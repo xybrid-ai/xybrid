@@ -8,31 +8,68 @@ made a decision.** Read it before writing code.
 
 ---
 
+## What xybrid is (read this first)
+
+xybrid is a **local-first execution engine with a platform layer built on top**.
+Both planes share one codebase, and the platform plane is **additive** — it
+extends the same runtime without replacing the offline path:
+
+1. **Foundation — on-device execution engine.** Model load/run/stream,
+   pipelines, hardware acceleration. Zero-config, offline, no account required.
+   This is the default path and most of the code today.
+2. **Platform / control-plane layer (additive).** Opt-in capabilities layered on
+   the engine — the direction being actively built out. When a developer
+   authenticates, these light up *on top of* the same local runtime:
+   - **Auth / API keys** — `crates/xybrid-core/src/cloud/config.rs`
+     (`set_xybrid_api_key`, `XYBRID_API_KEY`). Gates the cloud gateway *and* the
+     telemetry exporter. Default gateway: `api.xybrid.dev`.
+   - **Cloud routing** — `crates/xybrid-core/src/cloud/` +
+     `crates/xybrid-core/src/orchestrator/routing_engine.rs` (local→cloud fallback under device stress).
+   - **Telemetry / observability** — `crates/xybrid-core/src/telemetry/`;
+     SDK exporter in `crates/xybrid-sdk/src/telemetry.rs`; ingest at `ingest.xybrid.dev`.
+   - **Remote routing authority** — `crates/xybrid-core/src/orchestrator/authority/remote.rs`
+     (`GET /v1/routing/advice`; partial).
+   - **Control sync** — `crates/xybrid-core/src/control_sync.rs` (policy /
+     registry refresh; scaffolded, backend not yet wired).
+
+The public README markets the foundation ("offline, no cloud, no API keys")
+because that's the zero-config default — the platform layer is what you add on
+top once you authenticate. **When touching `xybrid-sdk` or `xybrid-core`, treat
+the platform plane as a first-class, additive surface**, not an afterthought:
+new SDK entry points should consider whether they extend into it too.
+
+---
+
 ## Workspace layout
 
 Cargo workspace, `resolver = "2"`, edition 2021, MSRV not pinned. Members:
 
 | Crate                          | Role                                                       | Layer    |
 |--------------------------------|------------------------------------------------------------|----------|
-| `crates/xybrid-core`           | ML execution, model inference, pipeline orchestration      | core lib |
-| `crates/xybrid-sdk`            | Public Rust SDK; high-level model load/run/stream API      | lib      |
+| `crates/xybrid-core`           | ML execution + pipelines; **additive platform plane** (cloud routing, telemetry, control sync) | core lib |
+| `crates/xybrid-sdk`            | Public Rust SDK; model load/run/stream + platform init (auth, telemetry) | lib      |
 | `crates/xybrid-cli`            | `xybrid` binary                                            | bin      |
-| `crates/xybrid-ffi`            | C ABI for Unity / C / C++                                  | FFI      |
-| `crates/xybrid-uniffi`         | UniFFI bindings for Swift / Kotlin (Apple/Android SDKs)    | FFI      |
+| `crates/xybrid-ffi-facade`     | FFI-agnostic POD/Arc facade over the SDK (one canonical translation) | FFI |
+| `crates/xybrid-bolt`           | BoltFFI bindings: Swift / Kotlin / Java / C# / WASM + C header (Apple/Android SDKs) | FFI |
+| `crates/xybrid-ffi`            | C ABI for Unity / C / C++ (pre-bolt; Unity migration pending) | FFI    |
 | `bindings/flutter/rust`        | flutter_rust_bridge wrapper for Dart                       | FFI      |
 | `macros`                       | proc-macros (`xybrid-macros`); syn/quote only              | proc     |
 | `xtask`                        | build / codegen automation                                 | tool     |
 | `integration-tests`            | end-to-end tests with real models & fixtures               | test     |
 
+`xybrid-uniffi` was removed once iOS + Android migrated to `xybrid-bolt`;
+the FFI binding crates now route their SDK→foreign-language translation
+through `xybrid-ffi-facade` rather than each re-translating SDK types.
+
 **Dependency direction (do not reverse):**
 
 ```
-xybrid-cli  ─┐
-xybrid-ffi  ─┤
-xybrid-uniffi ─┼─► xybrid-sdk ─► xybrid-core
-flutter rust──┤
-xtask ──────────────────────────► xybrid-core
-integration-tests ──────────────► xybrid-core
+xybrid-cli  ──────────────────────► xybrid-sdk ─► xybrid-core
+xybrid-bolt ──► xybrid-ffi-facade ─► xybrid-sdk ─► xybrid-core
+xybrid-ffi  ─┐
+flutter rust─┴────────────────────► xybrid-sdk ─► xybrid-core
+xtask ────────────────────────────► xybrid-core
+integration-tests ────────────────► xybrid-core
 ```
 
 Workspace **package metadata** is inherited via `[workspace.package]` —
@@ -51,15 +88,15 @@ refactor, not a drive-by change.
 
 ## Error handling
 
-Rust-API library crates (`xybrid-core`, `xybrid-sdk`, `xybrid-uniffi`) use
-**`thiserror`** with a single canonical error enum and a `Result` alias per
-crate:
+Rust-API library crates (`xybrid-core`, `xybrid-sdk`, `xybrid-ffi-facade`)
+use **`thiserror`** with a single canonical error enum and a `Result` alias
+per crate:
 
-| Crate           | Error type     | Result alias    | Defined in                        |
-|-----------------|----------------|-----------------|-----------------------------------|
-| `xybrid-core`   | `XybridError`  | `XybridResult`  | `crates/xybrid-core/src/error.rs` |
-| `xybrid-sdk`    | `SdkError`     | `SdkResult`     | `crates/xybrid-sdk/src/model.rs`  |
-| `xybrid-uniffi` | `XybridError`  | —               | `crates/xybrid-uniffi/src/lib.rs` (also derives `uniffi::Error`) |
+| Crate              | Error type     | Result alias    | Defined in                           |
+|--------------------|----------------|-----------------|--------------------------------------|
+| `xybrid-core`      | `XybridError`  | `XybridResult`  | `crates/xybrid-core/src/error.rs`    |
+| `xybrid-sdk`       | `SdkError`     | `SdkResult`     | `crates/xybrid-sdk/src/model.rs`     |
+| `xybrid-ffi-facade`| `Error`        | `Result`        | `crates/xybrid-ffi-facade/src/lib.rs` (one canonical `From<SdkError>`; the FFI generator crates re-decorate it) |
 
 Sub-error enums (`InferenceError`, `PipelineError`, `AdapterError`, …) live
 next to the modules that raise them and convert into the canonical type via
@@ -158,6 +195,51 @@ established convention for backend / strategy / session traits in
 Prefer borrows over `Arc::clone` when a borrow's lifetime is obviously short
 enough. Reach for `Arc` when you're crossing a `spawn` / `spawn_blocking` /
 channel boundary, or storing the value behind a trait object.
+
+---
+
+## Releases — never hand-roll one (agents read this)
+
+**Releases are cut by branch name, not by hand.** The entire pipeline keys off a
+`release/v<version>` branch. An agent's *only* correct action to start a release
+is to create and push that branch — everything else (artifact builds, checksum
+patch, draft GitHub Release, the release PR, the tag, and the crates.io / pub.dev
+/ Maven Central publishes) is generated by CI. The ritual
+(`.github/workflows/release-prep.yml` → `release-publish.yml`):
+
+```bash
+git switch -c release/v<version> origin/master
+just bump-version <version>     # syncs every manifest: Cargo, pubspec, Unity,
+                                # Kotlin, Package.swift sdkVersion
+./bindings/apple/scripts/set-natives-mode.sh --set-remote   # useLocalNatives=false
+# fill the CHANGELOG entry for <version> (and bindings/flutter/CHANGELOG.md)
+git commit -am "bump: <version>" && git push -u origin release/v<version>
+```
+
+Pushing `release/v*` triggers `release-prep.yml`, which:
+
+1. Parses the version **from the branch name** and **fails** unless it matches
+   every package manifest (`version-sync.sh --check` must be green).
+2. Builds all artifacts, patches `Package.swift`'s `xybridFFIChecksum`, and
+   creates a **draft GitHub Release**.
+3. **Opens the `Release v<version>` PR to master itself.** On merge,
+   `release-publish.yml` tags and publishes.
+
+**Do NOT:**
+
+- run `gh pr create` for a release, or run `just bump-version` on a feature
+  branch and open a PR from it — that bypasses the artifact builds, the checksum
+  patch, and the draft release, producing a PR that *looks* like a release but
+  ships nothing. The branch name (`release/v*`) is the trigger; a PR title is not.
+- leave `Package.swift`'s `useLocalNatives = true` in any committed state. It is
+  **local-dev only** and breaks remote SPM consumers (the local xcframework is
+  not committed). Run `bindings/apple/scripts/set-natives-mode.sh --set-remote`
+  before committing — remote (`false`) is the canonical committed state.
+
+`just bump-version` only rewrites the workspace `version`; it does **not** touch
+internal path-dep `version = "..."` pins (e.g. `xybrid-sdk`/`xybrid-core` in
+sibling `Cargo.toml`s). If those drift, lockfile regen fails under `^0.1.x` —
+update them to match and re-run `cargo update -w` when bumping.
 
 ---
 

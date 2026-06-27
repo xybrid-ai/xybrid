@@ -10,6 +10,8 @@
 !/resnet50/model_metadata.json
 !/mnist/model_metadata.json
 model_metadata.json
+!/lfm2-vl-450m/model_metadata.json
+!/gemma-4-e2b/model_metadata.json
 
 # Keep scripts and tooling
 !download_models.sh

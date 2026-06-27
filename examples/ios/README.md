@@ -6,9 +6,21 @@ A native iOS example app demonstrating Xybrid SDK integration using SwiftUI.
 
 - **SDK Initialization**: Cache directory setup plus `Xybrid.initialize()` (pass an `apiKey` to enable dashboard telemetry)
 - **Model Loading**: Downloads models from the xybrid registry with async/await
-- **Text-to-Speech**: Run TTS inference with voice selection
-- **Audio Playback**: Play generated audio via AVAudioPlayer
+- **Text-to-Speech** (Speech tab): Run TTS inference with voice selection + audio playback
+- **Live camera vision** (Vision tab): point the camera at a scene and get an on-device VLM caption that refreshes as the scene changes — AVFoundation capture + a cheap luma change-gate firing batch multimodal turns
 - **Error Handling**: User-friendly error messages with retry capability
+
+The two demos live behind a `TabView` once the SDK is initialized.
+
+### Live vision: responsiveness model
+
+The Vision tab is **drop-if-busy**, not cancel-and-replace: while one frame is
+being answered, newly gated frames are dropped rather than preempting the
+in-flight run. That's because the Swift/UniFFI bindings currently expose only the
+batch `model.run(...)`; streaming tokens, cancel-and-replace, and raw-frame
+(`imageRaw`) envelopes — the realtime-vision primitives already in the Flutter
+SDK — are not yet bound for Swift. When that surface lands the loop can move to
+latest-frame-wins. See `LiveVision.swift` for the gate + batch-VLM wiring.
 
 ## Prerequisites
 
@@ -43,19 +55,50 @@ In Xcode:
 3. Click **+** and add local package: `../../bindings/apple`
 4. Select **Xybrid** library
 
-### 4. Build and Run
+### 4. Set your API key (optional)
+
+The app reads `XYBRID_API_KEY` (and optionally `XYBRID_PLATFORM_URL`, the
+telemetry ingest endpoint) from the scheme's environment — the Xcode-native way
+to inject values at run time without committing them. This is the iOS analog of
+Flutter's `flutter run --dart-define=...`.
+
+1. **Product → Scheme → Edit Scheme…** (or `Cmd+<`)
+2. Select **Run** → **Arguments** tab
+3. Under **Environment Variables**, add:
+   - `XYBRID_API_KEY` = `sk_test_...`
+   - `XYBRID_PLATFORM_URL` = `https://your-platform.example.com` *(optional)*
+
+The values are saved in your *user* scheme under `xcuserdata/`, which is
+gitignored — so they never land in the repo. Leave **Shared** unchecked
+(the default) to keep it that way. Both are optional: without a key the app
+runs anonymously (on-device inference, telemetry disabled); without a platform
+URL it uses the default Xybrid endpoint (`XYBRID_PLATFORM_URL` is handy for
+pointing a debug build at a self-hosted or tunneled platform). Get a free key
+at [dashboard.xybrid.dev](https://dashboard.xybrid.dev).
+
+To inject them from the command line on a Simulator instead, prefix the
+launch environment:
+
+```bash
+SIMCTL_CHILD_XYBRID_API_KEY=sk_test_... \
+SIMCTL_CHILD_XYBRID_PLATFORM_URL=https://your-platform.example.com \
+  xcrun simctl launch --console booted ai.xybrid.example
+```
+
+### 5. Build and Run
 
 1. Select an iOS device (arm64) — simulator requires separate ORT build
 2. Press **Cmd+R** to build and run
 
 The app will:
 1. Show a welcome screen with "Initialize SDK" button
-2. After init, show inference demo with:
-   - Model ID input (default: `kokoro-82m`)
-   - Voice picker (populated after model loads)
-   - Text input for TTS
-   - "Run Inference" button
-   - Audio playback of generated speech
+2. After init, show a two-tab demo:
+   - **Speech** — Model ID input (default: `kokoro-82m`), voice picker, text input,
+     "Run Inference", and audio playback of generated speech.
+   - **Vision** — a vision-model ID input (default: `lfm2-vl-450m`, editable — use
+     any registry-resolvable VLM with an mmproj artifact), a question field,
+     "Start live", and a viewfinder with a replace-in-place caption + history.
+     Requires camera access (the app declares `NSCameraUsageDescription`).
 
 ## Project Structure
 
@@ -64,9 +107,10 @@ ios/
 ├── XybridExample.xcodeproj/     # Xcode project
 ├── XybridExample/
 │   ├── XybridExampleApp.swift   # App entry point
-│   ├── ContentView.swift        # Main UI with real SDK integration
+│   ├── ContentView.swift        # SDK init + TabView; the Speech (TTS) demo
+│   ├── LiveVision.swift         # Vision tab: camera service + luma gate + batch VLM
 │   ├── Assets.xcassets/         # App icons and colors
-│   └── Info.plist               # App configuration
+│   └── Info.plist               # App configuration (incl. NSCameraUsageDescription)
 └── README.md                    # This file
 ```
 
@@ -81,26 +125,33 @@ let cacheDir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMa
     .first!.appendingPathComponent("xybrid").path
 initSdkCacheDir(cacheDir: cacheDir)
 
-// Runs locally with no key. Pass an apiKey to light up the dashboard:
-//   Xybrid.initialize(apiKey: ProcessInfo.processInfo.environment["XYBRID_API_KEY"])
-Xybrid.initialize()
+// Reads the key and platform URL from scheme environment variables (see
+// "Set your API key" above). Empty/unset → anonymous, local-only init.
+let env = ProcessInfo.processInfo.environment
+let apiKey = env["XYBRID_API_KEY"]
+let platformUrl = env["XYBRID_PLATFORM_URL"]
+Xybrid.initialize(
+    apiKey: (apiKey ?? "").isEmpty ? nil : apiKey,
+    ingestUrl: (platformUrl ?? "").isEmpty ? nil : platformUrl
+)
 ```
 
 ### Load Model
 
 ```swift
-let loader = XybridModelLoader.fromRegistry(modelId: "kokoro-82m")
-let model = try await loader.load()
-let voices = model.voices()  // [XybridVoiceInfo]?
+// Loading is synchronous + blocking — call it off the main thread
+// (e.g. inside `Task.detached`) so the UI stays responsive.
+let model = try Model(fromRegistry: "kokoro-82m")
+let voices = model.voices()  // [XybridVoiceInfo]
 ```
 
 ### Run Inference
 
 ```swift
 let envelope = XybridEnvelope.text(text: "Hello!", voiceId: "af", speed: 1.0)
-let result = try await model.run(envelope: envelope, config: nil)
+let result = try model.run(envelope: envelope)
 
-if result.success, let audio = result.audioBytes {
+if let audio = result.audioBytes {
     // Play audio (wrap in WAV header for AVAudioPlayer)
 }
 ```
@@ -114,9 +165,36 @@ let config = XybridGenerationConfig(
     topP: 0.9,
     minP: nil, topK: nil,
     repetitionPenalty: nil,
-    stopSequences: nil
+    stopSequences: []
 )
-let result = try await model.run(envelope: envelope, config: config)
+let result = try model.run(
+    envelope: envelope,
+    options: XybridRunOptions(
+        generationConfig: config,
+        abortOn: [],
+        fallbackToCloud: false,
+        maxGraceTokens: 0
+    )
+)
+```
+
+### Vision (image → VLM, batch)
+
+```swift
+// Encode a camera frame (or any image) to JPEG, then send it as a multimodal
+// user turn. Batch only on Swift today — see "responsiveness model" above.
+let image = try XybridEnvelope.image(jpegData, format: "jpeg")
+let envelope = try XybridEnvelope.userMessage("What do you see?", images: [image])
+let result = try model.run(
+    envelope: envelope,
+    options: XybridRunOptions(
+        generationConfig: config,
+        abortOn: [],
+        fallbackToCloud: false,
+        maxGraceTokens: 0
+    )
+)
+let caption = result.text
 ```
 
 ## Troubleshooting

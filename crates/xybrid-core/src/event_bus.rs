@@ -8,6 +8,7 @@
 
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -329,7 +330,7 @@ struct Subscriber {
 /// - Handle events synchronously or asynchronously
 pub struct EventBus {
     subscribers: Arc<Mutex<HashMap<usize, Subscriber>>>,
-    next_id: Arc<Mutex<usize>>,
+    next_id: AtomicUsize,
     context: EventContext,
 }
 
@@ -338,7 +339,7 @@ impl EventBus {
     pub fn new() -> Self {
         Self {
             subscribers: Arc::new(Mutex::new(HashMap::new())),
-            next_id: Arc::new(Mutex::new(0)),
+            next_id: AtomicUsize::new(0),
             context: EventContext::current(),
         }
     }
@@ -352,24 +353,16 @@ impl EventBus {
             current_context.merge_missing(self.context.clone())
         };
         let event = event.attach_context(context);
-        let subscribers = self.subscribers.lock().unwrap();
-        let mut failed_ids = Vec::new();
-
-        for (id, subscriber) in subscribers.iter() {
-            if subscriber.sender.send(event.clone()).is_err() {
-                // Receiver was dropped, mark for removal
-                failed_ids.push(*id);
-            }
-        }
-
-        // Remove dead subscribers
-        if !failed_ids.is_empty() {
-            drop(subscribers);
-            let mut subscribers = self.subscribers.lock().unwrap();
-            for id in failed_ids {
-                subscribers.remove(&id);
-            }
-        }
+        // The subscriber registry is pure in-memory bookkeeping. `publish` runs
+        // on every orchestrator event from multiple threads, so recover from a
+        // poisoned lock (`into_inner`) rather than panicking — a single panicked
+        // subscriber must not wedge all future event delivery.
+        //
+        // Take the lock once and drop dead subscribers (whose receiver hung up)
+        // in place via `retain`. Sending to a live receiver returns `Ok`, so the
+        // entry is kept; a dropped receiver returns `Err`, so it is removed.
+        let mut subscribers = self.subscribers.lock().unwrap_or_else(|p| p.into_inner());
+        subscribers.retain(|_, subscriber| subscriber.sender.send(event.clone()).is_ok());
     }
 
     /// Subscribe to events, returning a subscription handle.
@@ -377,12 +370,9 @@ impl EventBus {
     /// The subscription allows receiving events manually via `recv()` or `try_recv()`.
     pub fn subscribe(&self) -> Subscription {
         let (sender, receiver) = mpsc::channel();
-        let mut next_id = self.next_id.lock().unwrap();
-        let id = *next_id;
-        *next_id += 1;
-        drop(next_id);
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
 
-        let mut subscribers = self.subscribers.lock().unwrap();
+        let mut subscribers = self.subscribers.lock().unwrap_or_else(|p| p.into_inner());
         subscribers.insert(id, Subscriber { sender });
 
         Subscription { id, receiver }
@@ -398,12 +388,9 @@ impl EventBus {
         F: Fn(&OrchestratorEvent) + Send + Sync + 'static,
     {
         let (sender, receiver) = mpsc::channel();
-        let mut next_id = self.next_id.lock().unwrap();
-        let id = *next_id;
-        *next_id += 1;
-        drop(next_id);
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
 
-        let mut subscribers = self.subscribers.lock().unwrap();
+        let mut subscribers = self.subscribers.lock().unwrap_or_else(|p| p.into_inner());
         subscribers.insert(id, Subscriber { sender });
         drop(subscribers);
 
@@ -423,13 +410,13 @@ impl EventBus {
 
     /// Unsubscribe by subscription ID.
     pub fn unsubscribe(&self, subscription_id: usize) {
-        let mut subscribers = self.subscribers.lock().unwrap();
+        let mut subscribers = self.subscribers.lock().unwrap_or_else(|p| p.into_inner());
         subscribers.remove(&subscription_id);
     }
 
     /// Get the number of active subscribers.
     pub fn subscriber_count(&self) -> usize {
-        let subscribers = self.subscribers.lock().unwrap();
+        let subscribers = self.subscribers.lock().unwrap_or_else(|p| p.into_inner());
         subscribers.len()
     }
 }

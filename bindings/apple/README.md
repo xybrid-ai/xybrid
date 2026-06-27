@@ -2,7 +2,7 @@
 
 > **Status**: Coming Soon — Swift bindings are in development. Use [Flutter](../flutter/) or [Kotlin](../kotlin/) for production use today.
 
-Native iOS and macOS SDK for [Xybrid](https://github.com/xybrid-ai/xybrid), providing on-device ML inference via UniFFI-generated Swift bindings.
+Native iOS and macOS SDK for [Xybrid](https://github.com/xybrid-ai/xybrid), providing on-device ML inference via BoltFFI-generated Swift bindings.
 
 ## Installation
 
@@ -12,14 +12,14 @@ Add Xybrid to your Xcode project:
 
 1. In Xcode, select **File > Add Package Dependencies...**
 2. Enter: `https://github.com/xybrid-ai/xybrid`
-3. Set **Dependency Rule** to **Exact Version** → `0.1.0-beta13`
+3. Set **Dependency Rule** to **Up to Next Major Version** → `0.2.0`
 4. Select the **Xybrid** library product
 
 Or add it to your `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/xybrid-ai/xybrid", exact: "0.1.0-beta13")
+    .package(url: "https://github.com/xybrid-ai/xybrid", from: "0.2.0")
 ]
 ```
 
@@ -31,11 +31,6 @@ Then add the dependency to your target:
     dependencies: ["Xybrid"]
 )
 ```
-
-> Once a stable `0.1.0` is released, you'll be able to use
-> `from: "0.1.0"` instead of pinning an exact beta tag. Pre-release
-> identifiers (e.g. `-beta13`) are excluded from `from:` resolution per
-> SemVer, which is why a beta requires `exact:`.
 
 ## Usage
 
@@ -70,7 +65,7 @@ if result.success {
 |------|-------------|
 | `XybridModelLoader` | Loads models from registry or local bundles |
 | `XybridModel` | Represents a loaded model ready for inference |
-| `XybridEnvelope` | Input data container (audio, text, or embedding) |
+| `XybridEnvelope` | Input data container (audio, text, embedding, image, or multi-part user message) |
 | `XybridResult` | Inference result with success status and output data |
 | `XybridError` | Error enum for error handling |
 
@@ -95,7 +90,18 @@ let asrEnvelope = XybridEnvelope.audio(
 let embeddingEnvelope = XybridEnvelope.embedding(
     data: [0.1, 0.2, 0.3, ...]
 )
+
+// Vision-language input
+let image = try XybridEnvelope.image(imageData, format: "jpeg")
+let prompt = try XybridEnvelope.userMessage(
+    "Describe this image",
+    images: [image]
+)
 ```
+
+For larger VLM variants, validate on iPhone 15 Pro or newer. Smaller devices should use
+capability checks before loading a vision bundle so unsupported paths fail with a clear
+runtime error instead of an opaque memory pressure failure.
 
 ## Structure
 
@@ -105,13 +111,8 @@ apple/
 ├── Sources/
 │   └── Xybrid/                      # Swift source
 │       ├── Xybrid.swift             # Public API, extensions, type aliases
-│       └── xybrid_uniffi.swift      # UniFFI-generated Swift bindings (DO NOT EDIT)
-├── Sources/xybrid_uniffiFFI/        # C FFI headers (bundled into XCFramework)
-│   ├── include/
-│   │   ├── xybrid_uniffiFFI.h       # C header for FFI
-│   │   └── module.modulemap         # Clang module map
-│   └── shim.c                       # Placeholder (symbols from XCFramework)
-└── XCFrameworks/                    # Pre-built binary frameworks
+│       └── xybrid_bolt.swift        # BoltFFI-generated Swift bindings (DO NOT EDIT)
+└── XCFrameworks/                    # Pre-built binary frameworks (C headers bundled inside)
     ├── XybridFFI.xcframework/       # Latest build (for local dev)
     └── XybridFFI-{version}.xcframework/  # Versioned copy
 ```
@@ -177,11 +178,11 @@ After a successful build:
 bindings/apple/XCFrameworks/
 ├── XybridFFI.xcframework/
 │   ├── ios-arm64/
-│   │   └── libxybrid_uniffi.a
+│   │   └── libxybrid-bolt.a
 │   ├── ios-arm64_x86_64-simulator/
-│   │   └── libxybrid_uniffi.a
+│   │   └── libxybrid-bolt.a
 │   └── macos-arm64_x86_64/
-│       └── libxybrid_uniffi.a
+│       └── libxybrid-bolt.a
 └── XybridFFI-{version}.xcframework/    # Versioned copy
 ```
 
@@ -233,8 +234,8 @@ XCFramework builds require macOS with Xcode. If you're developing on Linux or Wi
 
 ## FFI Strategy
 
-The Swift bindings are generated from `crates/xybrid-uniffi/` using [UniFFI](https://mozilla.github.io/uniffi-rs/):
-- Single Rust source generates both Swift and Kotlin
+The Swift bindings are generated from `crates/xybrid-bolt/` using [BoltFFI](https://crates.io/crates/boltffi):
+- Single Rust source generates Swift, Kotlin, Java, C#, WASM, and a C header
 - Native async/await support
 - Memory-safe wrappers
 - Automatic error handling

@@ -89,6 +89,17 @@ fn parse_compound_voice_id(voice_id: &str) -> Option<Vec<VoiceComponent>> {
     Some(components)
 }
 
+/// Returns true when the file starts with the ZIP magic ("PK"), meaning it
+/// is an NPZ archive regardless of what the metadata loader claims.
+fn file_is_npz(path: &Path) -> bool {
+    use std::io::Read;
+    let mut magic = [0u8; 2];
+    std::fs::File::open(path)
+        .and_then(|mut file| file.read_exact(&mut magic))
+        .map(|_| &magic == b"PK")
+        .unwrap_or(false)
+}
+
 /// Trait for loading voice embeddings.
 ///
 /// This trait enables mocking voice loading in tests without file system access.
@@ -342,14 +353,19 @@ impl<S: VoiceEmbeddingSource> TtsVoiceLoader<S> {
                     })
             }
             VoiceSelectionStrategy::FixedIndex => {
-                // Determine loader type from config
+                // NPZ archives are keyed by voice name; catalog indexes only
+                // describe raw binary packs. Trust the file magic over the
+                // declared loader so an NPZ shipped as `voices.bin` with a
+                // binary loader label (e.g. kokoro-82m) resolves by name
+                // instead of indexing zip entry order, which returns the
+                // wrong voice (bm_george → bf_emma).
                 let is_npz = matches!(
                     &voice_config.format,
                     VoiceFormat::Embedded {
                         loader: VoiceLoader::NumpyNpz,
                         ..
                     }
-                );
+                ) || file_is_npz(voice_path);
 
                 if is_npz {
                     // NPZ format: load by voice name
@@ -568,7 +584,19 @@ fn read_codes_binary(data: &[u8]) -> ExecutorResult<Vec<i32>> {
         ));
     }
     let count = u32::from_le_bytes(data[0..4].try_into().unwrap()) as usize;
-    let expected = 4 + count * 4;
+    // `count` is bundle-supplied (untrusted). Compute the expected size with
+    // checked arithmetic so a huge count can't overflow `usize` on 32-bit
+    // targets (e.g. armeabi-v7a Android) and silently wrap the bounds check
+    // below — which would otherwise let a tiny file through to a 16 GB
+    // `with_capacity` or an out-of-bounds index.
+    let expected = count
+        .checked_mul(4)
+        .and_then(|body| body.checked_add(4))
+        .ok_or_else(|| {
+            AdapterError::InvalidInput(format!(
+                "Voice codes count {count} overflows addressable size"
+            ))
+        })?;
     if data.len() < expected {
         return Err(AdapterError::InvalidInput(format!(
             "Voice codes file truncated: expected {} bytes for {} codes, got {}",
@@ -591,6 +619,33 @@ fn read_codes_binary(data: &[u8]) -> ExecutorResult<Vec<i32>> {
 mod tests {
     use super::*;
     use std::collections::HashMap;
+
+    #[test]
+    fn read_codes_binary_roundtrips_valid_data() {
+        let mut data = 3u32.to_le_bytes().to_vec();
+        for v in [1i32, -2, 3] {
+            data.extend_from_slice(&v.to_le_bytes());
+        }
+        assert_eq!(read_codes_binary(&data).unwrap(), vec![1, -2, 3]);
+    }
+
+    #[test]
+    fn read_codes_binary_rejects_truncated_data() {
+        // Claims 5 codes but only carries one.
+        let mut data = 5u32.to_le_bytes().to_vec();
+        data.extend_from_slice(&7i32.to_le_bytes());
+        assert!(read_codes_binary(&data).is_err());
+    }
+
+    #[test]
+    fn read_codes_binary_rejects_overflowing_count_without_panicking() {
+        // count = u32::MAX with only a 4-byte body. The naive `4 + count * 4`
+        // overflows `usize` on 32-bit targets; checked arithmetic must turn
+        // this into a clean error rather than a wrap → OOB/OOM panic.
+        let mut data = u32::MAX.to_le_bytes().to_vec();
+        data.extend_from_slice(&[0u8; 4]);
+        assert!(read_codes_binary(&data).is_err());
+    }
 
     // ============================================================================
     // Mock Voice Source for Testing
@@ -811,6 +866,27 @@ mod tests {
             .load_legacy(Path::new("/models/voices.bin"), None)
             .unwrap();
         assert_eq!(result, embedding);
+    }
+
+    #[test]
+    fn test_fixed_index_loads_by_name_when_file_is_actually_npz() {
+        // kokoro-82m ships an NPZ archive named voices.bin with a binary
+        // loader label; indexing zip entry order returned the wrong voice
+        // (bm_george → bf_emma). The file magic must win over the label.
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("voices.bin"), b"PK\x03\x04not-a-real-zip").unwrap();
+
+        let by_name = vec![1.0, 1.0];
+        let by_index = vec![0.0, 0.0];
+        let source = MockVoiceSource::new()
+            .with_voice_by_name("voice_b", by_name.clone())
+            .with_voice_at_index(1, by_index);
+        let loader = TtsVoiceLoader::with_source(dir.path().to_path_buf(), source);
+        let metadata = create_test_metadata_with_voices();
+        let input = create_test_envelope_with_voice("voice_b");
+
+        let result = loader.load(&metadata, &input).unwrap();
+        assert_eq!(result, by_name);
     }
 
     // ============================================================================

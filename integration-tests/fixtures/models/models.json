@@ -27,6 +27,123 @@
       "task": "text-generation",
       "feature_gate": "llm-llamacpp"
     },
+    "lfm2-vl-450m": {
+      "description": "Liquid LFM2-VL 450M - compact edge vision-language model (Q4 GGUF + Q8 mmproj)",
+      "source": "url",
+      "size_mb": 308,
+      "task": "vision-language",
+      "feature_gate": "llm-llamacpp-vision",
+      "files": [
+        {
+          "url": "https://huggingface.co/LiquidAI/LFM2-VL-450M-GGUF/resolve/main/LFM2-VL-450M-Q4_0.gguf",
+          "output": "LFM2-VL-450M-Q4_0.gguf"
+        },
+        {
+          "url": "https://huggingface.co/LiquidAI/LFM2-VL-450M-GGUF/resolve/main/mmproj-LFM2-VL-450M-Q8_0.gguf",
+          "output": "mmproj-LFM2-VL-450M-Q8_0.gguf"
+        }
+      ],
+      "model_metadata": {
+        "model_id": "lfm2-vl-450m",
+        "version": "1.0",
+        "description": "Liquid LFM2-VL 450M compact vision-language model for edge inference.",
+        "execution_template": {
+          "type": "VisionLanguage",
+          "model_file": "LFM2-VL-450M-Q4_0.gguf",
+          "context_length": 4096,
+          "generation_params": {
+            "max_tokens": 256,
+            "temperature": 0.1,
+            "top_p": 0.9,
+            "repetition_penalty": 1.05
+          }
+        },
+        "vision_encoder": {
+          "file": "mmproj-LFM2-VL-450M-Q8_0.gguf",
+          "preprocessing_preset": "siglip",
+          "image_size": 512,
+          "patch_size": 16
+        },
+        "preprocessing": [],
+        "postprocessing": [],
+        "files": [
+          "LFM2-VL-450M-Q4_0.gguf",
+          "mmproj-LFM2-VL-450M-Q8_0.gguf"
+        ],
+        "metadata": {
+          "task": "vlm",
+          "architecture": "lfm2_vl",
+          "vision_architecture": "siglip2_vision_model",
+          "backend": "llamacpp",
+          "context_length": 32768,
+          "license_name": "LFM Open License v1.0",
+          "chat_format": "chatml",
+          "quantization": "q4_0",
+          "ram_minimum_mb": 1024,
+          "ram_recommended_mb": 2048
+        }
+      }
+    },
+    "gemma-4-e2b": {
+      "description": "Gemma 4 E2B - multimodal VLM correctness fixture (Q8 GGUF + Q8 mmproj)",
+      "source": "url",
+      "size_mb": 5525,
+      "task": "vision-language",
+      "feature_gate": "llm-llamacpp-vision",
+      "files": [
+        {
+          "url": "https://huggingface.co/ggml-org/gemma-4-E2B-it-GGUF/resolve/main/gemma-4-E2B-it-Q8_0.gguf",
+          "output": "gemma-4-E2B-it-Q8_0.gguf"
+        },
+        {
+          "url": "https://huggingface.co/ggml-org/gemma-4-E2B-it-GGUF/resolve/main/mmproj-gemma-4-E2B-it-Q8_0.gguf",
+          "output": "mmproj-gemma-4-E2B-it-Q8_0.gguf"
+        }
+      ],
+      "model_metadata": {
+        "model_id": "gemma-4-e2b",
+        "version": "1.0",
+        "description": "Gemma 4 E2B - Google's compact multimodal VLM with 2.3B effective params, 128K context, and image/audio/video understanding",
+        "execution_template": {
+          "type": "VisionLanguage",
+          "model_file": "gemma-4-E2B-it-Q8_0.gguf",
+          "context_length": 4096,
+          "generation_params": {
+            "max_tokens": 256,
+            "temperature": 0.1,
+            "top_p": 0.9,
+            "repetition_penalty": 1.05
+          }
+        },
+        "vision_encoder": {
+          "file": "mmproj-gemma-4-E2B-it-Q8_0.gguf",
+          "preprocessing_preset": "gemma4_vision",
+          "image_size": 224,
+          "patch_size": 16
+        },
+        "preprocessing": [],
+        "postprocessing": [],
+        "files": [
+          "gemma-4-E2B-it-Q8_0.gguf",
+          "mmproj-gemma-4-E2B-it-Q8_0.gguf"
+        ],
+        "metadata": {
+          "task": "vlm",
+          "architecture": "gemma4",
+          "vision_architecture": "gemma4_vision",
+          "backend": "llamacpp",
+          "languages": ["multilingual", "140+"],
+          "instruction_tuned": true,
+          "context_length": 131072,
+          "image_seq_length": 280,
+          "max_soft_tokens": 280,
+          "pooling_kernel_size": 3,
+          "quantization": "q8_0",
+          "ram_minimum_mb": 5632,
+          "ram_recommended_mb": 8192
+        }
+      }
+    },
     "neutts-nano-q4": {
       "description": "NeuTTS Nano Q4 - Codec-based TTS (120M GGUF + NeuCodec ONNX + OpenPhonemizer). Voice cloning, no system deps.",
       "source": "registry",
@@ -161,15 +278,24 @@
       "model_metadata": {
         "model_id": "mobilenetv2-imagenet",
         "version": "v2-12",
-        "description": "MobileNetV2 lightweight image classification model trained on ImageNet. Input: [1, 3, 224, 224] RGB image normalized to [0, 1] with ImageNet mean/std. Output: [1, 1000] probabilities for ImageNet classes.",
+        "description": "MobileNetV2 lightweight image classification model trained on ImageNet. Input: encoded PNG/JPEG/WebP image decoded to RGB, resized to 256x256, center-cropped to [1, 3, 224, 224], and normalized with ImageNet mean/std. Output: [1, 1000] probabilities for ImageNet classes.",
         "execution_template": {
-          "type": "SimpleMode",
+          "type": "Onnx",
           "model_file": "mobilenetv2-12.onnx"
         },
         "preprocessing": [
           {
-            "type": "Reshape",
-            "shape": [1, 3, 256, 256]
+            "type": "ImageDecode",
+            "channels": 3,
+            "layout": "Nchw"
+          },
+          {
+            "type": "ImageResize",
+            "width": 256,
+            "height": 256,
+            "mode": "Stretch",
+            "interpolation": "Bilinear",
+            "layout": "Nchw"
           },
           {
             "type": "CenterCrop",
@@ -177,9 +303,9 @@
             "height": 224
           },
           {
-            "type": "Normalize",
-            "mean": [0.485, 0.456, 0.406],
-            "std": [0.229, 0.224, 0.225]
+            "type": "ImageNormalize",
+            "preset": "ImageNet",
+            "layout": "Nchw"
           }
         ],
         "postprocessing": [

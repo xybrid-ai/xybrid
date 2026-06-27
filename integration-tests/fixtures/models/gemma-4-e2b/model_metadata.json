@@ -1,0 +1,46 @@
+{
+  "model_id": "gemma-4-e2b",
+  "version": "1.0",
+  "description": "Gemma 4 E2B - Google's compact multimodal VLM with 2.3B effective params, 128K context, and image/audio/video understanding",
+  "execution_template": {
+    "type": "VisionLanguage",
+    "model_file": "gemma-4-E2B-it-Q8_0.gguf",
+    "context_length": 4096,
+    "generation_params": {
+      "max_tokens": 256,
+      "temperature": 0.1,
+      "top_p": 0.9,
+      "repetition_penalty": 1.05
+    }
+  },
+  "vision_encoder": {
+    "file": "mmproj-gemma-4-E2B-it-Q8_0.gguf",
+    "preprocessing_preset": "gemma4_vision",
+    "image_size": 224,
+    "patch_size": 16
+  },
+  "preprocessing": [],
+  "postprocessing": [],
+  "files": [
+    "gemma-4-E2B-it-Q8_0.gguf",
+    "mmproj-gemma-4-E2B-it-Q8_0.gguf"
+  ],
+  "metadata": {
+    "task": "vlm",
+    "architecture": "gemma4",
+    "vision_architecture": "gemma4_vision",
+    "backend": "llamacpp",
+    "languages": [
+      "multilingual",
+      "140+"
+    ],
+    "instruction_tuned": true,
+    "context_length": 131072,
+    "image_seq_length": 280,
+    "max_soft_tokens": 280,
+    "pooling_kernel_size": 3,
+    "quantization": "q8_0",
+    "ram_minimum_mb": 5632,
+    "ram_recommended_mb": 8192
+  }
+}

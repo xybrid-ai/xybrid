@@ -430,9 +430,22 @@ impl SessionManager {
         }
     }
 
+    /// Acquire the session lock, recovering from poisoning.
+    ///
+    /// A `std::sync::Mutex` stays poisoned permanently once a thread panics
+    /// while holding it, so every accessor must recover the guard via
+    /// `into_inner` rather than bail on `Err`. Otherwise a single panic would
+    /// permanently silence all telemetry — including the `record_*` methods —
+    /// even after `start_session`/`reset` install a fresh, consistent session.
+    fn lock_session(&self) -> std::sync::MutexGuard<'_, Option<SessionMetrics>> {
+        self.current_session
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+    }
+
     /// Start a new session.
     pub fn start_session(&self) -> String {
-        let mut session = self.current_session.lock().unwrap();
+        let mut session = self.lock_session();
         let new_session = SessionMetrics::new(self.device_id.clone());
         let session_id = new_session.session_id.clone();
         *session = Some(new_session);
@@ -441,40 +454,36 @@ impl SessionManager {
 
     /// Get current session metrics (clone).
     pub fn get_session(&self) -> Option<SessionMetrics> {
-        let session = self.current_session.lock().unwrap();
-        session.clone()
+        self.lock_session().clone()
     }
 
     /// Record an inference call.
     pub fn record_inference(&self, model_id: &str, version: &str, latency_ms: u64) {
-        if let Ok(mut session) = self.current_session.lock() {
-            if let Some(ref mut s) = *session {
-                s.record_inference(model_id, version, latency_ms);
-            }
+        let mut session = self.lock_session();
+        if let Some(ref mut s) = *session {
+            s.record_inference(model_id, version, latency_ms);
         }
     }
 
     /// Record an error.
     pub fn record_error(&self, model_id: Option<&str>, error: &str) {
-        if let Ok(mut session) = self.current_session.lock() {
-            if let Some(ref mut s) = *session {
-                s.record_error(model_id, error);
-            }
+        let mut session = self.lock_session();
+        if let Some(ref mut s) = *session {
+            s.record_error(model_id, error);
         }
     }
 
     /// Set hardware capabilities for current session.
     pub fn set_hardware_capabilities(&self, caps: HardwareCapabilities) {
-        if let Ok(mut session) = self.current_session.lock() {
-            if let Some(ref mut s) = *session {
-                s.set_hardware_capabilities(caps);
-            }
+        let mut session = self.lock_session();
+        if let Some(ref mut s) = *session {
+            s.set_hardware_capabilities(caps);
         }
     }
 
     /// End current session and return export.
     pub fn end_session(&self) -> Option<TelemetryExport> {
-        let mut session = self.current_session.lock().unwrap();
+        let mut session = self.lock_session();
         if let Some(ref mut s) = *session {
             s.end_session();
             Some(TelemetryExport::from_session(s))
@@ -485,14 +494,14 @@ impl SessionManager {
 
     /// Export current session without ending it.
     pub fn export_session(&self) -> Option<TelemetryExport> {
-        let session = self.current_session.lock().unwrap();
-        session.as_ref().map(TelemetryExport::from_session)
+        self.lock_session()
+            .as_ref()
+            .map(TelemetryExport::from_session)
     }
 
     /// Reset session (start fresh).
     pub fn reset(&self) {
-        let mut session = self.current_session.lock().unwrap();
-        *session = Some(SessionMetrics::new(self.device_id.clone()));
+        *self.lock_session() = Some(SessionMetrics::new(self.device_id.clone()));
     }
 }
 

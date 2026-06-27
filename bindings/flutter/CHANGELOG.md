@@ -1,5 +1,50 @@
 # Changelog
 
+## 0.2.1
+
+Vision (VLM) now runs on every Flutter target. `0.2.0` shipped on-device
+vision on Android and iOS; `0.2.1` brings the native VLM backend
+(`llm-llamacpp-vision`, llama.cpp's mtmd) to the **desktop** targets too —
+macOS, Linux, and Windows — so a Flutter desktop app can run a vision-language
+model out of the box, matching mobile (xybrid-ai/xybrid#296).
+
+* Fixed: GGUF models with custom or non-standard chat templates now load and run — when llama.cpp's built-in template matcher rejects the embedded template, it is rendered via a real Jinja engine (minijinja) instead of failing (xybrid-ai/xybrid#304)
+
+## 0.2.0-rc1
+
+Release candidate for `0.2.0`, published so consumers can validate the vision
+binding against real integrations ahead of the stable tag. No functional
+changes from `0.2.0` — see the `0.2.0` entry below for the full change set.
+
+## 0.2.0-alpha
+
+Prerelease of `0.2.0`, published to validate the release pipeline ahead of the
+stable tag. No functional changes from `0.2.0` — see the `0.2.0` entry below
+for the full change set.
+
+## 0.2.0
+
+The vision release. The binding gains on-device multimodal input and the
+real-time camera vision primitives behind Studio's live loop.
+
+* On-device vision (VLM): new `XybridEnvelope.image` (encoded PNG/JPEG/WebP), `XybridEnvelope.imageRaw` (raw camera/canvas pixel frames), and `XybridEnvelope.multiPart` (user-role message with image attachments) for running vision-language models from Dart (xybrid-ai/xybrid#245, #265)
+* Reachable streaming cancellation: new `CancellationToken` whose `cancel()` drives a real runtime abort end-to-end — the generation halts at the next token and releases the model lock, instead of the old behavior where "stop" only unsubscribed while the runtime kept generating (xybrid-ai/xybrid#245)
+* Live-loop run options on the model handle: `preempt` (latest-frame-wins — a new run preempts the in-flight one so a live loop no longer head-of-line-blocks behind a stale frame) and `frameSessionId` for tagging live inferences (xybrid-ai/xybrid#245)
+* Raw-frame path avoids per-frame JPEG re-encoding: `imageRaw` packs RGB pixel buffers straight through to the multimodal runtime; the encoded `image` path remains the fallback (xybrid-ai/xybrid#245)
+* Streaming TTS support on top of the new audio generation path (xybrid-ai/xybrid#245)
+* Live-mode telemetry is rate-limited by a per-session sampler (≈1 row/sec/session), so live camera sessions no longer emit a telemetry row per frame (xybrid-ai/xybrid#245)
+* `XybridModel.warmup` / `unload` are now exposed on the Flutter binding, completing the sync/async method symmetry (xybrid-ai/xybrid#293)
+* Fixed: TTS text chunking is now UTF-8-safe — multi-byte codepoints are no longer split mid-character (xybrid-ai/xybrid#249)
+* Fixed: `.npz` voice files are detected by magic header rather than file extension (xybrid-ai/xybrid#252)
+* Fixed: `tokens_out` is now emitted on local LLM telemetry paths (xybrid-ai/xybrid#253)
+
+## 0.1.2
+
+* Audio inputs now detect MP3, OGG, and FLAC in addition to WAV, and mono audio is upmixed to stereo when a model expects two channels (xybrid-ai/xybrid#132, #141)
+* Robustness: the underlying SDK/core no longer panics on poisoned locks, unchecked length headers, or non-contiguous ONNX output tensors — these are recovered or handled gracefully (xybrid-ai/xybrid#233, #234, #235, #231, #232, #237)
+* The Xybrid API key is no longer placed in the process environment (xybrid-ai/xybrid#214)
+* Registry requests now honor `Retry-After` on `429` responses (xybrid-ai/xybrid#134)
+
 ## 0.1.1
 
 * New bundled `init()` entry point starts anonymous-by-default telemetry from an API key; the standalone `initTelemetry` is now legacy (xybrid-ai/xybrid#188, #195)

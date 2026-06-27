@@ -1,0 +1,6 @@
+# libxybrid_uniffi.so is a build output produced from crates/xybrid-uniffi
+# (see README — `cargo xtask build-android`) and built fresh by CI for
+# releases. It is
+# not committed. The vendored ONNX Runtime libraries (libonnxruntime.so,
+# libc++_shared.so) and .gitkeep are intentionally tracked and not ignored.
+libxybrid_uniffi.so

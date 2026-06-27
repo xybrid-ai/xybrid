@@ -25,6 +25,12 @@ FLUTTER_RUST_CARGO="$REPO_ROOT/bindings/flutter/rust/Cargo.toml"
 # URL for SPM consumers in remote mode and MUST match the cargo workspace
 # version.
 SWIFT_PACKAGE="$REPO_ROOT/Package.swift"
+# React Native npm package. RN is hand-translated (not generated), so it was
+# absent from this sync and its package.json drifted. Two versions must equal
+# the workspace version: the npm package version, and the `ai.xybrid:xybrid-kotlin`
+# AAR pin its Android binding consumes from Maven Central.
+RN_PACKAGE="$REPO_ROOT/bindings/react-native/package.json"
+RN_GRADLE="$REPO_ROOT/bindings/react-native/android/build.gradle"
 
 # Extract current workspace version from Cargo.toml
 get_cargo_version() {
@@ -58,6 +64,16 @@ get_flutter_rust_version() {
 # Extract sdkVersion from root Package.swift
 get_swift_version() {
     grep '^let sdkVersion = ' "$SWIFT_PACKAGE" | sed 's/let sdkVersion = "\(.*\)"/\1/'
+}
+
+# Extract version from React Native package.json (parsed, like Unity's).
+get_rn_version() {
+    python3 -c "import json; print(json.load(open('$RN_PACKAGE'))['version'])"
+}
+
+# Extract the ai.xybrid:xybrid-kotlin AAR version the RN Android binding pins.
+get_rn_aar_version() {
+    grep 'ai.xybrid:xybrid-kotlin:' "$RN_GRADLE" | head -1 | sed 's/.*xybrid-kotlin:\([^"]*\)".*/\1/'
 }
 
 # Set version in Cargo workspace (all Rust crates inherit via version.workspace = true)
@@ -115,6 +131,29 @@ set_swift_version() {
     rm -f "$SWIFT_PACKAGE.bak"
 }
 
+# Set version in React Native package.json (parsed + rewritten, like Unity's —
+# robust against reformatting; preserves the file's standard 2-space layout).
+set_rn_version() {
+    local version="$1"
+    python3 -c "
+import json
+with open('$RN_PACKAGE', 'r') as f:
+    data = json.load(f)
+data['version'] = '$version'
+with open('$RN_PACKAGE', 'w') as f:
+    json.dump(data, f, indent=2)
+    f.write('\n')
+"
+}
+
+# Set the ai.xybrid:xybrid-kotlin AAR pin in the RN Android build.gradle so the
+# binding resolves the matching published Kotlin SDK at consumer build time.
+set_rn_aar_version() {
+    local version="$1"
+    sed -i.bak "s/ai.xybrid:xybrid-kotlin:[^\"]*\"/ai.xybrid:xybrid-kotlin:$version\"/" "$RN_GRADLE"
+    rm -f "$RN_GRADLE.bak"
+}
+
 # Check mode: verify all versions match
 check_versions() {
     local cargo_version
@@ -124,7 +163,7 @@ check_versions() {
     echo "Cargo workspace version: $cargo_version"
     echo ""
 
-    for name_func in "Flutter:get_flutter_version" "Flutter rust crate:get_flutter_rust_version" "Unity:get_unity_version" "Kotlin:get_kotlin_version" "Swift:get_swift_version"; do
+    for name_func in "Flutter:get_flutter_version" "Flutter rust crate:get_flutter_rust_version" "Unity:get_unity_version" "Kotlin:get_kotlin_version" "Swift:get_swift_version" "React Native:get_rn_version" "React Native AAR:get_rn_aar_version"; do
         local name="${name_func%%:*}"
         local func="${name_func##*:}"
         local version
@@ -161,6 +200,8 @@ case "${1:-}" in
         set_unity_version "$VERSION"
         set_kotlin_version "$VERSION"
         set_swift_version "$VERSION"
+        set_rn_version "$VERSION"
+        set_rn_aar_version "$VERSION"
         echo "Done. Run '$0 --check' to verify."
         ;;
     --help|-h)
@@ -181,6 +222,8 @@ case "${1:-}" in
         set_unity_version "$VERSION"
         set_kotlin_version "$VERSION"
         set_swift_version "$VERSION"
+        set_rn_version "$VERSION"
+        set_rn_aar_version "$VERSION"
         echo ""
         echo "Rust crates inherit via version.workspace = true."
 

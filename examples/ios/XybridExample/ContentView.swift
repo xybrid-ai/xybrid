@@ -35,20 +35,29 @@ struct ContentView: View {
     @State private var appState: AppState = .notInitialized
 
     var body: some View {
-        NavigationView {
-            Group {
-                switch appState {
-                case .notInitialized:
-                    WelcomeView(onInitialize: initializeSDK)
-                case .initializing:
-                    LoadingView(message: "Initializing Xybrid SDK...")
-                case .ready:
-                    InferenceView()
-                case .error(let message):
-                    ErrorView(message: message, onRetry: initializeSDK)
-                }
+        switch appState {
+        case .notInitialized:
+            navigation { WelcomeView(onInitialize: initializeSDK) }
+        case .initializing:
+            navigation { LoadingView(message: "Initializing Xybrid SDK...") }
+        case .ready:
+            TabView {
+                navigation { InferenceView() }
+                    .tabItem { Label("Speech", systemImage: "waveform") }
+                navigation { LiveVisionView() }
+                    .tabItem { Label("Vision", systemImage: "camera.viewfinder") }
             }
-            .navigationBarTitleDisplayMode(.inline)
+        case .error(let message):
+            navigation { ErrorView(message: message, onRetry: initializeSDK) }
+        }
+    }
+
+    /// Wraps a screen in the example's standard stacked-navigation chrome.
+    @ViewBuilder
+    private func navigation<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        NavigationView {
+            content()
+                .navigationBarTitleDisplayMode(.inline)
         }
         .navigationViewStyle(.stack)
     }
@@ -61,10 +70,19 @@ struct ContentView: View {
                 .first!.appendingPathComponent("xybrid").path
             initSdkCacheDir(cacheDir: cacheDir)
 
-            // Initialize the runtime. Runs locally as-is; add a free key from
-            // dashboard.xybrid.dev to see inference traces:
-            //   Xybrid.initialize(apiKey: "xy_live_...")
-            Xybrid.initialize()
+            // The key and platform URL come from the XYBRID_API_KEY and
+            // XYBRID_PLATFORM_URL scheme environment variables (Product →
+            // Scheme → Edit Scheme → Run → Arguments), so they never land in
+            // the repo. Empty/unset resolves to anonymous, local-only init
+            // against the default platform. Get a free key at
+            // dashboard.xybrid.dev. See README.
+            let env = ProcessInfo.processInfo.environment
+            let apiKey = env["XYBRID_API_KEY"]
+            let platformUrl = env["XYBRID_PLATFORM_URL"]
+            Xybrid.initialize(
+                apiKey: (apiKey ?? "").isEmpty ? nil : apiKey,
+                ingestUrl: (platformUrl ?? "").isEmpty ? nil : platformUrl
+            )
 
             await MainActor.run {
                 appState = .ready
@@ -329,18 +347,24 @@ struct InferenceView: View {
     private func loadModel() {
         inferenceState = .loading
 
-        Task {
-            do {
-                let loader = XybridModelLoader.fromRegistry(modelId: modelId)
-                let loadedModel = try await loader.load()
+        // Capture the @State input on the main actor before detaching.
+        let modelId = self.modelId
 
-                // Get voices if available
+        // `Task.detached`, NOT `Task {}`: this method runs on the main
+        // actor (SwiftUI View), and a plain `Task` inherits that
+        // executor — the synchronous, blocking `XybridModel(fromRegistry:)`
+        // (model resolve + download + load) would run on the main thread
+        // and freeze the UI. Detaching runs it on a background executor.
+        Task.detached {
+            do {
+                let loadedModel = try XybridModel(fromRegistry: modelId)
                 let modelVoices = loadedModel.voices()
+                let defaultVoice = loadedModel.defaultVoice()?.id
 
                 await MainActor.run {
                     self.model = loadedModel
-                    self.voices = modelVoices
-                    if let defaultVoice = loadedModel.defaultVoiceId() {
+                    self.voices = modelVoices.isEmpty ? nil : modelVoices
+                    if let defaultVoice = defaultVoice {
                         self.voiceId = defaultVoice
                     }
                     inferenceState = .idle
@@ -354,18 +378,26 @@ struct InferenceView: View {
     }
 
     private func runInference() {
-        guard model != nil else { return }
+        guard let model = model else { return }
 
         inferenceState = .running
 
-        Task {
+        // Capture the @State inputs on the main actor before detaching.
+        let inputText = self.inputText
+        let voiceId = self.voiceId
+
+        // `Task.detached` for the same reason as `loadModel`: bolt's
+        // `run` is synchronous + blocking, and a plain `Task` from this
+        // main-actor method would run it on the main thread and freeze
+        // the UI for the duration of inference.
+        Task.detached {
             do {
                 let envelope = XybridEnvelope.text(
                     text: inputText,
                     voiceId: voiceId,
                     speed: 1.0
                 )
-                let result = try await model!.run(envelope: envelope, config: nil)
+                let result = try model.run(envelope: envelope)
 
                 await MainActor.run {
                     inferenceState = .completed(result)

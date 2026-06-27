@@ -35,13 +35,16 @@ llm-mistral = ["xybrid-sdk/llm-mistral"]
 llm-mistral-metal = ["xybrid-sdk/llm-mistral-metal"]
 llm-mistral-cuda = ["xybrid-sdk/llm-mistral-cuda"]
 llm-llamacpp = ["xybrid-sdk/llm-llamacpp"]
+llm-llamacpp-vision = ["llm-llamacpp", "xybrid-sdk/llm-llamacpp-vision"]
 
 # PLATFORM PRESETS (composed from individual features above)
 # This ensures #[cfg(feature = "...")] checks work correctly in this crate.
-platform-android = ["ort-dynamic", "llm-llamacpp", "candle", "huggingface"]
-platform-ios = ["ort-download", "ort-coreml", "candle-metal", "candle-hub", "llm-llamacpp", "huggingface"]
-platform-macos = ["ort-download", "ort-coreml", "candle-metal", "candle-hub", "llm-llamacpp", "huggingface"]
-platform-desktop = ["ort-download", "llm-llamacpp", "huggingface"]
+# These mirror xybrid-sdk's presets and ship the native VLM (mtmd) backend via
+# `llm-llamacpp-vision` so the CLI can run vision-language models out of the box.
+platform-android = ["ort-dynamic", "llm-llamacpp-vision", "candle", "huggingface"]
+platform-ios = ["ort-download", "ort-coreml", "candle-metal", "candle-hub", "llm-llamacpp-vision", "huggingface"]
+platform-macos = ["ort-download", "ort-coreml", "candle-metal", "candle-hub", "llm-llamacpp-vision", "huggingface"]
+platform-desktop = ["ort-download", "llm-llamacpp-vision", "huggingface"]
 
 
 [dependencies]
@@ -62,10 +65,12 @@ lazy_static = "1.4"
 hostname = "0.4"
 # CLI UI
 indicatif = "0.17"
-console = "0.15"
+console = "0.16"
 dialoguer = "0.11"
 # Tracing
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 tracing-flame = "0.2"
 
+[dev-dependencies]
+image = "0.25"

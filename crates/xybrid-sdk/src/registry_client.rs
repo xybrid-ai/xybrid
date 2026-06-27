@@ -41,6 +41,7 @@ use crate::platform::current_platform;
 use crate::source::detect_platform;
 use crate::telemetry_optout::is_telemetry_opted_out;
 use crate::{get_binding, DEFAULT_BINDING, SDK_VERSION};
+use chrono::{DateTime, NaiveDateTime, Utc};
 use log::{debug, info, warn};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -150,6 +151,41 @@ const CONNECT_TIMEOUT_MS: u64 = 5000;
 
 /// Request timeout in milliseconds.
 const REQUEST_TIMEOUT_MS: u64 = 15000;
+
+/// Default retry delay when a 429 response omits or mangles Retry-After.
+const DEFAULT_RATE_LIMIT_RETRY_AFTER_SECS: u64 = 60;
+
+/// Cap Retry-After to avoid a registry hint sleeping the client indefinitely.
+const MAX_RATE_LIMIT_RETRY_AFTER_SECS: u64 = 5 * 60;
+
+fn rate_limit_retry_after_secs(retry_after: Option<&str>) -> u64 {
+    rate_limit_retry_after_secs_at(retry_after, Utc::now())
+}
+
+fn rate_limit_retry_after_secs_at(retry_after: Option<&str>, now: DateTime<Utc>) -> u64 {
+    let Some(value) = retry_after.map(str::trim).filter(|value| !value.is_empty()) else {
+        return DEFAULT_RATE_LIMIT_RETRY_AFTER_SECS;
+    };
+
+    if let Ok(seconds) = value.parse::<u64>() {
+        return seconds.min(MAX_RATE_LIMIT_RETRY_AFTER_SECS);
+    }
+
+    parse_retry_after_http_date(value, now).unwrap_or(DEFAULT_RATE_LIMIT_RETRY_AFTER_SECS)
+}
+
+fn parse_retry_after_http_date(value: &str, now: DateTime<Utc>) -> Option<u64> {
+    let parsed = DateTime::parse_from_rfc2822(value)
+        .map(|date| date.with_timezone(&Utc))
+        .or_else(|_| {
+            NaiveDateTime::parse_from_str(value, "%a, %d %b %Y %H:%M:%S GMT")
+                .map(|date| DateTime::<Utc>::from_naive_utc_and_offset(date, Utc))
+        })
+        .ok()?;
+
+    let seconds = parsed.signed_duration_since(now).num_seconds().max(0) as u64;
+    Some(seconds.min(MAX_RATE_LIMIT_RETRY_AFTER_SECS))
+}
 
 /// Registry client for model resolution and download.
 pub struct RegistryClient {
@@ -303,7 +339,7 @@ impl RegistryClient {
         .and_then(|response| {
             let list_response: ListModelsResponse = response
                 .into_json()
-                .map_err(|e| SdkError::NetworkError(format!("Failed to parse response: {}", e)))?;
+                .map_err(|e| SdkError::network_src("Failed to parse response", e))?;
             Ok(list_response.models)
         })
     }
@@ -324,7 +360,7 @@ impl RegistryClient {
         .and_then(|response| {
             response
                 .into_json()
-                .map_err(|e| SdkError::NetworkError(format!("Failed to parse response: {}", e)))
+                .map_err(|e| SdkError::network_src("Failed to parse response", e))
         })
     }
 
@@ -353,7 +389,7 @@ impl RegistryClient {
         .and_then(|response| {
             let resolve_response: ResolveResponse = response
                 .into_json()
-                .map_err(|e| SdkError::NetworkError(format!("Failed to parse response: {}", e)))?;
+                .map_err(|e| SdkError::network_src("Failed to parse response", e))?;
             Ok(resolve_response.resolved)
         })
     }
@@ -394,9 +430,8 @@ impl RegistryClient {
             }
         }
 
-        Err(last_error.unwrap_or_else(|| {
-            SdkError::NetworkError("All registry URLs failed or circuits open".to_string())
-        }))
+        Err(last_error
+            .unwrap_or_else(|| SdkError::network("All registry URLs failed or circuits open")))
     }
 
     /// Execute an operation with retry for a specific URL.
@@ -446,7 +481,7 @@ impl RegistryClient {
                     // online), and skip the retry loop within this URL since
                     // backoff won't help a DNS failure. Return immediately and
                     // let `execute_with_fallback` try the next URL.
-                    if matches!(&err, SdkError::Offline(_)) {
+                    if matches!(&err, SdkError::Offline { .. }) {
                         return Err(err);
                     }
 
@@ -468,7 +503,7 @@ impl RegistryClient {
         }
 
         Err(last_error.unwrap_or_else(|| {
-            SdkError::NetworkError(format!("All retry attempts exhausted for {}", api_url))
+            SdkError::network(format!("All retry attempts exhausted for {}", api_url))
         }))
     }
 
@@ -483,7 +518,7 @@ impl RegistryClient {
                 if resp.status() == 200 {
                     Ok(resp)
                 } else {
-                    Err(self.status_to_error(resp.status(), operation))
+                    Err(self.response_status_to_error(&resp, operation))
                 }
             }
             Err(e) => Err(self.ureq_error_to_sdk_error(e, operation)),
@@ -507,7 +542,7 @@ impl RegistryClient {
                 } else if resp.status() == 404 {
                     Err(not_found_err())
                 } else {
-                    Err(self.status_to_error(resp.status(), operation))
+                    Err(self.response_status_to_error(&resp, operation))
                 }
             }
             Err(ureq::Error::Status(404, _)) => Err(not_found_err()),
@@ -515,16 +550,18 @@ impl RegistryClient {
         }
     }
 
+    /// Convert an HTTP response status and headers to SdkError.
+    fn response_status_to_error(&self, response: &ureq::Response, operation: &str) -> SdkError {
+        self.status_to_error(response.status(), operation, response.header("Retry-After"))
+    }
+
     /// Convert HTTP status code to SdkError.
-    fn status_to_error(&self, status: u16, operation: &str) -> SdkError {
+    fn status_to_error(&self, status: u16, operation: &str, retry_after: Option<&str>) -> SdkError {
         match status {
-            429 => {
-                // TODO: Parse Retry-After header when available
-                SdkError::RateLimited {
-                    retry_after_secs: 60,
-                }
-            }
-            502..=504 => SdkError::NetworkError(format!(
+            429 => SdkError::RateLimited {
+                retry_after_secs: rate_limit_retry_after_secs(retry_after),
+            },
+            502..=504 => SdkError::network(format!(
                 "Registry {} failed with status {} (server error)",
                 operation, status
             )),
@@ -532,9 +569,7 @@ impl RegistryClient {
                 "Registry {} failed with status {} (client error)",
                 operation, status
             )),
-            _ => {
-                SdkError::NetworkError(format!("Registry {} returned status {}", operation, status))
-            }
+            _ => SdkError::network(format!("Registry {} returned status {}", operation, status)),
         }
     }
 
@@ -547,24 +582,28 @@ impl RegistryClient {
     /// toward the failure threshold (see `execute_with_retry_for_url`).
     fn ureq_error_to_sdk_error(&self, error: ureq::Error, operation: &str) -> SdkError {
         match error {
-            ureq::Error::Status(status, _) => self.status_to_error(status, operation),
+            ureq::Error::Status(status, response) => {
+                self.status_to_error(status, operation, response.header("Retry-After"))
+            }
             ureq::Error::Transport(transport) => {
                 let kind = transport.kind();
                 match kind {
-                    ureq::ErrorKind::Dns => SdkError::Offline(format!(
-                        "Failed to {} (DNS resolution failed)",
-                        operation
-                    )),
-                    ureq::ErrorKind::ConnectionFailed => SdkError::Offline(format!(
-                        "Failed to {} (connection refused or host unreachable)",
-                        operation
-                    )),
-                    ureq::ErrorKind::Io => SdkError::Offline(format!(
-                        "Failed to {} (network I/O error: {})",
-                        operation,
-                        transport.message().unwrap_or("unknown")
-                    )),
-                    _ => SdkError::NetworkError(format!("Failed to {}: {}", operation, transport)),
+                    ureq::ErrorKind::Dns => SdkError::offline_src(
+                        format!("Failed to {} (DNS resolution failed)", operation),
+                        transport,
+                    ),
+                    ureq::ErrorKind::ConnectionFailed => SdkError::offline_src(
+                        format!(
+                            "Failed to {} (connection refused or host unreachable)",
+                            operation
+                        ),
+                        transport,
+                    ),
+                    ureq::ErrorKind::Io => SdkError::offline_src(
+                        format!("Failed to {} (network I/O error)", operation),
+                        transport,
+                    ),
+                    _ => SdkError::network_src(format!("Failed to {}", operation), transport),
                 }
             }
         }
@@ -715,7 +754,7 @@ impl RegistryClient {
             let hash = compute_sha256(&cache_path)?;
             if hash != resolved.sha256 {
                 std::fs::remove_file(&cache_path).ok();
-                return Err(SdkError::CacheError(format!(
+                return Err(SdkError::cache(format!(
                     "SHA256 mismatch: expected {}, got {}",
                     resolved.sha256, hash
                 )));
@@ -827,97 +866,168 @@ impl RegistryClient {
         let metadata_path = extract_dir.join("model_metadata.json");
 
         // Idempotency check: if model file + metadata exist, check cache validity
-        if model_file_path.exists() && metadata_path.exists() {
-            if resolved.sha256.is_empty() {
-                // No hash to verify — trust existing files
-                warn!(
-                    "Passthrough cache hit for '{}' (no hash verification) at {}",
-                    mask,
-                    extract_dir.display()
-                );
-                return Ok(extract_dir);
+        if metadata_path.exists() {
+            let mut cache_valid =
+                self.passthrough_file_is_valid(&model_file_path, &resolved.sha256)?;
+            for artifact in &resolved.artifacts {
+                let artifact_path = extract_dir.join(&artifact.file);
+                cache_valid &= self.passthrough_file_is_valid(&artifact_path, &artifact.sha256)?;
             }
-            if let Some(cached_hash) = read_cached_hash(&model_file_path) {
-                if cached_hash == resolved.sha256 {
+
+            if cache_valid {
+                if resolved.sha256.is_empty()
+                    || resolved
+                        .artifacts
+                        .iter()
+                        .any(|artifact| artifact.sha256.is_empty())
+                {
+                    warn!(
+                        "Passthrough cache hit for '{}' (one or more files lack hash verification) at {}",
+                        mask,
+                        extract_dir.display()
+                    );
+                } else {
                     info!(
                         "Passthrough cache hit for '{}' at {}",
                         mask,
                         extract_dir.display()
                     );
-                    return Ok(extract_dir);
                 }
-                info!("Passthrough hash mismatch for '{}', re-downloading", mask);
+                return Ok(extract_dir);
             }
+            info!(
+                "Passthrough cache incomplete or hash mismatch for '{}', re-downloading",
+                mask
+            );
         }
 
         // Create extraction directory
-        std::fs::create_dir_all(&extract_dir).map_err(|e| {
-            SdkError::CacheError(format!("Failed to create extraction directory: {}", e))
-        })?;
+        std::fs::create_dir_all(&extract_dir)
+            .map_err(|e| SdkError::cache_src("Failed to create extraction directory", e))?;
 
-        // Download raw model file directly to extraction dir
-        info!(
-            "Passthrough download '{}' from {}",
-            mask, resolved.download_url
-        );
-        // Same reasoning as the standard fetch path: we time the
-        // network transfer alone so the cost dashboard sees a clean
-        // bytes-on-the-wire signal.
-        let download_started = Instant::now();
-        self.download_with_progress(
+        self.download_passthrough_file(
+            mask,
+            &resolved.file,
             &resolved.download_url,
             &model_file_path,
             resolved.size_bytes,
             &progress_callback,
+            &resolved.sha256,
         )?;
-        let download_duration = download_started.elapsed();
 
-        let bytes_downloaded = std::fs::metadata(&model_file_path)
-            .map(|m| m.len())
-            .unwrap_or(resolved.size_bytes);
-        crate::telemetry::publish_model_download(
-            mask,
-            bytes_downloaded,
-            classify_download_source(&resolved.download_url),
-            download_duration.as_millis().min(u32::MAX as u128) as u32,
-        );
-
-        // Verify SHA256
-        if !resolved.sha256.is_empty() {
-            let hash = compute_sha256(&model_file_path)?;
-            if hash != resolved.sha256 {
-                std::fs::remove_file(&model_file_path).ok();
-                return Err(SdkError::CacheError(format!(
-                    "Passthrough SHA256 mismatch: expected {}, got {}",
-                    resolved.sha256, hash
-                )));
-            }
-            // Cache the verified hash
-            write_cached_hash(&model_file_path, &hash);
-            info!("Passthrough SHA256 verified for '{}'", mask);
+        // Note: download_passthrough_file already handles telemetry + SHA256 per file.
+        // Download additional artifacts (e.g. mmproj for VLM models)
+        for artifact in &resolved.artifacts {
+            let artifact_path = extract_dir.join(&artifact.file);
+            self.download_passthrough_file(
+                mask,
+                &artifact.file,
+                &artifact.download_url,
+                &artifact_path,
+                artifact.size_bytes,
+                &progress_callback,
+                &artifact.sha256,
+            )?;
         }
 
         // Write model_metadata.json from registry response
         if let Some(ref metadata) = resolved.model_metadata {
-            let metadata_json = serde_json::to_string_pretty(metadata).map_err(|e| {
-                SdkError::CacheError(format!("Failed to serialize model metadata: {}", e))
-            })?;
-            std::fs::write(&metadata_path, metadata_json).map_err(|e| {
-                SdkError::CacheError(format!("Failed to write model_metadata.json: {}", e))
-            })?;
+            let metadata_json = serde_json::to_string_pretty(metadata)
+                .map_err(|e| SdkError::cache_src("Failed to serialize model metadata", e))?;
+            std::fs::write(&metadata_path, metadata_json)
+                .map_err(|e| SdkError::cache_src("Failed to write model_metadata.json", e))?;
             info!(
                 "Wrote model_metadata.json for passthrough model '{}' at {}",
                 mask,
                 metadata_path.display()
             );
         } else {
-            return Err(SdkError::CacheError(format!(
+            return Err(SdkError::cache(format!(
                 "Passthrough variant for '{}' has no model_metadata in registry response",
                 mask
             )));
         }
 
         Ok(extract_dir)
+    }
+
+    fn passthrough_file_is_valid(
+        &self,
+        file_path: &PathBuf,
+        expected_sha256: &str,
+    ) -> Result<bool, SdkError> {
+        if !file_path.exists() {
+            return Ok(false);
+        }
+        if expected_sha256.is_empty() {
+            return Ok(true);
+        }
+        if let Some(cached_hash) = read_cached_hash(file_path) {
+            return Ok(cached_hash == expected_sha256);
+        }
+        let computed = compute_sha256(file_path)?;
+        let matches = computed == expected_sha256;
+        if matches {
+            write_cached_hash(file_path, &computed);
+        }
+        Ok(matches)
+    }
+
+    fn download_passthrough_file<F>(
+        &self,
+        mask: &str,
+        file_name: &str,
+        download_url: &str,
+        dest: &PathBuf,
+        size_bytes: u64,
+        progress_callback: &F,
+        expected_sha256: &str,
+    ) -> Result<(), SdkError>
+    where
+        F: Fn(f32),
+    {
+        if let Some(parent) = dest.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+
+        info!(
+            "Passthrough download '{}' file '{}' from {}",
+            mask, file_name, download_url
+        );
+        // Same reasoning as the standard fetch path: we time the
+        // network transfer alone so the cost dashboard sees a clean
+        // bytes-on-the-wire signal.
+        let download_started = Instant::now();
+        self.download_with_progress(download_url, dest, size_bytes, progress_callback)?;
+        let download_duration = download_started.elapsed();
+
+        let bytes_downloaded = std::fs::metadata(dest)
+            .map(|m| m.len())
+            .unwrap_or(size_bytes);
+        crate::telemetry::publish_model_download(
+            mask,
+            bytes_downloaded,
+            classify_download_source(download_url),
+            download_duration.as_millis().min(u32::MAX as u128) as u32,
+        );
+
+        if !expected_sha256.is_empty() {
+            let hash = compute_sha256(dest)?;
+            if hash != expected_sha256 {
+                std::fs::remove_file(dest).ok();
+                return Err(SdkError::cache(format!(
+                    "Passthrough SHA256 mismatch for '{}': expected {}, got {}",
+                    file_name, expected_sha256, hash
+                )));
+            }
+            write_cached_hash(dest, &hash);
+            info!(
+                "Passthrough SHA256 verified for '{}' file '{}'",
+                mask, file_name
+            );
+        }
+
+        Ok(())
     }
 
     /// Check if a model is already extracted and ready to use.
@@ -1008,9 +1118,8 @@ impl RegistryClient {
             }
         }
 
-        Err(last_error.unwrap_or_else(|| {
-            SdkError::NetworkError("Download failed after all retry attempts".to_string())
-        }))
+        Err(last_error
+            .unwrap_or_else(|| SdkError::network("Download failed after all retry attempts")))
     }
 
     /// Attempt a single download.
@@ -1036,7 +1145,7 @@ impl RegistryClient {
             .map_err(|e| self.ureq_error_to_sdk_error(e, "download bundle"))?;
 
         if response.status() != 200 {
-            return Err(self.status_to_error(response.status(), "download bundle"));
+            return Err(self.response_status_to_error(&response, "download bundle"));
         }
 
         let mut file = File::create(dest)?;
@@ -1047,7 +1156,7 @@ impl RegistryClient {
         loop {
             let bytes_read = reader
                 .read(&mut buffer)
-                .map_err(|e| SdkError::NetworkError(format!("Read error: {}", e)))?;
+                .map_err(|e| SdkError::network_src("Read error", e))?;
 
             if bytes_read == 0 {
                 break;
@@ -1078,9 +1187,7 @@ impl RegistryClient {
 
     /// Clear the entire model cache.
     pub fn clear_all_cache(&mut self) -> Result<(), SdkError> {
-        self.cache
-            .clear()
-            .map_err(|e| SdkError::CacheError(e.to_string()))?;
+        self.cache.clear()?;
         Ok(())
     }
 
@@ -1286,12 +1393,29 @@ pub struct ResolvedVariant {
     pub size_bytes: u64,
     /// SHA256 hash for verification
     pub sha256: String,
+    /// Additional files required by this variant, such as VLM mmproj siblings.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub artifacts: Vec<ResolvedArtifact>,
     /// Whether this is a passthrough variant (direct download, no .xyb bundle)
     #[serde(default)]
     pub passthrough: bool,
     /// Inline model_metadata.json for passthrough variants
     #[serde(default)]
     pub model_metadata: Option<serde_json::Value>,
+}
+
+/// Additional resolved artifact required alongside the primary variant file.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResolvedArtifact {
+    /// Local file path relative to the extracted model directory.
+    pub file: String,
+    /// Direct download URL.
+    pub download_url: String,
+    /// Expected size in bytes.
+    pub size_bytes: u64,
+    /// Expected SHA256 hash. Empty means no hash verification is available.
+    #[serde(default)]
+    pub sha256: String,
 }
 
 /// Cache statistics.
@@ -1324,6 +1448,53 @@ impl CacheStats {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::TimeZone;
+
+    fn create_vlm_bundle(temp_dir: &tempfile::TempDir, model_id: &str) -> PathBuf {
+        let model_dir = temp_dir.path().join("bundle_model_files");
+        std::fs::create_dir_all(&model_dir).unwrap();
+
+        let metadata = format!(
+            r#"{{
+                "model_id": "{}",
+                "version": "1.0",
+                "execution_template": {{
+                    "type": "VisionLanguage",
+                    "model_file": "model.gguf"
+                }},
+                "vision_encoder": {{
+                    "file": "mmproj-model.gguf",
+                    "preprocessing_preset": "gemma3_vision",
+                    "image_size": 896
+                }},
+                "preprocessing": [],
+                "postprocessing": [],
+                "files": ["model.gguf", "mmproj-model.gguf"],
+                "metadata": {{ "task": "vlm" }}
+            }}"#,
+            model_id
+        );
+        std::fs::write(model_dir.join("model_metadata.json"), &metadata).unwrap();
+        std::fs::write(model_dir.join("model.gguf"), b"fake language model").unwrap();
+        std::fs::write(
+            model_dir.join("mmproj-model.gguf"),
+            b"fake vision projector",
+        )
+        .unwrap();
+
+        let mut bundle = xybrid_core::bundler::XyBundle::new(model_id, "1.0", "universal");
+        bundle
+            .add_file(model_dir.join("model_metadata.json"))
+            .unwrap();
+        bundle.add_file(model_dir.join("model.gguf")).unwrap();
+        bundle
+            .add_file(model_dir.join("mmproj-model.gguf"))
+            .unwrap();
+
+        let bundle_path = temp_dir.path().join(format!("{}.xyb", model_id));
+        bundle.write(&bundle_path).unwrap();
+        bundle_path
+    }
 
     #[test]
     fn classify_download_source_recognises_r2_hosts() {
@@ -1370,6 +1541,238 @@ mod tests {
             "other"
         );
         assert_eq!(classify_download_source(""), "other");
+    }
+
+    #[test]
+    fn resolved_variant_preserves_passthrough_sibling_artifacts() {
+        let resolved: ResolvedVariant = serde_json::from_str(
+            r#"
+{
+  "hf_repo": "xybrid-ai/vlm",
+  "file": "model.gguf",
+  "download_url": "https://example.com/model.gguf",
+  "format": "gguf",
+  "quantization": "q4_k_m",
+  "size_bytes": 10,
+  "sha256": "model-hash",
+  "passthrough": true,
+  "artifacts": [
+    {
+      "file": "mmproj-model.gguf",
+      "download_url": "https://example.com/mmproj-model.gguf",
+      "size_bytes": 5,
+      "sha256": "mmproj-hash"
+    }
+  ],
+  "model_metadata": {
+    "model_id": "vlm",
+    "version": "1.0",
+    "execution_template": { "type": "VisionLanguage", "model_file": "model.gguf" },
+    "vision_encoder": {
+      "file": "mmproj-model.gguf",
+      "preprocessing_preset": "gemma3_vision",
+      "image_size": 896
+    },
+    "files": ["model.gguf", "mmproj-model.gguf"],
+    "metadata": {}
+  }
+}
+"#,
+        )
+        .unwrap();
+
+        let roundtrip = serde_json::to_value(&resolved).unwrap();
+        let artifacts = roundtrip
+            .get("artifacts")
+            .and_then(|value| value.as_array())
+            .expect("resolved passthrough variant must keep sibling artifact descriptors");
+        assert_eq!(artifacts.len(), 1);
+        assert_eq!(artifacts[0]["file"], "mmproj-model.gguf");
+        assert_eq!(
+            artifacts[0]["download_url"],
+            "https://example.com/mmproj-model.gguf"
+        );
+        assert_eq!(artifacts[0]["sha256"], "mmproj-hash");
+    }
+
+    #[test]
+    fn fetch_extracted_passthrough_downloads_sibling_artifacts() {
+        use httpmock::prelude::*;
+        use sha2::{Digest, Sha256};
+
+        fn sha256_hex(bytes: &[u8]) -> String {
+            let mut hasher = Sha256::new();
+            hasher.update(bytes);
+            format!("{:x}", hasher.finalize())
+        }
+
+        let server = MockServer::start();
+        let model_bytes = b"main model";
+        let mmproj_bytes = b"vision projector";
+        let model_hash = sha256_hex(model_bytes);
+        let mmproj_hash = sha256_hex(mmproj_bytes);
+
+        let model_mock = server.mock(|when, then| {
+            when.method(GET).path("/model.gguf");
+            then.status(200).body(model_bytes.as_slice());
+        });
+        let mmproj_mock = server.mock(|when, then| {
+            when.method(GET).path("/mmproj-model.gguf");
+            then.status(200).body(mmproj_bytes.as_slice());
+        });
+
+        let resolve_body = serde_json::json!({
+            "mask": "vlm",
+            "platform": "universal",
+            "resolved": {
+                "hf_repo": "xybrid-ai/vlm",
+                "file": "model.gguf",
+                "download_url": server.url("/model.gguf"),
+                "format": "gguf",
+                "quantization": "q4_k_m",
+                "size_bytes": model_bytes.len(),
+                "sha256": model_hash,
+                "passthrough": true,
+                "artifacts": [
+                    {
+                        "file": "mmproj-model.gguf",
+                        "download_url": server.url("/mmproj-model.gguf"),
+                        "size_bytes": mmproj_bytes.len(),
+                        "sha256": mmproj_hash
+                    }
+                ],
+                "model_metadata": {
+                    "model_id": "vlm",
+                    "version": "1.0",
+                    "execution_template": {
+                        "type": "VisionLanguage",
+                        "model_file": "model.gguf"
+                    },
+                    "vision_encoder": {
+                        "file": "mmproj-model.gguf",
+                        "preprocessing_preset": "gemma3_vision",
+                        "image_size": 896
+                    },
+                    "files": ["model.gguf", "mmproj-model.gguf"],
+                    "metadata": {}
+                }
+            }
+        });
+        let resolve_mock = server.mock(|when, then| {
+            when.method(GET)
+                .path("/v1/models/vlm/resolve")
+                .query_param_exists("platform");
+            then.status(200)
+                .header("content-type", "application/json")
+                .json_body(resolve_body);
+        });
+
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let cache_dir = temp_dir.path().join("cache").join("models");
+        let mut client = RegistryClient::with_url(server.base_url()).unwrap();
+        client.cache = CacheManager::with_dir(cache_dir).unwrap();
+
+        let model_dir = client
+            .fetch_extracted("vlm", Some("universal"), |_| {})
+            .expect("passthrough VLM fetch should materialize all artifacts");
+
+        assert_eq!(
+            std::fs::read(model_dir.join("model.gguf")).unwrap(),
+            model_bytes
+        );
+        assert_eq!(
+            std::fs::read(model_dir.join("mmproj-model.gguf")).unwrap(),
+            mmproj_bytes
+        );
+        assert!(
+            model_dir.join("model_metadata.json").exists(),
+            "metadata must be written next to passthrough artifacts"
+        );
+        assert_eq!(
+            read_cached_hash(&model_dir.join("model.gguf")).as_deref(),
+            Some(model_hash.as_str())
+        );
+        assert_eq!(
+            read_cached_hash(&model_dir.join("mmproj-model.gguf")).as_deref(),
+            Some(mmproj_hash.as_str())
+        );
+
+        resolve_mock.assert();
+        model_mock.assert();
+        mmproj_mock.assert();
+    }
+
+    #[test]
+    fn fetch_extracted_bundle_repairs_partial_multifile_vlm_extraction() {
+        use httpmock::prelude::*;
+        use sha2::{Digest, Sha256};
+
+        fn sha256_hex(bytes: &[u8]) -> String {
+            let mut hasher = Sha256::new();
+            hasher.update(bytes);
+            format!("{:x}", hasher.finalize())
+        }
+
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let bundle_path = create_vlm_bundle(&temp_dir, "vlm-bundle");
+        let bundle_bytes = std::fs::read(&bundle_path).unwrap();
+        let bundle_hash = sha256_hex(&bundle_bytes);
+
+        let server = MockServer::start();
+        let bundle_mock = server.mock(|when, then| {
+            when.method(GET).path("/universal.xyb");
+            then.status(200).body(bundle_bytes.clone());
+        });
+        let resolve_body = serde_json::json!({
+            "mask": "vlm-bundle",
+            "platform": "universal",
+            "resolved": {
+                "hf_repo": "xybrid-ai/vlm-bundle",
+                "file": "universal.xyb",
+                "download_url": server.url("/universal.xyb"),
+                "format": "gguf",
+                "quantization": "q4_k_m",
+                "size_bytes": bundle_bytes.len(),
+                "sha256": bundle_hash
+            }
+        });
+        let resolve_mock = server.mock(|when, then| {
+            when.method(GET)
+                .path("/v1/models/vlm-bundle/resolve")
+                .query_param_exists("platform");
+            then.status(200)
+                .header("content-type", "application/json")
+                .json_body(resolve_body);
+        });
+
+        let cache_dir = temp_dir.path().join("cache").join("models");
+        let mut client = RegistryClient::with_url(server.base_url()).unwrap();
+        client.cache = CacheManager::with_dir(cache_dir).unwrap();
+
+        let partial_dir = client.cache.extraction_dir("vlm-bundle");
+        std::fs::create_dir_all(&partial_dir).unwrap();
+        let bundle = xybrid_core::bundler::XyBundle::load(&bundle_path).unwrap();
+        let metadata_json = bundle.get_metadata_json().unwrap().unwrap();
+        std::fs::write(partial_dir.join("model_metadata.json"), metadata_json).unwrap();
+
+        let model_dir = client
+            .fetch_extracted("vlm-bundle", Some("universal"), |_| {})
+            .expect("bundle VLM fetch should repair partial extraction and materialize siblings");
+
+        assert_eq!(model_dir, partial_dir);
+        assert!(model_dir.join("model_metadata.json").exists());
+        assert_eq!(
+            std::fs::read(model_dir.join("model.gguf")).unwrap(),
+            b"fake language model"
+        );
+        assert_eq!(
+            std::fs::read(model_dir.join("mmproj-model.gguf")).unwrap(),
+            b"fake vision projector"
+        );
+        assert!(client.is_extracted("vlm-bundle"));
+
+        resolve_mock.assert_hits(2);
+        bundle_mock.assert();
     }
 
     #[test]
@@ -1517,6 +1920,82 @@ mod tests {
     }
 
     #[test]
+    fn retry_after_seconds_header_is_used_for_rate_limit_errors() {
+        let client = RegistryClient::default_client().unwrap();
+        let error = client.status_to_error(429, "list models", Some("120"));
+
+        assert!(matches!(
+            error,
+            SdkError::RateLimited {
+                retry_after_secs: 120
+            }
+        ));
+    }
+
+    #[test]
+    fn retry_after_header_is_read_from_ureq_error_response() {
+        use httpmock::prelude::*;
+
+        let server = MockServer::start();
+        let rate_limited = server.mock(|when, then| {
+            when.method(GET).path("/v1/models");
+            then.status(429).header("Retry-After", "120");
+        });
+
+        let client = RegistryClient::with_url(server.base_url()).unwrap();
+        let response = client
+            .agent
+            .get(&format!("{}/v1/models", server.base_url()))
+            .call();
+
+        assert!(matches!(
+            client.handle_response(response, "list models"),
+            Err(SdkError::RateLimited {
+                retry_after_secs: 120
+            })
+        ));
+        rate_limited.assert();
+    }
+
+    #[test]
+    fn retry_after_http_date_header_is_used_for_rate_limit_errors() {
+        let now = Utc.with_ymd_and_hms(2026, 10, 21, 7, 27, 0).unwrap();
+
+        assert_eq!(
+            rate_limit_retry_after_secs_at(Some("Wed, 21 Oct 2026 07:28:00 GMT"), now),
+            60
+        );
+    }
+
+    #[test]
+    fn retry_after_missing_or_malformed_header_uses_default_delay() {
+        let now = Utc.with_ymd_and_hms(2026, 10, 21, 7, 27, 0).unwrap();
+
+        assert_eq!(
+            rate_limit_retry_after_secs_at(None, now),
+            DEFAULT_RATE_LIMIT_RETRY_AFTER_SECS
+        );
+        assert_eq!(
+            rate_limit_retry_after_secs_at(Some("not a retry date"), now),
+            DEFAULT_RATE_LIMIT_RETRY_AFTER_SECS
+        );
+    }
+
+    #[test]
+    fn retry_after_header_is_capped() {
+        let now = Utc.with_ymd_and_hms(2026, 10, 21, 7, 27, 0).unwrap();
+
+        assert_eq!(
+            rate_limit_retry_after_secs_at(Some("1200"), now),
+            MAX_RATE_LIMIT_RETRY_AFTER_SECS
+        );
+        assert_eq!(
+            rate_limit_retry_after_secs_at(Some("Wed, 21 Oct 2026 07:37:00 GMT"), now),
+            MAX_RATE_LIMIT_RETRY_AFTER_SECS
+        );
+    }
+
+    #[test]
     fn test_cache_path() {
         let client = RegistryClient::default_client().unwrap();
         let resolved = ResolvedVariant {
@@ -1527,6 +2006,7 @@ mod tests {
             quantization: "fp16".to_string(),
             size_bytes: 100000,
             sha256: "abc123".to_string(),
+            artifacts: Vec::new(),
             passthrough: false,
             model_metadata: None,
         };
@@ -1600,12 +2080,12 @@ mod tests {
         assert!(circuit.is_closed(), "breaker starts closed");
 
         let mut op = |_url: &str| -> Result<ureq::Response, SdkError> {
-            Err(SdkError::Offline("simulated offline".to_string()))
+            Err(SdkError::offline("simulated offline"))
         };
 
         let result =
             client.execute_with_retry_for_url("https://primary.example.invalid", &circuit, &mut op);
-        assert!(matches!(result, Err(SdkError::Offline(_))));
+        assert!(matches!(result, Err(SdkError::Offline { .. })));
         assert_eq!(
             circuit.failure_count(),
             0,
@@ -1630,7 +2110,7 @@ mod tests {
 
         let mut op = |_url: &str| -> Result<ureq::Response, SdkError> {
             call_count.fetch_add(1, Ordering::SeqCst);
-            Err(SdkError::Offline("simulated offline".to_string()))
+            Err(SdkError::offline("simulated offline"))
         };
 
         let result =

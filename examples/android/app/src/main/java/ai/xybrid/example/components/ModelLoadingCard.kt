@@ -215,9 +215,12 @@ private fun LoadedModelInfo(model: XybridModel, catalogModel: CatalogModel?) {
 
             // Show voice info for TTS models
             if (model.hasVoices()) {
-                val voices: List<XybridVoiceInfo>? = model.voices()
-                val defaultVoice = model.defaultVoiceId()
-                if (voices != null && voices.isNotEmpty()) {
+                // Bolt's `voices()` returns non-optional List<XybridVoiceInfo>
+                // (empty for non-TTS models) and `defaultVoice()` returns the
+                // full VoiceInfo (we extract `.id` for the "default: …" label).
+                val voices: List<XybridVoiceInfo> = model.voices()
+                val defaultVoice = model.defaultVoice()?.id
+                if (voices.isNotEmpty()) {
                     Text(
                         text = "${voices.size} voice${if (voices.size > 1) "s" else ""} available" +
                                 (defaultVoice?.let { " (default: $it)" } ?: ""),

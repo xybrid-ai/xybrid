@@ -1,10 +1,10 @@
 [package]
-name = "llama-cpp-sys"
+name = "xybrid-llama-sys"
 version.workspace = true
 edition.workspace = true
 license = "MIT"
+repository.workspace = true
 description = "Raw FFI bindings to llama.cpp. Build-time clones + cmake-compiles the pinned upstream commit; first-party C++ shim lives in wrapper.cpp."
-publish = false
 
 # The llama.cpp source tree (~180MB) is fetched via the workspace-level
 # submodule consumed by build.rs (`vendor/llama-cpp/`). This path does not live under this
@@ -24,6 +24,7 @@ path = "src/lib.rs"
 # can stay green.
 default = []
 bindings = []
+vision = ["bindings"]
 
 [build-dependencies]
 # For compiling the wrapper.cpp shim and llama.cpp source. Carried at the

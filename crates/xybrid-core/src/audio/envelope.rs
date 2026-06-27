@@ -197,11 +197,29 @@ impl AudioEnvelope {
                 break;
             }
 
-            pos += 8 + chunk_size;
-            // Align to even boundary
-            if !chunk_size.is_multiple_of(2) {
-                pos += 1;
-            }
+            // Advance to the next chunk. `chunk_size` is untrusted (the WAV
+            // bytes are caller-supplied). If `8 + chunk_size` plus the
+            // even-boundary pad byte overflows `usize` on a 32-bit target, the
+            // chunk can't fit the buffer anyway — stop parsing rather than
+            // wrapping `pos` back into range and re-reading earlier bytes.
+            let pad = usize::from(!chunk_size.is_multiple_of(2));
+            pos = match 8usize
+                .checked_add(chunk_size)
+                .and_then(|step| step.checked_add(pad))
+                .and_then(|step| pos.checked_add(step))
+            {
+                // Only continue if the next chunk header is fully in bounds.
+                // This also keeps the `pos + 8` loop guard from overflowing on
+                // 32-bit when `next` lands just below `usize::MAX`.
+                Some(next)
+                    if next
+                        .checked_add(8)
+                        .is_some_and(|end| end <= wav_bytes.len()) =>
+                {
+                    next
+                }
+                _ => break,
+            };
         }
 
         if data_start == 0 || data_size == 0 {
@@ -217,7 +235,9 @@ impl AudioEnvelope {
         }
 
         // Extract audio data
-        let data_end = (data_start + data_size).min(wav_bytes.len());
+        // `data_size` is untrusted; saturate so a 32-bit overflow can't wrap
+        // `data_end` below `data_start` (which would panic the slice below).
+        let data_end = data_start.saturating_add(data_size).min(wav_bytes.len());
         let audio_data = &wav_bytes[data_start..data_end];
 
         // Convert to f32 samples based on format
@@ -646,6 +666,20 @@ mod tests {
         let invalid = b"not a wav file";
         let result = AudioEnvelope::from_wav(invalid);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn from_wav_rejects_overflowing_chunk_size_without_panicking() {
+        // A chunk claiming u32::MAX bytes must not overflow the chunk walk
+        // (`8 + chunk_size` wraps on 32-bit) — parse should error cleanly.
+        let mut wav = Vec::new();
+        wav.extend_from_slice(b"RIFF");
+        wav.extend_from_slice(&0u32.to_le_bytes());
+        wav.extend_from_slice(b"WAVE");
+        wav.extend_from_slice(b"JUNK");
+        wav.extend_from_slice(&u32::MAX.to_le_bytes());
+        wav.extend_from_slice(&[0u8; 4]);
+        assert!(AudioEnvelope::from_wav(&wav).is_err());
     }
 
     /// Create a WAVE_FORMAT_EXTENSIBLE WAV file (format code 65534)

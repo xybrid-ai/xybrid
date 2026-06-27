@@ -9,7 +9,7 @@ documentation.workspace = true
 description = "Core runtime for hybrid cloud-edge AI inference: model execution, pipeline orchestration, and routing primitives."
 readme = "README.md"
 # Upstream llama backend source lives at workspace `vendor/llama-cpp/`
-# (see `.gitmodules`), consumed by the `llama-cpp-sys` crate's build
+# (see `.gitmodules`), consumed by the `xybrid-llama-sys` crate's build
 # script. No tarball-exclude needed here — the source is not under this
 # crate's manifest dir.
 
@@ -19,14 +19,20 @@ path = "src/lib.rs"
 
 [dependencies]
 # Raw FFI bindings + cmake build for llama.cpp. Gated entirely behind the
-# `llm-llamacpp` feature (which activates both `llama-cpp-sys/bindings`
+# `llm-llamacpp` feature (which activates both `xybrid-llama-sys/bindings`
 # and `xybrid-llama/bindings`) so default builds — and any consumer not
 # opting into llama.cpp — pay zero compile cost. The 3-layer shape:
-#   `llama-cpp-sys`  : raw FFI + cmake build (Phase 1)
+#   `xybrid-llama-sys`  : raw FFI + cmake build (Phase 1)
 #   `xybrid-llama`   : safe RAII + typed errors + streaming trampoline (Phase 2)
 #   `xybrid-core`    : thin adapter glue (Phase 3 reduction)
-llama-cpp-sys = { path = "../llama-cpp-sys", optional = true }
-xybrid-llama = { path = "../xybrid-llama", optional = true }
+xybrid-llama-sys = { path = "../llama-cpp-sys", version = "0.2.1", optional = true }
+xybrid-llama = { path = "../xybrid-llama", version = "0.2.1", optional = true }
+# Real Jinja engine for the llama.cpp chat-template fallback: when llama.cpp's
+# hardcoded non-Jinja matcher rejects a GGUF's embedded template (returns -1),
+# we render that template here instead. Gated with the deps below into
+# `llm-llamacpp` so non-llama builds pay zero cost.
+minijinja = { version = "2.5", default-features = false, features = ["builtins", "loader", "macros", "serde"], optional = true }
+minijinja-contrib = { version = "2.5", features = ["pycompat"], optional = true }
 serde = { version = "1.0", features = ["derive"] }
 serde_yaml = "0.9"
 serde_json = "1.0"
@@ -61,11 +67,12 @@ sysinfo = "0.32"
 # - For CoreML acceleration: Use ort-coreml feature (macOS/iOS only)
 ort = { version = "=2.0.0-rc.11", default-features = false, features = ["ndarray", "std"] }
 ndarray = "0.17"  # Used by ort for tensor operations (must match ort's ndarray version)
-base64 = "0.21"  # For BPE token decoding
+base64 = "0.22"  # For BPE token decoding
 mel_spec = "0.2"  # For mel spectrogram computation (audio preprocessing)
 num-complex = "0.4"  # Required by mel_spec for Complex numbers
 rustfft = "6.2"  # For custom Whisper-compatible FFT (Slaney mel scale)
 image = "0.25"  # For image resizing and processing
+yuvutils-rs = { version = "0.8.3", default-features = false }  # For raw YUV camera-frame conversion
 # Disable default features to exclude esaxx_fast (esaxx-rs/cpp) which hardcodes
 # static_crt(true) on MSVC, producing /MT objects that conflict with ORT's /MD.
 # We only run tokenizer models, we don't train them — esaxx-rs is only for BPE training.
@@ -108,6 +115,12 @@ default = ["ort-download"]
 # JSON Schema generation for model_metadata.json
 schema = ["dep:schemars"]
 
+# Expose the `testing` module (mocks + model fixtures) to downstream crates.
+# No-op marker today (the module is currently always `pub`); it exists so
+# consumers can depend on `xybrid-core/test-util` now and stay correct once
+# the `testing` module is gated behind this feature (audit 4a).
+test-util = []
+
 # ONNX Runtime
 ort-download = ["ort/download-binaries", "ort/tls-native"]  # Desktop/macOS/iOS: download prebuilt binaries
 ort-dynamic = ["ort/load-dynamic"]                          # Android: load .so at runtime from AAR
@@ -130,18 +143,28 @@ llm-mistral-metal = ["llm-mistral"]
 llm-mistral-cuda = ["llm-mistral"]
 
 # llama.cpp backend. Enabling `llm-llamacpp` links the llama.cpp runtime:
-# it activates both `llama-cpp-sys/bindings` (cmake build of llama.cpp +
+# it activates both `xybrid-llama-sys/bindings` (cmake build of llama.cpp +
 # wrapper.cpp shim) and `xybrid-llama/bindings` (safe RAII wrappers).
 # All four `platform-*` presets on `xybrid-sdk` depend on it since they
 # ship runtime inference. The 3-layer crate split underneath:
-#   `llama-cpp-sys`  : raw FFI + cmake build (Phase 1)
+#   `xybrid-llama-sys`  : raw FFI + cmake build (Phase 1)
 #   `xybrid-llama`   : safe RAII + typed errors + streaming trampoline (Phase 2)
 #   `xybrid-core`    : thin adapter glue (Phase 3 reduction)
 llm-llamacpp = [
-    "dep:llama-cpp-sys",
-    "llama-cpp-sys/bindings",
+    "dep:xybrid-llama-sys",
+    "xybrid-llama-sys/bindings",
     "dep:xybrid-llama",
     "xybrid-llama/bindings",
+    "dep:minijinja",
+    "dep:minijinja-contrib",
+]
+# The Rust vision pipeline (envelopes, preprocessing, strategy dispatch) is
+# always compiled in. This feature gates only the *native* llama multimodal
+# backend (mtmd bindings) on top of `llm-llamacpp`.
+llm-llamacpp-vision = [
+    "llm-llamacpp",
+    "xybrid-llama-sys/vision",
+    "xybrid-llama/vision",
 ]
 
 # dev-tools — exposes test seams (e.g. resource-snapshot providers) for
@@ -153,7 +176,7 @@ dev-tools = []
 [build-dependencies]
 # No build-time native dependencies in xybrid-core: the llama.cpp cmake
 # build was relocated to `crates/llama-cpp-sys/build.rs` as Phase 1 of the
-# `llamacpp-crate-split` epic, and `xybrid-core/build.rs` was removed.
+# `llamacpp-crate-split` epic, and `xybrid-core/build.rs` is now a stub.
 
 [dev-dependencies]
 tempfile = "3.8"
@@ -181,6 +204,11 @@ harness = false
 [[bench]]
 name = "routing_feedback"
 harness = false
+
+[[bench]]
+name = "raw_image_ingress"
+harness = false
+required-features = ["dev-tools"]
 
 # Platform-specific ureq dependencies
 # Non-Android: Use default ureq with TLS

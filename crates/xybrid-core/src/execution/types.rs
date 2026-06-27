@@ -5,6 +5,7 @@
 //! - [`RawOutputs`]: Output from model execution, input to postprocessing
 
 use crate::ir::{Envelope, EnvelopeKind};
+use crate::ir::{ImageSource, ImageValidationLimits};
 use crate::runtime_adapter::AdapterError;
 use ndarray::{ArrayD, IxDyn};
 use std::collections::HashMap;
@@ -51,6 +52,9 @@ pub enum PreprocessedData {
         phonemes: String,
         original_text: String,
     },
+
+    /// Validated image source.
+    Image { source: ImageSource },
 }
 
 impl PreprocessedData {
@@ -66,6 +70,26 @@ impl PreprocessedData {
                     })?;
                 Ok(PreprocessedData::Tensor(tensor))
             }
+            EnvelopeKind::Image { source } => {
+                match source {
+                    ImageSource::Encoded { .. } => {
+                        source
+                            .validated_encoded(ImageValidationLimits::default())
+                            .map_err(|err| AdapterError::InvalidInput(err.to_string()))?;
+                    }
+                    ImageSource::Raw { .. } => {
+                        source
+                            .validated_raw(ImageValidationLimits::default())
+                            .map_err(|err| AdapterError::InvalidInput(err.to_string()))?;
+                    }
+                }
+                Ok(PreprocessedData::Image {
+                    source: source.clone(),
+                })
+            }
+            EnvelopeKind::MultiPart(_) => Err(AdapterError::InvalidInput(
+                "MultiPart envelopes require multimodal preprocessing".to_string(),
+            )),
         }
     }
 
@@ -178,6 +202,9 @@ impl PreprocessedData {
             PreprocessedData::TokenIds { original_text, .. } => {
                 Ok(Envelope::new(EnvelopeKind::Text(original_text.clone())))
             }
+            PreprocessedData::Image { .. } => Err(AdapterError::InvalidInput(
+                "Image data must be decoded before converting to an envelope".to_string(),
+            )),
         }
     }
 }
@@ -265,6 +292,12 @@ impl RawOutputs {
                 map.insert("output".to_string(), tensor);
                 Ok(RawOutputs::TensorMap(map))
             }
+            EnvelopeKind::Image { .. } => Err(AdapterError::InvalidInput(
+                "Image envelopes cannot be converted directly to raw outputs".to_string(),
+            )),
+            EnvelopeKind::MultiPart(_) => Err(AdapterError::InvalidInput(
+                "MultiPart envelopes cannot be converted directly to raw outputs".to_string(),
+            )),
         }
     }
 }
@@ -285,6 +318,24 @@ mod tests {
         let envelope = Envelope::new(EnvelopeKind::Audio(vec![1, 2, 3]));
         let data = PreprocessedData::from_envelope(&envelope).unwrap();
         assert!(matches!(data, PreprocessedData::AudioBytes(_)));
+    }
+
+    #[test]
+    fn preprocessed_data_revalidates_image_sources_before_decode() {
+        let envelope = Envelope::new(EnvelopeKind::Image {
+            source: crate::ir::ImageSource::Encoded {
+                bytes: vec![42, 42, 42, 42].into(),
+                format: crate::ir::ImageFormat::Png,
+                dimensions: crate::ir::ImageDimensions {
+                    width: 1,
+                    height: 1,
+                },
+            },
+        });
+
+        let err = PreprocessedData::from_envelope(&envelope).unwrap_err();
+
+        assert!(format!("{err}").contains("invalid or corrupt png image bytes"));
     }
 
     #[test]

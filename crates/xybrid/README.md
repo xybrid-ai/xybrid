@@ -6,7 +6,7 @@ This is the umbrella crate. It re-exports [`xybrid-sdk`](https://crates.io/crate
 
 ```toml
 [dependencies]
-xybrid = "0.1"
+xybrid = "0.2"
 ```
 
 ## Features

@@ -110,6 +110,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         EnvelopeKind::Audio(_) => {
             println!("🔊 Audio output (unexpected for text model)");
         }
+        EnvelopeKind::Image { .. } | EnvelopeKind::MultiPart(_) => {
+            println!("🖼️  Vision output (unexpected for sentence embedding model)");
+        }
     }
 
     println!();

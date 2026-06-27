@@ -6,7 +6,7 @@
 //! | Module | Operations |
 //! |--------|-----------|
 //! | [`audio`] | `AudioDecode`, `MelSpectrogram` |
-//! | [`image`] | `Resize`, `CenterCrop` |
+//! | [`image`] | `ImageDecode`, `Resize`, `CenterCrop` |
 //! | [`text`] | `Tokenize`, `Phonemize` |
 //! | [`tensor`] | `Normalize`, `Reshape` |
 
@@ -16,6 +16,7 @@ pub mod image;
 pub mod tensor;
 pub mod text;
 
+use super::path::resolve_file_path;
 use super::types::{ExecutorResult, PreprocessedData};
 use crate::execution::template::PreprocessingStep;
 use crate::ir::Envelope;
@@ -53,6 +54,14 @@ pub fn apply_preprocessing_step(
             sample_rate,
             channels,
         } => audio::decode_audio_step(data, input_envelope, *sample_rate, *channels),
+
+        PreprocessingStep::ImageDecode { channels, layout } => {
+            image::image_decode_step(data, *channels, *layout)
+        }
+
+        PreprocessingStep::ImageIngress { channels, layout } => {
+            image::image_ingress_step(data, *channels, *layout)
+        }
 
         PreprocessingStep::Tokenize {
             vocab_file,
@@ -96,6 +105,27 @@ pub fn apply_preprocessing_step(
 
         PreprocessingStep::Reshape { shape } => tensor::reshape_step(data, shape),
 
+        PreprocessingStep::ImageResize {
+            width,
+            height,
+            mode,
+            interpolation,
+            fill,
+            layout,
+        } => image::image_resize_step(
+            data,
+            *width,
+            *height,
+            *mode,
+            interpolation,
+            fill,
+            *layout,
+        ),
+
+        PreprocessingStep::ImageNormalize { preset, layout } => {
+            image::image_normalize_step(data, preset, *layout)
+        }
+
         PreprocessingStep::CenterCrop { width, height } => {
             image::center_crop_step(data, *width, *height)
         }
@@ -105,17 +135,5 @@ pub fn apply_preprocessing_step(
             height,
             interpolation,
         } => image::resize_step(data, *width, *height, interpolation),
-    }
-}
-
-/// Resolve a file path relative to base_path.
-fn resolve_file_path(base_path: &str, file: &str) -> String {
-    if base_path.is_empty() {
-        file.to_string()
-    } else {
-        std::path::Path::new(base_path)
-            .join(file)
-            .to_string_lossy()
-            .to_string()
     }
 }

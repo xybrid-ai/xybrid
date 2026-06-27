@@ -178,6 +178,22 @@ jobs:
           cache-all-crates: "true"
           save-if: "true"
 
+      # `cargo xtask build-xcframework` shells out to `boltffi pack apple`, so
+      # the CLI must be present here just as it is in the Android job. Without
+      # it the build fails with "Failed to run `boltffi pack apple`. Install
+      # with `cargo install boltffi_cli`." Cache + pin to 0.25.3 to match the
+      # runtime `boltffi` crate (Cargo.lock) — a CLI/runtime skew mis-generates
+      # the bindings (see the Android job's note).
+      - name: Cache boltffi CLI
+        id: cache-boltffi
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.cargo/bin/boltffi
+          key: boltffi-cli-${{ runner.os }}-0.25.3
+
+      - name: Install boltffi CLI
+        run: which boltffi || cargo install boltffi_cli --version 0.25.3 --locked
+
       - name: Build XCFramework
         run: cargo xtask build-xcframework --release
 
@@ -398,6 +414,26 @@ jobs:
 
       - name: Install cargo-ndk
         run: which cargo-ndk || cargo install cargo-ndk
+
+      # boltffi CLI provides the `boltffi pack android` the build script
+      # (tools/scripts/build-android-bolt.sh) calls. The standalone
+      # build-android.yml / test-ci.yml jobs install it; release-prep must too,
+      # or `cargo xtask build-android` fails with `boltffi: command not found`.
+      # Cache the installed binary across runs.
+      - name: Cache boltffi CLI
+        id: cache-boltffi
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.cargo/bin/boltffi
+          key: boltffi-cli-${{ runner.os }}-0.25.3
+
+      - name: Install boltffi CLI
+        # `which || install` is idempotent whether or not the cache populated
+        # the binary. Pinned to 0.25.3 to MATCH the runtime `boltffi` crate
+        # (Cargo.lock): a CLI/runtime skew mis-generates unit-ok `Result<(), E>`
+        # exports as a `void` foreign function that drops the error and leaks
+        # the result buffer. `--locked` installs against the CLI's bundled lock.
+        run: which boltffi || cargo install boltffi_cli --version 0.25.3 --locked
 
       - name: Build Android .so files
         run: cargo xtask build-android --release
@@ -807,7 +843,13 @@ jobs:
           case "$STATE" in
             true)
               echo "::notice::Deleting pre-existing DRAFT release for ${TAG} so this run can recreate it."
-              gh release delete "$TAG" --yes --cleanup-tag
+              # NOTE: no --cleanup-tag here. A draft release has no materialized
+              # git tag (drafts only hold a tag *name*; the ref is created at
+              # publish time), so `--cleanup-tag` 422s with "Reference does not
+              # exist" and aborts this step *after* deleting the release —
+              # leaving the branch with no draft at all. Deleting just the
+              # release is correct; there is no tag to clean up.
+              gh release delete "$TAG" --yes
               ;;
             false)
               echo "::error::Release ${TAG} is already PUBLISHED. Refusing to delete. Bump the version on this branch (or pick a new branch name) and re-push."
@@ -831,6 +873,50 @@ jobs:
             artifacts/*
 
   # =========================================================================
+  # Generate a CycloneDX SBOM for the released crates and attach it to the
+  # draft release. Independent of the release gate: this job is not required
+  # by open-release-pr, and continue-on-error keeps an SBOM-tooling hiccup
+  # from ever marking a release run failed.
+  # =========================================================================
+  attach-sbom:
+    name: Attach SBOM
+    permissions:
+      contents: write   # gh release upload of the SBOM assets
+    needs: [check-release-branch, create-draft-release]
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
+        with:
+          toolchain: stable
+
+      - name: Install cargo-cyclonedx
+        run: cargo install cargo-cyclonedx --locked
+
+      - name: Generate CycloneDX SBOMs (JSON)
+        # Resolves from Cargo.lock — no project build needed. Emits a
+        # <crate>.cdx.json next to each workspace member's Cargo.toml.
+        run: cargo cyclonedx --format json
+
+      - name: Attach SBOMs for the published artifacts to the draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.check-release-branch.outputs.tag }}
+        run: |
+          set -euo pipefail
+          # Upload the SBOMs for the published library crate and the CLI binary
+          # (each captures its full transitive dependency tree).
+          cp crates/xybrid/xybrid.cdx.json         "xybrid-${TAG}.cdx.json"
+          cp crates/xybrid-cli/xybrid-cli.cdx.json "xybrid-cli-${TAG}.cdx.json"
+          gh release upload "$TAG" \
+            "xybrid-${TAG}.cdx.json" \
+            "xybrid-cli-${TAG}.cdx.json" \
+            --clobber
+
+  # =========================================================================
   # Open the release PR (if not already open).
   # =========================================================================
   open-release-pr:
@@ -845,7 +931,16 @@ jobs:
 
       - name: Open PR (if not already open)
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Prefer a PAT (RELEASE_PAT) over GITHUB_TOKEN to OPEN the PR.
+          # GitHub does not trigger `pull_request` workflows for PRs opened by
+          # GITHUB_TOKEN (loop prevention), so with the default token the
+          # branch-protection-required `CI Success` check never runs on the PR
+          # head and the release PR can never be merged without an admin
+          # bypass. Opening the PR with a PAT makes ci.yml's `pull_request`
+          # trigger fire and the required check report. Falls back to
+          # GITHUB_TOKEN when RELEASE_PAT is unset (PR opens, but `CI Success`
+          # stays pending — merge then needs a manual CI run or admin bypass).
+          GH_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
           TAG: ${{ needs.check-release-branch.outputs.tag }}
           BRANCH: ${{ needs.check-release-branch.outputs.branch }}
         run: |

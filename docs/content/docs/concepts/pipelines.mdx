@@ -1,270 +1,149 @@
 ---
 title: Pipelines
-description: Multi-stage ML pipeline definition and YAML DSL reference
+description: Chain models into multi-stage inference pipelines with YAML
 ---
 
-
-A **Pipeline** is a sequence of stages that transform data. Pipelines are defined in YAML and executed by the SDK, enabling you to chain models together (ASR → LLM → TTS) with automatic routing between device and cloud execution.
-
-## How Pipelines Work
-
-```mermaid
-flowchart TD
-  A[YAML Definition] --> B[Pipeline Loader]
-
-  B --> BB
-  subgraph BB[Load]
-    direction LR
-      B1[1. Parse YAML] --> B2[2. Resolve models from Registry] --> B3[3. Validate type compatibility] --> B4[4. Prepare execution context]
-    end
-
-    BB --> C[Pipeline Execution]
-
-    C --> D
-
-    subgraph D[Sequential Execution]
-        direction LR
-        S1[Stage 1</br>Whisper] --> S2[Stage 2</br>GPT-4o] --> S3[Stage 3</br>Kokoro]
-    end
-```
-
-## Basic Structure
+A pipeline chains multiple models into a single inference flow — for example a voice assistant that transcribes speech, generates a reply, and speaks it back. Pipelines are defined in YAML and run through the same engine on every platform.
 
 ```yaml
-name: "Voice Assistant"
-registry: "http://localhost:8080"
-
-input:
-  kind: "AudioRaw"
-
+# voice-assistant.yaml
+name: voice-assistant
 stages:
-  - whisper-tiny@1.0
-  - kokoro-82m@0.1
+  - whisper-tiny          # Speech → text
+  - qwen2.5-0.5b-instruct # Generate a reply
+  - kokoro-82m            # Text → speech
 ```
 
-## Stage Formats
+```bash
+xybrid run --config voice-assistant.yaml --input-audio question.wav -o response.wav
+```
 
-### Simple Format
+The output `Envelope` of each stage becomes the input of the next: audio → text → text → audio.
 
-Reference a model by ID and version:
+<Callout type="info">
+Multi-model pipelines (MMP) are **experimental**. Single-stage pipelines are stable and are how the SDKs run individual models internally.
+</Callout>
+
+## Pipeline schema
+
+Only `stages` is required:
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `name` | No | Display name used in logs and traces |
+| `registry` | No | Registry URL for model resolution (default `https://api.xybrid.dev`) |
+| `stages` | **Yes** | List of stages — at least one |
+
+## Stage formats
+
+A stage is either a plain string or a full object.
+
+**Simple** — just the model ID, optionally pinned to a version:
 
 ```yaml
 stages:
-  - wav2vec2-base-960h@1.0
-  - kokoro-82m@0.1
+  - kokoro-82m
+  - qwen2.5-0.5b-instruct@1.0
 ```
 
-### Object Format
-
-For more control, use the object format:
+**Object** — full control over routing and generation options:
 
 ```yaml
 stages:
-  - name: whisper-tiny@1.0
-    target: device
-    registry: "http://other-registry:8080"
-```
-
-### Integration Stages
-
-For cloud LLM execution:
-
-```yaml
-stages:
-  - whisper-tiny@1.0
-
-  - target: integration
-    provider: openai
+  - id: assistant
     model: gpt-4o-mini
-    options:
-      system_prompt: "You are a helpful voice assistant."
-      max_tokens: 150
-      temperature: 0.7
-
-  - kokoro-82m@0.1
-```
-
-## Execution Targets
-
-| Target | Description | Config Source |
-|--------|-------------|---------------|
-| `device` | On-device inference | .xyb bundle from registry |
-| `integration` | Third-party API | Provider config (OpenAI, Anthropic) |
-| `auto` | Framework decides | Resolved at runtime |
-
-## Input Types
-
-Declare expected input type for validation:
-
-```yaml
-input:
-  kind: "AudioRaw"   # For ASR pipelines
-```
-
-```yaml
-input:
-  kind: "Text"       # For TTS or text pipelines
-```
-
-```yaml
-input:
-  kind: "Embedding"  # For vector search
-```
-
-## Data Flow
-
-Each stage transforms an Envelope:
-
-| Stage Type | Input | Output |
-|------------|-------|--------|
-| ASR (Whisper) | `AudioRaw` | `Text` |
-| LLM (GPT-4o) | `Text` | `Text` |
-| TTS (Kokoro) | `Text` | `AudioRaw` |
-
-The pipeline validates that outputs match the next stage's expected input.
-
-## Registry Configuration
-
-### Simple URL
-
-```yaml
-registry: "http://localhost:8080"
-```
-
-### File Path (Local)
-
-```yaml
-registry: "file:///Users/me/.xybrid/registry"
-```
-
-### Full Configuration
-
-```yaml
-registry:
-  local_path: "/Users/me/.xybrid/registry"
-  remote:
-    base_url: "http://localhost:8080"
-    timeout_ms: 30000
-    retry_attempts: 3
-```
-
-## Integration Providers
-
-Supported providers for cloud LLM stages:
-
-| Provider | Models | Notes |
-|----------|--------|-------|
-| `openai` | gpt-4o, gpt-4o-mini | Requires OPENAI_API_KEY |
-| `anthropic` | claude-3-5-sonnet | Requires ANTHROPIC_API_KEY |
-
-## Example Pipelines
-
-### Voice Assistant (ASR → LLM → TTS)
-
-```yaml
-name: "Voice Assistant"
-registry: "http://localhost:8080"
-
-input:
-  kind: "AudioRaw"
-
-stages:
-  # Speech recognition (on-device)
-  - whisper-tiny@1.0
-
-  # Language model (cloud)
-  - target: integration
+    target: cloud
     provider: openai
-    model: gpt-4o-mini
-    options:
-      system_prompt: "You are a helpful voice assistant. Keep responses brief."
-      max_tokens: 150
-
-  # Text-to-speech (on-device)
-  - kokoro-82m@0.1
+    system_prompt: "You are a helpful voice assistant. Keep responses concise."
+    max_tokens: 150
+    temperature: 0.7
 ```
 
-### Speech-to-Text Only
+| Field | Description |
+|-------|-------------|
+| `id` | Stage identifier (defaults to the model ID) |
+| `model` | Model ID from the registry, or a provider model name for cloud stages |
+| `version` | Model version (e.g. `"1.0"`) |
+| `target` | Where to run: `device`, `cloud`, or `auto` (default) — see [Hybrid Execution](/docs/concepts/hybrid-execution) |
+| `provider` | Cloud provider for cloud stages: `openai`, `anthropic`, `google`, `deepseek`, `elevenlabs`, `openrouter`, `custom` |
+| `execution_provider` | ONNX Runtime override: `cpu`, `coreml`, `coreml-ane`, `coreml-gpu` (auto-selected if unset) |
+| *(any other key)* | Passed to the stage as an option — common ones: `system_prompt`, `max_tokens`, `temperature` |
+
+## Mixing device and cloud stages
+
+A pipeline can route each stage independently — keep audio on-device for privacy and latency, and burst to the cloud for a bigger model:
 
 ```yaml
-name: "Transcription"
-registry: "http://localhost:8080"
-
-input:
-  kind: "AudioRaw"
-
+name: voice-assistant
 stages:
-  - wav2vec2-base-960h@1.0
+  - whisper-tiny              # on-device ASR
+
+  - model: gpt-4o-mini        # cloud LLM
+    target: cloud
+    provider: openai
+    system_prompt: "You are a helpful voice assistant."
+    max_tokens: 150
+
+  - kokoro-82m                # on-device TTS
 ```
 
-### Text-to-Speech Only
+## Running pipelines
 
-```yaml
-name: "TTS"
-registry: "http://localhost:8080"
+### CLI
 
-input:
-  kind: "Text"
+```bash
+# Validate the YAML without running
+xybrid prepare voice-assistant.yaml
 
-stages:
-  - kitten-tts-nano@1.0
+# Show the execution plan (models, targets, download status)
+xybrid plan voice-assistant.yaml
+
+# Preview routing decisions without executing
+xybrid run --config voice-assistant.yaml --input-audio q.wav --dry-run
+
+# Run it
+xybrid run --config voice-assistant.yaml --input-audio q.wav -o response.wav
 ```
 
-## Running Pipelines
-
-### Flutter SDK
+### Flutter
 
 ```dart
-final pipeline = Xybrid.pipeline(filePath: 'assets/pipelines/voice-assistant.yaml');
-
+final pipeline = await Xybrid.pipeline(yaml: yamlString).load();
+await pipeline.loadModels(); // optional preload
 final result = await pipeline.run(
   XybridEnvelope.audio(bytes: audioBytes, sampleRate: 16000),
 );
-print(result.text);
 ```
 
-### Rust SDK
+### Rust
 
 ```rust
-use xybrid_sdk::PipelineLoader;
+use xybrid::Xybrid;
+use xybrid::ir::{Envelope, EnvelopeKind};
 
-let pipeline = PipelineLoader::from_yaml(yaml_content)?
-    .load()?;
+let input = Envelope::new(EnvelopeKind::Audio(audio_bytes));
 
-let result = pipeline.run(&input_envelope)?;
+// One call: parse, resolve, download, execute
+let result = Xybrid::run_pipeline(&yaml, &input)?;
+
+// Or staged: inspect and preload first
+let pipeline = Xybrid::pipeline(&yaml)?.load()?;
+pipeline.load_models()?;
+let result = pipeline.run(&input)?;
 ```
 
-## Pipeline Metadata
+### SDK support
 
-Query pipeline properties:
-
-```dart
-final pipeline = Xybrid.pipeline(filePath: 'pipeline.yaml');
-
-pipeline.name;        // "Voice Assistant"
-pipeline.stageCount;  // 3
-pipeline.stageNames;  // ["whisper-tiny@1.0", "gpt-4o-mini", "kokoro-82m@0.1"]
-```
-
-## Lifecycle
-
-1. **Load** - Parse YAML, resolve models from registry
-2. **Validate** - Check type compatibility between stages
-3. **Execute** - Run stages sequentially
-4. **Unload** - Release resources
-
-```dart
-// Load from YAML
-final pipeline = Xybrid.pipeline(yaml: yamlContent);
-
-// Or from file
-final pipeline = Xybrid.pipeline(filePath: 'pipeline.yaml');
-
-// Run
-final result = await pipeline.run(XybridEnvelope.audio(bytes: audioBytes, sampleRate: 16000));
-```
+| Platform | Pipelines |
+|----------|-----------|
+| Dart (Flutter) | ✅ Available |
+| Rust | ✅ Available |
+| Kotlin | 🚧 Planned |
+| Swift | 🚧 Planned |
+| C# (Unity) | 🚧 Planned |
 
 ## Related
 
-- [Registry](/docs/concepts/registry) - Model bundle resolution
-- [Bundles](/docs/concepts/bundles) - Bundle format and metadata
+- [Hybrid Execution](/docs/concepts/hybrid-execution) — how `target: auto` decides between device and cloud
+- [Models](/docs/concepts/models) — the model catalog
+- [xybrid run](/docs/cli/reference/run) — full CLI reference

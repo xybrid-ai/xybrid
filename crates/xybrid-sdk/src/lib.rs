@@ -9,10 +9,14 @@
 
 //! Xybrid SDK - Developer-facing API for hybrid cloud-edge AI inference.
 //!
-//! This crate provides high-level abstractions for:
-//! - Loading and running ML models (ASR, TTS, embeddings)
+//! The SDK is **local-first**: model load/run/stream and pipelines work fully
+//! offline with no account. Authenticating with an API key adds an **additive
+//! platform layer** on top of the same runtime — cloud routing, telemetry, and
+//! control-plane sync. This crate provides high-level abstractions for:
+//! - Loading and running ML models (ASR, TTS, embeddings) — local by default
 //! - Streaming inference for real-time applications
-//! - Multi-stage pipelines with intelligent routing
+//! - Multi-stage pipelines with intelligent local→cloud routing
+//! - Platform integration (auth, telemetry export) once a key is provided
 //!
 //! # Architecture
 //!
@@ -27,8 +31,9 @@
 //!
 //! ## Initialization
 //!
-//! Anonymous use works out of the box — every inference path runs locally.
-//! Provide an API key to light up the platform dashboard:
+//! Anonymous use works out of the box — local inference, no account needed.
+//! Provide an API key to layer on the platform (cloud routing + telemetry
+//! dashboard) without changing the local path:
 //!
 //! ```no_run
 //! // Anonymous — local inference, telemetry disabled
@@ -505,6 +510,37 @@ pub fn set_provider_api_key(provider: &str, api_key: &str) {
     };
     std::env::set_var(env_var, api_key);
 }
+
+/// Enable or disable speculative cloud fallback globally.
+///
+/// When enabled, a [`ModelLoader`] whose model isn't downloaded yet is served
+/// from the Xybrid gateway while the weights download in the background —
+/// provided a cloud API key is resolvable. This sets the process-global
+/// default; individual loads override it with
+/// [`ModelLoader::with_speculative_cloud`]. The flag persists in memory for the
+/// app lifetime.
+///
+/// # Examples
+/// ```
+/// xybrid_sdk::set_speculative_cloud(true);
+/// assert!(xybrid_sdk::is_speculative_cloud_enabled());
+/// # xybrid_sdk::set_speculative_cloud(false);
+/// ```
+pub fn set_speculative_cloud(enabled: bool) {
+    SPECULATIVE_CLOUD.store(enabled, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Whether speculative cloud fallback is enabled by the global default.
+///
+/// Reflects the most recent [`set_speculative_cloud`] call; defaults to
+/// `false`. A per-load override via [`ModelLoader::with_speculative_cloud`]
+/// takes precedence over this value for that load.
+pub fn is_speculative_cloud_enabled() -> bool {
+    SPECULATIVE_CLOUD.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Process-global speculative-cloud default. See [`set_speculative_cloud`].
+static SPECULATIVE_CLOUD: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// Get the currently configured Xybrid API key (if set).
 ///
