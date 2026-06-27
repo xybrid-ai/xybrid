@@ -1,0 +1,19 @@
+Cargo.lock
+  s_a64fe9de419967::t_5a607cb64e0d05 591,892,3242,5086-5091,7131
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.3",
+  "base_commit_sha": "de032bd55200e601d91b4fc3f986fa340ff45a3c",
+  "prompts": {},
+  "sessions": {
+    "s_a64fe9de419967": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4322caba-5bc8-4b30-8ba1-51b0b8519417",
+        "model": "unknown"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
