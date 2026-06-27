@@ -26,6 +26,7 @@ import ai.xybrid.displayMessage
 // fields uniffi emitted; the extensions in Xybrid.kt restore that shape.
 import ai.xybrid.success
 import ai.xybrid.text
+import ai.xybrid.reasoningContent
 import ai.xybrid.audioBytes
 
 // State and component imports
@@ -202,6 +203,7 @@ fun XybridExampleApp() {
                             inferenceState = InferenceState.Completed(
                                 task = task,
                                 text = result.text,
+                                reasoningContent = result.reasoningContent,
                                 audioBytes = result.audioBytes,
                                 latencyMs = result.latencyMs.toLong(),
                                 metrics = result.metrics
