@@ -363,8 +363,8 @@ fn dictionary_to_envelope(dict: &Dictionary) -> Result<facade::Envelope, String>
         ),
         "multipart" => {
             let parts = get_dictionary_array(dict, "parts")?
-                .iter()
-                .map(dictionary_to_envelope)
+                .into_iter()
+                .map(|part| dictionary_to_envelope(&part))
                 .collect::<Result<Vec<_>, _>>()?;
             facade::Envelope::multipart(parts)
         }
