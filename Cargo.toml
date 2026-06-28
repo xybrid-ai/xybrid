@@ -11,6 +11,7 @@ members = [
     "crates/llama-cpp-sys",
     "crates/xybrid-llama",
     "bindings/flutter/rust",
+    "bindings/godot/rust",
     "macros",
     "xtask",
     "integration-tests",

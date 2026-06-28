@@ -1,0 +1,68 @@
+---
+title: Godot
+description: 面向 Godot 4.5+ 的本地 Xybrid 推理 GDExtension 绑定
+---
+
+Godot SDK 通过 GDExtension 将 Xybrid 暴露给 Godot 4.5+ 项目。该绑定基于 godot-rust/gdext 实现，v1 支持桌面 Godot Editor 和桌面导出目标。
+
+## 安装
+
+在仓库根目录构建原生扩展：
+
+```bash
+tools/scripts/build-godot.sh release
+```
+
+将 `bindings/godot/addons/xybrid` 复制到你的项目中，路径为 `res://addons/xybrid`。
+
+macOS 上构建脚本会把扩展打包成 `Xybrid Godot.framework`，而不是裸 `.dylib`。发布导出前请先安装两个 Rust 桌面 target：
+
+```bash
+rustup target add aarch64-apple-darwin x86_64-apple-darwin
+```
+
+`.gdextension` 已将该 framework 声明为导出依赖，Godot 导出 `.app` 时会把它复制到应用包内。
+
+## 初始化
+
+```gdscript
+var runtime := XybridRuntime.new()
+var result := runtime.init("", "", "", OS.get_user_data_dir().path_join("xybrid-cache"))
+if not result.ok:
+	push_error(result.message)
+```
+
+第一个参数传入 API key 可启用控制台遥测；留空则保持本地匿名推理。
+
+## 加载与运行
+
+```gdscript
+var loader_result := runtime.model_from_registry("kokoro-82m")
+if not loader_result.ok:
+	push_error(loader_result.message)
+	return
+
+var model_result := loader_result.value.load()
+if not model_result.ok:
+	push_error(model_result.message)
+	return
+
+var run_result := model_result.value.run({"kind": "text", "text": "Hello from Godot"}, {}, {})
+if run_result.ok:
+	print(run_result.value.text)
+else:
+	push_error(run_result.message)
+```
+
+`load`、`run`、`warmup` 和 `unload` 都是阻塞调用。需要在游戏 UI 中调用时，请使用随附的 `XybridAsync` helper（`addons/xybrid/xybrid_async.gd`），它会通过 Godot `Thread` 执行。
+
+## 返回值形状
+
+所有可失败调用都返回字典：
+
+```gdscript
+{"ok": true, "value": value}
+{"ok": false, "code": 6, "retryable": false, "message": "..."}
+```
+
+支持的 envelope kind 为 `text`、`audio`、`embedding`、`image` 和 `multipart`。

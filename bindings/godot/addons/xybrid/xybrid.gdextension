@@ -1,0 +1,28 @@
+[configuration]
+entry_symbol = "gdext_rust_init"
+compatibility_minimum = 4.5
+reloadable = true
+
+[libraries]
+linux.debug.x86_64 = "bin/linux/debug/libxybrid_godot.so"
+linux.release.x86_64 = "bin/linux/release/libxybrid_godot.so"
+windows.debug.x86_64 = "bin/windows/debug/xybrid_godot.dll"
+windows.release.x86_64 = "bin/windows/release/xybrid_godot.dll"
+macos.debug = "bin/universal-apple-darwin/debug/Xybrid Godot.framework"
+macos.release = "bin/universal-apple-darwin/release/Xybrid Godot.framework"
+macos.debug.arm64 = "bin/universal-apple-darwin/debug/Xybrid Godot.framework"
+macos.release.arm64 = "bin/universal-apple-darwin/release/Xybrid Godot.framework"
+
+[dependencies]
+macos.debug = {
+  "bin/universal-apple-darwin/debug/Xybrid Godot.framework" : "Contents/Frameworks"
+}
+macos.release = {
+  "bin/universal-apple-darwin/release/Xybrid Godot.framework" : "Contents/Frameworks"
+}
+macos.debug.arm64 = {
+  "bin/universal-apple-darwin/debug/Xybrid Godot.framework" : "Contents/Frameworks"
+}
+macos.release.arm64 = {
+  "bin/universal-apple-darwin/release/Xybrid Godot.framework" : "Contents/Frameworks"
+}
