@@ -363,8 +363,8 @@ fn dictionary_to_envelope(dict: &Dictionary) -> Result<facade::Envelope, String>
         ),
         "multipart" => {
             let parts = get_dictionary_array(dict, "parts")?
-                .iter_shared()
-                .map(|part| dictionary_to_envelope(&part))
+                .iter()
+                .map(dictionary_to_envelope)
                 .collect::<Result<Vec<_>, _>>()?;
             facade::Envelope::multipart(parts)
         }
@@ -552,14 +552,29 @@ fn get_bytes(dict: &Dictionary, key: &str) -> Result<Vec<u8>, String> {
     if let Ok(bytes) = value.try_to::<PackedByteArray>() {
         return Ok(bytes.as_slice().to_vec());
     }
+    if let Ok(values) = value.try_to::<Array<Variant>>() {
+        return values
+            .iter_shared()
+            .map(|v| {
+                let value = v
+                    .try_to::<i64>()
+                    .map_err(|_| format!("{key} contains non-integer value"))?;
+                byte_from_i64(value, key)
+            })
+            .collect();
+    }
     if let Ok(values) = value.try_to::<Array<i64>>() {
         return values
             .iter_shared()
-            .map(|v| u8::try_from(v).map_err(|_| format!("{key} contains byte outside 0..=255")))
+            .map(|v| byte_from_i64(v, key))
             .collect();
     }
 
     Err(format!("{key} must be a PackedByteArray or Array[int]"))
+}
+
+fn byte_from_i64(value: i64, key: &str) -> Result<u8, String> {
+    u8::try_from(value).map_err(|_| format!("{key} contains byte outside 0..=255"))
 }
 
 fn get_f32s(dict: &Dictionary, key: &str) -> Result<Vec<f32>, String> {
@@ -569,6 +584,16 @@ fn get_f32s(dict: &Dictionary, key: &str) -> Result<Vec<f32>, String> {
 
     if let Ok(values) = value.try_to::<PackedFloat32Array>() {
         return Ok(values.as_slice().to_vec());
+    }
+    if let Ok(values) = value.try_to::<Array<Variant>>() {
+        return values
+            .iter_shared()
+            .map(|v| {
+                v.try_to::<f64>()
+                    .map(|value| value as f32)
+                    .map_err(|_| format!("{key} contains non-float value"))
+            })
+            .collect();
     }
     if let Ok(values) = value.try_to::<Array<f64>>() {
         return Ok(values.iter_shared().map(|v| v as f32).collect());
@@ -580,19 +605,42 @@ fn get_f32s(dict: &Dictionary, key: &str) -> Result<Vec<f32>, String> {
 }
 
 fn get_string_array(dict: &Dictionary, key: &str) -> Option<Vec<String>> {
-    get_variant(dict, key)
-        .and_then(|v| v.try_to::<Array<GString>>().ok())
-        .map(|arr| arr.iter_shared().map(|s| s.to_string()).collect())
+    get_variant(dict, key).and_then(|value| {
+        if let Ok(values) = value.try_to::<Array<Variant>>() {
+            Some(
+                values
+                    .iter_shared()
+                    .filter_map(|v| v.try_to::<GString>().ok().map(|s| s.to_string()))
+                    .collect(),
+            )
+        } else {
+            value
+                .try_to::<Array<GString>>()
+                .ok()
+                .map(|values| values.iter_shared().map(|s| s.to_string()).collect())
+        }
+    })
 }
 
-fn get_dictionary_array(dict: &Dictionary, key: &str) -> Result<Array<Dictionary>, String> {
+fn get_dictionary_array(dict: &Dictionary, key: &str) -> Result<Vec<Dictionary>, String> {
     let Some(value) = get_variant(dict, key) else {
-        return Ok(Array::new());
+        return Ok(Vec::new());
     };
 
-    value
-        .try_to::<Array<Dictionary>>()
-        .map_err(|_| format!("{key} must be Array[Dictionary]"))
+    if let Ok(values) = value.try_to::<Array<Dictionary>>() {
+        return Ok(values.iter_shared().collect());
+    }
+    if let Ok(values) = value.try_to::<Array<Variant>>() {
+        return values
+            .iter_shared()
+            .map(|v| {
+                v.try_to::<Dictionary>()
+                    .map_err(|_| format!("{key} elements must be Dictionaries"))
+            })
+            .collect();
+    }
+
+    Err(format!("{key} must be an Array of Dictionaries"))
 }
 
 #[cfg(test)]
@@ -634,5 +682,19 @@ mod tests {
         assert_eq!(get_bool(&dict, "ok"), Some(false));
         assert_eq!(get_i64(&dict, "code"), Some(9));
         assert_eq!(get_bool(&dict, "retryable"), Some(false));
+    }
+
+    #[test]
+    fn byte_from_i64_accepts_only_byte_range() {
+        assert_eq!(byte_from_i64(0, "bytes"), Ok(0));
+        assert_eq!(byte_from_i64(255, "bytes"), Ok(255));
+        assert_eq!(
+            byte_from_i64(-1, "bytes"),
+            Err("bytes contains byte outside 0..=255".to_string())
+        );
+        assert_eq!(
+            byte_from_i64(256, "bytes"),
+            Err("bytes contains byte outside 0..=255".to_string())
+        );
     }
 }
