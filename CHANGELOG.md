@@ -14,6 +14,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.2.1] - 2026-06-25
+
+The native VLM ships enabled. `0.2.0` landed the vision *foundation* — image
+envelopes, preprocessing, and the mtmd backend in the codebase — but kept the
+native VLM backend opt-in, so the default mobile/desktop binaries could not
+actually run a vision-language model. `0.2.1` turns it on in every platform
+preset: vision-language inference works out of the box, at a measured
+~0.7–1.5 MiB stripped size cost.
+
+### Added
+
+- **Native VLM backend shipped enabled** (#296): `llm-llamacpp-vision`
+  (llama.cpp's mtmd/clip) is now part of every platform preset
+  (`platform-android` / `platform-ios` / `platform-macos` / `platform-desktop`),
+  so the default XCFramework, Android AAR, Flutter/React Native natives, and CLI
+  run vision-language models with no build-from-source step. The prebuilt-natives
+  CI now publishes `vision` slices alongside `base`, so vision builds stay on the
+  fast cached path instead of recompiling llama.cpp.
+
+### Fixed
+
+- **Unrecognized GGUF chat templates now render** (#304): when llama.cpp's
+  hardcoded template matcher rejects a model's embedded chat template, xybrid
+  falls back to a real Jinja engine (minijinja) to render it instead of failing
+  — so GGUF models with custom or non-standard chat templates load and run
+  correctly. Gated into `llm-llamacpp`, so non-llama builds pay zero cost.
+- **Readable Apple FFI errors** (#296): `FfiError` now conforms to
+  `LocalizedError`, so model-load and other low-level FFI failures surface their
+  real message (e.g. a registry `ModelNotFound`) instead of the opaque
+  "The operation couldn't be completed. (Xybrid.FfiError error 1.)".
+- **Release tooling**: `version-sync` is now React-Native-aware (#298), and a
+  spurious `bindings/flutter/rust/Cargo.lock` that broke dependency resolution
+  was removed (#300).
+
+---
+
 ## [0.2.0-rc1] - 2026-06-21
 
 Release candidate for `0.2.0`. This is the stable `0.2.0` tree under a
