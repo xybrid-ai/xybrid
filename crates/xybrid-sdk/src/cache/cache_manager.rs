@@ -63,7 +63,7 @@ struct CacheEntry {
 enum CacheType {
     /// Local models persist indefinitely
     Local,
-    /// Cloud models have  weeks TTL
+    /// Cloud models have a 24h TTL
     Cloud,
 }
 
