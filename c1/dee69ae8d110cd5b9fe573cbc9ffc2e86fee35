@@ -1,0 +1,62 @@
+crates/llama-cpp-sys/wrapper.h
+  s_fce189698ddf27::t_abc4484df62834 137
+  s_fce189698ddf27::t_418c12a8aa1a39 208-209
+  s_fce189698ddf27::t_b2b4a39fc6fddc 144-146
+  s_fce189698ddf27::t_ec73856fcef3dc 186-187
+  s_fce189698ddf27::t_d76f7ebb841a92 166-167
+crates/xybrid-llama/src/generation.rs
+  s_fce189698ddf27::t_68fcff78ada98f 381,398-402,412,425-426
+  s_fce189698ddf27::t_8368a98555ea66 292,303-307,317,332-333
+  s_fce189698ddf27::t_c2a3e79cacf276 201-216,229,235-240,242,257-258
+crates/llama-cpp-sys/wrapper.cpp
+  s_fce189698ddf27::t_90e7cfc73c38cc 1182-1183
+  s_fce189698ddf27::t_9812c52b202785 975-976
+  s_fce189698ddf27::t_5f98caeb854fbe 999-1000
+  s_fce189698ddf27::t_772398564fd22c 818-819
+  s_fce189698ddf27::t_31be61f6b1490b 1145-1146
+  s_fce189698ddf27::t_059800133ca593 794-795
+  s_fce189698ddf27::t_048a9d6c8c6c6c 637,644-646,652-669
+  s_fce189698ddf27::t_be393dbaa934af 670
+crates/xybrid-llama/tests/recurrent_gating_smoke.rs
+  s_fce189698ddf27::t_1999e2c81cee05 114,139
+crates/xybrid-llama/src/ffi.rs
+  s_fce189698ddf27::t_be8b25ea61b804 258-260
+  s_fce189698ddf27::t_30a20d743bdb3f 377-378,397-398
+  s_fce189698ddf27::t_5dbcb096080bad 275-276,294-295
+  s_fce189698ddf27::t_6ac965df5f5a78 323-324,345-346
+crates/xybrid-core/src/runtime_adapter/llama_cpp/mod.rs
+  s_fce189698ddf27::t_5df78b2de9697c 1143
+  s_fce189698ddf27::t_996f71767135f7 565
+  s_fce189698ddf27::t_890bbd12067247 1292
+crates/xybrid-llama/tests/prefix_cache_hit_smoke.rs
+  s_fce189698ddf27::t_23947ae9781158 167
+crates/xybrid-core/src/runtime_adapter/grammar.rs
+  s_fce189698ddf27::t_bba366c9497055 1-110,114-128,132-156,161-302
+  s_fce189698ddf27::t_6096fb8244d6a8 111-113,129-131,157-160
+crates/xybrid-core/src/runtime_adapter/mod.rs
+  s_fce189698ddf27::t_b29ae73c6dc95e 58-61
+crates/xybrid-core/src/error.rs
+  s_fce189698ddf27::t_8c4e8d2d56c327 32-33
+  s_fce189698ddf27::t_165f4ab1375594 85-88
+crates/xybrid-core/src/runtime_adapter/types.rs
+  s_fce189698ddf27::t_6096fb8244d6a8 457-463
+  s_fce189698ddf27::t_20cea6f3a45fd4 339-348
+  s_fce189698ddf27::t_9eff459eccdd61 389
+  s_fce189698ddf27::t_e75254292e8f8e 432-456,464-465
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.3",
+  "base_commit_sha": "c1dee69ae8d110cd5b9fe573cbc9ffc2e86fee35",
+  "prompts": {},
+  "sessions": {
+    "s_fce189698ddf27": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "05b32fb8-246e-4e34-bba8-8005771e45ce",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
