@@ -112,7 +112,12 @@ fn clear_cache(
         ui::hint("Press Enter to continue or Ctrl+C to cancel...");
 
         let mut input = String::new();
-        std::io::stdin().read_line(&mut input).ok();
+        // EOF / closed stdin (piped input, /dev/null, CI) must not count as
+        // confirmation — a destructive clear requires an explicit keypress.
+        if std::io::stdin().read_line(&mut input).unwrap_or(0) == 0 {
+            ui::warning("Aborted: no interactive confirmation.");
+            return Ok(());
+        }
 
         let removed = client.clear_all_cache().context("Failed to clear cache")?;
 
