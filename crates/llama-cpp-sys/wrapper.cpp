@@ -634,17 +634,39 @@ void llama_batch_free_c(llama_batch batch) {
 // =============================================================================
 
 llama_sampler* llama_sampler_chain_create_c(
+    const llama_model* model,
     float temperature,
     float top_p,
     float min_p,
     int top_k,
     float repeat_penalty,
     int penalty_last_n,
-    uint32_t seed
+    uint32_t seed,
+    const char* grammar,
+    const char* grammar_root
 ) {
     // Create sampler chain with default params
     llama_sampler_chain_params chain_params = llama_sampler_chain_default_params();
     llama_sampler* chain = llama_sampler_chain_init(chain_params);
+
+    // Grammar constraint goes FIRST: it masks (sets logit = -inf) every token
+    // the GBNF grammar would reject, so all downstream samplers (penalties,
+    // top_k/top_p/min_p, temp, dist/greedy) only ever see grammar-valid
+    // candidates. The chain's per-token llama_sampler_accept (below, in the
+    // generation loops) advances this sub-sampler's parse state. A NULL/empty
+    // grammar (or missing model) leaves generation unconstrained.
+    if (grammar && grammar[0] && model) {
+        const llama_vocab* vocab = llama_model_get_vocab(model);
+        const char* root = (grammar_root && grammar_root[0]) ? grammar_root : "root";
+        llama_sampler* grammar_smpl = llama_sampler_init_grammar(vocab, grammar, root);
+        if (grammar_smpl) {
+            llama_sampler_chain_add(chain, grammar_smpl);
+        } else {
+            fprintf(stderr,
+                    "llama_sampler_chain_create_c: failed to compile GBNF grammar "
+                    "(root rule '%s'); continuing unconstrained.\n", root);
+        }
+    }
 
     // Add samplers in order: penalties -> top_k -> top_p -> min_p -> temp -> dist
     // Repetition penalty must come first to modify logits before sampling
@@ -769,6 +791,8 @@ int llama_generate_c(
     int top_k,
     float repeat_penalty,
     uint32_t seed,
+    const char* grammar,
+    const char* grammar_root,
     const int32_t* stop_seqs,
     const int* stop_lens,
     int n_stop_seqs
@@ -791,7 +815,8 @@ int llama_generate_c(
     // Create sampler chain with repetition penalty
     // penalty_last_n = 64 is a reasonable default (consider last 64 tokens for penalty)
     llama_sampler* sampler = llama_sampler_chain_create_c(
-        temperature, top_p, min_p, top_k, repeat_penalty, 64, seed
+        model, temperature, top_p, min_p, top_k, repeat_penalty, 64, seed,
+        grammar, grammar_root
     );
     if (!sampler) {
         return -2;
@@ -947,6 +972,8 @@ int llama_generate_from_current_logits_c(
     int top_k,
     float repeat_penalty,
     uint32_t seed,
+    const char* grammar,
+    const char* grammar_root,
     const int32_t* stop_seqs,
     const int* stop_lens,
     int n_stop_seqs,
@@ -969,7 +996,8 @@ int llama_generate_from_current_logits_c(
     const int n_vocab = llama_vocab_n_tokens(vocab);
 
     llama_sampler* sampler = llama_sampler_chain_create_c(
-        temperature, top_p, min_p, top_k, repeat_penalty, 64, seed
+        model, temperature, top_p, min_p, top_k, repeat_penalty, 64, seed,
+        grammar, grammar_root
     );
     if (!sampler) {
         return -2;
@@ -1114,6 +1142,8 @@ int llama_generate_streaming_c(
     int top_k,
     float repeat_penalty,
     uint32_t seed,
+    const char* grammar,
+    const char* grammar_root,
     const int32_t* stop_seqs,
     const int* stop_lens,
     int n_stop_seqs,
@@ -1149,7 +1179,8 @@ int llama_generate_streaming_c(
 
     // Create sampler chain with repetition penalty
     llama_sampler* sampler = llama_sampler_chain_create_c(
-        temperature, top_p, min_p, top_k, repeat_penalty, 64, seed
+        model, temperature, top_p, min_p, top_k, repeat_penalty, 64, seed,
+        grammar, grammar_root
     );
     if (!sampler) {
         return -2;

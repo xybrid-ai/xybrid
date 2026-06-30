@@ -562,6 +562,7 @@ impl LlamaCppBackend {
             config.top_k,
             config.repetition_penalty,
             stop_sequences,
+            config.grammar.as_deref(),
             |token_id, token_text| on_chunk(token_id, token_text, &mut tel),
             prepared.n_past,
         )?;
@@ -1139,6 +1140,7 @@ impl LlmBackend for LlamaCppBackend {
                             config.top_k,
                             config.repetition_penalty,
                             &generation_stop_patterns,
+                            config.grammar.as_deref(),
                             new_n_past as usize,
                             |_token_id, _token_text| {
                                 tel.record_chunk();
@@ -1287,6 +1289,7 @@ impl LlmBackend for LlamaCppBackend {
                     config.top_k,
                     config.repetition_penalty,
                     &generation_stop_patterns,
+                    config.grammar.as_deref(),
                     new_n_past as usize,
                     |token_id, token_text| {
                         tel.record_chunk();
