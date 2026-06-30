@@ -1,5 +1,7 @@
 use super::layout::{CacheEntryLocation, CacheLayout};
 use std::fs;
+use std::path::Path;
+use std::path::PathBuf;
 use tempfile::TempDir;
 
 #[test]
@@ -151,4 +153,65 @@ fn model_clear_roots_cover_canonical_and_legacy_repo_locations() {
     assert!(roots.contains(&models_dir.join("hf").join("owner/repo")));
     assert!(roots.contains(&models_dir.join("hf").join("owner--repo")));
     assert!(roots.contains(&models_dir.join("hf-hub").join("models--owner--repo")));
+}
+
+#[test]
+fn layout_keeps_siblings_co_located_for_bare_relative_models_root() {
+    // Regression guard for the `cache_root()` empty-parent bug: `Path::parent`
+    // of a bare single-component "models" is `Some("")`, not `None`. Without
+    // the empty-parent guard, the sibling extracted/hf/hf-hub roots would
+    // resolve CWD-relative and split away from the registry bundles.
+    let layout = CacheLayout::from_registry_root(PathBuf::from("models"));
+
+    // cache_root() collapses to the registry root itself, never an empty path.
+    assert_eq!(layout.cache_root(), Path::new("models"));
+    assert_eq!(
+        layout.extracted_root(),
+        Path::new("models").join("extracted")
+    );
+    assert_eq!(layout.huggingface_root(), Path::new("models").join("hf"));
+    assert_eq!(
+        layout.huggingface_hub_root(),
+        Path::new("models").join("hf-hub")
+    );
+
+    // Every sibling root stays nested under the registry root — none escapes to
+    // a bare CWD-relative directory.
+    for root in [
+        layout.extracted_root(),
+        layout.huggingface_root(),
+        layout.huggingface_hub_root(),
+    ] {
+        assert!(
+            root.starts_with("models"),
+            "sibling root {:?} escaped the registry root",
+            root
+        );
+    }
+}
+
+#[test]
+fn cache_root_never_splits_siblings_for_non_models_roots() {
+    // Any registry root whose leaf is not "models" is treated as the cache root
+    // itself, so the sibling areas always nest under it — never an empty or
+    // CWD-relative path. Covers the edge inputs around the bare-"models" guard:
+    // a current-dir ".", an absolute non-models dir, and a trailing-slash
+    // relative dir.
+    for raw in [".", "/var/cache/xybrid", "relative/custom/"] {
+        let root = PathBuf::from(raw);
+        let layout = CacheLayout::from_registry_root(root.clone());
+
+        assert_eq!(
+            layout.cache_root(),
+            root.as_path(),
+            "cache_root should equal the registry root for {raw:?}"
+        );
+        assert_eq!(layout.extracted_root(), root.join("extracted"));
+        assert_eq!(layout.huggingface_root(), root.join("hf"));
+        assert_eq!(layout.huggingface_hub_root(), root.join("hf-hub"));
+        assert!(
+            layout.extracted_root().starts_with(&root),
+            "extracted root escaped {raw:?}"
+        );
+    }
 }

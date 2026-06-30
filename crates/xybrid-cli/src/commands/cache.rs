@@ -96,11 +96,15 @@ fn clear_cache(
     if let Some(id) = model_id {
         ui::header(&format!("Clear Cache · {}", id));
 
-        client
+        let removed = client
             .clear_cache(&id)
             .context(format!("Failed to clear cache for '{}'", id))?;
 
-        ui::ok(&format!("Cache cleared for model '{}'", id));
+        if removed == 0 {
+            ui::warning(&format!("No cached data found for model '{}'", id));
+        } else {
+            ui::ok(&format!("Cache cleared for model '{}'", id));
+        }
     } else {
         ui::header("Clear All Cache");
         println!();
@@ -110,9 +114,13 @@ fn clear_cache(
         let mut input = String::new();
         std::io::stdin().read_line(&mut input).ok();
 
-        client.clear_all_cache().context("Failed to clear cache")?;
+        let removed = client.clear_all_cache().context("Failed to clear cache")?;
 
-        ui::ok("All cached models cleared");
+        if removed == 0 {
+            ui::warning("No cached models found");
+        } else {
+            ui::ok("All cached models cleared");
+        }
     }
 
     println!();

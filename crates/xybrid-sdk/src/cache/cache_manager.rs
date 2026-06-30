@@ -661,6 +661,16 @@ impl CacheManager {
         Ok(removed_count)
     }
 
+    /// Removes every managed cache root for a single model.
+    ///
+    /// # Returns
+    ///
+    /// The number of cache roots removed (0 if the model was not cached).
+    ///
+    /// # Concurrency
+    ///
+    /// Not safe to run concurrently with a load of the same model: it removes
+    /// whole cache directories that an in-flight extraction may be writing to.
     pub(crate) fn clear_model_roots(&self, model_id: &str) -> Result<u32, SdkError> {
         if model_id.is_empty()
             || !Path::new(model_id)
@@ -694,22 +704,30 @@ impl CacheManager {
         Ok(removed_count)
     }
 
-    /// Clears all cached models.
+    /// Clears all cached models across every managed cache root.
     ///
     /// # Returns
     ///
-    /// Number of entries removed
+    /// The number of cache roots removed (registry bundles, extracted runtime
+    /// caches, and HuggingFace downloads). Returns `0` when nothing was cached.
+    ///
+    /// # Concurrency
+    ///
+    /// Not safe to run concurrently with a model load: it removes whole cache
+    /// directories that an in-flight download or extraction may be writing to.
     pub fn clear(&mut self) -> Result<u32, SdkError> {
-        let count = self.entries.len() as u32;
+        let mut removed_count = 0;
 
         for root in self.layout().entry_roots() {
-            Self::remove_cache_path(&root.path)?;
+            if Self::remove_cache_path(&root.path)? {
+                removed_count += 1;
+            }
         }
 
         std::fs::create_dir_all(&self.cache_dir)
             .map_err(|e| SdkError::cache_src("Failed to recreate cache directory", e))?;
         self.entries.clear();
-        Ok(count)
+        Ok(removed_count)
     }
 
     fn remove_cache_path(path: &Path) -> Result<bool, SdkError> {
@@ -1091,6 +1109,46 @@ mod tests {
         assert!(extract_dir.exists());
         assert!(extract_dir.join("model_metadata.json").exists());
         assert!(extract_dir.join("model.onnx").exists());
+    }
+
+    #[test]
+    fn clear_leaves_cache_loadable_for_the_next_extraction() {
+        // Regression guard: clear() removes the extracted/ runtime cache and
+        // recreates only the registry root. The very next load must still
+        // succeed by re-extracting — i.e. clear() must leave the cache in a
+        // loadable state, not a half-torn-down one.
+        let temp_dir = TempDir::new().unwrap();
+        let cache_dir = temp_dir.path().join("cache").join("models");
+        fs::create_dir_all(&cache_dir).unwrap();
+
+        let mut manager = CacheManager::with_dir(cache_dir.clone()).unwrap();
+        // The bundle lives outside the cache tree, so it survives clear().
+        let bundle_path = create_test_bundle(&temp_dir, "reload-model");
+
+        // First load populates extracted/reload-model/.
+        manager.ensure_extracted(&bundle_path).unwrap();
+        assert!(manager.is_extracted("reload-model"));
+
+        // Clearing wipes the extracted runtime cache and recreates the root.
+        // Exactly two managed roots exist here — the registry root (models/)
+        // and the extracted/ runtime cache — so both are counted.
+        let removed = manager.clear().unwrap();
+        assert_eq!(
+            removed, 2,
+            "clear() should count the registry + extracted roots"
+        );
+        assert!(
+            cache_dir.exists(),
+            "registry root should be recreated after clear()"
+        );
+        assert!(!manager.is_extracted("reload-model"));
+        assert!(manager.list_extracted_model_ids().is_empty());
+
+        // The next load must succeed by re-extracting from the surviving bundle.
+        let extract_dir = manager.ensure_extracted(&bundle_path).unwrap();
+        assert!(extract_dir.join("model_metadata.json").exists());
+        assert!(extract_dir.join("model.onnx").exists());
+        assert!(manager.is_extracted("reload-model"));
     }
 
     #[test]

@@ -62,7 +62,15 @@ impl CacheLayout {
 
     pub(crate) fn cache_root(&self) -> &Path {
         if is_models_dir(&self.registry_root) {
-            self.registry_root.parent().unwrap_or(&self.registry_root)
+            // `Path::parent` returns `Some("")` (an empty path), not `None`,
+            // for a bare single-component relative root like "models". Guard
+            // against that empty parent too — otherwise the sibling
+            // `extracted/`, `hf/`, and `hf-hub/` roots would resolve
+            // CWD-relative and split away from the registry bundles.
+            self.registry_root
+                .parent()
+                .filter(|parent| !parent.as_os_str().is_empty())
+                .unwrap_or(&self.registry_root)
         } else {
             &self.registry_root
         }

@@ -1169,15 +1169,35 @@ impl RegistryClient {
     }
 
     /// Clear the local cache for a specific model.
-    pub fn clear_cache(&self, mask: &str) -> Result<(), SdkError> {
-        self.cache.clear_model_roots(mask)?;
-        Ok(())
+    ///
+    /// # Returns
+    ///
+    /// The number of cache roots removed for `mask` across all managed cache
+    /// areas (registry bundle, extracted runtime cache, HuggingFace
+    /// downloads). Returns `0` when the model was not cached.
+    ///
+    /// # Concurrency
+    ///
+    /// Not safe to run concurrently with a load of the same model: it removes
+    /// whole cache directories that an in-flight extraction may be writing to.
+    pub fn clear_cache(&self, mask: &str) -> Result<u32, SdkError> {
+        self.cache.clear_model_roots(mask)
     }
 
     /// Clear the entire model cache.
-    pub fn clear_all_cache(&mut self) -> Result<(), SdkError> {
-        self.cache.clear()?;
-        Ok(())
+    ///
+    /// # Returns
+    ///
+    /// The number of cache roots removed across all managed cache areas.
+    /// Returns `0` when nothing was cached.
+    ///
+    /// # Concurrency
+    ///
+    /// Not safe to run concurrently with any model load: it removes whole
+    /// cache directories that in-flight downloads or extractions may be
+    /// writing to.
+    pub fn clear_all_cache(&mut self) -> Result<u32, SdkError> {
+        self.cache.clear()
     }
 
     /// Get aggregate cache statistics across all managed model cache roots.
