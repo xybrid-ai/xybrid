@@ -48,13 +48,15 @@ use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufReader, Read, Write};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use xybrid_core::http::{CircuitBreaker, CircuitConfig, RetryPolicy};
 
 pub const DEFAULT_REGISTRY_URL: &str = "https://registry.xybrid.dev";
 pub const FALLBACK_REGISTRY_URL: &str = "https://r2.xybrid.dev";
+
+pub use crate::cache::{CacheEntryInfo, CacheEntryLocation};
 
 /// All registry URLs in priority order.
 pub const REGISTRY_URLS: &[&str] = &[DEFAULT_REGISTRY_URL, FALLBACK_REGISTRY_URL];
@@ -629,14 +631,8 @@ impl RegistryClient {
 
     /// Get the local cache path for a resolved variant.
     pub fn get_cache_path(&self, resolved: &ResolvedVariant) -> PathBuf {
-        // Extract model name from hf_repo (e.g., "xybrid-ai/kokoro-82m" -> "kokoro-82m")
-        let model_name = resolved
-            .hf_repo
-            .split('/')
-            .next_back()
-            .unwrap_or(&resolved.hf_repo);
-
-        self.cache.cache_dir().join(model_name).join(&resolved.file)
+        self.cache
+            .registry_bundle_path(&resolved.hf_repo, &resolved.file)
     }
 
     /// Fetch a model bundle, downloading if not cached.
@@ -1205,92 +1201,8 @@ impl RegistryClient {
     /// Includes the legacy registry bundle cache and runtime caches such as
     /// extracted bundles and direct Hugging Face downloads.
     pub fn cache_entries(&self) -> Result<Vec<CacheEntryInfo>, SdkError> {
-        let mut entries = Vec::new();
-
-        for root in self.cache_entry_roots() {
-            entries.extend(cache_entries_for_root(root.location, &root.path)?);
-        }
-
-        entries.sort_by(|left, right| {
-            left.model_id
-                .cmp(&right.model_id)
-                .then_with(|| left.location.as_str().cmp(right.location.as_str()))
-        });
-
-        Ok(entries)
+        self.cache.cache_entries()
     }
-
-    fn cache_entry_roots(&self) -> Vec<CacheEntryRoot> {
-        let cache_dir = self.cache.cache_dir();
-        let cache_root = cache_dir.parent().unwrap_or(cache_dir);
-        let mut roots = vec![
-            CacheEntryRoot {
-                location: CacheEntryLocation::Registry,
-                path: cache_dir.to_path_buf(),
-            },
-            CacheEntryRoot {
-                location: CacheEntryLocation::Extracted,
-                path: cache_root.join("extracted"),
-            },
-        ];
-
-        if cache_dir
-            .file_name()
-            .and_then(|name| name.to_str())
-            .is_some_and(|name| name.eq_ignore_ascii_case("models"))
-        {
-            roots.push(CacheEntryRoot {
-                location: CacheEntryLocation::HuggingFace,
-                path: cache_root.join("hf"),
-            });
-            roots.push(CacheEntryRoot {
-                location: CacheEntryLocation::HuggingFaceHub,
-                path: cache_root.join("hf-hub"),
-            });
-        }
-
-        roots
-    }
-}
-
-#[derive(Debug)]
-struct CacheEntryRoot {
-    location: CacheEntryLocation,
-    path: PathBuf,
-}
-
-fn cache_entries_for_root(
-    location: CacheEntryLocation,
-    root: &Path,
-) -> Result<Vec<CacheEntryInfo>, SdkError> {
-    if !root.is_dir() {
-        return Ok(Vec::new());
-    }
-
-    let mut entries = Vec::new();
-    for entry in std::fs::read_dir(root)? {
-        let entry = entry?;
-        if !entry.file_type()?.is_dir() {
-            continue;
-        }
-
-        let Some(model_id) = entry.file_name().into_string().ok() else {
-            continue;
-        };
-
-        if model_id.starts_with('.') {
-            continue;
-        }
-
-        entries.push(CacheEntryInfo {
-            model_id,
-            location,
-            path: entry.path(),
-            size_bytes: dir_size(&entry.path())?,
-        });
-    }
-
-    Ok(entries)
 }
 
 /// Compute SHA256 hash of a file.
@@ -1364,21 +1276,6 @@ fn write_cached_hash(bundle_path: &PathBuf, hash: &str) {
 fn remove_cached_hash(bundle_path: &PathBuf) {
     let hash_path = hash_cache_path(bundle_path);
     let _ = std::fs::remove_file(&hash_path);
-}
-
-/// Calculate total size of a directory.
-fn dir_size(path: &PathBuf) -> Result<u64, SdkError> {
-    let mut total: u64 = 0;
-    for entry in std::fs::read_dir(path)? {
-        let entry = entry?;
-        let metadata = entry.metadata()?;
-        if metadata.is_file() {
-            total += metadata.len();
-        } else if metadata.is_dir() {
-            total += dir_size(&entry.path())?;
-        }
-    }
-    Ok(total)
 }
 
 // ============================================================================
@@ -1496,44 +1393,6 @@ pub struct ResolvedArtifact {
     pub sha256: String,
 }
 
-/// Logical cache location for a model entry.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CacheEntryLocation {
-    /// Registry bundle cache under `models/`.
-    Registry,
-    /// Runtime-ready extraction cache under `extracted/`.
-    Extracted,
-    /// Direct Hugging Face file cache under `hf/`.
-    HuggingFace,
-    /// Hugging Face hub blob cache under `hf-hub/`.
-    HuggingFaceHub,
-}
-
-impl CacheEntryLocation {
-    /// Return the stable CLI/API label for this cache location.
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Registry => "models",
-            Self::Extracted => "extracted",
-            Self::HuggingFace => "hf",
-            Self::HuggingFaceHub => "hf-hub",
-        }
-    }
-}
-
-/// Summary of one cached model entry.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CacheEntryInfo {
-    /// Model or repository identifier inferred from the cache directory name.
-    pub model_id: String,
-    /// Cache location where this entry was found.
-    pub location: CacheEntryLocation,
-    /// Path to the cached model entry.
-    pub path: PathBuf,
-    /// Recursive size of this cache entry in bytes.
-    pub size_bytes: u64,
-}
-
 /// Aggregate cache statistics across all managed model cache roots.
 #[derive(Debug, Clone)]
 pub struct CacheStats {
@@ -1548,9 +1407,8 @@ pub struct CacheStats {
 impl CacheStats {
     /// Return the root directory that owns all managed model cache locations.
     pub fn cache_root(&self) -> PathBuf {
-        self.cache_path
-            .parent()
-            .unwrap_or(&self.cache_path)
+        crate::cache::layout::CacheLayout::from_registry_root(self.cache_path.clone())
+            .cache_root()
             .to_path_buf()
     }
 
@@ -1927,6 +1785,7 @@ mod tests {
 
         let stats = client.cache_stats().unwrap();
         assert_eq!(stats.model_count, 1);
+        assert_eq!(stats.cache_root(), cache_root);
         assert_eq!(
             stats.total_size_bytes,
             (metadata.len() + weights.len()) as u64
@@ -1969,6 +1828,19 @@ mod tests {
         let stats = client.cache_stats().unwrap();
         assert_eq!(stats.model_count, 4);
         assert_eq!(stats.total_size_bytes, 18);
+    }
+
+    #[test]
+    fn cache_stats_root_keeps_custom_non_models_cache_self_contained() {
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let cache_path = temp_dir.path().join("custom-cache");
+        let stats = CacheStats {
+            total_size_bytes: 0,
+            model_count: 0,
+            cache_path: cache_path.clone(),
+        };
+
+        assert_eq!(stats.cache_root(), cache_path);
     }
 
     #[test]

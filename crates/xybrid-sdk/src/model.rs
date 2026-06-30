@@ -6,6 +6,7 @@
 //! - `ModelHandle`: Internal state management for the loaded model
 //! - `StreamEvent`: Events emitted during streaming inference
 
+use crate::cache::CacheManager;
 use crate::registry_client::RegistryClient;
 use crate::result::{InferenceResult, OutputType};
 use crate::run_options::{
@@ -1186,7 +1187,7 @@ impl ModelLoader {
                 // A local cache check only — instantiate `CacheManager` directly
                 // rather than `RegistryClient::from_env()`, which would spin up
                 // an HTTP agent and circuit breakers we don't need here.
-                crate::cache::CacheManager::new().is_ok_and(|cache| cache.is_extracted(id))
+                CacheManager::new().is_ok_and(|cache| cache.is_extracted(id))
             }
             _ => true,
         }
@@ -1333,7 +1334,7 @@ impl ModelLoader {
 
     fn load_from_bundle(&self, path: &PathBuf) -> SdkResult<XybridModel> {
         // Use CacheManager for unified extraction (single source of truth)
-        let cache = crate::cache::CacheManager::new()?;
+        let cache = CacheManager::new()?;
         let extract_dir = cache.ensure_extracted(path)?;
 
         // Load from extracted directory (extraction is permanent in cache)
@@ -1372,7 +1373,8 @@ impl ModelLoader {
         use hf_hub::{api::sync::ApiBuilder, Repo, RepoType};
 
         // Determine our cache directory
-        let cache_dir = Self::hf_cache_dir(repo)?;
+        let cache_layout = CacheManager::layout_from_config()?;
+        let cache_dir = cache_layout.huggingface_repo_dir(repo);
 
         // Check if we already have a cached copy with model_metadata.json
         let metadata_path = cache_dir.join("model_metadata.json");
@@ -1385,7 +1387,7 @@ impl ModelLoader {
 
         // Create HF API client
         let api = ApiBuilder::from_env()
-            .with_cache_dir(Self::hf_hub_cache_dir()?)
+            .with_cache_dir(cache_layout.huggingface_hub_root())
             .build()
             .map_err(|e| SdkError::network_src("Failed to create HuggingFace API client", e))?;
 
@@ -1565,35 +1567,6 @@ impl ModelLoader {
              Enable it with: cargo build --features huggingface"
                 .to_string(),
         ))
-    }
-
-    /// Get the cache directory for a HuggingFace repo.
-    ///
-    /// Returns `~/.xybrid/cache/hf/{sanitized_repo}/` or the SDK-configured cache path.
-    fn hf_cache_dir(repo: &str) -> SdkResult<PathBuf> {
-        let base_cache = if let Some(sdk_cache) = crate::get_sdk_cache_dir() {
-            sdk_cache.join("hf")
-        } else {
-            Self::default_xybrid_cache_root()?.join("hf")
-        };
-
-        // Sanitize repo name for filesystem (e.g., "xybrid-ai/kokoro-82m" -> "xybrid-ai--kokoro-82m")
-        let sanitized = repo.replace('/', "--");
-        Ok(base_cache.join(sanitized))
-    }
-
-    fn hf_hub_cache_dir() -> SdkResult<PathBuf> {
-        if let Some(sdk_cache) = crate::get_sdk_cache_dir() {
-            return Ok(sdk_cache.join("hf-hub"));
-        }
-
-        Ok(Self::default_xybrid_cache_root()?.join("hf-hub"))
-    }
-
-    fn default_xybrid_cache_root() -> SdkResult<PathBuf> {
-        let home =
-            dirs::home_dir().ok_or_else(|| SdkError::cache("Cannot determine home directory"))?;
-        Ok(home.join(".xybrid").join("cache"))
     }
 
     /// Check if a file is essential and should always be downloaded.

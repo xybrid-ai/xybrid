@@ -17,6 +17,7 @@
 //! # }
 //! ```
 
+use super::layout::{CacheEntryInfo, CacheLayout};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::path::{Component, Path, PathBuf};
@@ -179,28 +180,20 @@ impl CacheManager {
         &self.cache_dir
     }
 
-    fn cache_root(&self) -> &Path {
-        self.cache_dir.parent().unwrap_or(&self.cache_dir)
+    pub(crate) fn layout_from_config() -> Result<CacheLayout, SdkError> {
+        Ok(CacheLayout::from_registry_root(Self::get_cache_dir()?))
     }
 
-    fn extracted_root(&self) -> PathBuf {
-        self.cache_root().join("extracted")
+    fn layout(&self) -> CacheLayout {
+        CacheLayout::from_registry_root(self.cache_dir.clone())
     }
 
-    fn sibling_root_when_cache_dir_is_models(&self, root_name: &str) -> Option<PathBuf> {
-        self.cache_dir
-            .file_name()
-            .and_then(|name| name.to_str())
-            .filter(|name| name.eq_ignore_ascii_case("models"))
-            .map(|_| self.cache_root().join(root_name))
+    pub(crate) fn registry_bundle_path(&self, hf_repo: &str, file: &str) -> PathBuf {
+        self.layout().registry_bundle_path(hf_repo, file)
     }
 
-    fn sibling_hf_root(&self) -> Option<PathBuf> {
-        self.sibling_root_when_cache_dir_is_models("hf")
-    }
-
-    fn sibling_hf_hub_root(&self) -> Option<PathBuf> {
-        self.sibling_root_when_cache_dir_is_models("hf-hub")
+    pub(crate) fn cache_entries(&self) -> Result<Vec<CacheEntryInfo>, SdkError> {
+        self.layout().cache_entries()
     }
 
     /// Scans the cache directory for existing bundles.
@@ -416,8 +409,7 @@ impl CacheManager {
     ///
     /// * `model_id` - The model identifier from model_metadata.json
     pub fn extraction_dir(&self, model_id: &str) -> PathBuf {
-        // Go up from models/ to cache/, then into extracted/
-        self.extracted_root().join(model_id)
+        self.layout().extraction_dir(model_id)
     }
 
     /// Checks if a bundle has already been extracted.
@@ -459,7 +451,7 @@ impl CacheManager {
     ///
     /// This is an offline operation — it never touches the network.
     pub fn list_extracted_model_ids(&self) -> Vec<String> {
-        let extracted_root = self.extracted_root();
+        let extracted_root = self.layout().extracted_root();
 
         let Ok(entries) = std::fs::read_dir(&extracted_root) else {
             return Vec::new();
@@ -676,23 +668,7 @@ impl CacheManager {
             )));
         }
 
-        let sanitized_hf_repo = model_id.replace('/', "--");
-        let hf_hub_repo = format!("models--{}", sanitized_hf_repo);
-        let mut roots = vec![
-            self.cache_dir.join(model_id),
-            self.extraction_dir(model_id),
-            self.cache_dir.join("hf").join(model_id),
-            self.cache_dir.join("hf").join(&sanitized_hf_repo),
-            self.cache_dir.join("hf-hub").join(&hf_hub_repo),
-        ];
-
-        if let Some(hf_root) = self.sibling_hf_root() {
-            roots.push(hf_root.join(model_id));
-            roots.push(hf_root.join(&sanitized_hf_repo));
-        }
-        if let Some(hf_hub_root) = self.sibling_hf_hub_root() {
-            roots.push(hf_hub_root.join(&hf_hub_repo));
-        }
+        let mut roots = self.layout().model_roots(model_id);
         for entry in self.entries.values() {
             if entry.id == model_id {
                 roots.push(entry.path.clone());
@@ -721,12 +697,8 @@ impl CacheManager {
     pub fn clear(&mut self) -> Result<u32, SdkError> {
         let count = self.entries.len() as u32;
 
-        let mut roots = vec![self.cache_dir.clone(), self.extracted_root()];
-        roots.extend(self.sibling_hf_root());
-        roots.extend(self.sibling_hf_hub_root());
-
-        for root in roots {
-            Self::remove_cache_path(&root)?;
+        for root in self.layout().entry_roots() {
+            Self::remove_cache_path(&root.path)?;
         }
 
         std::fs::create_dir_all(&self.cache_dir)
