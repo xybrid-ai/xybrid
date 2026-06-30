@@ -40,6 +40,7 @@ use crate::runtime_adapter::{AdapterError, ModelRuntime};
 use crate::tracing as xybrid_trace;
 use ndarray::ArrayD;
 use std::collections::HashMap;
+use std::env;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -58,6 +59,13 @@ fn mark_execution_terminal(guard: &ExecutionGuard, error: &AdapterError) {
     }
 }
 
+fn cpu_threads_from_env() -> Option<usize> {
+    env::var("XYBRID_CPU_THREADS")
+        .ok()
+        .and_then(|value| value.trim().parse::<usize>().ok())
+        .filter(|threads| *threads > 0)
+}
+
 #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct LlmAdapterCacheKey {
@@ -66,6 +74,7 @@ struct LlmAdapterCacheKey {
     context_length: usize,
     backend_hint: Option<String>,
     vision_encoder_path: Option<String>,
+    cpu_threads: Option<usize>,
 }
 
 #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
@@ -76,6 +85,7 @@ impl LlmAdapterCacheKey {
         context_length: usize,
         backend_hint: Option<&str>,
         vision_encoder_path: Option<String>,
+        cpu_threads: Option<usize>,
     ) -> Self {
         Self {
             model_path,
@@ -83,6 +93,7 @@ impl LlmAdapterCacheKey {
             context_length,
             backend_hint: backend_hint.map(ToOwned::to_owned),
             vision_encoder_path,
+            cpu_threads,
         }
     }
 }
@@ -221,6 +232,8 @@ pub struct TemplateExecutor {
     runtimes: HashMap<String, Box<dyn ModelRuntime>>,
     /// Base path for resolving relative model paths
     base_path: String,
+    /// Optional CPU thread count for LLM backends. None keeps backend defaults.
+    cpu_threads: Option<usize>,
     /// Cached LLM adapter to avoid reloading models between executions.
     /// Stores (cache key, adapter) tuple - reused only when all load-relevant
     /// config matches. The key includes the model path, context window, chat
@@ -294,9 +307,43 @@ impl TemplateExecutor {
         Self {
             runtimes,
             base_path: base_path.into(),
+            cpu_threads: cpu_threads_from_env(),
             llm_adapter_cache: None,
             tts_session_cache: None,
             vision_encoders: HashMap::new(),
+        }
+    }
+
+    /// Set the CPU thread count used by LLM backends.
+    ///
+    /// Passing `0` clears the override and lets the backend use its default.
+    pub fn with_cpu_threads(mut self, n_threads: usize) -> Self {
+        self.cpu_threads = if n_threads == 0 {
+            None
+        } else {
+            Some(n_threads)
+        };
+        self
+    }
+
+    /// CPU thread override used by LLM backends, if configured.
+    pub fn cpu_threads(&self) -> Option<usize> {
+        self.cpu_threads
+    }
+
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    fn apply_llm_thread_config(&self, config: LlmConfig) -> LlmConfig {
+        if let Some(n_threads) = self.cpu_threads {
+            config.with_threads(n_threads)
+        } else {
+            config
+        }
+    }
+
+    fn session_options(&self) -> SessionOptions {
+        SessionOptions {
+            intra_threads: self.cpu_threads,
+            ..Default::default()
         }
     }
 
@@ -701,7 +748,7 @@ impl TemplateExecutor {
             let session = OnnxSessionFactory::create_session(
                 &model_full_path,
                 ExecutionProviderKind::Cpu,
-                SessionOptions::default(),
+                self.session_options(),
             )?;
             let raw_outputs =
                 execute_bert_inference(&session, ids, attention_mask, token_type_ids)?;
@@ -1358,6 +1405,7 @@ impl TemplateExecutor {
             context_length,
             backend_hint,
             None,
+            self.cpu_threads,
         );
 
         // Check if we have a cached adapter for this exact load config.
@@ -1368,8 +1416,9 @@ impl TemplateExecutor {
 
         // Load model if needed
         if need_load {
-            let mut config =
-                LlmConfig::new(model_path_str.clone()).with_context_length(context_length);
+            let mut config = self.apply_llm_thread_config(
+                LlmConfig::new(model_path_str.clone()).with_context_length(context_length),
+            );
 
             if let Some(template_path) = chat_template_path {
                 config = config.with_chat_template(template_path);
@@ -1470,6 +1519,7 @@ impl TemplateExecutor {
             context_length,
             backend_hint,
             None,
+            self.cpu_threads,
         );
 
         // Check if we have a cached adapter for this exact load config.
@@ -1480,7 +1530,9 @@ impl TemplateExecutor {
 
         // Load model if needed
         if need_load {
-            let config = LlmConfig::new(model_path_str.clone()).with_context_length(context_length);
+            let config = self.apply_llm_thread_config(
+                LlmConfig::new(model_path_str.clone()).with_context_length(context_length),
+            );
 
             let mut adapter = LlmRuntimeAdapter::with_backend_hint(backend_hint)?;
             adapter.load_model_with_config(&config)?;
@@ -1549,7 +1601,9 @@ impl TemplateExecutor {
         chat_template: Option<&str>,
         context_length: usize,
     ) -> LlmConfig {
-        let mut llm_config = LlmConfig::new(model_path_str).with_context_length(context_length);
+        let mut llm_config = self.apply_llm_thread_config(
+            LlmConfig::new(model_path_str).with_context_length(context_length),
+        );
         if let Some(template) = chat_template {
             let template_path = Path::new(&self.base_path).join(template);
             llm_config = llm_config.with_chat_template(template_path.to_string_lossy().to_string());
@@ -1606,6 +1660,7 @@ impl TemplateExecutor {
             context_length,
             backend_hint,
             vision_encoder_path,
+            self.cpu_threads,
         );
 
         let gen_config = config.cloned().unwrap_or_default();
@@ -1730,6 +1785,7 @@ impl TemplateExecutor {
             context_length,
             backend_hint,
             vision_encoder_path,
+            self.cpu_threads,
         );
 
         let gen_config = config.cloned().unwrap_or_default();
@@ -1827,6 +1883,7 @@ impl TemplateExecutor {
             context_length,
             backend_hint,
             None,
+            self.cpu_threads,
         );
 
         // Check if we have a cached adapter for this exact load config.
@@ -1837,7 +1894,9 @@ impl TemplateExecutor {
 
         // Load model if needed
         if need_load {
-            let config = LlmConfig::new(model_path_str.clone()).with_context_length(context_length);
+            let config = self.apply_llm_thread_config(
+                LlmConfig::new(model_path_str.clone()).with_context_length(context_length),
+            );
 
             let mut adapter = LlmRuntimeAdapter::with_backend_hint(backend_hint)?;
             adapter.load_model_with_config(&config)?;
@@ -1924,6 +1983,7 @@ impl TemplateExecutor {
             context_length,
             backend_hint,
             None,
+            self.cpu_threads,
         );
 
         // Check if we have a cached adapter for this exact load config.
@@ -1950,8 +2010,9 @@ impl TemplateExecutor {
         // Load model if needed (cache miss or different model)
         if need_load {
             // Create LLM config
-            let mut config =
-                LlmConfig::new(model_path_str.clone()).with_context_length(context_length);
+            let mut config = self.apply_llm_thread_config(
+                LlmConfig::new(model_path_str.clone()).with_context_length(context_length),
+            );
 
             if let Some(template_path) = chat_template_path {
                 config = config.with_chat_template(template_path);
@@ -2855,6 +2916,7 @@ mod tests {
                 4096,
                 None,
                 vision_encoder_path.map(ToOwned::to_owned),
+                executor.cpu_threads,
             ),
             crate::runtime_adapter::LlmRuntimeAdapter::with_backend(Box::new(
                 TextOnlyVisionBoundaryBackend,
@@ -2876,6 +2938,49 @@ mod tests {
     fn test_executor_with_base_path() {
         let executor = TemplateExecutor::with_base_path("/path/to/models");
         assert_eq!(executor.base_path, "/path/to/models");
+    }
+
+    #[test]
+    fn test_executor_cpu_threads_option_normalizes_zero() {
+        let executor = TemplateExecutor::with_base_path("/path/to/models").with_cpu_threads(4);
+        assert_eq!(executor.cpu_threads(), Some(4));
+        assert_eq!(executor.session_options().intra_threads, Some(4));
+
+        let executor = executor.with_cpu_threads(0);
+        assert_eq!(executor.cpu_threads(), None);
+        assert_eq!(executor.session_options().intra_threads, None);
+    }
+
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[test]
+    fn test_executor_applies_cpu_threads_to_llm_config() {
+        let executor = TemplateExecutor::with_base_path("/models").with_cpu_threads(3);
+        let config = executor.apply_llm_thread_config(LlmConfig::new("model.gguf"));
+
+        assert_eq!(config.n_threads, 3);
+    }
+
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[test]
+    fn test_llm_adapter_cache_key_includes_cpu_threads() {
+        let default_threads = LlmAdapterCacheKey::new(
+            "/models/model.gguf".to_string(),
+            None,
+            4096,
+            None,
+            None,
+            None,
+        );
+        let pinned_threads = LlmAdapterCacheKey::new(
+            "/models/model.gguf".to_string(),
+            None,
+            4096,
+            None,
+            None,
+            Some(4),
+        );
+
+        assert_ne!(default_threads, pinned_threads);
     }
 
     #[test]
@@ -3538,6 +3643,7 @@ mod tests {
                 4096,
                 None,
                 Some("/models/mmproj.gguf".to_string()),
+                executor.cpu_threads,
             ),
             LlmRuntimeAdapter::with_backend(Box::new(StubVisionBackend {
                 events: events.clone(),
