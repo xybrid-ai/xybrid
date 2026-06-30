@@ -1180,7 +1180,7 @@ impl RegistryClient {
     ///
     /// Not safe to run concurrently with a load of the same model: it removes
     /// whole cache directories that an in-flight extraction may be writing to.
-    pub fn clear_cache(&self, mask: &str) -> Result<u32, SdkError> {
+    pub fn clear_cache(&mut self, mask: &str) -> Result<u32, SdkError> {
         self.cache.clear_model_roots(mask)
     }
 
@@ -1210,6 +1210,13 @@ impl RegistryClient {
             model_count: entries.len(),
             cache_path: self.cache.cache_dir().to_path_buf(),
         })
+    }
+
+    /// Return the root directory that owns all managed model cache locations.
+    pub fn cache_root(&self) -> PathBuf {
+        crate::cache::layout::CacheLayout::from_registry_root(self.cache.cache_dir().to_path_buf())
+            .cache_root()
+            .to_path_buf()
     }
 
     /// List cached model entries across all managed cache roots.
@@ -1430,7 +1437,11 @@ impl CacheStats {
 
     /// Get human-readable size.
     pub fn total_size_human(&self) -> String {
-        let bytes = self.total_size_bytes;
+        Self::format_size(self.total_size_bytes)
+    }
+
+    /// Format a byte size using the cache summary display convention.
+    pub fn format_size(bytes: u64) -> String {
         if bytes < 1024 {
             format!("{} B", bytes)
         } else if bytes < 1024 * 1024 {
@@ -1889,6 +1900,23 @@ mod tests {
         assert_eq!(stats.model_count, 5);
         assert_eq!(stats.cache_root(), custom_cache);
         assert_eq!(stats.total_size_bytes, 24);
+    }
+
+    #[test]
+    fn clear_cache_removes_legacy_bundle_from_memory_index() {
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let cache_dir = temp_dir.path().join("models");
+        std::fs::create_dir_all(&cache_dir).unwrap();
+        std::fs::write(cache_dir.join("test-model@1.0.xyb"), b"bundle").unwrap();
+
+        let mut client = RegistryClient::with_url("https://example.test").unwrap();
+        client.cache = CacheManager::with_dir(cache_dir).unwrap();
+
+        let removed = client.clear_cache("test-model").unwrap();
+
+        assert_eq!(removed, 1);
+        assert_eq!(client.cache.status().unwrap().total_models, 0);
+        assert!(!client.cache.is_cached("test-model"));
     }
 
     #[test]

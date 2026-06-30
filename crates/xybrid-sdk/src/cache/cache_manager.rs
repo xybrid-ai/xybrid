@@ -671,7 +671,7 @@ impl CacheManager {
     ///
     /// Not safe to run concurrently with a load of the same model: it removes
     /// whole cache directories that an in-flight extraction may be writing to.
-    pub(crate) fn clear_model_roots(&self, model_id: &str) -> Result<u32, SdkError> {
+    pub(crate) fn clear_model_roots(&mut self, model_id: &str) -> Result<u32, SdkError> {
         if model_id.is_empty()
             || !Path::new(model_id)
                 .components()
@@ -684,8 +684,10 @@ impl CacheManager {
         }
 
         let mut roots = self.layout().model_roots(model_id);
-        for entry in self.entries.values() {
+        let mut entry_keys = Vec::new();
+        for (key, entry) in &self.entries {
             if entry.id == model_id {
+                entry_keys.push(key.clone());
                 roots.push(entry.path.clone());
             }
         }
@@ -699,6 +701,10 @@ impl CacheManager {
             if Self::remove_cache_path(&root)? {
                 removed_count += 1;
             }
+        }
+
+        for key in entry_keys {
+            self.entries.remove(&key);
         }
 
         Ok(removed_count)
@@ -861,7 +867,7 @@ mod tests {
         fs::write(extracted_model_dir.join("model_metadata.json"), b"{}").unwrap();
         fs::write(other_model_dir.join("universal.xyb"), b"bundle").unwrap();
 
-        let manager = CacheManager::with_dir(models_dir).unwrap();
+        let mut manager = CacheManager::with_dir(models_dir).unwrap();
 
         let removed = manager.clear_model_roots("kokoro-82m").unwrap();
 
@@ -889,7 +895,7 @@ mod tests {
         fs::write(hf_model_dir.join("model.gguf"), b"weights").unwrap();
         fs::write(hf_hub_model_dir.join("blob"), b"weights").unwrap();
 
-        let manager = CacheManager::with_dir(models_dir).unwrap();
+        let mut manager = CacheManager::with_dir(models_dir).unwrap();
 
         let removed = manager.clear_model_roots("owner/repo").unwrap();
 
@@ -930,7 +936,7 @@ mod tests {
         fs::create_dir_all(&sibling_sentinel).unwrap();
         fs::write(sibling_sentinel.join("keep"), b"keep").unwrap();
 
-        let manager = CacheManager::with_dir(custom_cache).unwrap();
+        let mut manager = CacheManager::with_dir(custom_cache).unwrap();
 
         let removed = manager.clear_model_roots("legacy-model").unwrap();
 
@@ -949,7 +955,7 @@ mod tests {
         fs::create_dir_all(&outside_dir).unwrap();
         fs::write(outside_dir.join("sentinel"), b"keep").unwrap();
 
-        let manager = CacheManager::with_dir(models_dir).unwrap();
+        let mut manager = CacheManager::with_dir(models_dir).unwrap();
 
         let result = manager.clear_model_roots("../outside");
 
@@ -958,6 +964,31 @@ mod tests {
             outside_dir.join("sentinel").exists(),
             "invalid model IDs must not delete outside cache paths"
         );
+    }
+
+    #[test]
+    fn clear_model_roots_removes_legacy_bundle_from_memory_index() {
+        let temp_dir = TempDir::new().unwrap();
+        let cache_dir = temp_dir.path().join("models");
+        fs::create_dir_all(&cache_dir).unwrap();
+        let bundle_path = cache_dir.join("test-model@1.0.xyb");
+        fs::write(&bundle_path, b"bundle").unwrap();
+
+        let mut manager = CacheManager::with_dir(cache_dir).unwrap();
+        assert!(manager.is_cached("test-model"));
+        assert_eq!(manager.status().unwrap().total_models, 1);
+        assert_eq!(
+            manager.get_cached_path("test-model"),
+            Some(bundle_path.clone())
+        );
+
+        let removed = manager.clear_model_roots("test-model").unwrap();
+
+        assert_eq!(removed, 1);
+        assert!(!bundle_path.exists());
+        assert!(!manager.is_cached("test-model"));
+        assert_eq!(manager.status().unwrap().total_models, 0);
+        assert_eq!(manager.get_cached_path("test-model"), None);
     }
 
     // =========================================================================

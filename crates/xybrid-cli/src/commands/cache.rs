@@ -21,12 +21,12 @@ pub(crate) fn handle_cache_command(command: CacheCommand) -> Result<()> {
 fn list_cache(client: &xybrid_sdk::registry_client::RegistryClient) -> Result<()> {
     ui::header("Model Cache");
 
-    let stats = client.cache_stats().context("Failed to get cache stats")?;
     let entries = client
         .cache_entries()
         .context("Failed to list cache entries")?;
+    let total_size: u64 = entries.iter().map(|entry| entry.size_bytes).sum();
 
-    ui::kv("Root", &stats.cache_root().display().to_string());
+    ui::kv("Root", &client.cache_root().display().to_string());
     println!();
 
     if entries.is_empty() {
@@ -48,8 +48,8 @@ fn list_cache(client: &xybrid_sdk::registry_client::RegistryClient) -> Result<()
 
     ui::footer(&format!(
         "{} entries · {}",
-        stats.model_count,
-        stats.total_size_human()
+        entries.len(),
+        xybrid_sdk::registry_client::CacheStats::format_size(total_size)
     ));
 
     Ok(())
