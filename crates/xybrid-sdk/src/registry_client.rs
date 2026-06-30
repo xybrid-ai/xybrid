@@ -1051,11 +1051,7 @@ impl RegistryClient {
     /// prefer this over `resolve()` + `fetch()` when they don't need to check for
     /// registry updates.
     pub fn resolve_offline(&self, mask: &str) -> Option<PathBuf> {
-        if self.cache.is_extracted(mask) {
-            Some(self.cache.extraction_dir(mask))
-        } else {
-            None
-        }
+        self.cache.existing_extraction_dir(mask)
     }
 
     /// List all model IDs that are currently available for offline use.
@@ -1828,6 +1824,51 @@ mod tests {
         let stats = client.cache_stats().unwrap();
         assert_eq!(stats.model_count, 4);
         assert_eq!(stats.total_size_bytes, 18);
+    }
+
+    #[test]
+    fn cache_entries_include_custom_root_and_legacy_parent_extracted_cache() {
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let custom_cache = temp_dir.path().join("custom-cache");
+        let registry_model_dir = custom_cache.join("registry-model");
+        let extracted_model_dir = custom_cache.join("extracted").join("runtime-model");
+        let legacy_extracted_model_dir = temp_dir.path().join("extracted").join("legacy-model");
+        let hf_model_dir = custom_cache.join("hf").join("owner--repo");
+        let hf_hub_model_dir = custom_cache.join("hf-hub").join("models--owner--repo");
+        std::fs::create_dir_all(&registry_model_dir).unwrap();
+        std::fs::create_dir_all(&extracted_model_dir).unwrap();
+        std::fs::create_dir_all(&legacy_extracted_model_dir).unwrap();
+        std::fs::create_dir_all(&hf_model_dir).unwrap();
+        std::fs::create_dir_all(&hf_hub_model_dir).unwrap();
+        std::fs::write(registry_model_dir.join("model.xyb"), b"bundle").unwrap();
+        std::fs::write(extracted_model_dir.join("model.gguf"), b"runtime").unwrap();
+        std::fs::write(legacy_extracted_model_dir.join("model.gguf"), b"legacy").unwrap();
+        std::fs::write(hf_model_dir.join("model.gguf"), b"hf").unwrap();
+        std::fs::write(hf_hub_model_dir.join("blob"), b"hub").unwrap();
+
+        let mut client = RegistryClient::with_url("https://example.test").unwrap();
+        client.cache = CacheManager::with_dir(custom_cache.clone()).unwrap();
+
+        let entries = client.cache_entries().unwrap();
+        let labels: Vec<_> = entries
+            .iter()
+            .map(|entry| (entry.model_id.as_str(), entry.location.as_str()))
+            .collect();
+
+        assert_eq!(entries.len(), 5);
+        assert!(labels.contains(&("registry-model", "models")));
+        assert!(labels.contains(&("runtime-model", "extracted")));
+        assert!(labels.contains(&("legacy-model", "extracted")));
+        assert!(labels.contains(&("owner--repo", "hf")));
+        assert!(labels.contains(&("models--owner--repo", "hf-hub")));
+        assert!(!labels.contains(&("extracted", "models")));
+        assert!(!labels.contains(&("hf", "models")));
+        assert!(!labels.contains(&("hf-hub", "models")));
+
+        let stats = client.cache_stats().unwrap();
+        assert_eq!(stats.model_count, 5);
+        assert_eq!(stats.cache_root(), custom_cache);
+        assert_eq!(stats.total_size_bytes, 24);
     }
 
     #[test]

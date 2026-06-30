@@ -422,8 +422,14 @@ impl CacheManager {
     ///
     /// True if the extraction directory exists and contains model_metadata.json
     pub fn is_extracted(&self, model_id: &str) -> bool {
-        let extract_dir = self.extraction_dir(model_id);
-        Self::extraction_is_ready(&extract_dir)
+        self.existing_extraction_dir(model_id).is_some()
+    }
+
+    pub(crate) fn existing_extraction_dir(&self, model_id: &str) -> Option<PathBuf> {
+        self.layout()
+            .extraction_dirs(model_id)
+            .into_iter()
+            .find(|extract_dir| Self::extraction_is_ready(extract_dir))
     }
 
     fn extraction_is_ready(extract_dir: &Path) -> bool {
@@ -451,14 +457,12 @@ impl CacheManager {
     ///
     /// This is an offline operation — it never touches the network.
     pub fn list_extracted_model_ids(&self) -> Vec<String> {
-        let extracted_root = self.layout().extracted_root();
-
-        let Ok(entries) = std::fs::read_dir(&extracted_root) else {
-            return Vec::new();
-        };
-
-        let mut ids: Vec<String> = entries
-            .filter_map(|entry| entry.ok())
+        let mut ids: Vec<String> = self
+            .layout()
+            .extracted_roots()
+            .into_iter()
+            .filter_map(|root| std::fs::read_dir(root).ok())
+            .flat_map(|entries| entries.filter_map(|entry| entry.ok()))
             .filter(|entry| Self::extraction_is_ready(&entry.path()))
             .filter_map(|entry| {
                 entry
@@ -470,6 +474,7 @@ impl CacheManager {
             .collect();
 
         ids.sort();
+        ids.dedup();
         ids
     }
 
@@ -527,10 +532,8 @@ impl CacheManager {
         let metadata: ModelMetadata = serde_json::from_str(&metadata_json)
             .map_err(|e| SdkError::cache_src("Failed to parse model metadata", e))?;
 
-        let extract_dir = self.extraction_dir(&metadata.model_id);
-
         // Check if already extracted and all files declared by metadata exist.
-        if Self::extraction_is_ready(&extract_dir) {
+        if let Some(extract_dir) = self.existing_extraction_dir(&metadata.model_id) {
             log::debug!(
                 "Bundle already extracted for '{}' at {}",
                 metadata.model_id,
@@ -538,6 +541,8 @@ impl CacheManager {
             );
             return Ok(extract_dir);
         }
+
+        let extract_dir = self.extraction_dir(&metadata.model_id);
 
         // Create extraction directory
         std::fs::create_dir_all(&extract_dir)
@@ -574,10 +579,8 @@ impl CacheManager {
         xyb_path: &Path,
         model_id: &str,
     ) -> Result<PathBuf, SdkError> {
-        let extract_dir = self.extraction_dir(model_id);
-
         // Check if already extracted and all files declared by metadata exist.
-        if Self::extraction_is_ready(&extract_dir) {
+        if let Some(extract_dir) = self.existing_extraction_dir(model_id) {
             log::debug!(
                 "Bundle already extracted for '{}' at {}",
                 model_id,
@@ -585,6 +588,8 @@ impl CacheManager {
             );
             return Ok(extract_dir);
         }
+
+        let extract_dir = self.extraction_dir(model_id);
 
         // Need to extract - load bundle
         if !xyb_path.exists() {
@@ -882,6 +887,41 @@ mod tests {
     }
 
     #[test]
+    fn custom_root_resolves_legacy_parent_extracted_cache() {
+        let temp_dir = TempDir::new().unwrap();
+        let custom_cache = temp_dir.path().join("custom-cache");
+        let legacy_extracted_model = temp_dir.path().join("extracted").join("legacy-model");
+        write_ready_extracted_model(&legacy_extracted_model, "legacy-model");
+
+        let manager = CacheManager::with_dir(custom_cache).unwrap();
+
+        assert!(manager.is_extracted("legacy-model"));
+        assert_eq!(
+            manager.list_extracted_model_ids(),
+            vec!["legacy-model".to_string()]
+        );
+    }
+
+    #[test]
+    fn custom_root_clear_model_removes_legacy_parent_extracted_cache() {
+        let temp_dir = TempDir::new().unwrap();
+        let custom_cache = temp_dir.path().join("custom-cache");
+        let legacy_extracted_model = temp_dir.path().join("extracted").join("legacy-model");
+        let sibling_sentinel = temp_dir.path().join("sibling");
+        write_ready_extracted_model(&legacy_extracted_model, "legacy-model");
+        fs::create_dir_all(&sibling_sentinel).unwrap();
+        fs::write(sibling_sentinel.join("keep"), b"keep").unwrap();
+
+        let manager = CacheManager::with_dir(custom_cache).unwrap();
+
+        let removed = manager.clear_model_roots("legacy-model").unwrap();
+
+        assert_eq!(removed, 1);
+        assert!(!legacy_extracted_model.exists());
+        assert!(sibling_sentinel.join("keep").exists());
+    }
+
+    #[test]
     fn clear_model_roots_rejects_path_traversal() {
         let temp_dir = TempDir::new().unwrap();
         let cache_root = temp_dir.path().join("cache");
@@ -905,6 +945,24 @@ mod tests {
     // =========================================================================
     // Bundle Extraction Tests
     // =========================================================================
+
+    fn write_ready_extracted_model(model_dir: &Path, model_id: &str) {
+        fs::create_dir_all(model_dir).unwrap();
+        let metadata = format!(
+            r#"{{
+                "model_id": "{}",
+                "version": "1.0",
+                "execution_template": {{ "type": "Onnx", "model_file": "model.onnx" }},
+                "preprocessing": [],
+                "postprocessing": [],
+                "files": ["model.onnx"],
+                "metadata": {{}}
+            }}"#,
+            model_id
+        );
+        fs::write(model_dir.join("model_metadata.json"), metadata).unwrap();
+        fs::write(model_dir.join("model.onnx"), b"model").unwrap();
+    }
 
     /// Creates a test bundle with model_metadata.json
     fn create_test_bundle(temp_dir: &TempDir, model_id: &str) -> PathBuf {

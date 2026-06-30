@@ -1374,7 +1374,11 @@ impl ModelLoader {
 
         // Determine our cache directory
         let cache_layout = CacheManager::layout_from_config()?;
-        let cache_dir = cache_layout.huggingface_repo_dir(repo);
+        let cache_dir = cache_layout
+            .huggingface_repo_dirs(repo)
+            .into_iter()
+            .find(|dir| dir.join("model_metadata.json").exists())
+            .unwrap_or_else(|| cache_layout.huggingface_repo_dir(repo));
 
         // Check if we already have a cached copy with model_metadata.json
         let metadata_path = cache_dir.join("model_metadata.json");
@@ -1387,7 +1391,7 @@ impl ModelLoader {
 
         // Create HF API client
         let api = ApiBuilder::from_env()
-            .with_cache_dir(cache_layout.huggingface_hub_root())
+            .with_cache_dir(cache_layout.preferred_huggingface_hub_root(repo))
             .build()
             .map_err(|e| SdkError::network_src("Failed to create HuggingFace API client", e))?;
 

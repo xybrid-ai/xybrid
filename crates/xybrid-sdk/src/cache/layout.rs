@@ -72,8 +72,23 @@ impl CacheLayout {
         self.cache_root().join("extracted")
     }
 
+    pub(crate) fn extracted_roots(&self) -> Vec<PathBuf> {
+        let mut roots = vec![self.extracted_root()];
+        if let Some(root) = self.legacy_parent_extracted_root() {
+            roots.push(root);
+        }
+        dedup_paths(roots)
+    }
+
     pub(crate) fn extraction_dir(&self, model_id: &str) -> PathBuf {
         self.extracted_root().join(model_id)
+    }
+
+    pub(crate) fn extraction_dirs(&self, model_id: &str) -> Vec<PathBuf> {
+        self.extracted_roots()
+            .into_iter()
+            .map(|root| root.join(model_id))
+            .collect()
     }
 
     pub(crate) fn registry_bundle_path(&self, hf_repo: &str, file: &str) -> PathBuf {
@@ -88,52 +103,76 @@ impl CacheLayout {
         self.huggingface_root().join(sanitize_repo_id(repo))
     }
 
+    pub(crate) fn huggingface_repo_dirs(&self, repo: &str) -> Vec<PathBuf> {
+        let sanitized_repo = sanitize_repo_id(repo);
+        dedup_paths(vec![
+            self.huggingface_root().join(&sanitized_repo),
+            self.registry_root.join("hf").join(&sanitized_repo),
+        ])
+    }
+
     pub(crate) fn huggingface_hub_root(&self) -> PathBuf {
         self.cache_root().join("hf-hub")
     }
 
+    pub(crate) fn preferred_huggingface_hub_root(&self, repo: &str) -> PathBuf {
+        let repo_dir = huggingface_hub_repo_dir_name(repo);
+        self.huggingface_hub_roots()
+            .into_iter()
+            .find(|root| root.join(&repo_dir).exists())
+            .unwrap_or_else(|| self.huggingface_hub_root())
+    }
+
     pub(crate) fn entry_roots(&self) -> Vec<CacheEntryRoot> {
-        self.dedup_roots(vec![
-            CacheEntryRoot {
+        let extracted_roots = self
+            .extracted_roots()
+            .into_iter()
+            .map(|path| CacheEntryRoot {
+                location: CacheEntryLocation::Extracted,
+                path,
+            });
+        self.dedup_roots(
+            std::iter::once(CacheEntryRoot {
                 location: CacheEntryLocation::Registry,
                 path: self.registry_root.clone(),
-            },
-            CacheEntryRoot {
-                location: CacheEntryLocation::Extracted,
-                path: self.extracted_root(),
-            },
-            CacheEntryRoot {
-                location: CacheEntryLocation::HuggingFace,
-                path: self.huggingface_root(),
-            },
-            CacheEntryRoot {
-                location: CacheEntryLocation::HuggingFaceHub,
-                path: self.huggingface_hub_root(),
-            },
-            CacheEntryRoot {
-                location: CacheEntryLocation::HuggingFace,
-                path: self.registry_root.join("hf"),
-            },
-            CacheEntryRoot {
-                location: CacheEntryLocation::HuggingFaceHub,
-                path: self.registry_root.join("hf-hub"),
-            },
-        ])
+            })
+            .chain(extracted_roots)
+            .chain([
+                CacheEntryRoot {
+                    location: CacheEntryLocation::HuggingFace,
+                    path: self.huggingface_root(),
+                },
+                CacheEntryRoot {
+                    location: CacheEntryLocation::HuggingFaceHub,
+                    path: self.huggingface_hub_root(),
+                },
+                CacheEntryRoot {
+                    location: CacheEntryLocation::HuggingFace,
+                    path: self.registry_root.join("hf"),
+                },
+                CacheEntryRoot {
+                    location: CacheEntryLocation::HuggingFaceHub,
+                    path: self.registry_root.join("hf-hub"),
+                },
+            ])
+            .collect(),
+        )
     }
 
     pub(crate) fn model_roots(&self, model_id: &str) -> Vec<PathBuf> {
         let sanitized_repo = sanitize_repo_id(model_id);
-        let hf_hub_repo = format!("models--{}", sanitized_repo);
-        dedup_paths(vec![
+        let hf_hub_repo = huggingface_hub_repo_dir_name(model_id);
+        let mut roots = vec![
             self.registry_root.join(model_id),
-            self.extraction_dir(model_id),
             self.huggingface_root().join(model_id),
             self.huggingface_root().join(&sanitized_repo),
             self.huggingface_hub_root().join(&hf_hub_repo),
             self.registry_root.join("hf").join(model_id),
             self.registry_root.join("hf").join(&sanitized_repo),
             self.registry_root.join("hf-hub").join(&hf_hub_repo),
-        ])
+        ];
+        roots.extend(self.extraction_dirs(model_id));
+        dedup_paths(roots)
     }
 
     pub(crate) fn cache_entries(&self) -> Result<Vec<CacheEntryInfo>, SdkError> {
@@ -159,6 +198,22 @@ impl CacheLayout {
             .into_iter()
             .filter(|root| seen.insert(root.path.clone()))
             .collect()
+    }
+
+    fn legacy_parent_extracted_root(&self) -> Option<PathBuf> {
+        if is_models_dir(&self.registry_root) {
+            return None;
+        }
+
+        let root = self.registry_root.parent()?.join("extracted");
+        (root != self.extracted_root()).then_some(root)
+    }
+
+    fn huggingface_hub_roots(&self) -> Vec<PathBuf> {
+        dedup_paths(vec![
+            self.huggingface_hub_root(),
+            self.registry_root.join("hf-hub"),
+        ])
     }
 }
 
@@ -216,6 +271,10 @@ fn repo_leaf(repo: &str) -> &str {
 
 fn sanitize_repo_id(repo: &str) -> String {
     repo.replace('/', "--")
+}
+
+fn huggingface_hub_repo_dir_name(repo: &str) -> String {
+    format!("models--{}", sanitize_repo_id(repo))
 }
 
 fn is_models_dir(path: &Path) -> bool {

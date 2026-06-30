@@ -1,4 +1,5 @@
 use super::layout::{CacheEntryLocation, CacheLayout};
+use std::fs;
 use tempfile::TempDir;
 
 #[test]
@@ -47,6 +48,29 @@ fn layout_keeps_custom_non_models_root_self_contained() {
 }
 
 #[test]
+fn custom_non_models_roots_include_legacy_parent_extracted_cache() {
+    let temp_dir = TempDir::new().unwrap();
+    let cache_root = temp_dir.path().join("custom-cache");
+    let layout = CacheLayout::from_registry_root(cache_root.clone());
+
+    let roots: Vec<_> = layout
+        .entry_roots()
+        .into_iter()
+        .map(|root| (root.location, root.path))
+        .collect();
+
+    assert!(roots.contains(&(CacheEntryLocation::Extracted, cache_root.join("extracted"))));
+    assert!(roots.contains(&(
+        CacheEntryLocation::Extracted,
+        temp_dir.path().join("extracted")
+    )));
+
+    let model_roots = layout.model_roots("legacy-model");
+    assert!(model_roots.contains(&cache_root.join("extracted").join("legacy-model")));
+    assert!(model_roots.contains(&temp_dir.path().join("extracted").join("legacy-model")));
+}
+
+#[test]
 fn registry_bundle_path_uses_repo_leaf_under_models() {
     let temp_dir = TempDir::new().unwrap();
     let models_dir = temp_dir.path().join("cache").join("models");
@@ -55,6 +79,31 @@ fn registry_bundle_path_uses_repo_leaf_under_models() {
     assert_eq!(
         layout.registry_bundle_path("xybrid-ai/kokoro-82m", "universal.xyb"),
         models_dir.join("kokoro-82m").join("universal.xyb")
+    );
+}
+
+#[test]
+fn direct_huggingface_roots_include_legacy_nested_locations() {
+    let temp_dir = TempDir::new().unwrap();
+    let cache_root = temp_dir.path().join("cache");
+    let models_dir = cache_root.join("models");
+    let layout = CacheLayout::from_registry_root(models_dir.clone());
+
+    let repo_dirs = layout.huggingface_repo_dirs("owner/repo");
+    assert_eq!(
+        repo_dirs,
+        vec![
+            cache_root.join("hf").join("owner--repo"),
+            models_dir.join("hf").join("owner--repo")
+        ]
+    );
+
+    let legacy_hub_repo = models_dir.join("hf-hub").join("models--owner--repo");
+    fs::create_dir_all(&legacy_hub_repo).unwrap();
+
+    assert_eq!(
+        layout.preferred_huggingface_hub_root("owner/repo"),
+        models_dir.join("hf-hub")
     );
 }
 
