@@ -1369,7 +1369,7 @@ impl ModelLoader {
     where
         F: Fn(f32),
     {
-        use hf_hub::{api::sync::Api, Repo, RepoType};
+        use hf_hub::{api::sync::ApiBuilder, Repo, RepoType};
 
         // Determine our cache directory
         let cache_dir = Self::hf_cache_dir(repo)?;
@@ -1384,7 +1384,9 @@ impl ModelLoader {
         log::info!(target: "xybrid_sdk", "Downloading model from HuggingFace: {}", repo);
 
         // Create HF API client
-        let api = Api::new()
+        let api = ApiBuilder::from_env()
+            .with_cache_dir(Self::hf_hub_cache_dir()?)
+            .build()
             .map_err(|e| SdkError::network_src("Failed to create HuggingFace API client", e))?;
 
         // Create repo reference with optional revision
@@ -1572,14 +1574,26 @@ impl ModelLoader {
         let base_cache = if let Some(sdk_cache) = crate::get_sdk_cache_dir() {
             sdk_cache.join("hf")
         } else {
-            let home = dirs::home_dir()
-                .ok_or_else(|| SdkError::cache("Cannot determine home directory"))?;
-            home.join(".xybrid").join("cache").join("hf")
+            Self::default_xybrid_cache_root()?.join("hf")
         };
 
         // Sanitize repo name for filesystem (e.g., "xybrid-ai/kokoro-82m" -> "xybrid-ai--kokoro-82m")
         let sanitized = repo.replace('/', "--");
         Ok(base_cache.join(sanitized))
+    }
+
+    fn hf_hub_cache_dir() -> SdkResult<PathBuf> {
+        if let Some(sdk_cache) = crate::get_sdk_cache_dir() {
+            return Ok(sdk_cache.join("hf-hub"));
+        }
+
+        Ok(Self::default_xybrid_cache_root()?.join("hf-hub"))
+    }
+
+    fn default_xybrid_cache_root() -> SdkResult<PathBuf> {
+        let home =
+            dirs::home_dir().ok_or_else(|| SdkError::cache("Cannot determine home directory"))?;
+        Ok(home.join(".xybrid").join("cache"))
     }
 
     /// Check if a file is essential and should always be downloaded.

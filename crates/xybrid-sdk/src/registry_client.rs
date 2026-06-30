@@ -1178,10 +1178,7 @@ impl RegistryClient {
 
     /// Clear the local cache for a specific model.
     pub fn clear_cache(&self, mask: &str) -> Result<(), SdkError> {
-        let model_dir = self.cache.cache_dir().join(mask);
-        if model_dir.exists() {
-            std::fs::remove_dir_all(&model_dir)?;
-        }
+        self.cache.clear_model_roots(mask)?;
         Ok(())
     }
 

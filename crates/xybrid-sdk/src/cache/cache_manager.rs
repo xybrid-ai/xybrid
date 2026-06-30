@@ -18,8 +18,8 @@
 //! ```
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::collections::{HashMap, HashSet};
+use std::path::{Component, Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 use xybrid_core::bundler::XyBundle;
 
@@ -187,12 +187,20 @@ impl CacheManager {
         self.cache_root().join("extracted")
     }
 
-    fn sibling_hf_root(&self) -> Option<PathBuf> {
+    fn sibling_root_when_cache_dir_is_models(&self, root_name: &str) -> Option<PathBuf> {
         self.cache_dir
             .file_name()
             .and_then(|name| name.to_str())
             .filter(|name| name.eq_ignore_ascii_case("models"))
-            .map(|_| self.cache_root().join("hf"))
+            .map(|_| self.cache_root().join(root_name))
+    }
+
+    fn sibling_hf_root(&self) -> Option<PathBuf> {
+        self.sibling_root_when_cache_dir_is_models("hf")
+    }
+
+    fn sibling_hf_hub_root(&self) -> Option<PathBuf> {
+        self.sibling_root_when_cache_dir_is_models("hf-hub")
     }
 
     /// Scans the cache directory for existing bundles.
@@ -656,6 +664,55 @@ impl CacheManager {
         Ok(removed_count)
     }
 
+    pub(crate) fn clear_model_roots(&self, model_id: &str) -> Result<u32, SdkError> {
+        if model_id.is_empty()
+            || !Path::new(model_id)
+                .components()
+                .all(|component| matches!(component, Component::Normal(_)))
+        {
+            return Err(SdkError::cache(format!(
+                "Invalid cache model identifier: {}",
+                model_id
+            )));
+        }
+
+        let sanitized_hf_repo = model_id.replace('/', "--");
+        let hf_hub_repo = format!("models--{}", sanitized_hf_repo);
+        let mut roots = vec![
+            self.cache_dir.join(model_id),
+            self.extraction_dir(model_id),
+            self.cache_dir.join("hf").join(model_id),
+            self.cache_dir.join("hf").join(&sanitized_hf_repo),
+            self.cache_dir.join("hf-hub").join(&hf_hub_repo),
+        ];
+
+        if let Some(hf_root) = self.sibling_hf_root() {
+            roots.push(hf_root.join(model_id));
+            roots.push(hf_root.join(&sanitized_hf_repo));
+        }
+        if let Some(hf_hub_root) = self.sibling_hf_hub_root() {
+            roots.push(hf_hub_root.join(&hf_hub_repo));
+        }
+        for entry in self.entries.values() {
+            if entry.id == model_id {
+                roots.push(entry.path.clone());
+            }
+        }
+
+        let mut removed_count = 0;
+        let mut seen = HashSet::new();
+        for root in roots {
+            if !seen.insert(root.clone()) {
+                continue;
+            }
+            if Self::remove_cache_path(&root)? {
+                removed_count += 1;
+            }
+        }
+
+        Ok(removed_count)
+    }
+
     /// Clears all cached models.
     ///
     /// # Returns
@@ -665,24 +722,31 @@ impl CacheManager {
         let count = self.entries.len() as u32;
 
         let mut roots = vec![self.cache_dir.clone(), self.extracted_root()];
-        if let Some(hf_root) = self.sibling_hf_root() {
-            roots.push(hf_root);
-        }
+        roots.extend(self.sibling_hf_root());
+        roots.extend(self.sibling_hf_hub_root());
 
         for root in roots {
-            if root.is_dir() {
-                std::fs::remove_dir_all(&root)
-                    .map_err(|e| SdkError::cache_src("Failed to remove cache directory", e))?;
-            } else if root.exists() {
-                std::fs::remove_file(&root)
-                    .map_err(|e| SdkError::cache_src("Failed to remove cache file", e))?;
-            }
+            Self::remove_cache_path(&root)?;
         }
 
         std::fs::create_dir_all(&self.cache_dir)
             .map_err(|e| SdkError::cache_src("Failed to recreate cache directory", e))?;
         self.entries.clear();
         Ok(count)
+    }
+
+    fn remove_cache_path(path: &Path) -> Result<bool, SdkError> {
+        if path.is_dir() {
+            std::fs::remove_dir_all(path)
+                .map_err(|e| SdkError::cache_src("Failed to remove cache directory", e))?;
+            Ok(true)
+        } else if path.exists() {
+            std::fs::remove_file(path)
+                .map_err(|e| SdkError::cache_src("Failed to remove cache file", e))?;
+            Ok(true)
+        } else {
+            Ok(false)
+        }
     }
 }
 
@@ -752,12 +816,15 @@ mod tests {
         let registry_model_dir = models_dir.join("Kokoro-82M-v1.0-ONNX");
         let extracted_model_dir = cache_root.join("extracted").join("kokoro-82m");
         let hf_model_dir = cache_root.join("hf").join("owner--repo");
+        let hf_hub_model_dir = cache_root.join("hf-hub").join("models--owner--repo");
         fs::create_dir_all(&registry_model_dir).unwrap();
         fs::create_dir_all(&extracted_model_dir).unwrap();
         fs::create_dir_all(&hf_model_dir).unwrap();
+        fs::create_dir_all(&hf_hub_model_dir).unwrap();
         fs::write(registry_model_dir.join("universal.xyb"), b"bundle").unwrap();
         fs::write(extracted_model_dir.join("model_metadata.json"), b"{}").unwrap();
         fs::write(hf_model_dir.join("model.gguf"), b"weights").unwrap();
+        fs::write(hf_hub_model_dir.join("blob"), b"weights").unwrap();
 
         let mut manager = CacheManager::with_dir(models_dir.clone()).unwrap();
 
@@ -777,6 +844,89 @@ mod tests {
         assert!(
             !hf_model_dir.exists(),
             "direct HuggingFace model cache should be removed by clear()"
+        );
+        assert!(
+            !hf_hub_model_dir.exists(),
+            "owned HuggingFace blob cache should be removed by clear()"
+        );
+    }
+
+    #[test]
+    fn clear_model_roots_removes_registry_and_extracted_cache_for_id() {
+        let temp_dir = TempDir::new().unwrap();
+        let cache_root = temp_dir.path().join("cache");
+        let models_dir = cache_root.join("models");
+        let model_dir = models_dir.join("kokoro-82m");
+        let extracted_model_dir = cache_root.join("extracted").join("kokoro-82m");
+        let other_model_dir = models_dir.join("other-model");
+        fs::create_dir_all(&model_dir).unwrap();
+        fs::create_dir_all(&extracted_model_dir).unwrap();
+        fs::create_dir_all(&other_model_dir).unwrap();
+        fs::write(model_dir.join("universal.xyb"), b"bundle").unwrap();
+        fs::write(extracted_model_dir.join("model_metadata.json"), b"{}").unwrap();
+        fs::write(other_model_dir.join("universal.xyb"), b"bundle").unwrap();
+
+        let manager = CacheManager::with_dir(models_dir).unwrap();
+
+        let removed = manager.clear_model_roots("kokoro-82m").unwrap();
+
+        assert_eq!(removed, 2);
+        assert!(
+            !model_dir.exists(),
+            "registry model cache should be removed"
+        );
+        assert!(
+            !extracted_model_dir.exists(),
+            "extracted model cache should be removed"
+        );
+        assert!(other_model_dir.exists(), "unrelated model should remain");
+    }
+
+    #[test]
+    fn clear_model_roots_removes_direct_hf_cache_for_repo_id() {
+        let temp_dir = TempDir::new().unwrap();
+        let cache_root = temp_dir.path().join("cache");
+        let models_dir = cache_root.join("models");
+        let hf_model_dir = cache_root.join("hf").join("owner--repo");
+        let hf_hub_model_dir = cache_root.join("hf-hub").join("models--owner--repo");
+        fs::create_dir_all(&hf_model_dir).unwrap();
+        fs::create_dir_all(&hf_hub_model_dir).unwrap();
+        fs::write(hf_model_dir.join("model.gguf"), b"weights").unwrap();
+        fs::write(hf_hub_model_dir.join("blob"), b"weights").unwrap();
+
+        let manager = CacheManager::with_dir(models_dir).unwrap();
+
+        let removed = manager.clear_model_roots("owner/repo").unwrap();
+
+        assert_eq!(removed, 2);
+        assert!(
+            !hf_model_dir.exists(),
+            "direct HuggingFace model cache should be removed"
+        );
+        assert!(
+            !hf_hub_model_dir.exists(),
+            "owned HuggingFace blob cache should be removed"
+        );
+    }
+
+    #[test]
+    fn clear_model_roots_rejects_path_traversal() {
+        let temp_dir = TempDir::new().unwrap();
+        let cache_root = temp_dir.path().join("cache");
+        let models_dir = cache_root.join("models");
+        let outside_dir = cache_root.join("outside");
+        fs::create_dir_all(&models_dir).unwrap();
+        fs::create_dir_all(&outside_dir).unwrap();
+        fs::write(outside_dir.join("sentinel"), b"keep").unwrap();
+
+        let manager = CacheManager::with_dir(models_dir).unwrap();
+
+        let result = manager.clear_model_roots("../outside");
+
+        assert!(result.is_err());
+        assert!(
+            outside_dir.join("sentinel").exists(),
+            "invalid model IDs must not delete outside cache paths"
         );
     }
 
