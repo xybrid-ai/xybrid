@@ -50,11 +50,15 @@ pub enum GrammarError {
     Invalid(String),
 }
 
-/// Shared terminal rules appended to every generated grammar. Whitespace is
-/// permissive (the grammar masks structure, not formatting); unused terminals
-/// are harmless to llama.cpp's grammar parser.
+/// Shared terminal rules appended to every generated grammar.
+///
+/// The grammar emits **compact** JSON (no inter-token whitespace). This is
+/// deliberate: an optional-whitespace rule like `[ \t\n]*` lets a greedy model
+/// emit whitespace indefinitely instead of committing to the next structural
+/// token, burning the whole token budget on newlines. Forbidding inter-token
+/// whitespace removes that trap; the output is still valid (minified) JSON.
+/// Unused terminals are harmless to llama.cpp's grammar parser.
 const TERMINALS: &str = "\
-ws ::= [ \\t\\n]*\n\
 string ::= \"\\\"\" ( [^\"\\\\] | \"\\\\\" [\"\\\\/bfnrt] )* \"\\\"\"\n\
 integer ::= \"-\"? ( \"0\" | [1-9] [0-9]* )\n\
 number ::= \"-\"? ( \"0\" | [1-9] [0-9]* ) ( \".\" [0-9]+ )? ( [eE] [-+]? [0-9]+ )?\n\
@@ -145,19 +149,16 @@ impl GrammarBuilder {
         let props = match props {
             Some(p) if !p.is_empty() => p,
             // No declared properties → match an empty JSON object.
-            _ => return Ok(self.add_rule("\"{\" ws \"}\"".to_string())),
+            _ => return Ok(self.add_rule("\"{}\"".to_string())),
         };
 
-        let mut parts = vec!["\"{\" ws".to_string()];
+        let mut parts = vec!["\"{\"".to_string()];
         for (i, (key, subschema)) in props.iter().enumerate() {
             let value_rule = self.convert(subschema)?;
             if i > 0 {
-                parts.push("\",\" ws".to_string());
+                parts.push("\",\"".to_string());
             }
-            parts.push(format!(
-                "{} ws \":\" ws {value_rule} ws",
-                gbnf_json_key(key)
-            ));
+            parts.push(format!("{} \":\" {value_rule}", gbnf_json_key(key)));
         }
         parts.push("\"}\"".to_string());
         Ok(self.add_rule(parts.join(" ")))
@@ -172,7 +173,7 @@ impl GrammarBuilder {
             .ok_or_else(|| GrammarError::Unsupported("array without `items`".to_string()))?;
         let item_rule = self.convert(items)?;
         Ok(self.add_rule(format!(
-            "\"[\" ws ( {item_rule} ( ws \",\" ws {item_rule} )* )? ws \"]\""
+            "\"[\" ( {item_rule} ( \",\" {item_rule} )* )? \"]\""
         )))
     }
 
@@ -237,7 +238,9 @@ mod tests {
         // Shared terminals are always present.
         assert!(gbnf.contains("string ::="));
         assert!(gbnf.contains("number ::="));
-        assert!(gbnf.contains("ws ::="));
+        // Compact JSON: no inter-token whitespace rule (avoids the greedy
+        // whitespace-loop trap).
+        assert!(!gbnf.contains("ws ::="));
     }
 
     #[test]
