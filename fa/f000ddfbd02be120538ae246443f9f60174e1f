@@ -1,0 +1,29 @@
+crates/xybrid-core/src/runtime_adapter/grammar.rs
+  s_fce189698ddf27::t_0974daf019063d 355-405
+  s_fce189698ddf27::t_82b7a3cb528eba 14-15
+  s_fce189698ddf27::t_87f89a94ca4018 236-240,243-245,247-249,252-253
+  s_fce189698ddf27::t_e3a7590f3a936f 186-189,191,193-195
+  s_fce189698ddf27::t_0092cc831f1d62 116-149,151-156
+  s_fce189698ddf27::t_906d731ef60059 63
+  s_fce189698ddf27::t_8d70986b8a88d8 242
+crates/xybrid-core/examples/lfm2_230m_grammar.rs
+  s_fce189698ddf27::t_c2ffb1539deeed 21-24
+crates/llama-cpp-sys/wrapper.cpp
+  s_fce189698ddf27::t_4e1c9c1054958e 651-653
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.9",
+  "base_commit_sha": "faf000ddfbd02be120538ae246443f9f60174e1f",
+  "prompts": {},
+  "sessions": {
+    "s_fce189698ddf27": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "05b32fb8-246e-4e34-bba8-8005771e45ce",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
