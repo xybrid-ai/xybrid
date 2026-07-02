@@ -86,8 +86,23 @@ pub(crate) fn handle_repl_command(args: ReplArgs) -> Result<()> {
     // Speculative cloud only applies to a bare registry --model (not config /
     // HuggingFace / GGUF file). When it engages, the model serves from cloud
     // immediately and the weights download in the background.
-    let want_speculative =
-        speculative_cloud && model.is_some() && config.is_none() && huggingface.is_none();
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    let want_speculative = speculative_cloud
+        && model.is_some()
+        && config.is_none()
+        && huggingface.is_none()
+        && model_file.is_none();
+    // Without LLM features the loop has no model-driven path that could consume
+    // the cloud-backed handle — fall through to the normal blocking download.
+    #[cfg(not(any(feature = "llm-mistral", feature = "llm-llamacpp")))]
+    let want_speculative = {
+        if speculative_cloud {
+            ui::warning(
+                "--speculative-cloud requires LLM features (llm-llamacpp) — downloading, then running locally",
+            );
+        }
+        false
+    };
 
     // Holds the cloud-backed (or already-local) model produced by the
     // speculative path, installed into `loaded_model` below.
@@ -473,11 +488,18 @@ pub(crate) fn handle_repl_command(args: ReplArgs) -> Result<()> {
         // Try streaming execution
         #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
         let use_streaming = {
-            let can_stream = stream
-                && !show_reasoning
-                && stages.len() == 1
-                && stage_is_locally_available(&stages[0]);
-            if stream && show_reasoning {
+            let can_stream = stages.len() == 1 && {
+                let locally_available = stage_is_locally_available(&stages[0]);
+                // The speculative cloud-backed model has no local bundle, so the
+                // orchestrator can't run its stage: the model must drive the turn
+                // directly (tokens print as they arrive) even without --stream —
+                // regardless of --show-reasoning. Local models stream only when
+                // asked and when not showing reasoning (which needs the whole
+                // answer up front).
+                let speculative_drives = loaded_model.is_some() && !locally_available;
+                speculative_drives || (stream && !show_reasoning && locally_available)
+            };
+            if stream && show_reasoning && !can_stream {
                 ui::hint("Token streaming disabled so reasoning can be shown before the answer");
             } else if stream && !can_stream {
                 ui::warning("Streaming conditions not met");
@@ -1024,12 +1046,10 @@ fn try_streaming_execution(
     start: std::time::Instant,
     verbose: u8,
 ) -> bool {
-    let bundle_path_str = stages[0].bundle_path.as_ref().unwrap();
-    let bundle_path = PathBuf::from(bundle_path_str);
-
-    let model_for_streaming = loaded_model.as_ref();
-
-    if let Some(model) = model_for_streaming {
+    // A pre-loaded model (including the speculative cloud-backed handle, which
+    // has no on-disk bundle) drives the turn directly. Resolve `bundle_path`
+    // only in the fall-back branch below, so a bundle-less stage never panics.
+    if let Some(model) = loaded_model.as_ref() {
         if model.supports_token_streaming() {
             return execute_streaming(
                 model,
@@ -1044,6 +1064,14 @@ fn try_streaming_execution(
             return false;
         }
     }
+
+    let bundle_path = match stages[0].bundle_path.as_ref() {
+        Some(path) => PathBuf::from(path),
+        None => {
+            ui::warning("No local bundle for stage, falling back to batch mode");
+            return false;
+        }
+    };
 
     // Fall back to loading the model if not pre-loaded
     let model_result = if bundle_path.extension().is_some_and(|ext| ext == "xyb") {

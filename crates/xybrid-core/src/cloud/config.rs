@@ -34,6 +34,35 @@ pub fn xybrid_api_key() -> Option<String> {
         .clone()
 }
 
+/// Programmatically-set Xybrid platform base URL, held in process memory.
+///
+/// Set via [`set_xybrid_platform_url`] — mirrors [`XYBRID_API_KEY`]. Consulted
+/// by [`default_gateway_url`] ahead of the `XYBRID_PLATFORM_URL` environment
+/// variable so a host (e.g. the CLI `--platform-url` flag) can point the
+/// gateway at a staging endpoint without mutating the process environment after
+/// telemetry threads have spawned (a concurrent `setenv`/`getenv` is UB).
+static XYBRID_PLATFORM_URL: RwLock<Option<String>> = RwLock::new(None);
+
+/// Store (or clear, with `None`) the in-memory Xybrid platform base URL.
+///
+/// Consulted by [`default_gateway_url`] ahead of the `XYBRID_PLATFORM_URL`
+/// environment variable. The stored value is a bare base URL (no `/v1`); the
+/// gateway suffix is applied at read time.
+pub fn set_xybrid_platform_url(url: Option<String>) {
+    let mut guard = XYBRID_PLATFORM_URL
+        .write()
+        .unwrap_or_else(|e| e.into_inner());
+    *guard = url;
+}
+
+/// Read the in-memory Xybrid platform base URL, if one has been set.
+pub fn xybrid_platform_url() -> Option<String> {
+    XYBRID_PLATFORM_URL
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone()
+}
+
 /// Report whether an in-memory Xybrid gateway API key has been set.
 ///
 /// Cheaper than [`xybrid_api_key`] for presence checks — it never clones the
@@ -100,13 +129,21 @@ pub struct CloudConfig {
 fn default_gateway_url() -> String {
     // Priority:
     // 1. XYBRID_GATEWAY_URL env var (explicit override, should include /v1)
-    // 2. XYBRID_PLATFORM_URL env var + /v1 suffix (shared with telemetry)
-    // 3. Default production URL (api.xybrid.dev/v1)
+    // 2. In-memory platform URL (set via set_xybrid_platform_url) + /v1 suffix
+    // 3. XYBRID_PLATFORM_URL env var + /v1 suffix (shared with telemetry)
+    // 4. Default production URL (api.xybrid.dev/v1)
     //
     // Note: The /v1 prefix is required for OpenAI-compatible API endpoints.
     // The client appends /chat/completions, so the full path becomes /v1/chat/completions.
     if let Ok(url) = std::env::var("XYBRID_GATEWAY_URL") {
         return url;
+    }
+    // Programmatic platform URL (set via the SDK/CLI, held in memory) takes
+    // precedence over the ambient XYBRID_PLATFORM_URL env var — same ordering as
+    // the API key resolution above.
+    if let Some(url) = xybrid_platform_url() {
+        // Platform URL needs /v1 suffix for gateway endpoints
+        return format!("{}/v1", url.trim_end_matches('/'));
     }
     if let Ok(url) = std::env::var("XYBRID_PLATFORM_URL") {
         // Platform URL needs /v1 suffix for gateway endpoints
@@ -204,6 +241,9 @@ mod tests {
 
     #[test]
     fn test_default_config() {
+        // Shares the process-global gateway-URL env/cell with the precedence
+        // tests below, so serialize against them.
+        let _guard = TEST_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
         let config = CloudConfig::default();
         assert_eq!(config.backend, CloudBackend::Gateway);
         // Default URL should be api.xybrid.dev/v1 or from env vars (with /v1)
@@ -272,5 +312,39 @@ mod tests {
         assert_eq!(explicit.resolve_api_key(), Some("field-key".to_string()));
 
         std::env::remove_var("XYBRID_API_KEY");
+    }
+
+    #[test]
+    fn test_gateway_url_in_memory_precedence() {
+        let _guard = TEST_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+
+        // RAII reset: clear the process-global cell + env vars on drop, so a
+        // failing assertion below can't leak state into `test_default_config`
+        // (which reads the same shared cell) and cascade into a false failure.
+        struct ResetOnDrop;
+        impl Drop for ResetOnDrop {
+            fn drop(&mut self) {
+                set_xybrid_platform_url(None);
+                std::env::remove_var("XYBRID_GATEWAY_URL");
+                std::env::remove_var("XYBRID_PLATFORM_URL");
+            }
+        }
+        let _reset = ResetOnDrop;
+
+        // The in-memory platform URL is consulted before the env var, and the
+        // bare base URL gains the /v1 gateway suffix.
+        std::env::remove_var("XYBRID_GATEWAY_URL");
+        std::env::set_var("XYBRID_PLATFORM_URL", "https://env.example.com");
+        set_xybrid_platform_url(Some("https://staging.example.com".to_string()));
+        assert_eq!(default_gateway_url(), "https://staging.example.com/v1");
+
+        // Clearing the cell falls back to the env var (also /v1-suffixed).
+        set_xybrid_platform_url(None);
+        assert_eq!(default_gateway_url(), "https://env.example.com/v1");
+
+        // XYBRID_GATEWAY_URL (already /v1) wins over the in-memory override.
+        set_xybrid_platform_url(Some("https://staging.example.com".to_string()));
+        std::env::set_var("XYBRID_GATEWAY_URL", "https://explicit.example.com/v1");
+        assert_eq!(default_gateway_url(), "https://explicit.example.com/v1");
     }
 }

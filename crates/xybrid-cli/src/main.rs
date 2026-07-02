@@ -498,15 +498,14 @@ fn init_telemetry(cli: &Cli) -> bool {
 #[allow(clippy::too_many_arguments)]
 fn run_command(cli: Cli) -> Result<()> {
     let verbose = cli.verbose;
-    // Propagate --platform-url into the env var the SDK's CloudConfig reads, so
-    // cloud gateway calls (speculative cloud, reactive fallback) target the same
-    // endpoint as telemetry. clap's `env =` only *reads* this var as a fallback;
-    // passing the flag does not write it, so without this the gateway falls back
-    // to the production default (`api.xybrid.dev`) and a staging key 401s.
-    // XYBRID_GATEWAY_URL (explicit, /v1-suffixed) still takes precedence if set.
-    if std::env::var_os("XYBRID_PLATFORM_URL").is_none() {
-        std::env::set_var("XYBRID_PLATFORM_URL", &cli.platform_url);
-    }
+    // Point the SDK's cloud gateway at the same endpoint as telemetry, so cloud
+    // calls (speculative cloud, reactive fallback) don't silently fall back to
+    // the production default (`api.xybrid.dev`) and 401 with a staging key.
+    // `cli.platform_url` already encodes clap's flag > env > default precedence,
+    // so set it unconditionally. Use the in-memory setter rather than
+    // `std::env::set_var`: telemetry threads are already running by now, and a
+    // concurrent `setenv`/`getenv` is UB. XYBRID_GATEWAY_URL still wins if set.
+    xybrid_sdk::set_platform_url(&cli.platform_url);
     match cli.command {
         Commands::Init {
             directory,
@@ -589,7 +588,10 @@ fn run_command(cli: Cli) -> Result<()> {
                 );
             }
 
-            if speculative_cloud {
+            // A dry run must not hit the network, so let `--dry-run` fall
+            // through to `run_model` (plan-only), which also honours
+            // --trace/--trace-export that the speculative path doesn't emit.
+            if speculative_cloud && !dry_run {
                 if let Some(model_id) = model.as_deref() {
                     return commands::run::run_model_speculative(
                         model_id,
