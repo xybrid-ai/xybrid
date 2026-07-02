@@ -1,0 +1,57 @@
+bindings/apple/Sources/Xybrid/xybrid_bolt.swift
+  s_fce189698ddf27::t_223fe023f57415 71-75,77,85,92,102,603-612
+  s_fce189698ddf27::t_d7cdfef540ef73 613-614
+bindings/flutter/lib/src/rust/frb_generated.dart
+  s_fce189698ddf27::t_fd9bd63dd866c6 82,291-292,2158-2181,2556-2557,2566,3315,3323-3324,4218
+crates/xybrid-ffi-facade/src/lib.rs
+  s_fce189698ddf27::t_2ebae41c7d953c 686-688,693-702
+  s_fce189698ddf27::t_728b5fb4325ff4 631-634
+  s_fce189698ddf27::t_2dbfda86f387a1 703-704
+crates/xybrid-core/src/runtime_adapter/grammar.rs
+  s_fce189698ddf27::t_abe025e6fb07b9 372-381
+  s_fce189698ddf27::t_b137a18ed5e8a7 85-99
+  s_fce189698ddf27::t_0b6c75fa999e2c 371
+crates/xybrid-ffi/include/xybrid.h
+  s_fce189698ddf27::t_49f978ea77f60b 960-995
+bindings/kotlin/src/main/kotlin/ai/xybrid/XybridBolt.kt
+  s_fce189698ddf27::t_223fe023f57415 1084-1091,1101-1102,1112-1113,1123,1288-1301,1661
+bindings/flutter/rust/src/frb_generated.rs
+  s_fce189698ddf27::t_fd9bd63dd866c6 46,2717-2746,3019,3028,3853,3999,4668
+crates/xybrid-core/Cargo.toml
+  s_fce189698ddf27::t_780f680df6ebc1 196-200
+crates/xybrid-core/examples/streaming_llm.rs
+  s_fce189698ddf27::t_ff3aebd2aa8c84 33,35-36
+bindings/flutter/rust/src/api/model.rs
+  s_fce189698ddf27::t_57affddb64dce0 228
+  s_fce189698ddf27::t_c8a14cb4087db3 39-42,57,72,90
+  s_fce189698ddf27::t_84b794ec21b12f 99-108
+bindings/flutter/lib/src/rust/api/model.dart
+  s_fce189698ddf27::t_fd9bd63dd866c6 22-30,254-258,267,286-287,300-301
+crates/xybrid-bolt/src/lib.rs
+  s_fce189698ddf27::t_579ad5a919f111 332
+  s_fce189698ddf27::t_df7b0d1c48374a 307-311,324,329-331,333-334
+  s_fce189698ddf27::t_4e6ae7703351c9 335-336
+crates/xybrid-ffi/src/lib.rs
+  s_fce189698ddf27::t_e8087e4cd53256 694-696
+  s_fce189698ddf27::t_92b163fa1a7c95 465
+  s_fce189698ddf27::t_625a93eea6f4ec 2414,2436,2458
+  s_fce189698ddf27::t_f7bb56ace56f38 2567-2628
+crates/xybrid-sdk/src/lib.rs
+  s_fce189698ddf27::t_96d064f02edba1 198-204
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.9",
+  "base_commit_sha": "877858bf7940c3b2dc9dc56a8c5f64b9230a5096",
+  "prompts": {},
+  "sessions": {
+    "s_fce189698ddf27": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "05b32fb8-246e-4e34-bba8-8005771e45ce",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
