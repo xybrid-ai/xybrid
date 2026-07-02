@@ -628,6 +628,10 @@ pub struct GenerationConfig {
     pub top_k: Option<u32>,
     pub repetition_penalty: Option<f32>,
     pub stop_sequences: Vec<String>,
+    /// Optional GBNF grammar constraining generation to structured output
+    /// (local llama backend only; other backends ignore it). Produce one from
+    /// a JSON Schema with [`json_schema_to_gbnf`], or pass raw GBNF.
+    pub grammar: Option<String>,
 }
 
 impl GenerationConfig {
@@ -679,8 +683,23 @@ impl GenerationConfig {
         if !self.stop_sequences.is_empty() {
             cfg.stop_sequences = self.stop_sequences.clone();
         }
+        if let Some(g) = &self.grammar {
+            cfg.grammar = Some(g.clone());
+        }
         cfg
     }
+}
+
+/// Convert a JSON Schema (as a JSON string) into a GBNF grammar for
+/// [`GenerationConfig::grammar`].
+///
+/// Kept as a free function rather than folded into `to_sdk` so the
+/// option-bag → SDK mapping stays infallible; schema conversion is the one
+/// step that can fail (invalid JSON, unsupported schema construct).
+pub fn json_schema_to_gbnf(schema_json: &str) -> Result<String> {
+    sdk::json_schema_str_to_gbnf(schema_json).map_err(|e| Error::ConfigError {
+        message: e.to_string(),
+    })
 }
 
 /// Abort signals the caller can observe. FFI-safe subset of

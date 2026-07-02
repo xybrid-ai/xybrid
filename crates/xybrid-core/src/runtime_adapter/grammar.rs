@@ -82,6 +82,21 @@ pub fn json_schema_to_gbnf(schema: &Value) -> Result<String, GrammarError> {
     Ok(builder.finish(&root))
 }
 
+/// Convert a JSON Schema provided as a JSON string.
+///
+/// Convenience for FFI bindings, where the schema crosses the language
+/// boundary as text rather than a parsed value.
+///
+/// # Errors
+///
+/// Returns [`GrammarError::Invalid`] if `schema_json` is not valid JSON, plus
+/// everything [`json_schema_to_gbnf`] returns.
+pub fn json_schema_str_to_gbnf(schema_json: &str) -> Result<String, GrammarError> {
+    let schema: Value = serde_json::from_str(schema_json)
+        .map_err(|e| GrammarError::Invalid(format!("schema is not valid JSON: {e}")))?;
+    json_schema_to_gbnf(&schema)
+}
+
 /// Accumulates generated rules and hands out unique rule names.
 #[derive(Default)]
 struct GrammarBuilder {
@@ -350,6 +365,17 @@ mod tests {
     #[test]
     fn non_object_schema_is_invalid() {
         let err = json_schema_to_gbnf(&json!("nope")).unwrap_err();
+        assert!(matches!(err, GrammarError::Invalid(_)));
+    }
+
+    #[test]
+    fn str_variant_parses_then_converts() {
+        let gbnf =
+            json_schema_str_to_gbnf(r#"{"type":"object","properties":{"x":{"type":"string"}}}"#)
+                .unwrap();
+        assert!(gbnf.starts_with("root ::="));
+
+        let err = json_schema_str_to_gbnf("not json {").unwrap_err();
         assert!(matches!(err, GrammarError::Invalid(_)));
     }
 
