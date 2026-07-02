@@ -134,13 +134,16 @@ llama_batch llama_batch_init_c(int n_tokens, int embd, int n_seq_max);
 void llama_batch_free_c(llama_batch batch);
 
 XYBRID_LLAMA_SAMPLER* llama_sampler_chain_create_c(
+    const XYBRID_LLAMA_MODEL* model,
     float temperature,
     float top_p,
     float min_p,
     int top_k,
     float repeat_penalty,
     int penalty_last_n,
-    uint32_t seed);
+    uint32_t seed,
+    const char* grammar,
+    const char* grammar_root);
 void llama_sampler_free_c(XYBRID_LLAMA_SAMPLER* smpl);
 
 /* Streaming-callback token type (matches Rust's `TokenCallback`). */
@@ -160,6 +163,8 @@ int  llama_generate_c(
     int top_k,
     float repeat_penalty,
     uint32_t seed,
+    const char* grammar,
+    const char* grammar_root,
     const int32_t* stop_seqs,
     const int* stop_lens,
     int n_stop_seqs);
@@ -178,6 +183,8 @@ int  llama_generate_streaming_c(
     int top_k,
     float repeat_penalty,
     uint32_t seed,
+    const char* grammar,
+    const char* grammar_root,
     const int32_t* stop_seqs,
     const int* stop_lens,
     int n_stop_seqs,
@@ -198,6 +205,8 @@ int  llama_generate_from_current_logits_c(
     int top_k,
     float repeat_penalty,
     uint32_t seed,
+    const char* grammar,
+    const char* grammar_root,
     const int32_t* stop_seqs,
     const int* stop_lens,
     int n_stop_seqs,

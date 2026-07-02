@@ -29,6 +29,8 @@
 
 use thiserror::Error;
 
+use crate::runtime_adapter::grammar::GrammarError;
+
 /// The canonical error type for xybrid-core public API.
 ///
 /// All public API methods return `Result<T, XybridError>`.
@@ -80,6 +82,10 @@ pub enum XybridError {
     /// Serialization/deserialization error (JSON, YAML, etc.)
     #[error("Serialization error: {0}")]
     Serialization(String),
+
+    /// JSON-Schema → GBNF grammar conversion failed (constrained decoding).
+    #[error("Grammar error: {0}")]
+    Grammar(#[from] GrammarError),
 }
 
 /// Errors during model inference.

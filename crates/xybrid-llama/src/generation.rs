@@ -198,6 +198,22 @@ fn stop_array_ptrs(stop_tokens: &[i32], stop_lens: &[c_int]) -> (*const i32, *co
 /// sequence that tokenises to zero tokens is silently dropped, matching
 /// the pre-refactor wrapper behavior. The count passed to the C side is
 /// the *filtered* length, not the original `stop_sequences.len()`.
+/// Build an owning `CString` for an optional GBNF grammar.
+///
+/// The returned `CString` must be held alive by the caller for the duration of
+/// the FFI call (the raw pointer borrows it). Returns `Ok(None)` when no
+/// grammar is requested, and errors if the grammar contains an interior NUL
+/// byte (which a GBNF grammar never legitimately does).
+fn grammar_cstring(grammar: Option<&str>) -> LlamaResult<Option<CString>> {
+    grammar
+        .map(|g| {
+            CString::new(g).map_err(|_| {
+                LlamaError::InvalidInput("grammar contains an interior NUL byte".to_string())
+            })
+        })
+        .transpose()
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn generate_with_stops(
     ctx: &LlamaContext,
@@ -210,13 +226,20 @@ pub fn generate_with_stops(
     top_k: usize,
     repeat_penalty: f32,
     stop_sequences: &[String],
+    grammar: Option<&str>,
 ) -> LlamaResult<Vec<i32>> {
     let (stop_tokens, stop_lens, mut output_tokens) =
         prepare_generation(model, input_tokens, max_tokens, stop_sequences)?;
     let (stop_seqs_ptr, stop_lens_ptr, n_stop_seqs) = stop_array_ptrs(&stop_tokens, &stop_lens);
 
+    // Owns the grammar C string for the lifetime of the FFI call; `null` =
+    // unconstrained. `grammar_root` is left null so the C side defaults to the
+    // "root" entry rule (which the JSON-Schema converter always emits).
+    let grammar_cstr = grammar_cstring(grammar)?;
+    let grammar_ptr = grammar_cstr.as_ref().map_or(ptr::null(), |c| c.as_ptr());
+
     // SAFETY: all pointers checked / sourced from owned buffers; sizes
-    // honest; ctx + model live for the call.
+    // honest; ctx + model live for the call; grammar_cstr outlives it.
     let result = unsafe {
         ffi::generate(
             ctx.as_ptr(),
@@ -231,6 +254,8 @@ pub fn generate_with_stops(
             top_k,
             repeat_penalty,
             time_seed(),
+            grammar_ptr,
+            ptr::null(),
             stop_seqs_ptr,
             stop_lens_ptr,
             n_stop_seqs,
@@ -264,6 +289,7 @@ pub fn generate_streaming<F>(
     top_k: usize,
     repeat_penalty: f32,
     stop_sequences: &[String],
+    grammar: Option<&str>,
     mut on_token: F,
     n_past_in: usize,
 ) -> LlamaResult<(Vec<i32>, bool)>
@@ -274,6 +300,11 @@ where
         prepare_generation(model, input_tokens, max_tokens, stop_sequences)?;
     let (stop_seqs_ptr, stop_lens_ptr, n_stop_seqs) = stop_array_ptrs(&stop_tokens, &stop_lens);
 
+    // Owns the grammar C string for the lifetime of the FFI call (see
+    // `generate_with_stops`).
+    let grammar_cstr = grammar_cstring(grammar)?;
+    let grammar_ptr = grammar_cstr.as_ref().map_or(ptr::null(), |c| c.as_ptr());
+
     let mut streaming_ctx = StreamingContext {
         callback: &mut on_token,
         error: None,
@@ -283,7 +314,7 @@ where
 
     // SAFETY: all pointers checked / sourced from owned buffers; the
     // user_data pointer is a stack-pinned `&mut StreamingContext<F>`
-    // that lives for the duration of the C call.
+    // that lives for the duration of the C call; grammar_cstr outlives it.
     let result = unsafe {
         ffi::generate_streaming(
             ctx.as_ptr(),
@@ -298,6 +329,8 @@ where
             top_k,
             repeat_penalty,
             time_seed(),
+            grammar_ptr,
+            ptr::null(),
             stop_seqs_ptr,
             stop_lens_ptr,
             n_stop_seqs,
@@ -345,6 +378,7 @@ pub fn generate_from_current_logits_streaming<F>(
     top_k: usize,
     repeat_penalty: f32,
     stop_sequences: &[String],
+    grammar: Option<&str>,
     n_past: usize,
     mut on_token: F,
 ) -> LlamaResult<(Vec<i32>, bool)>
@@ -361,6 +395,11 @@ where
     let (stop_seqs_ptr, stop_lens_ptr, n_stop_seqs) = stop_array_ptrs(&stop_tokens, &stop_lens);
     let mut output_tokens = vec![0i32; max_tokens];
 
+    // Owns the grammar C string for the lifetime of the FFI call (see
+    // `generate_with_stops`).
+    let grammar_cstr = grammar_cstring(grammar)?;
+    let grammar_ptr = grammar_cstr.as_ref().map_or(ptr::null(), |c| c.as_ptr());
+
     let mut streaming_ctx = StreamingContext {
         callback: &mut on_token,
         error: None,
@@ -370,7 +409,7 @@ where
 
     // SAFETY: ctx/model are live; output buffer and stop arrays are owned
     // by this frame; user_data points to a stack-pinned StreamingContext
-    // that outlives the C call.
+    // that outlives the C call; grammar_cstr outlives it.
     let result = unsafe {
         ffi::generate_from_current_logits(
             ctx.as_ptr(),
@@ -383,6 +422,8 @@ where
             top_k,
             repeat_penalty,
             time_seed(),
+            grammar_ptr,
+            ptr::null(),
             stop_seqs_ptr,
             stop_lens_ptr,
             n_stop_seqs,
