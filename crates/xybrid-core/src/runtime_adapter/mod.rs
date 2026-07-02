@@ -55,6 +55,10 @@ pub mod traits;
 // Always-available types for FFI/bindings (NOT feature-gated)
 pub mod types;
 
+// JSON-Schema → GBNF conversion for constrained decoding. Pure Rust, no llama
+// dependency, so it is always compiled (referenced by `GenerationConfig`).
+pub mod grammar;
+
 // Shared vision contracts for embedding-style multimodal backends.
 pub mod vision;
 

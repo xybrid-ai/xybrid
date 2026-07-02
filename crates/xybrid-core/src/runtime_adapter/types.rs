@@ -336,6 +336,16 @@ pub struct GenerationConfig {
     /// Stop sequences.
     #[serde(default)]
     pub stop_sequences: Vec<String>,
+
+    /// Optional GBNF grammar constraining generation. When set, the local
+    /// llama.cpp backend masks any token the grammar would reject, guaranteeing
+    /// structured output (e.g. schema-valid JSON for data extraction).
+    ///
+    /// Set the raw grammar via [`GenerationConfig::with_grammar`], or convert a
+    /// JSON Schema with [`GenerationConfig::with_json_schema`]. `None` = free
+    /// (unconstrained) generation. Ignored by non-llama backends.
+    #[serde(default)]
+    pub grammar: Option<String>,
 }
 
 fn default_max_tokens() -> usize {
@@ -376,6 +386,7 @@ impl Default for GenerationConfig {
             top_k: default_top_k(),
             repetition_penalty: default_repetition_penalty(),
             stop_sequences: Vec::new(),
+            grammar: None,
         }
     }
 }
@@ -417,6 +428,40 @@ impl GenerationConfig {
     pub fn with_stop(mut self, stop: impl Into<String>) -> Self {
         self.stop_sequences.push(stop.into());
         self
+    }
+
+    /// Constrain generation to a raw [GBNF] grammar (entry rule `root`).
+    ///
+    /// This is the escape hatch for callers who already have a grammar; most
+    /// callers should use [`GenerationConfig::with_json_schema`] instead. Only
+    /// the local llama.cpp backend honors this; other backends ignore it.
+    ///
+    /// [GBNF]: https://github.com/ggml-org/llama.cpp/blob/master/grammars/README.md
+    pub fn with_grammar(mut self, grammar: impl Into<String>) -> Self {
+        self.grammar = Some(grammar.into());
+        self
+    }
+
+    /// Constrain generation to a JSON Schema, converting it to a GBNF grammar.
+    ///
+    /// Guarantees the model emits schema-valid JSON — the basis for reliable
+    /// on-device data extraction. Supports a subset of JSON Schema (objects,
+    /// arrays, scalars, enums); see [`crate::runtime_adapter::grammar`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`XybridError::Grammar`] if the schema is malformed or uses an
+    /// unsupported construct.
+    ///
+    /// [`XybridError::Grammar`]: crate::error::XybridError::Grammar
+    pub fn with_json_schema(
+        mut self,
+        schema: &serde_json::Value,
+    ) -> crate::error::XybridResult<Self> {
+        self.grammar = Some(crate::runtime_adapter::grammar::json_schema_to_gbnf(
+            schema,
+        )?);
+        Ok(self)
     }
 }
 
