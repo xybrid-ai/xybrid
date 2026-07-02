@@ -648,6 +648,9 @@ llama_sampler* llama_sampler_chain_create_c(
     // Create sampler chain with default params
     llama_sampler_chain_params chain_params = llama_sampler_chain_default_params();
     llama_sampler* chain = llama_sampler_chain_init(chain_params);
+    if (!chain) {
+        return nullptr;
+    }
 
     // Grammar constraint goes FIRST: it masks (sets logit = -inf) every token
     // the GBNF grammar would reject, so all downstream samplers (penalties,

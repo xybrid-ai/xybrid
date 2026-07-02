@@ -11,7 +11,8 @@
 //! library which this build does not link, so the conversion is done here in
 //! Rust against a deliberate **subset** of JSON Schema:
 //!
-//! - `type`: `object`, `array`, `string`, `integer`, `number`, `boolean`, `null`
+//! - `type`: `object`, `array`, `string`, `integer`, `number`, `boolean`,
+//!   `null` — or an array of those (e.g. `["string", "null"]` for nullable)
 //! - `object`: `properties` (all emitted, in map order), nested objects
 //! - `array`: `items`
 //! - `enum`: scalar variants (string / number / boolean / null)
@@ -59,7 +60,7 @@ pub enum GrammarError {
 /// whitespace removes that trap; the output is still valid (minified) JSON.
 /// Unused terminals are harmless to llama.cpp's grammar parser.
 const TERMINALS: &str = "\
-string ::= \"\\\"\" ( [^\"\\\\] | \"\\\\\" [\"\\\\/bfnrt] )* \"\\\"\"\n\
+string ::= \"\\\"\" ( [^\"\\\\] | \"\\\\\" [\"\\\\/bfnrt] | \"\\\\u\" [0-9a-fA-F] [0-9a-fA-F] [0-9a-fA-F] [0-9a-fA-F] )* \"\\\"\"\n\
 integer ::= \"-\"? ( \"0\" | [1-9] [0-9]* )\n\
 number ::= \"-\"? ( \"0\" | [1-9] [0-9]* ) ( \".\" [0-9]+ )? ( [eE] [-+]? [0-9]+ )?\n\
 boolean ::= \"true\" | \"false\"\n\
@@ -112,10 +113,47 @@ impl GrammarBuilder {
             return self.convert_enum(variants);
         }
 
-        let ty = obj.get("type").and_then(Value::as_str).ok_or_else(|| {
-            GrammarError::Unsupported("schema without `type` or `enum`".to_string())
-        })?;
+        match obj.get("type") {
+            Some(Value::String(ty)) => self.convert_type(ty, obj),
+            // Array-valued `type` (e.g. `["string", "null"]` for a nullable
+            // field) becomes an alternation over the listed types.
+            Some(Value::Array(types)) => {
+                if types.is_empty() {
+                    return Err(GrammarError::Invalid(
+                        "`type` array must list at least one type".to_string(),
+                    ));
+                }
+                let alts = types
+                    .iter()
+                    .map(|t| {
+                        let ty = t.as_str().ok_or_else(|| {
+                            GrammarError::Invalid(
+                                "`type` array entries must be strings".to_string(),
+                            )
+                        })?;
+                        self.convert_type(ty, obj)
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                if alts.len() == 1 {
+                    return Ok(alts.into_iter().next().expect("len checked == 1"));
+                }
+                Ok(self.add_rule(alts.join(" | ")))
+            }
+            Some(_) => Err(GrammarError::Invalid(
+                "`type` must be a string or an array of strings".to_string(),
+            )),
+            None => Err(GrammarError::Unsupported(
+                "schema without `type` or `enum`".to_string(),
+            )),
+        }
+    }
 
+    /// Convert a single named `type` against its schema node.
+    fn convert_type(
+        &mut self,
+        ty: &str,
+        obj: &serde_json::Map<String, Value>,
+    ) -> Result<String, GrammarError> {
         match ty {
             "string" => Ok("string".to_string()),
             "integer" => Ok("integer".to_string()),
@@ -145,12 +183,16 @@ impl GrammarBuilder {
         &mut self,
         obj: &serde_json::Map<String, Value>,
     ) -> Result<String, GrammarError> {
-        let props = obj.get("properties").and_then(Value::as_object);
-        let props = match props {
-            Some(p) if !p.is_empty() => p,
+        let props = match obj.get("properties") {
+            Some(p) => p.as_object().ok_or_else(|| {
+                GrammarError::Invalid("`properties` must be an object".to_string())
+            })?,
             // No declared properties → match an empty JSON object.
-            _ => return Ok(self.add_rule("\"{}\"".to_string())),
+            None => return Ok(self.add_rule("\"{}\"".to_string())),
         };
+        if props.is_empty() {
+            return Ok(self.add_rule("\"{}\"".to_string()));
+        }
 
         let mut parts = vec!["\"{\"".to_string()];
         for (i, (key, subschema)) in props.iter().enumerate() {
@@ -191,16 +233,24 @@ impl GrammarBuilder {
 
 /// GBNF literal matching the JSON-quoted form of an object key, e.g.
 /// `merchant` → `"\"merchant\""`.
+///
+/// The key is JSON-encoded first (quotes + JSON escapes, including `\u00XX`
+/// for control characters) so the grammar matches the *escaped* form the model
+/// must emit — never raw control characters, which would be invalid JSON.
+/// That JSON text is then escaped once more for the GBNF literal syntax.
 fn gbnf_json_key(key: &str) -> String {
-    let mut inner = String::with_capacity(key.len());
-    for ch in key.chars() {
+    let json = serde_json::to_string(key).expect("serializing a &str to JSON string cannot fail");
+    let mut out = String::with_capacity(json.len() + 8);
+    out.push('"');
+    for ch in json.chars() {
         match ch {
-            '"' => inner.push_str("\\\""),
-            '\\' => inner.push_str("\\\\"),
-            _ => inner.push(ch),
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            _ => out.push(ch),
         }
     }
-    format!("\"\\\"{inner}\\\"\"")
+    out.push('"');
+    out
 }
 
 /// GBNF literal matching a single scalar `enum` variant in its JSON form.
@@ -301,5 +351,56 @@ mod tests {
     fn non_object_schema_is_invalid() {
         let err = json_schema_to_gbnf(&json!("nope")).unwrap_err();
         assert!(matches!(err, GrammarError::Invalid(_)));
+    }
+
+    #[test]
+    fn nullable_type_array_becomes_alternation() {
+        let gbnf = json_schema_to_gbnf(&json!({
+            "type": "object",
+            "properties": {
+                "nickname": { "type": ["string", "null"] }
+            }
+        }))
+        .unwrap();
+        assert!(gbnf.contains("string | null"));
+    }
+
+    #[test]
+    fn empty_or_non_string_type_array_is_invalid() {
+        let err = json_schema_to_gbnf(&json!({ "type": [] })).unwrap_err();
+        assert!(matches!(err, GrammarError::Invalid(_)));
+        let err = json_schema_to_gbnf(&json!({ "type": [42] })).unwrap_err();
+        assert!(matches!(err, GrammarError::Invalid(_)));
+    }
+
+    #[test]
+    fn non_object_properties_is_invalid() {
+        let err = json_schema_to_gbnf(&json!({
+            "type": "object",
+            "properties": true
+        }))
+        .unwrap_err();
+        assert!(matches!(err, GrammarError::Invalid(_)));
+    }
+
+    #[test]
+    fn control_chars_in_keys_match_json_escaped_form() {
+        let gbnf = json_schema_to_gbnf(&json!({
+            "type": "object",
+            "properties": {
+                "a\nb": { "type": "string" }
+            }
+        }))
+        .unwrap();
+        // The grammar must match the JSON-escaped key (`a\nb` with a
+        // backslash-n), never a raw newline, which would be invalid JSON.
+        assert!(gbnf.contains("a\\\\nb"));
+        assert!(!gbnf.contains("a\nb"));
+    }
+
+    #[test]
+    fn string_terminal_accepts_unicode_escapes() {
+        let gbnf = json_schema_to_gbnf(&json!({ "type": "string" })).unwrap();
+        assert!(gbnf.contains("[0-9a-fA-F] [0-9a-fA-F] [0-9a-fA-F] [0-9a-fA-F]"));
     }
 }

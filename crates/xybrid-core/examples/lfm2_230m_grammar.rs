@@ -18,7 +18,10 @@ use xybrid_core::ir::{Envelope, EnvelopeKind};
 use xybrid_core::runtime_adapter::llm::GenerationConfig;
 
 fn model_dir() -> PathBuf {
-    let home = std::env::var("HOME").expect("HOME not set");
+    // Windows sets USERPROFILE rather than HOME.
+    let home = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .expect("neither HOME nor USERPROFILE is set");
     PathBuf::from(home).join(".xybrid/cache/extracted/lfm2.5-230m")
 }
 
