@@ -145,7 +145,7 @@ xybrid run --model kokoro-82m --input-text "国破山河在，城春草木深" -
 
 ```yaml
 dependencies:
-  xybrid_flutter: ^0.1.2
+  xybrid_flutter: ^0.2.1
 ```
 
 **运行模型：**
@@ -162,7 +162,7 @@ final result = await model.run(XybridEnvelope.text('国破山河在，城春草�
 
 ```gradle
 dependencies {
-    implementation("ai.xybrid:xybrid-kotlin:0.1.2")
+    implementation("ai.xybrid:xybrid-kotlin:0.2.1")
 }
 ```
 
@@ -180,7 +180,7 @@ val result = model.run(Envelope.text("国破山河在，城春草木深"))
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/xybrid-ai/xybrid.git", from: "0.1.2")
+    .package(url: "https://github.com/xybrid-ai/xybrid.git", from: "0.2.1")
 ]
 ```
 
@@ -214,7 +214,7 @@ var result = model.Run(Envelope.Text("国破山河在，城春草木深"));
 
 ```toml
 [dependencies]
-xybrid = "0.1.2"
+xybrid = "0.2.1"
 ```
 
 **运行模型：**
@@ -316,6 +316,12 @@ let result = pipeline.run(&Envelope::audio(audio_bytes))?;
 | Qwen 3.5 2B | 2B | GGUF Q4_K_M | 更大的 Qwen 3.5，扩展推理能力 |
 | SmolLM2 360M | 360M | GGUF Q4_K_M | 最佳的微型模型，优秀的质量/体积比 |
 
+### 视觉语言模型（VLM）
+
+| 模型 | 参数量 | 格式 | 简介 |
+|------|--------|------|------|
+| LFM2-VL 450M | 450M | GGUF Q4_0 + mmproj | Liquid AI 的紧凑型 VLM（SigLIP2 视觉）— 图像+文本输入，通过 llama.cpp mtmd 运行 |
+
 ### 即将推出
 
 | 模型 | 类型 | 参数量 | 优先级 | 状态 |
@@ -325,7 +331,6 @@ let result = pipeline.run(&Envelope::audio(audio_bytes))?;
 | Trinity Nano | LLM (MoE) | 6B（1B 活跃） | P2 | 计划中 |
 | LFM2-VL 700M | Vision+LLM | 700M | P2 | 计划中 |
 | Nomic Embed Text v1.5 | 嵌入 | 137M | P1 | 受阻（需要 Tokenize/MeanPool 步骤） |
-| LFM2-VL 450M | 视觉 | 450M | P2 | 计划中 |
 | Whisper Tiny CoreML | ASR | 39M | P2 | 计划中 |
 | Qwen3-TTS 0.6B | TTS | 600M | P2 | 受阻（需要自定义 SafeTensors 运行时） |
 | Chatterbox Turbo | TTS | 350M | P3 | 受阻（需要 ModelGraph 模板） |
@@ -376,7 +381,7 @@ Skills 与 agent 无关，位于 [`agents/skills/`](agents/skills/)。安装脚�
 | 语音转文本 | ✅ | ✅ | ✅ | ✅ | ✅ |
 | 文本转语音 | ✅ | ✅ | ✅ | ✅ | ✅ |
 | 语言模型 | ✅ | ✅ | ✅ | ✅ | ✅ |
-| 视觉模型 | 🔜 | 🔜 | 🔜 | 🔜 | 🔜 |
+| 视觉模型 | ✅ | ✅ | ✅ | ✅ | ✅ |
 | 嵌入模型 | 🔜 | 🔜 | 🔜 | 🔜 | 🔜 |
 | 多模型流水线（MMP） | ✅ | ✅ | ✅ | ✅ | ✅ |
 | 模型下载与缓存 | ✅ | ✅ | ✅ | ✅ | ✅ |

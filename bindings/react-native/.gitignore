@@ -2,6 +2,12 @@
 lib/
 node_modules/
 
+# Gradle build output for the android library module (produced when the
+# module is compiled, e.g. by the example app's `gradlew assembleDebug`).
+android/build/
+android/.gradle/
+.kotlin/
+
 # iOS native artifacts staged by `cargo xtask stage-react-native`. These are
 # produced from the Rust core and should not be checked in — the published
 # npm tarball includes them (CI runs the xtask before `npm pack`), but

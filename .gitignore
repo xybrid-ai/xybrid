@@ -61,3 +61,8 @@ __pycache__/
 # Bazel (Phase-0 spike — see .context/bazel-hermetic-evaluation.md)
 /bazel-*
 MODULE.bazel.lock
+
+# bindings/flutter/rust is a member of the root workspace, so the root
+# Cargo.lock is authoritative. A lockfile here is spurious (cargo ignores it)
+# but vuln scanners would read its stale contents — keep it out of the repo.
+/bindings/flutter/rust/Cargo.lock

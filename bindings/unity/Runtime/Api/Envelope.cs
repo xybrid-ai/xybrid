@@ -232,22 +232,27 @@ namespace Xybrid
             }
 
             int imageCount = images?.Count ?? 0;
-            XybridEnvelopeHandle** imageHandles = imageCount == 0
-                ? null
-                : stackalloc XybridEnvelopeHandle*[imageCount];
-
-            for (int i = 0; i < imageCount; i++)
+            XybridEnvelopeHandle** imageHandles = null;
+            if (imageCount > 0)
             {
-                Envelope image = images[i];
-                if (image == null)
+                // Note: stackalloc must be assigned directly to a pointer-typed local;
+                // placing it inside a ternary makes the compiler infer Span<T>, which
+                // rejects pointer type arguments (CS0306/CS0029).
+                XybridEnvelopeHandle** buffer = stackalloc XybridEnvelopeHandle*[imageCount];
+                for (int i = 0; i < imageCount; i++)
                 {
-                    throw new ArgumentException("Image attachment cannot be null.", nameof(images));
+                    Envelope image = images[i];
+                    if (image == null)
+                    {
+                        throw new ArgumentException("Image attachment cannot be null.", nameof(images));
+                    }
+                    if (image._kind != PayloadKind.Image)
+                    {
+                        throw new ArgumentException("Envelope.UserMessage accepts only image envelopes.", nameof(images));
+                    }
+                    buffer[i] = image.Handle;
                 }
-                if (image._kind != PayloadKind.Image)
-                {
-                    throw new ArgumentException("Envelope.UserMessage accepts only image envelopes.", nameof(images));
-                }
-                imageHandles[i] = image.Handle;
+                imageHandles = buffer;
             }
 
             byte[] textBytes = NativeHelpers.ToUtf8Bytes(text);

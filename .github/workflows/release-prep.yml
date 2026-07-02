@@ -178,6 +178,22 @@ jobs:
           cache-all-crates: "true"
           save-if: "true"
 
+      # `cargo xtask build-xcframework` shells out to `boltffi pack apple`, so
+      # the CLI must be present here just as it is in the Android job. Without
+      # it the build fails with "Failed to run `boltffi pack apple`. Install
+      # with `cargo install boltffi_cli`." Cache + pin to 0.25.3 to match the
+      # runtime `boltffi` crate (Cargo.lock) — a CLI/runtime skew mis-generates
+      # the bindings (see the Android job's note).
+      - name: Cache boltffi CLI
+        id: cache-boltffi
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.cargo/bin/boltffi
+          key: boltffi-cli-${{ runner.os }}-0.25.3
+
+      - name: Install boltffi CLI
+        run: which boltffi || cargo install boltffi_cli --version 0.25.3 --locked
+
       - name: Build XCFramework
         run: cargo xtask build-xcframework --release
 
@@ -398,6 +414,26 @@ jobs:
 
       - name: Install cargo-ndk
         run: which cargo-ndk || cargo install cargo-ndk
+
+      # boltffi CLI provides the `boltffi pack android` the build script
+      # (tools/scripts/build-android-bolt.sh) calls. The standalone
+      # build-android.yml / test-ci.yml jobs install it; release-prep must too,
+      # or `cargo xtask build-android` fails with `boltffi: command not found`.
+      # Cache the installed binary across runs.
+      - name: Cache boltffi CLI
+        id: cache-boltffi
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.cargo/bin/boltffi
+          key: boltffi-cli-${{ runner.os }}-0.25.3
+
+      - name: Install boltffi CLI
+        # `which || install` is idempotent whether or not the cache populated
+        # the binary. Pinned to 0.25.3 to MATCH the runtime `boltffi` crate
+        # (Cargo.lock): a CLI/runtime skew mis-generates unit-ok `Result<(), E>`
+        # exports as a `void` foreign function that drops the error and leaks
+        # the result buffer. `--locked` installs against the CLI's bundled lock.
+        run: which boltffi || cargo install boltffi_cli --version 0.25.3 --locked
 
       - name: Build Android .so files
         run: cargo xtask build-android --release

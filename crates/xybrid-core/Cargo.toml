@@ -25,8 +25,14 @@ path = "src/lib.rs"
 #   `xybrid-llama-sys`  : raw FFI + cmake build (Phase 1)
 #   `xybrid-llama`   : safe RAII + typed errors + streaming trampoline (Phase 2)
 #   `xybrid-core`    : thin adapter glue (Phase 3 reduction)
-xybrid-llama-sys = { path = "../llama-cpp-sys", version = "0.1.2", optional = true }
-xybrid-llama = { path = "../xybrid-llama", version = "0.1.2", optional = true }
+xybrid-llama-sys = { path = "../llama-cpp-sys", version = "0.2.1", optional = true }
+xybrid-llama = { path = "../xybrid-llama", version = "0.2.1", optional = true }
+# Real Jinja engine for the llama.cpp chat-template fallback: when llama.cpp's
+# hardcoded non-Jinja matcher rejects a GGUF's embedded template (returns -1),
+# we render that template here instead. Gated with the deps below into
+# `llm-llamacpp` so non-llama builds pay zero cost.
+minijinja = { version = "2.5", default-features = false, features = ["builtins", "loader", "macros", "serde"], optional = true }
+minijinja-contrib = { version = "2.5", features = ["pycompat"], optional = true }
 serde = { version = "1.0", features = ["derive"] }
 serde_yaml = "0.9"
 serde_json = "1.0"
@@ -149,6 +155,8 @@ llm-llamacpp = [
     "xybrid-llama-sys/bindings",
     "dep:xybrid-llama",
     "xybrid-llama/bindings",
+    "dep:minijinja",
+    "dep:minijinja-contrib",
 ]
 # The Rust vision pipeline (envelopes, preprocessing, strategy dispatch) is
 # always compiled in. This feature gates only the *native* llama multimodal

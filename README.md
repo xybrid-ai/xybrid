@@ -130,7 +130,7 @@ See the full [Installation Guide](https://docs.xybrid.dev/en/docs/quickstart) fo
 
 ```yaml
 dependencies:
-  xybrid_flutter: ^0.1.2
+  xybrid_flutter: ^0.2.1
 ```
 
 **Run a model:**
@@ -147,7 +147,7 @@ final result = await model.run(XybridEnvelope.text('Hello world'));
 
 ```gradle
 dependencies {
-    implementation("ai.xybrid:xybrid-kotlin:0.1.2")
+    implementation("ai.xybrid:xybrid-kotlin:0.2.1")
 }
 ```
 
@@ -165,7 +165,7 @@ val result = model.run(Envelope.text("Hello world"))
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/xybrid-ai/xybrid.git", from: "0.1.2")
+    .package(url: "https://github.com/xybrid-ai/xybrid.git", from: "0.2.1")
 ]
 ```
 
@@ -199,7 +199,7 @@ var result = model.Run(Envelope.Text("Hello world"));
 
 ```toml
 [dependencies]
-xybrid = "0.1.2"
+xybrid = "0.2.1"
 ```
 
 **Run a model:**
@@ -314,12 +314,19 @@ All models run entirely on-device. No cloud, no API keys required. Browse the fu
 | Model | Params | Format | Description |
 |-------|--------|--------|-------------|
 | Gemma 3 1B | 1B | GGUF Q4_K_M | Google's mobile-optimized LLM |
+| LFM2.5 230M | 230M | GGUF Q4_K_M | Liquid AI's smallest hybrid conv+attention LLM for edge devices |
 | LFM2.5 350M | 354M | GGUF Q4_K_M | Liquid AI's hybrid conv+attention, 9 languages, tool calling |
 | Llama 3.2 1B | 1B | GGUF Q4_K_M | Meta's general purpose, 128K context |
 | Qwen 2.5 0.5B | 500M | GGUF Q4_K_M | Compact on-device chat |
 | Qwen 3.5 0.8B | 800M | GGUF Q4_K_M | Latest Qwen with reasoning (thinking mode) |
 | Qwen 3.5 2B | 2B | GGUF Q4_K_M | Larger Qwen 3.5 with extended reasoning |
 | SmolLM2 360M | 360M | GGUF Q4_K_M | Best tiny LLM, excellent quality/size ratio |
+
+### Vision-Language
+
+| Model | Params | Format | Description |
+|-------|--------|--------|-------------|
+| LFM2-VL 450M | 450M | GGUF Q4_0 + mmproj | Liquid AI's compact VLM (SigLIP2 vision) — image + text in, runs via llama.cpp mtmd |
 
 ### Coming Soon
 
@@ -330,7 +337,6 @@ All models run entirely on-device. No cloud, no API keys required. Browse the fu
 | Trinity Nano | LLM (MoE) | 6B (1B active) | P2 | Planned |
 | LFM2-VL 700M | Vision+LLM | 700M | P2 | Planned |
 | Nomic Embed Text v1.5 | Embeddings | 137M | P1 | Blocked (needs Tokenize/MeanPool steps) |
-| LFM2-VL 450M | Vision | 450M | P2 | Planned |
 | Whisper Tiny CoreML | ASR | 39M | P2 | Planned |
 | Qwen3-TTS 0.6B | TTS | 600M | P2 | Blocked (needs custom SafeTensors runtime) |
 | Chatterbox Turbo | TTS | 350M | P3 | Blocked (needs ModelGraph template) |
@@ -381,7 +387,7 @@ See the [model metadata docs](docs/sdk/API_REFERENCE.md) for the full schema, or
 | Speech-to-Text | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Text-to-Speech | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Language Models | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Vision Models | 🔜 | 🔜 | 🔜 | 🔜 | 🔜 |
+| Vision Models | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Embeddings | 🔜 | 🔜 | 🔜 | 🔜 | 🔜 |
 | Multi-Model Pipelines (MMP) | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Model Download & Caching | ✅ | ✅ | ✅ | ✅ | ✅ |

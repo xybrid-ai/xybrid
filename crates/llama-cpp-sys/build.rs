@@ -506,6 +506,52 @@ fn compile_llama_cpp() {
     // resolve `<stdio.h>` through the NDK sysroot.
     generate_bindings(&llama_cpp_dir, &ctx.out_dir, ctx.android_ndk_path());
 
+    // rerun signals (apply to both the prebuilt fast path and the source
+    // build, so they live before the branch below).
+    println!("cargo:rerun-if-changed={}", llama_cpp_dir.display());
+    println!("cargo:rerun-if-changed={}", wrapper_path.display());
+    if vision_enabled {
+        println!(
+            "cargo:rerun-if-changed={}",
+            llama_cpp_dir.join("tools/mtmd/mtmd.h").display()
+        );
+        println!(
+            "cargo:rerun-if-changed={}",
+            llama_cpp_dir.join("tools/mtmd/mtmd-helper.h").display()
+        );
+    }
+    // The prebuilt fast path and the publisher export hook are selected by
+    // these env vars; declare them so toggling either re-runs the script.
+    println!("cargo:rerun-if-env-changed=XYBRID_NATIVES_PREBUILT_DIR");
+    println!("cargo:rerun-if-env-changed=XYBRID_NATIVES_EXPORT_DIR");
+
+    // Resolve the install prefix (`dst`) one of two ways:
+    //   - Fast path: a complete prebuilt slice staged for this target+feature
+    //     in `XYBRID_NATIVES_PREBUILT_DIR/<target>` — link it, skip the cmake
+    //     compile (the dominant cold-build cost on Android/Apple).
+    //   - Source path: today's cmake build, also the fallback when the fast
+    //     path misses for any reason (absent dir, incomplete slice).
+    let dst = match resolve_prebuilt(&ctx, vision_enabled) {
+        Some(prebuilt) => {
+            println!(
+                "cargo:warning=llama.cpp: using prebuilt natives for {} ({})",
+                ctx.target,
+                prebuilt.display()
+            );
+            prebuilt
+        }
+        None => build_from_source(&ctx, &llama_cpp_dir, vision_enabled),
+    };
+
+    emit_link_and_wrapper(&ctx, &llama_cpp_dir, &wrapper_path, &dst, vision_enabled);
+}
+
+/// Compile llama.cpp (+ the mtmd vision libs when enabled) from source via
+/// cmake and return the install prefix. This is the original build path; it is
+/// taken whenever the prebuilt fast path misses. When
+/// `XYBRID_NATIVES_EXPORT_DIR` is set, the produced archives + headers are also
+/// copied out so a publisher job can upload them as a reusable slice.
+fn build_from_source(ctx: &BuildContext, llama_cpp_dir: &Path, vision_enabled: bool) -> PathBuf {
     if !check_cmake_available() {
         fatal(
             "CMake not found!",
@@ -523,20 +569,7 @@ fn compile_llama_cpp() {
     let mut metal_enabled = false;
     let mut ndk_path_used: Option<String> = None;
 
-    println!("cargo:rerun-if-changed={}", llama_cpp_dir.display());
-    println!("cargo:rerun-if-changed={}", wrapper_path.display());
-    if vision_enabled {
-        println!(
-            "cargo:rerun-if-changed={}",
-            llama_cpp_dir.join("tools/mtmd/mtmd.h").display()
-        );
-        println!(
-            "cargo:rerun-if-changed={}",
-            llama_cpp_dir.join("tools/mtmd/mtmd-helper.h").display()
-        );
-    }
-
-    let mut cmake_config = cmake::Config::new(&llama_cpp_dir);
+    let mut cmake_config = cmake::Config::new(llama_cpp_dir);
     cmake_config
         .define("BUILD_SHARED_LIBS", "OFF")
         .define("LLAMA_BUILD_EXAMPLES", "OFF")
@@ -550,7 +583,7 @@ fn compile_llama_cpp() {
         .define("GGML_OPENMP", "OFF");
 
     if ctx.target_os == "android" {
-        ndk_path_used = configure_android(&mut cmake_config, &ctx);
+        ndk_path_used = configure_android(&mut cmake_config, ctx);
     } else if ctx.target_os == "macos" || ctx.target_os == "ios" {
         cmake_config
             .define("GGML_METAL", "ON")
@@ -581,7 +614,20 @@ fn compile_llama_cpp() {
     );
 
     let dst = cmake_config.build();
+    export_prebuilt(ctx, &dst);
+    dst
+}
 
+/// Emit the link directives and compile the first-party `wrapper.cpp` shim
+/// against `dst`. Shared by both the prebuilt and source paths so the linked
+/// surface is identical regardless of how `dst` was produced.
+fn emit_link_and_wrapper(
+    ctx: &BuildContext,
+    llama_cpp_dir: &Path,
+    wrapper_path: &Path,
+    dst: &Path,
+    vision_enabled: bool,
+) {
     println!("cargo:rustc-link-search=native={}/lib", dst.display());
     println!("cargo:rustc-link-search=native={}/lib64", dst.display());
     println!("cargo:rustc-link-search=native={}", dst.display());
@@ -601,7 +647,7 @@ fn compile_llama_cpp() {
     wrapper_build
         .cpp(true)
         .std("c++17")
-        .file(&wrapper_path)
+        .file(wrapper_path)
         .include(llama_cpp_dir.join("include"))
         .include(llama_cpp_dir.join("ggml/include"));
     if vision_enabled {
@@ -635,6 +681,146 @@ fn compile_llama_cpp() {
     } else if ctx.target_os == "windows" {
         // Windows linking handled by CMake
     }
+}
+
+/// The static archives the link step requires for a target + feature set —
+/// must stay in sync with the `rustc-link-lib=static=` directives in
+/// [`emit_link_and_wrapper`]. Used to validate a prebuilt slice before
+/// trusting it.
+fn required_archives(target_os: &str, vision_enabled: bool) -> Vec<String> {
+    // MSVC names static libs `<name>.lib` (no `lib` prefix); every other target
+    // we build for is Unix-style `lib<name>.a`.
+    let (prefix, suffix) = if target_os == "windows" {
+        ("", ".lib")
+    } else {
+        ("lib", ".a")
+    };
+    let mut libs = vec![
+        format!("{prefix}llama{suffix}"),
+        format!("{prefix}ggml{suffix}"),
+        format!("{prefix}ggml-base{suffix}"),
+        format!("{prefix}ggml-cpu{suffix}"),
+    ];
+    if target_os == "macos" || target_os == "ios" {
+        // Apple links ggml-metal unconditionally (see emit_link_and_wrapper).
+        libs.push(format!("{prefix}ggml-metal{suffix}"));
+    }
+    if vision_enabled {
+        libs.push(format!("{prefix}mtmd{suffix}"));
+    }
+    libs
+}
+
+/// True if static archive `name` exists and is non-empty under any of the
+/// link-search roots [`emit_link_and_wrapper`] emits (`<dir>/lib`,
+/// `<dir>/lib64`, `<dir>`).
+fn archive_present(dir: &Path, name: &str) -> bool {
+    ["lib", "lib64", ""].iter().any(|sub| {
+        std::fs::metadata(dir.join(sub).join(name)).is_ok_and(|m| m.is_file() && m.len() > 0)
+    })
+}
+
+/// Fast path: if `XYBRID_NATIVES_PREBUILT_DIR` is set and holds a *complete*
+/// install prefix for this exact target under `<dir>/<target-triple>`, return
+/// it to be linked in place of a cmake build.
+///
+/// Returns `None` — falling through to a source build — on any miss: env unset,
+/// the per-target slice absent, a required archive missing/empty, or no
+/// `include/` dir. The fast path therefore never fails the build; a cold or
+/// partial cache degrades silently to compiling from source. Keying by the
+/// full target triple lets one base dir serve a multi-ABI build (the Android
+/// build compiles every ABI from one cargo invocation, each running this
+/// script for its own `TARGET`).
+fn resolve_prebuilt(ctx: &BuildContext, vision_enabled: bool) -> Option<PathBuf> {
+    let base = env::var_os("XYBRID_NATIVES_PREBUILT_DIR")?;
+    let base = PathBuf::from(base);
+    if base.as_os_str().is_empty() {
+        return None;
+    }
+    let dir = base.join(&ctx.target);
+    // A missing per-target slice dir is a normal cold miss (e.g. the other
+    // Android ABIs when only arm64 was pulled) — degrade silently. The
+    // per-archive warnings below are reserved for a *present but incomplete*
+    // slice, which is the case actually worth surfacing.
+    if !dir.is_dir() {
+        return None;
+    }
+
+    for archive in required_archives(&ctx.target_os, vision_enabled) {
+        if !archive_present(&dir, &archive) {
+            println!(
+                "cargo:warning=llama.cpp: prebuilt slice for {} incomplete (missing {archive}); compiling from source",
+                ctx.target
+            );
+            return None;
+        }
+    }
+    // wrapper.cpp includes `dst/include` for cmake-generated headers.
+    if !dir.join("include").is_dir() {
+        println!(
+            "cargo:warning=llama.cpp: prebuilt slice for {} has no include/; compiling from source",
+            ctx.target
+        );
+        return None;
+    }
+    Some(dir)
+}
+
+/// Publisher hook: when `XYBRID_NATIVES_EXPORT_DIR` is set, copy the freshly
+/// built install prefix (`lib/`, `lib64/`, `include/`) into
+/// `<export>/<target-triple>/` so a CI job can tar + upload it as a reusable
+/// slice that [`resolve_prebuilt`] later consumes. No-op when the env var is
+/// unset (the normal build). Best-effort: a copy failure warns but does not
+/// fail the build, which already succeeded.
+fn export_prebuilt(ctx: &BuildContext, dst: &Path) {
+    let Some(base) = env::var_os("XYBRID_NATIVES_EXPORT_DIR") else {
+        return;
+    };
+    let base = PathBuf::from(base);
+    if base.as_os_str().is_empty() {
+        return;
+    }
+    let out = base.join(&ctx.target);
+    let mut exported_any = false;
+    let mut had_error = false;
+    for sub in ["lib", "lib64", "include"] {
+        let src = dst.join(sub);
+        if src.is_dir() {
+            if let Err(e) = copy_dir(&src, &out.join(sub)) {
+                println!(
+                    "cargo:warning=llama.cpp: failed to export {sub} for {}: {e}",
+                    ctx.target
+                );
+                had_error = true;
+            } else {
+                exported_any = true;
+            }
+        }
+    }
+    if exported_any && !had_error {
+        println!(
+            "cargo:warning=llama.cpp: exported prebuilt slice for {} to {}",
+            ctx.target,
+            out.display()
+        );
+    }
+}
+
+/// Recursively copy a directory tree (portable; no extra deps). Used only by
+/// the export hook in CI.
+fn copy_dir(src: &Path, dst: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(dst)?;
+    for entry in std::fs::read_dir(src)? {
+        let entry = entry?;
+        let from = entry.path();
+        let to = dst.join(entry.file_name());
+        if entry.file_type()?.is_dir() {
+            copy_dir(&from, &to)?;
+        } else {
+            std::fs::copy(&from, &to)?;
+        }
+    }
+    Ok(())
 }
 
 fn configure_android(cmake_config: &mut cmake::Config, ctx: &BuildContext) -> Option<String> {

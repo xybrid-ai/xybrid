@@ -102,6 +102,47 @@ jobs:
         # installs against the CLI's own bundled Cargo.lock for reproducibility.
         run: which boltffi || cargo install boltffi_cli --version 0.25.3 --locked
 
+      # Prebuilt-natives fast path (iOS device + arm64 simulator — the two
+      # slices boltffi's xcframework builds). Best-effort: pull the prebuilt
+      # llama.cpp slices and point build.rs at them so the xcframework build
+      # skips the llama.cpp cmake compile per slice. On ANY miss/error this is a
+      # silent no-op (continue-on-error) and the slice compiles from source — it
+      # can never break the build. build.rs keys on
+      # XYBRID_NATIVES_PREBUILT_DIR/<target>, so each slice in the single
+      # `boltffi pack apple` invocation resolves its own (or falls through).
+      - name: Setup oras
+        uses: oras-project/setup-oras@38de303aac69abb66f3e6255b7198bff35f323e3 # v2.0.0
+      # `oras login`, not docker/login-action: macOS runners have no docker.
+      # Best-effort + same-repo only (forks have no token → anonymous pull).
+      - name: Log in to ghcr (best-effort, same-repo)
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+        continue-on-error: true
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: echo "$GHCR_TOKEN" | oras login ghcr.io -u "${{ github.actor }}" --password-stdin
+      - name: Pull prebuilt natives (iOS device + sim, best-effort)
+        continue-on-error: true
+        env:
+          XYBRID_NATIVES_PKG: ghcr.io/xybrid-ai/llama-natives
+        run: |
+          # Use the Rust TARGET spelling aarch64-apple-ios-sim (with -sim);
+          # build.rs keys the slice dir on it.
+          DEST="$RUNNER_TEMP/natives"
+          got_any=0
+          for triple in aarch64-apple-ios aarch64-apple-ios-sim; do
+            if tools/scripts/natives-pull.sh "$triple" vision "$DEST"; then
+              echo "prebuilt natives staged for $triple (will skip cmake)"
+              got_any=1
+            else
+              echo "no prebuilt natives for $triple — compiles from source"
+            fi
+          done
+          if [ "$got_any" = 1 ]; then
+            echo "XYBRID_NATIVES_PREBUILT_DIR=$DEST" >> "$GITHUB_ENV"
+          else
+            echo "no prebuilt natives — compiles from source (unchanged)"
+          fi
+
       - name: Build XCFramework
         run: cargo xtask build-xcframework --release
 
@@ -133,7 +174,11 @@ jobs:
         # (non-exhaustive errorDescription switch, a missing import, an
         # enum-shape mismatch vs the regenerated bindings) fails CI here instead
         # of only when a human builds the example app. Uses the xcframework
-        # just built above (root Package.swift has useLocalNatives = true).
+        # just built above: the committed state is useLocalNatives = false (so
+        # SPM consumers resolve the published release asset), so this step flips
+        # to local mode at CI runtime before resolving — otherwise it would try
+        # to download the remote asset, which 404s on a release PR while the
+        # v<version> release is still a draft. The flip is CI-only, never committed.
         #
         # Targets the iOS Simulator for two reasons: (1) the xcframework ships
         # only ios-arm64 + ios-arm64-simulator (boltffi.toml include_macos=false),
@@ -145,6 +190,8 @@ jobs:
         # destination = compile + link, no run, no signing).
         run: |
           set -euo pipefail
+          # CI-runtime flip to the locally-built xcframework. Do NOT commit this.
+          ./bindings/apple/scripts/set-natives-mode.sh --set-local
           xcodebuild -resolvePackageDependencies
           xcodebuild build \
             -scheme Xybrid \
@@ -152,16 +199,14 @@ jobs:
             -skipPackagePluginValidation \
             CODE_SIGNING_ALLOWED=NO
 
-      - name: Check iOS vision build (compile-only, not shipped)
-        # Compile-only gate for the OPT-IN native llama.cpp vision backend
-        # (mtmd). This backend is in NO platform preset and is NOT shipped in
-        # the XCFramework above — this step only proves the
-        # `llm-llamacpp-vision` (mtmd) chain still cross-compiles for iOS, the
-        # gate the UniFFI->bolt migration dropped (it pointed at the deleted
-        # `xybrid-uniffi`; retargeted here at `xybrid-sdk`, which now carries
-        # both `platform-ios` and `llm-llamacpp-vision`: xybrid-sdk ->
-        # xybrid-core/llm-llamacpp-vision -> xybrid-llama-sys/vision; the -sys
-        # crate lives at crates/llama-cpp-sys/, package `xybrid-llama-sys`).
+      - name: Check iOS vision build (fast early-fail smoke)
+        # Fast `cargo check` smoke for the native llama.cpp vision backend
+        # (mtmd). As of 0.2.1 `platform-ios` ships this backend, so the
+        # XCFramework above already compiles it — this step is a redundant but
+        # cheap early-fail signal that surfaces an mtmd cross-compile break in
+        # ~1-2 min instead of waiting on the full xcframework cycle. The chain:
+        # xybrid-sdk -> xybrid-core/llm-llamacpp-vision -> xybrid-llama-sys/vision
+        # (the -sys crate lives at crates/llama-cpp-sys/, package `xybrid-llama-sys`).
         #
         # `check` (not `build`) is sufficient and matches the old gate: the
         # crates/llama-cpp-sys/build.rs runs on `check` and is what compiles

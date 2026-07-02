@@ -632,8 +632,10 @@ namespace Xybrid.Native
         ///  Get the conversation context ID.
         ///
         ///  Returns a pointer to a null-terminated string containing the context ID.
-        ///  The returned pointer is valid until the context handle is freed.
-        ///  Do NOT free the returned string.
+        ///  The returned pointer is valid for the lifetime of the context handle —
+        ///  it shares storage with the handle and is invalidated only by
+        ///  `xybrid_context_free`. Safe to hold across other `xybrid_*` calls on
+        ///  any thread. Do NOT free the returned string.
         ///
         ///  # Parameters
         ///
@@ -641,7 +643,8 @@ namespace Xybrid.Native
         ///
         ///  # Returns
         ///
-        ///  A pointer to the context ID string, or null on failure.
+        ///  A pointer to the context ID string, or null if the handle is null or
+        ///  invalid.
         /// </summary>
         [DllImport(__DllName, EntryPoint = "xybrid_context_id", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         internal static extern byte* xybrid_context_id(XybridContextHandle* handle);
@@ -1260,12 +1263,57 @@ namespace Xybrid.Native
         internal static extern uint xybrid_result_latency_ms(XybridResultHandle* result);
 
         /// <summary>
-        ///  Get the output type from an inference result.
+        ///  Get the output type of an inference result as a typed enum.
+        ///
+        ///  Prefer this over the string accessor [`xybrid_result_output_type`]
+        ///  — it lets C consumers `switch` on a stable `#[repr(C)]` value
+        ///  instead of `strcmp`-ing against magic strings.
+        ///
+        ///  # Parameters
+        ///
+        ///  - `result`: A handle to the inference result.
+        ///
+        ///  # Returns
+        ///
+        ///  The [`XybridOutputType`] variant. Returns `XybridOutputType::Unknown`
+        ///  (== `0`) if the handle is null/invalid, which is indistinguishable
+        ///  from a genuine "no recognised output" result — callers that need to
+        ///  tell those apart should null-check the handle before calling.
+        ///
+        ///  # Example (C)
+        ///
+        ///  ```c
+        ///  switch (xybrid_result_output_type_enum(result)) {
+        ///      case XybridOutputType_Audio: {
+        ///          const uint8_t* data = xybrid_result_audio_data(result);
+        ///          size_t len = xybrid_result_audio_len(result);
+        ///          // Process audio bytes...
+        ///          break;
+        ///      }
+        ///      case XybridOutputType_Text:
+        ///          printf("%s\n", xybrid_result_text(result));
+        ///          break;
+        ///      default:
+        ///          break;
+        ///  }
+        ///  ```
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "xybrid_result_output_type_enum", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern XybridOutputType xybrid_result_output_type_enum(XybridResultHandle* result);
+
+        /// <summary>
+        ///  Get the output type from an inference result as a string.
         ///
         ///  Returns a pointer to a null-terminated string containing the output type:
         ///  `"text"`, `"audio"`, `"embedding"`, or `"unknown"`.
-        ///  The returned pointer uses thread-local storage and is valid until the next
-        ///  call to this function on the same thread. Do NOT free it.
+        ///  The returned pointer is valid for the lifetime of the result handle —
+        ///  backed by per-handle storage populated when the result was constructed.
+        ///  Safe to hold across other `xybrid_*` calls on any thread. Do NOT free it.
+        ///
+        ///  **Prefer [`xybrid_result_output_type_enum`]** for new code — it
+        ///  returns a typed `#[repr(C)]` enum instead of a string that has to
+        ///  be `strcmp`'d. This accessor is retained as a convenience and
+        ///  derives its value from the same typed source.
         ///
         ///  # Parameters
         ///
@@ -1475,10 +1523,12 @@ namespace Xybrid.Native
         /// <summary>
         ///  Get the stage_id string for the entry at `index`.
         ///
-        ///  Returns a thread-local pointer valid until the next call to this
-        ///  function on the same thread. Do NOT free. Returns null if `index`
-        ///  is out of bounds or the handle is null/invalid. Callers should
-        ///  check `xybrid_result_stage_count` first.
+        ///  Returns a pointer to the stage_id string, valid for the lifetime of
+        ///  the result handle — backed by per-handle storage populated when the
+        ///  result was constructed. Safe to hold across other `xybrid_*` calls
+        ///  on any thread. Do NOT free. Returns null if `index` is out of bounds
+        ///  or the handle is null/invalid; callers should check
+        ///  `xybrid_result_stage_count` first.
         /// </summary>
         [DllImport(__DllName, EntryPoint = "xybrid_result_stage_id", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         internal static extern byte* xybrid_result_stage_id(XybridResultHandle* result, nuint index);
@@ -1581,8 +1631,9 @@ namespace Xybrid.Native
         /// <summary>
         ///  Get the model ID from an opened bundle's manifest.
         ///
-        ///  The returned pointer uses thread-local storage and is valid until the next
-        ///  call to this function on the same thread. Do NOT free it.
+        ///  The returned pointer is valid for the lifetime of the bundle handle —
+        ///  backed by per-handle storage populated at `xybrid_bundle_open`. Safe to
+        ///  hold across other `xybrid_*` calls on any thread. Do NOT free it.
         ///
         ///  # Parameters
         ///
@@ -1590,7 +1641,7 @@ namespace Xybrid.Native
         ///
         ///  # Returns
         ///
-        ///  A pointer to the model ID string, or null on error.
+        ///  A pointer to the model ID string, or null if the handle is null/invalid.
         /// </summary>
         [DllImport(__DllName, EntryPoint = "xybrid_bundle_model_id", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         internal static extern byte* xybrid_bundle_model_id(XybridBundleHandle* handle);
@@ -1598,8 +1649,8 @@ namespace Xybrid.Native
         /// <summary>
         ///  Get the version from an opened bundle's manifest.
         ///
-        ///  The returned pointer uses thread-local storage and is valid until the next
-        ///  call to this function on the same thread. Do NOT free it.
+        ///  The returned pointer is valid for the lifetime of the bundle handle.
+        ///  Safe to hold across other `xybrid_*` calls on any thread. Do NOT free it.
         /// </summary>
         [DllImport(__DllName, EntryPoint = "xybrid_bundle_version", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         internal static extern byte* xybrid_bundle_version(XybridBundleHandle* handle);
@@ -1607,8 +1658,8 @@ namespace Xybrid.Native
         /// <summary>
         ///  Get the target platform from an opened bundle's manifest.
         ///
-        ///  The returned pointer uses thread-local storage and is valid until the next
-        ///  call to this function on the same thread. Do NOT free it.
+        ///  The returned pointer is valid for the lifetime of the bundle handle.
+        ///  Safe to hold across other `xybrid_*` calls on any thread. Do NOT free it.
         /// </summary>
         [DllImport(__DllName, EntryPoint = "xybrid_bundle_target", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         internal static extern byte* xybrid_bundle_target(XybridBundleHandle* handle);
@@ -1616,8 +1667,8 @@ namespace Xybrid.Native
         /// <summary>
         ///  Get the SHA-256 hash from an opened bundle's manifest.
         ///
-        ///  The returned pointer uses thread-local storage and is valid until the next
-        ///  call to this function on the same thread. Do NOT free it.
+        ///  The returned pointer is valid for the lifetime of the bundle handle.
+        ///  Safe to hold across other `xybrid_*` calls on any thread. Do NOT free it.
         /// </summary>
         [DllImport(__DllName, EntryPoint = "xybrid_bundle_hash", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         internal static extern byte* xybrid_bundle_hash(XybridBundleHandle* handle);
@@ -1646,8 +1697,9 @@ namespace Xybrid.Native
         /// <summary>
         ///  Get the filename at a given index in the bundle's file list.
         ///
-        ///  The returned pointer uses thread-local storage and is valid until the next
-        ///  call to this function on the same thread. Do NOT free it.
+        ///  The returned pointer is valid for the lifetime of the bundle handle —
+        ///  backed by per-handle storage populated at `xybrid_bundle_open`. Safe to
+        ///  hold across other `xybrid_*` calls on any thread. Do NOT free it.
         ///
         ///  # Parameters
         ///
@@ -1656,7 +1708,8 @@ namespace Xybrid.Native
         ///
         ///  # Returns
         ///
-        ///  A pointer to the filename string, or null if index is out of bounds.
+        ///  A pointer to the filename string, or null if index is out of bounds
+        ///  or the handle is null/invalid.
         /// </summary>
         [DllImport(__DllName, EntryPoint = "xybrid_bundle_file_name", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         internal static extern byte* xybrid_bundle_file_name(XybridBundleHandle* handle, uint index);
@@ -1835,9 +1888,10 @@ namespace Xybrid.Native
     /// <summary>
     ///  Opaque handle to a model loader.
     ///
-    ///  This handle is created by `xybrid_model_loader_from_registry`,
-    ///  `xybrid_model_loader_from_bundle`, or `xybrid_model_loader_from_directory`
-    ///  and must be freed with `xybrid_model_loader_free`.
+    ///  Created by `xybrid_model_loader_from_registry`,
+    ///  `xybrid_model_loader_from_bundle`, or
+    ///  `xybrid_model_loader_from_directory` (and the HuggingFace /
+    ///  model-file siblings). Freed via `xybrid_model_loader_free`.
     /// </summary>
     [StructLayout(LayoutKind.Sequential)]
     internal unsafe partial struct XybridModelLoaderHandle
@@ -1848,8 +1902,8 @@ namespace Xybrid.Native
     /// <summary>
     ///  Opaque handle to a loaded model.
     ///
-    ///  This handle is created by `xybrid_model_loader_load` and must be
-    ///  freed with `xybrid_model_free`.
+    ///  Created by `xybrid_model_loader_load`. Freed via
+    ///  `xybrid_model_free`.
     /// </summary>
     [StructLayout(LayoutKind.Sequential)]
     internal unsafe partial struct XybridModelHandle
@@ -1860,8 +1914,10 @@ namespace Xybrid.Native
     /// <summary>
     ///  Opaque handle to an envelope (input data).
     ///
-    ///  This handle is created by `xybrid_envelope_audio` or `xybrid_envelope_text`
-    ///  and must be freed with `xybrid_envelope_free`.
+    ///  Created by `xybrid_envelope_audio` / `xybrid_envelope_text` /
+    ///  `xybrid_envelope_text_with_voice` /
+    ///  `xybrid_envelope_text_with_role`. Freed via
+    ///  `xybrid_envelope_free`.
     /// </summary>
     [StructLayout(LayoutKind.Sequential)]
     internal unsafe partial struct XybridEnvelopeHandle
@@ -1872,8 +1928,8 @@ namespace Xybrid.Native
     /// <summary>
     ///  Opaque handle to an inference result.
     ///
-    ///  This handle is created by `xybrid_model_run` and must be freed with
-    ///  `xybrid_result_free`.
+    ///  Created by `xybrid_model_run` (and the streaming / context
+    ///  variants). Freed via `xybrid_result_free`.
     /// </summary>
     [StructLayout(LayoutKind.Sequential)]
     internal unsafe partial struct XybridResultHandle
@@ -1884,8 +1940,8 @@ namespace Xybrid.Native
     /// <summary>
     ///  Opaque handle to a conversation context.
     ///
-    ///  This handle is created by `xybrid_context_new` and must be freed with
-    ///  `xybrid_context_free`.
+    ///  Created by `xybrid_context_new` / `xybrid_context_with_id`. Freed
+    ///  via `xybrid_context_free`.
     /// </summary>
     [StructLayout(LayoutKind.Sequential)]
     internal unsafe partial struct XybridContextHandle
@@ -1896,8 +1952,8 @@ namespace Xybrid.Native
     /// <summary>
     ///  Opaque handle to a generation config.
     ///
-    ///  This handle is created by `xybrid_generation_config_new` (or a preset
-    ///  like `xybrid_generation_config_greedy`) and must be freed with
+    ///  Created by `xybrid_generation_config_new` (or a preset like
+    ///  `xybrid_generation_config_greedy` / `_creative`). Freed via
     ///  `xybrid_generation_config_free`.
     /// </summary>
     [StructLayout(LayoutKind.Sequential)]
@@ -1909,8 +1965,7 @@ namespace Xybrid.Native
     /// <summary>
     ///  Opaque handle to a loaded bundle.
     ///
-    ///  This handle is created by `xybrid_bundle_open` and must be freed with
-    ///  `xybrid_bundle_free`.
+    ///  Created by `xybrid_bundle_open`. Freed via `xybrid_bundle_free`.
     /// </summary>
     [StructLayout(LayoutKind.Sequential)]
     internal unsafe partial struct XybridBundleHandle
@@ -1922,8 +1977,8 @@ namespace Xybrid.Native
     ///  Opaque handle to a telemetry configuration.
     ///
     ///  Create with `xybrid_telemetry_config_new`. Free with
-    ///  `xybrid_telemetry_config_free` unless the handle has been consumed by
-    ///  `xybrid_telemetry_init` (which always takes ownership).
+    ///  `xybrid_telemetry_config_free` unless the handle has been consumed
+    ///  by `xybrid_telemetry_init` (which always takes ownership).
     /// </summary>
     [StructLayout(LayoutKind.Sequential)]
     internal unsafe partial struct XybridTelemetryConfigHandle
@@ -1931,6 +1986,44 @@ namespace Xybrid.Native
         public void* Item1;
     }
 
+
+    /// <summary>
+    ///  The kind of payload an inference result carries.
+    ///
+    ///  Typed replacement for the previous stringly-typed `output_type`
+    ///  (`"text"` / `"audio"` / `"embedding"` / `"unknown"`) that C
+    ///  consumers had to `strcmp` against (audit theme 6,
+    ///  `type-no-stringly`). Returned by
+    ///  [`xybrid_result_output_type_enum`]; the legacy string accessor
+    ///  [`xybrid_result_output_type`] is kept as a convenience and derives
+    ///  its value from this enum via [`XybridOutputType::as_str`].
+    ///
+    ///  `#[repr(C)]` with explicit discriminants so the wire values are
+    ///  stable across header regenerations — appending a future variant
+    ///  must not renumber the existing four. `Unknown` is `0` so a
+    ///  zero-initialised C struct reads as "no/unknown output" rather than
+    ///  mis-decoding as `Text`.
+    /// </summary>
+    internal enum XybridOutputType : uint
+    {
+        /// <summary>
+        ///  No recognised payload (error results, or a successful run that
+        ///  produced none of text / audio / embedding).
+        /// </summary>
+        Unknown = 0,
+        /// <summary>
+        ///  Text output (ASR transcription, LLM completion).
+        /// </summary>
+        Text = 1,
+        /// <summary>
+        ///  Audio bytes (TTS synthesis).
+        /// </summary>
+        Audio = 2,
+        /// <summary>
+        ///  Embedding vector.
+        /// </summary>
+        Embedding = 3,
+    }
 
 
 }
