@@ -1,0 +1,32 @@
+bindings/react-native/src/NativeXybrid.ts
+  s_724f33db75a837::t_f82850f67fa0fa 47
+bindings/apple/Sources/Xybrid/Xybrid.swift
+  s_724f33db75a837::t_6565dd4947306e 235-240
+bindings/react-native/README.md
+  s_724f33db75a837::t_feabb930847d63 126-132
+  s_724f33db75a837::t_7ddfe6230ecd75 13
+bindings/react-native/src/index.ts
+  s_724f33db75a837::t_820ec6cbf23b2b 183-189
+  s_724f33db75a837::t_bd822432c40baa 240-244
+bindings/react-native/android/src/main/java/ai/xybrid/reactnative/XybridModule.kt
+  s_724f33db75a837::t_1c5f9d9ea74484 493
+  s_724f33db75a837::t_328980bac7d126 569-577,580,587,593-594,606-609
+bindings/react-native/ios/XybridModuleImpl.swift
+  s_724f33db75a837::t_7ac2d3e61d8384 435
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.9",
+  "base_commit_sha": "0170bb34f337ca78a83db4c3f334b2de51c23b0b",
+  "prompts": {},
+  "sessions": {
+    "s_724f33db75a837": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "cc7bd0bf-cafb-447d-a3a0-3f200f88e0bc",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
