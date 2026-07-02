@@ -1,0 +1,74 @@
+# PHASE-0 BAZEL SPIKE — throwaway. Root package exists so rules_rs can
+# watch //:Cargo.lock and //:Cargo.toml as the dependency source of truth.
+exports_files([
+    "Cargo.lock",
+    "Cargo.toml",
+])
+
+# GATE 3: vendored llama.cpp source (git submodule at vendor/llama-cpp), fed to
+# the llama-cpp-sys build script so build.rs uses it instead of cloning (no network
+# in Bazel actions). Owned by the root package since vendor/ has no BUILD of its own.
+filegroup(
+    name = "llama_src",
+    srcs = glob(
+        ["vendor/llama-cpp/**"],
+        exclude = ["vendor/llama-cpp/**/BUILD", "vendor/llama-cpp/**/BUILD.bazel"],
+        allow_empty = True,
+    ),
+    visibility = ["//visibility:public"],
+)
+
+# OPTION B: build llama.cpp's libraries hermetically via its own CMakeLists,
+# driven by rules_foreign_cc + the hermetic-llvm clang. Feature flags are MINE
+# here (not build.rs's hardcoded ones) → CPU-only, Metal/Accelerate/BLAS OFF, so
+# this is fully hermetic even on a Mac (no Xcode/xcrun). This is the clean
+# "graph node" llama target the evaluation's Option B describes.
+load("@rules_foreign_cc//foreign_cc:defs.bzl", "cmake")
+
+cmake(
+    name = "llama",
+    cache_entries = {
+        "CMAKE_BUILD_TYPE": "Release",
+        "BUILD_SHARED_LIBS": "OFF",
+        "LLAMA_BUILD_EXAMPLES": "OFF",
+        "LLAMA_BUILD_TESTS": "OFF",
+        "LLAMA_BUILD_TOOLS": "OFF",
+        "LLAMA_BUILD_SERVER": "OFF",
+        "LLAMA_BUILD_COMMON": "OFF",
+        "LLAMA_CURL": "OFF",
+        "GGML_OPENMP": "OFF",
+        "GGML_NATIVE": "OFF",  # reproducible: no -march=native
+        "GGML_METAL": "OFF",  # <-- the key: no Apple GPU => no Xcode => hermetic
+        "GGML_ACCELERATE": "OFF",
+        "GGML_BLAS": "OFF",
+        "GGML_CUDA": "OFF",
+        "GGML_VULKAN": "OFF",
+    },
+    # (macOS-host PATH hack removed for the RBE/Linux test — on Linux workers
+    # rfcc finds its own downloaded cmake; /opt/homebrew doesn't exist there.)
+    lib_source = ":llama_src",
+    out_static_libs = [
+        "libllama.a",
+        "libggml.a",
+        "libggml-base.a",
+        "libggml-cpu.a",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+# --- ANDROID PoC: validate the NDK cc_toolchain with a trivial compile before
+# wiring llama.cpp. Build with: bazel build //:ndk_smoke --platforms=//:android_arm64
+load("@rules_cc//cc:defs.bzl", "cc_library")
+
+platform(
+    name = "android_arm64",
+    constraint_values = [
+        "@platforms//os:android",
+        "@platforms//cpu:arm64",
+    ],
+)
+
+cc_library(
+    name = "ndk_smoke",
+    srcs = ["ndk_smoke.c"],
+)

@@ -1,0 +1,23 @@
+# GATE 3: safe Rust wrapper over llama-cpp-sys. Builds once llama_cpp_sys links.
+load("@rules_rs//rs:rust_library.bzl", "rust_library")
+
+rust_library(
+    name = "xybrid_llama",
+    srcs = glob(["src/**/*.rs"]),
+    edition = "2021",
+    crate_features = ["bindings"],
+    deps = [
+        "//crates/llama-cpp-sys:llama_cpp_sys",
+        "@crates//:thiserror",
+        "@crates//:tracing",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+# Dir-basename alias so `//crates/xybrid-llama` (the label all_crate_deps()
+# emits for xybrid-core) resolves to the proven target above.
+alias(
+    name = "xybrid-llama",
+    actual = ":xybrid_llama",
+    visibility = ["//visibility:public"],
+)

@@ -1,0 +1,48 @@
+# GATE 4 — full xybrid-llama-sys, Bazel-native via Option A (committed bindings).
+# No build.rs, no bindgen, no libclang. build.rs's jobs are replaced by:
+#   llama compile -> //:llama (rules_foreign_cc)
+#   bindgen       -> COMMITTED src/bindings.rs (regenerated offline via cargo)
+#   wrapper.cpp   -> cc_library
+#   crate         -> rust_library linking those
+load("@rules_cc//cc:defs.bzl", "cc_library")
+load("@rules_rs//rs:rust_library.bzl", "rust_library")
+
+# First-party C++ shim: defines the _c-suffixed symbols the Rust bindings call.
+# Links llama (CcInfo from rules_foreign_cc) and carries the llama headers.
+cc_library(
+    name = "wrapper_cc",
+    srcs = ["wrapper.cpp"],
+    hdrs = ["wrapper.h"],
+    deps = ["//:llama"],
+)
+
+# The crate. `committed-bindings` makes lib.rs include! the committed
+# src/bindings.rs (no OUT_DIR / bindgen). Cargo builds do NOT enable it —
+# they stay on fresh $OUT_DIR bindgen output so `vision` (mtmd_*) and
+# llama.cpp bumps keep working there.
+rust_library(
+    name = "llama_cpp_sys",
+    srcs = glob(["src/**/*.rs"]),
+    crate_features = [
+        "bindings",
+        "committed-bindings",
+    ],
+    edition = "2021",
+    deps = [
+        ":wrapper_cc",
+        "//:llama",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+# Dir-basename alias so `//crates/llama-cpp-sys` (the label all_crate_deps()
+# emits for xybrid-core) resolves to the proven target above. NOTE: the package
+# is `xybrid-llama-sys` but its [lib] name is `llama_cpp_sys`, so the resolver's
+# auto-alias (`xybrid_llama_sys`, package-derived) diverges from the real crate
+# name — a -sys lib-name-override gotcha. It doesn't bite xybrid-core (which
+# imports the safe `xybrid_llama` wrapper, not the sys crate, by name).
+alias(
+    name = "llama-cpp-sys",
+    actual = ":llama_cpp_sys",
+    visibility = ["//visibility:public"],
+)

@@ -1,0 +1,25 @@
+# GATE 5 — xybrid-sdk, the public Rust SDK (model load/run/stream + platform
+# init). Free via @crates apart from one wrinkle: it depends on `//macros`
+# (xybrid-macros), a proc-macro. rules_rust requires proc-macro crates in
+# `proc_macro_deps`, but `all_crate_deps()` lumps everything into one list — so
+# we lift `//macros` out. (sdk has no per-platform dep deltas, so the list is
+# plain and safe to filter; the platform feature deltas live in crate_features.)
+load("@rules_rs//rs:rust_library.bzl", "rust_library")
+load("@crates//:defs.bzl", "all_crate_deps")
+
+rust_library(
+    name = "xybrid-sdk",
+    srcs = glob(["src/**/*.rs"]),
+    edition = "2021",
+    crate_features = [
+        "default",
+        "llm-llamacpp",
+    ] + select({
+        "@rules_rs//rs/platforms/config:x86_64-unknown-linux-gnu": ["platform-desktop"],
+        "@rules_rs//rs/platforms/config:aarch64-apple-darwin": ["platform-macos"],
+        "//conditions:default": [],
+    }),
+    proc_macro_deps = ["//macros"],
+    deps = [d for d in all_crate_deps(normal = True) if d != "//macros"],
+    visibility = ["//visibility:public"],
+)

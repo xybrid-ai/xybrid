@@ -1,0 +1,13 @@
+# GATE 5 — xybrid umbrella crate (thin re-export over xybrid-sdk). Trivial:
+# one internal dep, zero externals, default features.
+load("@rules_rs//rs:rust_library.bzl", "rust_library")
+load("@crates//:defs.bzl", "all_crate_deps")
+
+rust_library(
+    name = "xybrid",
+    srcs = glob(["src/**/*.rs"]),
+    edition = "2021",
+    crate_features = ["default"],
+    deps = all_crate_deps(normal = True),
+    visibility = ["//visibility:public"],
+)

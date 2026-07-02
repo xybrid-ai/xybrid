@@ -1,0 +1,35 @@
+# GATE 5 — xybrid-bolt (BoltFFI: Swift/Kotlin/Java/C#/WASM bindings).
+#
+# This is the "other hard crate" the evaluation flagged. Bazel can build the
+# RUST ARTIFACTS — the cdylib (.so/.dylib) and the staticlib (.a) — straight
+# from @crates, no build.rs involved. What Bazel does NOT own here is the
+# `boltffi pack` step: it relinks the staticlib (the c++_shared / 16KB-align
+# fight), generates the Swift/Kotlin sources, and packs the xcframework/aar.
+# That stays in xtask/CI consuming these outputs (the build-once -> fan-out
+# boundary). boltffi itself is codegen, not a build script, so nothing is
+# generated at compile time.
+load("@rules_rs//rs:rust_shared_library.bzl", "rust_shared_library")
+load("@rules_rs//rs:rust_static_library.bzl", "rust_static_library")
+load("@crates//:defs.bzl", "all_crate_deps")
+
+# cdylib — libxybrid_bolt.{so,dylib}
+rust_shared_library(
+    name = "xybrid_bolt_cdylib",
+    srcs = glob(["src/**/*.rs"]),
+    crate_name = "xybrid_bolt",
+    edition = "2021",
+    crate_features = ["default"],
+    deps = all_crate_deps(normal = True),
+    visibility = ["//visibility:public"],
+)
+
+# staticlib — libxybrid_bolt.a (what `boltffi pack` relinks into the xcframework/aar)
+rust_static_library(
+    name = "xybrid_bolt_staticlib",
+    srcs = glob(["src/**/*.rs"]),
+    crate_name = "xybrid_bolt",
+    edition = "2021",
+    crate_features = ["default"],
+    deps = all_crate_deps(normal = True),
+    visibility = ["//visibility:public"],
+)

@@ -1,0 +1,106 @@
+# PHASE-0 BAZEL SPIKE — throwaway. See .context/bazel-hermetic-evaluation.md.
+# Goal: get real cold-build / cache-hit / reproducibility numbers for the
+# hermeticbuild stack (rules_rs + hermetic-llvm) on xybrid's REAL Cargo.lock.
+#
+# The three hermeticbuild modules are pinned to the local clones under
+# .context/bazel-research/ so this uses exactly the source that was evaluated.
+
+module(name = "xybrid_bazel_spike", version = "0.0.0")
+
+# --- hermeticbuild stack (local clones, mutually consistent @ main HEAD) -------
+# NOTE: clones live OUTSIDE the cargo workspace tree on purpose — if they sit
+# under the repo, `cargo metadata` (run by rules_rs' resolver) treats their
+# nested Cargo.toml files as stray workspace members and fails. A real migration
+# uses `bazel_dep` from BCR (deps land in Bazel's external cache, not the repo),
+# so this is a spike-only artifact.
+bazel_dep(name = "rules_rs", version = "0.0.0")
+local_path_override(
+    module_name = "rules_rs",
+    path = "/Users/glennsonna/.cache/xybrid-bazel-research/rules_rs",
+)
+
+bazel_dep(name = "llvm", version = "0.0.0")
+local_path_override(
+    module_name = "llvm",
+    path = "/Users/glennsonna/.cache/xybrid-bazel-research/hermetic-llvm",
+)
+
+bazel_dep(name = "hermetic_launcher", version = "0.0.0")
+local_path_override(
+    module_name = "hermetic_launcher",
+    path = "/Users/glennsonna/.cache/xybrid-bazel-research/hermetic-launcher",
+)
+
+# rules_cc must be a direct dep so the `@rules_cc//...` flag in .bazelrc resolves.
+bazel_dep(name = "rules_cc", version = "0.2.20")
+# platforms must be a direct dep so the `@platforms//...` constraints in //:android_arm64 resolve.
+bazel_dep(name = "platforms", version = "1.0.0")
+
+# --- Option B: rules_foreign_cc drives llama.cpp's own CMakeLists with the
+# hermetic-llvm compiler. Pinned + patched to the hermetic-llvm-compatible combo
+# (PR #1470 = thread --sysroot/-isystem into the foreign build).
+bazel_dep(name = "rules_foreign_cc", version = "0.15.1")
+single_version_override(
+    module_name = "rules_foreign_cc",
+    patch_strip = 1,
+    patches = ["//:rules_foreign_cc.patch"],
+)
+
+# --- Android NDK cc_toolchain. hermetic-llvm does NOT target Android, so Android
+# C/C++ (llama.cpp) is compiled by the NDK registered as a Bazel cc_toolchain.
+# Local-first PoC: uses the installed NDK r27 via ANDROID_NDK_HOME (set in
+# .bazelrc --repo_env). RBE would need the NDK present on the worker (later gate).
+bazel_dep(name = "rules_android_ndk", version = "0.1.5")
+android_ndk = use_extension("@rules_android_ndk//:extension.bzl", "android_ndk_repository_extension")
+use_repo(android_ndk, "androidndk")
+register_toolchains("@androidndk//:all")
+
+# NOTE: bindgen runs OFFLINE (committed src/bindings.rs, Option A) — no
+# rust_bindgen toolchain, no libclang-from-source, no python. Regenerate via
+# `cargo build -p xybrid-llama-sys --features bindings` when llama.cpp bumps.
+
+# NOTE: macOS-host-only workaround, DISABLED for the RBE (Linux) test. On a Mac,
+# rfcc's from-source pkg-config fails under lld, so we used host preinstalled
+# tools. On Linux RBE workers those host tools don't exist (ubuntu:22.04), and
+# rfcc's from-source pkg-config works fine — so we let rfcc use its defaults.
+# Re-enable this block to build //:llama locally on macOS again.
+# register_toolchains(
+#     "@rules_foreign_cc//toolchains:preinstalled_cmake_toolchain",
+#     "@rules_foreign_cc//toolchains:preinstalled_make_toolchain",
+#     "@rules_foreign_cc//toolchains:preinstalled_pkgconfig_toolchain",
+# )
+
+# --- C/C++ toolchain: hermetic LLVM (desktop targets) -------------------------
+register_toolchains("@llvm//toolchain:all")
+
+# Hermetic macOS SDK (replaces xcrun) — needed on darwin host/target.
+osx = use_extension("@llvm//extensions:osx.bzl", "osx")
+use_repo(osx, "macos_sdk")
+
+# --- Rust toolchain: rules_rs (facade over rules_rust) ------------------------
+rules_rust = use_extension("@rules_rs//rs:rules_rust.bzl", "rules_rust")
+use_repo(rules_rust, "rules_rust")
+
+toolchains = use_extension("@rules_rs//rs/toolchains:module_extension.bzl", "toolchains")
+toolchains.toolchain(
+    edition = "2021",
+    version = "1.92.0",
+)
+use_repo(toolchains, "default_rust_toolchains")
+
+register_toolchains("@default_rust_toolchains//:all")
+
+# --- GATE 2: crates from the REAL Cargo.lock ----------------------------------
+# Validates rules_rs dependency resolution over xybrid's actual workspace lock.
+crate = use_extension("@rules_rs//rs:extensions.bzl", "crate")
+crate.from_cargo(
+    name = "crates",
+    cargo_lock = "//:Cargo.lock",
+    cargo_toml = "//:Cargo.toml",
+    platform_triples = [
+        "x86_64-unknown-linux-gnu",
+        "aarch64-apple-darwin",
+        "aarch64-linux-android",
+    ],
+)
+use_repo(crate, "crates")

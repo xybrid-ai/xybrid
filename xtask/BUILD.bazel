@@ -1,0 +1,15 @@
+# GATE 5 — xtask build/codegen automation binary. rust_binary (src/main.rs).
+# No crate features; deps = xybrid-core + clap/reqwest/etc, auto-resolved.
+# NOTE: xtask drives the native-artifact packaging (boltffi pack, frb codegen,
+# header gen) that Bazel deliberately does NOT own — so under a real migration
+# Bazel replaces the native-artifact CORE of xtask, not the publisher glue.
+load("@rules_rs//rs:rust_binary.bzl", "rust_binary")
+load("@crates//:defs.bzl", "all_crate_deps")
+
+rust_binary(
+    name = "xtask",
+    srcs = glob(["src/**/*.rs"]),
+    edition = "2021",
+    deps = all_crate_deps(normal = True),
+    visibility = ["//visibility:public"],
+)

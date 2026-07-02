@@ -1,0 +1,4 @@
+.context
+target
+vendor/ort-android
+vendor/ort-ios
