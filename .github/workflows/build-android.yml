@@ -383,8 +383,19 @@ jobs:
         run: |
           set -u
           sdk="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
+          # `sdkmanager` isn't on PATH in a plain run step (the emulator-runner
+          # action wires it up itself), so resolve it under the SDK root.
+          sdkmanager="$(command -v sdkmanager || true)"
+          if [ -z "$sdkmanager" ]; then
+            sdkmanager="$(ls "$sdk"/cmdline-tools/latest/bin/sdkmanager \
+              "$sdk"/cmdline-tools/*/bin/sdkmanager 2>/dev/null | head -1 || true)"
+          fi
+          if [ -z "$sdkmanager" ]; then
+            echo "::error::sdkmanager not found under $sdk"; exit 1
+          fi
+          echo "using sdkmanager: $sdkmanager"
           for i in $(seq 1 3); do
-            if yes | sdkmanager --install emulator --channel=0; then
+            if yes | "$sdkmanager" --install emulator --channel=0; then
               echo "emulator installed (attempt $i)"
               exit 0
             fi
