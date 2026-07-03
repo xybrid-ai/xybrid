@@ -68,8 +68,13 @@ public struct XybridGenerationConfig: Hashable, Equatable, Sendable {
     public var topK: UInt32?
     public var repetitionPenalty: Float?
     public var stopSequences: [String]
+    /// Optional GBNF grammar constraining generation to structured output
+    /// (local llama backend only). Produce one from a JSON Schema with
+    /// [`json_schema_to_gbnf`], or pass raw GBNF. Appended last: `#[data]`
+    /// PODs serialize by field order across the FFI boundary.
+    public var grammar: String?
 
-    public init(maxTokens: UInt32? = nil, temperature: Float? = nil, topP: Float? = nil, minP: Float? = nil, topK: UInt32? = nil, repetitionPenalty: Float? = nil, stopSequences: [String]) {
+    public init(maxTokens: UInt32? = nil, temperature: Float? = nil, topP: Float? = nil, minP: Float? = nil, topK: UInt32? = nil, repetitionPenalty: Float? = nil, stopSequences: [String], grammar: String? = nil) {
         self.maxTokens = maxTokens
         self.temperature = temperature
         self.topP = topP
@@ -77,13 +82,14 @@ public struct XybridGenerationConfig: Hashable, Equatable, Sendable {
         self.topK = topK
         self.repetitionPenalty = repetitionPenalty
         self.stopSequences = stopSequences
+        self.grammar = grammar
     }
 
 }
 
 extension XybridGenerationConfig: WireCodable {
     @inlinable static func decode(from reader: inout WireReader) -> XybridGenerationConfig {
-        XybridGenerationConfig(maxTokens: reader.readOptional { reader in reader.readU32() }, temperature: reader.readOptional { reader in reader.readF32() }, topP: reader.readOptional { reader in reader.readF32() }, minP: reader.readOptional { reader in reader.readF32() }, topK: reader.readOptional { reader in reader.readU32() }, repetitionPenalty: reader.readOptional { reader in reader.readF32() }, stopSequences: reader.readArray { reader in reader.readString() })
+        XybridGenerationConfig(maxTokens: reader.readOptional { reader in reader.readU32() }, temperature: reader.readOptional { reader in reader.readF32() }, topP: reader.readOptional { reader in reader.readF32() }, minP: reader.readOptional { reader in reader.readF32() }, topK: reader.readOptional { reader in reader.readU32() }, repetitionPenalty: reader.readOptional { reader in reader.readF32() }, stopSequences: reader.readArray { reader in reader.readString() }, grammar: reader.readOptional { reader in reader.readString() })
     }
     @inlinable func encode(to writer: inout WireWriter) {
         writer.writeOptional(self.maxTokens) { writer, v in writer.writeU32(v) }
@@ -93,6 +99,7 @@ extension XybridGenerationConfig: WireCodable {
         writer.writeOptional(self.topK) { writer, v in writer.writeU32(v) }
         writer.writeOptional(self.repetitionPenalty) { writer, v in writer.writeF32(v) }
         writer.writeArray(self.stopSequences) { writer, item in writer.writeString(item) }
+        writer.writeOptional(self.grammar) { writer, v in writer.writeString(v) }
     }
 }
 
@@ -591,6 +598,18 @@ public enum XybridThermalState: Int32, Hashable, Sendable, CaseIterable {
 extension XybridThermalState: WireCodable {
     @inlinable static func decode(from reader: inout WireReader) -> XybridThermalState { XybridThermalState(wireTag: reader.readI32()) }
     @inlinable func encode(to writer: inout WireWriter) { writer.writeI32(wireTag) }
+}
+
+/// Convert a JSON Schema (as a JSON string) into a GBNF grammar for
+/// [`XybridGenerationConfig::grammar`]. Fails on invalid JSON or schema
+/// constructs outside the supported subset.
+public func jsonSchemaToGbnf(schemaJson: String) throws -> String {
+    var schemaJson = schemaJson
+    return try schemaJson.withUTF8 { schemaJsonBuf in
+        let buf = boltffi_json_schema_to_gbnf(schemaJsonBuf.baseAddress!, UInt(schemaJsonBuf.count))
+        defer { boltffi_free_buf(buf) }
+        return try boltffiDecodeOwnedBuf(buf.ptr, Int(buf.len)) { reader in try { let tag = reader.readU8(); if tag == 0 { return reader.readString() } else { throw XybridError.decode(from: &reader) } }() }
+    }
 }
 
 public func setThermalState(state: XybridThermalState) {
