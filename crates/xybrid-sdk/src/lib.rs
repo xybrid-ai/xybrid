@@ -195,6 +195,13 @@ pub use xybrid_core::runtime_adapter::types::{
     GenerationConfig, PartialToken, StreamingCallback, StreamingError,
 };
 
+// Re-export JSON-Schema → GBNF conversion for constrained decoding, so SDK
+// consumers and binding crates can produce `GenerationConfig::grammar` values
+// without depending on xybrid-core directly.
+pub use xybrid_core::runtime_adapter::grammar::{
+    json_schema_str_to_gbnf, json_schema_to_gbnf, GrammarError,
+};
+
 // Backwards compatibility re-exports
 #[doc(hidden)]
 pub use xybrid_core::execution as template_executor;

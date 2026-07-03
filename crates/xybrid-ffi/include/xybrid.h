@@ -958,6 +958,42 @@ void xybrid_generation_config_add_stop(struct XybridGenerationConfigHandle *conf
                                        const char *stop);
 
 /*
+ Set a GBNF grammar constraining generation to structured output
+ (local llama backend only; other backends ignore it).
+
+ Produce a grammar from a JSON Schema with `xybrid_json_schema_to_gbnf`,
+ or pass raw GBNF. Passing null clears any previously set grammar.
+
+ # Safety
+
+ `config` must be a valid handle. `grammar`, when non-null, must be a
+ null-terminated UTF-8 string.
+
+ # Parameters
+
+ - `config`: A handle to the generation config.
+ - `grammar`: A null-terminated UTF-8 GBNF grammar, or null to clear.
+ */
+void xybrid_generation_config_set_grammar(struct XybridGenerationConfigHandle *config,
+                                          const char *grammar);
+
+/*
+ Convert a JSON Schema (as a JSON string) into a GBNF grammar suitable for
+ `xybrid_generation_config_set_grammar`.
+
+ # Safety
+
+ `schema_json` must be a null-terminated UTF-8 string.
+
+ # Returns
+
+ A newly allocated null-terminated GBNF string, or null if the schema is
+ invalid JSON or uses an unsupported construct. Free the returned string
+ with `xybrid_free_string()`.
+ */
+char *xybrid_json_schema_to_gbnf(const char *schema_json);
+
+/*
  Free a generation config handle.
 
  After calling this function, the handle must not be used again.

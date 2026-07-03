@@ -462,6 +462,7 @@ pub(crate) struct GenerationConfigData {
     pub top_k: Option<usize>,
     pub repetition_penalty: Option<f32>,
     pub stop_sequences: Vec<String>,
+    pub grammar: Option<String>,
 }
 
 // Note: the previous `pub(crate) type BoxedFoo = Box<FooState>` aliases
@@ -689,6 +690,9 @@ fn generation_config_data_to_sdk(data: &GenerationConfigData) -> GenerationConfi
     }
     if !data.stop_sequences.is_empty() {
         config.stop_sequences = data.stop_sequences.clone();
+    }
+    if let Some(g) = &data.grammar {
+        config.grammar = Some(g.clone());
     }
     config
 }
@@ -2407,6 +2411,7 @@ pub extern "C" fn xybrid_generation_config_new() -> *mut XybridGenerationConfigH
             top_k: None,
             repetition_penalty: None,
             stop_sequences: Vec::new(),
+            grammar: None,
         });
         XybridGenerationConfigHandle::from_boxed(config)
     })
@@ -2428,6 +2433,7 @@ pub extern "C" fn xybrid_generation_config_greedy() -> *mut XybridGenerationConf
             top_k: Some(0),
             repetition_penalty: None,
             stop_sequences: Vec::new(),
+            grammar: None,
         });
         XybridGenerationConfigHandle::from_boxed(config)
     })
@@ -2449,6 +2455,7 @@ pub extern "C" fn xybrid_generation_config_creative() -> *mut XybridGenerationCo
             top_k: Some(50),
             repetition_penalty: None,
             stop_sequences: Vec::new(),
+            grammar: None,
         });
         XybridGenerationConfigHandle::from_boxed(config)
     })
@@ -2553,6 +2560,68 @@ pub unsafe extern "C" fn xybrid_generation_config_add_stop(
             if let Ok(s) = CStr::from_ptr(stop).to_str() {
                 data.stop_sequences.push(s.to_string());
             }
+        }
+    })
+}
+
+/// Set a GBNF grammar constraining generation to structured output
+/// (local llama backend only; other backends ignore it).
+///
+/// Produce a grammar from a JSON Schema with `xybrid_json_schema_to_gbnf`,
+/// or pass raw GBNF. Passing null clears any previously set grammar.
+///
+/// # Safety
+///
+/// `config` must be a valid handle. `grammar`, when non-null, must be a
+/// null-terminated UTF-8 string.
+///
+/// # Parameters
+///
+/// - `config`: A handle to the generation config.
+/// - `grammar`: A null-terminated UTF-8 GBNF grammar, or null to clear.
+#[no_mangle]
+pub unsafe extern "C" fn xybrid_generation_config_set_grammar(
+    config: *mut XybridGenerationConfigHandle,
+    grammar: *const c_char,
+) {
+    ffi_guard!("xybrid_generation_config_set_grammar", (), {
+        if let Some(data) = XybridGenerationConfigHandle::as_mut(config) {
+            if grammar.is_null() {
+                data.grammar = None;
+            } else if let Ok(s) = CStr::from_ptr(grammar).to_str() {
+                data.grammar = Some(s.to_string());
+            }
+        }
+    })
+}
+
+/// Convert a JSON Schema (as a JSON string) into a GBNF grammar suitable for
+/// `xybrid_generation_config_set_grammar`.
+///
+/// # Safety
+///
+/// `schema_json` must be a null-terminated UTF-8 string.
+///
+/// # Returns
+///
+/// A newly allocated null-terminated GBNF string, or null if the schema is
+/// invalid JSON or uses an unsupported construct. Free the returned string
+/// with `xybrid_free_string()`.
+#[no_mangle]
+pub unsafe extern "C" fn xybrid_json_schema_to_gbnf(schema_json: *const c_char) -> *mut c_char {
+    if schema_json.is_null() {
+        return std::ptr::null_mut();
+    }
+    ffi_guard!("xybrid_json_schema_to_gbnf", std::ptr::null_mut(), {
+        let Ok(schema) = CStr::from_ptr(schema_json).to_str() else {
+            return std::ptr::null_mut();
+        };
+        match xybrid_sdk::json_schema_str_to_gbnf(schema) {
+            Ok(gbnf) => match CString::new(gbnf) {
+                Ok(c) => c.into_raw(),
+                Err(_) => std::ptr::null_mut(),
+            },
+            Err(_) => std::ptr::null_mut(),
         }
     })
 }
