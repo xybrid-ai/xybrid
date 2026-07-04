@@ -1,0 +1,21 @@
+AGENTS.md
+  s_fce189698ddf27::t_191c980cff1b27 1,3-9,49-354,427,508,530,536-537
+CLAUDE.md
+  s_fce189698ddf27::t_77c188271d9226 1,5-9,11,13,15-20
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "8e3b373bf461928c2c54eb4db08b7a9804cc567e",
+  "prompts": {},
+  "sessions": {
+    "s_fce189698ddf27": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "05b32fb8-246e-4e34-bba8-8005771e45ce",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
