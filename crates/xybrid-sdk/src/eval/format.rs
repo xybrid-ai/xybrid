@@ -16,6 +16,7 @@
 //!   wire format never depends on a serialization detail of a dependency.
 
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::{Component, Path, PathBuf};
 
 /// Manifest filename inside an evalset directory.
@@ -57,6 +58,20 @@ pub enum TaskType {
 }
 
 impl TaskType {
+    /// The manifest spelling for this task.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            TaskType::Classify => "classify",
+            TaskType::Chat => "chat",
+            TaskType::Summarize => "summarize",
+            TaskType::Extract => "extract",
+            TaskType::Asr => "asr",
+            TaskType::Tts => "tts",
+            TaskType::Embedding => "embedding",
+            TaskType::Vlm => "vlm",
+        }
+    }
+
     /// Whether the default grader for this task requires an `expected` field.
     ///
     /// `chat`/`summarize`/`vlm` can run reference-free (judge reads input+output)
@@ -451,9 +466,10 @@ impl LoadedEvalset {
         if manifest.name.trim().is_empty() {
             return Err(EvalError::Invalid("evalset name is empty".into()));
         }
+        validate_gate(manifest.gate.as_ref())?;
 
         let cases_path = dir.join(CASES_FILE);
-        let cases = if cases_path.exists() {
+        let parsed_cases = if cases_path.exists() {
             // DoS guard: refuse a pathologically large cases file before reading
             // it into memory.
             let len = std::fs::metadata(&cases_path)
@@ -471,13 +487,17 @@ impl LoadedEvalset {
             Vec::new()
         };
 
+        validate_required_expected(&manifest, &parsed_cases, &cases_path)?;
+
         // Security: refuse any payload reference that escapes the evalset dir.
-        for case in &cases {
-            if let Some(rel) = case.input.payload_ref() {
-                validate_contained(dir, rel)
-                    .map_err(|_| EvalError::PathEscape(format!("case {}: {rel}", case.id)))?;
+        for parsed in &parsed_cases {
+            if let Some(rel) = parsed.case.input.payload_ref() {
+                validate_contained(dir, rel).map_err(|_| {
+                    EvalError::PathEscape(format!("case {}: {rel}", parsed.case.id))
+                })?;
             }
         }
+        let cases = parsed_cases.into_iter().map(|parsed| parsed.case).collect();
 
         Ok(Self {
             manifest,
@@ -506,10 +526,83 @@ impl LoadedEvalset {
     }
 }
 
+#[derive(Debug)]
+struct ParsedCase {
+    case: Case,
+    line: usize,
+}
+
+fn validate_gate(gate: Option<&Gate>) -> Result<(), EvalError> {
+    let Some(gate) = gate else {
+        return Ok(());
+    };
+    if let Some(value) = gate.min_quality {
+        if !value.is_finite() || !(0.0..=1.0).contains(&value) {
+            return Err(EvalError::Invalid(format!(
+                "gate.min_quality must be finite in 0.0..=1.0, got {value}"
+            )));
+        }
+    }
+    if let Some(value) = gate.max_p95_latency_ms {
+        if !value.is_finite() || value <= 0.0 {
+            return Err(EvalError::Invalid(format!(
+                "gate.max_p95_latency_ms must be finite and > 0.0, got {value}"
+            )));
+        }
+    }
+    if let Some(value) = gate.min_cases {
+        if value == 0 {
+            return Err(EvalError::Invalid(format!(
+                "gate.min_cases must be >= 1, got {value}"
+            )));
+        }
+    }
+    if let Some(value) = gate.repeats {
+        if value == 0 {
+            return Err(EvalError::Invalid(format!(
+                "gate.repeats must be >= 1, got {value}"
+            )));
+        }
+    }
+    if let Some(value) = gate.non_inferiority_margin {
+        if !value.is_finite() || value < 0.0 {
+            return Err(EvalError::Invalid(format!(
+                "gate.non_inferiority_margin must be finite and >= 0.0, got {value}"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn validate_required_expected(
+    manifest: &Evalset,
+    cases: &[ParsedCase],
+    path: &Path,
+) -> Result<(), EvalError> {
+    if !manifest.task.requires_expected() {
+        return Ok(());
+    }
+    for parsed in cases {
+        if parsed.case.expected.is_none() {
+            return Err(EvalError::Case {
+                path: path.to_path_buf(),
+                line: parsed.line,
+                reason: format!(
+                    "case '{}' is missing expected for {} task",
+                    parsed.case.id,
+                    manifest.task.as_str()
+                ),
+            });
+        }
+    }
+    Ok(())
+}
+
 /// Parse a `cases.jsonl` body into cases, attaching the 1-based line number to
 /// any parse error. Blank lines are skipped.
-fn parse_cases(src: &str, path: &Path) -> Result<Vec<Case>, EvalError> {
+fn parse_cases(src: &str, path: &Path) -> Result<Vec<ParsedCase>, EvalError> {
     let mut cases = Vec::new();
+    let mut seen_ids = HashMap::new();
     for (idx, line) in src.lines().enumerate() {
         let trimmed = line.trim();
         if trimmed.is_empty() {
@@ -520,7 +613,18 @@ fn parse_cases(src: &str, path: &Path) -> Result<Vec<Case>, EvalError> {
             line: idx + 1,
             reason: e.to_string(),
         })?;
-        cases.push(case);
+        let line = idx + 1;
+        if let Some(first_line) = seen_ids.insert(case.id.clone(), line) {
+            return Err(EvalError::Case {
+                path: path.to_path_buf(),
+                line,
+                reason: format!(
+                    "duplicate case id '{}' first appears at line {first_line} and repeats at line {line}",
+                    case.id
+                ),
+            });
+        }
+        cases.push(ParsedCase { case, line });
     }
     Ok(cases)
 }
@@ -673,6 +777,82 @@ mod tests {
     }
 
     #[test]
+    fn reference_required_task_rejects_missing_expected() {
+        let cases = r#"{"id":"c1","input":{"text":"refund please"}}
+"#;
+        let dir = write_evalset("name: s\ntask: classify\n", cases);
+        let err = LoadedEvalset::load(dir.path()).unwrap_err();
+        match err {
+            EvalError::Case { line, reason, .. } => {
+                assert_eq!(line, 1);
+                assert!(reason.contains("c1"));
+                assert!(reason.contains("classify"));
+                assert!(reason.contains("missing expected"));
+            }
+            other => panic!("expected Case error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn duplicate_case_id_reports_both_lines() {
+        let cases = r#"{"id":"dup","input":{"text":"a"}}
+{"id":"ok","input":{"text":"b"}}
+{"id":"dup","input":{"text":"c"}}
+"#;
+        let dir = write_evalset("name: s\ntask: chat\n", cases);
+        let err = LoadedEvalset::load(dir.path()).unwrap_err();
+        match err {
+            EvalError::Case { line, reason, .. } => {
+                assert_eq!(line, 3);
+                assert!(reason.contains("dup"));
+                assert!(reason.contains("line 1"));
+                assert!(reason.contains("line 3"));
+            }
+            other => panic!("expected Case error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn gate_numeric_ranges_are_validated() {
+        for (gate_field, field_name, value) in [
+            ("min_quality: 1.1", "gate.min_quality", "1.1"),
+            ("max_p95_latency_ms: 0", "gate.max_p95_latency_ms", "0"),
+            ("min_cases: 0", "gate.min_cases", "0"),
+            ("repeats: 0", "gate.repeats", "0"),
+            (
+                "non_inferiority_margin: -0.1",
+                "gate.non_inferiority_margin",
+                "-0.1",
+            ),
+            ("min_quality: .nan", "gate.min_quality", "NaN"),
+        ] {
+            let manifest = format!("name: s\ntask: chat\ngate:\n  {gate_field}\n");
+            let dir = write_evalset(&manifest, "");
+            let err = LoadedEvalset::load(dir.path()).unwrap_err();
+            let message = err.to_string();
+            assert!(message.contains(field_name), "{message}");
+            assert!(message.contains(value), "{message}");
+        }
+    }
+
+    #[test]
+    fn valid_gate_numeric_ranges_load() {
+        let manifest = "\
+name: s
+task: chat
+gate:
+  min_quality: 0.0
+  max_p95_latency_ms: 1.0
+  min_cases: 1
+  repeats: 1
+  non_inferiority_margin: 0.0
+";
+        let dir = write_evalset(manifest, "");
+        let set = LoadedEvalset::load(dir.path()).unwrap();
+        assert!(set.manifest.gate.is_some());
+    }
+
+    #[test]
     fn case_round_trips_through_serde() {
         let case = Case::new("c1", CaseInput::Text("hi".into()))
             .with_expected(Expected::Label("refund".into()));
@@ -728,7 +908,7 @@ mod tests {
 
     #[test]
     fn rejects_parent_dir_payload_ref() {
-        let cases = r#"{"id":"evil","input":{"audio":"file:../../etc/passwd"}}
+        let cases = r#"{"id":"evil","input":{"audio":"file:../../etc/passwd"},"expected":{"text":"transcript"}}
 "#;
         let dir = write_evalset("name: s\ntask: asr\n", cases);
         let err = LoadedEvalset::load(dir.path()).unwrap_err();
@@ -737,7 +917,7 @@ mod tests {
 
     #[test]
     fn rejects_absolute_payload_ref() {
-        let cases = r#"{"id":"evil","input":{"audio":"file:/etc/shadow"}}
+        let cases = r#"{"id":"evil","input":{"audio":"file:/etc/shadow"},"expected":{"text":"transcript"}}
 "#;
         let dir = write_evalset("name: s\ntask: asr\n", cases);
         let err = LoadedEvalset::load(dir.path()).unwrap_err();
@@ -768,7 +948,7 @@ mod tests {
         symlink(&secret, dir.path().join("clips/leak.wav")).unwrap();
         fs::write(
             dir.path().join(CASES_FILE),
-            "{\"id\":\"x\",\"input\":{\"audio\":\"file:clips/leak.wav\"}}\n",
+            "{\"id\":\"x\",\"input\":{\"audio\":\"file:clips/leak.wav\"},\"expected\":{\"text\":\"transcript\"}}\n",
         )
         .unwrap();
         let err = LoadedEvalset::load(dir.path()).unwrap_err();
@@ -783,7 +963,7 @@ mod tests {
         fs::write(dir.path().join("clips/a.wav"), b"RIFF").unwrap();
         fs::write(
             dir.path().join(CASES_FILE),
-            "{\"id\":\"x\",\"input\":{\"audio\":\"file:clips/a.wav\"}}\n",
+            "{\"id\":\"x\",\"input\":{\"audio\":\"file:clips/a.wav\"},\"expected\":{\"text\":\"transcript\"}}\n",
         )
         .unwrap();
         let set = LoadedEvalset::load(dir.path()).unwrap();

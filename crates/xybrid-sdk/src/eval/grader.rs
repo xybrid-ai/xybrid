@@ -8,7 +8,8 @@
 //! Implemented here (deterministic, no model needed to *grade*):
 //! - `classify` — normalized label match with an alias map from `evalset.labels`.
 //! - `asr` — word-level Word Error Rate, `quality = clamp(1 - WER, 0, 1)`.
-//! - `extract` — per-field match over a reference JSON object.
+//! - `extract` — subset match over a reference JSON object; extra output fields
+//!   are ignored.
 //! - golden mode — a case with no reference is **`Unblessed`** (cannot be
 //!   scored); blessing writes the output into `expected` (see [`bless`]).
 //! - `chat` / `summarize` / `vlm` — routed to a [`Judge`] when one is supplied;
@@ -222,13 +223,27 @@ pub fn grade_case(
 /// Pin a candidate's `output` as the golden reference on `case`: write it into
 /// `expected` and mark the case `review_status: golden`. This is the "approve a
 /// good output" curation step, deliberately separate from grading.
-pub fn bless(case: &mut Case, output: &GradeOutput) {
+pub fn bless(case: &mut Case, output: &GradeOutput) -> Result<(), BlessError> {
+    if let GradeOutput::Text(t) = output {
+        if normalize(t).is_empty() {
+            return Err(BlessError::EmptyTextOutput);
+        }
+    }
     case.expected = Some(match output {
         GradeOutput::Text(t) => Expected::Text(t.clone()),
         GradeOutput::Json(v) => Expected::Json(v.clone()),
         GradeOutput::Embedding(v) => Expected::Json(serde_json::json!(v)),
     });
     case.review_status = ReviewStatus::Golden;
+    Ok(())
+}
+
+/// Error returned when a candidate output cannot be blessed.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum BlessError {
+    /// Empty text cannot become a useful golden reference.
+    #[error("cannot bless empty text output")]
+    EmptyTextOutput,
 }
 
 // ============================================================================
@@ -240,14 +255,14 @@ pub fn bless(case: &mut Case, output: &GradeOutput) {
 /// declared label fails (not an error).
 fn classify_grade(labels: &[String], expected: &Expected, output: &GradeOutput) -> CaseGrade {
     let expected_label = match expected {
-        Expected::Label(l) | Expected::Text(l) => l.clone(),
-        Expected::Json(v) => v.as_str().map(str::to_string).unwrap_or_default(),
+        Expected::Label(l) | Expected::Text(l) => l,
+        Expected::Json(_) => return CaseGrade::fail("classify expected label/text, got json"),
     };
     let Some(out) = output.as_text() else {
         return CaseGrade::fail("classify output is not text");
     };
     let norm_out = normalize(out);
-    let norm_expected = normalize(&expected_label);
+    let norm_expected = normalize(expected_label);
 
     // With declared labels, the output must resolve to one of them.
     if !labels.is_empty() {
@@ -269,20 +284,22 @@ fn classify_grade(labels: &[String], expected: &Expected, output: &GradeOutput) 
 /// ASR: word-level WER, `quality = clamp(1 - WER, 0, 1)`.
 fn asr_grade(expected: &Expected, output: &GradeOutput, threshold: f64) -> CaseGrade {
     let reference = match expected {
-        Expected::Text(t) | Expected::Label(t) => t.clone(),
-        Expected::Json(v) => v.as_str().map(str::to_string).unwrap_or_default(),
+        Expected::Text(t) | Expected::Label(t) => t,
+        Expected::Json(_) => return CaseGrade::fail("asr expected text/label, got json"),
     };
     let Some(out) = output.as_text() else {
         return CaseGrade::fail("asr output is not text");
     };
-    let rate = wer(&reference, out);
+    let rate = wer(reference, out);
     let mut grade = CaseGrade::scored(1.0 - rate, threshold);
     grade.detail = Some(format!("WER {:.3}", rate));
     grade
 }
 
-/// Extract: fraction of reference object fields that match the output object.
-/// All fields matching ⇒ pass.
+/// Extract: subset match over the reference object's fields.
+///
+/// Only fields present in `expected` are compared; extra fields in the output
+/// are ignored. All expected fields matching ⇒ pass.
 fn extract_grade(expected: &Expected, output: &GradeOutput) -> CaseGrade {
     let expected_json = match expected {
         Expected::Json(v) => v.clone(),
@@ -454,16 +471,28 @@ impl Judge for OverlapJudge {
         reference: Option<&Expected>,
         output: &GradeOutput,
     ) -> CaseGrade {
-        let out = output.as_text().unwrap_or_default();
+        let Some(out) = output.as_text() else {
+            return CaseGrade::unblessed("overlap judge output must be non-empty text");
+        };
+        let out_tokens = tokenize(out);
+        if out_tokens.is_empty() {
+            return CaseGrade::unblessed("overlap judge output must be non-empty text");
+        }
         let basis = match reference {
-            Some(Expected::Text(t)) | Some(Expected::Label(t)) => t.clone(),
-            Some(Expected::Json(v)) => v.to_string(),
+            Some(Expected::Text(t)) | Some(Expected::Label(t)) => t.as_str(),
+            Some(Expected::Json(_)) => {
+                return CaseGrade::unblessed("overlap judge basis must be non-empty text");
+            }
             None => match input {
-                CaseInput::Text(t) => t.clone(),
-                _ => String::new(),
+                CaseInput::Text(t) => t.as_str(),
+                _ => return CaseGrade::unblessed("overlap judge basis must be non-empty text"),
             },
         };
-        let score = jaccard(&tokenize(&basis), &tokenize(out));
+        let basis_tokens = tokenize(basis);
+        if basis_tokens.is_empty() {
+            return CaseGrade::unblessed("overlap judge basis must be non-empty text");
+        }
+        let score = jaccard(&basis_tokens, &out_tokens);
         let mut grade = CaseGrade::scored(score, self.threshold);
         grade.detail = Some(format!("overlap {:.3}", score));
         grade
@@ -553,6 +582,15 @@ mod tests {
         );
         assert_eq!(g.verdict, Verdict::Fail);
         assert!(g.detail.unwrap().contains("matched no declared label"));
+    }
+
+    #[test]
+    fn classify_json_expected_fails_type_mismatch() {
+        let set = Evalset::new("s", TaskType::Classify);
+        let case = case_with(Some(Expected::Json(json!({"label": "refund"}))));
+        let g = grade_case(&set, &case, &GradeOutput::Text("".into()), None);
+        assert_eq!(g.verdict, Verdict::Fail);
+        assert!(g.detail.unwrap().contains("expected label/text"));
     }
 
     #[test]
@@ -653,6 +691,15 @@ mod tests {
         assert_eq!(g.score, 1.0);
     }
 
+    #[test]
+    fn asr_json_expected_fails_type_mismatch() {
+        let set = Evalset::new("s", TaskType::Asr);
+        let case = case_with(Some(Expected::Json(json!({"text": ""}))));
+        let g = grade_case(&set, &case, &GradeOutput::Text("".into()), None);
+        assert_eq!(g.verdict, Verdict::Fail);
+        assert!(g.detail.unwrap().contains("expected text/label"));
+    }
+
     // ---- extract ----
 
     #[test]
@@ -663,6 +710,20 @@ mod tests {
             &set,
             &case,
             &GradeOutput::Json(json!({"name":"Ada","year":1815,"extra":true})),
+            None,
+        );
+        assert_eq!(g.verdict, Verdict::Pass);
+        assert_eq!(g.score, 1.0);
+    }
+
+    #[test]
+    fn extract_ignores_extra_output_fields() {
+        let set = Evalset::new("s", TaskType::Extract);
+        let case = case_with(Some(Expected::Json(json!({"name":"Ada"}))));
+        let g = grade_case(
+            &set,
+            &case,
+            &GradeOutput::Json(json!({"name":"Ada","extra":true})),
             None,
         );
         assert_eq!(g.verdict, Verdict::Pass);
@@ -728,7 +789,7 @@ mod tests {
             grade_case(&set, &case, &output, None).verdict,
             Verdict::Unblessed
         );
-        bless(&mut case, &output);
+        bless(&mut case, &output).unwrap();
         assert_eq!(case.review_status, ReviewStatus::Golden);
         // Deterministic golden diff (no judge) now passes on the same output.
         assert_eq!(
@@ -746,6 +807,15 @@ mod tests {
             .verdict,
             Verdict::Fail
         );
+    }
+
+    #[test]
+    fn bless_rejects_empty_text_output() {
+        let mut case = case_with(None);
+        let original = case.clone();
+        let err = bless(&mut case, &GradeOutput::Text(" \n\t ".into())).unwrap_err();
+        assert_eq!(err, BlessError::EmptyTextOutput);
+        assert_eq!(case, original);
     }
 
     // ---- judge seam ----
@@ -778,6 +848,38 @@ mod tests {
             Some(&judge),
         );
         assert_ne!(g.verdict, Verdict::Unblessed); // judge scored it
+    }
+
+    #[test]
+    fn overlap_judge_rejects_non_text_output() {
+        let judge = OverlapJudge::default();
+        let input = CaseInput::Text("tell me about rust".into());
+        let g = judge.grade(&input, None, &GradeOutput::Json(json!({"answer": ""})));
+        assert_eq!(g.verdict, Verdict::Unblessed);
+        assert!(g.detail.unwrap().contains("output must be non-empty text"));
+    }
+
+    #[test]
+    fn overlap_judge_rejects_reference_free_non_text_input() {
+        let judge = OverlapJudge::default();
+        let input = CaseInput::Image("file:img.png".into());
+        let g = judge.grade(&input, None, &GradeOutput::Text("rust".into()));
+        assert_eq!(g.verdict, Verdict::Unblessed);
+        assert!(g.detail.unwrap().contains("basis must be non-empty text"));
+    }
+
+    #[test]
+    fn overlap_judge_rejects_empty_reference() {
+        let judge = OverlapJudge::default();
+        let input = CaseInput::Text("fallback text".into());
+        let reference = Expected::Text(" \n\t ".into());
+        let g = judge.grade(
+            &input,
+            Some(&reference),
+            &GradeOutput::Text("fallback".into()),
+        );
+        assert_eq!(g.verdict, Verdict::Unblessed);
+        assert!(g.detail.unwrap().contains("basis must be non-empty text"));
     }
 
     #[test]
