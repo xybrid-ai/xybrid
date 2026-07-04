@@ -1,5 +1,5 @@
 //! Remote failure-inbox client (eliXir) — the read seam to the platform's
-//! `GET /v1/telemetry/feedback` endpoint.
+//! `GET /v1/telemetry/feedback` and `GET /v1/evals/cases` endpoints.
 //!
 //! `xybrid eval inbox` surfaces the same triage queue the console shows:
 //! explicit `Feedback` flags (`result.report()`) plus implicit monitor `Signal`
@@ -7,15 +7,13 @@
 //! collect loop — the "go look at the failure logs" view, the terminal twin of
 //! the console inbox.
 //!
-//! Scope: this client is **read-only**. Minting full eval [`Case`]s from these
-//! items additionally needs the original inference *input*, which is not carried
-//! on a `Feedback` event (only the captured `expected`/`note` are) — it rides on
-//! payload capture, joined by `trace_id`. That backfill is deliberately out of
-//! scope here; `eval pull` keeps its local-inbox path for case minting.
+//! Scope: telemetry feedback remains read-only, while eval cases support the
+//! pull workflow's read-and-mark-reviewed path. The platform resolves the
+//! original event into a curated case before the CLI appends it locally.
 //!
 //! [`Case`]: crate::eval::format::Case
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
 use crate::model::SdkError;
@@ -104,6 +102,88 @@ pub struct InboxResponse {
     pub data_source: String,
 }
 
+/// Lifecycle status for platform-curated eval cases.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum EvalCaseStatus {
+    /// Waiting for local review.
+    Pending,
+    /// Accepted into the local evalset.
+    Accepted,
+    /// Rejected during review.
+    Discarded,
+}
+
+impl EvalCaseStatus {
+    /// The wire spelling used by `/v1/evals/cases`.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Pending => "pending",
+            Self::Accepted => "accepted",
+            Self::Discarded => "discarded",
+        }
+    }
+}
+
+/// A platform-curated eval case.
+#[derive(Debug, Clone, Deserialize, PartialEq)]
+pub struct RemoteEvalCase {
+    /// Platform case id.
+    pub id: String,
+    /// Evalset this case targets.
+    pub evalset: String,
+    /// Current platform review status.
+    pub status: EvalCaseStatus,
+    /// Originating trace id, when captured.
+    #[serde(default)]
+    pub trace_id: Option<String>,
+    /// Model id observed in production.
+    #[serde(default)]
+    pub model_id: Option<String>,
+    /// Task associated with the production event.
+    #[serde(default)]
+    pub task: Option<String>,
+    /// Human-provided expected output, when available.
+    #[serde(default)]
+    pub expected: Option<String>,
+    /// Human note from the originating event.
+    #[serde(default)]
+    pub note: Option<String>,
+    /// ISO-8601 creation timestamp.
+    pub created_at: String,
+    /// Captured input payload, when payload capture was enabled.
+    #[serde(default)]
+    pub input: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq)]
+struct EvalCasesPage {
+    items: Vec<RemoteEvalCase>,
+    total: i64,
+}
+
+/// Query filters for platform eval cases.
+#[derive(Debug, Clone)]
+pub struct EvalCasesQuery {
+    /// Evalset name from the local manifest.
+    pub evalset: String,
+    /// Case status filter.
+    pub status: EvalCaseStatus,
+    /// Page size for platform pagination.
+    pub limit: u32,
+}
+
+impl EvalCasesQuery {
+    /// Pending cases for an evalset, using a conservative page size.
+    pub fn pending(evalset: impl Into<String>) -> Self {
+        Self {
+            evalset: evalset.into(),
+            status: EvalCaseStatus::Pending,
+            limit: 100,
+        }
+    }
+}
+
 /// Query filters for an inbox fetch (all optional; the server applies defaults).
 #[derive(Debug, Clone, Default)]
 pub struct InboxQuery {
@@ -117,7 +197,7 @@ pub struct InboxQuery {
     pub limit: Option<u32>,
 }
 
-/// Read-only client for the platform failure inbox. Mirrors the
+/// Client for the platform failure inbox and eval-case pull flow. Mirrors the
 /// [`RegistryClient`](crate::registry_client::RegistryClient) HTTP conventions
 /// (blocking `ureq` agent with connect/request timeouts).
 pub struct InboxClient {
@@ -175,6 +255,11 @@ impl InboxClient {
         )
     }
 
+    /// The eval-cases endpoint URL (exposed for diagnostics / tests).
+    pub fn cases_endpoint(&self) -> String {
+        format!("{}/v1/evals/cases", self.base_url.trim_end_matches('/'))
+    }
+
     /// Fetch the failure inbox. Network/transport failures map to
     /// [`SdkError::Offline`]; non-2xx and parse failures to
     /// [`SdkError::NetworkError`].
@@ -211,6 +296,84 @@ impl InboxClient {
             ))),
         }
     }
+
+    /// List platform-curated eval cases, paging until the server-reported
+    /// `total` has been drained. Transport failures map to [`SdkError::Offline`].
+    pub fn list_cases(&self, query: &EvalCasesQuery) -> Result<Vec<RemoteEvalCase>, SdkError> {
+        let page_size = query.limit.max(1);
+        let mut offset = 0_u32;
+        let mut items = Vec::new();
+
+        loop {
+            let page = self.fetch_cases_page(query, offset, page_size)?;
+            let total = usize::try_from(page.total.max(0)).unwrap_or(usize::MAX);
+            let received = page.items.len();
+            items.extend(page.items);
+            if items.len() >= total || received == 0 {
+                return Ok(items);
+            }
+            offset = offset.saturating_add(page_size);
+        }
+    }
+
+    /// Update a platform-curated eval case status.
+    pub fn update_case_status(
+        &self,
+        id: &str,
+        status: EvalCaseStatus,
+    ) -> Result<RemoteEvalCase, SdkError> {
+        #[derive(Serialize)]
+        struct UpdateBody<'a> {
+            status: &'a str,
+        }
+
+        let url = format!("{}/{}", self.cases_endpoint(), id);
+        let req = self
+            .agent
+            .patch(&url)
+            .set("Authorization", &format!("Bearer {}", self.api_key));
+        match req.send_json(UpdateBody {
+            status: status.as_str(),
+        }) {
+            Ok(resp) => resp
+                .into_json::<RemoteEvalCase>()
+                .map_err(|e| SdkError::network(format!("failed to parse eval case response: {e}"))),
+            Err(ureq::Error::Status(status, _)) => Err(SdkError::network(format!(
+                "eval case status update failed: HTTP {status}"
+            ))),
+            Err(ureq::Error::Transport(t)) => Err(SdkError::offline(format!(
+                "eval case status update failed: {t}"
+            ))),
+        }
+    }
+
+    fn fetch_cases_page(
+        &self,
+        query: &EvalCasesQuery,
+        offset: u32,
+        limit: u32,
+    ) -> Result<EvalCasesPage, SdkError> {
+        let req = self
+            .agent
+            .get(&self.cases_endpoint())
+            .set("Authorization", &format!("Bearer {}", self.api_key))
+            .query("evalset", &query.evalset)
+            .query("status", query.status.as_str())
+            .query("limit", &limit.to_string())
+            .query("offset", &offset.to_string());
+
+        match req.call() {
+            Ok(resp) => resp
+                .into_json::<EvalCasesPage>()
+                .map_err(|e| SdkError::network(format!("failed to parse eval cases: {e}"))),
+            Err(ureq::Error::Status(status, _)) => Err(SdkError::network(format!(
+                "eval cases request failed: HTTP {status}"
+            ))),
+            Err(ureq::Error::Transport(t)) => {
+                Err(SdkError::offline(format!("eval cases request failed: {t}")))
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -223,6 +386,10 @@ mod tests {
         assert_eq!(
             c.endpoint(),
             "https://api.example.test/v1/telemetry/feedback"
+        );
+        assert_eq!(
+            c.cases_endpoint(),
+            "https://api.example.test/v1/evals/cases"
         );
         let c2 = InboxClient::new("https://api.example.test", "xy_test_k");
         assert_eq!(
@@ -305,6 +472,109 @@ mod tests {
         assert_eq!(resp.summary.negative_rate, Some(1.0));
         assert_eq!(resp.summary.by_model[0].key, "qwen3.5-0.8b");
         assert_eq!(resp.summary.top_signals[0].key, "truncated");
+    }
+
+    #[test]
+    fn deserializes_eval_case_response() {
+        let json = r#"{
+            "items": [{
+                "id": "4b1f",
+                "evalset": "intent",
+                "status": "pending",
+                "trace_id": "tr_1",
+                "model_id": "qwen3",
+                "task": "classify",
+                "expected": "refund",
+                "note": "bad label",
+                "created_at": "2026-07-04T12:00:00Z",
+                "input": { "text": "refund please" }
+            }],
+            "total": 1,
+            "limit": 100,
+            "offset": 0
+        }"#;
+
+        let resp: EvalCasesPage = serde_json::from_str(json).expect("parses");
+        assert_eq!(resp.total, 1);
+        let case = &resp.items[0];
+        assert_eq!(case.status, EvalCaseStatus::Pending);
+        assert_eq!(case.trace_id.as_deref(), Some("tr_1"));
+        assert_eq!(case.model_id.as_deref(), Some("qwen3"));
+        assert_eq!(
+            case.input.as_ref().and_then(|v| v.get("text")).unwrap(),
+            "refund please"
+        );
+    }
+
+    #[test]
+    fn list_cases_builds_query_and_paginates() {
+        use httpmock::prelude::*;
+
+        let server = MockServer::start();
+        let first = server.mock(|when, then| {
+            when.method(GET)
+                .path("/v1/evals/cases")
+                .header("Authorization", "Bearer xy_test_k")
+                .query_param("evalset", "intent")
+                .query_param("status", "pending")
+                .query_param("limit", "1")
+                .query_param("offset", "0");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"items":[{"id":"c1","evalset":"intent","status":"pending","created_at":"2026-07-04T12:00:00Z","input":{"text":"a"}}],"total":2,"limit":1,"offset":0}"#);
+        });
+        let second = server.mock(|when, then| {
+            when.method(GET)
+                .path("/v1/evals/cases")
+                .query_param("evalset", "intent")
+                .query_param("status", "pending")
+                .query_param("limit", "1")
+                .query_param("offset", "1");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"items":[{"id":"c2","evalset":"intent","status":"pending","created_at":"2026-07-04T12:01:00Z","input":{"text":"b"}}],"total":2,"limit":1,"offset":1}"#);
+        });
+
+        let client = InboxClient::new(server.base_url(), "xy_test_k");
+        let cases = client
+            .list_cases(&EvalCasesQuery {
+                evalset: "intent".to_string(),
+                status: EvalCaseStatus::Pending,
+                limit: 1,
+            })
+            .expect("lists cases");
+
+        assert_eq!(
+            cases.iter().map(|c| c.id.as_str()).collect::<Vec<_>>(),
+            ["c1", "c2"]
+        );
+        first.assert();
+        second.assert();
+    }
+
+    #[test]
+    fn update_case_status_sends_patch_body() {
+        use httpmock::prelude::*;
+
+        let server = MockServer::start();
+        let patch = server.mock(|when, then| {
+            when.method("PATCH")
+                .path("/v1/evals/cases/c1")
+                .header("Authorization", "Bearer xy_test_k")
+                .json_body(serde_json::json!({ "status": "discarded" }));
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"id":"c1","evalset":"intent","status":"discarded","created_at":"2026-07-04T12:00:00Z","input":{"text":"a"}}"#);
+        });
+
+        let client = InboxClient::new(server.base_url(), "xy_test_k");
+        let updated = client
+            .update_case_status("c1", EvalCaseStatus::Discarded)
+            .expect("updates status");
+
+        assert_eq!(updated.id, "c1");
+        assert_eq!(updated.status, EvalCaseStatus::Discarded);
+        patch.assert();
     }
 
     #[test]

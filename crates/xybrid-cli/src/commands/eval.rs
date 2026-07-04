@@ -21,12 +21,13 @@ use xybrid_core::execution_template::ModelMetadata;
 use xybrid_core::ir::{Envelope, EnvelopeKind};
 use xybrid_core::template_executor::TemplateExecutor;
 use xybrid_sdk::eval::{
-    gate_policy, run_evalset, CandidateRef, Case, CaseOutcome, Environment, EvalRunStore, Evalset,
-    GateDecision, GateVerdict, GradeOutput, InboxClient, InboxQuery, LoadedEvalset, OverlapJudge,
-    Run, RunOptions, TaskType, Verdict,
+    gate_policy, run_evalset, CandidateRef, Case, CaseInput, CaseOutcome, CaseSource, Environment,
+    EvalCaseStatus, EvalCasesQuery, EvalRunStore, Evalset, Expected, GateDecision, GateVerdict,
+    GradeOutput, InboxClient, InboxQuery, LoadedEvalset, OverlapJudge, RemoteEvalCase,
+    ReviewStatus, Run, RunOptions, Split, TaskType, Verdict,
 };
 use xybrid_sdk::registry_client::RegistryClient;
-use xybrid_sdk::ExecutionProviderInfo;
+use xybrid_sdk::{ExecutionProviderInfo, SdkError};
 
 use crate::ui;
 
@@ -297,7 +298,14 @@ pub fn handle_eval_command(
             inbox,
             accept_all,
             dry_run,
-        }) => pull(&evalset, inbox.as_deref(), accept_all, dry_run),
+        }) => pull(
+            &evalset,
+            inbox.as_deref(),
+            accept_all,
+            dry_run,
+            api_key,
+            platform_url,
+        ),
         Some(EvalCommand::Inbox {
             period,
             model,
@@ -896,16 +904,38 @@ fn read_inbox(path: &Path) -> Result<Vec<Case>> {
     Ok(cases)
 }
 
-/// Select pulled cases that are new to the evalset (dedupe by id), preserving
-/// inbox order. Pure + unit-tested.
+/// Select pulled cases that are new to the evalset (dedupe by id/hash),
+/// preserving inbox order. Pure + unit-tested.
 fn select_new_cases(existing: &[Case], pulled: &[Case]) -> Vec<Case> {
     use std::collections::HashSet;
-    let have: HashSet<&str> = existing.iter().map(|c| c.id.as_str()).collect();
+    let have: HashSet<&str> = existing
+        .iter()
+        .flat_map(|c| [Some(c.id.as_str()), c.dedupe_hash.as_deref()])
+        .flatten()
+        .collect();
     pulled
         .iter()
-        .filter(|c| !have.contains(c.id.as_str()))
+        .filter(|c| {
+            !have.contains(c.id.as_str())
+                && c.dedupe_hash
+                    .as_deref()
+                    .is_none_or(|dedupe| !have.contains(dedupe))
+        })
         .cloned()
         .collect()
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ReviewDecision {
+    Accept,
+    Skip,
+    Discard,
+}
+
+#[derive(Debug, Clone)]
+struct ReviewedCase {
+    case: Case,
+    decision: ReviewDecision,
 }
 
 /// Append accepted cases to `cases.jsonl` and bump the manifest `version`.
@@ -943,17 +973,52 @@ fn write_inbox(path: &Path, remaining: &[Case]) -> Result<()> {
 }
 
 /// `xybrid eval pull` — drain the inbox into the evalset through a review queue.
-fn pull(evalset_dir: &Path, inbox: Option<&Path>, accept_all: bool, dry_run: bool) -> Result<()> {
+fn pull(
+    evalset_dir: &Path,
+    inbox: Option<&Path>,
+    accept_all: bool,
+    dry_run: bool,
+    api_key: Option<&str>,
+    platform_url: &str,
+) -> Result<()> {
     let set = LoadedEvalset::load(evalset_dir)
         .with_context(|| format!("failed to load evalset at {}", evalset_dir.display()))?;
+
+    ui::header(&format!("Eval pull · {}", set.manifest.name));
+    println!();
+    if inbox.is_none() {
+        if let Some(key) = platform_api_key(api_key) {
+            match pull_remote(&set, evalset_dir, &key, platform_url, accept_all, dry_run) {
+                Ok(RemotePullOutcome::Handled) => return Ok(()),
+                Ok(RemotePullOutcome::FallBackLocal) => {}
+                Err(e) => return Err(e),
+            }
+        }
+    }
+
     let inbox_path = match inbox {
         Some(p) => p.to_path_buf(),
         None => default_inbox_path(&set.manifest.name)?,
     };
+    pull_local(&set, evalset_dir, &inbox_path, accept_all, dry_run)
+}
 
-    ui::header(&format!("Eval pull · {}", set.manifest.name));
-    println!();
-    let pending = read_inbox(&inbox_path)?;
+fn platform_api_key(api_key: Option<&str>) -> Option<String> {
+    api_key.map(str::to_string).or_else(|| {
+        std::env::var("XYBRID_API_KEY")
+            .ok()
+            .filter(|k| !k.is_empty())
+    })
+}
+
+fn pull_local(
+    set: &LoadedEvalset,
+    evalset_dir: &Path,
+    inbox_path: &Path,
+    accept_all: bool,
+    dry_run: bool,
+) -> Result<()> {
+    let pending = read_inbox(inbox_path)?;
     if pending.is_empty() {
         ui::hint(&format!("No pending cases in {}", inbox_path.display()));
         ui::hint("Flag results in your app (result.report) — the platform syncs them here.");
@@ -973,12 +1038,8 @@ fn pull(evalset_dir: &Path, inbox: Option<&Path>, accept_all: bool, dry_run: boo
         return Ok(());
     }
 
-    // Decide which fresh cases to accept.
-    let accepted: Vec<Case> = if dry_run || accept_all {
-        fresh.clone()
-    } else {
-        review_queue(&fresh)
-    };
+    let reviewed = review_cases(&fresh, accept_all || dry_run);
+    let accepted = accepted_cases(&reviewed);
 
     if dry_run {
         println!();
@@ -992,39 +1053,216 @@ fn pull(evalset_dir: &Path, inbox: Option<&Path>, accept_all: bool, dry_run: boo
         return Ok(());
     }
 
-    if accepted.is_empty() {
+    let has_discarded = reviewed
+        .iter()
+        .any(|r| r.decision == ReviewDecision::Discard);
+    if accepted.is_empty() && !has_discarded {
         ui::hint("Nothing accepted; inbox unchanged.");
         return Ok(());
     }
 
-    let new_version = append_and_bump(evalset_dir, &set.manifest, &accepted)?;
-    // Remove accepted from the inbox; skipped/discarded handling: accepted are
-    // gone, everything else stays pending for next time.
+    let new_version = if accepted.is_empty() {
+        set.manifest.version
+    } else {
+        append_and_bump(evalset_dir, &set.manifest, &accepted)?
+    };
     use std::collections::HashSet;
-    let accepted_ids: HashSet<&str> = accepted.iter().map(|c| c.id.as_str()).collect();
+    let drained_ids: HashSet<&str> = reviewed
+        .iter()
+        .filter(|r| matches!(r.decision, ReviewDecision::Accept | ReviewDecision::Discard))
+        .map(|r| r.case.id.as_str())
+        .collect();
     let remaining: Vec<Case> = pending
         .into_iter()
-        .filter(|c| !accepted_ids.contains(c.id.as_str()))
+        .filter(|c| !drained_ids.contains(c.id.as_str()))
         .collect();
-    write_inbox(&inbox_path, &remaining)?;
+    write_inbox(inbox_path, &remaining)?;
 
     println!();
-    ui::ok(&format!(
-        "Pulled {} case(s) → {} now v{}",
-        accepted.len(),
-        set.manifest.name,
-        new_version
-    ));
+    if accepted.is_empty() {
+        ui::ok("Discarded case(s); inbox updated.");
+    } else {
+        ui::ok(&format!(
+            "Pulled {} case(s) → {} now v{}",
+            accepted.len(),
+            set.manifest.name,
+            new_version
+        ));
+    }
     Ok(())
 }
 
-/// Interactive review queue: accept / skip / discard each fresh case. Skipped
-/// and discarded both stay out of the evalset (discarded would also be dropped
-/// server-side in the platform flow). Falls back to accepting on EOF (piped
-/// input) so non-interactive use without `--accept-all` still progresses.
-fn review_queue(fresh: &[Case]) -> Vec<Case> {
+enum RemotePullOutcome {
+    Handled,
+    FallBackLocal,
+}
+
+fn pull_remote(
+    set: &LoadedEvalset,
+    evalset_dir: &Path,
+    api_key: &str,
+    platform_url: &str,
+    accept_all: bool,
+    dry_run: bool,
+) -> Result<RemotePullOutcome> {
+    let client = InboxClient::new(platform_url, api_key);
+    let remote = match client.list_cases(&EvalCasesQuery::pending(&set.manifest.name)) {
+        Ok(cases) => cases,
+        Err(e) => {
+            warn_remote_pull_fallback(&e);
+            return Ok(RemotePullOutcome::FallBackLocal);
+        }
+    };
+    if remote.is_empty() {
+        ui::hint("No pending remote cases.");
+        return Ok(RemotePullOutcome::Handled);
+    }
+
+    let mut skipped_unsupported = 0_usize;
+    let mut pending = Vec::new();
+    for item in &remote {
+        match remote_case_to_local(item, &set.manifest) {
+            Ok(case) => pending.push((item, case)),
+            Err(e) => {
+                skipped_unsupported += 1;
+                ui::warning(&format!("Skipping remote case {}: {e}", item.id));
+            }
+        }
+    }
+
+    let local_cases: Vec<Case> = pending.iter().map(|(_, case)| case.clone()).collect();
+    let fresh = select_new_cases(&set.cases, &local_cases);
+    ui::kv(
+        "Pending",
+        &format!(
+            "{} remote ({} new, {} already pulled, {} unsupported)",
+            remote.len(),
+            fresh.len(),
+            local_cases.len() - fresh.len(),
+            skipped_unsupported
+        ),
+    );
+    if fresh.is_empty() {
+        return Ok(RemotePullOutcome::Handled);
+    }
+
+    let reviewed = review_cases(&fresh, accept_all || dry_run);
+    let accepted = accepted_cases(&reviewed);
+
+    if dry_run {
+        println!();
+        for c in &accepted {
+            ui::bullet(&c.id, &format!("{:?}", c.input));
+        }
+        ui::footer(&format!(
+            "{} remote case(s) would be pulled (dry run)",
+            accepted.len()
+        ));
+        return Ok(RemotePullOutcome::Handled);
+    }
+
+    if !accepted.is_empty() {
+        let new_version = append_and_bump(evalset_dir, &set.manifest, &accepted)?;
+        println!();
+        ui::ok(&format!(
+            "Pulled {} remote case(s) → {} now v{}",
+            accepted.len(),
+            set.manifest.name,
+            new_version
+        ));
+    } else {
+        ui::hint("Nothing accepted.");
+    }
+
+    for reviewed_case in &reviewed {
+        let status = match reviewed_case.decision {
+            ReviewDecision::Accept => Some(EvalCaseStatus::Accepted),
+            ReviewDecision::Discard => Some(EvalCaseStatus::Discarded),
+            ReviewDecision::Skip => None,
+        };
+        let Some(status) = status else {
+            continue;
+        };
+        client
+            .update_case_status(&reviewed_case.case.id, status)
+            .with_context(|| format!("failed to update remote case {}", reviewed_case.case.id))?;
+    }
+
+    Ok(RemotePullOutcome::Handled)
+}
+
+fn warn_remote_pull_fallback(error: &SdkError) {
+    let detail = if matches!(error, SdkError::Offline { .. }) {
+        format!("Remote eval cases unavailable ({error}); falling back to local inbox.")
+    } else {
+        format!("Remote eval cases failed ({error}); falling back to local inbox.")
+    };
+    ui::warning(&detail);
+}
+
+fn remote_case_to_local(remote: &RemoteEvalCase, manifest: &Evalset) -> Result<Case> {
+    let input = remote
+        .input
+        .as_ref()
+        .context("input payload was not captured")?;
+    let mut case = Case::new(&remote.id, parse_remote_input(input)?);
+    case.expected = remote
+        .expected
+        .as_deref()
+        .map(|expected| remote_expected_for_task(manifest.task, expected));
+    case.source = CaseSource::Flagged;
+    case.trace_id = remote.trace_id.clone();
+    case.added = Some(xybrid_sdk::eval::today_utc());
+    case.review_status = ReviewStatus::Reviewed;
+    case.split = Split::Regression;
+    Ok(case)
+}
+
+fn parse_remote_input(input: &serde_json::Value) -> Result<CaseInput> {
+    if let Some(text) = input.as_str() {
+        return Ok(CaseInput::Text(text.to_string()));
+    }
+    serde_json::from_value::<CaseInput>(input.clone())
+        .context("input is not a supported eval case payload")
+}
+
+fn remote_expected_for_task(task: TaskType, expected: &str) -> Expected {
+    match task {
+        TaskType::Classify => Expected::Label(expected.to_string()),
+        TaskType::Extract => serde_json::from_str::<serde_json::Value>(expected)
+            .map(Expected::Json)
+            .unwrap_or_else(|_| Expected::Text(expected.to_string())),
+        TaskType::Chat
+        | TaskType::Summarize
+        | TaskType::Asr
+        | TaskType::Tts
+        | TaskType::Embedding
+        | TaskType::Vlm => Expected::Text(expected.to_string()),
+    }
+}
+
+fn accepted_cases(reviewed: &[ReviewedCase]) -> Vec<Case> {
+    reviewed
+        .iter()
+        .filter(|r| r.decision == ReviewDecision::Accept)
+        .map(|r| r.case.clone())
+        .collect()
+}
+
+fn review_cases(fresh: &[Case], accept_all: bool) -> Vec<ReviewedCase> {
+    if accept_all {
+        return fresh
+            .iter()
+            .cloned()
+            .map(|case| ReviewedCase {
+                case,
+                decision: ReviewDecision::Accept,
+            })
+            .collect();
+    }
+
     use std::io::Write;
-    let mut accepted = Vec::new();
+    let mut reviewed = Vec::new();
     for c in fresh {
         print!(
             "  {} {}  [a]ccept / [s]kip / [d]iscard? ",
@@ -1033,20 +1271,21 @@ fn review_queue(fresh: &[Case]) -> Vec<Case> {
         );
         let _ = std::io::stdout().flush();
         let mut line = String::new();
-        match std::io::stdin().read_line(&mut line) {
-            Ok(0) => {
-                // EOF — accept the rest by default.
-                accepted.push(c.clone());
-            }
+        let decision = match std::io::stdin().read_line(&mut line) {
+            Ok(0) => ReviewDecision::Accept,
             Ok(_) => match line.trim().chars().next() {
-                Some('s') | Some('S') => {}
-                Some('d') | Some('D') => {}
-                _ => accepted.push(c.clone()),
+                Some('s') | Some('S') => ReviewDecision::Skip,
+                Some('d') | Some('D') => ReviewDecision::Discard,
+                _ => ReviewDecision::Accept,
             },
-            Err(_) => accepted.push(c.clone()),
-        }
+            Err(_) => ReviewDecision::Accept,
+        };
+        reviewed.push(ReviewedCase {
+            case: c.clone(),
+            decision,
+        });
     }
-    accepted
+    reviewed
 }
 
 fn show(run_id: &str, store: Option<&Path>) -> Result<()> {
@@ -2052,6 +2291,48 @@ mod tests {
     }
 
     #[test]
+    fn select_new_cases_dedupes_by_existing_dedupe_hash() {
+        let mut existing = Case::new("local", CaseInput::Text("x".into()));
+        existing.dedupe_hash = Some("remote-1".into());
+        let pulled = vec![
+            Case::new("remote-1", CaseInput::Text("x".into())),
+            Case::new("remote-2", CaseInput::Text("y".into())),
+        ];
+
+        let fresh = select_new_cases(&[existing], &pulled);
+
+        assert_eq!(fresh.len(), 1);
+        assert_eq!(fresh[0].id, "remote-2");
+    }
+
+    #[test]
+    fn remote_case_to_local_marks_reviewed_regression_flagged_case() {
+        let remote = RemoteEvalCase {
+            id: "remote-1".into(),
+            evalset: "intent".into(),
+            status: EvalCaseStatus::Pending,
+            trace_id: Some("tr_1".into()),
+            model_id: Some("qwen3".into()),
+            task: Some("classify".into()),
+            expected: Some("refund".into()),
+            note: Some("bad label".into()),
+            created_at: "2026-07-04T12:00:00Z".into(),
+            input: Some(serde_json::json!({ "text": "refund please" })),
+        };
+        let manifest = Evalset::new("intent", TaskType::Classify);
+
+        let case = remote_case_to_local(&remote, &manifest).unwrap();
+
+        assert_eq!(case.id, "remote-1");
+        assert_eq!(case.input, CaseInput::Text("refund please".into()));
+        assert_eq!(case.expected, Some(Expected::Label("refund".into())));
+        assert_eq!(case.source, CaseSource::Flagged);
+        assert_eq!(case.trace_id.as_deref(), Some("tr_1"));
+        assert_eq!(case.review_status, ReviewStatus::Reviewed);
+        assert_eq!(case.split, Split::Regression);
+    }
+
+    #[test]
     fn read_inbox_parses_and_skips_blanks() {
         let dir = TempDir::new().unwrap();
         let inbox = dir.path().join("inbox.jsonl");
@@ -2089,7 +2370,15 @@ mod tests {
         )
         .unwrap();
 
-        pull(&eval_dir, Some(&inbox), true, false).unwrap();
+        pull(
+            &eval_dir,
+            Some(&inbox),
+            true,
+            false,
+            None,
+            "https://api.xybrid.dev",
+        )
+        .unwrap();
 
         let set = LoadedEvalset::load(&eval_dir).unwrap();
         assert_eq!(set.cases.len(), 1);
@@ -2101,7 +2390,15 @@ mod tests {
         assert!(read_inbox(&inbox).unwrap().is_empty());
 
         // a second pull with the same (now-empty) inbox is a no-op, no double-add.
-        pull(&eval_dir, Some(&inbox), true, false).unwrap();
+        pull(
+            &eval_dir,
+            Some(&inbox),
+            true,
+            false,
+            None,
+            "https://api.xybrid.dev",
+        )
+        .unwrap();
         assert_eq!(LoadedEvalset::load(&eval_dir).unwrap().cases.len(), 1);
     }
 
@@ -2119,7 +2416,15 @@ mod tests {
         let inbox = dir.path().join("inbox.jsonl");
         std::fs::write(&inbox, "{\"id\":\"x\",\"input\":{\"text\":\"hi\"}}\n").unwrap();
 
-        pull(&eval_dir, Some(&inbox), false, true).unwrap();
+        pull(
+            &eval_dir,
+            Some(&inbox),
+            false,
+            true,
+            None,
+            "https://api.xybrid.dev",
+        )
+        .unwrap();
         // nothing pulled, version unchanged, inbox intact.
         let set = LoadedEvalset::load(&eval_dir).unwrap();
         assert!(set.cases.is_empty());

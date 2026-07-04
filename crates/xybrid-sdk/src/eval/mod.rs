@@ -40,7 +40,10 @@ pub use format::{
 pub use grader::{
     bless, grade_case, wer, CaseGrade, GradeOutput, Grader, Judge, OverlapJudge, Verdict,
 };
-pub use inbox::{InboxClient, InboxCountRow, InboxItem, InboxQuery, InboxResponse, InboxSummary};
+pub use inbox::{
+    EvalCaseStatus, EvalCasesQuery, InboxClient, InboxCountRow, InboxItem, InboxQuery,
+    InboxResponse, InboxSummary, RemoteEvalCase,
+};
 pub use monitor::{structural_signals, BehavioralSignal, StructuralSignals};
 pub use prompt::{
     estimate_tokens, lint_prompt, model_profile, ModelProfile, PromptLibrary, PromptSuggestion,

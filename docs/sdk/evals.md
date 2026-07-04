@@ -160,7 +160,7 @@ Exit codes: `pass` → 0, `inconclusive` → 0 (or 2 with `--strict`), `fail` �
 | `xybrid eval` | 1 | Discover `evals/` and list evalsets. |
 | `xybrid eval init <task> [--name N]` | 1 | Scaffold `evals/<name>/`. |
 | `xybrid eval inspect <path>` | 1 | Validate + summarize an evalset. |
-| `xybrid eval pull <evalset> [--accept-all] [--dry-run]` | 1 | Drain flagged cases into the evalset via a review queue (local inbox file). |
+| `xybrid eval pull <evalset> [--accept-all] [--dry-run]` | 1 | Drain platform-curated or local flagged cases into the evalset via a review queue. |
 | `xybrid eval inbox [--period 7d] [--model <id>] [--source report\|signal] [--rating up\|down]` | 1 | View the platform failure inbox (flagged results + monitor auto-flags) in the terminal — the read side of collect. Needs `XYBRID_API_KEY`. |
 | `xybrid eval run <evalset> --model <id> [--limit N] [--capture]` | 1–3 | Score a candidate; persist the run. |
 | `xybrid eval compare <evalset> --model <id>… [--auto] [--capture]` | 1 | Leaderboard + recommended winner (hard-constraint filter → quality → tie-breakers). |
@@ -173,6 +173,29 @@ through the same path as `xybrid run`, so they require a platform preset
 (`--features platform-*`) built in. The offline commands need no backend.
 `--no-capture` is accepted as a hidden deprecated alias for older scripts, but
 capture is already off unless `--capture` is set.
+
+### Pulling curated cases
+
+`xybrid eval pull <evalset>` reads the evalset manifest name, then uses
+`XYBRID_API_KEY` (or global `--api-key`) plus the platform URL to fetch pending
+cases from `/v1/evals/cases?evalset=<name>&status=pending`. The same review
+queue is used for remote and local cases:
+
+- accept appends the case to `cases.jsonl` and marks the remote case accepted;
+- skip leaves the remote case pending for a later pull;
+- discard keeps it out of `cases.jsonl` and marks the remote case discarded.
+
+Accepted remote cases are written as production regressions: `source: flagged`,
+`review_status: reviewed`, `split: regression`, with trace metadata preserved
+when the platform case carries it. `--accept-all` accepts every new pending case
+without prompting. `--dry-run` shows what would be appended but does not write
+files or patch remote state.
+
+Duplicate protection is local-first: a pending remote case is not appended when
+its id or dedupe key is already present in `cases.jsonl`. If the platform is
+unreachable, `pull` warns and falls back to the local inbox file
+`~/.xybrid/inbox/<evalset>.jsonl`; passing `--inbox <path>` forces that local
+mode.
 
 ## Determinism
 
