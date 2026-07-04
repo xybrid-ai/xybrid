@@ -666,7 +666,9 @@ fn run_command(cli: Cli) -> Result<()> {
             platform,
         } => commands::bundle::handle_bundle_command(&model, output, platform.as_deref()),
         Commands::Telemetry { command } => commands::telemetry::handle_telemetry_command(command),
-        Commands::Eval { command } => commands::eval::handle_eval_command(command),
+        Commands::Eval { command } => {
+            commands::eval::handle_eval_command(command, cli.api_key.as_deref(), &cli.platform_url)
+        }
         Commands::PromptOpt {
             prompt,
             model,

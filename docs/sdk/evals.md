@@ -148,6 +148,8 @@ Exit codes: `pass` → 0, `inconclusive` → 0 (or 2 with `--strict`), `fail` �
 | `xybrid eval` | 1 | Discover `evals/` and list evalsets. |
 | `xybrid eval init <task> [--name N]` | 1 | Scaffold `evals/<name>/`. |
 | `xybrid eval inspect <path>` | 1 | Validate + summarize an evalset. |
+| `xybrid eval pull <evalset> [--accept-all] [--dry-run]` | 1 | Drain flagged cases into the evalset via a review queue (local inbox file). |
+| `xybrid eval inbox [--period 7d] [--model <id>] [--source report\|signal] [--rating up\|down]` | 1 | View the platform failure inbox (flagged results + monitor auto-flags) in the terminal — the read side of collect. Needs `XYBRID_API_KEY`. |
 | `xybrid eval run <evalset> --model <id> [--limit N] [--no-capture]` | 1–3 | Score a candidate; persist the run. |
 | `xybrid eval compare <evalset> --model <id>… [--auto]` | 1 | Leaderboard + recommended winner (hard-constraint filter → quality → tie-breakers). |
 | `xybrid eval gate <evalset> [--run <id> \| --model <id>] [--strict]` | 2 | Pass/fail/inconclusive with a CI-aware exit code (CI primitive). |

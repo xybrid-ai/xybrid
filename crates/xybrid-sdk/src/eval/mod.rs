@@ -22,6 +22,7 @@
 pub mod deploy;
 pub mod format;
 pub mod grader;
+pub mod inbox;
 pub mod monitor;
 pub mod prompt;
 pub mod run;
@@ -39,6 +40,7 @@ pub use format::{
 pub use grader::{
     bless, grade_case, wer, CaseGrade, GradeOutput, Grader, Judge, OverlapJudge, Verdict,
 };
+pub use inbox::{InboxClient, InboxCountRow, InboxItem, InboxQuery, InboxResponse, InboxSummary};
 pub use monitor::{structural_signals, BehavioralSignal, StructuralSignals};
 pub use prompt::{
     estimate_tokens, lint_prompt, model_profile, ModelProfile, PromptLibrary, PromptSuggestion,

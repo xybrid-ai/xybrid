@@ -2953,6 +2953,176 @@ pub fn publish_signal_event(
     publish_telemetry_event(event);
 }
 
+/// Stable lowercase wire label for a gate verdict (the leaderboard contract
+/// must not drift if the enum's serde representation changes).
+fn gate_verdict_label(v: crate::eval::GateVerdict) -> &'static str {
+    match v {
+        crate::eval::GateVerdict::Pass => "pass",
+        crate::eval::GateVerdict::Fail => "fail",
+        crate::eval::GateVerdict::Inconclusive => "inconclusive",
+    }
+}
+
+/// Build an `EvalRun` telemetry event from a completed eval run — metadata-only
+/// (aggregate quality + on-device SLOs; no per-case outputs or payloads). This
+/// is the wire feed for the console **compare leaderboard**: one event per
+/// `evalset × candidate` run. `model_id` is hoisted to the payload top level by
+/// the exporter; the rest rides under `data`.
+fn build_eval_run_event(run: &crate::eval::Run) -> TelemetryEvent {
+    let now_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+
+    let s = &run.scores;
+    let mut data = serde_json::Map::new();
+    data.insert("run_id".to_string(), serde_json::json!(run.run_id));
+    data.insert("evalset".to_string(), serde_json::json!(run.evalset));
+    data.insert(
+        "evalset_version".to_string(),
+        serde_json::json!(run.evalset_version),
+    );
+    data.insert(
+        "model_id".to_string(),
+        serde_json::json!(run.candidate.model_id),
+    );
+    if let Some(sha) = &run.candidate.model_sha256 {
+        data.insert("model_sha256".to_string(), serde_json::json!(sha));
+    }
+    if let Some(pid) = &run.candidate.prompt_id {
+        data.insert("prompt_id".to_string(), serde_json::json!(pid));
+    }
+    data.insert("quality".to_string(), serde_json::json!(s.quality));
+    data.insert("pass".to_string(), serde_json::json!(s.pass));
+    data.insert("fail".to_string(), serde_json::json!(s.fail));
+    data.insert(
+        "verdict".to_string(),
+        serde_json::json!(gate_verdict_label(s.verdict)),
+    );
+    data.insert("flaky".to_string(), serde_json::json!(s.flaky));
+    if let Some(ci) = &s.ci {
+        data.insert("ci_low".to_string(), serde_json::json!(ci.low));
+        data.insert("ci_high".to_string(), serde_json::json!(ci.high));
+        data.insert("ci_n".to_string(), serde_json::json!(ci.n));
+    }
+    // On-device SLOs (only the ones populated for this run).
+    let mut put = |k: &str, v: Option<f64>| {
+        if let Some(v) = v {
+            data.insert(k.to_string(), serde_json::json!(v));
+        }
+    };
+    put("latency_p50_ms", s.latency_p50_ms);
+    put("latency_p95_ms", s.latency_p95_ms);
+    put("ttft_p95_ms", s.ttft_p95_ms);
+    put("itl_p95_ms", s.itl_p95_ms);
+    put("cold_start_ms", s.cold_start_ms);
+    put("model_load_ms", s.model_load_ms);
+    put("peak_memory_mb", s.peak_memory_mb);
+    put("bundle_mb", s.bundle_mb);
+    data.insert(
+        "scorer_version".to_string(),
+        serde_json::json!(s.scorer_version),
+    );
+    // Environment (reproducibility attribution).
+    data.insert("host".to_string(), serde_json::json!(run.environment.host));
+    data.insert(
+        "backend".to_string(),
+        serde_json::json!(run.environment.backend),
+    );
+    data.insert(
+        "execution_provider".to_string(),
+        serde_json::json!(run.environment.execution_provider),
+    );
+    data.insert(
+        "run_sdk_version".to_string(),
+        serde_json::json!(run.environment.sdk_version),
+    );
+
+    TelemetryEvent {
+        event_type: "EvalRun".to_string(),
+        stage_name: None,
+        target: None,
+        latency_ms: None,
+        error: None,
+        data: Some(serde_json::Value::Object(data).to_string()),
+        timestamp_ms: now_ms,
+    }
+}
+
+/// Publish an `EvalRun` event for a completed run (opt-out gated, metadata-only).
+/// A no-op without a configured exporter, so local-only `eval run` / `compare`
+/// emit nothing until the dev sets an API key.
+pub fn publish_eval_run_event(run: &crate::eval::Run) {
+    if crate::telemetry_optout::is_telemetry_opted_out() {
+        return;
+    }
+    publish_telemetry_event(build_eval_run_event(run));
+}
+
+#[cfg(test)]
+mod eval_run_event_tests {
+    use super::*;
+    use crate::eval::{CandidateRef, Environment, Run, Scores};
+
+    fn sample_run() -> Run {
+        let mut scores = Scores {
+            quality: 0.91,
+            pass: 46,
+            fail: 4,
+            ..Scores::default()
+        };
+        scores.verdict = crate::eval::GateVerdict::Pass;
+        scores.latency_p95_ms = Some(640.0);
+        scores.peak_memory_mb = Some(890.0);
+        scores.bundle_mb = Some(612.0);
+        Run {
+            run_id: "run_abc".to_string(),
+            evalset: "intent-classifier".to_string(),
+            evalset_version: 3,
+            candidate: CandidateRef::new("qwen3.5-0.8b"),
+            environment: Environment {
+                host: "macos-arm64".to_string(),
+                backend: "llamacpp".to_string(),
+                execution_provider: "metal".to_string(),
+                sdk_version: "0.1.2".to_string(),
+            },
+            scores,
+            cases: Vec::new(),
+            created: None,
+        }
+    }
+
+    #[test]
+    fn eval_run_event_has_leaderboard_fields_and_no_case_payloads() {
+        let event = build_eval_run_event(&sample_run());
+        assert_eq!(event.event_type, "EvalRun");
+        let data: serde_json::Value =
+            serde_json::from_str(event.data.as_deref().expect("data present")).expect("valid json");
+        assert_eq!(data["evalset"], "intent-classifier");
+        assert_eq!(data["evalset_version"], 3);
+        assert_eq!(data["model_id"], "qwen3.5-0.8b");
+        assert_eq!(data["quality"], 0.91);
+        assert_eq!(data["pass"], 46);
+        assert_eq!(data["verdict"], "pass");
+        assert_eq!(data["latency_p95_ms"], 640.0);
+        assert_eq!(data["peak_memory_mb"], 890.0);
+        assert_eq!(data["backend"], "llamacpp");
+        // Metadata-only: never carries per-case outputs.
+        assert!(data.get("cases").is_none());
+        assert!(data.get("output").is_none());
+    }
+
+    #[test]
+    fn eval_run_verdict_label_is_stable_lowercase() {
+        assert_eq!(gate_verdict_label(crate::eval::GateVerdict::Pass), "pass");
+        assert_eq!(gate_verdict_label(crate::eval::GateVerdict::Fail), "fail");
+        assert_eq!(
+            gate_verdict_label(crate::eval::GateVerdict::Inconclusive),
+            "inconclusive"
+        );
+    }
+}
+
 #[cfg(test)]
 mod signal_event_tests {
     use super::*;

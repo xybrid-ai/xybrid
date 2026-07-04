@@ -22,7 +22,8 @@ use xybrid_core::ir::{Envelope, EnvelopeKind};
 use xybrid_core::template_executor::TemplateExecutor;
 use xybrid_sdk::eval::{
     gate_policy, run_evalset, CandidateRef, Case, CaseOutcome, Environment, EvalRunStore, Evalset,
-    GateVerdict, GradeOutput, LoadedEvalset, OverlapJudge, Run, RunOptions, TaskType, Verdict,
+    GateVerdict, GradeOutput, InboxClient, InboxQuery, LoadedEvalset, OverlapJudge, Run,
+    RunOptions, TaskType, Verdict,
 };
 use xybrid_sdk::registry_client::RegistryClient;
 use xybrid_sdk::ExecutionProviderInfo;
@@ -71,6 +72,24 @@ pub enum EvalCommand {
         /// Show what would be pulled without writing anything.
         #[arg(long)]
         dry_run: bool,
+    },
+    /// View the platform failure inbox (flagged results + monitor auto-flags).
+    Inbox {
+        /// Look-back window: 1d | 7d | 30d | all.
+        #[arg(long, default_value = "7d")]
+        period: String,
+        /// Filter to one model id.
+        #[arg(long, value_name = "ID")]
+        model: Option<String>,
+        /// Filter by source: report | signal | all.
+        #[arg(long, default_value = "all")]
+        source: String,
+        /// Filter explicit rating: up | down.
+        #[arg(long)]
+        rating: Option<String>,
+        /// Maximum number of items to show.
+        #[arg(long, default_value_t = 50)]
+        limit: u32,
     },
     /// Run a candidate against an evalset and score it.
     Run {
@@ -229,7 +248,16 @@ pub enum EvalCommand {
 }
 
 /// Dispatch `xybrid eval [subcommand]`. Zero-arg discovers `evals/` in the cwd.
-pub fn handle_eval_command(command: Option<EvalCommand>) -> Result<()> {
+///
+/// `api_key` / `platform_url` carry the CLI's resolved global `--api-key` /
+/// `--platform-url` flags so `eval inbox` honors them (clap doesn't write parsed
+/// flags back to the environment, so the env-only path would silently ignore the
+/// flag forms).
+pub fn handle_eval_command(
+    command: Option<EvalCommand>,
+    api_key: Option<&str>,
+    platform_url: &str,
+) -> Result<()> {
     match command {
         None => discover_evalsets(),
         Some(EvalCommand::Inspect { path }) => inspect(&path),
@@ -245,6 +273,21 @@ pub fn handle_eval_command(command: Option<EvalCommand>) -> Result<()> {
             accept_all,
             dry_run,
         }) => pull(&evalset, inbox.as_deref(), accept_all, dry_run),
+        Some(EvalCommand::Inbox {
+            period,
+            model,
+            source,
+            rating,
+            limit,
+        }) => inbox_view(
+            &period,
+            model.as_deref(),
+            &source,
+            rating.as_deref(),
+            limit,
+            api_key,
+            platform_url,
+        ),
         Some(EvalCommand::Run {
             evalset,
             model,
@@ -579,6 +622,181 @@ fn init(task: &str, name: Option<&str>, dir: &Path, force: bool) -> Result<()> {
         target.display()
     ));
     Ok(())
+}
+
+/// `xybrid eval inbox` — view the platform failure inbox: the read side of the
+/// collect loop (explicit `Feedback` flags + monitor `Signal` auto-flags),
+/// the terminal twin of the console inbox. Read-only; reuses the SDK
+/// [`InboxClient`] against `/v1/telemetry/feedback` (auth via `XYBRID_API_KEY`,
+/// base via `XYBRID_API_URL`). Minting full cases from these items needs the
+/// original inference input (payload capture, joined by `trace_id`) and stays
+/// on `eval pull`'s local path for now.
+#[allow(clippy::too_many_arguments)]
+fn inbox_view(
+    period: &str,
+    model: Option<&str>,
+    source: &str,
+    rating: Option<&str>,
+    limit: u32,
+    api_key: Option<&str>,
+    platform_url: &str,
+) -> Result<()> {
+    // Resolve auth: the global `--api-key` flag (already env-fellback by clap)
+    // wins; fall back to a raw `XYBRID_API_KEY` read so a bare env var also
+    // works. The base URL is the CLI's resolved `--platform-url` (flag / env /
+    // default), so both flag and env forms target the same place.
+    let key = api_key.map(str::to_string).or_else(|| {
+        std::env::var("XYBRID_API_KEY")
+            .ok()
+            .filter(|k| !k.is_empty())
+    });
+    let Some(key) = key else {
+        ui::header("Eval inbox");
+        ui::err("No API key set — the failure inbox is a platform feature.");
+        ui::hint("Pass --api-key or set XYBRID_API_KEY to view flagged results.");
+        ui::hint("Get a free key at https://dashboard.xybrid.dev");
+        return Ok(());
+    };
+    let client = InboxClient::new(platform_url, key);
+
+    let query = InboxQuery {
+        period: Some(period.to_string()),
+        model_id: model.map(str::to_string),
+        source: (source != "all").then(|| source.to_string()),
+        rating: rating.map(str::to_string),
+        limit: Some(limit),
+    };
+
+    let resp = match client.fetch(&query) {
+        Ok(r) => r,
+        Err(e) => {
+            // A rejected key reads as an HTTP 401/403 — surface the actionable
+            // hint the missing-key branch can't (the request did go out).
+            let msg = e.to_string();
+            if msg.contains("HTTP 401") || msg.contains("HTTP 403") {
+                ui::header("Eval inbox");
+                ui::err("Platform rejected the API key (HTTP 401/403).");
+                ui::hint("Check --api-key / XYBRID_API_KEY and the workspace it belongs to.");
+                return Ok(());
+            }
+            return Err(anyhow::Error::new(e).context("failed to fetch the failure inbox"));
+        }
+    };
+
+    ui::header(&format!("Eval inbox · {} window", resp.period));
+    println!();
+    let s = &resp.summary;
+    ui::kv("Total flags", &s.total.to_string());
+    ui::kv("Reported down", &s.down_count.to_string());
+    ui::kv("Auto-flagged", &s.signal_count.to_string());
+    if let Some(rate) = s.negative_rate {
+        ui::kv("Negative rate", &format!("{:.0}%", rate * 100.0));
+    }
+    if !s.by_model.is_empty() {
+        let top = s
+            .by_model
+            .iter()
+            .map(|r| format!("{} ({})", r.key, r.count))
+            .collect::<Vec<_>>()
+            .join(", ");
+        ui::kv("By model", &top);
+    }
+    println!();
+
+    if resp.items.is_empty() {
+        ui::hint("Inbox is empty for these filters.");
+        ui::hint(
+            "As users flag results (result.report) and the monitor auto-flags \
+             degraded outputs, cases land here.",
+        );
+        return Ok(());
+    }
+
+    let mut table = ui::Table::new(vec!["When", "Source", "Model", "Task", "Detail", "Trace"]);
+    let rows: Vec<[String; 6]> = resp
+        .items
+        .iter()
+        .map(|it| {
+            let src = match it.source.as_str() {
+                "report" => match it.rating.as_deref() {
+                    Some("up") => "reported up".to_string(),
+                    _ => "reported down".to_string(),
+                },
+                _ => "auto-flag".to_string(),
+            };
+            let detail = if let Some(e) = &it.expected {
+                format!("expected: {e}")
+            } else if let Some(n) = &it.note {
+                n.clone()
+            } else if let Some(sn) = &it.signal_name {
+                match &it.signal_kind {
+                    Some(k) => format!("{k}: {sn}"),
+                    None => sn.clone(),
+                }
+            } else {
+                "-".to_string()
+            };
+            [
+                inbox_fmt_when(&it.created_at),
+                src,
+                it.model_id.clone().unwrap_or_else(|| "-".to_string()),
+                it.task.clone().unwrap_or_else(|| "-".to_string()),
+                inbox_trunc(&detail, 48),
+                it.trace_id
+                    .as_deref()
+                    .map(inbox_short_trace)
+                    .unwrap_or_else(|| "-".to_string()),
+            ]
+        })
+        .collect();
+    for r in &rows {
+        table.row(r.iter().map(String::as_str).collect());
+    }
+    table.print();
+
+    println!();
+    ui::footer(&format!(
+        "{} of {} flagged result(s) · source: {}",
+        resp.items.len(),
+        resp.total,
+        resp.data_source
+    ));
+    Ok(())
+}
+
+/// Compact `MM-DD HH:MM` rendering of an ISO-8601 timestamp (`YYYY-MM-DDThh:mm…`
+/// → `MM-DD hh:mm`). Char-safe: a short or non-ASCII string (a malformed server
+/// response) falls back to the raw value instead of panicking on a byte slice.
+fn inbox_fmt_when(iso: &str) -> String {
+    let chars: Vec<char> = iso.chars().collect();
+    if chars.len() >= 16 {
+        chars[5..16]
+            .iter()
+            .map(|&c| if c == 'T' { ' ' } else { c })
+            .collect()
+    } else {
+        iso.to_string()
+    }
+}
+
+/// Shorten a trace id for the table's last column.
+fn inbox_short_trace(id: &str) -> String {
+    if id.chars().count() > 12 {
+        let head: String = id.chars().take(10).collect();
+        format!("{head}…")
+    } else {
+        id.to_string()
+    }
+}
+
+/// Truncate `s` to at most `n` characters, appending an ellipsis when cut.
+fn inbox_trunc(s: &str, n: usize) -> String {
+    if s.chars().count() > n {
+        let head: String = s.chars().take(n).collect();
+        format!("{head}…")
+    } else {
+        s.to_string()
+    }
 }
 
 /// Default inbox path for an evalset: `~/.xybrid/inbox/<name>.jsonl` (the
@@ -1175,6 +1393,10 @@ fn run(
 
     let store = open_store(store)?;
     let dir = store.save(&run)?;
+    // Emit an EvalRun telemetry event so the run lands on the console compare
+    // leaderboard. Opt-out gated + a no-op without a configured exporter, so a
+    // local-only run (no API key) emits nothing.
+    xybrid_sdk::telemetry::publish_eval_run_event(&run);
     print_run(&run);
     ui::footer(&format!("Saved {} · {}", run.run_id, dir.display()));
     Ok(())
@@ -1219,6 +1441,8 @@ fn compare(evalset: &Path, models: &[String], auto: bool, store: Option<&Path>) 
         if let Err(e) = store.save(&run) {
             ui::warning(&format!("failed to save run for {model}: {e}"));
         }
+        // Feed the console compare leaderboard (opt-out gated; no-op offline).
+        xybrid_sdk::telemetry::publish_eval_run_event(&run);
         runs.push(run);
     }
 
@@ -2066,5 +2290,27 @@ mod tests {
                 "{name} has unblessed cases"
             );
         }
+    }
+
+    #[test]
+    fn inbox_fmt_when_formats_iso_and_is_multibyte_safe() {
+        // Canonical Postgres `to_char` output → compact MM-DD HH:MM.
+        assert_eq!(inbox_fmt_when("2026-06-27T10:00:00.000Z"), "06-27 10:00");
+        // Short / odd input falls back to the raw string, no panic.
+        assert_eq!(inbox_fmt_when("2026-06"), "2026-06");
+        // A malformed multibyte timestamp must NOT panic on a byte slice
+        // (regression: byte-indexed `iso[5..16]` panicked mid-char).
+        let weird = "20€6-06-27Ti🙂:00:00Z"; // ≥16 chars, multibyte at boundaries
+        let _ = inbox_fmt_when(weird); // must not panic
+    }
+
+    #[test]
+    fn inbox_trunc_and_short_trace_are_char_safe() {
+        assert_eq!(inbox_trunc("short", 48), "short");
+        assert_eq!(inbox_trunc("abcdef", 3), "abc…");
+        assert_eq!(inbox_short_trace("tr_short"), "tr_short");
+        assert_eq!(inbox_short_trace("tr_0123456789abcdef"), "tr_0123456…");
+        // Multibyte content must not panic.
+        let _ = inbox_trunc("café — déjà vu, naïve façade, 🙂🙂🙂", 5);
     }
 }
