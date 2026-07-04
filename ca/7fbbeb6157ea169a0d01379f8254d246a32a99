@@ -1,0 +1,19 @@
+examples/ios/XybridExample/ExtractionView.swift
+  s_fce189698ddf27::t_01b815316e9f95 331-345,348
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "ca7fbbeb6157ea169a0d01379f8254d246a32a99",
+  "prompts": {},
+  "sessions": {
+    "s_fce189698ddf27": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "05b32fb8-246e-4e34-bba8-8005771e45ce",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
