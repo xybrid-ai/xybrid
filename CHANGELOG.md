@@ -14,6 +14,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.2.2] - 2026-07-04
+
+Structured output on-device. The local llama.cpp backend can now be constrained
+to a grammar so small models (e.g. LFM2.5-230M) emit guaranteed-valid JSON for
+data-extraction workloads, and that capability is exposed across every binding.
+
+### Added
+
+- **JSON-Schema / GBNF constrained decoding for the local llama backend**
+  (#310): `GenerationConfig` gains a `grammar` field with chainable
+  `with_grammar` / `with_json_schema` builders, backed by a new
+  JSON-Schema→GBNF converter (`runtime_adapter::grammar`) covering the
+  object / array / scalar / enum subset, including nullable (`["string","null"]`)
+  fields and `\uXXXX` escapes. The grammar is prepended to the llama.cpp sampler
+  chain at the single shared chokepoint, so all generate paths are constrained
+  with no new type crossing the ABI. Ships with an end-to-end
+  `lfm2_230m_grammar` example proving schema-valid receipt→JSON extraction on
+  LFM2.5-230M where the unconstrained baseline fails. New
+  `XybridError::Grammar` variant.
+- **Grammar constraint exposed across all FFI surfaces** (#311): structured
+  output now works from Swift, Kotlin, C, and Dart. The SDK re-exports
+  `json_schema_to_gbnf` / `json_schema_str_to_gbnf` / `GrammarError`; the schema
+  crosses the FFI boundary as text and is converted natively. Bolt (Swift /
+  Kotlin), the C ABI (`xybrid_generation_config_set_grammar`,
+  `xybrid_json_schema_to_gbnf`), and Flutter (`FfiGenerationConfig.grammar`,
+  `jsonSchemaToGbnf`) all gain the `grammar` field and converter; committed
+  Swift/Kotlin wrappers, the C header, and the FRB bindings are regenerated.
+
+### Fixed
+
+- **Compact JSON from schema→GBNF** (#310): the converter's whitespace rule
+  allowed unbounded inter-token whitespace, letting a greedy model emit newlines
+  until `max_tokens` (truncated output, `finish_reason=length`). The converter
+  now emits compact (minified) JSON to remove the trap; output stays valid JSON.
+- **Grammar converter robustness** (#310): NULL-check the llama sampler chain
+  before use; error on non-object `properties` instead of silently matching
+  `{}`; JSON-escape object keys before GBNF-escaping so control characters match
+  their JSON-escaped form.
+
+---
+
 ## [0.2.1] - 2026-06-25
 
 The native VLM ships enabled. `0.2.0` landed the vision *foundation* — image

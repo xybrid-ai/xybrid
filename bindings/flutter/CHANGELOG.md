@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.2
+
+Structured output on Flutter. Local llama generation can now be constrained to a
+JSON Schema so small models emit guaranteed-valid JSON for on-device data
+extraction: `FfiGenerationConfig` gains a `grammar` field, and a new
+`jsonSchemaToGbnf` helper converts a JSON Schema to the GBNF grammar the backend
+enforces (xybrid-ai/xybrid#310, xybrid-ai/xybrid#311).
+
 ## 0.2.1
 
 Vision (VLM) now runs on every Flutter target. `0.2.0` shipped on-device
