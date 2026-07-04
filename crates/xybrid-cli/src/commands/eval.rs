@@ -22,8 +22,8 @@ use xybrid_core::ir::{Envelope, EnvelopeKind};
 use xybrid_core::template_executor::TemplateExecutor;
 use xybrid_sdk::eval::{
     gate_policy, run_evalset, CandidateRef, Case, CaseOutcome, Environment, EvalRunStore, Evalset,
-    GateVerdict, GradeOutput, InboxClient, InboxQuery, LoadedEvalset, OverlapJudge, Run,
-    RunOptions, TaskType, Verdict,
+    GateDecision, GateVerdict, GradeOutput, InboxClient, InboxQuery, LoadedEvalset, OverlapJudge,
+    Run, RunOptions, TaskType, Verdict,
 };
 use xybrid_sdk::registry_client::RegistryClient;
 use xybrid_sdk::ExecutionProviderInfo;
@@ -102,8 +102,12 @@ pub enum EvalCommand {
         /// Limit to the first N cases.
         #[arg(long)]
         limit: Option<usize>,
-        /// Don't capture per-case outputs into the run record.
+        /// Capture per-case outputs into the run record.
         #[arg(long)]
+        capture: bool,
+        /// Deprecated alias; output capture is disabled by default.
+        #[arg(long)]
+        #[arg(hide = true)]
         no_capture: bool,
         /// Run store directory (defaults to `~/.xybrid/eval-runs`).
         #[arg(long, value_name = "DIR")]
@@ -120,6 +124,13 @@ pub enum EvalCommand {
         /// Suggest comparable candidates from the registry by task type.
         #[arg(long)]
         auto: bool,
+        /// Capture per-case outputs into the run records.
+        #[arg(long)]
+        capture: bool,
+        /// Deprecated alias; output capture is disabled by default.
+        #[arg(long)]
+        #[arg(hide = true)]
+        no_capture: bool,
         /// Run store directory.
         #[arg(long, value_name = "DIR")]
         store: Option<PathBuf>,
@@ -138,6 +149,13 @@ pub enum EvalCommand {
         /// Treat an inconclusive gate as a failure (exit non-zero).
         #[arg(long)]
         strict: bool,
+        /// Capture per-case outputs when running fresh with `--model`.
+        #[arg(long)]
+        capture: bool,
+        /// Deprecated alias; output capture is disabled by default.
+        #[arg(long)]
+        #[arg(hide = true)]
+        no_capture: bool,
         /// Run store directory.
         #[arg(long, value_name = "DIR")]
         store: Option<PathBuf>,
@@ -164,6 +182,13 @@ pub enum EvalCommand {
         /// Device/profile constraint that allowed the ramp (repeatable).
         #[arg(long = "constraint", value_name = "EXPR")]
         constraints: Vec<String>,
+        /// Capture per-case outputs when running fresh with `--model`.
+        #[arg(long)]
+        capture: bool,
+        /// Deprecated alias; output capture is disabled by default.
+        #[arg(long)]
+        #[arg(hide = true)]
+        no_capture: bool,
         /// Run store directory.
         #[arg(long, value_name = "DIR")]
         store: Option<PathBuf>,
@@ -292,26 +317,44 @@ pub fn handle_eval_command(
             evalset,
             model,
             limit,
+            capture,
             no_capture,
             store,
-        }) => run(&evalset, &model, limit, !no_capture, store.as_deref()),
+        }) => run(
+            &evalset,
+            &model,
+            limit,
+            capture_from_flags(capture, no_capture),
+            store.as_deref(),
+        ),
         Some(EvalCommand::Compare {
             evalset,
             models,
             auto,
+            capture,
+            no_capture,
             store,
-        }) => compare(&evalset, &models, auto, store.as_deref()),
+        }) => compare(
+            &evalset,
+            &models,
+            auto,
+            capture_from_flags(capture, no_capture),
+            store.as_deref(),
+        ),
         Some(EvalCommand::Gate {
             evalset,
             run,
             model,
             strict,
+            capture,
+            no_capture,
             store,
         }) => gate(
             &evalset,
             run.as_deref(),
             model.as_deref(),
             strict,
+            capture_from_flags(capture, no_capture),
             store.as_deref(),
         ),
         Some(EvalCommand::Ship {
@@ -321,6 +364,8 @@ pub fn handle_eval_command(
             skill,
             canary,
             constraints,
+            capture,
+            no_capture,
             store,
             deployments,
         }) => ship(
@@ -330,6 +375,7 @@ pub fn handle_eval_command(
             skill.as_deref(),
             canary,
             constraints,
+            capture_from_flags(capture, no_capture),
             store.as_deref(),
             deployments.as_deref(),
         ),
@@ -409,6 +455,13 @@ fn gate_exit_code(verdict: GateVerdict, strict: bool) -> i32 {
         }
         GateVerdict::Fail => 2,
     }
+}
+
+fn capture_from_flags(capture: bool, no_capture: bool) -> bool {
+    if no_capture {
+        ui::warning("--no-capture is deprecated; outputs are not captured unless --capture is set");
+    }
+    capture
 }
 
 /// Whether a manifest declares an enforceable absolute gate (a quality or
@@ -1054,6 +1107,7 @@ fn gate(
     run_id: Option<&str>,
     model: Option<&str>,
     strict: bool,
+    capture: bool,
     store: Option<&Path>,
 ) -> Result<()> {
     let set = LoadedEvalset::load(evalset)
@@ -1077,7 +1131,7 @@ fn gate(
         validate_run_evalset_identity(&run, &set.manifest)?;
         run
     } else if let Some(model_id) = model {
-        execute_run(&set, model_id, None, true)?
+        execute_run(&set, model_id, None, capture)?
     } else {
         anyhow::bail!("specify --run <id> to gate a stored run or --model <id> to run fresh");
     };
@@ -1086,13 +1140,7 @@ fn gate(
     // frozen at run time; tightening `gate.min_quality` and re-gating must use
     // the new policy, not the stale verdict.
     let policy = gate_policy(&set.manifest);
-    let scores: Vec<f64> = run
-        .cases
-        .iter()
-        .filter(|c| c.verdict != Verdict::Unblessed)
-        .map(|c| c.score)
-        .collect();
-    let decision = policy.evaluate_with_latency(&scores, run_latency_stats(&run), None);
+    let decision = evaluate_run_gate(&run, &policy, None);
 
     ui::header(&format!("Gate · {}", set.manifest.name));
     println!();
@@ -1128,6 +1176,7 @@ fn ship(
     skill: Option<&str>,
     canary: u8,
     constraints: Vec<String>,
+    capture: bool,
     store: Option<&Path>,
     deployments: Option<&Path>,
 ) -> Result<()> {
@@ -1148,20 +1197,14 @@ fn ship(
         validate_run_evalset_identity(&run, &set.manifest)?;
         run
     } else if let Some(model_id) = model {
-        execute_run(&set, model_id, None, true)?
+        execute_run(&set, model_id, None, capture)?
     } else {
         anyhow::bail!("specify --run <id> to ship a stored run or --model <id> to run fresh");
     };
 
     // Re-evaluate against the current gate; only a Pass may ship.
     let policy = gate_policy(&set.manifest);
-    let scores: Vec<f64> = run
-        .cases
-        .iter()
-        .filter(|c| c.verdict != Verdict::Unblessed)
-        .map(|c| c.score)
-        .collect();
-    let decision = policy.evaluate_with_latency(&scores, run_latency_stats(&run), None);
+    let decision = evaluate_run_gate(&run, &policy, None);
 
     ui::header(&format!(
         "Ship · {} → {}",
@@ -1266,13 +1309,7 @@ fn promote(
         .with_context(|| format!("gating run '{}' not found", rec.run_id))?;
     validate_run_evalset_identity(&run, &set.manifest)?;
     let policy = gate_policy(&set.manifest);
-    let scores: Vec<f64> = run
-        .cases
-        .iter()
-        .filter(|c| c.verdict != Verdict::Unblessed)
-        .map(|c| c.score)
-        .collect();
-    let decision = policy.evaluate_with_latency(&scores, run_latency_stats(&run), None);
+    let decision = evaluate_run_gate(&run, &policy, None);
 
     ui::header(&format!("Promote · {deployment_id}"));
     println!();
@@ -1409,7 +1446,13 @@ fn run(
     Ok(())
 }
 
-fn compare(evalset: &Path, models: &[String], auto: bool, store: Option<&Path>) -> Result<()> {
+fn compare(
+    evalset: &Path,
+    models: &[String],
+    auto: bool,
+    capture: bool,
+    store: Option<&Path>,
+) -> Result<()> {
     let set = LoadedEvalset::load(evalset)
         .with_context(|| format!("failed to load evalset at {}", evalset.display()))?;
 
@@ -1441,7 +1484,7 @@ fn compare(evalset: &Path, models: &[String], auto: bool, store: Option<&Path>) 
     // The first candidate is the baseline for non-inferiority on the rest.
     let mut baseline_quality: Option<f64> = None;
     for model in &candidates {
-        let run = execute_run(&set, model, baseline_quality, true)?;
+        let run = execute_run(&set, model, baseline_quality, capture)?;
         if baseline_quality.is_none() {
             baseline_quality = Some(run.scores.quality);
         }
@@ -1721,7 +1764,7 @@ fn run_latency_stats(run: &Run) -> xybrid_sdk::eval::stats::LatencyStats {
     let mut scorable_cases = 0;
     let mut latencies = Vec::new();
     for case in &run.cases {
-        if case.verdict == Verdict::Unblessed {
+        if !case.counts_for_gate || case.verdict == Verdict::Unblessed {
             continue;
         }
         scorable_cases += 1;
@@ -1734,6 +1777,32 @@ fn run_latency_stats(run: &Run) -> xybrid_sdk::eval::stats::LatencyStats {
         measured_cases: latencies.len(),
         scorable_cases,
     }
+}
+
+fn evaluate_run_gate(
+    run: &Run,
+    policy: &xybrid_sdk::eval::GatePolicy,
+    baseline_quality: Option<f64>,
+) -> GateDecision {
+    let scores: Vec<f64> = run
+        .cases
+        .iter()
+        .filter(|case| case.counts_for_gate && case.verdict != Verdict::Unblessed)
+        .map(|case| case.score)
+        .collect();
+    let eligible = run.cases.iter().filter(|case| case.counts_for_gate).count();
+    let mut decision = policy.evaluate_with_latency_and_repeats(
+        &scores,
+        run_latency_stats(run),
+        baseline_quality,
+        run.scores.repeat_qualities.as_deref(),
+    );
+    decision.reason = format!(
+        "{}; gate-eligible cases: {eligible}/{}",
+        decision.reason,
+        run.cases.len()
+    );
+    decision
 }
 
 fn task_default_name(task: TaskType) -> &'static str {
@@ -1779,6 +1848,13 @@ mod tests {
         assert_eq!(gate_exit_code(GateVerdict::Fail, false), 2);
         assert_eq!(gate_exit_code(GateVerdict::Inconclusive, false), 0);
         assert_eq!(gate_exit_code(GateVerdict::Inconclusive, true), 2);
+    }
+
+    #[test]
+    fn capture_defaults_to_opt_in() {
+        assert!(!capture_from_flags(false, false));
+        assert!(capture_from_flags(true, false));
+        assert!(!capture_from_flags(false, true));
     }
 
     #[test]
@@ -2076,6 +2152,7 @@ mod tests {
                 score,
                 latency_ms: Some(100),
                 detail: None,
+                counts_for_gate: true,
             })
             .collect();
         let run = Run {
@@ -2130,6 +2207,7 @@ mod tests {
                 score: 1.0,
                 latency_ms: Some(100),
                 detail: None,
+                counts_for_gate: true,
             },
             xybrid_sdk::eval::RunCase {
                 id: "b".into(),
@@ -2138,6 +2216,7 @@ mod tests {
                 score: 0.0,
                 latency_ms: None,
                 detail: None,
+                counts_for_gate: true,
             },
             xybrid_sdk::eval::RunCase {
                 id: "c".into(),
@@ -2146,12 +2225,48 @@ mod tests {
                 score: 0.0,
                 latency_ms: None,
                 detail: None,
+                counts_for_gate: true,
             },
         ];
         let stats = run_latency_stats(&run);
         assert_eq!(stats.measured_cases, 1);
         assert_eq!(stats.scorable_cases, 2);
         assert_eq!(stats.p95_ms, Some(100.0));
+    }
+
+    #[test]
+    fn stored_run_gate_uses_only_gate_eligible_cases() {
+        let mut run = run_with("m", 0.5, GateVerdict::Fail, Some(100.0), false);
+        run.cases = vec![
+            xybrid_sdk::eval::RunCase {
+                id: "regression".into(),
+                output: None,
+                verdict: Verdict::Pass,
+                score: 1.0,
+                latency_ms: Some(100),
+                detail: None,
+                counts_for_gate: true,
+            },
+            xybrid_sdk::eval::RunCase {
+                id: "dev".into(),
+                output: None,
+                verdict: Verdict::Fail,
+                score: 0.0,
+                latency_ms: Some(999),
+                detail: None,
+                counts_for_gate: false,
+            },
+        ];
+        let policy = xybrid_sdk::eval::GatePolicy {
+            min_cases: 1,
+            min_quality: Some(0.9),
+            bootstrap_iterations: 100,
+            ..xybrid_sdk::eval::GatePolicy::default()
+        };
+        let decision = evaluate_run_gate(&run, &policy, None);
+        assert_eq!(decision.verdict, GateVerdict::Pass, "{}", decision.reason);
+        assert_eq!(decision.quality, 1.0);
+        assert!(decision.reason.contains("gate-eligible cases: 1/2"));
     }
 
     #[test]
@@ -2178,6 +2293,7 @@ mod tests {
             None,
             5,
             vec!["os=ios>=16".into()],
+            false,
             Some(&run_store),
             Some(&dep_store),
         )
@@ -2201,6 +2317,7 @@ mod tests {
             None,
             5,
             vec![],
+            false,
             Some(&run_store),
             Some(&dep_store),
         );
@@ -2230,6 +2347,7 @@ mod tests {
             None,
             250,
             vec![],
+            false,
             Some(&run_store),
             Some(&dep_store),
         )
@@ -2261,6 +2379,7 @@ mod tests {
             None,
             5,
             vec![],
+            false,
             Some(&run_store),
             Some(&dir.path().join("deployments")),
         )
@@ -2288,6 +2407,7 @@ mod tests {
             None,
             5,
             vec![],
+            false,
             Some(&run_store),
             Some(&dir.path().join("d")),
         );
@@ -2317,6 +2437,7 @@ mod tests {
             None,
             5,
             vec![],
+            false,
             Some(&run_store),
             Some(&dep_store),
         )
@@ -2364,6 +2485,7 @@ mod tests {
             None,
             5,
             vec![],
+            false,
             Some(&run_store),
             Some(&dep_store),
         )
@@ -2403,6 +2525,7 @@ mod tests {
             None,
             5,
             vec![],
+            false,
             Some(&run_store),
             Some(&dep_store),
         )
@@ -2443,6 +2566,7 @@ mod tests {
             Some("support-intent"),
             5,
             vec![],
+            false,
             Some(&run_store),
             Some(&dep_store),
         )

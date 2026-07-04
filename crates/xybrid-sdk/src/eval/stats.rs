@@ -303,10 +303,21 @@ impl GatePolicy {
         latency: LatencyStats,
         baseline_quality: Option<f64>,
     ) -> GateDecision {
+        self.evaluate_with_latency_and_repeats(scores, latency, baseline_quality, None)
+    }
+
+    /// Evaluate with optional repeat-quality evidence for flakiness.
+    pub fn evaluate_with_latency_and_repeats(
+        &self,
+        scores: &[f64],
+        latency: LatencyStats,
+        baseline_quality: Option<f64>,
+        repeat_qualities: Option<&[f64]>,
+    ) -> GateDecision {
         let n = scores.len();
 
         let quality = mean(scores);
-        let ci = bootstrap_ci(
+        let mut ci = bootstrap_ci(
             scores,
             self.seed,
             self.bootstrap_iterations,
@@ -396,11 +407,27 @@ impl GatePolicy {
             reasons.push("no gate criteria configured".to_string());
         }
 
+        let flaky = repeat_qualities.is_some_and(|qualities| {
+            if let Some(ci) = &mut ci {
+                ci.repeats = qualities.len().max(1).min(u32::MAX as usize) as u32;
+            }
+            let std = sample_std_dev(qualities);
+            let flaky = is_flaky(qualities, self.flaky_std_threshold);
+            if flaky {
+                verdict = stricter(verdict, GateVerdict::Inconclusive);
+                reasons.push(format!(
+                    "flaky: repeat std {std:.3} over threshold {:.3}",
+                    self.flaky_std_threshold
+                ));
+            }
+            flaky
+        });
+
         GateDecision {
             verdict,
             quality,
             ci,
-            flaky: false,
+            flaky,
             reason: if reasons.is_empty() {
                 "all configured gate criteria passed".to_string()
             } else {
@@ -765,5 +792,20 @@ mod tests {
             "sample std should exceed the threshold here"
         );
         assert!(is_flaky(&repeats, 0.1));
+    }
+
+    #[test]
+    fn gate_repeats_make_flaky_pass_inconclusive() {
+        let p = policy(1, Some(0.0));
+        let d = p.evaluate_with_latency_and_repeats(
+            &[1.0, 1.0, 0.0, 0.0],
+            LatencyStats::from_p95(Some(100.0), 4),
+            None,
+            Some(&[1.0, 0.0]),
+        );
+        assert!(d.flaky);
+        assert_eq!(d.verdict, GateVerdict::Inconclusive);
+        assert_eq!(d.ci.unwrap().repeats, 2);
+        assert!(d.reason.contains("flaky: repeat std"));
     }
 }

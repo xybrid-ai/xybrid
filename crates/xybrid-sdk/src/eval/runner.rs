@@ -9,7 +9,7 @@
 use crate::eval::format::{Case, Evalset, Gate, LoadedEvalset};
 use crate::eval::grader::{grade_case, CaseGrade, GradeOutput, Judge, Verdict};
 use crate::eval::run::{
-    aggregate_scores, CandidateRef, Environment, JudgeIdentity, Run, RunCase, Scores,
+    aggregate_scores_with_repeats, CandidateRef, Environment, JudgeIdentity, Run, RunCase, Scores,
 };
 use crate::eval::stats::{
     GatePolicy, DEFAULT_BOOTSTRAP_ITERATIONS, DEFAULT_CONFIDENCE, DEFAULT_SEED,
@@ -38,7 +38,7 @@ impl CaseOutcome {
 }
 
 /// Options controlling a run.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct RunOptions {
     /// Whether to capture per-case outputs into the run record. Off ⇒ the run
     /// stores verdicts + scores only (privacy-conservative default).
@@ -48,16 +48,6 @@ pub struct RunOptions {
     /// Today's date (`YYYY-MM-DD`) for expiry exclusion. `None` disables expiry
     /// filtering (quarantined cases are always excluded regardless).
     pub today: Option<String>,
-}
-
-impl Default for RunOptions {
-    fn default() -> Self {
-        Self {
-            capture_outputs: true,
-            baseline_quality: None,
-            today: None,
-        }
-    }
 }
 
 /// Today's date as `YYYY-MM-DD` (UTC) — for the CLI to pass into [`RunOptions`]
@@ -109,65 +99,89 @@ pub fn run_evalset<F>(
 where
     F: FnMut(&Case) -> Result<CaseOutcome, String>,
 {
-    let mut grades: Vec<CaseGrade> = Vec::with_capacity(set.cases.len());
+    let repeats = set
+        .manifest
+        .gate
+        .as_ref()
+        .and_then(|gate| gate.repeats)
+        .unwrap_or(1)
+        .max(1);
+    let mut grades: Vec<CaseGrade> = Vec::with_capacity(set.cases.len() * repeats as usize);
     let mut latencies: Vec<f64> = Vec::new();
     let mut run_cases: Vec<RunCase> = Vec::with_capacity(set.cases.len());
     let mut crashes: u32 = 0;
+    let mut repeat_qualities = Vec::with_capacity(repeats as usize);
 
-    for case in &set.cases {
-        // Governance: never score a quarantined (known-bad) case, and skip
-        // expired (stale) cases when a date is supplied. Both are retained on
-        // disk for audit but excluded from scoring/gates.
-        if case.is_quarantined() {
-            continue;
-        }
-        if options
-            .today
-            .as_deref()
-            .is_some_and(|today| case.is_expired_on(today))
-        {
-            continue;
-        }
-        match infer(case) {
-            Ok(outcome) => {
-                let mut grade = grade_case(&set.manifest, case, &outcome.output, judge);
-                grade.score = finite_score(grade.score);
-                grade.detail = grade.detail.map(cap_case_detail);
-                if let Some(ms) = outcome.latency_ms {
-                    latencies.push(ms as f64);
+    for repeat_idx in 0..repeats {
+        let mut repeat_scores = Vec::new();
+        for case in &set.cases {
+            let counts_for_gate = counts_for_gate(case, options.today.as_deref());
+            match infer(case) {
+                Ok(outcome) => {
+                    let mut grade = grade_case(&set.manifest, case, &outcome.output, judge);
+                    grade.score = finite_score(grade.score);
+                    grade.detail = grade.detail.map(cap_case_detail);
+                    if counts_for_gate {
+                        if let Some(ms) = outcome.latency_ms {
+                            latencies.push(ms as f64);
+                        }
+                        if grade.verdict != Verdict::Unblessed {
+                            repeat_scores.push(grade.score);
+                        }
+                        grades.push(grade.clone());
+                    }
+                    if repeat_idx == 0 {
+                        run_cases.push(RunCase {
+                            id: case.id.clone(),
+                            output: if options.capture_outputs {
+                                Some(output_to_json(&outcome.output))
+                            } else {
+                                None
+                            },
+                            verdict: grade.verdict,
+                            score: grade.score,
+                            latency_ms: outcome.latency_ms,
+                            detail: grade.detail.clone(),
+                            counts_for_gate,
+                        });
+                    }
                 }
-                run_cases.push(RunCase {
-                    id: case.id.clone(),
-                    output: if options.capture_outputs {
-                        Some(output_to_json(&outcome.output))
-                    } else {
-                        None
-                    },
-                    verdict: grade.verdict,
-                    score: grade.score,
-                    latency_ms: outcome.latency_ms,
-                    detail: grade.detail.clone(),
-                });
-                grades.push(grade);
-            }
-            Err(err) => {
-                crashes += 1;
-                let grade = CaseGrade::fail(format!("inference error: {err}"));
-                run_cases.push(RunCase {
-                    id: case.id.clone(),
-                    output: None,
-                    verdict: Verdict::Fail,
-                    score: 0.0,
-                    latency_ms: None,
-                    detail: grade.detail.clone().map(cap_case_detail),
-                });
-                grades.push(grade);
+                Err(err) => {
+                    let grade = CaseGrade::fail(format!("inference error: {err}"));
+                    let detail = grade.detail.clone().map(cap_case_detail);
+                    if counts_for_gate {
+                        crashes += 1;
+                        repeat_scores.push(0.0);
+                        grades.push(CaseGrade {
+                            detail: detail.clone(),
+                            ..grade
+                        });
+                    }
+                    if repeat_idx == 0 {
+                        run_cases.push(RunCase {
+                            id: case.id.clone(),
+                            output: None,
+                            verdict: Verdict::Fail,
+                            score: 0.0,
+                            latency_ms: None,
+                            detail,
+                            counts_for_gate,
+                        });
+                    }
+                }
             }
         }
+        repeat_qualities.push(mean_or_zero(&repeat_scores));
     }
 
-    let mut scores: Scores =
-        aggregate_scores(&grades, &latencies, policy, options.baseline_quality);
+    let repeat_qualities = (repeats > 1).then_some(repeat_qualities);
+    let mut scores: Scores = aggregate_scores_with_repeats(
+        &grades,
+        &latencies,
+        policy,
+        options.baseline_quality,
+        repeat_qualities,
+    );
     scores.crash_or_timeout = crashes;
     if let Some(j) = judge {
         scores.judge = Some(JudgeIdentity {
@@ -189,6 +203,20 @@ where
         scores,
         cases: run_cases,
         created: None,
+    }
+}
+
+fn counts_for_gate(case: &Case, today: Option<&str>) -> bool {
+    !case.is_quarantined()
+        && case.split == crate::eval::format::Split::Regression
+        && today.is_none_or(|today| !case.is_expired_on(today))
+}
+
+fn mean_or_zero(scores: &[f64]) -> f64 {
+    if scores.is_empty() {
+        0.0
+    } else {
+        scores.iter().sum::<f64>() / scores.len() as f64
     }
 }
 
@@ -221,7 +249,7 @@ fn cap_case_detail(detail: String) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::eval::format::{Case, CaseInput, Evalset, Expected, LoadedEvalset, TaskType};
+    use crate::eval::format::{Case, CaseInput, Evalset, Expected, LoadedEvalset, Split, TaskType};
     use crate::eval::grader::OverlapJudge;
     use crate::eval::stats::GateVerdict;
 
@@ -238,16 +266,21 @@ mod tests {
         let mut manifest = Evalset::new("intent", TaskType::Classify);
         manifest.labels = vec!["refund".into(), "cancel".into()];
         let cases = vec![
-            Case::new("c1", CaseInput::Text("refund please".into()))
-                .with_expected(Expected::Label("refund".into())),
-            Case::new("c2", CaseInput::Text("cancel my order".into()))
-                .with_expected(Expected::Label("cancel".into())),
+            regression_case("c1", "refund please", "refund"),
+            regression_case("c2", "cancel my order", "cancel"),
         ];
         LoadedEvalset {
             manifest,
             cases,
             root: std::path::PathBuf::from("."),
         }
+    }
+
+    fn regression_case(id: &str, input: &str, label: &str) -> Case {
+        let mut case = Case::new(id, CaseInput::Text(input.into()))
+            .with_expected(Expected::Label(label.into()));
+        case.split = Split::Regression;
+        case
     }
 
     #[test]
@@ -274,8 +307,7 @@ mod tests {
         assert_eq!(run.scores.quality, 1.0);
         assert_eq!(run.cases.len(), 2);
         assert_eq!(run.scores.crash_or_timeout, 0);
-        // outputs captured by default
-        assert!(run.cases[0].output.is_some());
+        assert!(run.cases[0].output.is_none());
     }
 
     #[test]
@@ -324,11 +356,11 @@ mod tests {
     }
 
     #[test]
-    fn capture_outputs_false_omits_payloads() {
+    fn capture_outputs_true_records_payloads() {
         let set = classify_set();
         let policy = gate_policy(&set.manifest);
         let opts = RunOptions {
-            capture_outputs: false,
+            capture_outputs: true,
             ..RunOptions::default()
         };
         let run = run_evalset(
@@ -341,7 +373,7 @@ mod tests {
             "run_4",
             |_| Ok(CaseOutcome::text("refund", 10)),
         );
-        assert!(run.cases.iter().all(|c| c.output.is_none()));
+        assert!(run.cases.iter().all(|c| c.output.is_some()));
     }
 
     #[test]
@@ -504,20 +536,25 @@ mod tests {
     }
 
     #[test]
-    fn quarantined_and_expired_cases_are_excluded_from_a_run() {
+    fn dev_quarantined_and_expired_cases_run_but_do_not_feed_gate() {
         let mut manifest = Evalset::new("s", TaskType::Classify);
         manifest.labels = vec!["a".into()];
-        let good = Case::new("good", CaseInput::Text("x".into()))
+        let mut good = Case::new("good", CaseInput::Text("x".into()))
+            .with_expected(Expected::Label("a".into()));
+        good.split = Split::Regression;
+        let dev = Case::new("dev", CaseInput::Text("x".into()))
             .with_expected(Expected::Label("a".into()));
         let mut quarantined = Case::new("bad", CaseInput::Text("x".into()))
             .with_expected(Expected::Label("a".into()));
+        quarantined.split = Split::Regression;
         quarantined.quarantine_reason = Some("mislabeled".into());
         let mut expired = Case::new("old", CaseInput::Text("x".into()))
             .with_expected(Expected::Label("a".into()));
+        expired.split = Split::Regression;
         expired.expires_at = Some("2020-01-01".into());
         let set = LoadedEvalset {
             manifest,
-            cases: vec![good, quarantined, expired],
+            cases: vec![good, dev, quarantined, expired],
             root: ".".into(),
         };
         let policy = gate_policy(&set.manifest);
@@ -535,11 +572,56 @@ mod tests {
             "run_gov",
             |_| Ok(CaseOutcome::text("a", 5)),
         );
-        // Only the one healthy case is scored; the quarantined + expired cases
-        // are excluded from the run entirely (retained on disk for audit).
-        assert_eq!(run.cases.len(), 1);
-        assert_eq!(run.cases[0].id, "good");
+        assert_eq!(run.cases.len(), 4);
+        assert_eq!(
+            run.cases
+                .iter()
+                .filter(|case| case.counts_for_gate)
+                .map(|case| case.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["good"]
+        );
         assert_eq!(run.scores.pass, 1);
+    }
+
+    #[test]
+    fn repeated_gate_marks_flaky_candidate_inconclusive() {
+        let mut set = classify_set();
+        set.manifest.gate = Some(Gate {
+            min_quality: Some(0.0),
+            min_cases: Some(1),
+            repeats: Some(2),
+            ..Gate::default()
+        });
+        let policy = gate_policy(&set.manifest);
+        let mut calls = 0;
+        let run = run_evalset(
+            &set,
+            CandidateRef::new("m"),
+            env(),
+            &policy,
+            None,
+            &RunOptions::default(),
+            "run_repeats",
+            |case| {
+                calls += 1;
+                let first_repeat = calls <= set.cases.len();
+                match (&case.input, first_repeat) {
+                    (CaseInput::Text(t), true) if t.contains("refund") => {
+                        Ok(CaseOutcome::text("refund", 10))
+                    }
+                    (CaseInput::Text(_), true) => Ok(CaseOutcome::text("cancel", 20)),
+                    _ => Ok(CaseOutcome::text("wrong", 30)),
+                }
+            },
+        );
+        assert_eq!(calls, set.cases.len() * 2);
+        assert_eq!(run.cases.len(), 2);
+        assert_eq!(run.scores.repeat_qualities, Some(vec![1.0, 0.0]));
+        assert!(run.scores.flaky);
+        assert_eq!(run.scores.verdict, GateVerdict::Inconclusive);
+        assert_eq!(run.scores.ci.as_ref().unwrap().repeats, 2);
+        assert_eq!(run.scores.latency_p95_ms, Some(30.0));
     }
 
     #[test]
@@ -555,8 +637,8 @@ mod tests {
             ..Gate::default()
         });
         let cases = vec![
-            Case::new("c1", CaseInput::Text("x".into())).with_expected(Expected::Label("a".into())),
-            Case::new("c2", CaseInput::Text("y".into())).with_expected(Expected::Label("a".into())),
+            regression_case("c1", "x", "a"),
+            regression_case("c2", "y", "a"),
         ];
         let set = LoadedEvalset {
             manifest,

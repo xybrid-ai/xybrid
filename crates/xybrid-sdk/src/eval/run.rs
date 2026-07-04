@@ -35,6 +35,10 @@ pub const RUN_FILE: &str = "run.json";
 /// pathologically large file would exhaust memory — both are rejected up front.
 const MAX_RUN_FILE_BYTES: u64 = 16 * 1024 * 1024;
 
+fn default_true() -> bool {
+    true
+}
+
 // ============================================================================
 // Candidate & environment
 // ============================================================================
@@ -158,6 +162,9 @@ pub struct Scores {
     /// Whether the candidate was flagged flaky across repeats.
     #[serde(default)]
     pub flaky: bool,
+    /// Mean quality for each repeat, when `gate.repeats` was used.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repeat_qualities: Option<Vec<f64>>,
 
     // ---- on-device SLOs (Option = not captured) ----
     /// p50 wall-clock latency, ms.
@@ -218,6 +225,7 @@ impl Default for Scores {
             verdict: GateVerdict::Inconclusive,
             ci: None,
             flaky: false,
+            repeat_qualities: None,
             latency_p50_ms: None,
             latency_p95_ms: None,
             ttft_p95_ms: None,
@@ -259,6 +267,9 @@ pub struct RunCase {
     /// Grader detail.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub detail: Option<String>,
+    /// Whether this case was eligible for gate scoring when the run was made.
+    #[serde(default = "default_true")]
+    pub counts_for_gate: bool,
 }
 
 /// A complete run record.
@@ -300,6 +311,16 @@ pub fn aggregate_scores(
     policy: &GatePolicy,
     baseline_quality: Option<f64>,
 ) -> Scores {
+    aggregate_scores_with_repeats(grades, latencies_ms, policy, baseline_quality, None)
+}
+
+pub(crate) fn aggregate_scores_with_repeats(
+    grades: &[CaseGrade],
+    latencies_ms: &[f64],
+    policy: &GatePolicy,
+    baseline_quality: Option<f64>,
+    repeat_qualities: Option<Vec<f64>>,
+) -> Scores {
     let mut pass = 0;
     let mut fail = 0;
     let mut unblessed = 0;
@@ -328,7 +349,12 @@ pub fn aggregate_scores(
         measured_cases: latencies_ms.len(),
         scorable_cases: scorable.len(),
     };
-    let decision = policy.evaluate_with_latency(&scorable, latency, baseline_quality);
+    let decision = policy.evaluate_with_latency_and_repeats(
+        &scorable,
+        latency,
+        baseline_quality,
+        repeat_qualities.as_deref(),
+    );
 
     Scores {
         quality: decision.quality,
@@ -338,6 +364,7 @@ pub fn aggregate_scores(
         verdict: decision.verdict,
         ci: decision.ci,
         flaky: decision.flaky,
+        repeat_qualities,
         latency_p50_ms: percentile(latencies_ms, 50.0),
         latency_p95_ms: p95,
         ..Scores::default()
@@ -636,12 +663,20 @@ mod tests {
                 score: 1.0,
                 latency_ms: Some(188),
                 detail: None,
+                counts_for_gate: true,
             }],
             created: Some("2026-06-14".into()),
         };
         let json = serde_json::to_string(&run).unwrap();
         let back: Run = serde_json::from_str(&json).unwrap();
         assert_eq!(run, back);
+    }
+
+    #[test]
+    fn run_case_counts_for_gate_defaults_true_for_old_records() {
+        let json = r#"{"id":"c1","verdict":"pass","score":1.0}"#;
+        let case: RunCase = serde_json::from_str(json).unwrap();
+        assert!(case.counts_for_gate);
     }
 
     // ---- store isolation ----

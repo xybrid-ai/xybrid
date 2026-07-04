@@ -23,7 +23,9 @@ so an evalset is a normal git directory — versionable, diffable, reviewable in
 
 > **Security:** payload references are validated on load. A reference that
 > escapes the evalset directory (absolute path, `..`, or an escaping symlink) is
-> rejected — an imported or flagged evalset cannot read or exfiltrate host files.
+> rejected, and the target must exist as a regular file — an imported or flagged
+> evalset cannot read or exfiltrate host files. `evalset.yaml` and `cases.jsonl`
+> must also be regular files before they are read.
 
 ## Manifest — `evalset.yaml`
 
@@ -38,6 +40,7 @@ gate:                     # optional; consumed by `eval gate` and over-the-air p
   max_p95_latency_ms: 800
   min_cases: 30           # below this → inconclusive
   non_inferiority_margin: 0.02
+  repeats: 3              # rerun the full evalset; flaky repeats cannot pass
 # Tier 3 only:
 # grader: { judge_model: …, rubric: …, custom: wasm:./graders/my_metric.wasm }
 ```
@@ -74,9 +77,10 @@ carry lifecycle state (all optional, with safe defaults):
 (`captured`\|`redacted`\|`metadata-only`) · `source_confidence` · `split`
 (`dev`\|`regression`) · `owner` · `expires_at` · `quarantine_reason`.
 
-Quarantined or expired cases are **excluded from gate runs but retained for
-audit**. Gate runs use the `regression` split. Splits are auto-assigned, never
-asked of a Tier 1 developer.
+All cases still execute and are recorded in a run. Only cases with
+`split: regression` that are not quarantined or expired are marked
+`counts_for_gate: true` and feed gate scores, latency SLOs, ship, and promote.
+Splits are auto-assigned, never asked of a Tier 1 developer.
 
 ## Graders (the task implies the metric)
 
@@ -115,13 +119,18 @@ A run is `evalset × candidate → verdicts`, stored under
   "scores": {
     "quality": 0.84, "pass": 42, "fail": 8, "verdict": "fail",
     "ci": { "low": 0.78, "high": 0.90, "n": 50, "repeats": 1 },
+    "flaky": false, "repeat_qualities": [0.84, 0.83, 0.86],
     "latency_p50_ms": 210, "latency_p95_ms": 640,
     "ttft_p95_ms": null, "cold_start_ms": null, "peak_memory_mb": null,
     "crash_or_timeout": 0, "scorer_version": "eval-scorer-v0"
   },
-  "cases": [ { "id": "c1", "verdict": "fail", "score": 0.0, "latency_ms": 188 } ]
+  "cases": [ { "id": "c1", "verdict": "fail", "score": 0.0, "latency_ms": 188, "counts_for_gate": true } ]
 }
 ```
+
+Per-case outputs are not captured by default. Pass `--capture` to `run`,
+`compare`, `gate --model`, or `ship --model` when a local run record needs the
+raw model output for debugging.
 
 The `scores` block reserves the full on-device SLO field set (TTFT/ITL, cold
 start, energy/thermal, memory, bundle, offline) and judge-identity fields
@@ -136,8 +145,11 @@ vs. confidence interval → non-inferiority vs. baseline**. A delta within the
 non-inferiority margin, a sample below `min_cases`, or a confidence interval that
 straddles the threshold all resolve to `inconclusive` (CI-neutral). Confidence
 intervals come from a deterministic bootstrap (fixed seed, reproducible across
-machines). Candidates that score erratically across repeats are flagged flaky and
-excluded from ranking.
+machines). When `gate.repeats > 1`, the full evalset is executed that many
+times; the stored per-case rows come from the first repeat, latency pools across
+repeats, and per-repeat mean qualities are stored in `repeat_qualities`.
+Candidates whose repeat-quality sample standard deviation exceeds the flaky
+threshold are marked `flaky` and resolve no better than `inconclusive`.
 
 Exit codes: `pass` → 0, `inconclusive` → 0 (or 2 with `--strict`), `fail` → 2.
 
@@ -150,14 +162,17 @@ Exit codes: `pass` → 0, `inconclusive` → 0 (or 2 with `--strict`), `fail` �
 | `xybrid eval inspect <path>` | 1 | Validate + summarize an evalset. |
 | `xybrid eval pull <evalset> [--accept-all] [--dry-run]` | 1 | Drain flagged cases into the evalset via a review queue (local inbox file). |
 | `xybrid eval inbox [--period 7d] [--model <id>] [--source report\|signal] [--rating up\|down]` | 1 | View the platform failure inbox (flagged results + monitor auto-flags) in the terminal — the read side of collect. Needs `XYBRID_API_KEY`. |
-| `xybrid eval run <evalset> --model <id> [--limit N] [--no-capture]` | 1–3 | Score a candidate; persist the run. |
-| `xybrid eval compare <evalset> --model <id>… [--auto]` | 1 | Leaderboard + recommended winner (hard-constraint filter → quality → tie-breakers). |
-| `xybrid eval gate <evalset> [--run <id> \| --model <id>] [--strict]` | 2 | Pass/fail/inconclusive with a CI-aware exit code (CI primitive). |
+| `xybrid eval run <evalset> --model <id> [--limit N] [--capture]` | 1–3 | Score a candidate; persist the run. |
+| `xybrid eval compare <evalset> --model <id>… [--auto] [--capture]` | 1 | Leaderboard + recommended winner (hard-constraint filter → quality → tie-breakers). |
+| `xybrid eval gate <evalset> [--run <id> \| --model <id>] [--strict] [--capture]` | 2 | Pass/fail/inconclusive with a CI-aware exit code (CI primitive). |
+| `xybrid eval ship <evalset> [--run <id> \| --model <id>] [--capture]` | 2 | Record a promotion only when the current gate passes. |
 | `xybrid eval show <run_id>` / `diff <a> <b>` | 2–3 | Re-print / side-by-side delta. |
 
-`run` / `compare` / `gate --model` execute the candidate through the same path as
-`xybrid run`, so they require a platform preset (`--features platform-*`) built
-in. The offline commands need no backend.
+`run` / `compare` / `gate --model` / `ship --model` execute the candidate
+through the same path as `xybrid run`, so they require a platform preset
+(`--features platform-*`) built in. The offline commands need no backend.
+`--no-capture` is accepted as a hidden deprecated alias for older scripts, but
+capture is already off unless `--capture` is set.
 
 ## Determinism
 

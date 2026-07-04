@@ -27,6 +27,7 @@ pub const CASES_FILE: &str = "cases.jsonl";
 /// The `file:` scheme prefix used by payload references in a case input.
 const FILE_SCHEME: &str = "file:";
 
+const MAX_MANIFEST_FILE_BYTES: u64 = 1024 * 1024;
 /// Maximum `cases.jsonl` size accepted on load (DoS guard).
 const MAX_CASES_FILE_BYTES: u64 = 64 * 1024 * 1024;
 
@@ -456,8 +457,24 @@ impl LoadedEvalset {
     pub fn load(dir: impl AsRef<Path>) -> Result<Self, EvalError> {
         let dir = dir.as_ref();
         let manifest_path = dir.join(MANIFEST_FILE);
-        if !manifest_path.exists() {
-            return Err(EvalError::ManifestNotFound(manifest_path));
+        let manifest_meta = match std::fs::metadata(&manifest_path) {
+            Ok(meta) => meta,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                return Err(EvalError::ManifestNotFound(manifest_path));
+            }
+            Err(e) => return Err(EvalError::Io(format!("{}: {e}", manifest_path.display()))),
+        };
+        if !manifest_meta.is_file() {
+            return Err(EvalError::Invalid(format!(
+                "{} is not a regular file",
+                manifest_path.display()
+            )));
+        }
+        if manifest_meta.len() > MAX_MANIFEST_FILE_BYTES {
+            return Err(EvalError::Invalid(format!(
+                "manifest is {} bytes (max {MAX_MANIFEST_FILE_BYTES})",
+                manifest_meta.len()
+            )));
         }
         let manifest_src = std::fs::read_to_string(&manifest_path)
             .map_err(|e| EvalError::Io(format!("{}: {e}", manifest_path.display())))?;
@@ -473,8 +490,14 @@ impl LoadedEvalset {
             // DoS guard: refuse a pathologically large cases file before reading
             // it into memory.
             let len = std::fs::metadata(&cases_path)
-                .map_err(|e| EvalError::Io(format!("{}: {e}", cases_path.display())))?
-                .len();
+                .map_err(|e| EvalError::Io(format!("{}: {e}", cases_path.display())))?;
+            if !len.is_file() {
+                return Err(EvalError::Invalid(format!(
+                    "{} is not a regular file",
+                    cases_path.display()
+                )));
+            }
+            let len = len.len();
             if len > MAX_CASES_FILE_BYTES {
                 return Err(EvalError::Invalid(format!(
                     "cases file is {len} bytes (max {MAX_CASES_FILE_BYTES})"
@@ -492,9 +515,7 @@ impl LoadedEvalset {
         // Security: refuse any payload reference that escapes the evalset dir.
         for parsed in &parsed_cases {
             if let Some(rel) = parsed.case.input.payload_ref() {
-                validate_contained(dir, rel).map_err(|_| {
-                    EvalError::PathEscape(format!("case {}: {rel}", parsed.case.id))
-                })?;
+                validate_payload_file(dir, &parsed.case.id, rel)?;
             }
         }
         let cases = parsed_cases.into_iter().map(|parsed| parsed.case).collect();
@@ -519,10 +540,7 @@ impl LoadedEvalset {
     /// Returns `None` for inline (non-`file:`) inputs. Re-validates containment.
     pub fn resolve_payload(&self, case: &Case) -> Option<Result<PathBuf, EvalError>> {
         let rel = case.input.payload_ref()?;
-        Some(
-            validate_contained(&self.root, rel)
-                .map_err(|_| EvalError::PathEscape(format!("case {}: {rel}", case.id))),
-        )
+        Some(validate_payload_file(&self.root, &case.id, rel))
     }
 }
 
@@ -639,7 +657,7 @@ fn parse_cases(src: &str, path: &Path) -> Result<Vec<ParsedCase>, EvalError> {
 ///    containment, catching symlink escapes (`clips/evil -> /etc`). The
 ///    **canonical** (symlink-resolved) path is returned so callers read the
 ///    real, contained target rather than the lexical join.
-fn validate_contained(root: &Path, rel: &str) -> Result<PathBuf, EvalError> {
+fn validate_payload_file(root: &Path, case_id: &str, rel: &str) -> Result<PathBuf, EvalError> {
     let rel_path = Path::new(rel);
     if rel_path.is_absolute() {
         return Err(EvalError::PathEscape(rel.to_string()));
@@ -654,21 +672,34 @@ fn validate_contained(root: &Path, rel: &str) -> Result<PathBuf, EvalError> {
         }
     }
     let joined = root.join(rel_path);
-    if joined.exists() {
-        let canon_root = root
-            .canonicalize()
-            .map_err(|e| EvalError::Io(format!("{}: {e}", root.display())))?;
-        let canon = joined
-            .canonicalize()
-            .map_err(|e| EvalError::Io(format!("{}: {e}", joined.display())))?;
-        if !canon.starts_with(&canon_root) {
-            return Err(EvalError::PathEscape(rel.to_string()));
+    let meta = match std::fs::metadata(&joined) {
+        Ok(meta) => meta,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return Err(EvalError::Invalid(format!(
+                "case {case_id}: payload file not found: {}",
+                joined.display()
+            )));
         }
-        // Return the symlink-resolved path so the caller reads the contained
-        // target (not the lexical join, which a symlink could still redirect).
-        return Ok(canon);
+        Err(e) => return Err(EvalError::Io(format!("{}: {e}", joined.display()))),
+    };
+    if !meta.is_file() {
+        return Err(EvalError::Invalid(format!(
+            "case {case_id}: payload is not a regular file: {}",
+            joined.display()
+        )));
     }
-    Ok(joined)
+    let canon_root = root
+        .canonicalize()
+        .map_err(|e| EvalError::Io(format!("{}: {e}", root.display())))?;
+    let canon = joined
+        .canonicalize()
+        .map_err(|e| EvalError::Io(format!("{}: {e}", joined.display())))?;
+    if !canon.starts_with(&canon_root) {
+        return Err(EvalError::PathEscape(rel.to_string()));
+    }
+    // Return the symlink-resolved path so the caller reads the contained target
+    // (not the lexical join, which a symlink could still redirect).
+    Ok(canon)
 }
 
 // ============================================================================
@@ -969,6 +1000,35 @@ gate:
         let set = LoadedEvalset::load(dir.path()).unwrap();
         let resolved = set.resolve_payload(&set.cases[0]).unwrap().unwrap();
         assert!(resolved.ends_with("clips/a.wav"));
+    }
+
+    #[test]
+    fn rejects_missing_payload_ref() {
+        let cases = r#"{"id":"missing","input":{"audio":"file:clips/missing.wav"},"expected":{"text":"transcript"}}
+"#;
+        let dir = write_evalset("name: s\ntask: asr\n", cases);
+        let err = LoadedEvalset::load(dir.path()).unwrap_err();
+        let message = err.to_string();
+        assert!(message.contains("case missing"), "{message}");
+        assert!(message.contains("clips/missing.wav"), "{message}");
+        assert!(message.contains("not found"), "{message}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_fifo_cases_file_without_reading() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join(MANIFEST_FILE), "name: s\ntask: chat\n").unwrap();
+        let cases_path = dir.path().join(CASES_FILE);
+        let status = std::process::Command::new("mkfifo")
+            .arg(&cases_path)
+            .status()
+            .unwrap();
+        assert!(status.success());
+        let err = LoadedEvalset::load(dir.path()).unwrap_err();
+        let message = err.to_string();
+        assert!(message.contains("cases.jsonl"), "{message}");
+        assert!(message.contains("not a regular file"), "{message}");
     }
 
     // ---- governance helpers ----
