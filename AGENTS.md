@@ -1,9 +1,12 @@
-# AGENTS.md — Rust guidance for AI coding agents in xybrid
+# AGENTS.md — guidance for AI coding agents in xybrid
 
-Project-specific decisions live in [`CLAUDE.md`](./CLAUDE.md) — **CLAUDE.md
-wins** when it disagrees with anything below. This file is a compressed index
-of the two upstream guides we follow. Fetch them when you need detail on a
-specific rule:
+This is the **canonical agent guide**: xybrid's project decisions first, then a
+compressed index of the two upstream guides we follow. Where a project decision
+here disagrees with the upstream rule indexes below, **the project decision
+wins**. (`CLAUDE.md` holds only Claude-specific material and imports this file —
+new project decisions belong here, not there.)
+
+Fetch the upstream guides when you need detail on a specific rule:
 
 - **Microsoft Pragmatic Rust (agent edition)** —
   <https://microsoft.github.io/rust-guidelines/agents/all.txt>
@@ -43,7 +46,312 @@ the `Release v<version>` PR to master). Don't `gh pr create` a release or run
 `just bump-version` on a feature branch and open a PR from it — that bypasses the
 pipeline and ships nothing. Never commit `Package.swift useLocalNatives = true`
 (local-dev only; breaks remote SPM — run `bindings/apple/scripts/set-natives-mode.sh
---set-remote`). Full ritual + gotchas: **CLAUDE.md § Releases**.
+--set-remote`). Full ritual + gotchas: **§ Releases** below.
+
+---
+
+# Section 0 — xybrid project decisions
+
+These are the decisions xybrid has already made. They override the upstream
+rule indexes in Sections 1–2 wherever the two disagree.
+
+## What xybrid is (read this first)
+
+xybrid is a **local-first execution engine with a platform layer built on top**.
+Both planes share one codebase, and the platform plane is **additive** — it
+extends the same runtime without replacing the offline path:
+
+1. **Foundation — on-device execution engine.** Model load/run/stream,
+   pipelines, hardware acceleration. Zero-config, offline, no account required.
+   This is the default path and most of the code today.
+2. **Platform / control-plane layer (additive).** Opt-in capabilities layered on
+   the engine — the direction being actively built out. When a developer
+   authenticates, these light up *on top of* the same local runtime:
+   - **Auth / API keys** — `crates/xybrid-core/src/cloud/config.rs`
+     (`set_xybrid_api_key`, `XYBRID_API_KEY`). Gates the cloud gateway *and* the
+     telemetry exporter. Default gateway: `api.xybrid.dev`.
+   - **Cloud routing** — `crates/xybrid-core/src/cloud/` +
+     `crates/xybrid-core/src/orchestrator/routing_engine.rs` (local→cloud fallback under device stress).
+   - **Telemetry / observability** — `crates/xybrid-core/src/telemetry/`;
+     SDK exporter in `crates/xybrid-sdk/src/telemetry.rs`; ingest at `ingest.xybrid.dev`.
+   - **Remote routing authority** — `crates/xybrid-core/src/orchestrator/authority/remote.rs`
+     (`GET /v1/routing/advice`; partial).
+   - **Control sync** — `crates/xybrid-core/src/control_sync.rs` (policy /
+     registry refresh; scaffolded, backend not yet wired).
+
+The public README markets the foundation ("offline, no cloud, no API keys")
+because that's the zero-config default — the platform layer is what you add on
+top once you authenticate. **When touching `xybrid-sdk` or `xybrid-core`, treat
+the platform plane as a first-class, additive surface**, not an afterthought:
+new SDK entry points should consider whether they extend into it too.
+
+---
+
+## Workspace layout
+
+Cargo workspace, `resolver = "2"`, edition 2021, MSRV not pinned. Members:
+
+| Crate                          | Role                                                       | Layer    |
+|--------------------------------|------------------------------------------------------------|----------|
+| `crates/xybrid-core`           | ML execution + pipelines; **additive platform plane** (cloud routing, telemetry, control sync) | core lib |
+| `crates/xybrid-sdk`            | Public Rust SDK; model load/run/stream + platform init (auth, telemetry) | lib      |
+| `crates/xybrid-cli`            | `xybrid` binary                                            | bin      |
+| `crates/xybrid-ffi-facade`     | FFI-agnostic POD/Arc facade over the SDK (one canonical translation) | FFI |
+| `crates/xybrid-bolt`           | BoltFFI bindings: Swift / Kotlin / Java / C# / WASM + C header (Apple/Android SDKs) | FFI |
+| `crates/xybrid-ffi`            | C ABI for Unity / C / C++ (pre-bolt; Unity migration pending) | FFI    |
+| `bindings/flutter/rust`        | flutter_rust_bridge wrapper for Dart                       | FFI      |
+| `macros`                       | proc-macros (`xybrid-macros`); syn/quote only              | proc     |
+| `xtask`                        | build / codegen automation                                 | tool     |
+| `integration-tests`            | end-to-end tests with real models & fixtures               | test     |
+
+`xybrid-uniffi` was removed once iOS + Android migrated to `xybrid-bolt`;
+the FFI binding crates now route their SDK→foreign-language translation
+through `xybrid-ffi-facade` rather than each re-translating SDK types.
+
+**Dependency direction (do not reverse):**
+
+```
+xybrid-cli  ──────────────────────► xybrid-sdk ─► xybrid-core
+xybrid-bolt ──► xybrid-ffi-facade ─► xybrid-sdk ─► xybrid-core
+xybrid-ffi  ─┐
+flutter rust─┴────────────────────► xybrid-sdk ─► xybrid-core
+xtask ────────────────────────────► xybrid-core
+integration-tests ────────────────► xybrid-core
+```
+
+Workspace **package metadata** is inherited via `[workspace.package]` —
+member crates use `version.workspace = true`, `edition.workspace = true`,
+etc. Keep that pattern.
+
+Workspace **dependencies** are *not* uniformly inherited today. The root
+`[workspace.dependencies]` block exists, but most member crates still pin
+versions per-crate (e.g. `serde = "1.0"`, `tokio = { version = "1.0", … }`).
+When adding a dep, match the surrounding crate's existing style — don't
+unilaterally migrate one crate to `dep.workspace = true` while the rest stay
+version-pinned. Full `proj-workspace-deps` migration is a deliberate
+refactor, not a drive-by change.
+
+---
+
+## Error handling
+
+Rust-API library crates (`xybrid-core`, `xybrid-sdk`, `xybrid-ffi-facade`)
+use **`thiserror`** with a single canonical error enum and a `Result` alias
+per crate:
+
+| Crate              | Error type     | Result alias    | Defined in                           |
+|--------------------|----------------|-----------------|--------------------------------------|
+| `xybrid-core`      | `XybridError`  | `XybridResult`  | `crates/xybrid-core/src/error.rs`    |
+| `xybrid-sdk`       | `SdkError`     | `SdkResult`     | `crates/xybrid-sdk/src/model.rs`     |
+| `xybrid-ffi-facade`| `Error`        | `Result`        | `crates/xybrid-ffi-facade/src/lib.rs` (one canonical `From<SdkError>`; the FFI generator crates re-decorate it) |
+
+Sub-error enums (`InferenceError`, `PipelineError`, `AdapterError`, …) live
+next to the modules that raise them and convert into the canonical type via
+`#[from]` / `impl From`. Follow that pattern for new modules — don't invent
+parallel top-level error types.
+
+`xybrid-ffi` is **different**: it's a C-ABI crate and uses opaque handles
+plus error strings/codes carried in result structs (see
+`crates/xybrid-ffi/src/lib.rs`). Don't bolt a public `thiserror` enum onto
+it — match the existing C-ABI pattern when adding new endpoints, and only
+surface error info through the documented handle/result conventions.
+
+Binaries (`xybrid-cli`, `xtask`) use **`anyhow`** with `.context(...)` at the
+boundaries where errors get printed.
+
+`SdkError` implements a `RetryableError` trait (`is_retryable`, `retry_after`)
+— preserve those semantics when adding variants. As of today
+(`crates/xybrid-sdk/src/model.rs`) the retryable variants are
+`NetworkError`, `RateLimited`, `Timeout`, and `Offline`; everything else
+(including `CircuitOpen`, `ConfigError`, `ModelNotFound`, `LoadError`,
+`InferenceError`, `IoError`, `CacheError`, `PipelineError`, …) is
+explicitly **non-retryable**. Read the current `is_retryable` match arm
+before changing or extending it — don't infer the rule from the variant name.
+
+Don't use `Box<dyn Error>` in public signatures. Don't `.unwrap()` outside
+tests, examples, and clearly-marked invariant checks (use `.expect("...")`
+with a message that explains the invariant — rust-skills `err-expect-bugs-only`).
+
+---
+
+## Async runtime
+
+**Tokio**, multi-threaded. Workspace pins:
+`tokio = { version = "1.0", features = ["rt", "rt-multi-thread", "sync"] }`.
+No async-std, no smol.
+
+Public SDK APIs come in **sync + async pairs**: `load` / `load_async`,
+`run` / `run_async`, `warmup` / `warmup_async`, `run_pipeline_async`, etc.
+Sync variants block on the runtime internally. **Match this convention** when
+adding new SDK entry points — don't break the symmetry.
+
+Inside async code:
+
+- Use `tokio::task::spawn_blocking` for CPU-bound or sync I/O (model loading
+  is the canonical example — see `xybrid-sdk` model loader).
+- Don't hold `Mutex` / `RwLock` guards across `.await` (rust-skills
+  `async-no-lock-await`, `anti-lock-across-await`).
+- Channels: `tokio::sync::mpsc` for streaming events; that's the established
+  pattern for pipeline event streams (`xybrid-sdk/src/lib.rs`).
+
+Tests that need a runtime use `tokio::runtime::Runtime::new().unwrap().block_on(...)`
+today. New async tests may use `#[tokio::test]` — both are accepted.
+
+---
+
+## SDK run surface — capabilities are data, not entry points
+
+The public run surface grows by axes, and axes multiply. The rule:
+
+- **A new capability rides `RunOptions`, `GenerationConfig`, or `Envelope`** —
+  never a new `run*` method. Constrained decoding shipped this way
+  (`GenerationConfig.grammar` — zero new entry points), and new capabilities
+  (tool calling, etc.) must too (`RunOptions`-carried inputs, parsed outputs
+  on `InferenceResult`).
+- **A new entry point is justified only by a new IO shape** — a different way
+  results physically flow out: batch return, per-token callback, async
+  `Stream` handle, TTS chunk sink. Each IO shape gets exactly one sync + one
+  async form, nothing else.
+- **Suffix chains are the anti-pattern.** Names like
+  `run_streaming_with_context_options_preempt` are capabilities leaking into
+  the namespace. `XybridModel` currently carries 14 `run*` variants for this
+  reason, while bolt's entire foreign surface needs exactly one
+  (`run(envelope, options)`). The excess is consolidation backlog, **not
+  precedent** — don't add variant #15.
+- Multi-step orchestration (agent loops, retries, tool-execution cycles)
+  lives **outside** `XybridModel` — a free helper or the caller's own loop —
+  and FFI bindings get turn-based primitives (parsed results + another `run`
+  call), not cross-boundary callbacks.
+
+---
+
+## Testing & mocking
+
+- **Unit tests** inline as `#[cfg(test)] mod tests { use super::*; ... }`.
+- **Integration tests** in each crate's `tests/` directory.
+- **End-to-end tests** with real models in `/integration-tests/`. Fixtures
+  live in `integration-tests/fixtures/{input,models,pipelines}/`. Tests that
+  need a downloaded model gate themselves with `fixtures::model_if_available()`
+  and skip cleanly if the model isn't present — follow that pattern, don't
+  hard-fail on missing assets.
+- **HTTP mocking:** `httpmock` (already a dev-dep in `xybrid-sdk`). **No
+  `mockall`, `mockito`, or `wiremock`** in this repo today — don't introduce
+  another mocking library without discussion.
+- **Benchmarks:** `criterion` (dev-dep in `xybrid-core`).
+- No `insta` snapshots, no `proptest`. Don't add either casually — they bring
+  CI cost and a learning curve.
+
+Run model-gated tests with `just`-recipes under `mod integration-tests` in the
+root `justfile`.
+
+---
+
+## Concurrency primitives — when to use what
+
+The workspace is multi-threaded. **Don't use `Rc` or `RefCell`** — they aren't
+in use anywhere and they trap you in single-threaded contexts.
+
+| Need                                            | Use                              |
+|-------------------------------------------------|----------------------------------|
+| Pass data into a function for read-only use     | `&T` (or `&[T]`, `&str`)         |
+| Share owned state across threads / async tasks  | `Arc<T>`                         |
+| Shared state, mostly reads, some writes         | `Arc<RwLock<T>>` (std)           |
+| Shared state, exclusive access each time        | `Arc<Mutex<T>>` (std)            |
+| Cross-task message passing                      | `tokio::sync::mpsc`              |
+| One-shot reply channel                          | `tokio::sync::oneshot`           |
+
+Use `std::sync::{Mutex, RwLock}` — **not** `parking_lot` (not a dependency).
+Public traits that cross task boundaries are bounded `Send + Sync`; this is
+established convention for backend / strategy / session traits in
+`xybrid-core`. Keep that bound on new traits in the same family.
+
+Prefer borrows over `Arc::clone` when a borrow's lifetime is obviously short
+enough. Reach for `Arc` when you're crossing a `spawn` / `spawn_blocking` /
+channel boundary, or storing the value behind a trait object.
+
+---
+
+## Releases — never hand-roll one (agents read this)
+
+**Releases are cut by branch name, not by hand.** The entire pipeline keys off a
+`release/v<version>` branch. An agent's *only* correct action to start a release
+is to create and push that branch — everything else (artifact builds, checksum
+patch, draft GitHub Release, the release PR, the tag, and the crates.io / pub.dev
+/ Maven Central publishes) is generated by CI. The ritual
+(`.github/workflows/release-prep.yml` → `release-publish.yml`):
+
+```bash
+git switch -c release/v<version> origin/master
+just bump-version <version>     # syncs every manifest: Cargo, pubspec, Unity,
+                                # Kotlin, Package.swift sdkVersion
+./bindings/apple/scripts/set-natives-mode.sh --set-remote   # useLocalNatives=false
+# fill the CHANGELOG entry for <version> (and bindings/flutter/CHANGELOG.md)
+git commit -am "bump: <version>" && git push -u origin release/v<version>
+```
+
+Pushing `release/v*` triggers `release-prep.yml`, which:
+
+1. Parses the version **from the branch name** and **fails** unless it matches
+   every package manifest (`version-sync.sh --check` must be green).
+2. Builds all artifacts, patches `Package.swift`'s `xybridFFIChecksum`, and
+   creates a **draft GitHub Release**.
+3. **Opens the `Release v<version>` PR to master itself.** On merge,
+   `release-publish.yml` tags and publishes.
+
+**Do NOT:**
+
+- run `gh pr create` for a release, or run `just bump-version` on a feature
+  branch and open a PR from it — that bypasses the artifact builds, the checksum
+  patch, and the draft release, producing a PR that *looks* like a release but
+  ships nothing. The branch name (`release/v*`) is the trigger; a PR title is not.
+- leave `Package.swift`'s `useLocalNatives = true` in any committed state. It is
+  **local-dev only** and breaks remote SPM consumers (the local xcframework is
+  not committed). Run `bindings/apple/scripts/set-natives-mode.sh --set-remote`
+  before committing — remote (`false`) is the canonical committed state.
+
+`just bump-version` only rewrites the workspace `version`; it does **not** touch
+internal path-dep `version = "..."` pins (e.g. `xybrid-sdk`/`xybrid-core` in
+sibling `Cargo.toml`s). If those drift, lockfile regen fails under `^0.1.x` —
+update them to match and re-run `cargo update -w` when bumping.
+
+---
+
+## Things to leave alone unless explicitly asked
+
+- `rustfmt.toml` is intentionally empty (defaults). Don't add style overrides.
+- The `#![allow(clippy::...)]` lists at the top of `xybrid-core/src/lib.rs`
+  and `xybrid-sdk/src/lib.rs` exist because the crates are still alpha
+  (`0.1.0-beta12`). Fixing those lints crate-wide is fine; **disabling
+  individual call-sites** with `#[allow]` is not — push it to crate-level if
+  it's project-wide.
+- API contract checks (`tools/scripts/api-contract-check.sh`) run in CI as a
+  soft warning. If you change a public SDK signature, run it locally.
+
+---
+
+## Open questions (resolve before encoding as rules)
+
+These are genuinely ambiguous in the current code — flag them to a maintainer
+rather than picking arbitrarily:
+
+1. **MSRV.** No `rust-version` is pinned in any `Cargo.toml`. Should the
+   workspace pin one (e.g. matching what CI's `dtolnay/rust-toolchain@stable`
+   resolves to today)?
+2. **Async test style.** `runtime.block_on` (current) vs `#[tokio::test]`
+   (rust-skills `test-tokio-async`) — both work; no canonical choice yet.
+3. **Workspace-level lints.** Only `bindings/flutter/rust` has a `[lints]`
+   table. The rust-skills `lint-workspace-lints` / `lint-deny-correctness`
+   rules suggest configuring lints workspace-wide; alpha-stage allow-lists in
+   each crate make that disruptive today. Worth revisiting post-1.0.
+4. **`Box<dyn Trait>` vs `impl Trait` in public APIs.** Trait-object style is
+   used widely for backends (`Arc<dyn LlmBackend>` etc.) for plug-in
+   replaceability. New code should follow that — but if a single-impl
+   internal trait shows up, prefer `impl Trait`.
+5. **Naming of streaming/event APIs.** `recv()` (channel-style) vs an
+   `EventStream`-newtype wrapper. Current code uses the channel idiom; an
+   abstraction layer hasn't been decided.
+
+When you hit one of these, ask in the PR rather than guessing.
 
 ---
 
@@ -116,7 +424,7 @@ rules are the ones you'll consult most often in this repo.**
 ### Library / UX
 - **`M-AVOID-WRAPPERS`** — don't expose `Arc<Mutex<T>>`, `Box<T>`, `Rc<RefCell<T>>` in public APIs; hide them behind clean signatures.
 - **`M-DI-HIERARCHY`** — concrete types > generics > `dyn Trait`. Don't translate `IFoo` interfaces from C# verbatim.
-- **`M-ERRORS-CANONICAL-STRUCTS`** — errors are structs with `Backtrace` + optional source; expose `is_xxx()` methods over public `ErrorKind`. See xybrid's per-crate error tables in CLAUDE.md.
+- **`M-ERRORS-CANONICAL-STRUCTS`** — errors are structs with `Backtrace` + optional source; expose `is_xxx()` methods over public `ErrorKind`. See xybrid's per-crate error tables in § Error handling above.
 - `M-ESSENTIAL-FN-INHERENT` — core functionality is inherent; trait impls forward to inherent methods.
 - `M-IMPL-ASREF` — accept `impl AsRef<str>` / `impl AsRef<Path>` / `impl AsRef<[u8]>` for non-owning string/path/byte inputs.
 - `M-IMPL-IO` — sans-io: accept `impl std::io::Read`/`Write` (or `futures::io::AsyncRead`) for one-shot init I/O.
@@ -197,7 +505,7 @@ words (`Uuid`, not `UUID`). No `-rs` crate suffix.
 `test-cfg-test-module`, `test-use-super`, `test-integration-dir`,
 `test-descriptive-names`, `test-arrange-act-assert`,
 `test-proptest-properties`, `test-mockall-mocking` (note: xybrid uses
-`httpmock`, not `mockall` — see CLAUDE.md), `test-mock-traits`,
+`httpmock`, not `mockall` — see § Testing & mocking above), `test-mock-traits`,
 `test-fixture-raii`, `test-tokio-async`, `test-should-panic`,
 `test-criterion-bench`, `test-doctest-examples`.
 
@@ -219,14 +527,14 @@ words (`Uuid`, not `UUID`). No `-rs` crate suffix.
 `proj-mod-rs-dir`, `proj-pub-crate-internal`, `proj-pub-super-parent`,
 `proj-pub-use-reexport`, `proj-prelude-module`, `proj-bin-dir`,
 `proj-workspace-large`, `proj-workspace-deps` (xybrid is partially migrated —
-see CLAUDE.md, don't drive-by-convert).
+see § Workspace layout above, don't drive-by-convert).
 
 ### LOW — Clippy / linting (`lint-`)
 `lint-deny-correctness`, `lint-warn-suspicious`, `lint-warn-style`,
 `lint-warn-complexity`, `lint-warn-perf`, `lint-pedantic-selective`,
 `lint-missing-docs`, `lint-unsafe-doc`, `lint-cargo-metadata`,
-`lint-rustfmt-check`, `lint-workspace-lints` (open question for xybrid — see
-CLAUDE.md).
+`lint-rustfmt-check`, `lint-workspace-lints` (open question — see § Open
+questions above).
 
 ### REFERENCE — Anti-patterns (`anti-`)
 Don't: `anti-unwrap-abuse`, `anti-expect-lazy`, `anti-clone-excessive`,
