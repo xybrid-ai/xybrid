@@ -328,17 +328,24 @@ struct ExtractionResultView: View {
     let result: XybridResult
 
     /// Parsed key/value pairs when the output is a valid JSON object.
-    private var parsedFields: [(String, String)]? {
-        guard let text = result.text,
-              let data = text.trimmingCharacters(in: .whitespacesAndNewlines).data(using: .utf8),
-              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-        else { return nil }
-        return object
-            .map { key, value in (key, stringify(value)) }
-            .sorted { $0.0 < $1.0 }
+    /// Stored, not computed: `body` reads this more than once per render,
+    /// and a computed property would re-run JSONSerialization each time.
+    private let parsedFields: [(String, String)]?
+
+    init(result: XybridResult) {
+        self.result = result
+        if let text = result.text,
+           let data = text.trimmingCharacters(in: .whitespacesAndNewlines).data(using: .utf8),
+           let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            self.parsedFields = object
+                .map { key, value in (key, Self.stringify(value)) }
+                .sorted { $0.0 < $1.0 }
+        } else {
+            self.parsedFields = nil
+        }
     }
 
-    private func stringify(_ value: Any) -> String {
+    private static func stringify(_ value: Any) -> String {
         if let array = value as? [Any] {
             return array.map { "\($0)" }.joined(separator: ", ")
         }
