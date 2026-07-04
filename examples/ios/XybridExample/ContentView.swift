@@ -46,6 +46,8 @@ struct ContentView: View {
                     .tabItem { Label("Speech", systemImage: "waveform") }
                 navigation { LiveVisionView() }
                     .tabItem { Label("Vision", systemImage: "camera.viewfinder") }
+                navigation { ExtractionView() }
+                    .tabItem { Label("Extract", systemImage: "doc.text.magnifyingglass") }
             }
         case .error(let message):
             navigation { ErrorView(message: message, onRetry: initializeSDK) }
