@@ -40,7 +40,11 @@ pub(super) fn format_chat_prompt(
     // `llama_chat_apply_template` does not render. Prime the channel ourselves so
     // the model emits its chain-of-thought; the backend reconstructs the opening
     // tag for capture. See `.context/reasoning-content-surfacing.md`.
-    if reasoning {
+    //
+    // Guard against a doubled tag: if the template (or a future llama.cpp / the
+    // minijinja fallback with thinking enabled) already rendered an opening
+    // `<think>`, don't prime a second one.
+    if reasoning && !prompt.trim_end().ends_with("<think>") {
         prompt.push_str(THINK_PRIME);
     }
 

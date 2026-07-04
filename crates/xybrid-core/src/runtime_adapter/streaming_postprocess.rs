@@ -114,17 +114,17 @@ pub(crate) fn strip_and_capture_thinking_tags(text: &str) -> (String, Option<Str
     let mut clean = text.to_string();
     let mut reasoning = String::new();
 
-    // Dangling close: `</think>` precedes any `<think>` (or there is no `<think>`
-    // at all). Peel the leading reasoning before the balanced-block pass.
-    let dangling_close = match (clean.find(OPEN), clean.find(CLOSE)) {
-        (Some(open), Some(close)) => close < open,
-        (None, Some(_)) => true,
-        _ => false,
-    };
-    if dangling_close {
-        let close = clean
-            .find(CLOSE)
-            .expect("dangling_close implies a close exists");
+    // Dangling close(es): a `</think>` with no `<think>` before it (the opening
+    // tag was primed into the prompt). Peel each leading reasoning segment before
+    // the balanced-block pass. Looping handles a model that emits more than one
+    // dangling close (repetition / multiple primed turns) — each would otherwise
+    // leak into the answer.
+    while let Some(close) = clean.find(CLOSE) {
+        // Stop once a `<think>` opens before the next close: that's a balanced
+        // block, handled by the pass below.
+        if clean.find(OPEN).is_some_and(|open| open < close) {
+            break;
+        }
         push_reasoning(&mut reasoning, &clean[..close]);
         clean.replace_range(..close + CLOSE.len(), "");
     }
@@ -417,6 +417,16 @@ mod tests {
             strip_and_capture_thinking_tags("let me work it out</think>The answer is 8.");
         assert_eq!(clean, "The answer is 8.");
         assert_eq!(reasoning.as_deref(), Some("let me work it out"));
+    }
+
+    #[test]
+    fn capture_thinking_tags_multiple_dangling_closes_all_stripped() {
+        // A model that repeats `</think>` must not leak the later ones into the
+        // answer — every leading dangling close is peeled as reasoning.
+        let (clean, reasoning) =
+            strip_and_capture_thinking_tags("first</think>second</think>answer");
+        assert_eq!(clean, "answer");
+        assert_eq!(reasoning.as_deref(), Some("first\nsecond"));
     }
 
     #[test]
