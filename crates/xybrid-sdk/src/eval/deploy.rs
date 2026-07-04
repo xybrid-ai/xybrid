@@ -85,6 +85,7 @@ pub struct PromotionRecord {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub judge: Option<JudgeIdentity>,
     /// Initial canary ramp percentage.
+    #[serde(deserialize_with = "deserialize_canary_pct")]
     pub canary_pct: u8,
     /// Device/profile constraints that allowed the ramp (e.g. `os=ios>=16`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -226,7 +227,9 @@ impl DeploymentStore {
         std::fs::create_dir_all(&dir)
             .map_err(|e| EvalError::Io(format!("{}: {e}", dir.display())))?;
         let path = dir.join(PROMOTION_FILE);
-        let json = serde_json::to_string_pretty(record)
+        let mut normalized = record.clone();
+        normalized.canary_pct = normalized.canary_pct.min(100);
+        let json = serde_json::to_string_pretty(&normalized)
             .map_err(|e| EvalError::Io(format!("serialize promotion: {e}")))?;
         let tmp = dir.join(format!(".{PROMOTION_FILE}.{}.tmp", std::process::id()));
         std::fs::write(&tmp, json).map_err(|e| EvalError::Io(format!("{}: {e}", tmp.display())))?;
@@ -288,8 +291,8 @@ impl DeploymentStore {
         // records without one sort last. Tie-break on the id so resolution is
         // deterministic when two records share a timestamp (e.g. synced records).
         recs.sort_by(|a, b| {
-            b.created
-                .cmp(&a.created)
+            parsed_created(&b.created)
+                .cmp(&parsed_created(&a.created))
                 .then_with(|| b.deployment_id.cmp(&a.deployment_id))
         });
         Ok(recs)
@@ -324,6 +327,20 @@ impl DeploymentStore {
 /// deployments for a skill are orderable.
 pub fn now_rfc3339() -> String {
     chrono::Utc::now().to_rfc3339()
+}
+
+fn deserialize_canary_pct<'de, D>(deserializer: D) -> Result<u8, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Ok(u8::deserialize(deserializer)?.min(100))
+}
+
+fn parsed_created(created: &Option<String>) -> Option<chrono::DateTime<chrono::Utc>> {
+    created
+        .as_deref()
+        .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+        .map(|dt| dt.with_timezone(&chrono::Utc))
 }
 
 #[cfg(test)]
@@ -409,6 +426,35 @@ mod tests {
     }
 
     #[test]
+    fn promotion_record_deserialize_clamps_canary_pct() {
+        let json = r#"{
+            "deployment_id": "dep_high",
+            "evalset": "intent",
+            "evalset_version": 3,
+            "candidate": {"model_id": "m", "config": {}},
+            "gate_verdict": "pass",
+            "quality": 1.0,
+            "scorer_version": "eval-scorer-v0",
+            "canary_pct": 250,
+            "device_constraints": [],
+            "run_id": "run_1",
+            "status": "pending"
+        }"#;
+        let rec: PromotionRecord = serde_json::from_str(json).unwrap();
+        assert_eq!(rec.canary_pct, 100);
+    }
+
+    #[test]
+    fn store_save_clamps_canary_pct() {
+        let dir = TempDir::new().unwrap();
+        let store = DeploymentStore::with_dir(dir.path());
+        let mut rec = record("dep_high");
+        rec.canary_pct = 250;
+        store.save(&rec).unwrap();
+        assert_eq!(store.load("dep_high").unwrap().canary_pct, 100);
+    }
+
+    #[test]
     fn store_round_trips_in_temp_dir() {
         let dir = TempDir::new().unwrap();
         let store = DeploymentStore::with_dir(dir.path());
@@ -485,5 +531,34 @@ mod tests {
             "dep_old"
         );
         assert_eq!(store.deployments_for_skill("intent").unwrap().len(), 2);
+    }
+
+    #[test]
+    fn deployments_for_skill_orders_by_utc_instant_not_raw_timestamp() {
+        let dir = TempDir::new().unwrap();
+        let store = DeploymentStore::with_dir(dir.path());
+
+        let mut older_local_next_day = record("dep_offset");
+        older_local_next_day.skill = Some("intent".into());
+        older_local_next_day.created = Some("2026-06-14T00:30:00+02:00".into());
+        store.save(&older_local_next_day).unwrap();
+
+        let mut newer_utc_previous_day = record("dep_utc");
+        newer_utc_previous_day.skill = Some("intent".into());
+        newer_utc_previous_day.created = Some("2026-06-13T23:00:00Z".into());
+        store.save(&newer_utc_previous_day).unwrap();
+
+        let mut malformed = record("dep_bad_time");
+        malformed.skill = Some("intent".into());
+        malformed.created = Some("not-rfc3339".into());
+        store.save(&malformed).unwrap();
+
+        let ids: Vec<String> = store
+            .deployments_for_skill("intent")
+            .unwrap()
+            .into_iter()
+            .map(|r| r.deployment_id)
+            .collect();
+        assert_eq!(ids, vec!["dep_utc", "dep_offset", "dep_bad_time"]);
     }
 }

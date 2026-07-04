@@ -159,7 +159,7 @@ pub enum EvalCommand {
         #[arg(long, value_name = "SLUG")]
         skill: Option<String>,
         /// Initial canary ramp percentage.
-        #[arg(long, default_value = "5")]
+        #[arg(long, default_value = "5", value_parser = clap::value_parser!(u8).range(0..=100))]
         canary: u8,
         /// Device/profile constraint that allowed the ramp (repeatable).
         #[arg(long = "constraint", value_name = "EXPR")]
@@ -631,6 +631,7 @@ fn init(task: &str, name: Option<&str>, dir: &Path, force: bool) -> Result<()> {
 /// base via `XYBRID_API_URL`). Minting full cases from these items needs the
 /// original inference input (payload capture, joined by `trace_id`) and stays
 /// on `eval pull`'s local path for now.
+// CLIPPY-ALLOW: inbox_view maps one clap subcommand directly to SDK query fields.
 #[allow(clippy::too_many_arguments)]
 fn inbox_view(
     period: &str,
@@ -1070,9 +1071,11 @@ fn gate(
     }
 
     let run = if let Some(id) = run_id {
-        open_store(store)?
+        let run = open_store(store)?
             .load(id)
-            .with_context(|| format!("no run '{id}'"))?
+            .with_context(|| format!("no run '{id}'"))?;
+        validate_run_evalset_identity(&run, &set.manifest)?;
+        run
     } else if let Some(model_id) = model {
         execute_run(&set, model_id, None, true)?
     } else {
@@ -1089,7 +1092,7 @@ fn gate(
         .filter(|c| c.verdict != Verdict::Unblessed)
         .map(|c| c.score)
         .collect();
-    let decision = policy.evaluate(&scores, run.scores.latency_p95_ms, None);
+    let decision = policy.evaluate_with_latency(&scores, run_latency_stats(&run), None);
 
     ui::header(&format!("Gate · {}", set.manifest.name));
     println!();
@@ -1116,6 +1119,7 @@ fn gate(
 /// `xybrid eval ship` — promote a candidate that passes its gate by writing a
 /// provenanced promotion record. The over-the-air *delivery* (canary ramp,
 /// rollback) is a remote backend's job; this produces the artifact it consumes.
+// CLIPPY-ALLOW: ship preserves the clap subcommand boundary without an extra bag type.
 #[allow(clippy::too_many_arguments)]
 fn ship(
     evalset: &Path,
@@ -1138,9 +1142,11 @@ fn ship(
     }
 
     let run = if let Some(id) = run_id {
-        open_store(store)?
+        let run = open_store(store)?
             .load(id)
-            .with_context(|| format!("no run '{id}'"))?
+            .with_context(|| format!("no run '{id}'"))?;
+        validate_run_evalset_identity(&run, &set.manifest)?;
+        run
     } else if let Some(model_id) = model {
         execute_run(&set, model_id, None, true)?
     } else {
@@ -1155,7 +1161,7 @@ fn ship(
         .filter(|c| c.verdict != Verdict::Unblessed)
         .map(|c| c.score)
         .collect();
-    let decision = policy.evaluate(&scores, run.scores.latency_p95_ms, None);
+    let decision = policy.evaluate_with_latency(&scores, run_latency_stats(&run), None);
 
     ui::header(&format!(
         "Ship · {} → {}",
@@ -1185,7 +1191,7 @@ fn ship(
         ci: decision.ci.clone(),
         scorer_version: run.scores.scorer_version.clone(),
         judge: run.scores.judge.clone(),
-        canary_pct: canary,
+        canary_pct: canary.min(100),
         device_constraints: constraints,
         run_id: run.run_id.clone(),
         created: Some(xybrid_sdk::eval::now_rfc3339()),
@@ -1258,6 +1264,7 @@ fn promote(
     let run = open_store(store)?
         .load(&rec.run_id)
         .with_context(|| format!("gating run '{}' not found", rec.run_id))?;
+    validate_run_evalset_identity(&run, &set.manifest)?;
     let policy = gate_policy(&set.manifest);
     let scores: Vec<f64> = run
         .cases
@@ -1265,7 +1272,7 @@ fn promote(
         .filter(|c| c.verdict != Verdict::Unblessed)
         .map(|c| c.score)
         .collect();
-    let decision = policy.evaluate(&scores, run.scores.latency_p95_ms, None);
+    let decision = policy.evaluate_with_latency(&scores, run_latency_stats(&run), None);
 
     ui::header(&format!("Promote · {deployment_id}"));
     println!();
@@ -1687,6 +1694,48 @@ fn open_store(store: Option<&Path>) -> Result<EvalRunStore> {
     }
 }
 
+fn validate_run_evalset_identity(run: &Run, manifest: &Evalset) -> Result<()> {
+    if run.evalset != manifest.name {
+        anyhow::bail!(
+            "stored run '{}' belongs to evalset '{}' v{}, not '{}' v{}",
+            run.run_id,
+            run.evalset,
+            run.evalset_version,
+            manifest.name,
+            manifest.version
+        );
+    }
+    if run.evalset_version != manifest.version {
+        anyhow::bail!(
+            "stored run '{}' was scored against evalset '{}' v{}, but manifest is v{}",
+            run.run_id,
+            run.evalset,
+            run.evalset_version,
+            manifest.version
+        );
+    }
+    Ok(())
+}
+
+fn run_latency_stats(run: &Run) -> xybrid_sdk::eval::stats::LatencyStats {
+    let mut scorable_cases = 0;
+    let mut latencies = Vec::new();
+    for case in &run.cases {
+        if case.verdict == Verdict::Unblessed {
+            continue;
+        }
+        scorable_cases += 1;
+        if let Some(ms) = case.latency_ms {
+            latencies.push(ms as f64);
+        }
+    }
+    xybrid_sdk::eval::stats::LatencyStats {
+        p95_ms: xybrid_sdk::eval::stats::percentile(&latencies, 95.0),
+        measured_cases: latencies.len(),
+        scorable_cases,
+    }
+}
+
 fn task_default_name(task: TaskType) -> &'static str {
     match task {
         TaskType::Classify => "classifier",
@@ -2004,6 +2053,17 @@ mod tests {
 
     /// Build + store a run with `n` cases each scoring `score`.
     fn store_run(run_store: &Path, run_id: &str, n: usize, score: f64) {
+        store_run_with_identity(run_store, run_id, n, score, "intent", 3);
+    }
+
+    fn store_run_with_identity(
+        run_store: &Path,
+        run_id: &str,
+        n: usize,
+        score: f64,
+        evalset: &str,
+        evalset_version: u32,
+    ) {
         let cases: Vec<xybrid_sdk::eval::RunCase> = (0..n)
             .map(|i| xybrid_sdk::eval::RunCase {
                 id: format!("c{i}"),
@@ -2020,8 +2080,8 @@ mod tests {
             .collect();
         let run = Run {
             run_id: run_id.into(),
-            evalset: "intent".into(),
-            evalset_version: 3,
+            evalset: evalset.into(),
+            evalset_version,
             candidate: CandidateRef::new("qwen3.5-0.8b"),
             environment: Environment {
                 host: "h".into(),
@@ -2041,6 +2101,57 @@ mod tests {
             created: None,
         };
         EvalRunStore::with_dir(run_store).save(&run).unwrap();
+    }
+
+    #[test]
+    fn stored_run_identity_validation_rejects_name_and_version_mismatch() {
+        let mut manifest = Evalset::new("intent", TaskType::Classify);
+        manifest.version = 3;
+        let mut run = run_with("m", 1.0, GateVerdict::Pass, Some(100.0), false);
+        run.evalset = "other".into();
+        run.evalset_version = 3;
+        let err = validate_run_evalset_identity(&run, &manifest).unwrap_err();
+        assert!(err.to_string().contains("belongs to evalset"));
+
+        run.evalset = "intent".into();
+        run.evalset_version = 2;
+        let err = validate_run_evalset_identity(&run, &manifest).unwrap_err();
+        assert!(err.to_string().contains("was scored against"));
+    }
+
+    #[test]
+    fn run_latency_stats_counts_partial_scorable_coverage() {
+        let mut run = run_with("m", 1.0, GateVerdict::Pass, Some(100.0), false);
+        run.cases = vec![
+            xybrid_sdk::eval::RunCase {
+                id: "a".into(),
+                output: None,
+                verdict: Verdict::Pass,
+                score: 1.0,
+                latency_ms: Some(100),
+                detail: None,
+            },
+            xybrid_sdk::eval::RunCase {
+                id: "b".into(),
+                output: None,
+                verdict: Verdict::Fail,
+                score: 0.0,
+                latency_ms: None,
+                detail: None,
+            },
+            xybrid_sdk::eval::RunCase {
+                id: "c".into(),
+                output: None,
+                verdict: Verdict::Unblessed,
+                score: 0.0,
+                latency_ms: None,
+                detail: None,
+            },
+        ];
+        let stats = run_latency_stats(&run);
+        assert_eq!(stats.measured_cases, 1);
+        assert_eq!(stats.scorable_cases, 2);
+        assert_eq!(stats.p95_ms, Some(100.0));
     }
 
     #[test]
@@ -2095,6 +2206,66 @@ mod tests {
         );
         assert!(err.is_err());
         assert_eq!(deps.list().unwrap().len(), 1); // unchanged
+    }
+
+    #[test]
+    fn ship_clamps_canary_in_promotion_record() {
+        let dir = TempDir::new().unwrap();
+        let eval_dir = dir.path().join("intent");
+        std::fs::create_dir_all(&eval_dir).unwrap();
+        std::fs::write(
+            eval_dir.join("evalset.yaml"),
+            "name: intent\ntask: classify\nversion: 3\nlabels: [a, b]\ngate:\n  min_quality: 0.9\n  min_cases: 10\n",
+        )
+        .unwrap();
+        std::fs::write(eval_dir.join("cases.jsonl"), "").unwrap();
+        let run_store = dir.path().join("runs");
+        let dep_store = dir.path().join("deployments");
+        store_run(&run_store, "run_pass", 20, 1.0);
+
+        ship(
+            &eval_dir,
+            Some("run_pass"),
+            None,
+            None,
+            250,
+            vec![],
+            Some(&run_store),
+            Some(&dep_store),
+        )
+        .unwrap();
+
+        let deps = xybrid_sdk::eval::DeploymentStore::with_dir(&dep_store);
+        let id = deps.list().unwrap()[0].clone();
+        assert_eq!(deps.load(&id).unwrap().canary_pct, 100);
+    }
+
+    #[test]
+    fn ship_rejects_stored_run_for_different_evalset_identity() {
+        let dir = TempDir::new().unwrap();
+        let eval_dir = dir.path().join("intent");
+        std::fs::create_dir_all(&eval_dir).unwrap();
+        std::fs::write(
+            eval_dir.join("evalset.yaml"),
+            "name: intent\ntask: classify\nversion: 3\nlabels: [a, b]\ngate:\n  min_quality: 0.9\n  min_cases: 10\n",
+        )
+        .unwrap();
+        std::fs::write(eval_dir.join("cases.jsonl"), "").unwrap();
+        let run_store = dir.path().join("runs");
+        store_run_with_identity(&run_store, "run_wrong", 20, 1.0, "other", 3);
+
+        let err = ship(
+            &eval_dir,
+            Some("run_wrong"),
+            None,
+            None,
+            5,
+            vec![],
+            Some(&run_store),
+            Some(&dir.path().join("deployments")),
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("belongs to evalset"));
     }
 
     #[test]
@@ -2184,7 +2355,7 @@ mod tests {
         std::fs::write(eval_dir.join("cases.jsonl"), "").unwrap();
         let run_store = dir.path().join("runs");
         let dep_store = dir.path().join("deployments");
-        store_run(&run_store, "run_mid", 20, 0.7); // quality 0.7 — passes 0.5, fails 0.9
+        store_run_with_identity(&run_store, "run_mid", 20, 0.7, "intent", 1);
 
         ship(
             &eval_dir,
@@ -2208,6 +2379,45 @@ mod tests {
         .unwrap();
         assert!(promote(&id, 50, &eval_dir, Some(&run_store), Some(&dep_store)).is_err());
         assert_eq!(deps.load(&id).unwrap().canary_pct, 5); // unchanged
+    }
+
+    #[test]
+    fn promote_rejects_gating_run_for_different_evalset_version() {
+        let dir = TempDir::new().unwrap();
+        let eval_dir = dir.path().join("intent");
+        std::fs::create_dir_all(&eval_dir).unwrap();
+        std::fs::write(
+            eval_dir.join("evalset.yaml"),
+            "name: intent\ntask: classify\nversion: 3\nlabels: [a, b]\ngate:\n  min_quality: 0.9\n  min_cases: 10\n",
+        )
+        .unwrap();
+        std::fs::write(eval_dir.join("cases.jsonl"), "").unwrap();
+        let run_store = dir.path().join("runs");
+        let dep_store = dir.path().join("deployments");
+        store_run(&run_store, "run_win", 20, 1.0);
+
+        ship(
+            &eval_dir,
+            Some("run_win"),
+            None,
+            None,
+            5,
+            vec![],
+            Some(&run_store),
+            Some(&dep_store),
+        )
+        .unwrap();
+        let deps = xybrid_sdk::eval::DeploymentStore::with_dir(&dep_store);
+        let id = deps.list().unwrap()[0].clone();
+
+        std::fs::write(
+            eval_dir.join("evalset.yaml"),
+            "name: intent\ntask: classify\nversion: 4\nlabels: [a, b]\ngate:\n  min_quality: 0.9\n  min_cases: 10\n",
+        )
+        .unwrap();
+        let err = promote(&id, 50, &eval_dir, Some(&run_store), Some(&dep_store)).unwrap_err();
+        assert!(err.to_string().contains("was scored against"));
+        assert_eq!(deps.load(&id).unwrap().canary_pct, 5);
     }
 
     #[test]

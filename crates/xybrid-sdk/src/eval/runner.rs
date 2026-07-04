@@ -15,6 +15,9 @@ use crate::eval::stats::{
     GatePolicy, DEFAULT_BOOTSTRAP_ITERATIONS, DEFAULT_CONFIDENCE, DEFAULT_SEED,
 };
 
+const MAX_CASE_DETAIL_CHARS: usize = 200;
+const TRUNCATED_SUFFIX: &str = "…(truncated)";
+
 /// What running a candidate on one case produced.
 #[derive(Debug, Clone)]
 pub struct CaseOutcome {
@@ -67,16 +70,17 @@ pub fn today_utc() -> String {
 /// engine defaults for anything the manifest leaves unset.
 pub fn gate_policy(manifest: &Evalset) -> GatePolicy {
     let gate: Option<&Gate> = manifest.gate.as_ref();
+    let non_inferiority_margin = gate.and_then(|g| g.non_inferiority_margin).unwrap_or(0.0);
+    if non_inferiority_margin < 0.0 {
+        eprintln!(
+            "warning: clamping negative non-inferiority margin {non_inferiority_margin} to 0.0"
+        );
+    }
     GatePolicy {
         min_cases: gate.and_then(|g| g.min_cases).unwrap_or(1),
         min_quality: gate.and_then(|g| g.min_quality),
         max_p95_latency_ms: gate.and_then(|g| g.max_p95_latency_ms),
-        // Clamp to >= 0: a negative margin would invert the tie logic (a clear
-        // loss read as a pass). A margin is a non-negative slack band.
-        non_inferiority_margin: gate
-            .and_then(|g| g.non_inferiority_margin)
-            .unwrap_or(0.0)
-            .max(0.0),
+        non_inferiority_margin: non_inferiority_margin.max(0.0),
         flaky_std_threshold: 0.1,
         seed: DEFAULT_SEED,
         bootstrap_iterations: DEFAULT_BOOTSTRAP_ITERATIONS,
@@ -90,6 +94,7 @@ pub fn gate_policy(manifest: &Evalset) -> GatePolicy {
 /// (never abort the whole run). The judge identity is recorded when a judge is
 /// supplied. `run_id`/`created` are caller-supplied (never stamped implicitly,
 /// for determinism).
+// CLIPPY-ALLOW: run_evalset is the public orchestration seam for injected inference.
 #[allow(clippy::too_many_arguments)]
 pub fn run_evalset<F>(
     set: &LoadedEvalset,
@@ -125,7 +130,9 @@ where
         }
         match infer(case) {
             Ok(outcome) => {
-                let grade = grade_case(&set.manifest, case, &outcome.output, judge);
+                let mut grade = grade_case(&set.manifest, case, &outcome.output, judge);
+                grade.score = finite_score(grade.score);
+                grade.detail = grade.detail.map(cap_case_detail);
                 if let Some(ms) = outcome.latency_ms {
                     latencies.push(ms as f64);
                 }
@@ -152,7 +159,7 @@ where
                     verdict: Verdict::Fail,
                     score: 0.0,
                     latency_ms: None,
-                    detail: grade.detail.clone(),
+                    detail: grade.detail.clone().map(cap_case_detail),
                 });
                 grades.push(grade);
             }
@@ -192,6 +199,23 @@ fn output_to_json(output: &GradeOutput) -> serde_json::Value {
         GradeOutput::Json(v) => v.clone(),
         GradeOutput::Embedding(v) => serde_json::json!(v),
     }
+}
+
+fn finite_score(score: f64) -> f64 {
+    if score.is_finite() {
+        score
+    } else {
+        0.0
+    }
+}
+
+fn cap_case_detail(detail: String) -> String {
+    if detail.chars().count() <= MAX_CASE_DETAIL_CHARS {
+        return detail;
+    }
+    let head_len = MAX_CASE_DETAIL_CHARS.saturating_sub(TRUNCATED_SUFFIX.chars().count());
+    let head: String = detail.chars().take(head_len).collect();
+    format!("{head}{TRUNCATED_SUFFIX}")
 }
 
 #[cfg(test)]
@@ -347,6 +371,77 @@ mod tests {
         assert_eq!(judge_id.judge_model, "overlap-judge-v0");
     }
 
+    struct NanJudge;
+
+    impl Judge for NanJudge {
+        fn grade(
+            &self,
+            _input: &CaseInput,
+            _reference: Option<&Expected>,
+            _output: &GradeOutput,
+        ) -> CaseGrade {
+            CaseGrade {
+                score: f64::NAN,
+                verdict: Verdict::Pass,
+                detail: None,
+            }
+        }
+
+        fn judge_model(&self) -> &str {
+            "nan-judge"
+        }
+    }
+
+    #[test]
+    fn run_case_sanitizes_non_finite_grade_score() {
+        let mut manifest = Evalset::new("chat", TaskType::Chat);
+        manifest.gate = Some(Gate {
+            min_quality: Some(0.5),
+            min_cases: Some(1),
+            ..Gate::default()
+        });
+        let cases = vec![Case::new("c1", CaseInput::Text("hi".into()))
+            .with_expected(Expected::Text("hello".into()))];
+        let set = LoadedEvalset {
+            manifest,
+            cases,
+            root: ".".into(),
+        };
+        let policy = gate_policy(&set.manifest);
+        let judge = NanJudge;
+        let run = run_evalset(
+            &set,
+            CandidateRef::new("m"),
+            env(),
+            &policy,
+            Some(&judge),
+            &RunOptions::default(),
+            "run_nan",
+            |_| Ok(CaseOutcome::text("hello", 5)),
+        );
+        assert_eq!(run.cases[0].score, 0.0);
+        assert!(run.scores.quality.is_finite());
+    }
+
+    #[test]
+    fn inference_error_detail_is_capped() {
+        let set = classify_set();
+        let policy = gate_policy(&set.manifest);
+        let run = run_evalset(
+            &set,
+            CandidateRef::new("flaky"),
+            env(),
+            &policy,
+            None,
+            &RunOptions::default(),
+            "run_detail",
+            |_| Err("é".repeat(400)),
+        );
+        let detail = run.cases[0].detail.as_ref().unwrap();
+        assert_eq!(detail.chars().count(), MAX_CASE_DETAIL_CHARS);
+        assert!(detail.ends_with(TRUNCATED_SUFFIX));
+    }
+
     #[test]
     fn gate_policy_maps_manifest_thresholds() {
         let mut manifest = Evalset::new("s", TaskType::Classify);
@@ -481,6 +576,37 @@ mod tests {
         );
         assert_eq!(run.scores.crash_or_timeout, 2);
         assert_eq!(run.scores.latency_p95_ms, None);
+        assert_eq!(run.scores.verdict, GateVerdict::Inconclusive);
+    }
+
+    #[test]
+    fn latency_gate_with_partial_latency_coverage_is_inconclusive() {
+        let mut set = classify_set();
+        set.manifest.gate = Some(Gate {
+            max_p95_latency_ms: Some(800.0),
+            min_quality: Some(0.5),
+            min_cases: Some(1),
+            ..Gate::default()
+        });
+        let policy = gate_policy(&set.manifest);
+        let run = run_evalset(
+            &set,
+            CandidateRef::new("m"),
+            env(),
+            &policy,
+            None,
+            &RunOptions::default(),
+            "run_partial_latency",
+            |case| match &case.input {
+                CaseInput::Text(t) if t.contains("refund") => Ok(CaseOutcome::text("refund", 10)),
+                _ => Ok(CaseOutcome {
+                    output: GradeOutput::Text("cancel".into()),
+                    latency_ms: None,
+                }),
+            },
+        );
+        assert_eq!(run.scores.pass, 2);
+        assert_eq!(run.scores.latency_p95_ms, Some(10.0));
         assert_eq!(run.scores.verdict, GateVerdict::Inconclusive);
     }
 }

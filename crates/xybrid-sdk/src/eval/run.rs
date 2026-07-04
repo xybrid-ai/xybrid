@@ -22,7 +22,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::eval::format::EvalError;
 use crate::eval::grader::{CaseGrade, Verdict};
-use crate::eval::stats::{percentile, ConfidenceInterval, GatePolicy, GateVerdict};
+use crate::eval::stats::{percentile, ConfidenceInterval, GatePolicy, GateVerdict, LatencyStats};
 
 /// Scorer schema version recorded on every run (bumps invalidate comparisons).
 pub const SCORER_VERSION: &str = "eval-scorer-v0";
@@ -323,7 +323,12 @@ pub fn aggregate_scores(
     }
 
     let p95 = percentile(latencies_ms, 95.0);
-    let decision = policy.evaluate(&scorable, p95, baseline_quality);
+    let latency = LatencyStats {
+        p95_ms: p95,
+        measured_cases: latencies_ms.len(),
+        scorable_cases: scorable.len(),
+    };
+    let decision = policy.evaluate_with_latency(&scorable, latency, baseline_quality);
 
     Scores {
         quality: decision.quality,
@@ -404,8 +409,12 @@ impl EvalRunStore {
         let path = dir.join(RUN_FILE);
         let json = serde_json::to_string_pretty(run)
             .map_err(|e| EvalError::Io(format!("serialize run: {e}")))?;
-        std::fs::write(&path, json)
-            .map_err(|e| EvalError::Io(format!("{}: {e}", path.display())))?;
+        let tmp = dir.join(format!(".{RUN_FILE}.{}.tmp", std::process::id()));
+        std::fs::write(&tmp, json).map_err(|e| EvalError::Io(format!("{}: {e}", tmp.display())))?;
+        std::fs::rename(&tmp, &path).map_err(|e| {
+            let _ = std::fs::remove_file(&tmp);
+            EvalError::Io(format!("{}: {e}", path.display()))
+        })?;
         Ok(dir)
     }
 
@@ -509,6 +518,21 @@ mod tests {
         let scores = aggregate_scores(&grades, &latencies, &policy, None);
         assert_eq!(scores.latency_p50_ms, Some(100.0)); // 10th value
         assert_eq!(scores.latency_p95_ms, Some(190.0)); // 19th value
+    }
+
+    #[test]
+    fn aggregate_marks_latency_slo_partial_coverage_inconclusive() {
+        let grades = vec![CaseGrade::pass(); 3];
+        let policy = GatePolicy {
+            min_cases: 1,
+            min_quality: Some(0.5),
+            max_p95_latency_ms: Some(800.0),
+            bootstrap_iterations: 100,
+            ..GatePolicy::default()
+        };
+        let scores = aggregate_scores(&grades, &[100.0], &policy, None);
+        assert_eq!(scores.verdict, GateVerdict::Inconclusive);
+        assert_eq!(scores.latency_p95_ms, Some(100.0));
     }
 
     #[test]
@@ -644,6 +668,11 @@ mod tests {
 
         let loaded = store.load("run_abc").unwrap();
         assert_eq!(loaded, run);
+        assert!(std::fs::read_dir(&run_dir).unwrap().all(|entry| !entry
+            .unwrap()
+            .file_name()
+            .to_string_lossy()
+            .ends_with(".tmp")));
     }
 
     #[test]

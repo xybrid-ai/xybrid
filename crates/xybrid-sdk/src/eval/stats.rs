@@ -136,6 +136,9 @@ pub struct ConfidenceInterval {
     pub n: usize,
     /// Repeat count used to produce the scores (1 = single run).
     pub repeats: u32,
+    /// Bootstrap iterations actually used after CPU-budget clamping.
+    #[serde(default)]
+    pub effective_iterations: u32,
 }
 
 /// Bootstrap a `confidence`-level CI for the mean of `scores`, deterministically
@@ -171,6 +174,7 @@ pub fn bootstrap_ci(
         high: percentile_sorted(&means, (1.0 - alpha) * 100.0),
         n,
         repeats: 1,
+        effective_iterations: iterations.min(u32::MAX as usize) as u32,
     })
 }
 
@@ -250,6 +254,28 @@ pub struct GateDecision {
     pub reason: String,
 }
 
+/// Latency evidence available to a gate.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LatencyStats {
+    /// P95 latency over measured scorable cases.
+    pub p95_ms: Option<f64>,
+    /// Scorable cases with measured latency.
+    pub measured_cases: usize,
+    /// Total scorable cases that should have latency.
+    pub scorable_cases: usize,
+}
+
+impl LatencyStats {
+    /// Build latency evidence from a legacy p95-only value.
+    pub fn from_p95(p95_ms: Option<f64>, scorable_cases: usize) -> Self {
+        Self {
+            p95_ms,
+            measured_cases: p95_ms.map_or(0, |_| scorable_cases),
+            scorable_cases,
+        }
+    }
+}
+
 impl GatePolicy {
     /// Evaluate a candidate's per-case `scores` (Unblessed cases already
     /// excluded by the caller) against this policy.
@@ -263,18 +289,21 @@ impl GatePolicy {
         p95_latency_ms: Option<f64>,
         baseline_quality: Option<f64>,
     ) -> GateDecision {
-        let n = scores.len();
+        self.evaluate_with_latency(
+            scores,
+            LatencyStats::from_p95(p95_latency_ms, scores.len()),
+            baseline_quality,
+        )
+    }
 
-        // 1. Minimum case count — evaluated FIRST, before any threshold/CI.
-        if n < self.min_cases.max(1) {
-            return GateDecision {
-                verdict: GateVerdict::Inconclusive,
-                quality: mean(scores),
-                ci: None,
-                flaky: false,
-                reason: format!("below minimum case count ({n} < {})", self.min_cases.max(1)),
-            };
-        }
+    /// Evaluate with latency coverage, not only the measured percentile.
+    pub fn evaluate_with_latency(
+        &self,
+        scores: &[f64],
+        latency: LatencyStats,
+        baseline_quality: Option<f64>,
+    ) -> GateDecision {
+        let n = scores.len();
 
         let quality = mean(scores);
         let ci = bootstrap_ci(
@@ -283,108 +312,111 @@ impl GatePolicy {
             self.bootstrap_iterations,
             self.confidence,
         );
+        let mut verdict = GateVerdict::Pass;
+        let mut reasons = Vec::new();
 
-        // 2. Latency SLO — a hard constraint. When a budget is set the p95 MUST
-        // be measured: an unmeasured p95 is inconclusive, never a silent pass.
+        if n < self.min_cases.max(1) {
+            verdict = stricter(verdict, GateVerdict::Inconclusive);
+            reasons.push(format!(
+                "minimum case count inconclusive ({n} < {})",
+                self.min_cases.max(1)
+            ));
+        }
+
         if let Some(max) = self.max_p95_latency_ms {
-            match p95_latency_ms {
-                Some(p95) if p95 > max => {
-                    return GateDecision {
-                        verdict: GateVerdict::Fail,
-                        quality,
-                        ci,
-                        flaky: false,
-                        reason: format!("p95 latency {p95:.0}ms over budget {max:.0}ms"),
-                    };
+            // An observed p95 over budget is a Fail even under partial coverage:
+            // unmeasured cases can only add violations, never retract observed ones.
+            if let Some(p95) = latency.p95_ms {
+                if p95 > max {
+                    verdict = stricter(verdict, GateVerdict::Fail);
+                    reasons.push(format!("p95 latency {p95:.0}ms over budget {max:.0}ms"));
                 }
-                Some(_) => {}
+            }
+            if latency.measured_cases < latency.scorable_cases {
+                verdict = stricter(verdict, GateVerdict::Inconclusive);
+                reasons.push(format!(
+                    "latency measured for {}/{} cases",
+                    latency.measured_cases, latency.scorable_cases
+                ));
+            } else if latency.p95_ms.is_none() {
+                verdict = stricter(verdict, GateVerdict::Inconclusive);
+                reasons.push("p95 latency not measured".to_string());
+            }
+        }
+
+        if let Some(min_q) = self.min_quality {
+            match &ci {
+                Some(ci) if ci.high < min_q - GATE_EPS => {
+                    verdict = stricter(verdict, GateVerdict::Fail);
+                    reasons.push(format!(
+                        "CI [{:.3},{:.3}] entirely below {min_q:.3}",
+                        ci.low, ci.high
+                    ));
+                }
+                Some(ci) if ci.low >= min_q - GATE_EPS => {}
+                Some(ci) => {
+                    verdict = stricter(verdict, GateVerdict::Inconclusive);
+                    reasons.push(format!(
+                        "CI [{:.3},{:.3}] straddles threshold {min_q:.3}",
+                        ci.low, ci.high
+                    ));
+                }
+                None if n == 0 => {
+                    verdict = stricter(verdict, GateVerdict::Inconclusive);
+                    reasons.push(format!(
+                        "quality CI not computable for threshold {min_q:.3}"
+                    ));
+                }
                 None => {
-                    return GateDecision {
-                        verdict: GateVerdict::Inconclusive,
-                        quality,
-                        ci,
-                        flaky: false,
-                        reason: "p95 latency not measured".to_string(),
-                    };
+                    if quality < min_q - GATE_EPS {
+                        verdict = stricter(verdict, GateVerdict::Fail);
+                        reasons.push(format!("quality {quality:.3} below threshold {min_q:.3}"));
+                    }
                 }
             }
         }
 
-        // 3. Absolute quality threshold, judged against the CI. Comparisons carry
-        // an epsilon so float dust at the exact bar doesn't flip Pass→Fail.
-        if let Some(min_q) = self.min_quality {
-            return match &ci {
-                Some(ci) if ci.high < min_q - GATE_EPS => GateDecision {
-                    verdict: GateVerdict::Fail,
-                    quality,
-                    ci: Some(ci.clone()),
-                    flaky: false,
-                    reason: format!(
-                        "CI [{:.3},{:.3}] entirely below {min_q:.3}",
-                        ci.low, ci.high
-                    ),
-                },
-                Some(ci) if ci.low >= min_q - GATE_EPS => GateDecision {
-                    verdict: GateVerdict::Pass,
-                    quality,
-                    ci: Some(ci.clone()),
-                    flaky: false,
-                    reason: format!("CI [{:.3},{:.3}] at/above {min_q:.3}", ci.low, ci.high),
-                },
-                Some(ci) => GateDecision {
-                    verdict: GateVerdict::Inconclusive,
-                    quality,
-                    ci: Some(ci.clone()),
-                    flaky: false,
-                    reason: format!(
-                        "CI [{:.3},{:.3}] straddles threshold {min_q:.3}",
-                        ci.low, ci.high
-                    ),
-                },
-                None => GateDecision {
-                    verdict: if quality >= min_q - GATE_EPS {
-                        GateVerdict::Pass
-                    } else {
-                        GateVerdict::Fail
-                    },
-                    quality,
-                    ci: None,
-                    flaky: false,
-                    reason: format!("quality {quality:.3} vs threshold {min_q:.3}"),
-                },
-            };
-        }
-
-        // 4. Non-inferiority vs a baseline (compare mode, no absolute threshold).
         if let Some(base) = baseline_quality {
             let delta = quality - base;
-            let (verdict, reason) = if delta.abs() <= self.non_inferiority_margin {
-                (
-                    GateVerdict::Inconclusive,
-                    format!("Δ {delta:+.3} within non-inferiority margin"),
-                )
+            if delta.abs() <= self.non_inferiority_margin {
+                verdict = stricter(verdict, GateVerdict::Inconclusive);
+                reasons.push(format!("Δ {delta:+.3} within non-inferiority margin"));
             } else if delta > 0.0 {
-                (GateVerdict::Pass, format!("Δ {delta:+.3} over baseline"))
             } else {
-                (GateVerdict::Fail, format!("Δ {delta:+.3} under baseline"))
-            };
-            return GateDecision {
-                verdict,
-                quality,
-                ci,
-                flaky: false,
-                reason,
-            };
+                verdict = stricter(verdict, GateVerdict::Fail);
+                reasons.push(format!("Δ {delta:+.3} under baseline"));
+            }
         }
 
-        // 5. No criteria configured — report-only pass.
+        if self.min_quality.is_none()
+            && self.max_p95_latency_ms.is_none()
+            && baseline_quality.is_none()
+        {
+            verdict = stricter(verdict, GateVerdict::Inconclusive);
+            reasons.push("no gate criteria configured".to_string());
+        }
+
         GateDecision {
-            verdict: GateVerdict::Pass,
+            verdict,
             quality,
             ci,
             flaky: false,
-            reason: "no gate criteria configured".to_string(),
+            reason: if reasons.is_empty() {
+                "all configured gate criteria passed".to_string()
+            } else {
+                reasons.join("; ")
+            },
         }
+    }
+}
+
+fn stricter(current: GateVerdict, next: GateVerdict) -> GateVerdict {
+    match (current, next) {
+        (GateVerdict::Fail, _) | (_, GateVerdict::Fail) => GateVerdict::Fail,
+        (GateVerdict::Inconclusive, _) | (_, GateVerdict::Inconclusive) => {
+            GateVerdict::Inconclusive
+        }
+        (GateVerdict::Pass, GateVerdict::Pass) => GateVerdict::Pass,
     }
 }
 
@@ -530,6 +562,7 @@ mod tests {
         );
         let b = bootstrap_ci(&scores, DEFAULT_SEED, DEFAULT_BOOTSTRAP_ITERATIONS, 0.95).unwrap();
         assert_eq!(a, b, "clamped bootstrap must stay deterministic");
+        assert_eq!(a.effective_iterations, 40);
         assert!(a.low < 0.5 && a.high > 0.5, "CI {a:?} should bracket 0.5");
     }
 
@@ -617,7 +650,53 @@ mod tests {
         p.max_p95_latency_ms = Some(800.0);
         let d = p.evaluate(&vec![1.0; 50], None, None);
         assert_eq!(d.verdict, GateVerdict::Inconclusive, "{}", d.reason);
-        assert!(d.reason.contains("not measured"));
+        assert!(d.reason.contains("latency measured for 0/50 cases"));
+    }
+
+    #[test]
+    fn gate_latency_partial_coverage_is_inconclusive() {
+        let mut p = policy(1, Some(0.5));
+        p.max_p95_latency_ms = Some(800.0);
+        let d = p.evaluate_with_latency(
+            &vec![1.0; 100],
+            LatencyStats {
+                p95_ms: Some(100.0),
+                measured_cases: 1,
+                scorable_cases: 100,
+            },
+            None,
+        );
+        assert_eq!(d.verdict, GateVerdict::Inconclusive, "{}", d.reason);
+        assert!(d.reason.contains("latency measured for 1/100 cases"));
+    }
+
+    #[test]
+    fn gate_latency_over_budget_fails_even_with_partial_coverage() {
+        // An observed over-budget p95 is a Fail; under-coverage cannot soften it
+        // to Inconclusive because unmeasured cases can only add violations.
+        let mut p = policy(1, Some(0.5));
+        p.max_p95_latency_ms = Some(800.0);
+        let d = p.evaluate_with_latency(
+            &vec![1.0; 100],
+            LatencyStats {
+                p95_ms: Some(2000.0),
+                measured_cases: 1,
+                scorable_cases: 100,
+            },
+            None,
+        );
+        assert_eq!(d.verdict, GateVerdict::Fail, "{}", d.reason);
+        assert!(d.reason.contains("over budget"));
+        assert!(d.reason.contains("latency measured for 1/100 cases"));
+    }
+
+    #[test]
+    fn gate_combines_min_quality_and_non_inferiority_verdicts() {
+        let mut p = policy(10, Some(0.9));
+        p.non_inferiority_margin = 0.05;
+        let d = p.evaluate(&vec![1.0; 50], None, Some(1.2));
+        assert_eq!(d.verdict, GateVerdict::Fail, "{}", d.reason);
+        assert!(d.reason.contains("under baseline"));
     }
 
     #[test]
@@ -647,10 +726,10 @@ mod tests {
     }
 
     #[test]
-    fn gate_no_criteria_is_report_only_pass() {
+    fn gate_no_criteria_is_inconclusive() {
         let p = policy(1, None);
         let d = p.evaluate(&[1.0, 0.0, 1.0], None, None);
-        assert_eq!(d.verdict, GateVerdict::Pass);
+        assert_eq!(d.verdict, GateVerdict::Inconclusive);
         assert!(d.reason.contains("no gate criteria"));
     }
 
