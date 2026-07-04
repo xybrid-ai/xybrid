@@ -1,0 +1,21 @@
+crates/xybrid-core/src/execution/llm_telemetry.rs
+  s_a619afae87b555::t_6aa712f055c2e4 412
+crates/xybrid-core/src/execution/executor.rs
+  s_a619afae87b555::t_b46b98016686e2 2768
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "5d002d78e5cd325bf939a154ef6f7da82d7656b9",
+  "prompts": {},
+  "sessions": {
+    "s_a619afae87b555": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e6fe5db3-dfc5-4fa6-b5ce-50fc626aab2e",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
