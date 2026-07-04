@@ -2765,6 +2765,7 @@ mod tests {
             decode_tps: None,
             prefill_tps: None,
             image_preprocess_ms: None,
+            reasoning_content: None,
         }
     }
 
