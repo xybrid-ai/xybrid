@@ -1,0 +1,30 @@
+bindings/unity/Editor/NativeLibraryBuildHook.cs.meta
+  s_fb271508a8988a::t_fc8ef5ab6c0acc 1-2
+xtask/src/main.rs
+  s_fb271508a8988a::t_fc8ef5ab6c0acc 2397-2399,2434-2437,2465-2468
+  s_fb271508a8988a::t_ebf4dfc624c4dc 396-412
+  s_fb271508a8988a::t_6f5bbfa48932ca 2338-2396,2400-2433,2438-2464,2469-2472
+  s_fb271508a8988a::t_a4b6e67aa38a27 608-614
+bindings/unity/Editor/NativeLibraryResolver.cs.meta
+  s_fb271508a8988a::t_fc8ef5ab6c0acc 1-2
+bindings/unity/Editor/NativeLibraryResolver.cs
+  s_fb271508a8988a::t_69a57e997ff9b7 1-352
+bindings/unity/Editor/NativeLibraryBuildHook.cs
+  s_fb271508a8988a::t_06993070715d3b 1-51
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "49d3b8c491386ace4a497eb5bea9702f594ff418",
+  "prompts": {},
+  "sessions": {
+    "s_fb271508a8988a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8ce838ba-c727-47cf-8b97-de143d5f0c48",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
