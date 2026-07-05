@@ -1,0 +1,45 @@
+docs/content/docs/(integration)/sdks/ios.zh.mdx
+  s_fb271508a8988a::t_2c7efad176a083 18
+docs/content/docs/quickstart.mdx
+  s_fb271508a8988a::t_2c7efad176a083 15,57,89,153
+README.ja-JP.md
+  s_fb271508a8988a::t_2c7efad176a083 148,165,183,217
+docs/content/docs/(integration)/sdks/ios.mdx
+  s_fb271508a8988a::t_2c7efad176a083 18
+docs/content/docs/(integration)/sdks/flutter.mdx
+  s_fb271508a8988a::t_2c7efad176a083 14
+docs/content/docs/(integration)/sdks/android.zh.mdx
+  s_fb271508a8988a::t_2c7efad176a083 14
+README.zh-CN.md
+  s_fb271508a8988a::t_2c7efad176a083 148,165,183,217
+docs/content/docs/(integration)/sdks/android.mdx
+  s_fb271508a8988a::t_2c7efad176a083 14
+docs/content/docs/quickstart.zh.mdx
+  s_fb271508a8988a::t_2c7efad176a083 15,57,89,154
+bindings/apple/README.md
+  s_fb271508a8988a::t_2c7efad176a083 15,22
+bindings/flutter/README.md
+  s_fb271508a8988a::t_2c7efad176a083 18
+bindings/kotlin/README.md
+  s_fb271508a8988a::t_2c7efad176a083 15
+docs/content/docs/(integration)/sdks/flutter.zh.mdx
+  s_fb271508a8988a::t_2c7efad176a083 14
+README.md
+  s_fb271508a8988a::t_2c7efad176a083 133,150,168,202
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "385633d39055c6a89426f82df815092c144d9c73",
+  "prompts": {},
+  "sessions": {
+    "s_fb271508a8988a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8ce838ba-c727-47cf-8b97-de143d5f0c48",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
