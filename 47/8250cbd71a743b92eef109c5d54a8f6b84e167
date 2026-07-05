@@ -1,0 +1,27 @@
+bindings/unity/Tests/Editor/Xybrid.SDK.Tests.Editor.asmdef
+  s_fb271508a8988a::t_e30a6c3a3c142e 6
+bindings/unity/Editor/NativeLibraryResolver.cs
+  s_fb271508a8988a::t_f7dc6463c03014 303,314-324
+  s_fb271508a8988a::t_e993408eac6a16 24-25
+  s_fb271508a8988a::t_99fcffb6730b38 325-326
+bindings/unity/Tests/Editor/NativeLibraryResolverTests.cs
+  s_fb271508a8988a::t_2e03237c8fa6df 1-81
+bindings/unity/Tests/Editor/NativeLibraryResolverTests.cs.meta
+  s_fb271508a8988a::t_e8f9078572ad17 1-2
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "478250cbd71a743b92eef109c5d54a8f6b84e167",
+  "prompts": {},
+  "sessions": {
+    "s_fb271508a8988a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8ce838ba-c727-47cf-8b97-de143d5f0c48",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
