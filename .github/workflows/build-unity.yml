@@ -505,6 +505,95 @@ jobs:
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "Unity SDK version: $VERSION"
 
+      # Per-platform native bundles consumed by the Unity editor
+      # NativeLibraryResolver (bindings/unity/Editor/NativeLibraryResolver.cs).
+      # This is the shell twin of `cargo xtask package-unity-natives` — kept in
+      # shell so this bare runner needn't compile xtask (→ xybrid-core → ORT).
+      # The manifest shape MUST match the resolver's `NativePlatform` model and
+      # the xtask `UnityNativePlatform` struct; keep all three in sync.
+      - name: Package Unity native resolver bundles
+        run: |
+          set -euo pipefail
+          VERSION=${{ steps.version.outputs.version }}
+          PLUGINS=bindings/unity/Runtime/Plugins
+          mkdir -p dist
+          # platform-key:PluginDir:primary-lib-relative-path ("" = any-ABI Android)
+          MAPPINGS=(
+            "macos:macOS:libxybrid_ffi.dylib"
+            "windows:Windows:xybrid_ffi.dll"
+            "linux:Linux:libxybrid_ffi.so"
+            "ios:iOS:libxybrid_ffi.a"
+            "android:Android:"
+          )
+          ENTRIES=()
+          for m in "${MAPPINGS[@]}"; do
+            KEY="${m%%:*}"; REST="${m#*:}"; DIR="${REST%%:*}"; LIB="${REST#*:}"
+            SRC="$PLUGINS/$DIR"
+            if [ "$KEY" = "android" ]; then
+              PRESENT=false
+              for abi in arm64-v8a armeabi-v7a x86_64; do
+                [ -f "$SRC/$abi/libxybrid_ffi.so" ] && PRESENT=true
+              done
+            else
+              PRESENT=false; [ -f "$SRC/$LIB" ] && PRESENT=true
+            fi
+            if [ "$PRESENT" != true ]; then
+              echo "skip $KEY — no native at $SRC"; continue
+            fi
+            ASSET="xybrid-unity-native-${KEY}-v${VERSION}.zip"
+            # zip root mirrors Runtime/Plugins/: <Dir>/... plus the folder .meta,
+            # so the resolver extracts it verbatim into Assets/Xybrid/Plugins/.
+            ZIP_ARGS=("$DIR")
+            [ -f "$PLUGINS/$DIR.meta" ] && ZIP_ARGS+=("$DIR.meta")
+            ( cd "$PLUGINS" && zip -r -q "$GITHUB_WORKSPACE/dist/$ASSET" "${ZIP_ARGS[@]}" )
+            SHA=$(shasum -a 256 "dist/$ASSET" | awk '{print $1}')
+            SIZE=$(wc -c < "dist/$ASSET" | tr -d ' ')
+            echo "  ✓ $ASSET ($SIZE bytes)"
+            ENTRIES+=("$KEY|$ASSET|$SHA|$SIZE")
+          done
+          if [ ${#ENTRIES[@]} -eq 0 ]; then
+            echo "No Unity native platforms present to package"; exit 1
+          fi
+          MANIFEST="dist/xybrid-unity-natives-v${VERSION}.manifest.json"
+          VERSION="$VERSION" python3 - "$MANIFEST" "${ENTRIES[@]}" <<'PY'
+          import json, os, sys
+          out, entries = sys.argv[1], sys.argv[2:]
+          plats = []
+          for e in entries:
+              k, asset, sha, size = e.split("|")
+              plats.append({"platform": k, "asset": asset, "sha256": sha, "size": int(size)})
+          json.dump({"version": os.environ["VERSION"], "platforms": plats},
+                    open(out, "w"), indent=2)
+          PY
+          echo "Wrote $MANIFEST (${#ENTRIES[@]} platform(s))"
+
+      - name: Upload native resolver bundles to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          VERSION=${{ steps.version.outputs.version }}
+          for i in $(seq 1 20); do
+            if gh release view "v${VERSION}" > /dev/null 2>&1; then
+              gh release upload "v${VERSION}" \
+                dist/xybrid-unity-native-*.zip \
+                "dist/xybrid-unity-natives-v${VERSION}.manifest.json" --clobber
+              echo "Uploaded Unity native bundles + manifest to v${VERSION}."
+              exit 0
+            fi
+            echo "Waiting for release v${VERSION}... (attempt $i/20)"
+            sleep 30
+          done
+          echo "::warning::Release v${VERSION} not found within 10 min — native bundles are CI artifacts only."
+
+      - name: Upload native bundles as CI artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: unity-native-bundles
+          path: dist/xybrid-unity-native*
+          if-no-files-found: error
+
       - name: Create SDK archive
         run: |
           VERSION=${{ steps.version.outputs.version }}
