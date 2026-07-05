@@ -20,6 +20,7 @@ use clap::Subcommand;
 use xybrid_core::execution_template::ModelMetadata;
 use xybrid_core::ir::{Envelope, EnvelopeKind};
 use xybrid_core::template_executor::TemplateExecutor;
+use xybrid_sdk::eval::inbox::CaseStatusUpdate;
 use xybrid_sdk::eval::{
     gate_policy, run_evalset, CandidateRef, Case, CaseInput, CaseOutcome, CaseSource, Environment,
     EvalCaseStatus, EvalCasesQuery, EvalRunStore, Evalset, Expected, GateDecision, GateVerdict,
@@ -938,6 +939,12 @@ struct ReviewedCase {
     decision: ReviewDecision,
 }
 
+#[derive(Debug, Clone)]
+struct RemoteStatusPatch {
+    case_id: String,
+    status: EvalCaseStatus,
+}
+
 /// Append accepted cases to `cases.jsonl` and bump the manifest `version`.
 /// Returns the new version. Pure-ish (filesystem only); unit-tested via a temp
 /// dir.
@@ -1132,6 +1139,16 @@ fn pull_remote(
 
     let local_cases: Vec<Case> = pending.iter().map(|(_, case)| case.clone()).collect();
     let fresh = select_new_cases(&set.cases, &local_cases);
+    let fresh_ids: std::collections::HashSet<&str> =
+        fresh.iter().map(|case| case.id.as_str()).collect();
+    let already_local_patches: Vec<RemoteStatusPatch> = pending
+        .iter()
+        .filter(|(_, case)| !fresh_ids.contains(case.id.as_str()))
+        .map(|(remote, _)| RemoteStatusPatch {
+            case_id: remote.id.clone(),
+            status: EvalCaseStatus::Accepted,
+        })
+        .collect();
     ui::kv(
         "Pending",
         &format!(
@@ -1142,7 +1159,7 @@ fn pull_remote(
             skipped_unsupported
         ),
     );
-    if fresh.is_empty() {
+    if fresh.is_empty() && already_local_patches.is_empty() {
         return Ok(RemotePullOutcome::Handled);
     }
 
@@ -1161,8 +1178,26 @@ fn pull_remote(
         return Ok(RemotePullOutcome::Handled);
     }
 
+    let new_version = if accepted.is_empty() {
+        set.manifest.version
+    } else {
+        append_and_bump(evalset_dir, &set.manifest, &accepted)?
+    };
+
+    let mut patches = already_local_patches;
+    for reviewed_case in &reviewed {
+        let Some(status) = remote_status_for_decision(reviewed_case.decision) else {
+            continue;
+        };
+        patches.push(RemoteStatusPatch {
+            case_id: reviewed_case.case.id.clone(),
+            status,
+        });
+    }
+
+    let reconciliation = reconcile_remote_case_statuses(&client, &patches);
+
     if !accepted.is_empty() {
-        let new_version = append_and_bump(evalset_dir, &set.manifest, &accepted)?;
         println!();
         ui::ok(&format!(
             "Pulled {} remote case(s) → {} now v{}",
@@ -1170,41 +1205,91 @@ fn pull_remote(
             set.manifest.name,
             new_version
         ));
-    } else {
-        ui::hint("Nothing accepted.");
     }
 
-    for reviewed_case in &reviewed {
-        let status = match reviewed_case.decision {
-            ReviewDecision::Accept => Some(EvalCaseStatus::Accepted),
-            ReviewDecision::Discard => Some(EvalCaseStatus::Discarded),
-            ReviewDecision::Skip => None,
-        };
-        let Some(status) = status else {
-            continue;
-        };
-        client
-            .update_case_status(&reviewed_case.case.id, status)
-            .with_context(|| format!("failed to update remote case {}", reviewed_case.case.id))?;
+    // Surface a reconciliation failure before the "nothing accepted" hint so a
+    // failed re-run doesn't print a misleading success-ish line above its error.
+    reconciliation?;
+
+    if accepted.is_empty() {
+        ui::hint("Nothing accepted.");
     }
 
     Ok(RemotePullOutcome::Handled)
 }
 
+fn remote_status_for_decision(decision: ReviewDecision) -> Option<EvalCaseStatus> {
+    match decision {
+        ReviewDecision::Accept => Some(EvalCaseStatus::Accepted),
+        ReviewDecision::Discard => Some(EvalCaseStatus::Discarded),
+        ReviewDecision::Skip => None,
+    }
+}
+
+fn reconcile_remote_case_statuses(
+    client: &InboxClient,
+    patches: &[RemoteStatusPatch],
+) -> Result<()> {
+    let mut failures = Vec::new();
+    for patch in patches {
+        match client.update_case_status(&patch.case_id, patch.status) {
+            Ok(CaseStatusUpdate::Updated(_)) => {}
+            Ok(CaseStatusUpdate::AlreadyResolved) => {
+                warn_remote_case_skip(&patch.case_id, "already resolved on the platform");
+            }
+            Err(e) => {
+                warn_remote_case_skip(
+                    &patch.case_id,
+                    &format!(
+                        "failed to mark {} on the platform ({e})",
+                        patch.status.as_str()
+                    ),
+                );
+                failures.push(format!("{}: {e}", patch.case_id));
+            }
+        }
+    }
+
+    if failures.is_empty() {
+        return Ok(());
+    }
+
+    anyhow::bail!(
+        "local cases were saved, but remote reconciliation is incomplete; re-running `xybrid eval pull` will retry ({})",
+        failures.join("; ")
+    );
+}
+
 fn warn_remote_pull_fallback(error: &SdkError) {
-    let detail = if matches!(error, SdkError::Offline { .. }) {
-        format!("Remote eval cases unavailable ({error}); falling back to local inbox.")
-    } else {
-        format!("Remote eval cases failed ({error}); falling back to local inbox.")
-    };
+    let detail = format!(
+        "Remote eval cases unavailable ({}: {error}); falling back to local inbox.",
+        remote_pull_failure_reason(error)
+    );
     ui::warning(&detail);
+}
+
+fn warn_remote_case_skip(case_id: &str, reason: &str) {
+    ui::warning(&format!("Skipping remote case {case_id}: {reason}."));
+}
+
+fn remote_pull_failure_reason(error: &SdkError) -> &'static str {
+    match error {
+        SdkError::Offline { .. } => "offline",
+        SdkError::ConfigError(message) if message.contains("eval telemetry is not available") => {
+            "unsupported backend"
+        }
+        _ if error.to_string().contains("HTTP 401") || error.to_string().contains("HTTP 403") => {
+            "auth"
+        }
+        _ => "remote error",
+    }
 }
 
 fn remote_case_to_local(remote: &RemoteEvalCase, manifest: &Evalset) -> Result<Case> {
     let input = remote
         .input
         .as_ref()
-        .context("input payload was not captured")?;
+        .context("input payload was not captured; needs platform-side handling")?;
     let mut case = Case::new(&remote.id, parse_remote_input(input)?);
     case.expected = remote
         .expected
@@ -2060,7 +2145,98 @@ fn task_default_name(task: TaskType) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::{Read, Write};
+    use std::net::{TcpListener, TcpStream};
+    use std::sync::{Arc, Mutex};
+    use std::thread;
     use tempfile::TempDir;
+
+    #[derive(Debug, Clone)]
+    struct TestHttpRequest {
+        method: String,
+        path: String,
+        body: String,
+    }
+
+    #[derive(Debug)]
+    struct TestHttpResponse {
+        status: u16,
+        body: String,
+    }
+
+    fn run_test_http_server(
+        responses: Vec<TestHttpResponse>,
+    ) -> (String, thread::JoinHandle<Vec<TestHttpRequest>>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let expected = responses.len();
+        let responses = Arc::new(Mutex::new(responses.into_iter()));
+        let handle = thread::spawn(move || {
+            let mut requests = Vec::new();
+            for stream in listener.incoming().take(expected) {
+                let mut stream = stream.unwrap();
+                requests.push(read_test_http_request(&mut stream));
+                let response = responses
+                    .lock()
+                    .unwrap()
+                    .next()
+                    .expect("test response exists");
+                write_test_http_response(&mut stream, response);
+            }
+            requests
+        });
+        (url, handle)
+    }
+
+    fn read_test_http_request(stream: &mut TcpStream) -> TestHttpRequest {
+        let mut buffer = Vec::new();
+        let mut temp = [0_u8; 1024];
+        let headers_end = loop {
+            let read = stream.read(&mut temp).unwrap();
+            assert_ne!(read, 0, "client closed before headers");
+            buffer.extend_from_slice(&temp[..read]);
+            if let Some(pos) = find_header_end(&buffer) {
+                break pos;
+            }
+        };
+        let header_text = String::from_utf8(buffer[..headers_end].to_vec()).unwrap();
+        let content_length = header_text
+            .lines()
+            .find_map(|line| line.strip_prefix("Content-Length: "))
+            .and_then(|value| value.parse::<usize>().ok())
+            .unwrap_or(0);
+        let body_start = headers_end + 4;
+        while buffer.len() - body_start < content_length {
+            let read = stream.read(&mut temp).unwrap();
+            assert_ne!(read, 0, "client closed before body");
+            buffer.extend_from_slice(&temp[..read]);
+        }
+        let request_line = header_text.lines().next().unwrap();
+        let mut parts = request_line.split_whitespace();
+        TestHttpRequest {
+            method: parts.next().unwrap().to_string(),
+            path: parts.next().unwrap().to_string(),
+            body: String::from_utf8(buffer[body_start..body_start + content_length].to_vec())
+                .unwrap(),
+        }
+    }
+
+    fn find_header_end(buffer: &[u8]) -> Option<usize> {
+        buffer.windows(4).position(|window| window == b"\r\n\r\n")
+    }
+
+    fn write_test_http_response(stream: &mut TcpStream, response: TestHttpResponse) {
+        let body = response.body;
+        write!(
+            stream,
+            "HTTP/1.1 {} OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            response.status,
+            body.len(),
+            body
+        )
+        .unwrap();
+        stream.flush().unwrap();
+    }
     use xybrid_sdk::eval::{CandidateRef, Environment, Run, Scores};
 
     #[test]
@@ -2430,6 +2606,257 @@ mod tests {
         assert!(set.cases.is_empty());
         assert_eq!(set.manifest.version, 1);
         assert_eq!(read_inbox(&inbox).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn remote_pull_conflict_skips_case_and_continues() {
+        let dir = TempDir::new().unwrap();
+        let eval_dir = write_evalset(dir.path(), "intent", "classify", 3);
+        let (url, handle) = run_test_http_server(vec![
+            TestHttpResponse {
+                status: 200,
+                body: remote_cases_body(&["c1", "c2"]),
+            },
+            TestHttpResponse {
+                status: 409,
+                body: String::new(),
+            },
+            TestHttpResponse {
+                status: 200,
+                body: remote_case_body("c2", "accepted"),
+            },
+        ]);
+
+        pull(&eval_dir, None, true, false, Some("xy_test_k"), &url).unwrap();
+
+        let set = LoadedEvalset::load(&eval_dir).unwrap();
+        assert_eq!(
+            set.cases
+                .iter()
+                .map(|case| case.id.as_str())
+                .collect::<Vec<_>>(),
+            ["c1", "c2"]
+        );
+        assert_eq!(set.manifest.version, 4);
+        let requests = handle.join().unwrap();
+        assert_eq!(
+            requests
+                .iter()
+                .map(|request| (request.method.as_str(), request.path.as_str()))
+                .collect::<Vec<_>>(),
+            [
+                (
+                    "GET",
+                    "/v1/evals/cases?evalset=intent&status=pending&limit=100&offset=0"
+                ),
+                ("PATCH", "/v1/evals/cases/c1"),
+                ("PATCH", "/v1/evals/cases/c2")
+            ]
+        );
+    }
+
+    #[test]
+    fn remote_pull_patch_failure_leaves_local_case_and_returns_error() {
+        let dir = TempDir::new().unwrap();
+        let eval_dir = write_evalset(dir.path(), "intent", "classify", 7);
+        let (url, handle) = run_test_http_server(vec![
+            TestHttpResponse {
+                status: 200,
+                body: remote_cases_body(&["c1"]),
+            },
+            TestHttpResponse {
+                status: 500,
+                body: String::new(),
+            },
+        ]);
+
+        let error = pull(&eval_dir, None, true, false, Some("xy_test_k"), &url)
+            .expect_err("PATCH failure must fail the command");
+
+        let set = LoadedEvalset::load(&eval_dir).unwrap();
+        assert_eq!(
+            set.cases
+                .iter()
+                .map(|case| case.id.as_str())
+                .collect::<Vec<_>>(),
+            ["c1"]
+        );
+        assert_eq!(set.manifest.version, 8);
+        assert!(
+            error.to_string().contains("local cases were saved")
+                && error
+                    .to_string()
+                    .contains("remote reconciliation is incomplete")
+                && error
+                    .to_string()
+                    .contains("re-running `xybrid eval pull` will retry"),
+            "{error}"
+        );
+        let requests = handle.join().unwrap();
+        assert_eq!(requests.len(), 2);
+        assert_eq!(requests[1].method, "PATCH");
+        assert!(requests[1].body.contains("\"status\":\"accepted\""));
+    }
+
+    #[test]
+    fn remote_pull_patch_failure_continues_remaining_cases() {
+        let dir = TempDir::new().unwrap();
+        let eval_dir = write_evalset(dir.path(), "intent", "classify", 1);
+        let (url, handle) = run_test_http_server(vec![
+            TestHttpResponse {
+                status: 200,
+                body: remote_cases_body(&["c1", "c2"]),
+            },
+            TestHttpResponse {
+                status: 500,
+                body: String::new(),
+            },
+            TestHttpResponse {
+                status: 200,
+                body: remote_case_body("c2", "accepted"),
+            },
+        ]);
+
+        let error = pull(&eval_dir, None, true, false, Some("xy_test_k"), &url)
+            .expect_err("one hard PATCH failure must fail after best-effort reconciliation");
+
+        let set = LoadedEvalset::load(&eval_dir).unwrap();
+        assert_eq!(
+            set.cases
+                .iter()
+                .map(|case| case.id.as_str())
+                .collect::<Vec<_>>(),
+            ["c1", "c2"]
+        );
+        assert!(error.to_string().contains("c1"));
+        let requests = handle.join().unwrap();
+        assert_eq!(
+            requests
+                .iter()
+                .map(|request| (request.method.as_str(), request.path.as_str()))
+                .collect::<Vec<_>>(),
+            [
+                (
+                    "GET",
+                    "/v1/evals/cases?evalset=intent&status=pending&limit=100&offset=0"
+                ),
+                ("PATCH", "/v1/evals/cases/c1"),
+                ("PATCH", "/v1/evals/cases/c2")
+            ]
+        );
+    }
+
+    #[test]
+    fn remote_pull_reconciles_already_local_pending_case() {
+        let dir = TempDir::new().unwrap();
+        let eval_dir = write_evalset(dir.path(), "intent", "classify", 5);
+        write_existing_case(&eval_dir, "c1");
+        let (url, handle) = run_test_http_server(vec![
+            TestHttpResponse {
+                status: 200,
+                body: remote_cases_body(&["c1"]),
+            },
+            TestHttpResponse {
+                status: 200,
+                body: remote_case_body("c1", "accepted"),
+            },
+        ]);
+
+        pull(&eval_dir, None, true, false, Some("xy_test_k"), &url).unwrap();
+
+        let set = LoadedEvalset::load(&eval_dir).unwrap();
+        assert_eq!(set.cases.len(), 1);
+        assert_eq!(set.cases[0].id, "c1");
+        assert_eq!(set.manifest.version, 5);
+        let requests = handle.join().unwrap();
+        assert_eq!(
+            requests
+                .iter()
+                .map(|request| (request.method.as_str(), request.path.as_str()))
+                .collect::<Vec<_>>(),
+            [
+                (
+                    "GET",
+                    "/v1/evals/cases?evalset=intent&status=pending&limit=100&offset=0"
+                ),
+                ("PATCH", "/v1/evals/cases/c1")
+            ]
+        );
+        assert!(requests[1].body.contains("\"status\":\"accepted\""));
+    }
+
+    #[test]
+    fn remote_pull_patch_unsupported_backend_returns_descriptive_error() {
+        let dir = TempDir::new().unwrap();
+        let eval_dir = write_evalset(dir.path(), "intent", "classify", 2);
+        let (url, handle) = run_test_http_server(vec![
+            TestHttpResponse {
+                status: 200,
+                body: remote_cases_body(&["c1"]),
+            },
+            TestHttpResponse {
+                status: 501,
+                body: String::new(),
+            },
+        ]);
+
+        let error = pull(&eval_dir, None, true, false, Some("xy_test_k"), &url)
+            .expect_err("PATCH 501 must fail with unsupported-backend context");
+
+        let message = error.to_string();
+        assert!(
+            message.contains("remote reconciliation is incomplete"),
+            "{message}"
+        );
+        assert!(
+            message
+                .contains("eval telemetry is not available on the platform's configured backend"),
+            "{message}"
+        );
+        let set = LoadedEvalset::load(&eval_dir).unwrap();
+        assert_eq!(set.cases.len(), 1);
+        assert_eq!(set.manifest.version, 3);
+        assert_eq!(handle.join().unwrap().len(), 2);
+    }
+
+    fn write_evalset(root: &Path, name: &str, task: &str, version: u32) -> PathBuf {
+        let eval_dir = root.join(name);
+        std::fs::create_dir_all(&eval_dir).unwrap();
+        std::fs::write(
+            eval_dir.join("evalset.yaml"),
+            format!("name: {name}\ntask: {task}\nversion: {version}\nlabels: [refund]\n"),
+        )
+        .unwrap();
+        std::fs::write(eval_dir.join("cases.jsonl"), "").unwrap();
+        eval_dir
+    }
+
+    fn write_existing_case(eval_dir: &Path, id: &str) {
+        let mut case = Case::new(id, CaseInput::Text(format!("refund please {id}")));
+        case.expected = Some(Expected::Label("refund".into()));
+        std::fs::write(
+            eval_dir.join("cases.jsonl"),
+            format!("{}\n", serde_json::to_string(&case).unwrap()),
+        )
+        .unwrap();
+    }
+
+    fn remote_cases_body(ids: &[&str]) -> String {
+        let items = ids
+            .iter()
+            .map(|id| remote_case_body(id, "pending"))
+            .collect::<Vec<_>>()
+            .join(",");
+        format!(
+            r#"{{"items":[{items}],"total":{},"limit":100,"offset":0}}"#,
+            ids.len()
+        )
+    }
+
+    fn remote_case_body(id: &str, status: &str) -> String {
+        format!(
+            r#"{{"id":"{id}","evalset":"intent","status":"{status}","expected":"refund","created_at":"2026-07-04T12:00:00Z","input":{{"text":"refund please {id}"}}}}"#
+        )
     }
 
     /// Build + store a run with `n` cases each scoring `score`.

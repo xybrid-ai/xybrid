@@ -156,6 +156,15 @@ pub struct RemoteEvalCase {
     pub input: Option<serde_json::Value>,
 }
 
+/// Result of attempting to transition a remote eval case.
+#[derive(Debug, Clone, PartialEq)]
+pub enum CaseStatusUpdate {
+    /// The platform accepted the transition and returned the updated case.
+    Updated(Box<RemoteEvalCase>),
+    /// The platform rejected the transition because the case was no longer pending.
+    AlreadyResolved,
+}
+
 #[derive(Debug, Clone, Deserialize, PartialEq)]
 struct EvalCasesPage {
     items: Vec<RemoteEvalCase>,
@@ -288,6 +297,7 @@ impl InboxClient {
             Ok(resp) => resp
                 .into_json::<InboxResponse>()
                 .map_err(|e| SdkError::network(format!("failed to parse inbox response: {e}"))),
+            Err(ureq::Error::Status(501, _)) => Err(eval_telemetry_unavailable()),
             Err(ureq::Error::Status(status, _)) => Err(SdkError::network(format!(
                 "failure inbox request failed: HTTP {status}"
             ))),
@@ -321,7 +331,7 @@ impl InboxClient {
         &self,
         id: &str,
         status: EvalCaseStatus,
-    ) -> Result<RemoteEvalCase, SdkError> {
+    ) -> Result<CaseStatusUpdate, SdkError> {
         #[derive(Serialize)]
         struct UpdateBody<'a> {
             status: &'a str,
@@ -337,7 +347,11 @@ impl InboxClient {
         }) {
             Ok(resp) => resp
                 .into_json::<RemoteEvalCase>()
+                .map(Box::new)
+                .map(CaseStatusUpdate::Updated)
                 .map_err(|e| SdkError::network(format!("failed to parse eval case response: {e}"))),
+            Err(ureq::Error::Status(409, _)) => Ok(CaseStatusUpdate::AlreadyResolved),
+            Err(ureq::Error::Status(501, _)) => Err(eval_telemetry_unavailable()),
             Err(ureq::Error::Status(status, _)) => Err(SdkError::network(format!(
                 "eval case status update failed: HTTP {status}"
             ))),
@@ -366,6 +380,7 @@ impl InboxClient {
             Ok(resp) => resp
                 .into_json::<EvalCasesPage>()
                 .map_err(|e| SdkError::network(format!("failed to parse eval cases: {e}"))),
+            Err(ureq::Error::Status(501, _)) => Err(eval_telemetry_unavailable()),
             Err(ureq::Error::Status(status, _)) => Err(SdkError::network(format!(
                 "eval cases request failed: HTTP {status}"
             ))),
@@ -374,6 +389,12 @@ impl InboxClient {
             }
         }
     }
+}
+
+fn eval_telemetry_unavailable() -> SdkError {
+    SdkError::ConfigError(
+        "eval telemetry is not available on the platform's configured backend".to_string(),
+    )
 }
 
 #[cfg(test)]
@@ -572,8 +593,96 @@ mod tests {
             .update_case_status("c1", EvalCaseStatus::Discarded)
             .expect("updates status");
 
+        let CaseStatusUpdate::Updated(updated) = updated else {
+            panic!("expected updated case");
+        };
         assert_eq!(updated.id, "c1");
         assert_eq!(updated.status, EvalCaseStatus::Discarded);
+        patch.assert();
+    }
+
+    #[test]
+    fn update_case_status_maps_conflict_to_already_resolved() {
+        use httpmock::prelude::*;
+
+        let server = MockServer::start();
+        let patch = server.mock(|when, then| {
+            when.method("PATCH")
+                .path("/v1/evals/cases/c1")
+                .json_body(serde_json::json!({ "status": "accepted" }));
+            then.status(409);
+        });
+
+        let client = InboxClient::new(server.base_url(), "xy_test_k");
+        let update = client
+            .update_case_status("c1", EvalCaseStatus::Accepted)
+            .expect("409 is a non-fatal case outcome");
+
+        assert_eq!(update, CaseStatusUpdate::AlreadyResolved);
+        patch.assert();
+    }
+
+    #[test]
+    fn eval_case_reads_map_unsupported_backend_to_descriptive_error() {
+        use httpmock::prelude::*;
+
+        let server = MockServer::start();
+        let list = server.mock(|when, then| {
+            when.method(GET).path("/v1/evals/cases");
+            then.status(501);
+        });
+        let fetch = server.mock(|when, then| {
+            when.method(GET).path("/v1/telemetry/feedback");
+            then.status(501);
+        });
+        let client = InboxClient::new(server.base_url(), "xy_test_k");
+
+        let list_error = client
+            .list_cases(&EvalCasesQuery::pending("intent"))
+            .expect_err("501 list response should be descriptive");
+        assert!(
+            list_error
+                .to_string()
+                .contains("eval telemetry is not available"),
+            "{list_error}"
+        );
+
+        let fetch_error = client
+            .fetch(&InboxQuery::default())
+            .expect_err("501 inbox response should be descriptive");
+        assert!(
+            fetch_error
+                .to_string()
+                .contains("eval telemetry is not available"),
+            "{fetch_error}"
+        );
+        list.assert();
+        fetch.assert();
+    }
+
+    #[test]
+    fn update_case_status_maps_unsupported_backend_to_descriptive_error() {
+        use httpmock::prelude::*;
+
+        let server = MockServer::start();
+        let patch = server.mock(|when, then| {
+            when.method("PATCH")
+                .path("/v1/evals/cases/c1")
+                .json_body(serde_json::json!({ "status": "accepted" }));
+            then.status(501);
+        });
+
+        let client = InboxClient::new(server.base_url(), "xy_test_k");
+        let error = client
+            .update_case_status("c1", EvalCaseStatus::Accepted)
+            .expect_err("501 PATCH response should be descriptive");
+
+        assert!(
+            error
+                .to_string()
+                .contains("eval telemetry is not available"),
+            "{error}"
+        );
         patch.assert();
     }
 

@@ -181,21 +181,53 @@ capture is already off unless `--capture` is set.
 cases from `/v1/evals/cases?evalset=<name>&status=pending`. The same review
 queue is used for remote and local cases:
 
-- accept appends the case to `cases.jsonl` and marks the remote case accepted;
+- accept appends the case to `cases.jsonl` first, then reconciles the remote
+  case to accepted;
 - skip leaves the remote case pending for a later pull;
-- discard keeps it out of `cases.jsonl` and marks the remote case discarded.
+- discard keeps it out of `cases.jsonl` and reconciles the remote case to
+  discarded.
 
 Accepted remote cases are written as production regressions: `source: flagged`,
 `review_status: reviewed`, `split: regression`, with trace metadata preserved
-when the platform case carries it. `--accept-all` accepts every new pending case
-without prompting. `--dry-run` shows what would be appended but does not write
-files or patch remote state.
+when the platform case carries it. The local `cases.jsonl` is the source of
+truth because gates run against it: accepted cases are appended and the evalset
+version is bumped before any remote status PATCH is attempted. If the local
+write fails, remote status is not patched. `--accept-all` accepts every new
+pending case without prompting. `--dry-run` shows what would be appended but
+does not write files or patch remote state.
 
-Duplicate protection is local-first: a pending remote case is not appended when
-its id or dedupe key is already present in `cases.jsonl`. If the platform is
-unreachable, `pull` warns and falls back to the local inbox file
+Remote status reconciliation is best-effort after the local write. A pending
+remote case is not appended again when its id or dedupe key is already present
+in `cases.jsonl`, but `pull` still retries the remote acceptance PATCH so a
+prior local-ahead crash converges on the next run. HTTP 409 means the case was
+already resolved on the platform; `pull` logs that case and continues. Any other
+PATCH failure makes the command fail after it has tried the remaining cases,
+with local cases still saved; re-running `xybrid eval pull` retries the
+incomplete remote reconciliation. HTTP 501 means the platform backend does not
+support eval telemetry.
+
+If remote listing fails for any reason, including offline transport, auth
+rejection, or a platform backend without eval telemetry support, `pull` warns
+with the specific reason and falls back to the local inbox file
 `~/.xybrid/inbox/<evalset>.jsonl`; passing `--inbox <path>` forces that local
 mode.
+
+### Feedback capture
+
+`InferenceResult::report(Feedback::...)` emits metadata only by default. Calling
+`Feedback::capture()` opts a single report into payload capture. Captured
+feedback may include the text input, text output, expected correction, and note;
+each field is truncated before telemetry publication.
+
+Only plain text inference inputs are captured. Audio, image, embedding, and
+multi-part inputs remain metadata-only unless the caller also supplies a text
+correction or note.
+
+The platform can promote only flagged events that include a captured text
+`input` string. `xybrid eval pull` skips SDK-flagged platform cases without that
+input because there is no runnable eval case to write. Signal-sourced or
+otherwise no-input cases are not drainable by the CLI; they are left pending for
+platform-side triage rather than patched to discarded.
 
 ## Determinism
 
