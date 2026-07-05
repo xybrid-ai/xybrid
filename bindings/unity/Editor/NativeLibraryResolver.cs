@@ -21,6 +21,8 @@ using UnityEditor;
 using UnityEditor.PackageManager;
 using UnityEngine;
 
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Xybrid.SDK.Tests.Editor")]
+
 namespace Xybrid.Editor
 {
     /// <summary>
@@ -298,10 +300,7 @@ namespace Xybrid.Editor
             {
                 if (string.IsNullOrEmpty(entry.Name)) continue; // directory entry
 
-                // Guard against zip-slip: resolved path must stay under destRoot.
-                var destPath = Path.GetFullPath(Path.Combine(destRoot, entry.FullName));
-                var rootFull = Path.GetFullPath(destRoot) + Path.DirectorySeparatorChar;
-                if (!destPath.StartsWith(rootFull, StringComparison.Ordinal))
+                if (!TryResolveSafeExtractPath(destRoot, entry.FullName, out var destPath))
                 {
                     throw new InvalidOperationException(
                         $"Refusing to extract '{entry.FullName}' outside {destRoot}.");
@@ -310,6 +309,19 @@ namespace Xybrid.Editor
                 Directory.CreateDirectory(Path.GetDirectoryName(destPath));
                 entry.ExtractToFile(destPath, overwrite: true);
             }
+        }
+
+        /// <summary>
+        /// Resolves <paramref name="entryName"/> under <paramref name="destRoot"/>
+        /// and rejects it (returns <c>false</c>) if it would escape the root
+        /// (zip-slip). Pure/host-agnostic so it can be unit-tested.
+        /// </summary>
+        internal static bool TryResolveSafeExtractPath(
+            string destRoot, string entryName, out string destPath)
+        {
+            destPath = Path.GetFullPath(Path.Combine(destRoot, entryName));
+            var rootFull = Path.GetFullPath(destRoot) + Path.DirectorySeparatorChar;
+            return destPath.StartsWith(rootFull, StringComparison.Ordinal);
         }
 
         private static string MarkerPath(string platform) =>
