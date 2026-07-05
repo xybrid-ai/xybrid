@@ -232,6 +232,7 @@ pub struct InferenceResult {
     /// Originating inference `trace_id`, when known. Lets `report()` join a
     /// `Feedback` event back to the trace that produced this result.
     trace_id: Option<String>,
+    input_text: Option<String>,
 }
 
 impl InferenceResult {
@@ -247,6 +248,7 @@ impl InferenceResult {
             model_id: model_id.into(),
             metrics,
             trace_id: None,
+            input_text: None,
         }
     }
 
@@ -265,6 +267,7 @@ impl InferenceResult {
             model_id: model_id.into(),
             metrics,
             trace_id: None,
+            input_text: None,
         }
     }
 
@@ -272,6 +275,11 @@ impl InferenceResult {
     /// paths so `report()` can join a `Feedback` event to the trace.
     pub fn with_trace_id(mut self, trace_id: impl Into<String>) -> Self {
         self.trace_id = Some(trace_id.into());
+        self
+    }
+
+    pub(crate) fn with_input_text(mut self, input_text: Option<&str>) -> Self {
+        self.input_text = input_text.map(crate::telemetry::truncate_feedback_payload);
         self
     }
 
@@ -435,6 +443,8 @@ impl InferenceResult {
             &self.model_id,
             task,
             feedback.rating.map(Rating::as_str),
+            self.input_text.as_deref(),
+            self.text(),
             feedback.expected.as_deref(),
             feedback.note.as_deref(),
             feedback.capture_payload,
@@ -723,6 +733,18 @@ mod tests {
         };
         let result = InferenceResult::new(envelope, "m", 10).with_trace_id("tr_42");
         assert_eq!(result.trace_id(), Some("tr_42"));
+    }
+
+    #[test]
+    fn with_input_text_retains_and_truncates_text_input() {
+        let big = "x".repeat(crate::telemetry::FEEDBACK_PAYLOAD_MAX_BYTES * 2);
+        let envelope = Envelope {
+            kind: EnvelopeKind::Text("output".to_string()),
+            metadata: HashMap::new(),
+        };
+        let result = InferenceResult::new(envelope, "m", 10).with_input_text(Some(&big));
+        let captured = result.input_text.as_deref().unwrap();
+        assert!(captured.len() <= crate::telemetry::FEEDBACK_PAYLOAD_MAX_BYTES);
     }
 
     #[test]

@@ -2786,11 +2786,11 @@ pub fn publish_model_download(
     publish_telemetry_event(event);
 }
 
-/// Max bytes captured per `Feedback` payload field (correction / note).
-const FEEDBACK_PAYLOAD_MAX_BYTES: usize = 8192;
+/// Max bytes captured per `Feedback` payload field (input / output / correction / note).
+pub(crate) const FEEDBACK_PAYLOAD_MAX_BYTES: usize = 8192;
 
 /// Truncate a payload string to the size cap on a UTF-8 boundary.
-fn truncate_feedback_payload(s: &str) -> String {
+pub(crate) fn truncate_feedback_payload(s: &str) -> String {
     if s.len() <= FEEDBACK_PAYLOAD_MAX_BYTES {
         return s.to_string();
     }
@@ -2805,8 +2805,9 @@ fn truncate_feedback_payload(s: &str) -> String {
 ///
 /// **Metadata-only by default.** The event always carries `trace_id`,
 /// `model_id`, `task`, and `rating` (all attribution, no user content). The
-/// `expected` correction and `note` are **payload** and are included ONLY when
-/// `capture` is `true` (the per-call opt-in). Payload fields are size-capped.
+/// `input`, `output`, `expected` correction, and `note` are **payload** and are
+/// included ONLY when `capture` is `true` (the per-call opt-in). Payload fields
+/// are size-capped.
 ///
 /// Pure builder — does not publish, so the privacy default is unit-testable
 /// (a canary string in `expected` must never appear in the serialized event
@@ -2818,6 +2819,8 @@ fn build_feedback_event(
     model_id: &str,
     task: Option<&str>,
     rating: Option<&str>,
+    input: Option<&str>,
+    output: Option<&str>,
     expected: Option<&str>,
     note: Option<&str>,
     capture: bool,
@@ -2840,19 +2843,38 @@ fn build_feedback_event(
     }
     // Payload — gated entirely behind the explicit per-call opt-in.
     if capture {
+        let mut payload_captured = false;
+        if let Some(i) = input {
+            data.insert(
+                "input".to_string(),
+                serde_json::json!(truncate_feedback_payload(i)),
+            );
+            payload_captured = true;
+        }
+        if let Some(o) = output {
+            data.insert(
+                "output".to_string(),
+                serde_json::json!(truncate_feedback_payload(o)),
+            );
+            payload_captured = true;
+        }
         if let Some(e) = expected {
             data.insert(
                 "expected".to_string(),
                 serde_json::json!(truncate_feedback_payload(e)),
             );
+            payload_captured = true;
         }
         if let Some(n) = note {
             data.insert(
                 "note".to_string(),
                 serde_json::json!(truncate_feedback_payload(n)),
             );
+            payload_captured = true;
         }
-        data.insert("payload_captured".to_string(), serde_json::json!(true));
+        if payload_captured {
+            data.insert("payload_captured".to_string(), serde_json::json!(true));
+        }
     }
 
     TelemetryEvent {
@@ -2877,6 +2899,8 @@ pub fn publish_feedback_event(
     model_id: &str,
     task: Option<&str>,
     rating: Option<&str>,
+    input: Option<&str>,
+    output: Option<&str>,
     expected: Option<&str>,
     note: Option<&str>,
     capture: bool,
@@ -2884,7 +2908,9 @@ pub fn publish_feedback_event(
     if crate::telemetry_optout::is_telemetry_opted_out() {
         return;
     }
-    let event = build_feedback_event(trace_id, model_id, task, rating, expected, note, capture);
+    let event = build_feedback_event(
+        trace_id, model_id, task, rating, input, output, expected, note, capture,
+    );
     publish_telemetry_event(event);
 }
 
@@ -3187,6 +3213,8 @@ mod feedback_event_tests {
             Some("down"),
             Some(CANARY),
             Some(CANARY),
+            Some(CANARY),
+            Some(CANARY),
             false,
         );
         // The strongest assertion: the canary appears in ZERO bytes of the
@@ -3213,6 +3241,8 @@ mod feedback_event_tests {
             "m",
             None,
             Some("down"),
+            None,
+            None,
             Some(CANARY),
             None,
             true,
@@ -3227,7 +3257,17 @@ mod feedback_event_tests {
     #[test]
     fn payload_is_size_capped() {
         let big = "x".repeat(FEEDBACK_PAYLOAD_MAX_BYTES * 2);
-        let event = build_feedback_event(None, "m", None, Some("up"), Some(&big), None, true);
+        let event = build_feedback_event(
+            None,
+            "m",
+            None,
+            Some("up"),
+            None,
+            None,
+            Some(&big),
+            None,
+            true,
+        );
         let data = event.data.unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&data).unwrap();
         let captured = parsed["expected"].as_str().unwrap();
@@ -3236,11 +3276,67 @@ mod feedback_event_tests {
 
     #[test]
     fn rating_only_feedback_has_no_payload_keys() {
-        let event =
-            build_feedback_event(Some("tr"), "m", Some("chat"), Some("up"), None, None, true);
+        let event = build_feedback_event(
+            Some("tr"),
+            "m",
+            Some("chat"),
+            Some("up"),
+            None,
+            None,
+            None,
+            None,
+            true,
+        );
         let data = event.data.unwrap();
         assert!(!data.contains("expected"));
         assert!(!data.contains("note"));
+        assert!(!data.contains("payload_captured"));
+    }
+
+    #[test]
+    fn capture_includes_input_and_output_payloads() {
+        let input = "x".repeat(FEEDBACK_PAYLOAD_MAX_BYTES * 2);
+        let output = "y".repeat(FEEDBACK_PAYLOAD_MAX_BYTES * 2);
+        let event = build_feedback_event(
+            Some("tr"),
+            "m",
+            Some("chat"),
+            Some("down"),
+            Some(&input),
+            Some(&output),
+            None,
+            None,
+            true,
+        );
+        let data = event.data.unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&data).unwrap();
+        let captured_input = parsed["input"].as_str().unwrap();
+        let captured_output = parsed["output"].as_str().unwrap();
+        assert!(captured_input.len() <= FEEDBACK_PAYLOAD_MAX_BYTES);
+        assert!(captured_output.len() <= FEEDBACK_PAYLOAD_MAX_BYTES);
+        assert_eq!(parsed["payload_captured"], true);
+    }
+
+    #[test]
+    fn capture_false_drops_all_payload_fields() {
+        let event = build_feedback_event(
+            Some("tr"),
+            "m",
+            Some("chat"),
+            Some("down"),
+            Some(CANARY),
+            Some(CANARY),
+            Some(CANARY),
+            Some(CANARY),
+            false,
+        );
+        let data = event.data.unwrap();
+        assert!(!data.contains("input"));
+        assert!(!data.contains("output"));
+        assert!(!data.contains("expected"));
+        assert!(!data.contains("note"));
+        assert!(!data.contains("payload_captured"));
+        assert!(!data.contains(CANARY));
     }
 }
 

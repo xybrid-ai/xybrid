@@ -702,11 +702,10 @@ where
                         signal_context,
                     );
                     let total_latency_ms = local_latency_ms.saturating_add(cloud_latency_ms);
-                    Ok(InferenceResult::new(
-                        cloud_output,
-                        cloud_model_id,
-                        total_latency_ms,
-                    ))
+                    Ok(
+                        InferenceResult::new(cloud_output, cloud_model_id, total_latency_ms)
+                            .with_input_text(cloud_envelope.as_text()),
+                    )
                 }
                 Err(adapter_err) => {
                     let error_message = adapter_err.to_string();
@@ -2257,6 +2256,7 @@ impl XybridModel {
         // `trace_id` onto the result so `result.report()` can join a Feedback
         // event back to this inference.
         Ok(InferenceResult::new(output, &self.model_id, latency_ms)
+            .with_input_text(envelope.as_text())
             .with_trace_id(trace_id.to_string()))
     }
 
@@ -2453,7 +2453,8 @@ impl XybridModel {
         // `_telemetry_ctx` drops here (and on every early return / unwind
         // above), clearing the pipeline context after the publish.
 
-        Ok(InferenceResult::new(output, &self.model_id, latency_ms))
+        Ok(InferenceResult::new(output, &self.model_id, latency_ms)
+            .with_input_text(envelope.as_text()))
     }
 
     /// Run inference with conversation context and per-run controls.
@@ -2632,7 +2633,8 @@ impl XybridModel {
         // `_telemetry_ctx` drops here, clearing pipeline context after
         // the publish — same ordering as before.
 
-        Ok(InferenceResult::new(output, &self.model_id, latency_ms))
+        Ok(InferenceResult::new(output, &self.model_id, latency_ms)
+            .with_input_text(envelope.as_text()))
     }
 
     /// Run streaming inference with conversation context and per-token abort checks.
@@ -2823,7 +2825,8 @@ impl XybridModel {
         };
         crate::telemetry::publish_telemetry_event(event);
 
-        Ok(InferenceResult::new(output, &self.model_id, latency_ms))
+        Ok(InferenceResult::new(output, &self.model_id, latency_ms)
+            .with_input_text(envelope.as_text()))
     }
 
     /// Run streaming inference with per-token abort checks.
@@ -3244,7 +3247,8 @@ impl XybridModel {
                 };
                 crate::telemetry::publish_telemetry_event(event);
 
-                Ok(InferenceResult::new(output, &model_id, latency_ms))
+                Ok(InferenceResult::new(output, &model_id, latency_ms)
+                    .with_input_text(envelope.as_text()))
             })
             .await;
 
@@ -3360,7 +3364,8 @@ impl XybridModel {
             };
             crate::telemetry::publish_with_resource_summary(event, resource_guard);
 
-            Ok(InferenceResult::new(output, &model_id, latency_ms))
+            Ok(InferenceResult::new(output, &model_id, latency_ms)
+                .with_input_text(envelope.as_text()))
         })
         .await
         .map_err(|e| SdkError::inference_src("Task join error", e))?
