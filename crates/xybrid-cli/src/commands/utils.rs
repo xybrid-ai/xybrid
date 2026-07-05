@@ -28,23 +28,6 @@ pub fn format_size(bytes: u64) -> String {
     }
 }
 
-/// Calculate the total size of a directory in bytes.
-pub fn dir_size_bytes(path: &Path) -> anyhow::Result<u64> {
-    let mut total = 0u64;
-    if path.is_dir() {
-        for entry in std::fs::read_dir(path)? {
-            let entry = entry?;
-            let path = entry.path();
-            if path.is_dir() {
-                total += dir_size_bytes(&path)?;
-            } else {
-                total += entry.metadata()?.len();
-            }
-        }
-    }
-    Ok(total)
-}
-
 /// Display a stage name, stripping any "@target" suffix.
 pub fn display_stage_name(name: &str) -> &str {
     name.split('@').next().unwrap_or(name)

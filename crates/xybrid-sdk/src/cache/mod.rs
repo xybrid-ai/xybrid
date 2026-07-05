@@ -36,6 +36,10 @@
 
 mod cache_manager;
 mod cache_provider;
+pub(crate) mod layout;
+#[cfg(test)]
+mod layout_tests;
 
 pub use cache_manager::{CacheManager, CacheStatus};
 pub use cache_provider::SdkCacheProvider;
+pub use layout::{CacheEntryInfo, CacheEntryLocation};
