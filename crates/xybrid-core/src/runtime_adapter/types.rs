@@ -521,6 +521,14 @@ pub struct LlmConfig {
     /// Can provide 2-4x speedup. Default: true.
     #[serde(default = "default_flash_attn")]
     pub flash_attn: bool,
+
+    /// Whether this is a reasoning ("thinking") model that emits a
+    /// chain-of-thought before its answer. Sourced from the model metadata's
+    /// `reasoning` flag. When set, the chat-prompt builder primes the
+    /// `<think>` channel so the model produces its reasoning, which the backend
+    /// captures into `reasoning_content`. Default: false.
+    #[serde(default)]
+    pub reasoning: bool,
 }
 
 fn default_context_length() -> usize {
@@ -586,6 +594,7 @@ impl Default for LlmConfig {
             n_threads: default_n_threads(),
             n_batch: default_n_batch(),
             flash_attn: default_flash_attn(),
+            reasoning: false,
         }
     }
 }
@@ -614,6 +623,13 @@ impl LlmConfig {
     /// Set the context length.
     pub fn with_context_length(mut self, length: usize) -> Self {
         self.context_length = length;
+        self
+    }
+
+    /// Mark this as a reasoning ("thinking") model. Primes the `<think>`
+    /// channel during chat-prompt construction. See [`Self::reasoning`].
+    pub fn with_reasoning(mut self, reasoning: bool) -> Self {
+        self.reasoning = reasoning;
         self
     }
 

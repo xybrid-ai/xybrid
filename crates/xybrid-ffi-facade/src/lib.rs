@@ -897,6 +897,23 @@ impl InferenceResult {
         }
     }
 
+    /// Convenience: the model's chain-of-thought / reasoning text, if any.
+    ///
+    /// Surfaced from the response envelope's `reasoning_content` metadata —
+    /// the same key the SDK's [`reasoning_content`] accessor reads — so it is
+    /// independent of the payload [`kind`]: a text result carries its answer
+    /// in `text()` and its `<think>` reasoning here. Returns `None` when the
+    /// model emitted no reasoning or the backend doesn't surface one.
+    ///
+    /// [`reasoning_content`]: sdk::InferenceResult::reasoning_content
+    /// [`kind`]: Envelope::kind
+    pub fn reasoning_content(&self) -> Option<&str> {
+        self.envelope
+            .metadata
+            .get("reasoning_content")
+            .map(String::as_str)
+    }
+
     /// Convenience: audio bytes, if the result is `OutputType::Audio`.
     pub fn audio_bytes(&self) -> Option<&[u8]> {
         match &self.envelope.kind {
@@ -1397,6 +1414,38 @@ mod tests {
                 values: vec![0.1, 0.2, 0.3]
             }
         );
+    }
+
+    fn text_result_with_metadata(metadata: HashMap<String, String>) -> InferenceResult {
+        InferenceResult {
+            envelope: Envelope {
+                kind: EnvelopeKind::Text {
+                    text: "the answer".into(),
+                },
+                metadata,
+            },
+            output_type: OutputType::Text,
+            model_id: "m".into(),
+            latency_ms: 0,
+            metrics: InferenceMetrics::default(),
+        }
+    }
+
+    #[test]
+    fn reasoning_content_reads_from_envelope_metadata() {
+        let mut metadata = HashMap::new();
+        metadata.insert("reasoning_content".to_string(), "let me think".to_string());
+        let result = text_result_with_metadata(metadata);
+
+        // Answer text and reasoning are surfaced independently.
+        assert_eq!(result.text(), Some("the answer"));
+        assert_eq!(result.reasoning_content(), Some("let me think"));
+    }
+
+    #[test]
+    fn reasoning_content_absent_is_none() {
+        let result = text_result_with_metadata(HashMap::new());
+        assert_eq!(result.reasoning_content(), None);
     }
 
     #[test]

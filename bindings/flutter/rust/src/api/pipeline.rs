@@ -72,6 +72,7 @@ impl FfiPipeline {
         Ok(FfiResult {
             success: true,
             text: result.text().map(|s| s.to_string()),
+            reasoning_content: result.output.metadata.get("reasoning_content").cloned(),
             audio_bytes: result.audio_bytes().map(|b| b.to_vec()),
             embedding: result.embedding().map(|e| e.to_vec()),
             latency_ms: result.total_latency_ms,

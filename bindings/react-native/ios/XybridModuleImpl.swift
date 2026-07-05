@@ -337,6 +337,7 @@ public final class XybridModuleImpl: NSObject {
       "latencyMs": r.latencyMs,
     ]
     if let text = r.text { out["text"] = text }
+    if let reasoning = r.reasoningContent { out["reasoningContent"] = reasoning }
     if let bytes = r.audioBytes {
       out["audioBytesBase64"] = bytes.base64EncodedString()
     }

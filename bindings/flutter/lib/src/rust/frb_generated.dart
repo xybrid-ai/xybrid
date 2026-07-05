@@ -2659,15 +2659,16 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
   FfiResult dco_decode_ffi_result(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 6)
-      throw Exception('unexpected arr length: expect 6 but see ${arr.length}');
+    if (arr.length != 7)
+      throw Exception('unexpected arr length: expect 7 but see ${arr.length}');
     return FfiResult(
       success: dco_decode_bool(arr[0]),
       text: dco_decode_opt_String(arr[1]),
-      audioBytes: dco_decode_opt_list_prim_u_8_strict(arr[2]),
-      embedding: dco_decode_opt_list_prim_f_32_strict(arr[3]),
-      latencyMs: dco_decode_u_32(arr[4]),
-      metrics: dco_decode_ffi_inference_metrics(arr[5]),
+      reasoningContent: dco_decode_opt_String(arr[2]),
+      audioBytes: dco_decode_opt_list_prim_u_8_strict(arr[3]),
+      embedding: dco_decode_opt_list_prim_f_32_strict(arr[4]),
+      latencyMs: dco_decode_u_32(arr[5]),
+      metrics: dco_decode_ffi_inference_metrics(arr[6]),
     );
   }
 
@@ -3432,6 +3433,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
     // Codec=Sse (Serialization based), see doc to use other codecs
     var var_success = sse_decode_bool(deserializer);
     var var_text = sse_decode_opt_String(deserializer);
+    var var_reasoningContent = sse_decode_opt_String(deserializer);
     var var_audioBytes = sse_decode_opt_list_prim_u_8_strict(deserializer);
     var var_embedding = sse_decode_opt_list_prim_f_32_strict(deserializer);
     var var_latencyMs = sse_decode_u_32(deserializer);
@@ -3439,6 +3441,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
     return FfiResult(
         success: var_success,
         text: var_text,
+        reasoningContent: var_reasoningContent,
         audioBytes: var_audioBytes,
         embedding: var_embedding,
         latencyMs: var_latencyMs,
@@ -4298,6 +4301,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_bool(self.success, serializer);
     sse_encode_opt_String(self.text, serializer);
+    sse_encode_opt_String(self.reasoningContent, serializer);
     sse_encode_opt_list_prim_u_8_strict(self.audioBytes, serializer);
     sse_encode_opt_list_prim_f_32_strict(self.embedding, serializer);
     sse_encode_u_32(self.latencyMs, serializer);

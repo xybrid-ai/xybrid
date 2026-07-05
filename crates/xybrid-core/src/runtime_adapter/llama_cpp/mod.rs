@@ -38,8 +38,8 @@ use crate::runtime_adapter::llm::{
 };
 use crate::runtime_adapter::llm_telemetry::{StreamingTelemetry, StreamingTelemetryFields};
 use crate::runtime_adapter::streaming_postprocess::{
-    merge_stop_patterns, strip_thinking_tags, trim_partial_stop_suffix, truncate_at_first_stop,
-    StreamingTextFilter, CHAT_STOP_PATTERNS, CHAT_STOP_PATTERNS_BROKEN,
+    merge_stop_patterns, strip_and_capture_thinking_tags, trim_partial_stop_suffix,
+    truncate_at_first_stop, StreamingTextFilter, CHAT_STOP_PATTERNS, CHAT_STOP_PATTERNS_BROKEN,
 };
 use crate::runtime_adapter::AdapterError;
 #[cfg(feature = "llm-llamacpp-vision")]
@@ -496,11 +496,18 @@ impl LlamaCppBackend {
         )
     }
 
+    /// Whether the loaded model is a reasoning ("thinking") model — drives
+    /// `<think>`-channel priming and the streaming filter's primed mode.
+    fn reasoning_enabled(&self) -> bool {
+        self.config.as_ref().map(|c| c.reasoning).unwrap_or(false)
+    }
+
     fn tokenize_chat_prompt(
         model: &xybrid_llama::LlamaModel,
         messages: &[ChatMessage],
+        reasoning: bool,
     ) -> LlmResult<Vec<i32>> {
-        let prompt = chat::format_chat_prompt(model, messages)?;
+        let prompt = chat::format_chat_prompt(model, messages, reasoning)?;
         Ok(model.tokenize_special(&prompt, true)?)
     }
 
@@ -602,6 +609,7 @@ fn output_from_fields(
     text: String,
     tokens_generated: usize,
     finish_reason: String,
+    reasoning_content: Option<String>,
     fields: StreamingTelemetryFields,
 ) -> GenerationOutput {
     GenerationOutput {
@@ -618,6 +626,7 @@ fn output_from_fields(
         decode_tps: fields.decode_tps,
         prefill_tps: fields.prefill_tps,
         image_preprocess_ms: None,
+        reasoning_content,
     }
 }
 
@@ -789,7 +798,7 @@ impl LlmBackend for LlamaCppBackend {
             // Tokenize with special token parsing enabled — the chat template contains
             // special tokens like <|im_start|>, <end_of_turn>, etc. that must be
             // recognized as their special token IDs, not as individual characters.
-            let tokens = Self::tokenize_chat_prompt(model, messages)?;
+            let tokens = Self::tokenize_chat_prompt(model, messages, self.reasoning_enabled())?;
             let prepared =
                 self.prepare_generation(model, context, tokens, config, PromptKind::Chat)?;
 
@@ -843,7 +852,8 @@ impl LlmBackend for LlamaCppBackend {
             log::debug!(target: "xybrid_core", "Searching for stop patterns: {:?}", final_stop_patterns);
             let stopped_in_text = truncate_at_first_stop(&mut text, &final_stop_patterns);
             let trimmed_partial = trim_partial_stop_suffix(&mut text, &final_stop_patterns);
-            let text = strip_thinking_tags(&text).trim().to_string();
+            let (clean, reasoning_content) = strip_and_capture_thinking_tags(&text);
+            let text = clean.trim().to_string();
             // `stopped_by_callback` catches the C layer detecting a stop
             // before the Rust post-scan would — e.g. the user-supplied
             // stop sequences that the C layer sees first. Prior code
@@ -866,6 +876,7 @@ impl LlmBackend for LlamaCppBackend {
                 text,
                 output_tokens.len(),
                 finish_reason,
+                reasoning_content,
                 fields,
             ))
         })
@@ -910,10 +921,13 @@ impl LlmBackend for LlamaCppBackend {
             }
             .to_string();
 
+            // Raw-prompt path: no chat template, so no `<think>` blocks to
+            // surface. Reasoning is always absent here.
             Ok(output_from_fields(
                 text,
                 output_tokens.len(),
                 finish_reason,
+                None,
                 fields,
             ))
         })
@@ -929,7 +943,7 @@ impl LlmBackend for LlamaCppBackend {
 
         self.with_model_and_context(|model, context| {
             // Tokenize with special token parsing — chat template contains special tokens
-            let tokens = Self::tokenize_chat_prompt(model, messages)?;
+            let tokens = Self::tokenize_chat_prompt(model, messages, self.reasoning_enabled())?;
             let prepared =
                 self.prepare_generation(model, context, tokens, config, PromptKind::Chat)?;
 
@@ -951,7 +965,14 @@ impl LlmBackend for LlamaCppBackend {
             // local leg of every aborted run. Successful runs harmlessly
             // overwrite this with the same value after finalize.
             let stop_patterns = merge_stop_patterns(&config.stop_sequences, CHAT_STOP_PATTERNS);
-            let mut filter = StreamingTextFilter::new(stop_patterns.clone());
+            // Thinking models have `<think>` primed into the prompt, so their
+            // output starts mid-reasoning with no opening tag — start the filter
+            // already suppressing so the reasoning never reaches the callback.
+            let mut filter = if self.reasoning_enabled() {
+                StreamingTextFilter::new_reasoning_primed(stop_patterns.clone())
+            } else {
+                StreamingTextFilter::new(stop_patterns.clone())
+            };
             let mut token_index = 0usize;
 
             let (output_tokens, stopped_by_callback, fields) = Self::run_streaming_generation(
@@ -992,7 +1013,8 @@ impl LlmBackend for LlamaCppBackend {
             let mut text = model.detokenize(&output_tokens)?;
             let stopped_full = truncate_at_first_stop(&mut text, &final_patterns);
             let trimmed_partial = trim_partial_stop_suffix(&mut text, &final_patterns);
-            let text = strip_thinking_tags(&text).trim().to_string();
+            let (clean, reasoning_content) = strip_and_capture_thinking_tags(&text);
+            let text = clean.trim().to_string();
             // `stopped_by_callback` is an independent signal from the C
             // layer that a stop sequence was hit — previously dropped.
             let finish_reason =
@@ -1017,6 +1039,7 @@ impl LlmBackend for LlamaCppBackend {
                 text,
                 output_tokens.len(),
                 finish_reason,
+                reasoning_content,
                 fields,
             ))
         })
@@ -1068,7 +1091,8 @@ impl LlmBackend for LlamaCppBackend {
             .to_string();
 
         self.with_model_and_context(|model, context| {
-            let prompt = chat::format_chat_prompt(model, &inputs.chat_messages)?;
+            let prompt =
+                chat::format_chat_prompt(model, &inputs.chat_messages, self.reasoning_enabled())?;
             let generation_stop_patterns =
                 merge_stop_patterns(&config.stop_sequences, CHAT_STOP_PATTERNS);
             let (_loaded, (output_tokens, stopped_by_callback, fields, image_preprocess_ms)) = self
@@ -1161,7 +1185,8 @@ impl LlmBackend for LlamaCppBackend {
             let mut text = model.detokenize(&output_tokens)?;
             let stopped_in_text = truncate_at_first_stop(&mut text, &final_stop_patterns);
             let trimmed_partial = trim_partial_stop_suffix(&mut text, &final_stop_patterns);
-            let text = strip_thinking_tags(&text).trim().to_string();
+            let (clean, reasoning_content) = strip_and_capture_thinking_tags(&text);
+            let text = clean.trim().to_string();
             let finish_reason = if stopped_in_text || trimmed_partial || stopped_by_callback {
                 "stop"
             } else {
@@ -1183,6 +1208,7 @@ impl LlmBackend for LlamaCppBackend {
                 decode_tps: fields.decode_tps,
                 prefill_tps: fields.prefill_tps,
                 image_preprocess_ms,
+                reasoning_content,
             })
         })
     }
@@ -1209,7 +1235,8 @@ impl LlmBackend for LlamaCppBackend {
             .to_string();
 
         self.with_model_and_context(|model, context| {
-            let prompt = chat::format_chat_prompt(model, &inputs.chat_messages)?;
+            let prompt =
+                chat::format_chat_prompt(model, &inputs.chat_messages, self.reasoning_enabled())?;
             let generation_stop_patterns =
                 merge_stop_patterns(&config.stop_sequences, CHAT_STOP_PATTERNS);
             let (
@@ -1277,7 +1304,11 @@ impl LlmBackend for LlamaCppBackend {
                 }
 
                 let mut tel = StreamingTelemetry::new(summary.helper_total_tokens);
-                let mut filter = StreamingTextFilter::new(generation_stop_patterns.clone());
+                let mut filter = if self.reasoning_enabled() {
+                    StreamingTextFilter::new_reasoning_primed(generation_stop_patterns.clone())
+                } else {
+                    StreamingTextFilter::new(generation_stop_patterns.clone())
+                };
                 let mut token_index = 0usize;
                 let stream_result = xybrid_llama::generate_from_current_logits_streaming(
                     context,
@@ -1325,7 +1356,8 @@ impl LlmBackend for LlamaCppBackend {
             let mut text = model.detokenize(&output_tokens)?;
             let stopped_in_text = truncate_at_first_stop(&mut text, &final_stop_patterns);
             let trimmed_partial = trim_partial_stop_suffix(&mut text, &final_stop_patterns);
-            let text = strip_thinking_tags(&text).trim().to_string();
+            let (clean, reasoning_content) = strip_and_capture_thinking_tags(&text);
+            let text = clean.trim().to_string();
             let finish_reason =
                 if filter_stopped || stopped_in_text || trimmed_partial || stopped_by_callback {
                     "stop"
@@ -1354,6 +1386,7 @@ impl LlmBackend for LlamaCppBackend {
                 decode_tps: fields.decode_tps,
                 prefill_tps: fields.prefill_tps,
                 image_preprocess_ms,
+                reasoning_content,
             })
         })
     }
