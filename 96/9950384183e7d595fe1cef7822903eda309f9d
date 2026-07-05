@@ -1,0 +1,22 @@
+.github/workflows/release-publish.yml
+  s_fb271508a8988a::t_8dea11e418633f 361-400
+.github/workflows/build-unity.yml
+  s_fb271508a8988a::t_e9e9697b31e52b 508-545,549-596
+  s_fb271508a8988a::t_5f07f6ebc61fa5 546-548
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "969950384183e7d595fe1cef7822903eda309f9d",
+  "prompts": {},
+  "sessions": {
+    "s_fb271508a8988a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8ce838ba-c727-47cf-8b97-de143d5f0c48",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
