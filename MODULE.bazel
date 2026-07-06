@@ -103,4 +103,11 @@ crate.from_cargo(
         "aarch64-linux-android",
     ],
 )
+crate.annotation(
+    crate = "ort-sys",
+    build_script_env = {
+        "ORT_CACHE_DIR": "/tmp",
+    },
+    allow_build_script_to_detect_nonhermetic_paths = True,
+)
 use_repo(crate, "crates")
