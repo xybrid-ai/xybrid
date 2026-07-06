@@ -1,0 +1,28 @@
+crates/xybrid-core/Cargo.toml
+  s_7dd5655fb99ca0::t_73d06ab6560fa4 254-259
+  s_7dd5655fb99ca0::t_fe9d593c1d6a2d 235-239
+  s_7dd5655fb99ca0::t_7725a64339ab9e 59-70
+  s_7dd5655fb99ca0::t_5526d84467b902 126-132
+  s_7dd5655fb99ca0::t_f6d33ac46dcac8 240-242
+bindings/flutter/rust/Cargo.toml
+  s_7dd5655fb99ca0::t_0f80fc2cdec91e 37-39
+crates/xybrid-core/BUILD.bazel
+  s_7dd5655fb99ca0::t_baaa546625c2f1 31
+  s_7dd5655fb99ca0::t_df4996b3c617c7 12-18
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "18af0ea615e4bf59e1a610f3da3088e0c54c8768",
+  "prompts": {},
+  "sessions": {
+    "s_7dd5655fb99ca0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "cf36cf8f-e504-47c5-9dd9-1994987a363c",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
