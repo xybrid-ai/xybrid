@@ -88,7 +88,7 @@
 | 目标 | 路径 |
 |------|------|
 | 最快上手（2 分钟） | [安装 CLI →](#快速开始) |
-| 构建移动端或桌面应用 | [Flutter SDK →](bindings/flutter/) |
+| 开发移动端或桌面应用 | [Flutter SDK →](bindings/flutter/) |
 | 为游戏添加 AI NPC | [Unity SDK →](bindings/unity/)，体验 [3D 酒馆示例](https://github.com/xybrid-ai/xybrid-unity-tavern) |
 | Android 原生开发 | [Kotlin SDK →](bindings/kotlin/) |
 | Rust / 嵌入式 | [核心 crate →](crates/) |
@@ -225,7 +225,7 @@ let result = model.run(&Envelope::text("国破山河在，城春草木深"))?;
 // 输出 → 24kHz WAV 音频
 ```
 
-完整安装选项、硬件加速与 CLI 参考请参阅 [Installation Guide](docs/INSTALLATION.md)。各平台的详细设置请参阅对应 SDK 的 README：[Flutter](bindings/flutter/) · [Unity](bindings/unity/) · [Swift](bindings/apple/) · [Kotlin](bindings/kotlin/) · [Rust](crates/)。
+完整安装选项、硬件加速与 CLI 参考请参阅 [安装指南](docs/INSTALLATION.zh.md)。各平台的详细设置请参阅对应 SDK 的 README：[Flutter](bindings/flutter/) · [Unity](bindings/unity/) · [Swift](bindings/apple/) · [Kotlin](bindings/kotlin/) · [Rust](crates/)。
 
 <details>
 <summary><h3>多模型推理流水线 — MMP（实验性）</h3></summary>
@@ -309,6 +309,7 @@ let result = pipeline.run(&Envelope::audio(audio_bytes))?;
 | 模型 | 参数量 | 格式 | 简介 |
 |------|--------|------|------|
 | Gemma 3 1B | 1B | GGUF Q4_K_M | Google 为移动端优化的模型 |
+| LFM2.5 230M | 230M | GGUF Q4_K_M | 最小的采用 Liquid AI 混合卷积+注意力架构的 LLM，适合边缘设备 |
 | LFM2.5 350M | 354M | GGUF Q4_K_M | Liquid AI 混合卷积+注意力架构，9 种语言，工具调用 |
 | Llama 3.2 1B | 1B | GGUF Q4_K_M | Meta 的通用模型，128K 上下文 |
 | Qwen 2.5 0.5B | 500M | GGUF Q4_K_M | 紧凑的本地聊天模型 |
