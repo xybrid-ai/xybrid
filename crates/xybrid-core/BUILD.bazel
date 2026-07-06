@@ -9,17 +9,13 @@
 # Target name == package dir basename so `//crates/xybrid-core` resolves and
 # the derived crate_name is `xybrid_core` — no `aliases()` needed.
 #
-# COMPILE CEILING (hard crate #3): `@crates//:ort` (ONNX Runtime) is a
-# non-optional dep resolved with `ort-download` → its build script downloads
-# prebuilt binaries over the network, which Bazel's sandbox / RBE blocks. This
-# is the exact analog of the llama.cpp network ceiling. The hermetic fix mirrors
-# llama Option A/B (decision, not wizardry):
-#   - switch the resolved feature to `ort-dynamic` (ort/load-dynamic — no
-#     build-time download; dlopen's libonnxruntime at runtime), or
-#   - `crate.annotation(crate = "ort-sys", gen_build_script = False, ...)` and
-#     feed a pinned onnxruntime as a Bazel input (the zstd-sys pattern rules_rs
-#     auto-suggested).
-# Until then this target ANALYZES clean but won't fully compile on RBE.
+# ORT CEILING: RESOLVED. The ort linking mode is per-target in Cargo.toml
+# (cfg-driven, not feature-driven): non-Apple targets get `ort/load-dynamic`
+# (no build-time download → hermetic; dlopen libonnxruntime at runtime), Apple
+# keeps static download-binaries on a rustls downloader. The hub resolves this
+# faithfully per-triple (linux/android → disable-linking; darwin →
+# download-binaries+tls-rustls), so this target builds GREEN on RBE.
+# The `ort-download` feature below is a retained NO-OP marker (invocation compat).
 load("@rules_rs//rs:rust_library.bzl", "rust_library")
 load("@crates//:defs.bzl", "all_crate_deps")
 
@@ -32,7 +28,7 @@ rust_library(
     crate_features = [
         "default",
         "llm-llamacpp",
-        "ort-download",  # <-- ceiling #3 lever: flip to "ort-dynamic" for the hermetic build (see header). Kept here to stay byte-identical to the hub's resolved feature set.
+        "ort-download",  # no-op marker (mode is per-target in Cargo.toml); kept to match the hub's resolved feature set.
         "schema",
         "xybrid-llama",
         "xybrid-llama-sys",
