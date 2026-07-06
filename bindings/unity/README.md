@@ -307,9 +307,9 @@ bindings/unity/
 │   ├── Native/
 │   │   ├── NativeMethods.g.cs   # Auto-generated P/Invoke bindings
 │   │   └── NativeHelpers.cs     # Helper utilities
-│   └── Plugins/                 # Per-platform .meta import settings only —
-│                                # the native binaries are fetched at import
-│                                # into Assets/Xybrid/Plugins/ (see above)
+│   └── Plugins/                 # Empty in the package — native binaries and
+│                                # their .meta import settings are fetched at
+│                                # import into Assets/Xybrid/Plugins/ (see above)
 ├── Editor/                      # Native-library resolver (download + verify)
 └── README.md
 ```
