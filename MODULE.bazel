@@ -51,7 +51,25 @@ single_version_override(
 # Local-first PoC: uses the installed NDK r27 via ANDROID_NDK_HOME (set in
 # .bazelrc --repo_env). RBE would need the NDK present on the worker (later gate).
 bazel_dep(name = "rules_android_ndk", version = "0.1.5")
+
+# "Bazelified NDK" for RBE: the stock rules are fetch-host-locked (they pick the
+# clang dir from ctx.os.name and EXECUTE clang at fetch time). This patch adds a
+# XYBRID_NDK_HOST_TAG override (set in .bazelrc) so we can fetch the LINUX NDK on
+# a macOS host — its binaries never run locally; they ship to the Linux RBE
+# workers as action inputs (same mechanism as hermetic-llvm's clang).
+single_version_override(
+    module_name = "rules_android_ndk",
+    patch_strip = 1,
+    patches = ["//:rules_android_ndk.patch"],
+)
+
 android_ndk = use_extension("@rules_android_ndk//:extension.bzl", "android_ndk_repository_extension")
+android_ndk.configure(
+    # android-28 matches today's cmake ANDROID_PLATFORM (build.rs / boltffi path).
+    api_level = 28,
+    # The downloaded LINUX NDK r27 (Pkg.Revision 27.0.12077973 — the CI pin).
+    path = "/Users/glennsonna/.cache/xybrid-bazel-research/android-ndk-r27",
+)
 use_repo(android_ndk, "androidndk")
 register_toolchains("@androidndk//:all")
 

@@ -1,0 +1,47 @@
+--- a/rules.bzl	2026-07-06 17:10:40
++++ b/rules.bzl	2026-07-06 17:10:40
+@@ -32,7 +32,14 @@
+ 
+     is_windows = False
+     executable_extension = ""
+-    if ctx.os.name == "linux":
++
++    # xybrid spike patch: allow forcing the NDK host tag (e.g. linux-x86_64) so
++    # a LINUX NDK can be fetched on a macOS host purely as remote-execution
++    # (RBE) action inputs. Set via --repo_env=XYBRID_NDK_HOST_TAG=linux-x86_64.
++    host_tag_override = ctx.os.environ.get("XYBRID_NDK_HOST_TAG", "")
++    if host_tag_override:
++        clang_directory = "toolchains/llvm/prebuilt/" + host_tag_override
++    elif ctx.os.name == "linux":
+         clang_directory = "toolchains/llvm/prebuilt/linux-x86_64"
+     elif ctx.os.name == "mac os x":
+         # Note: darwin-x86_64 does indeed contain fat binaries with arm64 slices, too.
+@@ -50,13 +57,21 @@
+ 
+     api_level = ctx.attr.api_level or 31
+ 
+-    result = ctx.execute([clang_directory + "/bin/clang", "--print-resource-dir"])
+-    if result.return_code != 0:
+-        fail("Failed to execute clang: %s" % result.stderr)
+-    stdout = result.stdout.strip()
+-    if is_windows:
+-        stdout = stdout.replace("\\", "/")
+-    clang_resource_directory = stdout.split(clang_directory)[1].strip("/")
++    if host_tag_override:
++        # Cannot execute a foreign-host clang at fetch time; derive the clang
++        # resource dir from the filesystem instead (lib/clang/<version>).
++        versions = ctx.path(clang_directory + "/lib/clang").readdir()
++        if len(versions) != 1:
++            fail("Expected exactly one clang resource dir, got %s" % versions)
++        clang_resource_directory = "lib/clang/" + versions[0].basename
++    else:
++        result = ctx.execute([clang_directory + "/bin/clang", "--print-resource-dir"])
++        if result.return_code != 0:
++            fail("Failed to execute clang: %s" % result.stderr)
++        stdout = result.stdout.strip()
++        if is_windows:
++            stdout = stdout.replace("\\", "/")
++        clang_resource_directory = stdout.split(clang_directory)[1].strip("/")
+ 
+     # Use a label relative to the workspace from which this repository rule came
+     # to get the workspace name.

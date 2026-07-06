@@ -6,9 +6,17 @@ common --@rules_cc//cc/toolchains/args/archiver_flags:use_libtool_on_macos=False
 # rules_rust allocator-library handling used by the known-good e2e config.
 common --@rules_rust//rust/settings:experimental_use_allocator_libraries_with_mangled_symbols
 
-# Android NDK location for rules_android_ndk (local NDK r27). On RBE the NDK must
-# instead be present on the Linux worker (a later gate).
-common --repo_env=ANDROID_NDK_HOME=/Users/glennsonna/Library/Android/sdk/ndk/27.0.12077973
+# Bazelified LINUX NDK (see MODULE.bazel): force the linux-x86_64 host tag so the
+# fetched-on-mac NDK repo carries Linux binaries for the RBE workers. NOTE: with
+# this set, android targets only build remotely (--config=remote) — the Linux
+# clang cannot execute on this Mac.
+common --repo_env=XYBRID_NDK_HOST_TAG=linux-x86_64
+
+# Android arm64 target config. The rustflag mirrors .cargo/config.toml's
+# [target.aarch64-linux-android] +fp16 (gemm-f16 FP16 SIMD asm; runtime-detected,
+# scalar fallback). extra_rustc_flags is target-config-only (exec tools unaffected).
+build:android-arm64 --platforms=@rules_rs//rs/platforms:aarch64-linux-android
+build:android-arm64 --@rules_rust//rust/settings:extra_rustc_flags=-Ctarget-feature=+fp16
 
 # On Linux hosts, rules_rs' experimental toolchains need an explicit host platform
 # with libc constraints. (No-op on macOS host.)
