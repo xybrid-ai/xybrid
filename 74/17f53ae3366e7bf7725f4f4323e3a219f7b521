@@ -1,0 +1,44 @@
+bindings/unity/docs/.gitignore
+  s_41962081cb4b2a::t_8245694d8d3c04 3-6
+bindings/unity/README.md
+  s_41962081cb4b2a::t_8245694d8d3c04 7-10,12,14,16-33,37-43,45,50-53,56-66,68,80,82-87,89,91-94,96-98,256,310-313,330-332
+docs/content/docs/quickstart.zh.mdx
+  s_41962081cb4b2a::t_8245694d8d3c04 122,125
+docs/FEATURE_MATRIX.zh.md
+  s_41962081cb4b2a::t_8245694d8d3c04 1-436
+docs/INSTALLATION.zh.md
+  s_41962081cb4b2a::t_8245694d8d3c04 1-305
+bindings/unity/Runtime/Plugins/.gitignore
+  s_41962081cb4b2a::t_8245694d8d3c04 1-6,11
+CHANGELOG.md
+  s_41962081cb4b2a::t_8245694d8d3c04 23-31
+docs/content/docs/quickstart.mdx
+  s_41962081cb4b2a::t_8245694d8d3c04 121,124
+README.md
+  s_41962081cb4b2a::t_8245694d8d3c04 182-184,187,190-191
+  s_41962081cb4b2a::t_5a2944de77f8df 192
+README.zh-CN.md
+  s_41962081cb4b2a::t_8245694d8d3c04 91,197,200,228,312
+docs/content/docs/guides/vision-models.zh.mdx
+  s_41962081cb4b2a::t_8245694d8d3c04 1-280
+docs/content/docs/guides/meta.zh.json
+  s_41962081cb4b2a::t_8245694d8d3c04 1-7
+README.ja-JP.md
+  s_41962081cb4b2a::t_8245694d8d3c04 197,200
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "7417f53ae3366e7bf7725f4f4323e3a219f7b521",
+  "prompts": {},
+  "sessions": {
+    "s_41962081cb4b2a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "373f2214-d840-46a5-8b85-a4625ec606c8",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
