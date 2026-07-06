@@ -3922,8 +3922,21 @@ mod tests {
     }
 
     fn test_loaded_model(supports_streaming: bool) -> XybridModel {
-        let metadata =
+        test_loaded_model_with_tool_calling(supports_streaming, None)
+    }
+
+    fn test_loaded_model_with_tool_calling(
+        supports_streaming: bool,
+        supports_tool_calling: Option<bool>,
+    ) -> XybridModel {
+        let mut metadata =
             xybrid_core::execution::ModelMetadata::onnx("local-test-model", "1.0", "model.onnx");
+        if let Some(supports_tool_calling) = supports_tool_calling {
+            metadata.metadata.insert(
+                "tool_calling".to_string(),
+                serde_json::Value::Bool(supports_tool_calling),
+            );
+        }
         XybridModel {
             handle: Arc::new(RwLock::new(ModelHandle {
                 executor: TemplateExecutor::default(),
@@ -3937,6 +3950,27 @@ mod tests {
             supports_streaming,
             current_run: Arc::new(Mutex::new(None)),
         }
+    }
+
+    #[test]
+    fn supports_tool_calling_returns_true_when_declared() {
+        let model = test_loaded_model_with_tool_calling(true, Some(true));
+
+        assert_eq!(model.supports_tool_calling(), Some(true));
+    }
+
+    #[test]
+    fn supports_tool_calling_returns_false_when_declared() {
+        let model = test_loaded_model_with_tool_calling(true, Some(false));
+
+        assert_eq!(model.supports_tool_calling(), Some(false));
+    }
+
+    #[test]
+    fn supports_tool_calling_returns_none_when_absent() {
+        let model = test_loaded_model_with_tool_calling(true, None);
+
+        assert_eq!(model.supports_tool_calling(), None);
     }
 
     fn default_metrics() -> xybrid_core::context::DeviceMetrics {

@@ -18,7 +18,7 @@
 //! Engines that strip these internally (e.g. mistralrs) don't use
 //! this module.
 
-use crate::runtime_adapter::tool_call::TOOL_BLOCK_MARKERS;
+use crate::runtime_adapter::tool_call::{parse_tool_calls, TOOL_BLOCK_MARKERS};
 
 /// Stop markers emitted by common chat templates:
 /// - `<|im_end|>` / `<|im_start|>` / `<|endoftext|>`: ChatML (Qwen, Phi)
@@ -363,31 +363,49 @@ impl StreamingTextFilter {
     }
 
     fn suppress_complete_tool_blocks(&mut self) {
+        let mut scan_start = self.last_emitted_len;
         loop {
-            let search = &self.cumulative_text[self.last_emitted_len..];
+            let search = &self.cumulative_text[scan_start..];
             let Some((relative_start, start, end, is_call_block)) = find_next_tool_block(search)
             else {
                 break;
             };
-            let start_index = self.last_emitted_len + relative_start;
+            let start_index = scan_start + relative_start;
             let after_start_index = start_index + start.len();
             let Some(relative_end) = self.cumulative_text[after_start_index..].find(end) else {
                 break;
             };
             let remove_end = after_start_index + relative_end + end.len();
+
+            if is_call_block
+                && parse_tool_calls(&self.cumulative_text[start_index..remove_end]).is_empty()
+            {
+                scan_start = remove_end;
+                continue;
+            }
+
             self.cumulative_text
                 .replace_range(start_index..remove_end, "");
             self.last_emitted_len = self.last_emitted_len.min(start_index);
             if is_call_block {
                 self.saw_tool_call_block = true;
             }
+            scan_start = start_index;
         }
     }
 
     fn open_tool_block_start(&self) -> Option<usize> {
-        let search = &self.cumulative_text[self.last_emitted_len..];
-        find_next_tool_block(search)
-            .map(|(relative_start, _, _, _)| self.last_emitted_len + relative_start)
+        let mut scan_start = self.last_emitted_len;
+        loop {
+            let search = &self.cumulative_text[scan_start..];
+            let (relative_start, start, end, _) = find_next_tool_block(search)?;
+            let start_index = scan_start + relative_start;
+            let after_start_index = start_index + start.len();
+            let Some(relative_end) = self.cumulative_text[after_start_index..].find(end) else {
+                return Some(start_index);
+            };
+            scan_start = after_start_index + relative_end + end.len();
+        }
     }
 }
 
@@ -565,6 +583,37 @@ mod tests {
 
         assert_eq!(f.cumulative_emitted(), "I will check  now.");
         assert!(f.saw_tool_call_block());
+    }
+
+    #[test]
+    fn streaming_filter_suppresses_complete_valid_tool_call_block() {
+        let (start, end, _) = TOOL_BLOCK_MARKERS[0];
+        let mut f = StreamingTextFilter::new(vec![]).with_tool_call_suppression();
+
+        assert_eq!(
+            f.push(&format!(
+                "before {start}[get_weather(city=\"Paris\")]{end} after"
+            )),
+            Some("before  after".to_string())
+        );
+
+        assert_eq!(f.cumulative_emitted(), "before  after");
+        assert!(f.saw_tool_call_block());
+    }
+
+    #[test]
+    fn streaming_filter_emits_complete_invalid_tool_call_block() {
+        let (start, end, _) = TOOL_BLOCK_MARKERS[0];
+        let mut f = StreamingTextFilter::new(vec![]).with_tool_call_suppression();
+        let block = format!("{start}not a real call{end}");
+
+        assert_eq!(
+            f.push(&format!("before {block} after")),
+            Some(format!("before {block} after"))
+        );
+
+        assert_eq!(f.cumulative_emitted(), format!("before {block} after"));
+        assert!(!f.saw_tool_call_block());
     }
 
     #[test]

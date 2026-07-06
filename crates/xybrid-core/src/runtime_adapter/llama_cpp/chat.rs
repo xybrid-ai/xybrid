@@ -160,7 +160,7 @@ fn render_with_tools(
         AdapterError::InvalidInput(format!("tool definition failed to serialize: {e}"))
     })?;
 
-    render_embedded(
+    let prompt = render_embedded(
         model,
         &template,
         messages,
@@ -170,7 +170,30 @@ fn render_with_tools(
         AdapterError::RuntimeError(format!(
             "embedded chat template failed to render tool definitions ({render_err})"
         ))
-    })
+    })?;
+    ensure_tool_names_rendered(&prompt, tools)?;
+    Ok(prompt)
+}
+
+fn ensure_tool_names_rendered(prompt: &str, tools: &[Tool]) -> LlmResult<()> {
+    let mut names = tools
+        .iter()
+        .map(|tool| tool.function.name.as_str())
+        .filter(|name| !name.is_empty());
+    let all_names_rendered = match names.next() {
+        Some(first_name) => prompt.contains(first_name) && names.all(|name| prompt.contains(name)),
+        None => false,
+    };
+
+    if all_names_rendered {
+        Ok(())
+    } else {
+        Err(AdapterError::InvalidInput(
+            "model's embedded chat template does not render tool definitions, so tool-bearing \
+             requests cannot be honored; load a tool-capable gguf or drop `tools` from the request"
+                .to_string(),
+        ))
+    }
 }
 
 /// Shared minijinja plumbing for both embedded-template entry points
@@ -245,4 +268,64 @@ fn format_chat_chatml(messages: &[ChatMessage]) -> String {
     }
     prompt.push_str("<|im_start|>assistant\n");
     prompt
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tool(name: &str) -> Tool {
+        Tool::function(
+            name,
+            "test tool",
+            serde_json::json!({
+                "type": "object",
+                "properties": {}
+            }),
+        )
+    }
+
+    #[test]
+    fn ensure_tool_names_rendered_returns_invalid_input_when_template_ignores_tools() {
+        let tools = vec![tool("get_weather")];
+
+        let err = ensure_tool_names_rendered("<|im_start|>user\nhello<|im_end|>", &tools)
+            .expect_err("missing tool name should fail closed");
+
+        match err {
+            AdapterError::InvalidInput(message) => {
+                assert!(message.contains("does not render tool definitions"));
+                assert!(message.contains("drop `tools`"));
+            }
+            other => panic!("expected invalid input, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn ensure_tool_names_rendered_succeeds_when_template_echoes_tool_name() {
+        let tools = vec![tool("get_weather")];
+
+        ensure_tool_names_rendered("available tools: get_weather", &tools)
+            .expect("rendered tool name should be accepted");
+    }
+
+    #[test]
+    fn ensure_tool_names_rendered_skips_empty_tool_names() {
+        let tools = vec![tool(""), tool("get_weather")];
+
+        let err = ensure_tool_names_rendered("available tools:", &tools)
+            .expect_err("missing non-empty tool name should fail closed");
+
+        assert!(matches!(err, AdapterError::InvalidInput(_)));
+    }
+
+    #[test]
+    fn ensure_tool_names_rendered_rejects_only_empty_tool_names() {
+        let tools = vec![tool("")];
+
+        let err = ensure_tool_names_rendered("available tools:", &tools)
+            .expect_err("empty tool name should not prove tools rendered");
+
+        assert!(matches!(err, AdapterError::InvalidInput(_)));
+    }
 }

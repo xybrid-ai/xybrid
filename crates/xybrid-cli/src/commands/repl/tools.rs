@@ -378,9 +378,9 @@ fn ip_is_blocked(ip: IpAddr) -> bool {
                 || (octets[0] == 100 && (octets[1] & 0xc0) == 64)
         }
         IpAddr::V6(v6) => {
-            // IPv4-mapped addresses smuggle a v4 target through a v6 socket.
-            if let Some(mapped) = v6.to_ipv4_mapped() {
-                return ip_is_blocked(IpAddr::V4(mapped));
+            if embedded_ipv4_target(v6).is_some_and(|embedded| ip_is_blocked(IpAddr::V4(embedded)))
+            {
+                return true;
             }
             let seg = v6.segments();
             v6.is_loopback()
@@ -391,6 +391,39 @@ fn ip_is_blocked(ip: IpAddr) -> bool {
                 || (seg[0] & 0xffc0) == 0xfe80
         }
     }
+}
+
+/// Extract IPv4 targets embedded in IPv6 transition mechanisms:
+/// IPv4-mapped, IPv4-compatible, 6to4, and Teredo addresses.
+fn embedded_ipv4_target(v6: std::net::Ipv6Addr) -> Option<std::net::Ipv4Addr> {
+    if let Some(mapped) = v6.to_ipv4_mapped() {
+        return Some(mapped);
+    }
+
+    let octets = v6.octets();
+    let segments = v6.segments();
+    if segments[..6].iter().all(|segment| *segment == 0) {
+        return Some(std::net::Ipv4Addr::new(
+            octets[12], octets[13], octets[14], octets[15],
+        ));
+    }
+
+    if segments[0] == 0x2002 {
+        return Some(std::net::Ipv4Addr::new(
+            octets[2], octets[3], octets[4], octets[5],
+        ));
+    }
+
+    if segments[0] == 0x2001 && segments[1] == 0x0000 {
+        return Some(std::net::Ipv4Addr::new(
+            !octets[12],
+            !octets[13],
+            !octets[14],
+            !octets[15],
+        ));
+    }
+
+    None
 }
 
 /// Resolve `netloc` and reject any answer in a blocked range. Installed as
@@ -741,15 +774,16 @@ fn run_user_command(tool: &UserTool, arguments: &str) -> Result<serde_json::Valu
         .spawn()
         .map_err(|e| format!("failed to start {:?}: {e}", tool.command[0]))?;
 
-    // Deliver the arguments and close stdin so line-oriented scripts see EOF.
-    if let Some(mut stdin) = child.stdin.take() {
-        let _ = stdin.write_all(arguments.as_bytes());
-    }
-
-    // Read the pipes on their own threads — draining concurrently avoids a
-    // deadlock when the child writes more than a pipe buffer.
-    let stdout_reader = child.stdout.take().map(spawn_capped_reader);
-    let stderr_reader = child.stderr.take().map(spawn_capped_reader);
+    // Drain output immediately so early child writes cannot fill a pipe while
+    // stdin is still being delivered.
+    let mut stdout_reader = child.stdout.take().map(spawn_capped_reader);
+    let mut stderr_reader = child.stderr.take().map(spawn_capped_reader);
+    let mut stdin_writer = child.stdin.take().map(|mut stdin| {
+        let arguments = arguments.as_bytes().to_vec();
+        std::thread::spawn(move || {
+            let _ = stdin.write_all(&arguments);
+        })
+    });
 
     let deadline = std::time::Instant::now() + Duration::from_secs(tool.timeout_secs);
     let status = loop {
@@ -759,6 +793,9 @@ fn run_user_command(tool: &UserTool, arguments: &str) -> Result<serde_json::Valu
                 if std::time::Instant::now() >= deadline {
                     let _ = child.kill();
                     let _ = child.wait();
+                    let _ = stdout_reader.take().and_then(|reader| reader.join().ok());
+                    let _ = stderr_reader.take().and_then(|reader| reader.join().ok());
+                    let _ = stdin_writer.take().and_then(|writer| writer.join().ok());
                     return Err(format!("timed out after {}s", tool.timeout_secs));
                 }
                 std::thread::sleep(Duration::from_millis(50));
@@ -768,11 +805,14 @@ fn run_user_command(tool: &UserTool, arguments: &str) -> Result<serde_json::Valu
     };
 
     let stdout = stdout_reader
+        .take()
         .and_then(|reader| reader.join().ok())
         .unwrap_or_default();
     let stderr = stderr_reader
+        .take()
         .and_then(|reader| reader.join().ok())
         .unwrap_or_default();
+    let _ = stdin_writer.take().and_then(|writer| writer.join().ok());
 
     if !status.success() {
         let detail = stderr.trim();
@@ -997,6 +1037,9 @@ mod tests {
             "fc00::1",
             "::ffff:127.0.0.1", // IPv4-mapped loopback
             "::ffff:10.0.0.1",
+            "::7f00:1",
+            "2002:a00:1::",
+            "2001:0:0:0:0:0:f5ff:fffe",
         ];
         for addr in blocked {
             assert!(
@@ -1192,6 +1235,15 @@ mod tests {
         let tool = user_tool("fail", &["/bin/sh", "-c", "echo boom >&2; exit 3"]);
         let err = run_user_command(&tool, "{}").unwrap_err();
         assert!(err.contains("boom"), "stderr missing from: {err}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn user_tool_command_returns_when_child_ignores_stdin() {
+        let tool = user_tool("ignore_stdin", &["/bin/sh", "-c", "echo ok"]);
+        let arguments = "x".repeat(256 * 1024);
+        let value = run_user_command(&tool, &arguments).unwrap();
+        assert_eq!(value["output"], "ok");
     }
 
     #[cfg(unix)]

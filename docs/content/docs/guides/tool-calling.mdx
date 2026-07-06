@@ -48,9 +48,8 @@ Define a tool with `Tool::function` — a name, a description the model reads,
 and a JSON Schema for the arguments:
 
 ```rust
-use xybrid_sdk::{ModelLoader, Tool};
+use xybrid_sdk::{GenerationConfig, ModelLoader, Tool};
 use xybrid_sdk::ir::{Envelope, EnvelopeKind, ToolCallResult};
-use xybrid_core::runtime_adapter::types::GenerationConfig;
 
 let tools = vec![Tool::function(
     "get_weather",

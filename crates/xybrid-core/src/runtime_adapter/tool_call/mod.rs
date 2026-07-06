@@ -32,6 +32,20 @@ const GEMMA_TOOL_CALL_START: &str = "<|tool_call>";
 const GEMMA_TOOL_CALL_END: &str = "<tool_call|>";
 const GEMMA_TOOL_RESPONSE_START: &str = "<|tool_response>";
 const GEMMA_TOOL_RESPONSE_END: &str = "<tool_response|>";
+const RESERVED_PROTOCOL_MARKERS: &[&str] = &[
+    TOOL_CALL_START,
+    TOOL_CALL_END,
+    TOOL_RESPONSE_START,
+    TOOL_RESPONSE_END,
+    GEMMA_TOOL_CALL_START,
+    GEMMA_TOOL_CALL_END,
+    GEMMA_TOOL_RESPONSE_START,
+    GEMMA_TOOL_RESPONSE_END,
+    "<|im_end|>",
+    "<|im_start|>",
+    "<turn|>",
+    "<|turn>",
+];
 
 /// Shared turn markers used by continuation stop configuration and
 /// [`truncate_at_turn_marker`].
@@ -235,31 +249,32 @@ pub fn strip_tool_calls(text: &str) -> String {
 ///
 /// # Errors
 ///
-/// Returns [`AdapterError::InvalidInput`] when `tool_responses_json` is not a
-/// non-empty JSON array of objects containing a `content` field.
+/// Returns [`AdapterError::InvalidInput`] when `tool_responses_json` does not
+/// exactly answer the calls from `prior_assistant_text`.
 pub(crate) fn compose_tool_continuation(
     base_prompt: &str,
     prior_assistant_text: &str,
     tool_responses_json: &str,
 ) -> Result<String, AdapterError> {
     let value: Value = serde_json::from_str(tool_responses_json).map_err(|err| {
-        AdapterError::InvalidInput(format!("tool_responses_json must be valid JSON: {err}"))
+        AdapterError::InvalidInput(format!("tool_responses_json must be valid json: {err}"))
     })?;
-    let responses = validate_tool_responses(&value)?;
+    let calls = parse_tool_calls(prior_assistant_text);
+    let responses = validate_tool_responses(&value, &calls)?;
 
     match ToolCallProtocol::detect_from_prompt(base_prompt) {
         ToolCallProtocol::Lfm2 => {
-            lfm2::compose_chatml_continuation(base_prompt, prior_assistant_text, responses)
+            lfm2::compose_chatml_continuation(base_prompt, prior_assistant_text, &responses)
         }
         ToolCallProtocol::Gemma => {
-            gemma::compose_gemma_continuation(base_prompt, prior_assistant_text, responses)
+            gemma::compose_gemma_continuation(base_prompt, prior_assistant_text, &responses)
         }
     }
 }
 
-fn validate_tool_responses(value: &Value) -> Result<&Vec<Value>, AdapterError> {
+fn validate_tool_responses(value: &Value, calls: &[ToolCall]) -> Result<Vec<Value>, AdapterError> {
     let responses = value.as_array().ok_or_else(|| {
-        AdapterError::InvalidInput("tool_responses_json must be a JSON array".to_string())
+        AdapterError::InvalidInput("tool_responses_json must be a json array".to_string())
     })?;
 
     if responses.is_empty() {
@@ -267,8 +282,90 @@ fn validate_tool_responses(value: &Value) -> Result<&Vec<Value>, AdapterError> {
             "tool_responses_json must contain at least one response".to_string(),
         ));
     }
+    if calls.is_empty() {
+        return Err(AdapterError::InvalidInput(
+            "prior assistant text must contain tool calls".to_string(),
+        ));
+    }
+    if responses.len() != calls.len() {
+        return Err(AdapterError::InvalidInput(format!(
+            "tool response count {} must match tool call count {}",
+            responses.len(),
+            calls.len()
+        )));
+    }
 
-    Ok(responses)
+    let mut ordered = vec![None; calls.len()];
+    for (response_index, response) in responses.iter().enumerate() {
+        let object = response.as_object().ok_or_else(|| {
+            AdapterError::InvalidInput(format!(
+                "tool response at index {response_index} must be an object"
+            ))
+        })?;
+        if !object.contains_key("content") {
+            return Err(AdapterError::InvalidInput(format!(
+                "tool response at index {response_index} must include content"
+            )));
+        }
+
+        let explicit_call_id = object
+            .get("call_id")
+            .and_then(Value::as_str)
+            .filter(|id| !id.is_empty());
+        let call_index = if let Some(call_id) = explicit_call_id {
+            calls
+                .iter()
+                .position(|call| call.id == call_id)
+                .ok_or_else(|| {
+                    AdapterError::InvalidInput(format!(
+                        "tool response at index {response_index} references unknown call id {call_id}"
+                    ))
+                })?
+        } else {
+            response_index
+        };
+        let call = &calls[call_index];
+
+        if ordered[call_index].is_some() {
+            return Err(AdapterError::InvalidInput(format!(
+                "tool call {} has duplicate responses",
+                call.id
+            )));
+        }
+        if let Some(name) = object
+            .get("name")
+            .and_then(Value::as_str)
+            .filter(|name| !name.is_empty())
+        {
+            if name != call.function.name {
+                return Err(AdapterError::InvalidInput(format!(
+                    "tool response at index {response_index} names {name} but call {} names {}",
+                    call.id, call.function.name
+                )));
+            }
+        }
+
+        let mut resolved = object.clone();
+        resolved.insert("call_id".to_string(), Value::String(call.id.clone()));
+        resolved.insert(
+            "name".to_string(),
+            Value::String(call.function.name.clone()),
+        );
+        ordered[call_index] = Some(Value::Object(resolved));
+    }
+
+    let mut resolved = Vec::with_capacity(ordered.len());
+    for (index, response) in ordered.into_iter().enumerate() {
+        let Some(response) = response else {
+            return Err(AdapterError::InvalidInput(format!(
+                "tool call {} has no response",
+                calls[index].id
+            )));
+        };
+        resolved.push(response);
+    }
+
+    Ok(resolved)
 }
 
 fn tool_response_content(response: &Value, index: usize) -> Result<&Value, AdapterError> {
@@ -280,6 +377,61 @@ fn tool_response_content(response: &Value, index: usize) -> Result<&Value, Adapt
             "tool response at index {index} must include content"
         ))
     })
+}
+
+pub(super) fn sanitize_tool_result_content(value: &Value) -> Value {
+    match value {
+        Value::String(value) => Value::String(neutralize_reserved_markers(value)),
+        Value::Array(values) => Value::Array(
+            values
+                .iter()
+                .map(sanitize_tool_result_content)
+                .collect::<Vec<_>>(),
+        ),
+        Value::Object(map) => Value::Object(
+            map.iter()
+                .map(|(key, value)| {
+                    (
+                        neutralize_reserved_markers(key),
+                        sanitize_tool_result_content(value),
+                    )
+                })
+                .collect(),
+        ),
+        Value::Null | Value::Bool(_) | Value::Number(_) => value.clone(),
+    }
+}
+
+fn neutralize_reserved_markers(value: &str) -> String {
+    let mut sanitized = value.to_string();
+    for marker in RESERVED_PROTOCOL_MARKERS {
+        sanitized = sanitized.replace(marker, neutralized_marker(marker));
+    }
+    sanitized
+}
+
+fn neutralized_marker(marker: &str) -> &'static str {
+    if marker == TOOL_CALL_START {
+        "tool_call_start"
+    } else if marker == TOOL_CALL_END {
+        "tool_call_end"
+    } else if marker == TOOL_RESPONSE_START {
+        "tool_response_start"
+    } else if marker == TOOL_RESPONSE_END {
+        "tool_response_end"
+    } else if marker == GEMMA_TOOL_CALL_START || marker == GEMMA_TOOL_CALL_END {
+        "tool_call"
+    } else if marker == GEMMA_TOOL_RESPONSE_START || marker == GEMMA_TOOL_RESPONSE_END {
+        "tool_response"
+    } else if marker == "<|im_end|>" {
+        "im_end"
+    } else if marker == "<|im_start|>" {
+        "im_start"
+    } else if marker == "<turn|>" || marker == "<|turn>" {
+        "turn"
+    } else {
+        "protocol_marker"
+    }
 }
 
 /// Truncates `text` at the first supported turn marker and trims the tail.
@@ -326,6 +478,10 @@ mod tests {
 
     fn gemma_wrapped(content: &str) -> String {
         format!("{GEMMA_TOOL_CALL_START}{content}{GEMMA_TOOL_CALL_END}")
+    }
+
+    fn assert_invalid_input(result: Result<String, AdapterError>) {
+        assert!(matches!(result, Err(AdapterError::InvalidInput(_))));
     }
 
     #[test]
@@ -404,23 +560,27 @@ hi<turn|>
 
     #[test]
     fn compose_returns_exact_prompt_when_happy_path() {
+        let prior = format!("I'll check{}", wrapped("[weather()]"));
         let result = compose_tool_continuation(
             "<|im_start|>user\nhi<|im_end|>\n<|im_start|>assistant\n",
-            "I'll check",
+            &prior,
             r#"[{"content":{"weather":"sunny"}}]"#,
         )
         .unwrap();
 
         assert_eq!(
             result,
-            "<|im_start|>user\nhi<|im_end|>\n<|im_start|>assistant\nI'll check<|im_end|>\n<|im_start|>tool\n<|tool_response_start|>{\"weather\":\"sunny\"}<|tool_response_end|><|im_end|>\n<|im_start|>assistant\n"
+            format!(
+                "<|im_start|>user\nhi<|im_end|>\n<|im_start|>assistant\n{prior}<|im_end|>\n<|im_start|>tool\n<|tool_response_start|>{{\"weather\":\"sunny\"}}<|tool_response_end|><|im_end|>\n<|im_start|>assistant\n"
+            )
         );
     }
 
     #[test]
     fn compose_preserves_response_order_when_two_responses() {
+        let prior = format!("{}{}", wrapped("[first()]"), wrapped("[second()]"));
         let result =
-            compose_tool_continuation("base", "prior", r#"[{"content":"one"},{"content":2}]"#)
+            compose_tool_continuation("base", &prior, r#"[{"content":"one"},{"content":2}]"#)
                 .unwrap();
 
         assert!(result.contains(
@@ -438,17 +598,90 @@ hi<turn|>
 
     #[test]
     fn compose_errors_when_array_is_empty() {
-        assert!(matches!(
-            compose_tool_continuation("base", "prior", "[]"),
-            Err(AdapterError::InvalidInput(_))
-        ));
+        assert_invalid_input(compose_tool_continuation("base", "prior", "[]"));
     }
 
     #[test]
     fn compose_errors_when_element_missing_content() {
-        assert!(matches!(
-            compose_tool_continuation("base", "prior", r#"[{"other":1}]"#),
-            Err(AdapterError::InvalidInput(_))
+        let prior = wrapped("[weather()]");
+        assert_invalid_input(compose_tool_continuation(
+            "base",
+            &prior,
+            r#"[{"other":1}]"#,
+        ));
+    }
+
+    #[test]
+    fn compose_errors_when_prior_has_no_tool_calls() {
+        assert_invalid_input(compose_tool_continuation(
+            "base",
+            "plain prior",
+            r#"[{"content":1}]"#,
+        ));
+    }
+
+    #[test]
+    fn compose_errors_when_response_count_mismatches_calls() {
+        let prior = format!("{}{}", wrapped("[first()]"), wrapped("[second()]"));
+
+        assert_invalid_input(compose_tool_continuation(
+            "base",
+            &prior,
+            r#"[{"content":"one"}]"#,
+        ));
+    }
+
+    #[test]
+    fn compose_errors_when_response_call_id_is_unknown() {
+        let prior = wrapped("[weather()]");
+
+        assert_invalid_input(compose_tool_continuation(
+            "base",
+            &prior,
+            r#"[{"call_id":"call_99","content":"sunny"}]"#,
+        ));
+    }
+
+    #[test]
+    fn compose_errors_when_response_call_id_is_duplicate() {
+        let prior = format!("{}{}", wrapped("[first()]"), wrapped("[second()]"));
+
+        assert_invalid_input(compose_tool_continuation(
+            "base",
+            &prior,
+            r#"[
+                {"call_id":"call_0","content":"one"},
+                {"call_id":"call_0","content":"two"}
+            ]"#,
+        ));
+    }
+
+    #[test]
+    fn compose_errors_when_response_name_mismatches_call() {
+        let prior = wrapped("[weather()]");
+
+        assert_invalid_input(compose_tool_continuation(
+            "base",
+            &prior,
+            r#"[{"call_id":"call_0","name":"wrong","content":"sunny"}]"#,
+        ));
+    }
+
+    #[test]
+    fn compose_orders_explicit_call_ids_by_prior_call_order() {
+        let prior = format!("{}{}", wrapped("[first()]"), wrapped("[second()]"));
+        let result = compose_tool_continuation(
+            "base",
+            &prior,
+            r#"[
+                {"call_id":"call_1","name":"second","content":"two"},
+                {"call_id":"call_0","name":"first","content":"one"}
+            ]"#,
+        )
+        .unwrap();
+
+        assert!(result.contains(
+            "<|tool_response_start|>\"one\"<|tool_response_end|><|tool_response_start|>\"two\"<|tool_response_end|>"
         ));
     }
 
