@@ -13,12 +13,29 @@ load("@rules_rs//rs:rust_static_library.bzl", "rust_static_library")
 load("@crates//:defs.bzl", "all_crate_deps")
 
 # cdylib — libxybrid_bolt.{so,dylib}
+#
+# GATE 8 (android): this ONE rustc link replaces boltffi pack's second `-shared`
+# relink + the patchelf --add-needed fixup. The flags are stated AT LINK TIME:
+#   -lc++_shared            -> the libc++_shared.so DT_NEEDED boltffi's relink drops
+#   -llog                   -> android liblog (matches the relink's -llog)
+#   -z,max-page-size=16384  -> 16KB page alignment; must come after the NDK
+#                              toolchain's hardcoded 4096 (last -z wins with lld)
+# (Packaging note: Kotlin loads "xybrid-bolt" (hyphen); the AAR assembly renames
+# libxybrid_bolt.so -> libxybrid-bolt.so.)
 rust_shared_library(
     name = "xybrid_bolt_cdylib",
     srcs = glob(["src/**/*.rs"]),
     crate_name = "xybrid_bolt",
     edition = "2021",
     crate_features = ["default"],
+    rustc_flags = select({
+        "@platforms//os:android": [
+            "-Clink-arg=-lc++_shared",
+            "-Clink-arg=-llog",
+            "-Clink-arg=-Wl,-z,max-page-size=16384",
+        ],
+        "//conditions:default": [],
+    }),
     deps = all_crate_deps(normal = True),
     visibility = ["//visibility:public"],
 )
