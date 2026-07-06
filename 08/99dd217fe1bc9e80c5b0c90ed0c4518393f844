@@ -1,0 +1,19 @@
+crates/xybrid-bolt/BUILD.bazel
+  s_7431c1432875d8::t_cf5082514bb531 16-24,31-38
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "0899dd217fe1bc9e80c5b0c90ed0c4518393f844",
+  "prompts": {},
+  "sessions": {
+    "s_7431c1432875d8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "85304c2d-b335-4cc4-a3a6-e618040982d4",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
