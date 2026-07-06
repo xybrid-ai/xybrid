@@ -18,8 +18,10 @@ using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
 using UnityEditor;
-using UnityEditor.PackageManager;
 using UnityEngine;
+// Alias to disambiguate from UnityEditor.PackageInfo (both are in scope via
+// `using UnityEditor;`), which triggers CS0104.
+using PackageInfo = UnityEditor.PackageManager.PackageInfo;
 
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Xybrid.SDK.Tests.Editor")]
 
