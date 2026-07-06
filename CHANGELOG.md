@@ -7,9 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Unity SDK distribution moved to OpenUPM.** The Unity package now ships
+  managed-only via the OpenUPM scoped registry (`ai.xybrid`); per-platform
+  native libraries are downloaded from the GitHub Release at import by an editor
+  resolver (SHA-256 verified) into `Assets/Xybrid/Plugins/`, **including the
+  ~326 MB iOS slice** that previously required manual setup. Replaces the
+  `upm` git-branch install, and the `publish-upm` CI job is retired.
+
 ### Planned
 
-- **OpenUPM registry**: Publish Unity SDK to [openupm.com](https://openupm.com) for scoped registry install
 - **Multimodal KV-prefix reuse**: the per-frame prefill cost lever for live vision — **deferred** from 0.2.0, not yet implemented.
 
 ---
