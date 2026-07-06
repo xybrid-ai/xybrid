@@ -1,0 +1,280 @@
+---
+title: 视觉模型
+description: 使用文本加图像输入运行本地视觉语言模型
+---
+
+视觉语言模型（VLM）接受包含文本和一张或多张图像的用户消息，然后从本地运行时
+流式返回文本答案。Xybrid 将其建模为一次普通的对话轮次：构建图像 Envelope，
+将它们与提示词文本组合到用户消息 Envelope 中，并通过与纯文本 LLM 相同的
+模型加载与流式 API 运行所选的 VLM。
+
+<Callout type="warn">
+视觉支持是 v0.2.0 的预览路径。构建必须包含 `llm-llamacpp-vision`，且云端视觉视觉模型的
+回退在本次发布中有意排除在外。带图像的对话轮次要么在本地运行，要么以“类型化
+能力错误”失败。
+</Callout>
+
+## 支持的模型
+
+| 模型 | 用途 | 构件 | 建议下限 |
+|-------|---------|-----------|-----------------|
+| `lfm2-vl-450m` | 小规模验证 | Q4 语言 GGUF 加 Q8 mmproj，总计约 308 MB | 4 GB 内存 |
+| `gemma-4-e2b` | 重量级高准确度 | Q8 语言 GGUF 加 Q8 mmproj，总计约 5.5 GB | 8 GB 内存，iPhone 15 Pro+ 级别的移动设备 |
+
+每个模型都必须包含其语言模型及其视觉投影器（`mmproj`）或等效的视觉编码器。
+如果缺少配套构件，模型加载会在生成之前失败，并抛出指明所引用路径的
+`MissingArtifact` 错误。
+
+## 启用视觉功能的构建
+
+默认的平台预设仍为纯文本。请为将要运行 VLM 的构建添加 `llm-llamacpp-vision`：
+
+```bash
+cargo build -p xybrid --features platform-macos,llm-llamacpp-vision
+```
+
+对于直接使用 Rust crate 的应用，将目标平台预设与 `llm-llamacpp-vision` 组合。
+对于 Flutter、Kotlin、Swift 和 Unity 包，请使用以相同特性构建的发布构件或
+本地原生构建。
+
+## CLI
+
+将 `--input-image` 与 `--input-text` 搭配使用，发送单次多模态用户轮次：
+
+```bash
+xybrid run \
+  --model gemma-4-e2b \
+  --input-text "Describe this image." \
+  --input-image ./cat.png
+```
+
+在注册表条目发布之前，用于本地 fixture 验证：
+
+```bash
+./integration-tests/download.sh gemma-4-e2b
+cargo test -p xybrid-cli --features llm-llamacpp-vision \
+  run_input_image_captions_gemma_4_e2b_fixture
+```
+
+REPL 也支持为下一轮次暂存图像：
+
+```text
+/image ./cat.png
+what is in this picture?
+```
+
+暂存的图像列表会在提示词发送后被清空。
+
+## Flutter
+
+```dart
+import 'dart:io';
+import 'package:xybrid_flutter/xybrid_flutter.dart';
+
+await Xybrid.init();
+
+final model = await Xybrid.model('gemma-4-e2b').load();
+final image = XybridEnvelope.image(
+  bytes: await File('cat.jpg').readAsBytes(),
+  format: 'jpeg',
+);
+final prompt = XybridEnvelope.userMessage(
+  text: 'Describe this image.',
+  images: [image],
+);
+
+await for (final token in model.runStreaming(prompt)) {
+  stdout.write(token.token);
+}
+```
+
+Studio 使用相同的 Envelope 形态。只有在所选模型支持图像输入、原生构建包含
+视觉后端、mmproj 构件存在且满足设备内存下限时，才应启用附加图像的控件。
+
+## Kotlin
+
+```kotlin
+import ai.xybrid.Envelope
+import java.io.File
+
+val model = XybridModelLoader.fromRegistry("gemma-4-e2b").load()
+val image = Envelope.image(File("cat.jpg").readBytes(), format = "jpeg")
+val prompt = Envelope.userMessage(
+    text = "Describe this image.",
+    images = listOf(image),
+)
+
+val result = model.run(prompt)
+println(result.text)
+```
+
+## Swift
+
+```swift
+import Foundation
+import Xybrid
+
+let model = try ModelLoader.fromRegistry(modelId: "gemma-4-e2b").load()
+let imageData = try Data(contentsOf: URL(fileURLWithPath: "cat.jpg"))
+let image = try XybridEnvelope.image(imageData, format: "jpeg")
+let prompt = try XybridEnvelope.userMessage(
+    "Describe this image.",
+    images: [image]
+)
+
+let result = try model.run(envelope: prompt)
+print(result.text ?? "")
+```
+
+对于 Q8 Gemma 4 E2B 路径，在声称支持移动端之前，请在 iPhone 15 Pro 或更新
+机型上验证。内存较低的设备应该会在加载 Bundle 之前被（设备）能力检查拦截。
+
+## Unity
+
+```csharp
+using System.IO;
+using Xybrid;
+
+using var model = XybridClient.LoadModel("gemma-4-e2b");
+byte[] imageBytes = File.ReadAllBytes("cat.jpg");
+using var image = Envelope.Image(imageBytes, "jpeg");
+using var prompt = Envelope.UserMessage("Describe this image.", new[] { image });
+
+using var result = model.Run(prompt);
+result.ThrowIfFailed();
+
+Debug.Log(result.Text);
+```
+
+## 多轮对话
+
+对话历史可以包含此前的文本以及带图像的用户消息。回放历史时，请保留有序的
+文本/图像部分，而不要将图像轮次压平为文本。后端允许在后续轮次重新预填充
+图像 token；v0.2.0 不引入跨后端的图像嵌入缓存。
+
+## 实时 / 实况相机视觉
+
+<Callout type="warn">
+实时相机视觉是一项特性分支能力（`feat/realtime-vision`），代码已完成并经过
+评审，但**尚未在真实设备上验证**，也未发布。下文的运行时/SDK 原语描述的是
+可编译且经过单元测试的行为；设备端图像描述一致性与持续会话验证仍在进行中。
+请将本节视为前瞻性指南，而非稳定的约定。
+</Callout>
+
+实况相机画面并不是视频模型。设备端 VLM 无法为每一帧生成描述，因此设计要点是
+**理解事件，而非每秒帧数**。Xybrid 将实况相机视图建模为一个*级联*：一个廉价的
+常开门控判断场景是否发生了有意义的变化，只有此时才唤醒昂贵的 VLM 处理单帧。
+取景器无论如何都持续运行；理解在设计上滞后于相机。
+
+### 级联结构
+
+```
+相机帧 ──► 廉价亮度变化门控 ──► [仅在变化时触发]
+                                    │
+                            单次在途, 最新帧优先
+                                    │
+                        单帧 ──► VLM (mtmd) ──► 流式输出的答案
+                                    │
+                            原地替换答案 + 历史日志
+```
+
+门控在降采样网格上计算一个感知格式的亮度（luma）签名，并比较连续帧。静态场景
+产生近乎为零的 VLM 触发（空闲 ≈ 无推理）；门控正是防止重复答案刷屏、并将
+每帧 token 成本——主要的成本驱动因素——控制在有界范围内的机制。VLM 始终只
+看到经过门控的单帧。
+
+### 预期：尽力而为，绝不阻塞
+
+**没有流畅视频承诺，也没有延迟 SLA**。现实的设备端速率大约为**每秒 1–5 个
+理解事件**，在热负载下或在低端设备上还会进一步下降。约定如下：
+
+- VLM 忙碌时取景器（门控）绝不冻结。
+- 当场景变化且模型完成一次轮次时，答案会刷新。
+- 在高温或内存压力下，触发会放缓（优雅降速），而不是冻结 UI 或崩溃。
+
+这是一个叠加在既有无状态流式 VLM 路径之上的尽力而为的理解循环，而非实时
+感知引擎。
+
+### 最新帧优先（drop-if-busy → cancel-and-replace）
+
+该循环是单次在途（single-flight） 的——同一时刻只运行一个 VLM 生成。有两种策略约束新的
+门控帧如何与在途帧交互：
+
+- **drop-if-busy**（仅应用层的基线）：当一次生成在途时，新帧被忽略。简单，但
+  答案可能滞后于场景，因为循环要等待当前轮次完成。
+- **cancel-and-replace**（借助运行时原语）：更新的门控帧会抢占在途的生成。这
+  建立在**可达的流式取消**之上——现在取消 Dart 流会驱动一次真正的运行时中止
+  （生成会在下一个 token 处停止并释放模型锁），而不仅仅是在 Dart 中取消订阅
+  ——外加模型句柄上一个抢占式的取消当前运行槽位。最终效果是*最新帧优先*：最新
+  的场景获得优先，陈旧的帧不会造成队头阻塞。
+
+### 能力与设备下限
+
+实况视觉的进入与单图像视觉以相同方式门控——所选模型必须声明图像输入、原生
+构建必须包含视觉后端、mmproj 构件必须存在、且设备必须满足内存下限。低于这些
+下限的设备或模型会在相机循环启动之前、而非会话中途，以类型化能力错误被拦截。
+
+### 原始帧路径（`imageRaw`）
+
+基线实况循环会在把每个触发帧交给 VLM 之前对其进行 JPEG 编码。运行时还额外
+暴露了一条跳过逐帧 JPEG 编码的**原始帧路径**：相机像素缓冲区（打包 RGB，并从
+常见相机格式转换）通过 `imageRaw` Envelope 绑定而非 `image` 直接流入 `mtmd`。
+编码路径保持不变，仍作为回退。
+
+在 Studio 中，原始路径**受标志门控且默认关闭**
+（`--dart-define=XYBRID_STUDIO_RAW_FRAMES=true`）。在设备端确认原始帧与编码帧的
+图像描述一致性之前，它始终保持关闭；未设置该标志时，Studio 使用编码路径。
+一致性检查参见验证手册（runbook）。
+
+```dart
+// 原始帧 Envelope（跳过逐帧 JPEG 编码）。
+final image = XybridEnvelope.imageRaw(
+  bytes: rgbBytes,      // 打包 RGB 像素缓冲区
+  width: width,
+  height: height,
+);
+final prompt = XybridEnvelope.userMessage(
+  text: 'What does this label say?',
+  images: [image],
+);
+```
+
+### 仅限设备端
+
+带图像的对话轮次在设备端运行，否则失败——与单图像视觉一样，实况模式下
+**图像轮次也没有云端回退机制**。温度/内存压力的中止机制与路由层共享，但在实况模式下
+它会限流或停止本地循环，而不是溢出到云端。
+
+### 实况模式遥测
+
+一个朴素的实况循环会为每个触发帧发出一行遥测，从而淹没追踪后端。取而代之，
+实况模式的推理会被**打标签**（一个 `live_mode` 标志加上一个用于归组同一相机
+会话的 `frame_session_id`），并由每会话采样器**限流**（大致每会话每秒一行，受
+TTL 限制），因此一次实况会话产生的是采样汇总，而非逐帧刷屏。
+
+## 故障排查
+
+### `MissingArtifact`
+
+模型元数据引用了一个 mmproj 或视觉编码器文件，但它并不在语言模型旁边。请重新
+拉取模型 Bundle，或核实注册表条目包含了每个配套构件。
+
+### `UnsupportedModelCapability`
+
+所选模型为纯文本，但输入 Envelope 包含图像或多部分用户消息。请选择诸如
+`lfm2-vl-450m` 或 `gemma-4-e2b` 的 VLM。
+
+### `UnsupportedBackendCapability`
+
+模型声明了图像输入，但已加载的后端/构建无法满足它。请使用 `llm-llamacpp-vision`
+重新构建，或切换到包含视觉后端的发布构件。
+
+### 设备低于下限
+
+所选 VLM 需要的内存超过当前设备所报告的容量。对于 Gemma 4 E2B Q8，请使用
+8 GB 级别的设备或选择更小的 VLM。应用应在生成开始之前将此呈现为能力门控。
+
+### 无效的图像格式
+
+请使用编码后的 PNG、JPEG 或 WebP 字节。HEIC 与相机原生的原始像素缓冲区是
+独立的接入路径，在调用 `Envelope.image` 之前可能需要平台专属的转换。
