@@ -56,8 +56,10 @@ pub(crate) const TOOL_SYSTEM_PROMPT: &str =
      directly — always do these yourself, never refuse them. You also have \
      tools for looking things up: for questions about facts, people, or \
      events, call web_search once with a short, focused query, then answer \
-     from the results. Never repeat a call you already made. For everything \
-     else, answer without tools.";
+     from the results. When information may be newer than your knowledge or \
+     you find you do not know, call web_search instead of saying the \
+     information is unavailable. Never repeat a call you already made. For \
+     everything else, answer without tools.";
 
 pub(crate) struct QueryOutcome {
     pub answer: String,

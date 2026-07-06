@@ -10,6 +10,7 @@
 
 use crate::ir::Envelope;
 use crate::runtime_adapter::llm::GenerationOutput;
+use crate::runtime_adapter::streaming_postprocess::strip_and_capture_thinking_tags;
 use crate::runtime_adapter::tool_call::{
     compose_tool_continuation, truncate_at_turn_marker, TURN_MARKERS,
 };
@@ -27,11 +28,15 @@ use super::types::ExecutorResult;
 /// rendered base by `compose_tool_continuation` — and generation continues
 /// through `generate_raw`.
 ///
-/// Known v1 limitation: for a reasoning model the rendered base ends with
-/// the primed `<think>` channel, which belongs to a FRESH assistant turn —
-/// not to the replayed prior turn appended next. No LFM2- or gemma-4-family
-/// tool model is a reasoning model today; revisit priming placement when a
-/// reasoning+tools model lands.
+/// Reasoning models: the raw path itself never splits `<think>` blocks
+/// (its other callers feed non-chat prompts), so this function does it —
+/// a continuation is a chat turn, and reasoning models (e.g.
+/// LFM2.5-1.2B-Thinking) deliberate before the continuation answer just
+/// like any other turn. Known v1 limitation: the rendered base may end
+/// with a primed `<think>` channel that belongs to a fresh assistant turn
+/// rather than the replayed prior turn; the models tested self-open the
+/// tag anyway, and the dangling-close handling in
+/// `strip_and_capture_thinking_tags` covers the primed shape.
 pub(crate) fn run_tool_continuation(
     backend: &dyn LlmBackend,
     messages: &[ChatMessage],
@@ -68,6 +73,11 @@ pub(crate) fn run_tool_continuation(
     // truncates it). Cut it so the answer is clean and a further
     // continuation doesn't double the turn marker.
     truncate_at_turn_marker(&mut out.text);
+    // Split the reasoning channel the way the chat paths do — a no-op for
+    // non-reasoning models (no tags → text unchanged, reasoning `None`).
+    let (clean, reasoning) = strip_and_capture_thinking_tags(&out.text);
+    out.text = clean;
+    out.reasoning_content = reasoning.or(out.reasoning_content);
     Ok(out)
 }
 
