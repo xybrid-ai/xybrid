@@ -290,7 +290,10 @@ enum Commands {
         name: String,
 
         /// Version string (e.g., 1.0.0)
-        #[arg(short, long, value_name = "VERSION", default_value = "0.1.0")]
+        ///
+        /// Long-only: `-v` belongs to the global `--verbose` flag, and clap
+        /// panics at startup on the collision.
+        #[arg(long, value_name = "VERSION", default_value = "0.1.0")]
         version: String,
 
         /// Target format (onnx, coreml, tflite, generic)
@@ -721,6 +724,16 @@ fn resolve_config_path(config: Option<PathBuf>, pipeline: Option<String>) -> Res
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_subcommand_parses_without_arg_collisions() {
+        // clap only detects duplicate short flags (like `pack -v` vs the
+        // global `-v/--verbose`) when the subcommand's arg set is built —
+        // exercise each one so a collision fails here instead of panicking
+        // at run time.
+        use clap::CommandFactory;
+        Cli::command().debug_assert();
+    }
 
     #[test]
     fn repl_accepts_show_reasoning_flag() {

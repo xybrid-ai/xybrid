@@ -10,6 +10,10 @@
 
 use crate::ir::Envelope;
 use crate::runtime_adapter::llm::GenerationOutput;
+// llamacpp-only on purpose: `streaming_postprocess` is not compiled for
+// mistral-only builds, and the mistral backend rejects tool-bearing
+// requests outright, so a continuation can never execute there.
+#[cfg(feature = "llm-llamacpp")]
 use crate::runtime_adapter::streaming_postprocess::strip_and_capture_thinking_tags;
 use crate::runtime_adapter::tool_call::{
     compose_tool_continuation, truncate_at_turn_marker, TURN_MARKERS,
@@ -75,9 +79,12 @@ pub(crate) fn run_tool_continuation(
     truncate_at_turn_marker(&mut out.text);
     // Split the reasoning channel the way the chat paths do — a no-op for
     // non-reasoning models (no tags → text unchanged, reasoning `None`).
-    let (clean, reasoning) = strip_and_capture_thinking_tags(&out.text);
-    out.text = clean;
-    out.reasoning_content = reasoning.or(out.reasoning_content);
+    #[cfg(feature = "llm-llamacpp")]
+    {
+        let (clean, reasoning) = strip_and_capture_thinking_tags(&out.text);
+        out.text = clean;
+        out.reasoning_content = reasoning.or(out.reasoning_content);
+    }
     Ok(out)
 }
 
