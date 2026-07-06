@@ -1,0 +1,19 @@
+bindings/unity/Editor/NativeLibraryResolver.cs
+  s_fb271508a8988a::t_d3afa233db61dd 22-24
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "88c8d1f0e73f48e91d8296e03b5f0fe40fdac70d",
+  "prompts": {},
+  "sessions": {
+    "s_fb271508a8988a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8ce838ba-c727-47cf-8b97-de143d5f0c48",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
