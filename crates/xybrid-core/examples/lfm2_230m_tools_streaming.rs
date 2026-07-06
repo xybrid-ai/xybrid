@@ -17,7 +17,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use xybrid_core::execution::{ModelMetadata, TemplateExecutor};
-use xybrid_core::gateway::{FunctionDefinition, Tool, ToolCall};
+use xybrid_core::gateway::{Tool, ToolCall};
 use xybrid_core::ir::{Envelope, EnvelopeKind};
 use xybrid_core::runtime_adapter::types::GenerationConfig;
 
@@ -48,18 +48,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut executor = TemplateExecutor::with_base_path(dir.to_str().unwrap());
 
-    let tool = Tool {
-        tool_type: "function".to_string(),
-        function: FunctionDefinition {
-            name: "get_temperature".to_string(),
-            description: Some("Get the current temperature in a room, in Celsius.".to_string()),
-            parameters: Some(serde_json::json!({
-                "type": "object",
-                "properties": { "room": { "type": "string" } },
-                "required": ["room"]
-            })),
-        },
-    };
+    let tool = Tool::function(
+        "get_temperature",
+        "Get the current temperature in a room, in Celsius.",
+        serde_json::json!({
+            "type": "object",
+            "properties": { "room": { "type": "string" } },
+            "required": ["room"]
+        }),
+    );
     let config = GenerationConfig::greedy()
         .with_max_tokens(128)
         .with_tools([tool]);

@@ -481,6 +481,30 @@ impl GenerationConfig {
     }
 
     /// Offer tools (functions) the model may call. See [`GenerationConfig::tools`].
+    ///
+    /// Tools are plain data — define your own with [`Tool::function`], run
+    /// the request, execute whatever calls come back in the response
+    /// envelope's `tool_calls` metadata, and feed the results into the next
+    /// turn with `Envelope::tool_results`. The multi-turn loop lives in app
+    /// code.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use xybrid_core::gateway::Tool;
+    /// use xybrid_core::runtime_adapter::types::GenerationConfig;
+    ///
+    /// let config = GenerationConfig::default().with_tools([Tool::function(
+    ///     "get_weather",
+    ///     "Current weather for a city.",
+    ///     serde_json::json!({
+    ///         "type": "object",
+    ///         "properties": { "city": { "type": "string" } },
+    ///         "required": ["city"]
+    ///     }),
+    /// )]);
+    /// assert_eq!(config.tools.len(), 1);
+    /// ```
     pub fn with_tools(mut self, tools: impl IntoIterator<Item = Tool>) -> Self {
         self.tools = tools.into_iter().collect();
         self

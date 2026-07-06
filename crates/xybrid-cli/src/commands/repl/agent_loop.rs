@@ -36,7 +36,7 @@ use xybrid_core::runtime_adapter::tool_call::strip_tool_calls;
 use xybrid_core::runtime_adapter::types::GenerationConfig;
 use xybrid_sdk::model::XybridModel;
 
-use super::tools::{self, SearchProvider};
+use super::tools::{self, ToolBox};
 use crate::ui;
 
 /// Tool-turn budget per query. After this many tool-calling turns the loop
@@ -86,19 +86,15 @@ pub(crate) fn run_query(
     model: &XybridModel,
     context: Option<&ConversationContext>,
     question: &str,
-    tools_enabled: bool,
-    provider: &SearchProvider,
+    toolbox: Option<&ToolBox>,
     system_prompt: Option<&str>,
     stream: bool,
     verbose: u8,
 ) -> Result<QueryOutcome> {
     // Tools ride the config; `Default` matches what the executor uses when
     // no config is passed, so plain-chat behavior is unchanged.
-    let config = if tools_enabled {
-        Some(GenerationConfig::default().with_tools(tools::builtin_tools()))
-    } else {
-        None
-    };
+    let config =
+        toolbox.map(|toolbox| GenerationConfig::default().with_tools(toolbox.definitions()));
 
     // ── Tools-offering turn (context-aware; may stream) ─────────────────────
     let mut input = Envelope::new(EnvelopeKind::Text(question.to_string()));
@@ -133,6 +129,17 @@ pub(crate) fn run_query(
         ui::hint("tool turns print after generation");
     }
 
+    // Tool calls can only come back when tools were offered; treat the
+    // impossible case as a plain answer rather than panicking.
+    let Some(toolbox) = toolbox else {
+        return Ok(QueryOutcome {
+            answer: strip_tool_calls(&first_text),
+            already_printed: first_streamed,
+            tool_calls_run: 0,
+            stream_stats: None,
+        });
+    };
+
     // ── Tool continuation turns (non-context, non-streaming) ────────────────
     let mut findings: Vec<String> = Vec::new();
     let mut seen_calls: HashSet<String> = HashSet::new();
@@ -147,7 +154,7 @@ pub(crate) fn run_query(
             tool_calls_run += 1;
             results.push(execute_and_display(
                 call,
-                provider,
+                toolbox,
                 &mut seen_calls,
                 &mut findings,
             ));
@@ -310,7 +317,7 @@ fn run_first_turn(
 /// preview. Repeated calls short-circuit to a nudge without networking.
 fn execute_and_display(
     call: &xybrid_core::gateway::ToolCall,
-    provider: &SearchProvider,
+    toolbox: &ToolBox,
     seen_calls: &mut HashSet<String>,
     findings: &mut Vec<String>,
 ) -> ToolCallResult {
@@ -336,7 +343,7 @@ fn execute_and_display(
 
     let spinner = ui::spinner(&format!("⚙ {label}"));
     let started = Instant::now();
-    let result = tools::execute_tool(call, provider);
+    let result = toolbox.execute(call);
     spinner.finish_and_clear();
     let elapsed_ms = started.elapsed().as_millis();
 

@@ -42,6 +42,7 @@ pub(crate) fn handle_repl_command(
     stream: bool,
     system_prompt: Option<String>,
     no_tools: bool,
+    tools_file: Option<PathBuf>,
     verbose: u8,
 ) -> Result<()> {
     use std::io::{self, Write};
@@ -183,15 +184,36 @@ pub(crate) fn handle_repl_command(
         }
     }
 
-    // Built-in tool calling: on by default when the bundle's metadata
-    // declares support (`tool_calling: true`), off via --no-tools or
-    // `/tools off`. The flag is advisory and per-model — most bundles do
-    // not declare it, so this is effectively a per-model allowlist.
-    let mut tools_state = ToolsState::resolve(loaded_model.as_ref(), no_tools);
+    // Tool calling: on by default when the bundle's metadata declares
+    // support (`tool_calling: true`), off via --no-tools or `/tools off`.
+    // The flag is advisory and per-model — most bundles do not declare it,
+    // so this is effectively a per-model allowlist. `--tools-file` adds
+    // user-defined tools (and counts as an explicit opt-in for models
+    // whose metadata is silent).
+    let user_tools = match &tools_file {
+        Some(path) => tools::load_user_tools(path)
+            .with_context(|| format!("Failed to load tools file: {}", path.display()))?,
+        None => Vec::new(),
+    };
+    let mut tools_state = ToolsState::resolve(
+        loaded_model.as_ref(),
+        no_tools,
+        user_tools,
+        tools_file.is_some(),
+    );
     if tools_state.active() {
         ui::ok("Tool calling: on");
         ui::hint("web_search / fetch_url reach the network; current_time stays local");
-        ui::kv("Search", tools_state.provider.label());
+        ui::kv("Search", tools_state.toolbox.provider.label());
+        if !tools_state.toolbox.user_tools.is_empty() {
+            let names: Vec<&str> = tools_state
+                .toolbox
+                .user_tools
+                .iter()
+                .map(|tool| tool.name.as_str())
+                .collect();
+            ui::kv("User tools", &names.join(", "));
+        }
         ui::hint("Disable with --no-tools or '/tools off'");
     }
 
@@ -283,8 +305,7 @@ pub(crate) fn handle_repl_command(
                     model,
                     conversation_context.as_ref(),
                     input_line,
-                    tools_state.active(),
-                    &tools_state.provider,
+                    tools_state.active().then_some(&tools_state.toolbox),
                     resolved_system.as_deref(),
                     llm_stream,
                     verbose,
@@ -486,22 +507,45 @@ enum SpecialCommandResult {
     NotSpecial,
 }
 
-/// Session state for built-in tool calling.
+/// Session state for tool calling (built-ins + `--tools-file` user tools).
 struct ToolsState {
-    /// The loaded model declared `tool_calling: true` in its metadata.
+    /// Tools may be offered to this model at all.
     available: bool,
     /// Session toggle (`--no-tools`, `/tools on|off`).
     enabled: bool,
-    provider: tools::SearchProvider,
+    toolbox: tools::ToolBox,
 }
 
 impl ToolsState {
-    fn resolve(model: Option<&xybrid_sdk::model::XybridModel>, no_tools: bool) -> Self {
-        let available = model
-            .map(|m| m.is_llm() && m.supports_tool_calling() == Some(true))
-            .unwrap_or(false);
+    fn resolve(
+        model: Option<&xybrid_sdk::model::XybridModel>,
+        no_tools: bool,
+        user_tools: Vec<tools::UserTool>,
+        explicit_tools_file: bool,
+    ) -> Self {
+        let is_llm = model.is_some_and(|m| m.is_llm());
+        let declared = model.and_then(|m| m.supports_tool_calling());
+        // The advisory metadata flag gates the default. An explicit
+        // --tools-file is a user opt-in that overrides *silence* (a model
+        // whose template cannot render tools still fails loudly at run
+        // time) — but not an explicit `tool_calling: false`.
+        let available = is_llm
+            && match declared {
+                Some(true) => true,
+                Some(false) => false,
+                None => explicit_tools_file,
+            };
+        if explicit_tools_file {
+            if !is_llm {
+                ui::warning("--tools-file ignored: no locally-loaded LLM in this session");
+            } else if declared == Some(false) {
+                ui::warning("The model's metadata declares tool_calling: false — tools stay off");
+            } else if no_tools {
+                ui::warning("--no-tools wins over --tools-file: tools are off");
+            }
+        }
         let (provider, warning) = tools::SearchProvider::from_env();
-        if available {
+        if available && !no_tools {
             if let Some(warning) = warning {
                 ui::warning(&warning);
             }
@@ -509,7 +553,10 @@ impl ToolsState {
         Self {
             available,
             enabled: available && !no_tools,
-            provider,
+            toolbox: tools::ToolBox {
+                provider,
+                user_tools,
+            },
         }
     }
 
@@ -693,14 +740,18 @@ fn handle_tools_command(input: &str, tools_state: &mut ToolsState) -> Option<Spe
             println!(
                 "    {}    Search the web via {}",
                 ui::dim("web_search"),
-                tools_state.provider.label()
+                tools_state.toolbox.provider.label()
             );
             println!(
                 "    {}     Fetch a public http(s) URL",
                 ui::dim("fetch_url")
             );
             println!("    {}  Local date and time", ui::dim("current_time"));
+            for tool in &tools_state.toolbox.user_tools {
+                println!("    {}  {} (user)", ui::dim(&tool.name), tool.description);
+            }
             ui::hint("Search provider: set XYBRID_SEARCH_PROVIDER=wikipedia|tavily|brave");
+            ui::hint("Add your own tools with --tools-file <file>");
         }
         "on" => {
             if tools_state.available {
@@ -1057,7 +1108,10 @@ mod tests {
         ToolsState {
             available,
             enabled: available,
-            provider: tools::SearchProvider::Wikipedia,
+            toolbox: tools::ToolBox {
+                provider: tools::SearchProvider::Wikipedia,
+                user_tools: Vec::new(),
+            },
         }
     }
 

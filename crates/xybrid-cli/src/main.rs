@@ -257,6 +257,12 @@ enum Commands {
         /// which is otherwise on for models whose metadata declares support
         #[arg(long)]
         no_tools: bool,
+
+        /// Add user-defined tools from a JSON or YAML file. Each entry maps a
+        /// JSON-schema'd function to a command; the model's arguments arrive
+        /// as JSON on the command's stdin, its stdout is the tool result
+        #[arg(long, value_name = "FILE")]
+        tools_file: Option<PathBuf>,
     },
     /// Trace and analyze telemetry logs from a session
     Trace {
@@ -611,6 +617,7 @@ fn run_command(cli: Cli) -> Result<()> {
             stream,
             system,
             no_tools,
+            tools_file,
         } => commands::repl::handle_repl_command(
             config,
             model,
@@ -621,6 +628,7 @@ fn run_command(cli: Cli) -> Result<()> {
             stream,
             system,
             no_tools,
+            tools_file,
             verbose,
         ),
         Commands::Trace {

@@ -10,7 +10,7 @@ use std::io::Read;
 use std::net::{IpAddr, SocketAddr, ToSocketAddrs};
 use std::time::Duration;
 
-use xybrid_core::gateway::{FunctionDefinition, Tool, ToolCall};
+use xybrid_core::gateway::{Tool, ToolCall};
 use xybrid_core::ir::ToolCallResult;
 
 /// Snippets to keep per search. More context helps synthesis but a small
@@ -270,64 +270,47 @@ fn brave_search(key: &str, query: &str, max: usize) -> Result<SearchResults, Str
 // Tool definitions
 // =============================================================================
 
-/// The tool declarations offered to the model.
+/// The built-in tool declarations offered to the model.
 pub(crate) fn builtin_tools() -> Vec<Tool> {
     vec![
-        Tool {
-            tool_type: "function".to_string(),
-            function: FunctionDefinition {
-                name: "web_search".to_string(),
-                description: Some(
-                    "Search the web for current or factual information and return the \
-                     top result snippets."
-                        .to_string(),
-                ),
-                parameters: Some(serde_json::json!({
-                    "type": "object",
-                    "properties": {
-                        "query": {
-                            "type": "string",
-                            "description": "A focused search query."
-                        }
-                    },
-                    "required": ["query"]
-                })),
-            },
-        },
-        Tool {
-            tool_type: "function".to_string(),
-            function: FunctionDefinition {
-                name: "fetch_url".to_string(),
-                description: Some(
-                    "Fetch a specific public http(s) URL you already know and return its \
-                     readable text. For answering questions, prefer web_search."
-                        .to_string(),
-                ),
-                parameters: Some(serde_json::json!({
-                    "type": "object",
-                    "properties": {
-                        "url": {
-                            "type": "string",
-                            "description": "The full http:// or https:// URL to fetch."
-                        }
-                    },
-                    "required": ["url"]
-                })),
-            },
-        },
-        Tool {
-            tool_type: "function".to_string(),
-            function: FunctionDefinition {
-                name: "current_time".to_string(),
-                description: Some(
-                    "Get the current local date and time. Takes no arguments.".to_string(),
-                ),
-                parameters: Some(serde_json::json!({
-                    "type": "object",
-                    "properties": {}
-                })),
-            },
-        },
+        Tool::function(
+            "web_search",
+            "Search the web for current or factual information and return the \
+             top result snippets.",
+            serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "A focused search query."
+                    }
+                },
+                "required": ["query"]
+            }),
+        ),
+        Tool::function(
+            "fetch_url",
+            "Fetch a specific public http(s) URL you already know and return its \
+             readable text. For answering questions, prefer web_search.",
+            serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "url": {
+                        "type": "string",
+                        "description": "The full http:// or https:// URL to fetch."
+                    }
+                },
+                "required": ["url"]
+            }),
+        ),
+        Tool::function(
+            "current_time",
+            "Get the current local date and time. Takes no arguments.",
+            serde_json::json!({
+                "type": "object",
+                "properties": {}
+            }),
+        ),
     ]
 }
 
@@ -556,18 +539,235 @@ pub(crate) fn dedup_key(call: &ToolCall) -> String {
 pub(crate) fn display_call(call: &ToolCall) -> String {
     let args: serde_json::Value =
         serde_json::from_str(&call.function.arguments).unwrap_or(serde_json::Value::Null);
-    let arg = args
+    if let Some(arg) = args
         .get("query")
         .or_else(|| args.get("url"))
-        .and_then(|v| v.as_str());
-    match arg {
-        Some(arg) => format!("{}({arg:?})", call.function.name),
-        None => format!("{}()", call.function.name),
+        .and_then(|v| v.as_str())
+    {
+        return format!("{}({arg:?})", call.function.name);
+    }
+    // Generic fallback (user tools): show the compact arguments object when
+    // it is short enough to read.
+    match &args {
+        serde_json::Value::Object(map) if !map.is_empty() => {
+            let compact = args.to_string();
+            if compact.chars().count() <= 48 {
+                format!("{}({compact})", call.function.name)
+            } else {
+                format!("{}(…)", call.function.name)
+            }
+        }
+        _ => format!("{}()", call.function.name),
     }
 }
 
-/// Run one tool call and shape the JSON the model reads back.
-pub(crate) fn execute_tool(call: &ToolCall, provider: &SearchProvider) -> ToolCallResult {
+/// The set of tools live in a REPL session: the built-ins plus any
+/// user-declared tools from `--tools-file`.
+pub(crate) struct ToolBox {
+    pub(crate) provider: SearchProvider,
+    pub(crate) user_tools: Vec<UserTool>,
+}
+
+impl ToolBox {
+    /// All tool declarations to offer the model.
+    pub(crate) fn definitions(&self) -> Vec<Tool> {
+        let mut tools = builtin_tools();
+        tools.extend(self.user_tools.iter().map(|tool| {
+            Tool::function(
+                tool.name.clone(),
+                tool.description.clone(),
+                tool.parameters.clone(),
+            )
+        }));
+        tools
+    }
+
+    /// Run one tool call and shape the JSON the model reads back. User
+    /// tools cannot shadow built-ins — collisions are rejected at load.
+    pub(crate) fn execute(&self, call: &ToolCall) -> ToolCallResult {
+        if let Some(tool) = self
+            .user_tools
+            .iter()
+            .find(|tool| tool.name == call.function.name)
+        {
+            let content = match run_user_command(tool, &call.function.arguments) {
+                Ok(value) => value,
+                Err(err) => serde_json::json!({ "error": err }),
+            };
+            return ToolCallResult {
+                call_id: call.id.clone(),
+                name: call.function.name.clone(),
+                content,
+            };
+        }
+        execute_builtin(call, &self.provider)
+    }
+}
+
+// =============================================================================
+// User tools (--tools-file)
+// =============================================================================
+
+const BUILTIN_TOOL_NAMES: [&str; 3] = ["web_search", "fetch_url", "current_time"];
+/// Cap on the bytes read from a user tool's stdout/stderr.
+const USER_TOOL_OUTPUT_CAP: u64 = 64 * 1024;
+
+fn default_user_tool_parameters() -> serde_json::Value {
+    serde_json::json!({ "type": "object", "properties": {} })
+}
+
+fn default_user_tool_timeout() -> u64 {
+    30
+}
+
+/// A user-declared tool from `--tools-file`: a JSON-schema'd function the
+/// model may call, backed by a command the user authored.
+///
+/// The executable and its fixed arguments come from the file only; the
+/// model's arguments are delivered as a JSON object on stdin — never
+/// interpolated into the command line, and never via a shell.
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct UserTool {
+    pub(crate) name: String,
+    pub(crate) description: String,
+    /// JSON Schema for the arguments object.
+    #[serde(default = "default_user_tool_parameters")]
+    pub(crate) parameters: serde_json::Value,
+    /// Command argv: `["./scripts/weather.sh"]` or `["python3", "tool.py"]`.
+    pub(crate) command: Vec<String>,
+    /// Seconds before the command is killed.
+    #[serde(default = "default_user_tool_timeout")]
+    pub(crate) timeout_secs: u64,
+}
+
+/// Load and validate a `--tools-file` (JSON by default, YAML for
+/// `.yaml`/`.yml` extensions).
+pub(crate) fn load_user_tools(path: &std::path::Path) -> anyhow::Result<Vec<UserTool>> {
+    let content = std::fs::read_to_string(path)?;
+    let is_yaml = path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("yaml") || ext.eq_ignore_ascii_case("yml"));
+    let tools: Vec<UserTool> = if is_yaml {
+        serde_yaml::from_str(&content)?
+    } else {
+        serde_json::from_str(&content)?
+    };
+    validate_user_tools(&tools)?;
+    Ok(tools)
+}
+
+fn validate_user_tools(tools: &[UserTool]) -> anyhow::Result<()> {
+    let mut seen = std::collections::HashSet::new();
+    for tool in tools {
+        let valid_name = !tool.name.is_empty()
+            && tool
+                .name
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '_')
+            && !tool.name.starts_with(|c: char| c.is_ascii_digit());
+        if !valid_name {
+            anyhow::bail!(
+                "invalid tool name {:?}: use letters, digits, and underscores, not starting with a digit",
+                tool.name
+            );
+        }
+        if BUILTIN_TOOL_NAMES.contains(&tool.name.as_str()) {
+            anyhow::bail!("tool name {:?} collides with a built-in tool", tool.name);
+        }
+        if !seen.insert(tool.name.as_str()) {
+            anyhow::bail!("duplicate tool name {:?}", tool.name);
+        }
+        if tool.description.trim().is_empty() {
+            anyhow::bail!(
+                "tool {:?} needs a description (the model relies on it)",
+                tool.name
+            );
+        }
+        if tool.command.is_empty() {
+            anyhow::bail!("tool {:?} has an empty command", tool.name);
+        }
+    }
+    Ok(())
+}
+
+/// Run a user tool's command: model arguments as JSON on stdin, stdout is
+/// the result (parsed as JSON when possible, wrapped otherwise). Killed
+/// after `timeout_secs`.
+fn run_user_command(tool: &UserTool, arguments: &str) -> Result<serde_json::Value, String> {
+    use std::io::Write as _;
+    use std::process::Stdio;
+
+    let mut child = std::process::Command::new(&tool.command[0])
+        .args(&tool.command[1..])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("failed to start {:?}: {e}", tool.command[0]))?;
+
+    // Deliver the arguments and close stdin so line-oriented scripts see EOF.
+    if let Some(mut stdin) = child.stdin.take() {
+        let _ = stdin.write_all(arguments.as_bytes());
+    }
+
+    // Read the pipes on their own threads — draining concurrently avoids a
+    // deadlock when the child writes more than a pipe buffer.
+    let stdout_reader = child.stdout.take().map(spawn_capped_reader);
+    let stderr_reader = child.stderr.take().map(spawn_capped_reader);
+
+    let deadline = std::time::Instant::now() + Duration::from_secs(tool.timeout_secs);
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) => {
+                if std::time::Instant::now() >= deadline {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Err(format!("timed out after {}s", tool.timeout_secs));
+                }
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            Err(e) => return Err(format!("wait failed: {e}")),
+        }
+    };
+
+    let stdout = stdout_reader
+        .and_then(|reader| reader.join().ok())
+        .unwrap_or_default();
+    let stderr = stderr_reader
+        .and_then(|reader| reader.join().ok())
+        .unwrap_or_default();
+
+    if !status.success() {
+        let detail = stderr.trim();
+        return Err(format!(
+            "command exited with {status}{}{}",
+            if detail.is_empty() { "" } else { ": " },
+            detail.chars().take(400).collect::<String>()
+        ));
+    }
+
+    let stdout = stdout.trim();
+    if stdout.is_empty() {
+        return Ok(serde_json::json!({ "output": "" }));
+    }
+    Ok(serde_json::from_str(stdout).unwrap_or_else(|_| serde_json::json!({ "output": stdout })))
+}
+
+fn spawn_capped_reader<R: std::io::Read + Send + 'static>(
+    source: R,
+) -> std::thread::JoinHandle<String> {
+    std::thread::spawn(move || {
+        let mut buffer = Vec::new();
+        let _ = source.take(USER_TOOL_OUTPUT_CAP).read_to_end(&mut buffer);
+        String::from_utf8_lossy(&buffer).into_owned()
+    })
+}
+
+/// Run one built-in tool call and shape the JSON the model reads back.
+fn execute_builtin(call: &ToolCall, provider: &SearchProvider) -> ToolCallResult {
     let args: serde_json::Value =
         serde_json::from_str(&call.function.arguments).unwrap_or(serde_json::Value::Null);
 
@@ -680,16 +880,22 @@ pub(crate) fn summarize(result: &ToolCallResult) -> String {
                 .unwrap_or_default();
             format!("Fetched {url}:\n{body}")
         }
-        _ => format!(
-            "{}: {}",
-            result.name,
-            result
+        _ => {
+            // current_time and user tools: lead with a human-readable field
+            // when present, else the (capped) JSON content.
+            let body = result
                 .content
                 .get("human")
+                .or_else(|| result.content.get("output"))
                 .and_then(|v| v.as_str())
                 .map(str::to_string)
-                .unwrap_or_else(|| result.content.to_string())
-        ),
+                .unwrap_or_else(|| result.content.to_string());
+            format!(
+                "{}: {}",
+                result.name,
+                body.chars().take(1200).collect::<String>()
+            )
+        }
     }
 }
 
@@ -839,23 +1045,139 @@ mod tests {
     }
 
     #[test]
-    fn execute_tool_handles_unknown_and_local_tools() {
+    fn execute_builtin_handles_unknown_and_local_tools() {
         let provider = SearchProvider::Wikipedia;
 
-        let unknown = execute_tool(&call("launch_missiles", "{}"), &provider);
+        let unknown = execute_builtin(&call("launch_missiles", "{}"), &provider);
         assert!(unknown.content["error"]
             .as_str()
             .unwrap()
             .contains("unsupported"));
 
-        let time = execute_tool(&call("current_time", "{}"), &provider);
+        let time = execute_builtin(&call("current_time", "{}"), &provider);
         assert!(time.content["iso"].as_str().is_some());
         assert!(time.content["human"].as_str().is_some());
 
         // Missing arguments error without touching the network.
-        let empty_search = execute_tool(&call("web_search", "{}"), &provider);
+        let empty_search = execute_builtin(&call("web_search", "{}"), &provider);
         assert!(empty_search.content["error"].as_str().is_some());
-        let empty_fetch = execute_tool(&call("fetch_url", "{}"), &provider);
+        let empty_fetch = execute_builtin(&call("fetch_url", "{}"), &provider);
         assert!(empty_fetch.content["error"].as_str().is_some());
+    }
+
+    fn user_tool(name: &str, command: &[&str]) -> UserTool {
+        UserTool {
+            name: name.to_string(),
+            description: "test tool".to_string(),
+            parameters: default_user_tool_parameters(),
+            command: command.iter().map(|s| s.to_string()).collect(),
+            timeout_secs: 5,
+        }
+    }
+
+    #[test]
+    fn user_tools_files_parse_json_and_yaml_with_defaults() {
+        let json = r#"[{
+            "name": "get_weather",
+            "description": "Weather for a city.",
+            "parameters": { "type": "object", "properties": { "city": { "type": "string" } } },
+            "command": ["./weather.sh", "--fast"]
+        }]"#;
+        let dir = tempfile::tempdir().unwrap();
+        let json_path = dir.path().join("tools.json");
+        std::fs::write(&json_path, json).unwrap();
+        let tools = load_user_tools(&json_path).unwrap();
+        assert_eq!(tools.len(), 1);
+        assert_eq!(tools[0].name, "get_weather");
+        assert_eq!(tools[0].command, ["./weather.sh", "--fast"]);
+        assert_eq!(tools[0].timeout_secs, 30); // default
+
+        let yaml = "- name: lookup\n  description: Lookup something.\n  command: [\"./lookup\"]\n";
+        let yaml_path = dir.path().join("tools.yaml");
+        std::fs::write(&yaml_path, yaml).unwrap();
+        let tools = load_user_tools(&yaml_path).unwrap();
+        assert_eq!(tools[0].name, "lookup");
+        assert_eq!(tools[0].parameters["type"], "object"); // default schema
+    }
+
+    #[test]
+    fn user_tool_validation_rejects_bad_specs() {
+        // Builtin collision.
+        let err = validate_user_tools(&[user_tool("web_search", &["./x"])]).unwrap_err();
+        assert!(err.to_string().contains("built-in"));
+
+        // Duplicate names.
+        let err =
+            validate_user_tools(&[user_tool("a", &["./x"]), user_tool("a", &["./y"])]).unwrap_err();
+        assert!(err.to_string().contains("duplicate"));
+
+        // Invalid identifier.
+        assert!(validate_user_tools(&[user_tool("bad name!", &["./x"])]).is_err());
+        assert!(validate_user_tools(&[user_tool("9lives", &["./x"])]).is_err());
+
+        // Empty command.
+        assert!(validate_user_tools(&[user_tool("ok", &[])]).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn user_tool_command_receives_args_on_stdin_and_returns_stdout() {
+        // Echoes stdin back — JSON in, JSON out.
+        let tool = user_tool("echo_args", &["/bin/cat"]);
+        let value = run_user_command(&tool, r#"{"city": "Paris"}"#).unwrap();
+        assert_eq!(value["city"], "Paris");
+
+        // Non-JSON stdout is wrapped.
+        let tool = user_tool("greet", &["/bin/sh", "-c", "echo hello"]);
+        let value = run_user_command(&tool, "{}").unwrap();
+        assert_eq!(value["output"], "hello");
+
+        // Non-zero exit surfaces stderr.
+        let tool = user_tool("fail", &["/bin/sh", "-c", "echo boom >&2; exit 3"]);
+        let err = run_user_command(&tool, "{}").unwrap_err();
+        assert!(err.contains("boom"), "stderr missing from: {err}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn user_tool_command_is_killed_on_timeout() {
+        let mut tool = user_tool("sleepy", &["/bin/sh", "-c", "sleep 30"]);
+        tool.timeout_secs = 1;
+        let err = run_user_command(&tool, "{}").unwrap_err();
+        assert!(err.contains("timed out"), "got: {err}");
+    }
+
+    #[test]
+    fn toolbox_dispatches_user_tools_and_builtins() {
+        let toolbox = ToolBox {
+            provider: SearchProvider::Wikipedia,
+            user_tools: vec![user_tool("my_tool", &["/nonexistent-command-xyz"])],
+        };
+
+        // Definitions merge builtins + user tools.
+        let names: Vec<String> = toolbox
+            .definitions()
+            .into_iter()
+            .map(|t| t.function.name)
+            .collect();
+        assert_eq!(
+            names,
+            ["web_search", "fetch_url", "current_time", "my_tool"]
+        );
+
+        // User dispatch reaches the command runner (spawn fails → error
+        // content, not a panic and not the builtin "unsupported" arm).
+        let result = toolbox.execute(&call("my_tool", "{}"));
+        assert!(result.content["error"]
+            .as_str()
+            .unwrap()
+            .contains("failed to start"));
+
+        // Unknown names still fall through to the builtin error arm.
+        let result = toolbox.execute(&call("nope", "{}"));
+        assert!(result.content["error"]
+            .as_str()
+            .unwrap()
+            .contains("unsupported"));
     }
 }

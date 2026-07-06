@@ -23,7 +23,7 @@
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     use std::path::PathBuf;
     use xybrid_core::execution::{ModelMetadata, TemplateExecutor};
-    use xybrid_core::gateway::{FunctionDefinition, Tool, ToolCall};
+    use xybrid_core::gateway::{Tool, ToolCall};
     use xybrid_core::ir::{Envelope, EnvelopeKind, ToolCallResult};
     use xybrid_core::runtime_adapter::tool_call::strip_tool_calls;
     use xybrid_core::runtime_adapter::types::GenerationConfig;
@@ -35,37 +35,29 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     const BEDROOM_TEMP_C: f64 = 17.5;
 
     fn tools() -> Vec<Tool> {
-        let get_temperature = Tool {
-            tool_type: "function".to_string(),
-            function: FunctionDefinition {
-                name: "get_temperature".to_string(),
-                description: Some("Get the current temperature in a room, in Celsius.".to_string()),
-                parameters: Some(serde_json::json!({
-                    "type": "object",
-                    "properties": {
-                        "room": { "type": "string", "description": "Name of the room." }
-                    },
-                    "required": ["room"]
-                })),
-            },
-        };
-        let set_thermostat = Tool {
-            tool_type: "function".to_string(),
-            function: FunctionDefinition {
-                name: "set_thermostat".to_string(),
-                description: Some(
-                    "Set the thermostat target temperature for a room, in Celsius.".to_string(),
-                ),
-                parameters: Some(serde_json::json!({
-                    "type": "object",
-                    "properties": {
-                        "room": { "type": "string", "description": "Name of the room." },
-                        "temperature_c": { "type": "number", "description": "Target temperature." }
-                    },
-                    "required": ["room", "temperature_c"]
-                })),
-            },
-        };
+        let get_temperature = Tool::function(
+            "get_temperature",
+            "Get the current temperature in a room, in Celsius.",
+            serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "room": { "type": "string", "description": "Name of the room." }
+                },
+                "required": ["room"]
+            }),
+        );
+        let set_thermostat = Tool::function(
+            "set_thermostat",
+            "Set the thermostat target temperature for a room, in Celsius.",
+            serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "room": { "type": "string", "description": "Name of the room." },
+                    "temperature_c": { "type": "number", "description": "Target temperature." }
+                },
+                "required": ["room", "temperature_c"]
+            }),
+        );
         vec![get_temperature, set_thermostat]
     }
 
