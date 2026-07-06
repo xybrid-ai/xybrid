@@ -32,6 +32,16 @@ const GEMMA_TOOL_CALL_START: &str = "<|tool_call>";
 const GEMMA_TOOL_CALL_END: &str = "<tool_call|>";
 const GEMMA_TOOL_RESPONSE_START: &str = "<|tool_response>";
 const GEMMA_TOOL_RESPONSE_END: &str = "<tool_response|>";
+const FAMILY_MARKERS: &[&str] = &[
+    TOOL_CALL_START,
+    TOOL_CALL_END,
+    TOOL_RESPONSE_START,
+    TOOL_RESPONSE_END,
+    GEMMA_TOOL_CALL_START,
+    GEMMA_TOOL_CALL_END,
+    GEMMA_TOOL_RESPONSE_START,
+    GEMMA_TOOL_RESPONSE_END,
+];
 const RESERVED_PROTOCOL_MARKERS: &[&str] = &[
     TOOL_CALL_START,
     TOOL_CALL_END,
@@ -233,6 +243,25 @@ pub fn strip_tool_calls(text: &str) -> String {
 
     output.push_str(rest);
     output.trim().to_string()
+}
+
+/// Returns whether text contains any tool-family protocol marker.
+///
+/// Use this to distinguish "the model made no tool call" from "the model
+/// attempted a tool call that failed to parse" when [`parse_tool_calls`]
+/// returns an empty vector. Generic turn markers such as `<|im_end|>` are not
+/// counted.
+///
+/// # Examples
+///
+/// ```
+/// use xybrid_core::runtime_adapter::tool_call::has_tool_markers;
+///
+/// assert!(has_tool_markers("<|tool_call_start|>[weather()]"));
+/// assert!(!has_tool_markers("plain assistant prose"));
+/// ```
+pub fn has_tool_markers(text: &str) -> bool {
+    FAMILY_MARKERS.iter().any(|marker| text.contains(marker))
 }
 
 /// Composes a raw tool-call continuation prompt with tool responses.
@@ -556,6 +585,44 @@ hi<turn|>
         );
 
         assert_eq!(strip_tool_calls(&text), "before  middle  after");
+    }
+
+    #[test]
+    fn has_tool_markers_returns_true_for_lfm2_call_block() {
+        let text = wrapped("[weather(city='Paris')]");
+
+        assert!(has_tool_markers(&text));
+    }
+
+    #[test]
+    fn has_tool_markers_returns_true_for_gemma_call_block() {
+        let text = gemma_wrapped("call:weather{city:<|\"|>Paris<|\"|>}");
+
+        assert!(has_tool_markers(&text));
+    }
+
+    #[test]
+    fn has_tool_markers_returns_true_for_lone_start_marker() {
+        let text = format!("assistant text {TOOL_CALL_START}");
+
+        assert!(has_tool_markers(&text));
+    }
+
+    #[test]
+    fn has_tool_markers_returns_true_for_gemma_response_block() {
+        let text = format!("{GEMMA_TOOL_RESPONSE_START}sunny{GEMMA_TOOL_RESPONSE_END}");
+
+        assert!(has_tool_markers(&text));
+    }
+
+    #[test]
+    fn has_tool_markers_returns_false_for_plain_prose() {
+        assert!(!has_tool_markers("plain assistant prose"));
+    }
+
+    #[test]
+    fn has_tool_markers_returns_false_for_turn_markers() {
+        assert!(!has_tool_markers("<|im_start|>assistant\nhi<|im_end|>"));
     }
 
     #[test]
