@@ -1,0 +1,40 @@
+bindings/unity/README.md
+  s_fb271508a8988a::t_7a3710786609c8 256
+  s_fb271508a8988a::t_7d4aca0a3593c6 57-58,60-61,63
+  s_fb271508a8988a::t_1a03a619fdcfaf 330-332
+  s_fb271508a8988a::t_3e9cb44fd9f0c3 310-313
+  s_fb271508a8988a::t_d2a806a7af205f 56
+  s_fb271508a8988a::t_1532743587e844 59
+  s_fb271508a8988a::t_90b6c7cefb5545 62
+  s_fb271508a8988a::t_03f59800331bda 64-66
+  s_fb271508a8988a::t_191d9827cb9fae 7-10,12,14,16-33,37-43,45,50-53,68,80,82-87,89,91-94,96-98
+README.zh-CN.md
+  s_fb271508a8988a::t_9c1f574d129d8e 197,200
+README.ja-JP.md
+  s_fb271508a8988a::t_d96e9154fca9fe 197,200
+docs/content/docs/quickstart.zh.mdx
+  s_fb271508a8988a::t_b758ee99130f64 122,125
+README.md
+  s_fb271508a8988a::t_5edb12cc0a56ae 182-184,187,190-191
+  s_fb271508a8988a::t_33451deeff1f9e 192
+CHANGELOG.md
+  s_fb271508a8988a::t_dbe5a9ed3cea12 10-18
+docs/content/docs/quickstart.mdx
+  s_fb271508a8988a::t_4f111e40da3043 121,124
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "feda94d100a0b6f516a46ed22b6842793a2d4cbf",
+  "prompts": {},
+  "sessions": {
+    "s_fb271508a8988a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8ce838ba-c727-47cf-8b97-de143d5f0c48",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
