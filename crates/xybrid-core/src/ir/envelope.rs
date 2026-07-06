@@ -1148,9 +1148,30 @@ pub struct Envelope {
     pub metadata: HashMap<String, String>,
 }
 
+/// Result of executing one model-requested tool call, fed back to the model
+/// in a continuation turn (see [`Envelope::tool_results`]).
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct ToolCallResult {
+    /// The `ToolCall.id` this result answers (e.g. "call_0").
+    pub call_id: String,
+    /// The tool (function) name that was invoked.
+    pub name: String,
+    /// The tool's output, fed back to the model verbatim as JSON.
+    pub content: serde_json::Value,
+}
+
 impl Envelope {
     /// Metadata key for storing the local unique ID.
     pub const LOCAL_ID_METADATA_KEY: &'static str = "xybrid.local_id";
+    /// Metadata key carrying tool-execution results (JSON array of
+    /// [`ToolCallResult`]) on a tool-continuation envelope.
+    pub const TOOL_RESPONSES_METADATA_KEY: &'static str = "tool_responses";
+    /// Metadata key carrying the prior turn's raw assistant text (including
+    /// its tool-call block) on a tool-continuation envelope.
+    pub const TOOL_PRIOR_TEXT_METADATA_KEY: &'static str = "tool_prior_text";
+    /// Metadata key carrying the parsed tool calls (JSON array of gateway
+    /// `ToolCall`) on an LLM response envelope whose request offered tools.
+    pub const TOOL_CALLS_METADATA_KEY: &'static str = "tool_calls";
 
     /// Creates a new envelope with the specified kind and empty metadata.
     ///
@@ -1274,6 +1295,57 @@ impl Envelope {
         parts.extend(images);
 
         Ok(Self::new(EnvelopeKind::MultiPart(parts)).with_role(super::MessageRole::User))
+    }
+
+    /// Creates a tool-continuation envelope: the follow-up turn after the
+    /// model requested tool calls.
+    ///
+    /// One `run` is one model turn, so the tool loop lives in app code: run a
+    /// tools-bearing request, execute the calls it returns, then run this
+    /// envelope to feed the results back. `user_text` is the original user
+    /// message of the turn being continued and `prior_assistant_text` is that
+    /// turn's raw output text, tool-call block included; pass `results` in
+    /// call order. Run the continuation with the same `GenerationConfig`
+    /// tools (and `system_prompt` metadata, if any) as the original turn so
+    /// the executor recomposes an identical chat prefix.
+    ///
+    /// Only the immediately prior assistant turn is replayed: multi-hop
+    /// chains work turn by turn, but earlier tool exchanges are not re-sent.
+    /// Continuation runs on the non-streaming text paths; streaming paths
+    /// and image-bearing conversations reject these envelopes as invalid
+    /// input (image embeddings cannot replay through the raw text path).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use xybrid_core::ir::{Envelope, ToolCallResult};
+    ///
+    /// let prior_text =
+    ///     r#"<|tool_call_start|>[get_temperature(room="bedroom")]<|tool_call_end|>"#;
+    /// let results = [ToolCallResult {
+    ///     call_id: "call_0".to_string(),
+    ///     name: "get_temperature".to_string(),
+    ///     content: serde_json::json!({"temperature_c": 17.5}),
+    /// }];
+    ///
+    /// let continuation = Envelope::tool_results("check the bedroom", prior_text, &results);
+    /// ```
+    pub fn tool_results(
+        user_text: impl Into<String>,
+        prior_assistant_text: impl Into<String>,
+        results: &[ToolCallResult],
+    ) -> Self {
+        let mut envelope = Self::new(EnvelopeKind::Text(user_text.into()));
+        envelope.metadata.insert(
+            Self::TOOL_PRIOR_TEXT_METADATA_KEY.to_string(),
+            prior_assistant_text.into(),
+        );
+        envelope.metadata.insert(
+            Self::TOOL_RESPONSES_METADATA_KEY.to_string(),
+            serde_json::to_string(results)
+                .expect("ToolCallResult serialization cannot fail: all fields are JSON-native"),
+        );
+        envelope
     }
 
     /// Returns the unique local ID of this envelope.
@@ -1941,6 +2013,43 @@ mod tests {
         envelope.set_metadata("key1".to_string(), "value1".to_string());
         assert_eq!(envelope.get_metadata("key1"), Some(&"value1".to_string()));
         assert_eq!(envelope.get_metadata("nonexistent"), None);
+    }
+
+    #[test]
+    fn test_tool_results_sets_text_kind_metadata_and_local_id() {
+        let prior_assistant_text = r#"I will check.<|tool_call_start|>{"name":"get_temperature","arguments":{"room":"kitchen"}}<|tool_call_end|>"#;
+        let results = vec![
+            ToolCallResult {
+                call_id: "call_0".to_string(),
+                name: "get_temperature".to_string(),
+                content: serde_json::json!({"room": "kitchen", "temperature_c": 21}),
+            },
+            ToolCallResult {
+                call_id: "call_1".to_string(),
+                name: "get_humidity".to_string(),
+                content: serde_json::json!({"room": "kitchen", "humidity": 0.42}),
+            },
+        ];
+
+        let envelope =
+            Envelope::tool_results("weather in the kitchen", prior_assistant_text, &results);
+
+        assert_eq!(
+            envelope.kind,
+            EnvelopeKind::Text("weather in the kitchen".to_string())
+        );
+        assert_eq!(
+            envelope.get_metadata(Envelope::TOOL_PRIOR_TEXT_METADATA_KEY),
+            Some(&prior_assistant_text.to_string())
+        );
+
+        let raw_results = envelope
+            .get_metadata(Envelope::TOOL_RESPONSES_METADATA_KEY)
+            .expect("tool_results stores serialized tool responses");
+        let parsed_results: Vec<ToolCallResult> =
+            serde_json::from_str(raw_results).expect("tool response metadata is valid JSON");
+        assert_eq!(parsed_results, results);
+        assert!(!envelope.local_id().is_empty());
     }
 
     #[test]

@@ -390,6 +390,7 @@ pub struct SeamInfo {
 }
 
 const FALLBACK_POLICY_RESOURCE_MAX_AGE: Duration = Duration::from_millis(500);
+const CLOUD_FALLBACK_UNSUPPORTED_TOOLS_REASON: &str = "cloud_fallback_unsupported_tools";
 
 static FALLBACK_AUTHORITY: OnceLock<LocalAuthority> = OnceLock::new();
 
@@ -486,8 +487,10 @@ fn local_reliability_hint_after_abort(
 
 /// Inspect the local-leg result and, on a typed cloud-fallback abort, fire
 /// `on_seam`, retry on the cloud adapter, and return the cloud
-/// [`InferenceResult`]. On any other shape the original result is returned
-/// unchanged.
+/// [`InferenceResult`]. Tool-bearing requests are refused before the cloud leg:
+/// the gateway adapter does not receive [`GenerationConfig`], so forwarding
+/// would silently drop `GenerationConfig::tools`. On any other shape the
+/// original result is returned unchanged.
 ///
 /// `cancellation_token`, when set, makes the cloud retry leg honour
 /// caller-driven cancellation. The cloud leg cannot meaningfully react to
@@ -510,6 +513,7 @@ fn dispatch_after_local<F, S>(
     policy_metrics: xybrid_core::context::DeviceMetrics,
     signal_context: Option<SignalContext>,
     cancellation_token: Option<CancellationToken>,
+    tools_requested: bool,
     on_token: &mut F,
     on_seam: &mut S,
 ) -> SdkResult<InferenceResult>
@@ -552,16 +556,6 @@ where
             };
             on_seam(seam);
 
-            if cancellation_token
-                .as_ref()
-                .is_some_and(CancellationToken::is_cancelled)
-            {
-                return Err(SdkError::inference(format!(
-                    "Execution aborted: {}",
-                    crate::run_options::AbortReason::UserCancelled
-                )));
-            }
-
             // FR-6: reuse the original prompt; no partial-token reuse.
             let cloud_envelope = envelope.clone();
             let cloud_provider = cloud_envelope.metadata.get("provider").cloned();
@@ -581,6 +575,46 @@ where
                 .get("model")
                 .map(|s| s.as_str())
                 .unwrap_or(model_id);
+            if cancellation_token
+                .as_ref()
+                .is_some_and(CancellationToken::is_cancelled)
+            {
+                return Err(SdkError::inference(format!(
+                    "Execution aborted: {}",
+                    crate::run_options::AbortReason::UserCancelled
+                )));
+            }
+
+            // Tool-bearing requests fail closed before policy or cloud
+            // dispatch (after the cancellation check — user intent wins over
+            // the capability error when both apply).
+            if tools_requested {
+                crate::telemetry::publish_cloud_denied_by_policy(
+                    &correlation_id,
+                    cloud_model_id,
+                    reason,
+                    CLOUD_FALLBACK_UNSUPPORTED_TOOLS_REASON,
+                    local_latency_ms,
+                );
+                record_cloud_outcome(
+                    authority,
+                    cloud_model_id,
+                    cloud_provider.as_deref(),
+                    0,
+                    false,
+                    Some(CLOUD_FALLBACK_UNSUPPORTED_TOOLS_REASON.to_string()),
+                    OutcomeCategory::HardFail {
+                        reason: CLOUD_FALLBACK_UNSUPPORTED_TOOLS_REASON.to_string(),
+                    },
+                    signal_context,
+                );
+                return Err(SdkError::inference(
+                    "cloud fallback is not available for tool-calling requests: tools are not \
+                     forwarded to the gateway yet; run tool-calling requests local-only or drop \
+                     `tools` to allow fallback",
+                ));
+            }
+
             let policy_decision = authority.apply_policy(&PolicyRequest {
                 stage_id: cloud_model_id.to_string(),
                 envelope: cloud_envelope.clone(),
@@ -1830,6 +1864,20 @@ impl XybridModel {
         self.handle.read().map(|h| h.loaded).unwrap_or(false)
     }
 
+    /// Whether the model bundle declares local tool-calling support.
+    ///
+    /// Advisory tri-state from the bundle's optional `tool_calling` metadata
+    /// flag: `None` means the bundle says nothing, `Some(true)`/`Some(false)`
+    /// are explicit declarations. Use it to gate tool UI; enforcement stays
+    /// at run time (a tools-bearing request against an unsupporting template
+    /// fails as invalid input regardless of this flag).
+    pub fn supports_tool_calling(&self) -> Option<bool> {
+        self.handle
+            .read()
+            .ok()
+            .and_then(|h| h.metadata.supports_tool_calling())
+    }
+
     /// Check if this model supports streaming.
     pub fn supports_streaming(&self) -> bool {
         self.supports_streaming
@@ -3029,6 +3077,9 @@ impl XybridModel {
     ///   `model`, `system_prompt`, `temperature`, …) for the retry leg. See
     ///   [`CloudRuntimeAdapter`](xybrid_core::runtime_adapter::CloudRuntimeAdapter)
     ///   for supported keys.
+    /// - Requests with `GenerationConfig::tools` do not enter the cloud leg yet:
+    ///   the gateway adapter does not forward tools, so the wrapper emits the
+    ///   local abort seam and then fails closed before policy or cloud dispatch.
     /// - The wrapper is fully synchronous; the default `CloudRuntimeAdapter`
     ///   consumes OpenAI-compatible gateway SSE via `CloudStreaming`.
     /// - **Cancellation timing across the seam.** A cancel set on the
@@ -3078,6 +3129,10 @@ impl XybridModel {
         let local_resource_summary = local_resource_guard.finish();
         let policy_metrics = fallback_policy_metrics(options);
         let signal_context = Some(SignalContext::from_metrics(&policy_metrics));
+        let tools_requested = options
+            .generation_config
+            .as_ref()
+            .is_some_and(|config| !config.tools.is_empty());
 
         dispatch_after_local(
             local_result,
@@ -3092,6 +3147,7 @@ impl XybridModel {
             policy_metrics,
             signal_context,
             options.cancellation_token.clone(),
+            tools_requested,
             on_token,
             on_seam,
         )
@@ -3861,6 +3917,19 @@ mod tests {
         xybrid_core::ir::Envelope::new(xybrid_core::ir::EnvelopeKind::Text(text.to_string()))
     }
 
+    fn tool_generation_config() -> GenerationConfig {
+        let mut config = GenerationConfig::default();
+        config.tools.push(xybrid_core::gateway::Tool {
+            tool_type: "function".to_string(),
+            function: xybrid_core::gateway::FunctionDefinition {
+                name: "lookup_weather".to_string(),
+                description: Some("Look up current weather".to_string()),
+                parameters: None,
+            },
+        });
+        config
+    }
+
     fn test_loaded_model(supports_streaming: bool) -> XybridModel {
         let metadata =
             xybrid_core::execution::ModelMetadata::onnx("local-test-model", "1.0", "model.onnx");
@@ -4025,6 +4094,7 @@ mod tests {
             default_metrics(),
             Some(default_signal()),
             None,
+            false,
             &mut on_token,
             &mut on_seam,
         )
@@ -4083,6 +4153,62 @@ mod tests {
         assert_eq!(cloud.call_count(), 1);
         assert_eq!(result.text(), Some("hello from cloud"));
         assert_eq!(collected.lock().unwrap().as_slice(), ["hello from cloud"]);
+    }
+
+    #[test]
+    fn run_streaming_with_fallback_refuses_cloud_when_tools_requested() {
+        let model = test_loaded_model(true);
+        let cloud = FakeCloudAdapter::new("must not run");
+        let mut critical_snapshot = xybrid_core::device::ResourceSnapshot::unknown();
+        critical_snapshot.memory_pressure = xybrid_core::device::MemoryPressure::Critical;
+        let resource_provider = Arc::new(FixedUnitResourceProvider::new(critical_snapshot));
+        let options = RunOptions::new()
+            .with_generation_config(tool_generation_config())
+            .with_abort_policy(
+                crate::run_options::AbortPolicy::default()
+                    .stop_on(crate::run_options::AbortSignal::MemoryPressureCritical)
+                    .with_cloud_fallback(true)
+                    .with_max_grace_tokens(0),
+            )
+            .with_resource_provider(resource_provider)
+            .with_correlation_id("corr-tools-pre-run");
+        let envelope = text_envelope("use a tool");
+        let collected: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+        let collected_for_cb = collected.clone();
+        let mut on_token = move |t: xybrid_core::runtime_adapter::types::PartialToken| {
+            collected_for_cb.lock().unwrap().push(t.token);
+            Ok::<_, Box<dyn std::error::Error + Send + Sync>>(())
+        };
+        let seam_count = Arc::new(AtomicUsize::new(0));
+        let seam_count_for_cb = seam_count.clone();
+        let mut on_seam = move |s: SeamInfo| {
+            seam_count_for_cb.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            assert_eq!(s.reason, xybrid_core::abort::AbortReason::StressMemory);
+            assert_eq!(s.correlation_id, "corr-tools-pre-run");
+            assert_eq!(s.local_tokens, 0);
+        };
+
+        let result = model.run_streaming_with_fallback(
+            &envelope,
+            &options,
+            &cloud,
+            &mut on_token,
+            &mut on_seam,
+        );
+
+        match result {
+            Err(SdkError::InferenceError { message, .. }) => {
+                assert!(
+                    message.contains("cloud fallback is not available for tool-calling requests"),
+                    "{message}"
+                );
+                assert!(message.contains("tools are not forwarded"), "{message}");
+            }
+            other => panic!("expected unsupported tools fallback error, got {other:?}"),
+        }
+        assert_eq!(seam_count.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert_eq!(cloud.call_count(), 0);
+        assert!(collected.lock().unwrap().is_empty());
     }
 
     #[test]
@@ -4155,6 +4281,7 @@ mod tests {
             default_metrics(),
             Some(default_signal()),
             None,
+            false,
             &mut on_token,
             &mut on_seam,
         )
@@ -4181,6 +4308,75 @@ mod tests {
         assert!(matches!(
             outcomes[1].target,
             xybrid_core::orchestrator::authority::ResolvedTarget::Cloud { .. }
+        ));
+        assert_eq!(outcomes[1].model_id.as_deref(), Some("deepseek-chat"));
+    }
+
+    #[test]
+    fn dispatch_after_local_records_cloud_hard_fail_when_tools_requested() {
+        let cloud = FakeCloudAdapter::new("must not run");
+        let authority = FakeAuthority::allow();
+        let mut envelope = text_envelope("use a tool");
+        envelope
+            .metadata
+            .insert("provider".to_string(), "deepseek".to_string());
+        envelope
+            .metadata
+            .insert("model".to_string(), "deepseek-chat".to_string());
+        let mut on_token =
+            |_: xybrid_core::runtime_adapter::types::PartialToken| -> Result<(), Box<dyn std::error::Error + Send + Sync>> { Ok(()) };
+        let seam_count = Arc::new(AtomicUsize::new(0));
+        let seam_count_for_cb = seam_count.clone();
+        let mut on_seam = move |_s: SeamInfo| {
+            seam_count_for_cb.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        };
+        let local_result: SdkResult<InferenceResult> = Err(SdkError::AbortedForCloudFallback {
+            reason: xybrid_core::abort::AbortReason::StressMemory,
+        });
+
+        let result = dispatch_after_local(
+            local_result,
+            &envelope,
+            &cloud,
+            "corr-tools".to_string(),
+            "local-model",
+            2,
+            120,
+            None,
+            &authority,
+            default_metrics(),
+            Some(default_signal()),
+            None,
+            true,
+            &mut on_token,
+            &mut on_seam,
+        );
+
+        match result {
+            Err(SdkError::InferenceError { message, .. }) => {
+                assert!(
+                    message.contains("cloud fallback is not available for tool-calling requests"),
+                    "{message}"
+                );
+            }
+            other => panic!("expected unsupported tools fallback error, got {other:?}"),
+        }
+        assert_eq!(seam_count.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert_eq!(cloud.call_count(), 0);
+        assert!(authority.policy_requests().is_empty());
+
+        let outcomes = authority.outcomes();
+        assert_eq!(outcomes.len(), 2);
+        assert!(matches!(
+            outcomes[0].category,
+            Some(
+                xybrid_core::orchestrator::authority::OutcomeCategory::AbortedForCloudFallback { .. }
+            )
+        ));
+        assert!(matches!(
+            outcomes[1].category,
+            Some(xybrid_core::orchestrator::authority::OutcomeCategory::HardFail { ref reason })
+                if reason == CLOUD_FALLBACK_UNSUPPORTED_TOOLS_REASON
         ));
         assert_eq!(outcomes[1].model_id.as_deref(), Some("deepseek-chat"));
     }
@@ -4216,6 +4412,7 @@ mod tests {
             default_metrics(),
             Some(default_signal()),
             None,
+            false,
             &mut on_token,
             &mut on_seam,
         );
@@ -4285,6 +4482,7 @@ mod tests {
             default_metrics(),
             Some(default_signal()),
             None,
+            false,
             &mut on_token,
             &mut on_seam,
         )
@@ -4333,6 +4531,7 @@ mod tests {
             default_metrics(),
             Some(default_signal()),
             Some(cancellation),
+            false,
             &mut on_token,
             &mut on_seam,
         );
@@ -4998,6 +5197,7 @@ mod tests {
             default_metrics(),
             Some(default_signal()),
             None,
+            false,
             &mut on_token,
             &mut on_seam,
         );
@@ -5056,6 +5256,7 @@ mod tests {
             default_metrics(),
             Some(default_signal()),
             None,
+            false,
             &mut on_token,
             &mut on_seam,
         )
@@ -5093,6 +5294,7 @@ mod tests {
             default_metrics(),
             Some(default_signal()),
             None,
+            false,
             &mut on_token,
             &mut on_seam,
         )
@@ -5130,6 +5332,7 @@ mod tests {
             default_metrics(),
             Some(default_signal()),
             None,
+            false,
             &mut on_token,
             &mut on_seam,
         )
@@ -5169,6 +5372,7 @@ mod tests {
             default_metrics(),
             Some(default_signal()),
             None,
+            false,
             &mut on_token,
             &mut on_seam,
         );
@@ -5214,6 +5418,7 @@ mod tests {
             default_metrics(),
             Some(default_signal()),
             None,
+            false,
             &mut on_token,
             &mut on_seam,
         );

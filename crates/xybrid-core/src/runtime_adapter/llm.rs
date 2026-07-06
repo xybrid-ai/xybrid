@@ -179,6 +179,26 @@ pub trait LlmBackend: Send + Sync {
     /// Generate text from a raw prompt (no chat template).
     fn generate_raw(&self, prompt: &str, config: &GenerationConfig) -> LlmResult<GenerationOutput>;
 
+    /// Render the chat prompt for `messages` exactly as [`Self::generate`]
+    /// would (native template, fallbacks, tool definitions from
+    /// `config.tools`) WITHOUT running generation.
+    ///
+    /// This exists so the executor can compose protocol-faithful raw
+    /// continuations (tool-result turns appended to a byte-identical first
+    /// prompt, maximizing KV-prefix reuse) through [`Self::generate_raw`].
+    /// Backends that never format chat prompts as text return the default
+    /// invalid-input error.
+    fn render_chat_prompt(
+        &self,
+        _messages: &[ChatMessage],
+        _config: &GenerationConfig,
+    ) -> LlmResult<String> {
+        Err(AdapterError::InvalidInput(format!(
+            "backend '{}' does not support chat-prompt rendering",
+            self.name()
+        )))
+    }
+
     /// Generate text with streaming, calling the callback for each token.
     ///
     /// The callback receives a `PartialToken` for each generated token.
@@ -946,6 +966,62 @@ mod tests {
         assert!(result.is_err());
         let err_msg = result.unwrap_err().to_string();
         assert!(err_msg.contains("callback error") || err_msg.contains("User cancelled"));
+    }
+
+    /// Backends that never format chat prompts as text (cloud, mocks) must
+    /// inherit a trait-level default that rejects with an invalid-input
+    /// error naming the backend, rather than silently returning something.
+    #[test]
+    fn default_render_chat_prompt_returns_invalid_input() {
+        struct MockBackend;
+
+        impl LlmBackend for MockBackend {
+            fn name(&self) -> &str {
+                "mock"
+            }
+            fn supported_formats(&self) -> Vec<&'static str> {
+                vec!["test"]
+            }
+            fn load(&mut self, _config: &LlmConfig) -> LlmResult<()> {
+                Ok(())
+            }
+            fn is_loaded(&self) -> bool {
+                true
+            }
+            fn unload(&mut self) -> LlmResult<()> {
+                Ok(())
+            }
+            fn generate(
+                &self,
+                _messages: &[ChatMessage],
+                _config: &GenerationConfig,
+            ) -> LlmResult<GenerationOutput> {
+                unreachable!("test only exercises the default render_chat_prompt")
+            }
+            fn generate_raw(
+                &self,
+                _prompt: &str,
+                _config: &GenerationConfig,
+            ) -> LlmResult<GenerationOutput> {
+                unreachable!("test only exercises the default render_chat_prompt")
+            }
+            // Uses default render_chat_prompt implementation
+        }
+
+        let backend = MockBackend;
+        let err = backend
+            .render_chat_prompt(&[ChatMessage::user("hi")], &GenerationConfig::default())
+            .unwrap_err();
+
+        match err {
+            AdapterError::InvalidInput(msg) => {
+                assert!(
+                    msg.contains("'mock' does not support chat-prompt rendering"),
+                    "unexpected message: {msg}"
+                );
+            }
+            other => panic!("expected InvalidInput, got {other:?}"),
+        }
     }
 
     #[test]

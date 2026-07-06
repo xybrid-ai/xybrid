@@ -49,6 +49,10 @@ use super::llm_telemetry::{
     insert_llm_streaming_metrics, mirror_llm_metrics_to_span, stamp_llm_runtime_backend,
     stamp_llm_span_cost_attribution,
 };
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+use super::tool_continuation::{
+    reject_tool_continuation_input, run_tool_continuation, text_messages_from_multimodal,
+};
 
 fn mark_execution_terminal(guard: &ExecutionGuard, error: &AdapterError) {
     if error.cloud_fallback_abort_reason().is_some() {
@@ -1358,6 +1362,7 @@ impl TemplateExecutor {
         stamp_llm_span_cost_attribution(metadata);
 
         reject_text_only_model_image_input(metadata, input)?;
+        reject_tool_continuation_input(input, "streaming")?;
 
         // Build full model path
         let model_path = Path::new(&self.base_path).join(model_file);
@@ -1439,6 +1444,7 @@ impl TemplateExecutor {
             &backend_name,
             cached_prefix,
             None,
+            !gen_config.tools.is_empty(),
         ))
     }
 
@@ -1529,6 +1535,7 @@ impl TemplateExecutor {
             &backend_name,
             cached_prefix,
             None,
+            !gen_config.tools.is_empty(),
         ))
     }
 
@@ -1543,6 +1550,23 @@ impl TemplateExecutor {
         backend_hint: Option<&str>,
         config: Option<&GenerationConfig>,
     ) -> ExecutorResult<Envelope> {
+        // Tool-result continuations replay through the raw text path and
+        // must be intercepted here, before envelope → message conversion:
+        // the messages-based functions below never see continuation
+        // metadata.
+        if let Some(responses_json) = input.metadata.get(Envelope::TOOL_RESPONSES_METADATA_KEY) {
+            return self.execute_vlm_tool_continuation(
+                metadata,
+                model_file,
+                chat_template,
+                context_length,
+                input,
+                responses_json,
+                backend_hint,
+                config,
+            );
+        }
+
         let messages = vec![MultimodalChatMessage::from_envelope(input)?];
         self.execute_llm_multimodal_messages(
             metadata,
@@ -1553,6 +1577,67 @@ impl TemplateExecutor {
             backend_hint,
             config,
         )
+    }
+
+    /// Text-only tool-result continuation on the vision-language path (see
+    /// `Envelope::tool_results`). Loads the same adapter the generate path
+    /// would, then replays the conversation through the raw continuation
+    /// path. Image-bearing conversations cannot re-evaluate their image
+    /// embeddings from text and are rejected by
+    /// `text_messages_from_multimodal`.
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    fn execute_vlm_tool_continuation(
+        &mut self,
+        metadata: &ModelMetadata,
+        model_file: &str,
+        chat_template: Option<&str>,
+        context_length: usize,
+        input: &Envelope,
+        responses_json: &str,
+        backend_hint: Option<&str>,
+        config: Option<&GenerationConfig>,
+    ) -> ExecutorResult<Envelope> {
+        // Same span label as the generate path: a continuation IS a
+        // vision-language inference turn to the telemetry consumer.
+        let _llm_span = xybrid_trace::SpanGuard::new("vlm_inference_with_messages");
+        xybrid_trace::add_metadata("model", model_file);
+        stamp_llm_span_cost_attribution(metadata);
+
+        self.ensure_vlm_adapter(
+            metadata,
+            model_file,
+            chat_template,
+            context_length,
+            backend_hint,
+        )?;
+
+        let gen_config = config.cloned().unwrap_or_default();
+        let messages = vec![MultimodalChatMessage::from_envelope(input)?];
+        let chat_messages = text_messages_from_multimodal(&messages)?;
+
+        let (output, backend_name, cached_prefix) = if let Some((_, adapter)) =
+            &self.llm_adapter_cache
+        {
+            stamp_llm_runtime_backend(adapter);
+            let backend = adapter.backend();
+            let out =
+                run_tool_continuation(backend, &chat_messages, &gen_config, input, responses_json)?;
+            let name = backend.name().to_string();
+            let cached = backend.last_cached_prefix_len();
+            (out, name, cached)
+        } else {
+            return Err(AdapterError::RuntimeError(
+                "LLM adapter cache unexpectedly empty".to_string(),
+            ));
+        };
+
+        Ok(build_llm_response_envelope(
+            output,
+            &backend_name,
+            cached_prefix,
+            None,
+            !gen_config.tools.is_empty(),
+        ))
     }
 
     #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
@@ -1576,6 +1661,65 @@ impl TemplateExecutor {
                 llm_config.with_vision_encoder(vision_encoder_path.to_string_lossy().to_string());
         }
         llm_config
+    }
+
+    /// Resolve paths, build the cache key, and (re)load the vision-language
+    /// adapter when the cached one doesn't match. Shared by the multimodal
+    /// generate path and the text-only tool-continuation path so both load
+    /// identically. Vision support is re-checked even on a cache hit,
+    /// preserving the original per-call validation.
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    fn ensure_vlm_adapter(
+        &mut self,
+        metadata: &ModelMetadata,
+        model_file: &str,
+        chat_template: Option<&str>,
+        context_length: usize,
+        backend_hint: Option<&str>,
+    ) -> ExecutorResult<()> {
+        let model_path = Path::new(&self.base_path).join(model_file);
+        let model_path_str = model_path.to_string_lossy().to_string();
+        let chat_template_path = resolve_optional_model_path(&self.base_path, chat_template);
+        let vision_encoder_path = metadata.vision_encoder.as_ref().map(|vision_encoder| {
+            Path::new(&self.base_path)
+                .join(&vision_encoder.file)
+                .to_string_lossy()
+                .to_string()
+        });
+        let cache_key = LlmAdapterCacheKey::new(
+            model_path_str.clone(),
+            chat_template_path,
+            context_length,
+            backend_hint,
+            vision_encoder_path,
+        );
+
+        let need_load = match &self.llm_adapter_cache {
+            Some((cached_key, _)) if cached_key == &cache_key => false,
+            _ => true,
+        };
+
+        if need_load {
+            let mut adapter = LlmRuntimeAdapter::with_backend_hint(backend_hint)?;
+            stamp_llm_runtime_backend(&adapter);
+            ensure_backend_supports_vision(metadata, &adapter)?;
+
+            let llm_config = self.vision_language_llm_config(
+                metadata,
+                model_path_str,
+                chat_template,
+                context_length,
+            );
+
+            adapter.load_model_with_config(&llm_config)?;
+            self.llm_adapter_cache = Some((cache_key, adapter));
+        }
+
+        if let Some((_, adapter)) = &self.llm_adapter_cache {
+            ensure_backend_supports_vision(metadata, adapter)?;
+        }
+
+        Ok(())
     }
 
     #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
@@ -1607,49 +1751,15 @@ impl TemplateExecutor {
         xybrid_trace::add_metadata("image_count", image_count.to_string());
         stamp_llm_span_cost_attribution(metadata);
 
-        let model_path = Path::new(&self.base_path).join(model_file);
-        let model_path_str = model_path.to_string_lossy().to_string();
-        let chat_template_path = resolve_optional_model_path(&self.base_path, chat_template);
-        let vision_encoder_path = metadata.vision_encoder.as_ref().map(|vision_encoder| {
-            Path::new(&self.base_path)
-                .join(&vision_encoder.file)
-                .to_string_lossy()
-                .to_string()
-        });
-        let cache_key = LlmAdapterCacheKey::new(
-            model_path_str.clone(),
-            chat_template_path,
+        self.ensure_vlm_adapter(
+            metadata,
+            model_file,
+            chat_template,
             context_length,
             backend_hint,
-            vision_encoder_path,
-        );
+        )?;
 
         let gen_config = config.cloned().unwrap_or_default();
-
-        let need_load = match &self.llm_adapter_cache {
-            Some((cached_key, _)) if cached_key == &cache_key => false,
-            _ => true,
-        };
-
-        if need_load {
-            let mut adapter = LlmRuntimeAdapter::with_backend_hint(backend_hint)?;
-            stamp_llm_runtime_backend(&adapter);
-            ensure_backend_supports_vision(metadata, &adapter)?;
-
-            let llm_config = self.vision_language_llm_config(
-                metadata,
-                model_path_str.clone(),
-                chat_template,
-                context_length,
-            );
-
-            adapter.load_model_with_config(&llm_config)?;
-            self.llm_adapter_cache = Some((cache_key.clone(), adapter));
-        }
-
-        if let Some((_, adapter)) = &self.llm_adapter_cache {
-            ensure_backend_supports_vision(metadata, adapter)?;
-        }
 
         let registered_image_preprocess_ms =
             self.encode_registered_vision_inputs(metadata, messages)?;
@@ -1673,6 +1783,7 @@ impl TemplateExecutor {
             &backend_name,
             cached_prefix,
             registered_image_preprocess_ms,
+            !gen_config.tools.is_empty(),
         ))
     }
 
@@ -1688,6 +1799,7 @@ impl TemplateExecutor {
         on_token: StreamingCallback<'_>,
         config: Option<&GenerationConfig>,
     ) -> ExecutorResult<Envelope> {
+        reject_tool_continuation_input(input, "vision-language streaming")?;
         let messages = vec![MultimodalChatMessage::from_envelope(input)?];
         self.execute_llm_multimodal_streaming_messages(
             metadata,
@@ -1797,6 +1909,7 @@ impl TemplateExecutor {
             &backend_name,
             cached_prefix,
             registered_image_preprocess_ms,
+            !gen_config.tools.is_empty(),
         ))
     }
 
@@ -1890,6 +2003,7 @@ impl TemplateExecutor {
             &backend_name,
             cached_prefix,
             None,
+            !gen_config.tools.is_empty(),
         ))
     }
 
@@ -2013,7 +2127,13 @@ impl TemplateExecutor {
                 // bundle metadata).
                 stamp_llm_runtime_backend(adapter);
                 let backend = adapter.backend();
-                let out = backend.generate(&messages, &gen_config)?;
+                let out = if let Some(responses_json) =
+                    input.metadata.get(Envelope::TOOL_RESPONSES_METADATA_KEY)
+                {
+                    run_tool_continuation(backend, &messages, &gen_config, input, responses_json)?
+                } else {
+                    backend.generate(&messages, &gen_config)?
+                };
                 let name = backend.name().to_string();
                 let cached = backend.last_cached_prefix_len();
                 (out, name, cached)
@@ -2033,6 +2153,7 @@ impl TemplateExecutor {
             &backend_name,
             cached_prefix,
             None,
+            !gen_config.tools.is_empty(),
         ))
     }
 
@@ -2676,12 +2797,20 @@ fn insert_image_preprocess_metric(
 /// optional image-preprocess timing) and mirrors the generation metrics onto the
 /// current span. `image_preprocess_ms` is `None` for text-only paths and carries
 /// the vision timing for multimodal paths (the insert is a no-op when `None`).
+///
+/// `tools_requested` is true when the request's `GenerationConfig.tools` was
+/// non-empty: the output text is then scanned for tool-call blocks (both the
+/// LFM2 and gemma-4 protocols) and any parsed calls ride the metadata
+/// side-channel as a `tool_calls` JSON array (same channel as `finish_reason`). The text itself stays intact —
+/// callers strip the blocks for display via `tool_call::strip_tool_calls`.
+/// Malformed blocks are untrusted model output and simply parse to nothing.
 #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
 fn build_llm_response_envelope(
     output: crate::runtime_adapter::llm::GenerationOutput,
     backend_name: &str,
     cached_prefix: Option<usize>,
     image_preprocess_ms: Option<u32>,
+    tools_requested: bool,
 ) -> Envelope {
     let mut response_metadata = std::collections::HashMap::new();
     response_metadata.insert(
@@ -2700,9 +2829,29 @@ fn build_llm_response_envelope(
     insert_image_preprocess_metric(&mut response_metadata, image_preprocess_ms);
     mirror_llm_metrics_to_span(&output, backend_name, cached_prefix);
 
+    let mut emitted_tool_calls = false;
+    if tools_requested {
+        let calls = crate::runtime_adapter::tool_call::parse_tool_calls(&output.text);
+        if !calls.is_empty() {
+            emitted_tool_calls = true;
+            response_metadata.insert(
+                Envelope::TOOL_CALLS_METADATA_KEY.to_string(),
+                serde_json::to_string(&calls)
+                    .expect("ToolCall serialization cannot fail: all fields are JSON-native"),
+            );
+        }
+    }
+
     // Move `finish_reason` (no clone) now that the borrows of `output` above
-    // have completed.
-    response_metadata.insert("finish_reason".to_string(), output.finish_reason);
+    // have completed. A turn that emitted parseable tool calls canonicalizes
+    // to `"tool_calls"` (the documented OpenAI-shaped value) regardless of
+    // backend, so stream and batch consumers get one terminal contract.
+    let finish_reason = if emitted_tool_calls {
+        "tool_calls".to_string()
+    } else {
+        output.finish_reason
+    };
+    response_metadata.insert("finish_reason".to_string(), finish_reason);
 
     Envelope {
         kind: EnvelopeKind::Text(output.text),
@@ -2772,7 +2921,8 @@ mod tests {
     #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
     #[test]
     fn build_llm_response_envelope_text_path_omits_image_metric() {
-        let env = build_llm_response_envelope(sample_generation_output(7), "llamacpp", None, None);
+        let env =
+            build_llm_response_envelope(sample_generation_output(7), "llamacpp", None, None, false);
         match &env.kind {
             EnvelopeKind::Text(t) => assert_eq!(t, "hello"),
             _ => panic!("expected a text envelope"),
@@ -2794,12 +2944,107 @@ mod tests {
     #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
     #[test]
     fn build_llm_response_envelope_multimodal_path_stamps_image_metric() {
-        let env =
-            build_llm_response_envelope(sample_generation_output(7), "llamacpp", None, Some(42));
+        let env = build_llm_response_envelope(
+            sample_generation_output(7),
+            "llamacpp",
+            None,
+            Some(42),
+            false,
+        );
         assert_eq!(
             env.metadata.get("image_preprocess_ms").map(String::as_str),
             Some("42"),
             "multimodal paths must surface the image-preprocess timing"
+        );
+    }
+
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[test]
+    fn build_llm_response_envelope_parses_tool_calls_when_tools_requested() {
+        let mut output = sample_generation_output(7);
+        output.text =
+            "checking<|tool_call_start|>[get_temperature(room=\"kitchen\")]<|tool_call_end|>"
+                .to_string();
+        let env = build_llm_response_envelope(output, "llamacpp", None, None, true);
+
+        let raw = env
+            .metadata
+            .get("tool_calls")
+            .expect("tools_requested with a call block must stamp tool_calls metadata");
+        let calls: Vec<crate::gateway::ToolCall> = serde_json::from_str(raw).unwrap();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].id, "call_0");
+        assert_eq!(calls[0].function.name, "get_temperature");
+        assert_eq!(
+            env.metadata.get("finish_reason").map(String::as_str),
+            Some("tool_calls"),
+            "tools_requested plus parsed calls must canonicalize finish_reason"
+        );
+        // The answer text keeps the raw block — display stripping is the
+        // caller's choice via `tool_call::strip_tool_calls`.
+        match &env.kind {
+            EnvelopeKind::Text(t) => assert!(t.contains("<|tool_call_start|>")),
+            _ => panic!("expected a text envelope"),
+        }
+    }
+
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[test]
+    fn build_llm_response_envelope_omits_tool_calls_when_none_emitted() {
+        let mut output = sample_generation_output(7);
+        output.finish_reason = "length".to_string();
+        let env = build_llm_response_envelope(output, "llamacpp", None, None, true);
+        assert!(
+            !env.metadata.contains_key("tool_calls"),
+            "a tools-bearing request whose output has no call block stamps nothing"
+        );
+        assert_eq!(
+            env.metadata.get("finish_reason").map(String::as_str),
+            Some("length"),
+            "tools_requested without parsed calls must preserve backend finish_reason"
+        );
+    }
+
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[test]
+    fn tool_continuation_envelopes_are_rejected_on_unsupported_paths() {
+        let envelope = crate::ir::Envelope::tool_results(
+            "user text",
+            "prior assistant text",
+            &[crate::ir::ToolCallResult {
+                call_id: "call_0".to_string(),
+                name: "f".to_string(),
+                content: serde_json::json!({"ok": true}),
+            }],
+        );
+        let err = reject_tool_continuation_input(&envelope, "streaming").unwrap_err();
+        assert!(
+            matches!(err, AdapterError::InvalidInput(ref msg) if msg.contains("streaming")),
+            "continuation envelopes must be rejected loudly, got: {err:?}"
+        );
+
+        // A plain envelope passes through untouched.
+        let plain = crate::ir::Envelope::new(EnvelopeKind::Text("hi".to_string()));
+        assert!(reject_tool_continuation_input(&plain, "streaming").is_ok());
+    }
+
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[test]
+    fn build_llm_response_envelope_skips_tool_parse_when_tools_not_requested() {
+        let mut output = sample_generation_output(7);
+        output.finish_reason = "length".to_string();
+        output.text =
+            "prose<|tool_call_start|>[get_temperature(room=\"kitchen\")]<|tool_call_end|>"
+                .to_string();
+        let env = build_llm_response_envelope(output, "llamacpp", None, None, false);
+        assert!(
+            !env.metadata.contains_key("tool_calls"),
+            "tool-call parsing only runs when the request offered tools"
+        );
+        assert_eq!(
+            env.metadata.get("finish_reason").map(String::as_str),
+            Some("length"),
+            "tools-off requests must preserve backend finish_reason even if text contains markers"
         );
     }
 
