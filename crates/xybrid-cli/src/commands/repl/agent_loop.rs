@@ -63,6 +63,7 @@ pub(crate) const TOOL_SYSTEM_PROMPT: &str =
 
 pub(crate) struct QueryOutcome {
     pub answer: String,
+    pub reasoning_content: Option<String>,
     /// True when the answer's tokens were already printed live by the
     /// streaming callback — the caller must not print it again.
     pub already_printed: bool,
@@ -79,6 +80,14 @@ pub(crate) struct StreamStats {
     pub ttft: Option<std::time::Duration>,
 }
 
+struct FirstTurn {
+    text: String,
+    calls: Vec<xybrid_core::gateway::ToolCall>,
+    already_printed: bool,
+    stream_stats: Option<StreamStats>,
+    reasoning_content: Option<String>,
+}
+
 /// Run one REPL query end-to-end: the tools-offering turn, any tool
 /// continuation turns, and the forced synthesis fallback.
 ///
@@ -93,6 +102,7 @@ pub(crate) fn run_query(
     toolbox: Option<&ToolBox>,
     system_prompt: Option<&str>,
     stream: bool,
+    show_reasoning: bool,
     verbose: u8,
 ) -> Result<QueryOutcome> {
     // Tools ride the config; `Default` matches what the executor uses when
@@ -110,11 +120,10 @@ pub(crate) fn run_query(
             .insert("system_prompt".to_string(), system.to_string());
     }
 
-    let (first_text, first_calls, first_streamed, stream_stats) =
-        run_first_turn(model, context, &input, config.as_ref(), stream)?;
+    let first_turn = run_first_turn(model, context, &input, config.as_ref(), stream)?;
 
-    if first_calls.is_empty() {
-        let answer = strip_tool_calls(&first_text);
+    if first_turn.calls.is_empty() {
+        let answer = strip_tool_calls(&first_turn.text);
         // The rendered tool declarations alone make some small models
         // refuse ordinary requests they handle fine without tools ("I
         // can't write a poem"). A zero-tool-call capability refusal gets
@@ -128,9 +137,10 @@ pub(crate) fn run_query(
         }
         return Ok(QueryOutcome {
             answer,
-            already_printed: first_streamed,
+            reasoning_content: first_turn.reasoning_content,
+            already_printed: first_turn.already_printed,
             tool_calls_run: 0,
-            stream_stats,
+            stream_stats: first_turn.stream_stats,
         });
     }
 
@@ -139,7 +149,7 @@ pub(crate) fn run_query(
         // whole (streaming rejects them), and a well-behaved model calls
         // its tool almost immediately, so often nothing streamed at all —
         // without a cue the drop to silence reads as a hang.
-        if first_streamed {
+        if first_turn.already_printed {
             println!();
         }
         ui::hint("tool turns print after generation");
@@ -149,18 +159,23 @@ pub(crate) fn run_query(
     // impossible case as a plain answer rather than panicking.
     let Some(toolbox) = toolbox else {
         return Ok(QueryOutcome {
-            answer: strip_tool_calls(&first_text),
-            already_printed: first_streamed,
+            answer: strip_tool_calls(&first_turn.text),
+            reasoning_content: first_turn.reasoning_content,
+            already_printed: first_turn.already_printed,
             tool_calls_run: 0,
             stream_stats: None,
         });
     };
 
+    // The reasoning behind the tool decision is the interesting part of a
+    // thinking model's tool turn — show it next to the calls it produced.
+    print_interim_reasoning(show_reasoning, first_turn.reasoning_content.as_deref());
+
     // ── Tool continuation turns (non-context, non-streaming) ────────────────
     let mut findings: Vec<String> = Vec::new();
     let mut seen_calls: HashSet<String> = HashSet::new();
-    let mut prior_text = first_text;
-    let mut prior_calls = first_calls;
+    let mut prior_text = first_turn.text;
+    let mut prior_calls = first_turn.calls;
     let mut tool_calls_run = 0usize;
     let mut turn = 1usize;
 
@@ -213,11 +228,15 @@ pub(crate) fn run_query(
         if calls.is_empty() {
             return Ok(QueryOutcome {
                 answer: strip_tool_calls(&text),
+                reasoning_content: response.reasoning_content().map(str::to_string),
                 already_printed: false,
                 tool_calls_run,
                 stream_stats: None,
             });
         }
+
+        // Another tool turn — surface its deliberation next to its calls.
+        print_interim_reasoning(show_reasoning, response.reasoning_content());
 
         prior_text = text;
         prior_calls = calls;
@@ -255,9 +274,11 @@ pub(crate) fn run_query(
             .text()
             .context("expected text output from synthesis turn")?,
     );
+    let reasoning_content = response.reasoning_content().map(str::to_string);
 
     Ok(QueryOutcome {
         answer,
+        reasoning_content,
         already_printed: false,
         tool_calls_run,
         stream_stats: None,
@@ -274,12 +295,7 @@ fn run_first_turn(
     input: &Envelope,
     config: Option<&GenerationConfig>,
     stream: bool,
-) -> Result<(
-    String,
-    Vec<xybrid_core::gateway::ToolCall>,
-    bool,
-    Option<StreamStats>,
-)> {
+) -> Result<FirstTurn> {
     if stream {
         let started = Instant::now();
         let mut tokens = 0usize;
@@ -310,6 +326,7 @@ fn run_first_turn(
             .context("expected text output from LLM turn")?
             .to_string();
         let calls = result.tool_calls();
+        let reasoning_content = result.reasoning_content().map(str::to_string);
         let (printed_any, stats) = if calls.is_empty() {
             // The whole answer streamed.
             let stats = StreamStats {
@@ -322,7 +339,13 @@ fn run_first_turn(
             // block itself was suppressed.
             (!strip_tool_calls(&text).trim().is_empty(), None)
         };
-        Ok((text, calls, printed_any, stats))
+        Ok(FirstTurn {
+            text,
+            calls,
+            already_printed: printed_any,
+            stream_stats: stats,
+            reasoning_content,
+        })
     } else {
         let result = match context {
             Some(ctx) => model.run_with_context(input, ctx, config),
@@ -334,7 +357,14 @@ fn run_first_turn(
             .context("expected text output from LLM turn")?
             .to_string();
         let calls = result.tool_calls();
-        Ok((text, calls, false, None))
+        let reasoning_content = result.reasoning_content().map(str::to_string);
+        Ok(FirstTurn {
+            text,
+            calls,
+            already_printed: false,
+            stream_stats: None,
+            reasoning_content,
+        })
     }
 }
 
@@ -427,10 +457,27 @@ fn retry_without_tools(
     ui::hint("answered without tools");
     Some(QueryOutcome {
         answer,
+        reasoning_content: result.reasoning_content().map(str::to_string),
         already_printed: false,
         tool_calls_run: 0,
         stream_stats: None,
     })
+}
+
+/// Show a tool-deciding turn's chain-of-thought as a dimmed block above
+/// the `⚙` lines it produced — the "why this tool, why this query" that
+/// `--show-reasoning` exists for. The final answer turn's reasoning is
+/// returned on [`QueryOutcome`] and printed by the caller instead.
+fn print_interim_reasoning(show_reasoning: bool, reasoning: Option<&str>) {
+    if !show_reasoning {
+        return;
+    }
+    let Some(reasoning) = reasoning.map(str::trim).filter(|r| !r.is_empty()) else {
+        return;
+    };
+    for line in reasoning.lines() {
+        println!("    {}", ui::dim(line));
+    }
 }
 
 /// Fold the running findings into the user turn so the model retains every

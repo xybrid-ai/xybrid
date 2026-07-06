@@ -40,6 +40,7 @@ pub(crate) fn handle_repl_command(
     voice: Option<String>,
     target: Option<String>,
     stream: bool,
+    show_reasoning: bool,
     system_prompt: Option<String>,
     no_tools: bool,
     tools_file: Option<PathBuf>,
@@ -243,8 +244,10 @@ pub(crate) fn handle_repl_command(
             .is_some_and(|m| m.supports_token_streaming());
         if stream && is_llm && !supports {
             ui::warning("Token streaming not available (LLM features not compiled) — using batch");
+        } else if stream && show_reasoning {
+            ui::hint("Token streaming disabled so reasoning can be shown before the answer");
         }
-        stream && supports
+        stream && supports && !show_reasoning
     };
 
     let metrics = DeviceMetrics::default();
@@ -308,10 +311,12 @@ pub(crate) fn handle_repl_command(
                     tools_state.active().then_some(&tools_state.toolbox),
                     resolved_system.as_deref(),
                     llm_stream,
+                    show_reasoning,
                     verbose,
                 ) {
                     Ok(outcome) => {
                         let elapsed = start.elapsed();
+                        print_reasoning(show_reasoning, outcome.reasoning_content.as_deref());
                         if outcome.already_printed {
                             println!();
                         } else {
@@ -365,8 +370,13 @@ pub(crate) fn handle_repl_command(
         // Try streaming execution
         #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
         let use_streaming = {
-            let can_stream = stream && stages.len() == 1 && stage_is_locally_available(&stages[0]);
-            if stream && !can_stream {
+            let can_stream = stream
+                && !show_reasoning
+                && stages.len() == 1
+                && stage_is_locally_available(&stages[0]);
+            if stream && show_reasoning {
+                ui::hint("Token streaming disabled so reasoning can be shown before the answer");
+            } else if stream && !can_stream {
                 ui::warning("Streaming conditions not met");
                 if verbose > 0 {
                     ui::hint(&format!("stages.len() = {} (need 1)", stages.len()));
@@ -414,6 +424,7 @@ pub(crate) fn handle_repl_command(
             &availability_fn,
             &mut conversation_context,
             start,
+            show_reasoning,
             verbose,
         );
     }
@@ -599,6 +610,25 @@ fn print_llm_chat_stats(outcome: &agent_loop::QueryOutcome, elapsed: std::time::
         ));
     } else {
         ui::hint(&format!("Inference time: {:.2}s", elapsed.as_secs_f32()));
+    }
+}
+
+fn print_reasoning(show_reasoning: bool, reasoning: Option<&str>) {
+    if !show_reasoning {
+        return;
+    }
+
+    match reasoning {
+        Some(reasoning) if !reasoning.is_empty() => {
+            println!();
+            ui::section("Reasoning");
+            println!();
+            println!("    {}", reasoning);
+        }
+        _ => {
+            println!();
+            ui::hint("No reasoning emitted (model produced no <think> blocks)");
+        }
     }
 }
 
@@ -1040,6 +1070,7 @@ fn execute_batch(
     availability_fn: &dyn Fn(&str) -> LocalAvailability,
     conversation_context: &mut Option<ConversationContext>,
     start: std::time::Instant,
+    show_reasoning: bool,
     verbose: u8,
 ) {
     match orchestrator.execute_pipeline(stages, input, metrics, availability_fn) {
@@ -1057,6 +1088,14 @@ fn execute_batch(
             for result in &results {
                 match &result.output.kind {
                     EnvelopeKind::Text(text) => {
+                        print_reasoning(
+                            show_reasoning,
+                            result
+                                .output
+                                .metadata
+                                .get("reasoning_content")
+                                .map(String::as_str),
+                        );
                         println!("  {}", text);
 
                         if let Some(ref mut ctx) = conversation_context {

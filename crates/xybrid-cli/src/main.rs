@@ -249,6 +249,11 @@ enum Commands {
         #[arg(long)]
         stream: bool,
 
+        /// Print the model's chain-of-thought reasoning (`<think>` blocks),
+        /// which is stripped out of the answer text by default
+        #[arg(long, default_value = "false")]
+        show_reasoning: bool,
+
         /// System prompt to set the assistant's behavior
         #[arg(long, value_name = "PROMPT")]
         system: Option<String>,
@@ -615,6 +620,7 @@ fn run_command(cli: Cli) -> Result<()> {
             voice,
             target,
             stream,
+            show_reasoning,
             system,
             no_tools,
             tools_file,
@@ -626,6 +632,7 @@ fn run_command(cli: Cli) -> Result<()> {
             voice,
             target,
             stream,
+            show_reasoning,
             system,
             no_tools,
             tools_file,
@@ -709,4 +716,26 @@ fn resolve_config_path(config: Option<PathBuf>, pipeline: Option<String>) -> Res
     Err(anyhow::anyhow!(
         "Either --config, --pipeline, --bundle, or --model must be specified"
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn repl_accepts_show_reasoning_flag() {
+        let parsed = Cli::try_parse_from([
+            "xybrid",
+            "repl",
+            "--show-reasoning",
+            "--model-file",
+            "model.gguf",
+        ]);
+
+        let cli = parsed.unwrap_or_else(|err| panic!("repl should accept --show-reasoning: {err}"));
+        let Commands::Repl { show_reasoning, .. } = cli.command else {
+            panic!("expected repl command");
+        };
+        assert!(show_reasoning);
+    }
 }

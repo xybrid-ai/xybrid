@@ -146,6 +146,10 @@ xybrid repl --model lfm2.5-350m
 - Search providers: set `XYBRID_SEARCH_PROVIDER=tavily` (+`TAVILY_API_KEY`)
   or `brave` (+`BRAVE_API_KEY`) for open-web coverage; unset defaults to
   Wikipedia with no key.
+- With a reasoning model (e.g. `lfm2.5-1.2b-thinking`), `--show-reasoning`
+  prints the chain-of-thought behind each tool decision above the `⚙` lines
+  and the final answer's reasoning before the answer — the clearest way to
+  watch a model decide *whether* and *which* tool to use.
 
 ### Your own tools in the REPL (`--tools-file`)
 
