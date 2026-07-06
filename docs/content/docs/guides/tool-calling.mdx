@@ -1,0 +1,216 @@
+---
+title: Tool Calling
+description: Let local models call your functions — on-device, no cloud loop
+---
+
+Local models can call tools: you declare functions, the model decides when to
+call them, your code executes the call, and the result feeds the next turn.
+Everything runs on-device — the only network traffic is whatever your tools
+themselves do.
+
+Xybrid's design rule is that **capabilities are data, not entry points**.
+Tools ride the existing types end to end:
+
+1. Declare tools on `GenerationConfig` — plain data, any function you want.
+2. `run` the request; parsed calls come back on the result.
+3. Execute the calls yourself — your code, your sandboxing, your APIs.
+4. Feed results back with `Envelope::tool_results` and `run` again.
+
+There is no agent framework and no callback API: **the loop is your code**,
+which is why your own tooling is first-class — xybrid never needs to know
+what a tool does, only its declaration and its JSON result.
+
+<Callout type="info">
+Tool calling runs on the local llama.cpp backend. Paths that cannot honor a
+tool-bearing request fail closed with an invalid-input error instead of
+silently generating without the tools: models without an embedded chat
+template, the mistralrs backend, streaming continuations,
+conversation-context continuations, and the SDK's cloud-fallback leg.
+</Callout>
+
+## Supported Models
+
+The tool-call syntax is auto-detected from the model's own chat template:
+
+| Protocol family | Syntax | Example models |
+|-----------------|--------|----------------|
+| LFM2-family | `<\|tool_call_start\|>[name(k=v)]<\|tool_call_end\|>` (pythonic) | LFM2.5 230M / 350M |
+| gemma-4-family | `<\|tool_call>call:name{...}<tool_call\|>` | gemma-4 E2B |
+
+A bundle advertises support with an advisory `tool_calling: true` flag in
+`model_metadata.json` (`ModelMetadata::supports_tool_calling()` /
+`XybridModel::supports_tool_calling()` read it). The flag gates UI defaults —
+enforcement always happens at run time.
+
+## Bring Your Own Tools (Rust SDK)
+
+Define a tool with `Tool::function` — a name, a description the model reads,
+and a JSON Schema for the arguments:
+
+```rust
+use xybrid_sdk::{ModelLoader, Tool};
+use xybrid_sdk::ir::{Envelope, EnvelopeKind, ToolCallResult};
+use xybrid_core::runtime_adapter::types::GenerationConfig;
+
+let tools = vec![Tool::function(
+    "get_weather",
+    "Current weather for a city.",
+    serde_json::json!({
+        "type": "object",
+        "properties": { "city": { "type": "string" } },
+        "required": ["city"]
+    }),
+)];
+
+let config = GenerationConfig::default().with_tools(tools);
+```
+
+Run a turn and execute whatever the model asked for:
+
+```rust
+let model = ModelLoader::from_registry("lfm2.5-350m").load()?;
+let question = "What's the weather in Paris?";
+
+let result = model.run(
+    &Envelope::new(EnvelopeKind::Text(question.to_string())),
+    Some(&config),
+)?;
+
+let calls = result.tool_calls(); // Vec<ToolCall>, empty if none
+let mut results = Vec::new();
+for call in &calls {
+    // call.function.name + call.function.arguments (JSON string).
+    // Execute with YOUR code — hit an API, query a database, anything.
+    results.push(ToolCallResult {
+        call_id: call.id.clone(),
+        name: call.function.name.clone(),
+        content: serde_json::json!({ "temp_c": 21, "sky": "clear" }),
+    });
+}
+```
+
+Feed the results back as the next turn — same tools, same system prompt, one
+`run` per model turn:
+
+```rust
+let continuation = Envelope::tool_results(
+    question,               // the user message being continued
+    result.text().unwrap(), // the prior turn's raw output, tool block included
+    &results,
+);
+let final_turn = model.run(&continuation, Some(&config))?;
+println!("{}", final_turn.text().unwrap_or_default());
+```
+
+That's the whole surface. Multi-step loops (budgets, retries, parallel tools)
+are ordinary application code — see
+[`crates/xybrid-core/examples/lfm2_230m_tools.rs`](https://github.com/xybrid-ai/xybrid/blob/master/crates/xybrid-core/examples/lfm2_230m_tools.rs)
+and `gemma4_e2b_tools.rs` for complete reference loops, including streaming.
+
+### Rules the loop must follow (v1)
+
+- **One `run` is one model turn.** The continuation replays only the
+  immediately prior assistant turn — for multi-hop chains, fold earlier
+  results into the user text you pass to `tool_results` (the examples show
+  the pattern).
+- **Continuations are non-streaming and context-free.** A `tool_results`
+  envelope on a streaming or conversation-context path is rejected as
+  invalid input. The tools-*offering* turn may stream — tool-call blocks are
+  suppressed from the token stream and the terminal token carries
+  `finish_reason: "tool_calls"`.
+- **Budget your turns.** Small models can search forever without settling;
+  cap the loop and force a tools-off synthesis turn from your accumulated
+  notes when the budget runs out.
+
+## Tool Calling in the CLI (`xybrid repl`)
+
+The REPL ships the reference experience. For models whose metadata declares
+`tool_calling: true`, three built-ins are on by default:
+
+| Tool | What it does | Network |
+|------|--------------|---------|
+| `web_search` | Search via a pluggable provider (keyless Wikipedia default) | yes |
+| `fetch_url` | Fetch a public http(s) page as readable text (SSRF-guarded) | yes |
+| `current_time` | Local date and time | no |
+
+```bash
+xybrid repl --model lfm2.5-350m
+❯ who won the 2022 fifa world cup final?
+  ⚙ web_search("2022 FIFA World Cup final winner") · 614ms
+    Search "2022 FIFA World Cup final winner": The 2022 FIFA World Cup final…
+  The 2022 FIFA World Cup final was won by Argentina.
+```
+
+- `--no-tools` disables tools for the session; `/tools` lists them and
+  `/tools on|off` toggles at run time.
+- Search providers: set `XYBRID_SEARCH_PROVIDER=tavily` (+`TAVILY_API_KEY`)
+  or `brave` (+`BRAVE_API_KEY`) for open-web coverage; unset defaults to
+  Wikipedia with no key.
+
+### Your own tools in the REPL (`--tools-file`)
+
+Declare tools in a JSON (or YAML) file; each maps a function to a command
+you author:
+
+```json title="my-tools.json"
+[
+  {
+    "name": "get_weather",
+    "description": "Get the current weather for a city.",
+    "parameters": {
+      "type": "object",
+      "properties": { "city": { "type": "string" } },
+      "required": ["city"]
+    },
+    "command": ["./scripts/weather.sh"],
+    "timeout_secs": 30
+  }
+]
+```
+
+```bash
+xybrid repl --model-file ./LFM2.5-350M-Q4_K_M.gguf --tools-file my-tools.json
+❯ what's the weather in paris?
+  ⚙ get_weather({"city":"Paris"}) · 55ms
+    get_weather: {"city":"Paris","sky":"clear","temp_c":21}
+  The current weather in Paris is clear with a temperature of 21°C.
+```
+
+Contract:
+
+- The model's arguments arrive as a **JSON object on stdin**; the command's
+  **stdout is the tool result** (parsed as JSON when possible, otherwise
+  wrapped as `{"output": "..."}`).
+- The executable and its fixed argv come from your file only — model output
+  is never interpolated into the command line and never passes through a
+  shell. If you want shell behavior, write a script.
+- Commands are killed after `timeout_secs` (default 30); output is capped.
+- Passing `--tools-file` is an explicit opt-in: it also enables tools for
+  models whose metadata doesn't declare `tool_calling` (an unsupported
+  template still fails loudly at run time). A bundle that declares
+  `tool_calling: false` stays off.
+
+## Declaring Support in Your Own Bundles
+
+Add the flag to `model_metadata.json` for models whose chat template renders
+tools (the `/xybrid-init` skill can generate metadata):
+
+```json
+{
+  "metadata": {
+    "tool_calling": true
+  }
+}
+```
+
+Apps read it before downloading weights via
+`ModelMetadata::supports_tool_calling()` — `None` means the bundle says
+nothing, and never implies support.
+
+## Small-Model Expectations
+
+Sub-1B models emit tool-call syntax reliably but reason loosely about *when*
+to call: LFM2.5-230M over-triggers (searches on greetings) while 350M tends
+to answer from memory without searching. The REPL's default system prompt is
+a compromise — override it with `--system`, and prefer larger tool-tuned
+models when tool discipline matters.
