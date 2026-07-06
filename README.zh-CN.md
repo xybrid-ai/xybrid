@@ -309,7 +309,7 @@ let result = pipeline.run(&Envelope::audio(audio_bytes))?;
 | 模型 | 参数量 | 格式 | 简介 |
 |------|--------|------|------|
 | Gemma 3 1B | 1B | GGUF Q4_K_M | Google 为移动端优化的模型 |
-| LFM2.5 230M | 230M | GGUF Q4_K_M | 最小的使用Liquid AI 混合卷积+注意力架构的LLM, 适合边缘设备 |
+| LFM2.5 230M | 230M | GGUF Q4_K_M | 最小的采用 Liquid AI 混合卷积+注意力架构的 LLM，适合边缘设备 |
 | LFM2.5 350M | 354M | GGUF Q4_K_M | Liquid AI 混合卷积+注意力架构，9 种语言，工具调用 |
 | Llama 3.2 1B | 1B | GGUF Q4_K_M | Meta 的通用模型，128K 上下文 |
 | Qwen 2.5 0.5B | 500M | GGUF Q4_K_M | 紧凑的本地聊天模型 |
