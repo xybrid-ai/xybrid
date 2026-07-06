@@ -1,0 +1,20 @@
+bindings/unity/Runtime/Native/NativeMethods.g.cs
+  s_fb271508a8988a::t_7462b26f60c4da 801-837,1278-1304
+  s_fb271508a8988a::t_fccf96ec9382db 1305
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "099859929973473aa91a1fae679c1f644f62589d",
+  "prompts": {},
+  "sessions": {
+    "s_fb271508a8988a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8ce838ba-c727-47cf-8b97-de143d5f0c48",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
