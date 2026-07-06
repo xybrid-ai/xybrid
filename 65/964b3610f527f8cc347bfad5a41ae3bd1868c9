@@ -1,0 +1,27 @@
+bindings/unity/Editor/NativeLibraryResolver.cs
+  s_fb271508a8988a::t_a479390a99b444 228-237
+  s_fb271508a8988a::t_55714b04810e93 209-214
+  s_fb271508a8988a::t_49575d48411e5c 256,264,278,295-297
+  s_fb271508a8988a::t_7cc9e85efe5043 328
+  s_fb271508a8988a::t_33037763b21835 107-114
+  s_fb271508a8988a::t_30e7760deb705c 334-359
+  s_fb271508a8988a::t_0be0922e17855b 333
+bindings/unity/Editor/NativeLibraryBuildHook.cs
+  s_fb271508a8988a::t_4bcf029dd539d7 41,43-44
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "65964b3610f527f8cc347bfad5a41ae3bd1868c9",
+  "prompts": {},
+  "sessions": {
+    "s_fb271508a8988a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8ce838ba-c727-47cf-8b97-de143d5f0c48",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
