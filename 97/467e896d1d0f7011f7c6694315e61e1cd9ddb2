@@ -1,0 +1,25 @@
+.bazelrc
+  s_7431c1432875d8::t_8ab73d0348d981 9-13
+  s_7431c1432875d8::t_3ee9ff00fac01c 15-19
+  s_7431c1432875d8::t_c412840b75ee4c 14
+MODULE.bazel
+  s_7431c1432875d8::t_41268f85fb0cbf 54-65,67-72
+rules_android_ndk.patch
+  s_7431c1432875d8::t_45135b9dd4b973 1-47
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "97467e896d1d0f7011f7c6694315e61e1cd9ddb2",
+  "prompts": {},
+  "sessions": {
+    "s_7431c1432875d8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "85304c2d-b335-4cc4-a3a6-e618040982d4",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
