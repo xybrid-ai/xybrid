@@ -890,6 +890,13 @@ impl TemplateExecutor {
             }
         }
 
+        // Fail closed: tool-result continuations do not compose with
+        // conversation context (v1). Without this guard the continuation
+        // metadata would be silently dropped and the turn would run as a
+        // fresh question, producing a plausible but ungrounded answer.
+        #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+        reject_tool_continuation_input(input, "context")?;
+
         #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
         if let ExecutionTemplate::VisionLanguage {
             model_file,
@@ -1217,6 +1224,10 @@ impl TemplateExecutor {
                 );
             }
         }
+
+        // Fail closed: continuations are non-streaming and context-free (v1).
+        #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+        reject_tool_continuation_input(input, "streaming context")?;
 
         #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
         {
@@ -3026,6 +3037,66 @@ mod tests {
         // A plain envelope passes through untouched.
         let plain = crate::ir::Envelope::new(EnvelopeKind::Text("hi".to_string()));
         assert!(reject_tool_continuation_input(&plain, "streaming").is_ok());
+    }
+
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[test]
+    fn execute_with_context_rejects_tool_continuation_envelopes() {
+        // The context path does not compose continuations (v1) — it must
+        // fail closed rather than silently drop the tool results and answer
+        // the replayed user text as a fresh question.
+        let metadata = ModelMetadata {
+            model_id: "test-llm".into(),
+            version: "1".into(),
+            execution_template: ExecutionTemplate::Gguf {
+                model_file: "model.gguf".into(),
+                chat_template: None,
+                context_length: 2048,
+                generation_params: None,
+            },
+            preprocessing: Vec::new(),
+            postprocessing: Vec::new(),
+            files: Vec::new(),
+            vision_encoder: None,
+            description: None,
+            metadata: std::collections::HashMap::new(),
+            voices: None,
+            max_chunk_chars: None,
+            trim_trailing_samples: None,
+        };
+        let envelope = crate::ir::Envelope::tool_results(
+            "user text",
+            "prior assistant text",
+            &[crate::ir::ToolCallResult {
+                call_id: "call_0".to_string(),
+                name: "f".to_string(),
+                content: serde_json::json!({"ok": true}),
+            }],
+        );
+        let context = crate::conversation::ConversationContext::new();
+
+        let mut executor = TemplateExecutor::default();
+        let err = executor
+            .execute_with_context(&metadata, &envelope, &context, None)
+            .unwrap_err();
+        assert!(
+            matches!(err, AdapterError::InvalidInput(ref msg) if msg.contains("context")),
+            "context path must reject continuation envelopes, got: {err:?}"
+        );
+
+        let streaming_err = executor
+            .execute_streaming_with_context(
+                &metadata,
+                &envelope,
+                &context,
+                Box::new(|_| Ok(())),
+                None,
+            )
+            .unwrap_err();
+        assert!(
+            matches!(streaming_err, AdapterError::InvalidInput(ref msg) if msg.contains("streaming context")),
+            "streaming context path must reject continuation envelopes, got: {streaming_err:?}"
+        );
     }
 
     #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]

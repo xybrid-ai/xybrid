@@ -107,8 +107,9 @@ pub(crate) fn text_messages_from_multimodal(
 /// the raw continuation prompt. Without this guard those paths would treat
 /// the envelope as a fresh first turn — silently dropping the prior
 /// assistant turn and the tool results — and produce a plausible but wrong
-/// answer. v1 supports continuation on the non-streaming paths only (text,
-/// and text-only vision-language turns).
+/// answer. v1 supports continuation on the non-streaming, **non-context**
+/// paths only (plain text, and text-only vision-language turns); streaming
+/// and conversation-context paths all reject.
 pub(crate) fn reject_tool_continuation_input(
     input: &Envelope,
     path: &str,

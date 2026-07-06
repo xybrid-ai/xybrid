@@ -252,6 +252,11 @@ enum Commands {
         /// System prompt to set the assistant's behavior
         #[arg(long, value_name = "PROMPT")]
         system: Option<String>,
+
+        /// Disable built-in tool calling (web_search, fetch_url, current_time),
+        /// which is otherwise on for models whose metadata declares support
+        #[arg(long)]
+        no_tools: bool,
     },
     /// Trace and analyze telemetry logs from a session
     Trace {
@@ -605,6 +610,7 @@ fn run_command(cli: Cli) -> Result<()> {
             target,
             stream,
             system,
+            no_tools,
         } => commands::repl::handle_repl_command(
             config,
             model,
@@ -614,6 +620,7 @@ fn run_command(cli: Cli) -> Result<()> {
             target,
             stream,
             system,
+            no_tools,
             verbose,
         ),
         Commands::Trace {

@@ -2,7 +2,9 @@
 
 #![allow(clippy::too_many_arguments)]
 
+mod agent_loop;
 mod targeting;
+mod tools;
 mod warmup;
 
 use anyhow::{Context, Result};
@@ -39,6 +41,7 @@ pub(crate) fn handle_repl_command(
     target: Option<String>,
     stream: bool,
     system_prompt: Option<String>,
+    no_tools: bool,
     verbose: u8,
 ) -> Result<()> {
     use std::io::{self, Write};
@@ -150,7 +153,6 @@ pub(crate) fn handle_repl_command(
     };
 
     let mut conversation_context: Option<ConversationContext> = None;
-    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
     let mut loaded_model: Option<xybrid_sdk::model::XybridModel> = None;
 
     if stages.len() == 1 && stage_is_locally_available(&stages[0]) {
@@ -177,12 +179,51 @@ pub(crate) fn handle_repl_command(
                     ui::hint("Use 'history' to view conversation, 'clear' to reset");
                 }
             }
-            #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
-            {
-                loaded_model = Some(model);
-            }
+            loaded_model = Some(model);
         }
     }
+
+    // Built-in tool calling: on by default when the bundle's metadata
+    // declares support (`tool_calling: true`), off via --no-tools or
+    // `/tools off`. The flag is advisory and per-model — most bundles do
+    // not declare it, so this is effectively a per-model allowlist.
+    let mut tools_state = ToolsState::resolve(loaded_model.as_ref(), no_tools);
+    if tools_state.active() {
+        ui::ok("Tool calling: on");
+        ui::hint("web_search / fetch_url reach the network; current_time stays local");
+        ui::kv("Search", tools_state.provider.label());
+        ui::hint("Disable with --no-tools or '/tools off'");
+    }
+
+    // Steering for the tool loop: the user's --system wins; otherwise a
+    // default prompt that licenses tool use with a clear stop condition.
+    let resolved_system = system_prompt.clone().or_else(|| {
+        tools_state
+            .active()
+            .then(|| agent_loop::TOOL_SYSTEM_PROMPT.to_string())
+    });
+    if system_prompt.is_none() && tools_state.active() {
+        conversation_context = conversation_context.map(|ctx| {
+            ctx.with_system(
+                Envelope::new(EnvelopeKind::Text(
+                    agent_loop::TOOL_SYSTEM_PROMPT.to_string(),
+                ))
+                .with_role(MessageRole::System),
+            )
+        });
+    }
+
+    // Streaming for the LLM chat route is resolved once up front.
+    let llm_stream = {
+        let is_llm = loaded_model.as_ref().is_some_and(|m| m.is_llm());
+        let supports = loaded_model
+            .as_ref()
+            .is_some_and(|m| m.supports_token_streaming());
+        if stream && is_llm && !supports {
+            ui::warning("Token streaming not available (LLM features not compiled) — using batch");
+        }
+        stream && supports
+    };
 
     let metrics = DeviceMetrics::default();
 
@@ -221,6 +262,7 @@ pub(crate) fn handle_repl_command(
             input_line,
             &mut conversation_context,
             &mut pending_images,
+            &mut tools_state,
             verbose,
         );
 
@@ -228,6 +270,60 @@ pub(crate) fn handle_repl_command(
             SpecialCommandResult::Quit => break,
             SpecialCommandResult::Continue => continue,
             SpecialCommandResult::NotSpecial => {}
+        }
+
+        // LLM chat route: a single locally-loaded GGUF model runs through
+        // the agent loop — conversation context, built-in tool calling, and
+        // token streaming in one path. Image turns and pipelines take the
+        // general path below.
+        if pending_images.is_empty() {
+            if let Some(model) = loaded_model.as_ref().filter(|m| m.is_llm()) {
+                let start = std::time::Instant::now();
+                match agent_loop::run_query(
+                    model,
+                    conversation_context.as_ref(),
+                    input_line,
+                    tools_state.active(),
+                    &tools_state.provider,
+                    resolved_system.as_deref(),
+                    llm_stream,
+                    verbose,
+                ) {
+                    Ok(outcome) => {
+                        let elapsed = start.elapsed();
+                        if outcome.already_printed {
+                            println!();
+                        } else {
+                            println!();
+                            println!("  {}", outcome.answer);
+                        }
+
+                        // Push user + assistant AFTER the run — pushing the
+                        // input before would double it in the prompt.
+                        if let Some(ref mut ctx) = conversation_context {
+                            ctx.push(
+                                Envelope::new(EnvelopeKind::Text(input_line.to_string()))
+                                    .with_role(MessageRole::User),
+                            );
+                            ctx.push(
+                                Envelope::new(EnvelopeKind::Text(outcome.answer.clone()))
+                                    .with_role(MessageRole::Assistant),
+                            );
+                            if verbose > 1 {
+                                ui::hint(&format!(
+                                    "Context updated (total: {} messages)",
+                                    ctx.history().len()
+                                ));
+                            }
+                        }
+
+                        println!();
+                        print_llm_chat_stats(&outcome, elapsed);
+                    }
+                    Err(e) => ui::err(&format!("{e:#}")),
+                }
+                continue;
+            }
         }
 
         let input = match build_repl_input(
@@ -242,16 +338,6 @@ pub(crate) fn handle_repl_command(
                 continue;
             }
         };
-
-        if let Some(ref mut ctx) = conversation_context {
-            ctx.push(input.clone());
-            if verbose > 1 {
-                ui::hint(&format!(
-                    "Added user message to context (total: {} messages)",
-                    ctx.history().len()
-                ));
-            }
-        }
 
         let start = std::time::Instant::now();
 
@@ -400,6 +486,75 @@ enum SpecialCommandResult {
     NotSpecial,
 }
 
+/// Session state for built-in tool calling.
+struct ToolsState {
+    /// The loaded model declared `tool_calling: true` in its metadata.
+    available: bool,
+    /// Session toggle (`--no-tools`, `/tools on|off`).
+    enabled: bool,
+    provider: tools::SearchProvider,
+}
+
+impl ToolsState {
+    fn resolve(model: Option<&xybrid_sdk::model::XybridModel>, no_tools: bool) -> Self {
+        let available = model
+            .map(|m| m.is_llm() && m.supports_tool_calling() == Some(true))
+            .unwrap_or(false);
+        let (provider, warning) = tools::SearchProvider::from_env();
+        if available {
+            if let Some(warning) = warning {
+                ui::warning(&warning);
+            }
+        }
+        Self {
+            available,
+            enabled: available && !no_tools,
+            provider,
+        }
+    }
+
+    fn active(&self) -> bool {
+        self.available && self.enabled
+    }
+}
+
+/// Post-query stats line for the LLM chat route: token throughput when the
+/// answer streamed, otherwise wall-clock (with the tool-call count when the
+/// turn used tools).
+fn print_llm_chat_stats(outcome: &agent_loop::QueryOutcome, elapsed: std::time::Duration) {
+    if let Some(stats) = &outcome.stream_stats {
+        let ttft_ms = stats.ttft.map(|d| d.as_millis()).unwrap_or(0);
+        let decode_tok_s = stats.ttft.and_then(|ttft| {
+            let decode_time = elapsed.saturating_sub(ttft).as_secs_f64();
+            (stats.tokens >= 2 && decode_time > 0.001)
+                .then(|| (stats.tokens - 1) as f64 / decode_time)
+        });
+        match decode_tok_s {
+            Some(tok_s) => ui::hint(&format!(
+                "{} tokens in {:.2}s ({:.1} tok/s, {}ms to first token)",
+                stats.tokens,
+                elapsed.as_secs_f64(),
+                tok_s,
+                ttft_ms
+            )),
+            None => ui::hint(&format!(
+                "{} tokens in {:.2}s",
+                stats.tokens,
+                elapsed.as_secs_f64()
+            )),
+        }
+    } else if outcome.tool_calls_run > 0 {
+        ui::hint(&format!(
+            "Inference time: {:.2}s ({} tool call{})",
+            elapsed.as_secs_f32(),
+            outcome.tool_calls_run,
+            if outcome.tool_calls_run == 1 { "" } else { "s" }
+        ));
+    } else {
+        ui::hint(&format!("Inference time: {:.2}s", elapsed.as_secs_f32()));
+    }
+}
+
 #[derive(Default)]
 struct ReplPendingImages {
     paths: Vec<PathBuf>,
@@ -427,9 +582,13 @@ fn handle_special_command(
     input: &str,
     conversation_context: &mut Option<ConversationContext>,
     pending_images: &mut ReplPendingImages,
+    tools_state: &mut ToolsState,
     verbose: u8,
 ) -> SpecialCommandResult {
     if let Some(result) = handle_image_command(input, pending_images) {
+        return result;
+    }
+    if let Some(result) = handle_tools_command(input, tools_state) {
         return result;
     }
 
@@ -447,6 +606,10 @@ fn handle_special_command(
             println!(
                 "    {}   Attach image to next message",
                 ui::dim("/image <path>")
+            );
+            println!(
+                "    {} List / toggle built-in tools",
+                ui::dim("/tools [on|off]")
             );
             if conversation_context.is_some() {
                 println!("    {}      Show conversation history", ui::dim("history"));
@@ -499,6 +662,66 @@ fn handle_special_command(
         "" => SpecialCommandResult::Continue,
         _ => SpecialCommandResult::NotSpecial,
     }
+}
+
+/// `/tools` — list the built-in tools; `/tools on|off` toggles them for the
+/// session (on requires the model to declare support).
+fn handle_tools_command(input: &str, tools_state: &mut ToolsState) -> Option<SpecialCommandResult> {
+    let trimmed = input.trim();
+    let mut parts = trimmed.splitn(2, char::is_whitespace);
+    if !parts
+        .next()
+        .unwrap_or_default()
+        .eq_ignore_ascii_case("/tools")
+    {
+        return None;
+    }
+
+    match parts.next().map(str::trim).unwrap_or("") {
+        "" => {
+            println!();
+            if tools_state.active() {
+                ui::hint("Tool calling: on");
+            } else if tools_state.available {
+                ui::hint("Tool calling: off — enable with '/tools on'");
+            } else {
+                ui::hint(
+                    "Tool calling: unavailable — the model's metadata does not \
+                     declare `tool_calling: true`",
+                );
+            }
+            println!(
+                "    {}    Search the web via {}",
+                ui::dim("web_search"),
+                tools_state.provider.label()
+            );
+            println!(
+                "    {}     Fetch a public http(s) URL",
+                ui::dim("fetch_url")
+            );
+            println!("    {}  Local date and time", ui::dim("current_time"));
+            ui::hint("Search provider: set XYBRID_SEARCH_PROVIDER=wikipedia|tavily|brave");
+        }
+        "on" => {
+            if tools_state.available {
+                tools_state.enabled = true;
+                ui::ok("Tool calling enabled");
+            } else {
+                ui::err(
+                    "This model does not declare tool support \
+                     (metadata `tool_calling: true`)",
+                );
+            }
+        }
+        "off" => {
+            tools_state.enabled = false;
+            ui::ok("Tool calling disabled for this session");
+        }
+        other => {
+            ui::err(&format!("Unknown option '{other}'. Usage: /tools [on|off]"));
+        }
+    }
+    Some(SpecialCommandResult::Continue)
 }
 
 fn handle_image_command(
@@ -699,6 +922,10 @@ fn execute_streaming(
             println!();
 
             if let Some(ref mut ctx) = conversation_context {
+                // Push the user turn only after the run: the streaming
+                // context path appends the input itself, so pushing before
+                // dispatch doubles it in the prompt.
+                ctx.push(input.clone());
                 if let Ok(text) = accumulated_text.lock() {
                     let assistant_response = Envelope::new(EnvelopeKind::Text(text.clone()))
                         .with_role(MessageRole::Assistant);
@@ -769,6 +996,13 @@ fn execute_batch(
             let elapsed = start.elapsed();
             println!();
 
+            // Record the user turn only now that the run succeeded (and
+            // never before dispatch — context-aware paths add the input
+            // themselves, so an early push doubles it in the prompt).
+            if let Some(ref mut ctx) = conversation_context {
+                ctx.push(input.clone());
+            }
+
             for result in &results {
                 match &result.output.kind {
                     EnvelopeKind::Text(text) => {
@@ -819,10 +1053,19 @@ fn execute_batch(
 mod tests {
     use super::*;
 
+    fn test_tools_state(available: bool) -> ToolsState {
+        ToolsState {
+            available,
+            enabled: available,
+            provider: tools::SearchProvider::Wikipedia,
+        }
+    }
+
     #[test]
     fn image_command_is_handled() {
         let mut conversation_context = None;
         let mut pending_images = ReplPendingImages::default();
+        let mut tools_state = test_tools_state(false);
 
         let dir = tempfile::tempdir().unwrap();
         let image_path = dir.path().join("fixture.png");
@@ -832,12 +1075,37 @@ mod tests {
             &format!("/image {}", image_path.display()),
             &mut conversation_context,
             &mut pending_images,
+            &mut tools_state,
             0,
         );
 
         assert!(matches!(result, SpecialCommandResult::Continue));
         assert_eq!(pending_images.len(), 1);
         assert_eq!(pending_images.paths[0], image_path);
+    }
+
+    #[test]
+    fn tools_command_toggles_session_state() {
+        // Toggle works when the model declares support…
+        let mut tools_state = test_tools_state(true);
+        assert!(tools_state.active());
+
+        assert!(matches!(
+            handle_tools_command("/tools off", &mut tools_state),
+            Some(SpecialCommandResult::Continue)
+        ));
+        assert!(!tools_state.active());
+
+        handle_tools_command("/tools on", &mut tools_state);
+        assert!(tools_state.active());
+
+        // …and `on` is refused when it does not.
+        let mut unavailable = test_tools_state(false);
+        handle_tools_command("/tools on", &mut unavailable);
+        assert!(!unavailable.active());
+
+        // Non-/tools input passes through untouched.
+        assert!(handle_tools_command("hello", &mut tools_state).is_none());
     }
 
     #[test]
