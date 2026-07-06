@@ -99,7 +99,7 @@ pub enum ModelSource {
     /// Load from HuggingFace Hub repository.
     ///
     /// Downloads model files from the HuggingFace Hub and caches them locally
-    /// at `~/.xybrid/cache/hf/{repo}/`. Subsequent calls use the cached files.
+    /// at `~/.xybrid/cache/hf/{repo-with-slashes-as--}/`. Subsequent calls use the cached files.
     ///
     /// The repository must contain a `model_metadata.json` file, or one will be
     /// auto-generated in a future version.

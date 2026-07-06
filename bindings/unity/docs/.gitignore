@@ -1,2 +1,6 @@
 *.md
 !README.md
+# Their Unity .meta files too — the .md sources aren't shipped, so committing
+# the metas orphans them in the installed package.
+*.md.meta
+!README.md.meta

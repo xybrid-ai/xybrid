@@ -12,7 +12,7 @@ description: 几分钟内开始使用 Xybrid
 ```yaml
 # pubspec.yaml
 dependencies:
-  xybrid_flutter: ^0.2.0
+  xybrid_flutter: ^0.2.2
 ```
 
 ```bash
@@ -54,7 +54,7 @@ https://github.com/xybrid-ai/xybrid
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/xybrid-ai/xybrid", from: "0.2.0")
+    .package(url: "https://github.com/xybrid-ai/xybrid", from: "0.2.2")
 ]
 ```
 
@@ -86,7 +86,7 @@ let result = try model.run(envelope: envelope)
 ```kotlin
 // build.gradle.kts
 dependencies {
-    implementation("ai.xybrid:xybrid-kotlin:0.2.0")
+    implementation("ai.xybrid:xybrid-kotlin:0.2.2")
 }
 ```
 
@@ -119,10 +119,10 @@ val result = model.run(envelope)
 在 Unity 中，前往 **Window > Package Manager > + > Add package from git URL**，输入：
 
 ```
-https://github.com/xybrid-ai/xybrid.git#upm
+https://github.com/xybrid-ai/xybrid.git?path=/bindings/unity
 ```
 
-`#upm` 始终指向最新发布的 Unity 构建。如需固定版本，请使用[仓库标签页](https://github.com/xybrid-ai/xybrid/tags)中的 `upm/*` 标签。
+或通过 [OpenUPM](https://openupm.com/packages/ai.xybrid.sdk/) 安装：`openupm add ai.xybrid.sdk`。原生库在首次导入时自动下载（经 SHA-256 校验）；如需固定版本，在 git URL 后追加 `#v0.2.2`。
 
 **运行推理**
 
@@ -151,7 +151,7 @@ Debug.Log($"延迟: {result.LatencyMs}ms");
 ```toml
 # Cargo.toml
 [dependencies]
-xybrid = "0.2.0"
+xybrid = "0.2.2"
 ```
 
 **运行推理**

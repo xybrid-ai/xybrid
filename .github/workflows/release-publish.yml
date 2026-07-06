@@ -359,6 +359,46 @@ jobs:
           echo "::notice::Re-dispatched release-publish (flutter_only) from tag ${TAG} to publish Flutter to pub.dev."
 
   # =========================================================================
+  # Dispatch build-unity from the freshly-created tag so the Unity native
+  # resolver bundles (xybrid-unity-native-*.zip + manifest) get built and
+  # uploaded to the release. build-unity.yml triggers on `push: tags: v*`, but
+  # the tag is created here via GITHUB_TOKEN, which does NOT trigger downstream
+  # workflows (loop prevention) — so we re-dispatch explicitly. Like the pub.dev
+  # dispatch above, this needs a PAT; without RELEASE_PAT we print the one-liner.
+  # =========================================================================
+  dispatch-unity-natives:
+    name: Dispatch Unity native bundles from tag
+    needs:
+      - publish-release
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch build-unity from the tag ref (or print recovery one-liner)
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PAT }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ needs.publish-release.outputs.tag }}
+        run: |
+          set -euo pipefail
+          if [ -z "${GH_TOKEN:-}" ]; then
+            cat >> "$GITHUB_STEP_SUMMARY" <<EOF
+          ### Unity native bundles need one manual step
+
+          The release tag was created with \`GITHUB_TOKEN\`, which cannot trigger
+          \`build-unity.yml\` (GitHub loop-prevention). Run this to build and
+          upload the Unity native resolver bundles (or set \`RELEASE_PAT\` to automate it):
+
+          \`\`\`
+          gh workflow run build-unity.yml --ref ${TAG}
+          \`\`\`
+          EOF
+            echo "::warning::Unity native bundle publish skipped — no RELEASE_PAT. See the job summary."
+            exit 0
+          fi
+          gh workflow run build-unity.yml --repo "$REPO" --ref "$TAG"
+          echo "::notice::Dispatched build-unity from tag ${TAG} to publish Unity native bundles."
+
+  # =========================================================================
   # Publish Kotlin SDK to Maven Central.
   #
   # The .so files come from the just-published GitHub Release asset (the

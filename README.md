@@ -130,7 +130,7 @@ See the full [Installation Guide](https://docs.xybrid.dev/en/docs/quickstart) fo
 
 ```yaml
 dependencies:
-  xybrid_flutter: ^0.2.1
+  xybrid_flutter: ^0.2.2
 ```
 
 **Run a model:**
@@ -147,7 +147,7 @@ final result = await model.run(XybridEnvelope.text('Hello world'));
 
 ```gradle
 dependencies {
-    implementation("ai.xybrid:xybrid-kotlin:0.2.1")
+    implementation("ai.xybrid:xybrid-kotlin:0.2.2")
 }
 ```
 
@@ -165,7 +165,7 @@ val result = model.run(Envelope.text("Hello world"))
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/xybrid-ai/xybrid.git", from: "0.2.1")
+    .package(url: "https://github.com/xybrid-ai/xybrid.git", from: "0.2.2")
 ]
 ```
 
@@ -179,11 +179,16 @@ let result = try model.run(envelope: Envelope.text("Hello world"))
 
 ### Unity
 
-**Install** via Unity Package Manager:
+**Install** via [OpenUPM](https://openupm.com/packages/ai.xybrid.sdk/) —
+`openupm add ai.xybrid.sdk`, or add the `https://package.openupm.com` scoped
+registry for scope `ai.xybrid` — or straight from the git subfolder:
 
 ```sh
-https://github.com/xybrid-ai/xybrid.git#upm
+https://github.com/xybrid-ai/xybrid.git?path=/bindings/unity
 ```
+
+Native libraries download automatically on import. See the
+[Unity SDK README](bindings/unity/README.md) for details.
 
 **Run a model:**
 
@@ -199,7 +204,7 @@ var result = model.Run(Envelope.Text("Hello world"));
 
 ```toml
 [dependencies]
-xybrid = "0.2.1"
+xybrid = "0.2.2"
 ```
 
 **Run a model:**

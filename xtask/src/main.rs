@@ -393,6 +393,23 @@ enum Commands {
         #[arg(long)]
         skip_flutter: bool,
     },
+
+    /// Package per-platform Unity native bundles + resolver manifest into dist/.
+    ///
+    /// Zips each present `bindings/unity/Runtime/Plugins/<Platform>` tree (as
+    /// deployed by `build-unity --deploy`) into
+    /// `xybrid-unity-native-<platform>-v<ver>.zip` and writes
+    /// `xybrid-unity-natives-v<ver>.manifest.json` (the manifest the Unity
+    /// editor `NativeLibraryResolver` downloads and verifies against).
+    PackageUnityNatives {
+        /// Override the version (defaults to Cargo.toml version or git tag)
+        #[arg(long)]
+        version: Option<String>,
+
+        /// Output directory for bundles (default: dist/)
+        #[arg(long, default_value = "dist")]
+        output_dir: PathBuf,
+    },
 }
 
 #[derive(Clone, Copy, ValueEnum, Debug, PartialEq, Eq)]
@@ -587,6 +604,13 @@ fn main() -> Result<()> {
         } => {
             let ver = get_version(version.as_deref());
             package_artifacts(&ver, &output_dir, skip_apple, skip_android, skip_flutter)?;
+        }
+        Commands::PackageUnityNatives {
+            version,
+            output_dir,
+        } => {
+            let ver = get_version(version.as_deref());
+            package_unity_natives(&ver, &output_dir)?;
         }
     }
 
@@ -2309,6 +2333,141 @@ fn chrono_now() -> String {
     }
     // Fallback
     "unknown".to_string()
+}
+
+/// One platform entry in the Unity native-resolver manifest.
+///
+/// Field names/shape are the wire contract consumed by
+/// `bindings/unity/Editor/NativeLibraryResolver.cs` (`NativePlatform`); keep
+/// them in sync.
+#[derive(serde::Serialize)]
+struct UnityNativePlatform {
+    /// `macos` | `windows` | `linux` | `android` | `ios`.
+    platform: String,
+    /// Release asset filename to download.
+    asset: String,
+    /// Lowercase hex SHA-256 of the asset.
+    sha256: String,
+    /// Asset size in bytes.
+    size: u64,
+}
+
+/// The `xybrid-unity-natives-v<ver>.manifest.json` document.
+#[derive(serde::Serialize)]
+struct UnityNativeManifest {
+    version: String,
+    platforms: Vec<UnityNativePlatform>,
+}
+
+/// Package each present Unity native platform tree into a zip + write the
+/// resolver manifest. Skips platforms whose native library isn't deployed yet
+/// (mirrors `package_android`'s "package what's present" behaviour, since CI
+/// assembles per-platform artifacts from separate runners before packaging).
+fn package_unity_natives(version: &str, output_dir: &Path) -> Result<()> {
+    let plugins_dir = PathBuf::from("bindings/unity/Runtime/Plugins");
+    if !plugins_dir.exists() {
+        anyhow::bail!(
+            "Unity plugins dir not found at {:?} — run \
+             `cargo xtask build-unity --all-platforms --deploy` first",
+            plugins_dir
+        );
+    }
+
+    std::fs::create_dir_all(output_dir)
+        .with_context(|| format!("Failed to create output directory: {:?}", output_dir))?;
+
+    // (platform key, Unity plugin subdir, primary native library relative path).
+    // Presence of the primary library gates whether the platform is packaged.
+    let platforms: [(&str, &str, &str); 5] = [
+        ("macos", "macOS", "libxybrid_ffi.dylib"),
+        ("windows", "Windows", "xybrid_ffi.dll"),
+        ("linux", "Linux", "libxybrid_ffi.so"),
+        ("ios", "iOS", "libxybrid_ffi.a"),
+        // Android has per-ABI subdirs; presence is checked separately below.
+        ("android", "Android", ""),
+    ];
+
+    println!("Packaging Unity native bundles (version {})...", version);
+    let mut entries: Vec<UnityNativePlatform> = Vec::new();
+
+    for (key, plugin_dir, primary_lib) in platforms {
+        let src_dir = plugins_dir.join(plugin_dir);
+        let present = if key == "android" {
+            // At least one ABI subdir must contain the FFI .so.
+            ["arm64-v8a", "armeabi-v7a", "x86_64"]
+                .iter()
+                .any(|abi| src_dir.join(abi).join("libxybrid_ffi.so").exists())
+        } else {
+            src_dir.join(primary_lib).exists()
+        };
+
+        if !present {
+            println!("  • skipping {key} — native not deployed at {:?}", src_dir);
+            continue;
+        }
+
+        let filename = format!("xybrid-unity-native-{key}-v{version}.zip");
+        let output_path = output_dir.join(&filename);
+        if output_path.exists() {
+            std::fs::remove_file(&output_path)?;
+        }
+
+        // Stage `<PluginDir>/…` (+ the sibling folder `.meta`) so the zip root
+        // mirrors `Runtime/Plugins/`; the resolver extracts it verbatim into
+        // the consumer's `Assets/Xybrid/Plugins/`.
+        let temp_dir = output_dir.join(format!(".unity-native-{key}-temp"));
+        if temp_dir.exists() {
+            std::fs::remove_dir_all(&temp_dir)?;
+        }
+        std::fs::create_dir_all(&temp_dir)?;
+        copy_dir_recursive(&src_dir, &temp_dir.join(plugin_dir))?;
+        let folder_meta = plugins_dir.join(format!("{plugin_dir}.meta"));
+        if folder_meta.exists() {
+            std::fs::copy(&folder_meta, temp_dir.join(format!("{plugin_dir}.meta")))?;
+        }
+
+        create_zip(&temp_dir, &output_path)?;
+        std::fs::remove_dir_all(&temp_dir)?;
+
+        let size = std::fs::metadata(&output_path)?.len();
+        let sha256 = calculate_sha256(&output_path)?;
+        println!(
+            "  ✓ {filename} ({size} bytes, sha256: {}...)",
+            &sha256[..16]
+        );
+
+        entries.push(UnityNativePlatform {
+            platform: key.to_string(),
+            asset: filename,
+            sha256,
+            size,
+        });
+    }
+
+    if entries.is_empty() {
+        anyhow::bail!(
+            "No Unity native platforms were present to package — run \
+             `cargo xtask build-unity --all-platforms --deploy` first"
+        );
+    }
+
+    let manifest = UnityNativeManifest {
+        version: version.to_string(),
+        platforms: entries,
+    };
+    let manifest_name = format!("xybrid-unity-natives-v{version}.manifest.json");
+    let manifest_path = output_dir.join(&manifest_name);
+    std::fs::write(
+        &manifest_path,
+        serde_json::to_string_pretty(&manifest).context("Failed to serialize Unity manifest")?,
+    )
+    .context("Failed to write Unity native manifest")?;
+    println!(
+        "  ✓ {manifest_name} ({} platform(s))",
+        manifest.platforms.len()
+    );
+
+    Ok(())
 }
 
 /// Package XCFramework as a .zip file

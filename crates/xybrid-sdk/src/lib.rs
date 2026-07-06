@@ -418,15 +418,18 @@ pub fn init_sdk_cache_dir(cache_dir: impl Into<std::path::PathBuf>) {
             }
         }
 
-        // Set HF_HOME for hf-hub/mistralrs (used for model tokenizer/config caching)
-        // This takes priority over XDG_CACHE_HOME
+        // Defensive HF_HOME fallback for HF-aware libraries (and a future
+        // mistralrs dep). Takes priority over XDG_CACHE_HOME. Note: the SDK's
+        // own HuggingFace loader overrides this via `with_cache_dir(...)`, so
+        // SDK downloads land under `<cache_root>/hf-hub`, not here.
         let hf_cache = cache_path.join("huggingface");
         if let Some(hf_str) = hf_cache.to_str() {
             std::env::set_var("HF_HOME", hf_str);
         }
 
-        // Set HF_HUB_OFFLINE to prevent any download attempts
-        // We bundle all required files, so hf-hub should never need to fetch anything
+        // Hint offline mode to HF-aware libraries that honor it. Best-effort
+        // guard, not a guarantee: the `huggingface` feature's loader downloads
+        // deliberately, and not every hf-hub version reads this variable.
         std::env::set_var("HF_HUB_OFFLINE", "1");
 
         // Also set XDG_CACHE_HOME as a fallback for other XDG-compliant libraries

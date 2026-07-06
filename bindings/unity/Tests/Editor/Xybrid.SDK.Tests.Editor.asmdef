@@ -3,6 +3,7 @@
     "rootNamespace": "Xybrid.Tests",
     "references": [
         "Xybrid.SDK.Runtime",
+        "Xybrid.SDK.Editor",
         "UnityEngine.TestRunner",
         "UnityEditor.TestRunner"
     ],
