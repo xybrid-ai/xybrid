@@ -86,6 +86,7 @@ fn short_greedy_config() -> GenerationConfig {
         repetition_penalty: 1.0,
         seed: None,
         stop_sequences: Vec::new(),
+        grammar: None,
     }
 }
 
@@ -602,6 +603,7 @@ fn streaming_matches_non_streaming_for_same_seed() {
         repetition_penalty: 1.0,
         seed: None,
         stop_sequences: Vec::new(),
+        grammar: None,
     };
 
     let prompt = "Write a single English sentence about oceans.";
@@ -704,6 +706,7 @@ fn sampling_seed_config(seed: u64) -> GenerationConfig {
         repetition_penalty: 1.0,
         stop_sequences: Vec::new(),
         seed: Some(seed),
+        grammar: None,
     }
 }
 

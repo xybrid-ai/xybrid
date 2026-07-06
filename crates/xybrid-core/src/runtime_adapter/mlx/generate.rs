@@ -696,6 +696,9 @@ mod runtime {
                 prefill_tps: fields.prefill_tps,
                 // Text-only MLX path: no image preprocessing leg to time.
                 image_preprocess_ms: None,
+                // The MLX generation loop does not yet surface a separate
+                // reasoning channel; `<think>` capture is handled upstream.
+                reasoning_content: None,
             })
         })();
 
