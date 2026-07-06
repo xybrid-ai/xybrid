@@ -118,10 +118,10 @@ val result = model.run(envelope)
 In Unity, go to **Window > Package Manager > + > Add package from git URL** and enter:
 
 ```
-https://github.com/xybrid-ai/xybrid.git#upm
+https://github.com/xybrid-ai/xybrid.git?path=/bindings/unity
 ```
 
-`#upm` tracks the latest published Unity build. To pin a version, use one of the `upm/*` tags from the [repository tags page](https://github.com/xybrid-ai/xybrid/tags).
+Or via [OpenUPM](https://openupm.com/packages/ai.xybrid.sdk/): `openupm add ai.xybrid.sdk`. Native libraries download automatically on first import (SHA-256 verified); pin a version by appending `#v0.2.2` to the git URL.
 
 **Run inference**
 

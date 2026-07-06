@@ -179,11 +179,16 @@ let result = try model.run(envelope: Envelope.text("Hello world"))
 
 ### Unity
 
-**Install** via Unity Package Manager:
+**Install** via [OpenUPM](https://openupm.com/packages/ai.xybrid.sdk/) —
+`openupm add ai.xybrid.sdk`, or add the `https://package.openupm.com` scoped
+registry for scope `ai.xybrid` — or straight from the git subfolder:
 
 ```sh
-https://github.com/xybrid-ai/xybrid.git#upm
+https://github.com/xybrid-ai/xybrid.git?path=/bindings/unity
 ```
+
+Native libraries download automatically on import. See the
+[Unity SDK README](bindings/unity/README.md) for details.
 
 **Run a model:**
 

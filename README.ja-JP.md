@@ -194,10 +194,10 @@ let result = try model.run(envelope: Envelope.text("Hello world"))
 
 ### Unity
 
-**インストール** Unity Package Managerを使用:
+**インストール** [OpenUPM](https://openupm.com/packages/ai.xybrid.sdk/)（`openupm add ai.xybrid.sdk`）、または git サブフォルダから:
 
 ```sh
-https://github.com/xybrid-ai/xybrid.git#upm
+https://github.com/xybrid-ai/xybrid.git?path=/bindings/unity
 ```
 
 **モデルを実行:**

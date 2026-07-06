@@ -194,10 +194,10 @@ let result = try model.run(envelope: Envelope.text("国破山河在，城春草�
 
 ### Unity
 
-**安装** 通过 Unity Package Manager：
+**安装** 通过 [OpenUPM](https://openupm.com/packages/ai.xybrid.sdk/)（`openupm add ai.xybrid.sdk`），或直接从 git 子目录安装：
 
 ```sh
-https://github.com/xybrid-ai/xybrid.git#upm
+https://github.com/xybrid-ai/xybrid.git?path=/bindings/unity
 ```
 
 **运行模型：**
