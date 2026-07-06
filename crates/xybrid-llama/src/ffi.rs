@@ -255,7 +255,9 @@ pub(crate) unsafe fn format_chat_with_model(
 /// `ctx` and `model` must be live, non-null pointers. `input_tokens`
 /// valid for `n_input` elements. `output_tokens` writable for `max_tokens`
 /// elements. `stop_seqs` and `stop_lens` either both null with
-/// `n_stop_seqs == 0`, or both valid.
+/// `n_stop_seqs == 0`, or both valid. `grammar` / `grammar_root` are either
+/// null (unconstrained generation) or NUL-terminated C strings that outlive
+/// the call.
 #[allow(clippy::too_many_arguments)]
 pub(crate) unsafe fn generate(
     ctx: *mut c_void,
@@ -270,6 +272,8 @@ pub(crate) unsafe fn generate(
     top_k: usize,
     repeat_penalty: f32,
     seed: u32,
+    grammar: *const c_char,
+    grammar_root: *const c_char,
     stop_seqs: *const i32,
     stop_lens: *const c_int,
     n_stop_seqs: c_int,
@@ -287,6 +291,8 @@ pub(crate) unsafe fn generate(
         top_k as c_int,
         repeat_penalty,
         seed,
+        grammar,
+        grammar_root,
         stop_seqs,
         stop_lens,
         n_stop_seqs,
@@ -314,6 +320,8 @@ pub(crate) unsafe fn generate_streaming(
     top_k: usize,
     repeat_penalty: f32,
     seed: u32,
+    grammar: *const c_char,
+    grammar_root: *const c_char,
     stop_seqs: *const i32,
     stop_lens: *const c_int,
     n_stop_seqs: c_int,
@@ -334,6 +342,8 @@ pub(crate) unsafe fn generate_streaming(
         top_k as c_int,
         repeat_penalty,
         seed,
+        grammar,
+        grammar_root,
         stop_seqs,
         stop_lens,
         n_stop_seqs,
@@ -364,6 +374,8 @@ pub(crate) unsafe fn generate_from_current_logits(
     top_k: usize,
     repeat_penalty: f32,
     seed: u32,
+    grammar: *const c_char,
+    grammar_root: *const c_char,
     stop_seqs: *const i32,
     stop_lens: *const c_int,
     n_stop_seqs: c_int,
@@ -382,6 +394,8 @@ pub(crate) unsafe fn generate_from_current_logits(
         top_k as c_int,
         repeat_penalty,
         seed,
+        grammar,
+        grammar_root,
         stop_seqs,
         stop_lens,
         n_stop_seqs,

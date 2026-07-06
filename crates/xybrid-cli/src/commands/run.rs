@@ -40,6 +40,7 @@ pub(crate) fn run_pipeline(
     target: Option<&str>,
     backend_override: Option<&str>,
     trace_enabled: bool,
+    show_reasoning: bool,
     trace_export: Option<&PathBuf>,
 ) -> Result<()> {
     let _pipeline_span = if trace_enabled {
@@ -78,6 +79,7 @@ pub(crate) fn run_pipeline(
         policy_path,
         output_path,
         trace_enabled,
+        show_reasoning,
         trace_export,
     )
 }
@@ -441,6 +443,7 @@ fn execute_pipeline(
     policy_path: Option<&PathBuf>,
     output_path: Option<&PathBuf>,
     trace_enabled: bool,
+    show_reasoning: bool,
     trace_export: Option<&PathBuf>,
 ) -> Result<()> {
     let mut orchestrator = Orchestrator::new();
@@ -470,7 +473,7 @@ fn execute_pipeline(
     match execution_result {
         Ok(results) => {
             sp.finish_and_clear();
-            print_pipeline_results(&results, output_path)?;
+            print_pipeline_results(&results, output_path, show_reasoning)?;
             print_trace_output(trace_enabled, trace_export)?;
             Ok(())
         }
@@ -485,6 +488,7 @@ fn execute_pipeline(
 fn print_pipeline_results(
     results: &[xybrid_core::orchestrator::StageExecutionResult],
     output_path: Option<&PathBuf>,
+    show_reasoning: bool,
 ) -> Result<()> {
     ui::section("Results");
     println!();
@@ -505,6 +509,19 @@ fn print_pipeline_results(
                 if !text.is_empty() {
                     println!();
                     println!("    {}", text);
+                }
+                // Chain-of-thought for this stage, opt-in via `--show-reasoning`.
+                if show_reasoning {
+                    if let Some(reasoning) = result
+                        .output
+                        .metadata
+                        .get("reasoning_content")
+                        .filter(|r| !r.is_empty())
+                    {
+                        println!();
+                        ui::kv("  Reasoning", "");
+                        println!("    {}", reasoning);
+                    }
                 }
             }
             EnvelopeKind::Audio(data) => {
@@ -638,6 +655,7 @@ pub(crate) fn run_bundle(
     backend_override: Option<&str>,
     dry_run: bool,
     trace_enabled: bool,
+    show_reasoning: bool,
     trace_export: Option<&PathBuf>,
 ) -> Result<()> {
     if trace_enabled {
@@ -696,7 +714,7 @@ pub(crate) fn run_bundle(
 
     let (output, elapsed) = run_inference(&extract_dir, &metadata, &input, trace_enabled)?;
 
-    print_inference_results(&metadata, &output, elapsed, output_path)?;
+    print_inference_results(&metadata, &output, elapsed, output_path, show_reasoning)?;
     print_llm_trace_block(&output, trace_enabled);
     emit_pipeline_complete_event(&metadata, &output, elapsed);
 
@@ -757,6 +775,7 @@ pub(crate) fn run_model(
     backend_override: Option<&str>,
     dry_run: bool,
     trace_enabled: bool,
+    show_reasoning: bool,
     trace_export: Option<&PathBuf>,
 ) -> Result<()> {
     if trace_enabled {
@@ -900,7 +919,7 @@ pub(crate) fn run_model(
 
     let (output, elapsed) = run_inference(&extract_dir, &metadata, &input, trace_enabled)?;
 
-    print_inference_results(&metadata, &output, elapsed, output_path)?;
+    print_inference_results(&metadata, &output, elapsed, output_path, show_reasoning)?;
     print_llm_trace_block(&output, trace_enabled);
     emit_pipeline_complete_event(&metadata, &output, elapsed);
 
@@ -923,6 +942,7 @@ pub(crate) fn run_directory(
     backend_override: Option<&str>,
     dry_run: bool,
     trace_enabled: bool,
+    show_reasoning: bool,
     trace_export: Option<&PathBuf>,
 ) -> Result<()> {
     if trace_enabled {
@@ -963,7 +983,7 @@ pub(crate) fn run_directory(
 
     let (output, elapsed) = run_inference(dir, &metadata, &input, trace_enabled)?;
 
-    print_inference_results(&metadata, &output, elapsed, output_path)?;
+    print_inference_results(&metadata, &output, elapsed, output_path, show_reasoning)?;
     print_llm_trace_block(&output, trace_enabled);
     emit_pipeline_complete_event(&metadata, &output, elapsed);
 
@@ -985,6 +1005,7 @@ pub(crate) fn run_huggingface(
     backend_override: Option<&str>,
     dry_run: bool,
     trace_enabled: bool,
+    show_reasoning: bool,
     trace_export: Option<&PathBuf>,
 ) -> Result<()> {
     if trace_enabled {
@@ -1046,7 +1067,7 @@ pub(crate) fn run_huggingface(
 
     let (output, elapsed) = run_inference(&cache_dir, &metadata, &input, trace_enabled)?;
 
-    print_inference_results(&metadata, &output, elapsed, output_path)?;
+    print_inference_results(&metadata, &output, elapsed, output_path, show_reasoning)?;
     print_llm_trace_block(&output, trace_enabled);
     emit_pipeline_complete_event(&metadata, &output, elapsed);
 
@@ -1068,6 +1089,7 @@ pub(crate) fn run_model_file(
     dry_run: bool,
     backend_override: Option<&str>,
     trace_enabled: bool,
+    show_reasoning: bool,
     trace_export: Option<&PathBuf>,
 ) -> Result<()> {
     if trace_enabled {
@@ -1131,7 +1153,7 @@ pub(crate) fn run_model_file(
 
     let (output, elapsed) = run_inference(parent_dir, &metadata, &input, trace_enabled)?;
 
-    print_inference_results(&metadata, &output, elapsed, output_path)?;
+    print_inference_results(&metadata, &output, elapsed, output_path, show_reasoning)?;
     print_llm_trace_block(&output, trace_enabled);
     emit_pipeline_complete_event(&metadata, &output, elapsed);
 
@@ -1371,6 +1393,7 @@ fn print_inference_results(
     output: &Envelope,
     elapsed: std::time::Duration,
     output_path: Option<&PathBuf>,
+    show_reasoning: bool,
 ) -> Result<()> {
     ui::section("Results");
     println!();
@@ -1449,6 +1472,24 @@ fn print_inference_results(
                     .with_context(|| format!("Failed to write token IDs to {}", path.display()))?;
                 println!();
                 ui::ok(&format!("Token IDs saved to {}", path.display()));
+            }
+        }
+    }
+
+    // Chain-of-thought, opt-in via `--show-reasoning`. Thinking models emit
+    // `<think>...</think>` blocks that are stripped from the answer text above;
+    // the reasoning is carried on the envelope metadata under "reasoning_content".
+    if show_reasoning {
+        match output.metadata.get("reasoning_content") {
+            Some(reasoning) if !reasoning.is_empty() => {
+                println!();
+                ui::section("Reasoning");
+                println!();
+                println!("    {}", reasoning);
+            }
+            _ => {
+                println!();
+                ui::hint("No reasoning emitted (model produced no <think> blocks)");
             }
         }
     }

@@ -111,6 +111,7 @@ fn lfm2_350m_two_turns_does_not_fail_with_decode_error() {
         0,
         1.0,
         &["<|im_end|>".to_string()],
+        None,
     )
     .expect("turn 1 must not fail");
 
@@ -135,6 +136,7 @@ fn lfm2_350m_two_turns_does_not_fail_with_decode_error() {
         0,
         1.0,
         &["<|im_end|>".to_string()],
+        None,
     );
 
     match result {

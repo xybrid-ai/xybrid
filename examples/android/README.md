@@ -165,6 +165,30 @@ if (result.success) {
 }
 ```
 
+### Thinking / Reasoning models (chain-of-thought)
+
+Reasoning models (flagged `reasoning: true` in their metadata, e.g.
+`lfm2.5-1.2b-thinking`) produce a chain-of-thought before their answer. xybrid
+strips the `<think>…</think>` reasoning out of the answer text and surfaces it
+separately on `result.reasoningContent` — `null` for non-thinking models.
+
+```kotlin
+import ai.xybrid.Envelope
+import ai.xybrid.text
+import ai.xybrid.reasoningContent
+
+val result = model.run(Envelope.text("Is 97 a prime number? Reason, then answer."))
+
+// The answer — never contains the <think> reasoning markup
+result.text?.let { println("Answer: $it") }
+
+// The chain-of-thought — null unless the model is a thinking model
+result.reasoningContent?.let { println("Reasoning: $it") }
+```
+
+In this example app: pick **"LFM2.5 1.2B Thinking"** from the model list, run a
+prompt, and expand the **Reasoning (chain-of-thought)** section under the answer.
+
 ### Error Handling with Coroutines
 
 ```kotlin

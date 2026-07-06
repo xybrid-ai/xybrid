@@ -12,6 +12,8 @@ sealed class InferenceState {
     data class Completed(
         val task: ModelTask,
         val text: String?,
+        /** Chain-of-thought from a thinking model (`reasoning: true`), or null. */
+        val reasoningContent: String? = null,
         val audioBytes: ByteArray?,
         val latencyMs: Long,
         val metrics: XybridInferenceMetrics? = null

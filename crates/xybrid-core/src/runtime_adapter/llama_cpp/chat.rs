@@ -5,24 +5,50 @@ use crate::runtime_adapter::llm::LlmResult;
 use crate::runtime_adapter::{AdapterError, ChatMessage};
 use xybrid_llama::LlamaError;
 
+/// The reasoning-channel opener primed onto the assistant turn for
+/// thinking models. The model continues from here, emitting its
+/// chain-of-thought and a closing `</think>` before the final answer.
+///
+/// Kept in sync with [`THINK_OPEN`](crate::runtime_adapter::streaming_postprocess)
+/// semantics: the backend reconstructs the opening tag around the output so
+/// the standard `<think>...</think>` capture path applies.
+pub(super) const THINK_PRIME: &str = "<think>\n";
+
 pub(super) fn format_chat_prompt(
     model: &xybrid_llama::LlamaModel,
     messages: &[ChatMessage],
+    reasoning: bool,
 ) -> LlmResult<String> {
     let roles: Vec<&str> = messages.iter().map(|m| m.role.as_str()).collect();
     let contents: Vec<&str> = messages.iter().map(|m| m.content.as_str()).collect();
 
-    match xybrid_llama::format_chat(model, &roles, &contents) {
-        Ok(Some(prompt)) => Ok(prompt),
-        Ok(None) => Ok(format_chat_chatml(messages)),
-        // Template is present but llama.cpp's non-Jinja matcher rejected it
-        // (e.g. gemma-4 returns code -1): fall back to rendering the model's
-        // own embedded template through minijinja.
+    // Base prompt: the model's native template via llama.cpp, the built-in
+    // ChatML fallback when the model has no template, or a minijinja render of
+    // the model's own embedded template when llama.cpp's non-Jinja matcher
+    // rejects it (e.g. gemma-4 returns code -1).
+    let mut prompt = match xybrid_llama::format_chat(model, &roles, &contents) {
+        Ok(Some(prompt)) => prompt,
+        Ok(None) => format_chat_chatml(messages),
         Err(err @ LlamaError::ChatTemplateFailed { .. }) => {
-            render_embedded_fallback(model, messages, err)
+            render_embedded_fallback(model, messages, err)?
         }
-        Err(err) => Err(err.into()),
+        Err(err) => return Err(err.into()),
+    };
+
+    // Thinking models (metadata `reasoning: true`) gate their `<think>` block
+    // behind the chat template's thinking flag, which llama.cpp's legacy
+    // `llama_chat_apply_template` does not render. Prime the channel ourselves so
+    // the model emits its chain-of-thought; the backend reconstructs the opening
+    // tag for capture. See `.context/reasoning-content-surfacing.md`.
+    //
+    // Guard against a doubled tag: if the template (or a future llama.cpp / the
+    // minijinja fallback with thinking enabled) already rendered an opening
+    // `<think>`, don't prime a second one.
+    if reasoning && !prompt.trim_end().ends_with("<think>") {
+        prompt.push_str(THINK_PRIME);
     }
+
+    Ok(prompt)
 }
 
 /// Render the model's own embedded chat template through minijinja and return

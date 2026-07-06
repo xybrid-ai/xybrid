@@ -36,6 +36,10 @@ pub struct FfiGenerationConfig {
     pub repetition_penalty: Option<f32>,
     /// Stop sequences. When `None` or empty, only EOS token stops generation.
     pub stop_sequences: Option<Vec<String>>,
+    /// Optional GBNF grammar constraining generation to structured output
+    /// (local llama backend only; other backends ignore it). Produce one from
+    /// a JSON Schema with `jsonSchemaToGbnf`, or pass raw GBNF.
+    pub grammar: Option<String>,
 }
 
 impl FfiGenerationConfig {
@@ -50,6 +54,7 @@ impl FfiGenerationConfig {
             top_k: Some(0),
             repetition_penalty: None,
             stop_sequences: None,
+            grammar: None,
         }
     }
 
@@ -64,6 +69,7 @@ impl FfiGenerationConfig {
             top_k: Some(50),
             repetition_penalty: None,
             stop_sequences: None,
+            grammar: None,
         }
     }
 
@@ -81,6 +87,7 @@ impl FfiGenerationConfig {
             top_k: self.top_k,
             repetition_penalty: self.repetition_penalty,
             stop_sequences: self.stop_sequences.clone().unwrap_or_default(),
+            grammar: self.grammar.clone(),
         }
     }
 
@@ -124,6 +131,16 @@ fn apply_backend_to_loader(loader: ModelLoader, backend: Option<FfiBackend>) -> 
     } else {
         loader
     }
+}
+
+/// Convert a JSON Schema (as a JSON string) into a GBNF grammar for
+/// [`FfiGenerationConfig::grammar`].
+///
+/// Fails (as a `String` error, per this crate's FRB convention) when the
+/// schema is not valid JSON or uses a construct outside the supported subset.
+#[frb(sync)]
+pub fn json_schema_to_gbnf(schema_json: String) -> Result<String, String> {
+    xybrid_sdk::json_schema_str_to_gbnf(&schema_json).map_err(|e| e.to_string())
 }
 
 /// Opaque cooperative cancellation handle shared across the FFI boundary.
@@ -245,6 +262,7 @@ impl FfiRunOptions {
                 top_k: Some(cfg.top_k as u32),
                 repetition_penalty: Some(cfg.repetition_penalty),
                 stop_sequences: cfg.stop_sequences.clone(),
+                grammar: cfg.grammar.clone(),
             });
         let mut options = self.to_facade(facade_gc).to_sdk(None);
 

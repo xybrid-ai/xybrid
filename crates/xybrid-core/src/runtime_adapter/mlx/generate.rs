@@ -952,6 +952,7 @@ mod tests {
             max_tokens: 8,
             seed: None,
             stop_sequences: vec![],
+            grammar: None,
         };
         let mut p1 = GenerateParams::new(&cfg);
         let mut p2 = GenerateParams::new(&cfg);
@@ -974,6 +975,7 @@ mod tests {
             max_tokens: 8,
             stop_sequences: vec![],
             seed: Some(0x5eed),
+            grammar: None,
         };
         let mut from_config = GenerateParams::new(&cfg);
         let mut explicit = Sampler::seeded(0x5eed);

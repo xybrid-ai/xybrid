@@ -55,6 +55,11 @@ struct StreamState {
     decode_tps_reported: Option<f32>,
     prefill_tps_reported: Option<f32>,
     saw_terminal: bool,
+    /// Reasoning text accumulated from mistralrs `Delta.reasoning_content`.
+    /// mistralrs strips `<think>` blocks from `content` natively and exposes
+    /// the reasoning on this separate field, so — unlike llama.cpp — we read
+    /// it straight off the delta rather than parsing tags ourselves.
+    reasoning: String,
 }
 
 #[cfg(feature = "llm-mistral")]
@@ -69,7 +74,13 @@ impl StreamState {
             decode_tps_reported: None,
             prefill_tps_reported: None,
             saw_terminal: false,
+            reasoning: String::new(),
         }
+    }
+
+    /// The accumulated reasoning text, or `None` if the model emitted none.
+    fn reasoning_content(&self) -> Option<String> {
+        (!self.reasoning.is_empty()).then(|| self.reasoning.clone())
     }
 }
 
@@ -110,6 +121,16 @@ fn handle_response(
             if let Some(body) = delta.filter(|s| !s.is_empty()) {
                 state.chunk_ts.push(ts);
                 state.text.push_str(body);
+            }
+            // mistralrs surfaces chain-of-thought on a dedicated delta field
+            // (already stripped out of `content`). Accumulate it so the
+            // backend can populate `GenerationOutput::reasoning_content`.
+            let reasoning = chunk
+                .choices
+                .first()
+                .and_then(|c| c.delta.reasoning_content.as_deref());
+            if let Some(body) = reasoning.filter(|s| !s.is_empty()) {
+                state.reasoning.push_str(body);
             }
             // Terminal chunk carries usage + finish_reason regardless
             // of whether content is present.
@@ -481,6 +502,7 @@ impl LlmBackend for MistralBackend {
             Ok::<_, AdapterError>(state)
         })?;
 
+        let reasoning_content = state.reasoning_content();
         let StreamState {
             text,
             finish_reason,
@@ -529,6 +551,7 @@ impl LlmBackend for MistralBackend {
             decode_tps: decode_tps_reported.or(fields.decode_tps),
             prefill_tps: prefill_tps_reported.or(fields.prefill_tps),
             image_preprocess_ms: None,
+            reasoning_content,
         })
     }
 
@@ -575,6 +598,7 @@ impl LlmBackend for MistralBackend {
             Ok::<_, AdapterError>(state)
         })?;
 
+        let reasoning_content = state.reasoning_content();
         let StreamState {
             text,
             finish_reason,
@@ -606,6 +630,7 @@ impl LlmBackend for MistralBackend {
             decode_tps: decode_tps_reported.or(fields.decode_tps),
             prefill_tps: prefill_tps_reported.or(fields.prefill_tps),
             image_preprocess_ms: None,
+            reasoning_content,
         })
     }
 

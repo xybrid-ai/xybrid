@@ -226,6 +226,11 @@ enum Commands {
         #[arg(long, default_value = "false")]
         trace: bool,
 
+        /// Print the model's chain-of-thought reasoning (`<think>` blocks),
+        /// which is stripped out of the answer text by default
+        #[arg(long, default_value = "false")]
+        show_reasoning: bool,
+
         /// Export trace to JSON file (Chrome trace format)
         #[arg(long, value_name = "FILE")]
         trace_export: Option<PathBuf>,
@@ -527,6 +532,7 @@ fn run_command(cli: Cli) -> Result<()> {
             target,
             backend,
             trace,
+            show_reasoning,
             trace_export,
         } => {
             if trace {
@@ -544,6 +550,7 @@ fn run_command(cli: Cli) -> Result<()> {
                     dry_run,
                     backend.as_deref(),
                     trace,
+                    show_reasoning,
                     trace_export.as_ref(),
                 );
             }
@@ -560,6 +567,7 @@ fn run_command(cli: Cli) -> Result<()> {
                     backend.as_deref(),
                     dry_run,
                     trace,
+                    show_reasoning,
                     trace_export.as_ref(),
                 );
             }
@@ -575,6 +583,7 @@ fn run_command(cli: Cli) -> Result<()> {
                     backend.as_deref(),
                     dry_run,
                     trace,
+                    show_reasoning,
                     trace_export.as_ref(),
                 );
             }
@@ -590,6 +599,7 @@ fn run_command(cli: Cli) -> Result<()> {
                     backend.as_deref(),
                     dry_run,
                     trace,
+                    show_reasoning,
                     trace_export.as_ref(),
                 );
             }
@@ -605,6 +615,7 @@ fn run_command(cli: Cli) -> Result<()> {
                     backend.as_deref(),
                     dry_run,
                     trace,
+                    show_reasoning,
                     trace_export.as_ref(),
                 );
             }
@@ -622,6 +633,7 @@ fn run_command(cli: Cli) -> Result<()> {
                 target.as_deref(),
                 backend.as_deref(),
                 trace,
+                show_reasoning,
                 trace_export.as_ref(),
             )
         }

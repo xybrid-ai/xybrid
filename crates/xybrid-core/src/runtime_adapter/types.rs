@@ -344,6 +344,16 @@ pub struct GenerationConfig {
     /// Stop sequences.
     #[serde(default)]
     pub stop_sequences: Vec<String>,
+
+    /// Optional GBNF grammar constraining generation. When set, the local
+    /// llama.cpp backend masks any token the grammar would reject, guaranteeing
+    /// structured output (e.g. schema-valid JSON for data extraction).
+    ///
+    /// Set the raw grammar via [`GenerationConfig::with_grammar`], or convert a
+    /// JSON Schema with [`GenerationConfig::with_json_schema`]. `None` = free
+    /// (unconstrained) generation. Ignored by non-llama backends.
+    #[serde(default)]
+    pub grammar: Option<String>,
 }
 
 fn default_max_tokens() -> usize {
@@ -385,6 +395,7 @@ impl Default for GenerationConfig {
             repetition_penalty: default_repetition_penalty(),
             seed: None,
             stop_sequences: Vec::new(),
+            grammar: None,
         }
     }
 }
@@ -432,6 +443,40 @@ impl GenerationConfig {
     pub fn with_stop(mut self, stop: impl Into<String>) -> Self {
         self.stop_sequences.push(stop.into());
         self
+    }
+
+    /// Constrain generation to a raw [GBNF] grammar (entry rule `root`).
+    ///
+    /// This is the escape hatch for callers who already have a grammar; most
+    /// callers should use [`GenerationConfig::with_json_schema`] instead. Only
+    /// the local llama.cpp backend honors this; other backends ignore it.
+    ///
+    /// [GBNF]: https://github.com/ggml-org/llama.cpp/blob/master/grammars/README.md
+    pub fn with_grammar(mut self, grammar: impl Into<String>) -> Self {
+        self.grammar = Some(grammar.into());
+        self
+    }
+
+    /// Constrain generation to a JSON Schema, converting it to a GBNF grammar.
+    ///
+    /// Guarantees the model emits schema-valid JSON — the basis for reliable
+    /// on-device data extraction. Supports a subset of JSON Schema (objects,
+    /// arrays, scalars, enums); see [`crate::runtime_adapter::grammar`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`XybridError::Grammar`] if the schema is malformed or uses an
+    /// unsupported construct.
+    ///
+    /// [`XybridError::Grammar`]: crate::error::XybridError::Grammar
+    pub fn with_json_schema(
+        mut self,
+        schema: &serde_json::Value,
+    ) -> crate::error::XybridResult<Self> {
+        self.grammar = Some(crate::runtime_adapter::grammar::json_schema_to_gbnf(
+            schema,
+        )?);
+        Ok(self)
     }
 }
 
@@ -491,6 +536,14 @@ pub struct LlmConfig {
     /// Can provide 2-4x speedup. Default: true.
     #[serde(default = "default_flash_attn")]
     pub flash_attn: bool,
+
+    /// Whether this is a reasoning ("thinking") model that emits a
+    /// chain-of-thought before its answer. Sourced from the model metadata's
+    /// `reasoning` flag. When set, the chat-prompt builder primes the
+    /// `<think>` channel so the model produces its reasoning, which the backend
+    /// captures into `reasoning_content`. Default: false.
+    #[serde(default)]
+    pub reasoning: bool,
 }
 
 fn default_context_length() -> usize {
@@ -556,6 +609,7 @@ impl Default for LlmConfig {
             n_threads: default_n_threads(),
             n_batch: default_n_batch(),
             flash_attn: default_flash_attn(),
+            reasoning: false,
         }
     }
 }
@@ -584,6 +638,13 @@ impl LlmConfig {
     /// Set the context length.
     pub fn with_context_length(mut self, length: usize) -> Self {
         self.context_length = length;
+        self
+    }
+
+    /// Mark this as a reasoning ("thinking") model. Primes the `<think>`
+    /// channel during chat-prompt construction. See [`Self::reasoning`].
+    pub fn with_reasoning(mut self, reasoning: bool) -> Self {
+        self.reasoning = reasoning;
         self
     }
 

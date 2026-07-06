@@ -8,9 +8,10 @@ A native iOS example app demonstrating Xybrid SDK integration using SwiftUI.
 - **Model Loading**: Downloads models from the xybrid registry with async/await
 - **Text-to-Speech** (Speech tab): Run TTS inference with voice selection + audio playback
 - **Live camera vision** (Vision tab): point the camera at a scene and get an on-device VLM caption that refreshes as the scene changes — AVFoundation capture + a cheap luma change-gate firing batch multimodal turns
+- **Structured extraction** (Extract tab): LFM2.5-230M turns messy text (receipts, email signatures) into schema-valid JSON via GBNF constrained decoding — a JSON Schema is converted with `jsonSchemaToGbnf` and attached as `XybridGenerationConfig.grammar`, so the model *cannot* emit output that violates the schema. Toggle the constraint off to watch the raw model drift into markdown fences and made-up keys.
 - **Error Handling**: User-friendly error messages with retry capability
 
-The two demos live behind a `TabView` once the SDK is initialized.
+The three demos live behind a `TabView` once the SDK is initialized.
 
 ### Live vision: responsiveness model
 
@@ -38,7 +39,17 @@ latest-frame-wins. See `LiveVision.swift` for the gate + batch-VLM wiring.
 # From the xybrid repo root
 rustup target add aarch64-apple-ios aarch64-apple-ios-sim aarch64-apple-darwin
 cargo xtask build-xcframework --release
+
+# Point the Swift package at the local build. Without this, SPM downloads the
+# published release xcframework, whose headers may predate symbols the checked-
+# out wrapper calls — the failure mode is a Swift error like
+# "Cannot find 'boltffi_json_schema_to_gbnf' in scope".
+./bindings/apple/scripts/set-natives-mode.sh --set-local
 ```
+
+> `useLocalNatives = true` is a local-dev setting — run
+> `./bindings/apple/scripts/set-natives-mode.sh --set-remote` before committing
+> anything that touches `Package.swift`.
 
 ### 2. Open in Xcode
 

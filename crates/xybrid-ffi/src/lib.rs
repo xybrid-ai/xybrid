@@ -359,6 +359,10 @@ pub(crate) struct ResultData {
     pub output_type: XybridOutputType,
     /// Text output (for ASR/LLM).
     pub text: Option<String>,
+    /// Chain-of-thought / reasoning text (LLM `<think>` blocks). Separate
+    /// from `text`, which always excludes it. `None` when the model emitted
+    /// no reasoning.
+    pub reasoning_content: Option<String>,
     /// Embedding output.
     pub embedding: Option<Vec<f32>>,
     /// Audio bytes (for TTS).
@@ -381,6 +385,7 @@ pub(crate) struct ResultData {
     // construction via [`ResultData::populate_caches`]; never mutated
     // afterward.
     pub text_cache: Option<CString>,
+    pub reasoning_content_cache: Option<CString>,
     pub error_cache: Option<CString>,
     pub output_type_cache: CString,
     /// Parallel to `metrics.stage_latencies_ms` — same length, same order.
@@ -397,6 +402,7 @@ impl ResultData {
     /// uses for token text.
     fn populate_caches(&mut self) {
         self.text_cache = self.text.as_deref().map(cstring_lossy);
+        self.reasoning_content_cache = self.reasoning_content.as_deref().map(cstring_lossy);
         self.error_cache = self.error.as_deref().map(cstring_lossy);
         // `output_type.as_str()` is a `&'static str` with no interior
         // NULs, so `cstring_lossy` is just `CString::new(...).unwrap()`
@@ -424,11 +430,13 @@ impl ResultData {
             error: Some(error),
             output_type: XybridOutputType::Unknown,
             text: None,
+            reasoning_content: None,
             embedding: None,
             audio_bytes: None,
             latency_ms: 0,
             metrics: xybrid_sdk::InferenceMetrics::default(),
             text_cache: None,
+            reasoning_content_cache: None,
             error_cache: None,
             output_type_cache: CString::default(),
             stage_id_cache: Vec::new(),
@@ -462,6 +470,7 @@ pub(crate) struct GenerationConfigData {
     pub top_k: Option<usize>,
     pub repetition_penalty: Option<f32>,
     pub stop_sequences: Vec<String>,
+    pub grammar: Option<String>,
 }
 
 // Note: the previous `pub(crate) type BoxedFoo = Box<FooState>` aliases
@@ -649,11 +658,13 @@ fn inference_result_to_data(result: &xybrid_sdk::InferenceResult) -> ResultData 
             xybrid_sdk::OutputType::Unknown => XybridOutputType::Unknown,
         },
         text: result.text().map(|s| s.to_string()),
+        reasoning_content: result.reasoning_content().map(|s| s.to_string()),
         embedding: result.embedding().map(|e| e.to_vec()),
         audio_bytes: result.audio_bytes().map(|b| b.to_vec()),
         latency_ms: result.latency_ms(),
         metrics: result.metrics().clone(),
         text_cache: None,
+        reasoning_content_cache: None,
         error_cache: None,
         output_type_cache: CString::default(),
         stage_id_cache: Vec::new(),
@@ -689,6 +700,9 @@ fn generation_config_data_to_sdk(data: &GenerationConfigData) -> GenerationConfi
     }
     if !data.stop_sequences.is_empty() {
         config.stop_sequences = data.stop_sequences.clone();
+    }
+    if let Some(g) = &data.grammar {
+        config.grammar = Some(g.clone());
     }
     config
 }
@@ -2407,6 +2421,7 @@ pub extern "C" fn xybrid_generation_config_new() -> *mut XybridGenerationConfigH
             top_k: None,
             repetition_penalty: None,
             stop_sequences: Vec::new(),
+            grammar: None,
         });
         XybridGenerationConfigHandle::from_boxed(config)
     })
@@ -2428,6 +2443,7 @@ pub extern "C" fn xybrid_generation_config_greedy() -> *mut XybridGenerationConf
             top_k: Some(0),
             repetition_penalty: None,
             stop_sequences: Vec::new(),
+            grammar: None,
         });
         XybridGenerationConfigHandle::from_boxed(config)
     })
@@ -2449,6 +2465,7 @@ pub extern "C" fn xybrid_generation_config_creative() -> *mut XybridGenerationCo
             top_k: Some(50),
             repetition_penalty: None,
             stop_sequences: Vec::new(),
+            grammar: None,
         });
         XybridGenerationConfigHandle::from_boxed(config)
     })
@@ -2553,6 +2570,68 @@ pub unsafe extern "C" fn xybrid_generation_config_add_stop(
             if let Ok(s) = CStr::from_ptr(stop).to_str() {
                 data.stop_sequences.push(s.to_string());
             }
+        }
+    })
+}
+
+/// Set a GBNF grammar constraining generation to structured output
+/// (local llama backend only; other backends ignore it).
+///
+/// Produce a grammar from a JSON Schema with `xybrid_json_schema_to_gbnf`,
+/// or pass raw GBNF. Passing null clears any previously set grammar.
+///
+/// # Safety
+///
+/// `config` must be a valid handle. `grammar`, when non-null, must be a
+/// null-terminated UTF-8 string.
+///
+/// # Parameters
+///
+/// - `config`: A handle to the generation config.
+/// - `grammar`: A null-terminated UTF-8 GBNF grammar, or null to clear.
+#[no_mangle]
+pub unsafe extern "C" fn xybrid_generation_config_set_grammar(
+    config: *mut XybridGenerationConfigHandle,
+    grammar: *const c_char,
+) {
+    ffi_guard!("xybrid_generation_config_set_grammar", (), {
+        if let Some(data) = XybridGenerationConfigHandle::as_mut(config) {
+            if grammar.is_null() {
+                data.grammar = None;
+            } else if let Ok(s) = CStr::from_ptr(grammar).to_str() {
+                data.grammar = Some(s.to_string());
+            }
+        }
+    })
+}
+
+/// Convert a JSON Schema (as a JSON string) into a GBNF grammar suitable for
+/// `xybrid_generation_config_set_grammar`.
+///
+/// # Safety
+///
+/// `schema_json` must be a null-terminated UTF-8 string.
+///
+/// # Returns
+///
+/// A newly allocated null-terminated GBNF string, or null if the schema is
+/// invalid JSON or uses an unsupported construct. Free the returned string
+/// with `xybrid_free_string()`.
+#[no_mangle]
+pub unsafe extern "C" fn xybrid_json_schema_to_gbnf(schema_json: *const c_char) -> *mut c_char {
+    if schema_json.is_null() {
+        return std::ptr::null_mut();
+    }
+    ffi_guard!("xybrid_json_schema_to_gbnf", std::ptr::null_mut(), {
+        let Ok(schema) = CStr::from_ptr(schema_json).to_str() else {
+            return std::ptr::null_mut();
+        };
+        match xybrid_sdk::json_schema_str_to_gbnf(schema) {
+            Ok(gbnf) => match CString::new(gbnf) {
+                Ok(c) => c.into_raw(),
+                Err(_) => std::ptr::null_mut(),
+            },
+            Err(_) => std::ptr::null_mut(),
         }
     })
 }
@@ -3548,6 +3627,49 @@ pub unsafe extern "C" fn xybrid_result_text(result: *mut XybridResultHandle) -> 
         match XybridResultHandle::as_ref(result) {
             Some(data) => data
                 .text_cache
+                .as_ref()
+                .map_or(std::ptr::null(), |c| c.as_ptr()),
+            None => std::ptr::null(),
+        }
+    })
+}
+
+/// Get the chain-of-thought / reasoning text from an inference result.
+///
+/// This is the model's `<think>...</think>` reasoning, surfaced separately
+/// from [`xybrid_result_text`] (which always excludes it).
+///
+/// # Parameters
+///
+/// - `result`: A handle to the inference result.
+///
+/// # Returns
+///
+/// A pointer to the reasoning string, or null if the model emitted no
+/// reasoning (or the handle is null/invalid). The pointer is valid until
+/// the result handle is freed.
+///
+/// # Example (C)
+///
+/// ```c
+/// const char* reasoning = xybrid_result_reasoning_content(result);
+/// if (reasoning != NULL) {
+///     printf("Model reasoning: %s\n", reasoning);
+/// }
+/// ```
+#[no_mangle]
+pub unsafe extern "C" fn xybrid_result_reasoning_content(
+    result: *mut XybridResultHandle,
+) -> *const c_char {
+    // Don't clear last error - this is a read-only accessor
+    if result.is_null() {
+        return std::ptr::null();
+    }
+
+    ffi_guard!("xybrid_result_reasoning_content", std::ptr::null(), {
+        match XybridResultHandle::as_ref(result) {
+            Some(data) => data
+                .reasoning_content_cache
                 .as_ref()
                 .map_or(std::ptr::null(), |c| c.as_ptr()),
             None => std::ptr::null(),
@@ -4950,11 +5072,13 @@ mod tests {
             error: None,
             output_type: XybridOutputType::Text,
             text: Some("hello from result A".to_string()),
+            reasoning_content: None,
             embedding: None,
             audio_bytes: None,
             latency_ms: 10,
             metrics: xybrid_sdk::InferenceMetrics::default(),
             text_cache: None,
+            reasoning_content_cache: None,
             error_cache: None,
             output_type_cache: CString::default(),
             stage_id_cache: Vec::new(),
@@ -4965,11 +5089,13 @@ mod tests {
             error: None,
             output_type: XybridOutputType::Text,
             text: Some("hello from result B".to_string()),
+            reasoning_content: None,
             embedding: None,
             audio_bytes: None,
             latency_ms: 20,
             metrics: xybrid_sdk::InferenceMetrics::default(),
             text_cache: None,
+            reasoning_content_cache: None,
             error_cache: None,
             output_type_cache: CString::default(),
             stage_id_cache: Vec::new(),
@@ -5188,11 +5314,13 @@ mod tests {
             error: None,
             output_type: XybridOutputType::Text,
             text: Some("Transcribed text".to_string()),
+            reasoning_content: None,
             embedding: None,
             audio_bytes: None,
             latency_ms: 100,
             metrics: xybrid_sdk::InferenceMetrics::default(),
             text_cache: None,
+            reasoning_content_cache: None,
             error_cache: None,
             output_type_cache: CString::default(),
             stage_id_cache: Vec::new(),
@@ -6498,11 +6626,13 @@ mod tests {
                 error: None,
                 output_type: variant,
                 text: None,
+                reasoning_content: None,
                 embedding: None,
                 audio_bytes: None,
                 latency_ms: 0,
                 metrics: xybrid_sdk::InferenceMetrics::default(),
                 text_cache: None,
+                reasoning_content_cache: None,
                 error_cache: None,
                 output_type_cache: CString::default(),
                 stage_id_cache: Vec::new(),

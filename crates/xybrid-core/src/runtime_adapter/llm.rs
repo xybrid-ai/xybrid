@@ -143,6 +143,12 @@ pub struct GenerationOutput {
     /// Vision image preprocessing latency in milliseconds. Present only when
     /// a vision-language run processes one or more images.
     pub image_preprocess_ms: Option<u32>,
+    /// Captured chain-of-thought / reasoning text the model emitted in
+    /// `<think>...</think>` blocks (or, for engines that surface it natively,
+    /// the engine's reasoning channel). This is the *pre-strip* text — `text`
+    /// always excludes it. `None` when the model produced no reasoning block
+    /// or the backend doesn't surface one. vLLM-style `reasoning_content`.
+    pub reasoning_content: Option<String>,
 }
 
 // =============================================================================
@@ -761,6 +767,15 @@ impl RuntimeAdapter for LlmRuntimeAdapter {
                     }
                 }
 
+                // Chain-of-thought, when the model emitted a `<think>` block
+                // (or the engine surfaced reasoning natively). Content, not
+                // telemetry: it rides the envelope metadata so the SDK/FFI can
+                // surface it, but is intentionally NOT mirrored onto the span
+                // via `add_metadata` — it can be large and may carry PII.
+                if let Some(reasoning) = output.reasoning_content {
+                    response_metadata.insert("reasoning_content".to_string(), reasoning);
+                }
+
                 Ok(Envelope {
                     kind: EnvelopeKind::Text(output.text),
                     metadata: response_metadata,
@@ -897,6 +912,7 @@ mod tests {
             decode_tps: None,
             prefill_tps: None,
             image_preprocess_ms: None,
+            reasoning_content: None,
         };
         assert_eq!(output.text, "Hello world");
         assert_eq!(output.tokens_generated, 3);
@@ -946,6 +962,7 @@ mod tests {
                     decode_tps: None,
                     prefill_tps: None,
                     image_preprocess_ms: None,
+                    reasoning_content: None,
                 })
             }
             fn generate_raw(
@@ -1026,6 +1043,7 @@ mod tests {
                     decode_tps: None,
                     prefill_tps: None,
                     image_preprocess_ms: None,
+                    reasoning_content: None,
                 })
             }
             fn generate_raw(

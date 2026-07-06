@@ -307,6 +307,11 @@ pub struct XybridGenerationConfig {
     pub top_k: Option<u32>,
     pub repetition_penalty: Option<f32>,
     pub stop_sequences: Vec<String>,
+    /// Optional GBNF grammar constraining generation to structured output
+    /// (local llama backend only). Produce one from a JSON Schema with
+    /// [`json_schema_to_gbnf`], or pass raw GBNF. Appended last: `#[data]`
+    /// PODs serialize by field order across the FFI boundary.
+    pub grammar: Option<String>,
 }
 
 impl From<XybridGenerationConfig> for facade::GenerationConfig {
@@ -319,8 +324,17 @@ impl From<XybridGenerationConfig> for facade::GenerationConfig {
             top_k: c.top_k,
             repetition_penalty: c.repetition_penalty,
             stop_sequences: c.stop_sequences,
+            grammar: c.grammar,
         }
     }
+}
+
+/// Convert a JSON Schema (as a JSON string) into a GBNF grammar for
+/// [`XybridGenerationConfig::grammar`]. Fails on invalid JSON or schema
+/// constructs outside the supported subset.
+#[export]
+pub fn json_schema_to_gbnf(schema_json: String) -> Result<String, XybridError> {
+    facade::json_schema_to_gbnf(&schema_json).map_err(XybridError::from)
 }
 
 #[data]

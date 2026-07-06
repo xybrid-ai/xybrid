@@ -25,8 +25,8 @@ path = "src/lib.rs"
 #   `xybrid-llama-sys`  : raw FFI + cmake build (Phase 1)
 #   `xybrid-llama`   : safe RAII + typed errors + streaming trampoline (Phase 2)
 #   `xybrid-core`    : thin adapter glue (Phase 3 reduction)
-xybrid-llama-sys = { path = "../llama-cpp-sys", version = "0.2.1", optional = true }
-xybrid-llama = { path = "../xybrid-llama", version = "0.2.1", optional = true }
+xybrid-llama-sys = { path = "../llama-cpp-sys", version = "0.2.2", optional = true }
+xybrid-llama = { path = "../xybrid-llama", version = "0.2.2", optional = true }
 # Real Jinja engine for the llama.cpp chat-template fallback: when llama.cpp's
 # hardcoded non-Jinja matcher rejects a GGUF's embedded template (returns -1),
 # we render that template here instead. Gated with the deps below into
@@ -219,6 +219,11 @@ criterion = { version = "0.5", features = ["html_reports"] }  # Benchmarking fra
 
 [[example]]
 name = "neutts_tts"
+# Real inference — needs llama.cpp linked.
+required-features = ["llm-llamacpp"]
+
+[[example]]
+name = "lfm2_230m_grammar"
 # Real inference — needs llama.cpp linked.
 required-features = ["llm-llamacpp"]
 

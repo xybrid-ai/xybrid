@@ -130,7 +130,7 @@ See the full [Installation Guide](https://docs.xybrid.dev/en/docs/quickstart) fo
 
 ```yaml
 dependencies:
-  xybrid_flutter: ^0.2.1
+  xybrid_flutter: ^0.2.2
 ```
 
 **Run a model:**
@@ -147,7 +147,7 @@ final result = await model.run(XybridEnvelope.text('Hello world'));
 
 ```gradle
 dependencies {
-    implementation("ai.xybrid:xybrid-kotlin:0.2.1")
+    implementation("ai.xybrid:xybrid-kotlin:0.2.2")
 }
 ```
 
@@ -165,7 +165,7 @@ val result = model.run(Envelope.text("Hello world"))
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/xybrid-ai/xybrid.git", from: "0.2.1")
+    .package(url: "https://github.com/xybrid-ai/xybrid.git", from: "0.2.2")
 ]
 ```
 
@@ -199,7 +199,7 @@ var result = model.Run(Envelope.Text("Hello world"));
 
 ```toml
 [dependencies]
-xybrid = "0.2.1"
+xybrid = "0.2.2"
 ```
 
 **Run a model:**
@@ -314,6 +314,7 @@ All models run entirely on-device. No cloud, no API keys required. Browse the fu
 | Model | Params | Format | Description |
 |-------|--------|--------|-------------|
 | Gemma 3 1B | 1B | GGUF Q4_K_M | Google's mobile-optimized LLM |
+| LFM2.5 230M | 230M | GGUF Q4_K_M | Liquid AI's smallest hybrid conv+attention LLM for edge devices |
 | LFM2.5 350M | 354M | GGUF Q4_K_M | Liquid AI's hybrid conv+attention, 9 languages, tool calling |
 | Llama 3.2 1B | 1B | GGUF Q4_K_M | Meta's general purpose, 128K context |
 | Qwen 2.5 0.5B | 500M | GGUF Q4_K_M | Compact on-device chat |

@@ -79,7 +79,7 @@ class XybridRustLib extends BaseEntrypoint<XybridRustLibApi,
   String get codegenVersion => '2.11.1';
 
   @override
-  int get rustContentHash => 591235616;
+  int get rustContentHash => 2113297335;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -289,6 +289,8 @@ abstract class XybridRustLibApi extends BaseApi {
   FfiGenerationConfig crateApiModelFfiGenerationConfigCreative();
 
   FfiGenerationConfig crateApiModelFfiGenerationConfigGreedy();
+
+  String crateApiModelJsonSchemaToGbnf({required String schemaJson});
 
   RustArcIncrementStrongCountFnType
       get rust_arc_increment_strong_count_FfiCancellationToken;
@@ -2182,6 +2184,30 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
         argNames: [],
       );
 
+  @override
+  String crateApiModelJsonSchemaToGbnf({required String schemaJson}) {
+    return handler.executeSync(SyncTask(
+      callFfi: () {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_String(schemaJson, serializer);
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 66)!;
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_String,
+        decodeErrorData: sse_decode_String,
+      ),
+      constMeta: kCrateApiModelJsonSchemaToGbnfConstMeta,
+      argValues: [schemaJson],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateApiModelJsonSchemaToGbnfConstMeta =>
+      const TaskConstMeta(
+        debugName: "json_schema_to_gbnf",
+        argNames: ["schemaJson"],
+      );
+
   RustArcIncrementStrongCountFnType
       get rust_arc_increment_strong_count_FfiCancellationToken => wire
           .rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiCancellationToken;
@@ -2592,8 +2618,8 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
   FfiGenerationConfig dco_decode_ffi_generation_config(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 7)
-      throw Exception('unexpected arr length: expect 7 but see ${arr.length}');
+    if (arr.length != 8)
+      throw Exception('unexpected arr length: expect 8 but see ${arr.length}');
     return FfiGenerationConfig(
       maxTokens: dco_decode_opt_box_autoadd_u_32(arr[0]),
       temperature: dco_decode_opt_box_autoadd_f_32(arr[1]),
@@ -2602,6 +2628,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
       topK: dco_decode_opt_box_autoadd_u_32(arr[4]),
       repetitionPenalty: dco_decode_opt_box_autoadd_f_32(arr[5]),
       stopSequences: dco_decode_opt_list_String(arr[6]),
+      grammar: dco_decode_opt_String(arr[7]),
     );
   }
 
@@ -2697,15 +2724,16 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
   FfiResult dco_decode_ffi_result(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 6)
-      throw Exception('unexpected arr length: expect 6 but see ${arr.length}');
+    if (arr.length != 7)
+      throw Exception('unexpected arr length: expect 7 but see ${arr.length}');
     return FfiResult(
       success: dco_decode_bool(arr[0]),
       text: dco_decode_opt_String(arr[1]),
-      audioBytes: dco_decode_opt_list_prim_u_8_strict(arr[2]),
-      embedding: dco_decode_opt_list_prim_f_32_strict(arr[3]),
-      latencyMs: dco_decode_u_32(arr[4]),
-      metrics: dco_decode_ffi_inference_metrics(arr[5]),
+      reasoningContent: dco_decode_opt_String(arr[2]),
+      audioBytes: dco_decode_opt_list_prim_u_8_strict(arr[3]),
+      embedding: dco_decode_opt_list_prim_f_32_strict(arr[4]),
+      latencyMs: dco_decode_u_32(arr[5]),
+      metrics: dco_decode_ffi_inference_metrics(arr[6]),
     );
   }
 
@@ -3396,6 +3424,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
     var var_topK = sse_decode_opt_box_autoadd_u_32(deserializer);
     var var_repetitionPenalty = sse_decode_opt_box_autoadd_f_32(deserializer);
     var var_stopSequences = sse_decode_opt_list_String(deserializer);
+    var var_grammar = sse_decode_opt_String(deserializer);
     return FfiGenerationConfig(
         maxTokens: var_maxTokens,
         temperature: var_temperature,
@@ -3403,7 +3432,8 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
         minP: var_minP,
         topK: var_topK,
         repetitionPenalty: var_repetitionPenalty,
-        stopSequences: var_stopSequences);
+        stopSequences: var_stopSequences,
+        grammar: var_grammar);
   }
 
   @protected
@@ -3514,6 +3544,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
     // Codec=Sse (Serialization based), see doc to use other codecs
     var var_success = sse_decode_bool(deserializer);
     var var_text = sse_decode_opt_String(deserializer);
+    var var_reasoningContent = sse_decode_opt_String(deserializer);
     var var_audioBytes = sse_decode_opt_list_prim_u_8_strict(deserializer);
     var var_embedding = sse_decode_opt_list_prim_f_32_strict(deserializer);
     var var_latencyMs = sse_decode_u_32(deserializer);
@@ -3521,6 +3552,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
     return FfiResult(
         success: var_success,
         text: var_text,
+        reasoningContent: var_reasoningContent,
         audioBytes: var_audioBytes,
         embedding: var_embedding,
         latencyMs: var_latencyMs,
@@ -4347,6 +4379,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
     sse_encode_opt_box_autoadd_u_32(self.topK, serializer);
     sse_encode_opt_box_autoadd_f_32(self.repetitionPenalty, serializer);
     sse_encode_opt_list_String(self.stopSequences, serializer);
+    sse_encode_opt_String(self.grammar, serializer);
   }
 
   @protected
@@ -4429,6 +4462,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_bool(self.success, serializer);
     sse_encode_opt_String(self.text, serializer);
+    sse_encode_opt_String(self.reasoningContent, serializer);
     sse_encode_opt_list_prim_u_8_strict(self.audioBytes, serializer);
     sse_encode_opt_list_prim_f_32_strict(self.embedding, serializer);
     sse_encode_u_32(self.latencyMs, serializer);
