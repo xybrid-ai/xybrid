@@ -1,0 +1,26 @@
+crates/xybrid-core/Cargo.toml
+  s_7dd5655fb99ca0::t_9dd977848d19dc 97
+  s_7dd5655fb99ca0::t_08a1db4a657892 131
+crates/llama-cpp-sys/src/bindings.rs
+  s_7dd5655fb99ca0::t_fa865d7f2bd525 761,769-770,797-798,818-819,840-841
+crates/xybrid-sdk/Cargo.toml
+  s_7dd5655fb99ca0::t_3ee272667b93f9 31
+Cargo.lock
+  s_7dd5655fb99ca0::t_89fb0127d8f1a4 527,875-880,1417,1439,1611,2187,2190,2200,2204,2334,2340,2528,2796,2831,3075-3080,3424,4183-4237,4519-4520,4525,4527,4537,4572-4577,4602,4626,5121,5448,6019,6035,6069,6181,6226,6235,6253-6255,6257-6260,6391,6423,6425,6530-6531
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "d6d9e5b8a319fdaf5787d05f6201f11717cd2393",
+  "prompts": {},
+  "sessions": {
+    "s_7dd5655fb99ca0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "cf36cf8f-e504-47c5-9dd9-1994987a363c",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
