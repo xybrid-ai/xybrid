@@ -1,0 +1,23 @@
+bindings/unity/README.md
+  s_fb271508a8988a::t_d4ddade480b1e0 310-312
+bindings/unity/docs/.gitignore
+  s_fb271508a8988a::t_45476c0202ef22 3-6
+bindings/unity/Runtime/Plugins/.gitignore
+  s_fb271508a8988a::t_46fca3ae4a0bf3 1-6,11
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "37a8201f7b5006ba5e371038cb852b2c11d1a5e5",
+  "prompts": {},
+  "sessions": {
+    "s_fb271508a8988a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8ce838ba-c727-47cf-8b97-de143d5f0c48",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
