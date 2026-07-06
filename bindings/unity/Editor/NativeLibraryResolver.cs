@@ -102,14 +102,16 @@ namespace Xybrid.Editor
             bool throwOnError = false)
         {
             var markerPath = MarkerPath(platform);
-            if (!force && File.Exists(markerPath) &&
-                File.ReadAllText(markerPath).Trim() == version)
-            {
-                return true;
-            }
-
             try
             {
+                // Inside the try so a corrupt/locked marker degrades per throwOnError
+                // rather than crashing editor load or the build.
+                if (!force && File.Exists(markerPath) &&
+                    File.ReadAllText(markerPath).Trim() == version)
+                {
+                    return true;
+                }
+
                 var manifest = FetchManifest(version, interactive);
                 var entry = manifest.Find(platform);
                 if (entry == null)
@@ -204,8 +206,12 @@ namespace Xybrid.Editor
         {
             var version = ResolveVersion();
             if (version == null) return;
-            // Non-interactive, non-fatal: keep first import quiet if offline.
-            EnsurePlatform(HostPlatform(), version, interactive: true, throwOnError: false);
+            // "Quiet" = non-fatal: logs a warning and continues if offline
+            // (throwOnError: false), rather than failing editor load. Progress is
+            // shown in the GUI editor for feedback during the download, but
+            // suppressed in batch/CI where a modal bar is unwanted.
+            EnsurePlatform(HostPlatform(), version,
+                interactive: !Application.isBatchMode, throwOnError: false);
         }
 
         // ---- Networking ----------------------------------------------------------
@@ -219,8 +225,16 @@ namespace Xybrid.Editor
             var url = ReleaseAssetUrl(version, asset);
             var tmp = Path.Combine(Path.GetTempPath(), asset);
             DownloadWithProgress(url, tmp, asset, interactive);
-            var manifest = JsonUtility.FromJson<NativeManifest>(File.ReadAllText(tmp));
-            File.Delete(tmp);
+            string json;
+            try
+            {
+                json = File.ReadAllText(tmp);
+            }
+            finally
+            {
+                if (File.Exists(tmp)) File.Delete(tmp);
+            }
+            var manifest = JsonUtility.FromJson<NativeManifest>(json);
             if (manifest?.platforms == null)
             {
                 throw new InvalidOperationException($"Malformed native manifest at {url}.");
@@ -239,6 +253,7 @@ namespace Xybrid.Editor
             float progress = 0f;
             string hashHex = null;
             Exception failure = null;
+            using var cts = new CancellationTokenSource();
 
             var task = Task.Run(() =>
             {
@@ -246,7 +261,7 @@ namespace Xybrid.Editor
                 {
                     using var client = new HttpClient { Timeout = TimeSpan.FromMinutes(30) };
                     using var resp = client
-                        .GetAsync(url, HttpCompletionOption.ResponseHeadersRead)
+                        .GetAsync(url, HttpCompletionOption.ResponseHeadersRead, cts.Token)
                         .GetAwaiter().GetResult();
                     resp.EnsureSuccessStatusCode();
                     long total = resp.Content.Headers.ContentLength ?? -1L;
@@ -260,6 +275,7 @@ namespace Xybrid.Editor
                     int n;
                     while ((n = src.Read(buffer, 0, buffer.Length)) > 0)
                     {
+                        cts.Token.ThrowIfCancellationRequested();
                         dst.Write(buffer, 0, n);
                         sha.TransformBlock(buffer, 0, n, null, 0);
                         read += n;
@@ -276,7 +292,9 @@ namespace Xybrid.Editor
                 if (interactive && EditorUtility.DisplayCancelableProgressBar(
                         "Xybrid — downloading native libraries", label, progress))
                 {
-                    // Best-effort: let the background copy finish/abort, then bail.
+                    // Abort the in-flight request/read so we don't keep pulling
+                    // bytes (up to ~326 MB for iOS) after the user cancelled.
+                    cts.Cancel();
                     throw new OperationCanceledException($"Download of {label} cancelled.");
                 }
                 Thread.Sleep(100);
@@ -307,7 +325,35 @@ namespace Xybrid.Editor
                 }
 
                 Directory.CreateDirectory(Path.GetDirectoryName(destPath));
+                FreeExistingFile(destPath);
                 entry.ExtractToFile(destPath, overwrite: true);
+            }
+        }
+
+        /// <summary>
+        /// Frees <paramref name="path"/> so a new native can be written even when
+        /// the current one is loaded into the Editor process (Windows/macOS lock a
+        /// loaded <c>.dll</c>/<c>.dylib</c>, so a plain overwrite throws). Deletes
+        /// it, or — if it's locked — renames it aside so the path is reusable; the
+        /// stale copy is cleaned up on a later run or editor restart.
+        /// </summary>
+        private static void FreeExistingFile(string path)
+        {
+            if (!File.Exists(path)) return;
+            try
+            {
+                File.Delete(path);
+            }
+            catch (IOException)
+            {
+                var parked = path + "." + Guid.NewGuid().ToString("N") + ".old";
+                // If even the rename fails, let ExtractToFile surface the original error.
+                try { File.Move(path, parked); } catch { /* fall through */ }
+            }
+            catch (UnauthorizedAccessException)
+            {
+                var parked = path + "." + Guid.NewGuid().ToString("N") + ".old";
+                try { File.Move(path, parked); } catch { /* fall through */ }
             }
         }
 

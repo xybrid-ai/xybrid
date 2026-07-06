@@ -38,8 +38,10 @@ namespace Xybrid.Editor
                     "libraries can't be resolved for the build.");
             }
 
+            // No modal progress bar during batch/CI builds (-batchmode).
             var ok = NativeLibraryResolver.EnsurePlatform(
-                platform, version, interactive: true, force: false, throwOnError: true);
+                platform, version, interactive: !UnityEngine.Application.isBatchMode,
+                force: false, throwOnError: true);
             if (!ok)
             {
                 throw new BuildFailedException(
