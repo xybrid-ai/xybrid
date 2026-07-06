@@ -15,6 +15,15 @@
 //!   rejects continuations everywhere else.
 //! - Continuations replay only the immediately-prior turn, so a running
 //!   findings log is folded into the (replayed) user text each turn.
+//!
+//! The context/non-context mix is deliberate: the first turn doubles as the
+//! plain-chat path, and it is what lets a follow-up like "what year was
+//! that novel published?" resolve "that novel" from history — running the
+//! whole loop context-free would strip history from every query. The cost
+//! is an asymmetry: continuation turns (tool-bearing queries only) do not
+//! see conversation history until core grows context-aware continuation
+//! composition (v2). Misrouting a continuation through a context path is a
+//! hard error, not a silent degradation.
 
 use std::collections::HashSet;
 use std::io::Write;
@@ -113,10 +122,14 @@ pub(crate) fn run_query(
         });
     }
 
-    if first_streamed {
-        // The suppressed tool-call turn may have streamed some preamble;
-        // continuation answers arrive whole (streaming rejects them).
-        println!();
+    if stream {
+        // Cue the stream→batch transition: continuation answers arrive
+        // whole (streaming rejects them), and a well-behaved model calls
+        // its tool almost immediately, so often nothing streamed at all —
+        // without a cue the drop to silence reads as a hang.
+        if first_streamed {
+            println!();
+        }
         ui::hint("tool turns print after generation");
     }
 
