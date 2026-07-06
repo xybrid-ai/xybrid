@@ -758,6 +758,7 @@ extern "C" {
 }
 extern "C" {
     pub fn llama_sampler_chain_create_c(
+        model: *const ::std::os::raw::c_void,
         temperature: f32,
         top_p: f32,
         min_p: f32,
@@ -765,6 +766,8 @@ extern "C" {
         repeat_penalty: f32,
         penalty_last_n: ::std::os::raw::c_int,
         seed: u32,
+        grammar: *const ::std::os::raw::c_char,
+        grammar_root: *const ::std::os::raw::c_char,
     ) -> *mut ::std::os::raw::c_void;
 }
 extern "C" {
@@ -791,6 +794,8 @@ extern "C" {
         top_k: ::std::os::raw::c_int,
         repeat_penalty: f32,
         seed: u32,
+        grammar: *const ::std::os::raw::c_char,
+        grammar_root: *const ::std::os::raw::c_char,
         stop_seqs: *const i32,
         stop_lens: *const ::std::os::raw::c_int,
         n_stop_seqs: ::std::os::raw::c_int,
@@ -810,6 +815,8 @@ extern "C" {
         top_k: ::std::os::raw::c_int,
         repeat_penalty: f32,
         seed: u32,
+        grammar: *const ::std::os::raw::c_char,
+        grammar_root: *const ::std::os::raw::c_char,
         stop_seqs: *const i32,
         stop_lens: *const ::std::os::raw::c_int,
         n_stop_seqs: ::std::os::raw::c_int,
@@ -830,6 +837,8 @@ extern "C" {
         top_k: ::std::os::raw::c_int,
         repeat_penalty: f32,
         seed: u32,
+        grammar: *const ::std::os::raw::c_char,
+        grammar_root: *const ::std::os::raw::c_char,
         stop_seqs: *const i32,
         stop_lens: *const ::std::os::raw::c_int,
         n_stop_seqs: ::std::os::raw::c_int,
