@@ -316,7 +316,6 @@ pub(crate) fn handle_repl_command(
                 ) {
                     Ok(outcome) => {
                         let elapsed = start.elapsed();
-                        print_reasoning(show_reasoning, outcome.reasoning_content.as_deref());
                         if outcome.already_printed {
                             println!();
                         } else {

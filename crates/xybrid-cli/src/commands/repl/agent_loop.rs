@@ -63,7 +63,6 @@ pub(crate) const TOOL_SYSTEM_PROMPT: &str =
 
 pub(crate) struct QueryOutcome {
     pub answer: String,
-    pub reasoning_content: Option<String>,
     /// True when the answer's tokens were already printed live by the
     /// streaming callback — the caller must not print it again.
     pub already_printed: bool,
@@ -131,13 +130,13 @@ pub(crate) fn run_query(
         // and context, since only the declarations cause the narrowing.
         // Streamed turns already printed their text, so they keep it.
         if !stream && toolbox.is_some() && looks_like_capability_refusal(&answer) {
-            if let Some(outcome) = retry_without_tools(model, context, &input, verbose) {
+            if let Some(outcome) = retry_without_tools(model, context, &input, show_reasoning) {
                 return Ok(outcome);
             }
         }
+        print_turn_reasoning(show_reasoning, first_turn.reasoning_content.as_deref());
         return Ok(QueryOutcome {
             answer,
-            reasoning_content: first_turn.reasoning_content,
             already_printed: first_turn.already_printed,
             tool_calls_run: 0,
             stream_stats: first_turn.stream_stats,
@@ -158,9 +157,9 @@ pub(crate) fn run_query(
     // Tool calls can only come back when tools were offered; treat the
     // impossible case as a plain answer rather than panicking.
     let Some(toolbox) = toolbox else {
+        print_turn_reasoning(show_reasoning, first_turn.reasoning_content.as_deref());
         return Ok(QueryOutcome {
             answer: strip_tool_calls(&first_turn.text),
-            reasoning_content: first_turn.reasoning_content,
             already_printed: first_turn.already_printed,
             tool_calls_run: 0,
             stream_stats: None,
@@ -169,7 +168,7 @@ pub(crate) fn run_query(
 
     // The reasoning behind the tool decision is the interesting part of a
     // thinking model's tool turn — show it next to the calls it produced.
-    print_interim_reasoning(show_reasoning, first_turn.reasoning_content.as_deref());
+    print_turn_reasoning(show_reasoning, first_turn.reasoning_content.as_deref());
 
     // ── Tool continuation turns (non-context, non-streaming) ────────────────
     let mut findings: Vec<String> = Vec::new();
@@ -226,9 +225,9 @@ pub(crate) fn run_query(
         }
 
         if calls.is_empty() {
+            print_turn_reasoning(show_reasoning, response.reasoning_content());
             return Ok(QueryOutcome {
                 answer: strip_tool_calls(&text),
-                reasoning_content: response.reasoning_content().map(str::to_string),
                 already_printed: false,
                 tool_calls_run,
                 stream_stats: None,
@@ -236,7 +235,7 @@ pub(crate) fn run_query(
         }
 
         // Another tool turn — surface its deliberation next to its calls.
-        print_interim_reasoning(show_reasoning, response.reasoning_content());
+        print_turn_reasoning(show_reasoning, response.reasoning_content());
 
         prior_text = text;
         prior_calls = calls;
@@ -274,11 +273,10 @@ pub(crate) fn run_query(
             .text()
             .context("expected text output from synthesis turn")?,
     );
-    let reasoning_content = response.reasoning_content().map(str::to_string);
+    print_turn_reasoning(show_reasoning, response.reasoning_content());
 
     Ok(QueryOutcome {
         answer,
-        reasoning_content,
         already_printed: false,
         tool_calls_run,
         stream_stats: None,
@@ -440,11 +438,8 @@ fn retry_without_tools(
     model: &XybridModel,
     context: Option<&ConversationContext>,
     input: &Envelope,
-    verbose: u8,
+    show_reasoning: bool,
 ) -> Option<QueryOutcome> {
-    if verbose > 0 {
-        ui::hint("capability refusal with tools offered — retrying without tools");
-    }
     let result = match context {
         Some(ctx) => model.run_with_context(input, ctx, None),
         None => model.run(input, None),
@@ -455,20 +450,21 @@ fn retry_without_tools(
         return None;
     }
     ui::hint("answered without tools");
+    print_turn_reasoning(show_reasoning, result.reasoning_content());
     Some(QueryOutcome {
         answer,
-        reasoning_content: result.reasoning_content().map(str::to_string),
         already_printed: false,
         tool_calls_run: 0,
         stream_stats: None,
     })
 }
 
-/// Show a tool-deciding turn's chain-of-thought as a dimmed block above
-/// the `⚙` lines it produced — the "why this tool, why this query" that
-/// `--show-reasoning` exists for. The final answer turn's reasoning is
-/// returned on [`QueryOutcome`] and printed by the caller instead.
-fn print_interim_reasoning(show_reasoning: bool, reasoning: Option<&str>) {
+/// Show one turn's chain-of-thought as a dimmed block directly above
+/// whatever the turn produced — its `⚙` tool calls or its answer. One
+/// uniform presentation for every turn keeps `--show-reasoning` output
+/// chronological (think → act → think → answer) instead of repeating a
+/// separate reasoning section per query.
+fn print_turn_reasoning(show_reasoning: bool, reasoning: Option<&str>) {
     if !show_reasoning {
         return;
     }
