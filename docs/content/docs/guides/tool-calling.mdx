@@ -214,3 +214,10 @@ to call: LFM2.5-230M over-triggers (searches on greetings) while 350M tends
 to answer from memory without searching. The REPL's default system prompt is
 a compromise — override it with `--system`, and prefer larger tool-tuned
 models when tool discipline matters.
+
+Tiny models also pay a "tool tax": with tool declarations in the prompt,
+some refuse ordinary requests they handle fine otherwise ("I can't write a
+poem"). The REPL compensates — a zero-tool-call capability refusal is
+retried once with the declarations withheld, cued as `answered without
+tools`. A model's own refusals earlier in the conversation can also bias
+later turns; `clear` resets the history.

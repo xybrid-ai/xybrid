@@ -47,17 +47,17 @@ const MAX_TOOL_TURNS: usize = 4;
 const SYNTHESIS_MAX_TOKENS: usize = 256;
 
 /// Default system prompt when tools are active and the user supplied none.
-/// Deliberation-first: the model should decide whether a tool is needed at
-/// all before reaching for one, with a clear stop condition once results
-/// arrive. Override with `--system`.
+/// Capabilities-first, tools-second: a small model told it "has tools"
+/// narrows its self-concept to tool dispatch and starts refusing ordinary
+/// requests (writing, brainstorming), so normal abilities are licensed
+/// explicitly before tools are mentioned. Override with `--system`.
 pub(crate) const TOOL_SYSTEM_PROMPT: &str =
-    "You are a helpful assistant with tools. Before answering, decide \
-     whether a tool is needed. Greetings, chit-chat, and simple math: answer \
-     directly, no tools. Questions about facts, people, or events: call \
-     web_search once with a short, focused query, then answer from the \
-     results. Never repeat a call you already made, and never claim you \
-     cannot look something up — web_search is available. Once the results \
-     answer the question, stop calling tools and answer concisely.";
+    "You are a helpful assistant. You write, brainstorm, explain, and chat \
+     directly — always do these yourself, never refuse them. You also have \
+     tools for looking things up: for questions about facts, people, or \
+     events, call web_search once with a short, focused query, then answer \
+     from the results. Never repeat a call you already made. For everything \
+     else, answer without tools.";
 
 pub(crate) struct QueryOutcome {
     pub answer: String,
@@ -112,8 +112,20 @@ pub(crate) fn run_query(
         run_first_turn(model, context, &input, config.as_ref(), stream)?;
 
     if first_calls.is_empty() {
+        let answer = strip_tool_calls(&first_text);
+        // The rendered tool declarations alone make some small models
+        // refuse ordinary requests they handle fine without tools ("I
+        // can't write a poem"). A zero-tool-call capability refusal gets
+        // one retry with the declarations withheld — same system prompt
+        // and context, since only the declarations cause the narrowing.
+        // Streamed turns already printed their text, so they keep it.
+        if !stream && toolbox.is_some() && looks_like_capability_refusal(&answer) {
+            if let Some(outcome) = retry_without_tools(model, context, &input, verbose) {
+                return Ok(outcome);
+            }
+        }
         return Ok(QueryOutcome {
-            answer: strip_tool_calls(&first_text),
+            answer,
             already_printed: first_streamed,
             tool_calls_run: 0,
             stream_stats,
@@ -374,6 +386,51 @@ fn execute_and_display(
     (result, true)
 }
 
+/// Conservative, head-anchored detector for "I can't do that" answers a
+/// small model gives to ordinary requests when tool declarations are in
+/// its prompt. Used only to trigger a tools-off retry, so a false positive
+/// costs one extra (usually better) turn.
+fn looks_like_capability_refusal(answer: &str) -> bool {
+    let head: String = answer.chars().take(120).collect::<String>().to_lowercase();
+    head.contains("i'm sorry, but i can")
+        || head.contains("i am sorry, but i can")
+        || head.contains("i don't have the capability")
+        || head.contains("i do not have the capability")
+        || head.contains("i don't have access to")
+        || head.contains("i do not have access to")
+        || head.contains("i can't generate")
+        || head.contains("i cannot generate")
+}
+
+/// Re-run the turn with tool declarations withheld (config `None`); returns
+/// the outcome only when the retry produced a real (non-refusal) answer.
+fn retry_without_tools(
+    model: &XybridModel,
+    context: Option<&ConversationContext>,
+    input: &Envelope,
+    verbose: u8,
+) -> Option<QueryOutcome> {
+    if verbose > 0 {
+        ui::hint("capability refusal with tools offered — retrying without tools");
+    }
+    let result = match context {
+        Some(ctx) => model.run_with_context(input, ctx, None),
+        None => model.run(input, None),
+    }
+    .ok()?;
+    let answer = strip_tool_calls(result.text()?);
+    if answer.trim().is_empty() || looks_like_capability_refusal(&answer) {
+        return None;
+    }
+    ui::hint("answered without tools");
+    Some(QueryOutcome {
+        answer,
+        already_printed: false,
+        tool_calls_run: 0,
+        stream_stats: None,
+    })
+}
+
 /// Fold the running findings into the user turn so the model retains every
 /// prior result despite the single-turn continuation replay.
 fn fold(question: &str, findings: &[String]) -> String {
@@ -407,6 +464,33 @@ mod tests {
         let folded = fold("q?", &["Search \"a\":\n- t: s".to_string()]);
         assert!(folded.starts_with("q?\n\nNotes from earlier searches:"));
         assert!(folded.contains("- t: s"));
+    }
+
+    #[test]
+    fn capability_refusal_detector_is_head_anchored_and_conservative() {
+        assert!(looks_like_capability_refusal(
+            "I'm sorry, but I can't write a poem. However, I can help you brainstorm!"
+        ));
+        assert!(looks_like_capability_refusal(
+            "I don't have the capability to generate poems directly."
+        ));
+        assert!(looks_like_capability_refusal(
+            "I don't have access to real-time sports data."
+        ));
+
+        // Real answers pass through untouched.
+        assert!(!looks_like_capability_refusal(
+            "The 2022 FIFA World Cup final was won by Argentina."
+        ));
+        assert!(!looks_like_capability_refusal(
+            "Here's a poem about the sea:\nWaves that wander, wide and free…"
+        ));
+        // Refusal-ish phrasing deep in an otherwise-real answer is ignored.
+        let long_tail = format!(
+            "{} I'm sorry, but I can't say more.",
+            "A fine answer sentence. ".repeat(10)
+        );
+        assert!(!looks_like_capability_refusal(&long_tail));
     }
 
     #[test]
