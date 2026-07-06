@@ -43,7 +43,7 @@
   构建 + `wrapper.cpp` shim）和 `xybrid-llama/bindings`（安全的 RAII 包装）。
   它**默认不启用** — 需要 cmake、C++ 工具链以及一份 llama.cpp 源码克隆。
   `xybrid-sdk` 上的全部四个 `platform-*` 预设都依赖它。不启用该特性的构建
-  不会不暴露 llama.cpp 后端类型。
+  不会暴露 llama.cpp 后端类型。
 - 三层 crate 结构：
   `llama-cpp-sys`（原始 FFI + cmake 构建）→ `xybrid-llama`（安全包装、
   类型化错误）→ `xybrid-core::runtime_adapter::llama_cpp`（轻量适配器）。
