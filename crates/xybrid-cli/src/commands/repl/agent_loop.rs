@@ -47,15 +47,17 @@ const MAX_TOOL_TURNS: usize = 4;
 const SYNTHESIS_MAX_TOKENS: usize = 256;
 
 /// Default system prompt when tools are active and the user supplied none.
-/// A small model needs an explicit license to use tools plus a clear stop
-/// condition, or it either never calls or never stops.
+/// Deliberation-first: the model should decide whether a tool is needed at
+/// all before reaching for one, with a clear stop condition once results
+/// arrive. Override with `--system`.
 pub(crate) const TOOL_SYSTEM_PROMPT: &str =
-    "You are a research assistant with tools. For any question about facts, \
-     people, places, events, or dates, first call web_search with a short, \
-     focused query — even if you think you know the answer, your memory is \
-     unreliable. One search at a time. Once the results answer the question, \
-     stop calling tools and answer, citing what you found. Only for greetings \
-     and small talk, reply directly without tools.";
+    "You are a helpful assistant with tools. Before answering, decide \
+     whether a tool is needed. Greetings, chit-chat, and simple math: answer \
+     directly, no tools. Questions about facts, people, or events: call \
+     web_search once with a short, focused query, then answer from the \
+     results. Never repeat a call you already made, and never claim you \
+     cannot look something up — web_search is available. Once the results \
+     answer the question, stop calling tools and answer concisely.";
 
 pub(crate) struct QueryOutcome {
     pub answer: String,
@@ -150,14 +152,24 @@ pub(crate) fn run_query(
 
     loop {
         let mut results = Vec::with_capacity(prior_calls.len());
+        let mut saw_new_result = false;
         for call in &prior_calls {
             tool_calls_run += 1;
-            results.push(execute_and_display(
-                call,
-                toolbox,
-                &mut seen_calls,
-                &mut findings,
-            ));
+            let (result, is_new) =
+                execute_and_display(call, toolbox, &mut seen_calls, &mut findings);
+            saw_new_result |= is_new;
+            results.push(result);
+        }
+
+        // A turn made of nothing but repeated calls produced no new
+        // information — replaying the duplicate-call notes gets them echoed
+        // back as the "answer" on small models. Jump straight to the forced
+        // synthesis from the real notes instead.
+        if !saw_new_result {
+            if verbose > 0 {
+                ui::hint("no new tool results — forcing a final answer from the notes");
+            }
+            break;
         }
 
         if turn >= MAX_TOOL_TURNS {
@@ -320,25 +332,28 @@ fn execute_and_display(
     toolbox: &ToolBox,
     seen_calls: &mut HashSet<String>,
     findings: &mut Vec<String>,
-) -> ToolCallResult {
+) -> (ToolCallResult, bool) {
     let label = tools::display_call(call);
 
     // Small models re-issue the same call instead of answering. Return a
-    // cached-style nudge instead of hitting the network again.
+    // machine-shaped duplicate marker instead of hitting the network again
+    // — deliberately not phrased as an instruction, because small models
+    // echo instruction-shaped tool results back as their answer.
     if !seen_calls.insert(tools::dedup_key(call)) {
         println!(
             "  {} {}",
             ui::secondary(&format!("⚙ {label}")),
-            ui::dim("· repeated — nudging model to answer")
+            ui::dim("· repeated — skipped")
         );
-        return ToolCallResult {
+        let result = ToolCallResult {
             call_id: call.id.clone(),
             name: call.function.name.clone(),
             content: serde_json::json!({
-                "note": "You already ran this exact call. Use the notes above to \
-                         write your final answer instead of calling tools again.",
+                "status": "duplicate_call",
+                "detail": "this exact call already ran; its results are in the notes",
             }),
         };
+        return (result, false);
     }
 
     let spinner = ui::spinner(&format!("⚙ {label}"));
@@ -356,7 +371,7 @@ fn execute_and_display(
     ui::sub(&preview_line(&summary, 120));
     findings.push(summary);
 
-    result
+    (result, true)
 }
 
 /// Fold the running findings into the user turn so the model retains every

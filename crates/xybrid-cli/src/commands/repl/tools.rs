@@ -466,7 +466,7 @@ fn fetch_url_impl(url: &str) -> Result<serde_json::Value, String> {
         Some(at) => &page[at..],
         None => &page[..],
     };
-    let text: String = strip_html(body).chars().take(FETCH_CHAR_CAP).collect();
+    let text: String = readable_text(body).chars().take(FETCH_CHAR_CAP).collect();
 
     Ok(serde_json::json!({ "url": url, "content": text }))
 }
@@ -475,14 +475,14 @@ fn fetch_url_impl(url: &str) -> Result<serde_json::Value, String> {
 // Shared helpers
 // =============================================================================
 
-/// Drop HTML tags — including the *contents* of `<script>`/`<style>`
-/// blocks — decode the handful of entities search APIs emit, and collapse
-/// whitespace.
-fn strip_html(fragment: &str) -> String {
+/// Split HTML into cleaned text runs (one per text node): tags dropped —
+/// including the *contents* of `<script>`/`<style>` blocks — entities
+/// decoded, whitespace collapsed, empty runs discarded.
+fn text_runs(fragment: &str) -> Vec<String> {
     // ASCII-lowered copy for case-insensitive matching; byte offsets are
     // identical to the original, so `find` positions transfer safely.
     let lower = fragment.to_ascii_lowercase();
-    let mut out = String::with_capacity(fragment.len().min(8 * 1024));
+    let mut runs = Vec::new();
     let mut i = 0usize;
     while i < fragment.len() {
         let rest = &lower[i..];
@@ -509,20 +509,54 @@ fn strip_html(fragment: &str) -> String {
             }
             continue;
         }
-        // Plain text run: copy up to the next tag.
+        // Plain text run: up to the next tag.
         let end = rest.find('<').map(|at| i + at).unwrap_or(fragment.len());
-        out.push_str(&fragment[i..end]);
+        let run = fragment[i..end]
+            .replace("&amp;", "&")
+            .replace("&lt;", "<")
+            .replace("&gt;", ">")
+            .replace("&quot;", "\"")
+            .replace("&#x27;", "'")
+            .replace("&#39;", "'")
+            .replace("&nbsp;", " ");
+        let run = run.split_whitespace().collect::<Vec<_>>().join(" ");
+        if !run.is_empty() {
+            runs.push(run);
+        }
         i = end;
     }
-    let out = out
-        .replace("&amp;", "&")
-        .replace("&lt;", "<")
-        .replace("&gt;", ">")
-        .replace("&quot;", "\"")
-        .replace("&#x27;", "'")
-        .replace("&#39;", "'")
-        .replace("&nbsp;", " ");
-    out.split_whitespace().collect::<Vec<_>>().join(" ")
+    runs
+}
+
+/// Flatten HTML to a single line of text. Good for short fragments (search
+/// snippets); use [`readable_text`] for whole pages.
+fn strip_html(fragment: &str) -> String {
+    text_runs(fragment).join(" ")
+}
+
+/// Minimum run length that counts as prose, and the minimum total prose
+/// before navigation-sized runs get dropped.
+const PROSE_RUN_MIN_CHARS: usize = 80;
+const PROSE_TOTAL_MIN_CHARS: usize = 400;
+
+/// Extract the readable text of a whole page: when enough paragraph-shaped
+/// runs exist, keep only those — navigation chrome, menus, and link lists
+/// are short runs and drown out the content otherwise. Falls back to all
+/// text when a page has no prose-shaped runs (then there is nothing better
+/// to offer).
+fn readable_text(html: &str) -> String {
+    let runs = text_runs(html);
+    let prose: Vec<&str> = runs
+        .iter()
+        .filter(|run| run.chars().count() >= PROSE_RUN_MIN_CHARS)
+        .map(String::as_str)
+        .collect();
+    let prose_total: usize = prose.iter().map(|run| run.chars().count()).sum();
+    if prose_total >= PROSE_TOTAL_MIN_CHARS {
+        prose.join("\n")
+    } else {
+        runs.join(" ")
+    }
 }
 
 /// Stable dedup key for a tool call: name plus canonicalized arguments
@@ -1019,6 +1053,28 @@ mod tests {
 
         // An unclosed script block drops the remainder instead of leaking it.
         assert_eq!(strip_html("ok<script>var leak = 1;"), "ok");
+    }
+
+    #[test]
+    fn readable_text_prefers_prose_over_navigation_chrome() {
+        let paragraph = "The 2022 FIFA World Cup final was an association football match \
+                         that determined the winner of the tournament, played between \
+                         Argentina and France at Lusail Stadium.";
+        let html = format!(
+            "<nav><a>Jump to content</a><a>Main menu</a><a>move to sidebar</a>\
+             <a>Navigation</a><a>Main page</a><a>Contents</a></nav>\
+             <p>{paragraph}</p><p>{paragraph}</p><p>{paragraph}</p>"
+        );
+        let text = readable_text(&html);
+        assert!(text.contains("Lusail Stadium"));
+        assert!(
+            !text.contains("Jump to content"),
+            "nav chrome must be filtered when prose exists: {text:?}"
+        );
+
+        // A page with no prose-shaped runs falls back to everything.
+        let sparse = "<a>one</a><a>two</a>";
+        assert_eq!(readable_text(sparse), "one two");
     }
 
     #[test]
