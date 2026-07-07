@@ -34,3 +34,7 @@ build --disk_cache=.context/bazel-disk-cache
 # --- Remote (BuildBuddy RBE): creds + remote flags live in a GITIGNORED file so
 # the API key never enters a committable file. Activate with `--config=remote`.
 try-import %workspace%/.context/buildbuddy.bazelrc
+
+# --- Machine-local settings (GITIGNORED): e.g.
+#   common --repo_env=ANDROID_NDK_HOME=/path/to/android-ndk-r27   (linux NDK for RBE)
+try-import %workspace%/.context/local.bazelrc
