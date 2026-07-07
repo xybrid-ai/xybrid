@@ -1,0 +1,22 @@
+MODULE.bazel
+  s_7431c1432875d8::t_8eaedd0359b823 117-122
+  s_7431c1432875d8::t_2555528f03dffd 10-13,15,17-18,22,24-25,29,31-32
+.bazelrc
+  s_7431c1432875d8::t_4d8ba1d32dba83 37-40
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "d4c386a5c416bc8289056f17b82ffd0561842bbf",
+  "prompts": {},
+  "sessions": {
+    "s_7431c1432875d8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "85304c2d-b335-4cc4-a3a6-e618040982d4",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
