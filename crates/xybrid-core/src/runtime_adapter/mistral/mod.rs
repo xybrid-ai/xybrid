@@ -36,6 +36,21 @@ fn nonzero(v: f32) -> Option<f32> {
     }
 }
 
+/// Tool calling is llama.cpp-only today. Fail closed rather than silently
+/// generating without the offered tools — the same policy as the SDK's
+/// cloud-fallback guard.
+#[cfg(feature = "llm-mistral")]
+fn reject_tools_unsupported(config: &GenerationConfig) -> LlmResult<()> {
+    if config.tools.is_empty() {
+        return Ok(());
+    }
+    Err(AdapterError::InvalidInput(
+        "the mistralrs backend does not support tool calling; run tool-bearing requests on the \
+         llama.cpp backend or drop `tools` from the request"
+            .to_string(),
+    ))
+}
+
 /// Accumulated state for the streaming response consumer. Kept pure-data so
 /// [`handle_response`] can be tested sequentially without an async runtime
 /// or the mistralrs `Stream<'_>` wrapper.
@@ -461,6 +476,7 @@ impl LlmBackend for MistralBackend {
         messages: &[ChatMessage],
         config: &GenerationConfig,
     ) -> LlmResult<GenerationOutput> {
+        reject_tools_unsupported(config)?;
         let model = self.model.as_ref().ok_or_else(|| {
             AdapterError::ModelNotLoaded("No model loaded. Call load() first.".to_string())
         })?;
@@ -566,6 +582,7 @@ impl LlmBackend for MistralBackend {
         config: &GenerationConfig,
         on_token: StreamingCallback<'_>,
     ) -> LlmResult<GenerationOutput> {
+        reject_tools_unsupported(config)?;
         let model = self.model.as_ref().ok_or_else(|| {
             AdapterError::ModelNotLoaded("No model loaded. Call load() first.".to_string())
         })?;

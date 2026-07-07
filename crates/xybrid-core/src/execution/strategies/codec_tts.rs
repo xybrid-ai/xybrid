@@ -145,6 +145,7 @@ impl<I: LlmInference> CodecTtsStrategy<I> {
             repetition_penalty: 1.0,
             system_prompt: None,
             stop_sequences: vec!["<|SPEECH_GENERATION_END|>".to_string()],
+            tools: Vec::new(),
         };
 
         if let ExecutionTemplate::Gguf {

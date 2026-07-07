@@ -249,9 +249,25 @@ enum Commands {
         #[arg(long)]
         stream: bool,
 
+        /// Print the model's chain-of-thought reasoning (`<think>` blocks),
+        /// which is stripped out of the answer text by default
+        #[arg(long, default_value = "false")]
+        show_reasoning: bool,
+
         /// System prompt to set the assistant's behavior
         #[arg(long, value_name = "PROMPT")]
         system: Option<String>,
+
+        /// Disable built-in tool calling (web_search, fetch_url, current_time),
+        /// which is otherwise on for models whose metadata declares support
+        #[arg(long)]
+        no_tools: bool,
+
+        /// Add user-defined tools from a JSON or YAML file. Each entry maps a
+        /// JSON-schema'd function to a command; the model's arguments arrive
+        /// as JSON on the command's stdin, its stdout is the tool result
+        #[arg(long, value_name = "FILE")]
+        tools_file: Option<PathBuf>,
     },
     /// Trace and analyze telemetry logs from a session
     Trace {
@@ -274,7 +290,10 @@ enum Commands {
         name: String,
 
         /// Version string (e.g., 1.0.0)
-        #[arg(short, long, value_name = "VERSION", default_value = "0.1.0")]
+        ///
+        /// Long-only: `-v` belongs to the global `--verbose` flag, and clap
+        /// panics at startup on the collision.
+        #[arg(long, value_name = "VERSION", default_value = "0.1.0")]
         version: String,
 
         /// Target format (onnx, coreml, tflite, generic)
@@ -604,7 +623,10 @@ fn run_command(cli: Cli) -> Result<()> {
             voice,
             target,
             stream,
+            show_reasoning,
             system,
+            no_tools,
+            tools_file,
         } => commands::repl::handle_repl_command(
             config,
             model,
@@ -613,7 +635,10 @@ fn run_command(cli: Cli) -> Result<()> {
             voice,
             target,
             stream,
+            show_reasoning,
             system,
+            no_tools,
+            tools_file,
             verbose,
         ),
         Commands::Trace {
@@ -694,4 +719,36 @@ fn resolve_config_path(config: Option<PathBuf>, pipeline: Option<String>) -> Res
     Err(anyhow::anyhow!(
         "Either --config, --pipeline, --bundle, or --model must be specified"
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_subcommand_parses_without_arg_collisions() {
+        // clap only detects duplicate short flags (like `pack -v` vs the
+        // global `-v/--verbose`) when the subcommand's arg set is built —
+        // exercise each one so a collision fails here instead of panicking
+        // at run time.
+        use clap::CommandFactory;
+        Cli::command().debug_assert();
+    }
+
+    #[test]
+    fn repl_accepts_show_reasoning_flag() {
+        let parsed = Cli::try_parse_from([
+            "xybrid",
+            "repl",
+            "--show-reasoning",
+            "--model-file",
+            "model.gguf",
+        ]);
+
+        let cli = parsed.unwrap_or_else(|err| panic!("repl should accept --show-reasoning: {err}"));
+        let Commands::Repl { show_reasoning, .. } = cli.command else {
+            panic!("expected repl command");
+        };
+        assert!(show_reasoning);
+    }
 }

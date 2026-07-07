@@ -13,6 +13,7 @@ use std::path::Path;
 use super::{ExecutionContext, ExecutionStrategy};
 use crate::execution::template::{ExecutionTemplate, ModelMetadata};
 use crate::execution::types::ExecutorResult;
+use crate::gateway::Tool;
 use crate::ir::{Envelope, EnvelopeKind};
 use crate::runtime_adapter::AdapterError;
 use crate::runtime_adapter::MultimodalChatMessage;
@@ -92,6 +93,12 @@ pub struct LlmGenerationParams {
     pub system_prompt: Option<String>,
     /// Stop sequences - generation stops when any of these are encountered
     pub stop_sequences: Vec<String>,
+    /// Tools (functions) offered to the model, mirrored into the rebuilt
+    /// `GenerationConfig`. Passive mirror only: the executor path is the
+    /// tool-calling surface (it parses emitted calls back out); this
+    /// strategy path renders definitions but does not parse responses, so
+    /// there is deliberately no envelope-metadata entry point for it.
+    pub tools: Vec<Tool>,
 }
 
 impl Default for LlmGenerationParams {
@@ -104,6 +111,7 @@ impl Default for LlmGenerationParams {
             repetition_penalty: 1.1,
             system_prompt: None,
             stop_sequences: Vec::new(),
+            tools: Vec::new(),
         }
     }
 }
@@ -369,6 +377,7 @@ impl LlmInference for DefaultLlmInference {
             top_k: params.top_k,
             repetition_penalty: params.repetition_penalty,
             stop_sequences: params.stop_sequences.clone(),
+            tools: params.tools.clone(),
             ..Default::default()
         };
 
@@ -400,6 +409,7 @@ impl LlmInference for DefaultLlmInference {
             top_k: params.top_k,
             repetition_penalty: params.repetition_penalty,
             stop_sequences: params.stop_sequences.clone(),
+            tools: params.tools.clone(),
             ..Default::default()
         };
 
@@ -437,6 +447,7 @@ impl LlmInference for DefaultLlmInference {
             top_k: params.top_k,
             repetition_penalty: params.repetition_penalty,
             stop_sequences: params.stop_sequences.clone(),
+            tools: params.tools.clone(),
             ..Default::default()
         };
 
@@ -888,6 +899,13 @@ mod tests {
         assert_eq!(params.top_k, 40);
         assert!(params.system_prompt.is_none());
         assert!(params.stop_sequences.is_empty());
+    }
+
+    #[test]
+    fn test_generation_params_default_has_empty_tools() {
+        let params = LlmGenerationParams::default();
+
+        assert!(params.tools.is_empty());
     }
 
     // ========================================================================

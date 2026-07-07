@@ -55,6 +55,10 @@ pub mod traits;
 // Always-available types for FFI/bindings (NOT feature-gated)
 pub mod types;
 
+// Always-compiled tool-call text protocols, LFM2- and gemma-4-family
+// (parser + continuation composer).
+pub mod tool_call;
+
 // JSON-Schema → GBNF conversion for constrained decoding. Pure Rust, no llama
 // dependency, so it is always compiled (referenced by `GenerationConfig`).
 pub mod grammar;

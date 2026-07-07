@@ -80,7 +80,8 @@ mod models;
 
 pub use api::{
     ChatChoice, ChatChunkChoice, ChatCompletionChunk, ChatCompletionRequest,
-    ChatCompletionResponse, ChatDelta, ChatMessage, ErrorResponse, MessageRole, Usage,
+    ChatCompletionResponse, ChatDelta, ChatMessage, ErrorResponse, FunctionCall,
+    FunctionDefinition, MessageRole, Tool, ToolCall, Usage,
 };
 pub use config::{GatewayConfig, ProviderCredentials, RateLimitConfig};
 pub use error::GatewayError;
