@@ -1,0 +1,20 @@
+CHANGELOG.md
+  s_fb271508a8988a::t_60d8b94f86f21a 18-22
+  s_fb271508a8988a::t_ee455a30bf7433 44-47
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "b6337a9e9ca3028d074dd946877f1b3234d09349",
+  "prompts": {},
+  "sessions": {
+    "s_fb271508a8988a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8ce838ba-c727-47cf-8b97-de143d5f0c48",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
