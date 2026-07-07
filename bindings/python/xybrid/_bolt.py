@@ -12,6 +12,7 @@ import os
 import platform
 import re
 import struct
+import threading
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import IntEnum
@@ -83,6 +84,7 @@ class _FfiStatus(ctypes.Structure):
 
 _LIB: ctypes.CDLL | None = None
 _LIB_PATH: Path | None = None
+_LIB_LOCK: Final = threading.Lock()
 
 
 class XybridMessageRole(IntEnum):
@@ -118,10 +120,6 @@ class XybridThermalState(IntEnum):
     WARM = 1
     HOT = 2
     CRITICAL = 3
-
-
-class _WireDecodeError(XybridError if "XybridError" in globals() else Exception):
-    pass
 
 
 class _WireReader:
@@ -297,6 +295,10 @@ class XybridError(Exception):
                 return InvalidImage(reader.read_string())
             case _:
                 return LoadError(f"unknown XybridError tag: {tag}")
+
+
+class _WireDecodeError(XybridError):
+    """Raised when a native wire buffer is truncated or malformed."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -828,6 +830,15 @@ def _load_library() -> ctypes.CDLL:
     global _LIB, _LIB_PATH
     if _LIB is not None:
         return _LIB
+
+    with _LIB_LOCK:
+        if _LIB is not None:
+            return _LIB
+        return _load_library_locked()
+
+
+def _load_library_locked() -> ctypes.CDLL:
+    global _LIB, _LIB_PATH
 
     path = _resolve_library_path()
     lib = ctypes.CDLL(str(path))

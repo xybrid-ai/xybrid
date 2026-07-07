@@ -11,9 +11,7 @@ import threading
 from typing import Final
 
 from . import _bolt
-
-for _name in _bolt.__all__:
-    globals()[_name] = getattr(_bolt, _name)
+from ._bolt import *  # noqa: F403 -- re-export the generated-style surface; _bolt defines __all__
 
 _INIT_LOCK: Final = threading.Lock()
 _INITIALIZED = False
