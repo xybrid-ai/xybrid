@@ -311,6 +311,13 @@ jobs:
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+        with:
+          # Don't install the default `tools` package — it drags in the Android
+          # Emulator (~1 GB), whose download flakes ("ZipFile unknown archive").
+          # This job only builds the APK (assembleDebug); the NDK is installed
+          # below and Gradle fetches build-tools/platform on demand. platform-tools
+          # is kept for adb, which some Gradle Android tasks probe for.
+          packages: platform-tools
 
       - name: Install NDK
         run: sdkmanager --install "ndk;27.1.12297006"
