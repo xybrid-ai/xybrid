@@ -18,6 +18,8 @@
 //! Engines that strip these internally (e.g. mistralrs) don't use
 //! this module.
 
+use crate::runtime_adapter::tool_call::{parse_tool_calls, TOOL_BLOCK_MARKERS};
+
 /// Stop markers emitted by common chat templates:
 /// - `<|im_end|>` / `<|im_start|>` / `<|endoftext|>`: ChatML (Qwen, Phi)
 /// - `</s>`: Llama 2 style
@@ -217,6 +219,8 @@ pub(crate) struct StreamingTextFilter {
     inside_think_block: bool,
     hit_stop_pattern: bool,
     reasoning: String,
+    suppress_tool_call_blocks: bool,
+    saw_tool_call_block: bool,
 }
 
 impl StreamingTextFilter {
@@ -228,6 +232,8 @@ impl StreamingTextFilter {
             inside_think_block: false,
             hit_stop_pattern: false,
             reasoning: String::new(),
+            suppress_tool_call_blocks: false,
+            saw_tool_call_block: false,
         }
     }
 
@@ -245,9 +251,23 @@ impl StreamingTextFilter {
         }
     }
 
+    /// Suppress complete tool-protocol blocks (and hold back potential
+    /// marker prefixes) from the emitted stream. Enabled only for requests
+    /// that offered tools.
+    pub fn with_tool_call_suppression(mut self) -> Self {
+        self.suppress_tool_call_blocks = true;
+        self
+    }
+
     /// Whether a complete stop pattern has been observed.
     pub fn is_stopped(&self) -> bool {
         self.hit_stop_pattern
+    }
+
+    /// Whether a complete tool-*call* block was suppressed. Response blocks
+    /// don't count: they are protocol scaffolding, not calls.
+    pub fn saw_tool_call_block(&self) -> bool {
+        self.saw_tool_call_block
     }
 
     /// The reasoning text captured from `<think>...</think>` blocks seen so
@@ -305,6 +325,10 @@ impl StreamingTextFilter {
             return None;
         }
 
+        if self.suppress_tool_call_blocks {
+            self.suppress_complete_tool_blocks();
+        }
+
         // Complete stop pattern observed?
         for pattern in &self.stop_patterns {
             if self.cumulative_text.contains(pattern.as_str()) {
@@ -318,8 +342,16 @@ impl StreamingTextFilter {
 
         // Find the safe emission boundary (exclude potential partial
         // stop prefixes hanging off the tail).
-        let safe_end = find_potential_stop_start(&self.cumulative_text, &self.stop_patterns)
+        let mut safe_end = find_potential_stop_start(&self.cumulative_text, &self.stop_patterns)
             .unwrap_or(self.cumulative_text.len());
+        if self.suppress_tool_call_blocks {
+            if let Some(start) = self.open_tool_block_start() {
+                safe_end = safe_end.min(start);
+            }
+            if let Some(start) = find_potential_tool_start(&self.cumulative_text) {
+                safe_end = safe_end.min(start);
+            }
+        }
 
         if safe_end > self.last_emitted_len {
             let safe = self.cumulative_text[self.last_emitted_len..safe_end].to_string();
@@ -327,6 +359,52 @@ impl StreamingTextFilter {
             Some(safe)
         } else {
             None
+        }
+    }
+
+    fn suppress_complete_tool_blocks(&mut self) {
+        let mut scan_start = self.last_emitted_len;
+        loop {
+            let search = &self.cumulative_text[scan_start..];
+            let Some((relative_start, start, end, is_call_block)) = find_next_tool_block(search)
+            else {
+                break;
+            };
+            let start_index = scan_start + relative_start;
+            let after_start_index = start_index + start.len();
+            let Some(relative_end) = self.cumulative_text[after_start_index..].find(end) else {
+                break;
+            };
+            let remove_end = after_start_index + relative_end + end.len();
+
+            if is_call_block
+                && parse_tool_calls(&self.cumulative_text[start_index..remove_end]).is_empty()
+            {
+                scan_start = remove_end;
+                continue;
+            }
+
+            self.cumulative_text
+                .replace_range(start_index..remove_end, "");
+            self.last_emitted_len = self.last_emitted_len.min(start_index);
+            if is_call_block {
+                self.saw_tool_call_block = true;
+            }
+            scan_start = start_index;
+        }
+    }
+
+    fn open_tool_block_start(&self) -> Option<usize> {
+        let mut scan_start = self.last_emitted_len;
+        loop {
+            let search = &self.cumulative_text[scan_start..];
+            let (relative_start, start, end, _) = find_next_tool_block(search)?;
+            let start_index = scan_start + relative_start;
+            let after_start_index = start_index + start.len();
+            let Some(relative_end) = self.cumulative_text[after_start_index..].find(end) else {
+                return Some(start_index);
+            };
+            scan_start = after_start_index + relative_end + end.len();
         }
     }
 }
@@ -344,6 +422,34 @@ fn find_potential_stop_start(text: &str, patterns: &[String]) -> Option<usize> {
         }
     }
     None
+}
+
+fn find_next_tool_block(text: &str) -> Option<(usize, &'static str, &'static str, bool)> {
+    TOOL_BLOCK_MARKERS
+        .iter()
+        .filter_map(|(start, end, is_call_block)| {
+            text.find(start)
+                .map(|position| (position, *start, *end, *is_call_block))
+        })
+        .min_by_key(|(position, _, _, _)| *position)
+}
+
+fn find_potential_tool_start(text: &str) -> Option<usize> {
+    TOOL_BLOCK_MARKERS
+        .iter()
+        .filter_map(|(start, _, _)| potential_suffix_start(text, start))
+        .min()
+}
+
+fn potential_suffix_start(text: &str, pattern: &str) -> Option<usize> {
+    let mut start = None;
+    for prefix_len in 1..=pattern.len() {
+        let prefix = &pattern[..prefix_len];
+        if text.ends_with(prefix) {
+            start = Some(text.len() - prefix_len);
+        }
+    }
+    start
 }
 
 #[cfg(test)]
@@ -462,6 +568,165 @@ mod tests {
         assert_eq!(f.push("</think>"), None);
         assert_eq!(f.push("97 is prime."), Some("97 is prime.".to_string()));
         assert_eq!(f.reasoning(), Some("checking divisors none divide it"));
+    }
+
+    #[test]
+    fn streaming_filter_suppresses_complete_lfm2_tool_block_mid_stream() {
+        let (start, end, _) = TOOL_BLOCK_MARKERS[0];
+        let mut f = StreamingTextFilter::new(vec![]).with_tool_call_suppression();
+
+        assert_eq!(f.push("I will check "), Some("I will check ".to_string()));
+        assert_eq!(f.push(start), None);
+        assert_eq!(f.push("[get_weather(city=\"Paris\")]"), None);
+        assert_eq!(f.push(end), None);
+        assert_eq!(f.push(" now."), Some(" now.".to_string()));
+
+        assert_eq!(f.cumulative_emitted(), "I will check  now.");
+        assert!(f.saw_tool_call_block());
+    }
+
+    #[test]
+    fn streaming_filter_suppresses_complete_valid_tool_call_block() {
+        let (start, end, _) = TOOL_BLOCK_MARKERS[0];
+        let mut f = StreamingTextFilter::new(vec![]).with_tool_call_suppression();
+
+        assert_eq!(
+            f.push(&format!(
+                "before {start}[get_weather(city=\"Paris\")]{end} after"
+            )),
+            Some("before  after".to_string())
+        );
+
+        assert_eq!(f.cumulative_emitted(), "before  after");
+        assert!(f.saw_tool_call_block());
+    }
+
+    #[test]
+    fn streaming_filter_emits_complete_invalid_tool_call_block() {
+        let (start, end, _) = TOOL_BLOCK_MARKERS[0];
+        let mut f = StreamingTextFilter::new(vec![]).with_tool_call_suppression();
+        let block = format!("{start}not a real call{end}");
+
+        assert_eq!(
+            f.push(&format!("before {block} after")),
+            Some(format!("before {block} after"))
+        );
+
+        assert_eq!(f.cumulative_emitted(), format!("before {block} after"));
+        assert!(!f.saw_tool_call_block());
+    }
+
+    #[test]
+    fn streaming_filter_suppresses_complete_gemma_tool_call_block() {
+        let (start, end, _) = TOOL_BLOCK_MARKERS[1];
+        let mut f = StreamingTextFilter::new(vec![]).with_tool_call_suppression();
+
+        assert_eq!(f.push("Checking "), Some("Checking ".to_string()));
+        assert_eq!(
+            f.push(&format!(
+                "{start}call:get_weather{{city:<|\"|>Paris<|\"|>}}{end}"
+            )),
+            None
+        );
+        assert_eq!(f.push("done"), Some("done".to_string()));
+
+        assert_eq!(f.cumulative_emitted(), "Checking done");
+        assert!(f.saw_tool_call_block());
+    }
+
+    #[test]
+    fn streaming_filter_holds_back_split_tool_start_marker() {
+        let (start, end, _) = TOOL_BLOCK_MARKERS[0];
+        let mut f = StreamingTextFilter::new(vec![]).with_tool_call_suppression();
+
+        assert_eq!(f.push("before "), Some("before ".to_string()));
+        assert_eq!(f.push(&start[..5]), None);
+        assert_eq!(f.cumulative_emitted(), "before ");
+        assert_eq!(
+            f.push(&format!("{}[f()]{}", &start[5..], end)),
+            None,
+            "held marker head and complete block must stay suppressed"
+        );
+        assert_eq!(f.push(" after"), Some(" after".to_string()));
+
+        assert_eq!(f.cumulative_emitted(), "before  after");
+    }
+
+    #[test]
+    fn streaming_filter_drops_partial_tool_start_marker_at_stream_end() {
+        let (start, _, _) = TOOL_BLOCK_MARKERS[0];
+        let mut f = StreamingTextFilter::new(vec![]).with_tool_call_suppression();
+
+        assert_eq!(f.push("before "), Some("before ".to_string()));
+        assert_eq!(f.push(&start[..8]), None);
+
+        assert_eq!(f.cumulative_emitted(), "before ");
+        assert!(!f.saw_tool_call_block());
+    }
+
+    #[test]
+    fn streaming_filter_drops_unclosed_gemma_tool_response_opener() {
+        let (start, _, _) = TOOL_BLOCK_MARKERS[2];
+        let mut f = StreamingTextFilter::new(vec![]).with_tool_call_suppression();
+
+        assert_eq!(f.push("answer"), Some("answer".to_string()));
+        assert_eq!(f.push(start), None);
+        assert_eq!(f.push("response:get_weather{"), None);
+
+        assert_eq!(f.cumulative_emitted(), "answer");
+        assert!(!f.saw_tool_call_block());
+    }
+
+    #[test]
+    fn streaming_filter_without_tool_suppression_emits_call_block_verbatim() {
+        let (start, end, _) = TOOL_BLOCK_MARKERS[0];
+        let mut f = StreamingTextFilter::new(vec![]);
+
+        let block = format!("{start}[get_weather(city=\"Paris\")]{end}");
+        assert_eq!(f.push("before "), Some("before ".to_string()));
+        assert_eq!(f.push(&block), Some(block.clone()));
+        assert_eq!(f.push(" after"), Some(" after".to_string()));
+
+        assert_eq!(f.cumulative_emitted(), format!("before {block} after"));
+        assert!(!f.saw_tool_call_block());
+    }
+
+    #[test]
+    fn streaming_filter_saw_tool_call_block_excludes_response_blocks() {
+        let (call_start, call_end, _) = TOOL_BLOCK_MARKERS[1];
+        let (response_start, response_end, _) = TOOL_BLOCK_MARKERS[2];
+
+        let mut response_only = StreamingTextFilter::new(vec![]).with_tool_call_suppression();
+        assert_eq!(
+            response_only.push(&format!(
+                "{response_start}response:get_weather{{ok:true}}{response_end}"
+            )),
+            None
+        );
+        assert!(!response_only.saw_tool_call_block());
+
+        let mut with_call = StreamingTextFilter::new(vec![]).with_tool_call_suppression();
+        assert_eq!(
+            with_call.push(&format!("{call_start}call:get_weather{{}}{call_end}")),
+            None
+        );
+        assert!(with_call.saw_tool_call_block());
+    }
+
+    #[test]
+    fn streaming_filter_reasoning_primed_and_tool_suppression_compose() {
+        let (start, end, _) = TOOL_BLOCK_MARKERS[0];
+        let mut f = StreamingTextFilter::new_reasoning_primed(vec![]).with_tool_call_suppression();
+
+        assert_eq!(f.push("thinking"), None);
+        assert_eq!(f.push("</think>"), None);
+        assert_eq!(f.push(" visible "), Some(" visible ".to_string()));
+        assert_eq!(f.push(&format!("{start}[f()]{end}")), None);
+        assert_eq!(f.push("done"), Some("done".to_string()));
+
+        assert_eq!(f.reasoning(), Some("thinking"));
+        assert_eq!(f.cumulative_emitted(), " visible done");
+        assert!(f.saw_tool_call_block());
     }
 
     #[test]

@@ -6401,6 +6401,7 @@ dependencies = [
  "tracing",
  "tracing-flame",
  "tracing-subscriber",
+ "ureq 2.12.1",
  "uuid",
  "xybrid-core",
  "xybrid-sdk",
