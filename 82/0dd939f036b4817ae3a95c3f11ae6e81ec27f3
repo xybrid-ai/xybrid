@@ -1,0 +1,114 @@
+crates/xybrid-core/src/runtime_adapter/mod.rs
+  s_7431c1432875d8::t_8453955396ef24 58-61
+crates/xybrid-sdk/src/result.rs
+  s_7431c1432875d8::t_8453955396ef24 8,248-263,409-464
+  s_7431c1432875d8::t_f5fdd7a91d1810 465
+crates/xybrid-core/src/runtime_adapter/tool_call/gemma.rs
+  s_7431c1432875d8::t_8453955396ef24 1-533
+crates/xybrid-core/src/execution/tool_continuation.rs
+  s_7431c1432875d8::t_8453955396ef24 1-144
+crates/xybrid-cli/src/commands/repl/agent_loop.rs
+  s_7431c1432875d8::t_8453955396ef24 1-549
+.gitignore
+  s_7431c1432875d8::t_8453955396ef24 65-66
+  s_7431c1432875d8::t_d08abe30c9a657 67
+crates/xybrid-core/src/runtime_adapter/llama_cpp/chat.rs
+  s_7431c1432875d8::t_8453955396ef24 2-10,12-13,15,28-35,40,42-56,58-59,101,115-240,272-331
+crates/xybrid-cli/src/commands/repl/tools.rs
+  s_7431c1432875d8::t_8453955396ef24 1-1291
+crates/xybrid-core/src/execution/executor.rs
+  s_7431c1432875d8::t_8453955396ef24 52-55,893-899,1228-1231,1376,1458,1549,1564-1580,1593-1653,1677-1681,1683,1690,1720,1726,1733-1774,1797,1813,1923,2017,2141-2147,2167,2811-2817,2824,2843-2855,2857-2865,2935-2936,2958-2964,2972-3120
+  s_7431c1432875d8::t_46278a0d183ccf 3121
+crates/xybrid-core/src/gateway/api.rs
+  s_7431c1432875d8::t_8453955396ef24 108-146
+crates/xybrid-cli/src/commands/repl.rs
+  s_7431c1432875d8::t_8453955396ef24 5,7,43,45-46,184-216,218-236,239-252,290,300-353,372-378,426,520-633,661,667-669,686-689,743-806,1005-1008,1072,1080-1086,1090-1097,1145-1155,1160,1170,1179-1201
+  s_7431c1432875d8::t_33528b3aa53098 1202
+agents/skills/xybrid-init/SKILL.md
+  s_7431c1432875d8::t_8453955396ef24 91-93
+crates/xybrid-sdk/src/model.rs
+  s_7431c1432875d8::t_8453955396ef24 394,491-494,517,579-618,1858-1871,3071-3073,3123-3126,3141,3911-3923,3925-3932,3934-3939,3955-3975,4122,4183-4238,4309,4340-4408,4440,4510,4559,5225,5284,5322,5360,5400,5446
+crates/xybrid-core/Cargo.toml
+  s_7431c1432875d8::t_8453955396ef24 207-216
+crates/xybrid-core/examples/gemma4_e2b_tools.rs
+  s_7431c1432875d8::t_8453955396ef24 1-241
+crates/xybrid-cli/Cargo.toml
+  s_7431c1432875d8::t_8453955396ef24 66-67
+crates/xybrid-core/src/runtime_adapter/streaming_postprocess.rs
+  s_7431c1432875d8::t_8453955396ef24 21-22,222-223,235-236,254-261,267-272,328-331,345,347-354,364-409,427-454,573-730
+  s_7431c1432875d8::t_36af561d104d39 731
+docs/content/docs/cli/index.mdx
+  s_7431c1432875d8::t_8453955396ef24 48
+crates/xybrid-core/src/runtime_adapter/llm.rs
+  s_7431c1432875d8::t_8453955396ef24 182-201,971-1025
+  s_7431c1432875d8::t_495a771ef1ca3f 1026
+crates/xybrid-core/examples/lfm2_230m_tools.rs
+  s_7431c1432875d8::t_8453955396ef24 1-227
+crates/xybrid-core/src/execution/strategies/codec_tts.rs
+  s_7431c1432875d8::t_8453955396ef24 148
+crates/xybrid-core/src/runtime_adapter/tool_call/cursor.rs
+  s_7431c1432875d8::t_8453955396ef24 1-120
+crates/xybrid-core/src/runtime_adapter/types.rs
+  s_7431c1432875d8::t_8453955396ef24 14,350-363,405,482-511,719-720,723-733,828-862
+  s_7431c1432875d8::t_752288b5430404 863
+crates/xybrid-core/src/gateway/mod.rs
+  s_7431c1432875d8::t_8453955396ef24 83-84
+crates/xybrid-core/src/runtime_adapter/llama_cpp/jinja_template.rs
+  s_7431c1432875d8::t_8453955396ef24 14-20,25,52-58,66,88-91,98,119-127,144,151-159,169-285,352,382,404,421-568,571
+  s_7431c1432875d8::t_bc7ee0edac24c9 569-570
+docs/content/docs/cli/reference/repl.mdx
+  s_7431c1432875d8::t_8453955396ef24 1-91
+docs/content/docs/guides/meta.json
+  s_7431c1432875d8::t_8453955396ef24 6
+crates/xybrid-cli/src/main.rs
+  s_7431c1432875d8::t_8453955396ef24 252-256,260-270,293-296,626,628-629,638,640-641,723-753
+  s_7431c1432875d8::t_324a0dc83d4492 754
+crates/xybrid-core/src/execution/template/metadata.rs
+  s_7431c1432875d8::t_8453955396ef24 455-469,809-844
+  s_7431c1432875d8::t_b5b288146ccfe6 845
+crates/xybrid-core/src/ir/envelope.rs
+  s_7431c1432875d8::t_8453955396ef24 1151-1162,1166-1174,1300-1350,2018-2052
+  s_7431c1432875d8::t_a467aa9d5485b6 2053-2054
+crates/xybrid-core/src/runtime_adapter/tool_call/lfm2.rs
+  s_7431c1432875d8::t_8453955396ef24 1-516
+crates/xybrid-core/src/runtime_adapter/llama_cpp/mod.rs
+  s_7431c1432875d8::t_8453955396ef24 509,511,802-807,942-956,967-972,994,1003-1005,1050-1067,1073-1082,1143-1148,1291-1296,1299,1308-1309,1372-1374,1413-1414,1426-1438,1440-1446
+crates/xybrid-core/src/ir/mod.rs
+  s_7431c1432875d8::t_8453955396ef24 10
+docs/content/docs/guides/tool-calling.mdx
+  s_7431c1432875d8::t_8453955396ef24 1-226
+crates/xybrid-core/src/runtime_adapter/mistral/mod.rs
+  s_7431c1432875d8::t_8453955396ef24 39-53,479,585
+crates/xybrid-sdk/src/lib.rs
+  s_7431c1432875d8::t_8453955396ef24 186-187
+crates/xybrid-core/src/execution/mod.rs
+  s_7431c1432875d8::t_8453955396ef24 101-105
+README.md
+  s_7431c1432875d8::t_8453955396ef24 396,404-409
+  s_7431c1432875d8::t_411c8b845c2cdf 410
+crates/xybrid-core/src/runtime_adapter/tool_call/mod.rs
+  s_7431c1432875d8::t_8453955396ef24 1-787
+crates/xybrid-core/src/execution/strategies/llm.rs
+  s_7431c1432875d8::t_8453955396ef24 16,96-101,114,380,412,450,904-908
+  s_7431c1432875d8::t_db9b1896e4453c 909-910
+crates/xybrid-core/examples/lfm2_230m_tools_streaming.rs
+  s_7431c1432875d8::t_8453955396ef24 1-131
+Cargo.lock
+  s_7431c1432875d8::t_72585104169ff0 6404
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "820dd939f036b4817ae3a95c3f11ae6e81ec27f3",
+  "prompts": {},
+  "sessions": {
+    "s_7431c1432875d8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "85304c2d-b335-4cc4-a3a6-e618040982d4",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
