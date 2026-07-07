@@ -644,6 +644,14 @@ mod tests {
 
     #[test]
     fn test_session_creation_with_mock_file() {
+        // The mock file passes the existence check, so this reaches real ort
+        // initialization — under load-dynamic a missing libonnxruntime panics
+        // inside ort, so skip on runners without the binary.
+        if !crate::runtime_adapter::onnx::ort_runtime_available() {
+            eprintln!("skipping: onnxruntime dylib not available in this environment");
+            return;
+        }
+
         // Create a temporary ONNX file (minimal valid ONNX format)
         // Note: This is a minimal test - real ONNX files are binary protobuf
         // For now, we'll test that the file existence check works
