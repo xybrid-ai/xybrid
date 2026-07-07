@@ -1,0 +1,21 @@
+.bazelrc
+  s_7431c1432875d8::t_fb268ce439212c 27-29
+BUILD.bazel
+  s_7431c1432875d8::t_81b6d66cf3dfd6 8-19
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "83020c533804643831489a631868e954c16e9844",
+  "prompts": {},
+  "sessions": {
+    "s_7431c1432875d8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "85304c2d-b335-4cc4-a3a6-e618040982d4",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
