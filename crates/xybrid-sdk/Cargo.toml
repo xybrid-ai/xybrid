@@ -54,8 +54,10 @@ test-util = ["xybrid-core/test-util"]
 # HuggingFace Hub integration (download models directly from HF repos)
 huggingface = ["dep:hf-hub"]
 
-# ONNX model inspection (loads ONNX files via ort to extract tensor metadata)
-onnx-inspect = ["dep:ort", "ort/download-binaries", "ort/tls-native"]
+# ONNX model inspection (loads ONNX files via ort to extract tensor metadata).
+# Downloader on rustls (tls-rustls), matching xybrid-core's ort sections — keeps
+# native-tls/openssl out of the lockfile even when this feature is enabled.
+onnx-inspect = ["dep:ort", "ort/download-binaries", "ort/tls-rustls"]
 
 # PLATFORM PRESETS (SINGLE SOURCE OF TRUTH)
 #
