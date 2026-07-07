@@ -5,6 +5,18 @@ exports_files([
     "Cargo.toml",
 ])
 
+# Host platform for Linux hosts (CI runners): rules_rs' experimental toolchains
+# need an explicit host platform carrying a libc constraint on Linux. Activated
+# by `common:linux` in .bazelrc (auto-applied via --enable_platform_specific_config).
+# Mirrors hermetic-llvm/e2e/rules_rs.
+platform(
+    name = "host_linux_gnu",
+    constraint_values = [
+        "@llvm//constraints/libc:gnu.2.28",
+    ],
+    parents = ["@platforms//host"],
+)
+
 # GATE 3: vendored llama.cpp source (git submodule at vendor/llama-cpp), fed to
 # the llama-cpp-sys build script so build.rs uses it instead of cloning (no network
 # in Bazel actions). Owned by the root package since vendor/ has no BUILD of its own.

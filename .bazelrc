@@ -24,7 +24,9 @@ build:android-arm64 --platforms=@rules_rs//rs/platforms:aarch64-linux-android
 build:android-arm64 --@rules_rust//rust/settings:extra_rustc_flags=-Ctarget-feature=+fp16
 
 # On Linux hosts, rules_rs' experimental toolchains need an explicit host platform
-# with libc constraints. (No-op on macOS host.)
+# with libc constraints (//:host_linux_gnu, root BUILD.bazel). The enable flag
+# makes `common:linux` auto-apply on Linux hosts (no-op on macOS: no macos config).
+common --enable_platform_specific_config
 common:linux --host_platform=//:host_linux_gnu
 
 # Local disk cache so we can MEASURE warm-cache restore across `bazel clean`.
