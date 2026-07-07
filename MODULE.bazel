@@ -69,6 +69,40 @@ single_version_override(
 # workers as an action input (same mechanism as the bazelified NDK).
 bazel_dep(name = "rules_pkg", version = "1.0.1")
 bazel_dep(name = "rules_python", version = "1.7.0")
+
+# --- Gate 10: classes.jar. Kotlin sources import android.* -> compile against a
+# BAZELIFIED android.jar (platforms;android-34, pinned zip from dl.google.com —
+# same move as the NDK). kotlinx-coroutines is the one real compile dep (JNA is
+# gradle-declared but unreferenced) -> a single pinned http_jar, no rules_jvm_external.
+bazel_dep(name = "rules_kotlin", version = "2.4.0")  # >=2.2 needed for Bazel 9 (JavaPluginInfo removal)
+# Direct dep so http_jar's generated repo (loads @rules_java//java:java_import.bzl)
+# resolves; Bazel 9 removed native java_import. MVS bumps to whatever kotlin needs.
+bazel_dep(name = "rules_java", version = "8.11.0")
+
+http_archive = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
+http_jar = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_jar")
+
+http_archive(
+    name = "android_sdk_34",
+    build_file_content = """
+load("@rules_java//java:java_import.bzl", "java_import")
+
+java_import(
+    name = "android_jar",
+    jars = ["android-34/android.jar"],
+    neverlink = True,  # compile-only: the platform provides these classes at runtime
+    visibility = ["//visibility:public"],
+)
+""",
+    sha256 = "16fdb74c55e59ae3ef52def135aec713508467bd56d7dabcd8c9be31fa8b20f3",
+    url = "https://dl.google.com/android/repository/platform-34-ext7_r03.zip",
+)
+
+http_jar(
+    name = "kotlinx_coroutines_core_jvm",
+    sha256 = "1ab3acc38f3e7355c4f9d1ec62107a46fa73c899f3070d055e5d4373dfe67e12",
+    url = "https://repo1.maven.org/maven2/org/jetbrains/kotlinx/kotlinx-coroutines-core-jvm/1.7.3/kotlinx-coroutines-core-jvm-1.7.3.jar",
+)
 python = use_extension("@rules_python//python/extensions:python.bzl", "python")
 python.toolchain(
     is_default = True,

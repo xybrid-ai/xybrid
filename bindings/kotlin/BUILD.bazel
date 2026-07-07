@@ -8,8 +8,21 @@
 # needs android.jar (sources import android.content/os); that's a bazelified
 # platforms;android-34 jar + rules_kotlin. Gradle remains the classes/publish
 # owner until then.
+load("@rules_kotlin//kotlin:jvm.bzl", "kt_jvm_library")
 load("@rules_pkg//pkg:mappings.bzl", "pkg_files")
 load("@rules_pkg//pkg:zip.bzl", "pkg_zip")
+
+# GATE 10 — classes.jar: the committed Kotlin sources (hand Xybrid.kt +
+# bolt-generated XybridBolt.kt) compiled by hermetic kotlinc against the
+# bazelified android.jar (neverlink) + the pinned coroutines jar.
+kt_jvm_library(
+    name = "xybrid_kotlin_classes",
+    srcs = glob(["src/main/kotlin/**/*.kt"]),
+    deps = [
+        "@android_sdk_34//:android_jar",
+        "@kotlinx_coroutines_core_jvm//jar",
+    ],
+)
 
 # Gate-8 .so, renamed at package time: rustc emits libxybrid_bolt.so (underscore);
 # Kotlin's System.loadLibrary("xybrid-bolt") expects libxybrid-bolt.so (hyphen).
@@ -35,11 +48,28 @@ pkg_files(
     renames = {"bazel/AndroidManifest.xml": "AndroidManifest.xml"},
 )
 
-# The AAR (skeleton: manifest + jni; classes.jar lands next gate).
+# classes.jar + (empty) R.txt — the pieces AGP consumers require of an AAR.
+pkg_files(
+    name = "aar_classes",
+    # The predeclared jar output (the bare target also carries the srcjar,
+    # which renames can't disambiguate).
+    srcs = [":xybrid_kotlin_classes.jar"],
+    renames = {":xybrid_kotlin_classes.jar": "classes.jar"},
+)
+
+pkg_files(
+    name = "aar_rtxt",
+    srcs = ["bazel/R.txt"],
+    renames = {"bazel/R.txt": "R.txt"},
+)
+
+# The AAR: manifest + classes.jar + R.txt + jni.
 pkg_zip(
     name = "xybrid_kotlin_aar",
     srcs = [
+        ":aar_classes",
         ":aar_manifest",
+        ":aar_rtxt",
         ":jni_bolt_arm64",
         ":jni_runtime_arm64",
     ],
