@@ -452,6 +452,21 @@ impl ModelMetadata {
         self
     }
 
+    /// Whether the bundle declares local tool-calling support, per the
+    /// optional `tool_calling` metadata flag.
+    ///
+    /// Advisory tri-state: `None` means the bundle says nothing (never
+    /// guessed from architecture or template contents), `Some(true)` /
+    /// `Some(false)` are explicit declarations. Enforcement stays at run
+    /// time — a tools-bearing request against a model whose template cannot
+    /// render tools fails with invalid input regardless of this flag. Apps
+    /// use it to gate tool UI before downloading/loading weights.
+    pub fn supports_tool_calling(&self) -> Option<bool> {
+        self.metadata
+            .get("tool_calling")
+            .and_then(serde_json::Value::as_bool)
+    }
+
     /// Get the voice configuration if this is a TTS model with voices.
     pub fn voice_config(&self) -> Option<&VoiceConfig> {
         self.voices.as_ref()
@@ -789,6 +804,43 @@ mod tests {
             ExecutionMode::Autoregressive { max_tokens, .. } => assert_eq!(max_tokens, 100),
             _ => panic!("Expected autoregressive mode"),
         }
+    }
+
+    #[test]
+    fn supports_tool_calling_returns_none_when_absent() {
+        let metadata = ModelMetadata::onnx("test-model", "1.0", "model.onnx");
+
+        assert_eq!(metadata.supports_tool_calling(), None);
+    }
+
+    #[test]
+    fn supports_tool_calling_returns_true_when_declared_true() {
+        let mut metadata = ModelMetadata::onnx("test-model", "1.0", "model.onnx");
+        metadata
+            .metadata
+            .insert("tool_calling".into(), serde_json::json!(true));
+
+        assert_eq!(metadata.supports_tool_calling(), Some(true));
+    }
+
+    #[test]
+    fn supports_tool_calling_returns_false_when_declared_false() {
+        let mut metadata = ModelMetadata::onnx("test-model", "1.0", "model.onnx");
+        metadata
+            .metadata
+            .insert("tool_calling".into(), serde_json::json!(false));
+
+        assert_eq!(metadata.supports_tool_calling(), Some(false));
+    }
+
+    #[test]
+    fn supports_tool_calling_returns_none_for_non_bool_value() {
+        let mut metadata = ModelMetadata::onnx("test-model", "1.0", "model.onnx");
+        metadata
+            .metadata
+            .insert("tool_calling".into(), serde_json::json!("yes"));
+
+        assert_eq!(metadata.supports_tool_calling(), None);
     }
 
     #[test]

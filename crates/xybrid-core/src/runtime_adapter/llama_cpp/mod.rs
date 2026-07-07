@@ -506,8 +506,9 @@ impl LlamaCppBackend {
         model: &xybrid_llama::LlamaModel,
         messages: &[ChatMessage],
         reasoning: bool,
+        tools: &[crate::gateway::Tool],
     ) -> LlmResult<Vec<i32>> {
-        let prompt = chat::format_chat_prompt(model, messages, reasoning)?;
+        let prompt = chat::format_chat_prompt(model, messages, reasoning, tools)?;
         Ok(model.tokenize_special(&prompt, true)?)
     }
 
@@ -798,7 +799,12 @@ impl LlmBackend for LlamaCppBackend {
             // Tokenize with special token parsing enabled — the chat template contains
             // special tokens like <|im_start|>, <end_of_turn>, etc. that must be
             // recognized as their special token IDs, not as individual characters.
-            let tokens = Self::tokenize_chat_prompt(model, messages, self.reasoning_enabled())?;
+            let tokens = Self::tokenize_chat_prompt(
+                model,
+                messages,
+                self.reasoning_enabled(),
+                &config.tools,
+            )?;
             let prepared =
                 self.prepare_generation(model, context, tokens, config, PromptKind::Chat)?;
 
@@ -933,6 +939,21 @@ impl LlmBackend for LlamaCppBackend {
         })
     }
 
+    fn render_chat_prompt(
+        &self,
+        messages: &[ChatMessage],
+        config: &GenerationConfig,
+    ) -> LlmResult<String> {
+        // Rendering needs only the model (embedded template + tokenizer
+        // metadata), not the decode context — so read the model directly
+        // instead of going through `with_model_and_context`, and never
+        // queue behind an in-flight generation holding the context mutex.
+        let model = self.model.as_ref().ok_or_else(|| {
+            AdapterError::ModelNotLoaded("No model loaded. Call load() first.".to_string())
+        })?;
+        chat::format_chat_prompt(model, messages, self.reasoning_enabled(), &config.tools)
+    }
+
     fn generate_streaming(
         &self,
         messages: &[ChatMessage],
@@ -943,7 +964,12 @@ impl LlmBackend for LlamaCppBackend {
 
         self.with_model_and_context(|model, context| {
             // Tokenize with special token parsing — chat template contains special tokens
-            let tokens = Self::tokenize_chat_prompt(model, messages, self.reasoning_enabled())?;
+            let tokens = Self::tokenize_chat_prompt(
+                model,
+                messages,
+                self.reasoning_enabled(),
+                &config.tools,
+            )?;
             let prepared =
                 self.prepare_generation(model, context, tokens, config, PromptKind::Chat)?;
 
@@ -965,6 +991,7 @@ impl LlmBackend for LlamaCppBackend {
             // local leg of every aborted run. Successful runs harmlessly
             // overwrite this with the same value after finalize.
             let stop_patterns = merge_stop_patterns(&config.stop_sequences, CHAT_STOP_PATTERNS);
+            let suppress_tools = !config.tools.is_empty();
             // Thinking models have `<think>` primed into the prompt, so their
             // output starts mid-reasoning with no opening tag — start the filter
             // already suppressing so the reasoning never reaches the callback.
@@ -973,6 +1000,9 @@ impl LlmBackend for LlamaCppBackend {
             } else {
                 StreamingTextFilter::new(stop_patterns.clone())
             };
+            if suppress_tools {
+                filter = filter.with_tool_call_suppression();
+            }
             let mut token_index = 0usize;
 
             let (output_tokens, stopped_by_callback, fields) = Self::run_streaming_generation(
@@ -1017,20 +1047,39 @@ impl LlmBackend for LlamaCppBackend {
             let text = clean.trim().to_string();
             // `stopped_by_callback` is an independent signal from the C
             // layer that a stop sequence was hit — previously dropped.
-            let finish_reason =
-                if filter.is_stopped() || stopped_full || trimmed_partial || stopped_by_callback {
-                    "stop".to_string()
-                } else {
-                    "length".to_string()
-                };
+            //
+            // finish_reason gates on a REAL parse of the final text — the
+            // exact criterion `build_llm_response_envelope` uses — so the
+            // terminal token and the envelope can never disagree. The
+            // filter's marker-level `saw_tool_call_block` is deliberately
+            // NOT used here: a complete-but-unparseable block suppresses
+            // fine but is not a tool call.
+            let saw_tool_call_block = filter.saw_tool_call_block();
+            let emitted_tool_calls = suppress_tools
+                && !crate::runtime_adapter::tool_call::parse_tool_calls(&text).is_empty();
+            let finish_reason = if emitted_tool_calls {
+                "tool_calls".to_string()
+            } else if filter.is_stopped() || stopped_full || trimmed_partial || stopped_by_callback
+            {
+                "stop".to_string()
+            } else {
+                "length".to_string()
+            };
 
             // Send final empty token with finish_reason — matches the
             // pre-refactor contract so downstream consumers see a
             // terminal signal. Guarded on `token_index > 0` to avoid
             // emitting a stray terminal chunk when nothing was ever
-            // emitted (e.g. immediate stop).
-            if token_index > 0 {
-                let final_partial = PartialToken::new(String::new(), token_index, text.clone())
+            // emitted (e.g. immediate stop) — except when a tool block was
+            // suppressed: then the stream showed nothing on purpose and the
+            // terminal token is the caller's only signal.
+            if token_index > 0 || (suppress_tools && saw_tool_call_block) {
+                let final_cumulative = if suppress_tools {
+                    filter.cumulative_emitted().to_string()
+                } else {
+                    text.clone()
+                };
+                let final_partial = PartialToken::new(String::new(), token_index, final_cumulative)
                     .with_finish_reason(&finish_reason);
                 let _ = on_token(final_partial);
             }
@@ -1091,8 +1140,12 @@ impl LlmBackend for LlamaCppBackend {
             .to_string();
 
         self.with_model_and_context(|model, context| {
-            let prompt =
-                chat::format_chat_prompt(model, &inputs.chat_messages, self.reasoning_enabled())?;
+            let prompt = chat::format_chat_prompt(
+                model,
+                &inputs.chat_messages,
+                self.reasoning_enabled(),
+                &config.tools,
+            )?;
             let generation_stop_patterns =
                 merge_stop_patterns(&config.stop_sequences, CHAT_STOP_PATTERNS);
             let (_loaded, (output_tokens, stopped_by_callback, fields, image_preprocess_ms)) = self
@@ -1235,10 +1288,15 @@ impl LlmBackend for LlamaCppBackend {
             .to_string();
 
         self.with_model_and_context(|model, context| {
-            let prompt =
-                chat::format_chat_prompt(model, &inputs.chat_messages, self.reasoning_enabled())?;
+            let prompt = chat::format_chat_prompt(
+                model,
+                &inputs.chat_messages,
+                self.reasoning_enabled(),
+                &config.tools,
+            )?;
             let generation_stop_patterns =
                 merge_stop_patterns(&config.stop_sequences, CHAT_STOP_PATTERNS);
+            let suppress_tools = !config.tools.is_empty();
             let (
                 _loaded,
                 (
@@ -1247,6 +1305,8 @@ impl LlmBackend for LlamaCppBackend {
                     fields,
                     image_preprocess_ms,
                     filter_stopped,
+                    filter_saw_tool_call_block,
+                    filter_cumulative,
                     token_index,
                 ),
             ) = self.with_mtmd_context_loaded(model, &mmproj_path, |mtmd_context| {
@@ -1309,6 +1369,9 @@ impl LlmBackend for LlamaCppBackend {
                 } else {
                     StreamingTextFilter::new(generation_stop_patterns.clone())
                 };
+                if suppress_tools {
+                    filter = filter.with_tool_call_suppression();
+                }
                 let mut token_index = 0usize;
                 let stream_result = xybrid_llama::generate_from_current_logits_streaming(
                     context,
@@ -1347,6 +1410,8 @@ impl LlmBackend for LlamaCppBackend {
                     fields,
                     image_preprocess_ms,
                     filter.is_stopped(),
+                    filter.saw_tool_call_block(),
+                    filter.cumulative_emitted().to_string(),
                     token_index,
                 ))
             })?;
@@ -1358,16 +1423,27 @@ impl LlmBackend for LlamaCppBackend {
             let trimmed_partial = trim_partial_stop_suffix(&mut text, &final_stop_patterns);
             let (clean, reasoning_content) = strip_and_capture_thinking_tags(&text);
             let text = clean.trim().to_string();
-            let finish_reason =
-                if filter_stopped || stopped_in_text || trimmed_partial || stopped_by_callback {
-                    "stop"
-                } else {
-                    "length"
-                }
-                .to_string();
+            // Same real-parse gate as the text streaming site: the terminal
+            // token's finish_reason must match what the executor's envelope
+            // will report, and a complete-but-unparseable block is not a
+            // tool call.
+            let emitted_tool_calls = suppress_tools
+                && !crate::runtime_adapter::tool_call::parse_tool_calls(&text).is_empty();
+            let finish_reason = if emitted_tool_calls {
+                "tool_calls".to_string()
+            } else if filter_stopped || stopped_in_text || trimmed_partial || stopped_by_callback {
+                "stop".to_string()
+            } else {
+                "length".to_string()
+            };
 
-            if token_index > 0 {
-                let final_partial = PartialToken::new(String::new(), token_index, text.clone())
+            if token_index > 0 || (suppress_tools && filter_saw_tool_call_block) {
+                let final_cumulative = if suppress_tools {
+                    filter_cumulative
+                } else {
+                    text.clone()
+                };
+                let final_partial = PartialToken::new(String::new(), token_index, final_cumulative)
                     .with_finish_reason(&finish_reason);
                 let _ = on_token(final_partial);
             }

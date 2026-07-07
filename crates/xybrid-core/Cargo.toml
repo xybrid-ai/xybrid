@@ -198,6 +198,16 @@ name = "lfm2_230m_grammar"
 # Real inference — needs llama.cpp linked.
 required-features = ["llm-llamacpp"]
 
+[[example]]
+name = "lfm2_230m_tools"
+# Real inference — needs llama.cpp linked.
+required-features = ["llm-llamacpp"]
+
+[[example]]
+name = "lfm2_230m_tools_streaming"
+# Real inference — needs llama.cpp linked.
+required-features = ["llm-llamacpp"]
+
 [[bench]]
 name = "inference_backends"
 harness = false
