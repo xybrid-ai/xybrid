@@ -1,0 +1,28 @@
+bindings/kotlin/BUILD.bazel
+  s_7431c1432875d8::t_48b2dc8b8c755a 1-48
+MODULE.bazel
+  s_7431c1432875d8::t_b23aeebd9e4ea3 66-70,72-77
+  s_7431c1432875d8::t_b988ae6c79b97e 71
+bindings/kotlin/bazel/AndroidManifest.xml
+  s_7431c1432875d8::t_a466638ce78c41 1-7
+.bazelrc
+  s_7431c1432875d8::t_ae71131182aedf 15-19
+BUILD.bazel
+  s_7431c1432875d8::t_1da97fb8b85286 75-84
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "35db21da888b85a3606609df2aca0f5e13e9485a",
+  "prompts": {},
+  "sessions": {
+    "s_7431c1432875d8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "85304c2d-b335-4cc4-a3a6-e618040982d4",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
