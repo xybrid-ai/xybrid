@@ -1,0 +1,25 @@
+crates/xybrid-sdk/Cargo.toml
+  s_7431c1432875d8::t_31b722f318f752 57-60
+crates/xybrid-core/Cargo.toml
+  s_7431c1432875d8::t_e96ae255874a77 196
+crates/xybrid-core/src/runtime_adapter/onnx/mod.rs
+  s_7431c1432875d8::t_2f660a720c4a82 41-46,49-72,74
+Cargo.lock
+  s_7431c1432875d8::t_9fcb0ba22b7314 1127,1756,3155,3170,6271
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "1db1fe22de93239ef6f3d56c8dad97bd7ba78b56",
+  "prompts": {},
+  "sessions": {
+    "s_7431c1432875d8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "85304c2d-b335-4cc4-a3a6-e618040982d4",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
