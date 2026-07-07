@@ -2011,7 +2011,7 @@ mod tests {
 
     #[test]
     fn build_client_header_accepts_known_bindings() {
-        for binding in ["rust", "flutter", "kotlin", "swift", "unity"] {
+        for binding in ["rust", "flutter", "godot", "kotlin", "swift", "unity"] {
             let header = build_client_header_with_optout(binding, false).unwrap();
             let prefix = format!("binding={};", binding);
             assert!(

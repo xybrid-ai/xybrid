@@ -10,6 +10,17 @@ Platform-specific reference implementations demonstrating how to integrate the X
 | [iOS (Swift)](#ios-swift) | `ios/` | `open ios/XybridExample.xcodeproj` | [README](ios/README.md) |
 | [Android (Kotlin)](#android-kotlin) | `android/` | `cd android && ./gradlew assembleDebug` | [README](android/README.md) |
 | [Unity](#unity) | `unity/` | Open in Unity Hub | [xybrid-unity-tavern](https://github.com/xybrid-ai/xybrid-unity-tavern) |
+| [Godot](#godot) | `godot/starter/` | `tools/scripts/godot-smoke.sh` | [README](../bindings/godot/README.md) |
+
+---
+
+## Godot
+
+Godot 4.5+ starter project using the GDExtension binding. Build the native extension first with `tools/scripts/build-godot.sh debug`, then open `godot/starter/` in Godot or run the headless smoke script.
+
+```bash
+tools/scripts/godot-smoke.sh
+```
 
 ---
 

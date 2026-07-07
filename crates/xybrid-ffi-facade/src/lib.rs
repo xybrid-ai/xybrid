@@ -1268,8 +1268,8 @@ pub fn is_sdk_cache_configured() -> bool {
     sdk::is_sdk_cache_configured()
 }
 
-/// Register the binding identifier (`"flutter"`, `"kotlin"`, `"swift"`,
-/// `"unity"`) reported in the `X-Xybrid-Client` registry header.
+/// Register the binding identifier (`"flutter"`, `"godot"`, `"kotlin"`,
+/// `"swift"`, `"unity"`) reported in the `X-Xybrid-Client` registry header.
 ///
 /// Each generator crate calls this once at SDK init with its hard-coded
 /// constant. Unknown strings fall back to [`sdk::DEFAULT_BINDING`] to
@@ -1277,6 +1277,7 @@ pub fn is_sdk_cache_configured() -> bool {
 pub fn set_binding(binding: String) {
     let resolved: &'static str = match binding.as_str() {
         "flutter" => "flutter",
+        "godot" => "godot",
         "kotlin" => "kotlin",
         "swift" => "swift",
         "unity" => "unity",

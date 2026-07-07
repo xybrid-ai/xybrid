@@ -1,0 +1,68 @@
+---
+title: Godot
+description: Godot 4.5+ GDExtension binding for local Xybrid inference
+---
+
+The Godot SDK exposes Xybrid to Godot 4.5+ projects through GDExtension. It is implemented with godot-rust/gdext and supports desktop Godot Editor/export targets in v1.
+
+## Installation
+
+Build the native extension from the repository root:
+
+```bash
+tools/scripts/build-godot.sh release
+```
+
+Copy `bindings/godot/addons/xybrid` into your project as `res://addons/xybrid`.
+
+On macOS, the build script packages the extension as `Xybrid Godot.framework` instead of a bare `.dylib`. Install both Rust desktop targets before creating release exports:
+
+```bash
+rustup target add aarch64-apple-darwin x86_64-apple-darwin
+```
+
+The `.gdextension` file declares the framework as an export dependency so Godot copies it into the exported app bundle.
+
+## Initialization
+
+```gdscript
+var runtime := XybridRuntime.new()
+var result := runtime.init("", "", "", OS.get_user_data_dir().path_join("xybrid-cache"))
+if not result.ok:
+	push_error(result.message)
+```
+
+Pass an API key as the first argument to enable dashboard telemetry. Omitting it keeps inference local and anonymous.
+
+## Load And Run
+
+```gdscript
+var loader_result := runtime.model_from_registry("kokoro-82m")
+if not loader_result.ok:
+	push_error(loader_result.message)
+	return
+
+var model_result := loader_result.value.load()
+if not model_result.ok:
+	push_error(model_result.message)
+	return
+
+var run_result := model_result.value.run({"kind": "text", "text": "Hello from Godot"}, {}, {})
+if run_result.ok:
+	print(run_result.value.text)
+else:
+	push_error(run_result.message)
+```
+
+`load`, `run`, `warmup`, and `unload` are blocking calls. Use the included `XybridAsync` helper (`addons/xybrid/xybrid_async.gd`) to run them on a Godot `Thread`.
+
+## Result Shape
+
+All fallible calls return a dictionary:
+
+```gdscript
+{"ok": true, "value": value}
+{"ok": false, "code": 6, "retryable": false, "message": "..."}
+```
+
+Supported envelope kinds are `text`, `audio`, `embedding`, `image`, and `multipart`.

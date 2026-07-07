@@ -98,6 +98,38 @@ jobs:
       - name: Check platform-desktop
         run: cargo check -p xybrid-sdk --features platform-desktop
 
+  check-godot-desktop:
+    name: check Godot (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux
+            os: ubuntu-latest
+            features: platform-desktop
+            cache-key: linux-godot-desktop
+          - name: macos
+            os: macos-latest
+            features: platform-macos
+            cache-key: macos-godot-desktop
+          - name: windows
+            os: windows-latest
+            features: platform-desktop
+            cache-key: windows-godot-desktop
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          submodules: true
+      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          key: ${{ matrix.cache-key }}
+      - name: Check xybrid-godot
+        run: cargo check -p xybrid-godot --features ${{ matrix.features }}
+
   check-vision-platforms:
     name: check vision (${{ matrix.name }})
     runs-on: ${{ matrix.os }}
@@ -240,6 +272,6 @@ jobs:
   ci-success:
     name: CI Success
     runs-on: ubuntu-latest
-    needs: [fmt, clippy, check-no-default-features, check-platform-macos, check-platform-desktop, check-vision-platforms, clippy-llm, test-llm, test, build-cli, api-contract]
+    needs: [fmt, clippy, check-no-default-features, check-platform-macos, check-platform-desktop, check-godot-desktop, check-vision-platforms, clippy-llm, test-llm, test, build-cli, api-contract]
     steps:
       - run: echo "All CI checks passed!"

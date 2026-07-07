@@ -1,0 +1,37 @@
+[package]
+name = "xybrid-godot"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Godot 4.5+ GDExtension bindings for xybrid-sdk"
+publish = false
+
+[lib]
+name = "xybrid_godot"
+crate-type = ["lib", "cdylib"]
+
+[dependencies]
+godot = { version = "0.5.4", features = ["api-4-5"] }
+xybrid-ffi-facade = { path = "../../../crates/xybrid-ffi-facade" }
+xybrid-sdk = { path = "../../../crates/xybrid-sdk", default-features = false }
+
+[features]
+default = []
+
+platform-macos = ["xybrid-sdk/platform-macos"]
+platform-desktop = ["xybrid-sdk/platform-desktop"]
+
+ort-download = ["xybrid-sdk/ort-download"]
+ort-dynamic = ["xybrid-sdk/ort-dynamic"]
+ort-coreml = ["xybrid-sdk/ort-coreml"]
+candle = ["xybrid-sdk/candle"]
+candle-hub = ["xybrid-sdk/candle-hub"]
+candle-metal = ["xybrid-sdk/candle-metal"]
+candle-cuda = ["xybrid-sdk/candle-cuda"]
+llm-mistral = ["xybrid-sdk/llm-mistral"]
+llm-mistral-metal = ["xybrid-sdk/llm-mistral-metal"]
+llm-mistral-cuda = ["xybrid-sdk/llm-mistral-cuda"]
+llm-llamacpp = ["xybrid-sdk/llm-llamacpp"]
+llm-llamacpp-vision = ["llm-llamacpp", "xybrid-sdk/llm-llamacpp-vision"]
+huggingface = ["xybrid-sdk/huggingface"]

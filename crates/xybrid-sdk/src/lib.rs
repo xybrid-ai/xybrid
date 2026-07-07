@@ -310,7 +310,7 @@ static BINDING: OnceLock<&'static str> = OnceLock::new();
 
 /// Default binding identifier reported in the registry telemetry header.
 ///
-/// Each platform binding (Flutter, Kotlin, Swift, Unity) overrides this via
+/// Each platform binding (Flutter, Godot, Kotlin, Swift, Unity) overrides this via
 /// [`set_binding`] (process-global) or [`SdkConfig::with_binding`] (per-config)
 /// so registry calls can be attributed correctly.
 pub const DEFAULT_BINDING: &str = "rust";
@@ -326,7 +326,7 @@ pub const SDK_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Register the binding identifier for this process.
 ///
-/// Each platform binding (Flutter, Kotlin, Swift, Unity) calls this once at
+/// Each platform binding (Flutter, Godot, Kotlin, Swift, Unity) calls this once at
 /// SDK init. The first call wins — subsequent calls are silent no-ops, which
 /// matches the lifecycle (a process is bound to exactly one platform binding).
 ///
