@@ -12,6 +12,11 @@ common --@rules_rust//rust/settings:experimental_use_allocator_libraries_with_ma
 # clang cannot execute on this Mac.
 common --repo_env=XYBRID_NDK_HOST_TAG=linux-x86_64
 
+# py_binary tools (rules_pkg's build_zip) must run on the python-less RBE
+# container: bootstrap_impl=script execs the HERMETIC interpreter from runfiles
+# instead of the default /usr/bin/env python3 launcher.
+common --@rules_python//python/config_settings:bootstrap_impl=script
+
 # Android arm64 target config. The rustflag mirrors .cargo/config.toml's
 # [target.aarch64-linux-android] +fp16 (gemm-f16 FP16 SIMD asm; runtime-detected,
 # scalar fallback). extra_rustc_flags is target-config-only (exec tools unaffected).

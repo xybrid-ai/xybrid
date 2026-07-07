@@ -72,3 +72,13 @@ cc_library(
     name = "ndk_smoke",
     srcs = ["ndk_smoke.c"],
 )
+
+# Vendored Android runtime libs (dlopened at runtime): libonnxruntime.so +
+# libc++_shared.so per ABI. Explicit graph nodes for the AAR jni payload.
+# NOTE: c++_shared should track the link NDK (r27) — follow-up: source it from
+# @androidndk's sysroot instead of the vendored copy.
+filegroup(
+    name = "ort_android_arm64_libs",
+    srcs = glob(["vendor/ort-android/arm64-v8a/*.so"]),
+    visibility = ["//visibility:public"],
+)

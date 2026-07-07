@@ -63,6 +63,18 @@ single_version_override(
     patches = ["//:rules_android_ndk.patch"],
 )
 
+# --- AAR packaging (Gate 9): pkg_files/pkg_zip assemble the jniLibs payload and
+# the .aar. rules_pkg's zip builder is a py_binary, and the bare RBE container has
+# no python — the HERMETIC rules_python toolchain ships its interpreter to the
+# workers as an action input (same mechanism as the bazelified NDK).
+bazel_dep(name = "rules_pkg", version = "1.0.1")
+bazel_dep(name = "rules_python", version = "1.7.0")
+python = use_extension("@rules_python//python/extensions:python.bzl", "python")
+python.toolchain(
+    is_default = True,
+    python_version = "3.11",
+)
+
 android_ndk = use_extension("@rules_android_ndk//:extension.bzl", "android_ndk_repository_extension")
 android_ndk.configure(
     # android-28 matches today's cmake ANDROID_PLATFORM (build.rs / boltffi path).
