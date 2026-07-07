@@ -1,0 +1,23 @@
+crates/xybrid-core/src/executor.rs
+  s_7431c1432875d8::t_af20484ec7ef8e 1045-1052
+crates/xybrid-core/src/runtime_adapter/onnx/mod.rs
+  s_7431c1432875d8::t_d36a0b9a317c7e 35-59
+crates/xybrid-core/src/runtime_adapter/onnx/session.rs
+  s_7431c1432875d8::t_133a8e09fad462 647-654
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "f94feadbb1707a412eda93dbe04ea3b778d4681f",
+  "prompts": {},
+  "sessions": {
+    "s_7431c1432875d8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "85304c2d-b335-4cc4-a3a6-e618040982d4",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
