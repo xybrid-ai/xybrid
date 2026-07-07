@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import threading
+
 import pytest
 
 try:
@@ -28,6 +30,46 @@ def test_primitive_calls_succeed() -> None:
     bolt.set_thermal_state(bolt.XybridThermalState.WARM)
     bolt.clear_thermal_state()
     bolt.set_binding("python")
+
+
+def test_parse_last_error_degrades_gracefully() -> None:
+    # Non-numeric payload for an integer-carrying variant must stay inside
+    # the typed error surface instead of leaking ValueError.
+    error = bolt._parse_last_error("RateLimited { retry_after_secs: n/a }")
+    assert isinstance(error, bolt.LoadError)
+    assert isinstance(bolt._parse_last_error("Timeout { timeout_ms: 42 }"), bolt.Timeout)
+
+
+def test_read_string_is_lossy_like_the_swift_reference() -> None:
+    # 2-byte string with an invalid UTF-8 sequence decodes with replacement
+    # characters (Swift String(decoding:) semantics), never raises.
+    value = bolt._WireReader(bytes([2, 0, 0, 0, 0xFF, 0xFE])).read_string()
+    assert value == "��"
+
+
+def test_f32_array_roundtrip_bulk_codec() -> None:
+    values = [float(i) / 7.0 for i in range(4096)]
+    writer = bolt._WireWriter()
+    writer.write_f32_array(values)
+    decoded = bolt._WireReader(writer.finalize()).read_f32_array()
+    assert len(decoded) == 4096
+    assert decoded[1] == pytest.approx(values[1])
+
+
+def test_battery_level_is_clamped() -> None:
+    # u8 parameter: out-of-range input clamps (Kotlin coerceIn semantics)
+    # instead of wrapping modulo 256.
+    bolt.set_battery_level(300)
+    bolt.set_battery_level(-5)
+    bolt.clear_battery_level()
+
+
+def test_is_loaded_reports_false_after_close() -> None:
+    model = bolt.XybridModel.__new__(bolt.XybridModel)
+    model._handle = None
+    model._handle_lock = threading.Lock()
+    assert model.is_loaded is False
+    model.close()
 
 
 def test_json_schema_to_gbnf_returns_grammar() -> None:

@@ -84,9 +84,32 @@ def test_result_conveniences_on_synthetic_result() -> None:
     assert text_result.reasoning_content == "thinking"
     assert text_result.latency_seconds == pytest.approx(1.234)
     assert not text_result.is_failure
+    assert text_result.success
     assert audio_result.audio_bytes == b"audio"
     assert embedding_result.embedding == [1.0, 2.0]
     assert failed_result.is_failure
+
+    # Non-matching kinds yield None, never the XybridEnvelopeKind factory
+    # methods (regression: getattr on the kind used to resolve the inherited
+    # `text` staticmethod for non-text kinds).
+    assert audio_result.text is None
+    assert text_result.audio_bytes is None
+    assert text_result.embedding is None
+
+    # Payload presence follows the envelope kind, not output_type, matching
+    # the Swift/Kotlin accessors.
+    mislabeled_audio = xybrid.XybridResult(
+        envelope=xybrid.XybridEnvelope.audio(b"pcm"),
+        output_type=xybrid.XybridOutputType.UNKNOWN,
+        model_id="model",
+        latency_ms=1,
+        metrics=xybrid.XybridInferenceMetrics(total_ms=1),
+    )
+    assert mislabeled_audio.audio_bytes == b"pcm"
+
+    # The conveniences are class members now, visible to type checkers.
+    assert isinstance(xybrid.XybridResult.text, property)
+    assert isinstance(xybrid.XybridVoiceInfo.is_female, property)
 
 
 def test_generation_configs_presets_match_kotlin_values() -> None:

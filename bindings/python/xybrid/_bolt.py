@@ -83,7 +83,6 @@ class _FfiStatus(ctypes.Structure):
 
 
 _LIB: ctypes.CDLL | None = None
-_LIB_PATH: Path | None = None
 _LIB_LOCK: Final = threading.Lock()
 
 
@@ -156,7 +155,10 @@ class _WireReader:
         byte_len = self.read_u32()
         if self._pos + byte_len > len(self._data):
             raise _WireDecodeError("wire string ended early")
-        value = self._data[self._pos : self._pos + byte_len].decode("utf-8")
+        # Lossy decode matches the Swift reference (String(decoding:as:), which
+        # never throws); strict decoding would leak UnicodeDecodeError past the
+        # typed XybridError surface.
+        value = self._data[self._pos : self._pos + byte_len].decode("utf-8", errors="replace")
         self._pos += byte_len
         return value
 
@@ -179,7 +181,13 @@ class _WireReader:
         return [reader(self) for _ in range(count)]
 
     def read_f32_array(self) -> list[float]:
-        return self.read_array(lambda reader: reader.read_f32())
+        count = self.read_u32()
+        byte_len = 4 * count
+        if self._pos + byte_len > len(self._data):
+            raise _WireDecodeError("wire f32 array ended early")
+        values = list(struct.unpack_from(f"<{count}f", self._data, self._pos))
+        self._pos += byte_len
+        return values
 
 
 class _WireWriter:
@@ -235,8 +243,7 @@ class _WireWriter:
 
     def write_f32_array(self, values: list[float]) -> None:
         self.write_u32(len(values))
-        for value in values:
-            self.write_f32(value)
+        self._data.extend(struct.pack(f"<{len(values)}f", *values))
 
     def finalize(self) -> bytes:
         return bytes(self._data)
@@ -598,6 +605,86 @@ class XybridEnvelope:
         self.kind._encode(writer)
         writer.write_array(self.metadata, lambda nested_writer, item: item._encode(nested_writer))
 
+    # -- Factories mirroring the hand-written Swift/Kotlin wrappers --
+
+    @staticmethod
+    def text(
+        content: str,
+        voice: str | None = None,
+        speed: float | None = None,
+        *,
+        voice_id: str | None = None,
+    ) -> "XybridEnvelope":
+        """Create a text envelope, optionally carrying TTS voice metadata."""
+
+        selected_voice = voice if voice is not None else voice_id
+        metadata: list[XybridMetadataEntry] = []
+        if selected_voice is not None:
+            metadata.append(XybridMetadataEntry(key="voice_id", value=selected_voice))
+            metadata.append(XybridMetadataEntry(key="speed", value=str(float(1.0 if speed is None else speed))))
+        elif speed is not None:
+            metadata.append(XybridMetadataEntry(key="speed", value=str(float(speed))))
+        return XybridEnvelope(kind=XybridEnvelopeKind.text(content), metadata=metadata)
+
+    @staticmethod
+    def audio(pcm_data: bytes, sample_rate: int = 16000, channels: int = 1) -> "XybridEnvelope":
+        """Create an audio envelope with sample-rate and channel metadata."""
+
+        return XybridEnvelope(
+            kind=XybridEnvelopeKind.audio(pcm_data),
+            metadata=[
+                XybridMetadataEntry(key="sample_rate", value=str(sample_rate)),
+                XybridMetadataEntry(key="channels", value=str(channels)),
+            ],
+        )
+
+    @staticmethod
+    def embedding(data: list[float]) -> "XybridEnvelope":
+        """Create an embedding envelope from a float vector."""
+
+        return XybridEnvelope(kind=XybridEnvelopeKind.embedding(data), metadata=[])
+
+    @staticmethod
+    def image(data: bytes, format: str) -> "XybridEnvelope":
+        """Create an encoded image envelope for vision-language models.
+
+        Raises:
+            ConfigError: If ``format`` is not png, jpeg, jpg, or webp.
+        """
+
+        return XybridEnvelope(kind=XybridEnvelopeKind.image(data, _normalize_image_format(format)), metadata=[])
+
+    @staticmethod
+    def user_message(text: str, images: "list[XybridEnvelope] | None" = None) -> "XybridEnvelope":
+        """Create a multi-part user message from prompt text and image envelopes.
+
+        Raises:
+            ConfigError: If any entry in ``images`` is not an image envelope.
+        """
+
+        image_parts = [] if images is None else images
+        if not all(isinstance(envelope.kind, _EnvelopeImage) for envelope in image_parts):
+            raise ConfigError("Envelope.user_message accepts only image envelopes")
+        parts = [XybridEnvelope(kind=XybridEnvelopeKind.text(text), metadata=[])]
+        parts.extend(image_parts)
+        return XybridEnvelope(
+            kind=XybridEnvelopeKind.multi_part(parts),
+            metadata=[XybridMetadataEntry(key="xybrid.role", value="user")],
+        )
+
+
+def _normalize_image_format(format: str) -> str:
+    # Mirrors the Rust-side allowlist (xybrid-core ir/envelope.rs); keep in
+    # sync when the ImageFormat enum grows.
+    normalized = format.strip().lower()
+    match normalized:
+        case "jpg":
+            return "jpeg"
+        case "jpeg" | "png" | "webp":
+            return normalized
+        case _:
+            raise ConfigError(f"Unsupported image format '{format}'. Supported formats: png, jpeg, jpg, webp")
+
 
 @dataclass(frozen=True, slots=True)
 class XybridGenerationConfig:
@@ -750,6 +837,57 @@ class XybridResult:
         writer.write_u32(self.latency_ms)
         self.metrics._encode(writer)
 
+    # -- Accessors mirroring the hand-written Swift/Kotlin wrappers; payload
+    # -- presence is decided by the envelope kind, not output_type.
+
+    @property
+    def text(self) -> str | None:
+        """Text payload, or ``None`` when the result is not text."""
+
+        kind = self.envelope.kind
+        return kind.text if isinstance(kind, _EnvelopeText) else None
+
+    @property
+    def audio_bytes(self) -> bytes | None:
+        """Audio payload, or ``None`` when the result is not audio."""
+
+        kind = self.envelope.kind
+        return kind.bytes if isinstance(kind, _EnvelopeAudio) else None
+
+    @property
+    def embedding(self) -> list[float] | None:
+        """Embedding vector, or ``None`` when the result is not an embedding."""
+
+        kind = self.envelope.kind
+        return kind.values if isinstance(kind, _EnvelopeEmbedding) else None
+
+    @property
+    def reasoning_content(self) -> str | None:
+        """Chain-of-thought text carried on the ``reasoning_content`` metadata key."""
+
+        for entry in self.envelope.metadata:
+            if entry.key == "reasoning_content":
+                return entry.value
+        return None
+
+    @property
+    def success(self) -> bool:
+        """Always ``True``; failures raise instead. Shape-compat with Swift/Kotlin."""
+
+        return True
+
+    @property
+    def is_failure(self) -> bool:
+        """``True`` when the result carries no output."""
+
+        return self.output_type == XybridOutputType.UNKNOWN
+
+    @property
+    def latency_seconds(self) -> float:
+        """Latency in seconds."""
+
+        return self.latency_ms / 1000.0
+
 
 @dataclass(frozen=True, slots=True)
 class XybridVoiceInfo:
@@ -777,6 +915,18 @@ class XybridVoiceInfo:
         writer.write_optional(self.gender, lambda nested_writer, value: nested_writer.write_string(value))
         writer.write_optional(self.language, lambda nested_writer, value: nested_writer.write_string(value))
         writer.write_optional(self.style, lambda nested_writer, value: nested_writer.write_string(value))
+
+    @property
+    def is_male(self) -> bool:
+        """``True`` when the voice gender is male."""
+
+        return self.gender == "male"
+
+    @property
+    def is_female(self) -> bool:
+        """``True`` when the voice gender is female."""
+
+        return self.gender == "female"
 
 
 _PathOrNone: TypeAlias = Path | None
@@ -820,14 +970,15 @@ def _resolve_library_path() -> Path:
             if candidate.is_file():
                 return candidate
 
+    features = "platform-macos" if platform.system() == "Darwin" else "platform-desktop"
     raise ImportError(
         "Could not locate xybrid BoltFFI native library. Set XYBRID_BOLT_LIBRARY "
-        "to an absolute path or run: cargo build -p xybrid-bolt --release --features platform-macos"
+        "to an absolute path, run tools/scripts/build-python-bolt.sh, or run: "
+        f"cargo build -p xybrid-bolt --release --features {features}"
     )
 
 
 def _load_library() -> ctypes.CDLL:
-    global _LIB, _LIB_PATH
     if _LIB is not None:
         return _LIB
 
@@ -838,7 +989,7 @@ def _load_library() -> ctypes.CDLL:
 
 
 def _load_library_locked() -> ctypes.CDLL:
-    global _LIB, _LIB_PATH
+    global _LIB
 
     path = _resolve_library_path()
     lib = ctypes.CDLL(str(path))
@@ -926,7 +1077,6 @@ def _load_library_locked() -> ctypes.CDLL:
     lib.boltffi_xybrid_model_unload.restype = _FfiBuf
 
     _LIB = lib
-    _LIB_PATH = path
     return lib
 
 
@@ -970,7 +1120,7 @@ def _take_last_error_message() -> str:
     try:
         if out.ptr is None or out.len == 0:
             return ""
-        return ctypes.string_at(out.ptr, out.len).decode("utf-8")
+        return ctypes.string_at(out.ptr, out.len).decode("utf-8", errors="replace")
     finally:
         lib.boltffi_free_string(out)
 
@@ -1026,10 +1176,15 @@ def _parse_last_error(message: str) -> XybridError:
             return PipelineError(value)
         case "CircuitOpen":
             return CircuitOpen(value)
-        case "RateLimited":
-            return RateLimited(int(value))
-        case "Timeout":
-            return Timeout(int(value))
+        case "RateLimited" | "Timeout" as variant_name:
+            # The payload is u64 in the wire contract; if the Debug-string
+            # fallback yielded non-numeric text, degrade to LoadError rather
+            # than let ValueError escape the typed surface.
+            try:
+                seconds_or_ms = int(value)
+            except (TypeError, ValueError):
+                return LoadError(message)
+            return RateLimited(seconds_or_ms) if variant_name == "RateLimited" else Timeout(seconds_or_ms)
         case "MissingArtifact":
             return MissingArtifact(value)
         case "UnsupportedModelCapability":
@@ -1065,9 +1220,11 @@ def clear_thermal_state() -> None:
 
 
 def set_battery_level(percent: int) -> None:
-    """Set the process battery level hint."""
+    """Set the process battery level hint, clamped to 0..=100."""
 
-    _load_library().boltffi_set_battery_level(percent)
+    # The C parameter is u8; clamp like the Kotlin wrapper (coerceIn) instead
+    # of letting ctypes silently wrap out-of-range values modulo 256.
+    _load_library().boltffi_set_battery_level(max(0, min(100, int(percent))))
 
 
 def clear_battery_level() -> None:
@@ -1144,6 +1301,7 @@ class XybridModel:
 
     def __init__(self, handle: int) -> None:
         self._handle: int | None = handle
+        self._handle_lock = threading.Lock()
 
     @classmethod
     def from_registry(cls, id: str) -> "XybridModel":
@@ -1213,16 +1371,25 @@ class XybridModel:
         self.close()
 
     def __del__(self) -> None:
-        if self._handle is not None and _LIB is not None:
-            _LIB.boltffi_xybrid_model_free(self._handle)
-            self._handle = None
+        if _LIB is not None:
+            self._free_handle()
 
     def close(self) -> None:
-        """Free the native model handle."""
+        """Free the native model handle.
 
-        if self._handle is not None:
-            _load_library().boltffi_xybrid_model_free(self._handle)
-            self._handle = None
+        Idempotent and safe against a concurrent ``__del__``. Do not call
+        while another thread has a call in flight on this model.
+        """
+
+        self._free_handle()
+
+    def _free_handle(self) -> None:
+        # Take-then-null under the lock so close()/__del__ racing from two
+        # threads cannot both see a live handle and double-free it.
+        with self._handle_lock:
+            handle, self._handle = self._handle, None
+        if handle is not None:
+            _load_library().boltffi_xybrid_model_free(handle)
 
     def _require_handle(self) -> int:
         if self._handle is None:
@@ -1251,9 +1418,11 @@ class XybridModel:
 
     @property
     def is_loaded(self) -> bool:
-        """Return whether the model is loaded."""
+        """Return whether the model is loaded. ``False`` after :meth:`close`."""
 
-        return bool(_load_library().boltffi_xybrid_model_is_loaded(self._require_handle()))
+        if self._handle is None:
+            return False
+        return bool(_load_library().boltffi_xybrid_model_is_loaded(self._handle))
 
     @property
     def supports_streaming(self) -> bool:

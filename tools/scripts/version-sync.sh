@@ -31,6 +31,9 @@ SWIFT_PACKAGE="$REPO_ROOT/Package.swift"
 # AAR pin its Android binding consumes from Maven Central.
 RN_PACKAGE="$REPO_ROOT/bindings/react-native/package.json"
 RN_GRADLE="$REPO_ROOT/bindings/react-native/android/build.gradle"
+# Python SDK wheel manifest. Hand-maintained (the ctypes binding is not
+# generated), so like RN it must be wired here or it drifts.
+PYTHON_PYPROJECT="$REPO_ROOT/bindings/python/pyproject.toml"
 
 # Extract current workspace version from Cargo.toml
 get_cargo_version() {
@@ -74,6 +77,12 @@ get_rn_version() {
 # Extract the ai.xybrid:xybrid-kotlin AAR version the RN Android binding pins.
 get_rn_aar_version() {
     grep 'ai.xybrid:xybrid-kotlin:' "$RN_GRADLE" | head -1 | sed 's/.*xybrid-kotlin:\([^"]*\)".*/\1/'
+}
+
+# Extract version from bindings/python/pyproject.toml ([project] holds the
+# file's only `version = ` line).
+get_python_version() {
+    grep '^version = ' "$PYTHON_PYPROJECT" | head -1 | sed 's/version = "\(.*\)"/\1/'
 }
 
 # Set version in Cargo workspace (all Rust crates inherit via version.workspace = true)
@@ -154,6 +163,13 @@ set_rn_aar_version() {
     rm -f "$RN_GRADLE.bak"
 }
 
+# Set version in bindings/python/pyproject.toml.
+set_python_version() {
+    local version="$1"
+    sed -i.bak "s/^version = \".*\"/version = \"$version\"/" "$PYTHON_PYPROJECT"
+    rm -f "$PYTHON_PYPROJECT.bak"
+}
+
 # Check mode: verify all versions match
 check_versions() {
     local cargo_version
@@ -163,7 +179,7 @@ check_versions() {
     echo "Cargo workspace version: $cargo_version"
     echo ""
 
-    for name_func in "Flutter:get_flutter_version" "Flutter rust crate:get_flutter_rust_version" "Unity:get_unity_version" "Kotlin:get_kotlin_version" "Swift:get_swift_version" "React Native:get_rn_version" "React Native AAR:get_rn_aar_version"; do
+    for name_func in "Flutter:get_flutter_version" "Flutter rust crate:get_flutter_rust_version" "Unity:get_unity_version" "Kotlin:get_kotlin_version" "Swift:get_swift_version" "React Native:get_rn_version" "React Native AAR:get_rn_aar_version" "Python:get_python_version"; do
         local name="${name_func%%:*}"
         local func="${name_func##*:}"
         local version
@@ -202,6 +218,7 @@ case "${1:-}" in
         set_swift_version "$VERSION"
         set_rn_version "$VERSION"
         set_rn_aar_version "$VERSION"
+        set_python_version "$VERSION"
         echo "Done. Run '$0 --check' to verify."
         ;;
     --help|-h)
@@ -224,6 +241,7 @@ case "${1:-}" in
         set_swift_version "$VERSION"
         set_rn_version "$VERSION"
         set_rn_aar_version "$VERSION"
+        set_python_version "$VERSION"
         echo ""
         echo "Rust crates inherit via version.workspace = true."
 
