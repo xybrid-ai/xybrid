@@ -15,10 +15,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.3.0] - 2026-07-06
 
-Unity moves to OpenUPM, and on-device cache clearing is made honest. The Unity
-SDK is re-platformed onto a managed-only package that fetches its natives at
-import, and the model-cache clear/discovery paths are corrected to report what
-they actually remove.
+Local tool calling, Unity on OpenUPM, and honest cache clearing. The local
+llama.cpp backend gains function/tool calling; the Unity SDK is re-platformed
+onto a managed-only OpenUPM package that fetches its natives at import; and the
+model-cache clear/discovery paths are corrected to report what they actually
+remove.
 
 ### Changed
 
@@ -40,6 +41,10 @@ they actually remove.
 
 ### Added
 
+- **Local tool calling for the llama.cpp backend** (#323): function/tool calls
+  are parsed from local LLM output for LFM2 and Gemma-family models, with
+  streaming tool-call continuation, an example, and a CLI REPL. See the
+  tool-calling guide.
 - **Unity native-library resolver + release bundles** (#321). An editor resolver
   downloads/verifies the per-platform natives on import and before player builds;
   CI publishes `xybrid-unity-native-<platform>-v<version>.zip` bundles + a
