@@ -12,7 +12,7 @@ Get Xybrid running in your app with a few lines of code. Choose your SDK below.
 ```yaml
 # pubspec.yaml
 dependencies:
-  xybrid_flutter: ^0.2.2
+  xybrid_flutter: ^0.3.0
 ```
 
 ```bash
@@ -54,7 +54,7 @@ Or add to `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/xybrid-ai/xybrid", from: "0.2.2")
+    .package(url: "https://github.com/xybrid-ai/xybrid", from: "0.3.0")
 ]
 ```
 
@@ -86,7 +86,7 @@ let result = try model.run(envelope: envelope)
 ```kotlin
 // build.gradle.kts
 dependencies {
-    implementation("ai.xybrid:xybrid-kotlin:0.2.2")
+    implementation("ai.xybrid:xybrid-kotlin:0.3.0")
 }
 ```
 
@@ -121,7 +121,7 @@ In Unity, go to **Window > Package Manager > + > Add package from git URL** and 
 https://github.com/xybrid-ai/xybrid.git?path=/bindings/unity
 ```
 
-Or via [OpenUPM](https://openupm.com/packages/ai.xybrid.sdk/): `openupm add ai.xybrid.sdk`. Native libraries download automatically on first import (SHA-256 verified); pin a version by appending `#v0.2.2` to the git URL.
+Or via [OpenUPM](https://openupm.com/packages/ai.xybrid.sdk/): `openupm add ai.xybrid.sdk`. Native libraries download automatically on first import (SHA-256 verified); pin a version by appending `#v0.3.0` to the git URL.
 
 **Run inference**
 
@@ -150,7 +150,7 @@ Debug.Log($"Latency: {result.LatencyMs}ms");
 ```toml
 # Cargo.toml
 [dependencies]
-xybrid = "0.2.2"
+xybrid = "0.3.0"
 ```
 
 **Run inference**
