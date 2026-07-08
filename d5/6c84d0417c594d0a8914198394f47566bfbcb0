@@ -1,0 +1,21 @@
+rules_android_ndk.patch
+  s_7431c1432875d8::t_50bd320224b3a3 1-3,11-12,14-17,20,22,42,49
+.github/workflows/bazel.yml
+  s_7431c1432875d8::t_b51489637eb2bf 29-30,35-37,40-41,44-46
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "d56c84d0417c594d0a8914198394f47566bfbcb0",
+  "prompts": {},
+  "sessions": {
+    "s_7431c1432875d8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "85304c2d-b335-4cc4-a3a6-e618040982d4",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
