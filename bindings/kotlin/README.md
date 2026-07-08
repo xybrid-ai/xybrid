@@ -59,8 +59,8 @@ if (result.success) {
 ```kotlin
 import ai.xybrid.XybridModel
 
-// Load from a local bundle path
-val model = XybridModel.fromBundle("/path/to/model/bundle")
+// Load from a local `.xyb` bundle file
+val model = XybridModel.fromBundle("/path/to/model.xyb")
 ```
 
 ### Speech Recognition (ASR)
