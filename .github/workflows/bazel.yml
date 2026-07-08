@@ -133,3 +133,35 @@ jobs:
           name: bazel-xybrid-kotlin-aar
           path: bazel-bin/bindings/kotlin/xybrid-kotlin.aar
           retention-days: 7
+
+      # Gradle-consumer smoke: a real AGP app consumes the Bazel AAR the way a
+      # Maven consumer would — manifest parses, classes.jar dexes, and all three
+      # ABIs' native libs land in the APK. Runner ships the Android SDK.
+      - name: Set up JDK 17 (consumer smoke)
+        if: env.BUILDBUDDY_API_KEY != ''
+        uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9 # v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      - name: Gradle-consumer smoke of the Bazel AAR
+        if: env.BUILDBUDDY_API_KEY != ''
+        run: |
+          mkdir -p bindings/kotlin/consumer-smoke/app/libs
+          cp bazel-bin/bindings/kotlin/xybrid-kotlin.aar bindings/kotlin/consumer-smoke/app/libs/
+          bindings/kotlin/gradlew -p bindings/kotlin/consumer-smoke :app:assembleDebug --no-daemon
+
+      - name: Verify APK payload (classes + 3-ABI jniLibs)
+        if: env.BUILDBUDDY_API_KEY != ''
+        run: |
+          APK=bindings/kotlin/consumer-smoke/app/build/outputs/apk/debug/app-debug.apk
+          unzip -l "$APK"
+          for f in \
+            lib/arm64-v8a/libxybrid-bolt.so lib/arm64-v8a/libc++_shared.so lib/arm64-v8a/libonnxruntime.so \
+            lib/armeabi-v7a/libxybrid-bolt.so lib/armeabi-v7a/libc++_shared.so \
+            lib/x86_64/libxybrid-bolt.so lib/x86_64/libc++_shared.so lib/x86_64/libonnxruntime.so \
+            classes.dex; do
+            unzip -l "$APK" | grep -q " $f\$" || { echo "MISSING: $f"; exit 1; }
+          done
+          echo "APK payload complete: 3-ABI jniLibs + classes.dex ✅"
