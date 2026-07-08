@@ -16,9 +16,22 @@
 #   libonnxruntime.so   — vendored, arm64-v8a + x86_64 only (armv7 ships no ORT,
 #                         matching today's AAR)
 load("@aspect_bazel_lib//lib:transitions.bzl", "platform_transition_filegroup")
+load("@rules_kotlin//kotlin:core.bzl", "define_kt_toolchain")
 load("@rules_kotlin//kotlin:jvm.bzl", "kt_jvm_library")
 load("@rules_pkg//pkg:mappings.bzl", "pkg_files")
 load("@rules_pkg//pkg:zip.bzl", "pkg_zip")
+
+# Consumer-compatibility toolchain (registered in MODULE.bazel): rules_kotlin
+# 2.4's bundled kotlinc emits Kotlin 2.1 METADATA by default, which the shipped
+# ecosystem pin (Kotlin 1.9.22, settings.gradle.kts) cannot read — caught by
+# the consumer smoke ("metadata version 2.1.0, expected 1.9.0; can read up to
+# 2.0.0"). kotlinc 2.x no longer supports language mode 1.9, so 2.0 is the
+# floor — and its metadata (2.0.x) is within the 1.9 compiler's read range.
+define_kt_toolchain(
+    name = "kotlin_toolchain_consumer_compat",
+    api_version = "2.0",
+    language_version = "2.0",
+)
 
 # (abi dir, rules_rs platform, NDK target_system_name, ships vendored ORT)
 ANDROID_ABIS = [
