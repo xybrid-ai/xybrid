@@ -137,7 +137,7 @@ import ai.xybrid.XybridException
 import ai.xybrid.displayMessage
 
 try {
-    val model = XybridModel.fromBundle("/path/to/model/directory")
+    val model = XybridModel.fromBundle("/path/to/model.xyb")
     // Model ready for inference
 } catch (e: XybridException.ModelNotFound) {
     println("Model not found: ${e.displayMessage}")
