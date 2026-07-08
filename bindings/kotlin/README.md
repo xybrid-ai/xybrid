@@ -140,12 +140,12 @@ import ai.xybrid.XybridException
 try {
     val model = XybridModel("unknown-model")
 } catch (e: XybridException.ModelNotFound) {
-    println("Model not found: ${e.modelId}")
-} catch (e: XybridException.InferenceFailed) {
+    println("Model not found: ${e.id}")
+} catch (e: XybridException.LoadError) {
+    println("Load error: ${e.message}")
+} catch (e: XybridException.InferenceError) {
     println("Inference failed: ${e.message}")
-} catch (e: XybridException.InvalidInput) {
-    println("Invalid input: ${e.message}")
-} catch (e: XybridException.IoException) {
+} catch (e: XybridException.IoError) {
     println("I/O error: ${e.message}")
 }
 ```
@@ -160,7 +160,7 @@ try {
 | `Envelope` | Factory for `XybridEnvelope` inputs (`text`, `audio`, `embedding`, `image`, `userMessage`) |
 | `XybridEnvelope` | Input data container |
 | `XybridResult` | Inference output with success/error and result data |
-| `XybridException` | Error types (ModelNotFound, InferenceFailed, etc.) |
+| `XybridException` | Error types (ModelNotFound, InferenceError, etc.) |
 
 ### XybridModel (loading)
 
