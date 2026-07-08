@@ -48,6 +48,12 @@ xybrid.init(api_key="xyb_...")
 
 Anonymous initialization keeps inference local-only and telemetry disabled.
 
+A runnable LLM example lives in [`examples/quickstart.py`](examples/quickstart.py):
+
+```bash
+python bindings/python/examples/quickstart.py
+```
+
 ## Text to Speech and Voices
 
 ```python
