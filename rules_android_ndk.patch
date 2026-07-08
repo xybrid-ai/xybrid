@@ -1,6 +1,31 @@
---- a/rules.bzl	2026-07-06 17:10:40
-+++ b/rules.bzl	2026-07-06 17:10:40
-@@ -32,7 +32,14 @@
+--- a/rules.bzl	2026-07-08 10:20:46
++++ b/rules.bzl	2026-07-08 10:21:17
+@@ -23,16 +23,36 @@
+     Returns:
+         A final dict of configuration attributes and values.
+     """
+-    ndk_path = ctx.attr.path or ctx.getenv("ANDROID_NDK_HOME", None)
++    # xybrid spike patch: when XYBRID_NDK_URL is set, download_and_extract a
++    # PINNED NDK into the repository instead of requiring a local install —
++    # the NDK becomes a normal fetched Bazel input (works on any machine/CI).
++    ndk_url = ctx.os.environ.get("XYBRID_NDK_URL", "")
++    if ndk_url:
++        ctx.download_and_extract(
++            url = ndk_url,
++            sha256 = ctx.os.environ.get("XYBRID_NDK_SHA256", ""),
++            output = "ndk-dl",
++            stripPrefix = ctx.os.environ.get("XYBRID_NDK_STRIP_PREFIX", "android-ndk-r27"),
++        )
++        ndk_path = str(ctx.path("ndk-dl"))
++    else:
++        ndk_path = ctx.attr.path or ctx.getenv("ANDROID_NDK_HOME", None)
+     if not ndk_path:
+-        fail("Either the ANDROID_NDK_HOME environment variable or the " +
+-             "path attribute of android_ndk_repository must be set.")
++        fail("Either the ANDROID_NDK_HOME environment variable, the path " +
++             "attribute of android_ndk_repository, or XYBRID_NDK_URL must be set.")
+     if ndk_path.startswith("$WORKSPACE_ROOT"):
+         ndk_path = str(ctx.workspace_root) + ndk_path.removeprefix("$WORKSPACE_ROOT")
  
      is_windows = False
      executable_extension = ""
@@ -16,7 +41,7 @@
          clang_directory = "toolchains/llvm/prebuilt/linux-x86_64"
      elif ctx.os.name == "mac os x":
          # Note: darwin-x86_64 does indeed contain fat binaries with arm64 slices, too.
-@@ -50,13 +57,21 @@
+@@ -50,13 +70,21 @@
  
      api_level = ctx.attr.api_level or 31
  

@@ -45,10 +45,6 @@ concurrency:
   group: bazel-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  # Must match build-android.yml (and the NDK the AAR was validated against).
-  NDK_VERSION: "27.0.12077973"
-
 jobs:
   bazel:
     name: Bazel graph + RBE targets
@@ -71,26 +67,9 @@ jobs:
           sudo docker image prune --all --force || true
           df -h /
 
-      # The android_ndk repo rule runs on ANY bazel invocation (toolchain
-      # registration), so the NDK must exist before the first bazel command —
-      # same install as build-android.yml. (Phase-1 follow-up: extend
-      # rules_android_ndk.patch to download_and_extract a pinned NDK instead.)
-      - name: Cache Android NDK
-        id: cache-ndk
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        with:
-          path: ${{ env.ANDROID_HOME }}/ndk/${{ env.NDK_VERSION }}
-          key: android-ndk-bazel-${{ env.NDK_VERSION }}
-
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
-
-      - name: Install NDK
-        if: steps.cache-ndk.outputs.cache-hit != 'true'
-        run: sdkmanager --install "ndk;${{ env.NDK_VERSION }}"
-
-      - name: Set NDK environment
-        run: echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/${{ env.NDK_VERSION }}" >> $GITHUB_ENV
+      # No NDK install: the android_ndk repo rule downloads a pinned Linux NDK
+      # r27 as a normal Bazel repository input (rules_android_ndk.patch +
+      # XYBRID_NDK_URL/SHA256 in the committed .bazelrc).
 
       # .bazelrc try-imports this gitignored file; in CI it's materialized from
       # the secret. Absent secret (forks) → no :remote config → RBE steps skip.

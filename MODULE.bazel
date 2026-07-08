@@ -7,30 +7,11 @@
 
 module(name = "xybrid_bazel_spike", version = "0.0.0")
 
-# --- hermeticbuild stack, pinned to the exact upstream commits the spike was
-# proven against (git_override → fetchable on any machine/CI, no local setup).
-# Follow-up: move to BCR `bazel_dep` versions once we re-validate against a
-# released version set.
-bazel_dep(name = "rules_rs", version = "0.0.0")
-git_override(
-    module_name = "rules_rs",
-    commit = "6e86558cdb62ad44d8535642e1133cc6bf443bf0",
-    remote = "https://github.com/hermeticbuild/rules_rs.git",
-)
-
-bazel_dep(name = "llvm", version = "0.0.0")
-git_override(
-    module_name = "llvm",
-    commit = "bdddceafc31abb43228d2d94cb55bad7277d5d26",
-    remote = "https://github.com/hermeticbuild/hermetic-llvm.git",
-)
-
-bazel_dep(name = "hermetic_launcher", version = "0.0.0")
-git_override(
-    module_name = "hermetic_launcher",
-    commit = "1897a8c57432d5dfd7625c41757b9cfb4e50c8be",
-    remote = "https://github.com/hermeticbuild/hermetic-launcher.git",
-)
+# --- hermeticbuild stack, pinned from the Bazel Central Registry (replaces the
+# earlier git_override commit pins; re-validated on RBE at these versions).
+bazel_dep(name = "rules_rs", version = "0.0.95")
+bazel_dep(name = "llvm", version = "0.8.11")
+bazel_dep(name = "hermetic_launcher", version = "0.0.11")
 
 # rules_cc must be a direct dep so the `@rules_cc//...` flag in .bazelrc resolves.
 bazel_dep(name = "rules_cc", version = "0.2.20")
@@ -114,12 +95,9 @@ android_ndk = use_extension("@rules_android_ndk//:extension.bzl", "android_ndk_r
 android_ndk.configure(
     # android-28 matches today's cmake ANDROID_PLATFORM (build.rs / boltffi path).
     api_level = 28,
-    # NDK location comes from the ANDROID_NDK_HOME env var (machine-local; set it
-    # in the gitignored .context/local.bazelrc — see .bazelrc). Point it at a
-    # LINUX NDK r27 (27.0.12077973, android-ndk-r27-linux.zip) when building the
-    # android targets via --config=remote (XYBRID_NDK_HOST_TAG=linux-x86_64).
-    # Follow-up: extend rules_android_ndk.patch to download_and_extract a pinned
-    # NDK so no machine setup is needed at all.
+    # The NDK itself is DOWNLOADED as a pinned repo input (rules_android_ndk.patch:
+    # XYBRID_NDK_URL/SHA256 in .bazelrc) — no local install. A local NDK via
+    # ANDROID_NDK_HOME / path applies only when XYBRID_NDK_URL is unset.
 )
 use_repo(android_ndk, "androidndk")
 register_toolchains("@androidndk//:all")
