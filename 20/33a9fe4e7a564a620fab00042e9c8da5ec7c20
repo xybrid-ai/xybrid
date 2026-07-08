@@ -1,0 +1,21 @@
+docs/content/docs/guides/reasoning.mdx
+  s_a619afae87b555::t_31fe625934938a 49,51,60-61
+bindings/apple/README.md
+  s_a619afae87b555::t_6c9c87cafdeb32 70,72
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "2033a9fe4e7a564a620fab00042e9c8da5ec7c20",
+  "prompts": {},
+  "sessions": {
+    "s_a619afae87b555": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e6fe5db3-dfc5-4fa6-b5ce-50fc626aab2e",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
