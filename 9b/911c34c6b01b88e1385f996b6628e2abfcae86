@@ -1,0 +1,32 @@
+crates/xybrid-core/src/runtime_adapter/streaming_postprocess.rs
+  s_a619afae87b555::t_6882e9d6972d89 79-89,91-108
+  s_a619afae87b555::t_e8c0a5f7482d5b 143-149,152,156,159-171,174,176-177,183-186
+  s_a619afae87b555::t_213438af0e062a 246-248
+  s_a619afae87b555::t_8e17cb0be957ab 585,921-942
+  s_a619afae87b555::t_715419cb7c1ec7 291-292
+  s_a619afae87b555::t_5ab26277538450 316-318,320
+  s_a619afae87b555::t_2fcdb6ddad61a4 339
+  s_a619afae87b555::t_2f1e38eaa9cca6 407-411
+  s_a619afae87b555::t_33eca37a7485bb 348-361,366-368
+  s_a619afae87b555::t_fb41e86fd123db 257-261,274
+  s_a619afae87b555::t_42bf952653e643 501-510
+  s_a619afae87b555::t_2e4cce30f200ec 586-613
+docs/content/docs/guides/reasoning.mdx
+  s_a619afae87b555::t_0ad7775813290d 141-153,156-157
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "9b911c34c6b01b88e1385f996b6628e2abfcae86",
+  "prompts": {},
+  "sessions": {
+    "s_a619afae87b555": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e6fe5db3-dfc5-4fa6-b5ce-50fc626aab2e",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
