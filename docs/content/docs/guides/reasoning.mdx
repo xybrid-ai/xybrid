@@ -138,13 +138,23 @@ Without the flag, xybrid treats the model as a normal LLM: any `<think>` blocks
 it emits on its own are still stripped from `text` and captured, but xybrid
 won't prime the channel, so a model that only thinks *when asked to* stays quiet.
 
+## Recognized formats
+
+Reasoning is captured from these delimiters (in the answer text and, during
+streaming, suppressed from the live callback):
+
+- `<think>…</think>` — Qwen 3 / DeepSeek-R1 / LFM2.5-thinking (the form xybrid primes).
+- `<thinking>…</thinking>` — Anthropic-style.
+- `<|channel>thought … <channel|>` — gemma-4's thought channel. Recognized, but
+  xybrid runs gemma-4 with thinking disabled today, so this path isn't yet
+  exercised end-to-end.
+
+Other bespoke reasoning delimiters aren't parsed.
+
 ## What Isn't Reasoning
 
-- **Whitespace-only blocks** — a model that opens and immediately closes
-  `<think></think>` produces no `reasoningContent` (`null`), not an empty string.
-- **Non-`<think>` formats** — only literal `<think>…</think>` is captured today.
-  Anthropic-style `<thinking>` and gemma-4's channel-based reasoning are not yet
-  parsed.
+- **Whitespace-only blocks** — a model that opens and immediately closes a block
+  with nothing inside produces no `reasoningContent` (`null`), not an empty string.
 - **Streaming** — reasoning lands on the final (non-streaming) result;
   during streaming it's suppressed from the token callback so it never leaks
   into the live answer.
