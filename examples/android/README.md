@@ -5,9 +5,9 @@ This is a native Android example app demonstrating how to integrate the Xybrid S
 ## Features
 
 - **SDK Initialization**: Shows proper SDK startup flow with loading and error states
-- **Model Loading**: Loads models from a local bundle path using `XybridModelLoader.fromBundle()`
+- **Model Loading**: Loads models from a local bundle path using `XybridModel.fromBundle()`
 - **TTS Inference**: Runs text-to-speech inference with result display and latency metrics from `XybridResult.latencyMs`
-- **Error Handling**: Displays `XybridException` messages (ModelNotFound, InferenceFailed, InvalidInput, IoException)
+- **Error Handling**: Displays `XybridException` messages (ModelNotFound, InferenceError, IoError, etc.)
 - **Jetpack Compose UI**: Modern declarative UI with Material 3 design
 - **Proper Async Handling**: Uses Kotlin coroutines for all SDK operations on `Dispatchers.IO`
 
@@ -132,17 +132,16 @@ The app defaults to `<app-files-dir>/models/kokoro-82m` — you can edit the pat
 ### Model Loading (from bundle)
 
 ```kotlin
-import ai.xybrid.XybridModelLoader
+import ai.xybrid.XybridModel
 import ai.xybrid.XybridException
 import ai.xybrid.displayMessage
 
 try {
-    val loader = XybridModelLoader.fromBundle("/path/to/model/directory")
-    val model = loader.load()
+    val model = XybridModel.fromBundle("/path/to/model/directory")
     // Model ready for inference
 } catch (e: XybridException.ModelNotFound) {
     println("Model not found: ${e.displayMessage}")
-} catch (e: XybridException.IoException) {
+} catch (e: XybridException.IoError) {
     println("I/O error: ${e.displayMessage}")
 }
 ```
@@ -199,8 +198,7 @@ import ai.xybrid.displayMessage
 suspend fun loadAndRun(path: String, text: String) {
     withContext(Dispatchers.IO) {
         try {
-            val loader = XybridModelLoader.fromBundle(path)
-            val model = loader.load()
+            val model = XybridModel.fromBundle(path)
             val result = model.run(Envelope.text(text))
             // Handle result...
         } catch (e: XybridException) {
