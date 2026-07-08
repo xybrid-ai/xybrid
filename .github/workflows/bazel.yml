@@ -26,14 +26,24 @@ on:
       - "Cargo.toml"
       - "Cargo.lock"
       - ".github/workflows/bazel.yml"
+  # Same path set as pull_request: a master merge touching any Bazel input
+  # re-warms the shared cache so the next PR starts warm.
   push:
     branches: [master]
     paths:
       - "MODULE.bazel"
+      - ".bazelrc"
+      - ".bazelversion"
+      - ".bazelignore"
       - "BUILD.bazel"
       - "**/BUILD.bazel"
+      - "rules_android_ndk.patch"
+      - "rules_foreign_cc.patch"
       - "crates/**"
       - "bindings/kotlin/**"
+      - "macros/**"
+      - "vendor/llama-cpp"
+      - "Cargo.toml"
       - "Cargo.lock"
       - ".github/workflows/bazel.yml"
   workflow_dispatch:
