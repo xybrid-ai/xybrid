@@ -46,9 +46,9 @@ Same `run`, same result — reasoning is a sibling of `text`.
 ### Swift
 
 ```swift
-let model = try XybridModelLoader.fromRegistry(modelId: "lfm2.5-1.2b-thinking").load()
+let model = try XybridModel(fromRegistry: "lfm2.5-1.2b-thinking")
 let result = try model.run(envelope: XybridEnvelope.text(
-    text: "Is 97 a prime number? Reason, then answer."))
+    "Is 97 a prime number? Reason, then answer."))
 
 if let answer = result.text { print("Answer:", answer) }
 if let reasoning = result.reasoningContent { print("Reasoning:", reasoning) }
@@ -57,9 +57,8 @@ if let reasoning = result.reasoningContent { print("Reasoning:", reasoning) }
 ### Kotlin
 
 ```kotlin
-val model = XybridModelLoader.fromRegistry("lfm2.5-1.2b-thinking").load()
-val result = model.run(XybridEnvelope.Text(
-    text = "Is 97 a prime number? Reason, then answer."))
+val model = XybridModel.fromRegistry("lfm2.5-1.2b-thinking")
+val result = model.run(Envelope.text("Is 97 a prime number? Reason, then answer."))
 
 result.text?.let { println("Answer: $it") }
 result.reasoningContent?.let { println("Reasoning: $it") }

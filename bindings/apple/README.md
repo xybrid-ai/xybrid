@@ -67,9 +67,9 @@ answer text and surfaces it on `reasoningContent` — `nil` for non-thinking
 models. Nothing to enable; just read it if you want it.
 
 ```swift
-let model = try XybridModelLoader.fromRegistry(modelId: "lfm2.5-1.2b-thinking").load()
+let model = try XybridModel(fromRegistry: "lfm2.5-1.2b-thinking")
 let result = try model.run(envelope: XybridEnvelope.text(
-    text: "Is 97 a prime number? Reason, then answer."))
+    "Is 97 a prime number? Reason, then answer."))
 
 if let answer = result.text { print("Answer:", answer) }
 if let reasoning = result.reasoningContent { print("Reasoning:", reasoning) }
