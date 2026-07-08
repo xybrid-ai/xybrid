@@ -1,0 +1,22 @@
+examples/android/README.md
+  s_a619afae87b555::t_7f8f7a8d0296ac 8
+  s_a619afae87b555::t_b022d5d1a3e001 10
+  s_a619afae87b555::t_9d00ccaed3dcfd 135,140,144
+  s_a619afae87b555::t_7d2e5f47f61bae 201
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "8038bd2eafad1fd21b8dee968fb7112dfbfacb2b",
+  "prompts": {},
+  "sessions": {
+    "s_a619afae87b555": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e6fe5db3-dfc5-4fa6-b5ce-50fc626aab2e",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
