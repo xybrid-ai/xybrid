@@ -1,0 +1,29 @@
+bindings/apple/README.md
+  s_a619afae87b555::t_808a5fcd686bf8 62-77
+docs/content/docs/guides/meta.json
+  s_a619afae87b555::t_693b5d306cf176 6
+bindings/kotlin/README.md
+  s_a619afae87b555::t_dbc58e3d31f67b 127-141
+docs/content/docs/guides/reasoning.mdx
+  s_a619afae87b555::t_aebe615b2ffe1d 1-151
+README.md
+  s_a619afae87b555::t_28893d7a91c40c 324
+bindings/flutter/README.md
+  s_a619afae87b555::t_b75c479e01e694 150-164
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "7c4c648ae3bac55d2768c12009ca898d529f8f83",
+  "prompts": {},
+  "sessions": {
+    "s_a619afae87b555": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e6fe5db3-dfc5-4fa6-b5ce-50fc626aab2e",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
