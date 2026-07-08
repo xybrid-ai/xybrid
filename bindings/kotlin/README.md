@@ -124,6 +124,21 @@ if (result.success) {
 }
 ```
 
+### Reasoning (thinking models)
+
+Reasoning models (metadata `reasoning: true`, e.g. `lfm2.5-1.2b-thinking`)
+produce a chain-of-thought before their answer. Xybrid keeps it out of the
+answer text and surfaces it on `reasoningContent` — `null` for non-thinking
+models. Nothing to enable; just read it if you want it.
+
+```kotlin
+import ai.xybrid.reasoningContent
+
+val result = model.run(Envelope.text("Is 97 a prime number? Reason, then answer."))
+result.text?.let { println("Answer: $it") }
+result.reasoningContent?.let { println("Reasoning: $it") }
+```
+
 ### Error Handling
 
 ```kotlin

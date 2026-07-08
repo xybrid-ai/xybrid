@@ -1,0 +1,151 @@
+---
+title: Reasoning
+description: Read a thinking model's chain-of-thought — on-device, kept out of the answer
+---
+
+Some local models are trained to *think before they answer*: they emit a
+chain-of-thought, then the final response. Xybrid keeps that reasoning out of
+the answer text and surfaces it separately, so you get a clean answer plus an
+optional window into how the model got there — all on-device.
+
+Xybrid's design rule is that **capabilities are data, not entry points**.
+Reasoning rides the existing types with **zero new run methods**:
+
+1. Load a reasoning model (flagged `reasoning: true` in its metadata).
+2. `run` the request as usual — nothing to enable.
+3. Read the answer from `text` and the chain-of-thought from `reasoningContent`.
+
+The answer in `text` never contains the `<think>…</think>` markup, and
+`reasoningContent` is `null` for models that aren't reasoning models (or that
+emitted no reasoning). It's purely additive: existing code that reads `text` is
+unaffected.
+
+<Callout type="info">
+Reasoning capture runs on the local llama.cpp backend. Thinking models gate
+their `<think>` block behind a chat-template flag that llama.cpp's legacy
+template applier doesn't render, so xybrid primes the channel itself for models
+flagged `reasoning: true` — you don't enable anything, you only choose whether
+to read `reasoningContent`.
+</Callout>
+
+## Supported Models
+
+Any bundle whose `model_metadata.json` sets `reasoning: true`. The reference
+model is **`lfm2.5-1.2b-thinking`** (Liquid AI's 1.2B reasoning model), which
+emits a chain-of-thought before every answer.
+
+| Model | Emits reasoning | Notes |
+|-------|-----------------|-------|
+| `lfm2.5-1.2b-thinking` | yes | hybrid conv+attention reasoning model, ~697 MB |
+| `qwen3.5-0.8b` / `qwen3.5-2b` | sometimes | Qwen 3.5 thinking mode |
+
+## Reading Reasoning
+
+Same `run`, same result — reasoning is a sibling of `text`.
+
+### Swift
+
+```swift
+let model = try XybridModelLoader.fromRegistry(modelId: "lfm2.5-1.2b-thinking").load()
+let result = try model.run(envelope: XybridEnvelope.text(
+    text: "Is 97 a prime number? Reason, then answer."))
+
+if let answer = result.text { print("Answer:", answer) }
+if let reasoning = result.reasoningContent { print("Reasoning:", reasoning) }
+```
+
+### Kotlin
+
+```kotlin
+val model = XybridModelLoader.fromRegistry("lfm2.5-1.2b-thinking").load()
+val result = model.run(XybridEnvelope.Text(
+    text = "Is 97 a prime number? Reason, then answer."))
+
+result.text?.let { println("Answer: $it") }
+result.reasoningContent?.let { println("Reasoning: $it") }
+```
+
+### Dart (Flutter)
+
+```dart
+final model = await XybridModelLoader.fromRegistry('lfm2.5-1.2b-thinking').load();
+final result = await model.run(XybridEnvelope.text(
+    'Is 97 a prime number? Reason, then answer.'));
+
+if (result.text != null) print('Answer: ${result.text}');
+if (result.reasoningContent != null) print('Reasoning: ${result.reasoningContent}');
+```
+
+### Rust
+
+```rust
+use xybrid_sdk::ModelLoader;
+use xybrid_sdk::ir::{Envelope, EnvelopeKind};
+
+let model = ModelLoader::from_registry("lfm2.5-1.2b-thinking").load()?;
+let result = model.run(
+    &Envelope::new(EnvelopeKind::Text("Is 97 a prime number? Reason, then answer.".into())),
+    None,
+)?;
+
+println!("Answer: {}", result.text().unwrap_or_default());
+if let Some(reasoning) = result.reasoning_content() {
+    println!("Reasoning: {reasoning}");
+}
+```
+
+The value is the same in every SDK (`String?` / `Option<&str>`, `null`/`None`
+when absent). The C ABI exposes it as `xybrid_result_reasoning_content()`, and
+the React Native and Unity bindings surface `reasoningContent` too.
+
+## Reasoning in the CLI (`xybrid run`)
+
+The `--show-reasoning` flag prints the chain-of-thought in a separate section
+under the answer:
+
+```bash
+xybrid run --model lfm2.5-1.2b-thinking \
+  --input-text "Is 97 a prime number? Reason, then answer." \
+  --show-reasoning
+```
+
+```text
+  ── Results ──
+    …no divisors other than 1 and itself. Thus, 97 is prime.
+    \boxed{Yes}
+
+  ── Reasoning ──
+    Check divisibility by primes ≤ √97 ≈ 9.85: 2, 3, 5, 7. None divide 97…
+```
+
+Non-reasoning models print `No reasoning emitted` instead. `xybrid repl` also
+honors `--show-reasoning`, printing each turn's reasoning as a dimmed block
+above what the turn produced.
+
+## Declaring Support in Your Own Bundles
+
+Flag a reasoning model in `model_metadata.json` so xybrid primes and captures
+its chain-of-thought (the `/xybrid-init` skill can generate metadata):
+
+```json
+{
+  "metadata": {
+    "reasoning": true
+  }
+}
+```
+
+Without the flag, xybrid treats the model as a normal LLM: any `<think>` blocks
+it emits on its own are still stripped from `text` and captured, but xybrid
+won't prime the channel, so a model that only thinks *when asked to* stays quiet.
+
+## What Isn't Reasoning
+
+- **Whitespace-only blocks** — a model that opens and immediately closes
+  `<think></think>` produces no `reasoningContent` (`null`), not an empty string.
+- **Non-`<think>` formats** — only literal `<think>…</think>` is captured today.
+  Anthropic-style `<thinking>` and gemma-4's channel-based reasoning are not yet
+  parsed.
+- **Streaming** — reasoning lands on the final (non-streaming) result;
+  during streaming it's suppressed from the token callback so it never leaks
+  into the live answer.

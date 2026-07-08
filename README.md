@@ -321,6 +321,7 @@ All models run entirely on-device. No cloud, no API keys required. Browse the fu
 | Gemma 3 1B | 1B | GGUF Q4_K_M | Google's mobile-optimized LLM |
 | LFM2.5 230M | 230M | GGUF Q4_K_M | Liquid AI's smallest hybrid conv+attention LLM for edge devices |
 | LFM2.5 350M | 354M | GGUF Q4_K_M | Liquid AI's hybrid conv+attention, 9 languages, tool calling |
+| LFM2.5 1.2B Thinking | 1.2B | GGUF Q4_K_M | Liquid AI reasoning model — chain-of-thought via `reasoningContent` ([guide](https://docs.xybrid.dev/en/docs/guides/reasoning)) |
 | Llama 3.2 1B | 1B | GGUF Q4_K_M | Meta's general purpose, 128K context |
 | Qwen 2.5 0.5B | 500M | GGUF Q4_K_M | Compact on-device chat |
 | Qwen 3.5 0.8B | 800M | GGUF Q4_K_M | Latest Qwen with reasoning (thinking mode) |

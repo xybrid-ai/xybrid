@@ -147,6 +147,21 @@ if (result.success) {
 }
 ```
 
+### Reasoning (thinking models)
+
+Reasoning models (metadata `reasoning: true`, e.g. `lfm2.5-1.2b-thinking`)
+produce a chain-of-thought before their answer. Xybrid keeps it out of the
+answer text and surfaces it on `reasoningContent` — `null` for non-thinking
+models. Nothing to enable; just read it if you want it.
+
+```dart
+final result = await model.run(XybridEnvelope.text(
+    'Is 97 a prime number? Reason, then answer.'));
+
+if (result.text != null) print('Answer: ${result.text}');
+if (result.reasoningContent != null) print('Reasoning: ${result.reasoningContent}');
+```
+
 ### LLM Streaming
 
 Stream tokens in real-time as the LLM generates:

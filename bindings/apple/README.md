@@ -59,6 +59,22 @@ if result.success {
 }
 ```
 
+### Reasoning (thinking models)
+
+Reasoning models (metadata `reasoning: true`, e.g. `lfm2.5-1.2b-thinking`)
+produce a chain-of-thought before their answer. Xybrid keeps it out of the
+answer text and surfaces it on `reasoningContent` — `nil` for non-thinking
+models. Nothing to enable; just read it if you want it.
+
+```swift
+let model = try XybridModelLoader.fromRegistry(modelId: "lfm2.5-1.2b-thinking").load()
+let result = try model.run(envelope: XybridEnvelope.text(
+    text: "Is 97 a prime number? Reason, then answer."))
+
+if let answer = result.text { print("Answer:", answer) }
+if let reasoning = result.reasoningContent { print("Reasoning:", reasoning) }
+```
+
 ### Available Types
 
 | Type | Description |
