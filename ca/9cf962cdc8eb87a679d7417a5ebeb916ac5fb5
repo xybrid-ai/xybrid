@@ -1,0 +1,43 @@
+BUILD.bazel
+  s_7431c1432875d8::t_e2f6a7d6b03f75 62-63,87
+  s_7431c1432875d8::t_dfb6104c6f83d7 40-58,61,64-66,74,86
+  s_7431c1432875d8::t_dd7cb907240c05 117-126,128-129
+  s_7431c1432875d8::t_96f886f1332c29 67-73,75,78-84
+  s_7431c1432875d8::t_84274703c17ff4 76-77,85
+.github/workflows/bazel.yml
+  s_7431c1432875d8::t_e6e2fdf5f47b03 120-122,126
+rules_android_ndk.patch
+  s_7431c1432875d8::t_89f8fd95fa1767 1-23
+rules_rs.patch
+  s_7431c1432875d8::t_6072eee5c5279f 1-2,4-17
+  s_7431c1432875d8::t_f6a2202376eb31 3
+  s_7431c1432875d8::t_93fd8f56bd6362 18-20
+  s_7431c1432875d8::t_68a5d7016a3293 21-32
+MODULE.bazel
+  s_7431c1432875d8::t_3f146365d8f38c 13-24
+  s_7431c1432875d8::t_bdf56eee8d0f65 66-68
+  s_7431c1432875d8::t_c958181c013c06 176-177
+  s_7431c1432875d8::t_84fbabfc2669a2 149-158
+crates/xybrid-bolt/BUILD.bazel
+  s_7431c1432875d8::t_64899756f1635a 36-38
+bindings/kotlin/BUILD.bazel
+  s_7431c1432875d8::t_39bc3681000ff9 1-2,4-18,23-74,85-89,110-112
+.bazelrc
+  s_7431c1432875d8::t_9baeb92cbb8e9e 24-26,28-32
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "ca9cf962cdc8eb87a679d7417a5ebeb916ac5fb5",
+  "prompts": {},
+  "sessions": {
+    "s_7431c1432875d8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "85304c2d-b335-4cc4-a3a6-e618040982d4",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
