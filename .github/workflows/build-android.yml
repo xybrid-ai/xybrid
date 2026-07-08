@@ -71,6 +71,19 @@ jobs:
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
+      # The 4-ABI llama.cpp compile can exhaust the ~14 GB free on ubuntu-latest
+      # when the prebuilt-natives fast path misses (observed: the runner itself
+      # died with "No space left on device", taking its logs with it). Reclaim
+      # space from preinstalled toolchains this build never touches — same step
+      # as ci.yml's test job, EXCEPT /usr/local/lib/android, which this job's
+      # Android SDK/NDK setup actually uses.
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/.ghcup \
+            /opt/hostedtoolcache/CodeQL
+          sudo docker image prune --all --force || true
+          df -h /
+
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
         with:

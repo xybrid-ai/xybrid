@@ -25,6 +25,12 @@ path = "src/lib.rs"
 default = []
 bindings = []
 vision = ["bindings"]
+# Compile against the committed `src/bindings.rs` snapshot instead of the
+# bindgen output freshly generated into $OUT_DIR. Exists for the Bazel path,
+# which has no build script and therefore no bindgen/libclang; cargo builds
+# should not enable it (the snapshot is generated without `vision` and does
+# not track wrapper.h / llama.cpp bumps by itself — build.rs warns on drift).
+committed-bindings = ["bindings"]
 
 [build-dependencies]
 # For compiling the wrapper.cpp shim and llama.cpp source. Carried at the

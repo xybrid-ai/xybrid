@@ -1,0 +1,98 @@
+diff --color -ru a/BUILD.ndk_sysroot.tpl b/BUILD.ndk_sysroot.tpl
+--- a/BUILD.ndk_sysroot.tpl	2026-07-08 11:15:00
++++ b/BUILD.ndk_sysroot.tpl	2026-07-08 11:15:00
+@@ -19,6 +19,16 @@
+     ], allow_empty = True),
+ ) for target_system_name in TARGET_SYSTEM_NAMES]
+ 
++# xybrid spike patch: the exact libc++_shared.so per ABI, for bundling into
++# the AAR jni dirs (version-matched to the NDK that linked the .so).
++[filegroup(
++    name = "libcxx_shared_%s" % target_system_name,
++    srcs = glob(
++        ["usr/lib/%s/libc++_shared.so" % target_system_name],
++        allow_empty = True,
++    ),
++) for target_system_name in TARGET_SYSTEM_NAMES]
++
+ [filegroup(
+     name = "dynamic_runtime_lib_%s" % target_system_name,
+     srcs = glob([
+diff --color -ru a/rules.bzl b/rules.bzl
+--- a/rules.bzl	2026-07-08 11:15:00
++++ b/rules.bzl	2026-07-08 11:15:00
+@@ -23,16 +23,41 @@
+     Returns:
+         A final dict of configuration attributes and values.
+     """
+-    ndk_path = ctx.attr.path or ctx.getenv("ANDROID_NDK_HOME", None)
++    # xybrid spike patch: when XYBRID_NDK_URL is set, download_and_extract a
++    # PINNED NDK into the repository instead of requiring a local install —
++    # the NDK becomes a normal fetched Bazel input (works on any machine/CI).
++    # ctx.getenv (not os.environ) so pin bumps invalidate the repository.
++    ndk_url = ctx.getenv("XYBRID_NDK_URL", "")
++    if ndk_url:
++        ndk_sha256 = ctx.getenv("XYBRID_NDK_SHA256", "")
++        if not ndk_sha256:
++            fail("XYBRID_NDK_SHA256 must be set when XYBRID_NDK_URL is set " +
++                 "(unverified toolchain downloads are not allowed).")
++        ctx.download_and_extract(
++            url = ndk_url,
++            sha256 = ndk_sha256,
++            output = "ndk-dl",
++            stripPrefix = ctx.getenv("XYBRID_NDK_STRIP_PREFIX", "android-ndk-r27"),
++        )
++        ndk_path = str(ctx.path("ndk-dl"))
++    else:
++        ndk_path = ctx.attr.path or ctx.getenv("ANDROID_NDK_HOME", None)
+     if not ndk_path:
+-        fail("Either the ANDROID_NDK_HOME environment variable or the " +
+-             "path attribute of android_ndk_repository must be set.")
++        fail("Either the ANDROID_NDK_HOME environment variable, the path " +
++             "attribute of android_ndk_repository, or XYBRID_NDK_URL must be set.")
+     if ndk_path.startswith("$WORKSPACE_ROOT"):
+         ndk_path = str(ctx.workspace_root) + ndk_path.removeprefix("$WORKSPACE_ROOT")
+ 
+     is_windows = False
+     executable_extension = ""
+-    if ctx.os.name == "linux":
++
++    # xybrid spike patch: allow forcing the NDK host tag (e.g. linux-x86_64) so
++    # a LINUX NDK can be fetched on a macOS host purely as remote-execution
++    # (RBE) action inputs. Set via --repo_env=XYBRID_NDK_HOST_TAG=linux-x86_64.
++    host_tag_override = ctx.getenv("XYBRID_NDK_HOST_TAG", "")
++    if host_tag_override:
++        clang_directory = "toolchains/llvm/prebuilt/" + host_tag_override
++    elif ctx.os.name == "linux":
+         clang_directory = "toolchains/llvm/prebuilt/linux-x86_64"
+     elif ctx.os.name == "mac os x":
+         # Note: darwin-x86_64 does indeed contain fat binaries with arm64 slices, too.
+@@ -50,13 +75,21 @@
+ 
+     api_level = ctx.attr.api_level or 31
+ 
+-    result = ctx.execute([clang_directory + "/bin/clang", "--print-resource-dir"])
+-    if result.return_code != 0:
+-        fail("Failed to execute clang: %s" % result.stderr)
+-    stdout = result.stdout.strip()
+-    if is_windows:
+-        stdout = stdout.replace("\\", "/")
+-    clang_resource_directory = stdout.split(clang_directory)[1].strip("/")
++    if host_tag_override:
++        # Cannot execute a foreign-host clang at fetch time; derive the clang
++        # resource dir from the filesystem instead (lib/clang/<version>).
++        versions = ctx.path(clang_directory + "/lib/clang").readdir()
++        if len(versions) != 1:
++            fail("Expected exactly one clang resource dir, got %s" % versions)
++        clang_resource_directory = "lib/clang/" + versions[0].basename
++    else:
++        result = ctx.execute([clang_directory + "/bin/clang", "--print-resource-dir"])
++        if result.return_code != 0:
++            fail("Failed to execute clang: %s" % result.stderr)
++        stdout = result.stdout.strip()
++        if is_windows:
++            stdout = stdout.replace("\\", "/")
++        clang_resource_directory = stdout.split(clang_directory)[1].strip("/")
+ 
+     # Use a label relative to the workspace from which this repository rule came
+     # to get the workspace name.

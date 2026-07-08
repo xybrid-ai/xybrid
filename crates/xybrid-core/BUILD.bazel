@@ -1,0 +1,48 @@
+# GATE 5 — xybrid-core, the workspace's center of gravity. Everything above
+# llama transitively depends on it, so this BUILD gates the whole upper half.
+#
+# Clean rules_rs convention (no hand-listed deps): the @crates hub already
+# resolved this crate's full dep set + features from the real Cargo.lock, so
+# `all_crate_deps(normal = True)` returns them — internal path-deps as
+# `//crates/...` labels and externals as exact-version `@crates//:...` labels,
+# with per-platform deltas (Apple objc2/candle/coreml) folded into a select().
+# Target name == package dir basename so `//crates/xybrid-core` resolves and
+# the derived crate_name is `xybrid_core` — no `aliases()` needed.
+#
+# ORT CEILING: RESOLVED. The ort linking mode is per-target in Cargo.toml
+# (cfg-driven, not feature-driven): non-Apple targets get `ort/load-dynamic`
+# (no build-time download → hermetic; dlopen libonnxruntime at runtime), Apple
+# keeps static download-binaries on a rustls downloader. The hub resolves this
+# faithfully per-triple (linux/android → disable-linking; darwin →
+# download-binaries+tls-rustls), so this target builds GREEN on RBE.
+# The `ort-download` feature below is a retained NO-OP marker (invocation compat).
+load("@rules_rs//rs:rust_library.bzl", "rust_library")
+load("@crates//:defs.bzl", "all_crate_deps")
+
+rust_library(
+    name = "xybrid-core",
+    srcs = glob(["src/**/*.rs"]),
+    edition = "2021",
+    # Resolved from the real Cargo.lock by the @crates hub (DEP_DATA). Apple-only
+    # accel features are gated to the darwin platform exactly as cargo unifies them.
+    crate_features = [
+        "default",
+        "llm-llamacpp",
+        "ort-download",  # no-op marker (mode is per-target in Cargo.toml); kept to match the hub's resolved feature set.
+        "schema",
+        "xybrid-llama",
+        "xybrid-llama-sys",
+    ] + select({
+        "@rules_rs//rs/platforms/config:aarch64-apple-darwin": [
+            "candle",
+            "candle-core",
+            "candle-hub",
+            "candle-metal",
+            "candle-nn",
+            "ort-coreml",
+        ],
+        "//conditions:default": [],
+    }),
+    deps = all_crate_deps(normal = True),
+    visibility = ["//visibility:public"],
+)

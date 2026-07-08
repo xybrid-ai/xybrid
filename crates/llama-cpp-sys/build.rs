@@ -192,6 +192,25 @@ fn generate_bindings(llama_cpp_dir: &Path, out_dir: &Path, ndk_root: Option<&str
     bindings
         .write_to_file(&out_path)
         .unwrap_or_else(|e| panic!("llama-cpp-sys: failed to write {}: {e}", out_path.display()));
+
+    // Drift guard for the committed snapshot consumed under the
+    // `committed-bindings` feature (the Bazel path, which cannot run bindgen).
+    // The snapshot is generated WITHOUT `vision`, so only a non-vision run
+    // produces comparable output. Warning (not error): bindgen output is not
+    // guaranteed byte-stable across bindgen/toolchain versions.
+    if !vision_enabled {
+        let committed = Path::new(&env::var("CARGO_MANIFEST_DIR").expect("cargo sets it"))
+            .join("src")
+            .join("bindings.rs");
+        let fresh = std::fs::read_to_string(&out_path).ok();
+        if fresh.is_some() && fresh != std::fs::read_to_string(&committed).ok() {
+            println!(
+                "cargo:warning=llama-cpp-sys: committed src/bindings.rs is stale — \
+                 copy {} over it to resync the `committed-bindings` (Bazel) path",
+                out_path.display()
+            );
+        }
+    }
 }
 
 /// Check if CMake is available in PATH

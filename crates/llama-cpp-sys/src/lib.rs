@@ -72,6 +72,18 @@ pub mod bindings {
 
     use std::os::raw::{c_char, c_int, c_void};
 
+    // Two sources for the generated bindings:
+    //   - cargo (default): fresh bindgen output from build.rs ($OUT_DIR).
+    //     Tracks wrapper.h / the pinned llama.cpp commit automatically and
+    //     honors the `vision` feature's extra `mtmd_*` surface.
+    //   - `committed-bindings` (the Bazel path, which has no build script and
+    //     therefore no bindgen/libclang): the committed src/bindings.rs
+    //     snapshot, generated WITHOUT `vision`. Regenerate it by building
+    //     with `--features bindings` and copying $OUT_DIR/bindings.rs over
+    //     src/bindings.rs — build.rs warns when the snapshot drifts.
+    #[cfg(feature = "committed-bindings")]
+    include!("bindings.rs");
+    #[cfg(not(feature = "committed-bindings"))]
     include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 
     /// Convenience alias for the bindgen-generated streaming callback
