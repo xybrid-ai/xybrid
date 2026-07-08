@@ -1,5 +1,26 @@
---- a/rules.bzl	2026-07-08 10:46:44
-+++ b/rules.bzl	2026-07-08 10:46:44
+diff --color -ru a/BUILD.ndk_sysroot.tpl b/BUILD.ndk_sysroot.tpl
+--- a/BUILD.ndk_sysroot.tpl	2026-07-08 11:15:00
++++ b/BUILD.ndk_sysroot.tpl	2026-07-08 11:15:00
+@@ -19,6 +19,16 @@
+     ], allow_empty = True),
+ ) for target_system_name in TARGET_SYSTEM_NAMES]
+ 
++# xybrid spike patch: the exact libc++_shared.so per ABI, for bundling into
++# the AAR jni dirs (version-matched to the NDK that linked the .so).
++[filegroup(
++    name = "libcxx_shared_%s" % target_system_name,
++    srcs = glob(
++        ["usr/lib/%s/libc++_shared.so" % target_system_name],
++        allow_empty = True,
++    ),
++) for target_system_name in TARGET_SYSTEM_NAMES]
++
+ [filegroup(
+     name = "dynamic_runtime_lib_%s" % target_system_name,
+     srcs = glob([
+diff --color -ru a/rules.bzl b/rules.bzl
+--- a/rules.bzl	2026-07-08 11:15:00
++++ b/rules.bzl	2026-07-08 11:15:00
 @@ -23,16 +23,41 @@
      Returns:
          A final dict of configuration attributes and values.

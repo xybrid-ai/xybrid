@@ -33,6 +33,9 @@ rust_shared_library(
             "-Clink-arg=-lc++_shared",
             "-Clink-arg=-llog",
             "-Clink-arg=-Wl,-z,max-page-size=16384",
+            # Strip the symtab at link time (keeps dynsym — the JNI/dlopen
+            # exports). Replaces the pipeline's post-hoc llvm-strip.
+            "-Cstrip=symbols",
         ],
         "//conditions:default": [],
     }),

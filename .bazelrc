@@ -21,11 +21,15 @@ common --repo_env=XYBRID_NDK_HOST_TAG=linux-x86_64
 # instead of the default /usr/bin/env python3 launcher.
 common --@rules_python//python/config_settings:bootstrap_impl=script
 
-# Android arm64 target config. The rustflag mirrors .cargo/config.toml's
-# [target.aarch64-linux-android] +fp16 (gemm-f16 FP16 SIMD asm; runtime-detected,
-# scalar fallback). extra_rustc_flags is target-config-only (exec tools unaffected).
+# Android per-ABI target configs (shipping semantics: opt + the toolchain's
+# per-triple flags — +fp16 lives on the rust toolchain in MODULE.bazel now, so
+# it also applies under build-graph transitions, not just these configs).
 build:android-arm64 --platforms=@rules_rs//rs/platforms:aarch64-linux-android
-build:android-arm64 --@rules_rust//rust/settings:extra_rustc_flags=-Ctarget-feature=+fp16
+build:android-arm64 --compilation_mode=opt
+build:android-armv7 --platforms=@rules_rs//rs/platforms:armv7-linux-androideabi
+build:android-armv7 --compilation_mode=opt
+build:android-x86_64 --platforms=@rules_rs//rs/platforms:x86_64-linux-android
+build:android-x86_64 --compilation_mode=opt
 
 # On Linux hosts, rules_rs' experimental toolchains need an explicit host platform
 # with libc constraints (//:host_linux_gnu, root BUILD.bazel). The enable flag

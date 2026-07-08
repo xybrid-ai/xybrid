@@ -10,6 +10,18 @@ module(name = "xybrid_bazel_spike", version = "0.0.0")
 # --- hermeticbuild stack, pinned from the Bazel Central Registry (replaces the
 # earlier git_override commit pins; re-validated on RBE at these versions).
 bazel_dep(name = "rules_rs", version = "0.0.95")
+
+# rules_rs resolver fix (report upstream): 3-part android triples fold the abi
+# into the os token (armv7-linux-androideabi), so _normalize_os must map
+# "androideabi" -> "android" — otherwise the triple is not unix and every
+# cfg(unix) / cfg(target_os="android") dep is silently dropped for armv7
+# (libloading lost cfg-if, dirs-sys lost libc, ...).
+single_version_override(
+    module_name = "rules_rs",
+    patch_strip = 1,
+    patches = ["//:rules_rs.patch"],
+    version = "0.0.95",
+)
 bazel_dep(name = "llvm", version = "0.8.11")
 bazel_dep(name = "hermetic_launcher", version = "0.0.11")
 
@@ -51,6 +63,9 @@ single_version_override(
 # workers as an action input (same mechanism as the bazelified NDK).
 bazel_dep(name = "rules_pkg", version = "1.0.1")
 bazel_dep(name = "rules_python", version = "1.7.0")
+# platform_transition_filegroup: build the SAME cdylib target for each Android
+# ABI inside one graph (the AAR packages all ABIs in a single zip).
+bazel_dep(name = "aspect_bazel_lib", version = "2.22.5")
 
 # --- Gate 10: classes.jar. Kotlin sources import android.* -> compile against a
 # BAZELIFIED android.jar (platforms;android-34, pinned zip from dl.google.com —
@@ -131,6 +146,16 @@ use_repo(rules_rust, "rules_rust")
 toolchains = use_extension("@rules_rs//rs/toolchains:module_extension.bzl", "toolchains")
 toolchains.toolchain(
     edition = "2021",
+    # Per-triple rustc flags travel WITH the toolchain (the Bazel analog of
+    # .cargo/config's [target.<triple>] rustflags), so they apply under both
+    # --platforms and build-graph transitions. +fp16: gemm-f16's FP16 SIMD asm
+    # needs the assembler to accept the instructions (runtime-detected, scalar
+    # fallback) — mirrors .cargo/config.toml exactly.
+    extra_rustc_flags = {
+        "aarch64-apple-ios": ["-Ctarget-feature=+fp16"],
+        "aarch64-apple-ios-sim": ["-Ctarget-feature=+fp16"],
+        "aarch64-linux-android": ["-Ctarget-feature=+fp16"],
+    },
     version = "1.92.0",
 )
 use_repo(toolchains, "default_rust_toolchains")
@@ -148,6 +173,8 @@ crate.from_cargo(
         "x86_64-unknown-linux-gnu",
         "aarch64-apple-darwin",
         "aarch64-linux-android",
+        "armv7-linux-androideabi",
+        "x86_64-linux-android",
     ],
 )
 crate.annotation(

@@ -1,20 +1,77 @@
-# GATE 9 — the Android AAR payload, assembled by Bazel (replaces the
-# build-android-bolt.sh copy loop + the .so→zip→Gradle hand-off).
+# The Android AAR, assembled by Bazel (replaces the build-android-bolt.sh copy
+# loop + the .so→zip→Gradle hand-off).
 #
-# What's here: the per-ABI jni tree with the ONE-LINK .so from Gate 8 (renamed
-# to the name the Kotlin loader expects) + the vendored dlopen runtime libs,
-# zipped into an .aar skeleton with the manifest.
-# NOT here yet (next gate): classes.jar — compiling Xybrid.kt/XybridBolt.kt
-# needs android.jar (sources import android.content/os); that's a bazelified
-# platforms;android-34 jar + rules_kotlin. Gradle remains the classes/publish
-# owner until then.
+# ABI fan-out happens INSIDE the graph: platform_transition_filegroup builds the
+# same cdylib target once per Android platform, so ONE plain invocation
+# (`bazel build [-c opt] //bindings/kotlin:xybrid_kotlin_aar`) produces the
+# 3-ABI AAR — no per-ABI --config needed. Per-triple rustc flags (+fp16 on
+# arm64) live on the rust toolchain (MODULE.bazel), so they apply under
+# transitions too.
+#
+# jni payload per ABI:
+#   libxybrid-bolt.so   — the one-link cdylib (renamed: rustc emits underscore,
+#                         Kotlin's System.loadLibrary("xybrid-bolt") wants hyphen)
+#   libc++_shared.so    — from @androidndk's sysroot (version-matched to the
+#                         NDK that linked the .so; no vendored drift)
+#   libonnxruntime.so   — vendored, arm64-v8a + x86_64 only (armv7 ships no ORT,
+#                         matching today's AAR)
+load("@aspect_bazel_lib//lib:transitions.bzl", "platform_transition_filegroup")
 load("@rules_kotlin//kotlin:jvm.bzl", "kt_jvm_library")
 load("@rules_pkg//pkg:mappings.bzl", "pkg_files")
 load("@rules_pkg//pkg:zip.bzl", "pkg_zip")
 
-# GATE 10 — classes.jar: the committed Kotlin sources (hand Xybrid.kt +
-# bolt-generated XybridBolt.kt) compiled by hermetic kotlinc against the
-# bazelified android.jar (neverlink) + the pinned coroutines jar.
+# (abi dir, rules_rs platform, NDK target_system_name, ships vendored ORT)
+ANDROID_ABIS = [
+    ("arm64-v8a", "@rules_rs//rs/platforms:aarch64-linux-android", "aarch64-linux-android", True),
+    ("armeabi-v7a", "@rules_rs//rs/platforms:armv7-linux-androideabi", "arm-linux-androideabi", False),
+    ("x86_64", "@rules_rs//rs/platforms:x86_64-linux-android", "x86_64-linux-android", True),
+]
+
+# The NDK repo's clang dir is pinned to linux-x86_64 binaries by
+# XYBRID_NDK_HOST_TAG in the committed .bazelrc (RBE workers run them).
+NDK_SYSROOT = "@androidndk//toolchains/llvm/prebuilt/linux-x86_64/sysroot"
+
+[
+    platform_transition_filegroup(
+        name = "bolt_so_" + abi,
+        srcs = ["//crates/xybrid-bolt:xybrid_bolt_cdylib"],
+        target_platform = platform,
+    )
+    for abi, platform, _, _ in ANDROID_ABIS
+]
+
+[
+    pkg_files(
+        name = "jni_bolt_" + abi,
+        srcs = [":bolt_so_" + abi],
+        prefix = "jni/" + abi,
+        renames = {":bolt_so_" + abi: "libxybrid-bolt.so"},
+    )
+    for abi, _, _, _ in ANDROID_ABIS
+]
+
+[
+    pkg_files(
+        name = "jni_cxx_" + abi,
+        srcs = ["%s:libcxx_shared_%s" % (NDK_SYSROOT, tsn)],
+        prefix = "jni/" + abi,
+    )
+    for abi, _, tsn, _ in ANDROID_ABIS
+]
+
+[
+    pkg_files(
+        name = "jni_ort_" + abi,
+        srcs = ["//:ort_android_" + abi.replace("-v8a", "")],
+        prefix = "jni/" + abi,
+    )
+    for abi, _, _, has_ort in ANDROID_ABIS
+    if has_ort
+]
+
+# classes.jar: the committed Kotlin sources (hand Xybrid.kt + bolt-generated
+# XybridBolt.kt) compiled by hermetic kotlinc against the bazelified android.jar
+# (neverlink) + the pinned coroutines jar.
 kt_jvm_library(
     name = "xybrid_kotlin_classes",
     srcs = glob(["src/main/kotlin/**/*.kt"]),
@@ -24,31 +81,6 @@ kt_jvm_library(
     ],
 )
 
-# Gate-8 .so, renamed at package time: rustc emits libxybrid_bolt.so (underscore);
-# Kotlin's System.loadLibrary("xybrid-bolt") expects libxybrid-bolt.so (hyphen).
-pkg_files(
-    name = "jni_bolt_arm64",
-    srcs = ["//crates/xybrid-bolt:xybrid_bolt_cdylib"],
-    prefix = "jni/arm64-v8a",
-    renames = {
-        "//crates/xybrid-bolt:xybrid_bolt_cdylib": "libxybrid-bolt.so",
-    },
-)
-
-# dlopened runtime libs (libonnxruntime.so + libc++_shared.so), vendored.
-pkg_files(
-    name = "jni_runtime_arm64",
-    srcs = ["//:ort_android_arm64_libs"],
-    prefix = "jni/arm64-v8a",
-)
-
-pkg_files(
-    name = "aar_manifest",
-    srcs = ["bazel/AndroidManifest.xml"],
-    renames = {"bazel/AndroidManifest.xml": "AndroidManifest.xml"},
-)
-
-# classes.jar + (empty) R.txt — the pieces AGP consumers require of an AAR.
 pkg_files(
     name = "aar_classes",
     # The predeclared jar output (the bare target also carries the srcjar,
@@ -58,21 +90,26 @@ pkg_files(
 )
 
 pkg_files(
+    name = "aar_manifest",
+    srcs = ["bazel/AndroidManifest.xml"],
+    renames = {"bazel/AndroidManifest.xml": "AndroidManifest.xml"},
+)
+
+pkg_files(
     name = "aar_rtxt",
     srcs = ["bazel/R.txt"],
     renames = {"bazel/R.txt": "R.txt"},
 )
 
-# The AAR: manifest + classes.jar + R.txt + jni.
 pkg_zip(
     name = "xybrid_kotlin_aar",
     srcs = [
         ":aar_classes",
         ":aar_manifest",
         ":aar_rtxt",
-        ":jni_bolt_arm64",
-        ":jni_runtime_arm64",
-    ],
+    ] + [":jni_bolt_" + abi for abi, _, _, _ in ANDROID_ABIS] +
+        [":jni_cxx_" + abi for abi, _, _, _ in ANDROID_ABIS] +
+        [":jni_ort_" + abi for abi, _, _, has_ort in ANDROID_ABIS if has_ort],
     out = "xybrid-kotlin.aar",
     visibility = ["//visibility:public"],
 )

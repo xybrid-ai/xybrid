@@ -117,11 +117,13 @@ jobs:
             //crates/xybrid-llama:xybrid_llama
 
       # The RBE-proven Android row (PR #326 gates 6-10): NDK cross-compile +
-      # one-link .so + complete AAR.
+      # one-link .so + complete AAR. ABI fan-out (arm64-v8a / armeabi-v7a /
+      # x86_64) happens via transitions inside the graph — one invocation,
+      # shipping mode (-c opt + link-time strip).
       - name: Build Android AAR on RBE
         if: env.BUILDBUDDY_API_KEY != ''
         run: |
-          bazelisk build --config=remote --config=android-arm64 \
+          bazelisk build --config=remote -c opt \
             //bindings/kotlin:xybrid_kotlin_aar
 
       - name: Upload AAR artifact

@@ -1,0 +1,32 @@
+diff --color -ru a/rs/private/cfg_parser.bzl b/rs/private/cfg_parser.bzl
+--- a/rs/private/cfg_parser.bzl	2026-07-08 11:24:16
++++ b/rs/private/cfg_parser.bzl	2026-07-08 11:26:23
+@@ -148,6 +148,13 @@
+ def _normalize_os(os_raw):
+     if os_raw == "darwin":
+         return "macos"
++    # xybrid patch: 3-part android triples fold the abi into the os token
++    # (armv7-linux-androideabi, arm-linux-androideabi). Without this, target_os
++    # != "android" and the triple is not unix, so every cfg(unix)/
++    # cfg(target_os = "android") dependency is silently dropped for armv7
++    # (observed: libloading losing cfg-if, dirs-sys losing libc).
++    if os_raw == "androideabi":
++        return "android"
+     return os_raw
+ 
+ def _family_for_os(os_name):
+@@ -212,6 +219,14 @@
+ def triple_to_cfg_attrs(triple):
+     parts = triple.split("-")
+     arch_part = _get(parts, 0, "")
++
++    # xybrid patch: rustc normalizes 32-bit arm arch variants to
++    # target_arch = "arm" (armv7-linux-androideabi has target_arch "arm", not
++    # "armv7"). Without this, cfg(target_arch = "arm") deps are silently
++    # dropped (observed: zip 1.x losing crossbeam-utils, its 32-bit-arm
++    # atomics polyfill). aarch64 does not start with "arm" so it is unaffected.
++    if arch_part.startswith("arm"):
++        arch_part = "arm"
+     vendor_part = _get(parts, 1, "unknown")
+     os_raw_part = _get(parts, 2, "none")
+     env_part = "-".join(parts[3:])
