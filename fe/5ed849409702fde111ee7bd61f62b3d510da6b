@@ -1,0 +1,29 @@
+rules_rs.patch
+  s_7431c1432875d8::t_488f25c5174c03 2-3,18,23-31
+bindings/kotlin/BUILD.bazel
+  s_8ec0e27938a0ae::t_a1d0f23290244d 36,38-40,78,81-82,125
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "fe5ed849409702fde111ee7bd61f62b3d510da6b",
+  "prompts": {},
+  "sessions": {
+    "s_7431c1432875d8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "85304c2d-b335-4cc4-a3a6-e618040982d4",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    },
+    "s_8ec0e27938a0ae": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-ad58601d3cb19930f",
+        "model": "unknown"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
