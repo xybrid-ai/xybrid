@@ -1,0 +1,31 @@
+bindings/kotlin/consumer-smoke/app/src/main/AndroidManifest.xml
+  s_7431c1432875d8::t_b95eac93b6b359 1-2
+bindings/kotlin/consumer-smoke/gradle.properties
+  s_7431c1432875d8::t_b95eac93b6b359 1
+.github/workflows/bazel.yml
+  s_7431c1432875d8::t_0183bdeca76065 136-167
+bindings/kotlin/consumer-smoke/app/build.gradle.kts
+  s_7431c1432875d8::t_b95eac93b6b359 1-33
+.gitignore
+  s_7431c1432875d8::t_0183bdeca76065 72-77
+bindings/kotlin/consumer-smoke/app/src/main/kotlin/ai/xybrid/smoke/Smoke.kt
+  s_7431c1432875d8::t_b95eac93b6b359 1-13
+bindings/kotlin/consumer-smoke/settings.gradle.kts
+  s_7431c1432875d8::t_b95eac93b6b359 1-26
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "33c7f7a16f925b7b37e4b27d62a4872135f2146e",
+  "prompts": {},
+  "sessions": {
+    "s_7431c1432875d8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "85304c2d-b335-4cc4-a3a6-e618040982d4",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
