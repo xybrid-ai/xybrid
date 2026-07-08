@@ -1,0 +1,23 @@
+bindings/kotlin/BUILD.bazel
+  s_7431c1432875d8::t_024a3a23830af8 19
+  s_7431c1432875d8::t_f2dbe60b61f4cf 24-35
+MODULE.bazel
+  s_7431c1432875d8::t_5a9859b2599737 76-80
+  s_7431c1432875d8::t_803ff790e81413 75
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "7a6af4506a3266190e4fab4c894c79315673838b",
+  "prompts": {},
+  "sessions": {
+    "s_7431c1432875d8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "85304c2d-b335-4cc4-a3a6-e618040982d4",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
