@@ -1,0 +1,144 @@
+# Bazel — ADVISORY (Phase 1 of the migration; see .context/bazel-per-platform-today-vs-ideal.md
+# in the spike workspace and PR #326). This job is NOT a required check: cargo remains the
+# build of record. It validates the Bazel graph on every PR and builds the RBE-proven targets
+# (the hermetic linux llama chain + the Android AAR) against the shared BuildBuddy cache.
+#
+# Fork-safe: PRs from forks have no secrets, so the RBE steps skip and only the
+# analyze-everything phase runs (no remote, no network beyond repo fetches).
+name: Bazel (advisory)
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - "MODULE.bazel"
+      - ".bazelrc"
+      - ".bazelversion"
+      - ".bazelignore"
+      - "BUILD.bazel"
+      - "**/BUILD.bazel"
+      - "rules_android_ndk.patch"
+      - "rules_foreign_cc.patch"
+      - "crates/**"
+      - "bindings/kotlin/**"
+      - "macros/**"
+      - "vendor/llama-cpp"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/bazel.yml"
+  push:
+    branches: [master]
+    paths:
+      - "MODULE.bazel"
+      - "BUILD.bazel"
+      - "**/BUILD.bazel"
+      - "crates/**"
+      - "bindings/kotlin/**"
+      - "Cargo.lock"
+      - ".github/workflows/bazel.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bazel-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Must match build-android.yml (and the NDK the AAR was validated against).
+  NDK_VERSION: "27.0.12077973"
+
+jobs:
+  bazel:
+    name: Bazel graph + RBE targets
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          submodules: true
+
+      # Repo fetches (LLVM prebuilt, rustc, NDK symlink tree) + downloaded
+      # toplevel outputs need headroom; reclaim toolchains this job never
+      # touches (keep /usr/local/lib/android — the SDK/NDK setup uses it).
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/.ghcup \
+            /opt/hostedtoolcache/CodeQL
+          sudo docker image prune --all --force || true
+          df -h /
+
+      # The android_ndk repo rule runs on ANY bazel invocation (toolchain
+      # registration), so the NDK must exist before the first bazel command —
+      # same install as build-android.yml. (Phase-1 follow-up: extend
+      # rules_android_ndk.patch to download_and_extract a pinned NDK instead.)
+      - name: Cache Android NDK
+        id: cache-ndk
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ${{ env.ANDROID_HOME }}/ndk/${{ env.NDK_VERSION }}
+          key: android-ndk-bazel-${{ env.NDK_VERSION }}
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+
+      - name: Install NDK
+        if: steps.cache-ndk.outputs.cache-hit != 'true'
+        run: sdkmanager --install "ndk;${{ env.NDK_VERSION }}"
+
+      - name: Set NDK environment
+        run: echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/${{ env.NDK_VERSION }}" >> $GITHUB_ENV
+
+      # .bazelrc try-imports this gitignored file; in CI it's materialized from
+      # the secret. Absent secret (forks) → no :remote config → RBE steps skip.
+      - name: Configure BuildBuddy remote config
+        if: env.BUILDBUDDY_API_KEY != ''
+        run: |
+          mkdir -p .context
+          cat > .context/buildbuddy.bazelrc <<EOF
+          common:remote --bes_results_url=https://app.buildbuddy.io/invocation/
+          common:remote --bes_backend=grpcs://remote.buildbuddy.io
+          common:remote --remote_header=x-buildbuddy-api-key=${BUILDBUDDY_API_KEY}
+          common:remote --remote_cache=grpcs://remote.buildbuddy.io
+          common:remote --remote_executor=grpcs://remote.buildbuddy.io
+          common:remote --remote_cache_compression
+          common:remote --remote_download_toplevel
+          common:remote --remote_timeout=600
+          common:remote --jobs=200
+          common:remote --extra_execution_platforms=@llvm//:rbe_linux_x86_64
+          EOF
+
+      # Structural gate (always, fork-safe): every BUILD file in the workspace
+      # must configure. Same target set Gate 5 proved (13 targets analyze-clean).
+      - name: Analyze workspace (no build)
+        run: |
+          bazelisk build --nobuild \
+            //crates/... //bindings/... //macros/... //xtask/... //integration-tests/... //:llama
+
+      # The RBE-proven hermetic linux chain (PR #326 gates 3B/4).
+      - name: Build llama chain on RBE (linux, hermetic)
+        if: env.BUILDBUDDY_API_KEY != ''
+        run: |
+          bazelisk build --config=remote \
+            //:llama \
+            //crates/llama-cpp-sys:llama_cpp_sys \
+            //crates/xybrid-llama:xybrid_llama
+
+      # The RBE-proven Android row (PR #326 gates 6-10): NDK cross-compile +
+      # one-link .so + complete AAR.
+      - name: Build Android AAR on RBE
+        if: env.BUILDBUDDY_API_KEY != ''
+        run: |
+          bazelisk build --config=remote --config=android-arm64 \
+            //bindings/kotlin:xybrid_kotlin_aar
+
+      - name: Upload AAR artifact
+        if: env.BUILDBUDDY_API_KEY != ''
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: bazel-xybrid-kotlin-aar
+          path: bazel-bin/bindings/kotlin/xybrid-kotlin.aar
+          retention-days: 7
