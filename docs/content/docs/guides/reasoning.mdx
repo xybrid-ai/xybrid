@@ -57,7 +57,7 @@ if let reasoning = result.reasoningContent { print("Reasoning:", reasoning) }
 ### Kotlin
 
 ```kotlin
-val model = XybridModel.fromRegistry("lfm2.5-1.2b-thinking")
+val model = XybridModel("lfm2.5-1.2b-thinking")
 val result = model.run(Envelope.text("Is 97 a prime number? Reason, then answer."))
 
 result.text?.let { println("Answer: $it") }

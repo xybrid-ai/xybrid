@@ -37,9 +37,8 @@ Then add the dependency to your target:
 ```swift
 import Xybrid
 
-// Load a model from the registry
-let loader = XybridModelLoader.fromRegistry(modelId: "kokoro-82m")
-let model = try loader.load()
+// Load a model from the registry (the initializer resolves + loads it)
+let model = try XybridModel(fromRegistry: "kokoro-82m")
 
 // Create an envelope for TTS
 let envelope = XybridEnvelope.text(
@@ -79,8 +78,7 @@ if let reasoning = result.reasoningContent { print("Reasoning:", reasoning) }
 
 | Type | Description |
 |------|-------------|
-| `XybridModelLoader` | Loads models from registry or local bundles |
-| `XybridModel` | Represents a loaded model ready for inference |
+| `XybridModel` | A loaded model ready for inference — construct via `XybridModel(fromRegistry:)`, `(fromBundle:)`, `(fromDirectory:)`, or `(fromHuggingface:)` |
 | `XybridEnvelope` | Input data container (audio, text, embedding, image, or multi-part user message) |
 | `XybridResult` | Inference result with success status and output data |
 | `XybridError` | Error enum for error handling |

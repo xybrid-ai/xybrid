@@ -36,20 +36,14 @@ dependencies {
 ### Loading a Model from Registry
 
 ```kotlin
-import ai.xybrid.XybridModelLoader
-import ai.xybrid.XybridEnvelope
-import ai.xybrid.XybridException
+import ai.xybrid.XybridModel
+import ai.xybrid.Envelope
 
-// Load a model from the registry
-val loader = XybridModelLoader.fromRegistry("kokoro-82m")
-val model = loader.load()
+// Load a model from the registry (the constructor resolves + loads it)
+val model = XybridModel("kokoro-82m")
 
 // Run text-to-speech
-val envelope = XybridEnvelope.Text(
-    text = "Hello, world!",
-    voiceId = "af_bella",
-    speed = 1.0
-)
+val envelope = Envelope.text("Hello, world!", voiceId = "af_bella", speed = 1.0)
 val result = model.run(envelope)
 
 if (result.success) {
@@ -63,11 +57,10 @@ if (result.success) {
 ### Loading a Model from Bundle
 
 ```kotlin
-import ai.xybrid.XybridModelLoader
+import ai.xybrid.XybridModel
 
 // Load from a local bundle path
-val loader = XybridModelLoader.fromBundle("/path/to/model/bundle")
-val model = loader.load()
+val model = XybridModel.fromBundle("/path/to/model/bundle")
 ```
 
 ### Speech Recognition (ASR)
@@ -145,8 +138,7 @@ result.reasoningContent?.let { println("Reasoning: $it") }
 import ai.xybrid.XybridException
 
 try {
-    val loader = XybridModelLoader.fromRegistry("unknown-model")
-    val model = loader.load()
+    val model = XybridModel("unknown-model")
 } catch (e: XybridException.ModelNotFound) {
     println("Model not found: ${e.modelId}")
 } catch (e: XybridException.InferenceFailed) {
@@ -164,19 +156,23 @@ try {
 
 | Type | Description |
 |------|-------------|
-| `XybridModelLoader` | Factory for loading models from registry or bundle |
-| `XybridModel` | Loaded model ready for inference |
-| `XybridEnvelope` | Input data (Audio, Text, Embedding, Image, or UserMessage) |
+| `XybridModel` | Loaded model ready for inference (construct/factory to load) |
+| `Envelope` | Factory for `XybridEnvelope` inputs (`text`, `audio`, `embedding`, `image`, `userMessage`) |
+| `XybridEnvelope` | Input data container |
 | `XybridResult` | Inference output with success/error and result data |
 | `XybridException` | Error types (ModelNotFound, InferenceFailed, etc.) |
 
-### XybridModelLoader
+### XybridModel (loading)
 
-| Method | Description |
+| Call | Description |
 |--------|-------------|
-| `fromRegistry(modelId: String)` | Load model from Xybrid registry |
-| `fromBundle(path: String)` | Load model from local bundle path |
-| `load(): XybridModel` | Fetch and load the model |
+| `XybridModel(id: String)` | Resolve and load a model from the Xybrid registry |
+| `XybridModel.fromBundle(path: String)` | Load a model from a local `.xyb` bundle |
+| `XybridModel.fromDirectory(path: String)` | Load a model from an extracted directory |
+| `XybridModel.fromHuggingface(repo: String)` | Resolve and load a HuggingFace repo |
+
+Each loads synchronously; use the `…Async` suspend variants
+(`XybridModel.fromRegistryAsync(id)`, etc.) to load off the calling thread.
 
 ### XybridEnvelope
 
