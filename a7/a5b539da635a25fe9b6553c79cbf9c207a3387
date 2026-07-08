@@ -1,0 +1,20 @@
+bindings/kotlin/README.md
+  s_a619afae87b555::t_94ef6f261b5422 163
+  s_a619afae87b555::t_3fad9b2ffb57e4 143-146,148
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "a7a5b539da635a25fe9b6553c79cbf9c207a3387",
+  "prompts": {},
+  "sessions": {
+    "s_a619afae87b555": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e6fe5db3-dfc5-4fa6-b5ce-50fc626aab2e",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
