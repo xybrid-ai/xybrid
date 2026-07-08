@@ -33,11 +33,11 @@ define_kt_toolchain(
     language_version = "2.0",
 )
 
-# (abi dir, rules_rs platform, NDK target_system_name, ships vendored ORT)
+# (abi dir, rules_rs platform, NDK target_system_name, vendored-ORT label or None)
 ANDROID_ABIS = [
-    ("arm64-v8a", "@rules_rs//rs/platforms:aarch64-linux-android", "aarch64-linux-android", True),
-    ("armeabi-v7a", "@rules_rs//rs/platforms:armv7-linux-androideabi", "arm-linux-androideabi", False),
-    ("x86_64", "@rules_rs//rs/platforms:x86_64-linux-android", "x86_64-linux-android", True),
+    ("arm64-v8a", "@rules_rs//rs/platforms:aarch64-linux-android", "aarch64-linux-android", "//:ort_android_arm64"),
+    ("armeabi-v7a", "@rules_rs//rs/platforms:armv7-linux-androideabi", "arm-linux-androideabi", None),
+    ("x86_64", "@rules_rs//rs/platforms:x86_64-linux-android", "x86_64-linux-android", "//:ort_android_x86_64"),
 ]
 
 # The NDK repo's clang dir is pinned to linux-x86_64 binaries by
@@ -75,11 +75,11 @@ NDK_SYSROOT = "@androidndk//toolchains/llvm/prebuilt/linux-x86_64/sysroot"
 [
     pkg_files(
         name = "jni_ort_" + abi,
-        srcs = ["//:ort_android_" + abi.replace("-v8a", "")],
+        srcs = [ort_target],
         prefix = "jni/" + abi,
     )
-    for abi, _, _, has_ort in ANDROID_ABIS
-    if has_ort
+    for abi, _, _, ort_target in ANDROID_ABIS
+    if ort_target
 ]
 
 # classes.jar: the committed Kotlin sources (hand Xybrid.kt + bolt-generated
@@ -122,7 +122,7 @@ pkg_zip(
         ":aar_rtxt",
     ] + [":jni_bolt_" + abi for abi, _, _, _ in ANDROID_ABIS] +
         [":jni_cxx_" + abi for abi, _, _, _ in ANDROID_ABIS] +
-        [":jni_ort_" + abi for abi, _, _, has_ort in ANDROID_ABIS if has_ort],
+        [":jni_ort_" + abi for abi, _, _, ort_target in ANDROID_ABIS if ort_target],
     out = "xybrid-kotlin.aar",
     visibility = ["//visibility:public"],
 )
