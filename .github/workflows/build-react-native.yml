@@ -251,6 +251,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          submodules: true  # //:llama_src = vendor/llama-cpp (xtask build-android now builds via Bazel)
 
       # Keep LLVM (large-packages: false): the bolt build runs bindgen for
       # the llama/ggml C++ via libclang. Removing system LLVM breaks it with

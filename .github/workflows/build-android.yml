@@ -67,6 +67,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          submodules: true  # //:llama_src = vendor/llama-cpp (the Bazel build needs it)
 
       # The 4-ABI llama.cpp compile can exhaust the ~14 GB free on ubuntu-latest
       # when the prebuilt-natives fast path misses (observed: the runner itself
