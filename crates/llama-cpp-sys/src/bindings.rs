@@ -624,6 +624,65 @@ pub struct llama_opt_params {
     pub get_opt_pars_ud: *mut ::std::os::raw::c_void,
     pub optimizer_type: ggml_opt_optimizer_type,
 }
+pub const mtmd_input_chunk_type_MTMD_INPUT_CHUNK_TYPE_TEXT: mtmd_input_chunk_type = 0;
+pub const mtmd_input_chunk_type_MTMD_INPUT_CHUNK_TYPE_IMAGE: mtmd_input_chunk_type = 1;
+pub const mtmd_input_chunk_type_MTMD_INPUT_CHUNK_TYPE_AUDIO: mtmd_input_chunk_type = 2;
+pub type mtmd_input_chunk_type = ::std::os::raw::c_uint;
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mtmd_context {
+    _unused: [u8; 0],
+}
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mtmd_bitmap {
+    _unused: [u8; 0],
+}
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mtmd_image_tokens {
+    _unused: [u8; 0],
+}
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mtmd_input_chunk {
+    _unused: [u8; 0],
+}
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mtmd_input_chunks {
+    _unused: [u8; 0],
+}
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mtmd_input_text {
+    pub text: *const ::std::os::raw::c_char,
+    pub add_special: bool,
+    pub parse_special: bool,
+}
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mtmd_context_params {
+    pub use_gpu: bool,
+    pub print_timings: bool,
+    pub n_threads: ::std::os::raw::c_int,
+    pub image_marker: *const ::std::os::raw::c_char,
+    pub media_marker: *const ::std::os::raw::c_char,
+    pub flash_attn_type: llama_flash_attn_type,
+    pub warmup: bool,
+    pub image_min_tokens: ::std::os::raw::c_int,
+    pub image_max_tokens: ::std::os::raw::c_int,
+    pub cb_eval: ggml_backend_sched_eval_callback,
+    pub cb_eval_user_data: *mut ::std::os::raw::c_void,
+}
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mtmd_decoder_pos {
+    pub t: u32,
+    pub x: u32,
+    pub y: u32,
+    pub z: u32,
+}
 extern "C" {
     pub fn llama_backend_init_c();
 }
@@ -846,6 +905,128 @@ extern "C" {
         user_data: *mut ::std::os::raw::c_void,
         n_past: ::std::os::raw::c_int,
     ) -> ::std::os::raw::c_int;
+}
+extern "C" {
+    pub fn mtmd_init_from_file_c(
+        mmproj_fname: *const ::std::os::raw::c_char,
+        text_model: *const ::std::os::raw::c_void,
+        use_gpu: bool,
+        warmup: bool,
+        n_threads: ::std::os::raw::c_int,
+        flash_attn: bool,
+    ) -> *mut mtmd_context;
+}
+extern "C" {
+    pub fn mtmd_free_c(ctx: *mut mtmd_context);
+}
+extern "C" {
+    pub fn mtmd_bitmap_init_from_buf_c(
+        ctx: *mut mtmd_context,
+        buf: *const ::std::os::raw::c_uchar,
+        len: usize,
+    ) -> *mut mtmd_bitmap;
+}
+extern "C" {
+    pub fn mtmd_bitmap_init_rgb_c(
+        nx: u32,
+        ny: u32,
+        data: *const ::std::os::raw::c_uchar,
+    ) -> *mut mtmd_bitmap;
+}
+extern "C" {
+    pub fn mtmd_bitmap_free_c(bitmap: *mut mtmd_bitmap);
+}
+extern "C" {
+    pub fn mtmd_bitmap_get_nx_c(bitmap: *const mtmd_bitmap) -> u32;
+}
+extern "C" {
+    pub fn mtmd_bitmap_get_ny_c(bitmap: *const mtmd_bitmap) -> u32;
+}
+extern "C" {
+    pub fn mtmd_bitmap_get_n_bytes_c(bitmap: *const mtmd_bitmap) -> usize;
+}
+extern "C" {
+    pub fn mtmd_bitmap_get_id_c(bitmap: *const mtmd_bitmap) -> *const ::std::os::raw::c_char;
+}
+extern "C" {
+    pub fn mtmd_bitmap_set_id_c(bitmap: *mut mtmd_bitmap, id: *const ::std::os::raw::c_char);
+}
+extern "C" {
+    pub fn mtmd_input_chunks_init_c() -> *mut mtmd_input_chunks;
+}
+extern "C" {
+    pub fn mtmd_input_chunks_size_c(chunks: *const mtmd_input_chunks) -> usize;
+}
+extern "C" {
+    pub fn mtmd_input_chunks_get_c(
+        chunks: *const mtmd_input_chunks,
+        idx: usize,
+    ) -> *const mtmd_input_chunk;
+}
+extern "C" {
+    pub fn mtmd_input_chunks_free_c(chunks: *mut mtmd_input_chunks);
+}
+extern "C" {
+    pub fn mtmd_input_chunk_get_type_c(chunk: *const mtmd_input_chunk) -> ::std::os::raw::c_int;
+}
+extern "C" {
+    pub fn mtmd_input_chunk_get_tokens_text_c(
+        chunk: *const mtmd_input_chunk,
+        n_tokens_output: *mut usize,
+    ) -> *const i32;
+}
+extern "C" {
+    pub fn mtmd_input_chunk_get_tokens_image_c(
+        chunk: *const mtmd_input_chunk,
+    ) -> *const mtmd_image_tokens;
+}
+extern "C" {
+    pub fn mtmd_input_chunk_get_n_tokens_c(chunk: *const mtmd_input_chunk) -> usize;
+}
+extern "C" {
+    pub fn mtmd_input_chunk_get_n_pos_c(chunk: *const mtmd_input_chunk) -> i32;
+}
+extern "C" {
+    pub fn mtmd_image_tokens_get_n_tokens_c(image_tokens: *const mtmd_image_tokens) -> usize;
+}
+extern "C" {
+    pub fn mtmd_image_tokens_get_n_pos_c(image_tokens: *const mtmd_image_tokens) -> i32;
+}
+extern "C" {
+    pub fn mtmd_image_tokens_get_decoder_pos_c(
+        image_tokens: *const mtmd_image_tokens,
+        pos_0: i32,
+        i: usize,
+    ) -> mtmd_decoder_pos;
+}
+extern "C" {
+    pub fn mtmd_helper_get_n_tokens_c(chunks: *const mtmd_input_chunks) -> usize;
+}
+extern "C" {
+    pub fn mtmd_helper_get_n_pos_c(chunks: *const mtmd_input_chunks) -> i32;
+}
+extern "C" {
+    pub fn mtmd_tokenize_c(
+        ctx: *mut mtmd_context,
+        output: *mut mtmd_input_chunks,
+        text: *const ::std::os::raw::c_char,
+        add_special: bool,
+        parse_special: bool,
+        bitmaps: *mut *const mtmd_bitmap,
+        n_bitmaps: usize,
+    ) -> i32;
+}
+extern "C" {
+    pub fn mtmd_helper_eval_chunks_c(
+        ctx: *mut mtmd_context,
+        lctx: *mut ::std::os::raw::c_void,
+        chunks: *const mtmd_input_chunks,
+        n_past: i32,
+        seq_id: i32,
+        n_batch: i32,
+        logits_last: bool,
+        new_n_past: *mut i32,
+    ) -> i32;
 }
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]

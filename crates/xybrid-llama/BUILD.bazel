@@ -1,11 +1,22 @@
 # GATE 3: safe Rust wrapper over llama-cpp-sys. Builds once llama_cpp_sys links.
 load("@rules_rs//rs:rust_library.bzl", "rust_library")
 
+# Vision (mtmd safe wrappers) is Android-only — a mobile backend (see
+# llama-cpp-sys/BUILD.bazel). Desktop builds the base llama wrapper only.
+_ANDROID = [
+    "@rules_rs//rs/platforms/config:aarch64-linux-android",
+    "@rules_rs//rs/platforms/config:armv7-linux-androideabi",
+    "@rules_rs//rs/platforms/config:x86_64-linux-android",
+]
+
 rust_library(
     name = "xybrid_llama",
     srcs = glob(["src/**/*.rs"]),
     edition = "2021",
-    crate_features = ["bindings"],
+    crate_features = ["bindings"] + select({
+        cfg: ["vision"]
+        for cfg in _ANDROID
+    } | {"//conditions:default": []}),
     deps = [
         "//crates/llama-cpp-sys:llama_cpp_sys",
         "@crates//:thiserror",

@@ -195,10 +195,11 @@ fn generate_bindings(llama_cpp_dir: &Path, out_dir: &Path, ndk_root: Option<&str
 
     // Drift guard for the committed snapshot consumed under the
     // `committed-bindings` feature (the Bazel path, which cannot run bindgen).
-    // The snapshot is generated WITHOUT `vision`, so only a non-vision run
-    // produces comparable output. Warning (not error): bindgen output is not
+    // The snapshot is generated WITH `vision` (the Bazel llama chain is always
+    // vision-capable — it builds libmtmd), so only a vision run produces
+    // comparable output. Warning (not error): bindgen output is not
     // guaranteed byte-stable across bindgen/toolchain versions.
-    if !vision_enabled {
+    if vision_enabled {
         let committed = Path::new(&env::var("CARGO_MANIFEST_DIR").expect("cargo sets it"))
             .join("src")
             .join("bindings.rs");
