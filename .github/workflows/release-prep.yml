@@ -778,7 +778,7 @@ jobs:
             echo "- Precompiled native libraries auto-downloaded by cargokit"
             echo
             echo "**Unity**"
-            echo "- \`xybrid-unity-sdk-${TAG}.tar.gz\` — Native plugins (uploaded by Build Unity workflow)"
+            echo "- Install via OpenUPM (\`openupm add ai.xybrid.sdk\`); native libraries are published as \`xybrid-unity-native-<platform>-${TAG}.zip\` bundles + manifest (uploaded post-release by Build Unity) and fetched at import by the SDK"
             echo
             echo "**Swift (iOS/macOS)**"
             echo "- SPM: \`.package(url: \"https://github.com/${{ github.repository }}\", from: \"${TAG#v}\")\`"

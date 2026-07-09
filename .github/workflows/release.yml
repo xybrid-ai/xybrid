@@ -775,7 +775,7 @@ jobs:
           echo "- Precompiled native libraries auto-downloaded by cargokit (no Rust toolchain required)" >> CHANGELOG_RELEASE.md
           echo "" >> CHANGELOG_RELEASE.md
           echo "**Unity**" >> CHANGELOG_RELEASE.md
-          echo "- \`xybrid-unity-sdk-${CURRENT_TAG}.tar.gz\` - Native plugins for all platforms (uploaded by Build Unity workflow)" >> CHANGELOG_RELEASE.md
+          echo "- Install via OpenUPM (\`openupm add ai.xybrid.sdk\`); native libraries are published as \`xybrid-unity-native-<platform>-${CURRENT_TAG}.zip\` bundles + manifest (uploaded post-release by Build Unity) and fetched at import by the SDK" >> CHANGELOG_RELEASE.md
           echo "" >> CHANGELOG_RELEASE.md
           echo "**Swift (iOS/macOS)**" >> CHANGELOG_RELEASE.md
           echo "- SPM (recommended): \`.package(url: \"https://github.com/${{ github.repository }}\", exact: \"${CURRENT_TAG#v}\")\`" >> CHANGELOG_RELEASE.md
