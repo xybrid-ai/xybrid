@@ -1,0 +1,32 @@
+.github/workflows/test-ci.yml
+  s_7431c1432875d8::t_307e8d2e860543 390-421
+.github/workflows/release.yml
+  s_7431c1432875d8::t_307e8d2e860543 373-404
+.github/workflows/build-android.yml
+  s_7431c1432875d8::t_8e439b83cb2993 106-109,111-112,114-141
+  s_7431c1432875d8::t_205fea23a54150 54-56
+xtask/src/main.rs
+  s_7431c1432875d8::t_71e542e231ce4c 1281,1283-1288,1290-1292,1294-1296
+  s_7431c1432875d8::t_205fea23a54150 1301
+  s_7431c1432875d8::t_667800a4fed39d 1308,1312-1319,1321-1326,1328-1329,1331-1359,1363-1365
+tools/README.md
+  s_7431c1432875d8::t_a1cfc4d88dd2e0 110-117
+.github/workflows/release-prep.yml
+  s_7431c1432875d8::t_382ad2774b52b9 366-372,374-376,378-402
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "c272331d17b84544a7a98840c19a6d095fd6829a",
+  "prompts": {},
+  "sessions": {
+    "s_7431c1432875d8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "85304c2d-b335-4cc4-a3a6-e618040982d4",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
