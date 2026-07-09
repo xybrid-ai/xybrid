@@ -1,0 +1,19 @@
+crates/xybrid-core/src/execution/postprocessing/tensor_ops.rs
+  s_7431c1432875d8::t_3a98dc1b6b7033 58
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "c7db8a4e35b335fe9a404bfe128d21eaef749608",
+  "prompts": {},
+  "sessions": {
+    "s_7431c1432875d8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "85304c2d-b335-4cc4-a3a6-e618040982d4",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
