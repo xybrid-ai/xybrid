@@ -1278,79 +1278,91 @@ fn copy_dir_recursive(src: &PathBuf, dst: &PathBuf) -> Result<()> {
     Ok(())
 }
 
-/// Build Android .so files for specified ABIs
-/// Build Android `libxybrid-bolt.so` (+ bundled ORT runtime) for every
-/// ABI by delegating to `tools/scripts/build-android-bolt.sh`.
+/// Build the Android AAR (all shipped ABIs) via Bazel and stage its jniLibs.
 ///
-/// The wrapper script encodes everything the release pipeline needs to
-/// produce a working AAR:
+/// Delegates to `bazel build //bindings/kotlin:xybrid_kotlin_aar`, which
+/// produces the feature-complete 3-ABI AAR (text llama + candle voice + mtmd
+/// vision) and, per ABI, `libxybrid-bolt.so` (one clean linker output — 16 KB
+/// aligned, `libc++_shared.so` in DT_NEEDED, no patchelf) + the vendored
+/// `libonnxruntime.so` + `libc++_shared.so`. This replaces the retired
+/// `tools/scripts/build-android-bolt.sh` (boltffi pack + clang-shim relink).
 ///
-/// - NDK r27 toolchain env vars (`CC_/CXX_/AR_/CARGO_TARGET_*_LINKER` per
-///   ABI), so `cc-rs` can find the API-suffixed clang binaries that NDK
-///   r27+ ships and llama.cpp's CMake build links cleanly.
-/// - A two-phase build (`boltffi build android` with the real NDK, then
-///   `boltffi pack android --no-build` through a clang shim) with
-///   `--features platform-android` — pulls in
-///   `xybrid-core/{ort-dynamic, llm-llamacpp, candle}`. The shim injects
-///   `-lc++_shared` + `-Wl,-z,max-page-size=16384` into boltffi's final
-///   relink (which otherwise emits only `-lm -llog -ldl`), so the shipped
-///   `.so` is a clean linker output: 16 KB-aligned and with the C++ runtime
-///   in DT_NEEDED, with no post-link patchelf rewrite to corrupt under a
-///   consumer's AGP strip.
-/// - `libonnxruntime.so` from `vendor/ort-android/` bundled alongside
-///   `libxybrid-bolt.so` (ort-dynamic dlopens it at runtime).
-/// - `libc++_shared.so` from the NDK sysroot for every ABI (CMake builds
-///   llama.cpp / cpp-httplib / candle native deps with
-///   `-DANDROID_STL=c++_shared`).
+/// The AAR's `jni/<abi>/` payload is staged into `bindings/kotlin/libs/` — the
+/// layout Gradle publishes from. Uses BuildBuddy RBE when a config is present,
+/// else a local build (the NDK is a pinned Bazel download; no machine setup).
 ///
-/// The `--abi` / `--release` / `--version` knobs that the previous
-/// uniffi-based implementation exposed via clap are accepted for
-/// interface compatibility but the script always builds every ABI in
-/// `bindings/kotlin/build.gradle.kts`'s `abiFilters`. Per-ABI selection
-/// is a niche dev-loop request, not something the release pipeline
-/// needs; if a tighter loop is necessary again it can land as a script
-/// flag.
+/// The `--abi` knob is accepted for interface compatibility but ignored: the
+/// AAR always builds every ABI in `bindings/kotlin/build.gradle.kts`'s
+/// `abiFilters`.
 fn build_android(release: bool, abis: Vec<AndroidAbi>, version: &str) -> Result<()> {
     let profile = if release { "release" } else { "debug" };
     if !abis.is_empty() {
         eprintln!(
-            "warning: --abi filter ignored; build-android-bolt.sh always builds every ABI \
+            "warning: --abi filter ignored; the Bazel AAR always builds every ABI \
              configured in bindings/kotlin/build.gradle.kts. Requested: {:?}",
             abis.iter().map(|a| a.ndk_arch()).collect::<Vec<_>>()
         );
     }
 
     println!(
-        "Building Android .so files via boltffi ({} mode, version {})...",
+        "Building the Android AAR via Bazel ({} mode, version {})...",
         profile, version
     );
 
-    let script = PathBuf::from("tools/scripts/build-android-bolt.sh");
-    if !script.is_file() {
-        anyhow::bail!(
-            "Wrapper script missing at {} — repo is in an inconsistent state",
-            script.display()
-        );
+    // Build the feature-complete 3-ABI AAR (text + candle voice + mtmd vision).
+    // Use RBE if a BuildBuddy config is present (.context/buildbuddy.bazelrc,
+    // gitignored — CI writes it from a secret); otherwise a local build. The NDK
+    // is a pinned Bazel download, so no machine setup is needed either way.
+    let compilation_mode = if release { "opt" } else { "fastbuild" };
+    let mut args: Vec<String> = vec!["build".into()];
+    if PathBuf::from(".context/buildbuddy.bazelrc").is_file() {
+        args.push("--config=remote".into());
     }
-    let mut cmd = Command::new("bash");
-    cmd.arg(&script);
-    // The wrapper defaults to a `--release` pack; `DEBUG=1` switches it to an
-    // unoptimized debug build (faster compile, symbols/asserts for native
-    // Android debugging).
-    if !release {
-        cmd.env("DEBUG", "1");
-    }
-    let status = cmd
+    args.push("-c".into());
+    args.push(compilation_mode.into());
+    args.push("//bindings/kotlin:xybrid_kotlin_aar".into());
+
+    let status = Command::new("bazelisk")
+        .args(&args)
         .status()
-        .with_context(|| format!("Failed to invoke {}", script.display()))?;
+        .or_else(|_| Command::new("bazel").args(&args).status())
+        .context("Failed to run bazelisk/bazel — is Bazel installed?")?;
     if !status.success() {
-        anyhow::bail!("{} failed", script.display());
+        anyhow::bail!("bazel build //bindings/kotlin:xybrid_kotlin_aar failed");
+    }
+
+    // Stage the AAR's jniLibs into bindings/kotlin/libs/ — the layout Gradle
+    // publishes from and the CI verify/dlopen-gate steps consume.
+    let aar = "bazel-bin/bindings/kotlin/xybrid-kotlin.aar";
+    let libs = PathBuf::from("bindings/kotlin/libs");
+    let _ = std::fs::remove_dir_all(&libs);
+    std::fs::create_dir_all(&libs).context("create bindings/kotlin/libs")?;
+    let extract = PathBuf::from("target/aar-jnilibs");
+    let _ = std::fs::remove_dir_all(&extract);
+    if !Command::new("unzip")
+        .args(["-o", "-q", aar, "jni/*", "-d", extract.to_str().unwrap()])
+        .status()
+        .context("extract the AAR jniLibs")?
+        .success()
+    {
+        anyhow::bail!("failed to extract jniLibs from {aar}");
+    }
+    if !Command::new("cp")
+        .args([
+            "-a",
+            &format!("{}/jni/.", extract.display()),
+            libs.to_str().unwrap(),
+        ])
+        .status()?
+        .success()
+    {
+        anyhow::bail!("failed to stage jniLibs into {}", libs.display());
     }
 
     println!();
-    println!("✓ Android build successful!");
-    println!("  Version: {}", version);
-    println!("  Output:  bindings/kotlin/libs/{{abi}}/libxybrid-bolt.so");
+    println!("✓ Android AAR built via Bazel ({compilation_mode} mode).");
+    println!("  Version: {version}");
+    println!("  Output:  bindings/kotlin/libs/{{abi}}/*.so");
 
     Ok(())
 }
