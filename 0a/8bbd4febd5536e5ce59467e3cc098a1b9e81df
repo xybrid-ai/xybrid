@@ -1,0 +1,21 @@
+.agents/skills/test-model/SKILL.md
+  s_6d388b750babe3::t_2a63a18518ff5f 1-133
+.agents/skills/xybrid-init/SKILL.md
+  s_6d388b750babe3::t_3a122df842af53 1-330
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "0a8bbd4febd5536e5ce59467e3cc098a1b9e81df",
+  "prompts": {},
+  "sessions": {
+    "s_6d388b750babe3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "66e1d567-1e9b-4a5d-ac30-e8e71c3b2d0b",
+        "model": "unknown"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
