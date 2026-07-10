@@ -1,0 +1,23 @@
+rules_foreign_cc.patch
+  s_6d388b750babe3::t_13b2b063ac088a 217,222,232,241,246
+BUILD.bazel
+  s_6d388b750babe3::t_ce0a2fec3df663 147
+.bazelrc
+  s_6d388b750babe3::t_ceaefbbfc8d7b7 39-40
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "e4ac292c12a16b7f56f59c186fa48a9dc15ebe37",
+  "prompts": {},
+  "sessions": {
+    "s_6d388b750babe3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "66e1d567-1e9b-4a5d-ac30-e8e71c3b2d0b",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
