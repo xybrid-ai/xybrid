@@ -144,7 +144,7 @@ cmake(
     # which has its own rule, does). Copy the built ggml archives into lib/ so
     # rfcc can collect them. No-op on other platforms (proven install works there).
     postfix_script = select({
-        "@rules_rs//rs/platforms/config:x86_64-pc-windows-gnu": "find $$BUILD_TMPDIR -name '*.a' -exec cp -f {} $$INSTALLDIR/lib/ \\;",
+        "@rules_rs//rs/platforms/config:x86_64-pc-windows-gnu": "mkdir -p $$INSTALLDIR/lib && find $$BUILD_TMPDIR -name '*.a' -exec cp -f {} $$INSTALLDIR/lib/ \\;",
         "//conditions:default": "",
     }),
     visibility = ["//visibility:public"],

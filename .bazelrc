@@ -36,13 +36,8 @@ build:android-x86_64 --compilation_mode=opt
 # x86_64-pc-windows-gnu PE — NOT the MSVC binary today's cargo windows-latest
 # build ships. Combine with --config=remote so exec=Linux RBE.
 build:windows --platforms=@rules_rs//rs/platforms:x86_64-pc-windows-gnu
-# hermetic-llvm defaults -fstack-protector, but its MinGW sysroot ships no libssp
-# (-lssp/-lssp_nonshared), so any windows-gnu link fails. Append -fno-stack-protector
-# (wins over the default) for C/C++ compiles+links; rustc compiles are unaffected
-# (--copt is C-only). llama builds static libs, so this only needs the compile side,
-# but the linkopt keeps cmake's compiler-probe link and the final exe link clean.
-build:windows --copt=-fno-stack-protector
-build:windows --linkopt=-fno-stack-protector
+# (-fstack-protector, which needs a libssp hermetic-llvm's MinGW sysroot doesn't
+# ship, is disabled for windows at the toolchain level in hermetic_llvm.patch.)
 
 # On Linux hosts, rules_rs' experimental toolchains need an explicit host platform
 # with libc constraints (//:host_linux_gnu, root BUILD.bazel). The enable flag

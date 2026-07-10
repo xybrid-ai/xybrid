@@ -214,12 +214,12 @@ index 0000000..0000000 100644
      name = "built_make",
      env = select({
 -        "@platforms//os:windows": {"MAKE": "$(execpath :make_tool)/bin/make.exe"},
-+        "@platforms//os:windows": {"MAKE": "$(execpath :make_tool)/bin/make"},
++        "@bazel_tools//src/conditions:host_windows": {"MAKE": "$(execpath :make_tool)/bin/make.exe"},
          "//conditions:default": {"MAKE": "$(execpath :make_tool)/bin/make"},
      }),
      path = select({
 -        "@platforms//os:windows": "$(execpath :make_tool)/bin/make.exe",
-+        "@platforms//os:windows": "$(execpath :make_tool)/bin/make",
++        "@bazel_tools//src/conditions:host_windows": "$(execpath :make_tool)/bin/make.exe",
          "//conditions:default": "$(execpath :make_tool)/bin/make",
      }),
      target = ":make_tool",
@@ -229,7 +229,7 @@ index 0000000..0000000 100644
      name = "preinstalled_m4",
      path = select({
 -        "@platforms//os:windows": "m4.exe",
-+        "@platforms//os:windows": "m4",
++        "@bazel_tools//src/conditions:host_windows": "m4.exe",
          "//conditions:default": "m4",
      }),
  )
@@ -238,12 +238,12 @@ index 0000000..0000000 100644
      name = "built_pkgconfig",
      env = select({
 -        "@platforms//os:windows": {"PKG_CONFIG": "$(execpath :pkgconfig_tool)"},
-+        "@platforms//os:windows": {"PKG_CONFIG": "$(execpath :pkgconfig_tool)/bin/pkg-config"},
++        "@bazel_tools//src/conditions:host_windows": {"PKG_CONFIG": "$(execpath :pkgconfig_tool)"},
          "//conditions:default": {"PKG_CONFIG": "$(execpath :pkgconfig_tool)/bin/pkg-config"},
      }),
      path = select({
 -        "@platforms//os:windows": "$(execpath :pkgconfig_tool)",
-+        "@platforms//os:windows": "$(execpath :pkgconfig_tool)/bin/pkg-config",
++        "@bazel_tools//src/conditions:host_windows": "$(execpath :pkgconfig_tool)",
          "//conditions:default": "$(execpath :pkgconfig_tool)/bin/pkg-config",
      }),
      target = ":pkgconfig_tool",
