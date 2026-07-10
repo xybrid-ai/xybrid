@@ -1,0 +1,12 @@
+diff --git a/toolchain/features/legacy/BUILD.bazel b/toolchain/features/legacy/BUILD.bazel
+index 0000000..0000000 100644
+--- a/toolchain/features/legacy/BUILD.bazel
++++ b/toolchain/features/legacy/BUILD.bazel
+@@ -21,4 +21,7 @@
+     args = select({
+         "@platforms//os:none": [],
++        # xybrid: hermetic-llvm's MinGW sysroot ships no libssp, so -fstack-protector
++        # makes clang's MinGW driver pull -lssp/-lssp_nonshared at link (undefined ref).
++        "@platforms//os:windows": [],
+         "//conditions:default": ["-fstack-protector"],
+     }) + [
