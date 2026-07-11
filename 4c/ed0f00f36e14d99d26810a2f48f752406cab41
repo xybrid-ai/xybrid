@@ -1,0 +1,25 @@
+.github/workflows/bazel.yml
+  s_6d388b750babe3::t_294b92e29f3e18 22-23,28,45-46,51
+  s_6d388b750babe3::t_5e4c01bc8b43ef 125-140
+.bazelrc
+  s_6d388b750babe3::t_c126ccd7e53817 39-46
+MODULE.bazel
+  s_6d388b750babe3::t_4efcd6c6c175ea 156-180
+  s_6d388b750babe3::t_9f15865beab61f 238-244,246
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.12",
+  "base_commit_sha": "4ced0f00f36e14d99d26810a2f48f752406cab41",
+  "prompts": {},
+  "sessions": {
+    "s_6d388b750babe3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "66e1d567-1e9b-4a5d-ac30-e8e71c3b2d0b",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
