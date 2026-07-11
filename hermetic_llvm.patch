@@ -22,7 +22,7 @@ index 065900f..ca85123 100644
  
  #ifdef _WIN32
  #include <process.h>
-@@ -63,8 +64,49 @@ static const char *required_env(const char *name) {
+@@ -63,8 +64,51 @@ static const char *required_env(const char *name) {
      return value;
  }
  
@@ -45,6 +45,8 @@ index 065900f..ca85123 100644
 + * directories (e.g. cmake's try-compile scratch dirs) but export the
 + * execroot as EXT_BUILD_ROOT; fall back to resolving against it when the
 + * relative path does not exist from the current working directory.
++ * The resolved allocation is intentionally not freed: the wrapper either
++ * exec()s (never returns) or exits within milliseconds of its subprocesses.
 + */
 +static const char *resolve_tool(const char *path) {
 +    if (is_absolute(path) || path_exists(path)) {
