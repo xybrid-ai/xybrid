@@ -23,6 +23,16 @@ single_version_override(
     version = "0.0.95",
 )
 bazel_dep(name = "llvm", version = "0.8.11")
+
+# hermetic-llvm fix (report upstream): toolchain/features/legacy adds
+# -fstack-protector unconditionally, but the module ships NO libssp — so clang's
+# MinGW driver pulls -lssp/-lssp_nonshared at link time and every windows-gnu
+# link fails with "unable to find library -lssp". Gate it off for windows.
+single_version_override(
+    module_name = "llvm",
+    patch_strip = 1,
+    patches = ["//:hermetic_llvm.patch"],
+)
 bazel_dep(name = "hermetic_launcher", version = "0.0.11")
 
 # rules_cc must be a direct dep so the `@rules_cc//...` flag in .bazelrc resolves.
@@ -177,6 +187,8 @@ crate.from_cargo(
     cargo_toml = "//:Cargo.toml",
     platform_triples = [
         "x86_64-unknown-linux-gnu",
+        # Desktop Windows cross (GNU/MinGW ABI — hermetic-llvm ships no MSVC CRT).
+        "x86_64-pc-windows-gnu",
         "aarch64-apple-darwin",
         "aarch64-linux-android",
         "armv7-linux-androideabi",
@@ -190,4 +202,15 @@ crate.annotation(
     },
     allow_build_script_to_detect_nonhermetic_paths = True,
 )
+
+# NOTE: Windows Rust CLI (raw-dylib -> dlltool) is a deliberate follow-up, not
+# wired here. The windows/windows-sys 0.61 family + ort-sys/getrandom/... emit
+# #[link(kind="raw-dylib")], so rustc needs `dlltool` at compile time. The tool
+# (hermetic-llvm's llvm-dlltool) is a symlink into the ~100MB multicall `llvm`
+# binary and can only be STAGED for the rustc compile by the toolchain machinery,
+# which is not reachable from crate.annotation / rules_rs (rules_rust is
+# extension-generated, so unpatchable; it doesn't consume llvm_tools for compile).
+# The C/C++ half (//:llama for windows-gnu) IS green. See
+# .context/bazel-windows-cli-progress.md for the full analysis + the proper fix
+# (patch hermetic-llvm's cc toolchain to ship dlltool).
 use_repo(crate, "crates")

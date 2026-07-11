@@ -14,6 +14,14 @@ PLATFORMS = [
     "@rules_rs//rs/platforms/config:x86_64-unknown-linux-gnu",
 ]
 
+# Android's `platform-android` preset expansion, set directly (Bazel doesn't
+# propagate the preset across crates). Mirrors sdk's platform-android.
+_SDK_ANDROID = [
+    "candle",
+    "llm-llamacpp-vision",
+    "platform-android",
+]
+
 # Filter out "//macros" from normal dependencies before generating the select() block
 original_sdk_deps = DEP_DATA.get("crates/xybrid-sdk", {})
 filtered_sdk_deps = dict(original_sdk_deps)
@@ -29,6 +37,9 @@ rust_library(
     ] + select({
         "@rules_rs//rs/platforms/config:x86_64-unknown-linux-gnu": ["platform-desktop"],
         "@rules_rs//rs/platforms/config:aarch64-apple-darwin": ["platform-macos"],
+        "@rules_rs//rs/platforms/config:aarch64-linux-android": _SDK_ANDROID,
+        "@rules_rs//rs/platforms/config:armv7-linux-androideabi": _SDK_ANDROID,
+        "@rules_rs//rs/platforms/config:x86_64-linux-android": _SDK_ANDROID,
         "//conditions:default": [],
     }),
     proc_macro_deps = ["//macros"],

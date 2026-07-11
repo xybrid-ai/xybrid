@@ -31,6 +31,14 @@ build:android-armv7 --compilation_mode=opt
 build:android-x86_64 --platforms=@rules_rs//rs/platforms:x86_64-linux-android
 build:android-x86_64 --compilation_mode=opt
 
+# Desktop Windows, cross-compiled from Linux RBE (no Windows runner needed).
+# hermetic-llvm ships a MinGW (GNU-ABI) sysroot only, so this produces an
+# x86_64-pc-windows-gnu PE — NOT the MSVC binary today's cargo windows-latest
+# build ships. Combine with --config=remote so exec=Linux RBE.
+build:windows --platforms=@rules_rs//rs/platforms:x86_64-pc-windows-gnu
+# (-fstack-protector, which needs a libssp hermetic-llvm's MinGW sysroot doesn't
+# ship, is disabled for windows at the toolchain level in hermetic_llvm.patch.)
+
 # On Linux hosts, rules_rs' experimental toolchains need an explicit host platform
 # with libc constraints (//:host_linux_gnu, root BUILD.bazel). The enable flag
 # makes `common:linux` auto-apply on Linux hosts (no-op on macOS: no macos config).

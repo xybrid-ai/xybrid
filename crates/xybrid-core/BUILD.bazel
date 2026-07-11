@@ -19,12 +19,21 @@
 load("@rules_rs//rs:rust_library.bzl", "rust_library")
 load("@crates//:defs.bzl", "all_crate_deps")
 
+# Android ships the `platform-android` backend set: candle (Whisper ASR/voice) +
+# llm-llamacpp-vision (mtmd multimodal). Bazel has no cross-crate feature
+# propagation, so the preset's expansion is set directly on each first-party box
+# — this is core's slice. (ort-dynamic is a no-op marker; linking is cfg-driven.)
+_ANDROID_BACKENDS = [
+    "candle",
+    "llm-llamacpp-vision",
+]
+
 rust_library(
     name = "xybrid-core",
     srcs = glob(["src/**/*.rs"]),
     edition = "2021",
-    # Resolved from the real Cargo.lock by the @crates hub (DEP_DATA). Apple-only
-    # accel features are gated to the darwin platform exactly as cargo unifies them.
+    # Resolved from the real Cargo.lock by the @crates hub (DEP_DATA). Backend
+    # accel features are gated per-platform exactly as cargo's presets unify them.
     crate_features = [
         "default",
         "llm-llamacpp",
@@ -41,6 +50,9 @@ rust_library(
             "candle-nn",
             "ort-coreml",
         ],
+        "@rules_rs//rs/platforms/config:aarch64-linux-android": _ANDROID_BACKENDS,
+        "@rules_rs//rs/platforms/config:armv7-linux-androideabi": _ANDROID_BACKENDS,
+        "@rules_rs//rs/platforms/config:x86_64-linux-android": _ANDROID_BACKENDS,
         "//conditions:default": [],
     }),
     deps = all_crate_deps(normal = True),

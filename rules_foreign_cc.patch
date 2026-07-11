@@ -205,3 +205,46 @@ index d96af9e..b50b16a 100644
  
  def built_tool_rule_impl(ctx, script_lines, out_dir, mnemonic, additional_tools = None):
      """Framework function for bootstrapping C/C++ build tools.
+diff --git a/toolchains/private/BUILD.bazel b/toolchains/private/BUILD.bazel
+index 0000000..0000000 100644
+--- a/toolchains/private/BUILD.bazel
++++ b/toolchains/private/BUILD.bazel
+@@ -29,12 +29,12 @@
+ native_tool_toolchain(
+     name = "built_make",
+     env = select({
+-        "@platforms//os:windows": {"MAKE": "$(execpath :make_tool)/bin/make.exe"},
++        "@bazel_tools//src/conditions:host_windows": {"MAKE": "$(execpath :make_tool)/bin/make.exe"},
+         "//conditions:default": {"MAKE": "$(execpath :make_tool)/bin/make"},
+     }),
+     path = select({
+-        "@platforms//os:windows": "$(execpath :make_tool)/bin/make.exe",
++        "@bazel_tools//src/conditions:host_windows": "$(execpath :make_tool)/bin/make.exe",
+         "//conditions:default": "$(execpath :make_tool)/bin/make",
+     }),
+     target = ":make_tool",
+ )
+@@ -142,7 +142,7 @@
+ native_tool_toolchain(
+     name = "preinstalled_m4",
+     path = select({
+-        "@platforms//os:windows": "m4.exe",
++        "@bazel_tools//src/conditions:host_windows": "m4.exe",
+         "//conditions:default": "m4",
+     }),
+ )
+@@ -164,12 +164,12 @@
+ native_tool_toolchain(
+     name = "built_pkgconfig",
+     env = select({
+-        "@platforms//os:windows": {"PKG_CONFIG": "$(execpath :pkgconfig_tool)"},
++        "@bazel_tools//src/conditions:host_windows": {"PKG_CONFIG": "$(execpath :pkgconfig_tool)"},
+         "//conditions:default": {"PKG_CONFIG": "$(execpath :pkgconfig_tool)/bin/pkg-config"},
+     }),
+     path = select({
+-        "@platforms//os:windows": "$(execpath :pkgconfig_tool)",
++        "@bazel_tools//src/conditions:host_windows": "$(execpath :pkgconfig_tool)",
+         "//conditions:default": "$(execpath :pkgconfig_tool)/bin/pkg-config",
+     }),
+     target = ":pkgconfig_tool",
+ )
