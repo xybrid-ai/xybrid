@@ -1,0 +1,23 @@
+hermetic_llvm.patch
+  s_6d388b750babe3::t_628c4cfe1adc21 48-49
+  s_6d388b750babe3::t_f713b6e6baea1c 25
+BUILD.bazel
+  s_6d388b750babe3::t_29c2399646af32 124-131
+  s_6d388b750babe3::t_8b64596a43f93d 137-147
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.12",
+  "base_commit_sha": "baf63a58bbc356de54953dc4d9f5988568f97c40",
+  "prompts": {},
+  "sessions": {
+    "s_6d388b750babe3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "66e1d567-1e9b-4a5d-ac30-e8e71c3b2d0b",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
