@@ -200,7 +200,42 @@ crate.annotation(
     build_script_env = {
         "ORT_CACHE_DIR": "/tmp",
     },
+    # darwin: hand ort-sys the vendored static onnxruntime instead of letting
+    # its build script download one — a build-time download is incompatible
+    # with RBE (the file isn't a tracked output, so it never reaches the
+    # rlib-compile action). ${pwd} = the action's execroot at runtime.
+    # `data` stages the .a for the rlib compile itself (rustc bundles static
+    # libs into the rlib); no per-triple data attr exists, so it's staged for
+    # all platforms — input-only, outputs unchanged.
+    build_script_data_select = {
+        "aarch64-apple-darwin": ["@@//:ort_macos_arm64"],
+    },
+    build_script_env_select = {
+        "aarch64-apple-darwin": "{\"ORT_LIB_LOCATION\": \"$${pwd}/vendor/ort-macos/aarch64-apple-darwin\"}",
+    },
+    data = ["@@//:ort_macos_arm64"],
     allow_build_script_to_detect_nonhermetic_paths = True,
+)
+
+# ort-sys's darwin build script pulls these two helper crates, whose features
+# the hub keys on aarch64-apple-darwin (conditional_crate_features). Build-
+# script deps compile in the EXEC config, where that config_setting doesn't
+# match (linux RBE worker) -> the crates lose std/default and the bs fails
+# trait resolution. Features are ADD-ONLY here, and neither crate has any
+# other consumer in the lock, so hoisting the darwin features to the base is
+# a no-op everywhere else. (Same exec-vs-target class as the bs-deps fix in
+# rules_rs.patch, one level down the dep tree.)
+crate.annotation(
+    crate = "lzma-rust2",
+    crate_features = [
+        "optimization",
+        "std",
+    ],
+)
+
+crate.annotation(
+    crate = "hmac-sha256",
+    crate_features = ["default"],
 )
 
 # NOTE: Windows Rust CLI (raw-dylib -> dlltool) is a deliberate follow-up, not
