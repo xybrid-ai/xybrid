@@ -36,6 +36,14 @@ build:android-x86_64 --compilation_mode=opt
 # x86_64-pc-windows-gnu PE — NOT the MSVC binary today's cargo windows-latest
 # build ships. Combine with --config=remote so exec=Linux RBE.
 build:windows --platforms=@rules_rs//rs/platforms:x86_64-pc-windows-gnu
+
+# Desktop macOS (CPU lane), cross-compiled from Linux RBE via hermetic clang +
+# @macos_sdk. Metal/Accelerate stay OFF (//:llama default arm): CPU-only is
+# the lane that can leave the Mac — Metal/Swift/xcframework need Xcode.
+# ort is satisfied by the vendored static lib (vendor/ort-macos, see the
+# ort-sys annotation in MODULE.bazel) instead of ort's build-time download,
+# which is structurally incompatible with remote execution.
+build:macos --platforms=@rules_rs//rs/platforms:aarch64-apple-darwin
 # (-fstack-protector, which needs a libssp hermetic-llvm's MinGW sysroot doesn't
 # ship, is disabled for windows at the toolchain level in hermetic_llvm.patch.)
 

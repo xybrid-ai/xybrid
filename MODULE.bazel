@@ -153,6 +153,31 @@ register_toolchains("@llvm//toolchain:all")
 
 # Hermetic macOS SDK (replaces xcrun) — needed on darwin host/target.
 osx = use_extension("@llvm//extensions:osx.bzl", "osx")
+
+# The macOS-CPU CLI links frameworks pulled in by the darwin dep graph
+# (objc2-metal/-io-kit/-core-ml, sysinfo, candle-metal — link directives fire
+# even though the GPU code paths are cfg'd off). The extension's default
+# framework set is minimal, and the tag REPLACES the defaults, so list them
+# too. Stub-only (.tbd) — cheap to include.
+osx.frameworks(names = [
+    # extension defaults
+    "CoreFoundation",
+    "Foundation",
+    "Kernel",
+    "OSLog",
+    "Security",
+    "SystemConfiguration",
+    # linked by the darwin closure
+    "Accelerate",
+    "CoreGraphics",
+    "CoreML",
+    "CoreVideo",
+    "IOKit",
+    "IOSurface",
+    "Metal",
+    "MetalPerformanceShaders",
+    "MetalPerformanceShadersGraph",
+])
 use_repo(osx, "macos_sdk")
 
 # --- Rust toolchain: rules_rs (facade over rules_rust) ------------------------
@@ -210,8 +235,15 @@ crate.annotation(
     build_script_data_select = {
         "aarch64-apple-darwin": ["@@//:ort_macos_arm64"],
     },
+    # CC=/usr/bin/false: ort-sys's bs probes `$CC --print-search-dirs` to find
+    # Xcode's clang_rt dir and, on success, emits -lclang_rt.osx — which only
+    # Xcode's clang ships (under the hermetic toolchain the probe "succeeds"
+    # with a mangled linux path and the link dies on the missing lib). A failed
+    # probe takes the graceful None branch: no bogus -L, no -lclang_rt.osx.
+    # Correct here: hermetic-llvm links its own compiler-rt builtins explicitly.
+    # CC is otherwise unused by this bs (no C compiled on the LIB_LOCATION path).
     build_script_env_select = {
-        "aarch64-apple-darwin": "{\"ORT_LIB_LOCATION\": \"$${pwd}/vendor/ort-macos/aarch64-apple-darwin\"}",
+        "aarch64-apple-darwin": "{\"ORT_LIB_LOCATION\": \"$${pwd}/vendor/ort-macos/aarch64-apple-darwin\", \"CC\": \"/usr/bin/false\"}",
     },
     data = ["@@//:ort_macos_arm64"],
     allow_build_script_to_detect_nonhermetic_paths = True,

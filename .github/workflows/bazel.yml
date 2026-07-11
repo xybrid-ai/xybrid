@@ -19,10 +19,13 @@ on:
       - "**/BUILD.bazel"
       - "rules_android_ndk.patch"
       - "rules_foreign_cc.patch"
+      - "rules_rs.patch"
+      - "hermetic_llvm.patch"
       - "crates/**"
       - "bindings/kotlin/**"
       - "macros/**"
       - "vendor/llama-cpp"
+      - "vendor/ort-macos/**"
       - "Cargo.toml"
       - "Cargo.lock"
       - ".github/workflows/bazel.yml"
@@ -39,10 +42,13 @@ on:
       - "**/BUILD.bazel"
       - "rules_android_ndk.patch"
       - "rules_foreign_cc.patch"
+      - "rules_rs.patch"
+      - "hermetic_llvm.patch"
       - "crates/**"
       - "bindings/kotlin/**"
       - "macros/**"
       - "vendor/llama-cpp"
+      - "vendor/ort-macos/**"
       - "Cargo.toml"
       - "Cargo.lock"
       - ".github/workflows/bazel.yml"
@@ -115,6 +121,22 @@ jobs:
             //:llama \
             //crates/llama-cpp-sys:llama_cpp_sys \
             //crates/xybrid-llama:xybrid_llama
+
+      # Desktop lanes on RBE: linux CLI (native) + the macOS-CPU cross
+      # (hermetic clang + @macos_sdk + vendored ort; Metal/Swift stay Mac-bound
+      # and are NOT built here) + the windows-gnu llama core (PR #343). Keeps
+      # the shared cache warm so a future Mac lane PULLS the shared graph
+      # instead of recompiling it — the cache-fed-Mac model.
+      - name: Build desktop lanes on RBE (linux CLI, macOS-CPU cross, windows llama)
+        if: env.BUILDBUDDY_API_KEY != ''
+        run: |
+          bazelisk build --config=remote \
+            //crates/xybrid-cli:xybrid
+          bazelisk build --config=remote --config=macos \
+            //crates/xybrid-cli:xybrid \
+            //crates/xybrid-bolt:xybrid_bolt_staticlib
+          bazelisk build --config=remote --config=windows \
+            //:llama
 
       # The RBE-proven Android row (PR #326 gates 6-10): NDK cross-compile +
       # one-link .so + complete AAR. ABI fan-out (arm64-v8a / armeabi-v7a /
