@@ -1,0 +1,21 @@
+.github/workflows/release-prep.yml
+  s_6d388b750babe3::t_b1737c81d7600f 645-646,661-662
+.github/workflows/bazel.yml
+  s_6d388b750babe3::t_6e3fad6be842a1 146-148,152-154
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.12",
+  "base_commit_sha": "932e06411028067580f810b2a268d07f5cfba2af",
+  "prompts": {},
+  "sessions": {
+    "s_6d388b750babe3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "66e1d567-1e9b-4a5d-ac30-e8e71c3b2d0b",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
