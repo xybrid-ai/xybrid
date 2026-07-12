@@ -142,7 +142,7 @@ type GenerateOptions = {
 };
 ```
 
-`auto` 优先使用 WebGPU，在 WebGPU 不可用时使用 wasm；显式指定 `webgpu` 时不会回退而是直接失败。在 LLM 界面上，`webgpu` 对应引擎的 GPU 后端，`wasm` 对应其 CPU 后端。LiteRT 仍可能在 CPU 上执行不支持的 WebGPU 算子——通过 `isFullyAccelerated` 判断计算图是否完全委托给 GPU。
+`auto` 优先使用 WebGPU，在 WebGPU 不可用或其尝试失败时回退到 wasm；显式指定 `webgpu` 时不会回退而是直接失败。在 LLM 界面上，`webgpu` 对应引擎的 GPU 后端，`wasm` 对应其 CPU 后端。LiteRT 仍可能在 CPU 上执行不支持的 WebGPU 算子——通过 `isFullyAccelerated` 判断计算图是否完全委托给 GPU。
 
 ### 错误处理
 

@@ -142,7 +142,7 @@ type GenerateOptions = {
 };
 ```
 
-`auto` prefers WebGPU and uses wasm when WebGPU is unavailable; explicit `webgpu` fails instead of falling back. On the LLM surface `webgpu` maps to the engine's GPU backend and `wasm` to its CPU backend. LiteRT may still execute unsupported WebGPU operations on CPU — check `isFullyAccelerated` to distinguish a fully delegated graph.
+`auto` prefers WebGPU and falls back to wasm when WebGPU is unavailable or its attempt fails; explicit `webgpu` fails instead of falling back. On the LLM surface `webgpu` maps to the engine's GPU backend and `wasm` to its CPU backend. LiteRT may still execute unsupported WebGPU operations on CPU — check `isFullyAccelerated` to distinguish a fully delegated graph.
 
 ### Error Handling
 
