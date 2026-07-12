@@ -10,3 +10,86 @@ index 0000000..0000000 100644
 +        "@platforms//os:windows": [],
          "//conditions:default": ["-fstack-protector"],
      }) + [
+diff --git a/tools/internal/link_wrapper.c b/tools/internal/link_wrapper.c
+index 065900f..ca85123 100644
+--- a/tools/internal/link_wrapper.c
++++ b/tools/internal/link_wrapper.c
+@@ -2,6 +2,7 @@
+ #include <stdio.h>
+ #include <stdlib.h>
+ #include <string.h>
++#include <sys/stat.h>
+ 
+ #ifdef _WIN32
+ #include <process.h>
+@@ -63,8 +64,51 @@ static const char *required_env(const char *name) {
+     return value;
+ }
+ 
++static int path_exists(const char *path) {
++    struct stat st;
++    return stat(path, &st) == 0;
++}
++
++static int is_absolute(const char *path) {
++    if (path[0] == '/' || path[0] == '\\') {
++        return 1;
++    }
++    return path[0] != '\0' && path[1] == ':';
++}
++
++/*
++ * Bazel passes tool paths relative to the execution root and runs actions
++ * with cwd == execroot, so relative paths normally resolve as-is. Consumers
++ * like rules_foreign_cc re-invoke the toolchain from other working
++ * directories (e.g. cmake's try-compile scratch dirs) but export the
++ * execroot as EXT_BUILD_ROOT; fall back to resolving against it when the
++ * relative path does not exist from the current working directory.
++ * The resolved allocation is intentionally not freed: the wrapper either
++ * exec()s (never returns) or exits within milliseconds of its subprocesses.
++ */
++static const char *resolve_tool(const char *path) {
++    if (is_absolute(path) || path_exists(path)) {
++        return path;
++    }
++    const char *root = getenv("EXT_BUILD_ROOT");
++    if (root == NULL || root[0] == '\0') {
++        return path;
++    }
++    size_t len = strlen(root) + 1 + strlen(path) + 1;
++    char *resolved = malloc(len);
++    if (resolved == NULL) {
++        return path;
++    }
++    snprintf(resolved, len, "%s/%s", root, path);
++    if (path_exists(resolved)) {
++        return resolved;
++    }
++    free(resolved);
++    return path;
++}
++
+ int main(int argc, char **argv) {
+-    const char *clangxx = required_env("LLVM_CLANGXX");
++    const char *clangxx = resolve_tool(required_env("LLVM_CLANGXX"));
+     const char *strip_debug_symbols = getenv("LLVM_STRIP_DEBUG_SYMBOLS");
+     int should_strip_debug_symbols = strip_debug_symbols != NULL && strip_debug_symbols[0] != '\0';
+ 
+@@ -80,7 +122,7 @@ int main(int argc, char **argv) {
+     }
+ 
+     const char *link_output = required_env("LLVM_LINK_OUTPUT");
+-    const char *dsymutil = required_env("LLVM_DSYMUTIL");
++    const char *dsymutil = resolve_tool(required_env("LLVM_DSYMUTIL"));
+ 
+     char *dsym_args[] = {
+         (char *)dsymutil,
+@@ -95,7 +137,7 @@ int main(int argc, char **argv) {
+         return status;
+     }
+ 
+-    const char *strip = required_env("LLVM_STRIP");
++    const char *strip = resolve_tool(required_env("LLVM_STRIP"));
+     char *strip_args[] = {
+         (char *)strip,
+         "-S",

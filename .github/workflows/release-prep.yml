@@ -59,7 +59,7 @@ env:
 #     precompile-binaries creates/uploads release assets)
 #   - contents + pull-requests: write -> open-release-pr
 #   - id-token + attestations: write  -> build-xcframework, build-cli-macos,
-#     build-android, build-cli (the jobs that call `attest-build-provenance`)
+#     build-android, build-cli, build-cli-linux (the jobs that call `attest-build-provenance`)
 # Keeping these off the workflow level means the remaining jobs don't get
 # unnecessary OIDC-issuance, release-write, or attestation-write privileges.
 permissions: read-all
@@ -589,6 +589,95 @@ jobs:
   # =========================================================================
   # CLI builds (Linux + Windows; macOS is built in build-apple-all).
   # =========================================================================
+  # ==========================================================================
+  # Linux CLI via Bazel on RBE (Flip 1 — mirrors the build-android cutover):
+  # Bazel produces the binary on the shared BuildBuddy cache with the hermetic
+  # toolchain; everything downstream (artifact name, provenance attestation,
+  # draft release, install.sh) is unchanged. Parity vs the cargo build was
+  # verified feature-by-feature (vision/mtmd + huggingface, no candle), and
+  # the hermetic build LOWERS the glibc floor from the runner's 2.39 to 2.28
+  # (the cargo binary built on ubuntu-24.04 could not run on Ubuntu 22.04).
+  # ==========================================================================
+  build-cli-linux:
+    name: Build CLI (linux-x86_64, Bazel)
+    needs: [check-release-branch]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read       # actions/checkout
+      id-token: write      # Sigstore OIDC for attest-build-provenance
+      attestations: write  # GitHub attestations API
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          submodules: true
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/.ghcup \
+            /opt/hostedtoolcache/CodeQL
+          sudo docker image prune --all --force || true
+
+      - name: Configure BuildBuddy remote config
+        env:
+          BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
+        run: |
+          mkdir -p .context
+          cat > .context/buildbuddy.bazelrc <<EOF
+          common:remote --bes_results_url=https://app.buildbuddy.io/invocation/
+          common:remote --bes_backend=grpcs://remote.buildbuddy.io
+          common:remote --remote_header=x-buildbuddy-api-key=${BUILDBUDDY_API_KEY}
+          common:remote --remote_cache=grpcs://remote.buildbuddy.io
+          common:remote --remote_executor=grpcs://remote.buildbuddy.io
+          common:remote --remote_cache_compression
+          common:remote --remote_download_toplevel
+          common:remote --remote_timeout=600
+          common:remote --jobs=200
+          common:remote --extra_execution_platforms=@llvm//:rbe_linux_x86_64
+          EOF
+
+      - name: Build CLI (Bazel on RBE, shipping mode)
+        run: |
+          bazelisk build --config=remote -c opt //crates/xybrid-cli:xybrid
+
+      # The payload gate (mirrors the Android APK-payload verify): the binary
+      # must run, carry vision (mtmd) + huggingface, and keep the hermetic
+      # glibc floor — strictly better than the old cargo/ubuntu-24.04 build.
+      - name: Verify CLI payload (run + features + glibc floor)
+        run: |
+          BIN=$(bazelisk cquery --config=remote -c opt --output=files //crates/xybrid-cli:xybrid | head -1)
+          echo "resolved CLI: $BIN"
+          "$BIN" --help >/dev/null
+          test "$(nm "$BIN" | grep -c ' mtmd_')" -gt 0 || { echo "MISSING vision (mtmd) symbols"; exit 1; }
+          strings "$BIN" | grep -q 'huggingface\.co' || { echo "MISSING huggingface support"; exit 1; }
+          MAX_GLIBC=$(strings "$BIN" | grep -oE 'GLIBC_[0-9]+\.[0-9]+' | sort -Vu | tail -1)
+          echo "glibc floor: $MAX_GLIBC"
+          [ "$(printf '%s\n' "$MAX_GLIBC" GLIBC_2.31 | sort -V | tail -1)" = "GLIBC_2.31" ] || { echo "glibc floor regressed above 2.31: $MAX_GLIBC"; exit 1; }
+
+      - name: Prepare artifact
+        id: prepare
+        env:
+          TAG: ${{ needs.check-release-branch.outputs.tag }}
+        run: |
+          mkdir -p dist
+          ARTIFACT="dist/xybrid-${TAG}-linux-x86_64"
+          BIN=$(bazelisk cquery --config=remote -c opt --output=files //crates/xybrid-cli:xybrid | head -1)
+          cp "$BIN" "$ARTIFACT"
+          chmod +w "$ARTIFACT"   # bazel-bin outputs are read-only
+          strip "$ARTIFACT"
+          chmod +x "$ARTIFACT"
+          echo "artifact_path=$ARTIFACT" >> "$GITHUB_OUTPUT"
+
+      - name: Attest CLI provenance (linux-x86_64)
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
+        with:
+          subject-path: ${{ steps.prepare.outputs.artifact_path }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: cli-linux-x86_64
+          path: dist/*
+
   build-cli:
     name: Build CLI (${{ matrix.name }})
     needs: [check-release-branch]
@@ -601,12 +690,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: linux-x86_64
-            os: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
-            artifact: xybrid
-            features: platform-desktop
-
+          # linux-x86_64 moved to the Bazel-built `build-cli-linux` job below
+          # (Flip 1 of the Bazel rollout — mirrors the Android AAR cutover).
           - name: windows-x86_64
             os: windows-latest
             target: x86_64-pc-windows-msvc
@@ -738,6 +823,7 @@ jobs:
       - precompile-flutter-darwin
       - build-android
       - build-cli
+      - build-cli-linux
       - precompile-flutter-linux
       - precompile-flutter-windows
     runs-on: ubuntu-latest
