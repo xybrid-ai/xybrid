@@ -35,7 +35,10 @@ filtered_sdk_deps["deps"] = [d for d in original_sdk_deps.get("deps", []) if d !
 _SDK_LINUX_CFG = "@rules_rs//rs/platforms/config:x86_64-unknown-linux-gnu"
 filtered_sdk_deps["deps_by_platform"] = dict(original_sdk_deps.get("deps_by_platform", {}))
 filtered_sdk_deps["deps_by_platform"][_SDK_LINUX_CFG] = filtered_sdk_deps["deps_by_platform"].get(_SDK_LINUX_CFG, []) + [
-    "@crates//:hf-hub-0.5.0",
+    # Unversioned alias: this reference is hand-written (unlike the generated
+    # DEP_DATA's versioned labels, which re-render on bumps), so it must not
+    # pin a version the lockfile will outgrow.
+    "@crates//:hf-hub",
 ]
 
 rust_library(
