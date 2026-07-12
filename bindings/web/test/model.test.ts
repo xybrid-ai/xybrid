@@ -122,6 +122,9 @@ describe("XybridModel runtime lifecycle", () => {
     await expect(
       Reflect.apply(model.run, model, [[new DataView(new ArrayBuffer(8)), tensor([3, 4, 5])]]),
     ).rejects.toBeInstanceOf(InputValidationError);
+    await expect(
+      model.run({ a: tensor([1, 2]), b: { data: new Float32Array(0), shape: [1, 2 ** 53] } }),
+    ).rejects.toThrow("non-negative integer dimensions");
   });
 
   test("copies outputs and deletes every tensor on success and backend failure", async () => {

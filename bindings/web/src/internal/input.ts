@@ -42,7 +42,7 @@ const dataType = (value: TensorValue): TensorDataType => {
 const checkedProduct = (shape: readonly number[]): number => {
   let product = 1;
   for (const dimension of shape) {
-    if (!Number.isInteger(dimension) || dimension < 0) {
+    if (!Number.isSafeInteger(dimension) || dimension < 0) {
       throw new InputValidationError("Tensor shapes must use non-negative integer dimensions.");
     }
     product *= dimension;
