@@ -5,12 +5,29 @@ import {
   UnsupportedTemplateError,
   XybridError,
 } from "../src/errors.ts";
-import { readResponseBytes } from "../src/internal/response.ts";
+import { readResponseBytes, readResponseChunks } from "../src/internal/response.ts";
 import { resolveMetadataUrl, resolveWasmPath } from "../src/internal/url.ts";
-import { parseMetadata, resolveModelUrl } from "../src/metadata.ts";
+import {
+  parseMetadata,
+  resolveModelUrl,
+  validateBrowserMetadata,
+  validateLlmBrowserMetadata,
+} from "../src/metadata.ts";
 import { createRuntime, loadWithDependencies, tfliteMetadata } from "./helpers.ts";
 
 const metadataUrl = new URL("https://models.example/add/model_metadata.json");
+
+const metadataWithContextLength = (
+  template: "TfLite" | "LiteRtLm",
+  contextLength?: unknown,
+): Record<string, unknown> => ({
+  ...tfliteMetadata(),
+  execution_template: {
+    type: template,
+    model_file: "model.tflite",
+    ...(contextLength === undefined ? {} : { context_length: contextLength }),
+  },
+});
 
 describe("metadata boundary", () => {
   test("parses existing metadata with future fields and routes non-TfLite to a typed error", async () => {
@@ -31,6 +48,31 @@ describe("metadata boundary", () => {
     ).rejects.toBeInstanceOf(UnsupportedTemplateError);
   });
 
+  test("leaves TfLite context_length unvalidated", () => {
+    for (const contextLength of [2_097_152, 0, 4096.5]) {
+      const parsed = parseMetadata(metadataWithContextLength("TfLite", contextLength));
+
+      expect(validateBrowserMetadata(parsed)).toBe("model.tflite");
+    }
+  });
+
+  test("validates context_length only for LiteRtLm", () => {
+    for (const contextLength of [2_097_152, 0, 4096.5]) {
+      const parsed = parseMetadata(metadataWithContextLength("LiteRtLm", contextLength));
+
+      expect(() => validateLlmBrowserMetadata(parsed)).toThrow(InvalidMetadataError);
+    }
+
+    const valid = parseMetadata(metadataWithContextLength("LiteRtLm", 2048));
+    expect(validateLlmBrowserMetadata(valid)).toEqual({
+      modelFile: "model.tflite",
+      contextLength: 2048,
+    });
+
+    const withoutContextLength = parseMetadata(metadataWithContextLength("LiteRtLm"));
+    expect(validateLlmBrowserMetadata(withoutContextLength).contextLength).toBeUndefined();
+  });
+
   test("stops reading chunked responses at the configured byte limit", async () => {
     let cancelled = false;
     const response = new Response(
@@ -45,6 +87,30 @@ describe("metadata boundary", () => {
     );
     await expect(readResponseBytes(response, 7, "too large")).rejects.toThrow("too large");
     expect(cancelled).toBe(true);
+  });
+
+  test("returns streamed response chunks with progress without concatenating them", async () => {
+    const progress: [number, number | undefined][] = [];
+    const response = new Response(
+      new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new Uint8Array([1, 2]));
+          controller.enqueue(new Uint8Array([3]));
+          controller.close();
+        },
+      }),
+      { headers: { "content-length": "3" } },
+    );
+
+    const chunks = await readResponseChunks(response, 3, "too large", (loaded, total) => {
+      progress.push([loaded, total]);
+    });
+
+    expect(chunks.map((chunk) => Array.from(chunk))).toEqual([[1, 2], [3]]);
+    expect(progress).toEqual([
+      [2, 3],
+      [3, 3],
+    ]);
   });
 
   test("rejects unsupported processing and attached model surfaces before runtime initialization", async () => {

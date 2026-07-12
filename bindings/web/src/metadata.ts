@@ -16,7 +16,7 @@ const metadataSchema = z
       .object({
         type: z.string(),
         model_file: z.string().optional(),
-        context_length: z.int().positive().max(MAX_CONTEXT_LENGTH).optional(),
+        context_length: z.unknown().optional(),
       })
       .loose(),
     files: z.array(z.string()),
@@ -33,7 +33,7 @@ export type ParsedMetadata = {
   readonly template: {
     readonly type: string;
     readonly modelFile: string | undefined;
-    readonly contextLength: number | undefined;
+    readonly contextLength: unknown;
   };
   readonly files: readonly string[];
   readonly preprocessing: readonly unknown[];
@@ -101,9 +101,24 @@ export const validateLlmBrowserMetadata = (metadata: ParsedMetadata): LlmBrowser
   if (metadata.template.type !== "LiteRtLm") {
     throw new UnsupportedTemplateError(metadata.template.type, "LiteRtLm");
   }
+  const modelFile = assertBrowserFeatureSubset(metadata, "LiteRtLm");
+  const rawContextLength = metadata.template.contextLength;
+  if (rawContextLength === undefined) {
+    return { modelFile, contextLength: undefined };
+  }
+  if (
+    typeof rawContextLength !== "number" ||
+    !Number.isSafeInteger(rawContextLength) ||
+    rawContextLength <= 0 ||
+    rawContextLength > MAX_CONTEXT_LENGTH
+  ) {
+    throw new InvalidMetadataError(
+      `LiteRtLm metadata context_length must be a positive safe integer no greater than ${MAX_CONTEXT_LENGTH}.`,
+    );
+  }
   return {
-    modelFile: assertBrowserFeatureSubset(metadata, "LiteRtLm"),
-    contextLength: metadata.template.contextLength,
+    modelFile,
+    contextLength: rawContextLength,
   };
 };
 

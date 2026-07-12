@@ -4,7 +4,6 @@ import {
   DisposedError,
   InferenceError,
   InputValidationError,
-  InvalidMetadataError,
   RuntimeConfigurationError,
   XybridError,
 } from "./errors.ts";
@@ -15,10 +14,11 @@ import {
   compileModel,
   loadMetadata,
   type MetadataLoader,
-  validateAcceleratorPreference,
+  normalizeBaseLoadOptions,
+  startLoadPrelude,
 } from "./internal/loading.ts";
 import type { BrowserRuntime, RuntimeModel, RuntimeTensor } from "./internal/runtime.ts";
-import { resolveMetadataUrl, resolveWasmPath } from "./internal/url.ts";
+import { resolveMetadataUrl } from "./internal/url.ts";
 import { type ParsedMetadata, resolveModelUrl, validateBrowserMetadata } from "./metadata.ts";
 import type {
   LoadOptions,
@@ -32,21 +32,8 @@ import type {
 const MAX_OUTPUT_BYTES = 256 * 1024 * 1024;
 const MODEL_CONSTRUCTION_TOKEN = Symbol("XybridModel construction");
 
-const normalizeLoadOptions = (options: unknown, base: string | undefined): LoadOptions => {
-  if (typeof options !== "object" || options === null) {
-    throw new RuntimeConfigurationError("load options must be an object.");
-  }
-  const values = options as Record<string, unknown>;
-  validateAcceleratorPreference(values["accelerator"]);
-  const wasmPath = values["wasmPath"];
-  if (typeof wasmPath !== "string" && !(wasmPath instanceof URL)) {
-    throw new RuntimeConfigurationError("wasmPath must be a string or URL.");
-  }
-  return {
-    accelerator: values["accelerator"],
-    wasmPath: resolveWasmPath(wasmPath, base),
-  };
-};
+const normalizeLoadOptions = (options: unknown, base: string | undefined): LoadOptions =>
+  normalizeBaseLoadOptions(options, base);
 
 const validateOutputShape = (detail: TensorDetail): void => {
   const bytesPerElement = detail.dataType === "uint8" ? 1 : 4;
@@ -249,22 +236,17 @@ export const loadModel = async (
   getMetadata: MetadataLoader,
   initializer: RuntimeInitializer,
 ): Promise<ModelSession> => {
-  let metadata: ParsedMetadata;
-  try {
-    metadata = await getMetadata(metadataUrl);
-  } catch (error: unknown) {
-    if (error instanceof XybridError) {
-      throw error;
-    }
-    throw new InvalidMetadataError("Failed to load model metadata.", error);
-  }
+  const prelude = startLoadPrelude(
+    metadataUrl,
+    options.wasmPath,
+    runtime,
+    getMetadata,
+    initializer,
+  );
+  const metadata: ParsedMetadata = await prelude.metadata;
   const modelFile = validateBrowserMetadata(metadata);
   const modelUrl = resolveModelUrl(metadataUrl, modelFile, metadata.files);
-  await initializer.initialize(runtime, {
-    wasmPath: options.wasmPath,
-    threads: false,
-    jspi: false,
-  });
+  await prelude.initialization;
   const compiled = await compileModel(runtime, modelUrl, options.accelerator);
   return new ModelSession(runtime, compiled.model, compiled.accelerator);
 };

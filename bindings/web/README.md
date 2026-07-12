@@ -7,7 +7,7 @@
 ### Tensor surface (`XybridModel`)
 
 - `XybridModel.load(metadataUrl, { wasmPath, accelerator })` for Xybrid metadata whose execution template is exactly `{ "type": "TfLite", "model_file": "..." }`.
-- Explicit `wasm` or `webgpu` compilation, plus `auto` that uses wasm when WebGPU is unavailable.
+- Explicit `wasm` or `webgpu` compilation, plus `auto` that uses wasm when WebGPU is unavailable or fails to compile the model.
 - Positional arrays or name-keyed records of `Float32Array`, `Int32Array`, and `Uint8Array` inputs.
 - Model-derived readonly tensor details, the selected compile path, and `isFullyAccelerated`.
 - Copied typed-array outputs, WebGPU device-loss protection, rejected overlapping runs, and idempotent asynchronous disposal.

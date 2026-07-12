@@ -60,6 +60,8 @@ export type RuntimeControl = {
   readonly tensors: TestRuntimeTensor[];
   readonly initialized: readonly string[];
   readonly compiled: readonly string[];
+  readonly holdInitialization: () => void;
+  readonly releaseInitialization: () => void;
   readonly deletedModels: () => number;
   readonly failWebGpu: () => void;
   readonly failWebGpuCompilation: () => void;
@@ -87,12 +89,15 @@ export const createRuntime = (): RuntimeControl => {
   let outputShape = output.shape;
   let runGate: Promise<void> | undefined;
   let releaseGate: (() => void) | undefined;
+  let initializationGate: Promise<void> | undefined;
+  let releaseInitializationGate: (() => void) | undefined;
   let deletedModels = 0;
   let onLost: (() => void) | undefined;
 
   const runtime: BrowserRuntime = {
     initialize: async (config) => {
       initialized.push(config.wasmPath.toString());
+      await initializationGate;
     },
     compile: async (_url, accelerator) => {
       compiled.push(accelerator);
@@ -165,6 +170,16 @@ export const createRuntime = (): RuntimeControl => {
     tensors,
     initialized,
     compiled,
+    holdInitialization: () => {
+      initializationGate = new Promise((resolve) => {
+        releaseInitializationGate = resolve;
+      });
+    },
+    releaseInitialization: () => {
+      releaseInitializationGate?.();
+      initializationGate = undefined;
+      releaseInitializationGate = undefined;
+    },
     deletedModels: () => deletedModels,
     failWebGpu: () => {
       shouldFailWebGpu = true;

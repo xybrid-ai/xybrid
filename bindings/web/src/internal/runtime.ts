@@ -32,6 +32,7 @@ export type BrowserRuntime = {
 export type LlmGeneration = {
   readonly stream: AsyncGenerator<string, void, undefined>;
   cancel(): void;
+  dispose(): Promise<void>;
 };
 
 export type LlmEngine = {
@@ -39,14 +40,14 @@ export type LlmEngine = {
   delete(): Promise<void>;
 };
 
-export type LlmRuntime = {
+export type LlmRuntime<Model> = {
   initialize(config: RuntimeInitConfig): Promise<void>;
   fetchModel(
     modelUrl: URL,
     onProgress: ((progress: DownloadProgress) => void) | undefined,
-  ): Promise<unknown>;
+  ): Promise<Model>;
   createEngine(
-    model: unknown,
+    model: Model,
     accelerator: SelectedAccelerator,
     contextLength: number | undefined,
   ): Promise<LlmEngine>;

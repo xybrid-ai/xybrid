@@ -3,7 +3,6 @@ import {
   DisposedError,
   InferenceError,
   InputValidationError,
-  InvalidMetadataError,
   RuntimeConfigurationError,
   XybridError,
 } from "./errors.ts";
@@ -12,34 +11,25 @@ import { liteRtLmRuntime } from "./internal/litert-lm-runtime.ts";
 import {
   loadMetadata,
   type MetadataLoader,
+  normalizeBaseLoadOptions,
   selectAccelerated,
-  validateAcceleratorPreference,
+  startLoadPrelude,
 } from "./internal/loading.ts";
 import type { LlmEngine, LlmGeneration, LlmRuntime } from "./internal/runtime.ts";
-import { resolveMetadataUrl, resolveWasmPath } from "./internal/url.ts";
+import { resolveMetadataUrl } from "./internal/url.ts";
 import { type ParsedMetadata, resolveModelUrl, validateLlmBrowserMetadata } from "./metadata.ts";
 import type { GenerateOptions, LlmLoadOptions, SelectedAccelerator } from "./types.ts";
 
 const LLM_CONSTRUCTION_TOKEN = Symbol("XybridLlm construction");
 
 const normalizeLlmLoadOptions = (options: unknown, base: string | undefined): LlmLoadOptions => {
-  if (typeof options !== "object" || options === null) {
-    throw new RuntimeConfigurationError("load options must be an object.");
-  }
+  const normalizedBase = normalizeBaseLoadOptions(options, base);
   const values = options as Record<string, unknown>;
-  validateAcceleratorPreference(values["accelerator"]);
-  const wasmPath = values["wasmPath"];
-  if (typeof wasmPath !== "string" && !(wasmPath instanceof URL)) {
-    throw new RuntimeConfigurationError("wasmPath must be a string or URL.");
-  }
   const onDownloadProgress = values["onDownloadProgress"];
   if (onDownloadProgress !== undefined && typeof onDownloadProgress !== "function") {
     throw new RuntimeConfigurationError("onDownloadProgress must be a function.");
   }
-  const normalized: LlmLoadOptions = {
-    accelerator: values["accelerator"],
-    wasmPath: resolveWasmPath(wasmPath, base),
-  };
+  const normalized: LlmLoadOptions = { ...normalizedBase };
   if (onDownloadProgress === undefined) {
     return normalized;
   }
@@ -113,6 +103,7 @@ class LlmSession {
         session.activeGeneration = generation;
         if (session.disposePromise !== undefined) {
           generation.cancel();
+          await generation.dispose();
           throw new DisposedError();
         }
         try {
@@ -148,10 +139,12 @@ class LlmSession {
   }
 
   private async finishDisposal(): Promise<void> {
-    this.activeGeneration?.cancel();
+    const generation = this.activeGeneration;
+    generation?.cancel();
     if (this.running !== undefined) {
       await Promise.allSettled([this.running]);
     }
+    await generation?.dispose();
     await this.engine.delete();
   }
 
@@ -203,30 +196,25 @@ export class XybridLlm {
   }
 }
 
-export const loadLlm = async (
+export const loadLlm = async <Model>(
   metadataUrl: URL,
   options: LlmLoadOptions,
-  runtime: LlmRuntime,
+  runtime: LlmRuntime<Model>,
   getMetadata: MetadataLoader,
   initializer: RuntimeInitializer,
 ): Promise<LlmSession> => {
-  let metadata: ParsedMetadata;
-  try {
-    metadata = await getMetadata(metadataUrl);
-  } catch (error: unknown) {
-    if (error instanceof XybridError) {
-      throw error;
-    }
-    throw new InvalidMetadataError("Failed to load model metadata.", error);
-  }
+  const prelude = startLoadPrelude(
+    metadataUrl,
+    options.wasmPath,
+    runtime,
+    getMetadata,
+    initializer,
+  );
+  const metadata: ParsedMetadata = await prelude.metadata;
   const { modelFile, contextLength } = validateLlmBrowserMetadata(metadata);
   const modelUrl = resolveModelUrl(metadataUrl, modelFile, metadata.files);
-  await initializer.initialize(runtime, {
-    wasmPath: options.wasmPath,
-    threads: false,
-    jspi: false,
-  });
-  const model = await runtime.fetchModel(modelUrl, options.onDownloadProgress);
+  const modelPromise = runtime.fetchModel(modelUrl, options.onDownloadProgress);
+  const [, model] = await Promise.all([prelude.initialization, modelPromise]);
   const { value, accelerator } = await selectAccelerated(options.accelerator, (target) =>
     runtime.createEngine(model, target, contextLength),
   );

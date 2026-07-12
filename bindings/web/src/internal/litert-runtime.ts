@@ -7,7 +7,6 @@ import {
   Tensor,
   type TensorDetails,
 } from "@litertjs/core";
-import ky from "ky";
 
 import {
   InferenceError,
@@ -15,7 +14,7 @@ import {
   UnsupportedTensorTypeError,
 } from "../errors.ts";
 import type { SelectedAccelerator, TensorDataType, TensorDetail, TensorValue } from "../types.ts";
-import { readResponseBytes } from "./response.ts";
+import { loadModelBytes } from "./model-download.ts";
 import {
   AcceleratorUnavailableError,
   type BrowserRuntime,
@@ -23,8 +22,6 @@ import {
   type RuntimeModel,
   type RuntimeTensor,
 } from "./runtime.ts";
-
-const MAX_MODEL_BYTES = 512 * 1024 * 1024;
 
 type OwnedTensorValue =
   | Float32Array<ArrayBuffer>
@@ -42,19 +39,6 @@ const ownedTensorValue = (value: TensorValue): OwnedTensorValue => {
     return new Int32Array(value);
   }
   return new Uint8Array(value);
-};
-
-const loadModelBytes = async (modelUrl: URL): Promise<Uint8Array> => {
-  const response = await ky.get(modelUrl);
-  try {
-    return await readResponseBytes(
-      response,
-      MAX_MODEL_BYTES,
-      "Model exceeds the 512 MiB browser limit.",
-    );
-  } catch (error: unknown) {
-    throw new RuntimeInitializationError(error);
-  }
 };
 
 const dataType = (dtype: DType): TensorDataType => {

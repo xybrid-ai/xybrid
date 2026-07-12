@@ -41,7 +41,7 @@ describe("XybridModel runtime lifecycle", () => {
     );
   });
 
-  test("falls back from WebGPU to wasm only for auto", async () => {
+  test("falls back from WebGPU failures to wasm only for auto", async () => {
     const runtime = createRuntime();
     runtime.failWebGpu();
     const { model } = await load(runtime);
@@ -61,8 +61,9 @@ describe("XybridModel runtime lifecycle", () => {
 
     const compilationFailure = createRuntime();
     compilationFailure.failWebGpuCompilation();
-    await expect(load(compilationFailure)).rejects.toBeInstanceOf(RuntimeInitializationError);
-    expect(compilationFailure.compiled).toEqual(["webgpu"]);
+    const { model: recovered } = await load(compilationFailure);
+    expect(recovered.accelerator).toBe("wasm");
+    expect(compilationFailure.compiled).toEqual(["webgpu", "wasm"]);
   });
 
   test("shares same-config initialization and rejects conflicting wasm configuration", async () => {
@@ -94,6 +95,37 @@ describe("XybridModel runtime lifecycle", () => {
         initializer,
       ),
     ).rejects.toBeInstanceOf(RuntimeConfigurationError);
+  });
+
+  test("overlaps metadata loading and initialization before compiling", async () => {
+    const runtime = createRuntime();
+    runtime.holdInitialization();
+    const initializer = new RuntimeInitializer();
+    let metadataStarted = false;
+    let resolveMetadata: ((metadata: Record<string, unknown>) => void) | undefined;
+    const metadata = new Promise<Record<string, unknown>>((resolve) => {
+      resolveMetadata = resolve;
+    });
+    const loading = loadWithDependencies(
+      metadataUrl,
+      options,
+      runtime.runtime,
+      async () => {
+        metadataStarted = true;
+        return metadata;
+      },
+      initializer,
+    );
+
+    await Bun.sleep(0);
+    expect(metadataStarted).toBe(true);
+    expect(runtime.initialized).toEqual(["/wasm"]);
+    expect(runtime.compiled).toHaveLength(0);
+
+    resolveMetadata?.(tfliteMetadata());
+    runtime.releaseInitialization();
+    await loading;
+    expect(runtime.compiled).toEqual(["webgpu"]);
   });
 
   test("validates positional and named typed tensor inputs before allocating LiteRT tensors", async () => {
