@@ -45,7 +45,13 @@ cc_library(
         ],
         "//conditions:default": [],
     }),
-    deps = ["//:llama"],
+    deps = select({
+        # --//:metal=true swaps in the Metal llama (a separate, local-pinned
+        # target — see //:llama_metal). Everything above this select is
+        # identical between the lanes by design.
+        "//:metal_enabled": ["//:llama_metal"],
+        "//conditions:default": ["//:llama"],
+    }),
 )
 
 # The crate. `committed-bindings` makes lib.rs include! the committed
@@ -63,10 +69,10 @@ rust_library(
         for cfg in _VISION_PLATFORMS
     } | {"//conditions:default": []}),
     edition = "2021",
-    deps = [
-        ":wrapper_cc",
-        "//:llama",
-    ],
+    deps = [":wrapper_cc"] + select({
+        "//:metal_enabled": ["//:llama_metal"],
+        "//conditions:default": ["//:llama"],
+    }),
     visibility = ["//visibility:public"],
 )
 
