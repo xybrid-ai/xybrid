@@ -83,6 +83,8 @@ jobs:
         if: steps.derive.outputs.is_release == 'true'
         shell: bash
         run: |
+          ./tools/scripts/version-sync.sh --check
+
           TARGET="${{ steps.derive.outputs.version }}"
           CARGO_VERSION=$(grep -A5 '\[workspace\.package\]' Cargo.toml | grep '^version' | head -1 | sed 's/.*= *"\(.*\)"/\1/')
           FLUTTER_VERSION_PKG=$(grep '^version:' bindings/flutter/pubspec.yaml | sed 's/version: *//')

@@ -34,6 +34,7 @@ RN_GRADLE="$REPO_ROOT/bindings/react-native/android/build.gradle"
 # Python SDK wheel manifest. Hand-maintained (the ctypes binding is not
 # generated), so like RN it must be wired here or it drifts.
 PYTHON_PYPROJECT="$REPO_ROOT/bindings/python/pyproject.toml"
+WEB_PACKAGE="$REPO_ROOT/bindings/web/package.json"
 
 # Extract current workspace version from Cargo.toml
 get_cargo_version() {
@@ -83,6 +84,10 @@ get_rn_aar_version() {
 # file's only `version = ` line).
 get_python_version() {
     grep '^version = ' "$PYTHON_PYPROJECT" | head -1 | sed 's/version = "\(.*\)"/\1/'
+}
+
+get_web_version() {
+    python3 -c "import json; print(json.load(open('$WEB_PACKAGE'))['version'])"
 }
 
 # Set version in Cargo workspace (all Rust crates inherit via version.workspace = true)
@@ -170,6 +175,19 @@ set_python_version() {
     rm -f "$PYTHON_PYPROJECT.bak"
 }
 
+set_web_version() {
+    local version="$1"
+    python3 -c "
+import json
+with open('$WEB_PACKAGE', 'r') as f:
+    data = json.load(f)
+data['version'] = '$version'
+with open('$WEB_PACKAGE', 'w') as f:
+    json.dump(data, f, indent=2)
+    f.write('\\n')
+"
+}
+
 # Check mode: verify all versions match
 check_versions() {
     local cargo_version
@@ -179,7 +197,7 @@ check_versions() {
     echo "Cargo workspace version: $cargo_version"
     echo ""
 
-    for name_func in "Flutter:get_flutter_version" "Flutter rust crate:get_flutter_rust_version" "Unity:get_unity_version" "Kotlin:get_kotlin_version" "Swift:get_swift_version" "React Native:get_rn_version" "React Native AAR:get_rn_aar_version" "Python:get_python_version"; do
+    for name_func in "Flutter:get_flutter_version" "Flutter rust crate:get_flutter_rust_version" "Unity:get_unity_version" "Kotlin:get_kotlin_version" "Swift:get_swift_version" "React Native:get_rn_version" "React Native AAR:get_rn_aar_version" "Python:get_python_version" "Browser/Web:get_web_version"; do
         local name="${name_func%%:*}"
         local func="${name_func##*:}"
         local version
@@ -219,6 +237,7 @@ case "${1:-}" in
         set_rn_version "$VERSION"
         set_rn_aar_version "$VERSION"
         set_python_version "$VERSION"
+        set_web_version "$VERSION"
         echo "Done. Run '$0 --check' to verify."
         ;;
     --help|-h)
@@ -242,6 +261,7 @@ case "${1:-}" in
         set_rn_version "$VERSION"
         set_rn_aar_version "$VERSION"
         set_python_version "$VERSION"
+        set_web_version "$VERSION"
         echo ""
         echo "Rust crates inherit via version.workspace = true."
 

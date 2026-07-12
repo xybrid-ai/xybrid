@@ -101,6 +101,8 @@ jobs:
           VERSION: ${{ steps.meta.outputs.version }}
         run: |
           set -euo pipefail
+          ./tools/scripts/version-sync.sh --check
+
           CARGO_VERSION=$(grep -A5 '\[workspace\.package\]' Cargo.toml | grep '^version' | head -1 | sed 's/.*= *"\(.*\)"/\1/')
           FLUTTER_VERSION_PKG=$(grep '^version:' bindings/flutter/pubspec.yaml | sed 's/version: *//')
           UNITY_VERSION=$(python3 -c "import json; print(json.load(open('bindings/unity/package.json'))['version'])")
