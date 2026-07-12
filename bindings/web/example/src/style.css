@@ -46,7 +46,8 @@ body {
 
 button,
 select,
-input {
+input,
+textarea {
   font: inherit;
 }
 
@@ -111,7 +112,8 @@ label {
 }
 select,
 button,
-input {
+input,
+textarea {
   min-height: 44px;
   border: var(--border-width) solid var(--border-default);
   border-radius: var(--radius-control);
@@ -119,12 +121,16 @@ input {
   color: var(--text-primary);
   background: var(--surface-page);
 }
+textarea {
+  resize: vertical;
+}
 button {
   cursor: pointer;
   border-color: var(--accent-blue);
 }
 select:hover,
-input:hover {
+input:hover,
+textarea:hover {
   border-color: var(--accent-blue);
 }
 button:hover {
@@ -138,9 +144,16 @@ button:disabled {
   color: var(--text-muted);
   border-color: var(--border-default);
 }
+textarea:disabled,
+select:disabled,
+input:disabled {
+  cursor: progress;
+  color: var(--text-muted);
+}
 button:focus-visible,
 select:focus-visible,
-input:focus-visible {
+input:focus-visible,
+textarea:focus-visible {
   outline: var(--focus-width) solid var(--accent-blue);
   outline-offset: var(--space-1);
 }
@@ -282,6 +295,18 @@ input:focus-visible {
   color: var(--text-muted);
   font-size: var(--font-small);
 }
+.output-stream {
+  max-width: 65ch;
+  margin: 0;
+  padding: var(--space-4);
+  border: var(--border-width) solid var(--border-subtle);
+  border-radius: var(--radius-control);
+  background: var(--surface-panel);
+  font-size: var(--font-small);
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
 .grid-scroll {
   overflow-x: auto;
 }
@@ -329,6 +354,9 @@ input:focus-visible {
   .run-form {
     grid-template-columns: 1fr 1fr;
     align-items: start;
+  }
+  .run-form .prompt-field {
+    grid-column: 1 / -1;
   }
   .run-form button {
     grid-column: 1 / -1;

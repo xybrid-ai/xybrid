@@ -5,22 +5,21 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta
       name="description"
-      content="Run a small language model entirely in your browser with @xybrid/web."
+      content="Run a TensorFlow Lite model entirely in your browser with @xybrid/web and LiteRT."
     />
     <link rel="icon" href="data:," />
-    <title>Xybrid browser demo: run a small language model locally</title>
+    <title>Xybrid browser demo: run a TFLite model locally</title>
   </head>
   <body>
     <main class="shell">
       <header class="masthead">
         <p class="eyebrow">@xybrid/web preview</p>
-        <h1>Run a small language model in your browser</h1>
+        <h1>Run a TensorFlow Lite model in your browser</h1>
         <p class="summary">
-          This page downloads SmolLM2-135M-Instruct, a 136 MB open language model, and generates
-          text entirely in this tab, on your GPU when WebGPU is available. Nothing is uploaded:
-          the prompt, the model, and every generated token stay on your device. Prefer raw
-          tensors? <a href="/tensor.html">Run the deterministic TFLite addition model
-          instead</a>.
+          This page loads a real 708-byte <code>.tflite</code> model, compiles it with LiteRT, and
+          executes it entirely in this tab. Nothing is uploaded: the model adds two 10 by 10
+          float32 tensors on your device, and the page verifies all 100 outputs. Looking for
+          something chattier? <a href="/">Talk to a small language model instead</a>.
         </p>
       </header>
 
@@ -31,22 +30,30 @@
             <label for="accelerator">Accelerator</label>
             <select id="accelerator" name="accelerator">
               <option value="auto">auto (WebGPU when available)</option>
-              <option value="webgpu">webgpu (GPU)</option>
               <option value="wasm">wasm (CPU)</option>
+              <option value="webgpu">webgpu (GPU)</option>
             </select>
             <p class="hint" id="accelerator-hint">
-              auto runs on WebGPU and falls back to the CPU engine when the browser has no GPU
-              support.
+              auto compiles for WebGPU and falls back to wasm when the browser has no GPU support.
             </p>
           </div>
-          <div class="field prompt-field">
-            <label for="prompt">Prompt</label>
-            <textarea id="prompt" name="prompt" rows="3" required>Write a two-sentence bedtime story about a robot fox.</textarea>
+          <div class="field">
+            <label for="addend">Value of b, added to every element</label>
+            <input
+              id="addend"
+              name="addend"
+              type="number"
+              value="10"
+              min="-1000"
+              max="1000"
+              step="1"
+              required
+            />
             <p class="hint">
-              Sent to the model as a single user turn. Replies are capped at 256 tokens.
+              Input a is fixed to 0 through 99, so every output should equal its a plus your b.
             </p>
           </div>
-          <button id="run-button" type="submit">Load model and generate</button>
+          <button id="run-button" type="submit">Load model and run</button>
         </form>
       </section>
 
@@ -57,14 +64,21 @@
             <li data-step="load" data-state="idle">
               <p class="step-body">
                 <span class="step-name">Load</span>
-                download the 136 MB model (the browser caches it) and start the on-device engine
+                fetch model_metadata.json and model.tflite, compile for the accelerator
               </p>
               <span class="step-note" data-note></span>
             </li>
-            <li data-step="generate" data-state="idle">
+            <li data-step="run" data-state="idle">
               <p class="step-body">
-                <span class="step-name">Generate</span>
-                stream the reply token by token from the on-device engine
+                <span class="step-name">Run</span>
+                execute the model with a and b as float32[10, 10] inputs
+              </p>
+              <span class="step-note" data-note></span>
+            </li>
+            <li data-step="verify" data-state="idle">
+              <p class="step-body">
+                <span class="step-name">Verify</span>
+                compare every output value against a + b computed in JavaScript
               </p>
               <span class="step-note" data-note></span>
             </li>
@@ -72,38 +86,36 @@
 
           <output id="status" class="status" data-state="ready" aria-live="polite">
             <strong>READY</strong>
-            <span>Pick an accelerator, edit the prompt, and press run. The model executes
-              locally in this tab.</span>
+            <span>Pick an accelerator and press run. The model executes locally in this tab.</span>
           </output>
 
           <div id="run-facts" hidden>
             <dl class="facts">
               <div>
-                <dt>Engine</dt>
+                <dt>Compile path</dt>
                 <dd id="fact-accelerator">-</dd>
+              </div>
+              <div>
+                <dt>Fully delegated</dt>
+                <dd id="fact-delegated">-</dd>
               </div>
               <div>
                 <dt>Model load</dt>
                 <dd id="fact-load">-</dd>
               </div>
               <div>
-                <dt>First token</dt>
-                <dd id="fact-first-token">-</dd>
-              </div>
-              <div>
-                <dt>Generation</dt>
+                <dt>Inference</dt>
                 <dd id="fact-run">-</dd>
               </div>
             </dl>
             <p class="hint">
-              First token measures prefill latency; generation is the total streaming time. A
-              135M-parameter model is small enough to answer quickly, and small enough to be
-              charmingly wrong.
+              Fully delegated means every operation ran on the selected accelerator. LiteRT
+              silently runs unsupported WebGPU operations on the CPU instead.
             </p>
           </div>
 
           <div id="output-view" class="output-view">
-            <p class="output-empty">The streamed reply will appear here after a run.</p>
+            <p class="output-empty">The 100 output values will appear here after a run.</p>
           </div>
         </div>
       </section>
@@ -119,6 +131,6 @@
         </div>
       </section>
     </main>
-    <script type="module" src="/src/main.ts"></script>
+    <script type="module" src="/src/tensor.ts"></script>
   </body>
 </html>

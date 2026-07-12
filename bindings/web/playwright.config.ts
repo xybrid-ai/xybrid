@@ -13,6 +13,7 @@ export default defineConfig({
     command: "pnpm dev:example --host 127.0.0.1 --port 4173",
     url: "http://127.0.0.1:4173",
     reuseExistingServer: false,
-    timeout: 120_000,
+    // The predev asset step downloads the 136 MB LiteRT-LM model on first run.
+    timeout: 600_000,
   },
 });

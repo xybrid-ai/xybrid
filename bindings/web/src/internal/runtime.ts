@@ -1,4 +1,4 @@
-import type { SelectedAccelerator, TensorDetail, TensorValue } from "../types.ts";
+import type { DownloadProgress, SelectedAccelerator, TensorDetail, TensorValue } from "../types.ts";
 
 export class AcceleratorUnavailableError extends Error {}
 
@@ -27,4 +27,27 @@ export type BrowserRuntime = {
   compile(modelUrl: URL, accelerator: SelectedAccelerator): Promise<RuntimeModel>;
   createTensor(detail: TensorDetail, data: TensorValue, shape: readonly number[]): RuntimeTensor;
   onDeviceLost(callback: () => void): () => void;
+};
+
+export type LlmGeneration = {
+  readonly stream: AsyncGenerator<string, void, undefined>;
+  cancel(): void;
+};
+
+export type LlmEngine = {
+  generate(prompt: string, options: { readonly maxOutputTokens?: number }): Promise<LlmGeneration>;
+  delete(): Promise<void>;
+};
+
+export type LlmRuntime = {
+  initialize(config: RuntimeInitConfig): Promise<void>;
+  fetchModel(
+    modelUrl: URL,
+    onProgress: ((progress: DownloadProgress) => void) | undefined,
+  ): Promise<unknown>;
+  createEngine(
+    model: unknown,
+    accelerator: SelectedAccelerator,
+    contextLength: number | undefined,
+  ): Promise<LlmEngine>;
 };

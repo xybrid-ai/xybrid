@@ -6,6 +6,19 @@ export type LoadOptions = {
   readonly accelerator: AcceleratorPreference;
 };
 
+export type DownloadProgress = {
+  readonly loadedBytes: number;
+  readonly totalBytes: number | undefined;
+};
+
+export type LlmLoadOptions = LoadOptions & {
+  readonly onDownloadProgress?: (progress: DownloadProgress) => void;
+};
+
+export type GenerateOptions = {
+  readonly maxOutputTokens?: number;
+};
+
 export type TensorDataType = "float32" | "int32" | "uint8";
 export type TensorValue =
   | Float32Array<ArrayBufferLike>

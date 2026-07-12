@@ -1,6 +1,10 @@
-import { type AcceleratorPreference, XybridModel } from "../../src/index.ts";
+import { type AcceleratorPreference, XybridLlm } from "../../src/index.ts";
 
 import "./style.css";
+
+const MAX_OUTPUT_TOKENS = 256;
+const MODEL_METADATA_URL = "/llm/model_metadata.json";
+const WASM_PATH = "/llm-runtime";
 
 class ExampleError extends Error {
   constructor(message: string) {
@@ -20,19 +24,19 @@ const requireElement = <T extends HTMLElement>(selector: string, kind: abstract 
 const form = requireElement("#run-form", HTMLFormElement);
 const accelerator = requireElement("#accelerator", HTMLSelectElement);
 const acceleratorHint = requireElement("#accelerator-hint", HTMLParagraphElement);
-const addend = requireElement("#addend", HTMLInputElement);
+const prompt = requireElement("#prompt", HTMLTextAreaElement);
 const button = requireElement("#run-button", HTMLButtonElement);
 const status = requireElement("#status", HTMLOutputElement);
 const steps = requireElement("#steps", HTMLOListElement);
 const facts = requireElement("#run-facts", HTMLDivElement);
 const factAccelerator = requireElement("#fact-accelerator", HTMLElement);
-const factDelegated = requireElement("#fact-delegated", HTMLElement);
 const factLoad = requireElement("#fact-load", HTMLElement);
+const factFirstToken = requireElement("#fact-first-token", HTMLElement);
 const factRun = requireElement("#fact-run", HTMLElement);
 const outputView = requireElement("#output-view", HTMLDivElement);
 const codeSample = requireElement("#code-sample", HTMLElement);
 
-let currentModel: XybridModel | undefined;
+let currentLlm: XybridLlm | undefined;
 let currentPreference: AcceleratorPreference | undefined;
 
 const setStatus = (
@@ -47,9 +51,9 @@ const setStatus = (
   );
 };
 
-type StepName = "load" | "run" | "verify";
+type StepName = "load" | "generate";
 type StepState = "idle" | "active" | "done" | "error";
-const stepNames: readonly StepName[] = ["load", "run", "verify"];
+const stepNames: readonly StepName[] = ["load", "generate"];
 
 const setStep = (name: StepName, state: StepState, note = ""): void => {
   const step = steps.querySelector(`[data-step="${name}"]`);
@@ -80,6 +84,10 @@ const markActiveStepFailed = (): void => {
 
 const formatMs = (milliseconds: number): string => `${Math.max(1, Math.round(milliseconds))} ms`;
 
+const formatSeconds = (milliseconds: number): string => `${(milliseconds / 1000).toFixed(1)} s`;
+
+const formatMegabytes = (bytes: number): string => `${Math.round(bytes / (1024 * 1024))} MB`;
+
 const preferredAccelerator = (): AcceleratorPreference => {
   switch (accelerator.value) {
     case "auto":
@@ -91,34 +99,35 @@ const preferredAccelerator = (): AcceleratorPreference => {
   }
 };
 
-const addendValue = (): number => {
-  const value = Number(addend.value);
-  if (!Number.isInteger(value) || value < -1000 || value > 1000) {
-    throw new ExampleError("b must be a whole number between -1000 and 1000.");
+const promptValue = (): string => {
+  const value = prompt.value.trim();
+  if (value.length === 0) {
+    throw new ExampleError("Enter a prompt before running the model.");
   }
   return value;
 };
 
-const getModel = async (
+const getLlm = async (
   preference: AcceleratorPreference,
-): Promise<{ model: XybridModel; cached: boolean }> => {
-  if (currentModel !== undefined && currentPreference === preference) {
-    return { model: currentModel, cached: true };
+): Promise<{ llm: XybridLlm; cached: boolean }> => {
+  if (currentLlm !== undefined && currentPreference === preference) {
+    return { llm: currentLlm, cached: true };
   }
-  await currentModel?.dispose();
-  currentModel = undefined;
+  await currentLlm?.dispose();
+  currentLlm = undefined;
   currentPreference = undefined;
-  const loaded = await XybridModel.load("/model_metadata.json", {
-    wasmPath: "/litert",
+  const loaded = await XybridLlm.load(MODEL_METADATA_URL, {
+    wasmPath: WASM_PATH,
     accelerator: preference,
+    onDownloadProgress: ({ loadedBytes, totalBytes }) => {
+      const total = totalBytes === undefined ? "" : ` of ${formatMegabytes(totalBytes)}`;
+      setStep("load", "active", `${formatMegabytes(loadedBytes)}${total}`);
+    },
   });
-  currentModel = loaded;
+  currentLlm = loaded;
   currentPreference = preference;
-  return { model: loaded, cached: false };
+  return { llm: loaded, cached: false };
 };
-
-const isExpectedSum = (actual: Float32Array, expected: Float32Array): boolean =>
-  actual.length === expected.length && actual.every((value, index) => value === expected[index]);
 
 const showEmptyOutput = (message: string): void => {
   const empty = document.createElement("p");
@@ -127,57 +136,46 @@ const showEmptyOutput = (message: string): void => {
   outputView.replaceChildren(empty);
 };
 
-const showOutputGrid = (data: Float32Array, b: number): void => {
-  const table = document.createElement("table");
-  table.className = "grid";
-  const caption = document.createElement("caption");
-  caption.textContent = `Identity output, float32[10, 10] row-major. Each cell is its a value plus ${b}.`;
-  table.append(caption);
-  const body = document.createElement("tbody");
-  for (let row = 0; row < 10; row += 1) {
-    const tableRow = document.createElement("tr");
-    for (let column = 0; column < 10; column += 1) {
-      const index = row * 10 + column;
-      const cell = document.createElement("td");
-      cell.textContent = String(data[index] ?? "?");
-      cell.title = `output[${index}] = a[${index}] (${index}) + b (${b})`;
-      tableRow.append(cell);
-    }
-    body.append(tableRow);
-  }
-  table.append(body);
-  const scroller = document.createElement("div");
-  scroller.className = "grid-scroll";
-  scroller.append(table);
-  outputView.replaceChildren(scroller);
+const createOutputStream = (): HTMLParagraphElement => {
+  const stream = document.createElement("p");
+  stream.className = "output-stream";
+  outputView.replaceChildren(stream);
+  return stream;
 };
 
-const showFacts = (model: XybridModel, cached: boolean, loadMs: number, runMs: number): void => {
-  factAccelerator.textContent = model.accelerator;
-  factDelegated.textContent = model.isFullyAccelerated
-    ? `yes, every operation ran on ${model.accelerator}`
-    : "partial, some operations fell back to the CPU";
-  factLoad.textContent = cached ? "cached from the previous run" : formatMs(loadMs);
-  factRun.textContent = formatMs(runMs);
+const showFacts = (
+  llm: XybridLlm,
+  cached: boolean,
+  loadMs: number,
+  firstTokenMs: number | undefined,
+  runMs: number,
+): void => {
+  factAccelerator.textContent =
+    llm.accelerator === "webgpu" ? "webgpu, on-device GPU engine" : "wasm, on-device CPU engine";
+  factLoad.textContent = cached ? "cached from the previous run" : formatSeconds(loadMs);
+  factFirstToken.textContent = firstTokenMs === undefined ? "-" : formatMs(firstTokenMs);
+  factRun.textContent = formatSeconds(runMs);
   facts.hidden = false;
 };
 
 const updateCodeSample = (): void => {
-  const b = addend.value === "" ? "10" : addend.value;
-  codeSample.textContent = `import { XybridModel } from "@xybrid/web";
+  const promptForSample = (prompt.value.trim() || "Hello!").replace(/`/g, "'");
+  codeSample.textContent = `import { XybridLlm } from "@xybrid/web";
 
-const model = await XybridModel.load("/model_metadata.json", {
-  wasmPath: "/litert", // LiteRT wasm assets served by this site
+const llm = await XybridLlm.load("${MODEL_METADATA_URL}", {
+  wasmPath: "${WASM_PATH}", // engine wasm assets served by this site
   accelerator: "${accelerator.value}",
 });
 
-const a = Float32Array.from({ length: 100 }, (_, i) => i);
-const b = new Float32Array(100).fill(${b});
+const stream = llm.generateStream(
+  \`${promptForSample}\`,
+  { maxOutputTokens: ${MAX_OUTPUT_TOKENS} },
+);
+for await (const delta of stream) {
+  process(delta); // tokens arrive as they decode
+}
 
-const { byName } = await model.run({ a, b });
-console.log(byName["Identity"]?.data); // Float32Array(100): a[i] + ${b}
-
-await model.dispose();`;
+await llm.dispose();`;
 };
 
 if (!("gpu" in navigator)) {
@@ -186,78 +184,77 @@ if (!("gpu" in navigator)) {
     webgpuOption.textContent = "webgpu (not detected in this browser)";
   }
   acceleratorHint.textContent =
-    "This browser reports no WebGPU support, so auto will compile for wasm.";
+    "This browser reports no WebGPU support, so auto will run on the CPU engine.";
 }
 
 accelerator.addEventListener("change", () => {
   updateCodeSample();
   if (accelerator.value !== currentPreference) {
-    button.textContent = "Load model and run";
+    button.textContent = "Load model and generate";
   }
 });
-addend.addEventListener("input", updateCodeSample);
+prompt.addEventListener("input", updateCodeSample);
 updateCodeSample();
 
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
   button.disabled = true;
   accelerator.disabled = true;
-  addend.disabled = true;
+  prompt.disabled = true;
   facts.hidden = true;
   resetSteps();
-  showEmptyOutput("Running: the output values will appear here.");
+  showEmptyOutput("Running: the streamed reply will appear here.");
   try {
     const preference = preferredAccelerator();
-    const b = addendValue();
+    const userPrompt = promptValue();
     setStatus(
       "loading",
       "RUNNING",
-      `Loading the model and executing with the ${preference} preference.`,
+      `Loading the model and generating with the ${preference} preference.`,
     );
 
     setStep("load", "active");
     const loadStart = performance.now();
-    const { model, cached } = await getModel(preference);
+    const { llm, cached } = await getLlm(preference);
     const loadMs = performance.now() - loadStart;
-    setStep("load", "done", cached ? "cached" : formatMs(loadMs));
+    setStep("load", "done", cached ? "cached" : formatSeconds(loadMs));
 
-    setStep("run", "active");
-    const a = Float32Array.from({ length: 100 }, (_, index) => index);
-    const bTensor = new Float32Array(100).fill(b);
-    const runStart = performance.now();
-    const result = await model.run({ a, b: bTensor });
-    const runMs = performance.now() - runStart;
-    setStep("run", "done", formatMs(runMs));
-
-    setStep("verify", "active");
-    const output = result.byName["Identity"];
-    if (output === undefined || !(output.data instanceof Float32Array)) {
-      throw new ExampleError(
-        "The deterministic model did not return the expected float32 Identity output.",
-      );
+    setStep("generate", "active");
+    const outputStream = createOutputStream();
+    const generateStart = performance.now();
+    let firstTokenMs: number | undefined;
+    let text = "";
+    for await (const delta of llm.generateStream(userPrompt, {
+      maxOutputTokens: MAX_OUTPUT_TOKENS,
+    })) {
+      if (firstTokenMs === undefined) {
+        firstTokenMs = performance.now() - generateStart;
+      }
+      text += delta;
+      outputStream.textContent = text;
+      setStep("generate", "active", `${text.length} chars`);
     }
-    const expected = Float32Array.from(a, (value) => value + b);
-    if (!isExpectedSum(output.data, expected)) {
-      throw new ExampleError("Model output did not equal elementwise a+b.");
+    const runMs = performance.now() - generateStart;
+    if (text.length === 0) {
+      throw new ExampleError("The model returned no text; try a different prompt.");
     }
-    setStep("verify", "done", "100 of 100 exact");
+    setStep("generate", "done", formatSeconds(runMs));
 
-    showFacts(model, cached, loadMs, runMs);
-    showOutputGrid(output.data, b);
+    showFacts(llm, cached, loadMs, firstTokenMs, runMs);
     setStatus(
       "pass",
-      "PASS",
-      `100 float32 values matched a+b via the ${model.accelerator} compile path.`,
+      "DONE",
+      `Streamed ${text.length} characters from SmolLM2-135M on the ${llm.accelerator} engine.`,
     );
-    button.textContent = "Run again";
+    button.textContent = "Generate again";
   } catch (error: unknown) {
     markActiveStepFailed();
-    showEmptyOutput("The run stopped before producing outputs.");
+    showEmptyOutput("The run stopped before producing a reply.");
     const detail = error instanceof Error ? error.message : "Unknown failure.";
     setStatus("error", "ERROR", detail);
   } finally {
     button.disabled = false;
     accelerator.disabled = false;
-    addend.disabled = false;
+    prompt.disabled = false;
   }
 });

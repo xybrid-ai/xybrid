@@ -6,11 +6,19 @@ import {
   UnsupportedTemplateError,
 } from "./errors.ts";
 
+const MAX_CONTEXT_LENGTH = 1_048_576;
+
 const metadataSchema = z
   .object({
     model_id: z.string(),
     version: z.string(),
-    execution_template: z.object({ type: z.string(), model_file: z.string().optional() }).loose(),
+    execution_template: z
+      .object({
+        type: z.string(),
+        model_file: z.string().optional(),
+        context_length: z.int().positive().max(MAX_CONTEXT_LENGTH).optional(),
+      })
+      .loose(),
     files: z.array(z.string()),
     preprocessing: z.array(z.unknown()).default([]),
     postprocessing: z.array(z.unknown()).default([]),
@@ -22,7 +30,11 @@ const metadataSchema = z
 export type ParsedMetadata = {
   readonly modelId: string;
   readonly version: string;
-  readonly template: { readonly type: string; readonly modelFile: string | undefined };
+  readonly template: {
+    readonly type: string;
+    readonly modelFile: string | undefined;
+    readonly contextLength: number | undefined;
+  };
   readonly files: readonly string[];
   readonly preprocessing: readonly unknown[];
   readonly postprocessing: readonly unknown[];
@@ -44,6 +56,7 @@ export const parseMetadata = (input: unknown): ParsedMetadata => {
     template: {
       type: parsed.data.execution_template.type,
       modelFile: parsed.data.execution_template.model_file,
+      contextLength: parsed.data.execution_template.context_length,
     },
     files: parsed.data.files,
     preprocessing: parsed.data.preprocessing,
@@ -53,10 +66,7 @@ export const parseMetadata = (input: unknown): ParsedMetadata => {
   };
 };
 
-export const validateBrowserMetadata = (metadata: ParsedMetadata): string => {
-  if (metadata.template.type !== "TfLite") {
-    throw new UnsupportedTemplateError(metadata.template.type);
-  }
+const assertBrowserFeatureSubset = (metadata: ParsedMetadata, template: string): string => {
   if (metadata.preprocessing.length > 0) {
     throw new UnsupportedFeatureError("metadata preprocessing");
   }
@@ -70,9 +80,31 @@ export const validateBrowserMetadata = (metadata: ParsedMetadata): string => {
     throw new UnsupportedFeatureError("metadata vision_encoder");
   }
   if (metadata.template.modelFile === undefined) {
-    throw new InvalidMetadataError("TfLite metadata requires execution_template.model_file.");
+    throw new InvalidMetadataError(`${template} metadata requires execution_template.model_file.`);
   }
   return metadata.template.modelFile;
+};
+
+export const validateBrowserMetadata = (metadata: ParsedMetadata): string => {
+  if (metadata.template.type !== "TfLite") {
+    throw new UnsupportedTemplateError(metadata.template.type, "TfLite");
+  }
+  return assertBrowserFeatureSubset(metadata, "TfLite");
+};
+
+export type LlmBrowserMetadata = {
+  readonly modelFile: string;
+  readonly contextLength: number | undefined;
+};
+
+export const validateLlmBrowserMetadata = (metadata: ParsedMetadata): LlmBrowserMetadata => {
+  if (metadata.template.type !== "LiteRtLm") {
+    throw new UnsupportedTemplateError(metadata.template.type, "LiteRtLm");
+  }
+  return {
+    modelFile: assertBrowserFeatureSubset(metadata, "LiteRtLm"),
+    contextLength: metadata.template.contextLength,
+  };
 };
 
 export const resolveModelUrl = (

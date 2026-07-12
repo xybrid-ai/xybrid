@@ -30,14 +30,13 @@ export const loadMetadata: MetadataLoader = async (url) => {
   return parseMetadata(JSON.parse(text));
 };
 
-export const compileModel = async (
-  runtime: BrowserRuntime,
-  modelUrl: URL,
+export const selectAccelerated = async <T>(
   preference: LoadOptions["accelerator"],
-): Promise<{ readonly model: RuntimeModel; readonly accelerator: SelectedAccelerator }> => {
-  const compileOne = async (accelerator: SelectedAccelerator) => {
+  create: (accelerator: SelectedAccelerator) => Promise<T>,
+): Promise<{ readonly value: T; readonly accelerator: SelectedAccelerator }> => {
+  const createOne = async (accelerator: SelectedAccelerator) => {
     try {
-      return await runtime.compile(modelUrl, accelerator);
+      return await create(accelerator);
     } catch (error: unknown) {
       if (error instanceof XybridError || error instanceof AcceleratorUnavailableError) {
         throw error;
@@ -45,10 +44,10 @@ export const compileModel = async (
       throw new RuntimeInitializationError(error);
     }
   };
-  const compileExplicit = async (accelerator: SelectedAccelerator) => {
+  const createExplicit = async (accelerator: SelectedAccelerator) => {
     try {
-      const model = await compileOne(accelerator);
-      return { model, accelerator };
+      const value = await createOne(accelerator);
+      return { value, accelerator };
     } catch (error: unknown) {
       if (error instanceof AcceleratorUnavailableError) {
         throw new RuntimeInitializationError(error);
@@ -57,19 +56,30 @@ export const compileModel = async (
     }
   };
   if (preference === "wasm") {
-    return compileExplicit("wasm");
+    return createExplicit("wasm");
   }
   if (preference === "webgpu") {
-    return compileExplicit("webgpu");
+    return createExplicit("webgpu");
   }
   try {
-    const model = await compileOne("webgpu");
-    return { model, accelerator: "webgpu" };
+    const value = await createOne("webgpu");
+    return { value, accelerator: "webgpu" };
   } catch (error: unknown) {
     if (!(error instanceof AcceleratorUnavailableError)) {
       throw error;
     }
-    const model = await compileOne("wasm");
-    return { model, accelerator: "wasm" };
+    const value = await createOne("wasm");
+    return { value, accelerator: "wasm" };
   }
+};
+
+export const compileModel = async (
+  runtime: BrowserRuntime,
+  modelUrl: URL,
+  preference: LoadOptions["accelerator"],
+): Promise<{ readonly model: RuntimeModel; readonly accelerator: SelectedAccelerator }> => {
+  const { value, accelerator } = await selectAccelerated(preference, (target) =>
+    runtime.compile(modelUrl, target),
+  );
+  return { model: value, accelerator };
 };

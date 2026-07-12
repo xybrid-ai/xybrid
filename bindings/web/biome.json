@@ -32,6 +32,7 @@
       "!example/dist",
       "!node_modules",
       "!example/public/litert",
+      "!example/public/llm-runtime",
       "!playwright-report",
       "!test-results"
     ]

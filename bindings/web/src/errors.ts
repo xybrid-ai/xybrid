@@ -33,10 +33,10 @@ export class InvalidMetadataError extends XybridError {
 }
 
 export class UnsupportedTemplateError extends XybridError {
-  constructor(template: string) {
+  constructor(template: string, supported = "TfLite") {
     super(
       "unsupported_template",
-      `Browser preview supports TfLite metadata, received ${template}.`,
+      `Browser preview supports ${supported} metadata, received ${template}.`,
     );
     this.name = "UnsupportedTemplateError";
   }

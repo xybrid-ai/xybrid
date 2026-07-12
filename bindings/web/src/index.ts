@@ -12,9 +12,13 @@ export {
   UnsupportedTensorTypeError,
   XybridError,
 } from "./errors.ts";
+export { XybridLlm } from "./llm.ts";
 export { XybridModel } from "./model.ts";
 export type {
   AcceleratorPreference,
+  DownloadProgress,
+  GenerateOptions,
+  LlmLoadOptions,
   LoadOptions,
   RunResult,
   SelectedAccelerator,

@@ -2,9 +2,12 @@ export const readResponseBytes = async (
   response: Response,
   maximumBytes: number,
   limitMessage: string,
+  onProgress?: (loadedBytes: number, totalBytes: number | undefined) => void,
 ): Promise<Uint8Array<ArrayBuffer>> => {
   const declaredLength = Number(response.headers.get("content-length"));
-  if (Number.isFinite(declaredLength) && declaredLength > maximumBytes) {
+  const declaredTotal =
+    Number.isFinite(declaredLength) && declaredLength > 0 ? declaredLength : undefined;
+  if (declaredTotal !== undefined && declaredTotal > maximumBytes) {
     throw new Error(limitMessage);
   }
 
@@ -13,6 +16,7 @@ export const readResponseBytes = async (
     if (bytes.byteLength > maximumBytes) {
       throw new Error(limitMessage);
     }
+    onProgress?.(bytes.byteLength, declaredTotal ?? bytes.byteLength);
     return bytes;
   }
 
@@ -31,6 +35,7 @@ export const readResponseBytes = async (
         throw new Error(limitMessage);
       }
       chunks.push(value);
+      onProgress?.(totalBytes, declaredTotal);
     }
   } finally {
     reader.releaseLock();

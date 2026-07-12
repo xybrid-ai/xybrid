@@ -6,6 +6,7 @@
 - Embedded refs: shortlisted opencode.ai, vercel, and warp; picked taste + opencode for a deterministic developer-tool surface.
 - Skipped lanes: lazyweb and image-concept lanes were ruled out because this is a functional demo harness with no imagery or product-marketing brief.
 - Revision 2: reworked from a bare QA jig into a teaching demo. Added the step tracker, run facts, output grid, and live code sample; replaced the status side rail with a full border; added pass and error state hues on top of the explicit text labels.
+- Revision 3: the landing page became a language-model demo (SmolLM2-135M via LiteRT-LM) and the deterministic addition jig moved to `/tensor.html`. Same system, two new components: a prompt textarea and a streamed-output panel; the load step note doubles as the model download progress readout, and DONE joins PASS in the status lexicon for generative runs that have no exact expected output.
 
 ## 1. Atmosphere & Identity
 
@@ -83,6 +84,16 @@ Page order tells the story: what this is (masthead), run it (form), what happene
 - **Structure**: `table` with a caption naming the tensor, shape, and formula; 10 by 10 cells with tabular numerals and `--border-subtle` cell borders inside a horizontal scroll container.
 - **Empty state**: a muted sentence saying where the values will appear, so the region teaches before the first run.
 - **Accessibility**: real table semantics, caption describes the data, cell titles expose the per-element formula.
+
+### Output stream (language-model page)
+- **Structure**: a single `p.output-stream` on the panel surface with a subtle border, `pre-wrap` whitespace, and a 65ch measure; text appends as deltas arrive.
+- **Empty state**: the same muted teaching sentence pattern as the grid.
+- **Progress**: while generating, the generate step note counts streamed characters; while downloading, the load step note counts megabytes. No spinners or bars — the step tracker is the progress surface.
+
+### Prompt field
+- **Structure**: `label`, `textarea` (vertical resize only), muted `.hint` naming the turn semantics and token cap.
+- **Layout**: spans both form columns at 768px and up.
+- **States**: matches the other controls, including a muted disabled state while a run is active.
 
 ### Code sample
 - **Structure**: `pre` block on the panel surface with a subtle border, showing the exact `@xybrid/web` calls the page makes. Rewrites live as the accelerator or b value changes.

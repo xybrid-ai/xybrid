@@ -1,0 +1,16 @@
+{
+  "model_id": "smollm2-135m-instruct",
+  "version": "1",
+  "description": "SmolLM2 135M Instruct packaged as LiteRT-LM for browser text generation.",
+  "execution_template": {
+    "type": "LiteRtLm",
+    "model_file": "SmolLM2_135M_Instruct.litertlm",
+    "context_length": 2048
+  },
+  "preprocessing": [],
+  "postprocessing": [],
+  "files": ["SmolLM2_135M_Instruct.litertlm"],
+  "metadata": {
+    "source": "https://huggingface.co/litert-community/SmolLM2-135M-Instruct"
+  }
+}

@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 
 for (const accelerator of ["wasm", "auto"] as const) {
   test(`runs the pinned LiteRT model through ${accelerator}`, async ({ page }) => {
-    await page.goto("/");
+    await page.goto("/tensor.html");
     await page.selectOption("#accelerator", accelerator);
     await page.click("#run-button");
 
