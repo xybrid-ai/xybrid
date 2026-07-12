@@ -1,0 +1,26 @@
+BUILD.bazel
+  s_6d388b750babe3::t_0b95a26675a5e5 201
+  s_6d388b750babe3::t_5cd832b6188ba8 247-277,288-291
+  s_6d388b750babe3::t_ce46d1b683b910 101-118
+  s_6d388b750babe3::t_83a896de1d626b 171-174
+  s_6d388b750babe3::t_f57091a5e8f1cc 278-287
+crates/llama-cpp-sys/BUILD.bazel
+  s_6d388b750babe3::t_6dcbcdae587201 48-54
+  s_6d388b750babe3::t_0e2cfe00be79a3 72-75
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.12",
+  "base_commit_sha": "37a384b03b37e0347e74743068c3923da606b877",
+  "prompts": {},
+  "sessions": {
+    "s_6d388b750babe3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "66e1d567-1e9b-4a5d-ac30-e8e71c3b2d0b",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
