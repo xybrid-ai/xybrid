@@ -1,0 +1,49 @@
+crates/llama-cpp-sys/BUILD.bazel
+  s_6d388b750babe3::t_fd2c3645f8c6d0 21
+  s_6d388b750babe3::t_26e480f3f2bbec 36-47
+crates/xybrid-core/BUILD.bazel
+  s_6d388b750babe3::t_5cea69a9d8287c 52-53
+crates/xybrid-sdk/BUILD.bazel
+  s_6d388b750babe3::t_31bbc65cfec684 66-72
+  s_6d388b750babe3::t_9a7dcee61810c5 43,45-48
+  s_6d388b750babe3::t_2c7a84b9e7ac69 35-40,44
+  s_6d388b750babe3::t_6e079f851fd18c 49
+crates/xybrid-llama/BUILD.bazel
+  s_6d388b750babe3::t_fd2c3645f8c6d0 11
+BUILD.bazel
+  s_6d388b750babe3::t_6391291d3a32f1 196-199,203
+  s_6d388b750babe3::t_254e5ad7f96b03 236-245
+  s_6d388b750babe3::t_faaab06141dcfe 220-222
+  s_6d388b750babe3::t_dea75d65e658b5 229
+  s_6d388b750babe3::t_8d873823988686 259-260
+  s_6d388b750babe3::t_98a8e8c79070ae 271-275
+  s_6d388b750babe3::t_fdd014b6b13553 8
+  s_6d388b750babe3::t_113e5da6594d04 9-24,44-45
+  s_6d388b750babe3::t_9c6c3ac575bfa7 184-190,193-195,200-202,204-205
+  s_6d388b750babe3::t_aad3efc0d6cb59 25-43
+  s_6d388b750babe3::t_74e8406ddf105f 230-232
+  s_6d388b750babe3::t_80ebe353764b31 233
+MODULE.bazel
+  s_6d388b750babe3::t_4f2aec1a36e674 189
+  s_6d388b750babe3::t_6139fb730e7e44 183-188,190-191
+  s_6d388b750babe3::t_3b7baac2e7a070 40-41
+  s_6d388b750babe3::t_ba4fe747bd2ecc 180
+.bazelrc
+  s_6d388b750babe3::t_ba9ddd999eb2b4 47-58
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.12",
+  "base_commit_sha": "94dfd4a25c167e253e1906e3095b3aa545248d28",
+  "prompts": {},
+  "sessions": {
+    "s_6d388b750babe3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "66e1d567-1e9b-4a5d-ac30-e8e71c3b2d0b",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
