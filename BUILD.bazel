@@ -5,6 +5,44 @@ exports_files([
     "Cargo.toml",
 ])
 
+load("@bazel_skylib//lib:selects.bzl", "selects")
+load("@bazel_skylib//rules:common_settings.bzl", "bool_flag")
+
+# The macOS GPU lane toggle (Flip 2). Both darwin lanes share the SAME Rust
+# feature set (candle-metal/CoreML/vision are bindings — pure Rust, cross-
+# compilable, so keeping features identical maximizes rlib cache overlap
+# between the RBE CPU lane and the Mac Metal lane). The flag flips only what
+# physically differs: llama.cpp's GGML_METAL/ACCELERATE, which need Xcode —
+# so --//:metal=true builds must run ON a Mac (see build:macos-metal).
+bool_flag(
+    name = "metal",
+    build_setting_default = False,
+)
+
+config_setting(
+    name = "metal_enabled",
+    flag_values = {":metal": "true"},
+    visibility = ["//visibility:public"],
+)
+
+config_setting(
+    name = "metal_disabled",
+    flag_values = {":metal": "false"},
+)
+
+# darwin CPU lane (RBE): the only darwin config that builds the hermetic
+# libc++ archives — the Metal lane (mac-local exec) links the real SDK's
+# -lc++ instead, because compiling hermetic-llvm's libc++ FROM SOURCE on a
+# mac host is broken (unresolved-using-declaration in libcxx headers; the
+# linux-exec build of the same target is fine).
+selects.config_setting_group(
+    name = "darwin_cpu_lane",
+    match_all = [
+        "@rules_rs//rs/platforms/config:aarch64-apple-darwin",
+        ":metal_disabled",
+    ],
+)
+
 # Host platform for Linux hosts (CI runners): rules_rs' experimental toolchains
 # need an explicit host platform carrying a libc constraint on Linux. Activated
 # by `common:linux` in .bazelrc (auto-applied via --enable_platform_specific_config).
@@ -143,8 +181,28 @@ cmake(
             # (execpath is execroot-relative; cmake needs it absolute).
             "CMAKE_INSTALL_NAME_TOOL": "$$EXT_BUILD_ROOT/$(execpath @llvm//tools:llvm-install-name-tool)",
             "CMAKE_OTOOL": "$$EXT_BUILD_ROOT/$(execpath @llvm//tools:llvm-otool)",
+            # Vision (mtmd), same shape as the linux arm: parity with the
+            # shipped platform-macos CLI. Tool exes get the static C++ runtime
+            # handed explicitly (hermetic toolchain stages it as link inputs,
+            # which rfcc's cmake doesn't replicate); tools are discarded.
+            "LLAMA_BUILD_TOOLS": "ON",
+            "LLAMA_BUILD_COMMON": "ON",
+            "CMAKE_CXX_STANDARD_LIBRARIES": "$$EXT_BUILD_ROOT/$(execpath @llvm//runtimes/libcxx:libcxx.static) $$EXT_BUILD_ROOT/$(execpath @llvm//runtimes/libcxx:libcxxabi.static) $$EXT_BUILD_ROOT/$(execpath @llvm//runtimes/libunwind:libunwind.static)",
         },
         "//conditions:default": _LLAMA_CACHE_ENTRIES,
+    }) | select({
+        # The GPU lane (Flip 2): dict-union overrides the base Metal/Accelerate
+        # OFF entries. Requires a Mac (Xcode's metal compiler) — build with
+        # --config=macos-metal, never with linux RBE execution. The tool exes
+        # link the REAL SDK's libc++ (-lc++ resolves against the sysroot tbds):
+        # the hermetic libc++ archives can't be compiled on a mac host (see
+        # :darwin_cpu_lane) and the tools are discarded anyway.
+        ":metal_enabled": {
+            "GGML_METAL": "ON",
+            "GGML_ACCELERATE": "ON",
+            "CMAKE_CXX_STANDARD_LIBRARIES": "-lc++",
+        },
+        "//conditions:default": {},
     }),
     # (macOS-host PATH hack removed for the RBE/Linux test — on Linux workers
     # rfcc finds its own downloaded cmake; /opt/homebrew doesn't exist there.)
@@ -159,16 +217,31 @@ cmake(
         ],
         "//conditions:default": [],
     }),
-    # linux-vision: the static C++ runtime archives referenced by the linux
-    # arm's CMAKE_CXX_STANDARD_LIBRARIES. cfg=target (they're linked into
-    # TARGET binaries), unlike build_data's exec-config host tools.
+    # desktop vision: the static C++ runtime archives referenced by the linux
+    # and darwin arms' CMAKE_CXX_STANDARD_LIBRARIES. cfg=target (they're
+    # linked into TARGET binaries), unlike build_data's exec-config host tools.
     data = select({
         "@rules_rs//rs/platforms/config:x86_64-unknown-linux-gnu": [
             "@llvm//runtimes/libcxx:libcxx.static",
             "@llvm//runtimes/libcxx:libcxxabi.static",
             "@llvm//runtimes/libunwind:libunwind.static",
         ],
+        ":darwin_cpu_lane": [
+            "@llvm//runtimes/libcxx:libcxx.static",
+            "@llvm//runtimes/libcxx:libcxxabi.static",
+            "@llvm//runtimes/libunwind:libunwind.static",
+        ],
         "//conditions:default": [],
+    }),
+    # Metal lane runs on a mac host with the PREINSTALLED cmake/make/pkg-config
+    # (see build:macos-metal), but rfcc sanitizes PATH to /bin:/usr/bin:
+    # /usr/local/bin — homebrew's /opt/homebrew/bin (Apple-silicon, incl. the
+    # macos-14 runners) is missing. User env overrides the framework's PATH.
+    env = select({
+        ":metal_enabled": {
+            "PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin",
+        },
+        "//conditions:default": {},
     }),
     lib_source = ":llama_src",
     # Build cmake's default `all` target — same as build.rs's vision path (it
@@ -183,6 +256,8 @@ cmake(
         "@rules_rs//rs/platforms/config:x86_64-linux-android": ["libmtmd.a"] + _LLAMA_LIBS,
         # Desktop-linux vision (Flip 1) also collects libmtmd.
         "@rules_rs//rs/platforms/config:x86_64-unknown-linux-gnu": ["libmtmd.a"] + _LLAMA_LIBS,
+        # Darwin vision (Flip 2 parity — both CPU and Metal lanes).
+        "@rules_rs//rs/platforms/config:aarch64-apple-darwin": ["libmtmd.a"] + _LLAMA_LIBS,
         # Windows/MinGW: ggml/CMakeLists.txt sets CMAKE_STATIC_LIBRARY_PREFIX=""
         # on WIN32, so the ggml archives have NO `lib` prefix (ggml.a, not
         # libggml.a) — while llama (sibling scope) keeps it (libllama.a).
@@ -193,6 +268,11 @@ cmake(
             "ggml-cpu.a",
         ],
         "//conditions:default": _LLAMA_LIBS,
+    }) + select({
+        # Metal lane: ggml builds its Metal backend as a separate archive,
+        # linked unconditionally by cargo's apple path (build.rs:681).
+        ":metal_enabled": ["libggml-metal.a"],
+        "//conditions:default": [],
     }),
     # Windows: ggml/CMakeLists.txt installs the ggml umbrella/base libs with
     # `install(TARGETS ggml LIBRARY)` (no ARCHIVE). On Linux that still lands the

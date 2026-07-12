@@ -18,6 +18,7 @@ _VISION_PLATFORMS = [
     "@rules_rs//rs/platforms/config:armv7-linux-androideabi",
     "@rules_rs//rs/platforms/config:x86_64-linux-android",
     "@rules_rs//rs/platforms/config:x86_64-unknown-linux-gnu",
+    "@rules_rs//rs/platforms/config:aarch64-apple-darwin",  # Flip 2: macOS parity
 ]
 
 # First-party C++ shim: defines the _c-suffixed symbols the Rust bindings call.
@@ -32,6 +33,18 @@ cc_library(
         cfg: ["XYBRID_LLAMA_VISION"]
         for cfg in _VISION_PLATFORMS
     } | {"//conditions:default": []}),
+    # Metal lane: the frameworks cargo's build.rs emits on apple (build.rs:
+    # 675-680). The Rust crates' #[link] attrs already pull Metal/Foundation/
+    # Accelerate; MetalKit exists ONLY here — ggml-metal.m needs it.
+    linkopts = select({
+        "//:metal_enabled": [
+            "-framework Accelerate",
+            "-framework Metal",
+            "-framework MetalKit",
+            "-framework Foundation",
+        ],
+        "//conditions:default": [],
+    }),
     deps = ["//:llama"],
 )
 

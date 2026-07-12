@@ -37,6 +37,8 @@ bazel_dep(name = "hermetic_launcher", version = "0.0.11")
 
 # rules_cc must be a direct dep so the `@rules_cc//...` flag in .bazelrc resolves.
 bazel_dep(name = "rules_cc", version = "0.2.20")
+# bool_flag for the //:metal build setting (the macOS GPU lane toggle).
+bazel_dep(name = "bazel_skylib", version = "1.9.0")
 # platforms must be a direct dep so the `@platforms//...` constraints in //:android_arm64 resolve.
 bazel_dep(name = "platforms", version = "1.0.0")
 
@@ -175,8 +177,18 @@ osx.frameworks(names = [
     "IOKit",
     "IOSurface",
     "Metal",
+    "MetalKit",
     "MetalPerformanceShaders",
     "MetalPerformanceShadersGraph",
+    # header-graph deps of the Metal lane's ObjC compile (ggml-metal.m):
+    # Foundation's headers include CoreServices; MetalKit's include ModelIO
+    # and QuartzCore (CAMetalLayer) / CoreImage (MTKTextureLoader).
+    "CFNetwork",
+    "CoreImage",
+    "CoreServices",
+    "DiskArbitration",  # CoreServices/CarbonCore/Files.h includes DADisk.h
+    "ModelIO",
+    "QuartzCore",
 ])
 use_repo(osx, "macos_sdk")
 

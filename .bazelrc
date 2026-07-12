@@ -44,6 +44,18 @@ build:windows --platforms=@rules_rs//rs/platforms:x86_64-pc-windows-gnu
 # ort-sys annotation in MODULE.bazel) instead of ort's build-time download,
 # which is structurally incompatible with remote execution.
 build:macos --platforms=@rules_rs//rs/platforms:aarch64-apple-darwin
+
+# Desktop macOS GPU lane (Flip 2): Metal + Accelerate ON — REQUIRES a Mac with
+# Xcode (the metal shader compiler); never combine with linux remote EXECUTION.
+# Uses the host's preinstalled cmake/make/pkg-config for rfcc's exec tools
+# (macos-14 runners and dev Macs ship them; the from-source bootstrap is the
+# known mac-host wall). The Rust side is identical to the CPU lane by design —
+# same features, same rlibs — so a warm shared cache serves most of the graph.
+build:macos-metal --platforms=@rules_rs//rs/platforms:aarch64-apple-darwin
+build:macos-metal --//:metal=true
+build:macos-metal --extra_toolchains=@rules_foreign_cc//toolchains:preinstalled_cmake_toolchain
+build:macos-metal --extra_toolchains=@rules_foreign_cc//toolchains:preinstalled_make_toolchain
+build:macos-metal --extra_toolchains=@rules_foreign_cc//toolchains:preinstalled_pkgconfig_toolchain
 # (-fstack-protector, which needs a libssp hermetic-llvm's MinGW sysroot doesn't
 # ship, is disabled for windows at the toolchain level in hermetic_llvm.patch.)
 

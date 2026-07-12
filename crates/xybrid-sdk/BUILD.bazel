@@ -32,14 +32,20 @@ filtered_sdk_deps["deps"] = [d for d in original_sdk_deps.get("deps", []) if d !
 # (it records the preset name, not its optional-dep expansion). Same surgery
 # precedent as the //macros filter above. hf-hub 0.5 resolves in the hub with
 # exactly [rustls-tls, ureq] — no new inputs.
-_SDK_LINUX_CFG = "@rules_rs//rs/platforms/config:x86_64-unknown-linux-gnu"
-filtered_sdk_deps["deps_by_platform"] = dict(original_sdk_deps.get("deps_by_platform", {}))
-filtered_sdk_deps["deps_by_platform"][_SDK_LINUX_CFG] = filtered_sdk_deps["deps_by_platform"].get(_SDK_LINUX_CFG, []) + [
-    # Unversioned alias: this reference is hand-written (unlike the generated
-    # DEP_DATA's versioned labels, which re-render on bumps), so it must not
-    # pin a version the lockfile will outgrow.
-    "@crates//:hf-hub",
+# Unversioned alias: this reference is hand-written (unlike the generated
+# DEP_DATA's versioned labels, which re-render on bumps), so it must not
+# pin a version the lockfile will outgrow.
+_HF_PLATFORMS = [
+    "@rules_rs//rs/platforms/config:x86_64-unknown-linux-gnu",
+    "@rules_rs//rs/platforms/config:aarch64-apple-darwin",  # Flip 2
 ]
+
+_ORIG_DBP = original_sdk_deps.get("deps_by_platform", {})
+
+filtered_sdk_deps["deps_by_platform"] = _ORIG_DBP | {
+    _cfg: _ORIG_DBP.get(_cfg, []) + ["@crates//:hf-hub"]
+    for _cfg in _HF_PLATFORMS
+}
 
 rust_library(
     name = "xybrid-sdk",
@@ -57,7 +63,13 @@ rust_library(
             "llm-llamacpp-vision",
             "huggingface",
         ],
-        "@rules_rs//rs/platforms/config:aarch64-apple-darwin": ["platform-macos"],
+        # Flip 2: cargo's platform-macos preset also implies vision + hf
+        # (Bazel doesn't expand presets across crates — name them).
+        "@rules_rs//rs/platforms/config:aarch64-apple-darwin": [
+            "platform-macos",
+            "llm-llamacpp-vision",
+            "huggingface",
+        ],
         "@rules_rs//rs/platforms/config:aarch64-linux-android": _SDK_ANDROID,
         "@rules_rs//rs/platforms/config:armv7-linux-androideabi": _SDK_ANDROID,
         "@rules_rs//rs/platforms/config:x86_64-linux-android": _SDK_ANDROID,

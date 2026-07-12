@@ -8,6 +8,7 @@ _VISION_PLATFORMS = [
     "@rules_rs//rs/platforms/config:armv7-linux-androideabi",
     "@rules_rs//rs/platforms/config:x86_64-linux-android",
     "@rules_rs//rs/platforms/config:x86_64-unknown-linux-gnu",
+    "@rules_rs//rs/platforms/config:aarch64-apple-darwin",  # Flip 2: macOS parity
 ]
 
 rust_library(
