@@ -1,3 +1,8 @@
+---
+name: test-model
+description: Test a model end-to-end using the xybrid execution system.
+---
+
 Test a model end-to-end using the xybrid execution system.
 
 The user should specify which model to test (e.g., "test kokoro-82m" or "test the TTS model").
