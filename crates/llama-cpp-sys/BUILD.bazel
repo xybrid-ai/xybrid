@@ -7,14 +7,17 @@
 load("@rules_cc//cc:defs.bzl", "cc_library")
 load("@rules_rs//rs:rust_library.bzl", "rust_library")
 
-# Android configs share the vision wiring. Vision (mtmd) is a mobile backend, so
-# the wrapper compiles its mtmd functions + the crate enables `vision` on Android
-# only; desktop's committed bindings carry the mtmd declarations but never call
-# them (no libmtmd link), keeping the proven desktop chain untouched.
-_ANDROID = [
+# Platforms with the vision (mtmd) backend: the wrapper compiles its mtmd
+# functions + the crate enables `vision`, and //:llama builds/installs libmtmd
+# for the same configs. Android (since #341) + desktop-linux (Flip 1 — the
+# shipped cargo CLI is platform-desktop = vision+huggingface, so the Bazel
+# artifact matches). Other platforms' committed bindings carry the mtmd
+# declarations but never call them (no libmtmd link).
+_VISION_PLATFORMS = [
     "@rules_rs//rs/platforms/config:aarch64-linux-android",
     "@rules_rs//rs/platforms/config:armv7-linux-androideabi",
     "@rules_rs//rs/platforms/config:x86_64-linux-android",
+    "@rules_rs//rs/platforms/config:x86_64-unknown-linux-gnu",
 ]
 
 # First-party C++ shim: defines the _c-suffixed symbols the Rust bindings call.
@@ -27,7 +30,7 @@ cc_library(
     hdrs = ["wrapper.h"],
     defines = select({
         cfg: ["XYBRID_LLAMA_VISION"]
-        for cfg in _ANDROID
+        for cfg in _VISION_PLATFORMS
     } | {"//conditions:default": []}),
     deps = ["//:llama"],
 )
@@ -43,8 +46,8 @@ rust_library(
         "bindings",
         "committed-bindings",
     ] + select({
-        cfg: ["vision"]  # mtmd re-exports; matches the Android wrapper + libmtmd
-        for cfg in _ANDROID
+        cfg: ["vision"]  # mtmd re-exports; matches the wrapper define + libmtmd
+        for cfg in _VISION_PLATFORMS
     } | {"//conditions:default": []}),
     edition = "2021",
     deps = [

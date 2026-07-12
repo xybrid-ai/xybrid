@@ -117,6 +117,20 @@ cmake(
         # _GNU_SOURCE instead of _DARWIN_C_SOURCE (u_int/u_char vanish from the
         # SDK headers). Metal stays OFF (base entries): CPU-only is the lane
         # that can leave the Mac; Metal needs Xcode.
+        # Desktop-linux VISION (Flip 1): TOOLS+COMMON=ON unlock tools/ -> libmtmd,
+        # mirroring the android arms — the shipped cargo CLI is built with
+        # platform-desktop = vision+huggingface, so the Bazel artifact must match.
+        # The tool EXECUTABLES need a C++ runtime: the hermetic toolchain links
+        # C++ via staged inputs (-nostdlib++), which rfcc's cmake doesn't
+        # replicate — hand the static libc++/abi/unwind archives to the exe
+        # links via CMAKE_CXX_STANDARD_LIBRARIES (lands AFTER objects, unlike
+        # EXE_LINKER_FLAGS). The tools themselves are discarded; only the
+        # static libs ship. GGML_LLAMAFILE stays default-ON (android-only off).
+        "@rules_rs//rs/platforms/config:x86_64-unknown-linux-gnu": _LLAMA_CACHE_ENTRIES | {
+            "LLAMA_BUILD_TOOLS": "ON",
+            "LLAMA_BUILD_COMMON": "ON",
+            "CMAKE_CXX_STANDARD_LIBRARIES": "$$EXT_BUILD_ROOT/$(execpath @llvm//runtimes/libcxx:libcxx.static) $$EXT_BUILD_ROOT/$(execpath @llvm//runtimes/libcxx:libcxxabi.static) $$EXT_BUILD_ROOT/$(execpath @llvm//runtimes/libunwind:libunwind.static)",
+        },
         "@rules_rs//rs/platforms/config:aarch64-apple-darwin": _LLAMA_CACHE_ENTRIES | {
             "CMAKE_SYSTEM_NAME": "Darwin",
             "CMAKE_SYSTEM_PROCESSOR": "arm64",
@@ -145,6 +159,17 @@ cmake(
         ],
         "//conditions:default": [],
     }),
+    # linux-vision: the static C++ runtime archives referenced by the linux
+    # arm's CMAKE_CXX_STANDARD_LIBRARIES. cfg=target (they're linked into
+    # TARGET binaries), unlike build_data's exec-config host tools.
+    data = select({
+        "@rules_rs//rs/platforms/config:x86_64-unknown-linux-gnu": [
+            "@llvm//runtimes/libcxx:libcxx.static",
+            "@llvm//runtimes/libcxx:libcxxabi.static",
+            "@llvm//runtimes/libunwind:libunwind.static",
+        ],
+        "//conditions:default": [],
+    }),
     lib_source = ":llama_src",
     # Build cmake's default `all` target — same as build.rs's vision path (it
     # sets TOOLS=ON and builds everything). Building only `mtmd` breaks cmake's
@@ -156,6 +181,8 @@ cmake(
         "@rules_rs//rs/platforms/config:aarch64-linux-android": ["libmtmd.a"] + _LLAMA_LIBS,
         "@rules_rs//rs/platforms/config:armv7-linux-androideabi": ["libmtmd.a"] + _LLAMA_LIBS,
         "@rules_rs//rs/platforms/config:x86_64-linux-android": ["libmtmd.a"] + _LLAMA_LIBS,
+        # Desktop-linux vision (Flip 1) also collects libmtmd.
+        "@rules_rs//rs/platforms/config:x86_64-unknown-linux-gnu": ["libmtmd.a"] + _LLAMA_LIBS,
         # Windows/MinGW: ggml/CMakeLists.txt sets CMAKE_STATIC_LIBRARY_PREFIX=""
         # on WIN32, so the ggml archives have NO `lib` prefix (ggml.a, not
         # libggml.a) — while llama (sibling scope) keeps it (libllama.a).

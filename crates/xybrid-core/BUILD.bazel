@@ -53,6 +53,12 @@ rust_library(
         "@rules_rs//rs/platforms/config:aarch64-linux-android": _ANDROID_BACKENDS,
         "@rules_rs//rs/platforms/config:armv7-linux-androideabi": _ANDROID_BACKENDS,
         "@rules_rs//rs/platforms/config:x86_64-linux-android": _ANDROID_BACKENDS,
+        # Desktop-linux (Flip 1): the shipped cargo CLI is platform-desktop =
+        # vision + huggingface — NO candle (desktop voice runs on ORT). Parity
+        # means vision only here; hf rides on the sdk's features/deps.
+        "@rules_rs//rs/platforms/config:x86_64-unknown-linux-gnu": [
+            "llm-llamacpp-vision",
+        ],
         "//conditions:default": [],
     }),
     deps = all_crate_deps(normal = True),

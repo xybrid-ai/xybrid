@@ -27,6 +27,17 @@ original_sdk_deps = DEP_DATA.get("crates/xybrid-sdk", {})
 filtered_sdk_deps = dict(original_sdk_deps)
 filtered_sdk_deps["deps"] = [d for d in original_sdk_deps.get("deps", []) if d != "//macros"]
 
+# Flip 1 (desktop-linux parity): the `huggingface` feature needs the optional
+# hf-hub dep, which the hub's per-platform resolution doesn't wire for linux
+# (it records the preset name, not its optional-dep expansion). Same surgery
+# precedent as the //macros filter above. hf-hub 0.5 resolves in the hub with
+# exactly [rustls-tls, ureq] — no new inputs.
+_SDK_LINUX_CFG = "@rules_rs//rs/platforms/config:x86_64-unknown-linux-gnu"
+filtered_sdk_deps["deps_by_platform"] = dict(original_sdk_deps.get("deps_by_platform", {}))
+filtered_sdk_deps["deps_by_platform"][_SDK_LINUX_CFG] = filtered_sdk_deps["deps_by_platform"].get(_SDK_LINUX_CFG, []) + [
+    "@crates//:hf-hub-0.5.0",
+]
+
 rust_library(
     name = "xybrid-sdk",
     srcs = glob(["src/**/*.rs"]),
@@ -35,7 +46,14 @@ rust_library(
         "default",
         "llm-llamacpp",
     ] + select({
-        "@rules_rs//rs/platforms/config:x86_64-unknown-linux-gnu": ["platform-desktop"],
+        # Flip 1: the shipped cargo CLI uses platform-desktop = ort-download
+        # (no-op marker) + llm-llamacpp-vision + huggingface. Bazel doesn't
+        # expand presets across crates, so name the expansion explicitly.
+        "@rules_rs//rs/platforms/config:x86_64-unknown-linux-gnu": [
+            "platform-desktop",
+            "llm-llamacpp-vision",
+            "huggingface",
+        ],
         "@rules_rs//rs/platforms/config:aarch64-apple-darwin": ["platform-macos"],
         "@rules_rs//rs/platforms/config:aarch64-linux-android": _SDK_ANDROID,
         "@rules_rs//rs/platforms/config:armv7-linux-androideabi": _SDK_ANDROID,
