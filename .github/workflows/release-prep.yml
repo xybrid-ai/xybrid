@@ -642,7 +642,8 @@ jobs:
       # glibc floor — strictly better than the old cargo/ubuntu-24.04 build.
       - name: Verify CLI payload (run + features + glibc floor)
         run: |
-          BIN=bazel-bin/crates/xybrid-cli/xybrid
+          BIN=$(bazelisk cquery --config=remote -c opt --output=files //crates/xybrid-cli:xybrid | head -1)
+          echo "resolved CLI: $BIN"
           "$BIN" --help >/dev/null
           test "$(nm "$BIN" | grep -c ' mtmd_')" -gt 0 || { echo "MISSING vision (mtmd) symbols"; exit 1; }
           strings "$BIN" | grep -q 'huggingface\.co' || { echo "MISSING huggingface support"; exit 1; }
@@ -657,7 +658,8 @@ jobs:
         run: |
           mkdir -p dist
           ARTIFACT="dist/xybrid-${TAG}-linux-x86_64"
-          cp bazel-bin/crates/xybrid-cli/xybrid "$ARTIFACT"
+          BIN=$(bazelisk cquery --config=remote -c opt --output=files //crates/xybrid-cli:xybrid | head -1)
+          cp "$BIN" "$ARTIFACT"
           chmod +w "$ARTIFACT"   # bazel-bin outputs are read-only
           strip "$ARTIFACT"
           chmod +x "$ARTIFACT"

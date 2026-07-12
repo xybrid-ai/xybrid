@@ -143,10 +143,15 @@ jobs:
       # desktop feature set (vision/mtmd + huggingface; parity with cargo's
       # platform-desktop), and hold the hermetic glibc floor (2.28 — the old
       # cargo/ubuntu-24.04 build required 2.39 and couldn't run on 22.04).
+      # NOTE: resolve the binary via cquery, NOT the bazel-bin symlink — the
+      # symlink tracks the LAST invocation above (windows), whose output is a
+      # different platform's binary ("Exec format error").
       - name: Smoke the linux CLI (run + features + glibc floor)
         if: env.BUILDBUDDY_API_KEY != ''
         run: |
-          BIN=bazel-bin/crates/xybrid-cli/xybrid
+          BIN=$(bazelisk cquery --config=remote -c opt --output=files //crates/xybrid-cli:xybrid | head -1)
+          echo "resolved linux CLI: $BIN"
+          file "$BIN"
           "$BIN" --help >/dev/null
           test "$(nm "$BIN" | grep -c ' mtmd_')" -gt 0 || { echo "MISSING vision (mtmd) symbols"; exit 1; }
           strings "$BIN" | grep -q 'huggingface\.co' || { echo "MISSING huggingface support"; exit 1; }
