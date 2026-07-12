@@ -1,0 +1,180 @@
+---
+title: Web
+description: 基于 WebAssembly 与 WebGPU 的浏览器端设备内 ML 推理 SDK 预览版
+---
+
+Web SDK（`@xybrid/web`）让 Xybrid 模型直接在浏览器中运行。它包含两个界面：用于 TfLite 模型的张量界面（`XybridModel`），以及用于 `.litertlm` 语言模型的文本生成界面（`XybridLlm`）。推理通过 WebAssembly 在本地执行，在可用时使用 WebGPU 加速——无需服务器往返。
+
+<Callout type="info">
+`@xybrid/web` `0.3.0` 为**私有预览版**，尚未发布到 npm。它位于 Xybrid 仓库的 [`bindings/web`](https://github.com/xybrid-ai/xybrid/tree/master/bindings/web) 目录中，仅提供 ESM 格式，API 可能发生变化。底层引擎属于实现细节——应用代码应只使用 `@xybrid/web` 的概念。
+</Callout>
+
+## 体验示例
+
+在仓库的 `bindings/web` 目录下：
+
+```bash
+pnpm install
+pnpm dev:example
+```
+
+predev 步骤会下载两个固定版本的模型（经 SHA-256 校验）并复制两个运行时的 wasm 资源——仓库中不提交任何模型二进制文件。
+
+- `/` 在 WebGPU 或 CPU 引擎上流式运行 SmolLM2-135M-Instruct（136 MB 的 `.litertlm` 模型），并实时显示下载进度与生成耗时。
+- `/tensor.html` 运行一个确定性的 708 字节加法模型，仅当所有输出全部匹配时才显示 PASS。
+
+`pnpm test:browser` 通过 Chromium 中的真实适配器测试这两个页面。
+
+## 快速开始
+
+### 文本生成
+
+```ts
+import { XybridLlm } from "@xybrid/web";
+
+const llm = await XybridLlm.load("https://models.example/llm/model_metadata.json", {
+  wasmPath: "/llm-runtime",
+  accelerator: "auto",
+  onDownloadProgress: ({ loadedBytes, totalBytes }) => render(loadedBytes, totalBytes),
+});
+
+for await (const delta of llm.generateStream("Hello!", { maxOutputTokens: 256 })) {
+  append(delta);
+}
+
+await llm.dispose();
+```
+
+每次 `generate` / `generateStream` 调用都是一次全新的单轮对话；模型内置的提示模板由引擎自动应用。提前放弃迭代器或调用 `dispose()` 会取消正在进行的解码。
+
+### 张量推理
+
+```ts
+import { XybridModel } from "@xybrid/web";
+
+const model = await XybridModel.load("https://models.example/model_metadata.json", {
+  wasmPath: "/litert",
+  accelerator: "auto",
+});
+
+const result = await model.run({
+  a: new Float32Array(100),
+  b: new Float32Array(100),
+});
+
+console.log(result.byName["Identity"]?.data);
+await model.dispose();
+```
+
+输入可以是位置数组，也可以是以名称为键的 `Float32Array`、`Int32Array` 或 `Uint8Array` 记录。当模型输入只有一个动态维度时，其大小会根据数据长度自动推断；有多个动态维度时需显式传入 `{ data, shape }`。
+
+## 托管 Wasm 资源
+
+每个界面都在运行时从 `wasmPath` 加载自己的 wasm JavaScript 与二进制文件：
+
+| 界面 | 需要托管的资源 | 示例路径 |
+|---------|----------------|--------------|
+| `XybridModel` | `@litertjs/core/wasm/*` | `/litert` |
+| `XybridLlm` | `@litert-lm/core/wasm/*` | `/llm-runtime` |
+
+Wasm 路径属于可执行代码，必须保持在页面自身的 HTTP(S) 源上。元数据与模型文件在目标主机允许 CORS 请求时可以位于其他源。预览版初始化时固定 `threads: false` 与 `jspi: false`，因此不需要 SharedArrayBuffer，也没有 COOP/COEP 要求。
+
+每个运行时的初始化都是页面级单例：使用相同 wasm 配置的并发加载会共享同一次初始化，之后使用不同 `wasmPath` 的加载会以 `RuntimeConfigurationError` 失败。
+
+## 模型元数据
+
+两个界面都加载 Xybrid 的 `model_metadata.json` 文档。浏览器端的元数据边界向前兼容——未识别的字段会被接受——而格式错误的元数据、不支持的模板以及不可用的浏览器特性都会成为类型化的 Xybrid 错误。
+
+| 字段 | 要求 |
+|-------|-------------|
+| `model_id`、`version`、`files` | 必填 |
+| `execution_template.type` | `"TfLite"`（张量）或 `"LiteRtLm"`（文本生成） |
+| `execution_template.model_file` | 纯文件名，必须列在 `files` 中，且与元数据文档位于同一目录 |
+| `execution_template.context_length` | 可选正整数（LiteRtLm），作为引擎的最大 token 数传入 |
+| `preprocessing`、`postprocessing`、`voices`、`vision_encoder` | 浏览器预览版中必须为空或不存在 |
+
+## API 参考
+
+### XybridModel
+
+```ts
+class XybridModel {
+  static load(metadataUrl: string | URL, options: LoadOptions): Promise<XybridModel>;
+
+  readonly inputs: readonly TensorDetail[];   // { name, shape, dataType }
+  readonly outputs: readonly TensorDetail[];
+  readonly accelerator: "wasm" | "webgpu";    // 实际选择的编译路径
+  readonly isFullyAccelerated: boolean;       // 部分算子回退到 CPU 时为 false
+
+  run(input: TensorInputs): Promise<RunResult>; // { outputs, byName }
+  dispose(): Promise<void>;                     // 幂等，等待进行中的推理
+}
+```
+
+### XybridLlm
+
+```ts
+class XybridLlm {
+  static load(metadataUrl: string | URL, options: LlmLoadOptions): Promise<XybridLlm>;
+
+  readonly accelerator: "wasm" | "webgpu";
+
+  generate(prompt: string, options?: GenerateOptions): Promise<string>;
+  generateStream(prompt: string, options?: GenerateOptions): AsyncGenerator<string>;
+  dispose(): Promise<void>;
+}
+```
+
+### 加载选项
+
+```ts
+type LoadOptions = {
+  wasmPath: string | URL;                       // 同源 wasm 资源目录
+  accelerator: "auto" | "wasm" | "webgpu";
+};
+
+type LlmLoadOptions = LoadOptions & {
+  onDownloadProgress?: (progress: { loadedBytes: number; totalBytes: number | undefined }) => void;
+};
+
+type GenerateOptions = {
+  maxOutputTokens?: number; // 正整数
+};
+```
+
+`auto` 优先使用 WebGPU，在 WebGPU 不可用时使用 wasm；显式指定 `webgpu` 时不会回退而是直接失败。在 LLM 界面上，`webgpu` 对应引擎的 GPU 后端，`wasm` 对应其 CPU 后端。LiteRT 仍可能在 CPU 上执行不支持的 WebGPU 算子——通过 `isFullyAccelerated` 判断计算图是否完全委托给 GPU。
+
+### 错误处理
+
+所有 SDK 错误都继承自 `XybridError`，带有稳定的 `code` 以及原始的 `causeValue`：
+
+| 错误类 | `code` |
+|-------------|--------|
+| `InvalidMetadataError` | `invalid_metadata` |
+| `UnsupportedTemplateError` | `unsupported_template` |
+| `UnsupportedFeatureError` | `unsupported_feature` |
+| `RuntimeConfigurationError` | `runtime_configuration` |
+| `RuntimeInitializationError` | `runtime_initialization` |
+| `InputValidationError` | `input_validation` |
+| `UnsupportedTensorTypeError` | `unsupported_tensor_type` |
+| `InferenceError` | `inference` |
+| `ConcurrentRunError` | `concurrent_run` |
+| `DeviceLostError` | `device_lost` |
+| `DisposedError` | `disposed` |
+
+每个模型同一时刻只允许一个进行中的 `run` 或生成（`ConcurrentRunError`）。WebGPU 设备丢失后，后续运行会抛出 `DeviceLostError`——加载新模型即可恢复。销毁后的调用会抛出 `DisposedError`。
+
+## 限制
+
+浏览器内存保护：元数据 **1 MiB**、模型 **512 MiB**、张量 I/O **256 MiB**。张量数据类型为 `float32`、`int32` 与 `uint8`。
+
+预览版中暂缓支持：前处理/后处理管线、`voices` 与 `vision_encoder` 元数据、线程、JSPI、WebNN、GPU 缓冲区 I/O、模型注册表、更高层的多模态 API，以及 LLM 界面上的多轮对话、系统提示、采样控制、约束解码与工具调用。
+
+## 浏览器支持
+
+| 要求 | 状态 |
+|-------------|--------|
+| WebAssembly（ESM 工具链） | 必需 |
+| WebGPU | 可选——`auto` 会回退到 wasm |
+| 跨源隔离（COOP/COEP） | 不需要 |
+| CI 测试环境 | Chromium（Playwright） |

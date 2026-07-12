@@ -5,7 +5,7 @@ description: 几分钟内开始使用 Xybrid
 
 只需几行代码即可在您的应用中运行 Xybrid。选择下方的 SDK 开始。
 
-<Tabs items={['Flutter', 'Swift', 'Kotlin', 'Unity', 'Rust', 'CLI']}>
+<Tabs items={['Flutter', 'Swift', 'Kotlin', 'Unity', 'Web', 'Rust', 'CLI']}>
   <Tab value="Flutter">
 **安装**
 
@@ -144,6 +144,38 @@ Debug.Log($"延迟: {result.LatencyMs}ms");
 ```
 
 **预期输出：** `result.Success == true`，包含来自 TTS 模型的音频输出。
+  </Tab>
+  <Tab value="Web">
+**安装**
+
+`@xybrid/web` 为私有预览版，尚未发布到 npm。它位于仓库的 [`bindings/web`](https://github.com/xybrid-ai/xybrid/tree/master/bindings/web) 目录：
+
+```bash
+git clone https://github.com/xybrid-ai/xybrid
+cd xybrid/bindings/web
+pnpm install
+pnpm dev:example   # 下载固定版本的示例模型并启动示例
+```
+
+**运行推理**
+
+```ts
+import { XybridLlm } from "@xybrid/web";
+
+// 在浏览器中流式运行语言模型
+const llm = await XybridLlm.load("/llm/model_metadata.json", {
+  wasmPath: "/llm-runtime",
+  accelerator: "auto", // 可用时使用 WebGPU，否则使用 wasm
+});
+
+for await (const delta of llm.generateStream("Hello from Xybrid!")) {
+  output.append(delta);
+}
+```
+
+**预期输出：** 完全在浏览器中生成的文本，逐 token 流式写入页面。
+
+张量界面与完整 API 请参阅 [Web SDK 指南](/zh/docs/sdks/web)。
   </Tab>
   <Tab value="Rust">
 **安装**
