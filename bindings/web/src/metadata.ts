@@ -6,7 +6,9 @@ import {
   UnsupportedTemplateError,
 } from "./errors.ts";
 
-const MAX_CONTEXT_LENGTH = 1_048_576;
+// Engine context capacity drives KV-cache allocation, so a remote metadata
+// document must not be able to request multi-gigabyte caches in a tab.
+const MAX_CONTEXT_LENGTH = 32_768;
 
 const metadataSchema = z
   .object({

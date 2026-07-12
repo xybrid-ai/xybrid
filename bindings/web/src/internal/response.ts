@@ -31,12 +31,18 @@ export const readResponseChunks = async (
       }
       totalBytes += value.byteLength;
       if (totalBytes > maximumBytes) {
-        await reader.cancel(limitMessage);
         throw new Error(limitMessage);
       }
       chunks.push(value);
       onProgress?.(totalBytes, declaredTotal);
     }
+  } catch (error: unknown) {
+    // Releasing the lock alone leaves the transfer streaming in the
+    // background; stop it before surfacing the failure.
+    await reader
+      .cancel(error instanceof Error ? error.message : String(error))
+      .catch(() => undefined);
+    throw error;
   } finally {
     reader.releaseLock();
   }

@@ -57,11 +57,14 @@ describe("metadata boundary", () => {
   });
 
   test("validates context_length only for LiteRtLm", () => {
-    for (const contextLength of [2_097_152, 0, 4096.5]) {
+    for (const contextLength of [2_097_152, 1_048_576, 32_769, 0, 4096.5]) {
       const parsed = parseMetadata(metadataWithContextLength("LiteRtLm", contextLength));
 
       expect(() => validateLlmBrowserMetadata(parsed)).toThrow(InvalidMetadataError);
     }
+
+    const atCap = parseMetadata(metadataWithContextLength("LiteRtLm", 32_768));
+    expect(validateLlmBrowserMetadata(atCap).contextLength).toBe(32_768);
 
     const valid = parseMetadata(metadataWithContextLength("LiteRtLm", 2048));
     expect(validateLlmBrowserMetadata(valid)).toEqual({
@@ -86,6 +89,26 @@ describe("metadata boundary", () => {
       }),
     );
     await expect(readResponseBytes(response, 7, "too large")).rejects.toThrow("too large");
+    expect(cancelled).toBe(true);
+  });
+
+  test("cancels the response body when a progress callback throws", async () => {
+    let cancelled = false;
+    const response = new Response(
+      new ReadableStream<Uint8Array>({
+        pull(controller) {
+          controller.enqueue(new Uint8Array(4));
+        },
+        cancel() {
+          cancelled = true;
+        },
+      }),
+    );
+    await expect(
+      readResponseChunks(response, 1024, "too large", () => {
+        throw new Error("progress consumer failed");
+      }),
+    ).rejects.toThrow("progress consumer failed");
     expect(cancelled).toBe(true);
   });
 
