@@ -57,7 +57,7 @@ pub fn inspect_and_generate(
 
     if model_files.is_empty() {
         return Err(SdkError::load(format!(
-            "No model files (.onnx, .gguf, .safetensors) found in '{}'",
+            "No model files (.onnx, .gguf, .safetensors, .tflite, .litertlm) found in '{}'",
             dir.display()
         )));
     }
@@ -330,6 +330,8 @@ pub(crate) enum ModelFormat {
     Onnx,
     Gguf,
     SafeTensors,
+    TfLite,
+    LiteRtLm,
 }
 
 /// Information about a detected model file.
@@ -370,6 +372,8 @@ fn detect_model_files(dir: &Path) -> Vec<ModelFileInfo> {
             Some("onnx") => ModelFormat::Onnx,
             Some("gguf") => ModelFormat::Gguf,
             Some("safetensors") => ModelFormat::SafeTensors,
+            Some("tflite") => ModelFormat::TfLite,
+            Some("litertlm") => ModelFormat::LiteRtLm,
             _ => continue,
         };
 
@@ -945,6 +949,63 @@ fn build_metadata(
         ModelFormat::SafeTensors => {
             build_safetensors_metadata(model_id, model_id, primary, &task, card, model_files)
         }
+        ModelFormat::TfLite => build_uninspected_metadata(
+            model_id,
+            primary,
+            &task,
+            card,
+            xybrid_core::execution::ExecutionTemplate::TfLite {
+                model_file: primary.filename.clone(),
+            },
+        ),
+        ModelFormat::LiteRtLm => build_uninspected_metadata(
+            model_id,
+            primary,
+            &task,
+            card,
+            xybrid_core::execution::ExecutionTemplate::LiteRtLm {
+                model_file: primary.filename.clone(),
+                context_length: None,
+            },
+        ),
+    }
+}
+
+fn build_uninspected_metadata(
+    model_id: &str,
+    primary: &ModelFileInfo,
+    task: &str,
+    card: Option<&HfModelCard>,
+    execution_template: xybrid_core::execution::ExecutionTemplate,
+) -> ModelMetadata {
+    let mut metadata_map = HashMap::new();
+    metadata_map.insert(
+        "task".to_string(),
+        serde_json::Value::String(task.to_string()),
+    );
+    metadata_map.insert(
+        "source_repo".to_string(),
+        serde_json::Value::String(model_id.to_string()),
+    );
+    metadata_map.insert("auto_generated".to_string(), serde_json::Value::Bool(true));
+
+    let description = card
+        .and_then(|c| c.model_name.clone())
+        .unwrap_or_else(|| format!("{} (auto-generated)", model_id));
+
+    ModelMetadata {
+        model_id: model_id.to_string(),
+        version: "1.0".to_string(),
+        execution_template,
+        preprocessing: Vec::new(),
+        postprocessing: Vec::new(),
+        files: vec![primary.filename.clone()],
+        vision_encoder: None,
+        description: Some(description),
+        metadata: metadata_map,
+        voices: None,
+        max_chunk_chars: None,
+        trim_trailing_samples: None,
     }
 }
 
@@ -1881,6 +1942,58 @@ mod tests {
         assert_eq!(files.len(), 2);
         assert!(files.iter().any(|f| f.format == ModelFormat::Onnx));
         assert!(files.iter().any(|f| f.format == ModelFormat::Gguf));
+    }
+
+    #[test]
+    fn test_generate_metadata_tflite() {
+        let dir = TempDir::new().unwrap();
+        std::fs::write(dir.path().join("model.tflite"), b"dummy tflite").unwrap();
+
+        let (metadata, _) = generate_metadata(dir.path(), "test/tflite").unwrap();
+
+        assert!(metadata.files.contains(&"model.tflite".to_string()));
+        match metadata.execution_template {
+            xybrid_core::execution::ExecutionTemplate::TfLite { model_file } => {
+                assert_eq!(model_file, "model.tflite");
+            }
+            other => panic!("Expected TfLite execution template, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_generate_metadata_litertlm() {
+        let dir = TempDir::new().unwrap();
+        std::fs::write(dir.path().join("model.litertlm"), b"dummy litertlm").unwrap();
+
+        let (metadata, _) = generate_metadata(dir.path(), "test/litertlm").unwrap();
+
+        assert!(metadata.files.contains(&"model.litertlm".to_string()));
+        match metadata.execution_template {
+            xybrid_core::execution::ExecutionTemplate::LiteRtLm {
+                model_file,
+                context_length,
+            } => {
+                assert_eq!(model_file, "model.litertlm");
+                assert_eq!(context_length, None);
+            }
+            other => panic!("Expected LiteRtLm execution template, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_generate_metadata_prefers_existing_gguf_behavior() {
+        let dir = TempDir::new().unwrap();
+        std::fs::write(dir.path().join("model.gguf"), b"larger dummy gguf").unwrap();
+        std::fs::write(dir.path().join("model.tflite"), b"tflite").unwrap();
+
+        let (metadata, _) = generate_metadata(dir.path(), "test/mixed").unwrap();
+
+        match metadata.execution_template {
+            xybrid_core::execution::ExecutionTemplate::Gguf { model_file, .. } => {
+                assert_eq!(model_file, "model.gguf");
+            }
+            other => panic!("Expected Gguf execution template, got {other:?}"),
+        }
     }
 
     #[test]

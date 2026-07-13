@@ -1617,6 +1617,8 @@ impl ModelLoader {
         if filename.ends_with(".gguf")
             || filename.ends_with(".onnx")
             || filename.ends_with(".safetensors")
+            || filename.ends_with(".tflite")
+            || filename.ends_with(".litertlm")
         {
             return true;
         }
@@ -3502,6 +3504,12 @@ impl Clone for XybridModel {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tflite_and_litertlm_files_are_essential() {
+        assert!(ModelLoader::is_essential_file("model.tflite"));
+        assert!(ModelLoader::is_essential_file("model.litertlm"));
+    }
 
     /// Serializes the tests that mutate the process-global speculative flag so
     /// they don't observe each other's writes within the test binary.
