@@ -12,16 +12,22 @@ import { validateInputs } from "./internal/input.ts";
 import { liteRtRuntime } from "./internal/litert-runtime.ts";
 import {
   compileModel,
+  compileModelBytes,
   loadMetadata,
   type MetadataLoader,
+  type NormalizedRegistryLoadOptions,
   normalizeBaseLoadOptions,
+  normalizeRegistryLoadOptions,
   startLoadPrelude,
 } from "./internal/loading.ts";
+import { type RegistryResolution, resolveRegistryModel } from "./internal/registry.ts";
 import type { BrowserRuntime, RuntimeModel, RuntimeTensor } from "./internal/runtime.ts";
 import { resolveMetadataUrl } from "./internal/url.ts";
+import { downloadVerifiedModel } from "./internal/verified-download.ts";
 import { type ParsedMetadata, resolveModelUrl, validateBrowserMetadata } from "./metadata.ts";
 import type {
   LoadOptions,
+  RegistryLoadOptions,
   RunResult,
   SelectedAccelerator,
   TensorDetail,
@@ -31,9 +37,16 @@ import type {
 
 const MAX_OUTPUT_BYTES = 256 * 1024 * 1024;
 const MODEL_CONSTRUCTION_TOKEN = Symbol("XybridModel construction");
+const DEFAULT_MODEL_WASM_PATH = "/xybrid/litert";
 
 const normalizeLoadOptions = (options: unknown, base: string | undefined): LoadOptions =>
-  normalizeBaseLoadOptions(options, base);
+  normalizeBaseLoadOptions(options, base, DEFAULT_MODEL_WASM_PATH);
+
+const normalizeRegistryOptions = (
+  options: unknown,
+  base: string | undefined,
+): NormalizedRegistryLoadOptions =>
+  normalizeRegistryLoadOptions(options, base, DEFAULT_MODEL_WASM_PATH);
 
 const validateOutputShape = (detail: TensorDetail): void => {
   const bytesPerElement = detail.dataType === "uint8" ? 1 : 4;
@@ -204,6 +217,23 @@ export class XybridModel {
     return new XybridModel(session, MODEL_CONSTRUCTION_TOKEN);
   }
 
+  static async fromRegistry(id: string, options?: RegistryLoadOptions): Promise<XybridModel> {
+    const base = typeof location === "undefined" ? undefined : location.href;
+    const normalizedOptions = normalizeRegistryOptions(options, base);
+    const resolution = await resolveRegistryModel(id, "tflite", {
+      registryUrl: normalizedOptions.registryUrl,
+      signal: normalizedOptions.signal,
+      version: normalizedOptions.version,
+    });
+    const session = await loadModelFromRegistry(
+      resolution,
+      normalizedOptions,
+      liteRtRuntime,
+      sharedInitializer,
+    );
+    return new XybridModel(session, MODEL_CONSTRUCTION_TOKEN);
+  }
+
   get inputs(): readonly TensorDetail[] {
     return this.session.inputs;
   }
@@ -236,17 +266,47 @@ export const loadModel = async (
   getMetadata: MetadataLoader,
   initializer: RuntimeInitializer,
 ): Promise<ModelSession> => {
-  const prelude = startLoadPrelude(
-    metadataUrl,
-    options.wasmPath,
-    runtime,
-    getMetadata,
-    initializer,
-  );
+  const wasmPath = options.wasmPath;
+  if (wasmPath === undefined) {
+    throw new RuntimeConfigurationError("wasmPath must be provided to the internal tensor loader.");
+  }
+  const prelude = startLoadPrelude(metadataUrl, wasmPath, runtime, getMetadata, initializer);
   const metadata: ParsedMetadata = await prelude.metadata;
   const modelFile = validateBrowserMetadata(metadata);
   const modelUrl = resolveModelUrl(metadataUrl, modelFile, metadata.files);
   await prelude.initialization;
-  const compiled = await compileModel(runtime, modelUrl, options.accelerator);
+  const compiled = await compileModel(runtime, modelUrl, options.accelerator ?? "auto");
+  return new ModelSession(runtime, compiled.model, compiled.accelerator);
+};
+
+export const loadModelFromRegistry = async (
+  resolution: RegistryResolution,
+  options: NormalizedRegistryLoadOptions,
+  runtime: BrowserRuntime,
+  initializer: RuntimeInitializer,
+): Promise<ModelSession> => {
+  const prelude = startLoadPrelude(
+    resolution.metadata,
+    options.wasmPath,
+    runtime,
+    async () => resolution.metadata,
+    initializer,
+  );
+  const modelPromise = downloadVerifiedModel(resolution.modelUrl, {
+    onProgress: options.onDownloadProgress,
+    sha256: resolution.sha256,
+    signal: options.signal,
+    sizeBytes: resolution.sizeBytes,
+  });
+  await prelude.initialization;
+  const chunks = await modelPromise;
+  const totalBytes = chunks.reduce((total, chunk) => total + chunk.byteLength, 0);
+  const bytes = new Uint8Array(totalBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  const compiled = await compileModelBytes(runtime, bytes, options.accelerator);
   return new ModelSession(runtime, compiled.model, compiled.accelerator);
 };

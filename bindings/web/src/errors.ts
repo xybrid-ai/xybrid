@@ -5,6 +5,8 @@ export type XybridErrorCode =
   | "inference"
   | "input_validation"
   | "invalid_metadata"
+  | "integrity"
+  | "registry"
   | "runtime_configuration"
   | "runtime_initialization"
   | "unsupported_feature"
@@ -29,6 +31,20 @@ export class InvalidMetadataError extends XybridError {
   constructor(message: string, causeValue: unknown = undefined) {
     super("invalid_metadata", message, causeValue);
     this.name = "InvalidMetadataError";
+  }
+}
+
+export class RegistryError extends XybridError {
+  constructor(message: string, causeValue: unknown = undefined) {
+    super("registry", message, causeValue);
+    this.name = "RegistryError";
+  }
+}
+
+export class IntegrityError extends XybridError {
+  constructor(message: string, causeValue: unknown = undefined) {
+    super("integrity", message, causeValue);
+    this.name = "IntegrityError";
   }
 }
 

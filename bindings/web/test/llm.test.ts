@@ -90,6 +90,9 @@ const createLlmRuntime = (): LlmRuntimeControl => {
       onProgress?.({ loadedBytes: 7, totalBytes: 7 });
       return { bytes: 7 };
     },
+    modelFromChunks: async (chunks) => ({
+      bytes: chunks.reduce((total, chunk) => total + chunk.byteLength, 0),
+    }),
     createEngine: async (_model, accelerator, contextLength) => {
       if (accelerator === "webgpu" && shouldFailWebGpu) {
         throw new AcceleratorUnavailableError("GPU unavailable");

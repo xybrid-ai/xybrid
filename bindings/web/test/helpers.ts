@@ -94,44 +94,47 @@ export const createRuntime = (): RuntimeControl => {
   let deletedModels = 0;
   let onLost: (() => void) | undefined;
 
+  const compile = async (accelerator: "wasm" | "webgpu"): Promise<RuntimeModel> => {
+    compiled.push(accelerator);
+    if (accelerator === "webgpu" && shouldFailWebGpu) {
+      throw new AcceleratorUnavailableError("GPU unavailable");
+    }
+    if (accelerator === "webgpu" && shouldFailWebGpuCompilation) {
+      throw new DOMException("model compilation failed", "OperationError");
+    }
+    const currentOutput = { ...output, name: outputName, shape: outputShape };
+    const model: RuntimeModel = {
+      inputs: details.inputs,
+      outputs: [currentOutput],
+      isFullyAccelerated: accelerator === "webgpu",
+      invoke: async (inputs) => {
+        await runGate;
+        if (shouldFailRun) {
+          throw new DOMException("backend failure", "OperationError");
+        }
+        if (shouldOmitOutputs) {
+          return [];
+        }
+        const first = inputs[0];
+        if (first === undefined) {
+          throw new DOMException("missing input", "OperationError");
+        }
+        return [runtime.createTensor(currentOutput, await first.read(), currentOutput.shape)];
+      },
+      delete: () => {
+        deletedModels += 1;
+      },
+    };
+    return model;
+  };
+
   const runtime: BrowserRuntime = {
     initialize: async (config) => {
       initialized.push(config.wasmPath.toString());
       await initializationGate;
     },
-    compile: async (_url, accelerator) => {
-      compiled.push(accelerator);
-      if (accelerator === "webgpu" && shouldFailWebGpu) {
-        throw new AcceleratorUnavailableError("GPU unavailable");
-      }
-      if (accelerator === "webgpu" && shouldFailWebGpuCompilation) {
-        throw new DOMException("model compilation failed", "OperationError");
-      }
-      const currentOutput = { ...output, name: outputName, shape: outputShape };
-      const model: RuntimeModel = {
-        inputs: details.inputs,
-        outputs: [currentOutput],
-        isFullyAccelerated: accelerator === "webgpu",
-        invoke: async (inputs) => {
-          await runGate;
-          if (shouldFailRun) {
-            throw new DOMException("backend failure", "OperationError");
-          }
-          if (shouldOmitOutputs) {
-            return [];
-          }
-          const first = inputs[0];
-          if (first === undefined) {
-            throw new DOMException("missing input", "OperationError");
-          }
-          return [runtime.createTensor(currentOutput, await first.read(), currentOutput.shape)];
-        },
-        delete: () => {
-          deletedModels += 1;
-        },
-      };
-      return model;
-    },
+    compile: async (_url, accelerator) => compile(accelerator),
+    compileBytes: async (_bytes, accelerator) => compile(accelerator),
     createTensor: (detail, data, shape) => {
       tensorCreationCalls += 1;
       if (tensorCreationCalls === tensorCreationFailure) {

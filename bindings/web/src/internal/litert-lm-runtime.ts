@@ -130,6 +130,14 @@ export const liteRtLmRuntime: LlmRuntime<Blob> = {
     modelUrl: URL,
     onProgress: ((progress: DownloadProgress) => void) | undefined,
   ) => loadModelChunks(modelUrl, onProgress).then((chunks) => new Blob(chunks)),
+  modelFromChunks: async (chunks) => {
+    const parts = chunks.map((chunk) => {
+      const part = new Uint8Array(new ArrayBuffer(chunk.byteLength));
+      part.set(chunk);
+      return part;
+    });
+    return new Blob(parts);
+  },
   createEngine: async (
     model: Blob,
     accelerator: SelectedAccelerator,

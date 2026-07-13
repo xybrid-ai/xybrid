@@ -137,10 +137,13 @@ export const liteRtRuntime: BrowserRuntime = {
     await loadLiteRt(config.wasmPath.toString(), { threads: false, jspi: false });
   },
   compile: async (modelUrl: URL, accelerator: SelectedAccelerator) => {
+    return liteRtRuntime.compileBytes(await loadModelBytes(modelUrl), accelerator);
+  },
+  compileBytes: async (bytes: Uint8Array, accelerator: SelectedAccelerator) => {
     if (accelerator === "webgpu" && getWebGpuDevice() === null) {
       throw new AcceleratorUnavailableError("WebGPU is unavailable.");
     }
-    return wrapModel(await loadAndCompile(await loadModelBytes(modelUrl), { accelerator }));
+    return wrapModel(await loadAndCompile(bytes, { accelerator }));
   },
   createTensor: (tensorDetail, value, shape) =>
     new CoreTensor(Tensor.fromTypedArray(ownedTensorValue(value), Array.from(shape)), tensorDetail),

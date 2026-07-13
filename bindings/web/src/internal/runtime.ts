@@ -25,6 +25,7 @@ export type RuntimeModel = {
 export type BrowserRuntime = {
   initialize(config: RuntimeInitConfig): Promise<void>;
   compile(modelUrl: URL, accelerator: SelectedAccelerator): Promise<RuntimeModel>;
+  compileBytes(bytes: Uint8Array, accelerator: SelectedAccelerator): Promise<RuntimeModel>;
   createTensor(detail: TensorDetail, data: TensorValue, shape: readonly number[]): RuntimeTensor;
   onDeviceLost(callback: () => void): () => void;
 };
@@ -46,6 +47,7 @@ export type LlmRuntime<Model> = {
     modelUrl: URL,
     onProgress: ((progress: DownloadProgress) => void) | undefined,
   ): Promise<Model>;
+  modelFromChunks(chunks: readonly Uint8Array[]): Promise<Model>;
   createEngine(
     model: Model,
     accelerator: SelectedAccelerator,

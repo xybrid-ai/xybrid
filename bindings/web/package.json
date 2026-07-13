@@ -23,13 +23,14 @@
     "prebuild:example": "bun run example:assets",
     "predev": "bun run example:assets",
     "predev:example": "bun run example:assets",
-    "test": "bun test test/model.test.ts test/metadata.test.ts test/llm.test.ts",
+    "test": "bun test test/model.test.ts test/metadata.test.ts test/llm.test.ts test/registry.test.ts",
     "test:browser": "playwright test",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@litert-lm/core": "0.14.0",
     "@litertjs/core": "2.5.2",
+    "hash-wasm": "^4.12.0",
     "ky": "^1.9.0",
     "zod": "^4.0.0"
   },

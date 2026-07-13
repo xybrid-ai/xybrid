@@ -3,7 +3,12 @@ export const readResponseChunks = async (
   maximumBytes: number,
   limitMessage: string,
   onProgress?: (loadedBytes: number, totalBytes: number | undefined) => void,
+  onChunk?: (chunk: Uint8Array<ArrayBuffer>) => void,
+  signal?: AbortSignal,
 ): Promise<Uint8Array<ArrayBuffer>[]> => {
+  if (signal?.aborted) {
+    throw signal.reason ?? new DOMException("The operation was aborted.", "AbortError");
+  }
   const declaredLength = Number(response.headers.get("content-length"));
   const declaredTotal =
     Number.isFinite(declaredLength) && declaredLength > 0 ? declaredLength : undefined;
@@ -16,6 +21,7 @@ export const readResponseChunks = async (
     if (bytes.byteLength > maximumBytes) {
       throw new Error(limitMessage);
     }
+    onChunk?.(bytes);
     onProgress?.(bytes.byteLength, declaredTotal ?? bytes.byteLength);
     return [bytes];
   }
@@ -23,9 +29,18 @@ export const readResponseChunks = async (
   const reader = response.body.getReader();
   const chunks: Uint8Array<ArrayBuffer>[] = [];
   let totalBytes = 0;
+  let aborted = false;
+  const abort = (): void => {
+    aborted = true;
+    void reader.cancel(signal?.reason).catch(() => undefined);
+  };
+  signal?.addEventListener("abort", abort, { once: true });
   try {
     while (true) {
       const { done, value } = await reader.read();
+      if (aborted || signal?.aborted) {
+        throw signal?.reason ?? new DOMException("The operation was aborted.", "AbortError");
+      }
       if (done) {
         break;
       }
@@ -33,6 +48,7 @@ export const readResponseChunks = async (
       if (totalBytes > maximumBytes) {
         throw new Error(limitMessage);
       }
+      onChunk?.(value);
       chunks.push(value);
       onProgress?.(totalBytes, declaredTotal);
     }
@@ -44,6 +60,7 @@ export const readResponseChunks = async (
       .catch(() => undefined);
     throw error;
   } finally {
+    signal?.removeEventListener("abort", abort);
     reader.releaseLock();
   }
 
