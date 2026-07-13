@@ -72,6 +72,9 @@ impl StandardStrategy {
             ExecutionTemplate::VisionLanguage { .. } => Err(AdapterError::InvalidInput(
                 "VisionLanguage models should use a multimodal LLM strategy".to_string(),
             )),
+            ExecutionTemplate::LiteRtLm { .. } => Err(AdapterError::InvalidInput(
+                "LiteRtLm models run in the browser SDK (@xybrid/web); no native runtime is available".to_string(),
+            )),
         }
     }
 

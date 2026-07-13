@@ -81,6 +81,17 @@
       "description": "Model version",
       "type": "string"
     },
+    "vision_encoder": {
+      "description": "Optional sibling vision encoder / mmproj declaration for VLMs.",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/VisionEncoderConfig"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "voices": {
       "description": "Optional: Voice configuration for TTS models",
       "anyOf": [
@@ -348,6 +359,36 @@
           }
         },
         {
+          "description": "LiteRT-LM model execution (browser SDK / @xybrid/web only)",
+          "type": "object",
+          "required": [
+            "model_file",
+            "type"
+          ],
+          "properties": {
+            "context_length": {
+              "description": "Maximum context length (tokens); engine default when absent",
+              "default": null,
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint",
+              "minimum": 0.0
+            },
+            "model_file": {
+              "description": "Path to the .litertlm model file (relative to bundle root)",
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "LiteRtLm"
+              ]
+            }
+          }
+        },
+        {
           "description": "Multi-model graph execution (DAG of models)",
           "type": "object",
           "required": [
@@ -399,6 +440,18 @@
               "format": "uint",
               "minimum": 0.0
             },
+            "generation_params": {
+              "description": "Per-model generation sampling parameters. When absent or when a field is absent, the consuming strategy supplies its own defaults. Used by codec TTS models (e.g. NeuTTS) that need specific sampling config for speech-token generation.",
+              "default": null,
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/GenerationParams"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "model_file": {
               "description": "Path to the GGUF model file",
               "type": "string"
@@ -410,6 +463,206 @@
               ]
             }
           }
+        },
+        {
+          "description": "Vision-language model execution for image+text LLM inputs.",
+          "type": "object",
+          "required": [
+            "model_file",
+            "type"
+          ],
+          "properties": {
+            "chat_template": {
+              "description": "Path to chat template JSON file.",
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "context_length": {
+              "description": "Maximum context length (tokens).",
+              "default": 4096,
+              "type": "integer",
+              "format": "uint",
+              "minimum": 0.0
+            },
+            "generation_params": {
+              "description": "Per-model generation sampling parameters.",
+              "default": null,
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/GenerationParams"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "model_file": {
+              "description": "Path to the language model file (usually GGUF) relative to bundle root.",
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "VisionLanguage"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "GenerationParams": {
+      "description": "Sampling parameters for GGUF generation. All fields optional so metadata only needs to specify overrides; absent fields use strategy defaults.",
+      "type": "object",
+      "properties": {
+        "max_tokens": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint",
+          "minimum": 0.0
+        },
+        "repetition_penalty": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "float"
+        },
+        "stop_sequences": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "temperature": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "float"
+        },
+        "top_k": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint",
+          "minimum": 0.0
+        },
+        "top_p": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "float"
+        }
+      }
+    },
+    "ImageNormalizePreset": {
+      "description": "Named per-channel normalization presets for vision inputs.",
+      "oneOf": [
+        {
+          "description": "ImageNet RGB normalization.",
+          "type": "string",
+          "enum": [
+            "ImageNet"
+          ]
+        },
+        {
+          "description": "OpenAI CLIP RGB normalization.",
+          "type": "string",
+          "enum": [
+            "Clip"
+          ]
+        },
+        {
+          "description": "SigLIP RGB normalization.",
+          "type": "string",
+          "enum": [
+            "SigLip"
+          ]
+        },
+        {
+          "description": "Custom per-channel normalization.",
+          "type": "object",
+          "required": [
+            "Custom"
+          ],
+          "properties": {
+            "Custom": {
+              "type": "object",
+              "required": [
+                "mean",
+                "std"
+              ],
+              "properties": {
+                "mean": {
+                  "type": "array",
+                  "items": {
+                    "type": "number",
+                    "format": "float"
+                  }
+                },
+                "std": {
+                  "type": "array",
+                  "items": {
+                    "type": "number",
+                    "format": "float"
+                  }
+                }
+              }
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "ImageResizeMode": {
+      "description": "Aspect-ratio handling mode for `ImageResize`.",
+      "oneOf": [
+        {
+          "description": "Resize directly to the target dimensions.",
+          "type": "string",
+          "enum": [
+            "Stretch"
+          ]
+        },
+        {
+          "description": "Preserve aspect ratio and pad the remaining area.",
+          "type": "string",
+          "enum": [
+            "Letterbox"
+          ]
+        },
+        {
+          "description": "Preserve aspect ratio and center-crop the overflow.",
+          "type": "string",
+          "enum": [
+            "Center"
+          ]
+        }
+      ]
+    },
+    "ImageTensorLayout": {
+      "description": "Tensor layout emitted by `ImageDecode`.",
+      "oneOf": [
+        {
+          "description": "Batch, channels, height, width.",
+          "type": "string",
+          "enum": [
+            "Nchw"
+          ]
+        },
+        {
+          "description": "Batch, height, width, channels.",
+          "type": "string",
+          "enum": [
+            "Nhwc"
+          ]
         }
       ]
     },
@@ -829,6 +1082,43 @@
               ]
             }
           }
+        },
+        {
+          "description": "Decode LLM speech token output to audio via an ONNX codec decoder\n\nUse for: Codec-based TTS models (NeuTTS, MARS5, F5-TTS)",
+          "type": "object",
+          "required": [
+            "decoder_model",
+            "sample_rate",
+            "token_pattern",
+            "type"
+          ],
+          "properties": {
+            "apply_postprocessing": {
+              "description": "Whether to apply postprocessing (normalization, silence trimming)",
+              "default": true,
+              "type": "boolean"
+            },
+            "decoder_model": {
+              "description": "Path to the ONNX codec decoder model (relative to bundle root)",
+              "type": "string"
+            },
+            "sample_rate": {
+              "description": "Output sample rate in Hz",
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0.0
+            },
+            "token_pattern": {
+              "description": "Regex pattern to extract speech token IDs from LLM output text",
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "CodecDecode"
+              ]
+            }
+          }
         }
       ]
     },
@@ -1016,6 +1306,108 @@
           }
         },
         {
+          "description": "Resize an image tensor with explicit aspect-ratio policy.\n\nUse for: Vision models that need deterministic stretch, letterbox, or center-crop resizing after `ImageDecode`.",
+          "type": "object",
+          "required": [
+            "height",
+            "type",
+            "width"
+          ],
+          "properties": {
+            "fill": {
+              "description": "Letterbox fill color in normalized channel values.",
+              "default": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "type": "array",
+              "items": {
+                "type": "number",
+                "format": "float"
+              }
+            },
+            "height": {
+              "description": "Target height.",
+              "type": "integer",
+              "format": "uint",
+              "minimum": 0.0
+            },
+            "interpolation": {
+              "description": "Interpolation method.",
+              "default": "Bilinear",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/InterpolationMethod"
+                }
+              ]
+            },
+            "layout": {
+              "description": "Input/output tensor layout.",
+              "default": "Nchw",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/ImageTensorLayout"
+                }
+              ]
+            },
+            "mode": {
+              "description": "Aspect-ratio handling mode.",
+              "default": "Stretch",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/ImageResizeMode"
+                }
+              ]
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "ImageResize"
+              ]
+            },
+            "width": {
+              "description": "Target width.",
+              "type": "integer",
+              "format": "uint",
+              "minimum": 0.0
+            }
+          }
+        },
+        {
+          "description": "Normalize an image tensor with a known vision-model preset.\n\nUse for: ImageNet classifiers, CLIP/SigLIP encoders, and VLM preprocessors that require per-channel mean/std normalization.",
+          "type": "object",
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "layout": {
+              "description": "Tensor layout to use when locating the channel axis.",
+              "default": "Nchw",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/ImageTensorLayout"
+                }
+              ]
+            },
+            "preset": {
+              "description": "Normalization preset or custom per-channel values.",
+              "default": "ImageNet",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/ImageNormalizePreset"
+                }
+              ]
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "ImageNormalize"
+              ]
+            }
+          }
+        },
+        {
           "description": "Center crop image to target dimensions\n\nUse for: Image classifiers (ResNet, EfficientNet) that need centered crops",
           "type": "object",
           "required": [
@@ -1074,6 +1466,68 @@
           }
         },
         {
+          "description": "Decode an image envelope into a float tensor in [0, 1].\n\nUse for: Image classifiers and vision-language models that need encoded PNG/JPEG/WebP bytes converted before resize/normalize steps.",
+          "type": "object",
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "channels": {
+              "description": "Output channel count. Supported: 1 (grayscale) or 3 (RGB).",
+              "default": 3,
+              "type": "integer",
+              "format": "uint",
+              "minimum": 0.0
+            },
+            "layout": {
+              "description": "Output tensor layout.",
+              "default": "Nchw",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/ImageTensorLayout"
+                }
+              ]
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "ImageDecode"
+              ]
+            }
+          }
+        },
+        {
+          "description": "Ingress an image envelope into a float tensor in [0, 1].\n\nUse for: image classifiers and vision-language models that accept either encoded PNG/JPEG/WebP bytes or raw camera/canvas frames.",
+          "type": "object",
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "channels": {
+              "description": "Output channel count. Supported: 1 (grayscale) or 3 (RGB).",
+              "default": 3,
+              "type": "integer",
+              "format": "uint",
+              "minimum": 0.0
+            },
+            "layout": {
+              "description": "Output tensor layout.",
+              "default": "Nchw",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/ImageTensorLayout"
+                }
+              ]
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "ImageIngress"
+              ]
+            }
+          }
+        },
+        {
           "description": "Reshape tensor to target dimensions\n\nUse for: Converting flat embeddings to multi-dimensional tensors",
           "type": "object",
           "required": [
@@ -1094,6 +1548,38 @@
               "type": "string",
               "enum": [
                 "Reshape"
+              ]
+            }
+          }
+        },
+        {
+          "description": "Convert text to raw IPA phoneme strings without token-ID mapping\n\nUse for: LLM-based TTS models (NeuTTS) that inject phonemes into text prompts",
+          "type": "object",
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "backend": {
+              "description": "Phonemization backend to use (default: MisakiDictionary)",
+              "default": "MisakiDictionary",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/PhonemizerBackend"
+                }
+              ]
+            },
+            "language": {
+              "description": "Language code (e.g., \"en-us\")",
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "PhonemeRaw"
               ]
             }
           }
@@ -1246,6 +1732,77 @@
         }
       ]
     },
+    "VisionEncoderConfig": {
+      "description": "Optional sibling vision encoder declaration in `model_metadata.json`.",
+      "type": "object",
+      "required": [
+        "file",
+        "image_size",
+        "preprocessing_preset"
+      ],
+      "properties": {
+        "file": {
+          "description": "Sibling mmproj / vision encoder file, relative to bundle root.",
+          "type": "string"
+        },
+        "image_size": {
+          "description": "Square image size expected by the encoder.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        },
+        "patch_size": {
+          "description": "Optional patch size for patch-count/capability planning.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint",
+          "minimum": 0.0
+        },
+        "preprocessing_preset": {
+          "description": "Named preprocessing preset for the encoder.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/VisionPreprocessingPreset"
+            }
+          ]
+        }
+      }
+    },
+    "VisionPreprocessingPreset": {
+      "description": "Named vision preprocessing preset used by sibling vision encoders.",
+      "oneOf": [
+        {
+          "description": "Gemma 3 / SigLIP-style image preprocessing.",
+          "type": "string",
+          "enum": [
+            "gemma3_vision"
+          ]
+        },
+        {
+          "description": "Gemma 4 image preprocessing.",
+          "type": "string",
+          "enum": [
+            "gemma4_vision"
+          ]
+        },
+        {
+          "description": "CLIP ViT-style preprocessing.",
+          "type": "string",
+          "enum": [
+            "clip_vit"
+          ]
+        },
+        {
+          "description": "SigLIP-style preprocessing.",
+          "type": "string",
+          "enum": [
+            "siglip"
+          ]
+        }
+      ]
+    },
     "VoiceConfig": {
       "description": "Complete voice configuration for a TTS model.\n\nThis struct describes all available voices for a TTS model, including how they are stored and which one is the default.\n\nExample: ```json { \"format\": \"embedded\", \"file\": \"voices.bin\", \"loader\": \"binary_f32_256\", \"default\": \"af_bella\", \"selection_strategy\": \"FixedIndex\", \"catalog\": [ {\"id\": \"af_bella\", \"name\": \"Bella\", \"gender\": \"female\", \"language\": \"en-US\", \"index\": 0} ] } ```",
       "type": "object",
@@ -1300,6 +1857,41 @@
             },
             "voice_dir": {
               "description": "Directory containing voice model files",
+              "type": "string"
+            }
+          }
+        },
+        {
+          "description": "Pre-encoded codec tokens for codec-based TTS (NeuTTS, MARS5)\n\nExample: ```json { \"format\": \"precomputed_codes\", \"codes_dir\": \"voices/\", \"codes_pattern\": \"{voice_id}.bin\", \"transcript_dir\": \"voices/\", \"transcript_pattern\": \"{voice_id}.txt\" } ```",
+          "type": "object",
+          "required": [
+            "codes_dir",
+            "codes_pattern",
+            "format",
+            "transcript_dir",
+            "transcript_pattern"
+          ],
+          "properties": {
+            "codes_dir": {
+              "description": "Directory containing binary code files",
+              "type": "string"
+            },
+            "codes_pattern": {
+              "description": "File pattern (e.g., \"{voice_id}.bin\")",
+              "type": "string"
+            },
+            "format": {
+              "type": "string",
+              "enum": [
+                "precomputed_codes"
+              ]
+            },
+            "transcript_dir": {
+              "description": "Directory containing reference transcript files",
+              "type": "string"
+            },
+            "transcript_pattern": {
+              "description": "File pattern (e.g., \"{voice_id}.txt\")",
               "type": "string"
             }
           }
