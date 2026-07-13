@@ -6,24 +6,28 @@ import {
   RuntimeConfigurationError,
   XybridError,
 } from "./errors.ts";
+import { resolveHuggingFaceModel } from "./internal/huggingface.ts";
 import { type RuntimeInitializer, sharedLlmInitializer } from "./internal/initialization.ts";
 import { liteRtLmRuntime } from "./internal/litert-lm-runtime.ts";
 import {
   loadMetadata,
   type MetadataLoader,
+  type NormalizedHuggingFaceLoadOptions,
   type NormalizedRegistryLoadOptions,
   normalizeBaseLoadOptions,
+  normalizeHuggingFaceLoadOptions,
   normalizeRegistryLoadOptions,
   selectAccelerated,
   startLoadPrelude,
 } from "./internal/loading.ts";
-import { type RegistryResolution, resolveRegistryModel } from "./internal/registry.ts";
+import { type ModelResolution, resolveRegistryModel } from "./internal/registry.ts";
 import type { LlmEngine, LlmGeneration, LlmRuntime } from "./internal/runtime.ts";
 import { resolveMetadataUrl } from "./internal/url.ts";
 import { downloadVerifiedModel } from "./internal/verified-download.ts";
 import { type ParsedMetadata, resolveModelUrl, validateLlmBrowserMetadata } from "./metadata.ts";
 import type {
   GenerateOptions,
+  HuggingFaceLoadOptions,
   LlmLoadOptions,
   RegistryLoadOptions,
   SelectedAccelerator,
@@ -54,6 +58,12 @@ const normalizeRegistryOptions = (
   base: string | undefined,
 ): NormalizedRegistryLoadOptions =>
   normalizeRegistryLoadOptions(options, base, DEFAULT_LLM_WASM_PATH);
+
+const normalizeHuggingFaceOptions = (
+  options: unknown,
+  base: string | undefined,
+): NormalizedHuggingFaceLoadOptions =>
+  normalizeHuggingFaceLoadOptions(options, base, DEFAULT_LLM_WASM_PATH);
 
 const validatePrompt = (prompt: unknown): string => {
   if (typeof prompt !== "string" || prompt.length === 0) {
@@ -203,7 +213,24 @@ export class XybridLlm {
       signal: normalizedOptions.signal,
       version: normalizedOptions.version,
     });
-    const session = await loadLlmFromRegistry(
+    const session = await loadLlmFromResolution(
+      resolution,
+      normalizedOptions,
+      liteRtLmRuntime,
+      sharedLlmInitializer,
+    );
+    return new XybridLlm(session, LLM_CONSTRUCTION_TOKEN);
+  }
+
+  static async fromHuggingFace(repo: string, options?: HuggingFaceLoadOptions): Promise<XybridLlm> {
+    const base = typeof location === "undefined" ? undefined : location.href;
+    const normalizedOptions = normalizeHuggingFaceOptions(options, base);
+    const resolution = await resolveHuggingFaceModel(repo, "litertlm", {
+      file: normalizedOptions.file,
+      revision: normalizedOptions.revision,
+      signal: normalizedOptions.signal,
+    });
+    const session = await loadLlmFromResolution(
       resolution,
       normalizedOptions,
       liteRtLmRuntime,
@@ -252,9 +279,9 @@ export const loadLlm = async <Model>(
   return new LlmSession(value, accelerator);
 };
 
-export const loadLlmFromRegistry = async <Model>(
-  resolution: RegistryResolution,
-  options: NormalizedRegistryLoadOptions,
+export const loadLlmFromResolution = async <Model>(
+  resolution: ModelResolution,
+  options: NormalizedRegistryLoadOptions | NormalizedHuggingFaceLoadOptions,
   runtime: LlmRuntime<Model>,
   initializer: RuntimeInitializer,
 ): Promise<LlmSession> => {

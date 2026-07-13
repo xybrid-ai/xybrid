@@ -23,7 +23,7 @@
     "prebuild:example": "bun run example:assets",
     "predev": "bun run example:assets",
     "predev:example": "bun run example:assets",
-    "test": "bun test test/model.test.ts test/metadata.test.ts test/llm.test.ts test/registry.test.ts",
+    "test": "bun test test/model.test.ts test/metadata.test.ts test/llm.test.ts test/registry.test.ts test/huggingface.test.ts",
     "test:browser": "playwright test",
     "typecheck": "tsc --noEmit"
   },

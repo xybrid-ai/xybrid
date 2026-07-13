@@ -5,6 +5,7 @@ export type XybridErrorCode =
   | "inference"
   | "input_validation"
   | "invalid_metadata"
+  | "huggingface"
   | "integrity"
   | "registry"
   | "runtime_configuration"
@@ -38,6 +39,13 @@ export class RegistryError extends XybridError {
   constructor(message: string, causeValue: unknown = undefined) {
     super("registry", message, causeValue);
     this.name = "RegistryError";
+  }
+}
+
+export class HuggingFaceError extends XybridError {
+  constructor(message: string, causeValue: unknown = undefined) {
+    super("huggingface", message, causeValue);
+    this.name = "HuggingFaceError";
   }
 }
 

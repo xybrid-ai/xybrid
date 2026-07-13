@@ -7,6 +7,7 @@ import {
   RuntimeConfigurationError,
   XybridError,
 } from "./errors.ts";
+import { resolveHuggingFaceModel } from "./internal/huggingface.ts";
 import { type RuntimeInitializer, sharedInitializer } from "./internal/initialization.ts";
 import { validateInputs } from "./internal/input.ts";
 import { liteRtRuntime } from "./internal/litert-runtime.ts";
@@ -15,17 +16,20 @@ import {
   compileModelBytes,
   loadMetadata,
   type MetadataLoader,
+  type NormalizedHuggingFaceLoadOptions,
   type NormalizedRegistryLoadOptions,
   normalizeBaseLoadOptions,
+  normalizeHuggingFaceLoadOptions,
   normalizeRegistryLoadOptions,
   startLoadPrelude,
 } from "./internal/loading.ts";
-import { type RegistryResolution, resolveRegistryModel } from "./internal/registry.ts";
+import { type ModelResolution, resolveRegistryModel } from "./internal/registry.ts";
 import type { BrowserRuntime, RuntimeModel, RuntimeTensor } from "./internal/runtime.ts";
 import { resolveMetadataUrl } from "./internal/url.ts";
 import { downloadVerifiedModel } from "./internal/verified-download.ts";
 import { type ParsedMetadata, resolveModelUrl, validateBrowserMetadata } from "./metadata.ts";
 import type {
+  HuggingFaceLoadOptions,
   LoadOptions,
   RegistryLoadOptions,
   RunResult,
@@ -47,6 +51,12 @@ const normalizeRegistryOptions = (
   base: string | undefined,
 ): NormalizedRegistryLoadOptions =>
   normalizeRegistryLoadOptions(options, base, DEFAULT_MODEL_WASM_PATH);
+
+const normalizeHuggingFaceOptions = (
+  options: unknown,
+  base: string | undefined,
+): NormalizedHuggingFaceLoadOptions =>
+  normalizeHuggingFaceLoadOptions(options, base, DEFAULT_MODEL_WASM_PATH);
 
 const validateOutputShape = (detail: TensorDetail): void => {
   const bytesPerElement = detail.dataType === "uint8" ? 1 : 4;
@@ -225,7 +235,27 @@ export class XybridModel {
       signal: normalizedOptions.signal,
       version: normalizedOptions.version,
     });
-    const session = await loadModelFromRegistry(
+    const session = await loadModelFromResolution(
+      resolution,
+      normalizedOptions,
+      liteRtRuntime,
+      sharedInitializer,
+    );
+    return new XybridModel(session, MODEL_CONSTRUCTION_TOKEN);
+  }
+
+  static async fromHuggingFace(
+    repo: string,
+    options?: HuggingFaceLoadOptions,
+  ): Promise<XybridModel> {
+    const base = typeof location === "undefined" ? undefined : location.href;
+    const normalizedOptions = normalizeHuggingFaceOptions(options, base);
+    const resolution = await resolveHuggingFaceModel(repo, "tflite", {
+      file: normalizedOptions.file,
+      revision: normalizedOptions.revision,
+      signal: normalizedOptions.signal,
+    });
+    const session = await loadModelFromResolution(
       resolution,
       normalizedOptions,
       liteRtRuntime,
@@ -279,9 +309,9 @@ export const loadModel = async (
   return new ModelSession(runtime, compiled.model, compiled.accelerator);
 };
 
-export const loadModelFromRegistry = async (
-  resolution: RegistryResolution,
-  options: NormalizedRegistryLoadOptions,
+export const loadModelFromResolution = async (
+  resolution: ModelResolution,
+  options: NormalizedRegistryLoadOptions | NormalizedHuggingFaceLoadOptions,
   runtime: BrowserRuntime,
   initializer: RuntimeInitializer,
 ): Promise<ModelSession> => {

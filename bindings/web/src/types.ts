@@ -24,6 +24,15 @@ export type RegistryLoadOptions = {
   readonly signal?: AbortSignal;
 };
 
+export type HuggingFaceLoadOptions = {
+  readonly wasmPath?: string | URL;
+  readonly accelerator?: AcceleratorPreference;
+  readonly revision?: string;
+  readonly file?: string;
+  readonly onDownloadProgress?: (progress: DownloadProgress) => void;
+  readonly signal?: AbortSignal;
+};
+
 export type GenerateOptions = {
   readonly maxOutputTokens?: number;
 };

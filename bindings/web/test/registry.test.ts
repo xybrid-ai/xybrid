@@ -6,7 +6,7 @@ import { normalizeBaseLoadOptions, normalizeRegistryLoadOptions } from "../src/i
 import { parseRegistryResponse, resolveRegistryModel } from "../src/internal/registry.ts";
 import type { LlmEngine, LlmGeneration, LlmRuntime } from "../src/internal/runtime.ts";
 import { downloadVerifiedModel } from "../src/internal/verified-download.ts";
-import { loadLlmFromRegistry } from "../src/llm.ts";
+import { loadLlmFromResolution } from "../src/llm.ts";
 import type { DownloadProgress } from "../src/types.ts";
 import { tfliteMetadata } from "./helpers.ts";
 
@@ -195,7 +195,7 @@ describe("registry resolution and verified downloads", () => {
       );
       const resolution = await resolveRegistryModel("demo-llm", "litertlm", normalizedOptions);
       const control = createRegistryLlmRuntime();
-      const session = await loadLlmFromRegistry(
+      const session = await loadLlmFromResolution(
         resolution,
         normalizedOptions,
         control.runtime,

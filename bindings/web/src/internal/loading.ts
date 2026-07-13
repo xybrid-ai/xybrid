@@ -7,7 +7,12 @@ import {
   XybridError,
 } from "../errors.ts";
 import { type ParsedMetadata, parseMetadata } from "../metadata.ts";
-import type { LoadOptions, RegistryLoadOptions, SelectedAccelerator } from "../types.ts";
+import type {
+  HuggingFaceLoadOptions,
+  LoadOptions,
+  RegistryLoadOptions,
+  SelectedAccelerator,
+} from "../types.ts";
 import type { RuntimeInitializer } from "./initialization.ts";
 import { readResponseBytes } from "./response.ts";
 import type { BrowserRuntime, RuntimeInitConfig, RuntimeModel } from "./runtime.ts";
@@ -57,6 +62,15 @@ export type NormalizedRegistryLoadOptions = {
   readonly registryUrl: URL | undefined;
   readonly version: string | undefined;
   readonly onDownloadProgress: RegistryLoadOptions["onDownloadProgress"];
+  readonly signal: AbortSignal | undefined;
+};
+
+export type NormalizedHuggingFaceLoadOptions = {
+  readonly accelerator: NonNullable<LoadOptions["accelerator"]>;
+  readonly wasmPath: URL;
+  readonly revision: string | undefined;
+  readonly file: string | undefined;
+  readonly onDownloadProgress: HuggingFaceLoadOptions["onDownloadProgress"];
   readonly signal: AbortSignal | undefined;
 };
 
@@ -112,6 +126,48 @@ export const normalizeRegistryLoadOptions = (
     registryUrl,
     version: version as string | undefined,
     onDownloadProgress: onDownloadProgress as RegistryLoadOptions["onDownloadProgress"],
+    signal: signal as AbortSignal | undefined,
+  };
+};
+
+export const normalizeHuggingFaceLoadOptions = (
+  options: unknown,
+  base: string | undefined,
+  defaultWasmPath: string,
+): NormalizedHuggingFaceLoadOptions => {
+  const normalizedBase = normalizeBaseLoadOptions(
+    options === undefined ? {} : options,
+    base,
+    defaultWasmPath,
+  );
+  const values = options === undefined ? {} : (options as Record<string, unknown>);
+  const revision = values["revision"];
+  if (revision !== undefined && typeof revision !== "string") {
+    throw new RuntimeConfigurationError("revision must be a string.");
+  }
+  const file = values["file"];
+  if (file !== undefined && typeof file !== "string") {
+    throw new RuntimeConfigurationError("file must be a string.");
+  }
+  const onDownloadProgress = values["onDownloadProgress"];
+  if (onDownloadProgress !== undefined && typeof onDownloadProgress !== "function") {
+    throw new RuntimeConfigurationError("onDownloadProgress must be a function.");
+  }
+  const signal = values["signal"];
+  if (
+    signal !== undefined &&
+    (typeof signal !== "object" ||
+      signal === null ||
+      typeof (signal as AbortSignal).aborted !== "boolean")
+  ) {
+    throw new RuntimeConfigurationError("signal must be an AbortSignal.");
+  }
+  return {
+    accelerator: normalizedBase.accelerator,
+    wasmPath: normalizedBase.wasmPath,
+    revision: revision as string | undefined,
+    file: file as string | undefined,
+    onDownloadProgress: onDownloadProgress as HuggingFaceLoadOptions["onDownloadProgress"],
     signal: signal as AbortSignal | undefined,
   };
 };

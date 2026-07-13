@@ -36,10 +36,14 @@ const registryEnvelopeSchema = z
   })
   .loose();
 
-export type RegistryResolution = {
+export type ModelResolution = {
   readonly modelUrl: URL;
   readonly metadata: ParsedMetadata;
   readonly sizeBytes: number;
+  readonly sha256: string | undefined;
+};
+
+export type RegistryResolution = Omit<ModelResolution, "sha256"> & {
   readonly sha256: string;
 };
 
