@@ -209,3 +209,61 @@ jobs:
             unzip -l "$APK" | grep -q " $f\$" || { echo "MISSING: $f"; exit 1; }
           done
           echo "APK payload complete: 3-ABI jniLibs + classes.dex ✅"
+
+  # The macOS Metal lane (Flip 2), on a real Mac. NOT on pull_request: macOS
+  # minutes bill at 10x linux and PR-level coverage of the shared Rust graph
+  # already comes from the desktop-lanes step above (the macOS-CPU cross
+  # compiles the identical rlib set on linux workers). This job validates the
+  # Mac-only remainder — the Metal llama compile + final link — on every
+  # master merge and keeps its action cached for the release job.
+  bazel-macos-metal:
+    name: Bazel macOS Metal lane (mixed execution)
+    if: github.event_name != 'pull_request'
+    runs-on: macos-14
+    timeout-minutes: 45
+    env:
+      BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          submodules: true
+
+      - name: Ensure rfcc host tools
+        run: |
+          which cmake >/dev/null || brew install cmake
+          which pkg-config >/dev/null || brew install pkg-config
+
+      - name: Configure BuildBuddy remote config
+        if: env.BUILDBUDDY_API_KEY != ''
+        run: |
+          mkdir -p .context
+          cat > .context/buildbuddy.bazelrc <<EOF
+          common:remote --bes_results_url=https://app.buildbuddy.io/invocation/
+          common:remote --bes_backend=grpcs://remote.buildbuddy.io
+          common:remote --remote_header=x-buildbuddy-api-key=${BUILDBUDDY_API_KEY}
+          common:remote --remote_cache=grpcs://remote.buildbuddy.io
+          common:remote --remote_executor=grpcs://remote.buildbuddy.io
+          common:remote --remote_cache_compression
+          common:remote --remote_download_toplevel
+          common:remote --remote_timeout=600
+          common:remote --jobs=200
+          common:remote --extra_execution_platforms=@llvm//:rbe_linux_x86_64
+          EOF
+
+      - name: Build Metal CLI (mixed execution)
+        if: env.BUILDBUDDY_API_KEY != ''
+        run: |
+          bazelisk build --config=remote --config=macos-metal -c opt \
+            //crates/xybrid-cli:xybrid
+
+      - name: Smoke the Metal CLI (run + Metal + features)
+        if: env.BUILDBUDDY_API_KEY != ''
+        run: |
+          BIN=$(bazelisk cquery --config=remote --config=macos-metal -c opt --output=files //crates/xybrid-cli:xybrid | head -1)
+          echo "resolved CLI: $BIN"
+          file "$BIN"
+          "$BIN" --help >/dev/null
+          test "$(nm "$BIN" | grep -c '_ggml_metal')" -gt 0 || { echo "MISSING Metal symbols"; exit 1; }
+          test "$(nm "$BIN" | grep -c '_mtmd_')" -gt 0 || { echo "MISSING vision symbols"; exit 1; }
+          strings "$BIN" | grep -q 'huggingface\.co' || { echo "MISSING huggingface"; exit 1; }
+          echo "Metal CLI smoke: OK"

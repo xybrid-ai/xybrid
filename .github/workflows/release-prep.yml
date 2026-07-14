@@ -284,7 +284,13 @@ jobs:
 
   # ----- Apple job 3/3: CLI macos-arm64 (parallel)
   build-cli-macos:
-    name: Build CLI (macos-arm64)
+    # Flip 2 (macOS): Bazel mixed execution — the Mac runner drives the build,
+    # the Rust graph executes on BuildBuddy's Linux workers (or comes from the
+    # shared cache the advisory CI keeps warm), and only the Metal llama
+    # compile runs on this Mac (Xcode's metal compiler). Same parity-first
+    # ritual as the Android AAR and linux CLI cutovers: payload gate before
+    # anything ships; artifact name, attestation, and downstream unchanged.
+    name: Build CLI (macos-arm64, Bazel)
     needs: [check-release-branch]
     runs-on: macos-14
     permissions:
@@ -296,36 +302,49 @@ jobs:
         with:
           submodules: true
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
-        with:
-          toolchain: stable
-          targets: aarch64-apple-darwin
-
-      - name: Setup sccache
-        uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
-
-      - name: Configure sccache environment
-        shell: bash
+      # build:macos-metal uses the host's preinstalled cmake/make/pkg-config
+      # for rfcc's exec tools (macos-14 images ship them; guard just in case).
+      - name: Ensure rfcc host tools
         run: |
-          echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
-          echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
-          echo "CMAKE_C_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
-          echo "CMAKE_CXX_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
+          which cmake >/dev/null || brew install cmake
+          which pkg-config >/dev/null || brew install pkg-config
 
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-        with:
-          prefix-key: "v1-rust"
-          shared-key: "cli-macos-arm64"
-          cache-all-crates: "true"
-          save-if: "true"
+      - name: Configure BuildBuddy remote config
+        env:
+          BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
+        run: |
+          mkdir -p .context
+          cat > .context/buildbuddy.bazelrc <<EOF
+          common:remote --bes_results_url=https://app.buildbuddy.io/invocation/
+          common:remote --bes_backend=grpcs://remote.buildbuddy.io
+          common:remote --remote_header=x-buildbuddy-api-key=${BUILDBUDDY_API_KEY}
+          common:remote --remote_cache=grpcs://remote.buildbuddy.io
+          common:remote --remote_executor=grpcs://remote.buildbuddy.io
+          common:remote --remote_cache_compression
+          common:remote --remote_download_toplevel
+          common:remote --remote_timeout=600
+          common:remote --jobs=200
+          common:remote --extra_execution_platforms=@llvm//:rbe_linux_x86_64
+          EOF
 
-      - name: Build CLI (macos-arm64)
-        run: cargo build --release -p xybrid-cli --target aarch64-apple-darwin --features platform-macos
+      - name: Build CLI (Bazel mixed execution, shipping mode)
+        run: |
+          bazelisk build --config=remote --config=macos-metal -c opt \
+            //crates/xybrid-cli:xybrid
 
-      - name: Strip CLI binary
-        run: strip target/aarch64-apple-darwin/release/xybrid
+      # The payload gate: must run, and carry the full platform-macos surface —
+      # Metal GPU (ggml_metal), vision (mtmd), candle voice, huggingface.
+      # (Mach-O symbols carry a leading underscore.)
+      - name: Verify CLI payload (run + Metal + features)
+        run: |
+          BIN=$(bazelisk cquery --config=remote --config=macos-metal -c opt --output=files //crates/xybrid-cli:xybrid | head -1)
+          echo "resolved CLI: $BIN"
+          file "$BIN"
+          "$BIN" --help >/dev/null
+          test "$(nm "$BIN" | grep -c '_ggml_metal')" -gt 0 || { echo "MISSING Metal (ggml_metal) symbols"; exit 1; }
+          test "$(nm "$BIN" | grep -c '_mtmd_')" -gt 0 || { echo "MISSING vision (mtmd) symbols"; exit 1; }
+          strings "$BIN" | grep -q 'huggingface\.co' || { echo "MISSING huggingface support"; exit 1; }
+          strings "$BIN" | grep -qi 'candle' || { echo "MISSING candle (voice) support"; exit 1; }
 
       - name: Prepare CLI artifact
         shell: bash
@@ -333,7 +352,10 @@ jobs:
           TAG: ${{ needs.check-release-branch.outputs.tag }}
         run: |
           mkdir -p dist-cli
-          cp target/aarch64-apple-darwin/release/xybrid dist-cli/xybrid-${TAG}-macos-arm64
+          BIN=$(bazelisk cquery --config=remote --config=macos-metal -c opt --output=files //crates/xybrid-cli:xybrid | head -1)
+          cp "$BIN" dist-cli/xybrid-${TAG}-macos-arm64
+          chmod +w dist-cli/xybrid-${TAG}-macos-arm64   # bazel outputs are read-only
+          strip dist-cli/xybrid-${TAG}-macos-arm64
           chmod +x dist-cli/xybrid-${TAG}-macos-arm64
 
       - name: Attest macOS CLI provenance
