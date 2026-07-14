@@ -168,11 +168,15 @@ cmake(
             "LLAMA_BUILD_COMMON": "ON",
             "CMAKE_CXX_STANDARD_LIBRARIES": "$$EXT_BUILD_ROOT/$(execpath @llvm//runtimes/libcxx:libcxx.static) $$EXT_BUILD_ROOT/$(execpath @llvm//runtimes/libcxx:libcxxabi.static) $$EXT_BUILD_ROOT/$(execpath @llvm//runtimes/libunwind:libunwind.static)",
         },
-        # darwin CPU lane (RBE): _DARWIN_LLAMA + the hermetic static C++
-        # runtime for the tool exes (linux-exec builds of libcxx work; mac-host
-        # ones don't — the Metal lane is a separate target, //:llama_metal).
+        # darwin CPU lane (RBE): _DARWIN_LLAMA + the SDK's -lc++ for the tool
+        # exes (resolves against the sysroot's libc++.tbd stubs; the tools are
+        # discarded). NOT the hermetic static libcxx: compiling hermetic-llvm's
+        # libcxx from source FOR A DARWIN TARGET breaks against the minimal
+        # SDK regardless of exec platform (_CTYPE_* undeclared in ___wctype.h,
+        # unresolved using declarations) — same reason //:llama_metal links
+        # -lc++. The static-archive approach remains linux-only.
         "@rules_rs//rs/platforms/config:aarch64-apple-darwin": _DARWIN_LLAMA | {
-            "CMAKE_CXX_STANDARD_LIBRARIES": "$$EXT_BUILD_ROOT/$(execpath @llvm//runtimes/libcxx:libcxx.static) $$EXT_BUILD_ROOT/$(execpath @llvm//runtimes/libcxx:libcxxabi.static) $$EXT_BUILD_ROOT/$(execpath @llvm//runtimes/libunwind:libunwind.static)",
+            "CMAKE_CXX_STANDARD_LIBRARIES": "-lc++",
         },
         "//conditions:default": _LLAMA_CACHE_ENTRIES,
     }),
@@ -189,16 +193,13 @@ cmake(
         ],
         "//conditions:default": [],
     }),
-    # desktop vision: the static C++ runtime archives referenced by the linux
-    # and darwin arms' CMAKE_CXX_STANDARD_LIBRARIES. cfg=target (they're
-    # linked into TARGET binaries), unlike build_data's exec-config host tools.
+    # linux vision: the static C++ runtime archives referenced by the linux
+    # arm's CMAKE_CXX_STANDARD_LIBRARIES. cfg=target (they're linked into
+    # TARGET binaries), unlike build_data's exec-config host tools. darwin
+    # deliberately absent: darwin-target libcxx-from-source is broken (see the
+    # darwin arm comment) — both darwin lanes use the SDK's -lc++.
     data = select({
         "@rules_rs//rs/platforms/config:x86_64-unknown-linux-gnu": [
-            "@llvm//runtimes/libcxx:libcxx.static",
-            "@llvm//runtimes/libcxx:libcxxabi.static",
-            "@llvm//runtimes/libunwind:libunwind.static",
-        ],
-        "@rules_rs//rs/platforms/config:aarch64-apple-darwin": [
             "@llvm//runtimes/libcxx:libcxx.static",
             "@llvm//runtimes/libcxx:libcxxabi.static",
             "@llvm//runtimes/libunwind:libunwind.static",
