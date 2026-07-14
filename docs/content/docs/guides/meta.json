@@ -3,5 +3,5 @@
   "description": "End-to-end implementation guides",
   "icon": "BookOpen",
   "root": true,
-  "pages": ["tool-calling", "vision-models"]
+  "pages": ["tool-calling", "reasoning", "vision-models"]
 }

@@ -108,6 +108,14 @@ Cargo workspace, `resolver = "2"`, edition 2021, MSRV not pinned. Members:
 the FFI binding crates now route their SDK→foreign-language translation
 through `xybrid-ffi-facade` rather than each re-translating SDK types.
 
+The Python SDK (`bindings/python`, pure Python — not a workspace member)
+consumes `xybrid-bolt`'s cdylib via a hand-ported ctypes wire layer
+(`bindings/python/xybrid/_bolt.py`) pinned to the boltffi 0.25.3 ABI: the
+pinned boltffi's experimental Python generator cannot express handles or
+fallible functions. Refresh the native lib with
+`tools/scripts/build-python-bolt.sh`; see the `[targets.python]` note in
+`crates/xybrid-bolt/boltffi.toml` for the boltffi >= 0.26 migration plan.
+
 **Dependency direction (do not reverse):**
 
 ```
@@ -283,7 +291,7 @@ patch, draft GitHub Release, the release PR, the tag, and the crates.io / pub.de
 ```bash
 git switch -c release/v<version> origin/master
 just bump-version <version>     # syncs every manifest: Cargo, pubspec, Unity,
-                                # Kotlin, Package.swift sdkVersion
+                                # Kotlin, Package.swift sdkVersion, Python pyproject
 ./bindings/apple/scripts/set-natives-mode.sh --set-remote   # useLocalNatives=false
 # fill the CHANGELOG entry for <version> (and bindings/flutter/CHANGELOG.md)
 git commit -am "bump: <version>" && git push -u origin release/v<version>

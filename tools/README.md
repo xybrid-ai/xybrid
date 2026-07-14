@@ -107,12 +107,14 @@ Simulator arm64. macOS is excluded by config.
 
 ### `build-android` - Build Android .so Files
 
-Delegates to `tools/scripts/build-android-bolt.sh`, which runs
-`boltffi pack android --release --features platform-android`, bundles the
-ORT runtime + `libc++_shared.so`, and patches DT_NEEDED. Builds every ABI
-configured in `bindings/kotlin/build.gradle.kts` (the `--abi` filter is
-accepted for interface compatibility but the script always builds the
-full set).
+Delegates to `bazel build //bindings/kotlin:xybrid_kotlin_aar` (BuildBuddy RBE
+when configured, else local — the NDK is a pinned Bazel download), then stages
+the AAR's jniLibs into `bindings/kotlin/libs/`. Produces the feature-complete
+3-ABI AAR (text + candle voice + mtmd vision); each `libxybrid-bolt.so` is a
+clean one-link output (16 KB-aligned, `libc++_shared` in DT_NEEDED, no
+patchelf) with the ORT runtime bundled. Builds every ABI in
+`bindings/kotlin/build.gradle.kts` (the `--abi` filter is ignored). Replaces
+the retired `tools/scripts/build-android-bolt.sh`.
 
 ```bash
 cargo xtask build-android --release

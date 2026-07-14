@@ -1,0 +1,283 @@
+# PHASE-0 BAZEL SPIKE — throwaway. See .context/bazel-hermetic-evaluation.md.
+# Goal: get real cold-build / cache-hit / reproducibility numbers for the
+# hermeticbuild stack (rules_rs + hermetic-llvm) on xybrid's REAL Cargo.lock.
+#
+# The three hermeticbuild modules are pinned to the local clones under
+# .context/bazel-research/ so this uses exactly the source that was evaluated.
+
+module(name = "xybrid_bazel_spike", version = "0.0.0")
+
+# --- hermeticbuild stack, pinned from the Bazel Central Registry (replaces the
+# earlier git_override commit pins; re-validated on RBE at these versions).
+bazel_dep(name = "rules_rs", version = "0.0.95")
+
+# rules_rs resolver fix (report upstream): 3-part android triples fold the abi
+# into the os token (armv7-linux-androideabi), so _normalize_os must map
+# "androideabi" -> "android" — otherwise the triple is not unix and every
+# cfg(unix) / cfg(target_os="android") dep is silently dropped for armv7
+# (libloading lost cfg-if, dirs-sys lost libc, ...).
+single_version_override(
+    module_name = "rules_rs",
+    patch_strip = 1,
+    patches = ["//:rules_rs.patch"],
+    version = "0.0.95",
+)
+bazel_dep(name = "llvm", version = "0.8.11")
+
+# hermetic-llvm fix (report upstream): toolchain/features/legacy adds
+# -fstack-protector unconditionally, but the module ships NO libssp — so clang's
+# MinGW driver pulls -lssp/-lssp_nonshared at link time and every windows-gnu
+# link fails with "unable to find library -lssp". Gate it off for windows.
+single_version_override(
+    module_name = "llvm",
+    patch_strip = 1,
+    patches = ["//:hermetic_llvm.patch"],
+)
+bazel_dep(name = "hermetic_launcher", version = "0.0.11")
+
+# rules_cc must be a direct dep so the `@rules_cc//...` flag in .bazelrc resolves.
+bazel_dep(name = "rules_cc", version = "0.2.20")
+# platforms must be a direct dep so the `@platforms//...` constraints in //:android_arm64 resolve.
+bazel_dep(name = "platforms", version = "1.0.0")
+
+# --- Option B: rules_foreign_cc drives llama.cpp's own CMakeLists with the
+# hermetic-llvm compiler. Pinned + patched to the hermetic-llvm-compatible combo
+# (PR #1470 = thread --sysroot/-isystem into the foreign build).
+bazel_dep(name = "rules_foreign_cc", version = "0.15.1")
+single_version_override(
+    module_name = "rules_foreign_cc",
+    patch_strip = 1,
+    patches = ["//:rules_foreign_cc.patch"],
+)
+
+# --- Android NDK cc_toolchain. hermetic-llvm does NOT target Android, so Android
+# C/C++ (llama.cpp) is compiled by the NDK registered as a Bazel cc_toolchain.
+# Local-first PoC: uses the installed NDK r27 via ANDROID_NDK_HOME (set in
+# .bazelrc --repo_env). RBE would need the NDK present on the worker (later gate).
+bazel_dep(name = "rules_android_ndk", version = "0.1.5")
+
+# "Bazelified NDK" for RBE: the stock rules are fetch-host-locked (they pick the
+# clang dir from ctx.os.name and EXECUTE clang at fetch time). This patch adds a
+# XYBRID_NDK_HOST_TAG override (set in .bazelrc) so we can fetch the LINUX NDK on
+# a macOS host — its binaries never run locally; they ship to the Linux RBE
+# workers as action inputs (same mechanism as hermetic-llvm's clang).
+single_version_override(
+    module_name = "rules_android_ndk",
+    patch_strip = 1,
+    patches = ["//:rules_android_ndk.patch"],
+)
+
+# --- AAR packaging (Gate 9): pkg_files/pkg_zip assemble the jniLibs payload and
+# the .aar. rules_pkg's zip builder is a py_binary, and the bare RBE container has
+# no python — the HERMETIC rules_python toolchain ships its interpreter to the
+# workers as an action input (same mechanism as the bazelified NDK).
+bazel_dep(name = "rules_pkg", version = "1.0.1")
+bazel_dep(name = "rules_python", version = "1.7.0")
+# platform_transition_filegroup: build the SAME cdylib target for each Android
+# ABI inside one graph (the AAR packages all ABIs in a single zip).
+bazel_dep(name = "aspect_bazel_lib", version = "2.22.5")
+
+# --- Gate 10: classes.jar. Kotlin sources import android.* -> compile against a
+# BAZELIFIED android.jar (platforms;android-34, pinned zip from dl.google.com —
+# same move as the NDK). kotlinx-coroutines is the one real compile dep (JNA is
+# gradle-declared but unreferenced) -> a single pinned http_jar, no rules_jvm_external.
+bazel_dep(name = "rules_kotlin", version = "2.4.0")  # >=2.2 needed for Bazel 9 (JavaPluginInfo removal)
+
+# Kotlin-1.9-consumer-compatible metadata for the AAR's classes.jar (language
+# mode 2.0 = the modern compiler's floor, readable by 1.9 consumers; see the
+# toolchain comment in bindings/kotlin/BUILD.bazel — caught by the consumer
+# smoke). Root registrations take precedence over rules_kotlin's default.
+register_toolchains("//bindings/kotlin:kotlin_toolchain_consumer_compat")
+# Direct dep so http_jar's generated repo (loads @rules_java//java:java_import.bzl)
+# resolves; Bazel 9 removed native java_import. MVS bumps to whatever kotlin needs.
+bazel_dep(name = "rules_java", version = "8.11.0")
+
+http_archive = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
+http_jar = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_jar")
+
+http_archive(
+    name = "android_sdk_34",
+    build_file_content = """
+load("@rules_java//java:java_import.bzl", "java_import")
+
+java_import(
+    name = "android_jar",
+    jars = ["android-34/android.jar"],
+    neverlink = True,  # compile-only: the platform provides these classes at runtime
+    visibility = ["//visibility:public"],
+)
+""",
+    sha256 = "16fdb74c55e59ae3ef52def135aec713508467bd56d7dabcd8c9be31fa8b20f3",
+    url = "https://dl.google.com/android/repository/platform-34-ext7_r03.zip",
+)
+
+http_jar(
+    name = "kotlinx_coroutines_core_jvm",
+    sha256 = "1ab3acc38f3e7355c4f9d1ec62107a46fa73c899f3070d055e5d4373dfe67e12",
+    url = "https://repo1.maven.org/maven2/org/jetbrains/kotlinx/kotlinx-coroutines-core-jvm/1.7.3/kotlinx-coroutines-core-jvm-1.7.3.jar",
+)
+python = use_extension("@rules_python//python/extensions:python.bzl", "python")
+python.toolchain(
+    is_default = True,
+    python_version = "3.11",
+)
+
+android_ndk = use_extension("@rules_android_ndk//:extension.bzl", "android_ndk_repository_extension")
+android_ndk.configure(
+    # android-28 matches today's cmake ANDROID_PLATFORM (build.rs / boltffi path).
+    api_level = 28,
+    # The NDK itself is DOWNLOADED as a pinned repo input (rules_android_ndk.patch:
+    # XYBRID_NDK_URL/SHA256 in .bazelrc) — no local install. A local NDK via
+    # ANDROID_NDK_HOME / path applies only when XYBRID_NDK_URL is unset.
+)
+use_repo(android_ndk, "androidndk")
+register_toolchains("@androidndk//:all")
+
+# NOTE: bindgen runs OFFLINE (committed src/bindings.rs, Option A) — no
+# rust_bindgen toolchain, no libclang-from-source, no python. Regenerate via
+# `cargo build -p xybrid-llama-sys --features bindings` when llama.cpp bumps.
+
+# NOTE: macOS-host-only workaround, DISABLED for the RBE (Linux) test. On a Mac,
+# rfcc's from-source pkg-config fails under lld, so we used host preinstalled
+# tools. On Linux RBE workers those host tools don't exist (ubuntu:22.04), and
+# rfcc's from-source pkg-config works fine — so we let rfcc use its defaults.
+# Re-enable this block to build //:llama locally on macOS again.
+# register_toolchains(
+#     "@rules_foreign_cc//toolchains:preinstalled_cmake_toolchain",
+#     "@rules_foreign_cc//toolchains:preinstalled_make_toolchain",
+#     "@rules_foreign_cc//toolchains:preinstalled_pkgconfig_toolchain",
+# )
+
+# --- C/C++ toolchain: hermetic LLVM (desktop targets) -------------------------
+register_toolchains("@llvm//toolchain:all")
+
+# Hermetic macOS SDK (replaces xcrun) — needed on darwin host/target.
+osx = use_extension("@llvm//extensions:osx.bzl", "osx")
+
+# The macOS-CPU CLI links frameworks pulled in by the darwin dep graph
+# (objc2-metal/-io-kit/-core-ml, sysinfo, candle-metal — link directives fire
+# even though the GPU code paths are cfg'd off). The extension's default
+# framework set is minimal, and the tag REPLACES the defaults, so list them
+# too. Stub-only (.tbd) — cheap to include.
+osx.frameworks(names = [
+    # extension defaults
+    "CoreFoundation",
+    "Foundation",
+    "Kernel",
+    "OSLog",
+    "Security",
+    "SystemConfiguration",
+    # linked by the darwin closure
+    "Accelerate",
+    "CoreGraphics",
+    "CoreML",
+    "CoreVideo",
+    "IOKit",
+    "IOSurface",
+    "Metal",
+    "MetalPerformanceShaders",
+    "MetalPerformanceShadersGraph",
+])
+use_repo(osx, "macos_sdk")
+
+# --- Rust toolchain: rules_rs (facade over rules_rust) ------------------------
+rules_rust = use_extension("@rules_rs//rs:rules_rust.bzl", "rules_rust")
+use_repo(rules_rust, "rules_rust")
+
+toolchains = use_extension("@rules_rs//rs/toolchains:module_extension.bzl", "toolchains")
+toolchains.toolchain(
+    edition = "2021",
+    # Per-triple rustc flags travel WITH the toolchain (the Bazel analog of
+    # .cargo/config's [target.<triple>] rustflags), so they apply under both
+    # --platforms and build-graph transitions. +fp16: gemm-f16's FP16 SIMD asm
+    # needs the assembler to accept the instructions (runtime-detected, scalar
+    # fallback) — mirrors .cargo/config.toml exactly.
+    extra_rustc_flags = {
+        "aarch64-apple-ios": ["-Ctarget-feature=+fp16"],
+        "aarch64-apple-ios-sim": ["-Ctarget-feature=+fp16"],
+        "aarch64-linux-android": ["-Ctarget-feature=+fp16"],
+    },
+    version = "1.92.0",
+)
+use_repo(toolchains, "default_rust_toolchains")
+
+register_toolchains("@default_rust_toolchains//:all")
+
+# --- GATE 2: crates from the REAL Cargo.lock ----------------------------------
+# Validates rules_rs dependency resolution over xybrid's actual workspace lock.
+crate = use_extension("@rules_rs//rs:extensions.bzl", "crate")
+crate.from_cargo(
+    name = "crates",
+    cargo_lock = "//:Cargo.lock",
+    cargo_toml = "//:Cargo.toml",
+    platform_triples = [
+        "x86_64-unknown-linux-gnu",
+        # Desktop Windows cross (GNU/MinGW ABI — hermetic-llvm ships no MSVC CRT).
+        "x86_64-pc-windows-gnu",
+        "aarch64-apple-darwin",
+        "aarch64-linux-android",
+        "armv7-linux-androideabi",
+        "x86_64-linux-android",
+    ],
+)
+crate.annotation(
+    crate = "ort-sys",
+    build_script_env = {
+        "ORT_CACHE_DIR": "/tmp",
+    },
+    # darwin: hand ort-sys the vendored static onnxruntime instead of letting
+    # its build script download one — a build-time download is incompatible
+    # with RBE (the file isn't a tracked output, so it never reaches the
+    # rlib-compile action). ${pwd} = the action's execroot at runtime.
+    # `data` stages the .a for the rlib compile itself (rustc bundles static
+    # libs into the rlib); no per-triple data attr exists, so it's staged for
+    # all platforms — input-only, outputs unchanged.
+    build_script_data_select = {
+        "aarch64-apple-darwin": ["@@//:ort_macos_arm64"],
+    },
+    # CC=/usr/bin/false: ort-sys's bs probes `$CC --print-search-dirs` to find
+    # Xcode's clang_rt dir and, on success, emits -lclang_rt.osx — which only
+    # Xcode's clang ships (under the hermetic toolchain the probe "succeeds"
+    # with a mangled linux path and the link dies on the missing lib). A failed
+    # probe takes the graceful None branch: no bogus -L, no -lclang_rt.osx.
+    # Correct here: hermetic-llvm links its own compiler-rt builtins explicitly.
+    # CC is otherwise unused by this bs (no C compiled on the LIB_LOCATION path).
+    build_script_env_select = {
+        "aarch64-apple-darwin": "{\"ORT_LIB_LOCATION\": \"$${pwd}/vendor/ort-macos/aarch64-apple-darwin\", \"CC\": \"/usr/bin/false\"}",
+    },
+    data = ["@@//:ort_macos_arm64"],
+    allow_build_script_to_detect_nonhermetic_paths = True,
+)
+
+# ort-sys's darwin build script pulls these two helper crates, whose features
+# the hub keys on aarch64-apple-darwin (conditional_crate_features). Build-
+# script deps compile in the EXEC config, where that config_setting doesn't
+# match (linux RBE worker) -> the crates lose std/default and the bs fails
+# trait resolution. Features are ADD-ONLY here, and neither crate has any
+# other consumer in the lock, so hoisting the darwin features to the base is
+# a no-op everywhere else. (Same exec-vs-target class as the bs-deps fix in
+# rules_rs.patch, one level down the dep tree.)
+crate.annotation(
+    crate = "lzma-rust2",
+    crate_features = [
+        "optimization",
+        "std",
+    ],
+)
+
+crate.annotation(
+    crate = "hmac-sha256",
+    crate_features = ["default"],
+)
+
+# NOTE: Windows Rust CLI (raw-dylib -> dlltool) is a deliberate follow-up, not
+# wired here. The windows/windows-sys 0.61 family + ort-sys/getrandom/... emit
+# #[link(kind="raw-dylib")], so rustc needs `dlltool` at compile time. The tool
+# (hermetic-llvm's llvm-dlltool) is a symlink into the ~100MB multicall `llvm`
+# binary and can only be STAGED for the rustc compile by the toolchain machinery,
+# which is not reachable from crate.annotation / rules_rs (rules_rust is
+# extension-generated, so unpatchable; it doesn't consume llvm_tools for compile).
+# The C/C++ half (//:llama for windows-gnu) IS green. See
+# .context/bazel-windows-cli-progress.md for the full analysis + the proper fix
+# (patch hermetic-llvm's cc toolchain to ship dlltool).
+use_repo(crate, "crates")

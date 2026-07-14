@@ -7,18 +7,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Changed
-
-- **Unity SDK distribution moved to OpenUPM.** The Unity package now ships
-  managed-only via the OpenUPM scoped registry (`ai.xybrid`); per-platform
-  native libraries are downloaded from the GitHub Release at import by an editor
-  resolver (SHA-256 verified) into `Assets/Xybrid/Plugins/`, **including the
-  ~326 MB iOS slice** that previously required manual setup. Replaces the
-  `upm` git-branch install, and the `publish-upm` CI job is retired.
-
 ### Planned
 
 - **Multimodal KV-prefix reuse**: the per-frame prefill cost lever for live vision — **deferred** from 0.2.0, not yet implemented.
+
+---
+
+## [0.3.0] - 2026-07-06
+
+Local tool calling, Unity on OpenUPM, and honest cache clearing. The local
+llama.cpp backend gains function/tool calling; the Unity SDK is re-platformed
+onto a managed-only OpenUPM package that fetches its natives at import; and the
+model-cache clear/discovery paths are corrected to report what they actually
+remove.
+
+### Changed
+
+- **Unity SDK distribution moved to OpenUPM** (#321, #324). The Unity package now
+  ships managed-only via the OpenUPM scoped registry (`ai.xybrid`); per-platform
+  native libraries are downloaded from the GitHub Release at import by an editor
+  resolver (SHA-256 verified) into `Assets/Xybrid/Plugins/`, **including the
+  ~326 MB iOS slice** that previously required manual setup. **Breaking for Unity
+  consumers:** the `#upm` git-branch install is replaced (install via OpenUPM or
+  the `?path=/bindings/unity` git URL), and the `publish-upm` CI job is retired.
+- **Model cache clearing reports what it removed** (#309). **Breaking:** `clear()`
+  / `clear_model_roots()` now return the number of cache *roots* removed (was the
+  scanned `.xyb` entry count, ~0 for the nested registry-bundle layout), and the
+  CLI now warns when nothing was cached instead of always reporting success.
+  `cache_root()` keeps `extracted/`, `hf/`, and `hf-hub/` co-located under the
+  cache root for a bare relative `models` root instead of resolving them
+  CWD-relative. `clear*` operations are documented as unsafe against concurrent
+  loads.
+
+### Added
+
+- **Local tool calling for the llama.cpp backend** (#323): function/tool calls
+  are parsed from local LLM output for LFM2 and Gemma-family models, with
+  streaming tool-call continuation, an example, and a CLI REPL. See the
+  tool-calling guide.
+- **Unity native-library resolver + release bundles** (#321). An editor resolver
+  downloads/verifies the per-platform natives on import and before player builds;
+  CI publishes `xybrid-unity-native-<platform>-v<version>.zip` bundles + a
+  SHA-256 manifest as release assets (managed by `cargo xtask package-unity-natives`).
+
+### Fixed
+
+- **Internal path-dep pins** realigned to the workspace version (#318).
 
 ---
 

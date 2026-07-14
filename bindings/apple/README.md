@@ -12,14 +12,14 @@ Add Xybrid to your Xcode project:
 
 1. In Xcode, select **File > Add Package Dependencies...**
 2. Enter: `https://github.com/xybrid-ai/xybrid`
-3. Set **Dependency Rule** to **Up to Next Major Version** → `0.2.2`
+3. Set **Dependency Rule** to **Up to Next Major Version** → `0.3.0`
 4. Select the **Xybrid** library product
 
 Or add it to your `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/xybrid-ai/xybrid", from: "0.2.2")
+    .package(url: "https://github.com/xybrid-ai/xybrid", from: "0.3.0")
 ]
 ```
 
@@ -37,9 +37,8 @@ Then add the dependency to your target:
 ```swift
 import Xybrid
 
-// Load a model from the registry
-let loader = XybridModelLoader.fromRegistry(modelId: "kokoro-82m")
-let model = try loader.load()
+// Load a model from the registry (the initializer resolves + loads it)
+let model = try XybridModel(fromRegistry: "kokoro-82m")
 
 // Create an envelope for TTS
 let envelope = XybridEnvelope.text(
@@ -59,12 +58,27 @@ if result.success {
 }
 ```
 
+### Reasoning (thinking models)
+
+Reasoning models (metadata `reasoning: true`, e.g. `lfm2.5-1.2b-thinking`)
+produce a chain-of-thought before their answer. Xybrid keeps it out of the
+answer text and surfaces it on `reasoningContent` — `nil` for non-thinking
+models. Nothing to enable; just read it if you want it.
+
+```swift
+let model = try XybridModel(fromRegistry: "lfm2.5-1.2b-thinking")
+let result = try model.run(envelope: XybridEnvelope.text(
+    "Is 97 a prime number? Reason, then answer."))
+
+if let answer = result.text { print("Answer:", answer) }
+if let reasoning = result.reasoningContent { print("Reasoning:", reasoning) }
+```
+
 ### Available Types
 
 | Type | Description |
 |------|-------------|
-| `XybridModelLoader` | Loads models from registry or local bundles |
-| `XybridModel` | Represents a loaded model ready for inference |
+| `XybridModel` | A loaded model ready for inference — construct via `XybridModel(fromRegistry:)`, `(fromBundle:)`, `(fromDirectory:)`, or `(fromHuggingface:)` |
 | `XybridEnvelope` | Input data container (audio, text, embedding, image, or multi-part user message) |
 | `XybridResult` | Inference result with success status and output data |
 | `XybridError` | Error enum for error handling |

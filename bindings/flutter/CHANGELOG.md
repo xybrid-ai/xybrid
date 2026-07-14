@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.0
+
+* Fixed: model cache clearing now reports the number of cache roots actually removed (previously counted scanned `.xyb` entries, ~0 for the nested registry-bundle layout), so "clear cache" no longer reports success when nothing was cached; `extracted/`, `hf/`, and `hf-hub/` stay co-located under a relative cache root (xybrid-ai/xybrid#309)
+
 ## 0.2.2
 
 Structured output on Flutter. Local llama generation can now be constrained to a

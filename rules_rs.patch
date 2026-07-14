@@ -1,0 +1,126 @@
+diff --color -ru a/rs/private/cfg_parser.bzl b/rs/private/cfg_parser.bzl
+--- a/rs/private/cfg_parser.bzl	2026-07-08 13:05:37
++++ b/rs/private/cfg_parser.bzl	2026-07-08 13:05:37
+@@ -148,6 +148,13 @@
+ def _normalize_os(os_raw):
+     if os_raw == "darwin":
+         return "macos"
++    # xybrid patch: 3-part android triples fold the abi into the os token
++    # (armv7-linux-androideabi, arm-linux-androideabi). Without this, target_os
++    # != "android" and the triple is not unix, so every cfg(unix)/
++    # cfg(target_os = "android") dependency is silently dropped for armv7
++    # (observed: libloading losing cfg-if, dirs-sys losing libc).
++    if os_raw == "androideabi":
++        return "android"
+     return os_raw
+ 
+ def _family_for_os(os_name):
+@@ -212,6 +219,17 @@
+ def triple_to_cfg_attrs(triple):
+     parts = triple.split("-")
+     arch_part = _get(parts, 0, "")
++
++    # xybrid patch: mirror rustc's arch normalization. arm64/arm64e/arm64_32
++    # (Apple spellings) have target_arch = "aarch64"; every other arm* variant
++    # (armv7, armv5te, ...) has target_arch = "arm". Without this,
++    # cfg(target_arch = "arm") deps are silently dropped for armv7 (observed:
++    # zip 1.x losing crossbeam-utils, its 32-bit-arm atomics polyfill) — and a
++    # bare startswith("arm") would misclassify arm64* as 32-bit.
++    if arch_part.startswith("arm64"):
++        arch_part = "aarch64"
++    elif arch_part.startswith("arm"):
++        arch_part = "arm"
+     vendor_part = _get(parts, 1, "unknown")
+     os_raw_part = _get(parts, 2, "none")
+     env_part = "-".join(parts[3:])
+diff --color -ru a/rs/private/repository_utils.bzl b/rs/private/repository_utils.bzl
+--- a/rs/private/repository_utils.bzl	2026-07-11 11:00:00
++++ b/rs/private/repository_utils.bzl	2026-07-11 11:00:00
+@@ -191,7 +191,8 @@
+ {indent}    build_script_data = {build_script_data}{conditional_build_script_data},
+ {indent}    build_deps = [
+ {indent}        {build_deps}
+-{indent}    ]{conditional_build_deps},
++{indent}    ],
++{indent}    conditional_build_deps = {conditional_build_deps},
+ {indent}    build_script_env = {build_script_env}{conditional_build_script_env},
+ {indent}    allow_build_script_to_detect_nonhermetic_paths = {allow_build_script_to_detect_nonhermetic_paths},
+ {indent}    build_script_toolchains = {build_script_toolchains},
+@@ -212,7 +213,13 @@
+         {platform: _exclude_deps_from_features(features) for platform, features in attr.crate_features_select.items()},
+     )
+     use_legacy_rules_rust_platforms = attr.use_legacy_rules_rust_platforms
+-    build_deps, conditional_build_deps = render_select(attr.build_script_deps, attr.build_script_deps_select, use_legacy_rules_rust_platforms)
++    # xybrid patch: keep conditional build deps unrendered (a triple-keyed
++    # dict, like conditional_crate_features) so rust_crate can bake the right
++    # arm into each exec-configured per-triple `_bs_<triple>` build script.
++    build_deps, conditional_build_deps = compute_select(
++        [str(d) for d in attr.build_script_deps],
++        {platform: [str(d) for d in items] for platform, items in attr.build_script_deps_select.items()},
++    )
+     build_script_data, conditional_build_script_data = render_select(attr.build_script_data, attr.build_script_data_select, use_legacy_rules_rust_platforms)
+     build_script_tools, conditional_build_script_tools = render_select(attr.build_script_tools, attr.build_script_tools_select, use_legacy_rules_rust_platforms)
+     rustc_flags, conditional_rustc_flags = render_select(attr.rustc_flags, attr.rustc_flags_select, use_legacy_rules_rust_platforms)
+@@ -262,7 +269,7 @@
+         build_script_data = repr(build_script_data),
+         conditional_build_script_data = " + " + conditional_build_script_data if conditional_build_script_data else "",
+         build_deps = list_indent.join(['"%s"' % d for d in sorted(build_deps)]),
+-        conditional_build_deps = " + " + conditional_build_deps if conditional_build_deps else "",
++        conditional_build_deps = repr(conditional_build_deps),
+         build_script_env = repr(attr.build_script_env),
+         conditional_build_script_env = " | " + conditional_build_script_env if conditional_build_script_env else "",
+         allow_build_script_to_detect_nonhermetic_paths = repr(attr.allow_build_script_to_detect_nonhermetic_paths),
+diff --color -ru a/rs/rust_crate.bzl b/rs/rust_crate.bzl
+--- a/rs/rust_crate.bzl	2026-07-11 11:00:00
++++ b/rs/rust_crate.bzl	2026-07-11 11:00:00
+@@ -43,9 +43,10 @@
+         has_lib,
+         binaries,
+         use_legacy_rules_rust_platforms,
+         extra_compile_data = [],
+         rustc_env = {},
+-        skip_deps_verification = False):
++        skip_deps_verification = False,
++        conditional_build_deps = {}):
+     package_metadata(
+         name = name + "_package_metadata",
+         purl = purl,
+@@ -83,8 +84,20 @@
+     build_script_target_tags = crate_tags + build_script_tags
+ 
+     if build_script:
++        # xybrid patch: conditional build deps arrive as a triple-keyed dict
++        # (mirroring conditional_crate_features) instead of a pre-rendered
++        # select(). The default `_bs` reconstructs the target-platform select
++        # (unchanged behavior); the per-triple `_bs_<triple>` variants bake
++        # their own arm below.
++        bs_deps = build_deps
++        if conditional_build_deps:
++            bs_deps = bs_deps + select(
++                {_platform(k, use_legacy_rules_rust_platforms): v for k, v in conditional_build_deps.items()} |
++                {"//conditions:default": []},
++            )
++
+         build_script_kwargs = dict(
+-            deps = build_deps,
++            deps = bs_deps,
+             aliases = aliases,
+             compile_data = compile_data,
+             crate_name = "build_script_build",
+@@ -118,6 +131,16 @@
+                 branches[_platform(triple, use_legacy_rules_rust_platforms)] = build_script_name
+ 
+                 build_script_kwargs_for_triple = dict(build_script_kwargs)
++                # xybrid patch: this build script compiles in the EXEC
++                # configuration ("[for tool]"), where the target-platform
++                # config_setting for `triple` need not match (cross-compile:
++                # exec != target). A select() there falls to its default arm
++                # while the triple's crate_features are baked below — features
++                # can enable code paths whose build-deps the select dropped
++                # (ort-sys darwin "download-binaries" losing ureq/hmac-sha256/
++                # lzma-rust2 on a linux executor). Bake the matching triple's
++                # deps so deps and features agree.
++                build_script_kwargs_for_triple["deps"] = build_deps + conditional_build_deps.get(triple, [])
+                 build_script_kwargs_for_triple["rustc_flags"] = build_script_kwargs["rustc_flags"] + [
+                     # Avoid metadata generation to clash under the same directory when cross-compiling to multiple targets
+                     # concurrently, see https://github.com/hermeticbuild/rules_rs/issues/161

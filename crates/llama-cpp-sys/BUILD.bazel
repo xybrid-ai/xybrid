@@ -1,0 +1,70 @@
+# GATE 4 — full xybrid-llama-sys, Bazel-native via Option A (committed bindings).
+# No build.rs, no bindgen, no libclang. build.rs's jobs are replaced by:
+#   llama compile -> //:llama (rules_foreign_cc)
+#   bindgen       -> COMMITTED src/bindings.rs (regenerated offline via cargo)
+#   wrapper.cpp   -> cc_library
+#   crate         -> rust_library linking those
+load("@rules_cc//cc:defs.bzl", "cc_library")
+load("@rules_rs//rs:rust_library.bzl", "rust_library")
+
+# Platforms with the vision (mtmd) backend: the wrapper compiles its mtmd
+# functions + the crate enables `vision`, and //:llama builds/installs libmtmd
+# for the same configs. Android (since #341) + desktop-linux (Flip 1 — the
+# shipped cargo CLI is platform-desktop = vision+huggingface, so the Bazel
+# artifact matches). Other platforms' committed bindings carry the mtmd
+# declarations but never call them (no libmtmd link).
+_VISION_PLATFORMS = [
+    "@rules_rs//rs/platforms/config:aarch64-linux-android",
+    "@rules_rs//rs/platforms/config:armv7-linux-androideabi",
+    "@rules_rs//rs/platforms/config:x86_64-linux-android",
+    "@rules_rs//rs/platforms/config:x86_64-unknown-linux-gnu",
+]
+
+# First-party C++ shim: defines the _c-suffixed symbols the Rust bindings call.
+# Links llama (CcInfo from rules_foreign_cc) and carries the llama headers.
+# XYBRID_LLAMA_VISION (Android) compiles the mtmd wrapper functions; mtmd.h comes
+# from //:llama's include dir (installed by the Android mtmd build).
+cc_library(
+    name = "wrapper_cc",
+    srcs = ["wrapper.cpp"],
+    hdrs = ["wrapper.h"],
+    defines = select({
+        cfg: ["XYBRID_LLAMA_VISION"]
+        for cfg in _VISION_PLATFORMS
+    } | {"//conditions:default": []}),
+    deps = ["//:llama"],
+)
+
+# The crate. `committed-bindings` makes lib.rs include! the committed
+# src/bindings.rs (no OUT_DIR / bindgen). Cargo builds do NOT enable it —
+# they stay on fresh $OUT_DIR bindgen output so `vision` (mtmd_*) and
+# llama.cpp bumps keep working there.
+rust_library(
+    name = "llama_cpp_sys",
+    srcs = glob(["src/**/*.rs"]),
+    crate_features = [
+        "bindings",
+        "committed-bindings",
+    ] + select({
+        cfg: ["vision"]  # mtmd re-exports; matches the wrapper define + libmtmd
+        for cfg in _VISION_PLATFORMS
+    } | {"//conditions:default": []}),
+    edition = "2021",
+    deps = [
+        ":wrapper_cc",
+        "//:llama",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+# Dir-basename alias so `//crates/llama-cpp-sys` (the label all_crate_deps()
+# emits for xybrid-core) resolves to the proven target above. NOTE: the package
+# is `xybrid-llama-sys` but its [lib] name is `llama_cpp_sys`, so the resolver's
+# auto-alias (`xybrid_llama_sys`, package-derived) diverges from the real crate
+# name — a -sys lib-name-override gotcha. It doesn't bite xybrid-core (which
+# imports the safe `xybrid_llama` wrapper, not the sys crate, by name).
+alias(
+    name = "llama-cpp-sys",
+    actual = ":llama_cpp_sys",
+    visibility = ["//visibility:public"],
+)

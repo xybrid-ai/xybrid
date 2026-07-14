@@ -1,0 +1,16 @@
+# GATE 5 — integration-tests (E2E with real models/fixtures). Scaffolded as a
+# rust_library so the graph is complete; the model-gated E2E cases self-skip
+# when fixtures are absent and would become per-file `rust_test` targets in a
+# real migration. Not a focus of the spike (sits below the ort ceiling via
+# xybrid-core).
+load("@rules_rs//rs:rust_library.bzl", "rust_library")
+load("@crates//:defs.bzl", "all_crate_deps")
+
+rust_library(
+    name = "integration-tests",
+    srcs = glob(["src/**/*.rs"]),
+    edition = "2021",
+    crate_features = ["default"],
+    deps = all_crate_deps(normal = True),
+    visibility = ["//visibility:public"],
+)

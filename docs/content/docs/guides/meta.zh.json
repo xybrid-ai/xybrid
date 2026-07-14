@@ -3,5 +3,5 @@
   "description": "端到端实现指南",
   "icon": "BookOpen",
   "root": true,
-  "pages": ["vision-models"]
+  "pages": ["tool-calling", "vision-models"]
 }

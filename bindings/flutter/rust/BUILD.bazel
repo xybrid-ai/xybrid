@@ -1,0 +1,42 @@
+# GATE 5 — flutter_rust_bridge wrapper (Dart cdylib + staticlib).
+#
+# Builds the Rust artifacts from @crates. Its build.rs is link-glue only —
+# `cargo:rustc-link-lib=c++` on macOS/iOS and the Android 16KB-page link-arg —
+# and a no-op on Linux, so the Linux/desktop cdylib compiles without it. On
+# Apple/Android those link directives must be ported to Bazel linkopts (the same
+# per-platform native glue as the other -sys/FFI crates); flagged below, not
+# wired (desktop-first spike). The frb Dart-bridge codegen is a separate
+# `flutter_rust_bridge_codegen` CLI step (not a build script) and stays in CI.
+load("@rules_rs//rs:rust_shared_library.bzl", "rust_shared_library")
+load("@rules_rs//rs:rust_static_library.bzl", "rust_static_library")
+load("@crates//:defs.bzl", "all_crate_deps")
+
+# cdylib — libxybrid_flutter_ffi.{so,dylib}
+rust_shared_library(
+    name = "xybrid_flutter_ffi_cdylib",
+    srcs = glob(["src/**/*.rs"]),
+    crate_name = "xybrid_flutter_ffi",
+    edition = "2021",
+    crate_features = ["default"],
+    deps = all_crate_deps(normal = True),
+    # APPLE/ANDROID TODO (not wired, desktop-first): the build.rs link directives
+    # become linkopts here, e.g.
+    #   select({
+    #       "@platforms//os:macos": ["-lc++"],
+    #       "@platforms//os:ios":   ["-lc++"],
+    #       "@platforms//os:android": ["-Wl,-z,max-page-size=16384"],
+    #       "//conditions:default": [],
+    #   })
+    visibility = ["//visibility:public"],
+)
+
+# staticlib — libxybrid_flutter_ffi.a
+rust_static_library(
+    name = "xybrid_flutter_ffi_staticlib",
+    srcs = glob(["src/**/*.rs"]),
+    crate_name = "xybrid_flutter_ffi",
+    edition = "2021",
+    crate_features = ["default"],
+    deps = all_crate_deps(normal = True),
+    visibility = ["//visibility:public"],
+)
