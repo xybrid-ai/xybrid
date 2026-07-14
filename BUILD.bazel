@@ -285,7 +285,14 @@ cmake(
     # (like //:llama's), and an incompatibility marker on it poisons the whole
     # top target under --config=remote.
     exec_compatible_with = ["@platforms//os:macos"],
-    tags = ["no-remote-exec"],
+    # "manual": keep wildcard builds (bazel build //...) on non-mac machines
+    # from analyzing this target — with no macOS exec platform registered,
+    # exec_compatible_with would hard-fail resolution. Explicit requests and
+    # the transitive path (llama-cpp-sys' --//:metal select) still work.
+    tags = [
+        "manual",
+        "no-remote-exec",
+    ],
     visibility = ["//visibility:public"],
 )
 
