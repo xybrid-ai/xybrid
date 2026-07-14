@@ -1,0 +1,23 @@
+crates/xybrid-core/src/runtime_adapter/streaming_postprocess.rs
+  s_fce189698ddf27::t_c85a20b8146914 426-434,436-449,451-452
+  s_fce189698ddf27::t_c7dc6148bf9a2b 396-400
+  s_fce189698ddf27::t_824c8965013351 344
+  s_fce189698ddf27::t_e3dcdc1c36c7b0 1020-1079
+  s_fce189698ddf27::t_9a37c172368f21 338-343
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.13",
+  "base_commit_sha": "d77fbba6d94e73c2cea0978bb5cc994996ad7632",
+  "prompts": {},
+  "sessions": {
+    "s_fce189698ddf27": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "05b32fb8-246e-4e34-bba8-8005771e45ce",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
