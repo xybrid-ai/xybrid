@@ -1,0 +1,19 @@
+BUILD.bazel
+  s_6d388b750babe3::t_01af081ce1880e 288-295
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.13",
+  "base_commit_sha": "69ba41a85dcf18ce3bf9215bc20997cd1f279dfd",
+  "prompts": {},
+  "sessions": {
+    "s_6d388b750babe3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "66e1d567-1e9b-4a5d-ac30-e8e71c3b2d0b",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
