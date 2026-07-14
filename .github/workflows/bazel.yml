@@ -68,10 +68,18 @@ jobs:
     timeout-minutes: 60
     env:
       BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
+    # Downstream jobs can't read secrets in a job-level `if`; export the
+    # fork-safety signal (RBE available or not) as a job output instead.
+    outputs:
+      rbe: ${{ steps.rbe-check.outputs.rbe }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           submodules: true
+
+      - name: Check RBE availability
+        id: rbe-check
+        run: echo "rbe=${{ env.BUILDBUDDY_API_KEY != '' }}" >> "$GITHUB_OUTPUT"
 
       # Repo fetches (LLVM prebuilt, rustc, NDK symlink tree) + downloaded
       # toplevel outputs need headroom; reclaim toolchains this job never
@@ -124,10 +132,12 @@ jobs:
 
       # Desktop lanes on RBE: linux CLI (native) + the macOS-CPU cross
       # (hermetic clang + @macos_sdk + vendored ort; Metal/Swift stay Mac-bound
-      # and are NOT built here) + the windows-gnu llama core (PR #343). Keeps
-      # the shared cache warm so a future Mac lane PULLS the shared graph
-      # instead of recompiling it — the cache-fed-Mac model.
-      - name: Build desktop lanes on RBE (linux CLI, macOS-CPU cross, windows llama)
+      # and are NOT built here) + the full windows-gnu CLI (the .exe chapter —
+      # llama + the raw-dylib Rust crates via the dlltool toolchain fix + the
+      # final MinGW link). Keeps the shared cache warm so a future Mac lane
+      # PULLS the shared graph instead of recompiling it — the cache-fed-Mac
+      # model.
+      - name: Build desktop lanes on RBE (linux CLI, macOS-CPU cross, windows CLI)
         if: env.BUILDBUDDY_API_KEY != ''
         run: |
           bazelisk build --config=remote -c opt \
@@ -135,8 +145,8 @@ jobs:
           bazelisk build --config=remote --config=macos \
             //crates/xybrid-cli:xybrid \
             //crates/xybrid-bolt:xybrid_bolt_staticlib
-          bazelisk build --config=remote --config=windows \
-            //:llama
+          bazelisk build --config=remote --config=windows -c opt \
+            //crates/xybrid-cli:xybrid
 
       # Linux-CLI smoke + parity gate (Flip 1): this is the SHIPPED artifact
       # since the release-prep build-cli-linux cutover — run it, verify the
@@ -159,6 +169,31 @@ jobs:
           echo "glibc floor: $MAX_GLIBC"
           [ "$(printf '%s\n' "$MAX_GLIBC" GLIBC_2.31 | sort -V | tail -1)" = "GLIBC_2.31" ] || { echo "glibc floor regressed above 2.31: $MAX_GLIBC"; exit 1; }
           echo "linux CLI smoke: OK ✅"
+
+      # Windows .exe payload gate (static half): verify the artifact is a real
+      # PE32+ x86-64 binary carrying the desktop feature set, then hand it to
+      # the windows-latest job below for the run-it half (this linux runner
+      # can't execute a PE). cquery, not bazel-bin: the symlink tracks the
+      # LAST invocation above.
+      - name: Verify + stage the windows CLI (.exe)
+        if: env.BUILDBUDDY_API_KEY != ''
+        run: |
+          EXE=$(bazelisk cquery --config=remote --config=windows -c opt --output=files //crates/xybrid-cli:xybrid | head -1)
+          echo "resolved windows CLI: $EXE"
+          file "$EXE"
+          file "$EXE" | grep -q 'PE32+.*x86-64' || { echo "NOT a PE32+ x86-64 binary"; exit 1; }
+          grep -aq 'mtmd_' "$EXE" || { echo "MISSING vision (mtmd) markers"; exit 1; }
+          grep -aq 'huggingface\.co' "$EXE" || { echo "MISSING huggingface support"; exit 1; }
+          mkdir -p /tmp/win-exe && cp "$EXE" /tmp/win-exe/xybrid.exe
+          echo "windows CLI payload: OK ✅"
+
+      - name: Upload windows CLI artifact
+        if: env.BUILDBUDDY_API_KEY != ''
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: bazel-xybrid-windows-exe
+          path: /tmp/win-exe/xybrid.exe
+          retention-days: 7
 
       # The RBE-proven Android row (PR #326 gates 6-10): NDK cross-compile +
       # one-link .so + complete AAR. ABI fan-out (arm64-v8a / armeabi-v7a /
@@ -267,3 +302,29 @@ jobs:
           test "$(nm "$BIN" | grep -c '_mtmd_')" -gt 0 || { echo "MISSING vision symbols"; exit 1; }
           strings "$BIN" | grep -q 'huggingface\.co' || { echo "MISSING huggingface"; exit 1; }
           echo "Metal CLI smoke: OK"
+
+  # The run-it half of the windows .exe gate: the linux job can build and
+  # byte-inspect the PE but not execute it — a real Windows runner downloads
+  # the RBE-built artifact and runs it. This is the only Windows machine in
+  # the whole lane, and it compiles nothing (the build happened on Linux
+  # workers); a few windows-latest minutes per Bazel-touching PR.
+  bazel-windows-smoke:
+    name: Bazel windows .exe smoke (runs the RBE-built CLI)
+    needs: bazel
+    if: needs.bazel.outputs.rbe == 'true'
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: bazel-xybrid-windows-exe
+
+      - name: Run the .exe + verify features
+        shell: bash
+        run: |
+          ls -la xybrid.exe
+          ./xybrid.exe --help
+          ./xybrid.exe --version || true
+          grep -aq 'mtmd_' xybrid.exe || { echo "MISSING vision (mtmd) markers"; exit 1; }
+          grep -aq 'huggingface\.co' xybrid.exe || { echo "MISSING huggingface support"; exit 1; }
+          echo "windows .exe smoke: OK"
