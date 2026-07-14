@@ -14,7 +14,9 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
-use xybrid_core::execution::ModelMetadata;
+use xybrid_core::execution::{
+    ExecutionTemplate, ModelMetadata, VisionEncoderConfig, VisionPreprocessingPreset,
+};
 
 // ============================================================================
 // Public API
@@ -68,7 +70,7 @@ pub fn inspect_and_generate(
     // 4. Inspect model files for metadata
     let gguf_info = model_files
         .iter()
-        .find(|f| f.format == ModelFormat::Gguf)
+        .find(|f| f.format == ModelFormat::Gguf && !is_gguf_companion_filename(&f.filename))
         .and_then(|f| read_gguf_metadata(&dir.join(&f.filename)));
 
     let onnx_info = model_files
@@ -425,6 +427,18 @@ pub(crate) struct GgufInfo {
     pub parameter_count: Option<u64>,
     /// Quantization type inferred from filename
     pub quantization: Option<String>,
+    pub projector_type: Option<String>,
+    pub image_size: Option<u64>,
+    pub patch_size: Option<u64>,
+}
+
+fn is_vision_projector_filename(filename: &str) -> bool {
+    filename.to_ascii_lowercase().contains("mmproj")
+}
+
+fn is_gguf_companion_filename(filename: &str) -> bool {
+    let filename = filename.to_ascii_lowercase();
+    filename.contains("mmproj") || filename.contains("drafter") || filename.contains("dspark")
 }
 
 // GGUF value types
@@ -511,6 +525,19 @@ fn read_gguf_metadata(path: &Path) -> Option<GgufInfo> {
                     skip_gguf_value(&mut reader, value_type);
                 }
             }
+            "clip.projector_type" => {
+                if value_type == GGUF_TYPE_STRING {
+                    info.projector_type = read_gguf_string(&mut reader);
+                } else {
+                    skip_gguf_value(&mut reader, value_type);
+                }
+            }
+            "clip.vision.image_size" => {
+                info.image_size = read_gguf_uint_value(&mut reader, value_type);
+            }
+            "clip.vision.patch_size" => {
+                info.patch_size = read_gguf_uint_value(&mut reader, value_type);
+            }
             k if k.ends_with(".context_length") => {
                 info.context_length = read_gguf_uint_value(&mut reader, value_type);
             }
@@ -540,8 +567,8 @@ fn infer_quantization_from_filename(filename: &str) -> Option<String> {
     let lower = filename.to_lowercase();
     // Common GGUF quantization patterns
     for q in &[
-        "q2_k", "q3_k_s", "q3_k_m", "q3_k_l", "q4_0", "q4_1", "q4_k_s", "q4_k_m", "q5_0", "q5_1",
-        "q5_k_s", "q5_k_m", "q6_k", "q8_0", "f16", "f32",
+        "q1_0", "q2_k", "q3_k_s", "q3_k_m", "q3_k_l", "q4_0", "q4_1", "q4_k_s", "q4_k_m", "q5_0",
+        "q5_1", "q5_k_s", "q5_k_m", "q6_k", "q8_0", "f16", "f32",
     ] {
         if lower.contains(q) {
             return Some(q.to_uppercase());
@@ -916,8 +943,12 @@ fn build_metadata(
     all_files: &[String],
     cache_dir: &Path,
 ) -> ModelMetadata {
-    // Determine the primary model file (largest file of the detected format)
-    let primary = &model_files[0];
+    let primary = model_files
+        .iter()
+        .find(|file| {
+            file.format != ModelFormat::Gguf || !is_gguf_companion_filename(&file.filename)
+        })
+        .unwrap_or(&model_files[0]);
 
     // Determine task: prefer task inference, then model card, then tags
     let task = task_inference
@@ -927,9 +958,22 @@ fn build_metadata(
         .unwrap_or_else(|| "unknown".to_string());
 
     match primary.format {
-        ModelFormat::Gguf => {
-            build_gguf_metadata(model_id, model_id, primary, &task, card, gguf_info)
-        }
+        ModelFormat::Gguf => model_files
+            .iter()
+            .find(|file| {
+                file.format == ModelFormat::Gguf && is_vision_projector_filename(&file.filename)
+            })
+            .and_then(|projector| {
+                read_gguf_metadata(&cache_dir.join(&projector.filename))
+                    .filter(|info| info.projector_type.as_deref() == Some("qwen3vl_merger"))
+                    .map(|info| (projector, info))
+            })
+            .map_or_else(
+                || build_gguf_metadata(model_id, model_id, primary, &task, card, gguf_info),
+                |(projector, projector_info)| {
+                    build_qwen3vl_metadata(model_id, primary, projector, gguf_info, &projector_info)
+                },
+            ),
         ModelFormat::Onnx => build_onnx_metadata(
             model_id,
             model_id,
@@ -1025,6 +1069,93 @@ fn build_gguf_metadata(
         vision_encoder: None,
         description: Some(description),
         metadata: metadata_map,
+        voices: None,
+        max_chunk_chars: None,
+        trim_trailing_samples: None,
+    }
+}
+
+fn build_qwen3vl_metadata(
+    model_id: &str,
+    primary: &ModelFileInfo,
+    projector: &ModelFileInfo,
+    gguf_info: Option<&GgufInfo>,
+    projector_info: &GgufInfo,
+) -> ModelMetadata {
+    const DEFAULT_CONTEXT_LENGTH: usize = 4096;
+
+    let max_context_length = gguf_info
+        .and_then(|info| info.context_length)
+        .and_then(|value| usize::try_from(value).ok());
+    let context_length = DEFAULT_CONTEXT_LENGTH;
+    let image_size = projector_info
+        .image_size
+        .and_then(|value| usize::try_from(value).ok())
+        .unwrap_or(768);
+    let patch_size = projector_info
+        .patch_size
+        .and_then(|value| usize::try_from(value).ok())
+        .unwrap_or(16);
+    let architecture = gguf_info
+        .and_then(|info| info.architecture.clone())
+        .unwrap_or_else(|| "unknown".to_string());
+    let quantization = gguf_info
+        .and_then(|info| info.quantization.clone())
+        .unwrap_or_else(|| "unknown".to_string());
+
+    let mut metadata = HashMap::new();
+    metadata.insert(
+        "task".to_string(),
+        serde_json::Value::String("vlm".to_string()),
+    );
+    metadata.insert(
+        "architecture".to_string(),
+        serde_json::Value::String(architecture),
+    );
+    metadata.insert(
+        "vision_architecture".to_string(),
+        serde_json::Value::String("qwen3vl_merger".to_string()),
+    );
+    metadata.insert(
+        "backend".to_string(),
+        serde_json::Value::String("llamacpp".to_string()),
+    );
+    metadata.insert(
+        "context_length".to_string(),
+        serde_json::json!(context_length),
+    );
+    if let Some(max_context_length) = max_context_length {
+        metadata.insert(
+            "max_context_length".to_string(),
+            serde_json::json!(max_context_length),
+        );
+    }
+    metadata.insert(
+        "quantization".to_string(),
+        serde_json::Value::String(quantization),
+    );
+    metadata.insert("auto_generated".to_string(), serde_json::Value::Bool(true));
+
+    ModelMetadata {
+        model_id: model_id.to_string(),
+        version: "1.0".to_string(),
+        execution_template: ExecutionTemplate::VisionLanguage {
+            model_file: primary.filename.clone(),
+            chat_template: None,
+            context_length,
+            generation_params: None,
+        },
+        preprocessing: Vec::new(),
+        postprocessing: Vec::new(),
+        files: vec![primary.filename.clone(), projector.filename.clone()],
+        vision_encoder: Some(VisionEncoderConfig {
+            file: projector.filename.clone(),
+            preprocessing_preset: VisionPreprocessingPreset::SigLip,
+            image_size,
+            patch_size: Some(patch_size),
+        }),
+        description: Some(format!("{} (auto-generated Qwen3VL GGUF)", model_id)),
+        metadata,
         voices: None,
         max_chunk_chars: None,
         trim_trailing_samples: None,
@@ -2008,6 +2139,118 @@ mod tests {
         let json = std::fs::read_to_string(&metadata_path).unwrap();
         let parsed: ModelMetadata = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.model_id, "test-model");
+    }
+
+    #[test]
+    fn generate_metadata_emits_vision_language_for_qwen3vl_projector_pair() {
+        let dir = TempDir::new().unwrap();
+
+        let language_path = dir.path().join("Bonsai-27B-Q1_0.gguf");
+        let mut language = std::fs::File::create(language_path).unwrap();
+        language.write_all(b"GGUF").unwrap();
+        language.write_all(&3u32.to_le_bytes()).unwrap();
+        language.write_all(&0u64.to_le_bytes()).unwrap();
+        language.write_all(&2u64.to_le_bytes()).unwrap();
+        write_gguf_test_string(&mut language, "general.architecture");
+        language.write_all(&GGUF_TYPE_STRING.to_le_bytes()).unwrap();
+        write_gguf_test_string(&mut language, "qwen35");
+        write_gguf_test_string(&mut language, "qwen35.context_length");
+        language.write_all(&GGUF_TYPE_UINT32.to_le_bytes()).unwrap();
+        language.write_all(&262_144u32.to_le_bytes()).unwrap();
+        drop(language);
+
+        let dspark_path = dir.path().join("Bonsai-27B-dspark-Q4_1.gguf");
+        let mut dspark = std::fs::File::create(dspark_path).unwrap();
+        dspark.write_all(b"GGUF").unwrap();
+        dspark.write_all(&3u32.to_le_bytes()).unwrap();
+        dspark.write_all(&0u64.to_le_bytes()).unwrap();
+        dspark.write_all(&2u64.to_le_bytes()).unwrap();
+        write_gguf_test_string(&mut dspark, "general.architecture");
+        dspark.write_all(&GGUF_TYPE_STRING.to_le_bytes()).unwrap();
+        write_gguf_test_string(&mut dspark, "draft");
+        write_gguf_test_string(&mut dspark, "draft.context_length");
+        dspark.write_all(&GGUF_TYPE_UINT32.to_le_bytes()).unwrap();
+        dspark.write_all(&8192u32.to_le_bytes()).unwrap();
+        drop(dspark);
+
+        let projector_path = dir.path().join("Bonsai-27B-mmproj-Q8_0.gguf");
+        let mut projector = std::fs::File::create(projector_path).unwrap();
+        projector.write_all(b"GGUF").unwrap();
+        projector.write_all(&3u32.to_le_bytes()).unwrap();
+        projector.write_all(&0u64.to_le_bytes()).unwrap();
+        projector.write_all(&5u64.to_le_bytes()).unwrap();
+        write_gguf_test_string(&mut projector, "general.architecture");
+        projector
+            .write_all(&GGUF_TYPE_STRING.to_le_bytes())
+            .unwrap();
+        write_gguf_test_string(&mut projector, "clip");
+        write_gguf_test_string(&mut projector, "general.type");
+        projector
+            .write_all(&GGUF_TYPE_STRING.to_le_bytes())
+            .unwrap();
+        write_gguf_test_string(&mut projector, "mmproj");
+        write_gguf_test_string(&mut projector, "clip.projector_type");
+        projector
+            .write_all(&GGUF_TYPE_STRING.to_le_bytes())
+            .unwrap();
+        write_gguf_test_string(&mut projector, "qwen3vl_merger");
+        write_gguf_test_string(&mut projector, "clip.vision.image_size");
+        projector
+            .write_all(&GGUF_TYPE_UINT32.to_le_bytes())
+            .unwrap();
+        projector.write_all(&768u32.to_le_bytes()).unwrap();
+        write_gguf_test_string(&mut projector, "clip.vision.patch_size");
+        projector
+            .write_all(&GGUF_TYPE_UINT32.to_le_bytes())
+            .unwrap();
+        projector.write_all(&16u32.to_le_bytes()).unwrap();
+        drop(projector);
+
+        let (metadata, _) = generate_metadata(dir.path(), "prism-ml/Bonsai-27B-gguf").unwrap();
+
+        assert!(matches!(
+            metadata.execution_template,
+            xybrid_core::execution::ExecutionTemplate::VisionLanguage {
+                ref model_file,
+                context_length: 4096,
+                ..
+            } if model_file == "Bonsai-27B-Q1_0.gguf"
+        ));
+        assert_eq!(
+            metadata
+                .metadata
+                .get("max_context_length")
+                .and_then(|value| value.as_u64()),
+            Some(262_144)
+        );
+        assert_eq!(
+            metadata
+                .vision_encoder
+                .as_ref()
+                .map(|encoder| encoder.file.as_str()),
+            Some("Bonsai-27B-mmproj-Q8_0.gguf")
+        );
+        assert_eq!(
+            metadata
+                .vision_encoder
+                .as_ref()
+                .map(|encoder| encoder.image_size),
+            Some(768)
+        );
+        assert_eq!(
+            metadata
+                .vision_encoder
+                .as_ref()
+                .and_then(|encoder| encoder.patch_size),
+            Some(16)
+        );
+        assert_eq!(
+            metadata
+                .metadata
+                .get("architecture")
+                .and_then(|value| value.as_str()),
+            Some("qwen35")
+        );
     }
 
     #[test]

@@ -887,7 +887,8 @@ pub(crate) fn run_huggingface(
     ui::ok(&format!("Model loaded: {}", model.model_id()));
     println!();
 
-    let sanitized = repo.replace('/', "--");
+    let cache_repo = xybrid_sdk::ModelSource::parse_huggingface(repo);
+    let sanitized = cache_repo.model_id().unwrap_or(repo).replace('/', "--");
     let cache_dir = dirs::home_dir()
         .ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))?
         .join(".xybrid")

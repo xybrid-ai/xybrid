@@ -868,8 +868,35 @@ struct ModelHandle {
 /// GGUF quantization preference order for automatic selection.
 /// Q4_K_M is the default — best quality/size tradeoff for edge devices.
 const GGUF_PREFERENCE_ORDER: &[&str] = &[
-    "Q4_K_M", "Q4_K_S", "Q4_0", "Q5_K_M", "Q5_K_S", "Q6_K", "Q8_0", "F16", "BF16", "F32",
+    "Q4_K_M", "Q4_K_S", "Q4_0", "Q5_K_M", "Q5_K_S", "Q6_K", "Q8_0", "Q1_0", "F16", "BF16", "F32",
 ];
+
+const VISION_PROJECTOR_PREFERENCE_ORDER: &[&str] =
+    &["Q8_0", "Q6_K", "Q5_K_M", "Q4_K_M", "F16", "BF16"];
+
+fn is_gguf_companion(filename: &str) -> bool {
+    let filename = filename.to_ascii_lowercase();
+    filename.contains("mmproj") || filename.contains("drafter") || filename.contains("dspark")
+}
+
+fn is_gguf_vision_projector(filename: &str) -> bool {
+    filename.to_ascii_lowercase().contains("mmproj")
+}
+
+fn select_vision_projector<'a>(gguf_files: &[&'a str]) -> Option<&'a str> {
+    for preference in VISION_PROJECTOR_PREFERENCE_ORDER {
+        if let Some(projector) = gguf_files.iter().find(|filename| {
+            is_gguf_vision_projector(filename) && filename.to_uppercase().contains(preference)
+        }) {
+            return Some(projector);
+        }
+    }
+
+    gguf_files
+        .iter()
+        .find(|filename| is_gguf_vision_projector(filename))
+        .copied()
+}
 
 /// Select the best GGUF file from a list based on user preference or default ranking.
 ///
@@ -878,10 +905,9 @@ const GGUF_PREFERENCE_ORDER: &[&str] = &[
 fn select_gguf_variant(gguf_files: &[&str], variant: Option<&str>) -> SdkResult<String> {
     if let Some(v) = variant {
         let v_upper = v.to_uppercase();
-        // Find a file containing the variant string (case-insensitive)
         if let Some(found) = gguf_files
             .iter()
-            .find(|f| f.to_uppercase().contains(&v_upper))
+            .find(|f| !is_gguf_companion(f) && f.to_uppercase().contains(&v_upper))
         {
             return Ok(found.to_string());
         }
@@ -892,16 +918,18 @@ fn select_gguf_variant(gguf_files: &[&str], variant: Option<&str>) -> SdkResult<
         )));
     }
 
-    // Auto-select: try each preferred quantization in order
     for pref in GGUF_PREFERENCE_ORDER {
-        if let Some(found) = gguf_files.iter().find(|f| f.to_uppercase().contains(pref)) {
+        if let Some(found) = gguf_files
+            .iter()
+            .find(|f| !is_gguf_companion(f) && f.to_uppercase().contains(pref))
+        {
             return Ok(found.to_string());
         }
     }
 
-    // Fallback: pick the smallest file (likely the most quantized)
     Ok(gguf_files
-        .first()
+        .iter()
+        .find(|file| !is_gguf_companion(file))
         .ok_or_else(|| SdkError::load("No GGUF files found"))?
         .to_string())
 }
@@ -1455,23 +1483,35 @@ impl ModelLoader {
 
         // Classify files by type to enable smart filtering
         let all_filenames: Vec<&str> = siblings.iter().map(|s| s.rfilename.as_str()).collect();
-        let gguf_files: Vec<&str> = all_filenames
+        let all_gguf_files: Vec<&str> = all_filenames
             .iter()
             .filter(|f| f.ends_with(".gguf"))
             .copied()
             .collect();
+        let gguf_files: Vec<&str> = all_gguf_files
+            .iter()
+            .copied()
+            .filter(|filename| !is_gguf_companion(filename))
+            .collect();
 
-        // If multiple GGUF files exist, select the best one instead of downloading all
-        let selected_gguf = if gguf_files.len() > 1 {
-            Some(select_gguf_variant(&gguf_files, variant)?)
-        } else {
+        if !all_gguf_files.is_empty() && gguf_files.is_empty() {
+            return Err(SdkError::load(format!(
+                "HuggingFace repo '{}' contains GGUF companion files but no language model",
+                repo
+            )));
+        }
+
+        let selected_gguf = if gguf_files.is_empty() {
             None
+        } else {
+            Some(select_gguf_variant(&gguf_files, variant)?)
         };
+        let selected_projector = select_vision_projector(&all_gguf_files);
 
         if let Some(ref selected) = selected_gguf {
             log::info!(
                 target: "xybrid_sdk",
-                "Selected GGUF variant: {} (from {} available)",
+                "Selected GGUF variant: {} (from {} language weights)",
                 selected, gguf_files.len()
             );
         }
@@ -1488,7 +1528,10 @@ impl ModelLoader {
                     return false;
                 }
 
-                // If we have a selected GGUF, skip other GGUF files
+                if filename.ends_with(".gguf") && is_gguf_companion(filename) {
+                    return selected_projector == Some(*filename);
+                }
+
                 if let Some(ref selected) = selected_gguf {
                     if filename.ends_with(".gguf") && **filename != *selected {
                         return false;
@@ -1678,7 +1721,10 @@ impl ModelLoader {
     }
 
     fn is_llm_template(metadata: &ModelMetadata) -> bool {
-        matches!(metadata.execution_template, ExecutionTemplate::Gguf { .. })
+        matches!(
+            metadata.execution_template,
+            ExecutionTemplate::Gguf { .. } | ExecutionTemplate::VisionLanguage { .. }
+        )
     }
 
     fn check_streaming_support(metadata: &ModelMetadata) -> bool {
@@ -2582,7 +2628,6 @@ impl XybridModel {
             ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>
             + Send,
     {
-        use xybrid_core::execution::ExecutionTemplate;
         use xybrid_core::runtime_adapter::types::PartialToken;
 
         let start = Instant::now();
@@ -2605,7 +2650,7 @@ impl XybridModel {
         let metadata = handle.metadata.clone();
 
         // Check if this is an LLM model (GGUF template)
-        let is_llm = matches!(metadata.execution_template, ExecutionTemplate::Gguf { .. });
+        let is_llm = ModelLoader::is_llm_template(&metadata);
 
         let output = if is_llm {
             // True streaming with context for LLM models
@@ -2784,7 +2829,6 @@ impl XybridModel {
             ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>
             + Send,
     {
-        use xybrid_core::execution::ExecutionTemplate;
         use xybrid_core::runtime_adapter::types::PartialToken;
 
         let start = Instant::now();
@@ -2806,7 +2850,7 @@ impl XybridModel {
         let metadata = handle.metadata.clone();
 
         // Check if this is an LLM model (GGUF template)
-        let is_llm = matches!(metadata.execution_template, ExecutionTemplate::Gguf { .. });
+        let is_llm = ModelLoader::is_llm_template(&metadata);
 
         let output = if is_llm {
             // True streaming for LLM models
@@ -3506,6 +3550,45 @@ mod tests {
     /// Serializes the tests that mutate the process-global speculative flag so
     /// they don't observe each other's writes within the test binary.
     static SPEC_GLOBAL_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    #[test]
+    fn select_gguf_variant_chooses_language_model_over_projector_and_drafter() {
+        let files = [
+            "Bonsai-27B-Q1_0.gguf",
+            "Bonsai-27B-mmproj-Q8_0.gguf",
+            "Bonsai-27B-dspark-Q4_1.gguf",
+        ];
+
+        assert_eq!(
+            select_gguf_variant(&files, None).unwrap(),
+            "Bonsai-27B-Q1_0.gguf"
+        );
+    }
+
+    #[test]
+    fn select_vision_projector_prefers_q8_over_bf16() {
+        let files = ["Bonsai-27B-mmproj-BF16.gguf", "Bonsai-27B-mmproj-Q8_0.gguf"];
+
+        assert_eq!(
+            select_vision_projector(&files),
+            Some("Bonsai-27B-mmproj-Q8_0.gguf")
+        );
+    }
+
+    #[test]
+    fn vision_language_template_is_treated_as_llm() {
+        let mut metadata = ModelMetadata::onnx("bonsai-27b", "1.0", "Bonsai-27B-Q1_0.gguf");
+        metadata.execution_template = ExecutionTemplate::VisionLanguage {
+            model_file: "Bonsai-27B-Q1_0.gguf".to_string(),
+            chat_template: None,
+            context_length: 4096,
+            generation_params: None,
+        };
+
+        assert!(ModelLoader::is_llm_template(&metadata));
+        assert!(ModelLoader::check_streaming_support(&metadata));
+        assert_eq!(ModelLoader::infer_output_type(&metadata), OutputType::Text);
+    }
 
     #[test]
     fn with_speculative_cloud_records_override() {
