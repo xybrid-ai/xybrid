@@ -1,0 +1,23 @@
+Package.swift
+  s_8b9a9b82c688c4::t_52a1052f1c16ef 49-53
+bindings/apple/README.md
+  s_8b9a9b82c688c4::t_d1f8e6ba43104d 196
+xtask/src/main.rs
+  s_8b9a9b82c688c4::t_e13d9d8e914dad 2537-2539,2542
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "d273127f48faab864c17e19100a23ed6eb1f2248",
+  "prompts": {},
+  "sessions": {
+    "s_8b9a9b82c688c4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "73a8592f-ccc0-42cf-bf05-435600f9a611",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
