@@ -18,6 +18,8 @@ _VISION_PLATFORMS = [
     "@rules_rs//rs/platforms/config:armv7-linux-androideabi",
     "@rules_rs//rs/platforms/config:x86_64-linux-android",
     "@rules_rs//rs/platforms/config:x86_64-unknown-linux-gnu",
+    "@rules_rs//rs/platforms/config:aarch64-apple-darwin",  # Flip 2: macOS parity
+    "@rules_rs//rs/platforms/config:x86_64-pc-windows-gnu",  # Windows .exe parity
 ]
 
 # First-party C++ shim: defines the _c-suffixed symbols the Rust bindings call.
@@ -32,7 +34,25 @@ cc_library(
         cfg: ["XYBRID_LLAMA_VISION"]
         for cfg in _VISION_PLATFORMS
     } | {"//conditions:default": []}),
-    deps = ["//:llama"],
+    # Metal lane: the frameworks cargo's build.rs emits on apple (build.rs:
+    # 675-680). The Rust crates' #[link] attrs already pull Metal/Foundation/
+    # Accelerate; MetalKit exists ONLY here — ggml-metal.m needs it.
+    linkopts = select({
+        "//:metal_enabled": [
+            "-framework Accelerate",
+            "-framework Metal",
+            "-framework MetalKit",
+            "-framework Foundation",
+        ],
+        "//conditions:default": [],
+    }),
+    deps = select({
+        # --//:metal=true swaps in the Metal llama (a separate, local-pinned
+        # target — see //:llama_metal). Everything above this select is
+        # identical between the lanes by design.
+        "//:metal_enabled": ["//:llama_metal"],
+        "//conditions:default": ["//:llama"],
+    }),
 )
 
 # The crate. `committed-bindings` makes lib.rs include! the committed
@@ -50,10 +70,10 @@ rust_library(
         for cfg in _VISION_PLATFORMS
     } | {"//conditions:default": []}),
     edition = "2021",
-    deps = [
-        ":wrapper_cc",
-        "//:llama",
-    ],
+    deps = [":wrapper_cc"] + select({
+        "//:metal_enabled": ["//:llama_metal"],
+        "//conditions:default": ["//:llama"],
+    }),
     visibility = ["//visibility:public"],
 )
 
