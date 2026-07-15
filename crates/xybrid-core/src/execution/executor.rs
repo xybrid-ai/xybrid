@@ -649,7 +649,7 @@ impl TemplateExecutor {
                 if let Some(sys) = input.metadata.get("system_prompt") {
                     chat_messages.insert(0, ChatMessage::system(sys));
                 }
-                let gen_config = build_gen_config_from_input(input, config);
+                let gen_config = build_gen_config_from_input(metadata, input, config);
                 self.execute_llm_with_messages(
                     metadata,
                     model_file,
@@ -1179,7 +1179,7 @@ impl TemplateExecutor {
                     if let Some(sys) = input.metadata.get("system_prompt") {
                         chat_messages.insert(0, ChatMessage::system(sys));
                     }
-                    let gen_config = build_gen_config_from_input(input, config);
+                    let gen_config = build_gen_config_from_input(metadata, input, config);
                     self.execute_llm_streaming_with_messages(
                         metadata,
                         model_file,
@@ -1545,7 +1545,7 @@ impl TemplateExecutor {
         }
         messages.push(ChatMessage::user(&prompt));
 
-        let gen_config = build_gen_config_from_input(input, config);
+        let gen_config = build_gen_config_from_input(metadata, input, config);
 
         // Execute with streaming. Capture the backend name + the prefix
         // length the backend reused from its KV cache so the metric
@@ -1643,8 +1643,9 @@ impl TemplateExecutor {
             self.llm_adapter_cache = Some((cache_key.clone(), adapter));
         }
 
-        // Use explicit config or fall back to defaults
-        let gen_config = config.cloned().unwrap_or_default();
+        let gen_config = config
+            .cloned()
+            .unwrap_or_else(|| model_default_gen_config(metadata));
 
         // Execute with ChatMessages directly — backend applies template once.
         // Capture backend name + cached-prefix length for the metric mirror.
@@ -1686,6 +1687,8 @@ impl TemplateExecutor {
         backend_hint: Option<&str>,
         config: Option<&GenerationConfig>,
     ) -> ExecutorResult<Envelope> {
+        let gen_config = build_gen_config_from_input(metadata, input, config);
+
         // Tool-result continuations replay through the raw text path and
         // must be intercepted here, before envelope → message conversion:
         // the messages-based functions below never see continuation
@@ -1699,7 +1702,7 @@ impl TemplateExecutor {
                 input,
                 responses_json,
                 backend_hint,
-                config,
+                Some(&gen_config),
             );
         }
 
@@ -1717,7 +1720,7 @@ impl TemplateExecutor {
             context_length,
             &messages,
             backend_hint,
-            config,
+            Some(&gen_config),
         )
     }
 
@@ -1753,7 +1756,9 @@ impl TemplateExecutor {
             backend_hint,
         )?;
 
-        let gen_config = config.cloned().unwrap_or_default();
+        let gen_config = config
+            .cloned()
+            .unwrap_or_else(|| model_default_gen_config(metadata));
         let messages = vec![MultimodalChatMessage::from_envelope(input)?];
         let chat_messages = text_messages_from_multimodal(&messages)?;
 
@@ -1901,7 +1906,9 @@ impl TemplateExecutor {
             backend_hint,
         )?;
 
-        let gen_config = config.cloned().unwrap_or_default();
+        let gen_config = config
+            .cloned()
+            .unwrap_or_else(|| model_default_gen_config(metadata));
 
         let registered_image_preprocess_ms =
             self.encode_registered_vision_inputs(metadata, messages)?;
@@ -1941,6 +1948,8 @@ impl TemplateExecutor {
         on_token: StreamingCallback<'_>,
         config: Option<&GenerationConfig>,
     ) -> ExecutorResult<Envelope> {
+        let gen_config = build_gen_config_from_input(metadata, input, config);
+
         reject_tool_continuation_input(input, "vision-language streaming")?;
         let messages = vec![MultimodalChatMessage::from_envelope(input)?];
         self.execute_llm_multimodal_streaming_messages(
@@ -1951,7 +1960,7 @@ impl TemplateExecutor {
             &messages,
             backend_hint,
             on_token,
-            config,
+            Some(&gen_config),
         )
     }
 
@@ -2002,7 +2011,9 @@ impl TemplateExecutor {
             vision_encoder_path,
         );
 
-        let gen_config = config.cloned().unwrap_or_default();
+        let gen_config = config
+            .cloned()
+            .unwrap_or_else(|| model_default_gen_config(metadata));
 
         let need_load = match &self.llm_adapter_cache {
             Some((cached_key, _)) if cached_key == &cache_key => false,
@@ -2123,8 +2134,9 @@ impl TemplateExecutor {
             self.llm_adapter_cache = Some((cache_key.clone(), adapter));
         }
 
-        // Use explicit config or fall back to defaults
-        let gen_config = config.cloned().unwrap_or_default();
+        let gen_config = config
+            .cloned()
+            .unwrap_or_else(|| model_default_gen_config(metadata));
 
         // Execute with streaming - pass ChatMessages directly to backend.
         // Capture backend name + cached-prefix length for the metric mirror.
@@ -2246,7 +2258,7 @@ impl TemplateExecutor {
             self.llm_adapter_cache = Some((cache_key.clone(), adapter));
         }
 
-        let gen_config = build_gen_config_from_input(input, config);
+        let gen_config = build_gen_config_from_input(metadata, input, config);
 
         // Build messages from input
         let prompt = match &input.kind {
@@ -3007,18 +3019,80 @@ fn build_llm_response_envelope(
     }
 }
 
-/// Build the generation config for the prompt-based LLM paths: an explicit
-/// config wins, otherwise fall back to envelope metadata (`max_tokens`,
-/// `temperature`), then defaults.
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+const REASONING_MAX_TOKENS_CEILING: usize = 3584;
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+const REASONING_PROMPT_HEADROOM: usize = 512;
+
+/// Build model defaults while reserving one shared budget for thinking and answering.
+///
+/// The think channel and the answer share one budget; the reasoning floor is a
+/// ceiling-bounded raise that leaves `REASONING_PROMPT_HEADROOM` tokens of prompt
+/// room inside the model's operational context and never drops below the global default.
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+fn model_default_gen_config(metadata: &ModelMetadata) -> GenerationConfig {
+    let (generation_params, context_length) = match &metadata.execution_template {
+        ExecutionTemplate::Gguf {
+            generation_params,
+            context_length,
+            ..
+        }
+        | ExecutionTemplate::VisionLanguage {
+            generation_params,
+            context_length,
+            ..
+        } => (generation_params.as_ref(), *context_length),
+        _ => (None, 0),
+    };
+
+    let mut cfg = GenerationConfig::default();
+    if let Some(params) = generation_params {
+        if let Some(max_tokens) = params.max_tokens {
+            cfg.max_tokens = max_tokens;
+        }
+        if let Some(temperature) = params.temperature {
+            cfg.temperature = temperature;
+        }
+        if let Some(top_p) = params.top_p {
+            cfg.top_p = top_p;
+        }
+        if let Some(top_k) = params.top_k {
+            cfg.top_k = top_k;
+        }
+        if let Some(repetition_penalty) = params.repetition_penalty {
+            cfg.repetition_penalty = repetition_penalty;
+        }
+        if !params.stop_sequences.is_empty() {
+            cfg.stop_sequences = params.stop_sequences.clone();
+        }
+    }
+
+    if generation_params
+        .and_then(|params| params.max_tokens)
+        .is_none()
+        && metadata_reasoning(metadata)
+    {
+        cfg.max_tokens = cfg.max_tokens.max(
+            REASONING_MAX_TOKENS_CEILING
+                .min(context_length.saturating_sub(REASONING_PROMPT_HEADROOM)),
+        );
+    }
+
+    cfg
+}
+
+/// Build the generation config for prompt-based LLM paths using explicit,
+/// envelope, template, reasoning, and global defaults in that precedence order.
 #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
 fn build_gen_config_from_input(
+    metadata: &ModelMetadata,
     input: &Envelope,
     config: Option<&GenerationConfig>,
 ) -> GenerationConfig {
     if let Some(cfg) = config {
         cfg.clone()
     } else {
-        let mut cfg = GenerationConfig::default();
+        let mut cfg = model_default_gen_config(metadata);
         if let Some(max_tokens) = input
             .metadata
             .get("max_tokens")
@@ -3039,6 +3113,8 @@ fn build_gen_config_from_input(
 
 #[cfg(test)]
 mod tests {
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    use super::super::template::GenerationParams;
     use super::super::template::PreprocessingStep;
     use super::*;
     use crate::ir::EnvelopeKind;
@@ -3064,6 +3140,261 @@ mod tests {
             image_preprocess_ms: None,
             reasoning_content: None,
         }
+    }
+
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    fn test_model_metadata(execution_template: ExecutionTemplate) -> ModelMetadata {
+        ModelMetadata {
+            model_id: "test-model".to_string(),
+            version: "1.0".to_string(),
+            execution_template,
+            preprocessing: Vec::new(),
+            postprocessing: Vec::new(),
+            files: Vec::new(),
+            vision_encoder: None,
+            description: None,
+            metadata: HashMap::new(),
+            voices: None,
+            max_chunk_chars: None,
+            trim_trailing_samples: None,
+        }
+    }
+
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[test]
+    fn model_default_gen_config_maps_all_template_generation_params() {
+        let metadata = test_model_metadata(ExecutionTemplate::Gguf {
+            model_file: "model.gguf".to_string(),
+            chat_template: None,
+            context_length: 4096,
+            generation_params: Some(GenerationParams {
+                max_tokens: Some(17),
+                temperature: Some(0.7),
+                top_p: Some(0.8),
+                top_k: Some(12),
+                repetition_penalty: Some(1.25),
+                stop_sequences: vec!["<end>".to_string()],
+            }),
+        });
+
+        let config = model_default_gen_config(&metadata);
+        let defaults = GenerationConfig::default();
+        assert_eq!(config.max_tokens, 17);
+        assert_eq!(config.temperature, 0.7);
+        assert_eq!(config.top_p, 0.8);
+        assert_eq!(config.top_k, 12);
+        assert_eq!(config.repetition_penalty, 1.25);
+        assert_eq!(config.stop_sequences, vec!["<end>".to_string()]);
+        assert_eq!(config.min_p, defaults.min_p);
+        assert_eq!(config.grammar, defaults.grammar);
+        assert!(config.tools.is_empty());
+    }
+
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[test]
+    fn model_default_gen_config_reasoning_floor_scales_with_context() {
+        for (context_length, expected_max_tokens) in
+            [(4096, 3584), (8192, 3584), (2560, 2048), (2048, 2048)]
+        {
+            let mut metadata = test_model_metadata(ExecutionTemplate::Gguf {
+                model_file: "model.gguf".to_string(),
+                chat_template: None,
+                context_length,
+                generation_params: None,
+            });
+            metadata
+                .metadata
+                .insert("reasoning".to_string(), serde_json::Value::Bool(true));
+
+            assert_eq!(
+                model_default_gen_config(&metadata).max_tokens,
+                expected_max_tokens
+            );
+        }
+    }
+
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[test]
+    fn model_default_gen_config_template_max_tokens_beats_reasoning_floor() {
+        let mut metadata = test_model_metadata(ExecutionTemplate::Gguf {
+            model_file: "model.gguf".to_string(),
+            chat_template: None,
+            context_length: 8192,
+            generation_params: Some(GenerationParams {
+                max_tokens: Some(64),
+                ..Default::default()
+            }),
+        });
+        metadata
+            .metadata
+            .insert("reasoning".to_string(), serde_json::Value::Bool(true));
+
+        assert_eq!(model_default_gen_config(&metadata).max_tokens, 64);
+    }
+
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[test]
+    fn model_default_gen_config_non_reasoning_keeps_default() {
+        let metadata = test_model_metadata(ExecutionTemplate::VisionLanguage {
+            model_file: "model.gguf".to_string(),
+            chat_template: None,
+            context_length: 4096,
+            generation_params: None,
+        });
+
+        assert_eq!(model_default_gen_config(&metadata).max_tokens, 2048);
+    }
+
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[test]
+    fn build_gen_config_from_input_envelope_beats_template() {
+        let metadata = test_model_metadata(ExecutionTemplate::Gguf {
+            model_file: "model.gguf".to_string(),
+            chat_template: None,
+            context_length: 4096,
+            generation_params: Some(GenerationParams {
+                max_tokens: Some(512),
+                temperature: Some(0.8),
+                ..Default::default()
+            }),
+        });
+        let mut input = Envelope::new(EnvelopeKind::Text("hello".to_string()));
+        input
+            .metadata
+            .insert("max_tokens".to_string(), "7".to_string());
+        input
+            .metadata
+            .insert("temperature".to_string(), "0.2".to_string());
+
+        let config = build_gen_config_from_input(&metadata, &input, None);
+        assert_eq!(config.max_tokens, 7);
+        assert_eq!(config.temperature, 0.2);
+    }
+
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[test]
+    fn build_gen_config_from_input_explicit_config_wins_whole_struct() {
+        let metadata = test_model_metadata(ExecutionTemplate::Gguf {
+            model_file: "model.gguf".to_string(),
+            chat_template: None,
+            context_length: 4096,
+            generation_params: Some(GenerationParams {
+                max_tokens: Some(512),
+                temperature: Some(0.8),
+                ..Default::default()
+            }),
+        });
+        let mut input = Envelope::new(EnvelopeKind::Text("hello".to_string()));
+        input
+            .metadata
+            .insert("max_tokens".to_string(), "7".to_string());
+        input
+            .metadata
+            .insert("temperature".to_string(), "0.2".to_string());
+
+        let explicit = GenerationConfig {
+            max_tokens: 99,
+            temperature: 0.37,
+            top_p: 0.42,
+            min_p: 0.11,
+            top_k: 17,
+            repetition_penalty: 1.4,
+            stop_sequences: vec!["stop".to_string()],
+            grammar: Some("root ::= \"ok\"".to_string()),
+            ..Default::default()
+        };
+
+        let config = build_gen_config_from_input(&metadata, &input, Some(&explicit));
+        assert_eq!(config.max_tokens, explicit.max_tokens);
+        assert_eq!(config.temperature, explicit.temperature);
+        assert_eq!(config.top_p, explicit.top_p);
+        assert_eq!(config.min_p, explicit.min_p);
+        assert_eq!(config.top_k, explicit.top_k);
+        assert_eq!(config.repetition_penalty, explicit.repetition_penalty);
+        assert_eq!(config.stop_sequences, explicit.stop_sequences);
+        assert_eq!(config.grammar, explicit.grammar);
+        assert!(config.tools.is_empty());
+    }
+
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[test]
+    fn template_generation_params_reach_backend_config() {
+        use std::sync::{Arc, Mutex};
+
+        struct StubBackend {
+            observed_max_tokens: Arc<Mutex<Option<usize>>>,
+        }
+
+        impl crate::runtime_adapter::LlmBackend for StubBackend {
+            fn name(&self) -> &str {
+                "stub"
+            }
+
+            fn supported_formats(&self) -> Vec<&'static str> {
+                vec!["gguf"]
+            }
+
+            fn load(&mut self, _config: &crate::runtime_adapter::LlmConfig) -> ExecutorResult<()> {
+                Ok(())
+            }
+
+            fn is_loaded(&self) -> bool {
+                true
+            }
+
+            fn unload(&mut self) -> ExecutorResult<()> {
+                Ok(())
+            }
+
+            fn generate(
+                &self,
+                _messages: &[crate::runtime_adapter::ChatMessage],
+                config: &GenerationConfig,
+            ) -> ExecutorResult<crate::runtime_adapter::GenerationOutput> {
+                *self.observed_max_tokens.lock().unwrap() = Some(config.max_tokens);
+                Ok(sample_generation_output(1))
+            }
+
+            fn generate_raw(
+                &self,
+                _prompt: &str,
+                _config: &GenerationConfig,
+            ) -> ExecutorResult<crate::runtime_adapter::GenerationOutput> {
+                unreachable!("the text-only VisionLanguage path uses ChatMessages")
+            }
+
+            fn generate_multimodal(
+                &self,
+                _messages: &[crate::runtime_adapter::MultimodalChatMessage],
+                _config: &GenerationConfig,
+            ) -> ExecutorResult<crate::runtime_adapter::GenerationOutput> {
+                unreachable!("the text-only VisionLanguage path uses ChatMessages")
+            }
+        }
+
+        let metadata = test_model_metadata(ExecutionTemplate::VisionLanguage {
+            model_file: "model.gguf".to_string(),
+            chat_template: None,
+            context_length: 4096,
+            generation_params: Some(GenerationParams {
+                max_tokens: Some(7),
+                ..Default::default()
+            }),
+        });
+        let input = Envelope::user_message("Reply briefly.", vec![]).unwrap();
+        let observed_max_tokens = Arc::new(Mutex::new(None));
+        let mut executor = TemplateExecutor::with_base_path("/models");
+        executor.llm_adapter_cache = Some((
+            LlmAdapterCacheKey::new("/models/model.gguf".to_string(), None, 4096, None, None),
+            crate::runtime_adapter::LlmRuntimeAdapter::with_backend(Box::new(StubBackend {
+                observed_max_tokens: observed_max_tokens.clone(),
+            })),
+        ));
+
+        executor
+            .execute(&metadata, &input, None)
+            .expect("template generation parameters must reach the backend");
+        assert_eq!(*observed_max_tokens.lock().unwrap(), Some(7));
     }
 
     #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
