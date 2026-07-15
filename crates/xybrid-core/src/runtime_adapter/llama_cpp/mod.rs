@@ -641,6 +641,33 @@ fn clamp_generation_budget(requested: usize, n_ctx: usize, consumed: usize) -> u
     requested.min(n_ctx.saturating_sub(consumed))
 }
 
+/// Restore the stream invariant that emitted deltas concatenate to the
+/// result text: a primed stream that suppressed everything would otherwise
+/// return an answer no consumer ever saw.
+fn should_emit_recovered_answer(
+    emitted_tokens: usize,
+    truncated_by_budget: bool,
+    tool_block_suppressed: bool,
+    primed: bool,
+    recovered_text: &str,
+) -> bool {
+    emitted_tokens == 0
+        && !truncated_by_budget
+        && !tool_block_suppressed
+        && primed
+        && !recovered_text.is_empty()
+}
+
+/// Whether generation exhausted its budget without a stop signal or EOG token.
+fn generation_truncated_by_budget(
+    stopped: bool,
+    ended_on_eog: bool,
+    generated: usize,
+    budget: usize,
+) -> bool {
+    !stopped && !ended_on_eog && generated >= budget
+}
+
 fn generation_would_overflow_context(
     prefix_len: usize,
     prompt_tokens: usize,
@@ -880,12 +907,15 @@ impl LlmBackend for LlamaCppBackend {
             log::debug!(target: "xybrid_core", "Searching for stop patterns: {:?}", final_stop_patterns);
             let stopped_in_text = truncate_at_first_stop(&mut text, &final_stop_patterns);
             let trimmed_partial = trim_partial_stop_suffix(&mut text, &final_stop_patterns);
-            // The C wrapper returns a positive token count for EOS and
-            // reaches exactly `prepared.max_tokens` only when the budget is
-            // exhausted; a shorter count is natural termination when no stop
-            // signal fired.
-            let truncated_by_budget = !(stopped_in_text || trimmed_partial || stopped_by_callback)
-                && output_tokens.len() >= prepared.max_tokens;
+            let ended_on_eog = output_tokens
+                .last()
+                .is_some_and(|&token| model.vocab_is_eog(token));
+            let truncated_by_budget = generation_truncated_by_budget(
+                stopped_in_text || trimmed_partial || stopped_by_callback,
+                ended_on_eog,
+                output_tokens.len(),
+                prepared.max_tokens,
+            );
             let (clean, reasoning_content) =
                 strip_and_capture_thinking_tags_primed(
                     &text,
@@ -898,7 +928,11 @@ impl LlmBackend for LlamaCppBackend {
             // stop sequences that the C layer sees first. Prior code
             // silently dropped this signal and sometimes reported
             // `length` for a clean stop.
-            let finish_reason = if stopped_in_text || trimmed_partial || stopped_by_callback {
+            let finish_reason = if stopped_in_text
+                || trimmed_partial
+                || stopped_by_callback
+                || ended_on_eog
+            {
                 "stop"
             } else {
                 "length"
@@ -1076,9 +1110,15 @@ impl LlmBackend for LlamaCppBackend {
             let mut text = model.detokenize(&output_tokens)?;
             let stopped_full = truncate_at_first_stop(&mut text, &final_patterns);
             let trimmed_partial = trim_partial_stop_suffix(&mut text, &final_patterns);
-            let truncated_by_budget =
-                !(filter.is_stopped() || stopped_full || trimmed_partial || stopped_by_callback)
-                    && output_tokens.len() >= prepared.max_tokens;
+            let ended_on_eog = output_tokens
+                .last()
+                .is_some_and(|&token| model.vocab_is_eog(token));
+            let truncated_by_budget = generation_truncated_by_budget(
+                filter.is_stopped() || stopped_full || trimmed_partial || stopped_by_callback,
+                ended_on_eog,
+                output_tokens.len(),
+                prepared.max_tokens,
+            );
             let (clean, reasoning_content) = strip_and_capture_thinking_tags_primed(
                 &text,
                 self.reasoning_enabled(),
@@ -1099,12 +1139,29 @@ impl LlmBackend for LlamaCppBackend {
                 && !crate::runtime_adapter::tool_call::parse_tool_calls(&text).is_empty();
             let finish_reason = if emitted_tool_calls {
                 "tool_calls".to_string()
-            } else if filter.is_stopped() || stopped_full || trimmed_partial || stopped_by_callback
+            } else if filter.is_stopped()
+                || stopped_full
+                || trimmed_partial
+                || stopped_by_callback
+                || ended_on_eog
             {
                 "stop".to_string()
             } else {
                 "length".to_string()
             };
+
+            let tool_block_suppressed = suppress_tools && saw_tool_call_block;
+            if should_emit_recovered_answer(
+                token_index,
+                truncated_by_budget,
+                tool_block_suppressed,
+                self.reasoning_enabled(),
+                &text,
+            ) {
+                let recovered_partial = PartialToken::new(text.clone(), token_index, text.clone());
+                token_index += 1;
+                let _ = on_token(recovered_partial);
+            }
 
             // Send final empty token with finish_reason — matches the
             // pre-refactor contract so downstream consumers see a
@@ -1113,7 +1170,7 @@ impl LlmBackend for LlamaCppBackend {
             // emitted (e.g. immediate stop) — except when a tool block was
             // suppressed: then the stream showed nothing on purpose and the
             // terminal token is the caller's only signal.
-            if token_index > 0 || (suppress_tools && saw_tool_call_block) {
+            if token_index > 0 || tool_block_suppressed {
                 let final_cumulative = if suppress_tools {
                     filter.cumulative_emitted().to_string()
                 } else {
@@ -1286,20 +1343,28 @@ impl LlmBackend for LlamaCppBackend {
             let mut text = model.detokenize(&output_tokens)?;
             let stopped_in_text = truncate_at_first_stop(&mut text, &final_stop_patterns);
             let trimmed_partial = trim_partial_stop_suffix(&mut text, &final_stop_patterns);
-            let truncated_by_budget = !(stopped_in_text || trimmed_partial || stopped_by_callback)
-                && output_tokens.len() >= max_tokens;
+            let ended_on_eog = output_tokens
+                .last()
+                .is_some_and(|&token| model.vocab_is_eog(token));
+            let truncated_by_budget = generation_truncated_by_budget(
+                stopped_in_text || trimmed_partial || stopped_by_callback,
+                ended_on_eog,
+                output_tokens.len(),
+                max_tokens,
+            );
             let (clean, reasoning_content) = strip_and_capture_thinking_tags_primed(
                 &text,
                 self.reasoning_enabled(),
                 truncated_by_budget,
             );
             let text = clean.trim().to_string();
-            let finish_reason = if stopped_in_text || trimmed_partial || stopped_by_callback {
-                "stop"
-            } else {
-                "length"
-            }
-            .to_string();
+            let finish_reason =
+                if stopped_in_text || trimmed_partial || stopped_by_callback || ended_on_eog {
+                    "stop"
+                } else {
+                    "length"
+                }
+                .to_string();
 
             Ok(GenerationOutput {
                 text,
@@ -1480,14 +1545,21 @@ impl LlmBackend for LlamaCppBackend {
                 ))
             })?;
 
+            let mut token_index = token_index;
             let final_stop_patterns =
                 merge_stop_patterns(&generation_stop_patterns, CHAT_STOP_PATTERNS_BROKEN);
             let mut text = model.detokenize(&output_tokens)?;
             let stopped_in_text = truncate_at_first_stop(&mut text, &final_stop_patterns);
             let trimmed_partial = trim_partial_stop_suffix(&mut text, &final_stop_patterns);
-            let truncated_by_budget =
-                !(filter_stopped || stopped_in_text || trimmed_partial || stopped_by_callback)
-                    && output_tokens.len() >= max_tokens;
+            let ended_on_eog = output_tokens
+                .last()
+                .is_some_and(|&token| model.vocab_is_eog(token));
+            let truncated_by_budget = generation_truncated_by_budget(
+                filter_stopped || stopped_in_text || trimmed_partial || stopped_by_callback,
+                ended_on_eog,
+                output_tokens.len(),
+                max_tokens,
+            );
             let (clean, reasoning_content) = strip_and_capture_thinking_tags_primed(
                 &text,
                 self.reasoning_enabled(),
@@ -1502,13 +1574,31 @@ impl LlmBackend for LlamaCppBackend {
                 && !crate::runtime_adapter::tool_call::parse_tool_calls(&text).is_empty();
             let finish_reason = if emitted_tool_calls {
                 "tool_calls".to_string()
-            } else if filter_stopped || stopped_in_text || trimmed_partial || stopped_by_callback {
+            } else if filter_stopped
+                || stopped_in_text
+                || trimmed_partial
+                || stopped_by_callback
+                || ended_on_eog
+            {
                 "stop".to_string()
             } else {
                 "length".to_string()
             };
 
-            if token_index > 0 || (suppress_tools && filter_saw_tool_call_block) {
+            let tool_block_suppressed = suppress_tools && filter_saw_tool_call_block;
+            if should_emit_recovered_answer(
+                token_index,
+                truncated_by_budget,
+                tool_block_suppressed,
+                self.reasoning_enabled(),
+                &text,
+            ) {
+                let recovered_partial = PartialToken::new(text.clone(), token_index, text.clone());
+                token_index += 1;
+                let _ = on_token(recovered_partial);
+            }
+
+            if token_index > 0 || tool_block_suppressed {
                 let final_cumulative = if suppress_tools {
                     filter_cumulative
                 } else {
@@ -1562,6 +1652,34 @@ mod tests {
     #[test]
     fn generation_budget_keeps_exact_remaining_boundary() {
         assert_eq!(clamp_generation_budget(1, 256, 255), 1);
+    }
+
+    #[test]
+    fn recovered_answer_requires_all_streaming_conditions() {
+        assert!(should_emit_recovered_answer(
+            0, false, false, true, "answer"
+        ));
+        assert!(!should_emit_recovered_answer(
+            1, false, false, true, "answer"
+        ));
+        assert!(!should_emit_recovered_answer(
+            0, true, false, true, "answer"
+        ));
+        assert!(!should_emit_recovered_answer(
+            0, false, true, true, "answer"
+        ));
+        assert!(!should_emit_recovered_answer(
+            0, false, false, false, "answer"
+        ));
+        assert!(!should_emit_recovered_answer(0, false, false, true, ""));
+    }
+
+    #[test]
+    fn generation_truncation_excludes_eog_at_exact_budget_boundary() {
+        assert!(!generation_truncated_by_budget(false, true, 4, 4));
+        assert!(generation_truncated_by_budget(false, false, 4, 4));
+        assert!(!generation_truncated_by_budget(false, false, 3, 4));
+        assert!(!generation_truncated_by_budget(true, false, 4, 4));
     }
 
     #[test]
