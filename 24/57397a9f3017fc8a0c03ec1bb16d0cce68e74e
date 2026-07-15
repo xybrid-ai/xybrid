@@ -1,0 +1,33 @@
+.github/workflows/release-prep.yml
+  s_8b9a9b82c688c4::t_130bc8ae069afa 886-887
+  s_8b9a9b82c688c4::t_898cd78dd2b780 268-269
+  s_8b9a9b82c688c4::t_b731ff79cb90b6 184-185
+  s_8b9a9b82c688c4::t_c9f9f07542e240 838-839
+  s_8b9a9b82c688c4::t_dcea1977a7b621 1151-1195
+  s_8b9a9b82c688c4::t_8a761de6a8b130 502-503
+  s_8b9a9b82c688c4::t_acba82dc79a7fe 94,101-104,108-122,126-129,134,152,157-165
+  s_8b9a9b82c688c4::t_a09bc7320d0434 1097-1098
+  s_8b9a9b82c688c4::t_c61f5f673f3553 745-746
+  s_8b9a9b82c688c4::t_906a134a82b329 425-426
+  s_8b9a9b82c688c4::t_b4379e3e607ee8 1054-1055
+  s_8b9a9b82c688c4::t_9b7a26eb659472 408-409
+  s_8b9a9b82c688c4::t_87f2c8f73e49cc 595-596
+  s_8b9a9b82c688c4::t_a80c523573c438 41-56
+  s_8b9a9b82c688c4::t_bd8b6f52ff04e3 933-935
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "2457397a9f3017fc8a0c03ec1bb16d0cce68e74e",
+  "prompts": {},
+  "sessions": {
+    "s_8b9a9b82c688c4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "73a8592f-ccc0-42cf-bf05-435600f9a611",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
