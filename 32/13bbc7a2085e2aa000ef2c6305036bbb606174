@@ -8,6 +8,7 @@ crates/xybrid-core/src/execution/strategies/llm.rs
   s_d63f9b1d7e1016::t_c5befb188bc040 11
   s_d63f9b1d7e1016::t_e44be23fe684bd 1
   s_d63f9b1d7e1016::t_07896e1c667d2a 12
+  s_d63f9b1d7e1016::t_c73d7dfdc3eccd 3-6,8-9,472
 ---
 {
   "schema_version": "authorship/3.0.0",
