@@ -15,7 +15,8 @@ use std::collections::HashMap;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
 use xybrid_core::execution::{
-    ExecutionTemplate, ModelMetadata, VisionEncoderConfig, VisionPreprocessingPreset,
+    template::GenerationParams, ExecutionTemplate, ModelMetadata, VisionEncoderConfig,
+    VisionPreprocessingPreset,
 };
 
 // ============================================================================
@@ -1084,6 +1085,11 @@ fn build_qwen3vl_metadata(
     projector_info: &GgufInfo,
 ) -> ModelMetadata {
     const DEFAULT_CONTEXT_LENGTH: usize = 4096;
+    // Qwen3VL reasons by default, and its think channel shares the answer budget.
+    // 3584 is a ceiling, not a target: non-thinking variants stop at EOS long
+    // before it, and it leaves 512 tokens of prompt headroom in the 4096-token
+    // operational context.
+    const QWEN3VL_DEFAULT_MAX_TOKENS: usize = 3584;
 
     let max_context_length = gguf_info
         .and_then(|info| info.context_length)
@@ -1144,7 +1150,10 @@ fn build_qwen3vl_metadata(
             model_file: primary.filename.clone(),
             chat_template: None,
             context_length,
-            generation_params: None,
+            generation_params: Some(GenerationParams {
+                max_tokens: Some(QWEN3VL_DEFAULT_MAX_TOKENS),
+                ..Default::default()
+            }),
         },
         preprocessing: Vec::new(),
         postprocessing: Vec::new(),
@@ -2213,9 +2222,15 @@ mod tests {
             metadata.execution_template,
             xybrid_core::execution::ExecutionTemplate::VisionLanguage {
                 ref model_file,
+                ref generation_params,
                 context_length: 4096,
                 ..
             } if model_file == "Bonsai-27B-Q1_0.gguf"
+                && generation_params
+                    == &Some(GenerationParams {
+                        max_tokens: Some(3584),
+                        ..Default::default()
+                    })
         ));
         assert_eq!(
             metadata
