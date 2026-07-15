@@ -163,8 +163,8 @@ index 0000000..0000000 100644
 diff --git a/toolchain/selects.bzl b/toolchain/selects.bzl
 index 0000000..0000000 100644
 --- a/toolchain/selects.bzl	2026-07-14 19:03:24
-+++ b/toolchain/selects.bzl	2026-07-14 19:04:36
-@@ -56,5 +56,25 @@
++++ b/toolchain/selects.bzl	2026-07-15 09:09:42
+@@ -56,5 +56,29 @@
          "@llvm//toolchain:macos_complete_with_libtool": Label(tool_repo + ":tools_with_dsym_and_libtool"),
          "@llvm//toolchain:macos_complete": Label(tool_repo + ":tools_with_dsym"),
          "@rules_cc//cc/toolchains/args/archiver_flags:use_libtool_on_apple_setting": Label(tool_repo + ":tools_with_libtool_for_runtime"),
@@ -184,10 +184,14 @@ index 0000000..0000000 100644
 +# Only valid while the tool is also STAGED for the consuming action (the
 +# windows tool_map above stages dlltool for windows-target actions).
 +def llvm_tool_execroot_path(exec_os, exec_cpu, binary):
++    # Accept both this module's exec-OS vocabulary ("macos") and rustc triple
++    # spellings ("darwin") without relying on _tool_repo's pass-through of
++    # unknown names (the release repos are darwin-flavored).
++    os_part = "macos" if exec_os == "darwin" else exec_os
 +    label = Label("%s:bin/%s%s" % (
-+        _tool_repo(exec_os, exec_cpu),
++        _tool_repo(os_part, exec_cpu),
 +        binary,
-+        ".exe" if exec_os == "windows" else "",
++        ".exe" if os_part == "windows" else "",
 +    ))
 +    return "external/%s/%s" % (label.repo_name, label.name)
 diff --git a/runtimes/libunwind/BUILD.bazel b/runtimes/libunwind/BUILD.bazel

@@ -213,9 +213,13 @@ toolchains.toolchain(
         # unstageable build-script-link-search shape as winapi's). Its own
         # windows_raw_dylib cfg switches the link! macro to raw-dylib —
         # the path the 0.61 family already uses, served by the dlltool
-        # staging fix (hermetic_llvm.patch + rules_rs.patch). Emits benign
-        # unexpected_cfgs warnings in crates that don't declare the cfg.
-        "x86_64-pc-windows-gnu": ["--cfg=windows_raw_dylib"],
+        # staging fix (hermetic_llvm.patch + rules_rs.patch). check-cfg
+        # declares the custom cfg so crates that don't know it stay free
+        # of unexpected_cfgs warnings.
+        "x86_64-pc-windows-gnu": [
+            "--cfg=windows_raw_dylib",
+            "--check-cfg=cfg(windows_raw_dylib)",
+        ],
     },
     version = "1.92.0",
 )
