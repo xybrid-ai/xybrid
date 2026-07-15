@@ -387,7 +387,8 @@ fn detect_model_files(dir: &Path) -> Vec<ModelFileInfo> {
     // Sort GGUF files by quantization preference (Q4_K_M first), others by size descending.
     // This ensures auto-generation picks the best edge-friendly variant, not the largest.
     const GGUF_QUANT_PREFERENCE: &[&str] = &[
-        "Q4_K_M", "Q4_K_S", "Q4_0", "Q5_K_M", "Q5_K_S", "Q6_K", "Q8_0", "F16", "BF16", "F32",
+        "Q4_K_M", "Q4_K_S", "Q4_0", "Q5_K_M", "Q5_K_S", "Q6_K", "Q8_0", "Q1_0", "F16", "BF16",
+        "F32",
     ];
 
     files.sort_by(|a, b| {
