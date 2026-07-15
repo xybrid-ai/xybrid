@@ -92,6 +92,7 @@
 |------|------|
 | Fastest demo (2 min) | [Install CLI →](#quick-start) |
 | Build a mobile or desktop app | [Flutter SDK →](bindings/flutter/) |
+| Try the browser preview | [Web SDK →](bindings/web/) |
 | Add AI NPCs to your game | [Unity SDK →](bindings/unity/) and try the [3D tavern demo](https://github.com/xybrid-ai/xybrid-unity-tavern) |
 | Android native | [Kotlin SDK →](bindings/kotlin/) |
 | Rust / embedded | [Core crate →](crates/) |
@@ -103,7 +104,10 @@
 
 ## SDKs
 
-Xybrid is a **Rust-powered runtime** with native bindings for every major platform.
+Native SDKs are powered by the Rust runtime and expose its native model
+capabilities. The Browser/Web preview is a separate browser-native LiteRT.js
+adapter that consumes `model_metadata.json` and currently supports only LiteRT
+raw typed-tensor I/O.
 
 | SDK | Platforms | Install | Status | Sample |
 |-----|-----------|---------|--------|--------|
@@ -111,10 +115,12 @@ Xybrid is a **Rust-powered runtime** with native bindings for every major platfo
 | **[Unity](bindings/unity/)** | macOS, Windows, Linux, iOS, Android | [See below](#quick-start) | Available | [Unity 3D AI tavern](https://github.com/xybrid-ai/xybrid-unity-tavern) |
 | **[Swift](bindings/apple/)** | iOS, macOS | Swift Package Manager | Coming Soon | [README](examples/ios/README.md) |
 | **[Kotlin](bindings/kotlin/)** | Android | Maven Central | Available | [README](examples/android/README.md) |
+| **[Browser/Web preview](bindings/web/)** | Modern browsers | `@xybrid/web` | Preview | [In-browser a+b demo](bindings/web/example/) |
 | **[CLI](https://github.com/xybrid-ai/xybrid/releases)** | macOS, Linux, Windows | `curl -sSL .../install.sh \| sh` | Available | — |
 | **[Rust](crates/)** | All | [crates.io](https://crates.io/crates/xybrid) | Available | — |
 
-Every SDK wraps the same Rust core — identical model support and behavior across all platforms.
+The native SDKs share the Rust core; the Browser/Web preview does not and has the
+limited LiteRT tensor surface described above.
 
 ---
 

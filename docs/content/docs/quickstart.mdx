@@ -5,7 +5,7 @@ description: Get up and running with Xybrid in minutes
 
 Get Xybrid running in your app with a few lines of code. Choose your SDK below.
 
-<Tabs items={['Flutter', 'Swift', 'Kotlin', 'Unity', 'Rust', 'CLI']}>
+<Tabs items={['Flutter', 'Swift', 'Kotlin', 'Unity', 'Web', 'Rust', 'CLI']}>
   <Tab value="Flutter">
 **Install**
 
@@ -143,6 +143,38 @@ Debug.Log($"Latency: {result.LatencyMs}ms");
 ```
 
 **Expected output:** `result.Success == true` with audio output from the TTS model.
+  </Tab>
+  <Tab value="Web">
+**Install**
+
+`@xybrid/web` is a private preview and not yet on npm. It lives in [`bindings/web`](https://github.com/xybrid-ai/xybrid/tree/master/bindings/web):
+
+```bash
+git clone https://github.com/xybrid-ai/xybrid
+cd xybrid/bindings/web
+pnpm install
+pnpm dev:example   # downloads pinned demo models, then serves the demo
+```
+
+**Run inference**
+
+```ts
+import { XybridLlm } from "@xybrid/web";
+
+// Stream a reply from a language model running in the browser
+const llm = await XybridLlm.load("/llm/model_metadata.json", {
+  wasmPath: "/llm-runtime",
+  accelerator: "auto", // WebGPU when available, wasm otherwise
+});
+
+for await (const delta of llm.generateStream("Hello from Xybrid!")) {
+  output.append(delta);
+}
+```
+
+**Expected output:** Text streamed into the page token by token, generated entirely in the browser.
+
+See the [Web SDK guide](/docs/sdks/web) for the tensor surface and the full API.
   </Tab>
   <Tab value="Rust">
 **Install**

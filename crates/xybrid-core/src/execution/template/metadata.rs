@@ -58,6 +58,15 @@ pub enum ExecutionTemplate {
         model_file: String,
     },
 
+    /// LiteRT-LM model execution (browser SDK / @xybrid/web only)
+    LiteRtLm {
+        /// Path to the .litertlm model file (relative to bundle root)
+        model_file: String,
+        /// Maximum context length (tokens); engine default when absent
+        #[serde(default)]
+        context_length: Option<usize>,
+    },
+
     /// Multi-model graph execution (DAG of models)
     ModelGraph {
         /// Sequence of execution stages
@@ -632,6 +641,7 @@ pub fn backend_label_from_template(
             .or(Some("llamacpp")),
         ExecutionTemplate::CoreMl { .. }
         | ExecutionTemplate::TfLite { .. }
+        | ExecutionTemplate::LiteRtLm { .. }
         | ExecutionTemplate::ModelGraph { .. } => None,
     }
 }
@@ -696,6 +706,7 @@ pub fn quantization_label_from_metadata(metadata: &ModelMetadata) -> Option<Stri
     let model_file = match &metadata.execution_template {
         ExecutionTemplate::Gguf { model_file, .. } => Some(model_file),
         ExecutionTemplate::VisionLanguage { model_file, .. } => Some(model_file),
+        ExecutionTemplate::LiteRtLm { model_file, .. } => Some(model_file),
         _ => None,
     };
     if let Some(model_file) = model_file {
@@ -761,6 +772,7 @@ pub fn span_kind_from_template(template: &ExecutionTemplate) -> &'static str {
         }
         ExecutionTemplate::Onnx { .. }
         | ExecutionTemplate::TfLite { .. }
+        | ExecutionTemplate::LiteRtLm { .. }
         | ExecutionTemplate::ModelGraph { .. } => "cpu",
     }
 }
@@ -786,6 +798,51 @@ mod tests {
         let parsed: ModelMetadata = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.model_id, "mnist");
         assert!(json.contains("\"type\": \"Onnx\""));
+    }
+
+    #[test]
+    fn test_litertlm_deserialization_with_context_length() {
+        let template: ExecutionTemplate = serde_json::from_str(
+            r#"{"type":"LiteRtLm","model_file":"SmolLM2_135M_Instruct.litertlm","context_length":2048}"#,
+        )
+        .unwrap();
+
+        match template {
+            ExecutionTemplate::LiteRtLm {
+                model_file,
+                context_length,
+            } => {
+                assert_eq!(model_file, "SmolLM2_135M_Instruct.litertlm");
+                assert_eq!(context_length, Some(2048));
+            }
+            other => panic!("expected LiteRtLm, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_litertlm_deserialization_without_context_length() {
+        let template: ExecutionTemplate =
+            serde_json::from_str(r#"{"type":"LiteRtLm","model_file":"model.litertlm"}"#).unwrap();
+
+        match template {
+            ExecutionTemplate::LiteRtLm { context_length, .. } => {
+                assert_eq!(context_length, None);
+            }
+            other => panic!("expected LiteRtLm, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_litertlm_serialization_round_trip() {
+        let template = ExecutionTemplate::LiteRtLm {
+            model_file: "model.litertlm".to_string(),
+            context_length: Some(2048),
+        };
+        let json = serde_json::to_string(&template).unwrap();
+        assert!(json.contains("\"type\":\"LiteRtLm\""));
+
+        let parsed: ExecutionTemplate = serde_json::from_str(&json).unwrap();
+        assert!(matches!(parsed, ExecutionTemplate::LiteRtLm { .. }));
     }
 
     #[test]

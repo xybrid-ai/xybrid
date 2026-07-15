@@ -1,0 +1,180 @@
+---
+title: Web
+description: Browser SDK preview for on-device ML inference with WebAssembly and WebGPU
+---
+
+The Web SDK (`@xybrid/web`) runs Xybrid models directly in the browser. It has two surfaces: a tensor surface (`XybridModel`) for TfLite models and a text-generation surface (`XybridLlm`) for `.litertlm` language models. Inference executes locally through WebAssembly, with WebGPU acceleration when available — no server round-trip.
+
+<Callout type="info">
+`@xybrid/web` `0.3.0` is a **private preview** and is not yet published to npm. It lives in [`bindings/web`](https://github.com/xybrid-ai/xybrid/tree/master/bindings/web) in the Xybrid repository, ships as ESM only, and its API may change. The underlying engines are an implementation detail — application code should only speak in terms of `@xybrid/web`.
+</Callout>
+
+## Try the Demo
+
+From `bindings/web` in the repository:
+
+```bash
+pnpm install
+pnpm dev:example
+```
+
+The predev step downloads two pinned models (SHA-256 verified) and copies both runtimes' wasm assets — no model binary is committed.
+
+- `/` streams SmolLM2-135M-Instruct (a 136 MB `.litertlm` model) on WebGPU or the CPU engine, with live download progress and generation timings.
+- `/tensor.html` runs a deterministic 708-byte addition model and shows PASS only when every output matches.
+
+`pnpm test:browser` drives both pages through the real adapters in Chromium.
+
+## Quick Start
+
+### Text Generation
+
+```ts
+import { XybridLlm } from "@xybrid/web";
+
+const llm = await XybridLlm.load("https://models.example/llm/model_metadata.json", {
+  wasmPath: "/llm-runtime",
+  accelerator: "auto",
+  onDownloadProgress: ({ loadedBytes, totalBytes }) => render(loadedBytes, totalBytes),
+});
+
+for await (const delta of llm.generateStream("Hello!", { maxOutputTokens: 256 })) {
+  append(delta);
+}
+
+await llm.dispose();
+```
+
+Each `generate` / `generateStream` call is a fresh single-turn conversation; the model's embedded prompt template is applied by the engine. Abandoning the stream early or calling `dispose()` cancels in-flight decoding.
+
+### Tensor Inference
+
+```ts
+import { XybridModel } from "@xybrid/web";
+
+const model = await XybridModel.load("https://models.example/model_metadata.json", {
+  wasmPath: "/litert",
+  accelerator: "auto",
+});
+
+const result = await model.run({
+  a: new Float32Array(100),
+  b: new Float32Array(100),
+});
+
+console.log(result.byName["Identity"]?.data);
+await model.dispose();
+```
+
+Inputs are positional arrays or name-keyed records of `Float32Array`, `Int32Array`, or `Uint8Array`. When a model input has one dynamic dimension it is inferred from the data length; with several dynamic dimensions pass `{ data, shape }` explicitly.
+
+## Serving Wasm Assets
+
+Each surface loads its own wasm JavaScript and binary at runtime from `wasmPath`:
+
+| Surface | Assets to host | Example path |
+|---------|----------------|--------------|
+| `XybridModel` | `@litertjs/core/wasm/*` | `/litert` |
+| `XybridLlm` | `@litert-lm/core/wasm/*` | `/llm-runtime` |
+
+Wasm paths are executable code and must stay on the page's own HTTP(S) origin. Metadata and model files may live on another origin when that host permits CORS requests. The preview initializes with `threads: false` and `jspi: false`, so there is no SharedArrayBuffer or COOP/COEP requirement.
+
+Each runtime's initialization is a per-page singleton: concurrent loads sharing a wasm configuration reuse one initialization, and a later load with a different `wasmPath` fails with `RuntimeConfigurationError`.
+
+## Model Metadata
+
+Both surfaces load Xybrid `model_metadata.json` documents. The browser boundary is forward-compatible — unrecognized fields are accepted — while malformed metadata, unsupported templates, and unavailable browser features become typed Xybrid errors.
+
+| Field | Requirement |
+|-------|-------------|
+| `model_id`, `version`, `files` | Required |
+| `execution_template.type` | `"TfLite"` (tensor) or `"LiteRtLm"` (text generation) |
+| `execution_template.model_file` | Bare filename, listed in `files`, resolved beside the metadata document |
+| `execution_template.context_length` | Optional positive integer (LiteRtLm), forwarded as the engine's max token count |
+| `preprocessing`, `postprocessing`, `voices`, `vision_encoder` | Must be absent/empty in the browser preview |
+
+## API Reference
+
+### XybridModel
+
+```ts
+class XybridModel {
+  static load(metadataUrl: string | URL, options: LoadOptions): Promise<XybridModel>;
+
+  readonly inputs: readonly TensorDetail[];   // { name, shape, dataType }
+  readonly outputs: readonly TensorDetail[];
+  readonly accelerator: "wasm" | "webgpu";    // compile path actually selected
+  readonly isFullyAccelerated: boolean;       // false when some ops fell back to CPU
+
+  run(input: TensorInputs): Promise<RunResult>; // { outputs, byName }
+  dispose(): Promise<void>;                     // idempotent, waits for in-flight run
+}
+```
+
+### XybridLlm
+
+```ts
+class XybridLlm {
+  static load(metadataUrl: string | URL, options: LlmLoadOptions): Promise<XybridLlm>;
+
+  readonly accelerator: "wasm" | "webgpu";
+
+  generate(prompt: string, options?: GenerateOptions): Promise<string>;
+  generateStream(prompt: string, options?: GenerateOptions): AsyncGenerator<string>;
+  dispose(): Promise<void>;
+}
+```
+
+### Load Options
+
+```ts
+type LoadOptions = {
+  wasmPath: string | URL;                       // same-origin wasm asset directory
+  accelerator: "auto" | "wasm" | "webgpu";
+};
+
+type LlmLoadOptions = LoadOptions & {
+  onDownloadProgress?: (progress: { loadedBytes: number; totalBytes: number | undefined }) => void;
+};
+
+type GenerateOptions = {
+  maxOutputTokens?: number; // positive integer
+};
+```
+
+`auto` prefers WebGPU and falls back to wasm when WebGPU is unavailable or its attempt fails; explicit `webgpu` fails instead of falling back. On the LLM surface `webgpu` maps to the engine's GPU backend and `wasm` to its CPU backend. LiteRT may still execute unsupported WebGPU operations on CPU — check `isFullyAccelerated` to distinguish a fully delegated graph.
+
+### Error Handling
+
+All SDK errors extend `XybridError`, which carries a stable `code` and the original `causeValue`:
+
+| Error class | `code` |
+|-------------|--------|
+| `InvalidMetadataError` | `invalid_metadata` |
+| `UnsupportedTemplateError` | `unsupported_template` |
+| `UnsupportedFeatureError` | `unsupported_feature` |
+| `RuntimeConfigurationError` | `runtime_configuration` |
+| `RuntimeInitializationError` | `runtime_initialization` |
+| `InputValidationError` | `input_validation` |
+| `UnsupportedTensorTypeError` | `unsupported_tensor_type` |
+| `InferenceError` | `inference` |
+| `ConcurrentRunError` | `concurrent_run` |
+| `DeviceLostError` | `device_lost` |
+| `DisposedError` | `disposed` |
+
+Each model allows one in-flight `run` or generation at a time (`ConcurrentRunError`). After a WebGPU device loss, further runs throw `DeviceLostError` — load a new model to recover. Post-dispose calls throw `DisposedError`.
+
+## Limits
+
+Browser memory guards: **1 MiB** metadata, **512 MiB** models, **256 MiB** tensor I/O. Tensor dtypes are `float32`, `int32`, and `uint8`.
+
+Deliberately deferred in this preview: preprocessing/postprocessing pipelines, `voices` and `vision_encoder` metadata, threads, JSPI, WebNN, GPU buffer I/O, model registries, higher-level multimodal APIs, and — on the LLM surface — multi-turn conversations, system prompts, sampling controls, constrained decoding, and tool calling.
+
+## Browser Support
+
+| Requirement | Status |
+|-------------|--------|
+| WebAssembly (ESM toolchain) | Required |
+| WebGPU | Optional — `auto` falls back to wasm |
+| Cross-origin isolation (COOP/COEP) | Not required |
+| Tested in CI | Chromium (Playwright) |

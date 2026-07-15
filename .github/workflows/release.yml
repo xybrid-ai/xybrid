@@ -40,6 +40,8 @@ jobs:
 
       - name: Check versions match git tag
         run: |
+          ./tools/scripts/version-sync.sh --check
+
           TAG_VERSION=${GITHUB_REF#refs/tags/v}
           echo "Git tag version: $TAG_VERSION"
 

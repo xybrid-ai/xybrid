@@ -6,10 +6,27 @@ Platform-specific reference implementations demonstrating how to integrate the X
 
 | Platform | Directory | Command | Sample |
 |----------|-----------|---------|--------|
+| [Browser/Web preview](#browserweb-preview) | `../bindings/web/` | `cd ../bindings/web && pnpm install && pnpm dev:example` | In-browser LiteRT a+b tensor demo |
 | [Flutter](#flutter) | `flutter/` | `cd flutter && flutter run` | [README](flutter/README.md) |
 | [iOS (Swift)](#ios-swift) | `ios/` | `open ios/XybridExample.xcodeproj` | [README](ios/README.md) |
 | [Android (Kotlin)](#android-kotlin) | `android/` | `cd android && ./gradlew assembleDebug` | [README](android/README.md) |
 | [Unity](#unity) | `unity/` | Open in Unity Hub | [xybrid-unity-tavern](https://github.com/xybrid-ai/xybrid-unity-tavern) |
+
+---
+
+## Browser/Web Preview
+
+Browser-native LiteRT.js adapter example: loads a pinned TFLite addition model,
+runs it entirely in the browser on wasm or WebGPU, and verifies every output
+equals elementwise a+b.
+
+### Getting Started
+
+```bash
+cd ../bindings/web
+pnpm install
+pnpm dev:example
+```
 
 ---
 

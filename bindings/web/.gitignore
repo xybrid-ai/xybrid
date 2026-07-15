@@ -1,0 +1,9 @@
+dist/
+node_modules/
+playwright-report/
+test-results/
+*.tsbuildinfo
+example/public/model.tflite
+example/public/litert/
+example/public/llm-runtime/
+example/public/llm/SmolLM2_135M_Instruct.litertlm

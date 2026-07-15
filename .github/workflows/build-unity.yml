@@ -27,6 +27,7 @@ jobs:
 
       - name: Check versions match git tag
         run: |
+          ./tools/scripts/version-sync.sh --check
           TAG_VERSION=${GITHUB_REF#refs/tags/v}
           UNITY_VERSION=$(python3 -c "import json; print(json.load(open('bindings/unity/package.json'))['version'])")
           echo "Git tag version: $TAG_VERSION"

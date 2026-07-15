@@ -1,0 +1,46 @@
+{
+  "name": "@xybrid/web",
+  "version": "0.3.0",
+  "private": true,
+  "type": "module",
+  "description": "Preview browser tensor runtime for Xybrid metadata backed by LiteRT.",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsdown",
+    "build:example": "vite build --config example/vite.config.ts",
+    "dev": "vite --config example/vite.config.ts",
+    "dev:example": "vite --config example/vite.config.ts",
+    "example:assets": "bun run example/scripts/prepare-assets.ts",
+    "lint": "biome check .",
+    "prebuild:example": "bun run example:assets",
+    "predev": "bun run example:assets",
+    "predev:example": "bun run example:assets",
+    "test": "bun test test/model.test.ts test/metadata.test.ts test/llm.test.ts test/registry.test.ts test/huggingface.test.ts",
+    "test:browser": "playwright test",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@litert-lm/core": "0.14.0",
+    "@litertjs/core": "2.5.2",
+    "hash-wasm": "^4.12.0",
+    "ky": "^1.9.0",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.0.0",
+    "@playwright/test": "1.61.1",
+    "@types/bun": "^1.2.0",
+    "@types/node": "^24.0.0",
+    "tsdown": "^0.15.0",
+    "typescript": "^5.8.0",
+    "vite": "^7.0.0"
+  }
+}

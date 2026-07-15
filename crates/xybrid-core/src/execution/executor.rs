@@ -631,6 +631,11 @@ impl TemplateExecutor {
                     "ModelGraph execution should not reach single model path".to_string(),
                 ));
             }
+            ExecutionTemplate::LiteRtLm { .. } => {
+                return Err(AdapterError::RuntimeError(
+                    "LiteRtLm models run in the browser SDK (@xybrid/web); no native runtime is available".to_string(),
+                ));
+            }
             #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
             ExecutionTemplate::Gguf {
                 model_file,
