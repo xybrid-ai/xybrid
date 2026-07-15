@@ -51,7 +51,8 @@ use super::llm_telemetry::{
 };
 #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
 use super::tool_continuation::{
-    reject_tool_continuation_input, run_tool_continuation, text_messages_from_multimodal,
+    reject_nested_tool_continuation_parts, reject_tool_continuation_input, run_tool_continuation,
+    text_messages_from_multimodal,
 };
 
 fn mark_execution_terminal(guard: &ExecutionGuard, error: &AdapterError) {
@@ -1701,6 +1702,12 @@ impl TemplateExecutor {
                 config,
             );
         }
+
+        // Outer continuations are handled above; nested ones (inside a
+        // MultiPart part) would be silently discarded by the message
+        // conversion below, so they must be rejected — keeping this batch
+        // path symmetric with the streaming variant's recursive guard.
+        reject_nested_tool_continuation_parts(input, "vision-language")?;
 
         let messages = vec![MultimodalChatMessage::from_envelope(input)?];
         self.execute_llm_multimodal_messages(
@@ -3598,12 +3605,39 @@ mod tests {
             Envelope::TOOL_RESPONSES_METADATA_KEY.to_string(),
             "[]".to_string(),
         );
-        let input = Envelope::new(EnvelopeKind::MultiPart(vec![tool_part]));
+        let input = Envelope::new(EnvelopeKind::MultiPart(vec![tool_part.clone()]));
 
         let mut executor = TemplateExecutor::with_base_path("/models");
         let err = executor
             .execute(&metadata, &input, None)
             .expect_err("nested tool-continuation MultiPart must be rejected");
+        assert!(
+            err.to_string().contains("tool-result continuation"),
+            "unexpected error: {err}"
+        );
+
+        // Image-bearing MultiPart takes the batch vision path, which handles
+        // OUTER continuations itself — nested ones must still be rejected
+        // there too (symmetric with the streaming guard), not silently
+        // flattened away by the multimodal conversion.
+        let image_bytes = {
+            let image = image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(
+                1,
+                1,
+                image::Rgb([1, 2, 3]),
+            ));
+            let mut encoded = std::io::Cursor::new(Vec::new());
+            image
+                .write_to(&mut encoded, image::ImageFormat::Png)
+                .expect("test image encodes");
+            encoded.into_inner()
+        };
+        let image_part = Envelope::image(image_bytes, "png").unwrap();
+        let vision_input = Envelope::new(EnvelopeKind::MultiPart(vec![image_part, tool_part]));
+
+        let err = executor
+            .execute(&metadata, &vision_input, None)
+            .expect_err("nested tool-continuation in image-bearing MultiPart must be rejected");
         assert!(
             err.to_string().contains("tool-result continuation"),
             "unexpected error: {err}"

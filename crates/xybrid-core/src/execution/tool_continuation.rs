@@ -140,6 +140,28 @@ pub(crate) fn reject_tool_continuation_input(
     Ok(())
 }
 
+/// Like [`reject_tool_continuation_input`], but ignores the outer envelope's
+/// own metadata. For paths that intercept outer continuations themselves
+/// (the batch vision-language path routes them to
+/// `execute_vlm_tool_continuation`) yet must still refuse continuation
+/// metadata buried inside `MultiPart` parts — the multimodal conversion
+/// discards part metadata, so a nested continuation would silently lose its
+/// tool results.
+pub(crate) fn reject_nested_tool_continuation_parts(
+    input: &Envelope,
+    path: &str,
+) -> Result<(), AdapterError> {
+    if let crate::ir::EnvelopeKind::MultiPart(parts) = &input.kind {
+        if parts.iter().any(carries_tool_continuation) {
+            return Err(AdapterError::InvalidInput(format!(
+                "tool-result continuation envelopes are not supported on the {path} path; \
+                 run the continuation turn through the non-streaming text path"
+            )));
+        }
+    }
+    Ok(())
+}
+
 /// Continuation metadata can ride the envelope itself or any nested
 /// `MultiPart` part; flattening a nested part would silently drop its
 /// tool results, so the guard must see through the whole tree.
