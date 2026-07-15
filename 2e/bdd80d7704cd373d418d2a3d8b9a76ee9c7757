@@ -1,0 +1,161 @@
+bindings/web/tsconfig.json
+  s_d63f9b1d7e1016::t_dd72ca4bfcd378 1-25
+bindings/web/src/errors.ts
+  s_d63f9b1d7e1016::t_dd72ca4bfcd378 1-130
+tools/scripts/version-sync.sh
+  s_d63f9b1d7e1016::t_dd72ca4bfcd378 37,89-92,178-190,200,240,264
+.github/workflows/release.yml
+  s_d63f9b1d7e1016::t_dd72ca4bfcd378 43-44
+bindings/web/browser-test/llm.spec.ts
+  s_d63f9b1d7e1016::t_dd72ca4bfcd378 1-17
+crates/xybrid-sdk/src/metadata_gen.rs
+  s_d63f9b1d7e1016::t_dd72ca4bfcd378 60,333-334,375-376,952-1008,1947-1997
+  s_d63f9b1d7e1016::t_97a2436023a01d 1998
+.agents/skills/xybrid-init/SKILL.md
+  s_d63f9b1d7e1016::t_dd72ca4bfcd378 1-5
+docs/content/docs/(integration)/sdks/web.zh.mdx
+  s_d63f9b1d7e1016::t_dd72ca4bfcd378 1-180
+docs/content/docs/introduction.zh.mdx
+  s_d63f9b1d7e1016::t_dd72ca4bfcd378 27
+bindings/web/example/index.html
+  s_d63f9b1d7e1016::t_dd72ca4bfcd378 1-124
+bindings/web/tsdown.config.ts
+  s_d63f9b1d7e1016::t_dd72ca4bfcd378 1-9
+crates/xybrid-core/src/execution/template/metadata.rs
+  s_d63f9b1d7e1016::t_dd72ca4bfcd378 61-69,644,709,775,803-846
+  s_d63f9b1d7e1016::t_1432e74e472889 847
+.github/workflows/build-unity.yml
+  s_d63f9b1d7e1016::t_dd72ca4bfcd378 30
+bindings/web/README.md
+  s_d63f9b1d7e1016::t_dd72ca4bfcd378 1-86
+bindings/web/src/internal/verified-download.ts
+  s_d63f9b1d7e1016::t_dd72ca4bfcd378 1-74
+bindings/web/src/internal/litert-lm-runtime.ts
+  s_d63f9b1d7e1016::t_dd72ca4bfcd378 1-164
+.github/workflows/release-dryrun.yml
+  s_d63f9b1d7e1016::t_dd72ca4bfcd378 86-87
+bindings/web/src/internal/loading.ts
+  s_d63f9b1d7e1016::t_dd72ca4bfcd378 1-283
+bindings/web/test/llm.test.ts
+  s_d63f9b1d7e1016::t_dd72ca4bfcd378 1-428
+docs/content/docs/(integration)/sdks/meta.json
+  s_d63f9b1d7e1016::t_dd72ca4bfcd378 3
+bindings/web/src/internal/huggingface.ts
+  s_d63f9b1d7e1016::t_dd72ca4bfcd378 1-302
+bindings/web/package.json
+  s_d63f9b1d7e1016::t_dd72ca4bfcd378 1-46
+bindings/web/test/metadata.test.ts
+  s_d63f9b1d7e1016::t_dd72ca4bfcd378 1-213
+bindings/web/example/src/tensor.ts
+  s_d63f9b1d7e1016::t_dd72ca4bfcd378 1-263
+.agents/skills/test-model/SKILL.md
+  s_d63f9b1d7e1016::t_dd72ca4bfcd378 1-5
+bindings/web/test/helpers.ts
+  s_d63f9b1d7e1016::t_dd72ca4bfcd378 1-224
+docs/content/docs/introduction.mdx
+  s_d63f9b1d7e1016::t_dd72ca4bfcd378 27
+bindings/web/src/internal/input.ts
+  s_d63f9b1d7e1016::t_dd72ca4bfcd378 1-136
+docs/sdk/model_metadata.schema.json
+  s_d63f9b1d7e1016::t_dd72ca4bfcd378 84-94,361-390,443-454,466-665,1085-1121,1308-1409,1468-1529,1555-1586,1735-1805,1864-1898
+bindings/web/example/src/main.ts
+  s_d63f9b1d7e1016::t_dd72ca4bfcd378 1-260
+bindings/web/browser-test/inference.spec.ts
+  s_d63f9b1d7e1016::t_dd72ca4bfcd378 1-15
+bindings/web/src/types.ts
+  s_d63f9b1d7e1016::t_dd72ca4bfcd378 1-70
+bindings/web/example/scripts/prepare-assets.ts
+  s_d63f9b1d7e1016::t_dd72ca4bfcd378 1-124
+crates/xybrid-sdk/src/model.rs
+  s_d63f9b1d7e1016::t_dd72ca4bfcd378 1620-1621,3508-3512
+  s_d63f9b1d7e1016::t_fd23ebd73a3408 3513
+examples/README.md
+  s_d63f9b1d7e1016::t_dd72ca4bfcd378 9,17-29
+  s_d63f9b1d7e1016::t_1fe39b198b99bb 30-32
+bindings/web/.gitignore
+  s_d63f9b1d7e1016::t_dd72ca4bfcd378 1-9
+bindings/web/test/fixtures/hf-tree-smollm2-litertlm.json
+  s_d63f9b1d7e1016::t_dd72ca4bfcd378 1-26
+docs/content/docs/(integration)/sdks/meta.zh.json
+  s_d63f9b1d7e1016::t_dd72ca4bfcd378 3
+.github/workflows/ci.yml
+  s_d63f9b1d7e1016::t_dd72ca4bfcd378 239-292,297
+bindings/web/example/src/style.css
+  s_d63f9b1d7e1016::t_dd72ca4bfcd378 1-397
+bindings/web/src/index.ts
+  s_d63f9b1d7e1016::t_dd72ca4bfcd378 1-36
+bindings/web/src/internal/url.ts
+  s_d63f9b1d7e1016::t_dd72ca4bfcd378 1-42
+bindings/web/biome.json
+  s_d63f9b1d7e1016::t_dd72ca4bfcd378 1-46
+README.md
+  s_d63f9b1d7e1016::t_dd72ca4bfcd378 95,107-110,118,122-123
+bindings/web/test/registry.test.ts
+  s_d63f9b1d7e1016::t_dd72ca4bfcd378 1-375
+bindings/web/test/fixtures/registry-resolve-gguf-leak.json
+  s_d63f9b1d7e1016::t_dd72ca4bfcd378 1-34
+bindings/web/src/internal/model-download.ts
+  s_d63f9b1d7e1016::t_dd72ca4bfcd378 1-44
+bindings/web/src/model.ts
+  s_d63f9b1d7e1016::t_dd72ca4bfcd378 1-342
+bindings/web/src/internal/initialization.ts
+  s_d63f9b1d7e1016::t_dd72ca4bfcd378 1-38
+bindings/web/example/public/llm/model_metadata.json
+  s_d63f9b1d7e1016::t_dd72ca4bfcd378 1-16
+bindings/web/example/DESIGN.md
+  s_d63f9b1d7e1016::t_dd72ca4bfcd378 1-112
+bindings/web/src/internal/runtime.ts
+  s_d63f9b1d7e1016::t_dd72ca4bfcd378 1-56
+bindings/web/playwright.config.ts
+  s_d63f9b1d7e1016::t_dd72ca4bfcd378 1-19
+bindings/web/pnpm-workspace.yaml
+  s_d63f9b1d7e1016::t_dd72ca4bfcd378 1-2
+docs/content/docs/quickstart.zh.mdx
+  s_d63f9b1d7e1016::t_dd72ca4bfcd378 8,147-178
+bindings/web/test/model.test.ts
+  s_d63f9b1d7e1016::t_dd72ca4bfcd378 1-265
+crates/xybrid-core/src/execution/executor.rs
+  s_d63f9b1d7e1016::t_dd72ca4bfcd378 634-638
+bindings/web/example/tensor.html
+  s_d63f9b1d7e1016::t_dd72ca4bfcd378 1-136
+bindings/web/src/internal/litert-runtime.ts
+  s_d63f9b1d7e1016::t_dd72ca4bfcd378 1-161
+docs/content/docs/(integration)/sdks/web.mdx
+  s_d63f9b1d7e1016::t_dd72ca4bfcd378 1-180
+bindings/web/src/metadata.ts
+  s_d63f9b1d7e1016::t_dd72ca4bfcd378 1-155
+bindings/web/test/huggingface.test.ts
+  s_d63f9b1d7e1016::t_dd72ca4bfcd378 1-372
+bindings/web/src/internal/response.ts
+  s_d63f9b1d7e1016::t_dd72ca4bfcd378 1-86
+bindings/web/src/llm.ts
+  s_d63f9b1d7e1016::t_dd72ca4bfcd378 1-311
+bindings/web/example/vite.config.ts
+  s_d63f9b1d7e1016::t_dd72ca4bfcd378 1-16
+bindings/web/src/internal/registry.ts
+  s_d63f9b1d7e1016::t_dd72ca4bfcd378 1-263
+docs/content/docs/quickstart.mdx
+  s_d63f9b1d7e1016::t_dd72ca4bfcd378 8,146-177
+.github/workflows/release-prep.yml
+  s_d63f9b1d7e1016::t_dd72ca4bfcd378 104-105
+bindings/web/example/public/model_metadata.json
+  s_d63f9b1d7e1016::t_dd72ca4bfcd378 1-15
+bindings/web/pnpm-lock.yaml
+  s_d63f9b1d7e1016::t_2f06c0767dd70e 1-1462
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "2ebdd80d7704cd373d418d2a3d8b9a76ee9c7757",
+  "prompts": {},
+  "sessions": {
+    "s_d63f9b1d7e1016": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b31456c6-15e5-4598-bcae-7f120287ae3a",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
