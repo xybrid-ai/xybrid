@@ -125,4 +125,4 @@ pub mod listener;
 // Execution strategies (modular execution paths, internal)
 pub(crate) mod strategies;
 #[allow(unused_imports)]
-pub(crate) use strategies::{ExecutionContext, ExecutionStrategy, StrategyResolver};
+pub(crate) use strategies::{ExecutionContext, ExecutionStrategy};
