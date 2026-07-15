@@ -12,6 +12,7 @@ PLATFORMS = [
     "@rules_rs//rs/platforms/config:aarch64-apple-darwin",
     "@rules_rs//rs/platforms/config:aarch64-linux-android",
     "@rules_rs//rs/platforms/config:x86_64-unknown-linux-gnu",
+    "@rules_rs//rs/platforms/config:x86_64-pc-windows-gnu",
 ]
 
 # Android's `platform-android` preset expansion, set directly (Bazel doesn't
@@ -38,6 +39,7 @@ filtered_sdk_deps["deps"] = [d for d in original_sdk_deps.get("deps", []) if d !
 _HF_PLATFORMS = [
     "@rules_rs//rs/platforms/config:x86_64-unknown-linux-gnu",
     "@rules_rs//rs/platforms/config:aarch64-apple-darwin",  # Flip 2
+    "@rules_rs//rs/platforms/config:x86_64-pc-windows-gnu",  # Windows .exe parity
 ]
 
 _ORIG_DBP = original_sdk_deps.get("deps_by_platform", {})
@@ -67,6 +69,13 @@ rust_library(
         # (Bazel doesn't expand presets across crates — name them).
         "@rules_rs//rs/platforms/config:aarch64-apple-darwin": [
             "platform-macos",
+            "llm-llamacpp-vision",
+            "huggingface",
+        ],
+        # Windows .exe parity: cargo's windows leg builds platform-desktop,
+        # same expansion as the linux arm above.
+        "@rules_rs//rs/platforms/config:x86_64-pc-windows-gnu": [
+            "platform-desktop",
             "llm-llamacpp-vision",
             "huggingface",
         ],

@@ -208,6 +208,18 @@ toolchains.toolchain(
         "aarch64-apple-ios": ["-Ctarget-feature=+fp16"],
         "aarch64-apple-ios-sim": ["-Ctarget-feature=+fp16"],
         "aarch64-linux-android": ["-Ctarget-feature=+fp16"],
+        # windows-targets 0.52-family defaults to a BUNDLED import lib
+        # (libwindows.0.52.0.a inside the windows_x86_64_gnu crate — same
+        # unstageable build-script-link-search shape as winapi's). Its own
+        # windows_raw_dylib cfg switches the link! macro to raw-dylib —
+        # the path the 0.61 family already uses, served by the dlltool
+        # staging fix (hermetic_llvm.patch + rules_rs.patch). check-cfg
+        # declares the custom cfg so crates that don't know it stay free
+        # of unexpected_cfgs warnings.
+        "x86_64-pc-windows-gnu": [
+            "--cfg=windows_raw_dylib",
+            "--check-cfg=cfg(windows_raw_dylib)",
+        ],
     },
     version = "1.92.0",
 )
@@ -277,19 +289,41 @@ crate.annotation(
     ],
 )
 
+# winapi 0.3 on windows-gnu links its own RENAMED copies of the system import
+# libs (-lwinapi_gdi32, ...) bundled in the winapi-x86_64-pc-windows-gnu
+# sidecar crate — a build-script link-search into crate SOURCE that Bazel
+# never stages into the final link. The crate's own escape hatch drops the
+# prefix so it links the standard names (-lgdi32, ...), which the hermetic
+# MinGW import libs already resolve (proven: the plain system -l's resolve in
+# the same link). This is winapi's documented cross-compilation knob.
+crate.annotation(
+    crate = "winapi",
+    build_script_env = {
+        "WINAPI_NO_BUNDLED_LIBRARIES": "1",
+    },
+)
+
+# ntapi mimics winapi's bundled-import-lib convention (-lwinapi_ntdll from its
+# own sidecar copy) and honors the same escape hatch → plain -lntdll.
+crate.annotation(
+    crate = "ntapi",
+    build_script_env = {
+        "WINAPI_NO_BUNDLED_LIBRARIES": "1",
+    },
+)
+
 crate.annotation(
     crate = "hmac-sha256",
     crate_features = ["default"],
 )
 
-# NOTE: Windows Rust CLI (raw-dylib -> dlltool) is a deliberate follow-up, not
-# wired here. The windows/windows-sys 0.61 family + ort-sys/getrandom/... emit
-# #[link(kind="raw-dylib")], so rustc needs `dlltool` at compile time. The tool
-# (hermetic-llvm's llvm-dlltool) is a symlink into the ~100MB multicall `llvm`
-# binary and can only be STAGED for the rustc compile by the toolchain machinery,
-# which is not reachable from crate.annotation / rules_rs (rules_rust is
-# extension-generated, so unpatchable; it doesn't consume llvm_tools for compile).
-# The C/C++ half (//:llama for windows-gnu) IS green. See
-# .context/bazel-windows-cli-progress.md for the full analysis + the proper fix
-# (patch hermetic-llvm's cc toolchain to ship dlltool).
+# NOTE: Windows Rust CLI (raw-dylib -> dlltool) is RESOLVED at the toolchain
+# layer, not here. The windows/windows-sys families emit #[link(kind =
+# "raw-dylib")] on windows-gnu, so rustc shells out to `dlltool` at compile
+# time — a tool that is a symlink into the ~100MB multicall `llvm` binary and
+# can only be staged by the toolchain machinery. hermetic_llvm.patch ships
+# dlltool (+ the multicall binary) in the windows tool_map's linker_files and
+# exposes llvm_tool_execroot_path(); rules_rs.patch injects the matching
+# -Cdlltool=<exec-correct path> into every windows-gnu rust toolchain. See
+# .context/bazel-windows-cli-progress.md for the full history.
 use_repo(crate, "crates")

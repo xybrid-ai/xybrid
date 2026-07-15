@@ -61,6 +61,11 @@ rust_library(
         "@rules_rs//rs/platforms/config:x86_64-unknown-linux-gnu": [
             "llm-llamacpp-vision",
         ],
+        # Desktop-windows (the .exe chapter): cargo's windows leg also builds
+        # platform-desktop — same expansion as linux.
+        "@rules_rs//rs/platforms/config:x86_64-pc-windows-gnu": [
+            "llm-llamacpp-vision",
+        ],
         "//conditions:default": [],
     }),
     deps = all_crate_deps(normal = True),

@@ -59,7 +59,7 @@ env:
 #     precompile-binaries creates/uploads release assets)
 #   - contents + pull-requests: write -> open-release-pr
 #   - id-token + attestations: write  -> build-xcframework, build-cli-macos,
-#     build-android, build-cli, build-cli-linux (the jobs that call `attest-build-provenance`)
+#     build-android, build-cli-windows, build-cli-linux (the jobs that call `attest-build-provenance`)
 # Keeping these off the workflow level means the remaining jobs don't get
 # unnecessary OIDC-issuance, release-write, or attestation-write privileges.
 permissions: read-all
@@ -698,78 +698,87 @@ jobs:
           name: cli-linux-x86_64
           path: dist/*
 
-  build-cli:
-    name: Build CLI (${{ matrix.name }})
+  build-cli-windows:
+    # Flip 3 (Windows): the CLI .exe, cross-compiled from Linux on BuildBuddy's
+    # RBE — a MinGW/GNU-ABI binary (a different toolchain flavor than the old
+    # cargo/MSVC build). For a self-contained CLI that's behaviorally identical;
+    # the one place MSVC-vs-MinGW C++ ABI would matter (linking foreign C++
+    # against ours) is the FFI SDK, a separate artifact with a C interface both
+    # flavors speak. Same parity-first ritual as the linux/macOS cutovers:
+    # payload gate before anything ships; artifact name (install.ps1 fetches
+    # `xybrid-<tag>-windows-x86_64.exe`), attestation, and downstream unchanged.
+    # A Linux runner can't execute a PE, so the "it runs" half of the gate lives
+    # in the windows-latest `smoke-cli-windows` job below, which
+    # create-draft-release also depends on — a non-running .exe blocks the draft.
+    name: Build CLI (windows-x86_64, Bazel)
     needs: [check-release-branch]
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
     permissions:
       contents: read       # actions/checkout
       id-token: write      # Sigstore OIDC for attest-build-provenance
       attestations: write  # GitHub attestations API
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          # linux-x86_64 moved to the Bazel-built `build-cli-linux` job below
-          # (Flip 1 of the Bazel rollout — mirrors the Android AAR cutover).
-          - name: windows-x86_64
-            os: windows-latest
-            target: x86_64-pc-windows-msvc
-            artifact: xybrid.exe
-            features: platform-desktop
-
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           submodules: true
 
-      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
-        with:
-          toolchain: stable
-          targets: ${{ matrix.target }}
-
-      - name: Setup sccache
-        uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
-
-      - name: Configure sccache environment
-        shell: bash
+      - name: Free disk space
         run: |
-          echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
-          echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
-          echo "CMAKE_C_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
-          echo "CMAKE_CXX_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/.ghcup \
+            /opt/hostedtoolcache/CodeQL
+          sudo docker image prune --all --force || true
 
-      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-        with:
-          prefix-key: "v1-rust"
-          shared-key: "cli-${{ matrix.name }}"
-          cache-all-crates: "true"
-          save-if: "true"
+      - name: Configure BuildBuddy remote config
+        env:
+          BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
+        run: |
+          mkdir -p .context
+          cat > .context/buildbuddy.bazelrc <<EOF
+          common:remote --bes_results_url=https://app.buildbuddy.io/invocation/
+          common:remote --bes_backend=grpcs://remote.buildbuddy.io
+          common:remote --remote_header=x-buildbuddy-api-key=${BUILDBUDDY_API_KEY}
+          common:remote --remote_cache=grpcs://remote.buildbuddy.io
+          common:remote --remote_executor=grpcs://remote.buildbuddy.io
+          common:remote --remote_cache_compression
+          common:remote --remote_download_toplevel
+          common:remote --remote_timeout=600
+          common:remote --jobs=200
+          common:remote --extra_execution_platforms=@llvm//:rbe_linux_x86_64
+          EOF
 
-      - name: Build CLI
-        run: cargo build --release -p xybrid-cli --target ${{ matrix.target }} --features ${{ matrix.features }}
+      - name: Build CLI (Bazel on RBE, shipping mode)
+        run: |
+          bazelisk build --config=remote --config=windows -c opt //crates/xybrid-cli:xybrid
 
-      - name: Strip binary (Unix)
-        if: runner.os != 'Windows'
-        run: strip target/${{ matrix.target }}/release/${{ matrix.artifact }}
+      # Byte half of the payload gate (a Linux runner can't execute a PE): the
+      # artifact must be a real PE32+ x86-64 binary carrying vision (mtmd) +
+      # huggingface — parity with cargo's platform-desktop windows leg. The
+      # run-it half is smoke-cli-windows below.
+      - name: Verify CLI payload (PE32+ + features)
+        run: |
+          EXE=$(bazelisk cquery --config=remote --config=windows -c opt --output=files //crates/xybrid-cli:xybrid | head -1)
+          echo "resolved CLI: $EXE"
+          file "$EXE"
+          file "$EXE" | grep -q 'PE32+.*x86-64' || { echo "NOT a PE32+ x86-64 binary"; exit 1; }
+          grep -aq 'mtmd_' "$EXE" || { echo "MISSING vision (mtmd) markers"; exit 1; }
+          grep -aq 'huggingface\.co' "$EXE" || { echo "MISSING huggingface support"; exit 1; }
 
+      # No strip: today's shipped windows binary is unstripped (cargo's default
+      # release profile; the old cargo job skipped the Unix strip step on
+      # Windows), so the MinGW artifact isn't stripped either — MSVC→MinGW is
+      # the only intended change to the shipped bytes' form.
       - name: Prepare artifact
         id: prepare
-        shell: bash
         env:
           TAG: ${{ needs.check-release-branch.outputs.tag }}
         run: |
           mkdir -p dist
-          if [[ "${{ runner.os }}" == "Windows" ]]; then
-            ARTIFACT="dist/xybrid-${TAG}-${{ matrix.name }}.exe"
-          else
-            ARTIFACT="dist/xybrid-${TAG}-${{ matrix.name }}"
-          fi
-          cp target/${{ matrix.target }}/release/${{ matrix.artifact }} "$ARTIFACT"
-          [ "${{ runner.os }}" != "Windows" ] && chmod +x "$ARTIFACT" || true
+          ARTIFACT="dist/xybrid-${TAG}-windows-x86_64.exe"
+          EXE=$(bazelisk cquery --config=remote --config=windows -c opt --output=files //crates/xybrid-cli:xybrid | head -1)
+          cp "$EXE" "$ARTIFACT"
           echo "artifact_path=$ARTIFACT" >> "$GITHUB_OUTPUT"
 
-      - name: Attest CLI provenance (${{ matrix.name }})
+      - name: Attest CLI provenance (windows-x86_64)
         uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
         with:
           subject-path: ${{ steps.prepare.outputs.artifact_path }}
@@ -777,8 +786,35 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: cli-${{ matrix.name }}
+          name: cli-windows-x86_64
           path: dist/*
+
+  # Run-it half of the Windows payload gate: a Linux runner built the .exe but
+  # can't execute it, so a real Windows runner downloads the EXACT uploaded
+  # artifact and runs it. create-draft-release depends on this job, so a .exe
+  # that won't start blocks the release. Compiles nothing (the build already
+  # happened on the RBE Linux workers).
+  smoke-cli-windows:
+    name: Smoke CLI (windows-x86_64)
+    needs: [build-cli-windows]
+    runs-on: windows-latest
+    steps:
+      - name: Download windows CLI artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: cli-windows-x86_64
+          path: dist
+
+      - name: Run the .exe + verify features
+        shell: bash
+        run: |
+          EXE=$(printf '%s\n' dist/xybrid-*-windows-x86_64.exe | head -1)
+          echo "resolved artifact: $EXE"
+          "$EXE" --help
+          "$EXE" --version || true
+          grep -aq 'mtmd_' "$EXE" || { echo "MISSING vision (mtmd) markers"; exit 1; }
+          grep -aq 'huggingface\.co' "$EXE" || { echo "MISSING huggingface support"; exit 1; }
+          echo "windows CLI smoke: OK"
 
   # =========================================================================
   # Patch Package.swift checksum and commit it back to the release branch.
@@ -842,7 +878,8 @@ jobs:
       - build-cli-macos
       - precompile-flutter-darwin
       - build-android
-      - build-cli
+      - build-cli-windows
+      - smoke-cli-windows
       - build-cli-linux
       - precompile-flutter-linux
       - precompile-flutter-windows
