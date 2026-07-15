@@ -1949,12 +1949,7 @@ impl XybridModel {
         self.handle
             .read()
             .ok()
-            .map(|h| {
-                matches!(
-                    h.metadata.execution_template,
-                    ExecutionTemplate::Gguf { .. }
-                )
-            })
+            .map(|h| ModelLoader::is_llm_template(&h.metadata))
             .unwrap_or(false)
     }
 
@@ -3256,10 +3251,7 @@ impl XybridModel {
                 }
 
                 let metadata = guard.metadata.clone();
-                let is_llm = matches!(
-                    metadata.execution_template,
-                    xybrid_core::execution::ExecutionTemplate::Gguf { .. }
-                );
+                let is_llm = ModelLoader::is_llm_template(&metadata);
 
                 // Clone tx for the streaming callback (so we can use tx in the else branch)
                 let tx_for_callback = tx.clone();
@@ -3367,17 +3359,10 @@ impl XybridModel {
     pub fn supports_token_streaming(&self) -> bool {
         #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
         {
-            use xybrid_core::execution::ExecutionTemplate;
-
             self.handle
                 .read()
                 .ok()
-                .map(|h| {
-                    matches!(
-                        h.metadata.execution_template,
-                        ExecutionTemplate::Gguf { .. }
-                    )
-                })
+                .map(|h| ModelLoader::is_llm_template(&h.metadata))
                 .unwrap_or(false)
         }
         #[cfg(not(any(feature = "llm-mistral", feature = "llm-llamacpp")))]

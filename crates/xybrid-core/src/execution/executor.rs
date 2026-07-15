@@ -327,6 +327,16 @@ impl TemplateExecutor {
         runtimes
     }
 
+    fn requires_multimodal_generation(input: &Envelope) -> bool {
+        match &input.kind {
+            EnvelopeKind::Image { .. } => true,
+            EnvelopeKind::MultiPart(parts) => {
+                parts.iter().any(Self::requires_multimodal_generation)
+            }
+            EnvelopeKind::Audio(_) | EnvelopeKind::Text(_) | EnvelopeKind::Embedding(_) => false,
+        }
+    }
+
     /// Register an additional runtime.
     ///
     /// Use this to add custom runtimes after construction.
@@ -598,15 +608,27 @@ impl TemplateExecutor {
         } = &metadata.execution_template
         {
             let backend_hint = metadata.metadata.get("backend").and_then(|v| v.as_str());
-            return self.execute_vision_language(
-                metadata,
-                model_file,
-                chat_template.as_deref(),
-                *context_length,
-                input,
-                backend_hint,
-                config,
-            );
+            return if Self::requires_multimodal_generation(input) {
+                self.execute_vision_language(
+                    metadata,
+                    model_file,
+                    chat_template.as_deref(),
+                    *context_length,
+                    input,
+                    backend_hint,
+                    config,
+                )
+            } else {
+                self.execute_llm(
+                    metadata,
+                    model_file,
+                    chat_template.as_deref(),
+                    *context_length,
+                    input,
+                    backend_hint,
+                    config,
+                )
+            };
         }
 
         #[cfg(not(any(feature = "llm-mistral", feature = "llm-llamacpp")))]
@@ -913,15 +935,28 @@ impl TemplateExecutor {
             let messages = Self::multimodal_messages_with_context(input, context)?;
             let backend_hint = metadata.metadata.get("backend").and_then(|v| v.as_str());
 
-            let mut result = self.execute_llm_multimodal_messages(
-                metadata,
-                model_file,
-                chat_template.as_deref(),
-                *context_length,
-                &messages,
-                backend_hint,
-                config,
-            )?;
+            let mut result = if messages.iter().any(|message| message.image_count() > 0) {
+                self.execute_llm_multimodal_messages(
+                    metadata,
+                    model_file,
+                    chat_template.as_deref(),
+                    *context_length,
+                    &messages,
+                    backend_hint,
+                    config,
+                )?
+            } else {
+                let chat_messages = text_messages_from_multimodal(&messages)?;
+                self.execute_llm_with_messages(
+                    metadata,
+                    model_file,
+                    chat_template.as_deref(),
+                    *context_length,
+                    &chat_messages,
+                    backend_hint,
+                    config,
+                )?
+            };
 
             result = result.with_role(MessageRole::Assistant);
             return Ok(result);
@@ -931,6 +966,7 @@ impl TemplateExecutor {
         #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
         if let ExecutionTemplate::Gguf {
             model_file,
+            chat_template,
             context_length,
             ..
         } = &metadata.execution_template
@@ -979,6 +1015,7 @@ impl TemplateExecutor {
             let mut result = self.execute_llm_with_messages(
                 metadata,
                 model_file,
+                chat_template.as_deref(),
                 *context_length,
                 &chat_messages,
                 backend_hint,
@@ -1078,16 +1115,29 @@ impl TemplateExecutor {
             {
                 let backend_hint = metadata.metadata.get("backend").and_then(|v| v.as_str());
 
-                return self.execute_vision_language_streaming(
-                    metadata,
-                    model_file,
-                    chat_template.as_deref(),
-                    *context_length,
-                    input,
-                    backend_hint,
-                    on_token,
-                    config,
-                );
+                return if Self::requires_multimodal_generation(input) {
+                    self.execute_vision_language_streaming(
+                        metadata,
+                        model_file,
+                        chat_template.as_deref(),
+                        *context_length,
+                        input,
+                        backend_hint,
+                        on_token,
+                        config,
+                    )
+                } else {
+                    self.execute_llm_streaming(
+                        metadata,
+                        model_file,
+                        chat_template.as_deref(),
+                        *context_length,
+                        input,
+                        backend_hint,
+                        on_token,
+                        config,
+                    )
+                };
             }
 
             // Only GGUF (LLM) templates support streaming
@@ -1246,16 +1296,30 @@ impl TemplateExecutor {
                 let messages = Self::multimodal_messages_with_context(input, context)?;
                 let backend_hint = metadata.metadata.get("backend").and_then(|v| v.as_str());
 
-                let result = self.execute_llm_multimodal_streaming_messages(
-                    metadata,
-                    model_file,
-                    chat_template.as_deref(),
-                    *context_length,
-                    &messages,
-                    backend_hint,
-                    on_token,
-                    config,
-                )?;
+                let result = if messages.iter().any(|message| message.image_count() > 0) {
+                    self.execute_llm_multimodal_streaming_messages(
+                        metadata,
+                        model_file,
+                        chat_template.as_deref(),
+                        *context_length,
+                        &messages,
+                        backend_hint,
+                        on_token,
+                        config,
+                    )?
+                } else {
+                    let chat_messages = text_messages_from_multimodal(&messages)?;
+                    self.execute_llm_streaming_with_messages(
+                        metadata,
+                        model_file,
+                        chat_template.as_deref(),
+                        *context_length,
+                        &chat_messages,
+                        backend_hint,
+                        on_token,
+                        config,
+                    )?
+                };
 
                 return Ok(result.with_role(MessageRole::Assistant));
             }
@@ -1263,6 +1327,7 @@ impl TemplateExecutor {
             // Check if this is a GGUF (LLM) model
             if let ExecutionTemplate::Gguf {
                 model_file,
+                chat_template,
                 context_length,
                 ..
             } = &metadata.execution_template
@@ -1310,6 +1375,7 @@ impl TemplateExecutor {
                 let result = self.execute_llm_streaming_with_messages(
                     metadata,
                     model_file,
+                    chat_template.as_deref(),
                     *context_length,
                     &chat_messages,
                     backend_hint,
@@ -1472,6 +1538,7 @@ impl TemplateExecutor {
         &mut self,
         metadata: &ModelMetadata,
         model_file: &str,
+        chat_template: Option<&str>,
         context_length: usize,
         messages: &[ChatMessage],
         backend_hint: Option<&str>,
@@ -1493,9 +1560,10 @@ impl TemplateExecutor {
         // Build full model path
         let model_path = Path::new(&self.base_path).join(model_file);
         let model_path_str = model_path.to_string_lossy().to_string();
+        let chat_template_path = resolve_optional_model_path(&self.base_path, chat_template);
         let cache_key = LlmAdapterCacheKey::new(
             model_path_str.clone(),
-            None,
+            chat_template_path.clone(),
             context_length,
             backend_hint,
             None,
@@ -1509,9 +1577,13 @@ impl TemplateExecutor {
 
         // Load model if needed
         if need_load {
-            let config = LlmConfig::new(model_path_str.clone())
+            let mut config = LlmConfig::new(model_path_str.clone())
                 .with_context_length(context_length)
                 .with_reasoning(metadata_reasoning(metadata));
+
+            if let Some(template_path) = chat_template_path {
+                config = config.with_chat_template(template_path);
+            }
 
             let mut adapter = LlmRuntimeAdapter::with_backend_hint(backend_hint)?;
             adapter.load_model_with_config(&config)?;
@@ -1937,6 +2009,7 @@ impl TemplateExecutor {
         &mut self,
         metadata: &ModelMetadata,
         model_file: &str,
+        chat_template: Option<&str>,
         context_length: usize,
         messages: &[ChatMessage],
         backend_hint: Option<&str>,
@@ -1961,9 +2034,10 @@ impl TemplateExecutor {
         // Build full model path
         let model_path = Path::new(&self.base_path).join(model_file);
         let model_path_str = model_path.to_string_lossy().to_string();
+        let chat_template_path = resolve_optional_model_path(&self.base_path, chat_template);
         let cache_key = LlmAdapterCacheKey::new(
             model_path_str.clone(),
-            None,
+            chat_template_path.clone(),
             context_length,
             backend_hint,
             None,
@@ -1977,9 +2051,13 @@ impl TemplateExecutor {
 
         // Load model if needed
         if need_load {
-            let config = LlmConfig::new(model_path_str.clone())
+            let mut config = LlmConfig::new(model_path_str.clone())
                 .with_context_length(context_length)
                 .with_reasoning(metadata_reasoning(metadata));
+
+            if let Some(template_path) = chat_template_path {
+                config = config.with_chat_template(template_path);
+            }
 
             let mut adapter = LlmRuntimeAdapter::with_backend_hint(backend_hint)?;
             adapter.load_model_with_config(&config)?;
@@ -3916,6 +3994,18 @@ mod tests {
         assert!(
             image_preprocess_ms.is_some_and(|value| value > 0),
             "vision encoder span must carry positive image_preprocess_ms, got {vision_encoder_metadata:?}"
+        );
+    }
+
+    #[test]
+    fn vision_language_text_input_does_not_require_multimodal_generation() {
+        let input = Envelope::new(EnvelopeKind::Text(
+            "Reply with exactly one word.".to_string(),
+        ));
+
+        assert!(
+            !TemplateExecutor::requires_multimodal_generation(&input),
+            "text-only VLM input must use text generation without loading the vision projector"
         );
     }
 
