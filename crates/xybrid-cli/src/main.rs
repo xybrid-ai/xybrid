@@ -214,6 +214,12 @@ enum Commands {
         #[arg(long, default_value = "false")]
         show_reasoning: bool,
 
+        /// Token budget for LLM generation, shared by thinking and answer
+        /// (default 2048; auto-raised for known thinking models). For multi-stage
+        /// pipelines this applies to the first stage.
+        #[arg(long, value_name = "N")]
+        max_tokens: Option<usize>,
+
         /// Export trace to JSON file (Chrome trace format)
         #[arg(long, value_name = "FILE")]
         trace_export: Option<PathBuf>,
@@ -253,6 +259,11 @@ enum Commands {
         /// which is stripped out of the answer text by default
         #[arg(long, default_value = "false")]
         show_reasoning: bool,
+
+        /// Token budget for LLM generation, shared by thinking and answer
+        /// (default 2048; auto-raised for known thinking models). Applies to every REPL turn.
+        #[arg(long, value_name = "N")]
+        max_tokens: Option<usize>,
 
         /// System prompt to set the assistant's behavior
         #[arg(long, value_name = "PROMPT")]
@@ -517,6 +528,7 @@ fn run_command(cli: Cli) -> Result<()> {
             target,
             trace,
             show_reasoning,
+            max_tokens,
             trace_export,
         } => {
             if trace {
@@ -534,6 +546,7 @@ fn run_command(cli: Cli) -> Result<()> {
                     dry_run,
                     trace,
                     show_reasoning,
+                    max_tokens,
                     trace_export.as_ref(),
                 );
             }
@@ -550,6 +563,7 @@ fn run_command(cli: Cli) -> Result<()> {
                     dry_run,
                     trace,
                     show_reasoning,
+                    max_tokens,
                     trace_export.as_ref(),
                 );
             }
@@ -565,6 +579,7 @@ fn run_command(cli: Cli) -> Result<()> {
                     dry_run,
                     trace,
                     show_reasoning,
+                    max_tokens,
                     trace_export.as_ref(),
                 );
             }
@@ -580,6 +595,7 @@ fn run_command(cli: Cli) -> Result<()> {
                     dry_run,
                     trace,
                     show_reasoning,
+                    max_tokens,
                     trace_export.as_ref(),
                 );
             }
@@ -595,6 +611,7 @@ fn run_command(cli: Cli) -> Result<()> {
                     dry_run,
                     trace,
                     show_reasoning,
+                    max_tokens,
                     trace_export.as_ref(),
                 );
             }
@@ -612,6 +629,7 @@ fn run_command(cli: Cli) -> Result<()> {
                 target.as_deref(),
                 trace,
                 show_reasoning,
+                max_tokens,
                 trace_export.as_ref(),
             )
         }
@@ -624,6 +642,7 @@ fn run_command(cli: Cli) -> Result<()> {
             target,
             stream,
             show_reasoning,
+            max_tokens,
             system,
             no_tools,
             tools_file,
@@ -636,6 +655,7 @@ fn run_command(cli: Cli) -> Result<()> {
             target,
             stream,
             show_reasoning,
+            max_tokens,
             system,
             no_tools,
             tools_file,
@@ -750,5 +770,36 @@ mod tests {
             panic!("expected repl command");
         };
         assert!(show_reasoning);
+    }
+
+    #[test]
+    fn run_and_repl_accept_max_tokens_flag() {
+        let run = Cli::try_parse_from([
+            "xybrid",
+            "run",
+            "--max-tokens",
+            "64",
+            "--model-file",
+            "model.gguf",
+        ])
+        .unwrap_or_else(|err| panic!("run should accept --max-tokens: {err}"));
+        let Commands::Run { max_tokens, .. } = run.command else {
+            panic!("expected run command");
+        };
+        assert_eq!(max_tokens, Some(64));
+
+        let repl = Cli::try_parse_from([
+            "xybrid",
+            "repl",
+            "--max-tokens",
+            "64",
+            "--model-file",
+            "model.gguf",
+        ])
+        .unwrap_or_else(|err| panic!("repl should accept --max-tokens: {err}"));
+        let Commands::Repl { max_tokens, .. } = repl.command else {
+            panic!("expected repl command");
+        };
+        assert_eq!(max_tokens, Some(64));
     }
 }
