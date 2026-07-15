@@ -532,11 +532,13 @@ impl LlamaCppBackend {
         }
 
         let prompt_token_count = tokens.len();
+        let max_tokens = clamp_generation_budget(config.max_tokens, n_ctx, prompt_token_count);
         let (tail, n_past) =
-            self.prepare_kv_cache_and_get_tail(model, context, &tokens, config.max_tokens)?;
+            self.prepare_kv_cache_and_get_tail(model, context, &tokens, max_tokens)?;
 
         Ok(PreparedGeneration {
             prompt_token_count,
+            max_tokens,
             tail,
             n_past,
         })
@@ -563,7 +565,7 @@ impl LlamaCppBackend {
             context,
             model,
             &prepared.tail,
-            config.max_tokens,
+            prepared.max_tokens,
             config.temperature,
             config.top_p,
             config.min_p,
@@ -581,6 +583,7 @@ impl LlamaCppBackend {
 
 struct PreparedGeneration {
     prompt_token_count: usize,
+    max_tokens: usize,
     tail: Vec<i32>,
     n_past: usize,
 }
@@ -629,6 +632,15 @@ fn output_from_fields(
         image_preprocess_ms: None,
         reasoning_content,
     }
+}
+
+/// Clamp generation to the positions left after the prompt or multimodal
+/// prefix — the C decode loop hard-errors (-4) once prompt + generation
+/// exceeds the context window, losing the partial result. A zero result
+/// means the consumed prompt or prefix fills the context window; callers
+/// surface their input-too-long error for that.
+fn clamp_generation_budget(requested: usize, n_ctx: usize, consumed: usize) -> usize {
+    requested.min(n_ctx.saturating_sub(consumed))
 }
 
 /// Assemble the final-cleanup stop patterns for a chat turn: the caller's
@@ -1206,13 +1218,21 @@ impl LlmBackend for LlamaCppBackend {
                             new_n_past
                         )));
                     }
+                    let consumed = new_n_past as usize;
+                    let max_tokens =
+                        clamp_generation_budget(config.max_tokens, context.n_ctx(), consumed);
+                    if max_tokens == 0 {
+                        return Err(AdapterError::InvalidInput(
+                            PromptKind::Chat.input_too_long_message(consumed, context.n_ctx()),
+                        ));
+                    }
 
                     let mut tel = StreamingTelemetry::new(summary.helper_total_tokens);
                     let (output_tokens, stopped_by_callback) =
                         xybrid_llama::generate_from_current_logits_streaming(
                             context,
                             model,
-                            config.max_tokens,
+                            max_tokens,
                             config.temperature,
                             config.top_p,
                             config.min_p,
@@ -1365,6 +1385,14 @@ impl LlmBackend for LlamaCppBackend {
                         new_n_past
                     )));
                 }
+                let consumed = new_n_past as usize;
+                let max_tokens =
+                    clamp_generation_budget(config.max_tokens, context.n_ctx(), consumed);
+                if max_tokens == 0 {
+                    return Err(AdapterError::InvalidInput(
+                        PromptKind::Chat.input_too_long_message(consumed, context.n_ctx()),
+                    ));
+                }
 
                 let mut tel = StreamingTelemetry::new(summary.helper_total_tokens);
                 let mut filter = if self.reasoning_enabled() {
@@ -1379,7 +1407,7 @@ impl LlmBackend for LlamaCppBackend {
                 let stream_result = xybrid_llama::generate_from_current_logits_streaming(
                     context,
                     model,
-                    config.max_tokens,
+                    max_tokens,
                     config.temperature,
                     config.top_p,
                     config.min_p,
@@ -1475,6 +1503,27 @@ impl LlmBackend for LlamaCppBackend {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn generation_budget_keeps_requested_budget_when_it_fits() {
+        assert_eq!(clamp_generation_budget(128, 256, 64), 128);
+    }
+
+    #[test]
+    fn generation_budget_clamps_to_remaining_context() {
+        assert_eq!(clamp_generation_budget(256, 256, 64), 192);
+    }
+
+    #[test]
+    fn generation_budget_is_zero_when_context_is_consumed() {
+        assert_eq!(clamp_generation_budget(1, 256, 256), 0);
+        assert_eq!(clamp_generation_budget(1, 256, 300), 0);
+    }
+
+    #[test]
+    fn generation_budget_keeps_exact_remaining_boundary() {
+        assert_eq!(clamp_generation_budget(1, 256, 255), 1);
+    }
 
     #[test]
     fn chat_stop_patterns_includes_user_stops_and_broken_variants() {
