@@ -31,6 +31,7 @@ use std::time::Instant;
 
 use anyhow::{Context, Result};
 use xybrid_core::conversation::ConversationContext;
+use xybrid_core::gateway::Tool;
 use xybrid_core::ir::{Envelope, EnvelopeKind, MessageRole, ToolCallResult};
 use xybrid_core::runtime_adapter::tool_call::strip_tool_calls;
 use xybrid_core::runtime_adapter::types::GenerationConfig;
@@ -43,8 +44,24 @@ use crate::ui;
 /// stops offering tools and forces a final answer from the notes — a small
 /// model can loop indefinitely without settling on its own.
 const MAX_TOOL_TURNS: usize = 4;
-/// Token cap for the forced synthesis turn.
-const SYNTHESIS_MAX_TOKENS: usize = 256;
+
+/// Layer session options over the model's resolved defaults. An explicit
+/// config replaces model defaults wholesale at the executor, so it must start
+/// from them or a one-field override (or tools alone) would silently reset
+/// template sampling params and the reasoning-budget floor to generic defaults.
+fn session_generation_config(
+    mut base: GenerationConfig,
+    tools: Option<Vec<Tool>>,
+    max_tokens: Option<usize>,
+) -> GenerationConfig {
+    if let Some(tools) = tools {
+        base = base.with_tools(tools);
+    }
+    if let Some(max_tokens) = max_tokens {
+        base = base.with_max_tokens(max_tokens);
+    }
+    base
+}
 
 /// Default system prompt when tools are active and the user supplied none.
 /// Capabilities-first, tools-second: a small model told it "has tools"
@@ -108,18 +125,15 @@ pub(crate) fn run_query(
     max_tokens: Option<usize>,
     verbose: u8,
 ) -> Result<QueryOutcome> {
-    let config = if toolbox.is_some() || max_tokens.is_some() {
-        let mut config = GenerationConfig::default();
-        if let Some(toolbox) = toolbox {
-            config = config.with_tools(toolbox.definitions());
-        }
-        if let Some(max_tokens) = max_tokens {
-            config = config.with_max_tokens(max_tokens);
-        }
-        Some(config)
-    } else {
-        None
-    };
+    // Keeping `None` when no session option is set preserves the executor's
+    // no-config path; otherwise layering starts from the same resolved defaults.
+    let config = (toolbox.is_some() || max_tokens.is_some()).then(|| {
+        session_generation_config(
+            model.default_generation_config(),
+            toolbox.map(|toolbox| toolbox.definitions()),
+            max_tokens,
+        )
+    });
 
     // ── Tools-offering turn (context-aware; may stream) ─────────────────────
     let mut input = Envelope::new(EnvelopeKind::Text(question.to_string()));
@@ -292,7 +306,10 @@ pub(crate) fn run_query(
          provided search notes."
             .to_string(),
     );
-    let synthesis_config = GenerationConfig::default().with_max_tokens(SYNTHESIS_MAX_TOKENS);
+    // The prompt and EOS enforce answer brevity; the generation budget must
+    // still leave room for a thinking model's reasoning channel.
+    let synthesis_config =
+        session_generation_config(model.default_generation_config(), None, max_tokens);
     let response = model
         .run(&envelope, Some(&synthesis_config))
         .context("forced synthesis turn failed")?;
@@ -476,8 +493,9 @@ fn retry_without_tools(
     show_reasoning: bool,
     max_tokens: Option<usize>,
 ) -> Option<QueryOutcome> {
-    let config =
-        max_tokens.map(|max_tokens| GenerationConfig::default().with_max_tokens(max_tokens));
+    let config = max_tokens.map(|max_tokens| {
+        session_generation_config(model.default_generation_config(), None, Some(max_tokens))
+    });
     let result = match context {
         Some(ctx) => model.run_with_context(input, ctx, config.as_ref()),
         None => model.run(input, config.as_ref()),
@@ -544,6 +562,76 @@ fn preview_line(text: &str, max: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn test_tool() -> Tool {
+        Tool::function(
+            "lookup",
+            "Look up a value",
+            serde_json::json!({"type": "object", "properties": {}}),
+        )
+    }
+
+    #[test]
+    fn session_config_preserves_base_fields_when_overriding_max_tokens() {
+        let base = GenerationConfig {
+            temperature: 0.7,
+            top_k: 12,
+            stop_sequences: vec!["<end>".to_string()],
+            ..Default::default()
+        };
+
+        let config = session_generation_config(base, None, Some(64));
+
+        assert_eq!(config.max_tokens, 64);
+        assert_eq!(config.temperature, 0.7);
+        assert_eq!(config.top_k, 12);
+        assert_eq!(config.stop_sequences, vec!["<end>".to_string()]);
+    }
+
+    #[test]
+    fn session_config_attaches_tools_without_clearing_base_fields() {
+        let base = GenerationConfig {
+            temperature: 0.7,
+            top_p: 0.8,
+            repetition_penalty: 1.25,
+            ..Default::default()
+        };
+
+        let config = session_generation_config(base, Some(vec![test_tool()]), None);
+
+        assert_eq!(config.temperature, 0.7);
+        assert_eq!(config.top_p, 0.8);
+        assert_eq!(config.repetition_penalty, 1.25);
+        assert_eq!(config.tools.len(), 1);
+        assert_eq!(config.tools[0].function.name, "lookup");
+    }
+
+    #[test]
+    fn session_config_without_overrides_returns_base_unchanged() {
+        let base = GenerationConfig {
+            max_tokens: 3584,
+            temperature: 0.7,
+            top_p: 0.8,
+            min_p: 0.02,
+            top_k: 12,
+            repetition_penalty: 1.25,
+            stop_sequences: vec!["<end>".to_string()],
+            grammar: Some("root ::= \"ok\"".to_string()),
+            tools: vec![test_tool()],
+        };
+
+        let config = session_generation_config(base, None, None);
+
+        assert_eq!(config.max_tokens, 3584);
+        assert_eq!(config.temperature, 0.7);
+        assert_eq!(config.top_p, 0.8);
+        assert_eq!(config.min_p, 0.02);
+        assert_eq!(config.top_k, 12);
+        assert_eq!(config.repetition_penalty, 1.25);
+        assert_eq!(config.stop_sequences, vec!["<end>".to_string()]);
+        assert_eq!(config.grammar.as_deref(), Some("root ::= \"ok\""));
+        assert_eq!(config.tools.len(), 1);
+    }
 
     #[test]
     fn fold_appends_findings_to_the_question() {

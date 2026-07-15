@@ -1953,6 +1953,27 @@ impl XybridModel {
             .unwrap_or(false)
     }
 
+    /// The generation config this model resolves when `run*` is called without an
+    /// explicit config: template `generation_params` and the reasoning-budget
+    /// floor layered over global defaults. Callers who need an explicit config
+    /// (tools, budget overrides) should start from this instead of
+    /// `GenerationConfig::default()`, because an explicit config replaces the
+    /// model-level defaults wholesale.
+    pub fn default_generation_config(&self) -> GenerationConfig {
+        #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+        {
+            self.handle
+                .read()
+                .ok()
+                .map(|h| xybrid_core::execution::model_default_gen_config(&h.metadata))
+                .unwrap_or_default()
+        }
+        #[cfg(not(any(feature = "llm-mistral", feature = "llm-llamacpp")))]
+        {
+            GenerationConfig::default()
+        }
+    }
+
     // =========================================================================
     // Voice Discovery (TTS models only)
     // =========================================================================
@@ -4018,6 +4039,61 @@ mod tests {
             supports_streaming,
             current_run: Arc::new(Mutex::new(None)),
         }
+    }
+
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    fn test_model_with_metadata(metadata: ModelMetadata) -> XybridModel {
+        let model_id = metadata.model_id.clone();
+        let version = metadata.version.clone();
+        XybridModel {
+            handle: Arc::new(RwLock::new(ModelHandle {
+                executor: TemplateExecutor::default(),
+                metadata,
+                model_dir: PathBuf::from("."),
+                loaded: true,
+            })),
+            model_id,
+            version,
+            output_type: OutputType::Text,
+            supports_streaming: true,
+            current_run: Arc::new(Mutex::new(None)),
+        }
+    }
+
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[test]
+    fn default_generation_config_resolves_template_params_and_reasoning_floor() {
+        let mut template_metadata = ModelMetadata::onnx("template-model", "1.0", "model.gguf");
+        template_metadata.execution_template = ExecutionTemplate::Gguf {
+            model_file: "model.gguf".to_string(),
+            chat_template: None,
+            context_length: 4096,
+            generation_params: Some(xybrid_core::execution::template::GenerationParams {
+                max_tokens: Some(64),
+                temperature: Some(0.7),
+                ..Default::default()
+            }),
+        };
+
+        let template_config =
+            test_model_with_metadata(template_metadata).default_generation_config();
+        assert_eq!(template_config.max_tokens, 64);
+        assert_eq!(template_config.temperature, 0.7);
+
+        let mut reasoning_metadata = ModelMetadata::onnx("reasoning-model", "1.0", "model.gguf");
+        reasoning_metadata.execution_template = ExecutionTemplate::Gguf {
+            model_file: "model.gguf".to_string(),
+            chat_template: None,
+            context_length: 4096,
+            generation_params: None,
+        };
+        reasoning_metadata
+            .metadata
+            .insert("reasoning".to_string(), serde_json::Value::Bool(true));
+
+        let reasoning_config =
+            test_model_with_metadata(reasoning_metadata).default_generation_config();
+        assert_eq!(reasoning_config.max_tokens, 3584);
     }
 
     #[test]

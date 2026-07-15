@@ -3024,13 +3024,15 @@ const REASONING_MAX_TOKENS_CEILING: usize = 3584;
 #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
 const REASONING_PROMPT_HEADROOM: usize = 512;
 
-/// Build model defaults while reserving one shared budget for thinking and answering.
+/// The generation config resolved when a caller passes no explicit config.
 ///
-/// The think channel and the answer share one budget; the reasoning floor is a
-/// ceiling-bounded raise that leaves `REASONING_PROMPT_HEADROOM` tokens of prompt
-/// room inside the model's operational context and never drops below the global default.
+/// Template `generation_params` and the reasoning-budget floor are layered over
+/// global defaults. The think channel and the answer share one budget; the
+/// reasoning floor is a ceiling-bounded raise that leaves
+/// `REASONING_PROMPT_HEADROOM` tokens of prompt room inside the model's
+/// operational context and never drops below the global default.
 #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
-fn model_default_gen_config(metadata: &ModelMetadata) -> GenerationConfig {
+pub fn model_default_gen_config(metadata: &ModelMetadata) -> GenerationConfig {
     let (generation_params, context_length) = match &metadata.execution_template {
         ExecutionTemplate::Gguf {
             generation_params,

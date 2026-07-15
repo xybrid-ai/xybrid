@@ -417,6 +417,7 @@ pub(crate) fn handle_repl_command(
                     &input,
                     &mut conversation_context,
                     &loaded_model,
+                    max_tokens,
                     start,
                     verbose,
                 );
@@ -927,6 +928,7 @@ fn try_streaming_execution(
     input: &Envelope,
     conversation_context: &mut Option<ConversationContext>,
     loaded_model: &Option<xybrid_sdk::model::XybridModel>,
+    max_tokens: Option<usize>,
     start: std::time::Instant,
     verbose: u8,
 ) -> bool {
@@ -937,7 +939,14 @@ fn try_streaming_execution(
 
     if let Some(model) = model_for_streaming {
         if model.supports_token_streaming() {
-            return execute_streaming(model, input, conversation_context, start, verbose);
+            return execute_streaming(
+                model,
+                input,
+                conversation_context,
+                max_tokens,
+                start,
+                verbose,
+            );
         } else {
             ui::warning("Streaming only supported for GGUF models, falling back to batch mode");
             return false;
@@ -954,7 +963,14 @@ fn try_streaming_execution(
     match model_result {
         Ok(model) => {
             if model.supports_token_streaming() {
-                execute_streaming(&model, input, conversation_context, start, verbose)
+                execute_streaming(
+                    &model,
+                    input,
+                    conversation_context,
+                    max_tokens,
+                    start,
+                    verbose,
+                )
             } else {
                 ui::warning("Streaming only supported for GGUF models, falling back to batch mode");
                 false
@@ -975,6 +991,7 @@ fn execute_streaming(
     model: &xybrid_sdk::model::XybridModel,
     input: &Envelope,
     conversation_context: &mut Option<ConversationContext>,
+    max_tokens: Option<usize>,
     start: std::time::Instant,
     verbose: u8,
 ) -> bool {
@@ -988,9 +1005,14 @@ fn execute_streaming(
     let token_count_clone = Arc::clone(&token_count);
     let first_token_time = Arc::new(Mutex::new(None::<std::time::Instant>));
     let first_token_clone = Arc::clone(&first_token_time);
+    let config = max_tokens.map(|max_tokens| {
+        model
+            .default_generation_config()
+            .with_max_tokens(max_tokens)
+    });
 
     let streaming_result = if let Some(ref ctx) = conversation_context {
-        model.run_streaming_with_context(input, ctx, None, |token| {
+        model.run_streaming_with_context(input, ctx, config.as_ref(), |token| {
             print!("{}", token.token);
             io::stdout().flush()?;
             let count = token_count_clone.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -1005,7 +1027,7 @@ fn execute_streaming(
             Ok(())
         })
     } else {
-        model.run_streaming(input, None, |token| {
+        model.run_streaming(input, config.as_ref(), |token| {
             print!("{}", token.token);
             io::stdout().flush()?;
             let count = token_count_clone.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
