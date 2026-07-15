@@ -193,9 +193,7 @@ bindings/apple/XCFrameworks/
 ├── XybridFFI.xcframework/
 │   ├── ios-arm64/
 │   │   └── libxybrid-bolt.a
-│   ├── ios-arm64_x86_64-simulator/
-│   │   └── libxybrid-bolt.a
-│   └── macos-arm64_x86_64/
+│   └── ios-arm64-simulator/
 │       └── libxybrid-bolt.a
 └── XybridFFI-{version}.xcframework/    # Versioned copy
 ```

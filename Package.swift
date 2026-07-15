@@ -46,8 +46,12 @@ let xybridFFIChecksum = "18948ed9dcb38bc0a309a3b30bec583a802498f032b1c98e997ccdc
 let package = Package(
     name: "Xybrid",
     platforms: [
+        // iOS-only: the shipped XybridFFI.xcframework carries only the
+        // ios-arm64 (device) + ios-arm64-simulator slices (boltffi.toml
+        // include_macos = false). Declaring .macOS made SPM resolve the
+        // package for macOS apps and then fail to link the absent slice —
+        // ship a macOS slice (a separate feature) before re-adding it.
         .iOS(.v13),
-        .macOS(.v10_15),
     ],
     products: [
         .library(
