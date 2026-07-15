@@ -618,13 +618,34 @@ impl TemplateExecutor {
                     backend_hint,
                     config,
                 )
-            } else {
+            } else if matches!(input.kind, EnvelopeKind::Text(_)) {
                 self.execute_llm(
                     metadata,
                     model_file,
                     chat_template.as_deref(),
                     *context_length,
                     input,
+                    backend_hint,
+                    config,
+                )
+            } else {
+                // Text-only MultiPart (no image parts): `execute_llm` would
+                // reject it via `reject_text_only_model_image_input`, which
+                // bars every MultiPart envelope regardless of content. Convert
+                // with the same envelope→messages step `execute_vision_language`
+                // uses for one-shot input, then flatten to plain ChatMessages
+                // and run the non-vision LLM path. Audio/Embedding parts (and
+                // any other non-text/image kind) still fail here, inside
+                // `MultimodalChatMessage::from_envelope`.
+                reject_tool_continuation_input(input, "text-only vision-language")?;
+                let messages = vec![MultimodalChatMessage::from_envelope(input)?];
+                let chat_messages = text_messages_from_multimodal(&messages)?;
+                self.execute_llm_with_messages(
+                    metadata,
+                    model_file,
+                    chat_template.as_deref(),
+                    *context_length,
+                    &chat_messages,
                     backend_hint,
                     config,
                 )
@@ -1126,13 +1147,30 @@ impl TemplateExecutor {
                         on_token,
                         config,
                     )
-                } else {
+                } else if matches!(input.kind, EnvelopeKind::Text(_)) {
                     self.execute_llm_streaming(
                         metadata,
                         model_file,
                         chat_template.as_deref(),
                         *context_length,
                         input,
+                        backend_hint,
+                        on_token,
+                        config,
+                    )
+                } else {
+                    // Text-only MultiPart: same conversion as the
+                    // non-streaming path (see `execute_impl`), routed through
+                    // the streaming ChatMessages entry point.
+                    reject_tool_continuation_input(input, "text-only vision-language streaming")?;
+                    let messages = vec![MultimodalChatMessage::from_envelope(input)?];
+                    let chat_messages = text_messages_from_multimodal(&messages)?;
+                    self.execute_llm_streaming_with_messages(
+                        metadata,
+                        model_file,
+                        chat_template.as_deref(),
+                        *context_length,
+                        &chat_messages,
                         backend_hint,
                         on_token,
                         config,
@@ -3371,6 +3409,123 @@ mod tests {
         assert!(!message.contains("missing-model.gguf"));
     }
 
+    /// Regression test: a text-only `MultiPart` envelope (e.g. built via
+    /// `Envelope::user_message(text, vec![])`) sent to a VisionLanguage
+    /// model must dispatch through the plain LLM ChatMessages path, not
+    /// `reject_text_only_model_image_input` — which used to bar every
+    /// `MultiPart` envelope regardless of whether it actually carried an
+    /// image, producing a misleading `UnsupportedModelCapability("image
+    /// input")` error for pure text.
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[test]
+    fn vision_language_multipart_text_only_dispatches_to_llm_path() {
+        use crate::execution::template::{VisionEncoderConfig, VisionPreprocessingPreset};
+        use std::sync::{Arc, Mutex};
+
+        struct StubTextOnlyBackend {
+            observed_messages: Arc<Mutex<Option<Vec<crate::runtime_adapter::ChatMessage>>>>,
+        }
+
+        impl crate::runtime_adapter::LlmBackend for StubTextOnlyBackend {
+            fn name(&self) -> &str {
+                "stub-text-only"
+            }
+
+            fn supported_formats(&self) -> Vec<&'static str> {
+                vec!["gguf"]
+            }
+
+            fn load(&mut self, _config: &crate::runtime_adapter::LlmConfig) -> ExecutorResult<()> {
+                Ok(())
+            }
+
+            fn is_loaded(&self) -> bool {
+                true
+            }
+
+            fn unload(&mut self) -> ExecutorResult<()> {
+                Ok(())
+            }
+
+            fn generate(
+                &self,
+                messages: &[crate::runtime_adapter::ChatMessage],
+                _config: &GenerationConfig,
+            ) -> ExecutorResult<crate::runtime_adapter::GenerationOutput> {
+                *self.observed_messages.lock().unwrap() = Some(messages.to_vec());
+                Ok(sample_generation_output(1))
+            }
+
+            fn generate_raw(
+                &self,
+                _prompt: &str,
+                _config: &GenerationConfig,
+            ) -> ExecutorResult<crate::runtime_adapter::GenerationOutput> {
+                unreachable!("text-only MultiPart dispatch uses the ChatMessages entry point")
+            }
+
+            fn generate_multimodal(
+                &self,
+                _messages: &[crate::runtime_adapter::MultimodalChatMessage],
+                _config: &GenerationConfig,
+            ) -> ExecutorResult<crate::runtime_adapter::GenerationOutput> {
+                unreachable!("text-only MultiPart must not reach the multimodal backend path")
+            }
+        }
+
+        let metadata = ModelMetadata {
+            model_id: "vlm-text-only-multipart".to_string(),
+            version: "1.0".to_string(),
+            execution_template: ExecutionTemplate::VisionLanguage {
+                model_file: "model.gguf".to_string(),
+                chat_template: None,
+                context_length: 4096,
+                generation_params: None,
+            },
+            preprocessing: vec![],
+            postprocessing: vec![],
+            files: vec!["model.gguf".to_string(), "mmproj.gguf".to_string()],
+            vision_encoder: Some(VisionEncoderConfig {
+                file: "mmproj.gguf".to_string(),
+                preprocessing_preset: VisionPreprocessingPreset::SigLip,
+                image_size: 512,
+                patch_size: Some(16),
+            }),
+            description: None,
+            metadata: HashMap::new(),
+            voices: None,
+            max_chunk_chars: None,
+            trim_trailing_samples: None,
+        };
+
+        // No image attachments: still a `MultiPart` envelope (single text part).
+        let input = Envelope::user_message("Reply with exactly one word.", vec![]).unwrap();
+
+        let observed_messages = Arc::new(Mutex::new(None));
+        let mut executor = TemplateExecutor::with_base_path("/models");
+        executor.llm_adapter_cache = Some((
+            LlmAdapterCacheKey::new("/models/model.gguf".to_string(), None, 4096, None, None),
+            crate::runtime_adapter::LlmRuntimeAdapter::with_backend(Box::new(
+                StubTextOnlyBackend {
+                    observed_messages: observed_messages.clone(),
+                },
+            )),
+        ));
+
+        let output = executor
+            .execute(&metadata, &input, None)
+            .expect("text-only MultiPart must dispatch to the LLM path, not error out");
+
+        assert_eq!(output.kind, EnvelopeKind::Text("hello".to_string()));
+        let messages = observed_messages
+            .lock()
+            .unwrap()
+            .clone()
+            .expect("stub backend generate() must have been called");
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].content, "Reply with exactly one word.");
+    }
+
     #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp-vision"))]
     #[test]
     fn vision_language_does_not_reuse_text_only_cache_for_same_model_path() {
@@ -4006,6 +4161,47 @@ mod tests {
         assert!(
             !TemplateExecutor::requires_multimodal_generation(&input),
             "text-only VLM input must use text generation without loading the vision projector"
+        );
+    }
+
+    #[test]
+    fn vision_language_multipart_text_only_does_not_require_multimodal_generation() {
+        // `Envelope::user_message` with no image attachments still produces
+        // `EnvelopeKind::MultiPart` (a single text part) — regression guard
+        // for the bug where such envelopes were mistaken for image-bearing
+        // input and routed into `reject_text_only_model_image_input`.
+        let input = Envelope::user_message("Reply with exactly one word.", vec![]).unwrap();
+
+        assert!(
+            matches!(input.kind, EnvelopeKind::MultiPart(_)),
+            "user_message with no images must still produce a MultiPart envelope"
+        );
+        assert!(
+            !TemplateExecutor::requires_multimodal_generation(&input),
+            "text-only MultiPart input must not require multimodal generation"
+        );
+    }
+
+    #[test]
+    fn vision_language_multipart_with_image_requires_multimodal_generation() {
+        let image_bytes = {
+            let image = image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(
+                1,
+                1,
+                image::Rgb([17, 34, 51]),
+            ));
+            let mut encoded = std::io::Cursor::new(Vec::new());
+            image
+                .write_to(&mut encoded, image::ImageFormat::Png)
+                .expect("test image encodes");
+            encoded.into_inner()
+        };
+        let image = Envelope::image(image_bytes, "png").unwrap();
+        let input = Envelope::user_message("Describe this image", vec![image]).unwrap();
+
+        assert!(
+            TemplateExecutor::requires_multimodal_generation(&input),
+            "MultiPart input carrying a nested image part must require multimodal generation"
         );
     }
 
