@@ -131,14 +131,27 @@ pub(crate) fn reject_tool_continuation_input(
     input: &Envelope,
     path: &str,
 ) -> Result<(), AdapterError> {
-    if input
-        .metadata
-        .contains_key(Envelope::TOOL_RESPONSES_METADATA_KEY)
-    {
+    if carries_tool_continuation(input) {
         return Err(AdapterError::InvalidInput(format!(
             "tool-result continuation envelopes are not supported on the {path} path; \
              run the continuation turn through the non-streaming text path"
         )));
     }
     Ok(())
+}
+
+/// Continuation metadata can ride the envelope itself or any nested
+/// `MultiPart` part; flattening a nested part would silently drop its
+/// tool results, so the guard must see through the whole tree.
+fn carries_tool_continuation(input: &Envelope) -> bool {
+    if input
+        .metadata
+        .contains_key(Envelope::TOOL_RESPONSES_METADATA_KEY)
+    {
+        return true;
+    }
+    if let crate::ir::EnvelopeKind::MultiPart(parts) = &input.kind {
+        return parts.iter().any(carries_tool_continuation);
+    }
+    false
 }

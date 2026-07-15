@@ -639,7 +639,16 @@ impl TemplateExecutor {
                 // `MultimodalChatMessage::from_envelope`.
                 reject_tool_continuation_input(input, "text-only vision-language")?;
                 let messages = vec![MultimodalChatMessage::from_envelope(input)?];
-                let chat_messages = text_messages_from_multimodal(&messages)?;
+                let mut chat_messages = text_messages_from_multimodal(&messages)?;
+                // Mirror the flat-Text path's envelope handling: the
+                // ChatMessages entry point never sees the envelope, so
+                // `system_prompt` and the generation knobs (`max_tokens`,
+                // `temperature`) must be lifted off it here or they are
+                // silently dropped.
+                if let Some(sys) = input.metadata.get("system_prompt") {
+                    chat_messages.insert(0, ChatMessage::system(sys));
+                }
+                let gen_config = build_gen_config_from_input(input, config);
                 self.execute_llm_with_messages(
                     metadata,
                     model_file,
@@ -647,7 +656,7 @@ impl TemplateExecutor {
                     *context_length,
                     &chat_messages,
                     backend_hint,
-                    config,
+                    Some(&gen_config),
                 )
             };
         }
@@ -1164,7 +1173,12 @@ impl TemplateExecutor {
                     // the streaming ChatMessages entry point.
                     reject_tool_continuation_input(input, "text-only vision-language streaming")?;
                     let messages = vec![MultimodalChatMessage::from_envelope(input)?];
-                    let chat_messages = text_messages_from_multimodal(&messages)?;
+                    let mut chat_messages = text_messages_from_multimodal(&messages)?;
+                    // Same envelope lift as the non-streaming branch above.
+                    if let Some(sys) = input.metadata.get("system_prompt") {
+                        chat_messages.insert(0, ChatMessage::system(sys));
+                    }
+                    let gen_config = build_gen_config_from_input(input, config);
                     self.execute_llm_streaming_with_messages(
                         metadata,
                         model_file,
@@ -1173,7 +1187,7 @@ impl TemplateExecutor {
                         &chat_messages,
                         backend_hint,
                         on_token,
-                        config,
+                        Some(&gen_config),
                     )
                 };
             }
@@ -3424,6 +3438,7 @@ mod tests {
 
         struct StubTextOnlyBackend {
             observed_messages: Arc<Mutex<Option<Vec<crate::runtime_adapter::ChatMessage>>>>,
+            observed_max_tokens: Arc<Mutex<Option<usize>>>,
         }
 
         impl crate::runtime_adapter::LlmBackend for StubTextOnlyBackend {
@@ -3450,9 +3465,10 @@ mod tests {
             fn generate(
                 &self,
                 messages: &[crate::runtime_adapter::ChatMessage],
-                _config: &GenerationConfig,
+                config: &GenerationConfig,
             ) -> ExecutorResult<crate::runtime_adapter::GenerationOutput> {
                 *self.observed_messages.lock().unwrap() = Some(messages.to_vec());
+                *self.observed_max_tokens.lock().unwrap() = Some(config.max_tokens);
                 Ok(sample_generation_output(1))
             }
 
@@ -3499,15 +3515,25 @@ mod tests {
         };
 
         // No image attachments: still a `MultiPart` envelope (single text part).
-        let input = Envelope::user_message("Reply with exactly one word.", vec![]).unwrap();
+        // Envelope-level metadata (system_prompt, max_tokens) must survive the
+        // MultiPart→ChatMessages conversion exactly like the flat-Text path.
+        let mut input = Envelope::user_message("Reply with exactly one word.", vec![]).unwrap();
+        input
+            .metadata
+            .insert("system_prompt".to_string(), "You are terse.".to_string());
+        input
+            .metadata
+            .insert("max_tokens".to_string(), "7".to_string());
 
         let observed_messages = Arc::new(Mutex::new(None));
+        let observed_max_tokens = Arc::new(Mutex::new(None));
         let mut executor = TemplateExecutor::with_base_path("/models");
         executor.llm_adapter_cache = Some((
             LlmAdapterCacheKey::new("/models/model.gguf".to_string(), None, 4096, None, None),
             crate::runtime_adapter::LlmRuntimeAdapter::with_backend(Box::new(
                 StubTextOnlyBackend {
                     observed_messages: observed_messages.clone(),
+                    observed_max_tokens: observed_max_tokens.clone(),
                 },
             )),
         ));
@@ -3522,8 +3548,66 @@ mod tests {
             .unwrap()
             .clone()
             .expect("stub backend generate() must have been called");
-        assert_eq!(messages.len(), 1);
-        assert_eq!(messages[0].content, "Reply with exactly one word.");
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[0].role, crate::ir::MessageRole::System);
+        assert_eq!(messages[0].content, "You are terse.");
+        assert_eq!(messages[1].content, "Reply with exactly one word.");
+        assert_eq!(
+            *observed_max_tokens.lock().unwrap(),
+            Some(7),
+            "envelope max_tokens metadata must reach the generation config"
+        );
+    }
+
+    /// Nested tool-continuation metadata (a `tool_results` envelope wrapped in
+    /// `MultiPart`) must be rejected, not flattened into plain text — the
+    /// ChatMessages paths cannot compose the continuation prompt, and silently
+    /// dropping the tool results would produce a plausible but wrong answer.
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[test]
+    fn vision_language_multipart_nested_tool_continuation_is_rejected() {
+        use crate::execution::template::{VisionEncoderConfig, VisionPreprocessingPreset};
+
+        let metadata = ModelMetadata {
+            model_id: "vlm-nested-tool".to_string(),
+            version: "1.0".to_string(),
+            execution_template: ExecutionTemplate::VisionLanguage {
+                model_file: "model.gguf".to_string(),
+                chat_template: None,
+                context_length: 4096,
+                generation_params: None,
+            },
+            preprocessing: vec![],
+            postprocessing: vec![],
+            files: vec!["model.gguf".to_string(), "mmproj.gguf".to_string()],
+            vision_encoder: Some(VisionEncoderConfig {
+                file: "mmproj.gguf".to_string(),
+                preprocessing_preset: VisionPreprocessingPreset::SigLip,
+                image_size: 512,
+                patch_size: Some(16),
+            }),
+            description: None,
+            metadata: HashMap::new(),
+            voices: None,
+            max_chunk_chars: None,
+            trim_trailing_samples: None,
+        };
+
+        let mut tool_part = Envelope::new(EnvelopeKind::Text("tool output".to_string()));
+        tool_part.metadata.insert(
+            Envelope::TOOL_RESPONSES_METADATA_KEY.to_string(),
+            "[]".to_string(),
+        );
+        let input = Envelope::new(EnvelopeKind::MultiPart(vec![tool_part]));
+
+        let mut executor = TemplateExecutor::with_base_path("/models");
+        let err = executor
+            .execute(&metadata, &input, None)
+            .expect_err("nested tool-continuation MultiPart must be rejected");
+        assert!(
+            err.to_string().contains("tool-result continuation"),
+            "unexpected error: {err}"
+        );
     }
 
     #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp-vision"))]
