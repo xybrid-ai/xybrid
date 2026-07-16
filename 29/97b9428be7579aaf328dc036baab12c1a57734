@@ -1,0 +1,38 @@
+MODULE.bazel
+  s_8b9a9b82c688c4::t_86daf8c371da09 274
+  s_8b9a9b82c688c4::t_a2f89700d84f49 40-49
+  s_8b9a9b82c688c4::t_29ac1f40d2c8b7 285-287,289-292
+  s_8b9a9b82c688c4::t_9337b09800b839 252-254
+BUILD.bazel
+  s_8b9a9b82c688c4::t_256e3b3231d324 216-217,226-228
+  s_8b9a9b82c688c4::t_e4b56c6bb09663 119-136
+  s_8b9a9b82c688c4::t_29a982bb6025c3 398-407
+  s_8b9a9b82c688c4::t_13d97f06ed9844 220-225
+  s_b4d04e8868b8a7::t_bedba4047533a7 229
+.bazelrc
+  s_8b9a9b82c688c4::t_db7602727bf159 62-73
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "2997b9428be7579aaf328dc036baab12c1a57734",
+  "prompts": {},
+  "sessions": {
+    "s_8b9a9b82c688c4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "73a8592f-ccc0-42cf-bf05-435600f9a611",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    },
+    "s_b4d04e8868b8a7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "695b9f3a-2768-45bf-ae65-fe908023ea3f",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
