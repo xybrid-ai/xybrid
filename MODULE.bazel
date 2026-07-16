@@ -37,6 +37,16 @@ bazel_dep(name = "hermetic_launcher", version = "0.0.11")
 
 # rules_cc must be a direct dep so the `@rules_cc//...` flag in .bazelrc resolves.
 bazel_dep(name = "rules_cc", version = "0.2.20")
+
+# Apple cc toolchain for iOS (Apple G1). hermetic-llvm has NO iOS target and
+# @macos_sdk is macOS-only/link-only, so the iOS cc toolchain — used for the
+# C-sys build-script compiles (ring, zstd-sys, ...), the wrapper cc_library, and
+# //:llama's cmake — comes from apple_support, which resolves the host Xcode's
+# iphoneos SDK. Already in the graph transitively (rules_rs -> apple_support) and
+# self-registers; os:ios is a UNIQUE match, so it resolves for aarch64-apple-ios
+# while hermetic-llvm keeps every desktop target (no conflict with the macOS
+# lanes). Pinned here for explicitness/stability.
+bazel_dep(name = "apple_support", version = "1.24.2", repo_name = "build_bazel_apple_support")
 # bool_flag for the //:metal build setting (the macOS GPU lane toggle).
 bazel_dep(name = "bazel_skylib", version = "1.9.0")
 # platforms must be a direct dep so the `@platforms//...` constraints in //:android_arm64 resolve.
@@ -239,6 +249,9 @@ crate.from_cargo(
         # Desktop Windows cross (GNU/MinGW ABI — hermetic-llvm ships no MSVC CRT).
         "x86_64-pc-windows-gnu",
         "aarch64-apple-darwin",
+        # iOS device (Apple G1). Mac-bound — builds locally via Xcode's iOS SDK
+        # (apple_support toolchain), never on Linux RBE.
+        "aarch64-apple-ios",
         "aarch64-linux-android",
         "armv7-linux-androideabi",
         "x86_64-linux-android",
@@ -258,6 +271,7 @@ crate.annotation(
     # all platforms — input-only, outputs unchanged.
     build_script_data_select = {
         "aarch64-apple-darwin": ["@@//:ort_macos_arm64"],
+        "aarch64-apple-ios": ["@@//:ort_ios_arm64"],
     },
     # CC=/usr/bin/false: ort-sys's bs probes `$CC --print-search-dirs` to find
     # Xcode's clang_rt dir and, on success, emits -lclang_rt.osx — which only
@@ -268,8 +282,14 @@ crate.annotation(
     # CC is otherwise unused by this bs (no C compiled on the LIB_LOCATION path).
     build_script_env_select = {
         "aarch64-apple-darwin": "{\"ORT_LIB_LOCATION\": \"$${pwd}/vendor/ort-macos/aarch64-apple-darwin\", \"CC\": \"/usr/bin/false\"}",
+        # iOS: the vendored slice lives inside the committed xcframework
+        # (vendor/ort-ios/onnxruntime.xcframework/ios-arm64/libonnxruntime.a).
+        "aarch64-apple-ios": "{\"ORT_LIB_LOCATION\": \"$${pwd}/vendor/ort-ios/onnxruntime.xcframework/ios-arm64\", \"CC\": \"/usr/bin/false\"}",
     },
-    data = ["@@//:ort_macos_arm64"],
+    data = [
+        "@@//:ort_macos_arm64",
+        "@@//:ort_ios_arm64",
+    ],
     allow_build_script_to_detect_nonhermetic_paths = True,
 )
 

@@ -45,19 +45,32 @@ build:windows --platforms=@rules_rs//rs/platforms:x86_64-pc-windows-gnu
 # which is structurally incompatible with remote execution.
 build:macos --platforms=@rules_rs//rs/platforms:aarch64-apple-darwin
 
+# Preinstalled host cmake/make/pkg-config for rfcc's exec tools — shared by the
+# local-only Mac lanes (macos-metal, ios). rfcc's from-source bootstrap is the
+# known mac-host wall, so both use the host's tools (macos-14 runners + dev Macs
+# ship them).
+build:local_tools --extra_toolchains=@rules_foreign_cc//toolchains:preinstalled_cmake_toolchain
+build:local_tools --extra_toolchains=@rules_foreign_cc//toolchains:preinstalled_make_toolchain
+build:local_tools --extra_toolchains=@rules_foreign_cc//toolchains:preinstalled_pkgconfig_toolchain
+
 # Desktop macOS GPU lane (Flip 2): Metal + Accelerate ON — REQUIRES a Mac with
 # Xcode (the metal shader compiler); never combine with linux remote EXECUTION.
-# Uses the host's preinstalled cmake/make/pkg-config for rfcc's exec tools
-# (macos-14 runners and dev Macs ship them; the from-source bootstrap is the
-# known mac-host wall). The Rust side is identical to the CPU lane by design —
-# same features, same rlibs — so a warm shared cache serves most of the graph.
+# The Rust side is identical to the CPU lane by design — same features, same
+# rlibs — so a warm shared cache serves most of the graph.
 build:macos-metal --platforms=@rules_rs//rs/platforms:aarch64-apple-darwin
 build:macos-metal --//:metal=true
-build:macos-metal --extra_toolchains=@rules_foreign_cc//toolchains:preinstalled_cmake_toolchain
-build:macos-metal --extra_toolchains=@rules_foreign_cc//toolchains:preinstalled_make_toolchain
-build:macos-metal --extra_toolchains=@rules_foreign_cc//toolchains:preinstalled_pkgconfig_toolchain
+build:macos-metal --config=local_tools
 # (-fstack-protector, which needs a libssp hermetic-llvm's MinGW sysroot doesn't
 # ship, is disabled for windows at the toolchain level in hermetic_llvm.patch.)
+
+# --- Apple Gate 1: iOS device staticlib, built LOCALLY on a Mac (Xcode iphoneos
+# SDK via apple_support). CPU-only, Metal OFF. Mac-bound end-to-end — NEVER
+# combine with --config=remote (no Mac RBE; the iOS closure needs an iphoneos
+# sysroot Linux can't provide). //:llama's iOS arm sets PATH so rfcc's sanitized
+# PATH finds the host tools.
+build:ios --platforms=@rules_rs//rs/platforms:aarch64-apple-ios
+build:ios --config=local_tools
+build:ios --compilation_mode=opt
 
 # On Linux hosts, rules_rs' experimental toolchains need an explicit host platform
 # with libc constraints (//:host_linux_gnu, root BUILD.bazel). The enable flag
