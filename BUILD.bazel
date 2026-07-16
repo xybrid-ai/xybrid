@@ -107,6 +107,12 @@ _LLAMA_LIBS = [
 # Vision (TOOLS/COMMON=ON -> libmtmd) for parity with the shipped
 # platform-macos CLI; the throwaway tool exes get a C++ runtime via
 # CMAKE_CXX_STANDARD_LIBRARIES (lands AFTER objects, unlike EXE_LINKER_FLAGS).
+# Metal GPU backend, shared by the Apple Metal lanes (macOS //:llama_metal + iOS).
+_METAL_CMAKE_FLAGS = {
+    "GGML_METAL": "ON",
+    "GGML_ACCELERATE": "ON",
+}
+
 _DARWIN_LLAMA = _LLAMA_CACHE_ENTRIES | {
     "CMAKE_SYSTEM_NAME": "Darwin",
     "CMAKE_SYSTEM_PROCESSOR": "arm64",
@@ -132,9 +138,7 @@ _IOS_LLAMA = _LLAMA_CACHE_ENTRIES | {
     "CMAKE_OSX_ARCHITECTURES": "arm64",
     "CMAKE_OSX_DEPLOYMENT_TARGET": "16.0",
     "IOS": "ON",
-    "GGML_METAL": "ON",
-    "GGML_ACCELERATE": "ON",
-}
+} | _METAL_CMAKE_FLAGS
 
 cmake(
     name = "llama",
@@ -323,9 +327,7 @@ cmake(
         "@llvm//tools:llvm-install-name-tool",
         "@llvm//tools:llvm-otool",
     ],
-    cache_entries = _DARWIN_LLAMA | {
-        "GGML_METAL": "ON",
-        "GGML_ACCELERATE": "ON",
+    cache_entries = _DARWIN_LLAMA | _METAL_CMAKE_FLAGS | {
         "CMAKE_CXX_STANDARD_LIBRARIES": "-lc++",
     },
     lib_source = ":llama_src",
