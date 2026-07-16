@@ -71,6 +71,13 @@ build:macos-metal --config=local_tools
 build:ios --platforms=@rules_rs//rs/platforms:aarch64-apple-ios
 build:ios --config=local_tools
 build:ios --compilation_mode=opt
+# Min iOS floor, matching Package.swift .iOS(.v16) / boltffi
+# deployment_target=16.0 — otherwise apple clang defaults to the SDK's newest
+# min (an iOS-16 app then can't link the objects). --ios_minimum_os is the
+# apple_support-honored flag; the IPHONEOS_DEPLOYMENT_TARGET env is a belt-and-
+# suspenders for cc-rs/rustc which read it directly.
+build:ios --ios_minimum_os=16.0
+build:ios --action_env=IPHONEOS_DEPLOYMENT_TARGET=16.0
 
 # On Linux hosts, rules_rs' experimental toolchains need an explicit host platform
 # with libc constraints (//:host_linux_gnu, root BUILD.bazel). The enable flag

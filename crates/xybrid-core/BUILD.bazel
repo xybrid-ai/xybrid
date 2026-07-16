@@ -52,6 +52,17 @@ rust_library(
             # Flip 2: parity with the shipped platform-macos CLI (vision).
             "llm-llamacpp-vision",
         ],
+        # Apple G1-G2 parity: platform-ios expands to the SAME core backend set
+        # as platform-macos (candle-metal + coreml + vision), so mirror darwin.
+        "@rules_rs//rs/platforms/config:aarch64-apple-ios": [
+            "candle",
+            "candle-core",
+            "candle-hub",
+            "candle-metal",
+            "candle-nn",
+            "ort-coreml",
+            "llm-llamacpp-vision",
+        ],
         "@rules_rs//rs/platforms/config:aarch64-linux-android": _ANDROID_BACKENDS,
         "@rules_rs//rs/platforms/config:armv7-linux-androideabi": _ANDROID_BACKENDS,
         "@rules_rs//rs/platforms/config:x86_64-linux-android": _ANDROID_BACKENDS,
