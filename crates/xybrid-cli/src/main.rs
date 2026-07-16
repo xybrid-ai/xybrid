@@ -214,6 +214,12 @@ enum Commands {
         #[arg(long, default_value = "false")]
         show_reasoning: bool,
 
+        /// Token budget for LLM generation, shared by thinking and answer
+        /// (default 2048; auto-raised for known thinking models). For multi-stage
+        /// pipelines this applies to the first stage.
+        #[arg(long, value_name = "N", value_parser = parse_max_tokens)]
+        max_tokens: Option<usize>,
+
         /// Export trace to JSON file (Chrome trace format)
         #[arg(long, value_name = "FILE")]
         trace_export: Option<PathBuf>,
@@ -253,6 +259,11 @@ enum Commands {
         /// which is stripped out of the answer text by default
         #[arg(long, default_value = "false")]
         show_reasoning: bool,
+
+        /// Token budget for LLM generation, shared by thinking and answer
+        /// (default 2048; auto-raised for known thinking models). Applies to every REPL turn.
+        #[arg(long, value_name = "N", value_parser = parse_max_tokens)]
+        max_tokens: Option<usize>,
 
         /// System prompt to set the assistant's behavior
         #[arg(long, value_name = "PROMPT")]
@@ -323,6 +334,16 @@ enum Commands {
         #[command(subcommand)]
         command: TelemetryCommand,
     },
+}
+
+/// `--max-tokens 0` would load the model and only then fail in the native
+/// layer ("non-positive max_tokens"); reject it at parse time instead.
+fn parse_max_tokens(s: &str) -> Result<usize, String> {
+    match s.parse::<usize>() {
+        Ok(0) => Err("must be at least 1".to_string()),
+        Ok(n) => Ok(n),
+        Err(e) => Err(e.to_string()),
+    }
 }
 
 fn main() -> Result<()> {
@@ -517,6 +538,7 @@ fn run_command(cli: Cli) -> Result<()> {
             target,
             trace,
             show_reasoning,
+            max_tokens,
             trace_export,
         } => {
             if trace {
@@ -534,6 +556,7 @@ fn run_command(cli: Cli) -> Result<()> {
                     dry_run,
                     trace,
                     show_reasoning,
+                    max_tokens,
                     trace_export.as_ref(),
                 );
             }
@@ -550,6 +573,7 @@ fn run_command(cli: Cli) -> Result<()> {
                     dry_run,
                     trace,
                     show_reasoning,
+                    max_tokens,
                     trace_export.as_ref(),
                 );
             }
@@ -565,6 +589,7 @@ fn run_command(cli: Cli) -> Result<()> {
                     dry_run,
                     trace,
                     show_reasoning,
+                    max_tokens,
                     trace_export.as_ref(),
                 );
             }
@@ -580,6 +605,7 @@ fn run_command(cli: Cli) -> Result<()> {
                     dry_run,
                     trace,
                     show_reasoning,
+                    max_tokens,
                     trace_export.as_ref(),
                 );
             }
@@ -595,6 +621,7 @@ fn run_command(cli: Cli) -> Result<()> {
                     dry_run,
                     trace,
                     show_reasoning,
+                    max_tokens,
                     trace_export.as_ref(),
                 );
             }
@@ -612,6 +639,7 @@ fn run_command(cli: Cli) -> Result<()> {
                 target.as_deref(),
                 trace,
                 show_reasoning,
+                max_tokens,
                 trace_export.as_ref(),
             )
         }
@@ -624,6 +652,7 @@ fn run_command(cli: Cli) -> Result<()> {
             target,
             stream,
             show_reasoning,
+            max_tokens,
             system,
             no_tools,
             tools_file,
@@ -636,6 +665,7 @@ fn run_command(cli: Cli) -> Result<()> {
             target,
             stream,
             show_reasoning,
+            max_tokens,
             system,
             no_tools,
             tools_file,
@@ -750,5 +780,57 @@ mod tests {
             panic!("expected repl command");
         };
         assert!(show_reasoning);
+    }
+
+    #[test]
+    fn run_and_repl_accept_max_tokens_flag() {
+        let run = Cli::try_parse_from([
+            "xybrid",
+            "run",
+            "--max-tokens",
+            "64",
+            "--model-file",
+            "model.gguf",
+        ])
+        .unwrap_or_else(|err| panic!("run should accept --max-tokens: {err}"));
+        let Commands::Run { max_tokens, .. } = run.command else {
+            panic!("expected run command");
+        };
+        assert_eq!(max_tokens, Some(64));
+
+        let repl = Cli::try_parse_from([
+            "xybrid",
+            "repl",
+            "--max-tokens",
+            "64",
+            "--model-file",
+            "model.gguf",
+        ])
+        .unwrap_or_else(|err| panic!("repl should accept --max-tokens: {err}"));
+        let Commands::Repl { max_tokens, .. } = repl.command else {
+            panic!("expected repl command");
+        };
+        assert_eq!(max_tokens, Some(64));
+    }
+
+    #[test]
+    fn run_and_repl_reject_zero_max_tokens_at_parse_time() {
+        for cmd in ["run", "repl"] {
+            let result = Cli::try_parse_from([
+                "xybrid",
+                cmd,
+                "--max-tokens",
+                "0",
+                "--model-file",
+                "model.gguf",
+            ]);
+            let Err(err) = result else {
+                panic!("--max-tokens 0 must be rejected before any model loads");
+            };
+            assert!(
+                err.to_string().contains("must be at least 1"),
+                "unexpected parse error: {err}"
+            );
+        }
     }
 }

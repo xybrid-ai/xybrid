@@ -189,6 +189,29 @@ pub(crate) fn strip_and_capture_thinking_tags(text: &str) -> (String, Option<Str
     (clean, reasoning)
 }
 
+/// Like [`strip_and_capture_thinking_tags`], for output generated from a
+/// reasoning-primed prompt (the llama.cpp adapter's `THINK_PRIME`). The opener
+/// lives in the prompt, so output whose budget ran out before `</think>` is
+/// mid-thought prose with no marker at all — indistinguishable from an answer
+/// without the priming bit. Reconstructing the opener only for budget-truncated
+/// output keeps marker-bearing behavior identical to the unprimed pass while
+/// preserving a naturally terminated markerless answer. A rare true
+/// mid-thought EOS is therefore surfaced as answer text rather than silently
+/// hiding it, which is the safer failure mode for callers.
+pub(crate) fn strip_and_capture_thinking_tags_primed(
+    text: &str,
+    primed: bool,
+    truncated_by_budget: bool,
+) -> (String, Option<String>) {
+    if !primed || !truncated_by_budget {
+        return strip_and_capture_thinking_tags(text);
+    }
+    let mut reconstructed = String::with_capacity(PRIMED_OPEN.len() + text.len());
+    reconstructed.push_str(PRIMED_OPEN);
+    reconstructed.push_str(text);
+    strip_and_capture_thinking_tags(&reconstructed)
+}
+
 /// Append one reasoning block, separating consecutive blocks with a newline.
 fn push_reasoning(buf: &mut String, block: &str) {
     if !buf.is_empty() {
@@ -524,6 +547,47 @@ mod tests {
     use super::*;
 
     #[test]
+    fn primed_strip_captures_markerless_mid_thought_as_reasoning() {
+        // Budget exhausted before `</think>`: the whole output is still inside
+        // the primed think channel, so none of it is answer text.
+        let (clean, reasoning) =
+            strip_and_capture_thinking_tags_primed("Okay, so I need to count rooks", true, true);
+        assert_eq!(clean, "");
+        assert_eq!(reasoning.as_deref(), Some("Okay, so I need to count rooks"));
+    }
+
+    #[test]
+    fn primed_strip_matches_dangling_close_behavior_for_completed_thoughts() {
+        let (clean, reasoning) =
+            strip_and_capture_thinking_tags_primed("first the plan</think>the answer", true, true);
+        assert_eq!(clean, "the answer");
+        assert_eq!(reasoning.as_deref(), Some("first the plan"));
+    }
+
+    #[test]
+    fn primed_strip_matches_dangling_close_behavior_after_natural_termination() {
+        let (clean, reasoning) =
+            strip_and_capture_thinking_tags_primed("first the plan</think>the answer", true, false);
+        assert_eq!(clean, "the answer");
+        assert_eq!(reasoning.as_deref(), Some("first the plan"));
+    }
+
+    #[test]
+    fn primed_strip_whitespace_only_thought_is_not_reasoning() {
+        let (clean, reasoning) = strip_and_capture_thinking_tags_primed("   \n ", true, true);
+        assert_eq!(clean, "");
+        assert_eq!(reasoning, None);
+    }
+
+    #[test]
+    fn unprimed_strip_leaves_markerless_text_as_answer() {
+        let (clean, reasoning) =
+            strip_and_capture_thinking_tags_primed("just an answer", false, false);
+        assert_eq!(clean, "just an answer");
+        assert_eq!(reasoning, None);
+    }
+
+    #[test]
     fn strip_thinking_tags_removes_closed_blocks() {
         assert_eq!(
             strip_thinking_tags("before<think>hidden</think>after"),
@@ -649,7 +713,8 @@ mod tests {
     fn capture_thinking_tags_no_close_keeps_answer() {
         // Primed but the model never closed `</think>` (e.g. answered directly).
         // The answer must NOT be eaten as reasoning.
-        let (clean, reasoning) = strip_and_capture_thinking_tags("The answer is 8.");
+        let (clean, reasoning) =
+            strip_and_capture_thinking_tags_primed("The answer is 8.", true, false);
         assert_eq!(clean, "The answer is 8.");
         assert_eq!(reasoning, None);
     }
