@@ -38,6 +38,22 @@ name: Release Prep
 on:
   push:
     branches: ['release/v*']
+  # Dry-run rehearsal (safe by construction): validate the Bazel CLI release
+  # path — build + payload-gate the linux/macOS/windows CLIs with the real
+  # release artifact names, and run the windows .exe smoke — WITHOUT any
+  # publish. In dry_run mode ONLY the CLI jobs + a summary run; every job with
+  # a publish side-effect (attestations, the draft release, the SBOM upload,
+  # the release PR, the checksum push, cargokit's release-asset uploads) is
+  # skipped wholesale. Dispatch from any branch; pass the version to rehearse.
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to rehearse (no v prefix, e.g. 0.4.0-alpha)'
+        required: true
+      dry_run:
+        description: 'Rehearsal only — build + gate the CLIs, publish nothing'
+        type: boolean
+        default: true
 
 # Cancel in-flight runs when the maintainer pushes again to the same
 # release branch (e.g. a changelog fixup) — no point finishing a stale
@@ -75,30 +91,47 @@ jobs:
       branch: ${{ steps.meta.outputs.branch }}
       version: ${{ steps.meta.outputs.version }}
       tag: ${{ steps.meta.outputs.tag }}
+      dry_run: ${{ steps.meta.outputs.dry_run }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Parse branch / version
         id: meta
         shell: bash
+        env:
+          # workflow_dispatch inputs (empty on push)
+          INPUT_VERSION: ${{ inputs.version }}
+          INPUT_DRY_RUN: ${{ inputs.dry_run }}
         run: |
           set -euo pipefail
           BRANCH="${GITHUB_REF#refs/heads/}"
-          case "$BRANCH" in
-            release/v*) ;;
-            *) echo "::error::Expected release/v* branch, got $BRANCH"; exit 1 ;;
-          esac
-          TAG="${BRANCH#release/}"
-          VERSION="${TAG#v}"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            # Rehearsal (or a deliberate dispatch-triggered cut): version comes
+            # from the input, not a release/v* branch name.
+            VERSION="${INPUT_VERSION#v}"
+            TAG="v${VERSION}"
+            DRY_RUN="${INPUT_DRY_RUN:-true}"
+          else
+            case "$BRANCH" in
+              release/v*) ;;
+              *) echo "::error::Expected release/v* branch, got $BRANCH"; exit 1 ;;
+            esac
+            TAG="${BRANCH#release/}"
+            VERSION="${TAG#v}"
+            DRY_RUN=false
+          fi
           echo "branch=$BRANCH"   >> "$GITHUB_OUTPUT"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "tag=$TAG"         >> "$GITHUB_OUTPUT"
-          echo "Release branch:  $BRANCH"
-          echo "Release version: $VERSION"
+          echo "dry_run=$DRY_RUN" >> "$GITHUB_OUTPUT"
+          echo "Ref:     $BRANCH"
+          echo "Version: $VERSION (tag $TAG)"
+          echo "Dry-run: $DRY_RUN"
 
       - name: Check versions match release branch
         env:
           VERSION: ${{ steps.meta.outputs.version }}
+          DRY_RUN: ${{ steps.meta.outputs.dry_run }}
         run: |
           set -euo pipefail
           ./tools/scripts/version-sync.sh --check
@@ -118,11 +151,20 @@ jobs:
           FAILED=0
           for V in "$CARGO_VERSION" "$FLUTTER_VERSION_PKG" "$UNITY_VERSION" "$KOTLIN_VERSION" "$SWIFT_VERSION"; do
             if [ "$V" != "$VERSION" ]; then
-              echo "::error::Version mismatch — branch is $VERSION but found $V"
+              echo "::error::Version mismatch — target is $VERSION but found $V"
               echo "Run 'just bump-version $VERSION' on the release branch and push the result."
               FAILED=1
             fi
           done
+          # In a rehearsal the manifests are usually the CURRENT version (the
+          # bump happens on the real release branch), so a mismatch is expected
+          # and non-fatal — the dry-run proves the CLI build mechanics, not the
+          # version bump. A real push (or a dispatch with dry_run=false) stays
+          # strict, which also blocks an accidental real cut from an unbumped ref.
+          if [ "$FAILED" -ne 0 ] && [ "$DRY_RUN" = "true" ]; then
+            echo "::warning::Version mismatch tolerated in dry-run rehearsal."
+            FAILED=0
+          fi
           [ "$FAILED" -eq 0 ] || exit 1
 
   # =========================================================================
@@ -141,6 +183,8 @@ jobs:
   # ----- Apple job 1/3: XCFramework (critical path; gates patch-spm-checksum)
   build-xcframework:
     name: Build XCFramework
+    # Skipped in a dry-run rehearsal (which validates only the CLI release path).
+    if: needs.check-release-branch.outputs.dry_run != 'true'
     needs: [check-release-branch]
     runs-on: macos-14
     permissions:
@@ -223,6 +267,8 @@ jobs:
   # ----- Apple job 2/3: Flutter darwin precompile (parallel; not on SPM path)
   precompile-flutter-darwin:
     name: Precompile Flutter (darwin)
+    # cargokit uploads release assets — skip in a dry-run rehearsal.
+    if: needs.check-release-branch.outputs.dry_run != 'true'
     permissions:
       contents: write   # cargokit precompile-binaries uploads release assets
     needs: [check-release-branch]
@@ -361,6 +407,8 @@ jobs:
           chmod +x dist-cli/xybrid-${TAG}-macos-arm64
 
       - name: Attest macOS CLI provenance
+        # No provenance for rehearsal artifacts (the binary won't ship).
+        if: needs.check-release-branch.outputs.dry_run != 'true'
         uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
         with:
           subject-path: dist-cli/xybrid-${{ needs.check-release-branch.outputs.tag }}-macos-arm64
@@ -376,6 +424,8 @@ jobs:
   # =========================================================================
   build-android:
     name: Build Android
+    # Skipped in a dry-run rehearsal (already ships; not the CLI path under test).
+    if: needs.check-release-branch.outputs.dry_run != 'true'
     needs: [check-release-branch]
     runs-on: ubuntu-latest
     permissions:
@@ -451,6 +501,8 @@ jobs:
   # =========================================================================
   precompile-flutter-linux:
     name: Precompile Flutter (linux)
+    # cargokit uploads release assets — skip in a dry-run rehearsal.
+    if: needs.check-release-branch.outputs.dry_run != 'true'
     permissions:
       contents: write   # cargokit precompile-binaries uploads release assets
     needs: [check-release-branch, build-android]
@@ -542,6 +594,8 @@ jobs:
   # =========================================================================
   precompile-flutter-windows:
     name: Precompile Flutter (windows)
+    # cargokit uploads release assets — skip in a dry-run rehearsal.
+    if: needs.check-release-branch.outputs.dry_run != 'true'
     permissions:
       contents: write   # cargokit precompile-binaries uploads release assets
     needs: [check-release-branch]
@@ -690,6 +744,8 @@ jobs:
           echo "artifact_path=$ARTIFACT" >> "$GITHUB_OUTPUT"
 
       - name: Attest CLI provenance (linux-x86_64)
+        # No provenance for rehearsal artifacts (the binary won't ship).
+        if: needs.check-release-branch.outputs.dry_run != 'true'
         uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
         with:
           subject-path: ${{ steps.prepare.outputs.artifact_path }}
@@ -781,6 +837,8 @@ jobs:
           echo "artifact_path=$ARTIFACT" >> "$GITHUB_OUTPUT"
 
       - name: Attest CLI provenance (windows-x86_64)
+        # No provenance for rehearsal artifacts (the binary won't ship).
+        if: needs.check-release-branch.outputs.dry_run != 'true'
         uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
         with:
           subject-path: ${{ steps.prepare.outputs.artifact_path }}
@@ -827,6 +885,8 @@ jobs:
   # =========================================================================
   patch-spm-checksum:
     name: Patch SPM checksum
+    # Commits + pushes to the release branch — skip in a dry-run rehearsal.
+    if: needs.check-release-branch.outputs.dry_run != 'true'
     permissions:
       contents: write   # commits the pinned SPM checksum and pushes the branch
     needs: [check-release-branch, build-xcframework]
@@ -872,6 +932,9 @@ jobs:
   # =========================================================================
   create-draft-release:
     name: Create draft release
+    # Creates the GitHub draft release — skip in a dry-run rehearsal (the
+    # dryrun-summary job prints what the CLI leg would ship instead).
+    if: needs.check-release-branch.outputs.dry_run != 'true'
     permissions:
       contents: write   # gh release create/delete of the draft release
     needs:
@@ -990,6 +1053,8 @@ jobs:
   # =========================================================================
   attach-sbom:
     name: Attach SBOM
+    # Uploads to the draft release — skip in a dry-run rehearsal.
+    if: needs.check-release-branch.outputs.dry_run != 'true'
     permissions:
       contents: write   # gh release upload of the SBOM assets
     needs: [check-release-branch, create-draft-release]
@@ -1031,6 +1096,8 @@ jobs:
   # =========================================================================
   open-release-pr:
     name: Open release PR
+    # Opens the release PR — skip in a dry-run rehearsal.
+    if: needs.check-release-branch.outputs.dry_run != 'true'
     permissions:
       contents: read
       pull-requests: write   # gh pr create for the release PR
@@ -1083,3 +1150,48 @@ jobs:
             --title "Release ${TAG}" \
             --body "$BODY" \
             --label release
+
+  # =========================================================================
+  # Dry-run rehearsal summary — what the Bazel CLI leg of this release would
+  # ship. Runs ONLY in a dry-run (the real path assembles via
+  # create-draft-release). Downloads the three CLI artifacts the build jobs
+  # uploaded (as internal workflow artifacts) and prints their names + sizes:
+  # proof the Bazel builds, payload gates, release-artifact naming, and the
+  # windows .exe run-smoke all work — with nothing published.
+  # =========================================================================
+  dryrun-summary:
+    name: Dry-run summary (CLI leg)
+    if: needs.check-release-branch.outputs.dry_run == 'true'
+    needs:
+      - check-release-branch
+      - build-cli-linux
+      - build-cli-macos
+      - build-cli-windows
+      - smoke-cli-windows
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download CLI artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          path: cli
+          pattern: cli-*
+          merge-multiple: true
+
+      - name: Summarize the CLI leg
+        env:
+          VERSION: ${{ needs.check-release-branch.outputs.version }}
+        run: |
+          set -euo pipefail
+          {
+            echo "## Dry-run rehearsal — v${VERSION} CLI leg ✅"
+            echo ""
+            echo "Built + payload-gated on Bazel/RBE, windows \`.exe\` smoke-run on a"
+            echo "real Windows runner — **nothing published** (no draft, PR, attestation,"
+            echo "or checksum push)."
+            echo ""
+            echo "| artifact (would ship as) | size |"
+            echo "|---|---|"
+            find cli -type f -printf '| %f | %s bytes |\n' | sort
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "=== artifacts that would ship ==="
+          find cli -type f -exec ls -lh {} \;

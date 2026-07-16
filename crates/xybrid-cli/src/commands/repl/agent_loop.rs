@@ -31,6 +31,7 @@ use std::time::Instant;
 
 use anyhow::{Context, Result};
 use xybrid_core::conversation::ConversationContext;
+use xybrid_core::gateway::Tool;
 use xybrid_core::ir::{Envelope, EnvelopeKind, MessageRole, ToolCallResult};
 use xybrid_core::runtime_adapter::tool_call::strip_tool_calls;
 use xybrid_core::runtime_adapter::types::GenerationConfig;
@@ -43,8 +44,24 @@ use crate::ui;
 /// stops offering tools and forces a final answer from the notes — a small
 /// model can loop indefinitely without settling on its own.
 const MAX_TOOL_TURNS: usize = 4;
-/// Token cap for the forced synthesis turn.
-const SYNTHESIS_MAX_TOKENS: usize = 256;
+
+/// Layer session options over the model's resolved defaults. An explicit
+/// config replaces model defaults wholesale at the executor, so it must start
+/// from them or a one-field override (or tools alone) would silently reset
+/// template sampling params and the reasoning-budget floor to generic defaults.
+fn session_generation_config(
+    mut base: GenerationConfig,
+    tools: Option<Vec<Tool>>,
+    max_tokens: Option<usize>,
+) -> GenerationConfig {
+    if let Some(tools) = tools {
+        base = base.with_tools(tools);
+    }
+    if let Some(max_tokens) = max_tokens {
+        base = base.with_max_tokens(max_tokens);
+    }
+    base
+}
 
 /// Default system prompt when tools are active and the user supplied none.
 /// Capabilities-first, tools-second: a small model told it "has tools"
@@ -63,6 +80,8 @@ pub(crate) const TOOL_SYSTEM_PROMPT: &str =
 
 pub(crate) struct QueryOutcome {
     pub answer: String,
+    pub finish_reason: Option<String>,
+    pub reasoning_present: bool,
     /// True when the answer's tokens were already printed live by the
     /// streaming callback — the caller must not print it again.
     pub already_printed: bool,
@@ -85,6 +104,7 @@ struct FirstTurn {
     already_printed: bool,
     stream_stats: Option<StreamStats>,
     reasoning_content: Option<String>,
+    finish_reason: Option<String>,
 }
 
 /// Run one REPL query end-to-end: the tools-offering turn, any tool
@@ -102,12 +122,18 @@ pub(crate) fn run_query(
     system_prompt: Option<&str>,
     stream: bool,
     show_reasoning: bool,
+    max_tokens: Option<usize>,
     verbose: u8,
 ) -> Result<QueryOutcome> {
-    // Tools ride the config; `Default` matches what the executor uses when
-    // no config is passed, so plain-chat behavior is unchanged.
-    let config =
-        toolbox.map(|toolbox| GenerationConfig::default().with_tools(toolbox.definitions()));
+    // Keeping `None` when no session option is set preserves the executor's
+    // no-config path; otherwise layering starts from the same resolved defaults.
+    let config = (toolbox.is_some() || max_tokens.is_some()).then(|| {
+        session_generation_config(
+            model.default_generation_config(),
+            toolbox.map(|toolbox| toolbox.definitions()),
+            max_tokens,
+        )
+    });
 
     // ── Tools-offering turn (context-aware; may stream) ─────────────────────
     let mut input = Envelope::new(EnvelopeKind::Text(question.to_string()));
@@ -130,13 +156,20 @@ pub(crate) fn run_query(
         // and context, since only the declarations cause the narrowing.
         // Streamed turns already printed their text, so they keep it.
         if !stream && toolbox.is_some() && looks_like_capability_refusal(&answer) {
-            if let Some(outcome) = retry_without_tools(model, context, &input, show_reasoning) {
+            if let Some(outcome) =
+                retry_without_tools(model, context, &input, show_reasoning, max_tokens)
+            {
                 return Ok(outcome);
             }
         }
         print_turn_reasoning(show_reasoning, first_turn.reasoning_content.as_deref());
         return Ok(QueryOutcome {
             answer,
+            finish_reason: first_turn.finish_reason,
+            reasoning_present: first_turn
+                .reasoning_content
+                .as_deref()
+                .is_some_and(|r| !r.trim().is_empty()),
             already_printed: first_turn.already_printed,
             tool_calls_run: 0,
             stream_stats: first_turn.stream_stats,
@@ -160,6 +193,11 @@ pub(crate) fn run_query(
         print_turn_reasoning(show_reasoning, first_turn.reasoning_content.as_deref());
         return Ok(QueryOutcome {
             answer: strip_tool_calls(&first_turn.text),
+            finish_reason: first_turn.finish_reason,
+            reasoning_present: first_turn
+                .reasoning_content
+                .as_deref()
+                .is_some_and(|r| !r.trim().is_empty()),
             already_printed: first_turn.already_printed,
             tool_calls_run: 0,
             stream_stats: None,
@@ -228,6 +266,10 @@ pub(crate) fn run_query(
             print_turn_reasoning(show_reasoning, response.reasoning_content());
             return Ok(QueryOutcome {
                 answer: strip_tool_calls(&text),
+                finish_reason: response.metadata("finish_reason").cloned(),
+                reasoning_present: response
+                    .reasoning_content()
+                    .is_some_and(|r| !r.trim().is_empty()),
                 already_printed: false,
                 tool_calls_run,
                 stream_stats: None,
@@ -264,7 +306,10 @@ pub(crate) fn run_query(
          provided search notes."
             .to_string(),
     );
-    let synthesis_config = GenerationConfig::default().with_max_tokens(SYNTHESIS_MAX_TOKENS);
+    // The prompt and EOS enforce answer brevity; the generation budget must
+    // still leave room for a thinking model's reasoning channel.
+    let synthesis_config =
+        session_generation_config(model.default_generation_config(), None, max_tokens);
     let response = model
         .run(&envelope, Some(&synthesis_config))
         .context("forced synthesis turn failed")?;
@@ -277,6 +322,10 @@ pub(crate) fn run_query(
 
     Ok(QueryOutcome {
         answer,
+        finish_reason: response.metadata("finish_reason").cloned(),
+        reasoning_present: response
+            .reasoning_content()
+            .is_some_and(|r| !r.trim().is_empty()),
         already_printed: false,
         tool_calls_run,
         stream_stats: None,
@@ -325,6 +374,7 @@ fn run_first_turn(
             .to_string();
         let calls = result.tool_calls();
         let reasoning_content = result.reasoning_content().map(str::to_string);
+        let finish_reason = result.metadata("finish_reason").cloned();
         let (printed_any, stats) = if calls.is_empty() {
             // The whole answer streamed.
             let stats = StreamStats {
@@ -343,6 +393,7 @@ fn run_first_turn(
             already_printed: printed_any,
             stream_stats: stats,
             reasoning_content,
+            finish_reason,
         })
     } else {
         let result = match context {
@@ -356,12 +407,14 @@ fn run_first_turn(
             .to_string();
         let calls = result.tool_calls();
         let reasoning_content = result.reasoning_content().map(str::to_string);
+        let finish_reason = result.metadata("finish_reason").cloned();
         Ok(FirstTurn {
             text,
             calls,
             already_printed: false,
             stream_stats: None,
             reasoning_content,
+            finish_reason,
         })
     }
 }
@@ -432,17 +485,20 @@ fn looks_like_capability_refusal(answer: &str) -> bool {
         || head.contains("i cannot generate")
 }
 
-/// Re-run the turn with tool declarations withheld (config `None`); returns
-/// the outcome only when the retry produced a real (non-refusal) answer.
+/// Re-run the turn without tool declarations; returns only a real answer.
 fn retry_without_tools(
     model: &XybridModel,
     context: Option<&ConversationContext>,
     input: &Envelope,
     show_reasoning: bool,
+    max_tokens: Option<usize>,
 ) -> Option<QueryOutcome> {
+    let config = max_tokens.map(|max_tokens| {
+        session_generation_config(model.default_generation_config(), None, Some(max_tokens))
+    });
     let result = match context {
-        Some(ctx) => model.run_with_context(input, ctx, None),
-        None => model.run(input, None),
+        Some(ctx) => model.run_with_context(input, ctx, config.as_ref()),
+        None => model.run(input, config.as_ref()),
     }
     .ok()?;
     let answer = strip_tool_calls(result.text()?);
@@ -453,6 +509,10 @@ fn retry_without_tools(
     print_turn_reasoning(show_reasoning, result.reasoning_content());
     Some(QueryOutcome {
         answer,
+        finish_reason: result.metadata("finish_reason").cloned(),
+        reasoning_present: result
+            .reasoning_content()
+            .is_some_and(|r| !r.trim().is_empty()),
         already_printed: false,
         tool_calls_run: 0,
         stream_stats: None,
@@ -502,6 +562,76 @@ fn preview_line(text: &str, max: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn test_tool() -> Tool {
+        Tool::function(
+            "lookup",
+            "Look up a value",
+            serde_json::json!({"type": "object", "properties": {}}),
+        )
+    }
+
+    #[test]
+    fn session_config_preserves_base_fields_when_overriding_max_tokens() {
+        let base = GenerationConfig {
+            temperature: 0.7,
+            top_k: 12,
+            stop_sequences: vec!["<end>".to_string()],
+            ..Default::default()
+        };
+
+        let config = session_generation_config(base, None, Some(64));
+
+        assert_eq!(config.max_tokens, 64);
+        assert_eq!(config.temperature, 0.7);
+        assert_eq!(config.top_k, 12);
+        assert_eq!(config.stop_sequences, vec!["<end>".to_string()]);
+    }
+
+    #[test]
+    fn session_config_attaches_tools_without_clearing_base_fields() {
+        let base = GenerationConfig {
+            temperature: 0.7,
+            top_p: 0.8,
+            repetition_penalty: 1.25,
+            ..Default::default()
+        };
+
+        let config = session_generation_config(base, Some(vec![test_tool()]), None);
+
+        assert_eq!(config.temperature, 0.7);
+        assert_eq!(config.top_p, 0.8);
+        assert_eq!(config.repetition_penalty, 1.25);
+        assert_eq!(config.tools.len(), 1);
+        assert_eq!(config.tools[0].function.name, "lookup");
+    }
+
+    #[test]
+    fn session_config_without_overrides_returns_base_unchanged() {
+        let base = GenerationConfig {
+            max_tokens: 3584,
+            temperature: 0.7,
+            top_p: 0.8,
+            min_p: 0.02,
+            top_k: 12,
+            repetition_penalty: 1.25,
+            stop_sequences: vec!["<end>".to_string()],
+            grammar: Some("root ::= \"ok\"".to_string()),
+            tools: vec![test_tool()],
+        };
+
+        let config = session_generation_config(base, None, None);
+
+        assert_eq!(config.max_tokens, 3584);
+        assert_eq!(config.temperature, 0.7);
+        assert_eq!(config.top_p, 0.8);
+        assert_eq!(config.min_p, 0.02);
+        assert_eq!(config.top_k, 12);
+        assert_eq!(config.repetition_penalty, 1.25);
+        assert_eq!(config.stop_sequences, vec!["<end>".to_string()]);
+        assert_eq!(config.grammar.as_deref(), Some("root ::= \"ok\""));
+        assert_eq!(config.tools.len(), 1);
+    }
 
     #[test]
     fn fold_appends_findings_to_the_question() {

@@ -655,13 +655,8 @@ impl GenerationConfig {
         }
     }
 
-    /// Materialize the SDK type. Binding crates wrapping a non-facade POD
-    /// (e.g. `FfiGenerationConfig` in the Flutter bindings) call this to
-    /// consume the canonical "option overrides → SDK defaults" mapping
-    /// instead of duplicating it. `pub` rather than `pub(crate)` for that
-    /// reason.
-    pub fn to_sdk(&self) -> sdk::GenerationConfig {
-        let mut cfg = sdk::GenerationConfig::default();
+    /// Apply the explicitly set fields over a caller-provided SDK config.
+    pub fn apply_over(&self, mut cfg: sdk::GenerationConfig) -> sdk::GenerationConfig {
         if let Some(v) = self.max_tokens {
             cfg.max_tokens = v as usize;
         }
@@ -687,6 +682,15 @@ impl GenerationConfig {
             cfg.grammar = Some(g.clone());
         }
         cfg
+    }
+
+    /// Materialize the SDK type over the global defaults.
+    ///
+    /// Run paths with a model in scope should prefer
+    /// `apply_over(model.default_generation_config())` so model-level defaults
+    /// are preserved.
+    pub fn to_sdk(&self) -> sdk::GenerationConfig {
+        self.apply_over(sdk::GenerationConfig::default())
     }
 }
 
@@ -744,11 +748,19 @@ pub struct RunOptions {
 }
 
 impl RunOptions {
-    /// Materialize the SDK type. `pub` so binding crates with their own
-    /// run-options POD (e.g. `FfiRunOptions` in the Flutter bindings) can
-    /// route through this for the policy-builder assembly without
-    /// re-implementing it.
+    /// Materialize the SDK type over global defaults.
+    ///
+    /// Run paths with a model in scope should prefer [`Self::to_sdk_over`].
     pub fn to_sdk(&self, cancel: Option<&CancellationToken>) -> sdk::RunOptions {
+        self.to_sdk_over(cancel, sdk::GenerationConfig::default())
+    }
+
+    /// Materialize the SDK type over model-resolved generation defaults.
+    pub fn to_sdk_over(
+        &self,
+        cancel: Option<&CancellationToken>,
+        generation_base: sdk::GenerationConfig,
+    ) -> sdk::RunOptions {
         let mut policy = sdk::AbortPolicy::default()
             .with_cloud_fallback(self.fallback_to_cloud)
             .with_max_grace_tokens(self.max_grace_tokens);
@@ -758,7 +770,7 @@ impl RunOptions {
 
         let mut opts = sdk::RunOptions::new().with_abort_policy(policy);
         if let Some(gc) = &self.generation_config {
-            opts = opts.with_generation_config(gc.to_sdk());
+            opts = opts.with_generation_config(gc.apply_over(generation_base));
         }
         if let Some(cid) = &self.correlation_id {
             opts = opts.with_correlation_id(cid.clone());
@@ -1155,7 +1167,7 @@ impl XybridModel {
         cancel: Option<Arc<CancellationToken>>,
     ) -> Result<InferenceResult> {
         let env = envelope.into_sdk()?;
-        let opts = options.to_sdk(cancel.as_deref());
+        let opts = options.to_sdk_over(cancel.as_deref(), self.inner.default_generation_config());
         let result = self
             .inner
             .run_with_options(&env, &opts)
@@ -1176,7 +1188,9 @@ impl XybridModel {
     ) -> Result<InferenceResult> {
         let env = envelope.into_sdk()?;
         let ctx = context.snapshot();
-        let gc = generation_config.as_ref().map(GenerationConfig::to_sdk);
+        let gc = generation_config
+            .as_ref()
+            .map(|config| config.apply_over(self.inner.default_generation_config()));
         let result = self
             .inner
             .run_with_context(&env, &ctx, gc.as_ref())
@@ -1487,6 +1501,25 @@ mod tests {
     }
 
     #[test]
+    fn generation_config_apply_over_preserves_unset_base_fields() {
+        let base = sdk::GenerationConfig {
+            max_tokens: 3584,
+            temperature: 0.7,
+            ..sdk::GenerationConfig::default()
+        };
+        let gc = GenerationConfig {
+            top_k: Some(12),
+            ..GenerationConfig::default()
+        };
+
+        let sdk_gc = gc.apply_over(base);
+
+        assert_eq!(sdk_gc.max_tokens, 3584);
+        assert!((sdk_gc.temperature - 0.7).abs() < f32::EPSILON);
+        assert_eq!(sdk_gc.top_k, 12);
+    }
+
+    #[test]
     fn generation_config_defaults_preserve_sdk_defaults() {
         // An empty facade config must not silently override the SDK's
         // baked-in defaults. Verifies the `if let Some(...)` guards.
@@ -1524,6 +1557,18 @@ mod tests {
             .observes(sdk::AbortSignal::ThermalCritical));
         assert_eq!(sdk_opts.correlation_id.as_deref(), Some("trace-1"));
         assert!(sdk_opts.cancellation_token.is_some());
+    }
+
+    #[test]
+    fn run_options_without_generation_config_preserves_none() {
+        let base = sdk::GenerationConfig {
+            max_tokens: 3584,
+            ..sdk::GenerationConfig::default()
+        };
+
+        let sdk_opts = RunOptions::default().to_sdk_over(None, base);
+
+        assert!(sdk_opts.generation_config.is_none());
     }
 
     #[test]

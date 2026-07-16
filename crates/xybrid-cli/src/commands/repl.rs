@@ -29,6 +29,7 @@ use targeting::{
 };
 use warmup::warmup_models;
 
+use super::utils::{maybe_warn_thinking_budget, thinking_budget_exhausted, THINKING_BUDGET_HINT};
 use crate::ui;
 
 /// Interactive REPL mode - keeps models loaded for fast repeated inference.
@@ -41,6 +42,7 @@ pub(crate) fn handle_repl_command(
     target: Option<String>,
     stream: bool,
     show_reasoning: bool,
+    max_tokens: Option<usize>,
     system_prompt: Option<String>,
     no_tools: bool,
     tools_file: Option<PathBuf>,
@@ -69,7 +71,8 @@ pub(crate) fn handle_repl_command(
             repo
         ))?;
 
-        let sanitized = repo.replace('/', "--");
+        let cache_repo = xybrid_sdk::ModelSource::parse_huggingface(repo);
+        let sanitized = cache_repo.model_id().unwrap_or(repo).replace('/', "--");
         let cache_dir = dirs::home_dir()
             .ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))?
             .join(".xybrid")
@@ -312,6 +315,7 @@ pub(crate) fn handle_repl_command(
                     resolved_system.as_deref(),
                     llm_stream,
                     show_reasoning,
+                    max_tokens,
                     verbose,
                 ) {
                     Ok(outcome) => {
@@ -321,6 +325,13 @@ pub(crate) fn handle_repl_command(
                         } else {
                             println!();
                             println!("  {}", outcome.answer);
+                        }
+                        if thinking_budget_exhausted(
+                            &outcome.answer,
+                            outcome.finish_reason.as_deref(),
+                            outcome.reasoning_present.then_some("present"),
+                        ) {
+                            ui::hint(THINKING_BUDGET_HINT);
                         }
 
                         // Push user + assistant AFTER the run — pushing the
@@ -356,6 +367,7 @@ pub(crate) fn handle_repl_command(
             voice.as_deref(),
             conversation_context.is_some(),
             &mut pending_images,
+            max_tokens,
         ) {
             Ok(input) => input,
             Err(e) => {
@@ -405,6 +417,7 @@ pub(crate) fn handle_repl_command(
                     &input,
                     &mut conversation_context,
                     &loaded_model,
+                    max_tokens,
                     start,
                     verbose,
                 );
@@ -842,6 +855,7 @@ fn build_repl_input(
     voice: Option<&str>,
     conversation_context_enabled: bool,
     pending_images: &mut ReplPendingImages,
+    max_tokens: Option<usize>,
 ) -> Result<Envelope> {
     if !pending_images.is_empty() {
         if voice.is_some() {
@@ -849,7 +863,13 @@ fn build_repl_input(
                 "--voice cannot be combined with /image attachments"
             ));
         }
-        return build_repl_multimodal_input(input_line, pending_images);
+        let mut input = build_repl_multimodal_input(input_line, pending_images)?;
+        if let Some(max_tokens) = max_tokens {
+            input
+                .metadata
+                .insert("max_tokens".to_string(), max_tokens.to_string());
+        }
+        return Ok(input);
     }
 
     let mut input = Envelope::new(EnvelopeKind::Text(input_line.to_string()));
@@ -860,6 +880,12 @@ fn build_repl_input(
         input
             .metadata
             .insert("voice_id".to_string(), voice_id.to_string());
+    }
+
+    if let Some(max_tokens) = max_tokens {
+        input
+            .metadata
+            .insert("max_tokens".to_string(), max_tokens.to_string());
     }
 
     Ok(input)
@@ -902,6 +928,7 @@ fn try_streaming_execution(
     input: &Envelope,
     conversation_context: &mut Option<ConversationContext>,
     loaded_model: &Option<xybrid_sdk::model::XybridModel>,
+    max_tokens: Option<usize>,
     start: std::time::Instant,
     verbose: u8,
 ) -> bool {
@@ -912,7 +939,14 @@ fn try_streaming_execution(
 
     if let Some(model) = model_for_streaming {
         if model.supports_token_streaming() {
-            return execute_streaming(model, input, conversation_context, start, verbose);
+            return execute_streaming(
+                model,
+                input,
+                conversation_context,
+                max_tokens,
+                start,
+                verbose,
+            );
         } else {
             ui::warning("Streaming only supported for GGUF models, falling back to batch mode");
             return false;
@@ -929,7 +963,14 @@ fn try_streaming_execution(
     match model_result {
         Ok(model) => {
             if model.supports_token_streaming() {
-                execute_streaming(&model, input, conversation_context, start, verbose)
+                execute_streaming(
+                    &model,
+                    input,
+                    conversation_context,
+                    max_tokens,
+                    start,
+                    verbose,
+                )
             } else {
                 ui::warning("Streaming only supported for GGUF models, falling back to batch mode");
                 false
@@ -950,6 +991,7 @@ fn execute_streaming(
     model: &xybrid_sdk::model::XybridModel,
     input: &Envelope,
     conversation_context: &mut Option<ConversationContext>,
+    max_tokens: Option<usize>,
     start: std::time::Instant,
     verbose: u8,
 ) -> bool {
@@ -963,9 +1005,14 @@ fn execute_streaming(
     let token_count_clone = Arc::clone(&token_count);
     let first_token_time = Arc::new(Mutex::new(None::<std::time::Instant>));
     let first_token_clone = Arc::clone(&first_token_time);
+    let config = max_tokens.map(|max_tokens| {
+        model
+            .default_generation_config()
+            .with_max_tokens(max_tokens)
+    });
 
     let streaming_result = if let Some(ref ctx) = conversation_context {
-        model.run_streaming_with_context(input, ctx, None, |token| {
+        model.run_streaming_with_context(input, ctx, config.as_ref(), |token| {
             print!("{}", token.token);
             io::stdout().flush()?;
             let count = token_count_clone.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -980,7 +1027,7 @@ fn execute_streaming(
             Ok(())
         })
     } else {
-        model.run_streaming(input, None, |token| {
+        model.run_streaming(input, config.as_ref(), |token| {
             print!("{}", token.token);
             io::stdout().flush()?;
             let count = token_count_clone.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -997,9 +1044,10 @@ fn execute_streaming(
     };
 
     match streaming_result {
-        Ok(_result) => {
+        Ok(result) => {
             let elapsed = start.elapsed();
             println!();
+            maybe_warn_thinking_budget(result.envelope());
 
             if let Some(ref mut ctx) = conversation_context {
                 // Push the user turn only after the run: the streaming
@@ -1096,6 +1144,7 @@ fn execute_batch(
                                 .map(String::as_str),
                         );
                         println!("  {}", text);
+                        maybe_warn_thinking_budget(&result.output);
 
                         if let Some(ref mut ctx) = conversation_context {
                             let assistant_response =
@@ -1208,7 +1257,8 @@ mod tests {
         let mut pending_images = ReplPendingImages::default();
         pending_images.push(image_path);
 
-        let input = build_repl_input("describe this", None, true, &mut pending_images).unwrap();
+        let input =
+            build_repl_input("describe this", None, true, &mut pending_images, None).unwrap();
         let parts = input.as_multipart().expect("REPL input is multipart");
 
         assert!(pending_images.is_empty());
@@ -1233,7 +1283,8 @@ mod tests {
         let mut pending_images = ReplPendingImages::default();
         pending_images.push(image_path);
 
-        let err = build_repl_input("describe this", None, true, &mut pending_images).unwrap_err();
+        let err =
+            build_repl_input("describe this", None, true, &mut pending_images, None).unwrap_err();
         let message = format!("{err:#}");
 
         assert!(message.contains("Invalid image input"));

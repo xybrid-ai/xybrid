@@ -2534,10 +2534,12 @@ fn package_xcframework(version: &str, output_dir: &Path) -> Result<Option<Packag
         size,
         sha256,
         platform: Some("apple".to_string()),
+        // The slices the xcframework actually carries (boltffi.toml:
+        // include_macos = false, simulator_architectures = ["arm64"]).
+        // Must match the real xcframework layout — no macOS, arm64-only sim.
         architectures: Some(vec![
             "ios-arm64".to_string(),
-            "ios-arm64_x86_64-simulator".to_string(),
-            "macos-arm64_x86_64".to_string(),
+            "ios-arm64-simulator".to_string(),
         ]),
     }))
 }
