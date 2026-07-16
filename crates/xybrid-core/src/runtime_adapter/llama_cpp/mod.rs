@@ -668,6 +668,18 @@ fn generation_truncated_by_budget(
     !stopped && !ended_on_eog && generated >= budget
 }
 
+/// The native loop stores the terminal EOG token before breaking, and
+/// `detokenize` renders special tokens verbatim — without trimming by token
+/// identity, a model whose EOG literal is missing from the stop-pattern
+/// table (e.g. Llama 3's `<|eot_id|>`) leaks it into the answer text.
+fn text_tokens_without_terminal_eog(output_tokens: &[i32], ended_on_eog: bool) -> &[i32] {
+    if ended_on_eog {
+        &output_tokens[..output_tokens.len().saturating_sub(1)]
+    } else {
+        output_tokens
+    }
+}
+
 fn generation_would_overflow_context(
     prefix_len: usize,
     prompt_tokens: usize,
@@ -893,7 +905,11 @@ impl LlmBackend for LlamaCppBackend {
             );
 
             // Decode tokens to text
-            let mut text = model.detokenize(&output_tokens)?;
+            let ended_on_eog = output_tokens
+                .last()
+                .is_some_and(|&token| model.vocab_is_eog(token));
+            let mut text =
+                model.detokenize(text_tokens_without_terminal_eog(&output_tokens, ended_on_eog))?;
 
             // Debug: log the raw text and its bytes to understand encoding
             log::debug!(target: "xybrid_core", "LLM raw output ({} chars): {:?}", text.len(), &text[..text.len().min(200)]);
@@ -907,9 +923,6 @@ impl LlmBackend for LlamaCppBackend {
             log::debug!(target: "xybrid_core", "Searching for stop patterns: {:?}", final_stop_patterns);
             let stopped_in_text = truncate_at_first_stop(&mut text, &final_stop_patterns);
             let trimmed_partial = trim_partial_stop_suffix(&mut text, &final_stop_patterns);
-            let ended_on_eog = output_tokens
-                .last()
-                .is_some_and(|&token| model.vocab_is_eog(token));
             let truncated_by_budget = generation_truncated_by_budget(
                 stopped_in_text || trimmed_partial || stopped_by_callback,
                 ended_on_eog,
@@ -1107,12 +1120,15 @@ impl LlmBackend for LlamaCppBackend {
             // included here because this is final-text only — no streaming
             // false-positive risk.
             let final_patterns = chat_stop_patterns(config);
-            let mut text = model.detokenize(&output_tokens)?;
-            let stopped_full = truncate_at_first_stop(&mut text, &final_patterns);
-            let trimmed_partial = trim_partial_stop_suffix(&mut text, &final_patterns);
             let ended_on_eog = output_tokens
                 .last()
                 .is_some_and(|&token| model.vocab_is_eog(token));
+            let mut text = model.detokenize(text_tokens_without_terminal_eog(
+                &output_tokens,
+                ended_on_eog,
+            ))?;
+            let stopped_full = truncate_at_first_stop(&mut text, &final_patterns);
+            let trimmed_partial = trim_partial_stop_suffix(&mut text, &final_patterns);
             let truncated_by_budget = generation_truncated_by_budget(
                 filter.is_stopped() || stopped_full || trimmed_partial || stopped_by_callback,
                 ended_on_eog,
@@ -1160,7 +1176,11 @@ impl LlmBackend for LlamaCppBackend {
             ) {
                 let recovered_partial = PartialToken::new(text.clone(), token_index, text.clone());
                 token_index += 1;
-                let _ = on_token(recovered_partial);
+                on_token(recovered_partial).map_err(|e| {
+                    AdapterError::RuntimeError(format!(
+                        "streaming callback rejected the recovered answer: {e}"
+                    ))
+                })?;
             }
 
             // Send final empty token with finish_reason — matches the
@@ -1171,13 +1191,20 @@ impl LlmBackend for LlamaCppBackend {
             // suppressed: then the stream showed nothing on purpose and the
             // terminal token is the caller's only signal.
             if token_index > 0 || tool_block_suppressed {
-                let final_cumulative = if suppress_tools {
+                // The filter's cumulative view only differs from the final text
+                // when a tool block was deliberately suppressed; keying on mere
+                // tool CONFIGURATION would send an empty cumulative whenever the
+                // answer was recovered post-filter (nothing ever streamed).
+                let final_cumulative = if tool_block_suppressed {
                     filter.cumulative_emitted().to_string()
                 } else {
                     text.clone()
                 };
                 let final_partial = PartialToken::new(String::new(), token_index, final_cumulative)
                     .with_finish_reason(&finish_reason);
+                // Best-effort by design: generation already completed and the
+                // result is returned regardless — unlike token deltas, whose
+                // errors abort the stream.
                 let _ = on_token(final_partial);
             }
 
@@ -1340,12 +1367,15 @@ impl LlmBackend for LlamaCppBackend {
 
             let final_stop_patterns =
                 merge_stop_patterns(&generation_stop_patterns, CHAT_STOP_PATTERNS_BROKEN);
-            let mut text = model.detokenize(&output_tokens)?;
-            let stopped_in_text = truncate_at_first_stop(&mut text, &final_stop_patterns);
-            let trimmed_partial = trim_partial_stop_suffix(&mut text, &final_stop_patterns);
             let ended_on_eog = output_tokens
                 .last()
                 .is_some_and(|&token| model.vocab_is_eog(token));
+            let mut text = model.detokenize(text_tokens_without_terminal_eog(
+                &output_tokens,
+                ended_on_eog,
+            ))?;
+            let stopped_in_text = truncate_at_first_stop(&mut text, &final_stop_patterns);
+            let trimmed_partial = trim_partial_stop_suffix(&mut text, &final_stop_patterns);
             let truncated_by_budget = generation_truncated_by_budget(
                 stopped_in_text || trimmed_partial || stopped_by_callback,
                 ended_on_eog,
@@ -1548,12 +1578,15 @@ impl LlmBackend for LlamaCppBackend {
             let mut token_index = token_index;
             let final_stop_patterns =
                 merge_stop_patterns(&generation_stop_patterns, CHAT_STOP_PATTERNS_BROKEN);
-            let mut text = model.detokenize(&output_tokens)?;
-            let stopped_in_text = truncate_at_first_stop(&mut text, &final_stop_patterns);
-            let trimmed_partial = trim_partial_stop_suffix(&mut text, &final_stop_patterns);
             let ended_on_eog = output_tokens
                 .last()
                 .is_some_and(|&token| model.vocab_is_eog(token));
+            let mut text = model.detokenize(text_tokens_without_terminal_eog(
+                &output_tokens,
+                ended_on_eog,
+            ))?;
+            let stopped_in_text = truncate_at_first_stop(&mut text, &final_stop_patterns);
+            let trimmed_partial = trim_partial_stop_suffix(&mut text, &final_stop_patterns);
             let truncated_by_budget = generation_truncated_by_budget(
                 filter_stopped || stopped_in_text || trimmed_partial || stopped_by_callback,
                 ended_on_eog,
@@ -1595,17 +1628,28 @@ impl LlmBackend for LlamaCppBackend {
             ) {
                 let recovered_partial = PartialToken::new(text.clone(), token_index, text.clone());
                 token_index += 1;
-                let _ = on_token(recovered_partial);
+                on_token(recovered_partial).map_err(|e| {
+                    AdapterError::RuntimeError(format!(
+                        "streaming callback rejected the recovered answer: {e}"
+                    ))
+                })?;
             }
 
             if token_index > 0 || tool_block_suppressed {
-                let final_cumulative = if suppress_tools {
+                // The filter's cumulative view only differs from the final text
+                // when a tool block was deliberately suppressed; keying on mere
+                // tool CONFIGURATION would send an empty cumulative whenever the
+                // answer was recovered post-filter (nothing ever streamed).
+                let final_cumulative = if tool_block_suppressed {
                     filter_cumulative
                 } else {
                     text.clone()
                 };
                 let final_partial = PartialToken::new(String::new(), token_index, final_cumulative)
                     .with_finish_reason(&finish_reason);
+                // Best-effort by design: generation already completed and the
+                // result is returned regardless — unlike token deltas, whose
+                // errors abort the stream.
                 let _ = on_token(final_partial);
             }
 
@@ -1632,6 +1676,15 @@ impl LlmBackend for LlamaCppBackend {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn terminal_eog_token_is_trimmed_from_text_tokens() {
+        let tokens = [1, 2, 3];
+        assert_eq!(text_tokens_without_terminal_eog(&tokens, true), &[1, 2]);
+        assert_eq!(text_tokens_without_terminal_eog(&tokens, false), &[1, 2, 3]);
+        let empty: [i32; 0] = [];
+        assert_eq!(text_tokens_without_terminal_eog(&empty, false), &empty[..]);
+    }
 
     #[test]
     fn generation_budget_keeps_requested_budget_when_it_fits() {
