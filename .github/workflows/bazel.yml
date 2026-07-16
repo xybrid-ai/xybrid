@@ -1,36 +1,23 @@
-# Bazel — ADVISORY (Phase 1 of the migration; see .context/bazel-per-platform-today-vs-ideal.md
-# in the spike workspace and PR #326). This job is NOT a required check: cargo remains the
-# build of record. It validates the Bazel graph on every PR and builds the RBE-proven targets
-# (the hermetic linux llama chain + the Android AAR) against the shared BuildBuddy cache.
+# Bazel — REQUIRED-READY. Runs on every PR to master so it can be marked a
+# required status check in branch protection (the "make Bazel the build of
+# record" toggle — that switch is a repo setting, not this file).
+#
+# To avoid blocking unrelated PRs, the cheap `changes` job decides whether the
+# PR touches any Bazel input; if not, the heavy `bazel` job is skipped, and a
+# skipped required check counts as passing.
 #
 # Fork-safe: PRs from forks have no secrets, so the RBE steps skip and only the
-# analyze-everything phase runs (no remote, no network beyond repo fetches).
-name: Bazel (advisory)
+# analyze phase runs (no remote, no network beyond repo fetches).
+name: Bazel
 
 on:
+  # No path filter here (unlike push): a required check must report on EVERY PR
+  # or GitHub blocks the merge waiting for a status that never comes. The
+  # `changes` job is the path filter instead.
   pull_request:
     branches: [master]
-    paths:
-      - "MODULE.bazel"
-      - ".bazelrc"
-      - ".bazelversion"
-      - ".bazelignore"
-      - "BUILD.bazel"
-      - "**/BUILD.bazel"
-      - "rules_android_ndk.patch"
-      - "rules_foreign_cc.patch"
-      - "rules_rs.patch"
-      - "hermetic_llvm.patch"
-      - "crates/**"
-      - "bindings/kotlin/**"
-      - "macros/**"
-      - "vendor/llama-cpp"
-      - "vendor/ort-macos/**"
-      - "Cargo.toml"
-      - "Cargo.lock"
-      - ".github/workflows/bazel.yml"
-  # Same path set as pull_request: a master merge touching any Bazel input
-  # re-warms the shared cache so the next PR starts warm.
+  # Path-filtered: a master merge touching any Bazel input re-warms the shared
+  # cache so the next PR starts warm.
   push:
     branches: [master]
     paths:
@@ -62,8 +49,41 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Cheap path gate (no checkout — just the PR's file list). Lets the heavy
+  # `bazel` job be a required check without blocking PRs that only touch
+  # unrelated files (docs, other workflows, ...).
+  changes:
+    name: Detect Bazel-relevant changes
+    runs-on: ubuntu-latest
+    outputs:
+      relevant: ${{ steps.filter.outputs.relevant }}
+    steps:
+      - name: Check changed paths
+        id: filter
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # push / dispatch already path-filter at the trigger → always relevant.
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          FILES=$(gh api --paginate \
+            "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" \
+            --jq '.[].filename')
+          if printf '%s\n' "$FILES" | grep -qE '^(MODULE\.bazel|\.bazelrc|\.bazelversion|\.bazelignore|BUILD\.bazel|.*/BUILD\.bazel|rules_android_ndk\.patch|rules_foreign_cc\.patch|rules_rs\.patch|hermetic_llvm\.patch|crates/|bindings/kotlin/|macros/|vendor/llama-cpp|vendor/ort-macos/|Cargo\.toml|Cargo\.lock|\.github/workflows/bazel\.yml)'; then
+            REL=true
+          else
+            REL=false
+          fi
+          echo "relevant=$REL" >> "$GITHUB_OUTPUT"
+          echo "Bazel-relevant PR: $REL"
+
   bazel:
     name: Bazel graph + RBE targets
+    # Skipped (→ passing) on PRs that touch no Bazel input; runs otherwise.
+    needs: changes
+    if: needs.changes.outputs.relevant == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:

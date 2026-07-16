@@ -202,26 +202,9 @@ jobs:
       - name: Run doc tests
         run: cargo test --workspace --features ort-download --doc
 
-  # Linux-only on push/PR. Per-platform CLI builds run in release.yml.
-  build-cli:
-    name: Build CLI (ubuntu-latest)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-        with:
-          submodules: true
-
-      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
-        with:
-          toolchain: stable
-          targets: x86_64-unknown-linux-gnu
-
-      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-        with:
-          key: ubuntu-latest-cli
-
-      - name: Build CLI
-        run: cargo build --release -p xybrid-cli --target x86_64-unknown-linux-gnu --features platform-desktop
+  # (Retired) The cargo linux-CLI build lived here. The required Bazel check
+  # ("Bazel graph + RBE targets", bazel.yml) now builds + smokes the linux CLI
+  # on every Bazel-relevant PR, so this cargo build was redundant.
 
   # API contract validation (soft warning — does not block CI)
   api-contract:
@@ -294,6 +277,6 @@ jobs:
   ci-success:
     name: CI Success
     runs-on: ubuntu-latest
-    needs: [fmt, clippy, check-no-default-features, check-platform-macos, check-platform-desktop, check-vision-platforms, clippy-llm, test-llm, test, build-cli, api-contract, web]
+    needs: [fmt, clippy, check-no-default-features, check-platform-macos, check-platform-desktop, check-vision-platforms, clippy-llm, test-llm, test, api-contract, web]
     steps:
       - run: echo "All CI checks passed!"
