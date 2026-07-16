@@ -116,6 +116,24 @@ _DARWIN_LLAMA = _LLAMA_CACHE_ENTRIES | {
     "LLAMA_BUILD_COMMON": "ON",
 }
 
+# iOS device (Apple G1), built LOCALLY on a Mac via Xcode's iphoneos SDK
+# (apple_support toolchain). Same rfcc gap as darwin/windows — no iOS entry in
+# rfcc's _TARGET_OS_PARAMS, so set CMAKE_SYSTEM_NAME=iOS explicitly, else cmake
+# detects the macOS EXEC host and builds llama as macOS. OSX_SYSROOT=iphoneos +
+# ARCHITECTURES=arm64 pick the iOS SDK via xcrun; deployment 16.0 matches
+# Package.swift / boltffi.toml. Metal stays OFF (base): GGML_METAL_DEFAULT is ON
+# on APPLE, so the base GGML_METAL=OFF is load-bearing (Metal is a later gate).
+# CPU-only, no vision/tools — the leanest iOS build. No Mach-O binutils overrides
+# (unlike the darwin CROSS): iOS builds ON the Mac, where /usr/bin/otool exists.
+_IOS_LLAMA = _LLAMA_CACHE_ENTRIES | {
+    "CMAKE_SYSTEM_NAME": "iOS",
+    "CMAKE_SYSTEM_PROCESSOR": "arm64",
+    "CMAKE_OSX_SYSROOT": "iphoneos",
+    "CMAKE_OSX_ARCHITECTURES": "arm64",
+    "CMAKE_OSX_DEPLOYMENT_TARGET": "16.0",
+    "IOS": "ON",
+}
+
 cmake(
     name = "llama",
     # armv7: rfcc's crosstool has no CMAKE_SYSTEM_PROCESSOR mapping for armv7,
@@ -195,7 +213,19 @@ cmake(
         "@rules_rs//rs/platforms/config:aarch64-apple-darwin": _DARWIN_LLAMA | {
             "CMAKE_CXX_STANDARD_LIBRARIES": "-lc++",
         },
+        # iOS device (Apple G1) — Mac-local build via the iphoneos SDK.
+        "@rules_rs//rs/platforms/config:aarch64-apple-ios": _IOS_LLAMA,
         "//conditions:default": _LLAMA_CACHE_ENTRIES,
+    }),
+    # iOS builds LOCALLY (--config=ios never uses --config=remote), so the exec
+    # platform is already this Mac — no exec_compatible_with pin needed (unlike
+    # //:llama_metal, which runs under remote exec and must be forced local).
+    # rfcc's PATH is sanitized, so hand the iOS arm the Apple-Silicon Homebrew
+    # path so it finds the preinstalled cmake/make (--config=ios registers them);
+    # /usr/bin keeps xcrun reachable. Default {} keeps other arms' keys stable.
+    env = select({
+        "@rules_rs//rs/platforms/config:aarch64-apple-ios": {"PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"},
+        "//conditions:default": {},
     }),
     # (macOS-host PATH hack removed for the RBE/Linux test — on Linux workers
     # rfcc finds its own downloaded cmake; /opt/homebrew doesn't exist there.)
@@ -363,5 +393,15 @@ filegroup(
 filegroup(
     name = "ort_macos_arm64",
     srcs = ["vendor/ort-macos/aarch64-apple-darwin/libonnxruntime.a"],
+    visibility = ["//visibility:public"],
+)
+
+# Vendored STATIC onnxruntime for the iOS device slice (Apple G1). Same
+# provide-the-artifact pattern as macOS above; the .a lives inside the
+# committed xcframework at the ios-arm64 slice. Fed to ort-sys via
+# ORT_LIB_LOCATION (MODULE.bazel annotation).
+filegroup(
+    name = "ort_ios_arm64",
+    srcs = ["vendor/ort-ios/onnxruntime.xcframework/ios-arm64/libonnxruntime.a"],
     visibility = ["//visibility:public"],
 )

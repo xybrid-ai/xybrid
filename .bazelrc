@@ -59,6 +59,18 @@ build:macos-metal --extra_toolchains=@rules_foreign_cc//toolchains:preinstalled_
 # (-fstack-protector, which needs a libssp hermetic-llvm's MinGW sysroot doesn't
 # ship, is disabled for windows at the toolchain level in hermetic_llvm.patch.)
 
+# --- Apple Gate 1: iOS device staticlib, built LOCALLY on a Mac (Xcode iphoneos
+# SDK via apple_support). CPU-only, Metal OFF. Mac-bound end-to-end — NEVER
+# combine with --config=remote (no Mac RBE; the iOS closure needs an iphoneos
+# sysroot Linux can't provide). rfcc's exec tools come from the host's
+# preinstalled cmake/make/pkg-config (the from-source bootstrap is the mac-host
+# wall); //:llama's iOS arm sets PATH so rfcc's sanitized PATH finds them.
+build:ios --platforms=@rules_rs//rs/platforms:aarch64-apple-ios
+build:ios --extra_toolchains=@rules_foreign_cc//toolchains:preinstalled_cmake_toolchain
+build:ios --extra_toolchains=@rules_foreign_cc//toolchains:preinstalled_make_toolchain
+build:ios --extra_toolchains=@rules_foreign_cc//toolchains:preinstalled_pkgconfig_toolchain
+build:ios --compilation_mode=opt
+
 # On Linux hosts, rules_rs' experimental toolchains need an explicit host platform
 # with libc constraints (//:host_linux_gnu, root BUILD.bazel). The enable flag
 # makes `common:linux` auto-apply on Linux hosts (no-op on macOS: no macos config).
