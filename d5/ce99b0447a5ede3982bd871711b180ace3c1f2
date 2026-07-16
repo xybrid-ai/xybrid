@@ -1,0 +1,20 @@
+BUILD.bazel
+  s_8b9a9b82c688c4::t_27f73228d62a56 278-280
+  s_8b9a9b82c688c4::t_c444d587f62f0c 119,124-127,135-136
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "d5ce99b0447a5ede3982bd871711b180ace3c1f2",
+  "prompts": {},
+  "sessions": {
+    "s_8b9a9b82c688c4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "73a8592f-ccc0-42cf-bf05-435600f9a611",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
