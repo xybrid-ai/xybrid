@@ -1,0 +1,22 @@
+.github/workflows/bazel.yml
+  s_d63f9b1d7e1016::t_fe67fd94ce80e5 1-7,10-11,14-16,19-20,52-81,84-86
+.github/workflows/ci.yml
+  s_d63f9b1d7e1016::t_fe67fd94ce80e5 205-207
+  s_d63f9b1d7e1016::t_357193f990d351 280
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "af17eaaf76ac98775fc95404316ac8b290171371",
+  "prompts": {},
+  "sessions": {
+    "s_d63f9b1d7e1016": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b31456c6-15e5-4598-bcae-7f120287ae3a",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
