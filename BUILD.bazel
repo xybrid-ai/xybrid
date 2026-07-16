@@ -116,15 +116,15 @@ _DARWIN_LLAMA = _LLAMA_CACHE_ENTRIES | {
     "LLAMA_BUILD_COMMON": "ON",
 }
 
-# iOS device (Apple G1), built LOCALLY on a Mac via Xcode's iphoneos SDK
+# iOS device (Apple G1+G2), built LOCALLY on a Mac via Xcode's iphoneos SDK
 # (apple_support toolchain). Same rfcc gap as darwin/windows — no iOS entry in
 # rfcc's _TARGET_OS_PARAMS, so set CMAKE_SYSTEM_NAME=iOS explicitly, else cmake
 # detects the macOS EXEC host and builds llama as macOS. OSX_SYSROOT=iphoneos +
 # ARCHITECTURES=arm64 pick the iOS SDK via xcrun; deployment 16.0 matches
-# Package.swift / boltffi.toml. Metal stays OFF (base): GGML_METAL_DEFAULT is ON
-# on APPLE, so the base GGML_METAL=OFF is load-bearing (Metal is a later gate).
-# CPU-only, no vision/tools — the leanest iOS build. No Mach-O binutils overrides
-# (unlike the darwin CROSS): iOS builds ON the Mac, where /usr/bin/otool exists.
+# Package.swift / boltffi.toml. G2: Metal GPU + Accelerate ON (Xcode's metal
+# compiler, Mac-bound) — iOS always ships with Metal, so unlike desktop it needs
+# no --//:metal flag; just turn it on for the iOS arm. No Mach-O binutils
+# overrides (unlike the darwin CROSS): iOS builds ON the Mac (/usr/bin/otool).
 _IOS_LLAMA = _LLAMA_CACHE_ENTRIES | {
     "CMAKE_SYSTEM_NAME": "iOS",
     "CMAKE_SYSTEM_PROCESSOR": "arm64",
@@ -132,6 +132,8 @@ _IOS_LLAMA = _LLAMA_CACHE_ENTRIES | {
     "CMAKE_OSX_ARCHITECTURES": "arm64",
     "CMAKE_OSX_DEPLOYMENT_TARGET": "16.0",
     "IOS": "ON",
+    "GGML_METAL": "ON",
+    "GGML_ACCELERATE": "ON",
 }
 
 cmake(
@@ -273,6 +275,9 @@ cmake(
         "@rules_rs//rs/platforms/config:x86_64-unknown-linux-gnu": ["libmtmd.a"] + _LLAMA_LIBS,
         # Darwin vision (Flip 2 parity — both CPU and Metal lanes).
         "@rules_rs//rs/platforms/config:aarch64-apple-darwin": ["libmtmd.a"] + _LLAMA_LIBS,
+        # iOS G2: Metal backend is its own archive (like //:llama_metal).
+        # Vision (libmtmd) is a later parity step — not collected yet.
+        "@rules_rs//rs/platforms/config:aarch64-apple-ios": ["libggml-metal.a"] + _LLAMA_LIBS,
         # Windows/MinGW: ggml/CMakeLists.txt sets CMAKE_STATIC_LIBRARY_PREFIX=""
         # on WIN32, so the ggml archives have NO `lib` prefix (ggml.a, not
         # libggml.a) — while llama (sibling scope) keeps it (libllama.a), and
