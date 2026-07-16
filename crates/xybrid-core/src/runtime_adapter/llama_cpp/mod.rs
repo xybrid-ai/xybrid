@@ -1176,11 +1176,7 @@ impl LlmBackend for LlamaCppBackend {
             ) {
                 let recovered_partial = PartialToken::new(text.clone(), token_index, text.clone());
                 token_index += 1;
-                on_token(recovered_partial).map_err(|e| {
-                    AdapterError::RuntimeError(format!(
-                        "streaming callback rejected the recovered answer: {e}"
-                    ))
-                })?;
+                on_token(recovered_partial).map_err(AdapterError::from_streaming_callback_error)?;
             }
 
             // Send final empty token with finish_reason — matches the
@@ -1202,10 +1198,11 @@ impl LlmBackend for LlamaCppBackend {
                 };
                 let final_partial = PartialToken::new(String::new(), token_index, final_cumulative)
                     .with_finish_reason(&finish_reason);
-                // Best-effort by design: generation already completed and the
-                // result is returned regardless — unlike token deltas, whose
-                // errors abort the stream.
-                let _ = on_token(final_partial);
+                // Terminal errors propagate like every other callback error
+                // (the trait contract, and what mistral already does) — the
+                // typed conversion keeps a CloudFallbackAbort returned here
+                // visible to the orchestrator's fallback matching.
+                on_token(final_partial).map_err(AdapterError::from_streaming_callback_error)?;
             }
 
             Ok(output_from_fields(
@@ -1628,11 +1625,7 @@ impl LlmBackend for LlamaCppBackend {
             ) {
                 let recovered_partial = PartialToken::new(text.clone(), token_index, text.clone());
                 token_index += 1;
-                on_token(recovered_partial).map_err(|e| {
-                    AdapterError::RuntimeError(format!(
-                        "streaming callback rejected the recovered answer: {e}"
-                    ))
-                })?;
+                on_token(recovered_partial).map_err(AdapterError::from_streaming_callback_error)?;
             }
 
             if token_index > 0 || tool_block_suppressed {
@@ -1647,10 +1640,11 @@ impl LlmBackend for LlamaCppBackend {
                 };
                 let final_partial = PartialToken::new(String::new(), token_index, final_cumulative)
                     .with_finish_reason(&finish_reason);
-                // Best-effort by design: generation already completed and the
-                // result is returned regardless — unlike token deltas, whose
-                // errors abort the stream.
-                let _ = on_token(final_partial);
+                // Terminal errors propagate like every other callback error
+                // (the trait contract, and what mistral already does) — the
+                // typed conversion keeps a CloudFallbackAbort returned here
+                // visible to the orchestrator's fallback matching.
+                on_token(final_partial).map_err(AdapterError::from_streaming_callback_error)?;
             }
 
             Ok(GenerationOutput {
