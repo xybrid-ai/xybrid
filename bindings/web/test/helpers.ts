@@ -1,4 +1,5 @@
 import { RuntimeInitializer } from "../src/internal/initialization.ts";
+import type { loadModelBytes } from "../src/internal/model-download.ts";
 import type { BrowserRuntime, RuntimeModel, RuntimeTensor } from "../src/internal/runtime.ts";
 import { AcceleratorUnavailableError } from "../src/internal/runtime.ts";
 import { type ParsedMetadata, parseMetadata } from "../src/metadata.ts";
@@ -6,8 +7,6 @@ import { loadModel } from "../src/model.ts";
 import type { LoadOptions, TensorDetail, TensorValue } from "../src/types.ts";
 
 type TestRuntimeTensor = RuntimeTensor & { isDeleted(): boolean; reads(): number };
-
-const initializer = new RuntimeInitializer();
 
 const isParsedMetadata = (
   value: ParsedMetadata | Record<string, unknown>,
@@ -18,7 +17,8 @@ export const loadWithDependencies = (
   options: LoadOptions,
   runtime: BrowserRuntime,
   metadata: () => Promise<ParsedMetadata | Record<string, unknown>>,
-  runtimeInitializer: RuntimeInitializer = initializer,
+  runtimeInitializer: RuntimeInitializer = new RuntimeInitializer(),
+  loadBytes: typeof loadModelBytes = async () => new Uint8Array([0]),
 ) =>
   loadModel(
     metadataUrl,
@@ -29,6 +29,7 @@ export const loadWithDependencies = (
       return isParsedMetadata(value) ? value : parseMetadata(value);
     },
     runtimeInitializer,
+    loadBytes,
   );
 
 export const tfliteMetadata = (
@@ -65,6 +66,7 @@ export type RuntimeControl = {
   readonly deletedModels: () => number;
   readonly failWebGpu: () => void;
   readonly failWebGpuCompilation: () => void;
+  readonly failWasmCompilation: () => void;
   readonly failRun: () => void;
   readonly failTensorCreationAt: (call: number) => void;
   readonly omitOutputs: () => void;
@@ -81,6 +83,7 @@ export const createRuntime = (): RuntimeControl => {
   const compiled: string[] = [];
   let shouldFailWebGpu = false;
   let shouldFailWebGpuCompilation = false;
+  let shouldFailWasmCompilation = false;
   let shouldFailRun = false;
   let tensorCreationFailure: number | undefined;
   let tensorCreationCalls = 0;
@@ -101,6 +104,9 @@ export const createRuntime = (): RuntimeControl => {
     }
     if (accelerator === "webgpu" && shouldFailWebGpuCompilation) {
       throw new DOMException("model compilation failed", "OperationError");
+    }
+    if (accelerator === "wasm" && shouldFailWasmCompilation) {
+      throw new DOMException("wasm compilation failed", "OperationError");
     }
     const currentOutput = { ...output, name: outputName, shape: outputShape };
     const model: RuntimeModel = {
@@ -133,7 +139,11 @@ export const createRuntime = (): RuntimeControl => {
       initialized.push(config.wasmPath.toString());
       await initializationGate;
     },
-    compile: async (_url, accelerator) => compile(accelerator),
+    probeAccelerator: async (accelerator) => {
+      if (accelerator === "webgpu" && shouldFailWebGpu) {
+        throw new AcceleratorUnavailableError("GPU unavailable");
+      }
+    },
     compileBytes: async (_bytes, accelerator) => compile(accelerator),
     createTensor: (detail, data, shape) => {
       tensorCreationCalls += 1;
@@ -189,6 +199,9 @@ export const createRuntime = (): RuntimeControl => {
     },
     failWebGpuCompilation: () => {
       shouldFailWebGpuCompilation = true;
+    },
+    failWasmCompilation: () => {
+      shouldFailWasmCompilation = true;
     },
     failRun: () => {
       shouldFailRun = true;

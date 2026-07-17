@@ -40,7 +40,10 @@ const messageText = (message: StreamedMessage): string => {
 };
 
 const requireWebGpuAdapter = async (): Promise<void> => {
-  const gpu = (navigator as { gpu?: { requestAdapter?: () => Promise<unknown> } }).gpu;
+  const gpu =
+    typeof navigator === "undefined"
+      ? undefined
+      : (navigator as { gpu?: { requestAdapter?: () => Promise<unknown> } }).gpu;
   if (gpu === undefined || typeof gpu.requestAdapter !== "function") {
     throw new AcceleratorUnavailableError("WebGPU is unavailable.");
   }
@@ -52,6 +55,12 @@ const requireWebGpuAdapter = async (): Promise<void> => {
   }
   if (adapter === null || adapter === undefined) {
     throw new AcceleratorUnavailableError("WebGPU reported no compatible adapter.");
+  }
+};
+
+const probeAccelerator = async (accelerator: SelectedAccelerator): Promise<void> => {
+  if (accelerator === "webgpu") {
+    await requireWebGpuAdapter();
   }
 };
 
@@ -126,26 +135,18 @@ export const liteRtLmRuntime: LlmRuntime<Blob> = {
   initialize: async (config: RuntimeInitConfig) => {
     await getOrLoadGlobalLiteRtLm(config.wasmPath.toString());
   },
+  probeAccelerator,
   fetchModel: async (
     modelUrl: URL,
     onProgress: ((progress: DownloadProgress) => void) | undefined,
-  ) => loadModelChunks(modelUrl, onProgress).then((chunks) => new Blob(chunks)),
-  modelFromChunks: async (chunks) => {
-    const parts = chunks.map((chunk) => {
-      const part = new Uint8Array(new ArrayBuffer(chunk.byteLength));
-      part.set(chunk);
-      return part;
-    });
-    return new Blob(parts);
-  },
+    signal?: AbortSignal,
+  ) => loadModelChunks(modelUrl, onProgress, signal).then((chunks) => new Blob(chunks)),
+  modelFromChunks: async (chunks) => new Blob([...chunks] as BlobPart[]),
   createEngine: async (
     model: Blob,
     accelerator: SelectedAccelerator,
     contextLength: number | undefined,
   ): Promise<LlmEngine> => {
-    if (accelerator === "webgpu") {
-      await requireWebGpuAdapter();
-    }
     // The default GPU_ARTISAN backend streams the model and cannot stream
     // compressed tokenizer sections; the plain GPU and CPU backends load
     // through the wasm filesystem and support every published section type.

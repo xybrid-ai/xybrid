@@ -18,6 +18,9 @@ export const readResponseChunks = async (
 
   if (response.body === null) {
     const bytes = new Uint8Array(await response.arrayBuffer());
+    if (signal?.aborted) {
+      throw signal.reason ?? new DOMException("The operation was aborted.", "AbortError");
+    }
     if (bytes.byteLength > maximumBytes) {
       throw new Error(limitMessage);
     }
@@ -72,8 +75,16 @@ export const readResponseBytes = async (
   maximumBytes: number,
   limitMessage: string,
   onProgress?: (loadedBytes: number, totalBytes: number | undefined) => void,
+  signal?: AbortSignal,
 ): Promise<Uint8Array<ArrayBuffer>> => {
-  const chunks = await readResponseChunks(response, maximumBytes, limitMessage, onProgress);
+  const chunks = await readResponseChunks(
+    response,
+    maximumBytes,
+    limitMessage,
+    onProgress,
+    undefined,
+    signal,
+  );
   const totalBytes = chunks.reduce((total, chunk) => total + chunk.byteLength, 0);
 
   const bytes = new Uint8Array(totalBytes);

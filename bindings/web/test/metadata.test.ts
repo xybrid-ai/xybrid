@@ -5,6 +5,8 @@ import {
   UnsupportedTemplateError,
   XybridError,
 } from "../src/errors.ts";
+import { loadMetadata } from "../src/internal/loading.ts";
+import { loadModelBytes } from "../src/internal/model-download.ts";
 import { readResponseBytes, readResponseChunks } from "../src/internal/response.ts";
 import { resolveMetadataUrl, resolveWasmPath } from "../src/internal/url.ts";
 import {
@@ -48,6 +50,46 @@ describe("metadata boundary", () => {
     ).rejects.toBeInstanceOf(UnsupportedTemplateError);
   });
 
+  test("omits ambient credentials for metadata and direct model downloads", async () => {
+    const originalFetch = globalThis.fetch;
+    const originalRequest = globalThis.Request;
+    class TrackedRequest extends originalRequest {
+      private readonly trackedCredentials: RequestCredentials;
+
+      constructor(input: RequestInfo | URL, init?: RequestInit) {
+        super(input, init);
+        this.trackedCredentials =
+          init?.credentials ??
+          (input instanceof originalRequest ? input.credentials : "same-origin");
+      }
+
+      override get credentials(): RequestCredentials {
+        return this.trackedCredentials;
+      }
+    }
+    const requests: Request[] = [];
+    globalThis.Request = TrackedRequest;
+    globalThis.fetch = Object.assign(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request = new Request(input, init);
+        requests.push(request);
+        if (request.url.endsWith("model_metadata.json")) {
+          return new Response(JSON.stringify(tfliteMetadata()));
+        }
+        return new Response(new Uint8Array([1]));
+      },
+      { preconnect: originalFetch.preconnect },
+    );
+    try {
+      await loadMetadata(metadataUrl);
+      await loadModelBytes(new URL("https://models.example/add/model.tflite"));
+      expect(requests.map((request) => request.credentials)).toEqual(["omit", "omit"]);
+    } finally {
+      globalThis.fetch = originalFetch;
+      globalThis.Request = originalRequest;
+    }
+  });
+
   test("leaves TfLite context_length unvalidated", () => {
     for (const contextLength of [2_097_152, 0, 4096.5]) {
       const parsed = parseMetadata(metadataWithContextLength("TfLite", contextLength));
@@ -57,7 +99,7 @@ describe("metadata boundary", () => {
   });
 
   test("validates context_length only for LiteRtLm", () => {
-    for (const contextLength of [2_097_152, 1_048_576, 32_769, 0, 4096.5]) {
+    for (const contextLength of [2_097_152, 1_048_576, 32_769, -1, 4096.5]) {
       const parsed = parseMetadata(metadataWithContextLength("LiteRtLm", contextLength));
 
       expect(() => validateLlmBrowserMetadata(parsed)).toThrow(InvalidMetadataError);
@@ -74,6 +116,32 @@ describe("metadata boundary", () => {
 
     const withoutContextLength = parseMetadata(metadataWithContextLength("LiteRtLm"));
     expect(validateLlmBrowserMetadata(withoutContextLength).contextLength).toBeUndefined();
+  });
+
+  test("rejects zero context_length for LiteRtLm", () => {
+    const parsed = parseMetadata(metadataWithContextLength("LiteRtLm", 0));
+
+    expect(() => validateLlmBrowserMetadata(parsed)).toThrow(InvalidMetadataError);
+  });
+
+  test("accepts the Rust LiteRtLm metadata fixture", async () => {
+    const fixture = await Bun.file("test/fixtures/rust-metadata-litertlm.json").json();
+    const parsed = parseMetadata(fixture);
+
+    expect(validateLlmBrowserMetadata(parsed)).toEqual({
+      modelFile: "model.litertlm",
+      contextLength: 4096,
+    });
+  });
+
+  test("accepts legacy Rust null context_length as absent", async () => {
+    const fixture = await Bun.file("test/fixtures/rust-metadata-litertlm-legacy-null.json").json();
+    const parsed = parseMetadata(fixture);
+
+    expect(validateLlmBrowserMetadata(parsed)).toEqual({
+      modelFile: "model.litertlm",
+      contextLength: undefined,
+    });
   });
 
   test("stops reading chunked responses at the configured byte limit", async () => {

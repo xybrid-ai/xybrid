@@ -12,8 +12,9 @@ import { type RuntimeInitializer, sharedInitializer } from "./internal/initializ
 import { validateInputs } from "./internal/input.ts";
 import { liteRtRuntime } from "./internal/litert-runtime.ts";
 import {
-  compileModel,
   compileModelBytes,
+  type LoadCancellation,
+  loadAfterMetadata,
   loadMetadata,
   type MetadataLoader,
   type NormalizedHuggingFaceLoadOptions,
@@ -21,8 +22,12 @@ import {
   normalizeBaseLoadOptions,
   normalizeHuggingFaceLoadOptions,
   normalizeRegistryLoadOptions,
+  runWithLoadCancellation,
   startLoadPrelude,
+  startRuntimeInitialization,
+  throwIfAborted,
 } from "./internal/loading.ts";
+import { loadModelBytes } from "./internal/model-download.ts";
 import { type ModelResolution, resolveRegistryModel } from "./internal/registry.ts";
 import type { BrowserRuntime, RuntimeModel, RuntimeTensor } from "./internal/runtime.ts";
 import { resolveMetadataUrl } from "./internal/url.ts";
@@ -43,8 +48,14 @@ const MAX_OUTPUT_BYTES = 256 * 1024 * 1024;
 const MODEL_CONSTRUCTION_TOKEN = Symbol("XybridModel construction");
 const DEFAULT_MODEL_WASM_PATH = "/xybrid/litert";
 
-const normalizeLoadOptions = (options: unknown, base: string | undefined): LoadOptions =>
-  normalizeBaseLoadOptions(options, base, DEFAULT_MODEL_WASM_PATH);
+const normalizeLoadOptions = (options: unknown, base: string | undefined): LoadOptions => {
+  const normalized = normalizeBaseLoadOptions(options, base, DEFAULT_MODEL_WASM_PATH);
+  return {
+    accelerator: normalized.accelerator,
+    wasmPath: normalized.wasmPath,
+    ...(normalized.signal === undefined ? {} : { signal: normalized.signal }),
+  };
+};
 
 const normalizeRegistryOptions = (
   options: unknown,
@@ -85,6 +96,16 @@ const deleteTensors = (tensors: readonly RuntimeTensor[]): void => {
   }
 };
 
+const freezeTensorDetails = (details: readonly TensorDetail[]): readonly TensorDetail[] =>
+  Object.freeze(
+    details.map((detail) =>
+      Object.freeze({
+        ...detail,
+        shape: Object.freeze([...detail.shape]),
+      }),
+    ),
+  );
+
 class ModelSession {
   readonly inputs: readonly TensorDetail[];
   readonly outputs: readonly TensorDetail[];
@@ -100,8 +121,8 @@ class ModelSession {
     private readonly model: RuntimeModel,
     readonly accelerator: SelectedAccelerator,
   ) {
-    this.inputs = Object.freeze([...model.inputs]);
-    this.outputs = Object.freeze([...model.outputs]);
+    this.inputs = freezeTensorDetails(model.inputs);
+    this.outputs = freezeTensorDetails(model.outputs);
     this.isFullyAccelerated = model.isFullyAccelerated;
     this.unsubscribe =
       accelerator === "webgpu"
@@ -217,31 +238,38 @@ export class XybridModel {
     const base = typeof location === "undefined" ? undefined : location.href;
     const normalizedMetadataUrl = resolveMetadataUrl(metadataUrl, base);
     const normalizedOptions = normalizeLoadOptions(options, base);
-    const session = await loadModel(
-      normalizedMetadataUrl,
-      normalizedOptions,
-      liteRtRuntime,
-      loadMetadata,
-      sharedInitializer,
-    );
-    return new XybridModel(session, MODEL_CONSTRUCTION_TOKEN);
+    return runWithLoadCancellation(normalizedOptions.signal, async (cancellation) => {
+      const session = await loadModel(
+        normalizedMetadataUrl,
+        normalizedOptions,
+        liteRtRuntime,
+        loadMetadata,
+        sharedInitializer,
+        loadModelBytes,
+        cancellation,
+      );
+      return new XybridModel(session, MODEL_CONSTRUCTION_TOKEN);
+    });
   }
 
   static async fromRegistry(id: string, options?: RegistryLoadOptions): Promise<XybridModel> {
     const base = typeof location === "undefined" ? undefined : location.href;
     const normalizedOptions = normalizeRegistryOptions(options, base);
-    const resolution = await resolveRegistryModel(id, "tflite", {
-      registryUrl: normalizedOptions.registryUrl,
-      signal: normalizedOptions.signal,
-      version: normalizedOptions.version,
+    return runWithLoadCancellation(normalizedOptions.signal, async (cancellation) => {
+      const resolution = await resolveRegistryModel(id, "tflite", {
+        registryUrl: normalizedOptions.registryUrl,
+        signal: cancellation.signal,
+        version: normalizedOptions.version,
+      });
+      const session = await loadModelFromResolution(
+        resolution,
+        normalizedOptions,
+        liteRtRuntime,
+        sharedInitializer,
+        cancellation,
+      );
+      return new XybridModel(session, MODEL_CONSTRUCTION_TOKEN);
     });
-    const session = await loadModelFromResolution(
-      resolution,
-      normalizedOptions,
-      liteRtRuntime,
-      sharedInitializer,
-    );
-    return new XybridModel(session, MODEL_CONSTRUCTION_TOKEN);
   }
 
   static async fromHuggingFace(
@@ -250,18 +278,21 @@ export class XybridModel {
   ): Promise<XybridModel> {
     const base = typeof location === "undefined" ? undefined : location.href;
     const normalizedOptions = normalizeHuggingFaceOptions(options, base);
-    const resolution = await resolveHuggingFaceModel(repo, "tflite", {
-      file: normalizedOptions.file,
-      revision: normalizedOptions.revision,
-      signal: normalizedOptions.signal,
+    return runWithLoadCancellation(normalizedOptions.signal, async (cancellation) => {
+      const resolution = await resolveHuggingFaceModel(repo, "tflite", {
+        file: normalizedOptions.file,
+        revision: normalizedOptions.revision,
+        signal: cancellation.signal,
+      });
+      const session = await loadModelFromResolution(
+        resolution,
+        normalizedOptions,
+        liteRtRuntime,
+        sharedInitializer,
+        cancellation,
+      );
+      return new XybridModel(session, MODEL_CONSTRUCTION_TOKEN);
     });
-    const session = await loadModelFromResolution(
-      resolution,
-      normalizedOptions,
-      liteRtRuntime,
-      sharedInitializer,
-    );
-    return new XybridModel(session, MODEL_CONSTRUCTION_TOKEN);
   }
 
   get inputs(): readonly TensorDetail[] {
@@ -295,17 +326,47 @@ export const loadModel = async (
   runtime: BrowserRuntime,
   getMetadata: MetadataLoader,
   initializer: RuntimeInitializer,
+  loadBytes: typeof loadModelBytes = loadModelBytes,
+  cancellation?: LoadCancellation,
 ): Promise<ModelSession> => {
+  if (cancellation === undefined) {
+    return runWithLoadCancellation(options.signal, (ownedCancellation) =>
+      loadModel(
+        metadataUrl,
+        options,
+        runtime,
+        getMetadata,
+        initializer,
+        loadBytes,
+        ownedCancellation,
+      ),
+    );
+  }
   const wasmPath = options.wasmPath;
   if (wasmPath === undefined) {
     throw new RuntimeConfigurationError("wasmPath must be provided to the internal tensor loader.");
   }
-  const prelude = startLoadPrelude(metadataUrl, wasmPath, runtime, getMetadata, initializer);
+  const prelude = startLoadPrelude(metadataUrl, getMetadata, cancellation.signal);
   const metadata: ParsedMetadata = await prelude.metadata;
   const modelFile = validateBrowserMetadata(metadata);
   const modelUrl = resolveModelUrl(metadataUrl, modelFile, metadata.files);
-  await prelude.initialization;
-  const compiled = await compileModel(runtime, modelUrl, options.accelerator ?? "auto");
+  const preference = options.accelerator ?? "auto";
+  throwIfAborted(cancellation.signal);
+  const initialization = startRuntimeInitialization(wasmPath, runtime, initializer);
+  const loaded = await loadAfterMetadata(
+    preference,
+    initialization,
+    () => runtime.probeAccelerator("webgpu"),
+    () => loadBytes(modelUrl, cancellation.signal),
+    cancellation,
+  );
+  const compiled = await compileModelBytes(
+    runtime,
+    loaded.value,
+    preference,
+    loaded.preflight,
+    cancellation.signal,
+  );
   return new ModelSession(runtime, compiled.model, compiled.accelerator);
 };
 
@@ -314,22 +375,30 @@ export const loadModelFromResolution = async (
   options: NormalizedRegistryLoadOptions | NormalizedHuggingFaceLoadOptions,
   runtime: BrowserRuntime,
   initializer: RuntimeInitializer,
+  cancellation?: LoadCancellation,
 ): Promise<ModelSession> => {
-  const prelude = startLoadPrelude(
-    resolution.metadata,
-    options.wasmPath,
-    runtime,
-    async () => resolution.metadata,
-    initializer,
+  if (cancellation === undefined) {
+    return runWithLoadCancellation(options.signal, (ownedCancellation) =>
+      loadModelFromResolution(resolution, options, runtime, initializer, ownedCancellation),
+    );
+  }
+  validateBrowserMetadata(resolution.metadata);
+  throwIfAborted(cancellation.signal);
+  const initialization = startRuntimeInitialization(options.wasmPath, runtime, initializer);
+  const loaded = await loadAfterMetadata(
+    options.accelerator,
+    initialization,
+    () => runtime.probeAccelerator("webgpu"),
+    () =>
+      downloadVerifiedModel(resolution.modelUrl, {
+        onProgress: options.onDownloadProgress,
+        sha256: resolution.sha256,
+        signal: cancellation.signal,
+        sizeBytes: resolution.sizeBytes,
+      }),
+    cancellation,
   );
-  const modelPromise = downloadVerifiedModel(resolution.modelUrl, {
-    onProgress: options.onDownloadProgress,
-    sha256: resolution.sha256,
-    signal: options.signal,
-    sizeBytes: resolution.sizeBytes,
-  });
-  await prelude.initialization;
-  const chunks = await modelPromise;
+  const chunks = loaded.value;
   const totalBytes = chunks.reduce((total, chunk) => total + chunk.byteLength, 0);
   const bytes = new Uint8Array(totalBytes);
   let offset = 0;
@@ -337,6 +406,13 @@ export const loadModelFromResolution = async (
     bytes.set(chunk, offset);
     offset += chunk.byteLength;
   }
-  const compiled = await compileModelBytes(runtime, bytes, options.accelerator);
+  throwIfAborted(cancellation.signal);
+  const compiled = await compileModelBytes(
+    runtime,
+    bytes,
+    options.accelerator,
+    loaded.preflight,
+    cancellation.signal,
+  );
   return new ModelSession(runtime, compiled.model, compiled.accelerator);
 };

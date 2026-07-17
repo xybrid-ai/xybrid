@@ -8,6 +8,7 @@ import {
   validateBrowserMetadata,
   validateLlmBrowserMetadata,
 } from "../metadata.ts";
+import { abortReason, isAbortError } from "./loading.ts";
 
 const DEFAULT_REGISTRY_URLS = ["https://registry.xybrid.dev", "https://r2.xybrid.dev"] as const;
 const REGISTRY_TIMEOUT_MS = 30_000;
@@ -202,6 +203,7 @@ const fetchRegistryResolution = async (
   let response: Response;
   try {
     response = await ky.get(endpoint, {
+      credentials: "omit",
       retry: 0,
       timeout: REGISTRY_TIMEOUT_MS,
       ...(signal === undefined ? {} : { signal }),
@@ -250,6 +252,12 @@ export const resolveRegistryModel = async (
         options.signal,
       );
     } catch (error: unknown) {
+      if (options.signal?.aborted) {
+        throw abortReason(options.signal);
+      }
+      if (isAbortError(error)) {
+        throw error;
+      }
       if (!isNetworkError(error)) {
         throw error;
       }

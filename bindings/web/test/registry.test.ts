@@ -46,18 +46,34 @@ const llmMetadata = (): Record<string, unknown> => ({
 });
 
 const installFetch = (
-  handler: (url: URL, init: RequestInit | undefined) => Promise<Response>,
+  handler: (url: URL, init: RequestInit | undefined, request: Request) => Promise<Response>,
 ): (() => void) => {
   const originalFetch = globalThis.fetch;
+  const originalRequest = globalThis.Request;
+  class TrackedRequest extends originalRequest {
+    private readonly trackedCredentials: RequestCredentials;
+
+    constructor(input: RequestInfo | URL, init?: RequestInit) {
+      super(input, init);
+      this.trackedCredentials =
+        init?.credentials ?? (input instanceof originalRequest ? input.credentials : "same-origin");
+    }
+
+    override get credentials(): RequestCredentials {
+      return this.trackedCredentials;
+    }
+  }
+  globalThis.Request = TrackedRequest;
   globalThis.fetch = Object.assign(
     (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = input instanceof Request ? input.url : input.toString();
-      return handler(new URL(url), init);
+      const request = new Request(input, init);
+      return handler(new URL(request.url), init, request);
     },
     { preconnect: originalFetch.preconnect },
   );
   return () => {
     globalThis.fetch = originalFetch;
+    globalThis.Request = originalRequest;
   };
 };
 
@@ -80,6 +96,7 @@ const createRegistryLlmRuntime = (): RegistryLlmControl => {
     initialize: async (config) => {
       initialized.push(config.wasmPath.toString());
     },
+    probeAccelerator: async () => undefined,
     fetchModel: async () => 0,
     modelFromChunks: async (chunks) => chunks.reduce((total, chunk) => total + chunk.byteLength, 0),
     createEngine: async (_model, accelerator, contextLength): Promise<LlmEngine> => {
@@ -174,8 +191,10 @@ describe("registry resolution and verified downloads", () => {
       }),
     };
     const progress: DownloadProgress[] = [];
+    const requests: Request[] = [];
     let downloadRequests = 0;
-    const restoreFetch = installFetch(async (url) => {
+    const restoreFetch = installFetch(async (url, _init, request) => {
+      requests.push(request);
       if (url.pathname.endsWith("/resolve")) {
         return jsonResponse(body);
       }
@@ -206,6 +225,7 @@ describe("registry resolution and verified downloads", () => {
       expect(control.initialized).toEqual(["https://app.test/llm-runtime"]);
       expect(control.created).toEqual([{ accelerator: "wasm", contextLength: 2048 }]);
       expect(downloadRequests).toBe(1);
+      expect(requests.map((request) => request.credentials)).toEqual(["omit", "omit"]);
       expect(progress.length).toBeGreaterThan(0);
       expect(progress.every((value) => value.totalBytes === bytes.byteLength)).toBe(true);
       expect(progress.at(-1)).toEqual({

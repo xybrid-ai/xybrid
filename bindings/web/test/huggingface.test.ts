@@ -43,19 +43,36 @@ const metadata = (modelFile: string, type: "LiteRtLm" | "TfLite" = "TfLite") => 
 });
 
 const installFetch = (
-  handler: (url: URL, init: RequestInit | undefined) => Promise<Response>,
+  handler: (url: URL, init: RequestInit | undefined, request: Request) => Promise<Response>,
 ): (() => void) => {
   const originalFetch = globalThis.fetch;
+  const originalRequest = globalThis.Request;
+  class TrackedRequest extends originalRequest {
+    private readonly trackedCredentials: RequestCredentials;
+
+    constructor(input: RequestInfo | URL, init?: RequestInit) {
+      super(input, init);
+      this.trackedCredentials =
+        init?.credentials ?? (input instanceof originalRequest ? input.credentials : "same-origin");
+    }
+
+    override get credentials(): RequestCredentials {
+      return this.trackedCredentials;
+    }
+  }
+  globalThis.Request = TrackedRequest;
   globalThis.fetch = Object.assign(
     (input: RequestInfo | URL, init?: RequestInit) => {
-      const request = input instanceof Request ? input : undefined;
-      const url = request === undefined ? input.toString() : request.url;
-      return handler(new URL(url), init ?? (request === undefined ? undefined : request));
+      const request = new Request(input, init);
+      const requestInit =
+        input instanceof Request ? { ...init, signal: init?.signal ?? request.signal } : init;
+      return handler(new URL(request.url), requestInit, request);
     },
     { preconnect: originalFetch.preconnect },
   );
   return () => {
     globalThis.fetch = originalFetch;
+    globalThis.Request = originalRequest;
   };
 };
 
@@ -78,6 +95,7 @@ const createLlmRuntime = (): LlmControl => {
     initialize: async (config) => {
       initialized.push(config.wasmPath.toString());
     },
+    probeAccelerator: async () => undefined,
     fetchModel: async () => 0,
     modelFromChunks: async (chunks) => chunks.reduce((total, chunk) => total + chunk.byteLength, 0),
     createEngine: async (_model, accelerator, contextLength): Promise<LlmEngine> => {
@@ -132,8 +150,10 @@ describe("HuggingFace resolution", () => {
       pointerSize: 134,
     };
     const requests: URL[] = [];
-    const restoreFetch = installFetch(async (url) => {
+    const requestCredentials: string[] = [];
+    const restoreFetch = installFetch(async (url, _init, request) => {
       requests.push(url);
+      requestCredentials.push(request.credentials);
       if (url.pathname.includes("/api/models/")) {
         return jsonResponse(tree);
       }
@@ -169,6 +189,7 @@ describe("HuggingFace resolution", () => {
         `${HF_BASE}/api/models/litert-community/SmolLM2-135M-Instruct/tree/main`,
         `${HF_BASE}/litert-community/SmolLM2-135M-Instruct/resolve/main/${MODEL_FILE}`,
       ]);
+      expect(requestCredentials).toEqual(["omit", "omit"]);
       await session.dispose();
     } finally {
       restoreFetch();
@@ -227,8 +248,10 @@ describe("HuggingFace resolution", () => {
   test("loads metadata from the repository and validates its model file", async () => {
     const tree = [fileEntry("actual.tflite"), fileEntry("model_metadata.json")];
     const requests: URL[] = [];
-    const restoreFetch = installFetch(async (url) => {
+    const requestCredentials: string[] = [];
+    const restoreFetch = installFetch(async (url, _init, request) => {
       requests.push(url);
+      requestCredentials.push(request.credentials);
       if (url.pathname.endsWith("model_metadata.json")) {
         return jsonResponse(metadata("actual.tflite"));
       }
@@ -242,6 +265,7 @@ describe("HuggingFace resolution", () => {
         "/api/models/org/model/tree/main",
         "/org/model/resolve/main/model_metadata.json",
       ]);
+      expect(requestCredentials).toEqual(["omit", "omit"]);
     } finally {
       restoreFetch();
     }
@@ -364,6 +388,47 @@ describe("HuggingFace resolution", () => {
       expect(started).toBe(true);
       controller.abort();
       await expect(pending).rejects.toBeDefined();
+    } finally {
+      controller.abort();
+      restoreFetch();
+    }
+  });
+
+  test("passes the caller signal to an in-flight metadata request", async () => {
+    const controller = new AbortController();
+    const tree = [fileEntry("model.tflite"), fileEntry("model_metadata.json")];
+    let metadataSignal: AbortSignal | undefined;
+    let resolveMetadataStarted: (() => void) | undefined;
+    const metadataStarted = new Promise<void>((resolve) => {
+      resolveMetadataStarted = resolve;
+    });
+    const restoreFetch = installFetch(async (url, init) => {
+      if (url.pathname.includes("/api/models/")) {
+        return jsonResponse(tree);
+      }
+      metadataSignal = init?.signal ?? undefined;
+      resolveMetadataStarted?.();
+      return new Promise<Response>((_resolve, reject) => {
+        metadataSignal?.addEventListener(
+          "abort",
+          () =>
+            reject(
+              metadataSignal?.reason ??
+                new DOMException("The operation was aborted.", "AbortError"),
+            ),
+          { once: true },
+        );
+      });
+    });
+    try {
+      const pending = resolveHuggingFaceModel("org/model", "tflite", {
+        signal: controller.signal,
+      });
+      await metadataStarted;
+      expect(metadataSignal).toBeDefined();
+      controller.abort();
+      await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+      expect(metadataSignal?.aborted).toBe(true);
     } finally {
       controller.abort();
       restoreFetch();

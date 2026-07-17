@@ -14,7 +14,6 @@ import {
   UnsupportedTensorTypeError,
 } from "../errors.ts";
 import type { SelectedAccelerator, TensorDataType, TensorDetail, TensorValue } from "../types.ts";
-import { loadModelBytes } from "./model-download.ts";
 import {
   AcceleratorUnavailableError,
   type BrowserRuntime,
@@ -136,8 +135,10 @@ export const liteRtRuntime: BrowserRuntime = {
   initialize: async (config: RuntimeInitConfig) => {
     await loadLiteRt(config.wasmPath.toString(), { threads: false, jspi: false });
   },
-  compile: async (modelUrl: URL, accelerator: SelectedAccelerator) => {
-    return liteRtRuntime.compileBytes(await loadModelBytes(modelUrl), accelerator);
+  probeAccelerator: async (accelerator: SelectedAccelerator) => {
+    if (accelerator === "webgpu" && getWebGpuDevice() === null) {
+      throw new AcceleratorUnavailableError("WebGPU is unavailable.");
+    }
   },
   compileBytes: async (bytes: Uint8Array, accelerator: SelectedAccelerator) => {
     if (accelerator === "webgpu" && getWebGpuDevice() === null) {

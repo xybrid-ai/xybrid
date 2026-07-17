@@ -10,6 +10,8 @@ import { resolveHuggingFaceModel } from "./internal/huggingface.ts";
 import { type RuntimeInitializer, sharedLlmInitializer } from "./internal/initialization.ts";
 import { liteRtLmRuntime } from "./internal/litert-lm-runtime.ts";
 import {
+  type LoadCancellation,
+  loadAfterMetadata,
   loadMetadata,
   type MetadataLoader,
   type NormalizedHuggingFaceLoadOptions,
@@ -17,8 +19,11 @@ import {
   normalizeBaseLoadOptions,
   normalizeHuggingFaceLoadOptions,
   normalizeRegistryLoadOptions,
+  runWithLoadCancellation,
   selectAccelerated,
   startLoadPrelude,
+  startRuntimeInitialization,
+  throwIfAborted,
 } from "./internal/loading.ts";
 import { type ModelResolution, resolveRegistryModel } from "./internal/registry.ts";
 import type { LlmEngine, LlmGeneration, LlmRuntime } from "./internal/runtime.ts";
@@ -43,7 +48,11 @@ const normalizeLlmLoadOptions = (options: unknown, base: string | undefined): Ll
   if (onDownloadProgress !== undefined && typeof onDownloadProgress !== "function") {
     throw new RuntimeConfigurationError("onDownloadProgress must be a function.");
   }
-  const normalized: LlmLoadOptions = { ...normalizedBase };
+  const normalized: LlmLoadOptions = {
+    accelerator: normalizedBase.accelerator,
+    wasmPath: normalizedBase.wasmPath,
+    ...(normalizedBase.signal === undefined ? {} : { signal: normalizedBase.signal }),
+  };
   if (onDownloadProgress === undefined) {
     return normalized;
   }
@@ -95,10 +104,11 @@ const asInferenceError = (error: unknown): XybridError =>
 class LlmSession {
   private running: Promise<void> | undefined;
   private activeGeneration: LlmGeneration | undefined;
+  private activeIterator: AsyncGenerator<string, void, void> | undefined;
   private disposePromise: Promise<void> | undefined;
 
   constructor(
-    private readonly engine: LlmEngine,
+    private engine: LlmEngine | undefined,
     readonly accelerator: SelectedAccelerator,
   ) {}
 
@@ -110,7 +120,7 @@ class LlmSession {
       throw new ConcurrentRunError();
     }
     const session = this;
-    return (async function* () {
+    const iterator = (async function* () {
       session.assertRunnable();
       if (session.running !== undefined) {
         throw new ConcurrentRunError();
@@ -121,8 +131,12 @@ class LlmSession {
       });
       try {
         let generation: LlmGeneration;
+        const engine = session.engine;
+        if (engine === undefined) {
+          throw new DisposedError();
+        }
         try {
-          generation = await session.engine.generate(validatedPrompt, validatedOptions);
+          generation = await engine.generate(validatedPrompt, validatedOptions);
         } catch (error: unknown) {
           throw asInferenceError(error);
         }
@@ -142,10 +156,13 @@ class LlmSession {
         // cancel is a no-op against an already-closed stream.
         session.activeGeneration?.cancel();
         session.activeGeneration = undefined;
+        session.activeIterator = undefined;
         session.running = undefined;
         release();
       }
     })();
+    this.activeIterator = iterator;
+    return iterator;
   }
 
   async generate(prompt: string, options?: GenerateOptions): Promise<string> {
@@ -167,11 +184,23 @@ class LlmSession {
   private async finishDisposal(): Promise<void> {
     const generation = this.activeGeneration;
     generation?.cancel();
-    if (this.running !== undefined) {
-      await Promise.allSettled([this.running]);
+    const iterator = this.activeIterator;
+    const running = this.running;
+    if (iterator !== undefined && running !== undefined) {
+      try {
+        await iterator.return(undefined);
+      } catch {}
+    }
+    if (running !== undefined) {
+      await Promise.allSettled([running]);
     }
     await generation?.dispose();
-    await this.engine.delete();
+    const engine = this.engine;
+    try {
+      await engine?.delete();
+    } finally {
+      this.engine = undefined;
+    }
   }
 
   private assertRunnable(): void {
@@ -195,48 +224,57 @@ export class XybridLlm {
     const base = typeof location === "undefined" ? undefined : location.href;
     const normalizedMetadataUrl = resolveMetadataUrl(metadataUrl, base);
     const normalizedOptions = normalizeLlmLoadOptions(options, base);
-    const session = await loadLlm(
-      normalizedMetadataUrl,
-      normalizedOptions,
-      liteRtLmRuntime,
-      loadMetadata,
-      sharedLlmInitializer,
-    );
-    return new XybridLlm(session, LLM_CONSTRUCTION_TOKEN);
+    return runWithLoadCancellation(normalizedOptions.signal, async (cancellation) => {
+      const session = await loadLlm(
+        normalizedMetadataUrl,
+        normalizedOptions,
+        liteRtLmRuntime,
+        loadMetadata,
+        sharedLlmInitializer,
+        cancellation,
+      );
+      return new XybridLlm(session, LLM_CONSTRUCTION_TOKEN);
+    });
   }
 
   static async fromRegistry(id: string, options?: RegistryLoadOptions): Promise<XybridLlm> {
     const base = typeof location === "undefined" ? undefined : location.href;
     const normalizedOptions = normalizeRegistryOptions(options, base);
-    const resolution = await resolveRegistryModel(id, "litertlm", {
-      registryUrl: normalizedOptions.registryUrl,
-      signal: normalizedOptions.signal,
-      version: normalizedOptions.version,
+    return runWithLoadCancellation(normalizedOptions.signal, async (cancellation) => {
+      const resolution = await resolveRegistryModel(id, "litertlm", {
+        registryUrl: normalizedOptions.registryUrl,
+        signal: cancellation.signal,
+        version: normalizedOptions.version,
+      });
+      const session = await loadLlmFromResolution(
+        resolution,
+        normalizedOptions,
+        liteRtLmRuntime,
+        sharedLlmInitializer,
+        cancellation,
+      );
+      return new XybridLlm(session, LLM_CONSTRUCTION_TOKEN);
     });
-    const session = await loadLlmFromResolution(
-      resolution,
-      normalizedOptions,
-      liteRtLmRuntime,
-      sharedLlmInitializer,
-    );
-    return new XybridLlm(session, LLM_CONSTRUCTION_TOKEN);
   }
 
   static async fromHuggingFace(repo: string, options?: HuggingFaceLoadOptions): Promise<XybridLlm> {
     const base = typeof location === "undefined" ? undefined : location.href;
     const normalizedOptions = normalizeHuggingFaceOptions(options, base);
-    const resolution = await resolveHuggingFaceModel(repo, "litertlm", {
-      file: normalizedOptions.file,
-      revision: normalizedOptions.revision,
-      signal: normalizedOptions.signal,
+    return runWithLoadCancellation(normalizedOptions.signal, async (cancellation) => {
+      const resolution = await resolveHuggingFaceModel(repo, "litertlm", {
+        file: normalizedOptions.file,
+        revision: normalizedOptions.revision,
+        signal: cancellation.signal,
+      });
+      const session = await loadLlmFromResolution(
+        resolution,
+        normalizedOptions,
+        liteRtLmRuntime,
+        sharedLlmInitializer,
+        cancellation,
+      );
+      return new XybridLlm(session, LLM_CONSTRUCTION_TOKEN);
     });
-    const session = await loadLlmFromResolution(
-      resolution,
-      normalizedOptions,
-      liteRtLmRuntime,
-      sharedLlmInitializer,
-    );
-    return new XybridLlm(session, LLM_CONSTRUCTION_TOKEN);
   }
 
   get accelerator(): SelectedAccelerator {
@@ -262,19 +300,37 @@ export const loadLlm = async <Model>(
   runtime: LlmRuntime<Model>,
   getMetadata: MetadataLoader,
   initializer: RuntimeInitializer,
+  cancellation?: LoadCancellation,
 ): Promise<LlmSession> => {
+  if (cancellation === undefined) {
+    return runWithLoadCancellation(options.signal, (ownedCancellation) =>
+      loadLlm(metadataUrl, options, runtime, getMetadata, initializer, ownedCancellation),
+    );
+  }
   const wasmPath = options.wasmPath;
   if (wasmPath === undefined) {
     throw new RuntimeConfigurationError("wasmPath must be provided to the internal LLM loader.");
   }
-  const prelude = startLoadPrelude(metadataUrl, wasmPath, runtime, getMetadata, initializer);
+  const prelude = startLoadPrelude(metadataUrl, getMetadata, cancellation.signal);
   const metadata: ParsedMetadata = await prelude.metadata;
   const { modelFile, contextLength } = validateLlmBrowserMetadata(metadata);
   const modelUrl = resolveModelUrl(metadataUrl, modelFile, metadata.files);
-  const modelPromise = runtime.fetchModel(modelUrl, options.onDownloadProgress);
-  const [, model] = await Promise.all([prelude.initialization, modelPromise]);
-  const { value, accelerator } = await selectAccelerated(options.accelerator ?? "auto", (target) =>
-    runtime.createEngine(model, target, contextLength),
+  const preference = options.accelerator ?? "auto";
+  throwIfAborted(cancellation.signal);
+  const initialization = startRuntimeInitialization(wasmPath, runtime, initializer);
+  const loaded = await loadAfterMetadata(
+    preference,
+    initialization,
+    () => runtime.probeAccelerator("webgpu"),
+    () => runtime.fetchModel(modelUrl, options.onDownloadProgress, cancellation.signal),
+    cancellation,
+  );
+  const { value, accelerator } = await selectAccelerated(
+    preference,
+    (target) => runtime.createEngine(loaded.value, target, contextLength),
+    loaded.preflight,
+    cancellation.signal,
+    (engine) => engine.delete(),
   );
   return new LlmSession(value, accelerator);
 };
@@ -284,28 +340,38 @@ export const loadLlmFromResolution = async <Model>(
   options: NormalizedRegistryLoadOptions | NormalizedHuggingFaceLoadOptions,
   runtime: LlmRuntime<Model>,
   initializer: RuntimeInitializer,
+  cancellation?: LoadCancellation,
 ): Promise<LlmSession> => {
-  const prelude = startLoadPrelude(
-    resolution.metadata,
-    options.wasmPath,
-    runtime,
-    async () => resolution.metadata,
-    initializer,
+  if (cancellation === undefined) {
+    return runWithLoadCancellation(options.signal, (ownedCancellation) =>
+      loadLlmFromResolution(resolution, options, runtime, initializer, ownedCancellation),
+    );
+  }
+  const { contextLength } = validateLlmBrowserMetadata(resolution.metadata);
+  throwIfAborted(cancellation.signal);
+  const initialization = startRuntimeInitialization(options.wasmPath, runtime, initializer);
+  const loaded = await loadAfterMetadata(
+    options.accelerator,
+    initialization,
+    () => runtime.probeAccelerator("webgpu"),
+    () =>
+      downloadVerifiedModel(resolution.modelUrl, {
+        onProgress: options.onDownloadProgress,
+        sha256: resolution.sha256,
+        signal: cancellation.signal,
+        sizeBytes: resolution.sizeBytes,
+      }),
+    cancellation,
   );
-  const modelPromise = downloadVerifiedModel(resolution.modelUrl, {
-    onProgress: options.onDownloadProgress,
-    sha256: resolution.sha256,
-    signal: options.signal,
-    sizeBytes: resolution.sizeBytes,
-  });
-  const [, chunks] = await Promise.all([prelude.initialization, modelPromise]);
-  const model = await runtime.modelFromChunks(chunks);
-  const { value, accelerator } = await selectAccelerated(options.accelerator, (target) =>
-    runtime.createEngine(
-      model,
-      target,
-      validateLlmBrowserMetadata(resolution.metadata).contextLength,
-    ),
+  throwIfAborted(cancellation.signal);
+  const model = await runtime.modelFromChunks(loaded.value);
+  throwIfAborted(cancellation.signal);
+  const { value, accelerator } = await selectAccelerated(
+    options.accelerator,
+    (target) => runtime.createEngine(model, target, contextLength),
+    loaded.preflight,
+    cancellation.signal,
+    (engine) => engine.delete(),
   );
   return new LlmSession(value, accelerator);
 };

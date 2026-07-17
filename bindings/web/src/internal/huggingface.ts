@@ -109,6 +109,7 @@ const fetchTree = async (
   let response: Response;
   try {
     response = await ky.get(treeUrl(validatedRepo, revision), {
+      credentials: "omit",
       retry: 0,
       timeout: HUGGINGFACE_TIMEOUT_MS,
       ...(signal === undefined ? {} : { signal }),
@@ -265,7 +266,10 @@ export const resolveHuggingFaceModel = async (
   let metadata: ParsedMetadata;
   let modelFile: string;
   if (metadataEntry !== undefined) {
-    metadata = await loadMetadata(resolveUrl(validatedRepo, revision, metadataEntry.path));
+    metadata = await loadMetadata(
+      resolveUrl(validatedRepo, revision, metadataEntry.path),
+      options.signal,
+    );
     modelFile = validateSurfaceMetadata(metadata, expectedFormat);
     if (!files.some((entry) => entry.path === modelFile)) {
       throw new HuggingFaceError(

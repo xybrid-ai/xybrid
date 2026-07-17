@@ -40,6 +40,7 @@ type LlmRuntimeControl = {
   readonly runtime: LlmRuntime<{ readonly bytes: number }>;
   readonly initialized: readonly string[];
   readonly fetches: readonly string[];
+  readonly fetchSignals: readonly AbortSignal[];
   readonly created: readonly { accelerator: string; contextLength: number | undefined }[];
   readonly cancelled: () => number;
   readonly disposedGenerations: () => number;
@@ -61,6 +62,7 @@ type LlmRuntimeControl = {
 const createLlmRuntime = (): LlmRuntimeControl => {
   const initialized: string[] = [];
   const fetches: string[] = [];
+  const fetchSignals: AbortSignal[] = [];
   const created: { accelerator: string; contextLength: number | undefined }[] = [];
   let deltas: readonly string[] = ["Hello", ", world."];
   let cancelled = 0;
@@ -78,14 +80,45 @@ const createLlmRuntime = (): LlmRuntimeControl => {
   let fetchGate: Promise<void> | undefined;
   let releaseFetchGate: (() => void) | undefined;
 
+  const waitForFetch = (signal: AbortSignal | undefined): Promise<void> => {
+    const gate = fetchGate;
+    if (gate === undefined) {
+      return signal?.aborted ? Promise.reject(signal.reason) : Promise.resolve();
+    }
+    return new Promise<void>((resolve, reject) => {
+      let settled = false;
+      const finish = (callback: () => void): void => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        signal?.removeEventListener("abort", onAbort);
+        callback();
+      };
+      const onAbort = (): void => {
+        finish(() => reject(signal?.reason));
+      };
+      signal?.addEventListener("abort", onAbort, { once: true });
+      void gate.then(() => finish(resolve));
+    });
+  };
+
   const runtime: LlmRuntime<{ readonly bytes: number }> = {
     initialize: async (config) => {
       initialized.push(config.wasmPath.toString());
       await initializationGate;
     },
-    fetchModel: async (modelUrl, onProgress) => {
+    probeAccelerator: async (accelerator) => {
+      if (accelerator === "webgpu" && shouldFailWebGpu) {
+        throw new AcceleratorUnavailableError("GPU unavailable");
+      }
+    },
+    fetchModel: async (modelUrl, onProgress, signal) => {
       fetches.push(modelUrl.toString());
-      await fetchGate;
+      if (signal !== undefined) {
+        fetchSignals.push(signal);
+      }
+      await waitForFetch(signal);
       onProgress?.({ loadedBytes: 3, totalBytes: 7 });
       onProgress?.({ loadedBytes: 7, totalBytes: 7 });
       return { bytes: 7 };
@@ -141,6 +174,7 @@ const createLlmRuntime = (): LlmRuntimeControl => {
     runtime,
     initialized,
     fetches,
+    fetchSignals,
     created,
     cancelled: () => cancelled,
     disposedGenerations: () => disposedGenerations,
@@ -281,6 +315,59 @@ describe("XybridLlm lifecycle", () => {
     expect(control.fetches).toHaveLength(0);
   });
 
+  test("surfaces a caller abort from fetchModel and allows a fresh load", async () => {
+    const controller = new AbortController();
+    const control = createLlmRuntime();
+    control.holdFetch();
+    const pending = load(control, {
+      ...options,
+      accelerator: "wasm",
+      signal: controller.signal,
+    });
+    await Bun.sleep(0);
+    expect(control.fetchSignals).toHaveLength(1);
+    controller.abort();
+    let caught: unknown;
+    try {
+      await pending;
+    } catch (error: unknown) {
+      caught = error;
+    }
+    expect(caught).toMatchObject({ name: "AbortError" });
+    expect(caught).not.toBeInstanceOf(RuntimeInitializationError);
+    expect(control.fetchSignals[0]?.aborted).toBe(true);
+
+    const fresh = createLlmRuntime();
+    await expect(load(fresh, { ...options, accelerator: "wasm" })).resolves.toBeDefined();
+  });
+
+  test("does not poison a shared initializer when LLM metadata validation fails", async () => {
+    const initializer = new RuntimeInitializer();
+    const invalidRuntime = createLlmRuntime();
+    await expect(
+      loadLlm(
+        metadataUrl,
+        { wasmPath: "/litert-lm-a", accelerator: "wasm" },
+        invalidRuntime.runtime,
+        async () => parseMetadata(litertLmMetadata({ execution_template: { type: "LiteRtLm" } })),
+        initializer,
+      ),
+    ).rejects.toBeInstanceOf(InvalidMetadataError);
+    expect(invalidRuntime.initialized).toHaveLength(0);
+
+    const validRuntime = createLlmRuntime();
+    await expect(
+      loadLlm(
+        metadataUrl,
+        { wasmPath: "/litert-lm-b", accelerator: "wasm" },
+        validRuntime.runtime,
+        async () => parseMetadata(litertLmMetadata()),
+        initializer,
+      ),
+    ).resolves.toBeDefined();
+    expect(validRuntime.initialized).toEqual(["/litert-lm-b"]);
+  });
+
   test("downloads the model once and reuses it across the auto fallback", async () => {
     const control = createLlmRuntime();
     control.failWebGpu();
@@ -302,10 +389,25 @@ describe("XybridLlm lifecycle", () => {
     await expect(
       load(explicit, { wasmPath: "/litert-lm", accelerator: "webgpu" }),
     ).rejects.toBeInstanceOf(RuntimeInitializationError);
+    expect(explicit.fetches).toHaveLength(0);
 
     const failed = createLlmRuntime();
     failed.failEngineCreation();
-    await expect(load(failed)).rejects.toBeInstanceOf(RuntimeInitializationError);
+    let caught: unknown;
+    try {
+      await load(failed);
+    } catch (error: unknown) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(RuntimeInitializationError);
+    if (!(caught instanceof RuntimeInitializationError)) {
+      return;
+    }
+    expect(caught.causeValue).toBeInstanceOf(AggregateError);
+    const aggregate = caught.causeValue as AggregateError;
+    expect(aggregate.errors).toHaveLength(2);
+    expect(aggregate.errors[0]).toBeInstanceOf(RuntimeInitializationError);
+    expect(aggregate.errors[1]).toBeInstanceOf(RuntimeInitializationError);
   });
 
   test("overlaps initialization and model fetch after metadata resolves", async () => {
@@ -325,7 +427,7 @@ describe("XybridLlm lifecycle", () => {
     );
 
     await Bun.sleep(0);
-    expect(control.initialized).toHaveLength(1);
+    expect(control.initialized).toHaveLength(0);
     expect(control.fetches).toHaveLength(0);
 
     resolveMetadata?.(parseMetadata(litertLmMetadata()));
@@ -390,6 +492,23 @@ describe("XybridLlm lifecycle", () => {
     }
     expect(control.cancelled()).toBeGreaterThan(0);
     await expect(llm.generate("after")).resolves.toBe("Hello, world.");
+  });
+
+  test("disposes a paused stream and closes its iterator", async () => {
+    const { llm } = await load();
+    const stream = llm.generateStream("hi");
+    await expect(stream.next()).resolves.toEqual({ value: "Hello", done: false });
+
+    await expect(
+      Promise.race([
+        llm.dispose(),
+        new Promise<never>((_, reject) => {
+          setTimeout(() => reject(new Error("dispose timed out")), 500);
+        }),
+      ]),
+    ).resolves.toBeUndefined();
+    await expect(stream.next()).resolves.toMatchObject({ done: true });
+    await expect(llm.generate("after")).rejects.toBeInstanceOf(DisposedError);
   });
 
   test("dispose cancels in-flight work, deletes once, and rejects new work", async () => {

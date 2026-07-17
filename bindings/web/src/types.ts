@@ -4,6 +4,7 @@ export type SelectedAccelerator = "wasm" | "webgpu";
 export type LoadOptions = {
   readonly wasmPath?: string | URL;
   readonly accelerator?: AcceleratorPreference;
+  readonly signal?: AbortSignal;
 };
 
 export type DownloadProgress = {
@@ -15,22 +16,16 @@ export type LlmLoadOptions = LoadOptions & {
   readonly onDownloadProgress?: (progress: DownloadProgress) => void;
 };
 
-export type RegistryLoadOptions = {
-  readonly wasmPath?: string | URL;
-  readonly accelerator?: AcceleratorPreference;
+export type RegistryLoadOptions = LoadOptions & {
   readonly registryUrl?: string | URL;
   readonly version?: string;
   readonly onDownloadProgress?: (progress: DownloadProgress) => void;
-  readonly signal?: AbortSignal;
 };
 
-export type HuggingFaceLoadOptions = {
-  readonly wasmPath?: string | URL;
-  readonly accelerator?: AcceleratorPreference;
+export type HuggingFaceLoadOptions = LoadOptions & {
   readonly revision?: string;
   readonly file?: string;
   readonly onDownloadProgress?: (progress: DownloadProgress) => void;
-  readonly signal?: AbortSignal;
 };
 
 export type GenerateOptions = {

@@ -2,6 +2,7 @@ import ky from "ky";
 
 import { IntegrityError, RuntimeInitializationError, XybridError } from "../errors.ts";
 import type { DownloadProgress } from "../types.ts";
+import { abortReason, isAbortError } from "./loading.ts";
 import { readResponseChunks } from "./response.ts";
 
 const MODEL_DOWNLOAD_TIMEOUT_MS = 600_000;
@@ -19,6 +20,7 @@ export const downloadVerifiedModel = async (
 ): Promise<Uint8Array<ArrayBuffer>[]> => {
   try {
     const response = await ky.get(modelUrl, {
+      credentials: "omit",
       retry: 0,
       timeout: MODEL_DOWNLOAD_TIMEOUT_MS,
       ...(options.signal === undefined ? {} : { signal: options.signal }),
@@ -66,6 +68,12 @@ export const downloadVerifiedModel = async (
     }
     return chunks;
   } catch (error: unknown) {
+    if (options.signal?.aborted) {
+      throw abortReason(options.signal);
+    }
+    if (isAbortError(error)) {
+      throw error;
+    }
     if (error instanceof XybridError) {
       throw error;
     }

@@ -9,19 +9,30 @@ import {
   InvalidMetadataError,
   RuntimeConfigurationError,
   RuntimeInitializationError,
+  XybridError,
 } from "../src/errors.ts";
 import { RuntimeInitializer } from "../src/internal/initialization.ts";
+import type { loadModelBytes } from "../src/internal/model-download.ts";
 import { XybridModel } from "../src/model.ts";
 import type { LoadOptions } from "../src/types.ts";
-import { createRuntime, loadWithDependencies, tensor, tfliteMetadata } from "./helpers.ts";
+import { createRuntime, details, loadWithDependencies, tensor, tfliteMetadata } from "./helpers.ts";
 
 const metadataUrl = new URL("https://models.example/add/model_metadata.json");
 const options: LoadOptions = { wasmPath: "/wasm", accelerator: "auto" };
 
-const load = async (runtime = createRuntime(), accelerator: LoadOptions = options) => ({
+const load = async (
+  runtime = createRuntime(),
+  accelerator: LoadOptions = options,
+  loadBytes: typeof loadModelBytes = async () => new Uint8Array([0]),
+) => ({
   runtime,
-  model: await loadWithDependencies(metadataUrl, accelerator, runtime.runtime, async () =>
-    tfliteMetadata(),
+  model: await loadWithDependencies(
+    metadataUrl,
+    accelerator,
+    runtime.runtime,
+    async () => tfliteMetadata(),
+    new RuntimeInitializer(),
+    loadBytes,
   ),
 });
 
@@ -46,14 +57,14 @@ describe("XybridModel runtime lifecycle", () => {
     runtime.failWebGpu();
     const { model } = await load(runtime);
     expect(model.accelerator).toBe("wasm");
-    expect(runtime.compiled).toEqual(["webgpu", "wasm"]);
+    expect(runtime.compiled).toEqual(["wasm"]);
 
     const explicit = createRuntime();
     explicit.failWebGpu();
     await expect(
       load(explicit, { wasmPath: "/wasm", accelerator: "webgpu" }),
     ).rejects.toBeInstanceOf(RuntimeInitializationError);
-    expect(explicit.compiled).toEqual(["webgpu"]);
+    expect(explicit.compiled).toEqual([]);
 
     const wasm = createRuntime();
     await load(wasm, { wasmPath: "/wasm", accelerator: "wasm" });
@@ -64,6 +75,137 @@ describe("XybridModel runtime lifecycle", () => {
     const { model: recovered } = await load(compilationFailure);
     expect(recovered.accelerator).toBe("wasm");
     expect(compilationFailure.compiled).toEqual(["webgpu", "wasm"]);
+  });
+
+  test("fetches direct-URL model bytes once across an auto fallback", async () => {
+    const runtime = createRuntime();
+    runtime.failWebGpuCompilation();
+    let fetches = 0;
+    await load(runtime, options, async () => {
+      fetches += 1;
+      return new Uint8Array([0]);
+    });
+    expect(fetches).toBe(1);
+    expect(runtime.compiled).toEqual(["webgpu", "wasm"]);
+  });
+
+  test("does not download model bytes before an explicit WebGPU preflight", async () => {
+    const runtime = createRuntime();
+    runtime.failWebGpu();
+    let fetches = 0;
+    await expect(
+      load(runtime, { wasmPath: "/wasm", accelerator: "webgpu" }, async () => {
+        fetches += 1;
+        return new Uint8Array([0]);
+      }),
+    ).rejects.toBeInstanceOf(RuntimeInitializationError);
+    expect(fetches).toBe(0);
+    expect(runtime.compiled).toEqual([]);
+  });
+
+  test("surfaces a caller abort from a direct model download", async () => {
+    const controller = new AbortController();
+    const runtime = createRuntime();
+    let observedSignal: AbortSignal | undefined;
+    const pending = load(
+      runtime,
+      { wasmPath: "/wasm", accelerator: "wasm", signal: controller.signal },
+      (_url, signal) => {
+        observedSignal = signal;
+        return new Promise<Uint8Array<ArrayBuffer>>((_resolve, reject) => {
+          signal?.addEventListener(
+            "abort",
+            () =>
+              reject(signal.reason ?? new DOMException("The operation was aborted.", "AbortError")),
+            { once: true },
+          );
+        });
+      },
+    );
+    await Bun.sleep(0);
+    expect(observedSignal).toBeDefined();
+    controller.abort();
+    let caught: unknown;
+    try {
+      await pending;
+    } catch (error: unknown) {
+      caught = error;
+    }
+    expect(caught).toMatchObject({ name: "AbortError" });
+    expect(caught).not.toBeInstanceOf(RuntimeInitializationError);
+    expect(observedSignal?.aborted).toBe(true);
+  });
+
+  test("does not fetch direct model bytes for a pre-aborted caller", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    let fetches = 0;
+    await expect(
+      load(
+        createRuntime(),
+        { wasmPath: "/wasm", accelerator: "wasm", signal: controller.signal },
+        async () => {
+          fetches += 1;
+          return new Uint8Array([0]);
+        },
+      ),
+    ).rejects.toMatchObject({ name: "AbortError" });
+    expect(fetches).toBe(0);
+  });
+
+  test("aborts an in-flight model download when initialization fails", async () => {
+    const initializationError = new Error("initialization failed");
+    const control = createRuntime();
+    const runtime = {
+      ...control.runtime,
+      initialize: async () => {
+        throw initializationError;
+      },
+    };
+    let observedSignal: AbortSignal | undefined;
+    const pending = loadWithDependencies(
+      metadataUrl,
+      { wasmPath: "/wasm", accelerator: "wasm" },
+      runtime,
+      async () => tfliteMetadata(),
+      new RuntimeInitializer(),
+      (_url, signal) => {
+        observedSignal = signal;
+        return new Promise<Uint8Array<ArrayBuffer>>((_resolve, reject) => {
+          signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
+        });
+      },
+    );
+    let caught: unknown;
+    try {
+      await pending;
+    } catch (error: unknown) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(RuntimeInitializationError);
+    expect((caught as RuntimeInitializationError).causeValue).toBe(initializationError);
+    expect(observedSignal?.aborted).toBe(true);
+  });
+
+  test("preserves both non-availability failures when auto fallback also fails", async () => {
+    const runtime = createRuntime();
+    runtime.failWebGpuCompilation();
+    runtime.failWasmCompilation();
+    let caught: unknown;
+    try {
+      await load(runtime);
+    } catch (error: unknown) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(RuntimeInitializationError);
+    if (!(caught instanceof RuntimeInitializationError)) {
+      return;
+    }
+    expect(caught.causeValue).toBeInstanceOf(AggregateError);
+    const aggregate = caught.causeValue as AggregateError;
+    expect(aggregate.errors).toHaveLength(2);
+    expect(aggregate.errors[0]).toBeInstanceOf(RuntimeInitializationError);
+    expect(aggregate.errors[1]).toBeInstanceOf(RuntimeInitializationError);
   });
 
   test("shares same-config initialization and rejects conflicting wasm configuration", async () => {
@@ -119,13 +261,42 @@ describe("XybridModel runtime lifecycle", () => {
 
     await Bun.sleep(0);
     expect(metadataStarted).toBe(true);
-    expect(runtime.initialized).toEqual(["/wasm"]);
+    expect(runtime.initialized).toEqual([]);
     expect(runtime.compiled).toHaveLength(0);
 
     resolveMetadata?.(tfliteMetadata());
+    await Bun.sleep(0);
+    expect(runtime.initialized).toEqual(["/wasm"]);
     runtime.releaseInitialization();
     await loading;
     expect(runtime.compiled).toEqual(["webgpu"]);
+  });
+
+  test("does not poison a shared initializer when metadata validation fails", async () => {
+    const initializer = new RuntimeInitializer();
+    const invalidRuntime = createRuntime();
+    await expect(
+      loadWithDependencies(
+        metadataUrl,
+        { wasmPath: "/wasm-a", accelerator: "wasm" },
+        invalidRuntime.runtime,
+        async () => tfliteMetadata({ preprocessing: [{ type: "Normalize" }] }),
+        initializer,
+      ),
+    ).rejects.toBeInstanceOf(XybridError);
+    expect(invalidRuntime.initialized).toHaveLength(0);
+
+    const validRuntime = createRuntime();
+    await expect(
+      loadWithDependencies(
+        metadataUrl,
+        { wasmPath: "/wasm-b", accelerator: "wasm" },
+        validRuntime.runtime,
+        async () => tfliteMetadata(),
+        initializer,
+      ),
+    ).resolves.toBeDefined();
+    expect(validRuntime.initialized).toEqual(["/wasm-b"]);
   });
 
   test("validates positional and named typed tensor inputs before allocating LiteRT tensors", async () => {
@@ -144,6 +315,32 @@ describe("XybridModel runtime lifecycle", () => {
     );
     expect(runtime.tensors).toHaveLength(allocatedBeforeInvalidRuns);
     expect(runtime.tensors.filter((value) => value.isDeleted())).not.toHaveLength(0);
+  });
+
+  test("deep-freezes metadata snapshots without freezing runtime-owned descriptors", async () => {
+    const { model } = await load();
+    const input = model.inputs[0];
+    if (input === undefined) {
+      throw new Error("test runtime must expose an input descriptor");
+    }
+
+    expect(Object.isFrozen(details.inputs[0])).toBe(false);
+    expect(Object.isFrozen(details.inputs[0]?.shape)).toBe(false);
+    expect(Object.isFrozen(model.inputs)).toBe(true);
+    expect(Object.isFrozen(input)).toBe(true);
+    expect(Object.isFrozen(input.shape)).toBe(true);
+
+    const mutableInput = input as unknown as { name: string; shape: number[] };
+    expect(() => {
+      mutableInput.name = "mutated";
+    }).toThrow(TypeError);
+    expect(() => {
+      mutableInput.shape[0] = 99;
+    }).toThrow(TypeError);
+
+    await expect(model.run([tensor([1, 2]), tensor([3, 4, 5])])).resolves.toBeDefined();
+    expect(input.name).toBe("a");
+    expect(input.shape).toEqual([1, 2]);
   });
 
   test("returns typed validation errors for malformed JavaScript inputs", async () => {

@@ -105,7 +105,7 @@ export const validateLlmBrowserMetadata = (metadata: ParsedMetadata): LlmBrowser
   }
   const modelFile = assertBrowserFeatureSubset(metadata, "LiteRtLm");
   const rawContextLength = metadata.template.contextLength;
-  if (rawContextLength === undefined) {
+  if (rawContextLength === undefined || rawContextLength === null) {
     return { modelFile, contextLength: undefined };
   }
   if (
