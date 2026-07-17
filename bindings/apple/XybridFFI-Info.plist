@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- rules_apple merges the generated keys (CFBundleIdentifier from
+	     bundle_id, CFBundleName/Executable from bundle_name, MinimumOSVersion,
+	     CFBundlePackageType) on top of these; only the version keys must be
+	     supplied. This is the embedded static framework's Info.plist. -->
+	<key>CFBundleVersion</key>
+	<string>0.3.0</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.3.0</string>
+</dict>
+</plist>

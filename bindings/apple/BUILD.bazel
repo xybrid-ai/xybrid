@@ -16,6 +16,14 @@ load("@build_bazel_rules_apple//apple:apple.bzl", "apple_static_xcframework")
 apple_static_xcframework(
     name = "XybridFFI",
     bundle_name = "XybridFFI",
+    # bundle_id gives the EMBEDDED framework its Info.plist (nested_bundle_id in
+    # rules_apple) — without it the .framework has no Info.plist and Xcode
+    # rejects it ("did not contain an Info.plist") when a consumer app processes
+    # the binaryTarget. Internal to the static framework; not user-facing.
+    bundle_id = "ai.xybrid.XybridFFI",
+    # The framework Info.plist needs version keys (CFBundleVersion); the rest is
+    # generated. Merged into the embedded XybridFFI.framework/Info.plist.
+    infoplists = ["XybridFFI-Info.plist"],
     minimum_os_versions = {"ios": "16.0"},  # matches Package.swift .iOS(.v16)
     ios = {"device": ["arm64"]},
     public_hdrs = ["include/xybrid-bolt.h"],
