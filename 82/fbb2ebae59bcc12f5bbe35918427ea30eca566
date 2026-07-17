@@ -1,0 +1,21 @@
+bazel/ort_ios_sim.bzl
+  s_8b9a9b82c688c4::t_78aebaf1acfee3 46-52,54-64,67-76
+MODULE.bazel
+  s_8b9a9b82c688c4::t_c661da74bd2119 316-327
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "82fbb2ebae59bcc12f5bbe35918427ea30eca566",
+  "prompts": {},
+  "sessions": {
+    "s_8b9a9b82c688c4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "73a8592f-ccc0-42cf-bf05-435600f9a611",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
