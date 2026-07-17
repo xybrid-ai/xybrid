@@ -138,6 +138,12 @@ _IOS_LLAMA = _LLAMA_CACHE_ENTRIES | {
     "CMAKE_OSX_ARCHITECTURES": "arm64",
     "CMAKE_OSX_DEPLOYMENT_TARGET": "16.0",
     "IOS": "ON",
+    # Vision (mtmd) parity: TOOLS/COMMON unlock tools/ -> libmtmd (the shipped
+    # platform-ios bolt has vision). The throwaway tool exes get the SDK's -lc++
+    # (resolves against iphoneos libc++.tbd), like the darwin/metal lanes.
+    "LLAMA_BUILD_TOOLS": "ON",
+    "LLAMA_BUILD_COMMON": "ON",
+    "CMAKE_CXX_STANDARD_LIBRARIES": "-lc++",
 } | _METAL_CMAKE_FLAGS
 
 cmake(
@@ -279,9 +285,8 @@ cmake(
         "@rules_rs//rs/platforms/config:x86_64-unknown-linux-gnu": ["libmtmd.a"] + _LLAMA_LIBS,
         # Darwin vision (Flip 2 parity — both CPU and Metal lanes).
         "@rules_rs//rs/platforms/config:aarch64-apple-darwin": ["libmtmd.a"] + _LLAMA_LIBS,
-        # iOS G2: Metal backend is its own archive (like //:llama_metal).
-        # Vision (libmtmd) is a later parity step — not collected yet.
-        "@rules_rs//rs/platforms/config:aarch64-apple-ios": ["libggml-metal.a"] + _LLAMA_LIBS,
+        # iOS parity: Metal backend archive + vision (libmtmd), like darwin.
+        "@rules_rs//rs/platforms/config:aarch64-apple-ios": ["libmtmd.a", "libggml-metal.a"] + _LLAMA_LIBS,
         # Windows/MinGW: ggml/CMakeLists.txt sets CMAKE_STATIC_LIBRARY_PREFIX=""
         # on WIN32, so the ggml archives have NO `lib` prefix (ggml.a, not
         # libggml.a) — while llama (sibling scope) keeps it (libllama.a), and

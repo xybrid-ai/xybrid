@@ -1,0 +1,32 @@
+# Apple Gate 3 — assemble XybridFFI.xcframework via rules_apple, replacing
+# `boltffi pack apple` / `cargo xtask build-xcframework`. FFI-only: the C static
+# lib (the G1/G2 rust staticlib) + the committed boltffi-generated C header. The
+# Swift wrappers (Sources/Xybrid/*.swift) are committed SPM source compiled by
+# the CONSUMER, so no rules_swift here. Mac-bound (xcodebuild -create-xcframework).
+#
+# The C header is boltffi-generated (regenerate: `cd crates/xybrid-bolt &&
+# boltffi generate`, then copy dist/apple/include/xybrid-bolt.h here). Committed
+# like the Swift wrapper; a CI drift check keeps it fresh.
+load("@build_bazel_rules_apple//apple:apple.bzl", "apple_static_xcframework")
+
+# Device-only for now (G3b). The simulator slice is a follow-up — blocked on a
+# vendored ort-ios SIMULATOR onnxruntime slice (only ios-arm64 device ships today).
+# bundle_name "XybridFFI" -> the xcframework dir AND the clang module name, which
+# must match `import XybridFFI` in the committed xybrid_bolt.swift + Package.swift.
+apple_static_xcframework(
+    name = "XybridFFI",
+    bundle_name = "XybridFFI",
+    minimum_os_versions = {"ios": "16.0"},  # matches Package.swift .iOS(.v16)
+    ios = {"device": ["arm64"]},
+    public_hdrs = ["include/xybrid-bolt.h"],
+    umbrella_header = "include/xybrid-bolt.h",
+    # The full-feature iOS staticlib (Metal + vision + candle + coreml, min-iOS
+    # 16.0). Provides CcInfo, so it feeds apple_static_xcframework directly.
+    deps = ["//crates/xybrid-bolt:xybrid_bolt_staticlib"],
+    # Mac-only (xcodebuild -create-xcframework, iphoneos SDK): keep it OUT of
+    # wildcard builds like the advisory CI's `//bindings/...` analyze, which
+    # runs on a LINUX runner where no macOS exec platform exists (same reason
+    # //:llama_metal is `manual`). Explicit `--config=ios` builds still work.
+    tags = ["manual"],
+    visibility = ["//visibility:public"],
+)
