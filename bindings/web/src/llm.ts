@@ -120,7 +120,8 @@ class LlmSession {
       throw new ConcurrentRunError();
     }
     const session = this;
-    const iterator = (async function* () {
+    let iterator!: AsyncGenerator<string, void, void>;
+    iterator = (async function* () {
       session.assertRunnable();
       if (session.running !== undefined) {
         throw new ConcurrentRunError();
@@ -129,6 +130,7 @@ class LlmSession {
       session.running = new Promise<void>((resolve) => {
         release = resolve;
       });
+      session.activeIterator = iterator;
       try {
         let generation: LlmGeneration;
         const engine = session.engine;
@@ -156,12 +158,13 @@ class LlmSession {
         // cancel is a no-op against an already-closed stream.
         session.activeGeneration?.cancel();
         session.activeGeneration = undefined;
-        session.activeIterator = undefined;
+        if (session.activeIterator === iterator) {
+          session.activeIterator = undefined;
+        }
         session.running = undefined;
         release();
       }
     })();
-    this.activeIterator = iterator;
     return iterator;
   }
 

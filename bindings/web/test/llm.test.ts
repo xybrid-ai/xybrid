@@ -341,6 +341,27 @@ describe("XybridLlm lifecycle", () => {
     await expect(load(fresh, { ...options, accelerator: "wasm" })).resolves.toBeDefined();
   });
 
+  test("rejects caller abort while initialization hangs for auto and wasm", async () => {
+    for (const accelerator of ["auto", "wasm"] as const) {
+      const controller = new AbortController();
+      const control = createLlmRuntime();
+      control.holdInitialization();
+      const pending = load(control, { ...options, accelerator, signal: controller.signal });
+
+      await Bun.sleep(0);
+      expect(control.initialized).toEqual(["/litert-lm"]);
+      controller.abort();
+      await expect(
+        Promise.race([
+          pending,
+          new Promise<never>((_, reject) => {
+            setTimeout(() => reject(new Error("load did not abort")), 500);
+          }),
+        ]),
+      ).rejects.toMatchObject({ name: "AbortError" });
+    }
+  });
+
   test("does not poison a shared initializer when LLM metadata validation fails", async () => {
     const initializer = new RuntimeInitializer();
     const invalidRuntime = createLlmRuntime();
@@ -509,6 +530,63 @@ describe("XybridLlm lifecycle", () => {
     ).resolves.toBeUndefined();
     await expect(stream.next()).resolves.toMatchObject({ done: true });
     await expect(llm.generate("after")).rejects.toBeInstanceOf(DisposedError);
+  });
+
+  test("disposes the running stream when another stream was created first", async () => {
+    const { llm } = await load();
+    const running = llm.generateStream("running");
+    const pending = llm.generateStream("pending");
+    await expect(running.next()).resolves.toEqual({ value: "Hello", done: false });
+
+    await expect(
+      Promise.race([
+        llm.dispose(),
+        new Promise<never>((_, reject) => {
+          setTimeout(() => reject(new Error("dispose timed out")), 500);
+        }),
+      ]),
+    ).resolves.toBeUndefined();
+    await expect(running.next()).resolves.toMatchObject({ done: true });
+    await expect(pending.next()).rejects.toBeInstanceOf(DisposedError);
+  });
+
+  test("disposes the running stream when the second created stream starts", async () => {
+    const { llm } = await load();
+    const pending = llm.generateStream("pending");
+    const running = llm.generateStream("running");
+    await expect(running.next()).resolves.toEqual({ value: "Hello", done: false });
+
+    await expect(
+      Promise.race([
+        llm.dispose(),
+        new Promise<never>((_, reject) => {
+          setTimeout(() => reject(new Error("dispose timed out")), 500);
+        }),
+      ]),
+    ).resolves.toBeUndefined();
+    await expect(running.next()).resolves.toMatchObject({ done: true });
+    await expect(pending.next()).rejects.toBeInstanceOf(DisposedError);
+  });
+
+  test("disposes without tracking never-started streams", async () => {
+    const { llm } = await load();
+    const pending = [
+      llm.generateStream("one"),
+      llm.generateStream("two"),
+      llm.generateStream("three"),
+    ];
+
+    await expect(
+      Promise.race([
+        llm.dispose(),
+        new Promise<never>((_, reject) => {
+          setTimeout(() => reject(new Error("dispose timed out")), 500);
+        }),
+      ]),
+    ).resolves.toBeUndefined();
+    for (const stream of pending) {
+      await expect(stream.next()).rejects.toBeInstanceOf(DisposedError);
+    }
   });
 
   test("dispose cancels in-flight work, deletes once, and rejects new work", async () => {

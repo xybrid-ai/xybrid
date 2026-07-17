@@ -42,7 +42,13 @@ describe("XybridModel runtime lifecycle", () => {
   });
 
   test("rejects malformed public load options with typed errors", async () => {
-    for (const malformed of [null, undefined, {}, { wasmPath: "/wasm", accelerator: "invalid" }]) {
+    for (const malformed of [
+      null,
+      undefined,
+      {},
+      { wasmPath: "/wasm", accelerator: "invalid" },
+      { wasmPath: "/wasm", signal: { aborted: false } },
+    ]) {
       await expect(
         Reflect.apply(XybridModel.load, XybridModel, [metadataUrl, malformed]),
       ).rejects.toBeInstanceOf(RuntimeConfigurationError);
@@ -151,6 +157,77 @@ describe("XybridModel runtime lifecycle", () => {
       ),
     ).rejects.toMatchObject({ name: "AbortError" });
     expect(fetches).toBe(0);
+  });
+
+  test("rejects caller abort while initialization hangs for auto and wasm", async () => {
+    for (const accelerator of ["auto", "wasm"] as const) {
+      const controller = new AbortController();
+      const control = createRuntime();
+      control.holdInitialization();
+      const pending = load(control, { ...options, accelerator, signal: controller.signal });
+
+      await Bun.sleep(0);
+      expect(control.initialized).toEqual(["/wasm"]);
+      controller.abort();
+      await expect(
+        Promise.race([
+          pending,
+          new Promise<never>((_, reject) => {
+            setTimeout(() => reject(new Error("load did not abort")), 500);
+          }),
+        ]),
+      ).rejects.toMatchObject({ name: "AbortError" });
+    }
+  });
+
+  test("does not fall back from an auto initialization configuration failure", async () => {
+    const control = createRuntime();
+    const initializer = new RuntimeInitializer();
+    await initializer.initialize(control.runtime, {
+      wasmPath: "/existing-wasm",
+      threads: false,
+      jspi: false,
+    });
+
+    await expect(
+      loadWithDependencies(
+        metadataUrl,
+        options,
+        control.runtime,
+        async () => tfliteMetadata(),
+        initializer,
+      ),
+    ).rejects.toBeInstanceOf(RuntimeConfigurationError);
+    expect(control.compiled).toHaveLength(0);
+  });
+
+  test("does not fall back from an auto initialization failure", async () => {
+    const initializationError = new Error("initialization failed");
+    const control = createRuntime();
+    const runtime = {
+      ...control.runtime,
+      initialize: async () => {
+        throw initializationError;
+      },
+    };
+
+    let caught: unknown;
+    try {
+      await loadWithDependencies(
+        metadataUrl,
+        options,
+        runtime,
+        async () => tfliteMetadata(),
+        new RuntimeInitializer(),
+      );
+    } catch (error: unknown) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(RuntimeInitializationError);
+    if (caught instanceof RuntimeInitializationError) {
+      expect(caught.causeValue).toBe(initializationError);
+    }
+    expect(control.compiled).toHaveLength(0);
   });
 
   test("aborts an in-flight model download when initialization fails", async () => {

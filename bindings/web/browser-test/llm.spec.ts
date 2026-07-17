@@ -54,4 +54,51 @@ for (const accelerator of ["wasm", "auto"] as const) {
       { moduleUrl: sdkModuleUrl, selectedAccelerator: accelerator },
     );
   });
+
+  test(`disposes the running stream among two handles through ${accelerator}`, async ({ page }) => {
+    test.setTimeout(300_000);
+    await page.goto("/");
+    await page.selectOption("#accelerator", accelerator);
+
+    await page.evaluate(
+      async ({
+        moduleUrl,
+        selectedAccelerator,
+      }: {
+        moduleUrl: string;
+        selectedAccelerator: "wasm" | "auto";
+      }) => {
+        const { DisposedError, XybridLlm } = await import(moduleUrl);
+        const llm = await XybridLlm.load("/llm/model_metadata.json", {
+          wasmPath: "/llm-runtime",
+          accelerator: selectedAccelerator,
+        });
+        const running = llm.generateStream("Reply with one short sentence about foxes.");
+        const pending = llm.generateStream("Reply with one short sentence about badgers.");
+        const first = await running.next();
+        if (first.done) {
+          throw new Error("expected the stream to produce a delta");
+        }
+        await Promise.race([
+          llm.dispose(),
+          new Promise<never>((_, reject) => {
+            setTimeout(() => reject(new Error("dispose timed out")), 500);
+          }),
+        ]);
+        const closed = await running.next();
+        if (!closed.done) {
+          throw new Error("expected the running stream to be closed");
+        }
+        try {
+          await pending.next();
+          throw new Error("expected the pending stream to reject after disposal");
+        } catch (error: unknown) {
+          if (!(error instanceof DisposedError)) {
+            throw error;
+          }
+        }
+      },
+      { moduleUrl: sdkModuleUrl, selectedAccelerator: accelerator },
+    );
+  });
 }

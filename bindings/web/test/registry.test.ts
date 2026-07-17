@@ -391,5 +391,12 @@ describe("registry resolution and verified downloads", () => {
         "/xybrid/litert",
       ),
     ).toThrow(RuntimeConfigurationError);
+    expect(() =>
+      normalizeBaseLoadOptions(
+        { accelerator: "wasm", signal: { aborted: false } },
+        "https://app.test/models/",
+        "/xybrid/litert",
+      ),
+    ).toThrow(RuntimeConfigurationError);
   });
 });

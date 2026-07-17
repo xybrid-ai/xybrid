@@ -120,7 +120,9 @@ export const normalizeBaseLoadOptions = (
     signal !== undefined &&
     (typeof signal !== "object" ||
       signal === null ||
-      typeof (signal as AbortSignal).aborted !== "boolean")
+      typeof (signal as AbortSignal).aborted !== "boolean" ||
+      typeof (signal as AbortSignal).addEventListener !== "function" ||
+      typeof (signal as AbortSignal).removeEventListener !== "function")
   ) {
     throw new RuntimeConfigurationError("signal must be an AbortSignal.");
   }
@@ -310,6 +312,33 @@ const asRuntimeInitializationError = (error: unknown): unknown => {
   return new RuntimeInitializationError(error);
 };
 
+const awaitWithCancellation = async <T>(
+  promise: Promise<T>,
+  signal: AbortSignal | undefined,
+): Promise<T> => {
+  if (signal === undefined) {
+    return promise;
+  }
+  throwIfAborted(signal);
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = (): void => {
+      signal.removeEventListener("abort", onAbort);
+      reject(abortReason(signal));
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    void promise.then(
+      (value) => {
+        signal.removeEventListener("abort", onAbort);
+        resolve(value);
+      },
+      (error: unknown) => {
+        signal.removeEventListener("abort", onAbort);
+        reject(error);
+      },
+    );
+  });
+};
+
 export const preflightAccelerator = async (
   preference: LoadOptions["accelerator"],
   initialization: Promise<void>,
@@ -321,8 +350,18 @@ export const preflightAccelerator = async (
     return { status: "not-requested" };
   }
   try {
-    await initialization;
+    await awaitWithCancellation(initialization, signal);
     throwIfAborted(signal);
+  } catch (error: unknown) {
+    if (signal?.aborted) {
+      throw abortReason(signal);
+    }
+    if (isAbortError(error)) {
+      throw error;
+    }
+    throw asRuntimeInitializationError(error);
+  }
+  try {
     await probe();
     throwIfAborted(signal);
     return { status: "available" };
@@ -376,7 +415,7 @@ export const loadAfterMetadata = async <T>(
     const preflightPromise = runStage(() =>
       preflightAccelerator(preference, initialization, probe, cancellation.signal),
     );
-    await Promise.allSettled([downloadPromise, preflightPromise]);
+    void Promise.allSettled([downloadPromise, preflightPromise]);
     if (firstFailure !== undefined) {
       throw firstFailure.error;
     }
@@ -385,15 +424,15 @@ export const loadAfterMetadata = async <T>(
   }
 
   const downloadPromise = runStage(download);
-  const initializationPromise = runStage(async () => initialization);
-  await Promise.allSettled([downloadPromise, initializationPromise]);
+  const initializationPromise = runStage(() =>
+    awaitWithCancellation(initialization, cancellation.signal),
+  );
+  void Promise.allSettled([downloadPromise, initializationPromise]);
   if (firstFailure !== undefined) {
     throw firstFailure.error;
   }
-  return {
-    value: await downloadPromise,
-    preflight: { status: "not-requested" },
-  };
+  const [value] = await Promise.all([downloadPromise, initializationPromise]);
+  return { value, preflight: { status: "not-requested" } };
 };
 
 export const selectAccelerated = async <T>(
