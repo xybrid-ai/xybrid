@@ -77,7 +77,7 @@ await model.dispose();
 | `XybridModel` | `@litertjs/core/wasm/*` | `/litert` |
 | `XybridLlm` | `@litert-lm/core/wasm/*` | `/llm-runtime` |
 
-Wasm 路径属于可执行代码，必须保持在页面自身的 HTTP(S) 源上。元数据与模型文件在目标主机允许 CORS 请求时可以位于其他源。预览版初始化时固定 `threads: false` 与 `jspi: false`，因此不需要 SharedArrayBuffer，也没有 COOP/COEP 要求。
+Wasm 路径属于可执行代码，必须保持在页面自身的 HTTP(S) 源上。元数据与模型文件在目标主机允许 CORS 请求时可以位于其他源。元数据、注册表、Hugging Face 与模型获取请求均使用 `credentials: "omit"`；跨源资源仍需通过 CORS 允许请求。预览版初始化时固定 `threads: false` 与 `jspi: false`，因此不需要 SharedArrayBuffer，也没有 COOP/COEP 要求。
 
 每个运行时的初始化都是页面级单例：使用相同 wasm 配置的并发加载会共享同一次初始化，之后使用不同 `wasmPath` 的加载会以 `RuntimeConfigurationError` 失败。
 
@@ -90,7 +90,7 @@ Wasm 路径属于可执行代码，必须保持在页面自身的 HTTP(S) 源上
 | `model_id`、`version`、`files` | 必填 |
 | `execution_template.type` | `"TfLite"`（张量）或 `"LiteRtLm"`（文本生成） |
 | `execution_template.model_file` | 纯文件名，必须列在 `files` 中，且与元数据文档位于同一目录 |
-| `execution_template.context_length` | 可选正整数（LiteRtLm），作为引擎的最大 token 数传入 |
+| `execution_template.context_length` | `LiteRtLm` 可选；未设置时应省略。旧版的 `null` 会按未设置处理。存在时必须是 1 到 32,768 之间的整数，并作为引擎的最大 token 数传入 |
 | `preprocessing`、`postprocessing`、`voices`、`vision_encoder` | 浏览器预览版中必须为空或不存在 |
 
 ## API 参考
@@ -100,6 +100,8 @@ Wasm 路径属于可执行代码，必须保持在页面自身的 HTTP(S) 源上
 ```ts
 class XybridModel {
   static load(metadataUrl: string | URL, options: LoadOptions): Promise<XybridModel>;
+  static fromRegistry(id: string, options?: RegistryLoadOptions): Promise<XybridModel>;
+  static fromHuggingFace(repo: string, options?: HuggingFaceLoadOptions): Promise<XybridModel>;
 
   readonly inputs: readonly TensorDetail[];   // { name, shape, dataType }
   readonly outputs: readonly TensorDetail[];
@@ -116,6 +118,8 @@ class XybridModel {
 ```ts
 class XybridLlm {
   static load(metadataUrl: string | URL, options: LlmLoadOptions): Promise<XybridLlm>;
+  static fromRegistry(id: string, options?: RegistryLoadOptions): Promise<XybridLlm>;
+  static fromHuggingFace(repo: string, options?: HuggingFaceLoadOptions): Promise<XybridLlm>;
 
   readonly accelerator: "wasm" | "webgpu";
 
@@ -129,11 +133,24 @@ class XybridLlm {
 
 ```ts
 type LoadOptions = {
-  wasmPath: string | URL;                       // 同源 wasm 资源目录
-  accelerator: "auto" | "wasm" | "webgpu";
+  wasmPath?: string | URL;                      // 同源 wasm 资源目录
+  accelerator?: "auto" | "wasm" | "webgpu";
+  signal?: AbortSignal;
 };
 
 type LlmLoadOptions = LoadOptions & {
+  onDownloadProgress?: (progress: { loadedBytes: number; totalBytes: number | undefined }) => void;
+};
+
+type RegistryLoadOptions = LoadOptions & {
+  registryUrl?: string | URL;                   // HTTPS；默认使用内置注册表
+  version?: string;
+  onDownloadProgress?: (progress: { loadedBytes: number; totalBytes: number | undefined }) => void;
+};
+
+type HuggingFaceLoadOptions = LoadOptions & {
+  revision?: string;                            // 默认为 "main"
+  file?: string;
   onDownloadProgress?: (progress: { loadedBytes: number; totalBytes: number | undefined }) => void;
 };
 
@@ -142,7 +159,13 @@ type GenerateOptions = {
 };
 ```
 
-`auto` 优先使用 WebGPU，在 WebGPU 不可用或其尝试失败时回退到 wasm；显式指定 `webgpu` 时不会回退而是直接失败。在 LLM 界面上，`webgpu` 对应引擎的 GPU 后端，`wasm` 对应其 CPU 后端。LiteRT 仍可能在 CPU 上执行不支持的 WebGPU 算子——通过 `isFullyAccelerated` 判断计算图是否完全委托给 GPU。
+所有加载路径都接受 `signal: AbortSignal`。调用方取消时，加载会以 abort 错误拒绝，而不是 `XybridError`。任一加载阶段失败都会中止共享的加载取消信号，从而取消兄弟阶段中正在进行的请求。
+
+每次加载只下载一次模型。`accelerator: "webgpu"` 会先完成初始化与 WebGPU 可用性探测，再下载模型；因此 WebGPU 不可用时会在获取任何模型字节前失败。使用 `"auto"` 时，如果 WebGPU 不可用则跳过它并静默选择 wasm。其他 WebGPU 初始化或编译失败会使用同一份已下载字节回退到 wasm；如果 wasm 也失败，`RuntimeInitializationError` 的 `AggregateError` cause 会保留两次失败。`"wasm"` 不会请求 WebGPU。在 LLM 界面上，`webgpu` 对应引擎的 GPU 后端，`wasm` 对应其 CPU 后端。LiteRT 仍可能在 CPU 上执行不支持的 WebGPU 算子——通过 `isFullyAccelerated` 判断计算图是否完全委托给 GPU。
+
+`XybridModel.fromRegistry(id, options?)` 通过注册表解析张量模型，`XybridLlm.fromRegistry(id, options?)` 解析 LiteRT-LM 模型。`registryUrl` 必须使用 HTTPS；省略时，实现在内置注册表端点中尝试。注册表解析结果必须提供浏览器兼容的元数据文档、HTTPS 下载地址、不超过 512 MiB 的声明大小，以及 64 个小写十六进制字符组成的 SHA-256 值。下载字节必须同时匹配声明大小与 SHA-256。
+
+`XybridModel.fromHuggingFace(repo, options?)` 与 `XybridLlm.fromHuggingFace(repo, options?)` 接受 `org/name` 格式的仓库。`revision` 默认为 `"main"`；需要时可用 `file` 选择顶层 `.tflite` 或 `.litertlm` 文件。仓库包含 `model_metadata.json` 时，加载器使用并校验其中的模型文件；否则在目标格式唯一明确时合成兼容的元数据。树 API 响应提供声明大小，存在 LFS 大小时优先使用它；有效的 LFS OID 会作为 SHA-256 校验下载。所有解析出的下载都会通过大小校验拒绝超大或截断字节；注册表工件和 Hugging Face LFS 文件还会在 SHA-256 不匹配时失败并停止。没有有效 LFS OID 的 Hugging Face 文件没有树 API 提供的哈希，因此只执行大小校验。
 
 ### 错误处理
 
@@ -157,18 +180,21 @@ type GenerateOptions = {
 | `RuntimeInitializationError` | `runtime_initialization` |
 | `InputValidationError` | `input_validation` |
 | `UnsupportedTensorTypeError` | `unsupported_tensor_type` |
+| `RegistryError` | `registry` |
+| `HuggingFaceError` | `huggingface` |
+| `IntegrityError` | `integrity` |
 | `InferenceError` | `inference` |
 | `ConcurrentRunError` | `concurrent_run` |
 | `DeviceLostError` | `device_lost` |
 | `DisposedError` | `disposed` |
 
-每个模型同一时刻只允许一个进行中的 `run` 或生成（`ConcurrentRunError`）。WebGPU 设备丢失后，后续运行会抛出 `DeviceLostError`——加载新模型即可恢复。销毁后的调用会抛出 `DisposedError`。
+每个模型同一时刻只允许一个进行中的 `run` 或生成（`ConcurrentRunError`）。`DeviceLostError` 只适用于张量界面：`XybridModel` 订阅 WebGPU 设备丢失，丢失后需要加载新模型。`XybridLlm` 不订阅设备丢失通知；其生成失败会以 `InferenceError` 呈现。即使消费者已经停止迭代 `generateStream`，`XybridLlm.dispose()` 也会在取消被放弃的生成并删除引擎后完成。销毁后的调用会抛出 `DisposedError`。
 
 ## 限制
 
 浏览器内存保护：元数据 **1 MiB**、模型 **512 MiB**、张量 I/O **256 MiB**。张量数据类型为 `float32`、`int32` 与 `uint8`。
 
-预览版中暂缓支持：前处理/后处理管线、`voices` 与 `vision_encoder` 元数据、线程、JSPI、WebNN、GPU 缓冲区 I/O、模型注册表、更高层的多模态 API，以及 LLM 界面上的多轮对话、系统提示、采样控制、约束解码与工具调用。
+预览版中暂缓支持：前处理/后处理管线、`voices` 与 `vision_encoder` 元数据、线程、JSPI、WebNN、GPU 缓冲区 I/O、更高层的多模态 API，以及 LLM 界面上的多轮对话、系统提示、采样控制、约束解码与工具调用。
 
 ## 浏览器支持
 

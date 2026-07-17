@@ -88,6 +88,6 @@ Downloads are cached at `~/.xybrid/cache/` — see [Model Caching](/docs/concept
 
 You can run models that aren't in the registry:
 
-- **HuggingFace GGUF**: `xybrid run --huggingface <repo>[:variant]` (or `fromHuggingFace` in the SDKs) downloads a GGUF directly
+- **HuggingFace repos**: `xybrid run --huggingface <repo>[:variant]` (or `fromHuggingFace` in the SDKs) downloads the model directly — GGUF, ONNX, SafeTensors, and TFLite natively, plus LiteRT-LM (`.litertlm`) in the browser SDK. When the repo lacks a `model_metadata.json`, one is auto-generated
 - **Local bundles**: load a `.xyb` bundle or model directory
 - **Custom models**: prepare your own `model_metadata.json` — see the [custom models guide](https://github.com/xybrid-ai/xybrid/blob/master/docs/guides/custom-models.md)

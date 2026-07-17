@@ -173,9 +173,18 @@ for await (const delta of llm.generateStream("Hello from Xybrid!")) {
 }
 ```
 
+模型也可以直接从 Hugging Face 加载——SDK 会列出仓库文件，用 Git-LFS 的
+SHA-256 校验下载内容，并在仓库未提供元数据时自动生成：
+
+```ts
+const llm = await XybridLlm.fromHuggingFace("litert-community/SmolLM2-135M-Instruct", {
+  wasmPath: "/llm-runtime", // 省略时默认为 /xybrid/llm-runtime
+});
+```
+
 **预期输出：** 完全在浏览器中生成的文本，逐 token 流式写入页面。
 
-张量界面与完整 API 请参阅 [Web SDK 指南](/zh/docs/sdks/web)。
+张量界面、注册表加载与完整 API 请参阅 [Web SDK 指南](/zh/docs/sdks/web)。
   </Tab>
   <Tab value="Rust">
 **安装**

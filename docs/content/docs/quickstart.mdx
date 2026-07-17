@@ -172,9 +172,19 @@ for await (const delta of llm.generateStream("Hello from Xybrid!")) {
 }
 ```
 
+Models can also load straight from Hugging Face — the SDK lists the repo,
+verifies the download against its Git-LFS SHA-256, and generates the metadata
+when the repo doesn't ship one:
+
+```ts
+const llm = await XybridLlm.fromHuggingFace("litert-community/SmolLM2-135M-Instruct", {
+  wasmPath: "/llm-runtime", // defaults to /xybrid/llm-runtime when omitted
+});
+```
+
 **Expected output:** Text streamed into the page token by token, generated entirely in the browser.
 
-See the [Web SDK guide](/docs/sdks/web) for the tensor surface and the full API.
+See the [Web SDK guide](/docs/sdks/web) for the tensor surface, registry loading, and the full API.
   </Tab>
   <Tab value="Rust">
 **Install**
