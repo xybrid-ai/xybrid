@@ -25,6 +25,10 @@ FLUTTER_RUST_CARGO="$REPO_ROOT/bindings/flutter/rust/Cargo.toml"
 # URL for SPM consumers in remote mode and MUST match the cargo workspace
 # version.
 SWIFT_PACKAGE="$REPO_ROOT/Package.swift"
+# The XybridFFI.xcframework's embedded framework Info.plist (Bazel-built via
+# apple_static_xcframework). Its CFBundleVersion/ShortVersionString bake into the
+# shipped xcframework, so they must track the SDK version too.
+SWIFT_FFI_PLIST="$REPO_ROOT/bindings/apple/XybridFFI-Info.plist"
 # React Native npm package. RN is hand-translated (not generated), so it was
 # absent from this sync and its package.json drifted. Two versions must equal
 # the workspace version: the npm package version, and the `ai.xybrid:xybrid-kotlin`
@@ -67,6 +71,13 @@ get_flutter_rust_version() {
 # Extract sdkVersion from root Package.swift
 get_swift_version() {
     grep '^let sdkVersion = ' "$SWIFT_PACKAGE" | sed 's/let sdkVersion = "\(.*\)"/\1/'
+}
+
+# Extract CFBundleShortVersionString from the xcframework framework Info.plist
+# (the value on the line after the key). Portable (no plutil, so CI --check
+# works on Linux).
+get_swift_ffi_version() {
+    grep -A1 'CFBundleShortVersionString' "$SWIFT_FFI_PLIST" | grep '<string>' | head -1 | sed 's|.*<string>\(.*\)</string>.*|\1|'
 }
 
 # Extract version from React Native package.json (parsed, like Unity's).
@@ -140,6 +151,18 @@ set_swift_version() {
     rm -f "$SWIFT_PACKAGE.bak"
 }
 
+# Set both version keys in the xcframework framework Info.plist. Each <string>
+# value sits on the line AFTER its key, so match the key then replace the next
+# line (`n`). Both track the SDK version (fine for a static-lib framework).
+set_swift_ffi_version() {
+    local version="$1"
+    sed -i.bak \
+        -e "/CFBundleVersion/{n;s|<string>.*</string>|<string>$version</string>|;}" \
+        -e "/CFBundleShortVersionString/{n;s|<string>.*</string>|<string>$version</string>|;}" \
+        "$SWIFT_FFI_PLIST"
+    rm -f "$SWIFT_FFI_PLIST.bak"
+}
+
 # Set version in React Native package.json (parsed + rewritten, like Unity's —
 # robust against reformatting; preserves the file's standard 2-space layout).
 set_rn_version() {
@@ -179,7 +202,7 @@ check_versions() {
     echo "Cargo workspace version: $cargo_version"
     echo ""
 
-    for name_func in "Flutter:get_flutter_version" "Flutter rust crate:get_flutter_rust_version" "Unity:get_unity_version" "Kotlin:get_kotlin_version" "Swift:get_swift_version" "React Native:get_rn_version" "React Native AAR:get_rn_aar_version" "Python:get_python_version"; do
+    for name_func in "Flutter:get_flutter_version" "Flutter rust crate:get_flutter_rust_version" "Unity:get_unity_version" "Kotlin:get_kotlin_version" "Swift:get_swift_version" "Swift FFI plist:get_swift_ffi_version" "React Native:get_rn_version" "React Native AAR:get_rn_aar_version" "Python:get_python_version"; do
         local name="${name_func%%:*}"
         local func="${name_func##*:}"
         local version
@@ -216,6 +239,7 @@ case "${1:-}" in
         set_unity_version "$VERSION"
         set_kotlin_version "$VERSION"
         set_swift_version "$VERSION"
+        set_swift_ffi_version "$VERSION"
         set_rn_version "$VERSION"
         set_rn_aar_version "$VERSION"
         set_python_version "$VERSION"
@@ -239,6 +263,7 @@ case "${1:-}" in
         set_unity_version "$VERSION"
         set_kotlin_version "$VERSION"
         set_swift_version "$VERSION"
+        set_swift_ffi_version "$VERSION"
         set_rn_version "$VERSION"
         set_rn_aar_version "$VERSION"
         set_python_version "$VERSION"
