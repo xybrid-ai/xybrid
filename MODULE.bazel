@@ -46,7 +46,19 @@ bazel_dep(name = "rules_cc", version = "0.2.20")
 # self-registers; os:ios is a UNIQUE match, so it resolves for aarch64-apple-ios
 # while hermetic-llvm keeps every desktop target (no conflict with the macOS
 # lanes). Pinned here for explicitness/stability.
-bazel_dep(name = "apple_support", version = "1.24.2", repo_name = "build_bazel_apple_support")
+# apple_support: the iOS cc toolchain (G1). Bumped 1.24.2 -> 2.2.0 by
+# rules_apple 4.5.x below — the older rules_apple that kept 1.24.2 (4.0/4.1) uses
+# apple fragment APIs Bazel 9 removed (multi_arch_platform / apple_crosstool_top),
+# so the Bazel-9-compatible rules_apple forces this bump. Re-validated: the iOS
+# staticlib (G1/G2) still builds under 2.2.0.
+bazel_dep(name = "apple_support", version = "2.2.0", repo_name = "build_bazel_apple_support")
+
+# Apple Gate 3: rules_apple's apple_static_xcframework assembles the iOS
+# XybridFFI.xcframework from the G1/G2 rust staticlib + the committed C header
+# (FFI-only — no rules_swift rules used; the Swift wrapper is committed SPM
+# source compiled by the consumer). 4.5.3 is the Bazel-9-compatible line
+# (4.0/4.1 use removed apple fragment APIs); it floors apple_support at 2.2.0.
+bazel_dep(name = "rules_apple", version = "4.5.3", repo_name = "build_bazel_rules_apple")
 # bool_flag for the //:metal build setting (the macOS GPU lane toggle).
 bazel_dep(name = "bazel_skylib", version = "1.9.0")
 # platforms must be a direct dep so the `@platforms//...` constraints in //:android_arm64 resolve.
