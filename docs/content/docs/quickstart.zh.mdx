@@ -173,8 +173,9 @@ for await (const delta of llm.generateStream("Hello from Xybrid!")) {
 }
 ```
 
-模型也可以直接从 Hugging Face 加载——SDK 会列出仓库文件，用 Git-LFS 的
-SHA-256 校验下载内容，并在仓库未提供元数据时自动生成：
+模型也可以直接从 Hugging Face 加载——SDK 会列出仓库文件；当 Hugging Face
+提供 Git-LFS OID 时（模型文件通常属于这种情况）使用 SHA-256 校验下载内容，
+非 LFS 文件则仅按大小校验；仓库未提供元数据时，SDK 会在内存中合成兼容的元数据：
 
 ```ts
 const llm = await XybridLlm.fromHuggingFace("litert-community/SmolLM2-135M-Instruct", {

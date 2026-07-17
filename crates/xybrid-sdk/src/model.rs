@@ -950,16 +950,16 @@ fn select_huggingface_files_to_download<'a>(
         filename.ends_with(".gguf")
             || filename.ends_with(".onnx")
             || filename.ends_with(".safetensors")
-            || filename.ends_with(".tflite")
     });
     let has_browser_only_model = all_filenames
         .iter()
-        .any(|filename| filename.ends_with(".litertlm"));
+        .any(|filename| filename.ends_with(".tflite") || filename.ends_with(".litertlm"));
 
     if has_browser_only_model && !has_native_model {
         return Err(SdkError::load(format!(
-            "HuggingFace repo '{}' contains only .litertlm model files; .litertlm is a \
-             browser-only format executed by the @xybrid/web SDK and is not natively runnable",
+            "HuggingFace repo '{}' contains only .tflite and/or .litertlm model files. \
+             TFLite and LiteRT-LM models run in the browser SDK (@xybrid/web); no native \
+             TFLite/LiteRT-LM runtime is registered",
             repo
         )));
     }
@@ -971,7 +971,7 @@ fn select_huggingface_files_to_download<'a>(
                 return false;
             }
 
-            if filename.ends_with(".litertlm") {
+            if filename.ends_with(".tflite") || filename.ends_with(".litertlm") {
                 return false;
             }
 
@@ -1155,7 +1155,9 @@ impl ModelLoader {
     /// Downloads model files from the HuggingFace Hub and caches them locally.
     /// Subsequent calls use the cached files. When the repository does not ship
     /// a `model_metadata.json`, one is auto-generated from the model card and
-    /// model files (.onnx, .gguf, .safetensors, .tflite, .litertlm).
+    /// native model files (.onnx, .gguf, .safetensors). Browser-only formats
+    /// (.tflite, .litertlm) are rejected before download — they run via the
+    /// `@xybrid/web` SDK.
     ///
     /// Requires the `huggingface` feature flag at load time.
     /// The constructor itself is always available, but `load()` will return
@@ -1699,7 +1701,6 @@ impl ModelLoader {
         if filename.ends_with(".gguf")
             || filename.ends_with(".onnx")
             || filename.ends_with(".safetensors")
-            || filename.ends_with(".tflite")
         {
             return true;
         }
@@ -1748,6 +1749,7 @@ impl ModelLoader {
             .map_err(|e| SdkError::load_src("Failed to read model_metadata.json", e))?;
         let metadata: ModelMetadata = serde_json::from_str(&metadata_str)
             .map_err(|e| SdkError::load_src("Failed to parse metadata", e))?;
+        Self::validate_native_execution_template(&metadata)?;
 
         // Create executor with base path
         let executor = TemplateExecutor::with_base_path(model_dir.to_str().unwrap_or("."));
@@ -1758,6 +1760,20 @@ impl ModelLoader {
             model_dir: model_dir.clone(),
             loaded: true,
         })
+    }
+
+    fn validate_native_execution_template(metadata: &ModelMetadata) -> SdkResult<()> {
+        let browser_format = match &metadata.execution_template {
+            ExecutionTemplate::TfLite { .. } => "TFLite",
+            ExecutionTemplate::LiteRtLm { .. } => "LiteRT-LM",
+            _ => return Ok(()),
+        };
+
+        Err(SdkError::load(format!(
+            "Model '{}' uses the browser-only {} format. TFLite and LiteRT-LM models run in the \
+             browser SDK (@xybrid/web); no native TFLite/LiteRT-LM runtime is registered",
+            metadata.model_id, browser_format
+        )))
     }
 
     fn is_llm_template(metadata: &ModelMetadata) -> bool {
@@ -3594,8 +3610,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn tflite_is_essential_but_litertlm_is_not() {
-        assert!(ModelLoader::is_essential_file("model.tflite"));
+    fn browser_only_model_files_are_not_essential() {
+        assert!(!ModelLoader::is_essential_file("model.tflite"));
         assert!(!ModelLoader::is_essential_file("model.litertlm"));
     }
 
@@ -3658,9 +3674,9 @@ mod tests {
         let message = error.to_string();
 
         assert!(message.contains("litert-community/gemma"));
-        assert!(message.contains(".litertlm is a browser-only format"));
-        assert!(message.contains("@xybrid/web SDK"));
-        assert!(message.contains("not natively runnable"));
+        assert!(message.contains("only .tflite and/or .litertlm model files"));
+        assert!(message.contains("browser SDK (@xybrid/web)"));
+        assert!(message.contains("no native TFLite/LiteRT-LM runtime is registered"));
     }
 
     #[test]
@@ -3674,13 +3690,42 @@ mod tests {
     }
 
     #[test]
-    fn huggingface_tflite_repo_is_still_admitted() {
+    fn huggingface_tflite_only_repo_fails_before_download() {
         let filenames = ["model.tflite", "README.md", "LICENSE"];
 
-        let files = select_huggingface_files_to_download("org/model", &filenames, None, None)
-            .expect("TFLite repository should be admitted");
+        let error = select_huggingface_files_to_download("org/model", &filenames, None, None)
+            .expect_err("TFLite-only repositories must be rejected");
+        let message = error.to_string();
 
-        assert_eq!(files, filenames);
+        assert!(message.contains("org/model"));
+        assert!(message.contains("only .tflite and/or .litertlm model files"));
+        assert!(message.contains("browser SDK (@xybrid/web)"));
+        assert!(message.contains("no native TFLite/LiteRT-LM runtime is registered"));
+    }
+
+    #[test]
+    fn huggingface_tflite_and_litertlm_only_repo_fails_before_download() {
+        let filenames = ["model.tflite", "model.litertlm", "README.md"];
+
+        let error =
+            select_huggingface_files_to_download("org/browser-model", &filenames, None, None)
+                .expect_err("TFLite and LiteRT-LM-only repositories must be rejected");
+        let message = error.to_string();
+
+        assert!(message.contains("org/browser-model"));
+        assert!(message.contains("only .tflite and/or .litertlm model files"));
+        assert!(message.contains("browser SDK (@xybrid/web)"));
+        assert!(message.contains("no native TFLite/LiteRT-LM runtime is registered"));
+    }
+
+    #[test]
+    fn huggingface_mixed_repo_excludes_tflite() {
+        let filenames = ["model.gguf", "model.tflite", "README.md", "LICENSE"];
+
+        let files = select_huggingface_files_to_download("org/model", &filenames, None, None)
+            .expect("mixed native and browser-only repository should succeed");
+
+        assert_eq!(files, vec!["model.gguf", "README.md"]);
     }
 
     #[test]
@@ -3691,6 +3736,45 @@ mod tests {
             .expect("repository selection should succeed");
 
         assert_eq!(files, vec!["model.gguf", "README.md"]);
+    }
+
+    #[test]
+    fn create_model_handle_rejects_browser_only_templates_at_load_time() {
+        let templates = [
+            (
+                "TFLite",
+                ExecutionTemplate::TfLite {
+                    model_file: "model.tflite".to_string(),
+                },
+            ),
+            (
+                "LiteRT-LM",
+                ExecutionTemplate::LiteRtLm {
+                    model_file: "model.litertlm".to_string(),
+                    context_length: None,
+                },
+            ),
+        ];
+
+        for (format, template) in templates {
+            let temp_dir = tempfile::tempdir().expect("temporary model directory should exist");
+            let mut metadata = ModelMetadata::onnx("browser-only-model", "1.0", "model.bin");
+            metadata.execution_template = template;
+            let metadata_json =
+                serde_json::to_string(&metadata).expect("model metadata should serialize");
+            std::fs::write(temp_dir.path().join("model_metadata.json"), metadata_json)
+                .expect("model metadata should be written");
+
+            let error = match ModelLoader::create_model_handle(&temp_dir.path().to_path_buf()) {
+                Ok(_) => panic!("{format} metadata must be rejected during load"),
+                Err(error) => error,
+            };
+            let message = error.to_string();
+
+            assert!(message.contains(&format!("browser-only {format} format")));
+            assert!(message.contains("browser SDK (@xybrid/web)"));
+            assert!(message.contains("no native TFLite/LiteRT-LM runtime is registered"));
+        }
     }
 
     /// Serializes the tests that mutate the process-global speculative flag so

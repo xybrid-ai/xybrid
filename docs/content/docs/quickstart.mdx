@@ -173,8 +173,9 @@ for await (const delta of llm.generateStream("Hello from Xybrid!")) {
 ```
 
 Models can also load straight from Hugging Face — the SDK lists the repo,
-verifies the download against its Git-LFS SHA-256, and generates the metadata
-when the repo doesn't ship one:
+verifies the download with SHA-256 when Hugging Face provides a Git-LFS OID
+(the normal case for model files), or by size for non-LFS files, and synthesizes
+compatible metadata in memory when the repo doesn't ship one:
 
 ```ts
 const llm = await XybridLlm.fromHuggingFace("litert-community/SmolLM2-135M-Instruct", {

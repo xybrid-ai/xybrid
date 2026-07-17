@@ -165,7 +165,7 @@ type GenerateOptions = {
 
 `XybridModel.fromRegistry(id, options?)` 通过注册表解析张量模型，`XybridLlm.fromRegistry(id, options?)` 解析 LiteRT-LM 模型。`registryUrl` 必须使用 HTTPS；省略时，实现在内置注册表端点中尝试。注册表解析结果必须提供浏览器兼容的元数据文档、HTTPS 下载地址、不超过 512 MiB 的声明大小，以及 64 个小写十六进制字符组成的 SHA-256 值。下载字节必须同时匹配声明大小与 SHA-256。
 
-`XybridModel.fromHuggingFace(repo, options?)` 与 `XybridLlm.fromHuggingFace(repo, options?)` 接受 `org/name` 格式的仓库。`revision` 默认为 `"main"`；需要时可用 `file` 选择顶层 `.tflite` 或 `.litertlm` 文件。仓库包含 `model_metadata.json` 时，加载器使用并校验其中的模型文件；否则在目标格式唯一明确时合成兼容的元数据。树 API 响应提供声明大小，存在 LFS 大小时优先使用它；有效的 LFS OID 会作为 SHA-256 校验下载。所有解析出的下载都会通过大小校验拒绝超大或截断字节；注册表工件和 Hugging Face LFS 文件还会在 SHA-256 不匹配时失败并停止。没有有效 LFS OID 的 Hugging Face 文件没有树 API 提供的哈希，因此只执行大小校验。
+`XybridModel.fromHuggingFace(repo, options?)` 与 `XybridLlm.fromHuggingFace(repo, options?)` 接受 `org/name` 格式的仓库。`revision` 默认为 `"main"`；需要时可用 `file` 选择顶层 `.tflite` 或 `.litertlm` 文件。仓库包含 `model_metadata.json` 时，加载器使用并校验其中的模型文件；否则在目标格式唯一明确时在内存中合成兼容的元数据。树 API 响应提供声明大小，存在 LFS 大小时优先使用它；有效的 LFS OID 会作为 SHA-256 校验下载。所有解析出的下载都会通过大小校验拒绝超大或截断字节；注册表工件和 Hugging Face LFS 文件还会在 SHA-256 不匹配时失败并停止。没有有效 LFS OID 的 Hugging Face 文件没有树 API 提供的哈希，因此只执行大小校验。
 
 ### 错误处理
 
