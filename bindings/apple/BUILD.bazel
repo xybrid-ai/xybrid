@@ -23,5 +23,10 @@ apple_static_xcframework(
     # The full-feature iOS staticlib (Metal + vision + candle + coreml, min-iOS
     # 16.0). Provides CcInfo, so it feeds apple_static_xcframework directly.
     deps = ["//crates/xybrid-bolt:xybrid_bolt_staticlib"],
+    # Mac-only (xcodebuild -create-xcframework, iphoneos SDK): keep it OUT of
+    # wildcard builds like the advisory CI's `//bindings/...` analyze, which
+    # runs on a LINUX runner where no macOS exec platform exists (same reason
+    # //:llama_metal is `manual`). Explicit `--config=ios` builds still work.
+    tags = ["manual"],
     visibility = ["//visibility:public"],
 )
