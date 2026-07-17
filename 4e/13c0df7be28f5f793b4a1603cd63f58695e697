@@ -1,0 +1,26 @@
+bindings/flutter/rust/BUILD.bazel
+  s_8b9a9b82c688c4::t_25a80929d7eda6 3-10
+  s_8b9a9b82c688c4::t_d34632a7c74507 29-32,35-54
+  s_8b9a9b82c688c4::t_21d9de5380e6de 13-18
+.github/workflows/bazel.yml
+  s_8b9a9b82c688c4::t_8457ac7e3e1186 313-314
+  s_8b9a9b82c688c4::t_2856e544a0bfb1 164-165
+BUILD.bazel
+  s_8b9a9b82c688c4::t_e0ffb7ead92fb4 227-232
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "4e13c0df7be28f5f793b4a1603cd63f58695e697",
+  "prompts": {},
+  "sessions": {
+    "s_8b9a9b82c688c4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "73a8592f-ccc0-42cf-bf05-435600f9a611",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
