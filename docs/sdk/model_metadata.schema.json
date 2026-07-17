@@ -368,13 +368,12 @@
           "properties": {
             "context_length": {
               "description": "Maximum context length (tokens); engine default when absent",
-              "default": null,
               "type": [
                 "integer",
                 "null"
               ],
               "format": "uint",
-              "minimum": 0.0
+              "minimum": 1.0
             },
             "model_file": {
               "description": "Path to the .litertlm model file (relative to bundle root)",

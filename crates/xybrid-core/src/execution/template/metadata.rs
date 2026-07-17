@@ -7,6 +7,7 @@ use super::steps::{PostprocessingStep, PreprocessingStep};
 use super::voice::{VoiceConfig, VoiceInfo};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::num::NonZeroUsize;
 
 #[cfg(feature = "schema")]
 use schemars::JsonSchema;
@@ -63,8 +64,8 @@ pub enum ExecutionTemplate {
         /// Path to the .litertlm model file (relative to bundle root)
         model_file: String,
         /// Maximum context length (tokens); engine default when absent
-        #[serde(default)]
-        context_length: Option<usize>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        context_length: Option<NonZeroUsize>,
     },
 
     /// Multi-model graph execution (DAG of models)
@@ -813,7 +814,7 @@ mod tests {
                 context_length,
             } => {
                 assert_eq!(model_file, "SmolLM2_135M_Instruct.litertlm");
-                assert_eq!(context_length, Some(2048));
+                assert_eq!(context_length.map(|value| value.get()), Some(2048));
             }
             other => panic!("expected LiteRtLm, got {other:?}"),
         }
@@ -833,16 +834,66 @@ mod tests {
     }
 
     #[test]
+    fn test_litertlm_deserialization_rejects_zero_context_length() {
+        let result: Result<ExecutionTemplate, _> = serde_json::from_str(
+            r#"{"type":"LiteRtLm","model_file":"model.litertlm","context_length":0}"#,
+        );
+
+        assert!(result.is_err());
+    }
+
+    #[test]
     fn test_litertlm_serialization_round_trip() {
         let template = ExecutionTemplate::LiteRtLm {
             model_file: "model.litertlm".to_string(),
-            context_length: Some(2048),
+            context_length: Some(NonZeroUsize::new(2048).unwrap()),
         };
         let json = serde_json::to_string(&template).unwrap();
         assert!(json.contains("\"type\":\"LiteRtLm\""));
 
         let parsed: ExecutionTemplate = serde_json::from_str(&json).unwrap();
         assert!(matches!(parsed, ExecutionTemplate::LiteRtLm { .. }));
+    }
+
+    #[test]
+    fn test_litertlm_serialization_omits_unset_context_length() {
+        let template = ExecutionTemplate::LiteRtLm {
+            model_file: "model.litertlm".to_string(),
+            context_length: None,
+        };
+
+        let value = serde_json::to_value(template).unwrap();
+
+        assert!(value.get("context_length").is_none());
+    }
+
+    #[test]
+    fn test_litertlm_serialization_matches_web_fixture() {
+        let metadata = ModelMetadata {
+            model_id: "litertlm-contract-fixture".to_string(),
+            version: "1.0".to_string(),
+            execution_template: ExecutionTemplate::LiteRtLm {
+                model_file: "model.litertlm".to_string(),
+                context_length: Some(NonZeroUsize::new(4096).unwrap()),
+            },
+            preprocessing: Vec::new(),
+            postprocessing: Vec::new(),
+            files: vec!["model.litertlm".to_string()],
+            vision_encoder: None,
+            description: None,
+            metadata: HashMap::new(),
+            voices: None,
+            max_chunk_chars: None,
+            trim_trailing_samples: None,
+        };
+        let serialized: serde_json::Value =
+            serde_json::from_str(&serde_json::to_string(&metadata).unwrap()).unwrap();
+        let fixture_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../bindings/web/test/fixtures/rust-metadata-litertlm.json");
+        let fixture: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(fixture_path).unwrap()).unwrap();
+
+        assert_eq!(serialized, fixture);
     }
 
     #[test]
