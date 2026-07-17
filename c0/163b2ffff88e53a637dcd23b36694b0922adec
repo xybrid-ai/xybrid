@@ -1,0 +1,24 @@
+MODULE.bazel
+  s_8b9a9b82c688c4::t_3b8ae1f8611807 49-54,59-61
+  s_8b9a9b82c688c4::t_94c3f2b370d7da 55-58
+bindings/apple/BUILD.bazel
+  s_8b9a9b82c688c4::t_a01d4f1915a849 1-31
+bindings/apple/include/xybrid-bolt.h
+  s_8b9a9b82c688c4::t_5724e90c8a7bc1 1-58
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "c0163b2ffff88e53a637dcd23b36694b0922adec",
+  "prompts": {},
+  "sessions": {
+    "s_8b9a9b82c688c4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "73a8592f-ccc0-42cf-bf05-435600f9a611",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
