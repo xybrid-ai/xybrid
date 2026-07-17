@@ -1,0 +1,2 @@
+# Marks `bazel/` as a package so `//bazel:ort_ios_sim.bzl` (the iOS-simulator
+# ONNX Runtime fetch repo rule) is a loadable label. No targets live here.

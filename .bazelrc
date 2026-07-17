@@ -79,6 +79,17 @@ build:ios --compilation_mode=opt
 build:ios --ios_minimum_os=16.0
 build:ios --action_env=IPHONEOS_DEPLOYMENT_TARGET=16.0
 
+# --- Apple Gate 4a: iOS SIMULATOR staticlib (arm64), built LOCALLY on a Mac
+# (Xcode iphonesimulator SDK). Same Mac-bound constraints as --config=ios; the
+# ONNX Runtime slice is fetched via @ort_ios_arm64_sim (see //bazel:ort_ios_sim.bzl).
+# Used to build/verify the sim slice standalone; the xcframework's per-slice
+# transition also selects this platform for the simulator library.
+build:ios-sim --platforms=@rules_rs//rs/platforms:aarch64-apple-ios-sim
+build:ios-sim --config=local_tools
+build:ios-sim --compilation_mode=opt
+build:ios-sim --ios_minimum_os=16.0
+build:ios-sim --action_env=IPHONEOS_DEPLOYMENT_TARGET=16.0
+
 # On Linux hosts, rules_rs' experimental toolchains need an explicit host platform
 # with libc constraints (//:host_linux_gnu, root BUILD.bazel). The enable flag
 # makes `common:linux` auto-apply on Linux hosts (no-op on macOS: no macos config).

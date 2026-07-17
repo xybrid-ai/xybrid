@@ -119,6 +119,15 @@ bazel_dep(name = "rules_java", version = "8.11.0")
 http_archive = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 http_jar = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_jar")
 
+# The pyke aarch64-apple-ios-sim ONNX Runtime slice, fetched + raw-LZMA2-decoded
+# at repo-fetch time (see //bazel:ort_ios_sim.bzl) — the SAME binary the boltffi
+# release ships in its ios-arm64-simulator slice. Feeds the ort-sys annotation's
+# ORT_LIB_LOCATION for the simulator triple below. The device slice stays
+# committed under vendor/ort-ios/; this only ADDS the simulator slice.
+ort_ios_sim = use_repo_rule("//bazel:ort_ios_sim.bzl", "ort_ios_sim_repository")
+
+ort_ios_sim(name = "ort_ios_arm64_sim")
+
 http_archive(
     name = "android_sdk_34",
     build_file_content = """
@@ -264,6 +273,10 @@ crate.from_cargo(
         # iOS device (Apple G1). Mac-bound — builds locally via Xcode's iOS SDK
         # (apple_support toolchain), never on Linux RBE.
         "aarch64-apple-ios",
+        # iOS simulator (Apple G4a — arm64 sim on Apple-Silicon Macs). Mac-bound
+        # like the device triple; its ONNX Runtime slice is FETCHED (not vendored)
+        # via @ort_ios_arm64_sim so the xcframework ships a simulator slice too.
+        "aarch64-apple-ios-sim",
         "aarch64-linux-android",
         "armv7-linux-androideabi",
         "x86_64-linux-android",
@@ -284,6 +297,7 @@ crate.annotation(
     build_script_data_select = {
         "aarch64-apple-darwin": ["@@//:ort_macos_arm64"],
         "aarch64-apple-ios": ["@@//:ort_ios_arm64"],
+        "aarch64-apple-ios-sim": ["@ort_ios_arm64_sim//:lib"],
     },
     # CC=/usr/bin/false: ort-sys's bs probes `$CC --print-search-dirs` to find
     # Xcode's clang_rt dir and, on success, emits -lclang_rt.osx — which only
@@ -297,10 +311,17 @@ crate.annotation(
         # iOS: the vendored slice lives inside the committed xcframework
         # (vendor/ort-ios/onnxruntime.xcframework/ios-arm64/libonnxruntime.a).
         "aarch64-apple-ios": "{\"ORT_LIB_LOCATION\": \"$${pwd}/vendor/ort-ios/onnxruntime.xcframework/ios-arm64\", \"CC\": \"/usr/bin/false\"}",
+        # iOS simulator: the slice is FETCHED (@ort_ios_arm64_sim), so it stages
+        # in the execroot under external/<canonical>/ (default repo layout),
+        # not vendor/. The canonical name is deterministic for our pinned Bazel 9
+        # + the repo-rule symbol name (see //bazel:ort_ios_sim.bzl); $${pwd} =
+        # execroot. ORT_LIB_LOCATION wants the DIRECTORY holding libonnxruntime.a.
+        "aarch64-apple-ios-sim": "{\"ORT_LIB_LOCATION\": \"$${pwd}/external/+ort_ios_sim_repository+ort_ios_arm64_sim\", \"CC\": \"/usr/bin/false\"}",
     },
     data = [
         "@@//:ort_macos_arm64",
         "@@//:ort_ios_arm64",
+        "@ort_ios_arm64_sim//:lib",
     ],
     allow_build_script_to_detect_nonhermetic_paths = True,
 )

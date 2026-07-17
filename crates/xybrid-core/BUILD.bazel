@@ -63,6 +63,16 @@ rust_library(
             "ort-coreml",
             "llm-llamacpp-vision",
         ],
+        # iOS simulator (Apple G4a): identical backend set to the device slice.
+        "@rules_rs//rs/platforms/config:aarch64-apple-ios-sim": [
+            "candle",
+            "candle-core",
+            "candle-hub",
+            "candle-metal",
+            "candle-nn",
+            "ort-coreml",
+            "llm-llamacpp-vision",
+        ],
         "@rules_rs//rs/platforms/config:aarch64-linux-android": _ANDROID_BACKENDS,
         "@rules_rs//rs/platforms/config:armv7-linux-androideabi": _ANDROID_BACKENDS,
         "@rules_rs//rs/platforms/config:x86_64-linux-android": _ANDROID_BACKENDS,
