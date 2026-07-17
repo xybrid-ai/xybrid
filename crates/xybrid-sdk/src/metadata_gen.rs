@@ -4,7 +4,7 @@
 //! generate one by:
 //!
 //! 1. Parsing the HF model card (README.md YAML frontmatter) for task type and library info
-//! 2. Scanning the directory for model files (.onnx, .gguf, .safetensors)
+//! 2. Scanning the directory for model files (.onnx, .gguf, .safetensors, .tflite, .litertlm)
 //! 3. For GGUF models: reading binary metadata (architecture, context_length)
 //! 4. For ONNX models: inspecting input/output tensor names and shapes via ort
 //! 5. Falling back to a generic template if auto-detection fails
