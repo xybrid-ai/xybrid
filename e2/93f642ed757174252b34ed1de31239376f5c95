@@ -1,0 +1,22 @@
+bindings/apple/BUILD.bazel
+  s_8b9a9b82c688c4::t_b8f0be89eaefbe 19-23
+  s_8b9a9b82c688c4::t_4570b93f73c9ef 24-26
+bindings/apple/XybridFFI-Info.plist
+  s_8b9a9b82c688c4::t_84795dfbda4307 1-14
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "e293f642ed757174252b34ed1de31239376f5c95",
+  "prompts": {},
+  "sessions": {
+    "s_8b9a9b82c688c4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "73a8592f-ccc0-42cf-bf05-435600f9a611",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
