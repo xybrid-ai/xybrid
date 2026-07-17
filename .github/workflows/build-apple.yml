@@ -66,6 +66,12 @@ jobs:
     runs-on: macos-14
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          # Bazel's //:llama_src globs the vendored llama.cpp submodule
+          # (vendor/llama-cpp); without this the cmake source dir is empty and the
+          # build fails "does not contain CMakeLists.txt". The old cargo path
+          # didn't need it (build.rs cloned llama into OUT_DIR).
+          submodules: true
 
       # Apple CI is Bazel-built — the SAME //bindings/apple:XybridFFI target the
       # release ships (device + simulator slices, G4). No cargo/boltffi/sccache/
