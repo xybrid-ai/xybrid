@@ -196,52 +196,25 @@ jobs:
         with:
           submodules: true
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
-        with:
-          toolchain: stable
-          targets: >-
-            aarch64-apple-ios,
-            aarch64-apple-ios-sim,
-            aarch64-apple-darwin
-
-      - name: Setup sccache
-        uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
-
-      - name: Configure sccache environment
-        shell: bash
+      # G4b: the XCFramework is Bazel-built — the same //bindings/apple:XybridFFI
+      # target G1-G3 assembled, now carrying BOTH the device and simulator slices
+      # (G4a). This REPLACES `cargo xtask build-xcframework` / `boltffi pack
+      # apple`, so the cargo scaffolding (rust toolchain, sccache, rust-cache,
+      # boltffi CLI) is gone: Bazel uses rules_rs's own pinned rust toolchain and
+      # its own cache, and the committed C header + Swift wrapper are the codegen
+      # (boltffi is not run here). bazelisk ships on macos runners and honors
+      # .bazelversion. --config=ios is Mac-LOCAL (xcodebuild -create-xcframework,
+      # iphoneos/iphonesimulator SDKs) — NEVER RBE, so no BuildBuddy config.
+      - name: Ensure Bazel host tools
         run: |
-          echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
-          echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
-          echo "CMAKE_C_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
-          echo "CMAKE_CXX_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
+          which cmake >/dev/null || brew install cmake
+          which pkg-config >/dev/null || brew install pkg-config
+          # The simulator ORT slice is fetched + raw-LZMA2-decoded with xz
+          # (bazel/ort_ios_sim.bzl).
+          which xz >/dev/null || brew install xz
 
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-        with:
-          prefix-key: "v1-rust"
-          shared-key: "apple-xcframework"
-          cache-all-crates: "true"
-          save-if: "true"
-
-      # `cargo xtask build-xcframework` shells out to `boltffi pack apple`, so
-      # the CLI must be present here just as it is in the Android job. Without
-      # it the build fails with "Failed to run `boltffi pack apple`. Install
-      # with `cargo install boltffi_cli`." Cache + pin to 0.25.3 to match the
-      # runtime `boltffi` crate (Cargo.lock) — a CLI/runtime skew mis-generates
-      # the bindings (see the Android job's note).
-      - name: Cache boltffi CLI
-        id: cache-boltffi
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        with:
-          path: ~/.cargo/bin/boltffi
-          key: boltffi-cli-${{ runner.os }}-0.25.3
-
-      - name: Install boltffi CLI
-        run: which boltffi || cargo install boltffi_cli --version 0.25.3 --locked
-
-      - name: Build XCFramework
-        run: cargo xtask build-xcframework --release
+      - name: Build XCFramework (Bazel)
+        run: bazelisk build --config=ios //bindings/apple:XybridFFI
 
       - name: Prepare XCFramework artifact
         shell: bash
@@ -249,8 +222,12 @@ jobs:
           TAG: ${{ needs.check-release-branch.outputs.tag }}
         run: |
           mkdir -p dist
-          cd bindings/apple/XCFrameworks
-          zip -r ../../../dist/XybridFFI-${TAG}.xcframework.zip XybridFFI.xcframework
+          # apple_static_xcframework emits a ready .xcframework.zip whose root is
+          # XybridFFI.xcframework/ — no manual `zip -r`. -L copies the real file
+          # out of the bazel-bin symlink tree; the name matches Package.swift's
+          # binaryTarget URL (XybridFFI-v<ver>.xcframework.zip).
+          cp -L bazel-bin/bindings/apple/XybridFFI.xcframework.zip \
+            "dist/XybridFFI-${TAG}.xcframework.zip"
 
       - name: Attest XCFramework provenance
         uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0

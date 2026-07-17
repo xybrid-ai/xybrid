@@ -9,10 +9,12 @@
 # like the Swift wrapper; a CI drift check keeps it fresh.
 load("@build_bazel_rules_apple//apple:apple.bzl", "apple_static_xcframework")
 
-# Device-only for now (G3b). The simulator slice is a follow-up — blocked on a
-# vendored ort-ios SIMULATOR onnxruntime slice (only ios-arm64 device ships today).
-# bundle_name "XybridFFI" -> the xcframework dir AND the clang module name, which
-# must match `import XybridFFI` in the committed xybrid_bolt.swift + Package.swift.
+# Device + simulator (G4a). The simulator arm64 slice links a FETCHED ONNX
+# Runtime slice (@ort_ios_arm64_sim — the same binary boltffi ships), so the
+# xcframework matches the 2-slice release asset and the iOS-Simulator inner loop
+# (Cmd-R) links. bundle_name "XybridFFI" -> the xcframework dir AND the clang
+# module name, which must match `import XybridFFI` in the committed
+# xybrid_bolt.swift + Package.swift.
 apple_static_xcframework(
     name = "XybridFFI",
     bundle_name = "XybridFFI",
@@ -25,7 +27,10 @@ apple_static_xcframework(
     # generated. Merged into the embedded XybridFFI.framework/Info.plist.
     infoplists = ["XybridFFI-Info.plist"],
     minimum_os_versions = {"ios": "16.0"},  # matches Package.swift .iOS(.v16)
-    ios = {"device": ["arm64"]},
+    ios = {
+        "device": ["arm64"],
+        "simulator": ["arm64"],  # G4a: arm64 sim (Apple-Silicon Macs)
+    },
     public_hdrs = ["include/xybrid-bolt.h"],
     umbrella_header = "include/xybrid-bolt.h",
     # The full-feature iOS staticlib (Metal + vision + candle + coreml, min-iOS
