@@ -313,9 +313,18 @@ crate.annotation(
         "aarch64-apple-ios": "{\"ORT_LIB_LOCATION\": \"$${pwd}/vendor/ort-ios/onnxruntime.xcframework/ios-arm64\", \"CC\": \"/usr/bin/false\"}",
         # iOS simulator: the slice is FETCHED (@ort_ios_arm64_sim), so it stages
         # in the execroot under external/<canonical>/ (default repo layout),
-        # not vendor/. The canonical name is deterministic for our pinned Bazel 9
-        # + the repo-rule symbol name (see //bazel:ort_ios_sim.bzl); $${pwd} =
-        # execroot. ORT_LIB_LOCATION wants the DIRECTORY holding libonnxruntime.a.
+        # not vendor/. ORT_LIB_LOCATION wants the DIRECTORY holding
+        # libonnxruntime.a; $${pwd} = execroot.
+        #
+        # NOTE: the `+ort_ios_sim_repository+ort_ios_arm64_sim` segment is the
+        # Bzlmod CANONICAL repo name (`+<repo-rule-symbol>+<repo-name>`), a Bazel
+        # implementation detail. It is stable for xybrid (pinned Bazel in
+        # .bazelversion; xybrid is the ROOT module, so no parent-module prefix),
+        # but a Bazel major bump or importing this module as a dependency could
+        # change it. If the sim build then fails to find libonnxruntime.a,
+        # re-derive with:
+        #   bazel cquery @ort_ios_arm64_sim//:lib --output=starlark \
+        #     --starlark:expr='[f.dirname for f in target.files.to_list()]'
         "aarch64-apple-ios-sim": "{\"ORT_LIB_LOCATION\": \"$${pwd}/external/+ort_ios_sim_repository+ort_ios_arm64_sim\", \"CC\": \"/usr/bin/false\"}",
     },
     data = [

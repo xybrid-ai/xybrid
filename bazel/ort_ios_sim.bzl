@@ -43,14 +43,37 @@ filegroup(
 )
 """
 
+def _emit_placeholder(ctx):
+    # An empty libonnxruntime.a keeps @ort_ios_arm64_sim//:lib resolvable without
+    # a download. It is only ever staged as an input-only `data` entry on builds
+    # that never link the simulator slice, so its contents are never read.
+    ctx.file("libonnxruntime.a", "", executable = False)
+    ctx.file("BUILD.bazel", _BUILD_FILE, executable = False)
+
 def _ort_ios_sim_impl(ctx):
+    # This repo is referenced from the ort-sys annotation's UNCONDITIONAL `data`
+    # (crate.annotation has no per-triple `data`, and a select() branch still
+    # loads its label), so the rule is evaluated on EVERY build — including Linux
+    # RBE and the windows-gnu cross, which never touch the iOS simulator. Only
+    # actually fetch on macOS (where the sim slice is built); elsewhere emit an
+    # empty placeholder so no 74 MiB download or `xz` dependency is imposed on
+    # non-Apple builds (which may run in minimal containers without `xz`).
+    if not ctx.os.name.startswith("mac"):
+        _emit_placeholder(ctx)
+        return
+
     xz = ctx.which("xz")
     if xz == None:
-        fail(
-            "`xz` not found on PATH: it is required to decode pyke's raw-LZMA2 " +
-            "ONNX Runtime archive for the iOS simulator slice. Install it " +
-            "(`brew install xz`); GitHub macos runners ship it.",
-        )
+        # On macOS but `xz` is missing: DON'T fail the fetch — that would break
+        # unrelated desktop/macOS builds that merely reference this repo. Warn and
+        # emit the placeholder; a real iOS-simulator build then fails later at the
+        # onnxruntime link, with this warning already pointing at the cause.
+        # buildifier: disable=print
+        print("WARNING: `xz` not found on PATH — the iOS-simulator ONNX Runtime " +
+              "slice was NOT fetched. Run `brew install xz` to build the simulator " +
+              "slice (`bazel build --config=ios //bindings/apple:XybridFFI`).")
+        _emit_placeholder(ctx)
+        return
 
     ctx.download(
         url = _URL,
