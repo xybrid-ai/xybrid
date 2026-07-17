@@ -1,0 +1,23 @@
+.github/workflows/build-apple.yml
+  s_8b9a9b82c688c4::t_1558b3e631bd90 12-21
+  s_8b9a9b82c688c4::t_0f4de86512cfe4 70-76,78-89,91-95
+  s_8b9a9b82c688c4::t_af5ae6890fec11 28-31,40-46
+  s_8b9a9b82c688c4::t_cc5decf2826016 99-114
+  s_8b9a9b82c688c4::t_36ec69b4293bff 129-132
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "74b11598dd1e3aebca27b41c4bca0cfd8040a422",
+  "prompts": {},
+  "sessions": {
+    "s_8b9a9b82c688c4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "73a8592f-ccc0-42cf-bf05-435600f9a611",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
