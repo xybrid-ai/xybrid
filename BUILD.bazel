@@ -224,6 +224,12 @@ cmake(
             "LLAMA_BUILD_TOOLS": "ON",
             "LLAMA_BUILD_COMMON": "ON",
             "CMAKE_CXX_STANDARD_LIBRARIES": "$$EXT_BUILD_ROOT/$(execpath @llvm//runtimes/libcxx:libcxx.static) $$EXT_BUILD_ROOT/$(execpath @llvm//runtimes/libcxx:libcxxabi.static) $$EXT_BUILD_ROOT/$(execpath @llvm//runtimes/libunwind:libunwind.static)",
+            # PIC so these static libs also link into a -shared consumer (the
+            # Flutter cdylib, //bindings/flutter/rust): stb_image's __thread
+            # globals otherwise emit R_X86_64_TPOFF32, illegal in a shared lib.
+            # Harmless for the CLI exe (macOS/arm64 is PIC by default, Android via
+            # the NDK, so only the linux GNU arm needs this explicitly).
+            "CMAKE_POSITION_INDEPENDENT_CODE": "ON",
         },
         # darwin CPU lane (RBE): _DARWIN_LLAMA + the SDK's -lc++ for the tool
         # exes (resolves against the sysroot's libc++.tbd stubs; the tools are

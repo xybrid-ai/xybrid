@@ -161,7 +161,8 @@ jobs:
         if: env.BUILDBUDDY_API_KEY != ''
         run: |
           bazelisk build --config=remote -c opt \
-            //crates/xybrid-cli:xybrid
+            //crates/xybrid-cli:xybrid \
+            //bindings/flutter/rust:xybrid_flutter_ffi_cdylib
           bazelisk build --config=remote --config=macos \
             //crates/xybrid-cli:xybrid \
             //crates/xybrid-bolt:xybrid_bolt_staticlib
@@ -309,7 +310,8 @@ jobs:
         if: env.BUILDBUDDY_API_KEY != ''
         run: |
           bazelisk build --config=remote --config=macos-metal -c opt \
-            //crates/xybrid-cli:xybrid
+            //crates/xybrid-cli:xybrid \
+            //bindings/flutter/rust:xybrid_flutter_ffi_staticlib
 
       - name: Smoke the Metal CLI (run + Metal + features)
         if: env.BUILDBUDDY_API_KEY != ''
