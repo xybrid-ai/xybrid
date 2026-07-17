@@ -18,10 +18,6 @@ apple_static_xcframework(
     bundle_name = "XybridFFI",
     minimum_os_versions = {"ios": "16.0"},  # matches Package.swift .iOS(.v16)
     ios = {"device": ["arm64"]},
-    families_required = {"ios": [
-        "iphone",
-        "ipad",
-    ]},
     public_hdrs = ["include/xybrid-bolt.h"],
     umbrella_header = "include/xybrid-bolt.h",
     # The full-feature iOS staticlib (Metal + vision + candle + coreml, min-iOS
