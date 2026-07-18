@@ -1,0 +1,28 @@
+bindings/flutter/rust/BUILD.bazel
+  s_bc0377b0b41b4d::t_062edc24e20cfa 3-12
+.github/workflows/bazel.yml
+  s_bc0377b0b41b4d::t_a5208db3c718de 229-242
+  s_bc0377b0b41b4d::t_84bb7a1926e116 330-337
+  s_bc0377b0b41b4d::t_b953d80f1281aa 338-339
+.github/workflows/release-prep.yml
+  s_bc0377b0b41b4d::t_fb1361e2be7136 256-260,262-264,266-282,284-323,331-333,343-349
+  s_bc0377b0b41b4d::t_7f7304d155cb3a 592-649,651-655,660-664,677-686
+  s_bc0377b0b41b4d::t_e6ba1f47ada359 650
+  s_bc0377b0b41b4d::t_0c35d7cb5d0fd6 533-537,542
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "8971bc13414d4b13acb91ab661181ae6dc5513bd",
+  "prompts": {},
+  "sessions": {
+    "s_bc0377b0b41b4d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c39ff2b4-b884-490e-a5cc-cc07241383f6",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
