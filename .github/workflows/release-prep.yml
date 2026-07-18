@@ -255,39 +255,74 @@ jobs:
         with:
           submodules: true
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
-        with:
-          toolchain: stable
-          targets: >-
-            aarch64-apple-ios,
-            aarch64-apple-ios-sim,
-            aarch64-apple-darwin
-
-      - name: Setup sccache
-        uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
-
-      - name: Configure sccache environment
-        shell: bash
+      # Flutter G2: the darwin/iOS/iOS-sim libraries are Bazel-built (the same
+      # //bindings/flutter/rust targets the advisory CI gates); cargokit keeps
+      # only its sign-and-upload role via --prebuilt-artifact. No Rust
+      # toolchain on this runner — Bazel brings its own.
+      - name: Ensure rfcc host tools
         run: |
-          echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
-          echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
-          echo "CMAKE_C_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
-          echo "CMAKE_CXX_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
+          which cmake >/dev/null || brew install cmake
+          which pkg-config >/dev/null || brew install pkg-config
+          which xz >/dev/null || brew install xz   # ort ios-sim fetch (raw-LZMA2 decode)
 
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-        with:
-          prefix-key: "v1-rust"
-          shared-key: "flutter-darwin"
-          cache-all-crates: "true"
-          save-if: "true"
+      - name: Configure BuildBuddy remote config
+        env:
+          BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
+        run: |
+          mkdir -p .context
+          cat > .context/buildbuddy.bazelrc <<EOF
+          common:remote --bes_results_url=https://app.buildbuddy.io/invocation/
+          common:remote --bes_backend=grpcs://remote.buildbuddy.io
+          common:remote --remote_header=x-buildbuddy-api-key=${BUILDBUDDY_API_KEY}
+          common:remote --remote_cache=grpcs://remote.buildbuddy.io
+          common:remote --remote_executor=grpcs://remote.buildbuddy.io
+          common:remote --remote_cache_compression
+          common:remote --remote_download_toplevel
+          common:remote --remote_timeout=600
+          common:remote --jobs=200
+          common:remote --extra_execution_platforms=@llvm//:rbe_linux_x86_64
+          EOF
 
-      # Matches the LLVM install on the Linux/Windows Flutter precompile
-      # jobs. Conservative: cargokit may invoke clang somewhere; verifying
-      # whether macOS strictly needs this is a follow-up.
-      - name: Install LLVM
-        run: brew install llvm
+      # Three configs, one bazel-bin symlink — resolve every artifact via
+      # cquery + cp -L immediately after its build (never reference bazel-bin
+      # across configs).
+      - name: Build Flutter darwin libraries (Bazel)
+        run: |
+          set -euo pipefail
+          stage() {  # stage <triple> <config-args...>
+            local triple="$1"; shift
+            bazelisk build "$@" //bindings/flutter/rust:xybrid_flutter_ffi_staticlib
+            mkdir -p "prebuilt/$triple"
+            cp -L "$(bazelisk cquery "$@" --output=files //bindings/flutter/rust:xybrid_flutter_ffi_staticlib | head -1)" \
+              "prebuilt/$triple/libxybrid_flutter_ffi.a"
+          }
+          # macOS — mixed execution (Rust graph on RBE/cache, Metal local).
+          stage aarch64-apple-darwin --config=remote --config=macos-metal -c opt
+          # iOS device + simulator — Mac-local (Apple locks these to Xcode).
+          stage aarch64-apple-ios --config=ios
+          stage aarch64-apple-ios-sim --config=ios-sim
+
+      # The payload gate (the cutover ritual): every staticlib must carry the
+      # full shipped feature surface, and the iOS slices must be the right
+      # platform (device vs simulator). Mach-O symbols carry a leading
+      # underscore; LC_BUILD_VERSION platform: 1=macOS, 2=iOS, 7=iOS-sim.
+      - name: Verify Flutter darwin payloads
+        run: |
+          set -euo pipefail
+          check_lib() {  # check_lib <triple> <expected-platform-id>
+            local lib="prebuilt/$1/libxybrid_flutter_ffi.a"
+            file "$lib" | grep -q 'archive' || { echo "$1: not a static archive"; exit 1; }
+            test "$(nm "$lib" 2>/dev/null | grep -c '_ggml_metal')" -gt 0 || { echo "$1: MISSING Metal symbols"; exit 1; }
+            test "$(nm "$lib" 2>/dev/null | grep -c '_mtmd_')" -gt 0 || { echo "$1: MISSING vision (mtmd) symbols"; exit 1; }
+            strings "$lib" | grep -qi 'candle' || { echo "$1: MISSING candle support"; exit 1; }
+            local platform
+            platform=$(otool -l "$lib" | awk '/LC_BUILD_VERSION/{f=1} f && /platform/{print $2; exit}')
+            test "$platform" = "$2" || { echo "$1: wrong platform $platform (want $2)"; exit 1; }
+            echo "$1: OK (platform $platform)"
+          }
+          check_lib aarch64-apple-darwin 1
+          check_lib aarch64-apple-ios 2
+          check_lib aarch64-apple-ios-sim 7
 
       - uses: dart-lang/setup-dart@65eb853c7ba17dde3be364c3d2858773e7144260 # v1.7.2
 
@@ -295,7 +330,9 @@ jobs:
         working-directory: bindings/flutter/cargokit/build_tool
         run: dart pub get
 
-      - name: Precompile and upload Flutter darwin binaries
+      # Explicit --target list = the exact set cargokit's empty-target
+      # fallback produces on a macOS host today (all darwin targets).
+      - name: Sign and upload Flutter darwin binaries (cargokit)
         working-directory: bindings/flutter/cargokit/build_tool
         shell: bash
         env:
@@ -305,7 +342,13 @@ jobs:
           dart run bin/build_tool.dart precompile-binaries \
             --repository ${{ github.repository }} \
             --manifest-dir ${{ github.workspace }}/bindings/flutter/rust \
-            --verbose
+            --verbose \
+            --target aarch64-apple-darwin \
+            --target aarch64-apple-ios \
+            --target aarch64-apple-ios-sim \
+            --prebuilt-artifact aarch64-apple-darwin=${{ github.workspace }}/prebuilt/aarch64-apple-darwin \
+            --prebuilt-artifact aarch64-apple-ios=${{ github.workspace }}/prebuilt/aarch64-apple-ios \
+            --prebuilt-artifact aarch64-apple-ios-sim=${{ github.workspace }}/prebuilt/aarch64-apple-ios-sim
 
   # ----- Apple job 3/3: CLI macos-arm64 (parallel)
   build-cli-macos:
@@ -489,15 +532,16 @@ jobs:
         with:
           submodules: true
 
+      # Flutter G2: linux + 3 of the 4 Android ABIs are Bazel-built on RBE
+      # (the same //bindings/flutter/rust cdylib the advisory CI gates);
+      # cargokit keeps sign-and-upload via --prebuilt-artifact. The cargo
+      # toolchain below remains ONLY for i686-linux-android — the one ABI
+      # with no Bazel triple in the workspace yet.
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
         with:
           toolchain: stable
-          targets: >-
-            x86_64-unknown-linux-gnu,
-            aarch64-linux-android,
-            armv7-linux-androideabi,
-            x86_64-linux-android
+          targets: i686-linux-android
 
       - name: Setup sccache
         uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
@@ -547,11 +591,79 @@ jobs:
       - name: Install cargo-ndk
         run: which cargo-ndk || cargo install cargo-ndk
 
+      - name: Configure BuildBuddy remote config
+        env:
+          BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
+        run: |
+          mkdir -p .context
+          cat > .context/buildbuddy.bazelrc <<EOF
+          common:remote --bes_results_url=https://app.buildbuddy.io/invocation/
+          common:remote --bes_backend=grpcs://remote.buildbuddy.io
+          common:remote --remote_header=x-buildbuddy-api-key=${BUILDBUDDY_API_KEY}
+          common:remote --remote_cache=grpcs://remote.buildbuddy.io
+          common:remote --remote_executor=grpcs://remote.buildbuddy.io
+          common:remote --remote_cache_compression
+          common:remote --remote_download_toplevel
+          common:remote --remote_timeout=600
+          common:remote --jobs=200
+          common:remote --extra_execution_platforms=@llvm//:rbe_linux_x86_64
+          EOF
+
+      # Four configs, one bazel-bin symlink — resolve every artifact via
+      # cquery + cp -L immediately after its build. build-android (a needs)
+      # has already warmed the RBE cache with the exact android Rust graph.
+      - name: Build Flutter libraries (Bazel on RBE)
+        run: |
+          set -euo pipefail
+          stage() {  # stage <triple> <config-args...>
+            local triple="$1"; shift
+            bazelisk build "$@" //bindings/flutter/rust:xybrid_flutter_ffi_cdylib
+            mkdir -p "prebuilt/$triple"
+            cp -L "$(bazelisk cquery "$@" --output=files //bindings/flutter/rust:xybrid_flutter_ffi_cdylib | head -1)" \
+              "prebuilt/$triple/libxybrid_flutter_ffi.so"
+          }
+          # linux x86_64 — hermetic glibc floor (loadable on older distros,
+          # unlike a runner-glibc cargo build)
+          stage x86_64-unknown-linux-gnu --config=remote -c opt
+          # android — the 3 Bazel ABIs (i686 stays on cargo below)
+          stage aarch64-linux-android --config=remote --config=android-arm64
+          stage armv7-linux-androideabi --config=remote --config=android-armv7
+          stage x86_64-linux-android --config=remote --config=android-x86_64
+
+      # The payload gate (the cutover ritual): right ELF machine per ABI,
+      # vision aboard, android .so carry the c++_shared DT_NEEDED + 16KB
+      # page alignment, linux keeps the hermetic glibc floor.
+      - name: Verify Flutter payloads
+        run: |
+          set -euo pipefail
+          check_so() {  # check_so <triple> <readelf-machine>
+            local so="prebuilt/$1/libxybrid_flutter_ffi.so"
+            readelf -h "$so" | grep -q "Machine:.*$2" || { echo "$1: wrong machine (want $2)"; readelf -h "$so" | grep Machine; exit 1; }
+            strings "$so" | grep -q 'mtmd' || { echo "$1: MISSING vision (mtmd) markers"; exit 1; }
+            echo "$1: OK"
+          }
+          check_so x86_64-unknown-linux-gnu "X86-64"
+          check_so aarch64-linux-android "AArch64"
+          check_so armv7-linux-androideabi "ARM"
+          check_so x86_64-linux-android "X86-64"
+          for triple in aarch64-linux-android armv7-linux-androideabi x86_64-linux-android; do
+            so="prebuilt/$triple/libxybrid_flutter_ffi.so"
+            readelf -d "$so" | grep -q 'NEEDED.*libc++_shared' || { echo "$triple: MISSING libc++_shared DT_NEEDED"; exit 1; }
+            readelf -lW "$so" | grep -Eq 'LOAD.*0x4000$' || { echo "$triple: MISSING 16KB page alignment"; exit 1; }
+          done
+          MAX_GLIBC=$(strings prebuilt/x86_64-unknown-linux-gnu/libxybrid_flutter_ffi.so | grep -oE 'GLIBC_[0-9]+\.[0-9]+' | sort -Vu | tail -1)
+          echo "linux glibc floor: $MAX_GLIBC"
+          [ "$(printf '%s\n' "$MAX_GLIBC" GLIBC_2.31 | sort -V | tail -1)" = "GLIBC_2.31" ] || { echo "glibc floor regressed above 2.31: $MAX_GLIBC"; exit 1; }
+
       - name: Install build tool dependencies
         working-directory: bindings/flutter/cargokit/build_tool
         run: dart pub get
 
-      - name: Precompile and upload binaries
+      # Explicit --target list = the exact set cargokit's fallback produces on
+      # a linux host today (host linux + all 4 android). i686 has no
+      # --prebuilt-artifact mapping, so cargokit cargo-builds it (the android
+      # flags below are what that one build needs).
+      - name: Sign and upload Flutter linux/android binaries (cargokit)
         working-directory: bindings/flutter/cargokit/build_tool
         shell: bash
         env:
@@ -564,7 +676,16 @@ jobs:
             --verbose \
             --android-sdk-location $ANDROID_HOME \
             --android-ndk-version ${{ env.NDK_VERSION }} \
-            --android-min-sdk-version 28
+            --android-min-sdk-version 28 \
+            --target x86_64-unknown-linux-gnu \
+            --target aarch64-linux-android \
+            --target armv7-linux-androideabi \
+            --target x86_64-linux-android \
+            --target i686-linux-android \
+            --prebuilt-artifact x86_64-unknown-linux-gnu=${{ github.workspace }}/prebuilt/x86_64-unknown-linux-gnu \
+            --prebuilt-artifact aarch64-linux-android=${{ github.workspace }}/prebuilt/aarch64-linux-android \
+            --prebuilt-artifact armv7-linux-androideabi=${{ github.workspace }}/prebuilt/armv7-linux-androideabi \
+            --prebuilt-artifact x86_64-linux-android=${{ github.workspace }}/prebuilt/x86_64-linux-android
 
   # =========================================================================
   # Flutter precompiled binaries — Windows.

@@ -226,6 +226,20 @@ jobs:
           bazelisk build --config=remote -c opt \
             //bindings/kotlin:xybrid_kotlin_aar
 
+      # The Flutter android cdylibs are release-critical since the precompile
+      # flip (release-prep precompile-flutter-linux ships them) — keep them a
+      # standing gate. Cheap: the Rust graph is cache-shared with the AAR
+      # build above; only the flutter crate + link are new per ABI.
+      - name: Build Flutter android cdylibs on RBE (3 ABIs)
+        if: env.BUILDBUDDY_API_KEY != ''
+        run: |
+          bazelisk build --config=remote --config=android-arm64 \
+            //bindings/flutter/rust:xybrid_flutter_ffi_cdylib
+          bazelisk build --config=remote --config=android-armv7 \
+            //bindings/flutter/rust:xybrid_flutter_ffi_cdylib
+          bazelisk build --config=remote --config=android-x86_64 \
+            //bindings/flutter/rust:xybrid_flutter_ffi_cdylib
+
       - name: Upload AAR artifact
         if: env.BUILDBUDDY_API_KEY != ''
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -311,6 +325,16 @@ jobs:
         run: |
           bazelisk build --config=remote --config=macos-metal -c opt \
             //crates/xybrid-cli:xybrid \
+            //bindings/flutter/rust:xybrid_flutter_ffi_staticlib
+
+      # Release-critical since the Flutter precompile flip (release-prep
+      # precompile-flutter-darwin ships it): the iOS-simulator staticlib.
+      # Mac-local like the ios configs themselves; the device slice is
+      # already covered per-PR by build-apple.yml's xcframework build.
+      - name: Build Flutter iOS-sim staticlib
+        if: env.BUILDBUDDY_API_KEY != ''
+        run: |
+          bazelisk build --config=ios-sim \
             //bindings/flutter/rust:xybrid_flutter_ffi_staticlib
 
       - name: Smoke the Metal CLI (run + Metal + features)
