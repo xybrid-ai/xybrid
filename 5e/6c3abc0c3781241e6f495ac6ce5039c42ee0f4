@@ -1,0 +1,25 @@
+bindings/flutter/cargokit/build_tool/lib/src/build_tool.dart
+  s_bc0377b0b41b4d::t_f1cf6520344001 133-139
+  s_bc0377b0b41b4d::t_771e0ce92872e3 198-214
+  s_bc0377b0b41b4d::t_c72f06ad1a394d 225
+bindings/flutter/cargokit/build_tool/lib/src/precompile_binaries.dart
+  s_bc0377b0b41b4d::t_bbc34e76c4e6eb 109-111,128-141
+  s_bc0377b0b41b4d::t_7490737c373042 32,45-50
+  s_bc0377b0b41b4d::t_8f91cdd9d59b5d 51
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "5e6c3abc0c3781241e6f495ac6ce5039c42ee0f4",
+  "prompts": {},
+  "sessions": {
+    "s_bc0377b0b41b4d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c39ff2b4-b884-490e-a5cc-cc07241383f6",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
