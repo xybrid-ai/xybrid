@@ -130,6 +130,13 @@ class PrecompileBinariesCommand extends Command {
         'temp-dir',
         help: 'Directory to store temporary build artifacts',
       )
+      ..addMultiOption(
+        'prebuilt-artifact',
+        help: 'Local addition (not upstream Cargokit): <rust-triple>=<dir>.\n'
+            'Use an already-built artifact directory (e.g. a Bazel output)\n'
+            'for the given target instead of building it with cargo.\n'
+            'Signing and uploading are unchanged. Can be repeated.',
+      )
       ..addFlag(
         "verbose",
         abbr: "v",
@@ -188,6 +195,28 @@ class PrecompileBinariesCommand extends Command {
       }
       return res;
     }).toList(growable: false);
+    final prebuiltArtifacts = <String, String>{};
+    for (final entry in argResults!['prebuilt-artifact'] as List<String>) {
+      final separator = entry.indexOf('=');
+      if (separator == -1) {
+        throw ArgumentError(
+            'Invalid prebuilt-artifact (expected <triple>=<dir>): $entry');
+      }
+      final triple = entry.substring(0, separator);
+      final dir = entry.substring(separator + 1);
+      if (dir.isEmpty) {
+        // Directory('').existsSync() resolves to the working directory,
+        // which would silently pass the check below.
+        throw ArgumentError('Prebuilt artifact directory cannot be empty: $entry');
+      }
+      if (Target.forRustTriple(triple) == null) {
+        throw ArgumentError('Invalid prebuilt-artifact target: $triple');
+      }
+      if (!Directory(dir).existsSync()) {
+        throw ArgumentError('Prebuilt artifact directory does not exist: $dir');
+      }
+      prebuiltArtifacts[triple] = dir;
+    }
     final precompileBinaries = PrecompileBinaries(
       privateKey: PrivateKey(privateKey),
       githubToken: githubToken,
@@ -198,6 +227,7 @@ class PrecompileBinariesCommand extends Command {
       androidNdkVersion: argResults!['android-ndk-version'] as String?,
       androidMinSdkVersion: androidMinSdkVersion,
       tempDir: argResults!['temp-dir'] as String?,
+      prebuiltArtifacts: prebuiltArtifacts,
     );
 
     await precompileBinaries.run();
