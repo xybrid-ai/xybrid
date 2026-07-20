@@ -159,8 +159,19 @@ set_swift_version() {
 # Set both version keys in the xcframework framework Info.plist. Each <string>
 # value sits on the line AFTER its key, so match the key then replace the next
 # line (`n`). Both track the SDK version (fine for a static-lib framework).
+#
+# Apple requires CFBundleVersion / CFBundleShortVersionString to be
+# period-separated NUMBERS (TN2420) — rules_apple's plisttool hard-fails on a
+# prerelease suffix like 0.4.0-alpha. The plist gets the numeric core; the
+# full version string lives everywhere else.
+plist_version_of() {
+    local v="${1%%-*}"
+    echo "${v%%+*}"
+}
+
 set_swift_ffi_version() {
-    local version="$1"
+    local version
+    version="$(plist_version_of "$1")"
     sed -i.bak \
         -e "/CFBundleVersion/{n;s|<string>.*</string>|<string>$version</string>|;}" \
         -e "/CFBundleShortVersionString/{n;s|<string>.*</string>|<string>$version</string>|;}" \
@@ -226,10 +237,17 @@ check_versions() {
         local version
         version="$($func 2>/dev/null || echo "NOT FOUND")"
 
-        if [ "$version" = "$cargo_version" ]; then
+        # The plist carries only the numeric core (Apple rejects prerelease
+        # suffixes in CFBundleVersion — see set_swift_ffi_version).
+        local expected="$cargo_version"
+        if [ "$name" = "Swift FFI plist" ]; then
+            expected="$(plist_version_of "$cargo_version")"
+        fi
+
+        if [ "$version" = "$expected" ]; then
             echo "  $name: $version ✓"
         else
-            echo "  $name: $version ✗ (expected $cargo_version)"
+            echo "  $name: $version ✗ (expected $expected)"
             exit_code=1
         fi
     done
