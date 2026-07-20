@@ -1,0 +1,22 @@
+tools/scripts/version-sync.sh
+  s_bc0377b0b41b4d::t_06a69c0a8ff337 240-247,250
+  s_bc0377b0b41b4d::t_fcc0744779f0af 162-171,173-174
+bindings/apple/XybridFFI-Info.plist
+  s_bc0377b0b41b4d::t_7b7faf5c9133ca 10,12
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "e840a3c91bf745fc4e476d09e728202058f88d14",
+  "prompts": {},
+  "sessions": {
+    "s_bc0377b0b41b4d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c39ff2b4-b884-490e-a5cc-cc07241383f6",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
