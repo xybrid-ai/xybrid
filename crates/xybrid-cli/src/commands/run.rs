@@ -2018,6 +2018,8 @@ stages:
             Some("mlx"),
             false,
             false,
+            false,
+            None,
             None,
         )
         .expect("CLI local-directory path should run synthetic MLX embedding bundle");
