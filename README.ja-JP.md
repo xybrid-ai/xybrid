@@ -29,6 +29,7 @@
 
 [![Website][website-shield]][website-url]
 [![Docs][docs-shield]][docs-url]
+[![Ask DeepWiki][deepwiki-shield]][deepwiki-url]
 [![Discord][discord-shield]][discord-url]
 [![Twitter][twitter-shield]][twitter-url]
 <br>
@@ -51,6 +52,8 @@
 [website-url]: https://www.xybrid.ai/
 [docs-shield]: https://img.shields.io/badge/docs-xybrid.dev-1F6FEB?style=flat&logo=readthedocs&logoColor=white
 [docs-url]: https://docs.xybrid.dev/
+[deepwiki-shield]: https://deepwiki.com/badge.svg
+[deepwiki-url]: https://deepwiki.com/xybrid-ai/xybrid
 [discord-shield]: https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fdiscord.com%2Fapi%2Finvites%2FYhFHHkhbad%3Fwith_counts%3Dtrue&query=%24.approximate_member_count&logo=discord&logoColor=white&label=Discord&color=5865F2&suffix=%20members
 [discord-url]: https://discord.gg/YhFHHkhbad
 [twitter-shield]: https://img.shields.io/twitter/follow/xybrid_ai
