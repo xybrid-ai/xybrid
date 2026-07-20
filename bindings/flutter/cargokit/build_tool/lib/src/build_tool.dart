@@ -204,6 +204,11 @@ class PrecompileBinariesCommand extends Command {
       }
       final triple = entry.substring(0, separator);
       final dir = entry.substring(separator + 1);
+      if (dir.isEmpty) {
+        // Directory('').existsSync() resolves to the working directory,
+        // which would silently pass the check below.
+        throw ArgumentError('Prebuilt artifact directory cannot be empty: $entry');
+      }
       if (Target.forRustTriple(triple) == null) {
         throw ArgumentError('Invalid prebuilt-artifact target: $triple');
       }
