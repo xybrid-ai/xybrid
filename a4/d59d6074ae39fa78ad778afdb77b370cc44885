@@ -1,0 +1,23 @@
+README.md
+  s_fe8b2ae06af256::t_c3dc3ff39e1d2b 30,33-37,39-40,44,48-52,56-57,59-61,63-65,67-70,75-79,81,83,85-94
+README.zh-CN.md
+  s_fe8b2ae06af256::t_162da00e61db12 30,33-37,40-42,44,48-52,56-57,59-61,63-65,67-70,73-79,81,83,85-94
+README.ja-JP.md
+  s_fe8b2ae06af256::t_83e39f416db49d 30,33-37,40-42,44,48-52,56-57,59-61,63-65,67-70,73-79,81,83,85-94
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "a4d59d6074ae39fa78ad778afdb77b370cc44885",
+  "prompts": {},
+  "sessions": {
+    "s_fe8b2ae06af256": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "49b0d7b4-7fe4-4309-8599-a36901be4930",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
