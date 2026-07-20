@@ -1,0 +1,26 @@
+README.md
+  s_fe8b2ae06af256::t_80cfc245ba87d0 48
+  s_fe8b2ae06af256::t_047d521c32f6d6 21,24
+README.zh-CN.md
+  s_fe8b2ae06af256::t_ae093269a7b8c2 48
+  s_fe8b2ae06af256::t_687f23c6d8a6d3 21,24
+README.ja-JP.md
+  s_fe8b2ae06af256::t_ec3ffc464c0b54 21,24
+  s_fe8b2ae06af256::t_9e7cc5da0d0d8b 48
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "858d93df33378a63c6857f27d6ea9446ec9997fd",
+  "prompts": {},
+  "sessions": {
+    "s_fe8b2ae06af256": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "49b0d7b4-7fe4-4309-8599-a36901be4930",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
