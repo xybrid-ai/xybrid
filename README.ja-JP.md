@@ -17,63 +17,72 @@
 </p>
 
 <p align="center">
-  <a href="https://docs.xybrid.dev">ドキュメント</a> ·
-  <a href="#sdk">SDK</a> ·
-  <a href="https://www.xybrid.ai/models">モデル</a> ·
-  <a href="https://discord.gg/YhFHHkhbad">Discordに参加</a> ·
-  <a href="https://x.com/xybrid_ai">Xでフォロー</a> ·
-  <a href="https://github.com/xybrid-ai/xybrid/issues">Issues</a>
+
+[![Docs][docs-shield]][docs-url]
+[![Website][website-shield]][website-url]
+[![Follow on X][twitter-shield]][twitter-url]
+[![Discord][discord-shield]][discord-url]
+
 </p>
 
 <p align="center">
 
-[![Website][website-shield]][website-url]
-[![Docs][docs-shield]][docs-url]
-[![Discord][discord-shield]][discord-url]
-[![Twitter][twitter-shield]][twitter-url]
-<br>
-[![License][license-shield]][license-url]
 [![Build][build-shield]][build-url]
-[![OpenSSF Scorecard][scorecard-shield]][scorecard-url]
-[![Stars][stars-shield]][stars-url]
 [![Release][release-shield]][release-url]
-[![Release Date][release-date-shield]][release-url]
+[![License][license-shield]][license-url]
+[![OpenSSF Scorecard][scorecard-shield]][scorecard-url]
+[![OpenSSF Best Practices][bestpractices-shield]][bestpractices-url]
 <br>
+[![crates.io][crates-shield]][crates-url]
 [![pub.dev][pubdev-shield]][pubdev-url]
 [![Maven Central][maven-shield]][maven-url]
 [![Swift Package Manager][spm-shield]][spm-url]
-[![crates.io][crates-shield]][crates-url]
-[![Visitors](https://visitor-badge.laobi.icu/badge?page_id=xybrid-ai.xybrid)](https://github.com/xybrid-ai/xybrid)
+<br>
+[![Ask DeepWiki][deepwiki-shield]][deepwiki-url]
+[![Stars][stars-shield]][stars-url]
+[![Visitors][visitors-shield]][visitors-url]
 
 </p>
 
-[website-shield]: https://img.shields.io/badge/xybrid.ai-4285F4?style=flat
-[website-url]: https://www.xybrid.ai/
-[docs-shield]: https://img.shields.io/badge/docs-xybrid.dev-1F6FEB?style=flat&logo=readthedocs&logoColor=white
+<!-- Primary — for-the-badge -->
+[docs-shield]: https://img.shields.io/badge/Docs-docs.xybrid.dev-1F6FEB?style=for-the-badge&logo=readthedocs&logoColor=white
 [docs-url]: https://docs.xybrid.dev/
-[discord-shield]: https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fdiscord.com%2Fapi%2Finvites%2FYhFHHkhbad%3Fwith_counts%3Dtrue&query=%24.approximate_member_count&logo=discord&logoColor=white&label=Discord&color=5865F2&suffix=%20members
+[website-shield]: https://img.shields.io/badge/Website-xybrid.ai-4285F4?style=for-the-badge
+[website-url]: https://www.xybrid.ai/
+[discord-shield]: https://img.shields.io/badge/Join_Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white
 [discord-url]: https://discord.gg/YhFHHkhbad
-[twitter-shield]: https://img.shields.io/twitter/follow/xybrid_ai
-[twitter-url]: https://x.com/xybrid_ai
-[license-shield]: https://img.shields.io/badge/License-Apache_2.0-blue.svg?style=flat
-[license-url]: https://opensource.org/licenses/Apache-2.0
-[build-shield]: https://img.shields.io/github/actions/workflow/status/xybrid-ai/xybrid/ci.yml?branch=master&style=flat
+
+<!-- Project health — flat-square -->
+[build-shield]: https://img.shields.io/github/actions/workflow/status/xybrid-ai/xybrid/ci.yml?branch=master&style=flat-square
 [build-url]: https://github.com/xybrid-ai/xybrid/actions
+[release-shield]: https://img.shields.io/github/v/release/xybrid-ai/xybrid?style=flat-square&sort=semver
+[release-url]: https://github.com/xybrid-ai/xybrid/releases
+[license-shield]: https://img.shields.io/badge/License-Apache_2.0-blue.svg?style=flat-square
+[license-url]: https://opensource.org/licenses/Apache-2.0
 [scorecard-shield]: https://api.scorecard.dev/projects/github.com/xybrid-ai/xybrid/badge
 [scorecard-url]: https://scorecard.dev/viewer/?uri=github.com/xybrid-ai/xybrid
-[stars-shield]: https://img.shields.io/github/stars/xybrid-ai/xybrid?style=flat
-[stars-url]: https://github.com/xybrid-ai/xybrid/stargazers
-[release-shield]: https://img.shields.io/github/v/release/xybrid-ai/xybrid?style=flat&sort=semver
-[release-url]: https://github.com/xybrid-ai/xybrid/releases
-[release-date-shield]: https://img.shields.io/github/release-date/xybrid-ai/xybrid?style=flat
-[pubdev-shield]: https://img.shields.io/pub/v/xybrid_flutter?style=flat&label=pub.dev
-[pubdev-url]: https://pub.dev/packages/xybrid_flutter
-[maven-shield]: https://img.shields.io/maven-central/v/ai.xybrid/xybrid-kotlin?style=flat&label=Maven%20Central
-[maven-url]: https://central.sonatype.com/artifact/ai.xybrid/xybrid-kotlin
-[spm-shield]: https://img.shields.io/badge/Swift_Package_Manager-compatible-F05138?style=flat&logo=swift&logoColor=white
-[spm-url]: https://github.com/xybrid-ai/xybrid
-[crates-shield]: https://img.shields.io/crates/v/xybrid?style=flat&label=crates.io&logo=rust
+[bestpractices-shield]: https://www.bestpractices.dev/projects/13041/badge
+[bestpractices-url]: https://www.bestpractices.dev/projects/13041
+
+<!-- Packages — flat-square -->
+[crates-shield]: https://img.shields.io/crates/v/xybrid?style=flat-square&label=crates.io&logo=rust
 [crates-url]: https://crates.io/crates/xybrid
+[pubdev-shield]: https://img.shields.io/pub/v/xybrid_flutter?style=flat-square&label=pub.dev
+[pubdev-url]: https://pub.dev/packages/xybrid_flutter
+[maven-shield]: https://img.shields.io/maven-central/v/ai.xybrid/xybrid-kotlin?style=flat-square&label=Maven%20Central
+[maven-url]: https://central.sonatype.com/artifact/ai.xybrid/xybrid-kotlin
+[spm-shield]: https://img.shields.io/badge/Swift_Package_Manager-compatible-F05138?style=flat-square&logo=swift&logoColor=white
+[spm-url]: https://github.com/xybrid-ai/xybrid
+
+<!-- Community — flat-square -->
+[deepwiki-shield]: https://deepwiki.com/badge.svg
+[deepwiki-url]: https://deepwiki.com/xybrid-ai/xybrid
+[stars-shield]: https://img.shields.io/github/stars/xybrid-ai/xybrid?style=flat-square
+[stars-url]: https://github.com/xybrid-ai/xybrid/stargazers
+[twitter-shield]: https://img.shields.io/badge/Follow-%40xybrid__ai-000000?style=for-the-badge&logo=x&logoColor=white
+[twitter-url]: https://x.com/xybrid_ai
+[visitors-shield]: https://visitor-badge.laobi.icu/badge?page_id=xybrid-ai.xybrid
+[visitors-url]: https://github.com/xybrid-ai/xybrid
 </div>
 
 <p align="center">
