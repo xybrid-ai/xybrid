@@ -18,10 +18,10 @@
 
 <p align="center">
 
-[![Documentation][docs-shield]][docs-url]
+[![Docs][docs-shield]][docs-url]
 [![Website][website-shield]][website-url]
-[![Discord][discord-shield]][discord-url]
 [![Follow on X][twitter-shield]][twitter-url]
+[![Discord][discord-shield]][discord-url]
 
 </p>
 
@@ -45,7 +45,7 @@
 </p>
 
 <!-- Primary — for-the-badge -->
-[docs-shield]: https://img.shields.io/badge/Documentation-docs.xybrid.dev-1F6FEB?style=for-the-badge&logo=readthedocs&logoColor=white
+[docs-shield]: https://img.shields.io/badge/Docs-docs.xybrid.dev-1F6FEB?style=for-the-badge&logo=readthedocs&logoColor=white
 [docs-url]: https://docs.xybrid.dev/
 [website-shield]: https://img.shields.io/badge/Website-xybrid.ai-4285F4?style=for-the-badge
 [website-url]: https://www.xybrid.ai/
