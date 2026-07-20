@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.0-alpha
+
+Prerelease exercising the new release pipeline.
+
+* Fixed: `libxybrid_flutter.so` not found when compiling from source on Linux (xybrid-ai/xybrid#340)
+* Changed: the precompiled binaries (desktop + mobile) are now built by Bazel with hermetic toolchains — same download, naming, and signature; the Linux `.so` now loads on older-glibc distros than before (xybrid-ai/xybrid#369, xybrid-ai/xybrid#371)
+
 ## 0.3.0
 
 * Fixed: model cache clearing now reports the number of cache roots actually removed (previously counted scanned `.xyb` entries, ~0 for the nested registry-bundle layout), so "clear cache" no longer reports success when nothing was cached; `extracted/`, `hf/`, and `hf-hub/` stay co-located under a relative cache root (xybrid-ai/xybrid#309)

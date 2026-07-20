@@ -13,6 +13,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.4.0-alpha] - 2026-07-18
+
+Prerelease. The headline is invisible on purpose: nearly every shipped artifact
+is now produced by one Bazel build graph on remote execution instead of
+per-platform cargo builds — same names, same delivery, same signatures. This
+alpha exists to exercise that new release pipeline end-to-end before a stable
+cut. Alongside it: a browser SDK preview, a Python SDK, and reasoning-model
+fixes.
+
+### Added
+
+- **Browser SDK preview (`@xybrid/web`)** backed by LiteRT.js and LiteRT-LM (#346).
+- **Python SDK** — BoltFFI-based, ctypes over the `xybrid-bolt` cdylib (#327).
+- **Reasoning capture**: `<thinking>` and gemma-4 reasoning formats recognized
+  via a marker table and surfaced separately from the answer (#336, docs #331).
+- **Bonsai-27B 1-bit runtime**: Qwen3VL companion artifacts and text-only VLM
+  routing (#356).
+
+### Fixed
+
+- **Reasoning models silently produced empty answers** when the entire output
+  was a thinking block (#355, #358).
+- **SwiftPM manifest honesty**: the package no longer advertises a macOS slice
+  that never shipped, and the iOS floor is `.v16` to match the binary — both
+  previously failed at link time instead of resolve time (#357).
+- **Flutter on Linux**: `libxybrid_flutter.so` not found when compiling from
+  source (#340).
+
+### Changed
+
+- **The build factory: cargo → Bazel + remote execution** for every release
+  artifact — the CLI on Linux (#347), macOS (#348, #350), and Windows (#352,
+  #354), the Android AAR (#341), the iOS XCFramework with device + simulator
+  slices (#362–#367), and the Flutter precompiled binaries (#369, #371).
+  Consumer-visible effects: the Windows CLI switches toolchain flavor
+  MSVC → MinGW (behaviorally identical for a self-contained CLI), and Linux
+  artifacts now carry a hermetic glibc ≤ 2.31 floor, so they load on older
+  distros than the previous runner-glibc builds. Bazel is also the required
+  CI gate; the duplicate cargo CLI jobs are retired (#360, #361).
+- **Dead execution strategies removed** from the core resolver
+  (Standard/Tts/Llm) (#353).
+
+---
+
 ## [0.3.0] - 2026-07-06
 
 Local tool calling, Unity on OpenUPM, and honest cache clearing. The local
