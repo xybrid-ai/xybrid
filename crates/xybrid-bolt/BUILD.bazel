@@ -1,0 +1,55 @@
+# GATE 5 — xybrid-bolt (BoltFFI: Swift/Kotlin/Java/C#/WASM bindings).
+#
+# This is the "other hard crate" the evaluation flagged. Bazel can build the
+# RUST ARTIFACTS — the cdylib (.so/.dylib) and the staticlib (.a) — straight
+# from @crates, no build.rs involved. What Bazel does NOT own here is the
+# `boltffi pack` step: it relinks the staticlib (the c++_shared / 16KB-align
+# fight), generates the Swift/Kotlin sources, and packs the xcframework/aar.
+# That stays in xtask/CI consuming these outputs (the build-once -> fan-out
+# boundary). boltffi itself is codegen, not a build script, so nothing is
+# generated at compile time.
+load("@rules_rs//rs:rust_shared_library.bzl", "rust_shared_library")
+load("@rules_rs//rs:rust_static_library.bzl", "rust_static_library")
+load("@crates//:defs.bzl", "all_crate_deps")
+
+# cdylib — libxybrid_bolt.{so,dylib}
+#
+# GATE 8 (android): this ONE rustc link replaces boltffi pack's second `-shared`
+# relink + the patchelf --add-needed fixup. The flags are stated AT LINK TIME:
+#   -lc++_shared            -> the libc++_shared.so DT_NEEDED boltffi's relink drops
+#   -llog                   -> android liblog (matches the relink's -llog)
+#   -z,max-page-size=16384  -> 16KB page alignment; must come after the NDK
+#                              toolchain's hardcoded 4096 (last -z wins with lld)
+# (Packaging note: Kotlin loads "xybrid-bolt" (hyphen); the AAR assembly renames
+# libxybrid_bolt.so -> libxybrid-bolt.so.)
+rust_shared_library(
+    name = "xybrid_bolt_cdylib",
+    srcs = glob(["src/**/*.rs"]),
+    crate_name = "xybrid_bolt",
+    edition = "2021",
+    crate_features = ["default"],
+    rustc_flags = select({
+        "@platforms//os:android": [
+            "-Clink-arg=-lc++_shared",
+            "-Clink-arg=-llog",
+            "-Clink-arg=-Wl,-z,max-page-size=16384",
+            # Strip the symtab at link time (keeps dynsym — the JNI/dlopen
+            # exports). Replaces the pipeline's post-hoc llvm-strip.
+            "-Cstrip=symbols",
+        ],
+        "//conditions:default": [],
+    }),
+    deps = all_crate_deps(normal = True),
+    visibility = ["//visibility:public"],
+)
+
+# staticlib — libxybrid_bolt.a (what `boltffi pack` relinks into the xcframework/aar)
+rust_static_library(
+    name = "xybrid_bolt_staticlib",
+    srcs = glob(["src/**/*.rs"]),
+    crate_name = "xybrid_bolt",
+    edition = "2021",
+    crate_features = ["default"],
+    deps = all_crate_deps(normal = True),
+    visibility = ["//visibility:public"],
+)

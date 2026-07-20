@@ -464,6 +464,39 @@
         }
       ]
     },
+    "qwen3-0.6b": {
+      "description": "Qwen3 0.6B thinking model - emits literal <think> tags (Q8_0 GGUF)",
+      "source": "url",
+      "size_mb": 640,
+      "task": "text-generation",
+      "feature_gate": "llm-llamacpp",
+      "files": [
+        {
+          "url": "https://huggingface.co/Qwen/Qwen3-0.6B-GGUF/resolve/main/Qwen3-0.6B-Q8_0.gguf",
+          "output": "Qwen3-0.6B-Q8_0.gguf"
+        }
+      ],
+      "model_metadata": {
+        "model_id": "qwen3-0.6b",
+        "version": "1.0",
+        "description": "Qwen3 0.6B thinking model for reasoning-budget tests.",
+        "execution_template": {
+          "type": "Gguf",
+          "model_file": "Qwen3-0.6B-Q8_0.gguf",
+          "context_length": 4096
+        },
+        "preprocessing": [],
+        "postprocessing": [],
+        "files": ["Qwen3-0.6B-Q8_0.gguf"],
+        "metadata": {
+          "task": "text-generation",
+          "architecture": "qwen3",
+          "backend": "llamacpp",
+          "reasoning": true,
+          "quantization": "q8_0"
+        }
+      }
+    },
     "qwen3.5-0.8b": {
       "description": "Qwen 3.5 0.8B - Alibaba Cloud's lightweight multimodal LLM, text-only (GGUF Q4_K_M, 533MB)",
       "source": "url",

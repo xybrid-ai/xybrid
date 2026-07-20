@@ -9,8 +9,127 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Planned
 
-- **OpenUPM registry**: Publish Unity SDK to [openupm.com](https://openupm.com) for scoped registry install
 - **Multimodal KV-prefix reuse**: the per-frame prefill cost lever for live vision — **deferred** from 0.2.0, not yet implemented.
+
+---
+
+## [0.3.0] - 2026-07-06
+
+Local tool calling, Unity on OpenUPM, and honest cache clearing. The local
+llama.cpp backend gains function/tool calling; the Unity SDK is re-platformed
+onto a managed-only OpenUPM package that fetches its natives at import; and the
+model-cache clear/discovery paths are corrected to report what they actually
+remove.
+
+### Changed
+
+- **Unity SDK distribution moved to OpenUPM** (#321, #324). The Unity package now
+  ships managed-only via the OpenUPM scoped registry (`ai.xybrid`); per-platform
+  native libraries are downloaded from the GitHub Release at import by an editor
+  resolver (SHA-256 verified) into `Assets/Xybrid/Plugins/`, **including the
+  ~326 MB iOS slice** that previously required manual setup. **Breaking for Unity
+  consumers:** the `#upm` git-branch install is replaced (install via OpenUPM or
+  the `?path=/bindings/unity` git URL), and the `publish-upm` CI job is retired.
+- **Model cache clearing reports what it removed** (#309). **Breaking:** `clear()`
+  / `clear_model_roots()` now return the number of cache *roots* removed (was the
+  scanned `.xyb` entry count, ~0 for the nested registry-bundle layout), and the
+  CLI now warns when nothing was cached instead of always reporting success.
+  `cache_root()` keeps `extracted/`, `hf/`, and `hf-hub/` co-located under the
+  cache root for a bare relative `models` root instead of resolving them
+  CWD-relative. `clear*` operations are documented as unsafe against concurrent
+  loads.
+
+### Added
+
+- **Local tool calling for the llama.cpp backend** (#323): function/tool calls
+  are parsed from local LLM output for LFM2 and Gemma-family models, with
+  streaming tool-call continuation, an example, and a CLI REPL. See the
+  tool-calling guide.
+- **Unity native-library resolver + release bundles** (#321). An editor resolver
+  downloads/verifies the per-platform natives on import and before player builds;
+  CI publishes `xybrid-unity-native-<platform>-v<version>.zip` bundles + a
+  SHA-256 manifest as release assets (managed by `cargo xtask package-unity-natives`).
+
+### Fixed
+
+- **Internal path-dep pins** realigned to the workspace version (#318).
+
+---
+
+## [0.2.2] - 2026-07-04
+
+Structured output on-device. The local llama.cpp backend can now be constrained
+to a grammar so small models (e.g. LFM2.5-230M) emit guaranteed-valid JSON for
+data-extraction workloads, and that capability is exposed across every binding.
+
+### Added
+
+- **JSON-Schema / GBNF constrained decoding for the local llama backend**
+  (#310): `GenerationConfig` gains a `grammar` field with chainable
+  `with_grammar` / `with_json_schema` builders, backed by a new
+  JSON-Schema→GBNF converter (`runtime_adapter::grammar`) covering the
+  object / array / scalar / enum subset, including nullable (`["string","null"]`)
+  fields and `\uXXXX` escapes. The grammar is prepended to the llama.cpp sampler
+  chain at the single shared chokepoint, so all generate paths are constrained
+  with no new type crossing the ABI. Ships with an end-to-end
+  `lfm2_230m_grammar` example proving schema-valid receipt→JSON extraction on
+  LFM2.5-230M where the unconstrained baseline fails. New
+  `XybridError::Grammar` variant.
+- **Grammar constraint exposed across all FFI surfaces** (#311): structured
+  output now works from Swift, Kotlin, C, and Dart. The SDK re-exports
+  `json_schema_to_gbnf` / `json_schema_str_to_gbnf` / `GrammarError`; the schema
+  crosses the FFI boundary as text and is converted natively. Bolt (Swift /
+  Kotlin), the C ABI (`xybrid_generation_config_set_grammar`,
+  `xybrid_json_schema_to_gbnf`), and Flutter (`FfiGenerationConfig.grammar`,
+  `jsonSchemaToGbnf`) all gain the `grammar` field and converter; committed
+  Swift/Kotlin wrappers, the C header, and the FRB bindings are regenerated.
+
+### Fixed
+
+- **Compact JSON from schema→GBNF** (#310): the converter's whitespace rule
+  allowed unbounded inter-token whitespace, letting a greedy model emit newlines
+  until `max_tokens` (truncated output, `finish_reason=length`). The converter
+  now emits compact (minified) JSON to remove the trap; output stays valid JSON.
+- **Grammar converter robustness** (#310): NULL-check the llama sampler chain
+  before use; error on non-object `properties` instead of silently matching
+  `{}`; JSON-escape object keys before GBNF-escaping so control characters match
+  their JSON-escaped form.
+
+---
+
+## [0.2.1] - 2026-06-25
+
+The native VLM ships enabled. `0.2.0` landed the vision *foundation* — image
+envelopes, preprocessing, and the mtmd backend in the codebase — but kept the
+native VLM backend opt-in, so the default mobile/desktop binaries could not
+actually run a vision-language model. `0.2.1` turns it on in every platform
+preset: vision-language inference works out of the box, at a measured
+~0.7–1.5 MiB stripped size cost.
+
+### Added
+
+- **Native VLM backend shipped enabled** (#296): `llm-llamacpp-vision`
+  (llama.cpp's mtmd/clip) is now part of every platform preset
+  (`platform-android` / `platform-ios` / `platform-macos` / `platform-desktop`),
+  so the default XCFramework, Android AAR, Flutter/React Native natives, and CLI
+  run vision-language models with no build-from-source step. The prebuilt-natives
+  CI now publishes `vision` slices alongside `base`, so vision builds stay on the
+  fast cached path instead of recompiling llama.cpp.
+
+### Fixed
+
+- **Unrecognized GGUF chat templates now render** (#304): when llama.cpp's
+  hardcoded template matcher rejects a model's embedded chat template, xybrid
+  falls back to a real Jinja engine (minijinja) to render it instead of failing
+  — so GGUF models with custom or non-standard chat templates load and run
+  correctly. Gated into `llm-llamacpp`, so non-llama builds pay zero cost.
+- **Readable Apple FFI errors** (#296): `FfiError` now conforms to
+  `LocalizedError`, so model-load and other low-level FFI failures surface their
+  real message (e.g. a registry `ModelNotFound`) instead of the opaque
+  "The operation couldn't be completed. (Xybrid.FfiError error 1.)".
+- **Release tooling**: `version-sync` is now React-Native-aware (#298), and a
+  spurious `bindings/flutter/rust/Cargo.lock` that broke dependency resolution
+  was removed (#300).
 
 ---
 

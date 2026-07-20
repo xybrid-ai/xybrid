@@ -1,0 +1,46 @@
+{
+  "$schema": "https://biomejs.dev/schemas/2.5.3/schema.json",
+  "assist": { "actions": { "source": { "organizeImports": "on" } } },
+  "formatter": {
+    "enabled": true,
+    "indentStyle": "space",
+    "indentWidth": 2,
+    "lineWidth": 100
+  },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "preset": "recommended",
+      "suspicious": {
+        "noExplicitAny": "error"
+      },
+      "complexity": {
+        "useLiteralKeys": "off"
+      },
+      "style": {
+        "noDefaultExport": "error",
+        "useImportType": "error",
+        "noParameterAssign": "error",
+        "noNonNullAssertion": "error"
+      }
+    }
+  },
+  "files": {
+    "includes": [
+      "**",
+      "!dist",
+      "!example/dist",
+      "!node_modules",
+      "!example/public/litert",
+      "!example/public/llm-runtime",
+      "!playwright-report",
+      "!test-results"
+    ]
+  },
+  "overrides": [
+    {
+      "includes": ["tsdown.config.ts", "playwright.config.ts", "example/vite.config.ts"],
+      "linter": { "rules": { "style": { "noDefaultExport": "off" } } }
+    }
+  ]
+}

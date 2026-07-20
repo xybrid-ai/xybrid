@@ -25,6 +25,7 @@ import ai.xybrid.clearBatteryLevel
 import ai.xybrid.clearThermalState
 import ai.xybrid.embedding
 import ai.xybrid.initSdkCacheDir
+import ai.xybrid.reasoningContent
 import ai.xybrid.setBatteryLevel
 import ai.xybrid.setBinding
 import ai.xybrid.setThermalState
@@ -406,6 +407,7 @@ class XybridModule(reactContext: ReactApplicationContext) :
     out.putBoolean("success", r.success)
     out.putInt("latencyMs", r.latencyMs.toInt())
     r.text?.let { out.putString("text", it) }
+    r.reasoningContent?.let { out.putString("reasoningContent", it) }
     r.audioBytes?.let { out.putString("audioBytesBase64", Base64.encodeToString(it, Base64.NO_WRAP)) }
     r.embedding?.let {
       val arr = Arguments.createArray()

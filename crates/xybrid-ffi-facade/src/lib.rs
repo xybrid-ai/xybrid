@@ -640,6 +640,10 @@ pub struct GenerationConfig {
     pub top_k: Option<u32>,
     pub repetition_penalty: Option<f32>,
     pub stop_sequences: Vec<String>,
+    /// Optional GBNF grammar constraining generation to structured output
+    /// (local llama backend only; other backends ignore it). Produce one from
+    /// a JSON Schema with [`json_schema_to_gbnf`], or pass raw GBNF.
+    pub grammar: Option<String>,
 }
 
 impl GenerationConfig {
@@ -663,13 +667,8 @@ impl GenerationConfig {
         }
     }
 
-    /// Materialize the SDK type. Binding crates wrapping a non-facade POD
-    /// (e.g. `FfiGenerationConfig` in the Flutter bindings) call this to
-    /// consume the canonical "option overrides → SDK defaults" mapping
-    /// instead of duplicating it. `pub` rather than `pub(crate)` for that
-    /// reason.
-    pub fn to_sdk(&self) -> sdk::GenerationConfig {
-        let mut cfg = sdk::GenerationConfig::default();
+    /// Apply the explicitly set fields over a caller-provided SDK config.
+    pub fn apply_over(&self, mut cfg: sdk::GenerationConfig) -> sdk::GenerationConfig {
         if let Some(v) = self.max_tokens {
             cfg.max_tokens = v as usize;
         }
@@ -691,8 +690,32 @@ impl GenerationConfig {
         if !self.stop_sequences.is_empty() {
             cfg.stop_sequences = self.stop_sequences.clone();
         }
+        if let Some(g) = &self.grammar {
+            cfg.grammar = Some(g.clone());
+        }
         cfg
     }
+
+    /// Materialize the SDK type over the global defaults.
+    ///
+    /// Run paths with a model in scope should prefer
+    /// `apply_over(model.default_generation_config())` so model-level defaults
+    /// are preserved.
+    pub fn to_sdk(&self) -> sdk::GenerationConfig {
+        self.apply_over(sdk::GenerationConfig::default())
+    }
+}
+
+/// Convert a JSON Schema (as a JSON string) into a GBNF grammar for
+/// [`GenerationConfig::grammar`].
+///
+/// Kept as a free function rather than folded into `to_sdk` so the
+/// option-bag → SDK mapping stays infallible; schema conversion is the one
+/// step that can fail (invalid JSON, unsupported schema construct).
+pub fn json_schema_to_gbnf(schema_json: &str) -> Result<String> {
+    sdk::json_schema_str_to_gbnf(schema_json).map_err(|e| Error::ConfigError {
+        message: e.to_string(),
+    })
 }
 
 /// Abort signals the caller can observe. FFI-safe subset of
@@ -737,11 +760,19 @@ pub struct RunOptions {
 }
 
 impl RunOptions {
-    /// Materialize the SDK type. `pub` so binding crates with their own
-    /// run-options POD (e.g. `FfiRunOptions` in the Flutter bindings) can
-    /// route through this for the policy-builder assembly without
-    /// re-implementing it.
+    /// Materialize the SDK type over global defaults.
+    ///
+    /// Run paths with a model in scope should prefer [`Self::to_sdk_over`].
     pub fn to_sdk(&self, cancel: Option<&CancellationToken>) -> sdk::RunOptions {
+        self.to_sdk_over(cancel, sdk::GenerationConfig::default())
+    }
+
+    /// Materialize the SDK type over model-resolved generation defaults.
+    pub fn to_sdk_over(
+        &self,
+        cancel: Option<&CancellationToken>,
+        generation_base: sdk::GenerationConfig,
+    ) -> sdk::RunOptions {
         let mut policy = sdk::AbortPolicy::default()
             .with_cloud_fallback(self.fallback_to_cloud)
             .with_max_grace_tokens(self.max_grace_tokens);
@@ -751,7 +782,7 @@ impl RunOptions {
 
         let mut opts = sdk::RunOptions::new().with_abort_policy(policy);
         if let Some(gc) = &self.generation_config {
-            opts = opts.with_generation_config(gc.to_sdk());
+            opts = opts.with_generation_config(gc.apply_over(generation_base));
         }
         if let Some(cid) = &self.correlation_id {
             opts = opts.with_correlation_id(cid.clone());
@@ -888,6 +919,23 @@ impl InferenceResult {
             EnvelopeKind::Text { text } => Some(text.as_str()),
             _ => None,
         }
+    }
+
+    /// Convenience: the model's chain-of-thought / reasoning text, if any.
+    ///
+    /// Surfaced from the response envelope's `reasoning_content` metadata —
+    /// the same key the SDK's [`reasoning_content`] accessor reads — so it is
+    /// independent of the payload [`kind`]: a text result carries its answer
+    /// in `text()` and its `<think>` reasoning here. Returns `None` when the
+    /// model emitted no reasoning or the backend doesn't surface one.
+    ///
+    /// [`reasoning_content`]: sdk::InferenceResult::reasoning_content
+    /// [`kind`]: Envelope::kind
+    pub fn reasoning_content(&self) -> Option<&str> {
+        self.envelope
+            .metadata
+            .get("reasoning_content")
+            .map(String::as_str)
     }
 
     /// Convenience: audio bytes, if the result is `OutputType::Audio`.
@@ -1131,7 +1179,7 @@ impl XybridModel {
         cancel: Option<Arc<CancellationToken>>,
     ) -> Result<InferenceResult> {
         let env = envelope.into_sdk()?;
-        let opts = options.to_sdk(cancel.as_deref());
+        let opts = options.to_sdk_over(cancel.as_deref(), self.inner.default_generation_config());
         let result = self
             .inner
             .run_with_options(&env, &opts)
@@ -1152,7 +1200,9 @@ impl XybridModel {
     ) -> Result<InferenceResult> {
         let env = envelope.into_sdk()?;
         let ctx = context.snapshot();
-        let gc = generation_config.as_ref().map(GenerationConfig::to_sdk);
+        let gc = generation_config
+            .as_ref()
+            .map(|config| config.apply_over(self.inner.default_generation_config()));
         let result = self
             .inner
             .run_with_context(&env, &ctx, gc.as_ref())
@@ -1392,6 +1442,38 @@ mod tests {
         );
     }
 
+    fn text_result_with_metadata(metadata: HashMap<String, String>) -> InferenceResult {
+        InferenceResult {
+            envelope: Envelope {
+                kind: EnvelopeKind::Text {
+                    text: "the answer".into(),
+                },
+                metadata,
+            },
+            output_type: OutputType::Text,
+            model_id: "m".into(),
+            latency_ms: 0,
+            metrics: InferenceMetrics::default(),
+        }
+    }
+
+    #[test]
+    fn reasoning_content_reads_from_envelope_metadata() {
+        let mut metadata = HashMap::new();
+        metadata.insert("reasoning_content".to_string(), "let me think".to_string());
+        let result = text_result_with_metadata(metadata);
+
+        // Answer text and reasoning are surfaced independently.
+        assert_eq!(result.text(), Some("the answer"));
+        assert_eq!(result.reasoning_content(), Some("let me think"));
+    }
+
+    #[test]
+    fn reasoning_content_absent_is_none() {
+        let result = text_result_with_metadata(HashMap::new());
+        assert_eq!(result.reasoning_content(), None);
+    }
+
     #[test]
     fn message_role_roundtrip() {
         for role in [
@@ -1428,6 +1510,25 @@ mod tests {
         assert!((sdk_gc.temperature - 0.3).abs() < f32::EPSILON);
         assert_eq!(sdk_gc.top_k, 40);
         assert_eq!(sdk_gc.stop_sequences, vec!["</s>".to_string()]);
+    }
+
+    #[test]
+    fn generation_config_apply_over_preserves_unset_base_fields() {
+        let base = sdk::GenerationConfig {
+            max_tokens: 3584,
+            temperature: 0.7,
+            ..sdk::GenerationConfig::default()
+        };
+        let gc = GenerationConfig {
+            top_k: Some(12),
+            ..GenerationConfig::default()
+        };
+
+        let sdk_gc = gc.apply_over(base);
+
+        assert_eq!(sdk_gc.max_tokens, 3584);
+        assert!((sdk_gc.temperature - 0.7).abs() < f32::EPSILON);
+        assert_eq!(sdk_gc.top_k, 12);
     }
 
     #[test]
@@ -1468,6 +1569,18 @@ mod tests {
             .observes(sdk::AbortSignal::ThermalCritical));
         assert_eq!(sdk_opts.correlation_id.as_deref(), Some("trace-1"));
         assert!(sdk_opts.cancellation_token.is_some());
+    }
+
+    #[test]
+    fn run_options_without_generation_config_preserves_none() {
+        let base = sdk::GenerationConfig {
+            max_tokens: 3584,
+            ..sdk::GenerationConfig::default()
+        };
+
+        let sdk_opts = RunOptions::default().to_sdk_over(None, base);
+
+        assert!(sdk_opts.generation_config.is_none());
     }
 
     #[test]

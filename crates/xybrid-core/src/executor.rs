@@ -1065,6 +1065,14 @@ mod tests {
     fn test_boundary_accepts_directory_path() {
         use tempfile::TempDir;
 
+        // Executes an Onnx stage past the boundary check, which reaches real
+        // ort initialization — under load-dynamic a missing libonnxruntime
+        // panics inside ort, so skip on runners without the binary.
+        if !crate::runtime_adapter::onnx::ort_runtime_available() {
+            eprintln!("skipping: onnxruntime dylib not available in this environment");
+            return;
+        }
+
         let mut executor = create_test_executor();
 
         // Create a temp directory with model_metadata.json

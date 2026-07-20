@@ -393,6 +393,23 @@ enum Commands {
         #[arg(long)]
         skip_flutter: bool,
     },
+
+    /// Package per-platform Unity native bundles + resolver manifest into dist/.
+    ///
+    /// Zips each present `bindings/unity/Runtime/Plugins/<Platform>` tree (as
+    /// deployed by `build-unity --deploy`) into
+    /// `xybrid-unity-native-<platform>-v<ver>.zip` and writes
+    /// `xybrid-unity-natives-v<ver>.manifest.json` (the manifest the Unity
+    /// editor `NativeLibraryResolver` downloads and verifies against).
+    PackageUnityNatives {
+        /// Override the version (defaults to Cargo.toml version or git tag)
+        #[arg(long)]
+        version: Option<String>,
+
+        /// Output directory for bundles (default: dist/)
+        #[arg(long, default_value = "dist")]
+        output_dir: PathBuf,
+    },
 }
 
 #[derive(Clone, Copy, ValueEnum, Debug, PartialEq, Eq)]
@@ -587,6 +604,13 @@ fn main() -> Result<()> {
         } => {
             let ver = get_version(version.as_deref());
             package_artifacts(&ver, &output_dir, skip_apple, skip_android, skip_flutter)?;
+        }
+        Commands::PackageUnityNatives {
+            version,
+            output_dir,
+        } => {
+            let ver = get_version(version.as_deref());
+            package_unity_natives(&ver, &output_dir)?;
         }
     }
 
@@ -1254,79 +1278,91 @@ fn copy_dir_recursive(src: &PathBuf, dst: &PathBuf) -> Result<()> {
     Ok(())
 }
 
-/// Build Android .so files for specified ABIs
-/// Build Android `libxybrid-bolt.so` (+ bundled ORT runtime) for every
-/// ABI by delegating to `tools/scripts/build-android-bolt.sh`.
+/// Build the Android AAR (all shipped ABIs) via Bazel and stage its jniLibs.
 ///
-/// The wrapper script encodes everything the release pipeline needs to
-/// produce a working AAR:
+/// Delegates to `bazel build //bindings/kotlin:xybrid_kotlin_aar`, which
+/// produces the feature-complete 3-ABI AAR (text llama + candle voice + mtmd
+/// vision) and, per ABI, `libxybrid-bolt.so` (one clean linker output — 16 KB
+/// aligned, `libc++_shared.so` in DT_NEEDED, no patchelf) + the vendored
+/// `libonnxruntime.so` + `libc++_shared.so`. This replaces the retired
+/// `tools/scripts/build-android-bolt.sh` (boltffi pack + clang-shim relink).
 ///
-/// - NDK r27 toolchain env vars (`CC_/CXX_/AR_/CARGO_TARGET_*_LINKER` per
-///   ABI), so `cc-rs` can find the API-suffixed clang binaries that NDK
-///   r27+ ships and llama.cpp's CMake build links cleanly.
-/// - A two-phase build (`boltffi build android` with the real NDK, then
-///   `boltffi pack android --no-build` through a clang shim) with
-///   `--features platform-android` — pulls in
-///   `xybrid-core/{ort-dynamic, llm-llamacpp, candle}`. The shim injects
-///   `-lc++_shared` + `-Wl,-z,max-page-size=16384` into boltffi's final
-///   relink (which otherwise emits only `-lm -llog -ldl`), so the shipped
-///   `.so` is a clean linker output: 16 KB-aligned and with the C++ runtime
-///   in DT_NEEDED, with no post-link patchelf rewrite to corrupt under a
-///   consumer's AGP strip.
-/// - `libonnxruntime.so` from `vendor/ort-android/` bundled alongside
-///   `libxybrid-bolt.so` (ort-dynamic dlopens it at runtime).
-/// - `libc++_shared.so` from the NDK sysroot for every ABI (CMake builds
-///   llama.cpp / cpp-httplib / candle native deps with
-///   `-DANDROID_STL=c++_shared`).
+/// The AAR's `jni/<abi>/` payload is staged into `bindings/kotlin/libs/` — the
+/// layout Gradle publishes from. Uses BuildBuddy RBE when a config is present,
+/// else a local build (the NDK is a pinned Bazel download; no machine setup).
 ///
-/// The `--abi` / `--release` / `--version` knobs that the previous
-/// uniffi-based implementation exposed via clap are accepted for
-/// interface compatibility but the script always builds every ABI in
-/// `bindings/kotlin/build.gradle.kts`'s `abiFilters`. Per-ABI selection
-/// is a niche dev-loop request, not something the release pipeline
-/// needs; if a tighter loop is necessary again it can land as a script
-/// flag.
+/// The `--abi` knob is accepted for interface compatibility but ignored: the
+/// AAR always builds every ABI in `bindings/kotlin/build.gradle.kts`'s
+/// `abiFilters`.
 fn build_android(release: bool, abis: Vec<AndroidAbi>, version: &str) -> Result<()> {
     let profile = if release { "release" } else { "debug" };
     if !abis.is_empty() {
         eprintln!(
-            "warning: --abi filter ignored; build-android-bolt.sh always builds every ABI \
+            "warning: --abi filter ignored; the Bazel AAR always builds every ABI \
              configured in bindings/kotlin/build.gradle.kts. Requested: {:?}",
             abis.iter().map(|a| a.ndk_arch()).collect::<Vec<_>>()
         );
     }
 
     println!(
-        "Building Android .so files via boltffi ({} mode, version {})...",
+        "Building the Android AAR via Bazel ({} mode, version {})...",
         profile, version
     );
 
-    let script = PathBuf::from("tools/scripts/build-android-bolt.sh");
-    if !script.is_file() {
-        anyhow::bail!(
-            "Wrapper script missing at {} — repo is in an inconsistent state",
-            script.display()
-        );
+    // Build the feature-complete 3-ABI AAR (text + candle voice + mtmd vision).
+    // Use RBE if a BuildBuddy config is present (.context/buildbuddy.bazelrc,
+    // gitignored — CI writes it from a secret); otherwise a local build. The NDK
+    // is a pinned Bazel download, so no machine setup is needed either way.
+    let compilation_mode = if release { "opt" } else { "fastbuild" };
+    let mut args: Vec<String> = vec!["build".into()];
+    if PathBuf::from(".context/buildbuddy.bazelrc").is_file() {
+        args.push("--config=remote".into());
     }
-    let mut cmd = Command::new("bash");
-    cmd.arg(&script);
-    // The wrapper defaults to a `--release` pack; `DEBUG=1` switches it to an
-    // unoptimized debug build (faster compile, symbols/asserts for native
-    // Android debugging).
-    if !release {
-        cmd.env("DEBUG", "1");
-    }
-    let status = cmd
+    args.push("-c".into());
+    args.push(compilation_mode.into());
+    args.push("//bindings/kotlin:xybrid_kotlin_aar".into());
+
+    let status = Command::new("bazelisk")
+        .args(&args)
         .status()
-        .with_context(|| format!("Failed to invoke {}", script.display()))?;
+        .or_else(|_| Command::new("bazel").args(&args).status())
+        .context("Failed to run bazelisk/bazel — is Bazel installed?")?;
     if !status.success() {
-        anyhow::bail!("{} failed", script.display());
+        anyhow::bail!("bazel build //bindings/kotlin:xybrid_kotlin_aar failed");
+    }
+
+    // Stage the AAR's jniLibs into bindings/kotlin/libs/ — the layout Gradle
+    // publishes from and the CI verify/dlopen-gate steps consume.
+    let aar = "bazel-bin/bindings/kotlin/xybrid-kotlin.aar";
+    let libs = PathBuf::from("bindings/kotlin/libs");
+    let _ = std::fs::remove_dir_all(&libs);
+    std::fs::create_dir_all(&libs).context("create bindings/kotlin/libs")?;
+    let extract = PathBuf::from("target/aar-jnilibs");
+    let _ = std::fs::remove_dir_all(&extract);
+    if !Command::new("unzip")
+        .args(["-o", "-q", aar, "jni/*", "-d", extract.to_str().unwrap()])
+        .status()
+        .context("extract the AAR jniLibs")?
+        .success()
+    {
+        anyhow::bail!("failed to extract jniLibs from {aar}");
+    }
+    if !Command::new("cp")
+        .args([
+            "-a",
+            &format!("{}/jni/.", extract.display()),
+            libs.to_str().unwrap(),
+        ])
+        .status()?
+        .success()
+    {
+        anyhow::bail!("failed to stage jniLibs into {}", libs.display());
     }
 
     println!();
-    println!("✓ Android build successful!");
-    println!("  Version: {}", version);
-    println!("  Output:  bindings/kotlin/libs/{{abi}}/libxybrid-bolt.so");
+    println!("✓ Android AAR built via Bazel ({compilation_mode} mode).");
+    println!("  Version: {version}");
+    println!("  Output:  bindings/kotlin/libs/{{abi}}/*.so");
 
     Ok(())
 }
@@ -2311,6 +2347,141 @@ fn chrono_now() -> String {
     "unknown".to_string()
 }
 
+/// One platform entry in the Unity native-resolver manifest.
+///
+/// Field names/shape are the wire contract consumed by
+/// `bindings/unity/Editor/NativeLibraryResolver.cs` (`NativePlatform`); keep
+/// them in sync.
+#[derive(serde::Serialize)]
+struct UnityNativePlatform {
+    /// `macos` | `windows` | `linux` | `android` | `ios`.
+    platform: String,
+    /// Release asset filename to download.
+    asset: String,
+    /// Lowercase hex SHA-256 of the asset.
+    sha256: String,
+    /// Asset size in bytes.
+    size: u64,
+}
+
+/// The `xybrid-unity-natives-v<ver>.manifest.json` document.
+#[derive(serde::Serialize)]
+struct UnityNativeManifest {
+    version: String,
+    platforms: Vec<UnityNativePlatform>,
+}
+
+/// Package each present Unity native platform tree into a zip + write the
+/// resolver manifest. Skips platforms whose native library isn't deployed yet
+/// (mirrors `package_android`'s "package what's present" behaviour, since CI
+/// assembles per-platform artifacts from separate runners before packaging).
+fn package_unity_natives(version: &str, output_dir: &Path) -> Result<()> {
+    let plugins_dir = PathBuf::from("bindings/unity/Runtime/Plugins");
+    if !plugins_dir.exists() {
+        anyhow::bail!(
+            "Unity plugins dir not found at {:?} — run \
+             `cargo xtask build-unity --all-platforms --deploy` first",
+            plugins_dir
+        );
+    }
+
+    std::fs::create_dir_all(output_dir)
+        .with_context(|| format!("Failed to create output directory: {:?}", output_dir))?;
+
+    // (platform key, Unity plugin subdir, primary native library relative path).
+    // Presence of the primary library gates whether the platform is packaged.
+    let platforms: [(&str, &str, &str); 5] = [
+        ("macos", "macOS", "libxybrid_ffi.dylib"),
+        ("windows", "Windows", "xybrid_ffi.dll"),
+        ("linux", "Linux", "libxybrid_ffi.so"),
+        ("ios", "iOS", "libxybrid_ffi.a"),
+        // Android has per-ABI subdirs; presence is checked separately below.
+        ("android", "Android", ""),
+    ];
+
+    println!("Packaging Unity native bundles (version {})...", version);
+    let mut entries: Vec<UnityNativePlatform> = Vec::new();
+
+    for (key, plugin_dir, primary_lib) in platforms {
+        let src_dir = plugins_dir.join(plugin_dir);
+        let present = if key == "android" {
+            // At least one ABI subdir must contain the FFI .so.
+            ["arm64-v8a", "armeabi-v7a", "x86_64"]
+                .iter()
+                .any(|abi| src_dir.join(abi).join("libxybrid_ffi.so").exists())
+        } else {
+            src_dir.join(primary_lib).exists()
+        };
+
+        if !present {
+            println!("  • skipping {key} — native not deployed at {:?}", src_dir);
+            continue;
+        }
+
+        let filename = format!("xybrid-unity-native-{key}-v{version}.zip");
+        let output_path = output_dir.join(&filename);
+        if output_path.exists() {
+            std::fs::remove_file(&output_path)?;
+        }
+
+        // Stage `<PluginDir>/…` (+ the sibling folder `.meta`) so the zip root
+        // mirrors `Runtime/Plugins/`; the resolver extracts it verbatim into
+        // the consumer's `Assets/Xybrid/Plugins/`.
+        let temp_dir = output_dir.join(format!(".unity-native-{key}-temp"));
+        if temp_dir.exists() {
+            std::fs::remove_dir_all(&temp_dir)?;
+        }
+        std::fs::create_dir_all(&temp_dir)?;
+        copy_dir_recursive(&src_dir, &temp_dir.join(plugin_dir))?;
+        let folder_meta = plugins_dir.join(format!("{plugin_dir}.meta"));
+        if folder_meta.exists() {
+            std::fs::copy(&folder_meta, temp_dir.join(format!("{plugin_dir}.meta")))?;
+        }
+
+        create_zip(&temp_dir, &output_path)?;
+        std::fs::remove_dir_all(&temp_dir)?;
+
+        let size = std::fs::metadata(&output_path)?.len();
+        let sha256 = calculate_sha256(&output_path)?;
+        println!(
+            "  ✓ {filename} ({size} bytes, sha256: {}...)",
+            &sha256[..16]
+        );
+
+        entries.push(UnityNativePlatform {
+            platform: key.to_string(),
+            asset: filename,
+            sha256,
+            size,
+        });
+    }
+
+    if entries.is_empty() {
+        anyhow::bail!(
+            "No Unity native platforms were present to package — run \
+             `cargo xtask build-unity --all-platforms --deploy` first"
+        );
+    }
+
+    let manifest = UnityNativeManifest {
+        version: version.to_string(),
+        platforms: entries,
+    };
+    let manifest_name = format!("xybrid-unity-natives-v{version}.manifest.json");
+    let manifest_path = output_dir.join(&manifest_name);
+    std::fs::write(
+        &manifest_path,
+        serde_json::to_string_pretty(&manifest).context("Failed to serialize Unity manifest")?,
+    )
+    .context("Failed to write Unity native manifest")?;
+    println!(
+        "  ✓ {manifest_name} ({} platform(s))",
+        manifest.platforms.len()
+    );
+
+    Ok(())
+}
+
 /// Package XCFramework as a .zip file
 fn package_xcframework(version: &str, output_dir: &Path) -> Result<Option<PackageInfo>> {
     let xcframework_dir = PathBuf::from("bindings/apple/XCFrameworks");
@@ -2363,10 +2534,12 @@ fn package_xcframework(version: &str, output_dir: &Path) -> Result<Option<Packag
         size,
         sha256,
         platform: Some("apple".to_string()),
+        // The slices the xcframework actually carries (boltffi.toml:
+        // include_macos = false, simulator_architectures = ["arm64"]).
+        // Must match the real xcframework layout — no macOS, arm64-only sim.
         architectures: Some(vec![
             "ios-arm64".to_string(),
-            "ios-arm64_x86_64-simulator".to_string(),
-            "macos-arm64_x86_64".to_string(),
+            "ios-arm64-simulator".to_string(),
         ]),
     }))
 }

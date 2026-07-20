@@ -313,6 +313,7 @@ mod tests {
             repetition_penalty: 1.0,
             seed: None,
             stop_sequences: Vec::new(),
+            ..Default::default()
         }
     }
 
@@ -326,6 +327,7 @@ mod tests {
             repetition_penalty: 1.1,
             seed: None,
             stop_sequences: Vec::new(),
+            ..Default::default()
         }
     }
 

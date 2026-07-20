@@ -1,0 +1,109 @@
+# PHASE-0 BAZEL SPIKE — throwaway. See .context/bazel-hermetic-evaluation.md.
+# Mirrors hermetic-llvm/e2e/rules_rs/.bazelrc (known-good rules_rs + hermetic-llvm config).
+
+# rules_cc on macOS: cc-rs (build scripts) breaks with libtool as archiver.
+common --@rules_cc//cc/toolchains/args/archiver_flags:use_libtool_on_macos=False
+# rules_rust allocator-library handling used by the known-good e2e config.
+common --@rules_rust//rust/settings:experimental_use_allocator_libraries_with_mangled_symbols
+
+# Bazelified LINUX NDK (see MODULE.bazel + rules_android_ndk.patch): the NDK is
+# DOWNLOADED as a pinned repository input (r27 = the CI pin, sha256-verified) —
+# no local install, no machine setup, works identically on any host/CI. The
+# host tag forces the linux-x86_64 toolchain so the binaries run on the RBE
+# workers. NOTE: android targets build remotely only (--config=remote) — the
+# Linux clang cannot execute on a macOS host.
+common --repo_env=XYBRID_NDK_URL=https://dl.google.com/android/repository/android-ndk-r27-linux.zip
+common --repo_env=XYBRID_NDK_SHA256=2f17eb8bcbfdc40201c0b36e9a70826fcd2524ab7a2a235e2c71186c302da1dc
+common --repo_env=XYBRID_NDK_HOST_TAG=linux-x86_64
+
+# py_binary tools (rules_pkg's build_zip) must run on the python-less RBE
+# container: bootstrap_impl=script execs the HERMETIC interpreter from runfiles
+# instead of the default /usr/bin/env python3 launcher.
+common --@rules_python//python/config_settings:bootstrap_impl=script
+
+# Android per-ABI target configs (shipping semantics: opt + the toolchain's
+# per-triple flags — +fp16 lives on the rust toolchain in MODULE.bazel now, so
+# it also applies under build-graph transitions, not just these configs).
+build:android-arm64 --platforms=@rules_rs//rs/platforms:aarch64-linux-android
+build:android-arm64 --compilation_mode=opt
+build:android-armv7 --platforms=@rules_rs//rs/platforms:armv7-linux-androideabi
+build:android-armv7 --compilation_mode=opt
+build:android-x86_64 --platforms=@rules_rs//rs/platforms:x86_64-linux-android
+build:android-x86_64 --compilation_mode=opt
+
+# Desktop Windows, cross-compiled from Linux RBE (no Windows runner needed).
+# hermetic-llvm ships a MinGW (GNU-ABI) sysroot only, so this produces an
+# x86_64-pc-windows-gnu PE — NOT the MSVC binary today's cargo windows-latest
+# build ships. Combine with --config=remote so exec=Linux RBE.
+build:windows --platforms=@rules_rs//rs/platforms:x86_64-pc-windows-gnu
+
+# Desktop macOS (CPU lane), cross-compiled from Linux RBE via hermetic clang +
+# @macos_sdk. Metal/Accelerate stay OFF (//:llama default arm): CPU-only is
+# the lane that can leave the Mac — Metal/Swift/xcframework need Xcode.
+# ort is satisfied by the vendored static lib (vendor/ort-macos, see the
+# ort-sys annotation in MODULE.bazel) instead of ort's build-time download,
+# which is structurally incompatible with remote execution.
+build:macos --platforms=@rules_rs//rs/platforms:aarch64-apple-darwin
+
+# Preinstalled host cmake/make/pkg-config for rfcc's exec tools — shared by the
+# local-only Mac lanes (macos-metal, ios). rfcc's from-source bootstrap is the
+# known mac-host wall, so both use the host's tools (macos-14 runners + dev Macs
+# ship them).
+build:local_tools --extra_toolchains=@rules_foreign_cc//toolchains:preinstalled_cmake_toolchain
+build:local_tools --extra_toolchains=@rules_foreign_cc//toolchains:preinstalled_make_toolchain
+build:local_tools --extra_toolchains=@rules_foreign_cc//toolchains:preinstalled_pkgconfig_toolchain
+
+# Desktop macOS GPU lane (Flip 2): Metal + Accelerate ON — REQUIRES a Mac with
+# Xcode (the metal shader compiler); never combine with linux remote EXECUTION.
+# The Rust side is identical to the CPU lane by design — same features, same
+# rlibs — so a warm shared cache serves most of the graph.
+build:macos-metal --platforms=@rules_rs//rs/platforms:aarch64-apple-darwin
+build:macos-metal --//:metal=true
+build:macos-metal --config=local_tools
+# (-fstack-protector, which needs a libssp hermetic-llvm's MinGW sysroot doesn't
+# ship, is disabled for windows at the toolchain level in hermetic_llvm.patch.)
+
+# --- Apple Gate 1: iOS device staticlib, built LOCALLY on a Mac (Xcode iphoneos
+# SDK via apple_support). CPU-only, Metal OFF. Mac-bound end-to-end — NEVER
+# combine with --config=remote (no Mac RBE; the iOS closure needs an iphoneos
+# sysroot Linux can't provide). //:llama's iOS arm sets PATH so rfcc's sanitized
+# PATH finds the host tools.
+build:ios --platforms=@rules_rs//rs/platforms:aarch64-apple-ios
+build:ios --config=local_tools
+build:ios --compilation_mode=opt
+# Min iOS floor, matching Package.swift .iOS(.v16) / boltffi
+# deployment_target=16.0 — otherwise apple clang defaults to the SDK's newest
+# min (an iOS-16 app then can't link the objects). --ios_minimum_os is the
+# apple_support-honored flag; the IPHONEOS_DEPLOYMENT_TARGET env is a belt-and-
+# suspenders for cc-rs/rustc which read it directly.
+build:ios --ios_minimum_os=16.0
+build:ios --action_env=IPHONEOS_DEPLOYMENT_TARGET=16.0
+
+# --- Apple Gate 4a: iOS SIMULATOR staticlib (arm64), built LOCALLY on a Mac
+# (Xcode iphonesimulator SDK). Same Mac-bound constraints as --config=ios; the
+# ONNX Runtime slice is fetched via @ort_ios_arm64_sim (see //bazel:ort_ios_sim.bzl).
+# Used to build/verify the sim slice standalone; the xcframework's per-slice
+# transition also selects this platform for the simulator library.
+build:ios-sim --platforms=@rules_rs//rs/platforms:aarch64-apple-ios-sim
+build:ios-sim --config=local_tools
+build:ios-sim --compilation_mode=opt
+build:ios-sim --ios_minimum_os=16.0
+build:ios-sim --action_env=IPHONEOS_DEPLOYMENT_TARGET=16.0
+
+# On Linux hosts, rules_rs' experimental toolchains need an explicit host platform
+# with libc constraints (//:host_linux_gnu, root BUILD.bazel). The enable flag
+# makes `common:linux` auto-apply on Linux hosts (no-op on macOS: no macos config).
+common --enable_platform_specific_config
+common:linux --host_platform=//:host_linux_gnu
+
+# Local disk cache so we can MEASURE warm-cache restore across `bazel clean`.
+# (Kept under .context so it's ignored by git + bazel.)
+build --disk_cache=.context/bazel-disk-cache
+
+# --- Remote (BuildBuddy RBE): creds + remote flags live in a GITIGNORED file so
+# the API key never enters a committable file. Activate with `--config=remote`.
+try-import %workspace%/.context/buildbuddy.bazelrc
+
+# --- Machine-local settings (GITIGNORED): e.g.
+#   common --repo_env=ANDROID_NDK_HOME=/path/to/android-ndk-r27   (linux NDK for RBE)
+try-import %workspace%/.context/local.bazelrc

@@ -62,6 +62,10 @@ impl FfiInferenceMetrics {
 pub struct FfiResult {
     pub success: bool,
     pub text: Option<String>,
+    /// Model chain-of-thought / reasoning (`<think>` blocks), surfaced
+    /// separately from `text`, which always excludes it. `None` when the
+    /// model emitted no reasoning.
+    pub reasoning_content: Option<String>,
     pub audio_bytes: Option<Vec<u8>>,
     pub embedding: Option<Vec<f32>>,
     pub latency_ms: u32,
@@ -73,6 +77,7 @@ impl FfiResult {
         Self {
             success: true,
             text: r.text().map(|s| s.to_string()),
+            reasoning_content: r.reasoning_content().map(|s| s.to_string()),
             audio_bytes: r.audio_bytes().map(|b| b.to_vec()),
             embedding: r.embedding().map(|e| e.to_vec()),
             latency_ms: r.latency_ms(),

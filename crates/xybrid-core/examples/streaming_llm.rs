@@ -26,13 +26,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         eprintln!(
             "Run with: cargo run --example streaming_llm -p xybrid-core --features llm-llamacpp"
         );
-        Ok(())
     }
 
     #[cfg(feature = "llm-llamacpp")]
     {
-        run_streaming_example()
+        run_streaming_example()?;
     }
+
+    Ok(())
 }
 
 #[cfg(feature = "llm-llamacpp")]

@@ -9,7 +9,6 @@ on:
       - 'crates/xybrid-ffi-facade/**'
       - 'crates/xybrid-core/**'
       - 'crates/xybrid-sdk/**'
-      - 'tools/scripts/build-android-bolt.sh'
       - 'tools/scripts/android-dlopen-gate.sh'
       - 'tools/scripts/android-dlopen-probe.c'
       - 'xtask/**'
@@ -34,7 +33,6 @@ on:
       - 'crates/xybrid-ffi-facade/**'
       - 'crates/xybrid-core/**'
       - 'crates/xybrid-sdk/**'
-      - 'tools/scripts/build-android-bolt.sh'
       - 'tools/scripts/android-dlopen-gate.sh'
       - 'tools/scripts/android-dlopen-probe.c'
       - 'xtask/**'
@@ -53,10 +51,9 @@ permissions: read-all
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
-  # NDK r27: build-android-bolt.sh resolves the API-suffixed clang
-  # binaries this NDK ships (r26 had a different toolchain layout that
-  # cc-rs couldn't drive for the llama.cpp CMake build). Keep in sync
-  # with the version build-android-bolt.sh prefers (27.*).
+  # NDK r27 — used ONLY by the dlopen-gate staging (probe compile + strip) and
+  # the readelf verify below. The shipped .so is built by Bazel (its own pinned
+  # NDK download); this local NDK never builds the libs.
   NDK_VERSION: "27.0.12077973"
 
 jobs:
@@ -70,37 +67,22 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
         with:
-          toolchain: stable
-          # All four ABIs the bolt config builds (the AAR ships the first
-          # three; i686/x86 is built but not packaged).
-          targets: >-
-            aarch64-linux-android,
-            armv7-linux-androideabi,
-            x86_64-linux-android,
-            i686-linux-android
+          submodules: true  # //:llama_src = vendor/llama-cpp (the Bazel build needs it)
 
-      - name: Setup sccache
-        uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
-
-      - name: Configure sccache environment
-        shell: bash
+      # The 4-ABI llama.cpp compile can exhaust the ~14 GB free on ubuntu-latest
+      # when the prebuilt-natives fast path misses (observed: the runner itself
+      # died with "No space left on device", taking its logs with it). Reclaim
+      # space from preinstalled toolchains this build never touches — same step
+      # as ci.yml's test job, EXCEPT /usr/local/lib/android, which this job's
+      # Android SDK/NDK setup actually uses.
+      - name: Free disk space
         run: |
-          echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
-          echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
-          echo "CMAKE_C_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
-          echo "CMAKE_CXX_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/.ghcup \
+            /opt/hostedtoolcache/CodeQL
+          sudo docker image prune --all --force || true
+          df -h /
 
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-        with:
-          prefix-key: "v1-rust"
-          shared-key: "android-bolt"
-          cache-all-crates: "true"
-          save-if: "true"
 
       # Cache Android NDK to avoid the ~1.5GB download on every build.
       - name: Cache Android NDK
@@ -120,83 +102,45 @@ jobs:
       - name: Set NDK environment
         run: echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/${{ env.NDK_VERSION }}" >> $GITHUB_ENV
 
-      # cargo-ndk drives a single-target Android cross-compile that accepts a
-      # `--features` arg (the bolt pack script the shipped build uses can't).
-      # Same idempotent `which || install` pattern as test-ci.yml /
-      # release.yml / build-unity.yml. Used only by the vision compile-check
-      # below — it does not touch the shipped AAR build path.
-      - name: Install cargo-ndk
-        run: which cargo-ndk || cargo install cargo-ndk
 
-      # boltffi CLI provides the `boltffi pack android` the build script
-      # calls. Cache the installed binary across runs.
-      - name: Cache boltffi CLI
-        id: cache-boltffi
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        with:
-          path: ~/.cargo/bin/boltffi
-          key: boltffi-cli-${{ runner.os }}-0.25.3
 
-      - name: Install boltffi CLI
-        # `which || install` is idempotent whether or not the cache
-        # populated the binary (actions/cache only sets cache-hit on an
-        # exact key match).
-        # Pinned to 0.25.3 to MATCH the runtime `boltffi` crate (Cargo.lock):
-        # a CLI/runtime version skew mis-generates unit-ok `Result<(), E>`
-        # exports (model warmup/unload) as a `void` foreign function that drops
-        # the error and leaks the result buffer. `--locked` installs against
-        # the CLI's own bundled Cargo.lock for reproducibility.
-        run: which boltffi || cargo install boltffi_cli --version 0.25.3 --locked
 
-      # Prebuilt-natives fast path. Best-effort: pull the prebuilt llama.cpp
-      # slice for each shipped ABI from ghcr and point build.rs at it so that
-      # ABI skips the ~25-min cmake compile. On ANY miss/error this is a silent
-      # no-op (continue-on-error) and the affected ABI compiles from source
-      # exactly as before — it can never break the build. build.rs keys on
-      # XYBRID_NATIVES_PREBUILT_DIR/<target>, so each ABI in the single
-      # `cargo xtask build-android` invocation resolves its own slice (or falls
-      # through to source on a miss).
-      - name: Setup oras
-        uses: oras-project/setup-oras@38de303aac69abb66f3e6255b7198bff35f323e3 # v2.0.0
-      # Best-effort ghcr login for SAME-REPO runs (not forks — they have no
-      # token): lets the consumer pull the natives package even while it is
-      # private and survives a visibility reset. `read-all` already grants
-      # packages:read. Forks skip this and rely on anonymous (public) pull;
-      # either way a miss falls through to a source compile.
-      - name: Log in to ghcr (best-effort, same-repo)
-        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-        continue-on-error: true
-        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Pull prebuilt natives (all shipped ABIs, best-effort)
-        continue-on-error: true
+      # BuildBuddy RBE config from the secret (.bazelrc try-imports it). Absent
+      # on forks -> the build falls back to local execution on the runner (the
+      # NDK is a Bazel download, so it still works, just uncached/slower).
+      - name: Configure BuildBuddy remote config
         env:
-          XYBRID_NATIVES_PKG: ghcr.io/xybrid-ai/llama-natives
+          BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
+        if: env.BUILDBUDDY_API_KEY != ''
         run: |
-          # One base dir holds a per-triple subdir for each ABI that has a
-          # published slice. The i686/x86 ABI is built but not packaged, so it
-          # is not pulled.
-          DEST="$RUNNER_TEMP/natives"
-          got_any=0
-          for triple in aarch64-linux-android armv7-linux-androideabi x86_64-linux-android; do
-            if tools/scripts/natives-pull.sh "$triple" vision "$DEST"; then
-              echo "prebuilt natives staged for $triple (will skip cmake)"
-              got_any=1
-            else
-              echo "no prebuilt natives for $triple — compiles from source"
-            fi
-          done
-          if [ "$got_any" = 1 ]; then
-            echo "XYBRID_NATIVES_PREBUILT_DIR=$DEST" >> "$GITHUB_ENV"
-          else
-            echo "no prebuilt natives for any ABI — all compile from source (unchanged)"
-          fi
+          mkdir -p .context
+          cat > .context/buildbuddy.bazelrc <<EOF
+          common:remote --bes_results_url=https://app.buildbuddy.io/invocation/
+          common:remote --bes_backend=grpcs://remote.buildbuddy.io
+          common:remote --remote_header=x-buildbuddy-api-key=${BUILDBUDDY_API_KEY}
+          common:remote --remote_cache=grpcs://remote.buildbuddy.io
+          common:remote --remote_executor=grpcs://remote.buildbuddy.io
+          common:remote --remote_cache_compression
+          common:remote --remote_download_toplevel
+          common:remote --remote_timeout=600
+          common:remote --jobs=200
+          common:remote --extra_execution_platforms=@llvm//:rbe_linux_x86_64
+          EOF
 
-      - name: Build Android .so files (all ABIs)
-        run: cargo xtask build-android --release
+      # Build the feature-complete 3-ABI AAR with Bazel and stage its jniLibs
+      # into bindings/kotlin/libs/ (the layout the verify + gate steps and the
+      # Kotlin AAR expect). Replaces build-android-bolt.sh (boltffi pack +
+      # clang-shim relink + patchelf); the .so is a clean one-link output.
+      - name: Build Android jniLibs (Bazel AAR)
+        env:
+          BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
+        run: |
+          REMOTE=""; [ -n "$BUILDBUDDY_API_KEY" ] && REMOTE="--config=remote"
+          bazelisk build $REMOTE -c opt //bindings/kotlin:xybrid_kotlin_aar
+          rm -rf bindings/kotlin/libs && mkdir -p bindings/kotlin/libs /tmp/aar
+          unzip -o -q bazel-bin/bindings/kotlin/xybrid-kotlin.aar 'jni/*' -d /tmp/aar
+          cp -r /tmp/aar/jni/* bindings/kotlin/libs/
+          ls -R bindings/kotlin/libs
 
       - name: Verify .so files
         run: |
@@ -253,20 +197,6 @@ jobs:
             done
           done
 
-      - name: Check Android vision build (fast early-fail smoke)
-        # Fast `cargo check` smoke for the native llama.cpp vision backend
-        # (mtmd). As of 0.2.1 `platform-android` ships this backend, so the AAR
-        # above already packages it — this step is a redundant but cheap
-        # early-fail signal that surfaces an mtmd cross-compile break sooner.
-        # Chain: platform-android -> xybrid-core/llm-llamacpp-vision ->
-        # xybrid-llama-sys/vision (-sys crate at crates/llama-cpp-sys/).
-        # One ABI (arm64-v8a) exercises the C++/mtmd cmake build, matching the
-        # baseline. `check` is sufficient: crates/llama-cpp-sys/build.rs
-        # compiles llama.cpp + mtmd via cmake on `check` (gated on
-        # CARGO_FEATURE_VISION). cargo-ndk uses ANDROID_NDK_HOME (set above)
-        # for the NDK toolchain; llama.cpp source comes from build.rs's
-        # OUT_DIR clone, same as the shipped llm-llamacpp build.
-        run: cargo ndk --target aarch64-linux-android --platform 28 check -p xybrid-sdk --features platform-android,llm-llamacpp-vision
 
       - name: Upload Android .so artifacts
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -370,6 +300,41 @@ jobs:
         with:
           name: android-dlopen-gate
           path: dlopen-gate
+
+      # `android-emulator-runner` installs the "latest emulator" with a single,
+      # un-retried `sdkmanager --install emulator` call. That download
+      # intermittently lands corrupt on the runner and fails the whole job with
+      # "Error on ZipFile unknown archive" — an infra hiccup, not a regression
+      # in the .so this gate checks. Pre-install it here with retries (wiping
+      # any partial download between attempts so a wedged cache can't be reused)
+      # so a bad fetch can't sink the run; the action's own install then sees
+      # the package already current and no-ops.
+      - name: Pre-install Android Emulator (retry corrupt downloads)
+        run: |
+          set -u
+          sdk="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
+          # `sdkmanager` isn't on PATH in a plain run step (the emulator-runner
+          # action wires it up itself), so resolve it under the SDK root.
+          sdkmanager="$(command -v sdkmanager || true)"
+          if [ -z "$sdkmanager" ]; then
+            sdkmanager="$(ls "$sdk"/cmdline-tools/latest/bin/sdkmanager \
+              "$sdk"/cmdline-tools/*/bin/sdkmanager 2>/dev/null | head -1 || true)"
+          fi
+          if [ -z "$sdkmanager" ]; then
+            echo "::error::sdkmanager not found under $sdk"; exit 1
+          fi
+          echo "using sdkmanager: $sdkmanager"
+          for i in $(seq 1 3); do
+            if yes | "$sdkmanager" --install emulator --channel=0; then
+              echo "emulator installed (attempt $i)"
+              exit 0
+            fi
+            echo "::warning::emulator install attempt $i failed; clearing partial download and retrying"
+            rm -rf "$sdk/emulator" "$sdk/.temp" "$sdk/.downloadIntermediates" || true
+            sleep 10
+          done
+          echo "::error::emulator install failed after 3 attempts"
+          exit 1
 
       # api-level 35 = Android 15 bionic, which is strict enough to reject the
       # DT_GNU_HASH corruption this gate guards against.

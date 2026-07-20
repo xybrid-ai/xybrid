@@ -58,7 +58,20 @@ __pycache__/
 # in CI; never committed (they go stale and bloat the repo).
 *.cdx.json
 
+# Bazel (Phase-0 spike — see .context/bazel-hermetic-evaluation.md)
+/bazel-*
+MODULE.bazel.lock
+
+# Agent-session working notes (local planning/analysis docs; never committed)
+claudedocs/
+
 # bindings/flutter/rust is a member of the root workspace, so the root
 # Cargo.lock is authoritative. A lockfile here is spurious (cargo ignores it)
 # but vuln scanners would read its stale contents — keep it out of the repo.
 /bindings/flutter/rust/Cargo.lock
+
+# Bazel-AAR consumer smoke (bindings/kotlin/consumer-smoke): transient build
+# state + the AAR copied in by the smoke step. Sources are committed.
+bindings/kotlin/consumer-smoke/.gradle/
+bindings/kotlin/consumer-smoke/app/build/
+bindings/kotlin/consumer-smoke/app/libs/

@@ -145,7 +145,7 @@ xybrid run --model kokoro-82m --input-text "Hello world" -o output.wav
 
 ```yaml
 dependencies:
-  xybrid_flutter: ^0.2.0
+  xybrid_flutter: ^0.3.0
 ```
 
 **モデルを実行:**
@@ -162,7 +162,7 @@ final result = await model.run(XybridEnvelope.text('Hello world'));
 
 ```gradle
 dependencies {
-    implementation("ai.xybrid:xybrid-kotlin:0.2.0")
+    implementation("ai.xybrid:xybrid-kotlin:0.3.0")
 }
 ```
 
@@ -180,7 +180,7 @@ val result = model.run(Envelope.text("Hello world"))
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/xybrid-ai/xybrid.git", from: "0.2.0")
+    .package(url: "https://github.com/xybrid-ai/xybrid.git", from: "0.3.0")
 ]
 ```
 
@@ -194,10 +194,10 @@ let result = try model.run(envelope: Envelope.text("Hello world"))
 
 ### Unity
 
-**インストール** Unity Package Managerを使用:
+**インストール** [OpenUPM](https://openupm.com/packages/ai.xybrid.sdk/)（`openupm add ai.xybrid.sdk`）、または git サブフォルダから:
 
 ```sh
-https://github.com/xybrid-ai/xybrid.git#upm
+https://github.com/xybrid-ai/xybrid.git?path=/bindings/unity
 ```
 
 **モデルを実行:**
@@ -214,7 +214,7 @@ var result = model.Run(Envelope.Text("Hello world"));
 
 ```toml
 [dependencies]
-xybrid = "0.2.0"
+xybrid = "0.3.0"
 ```
 
 **モデルを実行:**
@@ -316,6 +316,12 @@ let result = pipeline.run(&Envelope::audio(audio_bytes))?;
 | Qwen 3.5 2B | 2B | GGUF Q4_K_M | 拡張推論機能付き大型Qwen 3.5 |
 | SmolLM2 360M | 360M | GGUF Q4_K_M | 最高の小型LLM、優れた品質/サイズ比 |
 
+### 視覚言語モデル（VLM）
+
+| モデル | パラメータ数 | フォーマット | 説明 |
+|-------|--------|--------|-------------|
+| LFM2-VL 450M | 450M | GGUF Q4_0 + mmproj | Liquid AIのコンパクトVLM（SigLIP2ビジョン）— 画像＋テキスト入力、llama.cpp mtmdで動作 |
+
 ### 近日公開
 
 | モデル | タイプ | パラメータ数 | 優先度 | ステータス |
@@ -325,7 +331,6 @@ let result = pipeline.run(&Envelope::audio(audio_bytes))?;
 | Trinity Nano | LLM (MoE) | 6B (1Bアクティブ) | P2 | 計画中 |
 | LFM2-VL 700M | Vision+LLM | 700M | P2 | 計画中 |
 | Nomic Embed Text v1.5 | Embeddings | 137M | P1 | ブロック中（Tokenize/MeanPoolステップが必要） |
-| LFM2-VL 450M | Vision | 450M | P2 | 計画中 |
 | Whisper Tiny CoreML | ASR | 39M | P2 | 計画中 |
 | Qwen3-TTS 0.6B | TTS | 600M | P2 | ブロック中（カスタムSafeTensorsランタイムが必要） |
 | Chatterbox Turbo | TTS | 350M | P3 | ブロック中（ModelGraphテンプレートが必要） |
@@ -376,7 +381,7 @@ claude /xybrid-init hexgrad/Kokoro-82M-v1.0-ONNX
 | 音声認識 | ✅ | ✅ | ✅ | ✅ | ✅ |
 | テキスト読み上げ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | 言語モデル | ✅ | ✅ | ✅ | ✅ | ✅ |
-| 画像認識モデル | 🔜 | 🔜 | 🔜 | 🔜 | 🔜 |
+| 画像認識モデル | ✅ | ✅ | ✅ | ✅ | ✅ |
 | 埋め込み | 🔜 | 🔜 | 🔜 | 🔜 | 🔜 |
 | マルチモデルパイプライン（MMP） | ✅ | ✅ | ✅ | ✅ | ✅ |
 | モデルのダウンロードとキャッシュ | ✅ | ✅ | ✅ | ✅ | ✅ |

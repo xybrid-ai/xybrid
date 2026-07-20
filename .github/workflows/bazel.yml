@@ -1,0 +1,350 @@
+# Bazel — REQUIRED-READY. Runs on every PR to master so it can be marked a
+# required status check in branch protection (the "make Bazel the build of
+# record" toggle — that switch is a repo setting, not this file).
+#
+# To avoid blocking unrelated PRs, the cheap `changes` job decides whether the
+# PR touches any Bazel input; if not, the heavy `bazel` job is skipped, and a
+# skipped required check counts as passing.
+#
+# Fork-safe: PRs from forks have no secrets, so the RBE steps skip and only the
+# analyze phase runs (no remote, no network beyond repo fetches).
+name: Bazel
+
+on:
+  # No path filter here (unlike push): a required check must report on EVERY PR
+  # or GitHub blocks the merge waiting for a status that never comes. The
+  # `changes` job is the path filter instead.
+  pull_request:
+    branches: [master]
+  # Path-filtered: a master merge touching any Bazel input re-warms the shared
+  # cache so the next PR starts warm.
+  push:
+    branches: [master]
+    paths:
+      - "MODULE.bazel"
+      - ".bazelrc"
+      - ".bazelversion"
+      - ".bazelignore"
+      - "BUILD.bazel"
+      - "**/BUILD.bazel"
+      - "rules_android_ndk.patch"
+      - "rules_foreign_cc.patch"
+      - "rules_rs.patch"
+      - "hermetic_llvm.patch"
+      - "crates/**"
+      - "bindings/kotlin/**"
+      - "macros/**"
+      - "vendor/llama-cpp"
+      - "vendor/ort-macos/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/bazel.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bazel-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Cheap path gate (no checkout — just the PR's file list). Lets the heavy
+  # `bazel` job be a required check without blocking PRs that only touch
+  # unrelated files (docs, other workflows, ...).
+  changes:
+    name: Detect Bazel-relevant changes
+    runs-on: ubuntu-latest
+    outputs:
+      relevant: ${{ steps.filter.outputs.relevant }}
+    steps:
+      - name: Check changed paths
+        id: filter
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # push / dispatch already path-filter at the trigger → always relevant.
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          FILES=$(gh api --paginate \
+            "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" \
+            --jq '.[].filename')
+          if printf '%s\n' "$FILES" | grep -qE '^(MODULE\.bazel|\.bazelrc|\.bazelversion|\.bazelignore|BUILD\.bazel|.*/BUILD\.bazel|rules_android_ndk\.patch|rules_foreign_cc\.patch|rules_rs\.patch|hermetic_llvm\.patch|crates/|bindings/kotlin/|macros/|vendor/llama-cpp|vendor/ort-macos/|Cargo\.toml|Cargo\.lock|\.github/workflows/bazel\.yml)'; then
+            REL=true
+          else
+            REL=false
+          fi
+          echo "relevant=$REL" >> "$GITHUB_OUTPUT"
+          echo "Bazel-relevant PR: $REL"
+
+  bazel:
+    name: Bazel graph + RBE targets
+    # Skipped (→ passing) on PRs that touch no Bazel input; runs otherwise.
+    needs: changes
+    if: needs.changes.outputs.relevant == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
+    # Downstream jobs can't read secrets in a job-level `if`; export the
+    # fork-safety signal (RBE available or not) as a job output instead.
+    outputs:
+      rbe: ${{ steps.rbe-check.outputs.rbe }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          submodules: true
+
+      - name: Check RBE availability
+        id: rbe-check
+        run: echo "rbe=${{ env.BUILDBUDDY_API_KEY != '' }}" >> "$GITHUB_OUTPUT"
+
+      # Repo fetches (LLVM prebuilt, rustc, NDK symlink tree) + downloaded
+      # toplevel outputs need headroom; reclaim toolchains this job never
+      # touches (keep /usr/local/lib/android — the SDK/NDK setup uses it).
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/.ghcup \
+            /opt/hostedtoolcache/CodeQL
+          sudo docker image prune --all --force || true
+          df -h /
+
+      # No NDK install: the android_ndk repo rule downloads a pinned Linux NDK
+      # r27 as a normal Bazel repository input (rules_android_ndk.patch +
+      # XYBRID_NDK_URL/SHA256 in the committed .bazelrc).
+
+      # .bazelrc try-imports this gitignored file; in CI it's materialized from
+      # the secret. Absent secret (forks) → no :remote config → RBE steps skip.
+      - name: Configure BuildBuddy remote config
+        if: env.BUILDBUDDY_API_KEY != ''
+        run: |
+          mkdir -p .context
+          cat > .context/buildbuddy.bazelrc <<EOF
+          common:remote --bes_results_url=https://app.buildbuddy.io/invocation/
+          common:remote --bes_backend=grpcs://remote.buildbuddy.io
+          common:remote --remote_header=x-buildbuddy-api-key=${BUILDBUDDY_API_KEY}
+          common:remote --remote_cache=grpcs://remote.buildbuddy.io
+          common:remote --remote_executor=grpcs://remote.buildbuddy.io
+          common:remote --remote_cache_compression
+          common:remote --remote_download_toplevel
+          common:remote --remote_timeout=600
+          common:remote --jobs=200
+          common:remote --extra_execution_platforms=@llvm//:rbe_linux_x86_64
+          EOF
+
+      # Structural gate (always, fork-safe): every BUILD file in the workspace
+      # must configure. Same target set Gate 5 proved (13 targets analyze-clean).
+      - name: Analyze workspace (no build)
+        run: |
+          bazelisk build --nobuild \
+            //crates/... //bindings/... //macros/... //xtask/... //integration-tests/... //:llama
+
+      # The RBE-proven hermetic linux chain (PR #326 gates 3B/4).
+      - name: Build llama chain on RBE (linux, hermetic)
+        if: env.BUILDBUDDY_API_KEY != ''
+        run: |
+          bazelisk build --config=remote \
+            //:llama \
+            //crates/llama-cpp-sys:llama_cpp_sys \
+            //crates/xybrid-llama:xybrid_llama
+
+      # Desktop lanes on RBE: linux CLI (native) + the macOS-CPU cross
+      # (hermetic clang + @macos_sdk + vendored ort; Metal/Swift stay Mac-bound
+      # and are NOT built here) + the full windows-gnu CLI (the .exe chapter —
+      # llama + the raw-dylib Rust crates via the dlltool toolchain fix + the
+      # final MinGW link). Keeps the shared cache warm so a future Mac lane
+      # PULLS the shared graph instead of recompiling it — the cache-fed-Mac
+      # model.
+      - name: Build desktop lanes on RBE (linux CLI, macOS-CPU cross, windows CLI)
+        if: env.BUILDBUDDY_API_KEY != ''
+        run: |
+          bazelisk build --config=remote -c opt \
+            //crates/xybrid-cli:xybrid
+          bazelisk build --config=remote --config=macos \
+            //crates/xybrid-cli:xybrid \
+            //crates/xybrid-bolt:xybrid_bolt_staticlib
+          bazelisk build --config=remote --config=windows -c opt \
+            //crates/xybrid-cli:xybrid
+
+      # Linux-CLI smoke + parity gate (Flip 1): this is the SHIPPED artifact
+      # since the release-prep build-cli-linux cutover — run it, verify the
+      # desktop feature set (vision/mtmd + huggingface; parity with cargo's
+      # platform-desktop), and hold the hermetic glibc floor (2.28 — the old
+      # cargo/ubuntu-24.04 build required 2.39 and couldn't run on 22.04).
+      # NOTE: resolve the binary via cquery, NOT the bazel-bin symlink — the
+      # symlink tracks the LAST invocation above (windows), whose output is a
+      # different platform's binary ("Exec format error").
+      - name: Smoke the linux CLI (run + features + glibc floor)
+        if: env.BUILDBUDDY_API_KEY != ''
+        run: |
+          BIN=$(bazelisk cquery --config=remote -c opt --output=files //crates/xybrid-cli:xybrid | head -1)
+          echo "resolved linux CLI: $BIN"
+          file "$BIN"
+          "$BIN" --help >/dev/null
+          test "$(nm "$BIN" | grep -c ' mtmd_')" -gt 0 || { echo "MISSING vision (mtmd) symbols"; exit 1; }
+          strings "$BIN" | grep -q 'huggingface\.co' || { echo "MISSING huggingface support"; exit 1; }
+          MAX_GLIBC=$(strings "$BIN" | grep -oE 'GLIBC_[0-9]+\.[0-9]+' | sort -Vu | tail -1)
+          echo "glibc floor: $MAX_GLIBC"
+          [ "$(printf '%s\n' "$MAX_GLIBC" GLIBC_2.31 | sort -V | tail -1)" = "GLIBC_2.31" ] || { echo "glibc floor regressed above 2.31: $MAX_GLIBC"; exit 1; }
+          echo "linux CLI smoke: OK ✅"
+
+      # Windows .exe payload gate (static half): verify the artifact is a real
+      # PE32+ x86-64 binary carrying the desktop feature set, then hand it to
+      # the windows-latest job below for the run-it half (this linux runner
+      # can't execute a PE). cquery, not bazel-bin: the symlink tracks the
+      # LAST invocation above.
+      - name: Verify + stage the windows CLI (.exe)
+        if: env.BUILDBUDDY_API_KEY != ''
+        run: |
+          EXE=$(bazelisk cquery --config=remote --config=windows -c opt --output=files //crates/xybrid-cli:xybrid | head -1)
+          echo "resolved windows CLI: $EXE"
+          file "$EXE"
+          file "$EXE" | grep -q 'PE32+.*x86-64' || { echo "NOT a PE32+ x86-64 binary"; exit 1; }
+          grep -aq 'mtmd_' "$EXE" || { echo "MISSING vision (mtmd) markers"; exit 1; }
+          grep -aq 'huggingface\.co' "$EXE" || { echo "MISSING huggingface support"; exit 1; }
+          mkdir -p /tmp/win-exe && cp "$EXE" /tmp/win-exe/xybrid.exe
+          echo "windows CLI payload: OK ✅"
+
+      - name: Upload windows CLI artifact
+        if: env.BUILDBUDDY_API_KEY != ''
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: bazel-xybrid-windows-exe
+          path: /tmp/win-exe/xybrid.exe
+          retention-days: 7
+
+      # The RBE-proven Android row (PR #326 gates 6-10): NDK cross-compile +
+      # one-link .so + complete AAR. ABI fan-out (arm64-v8a / armeabi-v7a /
+      # x86_64) happens via transitions inside the graph — one invocation,
+      # shipping mode (-c opt + link-time strip).
+      - name: Build Android AAR on RBE
+        if: env.BUILDBUDDY_API_KEY != ''
+        run: |
+          bazelisk build --config=remote -c opt \
+            //bindings/kotlin:xybrid_kotlin_aar
+
+      - name: Upload AAR artifact
+        if: env.BUILDBUDDY_API_KEY != ''
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: bazel-xybrid-kotlin-aar
+          path: bazel-bin/bindings/kotlin/xybrid-kotlin.aar
+          retention-days: 7
+
+      # Gradle-consumer smoke: a real AGP app consumes the Bazel AAR the way a
+      # Maven consumer would — manifest parses, classes.jar dexes, and all three
+      # ABIs' native libs land in the APK. Runner ships the Android SDK.
+      - name: Set up JDK 17 (consumer smoke)
+        if: env.BUILDBUDDY_API_KEY != ''
+        uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9 # v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      - name: Gradle-consumer smoke of the Bazel AAR
+        if: env.BUILDBUDDY_API_KEY != ''
+        run: |
+          mkdir -p bindings/kotlin/consumer-smoke/app/libs
+          cp bazel-bin/bindings/kotlin/xybrid-kotlin.aar bindings/kotlin/consumer-smoke/app/libs/
+          bindings/kotlin/gradlew -p bindings/kotlin/consumer-smoke :app:assembleDebug --no-daemon
+
+      - name: Verify APK payload (classes + 3-ABI jniLibs)
+        if: env.BUILDBUDDY_API_KEY != ''
+        run: |
+          APK=bindings/kotlin/consumer-smoke/app/build/outputs/apk/debug/app-debug.apk
+          unzip -l "$APK"
+          for f in \
+            lib/arm64-v8a/libxybrid-bolt.so lib/arm64-v8a/libc++_shared.so lib/arm64-v8a/libonnxruntime.so \
+            lib/armeabi-v7a/libxybrid-bolt.so lib/armeabi-v7a/libc++_shared.so \
+            lib/x86_64/libxybrid-bolt.so lib/x86_64/libc++_shared.so lib/x86_64/libonnxruntime.so \
+            classes.dex; do
+            unzip -l "$APK" | grep -q " $f\$" || { echo "MISSING: $f"; exit 1; }
+          done
+          echo "APK payload complete: 3-ABI jniLibs + classes.dex ✅"
+
+  # The macOS Metal lane (Flip 2), on a real Mac. NOT on pull_request: macOS
+  # minutes bill at 10x linux and PR-level coverage of the shared Rust graph
+  # already comes from the desktop-lanes step above (the macOS-CPU cross
+  # compiles the identical rlib set on linux workers). This job validates the
+  # Mac-only remainder — the Metal llama compile + final link — on every
+  # master merge and keeps its action cached for the release job.
+  bazel-macos-metal:
+    name: Bazel macOS Metal lane (mixed execution)
+    if: github.event_name != 'pull_request'
+    runs-on: macos-14
+    timeout-minutes: 45
+    env:
+      BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          submodules: true
+
+      - name: Ensure rfcc host tools
+        run: |
+          which cmake >/dev/null || brew install cmake
+          which pkg-config >/dev/null || brew install pkg-config
+
+      - name: Configure BuildBuddy remote config
+        if: env.BUILDBUDDY_API_KEY != ''
+        run: |
+          mkdir -p .context
+          cat > .context/buildbuddy.bazelrc <<EOF
+          common:remote --bes_results_url=https://app.buildbuddy.io/invocation/
+          common:remote --bes_backend=grpcs://remote.buildbuddy.io
+          common:remote --remote_header=x-buildbuddy-api-key=${BUILDBUDDY_API_KEY}
+          common:remote --remote_cache=grpcs://remote.buildbuddy.io
+          common:remote --remote_executor=grpcs://remote.buildbuddy.io
+          common:remote --remote_cache_compression
+          common:remote --remote_download_toplevel
+          common:remote --remote_timeout=600
+          common:remote --jobs=200
+          common:remote --extra_execution_platforms=@llvm//:rbe_linux_x86_64
+          EOF
+
+      - name: Build Metal CLI (mixed execution)
+        if: env.BUILDBUDDY_API_KEY != ''
+        run: |
+          bazelisk build --config=remote --config=macos-metal -c opt \
+            //crates/xybrid-cli:xybrid
+
+      - name: Smoke the Metal CLI (run + Metal + features)
+        if: env.BUILDBUDDY_API_KEY != ''
+        run: |
+          BIN=$(bazelisk cquery --config=remote --config=macos-metal -c opt --output=files //crates/xybrid-cli:xybrid | head -1)
+          echo "resolved CLI: $BIN"
+          file "$BIN"
+          "$BIN" --help >/dev/null
+          test "$(nm "$BIN" | grep -c '_ggml_metal')" -gt 0 || { echo "MISSING Metal symbols"; exit 1; }
+          test "$(nm "$BIN" | grep -c '_mtmd_')" -gt 0 || { echo "MISSING vision symbols"; exit 1; }
+          strings "$BIN" | grep -q 'huggingface\.co' || { echo "MISSING huggingface"; exit 1; }
+          echo "Metal CLI smoke: OK"
+
+  # The run-it half of the windows .exe gate: the linux job can build and
+  # byte-inspect the PE but not execute it — a real Windows runner downloads
+  # the RBE-built artifact and runs it. This is the only Windows machine in
+  # the whole lane, and it compiles nothing (the build happened on Linux
+  # workers); a few windows-latest minutes per Bazel-touching PR.
+  bazel-windows-smoke:
+    name: Bazel windows .exe smoke (runs the RBE-built CLI)
+    needs: bazel
+    if: needs.bazel.outputs.rbe == 'true'
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: bazel-xybrid-windows-exe
+
+      - name: Run the .exe + verify features
+        shell: bash
+        run: |
+          ls -la xybrid.exe
+          ./xybrid.exe --help
+          ./xybrid.exe --version || true
+          grep -aq 'mtmd_' xybrid.exe || { echo "MISSING vision (mtmd) markers"; exit 1; }
+          grep -aq 'huggingface\.co' xybrid.exe || { echo "MISSING huggingface support"; exit 1; }
+          echo "windows .exe smoke: OK"

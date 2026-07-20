@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.3.0
+
+* Fixed: model cache clearing now reports the number of cache roots actually removed (previously counted scanned `.xyb` entries, ~0 for the nested registry-bundle layout), so "clear cache" no longer reports success when nothing was cached; `extracted/`, `hf/`, and `hf-hub/` stay co-located under a relative cache root (xybrid-ai/xybrid#309)
+
+## 0.2.2
+
+Structured output on Flutter. Local llama generation can now be constrained to a
+JSON Schema so small models emit guaranteed-valid JSON for on-device data
+extraction: `FfiGenerationConfig` gains a `grammar` field, and a new
+`jsonSchemaToGbnf` helper converts a JSON Schema to the GBNF grammar the backend
+enforces (xybrid-ai/xybrid#310, xybrid-ai/xybrid#311).
+
+## 0.2.1
+
+Vision (VLM) now runs on every Flutter target. `0.2.0` shipped on-device
+vision on Android and iOS; `0.2.1` brings the native VLM backend
+(`llm-llamacpp-vision`, llama.cpp's mtmd) to the **desktop** targets too —
+macOS, Linux, and Windows — so a Flutter desktop app can run a vision-language
+model out of the box, matching mobile (xybrid-ai/xybrid#296).
+
+* Fixed: GGUF models with custom or non-standard chat templates now load and run — when llama.cpp's built-in template matcher rejects the embedded template, it is rendered via a real Jinja engine (minijinja) instead of failing (xybrid-ai/xybrid#304)
+
 ## 0.2.0-rc1
 
 Release candidate for `0.2.0`, published so consumers can validate the vision

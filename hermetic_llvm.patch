@@ -1,0 +1,240 @@
+diff --git a/toolchain/features/legacy/BUILD.bazel b/toolchain/features/legacy/BUILD.bazel
+index 0000000..0000000 100644
+--- a/toolchain/features/legacy/BUILD.bazel
++++ b/toolchain/features/legacy/BUILD.bazel
+@@ -21,4 +21,7 @@
+     args = select({
+         "@platforms//os:none": [],
++        # xybrid: hermetic-llvm's MinGW sysroot ships no libssp, so -fstack-protector
++        # makes clang's MinGW driver pull -lssp/-lssp_nonshared at link (undefined ref).
++        "@platforms//os:windows": [],
+         "//conditions:default": ["-fstack-protector"],
+     }) + [
+diff --git a/tools/internal/link_wrapper.c b/tools/internal/link_wrapper.c
+index 065900f..ca85123 100644
+--- a/tools/internal/link_wrapper.c
++++ b/tools/internal/link_wrapper.c
+@@ -2,6 +2,7 @@
+ #include <stdio.h>
+ #include <stdlib.h>
+ #include <string.h>
++#include <sys/stat.h>
+ 
+ #ifdef _WIN32
+ #include <process.h>
+@@ -63,8 +64,51 @@ static const char *required_env(const char *name) {
+     return value;
+ }
+ 
++static int path_exists(const char *path) {
++    struct stat st;
++    return stat(path, &st) == 0;
++}
++
++static int is_absolute(const char *path) {
++    if (path[0] == '/' || path[0] == '\\') {
++        return 1;
++    }
++    return path[0] != '\0' && path[1] == ':';
++}
++
++/*
++ * Bazel passes tool paths relative to the execution root and runs actions
++ * with cwd == execroot, so relative paths normally resolve as-is. Consumers
++ * like rules_foreign_cc re-invoke the toolchain from other working
++ * directories (e.g. cmake's try-compile scratch dirs) but export the
++ * execroot as EXT_BUILD_ROOT; fall back to resolving against it when the
++ * relative path does not exist from the current working directory.
++ * The resolved allocation is intentionally not freed: the wrapper either
++ * exec()s (never returns) or exits within milliseconds of its subprocesses.
++ */
++static const char *resolve_tool(const char *path) {
++    if (is_absolute(path) || path_exists(path)) {
++        return path;
++    }
++    const char *root = getenv("EXT_BUILD_ROOT");
++    if (root == NULL || root[0] == '\0') {
++        return path;
++    }
++    size_t len = strlen(root) + 1 + strlen(path) + 1;
++    char *resolved = malloc(len);
++    if (resolved == NULL) {
++        return path;
++    }
++    snprintf(resolved, len, "%s/%s", root, path);
++    if (path_exists(resolved)) {
++        return resolved;
++    }
++    free(resolved);
++    return path;
++}
++
+ int main(int argc, char **argv) {
+-    const char *clangxx = required_env("LLVM_CLANGXX");
++    const char *clangxx = resolve_tool(required_env("LLVM_CLANGXX"));
+     const char *strip_debug_symbols = getenv("LLVM_STRIP_DEBUG_SYMBOLS");
+     int should_strip_debug_symbols = strip_debug_symbols != NULL && strip_debug_symbols[0] != '\0';
+ 
+@@ -80,7 +122,7 @@ int main(int argc, char **argv) {
+     }
+ 
+     const char *link_output = required_env("LLVM_LINK_OUTPUT");
+-    const char *dsymutil = required_env("LLVM_DSYMUTIL");
++    const char *dsymutil = resolve_tool(required_env("LLVM_DSYMUTIL"));
+ 
+     char *dsym_args[] = {
+         (char *)dsymutil,
+@@ -95,7 +137,7 @@ int main(int argc, char **argv) {
+         return status;
+     }
+ 
+-    const char *strip = required_env("LLVM_STRIP");
++    const char *strip = resolve_tool(required_env("LLVM_STRIP"));
+     char *strip_args[] = {
+         (char *)strip,
+         "-S",
+diff --git a/toolchain/llvm/llvm.bzl b/toolchain/llvm/llvm.bzl
+index 0000000..0000000 100644
+--- a/toolchain/llvm/llvm.bzl	2026-07-14 19:03:24
++++ b/toolchain/llvm/llvm.bzl	2026-07-14 19:04:12
+@@ -209,8 +209,62 @@
+             "bin/lld" + suffix,
+             "bin/wasm-ld" + suffix,
+         ],
++    )
++
++    # xybrid: windows-gnu raw-dylib support. rustc shells out to `dlltool` at
++    # COMPILE time for crates using #[link(kind = "raw-dylib")] (the modern
++    # windows/windows-sys family), so the tool must reach every windows-target
++    # rustc action. rules_rust stages the cc toolchain's linker_files into its
++    # compile actions, so the link tool's data is the staging vehicle. Both the
++    # `llvm-dlltool` symlink AND the multicall `llvm` binary it points at must
++    # ship (a lone symlink dangles on a remote worker). Windows-only tool_map
++    # variants (selected in //toolchain/selects.bzl) keep every other
++    # platform's action keys byte-identical.
++    cc_tool(
++        name = "lld_with_dlltool",
++        src = "bin/clang++" + suffix,
++        data = [
++            "bin/ld.lld" + suffix,
++            "bin/ld64.lld" + suffix,
++            "bin/lld" + suffix,
++            "bin/wasm-ld" + suffix,
++            "bin/llvm-dlltool" + suffix,
++        ] + native.glob(
++            # The multicall binary: `llvm` in the unix releases; globbed so a
++            # release that ships real per-tool binaries (no multicall) still
++            # analyzes.
++            ["bin/llvm", "bin/llvm.exe"],
++            allow_empty = True,
++        ),
++    )
++
++    cc_tool_map(
++        name = "default_tools_windows",
++        tools = BASE_TOOLS | COMPLETE_ONLY_TOOLS | {
++            "@rules_cc//cc/toolchains/actions:link_actions": ":lld_with_dlltool",
++            "@rules_cc//cc/toolchains/actions:ar_actions": ":llvm-ar",
++        },
++        visibility = ["//visibility:public"],
+     )
+ 
++    cc_tool_map(
++        name = "staged_default_tools_windows",
++        tools = BASE_TOOLS | {
++            "@rules_cc//cc/toolchains/actions:link_actions": ":lld_with_dlltool",
++            "@rules_cc//cc/toolchains/actions:ar_actions": ":llvm-ar",
++        },
++        visibility = ["//visibility:public"],
++    )
++
++    native.alias(
++        name = "default_tools_for_runtime_windows",
++        actual = select({
++            "@llvm//toolchain:runtimes_all": ":default_tools_windows",
++            "//conditions:default": ":staged_default_tools_windows",
++        }),
++        visibility = ["//visibility:public"],
++    )
++
+     cc_tool(
+         name = "link-wrapper",
+         src = "@llvm//tools/internal:link-wrapper",
+diff --git a/toolchain/selects.bzl b/toolchain/selects.bzl
+index 0000000..0000000 100644
+--- a/toolchain/selects.bzl	2026-07-14 19:03:24
++++ b/toolchain/selects.bzl	2026-07-15 09:09:42
+@@ -56,5 +56,29 @@
+         "@llvm//toolchain:macos_complete_with_libtool": Label(tool_repo + ":tools_with_dsym_and_libtool"),
+         "@llvm//toolchain:macos_complete": Label(tool_repo + ":tools_with_dsym"),
+         "@rules_cc//cc/toolchains/args/archiver_flags:use_libtool_on_apple_setting": Label(tool_repo + ":tools_with_libtool_for_runtime"),
++        # xybrid: windows targets get the dlltool-carrying link tool so rustc's
++        # raw-dylib compiles find it staged (see toolchain/llvm/llvm.bzl).
++        # Resolved under the TARGET configuration (see comment above), so this
++        # keys on the target OS while the tool binaries stay exec-correct.
++        "@platforms//os:windows": Label(tool_repo + ":default_tools_for_runtime_windows"),
+         "//conditions:default": Label(tool_repo + ":default_tools_for_runtime"),
+     })
++
++# xybrid: execroot-relative path of a prebuilt LLVM tool for a given EXEC
++# platform, computed from this module's own version pin so it survives LLVM
++# bumps (no hardcoded canonical repo names in consumers). Needed by consumers
++# that must pass a tool PATH on a command line where label expansion does not
++# exist (e.g. rustc's -Cdlltool via a rust_toolchain's extra_rustc_flags).
++# Only valid while the tool is also STAGED for the consuming action (the
++# windows tool_map above stages dlltool for windows-target actions).
++def llvm_tool_execroot_path(exec_os, exec_cpu, binary):
++    # Accept both this module's exec-OS vocabulary ("macos") and rustc triple
++    # spellings ("darwin") without relying on _tool_repo's pass-through of
++    # unknown names (the release repos are darwin-flavored).
++    os_part = "macos" if exec_os == "darwin" else exec_os
++    label = Label("%s:bin/%s%s" % (
++        _tool_repo(os_part, exec_cpu),
++        binary,
++        ".exe" if os_part == "windows" else "",
++    ))
++    return "external/%s/%s" % (label.repo_name, label.name)
+diff --git a/runtimes/libunwind/BUILD.bazel b/runtimes/libunwind/BUILD.bazel
+index 0000000..0000000 100644
+--- a/runtimes/libunwind/BUILD.bazel	2026-07-14 23:14:14
++++ b/runtimes/libunwind/BUILD.bazel	2026-07-14 23:26:03
+@@ -23,6 +23,24 @@
+     visibility = ["//visibility:public"],
+ )
+ 
++# xybrid: rustc's windows-gnu target spec hardcodes -lgcc_eh (GCC's unwinder
++# library, which an LLVM/compiler-rt toolchain does not ship). Same problem
++# class as gcc_s above, same treatment: an empty stub satisfies the -l while
++# the real unwinding comes from the toolchain's explicitly-staged runtimes.
++stub_library(
++    name = "gcc_eh",
++    visibility = ["//visibility:public"],
++)
++
++# xybrid: -lgcc is likewise hardcoded by rustc's windows-gnu spec (compiler
++# builtins live in libgcc on a GCC toolchain). Here the clang driver already
++# links compiler-rt builtins (-rtlib=compiler-rt), so an empty stub is the
++# correct resolution.
++stub_library(
++    name = "gcc",
++    visibility = ["//visibility:public"],
++)
++
+ config_setting(
+     name = "stub_libgcc_s",
+     flag_values = {
+@@ -37,6 +55,14 @@
+     ] + select({
+         ":stub_libgcc_s": [":gcc_s"],
+         "//conditions:default": [],
++    }) + select({
++        # xybrid: windows-scoped so every other platform's link action keys
++        # stay byte-identical.
++        "@platforms//os:windows": [
++            ":gcc",
++            ":gcc_eh",
++        ],
++        "//conditions:default": [],
+     }),
+     visibility = ["//visibility:public"],
+ )

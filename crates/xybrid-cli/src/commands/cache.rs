@@ -1,10 +1,9 @@
 //! `xybrid cache` command handler.
 
 use anyhow::{Context, Result};
-use std::fs;
 
 use super::types::CacheCommand;
-use super::utils::{dir_size_bytes, format_size};
+use super::utils::format_size;
 use crate::ui;
 
 /// Handle `xybrid cache` subcommands.
@@ -22,35 +21,35 @@ pub(crate) fn handle_cache_command(command: CacheCommand) -> Result<()> {
 fn list_cache(client: &xybrid_sdk::registry_client::RegistryClient) -> Result<()> {
     ui::header("Model Cache");
 
-    let stats = client.cache_stats().context("Failed to get cache stats")?;
+    let entries = client
+        .cache_entries()
+        .context("Failed to list cache entries")?;
+    let total_size: u64 = entries.iter().map(|entry| entry.size_bytes).sum();
 
-    ui::kv("Directory", &stats.cache_path.display().to_string());
+    ui::kv("Root", &client.cache_root().display().to_string());
     println!();
 
-    if stats.model_count == 0 {
+    if entries.is_empty() {
         ui::hint("Cache is empty.");
         ui::hint("Use 'xybrid fetch --model <id>' to download models.");
         return Ok(());
     }
 
-    if stats.cache_path.exists() {
-        let mut table = ui::Table::new(vec!["Model", "Size"]);
-        for entry in fs::read_dir(&stats.cache_path)? {
-            let entry = entry?;
-            if entry.path().is_dir() {
-                let model_name = entry.file_name();
-                let model_name = model_name.to_string_lossy();
-                let model_size = dir_size_bytes(&entry.path()).unwrap_or(0);
-                table.row(vec![&model_name, &format_size(model_size)]);
-            }
-        }
-        table.print();
+    let mut table = ui::Table::new(vec!["Model", "Location", "Size"]);
+    for entry in &entries {
+        let size = format_size(entry.size_bytes);
+        table.row(vec![
+            entry.model_id.as_str(),
+            entry.location.as_str(),
+            size.as_str(),
+        ]);
     }
+    table.print();
 
     ui::footer(&format!(
-        "{} models · {}",
-        stats.model_count,
-        stats.total_size_human()
+        "{} entries · {}",
+        entries.len(),
+        xybrid_sdk::registry_client::CacheStats::format_size(total_size)
     ));
 
     Ok(())
@@ -75,13 +74,13 @@ fn show_cache_status(client: &xybrid_sdk::registry_client::RegistryClient) -> Re
         format!(
             "{}    {}",
             ui::dim("Path"),
-            ui::dim(&stats.cache_path.display().to_string())
+            ui::dim(&stats.cache_root().display().to_string())
         ),
     ]);
 
-    if !stats.cache_path.exists() {
+    if !stats.cache_root().exists() {
         println!();
-        ui::hint("Cache directory does not exist yet.");
+        ui::hint("Cache root does not exist yet.");
         ui::hint("It will be created when you download your first model.");
     }
 
@@ -97,11 +96,15 @@ fn clear_cache(
     if let Some(id) = model_id {
         ui::header(&format!("Clear Cache · {}", id));
 
-        client
+        let removed = client
             .clear_cache(&id)
             .context(format!("Failed to clear cache for '{}'", id))?;
 
-        ui::ok(&format!("Cache cleared for model '{}'", id));
+        if removed == 0 {
+            ui::warning(&format!("No cached data found for model '{}'", id));
+        } else {
+            ui::ok(&format!("Cache cleared for model '{}'", id));
+        }
     } else {
         ui::header("Clear All Cache");
         println!();
@@ -109,11 +112,20 @@ fn clear_cache(
         ui::hint("Press Enter to continue or Ctrl+C to cancel...");
 
         let mut input = String::new();
-        std::io::stdin().read_line(&mut input).ok();
+        // EOF / closed stdin (piped input, /dev/null, CI) must not count as
+        // confirmation — a destructive clear requires an explicit keypress.
+        if std::io::stdin().read_line(&mut input).unwrap_or(0) == 0 {
+            ui::warning("Aborted: no interactive confirmation.");
+            return Ok(());
+        }
 
-        client.clear_all_cache().context("Failed to clear cache")?;
+        let removed = client.clear_all_cache().context("Failed to clear cache")?;
 
-        ui::ok("All cached models cleared");
+        if removed == 0 {
+            ui::warning("No cached models found");
+        } else {
+            ui::ok("All cached models cleared");
+        }
     }
 
     println!();

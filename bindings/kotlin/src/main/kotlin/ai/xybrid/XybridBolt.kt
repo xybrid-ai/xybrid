@@ -1081,7 +1081,14 @@ data class XybridGenerationConfig(
     val minP: Float? = null,
     val topK: UInt? = null,
     val repetitionPenalty: Float? = null,
-    val stopSequences: List<String>
+    val stopSequences: List<String>,
+    /**
+     * Optional GBNF grammar constraining generation to structured output
+     * (local llama backend only). Produce one from a JSON Schema with
+     * [`json_schema_to_gbnf`], or pass raw GBNF. Appended last: `#[data]`
+     * PODs serialize by field order across the FFI boundary.
+     */
+    val grammar: String? = null
 ) {
     companion object {
         fun decode(reader: WireReader): XybridGenerationConfig = XybridGenerationConfig(
@@ -1091,7 +1098,8 @@ data class XybridGenerationConfig(
             reader.readOptional { reader.readF32() },
             reader.readOptional { reader.readU32() },
             reader.readOptional { reader.readF32() },
-            reader.readList { reader.readString() }
+            reader.readList { reader.readString() },
+            reader.readOptional { reader.readString() }
         )
     }
     fun wireEncodedSize(): Int =
@@ -1101,7 +1109,8 @@ data class XybridGenerationConfig(
         (minP?.let { v -> 1 + 4 } ?: 1.toInt()) +
         (topK?.let { v -> 1 + 4 } ?: 1.toInt()) +
         (repetitionPenalty?.let { v -> 1 + 4 } ?: 1.toInt()) +
-        (4 + stopSequences.sumOf { item -> (4 + Utf8Codec.maxBytes(item)) })
+        (4 + stopSequences.sumOf { item -> (4 + Utf8Codec.maxBytes(item)) }) +
+        (grammar?.let { v -> 1 + (4 + Utf8Codec.maxBytes(v)) } ?: 1.toInt())
 
     fun wireEncodeTo(wire: WireWriter) {
         maxTokens?.let { v -> wire.writeU8(1u); wire.writeU32(v) } ?: wire.writeU8(0u)
@@ -1111,6 +1120,7 @@ data class XybridGenerationConfig(
         topK?.let { v -> wire.writeU8(1u); wire.writeU32(v) } ?: wire.writeU8(0u)
         repetitionPenalty?.let { v -> wire.writeU8(1u); wire.writeF32(v) } ?: wire.writeU8(0u)
         wire.writeU32(stopSequences.size.toUInt()); stopSequences.forEach { item -> wire.writeString(item) }
+        grammar?.let { v -> wire.writeU8(1u); wire.writeString(v) } ?: wire.writeU8(0u)
     }
 }
 
@@ -1273,6 +1283,20 @@ data class XybridVoiceInfo(
         language?.let { v -> wire.writeU8(1u); wire.writeString(v) } ?: wire.writeU8(0u)
         style?.let { v -> wire.writeU8(1u); wire.writeString(v) } ?: wire.writeU8(0u)
     }
+}
+
+/**
+ * Convert a JSON Schema (as a JSON string) into a GBNF grammar for
+ * [`XybridGenerationConfig::grammar`]. Fails on invalid JSON or schema
+ * constructs outside the supported subset.
+ */
+
+@Throws(XybridError::class)
+fun jsonSchemaToGbnf(schemaJson: String): String {
+    val buf = Native.boltffi_json_schema_to_gbnf(schemaJson.toByteArray(Charsets.UTF_8))
+        ?: throw FfiException(-1, "Null buffer returned")
+    val reader = WireReader(buf)
+    return reader.readResult({ reader.readString() }, { XybridError.decode(reader) }).getOrThrow()
 }
 
 fun setThermalState(state: XybridThermalState) {
@@ -1634,6 +1658,7 @@ private object Native {
 
     @JvmStatic external fun boltffi_free_string(ptr: Long)
     @JvmStatic external fun boltffi_last_error_message(): ByteArray
+    @JvmStatic external fun boltffi_json_schema_to_gbnf(schema_json: ByteArray): ByteArray?
     @JvmStatic external fun boltffi_set_thermal_state(state: Int): Unit
     @JvmStatic external fun boltffi_clear_thermal_state(): Unit
     @JvmStatic external fun boltffi_set_battery_level(percent: Byte): Unit

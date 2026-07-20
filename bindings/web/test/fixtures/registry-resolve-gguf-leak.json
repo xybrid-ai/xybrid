@@ -1,0 +1,34 @@
+{
+  "mask": "smollm2-360m",
+  "platform": "web",
+  "resolved": {
+    "hf_repo": "bartowski/SmolLM2-360M-Instruct-GGUF",
+    "file": "SmolLM2-360M-Instruct-Q4_K_M.gguf",
+    "download_url": "https://huggingface.co/bartowski/SmolLM2-360M-Instruct-GGUF/resolve/main/SmolLM2-360M-Instruct-Q4_K_M.gguf",
+    "format": "gguf",
+    "quantization": "q4_k_m",
+    "size_bytes": 266532269,
+    "sha256": "",
+    "passthrough": true,
+    "model_metadata": {
+      "execution_template": {
+        "context_length": 4096,
+        "model_file": "SmolLM2-360M-Instruct-Q4_K_M.gguf",
+        "type": "Gguf"
+      },
+      "files": ["SmolLM2-360M-Instruct-Q4_K_M.gguf"],
+      "metadata": {
+        "architecture": "llama",
+        "backend": "llamacpp",
+        "context_length": 8192,
+        "instruction_tuned": true,
+        "languages": ["en"],
+        "task": "text-generation"
+      },
+      "model_id": "smollm2-360m",
+      "postprocessing": [],
+      "preprocessing": [],
+      "version": "1.0"
+    }
+  }
+}

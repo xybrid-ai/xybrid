@@ -1,0 +1,39 @@
+# GATE 3: safe Rust wrapper over llama-cpp-sys. Builds once llama_cpp_sys links.
+load("@rules_rs//rs:rust_library.bzl", "rust_library")
+
+# Vision (mtmd safe wrappers): Android + desktop-linux (Flip 1) — must match
+# llama-cpp-sys/BUILD.bazel's _VISION_PLATFORMS and //:llama's libmtmd arms.
+_VISION_PLATFORMS = [
+    "@rules_rs//rs/platforms/config:aarch64-linux-android",
+    "@rules_rs//rs/platforms/config:armv7-linux-androideabi",
+    "@rules_rs//rs/platforms/config:x86_64-linux-android",
+    "@rules_rs//rs/platforms/config:x86_64-unknown-linux-gnu",
+    "@rules_rs//rs/platforms/config:aarch64-apple-darwin",  # Flip 2: macOS parity
+    "@rules_rs//rs/platforms/config:aarch64-apple-ios",  # Apple parity: iOS vision
+    "@rules_rs//rs/platforms/config:aarch64-apple-ios-sim",  # G4a: iOS simulator vision
+    "@rules_rs//rs/platforms/config:x86_64-pc-windows-gnu",  # Windows .exe parity
+]
+
+rust_library(
+    name = "xybrid_llama",
+    srcs = glob(["src/**/*.rs"]),
+    edition = "2021",
+    crate_features = ["bindings"] + select({
+        cfg: ["vision"]
+        for cfg in _VISION_PLATFORMS
+    } | {"//conditions:default": []}),
+    deps = [
+        "//crates/llama-cpp-sys:llama_cpp_sys",
+        "@crates//:thiserror",
+        "@crates//:tracing",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+# Dir-basename alias so `//crates/xybrid-llama` (the label all_crate_deps()
+# emits for xybrid-core) resolves to the proven target above.
+alias(
+    name = "xybrid-llama",
+    actual = ":xybrid_llama",
+    visibility = ["//visibility:public"],
+)

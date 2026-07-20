@@ -1,0 +1,14 @@
+# GATE 5 — xybrid-ffi-facade. Pure-Rust translation layer over the SDK; the one
+# canonical SDK->foreign POD/Arc facade the bolt/flutter/ffi crates route through.
+# Free via @crates: deps = xybrid-core + xybrid-sdk + tokio, all auto-resolved.
+load("@rules_rs//rs:rust_library.bzl", "rust_library")
+load("@crates//:defs.bzl", "all_crate_deps")
+
+rust_library(
+    name = "xybrid-ffi-facade",
+    srcs = glob(["src/**/*.rs"]),
+    edition = "2021",
+    crate_features = ["default"],
+    deps = all_crate_deps(normal = True),
+    visibility = ["//visibility:public"],
+)

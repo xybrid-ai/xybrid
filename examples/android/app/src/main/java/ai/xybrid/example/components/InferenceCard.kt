@@ -1,5 +1,6 @@
 package ai.xybrid.example.components
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -442,30 +443,93 @@ private fun TtsResult(state: InferenceState.Completed, pcmPlayer: PcmPlayer) {
 private fun LlmResult(state: InferenceState.Completed) {
     val clipboardManager = LocalClipboardManager.current
 
-    state.text?.let { text ->
-        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            SelectionContainer {
-                Text(
-                    text = text,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer
-                )
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        // The answer — never contains the model's <think> reasoning.
+        state.text?.let { text ->
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                SelectionContainer {
+                    Text(
+                        text = text,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                }
+                TextButton(
+                    onClick = { clipboardManager.setText(AnnotatedString(text)) },
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+                ) {
+                    Text(
+                        text = "Copy to clipboard",
+                        style = MaterialTheme.typography.labelSmall
+                    )
+                }
             }
-            TextButton(
-                onClick = { clipboardManager.setText(AnnotatedString(text)) },
-                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+        } ?: Text(
+            text = "No text output",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.5f)
+        )
+
+        // Chain-of-thought — present only for thinking models (e.g.
+        // lfm2.5-1.2b-thinking). Surfaced separately from the answer above.
+        state.reasoningContent?.let { reasoning ->
+            ReasoningSection(reasoning)
+        }
+    }
+}
+
+@Composable
+private fun ReasoningSection(reasoning: String) {
+    val clipboardManager = LocalClipboardManager.current
+    var expanded by remember { mutableStateOf(false) }
+
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        shape = MaterialTheme.shapes.small,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier.padding(8.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { expanded = !expanded },
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "Copy to clipboard",
-                    style = MaterialTheme.typography.labelSmall
+                    text = "Reasoning (chain-of-thought)",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Text(
+                    text = if (expanded) "Hide" else "Show",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary
                 )
             }
+            if (expanded) {
+                SelectionContainer {
+                    Text(
+                        text = reasoning,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                TextButton(
+                    onClick = { clipboardManager.setText(AnnotatedString(reasoning)) },
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+                ) {
+                    Text(
+                        text = "Copy reasoning",
+                        style = MaterialTheme.typography.labelSmall
+                    )
+                }
+            }
         }
-    } ?: Text(
-        text = "No text output",
-        style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.5f)
-    )
+    }
 }
 
 @Composable

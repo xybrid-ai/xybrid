@@ -799,6 +799,43 @@ namespace Xybrid.Native
         internal static extern void xybrid_generation_config_add_stop(XybridGenerationConfigHandle* config, byte* stop);
 
         /// <summary>
+        ///  Set a GBNF grammar constraining generation to structured output
+        ///  (local llama backend only; other backends ignore it).
+        ///
+        ///  Produce a grammar from a JSON Schema with `xybrid_json_schema_to_gbnf`,
+        ///  or pass raw GBNF. Passing null clears any previously set grammar.
+        ///
+        ///  # Safety
+        ///
+        ///  `config` must be a valid handle. `grammar`, when non-null, must be a
+        ///  null-terminated UTF-8 string.
+        ///
+        ///  # Parameters
+        ///
+        ///  - `config`: A handle to the generation config.
+        ///  - `grammar`: A null-terminated UTF-8 GBNF grammar, or null to clear.
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "xybrid_generation_config_set_grammar", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern void xybrid_generation_config_set_grammar(XybridGenerationConfigHandle* config, byte* grammar);
+
+        /// <summary>
+        ///  Convert a JSON Schema (as a JSON string) into a GBNF grammar suitable for
+        ///  `xybrid_generation_config_set_grammar`.
+        ///
+        ///  # Safety
+        ///
+        ///  `schema_json` must be a null-terminated UTF-8 string.
+        ///
+        ///  # Returns
+        ///
+        ///  A newly allocated null-terminated GBNF string, or null if the schema is
+        ///  invalid JSON or uses an unsupported construct. Free the returned string
+        ///  with `xybrid_free_string()`.
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "xybrid_json_schema_to_gbnf", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern byte* xybrid_json_schema_to_gbnf(byte* schema_json);
+
+        /// <summary>
         ///  Free a generation config handle.
         ///
         ///  After calling this function, the handle must not be used again.
@@ -1237,6 +1274,34 @@ namespace Xybrid.Native
         /// </summary>
         [DllImport(__DllName, EntryPoint = "xybrid_result_text", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         internal static extern byte* xybrid_result_text(XybridResultHandle* result);
+
+        /// <summary>
+        ///  Get the chain-of-thought / reasoning text from an inference result.
+        ///
+        ///  This is the model's `&lt;think&gt;...&lt;/think&gt;` reasoning, surfaced separately
+        ///  from [`xybrid_result_text`] (which always excludes it).
+        ///
+        ///  # Parameters
+        ///
+        ///  - `result`: A handle to the inference result.
+        ///
+        ///  # Returns
+        ///
+        ///  A pointer to the reasoning string, or null if the model emitted no
+        ///  reasoning (or the handle is null/invalid). The pointer is valid until
+        ///  the result handle is freed.
+        ///
+        ///  # Example (C)
+        ///
+        ///  ```c
+        ///  const char* reasoning = xybrid_result_reasoning_content(result);
+        ///  if (reasoning != NULL) {
+        ///      printf("Model reasoning: %s\n", reasoning);
+        ///  }
+        ///  ```
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "xybrid_result_reasoning_content", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern byte* xybrid_result_reasoning_content(XybridResultHandle* result);
 
         /// <summary>
         ///  Get the latency in milliseconds from an inference result.

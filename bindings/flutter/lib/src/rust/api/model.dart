@@ -15,9 +15,18 @@ import 'package:freezed_annotation/freezed_annotation.dart' hide protected;
 import 'result.dart';
 part 'model.freezed.dart';
 
-// These functions are ignored because they are not marked as `pub`: `apply_backend_to_loader`, `apply_cloud_fallback_metadata`, `cloud_fallback_abort_event`, `is_debug_gateway_host`, `is_ipv6_link_local`, `is_ipv6_unique_local`, `is_v1_gateway_base`, `is_xybrid_gateway_host`, `non_empty`, `normalize_gateway_url`, `should_cancel_on_sink_close`, `stream_error_event`, `streaming_run_options`, `to_facade`, `to_facade`, `to_sdk_with_cancellation`, `to_sdk`, `to_sdk`, `validate_cloud_gateway_url`, `validated_cloud_gateway_url`
+// These functions are ignored because they are not marked as `pub`: `apply_backend_to_loader`, `apply_cloud_fallback_metadata`, `cloud_fallback_abort_event`, `is_debug_gateway_host`, `is_ipv6_link_local`, `is_ipv6_unique_local`, `is_v1_gateway_base`, `is_xybrid_gateway_host`, `non_empty`, `normalize_gateway_url`, `should_cancel_on_sink_close`, `stream_error_event`, `streaming_run_options`, `to_facade`, `to_facade`, `to_sdk_over`, `to_sdk_with_cancellation_over`, `to_sdk`, `validate_cloud_gateway_url`, `validated_cloud_gateway_url`
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `FlutterFallbackResourceProvider`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `current_snapshot`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `from`
+
+/// Convert a JSON Schema (as a JSON string) into a GBNF grammar for
+/// [`FfiGenerationConfig::grammar`].
+///
+/// Fails (as a `String` error, per this crate's FRB convention) when the
+/// schema is not valid JSON or uses a construct outside the supported subset.
+String jsonSchemaToGbnf({required String schemaJson}) =>
+    XybridRustLib.instance.api
+        .crateApiModelJsonSchemaToGbnf(schemaJson: schemaJson);
 
 // Rust type: RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiCancellationToken>>
 abstract class FfiCancellationToken implements RustOpaqueInterface {
@@ -301,6 +310,11 @@ class FfiGenerationConfig {
   /// Stop sequences. When `None` or empty, only EOS token stops generation.
   final List<String>? stopSequences;
 
+  /// Optional GBNF grammar constraining generation to structured output
+  /// (local llama backend only; other backends ignore it). Produce one from
+  /// a JSON Schema with `jsonSchemaToGbnf`, or pass raw GBNF.
+  final String? grammar;
+
   const FfiGenerationConfig({
     this.maxTokens,
     this.temperature,
@@ -309,6 +323,7 @@ class FfiGenerationConfig {
     this.topK,
     this.repetitionPenalty,
     this.stopSequences,
+    this.grammar,
   });
 
   /// Create a creative generation config (higher temperature).
@@ -327,7 +342,8 @@ class FfiGenerationConfig {
       minP.hashCode ^
       topK.hashCode ^
       repetitionPenalty.hashCode ^
-      stopSequences.hashCode;
+      stopSequences.hashCode ^
+      grammar.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -340,7 +356,8 @@ class FfiGenerationConfig {
           minP == other.minP &&
           topK == other.topK &&
           repetitionPenalty == other.repetitionPenalty &&
-          stopSequences == other.stopSequences;
+          stopSequences == other.stopSequences &&
+          grammar == other.grammar;
 }
 
 @freezed

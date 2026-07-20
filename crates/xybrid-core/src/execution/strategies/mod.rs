@@ -1,28 +1,14 @@
-//! Execution strategies - Modular execution paths for different model types.
+//! Execution strategy trait and the live strategies.
 //!
-//! This module extracts execution logic into independent, testable strategies:
+//! Defines the [`ExecutionStrategy`] trait and [`ExecutionContext`], plus the
+//! strategies that are actually wired into the executor: [`CodecTtsStrategy`]
+//! (GGUF backbone + ONNX codec decoder) and, under the `llm-mlx` feature,
+//! [`MlxEmbeddingStrategy`] (MLX SafeTensors embedding models). The `llm`
+//! submodule provides the LLM inference infrastructure ([`LlmInference`],
+//! generation/model config) that [`CodecTtsStrategy`] builds on.
 //!
-//! | Strategy | Use Case |
-//! |----------|----------|
-//! | [`StandardStrategy`] | Single-model ONNX/Candle execution |
-//! | [`TtsStrategy`] | Text-to-speech with chunking |
-//! | [`BertStrategy`] | BERT-style token-based inference |
-//! | [`ModelGraphStrategy`] | Multi-stage DAG execution |
-//! | [`LlmStrategy`] | GGUF / MLX SafeTensors LLM execution (feature-gated) |
-//! | [`MlxEmbeddingStrategy`] | MLX SafeTensors embedding execution (feature-gated) |
-//! | [`CodecTtsStrategy`] | Codec TTS: GGUF backbone + ONNX decoder (feature-gated) |
-//!
-//! ## Design
-//!
-//! Each strategy implements the `ExecutionStrategy` trait, which provides:
-//! - `can_handle()` - Check if this strategy handles the given metadata
-//! - `execute()` - Run the execution
-//!
-//! The executor uses a strategy resolver to select the appropriate strategy
-//! based on the model metadata.
-
-mod standard;
-mod tts;
+//! Both strategies implement [`ExecutionStrategy`]; the executor dispatches
+//! to them from `TemplateExecutor::execute_impl` (see `executor.rs`).
 
 #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp", feature = "llm-mlx"))]
 mod llm;
@@ -33,11 +19,6 @@ mod mlx_embedding;
 // Codec TTS depends on LLM infrastructure (same feature gate)
 mod codec_tts;
 
-pub use standard::StandardStrategy;
-pub use tts::TtsStrategy;
-
-#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp", feature = "llm-mlx"))]
-pub use llm::LlmStrategy;
 #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp", feature = "llm-mlx"))]
 #[allow(unused_imports)]
 pub use llm::{LlmGenerationParams, LlmInference, LlmModelConfig};
@@ -53,7 +34,7 @@ pub use codec_tts::CodecTtsStrategy;
 mod llm;
 #[cfg(not(any(feature = "llm-mistral", feature = "llm-llamacpp", feature = "llm-mlx")))]
 #[allow(unused_imports)]
-pub use llm::{LlmGenerationParams, LlmInference, LlmModelConfig, LlmStrategy};
+pub use llm::{LlmGenerationParams, LlmInference, LlmModelConfig};
 
 use super::template::ModelMetadata;
 use super::types::ExecutorResult;
@@ -87,12 +68,11 @@ impl<'a> ExecutionContext<'a> {
 
 /// Trait for execution strategies.
 ///
-/// Strategies encapsulate the logic for executing different types of models.
-/// Each strategy handles a specific execution pattern (TTS, BERT, standard, etc.).
+/// Strategies encapsulate the logic for executing a specific model pattern.
+/// Implemented today by [`CodecTtsStrategy`] (GGUF backbone + ONNX codec
+/// decoder) and, under `llm-mlx`, [`MlxEmbeddingStrategy`].
 pub trait ExecutionStrategy: Send + Sync {
     /// Check if this strategy can handle the given metadata.
-    ///
-    /// The executor uses this to select the appropriate strategy.
     fn can_handle(&self, metadata: &ModelMetadata) -> bool;
 
     /// Execute the model with the given context and input.
@@ -117,285 +97,10 @@ pub trait ExecutionStrategy: Send + Sync {
     fn name(&self) -> &'static str;
 }
 
-/// Strategy resolver that selects the appropriate strategy for a model.
-pub struct StrategyResolver {
-    strategies: Vec<Box<dyn ExecutionStrategy>>,
-}
-
-impl StrategyResolver {
-    /// Create a new resolver with the default strategies.
-    #[allow(clippy::vec_init_then_push)]
-    pub fn new() -> Self {
-        let mut strategies: Vec<Box<dyn ExecutionStrategy>> = vec![];
-
-        // CodecTts must be checked before LLM (both match GGUF, but CodecTts also requires CodecDecode)
-        #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
-        {
-            strategies.push(Box::new(CodecTtsStrategy::new()));
-        }
-
-        // LLM strategy for plain GGUF and MLX SafeTensors models.
-        #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp", feature = "llm-mlx"))]
-        {
-            strategies.push(Box::new(LlmStrategy::new()));
-        }
-
-        // MLX BERT/nomic SafeTensors embedding models.
-        #[cfg(feature = "llm-mlx")]
-        {
-            strategies.push(Box::new(MlxEmbeddingStrategy::new()));
-        }
-
-        // TTS must be checked before Standard (both handle ONNX)
-        strategies.push(Box::new(TtsStrategy::new()));
-
-        // Standard handles generic ONNX/Candle models
-        strategies.push(Box::new(StandardStrategy::new()));
-
-        Self { strategies }
-    }
-
-    /// Find the strategy that can handle the given metadata.
-    pub fn resolve(&self, metadata: &ModelMetadata) -> Option<&dyn ExecutionStrategy> {
-        self.strategies
-            .iter()
-            .find(|s| s.can_handle(metadata))
-            .map(|s| s.as_ref())
-    }
-}
-
-impl Default for StrategyResolver {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp", feature = "llm-mlx"))]
-    use crate::execution::template::ExecutionTemplate;
-    use crate::execution::template::PreprocessingStep;
-
-    #[test]
-    fn test_resolver_selects_tts_for_phonemize() {
-        let resolver = StrategyResolver::new();
-        let metadata = ModelMetadata::onnx("test-tts", "1.0", "model.onnx").with_preprocessing(
-            PreprocessingStep::Phonemize {
-                tokens_file: "tokens.txt".to_string(),
-                backend: Default::default(),
-                dict_file: None,
-                language: None,
-                add_padding: true,
-                normalize_text: false,
-                silence_tokens: None,
-            },
-        );
-
-        let strategy = resolver.resolve(&metadata);
-        assert!(strategy.is_some());
-        assert_eq!(strategy.unwrap().name(), "tts");
-    }
-
-    #[test]
-    fn test_resolver_selects_standard_for_onnx() {
-        let resolver = StrategyResolver::new();
-        let metadata = ModelMetadata::onnx("test-model", "1.0", "model.onnx");
-
-        let strategy = resolver.resolve(&metadata);
-        assert!(strategy.is_some());
-        assert_eq!(strategy.unwrap().name(), "standard");
-    }
-
-    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp", feature = "llm-mlx"))]
-    #[test]
-    fn test_resolver_selects_llm_for_gguf() {
-        let resolver = StrategyResolver::new();
-        let metadata = ModelMetadata {
-            model_id: "test-llm".to_string(),
-            version: "1.0".to_string(),
-            execution_template: ExecutionTemplate::Gguf {
-                model_file: "model.gguf".to_string(),
-                chat_template: None,
-                context_length: 4096,
-                generation_params: None,
-            },
-            preprocessing: vec![],
-            postprocessing: vec![],
-            files: vec!["model.gguf".to_string()],
-            vision_encoder: None,
-            description: None,
-            backend: None,
-            metadata: std::collections::HashMap::new(),
-            voices: None,
-            max_chunk_chars: None,
-            trim_trailing_samples: None,
-        };
-
-        let strategy = resolver.resolve(&metadata);
-        assert!(strategy.is_some());
-        assert_eq!(strategy.unwrap().name(), "llm");
-    }
-
-    #[cfg(feature = "llm-mlx")]
-    #[test]
-    fn test_resolver_selects_llm_for_mlx_safetensors() {
-        let resolver = StrategyResolver::new();
-        let metadata = ModelMetadata {
-            model_id: "qwen3.5-0.6b-mlx".to_string(),
-            version: "1.0".to_string(),
-            execution_template: ExecutionTemplate::SafeTensors {
-                model_file: "model.safetensors".to_string(),
-                architecture: Some("qwen3".to_string()),
-                config_file: Some("config.json".to_string()),
-                tokenizer_file: Some("tokenizer.json".to_string()),
-            },
-            preprocessing: vec![],
-            postprocessing: vec![],
-            files: vec![
-                "config.json".to_string(),
-                "tokenizer.json".to_string(),
-                "model.safetensors".to_string(),
-            ],
-            vision_encoder: None,
-            description: None,
-            backend: Some("mlx".to_string()),
-            metadata: std::collections::HashMap::new(),
-            voices: None,
-            max_chunk_chars: None,
-            trim_trailing_samples: None,
-        };
-
-        let strategy = resolver.resolve(&metadata);
-        assert!(strategy.is_some());
-        assert_eq!(strategy.unwrap().name(), "llm");
-    }
-
-    #[cfg(feature = "llm-mlx")]
-    #[test]
-    fn test_resolver_selects_mlx_embedding_for_auto_bert_safetensors() {
-        let resolver = StrategyResolver::new();
-        let mut metadata = ModelMetadata {
-            model_id: "nomic-embed-text-v1.5-mlx".to_string(),
-            version: "1.0".to_string(),
-            execution_template: ExecutionTemplate::SafeTensors {
-                model_file: "model.safetensors".to_string(),
-                architecture: Some("nomic_bert".to_string()),
-                config_file: Some("config.json".to_string()),
-                tokenizer_file: Some("tokenizer.json".to_string()),
-            },
-            preprocessing: vec![],
-            postprocessing: vec![],
-            files: vec![
-                "config.json".to_string(),
-                "tokenizer.json".to_string(),
-                "model.safetensors".to_string(),
-            ],
-            vision_encoder: None,
-            description: None,
-            backend: Some("auto".to_string()),
-            metadata: std::collections::HashMap::new(),
-            voices: None,
-            max_chunk_chars: None,
-            trim_trailing_samples: None,
-        };
-        metadata
-            .metadata
-            .insert("task".to_string(), serde_json::json!("text-embedding"));
-
-        let strategy = resolver.resolve(&metadata);
-        assert!(strategy.is_some());
-        assert_eq!(strategy.unwrap().name(), "mlx_embedding");
-    }
-
-    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
-    #[test]
-    fn test_resolver_selects_codec_tts_for_gguf_with_codec_decode() {
-        use crate::execution::template::PostprocessingStep;
-
-        let resolver = StrategyResolver::new();
-        let metadata = ModelMetadata {
-            model_id: "neutts-nano-q4".to_string(),
-            version: "1.0".to_string(),
-            execution_template: ExecutionTemplate::Gguf {
-                model_file: "model.gguf".to_string(),
-                chat_template: None,
-                context_length: 2048,
-                generation_params: None,
-            },
-            preprocessing: vec![PreprocessingStep::PhonemeRaw {
-                backend: Default::default(),
-                language: Some("en-us".to_string()),
-            }],
-            postprocessing: vec![PostprocessingStep::CodecDecode {
-                decoder_model: "neucodec-decoder-int8.onnx".to_string(),
-                sample_rate: 24000,
-                token_pattern: r"<\|speech_(\d+)\|>".to_string(),
-                apply_postprocessing: true,
-            }],
-            files: vec!["model.gguf".to_string()],
-            vision_encoder: None,
-            description: None,
-            backend: None,
-            metadata: std::collections::HashMap::new(),
-            voices: None,
-            max_chunk_chars: None,
-            trim_trailing_samples: None,
-        };
-
-        let strategy = resolver.resolve(&metadata);
-        assert!(strategy.is_some());
-        assert_eq!(strategy.unwrap().name(), "codec_tts");
-    }
-
-    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
-    #[test]
-    fn test_resolver_selects_llm_not_codec_tts_for_plain_gguf() {
-        let resolver = StrategyResolver::new();
-        let metadata = ModelMetadata {
-            model_id: "plain-llm".to_string(),
-            version: "1.0".to_string(),
-            execution_template: ExecutionTemplate::Gguf {
-                model_file: "model.gguf".to_string(),
-                chat_template: None,
-                context_length: 4096,
-                generation_params: None,
-            },
-            preprocessing: vec![],
-            postprocessing: vec![],
-            files: vec!["model.gguf".to_string()],
-            vision_encoder: None,
-            description: None,
-            backend: None,
-            metadata: std::collections::HashMap::new(),
-            voices: None,
-            max_chunk_chars: None,
-            trim_trailing_samples: None,
-        };
-
-        let strategy = resolver.resolve(&metadata);
-        assert!(strategy.is_some());
-        assert_eq!(strategy.unwrap().name(), "llm");
-    }
-
-    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
-    #[test]
-    fn test_resolver_selects_tts_not_codec_for_onnx_phonemize() {
-        let resolver = StrategyResolver::new();
-        let metadata = ModelMetadata::onnx("kokoro-82m", "1.0", "model.onnx").with_preprocessing(
-            PreprocessingStep::Phonemize {
-                tokens_file: "tokens.txt".to_string(),
-                backend: Default::default(),
-                dict_file: None,
-                language: None,
-                add_padding: true,
-                normalize_text: false,
-                silence_tokens: None,
-            },
-        );
-
-        let strategy = resolver.resolve(&metadata);
-        assert!(strategy.is_some());
-        assert_eq!(strategy.unwrap().name(), "tts");
-    }
-}
+// The per-model-type Strategy pattern (resolver + Standard/Tts/Llm strategies) was
+// removed as dead code: only CodecTtsStrategy was ever wired; the others diverged
+// from the live inline execution paths in TemplateExecutor::execute_impl (dispatch
+// is by ExecutionTemplate there). If pluggable/swappable execution is ever needed,
+// see .context/strategy-reconciliation-scoping.md for the forward-port blueprint
+// (evolve ExecutionStrategy for streaming + adapter-cache + multimodal; drive
+// LlmRuntimeAdapter, not the cache-less LlmInference).

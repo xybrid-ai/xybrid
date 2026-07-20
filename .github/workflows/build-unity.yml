@@ -5,12 +5,6 @@ on:
     tags:
       - 'v*'
   workflow_dispatch:
-    inputs:
-      publish_upm:
-        description: 'Also publish to UPM branch (normally only on tag push)'
-        required: false
-        type: boolean
-        default: false
 
 env:
   CARGO_TERM_COLOR: always
@@ -33,6 +27,7 @@ jobs:
 
       - name: Check versions match git tag
         run: |
+          ./tools/scripts/version-sync.sh --check
           TAG_VERSION=${GITHUB_REF#refs/tags/v}
           UNITY_VERSION=$(python3 -c "import json; print(json.load(open('bindings/unity/package.json'))['version'])")
           echo "Git tag version: $TAG_VERSION"
@@ -505,173 +500,91 @@ jobs:
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "Unity SDK version: $VERSION"
 
-      - name: Create SDK archive
+      # Per-platform native bundles consumed by the Unity editor
+      # NativeLibraryResolver (bindings/unity/Editor/NativeLibraryResolver.cs).
+      # This is the shell twin of `cargo xtask package-unity-natives` — kept in
+      # shell so this bare runner needn't compile xtask (→ xybrid-core → ORT).
+      # The manifest shape MUST match the resolver's `NativePlatform` model and
+      # the xtask `UnityNativePlatform` struct; keep all three in sync.
+      - name: Package Unity native resolver bundles
         run: |
+          set -euo pipefail
           VERSION=${{ steps.version.outputs.version }}
-          tar -czf "xybrid-unity-sdk-${VERSION}.tar.gz" -C bindings unity
-          echo "Created xybrid-unity-sdk-${VERSION}.tar.gz"
-          ls -lh "xybrid-unity-sdk-${VERSION}.tar.gz"
+          PLUGINS=bindings/unity/Runtime/Plugins
+          mkdir -p dist
+          # platform-key:PluginDir:primary-lib-relative-path ("" = any-ABI Android)
+          MAPPINGS=(
+            "macos:macOS:libxybrid_ffi.dylib"
+            "windows:Windows:xybrid_ffi.dll"
+            "linux:Linux:libxybrid_ffi.so"
+            "ios:iOS:libxybrid_ffi.a"
+            "android:Android:"
+          )
+          ENTRIES=()
+          for m in "${MAPPINGS[@]}"; do
+            KEY="${m%%:*}"; REST="${m#*:}"; DIR="${REST%%:*}"; LIB="${REST#*:}"
+            SRC="$PLUGINS/$DIR"
+            if [ "$KEY" = "android" ]; then
+              PRESENT=false
+              for abi in arm64-v8a armeabi-v7a x86_64; do
+                [ -f "$SRC/$abi/libxybrid_ffi.so" ] && PRESENT=true
+              done
+            else
+              PRESENT=false; [ -f "$SRC/$LIB" ] && PRESENT=true
+            fi
+            if [ "$PRESENT" != true ]; then
+              echo "skip $KEY — no native at $SRC"; continue
+            fi
+            ASSET="xybrid-unity-native-${KEY}-v${VERSION}.zip"
+            # zip root mirrors Runtime/Plugins/: <Dir>/... plus the folder .meta,
+            # so the resolver extracts it verbatim into Assets/Xybrid/Plugins/.
+            ZIP_ARGS=("$DIR")
+            [ -f "$PLUGINS/$DIR.meta" ] && ZIP_ARGS+=("$DIR.meta")
+            ( cd "$PLUGINS" && zip -r -q "$GITHUB_WORKSPACE/dist/$ASSET" "${ZIP_ARGS[@]}" )
+            SHA=$(shasum -a 256 "dist/$ASSET" | awk '{print $1}')
+            SIZE=$(wc -c < "dist/$ASSET" | tr -d ' ')
+            echo "  ✓ $ASSET ($SIZE bytes)"
+            ENTRIES+=("$KEY|$ASSET|$SHA|$SIZE")
+          done
+          if [ ${#ENTRIES[@]} -eq 0 ]; then
+            echo "No Unity native platforms present to package"; exit 1
+          fi
+          MANIFEST="dist/xybrid-unity-natives-v${VERSION}.manifest.json"
+          VERSION="$VERSION" python3 - "$MANIFEST" "${ENTRIES[@]}" <<'PY'
+          import json, os, sys
+          out, entries = sys.argv[1], sys.argv[2:]
+          plats = []
+          for e in entries:
+              k, asset, sha, size = e.split("|")
+              plats.append({"platform": k, "asset": asset, "sha256": sha, "size": int(size)})
+          json.dump({"version": os.environ["VERSION"], "platforms": plats},
+                    open(out, "w"), indent=2)
+          PY
+          echo "Wrote $MANIFEST (${#ENTRIES[@]} platform(s))"
 
-      - name: Upload Unity SDK package
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: unity-sdk-package
-          path: xybrid-unity-sdk-*.tar.gz
-          if-no-files-found: error
-
-      - name: Upload to GitHub Release
+      - name: Upload native resolver bundles to GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          set -euo pipefail
           VERSION=${{ steps.version.outputs.version }}
-          # The release is created by release.yml which runs in parallel.
-          # Wait up to 10 minutes for it to appear, checking every 30 seconds.
           for i in $(seq 1 20); do
             if gh release view "v${VERSION}" > /dev/null 2>&1; then
-              echo "Release v${VERSION} found — uploading Unity SDK..."
-              gh release upload "v${VERSION}" "xybrid-unity-sdk-${VERSION}.tar.gz" --clobber
-              echo "Upload complete."
+              gh release upload "v${VERSION}" \
+                dist/xybrid-unity-native-*.zip \
+                "dist/xybrid-unity-natives-v${VERSION}.manifest.json" --clobber
+              echo "Uploaded Unity native bundles + manifest to v${VERSION}."
               exit 0
             fi
-            echo "Waiting for release v${VERSION} to be created by release.yml... (attempt $i/20)"
+            echo "Waiting for release v${VERSION}... (attempt $i/20)"
             sleep 30
           done
-          echo "WARNING: Release v${VERSION} was not created within 10 minutes."
-          echo "Unity SDK is available as a CI artifact — upload manually with:"
-          echo "  gh release upload v${VERSION} xybrid-unity-sdk-${VERSION}.tar.gz --clobber"
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          echo "::warning::Release v${VERSION} not found within 10 min — native bundles are CI artifacts only."
 
-  #
-  # Publish UPM branch — enables Unity Package Manager install via Git URL:
-  #   https://github.com/xybrid-ai/xybrid.git#upm
-  #
-  # This job takes the assembled Unity package (with all native libraries from CI)
-  # and pushes it to the `upm` branch with package.json at root.
-  #
-  publish-upm:
-    name: Publish UPM Branch
-    permissions:
-      contents: write   # force-pushes the generated upm branch/tag
-    needs: [package-unity]
-    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && github.event.inputs.publish_upm == 'true')
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Upload native bundles as CI artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          fetch-depth: 0
-
-      - name: Download all Unity plugin artifacts
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          pattern: unity-plugins-*
-          path: downloaded-plugins
-
-      - name: Assemble plugins into Unity package
-        run: |
-          # Map lowercase artifact names to Unity-standard capitalized directory names
-          declare -A PLATFORM_MAP=(
-            [macos]="macOS"
-            [windows]="Windows"
-            [linux]="Linux"
-            [android]="Android"
-          )
-          # NOTE: iOS is intentionally excluded from the UPM branch.
-          # libxybrid_ffi.a embeds ORT statically (~326 MB), exceeding GitHub's 100 MB
-          # hard file size limit. iOS Unity support requires manual setup.
-          # See bindings/unity/README.md#ios-installation for instructions.
-
-          for platform_dir in downloaded-plugins/unity-plugins-*/; do
-            ARTIFACT_NAME=$(basename "$platform_dir" | sed 's/unity-plugins-//')
-
-            if [[ "$ARTIFACT_NAME" == "ios" ]]; then
-              echo "Skipping ios -- excluded from UPM branch (see README for manual iOS setup)"
-              continue
-            fi
-
-            PLATFORM="${PLATFORM_MAP[$ARTIFACT_NAME]:-$ARTIFACT_NAME}"
-            echo "Assembling $ARTIFACT_NAME -> $PLATFORM..."
-            mkdir -p "bindings/unity/Runtime/Plugins/$PLATFORM"
-            cp -r "$platform_dir"/* "bindings/unity/Runtime/Plugins/$PLATFORM/"
-          done
-
-          echo ""
-          echo "Assembled plugin structure:"
-          find bindings/unity/Runtime/Plugins -type f -not -name '.DS_Store' | sort
-
-      - name: Publish to upm branch
-        run: |
-          # Get version from tag or from package.json (manual dispatch)
-          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
-            VERSION=${GITHUB_REF#refs/tags/v}
-          else
-            VERSION=$(python3 -c "import json; print(json.load(open('bindings/unity/package.json'))['version'])")
-          fi
-          echo "Publishing UPM branch for version: $VERSION"
-
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-
-          # Increase post buffer for large native binary push (~200 MB)
-          git config http.postBuffer 524288000
-
-          # Prepare package contents in a temp directory
-          PACKAGE_DIR=$(mktemp -d)
-          cp -r bindings/unity/* "$PACKAGE_DIR/"
-
-          # Remove .gitignore that blocks native libs — we WANT them on the upm branch
-          rm -f "$PACKAGE_DIR/Runtime/Plugins/.gitignore"
-
-          # Remove iOS directory entirely — binary excluded due to 100 MB git limit.
-          # The .meta files would otherwise cause Unity "orphaned meta" errors.
-          rm -rf "$PACKAGE_DIR/Runtime/Plugins/iOS"
-
-          # Remove .gitkeep files (no longer needed with real binaries)
-          find "$PACKAGE_DIR" -name ".gitkeep" -delete
-          find "$PACKAGE_DIR" -name ".gitkeep.meta" -delete
-
-          # Remove .DS_Store files
-          find "$PACKAGE_DIR" -name ".DS_Store" -delete
-
-          # Switch to upm branch (orphan if it doesn't exist)
-          # Use -f to discard downloaded native binaries already in working tree
-          # (they're safely copied to $PACKAGE_DIR above)
-          if git ls-remote --exit-code origin upm > /dev/null 2>&1; then
-            git fetch origin upm
-            git checkout -f upm
-            # Clear all existing files
-            git rm -rf . > /dev/null 2>&1 || true
-          else
-            git checkout --orphan upm
-            git rm -rf . > /dev/null 2>&1 || true
-          fi
-
-          # Clean untracked files from checkout (downloaded-plugins, etc.)
-          git clean -fd
-
-          # Copy package contents to repo root (package.json at root for UPM)
-          cp -r "$PACKAGE_DIR"/* .
-          rm -rf "$PACKAGE_DIR"
-
-          # Stage everything including native binaries
-          git add -A
-
-          # Check if there are changes to commit
-          if git diff --cached --quiet; then
-            echo "No changes to commit — upm branch is already up to date."
-          else
-            git commit -m "v${VERSION} — Unity SDK with native libraries"
-            git push origin upm --force
-            echo "Pushed upm branch with v${VERSION}"
-          fi
-
-          # Create a version-specific tag on the upm branch
-          git tag -f "upm/v${VERSION}"
-          git push origin "upm/v${VERSION}" --force
-          echo "Tagged upm/v${VERSION}"
-
-          echo ""
-          echo "Unity users can now install via Package Manager:"
-          echo "  Latest:  https://github.com/xybrid-ai/xybrid.git#upm"
-          echo "  Pinned:  https://github.com/xybrid-ai/xybrid.git#upm/v${VERSION}"
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          name: unity-native-bundles
+          path: dist/xybrid-unity-native*
+          if-no-files-found: error

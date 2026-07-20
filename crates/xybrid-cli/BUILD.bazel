@@ -1,0 +1,14 @@
+# GATE 5 — the `xybrid` CLI binary. rust_binary (crate root src/main.rs, bin
+# name `xybrid` per the resolved DEP_DATA). Deps = core + sdk + clap/console/etc,
+# all auto-resolved. Compiles once the xybrid-core ort ceiling is addressed.
+load("@rules_rs//rs:rust_binary.bzl", "rust_binary")
+load("@crates//:defs.bzl", "all_crate_deps")
+
+rust_binary(
+    name = "xybrid",
+    srcs = glob(["src/**/*.rs"]),
+    edition = "2021",
+    crate_features = ["default"],
+    deps = all_crate_deps(normal = True),
+    visibility = ["//visibility:public"],
+)

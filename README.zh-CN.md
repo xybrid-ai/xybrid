@@ -88,7 +88,7 @@
 | 目标 | 路径 |
 |------|------|
 | 最快上手（2 分钟） | [安装 CLI →](#快速开始) |
-| 构建移动端或桌面应用 | [Flutter SDK →](bindings/flutter/) |
+| 开发移动端或桌面应用 | [Flutter SDK →](bindings/flutter/) |
 | 为游戏添加 AI NPC | [Unity SDK →](bindings/unity/)，体验 [3D 酒馆示例](https://github.com/xybrid-ai/xybrid-unity-tavern) |
 | Android 原生开发 | [Kotlin SDK →](bindings/kotlin/) |
 | Rust / 嵌入式 | [核心 crate →](crates/) |
@@ -145,7 +145,7 @@ xybrid run --model kokoro-82m --input-text "国破山河在，城春草木深" -
 
 ```yaml
 dependencies:
-  xybrid_flutter: ^0.2.0
+  xybrid_flutter: ^0.3.0
 ```
 
 **运行模型：**
@@ -162,7 +162,7 @@ final result = await model.run(XybridEnvelope.text('国破山河在，城春草�
 
 ```gradle
 dependencies {
-    implementation("ai.xybrid:xybrid-kotlin:0.2.0")
+    implementation("ai.xybrid:xybrid-kotlin:0.3.0")
 }
 ```
 
@@ -180,7 +180,7 @@ val result = model.run(Envelope.text("国破山河在，城春草木深"))
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/xybrid-ai/xybrid.git", from: "0.2.0")
+    .package(url: "https://github.com/xybrid-ai/xybrid.git", from: "0.3.0")
 ]
 ```
 
@@ -194,10 +194,10 @@ let result = try model.run(envelope: Envelope.text("国破山河在，城春草�
 
 ### Unity
 
-**安装** 通过 Unity Package Manager：
+**安装** 通过 [OpenUPM](https://openupm.com/packages/ai.xybrid.sdk/)（`openupm add ai.xybrid.sdk`），或直接从 git 子目录安装：
 
 ```sh
-https://github.com/xybrid-ai/xybrid.git#upm
+https://github.com/xybrid-ai/xybrid.git?path=/bindings/unity
 ```
 
 **运行模型：**
@@ -214,7 +214,7 @@ var result = model.Run(Envelope.Text("国破山河在，城春草木深"));
 
 ```toml
 [dependencies]
-xybrid = "0.2.0"
+xybrid = "0.3.0"
 ```
 
 **运行模型：**
@@ -225,7 +225,7 @@ let result = model.run(&Envelope::text("国破山河在，城春草木深"))?;
 // 输出 → 24kHz WAV 音频
 ```
 
-完整安装选项、硬件加速与 CLI 参考请参阅 [Installation Guide](docs/INSTALLATION.md)。各平台的详细设置请参阅对应 SDK 的 README：[Flutter](bindings/flutter/) · [Unity](bindings/unity/) · [Swift](bindings/apple/) · [Kotlin](bindings/kotlin/) · [Rust](crates/)。
+完整安装选项、硬件加速与 CLI 参考请参阅 [安装指南](docs/INSTALLATION.zh.md)。各平台的详细设置请参阅对应 SDK 的 README：[Flutter](bindings/flutter/) · [Unity](bindings/unity/) · [Swift](bindings/apple/) · [Kotlin](bindings/kotlin/) · [Rust](crates/)。
 
 <details>
 <summary><h3>多模型推理流水线 — MMP（实验性）</h3></summary>
@@ -309,12 +309,19 @@ let result = pipeline.run(&Envelope::audio(audio_bytes))?;
 | 模型 | 参数量 | 格式 | 简介 |
 |------|--------|------|------|
 | Gemma 3 1B | 1B | GGUF Q4_K_M | Google 为移动端优化的模型 |
+| LFM2.5 230M | 230M | GGUF Q4_K_M | 最小的采用 Liquid AI 混合卷积+注意力架构的 LLM，适合边缘设备 |
 | LFM2.5 350M | 354M | GGUF Q4_K_M | Liquid AI 混合卷积+注意力架构，9 种语言，工具调用 |
 | Llama 3.2 1B | 1B | GGUF Q4_K_M | Meta 的通用模型，128K 上下文 |
 | Qwen 2.5 0.5B | 500M | GGUF Q4_K_M | 紧凑的本地聊天模型 |
 | Qwen 3.5 0.8B | 800M | GGUF Q4_K_M | 最新 Qwen，支持推理（思考模式） |
 | Qwen 3.5 2B | 2B | GGUF Q4_K_M | 更大的 Qwen 3.5，扩展推理能力 |
 | SmolLM2 360M | 360M | GGUF Q4_K_M | 最佳的微型模型，优秀的质量/体积比 |
+
+### 视觉语言模型（VLM）
+
+| 模型 | 参数量 | 格式 | 简介 |
+|------|--------|------|------|
+| LFM2-VL 450M | 450M | GGUF Q4_0 + mmproj | Liquid AI 的紧凑型 VLM（SigLIP2 视觉）— 图像+文本输入，通过 llama.cpp mtmd 运行 |
 
 ### 即将推出
 
@@ -325,7 +332,6 @@ let result = pipeline.run(&Envelope::audio(audio_bytes))?;
 | Trinity Nano | LLM (MoE) | 6B（1B 活跃） | P2 | 计划中 |
 | LFM2-VL 700M | Vision+LLM | 700M | P2 | 计划中 |
 | Nomic Embed Text v1.5 | 嵌入 | 137M | P1 | 受阻（需要 Tokenize/MeanPool 步骤） |
-| LFM2-VL 450M | 视觉 | 450M | P2 | 计划中 |
 | Whisper Tiny CoreML | ASR | 39M | P2 | 计划中 |
 | Qwen3-TTS 0.6B | TTS | 600M | P2 | 受阻（需要自定义 SafeTensors 运行时） |
 | Chatterbox Turbo | TTS | 350M | P3 | 受阻（需要 ModelGraph 模板） |
@@ -376,7 +382,7 @@ Skills 与 agent 无关，位于 [`agents/skills/`](agents/skills/)。安装脚�
 | 语音转文本 | ✅ | ✅ | ✅ | ✅ | ✅ |
 | 文本转语音 | ✅ | ✅ | ✅ | ✅ | ✅ |
 | 语言模型 | ✅ | ✅ | ✅ | ✅ | ✅ |
-| 视觉模型 | 🔜 | 🔜 | 🔜 | 🔜 | 🔜 |
+| 视觉模型 | ✅ | ✅ | ✅ | ✅ | ✅ |
 | 嵌入模型 | 🔜 | 🔜 | 🔜 | 🔜 | 🔜 |
 | 多模型流水线（MMP） | ✅ | ✅ | ✅ | ✅ | ✅ |
 | 模型下载与缓存 | ✅ | ✅ | ✅ | ✅ | ✅ |

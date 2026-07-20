@@ -24,7 +24,7 @@ use xybrid_core::template_executor::TemplateExecutor;
 use xybrid_sdk::registry_client::RegistryClient;
 
 use super::registry_format::registry_format_for_stage_backend;
-use super::utils::{display_stage_name, format_size, save_wav_file};
+use super::utils::{display_stage_name, format_size, maybe_warn_thinking_budget, save_wav_file};
 use crate::ui;
 
 /// Run a pipeline from a configuration file.
@@ -40,6 +40,8 @@ pub(crate) fn run_pipeline(
     target: Option<&str>,
     backend_override: Option<&str>,
     trace_enabled: bool,
+    show_reasoning: bool,
+    max_tokens: Option<usize>,
     trace_export: Option<&PathBuf>,
 ) -> Result<()> {
     let _pipeline_span = if trace_enabled {
@@ -59,7 +61,7 @@ pub(crate) fn run_pipeline(
 
     let client = RegistryClient::from_env().context("Failed to initialize registry client")?;
     let stages = resolve_pipeline_stages(&config, &client, backend_override)?;
-    let input = build_input_envelope(input_audio, input_text, input_images, voice)?;
+    let input = build_input_envelope(input_audio, input_text, input_images, voice, max_tokens)?;
 
     let metrics = DeviceMetrics::default();
     let availability_fn = build_availability_fn(&stages);
@@ -78,6 +80,7 @@ pub(crate) fn run_pipeline(
         policy_path,
         output_path,
         trace_enabled,
+        show_reasoning,
         trace_export,
     )
 }
@@ -247,6 +250,7 @@ fn build_input_envelope(
     input_text: Option<&str>,
     input_images: &[PathBuf],
     voice: Option<&str>,
+    max_tokens: Option<usize>,
 ) -> Result<Envelope> {
     if !input_images.is_empty() {
         if input_audio.is_some() {
@@ -260,7 +264,13 @@ fn build_input_envelope(
             ));
         }
 
-        return build_multimodal_input_envelope(input_text, input_images);
+        let mut input = build_multimodal_input_envelope(input_text, input_images)?;
+        if let Some(max_tokens) = max_tokens {
+            input
+                .metadata
+                .insert("max_tokens".to_string(), max_tokens.to_string());
+        }
+        return Ok(input);
     }
 
     let mut input = if let Some(audio_path) = input_audio {
@@ -281,6 +291,12 @@ fn build_input_envelope(
         input
             .metadata
             .insert("voice_id".to_string(), voice_id.to_string());
+    }
+
+    if let Some(max_tokens) = max_tokens {
+        input
+            .metadata
+            .insert("max_tokens".to_string(), max_tokens.to_string());
     }
 
     Ok(input)
@@ -441,6 +457,7 @@ fn execute_pipeline(
     policy_path: Option<&PathBuf>,
     output_path: Option<&PathBuf>,
     trace_enabled: bool,
+    show_reasoning: bool,
     trace_export: Option<&PathBuf>,
 ) -> Result<()> {
     let mut orchestrator = Orchestrator::new();
@@ -470,7 +487,7 @@ fn execute_pipeline(
     match execution_result {
         Ok(results) => {
             sp.finish_and_clear();
-            print_pipeline_results(&results, output_path)?;
+            print_pipeline_results(&results, output_path, show_reasoning)?;
             print_trace_output(trace_enabled, trace_export)?;
             Ok(())
         }
@@ -485,6 +502,7 @@ fn execute_pipeline(
 fn print_pipeline_results(
     results: &[xybrid_core::orchestrator::StageExecutionResult],
     output_path: Option<&PathBuf>,
+    show_reasoning: bool,
 ) -> Result<()> {
     ui::section("Results");
     println!();
@@ -506,6 +524,20 @@ fn print_pipeline_results(
                     println!();
                     println!("    {}", text);
                 }
+                // Chain-of-thought for this stage, opt-in via `--show-reasoning`.
+                if show_reasoning {
+                    if let Some(reasoning) = result
+                        .output
+                        .metadata
+                        .get("reasoning_content")
+                        .filter(|r| !r.is_empty())
+                    {
+                        println!();
+                        ui::kv("  Reasoning", "");
+                        println!("    {}", reasoning);
+                    }
+                }
+                maybe_warn_thinking_budget(&result.output);
             }
             EnvelopeKind::Audio(data) => {
                 ui::kv("  Size", &format!("{} bytes", data.len()));
@@ -638,6 +670,8 @@ pub(crate) fn run_bundle(
     backend_override: Option<&str>,
     dry_run: bool,
     trace_enabled: bool,
+    show_reasoning: bool,
+    max_tokens: Option<usize>,
     trace_export: Option<&PathBuf>,
 ) -> Result<()> {
     if trace_enabled {
@@ -677,6 +711,7 @@ pub(crate) fn run_bundle(
         voice,
         dry_run,
         backend_override,
+        max_tokens,
     )?;
 
     emit_pipeline_start_event(&metadata, &bundle_path.display().to_string());
@@ -696,7 +731,7 @@ pub(crate) fn run_bundle(
 
     let (output, elapsed) = run_inference(&extract_dir, &metadata, &input, trace_enabled)?;
 
-    print_inference_results(&metadata, &output, elapsed, output_path)?;
+    print_inference_results(&metadata, &output, elapsed, output_path, show_reasoning)?;
     print_llm_trace_block(&output, trace_enabled);
     emit_pipeline_complete_event(&metadata, &output, elapsed);
 
@@ -757,6 +792,8 @@ pub(crate) fn run_model(
     backend_override: Option<&str>,
     dry_run: bool,
     trace_enabled: bool,
+    show_reasoning: bool,
+    max_tokens: Option<usize>,
     trace_export: Option<&PathBuf>,
 ) -> Result<()> {
     if trace_enabled {
@@ -881,6 +918,7 @@ pub(crate) fn run_model(
         voice,
         dry_run,
         backend_override,
+        max_tokens,
     )?;
 
     emit_pipeline_start_event(&metadata, "registry");
@@ -900,7 +938,7 @@ pub(crate) fn run_model(
 
     let (output, elapsed) = run_inference(&extract_dir, &metadata, &input, trace_enabled)?;
 
-    print_inference_results(&metadata, &output, elapsed, output_path)?;
+    print_inference_results(&metadata, &output, elapsed, output_path, show_reasoning)?;
     print_llm_trace_block(&output, trace_enabled);
     emit_pipeline_complete_event(&metadata, &output, elapsed);
 
@@ -923,6 +961,8 @@ pub(crate) fn run_directory(
     backend_override: Option<&str>,
     dry_run: bool,
     trace_enabled: bool,
+    show_reasoning: bool,
+    max_tokens: Option<usize>,
     trace_export: Option<&PathBuf>,
 ) -> Result<()> {
     if trace_enabled {
@@ -944,6 +984,7 @@ pub(crate) fn run_directory(
         voice,
         dry_run,
         backend_override,
+        max_tokens,
     )?;
 
     emit_pipeline_start_event(&metadata, "directory");
@@ -963,7 +1004,7 @@ pub(crate) fn run_directory(
 
     let (output, elapsed) = run_inference(dir, &metadata, &input, trace_enabled)?;
 
-    print_inference_results(&metadata, &output, elapsed, output_path)?;
+    print_inference_results(&metadata, &output, elapsed, output_path, show_reasoning)?;
     print_llm_trace_block(&output, trace_enabled);
     emit_pipeline_complete_event(&metadata, &output, elapsed);
 
@@ -985,6 +1026,8 @@ pub(crate) fn run_huggingface(
     backend_override: Option<&str>,
     dry_run: bool,
     trace_enabled: bool,
+    show_reasoning: bool,
+    max_tokens: Option<usize>,
     trace_export: Option<&PathBuf>,
 ) -> Result<()> {
     if trace_enabled {
@@ -1011,7 +1054,8 @@ pub(crate) fn run_huggingface(
     ui::ok(&format!("Model loaded: {}", model.model_id()));
     println!();
 
-    let sanitized = repo.replace('/', "--");
+    let cache_repo = xybrid_sdk::ModelSource::parse_huggingface(repo);
+    let sanitized = cache_repo.model_id().unwrap_or(repo).replace('/', "--");
     let cache_dir = dirs::home_dir()
         .ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))?
         .join(".xybrid")
@@ -1027,6 +1071,7 @@ pub(crate) fn run_huggingface(
         voice,
         dry_run,
         backend_override,
+        max_tokens,
     )?;
 
     emit_pipeline_start_event(&metadata, "huggingface");
@@ -1046,7 +1091,7 @@ pub(crate) fn run_huggingface(
 
     let (output, elapsed) = run_inference(&cache_dir, &metadata, &input, trace_enabled)?;
 
-    print_inference_results(&metadata, &output, elapsed, output_path)?;
+    print_inference_results(&metadata, &output, elapsed, output_path, show_reasoning)?;
     print_llm_trace_block(&output, trace_enabled);
     emit_pipeline_complete_event(&metadata, &output, elapsed);
 
@@ -1068,6 +1113,8 @@ pub(crate) fn run_model_file(
     dry_run: bool,
     backend_override: Option<&str>,
     trace_enabled: bool,
+    show_reasoning: bool,
+    max_tokens: Option<usize>,
     trace_export: Option<&PathBuf>,
 ) -> Result<()> {
     if trace_enabled {
@@ -1122,7 +1169,7 @@ pub(crate) fn run_model_file(
     }
 
     let input = if input_audio.is_some() || input_text.is_some() || !input_images.is_empty() {
-        build_input_envelope(input_audio, input_text, input_images, voice)?
+        build_input_envelope(input_audio, input_text, input_images, voice, max_tokens)?
     } else {
         return Err(anyhow::anyhow!(
             "No input provided. Use --input-audio <file>, --input-text <text>, or --input-image <file>"
@@ -1131,7 +1178,7 @@ pub(crate) fn run_model_file(
 
     let (output, elapsed) = run_inference(parent_dir, &metadata, &input, trace_enabled)?;
 
-    print_inference_results(&metadata, &output, elapsed, output_path)?;
+    print_inference_results(&metadata, &output, elapsed, output_path, show_reasoning)?;
     print_llm_trace_block(&output, trace_enabled);
     emit_pipeline_complete_event(&metadata, &output, elapsed);
 
@@ -1181,6 +1228,7 @@ fn prepare_bundle_execution(
     voice: Option<&str>,
     dry_run: bool,
     backend_override: Option<&str>,
+    max_tokens: Option<usize>,
 ) -> Result<(ModelMetadata, Option<Envelope>)> {
     let metadata_path = extract_dir.join("model_metadata.json");
     let metadata_content =
@@ -1214,7 +1262,7 @@ fn prepare_bundle_execution(
         return Ok((metadata, None));
     }
 
-    let input = build_input_envelope(input_audio, input_text, input_images, voice)?;
+    let input = build_input_envelope(input_audio, input_text, input_images, voice, max_tokens)?;
     println!();
 
     Ok((metadata, Some(input)))
@@ -1371,6 +1419,7 @@ fn print_inference_results(
     output: &Envelope,
     elapsed: std::time::Duration,
     output_path: Option<&PathBuf>,
+    show_reasoning: bool,
 ) -> Result<()> {
     ui::section("Results");
     println!();
@@ -1394,6 +1443,7 @@ fn print_inference_results(
                 println!();
                 ui::ok(&format!("Output saved to {}", path.display()));
             }
+            maybe_warn_thinking_budget(output);
         }
         EnvelopeKind::Audio(data) => {
             ui::kv("Size", &format!("{} bytes", data.len()));
@@ -1449,6 +1499,24 @@ fn print_inference_results(
                     .with_context(|| format!("Failed to write token IDs to {}", path.display()))?;
                 println!();
                 ui::ok(&format!("Token IDs saved to {}", path.display()));
+            }
+        }
+    }
+
+    // Chain-of-thought, opt-in via `--show-reasoning`. Thinking models emit
+    // `<think>...</think>` blocks that are stripped from the answer text above;
+    // the reasoning is carried on the envelope metadata under "reasoning_content".
+    if show_reasoning {
+        match output.metadata.get("reasoning_content") {
+            Some(reasoning) if !reasoning.is_empty() => {
+                println!();
+                ui::section("Reasoning");
+                println!();
+                println!("    {}", reasoning);
+            }
+            _ => {
+                println!();
+                ui::hint("No reasoning emitted (model produced no <think> blocks)");
             }
         }
     }
@@ -1556,7 +1624,8 @@ mod tests {
         let image_path = dir.path().join("fixture.png");
         fs::write(&image_path, png_image(2, 3)).unwrap();
 
-        let input = build_input_envelope(None, Some("describe this"), &[image_path], None).unwrap();
+        let input =
+            build_input_envelope(None, Some("describe this"), &[image_path], None, None).unwrap();
         let parts = input.as_multipart().expect("text+image input is multipart");
 
         assert_eq!(parts.len(), 2);
@@ -1688,8 +1757,8 @@ stages:
         let image_path = dir.path().join("corrupt.jpeg");
         fs::write(&image_path, [42_u8, 42, 42, 42]).unwrap();
 
-        let err =
-            build_input_envelope(None, Some("describe this"), &[image_path], None).unwrap_err();
+        let err = build_input_envelope(None, Some("describe this"), &[image_path], None, None)
+            .unwrap_err();
         let message = format!("{err:#}");
 
         assert!(message.contains("Invalid image input"));
@@ -1708,8 +1777,8 @@ stages:
         )
         .unwrap();
 
-        let err =
-            build_input_envelope(None, Some("describe this"), &[image_path], None).unwrap_err();
+        let err = build_input_envelope(None, Some("describe this"), &[image_path], None, None)
+            .unwrap_err();
         let message = format!("{err:#}");
 
         assert!(message.contains("Invalid image input"));

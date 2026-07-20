@@ -39,7 +39,6 @@ use crate::model::SdkError;
 ///
 /// - Fuzzy model ID matching (e.g., "kokoro-82m" matches "Kokoro-82M-v1.0-ONNX")
 /// - Integrates with `CacheManager` for bundle management
-/// - Optionally uses `RegistryClient` for online resolution (when available)
 ///
 /// ## Example
 ///

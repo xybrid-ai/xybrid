@@ -696,6 +696,9 @@ mod runtime {
                 prefill_tps: fields.prefill_tps,
                 // Text-only MLX path: no image preprocessing leg to time.
                 image_preprocess_ms: None,
+                // MLX does not split a reasoning channel yet; <think> capture
+                // happens in the shared executor marker-table pass.
+                reasoning_content: None,
             })
         })();
 
@@ -952,6 +955,7 @@ mod tests {
             max_tokens: 8,
             seed: None,
             stop_sequences: vec![],
+            ..Default::default()
         };
         let mut p1 = GenerateParams::new(&cfg);
         let mut p2 = GenerateParams::new(&cfg);
@@ -974,6 +978,7 @@ mod tests {
             max_tokens: 8,
             stop_sequences: vec![],
             seed: Some(0x5eed),
+            ..Default::default()
         };
         let mut from_config = GenerateParams::new(&cfg);
         let mut explicit = Sampler::seeded(0x5eed);

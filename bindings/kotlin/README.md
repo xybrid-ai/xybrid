@@ -12,7 +12,7 @@ Add to your `build.gradle.kts`:
 
 ```gradle
 dependencies {
-    implementation("ai.xybrid:xybrid-kotlin:0.2.0")
+    implementation("ai.xybrid:xybrid-kotlin:0.3.0")
 }
 ```
 
@@ -36,20 +36,14 @@ dependencies {
 ### Loading a Model from Registry
 
 ```kotlin
-import ai.xybrid.XybridModelLoader
-import ai.xybrid.XybridEnvelope
-import ai.xybrid.XybridException
+import ai.xybrid.XybridModel
+import ai.xybrid.Envelope
 
-// Load a model from the registry
-val loader = XybridModelLoader.fromRegistry("kokoro-82m")
-val model = loader.load()
+// Load a model from the registry (the constructor resolves + loads it)
+val model = XybridModel("kokoro-82m")
 
 // Run text-to-speech
-val envelope = XybridEnvelope.Text(
-    text = "Hello, world!",
-    voiceId = "af_bella",
-    speed = 1.0
-)
+val envelope = Envelope.text("Hello, world!", voiceId = "af_bella", speed = 1.0)
 val result = model.run(envelope)
 
 if (result.success) {
@@ -63,11 +57,10 @@ if (result.success) {
 ### Loading a Model from Bundle
 
 ```kotlin
-import ai.xybrid.XybridModelLoader
+import ai.xybrid.XybridModel
 
 // Load from a local bundle path
-val loader = XybridModelLoader.fromBundle("/path/to/model/bundle")
-val model = loader.load()
+val model = XybridModel.fromBundle("/path/to/model/bundle")
 ```
 
 ### Speech Recognition (ASR)
@@ -124,21 +117,35 @@ if (result.success) {
 }
 ```
 
+### Reasoning (thinking models)
+
+Reasoning models (metadata `reasoning: true`, e.g. `lfm2.5-1.2b-thinking`)
+produce a chain-of-thought before their answer. Xybrid keeps it out of the
+answer text and surfaces it on `reasoningContent` — `null` for non-thinking
+models. Nothing to enable; just read it if you want it.
+
+```kotlin
+import ai.xybrid.reasoningContent
+
+val result = model.run(Envelope.text("Is 97 a prime number? Reason, then answer."))
+result.text?.let { println("Answer: $it") }
+result.reasoningContent?.let { println("Reasoning: $it") }
+```
+
 ### Error Handling
 
 ```kotlin
 import ai.xybrid.XybridException
 
 try {
-    val loader = XybridModelLoader.fromRegistry("unknown-model")
-    val model = loader.load()
+    val model = XybridModel("unknown-model")
 } catch (e: XybridException.ModelNotFound) {
-    println("Model not found: ${e.modelId}")
-} catch (e: XybridException.InferenceFailed) {
+    println("Model not found: ${e.id}")
+} catch (e: XybridException.LoadError) {
+    println("Load error: ${e.message}")
+} catch (e: XybridException.InferenceError) {
     println("Inference failed: ${e.message}")
-} catch (e: XybridException.InvalidInput) {
-    println("Invalid input: ${e.message}")
-} catch (e: XybridException.IoException) {
+} catch (e: XybridException.IoError) {
     println("I/O error: ${e.message}")
 }
 ```
@@ -149,19 +156,23 @@ try {
 
 | Type | Description |
 |------|-------------|
-| `XybridModelLoader` | Factory for loading models from registry or bundle |
-| `XybridModel` | Loaded model ready for inference |
-| `XybridEnvelope` | Input data (Audio, Text, Embedding, Image, or UserMessage) |
+| `XybridModel` | Loaded model ready for inference (construct/factory to load) |
+| `Envelope` | Factory for `XybridEnvelope` inputs (`text`, `audio`, `embedding`, `image`, `userMessage`) |
+| `XybridEnvelope` | Input data container |
 | `XybridResult` | Inference output with success/error and result data |
-| `XybridException` | Error types (ModelNotFound, InferenceFailed, etc.) |
+| `XybridException` | Error types (ModelNotFound, InferenceError, etc.) |
 
-### XybridModelLoader
+### XybridModel (loading)
 
-| Method | Description |
+| Call | Description |
 |--------|-------------|
-| `fromRegistry(modelId: String)` | Load model from Xybrid registry |
-| `fromBundle(path: String)` | Load model from local bundle path |
-| `load(): XybridModel` | Fetch and load the model |
+| `XybridModel(id: String)` | Resolve and load a model from the Xybrid registry |
+| `XybridModel.fromBundle(path: String)` | Load a model from a local `.xyb` bundle |
+| `XybridModel.fromDirectory(path: String)` | Load a model from an extracted directory |
+| `XybridModel.fromHuggingface(repo: String)` | Resolve and load a HuggingFace repo |
+
+Each loads synchronously; use the `…Async` suspend variants
+(`XybridModel.fromRegistryAsync(id)`, etc.) to load off the calling thread.
 
 ### XybridEnvelope
 

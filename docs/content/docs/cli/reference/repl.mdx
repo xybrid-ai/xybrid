@@ -1,0 +1,91 @@
+---
+title: xybrid repl
+description: Interactive chat with local models — kept warm, with tool calling
+---
+
+Start an interactive session against a local model. The model loads once and
+stays warm; LLMs get conversation context across turns and, when supported,
+built-in tool calling.
+
+## Usage
+
+```bash
+xybrid repl --model <id>
+xybrid repl --model-file <path.gguf>
+xybrid repl --huggingface <repo[:variant]>
+xybrid repl --config <pipeline.yaml>
+```
+
+## Options
+
+| Option | Description |
+|--------|-------------|
+| `--model` | Model ID from the registry (e.g. `lfm2.5-350m`) |
+| `--model-file` | Path to a local GGUF file (metadata auto-generated if missing) |
+| `--huggingface` | HuggingFace repo, `:VARIANT` selects a GGUF quantization |
+| `--config` | Pipeline YAML (multi-stage sessions) |
+| `--system` | System prompt for the assistant |
+| `--stream` | Stream tokens as they generate (LLMs) |
+| `--show-reasoning` | Print the model's `<think>` chain-of-thought (stripped from answers by default); disables token streaming |
+| `--no-tools` | Disable tool calling even when the model supports it |
+| `--tools-file` | Add user-defined tools from a JSON/YAML file |
+| `--voice` | Voice ID for TTS models |
+| `--target` | Execution target (`auto`, `local`, `cloud`, `server`) |
+
+## In-Session Commands
+
+| Command | Description |
+|---------|-------------|
+| `help`, `?` | Show commands |
+| `history` | Show the conversation (LLMs) |
+| `clear` | Reset the conversation |
+| `/image <path>` | Attach an image to the next message (VLMs) |
+| `/tools` | List available tools and their state |
+| `/tools on\|off` | Toggle tool calling for the session |
+| `quit`, `exit`, `q` | Leave the REPL |
+
+## Tool Calling
+
+For models whose bundle metadata declares `tool_calling: true`, three
+built-in tools are offered by default — `web_search`, `fetch_url`, and
+`current_time` — with a startup banner (web_search / fetch_url reach the
+network):
+
+```
+✔ Tool calling: on
+› web_search / fetch_url reach the network; current_time stays local
+Search           wikipedia (keyless)
+
+❯ who won the 2022 fifa world cup final?
+  ⚙ web_search("2022 FIFA World Cup final winner") · 614ms
+    Search "2022 FIFA World Cup final winner": The 2022 FIFA World Cup final…
+  The 2022 FIFA World Cup final was won by Argentina.
+```
+
+Search providers are pluggable via environment variables:
+
+| Variable | Values |
+|----------|--------|
+| `XYBRID_SEARCH_PROVIDER` | `wikipedia` (default, keyless) · `tavily` · `brave` |
+| `TAVILY_API_KEY` | API key when the provider is `tavily` |
+| `BRAVE_API_KEY` | API key when the provider is `brave` |
+
+Add your own tools with `--tools-file` — each entry maps a JSON-schema'd
+function to a command you author (arguments arrive as JSON on stdin, stdout
+is the result). Passing the flag is an explicit opt-in that also enables
+tools for models whose metadata is silent. See the
+[Tool Calling guide](/docs/guides/tool-calling) for the file format and the
+full contract.
+
+With `--stream`, plain answers stream token by token; tool-bearing turns
+print their answer as a block after the tool results (continuation turns are
+non-streaming), with a cue when the switch happens.
+
+## Notes
+
+- Models load once at startup and stay warm across turns — repeated queries
+  skip load latency entirely.
+- Conversation context is enabled automatically for LLMs; `history` and
+  `clear` manage it.
+- Tool availability is per-model: bundles declare `tool_calling: true` in
+  `model_metadata.json`; `/tools` explains why tools are off when they are.

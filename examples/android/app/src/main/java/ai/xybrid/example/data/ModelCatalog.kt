@@ -46,6 +46,14 @@ val MODEL_CATALOG = listOf(
         parameterCount = "354M"
     ),
     CatalogModel(
+        id = "lfm2.5-1.2b-thinking",
+        displayName = "LFM2.5 1.2B Thinking",
+        task = ModelTask.LLM,
+        description = "Liquid AI reasoning model — emits a chain-of-thought before its answer. Try the result's \"Reasoning\" section.",
+        defaultInput = "Is 97 a prime number? Reason step by step, then answer.",
+        parameterCount = "1.2B"
+    ),
+    CatalogModel(
         id = "kokoro-82m",
         displayName = "Kokoro 82M",
         task = ModelTask.TTS,
