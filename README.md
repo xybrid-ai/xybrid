@@ -17,19 +17,11 @@
 </p>
 
 <p align="center">
-  <a href="https://docs.xybrid.dev">Documentation</a> ·
-  <a href="#sdks">SDKs</a> ·
-  <a href="https://www.xybrid.ai/models">Models</a> ·
-  <a href="https://discord.gg/YhFHHkhbad">Join Discord</a> ·
-  <a href="https://x.com/xybrid_ai">Follow on X</a> ·
-  <a href="https://github.com/xybrid-ai/xybrid/issues">Issues</a>
-</p>
-
-<p align="center">
 
 [![Documentation][docs-shield]][docs-url]
 [![Website][website-shield]][website-url]
 [![Discord][discord-shield]][discord-url]
+[![Follow on X][twitter-shield]][twitter-url]
 
 </p>
 
@@ -48,7 +40,6 @@
 <br>
 [![Ask DeepWiki][deepwiki-shield]][deepwiki-url]
 [![Stars][stars-shield]][stars-url]
-[![Follow on X][twitter-shield]][twitter-url]
 [![Visitors][visitors-shield]][visitors-url]
 
 </p>
@@ -58,7 +49,7 @@
 [docs-url]: https://docs.xybrid.dev/
 [website-shield]: https://img.shields.io/badge/Website-xybrid.ai-4285F4?style=for-the-badge
 [website-url]: https://www.xybrid.ai/
-[discord-shield]: https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fdiscord.com%2Fapi%2Finvites%2FYhFHHkhbad%3Fwith_counts%3Dtrue&query=%24.approximate_member_count&logo=discord&logoColor=white&label=Discord&color=5865F2&suffix=%20members&style=for-the-badge
+[discord-shield]: https://img.shields.io/badge/Join_Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white
 [discord-url]: https://discord.gg/YhFHHkhbad
 
 <!-- Project health — flat-square -->
@@ -88,7 +79,7 @@
 [deepwiki-url]: https://deepwiki.com/xybrid-ai/xybrid
 [stars-shield]: https://img.shields.io/github/stars/xybrid-ai/xybrid?style=flat-square
 [stars-url]: https://github.com/xybrid-ai/xybrid/stargazers
-[twitter-shield]: https://img.shields.io/twitter/follow/xybrid_ai?style=flat-square
+[twitter-shield]: https://img.shields.io/badge/Follow-%40xybrid__ai-000000?style=for-the-badge&logo=x&logoColor=white
 [twitter-url]: https://x.com/xybrid_ai
 [visitors-shield]: https://visitor-badge.laobi.icu/badge?page_id=xybrid-ai.xybrid
 [visitors-url]: https://github.com/xybrid-ai/xybrid
