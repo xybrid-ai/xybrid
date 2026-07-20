@@ -314,9 +314,12 @@ jobs:
             file "$lib" | grep -q 'archive' || { echo "$1: not a static archive"; exit 1; }
             test "$(nm "$lib" 2>/dev/null | grep -c '_ggml_metal')" -gt 0 || { echo "$1: MISSING Metal symbols"; exit 1; }
             test "$(nm "$lib" 2>/dev/null | grep -c '_mtmd_')" -gt 0 || { echo "$1: MISSING vision (mtmd) symbols"; exit 1; }
-            strings "$lib" | grep -qi 'candle' || { echo "$1: MISSING candle support"; exit 1; }
+            # No early-exit consumers (grep -q / awk exit) on big pipes: under
+            # pipefail, the writer dies on EPIPE and fails the step ("strings:
+            # failed to flush output"). Count matches instead — full read.
+            test "$(strings "$lib" | grep -ci 'candle')" -gt 0 || { echo "$1: MISSING candle support"; exit 1; }
             local platform
-            platform=$(otool -l "$lib" | awk '/LC_BUILD_VERSION/{f=1} f && /platform/{print $2; exit}')
+            platform=$(otool -l "$lib" | awk '/LC_BUILD_VERSION/{f=1} f && /platform/ && !p {p=$2} END{print p}')
             test "$platform" = "$2" || { echo "$1: wrong platform $platform (want $2)"; exit 1; }
             echo "$1: OK (platform $platform)"
           }
@@ -639,7 +642,8 @@ jobs:
           check_so() {  # check_so <triple> <readelf-machine>
             local so="prebuilt/$1/libxybrid_flutter_ffi.so"
             readelf -h "$so" | grep -q "Machine:.*$2" || { echo "$1: wrong machine (want $2)"; readelf -h "$so" | grep Machine; exit 1; }
-            strings "$so" | grep -q 'mtmd' || { echo "$1: MISSING vision (mtmd) markers"; exit 1; }
+            # grep -c (not -q): early pipe close + pipefail = EPIPE step failure.
+            test "$(strings "$so" | grep -c 'mtmd')" -gt 0 || { echo "$1: MISSING vision (mtmd) markers"; exit 1; }
             echo "$1: OK"
           }
           check_so x86_64-unknown-linux-gnu "X86-64"
