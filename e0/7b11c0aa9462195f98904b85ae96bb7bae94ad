@@ -1,0 +1,42 @@
+bindings/flutter/rust/BUILD.bazel
+  s_8b9a9b82c688c4::t_25a80929d7eda6 3-10
+  s_8b9a9b82c688c4::t_d34632a7c74507 29-32,35-54
+  s_8b9a9b82c688c4::t_21d9de5380e6de 13-18
+.github/workflows/bazel.yml
+  s_8b9a9b82c688c4::t_8457ac7e3e1186 313-314
+  s_8b9a9b82c688c4::t_2856e544a0bfb1 164-165
+BUILD.bazel
+  s_8b9a9b82c688c4::t_e0ffb7ead92fb4 227-232
+bindings/flutter/cargokit/build_tool/lib/src/build_tool.dart
+  s_bc0377b0b41b4d::t_f1cf6520344001 133-139
+  s_bc0377b0b41b4d::t_771e0ce92872e3 198-214
+  s_bc0377b0b41b4d::t_c72f06ad1a394d 225
+bindings/flutter/cargokit/build_tool/lib/src/precompile_binaries.dart
+  s_bc0377b0b41b4d::t_bbc34e76c4e6eb 109-111,128-141
+  s_bc0377b0b41b4d::t_7490737c373042 32,45-50
+  s_bc0377b0b41b4d::t_8f91cdd9d59b5d 51
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "e07b11c0aa9462195f98904b85ae96bb7bae94ad",
+  "prompts": {},
+  "sessions": {
+    "s_8b9a9b82c688c4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "73a8592f-ccc0-42cf-bf05-435600f9a611",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    },
+    "s_bc0377b0b41b4d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c39ff2b4-b884-490e-a5cc-cc07241383f6",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
