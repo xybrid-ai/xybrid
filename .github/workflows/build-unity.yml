@@ -191,6 +191,11 @@ jobs:
       - name: Build for x86_64-pc-windows-msvc
         run: cargo xtask build-ffi --target x86_64-pc-windows-msvc --deploy-unity
 
+      - name: Stage ONNX Runtime (Windows)
+        run: >-
+          python tools/scripts/stage_unity_desktop_ort.py windows
+          bindings/unity/Runtime/Plugins/Windows
+
       - name: Strip debug symbols (Windows)
         shell: bash
         run: llvm-strip bindings/unity/Runtime/Plugins/Windows/xybrid_ffi.dll
@@ -199,7 +204,13 @@ jobs:
         shell: bash
         run: |
           echo "Windows plugin directory:"
-          ls -la bindings/unity/Runtime/Plugins/Windows/ || echo "WARNING: Windows plugin directory not found"
+          PLUGINS=bindings/unity/Runtime/Plugins/Windows
+          ls -la "$PLUGINS"
+          test -f "$PLUGINS/xybrid_ffi.dll"
+          test -f "$PLUGINS/onnxruntime.dll"
+          test -f "$PLUGINS/onnxruntime.dll.meta"
+          python -c "import ctypes; ctypes.CDLL(r'$PLUGINS/onnxruntime.dll')"
+          echo "Windows ORT runtime loads successfully."
 
       - name: Upload Windows plugins
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -249,13 +260,24 @@ jobs:
       - name: Build for x86_64-unknown-linux-gnu
         run: cargo xtask build-ffi --target x86_64-unknown-linux-gnu --deploy-unity
 
+      - name: Stage ONNX Runtime (Linux)
+        run: >-
+          python3 tools/scripts/stage_unity_desktop_ort.py linux
+          bindings/unity/Runtime/Plugins/Linux
+
       - name: Strip debug symbols (Linux)
         run: strip --strip-unneeded bindings/unity/Runtime/Plugins/Linux/libxybrid_ffi.so
 
       - name: Verify deployed libraries
         run: |
           echo "Linux plugin directory:"
-          ls -la bindings/unity/Runtime/Plugins/Linux/ || echo "WARNING: Linux plugin directory not found"
+          PLUGINS=bindings/unity/Runtime/Plugins/Linux
+          ls -la "$PLUGINS"
+          test -f "$PLUGINS/libxybrid_ffi.so"
+          test -f "$PLUGINS/libonnxruntime.so"
+          test -f "$PLUGINS/libonnxruntime.so.meta"
+          python3 -c "import ctypes; ctypes.CDLL('$PLUGINS/libonnxruntime.so')"
+          echo "Linux ORT runtime loads successfully."
 
       - name: Upload Linux plugins
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -491,6 +513,21 @@ jobs:
           echo ""
           echo "Final plugin directory structure:"
           find bindings/unity/Runtime/Plugins -type f | sort
+
+      - name: Verify desktop runtime dependencies
+        run: |
+          set -euo pipefail
+          PLUGINS=bindings/unity/Runtime/Plugins
+          for path in \
+            Windows/xybrid_ffi.dll \
+            Windows/onnxruntime.dll \
+            Windows/onnxruntime.dll.meta \
+            Linux/libxybrid_ffi.so \
+            Linux/libonnxruntime.so \
+            Linux/libonnxruntime.so.meta; do
+            test -f "$PLUGINS/$path" || { echo "Missing Unity runtime: $path"; exit 1; }
+          done
+          echo "Unity desktop bundles contain xybrid_ffi + ONNX Runtime."
 
       - name: Extract version
         id: version

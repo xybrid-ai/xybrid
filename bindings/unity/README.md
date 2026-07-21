@@ -85,6 +85,8 @@ version from the [GitHub Release](https://github.com/xybrid-ai/xybrid/releases),
 verifies their SHA-256, and installs them into `Assets/Xybrid/Plugins/`. This
 keeps the package small and sidesteps Git/registry size limits — **including the
 ~326 MB iOS static library, which now installs automatically** (no manual step).
+The Windows and Linux bundles include the matching ONNX Runtime shared library,
+so desktop users do not need a system-wide ONNX Runtime installation.
 
 To (re)download on demand, use the editor menu:
 
