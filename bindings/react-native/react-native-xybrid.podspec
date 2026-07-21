@@ -24,10 +24,10 @@ Pod::Spec.new do |s|
   s.requires_arc = true
   s.swift_version = "5.0"
 
-  # Pre-built bolt static lib bundled as an XCFramework. Copied in from
-  # `bindings/apple/XCFrameworks/XybridFFI.xcframework` by
-  # `cargo xtask stage-react-native`. (Android pulls its natives from the
-  # Maven AAR instead — see android/build.gradle.)
+  # Pre-built bolt static framework bundled as an XCFramework — the same
+  # Bazel-built `//bindings/apple:XybridFFI` the Apple release ships, staged
+  # here by `cargo xtask stage-react-native`. (Android pulls its natives
+  # from the Maven AAR instead — see android/build.gradle.)
   s.vendored_frameworks = "ios/Frameworks/XybridFFI.xcframework"
 
   # System frameworks the Rust core links against (mirrors Package.swift).

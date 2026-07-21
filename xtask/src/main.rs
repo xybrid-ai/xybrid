@@ -1203,32 +1203,72 @@ fn stage_react_native_ios(release: bool, version: &str) -> Result<()> {
     if !cfg!(target_os = "macos") {
         anyhow::bail!("React Native iOS staging is only supported on macOS");
     }
+    if !release {
+        eprintln!("warning: --release ignored; the Bazel iOS config always builds opt");
+    }
 
-    // 1. Build the XCFramework (also refreshes bindings/apple's Swift wrapper).
-    build_xcframework(release, version)?;
+    // 1. Build the XCFramework via Bazel — the same producer the Apple
+    //    release (release-prep) and PR CI (build-apple.yml) use. --config=ios
+    //    is Mac-local by design (Apple locks iOS builds to Xcode); when a
+    //    remote-cache-only config is staged (CI writes it from a secret),
+    //    add it so darwin-local action results up/download from BuildBuddy —
+    //    pure cache, never remote execution. Gated on the config actually
+    //    being defined in the rc, so a dev rc without it keeps working.
+    let mut args: Vec<String> = vec!["build".into()];
+    let rc = PathBuf::from(".context/buildbuddy.bazelrc");
+    if rc.is_file()
+        && std::fs::read_to_string(&rc)
+            .map(|s| s.contains(":remote-cache"))
+            .unwrap_or(false)
+    {
+        args.push("--config=remote-cache".into());
+    }
+    args.push("--config=ios".into());
+    args.push("//bindings/apple:XybridFFI".into());
+    let status = Command::new("bazelisk")
+        .args(&args)
+        .status()
+        .or_else(|_| Command::new("bazel").args(&args).status())
+        .context("Failed to run bazelisk/bazel — is Bazel installed?")?;
+    if !status.success() {
+        anyhow::bail!("bazel build --config=ios //bindings/apple:XybridFFI failed");
+    }
 
     let rn_ios = PathBuf::from("bindings/react-native/ios");
 
-    // 2. Stage the XCFramework (unversioned copy) into ios/Frameworks/.
-    let src_xcfw = PathBuf::from("bindings/apple/XCFrameworks/XybridFFI.xcframework");
-    if !src_xcfw.is_dir() {
-        anyhow::bail!(
-            "Expected XCFramework at {} after build — build_xcframework failed silently?",
-            src_xcfw.display()
-        );
+    // 2. Unzip the built xcframework into ios/Frameworks/. Single-config
+    //    invocation, so referencing bazel-bin right after the build is safe.
+    let zip = "bazel-bin/bindings/apple/XybridFFI.xcframework.zip";
+    if !PathBuf::from(zip).is_file() {
+        anyhow::bail!("Expected {} after the Bazel build", zip);
     }
-    let dst_xcfw = rn_ios.join("Frameworks/XybridFFI.xcframework");
+    let fw_dir = rn_ios.join("Frameworks");
+    let dst_xcfw = fw_dir.join("XybridFFI.xcframework");
     if dst_xcfw.exists() {
         std::fs::remove_dir_all(&dst_xcfw)
             .with_context(|| format!("Failed to remove existing {}", dst_xcfw.display()))?;
     }
-    std::fs::create_dir_all(rn_ios.join("Frameworks"))?;
-    copy_dir_recursive(&src_xcfw, &dst_xcfw)
-        .context("Failed to copy XCFramework into RN module")?;
+    std::fs::create_dir_all(&fw_dir)?;
+    if !Command::new("unzip")
+        .args(["-o", "-q", zip, "-d", fw_dir.to_str().unwrap()])
+        .status()
+        .context("unzip the xcframework")?
+        .success()
+    {
+        anyhow::bail!("Failed to unzip {} into {}", zip, fw_dir.display());
+    }
+    if !dst_xcfw.is_dir() {
+        anyhow::bail!(
+            "Zip did not contain XybridFFI.xcframework/ at its root — got {}",
+            fw_dir.display()
+        );
+    }
     println!("  ✓ XCFramework -> {}", dst_xcfw.display());
 
     // 3. Stage the bolt Swift wrapper sources into ios/XybridSwift/. The RN
-    //    Swift glue (XybridModuleImpl.swift) calls into these directly.
+    //    Swift glue (XybridModuleImpl.swift) calls into these directly. They
+    //    are committed sources (byte-identical to boltffi 0.25.3 output) —
+    //    no generator run needed.
     let dst_swift = rn_ios.join("XybridSwift");
     if dst_swift.exists() {
         std::fs::remove_dir_all(&dst_swift)
@@ -1239,7 +1279,7 @@ fn stage_react_native_ios(release: bool, version: &str) -> Result<()> {
         let src = PathBuf::from("bindings/apple/Sources/Xybrid").join(fname);
         if !src.is_file() {
             anyhow::bail!(
-                "Expected {} — run `cargo xtask build-xcframework` first",
+                "Expected committed Swift wrapper at {} — was it moved?",
                 src.display()
             );
         }
