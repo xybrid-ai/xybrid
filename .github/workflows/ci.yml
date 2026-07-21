@@ -28,12 +28,29 @@ env:
 
 jobs:
   tooling-tests:
-    name: Tooling tests
-    runs-on: ubuntu-latest
+    name: Tooling tests (${{ matrix.platform }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux
+            python: python3
+            runtime: libonnxruntime.so
+          - os: windows-latest
+            platform: windows
+            python: python
+            runtime: onnxruntime.dll
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - name: Test native staging tools
+        if: matrix.platform == 'linux'
         run: python3 -m unittest discover -s tools/scripts/tests -p 'test_*.py'
+      - name: Stage and load the real ONNX Runtime
+        run: |
+          ${{ matrix.python }} tools/scripts/stage_unity_desktop_ort.py ${{ matrix.platform }} "${{ runner.temp }}/unity-ort"
+          ${{ matrix.python }} -c "import ctypes, sys; ctypes.CDLL(sys.argv[1])" "${{ runner.temp }}/unity-ort/${{ matrix.runtime }}"
 
   fmt:
     name: Format
