@@ -6,6 +6,7 @@ import tempfile
 import unittest
 import zipfile
 from pathlib import Path
+from unittest import mock
 
 
 SCRIPTS_DIR = Path(__file__).resolve().parents[1]
@@ -92,6 +93,28 @@ class StageUnityDesktopOrtTests(unittest.TestCase):
                 stage_from_archive(spec, archive, output)
 
             self.assertFalse((output / "onnxruntime.dll").exists())
+
+    def test_replace_failure_removes_temporary_runtime(self):
+        payload = b"windows-onnxruntime"
+        member = "onnxruntime-win-x64-1.23.2/lib/onnxruntime.dll"
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            archive = root / "ort.zip"
+            with zipfile.ZipFile(archive, "w") as zip_file:
+                zip_file.writestr(member, payload)
+
+            spec = self.spec("windows", member, "onnxruntime.dll", archive)
+            output = root / "Windows"
+
+            with mock.patch.object(
+                Path, "replace", side_effect=OSError("rename failed")
+            ):
+                with self.assertRaisesRegex(OSError, "rename failed"):
+                    stage_from_archive(spec, archive, output)
+
+            self.assertFalse((output / "onnxruntime.dll").exists())
+            self.assertFalse((output / ".onnxruntime.dll.tmp").exists())
 
     @staticmethod
     def spec(

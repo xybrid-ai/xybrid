@@ -11,6 +11,7 @@ import tarfile
 import tempfile
 import urllib.request
 import zipfile
+from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -179,8 +180,12 @@ def stage_from_archive(
     output_dir.mkdir(parents=True, exist_ok=True)
     destination = output_dir / spec.runtime_name
     temporary = output_dir / f".{spec.runtime_name}.tmp"
-    temporary.write_bytes(runtime)
-    temporary.replace(destination)
+    try:
+        temporary.write_bytes(runtime)
+        temporary.replace(destination)
+    finally:
+        with suppress(OSError):
+            temporary.unlink()
     destination.with_name(f"{destination.name}.meta").write_text(
         unity_meta(spec), encoding="utf-8"
     )
