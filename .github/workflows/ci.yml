@@ -60,7 +60,7 @@ jobs:
           fi
           echo "relevant=$RELEVANT" >> "$GITHUB_OUTPUT"
           echo "Tooling-relevant changes: $RELEVANT"
-          if printf '%s\n' "$FILES" | grep -qE '^(bindings/unity/Runtime/Bolt/|tools/unity-bolt-compile-check/|tools/scripts/gen_unity_bolt_csharp\.py$|crates/xybrid-bolt/boltffi\.toml$|\.github/workflows/ci\.yml$)'; then
+          if printf '%s\n' "$FILES" | grep -qE '^(bindings/unity/Runtime/Bolt/|bindings/unity/Runtime/BoltSupplement/|tools/unity-bolt-compile-check/|tools/scripts/gen_unity_bolt_csharp\.py$|crates/xybrid-bolt/boltffi\.toml$|\.github/workflows/ci\.yml$)'; then
             UNITY_BOLT=true
           else
             UNITY_BOLT=false

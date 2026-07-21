@@ -9,7 +9,7 @@ using System.Text;
 
 namespace XybridBolt
 {
-    public sealed class XybridModel : IDisposable
+    public sealed partial class XybridModel : IDisposable
     {
         private IntPtr _handle;
 

@@ -32,6 +32,10 @@ What it does:
         IsExternalInit, a .NET 5 type Unity lacks -> a one-file internal
         polyfill is emitted (needed by the C# 9 record hierarchy in
         XybridError, whose positional records still synthesize `init`).
+     e. `class XybridModel` -> `partial class XybridModel`, so the hand-ported
+        inference path in bindings/unity/Runtime/BoltSupplement (which boltffi
+        0.25.3 drops entirely -- run(), XybridEnvelope/EnvelopeKind/Result) can
+        extend it. That folder is hand-written and NOT touched by this script.
      d. `NativeMemory.Alloc` (.NET 6) in FfiBuf.FromBytes -> fail closed. That
         method hands an owned buffer to Rust, which frees it with its global
         allocator in boltffi_free_buf (std::alloc::dealloc) — a free no C#
@@ -133,6 +137,18 @@ LE_FLOAT_REWRITES = (
         "BitConverter.DoubleToInt64Bits(v))",
     ),
 )
+
+# --- Transform (e): make XybridModel partial. boltffi 0.25.3's C# generator
+# drops the entire inference path -- no `run`, and no XybridEnvelope /
+# XybridEnvelopeKind / XybridResult (a data-carrying enum used as a function
+# INPUT, which the 0.25.3 C# lowering can't express; same class the Python
+# generator drops). bindings/unity/Runtime/BoltSupplement/ hand-ports that path
+# (wire codecs + a `partial class XybridModel` adding Run()), mirroring
+# bindings/python/xybrid/_bolt.py. Marking the generated class partial lets the
+# supplement extend it and reach its private _handle.
+MODEL_FILE = "XybridModel.cs"
+MODEL_PARTIAL_TARGET = "public sealed class XybridModel : IDisposable"
+MODEL_PARTIAL_REPLACEMENT = "public sealed partial class XybridModel : IDisposable"
 
 # --- Transform (c): IsExternalInit polyfill (a Unity-only supplement) ---
 POLYFILL_FILE = "IsExternalInit.cs"
@@ -249,6 +265,7 @@ def generate() -> dict[str, str]:
     record_structs = 0
     le_floats = 0
     native_memory_shimmed = False
+    model_made_partial = False
     for src in sources:
         content = src.read_text(encoding="utf-8")
         content, n = _downlevel_record_structs(content)
@@ -262,6 +279,15 @@ def generate() -> dict[str, str]:
             )
             content = content.replace(SHIM_TARGET, SHIM_REPLACEMENT, 1)
             native_memory_shimmed = True
+        if src.name == MODEL_FILE:
+            _drift(
+                MODEL_PARTIAL_TARGET in content,
+                f"expected XybridModel class declaration not found in {src.name}",
+            )
+            content = content.replace(
+                MODEL_PARTIAL_TARGET, MODEL_PARTIAL_REPLACEMENT, 1
+            )
+            model_made_partial = True
         tree[src.name] = content
         tree[src.name + ".meta"] = script_meta(f"{DEST_REL}/{src.name}")
 
@@ -279,6 +305,7 @@ def generate() -> dict[str, str]:
         f"rewrote {le_floats} float LE writers, expected {len(LE_FLOAT_REWRITES)}",
     )
     _drift(native_memory_shimmed, f"{SHIM_FILE} not found in boltffi output")
+    _drift(model_made_partial, f"{MODEL_FILE} not found in boltffi output")
     return tree
 
 
