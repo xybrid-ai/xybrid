@@ -1,0 +1,36 @@
+tools/scripts/tests/test_stage_unity_desktop_ort.py
+  s_90c8d60046bd31::t_a90d36acd450c1 1-110
+tools/scripts/stage_unity_desktop_ort.py
+  s_90c8d60046bd31::t_7e2554a15e65c5 1-221
+.github/workflows/build-unity.yml
+  s_90c8d60046bd31::t_62f049009cf3ed 194-198,207-213,263-267,274-280,517-530
+  s_9b5015926c01e8::t_74b14e3d2af0af 531
+bindings/unity/README.md
+  s_90c8d60046bd31::t_62f049009cf3ed 88-89
+.github/workflows/ci.yml
+  s_90c8d60046bd31::t_62f049009cf3ed 30-37
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "d18bf903c2eb430da303285367aad88fc3077446",
+  "prompts": {},
+  "sessions": {
+    "s_90c8d60046bd31": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f84bb-6173-7261-8ab4-a36eb1e8ac90",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    },
+    "s_9b5015926c01e8": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f84b0-93dc-7a52-81f2-ee3a7f85d982",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
