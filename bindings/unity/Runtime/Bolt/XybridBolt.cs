@@ -138,21 +138,21 @@ namespace XybridBolt
 
             // xybrid Unity shim (tools/scripts/gen_unity_bolt_csharp.py):
             // boltffi 0.25.3 emits `NativeMemory.Alloc` here, a .NET 6 API
-            // that does not exist in Unity's Mono/IL2CPP scripting profile.
-            // Rewritten to Marshal.AllocHGlobal, which is malloc-backed on
-            // the Unix targets and so matches the free Rust's global
-            // (System) allocator performs in boltffi_free_buf. No generated
-            // entry point passes an owned FfiBuf into Rust today, so this
-            // path is currently unused.
-            void* allocated = (void*)Marshal.AllocHGlobal(bytes.Length);
-            Marshal.Copy(bytes, 0, (IntPtr)allocated, bytes.Length);
-            return new FfiBuf
-            {
-                ptr = (IntPtr)allocated,
-                len = (UIntPtr)bytes.Length,
-                cap = (UIntPtr)bytes.Length,
-                align = (UIntPtr)1,
-            };
+            // absent from Unity's Mono/IL2CPP scripting profile. It also
+            // hands an owned buffer to Rust, which frees it with its global
+            // allocator in boltffi_free_buf (std::alloc::dealloc) -- a free
+            // no C# allocator matches on Windows (malloc/AllocHGlobal use
+            // the CRT heap; Rust frees on GetProcessHeap() = cross-heap free
+            // = UB). No generated entry point passes an owned FfiBuf into
+            // Rust today, so we fail closed rather than ship latent UB. When
+            // a call site is added, expose a Rust-side allocator (e.g.
+            // boltffi_alloc_buf) so alloc and free share one allocator.
+            throw new NotSupportedException(
+                "FfiBuf.FromBytes: passing an owned buffer from C# into Rust"
+                + " is not supported by the Unity binding; boltffi_free_buf"
+                + " would free it with Rust's allocator, which no C#"
+                + " allocator matches on Windows. Expose a Rust-side"
+                + " allocator before using this path.");
         }
     }
 

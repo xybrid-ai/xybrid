@@ -130,9 +130,11 @@ module_name = "xybrid_bolt"
 # produced by tools/scripts/gen_unity_bolt_csharp.py. That script applies one
 # deterministic post-process: boltffi 0.25.3 emits `NativeMemory.Alloc` in
 # FfiBuf.FromBytes (a .NET 6 API absent from Unity's Mono/IL2CPP scripting
-# profile), rewritten to Marshal.AllocHGlobal so the sources compile under
-# Unity. The default namespace (XybridBolt) and DllImport name (xybrid_bolt)
-# are already what the Unity package wants, so no further config is needed.
+# profile, in a method that would also hand Rust a buffer no C# allocator can
+# safely free on Windows). Since no entry point uses that path, the script
+# rewrites its body to throw rather than ship latent cross-allocator UB. The
+# default namespace (XybridBolt) and DllImport name (xybrid_bolt) are already
+# what the Unity package wants, so no further config is needed.
 [targets.csharp]
 output = "dist/csharp"
 enabled = true

@@ -14,12 +14,15 @@ What it does:
   1. `boltffi generate csharp` -> crates/xybrid-bolt/dist/csharp (git-ignored).
   2. Applies ONE deterministic post-process: boltffi 0.25.3 emits
      `NativeMemory.Alloc` in FfiBuf.FromBytes, a .NET 6 API that does not exist
-     in Unity's Mono/IL2CPP scripting profile. It is rewritten to
-     Marshal.AllocHGlobal, which is malloc-backed on the Unix targets and so
-     matches the free Rust's global (System) allocator performs in
-     boltffi_free_buf. (No generated entry point passes an owned FfiBuf into
-     Rust today, so this path is unused; the shim only keeps the file
-     compiling.)
+     in Unity's Mono/IL2CPP scripting profile. That method also hands an owned
+     buffer to Rust, which frees it with its global allocator in
+     boltffi_free_buf (std::alloc::dealloc) — a free no C# allocator matches on
+     every platform (on Windows, malloc/AllocHGlobal use the CRT heap while
+     Rust frees on GetProcessHeap(): a cross-heap free = UB). No generated
+     entry point passes an owned FfiBuf into Rust today, so rather than ship a
+     latent cross-allocator bug the body is rewritten to fail closed
+     (NotSupportedException). This keeps the file compiling and defers the
+     correct fix (a Rust-side allocator) to the point a call site is added.
   3. Writes deterministic Unity .meta files (GUID = sha256(asset path)[:32],
      the same scheme as stage_unity_desktop_ort.py).
   4. Syncs the result into bindings/unity/Runtime/Bolt, pruning stale files.
@@ -49,22 +52,40 @@ DEST_DIR = REPO_ROOT / "bindings" / "unity" / "Runtime" / "Bolt"
 DEST_REL = "bindings/unity/Runtime/Bolt"
 PINNED_BOLTFFI = "0.25.3"
 
-# The exact line boltffi 0.25.3 emits, and its Unity-safe replacement. Kept as
-# a literal so a boltffi output change trips the assertion below instead of
-# silently shipping a file that will not compile under Unity.
+# The exact non-empty-input block boltffi 0.25.3 emits, and its Unity-safe
+# replacement. Kept as a literal so a boltffi output change trips the assertion
+# below instead of silently shipping a file that will not compile under Unity.
+# The whole block (alloc + copy + return) is replaced so no unreachable code is
+# left behind the `throw`.
 SHIM_TARGET = (
     "            void* allocated = NativeMemory.Alloc((nuint)bytes.Length);\n"
+    "            Marshal.Copy(bytes, 0, (IntPtr)allocated, bytes.Length);\n"
+    "            return new FfiBuf\n"
+    "            {\n"
+    "                ptr = (IntPtr)allocated,\n"
+    "                len = (UIntPtr)bytes.Length,\n"
+    "                cap = (UIntPtr)bytes.Length,\n"
+    "                align = (UIntPtr)1,\n"
+    "            };\n"
 )
 SHIM_REPLACEMENT = (
     "            // xybrid Unity shim (tools/scripts/gen_unity_bolt_csharp.py):\n"
     "            // boltffi 0.25.3 emits `NativeMemory.Alloc` here, a .NET 6 API\n"
-    "            // that does not exist in Unity's Mono/IL2CPP scripting profile.\n"
-    "            // Rewritten to Marshal.AllocHGlobal, which is malloc-backed on\n"
-    "            // the Unix targets and so matches the free Rust's global\n"
-    "            // (System) allocator performs in boltffi_free_buf. No generated\n"
-    "            // entry point passes an owned FfiBuf into Rust today, so this\n"
-    "            // path is currently unused.\n"
-    "            void* allocated = (void*)Marshal.AllocHGlobal(bytes.Length);\n"
+    "            // absent from Unity's Mono/IL2CPP scripting profile. It also\n"
+    "            // hands an owned buffer to Rust, which frees it with its global\n"
+    "            // allocator in boltffi_free_buf (std::alloc::dealloc) -- a free\n"
+    "            // no C# allocator matches on Windows (malloc/AllocHGlobal use\n"
+    "            // the CRT heap; Rust frees on GetProcessHeap() = cross-heap free\n"
+    "            // = UB). No generated entry point passes an owned FfiBuf into\n"
+    "            // Rust today, so we fail closed rather than ship latent UB. When\n"
+    "            // a call site is added, expose a Rust-side allocator (e.g.\n"
+    "            // boltffi_alloc_buf) so alloc and free share one allocator.\n"
+    "            throw new NotSupportedException(\n"
+    "                \"FfiBuf.FromBytes: passing an owned buffer from C# into Rust\"\n"
+    "                + \" is not supported by the Unity binding; boltffi_free_buf\"\n"
+    "                + \" would free it with Rust's allocator, which no C#\"\n"
+    "                + \" allocator matches on Windows. Expose a Rust-side\"\n"
+    "                + \" allocator before using this path.\");\n"
 )
 SHIM_FILE = "XybridBolt.cs"
 
@@ -121,7 +142,7 @@ def generate() -> dict[str, str]:
 
     tree: dict[str, str] = {}
     for src in sources:
-        content = src.read_text()
+        content = src.read_text(encoding="utf-8")
         if src.name == SHIM_FILE:
             if SHIM_TARGET not in content:
                 sys.exit(
@@ -146,14 +167,14 @@ def do_check(tree: dict[str, str]) -> int:
         path = DEST_DIR / name
         if not path.exists():
             drift.append(f"  missing: {DEST_REL}/{name}")
-        elif path.read_text() != expected:
+        elif path.read_text(encoding="utf-8") != expected:
             drift.append(f"  stale:   {DEST_REL}/{name}")
     for name in sorted(committed_files - expected_files):
         drift.append(f"  extra:   {DEST_REL}/{name}")
 
     folder_meta_path = REPO_ROOT / f"{DEST_REL}.meta"
     if (not folder_meta_path.exists()
-            or folder_meta_path.read_text() != folder_meta(DEST_REL)):
+            or folder_meta_path.read_text(encoding="utf-8") != folder_meta(DEST_REL)):
         drift.append(f"  stale:   {DEST_REL}.meta")
 
     if drift:
@@ -173,8 +194,10 @@ def do_write(tree: dict[str, str]) -> int:
         shutil.rmtree(DEST_DIR)
     DEST_DIR.mkdir(parents=True)
     for name, content in sorted(tree.items()):
-        (DEST_DIR / name).write_text(content)
-    (REPO_ROOT / f"{DEST_REL}.meta").write_text(folder_meta(DEST_REL))
+        (DEST_DIR / name).write_text(content, encoding="utf-8")
+    (REPO_ROOT / f"{DEST_REL}.meta").write_text(
+        folder_meta(DEST_REL), encoding="utf-8"
+    )
     print(
         f"Wrote {len([n for n in tree if n.endswith('.cs')])} C# files "
         f"(+ .meta) to {DEST_REL}"
