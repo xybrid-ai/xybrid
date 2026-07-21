@@ -1,0 +1,21 @@
+.github/workflows/build-flutter.yml
+  s_bc0377b0b41b4d::t_5b0dedb3cd4cec 45
+.github/workflows/ci.yml
+  s_bc0377b0b41b4d::t_8678ef4446484c 166-168
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "f95f25f06b0401d0836b4468898801aea7f9eb37",
+  "prompts": {},
+  "sessions": {
+    "s_bc0377b0b41b4d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c39ff2b4-b884-490e-a5cc-cc07241383f6",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
