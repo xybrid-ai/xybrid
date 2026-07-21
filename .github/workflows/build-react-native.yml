@@ -249,6 +249,11 @@ jobs:
   build-android-example:
     name: Build Android example (from source)
     runs-on: ubuntu-latest
+    env:
+      # Enables the RBE fast path below. Absent on fork PRs → the config step
+      # skips → xtask's Bazel build falls back to local execution (slow but
+      # correct), same as before.
+      BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
@@ -285,15 +290,12 @@ jobs:
         with:
           node-version: '20'
 
+      # Host-only toolchain: it compiles xtask. The android cross-targets are
+      # gone — the .so builds through Bazel, which brings its own Rust.
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
         with:
           toolchain: stable
-          targets: >-
-            aarch64-linux-android,
-            armv7-linux-androideabi,
-            x86_64-linux-android,
-            i686-linux-android
 
       - name: Setup sccache
         uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
@@ -321,59 +323,40 @@ jobs:
           # is kept for adb, which some Gradle Android tasks probe for.
           packages: platform-tools
 
+      # The NDK here is for the EXAMPLE APP's gradle build (RN codegen C++),
+      # not for our .so — Bazel downloads its own pinned NDK in-build.
       - name: Install NDK
         run: sdkmanager --install "ndk;27.1.12297006"
 
       - name: Set NDK environment
         run: echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.1.12297006" >> $GITHUB_ENV
 
-      # build-android-bolt.sh adds the libc++_shared DT_NEEDED via patchelf,
-      # which isn't preinstalled on the runner.
-      - name: Install patchelf + cargo-ndk
+      # RBE fast path: with this config present, `cargo xtask build-android`
+      # adds --config=remote and the AAR graph resolves from BuildBuddy's
+      # cache (kept warm by bazel.yml on every PR) instead of compiling
+      # ~1,900 crates + llama.cpp locally on a 2-core runner (~38 min → ~3).
+      # Skipped on forks (no secret) → local Bazel fallback, as before.
+      - name: Configure BuildBuddy remote config
+        if: env.BUILDBUDDY_API_KEY != ''
         run: |
-          sudo apt-get update && sudo apt-get install -y patchelf
-          which cargo-ndk || cargo install cargo-ndk
-
-      - name: Install boltffi CLI
-        run: which boltffi || cargo install boltffi_cli --version 0.25.3 --locked
-
-      # Prebuilt-natives fast path (mirrors build-android.yml). Best-effort:
-      # pull the prebuilt llama.cpp slice per ABI from ghcr so each ABI skips
-      # the ~25-min cmake compile. ANY miss/error is a silent no-op
-      # (continue-on-error) → that ABI compiles from source, never breaks the
-      # build. build.rs keys on XYBRID_NATIVES_PREBUILT_DIR/<target>.
-      - name: Setup oras
-        uses: oras-project/setup-oras@38de303aac69abb66f3e6255b7198bff35f323e3 # v2.0.0
-      - name: Log in to ghcr (best-effort, same-repo)
-        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-        continue-on-error: true
-        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Pull prebuilt natives (all shipped ABIs, best-effort)
-        continue-on-error: true
-        env:
-          XYBRID_NATIVES_PKG: ghcr.io/xybrid-ai/llama-natives
-        run: |
-          DEST="$RUNNER_TEMP/natives"
-          got_any=0
-          for triple in aarch64-linux-android armv7-linux-androideabi x86_64-linux-android; do
-            if tools/scripts/natives-pull.sh "$triple" vision "$DEST"; then
-              echo "prebuilt natives staged for $triple (will skip cmake)"
-              got_any=1
-            else
-              echo "no prebuilt natives for $triple — compiles from source"
-            fi
-          done
-          if [ "$got_any" = 1 ]; then
-            echo "XYBRID_NATIVES_PREBUILT_DIR=$DEST" >> "$GITHUB_ENV"
-          else
-            echo "no prebuilt natives for any ABI — all compile from source (unchanged)"
-          fi
+          mkdir -p .context
+          cat > .context/buildbuddy.bazelrc <<EOF
+          common:remote --bes_results_url=https://app.buildbuddy.io/invocation/
+          common:remote --bes_backend=grpcs://remote.buildbuddy.io
+          common:remote --remote_header=x-buildbuddy-api-key=${BUILDBUDDY_API_KEY}
+          common:remote --remote_cache=grpcs://remote.buildbuddy.io
+          common:remote --remote_executor=grpcs://remote.buildbuddy.io
+          common:remote --remote_cache_compression
+          common:remote --remote_download_toplevel
+          common:remote --remote_timeout=600
+          common:remote --jobs=200
+          common:remote --extra_execution_platforms=@llvm//:rbe_linux_x86_64
+          EOF
 
       # 1. Build the bolt .so for all ABIs (staged into bindings/kotlin/libs).
+      #    Bazel end-to-end since #341 — the cargo-era helpers this job used
+      #    to install (android rust targets, patchelf, cargo-ndk, boltffi
+      #    CLI, the ghcr llama-natives pull) are dead on this path and gone.
       - name: Build Android native libs
         run: cargo xtask build-android --release
 
