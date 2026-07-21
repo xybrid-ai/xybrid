@@ -1,0 +1,34 @@
+tools/scripts/gen_unity_bolt_csharp.py
+  s_3feb3bac73008c::t_2dfb3fdf1070b9 35-38
+  s_3feb3bac73008c::t_1638273d8c50c8 268,282-290
+  s_3feb3bac73008c::t_d62953f450d025 308
+  s_3feb3bac73008c::t_ce691fe8454ccb 141-152
+bindings/unity/Runtime/Bolt/XybridModel.cs
+  s_3feb3bac73008c::t_c5a68917f3d193 12
+bindings/unity/Runtime/BoltSupplement/XybridInference.cs.meta
+  s_3feb3bac73008c::t_c5762dd6cd84e4 1-2
+tools/unity-bolt-compile-check/UnityBoltCompileCheck.csproj
+  s_3feb3bac73008c::t_b013cced33aa63 26-27
+.github/workflows/ci.yml
+  s_3feb3bac73008c::t_caae2068459743 63
+bindings/unity/Runtime/BoltSupplement/XybridInference.cs
+  s_3feb3bac73008c::t_d9ac9ce5ad7a68 1-254
+bindings/unity/Runtime/BoltSupplement.meta
+  s_3feb3bac73008c::t_c5762dd6cd84e4 1-8
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "8c99c4b0a04a2afe1d12ad2b1f8f1fea55d91024",
+  "prompts": {},
+  "sessions": {
+    "s_3feb3bac73008c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a953a9f9-867a-4e8d-8c79-863fa8a7808b",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
