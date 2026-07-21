@@ -163,9 +163,9 @@ jobs:
       - name: Test with llm-llamacpp
         run: cargo test -p xybrid-core --features "ort-download,llm-llamacpp" --lib
 
-  # Linux-only on push/PR. macOS + Windows validation runs in release.yml at
-  # release time, and check-platform-macos / build-apple.yml cover Apple-specific
-  # compilation when bindings/apple changes.
+  # Linux-only on push/PR. macOS + Windows validation runs in release-prep.yml
+  # at release time, and check-platform-macos / build-apple.yml cover
+  # Apple-specific compilation when bindings/apple changes.
   test:
     name: Test (ubuntu-latest)
     runs-on: ubuntu-latest

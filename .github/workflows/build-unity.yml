@@ -16,7 +16,6 @@ permissions: read-all
 jobs:
   #
   # Version check - verify all package versions match the git tag
-  # (reuses the same logic as release.yml)
   #
   check-version:
     name: Verify Version

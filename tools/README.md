@@ -220,7 +220,6 @@ The xtask commands are used by GitHub Actions workflows:
 | `build-apple.yml` | `cargo xtask build-xcframework --release` | macos-14 |
 | `build-android.yml` | `cargo xtask build-android --release` | ubuntu-latest |
 | `build-flutter.yml` | `cargo xtask build-flutter --platform <plat>` | matrix (linux, macos, windows) |
-| `release.yml` | All build commands + manual packaging | matrix |
 
 ## Quick Start Examples
 
