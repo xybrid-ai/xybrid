@@ -1,0 +1,21 @@
+tools/scripts/stage_unity_desktop_ort.py
+  s_90c8d60046bd31::t_61bfe50de61103 111,132
+tools/scripts/tests/test_stage_unity_desktop_ort.py
+  s_90c8d60046bd31::t_8d41776387feed 39,59
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "fbfa256e91b20c75c31a61424779cc35ead7dd34",
+  "prompts": {},
+  "sessions": {
+    "s_90c8d60046bd31": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f84bb-6173-7261-8ab4-a36eb1e8ac90",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
