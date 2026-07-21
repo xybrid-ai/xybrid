@@ -1,0 +1,28 @@
+tools/scripts/gen_unity_bolt_csharp.py
+  s_3feb3bac73008c::t_193961d717127d 17-25
+  s_3feb3bac73008c::t_f9fb38ed05a05f 145
+  s_3feb3bac73008c::t_7a32571f1b3a74 55-59,62-69,74-88
+  s_3feb3bac73008c::t_a815c4175c0ec6 170
+  s_3feb3bac73008c::t_2228d48f099863 177
+  s_3feb3bac73008c::t_ed24a1d51416b1 197-200
+bindings/unity/Runtime/Bolt/XybridBolt.cs
+  s_3feb3bac73008c::t_598395bdd276c0 141-155
+crates/xybrid-bolt/boltffi.toml
+  s_3feb3bac73008c::t_47c66507dda2f2 133-137
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "f2a907268b004ece41fe8e8f934fda008df9a164",
+  "prompts": {},
+  "sessions": {
+    "s_3feb3bac73008c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a953a9f9-867a-4e8d-8c79-863fa8a7808b",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
