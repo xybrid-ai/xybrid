@@ -27,8 +27,43 @@ env:
   RUST_BACKTRACE: 1
 
 jobs:
+  tooling-changes:
+    name: Detect tooling-relevant changes
+    runs-on: ubuntu-latest
+    outputs:
+      relevant: ${{ steps.filter.outputs.relevant }}
+    steps:
+      - name: Check changed paths
+        id: filter
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          BEFORE_SHA: ${{ github.event.before }}
+          CURRENT_SHA: ${{ github.sha }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            FILES=$(gh api --paginate \
+              "repos/$REPOSITORY/pulls/$PR_NUMBER/files" \
+              --jq '.[].filename')
+          else
+            FILES=$(gh api \
+              "repos/$REPOSITORY/compare/$BEFORE_SHA...$CURRENT_SHA" \
+              --jq '.files[].filename')
+          fi
+          if printf '%s\n' "$FILES" | grep -qE '^(tools/scripts/|\.github/workflows/ci\.yml$)'; then
+            RELEVANT=true
+          else
+            RELEVANT=false
+          fi
+          echo "relevant=$RELEVANT" >> "$GITHUB_OUTPUT"
+          echo "Tooling-relevant changes: $RELEVANT"
+
   tooling-tests:
     name: Tooling tests (${{ matrix.platform }})
+    needs: tooling-changes
+    if: needs.tooling-changes.outputs.relevant == 'true'
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -302,6 +337,24 @@ jobs:
   ci-success:
     name: CI Success
     runs-on: ubuntu-latest
-    needs: [fmt, clippy, check-no-default-features, check-platform-macos, check-platform-desktop, check-vision-platforms, clippy-llm, test-llm, test, api-contract, web]
+    # Inspect dependency results even when the tooling path gate skips its matrix.
+    if: ${{ !cancelled() }}
+    needs: [tooling-changes, tooling-tests, fmt, clippy, check-no-default-features, check-platform-macos, check-platform-desktop, check-vision-platforms, clippy-llm, test-llm, test, api-contract, web]
     steps:
-      - run: echo "All CI checks passed!"
+      - name: Verify required job results
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: |
+          jq --exit-status '
+            . as $needs
+            |
+            to_entries
+            | all(
+                .value.result == "success"
+                or (
+                  .key == "tooling-tests"
+                  and .value.result == "skipped"
+                  and $needs["tooling-changes"].outputs.relevant == "false"
+                )
+              )
+          ' <<<"$NEEDS_JSON"
