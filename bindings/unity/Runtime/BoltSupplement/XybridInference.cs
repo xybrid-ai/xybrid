@@ -248,6 +248,12 @@ namespace XybridBolt
             finally
             {
                 NativeMethods.FreeBuf(buf);
+                // Run blocks for the whole inference. Once _handle is read into
+                // the native call above, the JIT may treat `this` as dead; if it
+                // is otherwise unreferenced, a GC here could run ~XybridModel and
+                // free the handle while Rust is still using it (use-after-free).
+                // Keep the wrapper alive across the call.
+                GC.KeepAlive(this);
             }
         }
     }
