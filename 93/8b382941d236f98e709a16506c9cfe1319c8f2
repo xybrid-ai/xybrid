@@ -1,0 +1,31 @@
+tools/scripts/stage_unity_desktop_ort.py
+  s_90c8d60046bd31::t_68645a1eee4d83 14
+  s_90c8d60046bd31::t_1a02ccaa97bcc7 183-188
+tools/scripts/tests/test_stage_unity_desktop_ort.py
+  s_90c8d60046bd31::t_7a7fe691e8cf19 9,97-117
+  s_9b5015926c01e8::t_e368bd9db78812 118
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "938b382941d236f98e709a16506c9cfe1319c8f2",
+  "prompts": {},
+  "sessions": {
+    "s_90c8d60046bd31": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f84bb-6173-7261-8ab4-a36eb1e8ac90",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    },
+    "s_9b5015926c01e8": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f84b0-93dc-7a52-81f2-ee3a7f85d982",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
