@@ -108,6 +108,7 @@ def unity_meta(spec: RuntimeSpec) -> str:
         target_data = """\
         Exclude Linux64: 1
         Exclude OSXUniversal: 1
+        Exclude WebGL: 1
         Exclude Win: 0
         Exclude Win64: 0
     Editor:
@@ -128,6 +129,7 @@ def unity_meta(spec: RuntimeSpec) -> str:
         target_data = """\
         Exclude Linux64: 0
         Exclude OSXUniversal: 1
+        Exclude WebGL: 1
         Exclude Win: 1
         Exclude Win64: 1
     Editor:

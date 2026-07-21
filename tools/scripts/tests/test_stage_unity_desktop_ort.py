@@ -36,6 +36,7 @@ class StageUnityDesktopOrtTests(unittest.TestCase):
             meta = (output / "libonnxruntime.so.meta").read_text()
             self.assertIn("Linux64:", meta)
             self.assertIn("CPU: x86_64", meta)
+            self.assertIn("Exclude WebGL: 1", meta)
 
     def test_windows_archive_stages_runtime_and_windows_metadata(self):
         payload = b"windows-onnxruntime"
@@ -55,6 +56,7 @@ class StageUnityDesktopOrtTests(unittest.TestCase):
             meta = (output / "onnxruntime.dll.meta").read_text()
             self.assertIn("OS: Windows", meta)
             self.assertIn("Win64:", meta)
+            self.assertIn("Exclude WebGL: 1", meta)
 
     def test_hash_mismatch_fails_without_staging_a_runtime(self):
         with tempfile.TemporaryDirectory() as temp:
