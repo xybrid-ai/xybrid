@@ -1,0 +1,19 @@
+.github/workflows/ci.yml
+  s_90c8d60046bd31::t_21dad058b9cd46 31-44,48,50-53
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "bcf6dd72f07a6994eb428f7e2a4df985f16c8b47",
+  "prompts": {},
+  "sessions": {
+    "s_90c8d60046bd31": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f84bb-6173-7261-8ab4-a36eb1e8ac90",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
