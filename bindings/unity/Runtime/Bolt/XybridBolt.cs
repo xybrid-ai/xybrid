@@ -521,8 +521,8 @@ namespace XybridBolt
         internal void WriteU32(uint v) { EnsureCapacity(4); BinaryPrimitives.WriteUInt32LittleEndian(_buffer.AsSpan(_pos), v); _pos += 4; }
         internal void WriteI64(long v) { EnsureCapacity(8); BinaryPrimitives.WriteInt64LittleEndian(_buffer.AsSpan(_pos), v); _pos += 8; }
         internal void WriteU64(ulong v) { EnsureCapacity(8); BinaryPrimitives.WriteUInt64LittleEndian(_buffer.AsSpan(_pos), v); _pos += 8; }
-        internal void WriteF32(float v) { EnsureCapacity(4); BinaryPrimitives.WriteSingleLittleEndian(_buffer.AsSpan(_pos), v); _pos += 4; }
-        internal void WriteF64(double v) { EnsureCapacity(8); BinaryPrimitives.WriteDoubleLittleEndian(_buffer.AsSpan(_pos), v); _pos += 8; }
+        internal void WriteF32(float v) { EnsureCapacity(4); BinaryPrimitives.WriteInt32LittleEndian(_buffer.AsSpan(_pos), BitConverter.SingleToInt32Bits(v)); _pos += 4; }
+        internal void WriteF64(double v) { EnsureCapacity(8); BinaryPrimitives.WriteInt64LittleEndian(_buffer.AsSpan(_pos), BitConverter.DoubleToInt64Bits(v)); _pos += 8; }
 
         internal void WriteNInt(nint v) => WriteI64((long)v);
         internal void WriteNUInt(nuint v) => WriteU64((ulong)v);

@@ -14,17 +14,18 @@ namespace XybridBolt
     /// [`json_schema_to_gbnf`], or pass raw GBNF. Appended last: `#[data]`
     /// PODs serialize by field order across the FFI boundary.
     /// </param>
-    public readonly record struct XybridGenerationConfig(
-        uint? MaxTokens,
-        float? Temperature,
-        float? TopP,
-        float? MinP,
-        uint? TopK,
-        float? RepetitionPenalty,
-        string[] StopSequences,
-        string? Grammar
-    )
+    public readonly struct XybridGenerationConfig
     {
+        public XybridGenerationConfig(uint? MaxTokens, float? Temperature, float? TopP, float? MinP, uint? TopK, float? RepetitionPenalty, string[] StopSequences, string? Grammar) { this.MaxTokens = MaxTokens; this.Temperature = Temperature; this.TopP = TopP; this.MinP = MinP; this.TopK = TopK; this.RepetitionPenalty = RepetitionPenalty; this.StopSequences = StopSequences; this.Grammar = Grammar; }
+        public uint? MaxTokens { get; }
+        public float? Temperature { get; }
+        public float? TopP { get; }
+        public float? MinP { get; }
+        public uint? TopK { get; }
+        public float? RepetitionPenalty { get; }
+        public string[] StopSequences { get; }
+        public string? Grammar { get; }
+
         internal static XybridGenerationConfig Decode(WireReader reader) =>
             new XybridGenerationConfig(
                 reader.ReadU8() == 0 ? (uint?)null : reader.ReadU32(),

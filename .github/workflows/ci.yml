@@ -32,6 +32,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       relevant: ${{ steps.filter.outputs.relevant }}
+      unity_bolt: ${{ steps.filter.outputs.unity_bolt }}
     steps:
       - name: Check changed paths
         id: filter
@@ -59,6 +60,13 @@ jobs:
           fi
           echo "relevant=$RELEVANT" >> "$GITHUB_OUTPUT"
           echo "Tooling-relevant changes: $RELEVANT"
+          if printf '%s\n' "$FILES" | grep -qE '^(bindings/unity/Runtime/Bolt/|tools/unity-bolt-compile-check/|tools/scripts/gen_unity_bolt_csharp\.py$|crates/xybrid-bolt/boltffi\.toml$|\.github/workflows/ci\.yml$)'; then
+            UNITY_BOLT=true
+          else
+            UNITY_BOLT=false
+          fi
+          echo "unity_bolt=$UNITY_BOLT" >> "$GITHUB_OUTPUT"
+          echo "Unity bolt binding changes: $UNITY_BOLT"
 
   tooling-tests:
     name: Tooling tests (${{ matrix.platform }})
@@ -86,6 +94,23 @@ jobs:
         run: |
           ${{ matrix.python }} tools/scripts/stage_unity_desktop_ort.py ${{ matrix.platform }} "${{ runner.temp }}/unity-ort"
           ${{ matrix.python }} -c "import ctypes, sys; ctypes.CDLL(sys.argv[1])" "${{ runner.temp }}/unity-ort/${{ matrix.runtime }}"
+
+  # Compile the committed BoltFFI C# bindings against Unity's frozen scripting
+  # profile (netstandard2.1 + C# 9). Catches a boltffi output change or a missed
+  # down-level in gen_unity_bolt_csharp.py at PR time instead of in the Editor.
+  unity-bolt-compile:
+    name: Compile Unity bolt bindings (netstandard2.1)
+    needs: tooling-changes
+    if: needs.tooling-changes.outputs.unity_bolt == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Compile against Unity's C# 9 / netstandard2.1 profile
+        # ubuntu-latest ships the .NET SDK preinstalled; netstandard2.1 builds
+        # with any 6+ SDK. The csproj pins LangVersion 9 to match Unity.
+        run: |
+          dotnet --version
+          dotnet build tools/unity-bolt-compile-check/UnityBoltCompileCheck.csproj -c Release
 
   fmt:
     name: Format
@@ -339,7 +364,7 @@ jobs:
     runs-on: ubuntu-latest
     # Inspect dependency results even when the tooling path gate skips its matrix.
     if: ${{ !cancelled() }}
-    needs: [tooling-changes, tooling-tests, fmt, clippy, check-no-default-features, check-platform-macos, check-platform-desktop, check-vision-platforms, clippy-llm, test-llm, test, api-contract, web]
+    needs: [tooling-changes, tooling-tests, unity-bolt-compile, fmt, clippy, check-no-default-features, check-platform-macos, check-platform-desktop, check-vision-platforms, clippy-llm, test-llm, test, api-contract, web]
     steps:
       - name: Verify required job results
         env:
@@ -355,6 +380,11 @@ jobs:
                   .key == "tooling-tests"
                   and .value.result == "skipped"
                   and $needs["tooling-changes"].outputs.relevant == "false"
+                )
+                or (
+                  .key == "unity-bolt-compile"
+                  and .value.result == "skipped"
+                  and $needs["tooling-changes"].outputs.unity_bolt == "false"
                 )
               )
           ' <<<"$NEEDS_JSON"

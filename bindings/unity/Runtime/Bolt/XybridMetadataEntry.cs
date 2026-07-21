@@ -14,11 +14,12 @@ namespace XybridBolt
     /// `Vec&lt;XybridMetadataEntry&gt;`. The conversion back to `HashMap` happens
     /// at the facade boundary inside [`XybridEnvelope::into`].
     /// </summary>
-    public readonly record struct XybridMetadataEntry(
-        string Key,
-        string Value
-    )
+    public readonly struct XybridMetadataEntry
     {
+        public XybridMetadataEntry(string Key, string Value) { this.Key = Key; this.Value = Value; }
+        public string Key { get; }
+        public string Value { get; }
+
         internal static XybridMetadataEntry Decode(WireReader reader) =>
             new XybridMetadataEntry(
                 reader.ReadString(),

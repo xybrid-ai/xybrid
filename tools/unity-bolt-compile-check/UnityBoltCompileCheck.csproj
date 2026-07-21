@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Compiles the committed BoltFFI C# bindings (bindings/unity/Runtime/Bolt)
+    against Unity's frozen scripting profile: netstandard2.1 + C# 9. A boltffi
+    output change or a missed down-level in gen_unity_bolt_csharp.py then fails a
+    PR here instead of only surfacing in the Unity Editor.
+
+    This is NOT a Unity project and ships nothing. It lives under tools/ so Unity
+    never imports it. It is a lower bound on Unity compatibility, not a substitute
+    for the in-editor Mono/IL2CPP compile (AOT/reflection issues can sit on top).
+
+    See tools/scripts/gen_unity_bolt_csharp.py.
+  -->
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <!-- Unity has been capped at C# 9 from 2021.2 through Unity 6. -->
+    <LangVersion>9</LangVersion>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="../../bindings/unity/Runtime/Bolt/*.cs" />
+    <!-- Unity bundles System.Runtime.CompilerServices.Unsafe; supply it here so
+         the standalone compile resolves Unsafe.SizeOf the same way Unity does. -->
+    <PackageReference Include="System.Runtime.CompilerServices.Unsafe" Version="6.0.0" />
+  </ItemGroup>
+
+</Project>

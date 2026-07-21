@@ -8,11 +8,12 @@ using System.Text;
 
 namespace XybridBolt
 {
-    public readonly record struct XybridStageLatency(
-        string StageId,
-        uint LatencyMs
-    )
+    public readonly struct XybridStageLatency
     {
+        public XybridStageLatency(string StageId, uint LatencyMs) { this.StageId = StageId; this.LatencyMs = LatencyMs; }
+        public string StageId { get; }
+        public uint LatencyMs { get; }
+
         internal static XybridStageLatency Decode(WireReader reader) =>
             new XybridStageLatency(
                 reader.ReadString(),

@@ -7,16 +7,17 @@ using System;
 
 namespace XybridBolt
 {
-    public readonly record struct XybridInferenceMetrics(
-        uint TotalMs,
-        uint? TtftMs,
-        float? TokensPerSecond,
-        float? PrefillTps,
-        float? DecodeTps,
-        uint? TokensOut,
-        XybridStageLatency[] StageLatenciesMs
-    )
+    public readonly struct XybridInferenceMetrics
     {
+        public XybridInferenceMetrics(uint TotalMs, uint? TtftMs, float? TokensPerSecond, float? PrefillTps, float? DecodeTps, uint? TokensOut, XybridStageLatency[] StageLatenciesMs) { this.TotalMs = TotalMs; this.TtftMs = TtftMs; this.TokensPerSecond = TokensPerSecond; this.PrefillTps = PrefillTps; this.DecodeTps = DecodeTps; this.TokensOut = TokensOut; this.StageLatenciesMs = StageLatenciesMs; }
+        public uint TotalMs { get; }
+        public uint? TtftMs { get; }
+        public float? TokensPerSecond { get; }
+        public float? PrefillTps { get; }
+        public float? DecodeTps { get; }
+        public uint? TokensOut { get; }
+        public XybridStageLatency[] StageLatenciesMs { get; }
+
         internal static XybridInferenceMetrics Decode(WireReader reader) =>
             new XybridInferenceMetrics(
                 reader.ReadU32(),

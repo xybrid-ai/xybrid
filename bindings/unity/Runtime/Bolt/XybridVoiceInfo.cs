@@ -8,14 +8,15 @@ using System.Text;
 
 namespace XybridBolt
 {
-    public readonly record struct XybridVoiceInfo(
-        string Id,
-        string Name,
-        string? Gender,
-        string? Language,
-        string? Style
-    )
+    public readonly struct XybridVoiceInfo
     {
+        public XybridVoiceInfo(string Id, string Name, string? Gender, string? Language, string? Style) { this.Id = Id; this.Name = Name; this.Gender = Gender; this.Language = Language; this.Style = Style; }
+        public string Id { get; }
+        public string Name { get; }
+        public string? Gender { get; }
+        public string? Language { get; }
+        public string? Style { get; }
+
         internal static XybridVoiceInfo Decode(WireReader reader) =>
             new XybridVoiceInfo(
                 reader.ReadString(),

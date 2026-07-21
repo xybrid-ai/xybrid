@@ -3,26 +3,43 @@
 
 The Unity SDK is migrating off the pre-bolt C ABI (crates/xybrid-ffi +
 csbindgen) onto xybrid-bolt, the same FFI every other binding already uses
-(chapter A of the Bazel/bolt migration; this is step A0 — land the generated
-sources). Consumers of those bindings — like the committed Swift in
-bindings/apple/Sources/Xybrid/xybrid_bolt.swift — check the generated wire
-layer into the repo alongside a hand-written wrapper. This script is the C#
-equivalent of the xtask copy step that stages the Swift.
+(chapter A of the Bazel/bolt migration). Consumers of those bindings — like the
+committed Swift in bindings/apple/Sources/Xybrid/xybrid_bolt.swift — check the
+generated wire layer into the repo alongside a hand-written wrapper. This script
+is the C# equivalent of the xtask copy step that stages the Swift.
+
+boltffi 0.25.3's C# generator targets modern C#/.NET (C# 10, .NET 5+ BCL), but
+Unity's scripting profile is frozen at C# 9 + netstandard2.1. So this script
+down-levels the generated output to the largest subset Unity accepts. Each
+transform below is guarded by a count assertion: if boltffi's output shape
+changes, the script fails loudly rather than silently shipping code that will
+not compile under Unity. The netstandard2.1 compile gate
+(tools/unity-bolt-compile-check) verifies the result on every relevant PR.
 
 What it does:
 
   1. `boltffi generate csharp` -> crates/xybrid-bolt/dist/csharp (git-ignored).
-  2. Applies ONE deterministic post-process: boltffi 0.25.3 emits
-     `NativeMemory.Alloc` in FfiBuf.FromBytes, a .NET 6 API that does not exist
-     in Unity's Mono/IL2CPP scripting profile. That method also hands an owned
-     buffer to Rust, which frees it with its global allocator in
-     boltffi_free_buf (std::alloc::dealloc) — a free no C# allocator matches on
-     every platform (on Windows, malloc/AllocHGlobal use the CRT heap while
-     Rust frees on GetProcessHeap(): a cross-heap free = UB). No generated
-     entry point passes an owned FfiBuf into Rust today, so rather than ship a
-     latent cross-allocator bug the body is rewritten to fail closed
-     (NotSupportedException). This keeps the file compiling and defers the
-     correct fix (a Rust-side allocator) to the point a call site is added.
+  2. Down-levels the four Unity incompatibilities boltffi 0.25.3 emits:
+     a. `readonly record struct` (C# 10) -> plain `readonly struct` with an
+        explicit ctor + get-only auto-properties. The generated structs are
+        positional and use no record features (with/==/Deconstruct), so this is
+        semantics-preserving.
+     b. `BinaryPrimitives.WriteSingle/DoubleLittleEndian` (.NET 5 methods, absent
+        from netstandard2.1) -> the integer variants over
+        BitConverter.SingleToInt32Bits / DoubleToInt64Bits (both in
+        netstandard2.1), a byte-identical little-endian encode.
+     c. `init` accessors lower against System.Runtime.CompilerServices.
+        IsExternalInit, a .NET 5 type Unity lacks -> a one-file internal
+        polyfill is emitted (needed by the C# 9 record hierarchy in
+        XybridError, whose positional records still synthesize `init`).
+     d. `NativeMemory.Alloc` (.NET 6) in FfiBuf.FromBytes -> fail closed. That
+        method hands an owned buffer to Rust, which frees it with its global
+        allocator in boltffi_free_buf (std::alloc::dealloc) — a free no C#
+        allocator matches on Windows (malloc/AllocHGlobal use the CRT heap;
+        Rust frees on GetProcessHeap() = cross-heap free = UB). No generated
+        entry point passes an owned FfiBuf into Rust today, so the body throws
+        NotSupportedException; the correct fix if a call site is ever added is
+        a Rust-side allocator (e.g. boltffi_alloc_buf).
   3. Writes deterministic Unity .meta files (GUID = sha256(asset path)[:32],
      the same scheme as stage_unity_desktop_ort.py).
   4. Syncs the result into bindings/unity/Runtime/Bolt, pruning stale files.
@@ -39,6 +56,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import re
 import shutil
 import subprocess
 import sys
@@ -89,6 +107,84 @@ SHIM_REPLACEMENT = (
 )
 SHIM_FILE = "XybridBolt.cs"
 
+# --- Transform (a): readonly record struct (C# 10) -> plain readonly struct ---
+# Matches a positional `public readonly record struct Name( params ) {`. The
+# params never contain parentheses (simple `Type Name`, incl. `T?` / `T[]`), so
+# `[^)]*` is a safe, greedy-free body match up to the closing paren.
+RECORD_STRUCT_RE = re.compile(
+    r"public readonly record struct (?P<name>\w+)\((?P<params>[^)]*)\)\s*\{",
+    re.DOTALL,
+)
+EXPECTED_RECORD_STRUCTS = 6
+
+# --- Transform (b): .NET 5 float LE writers -> netstandard2.1-safe equivalents.
+# BinaryPrimitives has the integer LE writers in netstandard2.1 but not the
+# float ones; BitConverter.SingleToInt32Bits / DoubleToInt64Bits are both in
+# netstandard2.1, so bit-reinterpret then write the integer. Byte-identical.
+LE_FLOAT_REWRITES = (
+    (
+        "BinaryPrimitives.WriteSingleLittleEndian(_buffer.AsSpan(_pos), v)",
+        "BinaryPrimitives.WriteInt32LittleEndian(_buffer.AsSpan(_pos), "
+        "BitConverter.SingleToInt32Bits(v))",
+    ),
+    (
+        "BinaryPrimitives.WriteDoubleLittleEndian(_buffer.AsSpan(_pos), v)",
+        "BinaryPrimitives.WriteInt64LittleEndian(_buffer.AsSpan(_pos), "
+        "BitConverter.DoubleToInt64Bits(v))",
+    ),
+)
+
+# --- Transform (c): IsExternalInit polyfill (a Unity-only supplement) ---
+POLYFILL_FILE = "IsExternalInit.cs"
+POLYFILL_CONTENT = (
+    "// Unity C# 9 polyfill (written by tools/scripts/gen_unity_bolt_csharp.py;\n"
+    "// not a BoltFFI output). The generated positional records use `init`\n"
+    "// accessors, which the compiler lowers against\n"
+    "// System.Runtime.CompilerServices.IsExternalInit -- a type .NET 5+ ships\n"
+    "// but Unity's netstandard2.1 scripting profile does not. This empty shim\n"
+    "// satisfies the reference so the records compile under Unity.\n"
+    "namespace System.Runtime.CompilerServices\n"
+    "{\n"
+    "    internal static class IsExternalInit { }\n"
+    "}\n"
+)
+
+
+def _downlevel_record_structs(content: str) -> tuple[str, int]:
+    """Rewrite positional `readonly record struct`s to plain readonly structs."""
+    count = 0
+
+    def repl(match: "re.Match[str]") -> str:
+        nonlocal count
+        count += 1
+        name = match.group("name")
+        fields = [
+            p.strip().rsplit(" ", 1)
+            for p in match.group("params").split(",")
+            if p.strip()
+        ]
+        ctor_params = ", ".join(f"{ty} {pn}" for ty, pn in fields)
+        assigns = " ".join(f"this.{pn} = {pn};" for _, pn in fields)
+        props = "\n".join(f"        public {ty} {pn} {{ get; }}" for ty, pn in fields)
+        return (
+            f"public readonly struct {name}\n"
+            "    {\n"
+            f"        public {name}({ctor_params}) {{ {assigns} }}\n"
+            f"{props}\n"
+        )
+
+    return RECORD_STRUCT_RE.sub(repl, content), count
+
+
+def _rewrite_le_floats(content: str) -> tuple[str, int]:
+    """Rewrite the two .NET 5 float little-endian writers to netstandard2.1."""
+    count = 0
+    for old, new in LE_FLOAT_REWRITES:
+        if old in content:
+            content = content.replace(old, new, 1)
+            count += 1
+    return content, count
+
 
 def unity_guid(asset_rel_path: str) -> str:
     """Deterministic 32-hex Unity GUID keyed on the repo-relative asset path."""
@@ -132,8 +228,17 @@ def check_boltffi() -> None:
         )
 
 
+def _drift(condition: bool, message: str) -> None:
+    """Fail loudly when a transform's expectation no longer matches the output."""
+    if not condition:
+        sys.exit(
+            f"error: {message}\nboltffi output changed — review the transforms in "
+            "tools/scripts/gen_unity_bolt_csharp.py before regenerating."
+        )
+
+
 def generate() -> dict[str, str]:
-    """Run the generator and return {relative filename: shimmed contents}."""
+    """Run the generator, down-level for Unity, and return {filename: contents}."""
     subprocess.run(["boltffi", "generate", "csharp"], cwd=BOLT_DIR, check=True)
 
     sources = sorted(RAW_DIR.glob("*.cs"))
@@ -141,18 +246,39 @@ def generate() -> dict[str, str]:
         sys.exit(f"error: boltffi produced no .cs files in {RAW_DIR}")
 
     tree: dict[str, str] = {}
+    record_structs = 0
+    le_floats = 0
+    native_memory_shimmed = False
     for src in sources:
         content = src.read_text(encoding="utf-8")
+        content, n = _downlevel_record_structs(content)
+        record_structs += n
+        content, n = _rewrite_le_floats(content)
+        le_floats += n
         if src.name == SHIM_FILE:
-            if SHIM_TARGET not in content:
-                sys.exit(
-                    f"error: expected `NativeMemory.Alloc` line not found in "
-                    f"{src.name}. boltffi output changed — update SHIM_TARGET in "
-                    "tools/scripts/gen_unity_bolt_csharp.py."
-                )
+            _drift(
+                SHIM_TARGET in content,
+                f"expected `NativeMemory.Alloc` block not found in {src.name}",
+            )
             content = content.replace(SHIM_TARGET, SHIM_REPLACEMENT, 1)
+            native_memory_shimmed = True
         tree[src.name] = content
         tree[src.name + ".meta"] = script_meta(f"{DEST_REL}/{src.name}")
+
+    # Transform (c): emit the IsExternalInit polyfill next to the sources.
+    tree[POLYFILL_FILE] = POLYFILL_CONTENT
+    tree[POLYFILL_FILE + ".meta"] = script_meta(f"{DEST_REL}/{POLYFILL_FILE}")
+
+    _drift(
+        record_structs == EXPECTED_RECORD_STRUCTS,
+        f"down-leveled {record_structs} record structs, expected "
+        f"{EXPECTED_RECORD_STRUCTS}",
+    )
+    _drift(
+        le_floats == len(LE_FLOAT_REWRITES),
+        f"rewrote {le_floats} float LE writers, expected {len(LE_FLOAT_REWRITES)}",
+    )
+    _drift(native_memory_shimmed, f"{SHIM_FILE} not found in boltffi output")
     return tree
 
 

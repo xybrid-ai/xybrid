@@ -8,14 +8,15 @@ using System.Text;
 
 namespace XybridBolt
 {
-    public readonly record struct XybridRunOptions(
-        XybridGenerationConfig? GenerationConfig,
-        XybridAbortSignal[] AbortOn,
-        bool FallbackToCloud,
-        uint MaxGraceTokens,
-        string? CorrelationId
-    )
+    public readonly struct XybridRunOptions
     {
+        public XybridRunOptions(XybridGenerationConfig? GenerationConfig, XybridAbortSignal[] AbortOn, bool FallbackToCloud, uint MaxGraceTokens, string? CorrelationId) { this.GenerationConfig = GenerationConfig; this.AbortOn = AbortOn; this.FallbackToCloud = FallbackToCloud; this.MaxGraceTokens = MaxGraceTokens; this.CorrelationId = CorrelationId; }
+        public XybridGenerationConfig? GenerationConfig { get; }
+        public XybridAbortSignal[] AbortOn { get; }
+        public bool FallbackToCloud { get; }
+        public uint MaxGraceTokens { get; }
+        public string? CorrelationId { get; }
+
         internal static XybridRunOptions Decode(WireReader reader) =>
             new XybridRunOptions(
                 reader.ReadU8() == 0 ? (XybridGenerationConfig?)null : XybridGenerationConfig.Decode(reader),
