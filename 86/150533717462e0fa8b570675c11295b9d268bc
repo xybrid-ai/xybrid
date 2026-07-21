@@ -1,0 +1,23 @@
+bindings/react-native/react-native-xybrid.podspec
+  s_bc0377b0b41b4d::t_c563181fea03f1 27-30
+xtask/src/main.rs
+  s_bc0377b0b41b4d::t_76969b54d10a9a 1206-1208,1210-1235,1239-1243,1245-1246,1251-1265,1269-1271,1282
+.github/workflows/build-react-native.yml
+  s_bc0377b0b41b4d::t_8e9ef296e177f3 53-57,61-64,67-68,70-71,85-91,93-98,100-109
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "86150533717462e0fa8b570675c11295b9d268bc",
+  "prompts": {},
+  "sessions": {
+    "s_bc0377b0b41b4d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c39ff2b4-b884-490e-a5cc-cc07241383f6",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
