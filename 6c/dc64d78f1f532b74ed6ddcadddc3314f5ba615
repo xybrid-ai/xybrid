@@ -1,0 +1,74 @@
+bindings/unity/Runtime/Bolt/XybridStreamEventKind.cs
+  s_a05c7d0f6e56a2::t_3c0825b372d205 1-12,14-36
+  s_a05c7d0f6e56a2::t_3ebcff94c0bea8 13
+bindings/unity/Runtime/Bolt/XybridModel.cs
+  s_a05c7d0f6e56a2::t_c80aa30cb05b38 194-197
+  s_a05c7d0f6e56a2::t_3ebcff94c0bea8 112-120,181,188-189
+  s_a05c7d0f6e56a2::t_3c0825b372d205 178-180,182-187,190-193,198-209
+tools/scripts/gen_unity_bolt_csharp.py
+  s_a05c7d0f6e56a2::t_68d68d2b955f63 35,40,43
+  s_a05c7d0f6e56a2::t_16f05ca6bff73b 126
+  s_a05c7d0f6e56a2::t_2e108f637a7d04 159,166-167
+  s_a05c7d0f6e56a2::t_5d8b98fb645afe 145,157
+  s_a05c7d0f6e56a2::t_230ed03b6ac4bc 37-38,150
+  s_a05c7d0f6e56a2::t_97fc53ba4c735d 41-42,158,160-165,168-183,300,323-330,349
+crates/xybrid-bolt/src/lib.rs
+  s_a05c7d0f6e56a2::t_1afade75fab26a 884,956-971
+  s_a05c7d0f6e56a2::t_cd7357ba022360 469-505,510-523,525-527,531-534,790-793,795-802
+  s_a05c7d0f6e56a2::t_a14e69345def4e 506-509,528-530,737-741,826-829,843,848-850
+  s_a05c7d0f6e56a2::t_fcde4a8eb8d777 788-789
+  s_a05c7d0f6e56a2::t_b371779491d198 820,836,839,845
+  s_a05c7d0f6e56a2::t_16f05ca6bff73b 35,651-652
+  s_a05c7d0f6e56a2::t_9101c05cefeec6 524,666,670-674,809-815,821,830-835,837-838,840-842,844,846-847,851,853-875
+  s_a05c7d0f6e56a2::t_e3b24d5979a755 667-669,675-682,692,699,706,714,786-787,794,803-808,816-819,822-825,852,876-883
+  s_a05c7d0f6e56a2::t_d1093e849e8180 885
+bindings/unity/Runtime/Bolt/XybridBolt.cs
+  s_a05c7d0f6e56a2::t_3ebcff94c0bea8 719-721
+  s_a05c7d0f6e56a2::t_3c0825b372d205 734-737
+bindings/unity/Runtime/Bolt/XybridStreamEvent.cs.meta
+  s_a05c7d0f6e56a2::t_3c0825b372d205 1-2
+bindings/unity/Runtime/Bolt/XybridStreamEventKind.cs.meta
+  s_a05c7d0f6e56a2::t_3c0825b372d205 1-2
+bindings/unity/Runtime/Bolt/XybridStreamToken.cs
+  s_a05c7d0f6e56a2::t_3c0825b372d205 1-45
+bindings/unity/Runtime/BoltSupplement/XybridInference.cs
+  s_a05c7d0f6e56a2::t_62eb5be5bf8103 4-5,16-18,193,202-212,229-230,232,255-379
+bindings/unity/Runtime/Bolt/XybridStreamToken.cs.meta
+  s_a05c7d0f6e56a2::t_3c0825b372d205 1-2
+tools/unity-bolt-compile-check/UnityBoltCompileCheck.csproj
+  s_a05c7d0f6e56a2::t_62eb5be5bf8103 26
+bindings/unity/Runtime/Bolt/XybridStreamEvent.cs
+  s_a05c7d0f6e56a2::t_3ebcff94c0bea8 15-18,22,29,34
+  s_a05c7d0f6e56a2::t_3c0825b372d205 1-14,19-21,23-28,30-33,35-42
+crates/xybrid-ffi-facade/src/lib.rs
+  s_a05c7d0f6e56a2::t_a14e69345def4e 1198-1202
+  s_a05c7d0f6e56a2::t_529abaebd067e3 41-42,886-953,955-957
+  s_a05c7d0f6e56a2::t_9ba5c2e3ccd737 1703-1757
+  s_a05c7d0f6e56a2::t_bb0ed0208e49fa 954
+  s_a05c7d0f6e56a2::t_0f711cecd7c8b7 1288-1331
+  s_5d5be30dac4b5a::t_a083e8ef3ee9c0 958
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "6cdc64d78f1f532b74ed6ddcadddc3314f5ba615",
+  "prompts": {},
+  "sessions": {
+    "s_5d5be30dac4b5a": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f8705-3408-76d0-b325-6de63f40e3fd",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    },
+    "s_a05c7d0f6e56a2": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f86f3-0322-7fc3-b495-bd7bc4de126c",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
