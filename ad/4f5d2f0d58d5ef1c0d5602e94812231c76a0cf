@@ -1,0 +1,43 @@
+tools/unity-bolt-compile-check/UnityBoltCompileCheck.csproj
+  s_56f8212040c844::t_1a7761109ee0ae 31-34,46-47
+bindings/unity/Runtime/Bolt/XybridBolt.cs
+  s_56f8212040c844::t_2fa100cda97935 105-152,740-747,818-835
+  s_56f8212040c844::t_6ed9f3c93c7aa1 836-837
+bindings/unity/Runtime/Api/XybridClient.cs
+  s_56f8212040c844::t_1f1b13e6aaa4c6 37
+  s_56f8212040c844::t_7f1e498b6677c6 259
+  s_56f8212040c844::t_efeecc723e865c 60,69,71-72
+  s_56f8212040c844::t_2eb45a7a206896 203,220-224,226-235
+  s_56f8212040c844::t_72e5c800b7e899 282
+crates/xybrid-ffi-facade/src/lib.rs
+  s_56f8212040c844::t_fb9c422fabd8fd 1517-1681,2046
+  s_56f8212040c844::t_cbf511333d8023 2047-2049
+  s_56f8212040c844::t_2f5a9d10dc959c 2050-2098
+crates/xybrid-bolt/src/lib.rs
+  s_56f8212040c844::t_4944b5fedbcfaa 649-654
+  s_56f8212040c844::t_565896f613bb7b 1024-1099,1115-1116
+  s_56f8212040c844::t_9fa7ef80993d8e 1100-1114
+bindings/unity/Runtime/Bolt/XybridTelemetryConfig.cs
+  s_56f8212040c844::t_2fa100cda97935 1-99,128-148
+  s_56f8212040c844::t_6ed9f3c93c7aa1 100-127
+bindings/unity/Runtime/Bolt/XybridTelemetryConfig.cs.meta
+  s_56f8212040c844::t_2fa100cda97935 1-2
+bindings/unity/Runtime/Api/TelemetryConfig.cs
+  s_56f8212040c844::t_e7881825755d0f 2,34,83,90,92-97,100,103,116,126,140,150,163,173,188,202,214,219,234,251,261,265,267,272-273,276,323,325-328,330
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "ad4f5d2f0d58d5ef1c0d5602e94812231c76a0cf",
+  "prompts": {},
+  "sessions": {
+    "s_56f8212040c844": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "712d827d-2c3e-407d-a7a4-2e1b3f6e2b3b",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
