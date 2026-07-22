@@ -337,10 +337,9 @@ namespace Xybrid
             }
             catch (XybridBolt.XybridErrorException ex)
             {
-                string message = ex.Error is XybridBolt.XybridError.InferenceError inferenceError
-                    ? inferenceError.Message
-                    : ex.Message;
-                return InferenceResult.Failed(message);
+                // Match the pre-bolt failure text: "Inference failed: <message>"
+                // with the error's inner message (not its record ToString()).
+                return InferenceResult.Failed("Inference failed: " + BoltErrors.Describe(ex.Error));
             }
             catch (XybridBolt.BoltException ex)
             {

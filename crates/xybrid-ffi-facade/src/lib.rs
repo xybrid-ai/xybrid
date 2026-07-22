@@ -590,9 +590,24 @@ impl ConversationContextHandle {
     }
 
     /// Set the max history length before FIFO pruning.
+    ///
+    /// Rebuilds the context and re-pushes history so pruning runs immediately
+    /// (matches the pre-bolt C ABI). `with_max_history_len` alone only changes
+    /// the cap; the SDK prunes on `push`, so a lower cap wouldn't trim existing
+    /// turns until the next push.
     pub fn set_max_history_len(&self, len: u32) {
         let mut guard = self.lock();
-        let new_ctx = std::mem::take(&mut *guard).with_max_history_len(len as usize);
+        let id = guard.id().to_string();
+        let system = guard.system_envelope().cloned();
+        let history: Vec<_> = guard.history().to_vec();
+
+        let mut new_ctx = sdk::ConversationContext::with_id(id).with_max_history_len(len as usize);
+        if let Some(sys) = system {
+            new_ctx = new_ctx.with_system(sys);
+        }
+        for envelope in history {
+            new_ctx.push(envelope);
+        }
         *guard = new_ctx;
     }
 

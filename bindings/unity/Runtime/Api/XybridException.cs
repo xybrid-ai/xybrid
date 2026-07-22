@@ -97,7 +97,43 @@ namespace Xybrid
                 case XybridBolt.XybridError.InferenceError inferenceError:
                     return new InferenceException(inferenceError.Message);
                 default:
-                    return new XybridException(error.ToString());
+                    return new XybridException(Describe(error));
+            }
+        }
+
+        /// <summary>
+        /// A human-readable message for a typed error — the inner text, not the
+        /// record's default <c>ToString()</c>. Used for a failed
+        /// <see cref="InferenceResult.Error"/> so it reads like the pre-bolt
+        /// "Inference failed: ..." messages rather than "NotLoaded { }".
+        /// </summary>
+        internal static string Describe(XybridBolt.XybridError error)
+        {
+            switch (error)
+            {
+                case XybridBolt.XybridError.ModelNotFound e: return $"model not found: {e.Id}";
+                case XybridBolt.XybridError.DirectoryNotFound e: return $"directory not found: {e.Path}";
+                case XybridBolt.XybridError.MetadataNotFound e: return $"metadata not found: {e.Path}";
+                case XybridBolt.XybridError.MetadataInvalid e: return e.Message;
+                case XybridBolt.XybridError.LoadError e: return e.Message;
+                case XybridBolt.XybridError.InferenceError e: return e.Message;
+                case XybridBolt.XybridError.AbortedForCloudFallback e: return e.Reason;
+                case XybridBolt.XybridError.StreamingNotSupported _: return "streaming not supported";
+                case XybridBolt.XybridError.NotLoaded _: return "model not loaded";
+                case XybridBolt.XybridError.ConfigError e: return e.Message;
+                case XybridBolt.XybridError.NetworkError e: return e.Message;
+                case XybridBolt.XybridError.Offline e: return e.Message;
+                case XybridBolt.XybridError.IoError e: return e.Message;
+                case XybridBolt.XybridError.CacheError e: return e.Message;
+                case XybridBolt.XybridError.PipelineError e: return e.Message;
+                case XybridBolt.XybridError.CircuitOpen e: return e.Message;
+                case XybridBolt.XybridError.RateLimited e: return $"rate limited (retry after {e.RetryAfterSecs}s)";
+                case XybridBolt.XybridError.Timeout e: return $"timed out after {e.TimeoutMs}ms";
+                case XybridBolt.XybridError.MissingArtifact e: return e.Message;
+                case XybridBolt.XybridError.UnsupportedModelCapability e: return e.Message;
+                case XybridBolt.XybridError.UnsupportedBackendCapability e: return e.Message;
+                case XybridBolt.XybridError.InvalidImage e: return e.Message;
+                default: return error.ToString();
             }
         }
     }
