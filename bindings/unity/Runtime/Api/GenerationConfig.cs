@@ -154,8 +154,10 @@ namespace Xybrid
         /// <see cref="Model"/>. Grammar-constrained decoding is not exposed by
         /// the Unity API, so it is always null.
         /// </summary>
-        internal XybridBolt.XybridGenerationConfig ToBolt() =>
-            new XybridBolt.XybridGenerationConfig(
+        internal XybridBolt.XybridGenerationConfig ToBolt()
+        {
+            ThrowIfDisposed();
+            return new XybridBolt.XybridGenerationConfig(
                 _maxTokens,
                 _temperature,
                 _topP,
@@ -164,6 +166,7 @@ namespace Xybrid
                 _repetitionPenalty,
                 _stopSequences.ToArray(),
                 null);
+        }
 
         private void ThrowIfDisposed()
         {

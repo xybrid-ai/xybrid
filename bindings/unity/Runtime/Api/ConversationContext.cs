@@ -112,7 +112,7 @@ namespace Xybrid
 
             try
             {
-                _bolt.SetSystem(Envelope.Text(systemPrompt).Bolt);
+                _bolt.SetSystem(Envelope.Text(systemPrompt, MessageRole.System).Bolt);
             }
             catch (Exception ex) when (IsBoltError(ex))
             {

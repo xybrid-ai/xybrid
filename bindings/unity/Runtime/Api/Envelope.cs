@@ -174,8 +174,12 @@ namespace Xybrid
                 }
             }
 
+            var metadata = new[]
+            {
+                new XybridBolt.XybridMetadataEntry("xybrid.role", RoleString(MessageRole.User)),
+            };
             return new Envelope(new XybridBolt.XybridEnvelope(
-                new XybridBolt.XybridEnvelopeKind.MultiPart(parts.ToArray())));
+                new XybridBolt.XybridEnvelopeKind.MultiPart(parts.ToArray()), metadata));
         }
 
         private static string RoleString(MessageRole role)

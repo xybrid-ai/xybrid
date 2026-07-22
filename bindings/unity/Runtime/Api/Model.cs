@@ -39,7 +39,7 @@ namespace Xybrid
         /// <returns>The inference result (<see cref="InferenceResult.Success"/> is false if inference failed).</returns>
         /// <exception cref="ArgumentNullException">Thrown if envelope is null.</exception>
         /// <exception cref="ObjectDisposedException">Thrown if this model is disposed.</exception>
-        /// <exception cref="XybridException">Thrown if inference fails to start (e.g. the model is not loaded).</exception>
+        /// <exception cref="XybridException">Thrown only on a catastrophic backend failure; ordinary inference failures (including a not-loaded model) set <see cref="InferenceResult.Success"/> to false instead.</exception>
         public InferenceResult Run(Envelope envelope, GenerationConfig config = null)
         {
             ThrowIfDisposed();
@@ -108,7 +108,7 @@ namespace Xybrid
         /// </remarks>
         /// <exception cref="ArgumentNullException">Thrown if envelope or context is null.</exception>
         /// <exception cref="ObjectDisposedException">Thrown if this model is disposed.</exception>
-        /// <exception cref="XybridException">Thrown if inference fails to start.</exception>
+        /// <exception cref="XybridException">Thrown only on a catastrophic backend failure; ordinary inference failures set <see cref="InferenceResult.Success"/> to false instead.</exception>
         public InferenceResult Run(Envelope envelope, ConversationContext context, GenerationConfig config = null)
         {
             ThrowIfDisposed();
@@ -250,7 +250,7 @@ namespace Xybrid
         /// <returns>The final inference result after all tokens are emitted.</returns>
         /// <exception cref="ArgumentNullException">Thrown if envelope or onToken is null.</exception>
         /// <exception cref="ObjectDisposedException">Thrown if this model is disposed.</exception>
-        /// <exception cref="XybridException">Thrown if inference fails to start.</exception>
+        /// <exception cref="XybridException">Thrown only on a catastrophic backend failure; ordinary inference failures set <see cref="InferenceResult.Success"/> to false instead.</exception>
         public InferenceResult RunStreaming(Envelope envelope, Action<StreamToken> onToken, GenerationConfig config = null)
         {
             ThrowIfDisposed();
@@ -276,7 +276,7 @@ namespace Xybrid
         /// <returns>The final inference result after all tokens are emitted.</returns>
         /// <exception cref="ArgumentNullException">Thrown if any argument is null.</exception>
         /// <exception cref="ObjectDisposedException">Thrown if this model is disposed.</exception>
-        /// <exception cref="XybridException">Thrown if inference fails to start.</exception>
+        /// <exception cref="XybridException">Thrown only on a catastrophic backend failure; ordinary inference failures set <see cref="InferenceResult.Success"/> to false instead.</exception>
         public InferenceResult RunStreaming(Envelope envelope, ConversationContext context, Action<StreamToken> onToken, GenerationConfig config = null)
         {
             ThrowIfDisposed();
@@ -323,10 +323,12 @@ namespace Xybrid
         // Internal helpers
         // ================================================================
 
-        // Bolt inference throws XybridErrorException; the public contract returns
-        // a failed InferenceResult for execution failures and only throws for
-        // start/setup failures. Map InferenceError -> failed result; translate
-        // everything else into the public exception taxonomy and rethrow.
+        // Preserve the pre-bolt contract: xybrid_model_run returned a failed
+        // result handle (Success == false) for EVERY SDK run error and only
+        // threw for null/invalid handles. Bolt surfaces those SDK errors as
+        // XybridErrorException, so map all of them to a failed InferenceResult
+        // (callers inspecting Success keep working). A BoltException is the
+        // catastrophic analog of the old null-handle path and is rethrown.
         private static InferenceResult Execute(Func<XybridBolt.XybridResult> run)
         {
             try
@@ -334,13 +336,11 @@ namespace Xybrid
                 return InferenceResult.FromBolt(run());
             }
             catch (XybridBolt.XybridErrorException ex)
-                when (ex.Error is XybridBolt.XybridError.InferenceError inferenceError)
             {
-                return InferenceResult.Failed(inferenceError.Message);
-            }
-            catch (XybridBolt.XybridErrorException ex)
-            {
-                throw BoltErrors.Translate(ex);
+                string message = ex.Error is XybridBolt.XybridError.InferenceError inferenceError
+                    ? inferenceError.Message
+                    : ex.Message;
+                return InferenceResult.Failed(message);
             }
             catch (XybridBolt.BoltException ex)
             {
