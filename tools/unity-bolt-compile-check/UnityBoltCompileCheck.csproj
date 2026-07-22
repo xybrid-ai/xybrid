@@ -28,23 +28,10 @@
     <Compile Include="../../bindings/unity/Runtime/Bolt/*.cs" />
     <!-- Hand-ported inference paths (run/stream/envelope) that boltffi 0.25.3 drops. -->
     <Compile Include="../../bindings/unity/Runtime/BoltSupplement/*.cs" />
-    <!-- Public managed API re-plumbed onto XybridBolt. Listed per-file, not
-         Runtime/Api/*.cs: BundleReader still binds the pre-bolt C ABI (deferred
-         gap A2.2b) and would drag Runtime/Native into this project, which does
-         not compile it. -->
-    <Compile Include="../../bindings/unity/Runtime/Api/OutputType.cs" />
-    <Compile Include="../../bindings/unity/Runtime/Api/MessageRole.cs" />
-    <Compile Include="../../bindings/unity/Runtime/Api/StreamToken.cs" />
-    <Compile Include="../../bindings/unity/Runtime/Api/VoiceInfo.cs" />
-    <Compile Include="../../bindings/unity/Runtime/Api/XybridException.cs" />
-    <Compile Include="../../bindings/unity/Runtime/Api/GenerationConfig.cs" />
-    <Compile Include="../../bindings/unity/Runtime/Api/Envelope.cs" />
-    <Compile Include="../../bindings/unity/Runtime/Api/InferenceResult.cs" />
-    <Compile Include="../../bindings/unity/Runtime/Api/ConversationContext.cs" />
-    <Compile Include="../../bindings/unity/Runtime/Api/Model.cs" />
-    <Compile Include="../../bindings/unity/Runtime/Api/ModelLoader.cs" />
-    <Compile Include="../../bindings/unity/Runtime/Api/TelemetryConfig.cs" />
-    <Compile Include="../../bindings/unity/Runtime/Api/XybridClient.cs" />
+    <!-- The entire public managed API now rides XybridBolt (A2.2b retired the
+         pre-bolt C ABI + Runtime/Native), so the whole Api folder compiles here
+         — nothing drags a C-ABI binding into this project anymore. -->
+    <Compile Include="../../bindings/unity/Runtime/Api/*.cs" />
     <!-- Unity bundles System.Runtime.CompilerServices.Unsafe; supply it here so
          the standalone compile resolves Unsafe.SizeOf the same way Unity does. -->
     <PackageReference Include="System.Runtime.CompilerServices.Unsafe" Version="6.0.0" />

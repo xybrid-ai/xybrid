@@ -760,6 +760,9 @@ namespace XybridBolt
 
         [DllImport(LibName, EntryPoint = "boltffi_xybrid_model_from_huggingface")]
         internal static extern IntPtr XybridModelFromHuggingface(byte[] repo, UIntPtr repoLen);
+
+        [DllImport(LibName, EntryPoint = "boltffi_xybrid_model_from_model_file")]
+        internal static extern IntPtr XybridModelFromModelFile(byte[] path, UIntPtr pathLen);
         [DllImport(LibName, EntryPoint = "boltffi_xybrid_model_model_id")]
         internal static extern FfiBuf XybridModelModelId(IntPtr self);
         [DllImport(LibName, EntryPoint = "boltffi_xybrid_model_version")]
@@ -835,5 +838,32 @@ namespace XybridBolt
         internal static extern void XybridTelemetryConfigSetFlushIntervalSecs(IntPtr self, uint secs);
         [DllImport(LibName, EntryPoint = "boltffi_xybrid_telemetry_config_init")]
         internal static extern FfiBuf XybridTelemetryConfigInit(IntPtr self);
+
+        [DllImport(LibName, EntryPoint = "boltffi_xybrid_bundle_free")]
+        internal static extern void XybridBundleFree(IntPtr handle);
+
+        [DllImport(LibName, EntryPoint = "boltffi_xybrid_bundle_open")]
+        internal static extern IntPtr XybridBundleOpen(byte[] path, UIntPtr pathLen);
+        [DllImport(LibName, EntryPoint = "boltffi_xybrid_bundle_model_id")]
+        internal static extern FfiBuf XybridBundleModelId(IntPtr self);
+        [DllImport(LibName, EntryPoint = "boltffi_xybrid_bundle_version")]
+        internal static extern FfiBuf XybridBundleVersion(IntPtr self);
+        [DllImport(LibName, EntryPoint = "boltffi_xybrid_bundle_target")]
+        internal static extern FfiBuf XybridBundleTarget(IntPtr self);
+        [DllImport(LibName, EntryPoint = "boltffi_xybrid_bundle_hash")]
+        internal static extern FfiBuf XybridBundleHash(IntPtr self);
+        [DllImport(LibName, EntryPoint = "boltffi_xybrid_bundle_has_metadata")]
+        [return: MarshalAs(UnmanagedType.I1)]
+        internal static extern bool XybridBundleHasMetadata(IntPtr self);
+        [DllImport(LibName, EntryPoint = "boltffi_xybrid_bundle_file_count")]
+        internal static extern uint XybridBundleFileCount(IntPtr self);
+        [DllImport(LibName, EntryPoint = "boltffi_xybrid_bundle_file_name")]
+        internal static extern FfiBuf XybridBundleFileName(IntPtr self, uint index);
+        [DllImport(LibName, EntryPoint = "boltffi_xybrid_bundle_manifest_json")]
+        internal static extern FfiBuf XybridBundleManifestJson(IntPtr self);
+        [DllImport(LibName, EntryPoint = "boltffi_xybrid_bundle_metadata_json")]
+        internal static extern FfiBuf XybridBundleMetadataJson(IntPtr self);
+        [DllImport(LibName, EntryPoint = "boltffi_xybrid_bundle_extract")]
+        internal static extern FfiBuf XybridBundleExtract(IntPtr self, byte[] outputDir, UIntPtr outputDirLen);
     }
 }

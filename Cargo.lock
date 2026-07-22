@@ -6413,6 +6413,7 @@ dependencies = [
 name = "xybrid-ffi-facade"
 version = "0.4.0-alpha"
 dependencies = [
+ "serde_json",
  "tokio",
  "xybrid-core",
  "xybrid-sdk",

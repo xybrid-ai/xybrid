@@ -1169,6 +1169,54 @@ impl ModelLoader {
         })
     }
 
+    /// Load from a raw GGUF file: auto-generate `model_metadata.json` from the
+    /// GGUF header (writing it next to the file if absent), then load the parent
+    /// directory. Mirrors the pre-bolt C ABI's `from_model_file`.
+    ///
+    /// # Errors
+    /// [`Error::ConfigError`] on an empty/missing path or metadata-generation
+    /// failure; [`Error::IoError`] if the metadata sidecar can't be written.
+    pub fn from_model_file(path: String) -> Result<Arc<Self>> {
+        if path.is_empty() {
+            return Err(Error::ConfigError {
+                message: "path is empty".to_string(),
+            });
+        }
+        let gguf_path = std::path::Path::new(&path);
+        if !gguf_path.exists() {
+            return Err(Error::ConfigError {
+                message: format!("GGUF file not found: {path}"),
+            });
+        }
+
+        let metadata =
+            sdk::metadata_gen::generate_metadata_for_gguf_file(gguf_path).map_err(|e| {
+                Error::ConfigError {
+                    message: format!("failed to generate metadata for GGUF file: {e}"),
+                }
+            })?;
+
+        let parent_dir = gguf_path.parent().ok_or_else(|| Error::ConfigError {
+            message: "cannot determine parent directory of GGUF file".to_string(),
+        })?;
+
+        // Write the sidecar only if absent, so re-loading the same file is
+        // idempotent and never clobbers a user-authored metadata file.
+        let metadata_path = parent_dir.join("model_metadata.json");
+        if !metadata_path.exists() {
+            let json = serde_json::to_string_pretty(&metadata).map_err(|e| Error::ConfigError {
+                message: format!("failed to serialize metadata: {e}"),
+            })?;
+            std::fs::write(&metadata_path, json).map_err(|e| Error::IoError {
+                message: format!("failed to write model_metadata.json: {e}"),
+            })?;
+        }
+
+        let inner = sdk::ModelLoader::from_directory(parent_dir.to_string_lossy().to_string())
+            .map_err(Error::from)?;
+        Ok(Arc::new(Self { inner }))
+    }
+
     pub fn model_id(&self) -> Option<String> {
         self.inner.model_id().map(str::to_string)
     }
@@ -1692,6 +1740,108 @@ pub fn telemetry_flush() {
 pub fn telemetry_shutdown() {
     if TELEMETRY_INITIALIZED.swap(false, std::sync::atomic::Ordering::AcqRel) {
         sdk::telemetry::shutdown_platform_telemetry();
+    }
+}
+
+// ============================================================================
+// Bundle inspection
+// ============================================================================
+//
+// Read-only inspection of `.xyb` model bundles (tar + zstd) for editor tooling
+// and asset workflows: open, read manifest/metadata, enumerate + extract files.
+// Mirrors the pre-bolt C ABI's bundle surface. Every method takes/returns simple
+// types, so the whole surface generates natively (no hand-port).
+
+/// FFI-friendly handle around an opened [`sdk::bundler::XyBundle`].
+///
+/// Generator crates wrap this in `Arc<Self>` for opaque-handle semantics. The
+/// bundle is immutable after [`open`](Self::open), so every accessor takes a
+/// shared `&self` and no interior mutability is needed.
+pub struct BundleHandle {
+    inner: sdk::bundler::XyBundle,
+}
+
+impl BundleHandle {
+    /// Open and parse a `.xyb` bundle (decompress zstd, parse tar, validate the
+    /// manifest).
+    ///
+    /// # Errors
+    /// [`Error::ConfigError`] if the bundle can't be opened or is malformed.
+    pub fn open(path: String) -> Result<Arc<Self>> {
+        let inner = sdk::bundler::XyBundle::load(&path).map_err(|e| Error::ConfigError {
+            message: format!("failed to open bundle: {e}"),
+        })?;
+        Ok(Arc::new(Self { inner }))
+    }
+
+    /// The model identifier from the manifest.
+    pub fn model_id(&self) -> String {
+        self.inner.manifest().model_id.clone()
+    }
+
+    /// The version string from the manifest.
+    pub fn version(&self) -> String {
+        self.inner.manifest().version.clone()
+    }
+
+    /// The target platform from the manifest.
+    pub fn target(&self) -> String {
+        self.inner.manifest().target.clone()
+    }
+
+    /// The SHA-256 hash from the manifest.
+    pub fn hash(&self) -> String {
+        self.inner.manifest().hash.clone()
+    }
+
+    /// Whether the bundle carries a `model_metadata.json`.
+    pub fn has_metadata(&self) -> bool {
+        self.inner.manifest().has_metadata
+    }
+
+    /// Number of files in the bundle (excludes `manifest.json`).
+    pub fn file_count(&self) -> u32 {
+        self.inner.manifest().files.len() as u32
+    }
+
+    /// The file name at `index`, or `None` if out of bounds.
+    pub fn file_name(&self, index: u32) -> Option<String> {
+        self.inner.manifest().files.get(index as usize).cloned()
+    }
+
+    /// The full bundle manifest serialized as JSON.
+    ///
+    /// # Errors
+    /// [`Error::ConfigError`] if the manifest can't be serialized.
+    pub fn manifest_json(&self) -> Result<String> {
+        serde_json::to_string(self.inner.manifest()).map_err(|e| Error::ConfigError {
+            message: format!("failed to serialize manifest: {e}"),
+        })
+    }
+
+    /// The `model_metadata.json` contents, or `None` if the bundle has none.
+    ///
+    /// # Errors
+    /// [`Error::ConfigError`] if reading the entry fails.
+    pub fn metadata_json(&self) -> Result<Option<String>> {
+        self.inner
+            .get_metadata_json()
+            .map_err(|e| Error::ConfigError {
+                message: format!("failed to read metadata: {e}"),
+            })
+    }
+
+    /// Extract every bundle file to `output_dir` (created if absent), preserving
+    /// relative paths.
+    ///
+    /// # Errors
+    /// [`Error::ConfigError`] if extraction fails.
+    pub fn extract(&self, output_dir: String) -> Result<()> {
+        self.inner
+            .extract_to(&output_dir)
+            .map_err(|e| Error::ConfigError {
+                message: format!("failed to extract bundle: {e}"),
+            })
     }
 }
 

@@ -722,6 +722,14 @@ impl XybridModel {
         Ok(Self::new(model))
     }
 
+    /// Load from a raw GGUF file, auto-generating `model_metadata.json` from the
+    /// GGUF header (written next to the file if absent).
+    pub fn from_model_file(path: String) -> Result<Self, XybridError> {
+        let loader = facade::ModelLoader::from_model_file(path).map_err(XybridError::from)?;
+        let model = loader.load().map_err(XybridError::from)?;
+        Ok(Self::new(model))
+    }
+
     pub fn model_id(&self) -> String {
         self.inner.model_id()
     }
@@ -1111,6 +1119,83 @@ impl XybridTelemetryConfig {
     /// initialized without an intervening [`telemetry_shutdown`].
     pub fn init(&self) -> Result<(), XybridError> {
         facade::telemetry_init(&self.inner).map_err(XybridError::from)
+    }
+}
+
+// ============================================================================
+// Bundle inspection
+// ============================================================================
+//
+// Read-only inspection of `.xyb` model bundles for editor tooling / asset
+// workflows. Mirrors the pre-bolt C ABI's bundle surface; every method takes or
+// returns simple types, so it generates natively (no hand-port).
+
+/// An opened `.xyb` model bundle.
+///
+/// Create with [`open`](Self::open); read the manifest/metadata, enumerate
+/// files, and [`extract`](Self::extract). Wraps the facade's immutable
+/// `BundleHandle`.
+pub struct XybridBundle {
+    inner: std::sync::Arc<facade::BundleHandle>,
+}
+
+#[export]
+impl XybridBundle {
+    /// Open and parse a `.xyb` bundle (decompress zstd, parse tar, validate the
+    /// manifest).
+    pub fn open(path: String) -> Result<Self, XybridError> {
+        let inner = facade::BundleHandle::open(path).map_err(XybridError::from)?;
+        Ok(Self { inner })
+    }
+
+    /// The model identifier from the manifest.
+    pub fn model_id(&self) -> String {
+        self.inner.model_id()
+    }
+
+    /// The version string from the manifest.
+    pub fn version(&self) -> String {
+        self.inner.version()
+    }
+
+    /// The target platform from the manifest.
+    pub fn target(&self) -> String {
+        self.inner.target()
+    }
+
+    /// The SHA-256 hash from the manifest.
+    pub fn hash(&self) -> String {
+        self.inner.hash()
+    }
+
+    /// Whether the bundle carries a `model_metadata.json`.
+    pub fn has_metadata(&self) -> bool {
+        self.inner.has_metadata()
+    }
+
+    /// Number of files in the bundle (excludes `manifest.json`).
+    pub fn file_count(&self) -> u32 {
+        self.inner.file_count()
+    }
+
+    /// The file name at `index`, or `None` if out of bounds.
+    pub fn file_name(&self, index: u32) -> Option<String> {
+        self.inner.file_name(index)
+    }
+
+    /// The full bundle manifest serialized as JSON.
+    pub fn manifest_json(&self) -> Result<String, XybridError> {
+        self.inner.manifest_json().map_err(XybridError::from)
+    }
+
+    /// The `model_metadata.json` contents, or `None` if the bundle has none.
+    pub fn metadata_json(&self) -> Result<Option<String>, XybridError> {
+        self.inner.metadata_json().map_err(XybridError::from)
+    }
+
+    /// Extract every bundle file to `output_dir` (created if absent).
+    pub fn extract(&self, output_dir: String) -> Result<(), XybridError> {
+        self.inner.extract(output_dir).map_err(XybridError::from)
     }
 }
 

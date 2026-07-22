@@ -63,6 +63,18 @@ namespace XybridBolt
             return new XybridModel(_handle);
         }
 
+        /// <summary>
+        /// Load from a raw GGUF file, auto-generating `model_metadata.json` from the
+        /// GGUF header (written next to the file if absent).
+        /// </summary>
+        public static XybridModel FromModelFile(string path)
+        {
+            byte[] _pathBytes = Encoding.UTF8.GetBytes(path);
+            IntPtr _handle = NativeMethods.XybridModelFromModelFile(_pathBytes, (UIntPtr)_pathBytes.Length);
+            if (_handle == IntPtr.Zero) throw new BoltException(NativeMethods.TakeLastErrorMessage("Factory constructor failed"));
+            return new XybridModel(_handle);
+        }
+
         public string ModelId()
         {
             ThrowIfDisposed();

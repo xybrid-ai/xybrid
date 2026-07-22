@@ -21,6 +21,7 @@ namespace Xybrid
             Bundle,
             Directory,
             HuggingFace,
+            ModelFile,
         }
 
         private readonly Source _source;
@@ -80,22 +81,20 @@ namespace Xybrid
         }
 
         /// <summary>
-        /// Creates a model loader from a raw GGUF model file.
+        /// Creates a model loader from a raw GGUF model file. On load, metadata is
+        /// auto-generated from the GGUF header and written as a
+        /// <c>model_metadata.json</c> sidecar next to the file if one isn't already
+        /// present.
         /// </summary>
         /// <param name="filePath">Path to the GGUF model file.</param>
         /// <exception cref="ArgumentNullException">Thrown if filePath is null.</exception>
-        /// <exception cref="NotSupportedException">
-        /// GGUF auto-metadata loading is not yet available on the bolt backend.
-        /// </exception>
         public static ModelLoader FromModelFile(string filePath)
         {
             if (filePath == null)
             {
                 throw new ArgumentNullException(nameof(filePath));
             }
-            throw new NotSupportedException(
-                "ModelLoader.FromModelFile (GGUF auto-metadata) is not yet available on the " +
-                "bolt backend. Use FromDirectory with a directory containing model_metadata.json.");
+            return new ModelLoader(Source.ModelFile, filePath);
         }
 
         /// <summary>
@@ -139,6 +138,9 @@ namespace Xybrid
                         break;
                     case Source.HuggingFace:
                         bolt = XybridBolt.XybridModel.FromHuggingface(_value);
+                        break;
+                    case Source.ModelFile:
+                        bolt = XybridBolt.XybridModel.FromModelFile(_value);
                         break;
                     default:
                         throw new InvalidOperationException("Unknown model source.");
