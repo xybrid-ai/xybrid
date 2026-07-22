@@ -76,9 +76,17 @@ namespace Xybrid
 
                 // Runtime init moves to bolt: set the binding tag (used for
                 // telemetry attribution). The pre-bolt xybrid_init() was a no-op.
-                // Advanced telemetry (below) still runs through the pre-bolt C
-                // ABI until the telemetry surface is ported (GAP-3).
                 XybridBolt.XybridBolt.SetBinding("unity");
+
+                // Dual-library window: advanced telemetry still runs through the
+                // pre-bolt C ABI (GAP-3), which keeps its OWN binding state. Set
+                // it too so xybrid_ffi telemetry reports "unity", not the default.
+                // Drop this once telemetry is ported off xybrid_ffi in A2.2.
+                byte[] bindingBytes = NativeHelpers.ToUtf8Bytes("unity");
+                fixed (byte* bindingPtr = bindingBytes)
+                {
+                    NativeMethods.xybrid_set_binding(bindingPtr);
+                }
 
                 _initialized = true;
 
