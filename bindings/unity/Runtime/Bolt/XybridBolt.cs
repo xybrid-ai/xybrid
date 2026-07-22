@@ -716,6 +716,9 @@ namespace XybridBolt
         [DllImport(LibName, EntryPoint = "boltffi_xybrid_model_supports_streaming")]
         [return: MarshalAs(UnmanagedType.I1)]
         internal static extern bool XybridModelSupportsStreaming(IntPtr self);
+        [DllImport(LibName, EntryPoint = "boltffi_xybrid_model_supports_token_streaming")]
+        [return: MarshalAs(UnmanagedType.I1)]
+        internal static extern bool XybridModelSupportsTokenStreaming(IntPtr self);
         [DllImport(LibName, EntryPoint = "boltffi_xybrid_model_is_llm")]
         [return: MarshalAs(UnmanagedType.I1)]
         internal static extern bool XybridModelIsLlm(IntPtr self);
@@ -728,6 +731,10 @@ namespace XybridBolt
         internal static extern FfiBuf XybridModelDefaultVoice(IntPtr self);
         [DllImport(LibName, EntryPoint = "boltffi_xybrid_model_voice")]
         internal static extern FfiBuf XybridModelVoice(IntPtr self, byte[] voiceId, UIntPtr voiceIdLen);
+        [DllImport(LibName, EntryPoint = "boltffi_xybrid_model_stream_next")]
+        internal static extern FfiBuf XybridModelStreamNext(IntPtr self, ulong streamId);
+        [DllImport(LibName, EntryPoint = "boltffi_xybrid_model_stream_close")]
+        internal static extern void XybridModelStreamClose(IntPtr self, ulong streamId);
         [DllImport(LibName, EntryPoint = "boltffi_xybrid_model_warmup")]
         internal static extern FfiBuf XybridModelWarmup(IntPtr self);
         [DllImport(LibName, EntryPoint = "boltffi_xybrid_model_unload")]

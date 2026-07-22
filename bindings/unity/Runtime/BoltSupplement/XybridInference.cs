@@ -1,7 +1,8 @@
 // Hand-written supplement to the generated BoltFFI C# bindings.
 //
 // boltffi 0.25.3's C# generator silently drops the entire inference path: no
-// `run` method, and none of the types it needs -- XybridEnvelope,
+// `run` / `run_stream` / `stream_result` methods, and none of the types they
+// need -- XybridEnvelope,
 // XybridEnvelopeKind (a data-carrying enum used as a function INPUT, which the
 // 0.25.3 C# lowering can't express), or XybridResult. Swift/Kotlin generate
 // them fine; C# does not. Rather than block Unity on inference, this file
@@ -12,9 +13,9 @@
 // which is device-validated) and reuses the generated C# WireReader/WireWriter
 // primitives in Runtime/Bolt/XybridBolt.cs. This layer is NOT emitted by
 // tools/scripts/gen_unity_bolt_csharp.py; that script only marks XybridModel
-// `partial` so the Run() method below can extend it. When boltffi >= 0.26 lands
-// (which is expected to express this path), delete this file and let the
-// generator emit run() natively.
+// `partial` so the Run() and RunStreaming() methods below can extend it. When
+// boltffi >= 0.26 lands (which is expected to express this path), delete this
+// file and let the generator emit inference natively.
 
 #nullable enable
 
@@ -189,7 +190,7 @@ namespace XybridBolt
                 XybridInferenceMetrics.Decode(reader));
     }
 
-    internal static class BoltRunNative
+    internal static class BoltInferenceNative
     {
         [DllImport(NativeMethods.LibName, EntryPoint = "boltffi_xybrid_model_run")]
         internal static extern FfiBuf XybridModelRun(
@@ -198,6 +199,17 @@ namespace XybridBolt
             UIntPtr envelopeLen,
             byte[] options,
             UIntPtr optionsLen);
+
+        [DllImport(NativeMethods.LibName, EntryPoint = "boltffi_xybrid_model_run_stream")]
+        internal static extern FfiBuf XybridModelRunStream(
+            IntPtr self,
+            byte[] envelope,
+            UIntPtr envelopeLen,
+            byte[] options,
+            UIntPtr optionsLen);
+
+        [DllImport(NativeMethods.LibName, EntryPoint = "boltffi_xybrid_model_stream_result")]
+        internal static extern FfiBuf XybridModelStreamResult(IntPtr self, ulong streamId);
     }
 
     public sealed partial class XybridModel
@@ -214,26 +226,10 @@ namespace XybridBolt
             if (envelope is null) throw new ArgumentNullException(nameof(envelope));
             ThrowIfDisposed();
 
-            using var envelopeWire = new WireWriter(64);
-            envelope.WireEncodeTo(envelopeWire);
-            byte[] envelopeBytes = envelopeWire.ToArray();
+            byte[] envelopeBytes = EncodeEnvelope(envelope);
+            byte[] optionsBytes = EncodeOptions(options);
 
-            // Options cross as an Optional<XybridRunOptions>: a u8 presence tag
-            // followed by the encoded options when present (matching the Swift
-            // `writer.writeOptional(options)`).
-            using var optionsWire = new WireWriter(16);
-            if (options is { } opts)
-            {
-                optionsWire.WriteU8(1);
-                opts.WireEncodeTo(optionsWire);
-            }
-            else
-            {
-                optionsWire.WriteU8(0);
-            }
-            byte[] optionsBytes = optionsWire.ToArray();
-
-            FfiBuf buf = BoltRunNative.XybridModelRun(
+            FfiBuf buf = BoltInferenceNative.XybridModelRun(
                 _handle,
                 envelopeBytes,
                 (UIntPtr)envelopeBytes.Length,
@@ -254,6 +250,131 @@ namespace XybridBolt
                 // free the handle while Rust is still using it (use-after-free).
                 // Keep the wrapper alive across the call.
                 GC.KeepAlive(this);
+            }
+        }
+
+        /// <summary>
+        /// Run inference while delivering each token to
+        /// <paramref name="onToken"/> on the calling thread. Blocks until the
+        /// final result is available.
+        /// </summary>
+        /// <remarks>
+        /// All model types support this shape. Check
+        /// <see cref="SupportsTokenStreaming"/> to distinguish true
+        /// token-by-token LLM output from models that emit one result token.
+        /// If the callback throws, streaming is closed and that exception is
+        /// propagated to the caller.
+        /// </remarks>
+        /// <exception cref="ArgumentNullException">
+        /// If <paramref name="envelope"/> or <paramref name="onToken"/> is null.
+        /// </exception>
+        /// <exception cref="XybridErrorException">If the model returns a typed error.</exception>
+        /// <exception cref="ObjectDisposedException">If the model has been disposed.</exception>
+        public XybridResult RunStreaming(
+            XybridEnvelope envelope,
+            Action<XybridStreamToken> onToken,
+            XybridRunOptions? options = null)
+        {
+            if (envelope is null) throw new ArgumentNullException(nameof(envelope));
+            if (onToken is null) throw new ArgumentNullException(nameof(onToken));
+            ThrowIfDisposed();
+
+            byte[] envelopeBytes = EncodeEnvelope(envelope);
+            byte[] optionsBytes = EncodeOptions(options);
+            ulong? streamId = null;
+
+            try
+            {
+                FfiBuf startBuf = BoltInferenceNative.XybridModelRunStream(
+                    _handle,
+                    envelopeBytes,
+                    (UIntPtr)envelopeBytes.Length,
+                    optionsBytes,
+                    (UIntPtr)optionsBytes.Length);
+                try
+                {
+                    var reader = new WireReader(startBuf);
+                    if (reader.ReadU8() != 0)
+                    {
+                        throw new XybridErrorException(XybridError.Decode(reader));
+                    }
+                    streamId = reader.ReadU64();
+                }
+                finally
+                {
+                    NativeMethods.FreeBuf(startBuf);
+                }
+
+                while (true)
+                {
+                    XybridStreamEvent streamEvent = StreamNext(streamId.Value);
+                    switch (streamEvent.Kind)
+                    {
+                        case XybridStreamEventKind.Token:
+                            if (streamEvent.Token is not { } token)
+                            {
+                                throw new InvalidOperationException(
+                                    "Bolt streaming returned a token event without a token payload.");
+                            }
+                            onToken(token);
+                            break;
+                        case XybridStreamEventKind.Complete:
+                            return TakeStreamResult(streamId.Value);
+                        default:
+                            throw new InvalidOperationException(
+                                $"Unknown Bolt stream event kind: {streamEvent.Kind}");
+                    }
+                }
+            }
+            finally
+            {
+                // Closing drops the bounded Rust receiver, which stops the
+                // producer at its next token if the callback exits early.
+                if (streamId is { } id && _handle != IntPtr.Zero)
+                {
+                    StreamClose(id);
+                }
+                GC.KeepAlive(this);
+            }
+        }
+
+        private static byte[] EncodeEnvelope(XybridEnvelope envelope)
+        {
+            using var wire = new WireWriter(64);
+            envelope.WireEncodeTo(wire);
+            return wire.ToArray();
+        }
+
+        private static byte[] EncodeOptions(XybridRunOptions? options)
+        {
+            // Options cross as an Optional<XybridRunOptions>: a u8 presence tag
+            // followed by the encoded options when present (matching the Swift
+            // `writer.writeOptional(options)`).
+            using var wire = new WireWriter(16);
+            if (options is { } opts)
+            {
+                wire.WriteU8(1);
+                opts.WireEncodeTo(wire);
+            }
+            else
+            {
+                wire.WriteU8(0);
+            }
+            return wire.ToArray();
+        }
+
+        private XybridResult TakeStreamResult(ulong streamId)
+        {
+            FfiBuf buf = BoltInferenceNative.XybridModelStreamResult(_handle, streamId);
+            try
+            {
+                var reader = new WireReader(buf);
+                if (reader.ReadU8() != 0) throw new XybridErrorException(XybridError.Decode(reader));
+                return XybridResult.Decode(reader);
+            }
+            finally
+            {
+                NativeMethods.FreeBuf(buf);
             }
         }
     }

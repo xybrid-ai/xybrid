@@ -109,6 +109,15 @@ namespace XybridBolt
             return NativeMethods.XybridModelSupportsStreaming(_handle);
         }
 
+        /// <summary>
+        /// Whether this model emits true token-by-token output.
+        /// </summary>
+        public bool SupportsTokenStreaming()
+        {
+            ThrowIfDisposed();
+            return NativeMethods.XybridModelSupportsTokenStreaming(_handle);
+        }
+
         public bool IsLlm()
         {
             ThrowIfDisposed();
@@ -164,6 +173,38 @@ namespace XybridBolt
             {
                 NativeMethods.FreeBuf(_buf);
             }
+        }
+
+        /// <summary>
+        /// Block until the next item for `stream_id` is ready.
+        /// </summary>
+        public XybridStreamEvent StreamNext(ulong streamId)
+        {
+            ThrowIfDisposed();
+            FfiBuf _buf = NativeMethods.XybridModelStreamNext(_handle, streamId);
+            try
+            {
+                var reader = new WireReader(_buf);
+                if (reader.ReadU8() != 0) throw new XybridErrorException(XybridError.Decode(reader));
+                return XybridStreamEvent.Decode(reader);
+            }
+            finally
+            {
+                NativeMethods.FreeBuf(_buf);
+                // StreamNext can block for the full inter-token gap. Keep
+                // this wrapper alive so its finalizer cannot free _handle
+                // while the native call is still using it.
+                GC.KeepAlive(this);
+            }
+        }
+
+        /// <summary>
+        /// Forget a streaming session.
+        /// </summary>
+        public void StreamClose(ulong streamId)
+        {
+            ThrowIfDisposed();
+            NativeMethods.XybridModelStreamClose(_handle, streamId);
         }
 
         public void Warmup()

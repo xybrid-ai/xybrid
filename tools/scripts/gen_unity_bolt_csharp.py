@@ -32,11 +32,15 @@ What it does:
         IsExternalInit, a .NET 5 type Unity lacks -> a one-file internal
         polyfill is emitted (needed by the C# 9 record hierarchy in
         XybridError, whose positional records still synthesize `init`).
-     e. `class XybridModel` -> `partial class XybridModel`, so the hand-ported
+     d. `class XybridModel` -> `partial class XybridModel`, so the hand-ported
         inference path in bindings/unity/Runtime/BoltSupplement (which boltffi
-        0.25.3 drops entirely -- run(), XybridEnvelope/EnvelopeKind/Result) can
+        0.25.3 drops entirely -- run(), run_stream(), stream_result(), and the
+        XybridEnvelope/EnvelopeKind/Result types) can
         extend it. That folder is hand-written and NOT touched by this script.
-     d. `NativeMemory.Alloc` (.NET 6) in FfiBuf.FromBytes -> fail closed. That
+     e. Keeps the generated model wrapper alive across blocking `StreamNext`,
+        preventing its finalizer from freeing the native model handle while
+        Rust is waiting for the next token.
+     f. `NativeMemory.Alloc` (.NET 6) in FfiBuf.FromBytes -> fail closed. That
         method hands an owned buffer to Rust, which frees it with its global
         allocator in boltffi_free_buf (std::alloc::dealloc) — a free no C#
         allocator matches on Windows (malloc/AllocHGlobal use the CRT heap;
@@ -119,7 +123,7 @@ RECORD_STRUCT_RE = re.compile(
     r"public readonly record struct (?P<name>\w+)\((?P<params>[^)]*)\)\s*\{",
     re.DOTALL,
 )
-EXPECTED_RECORD_STRUCTS = 6
+EXPECTED_RECORD_STRUCTS = 8
 
 # --- Transform (b): .NET 5 float LE writers -> netstandard2.1-safe equivalents.
 # BinaryPrimitives has the integer LE writers in netstandard2.1 but not the
@@ -138,17 +142,44 @@ LE_FLOAT_REWRITES = (
     ),
 )
 
-# --- Transform (e): make XybridModel partial. boltffi 0.25.3's C# generator
+# --- Transform (d): make XybridModel partial. boltffi 0.25.3's C# generator
 # drops the entire inference path -- no `run`, and no XybridEnvelope /
 # XybridEnvelopeKind / XybridResult (a data-carrying enum used as a function
 # INPUT, which the 0.25.3 C# lowering can't express; same class the Python
 # generator drops). bindings/unity/Runtime/BoltSupplement/ hand-ports that path
-# (wire codecs + a `partial class XybridModel` adding Run()), mirroring
+# (wire codecs + a `partial class XybridModel` adding Run() / RunStreaming()), mirroring
 # bindings/python/xybrid/_bolt.py. Marking the generated class partial lets the
 # supplement extend it and reach its private _handle.
 MODEL_FILE = "XybridModel.cs"
 MODEL_PARTIAL_TARGET = "public sealed class XybridModel : IDisposable"
 MODEL_PARTIAL_REPLACEMENT = "public sealed partial class XybridModel : IDisposable"
+
+# --- Transform (e): keep the managed model alive across blocking StreamNext.
+STREAM_NEXT_FREE_TARGET = (
+    "        public XybridStreamEvent StreamNext(ulong streamId)\n"
+    "        {\n"
+    "            ThrowIfDisposed();\n"
+    "            FfiBuf _buf = NativeMethods.XybridModelStreamNext(_handle, streamId);\n"
+    "            try\n"
+    "            {\n"
+    "                var reader = new WireReader(_buf);\n"
+    "                if (reader.ReadU8() != 0) throw new XybridErrorException(XybridError.Decode(reader));\n"
+    "                return XybridStreamEvent.Decode(reader);\n"
+    "            }\n"
+    "            finally\n"
+    "            {\n"
+    "                NativeMethods.FreeBuf(_buf);\n"
+    "            }\n"
+    "        }\n"
+)
+STREAM_NEXT_FREE_REPLACEMENT = STREAM_NEXT_FREE_TARGET.replace(
+    "                NativeMethods.FreeBuf(_buf);\n",
+    "                NativeMethods.FreeBuf(_buf);\n"
+    "                // StreamNext can block for the full inter-token gap. Keep\n"
+    "                // this wrapper alive so its finalizer cannot free _handle\n"
+    "                // while the native call is still using it.\n"
+    "                GC.KeepAlive(this);\n",
+)
 
 # --- Transform (c): IsExternalInit polyfill (a Unity-only supplement) ---
 POLYFILL_FILE = "IsExternalInit.cs"
@@ -266,6 +297,7 @@ def generate() -> dict[str, str]:
     le_floats = 0
     native_memory_shimmed = False
     model_made_partial = False
+    stream_next_kept_alive = False
     for src in sources:
         content = src.read_text(encoding="utf-8")
         content, n = _downlevel_record_structs(content)
@@ -288,6 +320,14 @@ def generate() -> dict[str, str]:
                 MODEL_PARTIAL_TARGET, MODEL_PARTIAL_REPLACEMENT, 1
             )
             model_made_partial = True
+            _drift(
+                STREAM_NEXT_FREE_TARGET in content,
+                f"expected StreamNext body not found in {src.name}",
+            )
+            content = content.replace(
+                STREAM_NEXT_FREE_TARGET, STREAM_NEXT_FREE_REPLACEMENT, 1
+            )
+            stream_next_kept_alive = True
         tree[src.name] = content
         tree[src.name + ".meta"] = script_meta(f"{DEST_REL}/{src.name}")
 
@@ -306,6 +346,7 @@ def generate() -> dict[str, str]:
     )
     _drift(native_memory_shimmed, f"{SHIM_FILE} not found in boltffi output")
     _drift(model_made_partial, f"{MODEL_FILE} not found in boltffi output")
+    _drift(stream_next_kept_alive, f"StreamNext not found in {MODEL_FILE}")
     return tree
 
 

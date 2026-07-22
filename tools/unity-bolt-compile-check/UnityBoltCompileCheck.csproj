@@ -23,7 +23,7 @@
 
   <ItemGroup>
     <Compile Include="../../bindings/unity/Runtime/Bolt/*.cs" />
-    <!-- Hand-ported inference path (run/envelope) that boltffi 0.25.3 drops. -->
+    <!-- Hand-ported inference paths (run/stream/envelope) that boltffi 0.25.3 drops. -->
     <Compile Include="../../bindings/unity/Runtime/BoltSupplement/*.cs" />
     <!-- Unity bundles System.Runtime.CompilerServices.Unsafe; supply it here so
          the standalone compile resolves Unsafe.SizeOf the same way Unity does. -->

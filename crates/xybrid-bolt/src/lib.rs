@@ -32,12 +32,8 @@
 //! - **Records and `XybridError`**: complete.
 //! - **Free functions** (init / push API): complete for the subset every
 //!   binding needs at startup.
-//! - **`XybridModel`**: minimal `#[export]` block covering the load / run /
-//!   warmup / voice surface. Enough to validate the proc-macro shape
-//!   against the facade.
+//! - **`XybridModel`**: load / run / pull-stream / warmup / voice surface.
 //! - **Deferred to follow-up commits**:
-//!   - Token streaming (`run_stream` / `run_stream_with_context`) — needs
-//!     BoltFFI's stream-event convention nailed down across all targets.
 //!   - `XybridCancellationToken` as an `Arc<Self>` handle.
 //!   - `XybridConversationContext` (uniffi opaque object equivalent).
 //!   - `run_with_options` / `run_with_context`.
@@ -471,6 +467,72 @@ impl From<facade::InferenceResult> for XybridResult {
 }
 
 // ============================================================================
+// Pull-based token streaming
+// ============================================================================
+
+#[data]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum XybridStreamEventKind {
+    Token,
+    Complete,
+}
+
+#[data]
+#[derive(Clone)]
+pub struct XybridStreamToken {
+    pub token: String,
+    pub token_id: Option<i64>,
+    pub index: u64,
+    pub cumulative_text: String,
+    pub finish_reason: Option<String>,
+}
+
+impl From<facade::StreamToken> for XybridStreamToken {
+    fn from(token: facade::StreamToken) -> Self {
+        Self {
+            token: token.token,
+            token_id: token.token_id,
+            index: token.index,
+            cumulative_text: token.cumulative_text,
+            finish_reason: token.finish_reason,
+        }
+    }
+}
+
+/// One pull from a streaming inference session.
+///
+/// This is a flat record instead of a data-carrying enum because the pinned
+/// C# generator cannot lower that enum shape reliably. `kind` selects the one
+/// populated payload: `token` for `Token`, none for `Complete`. A `Complete`
+/// event is followed by [`XybridModel::stream_result`] to retrieve the final
+/// result. Inference failures are returned as typed [`XybridError`] values by
+/// [`XybridModel::stream_next`].
+#[data]
+#[derive(Clone)]
+pub struct XybridStreamEvent {
+    pub kind: XybridStreamEventKind,
+    pub token: Option<XybridStreamToken>,
+}
+
+impl From<facade::StreamEvent> for XybridStreamEvent {
+    fn from(event: facade::StreamEvent) -> Self {
+        match event {
+            facade::StreamEvent::Token(token) => Self {
+                kind: XybridStreamEventKind::Token,
+                token: Some(token.into()),
+            },
+            facade::StreamEvent::Complete(_) => Self {
+                kind: XybridStreamEventKind::Complete,
+                token: None,
+            },
+            facade::StreamEvent::Error(_) => {
+                unreachable!("stream errors are returned before event conversion")
+            }
+        }
+    }
+}
+
+// ============================================================================
 // Voice info
 // ============================================================================
 
@@ -586,10 +648,8 @@ pub fn set_provider_api_key(provider: String, api_key: String) {
 // XybridModel handle
 // ============================================================================
 //
-// Sketch scope: load / run / warmup / unload / voice accessors only.
-// Streaming + cancellation + conversation context are wired in follow-up
-// commits once the bolt artifact emission has been validated against
-// the existing Swift / Kotlin / Unity examples.
+// Scope: load / run / pull-stream / warmup / unload / voice accessors.
+// Cancellation and conversation context remain follow-up work.
 //
 // `ModelLoader` is intentionally **not** mirrored as a separate
 // `#[export]` type. BoltFFI's wire layer treats opaque types as handle
@@ -603,6 +663,23 @@ pub fn set_provider_api_key(provider: String, api_key: String) {
 
 pub struct XybridModel {
     inner: std::sync::Arc<facade::XybridModel>,
+    streams: std::sync::Mutex<std::collections::HashMap<u64, std::sync::Arc<StreamEntry>>>,
+    next_stream_id: std::sync::atomic::AtomicU64,
+}
+
+struct StreamEntry {
+    session: std::sync::Arc<facade::StreamingSession>,
+    result: std::sync::Mutex<Option<facade::InferenceResult>>,
+}
+
+impl XybridModel {
+    fn new(inner: std::sync::Arc<facade::XybridModel>) -> Self {
+        Self {
+            inner,
+            streams: std::sync::Mutex::new(std::collections::HashMap::new()),
+            next_stream_id: std::sync::atomic::AtomicU64::new(1),
+        }
+    }
 }
 
 #[export]
@@ -612,21 +689,21 @@ impl XybridModel {
         let model = facade::ModelLoader::from_registry(id)
             .load()
             .map_err(XybridError::from)?;
-        Ok(Self { inner: model })
+        Ok(Self::new(model))
     }
 
     /// Load from a local model directory (must contain `model_metadata.json`).
     pub fn from_directory(path: String) -> Result<Self, XybridError> {
         let loader = facade::ModelLoader::from_directory(path).map_err(XybridError::from)?;
         let model = loader.load().map_err(XybridError::from)?;
-        Ok(Self { inner: model })
+        Ok(Self::new(model))
     }
 
     /// Load from a local `.xyb` bundle.
     pub fn from_bundle(path: String) -> Result<Self, XybridError> {
         let loader = facade::ModelLoader::from_bundle(path).map_err(XybridError::from)?;
         let model = loader.load().map_err(XybridError::from)?;
-        Ok(Self { inner: model })
+        Ok(Self::new(model))
     }
 
     /// Resolve and load from a HuggingFace repo (`org/repo` or `org/repo:variant`).
@@ -634,7 +711,7 @@ impl XybridModel {
         let model = facade::ModelLoader::from_huggingface(repo)
             .load()
             .map_err(XybridError::from)?;
-        Ok(Self { inner: model })
+        Ok(Self::new(model))
     }
 
     pub fn model_id(&self) -> String {
@@ -655,6 +732,11 @@ impl XybridModel {
 
     pub fn supports_streaming(&self) -> bool {
         self.inner.supports_streaming()
+    }
+
+    /// Whether this model emits true token-by-token output.
+    pub fn supports_token_streaming(&self) -> bool {
+        self.inner.supports_token_streaming()
     }
 
     pub fn is_llm(&self) -> bool {
@@ -699,6 +781,106 @@ impl XybridModel {
         }
         .map_err(XybridError::from)?;
         Ok(result.into())
+    }
+
+    /// Start token streaming and return a model-scoped session identifier.
+    ///
+    /// The identifier remains valid until the final result is taken, an error
+    /// is returned, or [`Self::stream_close`] is called.
+    pub fn run_stream(
+        &self,
+        envelope: XybridEnvelope,
+        options: Option<XybridRunOptions>,
+    ) -> Result<u64, XybridError> {
+        let session = self
+            .inner
+            .run_stream(
+                envelope.into(),
+                options.map(Into::into).unwrap_or_default(),
+                None,
+            )
+            .map_err(XybridError::from)?;
+        let stream_id = self
+            .next_stream_id
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.streams
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .insert(
+                stream_id,
+                std::sync::Arc::new(StreamEntry {
+                    session,
+                    result: std::sync::Mutex::new(None),
+                }),
+            );
+        Ok(stream_id)
+    }
+
+    /// Block until the next item for `stream_id` is ready.
+    pub fn stream_next(&self, stream_id: u64) -> Result<XybridStreamEvent, XybridError> {
+        let entry = self
+            .streams
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .get(&stream_id)
+            .cloned()
+            .ok_or_else(|| XybridError::InferenceError {
+                message: "unknown streaming session".into(),
+            })?;
+        match entry.session.next() {
+            Some(facade::StreamEvent::Complete(result)) => {
+                *entry
+                    .result
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(result);
+                Ok(XybridStreamEvent {
+                    kind: XybridStreamEventKind::Complete,
+                    token: None,
+                })
+            }
+            Some(facade::StreamEvent::Error(error)) => {
+                self.stream_close(stream_id);
+                Err(error.into())
+            }
+            Some(event @ facade::StreamEvent::Token(_)) => Ok(event.into()),
+            None => {
+                self.stream_close(stream_id);
+                Err(XybridError::InferenceError {
+                    message: "stream ended without a terminal event".into(),
+                })
+            }
+        }
+    }
+
+    /// Take the final result after receiving a `Complete` event.
+    pub fn stream_result(&self, stream_id: u64) -> Result<XybridResult, XybridError> {
+        let entry = self
+            .streams
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .get(&stream_id)
+            .cloned()
+            .ok_or_else(|| XybridError::InferenceError {
+                message: "unknown streaming session".into(),
+            })?;
+        let result = entry
+            .result
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .take()
+            .ok_or_else(|| XybridError::InferenceError {
+                message: "streaming result is not ready".into(),
+            })?;
+        self.stream_close(stream_id);
+        Ok(result.into())
+    }
+
+    /// Forget a streaming session.
+    pub fn stream_close(&self, stream_id: u64) {
+        self.streams
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .remove(&stream_id);
     }
 
     pub fn warmup(&self) -> Result<(), XybridError> {
@@ -770,5 +952,21 @@ mod tests {
             facade_opts.abort_on,
             vec![facade::AbortSignal::ThermalCritical]
         );
+    }
+
+    #[test]
+    fn stream_token_event_flattens_for_the_wire() {
+        let event = XybridStreamEvent::from(facade::StreamEvent::Token(facade::StreamToken {
+            token: "hi".into(),
+            token_id: Some(7),
+            index: 3,
+            cumulative_text: "say hi".into(),
+            finish_reason: None,
+        }));
+
+        assert_eq!(event.kind, XybridStreamEventKind::Token);
+        let token = event.token.expect("token event should carry a token");
+        assert_eq!(token.token, "hi");
+        assert_eq!(token.index, 3);
     }
 }

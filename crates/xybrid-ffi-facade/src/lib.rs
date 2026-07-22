@@ -25,9 +25,6 @@
 //!
 //! # Out of scope (deferred to follow-up PRs)
 //!
-//! - **LLM token streaming.** The SDK exposes callback-based streaming
-//!   APIs (`run_streaming`, `run_stream`); a channel-style facade wrapper
-//!   will land next, once the binding crates start consuming this surface.
 //! - **ASR streaming.** [`xybrid_sdk::stream::XybridStream`] is wrapped
 //!   separately in the same follow-up.
 //! - **Pipelines.** `xybrid-sdk` already exports POD-friendly
@@ -41,7 +38,8 @@
 //! [`FfiStageExecutionResult`]: xybrid_sdk::FfiStageExecutionResult
 
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::mpsc::{self, Receiver, SyncSender};
+use std::sync::{Arc, Mutex};
 
 use xybrid_sdk as sdk;
 
@@ -885,6 +883,79 @@ pub struct InferenceResult {
     pub metrics: InferenceMetrics,
 }
 
+/// A token emitted by a pull-based inference stream.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StreamToken {
+    pub token: String,
+    pub token_id: Option<i64>,
+    pub index: u64,
+    pub cumulative_text: String,
+    pub finish_reason: Option<String>,
+}
+
+impl StreamToken {
+    fn from_sdk(token: xybrid_core::runtime_adapter::types::PartialToken) -> Self {
+        Self {
+            token: token.token,
+            token_id: token.token_id,
+            index: token.index as u64,
+            cumulative_text: token.cumulative_text,
+            finish_reason: token.finish_reason,
+        }
+    }
+}
+
+/// An item returned by [`StreamingSession::next`].
+#[derive(Debug, Clone)]
+pub enum StreamEvent {
+    Token(StreamToken),
+    Complete(InferenceResult),
+    Error(Error),
+}
+
+const STREAM_CHANNEL_CAPACITY: usize = 32;
+
+/// Pull-based bridge over the SDK's callback streaming API.
+///
+/// A worker thread runs inference and writes into a bounded channel. Foreign
+/// callers repeatedly call [`next`](Self::next), keeping callbacks and Rust
+/// references on their respective sides of the FFI boundary.
+pub struct StreamingSession {
+    receiver: Mutex<Receiver<StreamEvent>>,
+}
+
+impl StreamingSession {
+    fn spawn(
+        produce: impl FnOnce(SyncSender<StreamEvent>) + Send + 'static,
+    ) -> std::io::Result<Arc<Self>> {
+        let (sender, receiver) = mpsc::sync_channel(STREAM_CHANNEL_CAPACITY);
+        std::thread::Builder::new()
+            .name("xybrid-stream".into())
+            .spawn(move || produce(sender))?;
+        Ok(Arc::new(Self {
+            receiver: Mutex::new(receiver),
+        }))
+    }
+
+    /// Block until the next token or terminal event is available.
+    ///
+    /// Returns `None` only after the producer disconnects. A normal inference
+    /// sends exactly one [`StreamEvent::Complete`] or [`StreamEvent::Error`]
+    /// before disconnecting.
+    pub fn next(&self) -> Option<StreamEvent> {
+        self.receiver
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .recv()
+            .ok()
+    }
+
+    #[cfg(test)]
+    fn spawn_for_test(produce: impl FnOnce(SyncSender<StreamEvent>) + Send + 'static) -> Arc<Self> {
+        Self::spawn(produce).expect("test streaming worker should spawn")
+    }
+}
+
 impl InferenceResult {
     pub fn from_sdk(result: sdk::InferenceResult) -> Self {
         let output_type = OutputType::from_sdk(result.output_type());
@@ -1124,6 +1195,11 @@ impl XybridModel {
         self.inner.supports_streaming()
     }
 
+    /// Whether this model emits true token-by-token output.
+    pub fn supports_token_streaming(&self) -> bool {
+        self.inner.supports_token_streaming()
+    }
+
     pub fn is_llm(&self) -> bool {
         self.inner.is_llm()
     }
@@ -1207,6 +1283,50 @@ impl XybridModel {
             .await
             .map_err(Error::from)?;
         Ok(InferenceResult::from_sdk(result))
+    }
+
+    /// Start inference and return a pull-based token stream.
+    ///
+    /// The returned session owns a bounded channel and the inference worker
+    /// owns a clone of the model, so both remain alive until inference ends.
+    /// Dropping the session disconnects the producer at its next token.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the envelope is invalid or the worker thread
+    /// cannot be created. Inference failures arrive as [`StreamEvent::Error`].
+    pub fn run_stream(
+        &self,
+        envelope: Envelope,
+        options: RunOptions,
+        cancel: Option<Arc<CancellationToken>>,
+    ) -> Result<Arc<StreamingSession>> {
+        let envelope = envelope.into_sdk()?;
+        let options =
+            options.to_sdk_over(cancel.as_deref(), self.inner.default_generation_config());
+        let model = self.inner.clone();
+
+        StreamingSession::spawn(move |sender| {
+            let result = model.run_streaming_with_options(&envelope, &options, |token| {
+                sender
+                    .send(StreamEvent::Token(StreamToken::from_sdk(token)))
+                    .map_err(|_| {
+                        Box::new(std::io::Error::new(
+                            std::io::ErrorKind::BrokenPipe,
+                            "stream receiver dropped",
+                        )) as Box<dyn std::error::Error + Send + Sync>
+                    })
+            });
+
+            let terminal = match result {
+                Ok(result) => StreamEvent::Complete(InferenceResult::from_sdk(result)),
+                Err(error) => StreamEvent::Error(Error::from(error)),
+            };
+            let _ = sender.send(terminal);
+        })
+        .map_err(|error| Error::InferenceError {
+            message: format!("failed to start streaming worker: {error}"),
+        })
     }
 
     // -- Lifecycle ----------------------------------------------------------
@@ -1578,6 +1698,61 @@ mod tests {
         assert!(!token.is_cancelled());
         clone.cancel();
         assert!(token.is_cancelled());
+    }
+
+    #[test]
+    fn streaming_session_delivers_tokens_then_completion_in_order() {
+        let session = StreamingSession::spawn_for_test(|sender| {
+            sender
+                .send(StreamEvent::Token(StreamToken {
+                    token: "hel".into(),
+                    token_id: Some(1),
+                    index: 0,
+                    cumulative_text: "hel".into(),
+                    finish_reason: None,
+                }))
+                .expect("test stream receiver should remain connected");
+            sender
+                .send(StreamEvent::Token(StreamToken {
+                    token: "lo".into(),
+                    token_id: Some(2),
+                    index: 1,
+                    cumulative_text: "hello".into(),
+                    finish_reason: Some("stop".into()),
+                }))
+                .expect("test stream receiver should remain connected");
+            sender
+                .send(StreamEvent::Complete(text_result_with_metadata(
+                    HashMap::new(),
+                )))
+                .expect("test stream receiver should remain connected");
+        });
+
+        assert!(matches!(
+            session.next(),
+            Some(StreamEvent::Token(StreamToken { index: 0, .. }))
+        ));
+        assert!(matches!(
+            session.next(),
+            Some(StreamEvent::Token(StreamToken { index: 1, .. }))
+        ));
+        assert!(matches!(session.next(), Some(StreamEvent::Complete(_))));
+        assert!(session.next().is_none());
+    }
+
+    #[test]
+    fn streaming_session_delivers_typed_terminal_error() {
+        let session = StreamingSession::spawn_for_test(|sender| {
+            sender
+                .send(StreamEvent::Error(Error::NotLoaded))
+                .expect("test stream receiver should remain connected");
+        });
+
+        assert!(matches!(
+            session.next(),
+            Some(StreamEvent::Error(Error::NotLoaded))
+        ));
+        assert!(session.next().is_none());
     }
 
     #[test]
