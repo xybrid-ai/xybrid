@@ -1,19 +1,20 @@
 // Hand-written supplement to the generated BoltFFI C# bindings.
 //
-// boltffi 0.25.3's C# generator silently drops the entire inference path: no
-// `run` / `run_stream` / `stream_result` methods, and none of the types they
-// need -- XybridEnvelope,
-// XybridEnvelopeKind (a data-carrying enum used as a function INPUT, which the
-// 0.25.3 C# lowering can't express), or XybridResult. Swift/Kotlin generate
-// them fine; C# does not. Rather than block Unity on inference, this file
-// hand-ports that path, exactly as bindings/python/xybrid/_bolt.py does for the
-// Python SDK. It is pinned to the boltffi 0.25.3 wire ABI.
+// boltffi 0.25.3's C# generator silently drops every method that takes an
+// envelope (a data-carrying enum used as a function INPUT the 0.25.3 C#
+// lowering can't express) plus the types they need -- XybridEnvelope,
+// XybridEnvelopeKind, XybridResult. That covers the whole inference surface:
+// `run` / `run_stream` / `run_with_context` / `run_stream_with_context` on the
+// model, and `push` / `set_system` on the conversation context. Swift/Kotlin
+// generate them fine; C# does not. Rather than block Unity on inference, this
+// file hand-ports that path, exactly as bindings/python/xybrid/_bolt.py does
+// for the Python SDK. It is pinned to the boltffi 0.25.3 wire ABI.
 //
 // The wire format mirrors the generated Swift (bindings/apple/.../xybrid_bolt.swift,
 // which is device-validated) and reuses the generated C# WireReader/WireWriter
 // primitives in Runtime/Bolt/XybridBolt.cs. This layer is NOT emitted by
-// tools/scripts/gen_unity_bolt_csharp.py; that script only marks XybridModel
-// `partial` so the Run() and RunStreaming() methods below can extend it. When
+// tools/scripts/gen_unity_bolt_csharp.py; that script only marks XybridModel and
+// XybridConversationContext `partial` so the methods below can extend them. When
 // boltffi >= 0.26 lands (which is expected to express this path), delete this
 // file and let the generator emit inference natively.
 
@@ -210,6 +211,36 @@ namespace XybridBolt
 
         [DllImport(NativeMethods.LibName, EntryPoint = "boltffi_xybrid_model_stream_result")]
         internal static extern FfiBuf XybridModelStreamResult(IntPtr self, ulong streamId);
+
+        [DllImport(NativeMethods.LibName, EntryPoint = "boltffi_xybrid_model_run_with_context")]
+        internal static extern FfiBuf XybridModelRunWithContext(
+            IntPtr self,
+            byte[] envelope,
+            UIntPtr envelopeLen,
+            IntPtr context,
+            byte[] options,
+            UIntPtr optionsLen);
+
+        [DllImport(NativeMethods.LibName, EntryPoint = "boltffi_xybrid_model_run_stream_with_context")]
+        internal static extern FfiBuf XybridModelRunStreamWithContext(
+            IntPtr self,
+            byte[] envelope,
+            UIntPtr envelopeLen,
+            IntPtr context,
+            byte[] options,
+            UIntPtr optionsLen);
+
+        [DllImport(NativeMethods.LibName, EntryPoint = "boltffi_xybrid_conversation_context_push")]
+        internal static extern FfiBuf XybridConversationContextPush(
+            IntPtr self,
+            byte[] envelope,
+            UIntPtr envelopeLen);
+
+        [DllImport(NativeMethods.LibName, EntryPoint = "boltffi_xybrid_conversation_context_set_system")]
+        internal static extern FfiBuf XybridConversationContextSetSystem(
+            IntPtr self,
+            byte[] envelope,
+            UIntPtr envelopeLen);
     }
 
     public sealed partial class XybridModel
@@ -281,33 +312,127 @@ namespace XybridBolt
 
             byte[] envelopeBytes = EncodeEnvelope(envelope);
             byte[] optionsBytes = EncodeOptions(options);
-            ulong? streamId = null;
+            ulong streamId = StartStream(BoltInferenceNative.XybridModelRunStream(
+                _handle,
+                envelopeBytes,
+                (UIntPtr)envelopeBytes.Length,
+                optionsBytes,
+                (UIntPtr)optionsBytes.Length));
+            return DrainStream(streamId, onToken);
+        }
 
+        /// <summary>
+        /// Context-aware variant of <see cref="Run"/>: seeds inference with
+        /// <paramref name="context"/>'s conversation history for multi-turn chat.
+        /// Only the generation config from <paramref name="options"/> is applied.
+        /// </summary>
+        /// <exception cref="ArgumentNullException">If any argument is null.</exception>
+        /// <exception cref="XybridErrorException">If the model returns a typed error.</exception>
+        /// <exception cref="ObjectDisposedException">If the model has been disposed.</exception>
+        public XybridResult RunWithContext(
+            XybridEnvelope envelope,
+            XybridConversationContext context,
+            XybridRunOptions? options = null)
+        {
+            if (envelope is null) throw new ArgumentNullException(nameof(envelope));
+            if (context is null) throw new ArgumentNullException(nameof(context));
+            ThrowIfDisposed();
+
+            byte[] envelopeBytes = EncodeEnvelope(envelope);
+            byte[] optionsBytes = EncodeOptions(options);
+
+            FfiBuf buf = BoltInferenceNative.XybridModelRunWithContext(
+                _handle,
+                envelopeBytes,
+                (UIntPtr)envelopeBytes.Length,
+                context.RawHandle,
+                optionsBytes,
+                (UIntPtr)optionsBytes.Length);
             try
             {
-                FfiBuf startBuf = BoltInferenceNative.XybridModelRunStream(
+                var reader = new WireReader(buf);
+                if (reader.ReadU8() != 0) throw new XybridErrorException(XybridError.Decode(reader));
+                return XybridResult.Decode(reader);
+            }
+            finally
+            {
+                NativeMethods.FreeBuf(buf);
+                // Blocking call: keep both the model and the context alive so a
+                // GC can't finalize either and free a handle mid-run.
+                GC.KeepAlive(this);
+                GC.KeepAlive(context);
+            }
+        }
+
+        /// <summary>
+        /// Context-aware variant of <see cref="RunStreaming"/>: streams tokens
+        /// while seeding inference with <paramref name="context"/>'s history.
+        /// </summary>
+        /// <exception cref="ArgumentNullException">If any argument is null.</exception>
+        /// <exception cref="XybridErrorException">If the model returns a typed error.</exception>
+        /// <exception cref="ObjectDisposedException">If the model has been disposed.</exception>
+        public XybridResult RunStreamingWithContext(
+            XybridEnvelope envelope,
+            Action<XybridStreamToken> onToken,
+            XybridConversationContext context,
+            XybridRunOptions? options = null)
+        {
+            if (envelope is null) throw new ArgumentNullException(nameof(envelope));
+            if (onToken is null) throw new ArgumentNullException(nameof(onToken));
+            if (context is null) throw new ArgumentNullException(nameof(context));
+            ThrowIfDisposed();
+
+            byte[] envelopeBytes = EncodeEnvelope(envelope);
+            byte[] optionsBytes = EncodeOptions(options);
+
+            ulong streamId;
+            try
+            {
+                streamId = StartStream(BoltInferenceNative.XybridModelRunStreamWithContext(
                     _handle,
                     envelopeBytes,
                     (UIntPtr)envelopeBytes.Length,
+                    context.RawHandle,
                     optionsBytes,
-                    (UIntPtr)optionsBytes.Length);
-                try
-                {
-                    var reader = new WireReader(startBuf);
-                    if (reader.ReadU8() != 0)
-                    {
-                        throw new XybridErrorException(XybridError.Decode(reader));
-                    }
-                    streamId = reader.ReadU64();
-                }
-                finally
-                {
-                    NativeMethods.FreeBuf(startBuf);
-                }
+                    (UIntPtr)optionsBytes.Length));
+            }
+            finally
+            {
+                // The worker snapshots the context before returning the id, so
+                // the context only needs to survive the start call.
+                GC.KeepAlive(context);
+            }
+            return DrainStream(streamId, onToken);
+        }
 
+        /// <summary>Decode a run_stream* start buffer into a session id (or throw).</summary>
+        private ulong StartStream(FfiBuf startBuf)
+        {
+            try
+            {
+                var reader = new WireReader(startBuf);
+                if (reader.ReadU8() != 0) throw new XybridErrorException(XybridError.Decode(reader));
+                return reader.ReadU64();
+            }
+            finally
+            {
+                NativeMethods.FreeBuf(startBuf);
+                GC.KeepAlive(this);
+            }
+        }
+
+        /// <summary>
+        /// Pull events for <paramref name="streamId"/>, invoking
+        /// <paramref name="onToken"/> per token until the terminal event, then
+        /// return the final result. Closes the session on exit.
+        /// </summary>
+        private XybridResult DrainStream(ulong streamId, Action<XybridStreamToken> onToken)
+        {
+            try
+            {
                 while (true)
                 {
-                    XybridStreamEvent streamEvent = StreamNext(streamId.Value);
+                    XybridStreamEvent streamEvent = StreamNext(streamId);
                     switch (streamEvent.Kind)
                     {
                         case XybridStreamEventKind.Token:
@@ -319,7 +444,7 @@ namespace XybridBolt
                             onToken(token);
                             break;
                         case XybridStreamEventKind.Complete:
-                            return TakeStreamResult(streamId.Value);
+                            return TakeStreamResult(streamId);
                         default:
                             throw new InvalidOperationException(
                                 $"Unknown Bolt stream event kind: {streamEvent.Kind}");
@@ -330,9 +455,9 @@ namespace XybridBolt
             {
                 // Closing drops the bounded Rust receiver, which stops the
                 // producer at its next token if the callback exits early.
-                if (streamId is { } id && _handle != IntPtr.Zero)
+                if (_handle != IntPtr.Zero)
                 {
-                    StreamClose(id);
+                    StreamClose(streamId);
                 }
                 GC.KeepAlive(this);
             }
@@ -375,6 +500,60 @@ namespace XybridBolt
             finally
             {
                 NativeMethods.FreeBuf(buf);
+            }
+        }
+    }
+
+    public sealed partial class XybridConversationContext
+    {
+        /// <summary>
+        /// Append a turn — typically a user or assistant message envelope — to
+        /// the conversation history.
+        /// </summary>
+        /// <exception cref="ArgumentNullException">If <paramref name="envelope"/> is null.</exception>
+        /// <exception cref="XybridErrorException">If the envelope fails validation.</exception>
+        /// <exception cref="ObjectDisposedException">If the context has been disposed.</exception>
+        public void Push(XybridEnvelope envelope)
+        {
+            if (envelope is null) throw new ArgumentNullException(nameof(envelope));
+            ThrowIfDisposed();
+            SendEnvelope(BoltInferenceNative.XybridConversationContextPush, envelope);
+        }
+
+        /// <summary>
+        /// Set the persistent system-prompt envelope (survives <see cref="Clear"/>).
+        /// </summary>
+        /// <exception cref="ArgumentNullException">If <paramref name="envelope"/> is null.</exception>
+        /// <exception cref="XybridErrorException">If the envelope fails validation.</exception>
+        /// <exception cref="ObjectDisposedException">If the context has been disposed.</exception>
+        public void SetSystem(XybridEnvelope envelope)
+        {
+            if (envelope is null) throw new ArgumentNullException(nameof(envelope));
+            ThrowIfDisposed();
+            SendEnvelope(BoltInferenceNative.XybridConversationContextSetSystem, envelope);
+        }
+
+        // Encode `envelope`, call `native(handle, bytes, len)`, and check the
+        // returned Result tag (a `Result<(), XybridError>` crosses as a 1-byte
+        // tag followed by the error when non-zero).
+        private void SendEnvelope(
+            Func<IntPtr, byte[], UIntPtr, FfiBuf> native,
+            XybridEnvelope envelope)
+        {
+            using var wire = new WireWriter(64);
+            envelope.WireEncodeTo(wire);
+            byte[] bytes = wire.ToArray();
+
+            FfiBuf buf = native(_handle, bytes, (UIntPtr)bytes.Length);
+            try
+            {
+                var reader = new WireReader(buf);
+                if (reader.ReadU8() != 0) throw new XybridErrorException(XybridError.Decode(reader));
+            }
+            finally
+            {
+                NativeMethods.FreeBuf(buf);
+                GC.KeepAlive(this);
             }
         }
     }

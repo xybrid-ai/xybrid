@@ -739,5 +739,18 @@ namespace XybridBolt
         internal static extern FfiBuf XybridModelWarmup(IntPtr self);
         [DllImport(LibName, EntryPoint = "boltffi_xybrid_model_unload")]
         internal static extern FfiBuf XybridModelUnload(IntPtr self);
+
+        [DllImport(LibName, EntryPoint = "boltffi_xybrid_conversation_context_free")]
+        internal static extern void XybridConversationContextFree(IntPtr handle);
+
+        [DllImport(LibName, EntryPoint = "boltffi_xybrid_conversation_context_new")]
+        internal static extern IntPtr XybridConversationContextNew();
+
+        [DllImport(LibName, EntryPoint = "boltffi_xybrid_conversation_context_with_id")]
+        internal static extern IntPtr XybridConversationContextWithId(byte[] id, UIntPtr idLen);
+        [DllImport(LibName, EntryPoint = "boltffi_xybrid_conversation_context_clear")]
+        internal static extern void XybridConversationContextClear(IntPtr self);
+        [DllImport(LibName, EntryPoint = "boltffi_xybrid_conversation_context_id")]
+        internal static extern FfiBuf XybridConversationContextId(IntPtr self);
     }
 }

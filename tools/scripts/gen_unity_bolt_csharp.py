@@ -154,6 +154,15 @@ MODEL_FILE = "XybridModel.cs"
 MODEL_PARTIAL_TARGET = "public sealed class XybridModel : IDisposable"
 MODEL_PARTIAL_REPLACEMENT = "public sealed partial class XybridModel : IDisposable"
 
+# XybridConversationContext is likewise extended in BoltSupplement with the
+# envelope-input methods the generator drops (push / set_system), so it too
+# must be partial.
+CONTEXT_FILE = "XybridConversationContext.cs"
+CONTEXT_PARTIAL_TARGET = "public sealed class XybridConversationContext : IDisposable"
+CONTEXT_PARTIAL_REPLACEMENT = (
+    "public sealed partial class XybridConversationContext : IDisposable"
+)
+
 # --- Transform (e): keep the managed model alive across blocking StreamNext.
 STREAM_NEXT_FREE_TARGET = (
     "        public XybridStreamEvent StreamNext(ulong streamId)\n"
@@ -297,6 +306,7 @@ def generate() -> dict[str, str]:
     le_floats = 0
     native_memory_shimmed = False
     model_made_partial = False
+    context_made_partial = False
     stream_next_kept_alive = False
     for src in sources:
         content = src.read_text(encoding="utf-8")
@@ -328,6 +338,15 @@ def generate() -> dict[str, str]:
                 STREAM_NEXT_FREE_TARGET, STREAM_NEXT_FREE_REPLACEMENT, 1
             )
             stream_next_kept_alive = True
+        if src.name == CONTEXT_FILE:
+            _drift(
+                CONTEXT_PARTIAL_TARGET in content,
+                f"expected XybridConversationContext class declaration not found in {src.name}",
+            )
+            content = content.replace(
+                CONTEXT_PARTIAL_TARGET, CONTEXT_PARTIAL_REPLACEMENT, 1
+            )
+            context_made_partial = True
         tree[src.name] = content
         tree[src.name + ".meta"] = script_meta(f"{DEST_REL}/{src.name}")
 
@@ -347,6 +366,7 @@ def generate() -> dict[str, str]:
     _drift(native_memory_shimmed, f"{SHIM_FILE} not found in boltffi output")
     _drift(model_made_partial, f"{MODEL_FILE} not found in boltffi output")
     _drift(stream_next_kept_alive, f"StreamNext not found in {MODEL_FILE}")
+    _drift(context_made_partial, f"{CONTEXT_FILE} not found in boltffi output")
     return tree
 
 

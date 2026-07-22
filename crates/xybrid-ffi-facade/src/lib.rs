@@ -1329,6 +1329,53 @@ impl XybridModel {
         })
     }
 
+    /// Start context-aware inference and return a pull-based token stream.
+    ///
+    /// Mirrors [`run_stream`](Self::run_stream) but seeds the worker with a
+    /// snapshot of `context`'s conversation history so multi-turn chat streams.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the envelope is invalid or the worker thread
+    /// cannot be created. Inference failures arrive as [`StreamEvent::Error`].
+    pub fn run_stream_with_context(
+        &self,
+        envelope: Envelope,
+        context: Arc<ConversationContextHandle>,
+        options: RunOptions,
+        cancel: Option<Arc<CancellationToken>>,
+    ) -> Result<Arc<StreamingSession>> {
+        let envelope = envelope.into_sdk()?;
+        let ctx = context.snapshot();
+        let options =
+            options.to_sdk_over(cancel.as_deref(), self.inner.default_generation_config());
+        let model = self.inner.clone();
+
+        StreamingSession::spawn(move |sender| {
+            let result =
+                model.run_streaming_with_context_options(&envelope, &ctx, &options, |token| {
+                    sender
+                        .send(StreamEvent::Token(StreamToken::from_sdk(token)))
+                        .map_err(|_| {
+                            Box::new(std::io::Error::new(
+                                std::io::ErrorKind::BrokenPipe,
+                                "stream receiver dropped",
+                            ))
+                                as Box<dyn std::error::Error + Send + Sync>
+                        })
+                });
+
+            let terminal = match result {
+                Ok(result) => StreamEvent::Complete(InferenceResult::from_sdk(result)),
+                Err(error) => StreamEvent::Error(Error::from(error)),
+            };
+            let _ = sender.send(terminal);
+        })
+        .map_err(|error| Error::InferenceError {
+            message: format!("failed to start streaming worker: {error}"),
+        })
+    }
+
     // -- Lifecycle ----------------------------------------------------------
 
     pub fn warmup(&self) -> Result<()> {

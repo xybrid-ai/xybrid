@@ -32,11 +32,13 @@
 //! - **Records and `XybridError`**: complete.
 //! - **Free functions** (init / push API): complete for the subset every
 //!   binding needs at startup.
-//! - **`XybridModel`**: load / run / pull-stream / warmup / voice surface.
+//! - **`XybridModel`**: load / run / pull-stream / conversation-context runs /
+//!   warmup / voice surface.
+//! - **`XybridConversationContext`**: opaque handle (new / with_id / push /
+//!   set_system / clear / id) feeding `run_with_context` and
+//!   `run_stream_with_context`.
 //! - **Deferred to follow-up commits**:
 //!   - `XybridCancellationToken` as an `Arc<Self>` handle.
-//!   - `XybridConversationContext` (uniffi opaque object equivalent).
-//!   - `run_with_options` / `run_with_context`.
 //!   - Pipeline surface.
 //!
 //! Until `xybrid-uniffi` and `xybrid-ffi` are removed, this crate exists
@@ -883,12 +885,118 @@ impl XybridModel {
             .remove(&stream_id);
     }
 
+    /// Run inference seeded with a conversation `context` (multi-turn chat).
+    ///
+    /// Only the generation config from `options` is applied — abort signals and
+    /// cloud fallback are not wired on the context path (matches the facade's
+    /// `run_with_context`).
+    pub fn run_with_context(
+        &self,
+        envelope: XybridEnvelope,
+        context: &XybridConversationContext,
+        options: Option<XybridRunOptions>,
+    ) -> Result<XybridResult, XybridError> {
+        let generation_config = options
+            .and_then(|opts| opts.generation_config)
+            .map(Into::into);
+        let result = self
+            .inner
+            .run_with_context(envelope.into(), context.inner.clone(), generation_config)
+            .map_err(XybridError::from)?;
+        Ok(result.into())
+    }
+
+    /// Start context-aware token streaming; returns a model-scoped session id.
+    /// The pull protocol is identical to [`Self::run_stream`]
+    /// (`stream_next` / `stream_result` / `stream_close`).
+    pub fn run_stream_with_context(
+        &self,
+        envelope: XybridEnvelope,
+        context: &XybridConversationContext,
+        options: Option<XybridRunOptions>,
+    ) -> Result<u64, XybridError> {
+        let session = self
+            .inner
+            .run_stream_with_context(
+                envelope.into(),
+                context.inner.clone(),
+                options.map(Into::into).unwrap_or_default(),
+                None,
+            )
+            .map_err(XybridError::from)?;
+        let stream_id = self
+            .next_stream_id
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.streams
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .insert(
+                stream_id,
+                std::sync::Arc::new(StreamEntry {
+                    session,
+                    result: std::sync::Mutex::new(None),
+                }),
+            );
+        Ok(stream_id)
+    }
+
     pub fn warmup(&self) -> Result<(), XybridError> {
         self.inner.warmup().map_err(XybridError::from)
     }
 
     pub fn unload(&self) -> Result<(), XybridError> {
         self.inner.unload().map_err(XybridError::from)
+    }
+}
+
+/// Opaque handle for multi-turn conversation history.
+///
+/// Build it up with [`push`](Self::push) / [`set_system`](Self::set_system),
+/// then pass it to [`XybridModel::run_with_context`] /
+/// [`XybridModel::run_stream_with_context`]. Wraps the facade's
+/// interior-mutable, thread-safe `ConversationContextHandle`.
+pub struct XybridConversationContext {
+    inner: std::sync::Arc<facade::ConversationContextHandle>,
+}
+
+#[export]
+impl XybridConversationContext {
+    /// Create an empty conversation context (fresh id).
+    #[allow(clippy::new_without_default)]
+    pub fn new() -> Self {
+        Self {
+            inner: facade::ConversationContextHandle::new(),
+        }
+    }
+
+    /// Create a context with a caller-supplied id (for telemetry correlation
+    /// across turns).
+    pub fn with_id(id: String) -> Self {
+        Self {
+            inner: facade::ConversationContextHandle::with_id(id),
+        }
+    }
+
+    /// Append a turn — typically a user or assistant message envelope.
+    pub fn push(&self, envelope: XybridEnvelope) -> Result<(), XybridError> {
+        self.inner.push(envelope.into()).map_err(XybridError::from)
+    }
+
+    /// Set the persistent system-prompt envelope (survives [`clear`](Self::clear)).
+    pub fn set_system(&self, envelope: XybridEnvelope) -> Result<(), XybridError> {
+        self.inner
+            .set_system(envelope.into())
+            .map_err(XybridError::from)
+    }
+
+    /// Drop the history; the system envelope (if any) is preserved.
+    pub fn clear(&self) {
+        self.inner.clear();
+    }
+
+    /// The context id.
+    pub fn id(&self) -> String {
+        self.inner.id()
     }
 }
 
