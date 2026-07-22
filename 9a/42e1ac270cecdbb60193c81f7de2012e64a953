@@ -1,0 +1,44 @@
+bindings/unity/Runtime/Api/ConversationContext.cs
+  s_3feb3bac73008c::t_137fa2a2d0cb4e 27-29,34,37-38,43,47-51,56,60-61,66,70-71,76,80-81,83,86,89,95,99,104-105,113,115-119,128,131,142,150,152-156,164,167,170-172,181-182,186,191,195,197
+bindings/unity/Runtime/Api/XybridClient.cs
+  s_3feb3bac73008c::t_7b8cf17d2827b2 77-81
+bindings/unity/Runtime/Api/Model.cs
+  s_3feb3bac73008c::t_b6a837f128c93f 17,19-20,22,25,28,30-31,39,41-43,51,62-65,78-81,93-94,107,110,112,124,136-139,146-147,152,156-157,159-160,165-166,171-172,174,184-186,188,203-204,218-219,230-232,234,239,245,248-249,252,254,259,261,263,265-266,275,278,280,284,286,289,291,293,295-297,305-308,316-319,323,326-330,334-343,345,347,351-377,379,381,383-394,396-398,400,411-412,416,421
+tools/unity-bolt-compile-check/UnityBoltCompileCheck.csproj
+  s_3feb3bac73008c::t_e6ab29d69df811 31-45
+  s_3feb3bac73008c::t_0361af4b20b0fd 19-22
+bindings/unity/Runtime/Api/GenerationConfig.cs
+  s_3feb3bac73008c::t_276d5d7abe9535 5,20,23,32-38,41-42,44,49,56,58-62,68,70-74,81,84,94,97,104,107,114,117,124,127,134,137,144,149,153-155,157-168,170,172,177-178,180,182
+bindings/unity/Runtime/Api/XybridException.cs
+  s_3feb3bac73008c::t_3b6f0161184589 66-103
+crates/xybrid-bolt/src/lib.rs
+  s_3feb3bac73008c::t_2f847a1667827f 1001-1015
+bindings/unity/Runtime/Api/InferenceResult.cs
+  s_3feb3bac73008c::t_6e4b74ca3b6c0c 32-33,69-70,72-73,75-76,78-79,81-82,84-85,91,93-94,96-97,99-100,102-103,105-113,115-123,125-131,133-141,144-153,155-173,175-182,184,186-189,191,194-201,210,212,217-218,220,222,225,228-231
+bindings/unity/Runtime/Api/Envelope.cs
+  s_3feb3bac73008c::t_a872d820201820 6,15-17,21-22,25-26,28,30,32,40,47-48,58,65-66,68,70-74,83,90,92-95,105,112,114-120,130,138-139,149,156-160,162,168,170-171,173,177-179,181-192,215,220-221,223,225
+bindings/unity/Runtime/Bolt/XybridBolt.cs
+  s_3feb3bac73008c::t_b4c12bdcdb0868 755-761
+bindings/unity/Runtime/Bolt/XybridConversationContext.cs
+  s_3feb3bac73008c::t_b4c12bdcdb0868 77-103
+bindings/unity/Runtime/Api/ModelLoader.cs
+  s_3feb3bac73008c::t_b0a3b4fc553d9f 13-14,18-27,30,33,35-36,44,50,58,64,73,79,87-90,96-98,106,112,122,126,128-145,147-153,165-166,168,170
+crates/xybrid-ffi-facade/src/lib.rs
+  s_3feb3bac73008c::t_406bf4401e5c78 582-598
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "9a42e1ac270cecdbb60193c81f7de2012e64a953",
+  "prompts": {},
+  "sessions": {
+    "s_3feb3bac73008c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a953a9f9-867a-4e8d-8c79-863fa8a7808b",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
