@@ -646,6 +646,12 @@ pub fn set_provider_api_key(provider: String, api_key: String) {
     facade::set_provider_api_key(provider, api_key);
 }
 
+/// The SDK version string (tracks `CARGO_PKG_VERSION`).
+#[export]
+pub fn version() -> String {
+    facade::version()
+}
+
 // ============================================================================
 // XybridModel handle
 // ============================================================================
@@ -1012,6 +1018,99 @@ impl XybridConversationContext {
     /// Set the max history length before FIFO pruning.
     pub fn set_max_history_len(&self, len: u32) {
         self.inner.set_max_history_len(len);
+    }
+}
+
+// ============================================================================
+// Telemetry (advanced config + lifecycle)
+// ============================================================================
+//
+// Mirrors the pre-bolt C ABI's telemetry surface. The apiKey-only fast path is
+// [`configure_runtime`]; this is the advanced builder (batch size, flush
+// interval, device label/attributes) plus the init/flush/shutdown lifecycle.
+// Telemetry *events* never cross the FFI — only this config/lifecycle control
+// plane does. Every setter takes simple scalars/strings, so the whole surface
+// generates natively (no hand-port needed).
+
+/// The SDK's default telemetry ingest endpoint (for display alongside a config).
+#[export]
+pub fn telemetry_default_endpoint() -> String {
+    facade::telemetry_default_endpoint()
+}
+
+/// Flush pending telemetry events. Safe before init / after shutdown.
+#[export]
+pub fn telemetry_flush() {
+    facade::telemetry_flush();
+}
+
+/// Shut down the telemetry exporter. Idempotent.
+#[export]
+pub fn telemetry_shutdown() {
+    facade::telemetry_shutdown();
+}
+
+/// Advanced telemetry configuration builder.
+///
+/// Create with [`new`](Self::new), tune via the setters, then hand to
+/// [`telemetry_init`]. Wraps the facade's interior-mutable, thread-safe
+/// `TelemetryConfigHandle`.
+pub struct XybridTelemetryConfig {
+    inner: std::sync::Arc<facade::TelemetryConfigHandle>,
+}
+
+#[export]
+impl XybridTelemetryConfig {
+    /// A new config bound to the default ingest endpoint and the given API key.
+    pub fn new(api_key: String) -> Self {
+        Self {
+            inner: facade::TelemetryConfigHandle::new(api_key),
+        }
+    }
+
+    /// Override the ingest endpoint (self-hosted collector / non-prod).
+    pub fn set_endpoint(&self, endpoint: String) {
+        self.inner.set_endpoint(endpoint);
+    }
+
+    /// Set the app version reported with every event.
+    pub fn set_app_version(&self, version: String) {
+        self.inner.set_app_version(version);
+    }
+
+    /// Set the human-friendly device label reported with every event.
+    pub fn set_device_label(&self, label: String) {
+        self.inner.set_device_label(label);
+    }
+
+    /// Attach an app-provided device attribute (stored under `device.custom`).
+    pub fn set_device_attribute(&self, key: String, value: String) {
+        self.inner.set_device_attribute(key, value);
+    }
+
+    /// Set the number of events buffered before a flush.
+    pub fn set_batch_size(&self, batch_size: u32) {
+        self.inner.set_batch_size(batch_size);
+    }
+
+    /// Set the background flush interval, in seconds.
+    pub fn set_flush_interval_secs(&self, secs: u32) {
+        self.inner.set_flush_interval_secs(secs);
+    }
+
+    /// Start the process-global telemetry exporter from this config.
+    ///
+    /// Consumes the config: subsequent setters no-op and a second `init` on the
+    /// same handle errors. Modeled as a method (not a free `telemetry_init`)
+    /// because boltffi 0.25.3 drops free functions that take a handle
+    /// parameter, but lowers a handle self-method fine (same reason the
+    /// generated `run` lives on `XybridModel`).
+    ///
+    /// # Errors
+    /// Errors if this config was already consumed, or if telemetry is already
+    /// initialized without an intervening [`telemetry_shutdown`].
+    pub fn init(&self) -> Result<(), XybridError> {
+        facade::telemetry_init(&self.inner).map_err(XybridError::from)
     }
 }
 

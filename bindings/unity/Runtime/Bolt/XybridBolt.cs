@@ -102,6 +102,54 @@ namespace XybridBolt
             NativeMethods.SetProviderApiKey(_providerBytes, (UIntPtr)_providerBytes.Length, _apiKeyBytes, (UIntPtr)_apiKeyBytes.Length);
         }
 
+        /// <summary>
+        /// The SDK version string (tracks `CARGO_PKG_VERSION`).
+        /// </summary>
+        public static string Version()
+        {
+            FfiBuf _buf = NativeMethods.Version();
+            try
+            {
+                return new WireReader(_buf).ReadString();
+            }
+            finally
+            {
+                NativeMethods.FreeBuf(_buf);
+            }
+        }
+
+        /// <summary>
+        /// The SDK's default telemetry ingest endpoint (for display alongside a config).
+        /// </summary>
+        public static string TelemetryDefaultEndpoint()
+        {
+            FfiBuf _buf = NativeMethods.TelemetryDefaultEndpoint();
+            try
+            {
+                return new WireReader(_buf).ReadString();
+            }
+            finally
+            {
+                NativeMethods.FreeBuf(_buf);
+            }
+        }
+
+        /// <summary>
+        /// Flush pending telemetry events. Safe before init / after shutdown.
+        /// </summary>
+        public static void TelemetryFlush()
+        {
+            NativeMethods.TelemetryFlush();
+        }
+
+        /// <summary>
+        /// Shut down the telemetry exporter. Idempotent.
+        /// </summary>
+        public static void TelemetryShutdown()
+        {
+            NativeMethods.TelemetryShutdown();
+        }
+
     }
 
 
@@ -689,6 +737,14 @@ namespace XybridBolt
         internal static extern void SetApiKey(byte[] apiKey, UIntPtr apiKeyLen);
         [DllImport(LibName, EntryPoint = "boltffi_set_provider_api_key")]
         internal static extern void SetProviderApiKey(byte[] provider, UIntPtr providerLen, byte[] apiKey, UIntPtr apiKeyLen);
+        [DllImport(LibName, EntryPoint = "boltffi_version")]
+        internal static extern FfiBuf Version();
+        [DllImport(LibName, EntryPoint = "boltffi_telemetry_default_endpoint")]
+        internal static extern FfiBuf TelemetryDefaultEndpoint();
+        [DllImport(LibName, EntryPoint = "boltffi_telemetry_flush")]
+        internal static extern void TelemetryFlush();
+        [DllImport(LibName, EntryPoint = "boltffi_telemetry_shutdown")]
+        internal static extern void TelemetryShutdown();
 
         [DllImport(LibName, EntryPoint = "boltffi_xybrid_model_free")]
         internal static extern void XybridModelFree(IntPtr handle);
@@ -759,5 +815,25 @@ namespace XybridBolt
         internal static extern bool XybridConversationContextHasSystem(IntPtr self);
         [DllImport(LibName, EntryPoint = "boltffi_xybrid_conversation_context_set_max_history_len")]
         internal static extern void XybridConversationContextSetMaxHistoryLen(IntPtr self, uint len);
+
+        [DllImport(LibName, EntryPoint = "boltffi_xybrid_telemetry_config_free")]
+        internal static extern void XybridTelemetryConfigFree(IntPtr handle);
+
+        [DllImport(LibName, EntryPoint = "boltffi_xybrid_telemetry_config_new")]
+        internal static extern IntPtr XybridTelemetryConfigNew(byte[] apiKey, UIntPtr apiKeyLen);
+        [DllImport(LibName, EntryPoint = "boltffi_xybrid_telemetry_config_set_endpoint")]
+        internal static extern void XybridTelemetryConfigSetEndpoint(IntPtr self, byte[] endpoint, UIntPtr endpointLen);
+        [DllImport(LibName, EntryPoint = "boltffi_xybrid_telemetry_config_set_app_version")]
+        internal static extern void XybridTelemetryConfigSetAppVersion(IntPtr self, byte[] version, UIntPtr versionLen);
+        [DllImport(LibName, EntryPoint = "boltffi_xybrid_telemetry_config_set_device_label")]
+        internal static extern void XybridTelemetryConfigSetDeviceLabel(IntPtr self, byte[] label, UIntPtr labelLen);
+        [DllImport(LibName, EntryPoint = "boltffi_xybrid_telemetry_config_set_device_attribute")]
+        internal static extern void XybridTelemetryConfigSetDeviceAttribute(IntPtr self, byte[] key, UIntPtr keyLen, byte[] value, UIntPtr valueLen);
+        [DllImport(LibName, EntryPoint = "boltffi_xybrid_telemetry_config_set_batch_size")]
+        internal static extern void XybridTelemetryConfigSetBatchSize(IntPtr self, uint batchSize);
+        [DllImport(LibName, EntryPoint = "boltffi_xybrid_telemetry_config_set_flush_interval_secs")]
+        internal static extern void XybridTelemetryConfigSetFlushIntervalSecs(IntPtr self, uint secs);
+        [DllImport(LibName, EntryPoint = "boltffi_xybrid_telemetry_config_init")]
+        internal static extern FfiBuf XybridTelemetryConfigInit(IntPtr self);
     }
 }

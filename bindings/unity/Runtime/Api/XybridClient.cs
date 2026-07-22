@@ -2,7 +2,6 @@
 // Main entry point for the Xybrid SDK.
 
 using System;
-using Xybrid.Native;
 
 namespace Xybrid
 {
@@ -35,14 +34,7 @@ namespace Xybrid
         /// <summary>
         /// Gets the SDK version string.
         /// </summary>
-        public static unsafe string Version
-        {
-            get
-            {
-                byte* versionPtr = NativeMethods.xybrid_version();
-                return NativeHelpers.FromUtf8Ptr(versionPtr) ?? "unknown";
-            }
-        }
+        public static string Version => XybridBolt.XybridBolt.Version();
 
         /// <summary>
         /// Initializes the Xybrid SDK.
@@ -65,7 +57,7 @@ namespace Xybrid
         /// calls are no-ops, so configuration is applied on the first call only.
         /// </remarks>
         /// <exception cref="XybridException">Thrown if initialization fails.</exception>
-        public static unsafe void Initialize(string apiKey = null, string ingestUrl = null)
+        public static void Initialize(string apiKey = null, string ingestUrl = null)
         {
             lock (_lock)
             {
@@ -74,19 +66,11 @@ namespace Xybrid
                     return;
                 }
 
-                // Runtime init moves to bolt: set the binding tag (used for
+                // Runtime init runs on bolt: set the binding tag (used for
                 // telemetry attribution). The pre-bolt xybrid_init() was a no-op.
+                // Telemetry now runs entirely through bolt (A2.2), so there is no
+                // longer a second C-ABI binding state to keep in sync.
                 XybridBolt.XybridBolt.SetBinding("unity");
-
-                // Dual-library window: advanced telemetry still runs through the
-                // pre-bolt C ABI (GAP-3), which keeps its OWN binding state. Set
-                // it too so xybrid_ffi telemetry reports "unity", not the default.
-                // Drop this once telemetry is ported off xybrid_ffi in A2.2.
-                byte[] bindingBytes = NativeHelpers.ToUtf8Bytes("unity");
-                fixed (byte* bindingPtr = bindingBytes)
-                {
-                    NativeMethods.xybrid_set_binding(bindingPtr);
-                }
 
                 _initialized = true;
 
@@ -216,7 +200,7 @@ namespace Xybrid
         /// Thread-safe: serialized via the SDK's initialization lock. Call
         /// <see cref="ShutdownTelemetry"/> before re-initializing.
         /// </remarks>
-        public static unsafe void InitializeTelemetry(TelemetryConfig config)
+        public static void InitializeTelemetry(TelemetryConfig config)
         {
             if (config == null)
             {
@@ -233,12 +217,22 @@ namespace Xybrid
                         "Xybrid telemetry is already initialized. Call XybridClient.ShutdownTelemetry() before re-initializing.");
                 }
 
-                IntPtr raw = config.DetachHandle();
-                var handle = (XybridTelemetryConfigHandle*)raw.ToPointer();
-                int result = NativeMethods.xybrid_telemetry_init(handle);
-                if (result != 0)
+                // Ownership transfers here: DetachHandle neutralizes `config` so a
+                // later Dispose() is a no-op. Init() consumes the config's inner
+                // state; we dispose the (now-empty) bolt handle on every path.
+                XybridBolt.XybridTelemetryConfig bolt = config.DetachHandle();
+                try
                 {
-                    NativeHelpers.ThrowLastError("Failed to initialize Xybrid telemetry");
+                    bolt.Init();
+                }
+                catch (Exception ex) when (
+                    ex is XybridBolt.XybridErrorException || ex is XybridBolt.BoltException)
+                {
+                    throw BoltErrors.Translate(ex);
+                }
+                finally
+                {
+                    bolt.Dispose();
                 }
 
                 _telemetryInitialized = true;
@@ -248,7 +242,6 @@ namespace Xybrid
         /// <summary>
         /// Flushes any pending telemetry events to the collector.
         /// </summary>
-        /// <exception cref="XybridException">Thrown if the native flush fails.</exception>
         /// <remarks>
         /// Thread-safe. No-op if telemetry has never been initialized or has been
         /// shut down. Safe to call from lifecycle hooks such as
@@ -263,18 +256,13 @@ namespace Xybrid
                     return;
                 }
 
-                int result = NativeMethods.xybrid_telemetry_flush();
-                if (result != 0)
-                {
-                    NativeHelpers.ThrowLastError("Failed to flush Xybrid telemetry");
-                }
+                XybridBolt.XybridBolt.TelemetryFlush();
             }
         }
 
         /// <summary>
         /// Shuts down the telemetry sender, releasing its background worker.
         /// </summary>
-        /// <exception cref="XybridException">Thrown if the native shutdown fails.</exception>
         /// <remarks>
         /// Thread-safe and idempotent: the first call stops the sender, subsequent
         /// calls are no-ops. Fire-and-forget semantics &#x2014; this method does not
@@ -291,11 +279,7 @@ namespace Xybrid
                 }
 
                 _telemetryInitialized = false;
-                int result = NativeMethods.xybrid_telemetry_shutdown();
-                if (result != 0)
-                {
-                    NativeHelpers.ThrowLastError("Failed to shut down Xybrid telemetry");
-                }
+                XybridBolt.XybridBolt.TelemetryShutdown();
             }
         }
     }

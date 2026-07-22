@@ -1515,6 +1515,171 @@ pub fn has_api_key() -> bool {
 }
 
 // ============================================================================
+// Telemetry (advanced config + lifecycle)
+// ============================================================================
+//
+// The apiKey-only fast path runs through [`configure_runtime`]
+// (`sdk::init().api_key().run()`). This handle exposes the *advanced* knobs —
+// batch size, flush interval, device label/attributes — that the platform SDKs
+// surface via a fluent `TelemetryConfig` builder, plus the process-global
+// init/flush/shutdown lifecycle. It mirrors the pre-bolt C ABI's telemetry
+// surface so the Unity/C# binding can move onto bolt without losing capability.
+//
+// Telemetry *events* never cross the FFI boundary — they are exported
+// Rust→network. Only this config/lifecycle control plane does.
+
+/// Tracks whether [`telemetry_init`] has run without a matching
+/// [`telemetry_shutdown`], so a second init is rejected instead of silently
+/// leaking the prior sender. Mirrors the pre-bolt C ABI's gate.
+static TELEMETRY_INITIALIZED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// The SDK's default telemetry ingest endpoint.
+///
+/// Bindings display this alongside a freshly created config so callers can read
+/// the resolved endpoint back without a round-trip setter.
+pub fn telemetry_default_endpoint() -> String {
+    sdk::telemetry::DEFAULT_INGEST_URL.to_string()
+}
+
+/// The SDK version string, sourced from `CARGO_PKG_VERSION` at compile time.
+pub fn version() -> String {
+    sdk::SDK_VERSION.to_string()
+}
+
+/// Interior-mutable holder for a telemetry configuration under construction.
+///
+/// Generator crates wrap this in `Arc<Self>` for opaque-handle semantics. The
+/// [`sdk::telemetry::TelemetryConfig`] is held behind a `Mutex<Option<_>>` so
+/// foreign callers can mutate it through a shared `&self` (FFI handle methods
+/// only ever receive a shared reference), and so [`telemetry_init`] can `take`
+/// it — leaving the handle empty — matching the pre-bolt consume-on-init
+/// contract. The mutex is uncontended in normal usage: a config is built by one
+/// host thread.
+pub struct TelemetryConfigHandle {
+    inner: Mutex<Option<sdk::telemetry::TelemetryConfig>>,
+}
+
+impl TelemetryConfigHandle {
+    /// A new config bound to the default ingest endpoint and the given API key.
+    pub fn new(api_key: String) -> Arc<Self> {
+        Arc::new(Self {
+            inner: Mutex::new(Some(sdk::telemetry::TelemetryConfig::new(
+                sdk::telemetry::DEFAULT_INGEST_URL,
+                api_key,
+            ))),
+        })
+    }
+
+    /// Override the ingest endpoint (self-hosted collector / non-prod).
+    pub fn set_endpoint(&self, endpoint: String) {
+        self.with_config(|config| config.endpoint = endpoint);
+    }
+
+    /// Set the app version reported with every event.
+    pub fn set_app_version(&self, version: String) {
+        self.with_config(|config| config.app_version = Some(version));
+    }
+
+    /// Set the human-friendly device label reported with every event.
+    pub fn set_device_label(&self, label: String) {
+        self.with_config(|config| config.device_label = Some(label));
+    }
+
+    /// Attach an app-provided device attribute (stored under `device.custom`).
+    pub fn set_device_attribute(&self, key: String, value: String) {
+        self.with_config(|config| {
+            config.device_profile_patch.custom.insert(key, value);
+        });
+    }
+
+    /// Set the number of events buffered before a flush.
+    pub fn set_batch_size(&self, batch_size: u32) {
+        self.with_config(|config| config.batch_size = batch_size as usize);
+    }
+
+    /// Set the background flush interval, in seconds.
+    pub fn set_flush_interval_secs(&self, secs: u32) {
+        self.with_config(|config| config.flush_interval_secs = secs as u64);
+    }
+
+    /// Apply `f` to the in-progress config. A no-op after the config has been
+    /// consumed by [`telemetry_init`] — mirroring the pre-bolt setters, which
+    /// no-op once the handle is gone.
+    fn with_config(&self, f: impl FnOnce(&mut sdk::telemetry::TelemetryConfig)) {
+        if let Some(config) = self.lock().as_mut() {
+            f(config);
+        }
+    }
+
+    /// Take the built config out, leaving the handle empty.
+    fn take(&self) -> Option<sdk::telemetry::TelemetryConfig> {
+        self.lock().take()
+    }
+
+    /// Lock the inner slot, recovering the guard if the mutex is poisoned (a
+    /// panic at the FFI boundary would abort the host app over a recoverable
+    /// condition — matches the codebase-wide poison-recovery convention).
+    fn lock(&self) -> std::sync::MutexGuard<'_, Option<sdk::telemetry::TelemetryConfig>> {
+        self.inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+}
+
+/// Start the process-global telemetry exporter from a built config.
+///
+/// Consumes the config held by `handle`: subsequent setter calls become no-ops
+/// and a second `telemetry_init` on the same handle errors. This is the
+/// advanced entry point; the apiKey-only path is [`configure_runtime`].
+///
+/// # Errors
+/// [`Error::ConfigError`] if the handle was already consumed, or if telemetry
+/// is already initialized without an intervening [`telemetry_shutdown`].
+pub fn telemetry_init(handle: &TelemetryConfigHandle) -> Result<()> {
+    // Reclaim the built config first — the pre-bolt C ABI always consumes the
+    // handle on init, success or failure.
+    let config = handle.take().ok_or_else(|| Error::ConfigError {
+        message: "telemetry config already consumed".to_string(),
+    })?;
+
+    // Gate against double-init: only the false→true transition wins. On
+    // contention, drop `config` (freeing the second sender's resources) and
+    // error without touching the live exporter.
+    if TELEMETRY_INITIALIZED
+        .compare_exchange(
+            false,
+            true,
+            std::sync::atomic::Ordering::AcqRel,
+            std::sync::atomic::Ordering::Acquire,
+        )
+        .is_err()
+    {
+        return Err(Error::ConfigError {
+            message: "telemetry already initialized; call shutdown before reinitializing"
+                .to_string(),
+        });
+    }
+
+    sdk::telemetry::init_platform_telemetry(config);
+    Ok(())
+}
+
+/// Flush pending telemetry events. Safe before init / after shutdown — the SDK
+/// no-ops when the exporter is absent.
+pub fn telemetry_flush() {
+    sdk::telemetry::flush_platform_telemetry();
+}
+
+/// Shut down the telemetry exporter. Idempotent: a call before init, or a
+/// second call, no-ops without touching the SDK.
+pub fn telemetry_shutdown() {
+    if TELEMETRY_INITIALIZED.swap(false, std::sync::atomic::Ordering::AcqRel) {
+        sdk::telemetry::shutdown_platform_telemetry();
+    }
+}
+
+// ============================================================================
 // Tests
 // ============================================================================
 
@@ -1877,5 +2042,58 @@ mod tests {
             bound.as_str(),
             "flutter" | "kotlin" | "swift" | "unity" | "rust"
         ));
+    }
+
+    #[test]
+    fn telemetry_default_endpoint_matches_sdk() {
+        assert_eq!(
+            telemetry_default_endpoint(),
+            sdk::telemetry::DEFAULT_INGEST_URL
+        );
+    }
+
+    #[test]
+    fn version_tracks_cargo_pkg_version() {
+        assert_eq!(version(), sdk::SDK_VERSION);
+        assert!(!version().is_empty());
+    }
+
+    #[test]
+    fn telemetry_builder_maps_to_sdk_fields_and_consumes() {
+        let handle = TelemetryConfigHandle::new("secret-key".into());
+
+        // A fresh config defaults its endpoint to the ingest URL (bindings read
+        // this back before init).
+        assert_eq!(
+            handle.lock().as_ref().unwrap().endpoint,
+            sdk::telemetry::DEFAULT_INGEST_URL
+        );
+
+        handle.set_endpoint("https://collector.internal".into());
+        handle.set_app_version("1.2.3".into());
+        handle.set_device_label("Test Device".into());
+        handle.set_device_attribute("ring".into(), "canary".into());
+        handle.set_batch_size(64);
+        handle.set_flush_interval_secs(30);
+
+        // `telemetry_init` takes the config out; assert every setter landed on the
+        // matching SDK field — this is the wire the C#/Unity builder relies on.
+        let config = handle.take().expect("config present before init");
+        assert_eq!(config.endpoint, "https://collector.internal");
+        assert_eq!(config.api_key, "secret-key");
+        assert_eq!(config.app_version.as_deref(), Some("1.2.3"));
+        assert_eq!(config.device_label.as_deref(), Some("Test Device"));
+        assert_eq!(
+            config.device_profile_patch.custom.get("ring"),
+            Some(&"canary".to_string())
+        );
+        assert_eq!(config.batch_size, 64);
+        assert_eq!(config.flush_interval_secs, 30);
+
+        // Consumed: a second take yields nothing and later setters no-op rather
+        // than panic (mirrors the pre-bolt consume-on-init contract).
+        assert!(handle.take().is_none());
+        handle.set_endpoint("ignored".into());
+        assert!(handle.take().is_none());
     }
 }

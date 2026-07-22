@@ -1,8 +1,7 @@
 // Xybrid SDK - Telemetry Configuration
-// Fluent builder wrapping the native telemetry config handle.
+// Fluent builder wrapping the bolt telemetry config handle.
 
 using System;
-using Xybrid.Native;
 
 namespace Xybrid
 {
@@ -32,7 +31,7 @@ namespace Xybrid
     {
         private readonly object _lock = new object();
         private string _endpoint;
-        private unsafe XybridTelemetryConfigHandle* _handle;
+        private XybridBolt.XybridTelemetryConfig _bolt;
         private bool _disposed;
 
         /// <summary>
@@ -81,31 +80,27 @@ namespace Xybrid
         /// Thrown if <paramref name="apiKey"/> is null, empty, or whitespace.
         /// </exception>
         /// <exception cref="XybridException">Thrown if the native handle cannot be created.</exception>
-        public unsafe TelemetryConfig(string apiKey)
+        public TelemetryConfig(string apiKey)
         {
             if (string.IsNullOrWhiteSpace(apiKey))
             {
                 throw new ArgumentException("apiKey must be a non-empty string.", nameof(apiKey));
             }
 
-            byte[] apiKeyBytes = NativeHelpers.ToUtf8Bytes(apiKey);
-
-            fixed (byte* apiKeyPtr = apiKeyBytes)
+            try
             {
-                XybridTelemetryConfigHandle* handle = NativeMethods.xybrid_telemetry_config_new(apiKeyPtr);
-                if (handle == null)
-                {
-                    NativeHelpers.ThrowLastError("Failed to create telemetry config");
-                }
-
-                _handle = handle;
+                _bolt = new XybridBolt.XybridTelemetryConfig(apiKey);
+            }
+            catch (Exception ex) when (
+                ex is XybridBolt.XybridErrorException || ex is XybridBolt.BoltException)
+            {
+                throw BoltErrors.Translate(ex);
             }
 
-            // Seed the managed Endpoint property from the same static string the
+            // Seed the managed Endpoint property from the same default string the
             // native side just bound to, so callers can read it back without a
             // round-trip setter.
-            byte* defaultPtr = NativeMethods.xybrid_telemetry_default_endpoint();
-            _endpoint = NativeHelpers.FromUtf8Ptr(defaultPtr) ?? string.Empty;
+            _endpoint = XybridBolt.XybridBolt.TelemetryDefaultEndpoint();
         }
 
         /// <summary>
@@ -118,27 +113,17 @@ namespace Xybrid
         /// Thrown if <paramref name="endpoint"/> is null, empty, or whitespace.
         /// </exception>
         /// <exception cref="ObjectDisposedException">Thrown if this config has been disposed or detached.</exception>
-        /// <exception cref="XybridException">Thrown if the native setter rejects the value.</exception>
-        public unsafe TelemetryConfig WithEndpoint(string endpoint)
+        public TelemetryConfig WithEndpoint(string endpoint)
         {
             if (string.IsNullOrWhiteSpace(endpoint))
             {
                 throw new ArgumentException("endpoint must be a non-empty string.", nameof(endpoint));
             }
 
-            byte[] bytes = NativeHelpers.ToUtf8Bytes(endpoint);
-
             lock (_lock)
             {
                 ThrowIfDisposedLocked();
-                fixed (byte* ptr = bytes)
-                {
-                    int result = NativeMethods.xybrid_telemetry_config_set_endpoint(_handle, ptr);
-                    if (result != 0)
-                    {
-                        NativeHelpers.ThrowLastError("Failed to set telemetry endpoint");
-                    }
-                }
+                _bolt.SetEndpoint(endpoint);
                 _endpoint = endpoint;
             }
 
@@ -152,27 +137,17 @@ namespace Xybrid
         /// <returns>This configuration, for chaining.</returns>
         /// <exception cref="ArgumentNullException">Thrown if <paramref name="appVersion"/> is null.</exception>
         /// <exception cref="ObjectDisposedException">Thrown if this config has been disposed or detached.</exception>
-        /// <exception cref="XybridException">Thrown if the native setter rejects the value.</exception>
-        public unsafe TelemetryConfig WithAppVersion(string appVersion)
+        public TelemetryConfig WithAppVersion(string appVersion)
         {
             if (appVersion == null)
             {
                 throw new ArgumentNullException(nameof(appVersion));
             }
 
-            byte[] bytes = NativeHelpers.ToUtf8Bytes(appVersion);
-
             lock (_lock)
             {
                 ThrowIfDisposedLocked();
-                fixed (byte* ptr = bytes)
-                {
-                    int result = NativeMethods.xybrid_telemetry_config_set_app_version(_handle, ptr);
-                    if (result != 0)
-                    {
-                        NativeHelpers.ThrowLastError("Failed to set telemetry app version");
-                    }
-                }
+                _bolt.SetAppVersion(appVersion);
             }
 
             return this;
@@ -185,27 +160,17 @@ namespace Xybrid
         /// <returns>This configuration, for chaining.</returns>
         /// <exception cref="ArgumentNullException">Thrown if <paramref name="deviceLabel"/> is null.</exception>
         /// <exception cref="ObjectDisposedException">Thrown if this config has been disposed or detached.</exception>
-        /// <exception cref="XybridException">Thrown if the native setter rejects the value.</exception>
-        public unsafe TelemetryConfig WithDeviceLabel(string deviceLabel)
+        public TelemetryConfig WithDeviceLabel(string deviceLabel)
         {
             if (deviceLabel == null)
             {
                 throw new ArgumentNullException(nameof(deviceLabel));
             }
 
-            byte[] bytes = NativeHelpers.ToUtf8Bytes(deviceLabel);
-
             lock (_lock)
             {
                 ThrowIfDisposedLocked();
-                fixed (byte* ptr = bytes)
-                {
-                    int result = NativeMethods.xybrid_telemetry_config_set_device_label(_handle, ptr);
-                    if (result != 0)
-                    {
-                        NativeHelpers.ThrowLastError("Failed to set telemetry device label");
-                    }
-                }
+                _bolt.SetDeviceLabel(deviceLabel);
             }
 
             return this;
@@ -220,8 +185,7 @@ namespace Xybrid
         /// <exception cref="ArgumentException">Thrown if <paramref name="key"/> is null or empty.</exception>
         /// <exception cref="ArgumentNullException">Thrown if <paramref name="value"/> is null.</exception>
         /// <exception cref="ObjectDisposedException">Thrown if this config has been disposed or detached.</exception>
-        /// <exception cref="XybridException">Thrown if the native setter rejects the value.</exception>
-        public unsafe TelemetryConfig WithDeviceAttribute(string key, string value)
+        public TelemetryConfig WithDeviceAttribute(string key, string value)
         {
             if (string.IsNullOrEmpty(key))
             {
@@ -232,21 +196,10 @@ namespace Xybrid
                 throw new ArgumentNullException(nameof(value));
             }
 
-            byte[] keyBytes = NativeHelpers.ToUtf8Bytes(key);
-            byte[] valueBytes = NativeHelpers.ToUtf8Bytes(value);
-
             lock (_lock)
             {
                 ThrowIfDisposedLocked();
-                fixed (byte* keyPtr = keyBytes)
-                fixed (byte* valuePtr = valueBytes)
-                {
-                    int result = NativeMethods.xybrid_telemetry_config_set_device_attribute(_handle, keyPtr, valuePtr);
-                    if (result != 0)
-                    {
-                        NativeHelpers.ThrowLastError($"Failed to set telemetry device attribute '{key}'");
-                    }
-                }
+                _bolt.SetDeviceAttribute(key, value);
             }
 
             return this;
@@ -258,17 +211,12 @@ namespace Xybrid
         /// <param name="batchSize">Batch size in events.</param>
         /// <returns>This configuration, for chaining.</returns>
         /// <exception cref="ObjectDisposedException">Thrown if this config has been disposed or detached.</exception>
-        /// <exception cref="XybridException">Thrown if the native setter rejects the value.</exception>
-        public unsafe TelemetryConfig WithBatchSize(uint batchSize)
+        public TelemetryConfig WithBatchSize(uint batchSize)
         {
             lock (_lock)
             {
                 ThrowIfDisposedLocked();
-                int result = NativeMethods.xybrid_telemetry_config_set_batch_size(_handle, batchSize);
-                if (result != 0)
-                {
-                    NativeHelpers.ThrowLastError("Failed to set telemetry batch size");
-                }
+                _bolt.SetBatchSize(batchSize);
             }
 
             return this;
@@ -283,8 +231,7 @@ namespace Xybrid
         /// Thrown if <paramref name="interval"/> is negative or exceeds <see cref="uint.MaxValue"/> seconds.
         /// </exception>
         /// <exception cref="ObjectDisposedException">Thrown if this config has been disposed or detached.</exception>
-        /// <exception cref="XybridException">Thrown if the native setter rejects the value.</exception>
-        public unsafe TelemetryConfig WithFlushInterval(TimeSpan interval)
+        public TelemetryConfig WithFlushInterval(TimeSpan interval)
         {
             double totalSeconds = interval.TotalSeconds;
             if (totalSeconds < 0)
@@ -301,11 +248,7 @@ namespace Xybrid
             lock (_lock)
             {
                 ThrowIfDisposedLocked();
-                int result = NativeMethods.xybrid_telemetry_config_set_flush_interval_secs(_handle, seconds);
-                if (result != 0)
-                {
-                    NativeHelpers.ThrowLastError("Failed to set telemetry flush interval");
-                }
+                _bolt.SetFlushIntervalSecs(seconds);
             }
 
             return this;
@@ -315,26 +258,22 @@ namespace Xybrid
         /// Transfers ownership of the native handle to the caller and neutralizes this
         /// instance so that subsequent <see cref="Dispose"/> calls are no-ops.
         /// </summary>
-        /// <returns>The raw native handle as an <see cref="IntPtr"/>.</returns>
+        /// <returns>The bolt telemetry config handle.</returns>
         /// <exception cref="ObjectDisposedException">Thrown if this config has already been disposed or detached.</exception>
         /// <remarks>
         /// Intended for internal use by <see cref="XybridClient.InitializeTelemetry"/>, which
-        /// passes the handle to <c>xybrid_telemetry_init</c> (a consuming call).
+        /// calls <c>Init()</c> on the handle (a consuming call) and disposes it afterwards.
         /// </remarks>
-        internal IntPtr DetachHandle()
+        internal XybridBolt.XybridTelemetryConfig DetachHandle()
         {
             lock (_lock)
             {
                 ThrowIfDisposedLocked();
-                IntPtr raw;
-                unsafe
-                {
-                    raw = (IntPtr)_handle;
-                    _handle = null;
-                }
+                XybridBolt.XybridTelemetryConfig bolt = _bolt;
+                _bolt = null;
                 _disposed = true;
                 GC.SuppressFinalize(this);
-                return raw;
+                return bolt;
             }
         }
 
@@ -381,14 +320,14 @@ namespace Xybrid
                 {
                     return;
                 }
-                unsafe
+                if (disposing)
                 {
-                    if (_handle != null)
-                    {
-                        NativeMethods.xybrid_telemetry_config_free(_handle);
-                        _handle = null;
-                    }
+                    // Release the native handle eagerly. On the finalizer path we
+                    // leave it to the bolt handle's own finalizer instead of
+                    // touching a possibly-finalized managed object.
+                    _bolt?.Dispose();
                 }
+                _bolt = null;
                 _disposed = true;
             }
         }
