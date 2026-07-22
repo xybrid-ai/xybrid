@@ -1,0 +1,21 @@
+crates/xybrid-ffi-facade/src/lib.rs
+  s_56f8212040c844::t_67d4c3008fcd71 1769-1770,1772-1776
+bindings/unity/Runtime/Api/BundleReader.cs
+  s_56f8212040c844::t_2d43d4d5713bce 114,117,124-141
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "79e4f56f21f4865af125f0580fd47f7d5fe9553f",
+  "prompts": {},
+  "sessions": {
+    "s_56f8212040c844": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "712d827d-2c3e-407d-a7a4-2e1b3f6e2b3b",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
