@@ -111,14 +111,33 @@ namespace Xybrid
             if (path == null)
                 throw new ArgumentNullException(nameof(path));
 
+            XybridBolt.XybridBundle bundle;
             try
             {
-                return new BundleReader(XybridBolt.XybridBundle.Open(path));
+                bundle = XybridBolt.XybridBundle.Open(path);
             }
             catch (Exception ex) when (
                 ex is XybridBolt.XybridErrorException || ex is XybridBolt.BoltException)
             {
                 throw BoltErrors.Translate(ex);
+            }
+
+            // The ctor issues native calls to cache the manifest fields. If any
+            // throws, dispose the opened bundle so its native handle doesn't leak,
+            // then surface the failure (translated to XybridException like Open's
+            // own errors).
+            try
+            {
+                return new BundleReader(bundle);
+            }
+            catch (Exception ex)
+            {
+                bundle.Dispose();
+                if (ex is XybridBolt.XybridErrorException || ex is XybridBolt.BoltException)
+                {
+                    throw BoltErrors.Translate(ex);
+                }
+                throw;
             }
         }
 

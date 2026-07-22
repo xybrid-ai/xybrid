@@ -1766,8 +1766,14 @@ impl BundleHandle {
     /// manifest).
     ///
     /// # Errors
-    /// [`Error::ConfigError`] if the bundle can't be opened or is malformed.
+    /// [`Error::ConfigError`] on an empty path, or if the bundle can't be opened
+    /// or is malformed.
     pub fn open(path: String) -> Result<Arc<Self>> {
+        if path.is_empty() {
+            return Err(Error::ConfigError {
+                message: "path is empty".to_string(),
+            });
+        }
         let inner = sdk::bundler::XyBundle::load(&path).map_err(|e| Error::ConfigError {
             message: format!("failed to open bundle: {e}"),
         })?;
