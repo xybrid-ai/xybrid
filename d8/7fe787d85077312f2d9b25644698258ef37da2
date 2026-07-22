@@ -1,0 +1,20 @@
+bindings/unity/Runtime/Api/XybridClient.cs
+  s_3feb3bac73008c::t_f26dc3b0e15816 81-89
+  s_3feb3bac73008c::t_d32a549dd987e5 90
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "d87fe787d85077312f2d9b25644698258ef37da2",
+  "prompts": {},
+  "sessions": {
+    "s_3feb3bac73008c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a953a9f9-867a-4e8d-8c79-863fa8a7808b",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
