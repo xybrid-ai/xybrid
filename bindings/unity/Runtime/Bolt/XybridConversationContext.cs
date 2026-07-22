@@ -74,6 +74,33 @@ namespace XybridBolt
             }
         }
 
+        /// <summary>
+        /// Number of history turns (excludes the system envelope).
+        /// </summary>
+        public uint HistoryLen()
+        {
+            ThrowIfDisposed();
+            return NativeMethods.XybridConversationContextHistoryLen(_handle);
+        }
+
+        /// <summary>
+        /// Whether a persistent system-prompt envelope is set.
+        /// </summary>
+        public bool HasSystem()
+        {
+            ThrowIfDisposed();
+            return NativeMethods.XybridConversationContextHasSystem(_handle);
+        }
+
+        /// <summary>
+        /// Set the max history length before FIFO pruning.
+        /// </summary>
+        public void SetMaxHistoryLen(uint len)
+        {
+            ThrowIfDisposed();
+            NativeMethods.XybridConversationContextSetMaxHistoryLen(_handle, len);
+        }
+
         internal IntPtr RawHandle => _handle;
 
         private void ThrowIfDisposed()

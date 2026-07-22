@@ -752,5 +752,12 @@ namespace XybridBolt
         internal static extern void XybridConversationContextClear(IntPtr self);
         [DllImport(LibName, EntryPoint = "boltffi_xybrid_conversation_context_id")]
         internal static extern FfiBuf XybridConversationContextId(IntPtr self);
+        [DllImport(LibName, EntryPoint = "boltffi_xybrid_conversation_context_history_len")]
+        internal static extern uint XybridConversationContextHistoryLen(IntPtr self);
+        [DllImport(LibName, EntryPoint = "boltffi_xybrid_conversation_context_has_system")]
+        [return: MarshalAs(UnmanagedType.I1)]
+        internal static extern bool XybridConversationContextHasSystem(IntPtr self);
+        [DllImport(LibName, EntryPoint = "boltffi_xybrid_conversation_context_set_max_history_len")]
+        internal static extern void XybridConversationContextSetMaxHistoryLen(IntPtr self, uint len);
     }
 }

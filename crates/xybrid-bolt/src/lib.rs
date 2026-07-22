@@ -998,6 +998,21 @@ impl XybridConversationContext {
     pub fn id(&self) -> String {
         self.inner.id()
     }
+
+    /// Number of history turns (excludes the system envelope).
+    pub fn history_len(&self) -> u32 {
+        self.inner.history_len()
+    }
+
+    /// Whether a persistent system-prompt envelope is set.
+    pub fn has_system(&self) -> bool {
+        self.inner.has_system()
+    }
+
+    /// Set the max history length before FIFO pruning.
+    pub fn set_max_history_len(&self, len: u32) {
+        self.inner.set_max_history_len(len);
+    }
 }
 
 // ============================================================================

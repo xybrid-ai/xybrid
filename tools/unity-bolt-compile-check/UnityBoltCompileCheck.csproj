@@ -16,7 +16,10 @@
     <TargetFramework>netstandard2.1</TargetFramework>
     <!-- Unity has been capped at C# 9 from 2021.2 through Unity 6. -->
     <LangVersion>9</LangVersion>
-    <Nullable>enable</Nullable>
+    <!-- Match Unity's default (nullable disabled). The generated Bolt sources
+         opt in per-file with `#nullable enable`; the hand-written Api layer is
+         nullable-oblivious, exactly as it compiles in the Unity Editor. -->
+    <Nullable>disable</Nullable>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
   </PropertyGroup>
@@ -25,6 +28,21 @@
     <Compile Include="../../bindings/unity/Runtime/Bolt/*.cs" />
     <!-- Hand-ported inference paths (run/stream/envelope) that boltffi 0.25.3 drops. -->
     <Compile Include="../../bindings/unity/Runtime/BoltSupplement/*.cs" />
+    <!-- Public managed API re-plumbed onto XybridBolt (A2.1). Listed per-file, not
+         Runtime/Api/*.cs: XybridClient / TelemetryConfig / BundleReader still bind
+         the pre-bolt C ABI (deferred gaps) and would drag Runtime/Native into this
+         project, which does not compile it. -->
+    <Compile Include="../../bindings/unity/Runtime/Api/OutputType.cs" />
+    <Compile Include="../../bindings/unity/Runtime/Api/MessageRole.cs" />
+    <Compile Include="../../bindings/unity/Runtime/Api/StreamToken.cs" />
+    <Compile Include="../../bindings/unity/Runtime/Api/VoiceInfo.cs" />
+    <Compile Include="../../bindings/unity/Runtime/Api/XybridException.cs" />
+    <Compile Include="../../bindings/unity/Runtime/Api/GenerationConfig.cs" />
+    <Compile Include="../../bindings/unity/Runtime/Api/Envelope.cs" />
+    <Compile Include="../../bindings/unity/Runtime/Api/InferenceResult.cs" />
+    <Compile Include="../../bindings/unity/Runtime/Api/ConversationContext.cs" />
+    <Compile Include="../../bindings/unity/Runtime/Api/Model.cs" />
+    <Compile Include="../../bindings/unity/Runtime/Api/ModelLoader.cs" />
     <!-- Unity bundles System.Runtime.CompilerServices.Unsafe; supply it here so
          the standalone compile resolves Unsafe.SizeOf the same way Unity does. -->
     <PackageReference Include="System.Runtime.CompilerServices.Unsafe" Version="6.0.0" />

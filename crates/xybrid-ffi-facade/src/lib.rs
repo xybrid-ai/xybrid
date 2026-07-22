@@ -579,6 +579,23 @@ impl ConversationContextHandle {
         self.lock().id().to_string()
     }
 
+    /// Number of history turns (excludes the system envelope).
+    pub fn history_len(&self) -> u32 {
+        self.lock().history().len() as u32
+    }
+
+    /// Whether a persistent system envelope is set.
+    pub fn has_system(&self) -> bool {
+        self.lock().system_envelope().is_some()
+    }
+
+    /// Set the max history length before FIFO pruning.
+    pub fn set_max_history_len(&self, len: u32) {
+        let mut guard = self.lock();
+        let new_ctx = std::mem::take(&mut *guard).with_max_history_len(len as usize);
+        *guard = new_ctx;
+    }
+
     pub fn history(&self) -> Vec<Envelope> {
         self.lock()
             .history()

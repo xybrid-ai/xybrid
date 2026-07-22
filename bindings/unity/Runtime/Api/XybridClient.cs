@@ -74,17 +74,11 @@ namespace Xybrid
                     return;
                 }
 
-                byte[] bindingBytes = NativeHelpers.ToUtf8Bytes("unity");
-                fixed (byte* bindingPtr = bindingBytes)
-                {
-                    NativeMethods.xybrid_set_binding(bindingPtr);
-                }
-
-                int result = NativeMethods.xybrid_init();
-                if (result != 0)
-                {
-                    NativeHelpers.ThrowLastError("Failed to initialize Xybrid SDK");
-                }
+                // Runtime init moves to bolt: set the binding tag (used for
+                // telemetry attribution). The pre-bolt xybrid_init() was a no-op.
+                // Advanced telemetry (below) still runs through the pre-bolt C
+                // ABI until the telemetry surface is ported (GAP-3).
+                XybridBolt.XybridBolt.SetBinding("unity");
 
                 _initialized = true;
 

@@ -63,4 +63,42 @@ namespace Xybrid
         {
         }
     }
+
+    /// <summary>
+    /// Translates bolt-layer exceptions into the public Xybrid exception
+    /// taxonomy. Bolt surfaces failures as <see cref="XybridBolt.XybridErrorException"/>
+    /// (typed variants) or <see cref="XybridBolt.BoltException"/> (loader /
+    /// last-error), which the public API maps to
+    /// <see cref="ModelNotFoundException"/> / <see cref="InferenceException"/> /
+    /// <see cref="XybridException"/>.
+    /// </summary>
+    internal static class BoltErrors
+    {
+        /// <summary>Translate a bolt exception to the public taxonomy.</summary>
+        public static XybridException Translate(Exception ex)
+        {
+            switch (ex)
+            {
+                case XybridBolt.XybridErrorException typed:
+                    return TranslateError(typed.Error);
+                case XybridBolt.BoltException bolt:
+                    return new XybridException(bolt.Message, bolt);
+                default:
+                    return new XybridException(ex.Message, ex);
+            }
+        }
+
+        private static XybridException TranslateError(XybridBolt.XybridError error)
+        {
+            switch (error)
+            {
+                case XybridBolt.XybridError.ModelNotFound modelNotFound:
+                    return new ModelNotFoundException(modelNotFound.Id);
+                case XybridBolt.XybridError.InferenceError inferenceError:
+                    return new InferenceException(inferenceError.Message);
+                default:
+                    return new XybridException(error.ToString());
+            }
+        }
+    }
 }
