@@ -1,0 +1,42 @@
+bindings/unity/Runtime/Bolt/XybridConversationContext.cs.meta
+  s_3feb3bac73008c::t_37aec8e1495691 1-2
+crates/xybrid-bolt/src/lib.rs
+  s_3feb3bac73008c::t_1e2be77f21f294 888-898,902-942,952-1001
+  s_3feb3bac73008c::t_a9544b146074d5 899-901
+  s_3feb3bac73008c::t_44cffa9882cc8b 35-39
+  s_3feb3bac73008c::t_e741a17d22c7d0 1002
+tools/scripts/gen_unity_bolt_csharp.py
+  s_3feb3bac73008c::t_035fe3d1f427fa 157-165
+  s_3feb3bac73008c::t_150bec8aa3dc9d 341-349
+  s_3feb3bac73008c::t_1345fd7d8b2b76 369
+  s_3feb3bac73008c::t_abee15d037ed85 309
+bindings/unity/Runtime/Bolt/XybridConversationContext.cs
+  s_3feb3bac73008c::t_37aec8e1495691 1-97
+crates/xybrid-ffi-facade/src/lib.rs
+  s_3feb3bac73008c::t_4f6d60306e4066 1332-1367
+  s_3feb3bac73008c::t_283a4b81e7f1c1 1329-1331
+  s_3feb3bac73008c::t_326e61a9f1004b 1321-1328
+bindings/unity/Runtime/BoltSupplement/XybridInference.cs
+  s_3feb3bac73008c::t_242231bff4a575 214-243
+  s_3feb3bac73008c::t_0662ac9a07d2f4 315-386,388,391,395,397-406,408-432,435,447,458,460
+  s_3feb3bac73008c::t_f0b8792940e57c 3-11,16-17
+  s_3feb3bac73008c::t_e9a480120c1da1 506-559
+bindings/unity/Runtime/Bolt/XybridBolt.cs
+  s_3feb3bac73008c::t_37aec8e1495691 742-754
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "3c08c8ebf424960ec714f9e58d7fed11ba0b9161",
+  "prompts": {},
+  "sessions": {
+    "s_3feb3bac73008c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a953a9f9-867a-4e8d-8c79-863fa8a7808b",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
