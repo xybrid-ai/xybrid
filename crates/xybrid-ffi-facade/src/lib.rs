@@ -1661,7 +1661,23 @@ pub fn telemetry_init(handle: &TelemetryConfigHandle) -> Result<()> {
         });
     }
 
-    sdk::telemetry::init_platform_telemetry(config);
+    // Roll the gate back if init panics so a later init can retry — mirrors the
+    // pre-bolt C ABI. Without this, a panicked init wedges the gate at `true`
+    // with no live exporter: every later `telemetry_init` reports "already
+    // initialized" until the process restarts, and `telemetry_shutdown` has no
+    // real sender to stop. Catching here also keeps a recoverable
+    // telemetry-setup failure from unwinding across the FFI boundary and
+    // aborting the host app.
+    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        sdk::telemetry::init_platform_telemetry(config);
+    }));
+    if outcome.is_err() {
+        TELEMETRY_INITIALIZED.store(false, std::sync::atomic::Ordering::Release);
+        return Err(Error::ConfigError {
+            message: "telemetry init panicked".to_string(),
+        });
+    }
+
     Ok(())
 }
 
