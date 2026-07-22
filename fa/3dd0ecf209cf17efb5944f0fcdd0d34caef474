@@ -1,0 +1,27 @@
+bindings/unity/Runtime/Api/Envelope.cs
+  s_3feb3bac73008c::t_f6969cf87117ea 177-180,182
+bindings/unity/Runtime/Api/GenerationConfig.cs
+  s_3feb3bac73008c::t_512b3b667d4124 157-160,169
+bindings/unity/Runtime/Api/ConversationContext.cs
+  s_3feb3bac73008c::t_58b9cb686f9833 115
+bindings/unity/Runtime/Api/Model.cs
+  s_3feb3bac73008c::t_ea3d68173883f3 42
+  s_3feb3bac73008c::t_e22fe02edf0597 111,253,279
+  s_3feb3bac73008c::t_b4c4144f1e4449 326-331,340-343
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "fa3dd0ecf209cf17efb5944f0fcdd0d34caef474",
+  "prompts": {},
+  "sessions": {
+    "s_3feb3bac73008c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a953a9f9-867a-4e8d-8c79-863fa8a7808b",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
