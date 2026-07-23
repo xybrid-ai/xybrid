@@ -71,15 +71,20 @@ jobs:
 
       # Note: arm64 only. ORT has no x86_64-apple-darwin prebuilt; Intel Macs run
       # arm64 via Rosetta 2.
-      - name: Build xybrid-bolt native (Bazel, Metal ON)
-        run: bazelisk build --config=macos-metal //crates/xybrid-bolt:xybrid_bolt_cdylib
+      # `-c opt` is required: --config=macos-metal sets the platform + Metal but
+      # NOT compilation_mode (unlike the android configs), so without it Bazel
+      # defaults to fastbuild — a non-optimized native. Matches the release
+      # profile the replaced `build-ffi --release` shipped.
+      - name: Build xybrid-bolt native (Bazel, Metal ON, opt)
+        run: bazelisk build --config=macos-metal -c opt //crates/xybrid-bolt:xybrid_bolt_cdylib
 
       # Stage the Bazel output into the Unity plugins tree (copy + generate the
       # per-platform .meta) — the same staging build-ffi --deploy-unity did, just
-      # fed from Bazel instead of cargo.
+      # fed from Bazel instead of cargo. Must match the build's `-c opt` so cquery
+      # resolves the same (opt) output path.
       - name: Stage into Unity plugins
         run: |
-          LIB=$(bazelisk cquery --config=macos-metal --output=files //crates/xybrid-bolt:xybrid_bolt_cdylib | head -1)
+          LIB=$(bazelisk cquery --config=macos-metal -c opt --output=files //crates/xybrid-bolt:xybrid_bolt_cdylib | head -1)
           echo "Bazel output: $LIB"
           cargo xtask deploy-unity-native --lib "$LIB" --target aarch64-apple-darwin
 
