@@ -1,0 +1,38 @@
+.github/workflows/build-unity.yml
+  s_56f8212040c844::t_e0ba6bad78bb70 83,86,142,151,159,211,219,226,315,318,321,326-328,343,401,404,472,475,480,503-506,516
+  s_56f8212040c844::t_c860dd74c2cb26 428
+xtask/src/main.rs
+  s_56f8212040c844::t_2f052e983a2edb 854,865
+  s_56f8212040c844::t_61dee353cce377 2467-2470
+  s_56f8212040c844::t_85e48585236a93 874
+  s_56f8212040c844::t_7a9ef2a70020c7 639,641-649
+  s_56f8212040c844::t_d425536db4e3ae 754-758,769
+  s_56f8212040c844::t_312fc83634210f 603,605
+  s_56f8212040c844::t_7b624c3a22b911 685
+  s_56f8212040c844::t_d868fc68954fbf 1055-1067
+  s_56f8212040c844::t_f2cdbec87787fc 677-682
+  s_56f8212040c844::t_5daaf99213098b 1473
+  s_56f8212040c844::t_03eef0412d281c 808
+  s_56f8212040c844::t_c2396ea995a181 371-374
+  s_56f8212040c844::t_bfddf49f506aea 248-253
+  s_56f8212040c844::t_e10bfcac4e220e 2481,2484
+  s_56f8212040c844::t_092c66bbf3ddd7 723,727,729,734,736
+  s_56f8212040c844::t_65f5f877c4dcde 1448
+  s_56f8212040c844::t_df24356a74c98b 543,545
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "e6d1c5c8b298a74773aba19a71c6a1b19422bf02",
+  "prompts": {},
+  "sessions": {
+    "s_56f8212040c844": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "712d827d-2c3e-407d-a7a4-2e1b3f6e2b3b",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
