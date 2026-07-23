@@ -1,0 +1,22 @@
+xtask/src/main.rs
+  s_56f8212040c844::t_e5aa2c2b6d5dab 246-262
+  s_56f8212040c844::t_048105132186d2 544-547
+.github/workflows/build-unity.yml
+  s_56f8212040c844::t_12577e1cc912bf 61-67,69-70,72-75,77-84
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "f388a8a2ae4f6ebbc751a2e6a0f645f2a9c4d104",
+  "prompts": {},
+  "sessions": {
+    "s_56f8212040c844": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "712d827d-2c3e-407d-a7a4-2e1b3f6e2b3b",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
