@@ -183,33 +183,36 @@ jobs:
         with:
           submodules: true
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
-        with:
-          toolchain: stable
-          targets: x86_64-unknown-linux-gnu
-
-      - name: Setup sccache
-        uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
-
-      - name: Configure sccache environment
-        shell: bash
+      # Bazel builds the Linux bolt cdylib — a host build on the ubuntu runner,
+      # RBE cache-fed. ORT ships dynamically on Linux, so the following
+      # stage_unity_desktop_ort.py step still bundles libonnxruntime.so beside it.
+      # Bazel doesn't strip desktop libs, so the strip step below is kept.
+      - name: Configure BuildBuddy remote config
+        env:
+          BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
+        if: env.BUILDBUDDY_API_KEY != ''
         run: |
-          echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
-          echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
-          echo "CMAKE_C_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
-          echo "CMAKE_CXX_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
+          mkdir -p .context
+          cat > .context/buildbuddy.bazelrc <<EOF
+          common:remote --bes_results_url=https://app.buildbuddy.io/invocation/
+          common:remote --bes_backend=grpcs://remote.buildbuddy.io
+          common:remote --remote_header=x-buildbuddy-api-key=${BUILDBUDDY_API_KEY}
+          common:remote --remote_cache=grpcs://remote.buildbuddy.io
+          common:remote --remote_executor=grpcs://remote.buildbuddy.io
+          common:remote --remote_cache_compression
+          common:remote --remote_download_toplevel
+          EOF
+          echo "REMOTE=--config=remote" >> "$GITHUB_ENV"
 
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-        with:
-          prefix-key: "v1-rust"
-          shared-key: "unity-linux"
-          cache-all-crates: "true"
-          save-if: "true"
-
-      - name: Build for x86_64-unknown-linux-gnu
-        run: cargo xtask build-ffi --target x86_64-unknown-linux-gnu --release --deploy-unity
+      - name: Build + stage Linux native (Bazel)
+        run: |
+          set -euo pipefail
+          remote_args=()
+          [[ -n "${REMOTE:-}" ]] && remote_args+=("$REMOTE")
+          bazelisk build "${remote_args[@]}" -c opt //crates/xybrid-bolt:xybrid_bolt_cdylib
+          LIB=$(bazelisk cquery "${remote_args[@]}" -c opt --output=files //crates/xybrid-bolt:xybrid_bolt_cdylib | head -1)
+          echo "Bazel output: $LIB"
+          python3 tools/scripts/stage_unity_native.py --lib "$LIB" --target x86_64-unknown-linux-gnu
 
       - name: Stage ONNX Runtime (Linux)
         run: >-
@@ -334,30 +337,16 @@ jobs:
         with:
           submodules: true
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
-        with:
-          toolchain: stable
-          targets: aarch64-apple-ios
-
-      - name: Setup sccache
-        uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
-
-      - name: Configure sccache environment
-        shell: bash
+      # iOS bolt STATICLIB (.a) is built by Bazel on this macos-14 runner —
+      # --config=ios is Mac-local (iphoneos SDK + llama.cpp Metal shaders; no Mac
+      # RBE), the SAME //crates/xybrid-bolt:xybrid_bolt_staticlib the Apple
+      # xcframework already ships. ORT links statically (vendored), so no separate
+      # ORT bundle. bazelisk ships on macos runners; local_tools (rules_foreign_cc)
+      # needs cmake + pkg-config.
+      - name: Install Bazel build tools
         run: |
-          echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
-          echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
-          echo "CMAKE_C_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
-          echo "CMAKE_CXX_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
-
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-        with:
-          prefix-key: "v1-rust"
-          shared-key: "unity-ios"
-          cache-all-crates: "true"
-          save-if: "true"
+          which cmake >/dev/null || brew install cmake
+          which pkg-config >/dev/null || brew install pkg-config
 
       - name: Verify ORT iOS library
         run: |
@@ -368,8 +357,16 @@ jobs:
           fi
           echo "ORT iOS library found."
 
-      - name: Build for aarch64-apple-ios
-        run: cargo xtask build-ffi --target aarch64-apple-ios --release --deploy-unity
+      # --config=ios already sets compilation_mode=opt (unlike macos-metal), so
+      # no explicit -c opt here.
+      - name: Build iOS bolt staticlib (Bazel)
+        run: bazelisk build --config=ios //crates/xybrid-bolt:xybrid_bolt_staticlib
+
+      - name: Stage into Unity plugins
+        run: |
+          LIB=$(bazelisk cquery --config=ios --output=files //crates/xybrid-bolt:xybrid_bolt_staticlib | head -1)
+          echo "Bazel output: $LIB"
+          python3 tools/scripts/stage_unity_native.py --lib "$LIB" --target aarch64-apple-ios
 
       - name: Strip debug symbols (iOS)
         run: strip -S bindings/unity/Runtime/Plugins/iOS/libxybrid_bolt.a
