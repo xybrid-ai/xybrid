@@ -243,6 +243,23 @@ enum Commands {
         deploy_unity: bool,
     },
 
+    /// Stage a pre-built native library into the Unity plugins tree.
+    ///
+    /// Decouples staging from the cargo build so a Bazel-built
+    /// `//crates/xybrid-bolt:xybrid_bolt_cdylib` (or `_staticlib`) can be dropped
+    /// into `bindings/unity/Runtime/Plugins/<Platform>/` with the correct
+    /// per-platform `.meta`. Same copy + meta logic `build-ffi --deploy-unity`
+    /// uses; the source lib just comes from Bazel instead of cargo.
+    DeployUnityNative {
+        /// Path to the pre-built native library (e.g. bazel-bin/crates/xybrid-bolt/libxybrid_bolt.dylib).
+        #[arg(long)]
+        lib: PathBuf,
+
+        /// Target triple the lib was built for (selects the Unity platform dir + .meta).
+        #[arg(long)]
+        target: Option<String>,
+    },
+
     /// Build Apple XCFramework for iOS and macOS platforms
     BuildXcframework {
         /// Build in release mode (default: true)
@@ -523,6 +540,10 @@ fn main() -> Result<()> {
             deploy_unity,
         } => {
             build_ffi(target, release, platform_preset, deploy_unity)?;
+        }
+        Commands::DeployUnityNative { lib, target } => {
+            let lib_str = lib.to_str().context("--lib path is not valid UTF-8")?;
+            deploy_ffi_to_unity(lib_str, target.as_deref())?;
         }
         Commands::BuildXcframework {
             release,

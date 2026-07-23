@@ -58,29 +58,30 @@ jobs:
           toolchain: stable
           targets: aarch64-apple-darwin
 
-      - name: Setup sccache
-        uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
-
-      - name: Configure sccache environment
-        shell: bash
+      # Unity's macOS native is built by Bazel — the same
+      # //crates/xybrid-bolt:xybrid_bolt_cdylib target every other binding uses —
+      # on this macos-14 runner because --config=macos-metal compiles the
+      # llama.cpp Metal shaders locally (no Mac RBE; same as build-apple.yml).
+      # bazelisk ships on macos runners and honors .bazelversion; local_tools
+      # (rules_foreign_cc) needs cmake + pkg-config.
+      - name: Install Bazel build tools
         run: |
-          echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
-          echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
-          echo "CMAKE_C_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
-          echo "CMAKE_CXX_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
+          which cmake >/dev/null || brew install cmake
+          which pkg-config >/dev/null || brew install pkg-config
 
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-        with:
-          prefix-key: "v1-rust"
-          shared-key: "unity-macos"
-          cache-all-crates: "true"
-          save-if: "true"
+      # Note: arm64 only. ORT has no x86_64-apple-darwin prebuilt; Intel Macs run
+      # arm64 via Rosetta 2.
+      - name: Build xybrid-bolt native (Bazel, Metal ON)
+        run: bazelisk build --config=macos-metal //crates/xybrid-bolt:xybrid_bolt_cdylib
 
-      # Note: Only building arm64. ORT does not provide prebuilt binaries for x86_64-apple-darwin.
-      # Intel Macs can run arm64 binaries via Rosetta 2.
-      - name: Build for aarch64-apple-darwin
-        run: cargo xtask build-ffi --target aarch64-apple-darwin --release --deploy-unity
+      # Stage the Bazel output into the Unity plugins tree (copy + generate the
+      # per-platform .meta) — the same staging build-ffi --deploy-unity did, just
+      # fed from Bazel instead of cargo.
+      - name: Stage into Unity plugins
+        run: |
+          LIB=$(bazelisk cquery --config=macos-metal --output=files //crates/xybrid-bolt:xybrid_bolt_cdylib | head -1)
+          echo "Bazel output: $LIB"
+          cargo xtask deploy-unity-native --lib "$LIB" --target aarch64-apple-darwin
 
       - name: Strip debug symbols (macOS)
         run: strip -x bindings/unity/Runtime/Plugins/macOS/libxybrid_bolt.dylib
