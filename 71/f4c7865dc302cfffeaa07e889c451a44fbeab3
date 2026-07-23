@@ -1,0 +1,19 @@
+.github/workflows/build-unity.yml
+  s_56f8212040c844::t_2b18a727a190de 83,142,211,315,318,321,401
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "71f4c7865dc302cfffeaa07e889c451a44fbeab3",
+  "prompts": {},
+  "sessions": {
+    "s_56f8212040c844": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "712d827d-2c3e-407d-a7a4-2e1b3f6e2b3b",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
