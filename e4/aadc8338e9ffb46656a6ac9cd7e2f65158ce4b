@@ -1,0 +1,65 @@
+tools/scripts/gen_unity_bolt_csharp.py
+  s_56f8212040c844::t_73fb8a555f7cbf 4
+docs/sdk/API_REFERENCE.md
+  s_56f8212040c844::t_cb489260327719 1542
+examples/unity/Telemetry/README.md
+  s_56f8212040c844::t_56f4fac641e272 135-136
+bindings/unity/Tests/Editor/NativeLibraryResolverTests.cs
+  s_56f8212040c844::t_fb34a6570059d7 65-66
+AGENTS.md
+  s_56f8212040c844::t_235a1314eb0a64 123
+  s_56f8212040c844::t_3fbd0d315d663e 381
+  s_56f8212040c844::t_9c5e72ca1ffe08 100
+docs/FEATURE_MATRIX.md
+  s_56f8212040c844::t_f3f2b43e0e7363 9-16
+examples/unity/starter/README.md
+  s_56f8212040c844::t_220936cc84aa4f 227
+  s_56f8212040c844::t_35ac5eb0671c41 231
+  s_56f8212040c844::t_be14f552ca1ee1 249
+.github/workflows/build-unity.yml
+  s_56f8212040c844::t_7cb5ea532ec9b8 83,142,211,315,318,321,401
+bindings/unity/Editor/NativeLibraryResolver.cs
+  s_56f8212040c844::t_983292344fa782 2
+xtask/src/main.rs
+  s_56f8212040c844::t_1a250de77be391 765-766
+  s_56f8212040c844::t_3fb726ecb37421 610,617-619,630,632
+  s_56f8212040c844::t_8d841b84885970 525
+  s_56f8212040c844::t_1ac904ba05a874 726
+  s_56f8212040c844::t_e7f02a2af21a11 226
+  s_56f8212040c844::t_983292344fa782 344,760,828,960,1382
+  s_56f8212040c844::t_6026488cf22a9b 807-808,820
+  s_56f8212040c844::t_1b1a10567c9d5f 583
+  s_56f8212040c844::t_627da373000aad 829
+tools/README.md
+  s_56f8212040c844::t_41855e61401eec 59,61-62,66,72,75-76
+docs/FEATURE_MATRIX.zh.md
+  s_56f8212040c844::t_344406ffaf8a7b 9-16
+CHANGELOG.md
+  s_56f8212040c844::t_a83ec9c55a90d3 10-17
+bindings/unity/README.md
+  s_56f8212040c844::t_1a9562fa05b2d0 326
+  s_56f8212040c844::t_c9a1e5ff33303d 331
+  s_56f8212040c844::t_23d16ecf758610 274
+  s_56f8212040c844::t_77b482a3dceb9d 271,281,284
+  s_56f8212040c844::t_3a046a0783666d 270
+crates/xybrid-bolt/src/lib.rs
+  s_56f8212040c844::t_ef212847ce53f6 44-46
+Cargo.lock
+  s_56f8212040c844::t_b9db6df48ed261 926-927,936,1052,1124,1222,1479,2716,3394,3717,3826,4659,5242,6156,6187,6522,6536
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "e4aadc8338e9ffb46656a6ac9cd7e2f65158ce4b",
+  "prompts": {},
+  "sessions": {
+    "s_56f8212040c844": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "712d827d-2c3e-407d-a7a4-2e1b3f6e2b3b",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
