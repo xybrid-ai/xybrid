@@ -362,7 +362,7 @@ namespace XybridBolt
             int byteCount = _length - _pos;
             if (byteCount < 0)
                 throw new InvalidOperationException("corrupt wire: read position past end");
-            int elementSize = Unsafe.SizeOf<T>();
+            int elementSize = Marshal.SizeOf<T>();
             if (byteCount % elementSize != 0)
                 throw new InvalidOperationException(
                     "corrupt wire: blittable array byte count is not a multiple of element size");
@@ -444,7 +444,7 @@ namespace XybridBolt
             int count = ReadI32();
             if (count < 0) throw new InvalidOperationException("corrupt wire: negative array length");
             if (count == 0) return Array.Empty<T>();
-            int elementSize = Unsafe.SizeOf<T>();
+            int elementSize = Marshal.SizeOf<T>();
             int byteCount = checked(count * elementSize);
             Require(byteCount, "blittable array payload");
             T[] result = new T[count];
@@ -607,7 +607,7 @@ namespace XybridBolt
         {
             WriteI32(v.Length);
             if (v.Length == 0) return;
-            int byteCount = checked(v.Length * Unsafe.SizeOf<T>());
+            int byteCount = checked(v.Length * Marshal.SizeOf<T>());
             EnsureCapacity(byteCount);
             // Reinterpret the source T[] as bytes and block-copy into the
             // managed buffer. Zero extra allocations, one copy. Little-endian

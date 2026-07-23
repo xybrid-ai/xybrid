@@ -142,6 +142,17 @@ LE_FLOAT_REWRITES = (
     ),
 )
 
+# --- Transform (g): Unsafe.SizeOf<T>() -> Marshal.SizeOf<T>(). boltffi's wire
+# codec sizes blittable arrays with System.Runtime.CompilerServices.Unsafe, whose
+# assembly Unity's scripting profile does not reference -- the Unity 6.3 editor
+# rejects it with `CS0103: The name 'Unsafe' does not exist`. The codecs are
+# `where T : unmanaged`, so Marshal.SizeOf<T>() (core BCL, already used
+# throughout the generated wire layer) returns the identical size. Verified with
+# an in-editor `unity test` compile on 6.3.
+UNSAFE_SIZEOF_TARGET = "Unsafe.SizeOf<T>()"
+UNSAFE_SIZEOF_REPLACEMENT = "Marshal.SizeOf<T>()"
+EXPECTED_UNSAFE_SIZEOF = 3
+
 # --- Transform (d): make XybridModel partial. boltffi 0.25.3's C# generator
 # drops the entire inference path -- no `run`, and no XybridEnvelope /
 # XybridEnvelopeKind / XybridResult (a data-carrying enum used as a function
@@ -242,6 +253,18 @@ def _rewrite_le_floats(content: str) -> tuple[str, int]:
     return content, count
 
 
+def _rewrite_unsafe_sizeof(content: str) -> tuple[str, int]:
+    """Rewrite Unsafe.SizeOf<T>() to Marshal.SizeOf<T>().
+
+    The Unsafe assembly is unreferenceable in Unity's scripting profile; the
+    codecs are `where T : unmanaged`, so the two sizes are identical.
+    """
+    count = content.count(UNSAFE_SIZEOF_TARGET)
+    if count:
+        content = content.replace(UNSAFE_SIZEOF_TARGET, UNSAFE_SIZEOF_REPLACEMENT)
+    return content, count
+
+
 def unity_guid(asset_rel_path: str) -> str:
     """Deterministic 32-hex Unity GUID keyed on the repo-relative asset path."""
     return hashlib.sha256(asset_rel_path.encode()).hexdigest()[:32]
@@ -304,6 +327,7 @@ def generate() -> dict[str, str]:
     tree: dict[str, str] = {}
     record_structs = 0
     le_floats = 0
+    unsafe_sizeof = 0
     native_memory_shimmed = False
     model_made_partial = False
     context_made_partial = False
@@ -314,6 +338,8 @@ def generate() -> dict[str, str]:
         record_structs += n
         content, n = _rewrite_le_floats(content)
         le_floats += n
+        content, n = _rewrite_unsafe_sizeof(content)
+        unsafe_sizeof += n
         if src.name == SHIM_FILE:
             _drift(
                 SHIM_TARGET in content,
@@ -362,6 +388,11 @@ def generate() -> dict[str, str]:
     _drift(
         le_floats == len(LE_FLOAT_REWRITES),
         f"rewrote {le_floats} float LE writers, expected {len(LE_FLOAT_REWRITES)}",
+    )
+    _drift(
+        unsafe_sizeof == EXPECTED_UNSAFE_SIZEOF,
+        f"rewrote {unsafe_sizeof} Unsafe.SizeOf calls, expected "
+        f"{EXPECTED_UNSAFE_SIZEOF}",
     )
     _drift(native_memory_shimmed, f"{SHIM_FILE} not found in boltffi output")
     _drift(model_made_partial, f"{MODEL_FILE} not found in boltffi output")

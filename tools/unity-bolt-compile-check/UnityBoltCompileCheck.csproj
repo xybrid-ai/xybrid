@@ -32,9 +32,12 @@
          pre-bolt C ABI + Runtime/Native), so the whole Api folder compiles here
          — nothing drags a C-ABI binding into this project anymore. -->
     <Compile Include="../../bindings/unity/Runtime/Api/*.cs" />
-    <!-- Unity bundles System.Runtime.CompilerServices.Unsafe; supply it here so
-         the standalone compile resolves Unsafe.SizeOf the same way Unity does. -->
-    <PackageReference Include="System.Runtime.CompilerServices.Unsafe" Version="6.0.0" />
+    <!-- No System.Runtime.CompilerServices.Unsafe reference on purpose: Unity's
+         scripting profile does not reference that assembly (a real `unity test`
+         on 6.3 rejects `Unsafe.SizeOf` with CS0103), so neither does this gate.
+         gen_unity_bolt_csharp.py rewrites the generated Unsafe.SizeOf<T> to
+         Marshal.SizeOf<T> (core BCL) — keep the gate faithful so a reintroduced
+         Unsafe reference fails here instead of only in-editor. -->
   </ItemGroup>
 
 </Project>
