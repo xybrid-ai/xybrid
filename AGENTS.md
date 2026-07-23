@@ -97,8 +97,7 @@ Cargo workspace, `resolver = "2"`, edition 2021, MSRV not pinned. Members:
 | `crates/xybrid-sdk`            | Public Rust SDK; model load/run/stream + platform init (auth, telemetry) | lib      |
 | `crates/xybrid-cli`            | `xybrid` binary                                            | bin      |
 | `crates/xybrid-ffi-facade`     | FFI-agnostic POD/Arc facade over the SDK (one canonical translation) | FFI |
-| `crates/xybrid-bolt`           | BoltFFI bindings: Swift / Kotlin / Java / C# / WASM + C header (Apple/Android SDKs) | FFI |
-| `crates/xybrid-ffi`            | C ABI for Unity / C / C++ (pre-bolt; Unity migration pending) | FFI    |
+| `crates/xybrid-bolt`           | BoltFFI bindings: Swift / Kotlin / Java / C# (Unity) / WASM + C header — the sole native binding crate | FFI |
 | `bindings/flutter/rust`        | flutter_rust_bridge wrapper for Dart                       | FFI      |
 | `macros`                       | proc-macros (`xybrid-macros`); syn/quote only              | proc     |
 | `xtask`                        | build / codegen automation                                 | tool     |
@@ -121,8 +120,7 @@ fallible functions. Refresh the native lib with
 ```
 xybrid-cli  ──────────────────────► xybrid-sdk ─► xybrid-core
 xybrid-bolt ──► xybrid-ffi-facade ─► xybrid-sdk ─► xybrid-core
-xybrid-ffi  ─┐
-flutter rust─┴────────────────────► xybrid-sdk ─► xybrid-core
+flutter rust──► xybrid-ffi-facade ─► xybrid-sdk ─► xybrid-core
 xtask ────────────────────────────► xybrid-core
 integration-tests ────────────────► xybrid-core
 ```
@@ -157,12 +155,6 @@ Sub-error enums (`InferenceError`, `PipelineError`, `AdapterError`, …) live
 next to the modules that raise them and convert into the canonical type via
 `#[from]` / `impl From`. Follow that pattern for new modules — don't invent
 parallel top-level error types.
-
-`xybrid-ffi` is **different**: it's a C-ABI crate and uses opaque handles
-plus error strings/codes carried in result structs (see
-`crates/xybrid-ffi/src/lib.rs`). Don't bolt a public `thiserror` enum onto
-it — match the existing C-ABI pattern when adding new endpoints, and only
-surface error info through the documented handle/result conventions.
 
 Binaries (`xybrid-cli`, `xtask`) use **`anyhow`** with `.context(...)` at the
 boundaries where errors get printed.
@@ -386,7 +378,7 @@ rules are the ones you'll consult most often in this repo.**
 - **`M-MODULE-DOCS`** — every public module needs `//!` docs covering contents, when to use, examples, side effects.
 
 ### FFI
-- **`M-ISOLATE-DLL-STATE`** — only portable (`#[repr(C)]`, no statics/TypeId/non-portable refs) data crosses DLL boundaries. Critical for `xybrid-ffi`.
+- **`M-ISOLATE-DLL-STATE`** — only portable (`#[repr(C)]`, no statics/TypeId/non-portable refs) data crosses DLL boundaries. Critical for `xybrid-bolt` (the cdylib crossing DLL boundaries).
 
 ### Performance
 - `M-HOTPATH` — identify hot paths early, bench with criterion, profile (Intel VTune / Superluminal). Enable `debug = 1` in `[profile.bench]`.

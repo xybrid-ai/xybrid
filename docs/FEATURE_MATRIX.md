@@ -6,15 +6,14 @@ This document provides a comprehensive reference for all feature flags, platform
 
 1. [xybrid-core Feature Flags](#xybrid-core-feature-flags)
 2. [xybrid-sdk Feature Flags](#xybrid-sdk-feature-flags)
-3. [xybrid-ffi Feature Flags](#xybrid-ffi-feature-flags)
-4. [xybrid-cli Feature Flags](#xybrid-cli-feature-flags)
-5. [Platform Presets](#platform-presets)
-6. [Feature-Gated Types and Modules](#feature-gated-types-and-modules)
-7. [Invalid Feature Combinations](#invalid-feature-combinations)
-8. [Release Gates](#release-gates)
-9. [ORT Loading Strategy](#ort-loading-strategy)
-10. [xtask Commands](#xtask-commands)
-11. [Build Architecture](#build-architecture)
+3. [xybrid-cli Feature Flags](#xybrid-cli-feature-flags)
+4. [Platform Presets](#platform-presets)
+5. [Feature-Gated Types and Modules](#feature-gated-types-and-modules)
+6. [Invalid Feature Combinations](#invalid-feature-combinations)
+7. [Release Gates](#release-gates)
+8. [ORT Loading Strategy](#ort-loading-strategy)
+9. [xtask Commands](#xtask-commands)
+10. [Build Architecture](#build-architecture)
 
 ---
 
@@ -79,32 +78,6 @@ This document provides a comprehensive reference for all feature flags, platform
 
 ---
 
-## xybrid-ffi Feature Flags
-
-| Feature | Description | Forwards to xybrid-sdk |
-|---------|-------------|------------------------|
-| **default** | No default features | *(none)* |
-| **csharp** | Generate C# bindings for Unity | *(build-time only)* |
-| **platform-android** | Android preset | `xybrid-sdk/platform-android` |
-| **platform-ios** | iOS preset | `xybrid-sdk/platform-ios` |
-| **platform-macos** | macOS preset | `xybrid-sdk/platform-macos` |
-| **platform-desktop** | Desktop preset | `xybrid-sdk/platform-desktop` |
-| **ort-download** | Forward to SDK | `xybrid-sdk/ort-download` |
-| **ort-dynamic** | Forward to SDK | `xybrid-sdk/ort-dynamic` |
-| **ort-coreml** | Forward to SDK | `xybrid-sdk/ort-coreml` |
-| **candle** | Forward to SDK | `xybrid-sdk/candle` |
-| **candle-metal** | Forward to SDK | `xybrid-sdk/candle-metal` |
-| **candle-cuda** | Forward to SDK | `xybrid-sdk/candle-cuda` |
-| **llm-mistral** | Forward to SDK | `xybrid-sdk/llm-mistral` |
-| **llm-mistral-metal** | Forward to SDK | `xybrid-sdk/llm-mistral-metal` |
-| **llm-mistral-cuda** | Forward to SDK | `xybrid-sdk/llm-mistral-cuda` |
-| **llm-llamacpp** | Forward to SDK | `xybrid-sdk/llm-llamacpp` |
-| **vision** | Forward to SDK image envelope primitives | `xybrid-sdk/vision` |
-| **llm-llamacpp-vision** | Forward to SDK llama.cpp VLM path | `xybrid-sdk/llm-llamacpp-vision` |
-| **huggingface** | Forward to SDK registry/HuggingFace loading | `xybrid-sdk/huggingface` |
-
----
-
 ## xybrid-cli Feature Flags
 
 | Feature | Description | Enables |
@@ -141,7 +114,6 @@ Example VLM builds:
 ```bash
 cargo build -p xybrid-cli --features platform-macos,llm-llamacpp-vision
 cargo check -p xybrid-sdk --features platform-desktop,llm-llamacpp-vision
-cargo check -p xybrid-ffi --features platform-ios,llm-llamacpp-vision
 ```
 
 ### Why llm-mistral is NOT on Android
@@ -296,7 +268,6 @@ The `xtask` crate provides build automation commands. Run `cargo xtask --help` f
 | Command | Purpose | Platform | Example |
 |---------|---------|----------|---------|
 | `setup-test-env` | Download models for integration tests | Any | `cargo xtask setup-test-env` |
-| `build-ffi` | Build xybrid-ffi library (C ABI) | Any | `cargo xtask build-ffi --release` |
 | `build-xcframework` | Build Apple XCFramework via boltffi (Swift bindings + xcframework) | macOS only | `cargo xtask build-xcframework --release` |
 | `build-android` | Build Android .so files | Any | `cargo xtask build-android --release` |
 | `build-flutter` | Build Flutter native libraries | Varies | `cargo xtask build-flutter --platform macos` |

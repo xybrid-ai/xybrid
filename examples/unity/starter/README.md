@@ -224,11 +224,11 @@ For testing in the Unity Editor on macOS:
 1. Build the macOS native library:
    ```bash
    cd repos/xybrid
-   cargo build --release --package xybrid-ffi
+   cargo build --release --package xybrid-bolt --features platform-macos
    ```
 2. Copy the library:
    ```bash
-   cp target/release/libxybrid_ffi.dylib examples/unity/starter/Assets/Plugins/macOS/libxybrid.dylib
+   cp target/release/libxybrid_bolt.dylib examples/unity/starter/Assets/Plugins/macOS/libxybrid.dylib
    ```
 3. In Unity, press **Play** to run the demo scene
 
@@ -246,7 +246,7 @@ Windows support is planned but not yet implemented. Native library builds for Wi
 
 ## Troubleshooting
 
-### "DllNotFoundException: xybrid_ffi"
+### "DllNotFoundException: xybrid_bolt"
 
 The native library hasn't been built or copied to the correct location. See **Build Native Libraries** section above.
 

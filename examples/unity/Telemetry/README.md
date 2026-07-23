@@ -132,8 +132,8 @@ and place them under `Assets/Plugins/`:
 cd repos/xybrid
 
 # macOS (editor + macOS builds)
-cargo build --release -p xybrid-ffi --features platform-macos
-cp target/release/libxybrid_ffi.dylib \
+cargo build --release -p xybrid-bolt --features platform-macos
+cp target/release/libxybrid_bolt.dylib \
    examples/unity/Telemetry/Assets/Plugins/macOS/libxybrid.dylib
 
 # iOS

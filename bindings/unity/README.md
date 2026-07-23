@@ -267,22 +267,21 @@ If you need to build the native libraries yourself:
 git clone https://github.com/xybrid-ai/xybrid.git
 cd xybrid
 
-# Build with C# bindings
-cargo xtask build-ffi --release --csharp
+# Build the native library + deploy into the Unity plugins tree
+cargo xtask build-ffi --release --deploy-unity
 
 # Output locations:
-# - Native lib: target/release/libxybrid_ffi.dylib (macOS)
-# - C# bindings: bindings/unity/Runtime/Native/NativeMethods.g.cs
+# - Native lib: target/release/libxybrid_bolt.dylib (macOS)
 ```
 
 ### Cross-platform builds
 
 ```bash
 # macOS (from macOS)
-cargo xtask build-ffi --release --csharp
+cargo xtask build-ffi --release --deploy-unity
 
 # Windows (from Windows)
-cargo xtask build-ffi --release --csharp
+cargo xtask build-ffi --release --deploy-unity
 
 # iOS (from macOS)
 cargo xtask build-ffi --release --target aarch64-apple-ios
@@ -306,9 +305,6 @@ bindings/unity/
 │   │   ├── ConversationContext.cs # Multi-turn LLM state
 │   │   ├── MessageRole.cs       # Role enum (System, User, Assistant)
 │   │   └── XybridException.cs   # Exception types
-│   ├── Native/
-│   │   ├── NativeMethods.g.cs   # Auto-generated P/Invoke bindings
-│   │   └── NativeHelpers.cs     # Helper utilities
 │   └── Plugins/                 # Empty in the package — native binaries and
 │                                # their .meta import settings are fetched at
 │                                # import into Assets/Xybrid/Plugins/ (see above)
@@ -327,12 +323,12 @@ bindings/unity/
 
 ## Troubleshooting
 
-### "DllNotFoundException: xybrid_ffi"
+### "DllNotFoundException: xybrid_bolt"
 
 1. Fetch the native library: **Xybrid → Native Libraries → Download for Current
    Editor** (the auto-download on import needs network access and the matching
    GitHub Release). Confirm it landed under `Assets/Xybrid/Plugins/`.
-2. On macOS, you may need to remove quarantine: `xattr -d com.apple.quarantine libxybrid_ffi.dylib`
+2. On macOS, you may need to remove quarantine: `xattr -d com.apple.quarantine libxybrid_bolt.dylib`
 3. Check the plugin import settings in Unity (select the .dylib and verify platform settings)
 
 ### "Model download failed"

@@ -80,7 +80,7 @@ jobs:
       # Note: Only building arm64. ORT does not provide prebuilt binaries for x86_64-apple-darwin.
       # Intel Macs can run arm64 binaries via Rosetta 2.
       - name: Build for aarch64-apple-darwin
-        run: cargo xtask build-ffi --target aarch64-apple-darwin --deploy-unity --bolt
+        run: cargo xtask build-ffi --target aarch64-apple-darwin --deploy-unity
 
       - name: Strip debug symbols (macOS)
         run: strip -x bindings/unity/Runtime/Plugins/macOS/libxybrid_bolt.dylib
@@ -139,7 +139,7 @@ jobs:
           save-if: "true"
 
       - name: Build for x86_64-pc-windows-msvc
-        run: cargo xtask build-ffi --target x86_64-pc-windows-msvc --deploy-unity --bolt
+        run: cargo xtask build-ffi --target x86_64-pc-windows-msvc --deploy-unity
 
       - name: Stage ONNX Runtime (Windows)
         run: >-
@@ -208,7 +208,7 @@ jobs:
           save-if: "true"
 
       - name: Build for x86_64-unknown-linux-gnu
-        run: cargo xtask build-ffi --target x86_64-unknown-linux-gnu --deploy-unity --bolt
+        run: cargo xtask build-ffi --target x86_64-unknown-linux-gnu --deploy-unity
 
       - name: Stage ONNX Runtime (Linux)
         run: >-
@@ -312,13 +312,13 @@ jobs:
         run: which cargo-ndk || cargo install cargo-ndk
 
       - name: Build for aarch64-linux-android
-        run: cargo xtask build-ffi --target aarch64-linux-android --deploy-unity --bolt
+        run: cargo xtask build-ffi --target aarch64-linux-android --deploy-unity
 
       - name: Build for armv7-linux-androideabi
-        run: cargo xtask build-ffi --target armv7-linux-androideabi --deploy-unity --bolt
+        run: cargo xtask build-ffi --target armv7-linux-androideabi --deploy-unity
 
       - name: Build for x86_64-linux-android
-        run: cargo xtask build-ffi --target x86_64-linux-android --deploy-unity --bolt
+        run: cargo xtask build-ffi --target x86_64-linux-android --deploy-unity
 
       - name: Strip debug symbols (Android)
         run: |
@@ -398,7 +398,7 @@ jobs:
           echo "ORT iOS library found."
 
       - name: Build for aarch64-apple-ios
-        run: cargo xtask build-ffi --target aarch64-apple-ios --deploy-unity --bolt
+        run: cargo xtask build-ffi --target aarch64-apple-ios --deploy-unity
 
       - name: Strip debug symbols (iOS)
         run: strip -S bindings/unity/Runtime/Plugins/iOS/libxybrid_bolt.a

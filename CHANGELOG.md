@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+
+- **`xybrid-ffi` crate (pre-bolt C ABI)**: Unity migrated fully onto BoltFFI
+  (`xybrid-bolt`) — managed layer, run/stream/context, telemetry, bundle and
+  model-file — so the C-ABI crate, its cbindgen header, and the csbindgen C#
+  generation (`Runtime/Native/NativeMethods.g.cs`) are gone. The Unity SDK now
+  loads `xybrid_bolt` on every platform (`cargo xtask build-ffi` builds bolt).
+
 ### Planned
 
 - **Multimodal KV-prefix reuse**: the per-frame prefill cost lever for live vision — **deferred** from 0.2.0, not yet implemented.

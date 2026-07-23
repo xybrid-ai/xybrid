@@ -41,10 +41,9 @@
 //!   - `XybridCancellationToken` as an `Arc<Self>` handle.
 //!   - Pipeline surface.
 //!
-//! Until `xybrid-uniffi` and `xybrid-ffi` are removed, this crate exists
-//! alongside them. The deletion happens once the Swift / Kotlin example
-//! apps in `examples/` build against bolt-generated bindings and the
-//! Unity package is rewired against bolt's emitted C header.
+//! This is now the sole native binding crate: `xybrid-uniffi` and the
+//! pre-bolt `xybrid-ffi` C ABI have both been removed, and every foreign SDK
+//! (Swift / Kotlin / Unity C# / …) rides bolt via [`xybrid_ffi_facade`].
 
 use boltffi::*;
 use xybrid_ffi_facade as facade;

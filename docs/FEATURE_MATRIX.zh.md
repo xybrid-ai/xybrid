@@ -6,15 +6,14 @@
 
 1. [xybrid-core Feature 标志](#xybrid-core-feature-标志)
 2. [xybrid-sdk Feature 标志](#xybrid-sdk-feature-标志)
-3. [xybrid-ffi Feature 标志](#xybrid-ffi-feature-标志)
-4. [xybrid-cli Feature 标志](#xybrid-cli-feature-标志)
-5. [平台预设](#平台预设)
-6. [受 Feature 控制的类型与模块](#受-feature-控制的类型与模块)
-7. [无效的 Feature 组合](#无效的-feature-组合)
-8. [发布门禁](#发布门禁)
-9. [ORT 加载策略](#ort-加载策略)
-10. [xtask 命令](#xtask-命令)
-11. [构建架构](#构建架构)
+3. [xybrid-cli Feature 标志](#xybrid-cli-feature-标志)
+4. [平台预设](#平台预设)
+5. [受 Feature 控制的类型与模块](#受-feature-控制的类型与模块)
+6. [无效的 Feature 组合](#无效的-feature-组合)
+7. [发布门禁](#发布门禁)
+8. [ORT 加载策略](#ort-加载策略)
+9. [xtask 命令](#xtask-命令)
+10. [构建架构](#构建架构)
 
 ---
 
@@ -78,32 +77,6 @@
 
 ---
 
-## xybrid-ffi Feature 标志
-
-| Feature | 说明 | 转发到 xybrid-sdk |
-|---------|-------------|------------------------|
-| **default** | 无默认特性 | *（无）* |
-| **csharp** | 为 Unity 生成 C# 绑定 | *（仅构建期）* |
-| **platform-android** | Android 预设 | `xybrid-sdk/platform-android` |
-| **platform-ios** | iOS 预设 | `xybrid-sdk/platform-ios` |
-| **platform-macos** | macOS 预设 | `xybrid-sdk/platform-macos` |
-| **platform-desktop** | 桌面预设 | `xybrid-sdk/platform-desktop` |
-| **ort-download** | 转发到 SDK | `xybrid-sdk/ort-download` |
-| **ort-dynamic** | 转发到 SDK | `xybrid-sdk/ort-dynamic` |
-| **ort-coreml** | 转发到 SDK | `xybrid-sdk/ort-coreml` |
-| **candle** | 转发到 SDK | `xybrid-sdk/candle` |
-| **candle-metal** | 转发到 SDK | `xybrid-sdk/candle-metal` |
-| **candle-cuda** | 转发到 SDK | `xybrid-sdk/candle-cuda` |
-| **llm-mistral** | 转发到 SDK | `xybrid-sdk/llm-mistral` |
-| **llm-mistral-metal** | 转发到 SDK | `xybrid-sdk/llm-mistral-metal` |
-| **llm-mistral-cuda** | 转发到 SDK | `xybrid-sdk/llm-mistral-cuda` |
-| **llm-llamacpp** | 转发到 SDK | `xybrid-sdk/llm-llamacpp` |
-| **vision** | 转发到 SDK 的图像 Envelope 原语 | `xybrid-sdk/vision` |
-| **llm-llamacpp-vision** | 转发到 SDK 的 llama.cpp VLM 路径 | `xybrid-sdk/llm-llamacpp-vision` |
-| **huggingface** | 转发到 SDK 的注册表/HuggingFace 加载 | `xybrid-sdk/huggingface` |
-
----
-
 ## xybrid-cli Feature 标志
 
 | Feature | 说明 | 启用 |
@@ -140,7 +113,6 @@ VLM 构建示例：
 ```bash
 cargo build -p xybrid-cli --features platform-macos,llm-llamacpp-vision
 cargo check -p xybrid-sdk --features platform-desktop,llm-llamacpp-vision
-cargo check -p xybrid-ffi --features platform-ios,llm-llamacpp-vision
 ```
 
 ### 为什么 llm-mistral 不用于 Android
@@ -295,7 +267,6 @@ export ORT_IOS_XCFWK_LOCATION=/path/to/onnxruntime.xcframework
 | 命令 | 用途 | 平台 | 示例 |
 |---------|---------|----------|---------|
 | `setup-test-env` | 为集成测试下载模型 | 任意 | `cargo xtask setup-test-env` |
-| `build-ffi` | 构建 xybrid-ffi 库（C ABI） | 任意 | `cargo xtask build-ffi --release` |
 | `build-xcframework` | 通过 boltffi 构建 Apple XCFramework（Swift 绑定 + xcframework） | 仅 macOS | `cargo xtask build-xcframework --release` |
 | `build-android` | 构建 Android .so 文件 | 任意 | `cargo xtask build-android --release` |
 | `build-flutter` | 构建 Flutter 原生库 | 视情况而定 | `cargo xtask build-flutter --platform macos` |

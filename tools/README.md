@@ -56,23 +56,24 @@ cargo xtask setup-test-env --registry <custom-registry-url>
 **Options:**
 - `--registry <url>` - Custom registry URL for model downloads (default: api.xybrid.dev)
 
-### `build-ffi` - Build C ABI Library
+### `build-ffi` - Build the Unity native library
 
-Builds the xybrid-ffi library for Unity/C++ integration.
+Builds the `xybrid-bolt` native library (the BoltFFI native the Unity SDK
+loads). Pass `--deploy-unity` to copy it into the Unity plugins tree.
 
 ```bash
 cargo xtask build-ffi
-cargo xtask build-ffi --target x86_64-unknown-linux-gnu --release
+cargo xtask build-ffi --target x86_64-unknown-linux-gnu --release --deploy-unity
 ```
 
 **Options:**
 - `--target <triple>` - Target triple
 - `--release` - Build in release mode
+- `--deploy-unity` - Copy the built library into `bindings/unity/Runtime/Plugins/<Platform>/`
 
 **Outputs:**
-- Dynamic library: `target/<target>/<profile>/libxybrid_ffi.{dylib,so,dll}`
-- Static library: `target/<target>/<profile>/libxybrid_ffi.a`
-- C header: `crates/xybrid-ffi/include/xybrid.h`
+- Dynamic library: `target/<target>/<profile>/libxybrid_bolt.{dylib,so,dll}`
+- Static library: `target/<target>/<profile>/libxybrid_bolt.a`
 
 ### `build-xcframework` - Build Apple XCFramework (macOS only)
 

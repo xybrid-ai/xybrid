@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Regenerate the committed BoltFFI C# bindings for the Unity SDK.
 
-The Unity SDK is migrating off the pre-bolt C ABI (crates/xybrid-ffi +
+The Unity SDK moved off the pre-bolt C ABI (the removed crates/xybrid-ffi +
 csbindgen) onto xybrid-bolt, the same FFI every other binding already uses
 (chapter A of the Bazel/bolt migration). Consumers of those bindings — like the
 committed Swift in bindings/apple/Sources/Xybrid/xybrid_bolt.swift — check the
