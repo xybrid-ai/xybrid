@@ -1,0 +1,37 @@
+bindings/unity/Runtime/Plugins/.gitignore
+  s_3abcd9ad5d66f0::t_4ff5dff38e59a3 1-6
+tools/scripts/stage_unity_native.py
+  s_3abcd9ad5d66f0::t_722e09462b6d8e 201-206,256-264,283
+  s_3abcd9ad5d66f0::t_61c4467af1ac12 1-200,207-255,265-282,284-327
+.github/workflows/build-unity.yml
+  s_56f8212040c844::t_ef1c2904160a3a 253-263,265-276,280,282,287-292,295,299
+  s_3abcd9ad5d66f0::t_4ff5dff38e59a3 82-84,277-279,296-298
+  s_3abcd9ad5d66f0::t_722e09462b6d8e 283-286,293-294
+tools/scripts/tests/test_stage_unity_native.py
+  s_3abcd9ad5d66f0::t_ea9e7d39ac7d75 1,31-33,91-111
+  s_3abcd9ad5d66f0::t_0df5205c47f1f0 2-30,34-90,112-143
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "29a86ec21fdc814c55d9e31b5d3ddd4d6a242eba",
+  "prompts": {},
+  "sessions": {
+    "s_3abcd9ad5d66f0": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f9036-c519-7f22-984f-d4ae60ddbf30",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    },
+    "s_56f8212040c844": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "712d827d-2c3e-407d-a7a4-2e1b3f6e2b3b",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
