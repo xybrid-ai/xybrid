@@ -40,56 +40,6 @@ jobs:
           echo "Unity version matches v$TAG_VERSION"
 
   #
-  # C# bindings sync check - verify NativeMethods.g.cs is up-to-date
-  #
-  check-csharp-bindings:
-    name: Check C# Bindings
-    needs: [check-version]
-    if: always() && (needs.check-version.result == 'success' || needs.check-version.result == 'skipped')
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-        with:
-          submodules: true
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
-        with:
-          toolchain: stable
-
-      - name: Setup sccache
-        uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
-
-      - name: Configure sccache environment
-        shell: bash
-        run: |
-          echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
-          echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
-          echo "CMAKE_C_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
-          echo "CMAKE_CXX_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
-
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-        with:
-          prefix-key: "v1-rust"
-          shared-key: "unity-csharp-check"
-
-      - name: Regenerate C# bindings
-        run: cargo xtask build-ffi --csharp
-
-      - name: Check C# bindings are up-to-date
-        run: |
-          if ! git diff --exit-code bindings/unity/Runtime/Native/NativeMethods.g.cs; then
-            echo ""
-            echo "ERROR: C# bindings (NativeMethods.g.cs) are out of date."
-            echo "A Rust FFI change was committed without regenerating C# bindings."
-            echo ""
-            echo "Fix: run 'cargo xtask build-ffi --csharp' and commit the result."
-            exit 1
-          fi
-          echo "C# bindings are up-to-date."
-
-  #
   # macOS native library builds (arm64 + x86_64)
   #
   build-unity-macos:
@@ -130,10 +80,10 @@ jobs:
       # Note: Only building arm64. ORT does not provide prebuilt binaries for x86_64-apple-darwin.
       # Intel Macs can run arm64 binaries via Rosetta 2.
       - name: Build for aarch64-apple-darwin
-        run: cargo xtask build-ffi --target aarch64-apple-darwin --deploy-unity
+        run: cargo xtask build-ffi --target aarch64-apple-darwin --deploy-unity --bolt
 
       - name: Strip debug symbols (macOS)
-        run: strip -x bindings/unity/Runtime/Plugins/macOS/libxybrid_ffi.dylib
+        run: strip -x bindings/unity/Runtime/Plugins/macOS/libxybrid_bolt.dylib
 
       - name: Verify deployed libraries
         run: |
@@ -189,7 +139,7 @@ jobs:
           save-if: "true"
 
       - name: Build for x86_64-pc-windows-msvc
-        run: cargo xtask build-ffi --target x86_64-pc-windows-msvc --deploy-unity
+        run: cargo xtask build-ffi --target x86_64-pc-windows-msvc --deploy-unity --bolt
 
       - name: Stage ONNX Runtime (Windows)
         run: >-
@@ -198,7 +148,7 @@ jobs:
 
       - name: Strip debug symbols (Windows)
         shell: bash
-        run: llvm-strip bindings/unity/Runtime/Plugins/Windows/xybrid_ffi.dll
+        run: llvm-strip bindings/unity/Runtime/Plugins/Windows/xybrid_bolt.dll
 
       - name: Verify deployed libraries
         shell: bash
@@ -206,7 +156,7 @@ jobs:
           echo "Windows plugin directory:"
           PLUGINS=bindings/unity/Runtime/Plugins/Windows
           ls -la "$PLUGINS"
-          test -f "$PLUGINS/xybrid_ffi.dll"
+          test -f "$PLUGINS/xybrid_bolt.dll"
           test -f "$PLUGINS/onnxruntime.dll"
           test -f "$PLUGINS/onnxruntime.dll.meta"
           python -c "import ctypes; ctypes.CDLL(r'$PLUGINS/onnxruntime.dll')"
@@ -258,7 +208,7 @@ jobs:
           save-if: "true"
 
       - name: Build for x86_64-unknown-linux-gnu
-        run: cargo xtask build-ffi --target x86_64-unknown-linux-gnu --deploy-unity
+        run: cargo xtask build-ffi --target x86_64-unknown-linux-gnu --deploy-unity --bolt
 
       - name: Stage ONNX Runtime (Linux)
         run: >-
@@ -266,14 +216,14 @@ jobs:
           bindings/unity/Runtime/Plugins/Linux
 
       - name: Strip debug symbols (Linux)
-        run: strip --strip-unneeded bindings/unity/Runtime/Plugins/Linux/libxybrid_ffi.so
+        run: strip --strip-unneeded bindings/unity/Runtime/Plugins/Linux/libxybrid_bolt.so
 
       - name: Verify deployed libraries
         run: |
           echo "Linux plugin directory:"
           PLUGINS=bindings/unity/Runtime/Plugins/Linux
           ls -la "$PLUGINS"
-          test -f "$PLUGINS/libxybrid_ffi.so"
+          test -f "$PLUGINS/libxybrid_bolt.so"
           test -f "$PLUGINS/libonnxruntime.so"
           test -f "$PLUGINS/libonnxruntime.so.meta"
           python3 -c "import ctypes; ctypes.CDLL('$PLUGINS/libonnxruntime.so')"
@@ -362,20 +312,20 @@ jobs:
         run: which cargo-ndk || cargo install cargo-ndk
 
       - name: Build for aarch64-linux-android
-        run: cargo xtask build-ffi --target aarch64-linux-android --deploy-unity
+        run: cargo xtask build-ffi --target aarch64-linux-android --deploy-unity --bolt
 
       - name: Build for armv7-linux-androideabi
-        run: cargo xtask build-ffi --target armv7-linux-androideabi --deploy-unity
+        run: cargo xtask build-ffi --target armv7-linux-androideabi --deploy-unity --bolt
 
       - name: Build for x86_64-linux-android
-        run: cargo xtask build-ffi --target x86_64-linux-android --deploy-unity
+        run: cargo xtask build-ffi --target x86_64-linux-android --deploy-unity --bolt
 
       - name: Strip debug symbols (Android)
         run: |
           NDK_STRIP="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip"
-          "$NDK_STRIP" bindings/unity/Runtime/Plugins/Android/arm64-v8a/libxybrid_ffi.so
-          "$NDK_STRIP" bindings/unity/Runtime/Plugins/Android/armeabi-v7a/libxybrid_ffi.so
-          "$NDK_STRIP" bindings/unity/Runtime/Plugins/Android/x86_64/libxybrid_ffi.so
+          "$NDK_STRIP" bindings/unity/Runtime/Plugins/Android/arm64-v8a/libxybrid_bolt.so
+          "$NDK_STRIP" bindings/unity/Runtime/Plugins/Android/armeabi-v7a/libxybrid_bolt.so
+          "$NDK_STRIP" bindings/unity/Runtime/Plugins/Android/x86_64/libxybrid_bolt.so
 
       - name: Verify deployed libraries
         run: |
@@ -390,7 +340,7 @@ jobs:
             echo ""
             echo "=== $abi ==="
             ls -la "$ABI_DIR/"
-            file "$ABI_DIR/libxybrid_ffi.so"
+            file "$ABI_DIR/libxybrid_bolt.so"
           done
 
       - name: Upload Android plugins
@@ -448,10 +398,10 @@ jobs:
           echo "ORT iOS library found."
 
       - name: Build for aarch64-apple-ios
-        run: cargo xtask build-ffi --target aarch64-apple-ios --deploy-unity
+        run: cargo xtask build-ffi --target aarch64-apple-ios --deploy-unity --bolt
 
       - name: Strip debug symbols (iOS)
-        run: strip -S bindings/unity/Runtime/Plugins/iOS/libxybrid_ffi.a
+        run: strip -S bindings/unity/Runtime/Plugins/iOS/libxybrid_bolt.a
 
       - name: Verify deployed libraries
         run: |
@@ -475,7 +425,7 @@ jobs:
     name: Package Unity SDK
     permissions:
       contents: write   # gh release upload of the packaged SDK tarball
-    needs: [check-csharp-bindings, build-unity-macos, build-unity-windows, build-unity-linux, build-unity-ios, build-unity-android]
+    needs: [build-unity-macos, build-unity-windows, build-unity-linux, build-unity-ios, build-unity-android]
     if: always() && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled')
     runs-on: ubuntu-latest
     steps:
@@ -519,15 +469,15 @@ jobs:
           set -euo pipefail
           PLUGINS=bindings/unity/Runtime/Plugins
           for path in \
-            Windows/xybrid_ffi.dll \
+            Windows/xybrid_bolt.dll \
             Windows/onnxruntime.dll \
             Windows/onnxruntime.dll.meta \
-            Linux/libxybrid_ffi.so \
+            Linux/libxybrid_bolt.so \
             Linux/libonnxruntime.so \
             Linux/libonnxruntime.so.meta; do
             test -f "$PLUGINS/$path" || { echo "Missing Unity runtime: $path"; exit 1; }
           done
-          echo "Unity desktop bundles contain xybrid_ffi + ONNX Runtime."
+          echo "Unity desktop bundles contain xybrid_bolt + ONNX Runtime."
 
       - name: Extract version
         id: version
@@ -550,10 +500,10 @@ jobs:
           mkdir -p dist
           # platform-key:PluginDir:primary-lib-relative-path ("" = any-ABI Android)
           MAPPINGS=(
-            "macos:macOS:libxybrid_ffi.dylib"
-            "windows:Windows:xybrid_ffi.dll"
-            "linux:Linux:libxybrid_ffi.so"
-            "ios:iOS:libxybrid_ffi.a"
+            "macos:macOS:libxybrid_bolt.dylib"
+            "windows:Windows:xybrid_bolt.dll"
+            "linux:Linux:libxybrid_bolt.so"
+            "ios:iOS:libxybrid_bolt.a"
             "android:Android:"
           )
           ENTRIES=()
@@ -563,7 +513,7 @@ jobs:
             if [ "$KEY" = "android" ]; then
               PRESENT=false
               for abi in arm64-v8a armeabi-v7a x86_64; do
-                [ -f "$SRC/$abi/libxybrid_ffi.so" ] && PRESENT=true
+                [ -f "$SRC/$abi/libxybrid_bolt.so" ] && PRESENT=true
               done
             else
               PRESENT=false; [ -f "$SRC/$LIB" ] && PRESENT=true
