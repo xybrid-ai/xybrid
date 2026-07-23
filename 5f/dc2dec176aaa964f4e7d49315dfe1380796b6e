@@ -1,0 +1,20 @@
+xtask/src/main.rs
+  s_56f8212040c844::t_c00d1f34962ca9 2535
+  s_56f8212040c844::t_aea986a9f74954 2456
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "5fdc2dec176aaa964f4e7d49315dfe1380796b6e",
+  "prompts": {},
+  "sessions": {
+    "s_56f8212040c844": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "712d827d-2c3e-407d-a7a4-2e1b3f6e2b3b",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
