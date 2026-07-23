@@ -2453,7 +2453,7 @@ fn package_unity_natives(version: &str, output_dir: &Path) -> Result<()> {
     if !plugins_dir.exists() {
         anyhow::bail!(
             "Unity plugins dir not found at {:?} — run \
-             `cargo xtask build-unity --all-platforms --deploy` first",
+             `cargo xtask build-unity --all-platforms --deploy --bolt` first",
             plugins_dir
         );
     }
@@ -2532,7 +2532,7 @@ fn package_unity_natives(version: &str, output_dir: &Path) -> Result<()> {
     if entries.is_empty() {
         anyhow::bail!(
             "No Unity native platforms were present to package — run \
-             `cargo xtask build-unity --all-platforms --deploy` first"
+             `cargo xtask build-unity --all-platforms --deploy --bolt` first"
         );
     }
 
