@@ -9,7 +9,6 @@ on:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
-  NDK_VERSION: "26.1.10909125"
 
 permissions: read-all
 
@@ -52,12 +51,6 @@ jobs:
         with:
           submodules: true
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
-        with:
-          toolchain: stable
-          targets: aarch64-apple-darwin
-
       # Unity's macOS native is built by Bazel — the same
       # //crates/xybrid-bolt:xybrid_bolt_cdylib target every other binding uses —
       # on this macos-14 runner because --config=macos-metal compiles the
@@ -86,7 +79,9 @@ jobs:
         run: |
           LIB=$(bazelisk cquery --config=macos-metal -c opt --output=files //crates/xybrid-bolt:xybrid_bolt_cdylib | head -1)
           echo "Bazel output: $LIB"
-          cargo xtask deploy-unity-native --lib "$LIB" --target aarch64-apple-darwin
+          python3 tools/scripts/stage_unity_native.py \
+            --lib "$LIB" \
+            --target aarch64-apple-darwin
 
       - name: Strip debug symbols (macOS)
         run: strip -x bindings/unity/Runtime/Plugins/macOS/libxybrid_bolt.dylib
@@ -255,83 +250,53 @@ jobs:
         with:
           submodules: true
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
-        with:
-          toolchain: stable
-          targets: >-
-            aarch64-linux-android,
-            armv7-linux-androideabi,
-            x86_64-linux-android
-
-      - name: Setup sccache
-        uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
-
-      - name: Configure sccache environment
-        shell: bash
+      # Android's bolt .so is built by Bazel — the same
+      # //crates/xybrid-bolt:xybrid_bolt_cdylib target the Kotlin AAR ships (and
+      # dlopen-gates on 16 KB-page emulators), one build per ABI. The Bazel link
+      # already strips, 16 KB-aligns, and links libc++_shared (see the android
+      # rustc_flags in crates/xybrid-bolt/BUILD.bazel), so there's no NDK,
+      # cargo-ndk, or strip step here. Android builds remotely only (Linux RBE);
+      # creds come from a gitignored try-import written from the BuildBuddy secret.
+      - name: Configure BuildBuddy remote config
+        env:
+          BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
+        if: env.BUILDBUDDY_API_KEY != ''
         run: |
-          echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
-          echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
-          echo "CMAKE_C_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
-          echo "CMAKE_CXX_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
+          mkdir -p .context
+          cat > .context/buildbuddy.bazelrc <<EOF
+          common:remote --bes_results_url=https://app.buildbuddy.io/invocation/
+          common:remote --bes_backend=grpcs://remote.buildbuddy.io
+          common:remote --remote_header=x-buildbuddy-api-key=${BUILDBUDDY_API_KEY}
+          common:remote --remote_cache=grpcs://remote.buildbuddy.io
+          common:remote --remote_executor=grpcs://remote.buildbuddy.io
+          common:remote --remote_cache_compression
+          common:remote --remote_download_toplevel
+          EOF
+          echo "REMOTE=--config=remote" >> "$GITHUB_ENV"
 
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-        with:
-          prefix-key: "v1-rust"
-          shared-key: "unity-android"
-          cache-all-crates: "true"
-          save-if: "true"
-
-      - name: Cache Android NDK
-        id: cache-ndk
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        with:
-          path: ${{ env.ANDROID_HOME }}/ndk/${{ env.NDK_VERSION }}
-          key: android-ndk-${{ env.NDK_VERSION }}
-
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
-
-      - name: Install NDK
-        if: steps.cache-ndk.outputs.cache-hit != 'true'
-        run: sdkmanager --install "ndk;${{ env.NDK_VERSION }}"
-
-      - name: Set NDK environment
-        run: echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/${{ env.NDK_VERSION }}" >> $GITHUB_ENV
-
-      - name: Cache cargo-ndk
-        id: cache-cargo-ndk
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        with:
-          path: ~/.cargo/bin/cargo-ndk
-          key: cargo-ndk-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            cargo-ndk-${{ runner.os }}-
-
-      - name: Install cargo-ndk
-        # actions/cache sets cache-hit only on EXACT key match; with
-        # restore-keys, a fallback can populate ~/.cargo/bin/cargo-ndk while
-        # leaving cache-hit empty, which made the previous `if:`-gated
-        # `cargo install` re-run and fail with "binary already exists".
-        # `which || install` is idempotent in both states.
-        run: which cargo-ndk || cargo install cargo-ndk
-
-      - name: Build for aarch64-linux-android
-        run: cargo xtask build-ffi --target aarch64-linux-android --release --deploy-unity
-
-      - name: Build for armv7-linux-androideabi
-        run: cargo xtask build-ffi --target armv7-linux-androideabi --release --deploy-unity
-
-      - name: Build for x86_64-linux-android
-        run: cargo xtask build-ffi --target x86_64-linux-android --release --deploy-unity
-
-      - name: Strip debug symbols (Android)
+      # stage_unity_native.py copies each ABI's .so into
+      # Runtime/Plugins/Android/<abi>/ and bundles the vendored ORT and
+      # libc++_shared beside it when that ABI is available.
+      - name: Build + stage Android natives (Bazel, per ABI)
         run: |
-          NDK_STRIP="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip"
-          "$NDK_STRIP" bindings/unity/Runtime/Plugins/Android/arm64-v8a/libxybrid_bolt.so
-          "$NDK_STRIP" bindings/unity/Runtime/Plugins/Android/armeabi-v7a/libxybrid_bolt.so
-          "$NDK_STRIP" bindings/unity/Runtime/Plugins/Android/x86_64/libxybrid_bolt.so
+          set -euo pipefail
+          remote_args=()
+          if [[ -n "${REMOTE:-}" ]]; then
+            remote_args+=("$REMOTE")
+          fi
+          for spec in \
+            "aarch64-linux-android:android-arm64" \
+            "armv7-linux-androideabi:android-armv7" \
+            "x86_64-linux-android:android-x86_64"; do
+            triple="${spec%%:*}"; cfg="${spec##*:}"
+            echo "=== $triple ($cfg) ==="
+            bazelisk build "${remote_args[@]}" --config="$cfg" //crates/xybrid-bolt:xybrid_bolt_cdylib
+            LIB=$(bazelisk cquery "${remote_args[@]}" --config="$cfg" --output=files //crates/xybrid-bolt:xybrid_bolt_cdylib | head -1)
+            echo "Bazel output: $LIB"
+            python3 tools/scripts/stage_unity_native.py \
+              --lib "$LIB" \
+              --target "$triple"
+          done
 
       - name: Verify deployed libraries
         run: |

@@ -1,9 +1,9 @@
-# The native libraries AND their Unity .meta import settings are generated at
-# build time by `cargo xtask build-ffi --deploy-unity` — CI zips them into the
-# per-platform release bundles, and the editor resolver fetches those into the
-# consuming project's Assets/Xybrid/Plugins/. Nothing platform-specific is
-# committed here (committing the .meta files would orphan them in the installed
-# package, since the binaries they describe are never shipped inside it).
+# The native libraries AND their Unity .meta import settings are staged at
+# build time — CI zips them into the per-platform release bundles, and the
+# editor resolver fetches those into the consuming project's
+# Assets/Xybrid/Plugins/. Nothing platform-specific is committed here
+# (committing the .meta files would orphan them in the installed package,
+# since the binaries they describe are never shipped inside it).
 *.so
 *.dll
 *.a
