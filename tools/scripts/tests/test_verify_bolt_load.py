@@ -1,12 +1,13 @@
-"""Unit tests for the boltffi wire-string decode (no native library required)."""
+"""Unit tests for the boltffi smoke helpers (no native library required)."""
 
+import ctypes
 import sys
 import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from verify_bolt_load import _decode_wire_string
+from verify_bolt_load import FfiBuf, _decode_wire_string
 
 
 def wire(text: str) -> bytes:
@@ -41,6 +42,15 @@ class DecodeWireStringTests(unittest.TestCase):
     def test_ignores_trailing_bytes(self):
         # A well-formed prefix + payload is decoded even if the buffer is longer.
         self.assertEqual(_decode_wire_string(wire("ok") + b"\x00\x00"), "ok")
+
+
+class FfiBufLayoutTests(unittest.TestCase):
+    def test_matches_four_word_boltffi_abi(self):
+        self.assertEqual(
+            [name for name, _field_type in FfiBuf._fields_],
+            ["ptr", "len", "cap", "align"],
+        )
+        self.assertEqual(ctypes.sizeof(FfiBuf), 4 * ctypes.sizeof(ctypes.c_size_t))
 
 
 if __name__ == "__main__":

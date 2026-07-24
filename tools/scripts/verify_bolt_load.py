@@ -22,6 +22,7 @@ class FfiBuf(ctypes.Structure):
         ("ptr", ctypes.c_void_p),
         ("len", ctypes.c_size_t),
         ("cap", ctypes.c_size_t),
+        ("align", ctypes.c_size_t),
     ]
 
 

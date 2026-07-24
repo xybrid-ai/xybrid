@@ -19,6 +19,7 @@ internal static class Smoke
         public IntPtr ptr;
         public UIntPtr len;
         public UIntPtr cap;
+        public UIntPtr align;
     }
 
     [DllImport(Lib, EntryPoint = "boltffi_version")]
