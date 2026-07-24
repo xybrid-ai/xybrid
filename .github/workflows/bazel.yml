@@ -167,7 +167,8 @@ jobs:
             //crates/xybrid-cli:xybrid \
             //crates/xybrid-bolt:xybrid_bolt_staticlib
           bazelisk build --config=remote --config=windows -c opt \
-            //crates/xybrid-cli:xybrid
+            //crates/xybrid-cli:xybrid \
+            //crates/xybrid-bolt:xybrid_bolt_cdylib
 
       # Linux-CLI smoke + parity gate (Flip 1): this is the SHIPPED artifact
       # since the release-prep build-cli-linux cutover — run it, verify the
@@ -214,6 +215,36 @@ jobs:
         with:
           name: bazel-xybrid-windows-exe
           path: /tmp/win-exe/xybrid.exe
+          retention-days: 7
+
+      # Windows bolt cdylib (Unity native) — NON-SHIPPING proof lane. Unity still
+      # ships the cargo/MSVC DLL; this validates the windows-gnu Bazel DLL end to
+      # end before any flip. Byte-inspect + audit here (PE shape, and the import
+      # table must be Windows-system-only — the static libc++/unwind trio means
+      # no MinGW/MSVC runtime carriers leak out); the run-it half loads it on
+      # windows-latest below (bazel-windows-bolt-smoke).
+      - name: Verify + audit + stage the windows bolt DLL
+        if: env.BUILDBUDDY_API_KEY != ''
+        run: |
+          DLL=$(bazelisk cquery --config=remote --config=windows -c opt --output=files //crates/xybrid-bolt:xybrid_bolt_cdylib | head -1)
+          echo "resolved windows bolt DLL: $DLL"
+          file "$DLL"
+          file "$DLL" | grep -q 'PE32+.*x86-64' || { echo "NOT a PE32+ x86-64 DLL"; exit 1; }
+          python3 -m pip install --quiet --user pefile
+          python3 tools/scripts/audit_windows_dll.py --dll "$DLL" \
+            --require-export boltffi_version \
+            --require-export boltffi_configure_runtime \
+            --require-export boltffi_free_buf \
+            --require-export boltffi_last_error_message
+          mkdir -p /tmp/win-bolt && cp "$DLL" /tmp/win-bolt/xybrid_bolt.dll
+          echo "windows bolt DLL payload + audit: OK ✅"
+
+      - name: Upload windows bolt DLL artifact
+        if: env.BUILDBUDDY_API_KEY != ''
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: bazel-xybrid-bolt-windows-dll
+          path: /tmp/win-bolt/xybrid_bolt.dll
           retention-days: 7
 
       # The RBE-proven Android row (PR #326 gates 6-10): NDK cross-compile +
@@ -374,3 +405,39 @@ jobs:
           grep -aq 'mtmd_' xybrid.exe || { echo "MISSING vision (mtmd) markers"; exit 1; }
           grep -aq 'huggingface\.co' xybrid.exe || { echo "MISSING huggingface support"; exit 1; }
           echo "windows .exe smoke: OK"
+
+  # Run-it half of the windows bolt-DLL proof (Unity native): a real Windows
+  # runner downloads the RBE-built xybrid_bolt.dll, stages ORT beside it, and
+  # runs a MANAGED C# smoke — loads the DLL under the CLR and P/Invokes a real
+  # boltffi entry point (stronger than a bare ctypes load, and the runtime
+  # validation the linux byte-inspection can't do). NON-SHIPPING: Unity keeps
+  # shipping the cargo/MSVC DLL until this windows-gnu lane is trusted.
+  bazel-windows-bolt-smoke:
+    name: Bazel windows bolt DLL smoke (managed C# P/Invoke)
+    needs: bazel
+    if: needs.bazel.outputs.rbe == 'true'
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: bazel-xybrid-bolt-windows-dll
+          path: tools/windows-smoke
+
+      - name: Build the managed smoke
+        run: dotnet build tools/windows-smoke/xybrid-bolt-smoke.csproj -c Release
+
+      - name: Stage natives beside the smoke exe (bolt DLL + ORT)
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT=tools/windows-smoke/bin/Release/net8.0
+          cp tools/windows-smoke/xybrid_bolt.dll "$OUT/"
+          python tools/scripts/stage_unity_desktop_ort.py windows "$OUT"
+          ls -la "$OUT"
+
+      - name: Run managed C# smoke (load DLL + boltffi P/Invoke)
+        shell: bash
+        run: ./tools/windows-smoke/bin/Release/net8.0/xybrid-bolt-smoke.exe

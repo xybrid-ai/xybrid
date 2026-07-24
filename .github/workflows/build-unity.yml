@@ -162,6 +162,9 @@ jobs:
           test -f "$PLUGINS/onnxruntime.dll.meta"
           python -c "import ctypes; ctypes.CDLL(r'$PLUGINS/onnxruntime.dll')"
           echo "Windows ORT runtime loads successfully."
+          # Load the shipped bolt plugin itself (not just ORT) and run a real
+          # boltffi call — proves the native is functional, not merely present.
+          python tools/scripts/verify_bolt_load.py "$PLUGINS/xybrid_bolt.dll"
 
       - name: Upload Windows plugins
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

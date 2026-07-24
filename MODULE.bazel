@@ -225,6 +225,18 @@ use_repo(osx, "macos_sdk")
 
 # --- Rust toolchain: rules_rs (facade over rules_rust) ------------------------
 rules_rust = use_extension("@rules_rs//rs:rules_rust.bzl", "rules_rust")
+
+# rules_rust fix (report upstream): the shared-library rule unconditionally
+# declares a mandatory `.dll.lib` import-library output for EVERY windows cdylib
+# (rust/private/rustc.bzl), but that `.dll.lib` name is MSVC-only — windows-GNU
+# (MinGW) rustc emits `.dll.a`, so a good gnu cdylib fails with "mandatory output
+# not created". The patch gates that output on target_abi == "msvc" (the same
+# check the rule already uses elsewhere). Needed for the bolt windows-gnu cdylib
+# (Unity), which is loaded via P/Invoke and needs no import library at all.
+rules_rust.patch(
+    patches = ["//:rules_rust.patch"],
+    strip = 1,
+)
 use_repo(rules_rust, "rules_rust")
 
 toolchains = use_extension("@rules_rs//rs/toolchains:module_extension.bzl", "toolchains")
