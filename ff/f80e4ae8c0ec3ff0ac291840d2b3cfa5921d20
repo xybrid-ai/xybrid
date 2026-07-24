@@ -1,0 +1,21 @@
+tools/unity-runtime-smoke/README.md
+  s_040de1881b637d::t_46d113d3b8ccc4 30-32,34-40
+.github/workflows/bazel.yml
+  s_040de1881b637d::t_46d113d3b8ccc4 465,518,521-522,525-535
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "fff80e4ae8c0ec3ff0ac291840d2b3cfa5921d20",
+  "prompts": {},
+  "sessions": {
+    "s_040de1881b637d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f939d-8736-7cd3-8aef-719175e1643d",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
