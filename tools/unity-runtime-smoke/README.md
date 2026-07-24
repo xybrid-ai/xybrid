@@ -25,16 +25,72 @@ unity build tools/unity-runtime-smoke \
   --allow-dirty-build
 ```
 
-The Windows CI rung is a manually dispatched job in `bazel.yml`. It runs only
-when the repository variable `UNITY_WINDOWS_SMOKE_ENABLED` is `true` and uses
-the `UNITY_LICENSE` repository secret. Set it to the complete contents of the
-`.ulf` file created by a locally activated Unity installation. On macOS, Unity
-Hub normally writes that file to:
+## Windows — one-time manual validation
 
-```text
-/Library/Application Support/Unity/Unity_lic.ulf
+The Windows smoke is **run by hand on a Windows box that's already
+Unity-licensed**, not in hosted CI. Unity licensing on an ephemeral
+GitHub-hosted Windows runner is not viable: service accounts cannot activate
+Editor licenses, and a locally activated `.ulf` is machine-bound
+(`Machine bindings don't match` on a fresh runner image). The
+`Bazel windows bolt DLL smoke (managed C# P/Invoke)` job in `bazel.yml`
+already proves the Windows DLL loads and round-trips a real boltffi call under
+the CLR on `windows-latest`; the rungs below add Unity's plugin import + IL2CPP
+AOT path, which require a real licensed editor.
+
+This is the last gate before flipping `build-unity.yml` from cargo/MSVC to
+Bazel/MinGW for the Windows Unity native. Run it once, paste `[XybridSmoke] OK`,
+then flip the producer.
+
+### 1. Obtain the Bazel-built Windows DLL
+
+Either download the `bazel-xybrid-bolt-windows-dll` artifact from a green
+`bazel.yml` run on `master`, or build it locally:
+
+```bash
+bazelisk build --config=remote --config=windows -c opt \
+  //crates/xybrid-bolt:xybrid_bolt_cdylib
 ```
 
-The workflow writes the secret to a runner-temporary file only for activation,
-then deletes that file. A Unity service account cannot activate an Editor
-license and is not used by this smoke.
+### 2. Stage the native + ONNX Runtime into the Unity package
+
+From the repo root (the smoke project references `bindings/unity` via a
+relative local-package path):
+
+```bash
+python tools/scripts/stage_unity_native.py \
+  --lib <path-to-xybrid_bolt.dll> \
+  --target x86_64-pc-windows-gnu
+
+python tools/scripts/stage_unity_desktop_ort.py windows \
+  bindings/unity/Runtime/Plugins/Windows
+
+# Suppress the package's download resolver so it can't swap the staged native
+# for a release asset during the smoke.
+VERSION=$(python -c "import json; print(json.load(open('bindings/unity/package.json'))['version'])")
+mkdir -p tools/unity-runtime-smoke/Assets/Xybrid/Plugins
+printf '%s\n' "$VERSION" \
+  > tools/unity-runtime-smoke/Assets/Xybrid/Plugins/.xybrid-native-windows-version
+```
+
+### 3. Run EditMode, then build + run the IL2CPP player
+
+```bash
+unity test tools/unity-runtime-smoke --mode EditMode \
+  --output tools/unity-runtime-smoke/editmode-results.xml
+
+unity build tools/unity-runtime-smoke \
+  --target StandaloneWindows64 \
+  --execute-method Builder.PerformBuild \
+  --allow-dirty-build
+```
+
+Then launch the built player and require `[XybridSmoke] OK`:
+
+```bash
+./tools/unity-runtime-smoke/Build/windows-il2cpp/XybridSmoke.exe \
+  -batchmode -nographics -logFile tools/unity-runtime-smoke/Logs/player.log
+```
+
+The macOS equivalent (the same project, `--target StandaloneOSX`) was the
+validation used during the Unity-on-bolt migration and is green: 24/24 EditMode
++ an IL2CPP player that called the native Bolt API and printed `[XybridSmoke] OK`.
