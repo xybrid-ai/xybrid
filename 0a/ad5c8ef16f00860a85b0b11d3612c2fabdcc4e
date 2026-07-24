@@ -1,0 +1,30 @@
+tools/scripts/verify_bolt_load.py
+  s_d25a9a919d11f8::t_92598882eb4229 13,48-51,53-72
+.github/workflows/bazel.yml
+  s_d25a9a919d11f8::t_92598882eb4229 238-240
+tools/scripts/audit_windows_dll.py
+  s_d25a9a919d11f8::t_92598882eb4229 14,17,95-104,199-205,217-236,240
+tools/scripts/tests/test_audit_windows_dll.py
+  s_d25a9a919d11f8::t_97395fb7e223a9 9,98-111
+  s_d25a9a919d11f8::t_2538cd7268751f 112
+tools/scripts/tests/test_verify_bolt_load.py
+  s_d25a9a919d11f8::t_97395fb7e223a9 6,9,13,59-80,82-91
+  s_d25a9a919d11f8::t_be37d5deae394c 4,81
+  s_d25a9a919d11f8::t_8f2e9543945704 92-93
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "0aad5c8ef16f00860a85b0b11d3612c2fabdcc4e",
+  "prompts": {},
+  "sessions": {
+    "s_d25a9a919d11f8": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f9195-b95c-70d3-8dc6-4e9d7e66ace8",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
