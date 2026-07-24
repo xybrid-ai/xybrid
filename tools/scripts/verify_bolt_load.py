@@ -76,12 +76,7 @@ def main() -> int:
         print(f"verify-bolt-load: {error}", file=sys.stderr)
         return 1
     print(f"bolt native loads; boltffi_version -> {version!r}")
-    # Hard-exit before interpreter teardown unloads the DLL: the boltffi native
-    # (llama.cpp / ggml C++ statics) runs destructors at unload, and abrupt
-    # teardown of that native state is out of scope for a load+call check (the
-    # real SDK guards its lifecycle). stdout is already flushed by print().
-    sys.stdout.flush()
-    os._exit(0)
+    return 0
 
 
 if __name__ == "__main__":

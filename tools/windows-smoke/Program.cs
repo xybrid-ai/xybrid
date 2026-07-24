@@ -28,15 +28,6 @@ internal static class Smoke
     [DllImport(Lib, EntryPoint = "boltffi_free_buf")]
     private static extern void FreeBuf(FfiBuf buf);
 
-    // Terminate immediately with a clean exit code. The boltffi native (llama.cpp
-    // / ggml C++ statics) runs destructors at DLL unload; abrupt teardown of that
-    // native state on process exit is out of scope for a load+call smoke — the
-    // real SDK guards it (e.g. TelemetryDomainReloadGuard) and the Unity IL2CPP
-    // player smoke exercises the true lifecycle. Exiting here keeps a noisy
-    // native unload from masking the already-verified result.
-    [DllImport("kernel32.dll")]
-    private static extern void ExitProcess(uint exitCode);
-
     private static int Main()
     {
         FfiBuf buf;
@@ -89,8 +80,6 @@ internal static class Smoke
 
         Console.WriteLine($"smoke: boltffi_version -> \"{version}\"");
         Console.WriteLine("windows managed C# bolt smoke: OK");
-        Console.Out.Flush();
-        ExitProcess(0); // clean, teardown-free exit (see note above)
-        return 0; // unreachable
+        return 0;
     }
 }
