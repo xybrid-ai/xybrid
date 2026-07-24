@@ -11,8 +11,10 @@ appears in the import table, or if an expected boltffi export is missing.
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 from dataclasses import dataclass
+from pathlib import Path
 
 
 # Windows DLLs guaranteed present on a stock machine (system32). MinGW/MSVC
@@ -88,6 +90,16 @@ FORBIDDEN_HINTS = (
 class AuditResult:
     ok: bool
     lines: tuple[str, ...]
+
+
+DLL_IMPORT_ENTRY_POINT = re.compile(
+    r'(?m)^\s*\[DllImport\([^\r\n]*?\bEntryPoint\s*=\s*"([^"]+)"'
+)
+
+
+def extract_csharp_entry_points(source: str) -> list[str]:
+    """Return unique native entry points declared by active C# DllImport attributes."""
+    return list(dict.fromkeys(DLL_IMPORT_ENTRY_POINT.findall(source)))
 
 
 def is_system_import(dll: str, *, extra_allowed: frozenset[str]) -> bool:
@@ -184,6 +196,13 @@ def parse_args() -> argparse.Namespace:
         default=[],
         help="An extra non-system DLL to permit, e.g. onnxruntime.dll (repeatable).",
     )
+    parser.add_argument(
+        "--require-exports-from-csharp",
+        action="append",
+        default=[],
+        metavar="PATH",
+        help="Require every DllImport EntryPoint declared in a C# source (repeatable).",
+    )
     return parser.parse_args()
 
 
@@ -195,10 +214,30 @@ def main() -> int:
         print(f"audit-windows-dll: cannot read {args.dll}: {error}", file=sys.stderr)
         return 2
 
+    required_exports = list(args.require_export)
+    for source_path in args.require_exports_from_csharp:
+        try:
+            source = Path(source_path).read_text(encoding="utf-8")
+        except OSError as error:
+            print(
+                f"audit-windows-dll: cannot read {source_path}: {error}",
+                file=sys.stderr,
+            )
+            return 2
+        entry_points = extract_csharp_entry_points(source)
+        if not entry_points:
+            print(
+                f"audit-windows-dll: no DllImport entry points found in {source_path}",
+                file=sys.stderr,
+            )
+            return 2
+        required_exports.extend(entry_points)
+    required_exports = list(dict.fromkeys(required_exports))
+
     result = audit(
         imports,
         exports,
-        required_exports=args.require_export,
+        required_exports=required_exports,
         extra_allowed=frozenset(a.lower() for a in args.allow_import),
     )
     print(f"== PE audit: {args.dll} ==")

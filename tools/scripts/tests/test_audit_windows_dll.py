@@ -6,7 +6,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from audit_windows_dll import audit, is_system_import
+from audit_windows_dll import audit, extract_csharp_entry_points, is_system_import
 
 
 SYSTEM_IMPORTS = ["KERNEL32.dll", "ntdll.dll", "ws2_32.dll", "bcrypt.dll"]
@@ -94,6 +94,21 @@ class AuditWindowsDllTests(unittest.TestCase):
         self.assertTrue(is_system_import("ext-ms-win-foo.dll", extra_allowed=allowed))
         self.assertTrue(is_system_import("KeRnEl32.DLL", extra_allowed=allowed))
         self.assertFalse(is_system_import("libunwind.dll", extra_allowed=allowed))
+
+    def test_extracts_real_csharp_dllimport_entry_points_only(self):
+        source = """
+            [DllImport(LibName, EntryPoint = "boltffi_version")]
+            private static extern FfiBuf Version();
+            // [DllImport(LibName, EntryPoint = "commented_out")]
+            [DllImport(NativeMethods.LibName, EntryPoint="boltffi_model_run")]
+            private static extern FfiBuf Run();
+            [DllImport(LibName, EntryPoint = "boltffi_version")]
+            private static extern FfiBuf VersionAgain();
+        """
+        self.assertEqual(
+            extract_csharp_entry_points(source),
+            ["boltffi_version", "boltffi_model_run"],
+        )
 
 
 if __name__ == "__main__":

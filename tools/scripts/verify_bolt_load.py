@@ -10,6 +10,7 @@ smoke in `.github/workflows/bazel.yml`.
 
 from __future__ import annotations
 
+import contextlib
 import ctypes
 import os
 import sys
@@ -44,26 +45,31 @@ def verify(lib_path: str) -> str:
     """Load `lib_path`, call boltffi_version, and return the decoded version."""
     directory = os.path.dirname(os.path.abspath(lib_path))
     # Let the OS loader resolve sibling deps (e.g. a co-located onnxruntime.dll)
-    # if the library references any. No-op on platforms without the API.
-    if hasattr(os, "add_dll_directory") and os.path.isdir(directory):
+    # if the library references any. Keep the returned handle alive through the
+    # native call; closing/discarding it removes the directory from Windows'
+    # process search path. No-op on platforms without the API.
+    dll_directory = (
         os.add_dll_directory(directory)
+        if hasattr(os, "add_dll_directory") and os.path.isdir(directory)
+        else contextlib.nullcontext()
+    )
+    with dll_directory:
+        lib = ctypes.CDLL(os.path.abspath(lib_path))
+        lib.boltffi_version.restype = FfiBuf
+        lib.boltffi_free_buf.argtypes = [FfiBuf]
+        lib.boltffi_free_buf.restype = None
 
-    lib = ctypes.CDLL(os.path.abspath(lib_path))
-    lib.boltffi_version.restype = FfiBuf
-    lib.boltffi_free_buf.argtypes = [FfiBuf]
-    lib.boltffi_free_buf.restype = None
-
-    buf = lib.boltffi_version()
-    try:
-        if not buf.ptr or not buf.len:
-            raise RuntimeError("boltffi_version returned an empty buffer")
-        raw = ctypes.string_at(buf.ptr, int(buf.len))
-        version = _decode_wire_string(raw)
-        if not version:
-            raise RuntimeError("boltffi_version decoded to an empty string")
-        return version
-    finally:
-        lib.boltffi_free_buf(buf)
+        buf = lib.boltffi_version()
+        try:
+            if not buf.ptr or not buf.len:
+                raise RuntimeError("boltffi_version returned an empty buffer")
+            raw = ctypes.string_at(buf.ptr, int(buf.len))
+            version = _decode_wire_string(raw)
+            if not version:
+                raise RuntimeError("boltffi_version decoded to an empty string")
+            return version
+        finally:
+            lib.boltffi_free_buf(buf)
 
 
 def main() -> int:

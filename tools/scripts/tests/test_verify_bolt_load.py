@@ -1,13 +1,16 @@
 """Unit tests for the boltffi smoke helpers (no native library required)."""
 
 import ctypes
+import os
 import sys
+import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from verify_bolt_load import FfiBuf, _decode_wire_string
+from verify_bolt_load import FfiBuf, _decode_wire_string, verify
 
 
 def wire(text: str) -> bytes:
@@ -51,6 +54,41 @@ class FfiBufLayoutTests(unittest.TestCase):
             ["ptr", "len", "cap", "align"],
         )
         self.assertEqual(ctypes.sizeof(FfiBuf), 4 * ctypes.sizeof(ctypes.c_size_t))
+
+
+class VerifyLibraryTests(unittest.TestCase):
+    def test_keeps_windows_dll_search_directory_active_through_call(self):
+        raw = ctypes.create_string_buffer(wire("0.1.0"))
+
+        class FakeFunction:
+            def __init__(self, result=None):
+                self.result = result
+
+            def __call__(self, *_args):
+                return self.result
+
+        fake_lib = MagicMock()
+        fake_lib.boltffi_version = FakeFunction(
+            FfiBuf(ctypes.addressof(raw), len(raw.raw) - 1, len(raw.raw) - 1, 1)
+        )
+        fake_lib.boltffi_free_buf = FakeFunction()
+        directory_handle = MagicMock()
+
+        with tempfile.TemporaryDirectory() as directory:
+            library = str(Path(directory) / "xybrid_bolt.dll")
+            with (
+                patch.object(
+                    os,
+                    "add_dll_directory",
+                    return_value=directory_handle,
+                    create=True,
+                ),
+                patch.object(ctypes, "CDLL", return_value=fake_lib),
+            ):
+                self.assertEqual(verify(library), "0.1.0")
+
+        directory_handle.__enter__.assert_called_once_with()
+        directory_handle.__exit__.assert_called_once()
 
 
 if __name__ == "__main__":
