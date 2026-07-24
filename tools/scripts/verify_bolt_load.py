@@ -2,8 +2,8 @@
 """Load a deployed bolt native library and exercise a real boltffi call.
 
 Proves a native plugin is *functional* — loads under the OS loader and completes
-a live FFI round-trip (boltffi_version -> owned buffer -> free) — not merely
-present on disk. Used by the Windows Unity verify to guard the shipped
+a live FFI round-trip (boltffi_version -> owned wire buffer -> decode -> free) —
+not merely present on disk. Used by the Windows Unity verify to guard the shipped
 cargo/MSVC `xybrid_bolt.dll`; the Bazel windows-gnu DLL gets a fuller managed C#
 smoke in `.github/workflows/bazel.yml`.
 """
@@ -25,8 +25,22 @@ class FfiBuf(ctypes.Structure):
     ]
 
 
+def _decode_wire_string(raw: bytes) -> str:
+    """Decode a boltffi wire string: an i32 LE length prefix, then UTF-8 bytes.
+
+    Mirrors WireReader.ReadString in XybridBolt.cs — the FfiBuf is wire-encoded,
+    NOT a raw C string.
+    """
+    if len(raw) < 4:
+        raise RuntimeError(f"undersized wire buffer ({len(raw)} bytes)")
+    length = int.from_bytes(raw[0:4], "little", signed=True)
+    if length < 0 or 4 + length > len(raw):
+        raise RuntimeError(f"corrupt wire buffer (prefix len={length}, total={len(raw)})")
+    return raw[4 : 4 + length].decode("utf-8")
+
+
 def verify(lib_path: str) -> str:
-    """Load `lib_path`, call boltffi_version, and return the version string."""
+    """Load `lib_path`, call boltffi_version, and return the decoded version."""
     directory = os.path.dirname(os.path.abspath(lib_path))
     # Let the OS loader resolve sibling deps (e.g. a co-located onnxruntime.dll)
     # if the library references any. No-op on platforms without the API.
@@ -42,7 +56,8 @@ def verify(lib_path: str) -> str:
     try:
         if not buf.ptr or not buf.len:
             raise RuntimeError("boltffi_version returned an empty buffer")
-        version = ctypes.string_at(buf.ptr, buf.len).decode("utf-8")
+        raw = ctypes.string_at(buf.ptr, int(buf.len))
+        version = _decode_wire_string(raw)
         if not version:
             raise RuntimeError("boltffi_version decoded to an empty string")
         return version
@@ -56,11 +71,16 @@ def main() -> int:
         return 2
     try:
         version = verify(sys.argv[1])
-    except (OSError, RuntimeError) as error:
+    except (OSError, RuntimeError, UnicodeDecodeError) as error:
         print(f"verify-bolt-load: {error}", file=sys.stderr)
         return 1
     print(f"bolt native loads; boltffi_version -> {version!r}")
-    return 0
+    # Hard-exit before interpreter teardown unloads the DLL: the boltffi native
+    # (llama.cpp / ggml C++ statics) runs destructors at unload, and abrupt
+    # teardown of that native state is out of scope for a load+call check (the
+    # real SDK guards its lifecycle). stdout is already flushed by print().
+    sys.stdout.flush()
+    os._exit(0)
 
 
 if __name__ == "__main__":

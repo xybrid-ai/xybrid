@@ -4,9 +4,10 @@ using System.Runtime.InteropServices;
 // Managed C# smoke for the windows-gnu xybrid_bolt.dll. The first P/Invoke below
 // forces the CLR to LoadLibrary the DLL; if the static libc++/libc++abi/libunwind
 // trio were NOT self-contained, this throws DllNotFoundException on a clean
-// Windows runner (the missing dependent DLL). Then it exercises a real boltffi
-// call that returns an owned buffer and frees it — round-tripping the FfiBuf
-// allocator across the C ABI boundary, exactly as the Unity binding does.
+// Windows runner (the missing dependent DLL). It then calls a real boltffi entry
+// point that returns an owned wire buffer, decodes it exactly as the Unity
+// binding does (WireReader.ReadString), and frees it — round-tripping the FfiBuf
+// allocator across the C ABI boundary.
 internal static class Smoke
 {
     private const string Lib = "xybrid_bolt";
@@ -26,6 +27,15 @@ internal static class Smoke
     [DllImport(Lib, EntryPoint = "boltffi_free_buf")]
     private static extern void FreeBuf(FfiBuf buf);
 
+    // Terminate immediately with a clean exit code. The boltffi native (llama.cpp
+    // / ggml C++ statics) runs destructors at DLL unload; abrupt teardown of that
+    // native state on process exit is out of scope for a load+call smoke — the
+    // real SDK guards it (e.g. TelemetryDomainReloadGuard) and the Unity IL2CPP
+    // player smoke exercises the true lifecycle. Exiting here keeps a noisy
+    // native unload from masking the already-verified result.
+    [DllImport("kernel32.dll")]
+    private static extern void ExitProcess(uint exitCode);
+
     private static int Main()
     {
         FfiBuf buf;
@@ -44,29 +54,42 @@ internal static class Smoke
             return 1;
         }
 
+        string version;
+        int total = checked((int)(nuint)buf.len);
         try
         {
-            if (buf.ptr == IntPtr.Zero || (nuint)buf.len == 0)
+            if (buf.ptr == IntPtr.Zero || total < 4)
             {
-                Console.Error.WriteLine("smoke: boltffi_version returned an empty buffer");
+                Console.Error.WriteLine($"smoke: boltffi_version returned an undersized buffer (len={total})");
                 return 1;
             }
-
-            string version = Marshal.PtrToStringUTF8(buf.ptr, checked((int)(nuint)buf.len)) ?? string.Empty;
-            if (version.Length == 0)
+            // boltffi FfiBuf is wire-encoded (not a raw C string). Mirror
+            // WireReader.ReadString: an i32 little-endian length prefix, then that
+            // many UTF-8 bytes. (windows-x64 is little-endian, so Marshal.ReadInt32
+            // reads the prefix directly.)
+            int len = Marshal.ReadInt32(buf.ptr, 0);
+            if (len < 0 || 4 + len > total)
             {
-                Console.Error.WriteLine("smoke: boltffi_version decoded to an empty string");
+                Console.Error.WriteLine($"smoke: corrupt wire buffer (prefix len={len}, total={total})");
                 return 1;
             }
-
-            Console.WriteLine($"smoke: boltffi_version -> \"{version}\"");
+            version = len == 0 ? string.Empty : (Marshal.PtrToStringUTF8(buf.ptr + 4, len) ?? string.Empty);
         }
         finally
         {
             FreeBuf(buf);
         }
 
+        if (version.Length == 0)
+        {
+            Console.Error.WriteLine("smoke: boltffi_version decoded to an empty string");
+            return 1;
+        }
+
+        Console.WriteLine($"smoke: boltffi_version -> \"{version}\"");
         Console.WriteLine("windows managed C# bolt smoke: OK");
-        return 0;
+        Console.Out.Flush();
+        ExitProcess(0); // clean, teardown-free exit (see note above)
+        return 0; // unreachable
     }
 }
