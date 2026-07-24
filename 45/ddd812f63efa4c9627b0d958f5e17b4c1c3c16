@@ -1,0 +1,23 @@
+tools/scripts/verify_bolt_load.py
+  s_56f8212040c844::t_b911e0115ff396 5-6,28-41,43,59-60,74,78-83
+tools/scripts/tests/test_verify_bolt_load.py
+  s_56f8212040c844::t_14995f073744d9 1-47
+tools/windows-smoke/Program.cs
+  s_56f8212040c844::t_df7335bf92cb60 7-10,30-38,57-58,61,63,66-71,73,76,83-89,91-93
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "45ddd812f63efa4c9627b0d958f5e17b4c1c3c16",
+  "prompts": {},
+  "sessions": {
+    "s_56f8212040c844": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "712d827d-2c3e-407d-a7a4-2e1b3f6e2b3b",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
