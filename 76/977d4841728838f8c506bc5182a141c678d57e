@@ -1,0 +1,21 @@
+tools/windows-smoke/Program.cs
+  s_d25a9a919d11f8::t_1b18e384b88b66 83
+tools/scripts/verify_bolt_load.py
+  s_d25a9a919d11f8::t_1b18e384b88b66 79
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "76977d4841728838f8c506bc5182a141c678d57e",
+  "prompts": {},
+  "sessions": {
+    "s_d25a9a919d11f8": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f9195-b95c-70d3-8dc6-4e9d7e66ace8",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
