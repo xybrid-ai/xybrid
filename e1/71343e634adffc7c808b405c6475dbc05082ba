@@ -1,0 +1,22 @@
+tools/unity-runtime-smoke/README.md
+  s_9b5e660be141de::t_ac693ba6afef60 78-79,81-83,90
+  s_9b5e660be141de::t_73124c226b5e08 28-77,80,84-89,91,94-96
+.github/workflows/bazel.yml
+  s_9b5e660be141de::t_b97dfb8eb516ff 448-456
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "e171343e634adffc7c808b405c6475dbc05082ba",
+  "prompts": {},
+  "sessions": {
+    "s_9b5e660be141de": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_06c1bcd46ffe4pdxWhGY03jiGm",
+        "model": "unknown"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
