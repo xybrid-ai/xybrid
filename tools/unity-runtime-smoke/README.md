@@ -27,8 +27,14 @@ unity build tools/unity-runtime-smoke \
 
 The Windows CI rung is a manually dispatched job in `bazel.yml`. It runs only
 when the repository variable `UNITY_WINDOWS_SMOKE_ENABLED` is `true` and uses
-these repository secrets:
+the `UNITY_LICENSE` repository secret. Set it to the complete contents of the
+`.ulf` file created by a locally activated Unity installation. On macOS, Unity
+Hub normally writes that file to:
 
-- `UNITY_SERVICE_ACCOUNT_ID`
-- `UNITY_SERVICE_ACCOUNT_SECRET`
-- `UNITY_SERIAL` (optional; without it, the CLI activates Unity Personal)
+```text
+/Library/Application Support/Unity/Unity_lic.ulf
+```
+
+The workflow writes the secret to a runner-temporary file only for activation,
+then deletes that file. A Unity service account cannot activate an Editor
+license and is not used by this smoke.
