@@ -1,0 +1,9 @@
+{
+  "dependencies": {
+    "com.unity.test-framework": "1.6.0",
+    "ai.xybrid.sdk": "file:../../../bindings/unity"
+  },
+  "testables": [
+    "ai.xybrid.sdk"
+  ]
+}
