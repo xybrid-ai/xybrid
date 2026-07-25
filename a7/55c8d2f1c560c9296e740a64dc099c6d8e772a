@@ -1,0 +1,22 @@
+crates/xybrid-ffi-facade/BUILD.bazel
+  s_56f8212040c844::t_870f5227e54b12 5,16-28
+  s_56f8212040c844::t_f4b933d1f45612 29
+.github/workflows/bazel.yml
+  s_56f8212040c844::t_11b3135625290e 154-166
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "a755c8d2f1c560c9296e740a64dc099c6d8e772a",
+  "prompts": {},
+  "sessions": {
+    "s_56f8212040c844": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "712d827d-2c3e-407d-a7a4-2e1b3f6e2b3b",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
