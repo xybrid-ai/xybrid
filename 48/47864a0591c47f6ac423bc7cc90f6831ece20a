@@ -1,0 +1,22 @@
+.github/workflows/bazel.yml
+  s_56f8212040c844::t_263536089c0115 160-164,169
+crates/xybrid-core/BUILD.bazel
+  s_56f8212040c844::t_cf834c91f1fe84 20
+  s_56f8212040c844::t_6e4fad9e2d77e2 96-119
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "4847864a0591c47f6ac423bc7cc90f6831ece20a",
+  "prompts": {},
+  "sessions": {
+    "s_56f8212040c844": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "712d827d-2c3e-407d-a7a4-2e1b3f6e2b3b",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
