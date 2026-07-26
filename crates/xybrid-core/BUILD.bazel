@@ -17,6 +17,7 @@
 # download-binaries+tls-rustls), so this target builds GREEN on RBE.
 # The `ort-download` feature below is a retained NO-OP marker (invocation compat).
 load("@rules_rs//rs:rust_library.bzl", "rust_library")
+load("@rules_rs//rs:rust_test.bzl", "rust_test")
 load("@crates//:defs.bzl", "all_crate_deps")
 
 # Android ships the `platform-android` backend set: candle (Whisper ASR/voice) +
@@ -91,4 +92,28 @@ rust_library(
     }),
     deps = all_crate_deps(normal = True),
     visibility = ["//visibility:public"],
+)
+
+# The workspace's largest test target: ~1180 inline `#[test]`/`#[tokio::test]`.
+#
+# xybrid-core carries a dev-dependency on xybrid-sdk, which depends back on
+# xybrid-core. Cargo permits that (dev-deps are outside the published graph);
+# Bazel cannot express the cycle. It does not block this target, because NOTHING
+# in src/ actually uses xybrid_sdk — the only mention is a doc-comment link in
+# cloud/config.rs. The dev-dep exists solely for tests/system_validation.rs, an
+# integration binary that is not part of this target.
+#
+# `deps` lists the dev-dependencies the inline tests really reach for; the other
+# declared dev-deps (filetime, walkdir) are used only under tests/.
+rust_test(
+    name = "xybrid-core_test",
+    crate = ":xybrid-core",
+    deps = [
+        "@crates//:criterion",
+        "@crates//:dirs",
+        "@crates//:hound",
+        "@crates//:libloading",
+        "@crates//:tempfile",
+        "@crates//:ureq",
+    ],
 )

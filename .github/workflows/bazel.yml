@@ -157,14 +157,16 @@ jobs:
       # binaries execute remotely at all — a darwin-target build of the same
       # targets fails with Exit 126 on a Linux worker.
       #
-      # Covers the inline `#[cfg(test)] mod tests` of each crate. Not yet here:
-      # //crates/xybrid-core (1273 tests) — it dev-depends on xybrid-sdk, which
-      # depends on xybrid-core, and Bazel cannot express that cycle; and the
-      # `tests/` integration binaries, which are separate targets.
+      # Covers the inline `#[cfg(test)] mod tests` of each crate. Still outside
+      # Bazel: the `tests/` integration binaries (separate targets), and among
+      # them xybrid-core's tests/system_validation.rs — the ONLY thing that needs
+      # core's dev-dependency on xybrid-sdk, the cycle Bazel cannot express.
+      # core's inline tests are unaffected: nothing in its src/ uses xybrid_sdk.
       - name: Run Rust tests on RBE
         if: env.BUILDBUDDY_API_KEY != ''
         run: |
           bazelisk test --config=remote -c opt --test_output=errors \
+            //crates/xybrid-core:xybrid-core_test \
             //crates/xybrid-ffi-facade:xybrid-ffi-facade_test \
             //crates/xybrid-llama:xybrid_llama_test \
             //crates/xybrid-sdk:xybrid-sdk_test \
