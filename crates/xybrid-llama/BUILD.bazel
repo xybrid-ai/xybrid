@@ -31,11 +31,21 @@ rust_library(
     visibility = ["//visibility:public"],
 )
 
-# Inline `#[cfg(test)] mod tests` (13). `crate = ` inherits srcs, edition, the
-# vision feature select and deps, so lib and test cannot drift. No dev-deps.
+# Inline `#[cfg(test)] mod tests`. `crate = ` inherits srcs, edition and deps.
+#
+# crate_features is restated rather than inherited: the library computes it as
+# `["bindings"] + select(...)`, and that select does NOT propagate through
+# `crate = ` — the test target came out with no features at all, so the
+# feature-gated modules (generation, vision) vanished and `--list` reported
+# "0 tests" while the target stayed green. Plain-list features on the other
+# crates inherit fine; only the select is lost.
 rust_test(
     name = "xybrid_llama_test",
     crate = ":xybrid_llama",
+    crate_features = ["bindings"] + select({
+        cfg: ["vision"]
+        for cfg in _VISION_PLATFORMS
+    } | {"//conditions:default": []}),
 )
 
 # Integration tests: each tests/*.rs is its own binary, so each gets its own
