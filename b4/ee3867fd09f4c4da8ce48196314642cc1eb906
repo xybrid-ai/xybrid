@@ -1,0 +1,25 @@
+crates/xybrid-core/BUILD.bazel
+  s_56f8212040c844::t_51cd5a5b9bebdf 108-109,111-113,117-130,135-143,154-176,183-184
+crates/xybrid-cli/BUILD.bazel
+  s_56f8212040c844::t_b44d3b0f9e42f0 5,16-61
+.github/workflows/bazel.yml
+  s_56f8212040c844::t_d3b40f8e412d23 163-166,168-173,178
+crates/xybrid-core/tests/legacy_cache_names.rs
+  s_56f8212040c844::t_3ad10fa5789079 22-27
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "b4ee3867fd09f4c4da8ce48196314642cc1eb906",
+  "prompts": {},
+  "sessions": {
+    "s_56f8212040c844": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "712d827d-2c3e-407d-a7a4-2e1b3f6e2b3b",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
