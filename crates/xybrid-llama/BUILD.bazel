@@ -42,21 +42,26 @@ rust_test(
 # target. Unlike the inline target above, these use `srcs` + a dep on the library
 # (they link it as an external crate, exactly as cargo does).
 #
-# The two GGUF smokes are `#[ignore]`d — they need multi-hundred-MB models on
-# disk. Building them still type-checks the public surface they exercise, which
-# is the point of having them here; the ignored cases stay skipped.
+# crate_features matters here: both GGUF smokes open with
+# `#![cfg(feature = "bindings")]`, so without that feature the file compiles to
+# an EMPTY binary — `--list` reports "0 tests" and nothing is type-checked. They
+# are `#[ignore]`d (each wants a multi-hundred-MB model on disk), so compiling
+# them is the entire value of having them here.
+_LLAMA_INTEGRATION_TESTS = {
+    "prefix_cache_hit_smoke": ["bindings"],
+    "recurrent_gating_smoke": ["bindings"],
+    "wrapper_invariants": [],
+}
+
 [
     rust_test(
         name = name,
         srcs = ["tests/{}.rs".format(name)],
+        crate_features = features,
         edition = "2021",
         deps = [":xybrid_llama"],
     )
-    for name in [
-        "prefix_cache_hit_smoke",
-        "recurrent_gating_smoke",
-        "wrapper_invariants",
-    ]
+    for name, features in _LLAMA_INTEGRATION_TESTS.items()
 ]
 
 # Dir-basename alias so `//crates/xybrid-llama` (the label all_crate_deps()
