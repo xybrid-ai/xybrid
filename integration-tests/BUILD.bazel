@@ -14,3 +14,20 @@ rust_library(
     deps = all_crate_deps(normal = True),
     visibility = ["//visibility:public"],
 )
+
+# Committed model METADATA only (no model weights — those are downloaded and stay
+# untracked). xybrid-core's inline tests read these via `testing::model_fixtures`,
+# which resolves CARGO_MANIFEST_DIR/../../integration-tests/fixtures/models.
+# Bazel sandboxes actions, so the files must be declared as `data` on the test
+# target or those reads fail with the file simply absent.
+filegroup(
+    name = "model_metadata_fixtures",
+    srcs = glob(
+        [
+            "fixtures/models/models.json",
+            "fixtures/models/*/model_metadata.json",
+        ],
+        allow_empty = False,
+    ),
+    visibility = ["//visibility:public"],
+)

@@ -108,6 +108,15 @@ rust_library(
 rust_test(
     name = "xybrid-core_test",
     crate = ":xybrid-core",
+    # Fixture files three inline tests read off disk (model metadata + the web
+    # SDK's serialization fixture). Cargo reads them straight from the worktree;
+    # Bazel sandboxes the action, so they have to be declared inputs. Both are
+    # resolved relative to CARGO_MANIFEST_DIR, which rules_rust points at this
+    # crate's directory, so the workspace-relative layout still applies.
+    data = [
+        "//bindings/web:rust_metadata_fixtures",
+        "//integration-tests:model_metadata_fixtures",
+    ],
     deps = [
         "@crates//:criterion",
         "@crates//:dirs",
