@@ -185,8 +185,13 @@ dev-tools = []
 # `llamacpp-crate-split` epic, and `xybrid-core/build.rs` is now a stub.
 
 [dev-dependencies]
+# NOTE: deliberately NO xybrid-sdk here. xybrid-sdk depends on xybrid-core, so a
+# dev-dependency back on the sdk forms a cycle — Cargo tolerates it (dev-deps sit
+# outside the published graph) but Bazel cannot express it, and it inverts the
+# dependency direction the workspace is built on. The single test that needed it
+# (system_validation.rs) now lives in //integration-tests, which may depend on
+# core and sdk both.
 tempfile = "3.8"
-xybrid-sdk = { path = "../xybrid-sdk" }
 dirs = "6.0"
 filetime = "0.2"
 hound = "3.5"  # WAV file reading for tests

@@ -25,3 +25,10 @@ env_logger = "0.10"
 dirs = "6.0"
 
 [dev-dependencies]
+# tests/system_validation.rs drives the public SDK end to end. It lives here
+# rather than in xybrid-core because core must not depend on the sdk (see the
+# note in crates/xybrid-core/Cargo.toml); this crate sits above both, so the
+# dependency direction stays one-way.
+xybrid-sdk = { path = "../crates/xybrid-sdk" }
+tempfile = "3.8"
+filetime = "0.2"

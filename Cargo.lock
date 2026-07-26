@@ -2682,12 +2682,15 @@ dependencies = [
  "anyhow",
  "dirs",
  "env_logger",
+ "filetime",
  "log",
  "serde",
  "serde_json",
  "serde_yaml",
+ "tempfile",
  "tokio",
  "xybrid-core",
+ "xybrid-sdk",
 ]
 
 [[package]]
@@ -6270,7 +6273,6 @@ dependencies = [
  "windows-sys 0.59.0",
  "xybrid-llama",
  "xybrid-llama-sys",
- "xybrid-sdk",
  "yuvutils-rs",
  "zstd",
 ]

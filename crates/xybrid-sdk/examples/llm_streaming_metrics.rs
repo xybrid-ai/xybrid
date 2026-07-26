@@ -6,12 +6,12 @@
 //! existing aggregate metrics.
 //!
 //! Run with:
-//!   cargo run --example llm_streaming_metrics -p xybrid-core --features llm-mistral --release
+//!   cargo run --example llm_streaming_metrics -p xybrid-sdk --features llm-mistral --release
 //!
 //! To also export telemetry to a local ingest service, set:
 //!   XYBRID_API_KEY=<your-api-key> \
 //!   XYBRID_INGEST_URL=http://localhost:8081 \
-//!   cargo run --example llm_streaming_metrics -p xybrid-core --features llm-mistral --release
+//!   cargo run --example llm_streaming_metrics -p xybrid-sdk --features llm-mistral --release
 //!
 //! Reuses the `integration-tests/fixtures/models/qwen2.5-0.5b-instruct/`
 //! fixture. See `integration-tests/download.sh` for download instructions
