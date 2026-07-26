@@ -139,6 +139,8 @@ _SDK_INTEGRATION_TESTS = {
         "@crates//:serde_json",
         "@crates//:tempfile",
     ],
+    # Reads integration-tests/fixtures/models/mnist/model_metadata.json, so it
+    # needs the fixture filegroup declared as data (see _SDK_TEST_DATA below).
     "from_directory_test": [":xybrid-sdk"],
     "macro_test": [":xybrid-sdk"],
     "metadata_gen_test": [
@@ -155,10 +157,18 @@ _SDK_INTEGRATION_TESTS = {
     ],
 }
 
+# Fixture files individual integration tests read off disk. Cargo reads them
+# straight from the worktree; Bazel sandboxes the action, so they must be
+# declared inputs or the reads fail.
+_SDK_TEST_DATA = {
+    "from_directory_test": ["//integration-tests:model_metadata_fixtures"],
+}
+
 [
     rust_test(
         name = name,
         srcs = ["tests/{}.rs".format(name)],
+        data = _SDK_TEST_DATA.get(name, []),
         edition = "2021",
         # macro_test exercises the `xybrid_model!` proc-macro the sdk re-exports,
         # so it needs the macro crate on its own compile line.
