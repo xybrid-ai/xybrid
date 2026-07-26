@@ -4,6 +4,7 @@
 # header gen) that Bazel deliberately does NOT own — so under a real migration
 # Bazel replaces the native-artifact CORE of xtask, not the publisher glue.
 load("@rules_rs//rs:rust_binary.bzl", "rust_binary")
+load("@rules_rs//rs:rust_test.bzl", "rust_test")
 load("@crates//:defs.bzl", "all_crate_deps")
 
 rust_binary(
@@ -12,4 +13,11 @@ rust_binary(
     edition = "2021",
     deps = all_crate_deps(normal = True),
     visibility = ["//visibility:public"],
+)
+
+# Inline `#[cfg(test)] mod tests` (9) in the binary crate. `crate = ` recompiles
+# the binary above with `--test`; it inherits srcs, edition and deps. No dev-deps.
+rust_test(
+    name = "xtask_test",
+    crate = ":xtask",
 )

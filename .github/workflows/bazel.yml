@@ -151,18 +151,24 @@ jobs:
             //crates/llama-cpp-sys:llama_cpp_sys \
             //crates/xybrid-llama:xybrid_llama
 
-      # Tests-under-Bazel pilot. Until now Bazel BUILT every shipped artifact but
-      # RAN no tests — every `#[test]` in the workspace executed only under cargo,
-      # so "Bazel is the build of record" stopped short of verification.
-      # //crates/xybrid-ffi-facade is the cheapest proof of the rust_test pattern:
-      # 26 inline tests, pure Rust, no dev-dependencies, no model fixtures.
-      # Runs on this ubuntu runner (host == linux == the RBE executor platform),
-      # which is what lets the test binary execute remotely at all.
-      - name: Run Rust tests on RBE (tests-under-Bazel pilot)
+      # Tests under Bazel. Bazel BUILDS every shipped artifact; these targets are
+      # what stop it from shipping unverified. Runs on this ubuntu runner
+      # (host == linux == the RBE executor platform), which is what lets the test
+      # binaries execute remotely at all — a darwin-target build of the same
+      # targets fails with Exit 126 on a Linux worker.
+      #
+      # Covers the inline `#[cfg(test)] mod tests` of each crate. Not yet here:
+      # //crates/xybrid-core (1273 tests) — it dev-depends on xybrid-sdk, which
+      # depends on xybrid-core, and Bazel cannot express that cycle; and the
+      # `tests/` integration binaries, which are separate targets.
+      - name: Run Rust tests on RBE
         if: env.BUILDBUDDY_API_KEY != ''
         run: |
           bazelisk test --config=remote -c opt --test_output=errors \
-            //crates/xybrid-ffi-facade:xybrid-ffi-facade_test
+            //crates/xybrid-ffi-facade:xybrid-ffi-facade_test \
+            //crates/xybrid-llama:xybrid_llama_test \
+            //crates/xybrid-sdk:xybrid-sdk_test \
+            //xtask:xtask_test
 
       # Desktop lanes on RBE: linux CLI (native) + the macOS-CPU cross
       # (hermetic clang + @macos_sdk + vendored ort; Metal/Swift stay Mac-bound

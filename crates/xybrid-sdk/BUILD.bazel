@@ -5,6 +5,7 @@
 # we lift `//macros` out. (sdk has no per-platform dep deltas, so the list is
 # plain and safe to filter; the platform feature deltas live in crate_features.)
 load("@rules_rs//rs:rust_library.bzl", "rust_library")
+load("@rules_rs//rs:rust_test.bzl", "rust_test")
 load("@crates//:data.bzl", "DEP_DATA")
 load("@rules_rs//rs/private:all_crate_deps.bzl", _all_crate_deps = "all_crate_deps")
 
@@ -105,4 +106,15 @@ rust_library(
         normal = True,
     ),
     visibility = ["//visibility:public"],
+)
+
+# Inline `#[cfg(test)] mod tests` (445 — the largest test target in the workspace
+# today). `crate = ` inherits srcs, edition, the platform feature select, deps and
+# proc_macro_deps; `deps` here ADDS the one dev-dependency the inline tests use
+# (httpmock, in registry_client.rs). The 37 tests under tests/ are separate
+# integration binaries and are NOT covered by this target.
+rust_test(
+    name = "xybrid-sdk_test",
+    crate = ":xybrid-sdk",
+    deps = ["@crates//:httpmock"],
 )

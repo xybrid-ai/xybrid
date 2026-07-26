@@ -1,5 +1,6 @@
 # GATE 3: safe Rust wrapper over llama-cpp-sys. Builds once llama_cpp_sys links.
 load("@rules_rs//rs:rust_library.bzl", "rust_library")
+load("@rules_rs//rs:rust_test.bzl", "rust_test")
 
 # Vision (mtmd safe wrappers): Android + desktop-linux (Flip 1) — must match
 # llama-cpp-sys/BUILD.bazel's _VISION_PLATFORMS and //:llama's libmtmd arms.
@@ -28,6 +29,13 @@ rust_library(
         "@crates//:tracing",
     ],
     visibility = ["//visibility:public"],
+)
+
+# Inline `#[cfg(test)] mod tests` (13). `crate = ` inherits srcs, edition, the
+# vision feature select and deps, so lib and test cannot drift. No dev-deps.
+rust_test(
+    name = "xybrid_llama_test",
+    crate = ":xybrid_llama",
 )
 
 # Dir-basename alias so `//crates/xybrid-llama` (the label all_crate_deps()
