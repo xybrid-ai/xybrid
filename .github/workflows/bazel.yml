@@ -160,18 +160,22 @@ jobs:
       # The inline `#[cfg(test)] mod tests` of each crate, plus the `tests/`
       # integration binaries (one target per file, since each is its own binary).
       #
-      # Still outside Bazel, each for a specific reason:
-      #  - xybrid-cli's 4 tests spawn the built binary via
-      #    env!("CARGO_BIN_EXE_xybrid"), which cargo sets and rules_rust does not.
-      #  - 7 xybrid-core tests read files off disk, so each needs its inputs
-      #    declared and its paths resolved at runtime rather than via env!.
-      #  - xybrid-sdk's cloud_fallback_e2e is gated behind `dev-tools` in cargo
-      #    and needs `test-util` propagated sdk -> core; Bazel has no cross-crate
+      # Every tests/ binary in the workspace is now covered. The two exceptions
+      # are both cargo-gated the same way in cargo itself:
+      #  - xybrid-sdk's cloud_fallback_e2e (required-features = ["dev-tools"])
+      #    needs `test-util` propagated sdk -> core, and Bazel has no cross-crate
       #    feature propagation.
+      #  - integration-tests' local_llm is gated on llm-mistral, a backend
+      #    xybrid-core's Bazel target does not build at all.
+      #
+      # Adding a target is not enough on its own: a file wrapped in
+      # `#![cfg(feature = ...)]` compiles to an EMPTY binary that still reports
+      # success, so each target's `--list` count is checked against cargo's.
       - name: Run Rust tests on RBE
         if: env.BUILDBUDDY_API_KEY != ''
         run: |
           bazelisk test --config=remote -c opt --test_output=errors \
+            //crates/xybrid-cli:all \
             //crates/xybrid-core:all \
             //crates/xybrid-ffi-facade:xybrid-ffi-facade_test \
             //crates/xybrid-llama:all \

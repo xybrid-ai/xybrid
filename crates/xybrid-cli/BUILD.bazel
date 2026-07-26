@@ -2,6 +2,7 @@
 # name `xybrid` per the resolved DEP_DATA). Deps = core + sdk + clap/console/etc,
 # all auto-resolved. Compiles once the xybrid-core ort ceiling is addressed.
 load("@rules_rs//rs:rust_binary.bzl", "rust_binary")
+load("@rules_rs//rs:rust_test.bzl", "rust_test")
 load("@crates//:defs.bzl", "all_crate_deps")
 
 rust_binary(
@@ -12,3 +13,49 @@ rust_binary(
     deps = all_crate_deps(normal = True),
     visibility = ["//visibility:public"],
 )
+
+# Integration tests. Every one of these spawns the built CLI, locating it through
+# `env!("CARGO_BIN_EXE_xybrid")`.
+#
+# That variable is not something we set by hand: rules_rust populates
+# CARGO_BIN_EXE_<name> for any `bin` crate listed in a target's `data`
+# (rust/private/rustc.bzl — "Make bin crate data deps available to tests"), using
+# the binary's runfiles-relative short_path. So `:xybrid` belongs in data, not
+# deps, and the binary is staged into the test's runfiles at the same path the
+# compile-time variable records.
+_CLI_INTEGRATION_TESTS = {
+    "init_json_test": [
+        "@crates//:serde_json",
+        "@crates//:tempfile",
+    ],
+    "reasoning_budget_cli_test": [
+        "//crates/xybrid-core:xybrid-core",
+        "@crates//:tempfile",
+    ],
+    "telemetry_status_test": [],
+    "vlm_cli_test": [
+        "//crates/xybrid-core:xybrid-core",
+        "@crates//:image",
+        "@crates//:serde_json",
+        "@crates//:tempfile",
+    ],
+}
+
+# Two of the four open with `#![cfg(feature = "llm-llamacpp")]`; without the
+# feature they compile to EMPTY binaries that still report success.
+_CLI_TEST_FEATURES = {
+    "reasoning_budget_cli_test": ["llm-llamacpp"],
+    "vlm_cli_test": ["llm-llamacpp"],
+}
+
+[
+    rust_test(
+        name = name,
+        srcs = ["tests/{}.rs".format(name)],
+        crate_features = _CLI_TEST_FEATURES.get(name, []),
+        data = [":xybrid"],
+        edition = "2021",
+        deps = deps,
+    )
+    for name, deps in _CLI_INTEGRATION_TESTS.items()
+]
