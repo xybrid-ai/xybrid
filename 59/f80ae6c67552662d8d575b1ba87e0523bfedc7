@@ -1,0 +1,26 @@
+crates/xybrid-sdk/examples/llm_streaming_metrics.rs
+  s_56f8212040c844::t_9bdd9dd5104633 1-213
+integration-tests/Cargo.toml
+  s_56f8212040c844::t_ff2679924ee2c7 34
+  s_56f8212040c844::t_9afd7b9da17e83 28-33
+crates/xybrid-core/Cargo.toml
+  s_56f8212040c844::t_0f42ee980c2d49 188-193
+Cargo.lock
+  s_56f8212040c844::t_82c2a43b2c52f4 2685,2690,2693
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "59f80ae6c67552662d8d575b1ba87e0523bfedc7",
+  "prompts": {},
+  "sessions": {
+    "s_56f8212040c844": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "712d827d-2c3e-407d-a7a4-2e1b3f6e2b3b",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
