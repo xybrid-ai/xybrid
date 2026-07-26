@@ -1,0 +1,25 @@
+crates/xybrid-llama/BUILD.bazel
+  s_56f8212040c844::t_0da1b9789b869d 41-61
+.github/workflows/bazel.yml
+  s_56f8212040c844::t_10798a64a6455e 160-165,172-173
+crates/xybrid-sdk/BUILD.bazel
+  s_56f8212040c844::t_605f9d531b7173 121-129,142-144,146,148-152,155-169
+  s_56f8212040c844::t_2a97bb787722af 130-135
+  s_56f8212040c844::t_f936a2b3b3d59c 136-141,145,147,153-154
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "12be95a56be30a214a592736ddd00c4907d7f872",
+  "prompts": {},
+  "sessions": {
+    "s_56f8212040c844": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "712d827d-2c3e-407d-a7a4-2e1b3f6e2b3b",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
