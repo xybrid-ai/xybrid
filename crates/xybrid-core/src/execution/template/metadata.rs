@@ -888,7 +888,13 @@ mod tests {
         };
         let serialized: serde_json::Value =
             serde_json::from_str(&serde_json::to_string(&metadata).unwrap()).unwrap();
-        let fixture_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        // Resolve the manifest dir at RUNTIME, not via `env!`. The compile-time
+        // value is baked into the binary and does not point anywhere useful when
+        // the test runs in a sandbox; the runtime variable is set by both cargo
+        // and Bazel. Same mechanism `testing::model_fixtures` already uses.
+        let manifest_dir =
+            std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR is set for tests");
+        let fixture_path = std::path::PathBuf::from(manifest_dir)
             .join("../../bindings/web/test/fixtures/rust-metadata-litertlm.json");
         let fixture: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(fixture_path).unwrap()).unwrap();
