@@ -118,3 +118,52 @@ rust_test(
     crate = ":xybrid-sdk",
     deps = ["@crates//:httpmock"],
 )
+
+# Integration tests: each tests/*.rs is its own binary, so each gets its own
+# target with `srcs` + an explicit dep on whichever library it links as an
+# external crate (some reach xybrid-core directly, not through the sdk).
+_SDK_INTEGRATION_TESTS = {
+    "async_test": [
+        ":xybrid-sdk",
+        "@crates//:tokio",
+    ],
+    # NOTE: no cloud_fallback_e2e. Cargo declares it
+    # `required-features = ["dev-tools"]`, so a default `cargo test -p xybrid-sdk`
+    # skips it too; it reaches xybrid_core::orchestrator::authority::test_seams,
+    # which needs the `test-util` feature propagated sdk -> core. Bazel has no
+    # cross-crate feature propagation, so enabling it means hand-expanding the
+    # feature on both targets — deliberately left for whoever needs that lane.
+    "fixture_validation_test": [
+        ":xybrid-sdk",
+        "//crates/xybrid-core:xybrid-core",
+        "@crates//:serde_json",
+        "@crates//:tempfile",
+    ],
+    "from_directory_test": [":xybrid-sdk"],
+    "macro_test": [":xybrid-sdk"],
+    "metadata_gen_test": [
+        ":xybrid-sdk",
+        "//crates/xybrid-core:xybrid-core",
+        "@crates//:serde_json",
+        "@crates//:tempfile",
+    ],
+    "telemetry_integration": [
+        ":xybrid-sdk",
+        "//crates/xybrid-core:xybrid-core",
+        "@crates//:serde",
+        "@crates//:serde_json",
+    ],
+}
+
+[
+    rust_test(
+        name = name,
+        srcs = ["tests/{}.rs".format(name)],
+        edition = "2021",
+        # macro_test exercises the `xybrid_model!` proc-macro the sdk re-exports,
+        # so it needs the macro crate on its own compile line.
+        proc_macro_deps = ["//macros"] if name == "macro_test" else [],
+        deps = deps,
+    )
+    for name, deps in _SDK_INTEGRATION_TESTS.items()
+]

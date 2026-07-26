@@ -38,6 +38,27 @@ rust_test(
     crate = ":xybrid_llama",
 )
 
+# Integration tests: each tests/*.rs is its own binary, so each gets its own
+# target. Unlike the inline target above, these use `srcs` + a dep on the library
+# (they link it as an external crate, exactly as cargo does).
+#
+# The two GGUF smokes are `#[ignore]`d — they need multi-hundred-MB models on
+# disk. Building them still type-checks the public surface they exercise, which
+# is the point of having them here; the ignored cases stay skipped.
+[
+    rust_test(
+        name = name,
+        srcs = ["tests/{}.rs".format(name)],
+        edition = "2021",
+        deps = [":xybrid_llama"],
+    )
+    for name in [
+        "prefix_cache_hit_smoke",
+        "recurrent_gating_smoke",
+        "wrapper_invariants",
+    ]
+]
+
 # Dir-basename alias so `//crates/xybrid-llama` (the label all_crate_deps()
 # emits for xybrid-core) resolves to the proven target above.
 alias(
