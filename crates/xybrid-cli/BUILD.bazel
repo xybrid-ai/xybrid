@@ -5,11 +5,33 @@ load("@rules_rs//rs:rust_binary.bzl", "rust_binary")
 load("@rules_rs//rs:rust_test.bzl", "rust_test")
 load("@crates//:defs.bzl", "all_crate_deps")
 
+# crate_features mirrors the LLM half of cargo's `platform-desktop`
+# (= ort-download + llm-llamacpp-vision + huggingface), which is what the shipped
+# cargo CLI is built with. Only two of those names are gated in this crate's own
+# source — llm-llamacpp and llm-mistral, 7 sites each in commands/repl.rs — the
+# rest are pure passthroughs to xybrid-sdk. Bazel does not propagate features to
+# dependencies (core/sdk set their own), so this list exists purely to open this
+# crate's cfgs.
+#
+# Without it the shipped binary took the `#[cfg(not(any(feature =
+# "llm-mistral", feature = "llm-llamacpp")))]` arms: `repl --stream` answered
+# "Streaming requested but LLM features not enabled" and refused to stream, while
+# the cargo-built CLI streams. The linux CLI smoke did not catch it because the
+# mtmd/huggingface symbols it greps for come from the dependency crates, not
+# from these cfgs.
 rust_binary(
     name = "xybrid",
     srcs = glob(["src/**/*.rs"]),
     edition = "2021",
-    crate_features = ["default"],
+    # Listed flat, not as the preset: Bazel does not expand transitive features
+    # the way Cargo does, so "llm-llamacpp-vision" alone would NOT imply
+    # "llm-llamacpp" and the cfgs would stay closed (verified against the built
+    # binary's strings). Same rule the core/sdk targets follow.
+    crate_features = [
+        "default",
+        "llm-llamacpp",
+        "llm-llamacpp-vision",
+    ],
     deps = all_crate_deps(normal = True),
     visibility = ["//visibility:public"],
 )
