@@ -1,0 +1,22 @@
+crates/xybrid-sdk/BUILD.bazel
+  s_56f8212040c844::t_62be770580c1fc 142-143
+  s_56f8212040c844::t_198ed98bfb733d 160-166,171
+crates/xybrid-sdk/tests/from_directory_test.rs
+  s_56f8212040c844::t_a6185a79457c90 8-14
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "80b3d59708a77a6d8d2eaad2980c59edfeefe307",
+  "prompts": {},
+  "sessions": {
+    "s_56f8212040c844": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "712d827d-2c3e-407d-a7a4-2e1b3f6e2b3b",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
