@@ -57,30 +57,44 @@ filegroup(
 # and self-skip when the weights are absent (fixtures::model_if_available), which
 # is what happens on CI — so these targets mainly prove the tests compile and
 # their skip paths hold. deps mirror what each file links as an external crate.
+#
+# crate_features matters: several of these files open with
+# `#![cfg(feature = "llm-llamacpp")]`, so without the feature the file compiles
+# to an EMPTY binary — `--list` reports "0 tests" while the target still goes
+# green. (Plain `cargo test -p integration-tests` has the same blind spot; it
+# needs `--features llm-llamacpp` to see them.) xybrid-core's Bazel target
+# already builds with llm-llamacpp, so enabling it here lines up.
 _E2E_TESTS = {
-    "asr_integration": [":integration-tests", "//crates/xybrid-core:xybrid-core", "@crates//:serde_json"],
-    "context_budget_clamp": [":integration-tests", "//crates/xybrid-core:xybrid-core", "@crates//:serde_json"],
-    "integration_check": [":integration-tests", "//crates/xybrid-core:xybrid-core", "@crates//:tokio"],
-    "llm_chat_template": [":integration-tests", "//crates/xybrid-core:xybrid-core", "@crates//:serde_json"],
-    "local_llm": [":integration-tests", "//crates/xybrid-core:xybrid-core", "@crates//:serde_json"],
-    "reasoning_budget": [":integration-tests", "//crates/xybrid-core:xybrid-core", "@crates//:serde_json"],
-    "reasoning_capture": [":integration-tests", "//crates/xybrid-core:xybrid-core", "@crates//:serde_json"],
-    "tts_integration": [":integration-tests", "//crates/xybrid-core:xybrid-core", "@crates//:serde_json"],
+    "asr_integration": [],
+    "context_budget_clamp": ["llm-llamacpp"],
+    "integration_check": [],
+    "llm_chat_template": ["llm-llamacpp"],
+    "reasoning_budget": ["llm-llamacpp"],
+    "reasoning_capture": ["llm-llamacpp"],
+    "tts_integration": [],
 }
+
+# local_llm is absent on purpose: it is gated on `llm-mistral`, and xybrid-core's
+# Bazel target does not build the mistral backend at all, so the feature cannot
+# be satisfied here the way llm-llamacpp can.
 
 [
     rust_test(
         name = name,
         srcs = ["tests/{}.rs".format(name)],
+        crate_features = features,
         data = [
             ":input_fixtures",
             ":model_metadata_fixtures",
             ":pipeline_fixtures",
         ],
         edition = "2021",
-        deps = deps,
+        deps = [
+            ":integration-tests",
+            "//crates/xybrid-core:xybrid-core",
+        ] + (["@crates//:tokio"] if name == "integration_check" else ["@crates//:serde_json"]),
     )
-    for name, deps in _E2E_TESTS.items()
+    for name, features in _E2E_TESTS.items()
 ]
 
 # system_validation drives the public SDK end to end (see the dev-dep note in
