@@ -157,20 +157,26 @@ jobs:
       # binaries execute remotely at all — a darwin-target build of the same
       # targets fails with Exit 126 on a Linux worker.
       #
-      # The inline `#[cfg(test)] mod tests` of each crate, plus the first
-      # `tests/` integration binaries (one target per file, since each is its own
-      # binary). Still outside Bazel: the remaining tests/ binaries under
-      # xybrid-core, xybrid-cli and integration-tests, and xybrid-sdk's
-      # cloud_fallback_e2e (cargo gates it behind `dev-tools` and it needs a
-      # feature propagated sdk -> core, which Bazel does not do automatically).
+      # The inline `#[cfg(test)] mod tests` of each crate, plus the `tests/`
+      # integration binaries (one target per file, since each is its own binary).
+      #
+      # Still outside Bazel, each for a specific reason:
+      #  - xybrid-cli's 4 tests spawn the built binary via
+      #    env!("CARGO_BIN_EXE_xybrid"), which cargo sets and rules_rust does not.
+      #  - 7 xybrid-core tests read files off disk, so each needs its inputs
+      #    declared and its paths resolved at runtime rather than via env!.
+      #  - xybrid-sdk's cloud_fallback_e2e is gated behind `dev-tools` in cargo
+      #    and needs `test-util` propagated sdk -> core; Bazel has no cross-crate
+      #    feature propagation.
       - name: Run Rust tests on RBE
         if: env.BUILDBUDDY_API_KEY != ''
         run: |
           bazelisk test --config=remote -c opt --test_output=errors \
-            //crates/xybrid-core:xybrid-core_test \
+            //crates/xybrid-core:all \
             //crates/xybrid-ffi-facade:xybrid-ffi-facade_test \
             //crates/xybrid-llama:all \
             //crates/xybrid-sdk:all \
+            //integration-tests:all \
             //xtask:xtask_test
 
       # Desktop lanes on RBE: linux CLI (native) + the macOS-CPU cross

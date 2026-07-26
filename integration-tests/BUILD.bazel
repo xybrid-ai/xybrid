@@ -4,6 +4,7 @@
 # real migration. Not a focus of the spike (sits below the ort ceiling via
 # xybrid-core).
 load("@rules_rs//rs:rust_library.bzl", "rust_library")
+load("@rules_rs//rs:rust_test.bzl", "rust_test")
 load("@crates//:defs.bzl", "all_crate_deps")
 
 rust_library(
@@ -30,4 +31,69 @@ filegroup(
         allow_empty = False,
     ),
     visibility = ["//visibility:public"],
+)
+
+# Committed sample inputs (audio/text) and pipeline YAML the E2E tests feed in.
+# Small and tracked, unlike the model weights.
+filegroup(
+    name = "input_fixtures",
+    srcs = glob(
+        ["fixtures/input/**"],
+        allow_empty = False,
+    ),
+    visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "pipeline_fixtures",
+    srcs = glob(
+        ["fixtures/pipelines/**"],
+        allow_empty = False,
+    ),
+    visibility = ["//visibility:public"],
+)
+
+# Integration tests. Each tests/*.rs is its own binary. They exercise real models
+# and self-skip when the weights are absent (fixtures::model_if_available), which
+# is what happens on CI — so these targets mainly prove the tests compile and
+# their skip paths hold. deps mirror what each file links as an external crate.
+_E2E_TESTS = {
+    "asr_integration": [":integration-tests", "//crates/xybrid-core:xybrid-core", "@crates//:serde_json"],
+    "context_budget_clamp": [":integration-tests", "//crates/xybrid-core:xybrid-core", "@crates//:serde_json"],
+    "integration_check": [":integration-tests", "//crates/xybrid-core:xybrid-core", "@crates//:tokio"],
+    "llm_chat_template": [":integration-tests", "//crates/xybrid-core:xybrid-core", "@crates//:serde_json"],
+    "local_llm": [":integration-tests", "//crates/xybrid-core:xybrid-core", "@crates//:serde_json"],
+    "reasoning_budget": [":integration-tests", "//crates/xybrid-core:xybrid-core", "@crates//:serde_json"],
+    "reasoning_capture": [":integration-tests", "//crates/xybrid-core:xybrid-core", "@crates//:serde_json"],
+    "tts_integration": [":integration-tests", "//crates/xybrid-core:xybrid-core", "@crates//:serde_json"],
+}
+
+[
+    rust_test(
+        name = name,
+        srcs = ["tests/{}.rs".format(name)],
+        data = [
+            ":input_fixtures",
+            ":model_metadata_fixtures",
+            ":pipeline_fixtures",
+        ],
+        edition = "2021",
+        deps = deps,
+    )
+    for name, deps in _E2E_TESTS.items()
+]
+
+# system_validation drives the public SDK end to end (see the dev-dep note in
+# Cargo.toml — it lives here so xybrid-core need not depend on the sdk). Its two
+# CLI-spawning cases are #[ignore]d, so no binary has to be staged.
+rust_test(
+    name = "system_validation",
+    srcs = ["tests/system_validation.rs"],
+    edition = "2021",
+    deps = [
+        "//crates/xybrid-sdk:xybrid-sdk",
+        "@crates//:dirs",
+        "@crates//:filetime",
+        "@crates//:tempfile",
+    ],
 )

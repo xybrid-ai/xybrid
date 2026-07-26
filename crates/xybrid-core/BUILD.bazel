@@ -105,6 +105,43 @@ rust_library(
 #
 # `deps` lists the dev-dependencies the inline tests really reach for; the other
 # declared dev-deps (filetime, walkdir) are used only under tests/.
+# Integration tests that need no on-disk fixtures. Each tests/*.rs is its own
+# binary, so each gets its own target: `srcs` + a dep on the library it links as
+# an external crate.
+#
+# NOT here yet (each reads files off disk, so each needs its inputs declared and
+# its paths resolved at runtime rather than via `env!`):
+#   legacy_cache_names, llm_context_integration, mobilenet_vision_parity,
+#   pipeline_yaml_integration, tts_integration, tts_smoke, vlm_lfm2_smoke
+_CORE_INTEGRATION_TESTS = {
+    "conformance_runtime_adapter": [":xybrid-core"],
+    "integration_hiiipe": [":xybrid-core"],
+    "multimodal_messages": [
+        ":xybrid-core",
+        "@crates//:image",
+    ],
+    "vision_envelope": [
+        ":xybrid-core",
+        "@crates//:image",
+        "@crates//:serde_json",
+    ],
+    "vision_metadata": [
+        ":xybrid-core",
+        "@crates//:ndarray",
+        "@crates//:serde_json",
+    ],
+}
+
+[
+    rust_test(
+        name = name,
+        srcs = ["tests/{}.rs".format(name)],
+        edition = "2021",
+        deps = deps,
+    )
+    for name, deps in _CORE_INTEGRATION_TESTS.items()
+]
+
 rust_test(
     name = "xybrid-core_test",
     crate = ":xybrid-core",
