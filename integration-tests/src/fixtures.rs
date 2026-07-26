@@ -1,8 +1,15 @@
 use std::path::PathBuf;
 
 /// Root fixtures directory
+///
+/// Resolves `CARGO_MANIFEST_DIR` at runtime rather than with `env!`: the
+/// compile-time value is baked into the binary and does not point anywhere
+/// useful when a test runs in a sandbox. Both cargo and Bazel set the variable
+/// for test execution.
 pub fn fixtures_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("fixtures")
+    let manifest_dir =
+        std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR is set for tests");
+    PathBuf::from(manifest_dir).join("fixtures")
 }
 
 /// Directory containing test input files (audio, text samples)
