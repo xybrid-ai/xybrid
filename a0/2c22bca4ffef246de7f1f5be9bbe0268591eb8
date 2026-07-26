@@ -1,0 +1,19 @@
+integration-tests/BUILD.bazel
+  s_56f8212040c844::t_7281d3596ac58d 60-66,68-74,77-80,85,92-95,97
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "a02c22bca4ffef246de7f1f5be9bbe0268591eb8",
+  "prompts": {},
+  "sessions": {
+    "s_56f8212040c844": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "712d827d-2c3e-407d-a7a4-2e1b3f6e2b3b",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
