@@ -1,0 +1,23 @@
+crates/xybrid-bolt/BUILD.bazel
+  s_56f8212040c844::t_1aa7773d0ae906 33-36,38-50
+  s_56f8212040c844::t_488d3751148400 31-32,37
+bindings/flutter/rust/BUILD.bazel
+  s_56f8212040c844::t_92c5d07756615c 37-44
+  s_56f8212040c844::t_aa860ff436ea22 32-36
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "d45b9dd035cd700e0048670e77af8a4b05ba0a62",
+  "prompts": {},
+  "sessions": {
+    "s_56f8212040c844": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "712d827d-2c3e-407d-a7a4-2e1b3f6e2b3b",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
