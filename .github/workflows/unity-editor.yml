@@ -109,7 +109,10 @@ jobs:
           python3 tools/scripts/stage_unity_native.py --lib "$LIB" \
             --target x86_64-unknown-linux-gnu
           # Linux links ORT dynamically, so libonnxruntime.so ships beside it.
-          python3 tools/scripts/stage_unity_desktop_ort.py linux
+          # output_dir is REQUIRED (build-unity.yml passes it on a folded second
+          # line, which is easy to misread as a one-argument call).
+          python3 tools/scripts/stage_unity_desktop_ort.py linux \
+            bindings/unity/Runtime/Plugins/Linux
           # Pin the native version so the package's editor resolver treats the
           # staged library as current and does not fetch a release asset over it.
           VERSION=$(python3 -c "import json; print(json.load(open('bindings/unity/package.json'))['version'])")
