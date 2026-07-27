@@ -28,6 +28,26 @@ rust_shared_library(
     srcs = glob(["src/**/*.rs"]),
     crate_name = "xybrid_bolt",
     edition = "2021",
+    # rules_rust hands cdylibs the cc toolchain's DYNAMIC C++ runtime by default
+    # (rustc.bzl: `if crate_type in ["dylib", "cdylib"] and linkage != "static"`),
+    # which put libc++.so.1 / libc++abi.so.1 / libunwind.so.1 in DT_NEEDED on
+    # linux. The hermetic toolchain ships no such shared objects, so the link only
+    # resolved inside the build container and the plugin failed to load anywhere
+    # else — Unity Editor CI caught it as
+    #   DllNotFoundException : libc++.so.1: cannot open shared object file
+    # "static" selects static_runtime_lib, the runtime the CLI binary already
+    # gets, which is why executables were never affected.
+    #
+    # LINUX ONLY, deliberately. On android the dynamic runtime lib IS the NDK's
+    # libc++_shared.so, and its DT_NEEDED is load-bearing (the boltffi relink /
+    # 16KB-page work, guarded by a dlopen gate). Verified by A/B: with "static"
+    # applied everywhere, libc++_shared.so disappeared from the android .so.
+    # Windows is left on the default too — its cdylib is already proven clean by
+    # the PE import audit, via the static trio in :win_cxx_runtime.
+    cc_runtime_linkage = select({
+        "@rules_rs//rs/platforms/config:x86_64-unknown-linux-gnu": "static",
+        "//conditions:default": "dynamic",
+    }),
     crate_features = ["default"],
     rustc_flags = select({
         "@platforms//os:android": [

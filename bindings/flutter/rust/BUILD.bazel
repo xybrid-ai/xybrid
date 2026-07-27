@@ -29,6 +29,19 @@ rust_shared_library(
     srcs = glob(["src/**/*.rs"]),
     crate_name = "xybrid_flutter_ffi",
     edition = "2021",
+    # Same reason as //crates/xybrid-bolt:xybrid_bolt_cdylib: rules_rust hands
+    # cdylibs the cc toolchain's DYNAMIC C++ runtime by default, which put
+    # libc++.so.1 in DT_NEEDED even though the hermetic toolchain ships no such
+    # shared object — so the link resolved only inside the build container.
+    # "static" selects static_runtime_lib, the runtime the CLI binary gets.
+    #
+    # LINUX ONLY: on android the dynamic runtime lib is the NDK's
+    # libc++_shared.so, whose DT_NEEDED is load-bearing (see the bolt cdylib's
+    # note — A/B showed a blanket "static" drops it).
+    cc_runtime_linkage = select({
+        "@rules_rs//rs/platforms/config:x86_64-unknown-linux-gnu": "static",
+        "//conditions:default": "dynamic",
+    }),
     # ["default"] matches the cargokit ship (it passes no --features); the real
     # candle/vision/coreml feature set flows transitively from the //crates/
     # xybrid-sdk target this links (verified: the darwin staticlib carries
