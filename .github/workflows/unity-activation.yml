@@ -1,0 +1,51 @@
+# Unity license activation — MANUAL, run rarely.
+#
+# GameCI runs the Unity Editor in a Docker image, and the Editor needs a license
+# file to start. This workflow produces the request half of that exchange:
+#
+#   1. Dispatch this workflow. It emits a `.alf` (activation request) artifact.
+#   2. Upload the `.alf` at https://license.unity3d.com/manual — Unity hands back
+#      a `.ulf` (the license itself).
+#   3. Store the FULL CONTENTS of the `.ulf` as the `UNITY_LICENSE` repo secret,
+#      alongside `UNITY_EMAIL` and `UNITY_PASSWORD`.
+#
+# Kept in the repo rather than deleted after first use: Unity licenses expire and
+# GameCI image bumps can invalidate them, so this is re-run whenever the Unity
+# Editor CI starts failing to activate.
+#
+# The `.alf` contains machine bindings and an account identifier, not a
+# credential — but the `.ulf` you get back IS the license, so it goes in secrets,
+# never in the repo.
+name: Unity activation (manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      unityVersion:
+        description: "Unity version to request activation for"
+        required: true
+        # Matches tools/unity-runtime-smoke/ProjectSettings/ProjectVersion.txt.
+        default: "6000.3.6f1"
+
+permissions:
+  contents: read
+
+jobs:
+  request-activation-file:
+    name: Request Unity activation file
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Request activation file
+        id: get-alf
+        uses: game-ci/unity-request-activation-file@65874ef791dae6dfa5829f1cb490eafbd7b2173c # v2.2.0
+        with:
+          unityVersion: ${{ inputs.unityVersion }}
+
+      - name: Upload activation file
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: unity-activation-file
+          path: ${{ steps.get-alf.outputs.filePath }}
+          if-no-files-found: error
+          retention-days: 1
