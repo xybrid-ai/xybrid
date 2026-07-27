@@ -58,10 +58,16 @@ jobs:
 
       # The Unity Editor image is ~10 GB on top of the Bazel fetches, so reclaim
       # the toolchains this job never touches before pulling anything.
+      #
+      # /usr/local/lib/android is deliberately NOT removed, matching bazel.yml:
+      # rules_android's android_sdk_repository rule reads it while FETCHING
+      # repositories, so deleting it aborts analysis of any target — including
+      # this one, which has nothing to do with Android:
+      #   "No Android SDK apis found in the Android SDK at /usr/local/lib/android/sdk"
       - name: Free disk space
         run: |
           sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/.ghcup \
-            /usr/local/lib/android /opt/hostedtoolcache/CodeQL
+            /opt/hostedtoolcache/CodeQL
           sudo docker image prune --all --force || true
           df -h /
 
