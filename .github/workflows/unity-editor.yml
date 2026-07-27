@@ -38,6 +38,9 @@ on:
 
 permissions:
   contents: read
+  # game-ci/unity-test-runner publishes the result as a GitHub Check. Without
+  # this the Checks API call fails with "Resource not accessible by integration".
+  checks: write
 
 concurrency:
   group: unity-editor-${{ github.workflow }}-${{ github.ref }}
@@ -55,6 +58,35 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           submodules: true
+
+      # Every step below is secret-gated so fork PRs (which get none) skip
+      # instead of failing. That leaves a trap: on a run that IS supposed to have
+      # secrets, a missing one would skip the Unity step and the job would still
+      # report success — a gate that looks healthy while testing nothing.
+      #
+      # So assert up front, and only for runs that should have secrets: same-repo
+      # PRs, master pushes, and manual dispatches. Fork PRs fall through to the
+      # skips by design.
+      - name: Require credentials (non-fork runs)
+        if: >-
+          github.event_name != 'pull_request' ||
+          github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+        run: |
+          missing=""
+          [ -n "${BUILDBUDDY_API_KEY}" ] || missing="$missing BUILDBUDDY_API_KEY"
+          [ -n "${UNITY_LICENSE}" ]      || missing="$missing UNITY_LICENSE"
+          [ -n "${UNITY_EMAIL}" ]        || missing="$missing UNITY_EMAIL"
+          [ -n "${UNITY_PASSWORD}" ]     || missing="$missing UNITY_PASSWORD"
+          if [ -n "$missing" ]; then
+            echo "Missing required secret(s):$missing"
+            echo "Without them the native build and/or the EditMode step would be"
+            echo "skipped and this job would report success without running Unity."
+            exit 1
+          fi
+          echo "All required secrets present."
 
       # The Unity Editor image is ~10 GB on top of the Bazel fetches, so reclaim
       # the toolchains this job never touches before pulling anything.
