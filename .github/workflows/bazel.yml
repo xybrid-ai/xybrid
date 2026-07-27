@@ -393,13 +393,22 @@ jobs:
             //crates/xybrid-cli:xybrid \
             //bindings/flutter/rust:xybrid_flutter_ffi_staticlib
 
-      # Release-critical since the Flutter precompile flip (release-prep
-      # precompile-flutter-darwin ships it): the iOS-simulator staticlib.
-      # Mac-local like the ios configs themselves; the device slice is
-      # already covered per-PR by build-apple.yml's xcframework build.
-      - name: Build Flutter iOS-sim staticlib
+      # Release-critical since the Flutter precompile flip: release-prep's
+      # precompile-flutter-darwin stages THREE Apple slices of this staticlib —
+      # aarch64-apple-darwin (built above), aarch64-apple-ios and
+      # aarch64-apple-ios-sim. Both ios configs are Mac-local, like the configs
+      # themselves.
+      #
+      # The device slice used to be skipped here on the grounds that
+      # build-apple.yml already covered it. It does not: that workflow builds
+      # //bindings/apple:XybridFFI, which is the BOLT staticlib from a different
+      # crate. Nothing was compiling //bindings/flutter/rust for iOS-device
+      # until release time.
+      - name: Build Flutter iOS staticlibs (device + simulator)
         if: env.BUILDBUDDY_API_KEY != ''
         run: |
+          bazelisk build --config=ios \
+            //bindings/flutter/rust:xybrid_flutter_ffi_staticlib
           bazelisk build --config=ios-sim \
             //bindings/flutter/rust:xybrid_flutter_ffi_staticlib
 
