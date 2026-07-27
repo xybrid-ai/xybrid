@@ -1,0 +1,20 @@
+.github/workflows/unity-editor.yml
+  s_56f8212040c844::t_580a4b5423a78b 41-43
+  s_56f8212040c844::t_724e3ae4d0ff7f 62-90
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "8f8023727a0a7c21dc3c2cc9ba7ba30b6558bb29",
+  "prompts": {},
+  "sessions": {
+    "s_56f8212040c844": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "712d827d-2c3e-407d-a7a4-2e1b3f6e2b3b",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
