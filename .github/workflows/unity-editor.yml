@@ -1,0 +1,141 @@
+# Unity Editor CI — the first job in this repo that runs a real Unity Editor.
+#
+# Everything else that touches the Unity SDK only compiles C#: ci.yml's
+# `unity-bolt-compile` is a `dotnet build` against netstandard2.1. That is not
+# enough — the `Unsafe.SizeOf<T>()` regression passed that gate and only failed
+# inside an actual Editor, because Unity's compiler and `dotnet build` disagree
+# about what is available.
+#
+# This job imports the package into Unity 6000.3.6f1 (the version
+# tools/unity-runtime-smoke pins), compiles it with Unity's own compiler, and
+# runs the package's EditMode tests against a Bazel-built Linux native. One of
+# the four test files drives ~16 native call sites, so the .so is genuinely
+# exercised rather than merely present.
+#
+# Mono + Linux only. IL2CPP and the Windows plugin loader are NOT covered here.
+name: Unity Editor CI
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - "bindings/unity/**"
+      - "crates/xybrid-bolt/**"
+      - "crates/xybrid-ffi-facade/**"
+      - "tools/unity-runtime-smoke/**"
+      - "tools/scripts/stage_unity_native.py"
+      - "tools/scripts/stage_unity_desktop_ort.py"
+      - ".github/workflows/unity-editor.yml"
+  push:
+    branches: [master]
+    paths:
+      - "bindings/unity/**"
+      - "crates/xybrid-bolt/**"
+      - "crates/xybrid-ffi-facade/**"
+      - "tools/unity-runtime-smoke/**"
+      - ".github/workflows/unity-editor.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: unity-editor-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  editmode:
+    name: Unity EditMode (Linux, Mono)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
+      UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          submodules: true
+
+      # The Unity Editor image is ~10 GB on top of the Bazel fetches, so reclaim
+      # the toolchains this job never touches before pulling anything.
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/.ghcup \
+            /usr/local/lib/android /opt/hostedtoolcache/CodeQL
+          sudo docker image prune --all --force || true
+          df -h /
+
+      # Same gitignored-file pattern the Bazel workflow uses: the key never
+      # lands in a committable file. Absent secret (forks) -> no :remote config.
+      - name: Configure BuildBuddy remote config
+        if: env.BUILDBUDDY_API_KEY != ''
+        run: |
+          mkdir -p .context
+          cat > .context/buildbuddy.bazelrc <<EOF
+          common:remote --bes_results_url=https://app.buildbuddy.io/invocation/
+          common:remote --bes_backend=grpcs://remote.buildbuddy.io
+          common:remote --remote_header=x-buildbuddy-api-key=${BUILDBUDDY_API_KEY}
+          common:remote --remote_cache=grpcs://remote.buildbuddy.io
+          common:remote --remote_executor=grpcs://remote.buildbuddy.io
+          common:remote --remote_cache_compression
+          common:remote --remote_download_toplevel
+          common:remote --remote_timeout=600
+          common:remote --jobs=200
+          common:remote --extra_execution_platforms=@llvm//:rbe_linux_x86_64
+          EOF
+
+      # The Linux bolt cdylib is not built anywhere else in CI — bazel.yml builds
+      # the windows one for the Unity DLL proof, and the linux CLI, but never
+      # this. Only the toplevel .so is downloaded (--remote_download_toplevel).
+      - name: Build the Linux bolt native (Bazel/RBE)
+        if: env.BUILDBUDDY_API_KEY != ''
+        run: |
+          bazelisk build --config=remote -c opt \
+            //crates/xybrid-bolt:xybrid_bolt_cdylib
+
+      - name: Stage the native + ONNX Runtime into the package
+        if: env.BUILDBUDDY_API_KEY != ''
+        run: |
+          set -euo pipefail
+          LIB=$(bazelisk cquery --config=remote -c opt --output=files \
+            //crates/xybrid-bolt:xybrid_bolt_cdylib | head -1)
+          echo "bolt native: $LIB"
+          python3 tools/scripts/stage_unity_native.py --lib "$LIB" \
+            --target x86_64-unknown-linux-gnu
+          # Linux links ORT dynamically, so libonnxruntime.so ships beside it.
+          python3 tools/scripts/stage_unity_desktop_ort.py linux
+          # Pin the native version so the package's editor resolver treats the
+          # staged library as current and does not fetch a release asset over it.
+          VERSION=$(python3 -c "import json; print(json.load(open('bindings/unity/package.json'))['version'])")
+          mkdir -p tools/unity-runtime-smoke/Assets/Xybrid/Plugins
+          printf '%s\n' "$VERSION" \
+            > tools/unity-runtime-smoke/Assets/Xybrid/Plugins/.xybrid-native-linux-version
+          ls -la bindings/unity/Runtime/Plugins/Linux
+
+      # Personal-license activation per GameCI v4: the .ulf is generated once by
+      # Unity Hub and stored as UNITY_LICENSE, together with the account
+      # email/password. Fork PRs carry no secrets, so this is skipped there
+      # rather than failing.
+      - name: Run EditMode tests
+        if: env.UNITY_LICENSE != ''
+        uses: game-ci/unity-test-runner@0ff419b913a3630032cbe0de48a0099b5a9f0ed9 # v4.3.1
+        env:
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+        with:
+          projectPath: tools/unity-runtime-smoke
+          unityVersion: 6000.3.6f1
+          testMode: EditMode
+          artifactsPath: unity-editmode-results
+          githubToken: ${{ secrets.GITHUB_TOKEN }}
+          checkName: Unity EditMode results
+
+      - name: Upload test results
+        if: always() && env.UNITY_LICENSE != ''
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: unity-editmode-results
+          path: unity-editmode-results
+          if-no-files-found: warn
+          retention-days: 7
