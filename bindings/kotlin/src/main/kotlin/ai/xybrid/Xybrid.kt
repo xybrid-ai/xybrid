@@ -149,10 +149,13 @@ object Xybrid {
 
 // -- Public Type Aliases --
 //
-// Bolt collapsed `XybridModelLoader.fromRegistry(id).load()` into the
-// `XybridModel.fromRegistry(id)` companion-object factory — there is no
-// loader type anymore. The Model / Result / Envelope / VoiceInfo /
-// GenerationConfig aliases stay for convenience.
+// Bolt collapsed `XybridModelLoader.fromRegistry(id).load()` into loading the
+// model directly — there is no loader type anymore. The registry path is the
+// `XybridModel(id)` constructor; the other sources are companion factories
+// (`fromBundle` / `fromDirectory` / `fromHuggingface`). The Model / Result /
+// VoiceInfo / GenerationConfig aliases stay for convenience.
+//
+// See [XybridModelLoader] below for the deprecated compatibility shim.
 
 /** A loaded model ready for inference. */
 typealias Model = XybridModel
@@ -206,6 +209,75 @@ suspend fun XybridModel.warmupAsync() = withContext(Dispatchers.IO) { this@warmu
 
 /** Unload the model, freeing its memory, off the caller's thread (on [Dispatchers.IO]). */
 suspend fun XybridModel.unloadAsync() = withContext(Dispatchers.IO) { this@unloadAsync.unload() }
+
+// -- Deprecated: the pre-bolt loader shape --
+//
+// Before the bolt migration, loading was two steps: build a loader, then call
+// `load()`. Bolt collapsed that into loading the model directly, and the type
+// was removed outright — so code written against the old shape (or against docs
+// that still showed it) failed with `Unresolved reference`, which says nothing
+// about what to use instead (xybrid-ai/xybrid#329).
+//
+// This shim keeps that code compiling and working, with a deprecation warning
+// naming the replacement. Scheduled for removal in 0.5.0.
+
+/**
+ * Deprecated two-step loader retained for source compatibility.
+ *
+ * Load the model directly instead — [XybridModel] for the registry, or
+ * [XybridModel.fromBundle] / [XybridModel.fromDirectory] /
+ * [XybridModel.fromHuggingface] for the other sources. Each has a `suspend`
+ * counterpart (`fromRegistryAsync` and friends).
+ */
+@Deprecated(
+    message = "XybridModelLoader was removed in 0.4.0. Load the model directly: " +
+        "XybridModel(id) for the registry, or XybridModel.fromBundle/fromDirectory/" +
+        "fromHuggingface. Use the *Async variants to load off the caller's thread.",
+    level = DeprecationLevel.WARNING,
+)
+class XybridModelLoader private constructor(private val open: () -> XybridModel) {
+
+    /** Performs the load the pre-bolt API deferred to this call. */
+    fun load(): XybridModel = open()
+
+    companion object {
+        /** Deprecated. Use `XybridModel(id)`. */
+        @Deprecated(
+            message = "Use XybridModel(id), or fromRegistryAsync(id) to load off-thread.",
+            replaceWith = ReplaceWith("XybridModel(id)"),
+            level = DeprecationLevel.WARNING,
+        )
+        fun fromRegistry(id: String): XybridModelLoader =
+            XybridModelLoader { XybridModel(id) }
+
+        /** Deprecated. Use [XybridModel.fromBundle]. */
+        @Deprecated(
+            message = "Use XybridModel.fromBundle(path).",
+            replaceWith = ReplaceWith("XybridModel.fromBundle(path)"),
+            level = DeprecationLevel.WARNING,
+        )
+        fun fromBundle(path: String): XybridModelLoader =
+            XybridModelLoader { XybridModel.fromBundle(path) }
+
+        /** Deprecated. Use [XybridModel.fromDirectory]. */
+        @Deprecated(
+            message = "Use XybridModel.fromDirectory(path).",
+            replaceWith = ReplaceWith("XybridModel.fromDirectory(path)"),
+            level = DeprecationLevel.WARNING,
+        )
+        fun fromDirectory(path: String): XybridModelLoader =
+            XybridModelLoader { XybridModel.fromDirectory(path) }
+
+        /** Deprecated. Use [XybridModel.fromHuggingface]. */
+        @Deprecated(
+            message = "Use XybridModel.fromHuggingface(repo).",
+            replaceWith = ReplaceWith("XybridModel.fromHuggingface(repo)"),
+            level = DeprecationLevel.WARNING,
+        )
+        fun fromHuggingface(repo: String): XybridModelLoader =
+            XybridModelLoader { XybridModel.fromHuggingface(repo) }
+    }
+}
 
 /** The result of a model inference operation. */
 typealias Result = XybridResult

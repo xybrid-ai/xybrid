@@ -100,8 +100,7 @@ import ai.xybrid.*
 Xybrid.init(context)
 
 // Load a model from the registry
-val loader = XybridModelLoader.fromRegistry("kokoro-82m")
-val model = loader.load()
+val model = XybridModel("kokoro-82m")
 
 // Run text-to-speech
 val envelope = Envelope.text("Hello from Xybrid!")

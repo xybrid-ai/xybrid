@@ -48,7 +48,7 @@ class InferenceRepository {
     private val dispatcher = Dispatchers.IO
 
     suspend fun loadModel(modelId: String): XybridModel = withContext(dispatcher) {
-        XybridModelLoader.fromRegistry(modelId).load()
+        XybridModel(modelId)
     }
 
     suspend fun runInference(
@@ -72,12 +72,8 @@ fun InferenceScreen() {
     Button(onClick = {
         scope.launch {
             isLoading = true
-            val model = withContext(Dispatchers.IO) {
-                XybridModelLoader.fromRegistry("kokoro-82m").load()
-            }
-            result = withContext(Dispatchers.IO) {
-                model.run(Envelope.text("Hello from Compose!"))
-            }
+            val model = XybridModel.fromRegistryAsync("kokoro-82m")
+            result = model.runAsync(Envelope.text("Hello from Compose!"))
             isLoading = false
         }
     }) {
@@ -97,10 +93,19 @@ The SDK provides short aliases matching the full qualified names:
 
 | Alias | Full Type |
 |-------|-----------|
-| `ModelLoader` | `XybridModelLoader` |
 | `Model` | `XybridModel` |
-| `Envelope` | `XybridEnvelope` |
 | `Result` | `XybridResult` |
-| `XybridError` | `XybridException` |
+| `VoiceInfo` | `XybridVoiceInfo` |
+| `GenerationConfig` | `XybridGenerationConfig` |
+| `XybridException` | `XybridError` |
+
+`Envelope` is not an alias — it is an object with factory methods
+(`Envelope.text(...)`, `Envelope.image(...)`, `Envelope.userMessage(...)`) that
+return `XybridEnvelope`.
+
+There is no `ModelLoader` type. Load a model directly with `XybridModel(id)` for
+the registry, or `XybridModel.fromBundle` / `fromDirectory` / `fromHuggingface`.
+A deprecated `XybridModelLoader` shim keeps pre-0.4.0 code compiling and will be
+removed in 0.5.0.
 
 See the [Android SDK guide](/docs/sdks/android) for the complete API reference.
