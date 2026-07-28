@@ -1,0 +1,32 @@
+.github/workflows/build-flutter.yml
+  s_e89cc11b615b8b::t_cf6ef01b55872b 212-290,293-295,297,301-333
+  s_e89cc11b615b8b::t_820da5474372d4 291-292,296,298-300
+bindings/flutter/cargokit/build_tool/lib/src/options.dart
+  s_e89cc11b615b8b::t_5af4f110a69ad4 300-304
+  s_e89cc11b615b8b::t_808a0a55789d40 239,246
+bindings/flutter/CHANGELOG.md
+  s_e89cc11b615b8b::t_ff878332e417a7 7
+bindings/flutter/README.md
+  s_e89cc11b615b8b::t_9d6d8fa5312d1d 261-268
+bindings/flutter/cargokit/build_tool/lib/src/artifacts_provider.dart
+  s_e89cc11b615b8b::t_aaad76248a995b 191
+  s_e89cc11b615b8b::t_2a3874b6b67a3c 97
+  s_e89cc11b615b8b::t_7965b1e0a6a3fa 159-161
+  s_e89cc11b615b8b::t_509a024c305ec4 56-77
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "5b880fb12b6922b29859d4147997329f7cb75141",
+  "prompts": {},
+  "sessions": {
+    "s_e89cc11b615b8b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "3118a97f-00e2-41a5-bb8e-f0ade0c25c5b",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
