@@ -7,17 +7,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Removed
-
-- **`xybrid-ffi` crate (pre-bolt C ABI)**: Unity migrated fully onto BoltFFI
-  (`xybrid-bolt`) — managed layer, run/stream/context, telemetry, bundle and
-  model-file — so the C-ABI crate, its cbindgen header, and the csbindgen C#
-  generation (`Runtime/Native/NativeMethods.g.cs`) are gone. The Unity SDK now
-  loads `xybrid_bolt` on every platform (`cargo xtask build-ffi` builds bolt).
-
 ### Planned
 
 - **Multimodal KV-prefix reuse**: the per-frame prefill cost lever for live vision — **deferred** from 0.2.0, not yet implemented.
+
+---
+
+## [0.4.0-rc1] - 2026-07-28
+
+Release candidate for 0.4.0. Two consumer-visible fixes on top of `0.4.0-alpha`
+— the published Flutter package could not be built by anyone with a Rust
+toolchain installed, and Linux `.so`s linked the C++ runtime dynamically — plus
+the Unity SDK moving fully onto BoltFFI and the Bazel graph growing from
+"builds the artifacts" to "builds and tests them".
+
+### Fixed
+
+- **Flutter: the published pub.dev package would not build** for any consumer
+  with a Rust toolchain installed. cargokit disables precompiled binaries
+  whenever `rustup` is on `PATH`, and the published package cannot be built
+  from source — its Rust crate inherits `edition` from a workspace root that is
+  not published and depends on sibling crates by path — so the build died on an
+  unrelated cargo manifest error. The choice is now made from the crate's
+  location: published package always precompiled, monorepo checkout still
+  source-built so edits to `xybrid-core`/`xybrid-sdk`/`xybrid-ffi-facade` are
+  picked up (#338, #408, #409).
+- **Linux `.so`s linked `libstdc++` dynamically** while binaries got it
+  statically, so the shipped cdylibs required a C++ runtime on the host
+  (#407).
+- **Unity shipped debug natives** in the release bundles (#391), and desktop
+  ONNX Runtime was missing from them (#379).
+
+### Changed
+
+- **Unity is fully on BoltFFI.** The managed layer, run/stream/context,
+  telemetry, bundle and model-file paths all go through `xybrid_bolt`, and its
+  natives for macOS, Android, Linux and iOS are built by Bazel
+  (#380–#390, #392–#394).
+- **Bazel now runs the test suite**, not just the builds — 38 test targets
+  covering the `tests/` binaries across `xybrid-core`, `xybrid-sdk`,
+  `xybrid-llama`, `xtask`, the CLI and integration-tests (#397–#403).
+- **Unity CI runs EditMode tests in a real Unity Editor** on Linux, plus a
+  Windows IL2CPP gate for the Bazel-built DLL (#396, #406).
+
+### Removed
+
+- **`xybrid-ffi` crate (pre-bolt C ABI)**: with Unity migrated onto BoltFFI,
+  the C-ABI crate, its cbindgen header, and the csbindgen C# generation
+  (`Runtime/Native/NativeMethods.g.cs`) are gone. The Unity SDK now loads
+  `xybrid_bolt` on every platform (`cargo xtask build-ffi` builds bolt).
 
 ---
 

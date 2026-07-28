@@ -1,10 +1,15 @@
 # Changelog
 
+## 0.4.0-rc1
+
+Release candidate for 0.4.0.
+
+* Fixed: the package would not build for anyone with a Rust toolchain installed — it failed with `error inheriting 'edition' from workspace root manifest`. cargokit disables precompiled binaries whenever `rustup` is on `PATH`, and this package cannot be built from source, so it fell through to a build that could never succeed. The published package now always uses its precompiled binaries, and a source build that cannot succeed fails with an explanation instead of a cargo error. `use_precompiled_binaries` still overrides (xybrid-ai/xybrid#338)
+
 ## 0.4.0-alpha
 
 Prerelease exercising the new release pipeline.
 
-* Fixed: builds failed with `error inheriting 'edition' from workspace root manifest` for anyone with a Rust toolchain installed — cargokit disabled precompiled binaries whenever `rustup` was on `PATH`, then fell back to a source build the published package cannot perform. The published package now always uses precompiled binaries, and a source build that cannot succeed fails with an explanation instead of a cargo error. `use_precompiled_binaries` still overrides (xybrid-ai/xybrid#338)
 * Fixed: `libxybrid_flutter.so` not found when compiling from source on Linux (xybrid-ai/xybrid#340)
 * Changed: the precompiled binaries (desktop + mobile) are now built by Bazel with hermetic toolchains — same download, naming, and signature; the Linux `.so` now loads on older-glibc distros than before (xybrid-ai/xybrid#369, xybrid-ai/xybrid#371)
 
