@@ -1,0 +1,19 @@
+.github/workflows/unity-editor.yml
+  s_ffc22842d6e67a::t_3ba21c6b4acfb0 196
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "f3195762338688a9df7850775deb4685610b09d4",
+  "prompts": {},
+  "sessions": {
+    "s_ffc22842d6e67a": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019faa73-65a9-7a10-9b23-f04ef02c5060",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
