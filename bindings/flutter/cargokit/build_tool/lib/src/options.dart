@@ -13,7 +13,6 @@ import 'package:yaml/yaml.dart';
 
 import 'builder.dart';
 import 'environment.dart';
-import 'rustup.dart';
 
 final _log = Logger('options');
 
@@ -231,10 +230,20 @@ class CargokitCrateOptions {
 }
 
 class CargokitUserOptions {
-  // When Rustup is installed always build locally unless user opts into
-  // using precompiled binaries.
+  // xybrid deviates from upstream cargokit here. Upstream builds from source
+  // whenever Rustup is installed, which silently disables precompiled binaries
+  // for anyone who has ever installed Rust. The published `xybrid_flutter`
+  // package cannot be built from source at all — `rust/Cargo.toml` inherits
+  // `edition` from a workspace root that is not published, and its `xybrid-*`
+  // dependencies are path dependencies into the monorepo — so that fallback
+  // produced an inscrutable cargo error instead of a working build (#338).
+  //
+  // Precompiled binaries are the shipping path, so they are the default.
+  // Building from source stays available via `use_precompiled_binaries: false`
+  // in `cargokit_options.yaml`, and inside the monorepo it also happens
+  // automatically whenever the crate hash has no published assets yet.
   static bool defaultUsePrecompiledBinaries() {
-    return Rustup.executablePath() == null;
+    return true;
   }
 
   CargokitUserOptions({

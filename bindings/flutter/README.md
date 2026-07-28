@@ -251,7 +251,20 @@ Native ML runtimes are resolved automatically at build time:
 - **iOS**: ONNX Runtime xcframework downloaded from HuggingFace and cached at `~/.xybrid/cache/ort-ios/`
 - **macOS/Linux/Windows**: ONNX Runtime downloaded by the `ort` Rust crate at compile time
 
-Precompiled Rust binaries are available for all platforms via [cargokit](https://github.com/nicklocking/cargokit) — no Rust toolchain required for most users.
+The Rust library itself ships as a precompiled, signature-verified binary for
+every supported platform via [cargokit](https://github.com/nicklocking/cargokit),
+downloaded at build time. No Rust toolchain is required, and having one
+installed does not change anything — the published package is precompiled-only
+and cannot be built from source, because its Rust crate lives in the xybrid
+monorepo workspace.
+
+Building from source is for monorepo development. Depend on
+`bindings/flutter` by path and add a `cargokit_options.yaml` next to your app's
+`pubspec.yaml`:
+
+```yaml
+use_precompiled_binaries: false
+```
 
 ## Example App
 
