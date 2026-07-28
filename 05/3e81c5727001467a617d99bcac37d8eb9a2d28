@@ -1,0 +1,34 @@
+.github/workflows/unity-editor.yml
+  s_ffc22842d6e67a::t_7233b93acab002 13-14,16,52,176-211,220-226
+  s_ffc22842d6e67a::t_e19d984c7064d6 54
+  s_ffc22842d6e67a::t_765efcf87cf0e4 227-228
+tools/unity-runtime-smoke/README.md
+  s_ffc22842d6e67a::t_7233b93acab002 23,28-42
+  s_e786724b192c2d::t_05ed8b63cb9b4f 43
+tools/unity-runtime-smoke/Assets/Editor/Builder.cs
+  s_ffc22842d6e67a::t_7233b93acab002 2,52-53,56,62-63,65,67-69,72,74-75
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "053e81c5727001467a617d99bcac37d8eb9a2d28",
+  "prompts": {},
+  "sessions": {
+    "s_e786724b192c2d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "24542696-2147-4bd7-89e3-828d637bba33",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    },
+    "s_ffc22842d6e67a": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019faa73-65a9-7a10-9b23-f04ef02c5060",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
