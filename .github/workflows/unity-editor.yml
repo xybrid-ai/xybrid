@@ -10,9 +10,10 @@
 # tools/unity-runtime-smoke pins), compiles it with Unity's own compiler, and
 # runs the package's EditMode tests against a Bazel-built Linux native. One of
 # the four test files drives ~16 native call sites, so the .so is genuinely
-# exercised rather than merely present.
+# exercised rather than merely present. It then AOT-compiles the same package
+# into a Linux IL2CPP player and runs the player headlessly against that native.
 #
-# Mono + Linux only. IL2CPP and the Windows plugin loader are NOT covered here.
+# The Windows plugin loader remains outside hosted CI.
 name: Unity Editor CI
 
 on:
@@ -48,9 +49,9 @@ concurrency:
 
 jobs:
   editmode:
-    name: Unity EditMode (Linux, Mono)
+    name: Unity Editor (Linux, Mono + IL2CPP)
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 75
     env:
       BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
       UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
@@ -172,11 +173,56 @@ jobs:
           githubToken: ${{ secrets.GITHUB_TOKEN }}
           checkName: Unity EditMode results
 
+      - name: Build Linux IL2CPP smoke player
+        if: env.UNITY_LICENSE != ''
+        uses: game-ci/unity-builder@1d4ee0697f193f54668e98961d79907911f4b4f2 # v4.8.1
+        env:
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+        with:
+          projectPath: tools/unity-runtime-smoke
+          unityVersion: 6000.3.6f1
+          targetPlatform: StandaloneLinux64
+          buildMethod: Builder.PerformBuild
+          manualExit: true
+          allowDirtyBuild: true
+
+      - name: Run Linux IL2CPP smoke player
+        if: env.UNITY_LICENSE != ''
+        run: |
+          set -euo pipefail
+          PLAYER=tools/unity-runtime-smoke/Build/linux-il2cpp/XybridSmoke.x86_64
+          LOG=tools/unity-runtime-smoke/Logs/linux-il2cpp-player.log
+          mkdir -p "$(dirname "$LOG")"
+          chmod +x "$PLAYER"
+
+          set +e
+          timeout 120s "$PLAYER" -batchmode -nographics -logFile "$LOG"
+          PLAYER_STATUS=$?
+          set -e
+
+          cat "$LOG"
+          if [ "$PLAYER_STATUS" -ne 0 ]; then
+            echo "Linux IL2CPP smoke player exited with status $PLAYER_STATUS."
+            exit "$PLAYER_STATUS"
+          fi
+          grep -Fq "[XybridSmoke] OK" "$LOG"
+
       - name: Upload test results
         if: always() && env.UNITY_LICENSE != ''
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: unity-editmode-results
           path: unity-editmode-results
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Upload IL2CPP smoke log
+        if: always() && env.UNITY_LICENSE != ''
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: unity-linux-il2cpp-smoke-log
+          path: tools/unity-runtime-smoke/Logs/linux-il2cpp-player.log
           if-no-files-found: warn
           retention-days: 7

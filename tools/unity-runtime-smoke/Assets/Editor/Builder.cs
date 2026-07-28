@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using UnityEditor;
 using UnityEditor.Build;
 using UnityEditor.Build.Reporting;
@@ -48,21 +49,29 @@ public static class Builder
         return BuildTarget.StandaloneWindows64;
 #elif UNITY_EDITOR_OSX
         return BuildTarget.StandaloneOSX;
+#elif UNITY_EDITOR_LINUX
+        return BuildTarget.StandaloneLinux64;
 #else
         throw new PlatformNotSupportedException(
-            "The Xybrid IL2CPP smoke supports Windows and macOS editors.");
+            "The Xybrid IL2CPP smoke supports Windows, macOS, and Linux editors.");
 #endif
     }
 
     private static string BuildOutputPath()
     {
+        string relativePath;
+
 #if UNITY_EDITOR_WIN
-        return "Build/windows-il2cpp/XybridSmoke.exe";
+        relativePath = "Build/windows-il2cpp/XybridSmoke.exe";
 #elif UNITY_EDITOR_OSX
-        return "Build/macos-il2cpp/XybridSmoke.app";
+        relativePath = "Build/macos-il2cpp/XybridSmoke.app";
+#elif UNITY_EDITOR_LINUX
+        relativePath = "Build/linux-il2cpp/XybridSmoke.x86_64";
 #else
         throw new PlatformNotSupportedException(
-            "The Xybrid IL2CPP smoke supports Windows and macOS editors.");
+            "The Xybrid IL2CPP smoke supports Windows, macOS, and Linux editors.");
 #endif
+
+        return Path.GetFullPath(Path.Combine(Application.dataPath, "..", relativePath));
     }
 }

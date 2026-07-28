@@ -20,10 +20,26 @@ unity test tools/unity-runtime-smoke --mode EditMode \
   --output tools/unity-runtime-smoke/test-results.xml
 
 unity build tools/unity-runtime-smoke \
-  --target StandaloneWindows64 \
+  --target StandaloneLinux64 \
   --execute-method Builder.PerformBuild \
   --allow-dirty-build
 ```
+
+## Linux — hosted IL2CPP validation
+
+`.github/workflows/unity-editor.yml` runs all three rungs on relevant pull
+requests and pushes to `master`. After the EditMode tests pass, GameCI builds
+the smoke project with its Unity 6000.3.6f1 Linux IL2CPP image. The workflow
+then launches this player headlessly:
+
+```bash
+./tools/unity-runtime-smoke/Build/linux-il2cpp/XybridSmoke.x86_64 \
+  -batchmode -nographics \
+  -logFile tools/unity-runtime-smoke/Logs/linux-il2cpp-player.log
+```
+
+The gate requires both a zero process exit code and `[XybridSmoke] OK` in the
+player log. The log is uploaded on success or failure.
 
 ## Windows — one-time manual validation
 
