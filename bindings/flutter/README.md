@@ -258,9 +258,14 @@ installed does not change anything — the published package is precompiled-only
 and cannot be built from source, because its Rust crate lives in the xybrid
 monorepo workspace.
 
-Building from source is for monorepo development. Depend on
-`bindings/flutter` by path and add a `cargokit_options.yaml` next to your app's
-`pubspec.yaml`:
+Building from source is for monorepo development, where the workspace root and
+the `xybrid-*` crates are present. There it is the default whenever a Rust
+toolchain is installed, because cargokit's crate hash only covers
+`bindings/flutter/rust` — a precompiled binary would not pick up edits to
+`xybrid-core`, `xybrid-sdk` or `xybrid-ffi-facade`.
+
+Either default can be overridden with a `cargokit_options.yaml` next to your
+app's `pubspec.yaml`:
 
 ```yaml
 use_precompiled_binaries: false

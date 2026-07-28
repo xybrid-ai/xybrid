@@ -230,36 +230,20 @@ class CargokitCrateOptions {
 }
 
 class CargokitUserOptions {
-  // xybrid deviates from upstream cargokit here. Upstream builds from source
-  // whenever Rustup is installed, which silently disables precompiled binaries
-  // for anyone who has ever installed Rust. The published `xybrid_flutter`
-  // package cannot be built from source at all — `rust/Cargo.toml` inherits
-  // `edition` from a workspace root that is not published, and its `xybrid-*`
-  // dependencies are path dependencies into the monorepo — so that fallback
-  // produced an inscrutable cargo error instead of a working build (#338).
-  //
-  // Precompiled binaries are the shipping path, so they are the default.
-  // Building from source stays available via `use_precompiled_binaries: false`
-  // in `cargokit_options.yaml`, and inside the monorepo it also happens
-  // automatically whenever the crate hash has no published assets yet.
-  static bool defaultUsePrecompiledBinaries() {
-    return true;
-  }
-
   CargokitUserOptions({
     required this.usePrecompiledBinaries,
     required this.verboseLogging,
   });
 
   CargokitUserOptions._()
-      : usePrecompiledBinaries = defaultUsePrecompiledBinaries(),
+      : usePrecompiledBinaries = null,
         verboseLogging = false;
 
   static CargokitUserOptions parse(YamlNode node) {
     if (node is! YamlMap) {
       throw SourceSpanException('Cargokit options must be a map', node.span);
     }
-    bool usePrecompiledBinaries = defaultUsePrecompiledBinaries();
+    bool? usePrecompiledBinaries;
     bool verboseLogging = false;
 
     for (final entry in node.nodes.entries) {
@@ -313,6 +297,10 @@ class CargokitUserOptions {
     return CargokitUserOptions._();
   }
 
-  final bool usePrecompiledBinaries;
+  /// `use_precompiled_binaries` as set in `cargokit_options.yaml`, or `null`
+  /// when the user did not express a preference. xybrid deviates from upstream
+  /// cargokit in resolving that default per crate location rather than globally
+  /// — see `ArtifactProvider.usePrecompiledBinaries`.
+  final bool? usePrecompiledBinaries;
   final bool verboseLogging;
 }

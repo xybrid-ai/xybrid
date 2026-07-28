@@ -53,6 +53,28 @@ class ArtifactProvider {
   final BuildEnvironment environment;
   final CargokitUserOptions userOptions;
 
+  /// Whether precompiled binaries should be used for this crate.
+  ///
+  /// xybrid deviates from upstream cargokit here. Upstream's default is "build
+  /// from source whenever Rustup is installed", which silently disabled
+  /// precompiled binaries for every consumer who had ever installed Rust and
+  /// dropped them into a build the published package cannot perform (#338).
+  ///
+  /// The default is resolved per crate location instead:
+  ///
+  /// * Published package — no workspace root, no sibling crates. Precompiled
+  ///   binaries are the only viable path, so they are used regardless of the
+  ///   local toolchain.
+  /// * Monorepo checkout — upstream's rule applies. Source builds matter here
+  ///   because [CrateHash] only covers `rust/`, so edits to `xybrid-core`,
+  ///   `xybrid-sdk` or `xybrid-ffi-facade` do not change the artifact key and a
+  ///   precompiled binary would silently ship stale code.
+  ///
+  /// An explicit `use_precompiled_binaries` in `cargokit_options.yaml` always
+  /// wins.
+  late final bool usePrecompiledBinaries = userOptions.usePrecompiledBinaries ??
+      (_sourceBuildBlocker() != null || Rustup.executablePath() == null);
+
   Future<Map<Target, List<Artifact>>> getArtifacts(List<Target> targets) async {
     final result = await _getPrecompiledArtifacts(targets);
 
@@ -72,7 +94,7 @@ class ArtifactProvider {
       throw SourceBuildUnavailableException(
         targets: pendingTargets,
         blocker: blocker,
-        precompiledEnabled: userOptions.usePrecompiledBinaries &&
+        precompiledEnabled: usePrecompiledBinaries &&
             environment.crateOptions.precompiledBinaries != null,
       );
     }
@@ -134,9 +156,9 @@ class ArtifactProvider {
     final missingPathDeps = RegExp(r'path\s*=\s*"([^"]+)"')
         .allMatches(manifest)
         .map((m) => m.group(1)!)
-        .where((dep) => !Directory(
-                path.normalize(path.join(environment.manifestDir, dep)))
-            .existsSync())
+        .where((dep) =>
+            !Directory(path.normalize(path.join(environment.manifestDir, dep)))
+                .existsSync())
         .toSet();
     if (missingPathDeps.isNotEmpty) {
       return 'Cargo.toml has path dependencies that are not present: '
@@ -166,7 +188,7 @@ class ArtifactProvider {
 
   Future<Map<Target, List<Artifact>>> _getPrecompiledArtifacts(
       List<Target> targets) async {
-    if (userOptions.usePrecompiledBinaries == false) {
+    if (!usePrecompiledBinaries) {
       _log.info('Precompiled binaries are disabled');
       return {};
     }
