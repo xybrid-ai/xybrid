@@ -193,8 +193,7 @@ jobs:
         run: |
           set -euo pipefail
           PLAYER=tools/unity-runtime-smoke/Build/linux-il2cpp/XybridSmoke.x86_64
-          LOG="$PWD/tools/unity-runtime-smoke/Logs/linux-il2cpp-player.log"
-          mkdir -p "$(dirname "$LOG")"
+          LOG="$RUNNER_TEMP/linux-il2cpp-player.log"
           ls -l "$PLAYER"
           test -x "$PLAYER"
 
@@ -224,6 +223,6 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: unity-linux-il2cpp-smoke-log
-          path: tools/unity-runtime-smoke/Logs/linux-il2cpp-player.log
+          path: ${{ runner.temp }}/linux-il2cpp-player.log
           if-no-files-found: warn
           retention-days: 7
