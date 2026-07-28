@@ -195,7 +195,8 @@ jobs:
           PLAYER=tools/unity-runtime-smoke/Build/linux-il2cpp/XybridSmoke.x86_64
           LOG=tools/unity-runtime-smoke/Logs/linux-il2cpp-player.log
           mkdir -p "$(dirname "$LOG")"
-          chmod +x "$PLAYER"
+          ls -l "$PLAYER"
+          test -x "$PLAYER"
 
           set +e
           timeout 120s "$PLAYER" -batchmode -nographics -logFile "$LOG"
