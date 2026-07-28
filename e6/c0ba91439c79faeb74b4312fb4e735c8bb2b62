@@ -1,0 +1,60 @@
+bindings/flutter/CHANGELOG.md
+  s_e89cc11b615b8b::t_74a2b1ad28fce4 3-8
+crates/xybrid-core/Cargo.toml
+  s_e89cc11b615b8b::t_cac778864741c8 28-29
+bindings/python/pyproject.toml
+  s_e89cc11b615b8b::t_857e089f7d7d21 7
+Package.swift
+  s_e89cc11b615b8b::t_857e089f7d7d21 39
+crates/xybrid-llama/Cargo.toml
+  s_e89cc11b615b8b::t_cac778864741c8 24
+bindings/flutter/rust/Cargo.toml
+  s_e89cc11b615b8b::t_857e089f7d7d21 3
+bindings/kotlin/build.gradle.kts
+  s_e89cc11b615b8b::t_857e089f7d7d21 8
+bindings/react-native/package.json
+  s_e89cc11b615b8b::t_857e089f7d7d21 3
+crates/xybrid-sdk/Cargo.toml
+  s_e89cc11b615b8b::t_cac778864741c8 17,37,42
+Cargo.toml
+  s_e89cc11b615b8b::t_857e089f7d7d21 19
+crates/xybrid/Cargo.toml
+  s_e89cc11b615b8b::t_cac778864741c8 17
+bindings/unity/package.json
+  s_e89cc11b615b8b::t_857e089f7d7d21 3
+CHANGELOG.md
+  s_e89cc11b615b8b::t_edb9c928e4416f 16-58
+  s_e786724b192c2d::t_33c505d6e307cb 59-61
+bindings/flutter/pubspec.yaml
+  s_e89cc11b615b8b::t_857e089f7d7d21 3
+bindings/web/package.json
+  s_e89cc11b615b8b::t_857e089f7d7d21 3
+bindings/react-native/android/build.gradle
+  s_e89cc11b615b8b::t_857e089f7d7d21 94
+Cargo.lock
+  s_e89cc11b615b8b::t_1e4267d26681a9 286,313,378,814,816,910,912,932,934,939,1454,1456,1558,1560,1572,1718,1720,1724,2163,2165,2679,2870,2872,3672,3674,3682,3684,3692,3694,3705,3707,4484,4486,4597,4864,4866,5016,5207,5209,5218,5220,5252,5254,5643,5645,6155,6169,6176,6185,6214,6281,6291,6300,6309,6318,6344
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "e6c0ba91439c79faeb74b4312fb4e735c8bb2b62",
+  "prompts": {},
+  "sessions": {
+    "s_e786724b192c2d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "24542696-2147-4bd7-89e3-828d637bba33",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    },
+    "s_e89cc11b615b8b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "3118a97f-00e2-41a5-bb8e-f0ade0c25c5b",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
