@@ -1,0 +1,22 @@
+tools/unity-runtime-smoke/README.md
+  s_ffc22842d6e67a::t_b2747ca3114d6a 32
+  s_ffc22842d6e67a::t_f2c2319a5d6d18 38
+.github/workflows/unity-editor.yml
+  s_ffc22842d6e67a::t_b2747ca3114d6a 185-186
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "b6df14fc245a19aa491294c59f884145e756e215",
+  "prompts": {},
+  "sessions": {
+    "s_ffc22842d6e67a": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019faa73-65a9-7a10-9b23-f04ef02c5060",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
