@@ -182,8 +182,7 @@ jobs:
           UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
         with:
           projectPath: tools/unity-runtime-smoke
-          # 6000.3.14f1 includes Unity's Linux player startup-crash fix.
-          unityVersion: 6000.3.14f1
+          unityVersion: 6000.3.6f1
           targetPlatform: StandaloneLinux64
           buildMethod: Builder.PerformBuild
           manualExit: true
@@ -197,9 +196,12 @@ jobs:
           LOG="$RUNNER_TEMP/linux-il2cpp-player.log"
           ls -l "$PLAYER"
           test -x "$PLAYER"
+          command -v xvfb-run
 
           set +e
-          timeout 120s "$PLAYER" -batchmode -nographics -logFile "$LOG"
+          timeout 120s xvfb-run --auto-servernum \
+            --server-args="-screen 0 1024x768x24" \
+            "$PLAYER" -batchmode -logFile "$LOG"
           PLAYER_STATUS=$?
           set -e
 

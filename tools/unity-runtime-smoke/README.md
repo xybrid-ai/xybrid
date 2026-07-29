@@ -29,12 +29,13 @@ unity build tools/unity-runtime-smoke \
 
 `.github/workflows/unity-editor.yml` runs all three rungs on relevant pull
 requests and pushes to `master`. After the EditMode tests pass, GameCI builds
-the smoke project with a Unity 6000.3.14f1 Linux IL2CPP image. The workflow
-then launches this player headlessly:
+the smoke project with its Unity 6000.3.6f1 Linux IL2CPP image. The workflow
+then launches this player on a virtual X11 display:
 
 ```bash
-./tools/unity-runtime-smoke/Build/linux-il2cpp/XybridSmoke.x86_64 \
-  -batchmode -nographics \
+xvfb-run --auto-servernum --server-args="-screen 0 1024x768x24" \
+  ./tools/unity-runtime-smoke/Build/linux-il2cpp/XybridSmoke.x86_64 \
+  -batchmode \
   -logFile "${RUNNER_TEMP}/linux-il2cpp-player.log"
 ```
 
