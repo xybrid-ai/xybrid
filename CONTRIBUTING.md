@@ -42,6 +42,17 @@ cargo xtask build-android                 # Android .so libraries
 cargo xtask build-flutter                 # Flutter native libraries
 ```
 
+### Building for Windows (MSVC)
+
+`bazel build --config=windows-msvc //...` cross-compiles MSVC-ABI Windows
+binaries from Linux or macOS. It downloads Microsoft's Visual C++ runtime and
+Windows SDK (~1.3 GB) via the [`windows_support`](https://github.com/hermeticbuild/windows_support)
+Bazel module, which requires accepting Microsoft's terms. `.bazelrc` sets
+`BAZEL_MSVC_RUNTIME_VISUAL_STUDIO_EULA=1` on the project's behalf — by building
+this configuration you are asserting your machine may use those files under the
+[Visual Studio license terms](https://visualstudio.microsoft.com/license-terms).
+No other build configuration fetches them.
+
 ## Testing
 
 ```bash

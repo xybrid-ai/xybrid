@@ -35,6 +35,47 @@ single_version_override(
 )
 bazel_dep(name = "hermetic_launcher", version = "0.0.11")
 
+# Microsoft's CRT + Windows SDK, the sysroot half of the Windows-MSVC lane
+# (--config=windows-msvc). windows_support deliberately ships no cc_toolchain:
+# @llvm stays the compiler provider and //bazel/toolchains/windows_msvc composes
+# the two. Pinned exactly — upstream is pre-1.0 and documents that its extension
+# APIs may change without notice. Fetching either repository below downloads
+# ~1.3 GB, and is gated on the EULA acknowledgement in .bazelrc.
+bazel_dep(name = "windows_support", version = "0.2.0")
+
+msvc_runtime = use_extension(
+    "@windows_support//windows:extensions.bzl",
+    "msvc_runtime",
+)
+msvc_runtime.configure(
+    architectures = ["x64"],
+    msvc_version = "14.50.35717",
+    visual_studio_installer_manifest_integrity = "sha256-qOhU+p8/uurCfXME4pfxZg1xN0ATid61fPeYPzPBb+8=",
+    visual_studio_installer_manifest_url = "https://download.visualstudio.microsoft.com/download/pr/fdc37f6e-59f6-4054-838a-b476eeaa6ec3/1d82370739911457e0a2f6be15d8b5f569531b352b2eabb961429eea1e99e356/VisualStudio.vsman",
+)
+use_repo(msvc_runtime, "msvc_runtime")
+
+windows_sdk = use_extension(
+    "@windows_support//windows:extensions.bzl",
+    "windows_sdk",
+)
+# NOTE: upstream's `transformations` attribute is deliberately NOT used. It runs
+# in the repository rule, i.e. on the Bazel *client*: on a case-insensitive macOS
+# volume its aliases collapse onto the originals, so a Mac-fetched sysroot
+# reaches a Linux RBE worker still missing them — and the two hosts would
+# materialise different repositories, splitting the remote cache. The case
+# handling lives in //bazel/toolchains/windows_msvc:case_insensitivity.bzl
+# instead, derived from the file list and therefore host-independent.
+windows_sdk.configure(
+    architectures = ["x64"],
+    windows_sdk_integrity = {
+        "Microsoft.Windows.SDK.CPP": "sha256-/0VWYL7gcadEcVqWZWZvopwHaBV509gVlZqe7FpVZCQ=",
+        "Microsoft.Windows.SDK.CPP.x64": "sha256-rWzpD/lAEGmdKVSLPCseUsieuBFD4hmRVdmlw4ABtSs=",
+    },
+    windows_sdk_version = "10.0.26100.7705",
+)
+use_repo(windows_sdk, "windows_sdk")
+
 # rules_cc must be a direct dep so the `@rules_cc//...` flag in .bazelrc resolves.
 bazel_dep(name = "rules_cc", version = "0.2.20")
 
@@ -182,6 +223,12 @@ register_toolchains("@androidndk//:all")
 # )
 
 # --- C/C++ toolchain: hermetic LLVM (desktop targets) -------------------------
+# ORDER MATTERS. @llvm's Windows toolchain declares no ABI constraint, so it also
+# matches a *-pc-windows-msvc platform; ours constrains on
+# @llvm//constraints/windows/abi:msvc and must be registered first to win there.
+# On windows-gnu platforms ours does not match at all and @llvm's is used.
+register_toolchains("//bazel/toolchains/windows_msvc:all")
+
 register_toolchains("@llvm//toolchain:all")
 
 # Hermetic macOS SDK (replaces xcrun) — needed on darwin host/target.

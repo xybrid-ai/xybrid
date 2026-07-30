@@ -6,6 +6,11 @@ common --@rules_cc//cc/toolchains/args/archiver_flags:use_libtool_on_macos=False
 # rules_rust allocator-library handling used by the known-good e2e config.
 common --@rules_rust//rust/settings:experimental_use_allocator_libraries_with_mangled_symbols
 
+# xybrid is open source and uses the MSVC runtime under Microsoft's applicable
+# Visual Studio terms. Required by hermeticbuild/windows_support before it
+# materializes @msvc_runtime on developer and CI machines.
+common --repo_env=BAZEL_MSVC_RUNTIME_VISUAL_STUDIO_EULA=1
+
 # Bazelified LINUX NDK (see MODULE.bazel + rules_android_ndk.patch): the NDK is
 # DOWNLOADED as a pinned repository input (r27 = the CI pin, sha256-verified) —
 # no local install, no machine setup, works identically on any host/CI. The
@@ -36,6 +41,13 @@ build:android-x86_64 --compilation_mode=opt
 # x86_64-pc-windows-gnu PE — NOT the MSVC binary today's cargo windows-latest
 # build ships. Combine with --config=remote so exec=Linux RBE.
 build:windows --platforms=@rules_rs//rs/platforms:x86_64-pc-windows-gnu
+
+# Desktop Windows with the MSVC ABI — the artifacts Flutter's cargokit links
+# against (`.dll` + MSVC-format `.dll.lib`), which the GNU lane above cannot
+# produce. Served by //bazel/toolchains/windows_msvc: the same hermetic clang,
+# with Microsoft's CRT + Windows SDK from @windows_support as the sysroot.
+# Reaching any target under this config downloads ~1.3 GB of Microsoft payload.
+build:windows-msvc --platforms=@rules_rs//rs/platforms:x86_64-pc-windows-msvc
 
 # Desktop macOS (CPU lane), cross-compiled from Linux RBE via hermetic clang +
 # @macos_sdk. Metal/Accelerate stay OFF (//:llama default arm): CPU-only is

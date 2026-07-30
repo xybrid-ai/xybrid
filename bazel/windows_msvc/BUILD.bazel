@@ -1,0 +1,36 @@
+"""Smoke targets proving //bazel/toolchains/windows_msvc end to end.
+
+Build with the MSVC platform, from any host:
+
+    bazel build --platforms=@rules_rs//rs/platforms:x86_64-pc-windows-msvc \
+        //bazel/windows_msvc:smoke_exe //bazel/windows_msvc:smoke_dll
+
+Everything here is `manual`: reaching these targets fetches ~1.3 GB of Microsoft
+CRT + SDK payload, which a stray `bazel build //...` should not pull.
+"""
+
+load("@rules_cc//cc:cc_binary.bzl", "cc_binary")
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
+load("@rules_cc//cc:cc_shared_library.bzl", "cc_shared_library")
+
+package(default_visibility = ["//visibility:private"])
+
+cc_library(
+    name = "smoke",
+    srcs = ["smoke.cc"],
+    alwayslink = True,
+    tags = ["manual"],
+)
+
+cc_binary(
+    name = "smoke_exe",
+    srcs = ["main.cc"],
+    tags = ["manual"],
+    deps = [":smoke"],
+)
+
+cc_shared_library(
+    name = "smoke_dll",
+    tags = ["manual"],
+    deps = [":smoke"],
+)
