@@ -1,0 +1,62 @@
+.github/workflows/build-react-native.yml
+  s_13e9783d1fe035::t_8dec38311537e3 284-287
+  s_13e9783d1fe035::t_5a42b113b70933 306-309,311-317
+  s_13e9783d1fe035::t_7b32e71ee3288a 95-98,100-118
+  s_13e9783d1fe035::t_526b8534e39829 233
+  s_13e9783d1fe035::t_ae7c265d8151a7 79-80
+examples/unity/Telemetry/README.md
+  s_13e9783d1fe035::t_7c2a8ac0df6885 144
+.github/workflows/build-flutter.yml
+  s_13e9783d1fe035::t_bd2c32f13a4f9b 199,201-206
+  s_13e9783d1fe035::t_3401a8a26da4af 47-52
+.github/workflows/release-dryrun.yml
+  s_13e9783d1fe035::t_b7554cd46129da 4-12,19
+  s_13e9783d1fe035::t_5d7e4f4e47533d 272
+  s_13e9783d1fe035::t_5a0512d11b4545 45-46
+docs/FEATURE_MATRIX.md
+  s_13e9783d1fe035::t_ecf1fb896fd1f2 205,345,399-400
+examples/android/README.md
+  s_13e9783d1fe035::t_7c2a8ac0df6885 32,245
+bindings/kotlin/README.md
+  s_13e9783d1fe035::t_3c5a035332040c 225,233,306,308-309,311-315,409
+examples/README.md
+  s_13e9783d1fe035::t_7c2a8ac0df6885 145,189,215
+bindings/react-native/README.md
+  s_13e9783d1fe035::t_b6e75e28c189ab 31-33
+  s_13e9783d1fe035::t_0b1fc6005a3ce6 72-76
+examples/unity/starter/Assets/Plugins/README.md
+  s_13e9783d1fe035::t_7c2a8ac0df6885 15
+examples/unity/starter/README.md
+  s_13e9783d1fe035::t_7c2a8ac0df6885 34
+examples/unity/README.md
+  s_13e9783d1fe035::t_7c2a8ac0df6885 90
+tools/README.md
+  s_13e9783d1fe035::t_0a55af34dec918 109,111-114,117-120,123-125,217-221,229-230
+xtask/src/main.rs
+  s_13e9783d1fe035::t_89b0ea5f53c462 2037,2311-2312,2341-2342
+  s_13e9783d1fe035::t_576a9ebc3f5dc7 1593,1604
+  s_13e9783d1fe035::t_28212fa96daef0 1106-1110
+CONTRIBUTING.md
+  s_13e9783d1fe035::t_95318aa0dd39f3 41
+docs/FEATURE_MATRIX.zh.md
+  s_13e9783d1fe035::t_dee33b8b026bc7 342,396-397
+  s_13e9783d1fe035::t_ecf1fb896fd1f2 204
+vendor/ort-android/README.md
+  s_13e9783d1fe035::t_715d08168f4c07 28,37
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "09805cf5d3b7ae51b9823cae72b466ceff602c85",
+  "prompts": {},
+  "sessions": {
+    "s_13e9783d1fe035": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c2e73e03-96e5-4291-8071-6cc09020b8b6",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
