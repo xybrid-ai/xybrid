@@ -27,9 +27,15 @@ on:
       - ".bazelignore"
       - "BUILD.bazel"
       - "**/BUILD.bazel"
+      # Starlark that BUILD files load — toolchain logic lives here, and
+      # `**/BUILD.bazel` alone would let a .bzl-only change slip through.
+      - "**/*.bzl"
+      - "bazel/**"
+      - "tools/scripts/**"
       - "rules_android_ndk.patch"
       - "rules_foreign_cc.patch"
       - "rules_rs.patch"
+      - "rules_rust.patch"
       - "hermetic_llvm.patch"
       - "crates/**"
       - "bindings/kotlin/**"
@@ -72,7 +78,7 @@ jobs:
           FILES=$(gh api --paginate \
             "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" \
             --jq '.[].filename')
-          if printf '%s\n' "$FILES" | grep -qE '^(MODULE\.bazel|\.bazelrc|\.bazelversion|\.bazelignore|BUILD\.bazel|.*/BUILD\.bazel|rules_android_ndk\.patch|rules_foreign_cc\.patch|rules_rs\.patch|hermetic_llvm\.patch|crates/|bindings/kotlin/|macros/|vendor/llama-cpp|vendor/ort-macos/|Cargo\.toml|Cargo\.lock|tools/unity-runtime-smoke/|\.github/workflows/bazel\.yml)'; then
+          if printf '%s\n' "$FILES" | grep -qE '^(MODULE\.bazel|\.bazelrc|\.bazelversion|\.bazelignore|BUILD\.bazel|.*/BUILD\.bazel|.*\.bzl|bazel/|tools/scripts/|rules_android_ndk\.patch|rules_foreign_cc\.patch|rules_rs\.patch|rules_rust\.patch|hermetic_llvm\.patch|crates/|bindings/kotlin/|macros/|vendor/llama-cpp|vendor/ort-macos/|Cargo\.toml|Cargo\.lock|tools/unity-runtime-smoke/|\.github/workflows/bazel\.yml)'; then
             REL=true
           else
             REL=false
@@ -423,6 +429,125 @@ jobs:
           test "$(nm "$BIN" | grep -c '_mtmd_')" -gt 0 || { echo "MISSING vision symbols"; exit 1; }
           strings "$BIN" | grep -q 'huggingface\.co' || { echo "MISSING huggingface"; exit 1; }
           echo "Metal CLI smoke: OK"
+
+  # The windows-MSVC lane — NON-SHIPPING proof, like the windows-gnu bolt DLL
+  # above. Everything compiles on Linux RBE workers; the runner only fetches
+  # repositories and inspects outputs.
+  #
+  # Master-merge / dispatch only (same shape as bazel-macos-metal), because
+  # @msvc_runtime + @windows_sdk are ~1.3 GB of Microsoft payload fetched
+  # CLIENT-side, and this workflow keeps no repository cache. Putting that on
+  # every Bazel-touching PR would cost more than the lane is worth until the
+  # Flutter windows producer actually flips to it.
+  bazel-windows-msvc:
+    name: Bazel windows-MSVC lane (non-shipping)
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          submodules: true
+
+      # The Microsoft payload lands on top of the usual LLVM/rustc/NDK fetches,
+      # so this job needs the headroom more than the others do.
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/.ghcup \
+            /opt/hostedtoolcache/CodeQL
+          sudo docker image prune --all --force || true
+          df -h /
+
+      - name: Configure BuildBuddy remote config
+        if: env.BUILDBUDDY_API_KEY != ''
+        run: |
+          mkdir -p .context
+          cat > .context/buildbuddy.bazelrc <<EOF
+          common:remote --bes_results_url=https://app.buildbuddy.io/invocation/
+          common:remote --bes_backend=grpcs://remote.buildbuddy.io
+          common:remote --remote_header=x-buildbuddy-api-key=${BUILDBUDDY_API_KEY}
+          common:remote --remote_cache=grpcs://remote.buildbuddy.io
+          common:remote --remote_executor=grpcs://remote.buildbuddy.io
+          common:remote --remote_cache_compression
+          common:remote --remote_download_toplevel
+          common:remote --remote_timeout=600
+          common:remote --jobs=200
+          common:remote --extra_execution_platforms=@llvm//:rbe_linux_x86_64
+          EOF
+
+      # The toolchain smokes come first and are cheap: they pull windows.h, the
+      # MSVC STL and clang's builtin headers, so a sysroot or include-order
+      # regression fails here rather than 20 minutes into llama.cpp.
+      - name: Build the windows-MSVC toolchain smokes
+        if: env.BUILDBUDDY_API_KEY != ''
+        run: |
+          bazelisk build --config=remote --config=windows-msvc \
+            //bazel/windows_msvc:smoke_exe \
+            //bazel/windows_msvc:smoke_dll
+
+      - name: Build llama.cpp + the Flutter native for windows-MSVC
+        if: env.BUILDBUDDY_API_KEY != ''
+        run: |
+          bazelisk build --config=remote --config=windows-msvc -c opt \
+            //:llama \
+            //bindings/flutter/rust:xybrid_flutter_ffi_cdylib
+
+      # The gate that actually distinguishes this lane from windows-gnu: the DLL
+      # must import the MSVC runtime (VCRUNTIME140/MSVCP140), and cargokit needs
+      # a real MSVC import library beside it. A MinGW build satisfies neither.
+      - name: Verify the MSVC ABI + import library
+        if: env.BUILDBUDDY_API_KEY != ''
+        run: |
+          set -euo pipefail
+          FILES=$(bazelisk cquery --config=remote --config=windows-msvc -c opt \
+            --output=files //bindings/flutter/rust:xybrid_flutter_ffi_cdylib)
+          DLL=$(printf '%s\n' "$FILES" | grep '\.dll$')
+          IMPLIB=$(printf '%s\n' "$FILES" | grep '\.dll\.lib$')
+          echo "resolved DLL: $DLL"
+          echo "resolved import library: $IMPLIB"
+          file "$DLL"
+          file "$DLL" | grep -q 'PE32+.*x86-64' || { echo "NOT a PE32+ x86-64 DLL"; exit 1; }
+          python3 -m pip install --quiet --user pefile
+          python3 tools/scripts/audit_windows_dll.py --dll "$DLL" \
+            --require-import vcruntime140.dll \
+            --require-import msvcp140.dll
+          python3 - "$DLL" "$IMPLIB" <<'PYEOF'
+          import sys
+
+          import pefile
+
+          dll_path, implib_path = sys.argv[1], sys.argv[2]
+          exports = len(pefile.PE(dll_path).DIRECTORY_ENTRY_EXPORT.symbols)
+
+          blob = open(implib_path, "rb").read()
+          if blob[:8] != b"!<arch>\n":
+              raise SystemExit(f"{implib_path}: not a COFF archive")
+          offset, short_imports = 8, 0
+          while offset + 60 <= len(blob):
+              size = int(blob[offset + 48:offset + 58].decode().strip())
+              # 0x0000FFFF marks a short-import member: the MSVC-only encoding
+              # that a MinGW `.dll.a` never contains.
+              if blob[offset + 60:offset + 64] == b"\x00\x00\xff\xff":
+                  short_imports += 1
+              offset += 60 + size + (size & 1)
+
+          print(f"exports: {exports}, short-import members: {short_imports}")
+          if short_imports != exports:
+              raise SystemExit("import library does not cover every export")
+          PYEOF
+          mkdir -p /tmp/win-msvc
+          cp "$DLL" "$IMPLIB" /tmp/win-msvc/
+          echo "windows-MSVC payload: OK"
+
+      - name: Upload windows-MSVC Flutter native
+        if: env.BUILDBUDDY_API_KEY != ''
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: bazel-xybrid-flutter-windows-msvc
+          path: /tmp/win-msvc/
+          retention-days: 7
 
   # The run-it half of the windows .exe gate: the linux job can build and
   # byte-inspect the PE but not execute it — a real Windows runner downloads

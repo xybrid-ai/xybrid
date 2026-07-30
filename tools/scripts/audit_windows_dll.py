@@ -115,11 +115,13 @@ def audit(
     exports: list[str],
     *,
     required_exports: list[str],
+    required_imports: list[str] = [],
     extra_allowed: frozenset[str] = frozenset(),
 ) -> AuditResult:
-    """Check imports against the allowlist and confirm required exports exist."""
+    """Check imports against the allowlist and confirm required symbols exist."""
     lines: list[str] = []
     export_set = set(exports)
+    import_set = {name.lower() for name in imports}
 
     forbidden: list[str] = []
     unexpected: list[str] = []
@@ -132,6 +134,9 @@ def audit(
             unexpected.append(dll)
 
     missing = [name for name in required_exports if name not in export_set]
+    missing_imports = [
+        name for name in required_imports if name.lower() not in import_set
+    ]
 
     lines.append(f"imports: {len(set(i.lower() for i in imports))} distinct DLLs")
     lines.append(f"exports: {len(export_set)} symbols")
@@ -147,13 +152,16 @@ def audit(
         )
     if missing:
         lines.append("FAIL: required exports missing: " + ", ".join(missing))
-    if not (forbidden or unexpected or missing):
+    if missing_imports:
+        lines.append("FAIL: required imports missing: " + ", ".join(missing_imports))
+    failed = bool(forbidden or unexpected or missing or missing_imports)
+    if not failed:
         lines.append(
             f"OK: import table is Windows-system-only; {len(required_exports)} "
             "required exports present"
         )
 
-    return AuditResult(ok=not (forbidden or unexpected or missing), lines=tuple(lines))
+    return AuditResult(ok=not failed, lines=tuple(lines))
 
 
 def read_pe(path: str) -> tuple[list[str], list[str]]:
@@ -189,6 +197,17 @@ def parse_args() -> argparse.Namespace:
         action="append",
         default=[],
         help="An export that must be present (repeatable).",
+    )
+    parser.add_argument(
+        "--require-import",
+        action="append",
+        default=[],
+        help=(
+            "A DLL that MUST appear in the import table, and is allowed by "
+            "implication (repeatable). The windows-MSVC lane uses it to assert "
+            "the MSVC runtime is linked, which is the opposite of what the "
+            "windows-GNU lane wants."
+        ),
     )
     parser.add_argument(
         "--allow-import",
@@ -238,7 +257,10 @@ def main() -> int:
         imports,
         exports,
         required_exports=required_exports,
-        extra_allowed=frozenset(a.lower() for a in args.allow_import),
+        required_imports=list(args.require_import),
+        extra_allowed=frozenset(
+            a.lower() for a in list(args.allow_import) + list(args.require_import)
+        ),
     )
     print(f"== PE audit: {args.dll} ==")
     for line in result.lines:
