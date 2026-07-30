@@ -1,0 +1,24 @@
+bazel/toolchains/windows_msvc/BUILD.bazel
+  s_5530c1a2c2062f::t_81cf01f7bb525d 237-249,252,254,256,258
+  s_5530c1a2c2062f::t_6441d9fb0a1f14 117-122
+BUILD.bazel
+  s_5530c1a2c2062f::t_e95fa3f3964a77 219-223
+  s_5530c1a2c2062f::t_ba70a0a6ab2333 293-297
+  s_5530c1a2c2062f::t_5e2ce875a61021 208-218,224-228
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "acbc0a006985f71a9d75ba0944b60508180e1cc5",
+  "prompts": {},
+  "sessions": {
+    "s_5530c1a2c2062f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "847b812e-4e6a-4262-82c2-97507c2c3690",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
