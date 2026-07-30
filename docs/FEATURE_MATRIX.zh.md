@@ -200,7 +200,7 @@ llama.cpp 通过 ggml 使用**运行时 SIMD 检测**，因此对所有 Android 
 | 平台 | 构建主机 | 规范门禁 |
 |---------|-----------|---------|
 | macOS arm64 / x86_64 | macOS | `cargo clippy --workspace --features platform-macos -- -D warnings` + `cargo test --workspace --features platform-macos` |
-| iOS arm64 + 模拟器 | macOS | `cargo xtask build-xcframework --release`（为 `aarch64-apple-ios`、`aarch64-apple-ios-sim`、`x86_64-apple-ios` 交叉编译 `xybrid-uniffi`）。CI 变体（含 vision 矩阵作业）参见 [`.github/workflows/build-apple.yml`](../.github/workflows/build-apple.yml)。 |
+| iOS arm64 + 模拟器 | macOS | `bazel build --config=ios //bindings/apple:XybridFFI`（rules_apple xcframework，设备 + 模拟器切片）。CI 变体参见 [`.github/workflows/build-apple.yml`](../.github/workflows/build-apple.yml)。 |
 | Android arm64-v8a / armeabi-v7a / x86_64 | 任意（Bazel 自带 NDK） | `bazel build -c opt //bindings/kotlin:xybrid_kotlin_aar`（功能完整的 3-ABI AAR）。CI 变体参见 [`.github/workflows/build-android.yml`](../.github/workflows/build-android.yml)。 |
 | 桌面 Linux x86_64 | Linux | `cargo clippy --workspace --features platform-desktop -- -D warnings` + `cargo test --workspace --features platform-desktop` |
 | 桌面 Windows x86_64 | Windows | 与 Linux 桌面相同 |
@@ -267,17 +267,12 @@ export ORT_IOS_XCFWK_LOCATION=/path/to/onnxruntime.xcframework
 | 命令 | 用途 | 平台 | 示例 |
 |---------|---------|----------|---------|
 | `setup-test-env` | 为集成测试下载模型 | 任意 | `cargo xtask setup-test-env` |
-| `build-xcframework` | 通过 boltffi 构建 Apple XCFramework（Swift 绑定 + xcframework） | 仅 macOS | `cargo xtask build-xcframework --release` |
 | `build-flutter` | 构建 Flutter 原生库 | 视情况而定 | `cargo xtask build-flutter --platform macos` |
-| `setup-targets` | 安装 Rust 交叉编译目标 | 任意 | `cargo xtask setup-targets` |
-| `build-all` | 构建所有平台 | 视情况而定 | `cargo xtask build-all --release` |
-| `package` | 打包用于分发的构件 | 任意 | `cargo xtask package --version 0.2.0` |
 
 ### xtask 与 Feature 预设的映射
 
 | xtask 命令 | 使用的平台预设 | 构建的目标 |
 |---------------|---------------------|---------------|
-| `build-xcframework` | `platform-macos` / `platform-ios` | iOS arm64、iOS Simulator（arm64、x86_64）、macOS（arm64、x86_64） |
 | `build-flutter --platform ios` | `platform-ios` | aarch64-apple-ios、aarch64-apple-ios-sim |
 | `build-flutter --platform android` | `platform-android` | aarch64-linux-android、armv7-linux-androideabi、x86_64-linux-android |
 | `build-flutter --platform macos` | `platform-macos` | aarch64-apple-darwin、x86_64-apple-darwin |

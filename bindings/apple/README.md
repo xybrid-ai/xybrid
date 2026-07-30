@@ -147,42 +147,27 @@ The XCFramework containing the compiled Rust library must be built before using 
 | Tool | Required Version | Installation |
 |------|------------------|--------------|
 | Xcode | 14.0+ | Mac App Store |
-| Rust | 1.70+ | [rustup.rs](https://rustup.rs) |
+| Bazel (via bazelisk) | per `.bazelversion` | `brew install bazelisk` |
 | Xcode Command Line Tools | Latest | `xcode-select --install` |
-
-### Installing Rust Targets
-
-Install the required cross-compilation targets:
-
-```bash
-# From the xybrid repo root
-cargo xtask setup-targets
-
-# Or manually:
-rustup target add aarch64-apple-ios        # iOS device (arm64)
-rustup target add aarch64-apple-ios-sim    # iOS simulator (arm64)
-rustup target add x86_64-apple-ios         # iOS simulator (x86_64)
-rustup target add aarch64-apple-darwin     # macOS (arm64)
-rustup target add x86_64-apple-darwin      # macOS (x86_64)
-```
 
 ### Building
 
+The xcframework builds with Bazel (which brings its own Rust toolchain — no
+rustup targets needed). Install Bazel via
+[bazelisk](https://github.com/bazelbuild/bazelisk) (`brew install bazelisk`),
+then:
+
 ```bash
 # From the xybrid repo root
-cargo xtask build-xcframework
+bazel build --config=ios //bindings/apple:XybridFFI
 
-# With debug symbols (slower, larger binaries)
-cargo xtask build-xcframework --debug
-
-# With explicit version
-cargo xtask build-xcframework --version 0.2.0
+# Unzip it where the Swift package's local-natives mode looks
+unzip -o bazel-bin/bindings/apple/XybridFFI.xcframework.zip -d bindings/apple/XCFrameworks
 ```
 
 This produces `XCFrameworks/XybridFFI.xcframework` containing:
 - iOS device (arm64)
-- iOS simulator (arm64, x86_64 universal)
-- macOS (arm64, x86_64 universal)
+- iOS simulator (arm64)
 
 ### Build Output
 
@@ -216,7 +201,7 @@ bindings/apple/XCFrameworks/
 
 **Cause**: Missing Rust target.
 
-**Fix**: Run `cargo xtask setup-targets` or `rustup target add aarch64-apple-ios`
+**Fix**: Build via Bazel (`bazel build --config=ios //bindings/apple:XybridFFI`) — it provides its own Rust toolchain and targets
 
 #### "xcodebuild: error: cannot be used together with -create-xcframework"
 
@@ -234,7 +219,7 @@ bindings/apple/XCFrameworks/
 
 **Cause**: XCFramework built for different architecture than target.
 
-**Fix**: Rebuild with `cargo xtask build-xcframework` ensuring all targets are installed.
+**Fix**: Rebuild with `bazel build --config=ios //bindings/apple:XybridFFI`.
 
 ### Non-macOS Developers
 

@@ -18,10 +18,36 @@ Medium-difficulty tasks are labeled [`help wanted`](https://github.com/xybrid-ai
 
 ## Prerequisites
 
+We use Bazel to build xybrid and its dependencies. The only build prerequisite
+is Bazel, which we recommend installing through
+[bazelisk](https://github.com/bazelbuild/bazelisk) — it reads `.bazelversion`
+and fetches the matching Bazel automatically.
+
+**macOS**
+
+```bash
+brew install bazelisk
+```
+
+**Linux**
+
+```bash
+sudo curl -L -o /usr/local/bin/bazel 'https://github.com/bazelbuild/bazelisk/releases/download/v1.28.0/bazelisk-linux-amd64'
+sudo chmod +x /usr/local/bin/bazel
+```
+
+Bazel brings its own hermetic toolchains — Rust, the Android NDK, clang, and
+every C/C++ dependency. No rustup targets or NDK install are needed to build
+the native artifacts.
+
+For working on the Rust workspace itself (the `cargo build` / `cargo test`
+dev loop):
+
 - **Rust** 1.75+ with `cargo` ([rustup.rs](https://rustup.rs))
 - **just** task runner ([github.com/casey/just](https://github.com/casey/just))
 - **Git** for version control
-- **Flutter** 3.x, **Xcode** 15+, or **Android NDK** (only if working on those bindings)
+- **Flutter** 3.x or **Xcode** 15+ (only if working on those bindings —
+  Apple builds are Mac-only)
 
 ## Dev Environment Setup
 
@@ -35,11 +61,18 @@ cargo test --workspace
 ## Building
 
 ```bash
+# Rust workspace (dev loop)
 cargo build --workspace                   # Build all packages
 cargo build --workspace --release         # Release mode
-cargo xtask build-xcframework             # Apple XCFramework (iOS + macOS)
+
+# Native artifacts — Bazel (same targets the release ships from)
 bazel build -c opt //bindings/kotlin:xybrid_kotlin_aar   # Android AAR (jniLibs inside)
-cargo xtask build-flutter                 # Flutter native libraries
+bazel build --config=ios //bindings/apple:XybridFFI      # Apple XCFramework (Mac + Xcode)
+bazel build --config=macos-metal //crates/xybrid-cli:xybrid   # CLI (macOS; see .bazelrc for other configs)
+
+# Flutter native — deliberately cargo, not Bazel: `flutter run` inside the
+# repo goes through cargokit → cargo, so this is the contributor path.
+cargo xtask build-flutter --platform <linux|macos|windows>
 ```
 
 ### Building for Windows (MSVC)

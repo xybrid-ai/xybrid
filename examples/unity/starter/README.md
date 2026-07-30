@@ -28,7 +28,7 @@ Before the SDK will work, you need to build the native libraries from the Rust s
 cd repos/xybrid
 
 # Build for iOS/macOS
-cargo xtask build-xcframework
+bazel build --config=ios //bindings/apple:XybridFFI
 
 # Build for Android
 bazel build -c opt //bindings/kotlin:xybrid_kotlin_aar

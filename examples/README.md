@@ -94,7 +94,7 @@ xcodebuild -project XybridExample.xcodeproj \
 
 ```bash
 # From xybrid repo root
-cargo xtask build-xcframework
+bazel build --config=ios //bindings/apple:XybridFFI
 ```
 
 ### Features Demonstrated
@@ -183,7 +183,7 @@ Unity example project for on-device ML inference in games.
 ```bash
 # From xybrid repo root
 # For iOS/macOS
-cargo xtask build-xcframework
+bazel build --config=ios //bindings/apple:XybridFFI
 
 # For Android
 bazel build -c opt //bindings/kotlin:xybrid_kotlin_aar
@@ -211,7 +211,7 @@ Native libraries need to be built from Rust before the SDK works:
 
 | Platform | Build Command |
 |----------|---------------|
-| iOS/macOS | `cargo xtask build-xcframework` |
+| iOS/macOS | `bazel build --config=ios //bindings/apple:XybridFFI` |
 | Android | `bazel build -c opt //bindings/kotlin:xybrid_kotlin_aar` |
 
 ### "Model not found"

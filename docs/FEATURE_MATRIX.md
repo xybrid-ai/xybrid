@@ -201,7 +201,7 @@ Run on each target host (or in CI matrix jobs). Each row matches what the releas
 | Platform | Build host | Canonical gate |
 |---------|-----------|---------|
 | macOS arm64 / x86_64 | macOS | `cargo clippy --workspace --features platform-macos -- -D warnings` + `cargo test --workspace --features platform-macos` |
-| iOS arm64 + simulator | macOS | `cargo xtask build-xcframework --release` (cross-compiles `xybrid-uniffi` for `aarch64-apple-ios`, `aarch64-apple-ios-sim`, `x86_64-apple-ios`). See [`.github/workflows/build-apple.yml`](../.github/workflows/build-apple.yml) for the CI variant including the vision matrix job. |
+| iOS arm64 + simulator | macOS | `bazel build --config=ios //bindings/apple:XybridFFI` (rules_apple xcframework, device + simulator slices). See [`.github/workflows/build-apple.yml`](../.github/workflows/build-apple.yml) for the CI variant. |
 | Android arm64-v8a / armeabi-v7a / x86_64 | Any (Bazel downloads its own NDK) | `bazel build -c opt //bindings/kotlin:xybrid_kotlin_aar` (feature-complete 3-ABI AAR). See [`.github/workflows/build-android.yml`](../.github/workflows/build-android.yml) for the CI variant. |
 | Desktop Linux x86_64 | Linux | `cargo clippy --workspace --features platform-desktop -- -D warnings` + `cargo test --workspace --features platform-desktop` |
 | Desktop Windows x86_64 | Windows | same as Linux desktop |
@@ -268,17 +268,12 @@ The `xtask` crate provides build automation commands. Run `cargo xtask --help` f
 | Command | Purpose | Platform | Example |
 |---------|---------|----------|---------|
 | `setup-test-env` | Download models for integration tests | Any | `cargo xtask setup-test-env` |
-| `build-xcframework` | Build Apple XCFramework via boltffi (Swift bindings + xcframework) | macOS only | `cargo xtask build-xcframework --release` |
 | `build-flutter` | Build Flutter native libraries | Varies | `cargo xtask build-flutter --platform macos` |
-| `setup-targets` | Install Rust cross-compilation targets | Any | `cargo xtask setup-targets` |
-| `build-all` | Build all platforms | Varies | `cargo xtask build-all --release` |
-| `package` | Package artifacts for distribution | Any | `cargo xtask package --version 0.2.0` |
 
 ### xtask to Feature Preset Mapping
 
 | xtask Command | Platform Preset Used | Targets Built |
 |---------------|---------------------|---------------|
-| `build-xcframework` | `platform-macos` / `platform-ios` | iOS arm64, iOS Simulator (arm64, x86_64), macOS (arm64, x86_64) |
 | `build-flutter --platform ios` | `platform-ios` | aarch64-apple-ios, aarch64-apple-ios-sim |
 | `build-flutter --platform android` | `platform-android` | aarch64-linux-android, armv7-linux-androideabi, x86_64-linux-android |
 | `build-flutter --platform macos` | `platform-macos` | aarch64-apple-darwin, x86_64-apple-darwin |

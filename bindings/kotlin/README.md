@@ -289,18 +289,6 @@ export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/26.1.10909125"
 export PATH="$PATH:$ANDROID_HOME/cmdline-tools/latest/bin"
 ```
 
-### Installing Rust Targets
-
-```bash
-# From the xybrid repo root
-cargo xtask setup-targets
-
-# Or manually:
-rustup target add aarch64-linux-android      # arm64-v8a
-rustup target add armv7-linux-androideabi    # armeabi-v7a
-rustup target add x86_64-linux-android       # x86_64
-```
-
 ### Building
 
 **Using Bazel (Recommended)**
@@ -377,7 +365,7 @@ export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/26.1.10909125"
 
 **Cause**: Missing Rust target.
 
-**Fix**: Run `cargo xtask setup-targets` or `rustup target add aarch64-linux-android`
+**Fix**: Build via Bazel (see Building above) — it provides its own Rust toolchain and Android targets
 
 #### "error: could not find 'cargo-ndk'"
 

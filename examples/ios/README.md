@@ -38,7 +38,7 @@ latest-frame-wins. See `LiveVision.swift` for the gate + batch-VLM wiring.
 ```bash
 # From the xybrid repo root
 rustup target add aarch64-apple-ios aarch64-apple-ios-sim aarch64-apple-darwin
-cargo xtask build-xcframework --release
+bazel build --config=ios //bindings/apple:XybridFFI
 
 # Point the Swift package at the local build. Without this, SPM downloads the
 # published release xcframework, whose headers may predate symbols the checked-
@@ -214,12 +214,12 @@ let caption = result.text
 
 The XCFramework hasn't been built or the package dependency hasn't been added.
 
-1. Run `cargo xtask build-xcframework --release` from the xybrid repo root
+1. Run `bazel build --config=ios //bindings/apple:XybridFFI` from the xybrid repo root
 2. Add the local package dependency in Xcode (see Quick Start step 3)
 
 ### Linker errors
 
-Ensure the XCFramework includes headers. Rebuild with `cargo xtask build-xcframework --release`.
+Ensure the XCFramework includes headers. Rebuild with `bazel build --config=ios //bindings/apple:XybridFFI`.
 
 ### App crashes on launch
 

@@ -137,7 +137,7 @@ cp target/release/libxybrid_bolt.dylib \
    examples/unity/Telemetry/Assets/Plugins/macOS/libxybrid.dylib
 
 # iOS
-cargo xtask build-xcframework
+bazel build --config=ios //bindings/apple:XybridFFI
 # Copy the static library per the xybrid README.
 
 # Android

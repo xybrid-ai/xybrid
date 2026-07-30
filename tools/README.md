@@ -75,36 +75,20 @@ cargo xtask build-ffi --target x86_64-unknown-linux-gnu --release --deploy-unity
 - Dynamic library: `target/<target>/<profile>/libxybrid_bolt.{dylib,so,dll}`
 - Static library: `target/<target>/<profile>/libxybrid_bolt.a`
 
-### `build-xcframework` - Build Apple XCFramework (macOS only)
+### Apple XCFramework — direct Bazel (no xtask command)
 
-Builds the Apple XCFramework via `boltffi pack apple` — compiles
-`xybrid-bolt` for every Apple slice in `crates/xybrid-bolt/boltffi.toml`,
-generates the Swift wrapper (`bindings/apple/Sources/Xybrid/xybrid_bolt.swift`),
-and packs the slices into an xcframework.
+`build-xcframework` (boltffi pack) was removed: the release ships the
+[rules_apple](https://github.com/bazelbuild/rules_apple)-built xcframework, so
+local dev uses the same target (Mac + Xcode required; device + simulator
+slices, min iOS 16):
 
 ```bash
-cargo xtask build-xcframework --release
-cargo xtask build-xcframework --debug --version 1.0.0
+bazel build --config=ios //bindings/apple:XybridFFI
+# → bazel-bin/bindings/apple/XybridFFI.xcframework.zip
 ```
 
-**Options:**
-- `--release` - Build in release mode (default: true)
-- `--debug` - Build in debug mode (overrides --release)
-- `--version <ver>` - Override version (default: from Cargo.toml or git tag)
-
-**Requirements:**
-- macOS host
-- `boltffi` CLI (`cargo install boltffi_cli`)
-- iOS ORT is fetched at build time via `xybrid-core/ort-download` (the
-  `platform-ios` feature) — no manual ORT vendoring needed.
-
-**Slices** (driven by `boltffi.toml`): iOS arm64 (device) + iOS
-Simulator arm64. macOS is excluded by config.
-
-**Output:**
-- `bindings/apple/XCFrameworks/XybridFFI.xcframework` (unversioned)
-- `bindings/apple/XCFrameworks/XybridFFI-<version>.xcframework` (versioned)
-- `bindings/apple/Sources/Xybrid/xybrid_bolt.swift` (generated Swift wrapper)
+The C header and Swift wrapper are committed (`bindings/apple/include/`,
+`bindings/apple/Sources/Xybrid/`) — no boltffi CLI needed.
 
 ### Android .so files — direct Bazel (no xtask command)
 
@@ -157,56 +141,18 @@ cargo xtask build-flutter --platform linux --debug
 
 **Note:** Runs `flutter_rust_bridge_codegen` to generate Dart bindings before building.
 
-### `setup-targets` - Install Cross-Compilation Targets
+### Removed commands (Bazel-era)
 
-Installs all required Rust targets for cross-compilation.
+`setup-targets`, `build-all`, `build-xcframework`, `build-android`,
+`stage-react-native`, and `package` no longer exist:
 
-```bash
-cargo xtask setup-targets
-```
-
-**Targets installed:**
-- iOS: `aarch64-apple-ios`, `x86_64-apple-ios`, `aarch64-apple-ios-sim`
-- macOS: `aarch64-apple-darwin`, `x86_64-apple-darwin`
-- Android: `aarch64-linux-android`, `armv7-linux-androideabi`, `x86_64-linux-android`
-
-### `build-all` - Build All Platforms
-
-Builds all platforms with one command. Skips platforms that can't be built on the current OS.
-
-```bash
-cargo xtask build-all --release
-cargo xtask build-all --parallel --version 1.0.0
-```
-
-**Options:**
-- `--release` - Build in release mode (default: true)
-- `--debug` - Build in debug mode
-- `--parallel` - Run builds concurrently (experimental)
-- `--version <ver>` - Override version
-
-### `package` - Package Distribution Artifacts
-
-Creates distribution packages with checksums and manifest.
-
-```bash
-cargo xtask package --version 1.0.0
-cargo xtask package --output-dir ./release --skip-flutter
-```
-
-**Options:**
-- `--version <ver>` - Package version (default: from Cargo.toml or git tag)
-- `--output-dir <path>` - Output directory (default: `dist/`)
-- `--skip-apple` - Skip XCFramework packaging
-- `--skip-android` - Skip Android .so packaging
-- `--skip-flutter` - Skip Flutter plugin packaging
-
-**Outputs:**
-- `XybridFFI-<version>.xcframework.zip` - Apple XCFramework
-- `xybrid-android-<version>.zip` - Android .so files
-- `xybrid-flutter-<version>.tar.gz` - Flutter plugin
-- `checksums.sha256` - SHA256 checksums
-- `manifest.json` - Package manifest with metadata
+- Bazel manages its own hermetic toolchains (Rust, NDK, clang), and cargokit
+  installs its own rustup targets for the Flutter from-source path — nothing
+  needs `setup-targets`.
+- Native artifacts build with direct `bazel build` commands (see the sections
+  above and `CONTRIBUTING.md`).
+- Release artifact assembly (naming, checksums, attestation, draft release)
+  lives in `.github/workflows/release-prep.yml`, which replaced `package`.
 
 ## CI/CD Integration
 
@@ -215,7 +161,6 @@ The xtask commands are used by GitHub Actions workflows:
 | Workflow | Command | Runner |
 |----------|---------|--------|
 | `build-flutter.yml` | `cargo xtask build-flutter --platform linux` | ubuntu-latest |
-| `test-ci.yml` (apple) | `cargo xtask build-xcframework --release` | macos-14 |
 
 The native build workflows (`build-apple.yml`, `build-android.yml`,
 `build-react-native.yml`, `release-prep.yml`) invoke Bazel directly.
@@ -223,23 +168,20 @@ The native build workflows (`build-apple.yml`, `build-android.yml`,
 ## Quick Start Examples
 
 ```bash
-# First-time setup: install all cross-compilation targets
-cargo xtask setup-targets
-
 # Build for Android (Bazel brings its own NDK)
 bazel build -c opt //bindings/kotlin:xybrid_kotlin_aar
 
-# Build for Apple platforms (macOS only)
-cargo xtask build-xcframework --release
+# Build the Apple XCFramework (macOS only)
+bazel build --config=ios //bindings/apple:XybridFFI
 
-# Build Flutter plugin for current platform
+# Build the CLI (macOS host; see .bazelrc for the other configs)
+bazel build --config=macos-metal //crates/xybrid-cli:xybrid
+
+# Build the Flutter plugin natives (contributor from-source path — cargo on purpose)
 cargo xtask build-flutter --platform macos --release
 
-# Build everything possible on current OS
-cargo xtask build-all --release
-
-# Package a release
-cargo xtask package --version 0.2.0
+# Build the Unity native library for the host platform (editor testing)
+cargo xtask build-ffi --deploy-unity
 ```
 
 ## Shell Scripts
