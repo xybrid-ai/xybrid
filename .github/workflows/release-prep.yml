@@ -701,68 +701,129 @@ jobs:
     permissions:
       contents: write   # cargokit precompile-binaries uploads release assets
     needs: [check-release-branch]
-    runs-on: windows-latest
+    # No Windows runner: the DLL is cross-compiled on Linux RBE workers by
+    # //bazel/toolchains/windows_msvc (hermetic clang + lld-link over
+    # Microsoft's CRT and SDK). cargokit only signs and uploads, so this box
+    # needs Dart and nothing else — no Rust toolchain, no LLVM/NASM install,
+    # no `-MD` CRT coaxing.
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           submodules: true
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
-        with:
-          toolchain: stable
-          targets: x86_64-pc-windows-msvc
-
-      - name: Setup sccache
-        uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
-
-      - name: Configure sccache environment
-        shell: bash
+      - name: Free disk space
         run: |
-          echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
-          echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
-          echo "CMAKE_C_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
-          echo "CMAKE_CXX_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
-
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-        with:
-          prefix-key: "v1-rust"
-          shared-key: "flutter-windows"
-          cache-all-crates: "true"
-          save-if: "true"
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/.ghcup \
+            /opt/hostedtoolcache/CodeQL
+          sudo docker image prune --all --force || true
 
       - uses: dart-lang/setup-dart@65eb853c7ba17dde3be364c3d2858773e7144260 # v1.7.2
 
-      - name: Install LLVM and NASM
-        run: choco install llvm nasm
+      - name: Configure BuildBuddy remote config
+        env:
+          BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
+        run: |
+          mkdir -p .context
+          cat > .context/buildbuddy.bazelrc <<EOF
+          common:remote --bes_results_url=https://app.buildbuddy.io/invocation/
+          common:remote --bes_backend=grpcs://remote.buildbuddy.io
+          common:remote --remote_header=x-buildbuddy-api-key=${BUILDBUDDY_API_KEY}
+          common:remote --remote_cache=grpcs://remote.buildbuddy.io
+          common:remote --remote_executor=grpcs://remote.buildbuddy.io
+          common:remote --remote_cache_compression
+          common:remote --remote_download_toplevel
+          common:remote --remote_timeout=600
+          common:remote --jobs=200
+          common:remote --extra_execution_platforms=@llvm//:rbe_linux_x86_64
+          EOF
 
-      - name: Add NASM to PATH
-        shell: bash
-        run: echo "C:\\Program Files\\NASM" >> $GITHUB_PATH
+      # cargokit wants `<libName>.dll` + `<libName>.dll.lib` in the prebuilt
+      # dir (artifacts_provider.dart), which is exactly what rustc emits for an
+      # MSVC cdylib — the import library arrives for free.
+      - name: Build the Flutter windows native (Bazel on RBE)
+        run: |
+          set -euo pipefail
+          bazelisk build --config=remote --config=windows-msvc -c opt \
+            //bindings/flutter/rust:xybrid_flutter_ffi_cdylib
+          mkdir -p prebuilt/x86_64-pc-windows-msvc
+          bazelisk cquery --config=remote --config=windows-msvc -c opt \
+            --output=files //bindings/flutter/rust:xybrid_flutter_ffi_cdylib \
+            | while read -r artifact; do
+                cp -L "$artifact" prebuilt/x86_64-pc-windows-msvc/
+              done
+          ls -l prebuilt/x86_64-pc-windows-msvc/
+
+      # NOTE: deliberately NOT the linux job's `strings | grep mtmd` gate.
+      # lld-link dead-strips by default and the MinGW driver does not, so that
+      # check measures dead-code retention rather than functionality and reads
+      # as a failure here even when the build is correct (verified: /OPT:NOREF
+      # brings the markers back, and the export count is 204 either way). The
+      # checks below assert the two things that actually matter — the ABI, and
+      # that the import library covers the DLL's whole public surface.
+      - name: Verify Flutter windows payload
+        run: |
+          set -euo pipefail
+          DLL=prebuilt/x86_64-pc-windows-msvc/xybrid_flutter_ffi.dll
+          IMPLIB=prebuilt/x86_64-pc-windows-msvc/xybrid_flutter_ffi.dll.lib
+          test -f "$DLL" || { echo "MISSING $DLL"; exit 1; }
+          test -f "$IMPLIB" || { echo "MISSING $IMPLIB"; exit 1; }
+          file "$DLL"
+          file "$DLL" | grep -q 'PE32+.*x86-64' || { echo "NOT a PE32+ x86-64 DLL"; exit 1; }
+          python3 -m pip install --quiet --user pefile
+          # MSVC ABI: a MinGW DLL imports neither of these, and Flutter could
+          # not link against it.
+          python3 tools/scripts/audit_windows_dll.py --dll "$DLL" \
+            --require-import vcruntime140.dll \
+            --require-import msvcp140.dll
+          python3 - "$DLL" "$IMPLIB" <<'PYEOF'
+          import sys
+
+          import pefile
+
+          dll_path, implib_path = sys.argv[1], sys.argv[2]
+          exports = len(pefile.PE(dll_path).DIRECTORY_ENTRY_EXPORT.symbols)
+
+          blob = open(implib_path, "rb").read()
+          if blob[:8] != b"!<arch>\n":
+              raise SystemExit(f"{implib_path}: not a COFF archive")
+          offset, short_imports = 8, 0
+          while offset + 60 <= len(blob):
+              size = int(blob[offset + 48:offset + 58].decode().strip())
+              # 0x0000FFFF marks a short-import member: the MSVC-only encoding
+              # that a MinGW `.dll.a` never contains.
+              if blob[offset + 60:offset + 64] == b"\x00\x00\xff\xff":
+                  short_imports += 1
+              offset += 60 + size + (size & 1)
+
+          print(f"exports: {exports}, short-import members: {short_imports}")
+          if exports == 0:
+              raise SystemExit("DLL exports nothing")
+          if short_imports != exports:
+              raise SystemExit("import library does not cover every export")
+          PYEOF
+          echo "windows Flutter payload: OK"
 
       - name: Install build tool dependencies
         working-directory: bindings/flutter/cargokit/build_tool
         run: dart pub get
 
-      - name: Force dynamic CRT (required for cdylib DLL linking)
-        shell: bash
-        run: |
-          echo "CFLAGS=-MD" >> $GITHUB_ENV
-          echo "CXXFLAGS=-MD" >> $GITHUB_ENV
-
-      - name: Precompile and upload binaries
+      # --prebuilt-artifact makes cargokit skip rustup/cargo entirely and only
+      # sign + upload. --target is explicit because cargokit would otherwise
+      # infer the host's (linux) target set.
+      - name: Sign and upload Flutter windows binaries (cargokit)
         working-directory: bindings/flutter/cargokit/build_tool
         shell: bash
         env:
           PRIVATE_KEY: ${{ secrets.CARGOKIT_PRIVATE_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          MANIFEST_DIR="${GITHUB_WORKSPACE//\\//}/bindings/flutter/rust"
           dart run bin/build_tool.dart precompile-binaries \
             --repository ${{ github.repository }} \
-            --manifest-dir "$MANIFEST_DIR" \
-            --verbose
+            --manifest-dir ${{ github.workspace }}/bindings/flutter/rust \
+            --verbose \
+            --target x86_64-pc-windows-msvc \
+            --prebuilt-artifact x86_64-pc-windows-msvc=${{ github.workspace }}/prebuilt/x86_64-pc-windows-msvc
 
   # =========================================================================
   # CLI builds (Linux + Windows; macOS is built in build-apple-all).
