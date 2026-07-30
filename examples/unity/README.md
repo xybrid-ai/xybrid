@@ -87,7 +87,7 @@ cd repos/xybrid
 
 # Build for your target platform(s)
 cargo xtask build-xcframework     # iOS + macOS
-cargo xtask build-android         # Android
+bazel build -c opt //bindings/kotlin:xybrid_kotlin_aar         # Android
 cargo xtask build-ffi             # Current platform (editor testing)
 ```
 

@@ -275,44 +275,6 @@ enum Commands {
         version: Option<String>,
     },
 
-    /// Stage the bolt iOS artifacts into bindings/react-native for npm packaging
-    ///
-    /// Builds the XCFramework, then copies it plus the bolt Swift wrapper
-    /// sources into `bindings/react-native/ios/`. Android needs no staging —
-    /// the RN module depends on the `ai.xybrid:xybrid-kotlin` Maven AAR.
-    StageReactNative {
-        /// Build in release mode (default: true)
-        #[arg(long, default_value = "true")]
-        release: bool,
-
-        /// Build in debug mode (overrides --release)
-        #[arg(long)]
-        debug: bool,
-
-        /// Override the version (defaults to Cargo.toml version or git tag)
-        #[arg(long)]
-        version: Option<String>,
-    },
-
-    /// Build Android .so files for all ABIs (armeabi-v7a, arm64-v8a, x86_64)
-    BuildAndroid {
-        /// Build in release mode (default: true)
-        #[arg(long, default_value = "true")]
-        release: bool,
-
-        /// Build in debug mode (overrides --release)
-        #[arg(long)]
-        debug: bool,
-
-        /// Build only specific ABI(s). Can be specified multiple times.
-        #[arg(long, value_enum)]
-        abi: Vec<AndroidAbi>,
-
-        /// Override the version (defaults to Cargo.toml version or git tag)
-        #[arg(long)]
-        version: Option<String>,
-    },
-
     /// Build Flutter native libraries for a specific platform
     BuildFlutter {
         /// Target platform to build for
@@ -422,32 +384,6 @@ enum Commands {
 }
 
 #[derive(Clone, Copy, ValueEnum, Debug, PartialEq, Eq)]
-enum AndroidAbi {
-    /// ARM 32-bit (armeabi-v7a)
-    #[value(name = "armeabi-v7a")]
-    ArmeabiV7a,
-    /// ARM 64-bit (arm64-v8a)
-    #[value(name = "arm64-v8a")]
-    Arm64V8a,
-    /// x86_64 (x86_64)
-    #[value(name = "x86_64")]
-    X86_64,
-}
-
-impl AndroidAbi {
-    /// ABI directory name under `bindings/kotlin/libs/`. Used for the
-    /// `--abi` warning in `build_android` (the bolt wrapper always builds
-    /// the full set, so the filter is informational).
-    fn ndk_arch(&self) -> &'static str {
-        match self {
-            AndroidAbi::ArmeabiV7a => "armeabi-v7a",
-            AndroidAbi::Arm64V8a => "arm64-v8a",
-            AndroidAbi::X86_64 => "x86_64",
-        }
-    }
-}
-
-#[derive(Clone, Copy, ValueEnum, Debug, PartialEq, Eq)]
 enum FlutterPlatform {
     /// iOS (requires macOS)
     #[value(name = "ios")]
@@ -553,25 +489,6 @@ fn main() -> Result<()> {
             let is_release = !debug && release;
             let ver = get_version(version.as_deref());
             build_xcframework(is_release, &ver)?;
-        }
-        Commands::StageReactNative {
-            release,
-            debug,
-            version,
-        } => {
-            let is_release = !debug && release;
-            let ver = get_version(version.as_deref());
-            stage_react_native_ios(is_release, &ver)?;
-        }
-        Commands::BuildAndroid {
-            release,
-            debug,
-            abi,
-            version,
-        } => {
-            let is_release = !debug && release;
-            let ver = get_version(version.as_deref());
-            build_android(is_release, abi, &ver)?;
         }
         Commands::BuildFlutter {
             platform,
@@ -1186,108 +1103,11 @@ fn build_xcframework(release: bool, version: &str) -> Result<()> {
     Ok(())
 }
 
-/// Stage the bolt iOS artifacts into the React Native module for npm packaging.
-///
-/// Builds the XCFramework, then copies it plus the bolt Swift wrapper sources
-/// (`Xybrid.swift`, `xybrid_bolt.swift`) into `bindings/react-native/ios/`,
-/// where `react-native-xybrid.podspec` vendors them. Android needs no
-/// equivalent — the RN module depends on the `ai.xybrid:xybrid-kotlin` AAR.
-fn stage_react_native_ios(release: bool, version: &str) -> Result<()> {
-    if !cfg!(target_os = "macos") {
-        anyhow::bail!("React Native iOS staging is only supported on macOS");
-    }
-    if !release {
-        eprintln!("warning: --release ignored; the Bazel iOS config always builds opt");
-    }
-
-    // 1. Build the XCFramework via Bazel — the same producer the Apple
-    //    release (release-prep) and PR CI (build-apple.yml) use. --config=ios
-    //    is Mac-local by design (Apple locks iOS builds to Xcode); when a
-    //    remote-cache-only config is staged (CI writes it from a secret),
-    //    add it so darwin-local action results up/download from BuildBuddy —
-    //    pure cache, never remote execution. Gated on the config actually
-    //    being defined in the rc, so a dev rc without it keeps working.
-    let mut args: Vec<String> = vec!["build".into()];
-    let rc = PathBuf::from(".context/buildbuddy.bazelrc");
-    if rc.is_file()
-        && std::fs::read_to_string(&rc)
-            .map(|s| s.contains(":remote-cache"))
-            .unwrap_or(false)
-    {
-        args.push("--config=remote-cache".into());
-    }
-    args.push("--config=ios".into());
-    args.push("//bindings/apple:XybridFFI".into());
-    let status = Command::new("bazelisk")
-        .args(&args)
-        .status()
-        .or_else(|_| Command::new("bazel").args(&args).status())
-        .context("Failed to run bazelisk/bazel — is Bazel installed?")?;
-    if !status.success() {
-        anyhow::bail!("bazel build --config=ios //bindings/apple:XybridFFI failed");
-    }
-
-    let rn_ios = PathBuf::from("bindings/react-native/ios");
-
-    // 2. Unzip the built xcframework into ios/Frameworks/. Single-config
-    //    invocation, so referencing bazel-bin right after the build is safe.
-    let zip = "bazel-bin/bindings/apple/XybridFFI.xcframework.zip";
-    if !PathBuf::from(zip).is_file() {
-        anyhow::bail!("Expected {} after the Bazel build", zip);
-    }
-    let fw_dir = rn_ios.join("Frameworks");
-    let dst_xcfw = fw_dir.join("XybridFFI.xcframework");
-    if dst_xcfw.exists() {
-        std::fs::remove_dir_all(&dst_xcfw)
-            .with_context(|| format!("Failed to remove existing {}", dst_xcfw.display()))?;
-    }
-    std::fs::create_dir_all(&fw_dir)?;
-    if !Command::new("unzip")
-        .args(["-o", "-q", zip, "-d", fw_dir.to_str().unwrap()])
-        .status()
-        .context("unzip the xcframework")?
-        .success()
-    {
-        anyhow::bail!("Failed to unzip {} into {}", zip, fw_dir.display());
-    }
-    if !dst_xcfw.is_dir() {
-        anyhow::bail!(
-            "Zip did not contain XybridFFI.xcframework/ at its root — got {}",
-            fw_dir.display()
-        );
-    }
-    println!("  ✓ XCFramework -> {}", dst_xcfw.display());
-
-    // 3. Stage the bolt Swift wrapper sources into ios/XybridSwift/. The RN
-    //    Swift glue (XybridModuleImpl.swift) calls into these directly. They
-    //    are committed sources (byte-identical to boltffi 0.25.3 output) —
-    //    no generator run needed.
-    let dst_swift = rn_ios.join("XybridSwift");
-    if dst_swift.exists() {
-        std::fs::remove_dir_all(&dst_swift)
-            .with_context(|| format!("Failed to clean {}", dst_swift.display()))?;
-    }
-    std::fs::create_dir_all(&dst_swift)?;
-    for fname in ["Xybrid.swift", "xybrid_bolt.swift"] {
-        let src = PathBuf::from("bindings/apple/Sources/Xybrid").join(fname);
-        if !src.is_file() {
-            anyhow::bail!(
-                "Expected committed Swift wrapper at {} — was it moved?",
-                src.display()
-            );
-        }
-        let dst = dst_swift.join(fname);
-        std::fs::copy(&src, &dst)
-            .with_context(|| format!("Failed to copy {} to {}", src.display(), dst.display()))?;
-        println!("  ✓ {} -> {}", fname, dst.display());
-    }
-
-    println!();
-    println!("✓ React Native iOS staging complete (version {})", version);
-    println!("  Next: cd bindings/react-native && npm pack");
-
-    Ok(())
-}
+// `stage-react-native` and `build-android` are gone: both were thin proxies
+// over Bazel (`--config=ios //bindings/apple:XybridFFI`,
+// `//bindings/kotlin:xybrid_kotlin_aar`). CI and local dev now run Bazel
+// directly and stage outputs with plain `unzip`/`cp` — see
+// `bindings/react-native/README.md` and `CONTRIBUTING.md` for the commands.
 
 // The previous `build_xcframework_macos_only` fallback (built only the
 // macOS slice when ORT iOS was unavailable) is gone — boltffi's pack
@@ -1308,95 +1128,6 @@ fn copy_dir_recursive(src: &PathBuf, dst: &PathBuf) -> Result<()> {
             std::fs::copy(&src_path, &dst_path)?;
         }
     }
-    Ok(())
-}
-
-/// Build the Android AAR (all shipped ABIs) via Bazel and stage its jniLibs.
-///
-/// Delegates to `bazel build //bindings/kotlin:xybrid_kotlin_aar`, which
-/// produces the feature-complete 3-ABI AAR (text llama + candle voice + mtmd
-/// vision) and, per ABI, `libxybrid-bolt.so` (one clean linker output — 16 KB
-/// aligned, `libc++_shared.so` in DT_NEEDED, no patchelf) + the vendored
-/// `libonnxruntime.so` + `libc++_shared.so`. This replaces the retired
-/// `tools/scripts/build-android-bolt.sh` (boltffi pack + clang-shim relink).
-///
-/// The AAR's `jni/<abi>/` payload is staged into `bindings/kotlin/libs/` — the
-/// layout Gradle publishes from. Uses BuildBuddy RBE when a config is present,
-/// else a local build (the NDK is a pinned Bazel download; no machine setup).
-///
-/// The `--abi` knob is accepted for interface compatibility but ignored: the
-/// AAR always builds every ABI in `bindings/kotlin/build.gradle.kts`'s
-/// `abiFilters`.
-fn build_android(release: bool, abis: Vec<AndroidAbi>, version: &str) -> Result<()> {
-    let profile = if release { "release" } else { "debug" };
-    if !abis.is_empty() {
-        eprintln!(
-            "warning: --abi filter ignored; the Bazel AAR always builds every ABI \
-             configured in bindings/kotlin/build.gradle.kts. Requested: {:?}",
-            abis.iter().map(|a| a.ndk_arch()).collect::<Vec<_>>()
-        );
-    }
-
-    println!(
-        "Building the Android AAR via Bazel ({} mode, version {})...",
-        profile, version
-    );
-
-    // Build the feature-complete 3-ABI AAR (text + candle voice + mtmd vision).
-    // Use RBE if a BuildBuddy config is present (.context/buildbuddy.bazelrc,
-    // gitignored — CI writes it from a secret); otherwise a local build. The NDK
-    // is a pinned Bazel download, so no machine setup is needed either way.
-    let compilation_mode = if release { "opt" } else { "fastbuild" };
-    let mut args: Vec<String> = vec!["build".into()];
-    if PathBuf::from(".context/buildbuddy.bazelrc").is_file() {
-        args.push("--config=remote".into());
-    }
-    args.push("-c".into());
-    args.push(compilation_mode.into());
-    args.push("//bindings/kotlin:xybrid_kotlin_aar".into());
-
-    let status = Command::new("bazelisk")
-        .args(&args)
-        .status()
-        .or_else(|_| Command::new("bazel").args(&args).status())
-        .context("Failed to run bazelisk/bazel — is Bazel installed?")?;
-    if !status.success() {
-        anyhow::bail!("bazel build //bindings/kotlin:xybrid_kotlin_aar failed");
-    }
-
-    // Stage the AAR's jniLibs into bindings/kotlin/libs/ — the layout Gradle
-    // publishes from and the CI verify/dlopen-gate steps consume.
-    let aar = "bazel-bin/bindings/kotlin/xybrid-kotlin.aar";
-    let libs = PathBuf::from("bindings/kotlin/libs");
-    let _ = std::fs::remove_dir_all(&libs);
-    std::fs::create_dir_all(&libs).context("create bindings/kotlin/libs")?;
-    let extract = PathBuf::from("target/aar-jnilibs");
-    let _ = std::fs::remove_dir_all(&extract);
-    if !Command::new("unzip")
-        .args(["-o", "-q", aar, "jni/*", "-d", extract.to_str().unwrap()])
-        .status()
-        .context("extract the AAR jniLibs")?
-        .success()
-    {
-        anyhow::bail!("failed to extract jniLibs from {aar}");
-    }
-    if !Command::new("cp")
-        .args([
-            "-a",
-            &format!("{}/jni/.", extract.display()),
-            libs.to_str().unwrap(),
-        ])
-        .status()?
-        .success()
-    {
-        anyhow::bail!("failed to stage jniLibs into {}", libs.display());
-    }
-
-    println!();
-    println!("✓ Android AAR built via Bazel ({compilation_mode} mode).");
-    println!("  Version: {version}");
-    println!("  Output:  bindings/kotlin/libs/{{abi}}/*.so");
-
     Ok(())
 }
 
@@ -1835,7 +1566,6 @@ fn setup_targets() -> Result<()> {
 #[derive(Debug, Clone, Copy)]
 enum BuildPlatform {
     XCFramework,
-    Android,
     FlutterIos,
     FlutterAndroid,
     FlutterMacos,
@@ -1848,7 +1578,6 @@ impl BuildPlatform {
     fn name(&self) -> &'static str {
         match self {
             BuildPlatform::XCFramework => "XCFramework (iOS/macOS)",
-            BuildPlatform::Android => "Android",
             BuildPlatform::FlutterIos => "Flutter iOS",
             BuildPlatform::FlutterAndroid => "Flutter Android",
             BuildPlatform::FlutterMacos => "Flutter macOS",
@@ -1861,7 +1590,7 @@ impl BuildPlatform {
     fn can_build_on_current_os(&self) -> bool {
         match self {
             BuildPlatform::XCFramework => cfg!(target_os = "macos"),
-            BuildPlatform::Android | BuildPlatform::FlutterAndroid => true, // Cross-compile from any OS
+            BuildPlatform::FlutterAndroid => true, // Cross-compile from any OS
             BuildPlatform::FlutterIos | BuildPlatform::FlutterMacos => cfg!(target_os = "macos"),
             BuildPlatform::FlutterWindows => cfg!(target_os = "windows"),
             BuildPlatform::FlutterLinux => cfg!(target_os = "linux"),
@@ -1872,9 +1601,7 @@ impl BuildPlatform {
     fn skip_reason(&self) -> &'static str {
         match self {
             BuildPlatform::XCFramework => "XCFramework builds require macOS",
-            BuildPlatform::Android | BuildPlatform::FlutterAndroid => {
-                "Android builds require Android NDK"
-            }
+            BuildPlatform::FlutterAndroid => "Android builds require Android NDK",
             BuildPlatform::FlutterIos => "iOS builds require macOS",
             BuildPlatform::FlutterMacos => "macOS builds require macOS",
             BuildPlatform::FlutterWindows => "Windows builds require Windows",
@@ -1886,7 +1613,6 @@ impl BuildPlatform {
     fn all() -> Vec<BuildPlatform> {
         vec![
             BuildPlatform::XCFramework,
-            BuildPlatform::Android,
             BuildPlatform::FlutterIos,
             BuildPlatform::FlutterAndroid,
             BuildPlatform::FlutterMacos,
@@ -2054,7 +1780,6 @@ fn build_all(release: bool, parallel: bool, version: &str) -> Result<()> {
 fn run_platform_build(platform: BuildPlatform, release: bool, version: &str) -> Result<()> {
     match platform {
         BuildPlatform::XCFramework => build_xcframework(release, version),
-        BuildPlatform::Android => build_android(release, vec![], version),
         BuildPlatform::FlutterIos => build_flutter(FlutterPlatform::Ios, release, version, false),
         BuildPlatform::FlutterAndroid => {
             build_flutter(FlutterPlatform::Android, release, version, false)
@@ -2309,7 +2034,7 @@ fn package_artifacts(
         println!("No artifacts were packaged.");
         println!("Run build commands first to generate artifacts:");
         println!("  cargo xtask build-xcframework");
-        println!("  cargo xtask build-android");
+        println!("  bazel build -c opt //bindings/kotlin:xybrid_kotlin_aar  (then unzip jni/* into bindings/kotlin/libs/)");
         println!("  cargo xtask build-flutter --platform <platform>");
         return Ok(());
     }
@@ -2583,7 +2308,8 @@ fn package_android(version: &str, output_dir: &Path) -> Result<Option<PackageInf
 
     if !libs_dir.exists() {
         println!("Skipping Android libs - not found at {:?}", libs_dir);
-        println!("  Run 'cargo xtask build-android' first");
+        println!("  Build the AAR first: bazel build -c opt //bindings/kotlin:xybrid_kotlin_aar,");
+        println!("  then unzip its jni/* into bindings/kotlin/libs/ (see CONTRIBUTING.md)");
         return Ok(None);
     }
 
@@ -2612,7 +2338,8 @@ fn package_android(version: &str, output_dir: &Path) -> Result<Option<PackageInf
 
     if found_abis.is_empty() {
         println!("Skipping Android libs - no .so files found");
-        println!("  Run 'cargo xtask build-android' first");
+        println!("  Build the AAR first: bazel build -c opt //bindings/kotlin:xybrid_kotlin_aar,");
+        println!("  then unzip its jni/* into bindings/kotlin/libs/ (see CONTRIBUTING.md)");
         return Ok(None);
     }
 

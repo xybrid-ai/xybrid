@@ -142,7 +142,7 @@ adb install app/build/outputs/apk/debug/app-debug.apk
 
 ```bash
 # From xybrid repo root
-cargo xtask build-android
+bazel build -c opt //bindings/kotlin:xybrid_kotlin_aar
 ```
 
 ### Features Demonstrated
@@ -186,7 +186,7 @@ Unity example project for on-device ML inference in games.
 cargo xtask build-xcframework
 
 # For Android
-cargo xtask build-android
+bazel build -c opt //bindings/kotlin:xybrid_kotlin_aar
 ```
 
 Then copy the built libraries to `Assets/Plugins/` (see [unity/README.md](unity/README.md) for paths).
@@ -212,7 +212,7 @@ Native libraries need to be built from Rust before the SDK works:
 | Platform | Build Command |
 |----------|---------------|
 | iOS/macOS | `cargo xtask build-xcframework` |
-| Android | `cargo xtask build-android` |
+| Android | `bazel build -c opt //bindings/kotlin:xybrid_kotlin_aar` |
 
 ### "Model not found"
 

@@ -222,7 +222,7 @@ kotlin/
 
 The SDK bundles ONNX Runtime (`libonnxruntime.so`) and the C++ shared library (`libc++_shared.so`) alongside `libxybrid-bolt.so`. These are included automatically in the AAR — no manual setup required.
 
-> **Note:** `libxybrid-bolt.so` is a build output and is **not** committed to the repository. The AAR published to Maven Central includes it (built in CI). For a **local** build, generate it first with `cargo xtask build-android` (see [Building Native Libraries](#building-native-libraries) below) so `libs/<abi>/` is populated before running `./gradlew`.
+> **Note:** `libxybrid-bolt.so` is a build output and is **not** committed to the repository. The AAR published to Maven Central includes it (built in CI). For a **local** build, build the Bazel AAR and stage its jniLibs (see [Building Native Libraries](#building-native-libraries) below) so `libs/<abi>/` is populated before running `./gradlew`.
 
 | Library | Purpose | Source |
 |---------|---------|--------|
@@ -230,7 +230,7 @@ The SDK bundles ONNX Runtime (`libonnxruntime.so`) and the C++ shared library (`
 | `libonnxruntime.so` | ONNX Runtime inference engine | Vendored at `vendor/ort-android/` |
 | `libc++_shared.so` | C++ standard library runtime | Vendored at `vendor/ort-android/` |
 
-ORT libraries are symlinked from the shared `vendor/ort-android/` directory (matching the iOS pattern with `vendor/ort-ios/`). When building with `cargo xtask build-android`, ORT libraries are automatically copied to the output directory.
+The Bazel AAR bundles the ORT libraries into `jni/<abi>/` automatically, so staging its jniLibs populates everything Gradle needs.
 
 ## FFI Strategy
 
@@ -303,20 +303,16 @@ rustup target add x86_64-linux-android       # x86_64
 
 ### Building
 
-**Using xtask (Recommended)**
+**Using Bazel (Recommended)**
+
+Builds every ABI (the AAR always ships the full set) and needs no local NDK or
+rustup targets — Bazel downloads its own pinned toolchains. From the repo root:
 
 ```bash
-# Build all ABIs
-cargo xtask build-android
-
-# Build specific ABI only
-cargo xtask build-android --abi arm64-v8a
-
-# Debug build (with symbols, unoptimized)
-cargo xtask build-android --debug
-
-# With explicit version
-cargo xtask build-android --version 0.2.0
+bazel build -c opt //bindings/kotlin:xybrid_kotlin_aar
+rm -rf bindings/kotlin/libs && mkdir -p bindings/kotlin/libs /tmp/aar
+unzip -o -q bazel-bin/bindings/kotlin/xybrid-kotlin.aar 'jni/*' -d /tmp/aar
+cp -r /tmp/aar/jni/* bindings/kotlin/libs/
 ```
 
 **Manual Build (without cargo-ndk)**
@@ -410,7 +406,7 @@ export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/26.1.10909125"
 **Fix**:
 1. Verify the .so file is valid: `file libs/arm64-v8a/libxybrid-bolt.so`
 2. Should show: `ELF 64-bit LSB shared object, ARM aarch64`
-3. Rebuild with `cargo xtask build-android`
+3. Rebuild the Bazel AAR and restage its jniLibs (see Building Native Libraries above)
 
 ### Platform Notes
 

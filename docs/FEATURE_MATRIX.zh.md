@@ -201,7 +201,7 @@ llama.cpp 通过 ggml 使用**运行时 SIMD 检测**，因此对所有 Android 
 |---------|-----------|---------|
 | macOS arm64 / x86_64 | macOS | `cargo clippy --workspace --features platform-macos -- -D warnings` + `cargo test --workspace --features platform-macos` |
 | iOS arm64 + 模拟器 | macOS | `cargo xtask build-xcframework --release`（为 `aarch64-apple-ios`、`aarch64-apple-ios-sim`、`x86_64-apple-ios` 交叉编译 `xybrid-uniffi`）。CI 变体（含 vision 矩阵作业）参见 [`.github/workflows/build-apple.yml`](../.github/workflows/build-apple.yml)。 |
-| Android arm64-v8a / armeabi-v7a / x86_64 | 装有 NDK 的 Linux 或 macOS | `cargo xtask build-android --release`（针对全部三个 ABI 对 `xybrid-uniffi` 驱动 `cargo ndk`）。矩阵并行化的 CI 变体参见 [`.github/workflows/build-android.yml`](../.github/workflows/build-android.yml)。 |
+| Android arm64-v8a / armeabi-v7a / x86_64 | 任意（Bazel 自带 NDK） | `bazel build -c opt //bindings/kotlin:xybrid_kotlin_aar`（功能完整的 3-ABI AAR）。CI 变体参见 [`.github/workflows/build-android.yml`](../.github/workflows/build-android.yml)。 |
 | 桌面 Linux x86_64 | Linux | `cargo clippy --workspace --features platform-desktop -- -D warnings` + `cargo test --workspace --features platform-desktop` |
 | 桌面 Windows x86_64 | Windows | 与 Linux 桌面相同 |
 
@@ -268,7 +268,6 @@ export ORT_IOS_XCFWK_LOCATION=/path/to/onnxruntime.xcframework
 |---------|---------|----------|---------|
 | `setup-test-env` | 为集成测试下载模型 | 任意 | `cargo xtask setup-test-env` |
 | `build-xcframework` | 通过 boltffi 构建 Apple XCFramework（Swift 绑定 + xcframework） | 仅 macOS | `cargo xtask build-xcframework --release` |
-| `build-android` | 构建 Android .so 文件 | 任意 | `cargo xtask build-android --release` |
 | `build-flutter` | 构建 Flutter 原生库 | 视情况而定 | `cargo xtask build-flutter --platform macos` |
 | `setup-targets` | 安装 Rust 交叉编译目标 | 任意 | `cargo xtask setup-targets` |
 | `build-all` | 构建所有平台 | 视情况而定 | `cargo xtask build-all --release` |
@@ -279,7 +278,6 @@ export ORT_IOS_XCFWK_LOCATION=/path/to/onnxruntime.xcframework
 | xtask 命令 | 使用的平台预设 | 构建的目标 |
 |---------------|---------------------|---------------|
 | `build-xcframework` | `platform-macos` / `platform-ios` | iOS arm64、iOS Simulator（arm64、x86_64）、macOS（arm64、x86_64） |
-| `build-android` | `platform-android` | arm64-v8a、armeabi-v7a、x86_64 |
 | `build-flutter --platform ios` | `platform-ios` | aarch64-apple-ios、aarch64-apple-ios-sim |
 | `build-flutter --platform android` | `platform-android` | aarch64-linux-android、armv7-linux-androideabi、x86_64-linux-android |
 | `build-flutter --platform macos` | `platform-macos` | aarch64-apple-darwin、x86_64-apple-darwin |
@@ -341,7 +339,7 @@ xtask 和 build.rs 都需要检测 Android NDK：
 ### 构建流程图
 
 ```
-用户运行: cargo xtask build-android --release
+用户运行（历史 cargo-ndk 流程；Android 现经 `bazel build -c opt //bindings/kotlin:xybrid_kotlin_aar` 构建）: cargo xtask build-android
 
 ┌─────────────────────────────────────────────────────────────┐
 │ xtask (Orchestration)                                       │
@@ -395,8 +393,8 @@ cargo build -p xybrid-core --features "ort-download,ort-coreml,llm-llamacpp-visi
 ### Android 构建
 
 ```bash
-# 需要：Android NDK、cargo-ndk
-cargo xtask build-android --release
+# Bazel 自带固定版本的 NDK — 无需机器配置
+bazel build -c opt //bindings/kotlin:xybrid_kotlin_aar
 ```
 
 ### 完整特性检查

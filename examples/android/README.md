@@ -29,7 +29,7 @@ The Xybrid SDK requires native `.so` libraries for Android:
 
 ```bash
 # From the xybrid repo root
-cargo xtask build-android
+bazel build -c opt //bindings/kotlin:xybrid_kotlin_aar
 ```
 
 This builds `libxybrid_uniffi.so` and bundles `libonnxruntime.so` + `libc++_shared.so` from `vendor/ort-android/` for each ABI (arm64-v8a, x86_64).
@@ -242,7 +242,7 @@ export ANDROID_HOME="$HOME/Library/Android/sdk"
 Native libraries aren't built or included. Build them with:
 
 ```bash
-cargo xtask build-android
+bazel build -c opt //bindings/kotlin:xybrid_kotlin_aar
 ```
 
 ### Model Not Found Error

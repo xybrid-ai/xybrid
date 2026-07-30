@@ -38,7 +38,7 @@ cargo test --workspace
 cargo build --workspace                   # Build all packages
 cargo build --workspace --release         # Release mode
 cargo xtask build-xcframework             # Apple XCFramework (iOS + macOS)
-cargo xtask build-android                 # Android .so libraries
+bazel build -c opt //bindings/kotlin:xybrid_kotlin_aar   # Android AAR (jniLibs inside)
 cargo xtask build-flutter                 # Flutter native libraries
 ```
 

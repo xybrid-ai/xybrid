@@ -12,7 +12,7 @@ cd repos/xybrid
 
 # Build for all platforms
 cargo xtask build-xcframework   # macOS/iOS
-cargo xtask build-android       # Android
+bazel build -c opt //bindings/kotlin:xybrid_kotlin_aar       # Android
 ```
 
 ## Plugin Structure

@@ -202,7 +202,7 @@ Run on each target host (or in CI matrix jobs). Each row matches what the releas
 |---------|-----------|---------|
 | macOS arm64 / x86_64 | macOS | `cargo clippy --workspace --features platform-macos -- -D warnings` + `cargo test --workspace --features platform-macos` |
 | iOS arm64 + simulator | macOS | `cargo xtask build-xcframework --release` (cross-compiles `xybrid-uniffi` for `aarch64-apple-ios`, `aarch64-apple-ios-sim`, `x86_64-apple-ios`). See [`.github/workflows/build-apple.yml`](../.github/workflows/build-apple.yml) for the CI variant including the vision matrix job. |
-| Android arm64-v8a / armeabi-v7a / x86_64 | Linux or macOS with NDK | `cargo xtask build-android --release` (drives `cargo ndk` against `xybrid-uniffi` for all three ABIs). See [`.github/workflows/build-android.yml`](../.github/workflows/build-android.yml) for the matrix-parallelised CI variant. |
+| Android arm64-v8a / armeabi-v7a / x86_64 | Any (Bazel downloads its own NDK) | `bazel build -c opt //bindings/kotlin:xybrid_kotlin_aar` (feature-complete 3-ABI AAR). See [`.github/workflows/build-android.yml`](../.github/workflows/build-android.yml) for the CI variant. |
 | Desktop Linux x86_64 | Linux | `cargo clippy --workspace --features platform-desktop -- -D warnings` + `cargo test --workspace --features platform-desktop` |
 | Desktop Windows x86_64 | Windows | same as Linux desktop |
 
@@ -269,7 +269,6 @@ The `xtask` crate provides build automation commands. Run `cargo xtask --help` f
 |---------|---------|----------|---------|
 | `setup-test-env` | Download models for integration tests | Any | `cargo xtask setup-test-env` |
 | `build-xcframework` | Build Apple XCFramework via boltffi (Swift bindings + xcframework) | macOS only | `cargo xtask build-xcframework --release` |
-| `build-android` | Build Android .so files | Any | `cargo xtask build-android --release` |
 | `build-flutter` | Build Flutter native libraries | Varies | `cargo xtask build-flutter --platform macos` |
 | `setup-targets` | Install Rust cross-compilation targets | Any | `cargo xtask setup-targets` |
 | `build-all` | Build all platforms | Varies | `cargo xtask build-all --release` |
@@ -280,7 +279,6 @@ The `xtask` crate provides build automation commands. Run `cargo xtask --help` f
 | xtask Command | Platform Preset Used | Targets Built |
 |---------------|---------------------|---------------|
 | `build-xcframework` | `platform-macos` / `platform-ios` | iOS arm64, iOS Simulator (arm64, x86_64), macOS (arm64, x86_64) |
-| `build-android` | `platform-android` | arm64-v8a, armeabi-v7a, x86_64 |
 | `build-flutter --platform ios` | `platform-ios` | aarch64-apple-ios, aarch64-apple-ios-sim |
 | `build-flutter --platform android` | `platform-android` | aarch64-linux-android, armv7-linux-androideabi, x86_64-linux-android |
 | `build-flutter --platform macos` | `platform-macos` | aarch64-apple-darwin, x86_64-apple-darwin |
@@ -344,7 +342,7 @@ This duplication exists because:
 ### Build Flow Diagram
 
 ```
-User runs: cargo xtask build-android --release
+User runs (historical cargo-ndk flow; Android now builds via `bazel build -c opt //bindings/kotlin:xybrid_kotlin_aar`): cargo xtask build-android
 
 ┌─────────────────────────────────────────────────────────────┐
 │ xtask (Orchestration)                                       │
@@ -398,8 +396,8 @@ cargo build -p xybrid-core --features "ort-download,ort-coreml,llm-llamacpp-visi
 ### Android Build
 
 ```bash
-# Requires: Android NDK, cargo-ndk
-cargo xtask build-android --release
+# Bazel downloads its own pinned NDK — no machine setup
+bazel build -c opt //bindings/kotlin:xybrid_kotlin_aar
 ```
 
 ### Full Feature Check

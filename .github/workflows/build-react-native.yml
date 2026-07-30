@@ -9,7 +9,6 @@ on:
       - 'bindings/kotlin/**'
       - 'crates/xybrid-bolt/**'
       - 'crates/xybrid-ffi-facade/**'
-      - 'xtask/**'
       - '.github/workflows/build-react-native.yml'
       # Docs-only changes under the paths above (READMEs, examples) never
       # affect the native build — exclude markdown so they don't trigger it.
@@ -29,7 +28,6 @@ on:
       - 'bindings/kotlin/**'
       - 'crates/xybrid-bolt/**'
       - 'crates/xybrid-ffi-facade/**'
-      - 'xtask/**'
       - '.github/workflows/build-react-native.yml'
       - '!**.md'
   workflow_dispatch:
@@ -67,21 +65,6 @@ jobs:
         with:
           submodules: true  # Bazel //:llama_src = vendor/llama-cpp
 
-      # Host-only toolchain: it compiles xtask. Bazel brings its own Rust
-      # (and its own iOS cross-targets).
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
-        with:
-          toolchain: stable
-
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-        with:
-          prefix-key: "v1-rust"
-          shared-key: "rn-ios"
-          cache-all-crates: "true"
-          save-if: "true"
-
       # build:ios uses the host's preinstalled cmake/make/pkg-config for
       # rfcc's exec tools; xz decodes the fetched ort iOS-sim slice.
       - name: Ensure rfcc host tools
@@ -93,7 +76,8 @@ jobs:
       # Remote CACHE only — never remote execution: iOS actions must run on
       # this Mac (Apple policy), but their results can still up/download from
       # BuildBuddy so identical macos-14 runners share work across jobs and
-      # runs. xtask adds --config=remote-cache when this file defines it.
+      # runs. The build step below adds --config=remote-cache when the key
+      # is present.
       - name: Configure BuildBuddy remote-cache config
         if: env.BUILDBUDDY_API_KEY != ''
         run: |
@@ -108,8 +92,30 @@ jobs:
           common:remote-cache --remote_upload_local_results
           EOF
 
+      # Build the xcframework with Bazel (same //bindings/apple:XybridFFI the
+      # release and build-apple.yml use), then stage it + the committed bolt
+      # Swift wrappers into the RN package tree, where the podspec vendors
+      # them. Plain unzip/cp — npm pack needs the files physically in-tree.
       - name: Stage iOS artifacts
-        run: cargo xtask stage-react-native --release
+        run: |
+          set -euo pipefail
+          REMOTE=""; [ -n "$BUILDBUDDY_API_KEY" ] && REMOTE="--config=remote-cache"
+          bazelisk build $REMOTE --config=ios //bindings/apple:XybridFFI
+
+          RN_IOS="bindings/react-native/ios"
+          ZIP="bazel-bin/bindings/apple/XybridFFI.xcframework.zip"
+          [ -f "$ZIP" ] || { echo "Expected $ZIP after the Bazel build"; exit 1; }
+          rm -rf "$RN_IOS/Frameworks/XybridFFI.xcframework"
+          mkdir -p "$RN_IOS/Frameworks"
+          unzip -o -q "$ZIP" -d "$RN_IOS/Frameworks"
+          [ -d "$RN_IOS/Frameworks/XybridFFI.xcframework" ] \
+            || { echo "Zip did not contain XybridFFI.xcframework/ at its root"; exit 1; }
+
+          rm -rf "$RN_IOS/XybridSwift"
+          mkdir -p "$RN_IOS/XybridSwift"
+          for f in Xybrid.swift xybrid_bolt.swift; do
+            cp "bindings/apple/Sources/Xybrid/$f" "$RN_IOS/XybridSwift/$f"
+          done
 
       - name: Verify iOS staging
         run: |
@@ -224,7 +230,7 @@ jobs:
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
-          submodules: true  # //:llama_src = vendor/llama-cpp (xtask build-android now builds via Bazel)
+          submodules: true  # //:llama_src = vendor/llama-cpp (the bolt .so builds via Bazel)
 
       # Keep LLVM (large-packages: false): the bolt build runs bindgen for
       # the llama/ggml C++ via libclang. Removing system LLVM breaks it with
@@ -257,29 +263,6 @@ jobs:
         with:
           node-version: '20'
 
-      # Host-only toolchain: it compiles xtask. The android cross-targets are
-      # gone — the .so builds through Bazel, which brings its own Rust.
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
-        with:
-          toolchain: stable
-
-      - name: Setup sccache
-        uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
-
-      - name: Configure sccache environment
-        run: |
-          echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
-          echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
-
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-        with:
-          prefix-key: "v1-rust"
-          shared-key: "rn-android-example"
-          cache-all-crates: "true"
-          save-if: "true"
-
       - name: Setup Android SDK
         uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
         with:
@@ -298,10 +281,10 @@ jobs:
       - name: Set NDK environment
         run: echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.1.12297006" >> $GITHUB_ENV
 
-      # RBE fast path: with this config present, `cargo xtask build-android`
-      # adds --config=remote and the AAR graph resolves from BuildBuddy's
-      # cache (kept warm by bazel.yml on every PR) instead of compiling
-      # ~1,900 crates + llama.cpp locally on a 2-core runner (~38 min → ~3).
+      # RBE fast path: with this config present, the Bazel build below adds
+      # --config=remote and the AAR graph resolves from BuildBuddy's cache
+      # (kept warm by bazel.yml on every PR) instead of compiling ~1,900
+      # crates + llama.cpp locally on a 2-core runner (~38 min → ~3).
       # Skipped on forks (no secret) → local Bazel fallback, as before.
       - name: Configure BuildBuddy remote config
         if: env.BUILDBUDDY_API_KEY != ''
@@ -320,12 +303,18 @@ jobs:
           common:remote --extra_execution_platforms=@llvm//:rbe_linux_x86_64
           EOF
 
-      # 1. Build the bolt .so for all ABIs (staged into bindings/kotlin/libs).
-      #    Bazel end-to-end since #341 — the cargo-era helpers this job used
-      #    to install (android rust targets, patchelf, cargo-ndk, boltffi
-      #    CLI, the ghcr llama-natives pull) are dead on this path and gone.
+      # 1. Build the bolt .so for all ABIs and stage the AAR's jniLibs into
+      #    bindings/kotlin/libs/ — the layout Gradle publishes from
+      #    (jniLibs.srcDirs("libs")). Same block release-prep.yml and
+      #    test-ci.yml (publish-kotlin) use. Bazel end-to-end since #341.
       - name: Build Android native libs
-        run: cargo xtask build-android --release
+        run: |
+          set -euo pipefail
+          REMOTE=""; [ -n "$BUILDBUDDY_API_KEY" ] && REMOTE="--config=remote"
+          bazelisk build $REMOTE -c opt //bindings/kotlin:xybrid_kotlin_aar
+          rm -rf bindings/kotlin/libs && mkdir -p bindings/kotlin/libs /tmp/aar
+          unzip -o -q bazel-bin/bindings/kotlin/xybrid-kotlin.aar 'jni/*' -d /tmp/aar
+          cp -r /tmp/aar/jni/* bindings/kotlin/libs/
 
       # 2. Publish the kotlin binding from source to mavenLocal (no signing —
       #    guarded on signingInMemoryKey, absent here).

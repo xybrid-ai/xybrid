@@ -106,27 +106,23 @@ Simulator arm64. macOS is excluded by config.
 - `bindings/apple/XCFrameworks/XybridFFI-<version>.xcframework` (versioned)
 - `bindings/apple/Sources/Xybrid/xybrid_bolt.swift` (generated Swift wrapper)
 
-### `build-android` - Build Android .so Files
+### Android .so files — direct Bazel (no xtask command)
 
-Delegates to `bazel build //bindings/kotlin:xybrid_kotlin_aar` (BuildBuddy RBE
-when configured, else local — the NDK is a pinned Bazel download), then stages
-the AAR's jniLibs into `bindings/kotlin/libs/`. Produces the feature-complete
-3-ABI AAR (text + candle voice + mtmd vision); each `libxybrid-bolt.so` is a
-clean one-link output (16 KB-aligned, `libc++_shared` in DT_NEEDED, no
-patchelf) with the ORT runtime bundled. Builds every ABI in
-`bindings/kotlin/build.gradle.kts` (the `--abi` filter is ignored). Replaces
-the retired `tools/scripts/build-android-bolt.sh`.
+`build-android` was removed: it was a thin proxy over Bazel. Build the
+feature-complete 3-ABI AAR (text + candle voice + mtmd vision) directly and,
+if you need loose `.so` files for Gradle, stage its jniLibs the way CI does
+(`release-prep.yml`, `test-ci.yml`, `build-react-native.yml`):
 
 ```bash
-cargo xtask build-android --release
-cargo xtask build-android --debug --version 1.0.0
+bazel build -c opt //bindings/kotlin:xybrid_kotlin_aar
+rm -rf bindings/kotlin/libs && mkdir -p bindings/kotlin/libs /tmp/aar
+unzip -o -q bazel-bin/bindings/kotlin/xybrid-kotlin.aar 'jni/*' -d /tmp/aar
+cp -r /tmp/aar/jni/* bindings/kotlin/libs/
 ```
 
-**Options:**
-- `--release` - Build in release mode (default: true)
-- `--debug` - Build in debug mode (the script always builds release; a warning is printed)
-- `--abi <abi>` - Accepted but informational (the script builds all ABIs)
-- `--version <ver>` - Override version
+The NDK is a pinned Bazel download — no machine setup. Each
+`libxybrid-bolt.so` is a clean one-link output (16 KB-aligned,
+`libc++_shared` in DT_NEEDED, no patchelf) with the ORT runtime bundled.
 
 **Requirements:**
 - Android NDK r27 (`ANDROID_NDK_HOME`, or installed under `$ANDROID_HOME/ndk/`)
@@ -218,9 +214,11 @@ The xtask commands are used by GitHub Actions workflows:
 
 | Workflow | Command | Runner |
 |----------|---------|--------|
-| `build-apple.yml` | `cargo xtask build-xcframework --release` | macos-14 |
-| `build-android.yml` | `cargo xtask build-android --release` | ubuntu-latest |
-| `build-flutter.yml` | `cargo xtask build-flutter --platform <plat>` | matrix (linux, macos, windows) |
+| `build-flutter.yml` | `cargo xtask build-flutter --platform linux` | ubuntu-latest |
+| `test-ci.yml` (apple) | `cargo xtask build-xcframework --release` | macos-14 |
+
+The native build workflows (`build-apple.yml`, `build-android.yml`,
+`build-react-native.yml`, `release-prep.yml`) invoke Bazel directly.
 
 ## Quick Start Examples
 
@@ -228,11 +226,8 @@ The xtask commands are used by GitHub Actions workflows:
 # First-time setup: install all cross-compilation targets
 cargo xtask setup-targets
 
-# Build for Android (requires NDK)
-cargo xtask build-android --release
-
-# Build for Android with Kotlin binding generation (one-command workflow)
-cargo xtask build-android --release --bindgen
+# Build for Android (Bazel brings its own NDK)
+bazel build -c opt //bindings/kotlin:xybrid_kotlin_aar
 
 # Build for Apple platforms (macOS only)
 cargo xtask build-xcframework --release

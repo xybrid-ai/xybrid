@@ -141,7 +141,7 @@ cargo xtask build-xcframework
 # Copy the static library per the xybrid README.
 
 # Android
-cargo xtask build-android
+bazel build -c opt //bindings/kotlin:xybrid_kotlin_aar
 # Copy libxybrid.so into Assets/Plugins/Android/<abi>/
 ```
 

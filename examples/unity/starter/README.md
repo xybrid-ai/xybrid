@@ -31,7 +31,7 @@ cd repos/xybrid
 cargo xtask build-xcframework
 
 # Build for Android
-cargo xtask build-android
+bazel build -c opt //bindings/kotlin:xybrid_kotlin_aar
 ```
 
 Copy the built libraries to `Assets/Plugins/`:
