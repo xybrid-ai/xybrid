@@ -338,6 +338,17 @@ cmake(
         # on WIN32, so the ggml archives have NO `lib` prefix (ggml.a, not
         # libggml.a) — while llama (sibling scope) keeps it (libllama.a), and
         # so does mtmd (tools/mtmd, also outside ggml's directory scope).
+        # Windows/MSVC: CMake's Windows-Clang module sets
+        # CMAKE_STATIC_LIBRARY_PREFIX="" and _SUFFIX=".lib" for every target, so
+        # unlike the MinGW arm there is no `lib` prefix anywhere and llama/mtmd
+        # follow the same rule as ggml.
+        "@rules_rs//rs/platforms/config:x86_64-pc-windows-msvc": [
+            "mtmd.lib",
+            "llama.lib",
+            "ggml.lib",
+            "ggml-base.lib",
+            "ggml-cpu.lib",
+        ],
         "@rules_rs//rs/platforms/config:x86_64-pc-windows-gnu": [
             "libmtmd.a",
             "libllama.a",
@@ -354,6 +365,7 @@ cmake(
     # which has its own rule, does). Copy the built ggml archives into lib/ so
     # rfcc can collect them. No-op on other platforms (proven install works there).
     postfix_script = select({
+        "@rules_rs//rs/platforms/config:x86_64-pc-windows-msvc": "mkdir -p $$INSTALLDIR/lib && find $$BUILD_TMPDIR \\( -name '*.a' -o -name '*.lib' \\) -exec cp -f {} $$INSTALLDIR/lib/ \\;",
         "@rules_rs//rs/platforms/config:x86_64-pc-windows-gnu": "mkdir -p $$INSTALLDIR/lib && find $$BUILD_TMPDIR -name '*.a' -exec cp -f {} $$INSTALLDIR/lib/ \\;",
         "//conditions:default": "",
     }),

@@ -17,7 +17,7 @@ load("@rules_cc//cc/toolchains:feature.bzl", "cc_feature")
 load("@rules_cc//cc/toolchains:tool.bzl", "cc_tool")
 load("@rules_cc//cc/toolchains:tool_map.bzl", "cc_tool_map")
 load("@rules_cc//cc/toolchains/impl:documented_api.bzl", "cc_args_list")
-load(":case_insensitivity.bzl", "lowercase_library_aliases", "vfs_overlay")
+load(":case_insensitivity.bzl", "lowercase_aliases")
 load(":declare_toolchains.bzl", "declare_toolchains")
 
 package(default_visibility = ["//visibility:private"])
@@ -192,7 +192,7 @@ cc_args(
     },
 )
 
-vfs_overlay(
+lowercase_aliases(
     name = "case_insensitive_headers",
     directories = [
         "@msvc_runtime//:msvc_include",
@@ -200,6 +200,15 @@ vfs_overlay(
         "@windows_sdk//:winsdk_ucrt_include",
         "@windows_sdk//:winsdk_um_include",
     ],
+    # The four headers Microsoft's own sources include under a casing that is
+    # not what is on disk. Same list upstream's `transformations` example
+    # carries; a fifth would surface as a "file not found" naming it.
+    extra_aliases = {
+        "driverspecs.h": "DriverSpecs.h",
+        "specstrings.h": "SpecStrings.h",
+        "ole2.h": "Ole2.h",
+        "olectl.h": "OleCtl.h",
+    },
 )
 
 cc_args(
@@ -208,14 +217,16 @@ cc_args(
         "@rules_cc//cc/toolchains/actions:compile_actions",
     ],
     args = [
-        "-ivfsoverlay",
-        "{overlay}",
+        "-Xclang",
+        "-internal-isystem",
+        "-Xclang",
+        "{aliases}",
     ],
     data = [":case_insensitive_headers"],
-    format = {"overlay": ":case_insensitive_headers"},
+    format = {"aliases": ":case_insensitive_headers"},
 )
 
-lowercase_library_aliases(
+lowercase_aliases(
     name = "case_insensitive_libraries",
     directories = [
         "@msvc_runtime//:msvc_lib",

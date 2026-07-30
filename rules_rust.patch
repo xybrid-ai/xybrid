@@ -13,32 +13,3 @@ diff --git a/rust/private/rustc.bzl b/rust/private/rustc.bzl
          # Rustc generates the import library with a `.dll.lib` extension rather than the usual `.lib` one that msvc
          # expects (see https://github.com/rust-lang/rust/pull/29520 for more context).
          interface_library = ctx.actions.declare_file(crate_info.output.basename + ".lib", sibling = crate_info.output)
-diff --git a/cargo/private/cargo_build_script.bzl b/cargo/private/cargo_build_script.bzl
---- a/cargo/private/cargo_build_script.bzl
-+++ b/cargo/private/cargo_build_script.bzl
-@@ -231,6 +231,16 @@
- def _pwd_flags_imacros(args):
-     """Prefix execroot-relative paths in -imacros arguments with ${pwd}."""
-     return _prefix_pwd_to_flag(args, ["-imacros"])
-+
-+# xybrid patch: -ivfsoverlay takes a path exactly like -isystem does, but was
-+# missing from the list, so the overlay stayed execroot-relative and every cc-rs
-+# build script died with "virtual filesystem overlay file ... not found" (build
-+# scripts run from their own working directory). The windows-MSVC toolchain uses
-+# an overlay to make Microsoft's mixed-case headers resolve on a case-sensitive
-+# filesystem, so this affects every -sys crate on that target.
-+def _pwd_flags_ivfsoverlay(args):
-+    """Prefix execroot-relative paths in -ivfsoverlay arguments with ${pwd}."""
-+    return _prefix_pwd_to_flag(args, ["-ivfsoverlay"])
- 
- _DIRECT_LIB_EXTENSIONS = (".a", ".o", ".so", ".dylib")
- 
-@@ -264,7 +274,7 @@
-     return _prefix_pwd_to_paths(args)
- 
- def _pwd_flags(args):
--    return _pwd_flags_direct_libs(_pwd_flags_imacros(_pwd_flags_fsanitize_ignorelist(_pwd_flags_isystem(_pwd_flags_L(_pwd_flags_B(_pwd_flags_resource_dir(_pwd_flags_sysroot(args))))))))
-+    return _pwd_flags_direct_libs(_pwd_flags_ivfsoverlay(_pwd_flags_imacros(_pwd_flags_fsanitize_ignorelist(_pwd_flags_isystem(_pwd_flags_L(_pwd_flags_B(_pwd_flags_resource_dir(_pwd_flags_sysroot(args)))))))))
- 
- def _feature_enabled(ctx, feature_name, default = False):
-     """Check if a feature is enabled.
