@@ -1,0 +1,19 @@
+tools/scripts/audit_windows_dll.py
+  s_5530c1a2c2062f::t_1ffd01ebe391a3 118,260
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "f167698b0343ef17febf9aa3948643b52c2be41f",
+  "prompts": {},
+  "sessions": {
+    "s_5530c1a2c2062f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "847b812e-4e6a-4262-82c2-97507c2c3690",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
