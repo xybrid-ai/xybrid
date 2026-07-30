@@ -1,0 +1,47 @@
+CONTRIBUTING.md
+  s_13e9783d1fe035::t_adc5bbe8a13459 71
+  s_13e9783d1fe035::t_4df36cbd028d26 21-45,49-50,64,67-68,70,72-75
+examples/unity/starter/README.md
+  s_13e9783d1fe035::t_835a6d68b5ce4a 31
+docs/FEATURE_MATRIX.md
+  s_13e9783d1fe035::t_c0a3c64f1a5499 204
+examples/unity/Telemetry/README.md
+  s_13e9783d1fe035::t_835a6d68b5ce4a 140
+docs/FEATURE_MATRIX.zh.md
+  s_13e9783d1fe035::t_c0a3c64f1a5499 203
+examples/ios/README.md
+  s_13e9783d1fe035::t_835a6d68b5ce4a 41,217,222
+bindings/kotlin/README.md
+  s_13e9783d1fe035::t_24138a45395684 368
+examples/unity/starter/Assets/Plugins/README.md
+  s_13e9783d1fe035::t_24138a45395684 14
+tools/README.md
+  s_13e9783d1fe035::t_d0b3830236c915 78,80-83,86-87,90-91,144,146-147,149-155,174-175,177-178,180-181,183-184
+xtask/src/main.rs
+  s_13e9783d1fe035::t_7f70d2139cae54 889-897
+examples/unity/README.md
+  s_13e9783d1fe035::t_835a6d68b5ce4a 89
+examples/README.md
+  s_13e9783d1fe035::t_835a6d68b5ce4a 97,186,214
+bindings/apple/README.md
+  s_13e9783d1fe035::t_d1e256b1813aaf 150
+  s_13e9783d1fe035::t_6563a2702c3532 155-159,162,164-165,170,204,222
+vendor/ort-ios/README.md
+  s_13e9783d1fe035::t_d86a980ef278b4 29
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "68007d64fa02805d925ffcc61fe338fa9195d621",
+  "prompts": {},
+  "sessions": {
+    "s_13e9783d1fe035": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c2e73e03-96e5-4291-8071-6cc09020b8b6",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
