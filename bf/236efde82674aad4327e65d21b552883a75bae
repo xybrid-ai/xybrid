@@ -1,0 +1,22 @@
+.github/workflows/bazel.yml
+  s_5530c1a2c2062f::t_70e4201d13032e 433-551
+  s_5530c1a2c2062f::t_066d0b3a1b6e8e 30-34,38,81
+tools/scripts/audit_windows_dll.py
+  s_5530c1a2c2062f::t_31ad43aae8d867 118,121,124,137-139,155-158,164,201-211,260-263
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "bf236efde82674aad4327e65d21b552883a75bae",
+  "prompts": {},
+  "sessions": {
+    "s_5530c1a2c2062f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "847b812e-4e6a-4262-82c2-97507c2c3690",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
