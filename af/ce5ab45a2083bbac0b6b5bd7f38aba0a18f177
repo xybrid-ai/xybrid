@@ -1,0 +1,22 @@
+.github/workflows/release-prep.yml
+  s_5530c1a2c2062f::t_04273f53476336 704-709,715,717-719,723-739,741-805,811-814,823-826
+bindings/flutter/rust/BUILD.bazel
+  s_5530c1a2c2062f::t_2e8626c4380488 7-11
+  s_5530c1a2c2062f::t_f53cf74b059a88 4-5
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "afce5ab45a2083bbac0b6b5bd7f38aba0a18f177",
+  "prompts": {},
+  "sessions": {
+    "s_5530c1a2c2062f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "847b812e-4e6a-4262-82c2-97507c2c3690",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
