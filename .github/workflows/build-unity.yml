@@ -105,66 +105,84 @@ jobs:
   # Windows native library build (x86_64)
   #
   build-unity-windows:
-    name: Build Windows Libraries
+    name: Build Unity native (Windows)
     needs: [check-version]
     if: always() && (needs.check-version.result == 'success' || needs.check-version.result == 'skipped')
-    runs-on: windows-latest
+    # No Windows runner: the DLL is cross-compiled MSVC-ABI on Linux RBE
+    # workers by //bazel/toolchains/windows_msvc, the same toolchain the
+    # shipped Flutter windows native uses. Mirrors build-unity-linux below.
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           submodules: true
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
-        with:
-          toolchain: stable
-          targets: x86_64-pc-windows-msvc
-
-      - name: Setup sccache
-        uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
-
-      - name: Configure sccache environment
-        shell: bash
+      - name: Free disk space
         run: |
-          echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
-          echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
-          echo "CMAKE_C_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
-          echo "CMAKE_CXX_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/.ghcup \
+            /opt/hostedtoolcache/CodeQL
+          sudo docker image prune --all --force || true
 
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-        with:
-          prefix-key: "v1-rust"
-          shared-key: "unity-windows"
-          cache-all-crates: "true"
-          save-if: "true"
+      - name: Configure BuildBuddy remote config
+        env:
+          BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
+        run: |
+          mkdir -p .context
+          cat > .context/buildbuddy.bazelrc <<EOF
+          common:remote --bes_results_url=https://app.buildbuddy.io/invocation/
+          common:remote --bes_backend=grpcs://remote.buildbuddy.io
+          common:remote --remote_header=x-buildbuddy-api-key=${BUILDBUDDY_API_KEY}
+          common:remote --remote_cache=grpcs://remote.buildbuddy.io
+          common:remote --remote_executor=grpcs://remote.buildbuddy.io
+          common:remote --remote_cache_compression
+          common:remote --remote_download_toplevel
+          common:remote --remote_timeout=600
+          common:remote --jobs=200
+          common:remote --extra_execution_platforms=@llvm//:rbe_linux_x86_64
+          EOF
+          echo "REMOTE=--config=remote" >> $GITHUB_ENV
 
-      - name: Build for x86_64-pc-windows-msvc
-        run: cargo xtask build-ffi --target x86_64-pc-windows-msvc --release --deploy-unity
+      - name: Build + stage Windows native (Bazel)
+        run: |
+          set -euo pipefail
+          remote_args=()
+          [[ -n "${REMOTE:-}" ]] && remote_args+=("$REMOTE")
+          bazelisk build "${remote_args[@]}" --config=windows-msvc -c opt \
+            //crates/xybrid-bolt:xybrid_bolt_cdylib
+          LIB=$(bazelisk cquery "${remote_args[@]}" --config=windows-msvc -c opt \
+            --output=files //crates/xybrid-bolt:xybrid_bolt_cdylib | grep '\.dll$')
+          echo "Bazel output: $LIB"
+          python3 tools/scripts/stage_unity_native.py --lib "$LIB" --target x86_64-pc-windows-msvc
 
       - name: Stage ONNX Runtime (Windows)
-        run: >-
-          python tools/scripts/stage_unity_desktop_ort.py windows
-          bindings/unity/Runtime/Plugins/Windows
+        run: python3 tools/scripts/stage_unity_desktop_ort.py windows bindings/unity/Runtime/Plugins/Windows
 
-      - name: Strip debug symbols (Windows)
-        shell: bash
-        run: llvm-strip bindings/unity/Runtime/Plugins/Windows/xybrid_bolt.dll
-
+      # No strip step: lld-link puts no debug data in the image (verified — the
+      # DLL has no debug sections, only a reference to a .pdb we never ship),
+      # unlike the cargo/MSVC build this replaces.
       - name: Verify deployed libraries
-        shell: bash
         run: |
+          set -euo pipefail
           echo "Windows plugin directory:"
           PLUGINS=bindings/unity/Runtime/Plugins/Windows
           ls -la "$PLUGINS"
           test -f "$PLUGINS/xybrid_bolt.dll"
           test -f "$PLUGINS/onnxruntime.dll"
           test -f "$PLUGINS/onnxruntime.dll.meta"
-          python -c "import ctypes; ctypes.CDLL(r'$PLUGINS/onnxruntime.dll')"
-          echo "Windows ORT runtime loads successfully."
-          # Load the shipped bolt plugin itself (not just ORT) and run a real
-          # boltffi call — proves the native is functional, not merely present.
-          python tools/scripts/verify_bolt_load.py "$PLUGINS/xybrid_bolt.dll"
+          # The linux job ctypes-loads its ORT here; a Windows DLL cannot be
+          # loaded on this host, so check the format instead. The bolt DLL is
+          # load-tested for real by bazel-windows-msvc-smoke in bazel.yml.
+          file "$PLUGINS/onnxruntime.dll" | grep -q 'PE32+.*x86-64' || { echo "ORT is not a PE32+ x86-64 DLL"; exit 1; }
+          file "$PLUGINS/xybrid_bolt.dll" | grep -q 'PE32+.*x86-64' || { echo "bolt is not a PE32+ x86-64 DLL"; exit 1; }
+          # Unity reaches the native purely through P/Invoke, so the export
+          # table IS the contract — assert every EntryPoint the C# declares.
+          python3 -m pip install --quiet --user pefile
+          python3 tools/scripts/audit_windows_dll.py --dll "$PLUGINS/xybrid_bolt.dll" \
+            --require-import vcruntime140.dll \
+            --require-import msvcp140.dll \
+            --require-exports-from-csharp bindings/unity/Runtime/Bolt/XybridBolt.cs \
+            --require-exports-from-csharp bindings/unity/Runtime/BoltSupplement/XybridInference.cs
+          echo "Windows Unity native: OK"
 
       - name: Upload Windows plugins
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -173,9 +191,6 @@ jobs:
           path: bindings/unity/Runtime/Plugins/Windows/
           if-no-files-found: error
 
-  #
-  # Linux native library build (x86_64)
-  #
   build-unity-linux:
     name: Build Linux Libraries
     needs: [check-version]
