@@ -13,6 +13,7 @@ _VISION_PLATFORMS = [
     "@rules_rs//rs/platforms/config:aarch64-apple-ios",  # Apple parity: iOS vision
     "@rules_rs//rs/platforms/config:aarch64-apple-ios-sim",  # G4a: iOS simulator vision
     "@rules_rs//rs/platforms/config:x86_64-pc-windows-gnu",  # Windows .exe parity
+    "@rules_rs//rs/platforms/config:x86_64-pc-windows-msvc",  # Flutter/cargokit parity
 ]
 
 rust_library(
