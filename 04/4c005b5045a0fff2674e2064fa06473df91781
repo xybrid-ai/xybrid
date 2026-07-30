@@ -1,0 +1,60 @@
+Package.swift
+  s_13e9783d1fe035::t_c31aae394674f6 17-20,29
+examples/unity/README.md
+  s_13e9783d1fe035::t_f231a80a83c5d3 89-98
+bindings/react-native/android/build.gradle
+  s_13e9783d1fe035::t_5fdb6cf87a8022 50
+.gitignore
+  s_13e9783d1fe035::t_c31aae394674f6 51
+bindings/react-native/example/plugins/withXybridDevAndroid.js
+  s_13e9783d1fe035::t_5fdb6cf87a8022 15-16
+bindings/kotlin/libs/.gitignore
+  s_13e9783d1fe035::t_5fdb6cf87a8022 1-2
+examples/ios/README.md
+  s_13e9783d1fe035::t_8eefe06c80f3ba 39,42-43
+  s_13e9783d1fe035::t_b2637d5f589226 44
+examples/README.md
+  s_13e9783d1fe035::t_8eefe06c80f3ba 98-99
+  s_13e9783d1fe035::t_c6524c5a7535b5 146-147,149-151,190-199,202,222,224-226
+examples/android/README.md
+  s_13e9783d1fe035::t_c6524c5a7535b5 31-32,34-36,39
+examples/ios/XybridExample/ContentView.swift
+  s_13e9783d1fe035::t_c31aae394674f6 7-8
+examples/unity/starter/Assets/Plugins/README.md
+  s_13e9783d1fe035::t_f231a80a83c5d3 13-23
+bindings/react-native/react-native-xybrid.podspec
+  s_13e9783d1fe035::t_c31aae394674f6 20-21,30-31
+bindings/kotlin/.gitignore
+  s_13e9783d1fe035::t_5fdb6cf87a8022 2-3
+CONTRIBUTING.md
+  s_13e9783d1fe035::t_27b3ce7ba14c51 35-41
+  s_13e9783d1fe035::t_2ee07392e4ff17 60-61,63
+bindings/kotlin/README.md
+  s_13e9783d1fe035::t_280477ab55142f 247-250,257-258
+  s_13e9783d1fe035::t_52f82bfab3db2c 259
+bindings/react-native/.gitignore
+  s_13e9783d1fe035::t_5fdb6cf87a8022 11-12,14
+examples/unity/Telemetry/README.md
+  s_13e9783d1fe035::t_f231a80a83c5d3 139-143
+examples/unity/starter/README.md
+  s_13e9783d1fe035::t_f231a80a83c5d3 30-39,42-44
+bindings/apple/README.md
+  s_13e9783d1fe035::t_ea6de8f089a467 129-130
+  s_13e9783d1fe035::t_280477ab55142f 177-182
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "044c005b5045a0fff2674e2064fa06473df91781",
+  "prompts": {},
+  "sessions": {
+    "s_13e9783d1fe035": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c2e73e03-96e5-4291-8071-6cc09020b8b6",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
