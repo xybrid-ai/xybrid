@@ -108,9 +108,6 @@ The NDK is a pinned Bazel download — no machine setup. Each
 `libxybrid-bolt.so` is a clean one-link output (16 KB-aligned,
 `libc++_shared` in DT_NEEDED, no patchelf) with the ORT runtime bundled.
 
-**Requirements:**
-- Android NDK r27 (`ANDROID_NDK_HOME`, or installed under `$ANDROID_HOME/ndk/`)
-
 **Output:**
 - `bindings/kotlin/libs/<abi>/libxybrid-bolt.so` (native library; 16 KB-aligned,
   `libc++_shared` linked in — a clean linker output that survives a consumer's

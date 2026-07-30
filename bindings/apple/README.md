@@ -126,9 +126,8 @@ apple/
 │   └── Xybrid/                      # Swift source
 │       ├── Xybrid.swift             # Public API, extensions, type aliases
 │       └── xybrid_bolt.swift        # BoltFFI-generated Swift bindings (DO NOT EDIT)
-└── XCFrameworks/                    # Pre-built binary frameworks (C headers bundled inside)
-    ├── XybridFFI.xcframework/       # Latest build (for local dev)
-    └── XybridFFI-{version}.xcframework/  # Versioned copy
+└── XCFrameworks/                    # Local-dev unzip target for the Bazel-built xcframework
+    └── XybridFFI.xcframework/       # (gitignored; unzipped from bazel-bin)
 ```
 
 ## Supported Platforms
@@ -175,12 +174,12 @@ After a successful build:
 
 ```
 bindings/apple/XCFrameworks/
-├── XybridFFI.xcframework/
-│   ├── ios-arm64/
-│   │   └── libxybrid-bolt.a
-│   └── ios-arm64-simulator/
-│       └── libxybrid-bolt.a
-└── XybridFFI-{version}.xcframework/    # Versioned copy
+└── XybridFFI.xcframework/
+    ├── Info.plist
+    ├── ios-arm64/
+    │   └── XybridFFI.framework/        # static framework (binary, Headers/, Modules/)
+    └── ios-arm64-simulator/
+        └── XybridFFI.framework/
 ```
 
 ### Environment Variables

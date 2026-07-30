@@ -14,9 +14,10 @@ import PackageDescription
 //
 // FOR LOCAL DEVELOPMENT:
 //
-//   1. Build the xcframework:  cargo xtask build-xcframework
-//   2. Toggle to local mode:   ./bindings/apple/scripts/set-natives-mode.sh --set-local
-//   3. Open in Xcode or run:   swift build
+//   1. Build the xcframework:  bazel build --config=ios //bindings/apple:XybridFFI
+//   2. Unzip it locally:       unzip -o bazel-bin/bindings/apple/XybridFFI.xcframework.zip -d bindings/apple/XCFrameworks
+//   3. Toggle to local mode:   ./bindings/apple/scripts/set-natives-mode.sh --set-local
+//   4. Open in Xcode or run:   swift build
 //
 //   Toggle back to remote mode before committing:
 //     ./bindings/apple/scripts/set-natives-mode.sh --set-remote
@@ -25,7 +26,7 @@ import PackageDescription
 //
 // useLocalNatives = true  → Use the local xcframework at
 //                            bindings/apple/XCFrameworks/XybridFFI.xcframework
-//                            (built by `cargo xtask build-xcframework`).
+//                            (unzipped from the Bazel build above).
 //
 // useLocalNatives = false → Download the xcframework zip from the GitHub
 //                            release for `sdkVersion`. This is the mode

@@ -95,6 +95,8 @@ xcodebuild -project XybridExample.xcodeproj \
 ```bash
 # From xybrid repo root
 bazel build --config=ios //bindings/apple:XybridFFI
+unzip -o bazel-bin/bindings/apple/XybridFFI.xcframework.zip -d bindings/apple/XCFrameworks
+./bindings/apple/scripts/set-natives-mode.sh --set-local   # revert with --set-remote before committing
 ```
 
 ### Features Demonstrated
@@ -141,8 +143,12 @@ adb install app/build/outputs/apk/debug/app-debug.apk
 **Note**: To enable full SDK functionality, build native libraries first:
 
 ```bash
-# From xybrid repo root
+# From xybrid repo root — build the AAR, then stage its jniLibs where the
+# example's Gradle module looks (bindings/kotlin/libs/)
 bazel build -c opt //bindings/kotlin:xybrid_kotlin_aar
+rm -rf bindings/kotlin/libs && mkdir -p bindings/kotlin/libs /tmp/aar
+unzip -o -q bazel-bin/bindings/kotlin/xybrid-kotlin.aar 'jni/*' -d /tmp/aar
+cp -r /tmp/aar/jni/* bindings/kotlin/libs/
 ```
 
 ### Features Demonstrated
@@ -181,15 +187,19 @@ Unity example project for on-device ML inference in games.
 **Note**: To enable full SDK functionality, build native libraries first:
 
 ```bash
-# From xybrid repo root
-# For iOS/macOS
-bazel build --config=ios //bindings/apple:XybridFFI
+# Host platform — builds and stages into the Unity package (editor testing)
+cargo xtask build-ffi --deploy-unity
 
-# For Android
-bazel build -c opt //bindings/kotlin:xybrid_kotlin_aar
+# Device targets mirror .github/workflows/build-unity.yml: build the bolt
+# native with Bazel, then stage it (with its Unity .meta) into
+# bindings/unity/Runtime/Plugins/<Platform>/ — no manual copying:
+bazel build --config=ios //crates/xybrid-bolt:xybrid_bolt_staticlib               # iOS
+bazel build --config=macos-metal -c opt //crates/xybrid-bolt:xybrid_bolt_cdylib   # macOS
+bazel build --config=android-arm64 //crates/xybrid-bolt:xybrid_bolt_cdylib        # Android (also android-armv7, android-x86_64)
+python3 tools/scripts/stage_unity_native.py --lib <bazelisk cquery --output=files path> --target <triple>
 ```
 
-Then copy the built libraries to `Assets/Plugins/` (see [unity/README.md](unity/README.md) for paths).
+See [unity/README.md](unity/README.md) for details.
 
 ### Features Demonstrated
 
@@ -209,10 +219,11 @@ See [unity/README.md](unity/README.md) for detailed documentation.
 
 Native libraries need to be built from Rust before the SDK works:
 
-| Platform | Build Command |
+| Example | Build Command |
 |----------|---------------|
-| iOS/macOS | `bazel build --config=ios //bindings/apple:XybridFFI` |
-| Android | `bazel build -c opt //bindings/kotlin:xybrid_kotlin_aar` |
+| iOS | `bazel build --config=ios //bindings/apple:XybridFFI` + unzip into `bindings/apple/XCFrameworks` (see the iOS section above) |
+| Android | `bazel build -c opt //bindings/kotlin:xybrid_kotlin_aar` + stage jniLibs into `bindings/kotlin/libs/` (see the Android section above) |
+| Unity | `cargo xtask build-ffi --deploy-unity` (see the Unity section above) |
 
 ### "Model not found"
 

@@ -136,13 +136,11 @@ cargo build --release -p xybrid-bolt --features platform-macos
 cp target/release/libxybrid_bolt.dylib \
    examples/unity/Telemetry/Assets/Plugins/macOS/libxybrid.dylib
 
-# iOS
-bazel build --config=ios //bindings/apple:XybridFFI
-# Copy the static library per the xybrid README.
-
-# Android
-bazel build -c opt //bindings/kotlin:xybrid_kotlin_aar
-# Copy libxybrid.so into Assets/Plugins/Android/<abi>/
+# iOS / Android — mirror .github/workflows/build-unity.yml: build the bolt
+# native with Bazel, then stage it into bindings/unity/Runtime/Plugins/:
+bazel build --config=ios //crates/xybrid-bolt:xybrid_bolt_staticlib          # iOS
+bazel build --config=android-arm64 //crates/xybrid-bolt:xybrid_bolt_cdylib   # Android (also android-armv7, android-x86_64)
+python3 tools/scripts/stage_unity_native.py --lib <bazelisk cquery --output=files path> --target <triple>
 ```
 
 See `examples/unity/starter/README.md` for full platform-specific steps.

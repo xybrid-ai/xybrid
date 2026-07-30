@@ -28,11 +28,15 @@ This is a native Android example app demonstrating how to integrate the Xybrid S
 The Xybrid SDK requires native `.so` libraries for Android:
 
 ```bash
-# From the xybrid repo root
+# From the xybrid repo root — build the AAR, then stage its jniLibs where
+# this example's Gradle module looks (bindings/kotlin/libs/)
 bazel build -c opt //bindings/kotlin:xybrid_kotlin_aar
+rm -rf bindings/kotlin/libs && mkdir -p bindings/kotlin/libs /tmp/aar
+unzip -o -q bazel-bin/bindings/kotlin/xybrid-kotlin.aar 'jni/*' -d /tmp/aar
+cp -r /tmp/aar/jni/* bindings/kotlin/libs/
 ```
 
-This builds `libxybrid_uniffi.so` and bundles `libonnxruntime.so` + `libc++_shared.so` from `vendor/ort-android/` for each ABI (arm64-v8a, x86_64).
+This stages `libxybrid-bolt.so`, `libonnxruntime.so`, and `libc++_shared.so` for each ABI (arm64-v8a, armeabi-v7a, x86_64) into `bindings/kotlin/libs/`.
 
 See [bindings/kotlin/README.md](../../bindings/kotlin/README.md) for detailed build instructions.
 

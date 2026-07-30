@@ -12,7 +12,8 @@
 // Publishing a local AAR keeps the kotlin module on its own toolchain.
 //
 // Dev flow:
-//   cargo xtask build-android --release
+//   bazel build -c opt //bindings/kotlin:xybrid_kotlin_aar
+//   (stage its jni/* into bindings/kotlin/libs/ — see bindings/kotlin/README.md)
 //   (cd bindings/kotlin && ./gradlew publishToMavenLocal)
 //   (cd bindings/react-native/example && npx expo run:android)
 //

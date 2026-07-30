@@ -27,17 +27,21 @@ Before the SDK will work, you need to build the native libraries from the Rust s
 # From the repository root
 cd repos/xybrid
 
-# Build for iOS/macOS
-bazel build --config=ios //bindings/apple:XybridFFI
+# Host platform — builds and stages into the Unity package (editor testing)
+cargo xtask build-ffi --deploy-unity
 
-# Build for Android
-bazel build -c opt //bindings/kotlin:xybrid_kotlin_aar
+# Device targets mirror .github/workflows/build-unity.yml: build the bolt
+# native with Bazel, then stage it (with its Unity .meta) into
+# bindings/unity/Runtime/Plugins/<Platform>/ — no manual copying:
+bazel build --config=ios //crates/xybrid-bolt:xybrid_bolt_staticlib               # iOS
+bazel build --config=macos-metal -c opt //crates/xybrid-bolt:xybrid_bolt_cdylib   # macOS
+bazel build --config=android-arm64 //crates/xybrid-bolt:xybrid_bolt_cdylib        # Android (also android-armv7, android-x86_64)
+python3 tools/scripts/stage_unity_native.py --lib <bazelisk cquery --output=files path> --target <triple>
 ```
 
-Copy the built libraries to `Assets/Plugins/`:
-- iOS: `libxybrid.a` → `Assets/Plugins/iOS/`
-- Android: `libxybrid.so` → `Assets/Plugins/Android/{arm64-v8a,armeabi-v7a}/`
-- macOS: `libxybrid.dylib` → `Assets/Plugins/macOS/`
+The staging step places each library (with its Unity `.meta`) under
+`bindings/unity/Runtime/Plugins/<Platform>/`, which this example consumes —
+no manual copying into `Assets/Plugins/`.
 
 ### 3. Play in Editor
 

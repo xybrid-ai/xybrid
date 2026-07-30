@@ -244,50 +244,18 @@ Native `.so` files must be built for each target architecture before the library
 
 ### Prerequisites
 
-| Tool | Required Version | Installation |
-|------|------------------|--------------|
-| Rust | 1.70+ | [rustup.rs](https://rustup.rs) |
-| Android NDK | r26+ (recommended: r26b) | Android Studio or sdkmanager |
-| cargo-ndk | Latest | `cargo install cargo-ndk` |
-
-### Installing Android NDK
-
-**Option 1: Android Studio (Recommended)**
-
-1. Open Android Studio
-2. Go to **Tools > SDK Manager**
-3. Select **SDK Tools** tab
-4. Check **NDK (Side by side)** and click Apply
-5. Note the installation path (e.g., `$ANDROID_HOME/ndk/26.1.10909125`)
-
-**Option 2: Command Line (sdkmanager)**
-
-```bash
-# Install NDK via sdkmanager
-sdkmanager --install "ndk;26.1.10909125"
-
-# Find your SDK location
-echo $ANDROID_HOME
-# Typically: ~/Library/Android/sdk (macOS) or ~/Android/Sdk (Linux)
-```
-
-### Environment Variables
-
-Set these environment variables before building:
-
-| Variable | Description | Example |
-|----------|-------------|---------|
-| `ANDROID_HOME` | Android SDK root directory | `~/Library/Android/sdk` |
-| `ANDROID_NDK_HOME` | NDK installation directory | `$ANDROID_HOME/ndk/26.1.10909125` |
-
-Add to your shell profile (`~/.bashrc`, `~/.zshrc`, etc.):
+The recommended Bazel path below needs **only Bazel** (install via
+[bazelisk](https://github.com/bazelbuild/bazelisk)) — it downloads its own
+Rust toolchain, Android targets, and NDK. The Android SDK (`ANDROID_HOME`)
+is required only for the Gradle steps (assembling / publishing the AAR):
 
 ```bash
 export ANDROID_HOME="$HOME/Library/Android/sdk"  # macOS
 # export ANDROID_HOME="$HOME/Android/Sdk"        # Linux
-export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/26.1.10909125"
-export PATH="$PATH:$ANDROID_HOME/cmdline-tools/latest/bin"
 ```
+
+The manual cargo build (below) additionally needs the Android NDK (r26+,
+`ANDROID_NDK_HOME`) and the rustup Android targets.
 
 ### Building
 

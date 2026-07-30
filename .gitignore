@@ -48,7 +48,7 @@ xcuserdata/
 /.build/
 Package.resolved
 
-# Build artifacts - XCFrameworks (built by `cargo xtask build-xcframework`)
+# Build artifacts - XCFrameworks (unzipped from the Bazel //bindings/apple:XybridFFI build)
 bindings/apple/XCFrameworks/*.xcframework/
 # Python bytecode
 __pycache__/

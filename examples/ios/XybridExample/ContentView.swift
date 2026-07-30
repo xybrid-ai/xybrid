@@ -4,7 +4,8 @@
 //
 //  Demonstrates Xybrid SDK usage for iOS.
 //  Requires the XCFramework to be built first:
-//    cargo xtask build-xcframework
+//    bazel build --config=ios //bindings/apple:XybridFFI
+//    unzip -o bazel-bin/bindings/apple/XybridFFI.xcframework.zip -d bindings/apple/XCFrameworks
 //  Then add the Xybrid Swift Package dependency (../../bindings/apple) in Xcode.
 //
 

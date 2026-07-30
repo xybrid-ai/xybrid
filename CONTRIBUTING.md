@@ -32,8 +32,13 @@ brew install bazelisk
 **Linux**
 
 ```bash
-sudo curl -L -o /usr/local/bin/bazel 'https://github.com/bazelbuild/bazelisk/releases/download/v1.28.0/bazelisk-linux-amd64'
-sudo chmod +x /usr/local/bin/bazel
+case "$(uname -m)" in
+  x86_64)  BAZELISK=bazelisk-linux-amd64; SHA=1d03e564dab205d7da72fbbf506679931ab2b33bc2bc92d1dc886dfedb6ef8a7 ;;
+  aarch64) BAZELISK=bazelisk-linux-arm64; SHA=534875f42090b9cb04742c37386585eb8ac1abda114285bcdcd825de54cfb9f5 ;;
+esac
+curl -LO "https://github.com/bazelbuild/bazelisk/releases/download/v1.28.0/$BAZELISK"
+echo "$SHA  $BAZELISK" | sha256sum -c
+sudo install -m 0755 "$BAZELISK" /usr/local/bin/bazel
 ```
 
 Bazel brings its own hermetic toolchains — Rust, the Android NDK, clang, and
@@ -52,8 +57,10 @@ dev loop):
 ## Dev Environment Setup
 
 ```bash
-git clone https://github.com/xybrid-ai/xybrid.git
+# --recurse-submodules matters: the Bazel llama.cpp build reads vendor/llama-cpp
+git clone --recurse-submodules https://github.com/xybrid-ai/xybrid.git
 cd xybrid
+# (already cloned without it? run: git submodule update --init)
 cargo build --workspace
 cargo test --workspace
 ```
