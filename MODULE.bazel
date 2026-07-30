@@ -328,6 +328,9 @@ crate.from_cargo(
         "x86_64-unknown-linux-gnu",
         # Desktop Windows cross (GNU/MinGW ABI — hermetic-llvm ships no MSVC CRT).
         "x86_64-pc-windows-gnu",
+        # Desktop Windows cross (MSVC ABI — the CRT + SDK come from
+        # @windows_support; see //bazel/toolchains/windows_msvc).
+        "x86_64-pc-windows-msvc",
         "aarch64-apple-darwin",
         # iOS device (Apple G1). Mac-bound — builds locally via Xcode's iOS SDK
         # (apple_support toolchain), never on Linux RBE.

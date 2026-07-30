@@ -38,7 +38,7 @@ def declare_toolchains():
                 "@llvm//toolchain/features:all_non_legacy_builtin_features",
                 "@llvm//toolchain/features/legacy:all_legacy_builtin_features",
                 # Always last: carries user_compile_flags / user_link_flags.
-                "@llvm//toolchain/features/legacy:experimental_replace_legacy_action_config_features",
+                "//bazel/toolchains/windows_msvc/link:features",
             ],
         )
 
@@ -52,7 +52,7 @@ def declare_toolchains():
                 "@llvm//toolchain/features:dbg",
                 "@llvm//toolchain/features:archive_param_file",
                 "@llvm//toolchain/features/legacy:all_legacy_builtin_features",
-                "@llvm//toolchain/features/legacy:experimental_replace_legacy_action_config_features",
+                "//bazel/toolchains/windows_msvc/link:features",
             ],
         )
 

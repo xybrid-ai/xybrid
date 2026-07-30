@@ -43,27 +43,15 @@ cc_tool(
     src = platform_llvm_binary("clang++"),
 )
 
-# The clang driver, invoked as the linker. `-fuse-ld=lld` resolves to `lld-link`
-# for an MSVC target, so that binary has to be staged alongside the driver.
-# `platform_llvm_binary` returns a `select`, which cannot appear inside a list
-# attribute — the aliases give `data` plain labels to hang off.
-alias(
-    name = "lld_binary",
-    actual = platform_llvm_binary("lld"),
-)
-
-alias(
-    name = "lld_link_binary",
-    actual = platform_llvm_binary("lld-link"),
-)
-
+# lld-link is invoked DIRECTLY, not through the clang driver. rustc accepts only
+# the `msvc-lld`, `msvc` and `lld-link` linker flavours for a
+# `*-pc-windows-msvc` target ("linker flavor `gcc` is incompatible with the
+# current target"), and rules_rust takes its linker from the cc toolchain — so
+# the C++ half links MSVC-style too. //bazel/toolchains/windows_msvc/link
+# carries the matching argument spellings.
 cc_tool(
-    name = "lld",
-    src = platform_llvm_binary("clang++"),
-    data = [
-        ":lld_binary",
-        ":lld_link_binary",
-    ],
+    name = "lld-link",
+    src = platform_llvm_binary("lld-link"),
 )
 
 cc_tool(
@@ -102,7 +90,7 @@ cc_tool_map(
         "@rules_cc//cc/toolchains/actions:assembly_actions": ":clang",
         "@rules_cc//cc/toolchains/actions:c_compile": ":clang",
         "@rules_cc//cc/toolchains/actions:cpp_compile_actions": ":clang++",
-        "@rules_cc//cc/toolchains/actions:link_actions": ":lld",
+        "@rules_cc//cc/toolchains/actions:link_actions": ":lld-link",
         "@rules_cc//cc/toolchains/actions:ar_actions": ":llvm-ar",
         "@rules_cc//cc/toolchains/actions:objcopy_embed_data": ":llvm-objcopy",
         "@rules_cc//cc/toolchains/actions:strip": ":llvm-strip",
@@ -122,18 +110,28 @@ cc_args(
     name = "target_flags",
     actions = [
         "@rules_cc//cc/toolchains/actions:compile_actions",
-        "@rules_cc//cc/toolchains/actions:link_actions",
     ],
     args = ["--target=x86_64-pc-windows-msvc"],
 )
 
+# The link half never sees the clang driver, so the target comes from lld-link's
+# own switch rather than `--target=`.
+cc_args(
+    name = "machine_flags",
+    actions = [
+        "@rules_cc//cc/toolchains/actions:link_actions",
+    ],
+    args = ["/machine:x64"],
+)
+
 # Dynamic UCRT (`/MD`), matching what rustc emits for *-pc-windows-msvc without
-# `+crt-static` — the two halves of a shipped DLL must agree on the CRT.
+# `+crt-static` — the two halves of a shipped DLL must agree on the CRT. Compile
+# only: it works by steering the `#pragma comment(lib, ...)` autolink directives
+# the MSVC headers emit.
 cc_args(
     name = "ms_runtime_lib",
     actions = [
         "@rules_cc//cc/toolchains/actions:compile_actions",
-        "@rules_cc//cc/toolchains/actions:link_actions",
     ],
     args = ["-fms-runtime-lib=dll"],
 )
@@ -240,10 +238,10 @@ cc_args(
         "@rules_cc//cc/toolchains/actions:link_actions",
     ],
     args = [
-        "-L{lowercase_aliases}",
-        "-L{msvc_lib}",
-        "-L{ucrt_lib}",
-        "-L{um_lib}",
+        "-LIBPATH:{lowercase_aliases}",
+        "-LIBPATH:{msvc_lib}",
+        "-LIBPATH:{ucrt_lib}",
+        "-LIBPATH:{um_lib}",
     ],
     data = [
         ":case_insensitive_libraries",
@@ -267,10 +265,7 @@ cc_args(
     actions = [
         "@rules_cc//cc/toolchains/actions:link_actions",
     ],
-    args = [
-        "-Xlinker",
-        "/def:{def_file_path}",
-    ],
+    args = ["/def:{def_file_path}"],
     format = {"def_file_path": "@rules_cc//cc/toolchains/variables:def_file_path"},
     requires_not_none = "@rules_cc//cc/toolchains/variables:def_file_path",
 )
@@ -327,7 +322,7 @@ cc_args_list(
         ":ms_runtime_lib",
         ":case_insensitive_header_lookup",
         ":headers_include_search_paths",
-        "@llvm//toolchain/args:fuse_ld",
+        ":machine_flags",
         ":library_search_paths",
         "@llvm//toolchain/args:ignore_unused_command_line_argument",
     ],
