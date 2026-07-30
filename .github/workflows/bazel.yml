@@ -549,6 +549,60 @@ jobs:
           path: /tmp/win-msvc/
           retention-days: 7
 
+  # The run-it half of the windows-MSVC gate. bazel-windows-msvc can build the
+  # DLL and byte-inspect it, but a PE that inspects clean can still fail to load
+  # — a missing Visual C++ redistributable or a bad import is only visible when
+  # Windows actually resolves it. This is the first time anything built by the
+  # MSVC toolchain runs on Windows; it compiles nothing (the build happened on
+  # Linux workers) and costs a couple of windows-latest minutes per master merge.
+  bazel-windows-msvc-smoke:
+    name: Bazel windows-MSVC Flutter DLL smoke (loads it on Windows)
+    needs: bazel-windows-msvc
+    if: github.event_name != 'pull_request'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: bazel-xybrid-flutter-windows-msvc
+          path: native
+
+      # LoadLibrary is the real test: it resolves the whole import table against
+      # the machine, so a DLL that needs a runtime this box lacks fails here.
+      # GetProcAddress then proves the export table is usable, which is what
+      # Flutter reaches the library through.
+      - name: Load the DLL and resolve an export
+        shell: pwsh
+        run: |
+          $dll = (Resolve-Path native/xybrid_flutter_ffi.dll).Path
+          Write-Host "loading $dll"
+
+          Add-Type -Namespace Win -Name Native -MemberDefinition @'
+          [System.Runtime.InteropServices.DllImport("kernel32", SetLastError = true)]
+          public static extern System.IntPtr LoadLibrary(string path);
+          [System.Runtime.InteropServices.DllImport("kernel32", SetLastError = true)]
+          public static extern System.IntPtr GetProcAddress(System.IntPtr module, string name);
+          '@
+
+          $handle = [Win.Native]::LoadLibrary($dll)
+          if ($handle -eq [System.IntPtr]::Zero) {
+            $code = [System.Runtime.InteropServices.Marshal]::GetLastWin32Error()
+            throw "LoadLibrary failed (Win32 error $code)"
+          }
+          Write-Host "loaded, handle $handle"
+
+          # flutter_rust_bridge's Dart-API entry point: present in every frb
+          # build and the first thing Dart calls, so its absence would break
+          # the binding outright.
+          foreach ($export in @('frb_init_frb_dart_api_dl', 'store_dart_post_cobject')) {
+            $address = [Win.Native]::GetProcAddress($handle, $export)
+            if ($address -eq [System.IntPtr]::Zero) {
+              throw "GetProcAddress('$export') failed"
+            }
+            Write-Host "resolved $export at $address"
+          }
+
+          Write-Host "windows-MSVC Flutter DLL smoke: OK"
+
   # The run-it half of the windows .exe gate: the linux job can build and
   # byte-inspect the PE but not execute it — a real Windows runner downloads
   # the RBE-built artifact and runs it. This is the only Windows machine in
