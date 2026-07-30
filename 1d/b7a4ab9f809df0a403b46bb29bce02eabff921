@@ -1,0 +1,35 @@
+.bazelrc
+  s_5530c1a2c2062f::t_89125300bbf6cf 9-13,45-51
+CONTRIBUTING.md
+  s_5530c1a2c2062f::t_05e65c02f6b88a 45-55
+MODULE.bazel
+  s_5530c1a2c2062f::t_8e875f56eab98d 38-78,226-231
+bazel/toolchains/windows_msvc/BUILD.bazel
+  s_5530c1a2c2062f::t_9178d17d0f9d09 1-336
+bazel/toolchains/windows_msvc/case_insensitivity.bzl
+  s_5530c1a2c2062f::t_02a73ad23d1e54 1-141
+bazel/toolchains/windows_msvc/declare_toolchains.bzl
+  s_5530c1a2c2062f::t_adb7615cbdc419 1-99
+bazel/windows_msvc/BUILD.bazel
+  s_5530c1a2c2062f::t_dcd9a082fc38dd 1-36
+bazel/windows_msvc/main.cc
+  s_5530c1a2c2062f::t_fc0a5715cafdfa 1-11
+bazel/windows_msvc/smoke.cc
+  s_5530c1a2c2062f::t_d2dbf3798aa2ce 1-33
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "1db7a4ab9f809df0a403b46bb29bce02eabff921",
+  "prompts": {},
+  "sessions": {
+    "s_5530c1a2c2062f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "847b812e-4e6a-4262-82c2-97507c2c3690",
+        "model": "unknown"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
