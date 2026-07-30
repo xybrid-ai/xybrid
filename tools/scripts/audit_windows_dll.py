@@ -115,7 +115,7 @@ def audit(
     exports: list[str],
     *,
     required_exports: list[str],
-    required_imports: list[str] = [],
+    required_imports: tuple[str, ...] = (),
     extra_allowed: frozenset[str] = frozenset(),
 ) -> AuditResult:
     """Check imports against the allowlist and confirm required symbols exist."""
@@ -257,7 +257,7 @@ def main() -> int:
         imports,
         exports,
         required_exports=required_exports,
-        required_imports=list(args.require_import),
+        required_imports=tuple(args.require_import),
         extra_allowed=frozenset(
             a.lower() for a in list(args.allow_import) + list(args.require_import)
         ),
