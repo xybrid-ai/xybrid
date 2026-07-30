@@ -205,6 +205,27 @@ cmake(
             "CMAKE_C_FLAGS": "-D_USE_MATH_DEFINES",
             "CMAKE_CXX_FLAGS": "-D_USE_MATH_DEFINES",
         },
+        # Desktop Windows cross (MSVC ABI) — the Flutter/cargokit lane. Same
+        # CMAKE_SYSTEM seeding and vision set as the GNU arm above, but the C++
+        # runtime is Microsoft's STL, autolinked by `#pragma comment(lib, ...)`
+        # out of @msvc_runtime's headers. So NO CMAKE_CXX_STANDARD_LIBRARIES:
+        # the libc++/libcxxabi/libunwind trio the MinGW arm has to hand-feed is
+        # exactly what the MSVC sysroot already provides.
+        "@rules_rs//rs/platforms/config:x86_64-pc-windows-msvc": _LLAMA_CACHE_ENTRIES | {
+            "CMAKE_SYSTEM_NAME": "Windows",
+            "CMAKE_SYSTEM_PROCESSOR": "AMD64",
+            "LLAMA_BUILD_TOOLS": "ON",
+            "LLAMA_BUILD_COMMON": "ON",
+            # CMake's Windows-Clang module enables the RC language and there is
+            # no resource compiler on a Linux worker's PATH ("No
+            # CMAKE_RC_COMPILER could be found"). llvm-rc is the hermetic
+            # equivalent; the label rides in via build_data (cfg=exec).
+            "CMAKE_RC_COMPILER": "$$EXT_BUILD_ROOT/$(execpath @llvm//tools:llvm-rc)",
+            # mtmd-audio's M_PI, same as the MinGW arm: Microsoft's math.h is
+            # where _USE_MATH_DEFINES comes from in the first place.
+            "CMAKE_C_FLAGS": "-D_USE_MATH_DEFINES",
+            "CMAKE_CXX_FLAGS": "-D_USE_MATH_DEFINES",
+        },
         # macOS cross from Linux RBE (the macOS-CPU lane): same rfcc gap as
         # windows — no darwin entry in rfcc's _TARGET_OS_PARAMS, so without
         # CMAKE_SYSTEM_NAME cmake detects the Linux exec host and ggml defines
@@ -268,6 +289,11 @@ cmake(
         "@rules_rs//rs/platforms/config:aarch64-apple-darwin": [
             "@llvm//tools:llvm-install-name-tool",
             "@llvm//tools:llvm-otool",
+        ],
+        # windows-msvc: the resource compiler CMake's Windows-Clang module
+        # insists on, referenced by that arm's CMAKE_RC_COMPILER.
+        "@rules_rs//rs/platforms/config:x86_64-pc-windows-msvc": [
+            "@llvm//tools:llvm-rc",
         ],
         "//conditions:default": [],
     }),

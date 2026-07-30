@@ -114,15 +114,12 @@ cc_args(
     args = ["--target=x86_64-pc-windows-msvc"],
 )
 
-# The link half never sees the clang driver, so the target comes from lld-link's
-# own switch rather than `--target=`.
-cc_args(
-    name = "machine_flags",
-    actions = [
-        "@rules_cc//cc/toolchains/actions:link_actions",
-    ],
-    args = ["/machine:x64"],
-)
+# NOTE: no `/machine:x64` here, deliberately. lld-link infers the machine from
+# the objects, and rules_foreign_cc hands the toolchain's link flags to CMake,
+# which links through the clang driver — clang reads `/machine:x64` as an input
+# filename and llama.cpp's first try-compile dies with "no such file or
+# directory". (`-LIBPATH:<dir>` survives that trip because clang parses it as
+# `-L IBPATH:<dir>`: a bogus search path, but harmless.)
 
 # Dynamic UCRT (`/MD`), matching what rustc emits for *-pc-windows-msvc without
 # `+crt-static` — the two halves of a shipped DLL must agree on the CRT. Compile
@@ -237,11 +234,28 @@ cc_args(
     actions = [
         "@rules_cc//cc/toolchains/actions:link_actions",
     ],
+    # Each directory is passed twice, because this toolchain has two kinds of
+    # link consumer and neither spelling reaches both:
+    #
+    #   -LIBPATH:  lld-link's own form, used by Bazel's link actions and by
+    #              rustc. The clang driver misparses it as `-L IBPATH:<dir>`,
+    #              silently losing the path.
+    #   -L         what rules_foreign_cc needs: CMake links through the clang
+    #              driver, so without it llama.cpp's try-compile cannot find
+    #              kernel32.lib. lld-link answers with "ignoring unknown
+    #              argument", which is where the per-link warnings come from.
+    #
+    # An `env = {"LIB": ...}` would serve both, but `cc_args` format strings
+    # take a single variable, so the four directories cannot be joined into one.
     args = [
         "-LIBPATH:{lowercase_aliases}",
+        "-L{lowercase_aliases}",
         "-LIBPATH:{msvc_lib}",
+        "-L{msvc_lib}",
         "-LIBPATH:{ucrt_lib}",
+        "-L{ucrt_lib}",
         "-LIBPATH:{um_lib}",
+        "-L{um_lib}",
     ],
     data = [
         ":case_insensitive_libraries",
@@ -322,7 +336,6 @@ cc_args_list(
         ":ms_runtime_lib",
         ":case_insensitive_header_lookup",
         ":headers_include_search_paths",
-        ":machine_flags",
         ":library_search_paths",
         "@llvm//toolchain/args:ignore_unused_command_line_argument",
     ],
