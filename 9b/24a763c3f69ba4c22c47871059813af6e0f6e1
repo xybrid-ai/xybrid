@@ -1,0 +1,19 @@
+tools/scripts/tests/test_bazel_output.py
+  s_13e9783d1fe035::t_8312d0f5648248 1-132
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "9b24a763c3f69ba4c22c47871059813af6e0f6e1",
+  "prompts": {},
+  "sessions": {
+    "s_13e9783d1fe035": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c2e73e03-96e5-4291-8071-6cc09020b8b6",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
