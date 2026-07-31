@@ -497,6 +497,18 @@ impl WhisperModel {
 
             let decoded = self.decode_segment(&audio_features, prefix)?;
             if is_silent_segment(decoded.no_speech_prob, decoded.avg_logprob) {
+                // The one path here that can delete transcript content, so it
+                // says so: a misfiring threshold would otherwise look exactly
+                // like audio the model had nothing to say about.
+                log::debug!(
+                    "whisper: dropping speechless window at frame {start} (len {len}): \
+                     no_speech_prob {:.3} > {}, avg_logprob {:.3} < {}, text {:?}",
+                    decoded.no_speech_prob,
+                    m::NO_SPEECH_THRESHOLD,
+                    decoded.avg_logprob,
+                    m::LOGPROB_THRESHOLD,
+                    decoded.text.trim(),
+                );
                 continue;
             }
 
@@ -834,6 +846,14 @@ fn suppress_mask_tensor(
 ///
 /// Thresholds are candle's own constants, which are OpenAI's: not tuned here,
 /// so they stay comparable to every other Whisper implementation.
+///
+/// This is the only mechanism that discards a window. Suppressing EOT on a
+/// segment's first step (`begin_suppress_tokens`) means a window can no longer
+/// terminate immediately with empty text, so the "drop the empty ones" filter
+/// downstream never fires on its own. Note also that it has never been observed
+/// to trip on this repo's fixtures — the suppress mask alone is what keeps
+/// mostly-padding windows from emitting annotation tokens — so treat it as
+/// defense in depth rather than as the load-bearing guard.
 fn is_silent_segment(no_speech_prob: f64, avg_logprob: f64) -> bool {
     no_speech_prob > m::NO_SPEECH_THRESHOLD && avg_logprob < m::LOGPROB_THRESHOLD
 }

@@ -232,14 +232,19 @@ fn english_word_rate(text: &str) -> f64 {
     hits as f64 / words.len() as f64
 }
 
-/// Sub-second audio: a single window that is 99%+ padding. The trim keeps this
-/// window because it holds real frames, on the premise that Whisper handles a
-/// padded *tail* fine — this measures that premise at its thinnest: 0.3 s of
-/// speech in front of 29.7 s of padding must not decode into fabricated
-/// annotations, and must not error. An empty transcript is acceptable; 0.3 s
-/// may genuinely carry no recognizable word.
+/// Sub-second audio: a single window that is 99%+ padding, the thinnest case
+/// the mel trim keeps. It decoded to "[BLANK_AUDIO]" before the suppress mask
+/// was ported, so this pins that it transcribes without erroring and emits no
+/// annotation token.
+///
+/// Deliberately narrower than "does not hallucinate". Whisper's classic
+/// silence artifacts are ordinary words — this clip currently yields "you" —
+/// and no cheap assertion separates those from a genuine short decode, so the
+/// test does not pretend to. What it does cover is the mechanism that failed:
+/// annotation tokens are now unreachable because `suppress_tokens` masks "["
+/// and "(" out of the logits entirely.
 #[test]
-fn test_whisper_survives_sub_second_audio_without_fabricating_text() {
+fn test_whisper_sub_second_audio_emits_no_annotation_token() {
     let Some(mut runtime) = whisper_runtime() else {
         skip_notice();
         return;
