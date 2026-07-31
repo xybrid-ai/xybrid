@@ -41,8 +41,10 @@ pub enum WhisperError {
     /// `<|xx|>` token for a *caller-supplied* language is bad input, not a
     /// broken model, and callers map it to an invalid-input error rather than
     /// an inference failure.
-    #[error("Unsupported language '{0}': the model vocabulary has no '<|{0}|>' token")]
-    UnsupportedLanguage(String),
+    #[error(
+        "Unsupported language value ({byte_len} bytes): the model vocabulary has no matching language token"
+    )]
+    UnsupportedLanguage { byte_len: usize },
 
     /// Candle tensor/model error
     #[error("Candle error: {0}")]
@@ -965,7 +967,9 @@ fn language_token_id(tokenizer: &Tokenizer, language: &str) -> WhisperResult<u32
     let token = format!("<|{}|>", language.trim().to_ascii_lowercase());
     tokenizer
         .token_to_id(&token)
-        .ok_or_else(|| WhisperError::UnsupportedLanguage(language.to_string()))
+        .ok_or(WhisperError::UnsupportedLanguage {
+            byte_len: language.len(),
+        })
 }
 
 /// Helper to get token ID from tokenizer
@@ -978,6 +982,28 @@ fn token_id(tokenizer: &Tokenizer, token: &str) -> WhisperResult<u32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_unsupported_language_error_redacts_value() {
+        let tokenizer = Tokenizer::new(tokenizers::models::bpe::BPE::default());
+        let private_language = "PRIVATE_LANGUAGE_SENTINEL_8d2e";
+        let message = language_token_id(&tokenizer, private_language)
+            .expect_err("the empty tokenizer has no language token")
+            .to_string();
+
+        assert!(
+            message.contains("language"),
+            "error should name the rejected parameter: {message}"
+        );
+        assert!(
+            message.contains(&private_language.len().to_string()),
+            "error should report the rejected language's byte length: {message}"
+        );
+        assert!(
+            !message.contains(private_language),
+            "error must not expose the rejected language: {message}"
+        );
+    }
 
     #[test]
     fn test_whisper_size_as_str() {

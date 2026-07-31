@@ -467,7 +467,8 @@ fn test_whisper_rejects_prompt_metadata_as_invalid_input() {
     };
 
     let pcm = read_pcm(FRENCH_CLIP);
-    let error = transcribe(&mut runtime, &pcm, &[("prompt", "x")])
+    let private_prompt = "PRIVATE_PROMPT_SENTINEL_7c1f";
+    let error = transcribe(&mut runtime, &pcm, &[("prompt", private_prompt)])
         .expect_err("'prompt' is unsupported and must be rejected");
 
     assert!(
@@ -477,5 +478,9 @@ fn test_whisper_rejects_prompt_metadata_as_invalid_input() {
     assert!(
         error.to_string().contains("prompt"),
         "error should name the rejected parameter: {error}"
+    );
+    assert!(
+        !error.to_string().contains(private_prompt),
+        "error must not expose the rejected prompt: {error}"
     );
 }

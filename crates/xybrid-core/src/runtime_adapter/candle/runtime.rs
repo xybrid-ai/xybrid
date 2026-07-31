@@ -230,7 +230,8 @@ fn parse_transcribe_options(
         return Err(AdapterError::InvalidInput(format!(
             "'prompt' is not supported by the Candle Whisper runtime: decoding starts from a \
              fixed forced-token prefix, so the prompt would be dropped without affecting the \
-             transcript (got {prompt:?})"
+             transcript (received a non-empty value of {} bytes)",
+            prompt.len()
         )));
     }
 
@@ -288,7 +289,7 @@ fn parse_transcribe_options(
 /// and invite a retry that cannot succeed.
 fn transcription_error(error: WhisperError) -> AdapterError {
     match error {
-        WhisperError::UnsupportedLanguage(_) => AdapterError::InvalidInput(error.to_string()),
+        WhisperError::UnsupportedLanguage { .. } => AdapterError::InvalidInput(error.to_string()),
         other => AdapterError::InferenceFailed(format!("Transcription failed: {}", other)),
     }
 }
@@ -367,13 +368,22 @@ mod tests {
 
     #[test]
     fn test_parse_options_rejects_prompt() {
+        let private_prompt = "PRIVATE_PROMPT_SENTINEL_7c1f";
         let message = invalid_input_message(parse_transcribe_options(&metadata(&[(
             "prompt",
-            "The following is a recording of a lecture.",
+            private_prompt,
         )])));
         assert!(
             message.contains("prompt"),
             "error should name the parameter: {message}"
+        );
+        assert!(
+            message.contains(&private_prompt.len().to_string()),
+            "error should report the rejected prompt's byte length: {message}"
+        );
+        assert!(
+            !message.contains(private_prompt),
+            "error must not expose the rejected prompt: {message}"
         );
     }
 
@@ -458,11 +468,11 @@ mod tests {
 
     #[test]
     fn test_unsupported_language_maps_to_invalid_input() {
-        let error = transcription_error(WhisperError::UnsupportedLanguage("xx".to_string()));
+        let error = transcription_error(WhisperError::UnsupportedLanguage { byte_len: 2 });
         match error {
             AdapterError::InvalidInput(message) => assert!(
-                message.contains("xx"),
-                "error should name the rejected language: {message}"
+                message.contains("language") && message.contains("2 bytes"),
+                "error should name the parameter and report its byte length: {message}"
             ),
             other => panic!("expected InvalidInput, got {other:?}"),
         }
