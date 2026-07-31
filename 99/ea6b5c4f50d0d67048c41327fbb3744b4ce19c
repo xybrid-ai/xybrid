@@ -1,0 +1,77 @@
+BUILD.bazel
+  s_d172d40632dd69::t_0628a65bd6c725 1-2
+.gitignore
+  s_d172d40632dd69::t_892c057823ded6 61
+.github/workflows/unity-editor.yml
+  s_13e9783d1fe035::t_0120406db04f67 110-112
+.github/workflows/build-android.yml
+  s_13e9783d1fe035::t_0120406db04f67 114
+bazel/windows_msvc_smoke/BUILD.bazel
+  s_d172d40632dd69::t_a2d67444034fbe 6
+.github/workflows/test-ci.yml
+  s_13e9783d1fe035::t_0120406db04f67 290
+MODULE.bazel
+  s_d172d40632dd69::t_4a80928469c3a1 1-2,6-8
+  s_d172d40632dd69::t_fa78c9d73d01bc 10
+  s_f0646b2cb26c2f::t_d636fc49a825ca 3-4
+.github/workflows/bazel.yml
+  s_13e9783d1fe035::t_0120406db04f67 128-130,367-369,440-442
+  s_d172d40632dd69::t_ee8c87f945540e 451-452
+tools/scripts/write-buildbuddy-rc.sh
+  s_13e9783d1fe035::t_e80cd00570cb7f 1-20,23-29,37-40,43-47,49-50,53-58,60-90,92
+  s_13e9783d1fe035::t_738c269363b954 21-22,30-36,41-42,48,51-52,59
+  s_13e9783d1fe035::t_410b4d31884e2d 91
+.github/workflows/release-prep.yml
+  s_13e9783d1fe035::t_0120406db04f67 271,373,452,561,674,797,877
+.github/workflows/build-react-native.yml
+  s_13e9783d1fe035::t_4204ff0e829918 61-62
+  s_13e9783d1fe035::t_0120406db04f67 83-85,286-288
+  s_598b65e968c463::t_2e7685ecd0ff12 219
+  s_d172d40632dd69::t_806ce09a648efb 227-233,238-240
+  s_13e9783d1fe035::t_3feb9b1ee8daed 284
+.github/workflows/build-unity.yml
+  s_13e9783d1fe035::t_e90c8a47f2c22b 129,197,258
+.bazelrc
+  s_13e9783d1fe035::t_37747db7439a38 116-120
+  s_d172d40632dd69::t_2a6c624777bed0 1-2
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "99ea6b5c4f50d0d67048c41327fbb3744b4ce19c",
+  "prompts": {},
+  "sessions": {
+    "s_13e9783d1fe035": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c2e73e03-96e5-4291-8071-6cc09020b8b6",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    },
+    "s_598b65e968c463": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_04ad20225ffeLducqR0pUpQ7n1",
+        "model": "unknown"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    },
+    "s_d172d40632dd69": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_048c550b2ffestg8cssdqYidY4",
+        "model": "unknown"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    },
+    "s_f0646b2cb26c2f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019fb7f2-3410-71b1-9be1-5be410f6bc15",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
