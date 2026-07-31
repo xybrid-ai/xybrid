@@ -10,14 +10,18 @@ on:
     branches: [master]
     paths:
       - 'crates/xybrid-core/src/runtime_adapter/candle/**'
+      - 'crates/xybrid-core/src/audio/**'
       - 'crates/xybrid-core/Cargo.toml'
+      - 'integration-tests/**'
       - 'Cargo.lock'
       - '.github/workflows/test-candle.yml'
   pull_request:
     branches: [master]
     paths:
       - 'crates/xybrid-core/src/runtime_adapter/candle/**'
+      - 'crates/xybrid-core/src/audio/**'
       - 'crates/xybrid-core/Cargo.toml'
+      - 'integration-tests/**'
       - 'Cargo.lock'
       - '.github/workflows/test-candle.yml'
   workflow_dispatch:
@@ -46,3 +50,56 @@ jobs:
           key: candle
       - name: Test Candle (xybrid-core only)
         run: cargo test -p xybrid-core --features "ort-download,candle" --lib --tests
+
+  # Real Whisper weights, real audio. The mel-windowing and per-request
+  # language/task defects this guards against are both invisible without them,
+  # so the job downloads whisper-tiny and sets XYBRID_REQUIRE_MODELS — with
+  # that variable set, `fixtures::model_for_test` panics instead of skipping,
+  # which is what keeps a silently failed download from leaving the suite green.
+  test-candle-integration:
+    name: Test Candle (integration, real model)
+    runs-on: macos-14
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          key: candle-integration
+
+      # The registry bundle is a zstd tarball and download.sh parses the
+      # resolve response with jq, so both have to exist before it runs. Present
+      # on the image today; installed only if that changes.
+      - name: Ensure download tooling (jq, zstd)
+        run: |
+          for tool in jq zstd; do
+            command -v "$tool" >/dev/null || brew install "$tool"
+          done
+
+      # ~150 MB of weights, keyed on the manifest entry that decides which
+      # bundle download.sh resolves. `download.sh --check` treats a model as
+      # present when the directory holds model_metadata.json, which is exactly
+      # what this restores.
+      - name: Cache whisper-tiny
+        id: cache-whisper-tiny
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: integration-tests/fixtures/models/whisper-tiny
+          key: whisper-tiny-${{ runner.os }}-${{ hashFiles('integration-tests/fixtures/models/models.json') }}
+
+      - name: Download whisper-tiny
+        if: steps.cache-whisper-tiny.outputs.cache-hit != 'true'
+        run: ./integration-tests/download.sh whisper-tiny
+
+      # Scoped to this one test binary on purpose: the crate's other E2E files
+      # gate on models this job does not download (wav2vec2, kokoro, the GGUF
+      # LLMs), and XYBRID_REQUIRE_MODELS would turn each of their skips into a
+      # failure.
+      - name: Test Whisper end to end
+        env:
+          XYBRID_REQUIRE_MODELS: 1
+        run: |
+          cargo test -p integration-tests --features candle \
+            --test whisper_candle_integration -- --nocapture

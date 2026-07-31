@@ -76,7 +76,10 @@ _E2E_TESTS = {
 
 # local_llm is absent on purpose: it is gated on `llm-mistral`, and xybrid-core's
 # Bazel target does not build the mistral backend at all, so the feature cannot
-# be satisfied here the way llm-llamacpp can.
+# be satisfied here the way llm-llamacpp can. whisper_candle_integration is
+# absent for the same reason — it is gated on `candle`, which xybrid-core's
+# crate_features above do not enable. It runs under cargo, in the Test Candle
+# workflow.
 
 [
     rust_test(

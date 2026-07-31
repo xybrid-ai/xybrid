@@ -72,6 +72,32 @@ pub fn model_if_available(model_name: &str) -> Option<PathBuf> {
     }
 }
 
+/// Name of the environment variable that turns a missing model into a failure.
+pub const REQUIRE_MODELS_ENV: &str = "XYBRID_REQUIRE_MODELS";
+
+/// Get a model path, skipping locally but failing where models are mandatory.
+///
+/// [`model_if_available`] alone makes every model-gated test a no-op on a
+/// machine without the weights — convenient locally, useless on CI, where a
+/// download step that quietly failed leaves the whole suite green while
+/// testing nothing. Setting `XYBRID_REQUIRE_MODELS` (to any value) flips the
+/// missing-model case from "return `None` and skip" to [`require_model`]'s
+/// panic, so CI has to actually have the model.
+///
+/// Use with early return in tests:
+/// ```rust,ignore
+/// let Some(model_dir) = model_for_test("whisper-tiny") else {
+///     eprintln!("Skipping: whisper-tiny not downloaded");
+///     return;
+/// };
+/// ```
+pub fn model_for_test(model_name: &str) -> Option<PathBuf> {
+    if std::env::var_os(REQUIRE_MODELS_ENV).is_some() {
+        return Some(require_model(model_name));
+    }
+    model_if_available(model_name)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

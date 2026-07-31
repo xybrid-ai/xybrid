@@ -7,6 +7,11 @@ publish = false
 [features]
 default = []
 
+# Candle (pure-Rust ML) backend — gates tests/whisper_candle_integration.rs.
+# Off by default because it pulls candle-core/nn/transformers into the build;
+# CI turns it on in the Test Candle workflow.
+candle = ["xybrid-core/candle"]
+
 # Local LLM inference
 llm-mistral = ["xybrid-core/llm-mistral"]              # mistral.rs (CPU)
 llm-mistral-metal = ["xybrid-core/llm-mistral-metal"]  # mistral.rs + Metal (macOS)

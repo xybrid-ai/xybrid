@@ -35,6 +35,9 @@ rust-project.json
 *.log
 
 *.wav
+# ...except the integration-test audio inputs, which are committed fixtures
+# rather than artifacts. Without this the tests' own inputs need `git add -f`.
+!integration-tests/fixtures/input/*.wav
 
 # Xcode user data
 xcuserdata/
