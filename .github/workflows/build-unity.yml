@@ -77,7 +77,7 @@ jobs:
       # resolves the same (opt) output path.
       - name: Stage into Unity plugins
         run: |
-          LIB=$(bazelisk cquery --config=macos-metal -c opt --output=files //crates/xybrid-bolt:xybrid_bolt_cdylib | head -1)
+          LIB=$(tools/scripts/bazel-output.sh //crates/xybrid-bolt:xybrid_bolt_cdylib --config=macos-metal -c opt)
           echo "Bazel output: $LIB"
           python3 tools/scripts/stage_unity_native.py \
             --lib "$LIB" \
@@ -135,8 +135,8 @@ jobs:
           [[ -n "${REMOTE:-}" ]] && remote_args+=("$REMOTE")
           bazelisk build "${remote_args[@]}" --config=windows-msvc -c opt \
             //crates/xybrid-bolt:xybrid_bolt_cdylib
-          LIB=$(bazelisk cquery "${remote_args[@]}" --config=windows-msvc -c opt \
-            --output=files //crates/xybrid-bolt:xybrid_bolt_cdylib | grep '\.dll$')
+          LIB=$(tools/scripts/bazel-output.sh --ext dll //crates/xybrid-bolt:xybrid_bolt_cdylib \
+            "${remote_args[@]}" --config=windows-msvc -c opt)
           echo "Bazel output: $LIB"
           python3 tools/scripts/stage_unity_native.py --lib "$LIB" --target x86_64-pc-windows-msvc
 
@@ -202,7 +202,7 @@ jobs:
           remote_args=()
           [[ -n "${REMOTE:-}" ]] && remote_args+=("$REMOTE")
           bazelisk build "${remote_args[@]}" -c opt //crates/xybrid-bolt:xybrid_bolt_cdylib
-          LIB=$(bazelisk cquery "${remote_args[@]}" -c opt --output=files //crates/xybrid-bolt:xybrid_bolt_cdylib | head -1)
+          LIB=$(tools/scripts/bazel-output.sh //crates/xybrid-bolt:xybrid_bolt_cdylib "${remote_args[@]}" -c opt)
           echo "Bazel output: $LIB"
           python3 tools/scripts/stage_unity_native.py --lib "$LIB" --target x86_64-unknown-linux-gnu
 
@@ -274,7 +274,7 @@ jobs:
             triple="${spec%%:*}"; cfg="${spec##*:}"
             echo "=== $triple ($cfg) ==="
             bazelisk build "${remote_args[@]}" --config="$cfg" //crates/xybrid-bolt:xybrid_bolt_cdylib
-            LIB=$(bazelisk cquery "${remote_args[@]}" --config="$cfg" --output=files //crates/xybrid-bolt:xybrid_bolt_cdylib | head -1)
+            LIB=$(tools/scripts/bazel-output.sh //crates/xybrid-bolt:xybrid_bolt_cdylib "${remote_args[@]}" --config="$cfg")
             echo "Bazel output: $LIB"
             python3 tools/scripts/stage_unity_native.py \
               --lib "$LIB" \
@@ -344,7 +344,7 @@ jobs:
 
       - name: Stage into Unity plugins
         run: |
-          LIB=$(bazelisk cquery --config=ios --output=files //crates/xybrid-bolt:xybrid_bolt_staticlib | head -1)
+          LIB=$(tools/scripts/bazel-output.sh //crates/xybrid-bolt:xybrid_bolt_staticlib --config=ios)
           echo "Bazel output: $LIB"
           python3 tools/scripts/stage_unity_native.py --lib "$LIB" --target aarch64-apple-ios
 

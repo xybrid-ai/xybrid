@@ -26,6 +26,8 @@ on:
       - "tools/unity-runtime-smoke/**"
       - "tools/scripts/stage_unity_native.py"
       - "tools/scripts/stage_unity_desktop_ort.py"
+      - "tools/scripts/bazel-output.sh"
+      - "tools/scripts/write-buildbuddy-rc.sh"
       - ".github/workflows/unity-editor.yml"
   push:
     branches: [master]
@@ -34,6 +36,10 @@ on:
       - "crates/xybrid-bolt/**"
       - "crates/xybrid-ffi-facade/**"
       - "tools/unity-runtime-smoke/**"
+      - "tools/scripts/stage_unity_native.py"
+      - "tools/scripts/stage_unity_desktop_ort.py"
+      - "tools/scripts/bazel-output.sh"
+      - "tools/scripts/write-buildbuddy-rc.sh"
       - ".github/workflows/unity-editor.yml"
   workflow_dispatch:
 
@@ -124,8 +130,8 @@ jobs:
         if: env.BUILDBUDDY_API_KEY != ''
         run: |
           set -euo pipefail
-          LIB=$(bazelisk cquery --config=remote -c opt --output=files \
-            //crates/xybrid-bolt:xybrid_bolt_cdylib | head -1)
+          LIB=$(tools/scripts/bazel-output.sh //crates/xybrid-bolt:xybrid_bolt_cdylib \
+            --config=remote -c opt)
           echo "bolt native: $LIB"
           python3 tools/scripts/stage_unity_native.py --lib "$LIB" \
             --target x86_64-unknown-linux-gnu

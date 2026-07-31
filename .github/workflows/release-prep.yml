@@ -280,7 +280,7 @@ jobs:
             local triple="$1"; shift
             bazelisk build "$@" //bindings/flutter/rust:xybrid_flutter_ffi_staticlib
             mkdir -p "prebuilt/$triple"
-            cp -L "$(bazelisk cquery "$@" --output=files //bindings/flutter/rust:xybrid_flutter_ffi_staticlib | head -1)" \
+            cp -L "$(tools/scripts/bazel-output.sh //bindings/flutter/rust:xybrid_flutter_ffi_staticlib "$@")" \
               "prebuilt/$triple/libxybrid_flutter_ffi.a"
           }
           # macOS — mixed execution (Rust graph on RBE/cache, Metal local).
@@ -382,7 +382,7 @@ jobs:
       # (Mach-O symbols carry a leading underscore.)
       - name: Verify CLI payload (run + Metal + features)
         run: |
-          BIN=$(bazelisk cquery --config=remote --config=macos-metal -c opt --output=files //crates/xybrid-cli:xybrid | head -1)
+          BIN=$(tools/scripts/bazel-output.sh //crates/xybrid-cli:xybrid --config=remote --config=macos-metal -c opt)
           echo "resolved CLI: $BIN"
           file "$BIN"
           "$BIN" --help >/dev/null
@@ -397,7 +397,7 @@ jobs:
           TAG: ${{ needs.check-release-branch.outputs.tag }}
         run: |
           mkdir -p dist-cli
-          BIN=$(bazelisk cquery --config=remote --config=macos-metal -c opt --output=files //crates/xybrid-cli:xybrid | head -1)
+          BIN=$(tools/scripts/bazel-output.sh //crates/xybrid-cli:xybrid --config=remote --config=macos-metal -c opt)
           cp "$BIN" dist-cli/xybrid-${TAG}-macos-arm64
           chmod +w dist-cli/xybrid-${TAG}-macos-arm64   # bazel outputs are read-only
           strip dist-cli/xybrid-${TAG}-macos-arm64
@@ -570,7 +570,7 @@ jobs:
             local triple="$1"; shift
             bazelisk build "$@" //bindings/flutter/rust:xybrid_flutter_ffi_cdylib
             mkdir -p "prebuilt/$triple"
-            cp -L "$(bazelisk cquery "$@" --output=files //bindings/flutter/rust:xybrid_flutter_ffi_cdylib | head -1)" \
+            cp -L "$(tools/scripts/bazel-output.sh //bindings/flutter/rust:xybrid_flutter_ffi_cdylib "$@")" \
               "prebuilt/$triple/libxybrid_flutter_ffi.so"
           }
           # linux x86_64 — hermetic glibc floor (loadable on older distros,
@@ -682,8 +682,8 @@ jobs:
           bazelisk build --config=remote --config=windows-msvc -c opt \
             //bindings/flutter/rust:xybrid_flutter_ffi_cdylib
           mkdir -p prebuilt/x86_64-pc-windows-msvc
-          bazelisk cquery --config=remote --config=windows-msvc -c opt \
-            --output=files //bindings/flutter/rust:xybrid_flutter_ffi_cdylib \
+          tools/scripts/bazel-output.sh --all //bindings/flutter/rust:xybrid_flutter_ffi_cdylib \
+            --config=remote --config=windows-msvc -c opt \
             | while read -r artifact; do
                 cp -L "$artifact" prebuilt/x86_64-pc-windows-msvc/
               done
@@ -805,7 +805,7 @@ jobs:
       # glibc floor — strictly better than the old cargo/ubuntu-24.04 build.
       - name: Verify CLI payload (run + features + glibc floor)
         run: |
-          BIN=$(bazelisk cquery --config=remote -c opt --output=files //crates/xybrid-cli:xybrid | head -1)
+          BIN=$(tools/scripts/bazel-output.sh //crates/xybrid-cli:xybrid --config=remote -c opt)
           echo "resolved CLI: $BIN"
           "$BIN" --help >/dev/null
           test "$(nm "$BIN" | grep -c ' mtmd_')" -gt 0 || { echo "MISSING vision (mtmd) symbols"; exit 1; }
@@ -821,7 +821,7 @@ jobs:
         run: |
           mkdir -p dist
           ARTIFACT="dist/xybrid-${TAG}-linux-x86_64"
-          BIN=$(bazelisk cquery --config=remote -c opt --output=files //crates/xybrid-cli:xybrid | head -1)
+          BIN=$(tools/scripts/bazel-output.sh //crates/xybrid-cli:xybrid --config=remote -c opt)
           cp "$BIN" "$ARTIFACT"
           chmod +w "$ARTIFACT"   # bazel-bin outputs are read-only
           strip "$ARTIFACT"
@@ -886,7 +886,7 @@ jobs:
       # run-it half is smoke-cli-windows below.
       - name: Verify CLI payload (PE32+ + features)
         run: |
-          EXE=$(bazelisk cquery --config=remote --config=windows -c opt --output=files //crates/xybrid-cli:xybrid | head -1)
+          EXE=$(tools/scripts/bazel-output.sh //crates/xybrid-cli:xybrid --config=remote --config=windows -c opt)
           echo "resolved CLI: $EXE"
           file "$EXE"
           file "$EXE" | grep -q 'PE32+.*x86-64' || { echo "NOT a PE32+ x86-64 binary"; exit 1; }
@@ -904,7 +904,7 @@ jobs:
         run: |
           mkdir -p dist
           ARTIFACT="dist/xybrid-${TAG}-windows-x86_64.exe"
-          EXE=$(bazelisk cquery --config=remote --config=windows -c opt --output=files //crates/xybrid-cli:xybrid | head -1)
+          EXE=$(tools/scripts/bazel-output.sh //crates/xybrid-cli:xybrid --config=remote --config=windows -c opt)
           cp "$EXE" "$ARTIFACT"
           echo "artifact_path=$ARTIFACT" >> "$GITHUB_OUTPUT"
 

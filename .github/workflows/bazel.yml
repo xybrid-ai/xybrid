@@ -208,7 +208,7 @@ jobs:
       - name: Smoke the linux CLI (run + features + glibc floor)
         if: env.BUILDBUDDY_API_KEY != ''
         run: |
-          BIN=$(bazelisk cquery --config=remote -c opt --output=files //crates/xybrid-cli:xybrid | head -1)
+          BIN=$(tools/scripts/bazel-output.sh //crates/xybrid-cli:xybrid --config=remote -c opt)
           echo "resolved linux CLI: $BIN"
           file "$BIN"
           "$BIN" --help >/dev/null
@@ -227,7 +227,7 @@ jobs:
       - name: Verify + stage the windows CLI (.exe)
         if: env.BUILDBUDDY_API_KEY != ''
         run: |
-          EXE=$(bazelisk cquery --config=remote --config=windows -c opt --output=files //crates/xybrid-cli:xybrid | head -1)
+          EXE=$(tools/scripts/bazel-output.sh //crates/xybrid-cli:xybrid --config=remote --config=windows -c opt)
           echo "resolved windows CLI: $EXE"
           file "$EXE"
           file "$EXE" | grep -q 'PE32+.*x86-64' || { echo "NOT a PE32+ x86-64 binary"; exit 1; }
@@ -253,7 +253,7 @@ jobs:
       - name: Verify + audit + stage the windows bolt DLL
         if: env.BUILDBUDDY_API_KEY != ''
         run: |
-          DLL=$(bazelisk cquery --config=remote --config=windows -c opt --output=files //crates/xybrid-bolt:xybrid_bolt_cdylib | head -1)
+          DLL=$(tools/scripts/bazel-output.sh //crates/xybrid-bolt:xybrid_bolt_cdylib --config=remote --config=windows -c opt)
           echo "resolved windows bolt DLL: $DLL"
           file "$DLL"
           file "$DLL" | grep -q 'PE32+.*x86-64' || { echo "NOT a PE32+ x86-64 DLL"; exit 1; }
@@ -397,7 +397,7 @@ jobs:
       - name: Smoke the Metal CLI (run + Metal + features)
         if: env.BUILDBUDDY_API_KEY != ''
         run: |
-          BIN=$(bazelisk cquery --config=remote --config=macos-metal -c opt --output=files //crates/xybrid-cli:xybrid | head -1)
+          BIN=$(tools/scripts/bazel-output.sh //crates/xybrid-cli:xybrid --config=remote --config=macos-metal -c opt)
           echo "resolved CLI: $BIN"
           file "$BIN"
           "$BIN" --help >/dev/null
@@ -465,10 +465,12 @@ jobs:
         if: env.BUILDBUDDY_API_KEY != ''
         run: |
           set -euo pipefail
-          FILES=$(bazelisk cquery --config=remote --config=windows-msvc -c opt \
-            --output=files //bindings/flutter/rust:xybrid_flutter_ffi_cdylib)
-          DLL=$(printf '%s\n' "$FILES" | grep '\.dll$')
-          IMPLIB=$(printf '%s\n' "$FILES" | grep '\.dll\.lib$')
+          DLL=$(tools/scripts/bazel-output.sh --ext dll \
+            //bindings/flutter/rust:xybrid_flutter_ffi_cdylib \
+            --config=remote --config=windows-msvc -c opt)
+          IMPLIB=$(tools/scripts/bazel-output.sh --ext dll.lib \
+            //bindings/flutter/rust:xybrid_flutter_ffi_cdylib \
+            --config=remote --config=windows-msvc -c opt)
           echo "resolved DLL: $DLL"
           echo "resolved import library: $IMPLIB"
           file "$DLL"
