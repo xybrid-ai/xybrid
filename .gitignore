@@ -61,7 +61,7 @@ __pycache__/
 # in CI; never committed (they go stale and bloat the repo).
 *.cdx.json
 
-# Bazel (Phase-0 spike — see .context/bazel-hermetic-evaluation.md)
+# Bazel
 /bazel-*
 MODULE.bazel.lock
 

@@ -58,7 +58,8 @@ jobs:
     runs-on: macos-14
     env:
       # Enables the remote-cache fast path below. Absent on fork PRs → the
-      # config step skips → a plain local Bazel build (slow but correct).
+      # config script writes nothing → a plain local Bazel build (slow but
+      # correct).
       BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -79,18 +80,9 @@ jobs:
       # runs. The build step below adds --config=remote-cache when the key
       # is present.
       - name: Configure BuildBuddy remote-cache config
-        if: env.BUILDBUDDY_API_KEY != ''
-        run: |
-          mkdir -p .context
-          cat > .context/buildbuddy.bazelrc <<EOF
-          common:remote-cache --bes_results_url=https://app.buildbuddy.io/invocation/
-          common:remote-cache --bes_backend=grpcs://remote.buildbuddy.io
-          common:remote-cache --remote_header=x-buildbuddy-api-key=${BUILDBUDDY_API_KEY}
-          common:remote-cache --remote_cache=grpcs://remote.buildbuddy.io
-          common:remote-cache --remote_cache_compression
-          common:remote-cache --remote_timeout=600
-          common:remote-cache --remote_upload_local_results
-          EOF
+        env:
+          BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
+        run: tools/scripts/write-buildbuddy-rc.sh
 
       # Build the xcframework with Bazel (same //bindings/apple:XybridFFI the
       # release and build-apple.yml use), then stage it + the committed bolt
@@ -224,7 +216,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       # Enables the RBE fast path below. Absent on fork PRs → the config step
-      # skips → xtask's Bazel build falls back to local execution (slow but
+      # skips → the bazelisk build falls back to local execution (slow but
       # correct), same as before.
       BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
     steps:
@@ -232,16 +224,20 @@ jobs:
         with:
           submodules: true  # //:llama_src = vendor/llama-cpp (the bolt .so builds via Bazel)
 
-      # Keep LLVM (large-packages: false): the bolt build runs bindgen for
-      # the llama/ggml C++ via libclang. Removing system LLVM breaks it with
-      # "'stdbool.h' file not found".
+      # Keep large-packages (LLVM etc.): originally needed because the bolt
+      # build ran bindgen over llama/ggml C++ via system libclang. That no
+      # longer applies — the Bazel lane uses COMMITTED bindings
+      # (crates/llama-cpp-sys/BUILD.bazel: committed-bindings, no bindgen, no
+      # libclang). The keep is preserved precautionarily for the Gradle/Expo
+      # Android toolchain; revisit (flip large-packages: true to reclaim the
+      # headroom) once a run confirms the bolt .so + APK assemble without it.
       #
       # tool-cache: true reclaims /opt/hostedtoolcache (~10 GB). This step runs
       # first, before Set up JDK / Use Node.js, so those re-provision their
       # toolchains afterward — the build never reads the preinstalled cache.
-      # The extra headroom is needed because the from-source path compiles
-      # llama.cpp + the bolt .so for every ABI and then assembles the APK,
-      # which exhausted the runner ("No space left on device") at assembleDebug.
+      # The extra headroom is needed because the bolt .so compiles for every ABI
+      # and Gradle then assembles the APK, which previously exhausted the
+      # runner ("No space left on device") at assembleDebug.
       - name: Free disk space
         uses: jlumbroso/free-disk-space@54081f138730dfa15788a46383842cd2f914a1be # v1.3.1
         with:
@@ -285,23 +281,11 @@ jobs:
       # --config=remote and the AAR graph resolves from BuildBuddy's cache
       # (kept warm by bazel.yml on every PR) instead of compiling ~1,900
       # crates + llama.cpp locally on a 2-core runner (~38 min → ~3).
-      # Skipped on forks (no secret) → local Bazel fallback, as before.
+      # On forks (no secret) the script writes nothing → local Bazel fallback.
       - name: Configure BuildBuddy remote config
-        if: env.BUILDBUDDY_API_KEY != ''
-        run: |
-          mkdir -p .context
-          cat > .context/buildbuddy.bazelrc <<EOF
-          common:remote --bes_results_url=https://app.buildbuddy.io/invocation/
-          common:remote --bes_backend=grpcs://remote.buildbuddy.io
-          common:remote --remote_header=x-buildbuddy-api-key=${BUILDBUDDY_API_KEY}
-          common:remote --remote_cache=grpcs://remote.buildbuddy.io
-          common:remote --remote_executor=grpcs://remote.buildbuddy.io
-          common:remote --remote_cache_compression
-          common:remote --remote_download_toplevel
-          common:remote --remote_timeout=600
-          common:remote --jobs=200
-          common:remote --extra_execution_platforms=@llvm//:rbe_linux_x86_64
-          EOF
+        env:
+          BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
+        run: tools/scripts/write-buildbuddy-rc.sh
 
       # 1. Build the bolt .so for all ABIs and stage the AAR's jniLibs into
       #    bindings/kotlin/libs/ — the layout Gradle publishes from
