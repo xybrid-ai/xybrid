@@ -5,6 +5,8 @@
 default:
     @just --list
 
+bazel_host_config := if os() == "macos" { "--config=macos-metal" } else { "" }
+
 # =============================================================================
 # Build & Test
 # =============================================================================
@@ -17,9 +19,34 @@ build:
 build-release:
     cargo build --workspace --release
 
+# Build the local CLI with Bazel
+bazel-build *bazel_args:
+    bazelisk build {{bazel_host_config}} {{bazel_args}} //crates/xybrid-cli:xybrid
+
+# Analyze the Bazel workspace without producing build outputs (same graph as CI)
+bazel-analyze *bazel_args:
+    bazelisk build --nobuild {{bazel_args}} \
+        //crates/... \
+        //bindings/... \
+        //macros/... \
+        //xtask/... \
+        //integration-tests/... \
+        //:llama
+
 # Run all tests
 test:
     cargo test --workspace
+
+# Run the Rust tests represented in the Bazel graph (same targets as CI)
+bazel-test *bazel_args:
+    bazelisk test {{bazel_host_config}} --test_output=errors {{bazel_args}} \
+        //crates/xybrid-cli:all \
+        //crates/xybrid-core:all \
+        //crates/xybrid-ffi-facade:xybrid-ffi-facade_test \
+        //crates/xybrid-llama:all \
+        //crates/xybrid-sdk:all \
+        //integration-tests:all \
+        //xtask:xtask_test
 
 # Run tests with output
 test-verbose:

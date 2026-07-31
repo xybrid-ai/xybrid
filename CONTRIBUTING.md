@@ -82,6 +82,14 @@ bazel build --config=macos-metal //crates/xybrid-cli:xybrid   # CLI (macOS; see 
 cargo xtask build-flutter --platform <linux|macos|windows>
 ```
 
+If you use `just`, the matching Bazel shortcuts are `just bazel-build`
+(the local CLI), `just bazel-analyze`, and `just bazel-test`. Each accepts
+additional Bazel flags, for example:
+
+```bash
+just bazel-build -c opt
+```
+
 ### Building for Windows (MSVC)
 
 `bazel build --config=windows-msvc //...` cross-compiles MSVC-ABI Windows
