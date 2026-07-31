@@ -1,5 +1,5 @@
-# PHASE-0 BAZEL SPIKE — throwaway. Root package exists so rules_rs can
-# watch //:Cargo.lock and //:Cargo.toml as the dependency source of truth.
+# Root package. The exports_files watchers let rules_rs watch //:Cargo.lock and
+# //:Cargo.toml as the dependency source of truth.
 exports_files([
     "Cargo.lock",
     "Cargo.toml",

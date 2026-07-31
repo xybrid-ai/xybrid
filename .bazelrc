@@ -1,5 +1,5 @@
-# PHASE-0 BAZEL SPIKE — throwaway. See .context/bazel-hermetic-evaluation.md.
-# Mirrors hermetic-llvm/e2e/rules_rs/.bazelrc (known-good rules_rs + hermetic-llvm config).
+# Bazel build config for xybrid. Mirrors hermetic-llvm/e2e/rules_rs/.bazelrc
+# (known-good rules_rs + hermetic-llvm config).
 
 # rules_cc on macOS: cc-rs (build scripts) breaks with libtool as archiver.
 common --@rules_cc//cc/toolchains/args/archiver_flags:use_libtool_on_macos=False
@@ -113,7 +113,11 @@ common:linux --host_platform=//:host_linux_gnu
 build --disk_cache=.context/bazel-disk-cache
 
 # --- Remote (BuildBuddy RBE): creds + remote flags live in a GITIGNORED file so
-# the API key never enters a committable file. Activate with `--config=remote`.
+# the API key never enters a committable file. Activate with `--config=remote`
+# (full remote execution) or `--config=remote-cache` (cache only — the Apple
+# lanes, whose actions must run on the Mac). CI generates the file with
+# tools/scripts/write-buildbuddy-rc.sh, which is the single source of truth for
+# these flags; write it by hand the same way for local RBE.
 try-import %workspace%/.context/buildbuddy.bazelrc
 
 # --- Machine-local settings (GITIGNORED): e.g.

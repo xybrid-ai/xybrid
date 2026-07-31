@@ -125,21 +125,9 @@ jobs:
       # .bazelrc try-imports this gitignored file; in CI it's materialized from
       # the secret. Absent secret (forks) → no :remote config → RBE steps skip.
       - name: Configure BuildBuddy remote config
-        if: env.BUILDBUDDY_API_KEY != ''
-        run: |
-          mkdir -p .context
-          cat > .context/buildbuddy.bazelrc <<EOF
-          common:remote --bes_results_url=https://app.buildbuddy.io/invocation/
-          common:remote --bes_backend=grpcs://remote.buildbuddy.io
-          common:remote --remote_header=x-buildbuddy-api-key=${BUILDBUDDY_API_KEY}
-          common:remote --remote_cache=grpcs://remote.buildbuddy.io
-          common:remote --remote_executor=grpcs://remote.buildbuddy.io
-          common:remote --remote_cache_compression
-          common:remote --remote_download_toplevel
-          common:remote --remote_timeout=600
-          common:remote --jobs=200
-          common:remote --extra_execution_platforms=@llvm//:rbe_linux_x86_64
-          EOF
+        env:
+          BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
+        run: tools/scripts/write-buildbuddy-rc.sh
 
       # Structural gate (always, fork-safe): every BUILD file in the workspace
       # must configure. Same target set Gate 5 proved (13 targets analyze-clean).
@@ -376,21 +364,9 @@ jobs:
           which pkg-config >/dev/null || brew install pkg-config
 
       - name: Configure BuildBuddy remote config
-        if: env.BUILDBUDDY_API_KEY != ''
-        run: |
-          mkdir -p .context
-          cat > .context/buildbuddy.bazelrc <<EOF
-          common:remote --bes_results_url=https://app.buildbuddy.io/invocation/
-          common:remote --bes_backend=grpcs://remote.buildbuddy.io
-          common:remote --remote_header=x-buildbuddy-api-key=${BUILDBUDDY_API_KEY}
-          common:remote --remote_cache=grpcs://remote.buildbuddy.io
-          common:remote --remote_executor=grpcs://remote.buildbuddy.io
-          common:remote --remote_cache_compression
-          common:remote --remote_download_toplevel
-          common:remote --remote_timeout=600
-          common:remote --jobs=200
-          common:remote --extra_execution_platforms=@llvm//:rbe_linux_x86_64
-          EOF
+        env:
+          BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
+        run: tools/scripts/write-buildbuddy-rc.sh
 
       - name: Build Metal CLI (mixed execution)
         if: env.BUILDBUDDY_API_KEY != ''
@@ -461,21 +437,9 @@ jobs:
           df -h /
 
       - name: Configure BuildBuddy remote config
-        if: env.BUILDBUDDY_API_KEY != ''
-        run: |
-          mkdir -p .context
-          cat > .context/buildbuddy.bazelrc <<EOF
-          common:remote --bes_results_url=https://app.buildbuddy.io/invocation/
-          common:remote --bes_backend=grpcs://remote.buildbuddy.io
-          common:remote --remote_header=x-buildbuddy-api-key=${BUILDBUDDY_API_KEY}
-          common:remote --remote_cache=grpcs://remote.buildbuddy.io
-          common:remote --remote_executor=grpcs://remote.buildbuddy.io
-          common:remote --remote_cache_compression
-          common:remote --remote_download_toplevel
-          common:remote --remote_timeout=600
-          common:remote --jobs=200
-          common:remote --extra_execution_platforms=@llvm//:rbe_linux_x86_64
-          EOF
+        env:
+          BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
+        run: tools/scripts/write-buildbuddy-rc.sh
 
       # The toolchain smokes come first and are cheap: they pull windows.h, the
       # MSVC STL and clang's builtin headers, so a sysroot or include-order
@@ -484,8 +448,8 @@ jobs:
         if: env.BUILDBUDDY_API_KEY != ''
         run: |
           bazelisk build --config=remote --config=windows-msvc \
-            //bazel/windows_msvc:smoke_exe \
-            //bazel/windows_msvc:smoke_dll
+            //bazel/windows_msvc_smoke:smoke_exe \
+            //bazel/windows_msvc_smoke:smoke_dll
 
       - name: Build llama.cpp + the Flutter native for windows-MSVC
         if: env.BUILDBUDDY_API_KEY != ''

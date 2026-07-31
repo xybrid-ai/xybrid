@@ -107,21 +107,9 @@ jobs:
       # Same gitignored-file pattern the Bazel workflow uses: the key never
       # lands in a committable file. Absent secret (forks) -> no :remote config.
       - name: Configure BuildBuddy remote config
-        if: env.BUILDBUDDY_API_KEY != ''
-        run: |
-          mkdir -p .context
-          cat > .context/buildbuddy.bazelrc <<EOF
-          common:remote --bes_results_url=https://app.buildbuddy.io/invocation/
-          common:remote --bes_backend=grpcs://remote.buildbuddy.io
-          common:remote --remote_header=x-buildbuddy-api-key=${BUILDBUDDY_API_KEY}
-          common:remote --remote_cache=grpcs://remote.buildbuddy.io
-          common:remote --remote_executor=grpcs://remote.buildbuddy.io
-          common:remote --remote_cache_compression
-          common:remote --remote_download_toplevel
-          common:remote --remote_timeout=600
-          common:remote --jobs=200
-          common:remote --extra_execution_platforms=@llvm//:rbe_linux_x86_64
-          EOF
+        env:
+          BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
+        run: tools/scripts/write-buildbuddy-rc.sh
 
       # The Linux bolt cdylib is not built anywhere else in CI — bazel.yml builds
       # the windows one for the Unity DLL proof, and the linux CLI, but never

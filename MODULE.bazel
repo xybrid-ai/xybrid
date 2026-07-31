@@ -1,11 +1,13 @@
-# PHASE-0 BAZEL SPIKE — throwaway. See .context/bazel-hermetic-evaluation.md.
-# Goal: get real cold-build / cache-hit / reproducibility numbers for the
-# hermeticbuild stack (rules_rs + hermetic-llvm) on xybrid's REAL Cargo.lock.
+# Bazel build of xybrid and its dependencies. Pinned from the Bazel Central
+# Registry at versions re-validated on BuildBuddy RBE; the stack is the release
+# build of record (see .github/workflows/release-prep.yml and the build-*.yml
+# workflows in the same directory).
 #
-# The three hermeticbuild modules are pinned to the local clones under
-# .context/bazel-research/ so this uses exactly the source that was evaluated.
+# The three hermeticbuild modules (rules_rs + hermetic-llvm + hermetic_launcher)
+# were validated against xybrid's real Cargo.lock; the pins below carry forward
+# what that validation proved.
 
-module(name = "xybrid_bazel_spike", version = "0.0.0")
+module(name = "xybrid", version = "0.0.0")
 
 # --- hermeticbuild stack, pinned from the Bazel Central Registry (replaces the
 # earlier git_override commit pins; re-validated on RBE at these versions).
