@@ -13,6 +13,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.4.0] - 2026-07-31
+
+Stable release of the 0.4.0 line. Since `0.4.0-rc1`, local Whisper gains
+correct long-audio and per-request language/task handling, the Windows Flutter
+and Unity natives move onto the tested MSVC Bazel path, and Kotlin callers get
+a compatibility shim for the loader API removed during the BoltFFI migration.
+The `0.4.0-rc1` and `0.4.0-alpha` entries below cover the rest of the changes
+since 0.3.0.
+
+### Fixed
+
+- **Candle Whisper now transcribes audio of any length** instead of failing at
+  roughly 15 seconds or truncating past 30 seconds. Audio is decoded in
+  correctly trimmed windows, padding-only output is discarded, Whisper's
+  suppress-token and no-speech rules are applied, and model-backed regression
+  tests cover clips through 66 seconds (#426).
+- **Whisper honors each request's language and task.** Transcription and
+  translation select the correct decode prefix without leaking state between
+  calls; unsupported languages, prompts, non-zero temperatures, and timestamp
+  granularities now return an explicit input error instead of being silently
+  ignored (#426).
+- **Kotlin's migration docs referenced a removed `XybridModelLoader`.** The
+  examples now use `XybridModel` directly, and a deprecated compatibility shim
+  keeps applications written against the old loader shape compiling through
+  the 0.4.x line (#329, #412).
+
+### Changed
+
+- **Flutter's Windows native is now MSVC ABI from end to end.** The shipped DLL
+  and import library are cross-compiled by the Bazel release graph, include the
+  llama.cpp vision path, and are load-tested on Windows before release
+  (#416–#420).
+- **Unity's Windows native now comes from the same Bazel graph** and is checked
+  through real IL2CPP runtime smokes on Windows and Linux (#414, #421).
+- **Release builds resolve exact Bazel outputs through one checked helper** and
+  share one remote-execution configuration, removing ambiguous `bazel-bin`
+  lookups and drift between shipping jobs (#424, #427).
+
+---
+
 ## [0.4.0-rc1] - 2026-07-28
 
 Release candidate for 0.4.0. Two consumer-visible fixes on top of `0.4.0-alpha`

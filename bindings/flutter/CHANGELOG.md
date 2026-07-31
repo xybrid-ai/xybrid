@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.0
+
+Stable release of the 0.4.0 line. No Flutter API changes since `0.4.0-rc1`.
+
+* Changed: the precompiled Windows native is now an MSVC-ABI DLL plus import library produced by the Bazel release graph, includes the llama.cpp vision path, and is load-tested on Windows before release (xybrid-ai/xybrid#416, xybrid-ai/xybrid#418, xybrid-ai/xybrid#419, xybrid-ai/xybrid#420)
+
 ## 0.4.0-rc1
 
 Release candidate for 0.4.0.
