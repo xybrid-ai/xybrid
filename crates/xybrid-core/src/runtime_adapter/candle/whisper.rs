@@ -34,6 +34,15 @@ pub enum WhisperError {
     #[error("Token '{0}' not found in vocabulary")]
     TokenNotFound(String),
 
+    /// Requested transcription language has no token in this model's vocabulary
+    ///
+    /// Distinct from [`WhisperError::TokenNotFound`] on purpose: a missing
+    /// `<|xx|>` token for a *caller-supplied* language is bad input, not a
+    /// broken model, and callers map it to an invalid-input error rather than
+    /// an inference failure.
+    #[error("Unsupported language '{0}': the model vocabulary has no '<|{0}|>' token")]
+    UnsupportedLanguage(String),
+
     /// Candle tensor/model error
     #[error("Candle error: {0}")]
     Candle(#[from] candle_core::Error),
@@ -124,6 +133,29 @@ pub enum Task {
     Translate,
 }
 
+/// Per-request transcription parameters.
+///
+/// These are *call arguments*, never stored on [`WhisperModel`]: the runtime
+/// caches one loaded model per directory and serves concurrent requests from
+/// it, so a request that asks for French must not leave the cached model
+/// speaking French for the next request.
+///
+/// [`Default`] means "no per-request override": `language: None` falls back to
+/// the language resolved at load time from [`WhisperConfig::language`], and
+/// `task` is [`Task::Transcribe`]. [`WhisperModel::transcribe`] and
+/// [`WhisperModel::transcribe_pcm`] additionally carry the load-time task
+/// forward, so existing callers see no behavior change.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct TranscribeOptions {
+    /// Language code for this request (e.g. `"en"`, `"fr"`), or `None` to use
+    /// the model's load-time language. Matched case-insensitively against the
+    /// vocabulary's `<|xx|>` tokens; an unknown code is an error, never a
+    /// silent fallback.
+    pub language: Option<String>,
+    /// Transcribe (keep the source language) or translate (into English).
+    pub task: Task,
+}
+
 /// Whisper model wrapper
 pub struct WhisperModel {
     /// The underlying Whisper model
@@ -142,8 +174,13 @@ pub struct WhisperModel {
     transcribe_token: u32,
     translate_token: u32,
     no_timestamps_token: u32,
+    /// Language token resolved at load time from [`WhisperConfig::language`].
+    /// Used only when a request does not name its own language — see
+    /// [`TranscribeOptions`].
     language_token: Option<u32>,
-    /// User configuration
+    /// Load-time configuration. Its `language`/`task` are fallbacks for
+    /// requests that don't specify their own; `timestamps` is not a
+    /// per-request parameter and always comes from here.
     user_config: WhisperConfig,
 }
 
@@ -308,12 +345,12 @@ impl WhisperModel {
         self.model.encoder.forward(mel, true)
     }
 
-    /// Transcribe audio from mel spectrogram.
+    /// Transcribe audio from mel spectrogram using the model's load-time
+    /// language and task.
     ///
-    /// The mel is sliced into encoder-sized windows by [`mel_windows`] and each
-    /// window is encoded and decoded independently, then the per-window texts
-    /// are joined with a single space. Audio of any length is accepted; nothing
-    /// is truncated.
+    /// Equivalent to [`WhisperModel::transcribe_with_options`] with the
+    /// load-time fallbacks, so callers that predate per-request options keep
+    /// their existing behavior.
     ///
     /// # Arguments
     ///
@@ -323,6 +360,40 @@ impl WhisperModel {
     ///
     /// Transcribed text (empty when the mel has no frames)
     pub fn transcribe(&mut self, mel: &Tensor) -> WhisperResult<String> {
+        let options = self.load_time_options();
+        self.transcribe_with_options(mel, &options)
+    }
+
+    /// Transcribe audio from mel spectrogram with per-request options.
+    ///
+    /// The mel is sliced into encoder-sized windows by [`mel_windows`] and each
+    /// window is encoded and decoded independently, then the per-window texts
+    /// are joined with a single space. Audio of any length is accepted; nothing
+    /// is truncated.
+    ///
+    /// `options` is resolved into a forced-token prefix once, before the window
+    /// loop, and nothing from it is written back to `self` — two calls with
+    /// different languages on the same loaded model are independent.
+    ///
+    /// # Arguments
+    ///
+    /// * `mel` - Mel spectrogram tensor [1, n_mels, n_frames]
+    /// * `options` - Per-request language and task
+    ///
+    /// # Errors
+    ///
+    /// [`WhisperError::UnsupportedLanguage`] when `options.language` names a
+    /// language this model's vocabulary has no token for.
+    ///
+    /// # Returns
+    ///
+    /// Transcribed text (empty when the mel has no frames)
+    pub(crate) fn transcribe_with_options(
+        &mut self,
+        mel: &Tensor,
+        options: &TranscribeOptions,
+    ) -> WhisperResult<String> {
+        let prefix = self.decode_prefix(options)?;
         let (_, _, content_frames) = mel.dims3()?;
 
         let mut segments: Vec<String> = Vec::new();
@@ -334,7 +405,7 @@ impl WhisperModel {
             // candle's own whisper example.
             let audio_features = self.model.encoder.forward(&mel_segment, true)?;
 
-            let text = self.decode_segment(&audio_features)?;
+            let text = self.decode_segment(&audio_features, &prefix)?;
             let text = text.trim();
             if !text.is_empty() {
                 segments.push(text.to_string());
@@ -344,23 +415,55 @@ impl WhisperModel {
         Ok(segments.join(" "))
     }
 
+    /// Options standing in for "no per-request override": both language and
+    /// task fall back to what the model was loaded with.
+    fn load_time_options(&self) -> TranscribeOptions {
+        TranscribeOptions {
+            language: None,
+            task: self.user_config.task,
+        }
+    }
+
+    /// Resolve `options` into the forced-token prefix every window starts from.
+    fn decode_prefix(&self, options: &TranscribeOptions) -> WhisperResult<Vec<u32>> {
+        let language_token = match options.language.as_deref() {
+            Some(language) => Some(self.resolve_language_token(language)?),
+            // No per-request language: use whatever was resolved at load time
+            // (`None` there means auto-detect, i.e. no forced language token).
+            None => self.language_token,
+        };
+
+        Ok(build_decode_prefix(
+            self.sot_token,
+            language_token,
+            options.task,
+            self.transcribe_token,
+            self.translate_token,
+            self.no_timestamps_token,
+            self.user_config.timestamps,
+        ))
+    }
+
+    /// Look up the `<|xx|>` token for a caller-supplied language code.
+    ///
+    /// Whisper spells these tokens in lowercase, so the code is lowercased
+    /// before lookup; `"FR"` and `"fr"` both resolve to `<|fr|>`. An
+    /// unrecognized code is rejected rather than silently dropped — decoding
+    /// without a language token makes Whisper auto-detect, which would look
+    /// like the request succeeded while ignoring what it asked for.
+    fn resolve_language_token(&self, language: &str) -> WhisperResult<u32> {
+        let token = format!("<|{}|>", language.trim().to_ascii_lowercase());
+        self.tokenizer
+            .token_to_id(&token)
+            .ok_or_else(|| WhisperError::UnsupportedLanguage(language.to_string()))
+    }
+
     /// Greedily decode one encoder window into text.
     ///
-    /// Starts from a fresh forced-token prefix so each window decodes
-    /// independently.
-    fn decode_segment(&mut self, audio_features: &Tensor) -> WhisperResult<String> {
-        // Initialize decoder tokens
-        let mut tokens = vec![self.sot_token];
-        if let Some(lang_token) = self.language_token {
-            tokens.push(lang_token);
-        }
-        match self.user_config.task {
-            Task::Transcribe => tokens.push(self.transcribe_token),
-            Task::Translate => tokens.push(self.translate_token),
-        }
-        if !self.user_config.timestamps {
-            tokens.push(self.no_timestamps_token);
-        }
+    /// Starts from `prefix`, the same forced-token prefix for every window, so
+    /// each window decodes independently.
+    fn decode_segment(&mut self, audio_features: &Tensor, prefix: &[u32]) -> WhisperResult<String> {
+        let mut tokens = prefix.to_vec();
 
         // Autoregressive decoding
         let sample_len = self.config.max_target_positions / 2;
@@ -440,7 +543,8 @@ impl WhisperModel {
             .map_err(WhisperError::from)
     }
 
-    /// Transcribe audio from PCM samples.
+    /// Transcribe audio from PCM samples using the model's load-time language
+    /// and task.
     ///
     /// # Arguments
     ///
@@ -450,9 +554,66 @@ impl WhisperModel {
     ///
     /// Transcribed text
     pub fn transcribe_pcm(&mut self, pcm_data: &[f32]) -> WhisperResult<String> {
-        let mel = self.pcm_to_mel_tensor(pcm_data)?;
-        self.transcribe(&mel)
+        let options = self.load_time_options();
+        self.transcribe_pcm_with_options(pcm_data, &options)
     }
+
+    /// Transcribe audio from PCM samples with per-request options.
+    ///
+    /// # Arguments
+    ///
+    /// * `pcm_data` - Audio samples (16kHz, mono, f32)
+    /// * `options` - Per-request language and task
+    ///
+    /// # Errors
+    ///
+    /// [`WhisperError::UnsupportedLanguage`] when `options.language` names a
+    /// language this model's vocabulary has no token for.
+    ///
+    /// # Returns
+    ///
+    /// Transcribed text
+    pub(crate) fn transcribe_pcm_with_options(
+        &mut self,
+        pcm_data: &[f32],
+        options: &TranscribeOptions,
+    ) -> WhisperResult<String> {
+        let mel = self.pcm_to_mel_tensor(pcm_data)?;
+        self.transcribe_with_options(&mel, options)
+    }
+}
+
+/// The forced-token prefix Whisper's decoder starts every window from.
+///
+/// Order is fixed by the model's training: start-of-transcript, then the
+/// language token (absent means auto-detect), then the task token, then
+/// `<|notimestamps|>` when timestamps are off. Kept as a free function over
+/// plain token ids so the ordering is testable without weights or a tokenizer
+/// — the prefix is the entire mechanism by which `language` and `task` take
+/// effect, and getting it wrong fails silently as a wrong-language transcript
+/// rather than as an error.
+fn build_decode_prefix(
+    sot: u32,
+    language: Option<u32>,
+    task: Task,
+    transcribe: u32,
+    translate: u32,
+    no_timestamps: u32,
+    timestamps: bool,
+) -> Vec<u32> {
+    let mut tokens = Vec::with_capacity(4);
+    tokens.push(sot);
+    if let Some(language) = language {
+        tokens.push(language);
+    }
+    tokens.push(match task {
+        Task::Transcribe => transcribe,
+        Task::Translate => translate,
+    });
+    if !timestamps {
+        tokens.push(no_timestamps);
+    }
+    tokens
 }
 
 /// Offsets and lengths of the encoder windows covering `content_frames` mel frames.
@@ -503,13 +664,117 @@ mod tests {
         assert_eq!(WhisperSize::LargeV3.as_str(), "large-v3");
     }
 
+    /// `WhisperConfig` is now the *load-time fallback*, not the per-request
+    /// truth: since [`TranscribeOptions`] exists, `language: Some("en")` only
+    /// decides what a request that names no language of its own gets. This
+    /// test still pins those load-time values (dropping them would silently
+    /// change what an unspecified request decodes as), but it deliberately no
+    /// longer stands for "Whisper always decodes English" — the companion
+    /// assertion below is what keeps that reading from creeping back.
     #[test]
-    fn test_whisper_config_default() {
+    fn test_whisper_config_default_is_load_time_fallback() {
         let config = WhisperConfig::default();
         assert_eq!(config.model_size, WhisperSize::Tiny);
         assert_eq!(config.language, Some("en".to_string()));
         assert_eq!(config.task, Task::Transcribe);
         assert!(!config.timestamps);
+
+        // Per-request default is "no override", which is not the same value.
+        let options = TranscribeOptions::default();
+        assert_eq!(options.language, None);
+        assert_eq!(options.task, Task::Transcribe);
+    }
+
+    // Synthetic token ids for the prefix tests. Real Whisper ids are ~50257+
+    // and adjacent, which makes an off-by-one ordering bug invisible in a
+    // failure diff; small distinct numbers make the *shape* of the prefix the
+    // thing under test.
+    const SOT: u32 = 1;
+    const EN: u32 = 2;
+    const FR: u32 = 3;
+    const TRANSCRIBE: u32 = 4;
+    const TRANSLATE: u32 = 5;
+    const NO_TIMESTAMPS: u32 = 6;
+
+    /// `build_decode_prefix` with this file's synthetic ids.
+    fn prefix(language: Option<u32>, task: Task, timestamps: bool) -> Vec<u32> {
+        build_decode_prefix(
+            SOT,
+            language,
+            task,
+            TRANSCRIBE,
+            TRANSLATE,
+            NO_TIMESTAMPS,
+            timestamps,
+        )
+    }
+
+    #[test]
+    fn test_decode_prefix_default_is_language_then_transcribe() {
+        assert_eq!(
+            prefix(Some(EN), Task::Transcribe, false),
+            vec![SOT, EN, TRANSCRIBE, NO_TIMESTAMPS]
+        );
+    }
+
+    #[test]
+    fn test_decode_prefix_language_fr() {
+        // The D3 regression: before per-request options this stayed <|en|>,
+        // and French audio came back decoded as English.
+        assert_eq!(
+            prefix(Some(FR), Task::Transcribe, false),
+            vec![SOT, FR, TRANSCRIBE, NO_TIMESTAMPS]
+        );
+    }
+
+    #[test]
+    fn test_decode_prefix_task_translate() {
+        assert_eq!(
+            prefix(Some(EN), Task::Translate, false),
+            vec![SOT, EN, TRANSLATE, NO_TIMESTAMPS]
+        );
+    }
+
+    #[test]
+    fn test_decode_prefix_language_fr_and_task_translate() {
+        assert_eq!(
+            prefix(Some(FR), Task::Translate, false),
+            vec![SOT, FR, TRANSLATE, NO_TIMESTAMPS]
+        );
+    }
+
+    #[test]
+    fn test_decode_prefix_without_language_omits_language_token() {
+        // No language token at all is how Whisper is asked to auto-detect;
+        // it must not degrade into some default id sitting in the slot.
+        assert_eq!(
+            prefix(None, Task::Transcribe, false),
+            vec![SOT, TRANSCRIBE, NO_TIMESTAMPS]
+        );
+    }
+
+    #[test]
+    fn test_decode_prefix_with_timestamps_omits_no_timestamps_token() {
+        assert_eq!(
+            prefix(Some(EN), Task::Transcribe, true),
+            vec![SOT, EN, TRANSCRIBE]
+        );
+    }
+
+    #[test]
+    fn test_decode_prefix_alternates_without_carrying_state() {
+        // The cached-model hazard: one loaded model serves many requests, so
+        // en → fr → en → fr must produce alternating prefixes, and each must
+        // equal what that language produces in isolation. A builder that read
+        // or wrote model state would drift after the first switch.
+        let en_alone = prefix(Some(EN), Task::Transcribe, false);
+        let fr_alone = prefix(Some(FR), Task::Translate, false);
+        assert_ne!(en_alone, fr_alone);
+
+        for _ in 0..4 {
+            assert_eq!(prefix(Some(EN), Task::Transcribe, false), en_alone);
+            assert_eq!(prefix(Some(FR), Task::Translate, false), fr_alone);
+        }
     }
 
     /// Mel frame count candle produces for `samples` PCM samples at 16 kHz.

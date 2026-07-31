@@ -1,5 +1,5 @@
 use super::device::{select_device, DeviceSelection};
-use super::whisper::WhisperModel;
+use super::whisper::{Task, TranscribeOptions, WhisperError, WhisperModel};
 use crate::audio::decode_wav_audio;
 use crate::ir::{Envelope, EnvelopeKind};
 use crate::runtime_adapter::{AdapterError, AdapterResult, ModelRuntime};
@@ -151,6 +151,8 @@ impl ModelRuntime for CandleRuntime {
 
         match &input.kind {
             EnvelopeKind::Audio(bytes) => {
+                let options = parse_transcribe_options(&input.metadata)?;
+
                 // Decode audio
                 // Whisper expects 16kHz mono
                 let samples = decode_wav_audio(bytes, 16000, 1).map_err(|e| {
@@ -158,9 +160,9 @@ impl ModelRuntime for CandleRuntime {
                 })?;
 
                 // Transcribe
-                let text = model.transcribe_pcm(&samples).map_err(|e| {
-                    AdapterError::InferenceFailed(format!("Transcription failed: {}", e))
-                })?;
+                let text = model
+                    .transcribe_pcm_with_options(&samples, &options)
+                    .map_err(transcription_error)?;
 
                 Ok(Envelope::new(EnvelopeKind::Text(text)))
             }
@@ -190,5 +192,288 @@ impl ModelRuntime for CandleRuntime {
                 "Candle runtime expects Audio input".to_string(),
             )),
         }
+    }
+}
+
+/// Reads a metadata value, treating a missing key and a blank value alike.
+///
+/// The OpenAI-compatible gateway in front of this runtime stringifies its
+/// request fields, so an option the client left unset arrives as `""` rather
+/// than as an absent key. Blank therefore means "not specified" for every key
+/// below — it is never a request for something we then have to honor or
+/// reject.
+fn metadata_value<'a>(metadata: &'a HashMap<String, String>, key: &str) -> Option<&'a str> {
+    metadata
+        .get(key)
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+}
+
+/// Parse per-request Whisper parameters out of envelope metadata.
+///
+/// Honored: `language` (any code the model's vocabulary has a `<|xx|>` token
+/// for — validated later, at prefix construction) and `task`
+/// (`"transcribe"` / `"translate"`, case-insensitive).
+///
+/// Rejected with [`AdapterError::InvalidInput`], never accepted-and-ignored,
+/// because each one would change the transcript a caller gets back and
+/// silently not doing so is indistinguishable from working: `prompt`,
+/// non-zero `temperature`, and `timestamp_granularities`.
+///
+/// Ignored: everything else, including the gateway's `response_format`,
+/// `format`, `filename` and `model_id`, plus the bookkeeping keys
+/// [`Envelope`] adds to its own metadata. These do not affect decoding.
+fn parse_transcribe_options(
+    metadata: &HashMap<String, String>,
+) -> AdapterResult<TranscribeOptions> {
+    if let Some(prompt) = metadata_value(metadata, "prompt") {
+        return Err(AdapterError::InvalidInput(format!(
+            "'prompt' is not supported by the Candle Whisper runtime: decoding starts from a \
+             fixed forced-token prefix, so the prompt would be dropped without affecting the \
+             transcript (got {prompt:?})"
+        )));
+    }
+
+    if let Some(temperature) = metadata_value(metadata, "temperature") {
+        let value: f32 = temperature.parse().map_err(|_| {
+            AdapterError::InvalidInput(format!(
+                "'temperature' must be a number, got {temperature:?}"
+            ))
+        })?;
+        if value != 0.0 {
+            return Err(AdapterError::InvalidInput(format!(
+                "'temperature' must be 0 for the Candle Whisper runtime: decoding is greedy \
+                 argmax, so a non-zero temperature is never sampled with (got {temperature:?})"
+            )));
+        }
+    }
+
+    if let Some(granularities) = metadata_value(metadata, "timestamp_granularities") {
+        // Comma-joined by the gateway, so "," and ", " are still empty lists.
+        if granularities
+            .split(',')
+            .any(|granularity| !granularity.trim().is_empty())
+        {
+            return Err(AdapterError::InvalidInput(format!(
+                "'timestamp_granularities' is not supported by the Candle Whisper runtime: it \
+                 decodes with <|notimestamps|> and returns plain text (got {granularities:?})"
+            )));
+        }
+    }
+
+    let task = match metadata_value(metadata, "task") {
+        None => Task::default(),
+        Some(task) => match task.to_ascii_lowercase().as_str() {
+            "transcribe" => Task::Transcribe,
+            "translate" => Task::Translate,
+            _ => {
+                return Err(AdapterError::InvalidInput(format!(
+                    "'task' must be \"transcribe\" or \"translate\", got {task:?}"
+                )))
+            }
+        },
+    };
+
+    Ok(TranscribeOptions {
+        language: metadata_value(metadata, "language").map(str::to_string),
+        task,
+    })
+}
+
+/// Map a transcription failure onto the adapter's error surface.
+///
+/// An unsupported `language` is the caller's input being wrong, so it has to
+/// stay [`AdapterError::InvalidInput`] all the way up — folding it into
+/// [`AdapterError::InferenceFailed`] would surface upstream as a server error
+/// and invite a retry that cannot succeed.
+fn transcription_error(error: WhisperError) -> AdapterError {
+    match error {
+        WhisperError::UnsupportedLanguage(_) => AdapterError::InvalidInput(error.to_string()),
+        other => AdapterError::InferenceFailed(format!("Transcription failed: {}", other)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Envelope metadata from a list of pairs.
+    fn metadata(pairs: &[(&str, &str)]) -> HashMap<String, String> {
+        pairs
+            .iter()
+            .map(|&(key, value)| (key.to_string(), value.to_string()))
+            .collect()
+    }
+
+    /// Unwrap the message of an `InvalidInput`, failing the test otherwise.
+    fn invalid_input_message(result: AdapterResult<TranscribeOptions>) -> String {
+        match result {
+            Err(AdapterError::InvalidInput(message)) => message,
+            Err(other) => panic!("expected InvalidInput, got {other:?}"),
+            Ok(options) => panic!("expected InvalidInput, got Ok({options:?})"),
+        }
+    }
+
+    #[test]
+    fn test_parse_options_empty_metadata_uses_defaults() {
+        let options = parse_transcribe_options(&metadata(&[])).expect("empty metadata is valid");
+        assert_eq!(options, TranscribeOptions::default());
+    }
+
+    #[test]
+    fn test_parse_options_accepts_language() {
+        let options = parse_transcribe_options(&metadata(&[("language", "fr")]))
+            .expect("'fr' is a valid language");
+        assert_eq!(options.language.as_deref(), Some("fr"));
+        assert_eq!(options.task, Task::Transcribe);
+    }
+
+    #[test]
+    fn test_parse_options_translate_task_selects_translate() {
+        let options = parse_transcribe_options(&metadata(&[("task", "translate")]))
+            .expect("'translate' is a valid task");
+        assert_eq!(options.task, Task::Translate);
+    }
+
+    #[test]
+    fn test_parse_options_task_is_case_insensitive() {
+        for value in ["Translate", "TRANSLATE", "  translate  "] {
+            let options = parse_transcribe_options(&metadata(&[("task", value)]))
+                .unwrap_or_else(|e| panic!("{value:?} should parse: {e}"));
+            assert_eq!(options.task, Task::Translate, "for {value:?}");
+        }
+    }
+
+    #[test]
+    fn test_parse_options_language_and_task_together() {
+        let options =
+            parse_transcribe_options(&metadata(&[("language", "fr"), ("task", "translate")]))
+                .expect("fr + translate is valid");
+        assert_eq!(options.language.as_deref(), Some("fr"));
+        assert_eq!(options.task, Task::Translate);
+    }
+
+    #[test]
+    fn test_parse_options_rejects_unknown_task() {
+        let message = invalid_input_message(parse_transcribe_options(&metadata(&[(
+            "task",
+            "summarize",
+        )])));
+        assert!(
+            message.contains("task") && message.contains("summarize"),
+            "error should name the parameter and the rejected value: {message}"
+        );
+    }
+
+    #[test]
+    fn test_parse_options_rejects_prompt() {
+        let message = invalid_input_message(parse_transcribe_options(&metadata(&[(
+            "prompt",
+            "The following is a recording of a lecture.",
+        )])));
+        assert!(
+            message.contains("prompt"),
+            "error should name the parameter: {message}"
+        );
+    }
+
+    #[test]
+    fn test_parse_options_accepts_zero_temperature() {
+        // 0 is what the gateway sends for deterministic decoding, which is
+        // exactly what greedy argmax already does — nothing to reject.
+        for value in ["0", "0.0", "-0.0"] {
+            let options = parse_transcribe_options(&metadata(&[("temperature", value)]))
+                .unwrap_or_else(|e| panic!("temperature {value:?} should be accepted: {e}"));
+            assert_eq!(options, TranscribeOptions::default(), "for {value:?}");
+        }
+    }
+
+    #[test]
+    fn test_parse_options_rejects_non_zero_temperature() {
+        let message = invalid_input_message(parse_transcribe_options(&metadata(&[(
+            "temperature",
+            "0.7",
+        )])));
+        assert!(
+            message.contains("temperature") && message.contains("0.7"),
+            "error should name the parameter and the rejected value: {message}"
+        );
+    }
+
+    #[test]
+    fn test_parse_options_rejects_unparseable_temperature() {
+        let message = invalid_input_message(parse_transcribe_options(&metadata(&[(
+            "temperature",
+            "abc",
+        )])));
+        assert!(
+            message.contains("temperature"),
+            "error should name the parameter: {message}"
+        );
+    }
+
+    #[test]
+    fn test_parse_options_rejects_timestamp_granularities() {
+        for value in ["word", "segment", "word,segment"] {
+            let message = invalid_input_message(parse_transcribe_options(&metadata(&[(
+                "timestamp_granularities",
+                value,
+            )])));
+            assert!(
+                message.contains("timestamp_granularities"),
+                "error should name the parameter for {value:?}: {message}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_parse_options_blank_values_mean_unspecified() {
+        // The gateway stringifies unset options into empty values; a blank
+        // `prompt` is not a prompt and a lone separator is not a granularity.
+        let options = parse_transcribe_options(&metadata(&[
+            ("language", ""),
+            ("task", "   "),
+            ("prompt", ""),
+            ("temperature", ""),
+            ("timestamp_granularities", ","),
+        ]))
+        .expect("blank values are not requests for anything");
+        assert_eq!(options, TranscribeOptions::default());
+    }
+
+    #[test]
+    fn test_parse_options_ignores_benign_keys() {
+        // These reach the runtime on every gateway request and none of them
+        // changes decoding, so they must not trip the reject path.
+        let options = parse_transcribe_options(&metadata(&[
+            ("response_format", "json"),
+            ("format", "wav"),
+            ("filename", "meeting.wav"),
+            ("model_id", "whisper-tiny"),
+            ("xybrid.local_id", "abc-123"),
+        ]))
+        .expect("benign keys are ignored");
+        assert_eq!(options, TranscribeOptions::default());
+    }
+
+    #[test]
+    fn test_unsupported_language_maps_to_invalid_input() {
+        let error = transcription_error(WhisperError::UnsupportedLanguage("xx".to_string()));
+        match error {
+            AdapterError::InvalidInput(message) => assert!(
+                message.contains("xx"),
+                "error should name the rejected language: {message}"
+            ),
+            other => panic!("expected InvalidInput, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_other_whisper_errors_map_to_inference_failed() {
+        let error = transcription_error(WhisperError::Tokenizer("boom".to_string()));
+        assert!(
+            matches!(error, AdapterError::InferenceFailed(_)),
+            "expected InferenceFailed, got {error:?}"
+        );
     }
 }
