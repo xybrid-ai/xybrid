@@ -296,7 +296,10 @@ impl WhisperModel {
     ///
     /// # Arguments
     ///
-    /// * `mel` - Mel spectrogram tensor [1, n_mels, n_frames]
+    /// * `mel` - Mel spectrogram tensor [1, n_mels, n_frames], where `n_frames`
+    ///   is at most [`m::N_FRAMES`]. Longer mels must be sliced into windows
+    ///   first — see [`mel_windows`] — because the encoder's positional
+    ///   embedding table only has `n_audio_ctx` (`N_FRAMES / 2`) rows.
     ///
     /// # Returns
     ///
@@ -307,17 +310,45 @@ impl WhisperModel {
 
     /// Transcribe audio from mel spectrogram.
     ///
+    /// The mel is sliced into encoder-sized windows by [`mel_windows`] and each
+    /// window is encoded and decoded independently, then the per-window texts
+    /// are joined with a single space. Audio of any length is accepted; nothing
+    /// is truncated.
+    ///
     /// # Arguments
     ///
     /// * `mel` - Mel spectrogram tensor [1, n_mels, n_frames]
     ///
     /// # Returns
     ///
-    /// Transcribed text
+    /// Transcribed text (empty when the mel has no frames)
     pub fn transcribe(&mut self, mel: &Tensor) -> WhisperResult<String> {
-        // Run encoder
-        let audio_features = self.model.encoder.forward(mel, true)?;
+        let (_, _, content_frames) = mel.dims3()?;
 
+        let mut segments: Vec<String> = Vec::new();
+        for (start, len) in mel_windows(content_frames) {
+            let mel_segment = mel.narrow(2, start, len)?;
+
+            // The encoder's blocks are self-attention only (`xa: None`), so the
+            // flush flag is inert there and recomputed per call; `true` matches
+            // candle's own whisper example.
+            let audio_features = self.model.encoder.forward(&mel_segment, true)?;
+
+            let text = self.decode_segment(&audio_features)?;
+            let text = text.trim();
+            if !text.is_empty() {
+                segments.push(text.to_string());
+            }
+        }
+
+        Ok(segments.join(" "))
+    }
+
+    /// Greedily decode one encoder window into text.
+    ///
+    /// Starts from a fresh forced-token prefix so each window decodes
+    /// independently.
+    fn decode_segment(&mut self, audio_features: &Tensor) -> WhisperResult<String> {
         // Initialize decoder tokens
         let mut tokens = vec![self.sot_token];
         if let Some(lang_token) = self.language_token {
@@ -337,10 +368,14 @@ impl WhisperModel {
             let tokens_t = Tensor::new(tokens.as_slice(), &self.device)?;
             let tokens_t = tokens_t.unsqueeze(0)?;
 
+            // The decoder caches the cross-attention keys/values derived from
+            // `audio_features`. Those differ per window, so the first step of
+            // every window must flush the cache — otherwise later windows would
+            // attend to the first window's audio.
             let ys = self
                 .model
                 .decoder
-                .forward(&tokens_t, &audio_features, i == 0)?;
+                .forward(&tokens_t, audio_features, i == 0)?;
 
             // Get logits for last position
             let (_, seq_len, _) = ys.dims3()?;
@@ -362,12 +397,9 @@ impl WhisperModel {
         }
 
         // Decode tokens to text
-        let text = self
-            .tokenizer
+        self.tokenizer
             .decode(&tokens, true)
-            .map_err(|e| WhisperError::Tokenizer(format!("Tokenizer decode error: {}", e)))?;
-
-        Ok(text)
+            .map_err(|e| WhisperError::Tokenizer(format!("Tokenizer decode error: {}", e)))
     }
 
     /// Get model configuration.
@@ -395,18 +427,11 @@ impl WhisperModel {
     ///
     /// Mel spectrogram tensor [1, n_mels, n_frames]
     ///
-    /// Note: Audio is automatically truncated to 30 seconds (480,000 samples @ 16kHz)
-    /// to fit within Whisper's encoder context window (1500 mel frames).
+    /// Note: audio of any length is accepted and nothing is truncated. The
+    /// resulting mel may exceed the encoder's [`m::N_FRAMES`] context; callers
+    /// slice it into encoder windows with [`mel_windows`], which is what
+    /// [`WhisperModel::transcribe`] does.
     pub fn pcm_to_mel_tensor(&self, pcm_data: &[f32]) -> WhisperResult<Tensor> {
-        // Whisper's encoder has a fixed context of 1500 mel frames (30 seconds @ 16kHz)
-        // Truncate audio to 30 seconds max to avoid encoder overflow
-        const MAX_SAMPLES_30S: usize = 16000 * 30; // 480,000 samples
-        let pcm_data = if pcm_data.len() > MAX_SAMPLES_30S {
-            &pcm_data[..MAX_SAMPLES_30S]
-        } else {
-            pcm_data
-        };
-
         let mel = audio::pcm_to_mel(&self.config, pcm_data, &self.mel_filters);
         let mel_len = mel.len();
         let n_mels = self.config.num_mel_bins;
@@ -428,6 +453,37 @@ impl WhisperModel {
         let mel = self.pcm_to_mel_tensor(pcm_data)?;
         self.transcribe(&mel)
     }
+}
+
+/// Offsets and lengths of the encoder windows covering `content_frames` mel frames.
+///
+/// Whisper's audio encoder halves the frame count in `conv2` and then indexes a
+/// positional-embedding table with exactly `n_audio_ctx` (= [`m::N_FRAMES`] / 2)
+/// rows, so a single forward pass accepts at most `N_FRAMES` (3000) mel frames.
+/// candle's `pcm_to_mel` deliberately over-pads beyond that — it rounds the
+/// frame count up to a multiple of 1500 and then appends one more 1500-frame
+/// chunk unconditionally — because it expects the caller to slice. This is that
+/// slicing loop; candle's own whisper example runs the equivalent between the
+/// mel step and the greedy decode.
+///
+/// Returned `(start, len)` windows tile `[0, content_frames)` contiguously: no
+/// gaps, no overlap, every `len` in `1..=N_FRAMES`, and `sum(len) ==
+/// content_frames`, so no audio is silently dropped.
+///
+/// `content_frames == 0` yields no windows, so a caller transcribes nothing and
+/// returns an empty transcript rather than encoding an empty tensor. A mel built
+/// from real PCM never hits this: `pcm_to_mel` always pads to at least one full
+/// 1500-frame chunk, even for zero samples. It is reachable only when a mel
+/// tensor is handed in directly.
+pub(crate) fn mel_windows(content_frames: usize) -> Vec<(usize, usize)> {
+    let mut windows = Vec::with_capacity(content_frames.div_ceil(m::N_FRAMES));
+    let mut seek = 0;
+    while seek < content_frames {
+        let len = usize::min(content_frames - seek, m::N_FRAMES);
+        windows.push((seek, len));
+        seek += len;
+    }
+    windows
 }
 
 /// Helper to get token ID from tokenizer
@@ -454,5 +510,145 @@ mod tests {
         assert_eq!(config.language, Some("en".to_string()));
         assert_eq!(config.task, Task::Transcribe);
         assert!(!config.timestamps);
+    }
+
+    /// Mel frame count candle produces for `samples` PCM samples at 16 kHz.
+    ///
+    /// Mirrors `log_mel_spectrogram_` in candle-transformers 0.8.4
+    /// (`src/models/whisper/audio.rs`, the `n_len` block): `n_len = samples /
+    /// HOP_LENGTH`, rounded up to a multiple of `100 * CHUNK_LENGTH / 2` (1500)
+    /// when it is not already one, plus one unconditional extra 1500-frame
+    /// chunk. The mel vector is `n_len * n_mel` long, so `n_len` is the frame
+    /// dimension `transcribe` windows over.
+    ///
+    /// Duplicated here on purpose: if candle changes its padding, this helper
+    /// stops matching reality and the boundary table below is where the drift
+    /// becomes visible.
+    fn candle_mel_frames(samples: usize) -> usize {
+        const PAD: usize = 100 * m::CHUNK_LENGTH / 2; // 1500
+        let n_len = samples / m::HOP_LENGTH;
+        // candle spells the round-up as `if n_len % pad != 0 { (n_len / pad + 1) * pad }`.
+        let n_len = if n_len.is_multiple_of(PAD) {
+            n_len
+        } else {
+            (n_len / PAD + 1) * PAD
+        };
+        n_len + PAD
+    }
+
+    /// Contiguity, bounds, exact coverage. Violating this *is* the D1 defect.
+    fn assert_window_invariants(content_frames: usize, windows: &[(usize, usize)]) {
+        let mut expected_start = 0usize;
+        for &(start, len) in windows {
+            assert_eq!(
+                start, expected_start,
+                "gap or overlap at window start for {content_frames} frames: {windows:?}"
+            );
+            assert!(
+                (1..=m::N_FRAMES).contains(&len),
+                "window len {len} out of 1..={} for {content_frames} frames",
+                m::N_FRAMES
+            );
+            assert!(
+                start < content_frames,
+                "window starts at {start}, past end {content_frames}"
+            );
+            expected_start = start + len;
+        }
+        assert_eq!(
+            expected_start, content_frames,
+            "windows must cover exactly [0, {content_frames})"
+        );
+    }
+
+    #[test]
+    fn test_mel_windows_boundary_table() {
+        // (samples, expected mel frames, expected window count).
+        // The 240_159 / 240_160 pair is the one-sample cliff observed in prod:
+        // 3000 frames fit the encoder, 4500 did not and hard-errored with
+        // "narrow invalid args start + len > dim_len".
+        let cases = [
+            (0usize, 1_500usize, 1usize), // no samples: still one padded chunk
+            (1, 1_500, 1),                // 62.5 us
+            (240_159, 3_000, 1),          // 15.00994 s
+            (240_160, 4_500, 2),          // 15.01000 s
+            (480_000, 4_500, 2),          // 30.00 s
+            (9_600_000, 61_500, 21),      // 10 min
+        ];
+
+        for (samples, expected_frames, expected_windows) in cases {
+            let frames = candle_mel_frames(samples);
+            assert_eq!(
+                frames, expected_frames,
+                "mel frames for {samples} samples changed"
+            );
+
+            let windows = mel_windows(frames);
+            assert_eq!(
+                windows.len(),
+                expected_windows,
+                "window count for {samples} samples ({frames} frames)"
+            );
+            assert_window_invariants(frames, &windows);
+        }
+    }
+
+    #[test]
+    fn test_mel_windows_invariants_over_sample_sweep() {
+        // Irregular steps so the sweep lands on and between chunk boundaries
+        // rather than only on multiples of 1500 frames.
+        const TEN_MINUTES_SAMPLES: usize = 16_000 * 600;
+        let steps = [1usize, 7, 159, 160, 161, 1_601, 24_001, 240_159, 480_001];
+
+        let mut samples = 0usize;
+        let mut i = 0usize;
+        while samples <= TEN_MINUTES_SAMPLES {
+            let frames = candle_mel_frames(samples);
+            let windows = mel_windows(frames);
+
+            assert!(
+                !windows.is_empty(),
+                "real audio always yields at least one window ({samples} samples)"
+            );
+            assert_window_invariants(frames, &windows);
+
+            samples += steps[i % steps.len()];
+            i += 1;
+        }
+    }
+
+    #[test]
+    fn test_mel_windows_invariants_over_frame_sweep() {
+        // Frame counts candle's padding never produces (including 0) still have
+        // to tile correctly, because `transcribe` takes whatever mel it is given.
+        for frames in 0..=(m::N_FRAMES * 2 + 1) {
+            assert_window_invariants(frames, &mel_windows(frames));
+        }
+    }
+
+    #[test]
+    fn test_mel_windows_empty_input_yields_no_windows() {
+        assert!(mel_windows(0).is_empty());
+    }
+
+    #[test]
+    fn test_mel_windows_no_silent_loss() {
+        // Guards D2: the deleted 30 s PCM clamp must not come back as truncation
+        // anywhere in the windowing. Total covered frames == content frames.
+        let frame_counts = [0usize, 1, 1_500, 2_999, 3_000, 3_001, 4_500, 61_500];
+        for frames in frame_counts {
+            let covered: usize = mel_windows(frames).iter().map(|&(_, len)| len).sum();
+            assert_eq!(covered, frames, "windows dropped frames for {frames}");
+        }
+
+        let sample_counts = [0usize, 1, 240_159, 240_160, 480_000, 1_234_567, 9_600_000];
+        for samples in sample_counts {
+            let frames = candle_mel_frames(samples);
+            let covered: usize = mel_windows(frames).iter().map(|&(_, len)| len).sum();
+            assert_eq!(
+                covered, frames,
+                "windows dropped frames for {samples} samples"
+            );
+        }
     }
 }
