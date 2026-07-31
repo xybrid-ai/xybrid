@@ -56,9 +56,19 @@ const JFK_TRANSCRIPT: &str = "And so my fellow Americans, ask not what your coun
 /// below compare outputs against each other rather than against that text.
 const FRENCH_CLIP: &str = "mls-fr-1-8s.wav";
 
-/// WER budget for whisper-tiny on clean speech. A threshold rather than string
-/// equality because Metal and CPU decode to slightly different transcripts.
-const MAX_WER: f64 = 0.15;
+/// WER budget for whisper-tiny on clean speech.
+///
+/// A threshold rather than string equality because whisper-tiny is not
+/// deterministic across backends — the CPU path both jobs run today agrees
+/// exactly, but enabling `candle-metal` would decode slightly differently.
+///
+/// Both scored clips currently measure **0.000**, so this is headroom, not a
+/// tolerance being consumed. It is set at the point where a real regression
+/// cannot hide: the 11 s clip's reference is 22 words, so 0.10 fails on the
+/// third wrong word (0.136) while absorbing the one or two a backend change
+/// might plausibly shift. Tightening further would start failing on numeric
+/// noise rather than on defects.
+const MAX_WER: f64 = 0.10;
 
 /// A loaded Whisper runtime, or `None` when the model is not downloaded.
 ///
