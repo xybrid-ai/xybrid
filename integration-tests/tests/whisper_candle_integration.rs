@@ -232,6 +232,25 @@ fn english_word_rate(text: &str) -> f64 {
     hits as f64 / words.len() as f64
 }
 
+/// Sub-second audio: a single window that is 99%+ padding. The trim keeps this
+/// window because it holds real frames, on the premise that Whisper handles a
+/// padded *tail* fine — this measures that premise at its thinnest: 0.3 s of
+/// speech in front of 29.7 s of padding must not decode into fabricated
+/// annotations, and must not error. An empty transcript is acceptable; 0.3 s
+/// may genuinely carry no recognizable word.
+#[test]
+fn test_whisper_survives_sub_second_audio_without_fabricating_text() {
+    let Some(mut runtime) = whisper_runtime() else {
+        skip_notice();
+        return;
+    };
+
+    let pcm = read_pcm(JFK_CLIP);
+    let text = transcribed(&mut runtime, &pcm[..(SAMPLE_RATE as usize * 3 / 10)], &[]);
+    println!("0.3 s slice: {text:?}");
+    assert_no_hallucinated_annotation("0.3 s slice", &text);
+}
+
 #[test]
 fn test_whisper_transcribes_five_second_slice() {
     let Some(mut runtime) = whisper_runtime() else {

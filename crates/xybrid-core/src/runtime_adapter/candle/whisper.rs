@@ -5,8 +5,9 @@
 
 use byteorder::{ByteOrder, LittleEndian};
 use candle_core::{Device, IndexOp, Tensor};
-use candle_nn::VarBuilder;
+use candle_nn::{ops::softmax, VarBuilder};
 use candle_transformers::models::whisper::{self as m, audio, Config};
+use serde::Deserialize;
 use std::path::Path;
 use thiserror::Error;
 use tokenizers::Tokenizer;
@@ -156,6 +157,29 @@ pub(crate) struct TranscribeOptions {
     pub task: Task,
 }
 
+/// Decoding parameters shipped in `config.json` that candle's [`Config`] drops.
+///
+/// candle keeps `suppress_tokens` but not `begin_suppress_tokens`, and both are
+/// properties of the trained model rather than caller-tunable settings, so they
+/// are read from the same file rather than reinvented as defaults. A model
+/// whose config omits the key suppresses nothing extra.
+#[derive(Debug, Default, Deserialize)]
+struct DecodeConfig {
+    #[serde(default)]
+    begin_suppress_tokens: Vec<u32>,
+}
+
+/// One decoded window: its text and the two scores that decide whether to keep it.
+struct SegmentDecode {
+    text: String,
+    /// Probability the model put on "this window is not speech", read at the
+    /// first decoded position. NaN when the model has no no-speech token.
+    no_speech_prob: f64,
+    /// Mean log-probability of the decoded tokens — how confident the decode
+    /// was, which is low when the model is fabricating.
+    avg_logprob: f64,
+}
+
 /// Whisper model wrapper
 pub struct WhisperModel {
     /// The underlying Whisper model
@@ -174,6 +198,16 @@ pub struct WhisperModel {
     transcribe_token: u32,
     translate_token: u32,
     no_timestamps_token: u32,
+    /// `<|nocaptions|>` / `<|nospeech|>`, whichever this vocabulary spells.
+    /// `None` for a model that has neither, which only disables the no-speech
+    /// guard — see [`is_silent_segment`].
+    no_speech_token: Option<u32>,
+    /// Additive `[vocab_size]` logit mask (`0.0` / `-inf`) applied at every
+    /// decode step, from the model's own `suppress_tokens`.
+    suppress_mask: Tensor,
+    /// The same shape, from `begin_suppress_tokens`, applied only on a
+    /// segment's first sampled step.
+    begin_suppress_mask: Tensor,
     /// Language token resolved at load time from [`WhisperConfig::language`].
     /// Used only when a request does not name its own language — see
     /// [`TranscribeOptions`].
@@ -206,9 +240,14 @@ impl WhisperModel {
         device: &Device,
         user_config: WhisperConfig,
     ) -> WhisperResult<Self> {
-        // Load configuration
+        // Load configuration. Parsed twice on purpose: candle's `Config` keeps
+        // `suppress_tokens` but drops `begin_suppress_tokens`, and both are
+        // decoding parameters shipped with the weights rather than something a
+        // caller gets to choose.
         let config_path = model_dir.join("config.json");
-        let config: Config = serde_json::from_str(&std::fs::read_to_string(&config_path)?)?;
+        let config_json = std::fs::read_to_string(&config_path)?;
+        let config: Config = serde_json::from_str(&config_json)?;
+        let decode_config: DecodeConfig = serde_json::from_str(&config_json)?;
 
         // Load tokenizer
         let tokenizer_path = model_dir.join("tokenizer.json");
@@ -268,6 +307,31 @@ impl WhisperModel {
         let translate_token = token_id(&tokenizer, m::TRANSLATE_TOKEN)?;
         let no_timestamps_token = token_id(&tokenizer, m::NO_TIMESTAMPS_TOKEN)?;
 
+        // Whichever spelling this vocabulary uses, or neither. A model without
+        // one is not broken — it just cannot be asked "was that speech?", so
+        // the guard downstream stays inert instead of failing the load.
+        let no_speech_token = m::NO_SPEECH_TOKENS
+            .iter()
+            .find_map(|token| tokenizer.token_to_id(token));
+
+        // Whisper's own logit filters, built once: without them greedy decoding
+        // is free to emit the non-speech annotation tokens ("[", "(", "♪") the
+        // model was trained to produce for music and silence, which on a
+        // mostly-padding window is exactly what it does.
+        let suppress_mask = suppress_mask_tensor(
+            config.vocab_size,
+            &config.suppress_tokens,
+            // Timestamps mode has to suppress the token that turns it off.
+            user_config.timestamps.then_some(no_timestamps_token),
+            device,
+        )?;
+        let begin_suppress_mask = suppress_mask_tensor(
+            config.vocab_size,
+            &decode_config.begin_suppress_tokens,
+            None,
+            device,
+        )?;
+
         // Resolve the load-time language now, and fail if it is not in the
         // vocabulary. Swallowing the lookup here would turn a misconfigured
         // language into silent auto-detect: every later request that names no
@@ -290,6 +354,9 @@ impl WhisperModel {
             transcribe_token,
             translate_token,
             no_timestamps_token,
+            no_speech_token,
+            suppress_mask,
+            begin_suppress_mask,
             language_token,
             user_config,
         })
@@ -337,9 +404,10 @@ impl WhisperModel {
     /// # Arguments
     ///
     /// * `mel` - Mel spectrogram tensor [1, n_mels, n_frames], where `n_frames`
-    ///   is at most [`m::N_FRAMES`]. Longer mels must be sliced into windows
-    ///   first — see [`mel_windows`] — because the encoder's positional
-    ///   embedding table only has `n_audio_ctx` (`N_FRAMES / 2`) rows.
+    ///   is at most [`m::N_FRAMES`]. Longer mels must be sliced into
+    ///   `N_FRAMES`-sized windows first — as [`WhisperModel::transcribe`]
+    ///   does — because the encoder's positional embedding table only has
+    ///   `n_audio_ctx` (`N_FRAMES / 2`) rows.
     ///
     /// # Returns
     ///
@@ -351,9 +419,10 @@ impl WhisperModel {
     /// Transcribe audio from mel spectrogram using the model's load-time
     /// language and task.
     ///
-    /// Equivalent to [`WhisperModel::transcribe_with_options`] with the
-    /// load-time fallbacks, so callers that predate per-request options keep
-    /// their existing behavior.
+    /// The mel is taken at face value: every frame it carries is windowed and
+    /// decoded, padding included. Prefer [`WhisperModel::transcribe_pcm`],
+    /// which trims `pcm_to_mel`'s padded tail before windowing; hand a mel in
+    /// directly only if it is already cut to the frames that carry audio.
     ///
     /// # Arguments
     ///
@@ -410,6 +479,10 @@ impl WhisperModel {
     /// Every frame handed in is transcribed: the caller decides what counts as
     /// content. From PCM that decision is [`trimmed_mel_frames`]; a mel passed
     /// in directly is taken at face value.
+    ///
+    /// A window the model reports as speechless and low-confidence is dropped
+    /// rather than transcribed — see [`is_silent_segment`]. Every window can be
+    /// dropped, which is an empty transcript, not an error.
     fn transcribe_mel(&mut self, mel: &Tensor, prefix: &[u32]) -> WhisperResult<String> {
         let (_, _, content_frames) = mel.dims3()?;
 
@@ -422,8 +495,12 @@ impl WhisperModel {
             // candle's own whisper example.
             let audio_features = self.model.encoder.forward(&mel_segment, true)?;
 
-            let text = self.decode_segment(&audio_features, prefix)?;
-            let text = text.trim();
+            let decoded = self.decode_segment(&audio_features, prefix)?;
+            if is_silent_segment(decoded.no_speech_prob, decoded.avg_logprob) {
+                continue;
+            }
+
+            let text = decoded.text.trim();
             if !text.is_empty() {
                 segments.push(text.to_string());
             }
@@ -464,12 +541,24 @@ impl WhisperModel {
         language_token_id(&self.tokenizer, language)
     }
 
-    /// Greedily decode one encoder window into text.
+    /// Greedily decode one encoder window into text and its two quality scores.
     ///
     /// Starts from `prefix`, the same forced-token prefix for every window, so
-    /// each window decodes independently.
-    fn decode_segment(&mut self, audio_features: &Tensor, prefix: &[u32]) -> WhisperResult<String> {
+    /// each window decodes independently. Mirrors the decode loop in candle's
+    /// whisper example: same logit masking, same point at which the no-speech
+    /// probability is read, same average-log-probability arithmetic — so
+    /// [`m::NO_SPEECH_THRESHOLD`] and [`m::LOGPROB_THRESHOLD`] mean here what
+    /// they mean there.
+    fn decode_segment(
+        &mut self,
+        audio_features: &Tensor,
+        prefix: &[u32],
+    ) -> WhisperResult<SegmentDecode> {
         let mut tokens = prefix.to_vec();
+        let mut sum_logprob = 0f64;
+        // NaN when this model has no no-speech token: every comparison against
+        // it is false, so the guard stays out of the way.
+        let mut no_speech_prob = f64::NAN;
 
         // Autoregressive decoding
         let sample_len = self.config.max_target_positions / 2;
@@ -486,6 +575,24 @@ impl WhisperModel {
                 .decoder
                 .forward(&tokens_t, audio_features, i == 0)?;
 
+            // "Did this window contain speech at all?" is asked once, of the
+            // *first* position of the first step — the slot right after
+            // `<|startoftranscript|>`, which is where Whisper was trained to
+            // put `<|nocaptions|>` for silence. Read from the raw logits: the
+            // suppress mask below sets that token to -inf, and masking it
+            // before measuring it would answer "no speech" with probability 0
+            // every time.
+            if i == 0 {
+                if let Some(no_speech_token) = self.no_speech_token {
+                    let first_logits = self.model.decoder.final_linear(&ys.i(..1)?)?.i(0)?.i(0)?;
+                    no_speech_prob = f64::from(
+                        softmax(&first_logits, 0)?
+                            .i(no_speech_token as usize)?
+                            .to_scalar::<f32>()?,
+                    );
+                }
+            }
+
             // Get logits for last position
             let (_, seq_len, _) = ys.dims3()?;
             let logits = self
@@ -495,20 +602,48 @@ impl WhisperModel {
                 .i(0)?
                 .i(0)?;
 
+            let logits = logits.broadcast_add(&self.suppress_mask)?;
+            // `begin_suppress_tokens` (a leading space, and end-of-text) is a
+            // rule about how a transcript may *start*, so it applies to the
+            // first sampled token only. A window with nothing to say still ends
+            // up empty — it decodes one token and then stops — but the no-speech
+            // guard, not an immediate end-of-text, is what discards it.
+            let logits = if i == 0 {
+                logits.broadcast_add(&self.begin_suppress_mask)?
+            } else {
+                logits
+            };
+
             // Greedy decoding: take argmax
             let next_token = logits.argmax(candle_core::D::Minus1)?.to_scalar::<u32>()?;
+            let prob = f64::from(
+                softmax(&logits, candle_core::D::Minus1)?
+                    .i(next_token as usize)?
+                    .to_scalar::<f32>()?,
+            );
 
+            // The end-of-text token is pushed before the loop breaks, and the
+            // average below divides by the whole token vector, prefix included.
+            // Both match candle's example: the thresholds are calibrated
+            // against that denominator, and a tighter one would shift what
+            // counts as a low-confidence segment.
+            tokens.push(next_token);
             if next_token == self.eot_token || tokens.len() > self.config.max_target_positions {
                 break;
             }
-
-            tokens.push(next_token);
+            sum_logprob += prob.ln();
         }
 
-        // Decode tokens to text
-        self.tokenizer
+        let text = self
+            .tokenizer
             .decode(&tokens, true)
-            .map_err(|e| WhisperError::Tokenizer(format!("Tokenizer decode error: {}", e)))
+            .map_err(|e| WhisperError::Tokenizer(format!("Tokenizer decode error: {}", e)))?;
+
+        Ok(SegmentDecode {
+            text,
+            no_speech_prob,
+            avg_logprob: sum_logprob / tokens.len() as f64,
+        })
     }
 
     /// Get model configuration.
@@ -539,9 +674,12 @@ impl WhisperModel {
     /// Note: audio of any length is accepted and nothing is truncated. The
     /// returned mel is candle's, padding and all: it may exceed the encoder's
     /// [`m::N_FRAMES`] context, and its tail may be padding past the last real
-    /// frame. Callers cut it back to [`trimmed_mel_frames`] and slice the rest
-    /// into encoder windows with [`mel_windows`], which is what
-    /// [`WhisperModel::transcribe_pcm_with_options`] does.
+    /// frame. [`WhisperModel::transcribe`] takes a mel at face value — it
+    /// windows and decodes every frame it is given, padding included, and a
+    /// window that is entirely padding decodes to fabricated text. Prefer
+    /// [`WhisperModel::transcribe_pcm`], which trims the padded tail before
+    /// windowing; feed a mel back into `transcribe` directly only if it is
+    /// already cut to the frames that carry audio.
     pub fn pcm_to_mel_tensor(&self, pcm_data: &[f32]) -> WhisperResult<Tensor> {
         let mel = audio::pcm_to_mel(&self.config, pcm_data, &self.mel_filters);
         let mel_len = mel.len();
@@ -650,6 +788,56 @@ fn build_decode_prefix(
     tokens
 }
 
+/// Additive logit mask values: `0.0` for every token, `-inf` for suppressed ones.
+///
+/// Adding this to a step's logits before the argmax is how Whisper's reference
+/// decoder forbids a token: `-inf` survives the softmax as probability 0, so
+/// greedy sampling can never pick it and the remaining distribution is
+/// unchanged. `extra` is folded in for the one suppression that depends on
+/// runtime configuration rather than on the model file (timestamps mode has to
+/// suppress `<|notimestamps|>`).
+///
+/// Ids at or past `vocab_size` are ignored rather than an error: the mask has
+/// to be exactly as wide as the logits, and a config listing an out-of-range id
+/// is the config's problem, not something to fail a model load over.
+fn suppress_mask_values(vocab_size: usize, suppressed: &[u32], extra: Option<u32>) -> Vec<f32> {
+    let mut mask = vec![0f32; vocab_size];
+    for &token in suppressed.iter().chain(extra.iter()) {
+        if let Some(slot) = mask.get_mut(token as usize) {
+            *slot = f32::NEG_INFINITY;
+        }
+    }
+    mask
+}
+
+/// [`suppress_mask_values`] as a `[vocab_size]` tensor on `device`.
+fn suppress_mask_tensor(
+    vocab_size: usize,
+    suppressed: &[u32],
+    extra: Option<u32>,
+    device: &Device,
+) -> WhisperResult<Tensor> {
+    let mask = suppress_mask_values(vocab_size, suppressed, extra);
+    Tensor::new(mask.as_slice(), device).map_err(WhisperError::from)
+}
+
+/// Whether a decoded window is silence the model talked over, and so is dropped.
+///
+/// Both halves are required, which is what keeps it from eating real speech: a
+/// window has to *both* look like non-speech to the model and have decoded with
+/// low confidence. Real speech that happens to score one of the two — a
+/// confident decode of a quiet passage, or a hesitant decode of clear speech —
+/// is kept.
+///
+/// A NaN `no_speech_prob` (this model has no no-speech token) compares false,
+/// so the guard is simply inert rather than dropping everything.
+///
+/// Thresholds are candle's own constants, which are OpenAI's: not tuned here,
+/// so they stay comparable to every other Whisper implementation.
+fn is_silent_segment(no_speech_prob: f64, avg_logprob: f64) -> bool {
+    no_speech_prob > m::NO_SPEECH_THRESHOLD && avg_logprob < m::LOGPROB_THRESHOLD
+}
+
 /// The language token to force when a request names no language of its own.
 ///
 /// Transcribe keeps the load-time language: a request that says nothing wants
@@ -664,6 +852,13 @@ fn build_decode_prefix(
 /// outright, so *every* request through it arrives here with `None` and would
 /// otherwise be told its French audio is English. `None` means auto-detect,
 /// which is what translation without a declared source language means.
+///
+/// Deliberate trade: this also drops a load-time language that was configured
+/// *explicitly* (e.g. `WhisperConfig { language: Some("fr"), task: Translate }`
+/// falls back to auto-detect rather than forcing `<|fr|>`). The load-time
+/// config cannot distinguish "defaulted to en" from "explicitly en", and
+/// forcing the default onto translate is the worse failure; a translate caller
+/// that knows the source language states it per request.
 fn fallback_language_token(load_time: Option<u32>, task: Task) -> Option<u32> {
     match task {
         Task::Transcribe => load_time,
@@ -682,16 +877,22 @@ fn fallback_language_token(load_time: Option<u32>, task: Task) -> Option<u32> {
 /// `pcm_to_mel` rounds the frame count up to a multiple of 1500 and then
 /// appends one more 1500-frame chunk unconditionally, so whenever that multiple
 /// is odd the 3000-frame tiling ends on a window that is 100% zero padding.
-/// Whisper is trained on 30 s windows whose *tail* is padded, so a last window
-/// holding even one real frame decodes fine — but a window holding none is
-/// off-distribution, and greedy decoding does not return empty for it: it
-/// fabricates text (whisper-tiny emits bracketed non-speech annotations like
-/// "[Opening]"). Half of all durations land there — [15.01 s, 30.00 s],
-/// [45.01, 60.00], and so on — so this is a routine input, not an edge case.
+/// Whisper is trained on 30 s windows whose *tail* is padded, so a padded tail
+/// is in-distribution — but a window with no real frame at all is not, and
+/// greedy decoding does not return empty for it: it fabricates text
+/// (whisper-tiny emits bracketed non-speech annotations like "[Opening]"). Half
+/// of all durations land there — [15.01 s, 30.00 s], [45.01, 60.00], and so on
+/// — so this is a routine input, not an edge case.
 ///
 /// Every kept window therefore starts before `content_frames` and contains real
 /// audio. Rounding *up* rather than down is what keeps that from costing
 /// anything: no real frame is ever dropped.
+///
+/// Holding a real frame is necessary but not sufficient: a window that is 99%
+/// padding (0.3 s of speech in a 30 s window) can still read as non-speech and
+/// fabricate. Trimming is only the first of three defenses — the suppress mask
+/// takes the annotation tokens off the table entirely, and [`is_silent_segment`]
+/// discards what the model itself reports as speechless.
 ///
 /// Zero content frames yields zero (`div_ceil(0, N) * N == 0`), i.e. audio
 /// shorter than one hop keeps nothing and transcribes to nothing.
@@ -896,6 +1097,88 @@ mod tests {
         // request through it arrives with None and hit exactly this path.
         assert_eq!(fallback_language_token(Some(EN), Task::Translate), None);
         assert_eq!(fallback_language_token(None, Task::Translate), None);
+    }
+
+    #[test]
+    fn test_suppress_mask_blocks_only_the_listed_tokens() {
+        let mask = suppress_mask_values(8, &[1, 5], None);
+        assert_eq!(mask.len(), 8, "the mask has to be as wide as the logits");
+        for (token, value) in mask.iter().enumerate() {
+            if token == 1 || token == 5 {
+                assert_eq!(
+                    *value,
+                    f32::NEG_INFINITY,
+                    "token {token} should be suppressed"
+                );
+            } else {
+                // Exactly zero, not merely small: the mask is *added* to the
+                // logits, so any other value would reweight allowed tokens.
+                assert_eq!(*value, 0.0, "token {token} should be untouched");
+            }
+        }
+    }
+
+    #[test]
+    fn test_suppress_mask_folds_in_the_extra_token() {
+        let mask = suppress_mask_values(4, &[0], Some(3));
+        assert_eq!(mask, vec![f32::NEG_INFINITY, 0.0, 0.0, f32::NEG_INFINITY]);
+
+        // No extra: the same list, nothing else touched.
+        let mask = suppress_mask_values(4, &[0], None);
+        assert_eq!(mask, vec![f32::NEG_INFINITY, 0.0, 0.0, 0.0]);
+    }
+
+    #[test]
+    fn test_suppress_mask_ignores_out_of_range_ids() {
+        // A config listing an id past the vocabulary must not panic or widen
+        // the mask — the tensor has to line up with the logits either way.
+        let mask = suppress_mask_values(3, &[1, 3, 99], None);
+        assert_eq!(mask, vec![0.0, f32::NEG_INFINITY, 0.0]);
+
+        assert!(suppress_mask_values(0, &[0], Some(1)).is_empty());
+    }
+
+    #[test]
+    fn test_is_silent_segment_needs_both_halves() {
+        // (no_speech_prob, avg_logprob, dropped?) around candle's 0.6 / -1.0.
+        let cases = [
+            (0.9, -2.0, true),   // no speech and unconfident: fabricated text
+            (0.9, -0.5, false),  // reads as non-speech but decoded confidently
+            (0.3, -2.0, false),  // unconfident, but the model heard speech
+            (0.3, -0.5, false),  // ordinary speech
+            (0.6, -2.0, false),  // exactly at the threshold is not past it
+            (0.61, -1.0, false), // ditto for the log-probability bound
+            (0.61, -1.01, true), // just past both
+        ];
+
+        for (no_speech_prob, avg_logprob, expected) in cases {
+            assert_eq!(
+                is_silent_segment(no_speech_prob, avg_logprob),
+                expected,
+                "no_speech_prob {no_speech_prob}, avg_logprob {avg_logprob}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_is_silent_segment_is_inert_without_a_no_speech_token() {
+        // NaN stands for "this model cannot tell us" — it must not drop
+        // segments, however low the confidence.
+        assert!(!is_silent_segment(f64::NAN, -5.0));
+        assert!(!is_silent_segment(f64::NAN, 0.0));
+    }
+
+    #[test]
+    fn test_decode_config_defaults_to_no_begin_suppression() {
+        // Not every config.json carries the key; missing means "suppress
+        // nothing extra", not a failed load.
+        let config: DecodeConfig = serde_json::from_str("{}").expect("empty config parses");
+        assert!(config.begin_suppress_tokens.is_empty());
+
+        let config: DecodeConfig =
+            serde_json::from_str(r#"{"begin_suppress_tokens": [220, 50257]}"#)
+                .expect("whisper-tiny's value parses");
+        assert_eq!(config.begin_suppress_tokens, vec![220, 50257]);
     }
 
     #[test]
