@@ -192,6 +192,24 @@ fn assert_transcribed_something(label: &str, text: &str) {
     );
 }
 
+/// Assert the transcript carries no bracketed non-speech annotation.
+///
+/// A documented heuristic, not a hard property of Whisper output. When the mel
+/// was windowed over `pcm_to_mel`'s padding, durations in [15.01 s, 30.00 s]
+/// (and [45.01, 60.00], and so on) ended on a window that was 100% zero
+/// padding, and whisper-tiny fabricated text from it — observed as "[Opening]"
+/// appended to an otherwise correct transcript. Clean looped speech never
+/// legitimately produces brackets or parentheses, so their absence is a cheap
+/// canary for that class of regression; it would need revisiting only if a
+/// fixture ever contained real annotated non-speech.
+fn assert_no_hallucinated_annotation(label: &str, text: &str) {
+    assert!(
+        !text.contains('[') && !text.contains('('),
+        "{label}: transcript carries a bracketed non-speech annotation, which is how a decode \
+         over an all-padding window shows up: {text:?}"
+    );
+}
+
 /// English function words, chosen to have no French homographs, so the rate
 /// separates an English transcript from a French one without a language model.
 const ENGLISH_FUNCTION_WORDS: &[&str] = &[
@@ -268,6 +286,8 @@ fn test_whisper_transcribes_exactly_240160_samples() {
     let pcm = looped(&read_pcm(JFK_CLIP), 240_160);
     let text = transcribed(&mut runtime, &pcm, &[]);
     assert_transcribed_something("240_160 samples (15.01 s)", &text);
+    // First duration whose padded mel tiled into a trailing all-padding window.
+    assert_no_hallucinated_annotation("240_160 samples (15.01 s)", &text);
 }
 
 /// Exactly 30.00 s — the length the runtime used to clamp every longer input
@@ -282,6 +302,9 @@ fn test_whisper_transcribes_exactly_thirty_seconds() {
     let pcm = looped(&read_pcm(JFK_CLIP), 480_000);
     let text = transcribed(&mut runtime, &pcm, &[]);
     assert_transcribed_something("480_000 samples (30.00 s)", &text);
+    // Exactly fills one window, so the padded mel's second window held nothing
+    // but padding — the far end of the same band as 240_160.
+    assert_no_hallucinated_annotation("480_000 samples (30.00 s)", &text);
 }
 
 /// Six copies of the clip, 66 s: three encoder windows. Scored against the
@@ -366,6 +389,36 @@ fn test_whisper_translate_task_returns_english_for_french_audio() {
         translated_rate > french_rate,
         "task=translate should read as English: {translated_rate:.3} English-word rate vs \
          {french_rate:.3} for the French transcript\n  translate: {translated:?}\n  transcribe: {french:?}"
+    );
+}
+
+/// `task=translate` with no `language` is what the OpenAI-compatible
+/// `/audio/translations` endpoint actually sends: it rejects `language` on that
+/// route, so the source language never reaches the runtime. Falling back to the
+/// load-time `<|en|>` there declares the French audio English; the output has to
+/// read as English anyway, from auto-detection rather than from a forced source
+/// language.
+#[test]
+fn test_whisper_translate_without_language_returns_english_for_french_audio() {
+    let Some(mut runtime) = whisper_runtime() else {
+        skip_notice();
+        return;
+    };
+
+    let pcm = read_pcm(FRENCH_CLIP);
+    let french = transcribed(&mut runtime, &pcm, &[("language", "fr")]);
+    let translated = transcribed(&mut runtime, &pcm, &[("task", "translate")]);
+
+    let french_rate = english_word_rate(&french);
+    let translated_rate = english_word_rate(&translated);
+    println!("transcribe (fr):          rate {french_rate:.3} {french:?}");
+    println!("translate  (no language): rate {translated_rate:.3} {translated:?}");
+
+    assert!(
+        translated_rate > french_rate,
+        "task=translate without a language should read as English: {translated_rate:.3} \
+         English-word rate vs {french_rate:.3} for the French transcript\n  translate: \
+         {translated:?}\n  transcribe: {french:?}"
     );
 }
 

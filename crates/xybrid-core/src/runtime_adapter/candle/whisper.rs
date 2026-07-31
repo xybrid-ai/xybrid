@@ -268,13 +268,16 @@ impl WhisperModel {
         let translate_token = token_id(&tokenizer, m::TRANSLATE_TOKEN)?;
         let no_timestamps_token = token_id(&tokenizer, m::NO_TIMESTAMPS_TOKEN)?;
 
-        // Get language token if specified
-        let language_token = if let Some(ref lang) = user_config.language {
-            let lang_token = format!("<|{}|>", lang);
-            token_id(&tokenizer, &lang_token).ok()
-        } else {
-            None
-        };
+        // Resolve the load-time language now, and fail if it is not in the
+        // vocabulary. Swallowing the lookup here would turn a misconfigured
+        // language into silent auto-detect: every later request that names no
+        // language of its own would decode as whatever Whisper guessed, with
+        // nothing in the response saying the configured language was dropped.
+        let language_token = user_config
+            .language
+            .as_deref()
+            .map(|language| language_token_id(&tokenizer, language))
+            .transpose()?;
 
         Ok(Self {
             model,
@@ -394,6 +397,20 @@ impl WhisperModel {
         options: &TranscribeOptions,
     ) -> WhisperResult<String> {
         let prefix = self.decode_prefix(options)?;
+        self.transcribe_mel(mel, &prefix)
+    }
+
+    /// Window, encode and decode `mel` against an already-resolved prefix.
+    ///
+    /// Split out from [`WhisperModel::transcribe_with_options`] so callers that
+    /// have to resolve the prefix early — [`WhisperModel::transcribe_pcm_with_options`]
+    /// validates the request's language before computing a mel that may be
+    /// minutes long — do not resolve it twice.
+    ///
+    /// Every frame handed in is transcribed: the caller decides what counts as
+    /// content. From PCM that decision is [`trimmed_mel_frames`]; a mel passed
+    /// in directly is taken at face value.
+    fn transcribe_mel(&mut self, mel: &Tensor, prefix: &[u32]) -> WhisperResult<String> {
         let (_, _, content_frames) = mel.dims3()?;
 
         let mut segments: Vec<String> = Vec::new();
@@ -405,7 +422,7 @@ impl WhisperModel {
             // candle's own whisper example.
             let audio_features = self.model.encoder.forward(&mel_segment, true)?;
 
-            let text = self.decode_segment(&audio_features, &prefix)?;
+            let text = self.decode_segment(&audio_features, prefix)?;
             let text = text.trim();
             if !text.is_empty() {
                 segments.push(text.to_string());
@@ -428,9 +445,7 @@ impl WhisperModel {
     fn decode_prefix(&self, options: &TranscribeOptions) -> WhisperResult<Vec<u32>> {
         let language_token = match options.language.as_deref() {
             Some(language) => Some(self.resolve_language_token(language)?),
-            // No per-request language: use whatever was resolved at load time
-            // (`None` there means auto-detect, i.e. no forced language token).
-            None => self.language_token,
+            None => fallback_language_token(self.language_token, options.task),
         };
 
         Ok(build_decode_prefix(
@@ -445,17 +460,8 @@ impl WhisperModel {
     }
 
     /// Look up the `<|xx|>` token for a caller-supplied language code.
-    ///
-    /// Whisper spells these tokens in lowercase, so the code is lowercased
-    /// before lookup; `"FR"` and `"fr"` both resolve to `<|fr|>`. An
-    /// unrecognized code is rejected rather than silently dropped — decoding
-    /// without a language token makes Whisper auto-detect, which would look
-    /// like the request succeeded while ignoring what it asked for.
     fn resolve_language_token(&self, language: &str) -> WhisperResult<u32> {
-        let token = format!("<|{}|>", language.trim().to_ascii_lowercase());
-        self.tokenizer
-            .token_to_id(&token)
-            .ok_or_else(|| WhisperError::UnsupportedLanguage(language.to_string()))
+        language_token_id(&self.tokenizer, language)
     }
 
     /// Greedily decode one encoder window into text.
@@ -531,9 +537,11 @@ impl WhisperModel {
     /// Mel spectrogram tensor [1, n_mels, n_frames]
     ///
     /// Note: audio of any length is accepted and nothing is truncated. The
-    /// resulting mel may exceed the encoder's [`m::N_FRAMES`] context; callers
-    /// slice it into encoder windows with [`mel_windows`], which is what
-    /// [`WhisperModel::transcribe`] does.
+    /// returned mel is candle's, padding and all: it may exceed the encoder's
+    /// [`m::N_FRAMES`] context, and its tail may be padding past the last real
+    /// frame. Callers cut it back to [`trimmed_mel_frames`] and slice the rest
+    /// into encoder windows with [`mel_windows`], which is what
+    /// [`WhisperModel::transcribe_pcm_with_options`] does.
     pub fn pcm_to_mel_tensor(&self, pcm_data: &[f32]) -> WhisperResult<Tensor> {
         let mel = audio::pcm_to_mel(&self.config, pcm_data, &self.mel_filters);
         let mel_len = mel.len();
@@ -560,6 +568,10 @@ impl WhisperModel {
 
     /// Transcribe audio from PCM samples with per-request options.
     ///
+    /// The mel is trimmed to [`trimmed_mel_frames`] before windowing, so no
+    /// encoder window is made entirely of `pcm_to_mel`'s padding — see that
+    /// function for why an all-padding window is not merely wasted work.
+    ///
     /// # Arguments
     ///
     /// * `pcm_data` - Audio samples (16kHz, mono, f32)
@@ -572,14 +584,36 @@ impl WhisperModel {
     ///
     /// # Returns
     ///
-    /// Transcribed text
+    /// Transcribed text (empty when the audio is shorter than one mel frame)
     pub(crate) fn transcribe_pcm_with_options(
         &mut self,
         pcm_data: &[f32],
         options: &TranscribeOptions,
     ) -> WhisperResult<String> {
+        // Resolve the prefix first: it is what validates `options.language`,
+        // and a rejected request should not first pay for the mel of a file
+        // that may be minutes long.
+        let prefix = self.decode_prefix(options)?;
+
+        // candle's own floor: `pcm_to_mel` derives its pre-padding frame count
+        // the same way, so this is the number of frames that carry audio.
+        let content_frames = pcm_data.len() / m::HOP_LENGTH;
+        if content_frames == 0 {
+            // Under one hop of audio: the mel would be padding end to end, and
+            // decoding padding invents text. Nothing to transcribe.
+            return Ok(String::new());
+        }
+
         let mel = self.pcm_to_mel_tensor(pcm_data)?;
-        self.transcribe_with_options(&mel, options)
+        let (_, _, mel_frames) = mel.dims3()?;
+        let trimmed = trimmed_mel_frames(content_frames, mel_frames);
+        let mel = if trimmed < mel_frames {
+            mel.narrow(2, 0, trimmed)?
+        } else {
+            mel
+        };
+
+        self.transcribe_mel(&mel, &prefix)
     }
 }
 
@@ -616,6 +650,58 @@ fn build_decode_prefix(
     tokens
 }
 
+/// The language token to force when a request names no language of its own.
+///
+/// Transcribe keeps the load-time language: a request that says nothing wants
+/// the model's configured default, and naming the source language is what makes
+/// Whisper transcribe it rather than guess.
+///
+/// Translate drops it. The task is "render this audio in English", and the
+/// language token names the *source*, not the target — forcing the load-time
+/// `<|en|>` onto translate would assert the audio is already English, which is
+/// exactly what a translate request says it is not. The OpenAI-compatible
+/// `/audio/translations` endpoint in front of this runtime rejects `language`
+/// outright, so *every* request through it arrives here with `None` and would
+/// otherwise be told its French audio is English. `None` means auto-detect,
+/// which is what translation without a declared source language means.
+fn fallback_language_token(load_time: Option<u32>, task: Task) -> Option<u32> {
+    match task {
+        Task::Transcribe => load_time,
+        Task::Translate => None,
+    }
+}
+
+/// How many of a `pcm_to_mel` output's frames to keep before windowing.
+///
+/// `content_frames` is the pre-padding frame count — `pcm_samples /
+/// HOP_LENGTH`, candle's own floor — and `mel_frames` is what `pcm_to_mel`
+/// actually returned. The result rounds the content up to a whole number of
+/// [`m::N_FRAMES`] encoder windows, capped by what exists.
+///
+/// The padding contract makes this necessary rather than merely tidy.
+/// `pcm_to_mel` rounds the frame count up to a multiple of 1500 and then
+/// appends one more 1500-frame chunk unconditionally, so whenever that multiple
+/// is odd the 3000-frame tiling ends on a window that is 100% zero padding.
+/// Whisper is trained on 30 s windows whose *tail* is padded, so a last window
+/// holding even one real frame decodes fine — but a window holding none is
+/// off-distribution, and greedy decoding does not return empty for it: it
+/// fabricates text (whisper-tiny emits bracketed non-speech annotations like
+/// "[Opening]"). Half of all durations land there — [15.01 s, 30.00 s],
+/// [45.01, 60.00], and so on — so this is a routine input, not an edge case.
+///
+/// Every kept window therefore starts before `content_frames` and contains real
+/// audio. Rounding *up* rather than down is what keeps that from costing
+/// anything: no real frame is ever dropped.
+///
+/// Zero content frames yields zero (`div_ceil(0, N) * N == 0`), i.e. audio
+/// shorter than one hop keeps nothing and transcribes to nothing.
+pub(crate) fn trimmed_mel_frames(content_frames: usize, mel_frames: usize) -> usize {
+    usize::min(
+        content_frames.div_ceil(m::N_FRAMES) * m::N_FRAMES,
+        mel_frames,
+    )
+}
+
 /// Offsets and lengths of the encoder windows covering `content_frames` mel frames.
 ///
 /// Whisper's audio encoder halves the frame count in `conv2` and then indexes a
@@ -632,10 +718,10 @@ fn build_decode_prefix(
 /// content_frames`, so no audio is silently dropped.
 ///
 /// `content_frames == 0` yields no windows, so a caller transcribes nothing and
-/// returns an empty transcript rather than encoding an empty tensor. A mel built
-/// from real PCM never hits this: `pcm_to_mel` always pads to at least one full
-/// 1500-frame chunk, even for zero samples. It is reachable only when a mel
-/// tensor is handed in directly.
+/// returns an empty transcript rather than encoding an empty tensor. The PCM
+/// path never gets here with zero: [`WhisperModel::transcribe_pcm_with_options`]
+/// returns early on sub-hop audio, and anything longer trims to at least one
+/// full window. It is reachable only when a mel tensor is handed in directly.
 pub(crate) fn mel_windows(content_frames: usize) -> Vec<(usize, usize)> {
     let mut windows = Vec::with_capacity(content_frames.div_ceil(m::N_FRAMES));
     let mut seek = 0;
@@ -645,6 +731,20 @@ pub(crate) fn mel_windows(content_frames: usize) -> Vec<(usize, usize)> {
         seek += len;
     }
     windows
+}
+
+/// Look up the `<|xx|>` token for a language code.
+///
+/// Whisper spells these tokens in lowercase, so the code is lowercased before
+/// lookup; `"FR"` and `"fr"` both resolve to `<|fr|>`. An unrecognized code is
+/// rejected rather than silently dropped — decoding without a language token
+/// makes Whisper auto-detect, which would look like the request succeeded while
+/// ignoring what it asked for.
+fn language_token_id(tokenizer: &Tokenizer, language: &str) -> WhisperResult<u32> {
+    let token = format!("<|{}|>", language.trim().to_ascii_lowercase());
+    tokenizer
+        .token_to_id(&token)
+        .ok_or_else(|| WhisperError::UnsupportedLanguage(language.to_string()))
 }
 
 /// Helper to get token ID from tokenizer
@@ -777,6 +877,36 @@ mod tests {
         }
     }
 
+    #[test]
+    fn test_fallback_language_transcribe_uses_load_time_language() {
+        // Nothing named per request: transcribe means "in the configured
+        // language", and a model loaded without one still auto-detects.
+        assert_eq!(
+            fallback_language_token(Some(EN), Task::Transcribe),
+            Some(EN)
+        );
+        assert_eq!(fallback_language_token(None, Task::Transcribe), None);
+    }
+
+    #[test]
+    fn test_fallback_language_translate_auto_detects_source() {
+        // The F2 regression. The language token names the *source* audio, so
+        // falling back to the load-time <|en|> told Whisper that French audio
+        // was English — and /audio/translations rejects `language`, so every
+        // request through it arrives with None and hit exactly this path.
+        assert_eq!(fallback_language_token(Some(EN), Task::Translate), None);
+        assert_eq!(fallback_language_token(None, Task::Translate), None);
+    }
+
+    #[test]
+    fn test_trimmed_mel_frames_is_capped_by_the_mel_it_is_given() {
+        // Rounding up never over-reads: a mel shorter than the round-up (not
+        // something candle's padding produces, but `narrow` would error on it)
+        // is kept whole.
+        assert_eq!(trimmed_mel_frames(2_000, 2_500), 2_500);
+        assert_eq!(trimmed_mel_frames(2_000, 3_000), 3_000);
+    }
+
     /// Mel frame count candle produces for `samples` PCM samples at 16 kHz.
     ///
     /// Mirrors `log_mel_spectrogram_` in candle-transformers 0.8.4
@@ -786,9 +916,12 @@ mod tests {
     /// chunk. The mel vector is `n_len * n_mel` long, so `n_len` is the frame
     /// dimension `transcribe` windows over.
     ///
-    /// Duplicated here on purpose: if candle changes its padding, this helper
-    /// stops matching reality and the boundary table below is where the drift
-    /// becomes visible.
+    /// This is a local reimplementation checked against local constants, so it
+    /// cannot detect candle changing its own padding — it would drift in
+    /// lockstep with nothing. What it pins is *this file's* understanding of
+    /// candle 0.8.4's arithmetic, which is what [`trimmed_mel_frames`] is
+    /// designed against. Real drift is caught by the integration tests, which
+    /// call the actual `pcm_to_mel`.
     fn candle_mel_frames(samples: usize) -> usize {
         const PAD: usize = 100 * m::CHUNK_LENGTH / 2; // 1500
         let n_len = samples / m::HOP_LENGTH;
@@ -827,34 +960,62 @@ mod tests {
     }
 
     #[test]
-    fn test_mel_windows_boundary_table() {
-        // (samples, expected mel frames, expected window count).
+    fn test_mel_trimming_boundary_table() {
+        // (samples, padded frames from candle, trimmed frames, window count).
+        //
+        // Each row derived from: content = samples / 160 (HOP_LENGTH);
+        // padded = roundup1500(content) + 1500; trimmed = min(roundup3000(content), padded).
+        //
         // The 240_159 / 240_160 pair is the one-sample cliff observed in prod:
         // 3000 frames fit the encoder, 4500 did not and hard-errored with
         // "narrow invalid args start + len > dim_len".
+        //
+        // The trimmed column is the F1 fix. Four of these rows used to window
+        // over the padded count and hand a 100%-padding window to the decoder,
+        // which fabricated text from it.
         let cases = [
-            (0usize, 1_500usize, 1usize), // no samples: still one padded chunk
-            (1, 1_500, 1),                // 62.5 us
-            (240_159, 3_000, 1),          // 15.00994 s
-            (240_160, 4_500, 2),          // 15.01000 s
-            (480_000, 4_500, 2),          // 30.00 s
-            (9_600_000, 61_500, 21),      // 10 min
+            // content 0 -> padded 0+1500; trimmed min(0, 1500) = 0: nothing to decode.
+            (0usize, 1_500usize, 0usize, 0usize),
+            // content 0 (0.0625 frames floors to 0) -> same as above.
+            (1, 1_500, 0, 0),
+            // content 1 -> padded 1500+1500; trimmed min(3000, 3000) = 3000.
+            (160, 3_000, 3_000, 1),
+            // content 1500 (15.00994 s) -> padded 1500+1500; trimmed min(3000, 3000).
+            (240_159, 3_000, 3_000, 1),
+            // content 1501 (15.01 s) -> padded 3000+1500 = 4500; trimmed min(3000, 4500)
+            // = 3000. Was 2 windows, the second one all padding.
+            (240_160, 4_500, 3_000, 1),
+            // content 3000 (30.00 s) -> padded 3000+1500 = 4500; trimmed 3000.
+            // Was 2 windows, the second one all padding.
+            (480_000, 4_500, 3_000, 1),
+            // content 6600 (66 s) -> padded 7500+1500 = 9000; trimmed min(9000, 9000).
+            (1_056_000, 9_000, 9_000, 3),
+            // content 60000 (10 min) -> padded 60000+1500 = 61500; trimmed min(60000, 61500)
+            // = 60000. Was 21 windows, the 21st all padding.
+            (9_600_000, 61_500, 60_000, 20),
         ];
 
-        for (samples, expected_frames, expected_windows) in cases {
-            let frames = candle_mel_frames(samples);
+        for (samples, expected_padded, expected_trimmed, expected_windows) in cases {
+            let content_frames = samples / m::HOP_LENGTH;
+            let padded = candle_mel_frames(samples);
             assert_eq!(
-                frames, expected_frames,
+                padded, expected_padded,
                 "mel frames for {samples} samples changed"
             );
 
-            let windows = mel_windows(frames);
+            let trimmed = trimmed_mel_frames(content_frames, padded);
+            assert_eq!(
+                trimmed, expected_trimmed,
+                "trimmed frames for {samples} samples ({padded} padded)"
+            );
+
+            let windows = mel_windows(trimmed);
             assert_eq!(
                 windows.len(),
                 expected_windows,
-                "window count for {samples} samples ({frames} frames)"
+                "window count for {samples} samples ({trimmed} trimmed frames)"
             );
-            assert_window_invariants(frames, &windows);
+            assert_window_invariants(trimmed, &windows);
         }
     }
 
@@ -868,14 +1029,45 @@ mod tests {
         let mut samples = 0usize;
         let mut i = 0usize;
         while samples <= TEN_MINUTES_SAMPLES {
-            let frames = candle_mel_frames(samples);
-            let windows = mel_windows(frames);
+            let content_frames = samples / m::HOP_LENGTH;
+            let padded = candle_mel_frames(samples);
+            let trimmed = trimmed_mel_frames(content_frames, padded);
+            let windows = mel_windows(trimmed);
 
             assert!(
-                !windows.is_empty(),
-                "real audio always yields at least one window ({samples} samples)"
+                trimmed <= padded,
+                "trimmed {trimmed} exceeds what the mel holds ({padded}) for {samples} samples"
             );
-            assert_window_invariants(frames, &windows);
+            // Rounding content *up* to a window multiple can only ever be
+            // capped away by `padded`, and roundup3000(f) <= roundup1500(f) +
+            // 1500 = padded always holds, so the cap never bites and no real
+            // frame is dropped. This is the no-silent-truncation half of the
+            // fix; the window-start assertion below is the no-hallucination
+            // half.
+            assert!(
+                trimmed >= content_frames,
+                "trimmed {trimmed} drops real content ({content_frames} frames) for {samples} samples"
+            );
+
+            if content_frames == 0 {
+                assert!(
+                    windows.is_empty(),
+                    "sub-hop audio has no real frames to decode ({samples} samples)"
+                );
+            } else {
+                assert!(
+                    !windows.is_empty(),
+                    "real audio always yields at least one window ({samples} samples)"
+                );
+                for &(start, _) in &windows {
+                    assert!(
+                        start < content_frames,
+                        "window at {start} begins past the last real frame \
+                         ({content_frames}) for {samples} samples: it would be all padding"
+                    );
+                }
+            }
+            assert_window_invariants(trimmed, &windows);
 
             samples += steps[i % steps.len()];
             i += 1;
@@ -906,13 +1098,21 @@ mod tests {
             assert_eq!(covered, frames, "windows dropped frames for {frames}");
         }
 
+        // From PCM the same has to hold after trimming: the windows cover every
+        // trimmed frame, and the trim itself keeps every real one.
         let sample_counts = [0usize, 1, 240_159, 240_160, 480_000, 1_234_567, 9_600_000];
         for samples in sample_counts {
-            let frames = candle_mel_frames(samples);
-            let covered: usize = mel_windows(frames).iter().map(|&(_, len)| len).sum();
+            let content_frames = samples / m::HOP_LENGTH;
+            let trimmed = trimmed_mel_frames(content_frames, candle_mel_frames(samples));
+            let covered: usize = mel_windows(trimmed).iter().map(|&(_, len)| len).sum();
             assert_eq!(
-                covered, frames,
+                covered, trimmed,
                 "windows dropped frames for {samples} samples"
+            );
+            assert!(
+                covered >= content_frames,
+                "{covered} covered frames lose real audio ({content_frames} content frames) \
+                 for {samples} samples"
             );
         }
     }
