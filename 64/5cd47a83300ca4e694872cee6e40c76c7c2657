@@ -1,0 +1,24 @@
+CONTRIBUTING.md
+  s_8160e366e66686::t_644fcf7b9fc802 86-87,90
+  s_8160e366e66686::t_300144ee15c280 85,88-89,91-92
+justfile
+  s_8160e366e66686::t_644fcf7b9fc802 8-9,22-24,42
+  s_8160e366e66686::t_300144ee15c280 25-35,40-41,43-49
+  s_8160e366e66686::t_70b7b184790c6e 50
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "645cd47a83300ca4e694872cee6e40c76c7c2657",
+  "prompts": {},
+  "sessions": {
+    "s_8160e366e66686": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019fb935-7754-7f20-af1f-534fce9b203a",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
