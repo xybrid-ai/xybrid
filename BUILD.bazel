@@ -422,22 +422,11 @@ cmake(
     visibility = ["//visibility:public"],
 )
 
-# --- ANDROID PoC: validate the NDK cc_toolchain with a trivial compile before
-# wiring llama.cpp. Build with: bazel build //:ndk_smoke --platforms=//:android_arm64
-load("@rules_cc//cc:defs.bzl", "cc_library")
-
-platform(
-    name = "android_arm64",
-    constraint_values = [
-        "@platforms//os:android",
-        "@platforms//cpu:arm64",
-    ],
-)
-
-cc_library(
-    name = "ndk_smoke",
-    srcs = ["ndk_smoke.c"],
-)
+# The `//:ndk_smoke` PoC (a trivial cc_library that proved the NDK
+# cc_toolchain before llama.cpp was wired) and its `//:android_arm64`
+# platform are gone: llama.cpp has shipped through that toolchain for
+# months, and the android lanes select `@rules_rs//rs/platforms:*` via
+# `.bazelrc`'s `build:android-*` configs rather than a local platform().
 
 # Vendored ONNX Runtime (dlopened at runtime), per ABI that ships it — armv7
 # has no vendored ORT (matches today's AAR). libc++_shared.so is NOT taken from

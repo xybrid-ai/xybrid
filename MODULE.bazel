@@ -104,7 +104,8 @@ bazel_dep(name = "apple_support", version = "2.2.0", repo_name = "build_bazel_ap
 bazel_dep(name = "rules_apple", version = "4.5.3", repo_name = "build_bazel_rules_apple")
 # bool_flag for the //:metal build setting (the macOS GPU lane toggle).
 bazel_dep(name = "bazel_skylib", version = "1.9.0")
-# platforms must be a direct dep so the `@platforms//...` constraints in //:android_arm64 resolve.
+# platforms must be a direct dep so the `@platforms//...` constraints in the root
+# BUILD file resolve (//:host_linux_gnu's parent, //:llama_metal's exec platform).
 bazel_dep(name = "platforms", version = "1.0.0")
 
 # --- Option B: rules_foreign_cc drives llama.cpp's own CMakeLists with the
