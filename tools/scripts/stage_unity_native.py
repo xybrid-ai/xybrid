@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import shutil
+import stat
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -193,6 +194,8 @@ def copy_file(source: Path, destination: Path) -> None:
     temporary = destination.with_name(f".{destination.name}.tmp")
     try:
         shutil.copy2(source, temporary)
+        # Bazel outputs are read-only, but release packaging strips this copy.
+        temporary.chmod(temporary.stat().st_mode | stat.S_IWUSR)
         temporary.replace(destination)
     finally:
         temporary.unlink(missing_ok=True)

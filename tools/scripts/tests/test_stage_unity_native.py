@@ -1,3 +1,4 @@
+import stat
 import sys
 import tempfile
 import unittest
@@ -11,6 +12,26 @@ from stage_unity_native import stage_native
 
 
 class StageUnityNativeTests(unittest.TestCase):
+    def test_staged_native_is_owner_writable(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            native = root / "bazel-bin" / "libxybrid_bolt.so"
+            native.parent.mkdir()
+            native.write_bytes(b"linux-native")
+            native.chmod(0o555)
+
+            destination = stage_native(
+                native,
+                "x86_64-unknown-linux-gnu",
+                plugins_root=root / "Plugins",
+            )
+
+            self.assertNotEqual(
+                0,
+                destination.stat().st_mode & stat.S_IWUSR,
+                "staged natives must be writable by post-processing tools",
+            )
+
     def test_macos_native_is_staged_with_editor_enabled_metadata(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
