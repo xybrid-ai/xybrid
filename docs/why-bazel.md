@@ -1,18 +1,19 @@
-# Why xybrid moved native CI to Bazel
+# Why xybrid moved its cross-platform builds to Bazel
 
-xybrid has one Rust execution engine, several native dependencies, six foreign-language
-surfaces, and release artifacts for Linux, macOS, iOS, Android, and Windows. We moved
-the expensive native artifact builds to Bazel because rebuilding that graph separately
-for every SDK and target had become the slowest and least reproducible part of CI.
+xybrid ships one Rust engine through React Native, Unity, Flutter, Apple, Android,
+desktop, and web SDKs. Those surfaces all depend on overlapping Rust crates, C/C++
+libraries, generated bindings, and platform toolchains. Before Bazel, separate scripts
+rebuilt much of that graph for each SDK and target.
 
-The measured result on the React Native Android end-to-end gate:
+Bazel gave us one reproducible graph for the whole platform matrix. On one of our
+heaviest cold-build gates, the measured result was:
 
 - median native build time fell from **31.48 to 1.79 minutes** (**94.3% less time**,
   or **17.5× faster**);
 - median total job time fell from **43.77 to 12.04 minutes** (**72.5% less time**,
   or **3.6× faster**).
 
-![Bazel and remote execution cut native CI build times](assets/bazel-ci-build-times.svg)
+![Measured build times grouped by SDK and platform](assets/bazel-ci-build-times.svg)
 
 Those are medians from successful, first-party pull-request runs immediately before
 and after the remote-execution cutover. The exact sample and limitations are documented
@@ -24,10 +25,11 @@ below.
 
 The core implementation is Rust, but the shipped surface is larger:
 
+- React Native for iOS and Android;
 - Swift for Apple platforms;
 - Kotlin and Java for Android;
-- C# for Unity;
-- Dart for Flutter;
+- C# and native plugins for Unity;
+- Dart and native libraries for Flutter;
 - JavaScript/Wasm for the web;
 - the Rust CLI and SDK.
 
@@ -39,6 +41,20 @@ artifacts from one dependency graph instead.
 Examples include the Android AAR, Apple XCFramework, Flutter native libraries, Unity
 libraries, and desktop CLI binaries. The PR and release workflows now call the same
 Bazel targets rather than maintaining separate build recipes for the same payload.
+
+### What moved into the shared graph
+
+| Surface | Artifacts built from the Bazel graph |
+|---|---|
+| React Native | Android AAR and Apple XCFramework |
+| Unity | Android, iOS, macOS, Linux, and Windows plugins |
+| Flutter | Android, iOS, macOS, Linux, and Windows native libraries |
+| Apple | XCFramework and macOS CLI |
+| Android | Three-ABI AAR with Kotlin bindings |
+| Desktop | Linux, macOS, and Windows CLI binaries |
+
+The SDKs still have their own packaging and consumer tests. What changed is the costly
+layer underneath them: they now ask the same graph for the same native artifacts.
 
 ### The toolchains are part of the build
 
@@ -52,8 +68,13 @@ installed on a hosted runner.
 
 ### Remote execution attacks the expensive part
 
-The old Android path compiled roughly 1,900 Rust compile units across its targets, plus
-`llama.cpp`, locally on a GitHub-hosted runner. With Bazel remote execution and a shared
+Linux-compatible actions run on remote workers and share cached outputs across
+workflows. That covers the common Rust graph, `llama.cpp`, Android, Linux, and
+cross-compiled Windows and macOS CPU artifacts. A workflow that needs one of those
+outputs can reuse it instead of starting another build from scratch.
+
+The measured cold-build path previously compiled roughly 1,900 Rust compile units plus
+`llama.cpp` on a GitHub-hosted runner. With Bazel remote execution and a shared
 BuildBuddy cache, the runner coordinates the build while cache hits and compile actions
 happen on remote workers.
 
@@ -114,6 +135,44 @@ The cutover merged on 21 July 2026 in
 
 Medians, rather than the two representative runs, are used for the headline numbers.
 
+### Release artifact build steps across SDKs
+
+The release pipeline supplies successful Cargo-era and Bazel-era build-step comparisons
+for more of the shipped surface:
+
+| SDK / artifact | Cargo-era step | Bazel-era step | Change |
+|---|---:|---:|---:|
+| Kotlin / Android native libraries | 31.07 min | 4.35 min | 86.0% faster |
+| CLI / Windows | 11.22 min | 3.47 min | 69.1% faster |
+| CLI / Linux | 8.80 min | 3.35 min | 61.9% faster |
+| CLI / macOS | 8.48 min | 4.18 min | 50.7% faster |
+| Swift / Apple XCFramework | 18.00 min | 19.78 min | 9.9% slower |
+
+These are individual build steps from the successful
+[v0.3.0 Cargo-era release-prep run](https://github.com/xybrid-ai/xybrid/actions/runs/28878515208)
+and the successful
+[v0.4.0 Bazel-era release-prep run](https://github.com/xybrid-ai/xybrid/actions/runs/30665717715).
+They are useful directional comparisons, not controlled benchmarks or medians: the two
+releases contain different code, features, and cache states.
+
+The Apple result is included because the slower row matters. Its XCFramework still
+builds locally on macOS without shared remote caching. Flutter is omitted from the
+comparison because its older release step could reuse precompiled outputs, so it does
+not provide a like-for-like Cargo baseline.
+
+### A second signal from Unity on Windows
+
+The Unity Windows native build provides another, smaller data point. In the v0.3.0
+workflow, the Cargo build step took 12.53 minutes. After that artifact moved to Bazel
+remote execution, the Bazel build-and-stage step took 2.10 minutes: an 83.2% reduction,
+or 6.0× faster.
+
+This is a one-run comparison, not a median, so it is supporting evidence rather than a
+headline claim. The Windows job itself succeeded in the later run, although unrelated
+Apple, Android, and Linux jobs made that overall workflow fail. See the
+[before run](https://github.com/xybrid-ai/xybrid/actions/runs/28887733637) and
+[after run](https://github.com/xybrid-ai/xybrid/actions/runs/30566931790).
+
 ### Why total CI usage still increased
 
 The migration month ran much more CI than the preceding month:
@@ -148,8 +207,10 @@ above.
   excluded from the after sample.
 - The Apple XCFramework gate is currently a local, uncached Bazel build. Recent runs are
   commonly around 17–24 minutes; adding shared remote caching is follow-up work.
-- The headline measurement applies to the React Native Android native-build path. It is
-  evidence for that migrated path, not a claim that every CI job became 72% faster.
+- The headline medians come from one end-to-end gate. They prove the result on that
+  measured path, not a uniform 72% reduction for every platform.
+- The release and Unity comparisons use individual successful build steps, not medians.
+  They show direction and magnitude but are not controlled benchmarks.
 - The June/July comparison measures GitHub-hosted runner usage. It does not include the
   external cost or worker time of remote execution.
 
@@ -212,6 +273,28 @@ results_minutes:
     after_median: 12.04
     reduction_percent: 72.5
     speedup: 3.6
+release_build_steps_minutes:
+  source_runs:
+    cargo_era: https://github.com/xybrid-ai/xybrid/actions/runs/28878515208
+    bazel_era: https://github.com/xybrid-ai/xybrid/actions/runs/30665717715
+  kotlin_android:
+    cargo: 31.07
+    bazel: 4.35
+  cli_windows:
+    cargo: 11.22
+    bazel: 3.47
+  cli_linux:
+    cargo: 8.80
+    bazel: 3.35
+  cli_macos:
+    cargo: 8.48
+    bazel: 4.18
+  swift_xcframework:
+    cargo: 18.00
+    bazel: 19.78
+unity_windows_build_step_minutes:
+  cargo: 12.53
+  bazel: 2.10
 migration_month_context:
   workflow_runs_change_percent: 31.6
   hosted_runner_minutes_change_percent: 21.5
@@ -219,6 +302,8 @@ migration_month_context:
   github_actions_amount_billed_usd: 0
 caveats:
   - The result is specific to the measured Android path.
+  - Release and Unity rows are single-run comparisons, not medians.
+  - Flutter has no comparable Cargo baseline in the sampled release runs.
   - Fork and Dependabot runs cannot use the RBE credential.
   - GitHub Actions figures exclude BuildBuddy usage.
   - The Apple XCFramework Bazel gate is not yet remote-cached.
