@@ -1,0 +1,21 @@
+crates/xybrid-core/Cargo.toml
+  s_f1e1e2ce83d30a::t_a48216ec71c910 81
+Cargo.lock
+  s_f1e1e2ce83d30a::t_3e04cbcfb7a5be 20-33,826-834,1011-1025,1284-1292,4145,4232,4290,4292,4295,4824-4829,5158,5160,5162,5164-5165,5168-5169,5175,5183
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "ef1a6e7d5664462cda89048a465d743e0a4032ce",
+  "prompts": {},
+  "sessions": {
+    "s_f1e1e2ce83d30a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b87510e6-e2b9-4214-8416-7a318005c514",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
