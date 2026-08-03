@@ -156,9 +156,69 @@ They are useful directional comparisons, not controlled benchmarks or medians: t
 releases contain different code, features, and cache states.
 
 The Apple result is included because the slower row matters. Its XCFramework still
-builds locally on macOS without shared remote caching. Flutter is omitted from the
-comparison because its older release step could reuse precompiled outputs, so it does
-not provide a like-for-like Cargo baseline.
+builds locally on macOS without shared remote caching.
+
+### Flutter native libraries, target by target
+
+The final v0.3 release run reused already-uploaded Flutter binaries, but the first
+successful run for that release compiled them from scratch. Its logs expose the start
+and end of every Cargo command. The v0.4 logs expose the elapsed time of every Bazel
+command, so the target builds can be compared without counting signing, uploading, or
+runner setup:
+
+| Flutter target | Cargo | Bazel | Change |
+|---|---:|---:|---:|
+| Linux x86_64 | 8.24 min | 1.66 min | 79.9% faster |
+| Android, three shared ABIs | 26.04 min | 8.13 min | 68.8% faster |
+| Windows x86_64 | 13.02 min | 3.51 min | 73.0% faster |
+| macOS arm64 | 8.17 min | 4.42 min | 45.9% faster |
+| iOS device arm64 | 5.83 min | 9.91 min | 69.9% slower |
+| iOS simulator arm64 | 4.08 min | 8.74 min | 114.3% slower |
+
+The Android row sums the arm64, armv7, and x86_64 commands present in both workflows;
+the old i686 Cargo build is excluded because it did not move to Bazel. See the fresh
+[v0.3 Cargo run](https://github.com/xybrid-ai/xybrid/actions/runs/28817793174) and the
+[v0.4 Bazel run](https://github.com/xybrid-ai/xybrid/actions/runs/30665717715).
+These remain one-run, different-release comparisons. They show where remote execution
+helped and where local Apple builds became slower; they are not controlled benchmarks.
+
+### Rust verification under Bazel
+
+The Rust SDK does not produce a platform binary of its own for a release: crates.io
+ships its source, while the SDK is compiled into the other artifacts above. The
+comparable CI unit is therefore the Linux Rust verification step.
+
+| Verification step | Cargo | Bazel on RBE | Reduction | Speed-up |
+|---|---:|---:|---:|---:|
+| Rust workspace tests, median | 4.95 min | 0.55 min | 88.9% | 9.0× |
+
+The Cargo median uses eight successful first-party runs from 15–20 July. The Bazel
+median uses seven successful remote-execution runs from 30 July–3 August. The Bazel
+target set covers the core, SDK, CLI, FFI facade, llama wrapper, integration tests, and
+xtask; two feature-gated tests remain Cargo-only. Cargo CI still runs during the
+transition, so this number describes the latency of the Bazel verification lane, not a
+claim that those Cargo runner minutes have already disappeared.
+
+<details>
+<summary>Rust verification source runs</summary>
+
+- Cargo: [29421286666](https://github.com/xybrid-ai/xybrid/actions/runs/29421286666),
+  [29428645436](https://github.com/xybrid-ai/xybrid/actions/runs/29428645436),
+  [29504085767](https://github.com/xybrid-ai/xybrid/actions/runs/29504085767),
+  [29512093670](https://github.com/xybrid-ai/xybrid/actions/runs/29512093670),
+  [29524555119](https://github.com/xybrid-ai/xybrid/actions/runs/29524555119),
+  [29525947521](https://github.com/xybrid-ai/xybrid/actions/runs/29525947521),
+  [29639710981](https://github.com/xybrid-ai/xybrid/actions/runs/29639710981), and
+  [29758048476](https://github.com/xybrid-ai/xybrid/actions/runs/29758048476).
+- Bazel: [30559956772](https://github.com/xybrid-ai/xybrid/actions/runs/30559956772),
+  [30566583343](https://github.com/xybrid-ai/xybrid/actions/runs/30566583343),
+  [30587545633](https://github.com/xybrid-ai/xybrid/actions/runs/30587545633),
+  [30650963114](https://github.com/xybrid-ai/xybrid/actions/runs/30650963114),
+  [30671890870](https://github.com/xybrid-ai/xybrid/actions/runs/30671890870),
+  [30762615356](https://github.com/xybrid-ai/xybrid/actions/runs/30762615356), and
+  [30790915330](https://github.com/xybrid-ai/xybrid/actions/runs/30790915330).
+
+</details>
 
 ### A second signal from Unity on Windows
 
@@ -209,8 +269,11 @@ above.
   commonly around 17–24 minutes; adding shared remote caching is follow-up work.
 - The headline medians come from one end-to-end gate. They prove the result on that
   measured path, not a uniform 72% reduction for every platform.
-- The release and Unity comparisons use individual successful build steps, not medians.
-  They show direction and magnitude but are not controlled benchmarks.
+- The release, Flutter, and Unity comparisons use individual successful build commands
+  or steps, not medians. They show direction and magnitude but are not controlled
+  benchmarks.
+- The Rust result compares similar verification suites, but two feature-gated Cargo
+  tests are not represented in the Bazel target set.
 - The June/July comparison measures GitHub-hosted runner usage. It does not include the
   external cost or worker time of remote execution.
 
@@ -292,6 +355,38 @@ release_build_steps_minutes:
   swift_xcframework:
     cargo: 18.00
     bazel: 19.78
+flutter_build_commands_minutes:
+  source_runs:
+    cargo_era: https://github.com/xybrid-ai/xybrid/actions/runs/28817793174
+    bazel_era: https://github.com/xybrid-ai/xybrid/actions/runs/30665717715
+  linux_x86_64:
+    cargo: 8.24
+    bazel: 1.66
+  android_three_shared_abis:
+    cargo: 26.04
+    bazel: 8.13
+  windows_x86_64:
+    cargo: 13.02
+    bazel: 3.51
+  macos_arm64:
+    cargo: 8.17
+    bazel: 4.42
+  ios_device_arm64:
+    cargo: 5.83
+    bazel: 9.91
+  ios_simulator_arm64:
+    cargo: 4.08
+    bazel: 8.74
+rust_verification_minutes:
+  scope: Linux Rust workspace test step
+  cargo_sample_count: 8
+  bazel_sample_count: 7
+  cargo_median: 4.95
+  bazel_median: 0.55
+  reduction_percent: 88.9
+  speedup: 9.0
+  cargo_source_runs: [29421286666, 29428645436, 29504085767, 29512093670, 29524555119, 29525947521, 29639710981, 29758048476]
+  bazel_source_runs: [30559956772, 30566583343, 30587545633, 30650963114, 30671890870, 30762615356, 30790915330]
 unity_windows_build_step_minutes:
   cargo: 12.53
   bazel: 2.10
@@ -302,8 +397,8 @@ migration_month_context:
   github_actions_amount_billed_usd: 0
 caveats:
   - The result is specific to the measured Android path.
-  - Release and Unity rows are single-run comparisons, not medians.
-  - Flutter has no comparable Cargo baseline in the sampled release runs.
+  - Release, Flutter, and Unity build rows are single-run comparisons, not medians.
+  - The Rust row measures verification latency, not a standalone release artifact.
   - Fork and Dependabot runs cannot use the RBE credential.
   - GitHub Actions figures exclude BuildBuddy usage.
   - The Apple XCFramework Bazel gate is not yet remote-cached.

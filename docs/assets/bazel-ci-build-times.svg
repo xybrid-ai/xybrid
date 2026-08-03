@@ -1,87 +1,135 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900" role="img" aria-labelledby="title desc">
-  <title id="title">Measured build times grouped by SDK and platform</title>
-  <desc id="desc">Black headers group measured SDKs. Green bars show Bazel build time by platform, while labels show Cargo to Bazel minutes and the percentage change. React Native Android, Kotlin Android, Unity Windows, and three CLI platforms became faster. The uncached Apple XCFramework became ten percent slower.</desc>
-  <rect width="1600" height="900" fill="#ffffff"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1200" viewBox="0 0 1600 1200" role="img" aria-labelledby="title desc">
+  <title id="title">Measured CI times grouped by SDK and platform</title>
+  <desc id="desc">Black headers group React Native, Kotlin, Flutter, Unity, CLI, Swift, and Rust measurements. Green bars show Bazel time. Labels show Cargo to Bazel minutes and percentage changes. Most Linux, Android, and Windows paths became faster; local iOS and Apple XCFramework paths became slower.</desc>
+  <rect width="1600" height="1200" fill="#ffffff"/>
   <g font-family="Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif">
-    <text x="60" y="78" fill="#050505" font-size="52" font-weight="800">BUILD TIME BY SDK / PLATFORM</text>
-    <text x="60" y="120" fill="#3f3f46" font-size="24">Framework → platform · Cargo before, Bazel after · lower is better</text>
+    <text x="60" y="76" fill="#050505" font-size="50" font-weight="800">CI TIME BY SDK / PLATFORM</text>
+    <text x="60" y="116" fill="#3f3f46" font-size="23">Cargo before → Bazel after · lower is better · minutes</text>
 
     <g font-size="17" font-weight="700">
-      <rect x="60" y="145" width="56" height="22" fill="#050505"/>
-      <text x="128" y="163" fill="#18181b">FRAMEWORK</text>
-      <rect x="270" y="145" width="56" height="22" fill="#16a34a"/>
-      <text x="338" y="163" fill="#18181b">BAZEL PLATFORM TIME</text>
-      <text x="830" y="163" fill="#71717a" font-weight="500">Green bars share a 0–20 minute scale</text>
+      <rect x="60" y="140" width="54" height="22" fill="#050505"/>
+      <text x="126" y="158" fill="#18181b">SDK GROUP</text>
+      <rect x="300" y="140" width="54" height="22" fill="#16a34a"/>
+      <text x="366" y="158" fill="#18181b">BAZEL TIME</text>
+      <text x="820" y="158" fill="#71717a" font-weight="500">Green bars share a 0–20 minute scale</text>
     </g>
 
-    <!-- Left column: React Native, Kotlin, Unity -->
-    <rect x="60" y="195" width="700" height="48" fill="#050505"/>
-    <text x="78" y="228" fill="#ffffff" font-size="26" font-weight="800">REACT NATIVE</text>
-    <text x="84" y="282" fill="#18181b" font-size="21" font-weight="700">ANDROID</text>
-    <rect x="270" y="258" width="54" height="34" fill="#16a34a"/>
-    <text x="340" y="282" fill="#18181b" font-size="21" font-weight="700">31.5 → 1.8 min</text>
-    <text x="680" y="282" fill="#15803d" font-size="22" font-weight="800" text-anchor="end">−94%</text>
+    <!-- Left column: React Native, Kotlin, Flutter -->
+    <rect x="60" y="185" width="720" height="42" fill="#050505"/>
+    <text x="78" y="214" fill="#ffffff" font-size="24" font-weight="800">REACT NATIVE</text>
+    <text x="80" y="266" fill="#18181b" font-size="19" font-weight="700">ANDROID</text>
+    <rect x="300" y="243" width="29" height="31" fill="#16a34a"/>
+    <text x="343" y="266" fill="#18181b" font-size="19" font-weight="700">31.5 → 1.8</text>
+    <text x="750" y="266" fill="#15803d" font-size="21" font-weight="800" text-anchor="end">−94%</text>
 
-    <line x1="60" y1="315" x2="760" y2="315" stroke="#d4d4d8"/>
-    <rect x="60" y="335" width="700" height="48" fill="#050505"/>
-    <text x="78" y="368" fill="#ffffff" font-size="26" font-weight="800">KOTLIN SDK</text>
-    <text x="84" y="422" fill="#18181b" font-size="21" font-weight="700">ANDROID</text>
-    <rect x="270" y="398" width="84" height="34" fill="#16a34a"/>
-    <text x="370" y="422" fill="#18181b" font-size="21" font-weight="700">31.1 → 4.4 min</text>
-    <text x="680" y="422" fill="#15803d" font-size="22" font-weight="800" text-anchor="end">−86%</text>
+    <line x1="60" y1="287" x2="780" y2="287" stroke="#d4d4d8"/>
+    <rect x="60" y="302" width="720" height="42" fill="#050505"/>
+    <text x="78" y="331" fill="#ffffff" font-size="24" font-weight="800">KOTLIN SDK</text>
+    <text x="80" y="383" fill="#18181b" font-size="19" font-weight="700">ANDROID</text>
+    <rect x="300" y="360" width="70" height="31" fill="#16a34a"/>
+    <text x="384" y="383" fill="#18181b" font-size="19" font-weight="700">31.1 → 4.4</text>
+    <text x="750" y="383" fill="#15803d" font-size="21" font-weight="800" text-anchor="end">−86%</text>
 
-    <line x1="60" y1="455" x2="760" y2="455" stroke="#d4d4d8"/>
-    <rect x="60" y="475" width="700" height="48" fill="#050505"/>
-    <text x="78" y="508" fill="#ffffff" font-size="26" font-weight="800">UNITY SDK</text>
-    <text x="84" y="562" fill="#18181b" font-size="21" font-weight="700">WINDOWS</text>
-    <rect x="270" y="538" width="40" height="34" fill="#16a34a"/>
-    <text x="326" y="562" fill="#18181b" font-size="21" font-weight="700">12.5 → 2.1 min</text>
-    <text x="680" y="562" fill="#15803d" font-size="22" font-weight="800" text-anchor="end">−83%</text>
+    <line x1="60" y1="404" x2="780" y2="404" stroke="#d4d4d8"/>
+    <rect x="60" y="419" width="720" height="42" fill="#050505"/>
+    <text x="78" y="448" fill="#ffffff" font-size="24" font-weight="800">FLUTTER SDK</text>
 
-    <!-- Right column: CLI and Swift -->
-    <rect x="830" y="195" width="710" height="48" fill="#050505"/>
-    <text x="848" y="228" fill="#ffffff" font-size="26" font-weight="800">CLI</text>
-    <text x="854" y="280" fill="#18181b" font-size="20" font-weight="700">WINDOWS</text>
-    <rect x="1050" y="256" width="67" height="32" fill="#16a34a"/>
-    <text x="1133" y="280" fill="#18181b" font-size="20" font-weight="700">11.2 → 3.5 min</text>
-    <text x="1510" y="280" fill="#15803d" font-size="21" font-weight="800" text-anchor="end">−69%</text>
+    <text x="80" y="500" fill="#18181b" font-size="18" font-weight="700">LINUX</text>
+    <rect x="300" y="478" width="27" height="29" fill="#16a34a"/>
+    <text x="341" y="500" fill="#18181b" font-size="18" font-weight="700">8.2 → 1.7</text>
+    <text x="750" y="500" fill="#15803d" font-size="20" font-weight="800" text-anchor="end">−80%</text>
 
-    <text x="854" y="326" fill="#18181b" font-size="20" font-weight="700">LINUX</text>
-    <rect x="1050" y="302" width="64" height="32" fill="#16a34a"/>
-    <text x="1130" y="326" fill="#18181b" font-size="20" font-weight="700">8.8 → 3.4 min</text>
-    <text x="1510" y="326" fill="#15803d" font-size="21" font-weight="800" text-anchor="end">−62%</text>
+    <text x="80" y="544" fill="#18181b" font-size="18" font-weight="700">ANDROID · 3 ABI</text>
+    <rect x="300" y="522" width="130" height="29" fill="#16a34a"/>
+    <text x="444" y="544" fill="#18181b" font-size="18" font-weight="700">26.0 → 8.1</text>
+    <text x="750" y="544" fill="#15803d" font-size="20" font-weight="800" text-anchor="end">−69%</text>
 
-    <text x="854" y="372" fill="#18181b" font-size="20" font-weight="700">MACOS</text>
-    <rect x="1050" y="348" width="80" height="32" fill="#16a34a"/>
-    <text x="1146" y="372" fill="#18181b" font-size="20" font-weight="700">8.5 → 4.2 min</text>
-    <text x="1510" y="372" fill="#15803d" font-size="21" font-weight="800" text-anchor="end">−51%</text>
+    <text x="80" y="588" fill="#18181b" font-size="18" font-weight="700">WINDOWS</text>
+    <rect x="300" y="566" width="56" height="29" fill="#16a34a"/>
+    <text x="370" y="588" fill="#18181b" font-size="18" font-weight="700">13.0 → 3.5</text>
+    <text x="750" y="588" fill="#15803d" font-size="20" font-weight="800" text-anchor="end">−73%</text>
 
-    <line x1="830" y1="405" x2="1540" y2="405" stroke="#d4d4d8"/>
-    <rect x="830" y="425" width="710" height="48" fill="#050505"/>
-    <text x="848" y="458" fill="#ffffff" font-size="26" font-weight="800">SWIFT SDK</text>
-    <text x="854" y="512" fill="#18181b" font-size="20" font-weight="700">XCFRAMEWORK</text>
-    <rect x="1050" y="488" width="376" height="34" fill="#16a34a"/>
-    <text x="1058" y="511" fill="#ffffff" font-size="19" font-weight="800">18.0 → 19.8 min</text>
-    <text x="1440" y="512" fill="#c2413b" font-size="19" font-weight="800">+10% SLOWER</text>
+    <text x="80" y="632" fill="#18181b" font-size="18" font-weight="700">MACOS</text>
+    <rect x="300" y="610" width="70" height="29" fill="#16a34a"/>
+    <text x="384" y="632" fill="#18181b" font-size="18" font-weight="700">8.2 → 4.4</text>
+    <text x="750" y="632" fill="#15803d" font-size="20" font-weight="800" text-anchor="end">−46%</text>
 
-    <!-- Shared axes -->
-    <line x1="270" y1="620" x2="650" y2="620" stroke="#18181b" stroke-width="2"/>
-    <line x1="270" y1="614" x2="270" y2="626" stroke="#18181b" stroke-width="2"/>
-    <line x1="650" y1="614" x2="650" y2="626" stroke="#18181b" stroke-width="2"/>
-    <text x="270" y="650" fill="#52525b" font-size="17" text-anchor="middle">0</text>
-    <text x="650" y="650" fill="#52525b" font-size="17" text-anchor="middle">20 min</text>
+    <text x="80" y="676" fill="#18181b" font-size="18" font-weight="700">IOS DEVICE</text>
+    <rect x="300" y="654" width="159" height="29" fill="#16a34a"/>
+    <text x="473" y="676" fill="#18181b" font-size="18" font-weight="700">5.8 → 9.9</text>
+    <text x="750" y="676" fill="#c2413b" font-size="18" font-weight="800" text-anchor="end">+70% SLOWER</text>
 
-    <line x1="1050" y1="620" x2="1430" y2="620" stroke="#18181b" stroke-width="2"/>
-    <line x1="1050" y1="614" x2="1050" y2="626" stroke="#18181b" stroke-width="2"/>
-    <line x1="1430" y1="614" x2="1430" y2="626" stroke="#18181b" stroke-width="2"/>
-    <text x="1050" y="650" fill="#52525b" font-size="17" text-anchor="middle">0</text>
-    <text x="1430" y="650" fill="#52525b" font-size="17" text-anchor="middle">20 min</text>
+    <text x="80" y="720" fill="#18181b" font-size="18" font-weight="700">IOS SIMULATOR</text>
+    <rect x="300" y="698" width="140" height="29" fill="#16a34a"/>
+    <text x="454" y="720" fill="#18181b" font-size="18" font-weight="700">4.1 → 8.7</text>
+    <text x="750" y="720" fill="#c2413b" font-size="18" font-weight="800" text-anchor="end">+114% SLOWER</text>
+
+    <!-- Right column: Unity, CLI, Swift, Rust -->
+    <rect x="820" y="185" width="720" height="42" fill="#050505"/>
+    <text x="838" y="214" fill="#ffffff" font-size="24" font-weight="800">UNITY SDK</text>
+    <text x="840" y="266" fill="#18181b" font-size="19" font-weight="700">WINDOWS</text>
+    <rect x="1060" y="243" width="34" height="31" fill="#16a34a"/>
+    <text x="1108" y="266" fill="#18181b" font-size="19" font-weight="700">12.5 → 2.1</text>
+    <text x="1510" y="266" fill="#15803d" font-size="21" font-weight="800" text-anchor="end">−83%</text>
+
+    <line x1="820" y1="287" x2="1540" y2="287" stroke="#d4d4d8"/>
+    <rect x="820" y="302" width="720" height="42" fill="#050505"/>
+    <text x="838" y="331" fill="#ffffff" font-size="24" font-weight="800">CLI</text>
+
+    <text x="840" y="383" fill="#18181b" font-size="18" font-weight="700">WINDOWS</text>
+    <rect x="1060" y="361" width="56" height="29" fill="#16a34a"/>
+    <text x="1130" y="383" fill="#18181b" font-size="18" font-weight="700">11.2 → 3.5</text>
+    <text x="1510" y="383" fill="#15803d" font-size="20" font-weight="800" text-anchor="end">−69%</text>
+
+    <text x="840" y="427" fill="#18181b" font-size="18" font-weight="700">LINUX</text>
+    <rect x="1060" y="405" width="54" height="29" fill="#16a34a"/>
+    <text x="1128" y="427" fill="#18181b" font-size="18" font-weight="700">8.8 → 3.4</text>
+    <text x="1510" y="427" fill="#15803d" font-size="20" font-weight="800" text-anchor="end">−62%</text>
+
+    <text x="840" y="471" fill="#18181b" font-size="18" font-weight="700">MACOS</text>
+    <rect x="1060" y="449" width="67" height="29" fill="#16a34a"/>
+    <text x="1141" y="471" fill="#18181b" font-size="18" font-weight="700">8.5 → 4.2</text>
+    <text x="1510" y="471" fill="#15803d" font-size="20" font-weight="800" text-anchor="end">−51%</text>
+
+    <line x1="820" y1="492" x2="1540" y2="492" stroke="#d4d4d8"/>
+    <rect x="820" y="507" width="720" height="42" fill="#050505"/>
+    <text x="838" y="536" fill="#ffffff" font-size="24" font-weight="800">SWIFT SDK</text>
+    <text x="840" y="588" fill="#18181b" font-size="18" font-weight="700">XCFRAMEWORK</text>
+    <rect x="1060" y="566" width="317" height="29" fill="#16a34a"/>
+    <text x="1068" y="587" fill="#ffffff" font-size="17" font-weight="800">18.0 → 19.8</text>
+    <text x="1510" y="588" fill="#c2413b" font-size="18" font-weight="800" text-anchor="end">+10% SLOWER</text>
+
+    <line x1="820" y1="609" x2="1540" y2="609" stroke="#d4d4d8"/>
+    <rect x="820" y="624" width="720" height="42" fill="#050505"/>
+    <text x="838" y="653" fill="#ffffff" font-size="24" font-weight="800">RUST SDK</text>
+    <text x="840" y="705" fill="#18181b" font-size="18" font-weight="700">LINUX TESTS</text>
+    <rect x="1060" y="683" width="12" height="29" fill="#16a34a"/>
+    <text x="1086" y="705" fill="#18181b" font-size="18" font-weight="700">5.0 → 0.6</text>
+    <text x="1510" y="705" fill="#15803d" font-size="20" font-weight="800" text-anchor="end">−89%</text>
+
+    <!-- Shared 0–20 minute axes -->
+    <line x1="300" y1="765" x2="620" y2="765" stroke="#18181b" stroke-width="2"/>
+    <line x1="300" y1="759" x2="300" y2="771" stroke="#18181b" stroke-width="2"/>
+    <line x1="620" y1="759" x2="620" y2="771" stroke="#18181b" stroke-width="2"/>
+    <text x="300" y="793" fill="#52525b" font-size="16" text-anchor="middle">0</text>
+    <text x="620" y="793" fill="#52525b" font-size="16" text-anchor="middle">20 min</text>
+
+    <line x1="1060" y1="765" x2="1380" y2="765" stroke="#18181b" stroke-width="2"/>
+    <line x1="1060" y1="759" x2="1060" y2="771" stroke="#18181b" stroke-width="2"/>
+    <line x1="1380" y1="759" x2="1380" y2="771" stroke="#18181b" stroke-width="2"/>
+    <text x="1060" y="793" fill="#52525b" font-size="16" text-anchor="middle">0</text>
+    <text x="1380" y="793" fill="#52525b" font-size="16" text-anchor="middle">20 min</text>
 
     <!-- Method and scope -->
-    <line x1="60" y1="700" x2="1540" y2="700" stroke="#a1a1aa"/>
-    <text x="60" y="744" fill="#18181b" font-size="20" font-weight="700">HOW TO READ THIS</text>
-    <text x="280" y="744" fill="#3f3f46" font-size="19">Black = SDK grouping. Green length = Bazel time. Labels show Cargo → Bazel.</text>
-    <text x="60" y="790" fill="#52525b" font-size="18">React Native: medians from 16 before and 26 after runs. Kotlin, CLI, Swift: v0.3 → v0.4 release build steps. Unity: one successful build-step comparison.</text>
-    <text x="60" y="832" fill="#71717a" font-size="17">Flutter and Rust SDK omitted because the sampled CI history has no like-for-like Cargo baseline. Full method and source runs: docs/why-bazel.md</text>
+    <line x1="60" y1="835" x2="1540" y2="835" stroke="#a1a1aa"/>
+    <text x="60" y="878" fill="#18181b" font-size="20" font-weight="800">WHAT IS MEASURED</text>
+    <text x="285" y="878" fill="#3f3f46" font-size="18">React Native and Rust use medians. Every other row is a CI command or step comparison.</text>
+    <text x="60" y="924" fill="#52525b" font-size="17">Flutter compares compiler/Bazel command time only; signing, uploads, and setup are excluded. Android sums the three ABIs common to both runs.</text>
+    <text x="60" y="966" fill="#52525b" font-size="17">Rust is the Linux workspace verification suite, not a standalone release binary. Two feature-gated Cargo tests remain outside the Bazel target set.</text>
+
+    <text x="60" y="1032" fill="#18181b" font-size="20" font-weight="800">THE PATTERN</text>
+    <text x="215" y="1032" fill="#3f3f46" font-size="18">Remote Linux / Android / Windows work shrank. Local Apple-only work did not.</text>
+    <text x="60" y="1080" fill="#71717a" font-size="16">Different releases and cache states make non-median rows directional evidence, not controlled benchmarks.</text>
+    <text x="60" y="1120" fill="#71717a" font-size="16">Full source runs, samples, exact values, and limitations: docs/why-bazel.md</text>
   </g>
 </svg>
