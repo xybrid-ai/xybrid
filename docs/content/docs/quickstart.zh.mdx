@@ -5,14 +5,14 @@ description: 几分钟内开始使用 Xybrid
 
 只需几行代码即可在您的应用中运行 Xybrid。选择下方的 SDK 开始。
 
-<Tabs items={['Flutter', 'Swift', 'Kotlin', 'Unity', 'Rust', 'CLI']}>
+<Tabs items={['Flutter', 'Swift', 'Kotlin', 'Unity', 'Web', 'Rust', 'CLI']}>
   <Tab value="Flutter">
 **安装**
 
 ```yaml
 # pubspec.yaml
 dependencies:
-  xybrid_flutter: ^0.2.2
+  xybrid_flutter: ^0.3.0
 ```
 
 ```bash
@@ -54,7 +54,7 @@ https://github.com/xybrid-ai/xybrid
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/xybrid-ai/xybrid", from: "0.2.2")
+    .package(url: "https://github.com/xybrid-ai/xybrid", from: "0.3.0")
 ]
 ```
 
@@ -86,7 +86,7 @@ let result = try model.run(envelope: envelope)
 ```kotlin
 // build.gradle.kts
 dependencies {
-    implementation("ai.xybrid:xybrid-kotlin:0.2.2")
+    implementation("ai.xybrid:xybrid-kotlin:0.3.0")
 }
 ```
 
@@ -119,10 +119,10 @@ val result = model.run(envelope)
 在 Unity 中，前往 **Window > Package Manager > + > Add package from git URL**，输入：
 
 ```
-https://github.com/xybrid-ai/xybrid.git#upm
+https://github.com/xybrid-ai/xybrid.git?path=/bindings/unity
 ```
 
-`#upm` 始终指向最新发布的 Unity 构建。如需固定版本，请使用[仓库标签页](https://github.com/xybrid-ai/xybrid/tags)中的 `upm/*` 标签。
+或通过 [OpenUPM](https://openupm.com/packages/ai.xybrid.sdk/) 安装：`openupm add ai.xybrid.sdk`。原生库在首次导入时自动下载（经 SHA-256 校验）；如需固定版本，在 git URL 后追加 `#v0.3.0`。
 
 **运行推理**
 
@@ -145,13 +145,55 @@ Debug.Log($"延迟: {result.LatencyMs}ms");
 
 **预期输出：** `result.Success == true`，包含来自 TTS 模型的音频输出。
   </Tab>
+  <Tab value="Web">
+**安装**
+
+`@xybrid/web` 为私有预览版，尚未发布到 npm。它位于仓库的 [`bindings/web`](https://github.com/xybrid-ai/xybrid/tree/master/bindings/web) 目录：
+
+```bash
+git clone https://github.com/xybrid-ai/xybrid
+cd xybrid/bindings/web
+pnpm install
+pnpm dev:example   # 下载固定版本的示例模型并启动示例
+```
+
+**运行推理**
+
+```ts
+import { XybridLlm } from "@xybrid/web";
+
+// 在浏览器中流式运行语言模型
+const llm = await XybridLlm.load("/llm/model_metadata.json", {
+  wasmPath: "/llm-runtime",
+  accelerator: "auto", // 可用时使用 WebGPU，否则使用 wasm
+});
+
+for await (const delta of llm.generateStream("Hello from Xybrid!")) {
+  output.append(delta);
+}
+```
+
+模型也可以直接从 Hugging Face 加载——SDK 会列出仓库文件；当 Hugging Face
+提供 Git-LFS OID 时（模型文件通常属于这种情况）使用 SHA-256 校验下载内容，
+非 LFS 文件则仅按大小校验；仓库未提供元数据时，SDK 会在内存中合成兼容的元数据：
+
+```ts
+const llm = await XybridLlm.fromHuggingFace("litert-community/SmolLM2-135M-Instruct", {
+  wasmPath: "/llm-runtime", // 省略时默认为 /xybrid/llm-runtime
+});
+```
+
+**预期输出：** 完全在浏览器中生成的文本，逐 token 流式写入页面。
+
+张量界面、注册表加载与完整 API 请参阅 [Web SDK 指南](/zh/docs/sdks/web)。
+  </Tab>
   <Tab value="Rust">
 **安装**
 
 ```toml
 # Cargo.toml
 [dependencies]
-xybrid = "0.2.2"
+xybrid = "0.3.0"
 ```
 
 **运行推理**

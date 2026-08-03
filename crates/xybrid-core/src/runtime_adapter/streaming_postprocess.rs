@@ -18,6 +18,8 @@
 //! Engines that strip these internally (e.g. mistralrs) don't use
 //! this module.
 
+use crate::runtime_adapter::tool_call::{parse_tool_calls, TOOL_BLOCK_MARKERS};
+
 /// Stop markers emitted by common chat templates:
 /// - `<|im_end|>` / `<|im_start|>` / `<|endoftext|>`: ChatML (Qwen, Phi)
 /// - `</s>`: Llama 2 style
@@ -74,9 +76,36 @@ pub(crate) fn merge_stop_patterns<S: AsRef<str>>(user: &[S], extras: &[&str]) ->
     out
 }
 
-/// Strip every `<think>...</think>` block from `text`.
+/// The reasoning opener xybrid primes onto the assistant turn (see the
+/// llama.cpp adapter's `THINK_PRIME`). The primed / dangling-close capture path
+/// is keyed specifically on this pair — `<think>` is the only form xybrid primes.
+const PRIMED_OPEN: &str = "<think>";
+const PRIMED_CLOSE: &str = "</think>";
+
+/// `(open, close)` delimiter pairs recognized as chain-of-thought / reasoning
+/// blocks. A balanced block in any of these forms is captured into
+/// `reasoning_content` and stripped from the answer, in both the non-streaming
+/// final-cleanup pass ([`strip_and_capture_thinking_tags`]) and the streaming
+/// filter ([`StreamingTextFilter`]). This is the single place to add a format.
 ///
-/// An unclosed opening tag strips from `<think>` to end of string —
+/// - `<think>` — Qwen3 / DeepSeek-R1 / LFM2.5-thinking (the form xybrid primes).
+/// - `<thinking>` — Anthropic-style reasoning.
+/// - `<|channel>thought` … `<channel|>` — gemma-4's thought channel. Forward
+///   coverage: xybrid runs gemma-4 with thinking disabled today (the raw-decode
+///   backend has no channel parser), so these are derived from gemma-4's
+///   template shape and are not yet exercised against a real reasoning-emitting
+///   gemma-4 run. They won't false-positive on ordinary text; correct them here
+///   once verified against a real channel-emitting model.
+pub(crate) const REASONING_BLOCK_MARKERS: &[(&str, &str)] = &[
+    (PRIMED_OPEN, PRIMED_CLOSE),
+    ("<thinking>", "</thinking>"),
+    ("<|channel>thought", "<channel|>"),
+];
+
+/// Strip every recognized reasoning block (see [`REASONING_BLOCK_MARKERS`])
+/// from `text`.
+///
+/// An unclosed opening tag strips from the opener to end of string —
 /// this is the partial-stream safety case for Qwen 3.5 and similar
 /// models that emit reasoning blocks before the final answer.
 ///
@@ -108,45 +137,79 @@ pub(crate) fn strip_thinking_tags(text: &str) -> String {
 /// streaming and non-streaming — recovers reasoning without knowing whether the
 /// tag was primed.
 pub(crate) fn strip_and_capture_thinking_tags(text: &str) -> (String, Option<String>) {
-    const OPEN: &str = "<think>";
-    const CLOSE: &str = "</think>";
-
     let mut clean = text.to_string();
     let mut reasoning = String::new();
 
-    // Dangling close(es): a `</think>` with no `<think>` before it (the opening
-    // tag was primed into the prompt). Peel each leading reasoning segment before
-    // the balanced-block pass. Looping handles a model that emits more than one
-    // dangling close (repetition / multiple primed turns) — each would otherwise
-    // leak into the answer.
-    while let Some(close) = clean.find(CLOSE) {
+    // Dangling close(es): a primed `</think>` with no `<think>` before it (the
+    // opening tag was primed into the prompt). Keyed specifically on the primed
+    // pair — `<think>` is the only form xybrid primes. Peel each leading
+    // reasoning segment before the balanced-block pass. Looping handles a model
+    // that emits more than one dangling close (repetition / multiple primed
+    // turns) — each would otherwise leak into the answer.
+    while let Some(close) = clean.find(PRIMED_CLOSE) {
         // Stop once a `<think>` opens before the next close: that's a balanced
         // block, handled by the pass below.
-        if clean.find(OPEN).is_some_and(|open| open < close) {
+        if clean.find(PRIMED_OPEN).is_some_and(|open| open < close) {
             break;
         }
         push_reasoning(&mut reasoning, &clean[..close]);
-        clean.replace_range(..close + CLOSE.len(), "");
+        clean.replace_range(..close + PRIMED_CLOSE.len(), "");
     }
 
-    while let Some(start) = clean.find(OPEN) {
-        let inner_start = start + OPEN.len();
-        if let Some(end_rel) = clean[inner_start..].find(CLOSE) {
+    // Balanced blocks in any recognized marker form: repeatedly strip the
+    // earliest opener across all markers together with its matching close.
+    loop {
+        let Some((start, open, close)) = REASONING_BLOCK_MARKERS
+            .iter()
+            .filter_map(|&(open, close)| clean.find(open).map(|pos| (pos, open, close)))
+            .min_by_key(|&(pos, ..)| pos)
+        else {
+            break;
+        };
+
+        let inner_start = start + open.len();
+        if let Some(end_rel) = clean[inner_start..].find(close) {
             let inner_end = inner_start + end_rel;
             push_reasoning(&mut reasoning, &clean[inner_start..inner_end]);
-            clean.replace_range(start..inner_end + CLOSE.len(), "");
+            clean.replace_range(start..inner_end + close.len(), "");
         } else {
+            // Unclosed opener — everything after it is reasoning (partial-stream
+            // safety; the model is still mid-thought).
             push_reasoning(&mut reasoning, &clean[inner_start..]);
             clean.truncate(start);
             break;
         }
     }
-    // A whitespace-only block (e.g. a thinking model that opened and closed
-    // `<think></think>` with nothing in between) is not reasoning — surface it
-    // as `None` so callers don't show an empty reasoning section.
+
+    // A whitespace-only block (e.g. a thinking model that opened and closed with
+    // nothing in between) is not reasoning — surface `None` so callers don't show
+    // an empty reasoning section.
     let reasoning = reasoning.trim();
     let reasoning = (!reasoning.is_empty()).then(|| reasoning.to_string());
     (clean, reasoning)
+}
+
+/// Like [`strip_and_capture_thinking_tags`], for output generated from a
+/// reasoning-primed prompt (the llama.cpp adapter's `THINK_PRIME`). The opener
+/// lives in the prompt, so output whose budget ran out before `</think>` is
+/// mid-thought prose with no marker at all — indistinguishable from an answer
+/// without the priming bit. Reconstructing the opener only for budget-truncated
+/// output keeps marker-bearing behavior identical to the unprimed pass while
+/// preserving a naturally terminated markerless answer. A rare true
+/// mid-thought EOS is therefore surfaced as answer text rather than silently
+/// hiding it, which is the safer failure mode for callers.
+pub(crate) fn strip_and_capture_thinking_tags_primed(
+    text: &str,
+    primed: bool,
+    truncated_by_budget: bool,
+) -> (String, Option<String>) {
+    if !primed || !truncated_by_budget {
+        return strip_and_capture_thinking_tags(text);
+    }
+    let mut reconstructed = String::with_capacity(PRIMED_OPEN.len() + text.len());
+    reconstructed.push_str(PRIMED_OPEN);
+    reconstructed.push_str(text);
+    strip_and_capture_thinking_tags(&reconstructed)
 }
 
 /// Append one reasoning block, separating consecutive blocks with a newline.
@@ -203,9 +266,9 @@ pub(crate) fn trim_partial_stop_suffix<S: AsRef<str>>(text: &mut String, pattern
 /// Feed raw chunk text in via [`Self::push`]; the filter returns the
 /// portion that's safe to emit to the user callback, holding back
 /// any trailing bytes that could turn into a stop pattern once more
-/// chunks arrive. It also transparently suppresses
-/// `<think>...</think>` blocks and stops emitting once a complete
-/// stop pattern is observed (see [`Self::is_stopped`]).
+/// chunks arrive. It also transparently suppresses reasoning blocks in any
+/// recognized form (see [`REASONING_BLOCK_MARKERS`]) and stops emitting once a
+/// complete stop pattern is observed (see [`Self::is_stopped`]).
 ///
 /// After [`Self::is_stopped`] returns `true`, further `push` calls
 /// are no-ops and return `None`. The backend should still drain the
@@ -214,9 +277,15 @@ pub(crate) struct StreamingTextFilter {
     stop_patterns: Vec<String>,
     cumulative_text: String,
     last_emitted_len: usize,
-    inside_think_block: bool,
+    /// The close marker of the reasoning block currently being suppressed, or
+    /// `None` when not inside a block. Holds the specific closer to wait for so
+    /// mixed marker forms (`</think>`, `</thinking>`, `<channel|>`) don't confuse
+    /// each other.
+    active_reasoning_close: Option<&'static str>,
     hit_stop_pattern: bool,
     reasoning: String,
+    suppress_tool_call_blocks: bool,
+    saw_tool_call_block: bool,
 }
 
 impl StreamingTextFilter {
@@ -225,9 +294,11 @@ impl StreamingTextFilter {
             stop_patterns,
             cumulative_text: String::new(),
             last_emitted_len: 0,
-            inside_think_block: false,
+            active_reasoning_close: None,
             hit_stop_pattern: false,
             reasoning: String::new(),
+            suppress_tool_call_blocks: false,
+            saw_tool_call_block: false,
         }
     }
 
@@ -240,9 +311,18 @@ impl StreamingTextFilter {
     /// `</think>`.
     pub fn new_reasoning_primed(stop_patterns: Vec<String>) -> Self {
         Self {
-            inside_think_block: true,
+            // Start inside the primed `<think>` block, waiting for its close.
+            active_reasoning_close: Some(PRIMED_CLOSE),
             ..Self::new(stop_patterns)
         }
+    }
+
+    /// Suppress complete tool-protocol blocks (and hold back potential
+    /// marker prefixes) from the emitted stream. Enabled only for requests
+    /// that offered tools.
+    pub fn with_tool_call_suppression(mut self) -> Self {
+        self.suppress_tool_call_blocks = true;
+        self
     }
 
     /// Whether a complete stop pattern has been observed.
@@ -250,10 +330,17 @@ impl StreamingTextFilter {
         self.hit_stop_pattern
     }
 
-    /// The reasoning text captured from `<think>...</think>` blocks seen so
-    /// far, or `None` if the stream emitted no closed reasoning block.
+    /// Whether a complete tool-*call* block was suppressed. Response blocks
+    /// don't count: they are protocol scaffolding, not calls.
+    pub fn saw_tool_call_block(&self) -> bool {
+        self.saw_tool_call_block
+    }
+
+    /// The reasoning text captured from recognized reasoning blocks (see
+    /// [`REASONING_BLOCK_MARKERS`]) seen so far, or `None` if the stream emitted
+    /// no closed reasoning block.
     ///
-    /// Only blocks that have been *closed* (a `</think>` arrived) are
+    /// Only blocks that have been *closed* (their close marker arrived) are
     /// captured here — an unclosed trailing block is suppressed from the
     /// emit stream but not surfaced as reasoning, since the streaming filter
     /// can't tell a still-open block from a malformed one. Backends that run
@@ -272,7 +359,7 @@ impl StreamingTextFilter {
 
     /// Push a raw chunk. Returns `Some(safe_text)` if new content is
     /// ready for the user callback; `None` if the chunk is fully
-    /// held back (partial stop prefix, inside a `<think>` block, or
+    /// held back (partial stop prefix, inside a reasoning block, or
     /// after a stop has been observed).
     pub fn push(&mut self, chunk: &str) -> Option<String> {
         if self.hit_stop_pattern {
@@ -281,19 +368,27 @@ impl StreamingTextFilter {
 
         self.cumulative_text.push_str(chunk);
 
-        // Enter a <think> block?
-        if !self.inside_think_block
-            && self.cumulative_text[self.last_emitted_len..].contains("<think>")
-        {
-            self.inside_think_block = true;
-            if let Some(pos) = self.cumulative_text.find("<think>") {
+        // Enter a reasoning block? Detect the earliest opener among the
+        // recognized marker forms and remember its matching close.
+        if self.active_reasoning_close.is_none() {
+            let scan_start = self.last_emitted_len;
+            if let Some((pos, close)) = REASONING_BLOCK_MARKERS
+                .iter()
+                .filter_map(|&(open, close)| {
+                    self.cumulative_text[scan_start..]
+                        .find(open)
+                        .map(|rel| (scan_start + rel, close))
+                })
+                .min_by_key(|&(pos, _)| pos)
+            {
+                self.active_reasoning_close = Some(close);
                 self.last_emitted_len = pos;
             }
         }
 
-        if self.inside_think_block {
-            if self.cumulative_text.contains("</think>") {
-                self.inside_think_block = false;
+        if let Some(close) = self.active_reasoning_close {
+            if self.cumulative_text.contains(close) {
+                self.active_reasoning_close = None;
                 let (clean, reasoning) = strip_and_capture_thinking_tags(&self.cumulative_text);
                 if let Some(block) = reasoning {
                     push_reasoning(&mut self.reasoning, &block);
@@ -303,6 +398,10 @@ impl StreamingTextFilter {
                 self.last_emitted_len = self.last_emitted_len.min(self.cumulative_text.len());
             }
             return None;
+        }
+
+        if self.suppress_tool_call_blocks {
+            self.suppress_complete_tool_blocks();
         }
 
         // Complete stop pattern observed?
@@ -318,8 +417,21 @@ impl StreamingTextFilter {
 
         // Find the safe emission boundary (exclude potential partial
         // stop prefixes hanging off the tail).
-        let safe_end = find_potential_stop_start(&self.cumulative_text, &self.stop_patterns)
+        let mut safe_end = find_potential_stop_start(&self.cumulative_text, &self.stop_patterns)
             .unwrap_or(self.cumulative_text.len());
+        if self.suppress_tool_call_blocks {
+            if let Some(start) = self.open_tool_block_start() {
+                safe_end = safe_end.min(start);
+            }
+            if let Some(start) = find_potential_tool_start(&self.cumulative_text) {
+                safe_end = safe_end.min(start);
+            }
+        }
+        // Hold back a partial reasoning-opener prefix at the tail so a marker
+        // split across chunks isn't emitted before the block is recognized.
+        if let Some(start) = find_potential_reasoning_start(&self.cumulative_text) {
+            safe_end = safe_end.min(start);
+        }
 
         if safe_end > self.last_emitted_len {
             let safe = self.cumulative_text[self.last_emitted_len..safe_end].to_string();
@@ -327,6 +439,52 @@ impl StreamingTextFilter {
             Some(safe)
         } else {
             None
+        }
+    }
+
+    fn suppress_complete_tool_blocks(&mut self) {
+        let mut scan_start = self.last_emitted_len;
+        loop {
+            let search = &self.cumulative_text[scan_start..];
+            let Some((relative_start, start, end, is_call_block)) = find_next_tool_block(search)
+            else {
+                break;
+            };
+            let start_index = scan_start + relative_start;
+            let after_start_index = start_index + start.len();
+            let Some(relative_end) = self.cumulative_text[after_start_index..].find(end) else {
+                break;
+            };
+            let remove_end = after_start_index + relative_end + end.len();
+
+            if is_call_block
+                && parse_tool_calls(&self.cumulative_text[start_index..remove_end]).is_empty()
+            {
+                scan_start = remove_end;
+                continue;
+            }
+
+            self.cumulative_text
+                .replace_range(start_index..remove_end, "");
+            self.last_emitted_len = self.last_emitted_len.min(start_index);
+            if is_call_block {
+                self.saw_tool_call_block = true;
+            }
+            scan_start = start_index;
+        }
+    }
+
+    fn open_tool_block_start(&self) -> Option<usize> {
+        let mut scan_start = self.last_emitted_len;
+        loop {
+            let search = &self.cumulative_text[scan_start..];
+            let (relative_start, start, end, _) = find_next_tool_block(search)?;
+            let start_index = scan_start + relative_start;
+            let after_start_index = start_index + start.len();
+            let Some(relative_end) = self.cumulative_text[after_start_index..].find(end) else {
+                return Some(start_index);
+            };
+            scan_start = after_start_index + relative_end + end.len();
         }
     }
 }
@@ -346,9 +504,88 @@ fn find_potential_stop_start(text: &str, patterns: &[String]) -> Option<usize> {
     None
 }
 
+fn find_next_tool_block(text: &str) -> Option<(usize, &'static str, &'static str, bool)> {
+    TOOL_BLOCK_MARKERS
+        .iter()
+        .filter_map(|(start, end, is_call_block)| {
+            text.find(start)
+                .map(|position| (position, *start, *end, *is_call_block))
+        })
+        .min_by_key(|(position, _, _, _)| *position)
+}
+
+fn find_potential_tool_start(text: &str) -> Option<usize> {
+    TOOL_BLOCK_MARKERS
+        .iter()
+        .filter_map(|(start, _, _)| potential_suffix_start(text, start))
+        .min()
+}
+
+/// Position where a partial reasoning-opener prefix begins at the tail of
+/// `text`, if any — so a reasoning marker split across chunks is held back
+/// rather than leaked to the emit stream. Mirrors [`find_potential_tool_start`].
+fn find_potential_reasoning_start(text: &str) -> Option<usize> {
+    REASONING_BLOCK_MARKERS
+        .iter()
+        .filter_map(|(open, _)| potential_suffix_start(text, open))
+        .min()
+}
+
+fn potential_suffix_start(text: &str, pattern: &str) -> Option<usize> {
+    let mut start = None;
+    for prefix_len in 1..=pattern.len() {
+        let prefix = &pattern[..prefix_len];
+        if text.ends_with(prefix) {
+            start = Some(text.len() - prefix_len);
+        }
+    }
+    start
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn primed_strip_captures_markerless_mid_thought_as_reasoning() {
+        // Budget exhausted before `</think>`: the whole output is still inside
+        // the primed think channel, so none of it is answer text.
+        let (clean, reasoning) =
+            strip_and_capture_thinking_tags_primed("Okay, so I need to count rooks", true, true);
+        assert_eq!(clean, "");
+        assert_eq!(reasoning.as_deref(), Some("Okay, so I need to count rooks"));
+    }
+
+    #[test]
+    fn primed_strip_matches_dangling_close_behavior_for_completed_thoughts() {
+        let (clean, reasoning) =
+            strip_and_capture_thinking_tags_primed("first the plan</think>the answer", true, true);
+        assert_eq!(clean, "the answer");
+        assert_eq!(reasoning.as_deref(), Some("first the plan"));
+    }
+
+    #[test]
+    fn primed_strip_matches_dangling_close_behavior_after_natural_termination() {
+        let (clean, reasoning) =
+            strip_and_capture_thinking_tags_primed("first the plan</think>the answer", true, false);
+        assert_eq!(clean, "the answer");
+        assert_eq!(reasoning.as_deref(), Some("first the plan"));
+    }
+
+    #[test]
+    fn primed_strip_whitespace_only_thought_is_not_reasoning() {
+        let (clean, reasoning) = strip_and_capture_thinking_tags_primed("   \n ", true, true);
+        assert_eq!(clean, "");
+        assert_eq!(reasoning, None);
+    }
+
+    #[test]
+    fn unprimed_strip_leaves_markerless_text_as_answer() {
+        let (clean, reasoning) =
+            strip_and_capture_thinking_tags_primed("just an answer", false, false);
+        assert_eq!(clean, "just an answer");
+        assert_eq!(reasoning, None);
+    }
 
     #[test]
     fn strip_thinking_tags_removes_closed_blocks() {
@@ -410,6 +647,35 @@ mod tests {
     }
 
     #[test]
+    fn capture_anthropic_thinking_block() {
+        // Anthropic-style `<thinking>...</thinking>`.
+        let (clean, reasoning) =
+            strip_and_capture_thinking_tags("<thinking>step by step</thinking>The answer is 4.");
+        assert_eq!(clean, "The answer is 4.");
+        assert_eq!(reasoning.as_deref(), Some("step by step"));
+    }
+
+    #[test]
+    fn capture_gemma4_thought_channel() {
+        // gemma-4's flipped-pipe thought channel `<|channel>thought ... <channel|>`.
+        let (clean, reasoning) = strip_and_capture_thinking_tags(
+            "<|channel>thought\nchecking divisors<channel|>97 is prime.",
+        );
+        assert_eq!(clean, "97 is prime.");
+        assert_eq!(reasoning.as_deref(), Some("checking divisors"));
+    }
+
+    #[test]
+    fn capture_think_and_thinking_are_distinct_markers() {
+        // `<think>` is not a false prefix of `<thinking>` (the `>` disambiguates),
+        // so a `<thinking>` block is captured whole, not mis-split.
+        let (clean, reasoning) =
+            strip_and_capture_thinking_tags("<thinking>outer <think> mention</thinking>done");
+        assert_eq!(clean, "done");
+        assert_eq!(reasoning.as_deref(), Some("outer <think> mention"));
+    }
+
+    #[test]
     fn capture_thinking_tags_dangling_close_is_primed_reasoning() {
         // Shape a thinking model produces when `<think>` was primed into the
         // prompt: reasoning, a closing tag, then the answer — no opening tag.
@@ -447,7 +713,8 @@ mod tests {
     fn capture_thinking_tags_no_close_keeps_answer() {
         // Primed but the model never closed `</think>` (e.g. answered directly).
         // The answer must NOT be eaten as reasoning.
-        let (clean, reasoning) = strip_and_capture_thinking_tags("The answer is 8.");
+        let (clean, reasoning) =
+            strip_and_capture_thinking_tags_primed("The answer is 8.", true, false);
         assert_eq!(clean, "The answer is 8.");
         assert_eq!(reasoning, None);
     }
@@ -462,6 +729,165 @@ mod tests {
         assert_eq!(f.push("</think>"), None);
         assert_eq!(f.push("97 is prime."), Some("97 is prime.".to_string()));
         assert_eq!(f.reasoning(), Some("checking divisors none divide it"));
+    }
+
+    #[test]
+    fn streaming_filter_suppresses_complete_lfm2_tool_block_mid_stream() {
+        let (start, end, _) = TOOL_BLOCK_MARKERS[0];
+        let mut f = StreamingTextFilter::new(vec![]).with_tool_call_suppression();
+
+        assert_eq!(f.push("I will check "), Some("I will check ".to_string()));
+        assert_eq!(f.push(start), None);
+        assert_eq!(f.push("[get_weather(city=\"Paris\")]"), None);
+        assert_eq!(f.push(end), None);
+        assert_eq!(f.push(" now."), Some(" now.".to_string()));
+
+        assert_eq!(f.cumulative_emitted(), "I will check  now.");
+        assert!(f.saw_tool_call_block());
+    }
+
+    #[test]
+    fn streaming_filter_suppresses_complete_valid_tool_call_block() {
+        let (start, end, _) = TOOL_BLOCK_MARKERS[0];
+        let mut f = StreamingTextFilter::new(vec![]).with_tool_call_suppression();
+
+        assert_eq!(
+            f.push(&format!(
+                "before {start}[get_weather(city=\"Paris\")]{end} after"
+            )),
+            Some("before  after".to_string())
+        );
+
+        assert_eq!(f.cumulative_emitted(), "before  after");
+        assert!(f.saw_tool_call_block());
+    }
+
+    #[test]
+    fn streaming_filter_emits_complete_invalid_tool_call_block() {
+        let (start, end, _) = TOOL_BLOCK_MARKERS[0];
+        let mut f = StreamingTextFilter::new(vec![]).with_tool_call_suppression();
+        let block = format!("{start}not a real call{end}");
+
+        assert_eq!(
+            f.push(&format!("before {block} after")),
+            Some(format!("before {block} after"))
+        );
+
+        assert_eq!(f.cumulative_emitted(), format!("before {block} after"));
+        assert!(!f.saw_tool_call_block());
+    }
+
+    #[test]
+    fn streaming_filter_suppresses_complete_gemma_tool_call_block() {
+        let (start, end, _) = TOOL_BLOCK_MARKERS[1];
+        let mut f = StreamingTextFilter::new(vec![]).with_tool_call_suppression();
+
+        assert_eq!(f.push("Checking "), Some("Checking ".to_string()));
+        assert_eq!(
+            f.push(&format!(
+                "{start}call:get_weather{{city:<|\"|>Paris<|\"|>}}{end}"
+            )),
+            None
+        );
+        assert_eq!(f.push("done"), Some("done".to_string()));
+
+        assert_eq!(f.cumulative_emitted(), "Checking done");
+        assert!(f.saw_tool_call_block());
+    }
+
+    #[test]
+    fn streaming_filter_holds_back_split_tool_start_marker() {
+        let (start, end, _) = TOOL_BLOCK_MARKERS[0];
+        let mut f = StreamingTextFilter::new(vec![]).with_tool_call_suppression();
+
+        assert_eq!(f.push("before "), Some("before ".to_string()));
+        assert_eq!(f.push(&start[..5]), None);
+        assert_eq!(f.cumulative_emitted(), "before ");
+        assert_eq!(
+            f.push(&format!("{}[f()]{}", &start[5..], end)),
+            None,
+            "held marker head and complete block must stay suppressed"
+        );
+        assert_eq!(f.push(" after"), Some(" after".to_string()));
+
+        assert_eq!(f.cumulative_emitted(), "before  after");
+    }
+
+    #[test]
+    fn streaming_filter_drops_partial_tool_start_marker_at_stream_end() {
+        let (start, _, _) = TOOL_BLOCK_MARKERS[0];
+        let mut f = StreamingTextFilter::new(vec![]).with_tool_call_suppression();
+
+        assert_eq!(f.push("before "), Some("before ".to_string()));
+        assert_eq!(f.push(&start[..8]), None);
+
+        assert_eq!(f.cumulative_emitted(), "before ");
+        assert!(!f.saw_tool_call_block());
+    }
+
+    #[test]
+    fn streaming_filter_drops_unclosed_gemma_tool_response_opener() {
+        let (start, _, _) = TOOL_BLOCK_MARKERS[2];
+        let mut f = StreamingTextFilter::new(vec![]).with_tool_call_suppression();
+
+        assert_eq!(f.push("answer"), Some("answer".to_string()));
+        assert_eq!(f.push(start), None);
+        assert_eq!(f.push("response:get_weather{"), None);
+
+        assert_eq!(f.cumulative_emitted(), "answer");
+        assert!(!f.saw_tool_call_block());
+    }
+
+    #[test]
+    fn streaming_filter_without_tool_suppression_emits_call_block_verbatim() {
+        let (start, end, _) = TOOL_BLOCK_MARKERS[0];
+        let mut f = StreamingTextFilter::new(vec![]);
+
+        let block = format!("{start}[get_weather(city=\"Paris\")]{end}");
+        assert_eq!(f.push("before "), Some("before ".to_string()));
+        assert_eq!(f.push(&block), Some(block.clone()));
+        assert_eq!(f.push(" after"), Some(" after".to_string()));
+
+        assert_eq!(f.cumulative_emitted(), format!("before {block} after"));
+        assert!(!f.saw_tool_call_block());
+    }
+
+    #[test]
+    fn streaming_filter_saw_tool_call_block_excludes_response_blocks() {
+        let (call_start, call_end, _) = TOOL_BLOCK_MARKERS[1];
+        let (response_start, response_end, _) = TOOL_BLOCK_MARKERS[2];
+
+        let mut response_only = StreamingTextFilter::new(vec![]).with_tool_call_suppression();
+        assert_eq!(
+            response_only.push(&format!(
+                "{response_start}response:get_weather{{ok:true}}{response_end}"
+            )),
+            None
+        );
+        assert!(!response_only.saw_tool_call_block());
+
+        let mut with_call = StreamingTextFilter::new(vec![]).with_tool_call_suppression();
+        assert_eq!(
+            with_call.push(&format!("{call_start}call:get_weather{{}}{call_end}")),
+            None
+        );
+        assert!(with_call.saw_tool_call_block());
+    }
+
+    #[test]
+    fn streaming_filter_reasoning_primed_and_tool_suppression_compose() {
+        let (start, end, _) = TOOL_BLOCK_MARKERS[0];
+        let mut f = StreamingTextFilter::new_reasoning_primed(vec![]).with_tool_call_suppression();
+
+        assert_eq!(f.push("thinking"), None);
+        assert_eq!(f.push("</think>"), None);
+        assert_eq!(f.push(" visible "), Some(" visible ".to_string()));
+        assert_eq!(f.push(&format!("{start}[f()]{end}")), None);
+        assert_eq!(f.push("done"), Some("done".to_string()));
+
+        assert_eq!(f.reasoning(), Some("thinking"));
+        assert_eq!(f.cumulative_emitted(), " visible done");
+        assert!(f.saw_tool_call_block());
     }
 
     #[test]
@@ -555,6 +981,28 @@ mod tests {
         assert_eq!(f.push("step two</think>"), None);
         assert_eq!(f.push("answer"), Some("answer".to_string()));
         assert_eq!(f.reasoning(), Some("step one step two"));
+    }
+
+    #[test]
+    fn streaming_filter_suppresses_and_captures_anthropic_thinking() {
+        // The filter recognizes `<thinking>` too, waiting for its own close.
+        let mut f = StreamingTextFilter::new(vec![]);
+        assert_eq!(f.push("visible "), Some("visible ".to_string()));
+        assert_eq!(f.push("<thinking>"), None);
+        assert_eq!(f.push("reasoning</thinking>"), None);
+        assert_eq!(f.push("answer"), Some("answer".to_string()));
+        assert_eq!(f.reasoning(), Some("reasoning"));
+    }
+
+    #[test]
+    fn streaming_filter_holds_back_split_reasoning_marker() {
+        // A `<thinking>` opener split across chunks must not leak its prefix.
+        let mut f = StreamingTextFilter::new(vec![]);
+        assert_eq!(f.push("answer<thin"), Some("answer".to_string()));
+        // The held-back `<thin` completes into `<thinking>` → suppressed.
+        assert_eq!(f.push("king>hidden</thinking>"), None);
+        assert_eq!(f.push("done"), Some("done".to_string()));
+        assert_eq!(f.reasoning(), Some("hidden"));
     }
 
     #[test]

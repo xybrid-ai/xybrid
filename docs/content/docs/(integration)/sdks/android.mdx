@@ -11,7 +11,7 @@ Add the Xybrid SDK from Maven Central:
 
 ```kotlin title="build.gradle.kts"
 dependencies {
-    implementation("ai.xybrid:xybrid-kotlin:0.2.2")
+    implementation("ai.xybrid:xybrid-kotlin:0.3.0")
 }
 ```
 
@@ -30,8 +30,7 @@ class MyApplication : Application() {
 }
 
 // Load a model from the registry
-val loader = XybridModelLoader.fromRegistry("kokoro-82m")
-val model = loader.load()
+val model = XybridModel("kokoro-82m")
 
 // Run inference
 val result = model.run(Envelope.text("Hello, world!"))
@@ -61,16 +60,20 @@ Without a key, telemetry is disabled and the first inference logs a one-shot hin
 ### From Registry
 
 ```kotlin
-val loader = XybridModelLoader.fromRegistry("whisper-tiny")
-val model = loader.load()
+val model = XybridModel("whisper-tiny")
 ```
 
 ### From Local Bundle
 
 ```kotlin
-val loader = XybridModelLoader.fromBundle("/path/to/model.xyb")
-val model = loader.load()
+val model = XybridModel.fromBundle("/path/to/model.xyb")
 ```
+
+`XybridModel.fromDirectory(path)` and `XybridModel.fromHuggingface("org/repo")` load
+from an unpacked model directory and from HuggingFace respectively. Each has a
+`suspend` counterpart — `fromRegistryAsync`, `fromBundleAsync`,
+`fromDirectoryAsync`, `fromHuggingfaceAsync` — that runs the blocking load on
+`Dispatchers.IO`.
 
 ---
 
@@ -153,7 +156,7 @@ The SDK uses sealed exception classes for type-safe error handling:
 
 ```kotlin
 try {
-    val model = XybridModelLoader.fromRegistry("kokoro-82m").load()
+    val model = XybridModel("kokoro-82m")
     val result = model.run(envelope)
 } catch (e: XybridException.ModelNotFound) {
     println("Model not found: ${e.modelId}")

@@ -183,6 +183,8 @@ pub use xybrid_core::device::{
 };
 pub use xybrid_core::execution;
 pub use xybrid_core::features;
+/// Tool-calling request and response types re-exported for SDK users.
+pub use xybrid_core::gateway::{FunctionCall, FunctionDefinition, Tool, ToolCall};
 pub use xybrid_core::ir;
 pub use xybrid_core::orchestrator;
 pub use xybrid_core::orchestrator::routing_engine;

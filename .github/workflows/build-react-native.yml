@@ -9,7 +9,6 @@ on:
       - 'bindings/kotlin/**'
       - 'crates/xybrid-bolt/**'
       - 'crates/xybrid-ffi-facade/**'
-      - 'xtask/**'
       - '.github/workflows/build-react-native.yml'
       # Docs-only changes under the paths above (READMEs, examples) never
       # affect the native build — exclude markdown so they don't trigger it.
@@ -29,7 +28,6 @@ on:
       - 'bindings/kotlin/**'
       - 'crates/xybrid-bolt/**'
       - 'crates/xybrid-ffi-facade/**'
-      - 'xtask/**'
       - '.github/workflows/build-react-native.yml'
       - '!**.md'
   workflow_dispatch:
@@ -50,99 +48,66 @@ jobs:
   # binding from the `ai.xybrid:xybrid-kotlin` Maven AAR (declared in
   # android/build.gradle), so there is nothing to stage or cross-build here.
 
+  # RN's iOS piece IS the Apple xcframework — since the Apple G4 flip it is
+  # Bazel-built (the same //bindings/apple:XybridFFI the release and
+  # build-apple.yml use), so this job now stages that instead of running its
+  # own boltffi pack. The cargo-era helpers (iOS rust targets, boltffi CLI,
+  # the ghcr llama-natives pull) are dead on this path and gone.
   stage-ios:
     name: Stage iOS artifacts
     runs-on: macos-14
+    env:
+      # Enables the remote-cache fast path below. Absent on fork PRs → the
+      # config script writes nothing → a plain local Bazel build (slow but
+      # correct).
+      BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
         with:
-          toolchain: stable
-          targets: >-
-            aarch64-apple-ios,
-            aarch64-apple-ios-sim,
-            aarch64-apple-darwin
+          submodules: true  # Bazel //:llama_src = vendor/llama-cpp
 
-      - name: Setup sccache
-        uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
-
-      - name: Configure sccache environment
-        shell: bash
+      # build:ios uses the host's preinstalled cmake/make/pkg-config for
+      # rfcc's exec tools; xz decodes the fetched ort iOS-sim slice.
+      - name: Ensure rfcc host tools
         run: |
-          echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
-          echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
-          # The GHA-backed sccache server occasionally needs more than the
-          # default 10s to complete its first handshake with the cache
-          # service, which surfaces as "Timed out waiting for server startup"
-          # and aborts the build. There is no env var for this, so write a
-          # minimal config file (it coexists with the env-based GHA settings
-          # above) bumping the startup timeout. https://github.com/mozilla/sccache
-          SCCACHE_CONF="$RUNNER_TEMP/sccache-config.toml"
-          echo "server_startup_timeout_ms = 60000" > "$SCCACHE_CONF"
-          echo "SCCACHE_CONF=$SCCACHE_CONF" >> $GITHUB_ENV
+          which cmake >/dev/null || brew install cmake
+          which pkg-config >/dev/null || brew install pkg-config
+          which xz >/dev/null || brew install xz
 
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-        with:
-          prefix-key: "v1-rust"
-          shared-key: "rn-ios"
-          cache-all-crates: "true"
-          save-if: "true"
-
-      # boltffi CLI provides the `boltffi pack apple` that build-xcframework
-      # (invoked by stage-react-native) shells out to. Pinned to 0.25.3 to
-      # match the runtime `boltffi` crate (see build-apple.yml for why the
-      # CLI/runtime versions must match).
-      - name: Cache boltffi CLI
-        id: cache-boltffi
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        with:
-          path: ~/.cargo/bin/boltffi
-          key: boltffi-cli-${{ runner.os }}-0.25.3
-
-      - name: Install boltffi CLI
-        run: which boltffi || cargo install boltffi_cli --version 0.25.3 --locked
-
-      # Prebuilt-natives fast path (iOS device + arm64 simulator). stage-ios
-      # routes through the same `boltffi pack apple` as build-apple, so it
-      # consumes the identical two slices. Best-effort: a miss/error is a silent
-      # no-op (continue-on-error) and the slice compiles from source — it can
-      # never break the build.
-      - name: Setup oras
-        uses: oras-project/setup-oras@38de303aac69abb66f3e6255b7198bff35f323e3 # v2.0.0
-      # `oras login`, not docker/login-action: macOS runners have no docker.
-      # Best-effort + same-repo only (forks have no token → anonymous pull).
-      - name: Log in to ghcr (best-effort, same-repo)
-        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-        continue-on-error: true
+      # Remote CACHE only — never remote execution: iOS actions must run on
+      # this Mac (Apple policy), but their results can still up/download from
+      # BuildBuddy so identical macos-14 runners share work across jobs and
+      # runs. The build step below adds --config=remote-cache when the key
+      # is present.
+      - name: Configure BuildBuddy remote-cache config
         env:
-          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: echo "$GHCR_TOKEN" | oras login ghcr.io -u "${{ github.actor }}" --password-stdin
-      - name: Pull prebuilt natives (iOS device + sim, best-effort)
-        continue-on-error: true
-        env:
-          XYBRID_NATIVES_PKG: ghcr.io/xybrid-ai/llama-natives
-        run: |
-          DEST="$RUNNER_TEMP/natives"
-          got_any=0
-          for triple in aarch64-apple-ios aarch64-apple-ios-sim; do
-            if tools/scripts/natives-pull.sh "$triple" vision "$DEST"; then
-              echo "prebuilt natives staged for $triple (will skip cmake)"
-              got_any=1
-            else
-              echo "no prebuilt natives for $triple — compiles from source"
-            fi
-          done
-          if [ "$got_any" = 1 ]; then
-            echo "XYBRID_NATIVES_PREBUILT_DIR=$DEST" >> "$GITHUB_ENV"
-          else
-            echo "no prebuilt natives — compiles from source (unchanged)"
-          fi
+          BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
+        run: tools/scripts/write-buildbuddy-rc.sh
 
+      # Build the xcframework with Bazel (same //bindings/apple:XybridFFI the
+      # release and build-apple.yml use), then stage it + the committed bolt
+      # Swift wrappers into the RN package tree, where the podspec vendors
+      # them. Plain unzip/cp — npm pack needs the files physically in-tree.
       - name: Stage iOS artifacts
-        run: cargo xtask stage-react-native --release
+        run: |
+          set -euo pipefail
+          REMOTE=""; [ -n "$BUILDBUDDY_API_KEY" ] && REMOTE="--config=remote-cache"
+          bazelisk build $REMOTE --config=ios //bindings/apple:XybridFFI
+
+          RN_IOS="bindings/react-native/ios"
+          ZIP="bazel-bin/bindings/apple/XybridFFI.xcframework.zip"
+          [ -f "$ZIP" ] || { echo "Expected $ZIP after the Bazel build"; exit 1; }
+          rm -rf "$RN_IOS/Frameworks/XybridFFI.xcframework"
+          mkdir -p "$RN_IOS/Frameworks"
+          unzip -o -q "$ZIP" -d "$RN_IOS/Frameworks"
+          [ -d "$RN_IOS/Frameworks/XybridFFI.xcframework" ] \
+            || { echo "Zip did not contain XybridFFI.xcframework/ at its root"; exit 1; }
+
+          rm -rf "$RN_IOS/XybridSwift"
+          mkdir -p "$RN_IOS/XybridSwift"
+          for f in Xybrid.swift xybrid_bolt.swift; do
+            cp "bindings/apple/Sources/Xybrid/$f" "$RN_IOS/XybridSwift/$f"
+          done
 
       - name: Verify iOS staging
         run: |
@@ -249,19 +214,30 @@ jobs:
   build-android-example:
     name: Build Android example (from source)
     runs-on: ubuntu-latest
+    env:
+      # Enables the RBE fast path below. Absent on fork PRs → the config step
+      # skips → the bazelisk build falls back to local execution (slow but
+      # correct), same as before.
+      BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          submodules: true  # //:llama_src = vendor/llama-cpp (the bolt .so builds via Bazel)
 
-      # Keep LLVM (large-packages: false): the bolt build runs bindgen for
-      # the llama/ggml C++ via libclang. Removing system LLVM breaks it with
-      # "'stdbool.h' file not found".
+      # Keep large-packages (LLVM etc.): originally needed because the bolt
+      # build ran bindgen over llama/ggml C++ via system libclang. That no
+      # longer applies — the Bazel lane uses COMMITTED bindings
+      # (crates/llama-cpp-sys/BUILD.bazel: committed-bindings, no bindgen, no
+      # libclang). The keep is preserved precautionarily for the Gradle/Expo
+      # Android toolchain; revisit (flip large-packages: true to reclaim the
+      # headroom) once a run confirms the bolt .so + APK assemble without it.
       #
       # tool-cache: true reclaims /opt/hostedtoolcache (~10 GB). This step runs
       # first, before Set up JDK / Use Node.js, so those re-provision their
       # toolchains afterward — the build never reads the preinstalled cache.
-      # The extra headroom is needed because the from-source path compiles
-      # llama.cpp + the bolt .so for every ABI and then assembles the APK,
-      # which exhausted the runner ("No space left on device") at assembleDebug.
+      # The extra headroom is needed because the bolt .so compiles for every ABI
+      # and Gradle then assembles the APK, which previously exhausted the
+      # runner ("No space left on device") at assembleDebug.
       - name: Free disk space
         uses: jlumbroso/free-disk-space@54081f138730dfa15788a46383842cd2f914a1be # v1.3.1
         with:
@@ -283,90 +259,46 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
-        with:
-          toolchain: stable
-          targets: >-
-            aarch64-linux-android,
-            armv7-linux-androideabi,
-            x86_64-linux-android,
-            i686-linux-android
-
-      - name: Setup sccache
-        uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
-
-      - name: Configure sccache environment
-        run: |
-          echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
-          echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
-
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-        with:
-          prefix-key: "v1-rust"
-          shared-key: "rn-android-example"
-          cache-all-crates: "true"
-          save-if: "true"
-
       - name: Setup Android SDK
         uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+        with:
+          # Don't install the default `tools` package — it drags in the Android
+          # Emulator (~1 GB), whose download flakes ("ZipFile unknown archive").
+          # This job only builds the APK (assembleDebug); the NDK is installed
+          # below and Gradle fetches build-tools/platform on demand. platform-tools
+          # is kept for adb, which some Gradle Android tasks probe for.
+          packages: platform-tools
 
+      # The NDK here is for the EXAMPLE APP's gradle build (RN codegen C++),
+      # not for our .so — Bazel downloads its own pinned NDK in-build.
       - name: Install NDK
         run: sdkmanager --install "ndk;27.1.12297006"
 
       - name: Set NDK environment
         run: echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.1.12297006" >> $GITHUB_ENV
 
-      # build-android-bolt.sh adds the libc++_shared DT_NEEDED via patchelf,
-      # which isn't preinstalled on the runner.
-      - name: Install patchelf + cargo-ndk
-        run: |
-          sudo apt-get update && sudo apt-get install -y patchelf
-          which cargo-ndk || cargo install cargo-ndk
-
-      - name: Install boltffi CLI
-        run: which boltffi || cargo install boltffi_cli --version 0.25.3 --locked
-
-      # Prebuilt-natives fast path (mirrors build-android.yml). Best-effort:
-      # pull the prebuilt llama.cpp slice per ABI from ghcr so each ABI skips
-      # the ~25-min cmake compile. ANY miss/error is a silent no-op
-      # (continue-on-error) → that ABI compiles from source, never breaks the
-      # build. build.rs keys on XYBRID_NATIVES_PREBUILT_DIR/<target>.
-      - name: Setup oras
-        uses: oras-project/setup-oras@38de303aac69abb66f3e6255b7198bff35f323e3 # v2.0.0
-      - name: Log in to ghcr (best-effort, same-repo)
-        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-        continue-on-error: true
-        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Pull prebuilt natives (all shipped ABIs, best-effort)
-        continue-on-error: true
+      # RBE fast path: with this config present, the Bazel build below adds
+      # --config=remote and the AAR graph resolves from BuildBuddy's cache
+      # (kept warm by bazel.yml on every PR) instead of compiling ~1,900
+      # crates + llama.cpp locally on a 2-core runner (~38 min → ~3).
+      # On forks (no secret) the script writes nothing → local Bazel fallback.
+      - name: Configure BuildBuddy remote config
         env:
-          XYBRID_NATIVES_PKG: ghcr.io/xybrid-ai/llama-natives
-        run: |
-          DEST="$RUNNER_TEMP/natives"
-          got_any=0
-          for triple in aarch64-linux-android armv7-linux-androideabi x86_64-linux-android; do
-            if tools/scripts/natives-pull.sh "$triple" vision "$DEST"; then
-              echo "prebuilt natives staged for $triple (will skip cmake)"
-              got_any=1
-            else
-              echo "no prebuilt natives for $triple — compiles from source"
-            fi
-          done
-          if [ "$got_any" = 1 ]; then
-            echo "XYBRID_NATIVES_PREBUILT_DIR=$DEST" >> "$GITHUB_ENV"
-          else
-            echo "no prebuilt natives for any ABI — all compile from source (unchanged)"
-          fi
+          BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
+        run: tools/scripts/write-buildbuddy-rc.sh
 
-      # 1. Build the bolt .so for all ABIs (staged into bindings/kotlin/libs).
+      # 1. Build the bolt .so for all ABIs and stage the AAR's jniLibs into
+      #    bindings/kotlin/libs/ — the layout Gradle publishes from
+      #    (jniLibs.srcDirs("libs")). Same block release-prep.yml and
+      #    test-ci.yml (publish-kotlin) use. Bazel end-to-end since #341.
       - name: Build Android native libs
-        run: cargo xtask build-android --release
+        run: |
+          set -euo pipefail
+          REMOTE=""; [ -n "$BUILDBUDDY_API_KEY" ] && REMOTE="--config=remote"
+          bazelisk build $REMOTE -c opt //bindings/kotlin:xybrid_kotlin_aar
+          rm -rf bindings/kotlin/libs && mkdir -p bindings/kotlin/libs /tmp/aar
+          unzip -o -q bazel-bin/bindings/kotlin/xybrid-kotlin.aar 'jni/*' -d /tmp/aar
+          cp -r /tmp/aar/jni/* bindings/kotlin/libs/
 
       # 2. Publish the kotlin binding from source to mavenLocal (no signing —
       #    guarded on signingInMemoryKey, absent here).

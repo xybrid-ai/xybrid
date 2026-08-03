@@ -5,14 +5,14 @@ description: Get up and running with Xybrid in minutes
 
 Get Xybrid running in your app with a few lines of code. Choose your SDK below.
 
-<Tabs items={['Flutter', 'Swift', 'Kotlin', 'Unity', 'Rust', 'CLI']}>
+<Tabs items={['Flutter', 'Swift', 'Kotlin', 'Unity', 'Web', 'Rust', 'CLI']}>
   <Tab value="Flutter">
 **Install**
 
 ```yaml
 # pubspec.yaml
 dependencies:
-  xybrid_flutter: ^0.2.2
+  xybrid_flutter: ^0.3.0
 ```
 
 ```bash
@@ -54,7 +54,7 @@ Or add to `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/xybrid-ai/xybrid", from: "0.2.2")
+    .package(url: "https://github.com/xybrid-ai/xybrid", from: "0.3.0")
 ]
 ```
 
@@ -86,7 +86,7 @@ let result = try model.run(envelope: envelope)
 ```kotlin
 // build.gradle.kts
 dependencies {
-    implementation("ai.xybrid:xybrid-kotlin:0.2.2")
+    implementation("ai.xybrid:xybrid-kotlin:0.3.0")
 }
 ```
 
@@ -100,8 +100,7 @@ import ai.xybrid.*
 Xybrid.init(context)
 
 // Load a model from the registry
-val loader = XybridModelLoader.fromRegistry("kokoro-82m")
-val model = loader.load()
+val model = XybridModel("kokoro-82m")
 
 // Run text-to-speech
 val envelope = Envelope.text("Hello from Xybrid!")
@@ -118,10 +117,10 @@ val result = model.run(envelope)
 In Unity, go to **Window > Package Manager > + > Add package from git URL** and enter:
 
 ```
-https://github.com/xybrid-ai/xybrid.git#upm
+https://github.com/xybrid-ai/xybrid.git?path=/bindings/unity
 ```
 
-`#upm` tracks the latest published Unity build. To pin a version, use one of the `upm/*` tags from the [repository tags page](https://github.com/xybrid-ai/xybrid/tags).
+Or via [OpenUPM](https://openupm.com/packages/ai.xybrid.sdk/): `openupm add ai.xybrid.sdk`. Native libraries download automatically on first import (SHA-256 verified); pin a version by appending `#v0.3.0` to the git URL.
 
 **Run inference**
 
@@ -144,13 +143,56 @@ Debug.Log($"Latency: {result.LatencyMs}ms");
 
 **Expected output:** `result.Success == true` with audio output from the TTS model.
   </Tab>
+  <Tab value="Web">
+**Install**
+
+`@xybrid/web` is a private preview and not yet on npm. It lives in [`bindings/web`](https://github.com/xybrid-ai/xybrid/tree/master/bindings/web):
+
+```bash
+git clone https://github.com/xybrid-ai/xybrid
+cd xybrid/bindings/web
+pnpm install
+pnpm dev:example   # downloads pinned demo models, then serves the demo
+```
+
+**Run inference**
+
+```ts
+import { XybridLlm } from "@xybrid/web";
+
+// Stream a reply from a language model running in the browser
+const llm = await XybridLlm.load("/llm/model_metadata.json", {
+  wasmPath: "/llm-runtime",
+  accelerator: "auto", // WebGPU when available, wasm otherwise
+});
+
+for await (const delta of llm.generateStream("Hello from Xybrid!")) {
+  output.append(delta);
+}
+```
+
+Models can also load straight from Hugging Face — the SDK lists the repo,
+verifies the download with SHA-256 when Hugging Face provides a Git-LFS OID
+(the normal case for model files), or by size for non-LFS files, and synthesizes
+compatible metadata in memory when the repo doesn't ship one:
+
+```ts
+const llm = await XybridLlm.fromHuggingFace("litert-community/SmolLM2-135M-Instruct", {
+  wasmPath: "/llm-runtime", // defaults to /xybrid/llm-runtime when omitted
+});
+```
+
+**Expected output:** Text streamed into the page token by token, generated entirely in the browser.
+
+See the [Web SDK guide](/docs/sdks/web) for the tensor surface, registry loading, and the full API.
+  </Tab>
   <Tab value="Rust">
 **Install**
 
 ```toml
 # Cargo.toml
 [dependencies]
-xybrid = "0.2.2"
+xybrid = "0.3.0"
 ```
 
 **Run inference**

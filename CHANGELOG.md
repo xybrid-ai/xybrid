@@ -9,8 +9,180 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Planned
 
-- **OpenUPM registry**: Publish Unity SDK to [openupm.com](https://openupm.com) for scoped registry install
 - **Multimodal KV-prefix reuse**: the per-frame prefill cost lever for live vision — **deferred** from 0.2.0, not yet implemented.
+
+---
+
+## [0.4.0] - 2026-07-31
+
+Stable release of the 0.4.0 line. Since `0.4.0-rc1`, local Whisper gains
+correct long-audio and per-request language/task handling, the Windows Flutter
+and Unity natives move onto the tested MSVC Bazel path, and Kotlin callers get
+a compatibility shim for the loader API removed during the BoltFFI migration.
+The `0.4.0-rc1` and `0.4.0-alpha` entries below cover the rest of the changes
+since 0.3.0.
+
+### Fixed
+
+- **Candle Whisper now transcribes audio of any length** instead of failing at
+  roughly 15 seconds or truncating past 30 seconds. Audio is decoded in
+  correctly trimmed windows, padding-only output is discarded, Whisper's
+  suppress-token and no-speech rules are applied, and model-backed regression
+  tests cover clips through 66 seconds (#426).
+- **Whisper honors each request's language and task.** Transcription and
+  translation select the correct decode prefix without leaking state between
+  calls; unsupported languages, prompts, non-zero temperatures, and timestamp
+  granularities now return an explicit input error instead of being silently
+  ignored (#426).
+- **Kotlin's migration docs referenced a removed `XybridModelLoader`.** The
+  examples now use `XybridModel` directly, and a deprecated compatibility shim
+  keeps applications written against the old loader shape compiling through
+  the 0.4.x line (#329, #412).
+
+### Changed
+
+- **Flutter's Windows native is now MSVC ABI from end to end.** The shipped DLL
+  and import library are cross-compiled by the Bazel release graph, include the
+  llama.cpp vision path, and are load-tested on Windows before release
+  (#416–#420).
+- **Unity's Windows native now comes from the same Bazel graph** and is checked
+  through real IL2CPP runtime smokes on Windows and Linux (#414, #421).
+- **Release builds resolve exact Bazel outputs through one checked helper** and
+  share one remote-execution configuration, removing ambiguous `bazel-bin`
+  lookups and drift between shipping jobs (#424, #427).
+
+---
+
+## [0.4.0-rc1] - 2026-07-28
+
+Release candidate for 0.4.0. Two consumer-visible fixes on top of `0.4.0-alpha`
+— the published Flutter package could not be built by anyone with a Rust
+toolchain installed, and Linux `.so`s linked the C++ runtime dynamically — plus
+the Unity SDK moving fully onto BoltFFI and the Bazel graph growing from
+"builds the artifacts" to "builds and tests them".
+
+### Fixed
+
+- **Flutter: the published pub.dev package would not build** for any consumer
+  with a Rust toolchain installed. cargokit disables precompiled binaries
+  whenever `rustup` is on `PATH`, and the published package cannot be built
+  from source — its Rust crate inherits `edition` from a workspace root that is
+  not published and depends on sibling crates by path — so the build died on an
+  unrelated cargo manifest error. The choice is now made from the crate's
+  location: published package always precompiled, monorepo checkout still
+  source-built so edits to `xybrid-core`/`xybrid-sdk`/`xybrid-ffi-facade` are
+  picked up (#338, #408, #409).
+- **Linux `.so`s linked `libstdc++` dynamically** while binaries got it
+  statically, so the shipped cdylibs required a C++ runtime on the host
+  (#407).
+- **Unity shipped debug natives** in the release bundles (#391), and desktop
+  ONNX Runtime was missing from them (#379).
+
+### Changed
+
+- **Unity is fully on BoltFFI.** The managed layer, run/stream/context,
+  telemetry, bundle and model-file paths all go through `xybrid_bolt`, and its
+  natives for macOS, Android, Linux and iOS are built by Bazel
+  (#380–#390, #392–#394).
+- **Bazel now runs the test suite**, not just the builds — 38 test targets
+  covering the `tests/` binaries across `xybrid-core`, `xybrid-sdk`,
+  `xybrid-llama`, `xtask`, the CLI and integration-tests (#397–#403).
+- **Unity CI runs EditMode tests in a real Unity Editor** on Linux, plus a
+  Windows IL2CPP gate for the Bazel-built DLL (#396, #406).
+
+### Removed
+
+- **`xybrid-ffi` crate (pre-bolt C ABI)**: with Unity migrated onto BoltFFI,
+  the C-ABI crate, its cbindgen header, and the csbindgen C# generation
+  (`Runtime/Native/NativeMethods.g.cs`) are gone. The Unity SDK now loads
+  `xybrid_bolt` on every platform (`cargo xtask build-ffi` builds bolt).
+
+---
+
+## [0.4.0-alpha] - 2026-07-18
+
+Prerelease. The headline is invisible on purpose: nearly every shipped artifact
+is now produced by one Bazel build graph on remote execution instead of
+per-platform cargo builds — same names, same delivery, same signatures. This
+alpha exists to exercise that new release pipeline end-to-end before a stable
+cut. Alongside it: a browser SDK preview, a Python SDK, and reasoning-model
+fixes.
+
+### Added
+
+- **Browser SDK preview (`@xybrid/web`)** backed by LiteRT.js and LiteRT-LM (#346).
+- **Python SDK** — BoltFFI-based, ctypes over the `xybrid-bolt` cdylib (#327).
+- **Reasoning capture**: `<thinking>` and gemma-4 reasoning formats recognized
+  via a marker table and surfaced separately from the answer (#336, docs #331).
+- **Bonsai-27B 1-bit runtime**: Qwen3VL companion artifacts and text-only VLM
+  routing (#356).
+
+### Fixed
+
+- **Reasoning models silently produced empty answers** when the entire output
+  was a thinking block (#355, #358).
+- **SwiftPM manifest honesty**: the package no longer advertises a macOS slice
+  that never shipped, and the iOS floor is `.v16` to match the binary — both
+  previously failed at link time instead of resolve time (#357).
+- **Flutter on Linux**: `libxybrid_flutter.so` not found when compiling from
+  source (#340).
+
+### Changed
+
+- **The build factory: cargo → Bazel + remote execution** for every release
+  artifact — the CLI on Linux (#347), macOS (#348, #350), and Windows (#352,
+  #354), the Android AAR (#341), the iOS XCFramework with device + simulator
+  slices (#362–#367), and the Flutter precompiled binaries (#369, #371).
+  Consumer-visible effects: the Windows CLI switches toolchain flavor
+  MSVC → MinGW (behaviorally identical for a self-contained CLI), and Linux
+  artifacts now carry a hermetic glibc ≤ 2.31 floor, so they load on older
+  distros than the previous runner-glibc builds. Bazel is also the required
+  CI gate; the duplicate cargo CLI jobs are retired (#360, #361).
+- **Dead execution strategies removed** from the core resolver
+  (Standard/Tts/Llm) (#353).
+
+---
+
+## [0.3.0] - 2026-07-06
+
+Local tool calling, Unity on OpenUPM, and honest cache clearing. The local
+llama.cpp backend gains function/tool calling; the Unity SDK is re-platformed
+onto a managed-only OpenUPM package that fetches its natives at import; and the
+model-cache clear/discovery paths are corrected to report what they actually
+remove.
+
+### Changed
+
+- **Unity SDK distribution moved to OpenUPM** (#321, #324). The Unity package now
+  ships managed-only via the OpenUPM scoped registry (`ai.xybrid`); per-platform
+  native libraries are downloaded from the GitHub Release at import by an editor
+  resolver (SHA-256 verified) into `Assets/Xybrid/Plugins/`, **including the
+  ~326 MB iOS slice** that previously required manual setup. **Breaking for Unity
+  consumers:** the `#upm` git-branch install is replaced (install via OpenUPM or
+  the `?path=/bindings/unity` git URL), and the `publish-upm` CI job is retired.
+- **Model cache clearing reports what it removed** (#309). **Breaking:** `clear()`
+  / `clear_model_roots()` now return the number of cache *roots* removed (was the
+  scanned `.xyb` entry count, ~0 for the nested registry-bundle layout), and the
+  CLI now warns when nothing was cached instead of always reporting success.
+  `cache_root()` keeps `extracted/`, `hf/`, and `hf-hub/` co-located under the
+  cache root for a bare relative `models` root instead of resolving them
+  CWD-relative. `clear*` operations are documented as unsafe against concurrent
+  loads.
+
+### Added
+
+- **Local tool calling for the llama.cpp backend** (#323): function/tool calls
+  are parsed from local LLM output for LFM2 and Gemma-family models, with
+  streaming tool-call continuation, an example, and a CLI REPL. See the
+  tool-calling guide.
+- **Unity native-library resolver + release bundles** (#321). An editor resolver
+  downloads/verifies the per-platform natives on import and before player builds;
+  CI publishes `xybrid-unity-native-<platform>-v<version>.zip` bundles + a
+  SHA-256 manifest as release assets (managed by `cargo xtask package-unity-natives`).
+
+### Fixed
+
+- **Internal path-dep pins** realigned to the workspace version (#318).
 
 ---
 

@@ -1,0 +1,15 @@
+diff --git a/rust/private/rustc.bzl b/rust/private/rustc.bzl
+--- a/rust/private/rustc.bzl
++++ b/rust/private/rustc.bzl
+@@ -2028,7 +2028,10 @@
+     # For a cdylib that might be added as a dependency to a cc_* target on Windows, it is important to include the
+     # interface library that rustc generates in the output files.
+     interface_library = None
+-    if rust_toolchain.target_os == "windows" and crate_info.type == "cdylib":
++    # xybrid patch: only windows-MSVC rustc emits the `.dll.lib` import library;
++    # windows-GNU (MinGW) emits `.dll.a`, so a mandatory `.dll.lib` output fails a
++    # good gnu cdylib. GNU cdylibs are consumed via dlopen/P-Invoke (no implib).
++    if rust_toolchain.target_os == "windows" and rust_toolchain.target_abi == "msvc" and crate_info.type == "cdylib":
+         # Rustc generates the import library with a `.dll.lib` extension rather than the usual `.lib` one that msvc
+         # expects (see https://github.com/rust-lang/rust/pull/29520 for more context).
+         interface_library = ctx.actions.declare_file(crate_info.output.basename + ".lib", sibling = crate_info.output)

@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.4.0
+
+Stable release of the 0.4.0 line. No Flutter API changes since `0.4.0-rc1`.
+
+* Changed: the precompiled Windows native is now an MSVC-ABI DLL plus import library produced by the Bazel release graph, includes the llama.cpp vision path, and is load-tested on Windows before release (xybrid-ai/xybrid#416, xybrid-ai/xybrid#418, xybrid-ai/xybrid#419, xybrid-ai/xybrid#420)
+
+## 0.4.0-rc1
+
+Release candidate for 0.4.0.
+
+* Fixed: the package would not build for anyone with a Rust toolchain installed — it failed with `error inheriting 'edition' from workspace root manifest`. cargokit disables precompiled binaries whenever `rustup` is on `PATH`, and this package cannot be built from source, so it fell through to a build that could never succeed. The published package now always uses its precompiled binaries, and a source build that cannot succeed fails with an explanation instead of a cargo error. `use_precompiled_binaries` still overrides (xybrid-ai/xybrid#338)
+
+## 0.4.0-alpha
+
+Prerelease exercising the new release pipeline.
+
+* Fixed: `libxybrid_flutter.so` not found when compiling from source on Linux (xybrid-ai/xybrid#340)
+* Changed: the precompiled binaries (desktop + mobile) are now built by Bazel with hermetic toolchains — same download, naming, and signature; the Linux `.so` now loads on older-glibc distros than before (xybrid-ai/xybrid#369, xybrid-ai/xybrid#371)
+
+## 0.3.0
+
+* Fixed: model cache clearing now reports the number of cache roots actually removed (previously counted scanned `.xyb` entries, ~0 for the nested registry-bundle layout), so "clear cache" no longer reports success when nothing was cached; `extracted/`, `hf/`, and `hf-hub/` stay co-located under a relative cache root (xybrid-ai/xybrid#309)
+
 ## 0.2.2
 
 Structured output on Flutter. Local llama generation can now be constrained to a

@@ -25,8 +25,8 @@ path = "src/lib.rs"
 #   `xybrid-llama-sys`  : raw FFI + cmake build (Phase 1)
 #   `xybrid-llama`   : safe RAII + typed errors + streaming trampoline (Phase 2)
 #   `xybrid-core`    : thin adapter glue (Phase 3 reduction)
-xybrid-llama-sys = { path = "../llama-cpp-sys", version = "0.2.2", optional = true }
-xybrid-llama = { path = "../xybrid-llama", version = "0.2.2", optional = true }
+xybrid-llama-sys = { path = "../llama-cpp-sys", version = "0.4.0", optional = true }
+xybrid-llama = { path = "../xybrid-llama", version = "0.4.0", optional = true }
 # Real Jinja engine for the llama.cpp chat-template fallback: when llama.cpp's
 # hardcoded non-Jinja matcher rejects a GGUF's embedded template (returns -1),
 # we render that template here instead. Gated with the deps below into
@@ -56,16 +56,18 @@ tracing = "0.1"  # Structured logging for streaming backend telemetry
 # System information for device detection (v0.0.7)
 sysinfo = "0.32"
 
-# ONNX Runtime for model inference
-# Note: Using ort crate for ONNX Runtime bindings
-# For macOS/iOS: Uses CoreML/Metal backend (enable ort-coreml feature)
-# For Android: Uses NNAPI backend (requires ort-dynamic + AAR)
-# For desktop: Uses CPU backend
-# Note: Using default-features = false for cross-platform compatibility.
-# - For Android: Use ort-dynamic feature (loads .so at runtime)
-# - For other platforms: Use ort-download feature to download prebuilt binaries
-# - For CoreML acceleration: Use ort-coreml feature (macOS/iOS only)
-ort = { version = "=2.0.0-rc.11", default-features = false, features = ["ndarray", "std"] }
+# ONNX Runtime for model inference — the linking MODE is per-target (cfg-driven,
+# see the [target.'cfg(...)'] sections below), not feature-driven:
+# - macOS/iOS: STATIC — ort downloads prebuilt binaries at build time and links
+#   them into the artifact (the xcframework model). Downloader on rustls
+#   (tls-rustls) so native-tls/openssl never enter the lockfile.
+# - Everything else (linux/windows/android): DYNAMIC — ort/load-dynamic dlopens
+#   libonnxruntime at runtime; ship the dylib alongside (Android has always
+#   worked this way via jniLibs co-location; desktop now matches). No build-time
+#   download → hermetic under Bazel/RBE.
+# The old additive `ort-download`/`ort-dynamic` marker features are retained as
+# no-ops for invocation compatibility (CI --features flags, sdk presets).
+# For CoreML acceleration: ort-coreml feature (macOS/iOS only).
 ndarray = "0.17"  # Used by ort for tensor operations (must match ort's ndarray version)
 base64 = "0.22"  # For BPE token decoding
 mel_spec = "0.2"  # For mel spectrogram computation (audio preprocessing)
@@ -94,7 +96,7 @@ candle-core = { version = "0.8", optional = true }
 candle-nn = { version = "0.8", optional = true }
 candle-transformers = { version = "0.8", optional = true }
 safetensors = { version = "0.4", optional = true }
-hf-hub = { version = "0.3", optional = true }  # For downloading models from HuggingFace
+hf-hub = { version = "0.5", optional = true, default-features = false, features = ["ureq", "rustls-tls"] }  # HF model downloads; rustls (no native-tls/openssl), unified with xybrid-sdk's 0.5
 byteorder = { version = "1.5", optional = true }  # For reading mel filter bytes
 num-traits = { version = "0.2", optional = true }  # Required by candle audio
 
@@ -131,14 +133,18 @@ schema = ["dep:schemars"]
 # the `testing` module is gated behind this feature (audit 4a).
 test-util = []
 
-# ONNX Runtime
-ort-download = ["ort/download-binaries", "ort/tls-native"]  # Desktop/macOS/iOS: download prebuilt binaries
-ort-dynamic = ["ort/load-dynamic"]                          # Android: load .so at runtime from AAR
+# ONNX Runtime — the static-vs-dynamic mode is decided per-target by the
+# [target.'cfg(...)'] ort dependency sections, NOT by these features. The two
+# markers below are retained as NO-OPS so existing invocations keep working
+# (CI `--features ort-download`, xtask, sdk platform presets); enabling either
+# changes nothing. They can be removed once all callers drop them.
+ort-download = []  # no-op marker (was: ort/download-binaries + ort/tls-native)
+ort-dynamic = []   # no-op marker (was: ort/load-dynamic)
 ort-coreml = ["ort/coreml"]                                 # Apple Neural Engine acceleration
 
 # Candle (Pure Rust ML)
 candle = ["dep:candle-core", "dep:candle-nn", "dep:candle-transformers", "dep:safetensors", "dep:byteorder", "dep:num-traits"]
-candle-hub = ["candle", "dep:hf-hub"]   # HuggingFace Hub download (requires OpenSSL — not for Android)
+candle-hub = ["candle", "dep:hf-hub"]   # HuggingFace Hub download (hf-hub on rustls — no OpenSSL)
 
 candle-metal = ["candle", "candle-core/metal", "candle-nn/metal"]
 candle-cuda = ["candle", "candle-core/cuda"]
@@ -208,14 +214,20 @@ dev-tools = []
 # `llamacpp-crate-split` epic, and `xybrid-core/build.rs` is now a stub.
 
 [dev-dependencies]
+# NOTE: deliberately NO xybrid-sdk here. xybrid-sdk depends on xybrid-core, so a
+# dev-dependency back on the sdk forms a cycle — Cargo tolerates it (dev-deps sit
+# outside the published graph) but Bazel cannot express it, and it inverts the
+# dependency direction the workspace is built on. The single test that needed it
+# (system_validation.rs) now lives in //integration-tests, which may depend on
+# core and sdk both.
 tempfile = "3.8"
-xybrid-sdk = { path = "../xybrid-sdk" }
 dirs = "6.0"
 filetime = "0.2"
 hound = "3.5"  # WAV file reading for tests
 walkdir = "2.4"  # For directory traversal in tests
 ureq = { version = "2.8", default-features = false, features = ["json", "tls"] }  # For HTTP in tests
 criterion = { version = "0.5", features = ["html_reports"] }  # Benchmarking framework
+libloading = "0.8"  # Test-only ort dylib probe (ort_runtime_available) — already in the lock via ort
 
 [[example]]
 name = "neutts_tts"
@@ -224,6 +236,16 @@ required-features = ["llm-llamacpp"]
 
 [[example]]
 name = "lfm2_230m_grammar"
+# Real inference — needs llama.cpp linked.
+required-features = ["llm-llamacpp"]
+
+[[example]]
+name = "lfm2_230m_tools"
+# Real inference — needs llama.cpp linked.
+required-features = ["llm-llamacpp"]
+
+[[example]]
+name = "lfm2_230m_tools_streaming"
 # Real inference — needs llama.cpp linked.
 required-features = ["llm-llamacpp"]
 
@@ -269,6 +291,14 @@ ureq = { version = "2.8", default-features = false, features = ["json", "tls"] }
 # Force rustls to use ring crypto backend instead of aws-lc-rs
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 
+# ONNX Runtime linking mode, non-Apple half (Apple half lives in the existing
+# apple target section below, next to the objc2 pollers — one table per cfg).
+# Everything except macOS/iOS = load-dynamic: dlopen libonnxruntime at runtime,
+# shipped alongside (the Android jniLibs model, now also the desktop/Bazel/RBE
+# hermetic path). No build-time download.
+[target.'cfg(not(any(target_os = "macos", target_os = "ios")))'.dependencies]
+ort = { version = "=2.0.0-rc.11", default-features = false, features = ["ndarray", "std", "load-dynamic"] }
+
 # Apple thermal poller (macOS + iOS): NSProcessInfo.thermalState — same
 # Foundation API on both, no entitlement, microsecond-class. The
 # Foundation crates work cross-platform under the same target_os check
@@ -280,6 +310,12 @@ rustls = { version = "0.23", default-features = false, features = ["ring", "std"
 # types and breaks isKindOfClass-style checks across them.
 objc2 = "0.6"
 objc2-foundation = { version = "0.3", features = ["NSProcessInfo", "NSString"] }
+# ONNX Runtime linking mode, Apple half (non-Apple half is the load-dynamic
+# section above): STATIC — download prebuilt binaries at build time and link
+# them into the artifact (the xcframework model; ORT_LIB_LOCATION still
+# overrides with the vendored xcframework where set). Downloader on rustls
+# (tls-rustls) so native-tls/openssl never enter the lockfile.
+ort = { version = "=2.0.0-rc.11", default-features = false, features = ["ndarray", "std", "download-binaries", "tls-rustls"] }
 # Real Metal probe via MTLCreateSystemDefaultDevice.
 objc2-metal = { version = "0.3", default-features = false, features = ["std", "MTLDevice"] }
 # Sibling dep to satisfy the CoreGraphics framework link objc2-metal documents

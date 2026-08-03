@@ -1605,7 +1605,7 @@ The full wire format and the list of enum values for each header field is docume
 ### Unity/C#-specific
 
 - Synchronous API (no async/await — runs on Unity main thread)
-- Uses C FFI layer (`xybrid-ffi`), not UniFFI
+- Uses BoltFFI (`xybrid-bolt`)
 - `IDisposable` pattern for resource management
 
 ### Cross-SDK Consistency

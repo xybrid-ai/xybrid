@@ -53,6 +53,28 @@ class ArtifactProvider {
   final BuildEnvironment environment;
   final CargokitUserOptions userOptions;
 
+  /// Whether precompiled binaries should be used for this crate.
+  ///
+  /// xybrid deviates from upstream cargokit here. Upstream's default is "build
+  /// from source whenever Rustup is installed", which silently disabled
+  /// precompiled binaries for every consumer who had ever installed Rust and
+  /// dropped them into a build the published package cannot perform (#338).
+  ///
+  /// The default is resolved per crate location instead:
+  ///
+  /// * Published package — no workspace root, no sibling crates. Precompiled
+  ///   binaries are the only viable path, so they are used regardless of the
+  ///   local toolchain.
+  /// * Monorepo checkout — upstream's rule applies. Source builds matter here
+  ///   because [CrateHash] only covers `rust/`, so edits to `xybrid-core`,
+  ///   `xybrid-sdk` or `xybrid-ffi-facade` do not change the artifact key and a
+  ///   precompiled binary would silently ship stale code.
+  ///
+  /// An explicit `use_precompiled_binaries` in `cargokit_options.yaml` always
+  /// wins.
+  late final bool usePrecompiledBinaries = userOptions.usePrecompiledBinaries ??
+      (_sourceBuildBlocker() != null || Rustup.executablePath() == null);
+
   Future<Map<Target, List<Artifact>>> getArtifacts(List<Target> targets) async {
     final result = await _getPrecompiledArtifacts(targets);
 
@@ -61,6 +83,20 @@ class ArtifactProvider {
 
     if (pendingTargets.isEmpty) {
       return result;
+    }
+
+    // xybrid addition. Upstream cargokit falls straight through to a source
+    // build here. The published `xybrid_flutter` package cannot be built from
+    // source — see `_sourceBuildBlocker` — so that fallback used to surface as
+    // an unrelated cargo error (#338). Stop with an actionable message instead.
+    final blocker = _sourceBuildBlocker();
+    if (blocker != null) {
+      throw SourceBuildUnavailableException(
+        targets: pendingTargets,
+        blocker: blocker,
+        precompiledEnabled: usePrecompiledBinaries &&
+            environment.crateOptions.precompiledBinaries != null,
+      );
     }
 
     final rustup = Rustup();
@@ -96,9 +132,63 @@ class ArtifactProvider {
     return result;
   }
 
+  /// Returns a description of why this crate cannot be built from source in
+  /// its current location, or `null` if a source build is viable.
+  ///
+  /// Both checks below hold inside the monorepo and fail in the package
+  /// published to pub.dev, which ships `rust/` without the workspace root it
+  /// inherits from and without the sibling crates its path dependencies point
+  /// at.
+  String? _sourceBuildBlocker() {
+    final manifestFile = File(path.join(environment.manifestDir, 'Cargo.toml'));
+    if (!manifestFile.existsSync()) {
+      return 'no Cargo.toml in ${environment.manifestDir}';
+    }
+    final manifest = manifestFile.readAsStringSync();
+
+    if (RegExp(r'workspace\s*=\s*true').hasMatch(manifest) &&
+        _workspaceRootDir() == null) {
+      return 'Cargo.toml inherits fields from a workspace root '
+          '(`workspace = true`) but no workspace root exists above '
+          '${environment.manifestDir}';
+    }
+
+    final missingPathDeps = RegExp(r'path\s*=\s*"([^"]+)"')
+        .allMatches(manifest)
+        .map((m) => m.group(1)!)
+        .where((dep) =>
+            !Directory(path.normalize(path.join(environment.manifestDir, dep)))
+                .existsSync())
+        .toSet();
+    if (missingPathDeps.isNotEmpty) {
+      return 'Cargo.toml has path dependencies that are not present: '
+          '${missingPathDeps.join(', ')}';
+    }
+
+    return null;
+  }
+
+  /// Nearest ancestor directory holding a `Cargo.toml` with a `[workspace]`
+  /// table, or `null` if there is none.
+  String? _workspaceRootDir() {
+    var dir = Directory(environment.manifestDir).absolute;
+    while (true) {
+      final manifest = File(path.join(dir.path, 'Cargo.toml'));
+      if (manifest.existsSync() &&
+          RegExp(r'^\s*\[workspace[\].]', multiLine: true)
+              .hasMatch(manifest.readAsStringSync())) {
+        return dir.path;
+      }
+      if (dir.parent.path == dir.path) {
+        return null;
+      }
+      dir = dir.parent;
+    }
+  }
+
   Future<Map<Target, List<Artifact>>> _getPrecompiledArtifacts(
       List<Target> targets) async {
-    if (userOptions.usePrecompiledBinaries == false) {
+    if (!usePrecompiledBinaries) {
       _log.info('Precompiled binaries are disabled');
       return {};
     }
@@ -215,6 +305,50 @@ class ArtifactProvider {
     } else {
       _log.shout('Signature verification failed! Ignoring binary.');
     }
+  }
+}
+
+/// Thrown when precompiled binaries did not cover every target and the crate
+/// cannot be built from source either.
+class SourceBuildUnavailableException implements Exception {
+  SourceBuildUnavailableException({
+    required this.targets,
+    required this.blocker,
+    required this.precompiledEnabled,
+  });
+
+  /// Targets left without an artifact.
+  final List<Target> targets;
+
+  /// Why the source-build fallback cannot succeed.
+  final String blocker;
+
+  /// Whether precompiled binaries were attempted before this fallback.
+  final bool precompiledEnabled;
+
+  @override
+  String toString() {
+    return [
+      ' ',
+      'No native library available for: ${targets.join(', ')}.',
+      ' ',
+      if (precompiledEnabled)
+        'This package ships precompiled binaries, but none matched. '
+            'Building from source is not possible here:'
+      else
+        'Precompiled binaries are disabled (`use_precompiled_binaries: false`), '
+            'and building from source is not possible here:',
+      ' ',
+      '  $blocker',
+      ' ',
+      if (!precompiledEnabled)
+        'Remove `use_precompiled_binaries: false` from cargokit_options.yaml '
+            'to use the precompiled binaries.'
+      else
+        'Please report this at https://github.com/xybrid-ai/xybrid/issues '
+            'with the target above and your Flutter version.',
+      ' ',
+    ].join('\n');
   }
 }
 

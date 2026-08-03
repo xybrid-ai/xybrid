@@ -61,6 +61,11 @@ pub(crate) fn handle_fetch_command(
             let bytes_done = (progress * resolved.size_bytes as f32) as u64;
             pb.set_position(bytes_done);
         })
+    } else if uses_extracted_model_path(&resolved) {
+        client.fetch_extracted(model_id, platform, |progress| {
+            let bytes_done = (progress * resolved.size_bytes as f32) as u64;
+            pb.set_position(bytes_done);
+        })
     } else {
         client.fetch(model_id, platform, |progress| {
             let bytes_done = (progress * resolved.size_bytes as f32) as u64;
@@ -82,7 +87,8 @@ pub(crate) fn handle_fetch_command(
 pub(crate) fn handle_fetch_huggingface_command(repo: &str) -> Result<()> {
     ui::header(&format!("Fetch · HuggingFace · {}", repo));
 
-    let sanitized = repo.replace('/', "--");
+    let cache_repo = xybrid_sdk::ModelSource::parse_huggingface(repo);
+    let sanitized = cache_repo.model_id().unwrap_or(repo).replace('/', "--");
     let cache_dir =
         dirs::home_dir().map(|h| h.join(".xybrid").join("cache").join("hf").join(&sanitized));
 
@@ -207,6 +213,10 @@ struct ModelFetchRequest {
     backend: Option<String>,
 }
 
+fn uses_extracted_model_path(resolved: &xybrid_sdk::registry_client::ResolvedVariant) -> bool {
+    resolved.passthrough
+}
+
 fn is_model_ready(
     client: &RegistryClient,
     model_id: &str,
@@ -217,10 +227,15 @@ fn is_model_ready(
         Ok(client
             .resolve_offline_with_format(model_id, format)
             .is_some())
+    } else if client
+        .is_cached(model_id, platform)
+        .context("Failed to check cache status")?
+    {
+        Ok(true)
     } else {
-        client
-            .is_cached(model_id, platform)
-            .context("Failed to check cache status")
+        // Passthrough variants never write a bundle; a prior fetch lives in
+        // the extracted cache instead.
+        Ok(client.resolve_offline(model_id).is_some())
     }
 }
 
@@ -234,6 +249,10 @@ fn cache_location(
         client
             .resolve_offline_with_format(model_id, format)
             .unwrap_or_else(|| client.extraction_dir_with_format(model_id, format))
+    } else if uses_extracted_model_path(resolved) {
+        client
+            .resolve_offline(model_id)
+            .unwrap_or_else(|| client.extraction_dir(model_id))
     } else {
         client.get_cache_path(resolved)
     }
@@ -299,6 +318,11 @@ fn fetch_models_with_selector_cfg(
 
                 let fetch_result = if let Some(format) = format {
                     client.fetch_extracted_with_format(model_id, platform, format, |progress| {
+                        let bytes_done = (progress * resolved.size_bytes as f32) as u64;
+                        pb.set_position(bytes_done);
+                    })
+                } else if uses_extracted_model_path(&resolved) {
+                    client.fetch_extracted(model_id, platform, |progress| {
                         let bytes_done = (progress * resolved.size_bytes as f32) as u64;
                         pb.set_position(bytes_done);
                     })
@@ -659,5 +683,33 @@ mod tests {
         );
         download_mock.assert();
         assert_eq!(counts, (1, 0, 0));
+    }
+
+    fn passthrough_resolved_variant(
+        passthrough: bool,
+    ) -> xybrid_sdk::registry_client::ResolvedVariant {
+        xybrid_sdk::registry_client::ResolvedVariant {
+            hf_repo: "prism-ml/Bonsai-27B-gguf".to_string(),
+            file: "Bonsai-27B-Q1_0.gguf".to_string(),
+            download_url: "https://example.test/Bonsai-27B-Q1_0.gguf".to_string(),
+            format: "gguf".to_string(),
+            quantization: "q1_0_g128".to_string(),
+            size_bytes: 1,
+            sha256: "a".repeat(64),
+            artifacts: Vec::new(),
+            file_sha256: Default::default(),
+            passthrough,
+            model_metadata: None,
+        }
+    }
+
+    #[test]
+    fn passthrough_variants_use_the_extracted_model_path() {
+        assert!(uses_extracted_model_path(&passthrough_resolved_variant(
+            true
+        )));
+        assert!(!uses_extracted_model_path(&passthrough_resolved_variant(
+            false
+        )));
     }
 }

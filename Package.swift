@@ -14,9 +14,10 @@ import PackageDescription
 //
 // FOR LOCAL DEVELOPMENT:
 //
-//   1. Build the xcframework:  cargo xtask build-xcframework
-//   2. Toggle to local mode:   ./bindings/apple/scripts/set-natives-mode.sh --set-local
-//   3. Open in Xcode or run:   swift build
+//   1. Build the xcframework:  bazel build --config=ios //bindings/apple:XybridFFI
+//   2. Unzip it locally:       unzip -o bazel-bin/bindings/apple/XybridFFI.xcframework.zip -d bindings/apple/XCFrameworks
+//   3. Toggle to local mode:   ./bindings/apple/scripts/set-natives-mode.sh --set-local
+//   4. Open in Xcode or run:   swift build
 //
 //   Toggle back to remote mode before committing:
 //     ./bindings/apple/scripts/set-natives-mode.sh --set-remote
@@ -25,7 +26,7 @@ import PackageDescription
 //
 // useLocalNatives = true  → Use the local xcframework at
 //                            bindings/apple/XCFrameworks/XybridFFI.xcframework
-//                            (built by `cargo xtask build-xcframework`).
+//                            (unzipped from the Bazel build above).
 //
 // useLocalNatives = false → Download the xcframework zip from the GitHub
 //                            release for `sdkVersion`. This is the mode
@@ -36,18 +37,24 @@ let useLocalNatives = false
 
 // Version for remote XybridFFI download (used when useLocalNatives = false).
 // Updated by the release workflow at tag time.
-let sdkVersion = "0.2.2"
+let sdkVersion = "0.4.0"
 
 // SHA-256 of XybridFFI-v<sdkVersion>.xcframework.zip on the GitHub release.
 // Updated by `bindings/apple/scripts/sync-spm-checksum.sh` (or the release
 // workflow) so the manifest at the tagged commit matches the published asset.
-let xybridFFIChecksum = "daf14db1c42132b8a451d800522c9be9915bb94fc55d8158cb9d245788554f0d"
+let xybridFFIChecksum = "3c209ca56fafa8345bb7be03d89da40ee60fe9fbbe9c6142e2bb7d1de7b3e63e"
 
 let package = Package(
     name: "Xybrid",
     platforms: [
-        .iOS(.v13),
-        .macOS(.v10_15),
+        // iOS-only, min iOS 16 — matches what the shipped
+        // XybridFFI.xcframework actually is (boltffi.toml: include_macos =
+        // false, so only ios-arm64 + ios-arm64-simulator ship;
+        // deployment_target = "16.0", so the binary cannot link below iOS 16).
+        // A lower floor (.v13) or a .macOS declaration let SPM resolve the
+        // package for apps it can't actually link — re-add either only after
+        // the xcframework is rebuilt to match (each a separate feature).
+        .iOS(.v16),
     ],
     products: [
         .library(

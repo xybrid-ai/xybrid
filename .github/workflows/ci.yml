@@ -27,6 +27,91 @@ env:
   RUST_BACKTRACE: 1
 
 jobs:
+  tooling-changes:
+    name: Detect tooling-relevant changes
+    runs-on: ubuntu-latest
+    outputs:
+      relevant: ${{ steps.filter.outputs.relevant }}
+      unity_bolt: ${{ steps.filter.outputs.unity_bolt }}
+    steps:
+      - name: Check changed paths
+        id: filter
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          BEFORE_SHA: ${{ github.event.before }}
+          CURRENT_SHA: ${{ github.sha }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            FILES=$(gh api --paginate \
+              "repos/$REPOSITORY/pulls/$PR_NUMBER/files" \
+              --jq '.[].filename')
+          else
+            FILES=$(gh api \
+              "repos/$REPOSITORY/compare/$BEFORE_SHA...$CURRENT_SHA" \
+              --jq '.files[].filename')
+          fi
+          if printf '%s\n' "$FILES" | grep -qE '^(tools/scripts/|\.github/workflows/ci\.yml$)'; then
+            RELEVANT=true
+          else
+            RELEVANT=false
+          fi
+          echo "relevant=$RELEVANT" >> "$GITHUB_OUTPUT"
+          echo "Tooling-relevant changes: $RELEVANT"
+          if printf '%s\n' "$FILES" | grep -qE '^(bindings/unity/Runtime/Bolt/|bindings/unity/Runtime/BoltSupplement/|tools/unity-bolt-compile-check/|tools/scripts/gen_unity_bolt_csharp\.py$|crates/xybrid-bolt/boltffi\.toml$|\.github/workflows/ci\.yml$)'; then
+            UNITY_BOLT=true
+          else
+            UNITY_BOLT=false
+          fi
+          echo "unity_bolt=$UNITY_BOLT" >> "$GITHUB_OUTPUT"
+          echo "Unity bolt binding changes: $UNITY_BOLT"
+
+  tooling-tests:
+    name: Tooling tests (${{ matrix.platform }})
+    needs: tooling-changes
+    if: needs.tooling-changes.outputs.relevant == 'true'
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux
+            python: python3
+            runtime: libonnxruntime.so
+          - os: windows-latest
+            platform: windows
+            python: python
+            runtime: onnxruntime.dll
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Test native staging tools
+        if: matrix.platform == 'linux'
+        run: python3 -m unittest discover -s tools/scripts/tests -p 'test_*.py'
+      - name: Stage and load the real ONNX Runtime
+        run: |
+          ${{ matrix.python }} tools/scripts/stage_unity_desktop_ort.py ${{ matrix.platform }} "${{ runner.temp }}/unity-ort"
+          ${{ matrix.python }} -c "import ctypes, sys; ctypes.CDLL(sys.argv[1])" "${{ runner.temp }}/unity-ort/${{ matrix.runtime }}"
+
+  # Compile the committed BoltFFI C# bindings against Unity's frozen scripting
+  # profile (netstandard2.1 + C# 9). Catches a boltffi output change or a missed
+  # down-level in gen_unity_bolt_csharp.py at PR time instead of in the Editor.
+  unity-bolt-compile:
+    name: Compile Unity bolt bindings (netstandard2.1)
+    needs: tooling-changes
+    if: needs.tooling-changes.outputs.unity_bolt == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Compile against Unity's C# 9 / netstandard2.1 profile
+        # ubuntu-latest ships the .NET SDK preinstalled; netstandard2.1 builds
+        # with any 6+ SDK. The csproj pins LangVersion 9 to match Unity.
+        run: |
+          dotnet --version
+          dotnet build tools/unity-bolt-compile-check/UnityBoltCompileCheck.csproj -c Release
+
   fmt:
     name: Format
     runs-on: ubuntu-latest
@@ -279,9 +364,9 @@ jobs:
       - name: Test with llm-llamacpp
         run: cargo test -p xybrid-core --features "ort-download,llm-llamacpp" --lib
 
-  # Linux-only on push/PR. macOS + Windows validation runs in release.yml at
-  # release time, and check-platform-macos / build-apple.yml cover Apple-specific
-  # compilation when bindings/apple changes.
+  # Linux-only on push/PR. macOS + Windows validation runs in release-prep.yml
+  # at release time, and check-platform-macos / build-apple.yml cover
+  # Apple-specific compilation when bindings/apple changes.
   test:
     name: Test (ubuntu-latest)
     runs-on: ubuntu-latest
@@ -318,26 +403,9 @@ jobs:
       - name: Run doc tests
         run: cargo test --workspace --features ort-download --doc
 
-  # Linux-only on push/PR. Per-platform CLI builds run in release.yml.
-  build-cli:
-    name: Build CLI (ubuntu-latest)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-        with:
-          submodules: true
-
-      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
-        with:
-          toolchain: stable
-          targets: x86_64-unknown-linux-gnu
-
-      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-        with:
-          key: ubuntu-latest-cli
-
-      - name: Build CLI
-        run: cargo build --release -p xybrid-cli --target x86_64-unknown-linux-gnu --features platform-desktop
+  # (Retired) The cargo linux-CLI build lived here. The required Bazel check
+  # ("Bazel graph + RBE targets", bazel.yml) now builds + smokes the linux CLI
+  # on every Bazel-relevant PR, so this cargo build was redundant.
 
   # API contract validation (soft warning — does not block CI)
   api-contract:
@@ -352,10 +420,87 @@ jobs:
       - name: Check API contract
         run: ./tools/scripts/api-contract-check.sh --check
 
+  web:
+    name: Web SDK
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Use Node.js
+        uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4.1.0
+        with:
+          node-version: '22'
+
+      - name: Use Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.3.9
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Activate pnpm
+        run: corepack prepare pnpm@11.2.2 --activate
+
+      - name: Install Web SDK dependencies
+        working-directory: bindings/web
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint Web SDK
+        working-directory: bindings/web
+        run: pnpm lint
+
+      - name: Typecheck Web SDK
+        working-directory: bindings/web
+        run: pnpm typecheck
+
+      - name: Test Web SDK
+        working-directory: bindings/web
+        run: pnpm test
+
+      - name: Build Web SDK
+        working-directory: bindings/web
+        run: pnpm build
+
+      - name: Build Web example
+        working-directory: bindings/web
+        run: pnpm build:example
+
+      - name: Install Chromium
+        working-directory: bindings/web
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Test Web SDK in Chromium
+        working-directory: bindings/web
+        run: pnpm test:browser
+
   # All checks passed
   ci-success:
     name: CI Success
     runs-on: ubuntu-latest
-    needs: [fmt, clippy, check-no-default-features, check-platform-macos, check-platform-desktop, check-vision-platforms, check-mlx-non-linking, check-mlx-runtime-macos, clippy-llm, test-llm, test, build-cli, api-contract]
+    # Inspect dependency results even when the tooling path gate skips its matrix.
+    if: ${{ !cancelled() }}
+    needs: [tooling-changes, tooling-tests, unity-bolt-compile, fmt, clippy, check-no-default-features, check-platform-macos, check-platform-desktop, check-vision-platforms, check-mlx-non-linking, check-mlx-runtime-macos, clippy-llm, test-llm, test, api-contract, web]
     steps:
-      - run: echo "All CI checks passed!"
+      - name: Verify required job results
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: |
+          jq --exit-status '
+            . as $needs
+            |
+            to_entries
+            | all(
+                .value.result == "success"
+                or (
+                  .key == "tooling-tests"
+                  and .value.result == "skipped"
+                  and $needs["tooling-changes"].outputs.relevant == "false"
+                )
+                or (
+                  .key == "unity-bolt-compile"
+                  and .value.result == "skipped"
+                  and $needs["tooling-changes"].outputs.unity_bolt == "false"
+                )
+              )
+          ' <<<"$NEEDS_JSON"

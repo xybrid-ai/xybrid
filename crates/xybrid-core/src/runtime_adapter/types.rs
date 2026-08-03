@@ -11,6 +11,7 @@
 //! - `GenerationConfig` - Generation parameters for LLM inference
 //! - `LlmConfig` - Configuration for loading a local LLM
 
+use crate::gateway::Tool;
 use crate::ir::MessageRole;
 use crate::{
     conversation::ConversationContext,
@@ -354,6 +355,20 @@ pub struct GenerationConfig {
     /// (unconstrained) generation. Ignored by non-llama backends.
     #[serde(default)]
     pub grammar: Option<String>,
+
+    /// Tools (functions) the model may call, in the OpenAI `Tool` shape.
+    ///
+    /// When non-empty, the local llama.cpp backend renders the definitions
+    /// into the model's embedded chat template and the executor parses any
+    /// emitted tool-call blocks (LFM2-family pythonic and gemma-4-family
+    /// `call:` notation) into the response envelope's `tool_calls` metadata.
+    /// Tool calling is llama.cpp-only today and unsupported paths fail
+    /// closed: a model without an embedded chat template, the mistralrs
+    /// backend, and the SDK's cloud-fallback leg all reject tool-bearing
+    /// requests instead of silently generating without the tools. Empty
+    /// means no tool calling (existing behavior, unchanged).
+    #[serde(default)]
+    pub tools: Vec<Tool>,
 }
 
 fn default_max_tokens() -> usize {
@@ -396,6 +411,7 @@ impl Default for GenerationConfig {
             seed: None,
             stop_sequences: Vec::new(),
             grammar: None,
+            tools: Vec::new(),
         }
     }
 }
@@ -477,6 +493,36 @@ impl GenerationConfig {
             schema,
         )?);
         Ok(self)
+    }
+
+    /// Offer tools (functions) the model may call. See [`GenerationConfig::tools`].
+    ///
+    /// Tools are plain data — define your own with [`Tool::function`], run
+    /// the request, execute whatever calls come back in the response
+    /// envelope's `tool_calls` metadata, and feed the results into the next
+    /// turn with `Envelope::tool_results`. The multi-turn loop lives in app
+    /// code.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use xybrid_core::gateway::Tool;
+    /// use xybrid_core::runtime_adapter::types::GenerationConfig;
+    ///
+    /// let config = GenerationConfig::default().with_tools([Tool::function(
+    ///     "get_weather",
+    ///     "Current weather for a city.",
+    ///     serde_json::json!({
+    ///         "type": "object",
+    ///         "properties": { "city": { "type": "string" } },
+    ///         "required": ["city"]
+    ///     }),
+    /// )]);
+    /// assert_eq!(config.tools.len(), 1);
+    /// ```
+    pub fn with_tools(mut self, tools: impl IntoIterator<Item = Tool>) -> Self {
+        self.tools = tools.into_iter().collect();
+        self
     }
 }
 
@@ -685,7 +731,20 @@ impl LlmConfig {
 
 #[cfg(test)]
 mod tests {
+    use crate::gateway::{FunctionDefinition, Tool};
+
     use super::*;
+
+    fn test_tool() -> Tool {
+        Tool {
+            tool_type: "function".into(),
+            function: FunctionDefinition {
+                name: "f".into(),
+                description: None,
+                parameters: None,
+            },
+        }
+    }
 
     #[test]
     fn test_partial_token_new() {
@@ -797,6 +856,42 @@ mod tests {
 
         let encoded = serde_json::to_string(&config).unwrap();
         assert!(encoded.contains(r#""seed":12345"#), "{encoded}");
+    }
+
+    #[test]
+    fn test_generation_config_default_has_empty_tools() {
+        let config = GenerationConfig::default();
+
+        assert!(config.tools.is_empty());
+    }
+
+    #[test]
+    fn test_generation_config_with_tools_sets_tools() {
+        let config = GenerationConfig::default().with_tools([test_tool()]);
+
+        assert_eq!(config.tools.len(), 1);
+        assert_eq!(config.tools[0].tool_type, "function");
+        assert_eq!(config.tools[0].function.name, "f");
+    }
+
+    #[test]
+    fn test_generation_config_deserializes_legacy_json_with_empty_tools() {
+        let config: GenerationConfig = serde_json::from_str(r#"{"max_tokens":128}"#).unwrap();
+
+        assert_eq!(config.max_tokens, 128);
+        assert!(config.tools.is_empty());
+    }
+
+    #[test]
+    fn test_generation_config_tools_serde_round_trip() {
+        let config = GenerationConfig::default().with_tools([test_tool()]);
+
+        let json = serde_json::to_string(&config).unwrap();
+        let parsed: GenerationConfig = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(parsed.tools.len(), 1);
+        assert_eq!(parsed.tools[0].tool_type, "function");
+        assert_eq!(parsed.tools[0].function.name, "f");
     }
 
     #[test]

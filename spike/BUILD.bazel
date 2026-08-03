@@ -1,0 +1,10 @@
+# GATE 1: zero-dep binary. Proves the toolchain stack stands up (LLVM + rustc
+# download, link a Rust binary for the host) WITHOUT needing Cargo.lock to resolve.
+load("@rules_rs//rs:rust_binary.bzl", "rust_binary")
+
+rust_binary(
+    name = "hello",
+    srcs = ["main.rs"],
+    edition = "2021",
+    visibility = ["//visibility:public"],
+)

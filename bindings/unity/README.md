@@ -4,35 +4,68 @@ On-device ML inference SDK for Unity - run TTS, ASR, and LLM models locally in y
 
 ## Installation
 
-### Option 1: Git URL (Recommended)
+The Unity package is **managed-only**: it contains the C# API and, on import,
+downloads the matching native libraries from the GitHub Release (SHA-256
+verified) into `Assets/Xybrid/Plugins/`. No platform binaries are committed to
+the package, so it installs cleanly from any source below.
 
-The `upm` branch contains pre-built native libraries for all platforms (macOS, Windows, Linux, iOS, Android).
+### Option 1: OpenUPM (recommended)
 
-1. Open your Unity project
-2. Go to **Window → Package Manager**
-3. Click **+ → Add package from git URL**
-4. Enter:
-   ```
-   https://github.com/xybrid-ai/xybrid.git#upm
-   ```
+Xybrid is published on [OpenUPM](https://openupm.com/packages/ai.xybrid.sdk/).
 
-Or add directly to `Packages/manifest.json`:
+With the OpenUPM CLI:
+
+```bash
+openupm add ai.xybrid.sdk
+```
+
+Without the CLI, add the scoped registry in **Project Settings → Package
+Manager → Scoped Registries → +**:
+
+| Field    | Value                          |
+|----------|--------------------------------|
+| Name     | `OpenUPM`                      |
+| URL      | `https://package.openupm.com`  |
+| Scope(s) | `ai.xybrid`                    |
+
+Then install **Xybrid SDK** from **Window → Package Manager → My Registries**.
+
+Or edit `Packages/manifest.json` directly:
 
 ```json
 {
+  "scopedRegistries": [
+    {
+      "name": "OpenUPM",
+      "url": "https://package.openupm.com",
+      "scopes": ["ai.xybrid"]
+    }
+  ],
   "dependencies": {
-    "ai.xybrid.sdk": "https://github.com/xybrid-ai/xybrid.git#upm"
+    "ai.xybrid.sdk": "0.3.0"
   }
 }
 ```
 
-To pin a specific version:
+### Option 2: Git URL
 
-```bash
-https://github.com/xybrid-ai/xybrid.git#upm/v0.2.0
+UPM can install the package straight from the repository subfolder — no OpenUPM
+registry required:
+
+```
+https://github.com/xybrid-ai/xybrid.git?path=/bindings/unity
 ```
 
-### Option 2: Local Development
+Pin a version by appending a tag:
+
+```
+https://github.com/xybrid-ai/xybrid.git?path=/bindings/unity#v0.3.0
+```
+
+(**Window → Package Manager → + → Add package from git URL**, or add it under
+`dependencies` in `Packages/manifest.json`.)
+
+### Option 3: Local development
 
 If you've cloned the xybrid repository:
 
@@ -44,39 +77,27 @@ If you've cloned the xybrid repository:
 }
 ```
 
-### Option 3: Tarball
+### Native libraries (fetched automatically)
 
-Download the `.tgz` release from GitHub, then:
-1. **Window → Package Manager**
-2. Click **+ → Add package from tarball**
-3. Select the downloaded `.tgz` file
+The package ships **no native binaries**. On first import — and before each
+player build — the SDK downloads the platform libraries for the installed
+version from the [GitHub Release](https://github.com/xybrid-ai/xybrid/releases),
+verifies their SHA-256, and installs them into `Assets/Xybrid/Plugins/`. This
+keeps the package small and sidesteps Git/registry size limits — **including the
+~326 MB iOS static library, which now installs automatically** (no manual step).
+The Windows and Linux bundles include the matching ONNX Runtime shared library,
+so desktop users do not need a system-wide ONNX Runtime installation.
 
-### iOS Installation
+To (re)download on demand, use the editor menu:
 
-iOS is not available via the UPM git URL due to a GitHub file size constraint. The iOS native library (`libxybrid_ffi.a`) statically embeds ONNX Runtime, making it ~326 MB — exceeding GitHub's 100 MB hard limit for files committed to git.
+- **Xybrid → Native Libraries → Download for Current Editor** — the editor host
+  platform, so Play mode works immediately.
+- **Xybrid → Native Libraries → Download for Active Build Target** — the current
+  build target's libraries.
 
-**To use Xybrid in an iOS Unity build:**
-
-1. Download the iOS plugin from [GitHub Releases](https://github.com/xybrid-ai/xybrid/releases):
-   - Find the latest release and download `xybrid-unity-sdk-<version>.tar.gz`
-   - Extract and locate `Runtime/Plugins/iOS/libxybrid_ffi.a`
-
-2. Place the file in your Unity project:
-   ```
-   Assets/Plugins/iOS/libxybrid_ffi.a
-   ```
-
-3. Select the file in the Unity Inspector and configure:
-   - **Platform**: iOS
-   - **CPU**: ARM64
-   - **Add to Embedded Binaries**: No (static library)
-
-4. Install the UPM package (provides the C# API without the iOS binary):
-   ```
-   https://github.com/xybrid-ai/xybrid.git#upm
-   ```
-
-> **Note**: Automated iOS UPM support is on our roadmap. Track progress at [#ios-upm](https://github.com/xybrid-ai/xybrid/issues).
+Network access is required on first import; the libraries are cached in the
+project afterward. Add `Assets/Xybrid/Plugins/` to your VCS ignore list if you
+don't want the downloaded binaries committed.
 
 ## Quick Start
 
@@ -234,7 +255,7 @@ Models are automatically downloaded from the Xybrid registry on first use.
 | macOS | Intel (x86_64) | Via Rosetta 2 |
 | Windows | x64 | Supported |
 | Linux | x64 | Supported |
-| iOS | arm64 | [Manual setup](#ios-installation) |
+| iOS | arm64 | Supported (auto-fetched) |
 | Android | arm64-v8a, armeabi-v7a, x86_64 | Supported |
 
 ## Building Native Libraries
@@ -246,22 +267,21 @@ If you need to build the native libraries yourself:
 git clone https://github.com/xybrid-ai/xybrid.git
 cd xybrid
 
-# Build with C# bindings
-cargo xtask build-ffi --release --csharp
+# Build the native library + deploy into the Unity plugins tree
+cargo xtask build-ffi --release --deploy-unity
 
 # Output locations:
-# - Native lib: target/release/libxybrid_ffi.dylib (macOS)
-# - C# bindings: bindings/unity/Runtime/Native/NativeMethods.g.cs
+# - Native lib: target/release/libxybrid_bolt.dylib (macOS)
 ```
 
 ### Cross-platform builds
 
 ```bash
 # macOS (from macOS)
-cargo xtask build-ffi --release --csharp
+cargo xtask build-ffi --release --deploy-unity
 
 # Windows (from Windows)
-cargo xtask build-ffi --release --csharp
+cargo xtask build-ffi --release --deploy-unity
 
 # iOS (from macOS)
 cargo xtask build-ffi --release --target aarch64-apple-ios
@@ -285,18 +305,10 @@ bindings/unity/
 │   │   ├── ConversationContext.cs # Multi-turn LLM state
 │   │   ├── MessageRole.cs       # Role enum (System, User, Assistant)
 │   │   └── XybridException.cs   # Exception types
-│   ├── Native/
-│   │   ├── NativeMethods.g.cs   # Auto-generated P/Invoke bindings
-│   │   └── NativeHelpers.cs     # Helper utilities
-│   └── Plugins/
-│       ├── macOS/
-│       │   └── libxybrid_ffi.dylib
-│       ├── Windows/
-│       │   └── xybrid_ffi.dll
-│       ├── iOS/
-│       │   └── libxybrid_ffi.a
-│       └── Android/
-│           └── libxybrid_ffi.so
+│   └── Plugins/                 # Empty in the package — native binaries and
+│                                # their .meta import settings are fetched at
+│                                # import into Assets/Xybrid/Plugins/ (see above)
+├── Editor/                      # Native-library resolver (download + verify)
 └── README.md
 ```
 
@@ -311,10 +323,12 @@ bindings/unity/
 
 ## Troubleshooting
 
-### "DllNotFoundException: xybrid_ffi"
+### "DllNotFoundException: xybrid_bolt"
 
-1. Ensure the native library is in the correct `Plugins/` subfolder for your platform
-2. On macOS, you may need to remove quarantine: `xattr -d com.apple.quarantine libxybrid_ffi.dylib`
+1. Fetch the native library: **Xybrid → Native Libraries → Download for Current
+   Editor** (the auto-download on import needs network access and the matching
+   GitHub Release). Confirm it landed under `Assets/Xybrid/Plugins/`.
+2. On macOS, you may need to remove quarantine: `xattr -d com.apple.quarantine libxybrid_bolt.dylib`
 3. Check the plugin import settings in Unity (select the .dylib and verify platform settings)
 
 ### "Model download failed"

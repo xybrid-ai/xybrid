@@ -19,7 +19,12 @@ fn legacy_cache_names_are_contained() {
         format!("cache{}miss{}tokens", "_", "_"),
     ];
 
-    let scan_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    // Resolve at RUNTIME rather than with `env!`: the compile-time value is baked
+    // into the binary and does not point anywhere useful when the test runs in a
+    // sandbox. Both cargo and Bazel set the variable for test execution.
+    let manifest_dir =
+        std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR is set for tests");
+    let scan_root = std::path::Path::new(&manifest_dir).join("src");
     let mut offenders = Vec::new();
     for entry in walkdir::WalkDir::new(&scan_root) {
         let e = match entry {

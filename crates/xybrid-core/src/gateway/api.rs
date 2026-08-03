@@ -105,6 +105,45 @@ pub struct Tool {
     pub function: FunctionDefinition,
 }
 
+impl Tool {
+    /// Define a callable function tool.
+    ///
+    /// `parameters` is a JSON Schema describing the arguments; pass
+    /// `serde_json::json!({"type": "object", "properties": {}})` for a tool
+    /// that takes none.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use xybrid_core::gateway::Tool;
+    ///
+    /// let tool = Tool::function(
+    ///     "get_weather",
+    ///     "Current weather for a city.",
+    ///     serde_json::json!({
+    ///         "type": "object",
+    ///         "properties": { "city": { "type": "string" } },
+    ///         "required": ["city"]
+    ///     }),
+    /// );
+    /// assert_eq!(tool.function.name, "get_weather");
+    /// ```
+    pub fn function(
+        name: impl Into<String>,
+        description: impl Into<String>,
+        parameters: serde_json::Value,
+    ) -> Self {
+        Self {
+            tool_type: "function".to_string(),
+            function: FunctionDefinition {
+                name: name.into(),
+                description: Some(description.into()),
+                parameters: Some(parameters),
+            },
+        }
+    }
+}
+
 /// Function definition for tool use.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FunctionDefinition {

@@ -1,0 +1,179 @@
+# GATE 5 — xybrid-sdk, the public Rust SDK (model load/run/stream + platform
+# init). Free via @crates apart from one wrinkle: it depends on `//macros`
+# (xybrid-macros), a proc-macro. rules_rust requires proc-macro crates in
+# `proc_macro_deps`, but `all_crate_deps()` lumps everything into one list — so
+# we lift `//macros` out. (sdk has no per-platform dep deltas, so the list is
+# plain and safe to filter; the platform feature deltas live in crate_features.)
+load("@rules_rs//rs:rust_library.bzl", "rust_library")
+load("@rules_rs//rs:rust_test.bzl", "rust_test")
+load("@crates//:data.bzl", "DEP_DATA")
+load("@rules_rs//rs/private:all_crate_deps.bzl", _all_crate_deps = "all_crate_deps")
+
+PLATFORMS = [
+    "@rules_rs//rs/platforms/config:aarch64-apple-darwin",
+    "@rules_rs//rs/platforms/config:aarch64-apple-ios",
+    "@rules_rs//rs/platforms/config:aarch64-apple-ios-sim",
+    "@rules_rs//rs/platforms/config:aarch64-linux-android",
+    "@rules_rs//rs/platforms/config:x86_64-unknown-linux-gnu",
+    "@rules_rs//rs/platforms/config:x86_64-pc-windows-gnu",
+]
+
+# Android's `platform-android` preset expansion, set directly (Bazel doesn't
+# propagate the preset across crates). Mirrors sdk's platform-android.
+_SDK_ANDROID = [
+    "candle",
+    "llm-llamacpp-vision",
+    "platform-android",
+]
+
+# Filter out "//macros" from normal dependencies before generating the select() block
+original_sdk_deps = DEP_DATA.get("crates/xybrid-sdk", {})
+filtered_sdk_deps = dict(original_sdk_deps)
+filtered_sdk_deps["deps"] = [d for d in original_sdk_deps.get("deps", []) if d != "//macros"]
+
+# Flip 1 (desktop-linux parity): the `huggingface` feature needs the optional
+# hf-hub dep, which the hub's per-platform resolution doesn't wire for linux
+# (it records the preset name, not its optional-dep expansion). Same surgery
+# precedent as the //macros filter above. hf-hub 0.5 resolves in the hub with
+# exactly [rustls-tls, ureq] — no new inputs.
+# Unversioned alias: this reference is hand-written (unlike the generated
+# DEP_DATA's versioned labels, which re-render on bumps), so it must not
+# pin a version the lockfile will outgrow.
+_HF_PLATFORMS = [
+    "@rules_rs//rs/platforms/config:x86_64-unknown-linux-gnu",
+    "@rules_rs//rs/platforms/config:aarch64-apple-darwin",  # Flip 2
+    "@rules_rs//rs/platforms/config:x86_64-pc-windows-gnu",  # Windows .exe parity
+]
+
+_ORIG_DBP = original_sdk_deps.get("deps_by_platform", {})
+
+filtered_sdk_deps["deps_by_platform"] = _ORIG_DBP | {
+    _cfg: _ORIG_DBP.get(_cfg, []) + ["@crates//:hf-hub"]
+    for _cfg in _HF_PLATFORMS
+}
+
+rust_library(
+    name = "xybrid-sdk",
+    srcs = glob(["src/**/*.rs"]),
+    edition = "2021",
+    crate_features = [
+        "default",
+        "llm-llamacpp",
+    ] + select({
+        # Flip 1: the shipped cargo CLI uses platform-desktop = ort-download
+        # (no-op marker) + llm-llamacpp-vision + huggingface. Bazel doesn't
+        # expand presets across crates, so name the expansion explicitly.
+        "@rules_rs//rs/platforms/config:x86_64-unknown-linux-gnu": [
+            "platform-desktop",
+            "llm-llamacpp-vision",
+            "huggingface",
+        ],
+        # Flip 2: cargo's platform-macos preset also implies vision + hf
+        # (Bazel doesn't expand presets across crates — name them).
+        "@rules_rs//rs/platforms/config:aarch64-apple-darwin": [
+            "platform-macos",
+            "llm-llamacpp-vision",
+            "huggingface",
+        ],
+        # Apple G1-G2 parity: cargo's platform-ios == platform-macos EXCEPT it
+        # does NOT pull the sdk-level `huggingface` (that was macOS-CLI-only), so
+        # no huggingface here and no hf-hub dep (iOS absent from _HF_PLATFORMS).
+        "@rules_rs//rs/platforms/config:aarch64-apple-ios": [
+            "platform-ios",
+            "llm-llamacpp-vision",
+        ],
+        # iOS simulator (G4a): same feature set as the device slice.
+        "@rules_rs//rs/platforms/config:aarch64-apple-ios-sim": [
+            "platform-ios",
+            "llm-llamacpp-vision",
+        ],
+        # Windows .exe parity: cargo's windows leg builds platform-desktop,
+        # same expansion as the linux arm above.
+        "@rules_rs//rs/platforms/config:x86_64-pc-windows-gnu": [
+            "platform-desktop",
+            "llm-llamacpp-vision",
+            "huggingface",
+        ],
+        "@rules_rs//rs/platforms/config:aarch64-linux-android": _SDK_ANDROID,
+        "@rules_rs//rs/platforms/config:armv7-linux-androideabi": _SDK_ANDROID,
+        "@rules_rs//rs/platforms/config:x86_64-linux-android": _SDK_ANDROID,
+        "//conditions:default": [],
+    }),
+    proc_macro_deps = ["//macros"],
+    deps = _all_crate_deps(
+        filtered_sdk_deps,
+        platforms = PLATFORMS,
+        normal = True,
+    ),
+    visibility = ["//visibility:public"],
+)
+
+# Inline `#[cfg(test)] mod tests` (445 — the largest test target in the workspace
+# today). `crate = ` inherits srcs, edition, the platform feature select, deps and
+# proc_macro_deps; `deps` here ADDS the one dev-dependency the inline tests use
+# (httpmock, in registry_client.rs). The 37 tests under tests/ are separate
+# integration binaries and are NOT covered by this target.
+rust_test(
+    name = "xybrid-sdk_test",
+    crate = ":xybrid-sdk",
+    deps = ["@crates//:httpmock"],
+)
+
+# Integration tests: each tests/*.rs is its own binary, so each gets its own
+# target with `srcs` + an explicit dep on whichever library it links as an
+# external crate (some reach xybrid-core directly, not through the sdk).
+_SDK_INTEGRATION_TESTS = {
+    "async_test": [
+        ":xybrid-sdk",
+        "@crates//:tokio",
+    ],
+    # NOTE: no cloud_fallback_e2e. Cargo declares it
+    # `required-features = ["dev-tools"]`, so a default `cargo test -p xybrid-sdk`
+    # skips it too; it reaches xybrid_core::orchestrator::authority::test_seams,
+    # which needs the `test-util` feature propagated sdk -> core. Bazel has no
+    # cross-crate feature propagation, so enabling it means hand-expanding the
+    # feature on both targets — deliberately left for whoever needs that lane.
+    "fixture_validation_test": [
+        ":xybrid-sdk",
+        "//crates/xybrid-core:xybrid-core",
+        "@crates//:serde_json",
+        "@crates//:tempfile",
+    ],
+    # Reads integration-tests/fixtures/models/mnist/model_metadata.json, so it
+    # needs the fixture filegroup declared as data (see _SDK_TEST_DATA below).
+    "from_directory_test": [":xybrid-sdk"],
+    "macro_test": [":xybrid-sdk"],
+    "metadata_gen_test": [
+        ":xybrid-sdk",
+        "//crates/xybrid-core:xybrid-core",
+        "@crates//:serde_json",
+        "@crates//:tempfile",
+    ],
+    "telemetry_integration": [
+        ":xybrid-sdk",
+        "//crates/xybrid-core:xybrid-core",
+        "@crates//:serde",
+        "@crates//:serde_json",
+    ],
+}
+
+# Fixture files individual integration tests read off disk. Cargo reads them
+# straight from the worktree; Bazel sandboxes the action, so they must be
+# declared inputs or the reads fail.
+_SDK_TEST_DATA = {
+    "from_directory_test": ["//integration-tests:model_metadata_fixtures"],
+}
+
+[
+    rust_test(
+        name = name,
+        srcs = ["tests/{}.rs".format(name)],
+        data = _SDK_TEST_DATA.get(name, []),
+        edition = "2021",
+        # macro_test exercises the `xybrid_model!` proc-macro the sdk re-exports,
+        # so it needs the macro crate on its own compile line.
+        proc_macro_deps = ["//macros"] if name == "macro_test" else [],
+        deps = deps,
+    )
+    for name, deps in _SDK_INTEGRATION_TESTS.items()
+]

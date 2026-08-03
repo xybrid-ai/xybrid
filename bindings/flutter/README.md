@@ -15,7 +15,7 @@ Or add to your `pubspec.yaml`:
 
 ```yaml
 dependencies:
-  xybrid_flutter: ^0.2.2
+  xybrid_flutter: ^0.3.0
 ```
 
 <details>
@@ -147,6 +147,21 @@ if (result.success) {
 }
 ```
 
+### Reasoning (thinking models)
+
+Reasoning models (metadata `reasoning: true`, e.g. `lfm2.5-1.2b-thinking`)
+produce a chain-of-thought before their answer. Xybrid keeps it out of the
+answer text and surfaces it on `reasoningContent` — `null` for non-thinking
+models. Nothing to enable; just read it if you want it.
+
+```dart
+final result = await model.run(XybridEnvelope.text(
+    'Is 97 a prime number? Reason, then answer.'));
+
+if (result.text != null) print('Answer: ${result.text}');
+if (result.reasoningContent != null) print('Reasoning: ${result.reasoningContent}');
+```
+
 ### LLM Streaming
 
 Stream tokens in real-time as the LLM generates:
@@ -253,7 +268,25 @@ Native ML runtimes are resolved automatically at build time:
 - **iOS**: ONNX Runtime xcframework downloaded from HuggingFace and cached at `~/.xybrid/cache/ort-ios/`
 - **macOS/Linux/Windows**: ONNX Runtime downloaded by the `ort` Rust crate at compile time
 
-Precompiled Rust binaries are available for all platforms via [cargokit](https://github.com/nicklocking/cargokit) — no Rust toolchain required for most users.
+The Rust library itself ships as a precompiled, signature-verified binary for
+every supported platform via [cargokit](https://github.com/nicklocking/cargokit),
+downloaded at build time. No Rust toolchain is required, and having one
+installed does not change anything — the published package is precompiled-only
+and cannot be built from source, because its Rust crate lives in the xybrid
+monorepo workspace.
+
+Building from source is for monorepo development, where the workspace root and
+the `xybrid-*` crates are present. There it is the default whenever a Rust
+toolchain is installed, because cargokit's crate hash only covers
+`bindings/flutter/rust` — a precompiled binary would not pick up edits to
+`xybrid-core`, `xybrid-sdk` or `xybrid-ffi-facade`.
+
+Either default can be overridden with a `cargokit_options.yaml` next to your
+app's `pubspec.yaml`:
+
+```yaml
+use_precompiled_binaries: false
+```
 
 ## Example App
 

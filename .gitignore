@@ -35,6 +35,9 @@ rust-project.json
 *.log
 
 *.wav
+# ...except the integration-test audio inputs, which are committed fixtures
+# rather than artifacts. Without this the tests' own inputs need `git add -f`.
+!integration-tests/fixtures/input/*.wav
 
 # Xcode user data
 xcuserdata/
@@ -48,7 +51,7 @@ xcuserdata/
 /.build/
 Package.resolved
 
-# Build artifacts - XCFrameworks (built by `cargo xtask build-xcframework`)
+# Build artifacts - XCFrameworks (unzipped from the Bazel //bindings/apple:XybridFFI build)
 bindings/apple/XCFrameworks/*.xcframework/
 # Python bytecode
 __pycache__/
@@ -58,7 +61,20 @@ __pycache__/
 # in CI; never committed (they go stale and bloat the repo).
 *.cdx.json
 
+# Bazel
+/bazel-*
+MODULE.bazel.lock
+
+# Agent-session working notes (local planning/analysis docs; never committed)
+claudedocs/
+
 # bindings/flutter/rust is a member of the root workspace, so the root
 # Cargo.lock is authoritative. A lockfile here is spurious (cargo ignores it)
 # but vuln scanners would read its stale contents — keep it out of the repo.
 /bindings/flutter/rust/Cargo.lock
+
+# Bazel-AAR consumer smoke (bindings/kotlin/consumer-smoke): transient build
+# state + the AAR copied in by the smoke step. Sources are committed.
+bindings/kotlin/consumer-smoke/.gradle/
+bindings/kotlin/consumer-smoke/app/build/
+bindings/kotlin/consumer-smoke/app/libs/

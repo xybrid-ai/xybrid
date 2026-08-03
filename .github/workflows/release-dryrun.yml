@@ -1,17 +1,22 @@
 name: Release Dry-Run
 
 # Runs publish-side validation on release/* branches so publish failures surface
-# before tagging. Mirrors release.yml but:
-#   - Derives target version from branch name instead of tag
-#   - Does not upload to pub.dev, Maven Central, GitHub Releases, or swift branch
-#   - Runs the same build jobs so sccache is warm for the real release
+# before tagging. Validates what release-prep.yml / release-publish.yml don't
+# build-test themselves:
+#   - version sync across every package manifest (branch name = target version)
+#   - changelog entries exist and contain no placeholders
+#   - flutter pub publish --dry-run (pub.dev validation)
+#   - Kotlin AAR/POM assembly (Maven Central required fields)
+# It does NOT rebuild artifacts: release-prep.yml itself builds everything via
+# Bazel on the same release/** push, so build failures already surface there
+# pre-tag (and bazel.yml guards those targets on PRs/master).
 on:
   push:
     branches:
       - 'release/**'
   pull_request:
     branches:
-      - main
+      - master
     paths:
       - 'Cargo.toml'
       - 'bindings/flutter/pubspec.yaml'
@@ -27,11 +32,7 @@ on:
         required: true
 
 env:
-  CARGO_TERM_COLOR: always
-  RUST_BACKTRACE: 1
-  NDK_VERSION: "26.1.10909125"
   FLUTTER_VERSION: "3.35.7"
-  FRB_VERSION: "2.11.1"
 
 permissions: read-all
 
@@ -41,8 +42,8 @@ jobs:
   #   1. workflow_dispatch input
   #   2. branch name (release/v0.1.0-beta11 → 0.1.0-beta11)
   #   3. PR head branch name if PR is from a release/* branch
-  # Then verify every package matches that version — same check as release.yml
-  # but without requiring a tag to exist yet.
+  # Then verify every package matches that version — same check as
+  # release-prep.yml but without requiring a tag to exist yet.
   #
   check-version-branch:
     name: Verify Version (branch)
@@ -83,6 +84,8 @@ jobs:
         if: steps.derive.outputs.is_release == 'true'
         shell: bash
         run: |
+          ./tools/scripts/version-sync.sh --check
+
           TARGET="${{ steps.derive.outputs.version }}"
           CARGO_VERSION=$(grep -A5 '\[workspace\.package\]' Cargo.toml | grep '^version' | head -1 | sed 's/.*= *"\(.*\)"/\1/')
           FLUTTER_VERSION_PKG=$(grep '^version:' bindings/flutter/pubspec.yaml | sed 's/version: *//')
@@ -236,202 +239,6 @@ jobs:
           echo "POM has all Maven Central required fields."
 
   #
-  # Build the precompiled binaries cargokit will ship. We do NOT run
-  # precompile-binaries (which uploads to GitHub Releases) — just cargo build.
-  # This catches: link errors, feature flag combos, missing system deps.
-  #
-  build-validate-apple:
-    name: Build-validate (Apple)
-    needs: [check-version-branch]
-    if: needs.check-version-branch.outputs.is_release_branch == 'true'
-    runs-on: macos-14
-    steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-        with:
-          submodules: true
-
-      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
-        with:
-          toolchain: stable
-          targets: >-
-            aarch64-apple-ios,
-            aarch64-apple-ios-sim,
-            aarch64-apple-darwin
-
-      - uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
-
-      - shell: bash
-        run: |
-          echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
-          echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
-
-      # Share cache key with release.yml so the tag build is hot
-      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-        with:
-          prefix-key: "v1-rust"
-          shared-key: "apple-xcframework"
-          cache-all-crates: "true"
-          save-if: "true"
-
-      - run: brew install llvm
-
-      # boltffi CLI provides the `boltffi pack apple` that
-      # `cargo xtask build-xcframework` shells out to. Cache the installed
-      # binary across runs.
-      - name: Cache boltffi CLI
-        id: cache-boltffi
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        with:
-          path: ~/.cargo/bin/boltffi
-          key: boltffi-cli-${{ runner.os }}-0.25.3
-
-      - name: Install boltffi CLI
-        # `which || install` is idempotent whether or not the cache populated
-        # the binary. Pinned to 0.25.3 to MATCH the runtime `boltffi` crate
-        # (Cargo.lock): a CLI/runtime version skew mis-generates unit-ok
-        # `Result<(), E>` exports (model warmup/unload) as a `void` foreign
-        # function that drops the error and leaks the result buffer. `--locked`
-        # installs against the CLI's own bundled Cargo.lock for reproducibility.
-        run: which boltffi || cargo install boltffi_cli --version 0.25.3 --locked
-
-      - name: Build XCFramework (release)
-        run: cargo xtask build-xcframework --release
-
-  #
-  # Windows-specific validation. This job exists because the real release
-  # workflow (precompile-flutter-windows) has hit Windows-only bugs twice:
-  #   - backslash path mangling in bash (github.workspace → "D:\a\x" → bash
-  #     escape-processes \a, \x → "D:ax...")
-  #   - CFLAGS=-MD CRT mismatch for cdylib linking
-  # We replicate the real job's path + CRT handling without uploading anything.
-  #
-  build-validate-windows:
-    name: Build-validate (Windows)
-    needs: [check-version-branch]
-    if: needs.check-version-branch.outputs.is_release_branch == 'true'
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-        with:
-          submodules: true
-
-      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
-        with:
-          toolchain: stable
-          targets: x86_64-pc-windows-msvc
-
-      - uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
-
-      - shell: bash
-        run: |
-          echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
-          echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
-
-      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-        with:
-          prefix-key: "v1-rust"
-          shared-key: "flutter-windows"
-          cache-all-crates: "true"
-          save-if: "true"
-
-      - name: Install LLVM and NASM
-        run: choco install llvm nasm
-
-      - name: Add NASM to PATH
-        shell: bash
-        run: echo "C:\\Program Files\\NASM" >> $GITHUB_PATH
-
-      - name: Force dynamic CRT (cdylib DLL linking requirement)
-        shell: bash
-        run: |
-          echo "CFLAGS=-MD" >> $GITHUB_ENV
-          echo "CXXFLAGS=-MD" >> $GITHUB_ENV
-
-      - name: Validate manifest path resolves on Windows
-        shell: bash
-        run: |
-          # Bash on Windows parses \a, \x etc. as backslash-escapes of
-          # non-special characters, mangling D:\a\xybrid into D:axybrid.
-          # Verify the converted path actually exists before the build uses it.
-          MANIFEST_DIR="${GITHUB_WORKSPACE//\\//}/bindings/flutter/rust"
-          echo "GITHUB_WORKSPACE='$GITHUB_WORKSPACE'"
-          echo "MANIFEST_DIR='$MANIFEST_DIR'"
-          if [ ! -d "$MANIFEST_DIR" ]; then
-            echo "ERROR: manifest dir does not exist — backslash escaping regression?"
-            exit 1
-          fi
-
-      - name: Build flutter bindings (Windows)
-        shell: bash
-        run: |
-          MANIFEST_DIR="${GITHUB_WORKSPACE//\\//}/bindings/flutter/rust"
-          cd "$MANIFEST_DIR"
-          cargo build --release --target x86_64-pc-windows-msvc
-
-  build-validate-android:
-    name: Build-validate (Android)
-    needs: [check-version-branch]
-    if: needs.check-version-branch.outputs.is_release_branch == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-        with:
-          submodules: true
-
-      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
-        with:
-          toolchain: stable
-          targets: >-
-            aarch64-linux-android,
-            armv7-linux-androideabi,
-            x86_64-linux-android
-
-      - uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
-
-      - shell: bash
-        run: |
-          echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
-          echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
-
-      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-        with:
-          prefix-key: "v1-rust"
-          shared-key: "android-ndk"
-          cache-all-crates: "true"
-          save-if: "true"
-
-      - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
-
-      - run: |
-          sdkmanager --install "ndk;${{ env.NDK_VERSION }}"
-          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/${{ env.NDK_VERSION }}" >> $GITHUB_ENV
-
-      - run: which cargo-ndk || cargo install cargo-ndk
-
-      # boltffi CLI provides the `boltffi pack android` the build script
-      # calls. Cache the installed binary across runs.
-      - name: Cache boltffi CLI
-        id: cache-boltffi
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        with:
-          path: ~/.cargo/bin/boltffi
-          key: boltffi-cli-${{ runner.os }}-0.25.3
-
-      - name: Install boltffi CLI
-        # `which || install` is idempotent whether or not the cache
-        # populated the binary (actions/cache only sets cache-hit on an
-        # exact key match).
-        # Pinned to 0.25.3 to MATCH the runtime `boltffi` crate (Cargo.lock):
-        # a CLI/runtime version skew mis-generates unit-ok `Result<(), E>`
-        # exports (model warmup/unload) as a `void` foreign function that drops
-        # the error and leaks the result buffer. `--locked` installs against
-        # the CLI's own bundled Cargo.lock for reproducibility.
-        run: which boltffi || cargo install boltffi_cli --version 0.25.3 --locked
-
-      - name: Build Android .so
-        run: cargo xtask build-android --release
-
-  #
   # Rollup: fail the PR if any validation step failed.
   # Single required status check in branch protection.
   #
@@ -441,9 +248,6 @@ jobs:
       - check-version-branch
       - flutter-dryrun
       - kotlin-dryrun
-      - build-validate-apple
-      - build-validate-android
-      - build-validate-windows
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -465,10 +269,7 @@ jobs:
           FAILED=0
           for PAIR in \
             "flutter-dryrun=${{ needs.flutter-dryrun.result }}" \
-            "kotlin-dryrun=${{ needs.kotlin-dryrun.result }}" \
-            "build-validate-apple=${{ needs.build-validate-apple.result }}" \
-            "build-validate-android=${{ needs.build-validate-android.result }}" \
-            "build-validate-windows=${{ needs.build-validate-windows.result }}"; do
+            "kotlin-dryrun=${{ needs.kotlin-dryrun.result }}"; do
             if [[ "${PAIR##*=}" != "success" ]]; then
               echo "FAIL: ${PAIR%%=*}"
               FAILED=1

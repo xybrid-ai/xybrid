@@ -17,17 +17,19 @@ Pod::Spec.new do |s|
   # with this pod rather than being pulled from SPM. This keeps consumer
   # setup to a single `npm install` + `pod install` and avoids resolving two
   # parallel package managers for the same Rust core. The files are copied
-  # in by `cargo xtask stage-react-native`; they live under
+  # in by the stage-ios step of build-react-native.yml (or the staging
+  # commands in this package's README for local dev); they live under
   # `ios/XybridSwift/` so the `.swift` files are discovered alongside the
   # TurboModule glue.
   s.source_files = "ios/**/*.{h,m,mm,swift}"
   s.requires_arc = true
   s.swift_version = "5.0"
 
-  # Pre-built bolt static lib bundled as an XCFramework. Copied in from
-  # `bindings/apple/XCFrameworks/XybridFFI.xcframework` by
-  # `cargo xtask stage-react-native`. (Android pulls its natives from the
-  # Maven AAR instead — see android/build.gradle.)
+  # Pre-built bolt static framework bundled as an XCFramework — the same
+  # Bazel-built `//bindings/apple:XybridFFI` the Apple release ships, staged
+  # here by build-react-native.yml / the README's staging commands. (Android
+  # pulls its natives
+  # from the Maven AAR instead — see android/build.gradle.)
   s.vendored_frameworks = "ios/Frameworks/XybridFFI.xcframework"
 
   # System frameworks the Rust core links against (mirrors Package.swift).

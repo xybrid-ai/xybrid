@@ -16,7 +16,7 @@ use xybrid_core::template_executor::TemplateExecutor;
 
 #[test]
 fn test_wav2vec2_model_metadata() {
-    let Some(model_dir) = fixtures::model_if_available("wav2vec2-base-960h") else {
+    let Some(model_dir) = fixtures::model_for_test("wav2vec2-base-960h") else {
         eprintln!("Skipping test: wav2vec2-base-960h not downloaded");
         eprintln!("Run: ./integration-tests/download.sh wav2vec2-base-960h");
         return;
@@ -53,7 +53,7 @@ fn test_wav2vec2_model_metadata() {
 
 #[test]
 fn test_wav2vec2_model_files_exist() {
-    let Some(model_dir) = fixtures::model_if_available("wav2vec2-base-960h") else {
+    let Some(model_dir) = fixtures::model_for_test("wav2vec2-base-960h") else {
         eprintln!("Skipping test: wav2vec2-base-960h not downloaded");
         return;
     };
@@ -88,7 +88,7 @@ fn test_wav2vec2_model_files_exist() {
 
 #[test]
 fn test_wav2vec2_vocab_loading() {
-    let Some(model_dir) = fixtures::model_if_available("wav2vec2-base-960h") else {
+    let Some(model_dir) = fixtures::model_for_test("wav2vec2-base-960h") else {
         eprintln!("Skipping test: wav2vec2-base-960h not downloaded");
         return;
     };
@@ -120,7 +120,7 @@ fn test_wav2vec2_vocab_loading() {
 
 #[test]
 fn test_wav2vec2_inference_with_audio() {
-    let Some(model_dir) = fixtures::model_if_available("wav2vec2-base-960h") else {
+    let Some(model_dir) = fixtures::model_for_test("wav2vec2-base-960h") else {
         eprintln!("Skipping test: wav2vec2-base-960h not downloaded");
         return;
     };
@@ -173,7 +173,7 @@ fn test_wav2vec2_inference_with_audio() {
 #[test]
 fn test_whisper_model_available() {
     // Check if whisper-tiny is available (Candle format)
-    let Some(model_dir) = fixtures::model_if_available("whisper-tiny") else {
+    let Some(model_dir) = fixtures::model_for_test("whisper-tiny") else {
         eprintln!("Skipping test: whisper-tiny not downloaded");
         eprintln!("Run: ./integration-tests/download.sh whisper-tiny");
         return;

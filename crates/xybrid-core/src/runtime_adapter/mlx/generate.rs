@@ -956,6 +956,7 @@ mod tests {
             seed: None,
             stop_sequences: vec![],
             grammar: None,
+            tools: Vec::new(),
         };
         let mut p1 = GenerateParams::new(&cfg);
         let mut p2 = GenerateParams::new(&cfg);
@@ -979,6 +980,7 @@ mod tests {
             stop_sequences: vec![],
             seed: Some(0x5eed),
             grammar: None,
+            tools: Vec::new(),
         };
         let mut from_config = GenerateParams::new(&cfg);
         let mut explicit = Sampler::seeded(0x5eed);

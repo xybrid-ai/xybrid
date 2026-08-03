@@ -1,8 +1,15 @@
 use std::path::PathBuf;
 
 /// Root fixtures directory
+///
+/// Resolves `CARGO_MANIFEST_DIR` at runtime rather than with `env!`: the
+/// compile-time value is baked into the binary and does not point anywhere
+/// useful when a test runs in a sandbox. Both cargo and Bazel set the variable
+/// for test execution.
 pub fn fixtures_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("fixtures")
+    let manifest_dir =
+        std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR is set for tests");
+    PathBuf::from(manifest_dir).join("fixtures")
 }
 
 /// Directory containing test input files (audio, text samples)
@@ -63,6 +70,32 @@ pub fn model_if_available(model_name: &str) -> Option<PathBuf> {
     } else {
         None
     }
+}
+
+/// Name of the environment variable that turns a missing model into a failure.
+pub const REQUIRE_MODELS_ENV: &str = "XYBRID_REQUIRE_MODELS";
+
+/// Get a model path, skipping locally but failing where models are mandatory.
+///
+/// [`model_if_available`] alone makes every model-gated test a no-op on a
+/// machine without the weights — convenient locally, useless on CI, where a
+/// download step that quietly failed leaves the whole suite green while
+/// testing nothing. Setting `XYBRID_REQUIRE_MODELS` (to any value) flips the
+/// missing-model case from "return `None` and skip" to [`require_model`]'s
+/// panic, so CI has to actually have the model.
+///
+/// Use with early return in tests:
+/// ```rust,ignore
+/// let Some(model_dir) = model_for_test("whisper-tiny") else {
+///     eprintln!("Skipping: whisper-tiny not downloaded");
+///     return;
+/// };
+/// ```
+pub fn model_for_test(model_name: &str) -> Option<PathBuf> {
+    if std::env::var_os(REQUIRE_MODELS_ENV).is_some() {
+        return Some(require_model(model_name));
+    }
+    model_if_available(model_name)
 }
 
 #[cfg(test)]

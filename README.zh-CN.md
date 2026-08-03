@@ -17,63 +17,72 @@
 </p>
 
 <p align="center">
-  <a href="https://docs.xybrid.dev">文档</a> ·
-  <a href="#sdk">SDK</a> ·
-  <a href="https://www.xybrid.ai/models">模型</a> ·
-  <a href="https://discord.gg/YhFHHkhbad">加入 Discord</a> ·
-  <a href="https://x.com/xybrid_ai">关注 X</a> ·
-  <a href="https://github.com/xybrid-ai/xybrid/issues">问题反馈</a>
+
+[![Docs][docs-shield]][docs-url]
+[![Website][website-shield]][website-url]
+[![Follow on X][twitter-shield]][twitter-url]
+[![Discord][discord-shield]][discord-url]
+
 </p>
 
 <p align="center">
 
-[![Website][website-shield]][website-url]
-[![Docs][docs-shield]][docs-url]
-[![Discord][discord-shield]][discord-url]
-[![Twitter][twitter-shield]][twitter-url]
-<br>
-[![License][license-shield]][license-url]
 [![Build][build-shield]][build-url]
-[![OpenSSF Scorecard][scorecard-shield]][scorecard-url]
-[![Stars][stars-shield]][stars-url]
 [![Release][release-shield]][release-url]
-[![Release Date][release-date-shield]][release-url]
+[![License][license-shield]][license-url]
+[![OpenSSF Scorecard][scorecard-shield]][scorecard-url]
+[![OpenSSF Best Practices][bestpractices-shield]][bestpractices-url]
 <br>
+[![crates.io][crates-shield]][crates-url]
 [![pub.dev][pubdev-shield]][pubdev-url]
 [![Maven Central][maven-shield]][maven-url]
 [![Swift Package Manager][spm-shield]][spm-url]
-[![crates.io][crates-shield]][crates-url]
-[![Visitors](https://visitor-badge.laobi.icu/badge?page_id=xybrid-ai.xybrid)](https://github.com/xybrid-ai/xybrid)
+<br>
+[![Ask DeepWiki][deepwiki-shield]][deepwiki-url]
+[![Stars][stars-shield]][stars-url]
+[![Visitors][visitors-shield]][visitors-url]
 
 </p>
 
-[website-shield]: https://img.shields.io/badge/xybrid.ai-4285F4?style=flat
-[website-url]: https://www.xybrid.ai/
-[docs-shield]: https://img.shields.io/badge/docs-xybrid.dev-1F6FEB?style=flat&logo=readthedocs&logoColor=white
+<!-- Primary — for-the-badge -->
+[docs-shield]: https://img.shields.io/badge/Docs-docs.xybrid.dev-1F6FEB?style=for-the-badge&logo=readthedocs&logoColor=white
 [docs-url]: https://docs.xybrid.dev/
-[discord-shield]: https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fdiscord.com%2Fapi%2Finvites%2FYhFHHkhbad%3Fwith_counts%3Dtrue&query=%24.approximate_member_count&logo=discord&logoColor=white&label=Discord&color=5865F2&suffix=%20members
+[website-shield]: https://img.shields.io/badge/Website-xybrid.ai-4285F4?style=for-the-badge
+[website-url]: https://www.xybrid.ai/
+[discord-shield]: https://img.shields.io/badge/Join_Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white
 [discord-url]: https://discord.gg/YhFHHkhbad
-[twitter-shield]: https://img.shields.io/twitter/follow/xybrid_ai
-[twitter-url]: https://x.com/xybrid_ai
-[license-shield]: https://img.shields.io/badge/License-Apache_2.0-blue.svg?style=flat
-[license-url]: https://opensource.org/licenses/Apache-2.0
-[build-shield]: https://img.shields.io/github/actions/workflow/status/xybrid-ai/xybrid/ci.yml?branch=master&style=flat
+
+<!-- Project health — flat-square -->
+[build-shield]: https://img.shields.io/github/actions/workflow/status/xybrid-ai/xybrid/ci.yml?branch=master&style=flat-square
 [build-url]: https://github.com/xybrid-ai/xybrid/actions
+[release-shield]: https://img.shields.io/github/v/release/xybrid-ai/xybrid?style=flat-square&sort=semver
+[release-url]: https://github.com/xybrid-ai/xybrid/releases
+[license-shield]: https://img.shields.io/badge/License-Apache_2.0-blue.svg?style=flat-square
+[license-url]: https://opensource.org/licenses/Apache-2.0
 [scorecard-shield]: https://api.scorecard.dev/projects/github.com/xybrid-ai/xybrid/badge
 [scorecard-url]: https://scorecard.dev/viewer/?uri=github.com/xybrid-ai/xybrid
-[stars-shield]: https://img.shields.io/github/stars/xybrid-ai/xybrid?style=flat
-[stars-url]: https://github.com/xybrid-ai/xybrid/stargazers
-[release-shield]: https://img.shields.io/github/v/release/xybrid-ai/xybrid?style=flat&sort=semver
-[release-url]: https://github.com/xybrid-ai/xybrid/releases
-[release-date-shield]: https://img.shields.io/github/release-date/xybrid-ai/xybrid?style=flat
-[pubdev-shield]: https://img.shields.io/pub/v/xybrid_flutter?style=flat&label=pub.dev
-[pubdev-url]: https://pub.dev/packages/xybrid_flutter
-[maven-shield]: https://img.shields.io/maven-central/v/ai.xybrid/xybrid-kotlin?style=flat&label=Maven%20Central
-[maven-url]: https://central.sonatype.com/artifact/ai.xybrid/xybrid-kotlin
-[spm-shield]: https://img.shields.io/badge/Swift_Package_Manager-compatible-F05138?style=flat&logo=swift&logoColor=white
-[spm-url]: https://github.com/xybrid-ai/xybrid
-[crates-shield]: https://img.shields.io/crates/v/xybrid?style=flat&label=crates.io&logo=rust
+[bestpractices-shield]: https://www.bestpractices.dev/projects/13041/badge
+[bestpractices-url]: https://www.bestpractices.dev/projects/13041
+
+<!-- Packages — flat-square -->
+[crates-shield]: https://img.shields.io/crates/v/xybrid?style=flat-square&label=crates.io&logo=rust
 [crates-url]: https://crates.io/crates/xybrid
+[pubdev-shield]: https://img.shields.io/pub/v/xybrid_flutter?style=flat-square&label=pub.dev
+[pubdev-url]: https://pub.dev/packages/xybrid_flutter
+[maven-shield]: https://img.shields.io/maven-central/v/ai.xybrid/xybrid-kotlin?style=flat-square&label=Maven%20Central
+[maven-url]: https://central.sonatype.com/artifact/ai.xybrid/xybrid-kotlin
+[spm-shield]: https://img.shields.io/badge/Swift_Package_Manager-compatible-F05138?style=flat-square&logo=swift&logoColor=white
+[spm-url]: https://github.com/xybrid-ai/xybrid
+
+<!-- Community — flat-square -->
+[deepwiki-shield]: https://deepwiki.com/badge.svg
+[deepwiki-url]: https://deepwiki.com/xybrid-ai/xybrid
+[stars-shield]: https://img.shields.io/github/stars/xybrid-ai/xybrid?style=flat-square
+[stars-url]: https://github.com/xybrid-ai/xybrid/stargazers
+[twitter-shield]: https://img.shields.io/badge/Follow-%40xybrid__ai-000000?style=for-the-badge&logo=x&logoColor=white
+[twitter-url]: https://x.com/xybrid_ai
+[visitors-shield]: https://visitor-badge.laobi.icu/badge?page_id=xybrid-ai.xybrid
+[visitors-url]: https://github.com/xybrid-ai/xybrid
 </div>
 
 <p align="center">
@@ -88,7 +97,7 @@
 | 目标 | 路径 |
 |------|------|
 | 最快上手（2 分钟） | [安装 CLI →](#快速开始) |
-| 构建移动端或桌面应用 | [Flutter SDK →](bindings/flutter/) |
+| 开发移动端或桌面应用 | [Flutter SDK →](bindings/flutter/) |
 | 为游戏添加 AI NPC | [Unity SDK →](bindings/unity/)，体验 [3D 酒馆示例](https://github.com/xybrid-ai/xybrid-unity-tavern) |
 | Android 原生开发 | [Kotlin SDK →](bindings/kotlin/) |
 | Rust / 嵌入式 | [核心 crate →](crates/) |
@@ -145,7 +154,7 @@ xybrid run --model kokoro-82m --input-text "国破山河在，城春草木深" -
 
 ```yaml
 dependencies:
-  xybrid_flutter: ^0.2.2
+  xybrid_flutter: ^0.3.0
 ```
 
 **运行模型：**
@@ -162,7 +171,7 @@ final result = await model.run(XybridEnvelope.text('国破山河在，城春草�
 
 ```gradle
 dependencies {
-    implementation("ai.xybrid:xybrid-kotlin:0.2.2")
+    implementation("ai.xybrid:xybrid-kotlin:0.3.0")
 }
 ```
 
@@ -180,7 +189,7 @@ val result = model.run(Envelope.text("国破山河在，城春草木深"))
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/xybrid-ai/xybrid.git", from: "0.2.2")
+    .package(url: "https://github.com/xybrid-ai/xybrid.git", from: "0.3.0")
 ]
 ```
 
@@ -194,10 +203,10 @@ let result = try model.run(envelope: Envelope.text("国破山河在，城春草�
 
 ### Unity
 
-**安装** 通过 Unity Package Manager：
+**安装** 通过 [OpenUPM](https://openupm.com/packages/ai.xybrid.sdk/)（`openupm add ai.xybrid.sdk`），或直接从 git 子目录安装：
 
 ```sh
-https://github.com/xybrid-ai/xybrid.git#upm
+https://github.com/xybrid-ai/xybrid.git?path=/bindings/unity
 ```
 
 **运行模型：**
@@ -214,7 +223,7 @@ var result = model.Run(Envelope.Text("国破山河在，城春草木深"));
 
 ```toml
 [dependencies]
-xybrid = "0.2.2"
+xybrid = "0.3.0"
 ```
 
 **运行模型：**
@@ -225,7 +234,7 @@ let result = model.run(&Envelope::text("国破山河在，城春草木深"))?;
 // 输出 → 24kHz WAV 音频
 ```
 
-完整安装选项、硬件加速与 CLI 参考请参阅 [Installation Guide](docs/INSTALLATION.md)。各平台的详细设置请参阅对应 SDK 的 README：[Flutter](bindings/flutter/) · [Unity](bindings/unity/) · [Swift](bindings/apple/) · [Kotlin](bindings/kotlin/) · [Rust](crates/)。
+完整安装选项、硬件加速与 CLI 参考请参阅 [安装指南](docs/INSTALLATION.zh.md)。各平台的详细设置请参阅对应 SDK 的 README：[Flutter](bindings/flutter/) · [Unity](bindings/unity/) · [Swift](bindings/apple/) · [Kotlin](bindings/kotlin/) · [Rust](crates/)。
 
 <details>
 <summary><h3>多模型推理流水线 — MMP（实验性）</h3></summary>
@@ -309,6 +318,7 @@ let result = pipeline.run(&Envelope::audio(audio_bytes))?;
 | 模型 | 参数量 | 格式 | 简介 |
 |------|--------|------|------|
 | Gemma 3 1B | 1B | GGUF Q4_K_M | Google 为移动端优化的模型 |
+| LFM2.5 230M | 230M | GGUF Q4_K_M | 最小的采用 Liquid AI 混合卷积+注意力架构的 LLM，适合边缘设备 |
 | LFM2.5 350M | 354M | GGUF Q4_K_M | Liquid AI 混合卷积+注意力架构，9 种语言，工具调用 |
 | Llama 3.2 1B | 1B | GGUF Q4_K_M | Meta 的通用模型，128K 上下文 |
 | Qwen 2.5 0.5B | 500M | GGUF Q4_K_M | 紧凑的本地聊天模型 |

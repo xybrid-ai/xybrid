@@ -1,0 +1,209 @@
+---
+title: 工具调用
+description: 让本地模型调用你的函数——在设备端，无需云端往返
+---
+
+本地模型可以调用工具：你声明函数，模型决定何时调用它们，你的代码执行调用，
+结果再喂入下一轮次。一切都在设备端运行——唯一的网络流量就是你的工具自身
+所产生的。
+
+Xybrid 的设计准则是**能力是数据，而非入口点**。工具端到端复用既有类型：
+
+1. 在 `GenerationConfig` 上声明工具——纯数据，任意你想要的函数。
+2. `run` 该请求；解析后的调用会随结果返回。
+3. 自己执行这些调用——你的代码、你的沙箱、你的 API。
+4. 用 `Envelope::tool_results` 把结果喂回，再次 `run`。
+
+这里没有 agent 框架，也没有回调 API：**循环就是你的代码**，这正是你自己的
+工具能成为一等公民的原因——xybrid 从不需要知道某个工具做了什么，只需要它的
+声明及其 JSON 结果。
+
+<Callout type="info">
+工具调用运行在本地 llama.cpp 后端上。无法处理带工具请求的路径会以“无效输入”
+错误保守失败（fail closed），而不是在没有工具的情况下静默生成：没有内嵌聊天
+模板的模型、`mistralrs` 后端、流式续接、对话上下文续接，以及 SDK 的云端回退分支。
+</Callout>
+
+## 支持的模型
+
+工具调用语法会从模型自身的聊天模板中自动检测：
+
+| 协议族 | 语法 | 示例模型 |
+|-----------------|--------|----------------|
+| LFM2 系列 | `<\|tool_call_start\|>[name(k=v)]<\|tool_call_end\|>`（Python 风格） | LFM2.5 230M / 350M |
+| gemma-4 系列 | `<\|tool_call>call:name{...}<tool_call\|>` | gemma-4 E2B |
+
+Bundle 通过 `model_metadata.json` 中一个建议性的 `tool_calling: true` 标志来
+宣告支持（由 `ModelMetadata::supports_tool_calling()` /
+`XybridModel::supports_tool_calling()` 读取）。该标志控制 UI 的默认行为——
+强制约束始终在运行时发生。
+
+## 自带工具（Rust SDK）
+
+用 `Tool::function` 定义一个工具——一个名称、一段供模型读取的描述，以及参数的
+JSON Schema：
+
+```rust
+use xybrid_sdk::{GenerationConfig, ModelLoader, Tool};
+use xybrid_sdk::ir::{Envelope, EnvelopeKind, ToolCallResult};
+
+let tools = vec![Tool::function(
+    "get_weather",
+    "Current weather for a city.",
+    serde_json::json!({
+        "type": "object",
+        "properties": { "city": { "type": "string" } },
+        "required": ["city"]
+    }),
+)];
+
+let config = GenerationConfig::default().with_tools(tools);
+```
+
+运行一个轮次，并执行模型请求的任何操作：
+
+```rust
+let model = ModelLoader::from_registry("lfm2.5-350m").load()?;
+let question = "What's the weather in Paris?";
+
+let result = model.run(
+    &Envelope::new(EnvelopeKind::Text(question.to_string())),
+    Some(&config),
+)?;
+
+let calls = result.tool_calls(); // Vec<ToolCall>，若没有则为空
+let mut results = Vec::new();
+for call in &calls {
+    // call.function.name + call.function.arguments（JSON 字符串）。
+    // 用你自己的代码执行——调用 API、查询数据库，任何操作皆可。
+    results.push(ToolCallResult {
+        call_id: call.id.clone(),
+        name: call.function.name.clone(),
+        content: serde_json::json!({ "temp_c": 21, "sky": "clear" }),
+    });
+}
+```
+
+将结果作为下一轮次喂回——相同的工具、相同的系统提示词，每个模型轮次一次
+`run`：
+
+```rust
+let continuation = Envelope::tool_results(
+    question,               // 正在续接的用户消息
+    result.text().unwrap(), // 上一轮次的原始输出（含工具块）
+    &results,
+);
+let final_turn = model.run(&continuation, Some(&config))?;
+println!("{}", final_turn.text().unwrap_or_default());
+```
+
+这就是全部接口。多步循环（预算、重试、并行工具）都是普通的应用代码——完整的
+参考循环（含流式）见
+[`crates/xybrid-core/examples/lfm2_230m_tools.rs`](https://github.com/xybrid-ai/xybrid/blob/master/crates/xybrid-core/examples/lfm2_230m_tools.rs)
+和 `gemma4_e2b_tools.rs`。
+
+### 循环必须遵守的规则（v1）
+
+- **一次 `run` 就是一个模型轮次。** 续接只回放紧邻的上一个助手轮次——对于
+  多跳链，请将更早的结果折叠进你传给 `tool_results` 的用户文本中（示例展示了
+  这一模式）。
+- **续接为非流式且无上下文。** 在流式或对话上下文路径上使用 `tool_results`
+  Envelope 会被作为无效输入拒绝。*提供*工具的那一轮次可以流式——工具调用块会
+  从 token 流中被抑制，且终止 token 携带 `finish_reason: "tool_calls"`。
+- **为你的轮次设定预算。** 小模型可能会无休止地搜索而始终无法收敛；请限制
+  循环次数，并在预算耗尽时，强制基于你已累积的笔记进行一次关闭工具的总结轮次。
+
+## 在 CLI 中进行工具调用（`xybrid repl`）
+
+REPL 提供了参考体验。对于元数据声明了 `tool_calling: true` 的模型，有三个内置
+工具默认开启：
+
+| 工具 | 作用 | 联网 |
+|------|--------------|---------|
+| `web_search` | 通过可插拔的提供商搜索（默认使用无需密钥的 Wikipedia） | 是 |
+| `fetch_url` | 将公开的 http(s) 页面抓取为可读文本（带 SSRF 防护） | 是 |
+| `current_time` | 本地日期与时间 | 否 |
+
+```bash
+xybrid repl --model lfm2.5-350m
+❯ who won the 2022 fifa world cup final?
+  ⚙ web_search("2022 FIFA World Cup final winner") · 614ms
+    Search "2022 FIFA World Cup final winner": The 2022 FIFA World Cup final…
+  The 2022 FIFA World Cup final was won by Argentina.
+```
+
+- `--no-tools` 会为本次会话禁用工具；`/tools` 列出它们，`/tools on|off` 在
+  运行时切换。
+- 搜索提供商：设置 `XYBRID_SEARCH_PROVIDER=tavily`（加 `TAVILY_API_KEY`）或
+  `brave`（加 `BRAVE_API_KEY`）以覆盖开放网络；不设置时默认使用 Wikipedia，
+  无需密钥。
+- 使用推理模型（如 `lfm2.5-1.2b-thinking`）时，`--show-reasoning` 会将每个
+  轮次的思维链以暗色块打印，紧位于该轮次产出内容——即它的 `⚙` 工具调用或它的
+  答案——的正上方，这是观察模型如何决定*是否*以及*使用哪个*工具的最清晰方式。
+
+### 在 REPL 中使用你自己的工具（`--tools-file`）
+
+在一个 JSON（或 YAML）文件中声明工具；每个条目将一个函数映射到你编写的命令：
+
+```json title="my-tools.json"
+[
+  {
+    "name": "get_weather",
+    "description": "Get the current weather for a city.",
+    "parameters": {
+      "type": "object",
+      "properties": { "city": { "type": "string" } },
+      "required": ["city"]
+    },
+    "command": ["./scripts/weather.sh"],
+    "timeout_secs": 30
+  }
+]
+```
+
+```bash
+xybrid repl --model-file ./LFM2.5-350M-Q4_K_M.gguf --tools-file my-tools.json
+❯ what's the weather in paris?
+  ⚙ get_weather({"city":"Paris"}) · 55ms
+    get_weather: {"city":"Paris","sky":"clear","temp_c":21}
+  The current weather in Paris is clear with a temperature of 21°C.
+```
+
+约定：
+
+- 模型的参数以 **stdin 上的 JSON 对象**形式到达；命令的 **stdout 即工具结果**
+  （尽可能解析为 JSON，否则包装为 `{"output": "..."}`）。
+- 可执行文件及其固定的 argv 仅来自你的文件——模型输出绝不会被插入命令行，也
+  绝不会经过 shell。如果你需要 shell 行为，请编写脚本。
+- 命令在 `timeout_secs`（默认 30）后被终止；输出有上限。
+- 传入 `--tools-file` 是一种显式的选择加入（opt-in）：它还会为元数据未声明
+  `tool_calling` 的模型启用工具（不受支持的模板在运行时仍会明确报错）。声明了
+  `tool_calling: false` 的 Bundle 则保持关闭。
+
+## 在你自己的 Bundle 中声明支持
+
+为聊天模板能渲染工具的模型，在 `model_metadata.json` 中添加该标志
+（`/xybrid-init` skill 可以生成元数据）：
+
+```json
+{
+  "metadata": {
+    "tool_calling": true
+  }
+}
+```
+
+应用会在下载权重之前通过 `ModelMetadata::supports_tool_calling()` 读取它——
+`None` 表示该 Bundle 未作任何声明，且绝不意味着支持。
+
+## 对小模型的预期
+
+10 亿参数以下的模型能可靠地生成工具调用语法，但对*何时*调用的判断较为松散：
+LFM2.5-230M 会过度触发（连打招呼都去搜索），而 350M 则倾向于凭记忆作答而不
+搜索。REPL 的默认系统提示词是一种折中——用 `--system` 覆盖它；当工具调用的
+纪律性很重要时，优先选择更大的、针对工具微调的模型。
+
+微型模型还要支付一种“工具税”：当提示词中包含工具声明时，有些模型会拒绝它们
+本来能很好处理的普通请求（“我无法写诗”）。REPL 会予以补偿——一次未产生任何
+工具调用的能力性拒绝，会在撤去工具声明后重试一次，并以 `answered without tools`
+标示。模型在对话早期自身的拒绝也会对后续轮次产生偏置影响；`clear` 会重置历史。

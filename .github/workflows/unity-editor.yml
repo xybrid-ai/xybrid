@@ -1,0 +1,225 @@
+# Unity Editor CI — the first job in this repo that runs a real Unity Editor.
+#
+# Everything else that touches the Unity SDK only compiles C#: ci.yml's
+# `unity-bolt-compile` is a `dotnet build` against netstandard2.1. That is not
+# enough — the `Unsafe.SizeOf<T>()` regression passed that gate and only failed
+# inside an actual Editor, because Unity's compiler and `dotnet build` disagree
+# about what is available.
+#
+# This job imports the package into Unity 6000.3.6f1 (the version
+# tools/unity-runtime-smoke pins), compiles it with Unity's own compiler, and
+# runs the package's EditMode tests against a Bazel-built Linux native. One of
+# the four test files drives ~16 native call sites, so the .so is genuinely
+# exercised rather than merely present. It then AOT-compiles the same package
+# into a Linux IL2CPP player and runs the player headlessly against that native.
+#
+# The Windows plugin loader remains outside hosted CI.
+name: Unity Editor CI
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - "bindings/unity/**"
+      - "crates/xybrid-bolt/**"
+      - "crates/xybrid-ffi-facade/**"
+      - "tools/unity-runtime-smoke/**"
+      - "tools/scripts/stage_unity_native.py"
+      - "tools/scripts/stage_unity_desktop_ort.py"
+      - "tools/scripts/bazel-output.sh"
+      - "tools/scripts/write-buildbuddy-rc.sh"
+      - ".github/workflows/unity-editor.yml"
+  push:
+    branches: [master]
+    paths:
+      - "bindings/unity/**"
+      - "crates/xybrid-bolt/**"
+      - "crates/xybrid-ffi-facade/**"
+      - "tools/unity-runtime-smoke/**"
+      - "tools/scripts/stage_unity_native.py"
+      - "tools/scripts/stage_unity_desktop_ort.py"
+      - "tools/scripts/bazel-output.sh"
+      - "tools/scripts/write-buildbuddy-rc.sh"
+      - ".github/workflows/unity-editor.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  # game-ci/unity-test-runner publishes the result as a GitHub Check. Without
+  # this the Checks API call fails with "Resource not accessible by integration".
+  checks: write
+
+concurrency:
+  group: unity-editor-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  editmode:
+    name: Unity Editor (Linux, Mono + IL2CPP)
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    env:
+      BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
+      UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          submodules: true
+
+      # Every step below is secret-gated so fork PRs (which get none) skip
+      # instead of failing. That leaves a trap: on a run that IS supposed to have
+      # secrets, a missing one would skip the Unity step and the job would still
+      # report success — a gate that looks healthy while testing nothing.
+      #
+      # So assert up front, and only for runs that should have secrets: same-repo
+      # PRs, master pushes, and manual dispatches. Fork PRs fall through to the
+      # skips by design.
+      - name: Require credentials (non-fork runs)
+        if: >-
+          github.event_name != 'pull_request' ||
+          github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+        run: |
+          missing=""
+          [ -n "${BUILDBUDDY_API_KEY}" ] || missing="$missing BUILDBUDDY_API_KEY"
+          [ -n "${UNITY_LICENSE}" ]      || missing="$missing UNITY_LICENSE"
+          [ -n "${UNITY_EMAIL}" ]        || missing="$missing UNITY_EMAIL"
+          [ -n "${UNITY_PASSWORD}" ]     || missing="$missing UNITY_PASSWORD"
+          if [ -n "$missing" ]; then
+            echo "Missing required secret(s):$missing"
+            echo "Without them the native build and/or the EditMode step would be"
+            echo "skipped and this job would report success without running Unity."
+            exit 1
+          fi
+          echo "All required secrets present."
+
+      # The Unity Editor image is ~10 GB on top of the Bazel fetches, so reclaim
+      # the toolchains this job never touches before pulling anything.
+      #
+      # /usr/local/lib/android is deliberately NOT removed, matching bazel.yml:
+      # rules_android's android_sdk_repository rule reads it while FETCHING
+      # repositories, so deleting it aborts analysis of any target — including
+      # this one, which has nothing to do with Android:
+      #   "No Android SDK apis found in the Android SDK at /usr/local/lib/android/sdk"
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/.ghcup \
+            /opt/hostedtoolcache/CodeQL
+          sudo docker image prune --all --force || true
+          df -h /
+
+      # Same gitignored-file pattern the Bazel workflow uses: the key never
+      # lands in a committable file. Absent secret (forks) -> no :remote config.
+      - name: Configure BuildBuddy remote config
+        env:
+          BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
+        run: tools/scripts/write-buildbuddy-rc.sh
+
+      # The Linux bolt cdylib is not built anywhere else in CI — bazel.yml builds
+      # the windows one for the Unity DLL proof, and the linux CLI, but never
+      # this. Only the toplevel .so is downloaded (--remote_download_toplevel).
+      - name: Build the Linux bolt native (Bazel/RBE)
+        if: env.BUILDBUDDY_API_KEY != ''
+        run: |
+          bazelisk build --config=remote -c opt \
+            //crates/xybrid-bolt:xybrid_bolt_cdylib
+
+      - name: Stage the native + ONNX Runtime into the package
+        if: env.BUILDBUDDY_API_KEY != ''
+        run: |
+          set -euo pipefail
+          LIB=$(tools/scripts/bazel-output.sh //crates/xybrid-bolt:xybrid_bolt_cdylib \
+            --config=remote -c opt)
+          echo "bolt native: $LIB"
+          python3 tools/scripts/stage_unity_native.py --lib "$LIB" \
+            --target x86_64-unknown-linux-gnu
+          # Linux links ORT dynamically, so libonnxruntime.so ships beside it.
+          # output_dir is REQUIRED (build-unity.yml passes it on a folded second
+          # line, which is easy to misread as a one-argument call).
+          python3 tools/scripts/stage_unity_desktop_ort.py linux \
+            bindings/unity/Runtime/Plugins/Linux
+          # Pin the native version so the package's editor resolver treats the
+          # staged library as current and does not fetch a release asset over it.
+          VERSION=$(python3 -c "import json; print(json.load(open('bindings/unity/package.json'))['version'])")
+          mkdir -p tools/unity-runtime-smoke/Assets/Xybrid/Plugins
+          printf '%s\n' "$VERSION" \
+            > tools/unity-runtime-smoke/Assets/Xybrid/Plugins/.xybrid-native-linux-version
+          ls -la bindings/unity/Runtime/Plugins/Linux
+
+      # Personal-license activation per GameCI v4: the .ulf is generated once by
+      # Unity Hub and stored as UNITY_LICENSE, together with the account
+      # email/password. Fork PRs carry no secrets, so this is skipped there
+      # rather than failing.
+      - name: Run EditMode tests
+        if: env.UNITY_LICENSE != ''
+        uses: game-ci/unity-test-runner@0ff419b913a3630032cbe0de48a0099b5a9f0ed9 # v4.3.1
+        env:
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+        with:
+          projectPath: tools/unity-runtime-smoke
+          unityVersion: 6000.3.6f1
+          testMode: EditMode
+          artifactsPath: unity-editmode-results
+          githubToken: ${{ secrets.GITHUB_TOKEN }}
+          checkName: Unity EditMode results
+
+      - name: Build Linux IL2CPP smoke player
+        if: env.UNITY_LICENSE != ''
+        uses: game-ci/unity-builder@1d4ee0697f193f54668e98961d79907911f4b4f2 # v4.8.1
+        env:
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+        with:
+          projectPath: tools/unity-runtime-smoke
+          unityVersion: 6000.3.6f1
+          targetPlatform: StandaloneLinux64
+          buildMethod: Builder.PerformBuild
+          manualExit: true
+          allowDirtyBuild: true
+
+      - name: Run Linux IL2CPP smoke player
+        if: env.UNITY_LICENSE != ''
+        run: |
+          set -euo pipefail
+          PLAYER=tools/unity-runtime-smoke/Build/linux-il2cpp/XybridSmoke.x86_64
+          LOG="$RUNNER_TEMP/linux-il2cpp-player.log"
+          ls -l "$PLAYER"
+          test -x "$PLAYER"
+          command -v xvfb-run
+
+          set +e
+          timeout 120s xvfb-run --auto-servernum \
+            --server-args="-screen 0 1024x768x24" \
+            "$PLAYER" -batchmode -logFile "$LOG"
+          PLAYER_STATUS=$?
+          set -e
+
+          cat "$LOG"
+          if [ "$PLAYER_STATUS" -ne 0 ]; then
+            echo "Linux IL2CPP smoke player exited with status $PLAYER_STATUS."
+            exit "$PLAYER_STATUS"
+          fi
+          grep -Fq "[XybridSmoke] OK" "$LOG"
+
+      - name: Upload test results
+        if: always() && env.UNITY_LICENSE != ''
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: unity-editmode-results
+          path: unity-editmode-results
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Upload IL2CPP smoke log
+        if: always() && env.UNITY_LICENSE != ''
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: unity-linux-il2cpp-smoke-log
+          path: ${{ runner.temp }}/linux-il2cpp-player.log
+          if-no-files-found: warn
+          retention-days: 7

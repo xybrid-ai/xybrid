@@ -231,6 +231,12 @@ enum Commands {
         #[arg(long, default_value = "false")]
         show_reasoning: bool,
 
+        /// Token budget for LLM generation, shared by thinking and answer
+        /// (default 2048; auto-raised for known thinking models). For multi-stage
+        /// pipelines this applies to the first stage.
+        #[arg(long, value_name = "N", value_parser = parse_max_tokens)]
+        max_tokens: Option<usize>,
+
         /// Export trace to JSON file (Chrome trace format)
         #[arg(long, value_name = "FILE")]
         trace_export: Option<PathBuf>,
@@ -274,9 +280,30 @@ enum Commands {
         #[arg(long)]
         stream: bool,
 
+        /// Print the model's chain-of-thought reasoning (`<think>` blocks),
+        /// which is stripped out of the answer text by default
+        #[arg(long, default_value = "false")]
+        show_reasoning: bool,
+
+        /// Token budget for LLM generation, shared by thinking and answer
+        /// (default 2048; auto-raised for known thinking models). Applies to every REPL turn.
+        #[arg(long, value_name = "N", value_parser = parse_max_tokens)]
+        max_tokens: Option<usize>,
+
         /// System prompt to set the assistant's behavior
         #[arg(long, value_name = "PROMPT")]
         system: Option<String>,
+
+        /// Disable built-in tool calling (web_search, fetch_url, current_time),
+        /// which is otherwise on for models whose metadata declares support
+        #[arg(long)]
+        no_tools: bool,
+
+        /// Add user-defined tools from a JSON or YAML file. Each entry maps a
+        /// JSON-schema'd function to a command; the model's arguments arrive
+        /// as JSON on the command's stdin, its stdout is the tool result
+        #[arg(long, value_name = "FILE")]
+        tools_file: Option<PathBuf>,
     },
     /// Trace and analyze telemetry logs from a session
     Trace {
@@ -299,7 +326,10 @@ enum Commands {
         name: String,
 
         /// Version string (e.g., 1.0.0)
-        #[arg(short, long, value_name = "VERSION", default_value = "0.1.0")]
+        ///
+        /// Long-only: `-v` belongs to the global `--verbose` flag, and clap
+        /// panics at startup on the collision.
+        #[arg(long, value_name = "VERSION", default_value = "0.1.0")]
         version: String,
 
         /// Target format (onnx, coreml, tflite, generic)
@@ -329,6 +359,16 @@ enum Commands {
         #[command(subcommand)]
         command: TelemetryCommand,
     },
+}
+
+/// `--max-tokens 0` would load the model and only then fail in the native
+/// layer ("non-positive max_tokens"); reject it at parse time instead.
+fn parse_max_tokens(s: &str) -> Result<usize, String> {
+    match s.parse::<usize>() {
+        Ok(0) => Err("must be at least 1".to_string()),
+        Ok(n) => Ok(n),
+        Err(e) => Err(e.to_string()),
+    }
 }
 
 fn main() -> Result<()> {
@@ -533,6 +573,7 @@ fn run_command(cli: Cli) -> Result<()> {
             backend,
             trace,
             show_reasoning,
+            max_tokens,
             trace_export,
         } => {
             if trace {
@@ -551,6 +592,7 @@ fn run_command(cli: Cli) -> Result<()> {
                     backend.as_deref(),
                     trace,
                     show_reasoning,
+                    max_tokens,
                     trace_export.as_ref(),
                 );
             }
@@ -568,6 +610,7 @@ fn run_command(cli: Cli) -> Result<()> {
                     dry_run,
                     trace,
                     show_reasoning,
+                    max_tokens,
                     trace_export.as_ref(),
                 );
             }
@@ -584,6 +627,7 @@ fn run_command(cli: Cli) -> Result<()> {
                     dry_run,
                     trace,
                     show_reasoning,
+                    max_tokens,
                     trace_export.as_ref(),
                 );
             }
@@ -600,6 +644,7 @@ fn run_command(cli: Cli) -> Result<()> {
                     dry_run,
                     trace,
                     show_reasoning,
+                    max_tokens,
                     trace_export.as_ref(),
                 );
             }
@@ -616,6 +661,7 @@ fn run_command(cli: Cli) -> Result<()> {
                     dry_run,
                     trace,
                     show_reasoning,
+                    max_tokens,
                     trace_export.as_ref(),
                 );
             }
@@ -634,6 +680,7 @@ fn run_command(cli: Cli) -> Result<()> {
                 backend.as_deref(),
                 trace,
                 show_reasoning,
+                max_tokens,
                 trace_export.as_ref(),
             )
         }
@@ -646,7 +693,11 @@ fn run_command(cli: Cli) -> Result<()> {
             target,
             backend,
             stream,
+            show_reasoning,
+            max_tokens,
             system,
+            no_tools,
+            tools_file,
         } => commands::repl::handle_repl_command(
             config,
             model,
@@ -656,7 +707,11 @@ fn run_command(cli: Cli) -> Result<()> {
             target,
             backend,
             stream,
+            show_reasoning,
+            max_tokens,
             system,
+            no_tools,
+            tools_file,
             verbose,
         ),
         Commands::Trace {
@@ -814,5 +869,83 @@ mod tests {
             help.contains("xybrid run --model qwen3-4b --backend mlx"),
             "{help}"
         );
+    }
+
+    #[test]
+    fn every_subcommand_parses_without_arg_collisions() {
+        // clap only detects duplicate short flags (like `pack -v` vs the
+        // global `-v/--verbose`) when the subcommand's arg set is built —
+        // exercise each one so a collision fails here instead of panicking
+        // at run time.
+        Cli::command().debug_assert();
+    }
+
+    #[test]
+    fn repl_accepts_show_reasoning_flag() {
+        let parsed = Cli::try_parse_from([
+            "xybrid",
+            "repl",
+            "--show-reasoning",
+            "--model-file",
+            "model.gguf",
+        ]);
+
+        let cli = parsed.unwrap_or_else(|err| panic!("repl should accept --show-reasoning: {err}"));
+        let Commands::Repl { show_reasoning, .. } = cli.command else {
+            panic!("expected repl command");
+        };
+        assert!(show_reasoning);
+    }
+
+    #[test]
+    fn run_and_repl_accept_max_tokens_flag() {
+        let run = Cli::try_parse_from([
+            "xybrid",
+            "run",
+            "--max-tokens",
+            "64",
+            "--model-file",
+            "model.gguf",
+        ])
+        .unwrap_or_else(|err| panic!("run should accept --max-tokens: {err}"));
+        let Commands::Run { max_tokens, .. } = run.command else {
+            panic!("expected run command");
+        };
+        assert_eq!(max_tokens, Some(64));
+
+        let repl = Cli::try_parse_from([
+            "xybrid",
+            "repl",
+            "--max-tokens",
+            "64",
+            "--model-file",
+            "model.gguf",
+        ])
+        .unwrap_or_else(|err| panic!("repl should accept --max-tokens: {err}"));
+        let Commands::Repl { max_tokens, .. } = repl.command else {
+            panic!("expected repl command");
+        };
+        assert_eq!(max_tokens, Some(64));
+    }
+
+    #[test]
+    fn run_and_repl_reject_zero_max_tokens_at_parse_time() {
+        for cmd in ["run", "repl"] {
+            let result = Cli::try_parse_from([
+                "xybrid",
+                cmd,
+                "--max-tokens",
+                "0",
+                "--model-file",
+                "model.gguf",
+            ]);
+            let Err(err) = result else {
+                panic!("--max-tokens 0 must be rejected before any model loads");
+            };
+            assert!(
+                err.to_string().contains("must be at least 1"),
+                "unexpected parse error: {err}"
+            );
+        }
     }
 }

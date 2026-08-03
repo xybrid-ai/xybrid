@@ -1,0 +1,26 @@
+[
+  {
+    "type": "file",
+    "oid": "c42d95952ee37aaa8e53e78b209711e489f7ca93",
+    "size": 1566,
+    "path": ".gitattributes"
+  },
+  {
+    "type": "file",
+    "oid": "6a34ecc2571604dffb788b20a5068471e350bd14",
+    "size": 989,
+    "path": "README.md"
+  },
+  {
+    "type": "file",
+    "oid": "060b6deb28162027937f886e7cd9fd68f401ebb3",
+    "size": 142819328,
+    "lfs": {
+      "oid": "ccdc5c85735743f081b7d44ca309cab569f76c0f2f0e8e163449a63721969c37",
+      "size": 142819328,
+      "pointerSize": 134
+    },
+    "xetHash": "7aaee8e8d6e62f61c79b201057f181edcc869bbbf5bd5a1aa5abc8da17558764",
+    "path": "SmolLM2_135M_Instruct.litertlm"
+  }
+]

@@ -1,0 +1,25 @@
+# GATE 2: a real first-party crate resolved from xybrid's actual Cargo.lock.
+# Proves rules_rs parses the real workspace lock and builds a proc-macro crate.
+# Requires the `crates` hub in //MODULE.bazel to be uncommented.
+load("@rules_rs//rs:rust_proc_macro.bzl", "rust_proc_macro")
+
+rust_proc_macro(
+    name = "xybrid_macros",
+    srcs = glob(["src/**/*.rs"]),
+    edition = "2021",
+    deps = [
+        "@crates//:syn",
+        "@crates//:quote",
+        "@crates//:proc-macro2",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+# Dir-basename alias so `//macros` (the label all_crate_deps() emits for
+# downstream crates, e.g. xybrid-sdk's proc_macro_deps) resolves to the
+# proven target above without renaming it.
+alias(
+    name = "macros",
+    actual = ":xybrid_macros",
+    visibility = ["//visibility:public"],
+)

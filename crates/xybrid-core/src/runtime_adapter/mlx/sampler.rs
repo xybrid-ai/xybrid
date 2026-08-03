@@ -314,6 +314,7 @@ mod tests {
             seed: None,
             stop_sequences: Vec::new(),
             grammar: None,
+            tools: Vec::new(),
         }
     }
 
@@ -328,6 +329,7 @@ mod tests {
             seed: None,
             stop_sequences: Vec::new(),
             grammar: None,
+            tools: Vec::new(),
         }
     }
 

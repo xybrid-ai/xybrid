@@ -17,66 +17,72 @@
 </p>
 
 <p align="center">
-  <a href="https://docs.xybrid.dev">Documentation</a> ·
-  <a href="#sdks">SDKs</a> ·
-  <a href="https://www.xybrid.ai/models">Models</a> ·
-  <a href="https://discord.gg/YhFHHkhbad">Join Discord</a> ·
-  <a href="https://x.com/xybrid_ai">Follow on X</a> ·
-  <a href="https://github.com/xybrid-ai/xybrid/issues">Issues</a>
+
+[![Docs][docs-shield]][docs-url]
+[![Website][website-shield]][website-url]
+[![Follow on X][twitter-shield]][twitter-url]
+[![Discord][discord-shield]][discord-url]
+
 </p>
 
 <p align="center">
 
-[![Website][website-shield]][website-url]
-[![Docs][docs-shield]][docs-url]
-[![Discord][discord-shield]][discord-url]
-[![Twitter][twitter-shield]][twitter-url]
-<br>
-[![License][license-shield]][license-url]
 [![Build][build-shield]][build-url]
+[![Release][release-shield]][release-url]
+[![License][license-shield]][license-url]
 [![OpenSSF Scorecard][scorecard-shield]][scorecard-url]
 [![OpenSSF Best Practices][bestpractices-shield]][bestpractices-url]
-[![Stars][stars-shield]][stars-url]
-[![Release][release-shield]][release-url]
-[![Release Date][release-date-shield]][release-url]
 <br>
+[![crates.io][crates-shield]][crates-url]
 [![pub.dev][pubdev-shield]][pubdev-url]
 [![Maven Central][maven-shield]][maven-url]
 [![Swift Package Manager][spm-shield]][spm-url]
-[![crates.io][crates-shield]][crates-url]
-[![Visitors](https://visitor-badge.laobi.icu/badge?page_id=xybrid-ai.xybrid)](https://github.com/xybrid-ai/xybrid)
+<br>
+[![Ask DeepWiki][deepwiki-shield]][deepwiki-url]
+[![Stars][stars-shield]][stars-url]
+[![Visitors][visitors-shield]][visitors-url]
 
 </p>
 
-[website-shield]: https://img.shields.io/badge/xybrid.ai-4285F4?style=flat
-[website-url]: https://www.xybrid.ai/
-[docs-shield]: https://img.shields.io/badge/docs-xybrid.dev-1F6FEB?style=flat&logo=readthedocs&logoColor=white
+<!-- Primary — for-the-badge -->
+[docs-shield]: https://img.shields.io/badge/Docs-docs.xybrid.dev-1F6FEB?style=for-the-badge&logo=readthedocs&logoColor=white
 [docs-url]: https://docs.xybrid.dev/
-[discord-shield]: https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fdiscord.com%2Fapi%2Finvites%2FYhFHHkhbad%3Fwith_counts%3Dtrue&query=%24.approximate_member_count&logo=discord&logoColor=white&label=Discord&color=5865F2&suffix=%20members
+[website-shield]: https://img.shields.io/badge/Website-xybrid.ai-4285F4?style=for-the-badge
+[website-url]: https://www.xybrid.ai/
+[discord-shield]: https://img.shields.io/badge/Join_Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white
 [discord-url]: https://discord.gg/YhFHHkhbad
-[twitter-shield]: https://img.shields.io/twitter/follow/xybrid_ai
-[twitter-url]: https://x.com/xybrid_ai
-[license-shield]: https://img.shields.io/badge/License-Apache_2.0-blue.svg?style=flat
-[license-url]: https://opensource.org/licenses/Apache-2.0
-[build-shield]: https://img.shields.io/github/actions/workflow/status/xybrid-ai/xybrid/ci.yml?branch=master&style=flat
+
+<!-- Project health — flat-square -->
+[build-shield]: https://img.shields.io/github/actions/workflow/status/xybrid-ai/xybrid/ci.yml?branch=master&style=flat-square
 [build-url]: https://github.com/xybrid-ai/xybrid/actions
+[release-shield]: https://img.shields.io/github/v/release/xybrid-ai/xybrid?style=flat-square&sort=semver
+[release-url]: https://github.com/xybrid-ai/xybrid/releases
+[license-shield]: https://img.shields.io/badge/License-Apache_2.0-blue.svg?style=flat-square
+[license-url]: https://opensource.org/licenses/Apache-2.0
 [scorecard-shield]: https://api.scorecard.dev/projects/github.com/xybrid-ai/xybrid/badge
 [scorecard-url]: https://scorecard.dev/viewer/?uri=github.com/xybrid-ai/xybrid
 [bestpractices-shield]: https://www.bestpractices.dev/projects/13041/badge
 [bestpractices-url]: https://www.bestpractices.dev/projects/13041
-[stars-shield]: https://img.shields.io/github/stars/xybrid-ai/xybrid?style=flat
-[stars-url]: https://github.com/xybrid-ai/xybrid/stargazers
-[release-shield]: https://img.shields.io/github/v/release/xybrid-ai/xybrid?style=flat&sort=semver
-[release-url]: https://github.com/xybrid-ai/xybrid/releases
-[release-date-shield]: https://img.shields.io/github/release-date/xybrid-ai/xybrid?style=flat
-[pubdev-shield]: https://img.shields.io/pub/v/xybrid_flutter?style=flat&label=pub.dev
-[pubdev-url]: https://pub.dev/packages/xybrid_flutter
-[maven-shield]: https://img.shields.io/maven-central/v/ai.xybrid/xybrid-kotlin?style=flat&label=Maven%20Central
-[maven-url]: https://central.sonatype.com/artifact/ai.xybrid/xybrid-kotlin
-[spm-shield]: https://img.shields.io/badge/Swift_Package_Manager-compatible-F05138?style=flat&logo=swift&logoColor=white
-[spm-url]: https://github.com/xybrid-ai/xybrid
-[crates-shield]: https://img.shields.io/crates/v/xybrid?style=flat&label=crates.io&logo=rust
+
+<!-- Packages — flat-square -->
+[crates-shield]: https://img.shields.io/crates/v/xybrid?style=flat-square&label=crates.io&logo=rust
 [crates-url]: https://crates.io/crates/xybrid
+[pubdev-shield]: https://img.shields.io/pub/v/xybrid_flutter?style=flat-square&label=pub.dev
+[pubdev-url]: https://pub.dev/packages/xybrid_flutter
+[maven-shield]: https://img.shields.io/maven-central/v/ai.xybrid/xybrid-kotlin?style=flat-square&label=Maven%20Central
+[maven-url]: https://central.sonatype.com/artifact/ai.xybrid/xybrid-kotlin
+[spm-shield]: https://img.shields.io/badge/Swift_Package_Manager-compatible-F05138?style=flat-square&logo=swift&logoColor=white
+[spm-url]: https://github.com/xybrid-ai/xybrid
+
+<!-- Community — flat-square -->
+[deepwiki-shield]: https://deepwiki.com/badge.svg
+[deepwiki-url]: https://deepwiki.com/xybrid-ai/xybrid
+[stars-shield]: https://img.shields.io/github/stars/xybrid-ai/xybrid?style=flat-square
+[stars-url]: https://github.com/xybrid-ai/xybrid/stargazers
+[twitter-shield]: https://img.shields.io/badge/Follow-%40xybrid__ai-000000?style=for-the-badge&logo=x&logoColor=white
+[twitter-url]: https://x.com/xybrid_ai
+[visitors-shield]: https://visitor-badge.laobi.icu/badge?page_id=xybrid-ai.xybrid
+[visitors-url]: https://github.com/xybrid-ai/xybrid
 </div>
 
 <p align="center">
@@ -92,6 +98,7 @@
 |------|------|
 | Fastest demo (2 min) | [Install CLI →](#quick-start) |
 | Build a mobile or desktop app | [Flutter SDK →](bindings/flutter/) |
+| Try the browser preview | [Web SDK →](bindings/web/) |
 | Add AI NPCs to your game | [Unity SDK →](bindings/unity/) and try the [3D tavern demo](https://github.com/xybrid-ai/xybrid-unity-tavern) |
 | Android native | [Kotlin SDK →](bindings/kotlin/) |
 | Rust / embedded | [Core crate →](crates/) |
@@ -103,7 +110,10 @@
 
 ## SDKs
 
-Xybrid is a **Rust-powered runtime** with native bindings for every major platform.
+Native SDKs are powered by the Rust runtime and expose its native model
+capabilities. The Browser/Web preview is a separate browser-native LiteRT.js
+adapter that consumes `model_metadata.json` and currently supports only LiteRT
+raw typed-tensor I/O.
 
 | SDK | Platforms | Install | Status | Sample |
 |-----|-----------|---------|--------|--------|
@@ -111,10 +121,12 @@ Xybrid is a **Rust-powered runtime** with native bindings for every major platfo
 | **[Unity](bindings/unity/)** | macOS, Windows, Linux, iOS, Android | [See below](#quick-start) | Available | [Unity 3D AI tavern](https://github.com/xybrid-ai/xybrid-unity-tavern) |
 | **[Swift](bindings/apple/)** | iOS, macOS | Swift Package Manager | Coming Soon | [README](examples/ios/README.md) |
 | **[Kotlin](bindings/kotlin/)** | Android | Maven Central | Available | [README](examples/android/README.md) |
+| **[Browser/Web preview](bindings/web/)** | Modern browsers | `@xybrid/web` | Preview | [In-browser a+b demo](bindings/web/example/) |
 | **[CLI](https://github.com/xybrid-ai/xybrid/releases)** | macOS, Linux, Windows | `curl -sSL .../install.sh \| sh` | Available | — |
 | **[Rust](crates/)** | All | [crates.io](https://crates.io/crates/xybrid) | Available | — |
 
-Every SDK wraps the same Rust core — identical model support and behavior across all platforms.
+The native SDKs share the Rust core; the Browser/Web preview does not and has the
+limited LiteRT tensor surface described above.
 
 ---
 
@@ -130,7 +142,7 @@ See the full [Installation Guide](https://docs.xybrid.dev/en/docs/quickstart) fo
 
 ```yaml
 dependencies:
-  xybrid_flutter: ^0.2.2
+  xybrid_flutter: ^0.3.0
 ```
 
 **Run a model:**
@@ -147,7 +159,7 @@ final result = await model.run(XybridEnvelope.text('Hello world'));
 
 ```gradle
 dependencies {
-    implementation("ai.xybrid:xybrid-kotlin:0.2.2")
+    implementation("ai.xybrid:xybrid-kotlin:0.3.0")
 }
 ```
 
@@ -165,7 +177,7 @@ val result = model.run(Envelope.text("Hello world"))
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/xybrid-ai/xybrid.git", from: "0.2.2")
+    .package(url: "https://github.com/xybrid-ai/xybrid.git", from: "0.3.0")
 ]
 ```
 
@@ -179,11 +191,16 @@ let result = try model.run(envelope: Envelope.text("Hello world"))
 
 ### Unity
 
-**Install** via Unity Package Manager:
+**Install** via [OpenUPM](https://openupm.com/packages/ai.xybrid.sdk/) —
+`openupm add ai.xybrid.sdk`, or add the `https://package.openupm.com` scoped
+registry for scope `ai.xybrid` — or straight from the git subfolder:
 
 ```sh
-https://github.com/xybrid-ai/xybrid.git#upm
+https://github.com/xybrid-ai/xybrid.git?path=/bindings/unity
 ```
+
+Native libraries download automatically on import. See the
+[Unity SDK README](bindings/unity/README.md) for details.
 
 **Run a model:**
 
@@ -199,7 +216,7 @@ var result = model.Run(Envelope.Text("Hello world"));
 
 ```toml
 [dependencies]
-xybrid = "0.2.2"
+xybrid = "0.3.0"
 ```
 
 **Run a model:**
@@ -316,6 +333,7 @@ All models run entirely on-device. No cloud, no API keys required. Browse the fu
 | Gemma 3 1B | 1B | GGUF Q4_K_M | Google's mobile-optimized LLM |
 | LFM2.5 230M | 230M | GGUF Q4_K_M | Liquid AI's smallest hybrid conv+attention LLM for edge devices |
 | LFM2.5 350M | 354M | GGUF Q4_K_M | Liquid AI's hybrid conv+attention, 9 languages, tool calling |
+| LFM2.5 1.2B Thinking | 1.2B | GGUF Q4_K_M | Liquid AI reasoning model — chain-of-thought via `reasoningContent` ([guide](https://docs.xybrid.dev/en/docs/guides/reasoning)) |
 | Llama 3.2 1B | 1B | GGUF Q4_K_M | Meta's general purpose, 128K context |
 | Qwen 2.5 0.5B | 500M | GGUF Q4_K_M | Compact on-device chat |
 | Qwen 3.5 0.8B | 800M | GGUF Q4_K_M | Latest Qwen with reasoning (thinking mode) |
@@ -388,12 +406,20 @@ See the [model metadata docs](docs/sdk/API_REFERENCE.md) for the full schema, or
 | Text-to-Speech | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Language Models | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Vision Models | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Tool Calling | 🔜 | 🔜 | ✅ | ✅ | ✅ |
 | Embeddings | 🔜 | 🔜 | 🔜 | 🔜 | 🔜 |
 | Multi-Model Pipelines (MMP) | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Model Download & Caching | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Hardware Acceleration | Metal, ANE | CPU | Metal, ANE | CUDA | CUDA |
 
 **SDK MMP support:** Flutter ✅ · Rust ✅ · Kotlin 🔜 · Swift 🔜 · Unity 🔜
+
+**Tool calling:** local models call functions you define — your tools are
+plain data (`Tool::function(...)`) and the loop is your code, so any tooling
+plugs in. On-device via llama.cpp (LFM2 and gemma-4 protocols); Rust SDK and
+CLI today (`xybrid repl` ships built-in `web_search` + your own via
+`--tools-file`), Swift/Kotlin/Flutter bindings next. See the
+[Tool Calling guide](https://docs.xybrid.dev/en/docs/guides/tool-calling).
 
 ---
 

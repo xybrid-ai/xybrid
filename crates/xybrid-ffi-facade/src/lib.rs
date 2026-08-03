@@ -25,9 +25,6 @@
 //!
 //! # Out of scope (deferred to follow-up PRs)
 //!
-//! - **LLM token streaming.** The SDK exposes callback-based streaming
-//!   APIs (`run_streaming`, `run_stream`); a channel-style facade wrapper
-//!   will land next, once the binding crates start consuming this surface.
 //! - **ASR streaming.** [`xybrid_sdk::stream::XybridStream`] is wrapped
 //!   separately in the same follow-up.
 //! - **Pipelines.** `xybrid-sdk` already exports POD-friendly
@@ -41,7 +38,8 @@
 //! [`FfiStageExecutionResult`]: xybrid_sdk::FfiStageExecutionResult
 
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::mpsc::{self, Receiver, SyncSender};
+use std::sync::{Arc, Mutex};
 
 use xybrid_sdk as sdk;
 
@@ -593,6 +591,38 @@ impl ConversationContextHandle {
         self.lock().id().to_string()
     }
 
+    /// Number of history turns (excludes the system envelope).
+    pub fn history_len(&self) -> u32 {
+        self.lock().history().len() as u32
+    }
+
+    /// Whether a persistent system envelope is set.
+    pub fn has_system(&self) -> bool {
+        self.lock().system_envelope().is_some()
+    }
+
+    /// Set the max history length before FIFO pruning.
+    ///
+    /// Rebuilds the context and re-pushes history so pruning runs immediately
+    /// (matches the pre-bolt C ABI). `with_max_history_len` alone only changes
+    /// the cap; the SDK prunes on `push`, so a lower cap wouldn't trim existing
+    /// turns until the next push.
+    pub fn set_max_history_len(&self, len: u32) {
+        let mut guard = self.lock();
+        let id = guard.id().to_string();
+        let system = guard.system_envelope().cloned();
+        let history: Vec<_> = guard.history().to_vec();
+
+        let mut new_ctx = sdk::ConversationContext::with_id(id).with_max_history_len(len as usize);
+        if let Some(sys) = system {
+            new_ctx = new_ctx.with_system(sys);
+        }
+        for envelope in history {
+            new_ctx.push(envelope);
+        }
+        *guard = new_ctx;
+    }
+
     pub fn history(&self) -> Vec<Envelope> {
         self.lock()
             .history()
@@ -667,13 +697,8 @@ impl GenerationConfig {
         }
     }
 
-    /// Materialize the SDK type. Binding crates wrapping a non-facade POD
-    /// (e.g. `FfiGenerationConfig` in the Flutter bindings) call this to
-    /// consume the canonical "option overrides → SDK defaults" mapping
-    /// instead of duplicating it. `pub` rather than `pub(crate)` for that
-    /// reason.
-    pub fn to_sdk(&self) -> sdk::GenerationConfig {
-        let mut cfg = sdk::GenerationConfig::default();
+    /// Apply the explicitly set fields over a caller-provided SDK config.
+    pub fn apply_over(&self, mut cfg: sdk::GenerationConfig) -> sdk::GenerationConfig {
         if let Some(v) = self.max_tokens {
             cfg.max_tokens = v as usize;
         }
@@ -699,6 +724,15 @@ impl GenerationConfig {
             cfg.grammar = Some(g.clone());
         }
         cfg
+    }
+
+    /// Materialize the SDK type over the global defaults.
+    ///
+    /// Run paths with a model in scope should prefer
+    /// `apply_over(model.default_generation_config())` so model-level defaults
+    /// are preserved.
+    pub fn to_sdk(&self) -> sdk::GenerationConfig {
+        self.apply_over(sdk::GenerationConfig::default())
     }
 }
 
@@ -756,11 +790,19 @@ pub struct RunOptions {
 }
 
 impl RunOptions {
-    /// Materialize the SDK type. `pub` so binding crates with their own
-    /// run-options POD (e.g. `FfiRunOptions` in the Flutter bindings) can
-    /// route through this for the policy-builder assembly without
-    /// re-implementing it.
+    /// Materialize the SDK type over global defaults.
+    ///
+    /// Run paths with a model in scope should prefer [`Self::to_sdk_over`].
     pub fn to_sdk(&self, cancel: Option<&CancellationToken>) -> sdk::RunOptions {
+        self.to_sdk_over(cancel, sdk::GenerationConfig::default())
+    }
+
+    /// Materialize the SDK type over model-resolved generation defaults.
+    pub fn to_sdk_over(
+        &self,
+        cancel: Option<&CancellationToken>,
+        generation_base: sdk::GenerationConfig,
+    ) -> sdk::RunOptions {
         let mut policy = sdk::AbortPolicy::default()
             .with_cloud_fallback(self.fallback_to_cloud)
             .with_max_grace_tokens(self.max_grace_tokens);
@@ -770,7 +812,7 @@ impl RunOptions {
 
         let mut opts = sdk::RunOptions::new().with_abort_policy(policy);
         if let Some(gc) = &self.generation_config {
-            opts = opts.with_generation_config(gc.to_sdk());
+            opts = opts.with_generation_config(gc.apply_over(generation_base));
         }
         if let Some(cid) = &self.correlation_id {
             opts = opts.with_correlation_id(cid.clone());
@@ -883,6 +925,79 @@ pub struct InferenceResult {
     pub model_id: String,
     pub latency_ms: u32,
     pub metrics: InferenceMetrics,
+}
+
+/// A token emitted by a pull-based inference stream.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StreamToken {
+    pub token: String,
+    pub token_id: Option<i64>,
+    pub index: u64,
+    pub cumulative_text: String,
+    pub finish_reason: Option<String>,
+}
+
+impl StreamToken {
+    fn from_sdk(token: xybrid_core::runtime_adapter::types::PartialToken) -> Self {
+        Self {
+            token: token.token,
+            token_id: token.token_id,
+            index: token.index as u64,
+            cumulative_text: token.cumulative_text,
+            finish_reason: token.finish_reason,
+        }
+    }
+}
+
+/// An item returned by [`StreamingSession::next`].
+#[derive(Debug, Clone)]
+pub enum StreamEvent {
+    Token(StreamToken),
+    Complete(InferenceResult),
+    Error(Error),
+}
+
+const STREAM_CHANNEL_CAPACITY: usize = 32;
+
+/// Pull-based bridge over the SDK's callback streaming API.
+///
+/// A worker thread runs inference and writes into a bounded channel. Foreign
+/// callers repeatedly call [`next`](Self::next), keeping callbacks and Rust
+/// references on their respective sides of the FFI boundary.
+pub struct StreamingSession {
+    receiver: Mutex<Receiver<StreamEvent>>,
+}
+
+impl StreamingSession {
+    fn spawn(
+        produce: impl FnOnce(SyncSender<StreamEvent>) + Send + 'static,
+    ) -> std::io::Result<Arc<Self>> {
+        let (sender, receiver) = mpsc::sync_channel(STREAM_CHANNEL_CAPACITY);
+        std::thread::Builder::new()
+            .name("xybrid-stream".into())
+            .spawn(move || produce(sender))?;
+        Ok(Arc::new(Self {
+            receiver: Mutex::new(receiver),
+        }))
+    }
+
+    /// Block until the next token or terminal event is available.
+    ///
+    /// Returns `None` only after the producer disconnects. A normal inference
+    /// sends exactly one [`StreamEvent::Complete`] or [`StreamEvent::Error`]
+    /// before disconnecting.
+    pub fn next(&self) -> Option<StreamEvent> {
+        self.receiver
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .recv()
+            .ok()
+    }
+
+    #[cfg(test)]
+    fn spawn_for_test(produce: impl FnOnce(SyncSender<StreamEvent>) + Send + 'static) -> Arc<Self> {
+        Self::spawn(produce).expect("test streaming worker should spawn")
+    }
 }
 
 impl InferenceResult {
@@ -1066,6 +1181,54 @@ impl ModelLoader {
         })
     }
 
+    /// Load from a raw GGUF file: auto-generate `model_metadata.json` from the
+    /// GGUF header (writing it next to the file if absent), then load the parent
+    /// directory. Mirrors the pre-bolt C ABI's `from_model_file`.
+    ///
+    /// # Errors
+    /// [`Error::ConfigError`] on an empty/missing path or metadata-generation
+    /// failure; [`Error::IoError`] if the metadata sidecar can't be written.
+    pub fn from_model_file(path: String) -> Result<Arc<Self>> {
+        if path.is_empty() {
+            return Err(Error::ConfigError {
+                message: "path is empty".to_string(),
+            });
+        }
+        let gguf_path = std::path::Path::new(&path);
+        if !gguf_path.exists() {
+            return Err(Error::ConfigError {
+                message: format!("GGUF file not found: {path}"),
+            });
+        }
+
+        let metadata =
+            sdk::metadata_gen::generate_metadata_for_gguf_file(gguf_path).map_err(|e| {
+                Error::ConfigError {
+                    message: format!("failed to generate metadata for GGUF file: {e}"),
+                }
+            })?;
+
+        let parent_dir = gguf_path.parent().ok_or_else(|| Error::ConfigError {
+            message: "cannot determine parent directory of GGUF file".to_string(),
+        })?;
+
+        // Write the sidecar only if absent, so re-loading the same file is
+        // idempotent and never clobbers a user-authored metadata file.
+        let metadata_path = parent_dir.join("model_metadata.json");
+        if !metadata_path.exists() {
+            let json = serde_json::to_string_pretty(&metadata).map_err(|e| Error::ConfigError {
+                message: format!("failed to serialize metadata: {e}"),
+            })?;
+            std::fs::write(&metadata_path, json).map_err(|e| Error::IoError {
+                message: format!("failed to write model_metadata.json: {e}"),
+            })?;
+        }
+
+        let inner = sdk::ModelLoader::from_directory(parent_dir.to_string_lossy().to_string())
+            .map_err(Error::from)?;
+        Ok(Arc::new(Self { inner }))
+    }
+
     pub fn model_id(&self) -> Option<String> {
         self.inner.model_id().map(str::to_string)
     }
@@ -1124,6 +1287,11 @@ impl XybridModel {
         self.inner.supports_streaming()
     }
 
+    /// Whether this model emits true token-by-token output.
+    pub fn supports_token_streaming(&self) -> bool {
+        self.inner.supports_token_streaming()
+    }
+
     pub fn is_llm(&self) -> bool {
         self.inner.is_llm()
     }
@@ -1167,7 +1335,7 @@ impl XybridModel {
         cancel: Option<Arc<CancellationToken>>,
     ) -> Result<InferenceResult> {
         let env = envelope.into_sdk()?;
-        let opts = options.to_sdk(cancel.as_deref());
+        let opts = options.to_sdk_over(cancel.as_deref(), self.inner.default_generation_config());
         let result = self
             .inner
             .run_with_options(&env, &opts)
@@ -1188,7 +1356,9 @@ impl XybridModel {
     ) -> Result<InferenceResult> {
         let env = envelope.into_sdk()?;
         let ctx = context.snapshot();
-        let gc = generation_config.as_ref().map(GenerationConfig::to_sdk);
+        let gc = generation_config
+            .as_ref()
+            .map(|config| config.apply_over(self.inner.default_generation_config()));
         let result = self
             .inner
             .run_with_context(&env, &ctx, gc.as_ref())
@@ -1205,6 +1375,97 @@ impl XybridModel {
             .await
             .map_err(Error::from)?;
         Ok(InferenceResult::from_sdk(result))
+    }
+
+    /// Start inference and return a pull-based token stream.
+    ///
+    /// The returned session owns a bounded channel and the inference worker
+    /// owns a clone of the model, so both remain alive until inference ends.
+    /// Dropping the session disconnects the producer at its next token.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the envelope is invalid or the worker thread
+    /// cannot be created. Inference failures arrive as [`StreamEvent::Error`].
+    pub fn run_stream(
+        &self,
+        envelope: Envelope,
+        options: RunOptions,
+        cancel: Option<Arc<CancellationToken>>,
+    ) -> Result<Arc<StreamingSession>> {
+        let envelope = envelope.into_sdk()?;
+        let options =
+            options.to_sdk_over(cancel.as_deref(), self.inner.default_generation_config());
+        let model = self.inner.clone();
+
+        StreamingSession::spawn(move |sender| {
+            let result = model.run_streaming_with_options(&envelope, &options, |token| {
+                sender
+                    .send(StreamEvent::Token(StreamToken::from_sdk(token)))
+                    .map_err(|_| {
+                        Box::new(std::io::Error::new(
+                            std::io::ErrorKind::BrokenPipe,
+                            "stream receiver dropped",
+                        )) as Box<dyn std::error::Error + Send + Sync>
+                    })
+            });
+
+            let terminal = match result {
+                Ok(result) => StreamEvent::Complete(InferenceResult::from_sdk(result)),
+                Err(error) => StreamEvent::Error(Error::from(error)),
+            };
+            let _ = sender.send(terminal);
+        })
+        .map_err(|error| Error::InferenceError {
+            message: format!("failed to start streaming worker: {error}"),
+        })
+    }
+
+    /// Start context-aware inference and return a pull-based token stream.
+    ///
+    /// Mirrors [`run_stream`](Self::run_stream) but seeds the worker with a
+    /// snapshot of `context`'s conversation history so multi-turn chat streams.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the envelope is invalid or the worker thread
+    /// cannot be created. Inference failures arrive as [`StreamEvent::Error`].
+    pub fn run_stream_with_context(
+        &self,
+        envelope: Envelope,
+        context: Arc<ConversationContextHandle>,
+        options: RunOptions,
+        cancel: Option<Arc<CancellationToken>>,
+    ) -> Result<Arc<StreamingSession>> {
+        let envelope = envelope.into_sdk()?;
+        let ctx = context.snapshot();
+        let options =
+            options.to_sdk_over(cancel.as_deref(), self.inner.default_generation_config());
+        let model = self.inner.clone();
+
+        StreamingSession::spawn(move |sender| {
+            let result =
+                model.run_streaming_with_context_options(&envelope, &ctx, &options, |token| {
+                    sender
+                        .send(StreamEvent::Token(StreamToken::from_sdk(token)))
+                        .map_err(|_| {
+                            Box::new(std::io::Error::new(
+                                std::io::ErrorKind::BrokenPipe,
+                                "stream receiver dropped",
+                            ))
+                                as Box<dyn std::error::Error + Send + Sync>
+                        })
+                });
+
+            let terminal = match result {
+                Ok(result) => StreamEvent::Complete(InferenceResult::from_sdk(result)),
+                Err(error) => StreamEvent::Error(Error::from(error)),
+            };
+            let _ = sender.send(terminal);
+        })
+        .map_err(|error| Error::InferenceError {
+            message: format!("failed to start streaming worker: {error}"),
+        })
     }
 
     // -- Lifecycle ----------------------------------------------------------
@@ -1311,6 +1572,295 @@ pub fn set_provider_api_key(provider: String, api_key: String) {
 
 pub fn has_api_key() -> bool {
     sdk::has_api_key()
+}
+
+// ============================================================================
+// Telemetry (advanced config + lifecycle)
+// ============================================================================
+//
+// The apiKey-only fast path runs through [`configure_runtime`]
+// (`sdk::init().api_key().run()`). This handle exposes the *advanced* knobs —
+// batch size, flush interval, device label/attributes — that the platform SDKs
+// surface via a fluent `TelemetryConfig` builder, plus the process-global
+// init/flush/shutdown lifecycle. It mirrors the pre-bolt C ABI's telemetry
+// surface so the Unity/C# binding can move onto bolt without losing capability.
+//
+// Telemetry *events* never cross the FFI boundary — they are exported
+// Rust→network. Only this config/lifecycle control plane does.
+
+/// Tracks whether [`telemetry_init`] has run without a matching
+/// [`telemetry_shutdown`], so a second init is rejected instead of silently
+/// leaking the prior sender. Mirrors the pre-bolt C ABI's gate.
+static TELEMETRY_INITIALIZED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// The SDK's default telemetry ingest endpoint.
+///
+/// Bindings display this alongside a freshly created config so callers can read
+/// the resolved endpoint back without a round-trip setter.
+pub fn telemetry_default_endpoint() -> String {
+    sdk::telemetry::DEFAULT_INGEST_URL.to_string()
+}
+
+/// The SDK version string, sourced from `CARGO_PKG_VERSION` at compile time.
+pub fn version() -> String {
+    sdk::SDK_VERSION.to_string()
+}
+
+/// Interior-mutable holder for a telemetry configuration under construction.
+///
+/// Generator crates wrap this in `Arc<Self>` for opaque-handle semantics. The
+/// [`sdk::telemetry::TelemetryConfig`] is held behind a `Mutex<Option<_>>` so
+/// foreign callers can mutate it through a shared `&self` (FFI handle methods
+/// only ever receive a shared reference), and so [`telemetry_init`] can `take`
+/// it — leaving the handle empty — matching the pre-bolt consume-on-init
+/// contract. The mutex is uncontended in normal usage: a config is built by one
+/// host thread.
+pub struct TelemetryConfigHandle {
+    inner: Mutex<Option<sdk::telemetry::TelemetryConfig>>,
+}
+
+impl TelemetryConfigHandle {
+    /// A new config bound to the default ingest endpoint and the given API key.
+    pub fn new(api_key: String) -> Arc<Self> {
+        Arc::new(Self {
+            inner: Mutex::new(Some(sdk::telemetry::TelemetryConfig::new(
+                sdk::telemetry::DEFAULT_INGEST_URL,
+                api_key,
+            ))),
+        })
+    }
+
+    /// Override the ingest endpoint (self-hosted collector / non-prod).
+    pub fn set_endpoint(&self, endpoint: String) {
+        self.with_config(|config| config.endpoint = endpoint);
+    }
+
+    /// Set the app version reported with every event.
+    pub fn set_app_version(&self, version: String) {
+        self.with_config(|config| config.app_version = Some(version));
+    }
+
+    /// Set the human-friendly device label reported with every event.
+    pub fn set_device_label(&self, label: String) {
+        self.with_config(|config| config.device_label = Some(label));
+    }
+
+    /// Attach an app-provided device attribute (stored under `device.custom`).
+    pub fn set_device_attribute(&self, key: String, value: String) {
+        self.with_config(|config| {
+            config.device_profile_patch.custom.insert(key, value);
+        });
+    }
+
+    /// Set the number of events buffered before a flush.
+    pub fn set_batch_size(&self, batch_size: u32) {
+        self.with_config(|config| config.batch_size = batch_size as usize);
+    }
+
+    /// Set the background flush interval, in seconds.
+    pub fn set_flush_interval_secs(&self, secs: u32) {
+        self.with_config(|config| config.flush_interval_secs = secs as u64);
+    }
+
+    /// Apply `f` to the in-progress config. A no-op after the config has been
+    /// consumed by [`telemetry_init`] — mirroring the pre-bolt setters, which
+    /// no-op once the handle is gone.
+    fn with_config(&self, f: impl FnOnce(&mut sdk::telemetry::TelemetryConfig)) {
+        if let Some(config) = self.lock().as_mut() {
+            f(config);
+        }
+    }
+
+    /// Take the built config out, leaving the handle empty.
+    fn take(&self) -> Option<sdk::telemetry::TelemetryConfig> {
+        self.lock().take()
+    }
+
+    /// Lock the inner slot, recovering the guard if the mutex is poisoned (a
+    /// panic at the FFI boundary would abort the host app over a recoverable
+    /// condition — matches the codebase-wide poison-recovery convention).
+    fn lock(&self) -> std::sync::MutexGuard<'_, Option<sdk::telemetry::TelemetryConfig>> {
+        self.inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+}
+
+/// Start the process-global telemetry exporter from a built config.
+///
+/// Consumes the config held by `handle`: subsequent setter calls become no-ops
+/// and a second `telemetry_init` on the same handle errors. This is the
+/// advanced entry point; the apiKey-only path is [`configure_runtime`].
+///
+/// # Errors
+/// [`Error::ConfigError`] if the handle was already consumed, or if telemetry
+/// is already initialized without an intervening [`telemetry_shutdown`].
+pub fn telemetry_init(handle: &TelemetryConfigHandle) -> Result<()> {
+    // Reclaim the built config first — the pre-bolt C ABI always consumes the
+    // handle on init, success or failure.
+    let config = handle.take().ok_or_else(|| Error::ConfigError {
+        message: "telemetry config already consumed".to_string(),
+    })?;
+
+    // Gate against double-init: only the false→true transition wins. On
+    // contention, drop `config` (freeing the second sender's resources) and
+    // error without touching the live exporter.
+    if TELEMETRY_INITIALIZED
+        .compare_exchange(
+            false,
+            true,
+            std::sync::atomic::Ordering::AcqRel,
+            std::sync::atomic::Ordering::Acquire,
+        )
+        .is_err()
+    {
+        return Err(Error::ConfigError {
+            message: "telemetry already initialized; call shutdown before reinitializing"
+                .to_string(),
+        });
+    }
+
+    // Roll the gate back if init panics so a later init can retry — mirrors the
+    // pre-bolt C ABI. Without this, a panicked init wedges the gate at `true`
+    // with no live exporter: every later `telemetry_init` reports "already
+    // initialized" until the process restarts, and `telemetry_shutdown` has no
+    // real sender to stop. Catching here also keeps a recoverable
+    // telemetry-setup failure from unwinding across the FFI boundary and
+    // aborting the host app.
+    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        sdk::telemetry::init_platform_telemetry(config);
+    }));
+    if outcome.is_err() {
+        TELEMETRY_INITIALIZED.store(false, std::sync::atomic::Ordering::Release);
+        return Err(Error::ConfigError {
+            message: "telemetry init panicked".to_string(),
+        });
+    }
+
+    Ok(())
+}
+
+/// Flush pending telemetry events. Safe before init / after shutdown — the SDK
+/// no-ops when the exporter is absent.
+pub fn telemetry_flush() {
+    sdk::telemetry::flush_platform_telemetry();
+}
+
+/// Shut down the telemetry exporter. Idempotent: a call before init, or a
+/// second call, no-ops without touching the SDK.
+pub fn telemetry_shutdown() {
+    if TELEMETRY_INITIALIZED.swap(false, std::sync::atomic::Ordering::AcqRel) {
+        sdk::telemetry::shutdown_platform_telemetry();
+    }
+}
+
+// ============================================================================
+// Bundle inspection
+// ============================================================================
+//
+// Read-only inspection of `.xyb` model bundles (tar + zstd) for editor tooling
+// and asset workflows: open, read manifest/metadata, enumerate + extract files.
+// Mirrors the pre-bolt C ABI's bundle surface. Every method takes/returns simple
+// types, so the whole surface generates natively (no hand-port).
+
+/// FFI-friendly handle around an opened [`sdk::bundler::XyBundle`].
+///
+/// Generator crates wrap this in `Arc<Self>` for opaque-handle semantics. The
+/// bundle is immutable after [`open`](Self::open), so every accessor takes a
+/// shared `&self` and no interior mutability is needed.
+pub struct BundleHandle {
+    inner: sdk::bundler::XyBundle,
+}
+
+impl BundleHandle {
+    /// Open and parse a `.xyb` bundle (decompress zstd, parse tar, validate the
+    /// manifest).
+    ///
+    /// # Errors
+    /// [`Error::ConfigError`] on an empty path, or if the bundle can't be opened
+    /// or is malformed.
+    pub fn open(path: String) -> Result<Arc<Self>> {
+        if path.is_empty() {
+            return Err(Error::ConfigError {
+                message: "path is empty".to_string(),
+            });
+        }
+        let inner = sdk::bundler::XyBundle::load(&path).map_err(|e| Error::ConfigError {
+            message: format!("failed to open bundle: {e}"),
+        })?;
+        Ok(Arc::new(Self { inner }))
+    }
+
+    /// The model identifier from the manifest.
+    pub fn model_id(&self) -> String {
+        self.inner.manifest().model_id.clone()
+    }
+
+    /// The version string from the manifest.
+    pub fn version(&self) -> String {
+        self.inner.manifest().version.clone()
+    }
+
+    /// The target platform from the manifest.
+    pub fn target(&self) -> String {
+        self.inner.manifest().target.clone()
+    }
+
+    /// The SHA-256 hash from the manifest.
+    pub fn hash(&self) -> String {
+        self.inner.manifest().hash.clone()
+    }
+
+    /// Whether the bundle carries a `model_metadata.json`.
+    pub fn has_metadata(&self) -> bool {
+        self.inner.manifest().has_metadata
+    }
+
+    /// Number of files in the bundle (excludes `manifest.json`).
+    pub fn file_count(&self) -> u32 {
+        self.inner.manifest().files.len() as u32
+    }
+
+    /// The file name at `index`, or `None` if out of bounds.
+    pub fn file_name(&self, index: u32) -> Option<String> {
+        self.inner.manifest().files.get(index as usize).cloned()
+    }
+
+    /// The full bundle manifest serialized as JSON.
+    ///
+    /// # Errors
+    /// [`Error::ConfigError`] if the manifest can't be serialized.
+    pub fn manifest_json(&self) -> Result<String> {
+        serde_json::to_string(self.inner.manifest()).map_err(|e| Error::ConfigError {
+            message: format!("failed to serialize manifest: {e}"),
+        })
+    }
+
+    /// The `model_metadata.json` contents, or `None` if the bundle has none.
+    ///
+    /// # Errors
+    /// [`Error::ConfigError`] if reading the entry fails.
+    pub fn metadata_json(&self) -> Result<Option<String>> {
+        self.inner
+            .get_metadata_json()
+            .map_err(|e| Error::ConfigError {
+                message: format!("failed to read metadata: {e}"),
+            })
+    }
+
+    /// Extract every bundle file to `output_dir` (created if absent), preserving
+    /// relative paths.
+    ///
+    /// # Errors
+    /// [`Error::ConfigError`] if extraction fails.
+    pub fn extract(&self, output_dir: String) -> Result<()> {
+        self.inner
+            .extract_to(&output_dir)
+            .map_err(|e| Error::ConfigError {
+                message: format!("failed to extract bundle: {e}"),
+            })
+    }
 }
 
 // ============================================================================
@@ -1499,6 +2049,25 @@ mod tests {
     }
 
     #[test]
+    fn generation_config_apply_over_preserves_unset_base_fields() {
+        let base = sdk::GenerationConfig {
+            max_tokens: 3584,
+            temperature: 0.7,
+            ..sdk::GenerationConfig::default()
+        };
+        let gc = GenerationConfig {
+            top_k: Some(12),
+            ..GenerationConfig::default()
+        };
+
+        let sdk_gc = gc.apply_over(base);
+
+        assert_eq!(sdk_gc.max_tokens, 3584);
+        assert!((sdk_gc.temperature - 0.7).abs() < f32::EPSILON);
+        assert_eq!(sdk_gc.top_k, 12);
+    }
+
+    #[test]
     fn generation_config_defaults_preserve_sdk_defaults() {
         // An empty facade config must not silently override the SDK's
         // baked-in defaults. Verifies the `if let Some(...)` guards.
@@ -1539,12 +2108,79 @@ mod tests {
     }
 
     #[test]
+    fn run_options_without_generation_config_preserves_none() {
+        let base = sdk::GenerationConfig {
+            max_tokens: 3584,
+            ..sdk::GenerationConfig::default()
+        };
+
+        let sdk_opts = RunOptions::default().to_sdk_over(None, base);
+
+        assert!(sdk_opts.generation_config.is_none());
+    }
+
+    #[test]
     fn cancellation_token_is_observable_through_arc() {
         let token = CancellationToken::new();
         let clone = Arc::clone(&token);
         assert!(!token.is_cancelled());
         clone.cancel();
         assert!(token.is_cancelled());
+    }
+
+    #[test]
+    fn streaming_session_delivers_tokens_then_completion_in_order() {
+        let session = StreamingSession::spawn_for_test(|sender| {
+            sender
+                .send(StreamEvent::Token(StreamToken {
+                    token: "hel".into(),
+                    token_id: Some(1),
+                    index: 0,
+                    cumulative_text: "hel".into(),
+                    finish_reason: None,
+                }))
+                .expect("test stream receiver should remain connected");
+            sender
+                .send(StreamEvent::Token(StreamToken {
+                    token: "lo".into(),
+                    token_id: Some(2),
+                    index: 1,
+                    cumulative_text: "hello".into(),
+                    finish_reason: Some("stop".into()),
+                }))
+                .expect("test stream receiver should remain connected");
+            sender
+                .send(StreamEvent::Complete(text_result_with_metadata(
+                    HashMap::new(),
+                )))
+                .expect("test stream receiver should remain connected");
+        });
+
+        assert!(matches!(
+            session.next(),
+            Some(StreamEvent::Token(StreamToken { index: 0, .. }))
+        ));
+        assert!(matches!(
+            session.next(),
+            Some(StreamEvent::Token(StreamToken { index: 1, .. }))
+        ));
+        assert!(matches!(session.next(), Some(StreamEvent::Complete(_))));
+        assert!(session.next().is_none());
+    }
+
+    #[test]
+    fn streaming_session_delivers_typed_terminal_error() {
+        let session = StreamingSession::spawn_for_test(|sender| {
+            sender
+                .send(StreamEvent::Error(Error::NotLoaded))
+                .expect("test stream receiver should remain connected");
+        });
+
+        assert!(matches!(
+            session.next(),
+            Some(StreamEvent::Error(Error::NotLoaded))
+        ));
+        assert!(session.next().is_none());
     }
 
     #[test]
@@ -1590,5 +2226,58 @@ mod tests {
             bound.as_str(),
             "flutter" | "kotlin" | "swift" | "unity" | "rust"
         ));
+    }
+
+    #[test]
+    fn telemetry_default_endpoint_matches_sdk() {
+        assert_eq!(
+            telemetry_default_endpoint(),
+            sdk::telemetry::DEFAULT_INGEST_URL
+        );
+    }
+
+    #[test]
+    fn version_tracks_cargo_pkg_version() {
+        assert_eq!(version(), sdk::SDK_VERSION);
+        assert!(!version().is_empty());
+    }
+
+    #[test]
+    fn telemetry_builder_maps_to_sdk_fields_and_consumes() {
+        let handle = TelemetryConfigHandle::new("secret-key".into());
+
+        // A fresh config defaults its endpoint to the ingest URL (bindings read
+        // this back before init).
+        assert_eq!(
+            handle.lock().as_ref().unwrap().endpoint,
+            sdk::telemetry::DEFAULT_INGEST_URL
+        );
+
+        handle.set_endpoint("https://collector.internal".into());
+        handle.set_app_version("1.2.3".into());
+        handle.set_device_label("Test Device".into());
+        handle.set_device_attribute("ring".into(), "canary".into());
+        handle.set_batch_size(64);
+        handle.set_flush_interval_secs(30);
+
+        // `telemetry_init` takes the config out; assert every setter landed on the
+        // matching SDK field — this is the wire the C#/Unity builder relies on.
+        let config = handle.take().expect("config present before init");
+        assert_eq!(config.endpoint, "https://collector.internal");
+        assert_eq!(config.api_key, "secret-key");
+        assert_eq!(config.app_version.as_deref(), Some("1.2.3"));
+        assert_eq!(config.device_label.as_deref(), Some("Test Device"));
+        assert_eq!(
+            config.device_profile_patch.custom.get("ring"),
+            Some(&"canary".to_string())
+        );
+        assert_eq!(config.batch_size, 64);
+        assert_eq!(config.flush_interval_secs, 30);
+
+        // Consumed: a second take yields nothing and later setters no-op rather
+        // than panic (mirrors the pre-bolt consume-on-init contract).
+        assert!(handle.take().is_none());
+        handle.set_endpoint("ignored".into());
+        assert!(handle.take().is_none());
     }
 }

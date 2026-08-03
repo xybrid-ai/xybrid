@@ -1,0 +1,15 @@
+/Assets/Smoke.unity
+/Assets/Smoke.unity.meta
+/Assets/Xybrid/
+/Assets/Xybrid.meta
+/Build/
+/editmode-results.xml
+/Library/
+/Logs/
+/Packages/packages-lock.json
+/ProjectSettings/*
+!/ProjectSettings/ProjectVersion.txt
+/Temp/
+/test-results.xml
+/UserSettings/
+/obj/

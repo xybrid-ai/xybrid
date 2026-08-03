@@ -38,7 +38,7 @@ use crate::runtime_adapter::llm::{
 };
 use crate::runtime_adapter::llm_telemetry::{StreamingTelemetry, StreamingTelemetryFields};
 use crate::runtime_adapter::streaming_postprocess::{
-    merge_stop_patterns, strip_and_capture_thinking_tags, trim_partial_stop_suffix,
+    merge_stop_patterns, strip_and_capture_thinking_tags_primed, trim_partial_stop_suffix,
     truncate_at_first_stop, StreamingTextFilter, CHAT_STOP_PATTERNS, CHAT_STOP_PATTERNS_BROKEN,
 };
 use crate::runtime_adapter::AdapterError;
@@ -381,15 +381,13 @@ impl LlamaCppBackend {
         let n_ctx = context.n_ctx();
         let prefix_len = compute_reusable_prefix_len(&state.cached_tokens, new_tokens);
 
-        // Safety net: if the prefilled prefix + new tail + max_new_tokens
-        // would push us past the context window, the simple LCP path
-        // can't help — drop the cache and let the standard "input too
-        // long" check in the C wrapper produce a clear error. This also
-        // covers the eviction case the issue explicitly punts on.
-        let would_overflow = prefix_len
-            .saturating_add(new_tokens.len() - prefix_len)
-            .saturating_add(max_new_tokens)
-            >= n_ctx;
+        // Generated positions are [prompt, prompt + max_new_tokens), so
+        // `prompt + max_new_tokens == n_ctx` is still inside the context.
+        // `clamp_generation_budget` guarantees this sum does not exceed
+        // `n_ctx` on clamped paths; keep the strict overflow check for other
+        // callers and retain the reusable prefix at the exact-fit boundary.
+        let would_overflow =
+            generation_would_overflow_context(prefix_len, new_tokens.len(), max_new_tokens, n_ctx);
         if prefix_len == 0 || would_overflow {
             context.kv_cache_clear();
             state.cached_tokens = new_tokens.to_vec();
@@ -506,8 +504,9 @@ impl LlamaCppBackend {
         model: &xybrid_llama::LlamaModel,
         messages: &[ChatMessage],
         reasoning: bool,
+        tools: &[crate::gateway::Tool],
     ) -> LlmResult<Vec<i32>> {
-        let prompt = chat::format_chat_prompt(model, messages, reasoning)?;
+        let prompt = chat::format_chat_prompt(model, messages, reasoning, tools)?;
         Ok(model.tokenize_special(&prompt, true)?)
     }
 
@@ -531,11 +530,13 @@ impl LlamaCppBackend {
         }
 
         let prompt_token_count = tokens.len();
+        let max_tokens = clamp_generation_budget(config.max_tokens, n_ctx, prompt_token_count);
         let (tail, n_past) =
-            self.prepare_kv_cache_and_get_tail(model, context, &tokens, config.max_tokens)?;
+            self.prepare_kv_cache_and_get_tail(model, context, &tokens, max_tokens)?;
 
         Ok(PreparedGeneration {
             prompt_token_count,
+            max_tokens,
             tail,
             n_past,
         })
@@ -562,7 +563,7 @@ impl LlamaCppBackend {
             context,
             model,
             &prepared.tail,
-            config.max_tokens,
+            prepared.max_tokens,
             config.temperature,
             config.top_p,
             config.min_p,
@@ -580,6 +581,7 @@ impl LlamaCppBackend {
 
 struct PreparedGeneration {
     prompt_token_count: usize,
+    max_tokens: usize,
     tail: Vec<i32>,
     n_past: usize,
 }
@@ -628,6 +630,66 @@ fn output_from_fields(
         image_preprocess_ms: None,
         reasoning_content,
     }
+}
+
+/// Clamp generation to the positions left after the prompt or multimodal
+/// prefix — the C decode loop hard-errors (-4) once prompt + generation
+/// exceeds the context window, losing the partial result. A zero result
+/// means the consumed prompt or prefix fills the context window; callers
+/// surface their input-too-long error for that.
+fn clamp_generation_budget(requested: usize, n_ctx: usize, consumed: usize) -> usize {
+    requested.min(n_ctx.saturating_sub(consumed))
+}
+
+/// Restore the stream invariant that emitted deltas concatenate to the
+/// result text: a primed stream that suppressed everything would otherwise
+/// return an answer no consumer ever saw.
+fn should_emit_recovered_answer(
+    emitted_tokens: usize,
+    truncated_by_budget: bool,
+    tool_block_suppressed: bool,
+    primed: bool,
+    recovered_text: &str,
+) -> bool {
+    emitted_tokens == 0
+        && !truncated_by_budget
+        && !tool_block_suppressed
+        && primed
+        && !recovered_text.is_empty()
+}
+
+/// Whether generation exhausted its budget without a stop signal or EOG token.
+fn generation_truncated_by_budget(
+    stopped: bool,
+    ended_on_eog: bool,
+    generated: usize,
+    budget: usize,
+) -> bool {
+    !stopped && !ended_on_eog && generated >= budget
+}
+
+/// The native loop stores the terminal EOG token before breaking, and
+/// `detokenize` renders special tokens verbatim — without trimming by token
+/// identity, a model whose EOG literal is missing from the stop-pattern
+/// table (e.g. Llama 3's `<|eot_id|>`) leaks it into the answer text.
+fn text_tokens_without_terminal_eog(output_tokens: &[i32], ended_on_eog: bool) -> &[i32] {
+    if ended_on_eog {
+        &output_tokens[..output_tokens.len().saturating_sub(1)]
+    } else {
+        output_tokens
+    }
+}
+
+fn generation_would_overflow_context(
+    prefix_len: usize,
+    prompt_tokens: usize,
+    max_new_tokens: usize,
+    n_ctx: usize,
+) -> bool {
+    prefix_len
+        .saturating_add(prompt_tokens.saturating_sub(prefix_len))
+        .saturating_add(max_new_tokens)
+        > n_ctx
 }
 
 /// Assemble the final-cleanup stop patterns for a chat turn: the caller's
@@ -798,7 +860,12 @@ impl LlmBackend for LlamaCppBackend {
             // Tokenize with special token parsing enabled — the chat template contains
             // special tokens like <|im_start|>, <end_of_turn>, etc. that must be
             // recognized as their special token IDs, not as individual characters.
-            let tokens = Self::tokenize_chat_prompt(model, messages, self.reasoning_enabled())?;
+            let tokens = Self::tokenize_chat_prompt(
+                model,
+                messages,
+                self.reasoning_enabled(),
+                &config.tools,
+            )?;
             let prepared =
                 self.prepare_generation(model, context, tokens, config, PromptKind::Chat)?;
 
@@ -838,7 +905,11 @@ impl LlmBackend for LlamaCppBackend {
             );
 
             // Decode tokens to text
-            let mut text = model.detokenize(&output_tokens)?;
+            let ended_on_eog = output_tokens
+                .last()
+                .is_some_and(|&token| model.vocab_is_eog(token));
+            let mut text =
+                model.detokenize(text_tokens_without_terminal_eog(&output_tokens, ended_on_eog))?;
 
             // Debug: log the raw text and its bytes to understand encoding
             log::debug!(target: "xybrid_core", "LLM raw output ({} chars): {:?}", text.len(), &text[..text.len().min(200)]);
@@ -852,14 +923,29 @@ impl LlmBackend for LlamaCppBackend {
             log::debug!(target: "xybrid_core", "Searching for stop patterns: {:?}", final_stop_patterns);
             let stopped_in_text = truncate_at_first_stop(&mut text, &final_stop_patterns);
             let trimmed_partial = trim_partial_stop_suffix(&mut text, &final_stop_patterns);
-            let (clean, reasoning_content) = strip_and_capture_thinking_tags(&text);
+            let truncated_by_budget = generation_truncated_by_budget(
+                stopped_in_text || trimmed_partial || stopped_by_callback,
+                ended_on_eog,
+                output_tokens.len(),
+                prepared.max_tokens,
+            );
+            let (clean, reasoning_content) =
+                strip_and_capture_thinking_tags_primed(
+                    &text,
+                    self.reasoning_enabled(),
+                    truncated_by_budget,
+                );
             let text = clean.trim().to_string();
             // `stopped_by_callback` catches the C layer detecting a stop
             // before the Rust post-scan would — e.g. the user-supplied
             // stop sequences that the C layer sees first. Prior code
             // silently dropped this signal and sometimes reported
             // `length` for a clean stop.
-            let finish_reason = if stopped_in_text || trimmed_partial || stopped_by_callback {
+            let finish_reason = if stopped_in_text
+                || trimmed_partial
+                || stopped_by_callback
+                || ended_on_eog
+            {
                 "stop"
             } else {
                 "length"
@@ -933,6 +1019,21 @@ impl LlmBackend for LlamaCppBackend {
         })
     }
 
+    fn render_chat_prompt(
+        &self,
+        messages: &[ChatMessage],
+        config: &GenerationConfig,
+    ) -> LlmResult<String> {
+        // Rendering needs only the model (embedded template + tokenizer
+        // metadata), not the decode context — so read the model directly
+        // instead of going through `with_model_and_context`, and never
+        // queue behind an in-flight generation holding the context mutex.
+        let model = self.model.as_ref().ok_or_else(|| {
+            AdapterError::ModelNotLoaded("No model loaded. Call load() first.".to_string())
+        })?;
+        chat::format_chat_prompt(model, messages, self.reasoning_enabled(), &config.tools)
+    }
+
     fn generate_streaming(
         &self,
         messages: &[ChatMessage],
@@ -943,7 +1044,12 @@ impl LlmBackend for LlamaCppBackend {
 
         self.with_model_and_context(|model, context| {
             // Tokenize with special token parsing — chat template contains special tokens
-            let tokens = Self::tokenize_chat_prompt(model, messages, self.reasoning_enabled())?;
+            let tokens = Self::tokenize_chat_prompt(
+                model,
+                messages,
+                self.reasoning_enabled(),
+                &config.tools,
+            )?;
             let prepared =
                 self.prepare_generation(model, context, tokens, config, PromptKind::Chat)?;
 
@@ -965,6 +1071,7 @@ impl LlmBackend for LlamaCppBackend {
             // local leg of every aborted run. Successful runs harmlessly
             // overwrite this with the same value after finalize.
             let stop_patterns = merge_stop_patterns(&config.stop_sequences, CHAT_STOP_PATTERNS);
+            let suppress_tools = !config.tools.is_empty();
             // Thinking models have `<think>` primed into the prompt, so their
             // output starts mid-reasoning with no opening tag — start the filter
             // already suppressing so the reasoning never reaches the callback.
@@ -973,6 +1080,9 @@ impl LlmBackend for LlamaCppBackend {
             } else {
                 StreamingTextFilter::new(stop_patterns.clone())
             };
+            if suppress_tools {
+                filter = filter.with_tool_call_suppression();
+            }
             let mut token_index = 0usize;
 
             let (output_tokens, stopped_by_callback, fields) = Self::run_streaming_generation(
@@ -1010,29 +1120,89 @@ impl LlmBackend for LlamaCppBackend {
             // included here because this is final-text only — no streaming
             // false-positive risk.
             let final_patterns = chat_stop_patterns(config);
-            let mut text = model.detokenize(&output_tokens)?;
+            let ended_on_eog = output_tokens
+                .last()
+                .is_some_and(|&token| model.vocab_is_eog(token));
+            let mut text = model.detokenize(text_tokens_without_terminal_eog(
+                &output_tokens,
+                ended_on_eog,
+            ))?;
             let stopped_full = truncate_at_first_stop(&mut text, &final_patterns);
             let trimmed_partial = trim_partial_stop_suffix(&mut text, &final_patterns);
-            let (clean, reasoning_content) = strip_and_capture_thinking_tags(&text);
+            let truncated_by_budget = generation_truncated_by_budget(
+                filter.is_stopped() || stopped_full || trimmed_partial || stopped_by_callback,
+                ended_on_eog,
+                output_tokens.len(),
+                prepared.max_tokens,
+            );
+            let (clean, reasoning_content) = strip_and_capture_thinking_tags_primed(
+                &text,
+                self.reasoning_enabled(),
+                truncated_by_budget,
+            );
             let text = clean.trim().to_string();
             // `stopped_by_callback` is an independent signal from the C
             // layer that a stop sequence was hit — previously dropped.
-            let finish_reason =
-                if filter.is_stopped() || stopped_full || trimmed_partial || stopped_by_callback {
-                    "stop".to_string()
-                } else {
-                    "length".to_string()
-                };
+            //
+            // finish_reason gates on a REAL parse of the final text — the
+            // exact criterion `build_llm_response_envelope` uses — so the
+            // terminal token and the envelope can never disagree. The
+            // filter's marker-level `saw_tool_call_block` is deliberately
+            // NOT used here: a complete-but-unparseable block suppresses
+            // fine but is not a tool call.
+            let saw_tool_call_block = filter.saw_tool_call_block();
+            let emitted_tool_calls = suppress_tools
+                && !crate::runtime_adapter::tool_call::parse_tool_calls(&text).is_empty();
+            let finish_reason = if emitted_tool_calls {
+                "tool_calls".to_string()
+            } else if filter.is_stopped()
+                || stopped_full
+                || trimmed_partial
+                || stopped_by_callback
+                || ended_on_eog
+            {
+                "stop".to_string()
+            } else {
+                "length".to_string()
+            };
+
+            let tool_block_suppressed = suppress_tools && saw_tool_call_block;
+            if should_emit_recovered_answer(
+                token_index,
+                truncated_by_budget,
+                tool_block_suppressed,
+                self.reasoning_enabled(),
+                &text,
+            ) {
+                let recovered_partial = PartialToken::new(text.clone(), token_index, text.clone());
+                token_index += 1;
+                on_token(recovered_partial).map_err(AdapterError::from_streaming_callback_error)?;
+            }
 
             // Send final empty token with finish_reason — matches the
             // pre-refactor contract so downstream consumers see a
             // terminal signal. Guarded on `token_index > 0` to avoid
             // emitting a stray terminal chunk when nothing was ever
-            // emitted (e.g. immediate stop).
-            if token_index > 0 {
-                let final_partial = PartialToken::new(String::new(), token_index, text.clone())
+            // emitted (e.g. immediate stop) — except when a tool block was
+            // suppressed: then the stream showed nothing on purpose and the
+            // terminal token is the caller's only signal.
+            if token_index > 0 || tool_block_suppressed {
+                // The filter's cumulative view only differs from the final text
+                // when a tool block was deliberately suppressed; keying on mere
+                // tool CONFIGURATION would send an empty cumulative whenever the
+                // answer was recovered post-filter (nothing ever streamed).
+                let final_cumulative = if tool_block_suppressed {
+                    filter.cumulative_emitted().to_string()
+                } else {
+                    text.clone()
+                };
+                let final_partial = PartialToken::new(String::new(), token_index, final_cumulative)
                     .with_finish_reason(&finish_reason);
-                let _ = on_token(final_partial);
+                // Terminal errors propagate like every other callback error
+                // (the trait contract, and what mistral already does) — the
+                // typed conversion keeps a CloudFallbackAbort returned here
+                // visible to the orchestrator's fallback matching.
+                on_token(final_partial).map_err(AdapterError::from_streaming_callback_error)?;
             }
 
             Ok(output_from_fields(
@@ -1091,108 +1261,137 @@ impl LlmBackend for LlamaCppBackend {
             .to_string();
 
         self.with_model_and_context(|model, context| {
-            let prompt =
-                chat::format_chat_prompt(model, &inputs.chat_messages, self.reasoning_enabled())?;
+            let prompt = chat::format_chat_prompt(
+                model,
+                &inputs.chat_messages,
+                self.reasoning_enabled(),
+                &config.tools,
+            )?;
             let generation_stop_patterns =
                 merge_stop_patterns(&config.stop_sequences, CHAT_STOP_PATTERNS);
-            let (_loaded, (output_tokens, stopped_by_callback, fields, image_preprocess_ms)) = self
-                .with_mtmd_context_loaded(model, &mmproj_path, |mtmd_context| {
-                    let image_preprocess_started = std::time::Instant::now();
-                    let bitmaps = inputs
-                        .images
-                        .iter()
-                        .map(|image| image.build_bitmap(mtmd_context))
-                        .collect::<Result<Vec<_>, _>>()?;
+            let (
+                _loaded,
+                (output_tokens, stopped_by_callback, fields, image_preprocess_ms, max_tokens),
+            ) = self.with_mtmd_context_loaded(model, &mmproj_path, |mtmd_context| {
+                let image_preprocess_started = std::time::Instant::now();
+                let bitmaps = inputs
+                    .images
+                    .iter()
+                    .map(|image| image.build_bitmap(mtmd_context))
+                    .collect::<Result<Vec<_>, _>>()?;
 
-                    let chunks = xybrid_llama::MtmdInputChunks::tokenize(
-                        mtmd_context,
-                        &prompt,
-                        true,
-                        true,
-                        &bitmaps,
-                    )?;
-                    let summary = chunks.summary()?;
-                    let image_preprocess_ms = if !inputs.images.is_empty() {
-                        let elapsed_ms = image_preprocess_started.elapsed().as_millis().max(1);
-                        let image_preprocess_ms = elapsed_ms.min(u32::MAX as u128) as u32;
-                        xybrid_trace::add_metadata(
-                            "image_preprocess_ms",
-                            image_preprocess_ms.to_string(),
-                        );
-                        Some(image_preprocess_ms)
-                    } else {
-                        None
-                    };
-                    context.kv_cache_clear();
-                    self.clear_cached_prefix_state();
+                let chunks = xybrid_llama::MtmdInputChunks::tokenize(
+                    mtmd_context,
+                    &prompt,
+                    true,
+                    true,
+                    &bitmaps,
+                )?;
+                let summary = chunks.summary()?;
+                let image_preprocess_ms = if !inputs.images.is_empty() {
+                    let elapsed_ms = image_preprocess_started.elapsed().as_millis().max(1);
+                    let image_preprocess_ms = elapsed_ms.min(u32::MAX as u128) as u32;
                     xybrid_trace::add_metadata(
-                        "tokens_in",
-                        summary.helper_total_tokens.to_string(),
+                        "image_preprocess_ms",
+                        image_preprocess_ms.to_string(),
                     );
-                    let n_batch = self.config.as_ref().map_or(512, |config| {
-                        if config.n_batch == 0 {
-                            512
-                        } else {
-                            config.n_batch
-                        }
-                    });
-                    let new_n_past = xybrid_llama::mtmd_helper_eval_chunks(
-                        mtmd_context,
-                        context,
-                        &chunks,
-                        0,
-                        0,
-                        n_batch,
-                        true,
-                    )?;
-                    if new_n_past < 0 {
-                        return Err(AdapterError::RuntimeError(format!(
-                            "mtmd helper eval returned negative n_past: {}",
-                            new_n_past
-                        )));
+                    Some(image_preprocess_ms)
+                } else {
+                    None
+                };
+                context.kv_cache_clear();
+                self.clear_cached_prefix_state();
+                xybrid_trace::add_metadata("tokens_in", summary.helper_total_tokens.to_string());
+                let n_batch = self.config.as_ref().map_or(512, |config| {
+                    if config.n_batch == 0 {
+                        512
+                    } else {
+                        config.n_batch
                     }
+                });
+                let new_n_past = xybrid_llama::mtmd_helper_eval_chunks(
+                    mtmd_context,
+                    context,
+                    &chunks,
+                    0,
+                    0,
+                    n_batch,
+                    true,
+                )?;
+                if new_n_past < 0 {
+                    return Err(AdapterError::RuntimeError(format!(
+                        "mtmd helper eval returned negative n_past: {}",
+                        new_n_past
+                    )));
+                }
+                let consumed = new_n_past as usize;
+                let max_tokens =
+                    clamp_generation_budget(config.max_tokens, context.n_ctx(), consumed);
+                if max_tokens == 0 {
+                    return Err(AdapterError::InvalidInput(
+                        PromptKind::Chat.input_too_long_message(consumed, context.n_ctx()),
+                    ));
+                }
 
-                    let mut tel = StreamingTelemetry::new(summary.helper_total_tokens);
-                    let (output_tokens, stopped_by_callback) =
-                        xybrid_llama::generate_from_current_logits_streaming(
-                            context,
-                            model,
-                            config.max_tokens,
-                            config.temperature,
-                            config.top_p,
-                            config.min_p,
-                            config.top_k,
-                            config.repetition_penalty,
-                            &generation_stop_patterns,
-                            config.grammar.as_deref(),
-                            new_n_past as usize,
-                            |_token_id, _token_text| {
-                                tel.record_chunk();
-                                Ok(())
-                            },
-                        )?;
-                    let fields = tel.finalize(output_tokens.len());
-                    Ok((
-                        output_tokens,
-                        stopped_by_callback,
-                        fields,
-                        image_preprocess_ms,
-                    ))
-                })?;
+                let mut tel = StreamingTelemetry::new(summary.helper_total_tokens);
+                let (output_tokens, stopped_by_callback) =
+                    xybrid_llama::generate_from_current_logits_streaming(
+                        context,
+                        model,
+                        max_tokens,
+                        config.temperature,
+                        config.top_p,
+                        config.min_p,
+                        config.top_k,
+                        config.repetition_penalty,
+                        &generation_stop_patterns,
+                        config.grammar.as_deref(),
+                        new_n_past as usize,
+                        |_token_id, _token_text| {
+                            tel.record_chunk();
+                            Ok(())
+                        },
+                    )?;
+                let fields = tel.finalize(output_tokens.len());
+                Ok((
+                    output_tokens,
+                    stopped_by_callback,
+                    fields,
+                    image_preprocess_ms,
+                    max_tokens,
+                ))
+            })?;
 
             let final_stop_patterns =
                 merge_stop_patterns(&generation_stop_patterns, CHAT_STOP_PATTERNS_BROKEN);
-            let mut text = model.detokenize(&output_tokens)?;
+            let ended_on_eog = output_tokens
+                .last()
+                .is_some_and(|&token| model.vocab_is_eog(token));
+            let mut text = model.detokenize(text_tokens_without_terminal_eog(
+                &output_tokens,
+                ended_on_eog,
+            ))?;
             let stopped_in_text = truncate_at_first_stop(&mut text, &final_stop_patterns);
             let trimmed_partial = trim_partial_stop_suffix(&mut text, &final_stop_patterns);
-            let (clean, reasoning_content) = strip_and_capture_thinking_tags(&text);
+            let truncated_by_budget = generation_truncated_by_budget(
+                stopped_in_text || trimmed_partial || stopped_by_callback,
+                ended_on_eog,
+                output_tokens.len(),
+                max_tokens,
+            );
+            let (clean, reasoning_content) = strip_and_capture_thinking_tags_primed(
+                &text,
+                self.reasoning_enabled(),
+                truncated_by_budget,
+            );
             let text = clean.trim().to_string();
-            let finish_reason = if stopped_in_text || trimmed_partial || stopped_by_callback {
-                "stop"
-            } else {
-                "length"
-            }
-            .to_string();
+            let finish_reason =
+                if stopped_in_text || trimmed_partial || stopped_by_callback || ended_on_eog {
+                    "stop"
+                } else {
+                    "length"
+                }
+                .to_string();
 
             Ok(GenerationOutput {
                 text,
@@ -1235,10 +1434,15 @@ impl LlmBackend for LlamaCppBackend {
             .to_string();
 
         self.with_model_and_context(|model, context| {
-            let prompt =
-                chat::format_chat_prompt(model, &inputs.chat_messages, self.reasoning_enabled())?;
+            let prompt = chat::format_chat_prompt(
+                model,
+                &inputs.chat_messages,
+                self.reasoning_enabled(),
+                &config.tools,
+            )?;
             let generation_stop_patterns =
                 merge_stop_patterns(&config.stop_sequences, CHAT_STOP_PATTERNS);
+            let suppress_tools = !config.tools.is_empty();
             let (
                 _loaded,
                 (
@@ -1246,7 +1450,10 @@ impl LlmBackend for LlamaCppBackend {
                     stopped_by_callback,
                     fields,
                     image_preprocess_ms,
+                    max_tokens,
                     filter_stopped,
+                    filter_saw_tool_call_block,
+                    filter_cumulative,
                     token_index,
                 ),
             ) = self.with_mtmd_context_loaded(model, &mmproj_path, |mtmd_context| {
@@ -1302,6 +1509,14 @@ impl LlmBackend for LlamaCppBackend {
                         new_n_past
                     )));
                 }
+                let consumed = new_n_past as usize;
+                let max_tokens =
+                    clamp_generation_budget(config.max_tokens, context.n_ctx(), consumed);
+                if max_tokens == 0 {
+                    return Err(AdapterError::InvalidInput(
+                        PromptKind::Chat.input_too_long_message(consumed, context.n_ctx()),
+                    ));
+                }
 
                 let mut tel = StreamingTelemetry::new(summary.helper_total_tokens);
                 let mut filter = if self.reasoning_enabled() {
@@ -1309,11 +1524,14 @@ impl LlmBackend for LlamaCppBackend {
                 } else {
                     StreamingTextFilter::new(generation_stop_patterns.clone())
                 };
+                if suppress_tools {
+                    filter = filter.with_tool_call_suppression();
+                }
                 let mut token_index = 0usize;
                 let stream_result = xybrid_llama::generate_from_current_logits_streaming(
                     context,
                     model,
-                    config.max_tokens,
+                    max_tokens,
                     config.temperature,
                     config.top_p,
                     config.min_p,
@@ -1346,30 +1564,87 @@ impl LlmBackend for LlamaCppBackend {
                     stopped_by_callback,
                     fields,
                     image_preprocess_ms,
+                    max_tokens,
                     filter.is_stopped(),
+                    filter.saw_tool_call_block(),
+                    filter.cumulative_emitted().to_string(),
                     token_index,
                 ))
             })?;
 
+            let mut token_index = token_index;
             let final_stop_patterns =
                 merge_stop_patterns(&generation_stop_patterns, CHAT_STOP_PATTERNS_BROKEN);
-            let mut text = model.detokenize(&output_tokens)?;
+            let ended_on_eog = output_tokens
+                .last()
+                .is_some_and(|&token| model.vocab_is_eog(token));
+            let mut text = model.detokenize(text_tokens_without_terminal_eog(
+                &output_tokens,
+                ended_on_eog,
+            ))?;
             let stopped_in_text = truncate_at_first_stop(&mut text, &final_stop_patterns);
             let trimmed_partial = trim_partial_stop_suffix(&mut text, &final_stop_patterns);
-            let (clean, reasoning_content) = strip_and_capture_thinking_tags(&text);
+            let truncated_by_budget = generation_truncated_by_budget(
+                filter_stopped || stopped_in_text || trimmed_partial || stopped_by_callback,
+                ended_on_eog,
+                output_tokens.len(),
+                max_tokens,
+            );
+            let (clean, reasoning_content) = strip_and_capture_thinking_tags_primed(
+                &text,
+                self.reasoning_enabled(),
+                truncated_by_budget,
+            );
             let text = clean.trim().to_string();
-            let finish_reason =
-                if filter_stopped || stopped_in_text || trimmed_partial || stopped_by_callback {
-                    "stop"
-                } else {
-                    "length"
-                }
-                .to_string();
+            // Same real-parse gate as the text streaming site: the terminal
+            // token's finish_reason must match what the executor's envelope
+            // will report, and a complete-but-unparseable block is not a
+            // tool call.
+            let emitted_tool_calls = suppress_tools
+                && !crate::runtime_adapter::tool_call::parse_tool_calls(&text).is_empty();
+            let finish_reason = if emitted_tool_calls {
+                "tool_calls".to_string()
+            } else if filter_stopped
+                || stopped_in_text
+                || trimmed_partial
+                || stopped_by_callback
+                || ended_on_eog
+            {
+                "stop".to_string()
+            } else {
+                "length".to_string()
+            };
 
-            if token_index > 0 {
-                let final_partial = PartialToken::new(String::new(), token_index, text.clone())
+            let tool_block_suppressed = suppress_tools && filter_saw_tool_call_block;
+            if should_emit_recovered_answer(
+                token_index,
+                truncated_by_budget,
+                tool_block_suppressed,
+                self.reasoning_enabled(),
+                &text,
+            ) {
+                let recovered_partial = PartialToken::new(text.clone(), token_index, text.clone());
+                token_index += 1;
+                on_token(recovered_partial).map_err(AdapterError::from_streaming_callback_error)?;
+            }
+
+            if token_index > 0 || tool_block_suppressed {
+                // The filter's cumulative view only differs from the final text
+                // when a tool block was deliberately suppressed; keying on mere
+                // tool CONFIGURATION would send an empty cumulative whenever the
+                // answer was recovered post-filter (nothing ever streamed).
+                let final_cumulative = if tool_block_suppressed {
+                    filter_cumulative
+                } else {
+                    text.clone()
+                };
+                let final_partial = PartialToken::new(String::new(), token_index, final_cumulative)
                     .with_finish_reason(&finish_reason);
-                let _ = on_token(final_partial);
+                // Terminal errors propagate like every other callback error
+                // (the trait contract, and what mistral already does) — the
+                // typed conversion keeps a CloudFallbackAbort returned here
+                // visible to the orchestrator's fallback matching.
+                on_token(final_partial).map_err(AdapterError::from_streaming_callback_error)?;
             }
 
             Ok(GenerationOutput {
@@ -1395,6 +1670,81 @@ impl LlmBackend for LlamaCppBackend {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn terminal_eog_token_is_trimmed_from_text_tokens() {
+        let tokens = [1, 2, 3];
+        assert_eq!(text_tokens_without_terminal_eog(&tokens, true), &[1, 2]);
+        assert_eq!(text_tokens_without_terminal_eog(&tokens, false), &[1, 2, 3]);
+        let empty: [i32; 0] = [];
+        assert_eq!(text_tokens_without_terminal_eog(&empty, false), &empty[..]);
+    }
+
+    #[test]
+    fn generation_budget_keeps_requested_budget_when_it_fits() {
+        assert_eq!(clamp_generation_budget(128, 256, 64), 128);
+    }
+
+    #[test]
+    fn generation_budget_clamps_to_remaining_context() {
+        assert_eq!(clamp_generation_budget(256, 256, 64), 192);
+    }
+
+    #[test]
+    fn generation_budget_is_zero_when_context_is_consumed() {
+        assert_eq!(clamp_generation_budget(1, 256, 256), 0);
+        assert_eq!(clamp_generation_budget(1, 256, 300), 0);
+    }
+
+    #[test]
+    fn generation_budget_keeps_exact_remaining_boundary() {
+        assert_eq!(clamp_generation_budget(1, 256, 255), 1);
+    }
+
+    #[test]
+    fn recovered_answer_requires_all_streaming_conditions() {
+        assert!(should_emit_recovered_answer(
+            0, false, false, true, "answer"
+        ));
+        assert!(!should_emit_recovered_answer(
+            1, false, false, true, "answer"
+        ));
+        assert!(!should_emit_recovered_answer(
+            0, true, false, true, "answer"
+        ));
+        assert!(!should_emit_recovered_answer(
+            0, false, true, true, "answer"
+        ));
+        assert!(!should_emit_recovered_answer(
+            0, false, false, false, "answer"
+        ));
+        assert!(!should_emit_recovered_answer(0, false, false, true, ""));
+    }
+
+    #[test]
+    fn generation_truncation_excludes_eog_at_exact_budget_boundary() {
+        assert!(!generation_truncated_by_budget(false, true, 4, 4));
+        assert!(generation_truncated_by_budget(false, false, 4, 4));
+        assert!(!generation_truncated_by_budget(false, false, 3, 4));
+        assert!(!generation_truncated_by_budget(true, false, 4, 4));
+    }
+
+    #[test]
+    fn exact_fit_clamped_budget_keeps_prefix_reuse_eligible() {
+        let n_ctx = 256;
+        let prompt_tokens = 200;
+        let max_new_tokens = clamp_generation_budget(usize::MAX, n_ctx, prompt_tokens);
+        let prefix_len = 64;
+
+        assert_eq!(prompt_tokens + max_new_tokens, n_ctx);
+        assert!(prefix_len > 0);
+        assert!(!generation_would_overflow_context(
+            prefix_len,
+            prompt_tokens,
+            max_new_tokens,
+            n_ctx,
+        ));
+    }
 
     #[test]
     fn chat_stop_patterns_includes_user_stops_and_broken_variants() {

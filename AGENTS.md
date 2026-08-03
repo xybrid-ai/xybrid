@@ -97,8 +97,7 @@ Cargo workspace, `resolver = "2"`, edition 2021, MSRV not pinned. Members:
 | `crates/xybrid-sdk`            | Public Rust SDK; model load/run/stream + platform init (auth, telemetry) | lib      |
 | `crates/xybrid-cli`            | `xybrid` binary                                            | bin      |
 | `crates/xybrid-ffi-facade`     | FFI-agnostic POD/Arc facade over the SDK (one canonical translation) | FFI |
-| `crates/xybrid-bolt`           | BoltFFI bindings: Swift / Kotlin / Java / C# / WASM + C header (Apple/Android SDKs) | FFI |
-| `crates/xybrid-ffi`            | C ABI for Unity / C / C++ (pre-bolt; Unity migration pending) | FFI    |
+| `crates/xybrid-bolt`           | BoltFFI bindings: Swift / Kotlin / Java / C# (Unity) / WASM + C header — the sole native binding crate | FFI |
 | `bindings/flutter/rust`        | flutter_rust_bridge wrapper for Dart                       | FFI      |
 | `macros`                       | proc-macros (`xybrid-macros`); syn/quote only              | proc     |
 | `xtask`                        | build / codegen automation                                 | tool     |
@@ -108,13 +107,20 @@ Cargo workspace, `resolver = "2"`, edition 2021, MSRV not pinned. Members:
 the FFI binding crates now route their SDK→foreign-language translation
 through `xybrid-ffi-facade` rather than each re-translating SDK types.
 
+The Python SDK (`bindings/python`, pure Python — not a workspace member)
+consumes `xybrid-bolt`'s cdylib via a hand-ported ctypes wire layer
+(`bindings/python/xybrid/_bolt.py`) pinned to the boltffi 0.25.3 ABI: the
+pinned boltffi's experimental Python generator cannot express handles or
+fallible functions. Refresh the native lib with
+`tools/scripts/build-python-bolt.sh`; see the `[targets.python]` note in
+`crates/xybrid-bolt/boltffi.toml` for the boltffi >= 0.26 migration plan.
+
 **Dependency direction (do not reverse):**
 
 ```
 xybrid-cli  ──────────────────────► xybrid-sdk ─► xybrid-core
 xybrid-bolt ──► xybrid-ffi-facade ─► xybrid-sdk ─► xybrid-core
-xybrid-ffi  ─┐
-flutter rust─┴────────────────────► xybrid-sdk ─► xybrid-core
+flutter rust──► xybrid-ffi-facade ─► xybrid-sdk ─► xybrid-core
 xtask ────────────────────────────► xybrid-core
 integration-tests ────────────────► xybrid-core
 ```
@@ -149,12 +155,6 @@ Sub-error enums (`InferenceError`, `PipelineError`, `AdapterError`, …) live
 next to the modules that raise them and convert into the canonical type via
 `#[from]` / `impl From`. Follow that pattern for new modules — don't invent
 parallel top-level error types.
-
-`xybrid-ffi` is **different**: it's a C-ABI crate and uses opaque handles
-plus error strings/codes carried in result structs (see
-`crates/xybrid-ffi/src/lib.rs`). Don't bolt a public `thiserror` enum onto
-it — match the existing C-ABI pattern when adding new endpoints, and only
-surface error info through the documented handle/result conventions.
 
 Binaries (`xybrid-cli`, `xtask`) use **`anyhow`** with `.context(...)` at the
 boundaries where errors get printed.
@@ -283,7 +283,7 @@ patch, draft GitHub Release, the release PR, the tag, and the crates.io / pub.de
 ```bash
 git switch -c release/v<version> origin/master
 just bump-version <version>     # syncs every manifest: Cargo, pubspec, Unity,
-                                # Kotlin, Package.swift sdkVersion
+                                # Kotlin, Package.swift sdkVersion, Python pyproject
 ./bindings/apple/scripts/set-natives-mode.sh --set-remote   # useLocalNatives=false
 # fill the CHANGELOG entry for <version> (and bindings/flutter/CHANGELOG.md)
 git commit -am "bump: <version>" && git push -u origin release/v<version>
@@ -378,7 +378,7 @@ rules are the ones you'll consult most often in this repo.**
 - **`M-MODULE-DOCS`** — every public module needs `//!` docs covering contents, when to use, examples, side effects.
 
 ### FFI
-- **`M-ISOLATE-DLL-STATE`** — only portable (`#[repr(C)]`, no statics/TypeId/non-portable refs) data crosses DLL boundaries. Critical for `xybrid-ffi`.
+- **`M-ISOLATE-DLL-STATE`** — only portable (`#[repr(C)]`, no statics/TypeId/non-portable refs) data crosses DLL boundaries. Critical for `xybrid-bolt` (the cdylib crossing DLL boundaries).
 
 ### Performance
 - `M-HOTPATH` — identify hot paths early, bench with criterion, profile (Intel VTune / Superluminal). Enable `debug = 1` in `[profile.bench]`.
