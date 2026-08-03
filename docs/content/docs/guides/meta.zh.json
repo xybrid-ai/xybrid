@@ -1,0 +1,7 @@
+{
+  "title": "指南",
+  "description": "端到端实现指南",
+  "icon": "BookOpen",
+  "root": true,
+  "pages": ["tool-calling", "vision-models"]
+}

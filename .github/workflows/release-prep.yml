@@ -38,6 +38,22 @@ name: Release Prep
 on:
   push:
     branches: ['release/v*']
+  # Dry-run rehearsal (safe by construction): validate the Bazel CLI release
+  # path — build + payload-gate the linux/macOS/windows CLIs with the real
+  # release artifact names, and run the windows .exe smoke — WITHOUT any
+  # publish. In dry_run mode ONLY the CLI jobs + a summary run; every job with
+  # a publish side-effect (attestations, the draft release, the SBOM upload,
+  # the release PR, the checksum push, cargokit's release-asset uploads) is
+  # skipped wholesale. Dispatch from any branch; pass the version to rehearse.
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to rehearse (no v prefix, e.g. 0.4.0-alpha)'
+        required: true
+      dry_run:
+        description: 'Rehearsal only — build + gate the CLIs, publish nothing'
+        type: boolean
+        default: true
 
 # Cancel in-flight runs when the maintainer pushes again to the same
 # release branch (e.g. a changelog fixup) — no point finishing a stale
@@ -59,7 +75,7 @@ env:
 #     precompile-binaries creates/uploads release assets)
 #   - contents + pull-requests: write -> open-release-pr
 #   - id-token + attestations: write  -> build-xcframework, build-cli-macos,
-#     build-android, build-cli (the jobs that call `attest-build-provenance`)
+#     build-android, build-cli-windows, build-cli-linux (the jobs that call `attest-build-provenance`)
 # Keeping these off the workflow level means the remaining jobs don't get
 # unnecessary OIDC-issuance, release-write, or attestation-write privileges.
 permissions: read-all
@@ -75,32 +91,51 @@ jobs:
       branch: ${{ steps.meta.outputs.branch }}
       version: ${{ steps.meta.outputs.version }}
       tag: ${{ steps.meta.outputs.tag }}
+      dry_run: ${{ steps.meta.outputs.dry_run }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Parse branch / version
         id: meta
         shell: bash
+        env:
+          # workflow_dispatch inputs (empty on push)
+          INPUT_VERSION: ${{ inputs.version }}
+          INPUT_DRY_RUN: ${{ inputs.dry_run }}
         run: |
           set -euo pipefail
           BRANCH="${GITHUB_REF#refs/heads/}"
-          case "$BRANCH" in
-            release/v*) ;;
-            *) echo "::error::Expected release/v* branch, got $BRANCH"; exit 1 ;;
-          esac
-          TAG="${BRANCH#release/}"
-          VERSION="${TAG#v}"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            # Rehearsal (or a deliberate dispatch-triggered cut): version comes
+            # from the input, not a release/v* branch name.
+            VERSION="${INPUT_VERSION#v}"
+            TAG="v${VERSION}"
+            DRY_RUN="${INPUT_DRY_RUN:-true}"
+          else
+            case "$BRANCH" in
+              release/v*) ;;
+              *) echo "::error::Expected release/v* branch, got $BRANCH"; exit 1 ;;
+            esac
+            TAG="${BRANCH#release/}"
+            VERSION="${TAG#v}"
+            DRY_RUN=false
+          fi
           echo "branch=$BRANCH"   >> "$GITHUB_OUTPUT"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "tag=$TAG"         >> "$GITHUB_OUTPUT"
-          echo "Release branch:  $BRANCH"
-          echo "Release version: $VERSION"
+          echo "dry_run=$DRY_RUN" >> "$GITHUB_OUTPUT"
+          echo "Ref:     $BRANCH"
+          echo "Version: $VERSION (tag $TAG)"
+          echo "Dry-run: $DRY_RUN"
 
       - name: Check versions match release branch
         env:
           VERSION: ${{ steps.meta.outputs.version }}
+          DRY_RUN: ${{ steps.meta.outputs.dry_run }}
         run: |
           set -euo pipefail
+          ./tools/scripts/version-sync.sh --check
+
           CARGO_VERSION=$(grep -A5 '\[workspace\.package\]' Cargo.toml | grep '^version' | head -1 | sed 's/.*= *"\(.*\)"/\1/')
           FLUTTER_VERSION_PKG=$(grep '^version:' bindings/flutter/pubspec.yaml | sed 's/version: *//')
           UNITY_VERSION=$(python3 -c "import json; print(json.load(open('bindings/unity/package.json'))['version'])")
@@ -116,11 +151,20 @@ jobs:
           FAILED=0
           for V in "$CARGO_VERSION" "$FLUTTER_VERSION_PKG" "$UNITY_VERSION" "$KOTLIN_VERSION" "$SWIFT_VERSION"; do
             if [ "$V" != "$VERSION" ]; then
-              echo "::error::Version mismatch — branch is $VERSION but found $V"
+              echo "::error::Version mismatch — target is $VERSION but found $V"
               echo "Run 'just bump-version $VERSION' on the release branch and push the result."
               FAILED=1
             fi
           done
+          # In a rehearsal the manifests are usually the CURRENT version (the
+          # bump happens on the real release branch), so a mismatch is expected
+          # and non-fatal — the dry-run proves the CLI build mechanics, not the
+          # version bump. A real push (or a dispatch with dry_run=false) stays
+          # strict, which also blocks an accidental real cut from an unbumped ref.
+          if [ "$FAILED" -ne 0 ] && [ "$DRY_RUN" = "true" ]; then
+            echo "::warning::Version mismatch tolerated in dry-run rehearsal."
+            FAILED=0
+          fi
           [ "$FAILED" -eq 0 ] || exit 1
 
   # =========================================================================
@@ -139,6 +183,8 @@ jobs:
   # ----- Apple job 1/3: XCFramework (critical path; gates patch-spm-checksum)
   build-xcframework:
     name: Build XCFramework
+    # Skipped in a dry-run rehearsal (which validates only the CLI release path).
+    if: needs.check-release-branch.outputs.dry_run != 'true'
     needs: [check-release-branch]
     runs-on: macos-14
     permissions:
@@ -150,52 +196,25 @@ jobs:
         with:
           submodules: true
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
-        with:
-          toolchain: stable
-          targets: >-
-            aarch64-apple-ios,
-            aarch64-apple-ios-sim,
-            aarch64-apple-darwin
-
-      - name: Setup sccache
-        uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
-
-      - name: Configure sccache environment
-        shell: bash
+      # G4b: the XCFramework is Bazel-built — the same //bindings/apple:XybridFFI
+      # target G1-G3 assembled, now carrying BOTH the device and simulator slices
+      # (G4a). This REPLACES `cargo xtask build-xcframework` / `boltffi pack
+      # apple`, so the cargo scaffolding (rust toolchain, sccache, rust-cache,
+      # boltffi CLI) is gone: Bazel uses rules_rs's own pinned rust toolchain and
+      # its own cache, and the committed C header + Swift wrapper are the codegen
+      # (boltffi is not run here). bazelisk ships on macos runners and honors
+      # .bazelversion. --config=ios is Mac-LOCAL (xcodebuild -create-xcframework,
+      # iphoneos/iphonesimulator SDKs) — NEVER RBE, so no BuildBuddy config.
+      - name: Ensure Bazel host tools
         run: |
-          echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
-          echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
-          echo "CMAKE_C_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
-          echo "CMAKE_CXX_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
+          which cmake >/dev/null || brew install cmake
+          which pkg-config >/dev/null || brew install pkg-config
+          # The simulator ORT slice is fetched + raw-LZMA2-decoded with xz
+          # (bazel/ort_ios_sim.bzl).
+          which xz >/dev/null || brew install xz
 
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-        with:
-          prefix-key: "v1-rust"
-          shared-key: "apple-xcframework"
-          cache-all-crates: "true"
-          save-if: "true"
-
-      # `cargo xtask build-xcframework` shells out to `boltffi pack apple`, so
-      # the CLI must be present here just as it is in the Android job. Without
-      # it the build fails with "Failed to run `boltffi pack apple`. Install
-      # with `cargo install boltffi_cli`." Cache + pin to 0.25.3 to match the
-      # runtime `boltffi` crate (Cargo.lock) — a CLI/runtime skew mis-generates
-      # the bindings (see the Android job's note).
-      - name: Cache boltffi CLI
-        id: cache-boltffi
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        with:
-          path: ~/.cargo/bin/boltffi
-          key: boltffi-cli-${{ runner.os }}-0.25.3
-
-      - name: Install boltffi CLI
-        run: which boltffi || cargo install boltffi_cli --version 0.25.3 --locked
-
-      - name: Build XCFramework
-        run: cargo xtask build-xcframework --release
+      - name: Build XCFramework (Bazel)
+        run: bazelisk build --config=ios //bindings/apple:XybridFFI
 
       - name: Prepare XCFramework artifact
         shell: bash
@@ -203,8 +222,12 @@ jobs:
           TAG: ${{ needs.check-release-branch.outputs.tag }}
         run: |
           mkdir -p dist
-          cd bindings/apple/XCFrameworks
-          zip -r ../../../dist/XybridFFI-${TAG}.xcframework.zip XybridFFI.xcframework
+          # apple_static_xcframework emits a ready .xcframework.zip whose root is
+          # XybridFFI.xcframework/ — no manual `zip -r`. -L copies the real file
+          # out of the bazel-bin symlink tree; the name matches Package.swift's
+          # binaryTarget URL (XybridFFI-v<ver>.xcframework.zip).
+          cp -L bazel-bin/bindings/apple/XybridFFI.xcframework.zip \
+            "dist/XybridFFI-${TAG}.xcframework.zip"
 
       - name: Attest XCFramework provenance
         uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
@@ -221,6 +244,8 @@ jobs:
   # ----- Apple job 2/3: Flutter darwin precompile (parallel; not on SPM path)
   precompile-flutter-darwin:
     name: Precompile Flutter (darwin)
+    # cargokit uploads release assets — skip in a dry-run rehearsal.
+    if: needs.check-release-branch.outputs.dry_run != 'true'
     permissions:
       contents: write   # cargokit precompile-binaries uploads release assets
     needs: [check-release-branch]
@@ -230,39 +255,64 @@ jobs:
         with:
           submodules: true
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
-        with:
-          toolchain: stable
-          targets: >-
-            aarch64-apple-ios,
-            aarch64-apple-ios-sim,
-            aarch64-apple-darwin
-
-      - name: Setup sccache
-        uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
-
-      - name: Configure sccache environment
-        shell: bash
+      # Flutter G2: the darwin/iOS/iOS-sim libraries are Bazel-built (the same
+      # //bindings/flutter/rust targets the advisory CI gates); cargokit keeps
+      # only its sign-and-upload role via --prebuilt-artifact. No Rust
+      # toolchain on this runner — Bazel brings its own.
+      - name: Ensure rfcc host tools
         run: |
-          echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
-          echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
-          echo "CMAKE_C_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
-          echo "CMAKE_CXX_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
+          which cmake >/dev/null || brew install cmake
+          which pkg-config >/dev/null || brew install pkg-config
+          which xz >/dev/null || brew install xz   # ort ios-sim fetch (raw-LZMA2 decode)
 
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-        with:
-          prefix-key: "v1-rust"
-          shared-key: "flutter-darwin"
-          cache-all-crates: "true"
-          save-if: "true"
+      - name: Configure BuildBuddy remote config
+        env:
+          BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
+        run: tools/scripts/write-buildbuddy-rc.sh
 
-      # Matches the LLVM install on the Linux/Windows Flutter precompile
-      # jobs. Conservative: cargokit may invoke clang somewhere; verifying
-      # whether macOS strictly needs this is a follow-up.
-      - name: Install LLVM
-        run: brew install llvm
+      # Three configs, one bazel-bin symlink — resolve every artifact via
+      # cquery + cp -L immediately after its build (never reference bazel-bin
+      # across configs).
+      - name: Build Flutter darwin libraries (Bazel)
+        run: |
+          set -euo pipefail
+          stage() {  # stage <triple> <config-args...>
+            local triple="$1"; shift
+            bazelisk build "$@" //bindings/flutter/rust:xybrid_flutter_ffi_staticlib
+            mkdir -p "prebuilt/$triple"
+            cp -L "$(tools/scripts/bazel-output.sh //bindings/flutter/rust:xybrid_flutter_ffi_staticlib "$@")" \
+              "prebuilt/$triple/libxybrid_flutter_ffi.a"
+          }
+          # macOS — mixed execution (Rust graph on RBE/cache, Metal local).
+          stage aarch64-apple-darwin --config=remote --config=macos-metal -c opt
+          # iOS device + simulator — Mac-local (Apple locks these to Xcode).
+          stage aarch64-apple-ios --config=ios
+          stage aarch64-apple-ios-sim --config=ios-sim
+
+      # The payload gate (the cutover ritual): every staticlib must carry the
+      # full shipped feature surface, and the iOS slices must be the right
+      # platform (device vs simulator). Mach-O symbols carry a leading
+      # underscore; LC_BUILD_VERSION platform: 1=macOS, 2=iOS, 7=iOS-sim.
+      - name: Verify Flutter darwin payloads
+        run: |
+          set -euo pipefail
+          check_lib() {  # check_lib <triple> <expected-platform-id>
+            local lib="prebuilt/$1/libxybrid_flutter_ffi.a"
+            file "$lib" | grep -q 'archive' || { echo "$1: not a static archive"; exit 1; }
+            test "$(nm "$lib" 2>/dev/null | grep -c '_ggml_metal')" -gt 0 || { echo "$1: MISSING Metal symbols"; exit 1; }
+            test "$(nm "$lib" 2>/dev/null | grep -c '_mtmd_')" -gt 0 || { echo "$1: MISSING vision (mtmd) symbols"; exit 1; }
+            # No early-exit consumers (grep -q / awk exit) on big pipes: under
+            # pipefail, the writer dies on EPIPE and fails the step ("strings:
+            # failed to flush output"). Count matches instead — full read.
+            test "$(strings "$lib" | grep -ci 'candle')" -gt 0 || { echo "$1: MISSING candle support"; exit 1; }
+            local platform
+            platform=$(otool -l "$lib" | awk '/LC_BUILD_VERSION/{f=1} f && /platform/ && !p {p=$2} END{print p}')
+            test "$platform" = "$2" || { echo "$1: wrong platform $platform (want $2)"; exit 1; }
+            echo "$1: OK (platform $platform)"
+          }
+          check_lib aarch64-apple-darwin 1
+          check_lib aarch64-apple-ios 2
+          check_lib aarch64-apple-ios-sim 7
 
       - uses: dart-lang/setup-dart@65eb853c7ba17dde3be364c3d2858773e7144260 # v1.7.2
 
@@ -270,7 +320,9 @@ jobs:
         working-directory: bindings/flutter/cargokit/build_tool
         run: dart pub get
 
-      - name: Precompile and upload Flutter darwin binaries
+      # Explicit --target list = the exact set cargokit's empty-target
+      # fallback produces on a macOS host today (all darwin targets).
+      - name: Sign and upload Flutter darwin binaries (cargokit)
         working-directory: bindings/flutter/cargokit/build_tool
         shell: bash
         env:
@@ -280,11 +332,23 @@ jobs:
           dart run bin/build_tool.dart precompile-binaries \
             --repository ${{ github.repository }} \
             --manifest-dir ${{ github.workspace }}/bindings/flutter/rust \
-            --verbose
+            --verbose \
+            --target aarch64-apple-darwin \
+            --target aarch64-apple-ios \
+            --target aarch64-apple-ios-sim \
+            --prebuilt-artifact aarch64-apple-darwin=${{ github.workspace }}/prebuilt/aarch64-apple-darwin \
+            --prebuilt-artifact aarch64-apple-ios=${{ github.workspace }}/prebuilt/aarch64-apple-ios \
+            --prebuilt-artifact aarch64-apple-ios-sim=${{ github.workspace }}/prebuilt/aarch64-apple-ios-sim
 
   # ----- Apple job 3/3: CLI macos-arm64 (parallel)
   build-cli-macos:
-    name: Build CLI (macos-arm64)
+    # Flip 2 (macOS): Bazel mixed execution — the Mac runner drives the build,
+    # the Rust graph executes on BuildBuddy's Linux workers (or comes from the
+    # shared cache the advisory CI keeps warm), and only the Metal llama
+    # compile runs on this Mac (Xcode's metal compiler). Same parity-first
+    # ritual as the Android AAR and linux CLI cutovers: payload gate before
+    # anything ships; artifact name, attestation, and downstream unchanged.
+    name: Build CLI (macos-arm64, Bazel)
     needs: [check-release-branch]
     runs-on: macos-14
     permissions:
@@ -296,36 +360,36 @@ jobs:
         with:
           submodules: true
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
-        with:
-          toolchain: stable
-          targets: aarch64-apple-darwin
-
-      - name: Setup sccache
-        uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
-
-      - name: Configure sccache environment
-        shell: bash
+      # build:macos-metal uses the host's preinstalled cmake/make/pkg-config
+      # for rfcc's exec tools (macos-14 images ship them; guard just in case).
+      - name: Ensure rfcc host tools
         run: |
-          echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
-          echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
-          echo "CMAKE_C_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
-          echo "CMAKE_CXX_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
+          which cmake >/dev/null || brew install cmake
+          which pkg-config >/dev/null || brew install pkg-config
 
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-        with:
-          prefix-key: "v1-rust"
-          shared-key: "cli-macos-arm64"
-          cache-all-crates: "true"
-          save-if: "true"
+      - name: Configure BuildBuddy remote config
+        env:
+          BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
+        run: tools/scripts/write-buildbuddy-rc.sh
 
-      - name: Build CLI (macos-arm64)
-        run: cargo build --release -p xybrid-cli --target aarch64-apple-darwin --features platform-macos
+      - name: Build CLI (Bazel mixed execution, shipping mode)
+        run: |
+          bazelisk build --config=remote --config=macos-metal -c opt \
+            //crates/xybrid-cli:xybrid
 
-      - name: Strip CLI binary
-        run: strip target/aarch64-apple-darwin/release/xybrid
+      # The payload gate: must run, and carry the full platform-macos surface —
+      # Metal GPU (ggml_metal), vision (mtmd), candle voice, huggingface.
+      # (Mach-O symbols carry a leading underscore.)
+      - name: Verify CLI payload (run + Metal + features)
+        run: |
+          BIN=$(tools/scripts/bazel-output.sh //crates/xybrid-cli:xybrid --config=remote --config=macos-metal -c opt)
+          echo "resolved CLI: $BIN"
+          file "$BIN"
+          "$BIN" --help >/dev/null
+          test "$(nm "$BIN" | grep -c '_ggml_metal')" -gt 0 || { echo "MISSING Metal (ggml_metal) symbols"; exit 1; }
+          test "$(nm "$BIN" | grep -c '_mtmd_')" -gt 0 || { echo "MISSING vision (mtmd) symbols"; exit 1; }
+          strings "$BIN" | grep -q 'huggingface\.co' || { echo "MISSING huggingface support"; exit 1; }
+          strings "$BIN" | grep -qi 'candle' || { echo "MISSING candle (voice) support"; exit 1; }
 
       - name: Prepare CLI artifact
         shell: bash
@@ -333,10 +397,15 @@ jobs:
           TAG: ${{ needs.check-release-branch.outputs.tag }}
         run: |
           mkdir -p dist-cli
-          cp target/aarch64-apple-darwin/release/xybrid dist-cli/xybrid-${TAG}-macos-arm64
+          BIN=$(tools/scripts/bazel-output.sh //crates/xybrid-cli:xybrid --config=remote --config=macos-metal -c opt)
+          cp "$BIN" dist-cli/xybrid-${TAG}-macos-arm64
+          chmod +w dist-cli/xybrid-${TAG}-macos-arm64   # bazel outputs are read-only
+          strip dist-cli/xybrid-${TAG}-macos-arm64
           chmod +x dist-cli/xybrid-${TAG}-macos-arm64
 
       - name: Attest macOS CLI provenance
+        # No provenance for rehearsal artifacts (the binary won't ship).
+        if: needs.check-release-branch.outputs.dry_run != 'true'
         uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
         with:
           subject-path: dist-cli/xybrid-${{ needs.check-release-branch.outputs.tag }}-macos-arm64
@@ -352,6 +421,8 @@ jobs:
   # =========================================================================
   build-android:
     name: Build Android
+    # Skipped in a dry-run rehearsal (already ships; not the CLI path under test).
+    if: needs.check-release-branch.outputs.dry_run != 'true'
     needs: [check-release-branch]
     runs-on: ubuntu-latest
     permissions:
@@ -363,80 +434,30 @@ jobs:
         with:
           submodules: true
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
-        with:
-          toolchain: stable
-          targets: >-
-            aarch64-linux-android,
-            armv7-linux-androideabi,
-            x86_64-linux-android
-
-      - name: Setup sccache
-        uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
-
-      - name: Configure sccache environment
-        shell: bash
+      # Bazel builds the feature-complete 3-ABI AAR (text + candle voice +
+      # mtmd vision) on the shared BuildBuddy cache; the NDK is a pinned Bazel
+      # download (no local SDK/NDK/cargo/boltffi setup). We stage the AAR's
+      # jniLibs into bindings/kotlin/libs/ — the exact layout Gradle publishes
+      # from. Replaces build-android-bolt.sh (boltffi pack + clang-shim relink
+      # + patchelf).
+      - name: Free disk space
         run: |
-          echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
-          echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
-          echo "CMAKE_C_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
-          echo "CMAKE_CXX_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/.ghcup \
+            /opt/hostedtoolcache/CodeQL
+          sudo docker image prune --all --force || true
 
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-        with:
-          prefix-key: "v1-rust"
-          shared-key: "android-ndk"
-          cache-all-crates: "true"
-          save-if: "true"
+      - name: Configure BuildBuddy remote config
+        env:
+          BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
+        run: tools/scripts/write-buildbuddy-rc.sh
 
-      - name: Setup Android NDK
-        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
-
-      - name: Resolve NDK install path
-        shell: bash
-        run: echo "NDK_DIR=$ANDROID_HOME/ndk/${{ env.NDK_VERSION }}" >> $GITHUB_ENV
-
-      - name: Cache Android NDK
-        id: cache-ndk
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
-        with:
-          path: ${{ env.NDK_DIR }}
-          key: ndk-${{ runner.os }}-${{ env.NDK_VERSION }}
-
-      - name: Install NDK
-        if: steps.cache-ndk.outputs.cache-hit != 'true'
-        run: sdkmanager --install "ndk;${{ env.NDK_VERSION }}"
-
-      - name: Set ANDROID_NDK_HOME
-        run: echo "ANDROID_NDK_HOME=${{ env.NDK_DIR }}" >> $GITHUB_ENV
-
-      - name: Install cargo-ndk
-        run: which cargo-ndk || cargo install cargo-ndk
-
-      # boltffi CLI provides the `boltffi pack android` the build script
-      # (tools/scripts/build-android-bolt.sh) calls. The standalone
-      # build-android.yml / test-ci.yml jobs install it; release-prep must too,
-      # or `cargo xtask build-android` fails with `boltffi: command not found`.
-      # Cache the installed binary across runs.
-      - name: Cache boltffi CLI
-        id: cache-boltffi
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        with:
-          path: ~/.cargo/bin/boltffi
-          key: boltffi-cli-${{ runner.os }}-0.25.3
-
-      - name: Install boltffi CLI
-        # `which || install` is idempotent whether or not the cache populated
-        # the binary. Pinned to 0.25.3 to MATCH the runtime `boltffi` crate
-        # (Cargo.lock): a CLI/runtime skew mis-generates unit-ok `Result<(), E>`
-        # exports as a `void` foreign function that drops the error and leaks
-        # the result buffer. `--locked` installs against the CLI's bundled lock.
-        run: which boltffi || cargo install boltffi_cli --version 0.25.3 --locked
-
-      - name: Build Android .so files
-        run: cargo xtask build-android --release
+      - name: Build Android jniLibs (Bazel AAR on RBE)
+        run: |
+          bazelisk build --config=remote -c opt //bindings/kotlin:xybrid_kotlin_aar
+          rm -rf bindings/kotlin/libs && mkdir -p bindings/kotlin/libs /tmp/aar
+          unzip -o -q bazel-bin/bindings/kotlin/xybrid-kotlin.aar 'jni/*' -d /tmp/aar
+          cp -r /tmp/aar/jni/* bindings/kotlin/libs/
+          echo "staged jniLibs:" && ls -R bindings/kotlin/libs
 
       - name: Prepare artifact with version
         shell: bash
@@ -464,6 +485,8 @@ jobs:
   # =========================================================================
   precompile-flutter-linux:
     name: Precompile Flutter (linux)
+    # cargokit uploads release assets — skip in a dry-run rehearsal.
+    if: needs.check-release-branch.outputs.dry_run != 'true'
     permissions:
       contents: write   # cargokit precompile-binaries uploads release assets
     needs: [check-release-branch, build-android]
@@ -473,15 +496,16 @@ jobs:
         with:
           submodules: true
 
+      # Flutter G2: linux + 3 of the 4 Android ABIs are Bazel-built on RBE
+      # (the same //bindings/flutter/rust cdylib the advisory CI gates);
+      # cargokit keeps sign-and-upload via --prebuilt-artifact. The cargo
+      # toolchain below remains ONLY for i686-linux-android — the one ABI
+      # with no Bazel triple in the workspace yet.
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
         with:
           toolchain: stable
-          targets: >-
-            x86_64-unknown-linux-gnu,
-            aarch64-linux-android,
-            armv7-linux-androideabi,
-            x86_64-linux-android
+          targets: i686-linux-android
 
       - name: Setup sccache
         uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
@@ -531,11 +555,67 @@ jobs:
       - name: Install cargo-ndk
         run: which cargo-ndk || cargo install cargo-ndk
 
+      - name: Configure BuildBuddy remote config
+        env:
+          BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
+        run: tools/scripts/write-buildbuddy-rc.sh
+
+      # Four configs, one bazel-bin symlink — resolve every artifact via
+      # cquery + cp -L immediately after its build. build-android (a needs)
+      # has already warmed the RBE cache with the exact android Rust graph.
+      - name: Build Flutter libraries (Bazel on RBE)
+        run: |
+          set -euo pipefail
+          stage() {  # stage <triple> <config-args...>
+            local triple="$1"; shift
+            bazelisk build "$@" //bindings/flutter/rust:xybrid_flutter_ffi_cdylib
+            mkdir -p "prebuilt/$triple"
+            cp -L "$(tools/scripts/bazel-output.sh //bindings/flutter/rust:xybrid_flutter_ffi_cdylib "$@")" \
+              "prebuilt/$triple/libxybrid_flutter_ffi.so"
+          }
+          # linux x86_64 — hermetic glibc floor (loadable on older distros,
+          # unlike a runner-glibc cargo build)
+          stage x86_64-unknown-linux-gnu --config=remote -c opt
+          # android — the 3 Bazel ABIs (i686 stays on cargo below)
+          stage aarch64-linux-android --config=remote --config=android-arm64
+          stage armv7-linux-androideabi --config=remote --config=android-armv7
+          stage x86_64-linux-android --config=remote --config=android-x86_64
+
+      # The payload gate (the cutover ritual): right ELF machine per ABI,
+      # vision aboard, android .so carry the c++_shared DT_NEEDED + 16KB
+      # page alignment, linux keeps the hermetic glibc floor.
+      - name: Verify Flutter payloads
+        run: |
+          set -euo pipefail
+          check_so() {  # check_so <triple> <readelf-machine>
+            local so="prebuilt/$1/libxybrid_flutter_ffi.so"
+            readelf -h "$so" | grep -q "Machine:.*$2" || { echo "$1: wrong machine (want $2)"; readelf -h "$so" | grep Machine; exit 1; }
+            # grep -c (not -q): early pipe close + pipefail = EPIPE step failure.
+            test "$(strings "$so" | grep -c 'mtmd')" -gt 0 || { echo "$1: MISSING vision (mtmd) markers"; exit 1; }
+            echo "$1: OK"
+          }
+          check_so x86_64-unknown-linux-gnu "X86-64"
+          check_so aarch64-linux-android "AArch64"
+          check_so armv7-linux-androideabi "ARM"
+          check_so x86_64-linux-android "X86-64"
+          for triple in aarch64-linux-android armv7-linux-androideabi x86_64-linux-android; do
+            so="prebuilt/$triple/libxybrid_flutter_ffi.so"
+            readelf -d "$so" | grep -q 'NEEDED.*libc++_shared' || { echo "$triple: MISSING libc++_shared DT_NEEDED"; exit 1; }
+            readelf -lW "$so" | grep -Eq 'LOAD.*0x4000$' || { echo "$triple: MISSING 16KB page alignment"; exit 1; }
+          done
+          MAX_GLIBC=$(strings prebuilt/x86_64-unknown-linux-gnu/libxybrid_flutter_ffi.so | grep -oE 'GLIBC_[0-9]+\.[0-9]+' | sort -Vu | tail -1)
+          echo "linux glibc floor: $MAX_GLIBC"
+          [ "$(printf '%s\n' "$MAX_GLIBC" GLIBC_2.31 | sort -V | tail -1)" = "GLIBC_2.31" ] || { echo "glibc floor regressed above 2.31: $MAX_GLIBC"; exit 1; }
+
       - name: Install build tool dependencies
         working-directory: bindings/flutter/cargokit/build_tool
         run: dart pub get
 
-      - name: Precompile and upload binaries
+      # Explicit --target list = the exact set cargokit's fallback produces on
+      # a linux host today (host linux + all 4 android). i686 has no
+      # --prebuilt-artifact mapping, so cargokit cargo-builds it (the android
+      # flags below are what that one build needs).
+      - name: Sign and upload Flutter linux/android binaries (cargokit)
         working-directory: bindings/flutter/cargokit/build_tool
         shell: bash
         env:
@@ -548,158 +628,209 @@ jobs:
             --verbose \
             --android-sdk-location $ANDROID_HOME \
             --android-ndk-version ${{ env.NDK_VERSION }} \
-            --android-min-sdk-version 28
+            --android-min-sdk-version 28 \
+            --target x86_64-unknown-linux-gnu \
+            --target aarch64-linux-android \
+            --target armv7-linux-androideabi \
+            --target x86_64-linux-android \
+            --target i686-linux-android \
+            --prebuilt-artifact x86_64-unknown-linux-gnu=${{ github.workspace }}/prebuilt/x86_64-unknown-linux-gnu \
+            --prebuilt-artifact aarch64-linux-android=${{ github.workspace }}/prebuilt/aarch64-linux-android \
+            --prebuilt-artifact armv7-linux-androideabi=${{ github.workspace }}/prebuilt/armv7-linux-androideabi \
+            --prebuilt-artifact x86_64-linux-android=${{ github.workspace }}/prebuilt/x86_64-linux-android
 
   # =========================================================================
   # Flutter precompiled binaries — Windows.
   # =========================================================================
   precompile-flutter-windows:
     name: Precompile Flutter (windows)
+    # cargokit uploads release assets — skip in a dry-run rehearsal.
+    if: needs.check-release-branch.outputs.dry_run != 'true'
     permissions:
       contents: write   # cargokit precompile-binaries uploads release assets
     needs: [check-release-branch]
-    runs-on: windows-latest
+    # No Windows runner: the DLL is cross-compiled on Linux RBE workers by
+    # //bazel/toolchains/windows_msvc (hermetic clang + lld-link over
+    # Microsoft's CRT and SDK). cargokit only signs and uploads, so this box
+    # needs Dart and nothing else — no Rust toolchain, no LLVM/NASM install,
+    # no `-MD` CRT coaxing.
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           submodules: true
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
-        with:
-          toolchain: stable
-          targets: x86_64-pc-windows-msvc
-
-      - name: Setup sccache
-        uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
-
-      - name: Configure sccache environment
-        shell: bash
+      - name: Free disk space
         run: |
-          echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
-          echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
-          echo "CMAKE_C_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
-          echo "CMAKE_CXX_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
-
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-        with:
-          prefix-key: "v1-rust"
-          shared-key: "flutter-windows"
-          cache-all-crates: "true"
-          save-if: "true"
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/.ghcup \
+            /opt/hostedtoolcache/CodeQL
+          sudo docker image prune --all --force || true
 
       - uses: dart-lang/setup-dart@65eb853c7ba17dde3be364c3d2858773e7144260 # v1.7.2
 
-      - name: Install LLVM and NASM
-        run: choco install llvm nasm
+      - name: Configure BuildBuddy remote config
+        env:
+          BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
+        run: tools/scripts/write-buildbuddy-rc.sh
 
-      - name: Add NASM to PATH
-        shell: bash
-        run: echo "C:\\Program Files\\NASM" >> $GITHUB_PATH
+      # cargokit wants `<libName>.dll` + `<libName>.dll.lib` in the prebuilt
+      # dir (artifacts_provider.dart), which is exactly what rustc emits for an
+      # MSVC cdylib — the import library arrives for free.
+      - name: Build the Flutter windows native (Bazel on RBE)
+        run: |
+          set -euo pipefail
+          bazelisk build --config=remote --config=windows-msvc -c opt \
+            //bindings/flutter/rust:xybrid_flutter_ffi_cdylib
+          mkdir -p prebuilt/x86_64-pc-windows-msvc
+          tools/scripts/bazel-output.sh --all //bindings/flutter/rust:xybrid_flutter_ffi_cdylib \
+            --config=remote --config=windows-msvc -c opt \
+            | while read -r artifact; do
+                cp -L "$artifact" prebuilt/x86_64-pc-windows-msvc/
+              done
+          ls -l prebuilt/x86_64-pc-windows-msvc/
+
+      # NOTE: deliberately NOT the linux job's `strings | grep mtmd` gate.
+      # lld-link dead-strips by default and the MinGW driver does not, so that
+      # check measures dead-code retention rather than functionality and reads
+      # as a failure here even when the build is correct (verified: /OPT:NOREF
+      # brings the markers back, and the export count is 204 either way). The
+      # checks below assert the two things that actually matter — the ABI, and
+      # that the import library covers the DLL's whole public surface.
+      - name: Verify Flutter windows payload
+        run: |
+          set -euo pipefail
+          DLL=prebuilt/x86_64-pc-windows-msvc/xybrid_flutter_ffi.dll
+          IMPLIB=prebuilt/x86_64-pc-windows-msvc/xybrid_flutter_ffi.dll.lib
+          test -f "$DLL" || { echo "MISSING $DLL"; exit 1; }
+          test -f "$IMPLIB" || { echo "MISSING $IMPLIB"; exit 1; }
+          file "$DLL"
+          file "$DLL" | grep -q 'PE32+.*x86-64' || { echo "NOT a PE32+ x86-64 DLL"; exit 1; }
+          python3 -m pip install --quiet --user pefile
+          # MSVC ABI: a MinGW DLL imports neither of these, and Flutter could
+          # not link against it.
+          python3 tools/scripts/audit_windows_dll.py --dll "$DLL" \
+            --require-import vcruntime140.dll \
+            --require-import msvcp140.dll
+          python3 - "$DLL" "$IMPLIB" <<'PYEOF'
+          import sys
+
+          import pefile
+
+          dll_path, implib_path = sys.argv[1], sys.argv[2]
+          exports = len(pefile.PE(dll_path).DIRECTORY_ENTRY_EXPORT.symbols)
+
+          blob = open(implib_path, "rb").read()
+          if blob[:8] != b"!<arch>\n":
+              raise SystemExit(f"{implib_path}: not a COFF archive")
+          offset, short_imports = 8, 0
+          while offset + 60 <= len(blob):
+              size = int(blob[offset + 48:offset + 58].decode().strip())
+              # 0x0000FFFF marks a short-import member: the MSVC-only encoding
+              # that a MinGW `.dll.a` never contains.
+              if blob[offset + 60:offset + 64] == b"\x00\x00\xff\xff":
+                  short_imports += 1
+              offset += 60 + size + (size & 1)
+
+          print(f"exports: {exports}, short-import members: {short_imports}")
+          if exports == 0:
+              raise SystemExit("DLL exports nothing")
+          if short_imports != exports:
+              raise SystemExit("import library does not cover every export")
+          PYEOF
+          echo "windows Flutter payload: OK"
 
       - name: Install build tool dependencies
         working-directory: bindings/flutter/cargokit/build_tool
         run: dart pub get
 
-      - name: Force dynamic CRT (required for cdylib DLL linking)
-        shell: bash
-        run: |
-          echo "CFLAGS=-MD" >> $GITHUB_ENV
-          echo "CXXFLAGS=-MD" >> $GITHUB_ENV
-
-      - name: Precompile and upload binaries
+      # --prebuilt-artifact makes cargokit skip rustup/cargo entirely and only
+      # sign + upload. --target is explicit because cargokit would otherwise
+      # infer the host's (linux) target set.
+      - name: Sign and upload Flutter windows binaries (cargokit)
         working-directory: bindings/flutter/cargokit/build_tool
         shell: bash
         env:
           PRIVATE_KEY: ${{ secrets.CARGOKIT_PRIVATE_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          MANIFEST_DIR="${GITHUB_WORKSPACE//\\//}/bindings/flutter/rust"
           dart run bin/build_tool.dart precompile-binaries \
             --repository ${{ github.repository }} \
-            --manifest-dir "$MANIFEST_DIR" \
-            --verbose
+            --manifest-dir ${{ github.workspace }}/bindings/flutter/rust \
+            --verbose \
+            --target x86_64-pc-windows-msvc \
+            --prebuilt-artifact x86_64-pc-windows-msvc=${{ github.workspace }}/prebuilt/x86_64-pc-windows-msvc
 
   # =========================================================================
   # CLI builds (Linux + Windows; macOS is built in build-apple-all).
   # =========================================================================
-  build-cli:
-    name: Build CLI (${{ matrix.name }})
+  # ==========================================================================
+  # Linux CLI via Bazel on RBE (Flip 1 — mirrors the build-android cutover):
+  # Bazel produces the binary on the shared BuildBuddy cache with the hermetic
+  # toolchain; everything downstream (artifact name, provenance attestation,
+  # draft release, install.sh) is unchanged. Parity vs the cargo build was
+  # verified feature-by-feature (vision/mtmd + huggingface, no candle), and
+  # the hermetic build LOWERS the glibc floor from the runner's 2.39 to 2.28
+  # (the cargo binary built on ubuntu-24.04 could not run on Ubuntu 22.04).
+  # ==========================================================================
+  build-cli-linux:
+    name: Build CLI (linux-x86_64, Bazel)
     needs: [check-release-branch]
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
     permissions:
       contents: read       # actions/checkout
       id-token: write      # Sigstore OIDC for attest-build-provenance
       attestations: write  # GitHub attestations API
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: linux-x86_64
-            os: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
-            artifact: xybrid
-            features: platform-desktop
-
-          - name: windows-x86_64
-            os: windows-latest
-            target: x86_64-pc-windows-msvc
-            artifact: xybrid.exe
-            features: platform-desktop
-
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           submodules: true
 
-      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
-        with:
-          toolchain: stable
-          targets: ${{ matrix.target }}
-
-      - name: Setup sccache
-        uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
-
-      - name: Configure sccache environment
-        shell: bash
+      - name: Free disk space
         run: |
-          echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
-          echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
-          echo "CMAKE_C_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
-          echo "CMAKE_CXX_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/.ghcup \
+            /opt/hostedtoolcache/CodeQL
+          sudo docker image prune --all --force || true
 
-      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-        with:
-          prefix-key: "v1-rust"
-          shared-key: "cli-${{ matrix.name }}"
-          cache-all-crates: "true"
-          save-if: "true"
+      - name: Configure BuildBuddy remote config
+        env:
+          BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
+        run: tools/scripts/write-buildbuddy-rc.sh
 
-      - name: Build CLI
-        run: cargo build --release -p xybrid-cli --target ${{ matrix.target }} --features ${{ matrix.features }}
+      - name: Build CLI (Bazel on RBE, shipping mode)
+        run: |
+          bazelisk build --config=remote -c opt //crates/xybrid-cli:xybrid
 
-      - name: Strip binary (Unix)
-        if: runner.os != 'Windows'
-        run: strip target/${{ matrix.target }}/release/${{ matrix.artifact }}
+      # The payload gate (mirrors the Android APK-payload verify): the binary
+      # must run, carry vision (mtmd) + huggingface, and keep the hermetic
+      # glibc floor — strictly better than the old cargo/ubuntu-24.04 build.
+      - name: Verify CLI payload (run + features + glibc floor)
+        run: |
+          BIN=$(tools/scripts/bazel-output.sh //crates/xybrid-cli:xybrid --config=remote -c opt)
+          echo "resolved CLI: $BIN"
+          "$BIN" --help >/dev/null
+          test "$(nm "$BIN" | grep -c ' mtmd_')" -gt 0 || { echo "MISSING vision (mtmd) symbols"; exit 1; }
+          strings "$BIN" | grep -q 'huggingface\.co' || { echo "MISSING huggingface support"; exit 1; }
+          MAX_GLIBC=$(strings "$BIN" | grep -oE 'GLIBC_[0-9]+\.[0-9]+' | sort -Vu | tail -1)
+          echo "glibc floor: $MAX_GLIBC"
+          [ "$(printf '%s\n' "$MAX_GLIBC" GLIBC_2.31 | sort -V | tail -1)" = "GLIBC_2.31" ] || { echo "glibc floor regressed above 2.31: $MAX_GLIBC"; exit 1; }
 
       - name: Prepare artifact
         id: prepare
-        shell: bash
         env:
           TAG: ${{ needs.check-release-branch.outputs.tag }}
         run: |
           mkdir -p dist
-          if [[ "${{ runner.os }}" == "Windows" ]]; then
-            ARTIFACT="dist/xybrid-${TAG}-${{ matrix.name }}.exe"
-          else
-            ARTIFACT="dist/xybrid-${TAG}-${{ matrix.name }}"
-          fi
-          cp target/${{ matrix.target }}/release/${{ matrix.artifact }} "$ARTIFACT"
-          [ "${{ runner.os }}" != "Windows" ] && chmod +x "$ARTIFACT" || true
+          ARTIFACT="dist/xybrid-${TAG}-linux-x86_64"
+          BIN=$(tools/scripts/bazel-output.sh //crates/xybrid-cli:xybrid --config=remote -c opt)
+          cp "$BIN" "$ARTIFACT"
+          chmod +w "$ARTIFACT"   # bazel-bin outputs are read-only
+          strip "$ARTIFACT"
+          chmod +x "$ARTIFACT"
           echo "artifact_path=$ARTIFACT" >> "$GITHUB_OUTPUT"
 
-      - name: Attest CLI provenance (${{ matrix.name }})
+      - name: Attest CLI provenance (linux-x86_64)
+        # No provenance for rehearsal artifacts (the binary won't ship).
+        if: needs.check-release-branch.outputs.dry_run != 'true'
         uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
         with:
           subject-path: ${{ steps.prepare.outputs.artifact_path }}
@@ -707,8 +838,115 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: cli-${{ matrix.name }}
+          name: cli-linux-x86_64
           path: dist/*
+
+  build-cli-windows:
+    # Flip 3 (Windows): the CLI .exe, cross-compiled from Linux on BuildBuddy's
+    # RBE — a MinGW/GNU-ABI binary (a different toolchain flavor than the old
+    # cargo/MSVC build). For a self-contained CLI that's behaviorally identical;
+    # the one place MSVC-vs-MinGW C++ ABI would matter (linking foreign C++
+    # against ours) is the FFI SDK, a separate artifact with a C interface both
+    # flavors speak. Same parity-first ritual as the linux/macOS cutovers:
+    # payload gate before anything ships; artifact name (install.ps1 fetches
+    # `xybrid-<tag>-windows-x86_64.exe`), attestation, and downstream unchanged.
+    # A Linux runner can't execute a PE, so the "it runs" half of the gate lives
+    # in the windows-latest `smoke-cli-windows` job below, which
+    # create-draft-release also depends on — a non-running .exe blocks the draft.
+    name: Build CLI (windows-x86_64, Bazel)
+    needs: [check-release-branch]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read       # actions/checkout
+      id-token: write      # Sigstore OIDC for attest-build-provenance
+      attestations: write  # GitHub attestations API
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          submodules: true
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/.ghcup \
+            /opt/hostedtoolcache/CodeQL
+          sudo docker image prune --all --force || true
+
+      - name: Configure BuildBuddy remote config
+        env:
+          BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
+        run: tools/scripts/write-buildbuddy-rc.sh
+
+      - name: Build CLI (Bazel on RBE, shipping mode)
+        run: |
+          bazelisk build --config=remote --config=windows -c opt //crates/xybrid-cli:xybrid
+
+      # Byte half of the payload gate (a Linux runner can't execute a PE): the
+      # artifact must be a real PE32+ x86-64 binary carrying vision (mtmd) +
+      # huggingface — parity with cargo's platform-desktop windows leg. The
+      # run-it half is smoke-cli-windows below.
+      - name: Verify CLI payload (PE32+ + features)
+        run: |
+          EXE=$(tools/scripts/bazel-output.sh //crates/xybrid-cli:xybrid --config=remote --config=windows -c opt)
+          echo "resolved CLI: $EXE"
+          file "$EXE"
+          file "$EXE" | grep -q 'PE32+.*x86-64' || { echo "NOT a PE32+ x86-64 binary"; exit 1; }
+          grep -aq 'mtmd_' "$EXE" || { echo "MISSING vision (mtmd) markers"; exit 1; }
+          grep -aq 'huggingface\.co' "$EXE" || { echo "MISSING huggingface support"; exit 1; }
+
+      # No strip: today's shipped windows binary is unstripped (cargo's default
+      # release profile; the old cargo job skipped the Unix strip step on
+      # Windows), so the MinGW artifact isn't stripped either — MSVC→MinGW is
+      # the only intended change to the shipped bytes' form.
+      - name: Prepare artifact
+        id: prepare
+        env:
+          TAG: ${{ needs.check-release-branch.outputs.tag }}
+        run: |
+          mkdir -p dist
+          ARTIFACT="dist/xybrid-${TAG}-windows-x86_64.exe"
+          EXE=$(tools/scripts/bazel-output.sh //crates/xybrid-cli:xybrid --config=remote --config=windows -c opt)
+          cp "$EXE" "$ARTIFACT"
+          echo "artifact_path=$ARTIFACT" >> "$GITHUB_OUTPUT"
+
+      - name: Attest CLI provenance (windows-x86_64)
+        # No provenance for rehearsal artifacts (the binary won't ship).
+        if: needs.check-release-branch.outputs.dry_run != 'true'
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
+        with:
+          subject-path: ${{ steps.prepare.outputs.artifact_path }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: cli-windows-x86_64
+          path: dist/*
+
+  # Run-it half of the Windows payload gate: a Linux runner built the .exe but
+  # can't execute it, so a real Windows runner downloads the EXACT uploaded
+  # artifact and runs it. create-draft-release depends on this job, so a .exe
+  # that won't start blocks the release. Compiles nothing (the build already
+  # happened on the RBE Linux workers).
+  smoke-cli-windows:
+    name: Smoke CLI (windows-x86_64)
+    needs: [build-cli-windows]
+    runs-on: windows-latest
+    steps:
+      - name: Download windows CLI artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: cli-windows-x86_64
+          path: dist
+
+      - name: Run the .exe + verify features
+        shell: bash
+        run: |
+          EXE=$(printf '%s\n' dist/xybrid-*-windows-x86_64.exe | head -1)
+          echo "resolved artifact: $EXE"
+          "$EXE" --help
+          "$EXE" --version || true
+          grep -aq 'mtmd_' "$EXE" || { echo "MISSING vision (mtmd) markers"; exit 1; }
+          grep -aq 'huggingface\.co' "$EXE" || { echo "MISSING huggingface support"; exit 1; }
+          echo "windows CLI smoke: OK"
 
   # =========================================================================
   # Patch Package.swift checksum and commit it back to the release branch.
@@ -719,6 +957,8 @@ jobs:
   # =========================================================================
   patch-spm-checksum:
     name: Patch SPM checksum
+    # Commits + pushes to the release branch — skip in a dry-run rehearsal.
+    if: needs.check-release-branch.outputs.dry_run != 'true'
     permissions:
       contents: write   # commits the pinned SPM checksum and pushes the branch
     needs: [check-release-branch, build-xcframework]
@@ -764,6 +1004,9 @@ jobs:
   # =========================================================================
   create-draft-release:
     name: Create draft release
+    # Creates the GitHub draft release — skip in a dry-run rehearsal (the
+    # dryrun-summary job prints what the CLI leg would ship instead).
+    if: needs.check-release-branch.outputs.dry_run != 'true'
     permissions:
       contents: write   # gh release create/delete of the draft release
     needs:
@@ -772,7 +1015,9 @@ jobs:
       - build-cli-macos
       - precompile-flutter-darwin
       - build-android
-      - build-cli
+      - build-cli-windows
+      - smoke-cli-windows
+      - build-cli-linux
       - precompile-flutter-linux
       - precompile-flutter-windows
     runs-on: ubuntu-latest
@@ -815,7 +1060,7 @@ jobs:
             echo "- Precompiled native libraries auto-downloaded by cargokit"
             echo
             echo "**Unity**"
-            echo "- \`xybrid-unity-sdk-${TAG}.tar.gz\` — Native plugins (uploaded by Build Unity workflow)"
+            echo "- Install via OpenUPM (\`openupm add ai.xybrid.sdk\`); native libraries are published as \`xybrid-unity-native-<platform>-${TAG}.zip\` bundles + manifest (uploaded post-release by Build Unity) and fetched at import by the SDK"
             echo
             echo "**Swift (iOS/macOS)**"
             echo "- SPM: \`.package(url: \"https://github.com/${{ github.repository }}\", from: \"${TAG#v}\")\`"
@@ -880,6 +1125,8 @@ jobs:
   # =========================================================================
   attach-sbom:
     name: Attach SBOM
+    # Uploads to the draft release — skip in a dry-run rehearsal.
+    if: needs.check-release-branch.outputs.dry_run != 'true'
     permissions:
       contents: write   # gh release upload of the SBOM assets
     needs: [check-release-branch, create-draft-release]
@@ -921,6 +1168,8 @@ jobs:
   # =========================================================================
   open-release-pr:
     name: Open release PR
+    # Opens the release PR — skip in a dry-run rehearsal.
+    if: needs.check-release-branch.outputs.dry_run != 'true'
     permissions:
       contents: read
       pull-requests: write   # gh pr create for the release PR
@@ -973,3 +1222,48 @@ jobs:
             --title "Release ${TAG}" \
             --body "$BODY" \
             --label release
+
+  # =========================================================================
+  # Dry-run rehearsal summary — what the Bazel CLI leg of this release would
+  # ship. Runs ONLY in a dry-run (the real path assembles via
+  # create-draft-release). Downloads the three CLI artifacts the build jobs
+  # uploaded (as internal workflow artifacts) and prints their names + sizes:
+  # proof the Bazel builds, payload gates, release-artifact naming, and the
+  # windows .exe run-smoke all work — with nothing published.
+  # =========================================================================
+  dryrun-summary:
+    name: Dry-run summary (CLI leg)
+    if: needs.check-release-branch.outputs.dry_run == 'true'
+    needs:
+      - check-release-branch
+      - build-cli-linux
+      - build-cli-macos
+      - build-cli-windows
+      - smoke-cli-windows
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download CLI artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          path: cli
+          pattern: cli-*
+          merge-multiple: true
+
+      - name: Summarize the CLI leg
+        env:
+          VERSION: ${{ needs.check-release-branch.outputs.version }}
+        run: |
+          set -euo pipefail
+          {
+            echo "## Dry-run rehearsal — v${VERSION} CLI leg ✅"
+            echo ""
+            echo "Built + payload-gated on Bazel/RBE, windows \`.exe\` smoke-run on a"
+            echo "real Windows runner — **nothing published** (no draft, PR, attestation,"
+            echo "or checksum push)."
+            echo ""
+            echo "| artifact (would ship as) | size |"
+            echo "|---|---|"
+            find cli -type f -printf '| %f | %s bytes |\n' | sort
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "=== artifacts that would ship ==="
+          find cli -type f -exec ls -lh {} \;

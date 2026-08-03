@@ -8,12 +8,10 @@ on:
         required: true
         type: choice
         options:
-          - apple
           - publish-kotlin
           - darwin-precompile
           - linux-precompile
           - windows-precompile
-          - windows-cli
 
 env:
   CARGO_TERM_COLOR: always
@@ -25,67 +23,6 @@ env:
 permissions: read-all
 
 jobs:
-  #
-  # Apple XCFramework build
-  #
-  build-apple:
-    name: Build Apple XCFramework
-    if: inputs.platform == 'apple'
-    runs-on: macos-14
-    steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-        with:
-          submodules: true
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
-        with:
-          toolchain: stable
-          targets: >-
-            aarch64-apple-ios,
-            aarch64-apple-ios-sim,
-            aarch64-apple-darwin
-
-      - name: Setup sccache
-        uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
-
-      - name: Configure sccache environment
-        shell: bash
-        run: |
-          echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
-          echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
-          echo "CMAKE_C_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
-          echo "CMAKE_CXX_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
-
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-        with:
-          key: test-apple
-
-      - name: Build XCFramework
-        run: cargo xtask build-xcframework --release
-
-      - name: Verify XCFramework
-        run: |
-          XCFW_PATH="bindings/apple/XCFrameworks/XybridFFI.xcframework"
-          if [ ! -d "$XCFW_PATH" ]; then
-            echo "Error: XCFramework not found at $XCFW_PATH"
-            exit 1
-          fi
-          echo "XCFramework contents:"
-          ls -la "$XCFW_PATH"
-          echo ""
-          echo "Verifying architectures..."
-          # boltffi emits libxybrid-bolt.a per slice (ios-arm64,
-          # ios-arm64-simulator; macOS excluded). Glob rather than
-          # hard-code the slice/lib names.
-          found=$(find "$XCFW_PATH" -name '*.a')
-          if [ -z "$found" ]; then
-            echo "Error: no static libraries found inside the XCFramework"
-            exit 1
-          fi
-          echo "$found" | while read -r lib; do file "$lib"; done
-
   #
   # Precompile Flutter (darwin)
   #
@@ -278,48 +215,6 @@ jobs:
           dart run bin/build_tool.dart precompile-binaries $ARGS
 
   #
-  # CLI (windows)
-  #
-  build-cli-windows:
-    name: Build CLI (windows)
-    if: inputs.platform == 'windows-cli'
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-        with:
-          submodules: true
-
-      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
-        with:
-          toolchain: stable
-          targets: x86_64-pc-windows-msvc
-
-      - name: Setup sccache
-        uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
-
-      - name: Configure sccache environment
-        shell: bash
-        run: |
-          echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
-          echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
-          echo "CMAKE_C_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
-          echo "CMAKE_CXX_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
-
-      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-        with:
-          key: test-cli-windows
-
-      - name: Install LLVM and NASM
-        run: choco install llvm nasm
-
-      - name: Add NASM to PATH
-        shell: bash
-        run: echo "C:\\Program Files\\NASM" >> $GITHUB_PATH
-
-      - name: Build CLI
-        run: cargo build --release -p xybrid-cli --target x86_64-pc-windows-msvc --features platform-desktop
-
-  #
   # Publish Kotlin SDK (dry-run: build Android + assemble AAR, no actual publish)
   #
   publish-kotlin:
@@ -387,8 +282,24 @@ jobs:
         # the CLI's own bundled Cargo.lock for reproducibility.
         run: which boltffi || cargo install boltffi_cli --version 0.25.3 --locked
 
-      - name: Build Android .so files
-        run: cargo xtask build-android --release
+      # BuildBuddy RBE config from the secret (.bazelrc try-imports it). Falls
+      # back to local execution when absent (the NDK is a Bazel download).
+      - name: Configure BuildBuddy remote config
+        env:
+          BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
+        run: tools/scripts/write-buildbuddy-rc.sh
+
+      # Bazel builds the feature-complete 3-ABI AAR; stage its jniLibs into
+      # bindings/kotlin/libs/. Replaces build-android-bolt.sh.
+      - name: Build Android jniLibs (Bazel AAR)
+        env:
+          BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
+        run: |
+          REMOTE=""; [ -n "$BUILDBUDDY_API_KEY" ] && REMOTE="--config=remote"
+          bazelisk build $REMOTE -c opt //bindings/kotlin:xybrid_kotlin_aar
+          rm -rf bindings/kotlin/libs && mkdir -p bindings/kotlin/libs /tmp/aar
+          unzip -o -q bazel-bin/bindings/kotlin/xybrid-kotlin.aar 'jni/*' -d /tmp/aar
+          cp -r /tmp/aar/jni/* bindings/kotlin/libs/
 
       - name: Verify .so files
         run: |

@@ -15,7 +15,7 @@ Add the Xybrid package via Swift Package Manager:
 
 ```swift title="Package.swift"
 dependencies: [
-    .package(url: "https://github.com/xybrid-ai/xybrid", from: "0.2.0")
+    .package(url: "https://github.com/xybrid-ai/xybrid", from: "0.3.0")
 ]
 ```
 
@@ -186,10 +186,16 @@ The SDK provides short aliases for convenience:
 
 | Alias | Full Type |
 |-------|-----------|
-| `ModelLoader` | `XybridModelLoader` |
 | `Model` | `XybridModel` |
 | `Envelope` | `XybridEnvelope` |
 | `Result` | `XybridResult` |
+| `VoiceInfo` | `XybridVoiceInfo` |
+| `GenerationConfig` | `XybridGenerationConfig` |
+| `XybridSDKError` | `XybridError` |
+
+There is no `ModelLoader` type. Load a model directly with
+`XybridModel(fromRegistry:)`, or `XybridModel(fromBundle:)` /
+`XybridModel(fromDirectory:)` / `XybridModel(fromHuggingface:)`.
 
 ---
 

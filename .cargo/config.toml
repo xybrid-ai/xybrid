@@ -43,6 +43,19 @@ rustflags = ["-C", "link-args=/NODEFAULTLIB:LIBCMT"]
 # can't satisfy those symbols — they need to be declared as a direct dep.
 # Without this flag dlopen fails with:
 #   cannot locate symbol "_ZTISt13runtime_error" referenced by libxybrid-bolt.so
+# iOS aarch64 (device + simulator): enable +fp16 so the assembler accepts the
+# FP16 SIMD inline asm in gemm-common (candle dependency). Unlike Android this
+# needs no runtime gate: the iOS 16 deployment target implies A12 or newer,
+# and every A12+ (and Apple-Silicon simulator host) supports fp16. Newer rustc
+# stables (observed on 1.95) no longer imply fullfp16 in the default
+# aarch64-apple-ios feature set, so gemm's `fmla ….8h` asm fails to assemble
+# without this.
+[target.aarch64-apple-ios]
+rustflags = ["-C", "target-feature=+fp16"]
+
+[target.aarch64-apple-ios-sim]
+rustflags = ["-C", "target-feature=+fp16"]
+
 [target.aarch64-linux-android]
 rustflags = [
     "-C", "target-feature=+fp16",

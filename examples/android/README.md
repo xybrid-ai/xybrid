@@ -5,9 +5,9 @@ This is a native Android example app demonstrating how to integrate the Xybrid S
 ## Features
 
 - **SDK Initialization**: Shows proper SDK startup flow with loading and error states
-- **Model Loading**: Loads models from a local bundle path using `XybridModelLoader.fromBundle()`
+- **Model Loading**: Loads models from a local bundle path using `XybridModel.fromBundle()`
 - **TTS Inference**: Runs text-to-speech inference with result display and latency metrics from `XybridResult.latencyMs`
-- **Error Handling**: Displays `XybridException` messages (ModelNotFound, InferenceFailed, InvalidInput, IoException)
+- **Error Handling**: Displays `XybridException` messages (ModelNotFound, InferenceError, IoError, etc.)
 - **Jetpack Compose UI**: Modern declarative UI with Material 3 design
 - **Proper Async Handling**: Uses Kotlin coroutines for all SDK operations on `Dispatchers.IO`
 
@@ -28,11 +28,15 @@ This is a native Android example app demonstrating how to integrate the Xybrid S
 The Xybrid SDK requires native `.so` libraries for Android:
 
 ```bash
-# From the xybrid repo root
-cargo xtask build-android
+# From the xybrid repo root — build the AAR, then stage its jniLibs where
+# this example's Gradle module looks (bindings/kotlin/libs/)
+bazel build -c opt //bindings/kotlin:xybrid_kotlin_aar
+rm -rf bindings/kotlin/libs && mkdir -p bindings/kotlin/libs /tmp/aar
+unzip -o -q bazel-bin/bindings/kotlin/xybrid-kotlin.aar 'jni/*' -d /tmp/aar
+cp -r /tmp/aar/jni/* bindings/kotlin/libs/
 ```
 
-This builds `libxybrid_uniffi.so` and bundles `libonnxruntime.so` + `libc++_shared.so` from `vendor/ort-android/` for each ABI (arm64-v8a, x86_64).
+This stages `libxybrid-bolt.so`, `libonnxruntime.so`, and `libc++_shared.so` for each ABI (arm64-v8a, armeabi-v7a, x86_64) into `bindings/kotlin/libs/`.
 
 See [bindings/kotlin/README.md](../../bindings/kotlin/README.md) for detailed build instructions.
 
@@ -132,17 +136,16 @@ The app defaults to `<app-files-dir>/models/kokoro-82m` — you can edit the pat
 ### Model Loading (from bundle)
 
 ```kotlin
-import ai.xybrid.XybridModelLoader
+import ai.xybrid.XybridModel
 import ai.xybrid.XybridException
 import ai.xybrid.displayMessage
 
 try {
-    val loader = XybridModelLoader.fromBundle("/path/to/model/directory")
-    val model = loader.load()
+    val model = XybridModel.fromBundle("/path/to/model.xyb")
     // Model ready for inference
 } catch (e: XybridException.ModelNotFound) {
     println("Model not found: ${e.displayMessage}")
-} catch (e: XybridException.IoException) {
+} catch (e: XybridException.IoError) {
     println("I/O error: ${e.displayMessage}")
 }
 ```
@@ -165,6 +168,30 @@ if (result.success) {
 }
 ```
 
+### Thinking / Reasoning models (chain-of-thought)
+
+Reasoning models (flagged `reasoning: true` in their metadata, e.g.
+`lfm2.5-1.2b-thinking`) produce a chain-of-thought before their answer. xybrid
+strips the `<think>…</think>` reasoning out of the answer text and surfaces it
+separately on `result.reasoningContent` — `null` for non-thinking models.
+
+```kotlin
+import ai.xybrid.Envelope
+import ai.xybrid.text
+import ai.xybrid.reasoningContent
+
+val result = model.run(Envelope.text("Is 97 a prime number? Reason, then answer."))
+
+// The answer — never contains the <think> reasoning markup
+result.text?.let { println("Answer: $it") }
+
+// The chain-of-thought — null unless the model is a thinking model
+result.reasoningContent?.let { println("Reasoning: $it") }
+```
+
+In this example app: pick **"LFM2.5 1.2B Thinking"** from the model list, run a
+prompt, and expand the **Reasoning (chain-of-thought)** section under the answer.
+
 ### Error Handling with Coroutines
 
 ```kotlin
@@ -175,8 +202,7 @@ import ai.xybrid.displayMessage
 suspend fun loadAndRun(path: String, text: String) {
     withContext(Dispatchers.IO) {
         try {
-            val loader = XybridModelLoader.fromBundle(path)
-            val model = loader.load()
+            val model = XybridModel.fromBundle(path)
             val result = model.run(Envelope.text(text))
             // Handle result...
         } catch (e: XybridException) {
@@ -220,7 +246,7 @@ export ANDROID_HOME="$HOME/Library/Android/sdk"
 Native libraries aren't built or included. Build them with:
 
 ```bash
-cargo xtask build-android
+bazel build -c opt //bindings/kotlin:xybrid_kotlin_aar
 ```
 
 ### Model Not Found Error

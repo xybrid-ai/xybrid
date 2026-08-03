@@ -55,7 +55,7 @@ pub fn softmax_step(data: RawOutputs, dim: Option<usize>) -> ExecutorResult<RawO
     };
 
     // Apply softmax to each tensor in the map
-    for (_name, tensor) in tensor_map.iter_mut() {
+    for tensor in tensor_map.values_mut() {
         apply_softmax(tensor, dim)?;
     }
 

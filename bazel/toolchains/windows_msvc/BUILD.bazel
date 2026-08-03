@@ -1,0 +1,355 @@
+"""Bazel C++ toolchain targeting `*-pc-windows-msvc` with hermetic LLVM.
+
+hermetic-llvm ships a MinGW sysroot only, so `@llvm`'s own Windows toolchain
+produces GNU-ABI PEs. This package composes the SAME hermetic clang/lld with
+Microsoft's CRT + Windows SDK (fetched by `@windows_support`, see MODULE.bazel)
+to produce MSVC-ABI PEs instead — the artifacts Flutter's cargokit links against.
+
+Only the `@llvm//toolchain/args:*` pieces that are ABI-neutral are reused; every
+sysroot-bearing argument is defined here, because `@llvm` cannot reference our
+`@msvc_runtime` / `@windows_sdk` repositories.
+"""
+
+load("@llvm//toolchain:selects.bzl", "platform_llvm_binary")
+load("@rules_cc//cc/toolchains:args.bzl", "cc_args")
+load("@rules_cc//cc/toolchains:artifacts.bzl", "cc_artifact_name_pattern")
+load("@rules_cc//cc/toolchains:feature.bzl", "cc_feature")
+load("@rules_cc//cc/toolchains:tool.bzl", "cc_tool")
+load("@rules_cc//cc/toolchains:tool_map.bzl", "cc_tool_map")
+load("@rules_cc//cc/toolchains/impl:documented_api.bzl", "cc_args_list")
+load(":case_insensitivity.bzl", "lowercase_aliases")
+load(":declare_toolchains.bzl", "declare_toolchains")
+
+package(default_visibility = ["//visibility:private"])
+
+# --- tools -------------------------------------------------------------------
+
+# The same hermetic clang binaries `@llvm` uses, re-declared here for one reason:
+# `@llvm`'s `:clang` / `:clang++` advertise
+# `@rules_cc//cc/toolchains/capabilities:supports_pic`, which makes rules_cc pass
+# `-fPIC` unconditionally. clang's MSVC driver rejects it outright
+# ("unsupported option '-fPIC' for target 'x86_64-pc-windows-msvc'"), and PE code
+# is position independent by construction — Bazel's own MSVC toolchain likewise
+# reports supports_pic = False. The capability cannot be switched off downstream:
+# `--features=-supports_pic` fails with "toolchain unconditionally implies
+# feature 'supports_pic'". Dropping it from the tool is the only lever.
+cc_tool(
+    name = "clang",
+    src = platform_llvm_binary("clang"),
+)
+
+cc_tool(
+    name = "clang++",
+    src = platform_llvm_binary("clang++"),
+)
+
+# lld-link is invoked DIRECTLY, not through the clang driver. rustc accepts only
+# the `msvc-lld`, `msvc` and `lld-link` linker flavours for a
+# `*-pc-windows-msvc` target ("linker flavor `gcc` is incompatible with the
+# current target"), and rules_rust takes its linker from the cc toolchain — so
+# the C++ half links MSVC-style too. //bazel/toolchains/windows_msvc/link
+# carries the matching argument spellings.
+cc_tool(
+    name = "lld-link",
+    src = platform_llvm_binary("lld-link"),
+)
+
+cc_tool(
+    name = "llvm-ar",
+    src = platform_llvm_binary("llvm-ar"),
+)
+
+cc_tool(
+    name = "llvm-objcopy",
+    src = platform_llvm_binary("llvm-objcopy"),
+)
+
+cc_tool(
+    name = "llvm-strip",
+    src = platform_llvm_binary("llvm-strip"),
+)
+
+cc_tool(
+    name = "llvm-dwp",
+    src = platform_llvm_binary("llvm-dwp"),
+)
+
+cc_tool(
+    name = "llvm-cov",
+    src = platform_llvm_binary("llvm-cov"),
+)
+
+cc_tool(
+    name = "llvm-profdata",
+    src = platform_llvm_binary("llvm-profdata"),
+)
+
+cc_tool_map(
+    name = "tools",
+    tools = {
+        "@rules_cc//cc/toolchains/actions:assembly_actions": ":clang",
+        "@rules_cc//cc/toolchains/actions:c_compile": ":clang",
+        "@rules_cc//cc/toolchains/actions:cpp_compile_actions": ":clang++",
+        "@rules_cc//cc/toolchains/actions:link_actions": ":lld-link",
+        "@rules_cc//cc/toolchains/actions:ar_actions": ":llvm-ar",
+        "@rules_cc//cc/toolchains/actions:objcopy_embed_data": ":llvm-objcopy",
+        "@rules_cc//cc/toolchains/actions:strip": ":llvm-strip",
+        "@rules_cc//cc/toolchains/actions:dwp": ":llvm-dwp",
+        "@rules_cc//cc/toolchains/actions:llvm_cov": ":llvm-cov",
+        "@rules_cc//cc/toolchains/actions:llvm_profdata": ":llvm-profdata",
+    },
+)
+
+# --- target selection --------------------------------------------------------
+
+# @llvm//toolchain/args:target_flags hardcodes the MinGW triple for Windows
+# (LLVM_TARGET_TRIPLE -> x86_64-w64-windows-gnu), so the MSVC lane supplies its
+# own. This is the single flag that flips the ABI: calling convention, name
+# mangling, EH model, and the CRT clang autolinks against.
+cc_args(
+    name = "target_flags",
+    actions = [
+        "@rules_cc//cc/toolchains/actions:compile_actions",
+    ],
+    args = ["--target=x86_64-pc-windows-msvc"],
+)
+
+# NOTE: no `/machine:x64` here, deliberately. lld-link infers the machine from
+# the objects, and rules_foreign_cc hands the toolchain's link flags to CMake,
+# which links through the clang driver — clang reads `/machine:x64` as an input
+# filename and llama.cpp's first try-compile dies with "no such file or
+# directory". (`-LIBPATH:<dir>` survives that trip because clang parses it as
+# `-L IBPATH:<dir>`: a bogus search path, but harmless.)
+
+# Dynamic UCRT (`/MD`), matching what rustc emits for *-pc-windows-msvc without
+# `+crt-static` — the two halves of a shipped DLL must agree on the CRT. Compile
+# only: it works by steering the `#pragma comment(lib, ...)` autolink directives
+# the MSVC headers emit.
+cc_args(
+    name = "ms_runtime_lib",
+    actions = [
+        "@rules_cc//cc/toolchains/actions:compile_actions",
+    ],
+    args = ["-fms-runtime-lib=dll"],
+)
+
+# --- sysroot -----------------------------------------------------------------
+
+# @llvm//toolchain/args:hermetic_compile_flags already passes -nostdlibinc, so
+# clang keeps only its builtin resource-dir headers and every system header
+# below comes from Microsoft's payload.
+cc_args(
+    name = "headers_include_search_paths",
+    actions = [
+        "@rules_cc//cc/toolchains/actions:compile_actions",
+    ],
+    allowlist_include_directories = [
+        "@msvc_runtime//:msvc_include",
+        "@windows_sdk//:winsdk_ucrt_include",
+        "@windows_sdk//:winsdk_shared_include",
+        "@windows_sdk//:winsdk_um_include",
+    ],
+    # `-Xclang -internal-isystem`, not `-isystem`. Microsoft's headers must be
+    # searched AFTER clang's builtin resource dir: <immintrin.h> exists in both,
+    # and Microsoft's declares the intrinsics as extern functions its own
+    # compiler provides — pick that one under clang and the link fails with
+    # `undefined symbol: _mm_set1_epi32`. `-isystem` would shadow the builtins;
+    # `-internal-isystem` appends in command-line order behind them, which is
+    # what clang-cl's `-imsvc` lowers to (`-imsvc` itself is a clang-cl-only
+    # driver flag and the gcc-style driver rejects it).
+    #
+    # ORDER-SENSITIVE: `resource_dir_arg()` must come before `:toolchain_args`
+    # in the cc_toolchain `args` list — see declare_toolchains.bzl.
+    args = [
+        "-Xclang",
+        "-internal-isystem",
+        "-Xclang",
+        "{msvc_include}",
+        "-Xclang",
+        "-internal-isystem",
+        "-Xclang",
+        "{ucrt_include}",
+        "-Xclang",
+        "-internal-isystem",
+        "-Xclang",
+        "{shared_include}",
+        "-Xclang",
+        "-internal-isystem",
+        "-Xclang",
+        "{um_include}",
+    ],
+    data = [
+        "@msvc_runtime//:msvc_include",
+        "@windows_sdk//:winsdk_shared_include",
+        "@windows_sdk//:winsdk_ucrt_include",
+        "@windows_sdk//:winsdk_um_include",
+    ],
+    format = {
+        "msvc_include": "@msvc_runtime//:msvc_include",
+        "shared_include": "@windows_sdk//:winsdk_shared_include",
+        "ucrt_include": "@windows_sdk//:winsdk_ucrt_include",
+        "um_include": "@windows_sdk//:winsdk_um_include",
+    },
+)
+
+lowercase_aliases(
+    name = "case_insensitive_headers",
+    directories = [
+        "@msvc_runtime//:msvc_include",
+        "@windows_sdk//:winsdk_shared_include",
+        "@windows_sdk//:winsdk_ucrt_include",
+        "@windows_sdk//:winsdk_um_include",
+    ],
+    # The four headers Microsoft's own sources include under a casing that is
+    # not what is on disk. Same list upstream's `transformations` example
+    # carries; a fifth would surface as a "file not found" naming it.
+    extra_aliases = {
+        "driverspecs.h": "DriverSpecs.h",
+        "specstrings.h": "SpecStrings.h",
+        "ole2.h": "Ole2.h",
+        "olectl.h": "OleCtl.h",
+    },
+)
+
+cc_args(
+    name = "case_insensitive_header_lookup",
+    actions = [
+        "@rules_cc//cc/toolchains/actions:compile_actions",
+    ],
+    args = [
+        "-Xclang",
+        "-internal-isystem",
+        "-Xclang",
+        "{aliases}",
+    ],
+    data = [":case_insensitive_headers"],
+    format = {"aliases": ":case_insensitive_headers"},
+)
+
+lowercase_aliases(
+    name = "case_insensitive_libraries",
+    directories = [
+        "@msvc_runtime//:msvc_lib",
+        "@windows_sdk//:winsdk_ucrt_lib",
+        "@windows_sdk//:winsdk_um_lib",
+    ],
+)
+
+# No explicit -l: MSVC headers carry `#pragma comment(lib, ...)` autolink
+# directives, so the CRT and SDK import libraries resolve from these paths.
+# The `:msvc_lib` / `:winsdk_*_lib` aliases pick the arch-correct subdirectory;
+# `:case_insensitive_libraries` supplies lowercase names for the mixed-case ones
+# and is searched first.
+cc_args(
+    name = "library_search_paths",
+    actions = [
+        "@rules_cc//cc/toolchains/actions:link_actions",
+    ],
+    # Each directory is passed twice, because this toolchain has two kinds of
+    # link consumer and neither spelling reaches both:
+    #
+    #   -LIBPATH:  lld-link's own form, used by Bazel's link actions and by
+    #              rustc. The clang driver misparses it as `-L IBPATH:<dir>`,
+    #              silently losing the path.
+    #   -L         what rules_foreign_cc needs: CMake links through the clang
+    #              driver, so without it llama.cpp's try-compile cannot find
+    #              kernel32.lib. lld-link answers with "ignoring unknown
+    #              argument", which is where the per-link warnings come from.
+    #
+    # An `env = {"LIB": ...}` would serve both, but `cc_args` format strings
+    # take a single variable, so the four directories cannot be joined into one.
+    args = [
+        "-LIBPATH:{lowercase_aliases}",
+        "-L{lowercase_aliases}",
+        "-LIBPATH:{msvc_lib}",
+        "-L{msvc_lib}",
+        "-LIBPATH:{ucrt_lib}",
+        "-L{ucrt_lib}",
+        "-LIBPATH:{um_lib}",
+        "-L{um_lib}",
+    ],
+    data = [
+        ":case_insensitive_libraries",
+        "@msvc_runtime//:msvc_lib",
+        "@windows_sdk//:winsdk_ucrt_lib",
+        "@windows_sdk//:winsdk_um_lib",
+    ],
+    format = {
+        "lowercase_aliases": ":case_insensitive_libraries",
+        "msvc_lib": "@msvc_runtime//:msvc_lib",
+        "ucrt_lib": "@windows_sdk//:winsdk_ucrt_lib",
+        "um_lib": "@windows_sdk//:winsdk_um_lib",
+    },
+)
+
+# Bazel hands `cc_shared_library` a generated `.def`. rules_cc's own `def_file`
+# feature passes the path bare, which GNU ld accepts as a linker input but
+# lld-link rejects ("unknown file type"); MSVC spells it `/def:`.
+cc_args(
+    name = "def_file_args",
+    actions = [
+        "@rules_cc//cc/toolchains/actions:link_actions",
+    ],
+    args = ["/def:{def_file_path}"],
+    format = {"def_file_path": "@rules_cc//cc/toolchains/variables:def_file_path"},
+    requires_not_none = "@rules_cc//cc/toolchains/variables:def_file_path",
+)
+
+# Deliberately NOT named `def_file`: rules_cc's own `def_file` feature arrives
+# through `@llvm//toolchain/features:all_non_legacy_builtin_features` and two
+# features may not share a name. Ours is enabled, theirs is only known.
+cc_feature(
+    name = "msvc_def_file",
+    args = [":def_file_args"],
+    feature_name = "msvc_def_file",
+)
+
+# --- artifact naming ---------------------------------------------------------
+
+cc_artifact_name_pattern(
+    name = "executable_pattern",
+    category = "@rules_cc//cc/toolchains/artifacts:executable",
+    extension = ".exe",
+    prefix = "",
+)
+
+cc_artifact_name_pattern(
+    name = "dynamic_library_pattern",
+    category = "@rules_cc//cc/toolchains/artifacts:dynamic_library",
+    extension = ".dll",
+    prefix = "",
+)
+
+cc_artifact_name_pattern(
+    name = "interface_library_pattern",
+    category = "@rules_cc//cc/toolchains/artifacts:interface_library",
+    extension = ".lib",
+    prefix = "",
+)
+
+cc_artifact_name_pattern(
+    name = "static_library_pattern",
+    category = "@rules_cc//cc/toolchains/artifacts:static_library",
+    extension = ".lib",
+    prefix = "",
+)
+
+# --- toolchain ---------------------------------------------------------------
+
+cc_args_list(
+    name = "toolchain_args",
+    args = [
+        ":target_flags",
+        "@llvm//toolchain/args:no_absolute_paths_for_builtins",
+        "@llvm//toolchain/args:deterministic_compile_flags",
+        "@llvm//toolchain/args:module_map",
+        "@llvm//toolchain/args:hermetic_compile_flags",
+        ":ms_runtime_lib",
+        ":case_insensitive_header_lookup",
+        ":headers_include_search_paths",
+        ":library_search_paths",
+        "@llvm//toolchain/args:ignore_unused_command_line_argument",
+    ],
+)
+
+declare_toolchains()

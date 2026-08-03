@@ -88,6 +88,6 @@ final model = await Xybrid.model('kokoro-82m').load();
 
 你也可以运行不在注册表中的模型：
 
-- **HuggingFace GGUF**：`xybrid run --huggingface <repo>[:variant]`（或 SDK 中的 `fromHuggingFace`）直接下载 GGUF
+- **HuggingFace 仓库**：`xybrid run --huggingface <repo>[:variant]`（或 SDK 中的 `fromHuggingFace`）直接下载模型——GGUF、ONNX 和 SafeTensors 可原生运行；TFLite 与 LiteRT-LM（`.litertlm`）在浏览器 SDK（`@xybrid/web`）中运行。仓库缺少 `model_metadata.json` 时会自动生成
 - **本地 Bundle**：加载 `.xyb` Bundle 或模型目录
 - **自定义模型**：编写自己的 `model_metadata.json` — 参见[自定义模型指南](https://github.com/xybrid-ai/xybrid/blob/master/docs/guides/custom-models.zh.md)

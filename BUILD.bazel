@@ -1,0 +1,467 @@
+# Root package. The exports_files watchers let rules_rs watch //:Cargo.lock and
+# //:Cargo.toml as the dependency source of truth.
+exports_files([
+    "Cargo.lock",
+    "Cargo.toml",
+])
+
+load("@bazel_skylib//rules:common_settings.bzl", "bool_flag")
+
+# The macOS GPU lane toggle (Flip 2). Both darwin lanes share the SAME Rust
+# feature set (candle-metal/CoreML/vision are bindings — pure Rust, cross-
+# compilable, so keeping features identical maximizes rlib cache overlap
+# between the RBE CPU lane and the Mac Metal lane). The flag flips only what
+# physically differs: llama.cpp's GGML_METAL/ACCELERATE, which need Xcode —
+# so --//:metal=true builds must run ON a Mac (see build:macos-metal).
+bool_flag(
+    name = "metal",
+    build_setting_default = False,
+)
+
+config_setting(
+    name = "metal_enabled",
+    flag_values = {":metal": "true"},
+    visibility = ["//visibility:public"],
+)
+
+# Host platform for Linux hosts (CI runners): rules_rs' experimental toolchains
+# need an explicit host platform carrying a libc constraint on Linux. Activated
+# by `common:linux` in .bazelrc (auto-applied via --enable_platform_specific_config).
+# Mirrors hermetic-llvm/e2e/rules_rs.
+platform(
+    name = "host_linux_gnu",
+    constraint_values = [
+        "@llvm//constraints/libc:gnu.2.28",
+    ],
+    parents = ["@platforms//host"],
+)
+
+# GATE 3: vendored llama.cpp source (git submodule at vendor/llama-cpp), fed to
+# the llama-cpp-sys build script so build.rs uses it instead of cloning (no network
+# in Bazel actions). Owned by the root package since vendor/ has no BUILD of its own.
+filegroup(
+    name = "llama_src",
+    srcs = glob(
+        ["vendor/llama-cpp/**"],
+        exclude = ["vendor/llama-cpp/**/BUILD", "vendor/llama-cpp/**/BUILD.bazel"],
+        allow_empty = True,
+    ),
+    visibility = ["//visibility:public"],
+)
+
+# OPTION B: build llama.cpp's libraries hermetically via its own CMakeLists,
+# driven by rules_foreign_cc + the hermetic-llvm clang. Feature flags are MINE
+# here (not build.rs's hardcoded ones) → CPU-only, Metal/Accelerate/BLAS OFF, so
+# this is fully hermetic even on a Mac (no Xcode/xcrun). This is the clean
+# "graph node" llama target the evaluation's Option B describes.
+load("@rules_foreign_cc//foreign_cc:defs.bzl", "cmake")
+
+# Base llama cmake configuration (CPU-only, hermetic on desktop: Metal OFF).
+# Desktop stays lean: TOOLS/COMMON OFF → just llama + ggml (the proven config).
+_LLAMA_CACHE_ENTRIES = {
+    "CMAKE_BUILD_TYPE": "Release",
+    "BUILD_SHARED_LIBS": "OFF",
+    "LLAMA_BUILD_EXAMPLES": "OFF",
+    "LLAMA_BUILD_TESTS": "OFF",
+    "LLAMA_BUILD_TOOLS": "OFF",
+    "LLAMA_BUILD_SERVER": "OFF",
+    "LLAMA_BUILD_COMMON": "OFF",
+    "LLAMA_CURL": "OFF",
+    "GGML_OPENMP": "OFF",
+    "GGML_NATIVE": "OFF",  # reproducible: no -march=native
+    "GGML_METAL": "OFF",  # <-- the key: no Apple GPU => no Xcode => hermetic
+    "GGML_ACCELERATE": "OFF",
+    "GGML_BLAS": "OFF",
+    "GGML_CUDA": "OFF",
+    "GGML_VULKAN": "OFF",
+}
+
+# Android extras. VISION: TOOLS+COMMON=ON unlock tools/ so the `mtmd` library
+# (multimodal vision/audio) is built — mirrors build.rs's mobile vision path.
+# TOOLS=ON also builds the tool executables (batched-bench, …); those need libc++
+# explicitly linked (cargo's NDK does this automatically, rfcc's doesn't — the
+# static libs we collect are unaffected). GGML_LLAMAFILE=OFF mirrors build.rs.
+# Vision is Android-only (a mobile backend, like candle): desktop never builds
+# mtmd, so the proven desktop chain is untouched.
+_ANDROID_LLAMA = {
+    "LLAMA_BUILD_TOOLS": "ON",
+    "LLAMA_BUILD_COMMON": "ON",
+    "GGML_LLAMAFILE": "OFF",
+    "CMAKE_EXE_LINKER_FLAGS": "-lc++_shared",
+}
+
+# out_static_libs differs by platform: android adds libmtmd.a (vision).
+_LLAMA_LIBS = [
+    "libllama.a",
+    "libggml.a",
+    "libggml-base.a",
+    "libggml-cpu.a",
+]
+
+# Shared darwin cmake config (CPU lane //:llama darwin arm + //:llama_metal).
+# CMAKE_SYSTEM pair: same rfcc gap as windows — no darwin _TARGET_OS_PARAMS
+# entry, so without it cmake detects the Linux exec host and ggml defines
+# _GNU_SOURCE instead of _DARWIN_C_SOURCE. With SYSTEM_NAME=Darwin cmake also
+# requires Mach-O binutils (CMakeFindBinUtils) — pointed at the hermetic llvm
+# equivalents via $(execpath) (labels ride in via build_data, cfg=exec).
+# Vision (TOOLS/COMMON=ON -> libmtmd) for parity with the shipped
+# platform-macos CLI; the throwaway tool exes get a C++ runtime via
+# CMAKE_CXX_STANDARD_LIBRARIES (lands AFTER objects, unlike EXE_LINKER_FLAGS).
+# Metal GPU backend, shared by the Apple Metal lanes (macOS //:llama_metal + iOS).
+_METAL_CMAKE_FLAGS = {
+    "GGML_METAL": "ON",
+    "GGML_ACCELERATE": "ON",
+}
+
+_DARWIN_LLAMA = _LLAMA_CACHE_ENTRIES | {
+    "CMAKE_SYSTEM_NAME": "Darwin",
+    "CMAKE_SYSTEM_PROCESSOR": "arm64",
+    "CMAKE_INSTALL_NAME_TOOL": "$$EXT_BUILD_ROOT/$(execpath @llvm//tools:llvm-install-name-tool)",
+    "CMAKE_OTOOL": "$$EXT_BUILD_ROOT/$(execpath @llvm//tools:llvm-otool)",
+    "LLAMA_BUILD_TOOLS": "ON",
+    "LLAMA_BUILD_COMMON": "ON",
+}
+
+# iOS device (Apple G1+G2), built LOCALLY on a Mac via Xcode's iphoneos SDK
+# (apple_support toolchain). Same rfcc gap as darwin/windows — no iOS entry in
+# rfcc's _TARGET_OS_PARAMS, so set CMAKE_SYSTEM_NAME=iOS explicitly, else cmake
+# detects the macOS EXEC host and builds llama as macOS. OSX_SYSROOT=iphoneos +
+# ARCHITECTURES=arm64 pick the iOS SDK via xcrun; deployment 16.0 matches
+# Package.swift / boltffi.toml. G2: Metal GPU + Accelerate ON (Xcode's metal
+# compiler, Mac-bound) — iOS always ships with Metal, so unlike desktop it needs
+# no --//:metal flag; just turn it on for the iOS arm. No Mach-O binutils
+# overrides (unlike the darwin CROSS): iOS builds ON the Mac (/usr/bin/otool).
+_IOS_LLAMA = _LLAMA_CACHE_ENTRIES | {
+    "CMAKE_SYSTEM_NAME": "iOS",
+    "CMAKE_SYSTEM_PROCESSOR": "arm64",
+    "CMAKE_OSX_SYSROOT": "iphoneos",
+    "CMAKE_OSX_ARCHITECTURES": "arm64",
+    "CMAKE_OSX_DEPLOYMENT_TARGET": "16.0",
+    "IOS": "ON",
+    # Vision (mtmd) parity: TOOLS/COMMON unlock tools/ -> libmtmd (the shipped
+    # platform-ios bolt has vision). The throwaway tool exes get the SDK's -lc++
+    # (resolves against iphoneos libc++.tbd), like the darwin/metal lanes.
+    "LLAMA_BUILD_TOOLS": "ON",
+    "LLAMA_BUILD_COMMON": "ON",
+    "CMAKE_CXX_STANDARD_LIBRARIES": "-lc++",
+} | _METAL_CMAKE_FLAGS
+
+# iOS simulator (Apple G4a). Identical to the device arm EXCEPT the sysroot:
+# CMAKE_SYSTEM_NAME stays iOS (cmake's iOS covers device + sim; the sysroot is
+# what distinguishes them), arch stays arm64 (Apple-Silicon Macs run the sim on
+# arm64), deployment/Metal/vision all match device. iphonesimulator's SDK ships
+# Metal + CoreML (CPU-backed on the sim), so GGML_METAL stays ON — matching the
+# slice boltffi already ships (its cargo sim build enables Metal via target_os=ios).
+_IOS_SIM_LLAMA = _IOS_LLAMA | {
+    "CMAKE_OSX_SYSROOT": "iphonesimulator",
+}
+
+cmake(
+    name = "llama",
+    # armv7: rfcc's crosstool has no CMAKE_SYSTEM_PROCESSOR mapping for armv7,
+    # so cmake falls back to the EXEC machine's uname (x86_64 RBE worker) and
+    # ggml's arch detection applies x86 SIMD flags (-mavx/-mf16c/…) to the arm
+    # compile. CMAKE_SYSTEM_* set via cache_entries are absorbed into the
+    # generated toolchain file (a plain -D is overridden by it), steering ggml
+    # onto its ARM path. (aarch64/x86_64 map correctly on their own.)
+    # Android mirrors build.rs's mobile cmake block: GGML_LLAMAFILE=OFF
+    # (llamafile's sgemm uses NEON fp16 intrinsics armv7 doesn't have; today's
+    # pipeline disables it on android across the board). armv7 additionally
+    # needs the CMAKE_SYSTEM pair: rfcc only honors CMAKE_SYSTEM_PROCESSOR
+    # (moving it into the generated crossfile) when CMAKE_SYSTEM_NAME is
+    # user-set — without them ggml detects the EXEC worker's x86_64 and applies
+    # x86 SIMD flags to the arm compile (verified in the configure log).
+    cache_entries = select({
+        "@rules_rs//rs/platforms/config:armv7-linux-androideabi": _LLAMA_CACHE_ENTRIES | _ANDROID_LLAMA | {
+            "CMAKE_SYSTEM_NAME": "Linux",
+            "CMAKE_SYSTEM_PROCESSOR": "arm",
+        },
+        "@rules_rs//rs/platforms/config:aarch64-linux-android": _LLAMA_CACHE_ENTRIES | _ANDROID_LLAMA,
+        "@rules_rs//rs/platforms/config:x86_64-linux-android": _LLAMA_CACHE_ENTRIES | _ANDROID_LLAMA,
+        # Desktop Windows cross (GNU/MinGW). rfcc has NO windows entry in its
+        # _TARGET_OS_PARAMS, so CMAKE_SYSTEM_NAME is not auto-set — without it
+        # cmake detects the Linux exec host and ggml takes its non-Windows path.
+        # Set the pair explicitly (rfcc only folds CMAKE_SYSTEM_PROCESSOR into the
+        # crossfile when CMAKE_SYSTEM_NAME is user-set); AMD64 → ggml x86 arch.
+        # Same shape as the armv7 seeding above.
+        # Windows vision (the .exe chapter): TOOLS+COMMON=ON unlock tools/ ->
+        # libmtmd, mirroring the linux arm — cargo ships the windows CLI with
+        # platform-desktop (vision + huggingface), so the Bazel artifact must
+        # match. The throwaway tool EXES need a C++ runtime exactly like linux
+        # (the hermetic toolchain links libc++ via staged inputs, which rfcc's
+        # cmake doesn't replicate) — hand them the same static archives, built
+        # for the windows target (hermetic-llvm builds its runtimes from source
+        # per target on windows; the darwin-only breakage doesn't apply).
+        "@rules_rs//rs/platforms/config:x86_64-pc-windows-gnu": _LLAMA_CACHE_ENTRIES | {
+            "CMAKE_SYSTEM_NAME": "Windows",
+            "CMAKE_SYSTEM_PROCESSOR": "AMD64",
+            "LLAMA_BUILD_TOOLS": "ON",
+            "LLAMA_BUILD_COMMON": "ON",
+            "CMAKE_CXX_STANDARD_LIBRARIES": "$$EXT_BUILD_ROOT/$(execpath @llvm//runtimes/libcxx:libcxx.static) $$EXT_BUILD_ROOT/$(execpath @llvm//runtimes/libcxx:libcxxabi.static) $$EXT_BUILD_ROOT/$(execpath @llvm//runtimes/libunwind:libunwind.static)",
+            # mtmd-audio uses M_PI, which MinGW's math.h hides under strict
+            # ANSI (glibc/bionic expose it by default — this bites only the
+            # windows cross). rfcc maps these to CMAKE_*_FLAGS_INIT with
+            # replace=False, so they APPEND to the toolchain-derived flags.
+            "CMAKE_C_FLAGS": "-D_USE_MATH_DEFINES",
+            "CMAKE_CXX_FLAGS": "-D_USE_MATH_DEFINES",
+        },
+        # Desktop Windows cross (MSVC ABI) — the Flutter/cargokit lane. Same
+        # CMAKE_SYSTEM seeding and vision set as the GNU arm above, but the C++
+        # runtime is Microsoft's STL, autolinked by `#pragma comment(lib, ...)`
+        # out of @msvc_runtime's headers. So NO CMAKE_CXX_STANDARD_LIBRARIES:
+        # the libc++/libcxxabi/libunwind trio the MinGW arm has to hand-feed is
+        # exactly what the MSVC sysroot already provides.
+        "@rules_rs//rs/platforms/config:x86_64-pc-windows-msvc": _LLAMA_CACHE_ENTRIES | {
+            "CMAKE_SYSTEM_NAME": "Windows",
+            "CMAKE_SYSTEM_PROCESSOR": "AMD64",
+            "LLAMA_BUILD_TOOLS": "ON",
+            "LLAMA_BUILD_COMMON": "ON",
+            # CMake's Windows-Clang module enables the RC language and there is
+            # no resource compiler on a Linux worker's PATH ("No
+            # CMAKE_RC_COMPILER could be found"). llvm-rc is the hermetic
+            # equivalent; the label rides in via build_data (cfg=exec).
+            "CMAKE_RC_COMPILER": "$$EXT_BUILD_ROOT/$(execpath @llvm//tools:llvm-rc)",
+            # mtmd-audio's M_PI, same as the MinGW arm: Microsoft's math.h is
+            # where _USE_MATH_DEFINES comes from in the first place.
+            "CMAKE_C_FLAGS": "-D_USE_MATH_DEFINES",
+            "CMAKE_CXX_FLAGS": "-D_USE_MATH_DEFINES",
+        },
+        # macOS cross from Linux RBE (the macOS-CPU lane): same rfcc gap as
+        # windows — no darwin entry in rfcc's _TARGET_OS_PARAMS, so without
+        # CMAKE_SYSTEM_NAME cmake detects the Linux exec host and ggml defines
+        # _GNU_SOURCE instead of _DARWIN_C_SOURCE (u_int/u_char vanish from the
+        # SDK headers). Metal stays OFF (base entries): CPU-only is the lane
+        # that can leave the Mac; Metal needs Xcode.
+        # Desktop-linux VISION (Flip 1): TOOLS+COMMON=ON unlock tools/ -> libmtmd,
+        # mirroring the android arms — the shipped cargo CLI is built with
+        # platform-desktop = vision+huggingface, so the Bazel artifact must match.
+        # The tool EXECUTABLES need a C++ runtime: the hermetic toolchain links
+        # C++ via staged inputs (-nostdlib++), which rfcc's cmake doesn't
+        # replicate — hand the static libc++/abi/unwind archives to the exe
+        # links via CMAKE_CXX_STANDARD_LIBRARIES (lands AFTER objects, unlike
+        # EXE_LINKER_FLAGS). The tools themselves are discarded; only the
+        # static libs ship. GGML_LLAMAFILE stays default-ON (android-only off).
+        "@rules_rs//rs/platforms/config:x86_64-unknown-linux-gnu": _LLAMA_CACHE_ENTRIES | {
+            "LLAMA_BUILD_TOOLS": "ON",
+            "LLAMA_BUILD_COMMON": "ON",
+            "CMAKE_CXX_STANDARD_LIBRARIES": "$$EXT_BUILD_ROOT/$(execpath @llvm//runtimes/libcxx:libcxx.static) $$EXT_BUILD_ROOT/$(execpath @llvm//runtimes/libcxx:libcxxabi.static) $$EXT_BUILD_ROOT/$(execpath @llvm//runtimes/libunwind:libunwind.static)",
+            # PIC so these static libs also link into a -shared consumer (the
+            # Flutter cdylib, //bindings/flutter/rust): stb_image's __thread
+            # globals otherwise emit R_X86_64_TPOFF32, illegal in a shared lib.
+            # Harmless for the CLI exe (macOS/arm64 is PIC by default, Android via
+            # the NDK, so only the linux GNU arm needs this explicitly).
+            "CMAKE_POSITION_INDEPENDENT_CODE": "ON",
+        },
+        # darwin CPU lane (RBE): _DARWIN_LLAMA + the SDK's -lc++ for the tool
+        # exes (resolves against the sysroot's libc++.tbd stubs; the tools are
+        # discarded). NOT the hermetic static libcxx: compiling hermetic-llvm's
+        # libcxx from source FOR A DARWIN TARGET breaks against the minimal
+        # SDK regardless of exec platform (_CTYPE_* undeclared in ___wctype.h,
+        # unresolved using declarations) — same reason //:llama_metal links
+        # -lc++. The static-archive approach remains linux-only.
+        "@rules_rs//rs/platforms/config:aarch64-apple-darwin": _DARWIN_LLAMA | {
+            "CMAKE_CXX_STANDARD_LIBRARIES": "-lc++",
+        },
+        # iOS device (Apple G1) — Mac-local build via the iphoneos SDK.
+        "@rules_rs//rs/platforms/config:aarch64-apple-ios": _IOS_LLAMA,
+        # iOS simulator (Apple G4a) — same, via the iphonesimulator SDK.
+        "@rules_rs//rs/platforms/config:aarch64-apple-ios-sim": _IOS_SIM_LLAMA,
+        "//conditions:default": _LLAMA_CACHE_ENTRIES,
+    }),
+    # iOS builds LOCALLY (--config=ios never uses --config=remote), so the exec
+    # platform is already this Mac — no exec_compatible_with pin needed (unlike
+    # //:llama_metal, which runs under remote exec and must be forced local).
+    # rfcc's PATH is sanitized, so hand the iOS arm the Apple-Silicon Homebrew
+    # path so it finds the preinstalled cmake/make (--config=ios registers them);
+    # /usr/bin keeps xcrun reachable. Default {} keeps other arms' keys stable.
+    env = select({
+        "@rules_rs//rs/platforms/config:aarch64-apple-ios": {"PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"},
+        "@rules_rs//rs/platforms/config:aarch64-apple-ios-sim": {"PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"},
+        "//conditions:default": {},
+    }),
+    # (macOS-host PATH hack removed for the RBE/Linux test — on Linux workers
+    # rfcc finds its own downloaded cmake; /opt/homebrew doesn't exist there.)
+    # Mach-O binutils for the darwin cross, referenced by the darwin
+    # cache_entries via $(execpath). build_data is cfg=exec: the platform-
+    # selected alias resolves to the binary that runs on the BUILD worker.
+    # Darwin-scoped so other platforms' action keys stay byte-stable.
+    build_data = select({
+        "@rules_rs//rs/platforms/config:aarch64-apple-darwin": [
+            "@llvm//tools:llvm-install-name-tool",
+            "@llvm//tools:llvm-otool",
+        ],
+        # windows-msvc: the resource compiler CMake's Windows-Clang module
+        # insists on, referenced by that arm's CMAKE_RC_COMPILER.
+        "@rules_rs//rs/platforms/config:x86_64-pc-windows-msvc": [
+            "@llvm//tools:llvm-rc",
+        ],
+        "//conditions:default": [],
+    }),
+    # linux + windows vision: the static C++ runtime archives referenced by
+    # those arms' CMAKE_CXX_STANDARD_LIBRARIES. cfg=target (they're linked into
+    # TARGET binaries), unlike build_data's exec-config host tools. darwin
+    # deliberately absent: darwin-target libcxx-from-source is broken (see the
+    # darwin arm comment) — both darwin lanes use the SDK's -lc++.
+    data = select({
+        "@rules_rs//rs/platforms/config:x86_64-unknown-linux-gnu": [
+            "@llvm//runtimes/libcxx:libcxx.static",
+            "@llvm//runtimes/libcxx:libcxxabi.static",
+            "@llvm//runtimes/libunwind:libunwind.static",
+        ],
+        "@rules_rs//rs/platforms/config:x86_64-pc-windows-gnu": [
+            "@llvm//runtimes/libcxx:libcxx.static",
+            "@llvm//runtimes/libcxx:libcxxabi.static",
+            "@llvm//runtimes/libunwind:libunwind.static",
+        ],
+        "//conditions:default": [],
+    }),
+    lib_source = ":llama_src",
+    # Build cmake's default `all` target — same as build.rs's vision path (it
+    # sets TOOLS=ON and builds everything). Building only `mtmd` breaks cmake's
+    # blanket `--install` step (it still runs the un-built tools' install rules).
+    # SERVER=OFF already excludes the heavy cli/server; the rest are the standard
+    # llama tools cargo compiles for android today, so `all` is proven to
+    # cross-compile. We collect only the static libs we need below.
+    out_static_libs = select({
+        "@rules_rs//rs/platforms/config:aarch64-linux-android": ["libmtmd.a"] + _LLAMA_LIBS,
+        "@rules_rs//rs/platforms/config:armv7-linux-androideabi": ["libmtmd.a"] + _LLAMA_LIBS,
+        "@rules_rs//rs/platforms/config:x86_64-linux-android": ["libmtmd.a"] + _LLAMA_LIBS,
+        # Desktop-linux vision (Flip 1) also collects libmtmd.
+        "@rules_rs//rs/platforms/config:x86_64-unknown-linux-gnu": ["libmtmd.a"] + _LLAMA_LIBS,
+        # Darwin vision (Flip 2 parity — both CPU and Metal lanes).
+        "@rules_rs//rs/platforms/config:aarch64-apple-darwin": ["libmtmd.a"] + _LLAMA_LIBS,
+        # iOS parity: Metal backend archive + vision (libmtmd), like darwin.
+        "@rules_rs//rs/platforms/config:aarch64-apple-ios": ["libmtmd.a", "libggml-metal.a"] + _LLAMA_LIBS,
+        # iOS simulator (G4a): same archive set as the device arm.
+        "@rules_rs//rs/platforms/config:aarch64-apple-ios-sim": ["libmtmd.a", "libggml-metal.a"] + _LLAMA_LIBS,
+        # Windows/MinGW: ggml/CMakeLists.txt sets CMAKE_STATIC_LIBRARY_PREFIX=""
+        # on WIN32, so the ggml archives have NO `lib` prefix (ggml.a, not
+        # libggml.a) — while llama (sibling scope) keeps it (libllama.a), and
+        # so does mtmd (tools/mtmd, also outside ggml's directory scope).
+        # Windows/MSVC: CMake's Windows-Clang module sets
+        # CMAKE_STATIC_LIBRARY_PREFIX="" and _SUFFIX=".lib" for every target, so
+        # unlike the MinGW arm there is no `lib` prefix anywhere and llama/mtmd
+        # follow the same rule as ggml.
+        "@rules_rs//rs/platforms/config:x86_64-pc-windows-msvc": [
+            "mtmd.lib",
+            "llama.lib",
+            "ggml.lib",
+            "ggml-base.lib",
+            "ggml-cpu.lib",
+        ],
+        "@rules_rs//rs/platforms/config:x86_64-pc-windows-gnu": [
+            "libmtmd.a",
+            "libllama.a",
+            "ggml.a",
+            "ggml-base.a",
+            "ggml-cpu.a",
+        ],
+        "//conditions:default": _LLAMA_LIBS,
+    }),
+    # Windows: ggml/CMakeLists.txt installs the ggml umbrella/base libs with
+    # `install(TARGETS ggml LIBRARY)` (no ARCHIVE). On Linux that still lands the
+    # static .a, but on Windows CMake treats a static lib strictly as an ARCHIVE
+    # artifact, so libggml*.a never reaches the install lib/ (only libllama.a,
+    # which has its own rule, does). Copy the built ggml archives into lib/ so
+    # rfcc can collect them. No-op on other platforms (proven install works there).
+    postfix_script = select({
+        "@rules_rs//rs/platforms/config:x86_64-pc-windows-msvc": "mkdir -p $$INSTALLDIR/lib && find $$BUILD_TMPDIR \\( -name '*.a' -o -name '*.lib' \\) -exec cp -f {} $$INSTALLDIR/lib/ \\;",
+        "@rules_rs//rs/platforms/config:x86_64-pc-windows-gnu": "mkdir -p $$INSTALLDIR/lib && find $$BUILD_TMPDIR -name '*.a' -exec cp -f {} $$INSTALLDIR/lib/ \\;",
+        "//conditions:default": "",
+    }),
+    visibility = ["//visibility:public"],
+)
+
+# The macOS GPU lane (Flip 2): llama with Metal + Accelerate, a SEPARATE target
+# so (a) the proven //:llama keeps its action keys byte-stable on every lane,
+# and (b) this one can be pinned LOCAL (tags) while the rest of the same build
+# graph executes remotely — the mixed-exec model: a Mac drives the build, RBE
+# compiles the Rust, only this action needs the Mac (Xcode's metal compiler).
+# Selected into the graph by //crates/llama-cpp-sys when --//:metal=true
+# (build:macos-metal). Tool exes link the REAL SDK's -lc++ (hermetic libc++
+# cannot be compiled FROM SOURCE on a mac host — unresolved-using-declaration
+# in its own headers; linux-exec builds of the same target are fine).
+cmake(
+    name = "llama_metal",
+    # rfcc sanitizes PATH to /bin:/usr/bin:/usr/local/bin; the preinstalled
+    # cmake/make/pkg-config (build:macos-metal --extra_toolchains) live in
+    # /opt/homebrew/bin on Apple silicon (incl. macos-14 runners).
+    env = {"PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"},
+    build_data = [
+        "@llvm//tools:llvm-install-name-tool",
+        "@llvm//tools:llvm-otool",
+    ],
+    cache_entries = _DARWIN_LLAMA | _METAL_CMAKE_FLAGS | {
+        "CMAKE_CXX_STANDARD_LIBRARIES": "-lc++",
+    },
+    lib_source = ":llama_src",
+    out_static_libs = [
+        "libmtmd.a",
+        # ggml's Metal backend is its own archive, linked unconditionally by
+        # cargo's apple path (build.rs:681).
+        "libggml-metal.a",
+    ] + _LLAMA_LIBS,
+    # Never on a remote (Linux) worker: needs Xcode's metal compiler.
+    # exec_compatible_with pins the EXEC PLATFORM (toolchain resolution) to a
+    # Mac — the no-remote-exec tag alone only pins the spawn strategy, and
+    # under --config=remote toolchain resolution would still pick the
+    # prioritized rbe_linux exec platform, handing this local action LINUX
+    # clang binaries (exec format error 126). NOTE: no target_compatible_with
+    # — the graph carries an analysis-only exec-config copy of this chain
+    # (like //:llama's), and an incompatibility marker on it poisons the whole
+    # top target under --config=remote.
+    exec_compatible_with = ["@platforms//os:macos"],
+    # "manual": keep wildcard builds (bazel build //...) on non-mac machines
+    # from analyzing this target — with no macOS exec platform registered,
+    # exec_compatible_with would hard-fail resolution. Explicit requests and
+    # the transitive path (llama-cpp-sys' --//:metal select) still work.
+    tags = [
+        "manual",
+        "no-remote-exec",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+# The `//:ndk_smoke` PoC (a trivial cc_library that proved the NDK
+# cc_toolchain before llama.cpp was wired) and its `//:android_arm64`
+# platform are gone: llama.cpp has shipped through that toolchain for
+# months, and the android lanes select `@rules_rs//rs/platforms:*` via
+# `.bazelrc`'s `build:android-*` configs rather than a local platform().
+
+# Vendored ONNX Runtime (dlopened at runtime), per ABI that ships it — armv7
+# has no vendored ORT (matches today's AAR). libc++_shared.so is NOT taken from
+# vendor anymore: it comes from @androidndk's sysroot, version-matched to the
+# NDK that linked the .so (see bindings/kotlin/BUILD.bazel).
+filegroup(
+    name = "ort_android_arm64",
+    srcs = ["vendor/ort-android/arm64-v8a/libonnxruntime.so"],
+    visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "ort_android_x86_64",
+    srcs = ["vendor/ort-android/x86_64/libonnxruntime.so"],
+    visibility = ["//visibility:public"],
+)
+
+# Vendored STATIC onnxruntime for the macOS lane (see vendor/ort-macos/README):
+# ort-sys on Apple uses download-binaries, but a build-time download is
+# incompatible with remote execution (the fetched file is not a tracked action
+# output, so it never reaches the rlib-compile action on another worker).
+# Fed to ort-sys via ORT_LIB_LOCATION (MODULE.bazel annotation) — the same
+# provide-the-artifact pattern as vendor/ort-ios in xtask.
+filegroup(
+    name = "ort_macos_arm64",
+    srcs = ["vendor/ort-macos/aarch64-apple-darwin/libonnxruntime.a"],
+    visibility = ["//visibility:public"],
+)
+
+# Vendored STATIC onnxruntime for the iOS device slice (Apple G1). Same
+# provide-the-artifact pattern as macOS above; the .a lives inside the
+# committed xcframework at the ios-arm64 slice. Fed to ort-sys via
+# ORT_LIB_LOCATION (MODULE.bazel annotation).
+filegroup(
+    name = "ort_ios_arm64",
+    srcs = ["vendor/ort-ios/onnxruntime.xcframework/ios-arm64/libonnxruntime.a"],
+    visibility = ["//visibility:public"],
+)

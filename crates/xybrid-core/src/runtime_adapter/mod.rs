@@ -55,6 +55,14 @@ pub mod traits;
 // Always-available types for FFI/bindings (NOT feature-gated)
 pub mod types;
 
+// Always-compiled tool-call text protocols, LFM2- and gemma-4-family
+// (parser + continuation composer).
+pub mod tool_call;
+
+// JSON-Schema → GBNF conversion for constrained decoding. Pure Rust, no llama
+// dependency, so it is always compiled (referenced by `GenerationConfig`).
+pub mod grammar;
+
 // Shared vision contracts for embedding-style multimodal backends.
 pub mod vision;
 
@@ -393,4 +401,28 @@ pub trait RuntimeAdapterExt {
     ///
     /// Vector of model identifiers
     fn list_loaded_models(&self) -> Vec<String>;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::abort::{AbortReason, CloudFallbackAbort};
+
+    #[test]
+    fn streaming_callback_error_preserves_typed_cloud_fallback_abort() {
+        let err: StreamingError = Box::new(CloudFallbackAbort::new(AbortReason::StressMemory));
+        let adapter_err = AdapterError::from_streaming_callback_error(err);
+        assert_eq!(
+            adapter_err.cloud_fallback_abort_reason(),
+            Some(AbortReason::StressMemory)
+        );
+    }
+
+    #[test]
+    fn streaming_callback_error_stringifies_ordinary_errors() {
+        let err: StreamingError = Box::new(std::io::Error::other("sink closed"));
+        let adapter_err = AdapterError::from_streaming_callback_error(err);
+        assert_eq!(adapter_err.cloud_fallback_abort_reason(), None);
+        assert!(matches!(adapter_err, AdapterError::RuntimeError(_)));
+    }
 }

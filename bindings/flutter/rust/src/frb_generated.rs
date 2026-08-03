@@ -43,7 +43,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.11.1";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -738506137;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 1092953575;
 
 // Section: executor
 
@@ -2714,6 +2714,36 @@ fn wire__crate__api__model__ffi_generation_config_greedy_impl(
         },
     )
 }
+fn wire__crate__api__model__json_schema_to_gbnf_impl(
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) -> flutter_rust_bridge::for_generated::WireSyncRust2DartSse {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_sync::<flutter_rust_bridge::for_generated::SseCodec, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "json_schema_to_gbnf",
+            port: None,
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Sync,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_schema_json = <String>::sse_decode(&mut deserializer);
+            deserializer.end();
+            transform_result_sse::<_, String>((move || {
+                let output_ok = crate::api::model::json_schema_to_gbnf(api_schema_json)?;
+                Ok(output_ok)
+            })())
+        },
+    )
+}
 
 // Section: related_funcs
 
@@ -2986,6 +3016,7 @@ impl SseDecode for crate::api::model::FfiGenerationConfig {
         let mut var_topK = <Option<u32>>::sse_decode(deserializer);
         let mut var_repetitionPenalty = <Option<f32>>::sse_decode(deserializer);
         let mut var_stopSequences = <Option<Vec<String>>>::sse_decode(deserializer);
+        let mut var_grammar = <Option<String>>::sse_decode(deserializer);
         return crate::api::model::FfiGenerationConfig {
             max_tokens: var_maxTokens,
             temperature: var_temperature,
@@ -2994,6 +3025,7 @@ impl SseDecode for crate::api::model::FfiGenerationConfig {
             top_k: var_topK,
             repetition_penalty: var_repetitionPenalty,
             stop_sequences: var_stopSequences,
+            grammar: var_grammar,
         };
     }
 }
@@ -3137,6 +3169,7 @@ impl SseDecode for crate::api::result::FfiResult {
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         let mut var_success = <bool>::sse_decode(deserializer);
         let mut var_text = <Option<String>>::sse_decode(deserializer);
+        let mut var_reasoningContent = <Option<String>>::sse_decode(deserializer);
         let mut var_audioBytes = <Option<Vec<u8>>>::sse_decode(deserializer);
         let mut var_embedding = <Option<Vec<f32>>>::sse_decode(deserializer);
         let mut var_latencyMs = <u32>::sse_decode(deserializer);
@@ -3144,6 +3177,7 @@ impl SseDecode for crate::api::result::FfiResult {
         return crate::api::result::FfiResult {
             success: var_success,
             text: var_text,
+            reasoning_content: var_reasoningContent,
             audio_bytes: var_audioBytes,
             embedding: var_embedding,
             latency_ms: var_latencyMs,
@@ -3818,6 +3852,7 @@ fn pde_ffi_dispatcher_sync_impl(
         64 => {
             wire__crate__api__model__ffi_generation_config_greedy_impl(ptr, rust_vec_len, data_len)
         }
+        65 => wire__crate__api__model__json_schema_to_gbnf_impl(ptr, rust_vec_len, data_len),
         _ => unreachable!(),
     }
 }
@@ -3963,6 +3998,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::model::FfiGenerationConfig {
             self.top_k.into_into_dart().into_dart(),
             self.repetition_penalty.into_into_dart().into_dart(),
             self.stop_sequences.into_into_dart().into_dart(),
+            self.grammar.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -4160,6 +4196,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::result::FfiResult {
         [
             self.success.into_into_dart().into_dart(),
             self.text.into_into_dart().into_dart(),
+            self.reasoning_content.into_into_dart().into_dart(),
             self.audio_bytes.into_into_dart().into_dart(),
             self.embedding.into_into_dart().into_dart(),
             self.latency_ms.into_into_dart().into_dart(),
@@ -4631,6 +4668,7 @@ impl SseEncode for crate::api::model::FfiGenerationConfig {
         <Option<u32>>::sse_encode(self.top_k, serializer);
         <Option<f32>>::sse_encode(self.repetition_penalty, serializer);
         <Option<Vec<String>>>::sse_encode(self.stop_sequences, serializer);
+        <Option<String>>::sse_encode(self.grammar, serializer);
     }
 }
 
@@ -4755,6 +4793,7 @@ impl SseEncode for crate::api::result::FfiResult {
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <bool>::sse_encode(self.success, serializer);
         <Option<String>>::sse_encode(self.text, serializer);
+        <Option<String>>::sse_encode(self.reasoning_content, serializer);
         <Option<Vec<u8>>>::sse_encode(self.audio_bytes, serializer);
         <Option<Vec<f32>>>::sse_encode(self.embedding, serializer);
         <u32>::sse_encode(self.latency_ms, serializer);

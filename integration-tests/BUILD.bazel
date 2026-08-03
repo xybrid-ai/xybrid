@@ -1,0 +1,116 @@
+# GATE 5 — integration-tests (E2E with real models/fixtures). Scaffolded as a
+# rust_library so the graph is complete; the model-gated E2E cases self-skip
+# when fixtures are absent and would become per-file `rust_test` targets in a
+# real migration. Not a focus of the spike (sits below the ort ceiling via
+# xybrid-core).
+load("@rules_rs//rs:rust_library.bzl", "rust_library")
+load("@rules_rs//rs:rust_test.bzl", "rust_test")
+load("@crates//:defs.bzl", "all_crate_deps")
+
+rust_library(
+    name = "integration-tests",
+    srcs = glob(["src/**/*.rs"]),
+    edition = "2021",
+    crate_features = ["default"],
+    deps = all_crate_deps(normal = True),
+    visibility = ["//visibility:public"],
+)
+
+# Committed model METADATA only (no model weights — those are downloaded and stay
+# untracked). xybrid-core's inline tests read these via `testing::model_fixtures`,
+# which resolves CARGO_MANIFEST_DIR/../../integration-tests/fixtures/models.
+# Bazel sandboxes actions, so the files must be declared as `data` on the test
+# target or those reads fail with the file simply absent.
+filegroup(
+    name = "model_metadata_fixtures",
+    srcs = glob(
+        [
+            "fixtures/models/models.json",
+            "fixtures/models/*/model_metadata.json",
+        ],
+        allow_empty = False,
+    ),
+    visibility = ["//visibility:public"],
+)
+
+# Committed sample inputs (audio/text) and pipeline YAML the E2E tests feed in.
+# Small and tracked, unlike the model weights.
+filegroup(
+    name = "input_fixtures",
+    srcs = glob(
+        ["fixtures/input/**"],
+        allow_empty = False,
+    ),
+    visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "pipeline_fixtures",
+    srcs = glob(
+        ["fixtures/pipelines/**"],
+        allow_empty = False,
+    ),
+    visibility = ["//visibility:public"],
+)
+
+# Integration tests. Each tests/*.rs is its own binary. They exercise real models
+# and self-skip when the weights are absent (fixtures::model_if_available), which
+# is what happens on CI — so these targets mainly prove the tests compile and
+# their skip paths hold. deps mirror what each file links as an external crate.
+#
+# crate_features matters: several of these files open with
+# `#![cfg(feature = "llm-llamacpp")]`, so without the feature the file compiles
+# to an EMPTY binary — `--list` reports "0 tests" while the target still goes
+# green. (Plain `cargo test -p integration-tests` has the same blind spot; it
+# needs `--features llm-llamacpp` to see them.) xybrid-core's Bazel target
+# already builds with llm-llamacpp, so enabling it here lines up.
+_E2E_TESTS = {
+    "asr_integration": [],
+    "context_budget_clamp": ["llm-llamacpp"],
+    "integration_check": [],
+    "llm_chat_template": ["llm-llamacpp"],
+    "reasoning_budget": ["llm-llamacpp"],
+    "reasoning_capture": ["llm-llamacpp"],
+    "tts_integration": [],
+}
+
+# local_llm is absent on purpose: it is gated on `llm-mistral`, and xybrid-core's
+# Bazel target does not build the mistral backend at all, so the feature cannot
+# be satisfied here the way llm-llamacpp can. whisper_candle_integration is
+# absent for the same reason — it is gated on `candle`, which xybrid-core's
+# crate_features above do not enable. It runs under cargo, in the Test Candle
+# workflow.
+
+[
+    rust_test(
+        name = name,
+        srcs = ["tests/{}.rs".format(name)],
+        crate_features = features,
+        data = [
+            ":input_fixtures",
+            ":model_metadata_fixtures",
+            ":pipeline_fixtures",
+        ],
+        edition = "2021",
+        deps = [
+            ":integration-tests",
+            "//crates/xybrid-core:xybrid-core",
+        ] + (["@crates//:tokio"] if name == "integration_check" else ["@crates//:serde_json"]),
+    )
+    for name, features in _E2E_TESTS.items()
+]
+
+# system_validation drives the public SDK end to end (see the dev-dep note in
+# Cargo.toml — it lives here so xybrid-core need not depend on the sdk). Its two
+# CLI-spawning cases are #[ignore]d, so no binary has to be staged.
+rust_test(
+    name = "system_validation",
+    srcs = ["tests/system_validation.rs"],
+    edition = "2021",
+    deps = [
+        "//crates/xybrid-sdk:xybrid-sdk",
+        "@crates//:dirs",
+        "@crates//:filetime",
+        "@crates//:tempfile",
+    ],
+)

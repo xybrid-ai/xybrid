@@ -1,6 +1,39 @@
 //! Shared utility functions for CLI commands.
 
 use std::path::Path;
+use xybrid_core::ir::{Envelope, EnvelopeKind};
+
+use crate::ui;
+
+/// A thinking model that spent its whole token budget inside `<think>` ends
+/// with an empty answer, finish_reason "length", and captured reasoning —
+/// the one situation where "success with no output" needs a nudge.
+pub(crate) fn thinking_budget_exhausted(
+    text: &str,
+    finish_reason: Option<&str>,
+    reasoning: Option<&str>,
+) -> bool {
+    text.trim().is_empty()
+        && finish_reason == Some("length")
+        && reasoning.is_some_and(|r| !r.trim().is_empty())
+}
+
+pub(crate) const THINKING_BUDGET_HINT: &str =
+    "the model spent the entire token budget thinking — rerun with a larger --max-tokens, or --show-reasoning to see the partial reasoning";
+
+pub(crate) fn maybe_warn_thinking_budget(output: &Envelope) {
+    let EnvelopeKind::Text(text) = &output.kind else {
+        return;
+    };
+
+    if thinking_budget_exhausted(
+        text,
+        output.metadata.get("finish_reason").map(String::as_str),
+        output.metadata.get("reasoning_content").map(String::as_str),
+    ) {
+        ui::warning(THINKING_BUDGET_HINT);
+    }
+}
 
 /// Format model parameter count (e.g., "82M", "1.5B").
 pub fn format_params(params: u64) -> String {
@@ -26,23 +59,6 @@ pub fn format_size(bytes: u64) -> String {
     } else {
         format!("{} B", bytes)
     }
-}
-
-/// Calculate the total size of a directory in bytes.
-pub fn dir_size_bytes(path: &Path) -> anyhow::Result<u64> {
-    let mut total = 0u64;
-    if path.is_dir() {
-        for entry in std::fs::read_dir(path)? {
-            let entry = entry?;
-            let path = entry.path();
-            if path.is_dir() {
-                total += dir_size_bytes(&path)?;
-            } else {
-                total += entry.metadata()?.len();
-            }
-        }
-    }
-    Ok(total)
 }
 
 /// Display a stage name, stripping any "@target" suffix.
@@ -99,4 +115,32 @@ pub fn save_wav_file(
     file.write_all(audio_bytes)?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::thinking_budget_exhausted;
+
+    #[test]
+    fn thinking_budget_exhausted_requires_all_three_signals() {
+        assert!(thinking_budget_exhausted(
+            "",
+            Some("length"),
+            Some("deliberation")
+        ));
+        assert!(!thinking_budget_exhausted(
+            "answer",
+            Some("length"),
+            Some("deliberation")
+        ));
+        assert!(!thinking_budget_exhausted(
+            "",
+            Some("stop"),
+            Some("deliberation")
+        ));
+        assert!(!thinking_budget_exhausted("", None, Some("deliberation")));
+        assert!(!thinking_budget_exhausted("", Some("length"), None));
+        assert!(!thinking_budget_exhausted("", Some("length"), Some("")));
+        assert!(!thinking_budget_exhausted("", Some("length"), Some("   ")));
+    }
 }

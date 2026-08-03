@@ -1,0 +1,43 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Compiles the committed BoltFFI C# bindings (bindings/unity/Runtime/Bolt)
+    against Unity's frozen scripting profile: netstandard2.1 + C# 9. A boltffi
+    output change or a missed down-level in gen_unity_bolt_csharp.py then fails a
+    PR here instead of only surfacing in the Unity Editor.
+
+    This is NOT a Unity project and ships nothing. It lives under tools/ so Unity
+    never imports it. It is a lower bound on Unity compatibility, not a substitute
+    for the in-editor Mono/IL2CPP compile (AOT/reflection issues can sit on top).
+
+    See tools/scripts/gen_unity_bolt_csharp.py.
+  -->
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <!-- Unity has been capped at C# 9 from 2021.2 through Unity 6. -->
+    <LangVersion>9</LangVersion>
+    <!-- Match Unity's default (nullable disabled). The generated Bolt sources
+         opt in per-file with `#nullable enable`; the hand-written Api layer is
+         nullable-oblivious, exactly as it compiles in the Unity Editor. -->
+    <Nullable>disable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="../../bindings/unity/Runtime/Bolt/*.cs" />
+    <!-- Hand-ported inference paths (run/stream/envelope) that boltffi 0.25.3 drops. -->
+    <Compile Include="../../bindings/unity/Runtime/BoltSupplement/*.cs" />
+    <!-- The entire public managed API now rides XybridBolt (A2.2b retired the
+         pre-bolt C ABI + Runtime/Native), so the whole Api folder compiles here
+         — nothing drags a C-ABI binding into this project anymore. -->
+    <Compile Include="../../bindings/unity/Runtime/Api/*.cs" />
+    <!-- No System.Runtime.CompilerServices.Unsafe reference on purpose: Unity's
+         scripting profile does not reference that assembly (a real `unity test`
+         on 6.3 rejects `Unsafe.SizeOf` with CS0103), so neither does this gate.
+         gen_unity_bolt_csharp.py rewrites the generated Unsafe.SizeOf<T> to
+         Marshal.SizeOf<T> (core BCL) — keep the gate faithful so a reintroduced
+         Unsafe reference fails here instead of only in-editor. -->
+  </ItemGroup>
+
+</Project>

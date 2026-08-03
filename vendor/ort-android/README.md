@@ -25,7 +25,7 @@ These libraries are referenced by symlinks from:
 - `bindings/flutter/android/src/main/jniLibs/{abi}/` — Flutter SDK
 - `bindings/kotlin/libs/{abi}/` — Kotlin SDK
 
-The `cargo xtask build-android` command also copies these libraries to the Kotlin SDK output.
+The Bazel AAR (`bazel build -c opt //bindings/kotlin:xybrid_kotlin_aar`) bundles these libraries into its `jni/<abi>/` payload.
 
 ## Updating the Libraries
 
@@ -34,4 +34,4 @@ The `cargo xtask build-android` command also copies these libraries to the Kotli
 3. Replace the files in this directory
 4. Update symlinks in `bindings/flutter/` and `bindings/kotlin/` if paths change
 5. Update this README with the new version number
-6. Test with `cargo xtask build-android`
+6. Test with `bazel build -c opt //bindings/kotlin:xybrid_kotlin_aar`

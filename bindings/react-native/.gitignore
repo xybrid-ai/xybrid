@@ -8,9 +8,10 @@ android/build/
 android/.gradle/
 .kotlin/
 
-# iOS native artifacts staged by `cargo xtask stage-react-native`. These are
+# iOS native artifacts staged from the Bazel xcframework build (see the
+# README's Local development section / build-react-native.yml). These are
 # produced from the Rust core and should not be checked in — the published
-# npm tarball includes them (CI runs the xtask before `npm pack`), but
+# npm tarball includes them (CI stages them before `npm pack`), but
 # they're regenerated from source on every build, so committing would just
 # create merge friction.
 #

@@ -137,6 +137,12 @@ pub struct GenerationOutput {
     /// Vision image preprocessing latency in milliseconds. Present only when
     /// a vision-language run processes one or more images.
     pub image_preprocess_ms: Option<u32>,
+    /// Captured chain-of-thought / reasoning text the model emitted in
+    /// `<think>...</think>` blocks (or, for engines that surface it natively,
+    /// the engine's reasoning channel). This is the *pre-strip* text — `text`
+    /// always excludes it. `None` when the model produced no reasoning block
+    /// or the backend doesn't surface one. vLLM-style `reasoning_content`.
+    pub reasoning_content: Option<String>,
 }
 
 // =============================================================================
@@ -172,6 +178,26 @@ pub trait LlmBackend: Send + Sync {
 
     /// Generate text from a raw prompt (no chat template).
     fn generate_raw(&self, prompt: &str, config: &GenerationConfig) -> LlmResult<GenerationOutput>;
+
+    /// Render the chat prompt for `messages` exactly as [`Self::generate`]
+    /// would (native template, fallbacks, tool definitions from
+    /// `config.tools`) WITHOUT running generation.
+    ///
+    /// This exists so the executor can compose protocol-faithful raw
+    /// continuations (tool-result turns appended to a byte-identical first
+    /// prompt, maximizing KV-prefix reuse) through [`Self::generate_raw`].
+    /// Backends that never format chat prompts as text return the default
+    /// invalid-input error.
+    fn render_chat_prompt(
+        &self,
+        _messages: &[ChatMessage],
+        _config: &GenerationConfig,
+    ) -> LlmResult<String> {
+        Err(AdapterError::InvalidInput(format!(
+            "backend '{}' does not support chat-prompt rendering",
+            self.name()
+        )))
+    }
 
     /// Generate text with streaming, calling the callback for each token.
     ///
@@ -670,6 +696,15 @@ impl RuntimeAdapter for LlmRuntimeAdapter {
                     }
                 }
 
+                // Chain-of-thought, when the model emitted a `<think>` block
+                // (or the engine surfaced reasoning natively). Content, not
+                // telemetry: it rides the envelope metadata so the SDK/FFI can
+                // surface it, but is intentionally NOT mirrored onto the span
+                // via `add_metadata` — it can be large and may carry PII.
+                if let Some(reasoning) = output.reasoning_content {
+                    response_metadata.insert("reasoning_content".to_string(), reasoning);
+                }
+
                 Ok(Envelope {
                     kind: EnvelopeKind::Text(output.text),
                     metadata: response_metadata,
@@ -774,6 +809,7 @@ mod tests {
             decode_tps: None,
             prefill_tps: None,
             image_preprocess_ms: None,
+            reasoning_content: None,
         };
         assert_eq!(output.text, "Hello world");
         assert_eq!(output.tokens_generated, 3);
@@ -823,6 +859,7 @@ mod tests {
                     decode_tps: None,
                     prefill_tps: None,
                     image_preprocess_ms: None,
+                    reasoning_content: None,
                 })
             }
             fn generate_raw(
@@ -903,6 +940,7 @@ mod tests {
                     decode_tps: None,
                     prefill_tps: None,
                     image_preprocess_ms: None,
+                    reasoning_content: None,
                 })
             }
             fn generate_raw(
@@ -928,6 +966,62 @@ mod tests {
         assert!(result.is_err());
         let err_msg = result.unwrap_err().to_string();
         assert!(err_msg.contains("callback error") || err_msg.contains("User cancelled"));
+    }
+
+    /// Backends that never format chat prompts as text (cloud, mocks) must
+    /// inherit a trait-level default that rejects with an invalid-input
+    /// error naming the backend, rather than silently returning something.
+    #[test]
+    fn default_render_chat_prompt_returns_invalid_input() {
+        struct MockBackend;
+
+        impl LlmBackend for MockBackend {
+            fn name(&self) -> &str {
+                "mock"
+            }
+            fn supported_formats(&self) -> Vec<&'static str> {
+                vec!["test"]
+            }
+            fn load(&mut self, _config: &LlmConfig) -> LlmResult<()> {
+                Ok(())
+            }
+            fn is_loaded(&self) -> bool {
+                true
+            }
+            fn unload(&mut self) -> LlmResult<()> {
+                Ok(())
+            }
+            fn generate(
+                &self,
+                _messages: &[ChatMessage],
+                _config: &GenerationConfig,
+            ) -> LlmResult<GenerationOutput> {
+                unreachable!("test only exercises the default render_chat_prompt")
+            }
+            fn generate_raw(
+                &self,
+                _prompt: &str,
+                _config: &GenerationConfig,
+            ) -> LlmResult<GenerationOutput> {
+                unreachable!("test only exercises the default render_chat_prompt")
+            }
+            // Uses default render_chat_prompt implementation
+        }
+
+        let backend = MockBackend;
+        let err = backend
+            .render_chat_prompt(&[ChatMessage::user("hi")], &GenerationConfig::default())
+            .unwrap_err();
+
+        match err {
+            AdapterError::InvalidInput(msg) => {
+                assert!(
+                    msg.contains("'mock' does not support chat-prompt rendering"),
+                    "unexpected message: {msg}"
+                );
+            }
+            other => panic!("expected InvalidInput, got {other:?}"),
+        }
     }
 
     #[test]

@@ -28,8 +28,9 @@ JS / TS
 The two platforms consume the bolt core differently:
 
 - **iOS** vendors the `XybridFFI.xcframework` + the bolt Swift wrapper sources,
-  staged into this package by `cargo xtask stage-react-native` (from the same
-  `build-xcframework` output the standalone Apple SDK uses).
+  staged into this package from the Bazel build (the same
+  `//bindings/apple:XybridFFI` target the standalone Apple SDK ships from —
+  see Local development below for the commands).
 - **Android** depends on the published `ai.xybrid:xybrid-kotlin` Maven AAR,
   which bundles `libxybrid-bolt.so` + the ONNX Runtime alongside the
   `ai.xybrid.*` Kotlin classes. Nothing is staged per-package.
@@ -68,7 +69,11 @@ binding + natives from Maven, so there is nothing to stage there.
 ```bash
 # 1. Stage the iOS native artifacts (XCFramework + Swift wrapper). macOS only.
 #    Android needs nothing — gradle resolves the Maven AAR.
-cargo xtask stage-react-native --release
+bazel build --config=ios //bindings/apple:XybridFFI
+rm -rf ios/Frameworks/XybridFFI.xcframework ios/XybridSwift
+mkdir -p ios/Frameworks ios/XybridSwift
+unzip -o -q ../../bazel-bin/bindings/apple/XybridFFI.xcframework.zip -d ios/Frameworks
+cp ../apple/Sources/Xybrid/{Xybrid.swift,xybrid_bolt.swift} ios/XybridSwift/
 
 # 2. Use a yarn link or relative path in a sample app
 cd ../my-sample-rn-app

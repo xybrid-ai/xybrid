@@ -5,6 +5,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use xybrid_core::gateway::ToolCall;
 use xybrid_core::ir::{Envelope, EnvelopeKind};
 
 /// Per-stage latency entry for pipeline runs.
@@ -230,6 +231,36 @@ impl InferenceResult {
         }
     }
 
+    /// Get the model's chain-of-thought / reasoning text, if it emitted any.
+    ///
+    /// This is the pre-strip reasoning the model produced in `<think>...</think>`
+    /// blocks (or, for engines that surface it natively, their reasoning
+    /// channel). It is *not* part of [`text`](Self::text) — the answer text
+    /// always excludes it. Returns `None` when the model produced no reasoning,
+    /// the backend doesn't surface one, or the output isn't text.
+    pub fn reasoning_content(&self) -> Option<&str> {
+        self.envelope
+            .metadata
+            .get("reasoning_content")
+            .map(String::as_str)
+    }
+
+    /// Parsed tool calls the model emitted this turn.
+    ///
+    /// Present when the request offered tools (`GenerationConfig::with_tools`)
+    /// and the model emitted at least one well-formed tool-call block
+    /// (LFM2-style `<|tool_call_start|>...` or gemma-4-style
+    /// `<|tool_call>call:...`). The raw blocks stay in [`text`](Self::text)
+    /// untouched. Returns an empty vec when the metadata is absent or
+    /// unparseable — malformed model output is never an error.
+    pub fn tool_calls(&self) -> Vec<ToolCall> {
+        self.envelope
+            .metadata
+            .get(Envelope::TOOL_CALLS_METADATA_KEY)
+            .and_then(|raw| serde_json::from_str(raw).ok())
+            .unwrap_or_default()
+    }
+
     /// Get audio bytes if available.
     ///
     /// Returns `None` if the output is not audio.
@@ -342,6 +373,94 @@ mod tests {
         assert_eq!(result.audio_bytes(), None);
         assert_eq!(result.latency_ms(), 100);
         assert_eq!(result.model_id(), "test-model");
+    }
+
+    #[test]
+    fn test_reasoning_content_from_metadata() {
+        let mut metadata = HashMap::new();
+        metadata.insert(
+            "reasoning_content".to_string(),
+            "let me think step by step".to_string(),
+        );
+        let envelope = Envelope {
+            kind: EnvelopeKind::Text("the answer".to_string()),
+            metadata,
+        };
+        let result = InferenceResult::new(envelope, "llm-model", 100);
+
+        // Reasoning is surfaced separately from the answer text.
+        assert_eq!(result.text(), Some("the answer"));
+        assert_eq!(
+            result.reasoning_content(),
+            Some("let me think step by step")
+        );
+    }
+
+    #[test]
+    fn test_reasoning_content_absent_is_none() {
+        let envelope = Envelope {
+            kind: EnvelopeKind::Text("plain answer".to_string()),
+            metadata: HashMap::new(),
+        };
+        let result = InferenceResult::new(envelope, "llm-model", 10);
+        assert_eq!(result.reasoning_content(), None);
+    }
+
+    #[test]
+    fn test_tool_calls_parses_valid_metadata() {
+        let mut metadata = HashMap::new();
+        metadata.insert(
+            "tool_calls".to_string(),
+            r#"[{"id":"call_0","type":"function","function":{"name":"get_temperature","arguments":"{\"room\":\"kitchen\"}"}},{"id":"call_1","type":"function","function":{"name":"get_humidity","arguments":"{\"room\":\"kitchen\"}"}}]"#
+                .to_string(),
+        );
+        let envelope = Envelope {
+            kind: EnvelopeKind::Text("tool call block".to_string()),
+            metadata,
+        };
+        let result = InferenceResult::new(envelope, "llm-model", 10);
+
+        let tool_calls = result.tool_calls();
+
+        assert_eq!(tool_calls.len(), 2);
+        let first = tool_calls
+            .first()
+            .expect("valid metadata includes first tool call");
+        assert_eq!(first.id, "call_0");
+        assert_eq!(first.tool_type, "function");
+        assert_eq!(first.function.name, "get_temperature");
+        assert_eq!(first.function.arguments, r#"{"room":"kitchen"}"#);
+        let second = tool_calls
+            .get(1)
+            .expect("valid metadata includes second tool call");
+        assert_eq!(second.id, "call_1");
+        assert_eq!(second.tool_type, "function");
+        assert_eq!(second.function.name, "get_humidity");
+        assert_eq!(second.function.arguments, r#"{"room":"kitchen"}"#);
+    }
+
+    #[test]
+    fn test_tool_calls_absent_metadata_returns_empty_vec() {
+        let envelope = Envelope {
+            kind: EnvelopeKind::Text("plain answer".to_string()),
+            metadata: HashMap::new(),
+        };
+        let result = InferenceResult::new(envelope, "llm-model", 10);
+
+        assert!(result.tool_calls().is_empty());
+    }
+
+    #[test]
+    fn test_tool_calls_invalid_json_returns_empty_vec() {
+        let mut metadata = HashMap::new();
+        metadata.insert("tool_calls".to_string(), "not-json".to_string());
+        let envelope = Envelope {
+            kind: EnvelopeKind::Text("malformed tool call block".to_string()),
+            metadata,
+        };
+        let result = InferenceResult::new(envelope, "llm-model", 10);
+
+        assert!(result.tool_calls().is_empty());
     }
 
     #[test]

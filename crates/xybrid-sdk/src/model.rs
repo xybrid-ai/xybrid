@@ -6,6 +6,7 @@
 //! - `ModelHandle`: Internal state management for the loaded model
 //! - `StreamEvent`: Events emitted during streaming inference
 
+use crate::cache::CacheManager;
 use crate::registry_client::RegistryClient;
 use crate::result::{InferenceResult, OutputType};
 use crate::run_options::{
@@ -390,6 +391,7 @@ pub struct SeamInfo {
 }
 
 const FALLBACK_POLICY_RESOURCE_MAX_AGE: Duration = Duration::from_millis(500);
+const CLOUD_FALLBACK_UNSUPPORTED_TOOLS_REASON: &str = "cloud_fallback_unsupported_tools";
 
 static FALLBACK_AUTHORITY: OnceLock<LocalAuthority> = OnceLock::new();
 
@@ -486,8 +488,10 @@ fn local_reliability_hint_after_abort(
 
 /// Inspect the local-leg result and, on a typed cloud-fallback abort, fire
 /// `on_seam`, retry on the cloud adapter, and return the cloud
-/// [`InferenceResult`]. On any other shape the original result is returned
-/// unchanged.
+/// [`InferenceResult`]. Tool-bearing requests are refused before the cloud leg:
+/// the gateway adapter does not receive [`GenerationConfig`], so forwarding
+/// would silently drop `GenerationConfig::tools`. On any other shape the
+/// original result is returned unchanged.
 ///
 /// `cancellation_token`, when set, makes the cloud retry leg honour
 /// caller-driven cancellation. The cloud leg cannot meaningfully react to
@@ -510,6 +514,7 @@ fn dispatch_after_local<F, S>(
     policy_metrics: xybrid_core::context::DeviceMetrics,
     signal_context: Option<SignalContext>,
     cancellation_token: Option<CancellationToken>,
+    tools_requested: bool,
     on_token: &mut F,
     on_seam: &mut S,
 ) -> SdkResult<InferenceResult>
@@ -552,16 +557,6 @@ where
             };
             on_seam(seam);
 
-            if cancellation_token
-                .as_ref()
-                .is_some_and(CancellationToken::is_cancelled)
-            {
-                return Err(SdkError::inference(format!(
-                    "Execution aborted: {}",
-                    crate::run_options::AbortReason::UserCancelled
-                )));
-            }
-
             // FR-6: reuse the original prompt; no partial-token reuse.
             let cloud_envelope = envelope.clone();
             let cloud_provider = cloud_envelope.metadata.get("provider").cloned();
@@ -581,6 +576,46 @@ where
                 .get("model")
                 .map(|s| s.as_str())
                 .unwrap_or(model_id);
+            if cancellation_token
+                .as_ref()
+                .is_some_and(CancellationToken::is_cancelled)
+            {
+                return Err(SdkError::inference(format!(
+                    "Execution aborted: {}",
+                    crate::run_options::AbortReason::UserCancelled
+                )));
+            }
+
+            // Tool-bearing requests fail closed before policy or cloud
+            // dispatch (after the cancellation check — user intent wins over
+            // the capability error when both apply).
+            if tools_requested {
+                crate::telemetry::publish_cloud_denied_by_policy(
+                    &correlation_id,
+                    cloud_model_id,
+                    reason,
+                    CLOUD_FALLBACK_UNSUPPORTED_TOOLS_REASON,
+                    local_latency_ms,
+                );
+                record_cloud_outcome(
+                    authority,
+                    cloud_model_id,
+                    cloud_provider.as_deref(),
+                    0,
+                    false,
+                    Some(CLOUD_FALLBACK_UNSUPPORTED_TOOLS_REASON.to_string()),
+                    OutcomeCategory::HardFail {
+                        reason: CLOUD_FALLBACK_UNSUPPORTED_TOOLS_REASON.to_string(),
+                    },
+                    signal_context,
+                );
+                return Err(SdkError::inference(
+                    "cloud fallback is not available for tool-calling requests: tools are not \
+                     forwarded to the gateway yet; run tool-calling requests local-only or drop \
+                     `tools` to allow fallback",
+                ));
+            }
+
             let policy_decision = authority.apply_policy(&PolicyRequest {
                 stage_id: cloud_model_id.to_string(),
                 envelope: cloud_envelope.clone(),
@@ -833,8 +868,35 @@ struct ModelHandle {
 /// GGUF quantization preference order for automatic selection.
 /// Q4_K_M is the default — best quality/size tradeoff for edge devices.
 const GGUF_PREFERENCE_ORDER: &[&str] = &[
-    "Q4_K_M", "Q4_K_S", "Q4_0", "Q5_K_M", "Q5_K_S", "Q6_K", "Q8_0", "F16", "BF16", "F32",
+    "Q4_K_M", "Q4_K_S", "Q4_0", "Q5_K_M", "Q5_K_S", "Q6_K", "Q8_0", "Q1_0", "F16", "BF16", "F32",
 ];
+
+const VISION_PROJECTOR_PREFERENCE_ORDER: &[&str] =
+    &["Q8_0", "Q6_K", "Q5_K_M", "Q4_K_M", "F16", "BF16"];
+
+fn is_gguf_companion(filename: &str) -> bool {
+    let filename = filename.to_ascii_lowercase();
+    filename.contains("mmproj") || filename.contains("drafter") || filename.contains("dspark")
+}
+
+fn is_gguf_vision_projector(filename: &str) -> bool {
+    filename.to_ascii_lowercase().contains("mmproj")
+}
+
+fn select_vision_projector<'a>(gguf_files: &[&'a str]) -> Option<&'a str> {
+    for preference in VISION_PROJECTOR_PREFERENCE_ORDER {
+        if let Some(projector) = gguf_files.iter().find(|filename| {
+            is_gguf_vision_projector(filename) && filename.to_uppercase().contains(preference)
+        }) {
+            return Some(projector);
+        }
+    }
+
+    gguf_files
+        .iter()
+        .find(|filename| is_gguf_vision_projector(filename))
+        .copied()
+}
 
 /// Select the best GGUF file from a list based on user preference or default ranking.
 ///
@@ -843,10 +905,9 @@ const GGUF_PREFERENCE_ORDER: &[&str] = &[
 fn select_gguf_variant(gguf_files: &[&str], variant: Option<&str>) -> SdkResult<String> {
     if let Some(v) = variant {
         let v_upper = v.to_uppercase();
-        // Find a file containing the variant string (case-insensitive)
         if let Some(found) = gguf_files
             .iter()
-            .find(|f| f.to_uppercase().contains(&v_upper))
+            .find(|f| !is_gguf_companion(f) && f.to_uppercase().contains(&v_upper))
         {
             return Ok(found.to_string());
         }
@@ -857,18 +918,82 @@ fn select_gguf_variant(gguf_files: &[&str], variant: Option<&str>) -> SdkResult<
         )));
     }
 
-    // Auto-select: try each preferred quantization in order
     for pref in GGUF_PREFERENCE_ORDER {
-        if let Some(found) = gguf_files.iter().find(|f| f.to_uppercase().contains(pref)) {
+        if let Some(found) = gguf_files
+            .iter()
+            .find(|f| !is_gguf_companion(f) && f.to_uppercase().contains(pref))
+        {
             return Ok(found.to_string());
         }
     }
 
-    // Fallback: pick the smallest file (likely the most quantized)
     Ok(gguf_files
-        .first()
+        .iter()
+        .find(|file| !is_gguf_companion(file))
         .ok_or_else(|| SdkError::load("No GGUF files found"))?
         .to_string())
+}
+
+fn select_huggingface_files_to_download<'a>(
+    repo: &str,
+    all_filenames: &[&'a str],
+    selected_gguf: Option<&str>,
+    selected_projector: Option<&str>,
+) -> SdkResult<Vec<&'a str>> {
+    let gguf_files: Vec<&str> = all_filenames
+        .iter()
+        .filter(|filename| filename.ends_with(".gguf") && !is_gguf_companion(filename))
+        .copied()
+        .collect();
+
+    let has_native_model = all_filenames.iter().any(|filename| {
+        filename.ends_with(".gguf")
+            || filename.ends_with(".onnx")
+            || filename.ends_with(".safetensors")
+    });
+    let has_browser_only_model = all_filenames
+        .iter()
+        .any(|filename| filename.ends_with(".tflite") || filename.ends_with(".litertlm"));
+
+    if has_browser_only_model && !has_native_model {
+        return Err(SdkError::load(format!(
+            "HuggingFace repo '{}' contains only .tflite and/or .litertlm model files. \
+             TFLite and LiteRT-LM models run in the browser SDK (@xybrid/web); no native \
+             TFLite/LiteRT-LM runtime is registered",
+            repo
+        )));
+    }
+
+    Ok(all_filenames
+        .iter()
+        .filter(|filename| {
+            if filename.starts_with('.') || filename.ends_with('/') {
+                return false;
+            }
+
+            if filename.ends_with(".tflite") || filename.ends_with(".litertlm") {
+                return false;
+            }
+
+            if filename.ends_with(".gguf") && is_gguf_companion(filename) {
+                return selected_projector == Some(**filename);
+            }
+
+            if let Some(selected) = selected_gguf {
+                if filename.ends_with(".gguf") && **filename != selected {
+                    return false;
+                }
+            }
+
+            let dominated_by_model = selected_gguf.is_some() || gguf_files.len() == 1;
+            if dominated_by_model {
+                ModelLoader::is_essential_file(filename)
+            } else {
+                true
+            }
+        })
+        .copied()
+        .collect())
 }
 
 #[derive(Debug, Clone)]
@@ -1028,9 +1153,11 @@ impl ModelLoader {
     /// Create loader from a HuggingFace Hub repository.
     ///
     /// Downloads model files from the HuggingFace Hub and caches them locally.
-    /// Subsequent calls use the cached files. The repository must contain a
-    /// `model_metadata.json` for the model to be loadable (auto-generation
-    /// is planned for a future version).
+    /// Subsequent calls use the cached files. When the repository does not ship
+    /// a `model_metadata.json`, one is auto-generated from the model card and
+    /// native model files (.onnx, .gguf, .safetensors). Browser-only formats
+    /// (.tflite, .litertlm) are rejected before download — they run via the
+    /// `@xybrid/web` SDK.
     ///
     /// Requires the `huggingface` feature flag at load time.
     /// The constructor itself is always available, but `load()` will return
@@ -1186,7 +1313,7 @@ impl ModelLoader {
                 // A local cache check only — instantiate `CacheManager` directly
                 // rather than `RegistryClient::from_env()`, which would spin up
                 // an HTTP agent and circuit breakers we don't need here.
-                crate::cache::CacheManager::new().is_ok_and(|cache| cache.is_extracted(id))
+                CacheManager::new().is_ok_and(|cache| cache.is_extracted(id))
             }
             _ => true,
         }
@@ -1333,7 +1460,7 @@ impl ModelLoader {
 
     fn load_from_bundle(&self, path: &PathBuf) -> SdkResult<XybridModel> {
         // Use CacheManager for unified extraction (single source of truth)
-        let cache = crate::cache::CacheManager::new()?;
+        let cache = CacheManager::new()?;
         let extract_dir = cache.ensure_extracted(path)?;
 
         // Load from extracted directory (extraction is permanent in cache)
@@ -1369,10 +1496,15 @@ impl ModelLoader {
     where
         F: Fn(f32),
     {
-        use hf_hub::{api::sync::Api, Repo, RepoType};
+        use hf_hub::{api::sync::ApiBuilder, Repo, RepoType};
 
         // Determine our cache directory
-        let cache_dir = Self::hf_cache_dir(repo)?;
+        let cache_layout = CacheManager::layout_from_config()?;
+        let cache_dir = cache_layout
+            .huggingface_repo_dirs(repo)
+            .into_iter()
+            .find(|dir| dir.join("model_metadata.json").exists())
+            .unwrap_or_else(|| cache_layout.huggingface_repo_dir(repo));
 
         // Check if we already have a cached copy with model_metadata.json
         let metadata_path = cache_dir.join("model_metadata.json");
@@ -1384,7 +1516,9 @@ impl ModelLoader {
         log::info!(target: "xybrid_sdk", "Downloading model from HuggingFace: {}", repo);
 
         // Create HF API client
-        let api = Api::new()
+        let api = ApiBuilder::from_env()
+            .with_cache_dir(cache_layout.preferred_huggingface_hub_root(repo))
+            .build()
             .map_err(|e| SdkError::network_src("Failed to create HuggingFace API client", e))?;
 
         // Create repo reference with optional revision
@@ -1413,56 +1547,48 @@ impl ModelLoader {
 
         // Classify files by type to enable smart filtering
         let all_filenames: Vec<&str> = siblings.iter().map(|s| s.rfilename.as_str()).collect();
-        let gguf_files: Vec<&str> = all_filenames
+        let all_gguf_files: Vec<&str> = all_filenames
             .iter()
             .filter(|f| f.ends_with(".gguf"))
             .copied()
             .collect();
+        let gguf_files: Vec<&str> = all_gguf_files
+            .iter()
+            .copied()
+            .filter(|filename| !is_gguf_companion(filename))
+            .collect();
 
-        // If multiple GGUF files exist, select the best one instead of downloading all
-        let selected_gguf = if gguf_files.len() > 1 {
-            Some(select_gguf_variant(&gguf_files, variant)?)
-        } else {
+        if !all_gguf_files.is_empty() && gguf_files.is_empty() {
+            return Err(SdkError::load(format!(
+                "HuggingFace repo '{}' contains GGUF companion files but no language model",
+                repo
+            )));
+        }
+
+        let selected_gguf = if gguf_files.is_empty() {
             None
+        } else {
+            Some(select_gguf_variant(&gguf_files, variant)?)
         };
+        let selected_projector = select_vision_projector(&all_gguf_files);
 
         if let Some(ref selected) = selected_gguf {
             log::info!(
                 target: "xybrid_sdk",
-                "Selected GGUF variant: {} (from {} available)",
+                "Selected GGUF variant: {} (from {} language weights)",
                 selected, gguf_files.len()
             );
         }
 
+        let files_to_download = select_huggingface_files_to_download(
+            repo,
+            &all_filenames,
+            selected_gguf.as_deref(),
+            selected_projector,
+        )?;
+
         // Create cache directory
         std::fs::create_dir_all(&cache_dir)?;
-
-        // Filter to only files we need
-        let files_to_download: Vec<&str> = all_filenames
-            .iter()
-            .filter(|filename| {
-                // Skip hidden files and directories
-                if filename.starts_with('.') || filename.ends_with('/') {
-                    return false;
-                }
-
-                // If we have a selected GGUF, skip other GGUF files
-                if let Some(ref selected) = selected_gguf {
-                    if filename.ends_with(".gguf") && **filename != *selected {
-                        return false;
-                    }
-                }
-
-                // Skip non-essential files (LICENSE, subdirectories like leap/)
-                let dominated_by_model = selected_gguf.is_some() || gguf_files.len() == 1;
-                if dominated_by_model {
-                    Self::is_essential_file(filename)
-                } else {
-                    true
-                }
-            })
-            .copied()
-            .collect();
 
         let total_files = files_to_download.len();
         for (i, filename) in files_to_download.iter().enumerate() {
@@ -1565,23 +1691,6 @@ impl ModelLoader {
         ))
     }
 
-    /// Get the cache directory for a HuggingFace repo.
-    ///
-    /// Returns `~/.xybrid/cache/hf/{sanitized_repo}/` or the SDK-configured cache path.
-    fn hf_cache_dir(repo: &str) -> SdkResult<PathBuf> {
-        let base_cache = if let Some(sdk_cache) = crate::get_sdk_cache_dir() {
-            sdk_cache.join("hf")
-        } else {
-            let home = dirs::home_dir()
-                .ok_or_else(|| SdkError::cache("Cannot determine home directory"))?;
-            home.join(".xybrid").join("cache").join("hf")
-        };
-
-        // Sanitize repo name for filesystem (e.g., "xybrid-ai/kokoro-82m" -> "xybrid-ai--kokoro-82m")
-        let sanitized = repo.replace('/', "--");
-        Ok(base_cache.join(sanitized))
-    }
-
     /// Check if a file is essential and should always be downloaded.
     ///
     /// Essential files are model files (.gguf, .onnx, .safetensors), metadata files
@@ -1640,6 +1749,7 @@ impl ModelLoader {
             .map_err(|e| SdkError::load_src("Failed to read model_metadata.json", e))?;
         let metadata: ModelMetadata = serde_json::from_str(&metadata_str)
             .map_err(|e| SdkError::load_src("Failed to parse metadata", e))?;
+        Self::validate_native_execution_template(&metadata)?;
 
         // Create executor with base path
         let executor = TemplateExecutor::with_base_path(model_dir.to_str().unwrap_or("."));
@@ -1652,8 +1762,25 @@ impl ModelLoader {
         })
     }
 
+    fn validate_native_execution_template(metadata: &ModelMetadata) -> SdkResult<()> {
+        let browser_format = match &metadata.execution_template {
+            ExecutionTemplate::TfLite { .. } => "TFLite",
+            ExecutionTemplate::LiteRtLm { .. } => "LiteRT-LM",
+            _ => return Ok(()),
+        };
+
+        Err(SdkError::load(format!(
+            "Model '{}' uses the browser-only {} format. TFLite and LiteRT-LM models run in the \
+             browser SDK (@xybrid/web); no native TFLite/LiteRT-LM runtime is registered",
+            metadata.model_id, browser_format
+        )))
+    }
+
     fn is_llm_template(metadata: &ModelMetadata) -> bool {
-        matches!(metadata.execution_template, ExecutionTemplate::Gguf { .. })
+        matches!(
+            metadata.execution_template,
+            ExecutionTemplate::Gguf { .. } | ExecutionTemplate::VisionLanguage { .. }
+        )
     }
 
     fn check_streaming_support(metadata: &ModelMetadata) -> bool {
@@ -1830,6 +1957,20 @@ impl XybridModel {
         self.handle.read().map(|h| h.loaded).unwrap_or(false)
     }
 
+    /// Whether the model bundle declares local tool-calling support.
+    ///
+    /// Advisory tri-state from the bundle's optional `tool_calling` metadata
+    /// flag: `None` means the bundle says nothing, `Some(true)`/`Some(false)`
+    /// are explicit declarations. Use it to gate tool UI; enforcement stays
+    /// at run time (a tools-bearing request against an unsupporting template
+    /// fails as invalid input regardless of this flag).
+    pub fn supports_tool_calling(&self) -> Option<bool> {
+        self.handle
+            .read()
+            .ok()
+            .and_then(|h| h.metadata.supports_tool_calling())
+    }
+
     /// Check if this model supports streaming.
     pub fn supports_streaming(&self) -> bool {
         self.supports_streaming
@@ -1864,13 +2005,29 @@ impl XybridModel {
         self.handle
             .read()
             .ok()
-            .map(|h| {
-                matches!(
-                    h.metadata.execution_template,
-                    ExecutionTemplate::Gguf { .. }
-                )
-            })
+            .map(|h| ModelLoader::is_llm_template(&h.metadata))
             .unwrap_or(false)
+    }
+
+    /// The generation config this model resolves when `run*` is called without an
+    /// explicit config: template `generation_params` and the reasoning-budget
+    /// floor layered over global defaults. Callers who need an explicit config
+    /// (tools, budget overrides) should start from this instead of
+    /// `GenerationConfig::default()`, because an explicit config replaces the
+    /// model-level defaults wholesale.
+    pub fn default_generation_config(&self) -> GenerationConfig {
+        #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+        {
+            self.handle
+                .read()
+                .ok()
+                .map(|h| xybrid_core::execution::model_default_gen_config(&h.metadata))
+                .unwrap_or_default()
+        }
+        #[cfg(not(any(feature = "llm-mistral", feature = "llm-llamacpp")))]
+        {
+            GenerationConfig::default()
+        }
     }
 
     // =========================================================================
@@ -2543,7 +2700,6 @@ impl XybridModel {
             ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>
             + Send,
     {
-        use xybrid_core::execution::ExecutionTemplate;
         use xybrid_core::runtime_adapter::types::PartialToken;
 
         let start = Instant::now();
@@ -2566,7 +2722,7 @@ impl XybridModel {
         let metadata = handle.metadata.clone();
 
         // Check if this is an LLM model (GGUF template)
-        let is_llm = matches!(metadata.execution_template, ExecutionTemplate::Gguf { .. });
+        let is_llm = ModelLoader::is_llm_template(&metadata);
 
         let output = if is_llm {
             // True streaming with context for LLM models
@@ -2745,7 +2901,6 @@ impl XybridModel {
             ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>
             + Send,
     {
-        use xybrid_core::execution::ExecutionTemplate;
         use xybrid_core::runtime_adapter::types::PartialToken;
 
         let start = Instant::now();
@@ -2767,7 +2922,7 @@ impl XybridModel {
         let metadata = handle.metadata.clone();
 
         // Check if this is an LLM model (GGUF template)
-        let is_llm = matches!(metadata.execution_template, ExecutionTemplate::Gguf { .. });
+        let is_llm = ModelLoader::is_llm_template(&metadata);
 
         let output = if is_llm {
             // True streaming for LLM models
@@ -3029,6 +3184,9 @@ impl XybridModel {
     ///   `model`, `system_prompt`, `temperature`, …) for the retry leg. See
     ///   [`CloudRuntimeAdapter`](xybrid_core::runtime_adapter::CloudRuntimeAdapter)
     ///   for supported keys.
+    /// - Requests with `GenerationConfig::tools` do not enter the cloud leg yet:
+    ///   the gateway adapter does not forward tools, so the wrapper emits the
+    ///   local abort seam and then fails closed before policy or cloud dispatch.
     /// - The wrapper is fully synchronous; the default `CloudRuntimeAdapter`
     ///   consumes OpenAI-compatible gateway SSE via `CloudStreaming`.
     /// - **Cancellation timing across the seam.** A cancel set on the
@@ -3078,6 +3236,10 @@ impl XybridModel {
         let local_resource_summary = local_resource_guard.finish();
         let policy_metrics = fallback_policy_metrics(options);
         let signal_context = Some(SignalContext::from_metrics(&policy_metrics));
+        let tools_requested = options
+            .generation_config
+            .as_ref()
+            .is_some_and(|config| !config.tools.is_empty());
 
         dispatch_after_local(
             local_result,
@@ -3092,6 +3254,7 @@ impl XybridModel {
             policy_metrics,
             signal_context,
             options.cancellation_token.clone(),
+            tools_requested,
             on_token,
             on_seam,
         )
@@ -3165,10 +3328,7 @@ impl XybridModel {
                 }
 
                 let metadata = guard.metadata.clone();
-                let is_llm = matches!(
-                    metadata.execution_template,
-                    xybrid_core::execution::ExecutionTemplate::Gguf { .. }
-                );
+                let is_llm = ModelLoader::is_llm_template(&metadata);
 
                 // Clone tx for the streaming callback (so we can use tx in the else branch)
                 let tx_for_callback = tx.clone();
@@ -3276,17 +3436,10 @@ impl XybridModel {
     pub fn supports_token_streaming(&self) -> bool {
         #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
         {
-            use xybrid_core::execution::ExecutionTemplate;
-
             self.handle
                 .read()
                 .ok()
-                .map(|h| {
-                    matches!(
-                        h.metadata.execution_template,
-                        ExecutionTemplate::Gguf { .. }
-                    )
-                })
+                .map(|h| ModelLoader::is_llm_template(&h.metadata))
                 .unwrap_or(false)
         }
         #[cfg(not(any(feature = "llm-mistral", feature = "llm-llamacpp")))]
@@ -3456,9 +3609,216 @@ impl Clone for XybridModel {
 mod tests {
     use super::*;
 
+    #[test]
+    fn browser_only_model_files_are_not_essential() {
+        assert!(!ModelLoader::is_essential_file("model.tflite"));
+        assert!(!ModelLoader::is_essential_file("model.litertlm"));
+    }
+
+    #[test]
+    fn huggingface_gguf_repo_selection_is_unchanged() {
+        let filenames = [
+            "model-Q4_K_M.gguf",
+            "model-Q8_0.gguf",
+            "config.json",
+            "README.md",
+            "LICENSE",
+        ];
+
+        let files = select_huggingface_files_to_download(
+            "org/model",
+            &filenames,
+            Some("model-Q4_K_M.gguf"),
+            None,
+        )
+        .expect("GGUF repository selection should succeed");
+
+        assert_eq!(files, vec!["model-Q4_K_M.gguf", "config.json", "README.md"]);
+    }
+
+    #[test]
+    fn huggingface_vision_repo_downloads_selected_projector() {
+        let filenames = [
+            "model-Q4_K_M.gguf",
+            "mmproj-model-f16.gguf",
+            "config.json",
+            "README.md",
+        ];
+
+        let files = select_huggingface_files_to_download(
+            "org/model",
+            &filenames,
+            Some("model-Q4_K_M.gguf"),
+            Some("mmproj-model-f16.gguf"),
+        )
+        .expect("vision repository selection should succeed");
+
+        assert_eq!(
+            files,
+            vec![
+                "model-Q4_K_M.gguf",
+                "mmproj-model-f16.gguf",
+                "config.json",
+                "README.md"
+            ]
+        );
+    }
+
+    #[test]
+    fn huggingface_litertlm_only_repo_fails_before_download() {
+        let filenames = ["model.litertlm", "README.md"];
+
+        let error =
+            select_huggingface_files_to_download("litert-community/gemma", &filenames, None, None)
+                .expect_err("LiteRtLm-only repositories must be rejected");
+        let message = error.to_string();
+
+        assert!(message.contains("litert-community/gemma"));
+        assert!(message.contains("only .tflite and/or .litertlm model files"));
+        assert!(message.contains("browser SDK (@xybrid/web)"));
+        assert!(message.contains("no native TFLite/LiteRT-LM runtime is registered"));
+    }
+
+    #[test]
+    fn huggingface_mixed_repo_excludes_litertlm() {
+        let filenames = ["model.gguf", "model.litertlm", "README.md", "LICENSE"];
+
+        let files = select_huggingface_files_to_download("org/model", &filenames, None, None)
+            .expect("mixed native and browser-only repository should succeed");
+
+        assert_eq!(files, vec!["model.gguf", "README.md"]);
+    }
+
+    #[test]
+    fn huggingface_tflite_only_repo_fails_before_download() {
+        let filenames = ["model.tflite", "README.md", "LICENSE"];
+
+        let error = select_huggingface_files_to_download("org/model", &filenames, None, None)
+            .expect_err("TFLite-only repositories must be rejected");
+        let message = error.to_string();
+
+        assert!(message.contains("org/model"));
+        assert!(message.contains("only .tflite and/or .litertlm model files"));
+        assert!(message.contains("browser SDK (@xybrid/web)"));
+        assert!(message.contains("no native TFLite/LiteRT-LM runtime is registered"));
+    }
+
+    #[test]
+    fn huggingface_tflite_and_litertlm_only_repo_fails_before_download() {
+        let filenames = ["model.tflite", "model.litertlm", "README.md"];
+
+        let error =
+            select_huggingface_files_to_download("org/browser-model", &filenames, None, None)
+                .expect_err("TFLite and LiteRT-LM-only repositories must be rejected");
+        let message = error.to_string();
+
+        assert!(message.contains("org/browser-model"));
+        assert!(message.contains("only .tflite and/or .litertlm model files"));
+        assert!(message.contains("browser SDK (@xybrid/web)"));
+        assert!(message.contains("no native TFLite/LiteRT-LM runtime is registered"));
+    }
+
+    #[test]
+    fn huggingface_mixed_repo_excludes_tflite() {
+        let filenames = ["model.gguf", "model.tflite", "README.md", "LICENSE"];
+
+        let files = select_huggingface_files_to_download("org/model", &filenames, None, None)
+            .expect("mixed native and browser-only repository should succeed");
+
+        assert_eq!(files, vec!["model.gguf", "README.md"]);
+    }
+
+    #[test]
+    fn huggingface_hidden_files_are_skipped() {
+        let filenames = ["model.gguf", ".gitattributes", "subdir/", "README.md"];
+
+        let files = select_huggingface_files_to_download("org/model", &filenames, None, None)
+            .expect("repository selection should succeed");
+
+        assert_eq!(files, vec!["model.gguf", "README.md"]);
+    }
+
+    #[test]
+    fn create_model_handle_rejects_browser_only_templates_at_load_time() {
+        let templates = [
+            (
+                "TFLite",
+                ExecutionTemplate::TfLite {
+                    model_file: "model.tflite".to_string(),
+                },
+            ),
+            (
+                "LiteRT-LM",
+                ExecutionTemplate::LiteRtLm {
+                    model_file: "model.litertlm".to_string(),
+                    context_length: None,
+                },
+            ),
+        ];
+
+        for (format, template) in templates {
+            let temp_dir = tempfile::tempdir().expect("temporary model directory should exist");
+            let mut metadata = ModelMetadata::onnx("browser-only-model", "1.0", "model.bin");
+            metadata.execution_template = template;
+            let metadata_json =
+                serde_json::to_string(&metadata).expect("model metadata should serialize");
+            std::fs::write(temp_dir.path().join("model_metadata.json"), metadata_json)
+                .expect("model metadata should be written");
+
+            let error = match ModelLoader::create_model_handle(&temp_dir.path().to_path_buf()) {
+                Ok(_) => panic!("{format} metadata must be rejected during load"),
+                Err(error) => error,
+            };
+            let message = error.to_string();
+
+            assert!(message.contains(&format!("browser-only {format} format")));
+            assert!(message.contains("browser SDK (@xybrid/web)"));
+            assert!(message.contains("no native TFLite/LiteRT-LM runtime is registered"));
+        }
+    }
+
     /// Serializes the tests that mutate the process-global speculative flag so
     /// they don't observe each other's writes within the test binary.
     static SPEC_GLOBAL_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    #[test]
+    fn select_gguf_variant_chooses_language_model_over_projector_and_drafter() {
+        let files = [
+            "Bonsai-27B-Q1_0.gguf",
+            "Bonsai-27B-mmproj-Q8_0.gguf",
+            "Bonsai-27B-dspark-Q4_1.gguf",
+        ];
+
+        assert_eq!(
+            select_gguf_variant(&files, None).unwrap(),
+            "Bonsai-27B-Q1_0.gguf"
+        );
+    }
+
+    #[test]
+    fn select_vision_projector_prefers_q8_over_bf16() {
+        let files = ["Bonsai-27B-mmproj-BF16.gguf", "Bonsai-27B-mmproj-Q8_0.gguf"];
+
+        assert_eq!(
+            select_vision_projector(&files),
+            Some("Bonsai-27B-mmproj-Q8_0.gguf")
+        );
+    }
+
+    #[test]
+    fn vision_language_template_is_treated_as_llm() {
+        let mut metadata = ModelMetadata::onnx("bonsai-27b", "1.0", "Bonsai-27B-Q1_0.gguf");
+        metadata.execution_template = ExecutionTemplate::VisionLanguage {
+            model_file: "Bonsai-27B-Q1_0.gguf".to_string(),
+            chat_template: None,
+            context_length: 4096,
+            generation_params: None,
+        };
+
+        assert!(ModelLoader::is_llm_template(&metadata));
+        assert!(ModelLoader::check_streaming_support(&metadata));
+        assert_eq!(ModelLoader::infer_output_type(&metadata), OutputType::Text);
+    }
 
     #[test]
     fn with_speculative_cloud_records_override() {
@@ -3861,9 +4221,35 @@ mod tests {
         xybrid_core::ir::Envelope::new(xybrid_core::ir::EnvelopeKind::Text(text.to_string()))
     }
 
+    fn tool_generation_config() -> GenerationConfig {
+        let mut config = GenerationConfig::default();
+        config.tools.push(xybrid_core::gateway::Tool {
+            tool_type: "function".to_string(),
+            function: xybrid_core::gateway::FunctionDefinition {
+                name: "lookup_weather".to_string(),
+                description: Some("Look up current weather".to_string()),
+                parameters: None,
+            },
+        });
+        config
+    }
+
     fn test_loaded_model(supports_streaming: bool) -> XybridModel {
-        let metadata =
+        test_loaded_model_with_tool_calling(supports_streaming, None)
+    }
+
+    fn test_loaded_model_with_tool_calling(
+        supports_streaming: bool,
+        supports_tool_calling: Option<bool>,
+    ) -> XybridModel {
+        let mut metadata =
             xybrid_core::execution::ModelMetadata::onnx("local-test-model", "1.0", "model.onnx");
+        if let Some(supports_tool_calling) = supports_tool_calling {
+            metadata.metadata.insert(
+                "tool_calling".to_string(),
+                serde_json::Value::Bool(supports_tool_calling),
+            );
+        }
         XybridModel {
             handle: Arc::new(RwLock::new(ModelHandle {
                 executor: TemplateExecutor::default(),
@@ -3877,6 +4263,82 @@ mod tests {
             supports_streaming,
             current_run: Arc::new(Mutex::new(None)),
         }
+    }
+
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    fn test_model_with_metadata(metadata: ModelMetadata) -> XybridModel {
+        let model_id = metadata.model_id.clone();
+        let version = metadata.version.clone();
+        XybridModel {
+            handle: Arc::new(RwLock::new(ModelHandle {
+                executor: TemplateExecutor::default(),
+                metadata,
+                model_dir: PathBuf::from("."),
+                loaded: true,
+            })),
+            model_id,
+            version,
+            output_type: OutputType::Text,
+            supports_streaming: true,
+            current_run: Arc::new(Mutex::new(None)),
+        }
+    }
+
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[test]
+    fn default_generation_config_resolves_template_params_and_reasoning_floor() {
+        let mut template_metadata = ModelMetadata::onnx("template-model", "1.0", "model.gguf");
+        template_metadata.execution_template = ExecutionTemplate::Gguf {
+            model_file: "model.gguf".to_string(),
+            chat_template: None,
+            context_length: 4096,
+            generation_params: Some(xybrid_core::execution::template::GenerationParams {
+                max_tokens: Some(64),
+                temperature: Some(0.7),
+                ..Default::default()
+            }),
+        };
+
+        let template_config =
+            test_model_with_metadata(template_metadata).default_generation_config();
+        assert_eq!(template_config.max_tokens, 64);
+        assert_eq!(template_config.temperature, 0.7);
+
+        let mut reasoning_metadata = ModelMetadata::onnx("reasoning-model", "1.0", "model.gguf");
+        reasoning_metadata.execution_template = ExecutionTemplate::Gguf {
+            model_file: "model.gguf".to_string(),
+            chat_template: None,
+            context_length: 4096,
+            generation_params: None,
+        };
+        reasoning_metadata
+            .metadata
+            .insert("reasoning".to_string(), serde_json::Value::Bool(true));
+
+        let reasoning_config =
+            test_model_with_metadata(reasoning_metadata).default_generation_config();
+        assert_eq!(reasoning_config.max_tokens, 3584);
+    }
+
+    #[test]
+    fn supports_tool_calling_returns_true_when_declared() {
+        let model = test_loaded_model_with_tool_calling(true, Some(true));
+
+        assert_eq!(model.supports_tool_calling(), Some(true));
+    }
+
+    #[test]
+    fn supports_tool_calling_returns_false_when_declared() {
+        let model = test_loaded_model_with_tool_calling(true, Some(false));
+
+        assert_eq!(model.supports_tool_calling(), Some(false));
+    }
+
+    #[test]
+    fn supports_tool_calling_returns_none_when_absent() {
+        let model = test_loaded_model_with_tool_calling(true, None);
+
+        assert_eq!(model.supports_tool_calling(), None);
     }
 
     fn default_metrics() -> xybrid_core::context::DeviceMetrics {
@@ -4025,6 +4487,7 @@ mod tests {
             default_metrics(),
             Some(default_signal()),
             None,
+            false,
             &mut on_token,
             &mut on_seam,
         )
@@ -4083,6 +4546,62 @@ mod tests {
         assert_eq!(cloud.call_count(), 1);
         assert_eq!(result.text(), Some("hello from cloud"));
         assert_eq!(collected.lock().unwrap().as_slice(), ["hello from cloud"]);
+    }
+
+    #[test]
+    fn run_streaming_with_fallback_refuses_cloud_when_tools_requested() {
+        let model = test_loaded_model(true);
+        let cloud = FakeCloudAdapter::new("must not run");
+        let mut critical_snapshot = xybrid_core::device::ResourceSnapshot::unknown();
+        critical_snapshot.memory_pressure = xybrid_core::device::MemoryPressure::Critical;
+        let resource_provider = Arc::new(FixedUnitResourceProvider::new(critical_snapshot));
+        let options = RunOptions::new()
+            .with_generation_config(tool_generation_config())
+            .with_abort_policy(
+                crate::run_options::AbortPolicy::default()
+                    .stop_on(crate::run_options::AbortSignal::MemoryPressureCritical)
+                    .with_cloud_fallback(true)
+                    .with_max_grace_tokens(0),
+            )
+            .with_resource_provider(resource_provider)
+            .with_correlation_id("corr-tools-pre-run");
+        let envelope = text_envelope("use a tool");
+        let collected: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+        let collected_for_cb = collected.clone();
+        let mut on_token = move |t: xybrid_core::runtime_adapter::types::PartialToken| {
+            collected_for_cb.lock().unwrap().push(t.token);
+            Ok::<_, Box<dyn std::error::Error + Send + Sync>>(())
+        };
+        let seam_count = Arc::new(AtomicUsize::new(0));
+        let seam_count_for_cb = seam_count.clone();
+        let mut on_seam = move |s: SeamInfo| {
+            seam_count_for_cb.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            assert_eq!(s.reason, xybrid_core::abort::AbortReason::StressMemory);
+            assert_eq!(s.correlation_id, "corr-tools-pre-run");
+            assert_eq!(s.local_tokens, 0);
+        };
+
+        let result = model.run_streaming_with_fallback(
+            &envelope,
+            &options,
+            &cloud,
+            &mut on_token,
+            &mut on_seam,
+        );
+
+        match result {
+            Err(SdkError::InferenceError { message, .. }) => {
+                assert!(
+                    message.contains("cloud fallback is not available for tool-calling requests"),
+                    "{message}"
+                );
+                assert!(message.contains("tools are not forwarded"), "{message}");
+            }
+            other => panic!("expected unsupported tools fallback error, got {other:?}"),
+        }
+        assert_eq!(seam_count.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert_eq!(cloud.call_count(), 0);
+        assert!(collected.lock().unwrap().is_empty());
     }
 
     #[test]
@@ -4155,6 +4674,7 @@ mod tests {
             default_metrics(),
             Some(default_signal()),
             None,
+            false,
             &mut on_token,
             &mut on_seam,
         )
@@ -4181,6 +4701,75 @@ mod tests {
         assert!(matches!(
             outcomes[1].target,
             xybrid_core::orchestrator::authority::ResolvedTarget::Cloud { .. }
+        ));
+        assert_eq!(outcomes[1].model_id.as_deref(), Some("deepseek-chat"));
+    }
+
+    #[test]
+    fn dispatch_after_local_records_cloud_hard_fail_when_tools_requested() {
+        let cloud = FakeCloudAdapter::new("must not run");
+        let authority = FakeAuthority::allow();
+        let mut envelope = text_envelope("use a tool");
+        envelope
+            .metadata
+            .insert("provider".to_string(), "deepseek".to_string());
+        envelope
+            .metadata
+            .insert("model".to_string(), "deepseek-chat".to_string());
+        let mut on_token =
+            |_: xybrid_core::runtime_adapter::types::PartialToken| -> Result<(), Box<dyn std::error::Error + Send + Sync>> { Ok(()) };
+        let seam_count = Arc::new(AtomicUsize::new(0));
+        let seam_count_for_cb = seam_count.clone();
+        let mut on_seam = move |_s: SeamInfo| {
+            seam_count_for_cb.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        };
+        let local_result: SdkResult<InferenceResult> = Err(SdkError::AbortedForCloudFallback {
+            reason: xybrid_core::abort::AbortReason::StressMemory,
+        });
+
+        let result = dispatch_after_local(
+            local_result,
+            &envelope,
+            &cloud,
+            "corr-tools".to_string(),
+            "local-model",
+            2,
+            120,
+            None,
+            &authority,
+            default_metrics(),
+            Some(default_signal()),
+            None,
+            true,
+            &mut on_token,
+            &mut on_seam,
+        );
+
+        match result {
+            Err(SdkError::InferenceError { message, .. }) => {
+                assert!(
+                    message.contains("cloud fallback is not available for tool-calling requests"),
+                    "{message}"
+                );
+            }
+            other => panic!("expected unsupported tools fallback error, got {other:?}"),
+        }
+        assert_eq!(seam_count.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert_eq!(cloud.call_count(), 0);
+        assert!(authority.policy_requests().is_empty());
+
+        let outcomes = authority.outcomes();
+        assert_eq!(outcomes.len(), 2);
+        assert!(matches!(
+            outcomes[0].category,
+            Some(
+                xybrid_core::orchestrator::authority::OutcomeCategory::AbortedForCloudFallback { .. }
+            )
+        ));
+        assert!(matches!(
+            outcomes[1].category,
+            Some(xybrid_core::orchestrator::authority::OutcomeCategory::HardFail { ref reason })
+                if reason == CLOUD_FALLBACK_UNSUPPORTED_TOOLS_REASON
         ));
         assert_eq!(outcomes[1].model_id.as_deref(), Some("deepseek-chat"));
     }
@@ -4216,6 +4805,7 @@ mod tests {
             default_metrics(),
             Some(default_signal()),
             None,
+            false,
             &mut on_token,
             &mut on_seam,
         );
@@ -4285,6 +4875,7 @@ mod tests {
             default_metrics(),
             Some(default_signal()),
             None,
+            false,
             &mut on_token,
             &mut on_seam,
         )
@@ -4333,6 +4924,7 @@ mod tests {
             default_metrics(),
             Some(default_signal()),
             Some(cancellation),
+            false,
             &mut on_token,
             &mut on_seam,
         );
@@ -4998,6 +5590,7 @@ mod tests {
             default_metrics(),
             Some(default_signal()),
             None,
+            false,
             &mut on_token,
             &mut on_seam,
         );
@@ -5056,6 +5649,7 @@ mod tests {
             default_metrics(),
             Some(default_signal()),
             None,
+            false,
             &mut on_token,
             &mut on_seam,
         )
@@ -5093,6 +5687,7 @@ mod tests {
             default_metrics(),
             Some(default_signal()),
             None,
+            false,
             &mut on_token,
             &mut on_seam,
         )
@@ -5130,6 +5725,7 @@ mod tests {
             default_metrics(),
             Some(default_signal()),
             None,
+            false,
             &mut on_token,
             &mut on_seam,
         )
@@ -5169,6 +5765,7 @@ mod tests {
             default_metrics(),
             Some(default_signal()),
             None,
+            false,
             &mut on_token,
             &mut on_seam,
         );
@@ -5214,6 +5811,7 @@ mod tests {
             default_metrics(),
             Some(default_signal()),
             None,
+            false,
             &mut on_token,
             &mut on_seam,
         );

@@ -36,6 +36,10 @@ pub struct FfiGenerationConfig {
     pub repetition_penalty: Option<f32>,
     /// Stop sequences. When `None` or empty, only EOS token stops generation.
     pub stop_sequences: Option<Vec<String>>,
+    /// Optional GBNF grammar constraining generation to structured output
+    /// (local llama backend only; other backends ignore it). Produce one from
+    /// a JSON Schema with `jsonSchemaToGbnf`, or pass raw GBNF.
+    pub grammar: Option<String>,
 }
 
 impl FfiGenerationConfig {
@@ -50,6 +54,7 @@ impl FfiGenerationConfig {
             top_k: Some(0),
             repetition_penalty: None,
             stop_sequences: None,
+            grammar: None,
         }
     }
 
@@ -64,14 +69,12 @@ impl FfiGenerationConfig {
             top_k: Some(50),
             repetition_penalty: None,
             stop_sequences: None,
+            grammar: None,
         }
     }
 
     /// Re-shape into the facade POD. The facade owns the single canonical
-    /// mapping into [`xybrid_sdk::GenerationConfig`] (`Option` overrides →
-    /// SDK defaults); calling [`to_sdk`](Self::to_sdk) delegates through
-    /// it instead of duplicating the 20-line `if let Some(...)` chain we
-    /// used to maintain here.
+    /// mapping into [`xybrid_sdk::GenerationConfig`].
     pub(crate) fn to_facade(&self) -> facade::GenerationConfig {
         facade::GenerationConfig {
             max_tokens: self.max_tokens,
@@ -81,12 +84,23 @@ impl FfiGenerationConfig {
             top_k: self.top_k,
             repetition_penalty: self.repetition_penalty,
             stop_sequences: self.stop_sequences.clone().unwrap_or_default(),
+            grammar: self.grammar.clone(),
         }
     }
 
-    pub(crate) fn to_sdk(&self) -> GenerationConfig {
-        self.to_facade().to_sdk()
+    pub(crate) fn to_sdk_over(&self, base: GenerationConfig) -> GenerationConfig {
+        self.to_facade().apply_over(base)
     }
+}
+
+/// Convert a JSON Schema (as a JSON string) into a GBNF grammar for
+/// [`FfiGenerationConfig::grammar`].
+///
+/// Fails (as a `String` error, per this crate's FRB convention) when the
+/// schema is not valid JSON or uses a construct outside the supported subset.
+#[frb(sync)]
+pub fn json_schema_to_gbnf(schema_json: String) -> Result<String, String> {
+    xybrid_sdk::json_schema_str_to_gbnf(&schema_json).map_err(|e| e.to_string())
 }
 
 /// Opaque cooperative cancellation handle shared across the FFI boundary.
@@ -193,23 +207,15 @@ impl FfiRunOptions {
     ///
     /// When `cancellation_token` is `None` the abort policy is left untouched,
     /// preserving the default chat / cloud-fallback semantics exactly.
-    fn to_sdk_with_cancellation(
+    fn to_sdk_with_cancellation_over(
         &self,
-        generation_config: Option<GenerationConfig>,
+        generation_config: Option<facade::GenerationConfig>,
+        generation_base: GenerationConfig,
         cancellation_token: Option<&FfiCancellationToken>,
     ) -> RunOptions {
-        let facade_gc = generation_config
-            .as_ref()
-            .map(|cfg| facade::GenerationConfig {
-                max_tokens: Some(cfg.max_tokens as u32),
-                temperature: Some(cfg.temperature),
-                top_p: Some(cfg.top_p),
-                min_p: Some(cfg.min_p),
-                top_k: Some(cfg.top_k as u32),
-                repetition_penalty: Some(cfg.repetition_penalty),
-                stop_sequences: cfg.stop_sequences.clone(),
-            });
-        let mut options = self.to_facade(facade_gc).to_sdk(None);
+        let mut options = self
+            .to_facade(generation_config)
+            .to_sdk_over(None, generation_base);
 
         // Flutter-specific resource provider; the facade omits this field so it
         // stays FFI-safe (the trait object isn't portable across generators).
@@ -582,7 +588,9 @@ impl FfiModel {
         envelope: super::envelope::FfiEnvelope,
         config: Option<FfiGenerationConfig>,
     ) -> Result<FfiResult, String> {
-        let sdk_config = config.as_ref().map(|c| c.to_sdk());
+        let sdk_config = config
+            .as_ref()
+            .map(|c| c.to_sdk_over(self.0.default_generation_config()));
         let result = self
             .0
             .run(&envelope.into_envelope(), sdk_config.as_ref())
@@ -633,21 +641,23 @@ impl FfiModel {
     ) {
         let model = self.0.clone();
         let env = envelope.into_envelope();
-        let sdk_config = config.map(|c| c.to_sdk());
+        let facade_config = config.map(|c| c.to_facade());
 
         // Build per-run options carrying the cancellation token (when present).
         // The token is also kept as `cancel_handle` so a closed/unsubscribed
         // sink can drive the same cancellation flag the abort check observes.
         // A non-empty `frame_session_id` tags the run as live-capture so the SDK
         // rate-limits its telemetry per session.
-        let run_options = streaming_run_options(
-            sdk_config,
-            cancellation_token.as_ref(),
-            frame_session_id.as_deref(),
-        );
         let cancel_handle = cancellation_token;
 
         std::thread::spawn(move || {
+            let sdk_config =
+                facade_config.map(|config| config.apply_over(model.default_generation_config()));
+            let run_options = streaming_run_options(
+                sdk_config,
+                cancel_handle.as_ref(),
+                frame_session_id.as_deref(),
+            );
             let reached_terminal = Arc::new(std::sync::atomic::AtomicBool::new(false));
             let mut token_index = 0u32;
             let result = {
@@ -716,11 +726,13 @@ impl FfiModel {
     ) {
         let model = self.0.clone();
         let env = envelope.into_envelope();
-        let sdk_config = config.map(|c| c.to_sdk());
-        let run_options = streaming_run_options(sdk_config, cancellation_token.as_ref(), None);
+        let facade_config = config.map(|c| c.to_facade());
         let cancel_handle = cancellation_token;
 
         std::thread::spawn(move || {
+            let sdk_config =
+                facade_config.map(|config| config.apply_over(model.default_generation_config()));
+            let run_options = streaming_run_options(sdk_config, cancel_handle.as_ref(), None);
             let reached_terminal = Arc::new(std::sync::atomic::AtomicBool::new(false));
             let result = {
                 let reached_terminal = reached_terminal.clone();
@@ -795,7 +807,9 @@ impl FfiModel {
         context: &FfiConversationContext,
         config: Option<FfiGenerationConfig>,
     ) -> Result<FfiResult, String> {
-        let sdk_config = config.as_ref().map(|c| c.to_sdk());
+        let sdk_config = config
+            .as_ref()
+            .map(|c| c.to_sdk_over(self.0.default_generation_config()));
         let ctx_guard = context
             .0
             .read()
@@ -854,16 +868,18 @@ impl FfiModel {
         let model = self.0.clone();
         let env = envelope.into_envelope();
         let ctx = context.0.clone();
-        let sdk_config = config.map(|c| c.to_sdk());
-        let run_options = streaming_run_options(
-            sdk_config,
-            cancellation_token.as_ref(),
-            frame_session_id.as_deref(),
-        );
+        let facade_config = config.map(|c| c.to_facade());
         let cancel_handle = cancellation_token;
 
         // Spawn a background thread
         std::thread::spawn(move || {
+            let sdk_config =
+                facade_config.map(|config| config.apply_over(model.default_generation_config()));
+            let run_options = streaming_run_options(
+                sdk_config,
+                cancel_handle.as_ref(),
+                frame_session_id.as_deref(),
+            );
             // Get read lock on context
             let ctx_guard = match ctx.read() {
                 Ok(guard) => guard,
@@ -953,8 +969,7 @@ impl FfiModel {
                 return;
             }
         };
-        let sdk_config = config.map(|c| c.to_sdk());
-        let run_options = options.to_sdk_with_cancellation(sdk_config, cancellation_token.as_ref());
+        let facade_config = config.map(|c| c.to_facade());
         let cancel_handle = cancellation_token;
         let cloud_adapter = match gateway_url.as_deref() {
             Some(gateway_url) => CloudRuntimeAdapter::with_gateway(gateway_url),
@@ -962,6 +977,11 @@ impl FfiModel {
         };
 
         std::thread::spawn(move || {
+            let run_options = options.to_sdk_with_cancellation_over(
+                facade_config,
+                model.default_generation_config(),
+                cancel_handle.as_ref(),
+            );
             let reached_terminal = Arc::new(std::sync::atomic::AtomicBool::new(false));
             let mut token_index = 0u32;
             let result = {
@@ -1058,7 +1078,8 @@ mod tests {
 
     #[test]
     fn to_sdk_without_cancellation_token_does_not_observe_user_cancelled() {
-        let sdk = sample_options().to_sdk_with_cancellation(None, None);
+        let sdk =
+            sample_options().to_sdk_with_cancellation_over(None, GenerationConfig::default(), None);
 
         assert!(!sdk.abort_policy.observes(AbortSignal::UserCancelled));
         assert!(sdk.cancellation_token.is_none());
@@ -1067,7 +1088,11 @@ mod tests {
     #[test]
     fn to_sdk_with_cancellation_token_observes_user_cancelled_and_sets_token() {
         let token = FfiCancellationToken::new();
-        let sdk = sample_options().to_sdk_with_cancellation(None, Some(&token));
+        let sdk = sample_options().to_sdk_with_cancellation_over(
+            None,
+            GenerationConfig::default(),
+            Some(&token),
+        );
 
         assert!(sdk.abort_policy.observes(AbortSignal::UserCancelled));
         assert!(sdk.cancellation_token.is_some());
@@ -1087,7 +1112,8 @@ mod tests {
         ffi.abort_on_thermal_critical = true;
         let token = FfiCancellationToken::new();
 
-        let sdk = ffi.to_sdk_with_cancellation(None, Some(&token));
+        let sdk =
+            ffi.to_sdk_with_cancellation_over(None, GenerationConfig::default(), Some(&token));
 
         assert!(sdk
             .abort_policy
@@ -1130,7 +1156,7 @@ mod tests {
     fn to_sdk_with_frame_session_id_enables_live_mode() {
         let mut ffi = sample_options();
         ffi.frame_session_id = Some("frame-sess-9".to_string());
-        let sdk = ffi.to_sdk_with_cancellation(None, None);
+        let sdk = ffi.to_sdk_with_cancellation_over(None, GenerationConfig::default(), None);
         assert!(sdk.live_mode);
         assert_eq!(sdk.frame_session_id.as_deref(), Some("frame-sess-9"));
     }
@@ -1168,7 +1194,7 @@ mod tests {
             frame_session_id: None,
         };
 
-        let sdk = ffi.to_sdk_with_cancellation(None, None);
+        let sdk = ffi.to_sdk_with_cancellation_over(None, GenerationConfig::default(), None);
 
         assert!(sdk
             .abort_policy

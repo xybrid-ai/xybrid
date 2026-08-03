@@ -1,0 +1,13 @@
+# The web SDK itself is not built by Bazel (pnpm owns it). This package exists
+# only to export the committed JSON fixture that xybrid-core's inline tests
+# compare Rust metadata serialization against — the test resolves it as
+# CARGO_MANIFEST_DIR/../../bindings/web/test/fixtures/, and Bazel sandboxes
+# actions, so it must be a declared `data` input on the test target.
+filegroup(
+    name = "rust_metadata_fixtures",
+    srcs = glob(
+        ["test/fixtures/rust-metadata-*.json"],
+        allow_empty = False,
+    ),
+    visibility = ["//visibility:public"],
+)

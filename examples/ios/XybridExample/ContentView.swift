@@ -4,7 +4,8 @@
 //
 //  Demonstrates Xybrid SDK usage for iOS.
 //  Requires the XCFramework to be built first:
-//    cargo xtask build-xcframework
+//    bazel build --config=ios //bindings/apple:XybridFFI
+//    unzip -o bazel-bin/bindings/apple/XybridFFI.xcframework.zip -d bindings/apple/XCFrameworks
 //  Then add the Xybrid Swift Package dependency (../../bindings/apple) in Xcode.
 //
 
@@ -46,6 +47,8 @@ struct ContentView: View {
                     .tabItem { Label("Speech", systemImage: "waveform") }
                 navigation { LiveVisionView() }
                     .tabItem { Label("Vision", systemImage: "camera.viewfinder") }
+                navigation { ExtractionView() }
+                    .tabItem { Label("Extract", systemImage: "doc.text.magnifyingglass") }
             }
         case .error(let message):
             navigation { ErrorView(message: message, onRetry: initializeSDK) }

@@ -83,6 +83,14 @@ pub(crate) fn insert_llm_streaming_metrics(
     if let Some(v) = output.prefill_tps {
         response_metadata.insert("prefill_tps".to_string(), format!("{:.4}", v));
     }
+    // Chain-of-thought, when a thinking model emitted one. Content rather than a
+    // metric, but this is the single chokepoint that copies `GenerationOutput`
+    // fields into the executor's response envelope, so it rides along here (the
+    // SDK reads it back via `InferenceResult::reasoning_content`). Deliberately
+    // NOT mirrored onto the span — can be large / may carry PII.
+    if let Some(reasoning) = &output.reasoning_content {
+        response_metadata.insert("reasoning_content".to_string(), reasoning.clone());
+    }
 }
 
 /// Mirror the LLM generation metrics onto the currently-open span.
@@ -401,6 +409,7 @@ mod tests {
             decode_tps: None,
             prefill_tps: None,
             image_preprocess_ms: None,
+            reasoning_content: None,
         }
     }
 

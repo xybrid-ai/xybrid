@@ -25,12 +25,20 @@ FLUTTER_RUST_CARGO="$REPO_ROOT/bindings/flutter/rust/Cargo.toml"
 # URL for SPM consumers in remote mode and MUST match the cargo workspace
 # version.
 SWIFT_PACKAGE="$REPO_ROOT/Package.swift"
+# The XybridFFI.xcframework's embedded framework Info.plist (Bazel-built via
+# apple_static_xcframework). Its CFBundleVersion/ShortVersionString bake into the
+# shipped xcframework, so they must track the SDK version too.
+SWIFT_FFI_PLIST="$REPO_ROOT/bindings/apple/XybridFFI-Info.plist"
 # React Native npm package. RN is hand-translated (not generated), so it was
 # absent from this sync and its package.json drifted. Two versions must equal
 # the workspace version: the npm package version, and the `ai.xybrid:xybrid-kotlin`
 # AAR pin its Android binding consumes from Maven Central.
 RN_PACKAGE="$REPO_ROOT/bindings/react-native/package.json"
 RN_GRADLE="$REPO_ROOT/bindings/react-native/android/build.gradle"
+# Python SDK wheel manifest. Hand-maintained (the ctypes binding is not
+# generated), so like RN it must be wired here or it drifts.
+PYTHON_PYPROJECT="$REPO_ROOT/bindings/python/pyproject.toml"
+WEB_PACKAGE="$REPO_ROOT/bindings/web/package.json"
 
 # Extract current workspace version from Cargo.toml
 get_cargo_version() {
@@ -66,6 +74,13 @@ get_swift_version() {
     grep '^let sdkVersion = ' "$SWIFT_PACKAGE" | sed 's/let sdkVersion = "\(.*\)"/\1/'
 }
 
+# Extract CFBundleShortVersionString from the xcframework framework Info.plist
+# (the value on the line after the key). Portable (no plutil, so CI --check
+# works on Linux).
+get_swift_ffi_version() {
+    grep -A1 'CFBundleShortVersionString' "$SWIFT_FFI_PLIST" | grep '<string>' | head -1 | sed 's|.*<string>\(.*\)</string>.*|\1|'
+}
+
 # Extract version from React Native package.json (parsed, like Unity's).
 get_rn_version() {
     python3 -c "import json; print(json.load(open('$RN_PACKAGE'))['version'])"
@@ -74,6 +89,16 @@ get_rn_version() {
 # Extract the ai.xybrid:xybrid-kotlin AAR version the RN Android binding pins.
 get_rn_aar_version() {
     grep 'ai.xybrid:xybrid-kotlin:' "$RN_GRADLE" | head -1 | sed 's/.*xybrid-kotlin:\([^"]*\)".*/\1/'
+}
+
+# Extract version from bindings/python/pyproject.toml ([project] holds the
+# file's only `version = ` line).
+get_python_version() {
+    grep '^version = ' "$PYTHON_PYPROJECT" | head -1 | sed 's/version = "\(.*\)"/\1/'
+}
+
+get_web_version() {
+    python3 -c "import json; print(json.load(open('$WEB_PACKAGE'))['version'])"
 }
 
 # Set version in Cargo workspace (all Rust crates inherit via version.workspace = true)
@@ -131,6 +156,29 @@ set_swift_version() {
     rm -f "$SWIFT_PACKAGE.bak"
 }
 
+# Set both version keys in the xcframework framework Info.plist. Each <string>
+# value sits on the line AFTER its key, so match the key then replace the next
+# line (`n`). Both track the SDK version (fine for a static-lib framework).
+#
+# Apple requires CFBundleVersion / CFBundleShortVersionString to be
+# period-separated NUMBERS (TN2420) — rules_apple's plisttool hard-fails on a
+# prerelease suffix like 0.4.0-alpha. The plist gets the numeric core; the
+# full version string lives everywhere else.
+plist_version_of() {
+    local v="${1%%-*}"
+    echo "${v%%+*}"
+}
+
+set_swift_ffi_version() {
+    local version
+    version="$(plist_version_of "$1")"
+    sed -i.bak \
+        -e "/CFBundleVersion/{n;s|<string>.*</string>|<string>$version</string>|;}" \
+        -e "/CFBundleShortVersionString/{n;s|<string>.*</string>|<string>$version</string>|;}" \
+        "$SWIFT_FFI_PLIST"
+    rm -f "$SWIFT_FFI_PLIST.bak"
+}
+
 # Set version in React Native package.json (parsed + rewritten, like Unity's —
 # robust against reformatting; preserves the file's standard 2-space layout).
 set_rn_version() {
@@ -154,6 +202,26 @@ set_rn_aar_version() {
     rm -f "$RN_GRADLE.bak"
 }
 
+# Set version in bindings/python/pyproject.toml.
+set_python_version() {
+    local version="$1"
+    sed -i.bak "s/^version = \".*\"/version = \"$version\"/" "$PYTHON_PYPROJECT"
+    rm -f "$PYTHON_PYPROJECT.bak"
+}
+
+set_web_version() {
+    local version="$1"
+    python3 -c "
+import json
+with open('$WEB_PACKAGE', 'r') as f:
+    data = json.load(f)
+data['version'] = '$version'
+with open('$WEB_PACKAGE', 'w') as f:
+    json.dump(data, f, indent=2)
+    f.write('\\n')
+"
+}
+
 # Check mode: verify all versions match
 check_versions() {
     local cargo_version
@@ -163,16 +231,23 @@ check_versions() {
     echo "Cargo workspace version: $cargo_version"
     echo ""
 
-    for name_func in "Flutter:get_flutter_version" "Flutter rust crate:get_flutter_rust_version" "Unity:get_unity_version" "Kotlin:get_kotlin_version" "Swift:get_swift_version" "React Native:get_rn_version" "React Native AAR:get_rn_aar_version"; do
+    for name_func in "Flutter:get_flutter_version" "Flutter rust crate:get_flutter_rust_version" "Unity:get_unity_version" "Kotlin:get_kotlin_version" "Swift:get_swift_version" "Swift FFI plist:get_swift_ffi_version" "React Native:get_rn_version" "React Native AAR:get_rn_aar_version" "Python:get_python_version" "Browser/Web:get_web_version"; do
         local name="${name_func%%:*}"
         local func="${name_func##*:}"
         local version
         version="$($func 2>/dev/null || echo "NOT FOUND")"
 
-        if [ "$version" = "$cargo_version" ]; then
+        # The plist carries only the numeric core (Apple rejects prerelease
+        # suffixes in CFBundleVersion — see set_swift_ffi_version).
+        local expected="$cargo_version"
+        if [ "$name" = "Swift FFI plist" ]; then
+            expected="$(plist_version_of "$cargo_version")"
+        fi
+
+        if [ "$version" = "$expected" ]; then
             echo "  $name: $version ✓"
         else
-            echo "  $name: $version ✗ (expected $cargo_version)"
+            echo "  $name: $version ✗ (expected $expected)"
             exit_code=1
         fi
     done
@@ -200,8 +275,11 @@ case "${1:-}" in
         set_unity_version "$VERSION"
         set_kotlin_version "$VERSION"
         set_swift_version "$VERSION"
+        set_swift_ffi_version "$VERSION"
         set_rn_version "$VERSION"
         set_rn_aar_version "$VERSION"
+        set_python_version "$VERSION"
+        set_web_version "$VERSION"
         echo "Done. Run '$0 --check' to verify."
         ;;
     --help|-h)
@@ -222,8 +300,11 @@ case "${1:-}" in
         set_unity_version "$VERSION"
         set_kotlin_version "$VERSION"
         set_swift_version "$VERSION"
+        set_swift_ffi_version "$VERSION"
         set_rn_version "$VERSION"
         set_rn_aar_version "$VERSION"
+        set_python_version "$VERSION"
+        set_web_version "$VERSION"
         echo ""
         echo "Rust crates inherit via version.workspace = true."
 

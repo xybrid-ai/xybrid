@@ -49,6 +49,11 @@ use super::llm_telemetry::{
     insert_llm_streaming_metrics, mirror_llm_metrics_to_span, stamp_llm_runtime_backend,
     stamp_llm_span_cost_attribution,
 };
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+use super::tool_continuation::{
+    reject_nested_tool_continuation_parts, reject_tool_continuation_input, run_tool_continuation,
+    text_messages_from_multimodal,
+};
 
 fn mark_execution_terminal(guard: &ExecutionGuard, error: &AdapterError) {
     if error.cloud_fallback_abort_reason().is_some() {
@@ -120,6 +125,17 @@ fn unsupported_backend_vision_error(metadata: &ModelMetadata, backend_name: &str
         capability: "vision input".to_string(),
         hint: "enable llm-llamacpp-vision or select a vision-capable backend".to_string(),
     }
+}
+
+/// Whether the model is a reasoning ("thinking") model, per its metadata
+/// `reasoning` flag. Drives `<think>`-channel priming during chat-prompt
+/// construction so thinking models emit (and we capture) their chain-of-thought.
+fn metadata_reasoning(metadata: &ModelMetadata) -> bool {
+    metadata
+        .metadata
+        .get("reasoning")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false)
 }
 
 #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
@@ -310,6 +326,16 @@ impl TemplateExecutor {
         #[cfg(feature = "candle")]
         runtimes.insert("candle".to_string(), Box::new(CandleRuntime::new()));
         runtimes
+    }
+
+    fn requires_multimodal_generation(input: &Envelope) -> bool {
+        match &input.kind {
+            EnvelopeKind::Image { .. } => true,
+            EnvelopeKind::MultiPart(parts) => {
+                parts.iter().any(Self::requires_multimodal_generation)
+            }
+            EnvelopeKind::Audio(_) | EnvelopeKind::Text(_) | EnvelopeKind::Embedding(_) => false,
+        }
     }
 
     /// Register an additional runtime.
@@ -583,15 +609,57 @@ impl TemplateExecutor {
         } = &metadata.execution_template
         {
             let backend_hint = metadata.metadata.get("backend").and_then(|v| v.as_str());
-            return self.execute_vision_language(
-                metadata,
-                model_file,
-                chat_template.as_deref(),
-                *context_length,
-                input,
-                backend_hint,
-                config,
-            );
+            return if Self::requires_multimodal_generation(input) {
+                self.execute_vision_language(
+                    metadata,
+                    model_file,
+                    chat_template.as_deref(),
+                    *context_length,
+                    input,
+                    backend_hint,
+                    config,
+                )
+            } else if matches!(input.kind, EnvelopeKind::Text(_)) {
+                self.execute_llm(
+                    metadata,
+                    model_file,
+                    chat_template.as_deref(),
+                    *context_length,
+                    input,
+                    backend_hint,
+                    config,
+                )
+            } else {
+                // Text-only MultiPart (no image parts): `execute_llm` would
+                // reject it via `reject_text_only_model_image_input`, which
+                // bars every MultiPart envelope regardless of content. Convert
+                // with the same envelope→messages step `execute_vision_language`
+                // uses for one-shot input, then flatten to plain ChatMessages
+                // and run the non-vision LLM path. Audio/Embedding parts (and
+                // any other non-text/image kind) still fail here, inside
+                // `MultimodalChatMessage::from_envelope`.
+                reject_tool_continuation_input(input, "text-only vision-language")?;
+                let messages = vec![MultimodalChatMessage::from_envelope(input)?];
+                let mut chat_messages = text_messages_from_multimodal(&messages)?;
+                // Mirror the flat-Text path's envelope handling: the
+                // ChatMessages entry point never sees the envelope, so
+                // `system_prompt` and the generation knobs (`max_tokens`,
+                // `temperature`) must be lifted off it here or they are
+                // silently dropped.
+                if let Some(sys) = input.metadata.get("system_prompt") {
+                    chat_messages.insert(0, ChatMessage::system(sys));
+                }
+                let gen_config = build_gen_config_from_input(metadata, input, config);
+                self.execute_llm_with_messages(
+                    metadata,
+                    model_file,
+                    chat_template.as_deref(),
+                    *context_length,
+                    &chat_messages,
+                    backend_hint,
+                    Some(&gen_config),
+                )
+            };
         }
 
         #[cfg(not(any(feature = "llm-mistral", feature = "llm-llamacpp")))]
@@ -614,6 +682,11 @@ impl TemplateExecutor {
             ExecutionTemplate::ModelGraph { .. } => {
                 return Err(AdapterError::RuntimeError(
                     "ModelGraph execution should not reach single model path".to_string(),
+                ));
+            }
+            ExecutionTemplate::LiteRtLm { .. } => {
+                return Err(AdapterError::RuntimeError(
+                    "LiteRtLm models run in the browser SDK (@xybrid/web); no native runtime is available".to_string(),
                 ));
             }
             #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
@@ -875,6 +948,13 @@ impl TemplateExecutor {
             }
         }
 
+        // Fail closed: tool-result continuations do not compose with
+        // conversation context (v1). Without this guard the continuation
+        // metadata would be silently dropped and the turn would run as a
+        // fresh question, producing a plausible but ungrounded answer.
+        #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+        reject_tool_continuation_input(input, "context")?;
+
         #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
         if let ExecutionTemplate::VisionLanguage {
             model_file,
@@ -891,15 +971,28 @@ impl TemplateExecutor {
             let messages = Self::multimodal_messages_with_context(input, context)?;
             let backend_hint = metadata.metadata.get("backend").and_then(|v| v.as_str());
 
-            let mut result = self.execute_llm_multimodal_messages(
-                metadata,
-                model_file,
-                chat_template.as_deref(),
-                *context_length,
-                &messages,
-                backend_hint,
-                config,
-            )?;
+            let mut result = if messages.iter().any(|message| message.image_count() > 0) {
+                self.execute_llm_multimodal_messages(
+                    metadata,
+                    model_file,
+                    chat_template.as_deref(),
+                    *context_length,
+                    &messages,
+                    backend_hint,
+                    config,
+                )?
+            } else {
+                let chat_messages = text_messages_from_multimodal(&messages)?;
+                self.execute_llm_with_messages(
+                    metadata,
+                    model_file,
+                    chat_template.as_deref(),
+                    *context_length,
+                    &chat_messages,
+                    backend_hint,
+                    config,
+                )?
+            };
 
             result = result.with_role(MessageRole::Assistant);
             return Ok(result);
@@ -909,6 +1002,7 @@ impl TemplateExecutor {
         #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
         if let ExecutionTemplate::Gguf {
             model_file,
+            chat_template,
             context_length,
             ..
         } = &metadata.execution_template
@@ -957,6 +1051,7 @@ impl TemplateExecutor {
             let mut result = self.execute_llm_with_messages(
                 metadata,
                 model_file,
+                chat_template.as_deref(),
                 *context_length,
                 &chat_messages,
                 backend_hint,
@@ -1056,16 +1151,51 @@ impl TemplateExecutor {
             {
                 let backend_hint = metadata.metadata.get("backend").and_then(|v| v.as_str());
 
-                return self.execute_vision_language_streaming(
-                    metadata,
-                    model_file,
-                    chat_template.as_deref(),
-                    *context_length,
-                    input,
-                    backend_hint,
-                    on_token,
-                    config,
-                );
+                return if Self::requires_multimodal_generation(input) {
+                    self.execute_vision_language_streaming(
+                        metadata,
+                        model_file,
+                        chat_template.as_deref(),
+                        *context_length,
+                        input,
+                        backend_hint,
+                        on_token,
+                        config,
+                    )
+                } else if matches!(input.kind, EnvelopeKind::Text(_)) {
+                    self.execute_llm_streaming(
+                        metadata,
+                        model_file,
+                        chat_template.as_deref(),
+                        *context_length,
+                        input,
+                        backend_hint,
+                        on_token,
+                        config,
+                    )
+                } else {
+                    // Text-only MultiPart: same conversion as the
+                    // non-streaming path (see `execute_impl`), routed through
+                    // the streaming ChatMessages entry point.
+                    reject_tool_continuation_input(input, "text-only vision-language streaming")?;
+                    let messages = vec![MultimodalChatMessage::from_envelope(input)?];
+                    let mut chat_messages = text_messages_from_multimodal(&messages)?;
+                    // Same envelope lift as the non-streaming branch above.
+                    if let Some(sys) = input.metadata.get("system_prompt") {
+                        chat_messages.insert(0, ChatMessage::system(sys));
+                    }
+                    let gen_config = build_gen_config_from_input(metadata, input, config);
+                    self.execute_llm_streaming_with_messages(
+                        metadata,
+                        model_file,
+                        chat_template.as_deref(),
+                        *context_length,
+                        &chat_messages,
+                        backend_hint,
+                        on_token,
+                        Some(&gen_config),
+                    )
+                };
             }
 
             // Only GGUF (LLM) templates support streaming
@@ -1203,6 +1333,10 @@ impl TemplateExecutor {
             }
         }
 
+        // Fail closed: continuations are non-streaming and context-free (v1).
+        #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+        reject_tool_continuation_input(input, "streaming context")?;
+
         #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
         {
             if let ExecutionTemplate::VisionLanguage {
@@ -1220,16 +1354,30 @@ impl TemplateExecutor {
                 let messages = Self::multimodal_messages_with_context(input, context)?;
                 let backend_hint = metadata.metadata.get("backend").and_then(|v| v.as_str());
 
-                let result = self.execute_llm_multimodal_streaming_messages(
-                    metadata,
-                    model_file,
-                    chat_template.as_deref(),
-                    *context_length,
-                    &messages,
-                    backend_hint,
-                    on_token,
-                    config,
-                )?;
+                let result = if messages.iter().any(|message| message.image_count() > 0) {
+                    self.execute_llm_multimodal_streaming_messages(
+                        metadata,
+                        model_file,
+                        chat_template.as_deref(),
+                        *context_length,
+                        &messages,
+                        backend_hint,
+                        on_token,
+                        config,
+                    )?
+                } else {
+                    let chat_messages = text_messages_from_multimodal(&messages)?;
+                    self.execute_llm_streaming_with_messages(
+                        metadata,
+                        model_file,
+                        chat_template.as_deref(),
+                        *context_length,
+                        &chat_messages,
+                        backend_hint,
+                        on_token,
+                        config,
+                    )?
+                };
 
                 return Ok(result.with_role(MessageRole::Assistant));
             }
@@ -1237,6 +1385,7 @@ impl TemplateExecutor {
             // Check if this is a GGUF (LLM) model
             if let ExecutionTemplate::Gguf {
                 model_file,
+                chat_template,
                 context_length,
                 ..
             } = &metadata.execution_template
@@ -1284,6 +1433,7 @@ impl TemplateExecutor {
                 let result = self.execute_llm_streaming_with_messages(
                     metadata,
                     model_file,
+                    chat_template.as_deref(),
                     *context_length,
                     &chat_messages,
                     backend_hint,
@@ -1347,6 +1497,7 @@ impl TemplateExecutor {
         stamp_llm_span_cost_attribution(metadata);
 
         reject_text_only_model_image_input(metadata, input)?;
+        reject_tool_continuation_input(input, "streaming")?;
 
         // Build full model path
         let model_path = Path::new(&self.base_path).join(model_file);
@@ -1368,8 +1519,9 @@ impl TemplateExecutor {
 
         // Load model if needed
         if need_load {
-            let mut config =
-                LlmConfig::new(model_path_str.clone()).with_context_length(context_length);
+            let mut config = LlmConfig::new(model_path_str.clone())
+                .with_context_length(context_length)
+                .with_reasoning(metadata_reasoning(metadata));
 
             if let Some(template_path) = chat_template_path {
                 config = config.with_chat_template(template_path);
@@ -1398,7 +1550,7 @@ impl TemplateExecutor {
         }
         messages.push(ChatMessage::user(&prompt));
 
-        let gen_config = build_gen_config_from_input(input, config);
+        let gen_config = build_gen_config_from_input(metadata, input, config);
 
         // Execute with streaming. Capture the backend name + the prefix
         // length the backend reused from its KV cache so the metric
@@ -1427,6 +1579,7 @@ impl TemplateExecutor {
             &backend_name,
             cached_prefix,
             None,
+            !gen_config.tools.is_empty(),
         ))
     }
 
@@ -1443,6 +1596,7 @@ impl TemplateExecutor {
         &mut self,
         metadata: &ModelMetadata,
         model_file: &str,
+        chat_template: Option<&str>,
         context_length: usize,
         messages: &[ChatMessage],
         backend_hint: Option<&str>,
@@ -1464,9 +1618,10 @@ impl TemplateExecutor {
         // Build full model path
         let model_path = Path::new(&self.base_path).join(model_file);
         let model_path_str = model_path.to_string_lossy().to_string();
+        let chat_template_path = resolve_optional_model_path(&self.base_path, chat_template);
         let cache_key = LlmAdapterCacheKey::new(
             model_path_str.clone(),
-            None,
+            chat_template_path.clone(),
             context_length,
             backend_hint,
             None,
@@ -1480,15 +1635,22 @@ impl TemplateExecutor {
 
         // Load model if needed
         if need_load {
-            let config = LlmConfig::new(model_path_str.clone()).with_context_length(context_length);
+            let mut config = LlmConfig::new(model_path_str.clone())
+                .with_context_length(context_length)
+                .with_reasoning(metadata_reasoning(metadata));
+
+            if let Some(template_path) = chat_template_path {
+                config = config.with_chat_template(template_path);
+            }
 
             let mut adapter = LlmRuntimeAdapter::with_backend_hint(backend_hint)?;
             adapter.load_model_with_config(&config)?;
             self.llm_adapter_cache = Some((cache_key.clone(), adapter));
         }
 
-        // Use explicit config or fall back to defaults
-        let gen_config = config.cloned().unwrap_or_default();
+        let gen_config = config
+            .cloned()
+            .unwrap_or_else(|| model_default_gen_config(metadata));
 
         // Execute with ChatMessages directly — backend applies template once.
         // Capture backend name + cached-prefix length for the metric mirror.
@@ -1515,6 +1677,7 @@ impl TemplateExecutor {
             &backend_name,
             cached_prefix,
             None,
+            !gen_config.tools.is_empty(),
         ))
     }
 
@@ -1529,6 +1692,31 @@ impl TemplateExecutor {
         backend_hint: Option<&str>,
         config: Option<&GenerationConfig>,
     ) -> ExecutorResult<Envelope> {
+        let gen_config = build_gen_config_from_input(metadata, input, config);
+
+        // Tool-result continuations replay through the raw text path and
+        // must be intercepted here, before envelope → message conversion:
+        // the messages-based functions below never see continuation
+        // metadata.
+        if let Some(responses_json) = input.metadata.get(Envelope::TOOL_RESPONSES_METADATA_KEY) {
+            return self.execute_vlm_tool_continuation(
+                metadata,
+                model_file,
+                chat_template,
+                context_length,
+                input,
+                responses_json,
+                backend_hint,
+                Some(&gen_config),
+            );
+        }
+
+        // Outer continuations are handled above; nested ones (inside a
+        // MultiPart part) would be silently discarded by the message
+        // conversion below, so they must be rejected — keeping this batch
+        // path symmetric with the streaming variant's recursive guard.
+        reject_nested_tool_continuation_parts(input, "vision-language")?;
+
         let messages = vec![MultimodalChatMessage::from_envelope(input)?];
         self.execute_llm_multimodal_messages(
             metadata,
@@ -1537,8 +1725,71 @@ impl TemplateExecutor {
             context_length,
             &messages,
             backend_hint,
-            config,
+            Some(&gen_config),
         )
+    }
+
+    /// Text-only tool-result continuation on the vision-language path (see
+    /// `Envelope::tool_results`). Loads the same adapter the generate path
+    /// would, then replays the conversation through the raw continuation
+    /// path. Image-bearing conversations cannot re-evaluate their image
+    /// embeddings from text and are rejected by
+    /// `text_messages_from_multimodal`.
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    fn execute_vlm_tool_continuation(
+        &mut self,
+        metadata: &ModelMetadata,
+        model_file: &str,
+        chat_template: Option<&str>,
+        context_length: usize,
+        input: &Envelope,
+        responses_json: &str,
+        backend_hint: Option<&str>,
+        config: Option<&GenerationConfig>,
+    ) -> ExecutorResult<Envelope> {
+        // Same span label as the generate path: a continuation IS a
+        // vision-language inference turn to the telemetry consumer.
+        let _llm_span = xybrid_trace::SpanGuard::new("vlm_inference_with_messages");
+        xybrid_trace::add_metadata("model", model_file);
+        stamp_llm_span_cost_attribution(metadata);
+
+        self.ensure_vlm_adapter(
+            metadata,
+            model_file,
+            chat_template,
+            context_length,
+            backend_hint,
+        )?;
+
+        let gen_config = config
+            .cloned()
+            .unwrap_or_else(|| model_default_gen_config(metadata));
+        let messages = vec![MultimodalChatMessage::from_envelope(input)?];
+        let chat_messages = text_messages_from_multimodal(&messages)?;
+
+        let (output, backend_name, cached_prefix) = if let Some((_, adapter)) =
+            &self.llm_adapter_cache
+        {
+            stamp_llm_runtime_backend(adapter);
+            let backend = adapter.backend();
+            let out =
+                run_tool_continuation(backend, &chat_messages, &gen_config, input, responses_json)?;
+            let name = backend.name().to_string();
+            let cached = backend.last_cached_prefix_len();
+            (out, name, cached)
+        } else {
+            return Err(AdapterError::RuntimeError(
+                "LLM adapter cache unexpectedly empty".to_string(),
+            ));
+        };
+
+        Ok(build_llm_response_envelope(
+            output,
+            &backend_name,
+            cached_prefix,
+            None,
+            !gen_config.tools.is_empty(),
+        ))
     }
 
     #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
@@ -1549,7 +1800,9 @@ impl TemplateExecutor {
         chat_template: Option<&str>,
         context_length: usize,
     ) -> LlmConfig {
-        let mut llm_config = LlmConfig::new(model_path_str).with_context_length(context_length);
+        let mut llm_config = LlmConfig::new(model_path_str)
+            .with_context_length(context_length)
+            .with_reasoning(metadata_reasoning(metadata));
         if let Some(template) = chat_template {
             let template_path = Path::new(&self.base_path).join(template);
             llm_config = llm_config.with_chat_template(template_path.to_string_lossy().to_string());
@@ -1560,6 +1813,65 @@ impl TemplateExecutor {
                 llm_config.with_vision_encoder(vision_encoder_path.to_string_lossy().to_string());
         }
         llm_config
+    }
+
+    /// Resolve paths, build the cache key, and (re)load the vision-language
+    /// adapter when the cached one doesn't match. Shared by the multimodal
+    /// generate path and the text-only tool-continuation path so both load
+    /// identically. Vision support is re-checked even on a cache hit,
+    /// preserving the original per-call validation.
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    fn ensure_vlm_adapter(
+        &mut self,
+        metadata: &ModelMetadata,
+        model_file: &str,
+        chat_template: Option<&str>,
+        context_length: usize,
+        backend_hint: Option<&str>,
+    ) -> ExecutorResult<()> {
+        let model_path = Path::new(&self.base_path).join(model_file);
+        let model_path_str = model_path.to_string_lossy().to_string();
+        let chat_template_path = resolve_optional_model_path(&self.base_path, chat_template);
+        let vision_encoder_path = metadata.vision_encoder.as_ref().map(|vision_encoder| {
+            Path::new(&self.base_path)
+                .join(&vision_encoder.file)
+                .to_string_lossy()
+                .to_string()
+        });
+        let cache_key = LlmAdapterCacheKey::new(
+            model_path_str.clone(),
+            chat_template_path,
+            context_length,
+            backend_hint,
+            vision_encoder_path,
+        );
+
+        let need_load = match &self.llm_adapter_cache {
+            Some((cached_key, _)) if cached_key == &cache_key => false,
+            _ => true,
+        };
+
+        if need_load {
+            let mut adapter = LlmRuntimeAdapter::with_backend_hint(backend_hint)?;
+            stamp_llm_runtime_backend(&adapter);
+            ensure_backend_supports_vision(metadata, &adapter)?;
+
+            let llm_config = self.vision_language_llm_config(
+                metadata,
+                model_path_str,
+                chat_template,
+                context_length,
+            );
+
+            adapter.load_model_with_config(&llm_config)?;
+            self.llm_adapter_cache = Some((cache_key, adapter));
+        }
+
+        if let Some((_, adapter)) = &self.llm_adapter_cache {
+            ensure_backend_supports_vision(metadata, adapter)?;
+        }
+
+        Ok(())
     }
 
     #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
@@ -1591,49 +1903,17 @@ impl TemplateExecutor {
         xybrid_trace::add_metadata("image_count", image_count.to_string());
         stamp_llm_span_cost_attribution(metadata);
 
-        let model_path = Path::new(&self.base_path).join(model_file);
-        let model_path_str = model_path.to_string_lossy().to_string();
-        let chat_template_path = resolve_optional_model_path(&self.base_path, chat_template);
-        let vision_encoder_path = metadata.vision_encoder.as_ref().map(|vision_encoder| {
-            Path::new(&self.base_path)
-                .join(&vision_encoder.file)
-                .to_string_lossy()
-                .to_string()
-        });
-        let cache_key = LlmAdapterCacheKey::new(
-            model_path_str.clone(),
-            chat_template_path,
+        self.ensure_vlm_adapter(
+            metadata,
+            model_file,
+            chat_template,
             context_length,
             backend_hint,
-            vision_encoder_path,
-        );
+        )?;
 
-        let gen_config = config.cloned().unwrap_or_default();
-
-        let need_load = match &self.llm_adapter_cache {
-            Some((cached_key, _)) if cached_key == &cache_key => false,
-            _ => true,
-        };
-
-        if need_load {
-            let mut adapter = LlmRuntimeAdapter::with_backend_hint(backend_hint)?;
-            stamp_llm_runtime_backend(&adapter);
-            ensure_backend_supports_vision(metadata, &adapter)?;
-
-            let llm_config = self.vision_language_llm_config(
-                metadata,
-                model_path_str.clone(),
-                chat_template,
-                context_length,
-            );
-
-            adapter.load_model_with_config(&llm_config)?;
-            self.llm_adapter_cache = Some((cache_key.clone(), adapter));
-        }
-
-        if let Some((_, adapter)) = &self.llm_adapter_cache {
-            ensure_backend_supports_vision(metadata, adapter)?;
-        }
+        let gen_config = config
+            .cloned()
+            .unwrap_or_else(|| model_default_gen_config(metadata));
 
         let registered_image_preprocess_ms =
             self.encode_registered_vision_inputs(metadata, messages)?;
@@ -1657,6 +1937,7 @@ impl TemplateExecutor {
             &backend_name,
             cached_prefix,
             registered_image_preprocess_ms,
+            !gen_config.tools.is_empty(),
         ))
     }
 
@@ -1672,6 +1953,9 @@ impl TemplateExecutor {
         on_token: StreamingCallback<'_>,
         config: Option<&GenerationConfig>,
     ) -> ExecutorResult<Envelope> {
+        let gen_config = build_gen_config_from_input(metadata, input, config);
+
+        reject_tool_continuation_input(input, "vision-language streaming")?;
         let messages = vec![MultimodalChatMessage::from_envelope(input)?];
         self.execute_llm_multimodal_streaming_messages(
             metadata,
@@ -1681,7 +1965,7 @@ impl TemplateExecutor {
             &messages,
             backend_hint,
             on_token,
-            config,
+            Some(&gen_config),
         )
     }
 
@@ -1732,7 +2016,9 @@ impl TemplateExecutor {
             vision_encoder_path,
         );
 
-        let gen_config = config.cloned().unwrap_or_default();
+        let gen_config = config
+            .cloned()
+            .unwrap_or_else(|| model_default_gen_config(metadata));
 
         let need_load = match &self.llm_adapter_cache {
             Some((cached_key, _)) if cached_key == &cache_key => false,
@@ -1781,6 +2067,7 @@ impl TemplateExecutor {
             &backend_name,
             cached_prefix,
             registered_image_preprocess_ms,
+            !gen_config.tools.is_empty(),
         ))
     }
 
@@ -1797,6 +2084,7 @@ impl TemplateExecutor {
         &mut self,
         metadata: &ModelMetadata,
         model_file: &str,
+        chat_template: Option<&str>,
         context_length: usize,
         messages: &[ChatMessage],
         backend_hint: Option<&str>,
@@ -1821,9 +2109,10 @@ impl TemplateExecutor {
         // Build full model path
         let model_path = Path::new(&self.base_path).join(model_file);
         let model_path_str = model_path.to_string_lossy().to_string();
+        let chat_template_path = resolve_optional_model_path(&self.base_path, chat_template);
         let cache_key = LlmAdapterCacheKey::new(
             model_path_str.clone(),
-            None,
+            chat_template_path.clone(),
             context_length,
             backend_hint,
             None,
@@ -1837,15 +2126,22 @@ impl TemplateExecutor {
 
         // Load model if needed
         if need_load {
-            let config = LlmConfig::new(model_path_str.clone()).with_context_length(context_length);
+            let mut config = LlmConfig::new(model_path_str.clone())
+                .with_context_length(context_length)
+                .with_reasoning(metadata_reasoning(metadata));
+
+            if let Some(template_path) = chat_template_path {
+                config = config.with_chat_template(template_path);
+            }
 
             let mut adapter = LlmRuntimeAdapter::with_backend_hint(backend_hint)?;
             adapter.load_model_with_config(&config)?;
             self.llm_adapter_cache = Some((cache_key.clone(), adapter));
         }
 
-        // Use explicit config or fall back to defaults
-        let gen_config = config.cloned().unwrap_or_default();
+        let gen_config = config
+            .cloned()
+            .unwrap_or_else(|| model_default_gen_config(metadata));
 
         // Execute with streaming - pass ChatMessages directly to backend.
         // Capture backend name + cached-prefix length for the metric mirror.
@@ -1872,6 +2168,7 @@ impl TemplateExecutor {
             &backend_name,
             cached_prefix,
             None,
+            !gen_config.tools.is_empty(),
         ))
     }
 
@@ -1950,8 +2247,9 @@ impl TemplateExecutor {
         // Load model if needed (cache miss or different model)
         if need_load {
             // Create LLM config
-            let mut config =
-                LlmConfig::new(model_path_str.clone()).with_context_length(context_length);
+            let mut config = LlmConfig::new(model_path_str.clone())
+                .with_context_length(context_length)
+                .with_reasoning(metadata_reasoning(metadata));
 
             if let Some(template_path) = chat_template_path {
                 config = config.with_chat_template(template_path);
@@ -1965,7 +2263,7 @@ impl TemplateExecutor {
             self.llm_adapter_cache = Some((cache_key.clone(), adapter));
         }
 
-        let gen_config = build_gen_config_from_input(input, config);
+        let gen_config = build_gen_config_from_input(metadata, input, config);
 
         // Build messages from input
         let prompt = match &input.kind {
@@ -1994,7 +2292,13 @@ impl TemplateExecutor {
                 // bundle metadata).
                 stamp_llm_runtime_backend(adapter);
                 let backend = adapter.backend();
-                let out = backend.generate(&messages, &gen_config)?;
+                let out = if let Some(responses_json) =
+                    input.metadata.get(Envelope::TOOL_RESPONSES_METADATA_KEY)
+                {
+                    run_tool_continuation(backend, &messages, &gen_config, input, responses_json)?
+                } else {
+                    backend.generate(&messages, &gen_config)?
+                };
                 let name = backend.name().to_string();
                 let cached = backend.last_cached_prefix_len();
                 (out, name, cached)
@@ -2014,6 +2318,7 @@ impl TemplateExecutor {
             &backend_name,
             cached_prefix,
             None,
+            !gen_config.tools.is_empty(),
         ))
     }
 
@@ -2657,12 +2962,20 @@ fn insert_image_preprocess_metric(
 /// optional image-preprocess timing) and mirrors the generation metrics onto the
 /// current span. `image_preprocess_ms` is `None` for text-only paths and carries
 /// the vision timing for multimodal paths (the insert is a no-op when `None`).
+///
+/// `tools_requested` is true when the request's `GenerationConfig.tools` was
+/// non-empty: the output text is then scanned for tool-call blocks (both the
+/// LFM2 and gemma-4 protocols) and any parsed calls ride the metadata
+/// side-channel as a `tool_calls` JSON array (same channel as `finish_reason`). The text itself stays intact —
+/// callers strip the blocks for display via `tool_call::strip_tool_calls`.
+/// Malformed blocks are untrusted model output and simply parse to nothing.
 #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
 fn build_llm_response_envelope(
     output: crate::runtime_adapter::llm::GenerationOutput,
     backend_name: &str,
     cached_prefix: Option<usize>,
     image_preprocess_ms: Option<u32>,
+    tools_requested: bool,
 ) -> Envelope {
     let mut response_metadata = std::collections::HashMap::new();
     response_metadata.insert(
@@ -2681,9 +2994,29 @@ fn build_llm_response_envelope(
     insert_image_preprocess_metric(&mut response_metadata, image_preprocess_ms);
     mirror_llm_metrics_to_span(&output, backend_name, cached_prefix);
 
+    let mut emitted_tool_calls = false;
+    if tools_requested {
+        let calls = crate::runtime_adapter::tool_call::parse_tool_calls(&output.text);
+        if !calls.is_empty() {
+            emitted_tool_calls = true;
+            response_metadata.insert(
+                Envelope::TOOL_CALLS_METADATA_KEY.to_string(),
+                serde_json::to_string(&calls)
+                    .expect("ToolCall serialization cannot fail: all fields are JSON-native"),
+            );
+        }
+    }
+
     // Move `finish_reason` (no clone) now that the borrows of `output` above
-    // have completed.
-    response_metadata.insert("finish_reason".to_string(), output.finish_reason);
+    // have completed. A turn that emitted parseable tool calls canonicalizes
+    // to `"tool_calls"` (the documented OpenAI-shaped value) regardless of
+    // backend, so stream and batch consumers get one terminal contract.
+    let finish_reason = if emitted_tool_calls {
+        "tool_calls".to_string()
+    } else {
+        output.finish_reason
+    };
+    response_metadata.insert("finish_reason".to_string(), finish_reason);
 
     Envelope {
         kind: EnvelopeKind::Text(output.text),
@@ -2691,18 +3024,82 @@ fn build_llm_response_envelope(
     }
 }
 
-/// Build the generation config for the prompt-based LLM paths: an explicit
-/// config wins, otherwise fall back to envelope metadata (`max_tokens`,
-/// `temperature`), then defaults.
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+const REASONING_MAX_TOKENS_CEILING: usize = 3584;
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+const REASONING_PROMPT_HEADROOM: usize = 512;
+
+/// The generation config resolved when a caller passes no explicit config.
+///
+/// Template `generation_params` and the reasoning-budget floor are layered over
+/// global defaults. The think channel and the answer share one budget; the
+/// reasoning floor is a ceiling-bounded raise that leaves
+/// `REASONING_PROMPT_HEADROOM` tokens of prompt room inside the model's
+/// operational context and never drops below the global default.
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+pub fn model_default_gen_config(metadata: &ModelMetadata) -> GenerationConfig {
+    let (generation_params, context_length) = match &metadata.execution_template {
+        ExecutionTemplate::Gguf {
+            generation_params,
+            context_length,
+            ..
+        }
+        | ExecutionTemplate::VisionLanguage {
+            generation_params,
+            context_length,
+            ..
+        } => (generation_params.as_ref(), *context_length),
+        _ => (None, 0),
+    };
+
+    let mut cfg = GenerationConfig::default();
+    if let Some(params) = generation_params {
+        if let Some(max_tokens) = params.max_tokens {
+            cfg.max_tokens = max_tokens;
+        }
+        if let Some(temperature) = params.temperature {
+            cfg.temperature = temperature;
+        }
+        if let Some(top_p) = params.top_p {
+            cfg.top_p = top_p;
+        }
+        if let Some(top_k) = params.top_k {
+            cfg.top_k = top_k;
+        }
+        if let Some(repetition_penalty) = params.repetition_penalty {
+            cfg.repetition_penalty = repetition_penalty;
+        }
+        if !params.stop_sequences.is_empty() {
+            cfg.stop_sequences = params.stop_sequences.clone();
+        }
+    }
+
+    if generation_params
+        .and_then(|params| params.max_tokens)
+        .is_none()
+        && metadata_reasoning(metadata)
+    {
+        cfg.max_tokens = cfg.max_tokens.max(
+            REASONING_MAX_TOKENS_CEILING
+                .min(context_length.saturating_sub(REASONING_PROMPT_HEADROOM)),
+        );
+    }
+
+    cfg
+}
+
+/// Build the generation config for prompt-based LLM paths using explicit,
+/// envelope, template, reasoning, and global defaults in that precedence order.
 #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
 fn build_gen_config_from_input(
+    metadata: &ModelMetadata,
     input: &Envelope,
     config: Option<&GenerationConfig>,
 ) -> GenerationConfig {
     if let Some(cfg) = config {
         cfg.clone()
     } else {
-        let mut cfg = GenerationConfig::default();
+        let mut cfg = model_default_gen_config(metadata);
         if let Some(max_tokens) = input
             .metadata
             .get("max_tokens")
@@ -2723,6 +3120,8 @@ fn build_gen_config_from_input(
 
 #[cfg(test)]
 mod tests {
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    use super::super::template::GenerationParams;
     use super::super::template::PreprocessingStep;
     use super::*;
     use crate::ir::EnvelopeKind;
@@ -2746,13 +3145,270 @@ mod tests {
             decode_tps: None,
             prefill_tps: None,
             image_preprocess_ms: None,
+            reasoning_content: None,
+        }
+    }
+
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    fn test_model_metadata(execution_template: ExecutionTemplate) -> ModelMetadata {
+        ModelMetadata {
+            model_id: "test-model".to_string(),
+            version: "1.0".to_string(),
+            execution_template,
+            preprocessing: Vec::new(),
+            postprocessing: Vec::new(),
+            files: Vec::new(),
+            vision_encoder: None,
+            description: None,
+            metadata: HashMap::new(),
+            voices: None,
+            max_chunk_chars: None,
+            trim_trailing_samples: None,
         }
     }
 
     #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
     #[test]
+    fn model_default_gen_config_maps_all_template_generation_params() {
+        let metadata = test_model_metadata(ExecutionTemplate::Gguf {
+            model_file: "model.gguf".to_string(),
+            chat_template: None,
+            context_length: 4096,
+            generation_params: Some(GenerationParams {
+                max_tokens: Some(17),
+                temperature: Some(0.7),
+                top_p: Some(0.8),
+                top_k: Some(12),
+                repetition_penalty: Some(1.25),
+                stop_sequences: vec!["<end>".to_string()],
+            }),
+        });
+
+        let config = model_default_gen_config(&metadata);
+        let defaults = GenerationConfig::default();
+        assert_eq!(config.max_tokens, 17);
+        assert_eq!(config.temperature, 0.7);
+        assert_eq!(config.top_p, 0.8);
+        assert_eq!(config.top_k, 12);
+        assert_eq!(config.repetition_penalty, 1.25);
+        assert_eq!(config.stop_sequences, vec!["<end>".to_string()]);
+        assert_eq!(config.min_p, defaults.min_p);
+        assert_eq!(config.grammar, defaults.grammar);
+        assert!(config.tools.is_empty());
+    }
+
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[test]
+    fn model_default_gen_config_reasoning_floor_scales_with_context() {
+        for (context_length, expected_max_tokens) in
+            [(4096, 3584), (8192, 3584), (2560, 2048), (2048, 2048)]
+        {
+            let mut metadata = test_model_metadata(ExecutionTemplate::Gguf {
+                model_file: "model.gguf".to_string(),
+                chat_template: None,
+                context_length,
+                generation_params: None,
+            });
+            metadata
+                .metadata
+                .insert("reasoning".to_string(), serde_json::Value::Bool(true));
+
+            assert_eq!(
+                model_default_gen_config(&metadata).max_tokens,
+                expected_max_tokens
+            );
+        }
+    }
+
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[test]
+    fn model_default_gen_config_template_max_tokens_beats_reasoning_floor() {
+        let mut metadata = test_model_metadata(ExecutionTemplate::Gguf {
+            model_file: "model.gguf".to_string(),
+            chat_template: None,
+            context_length: 8192,
+            generation_params: Some(GenerationParams {
+                max_tokens: Some(64),
+                ..Default::default()
+            }),
+        });
+        metadata
+            .metadata
+            .insert("reasoning".to_string(), serde_json::Value::Bool(true));
+
+        assert_eq!(model_default_gen_config(&metadata).max_tokens, 64);
+    }
+
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[test]
+    fn model_default_gen_config_non_reasoning_keeps_default() {
+        let metadata = test_model_metadata(ExecutionTemplate::VisionLanguage {
+            model_file: "model.gguf".to_string(),
+            chat_template: None,
+            context_length: 4096,
+            generation_params: None,
+        });
+
+        assert_eq!(model_default_gen_config(&metadata).max_tokens, 2048);
+    }
+
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[test]
+    fn build_gen_config_from_input_envelope_beats_template() {
+        let metadata = test_model_metadata(ExecutionTemplate::Gguf {
+            model_file: "model.gguf".to_string(),
+            chat_template: None,
+            context_length: 4096,
+            generation_params: Some(GenerationParams {
+                max_tokens: Some(512),
+                temperature: Some(0.8),
+                ..Default::default()
+            }),
+        });
+        let mut input = Envelope::new(EnvelopeKind::Text("hello".to_string()));
+        input
+            .metadata
+            .insert("max_tokens".to_string(), "7".to_string());
+        input
+            .metadata
+            .insert("temperature".to_string(), "0.2".to_string());
+
+        let config = build_gen_config_from_input(&metadata, &input, None);
+        assert_eq!(config.max_tokens, 7);
+        assert_eq!(config.temperature, 0.2);
+    }
+
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[test]
+    fn build_gen_config_from_input_explicit_config_wins_whole_struct() {
+        let metadata = test_model_metadata(ExecutionTemplate::Gguf {
+            model_file: "model.gguf".to_string(),
+            chat_template: None,
+            context_length: 4096,
+            generation_params: Some(GenerationParams {
+                max_tokens: Some(512),
+                temperature: Some(0.8),
+                ..Default::default()
+            }),
+        });
+        let mut input = Envelope::new(EnvelopeKind::Text("hello".to_string()));
+        input
+            .metadata
+            .insert("max_tokens".to_string(), "7".to_string());
+        input
+            .metadata
+            .insert("temperature".to_string(), "0.2".to_string());
+
+        let explicit = GenerationConfig {
+            max_tokens: 99,
+            temperature: 0.37,
+            top_p: 0.42,
+            min_p: 0.11,
+            top_k: 17,
+            repetition_penalty: 1.4,
+            stop_sequences: vec!["stop".to_string()],
+            grammar: Some("root ::= \"ok\"".to_string()),
+            ..Default::default()
+        };
+
+        let config = build_gen_config_from_input(&metadata, &input, Some(&explicit));
+        assert_eq!(config.max_tokens, explicit.max_tokens);
+        assert_eq!(config.temperature, explicit.temperature);
+        assert_eq!(config.top_p, explicit.top_p);
+        assert_eq!(config.min_p, explicit.min_p);
+        assert_eq!(config.top_k, explicit.top_k);
+        assert_eq!(config.repetition_penalty, explicit.repetition_penalty);
+        assert_eq!(config.stop_sequences, explicit.stop_sequences);
+        assert_eq!(config.grammar, explicit.grammar);
+        assert!(config.tools.is_empty());
+    }
+
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[test]
+    fn template_generation_params_reach_backend_config() {
+        use std::sync::{Arc, Mutex};
+
+        struct StubBackend {
+            observed_max_tokens: Arc<Mutex<Option<usize>>>,
+        }
+
+        impl crate::runtime_adapter::LlmBackend for StubBackend {
+            fn name(&self) -> &str {
+                "stub"
+            }
+
+            fn supported_formats(&self) -> Vec<&'static str> {
+                vec!["gguf"]
+            }
+
+            fn load(&mut self, _config: &crate::runtime_adapter::LlmConfig) -> ExecutorResult<()> {
+                Ok(())
+            }
+
+            fn is_loaded(&self) -> bool {
+                true
+            }
+
+            fn unload(&mut self) -> ExecutorResult<()> {
+                Ok(())
+            }
+
+            fn generate(
+                &self,
+                _messages: &[crate::runtime_adapter::ChatMessage],
+                config: &GenerationConfig,
+            ) -> ExecutorResult<crate::runtime_adapter::GenerationOutput> {
+                *self.observed_max_tokens.lock().unwrap() = Some(config.max_tokens);
+                Ok(sample_generation_output(1))
+            }
+
+            fn generate_raw(
+                &self,
+                _prompt: &str,
+                _config: &GenerationConfig,
+            ) -> ExecutorResult<crate::runtime_adapter::GenerationOutput> {
+                unreachable!("the text-only VisionLanguage path uses ChatMessages")
+            }
+
+            fn generate_multimodal(
+                &self,
+                _messages: &[crate::runtime_adapter::MultimodalChatMessage],
+                _config: &GenerationConfig,
+            ) -> ExecutorResult<crate::runtime_adapter::GenerationOutput> {
+                unreachable!("the text-only VisionLanguage path uses ChatMessages")
+            }
+        }
+
+        let metadata = test_model_metadata(ExecutionTemplate::VisionLanguage {
+            model_file: "model.gguf".to_string(),
+            chat_template: None,
+            context_length: 4096,
+            generation_params: Some(GenerationParams {
+                max_tokens: Some(7),
+                ..Default::default()
+            }),
+        });
+        let input = Envelope::user_message("Reply briefly.", vec![]).unwrap();
+        let observed_max_tokens = Arc::new(Mutex::new(None));
+        let mut executor = TemplateExecutor::with_base_path("/models");
+        executor.llm_adapter_cache = Some((
+            LlmAdapterCacheKey::new("/models/model.gguf".to_string(), None, 4096, None, None),
+            crate::runtime_adapter::LlmRuntimeAdapter::with_backend(Box::new(StubBackend {
+                observed_max_tokens: observed_max_tokens.clone(),
+            })),
+        ));
+
+        executor
+            .execute(&metadata, &input, None)
+            .expect("template generation parameters must reach the backend");
+        assert_eq!(*observed_max_tokens.lock().unwrap(), Some(7));
+    }
+
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[test]
     fn build_llm_response_envelope_text_path_omits_image_metric() {
-        let env = build_llm_response_envelope(sample_generation_output(7), "llamacpp", None, None);
+        let env =
+            build_llm_response_envelope(sample_generation_output(7), "llamacpp", None, None, false);
         match &env.kind {
             EnvelopeKind::Text(t) => assert_eq!(t, "hello"),
             _ => panic!("expected a text envelope"),
@@ -2774,12 +3430,167 @@ mod tests {
     #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
     #[test]
     fn build_llm_response_envelope_multimodal_path_stamps_image_metric() {
-        let env =
-            build_llm_response_envelope(sample_generation_output(7), "llamacpp", None, Some(42));
+        let env = build_llm_response_envelope(
+            sample_generation_output(7),
+            "llamacpp",
+            None,
+            Some(42),
+            false,
+        );
         assert_eq!(
             env.metadata.get("image_preprocess_ms").map(String::as_str),
             Some("42"),
             "multimodal paths must surface the image-preprocess timing"
+        );
+    }
+
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[test]
+    fn build_llm_response_envelope_parses_tool_calls_when_tools_requested() {
+        let mut output = sample_generation_output(7);
+        output.text =
+            "checking<|tool_call_start|>[get_temperature(room=\"kitchen\")]<|tool_call_end|>"
+                .to_string();
+        let env = build_llm_response_envelope(output, "llamacpp", None, None, true);
+
+        let raw = env
+            .metadata
+            .get("tool_calls")
+            .expect("tools_requested with a call block must stamp tool_calls metadata");
+        let calls: Vec<crate::gateway::ToolCall> = serde_json::from_str(raw).unwrap();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].id, "call_0");
+        assert_eq!(calls[0].function.name, "get_temperature");
+        assert_eq!(
+            env.metadata.get("finish_reason").map(String::as_str),
+            Some("tool_calls"),
+            "tools_requested plus parsed calls must canonicalize finish_reason"
+        );
+        // The answer text keeps the raw block — display stripping is the
+        // caller's choice via `tool_call::strip_tool_calls`.
+        match &env.kind {
+            EnvelopeKind::Text(t) => assert!(t.contains("<|tool_call_start|>")),
+            _ => panic!("expected a text envelope"),
+        }
+    }
+
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[test]
+    fn build_llm_response_envelope_omits_tool_calls_when_none_emitted() {
+        let mut output = sample_generation_output(7);
+        output.finish_reason = "length".to_string();
+        let env = build_llm_response_envelope(output, "llamacpp", None, None, true);
+        assert!(
+            !env.metadata.contains_key("tool_calls"),
+            "a tools-bearing request whose output has no call block stamps nothing"
+        );
+        assert_eq!(
+            env.metadata.get("finish_reason").map(String::as_str),
+            Some("length"),
+            "tools_requested without parsed calls must preserve backend finish_reason"
+        );
+    }
+
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[test]
+    fn tool_continuation_envelopes_are_rejected_on_unsupported_paths() {
+        let envelope = crate::ir::Envelope::tool_results(
+            "user text",
+            "prior assistant text",
+            &[crate::ir::ToolCallResult {
+                call_id: "call_0".to_string(),
+                name: "f".to_string(),
+                content: serde_json::json!({"ok": true}),
+            }],
+        );
+        let err = reject_tool_continuation_input(&envelope, "streaming").unwrap_err();
+        assert!(
+            matches!(err, AdapterError::InvalidInput(ref msg) if msg.contains("streaming")),
+            "continuation envelopes must be rejected loudly, got: {err:?}"
+        );
+
+        // A plain envelope passes through untouched.
+        let plain = crate::ir::Envelope::new(EnvelopeKind::Text("hi".to_string()));
+        assert!(reject_tool_continuation_input(&plain, "streaming").is_ok());
+    }
+
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[test]
+    fn execute_with_context_rejects_tool_continuation_envelopes() {
+        // The context path does not compose continuations (v1) — it must
+        // fail closed rather than silently drop the tool results and answer
+        // the replayed user text as a fresh question.
+        let metadata = ModelMetadata {
+            model_id: "test-llm".into(),
+            version: "1".into(),
+            execution_template: ExecutionTemplate::Gguf {
+                model_file: "model.gguf".into(),
+                chat_template: None,
+                context_length: 2048,
+                generation_params: None,
+            },
+            preprocessing: Vec::new(),
+            postprocessing: Vec::new(),
+            files: Vec::new(),
+            vision_encoder: None,
+            description: None,
+            metadata: std::collections::HashMap::new(),
+            voices: None,
+            max_chunk_chars: None,
+            trim_trailing_samples: None,
+        };
+        let envelope = crate::ir::Envelope::tool_results(
+            "user text",
+            "prior assistant text",
+            &[crate::ir::ToolCallResult {
+                call_id: "call_0".to_string(),
+                name: "f".to_string(),
+                content: serde_json::json!({"ok": true}),
+            }],
+        );
+        let context = crate::conversation::ConversationContext::new();
+
+        let mut executor = TemplateExecutor::default();
+        let err = executor
+            .execute_with_context(&metadata, &envelope, &context, None)
+            .unwrap_err();
+        assert!(
+            matches!(err, AdapterError::InvalidInput(ref msg) if msg.contains("context")),
+            "context path must reject continuation envelopes, got: {err:?}"
+        );
+
+        let streaming_err = executor
+            .execute_streaming_with_context(
+                &metadata,
+                &envelope,
+                &context,
+                Box::new(|_| Ok(())),
+                None,
+            )
+            .unwrap_err();
+        assert!(
+            matches!(streaming_err, AdapterError::InvalidInput(ref msg) if msg.contains("streaming context")),
+            "streaming context path must reject continuation envelopes, got: {streaming_err:?}"
+        );
+    }
+
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[test]
+    fn build_llm_response_envelope_skips_tool_parse_when_tools_not_requested() {
+        let mut output = sample_generation_output(7);
+        output.finish_reason = "length".to_string();
+        output.text =
+            "prose<|tool_call_start|>[get_temperature(room=\"kitchen\")]<|tool_call_end|>"
+                .to_string();
+        let env = build_llm_response_envelope(output, "llamacpp", None, None, false);
+        assert!(
+            !env.metadata.contains_key("tool_calls"),
+            "tool-call parsing only runs when the request offered tools"
+        );
+        assert_eq!(
+            env.metadata.get("finish_reason").map(String::as_str),
+            Some("length"),
+            "tools-off requests must preserve backend finish_reason even if text contains markers"
         );
     }
 
@@ -2955,6 +3766,220 @@ mod tests {
         assert!(message.contains("does not support vision input"));
         assert!(!message.contains("not wired"));
         assert!(!message.contains("missing-model.gguf"));
+    }
+
+    /// Regression test: a text-only `MultiPart` envelope (e.g. built via
+    /// `Envelope::user_message(text, vec![])`) sent to a VisionLanguage
+    /// model must dispatch through the plain LLM ChatMessages path, not
+    /// `reject_text_only_model_image_input` — which used to bar every
+    /// `MultiPart` envelope regardless of whether it actually carried an
+    /// image, producing a misleading `UnsupportedModelCapability("image
+    /// input")` error for pure text.
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[test]
+    fn vision_language_multipart_text_only_dispatches_to_llm_path() {
+        use crate::execution::template::{VisionEncoderConfig, VisionPreprocessingPreset};
+        use std::sync::{Arc, Mutex};
+
+        struct StubTextOnlyBackend {
+            observed_messages: Arc<Mutex<Option<Vec<crate::runtime_adapter::ChatMessage>>>>,
+            observed_max_tokens: Arc<Mutex<Option<usize>>>,
+        }
+
+        impl crate::runtime_adapter::LlmBackend for StubTextOnlyBackend {
+            fn name(&self) -> &str {
+                "stub-text-only"
+            }
+
+            fn supported_formats(&self) -> Vec<&'static str> {
+                vec!["gguf"]
+            }
+
+            fn load(&mut self, _config: &crate::runtime_adapter::LlmConfig) -> ExecutorResult<()> {
+                Ok(())
+            }
+
+            fn is_loaded(&self) -> bool {
+                true
+            }
+
+            fn unload(&mut self) -> ExecutorResult<()> {
+                Ok(())
+            }
+
+            fn generate(
+                &self,
+                messages: &[crate::runtime_adapter::ChatMessage],
+                config: &GenerationConfig,
+            ) -> ExecutorResult<crate::runtime_adapter::GenerationOutput> {
+                *self.observed_messages.lock().unwrap() = Some(messages.to_vec());
+                *self.observed_max_tokens.lock().unwrap() = Some(config.max_tokens);
+                Ok(sample_generation_output(1))
+            }
+
+            fn generate_raw(
+                &self,
+                _prompt: &str,
+                _config: &GenerationConfig,
+            ) -> ExecutorResult<crate::runtime_adapter::GenerationOutput> {
+                unreachable!("text-only MultiPart dispatch uses the ChatMessages entry point")
+            }
+
+            fn generate_multimodal(
+                &self,
+                _messages: &[crate::runtime_adapter::MultimodalChatMessage],
+                _config: &GenerationConfig,
+            ) -> ExecutorResult<crate::runtime_adapter::GenerationOutput> {
+                unreachable!("text-only MultiPart must not reach the multimodal backend path")
+            }
+        }
+
+        let metadata = ModelMetadata {
+            model_id: "vlm-text-only-multipart".to_string(),
+            version: "1.0".to_string(),
+            execution_template: ExecutionTemplate::VisionLanguage {
+                model_file: "model.gguf".to_string(),
+                chat_template: None,
+                context_length: 4096,
+                generation_params: None,
+            },
+            preprocessing: vec![],
+            postprocessing: vec![],
+            files: vec!["model.gguf".to_string(), "mmproj.gguf".to_string()],
+            vision_encoder: Some(VisionEncoderConfig {
+                file: "mmproj.gguf".to_string(),
+                preprocessing_preset: VisionPreprocessingPreset::SigLip,
+                image_size: 512,
+                patch_size: Some(16),
+            }),
+            description: None,
+            metadata: HashMap::new(),
+            voices: None,
+            max_chunk_chars: None,
+            trim_trailing_samples: None,
+        };
+
+        // No image attachments: still a `MultiPart` envelope (single text part).
+        // Envelope-level metadata (system_prompt, max_tokens) must survive the
+        // MultiPart→ChatMessages conversion exactly like the flat-Text path.
+        let mut input = Envelope::user_message("Reply with exactly one word.", vec![]).unwrap();
+        input
+            .metadata
+            .insert("system_prompt".to_string(), "You are terse.".to_string());
+        input
+            .metadata
+            .insert("max_tokens".to_string(), "7".to_string());
+
+        let observed_messages = Arc::new(Mutex::new(None));
+        let observed_max_tokens = Arc::new(Mutex::new(None));
+        let mut executor = TemplateExecutor::with_base_path("/models");
+        executor.llm_adapter_cache = Some((
+            LlmAdapterCacheKey::new("/models/model.gguf".to_string(), None, 4096, None, None),
+            crate::runtime_adapter::LlmRuntimeAdapter::with_backend(Box::new(
+                StubTextOnlyBackend {
+                    observed_messages: observed_messages.clone(),
+                    observed_max_tokens: observed_max_tokens.clone(),
+                },
+            )),
+        ));
+
+        let output = executor
+            .execute(&metadata, &input, None)
+            .expect("text-only MultiPart must dispatch to the LLM path, not error out");
+
+        assert_eq!(output.kind, EnvelopeKind::Text("hello".to_string()));
+        let messages = observed_messages
+            .lock()
+            .unwrap()
+            .clone()
+            .expect("stub backend generate() must have been called");
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[0].role, crate::ir::MessageRole::System);
+        assert_eq!(messages[0].content, "You are terse.");
+        assert_eq!(messages[1].content, "Reply with exactly one word.");
+        assert_eq!(
+            *observed_max_tokens.lock().unwrap(),
+            Some(7),
+            "envelope max_tokens metadata must reach the generation config"
+        );
+    }
+
+    /// Nested tool-continuation metadata (a `tool_results` envelope wrapped in
+    /// `MultiPart`) must be rejected, not flattened into plain text — the
+    /// ChatMessages paths cannot compose the continuation prompt, and silently
+    /// dropping the tool results would produce a plausible but wrong answer.
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[test]
+    fn vision_language_multipart_nested_tool_continuation_is_rejected() {
+        use crate::execution::template::{VisionEncoderConfig, VisionPreprocessingPreset};
+
+        let metadata = ModelMetadata {
+            model_id: "vlm-nested-tool".to_string(),
+            version: "1.0".to_string(),
+            execution_template: ExecutionTemplate::VisionLanguage {
+                model_file: "model.gguf".to_string(),
+                chat_template: None,
+                context_length: 4096,
+                generation_params: None,
+            },
+            preprocessing: vec![],
+            postprocessing: vec![],
+            files: vec!["model.gguf".to_string(), "mmproj.gguf".to_string()],
+            vision_encoder: Some(VisionEncoderConfig {
+                file: "mmproj.gguf".to_string(),
+                preprocessing_preset: VisionPreprocessingPreset::SigLip,
+                image_size: 512,
+                patch_size: Some(16),
+            }),
+            description: None,
+            metadata: HashMap::new(),
+            voices: None,
+            max_chunk_chars: None,
+            trim_trailing_samples: None,
+        };
+
+        let mut tool_part = Envelope::new(EnvelopeKind::Text("tool output".to_string()));
+        tool_part.metadata.insert(
+            Envelope::TOOL_RESPONSES_METADATA_KEY.to_string(),
+            "[]".to_string(),
+        );
+        let input = Envelope::new(EnvelopeKind::MultiPart(vec![tool_part.clone()]));
+
+        let mut executor = TemplateExecutor::with_base_path("/models");
+        let err = executor
+            .execute(&metadata, &input, None)
+            .expect_err("nested tool-continuation MultiPart must be rejected");
+        assert!(
+            err.to_string().contains("tool-result continuation"),
+            "unexpected error: {err}"
+        );
+
+        // Image-bearing MultiPart takes the batch vision path, which handles
+        // OUTER continuations itself — nested ones must still be rejected
+        // there too (symmetric with the streaming guard), not silently
+        // flattened away by the multimodal conversion.
+        let image_bytes = {
+            let image = image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(
+                1,
+                1,
+                image::Rgb([1, 2, 3]),
+            ));
+            let mut encoded = std::io::Cursor::new(Vec::new());
+            image
+                .write_to(&mut encoded, image::ImageFormat::Png)
+                .expect("test image encodes");
+            encoded.into_inner()
+        };
+        let image_part = Envelope::image(image_bytes, "png").unwrap();
+        let vision_input = Envelope::new(EnvelopeKind::MultiPart(vec![image_part, tool_part]));
+
+        let err = executor
+            .execute(&metadata, &vision_input, None)
+            .expect_err("nested tool-continuation in image-bearing MultiPart must be rejected");
+        assert!(
+            err.to_string().contains("tool-result continuation"),
+            "unexpected error: {err}"
+        );
     }
 
     #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp-vision"))]
@@ -3473,6 +4498,7 @@ mod tests {
                     decode_tps: None,
                     prefill_tps: None,
                     image_preprocess_ms: None,
+                    reasoning_content: None,
                 })
             }
         }
@@ -3579,6 +4605,59 @@ mod tests {
         assert!(
             image_preprocess_ms.is_some_and(|value| value > 0),
             "vision encoder span must carry positive image_preprocess_ms, got {vision_encoder_metadata:?}"
+        );
+    }
+
+    #[test]
+    fn vision_language_text_input_does_not_require_multimodal_generation() {
+        let input = Envelope::new(EnvelopeKind::Text(
+            "Reply with exactly one word.".to_string(),
+        ));
+
+        assert!(
+            !TemplateExecutor::requires_multimodal_generation(&input),
+            "text-only VLM input must use text generation without loading the vision projector"
+        );
+    }
+
+    #[test]
+    fn vision_language_multipart_text_only_does_not_require_multimodal_generation() {
+        // `Envelope::user_message` with no image attachments still produces
+        // `EnvelopeKind::MultiPart` (a single text part) — regression guard
+        // for the bug where such envelopes were mistaken for image-bearing
+        // input and routed into `reject_text_only_model_image_input`.
+        let input = Envelope::user_message("Reply with exactly one word.", vec![]).unwrap();
+
+        assert!(
+            matches!(input.kind, EnvelopeKind::MultiPart(_)),
+            "user_message with no images must still produce a MultiPart envelope"
+        );
+        assert!(
+            !TemplateExecutor::requires_multimodal_generation(&input),
+            "text-only MultiPart input must not require multimodal generation"
+        );
+    }
+
+    #[test]
+    fn vision_language_multipart_with_image_requires_multimodal_generation() {
+        let image_bytes = {
+            let image = image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(
+                1,
+                1,
+                image::Rgb([17, 34, 51]),
+            ));
+            let mut encoded = std::io::Cursor::new(Vec::new());
+            image
+                .write_to(&mut encoded, image::ImageFormat::Png)
+                .expect("test image encodes");
+            encoded.into_inner()
+        };
+        let image = Envelope::image(image_bytes, "png").unwrap();
+        let input = Envelope::user_message("Describe this image", vec![image]).unwrap();
+
+        assert!(
+            TemplateExecutor::requires_multimodal_generation(&input),
+            "MultiPart input carrying a nested image part must require multimodal generation"
         );
     }
 

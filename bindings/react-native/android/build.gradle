@@ -47,7 +47,7 @@ android {
     minSdkVersion safeExtGet("minSdkVersion", 24)
     targetSdkVersion safeExtGet("targetSdkVersion", 34)
 
-    // ABIs match what `cargo xtask build-android` produces.
+    // ABIs match what the Bazel AAR (//bindings/kotlin:xybrid_kotlin_aar) ships.
     ndk {
       abiFilters "armeabi-v7a", "arm64-v8a", "x86_64"
     }
@@ -91,5 +91,5 @@ dependencies {
   // native layer over JNI directly, so there is no JNA dependency (unlike
   // the previous uniffi binding). Keep this version in lockstep with the
   // workspace SDK version (bindings/kotlin/build.gradle.kts `version`).
-  implementation "ai.xybrid:xybrid-kotlin:0.2.1"
+  implementation "ai.xybrid:xybrid-kotlin:0.4.0"
 }

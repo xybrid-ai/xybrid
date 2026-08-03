@@ -7,6 +7,7 @@ use super::steps::{PostprocessingStep, PreprocessingStep};
 use super::voice::{VoiceConfig, VoiceInfo};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::num::NonZeroUsize;
 
 #[cfg(feature = "schema")]
 use schemars::JsonSchema;
@@ -56,6 +57,15 @@ pub enum ExecutionTemplate {
     TfLite {
         /// Path to the TFLite model file
         model_file: String,
+    },
+
+    /// LiteRT-LM model execution (browser SDK / @xybrid/web only)
+    LiteRtLm {
+        /// Path to the .litertlm model file (relative to bundle root)
+        model_file: String,
+        /// Maximum context length (tokens); engine default when absent
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        context_length: Option<NonZeroUsize>,
     },
 
     /// Multi-model graph execution (DAG of models)
@@ -452,6 +462,21 @@ impl ModelMetadata {
         self
     }
 
+    /// Whether the bundle declares local tool-calling support, per the
+    /// optional `tool_calling` metadata flag.
+    ///
+    /// Advisory tri-state: `None` means the bundle says nothing (never
+    /// guessed from architecture or template contents), `Some(true)` /
+    /// `Some(false)` are explicit declarations. Enforcement stays at run
+    /// time — a tools-bearing request against a model whose template cannot
+    /// render tools fails with invalid input regardless of this flag. Apps
+    /// use it to gate tool UI before downloading/loading weights.
+    pub fn supports_tool_calling(&self) -> Option<bool> {
+        self.metadata
+            .get("tool_calling")
+            .and_then(serde_json::Value::as_bool)
+    }
+
     /// Get the voice configuration if this is a TTS model with voices.
     pub fn voice_config(&self) -> Option<&VoiceConfig> {
         self.voices.as_ref()
@@ -617,6 +642,7 @@ pub fn backend_label_from_template(
             .or(Some("llamacpp")),
         ExecutionTemplate::CoreMl { .. }
         | ExecutionTemplate::TfLite { .. }
+        | ExecutionTemplate::LiteRtLm { .. }
         | ExecutionTemplate::ModelGraph { .. } => None,
     }
 }
@@ -681,6 +707,7 @@ pub fn quantization_label_from_metadata(metadata: &ModelMetadata) -> Option<Stri
     let model_file = match &metadata.execution_template {
         ExecutionTemplate::Gguf { model_file, .. } => Some(model_file),
         ExecutionTemplate::VisionLanguage { model_file, .. } => Some(model_file),
+        ExecutionTemplate::LiteRtLm { model_file, .. } => Some(model_file),
         _ => None,
     };
     if let Some(model_file) = model_file {
@@ -746,6 +773,7 @@ pub fn span_kind_from_template(template: &ExecutionTemplate) -> &'static str {
         }
         ExecutionTemplate::Onnx { .. }
         | ExecutionTemplate::TfLite { .. }
+        | ExecutionTemplate::LiteRtLm { .. }
         | ExecutionTemplate::ModelGraph { .. } => "cpu",
     }
 }
@@ -774,6 +802,107 @@ mod tests {
     }
 
     #[test]
+    fn test_litertlm_deserialization_with_context_length() {
+        let template: ExecutionTemplate = serde_json::from_str(
+            r#"{"type":"LiteRtLm","model_file":"SmolLM2_135M_Instruct.litertlm","context_length":2048}"#,
+        )
+        .unwrap();
+
+        match template {
+            ExecutionTemplate::LiteRtLm {
+                model_file,
+                context_length,
+            } => {
+                assert_eq!(model_file, "SmolLM2_135M_Instruct.litertlm");
+                assert_eq!(context_length.map(|value| value.get()), Some(2048));
+            }
+            other => panic!("expected LiteRtLm, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_litertlm_deserialization_without_context_length() {
+        let template: ExecutionTemplate =
+            serde_json::from_str(r#"{"type":"LiteRtLm","model_file":"model.litertlm"}"#).unwrap();
+
+        match template {
+            ExecutionTemplate::LiteRtLm { context_length, .. } => {
+                assert_eq!(context_length, None);
+            }
+            other => panic!("expected LiteRtLm, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_litertlm_deserialization_rejects_zero_context_length() {
+        let result: Result<ExecutionTemplate, _> = serde_json::from_str(
+            r#"{"type":"LiteRtLm","model_file":"model.litertlm","context_length":0}"#,
+        );
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_litertlm_serialization_round_trip() {
+        let template = ExecutionTemplate::LiteRtLm {
+            model_file: "model.litertlm".to_string(),
+            context_length: Some(NonZeroUsize::new(2048).unwrap()),
+        };
+        let json = serde_json::to_string(&template).unwrap();
+        assert!(json.contains("\"type\":\"LiteRtLm\""));
+
+        let parsed: ExecutionTemplate = serde_json::from_str(&json).unwrap();
+        assert!(matches!(parsed, ExecutionTemplate::LiteRtLm { .. }));
+    }
+
+    #[test]
+    fn test_litertlm_serialization_omits_unset_context_length() {
+        let template = ExecutionTemplate::LiteRtLm {
+            model_file: "model.litertlm".to_string(),
+            context_length: None,
+        };
+
+        let value = serde_json::to_value(template).unwrap();
+
+        assert!(value.get("context_length").is_none());
+    }
+
+    #[test]
+    fn test_litertlm_serialization_matches_web_fixture() {
+        let metadata = ModelMetadata {
+            model_id: "litertlm-contract-fixture".to_string(),
+            version: "1.0".to_string(),
+            execution_template: ExecutionTemplate::LiteRtLm {
+                model_file: "model.litertlm".to_string(),
+                context_length: Some(NonZeroUsize::new(4096).unwrap()),
+            },
+            preprocessing: Vec::new(),
+            postprocessing: Vec::new(),
+            files: vec!["model.litertlm".to_string()],
+            vision_encoder: None,
+            description: None,
+            metadata: HashMap::new(),
+            voices: None,
+            max_chunk_chars: None,
+            trim_trailing_samples: None,
+        };
+        let serialized: serde_json::Value =
+            serde_json::from_str(&serde_json::to_string(&metadata).unwrap()).unwrap();
+        // Resolve the manifest dir at RUNTIME, not via `env!`. The compile-time
+        // value is baked into the binary and does not point anywhere useful when
+        // the test runs in a sandbox; the runtime variable is set by both cargo
+        // and Bazel. Same mechanism `testing::model_fixtures` already uses.
+        let manifest_dir =
+            std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR is set for tests");
+        let fixture_path = std::path::PathBuf::from(manifest_dir)
+            .join("../../bindings/web/test/fixtures/rust-metadata-litertlm.json");
+        let fixture: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(fixture_path).unwrap()).unwrap();
+
+        assert_eq!(serialized, fixture);
+    }
+
+    #[test]
     fn test_execution_modes() {
         let autoregressive = ExecutionMode::Autoregressive {
             max_tokens: 100,
@@ -789,6 +918,43 @@ mod tests {
             ExecutionMode::Autoregressive { max_tokens, .. } => assert_eq!(max_tokens, 100),
             _ => panic!("Expected autoregressive mode"),
         }
+    }
+
+    #[test]
+    fn supports_tool_calling_returns_none_when_absent() {
+        let metadata = ModelMetadata::onnx("test-model", "1.0", "model.onnx");
+
+        assert_eq!(metadata.supports_tool_calling(), None);
+    }
+
+    #[test]
+    fn supports_tool_calling_returns_true_when_declared_true() {
+        let mut metadata = ModelMetadata::onnx("test-model", "1.0", "model.onnx");
+        metadata
+            .metadata
+            .insert("tool_calling".into(), serde_json::json!(true));
+
+        assert_eq!(metadata.supports_tool_calling(), Some(true));
+    }
+
+    #[test]
+    fn supports_tool_calling_returns_false_when_declared_false() {
+        let mut metadata = ModelMetadata::onnx("test-model", "1.0", "model.onnx");
+        metadata
+            .metadata
+            .insert("tool_calling".into(), serde_json::json!(false));
+
+        assert_eq!(metadata.supports_tool_calling(), Some(false));
+    }
+
+    #[test]
+    fn supports_tool_calling_returns_none_for_non_bool_value() {
+        let mut metadata = ModelMetadata::onnx("test-model", "1.0", "model.onnx");
+        metadata
+            .metadata
+            .insert("tool_calling".into(), serde_json::json!("yes"));
+
+        assert_eq!(metadata.supports_tool_calling(), None);
     }
 
     #[test]

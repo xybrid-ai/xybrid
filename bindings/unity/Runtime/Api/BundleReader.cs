@@ -1,9 +1,7 @@
 // Xybrid SDK - BundleReader
-// Reads .xyb bundle files (tar + zstd) via the native library.
+// Reads .xyb bundle files (tar + zstd) via the bolt native library.
 
 using System;
-using System.Runtime.InteropServices;
-using Xybrid.Native;
 
 namespace Xybrid
 {
@@ -42,7 +40,7 @@ namespace Xybrid
     /// </example>
     public sealed class BundleReader : IDisposable
     {
-        private unsafe XybridBundleHandle* _handle;
+        private XybridBolt.XybridBundle _bundle;
         private bool _disposed;
 
         // Cached manifest fields
@@ -88,27 +86,17 @@ namespace Xybrid
         /// </summary>
         public bool IsDisposed => _disposed;
 
-        private unsafe BundleReader(XybridBundleHandle* handle)
+        private BundleReader(XybridBolt.XybridBundle bundle)
         {
-            _handle = handle;
+            _bundle = bundle;
 
-            // Cache all manifest fields so they survive handle disposal
-            byte* ptr;
-
-            ptr = NativeMethods.xybrid_bundle_model_id(handle);
-            _modelId = NativeHelpers.FromUtf8Ptr(ptr) ?? "unknown";
-
-            ptr = NativeMethods.xybrid_bundle_version(handle);
-            _version = NativeHelpers.FromUtf8Ptr(ptr) ?? "0.0.0";
-
-            ptr = NativeMethods.xybrid_bundle_target(handle);
-            _target = NativeHelpers.FromUtf8Ptr(ptr) ?? "unknown";
-
-            ptr = NativeMethods.xybrid_bundle_hash(handle);
-            _hash = NativeHelpers.FromUtf8Ptr(ptr) ?? "";
-
-            _hasMetadata = NativeMethods.xybrid_bundle_has_metadata(handle) != 0;
-            _fileCount = NativeMethods.xybrid_bundle_file_count(handle);
+            // Cache all manifest fields so they survive handle disposal.
+            _modelId = bundle.ModelId();
+            _version = bundle.Version();
+            _target = bundle.Target();
+            _hash = bundle.Hash();
+            _hasMetadata = bundle.HasMetadata();
+            _fileCount = bundle.FileCount();
         }
 
         /// <summary>
@@ -118,20 +106,38 @@ namespace Xybrid
         /// <returns>A BundleReader for inspecting the bundle.</returns>
         /// <exception cref="ArgumentNullException">Thrown if path is null.</exception>
         /// <exception cref="XybridException">Thrown if the bundle cannot be opened.</exception>
-        public static unsafe BundleReader Open(string path)
+        public static BundleReader Open(string path)
         {
             if (path == null)
                 throw new ArgumentNullException(nameof(path));
 
-            fixed (byte* pathBytes = NativeHelpers.ToUtf8Bytes(path))
+            XybridBolt.XybridBundle bundle;
+            try
             {
-                XybridBundleHandle* handle = NativeMethods.xybrid_bundle_open(pathBytes);
-                if (handle == null)
-                {
-                    NativeHelpers.ThrowLastError("Failed to open bundle");
-                }
+                bundle = XybridBolt.XybridBundle.Open(path);
+            }
+            catch (Exception ex) when (
+                ex is XybridBolt.XybridErrorException || ex is XybridBolt.BoltException)
+            {
+                throw BoltErrors.Translate(ex);
+            }
 
-                return new BundleReader(handle);
+            // The ctor issues native calls to cache the manifest fields. If any
+            // throws, dispose the opened bundle so its native handle doesn't leak,
+            // then surface the failure (translated to XybridException like Open's
+            // own errors).
+            try
+            {
+                return new BundleReader(bundle);
+            }
+            catch (Exception ex)
+            {
+                bundle.Dispose();
+                if (ex is XybridBolt.XybridErrorException || ex is XybridBolt.BoltException)
+                {
+                    throw BoltErrors.Translate(ex);
+                }
+                throw;
             }
         }
 
@@ -141,25 +147,19 @@ namespace Xybrid
         /// <returns>The metadata JSON string, or null if the bundle has no model_metadata.json.</returns>
         /// <exception cref="ObjectDisposedException">Thrown if this reader is disposed.</exception>
         /// <exception cref="XybridException">Thrown if reading metadata fails.</exception>
-        public unsafe string GetMetadataJson()
+        public string GetMetadataJson()
         {
             ThrowIfDisposed();
 
-            byte* ptr = NativeMethods.xybrid_bundle_metadata_json(_handle);
-            if (ptr == null)
+            try
             {
-                // Distinguish "not present" from error
-                string error = NativeHelpers.GetLastError();
-                if (error != null && error != "Unknown error")
-                {
-                    throw new XybridException($"Failed to read metadata: {error}");
-                }
-                return null;
+                return _bundle.MetadataJson();
             }
-
-            string json = NativeHelpers.FromUtf8Ptr(ptr);
-            NativeMethods.xybrid_free_string(ptr);
-            return json;
+            catch (Exception ex) when (
+                ex is XybridBolt.XybridErrorException || ex is XybridBolt.BoltException)
+            {
+                throw BoltErrors.Translate(ex);
+            }
         }
 
         /// <summary>
@@ -168,19 +168,19 @@ namespace Xybrid
         /// <returns>The manifest JSON string.</returns>
         /// <exception cref="ObjectDisposedException">Thrown if this reader is disposed.</exception>
         /// <exception cref="XybridException">Thrown if reading manifest fails.</exception>
-        public unsafe string GetManifestJson()
+        public string GetManifestJson()
         {
             ThrowIfDisposed();
 
-            byte* ptr = NativeMethods.xybrid_bundle_manifest_json(_handle);
-            if (ptr == null)
+            try
             {
-                NativeHelpers.ThrowLastError("Failed to read manifest");
+                return _bundle.ManifestJson();
             }
-
-            string json = NativeHelpers.FromUtf8Ptr(ptr);
-            NativeMethods.xybrid_free_string(ptr);
-            return json;
+            catch (Exception ex) when (
+                ex is XybridBolt.XybridErrorException || ex is XybridBolt.BoltException)
+            {
+                throw BoltErrors.Translate(ex);
+            }
         }
 
         /// <summary>
@@ -189,12 +189,10 @@ namespace Xybrid
         /// <param name="index">Zero-based index into the file list.</param>
         /// <returns>The filename, or null if index is out of bounds.</returns>
         /// <exception cref="ObjectDisposedException">Thrown if this reader is disposed.</exception>
-        public unsafe string GetFileName(uint index)
+        public string GetFileName(uint index)
         {
             ThrowIfDisposed();
-
-            byte* ptr = NativeMethods.xybrid_bundle_file_name(_handle, index);
-            return NativeHelpers.FromUtf8Ptr(ptr);
+            return _bundle.FileName(index);
         }
 
         /// <summary>
@@ -221,20 +219,21 @@ namespace Xybrid
         /// <exception cref="ArgumentNullException">Thrown if outputDir is null.</exception>
         /// <exception cref="ObjectDisposedException">Thrown if this reader is disposed.</exception>
         /// <exception cref="XybridException">Thrown if extraction fails.</exception>
-        public unsafe void ExtractTo(string outputDir)
+        public void ExtractTo(string outputDir)
         {
             ThrowIfDisposed();
 
             if (outputDir == null)
                 throw new ArgumentNullException(nameof(outputDir));
 
-            fixed (byte* dirBytes = NativeHelpers.ToUtf8Bytes(outputDir))
+            try
             {
-                int result = NativeMethods.xybrid_bundle_extract(_handle, dirBytes);
-                if (result != 0)
-                {
-                    NativeHelpers.ThrowLastError("Failed to extract bundle");
-                }
+                _bundle.Extract(outputDir);
+            }
+            catch (Exception ex) when (
+                ex is XybridBolt.XybridErrorException || ex is XybridBolt.BoltException)
+            {
+                throw BoltErrors.Translate(ex);
             }
         }
 
@@ -249,22 +248,32 @@ namespace Xybrid
         /// <summary>
         /// Releases the native resources used by this reader.
         /// </summary>
-        public unsafe void Dispose()
+        public void Dispose()
         {
-            if (!_disposed)
+            Dispose(true);
+            GC.SuppressFinalize(this);
+        }
+
+        private void Dispose(bool disposing)
+        {
+            if (_disposed)
             {
-                if (_handle != null)
-                {
-                    NativeMethods.xybrid_bundle_free(_handle);
-                    _handle = null;
-                }
-                _disposed = true;
+                return;
             }
+            if (disposing)
+            {
+                // Release the native handle eagerly. On the finalizer path we
+                // leave it to the bolt handle's own finalizer instead of
+                // touching a possibly-finalized managed object.
+                _bundle?.Dispose();
+            }
+            _bundle = null;
+            _disposed = true;
         }
 
         ~BundleReader()
         {
-            Dispose();
+            Dispose(false);
         }
 
         /// <summary>

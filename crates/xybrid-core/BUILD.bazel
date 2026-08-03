@@ -1,0 +1,211 @@
+# GATE 5 — xybrid-core, the workspace's center of gravity. Everything above
+# llama transitively depends on it, so this BUILD gates the whole upper half.
+#
+# Clean rules_rs convention (no hand-listed deps): the @crates hub already
+# resolved this crate's full dep set + features from the real Cargo.lock, so
+# `all_crate_deps(normal = True)` returns them — internal path-deps as
+# `//crates/...` labels and externals as exact-version `@crates//:...` labels,
+# with per-platform deltas (Apple objc2/candle/coreml) folded into a select().
+# Target name == package dir basename so `//crates/xybrid-core` resolves and
+# the derived crate_name is `xybrid_core` — no `aliases()` needed.
+#
+# ORT CEILING: RESOLVED. The ort linking mode is per-target in Cargo.toml
+# (cfg-driven, not feature-driven): non-Apple targets get `ort/load-dynamic`
+# (no build-time download → hermetic; dlopen libonnxruntime at runtime), Apple
+# keeps static download-binaries on a rustls downloader. The hub resolves this
+# faithfully per-triple (linux/android → disable-linking; darwin →
+# download-binaries+tls-rustls), so this target builds GREEN on RBE.
+# The `ort-download` feature below is a retained NO-OP marker (invocation compat).
+load("@rules_rs//rs:rust_library.bzl", "rust_library")
+load("@rules_rs//rs:rust_test.bzl", "rust_test")
+load("@crates//:defs.bzl", "all_crate_deps")
+
+# Android ships the `platform-android` backend set: candle (Whisper ASR/voice) +
+# llm-llamacpp-vision (mtmd multimodal). Bazel has no cross-crate feature
+# propagation, so the preset's expansion is set directly on each first-party box
+# — this is core's slice. (ort-dynamic is a no-op marker; linking is cfg-driven.)
+_ANDROID_BACKENDS = [
+    "candle",
+    "llm-llamacpp-vision",
+]
+
+rust_library(
+    name = "xybrid-core",
+    srcs = glob(["src/**/*.rs"]),
+    edition = "2021",
+    # Resolved from the real Cargo.lock by the @crates hub (DEP_DATA). Backend
+    # accel features are gated per-platform exactly as cargo's presets unify them.
+    crate_features = [
+        "default",
+        "llm-llamacpp",
+        "ort-download",  # no-op marker (mode is per-target in Cargo.toml); kept to match the hub's resolved feature set.
+        "schema",
+        "xybrid-llama",
+        "xybrid-llama-sys",
+    ] + select({
+        "@rules_rs//rs/platforms/config:aarch64-apple-darwin": [
+            "candle",
+            "candle-core",
+            "candle-hub",
+            "candle-metal",
+            "candle-nn",
+            "ort-coreml",
+            # Flip 2: parity with the shipped platform-macos CLI (vision).
+            "llm-llamacpp-vision",
+        ],
+        # Apple G1-G2 parity: platform-ios expands to the SAME core backend set
+        # as platform-macos (candle-metal + coreml + vision), so mirror darwin.
+        "@rules_rs//rs/platforms/config:aarch64-apple-ios": [
+            "candle",
+            "candle-core",
+            "candle-hub",
+            "candle-metal",
+            "candle-nn",
+            "ort-coreml",
+            "llm-llamacpp-vision",
+        ],
+        # iOS simulator (Apple G4a): identical backend set to the device slice.
+        "@rules_rs//rs/platforms/config:aarch64-apple-ios-sim": [
+            "candle",
+            "candle-core",
+            "candle-hub",
+            "candle-metal",
+            "candle-nn",
+            "ort-coreml",
+            "llm-llamacpp-vision",
+        ],
+        "@rules_rs//rs/platforms/config:aarch64-linux-android": _ANDROID_BACKENDS,
+        "@rules_rs//rs/platforms/config:armv7-linux-androideabi": _ANDROID_BACKENDS,
+        "@rules_rs//rs/platforms/config:x86_64-linux-android": _ANDROID_BACKENDS,
+        # Desktop-linux (Flip 1): the shipped cargo CLI is platform-desktop =
+        # vision + huggingface — NO candle (desktop voice runs on ORT). Parity
+        # means vision only here; hf rides on the sdk's features/deps.
+        "@rules_rs//rs/platforms/config:x86_64-unknown-linux-gnu": [
+            "llm-llamacpp-vision",
+        ],
+        # Desktop-windows (the .exe chapter): cargo's windows leg also builds
+        # platform-desktop — same expansion as linux.
+        "@rules_rs//rs/platforms/config:x86_64-pc-windows-gnu": [
+            "llm-llamacpp-vision",
+        ],
+        "//conditions:default": [],
+    }),
+    deps = all_crate_deps(normal = True),
+    visibility = ["//visibility:public"],
+)
+
+# The workspace's largest test target: ~1180 inline `#[test]`/`#[tokio::test]`.
+#
+# xybrid-core carries a dev-dependency on xybrid-sdk, which depends back on
+# xybrid-core. Cargo permits that (dev-deps are outside the published graph);
+# Bazel cannot express the cycle. It does not block this target, because NOTHING
+# in src/ actually uses xybrid_sdk — the only mention is a doc-comment link in
+# cloud/config.rs. The dev-dep exists solely for tests/system_validation.rs, an
+# integration binary that is not part of this target.
+#
+# `deps` lists the dev-dependencies the inline tests really reach for; the other
+# declared dev-deps (filetime, walkdir) are used only under tests/.
+# Integration tests. Each tests/*.rs is its own binary, so each gets its own
+# target: `srcs` + a dep on the library it links as an external crate.
+#
+# The model-backed ones self-skip when the weights are absent (which is the case
+# on CI) but still read the committed model METADATA, so they take the fixture
+# filegroup as data — Bazel sandboxes the action, and undeclared reads fail.
+_CORE_INTEGRATION_TESTS = {
+    "conformance_runtime_adapter": [":xybrid-core"],
+    "integration_hiiipe": [":xybrid-core"],
+    "legacy_cache_names": [
+        ":xybrid-core",
+        "@crates//:walkdir",
+    ],
+    "llm_context_integration": [
+        ":xybrid-core",
+        "@crates//:serde_json",
+    ],
+    "mobilenet_vision_parity": [
+        ":xybrid-core",
+        "@crates//:image",
+        "@crates//:ndarray",
+        "@crates//:serde_json",
+    ],
+    "multimodal_messages": [
+        ":xybrid-core",
+        "@crates//:image",
+    ],
+    "pipeline_yaml_integration": [":xybrid-core"],
+    "tts_integration": [
+        ":xybrid-core",
+        "@crates//:serde_json",
+    ],
+    "tts_smoke": [
+        ":xybrid-core",
+        "@crates//:serde_json",
+    ],
+    "vision_envelope": [
+        ":xybrid-core",
+        "@crates//:image",
+        "@crates//:serde_json",
+    ],
+    "vision_metadata": [
+        ":xybrid-core",
+        "@crates//:ndarray",
+        "@crates//:serde_json",
+    ],
+    "vlm_lfm2_smoke": [
+        ":xybrid-core",
+        "@crates//:image",
+        "@crates//:serde_json",
+    ],
+}
+
+# vlm_lfm2_smoke opens with `#![cfg(feature = "llm-llamacpp")]`; without the
+# feature the file compiles to an EMPTY binary that still reports success. The
+# library target above already builds with llm-llamacpp, so this lines up.
+_CORE_TEST_FEATURES = {
+    "vlm_lfm2_smoke": ["llm-llamacpp"],
+}
+
+# legacy_cache_names is a source-scanning lint: it walks the crate's own src/
+# looking for retired cache-key names, so the sources themselves are inputs.
+_CORE_TEST_DATA = {
+    "legacy_cache_names": glob(["src/**/*.rs"]),
+    "llm_context_integration": ["//integration-tests:model_metadata_fixtures"],
+    "mobilenet_vision_parity": ["//integration-tests:model_metadata_fixtures"],
+    "tts_integration": ["//integration-tests:model_metadata_fixtures"],
+    "tts_smoke": ["//integration-tests:model_metadata_fixtures"],
+    "vlm_lfm2_smoke": ["//integration-tests:model_metadata_fixtures"],
+}
+
+[
+    rust_test(
+        name = name,
+        srcs = ["tests/{}.rs".format(name)],
+        crate_features = _CORE_TEST_FEATURES.get(name, []),
+        data = _CORE_TEST_DATA.get(name, []),
+        edition = "2021",
+        deps = deps,
+    )
+    for name, deps in _CORE_INTEGRATION_TESTS.items()
+]
+
+rust_test(
+    name = "xybrid-core_test",
+    crate = ":xybrid-core",
+    # Fixture files three inline tests read off disk (model metadata + the web
+    # SDK's serialization fixture). Cargo reads them straight from the worktree;
+    # Bazel sandboxes the action, so they have to be declared inputs. Both are
+    # resolved relative to CARGO_MANIFEST_DIR, which rules_rust points at this
+    # crate's directory, so the workspace-relative layout still applies.
+    data = [
+        "//bindings/web:rust_metadata_fixtures",
+        "//integration-tests:model_metadata_fixtures",
+    ],
+    deps = [
+        "@crates//:criterion",
+        "@crates//:dirs",
+        "@crates//:hound",
+        "@crates//:libloading",
+        "@crates//:tempfile",
+        "@crates//:ureq",
+    ],
+)

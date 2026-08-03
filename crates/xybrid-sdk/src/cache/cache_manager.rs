@@ -17,9 +17,10 @@
 //! # }
 //! ```
 
+use super::layout::{CacheEntryInfo, CacheLayout};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::collections::{HashMap, HashSet};
+use std::path::{Component, Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 use xybrid_core::bundler::XyBundle;
 
@@ -62,7 +63,7 @@ struct CacheEntry {
 enum CacheType {
     /// Local models persist indefinitely
     Local,
-    /// Cloud models have  weeks TTL
+    /// Cloud models have a 24h TTL
     Cloud,
 }
 
@@ -177,6 +178,22 @@ impl CacheManager {
     /// Returns the cache directory path.
     pub fn cache_dir(&self) -> &Path {
         &self.cache_dir
+    }
+
+    pub(crate) fn layout_from_config() -> Result<CacheLayout, SdkError> {
+        Ok(CacheLayout::from_registry_root(Self::get_cache_dir()?))
+    }
+
+    fn layout(&self) -> CacheLayout {
+        CacheLayout::from_registry_root(self.cache_dir.clone())
+    }
+
+    pub(crate) fn registry_bundle_path(&self, hf_repo: &str, file: &str) -> PathBuf {
+        self.layout().registry_bundle_path(hf_repo, file)
+    }
+
+    pub(crate) fn cache_entries(&self) -> Result<Vec<CacheEntryInfo>, SdkError> {
+        self.layout().cache_entries()
     }
 
     /// Scans the cache directory for existing bundles.
@@ -392,12 +409,7 @@ impl CacheManager {
     ///
     /// * `model_id` - The model identifier from model_metadata.json
     pub fn extraction_dir(&self, model_id: &str) -> PathBuf {
-        // Go up from models/ to cache/, then into extracted/
-        self.cache_dir
-            .parent()
-            .unwrap_or(&self.cache_dir)
-            .join("extracted")
-            .join(model_id)
+        self.layout().extraction_dir(model_id)
     }
 
     /// Checks if a bundle has already been extracted.
@@ -410,8 +422,14 @@ impl CacheManager {
     ///
     /// True if the extraction directory exists and contains model_metadata.json
     pub fn is_extracted(&self, model_id: &str) -> bool {
-        let extract_dir = self.extraction_dir(model_id);
-        Self::extraction_is_ready(&extract_dir)
+        self.existing_extraction_dir(model_id).is_some()
+    }
+
+    pub(crate) fn existing_extraction_dir(&self, model_id: &str) -> Option<PathBuf> {
+        self.layout()
+            .extraction_dirs(model_id)
+            .into_iter()
+            .find(|extract_dir| Self::extraction_is_ready(extract_dir))
     }
 
     fn extraction_is_ready(extract_dir: &Path) -> bool {
@@ -439,18 +457,12 @@ impl CacheManager {
     ///
     /// This is an offline operation — it never touches the network.
     pub fn list_extracted_model_ids(&self) -> Vec<String> {
-        let extracted_root = self
-            .cache_dir
-            .parent()
-            .unwrap_or(&self.cache_dir)
-            .join("extracted");
-
-        let Ok(entries) = std::fs::read_dir(&extracted_root) else {
-            return Vec::new();
-        };
-
-        let mut ids: Vec<String> = entries
-            .filter_map(|entry| entry.ok())
+        let mut ids: Vec<String> = self
+            .layout()
+            .extracted_roots()
+            .into_iter()
+            .filter_map(|root| std::fs::read_dir(root).ok())
+            .flat_map(|entries| entries.filter_map(|entry| entry.ok()))
             .filter(|entry| Self::extraction_is_ready(&entry.path()))
             .filter_map(|entry| {
                 entry
@@ -462,6 +474,7 @@ impl CacheManager {
             .collect();
 
         ids.sort();
+        ids.dedup();
         ids
     }
 
@@ -519,10 +532,8 @@ impl CacheManager {
         let metadata: ModelMetadata = serde_json::from_str(&metadata_json)
             .map_err(|e| SdkError::cache_src("Failed to parse model metadata", e))?;
 
-        let extract_dir = self.extraction_dir(&metadata.model_id);
-
         // Check if already extracted and all files declared by metadata exist.
-        if Self::extraction_is_ready(&extract_dir) {
+        if let Some(extract_dir) = self.existing_extraction_dir(&metadata.model_id) {
             log::debug!(
                 "Bundle already extracted for '{}' at {}",
                 metadata.model_id,
@@ -530,6 +541,8 @@ impl CacheManager {
             );
             return Ok(extract_dir);
         }
+
+        let extract_dir = self.extraction_dir(&metadata.model_id);
 
         // Create extraction directory
         std::fs::create_dir_all(&extract_dir)
@@ -566,10 +579,8 @@ impl CacheManager {
         xyb_path: &Path,
         model_id: &str,
     ) -> Result<PathBuf, SdkError> {
-        let extract_dir = self.extraction_dir(model_id);
-
         // Check if already extracted and all files declared by metadata exist.
-        if Self::extraction_is_ready(&extract_dir) {
+        if let Some(extract_dir) = self.existing_extraction_dir(model_id) {
             log::debug!(
                 "Bundle already extracted for '{}' at {}",
                 model_id,
@@ -577,6 +588,8 @@ impl CacheManager {
             );
             return Ok(extract_dir);
         }
+
+        let extract_dir = self.extraction_dir(model_id);
 
         // Need to extract - load bundle
         if !xyb_path.exists() {
@@ -648,22 +661,93 @@ impl CacheManager {
         Ok(removed_count)
     }
 
-    /// Clears all cached models.
+    /// Removes every managed cache root for a single model.
     ///
     /// # Returns
     ///
-    /// Number of entries removed
-    pub fn clear(&mut self) -> Result<u32, SdkError> {
-        let count = self.entries.len() as u32;
+    /// The number of cache roots removed (0 if the model was not cached).
+    ///
+    /// # Concurrency
+    ///
+    /// Not safe to run concurrently with a load of the same model: it removes
+    /// whole cache directories that an in-flight extraction may be writing to.
+    pub(crate) fn clear_model_roots(&mut self, model_id: &str) -> Result<u32, SdkError> {
+        if model_id.is_empty()
+            || !Path::new(model_id)
+                .components()
+                .all(|component| matches!(component, Component::Normal(_)))
+        {
+            return Err(SdkError::cache(format!(
+                "Invalid cache model identifier: {}",
+                model_id
+            )));
+        }
 
-        for entry in self.entries.values() {
-            if entry.path.exists() {
-                let _ = std::fs::remove_file(&entry.path);
+        let mut roots = self.layout().model_roots(model_id);
+        let mut entry_keys = Vec::new();
+        for (key, entry) in &self.entries {
+            if entry.id == model_id {
+                entry_keys.push(key.clone());
+                roots.push(entry.path.clone());
             }
         }
 
+        let mut removed_count = 0;
+        let mut seen = HashSet::new();
+        for root in roots {
+            if !seen.insert(root.clone()) {
+                continue;
+            }
+            if Self::remove_cache_path(&root)? {
+                removed_count += 1;
+            }
+        }
+
+        for key in entry_keys {
+            self.entries.remove(&key);
+        }
+
+        Ok(removed_count)
+    }
+
+    /// Clears all cached models across every managed cache root.
+    ///
+    /// # Returns
+    ///
+    /// The number of cache roots removed (registry bundles, extracted runtime
+    /// caches, and HuggingFace downloads). Returns `0` when nothing was cached.
+    ///
+    /// # Concurrency
+    ///
+    /// Not safe to run concurrently with a model load: it removes whole cache
+    /// directories that an in-flight download or extraction may be writing to.
+    pub fn clear(&mut self) -> Result<u32, SdkError> {
+        let mut removed_count = 0;
+
+        for root in self.layout().entry_roots() {
+            if Self::remove_cache_path(&root.path)? {
+                removed_count += 1;
+            }
+        }
+
+        std::fs::create_dir_all(&self.cache_dir)
+            .map_err(|e| SdkError::cache_src("Failed to recreate cache directory", e))?;
         self.entries.clear();
-        Ok(count)
+        Ok(removed_count)
+    }
+
+    fn remove_cache_path(path: &Path) -> Result<bool, SdkError> {
+        if path.is_dir() {
+            std::fs::remove_dir_all(path)
+                .map_err(|e| SdkError::cache_src("Failed to remove cache directory", e))?;
+            Ok(true)
+        } else if path.exists() {
+            std::fs::remove_file(path)
+                .map_err(|e| SdkError::cache_src("Failed to remove cache file", e))?;
+            Ok(true)
+        } else {
+            Ok(false)
+        }
     }
 }
 
@@ -723,9 +807,211 @@ mod tests {
         assert!(manager.get_cached_path("test-model").is_none());
     }
 
+    #[test]
+    fn clear_removes_managed_model_cache_roots_when_registry_entries_are_unscanned() {
+        // Given: the real cache layout produced by registry, extraction, and
+        // direct HuggingFace model-loading paths.
+        let temp_dir = TempDir::new().unwrap();
+        let cache_root = temp_dir.path().join("cache");
+        let models_dir = cache_root.join("models");
+        let registry_model_dir = models_dir.join("Kokoro-82M-v1.0-ONNX");
+        let extracted_model_dir = cache_root.join("extracted").join("kokoro-82m");
+        let hf_model_dir = cache_root.join("hf").join("owner--repo");
+        let hf_hub_model_dir = cache_root.join("hf-hub").join("models--owner--repo");
+        fs::create_dir_all(&registry_model_dir).unwrap();
+        fs::create_dir_all(&extracted_model_dir).unwrap();
+        fs::create_dir_all(&hf_model_dir).unwrap();
+        fs::create_dir_all(&hf_hub_model_dir).unwrap();
+        fs::write(registry_model_dir.join("universal.xyb"), b"bundle").unwrap();
+        fs::write(extracted_model_dir.join("model_metadata.json"), b"{}").unwrap();
+        fs::write(hf_model_dir.join("model.gguf"), b"weights").unwrap();
+        fs::write(hf_hub_model_dir.join("blob"), b"weights").unwrap();
+
+        let mut manager = CacheManager::with_dir(models_dir.clone()).unwrap();
+
+        // When: the user clears all cached models through the cache manager.
+        manager.clear().unwrap();
+
+        // Then: every managed model-cache root is removed, including roots not
+        // represented in the legacy top-level `.xyb` entry map.
+        assert!(
+            !registry_model_dir.exists(),
+            "registry model cache should be removed by clear()"
+        );
+        assert!(
+            !extracted_model_dir.exists(),
+            "extracted runtime cache should be removed by clear()"
+        );
+        assert!(
+            !hf_model_dir.exists(),
+            "direct HuggingFace model cache should be removed by clear()"
+        );
+        assert!(
+            !hf_hub_model_dir.exists(),
+            "owned HuggingFace blob cache should be removed by clear()"
+        );
+    }
+
+    #[test]
+    fn clear_model_roots_removes_registry_and_extracted_cache_for_id() {
+        let temp_dir = TempDir::new().unwrap();
+        let cache_root = temp_dir.path().join("cache");
+        let models_dir = cache_root.join("models");
+        let model_dir = models_dir.join("kokoro-82m");
+        let extracted_model_dir = cache_root.join("extracted").join("kokoro-82m");
+        let other_model_dir = models_dir.join("other-model");
+        fs::create_dir_all(&model_dir).unwrap();
+        fs::create_dir_all(&extracted_model_dir).unwrap();
+        fs::create_dir_all(&other_model_dir).unwrap();
+        fs::write(model_dir.join("universal.xyb"), b"bundle").unwrap();
+        fs::write(extracted_model_dir.join("model_metadata.json"), b"{}").unwrap();
+        fs::write(other_model_dir.join("universal.xyb"), b"bundle").unwrap();
+
+        let mut manager = CacheManager::with_dir(models_dir).unwrap();
+
+        let removed = manager.clear_model_roots("kokoro-82m").unwrap();
+
+        assert_eq!(removed, 2);
+        assert!(
+            !model_dir.exists(),
+            "registry model cache should be removed"
+        );
+        assert!(
+            !extracted_model_dir.exists(),
+            "extracted model cache should be removed"
+        );
+        assert!(other_model_dir.exists(), "unrelated model should remain");
+    }
+
+    #[test]
+    fn clear_model_roots_removes_direct_hf_cache_for_repo_id() {
+        let temp_dir = TempDir::new().unwrap();
+        let cache_root = temp_dir.path().join("cache");
+        let models_dir = cache_root.join("models");
+        let hf_model_dir = cache_root.join("hf").join("owner--repo");
+        let hf_hub_model_dir = cache_root.join("hf-hub").join("models--owner--repo");
+        fs::create_dir_all(&hf_model_dir).unwrap();
+        fs::create_dir_all(&hf_hub_model_dir).unwrap();
+        fs::write(hf_model_dir.join("model.gguf"), b"weights").unwrap();
+        fs::write(hf_hub_model_dir.join("blob"), b"weights").unwrap();
+
+        let mut manager = CacheManager::with_dir(models_dir).unwrap();
+
+        let removed = manager.clear_model_roots("owner/repo").unwrap();
+
+        assert_eq!(removed, 2);
+        assert!(
+            !hf_model_dir.exists(),
+            "direct HuggingFace model cache should be removed"
+        );
+        assert!(
+            !hf_hub_model_dir.exists(),
+            "owned HuggingFace blob cache should be removed"
+        );
+    }
+
+    #[test]
+    fn custom_root_resolves_legacy_parent_extracted_cache() {
+        let temp_dir = TempDir::new().unwrap();
+        let custom_cache = temp_dir.path().join("custom-cache");
+        let legacy_extracted_model = temp_dir.path().join("extracted").join("legacy-model");
+        write_ready_extracted_model(&legacy_extracted_model, "legacy-model");
+
+        let manager = CacheManager::with_dir(custom_cache).unwrap();
+
+        assert!(manager.is_extracted("legacy-model"));
+        assert_eq!(
+            manager.list_extracted_model_ids(),
+            vec!["legacy-model".to_string()]
+        );
+    }
+
+    #[test]
+    fn custom_root_clear_model_removes_legacy_parent_extracted_cache() {
+        let temp_dir = TempDir::new().unwrap();
+        let custom_cache = temp_dir.path().join("custom-cache");
+        let legacy_extracted_model = temp_dir.path().join("extracted").join("legacy-model");
+        let sibling_sentinel = temp_dir.path().join("sibling");
+        write_ready_extracted_model(&legacy_extracted_model, "legacy-model");
+        fs::create_dir_all(&sibling_sentinel).unwrap();
+        fs::write(sibling_sentinel.join("keep"), b"keep").unwrap();
+
+        let mut manager = CacheManager::with_dir(custom_cache).unwrap();
+
+        let removed = manager.clear_model_roots("legacy-model").unwrap();
+
+        assert_eq!(removed, 1);
+        assert!(!legacy_extracted_model.exists());
+        assert!(sibling_sentinel.join("keep").exists());
+    }
+
+    #[test]
+    fn clear_model_roots_rejects_path_traversal() {
+        let temp_dir = TempDir::new().unwrap();
+        let cache_root = temp_dir.path().join("cache");
+        let models_dir = cache_root.join("models");
+        let outside_dir = cache_root.join("outside");
+        fs::create_dir_all(&models_dir).unwrap();
+        fs::create_dir_all(&outside_dir).unwrap();
+        fs::write(outside_dir.join("sentinel"), b"keep").unwrap();
+
+        let mut manager = CacheManager::with_dir(models_dir).unwrap();
+
+        let result = manager.clear_model_roots("../outside");
+
+        assert!(result.is_err());
+        assert!(
+            outside_dir.join("sentinel").exists(),
+            "invalid model IDs must not delete outside cache paths"
+        );
+    }
+
+    #[test]
+    fn clear_model_roots_removes_legacy_bundle_from_memory_index() {
+        let temp_dir = TempDir::new().unwrap();
+        let cache_dir = temp_dir.path().join("models");
+        fs::create_dir_all(&cache_dir).unwrap();
+        let bundle_path = cache_dir.join("test-model@1.0.xyb");
+        fs::write(&bundle_path, b"bundle").unwrap();
+
+        let mut manager = CacheManager::with_dir(cache_dir).unwrap();
+        assert!(manager.is_cached("test-model"));
+        assert_eq!(manager.status().unwrap().total_models, 1);
+        assert_eq!(
+            manager.get_cached_path("test-model"),
+            Some(bundle_path.clone())
+        );
+
+        let removed = manager.clear_model_roots("test-model").unwrap();
+
+        assert_eq!(removed, 1);
+        assert!(!bundle_path.exists());
+        assert!(!manager.is_cached("test-model"));
+        assert_eq!(manager.status().unwrap().total_models, 0);
+        assert_eq!(manager.get_cached_path("test-model"), None);
+    }
+
     // =========================================================================
     // Bundle Extraction Tests
     // =========================================================================
+
+    fn write_ready_extracted_model(model_dir: &Path, model_id: &str) {
+        fs::create_dir_all(model_dir).unwrap();
+        let metadata = format!(
+            r#"{{
+                "model_id": "{}",
+                "version": "1.0",
+                "execution_template": {{ "type": "Onnx", "model_file": "model.onnx" }},
+                "preprocessing": [],
+                "postprocessing": [],
+                "files": ["model.onnx"],
+                "metadata": {{}}
+            }}"#,
+            model_id
+        );
+        fs::write(model_dir.join("model_metadata.json"), metadata).unwrap();
+        fs::write(model_dir.join("model.onnx"), b"model").unwrap();
+    }
 
     /// Creates a test bundle with model_metadata.json
     fn create_test_bundle(temp_dir: &TempDir, model_id: &str) -> PathBuf {
@@ -854,6 +1140,46 @@ mod tests {
         assert!(extract_dir.exists());
         assert!(extract_dir.join("model_metadata.json").exists());
         assert!(extract_dir.join("model.onnx").exists());
+    }
+
+    #[test]
+    fn clear_leaves_cache_loadable_for_the_next_extraction() {
+        // Regression guard: clear() removes the extracted/ runtime cache and
+        // recreates only the registry root. The very next load must still
+        // succeed by re-extracting — i.e. clear() must leave the cache in a
+        // loadable state, not a half-torn-down one.
+        let temp_dir = TempDir::new().unwrap();
+        let cache_dir = temp_dir.path().join("cache").join("models");
+        fs::create_dir_all(&cache_dir).unwrap();
+
+        let mut manager = CacheManager::with_dir(cache_dir.clone()).unwrap();
+        // The bundle lives outside the cache tree, so it survives clear().
+        let bundle_path = create_test_bundle(&temp_dir, "reload-model");
+
+        // First load populates extracted/reload-model/.
+        manager.ensure_extracted(&bundle_path).unwrap();
+        assert!(manager.is_extracted("reload-model"));
+
+        // Clearing wipes the extracted runtime cache and recreates the root.
+        // Exactly two managed roots exist here — the registry root (models/)
+        // and the extracted/ runtime cache — so both are counted.
+        let removed = manager.clear().unwrap();
+        assert_eq!(
+            removed, 2,
+            "clear() should count the registry + extracted roots"
+        );
+        assert!(
+            cache_dir.exists(),
+            "registry root should be recreated after clear()"
+        );
+        assert!(!manager.is_extracted("reload-model"));
+        assert!(manager.list_extracted_model_ids().is_empty());
+
+        // The next load must succeed by re-extracting from the surviving bundle.
+        let extract_dir = manager.ensure_extracted(&bundle_path).unwrap();
+        assert!(extract_dir.join("model_metadata.json").exists());
+        assert!(extract_dir.join("model.onnx").exists());
+        assert!(manager.is_extracted("reload-model"));
     }
 
     #[test]
