@@ -1,0 +1,23 @@
+docs/assets/bazel-ci-build-times.svg
+  s_ccf7e85c449da0::t_464f88467325ac 2-4,6-14,16-64,66-82,84-85
+  s_ccf7e85c449da0::t_6e976b26929d1e 65,83
+docs/why-bazel.md
+  s_ccf7e85c449da0::t_8d9f3b7c83e221 1,3-6,8-9,28,31-32,45-58,71-77,163-175,210-211
+  s_ccf7e85c449da0::t_85c46a92797332 16,138-162,212-213,276-297,305-306
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "ee080a2a1a5a5d10a0fadd07489dd789ae0685ff",
+  "prompts": {},
+  "sessions": {
+    "s_ccf7e85c449da0": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019fb857-924d-7711-b50e-5b89a6993f23",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
