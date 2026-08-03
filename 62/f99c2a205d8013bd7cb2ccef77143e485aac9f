@@ -1,0 +1,804 @@
+bindings/unity/Runtime/Bolt/XybridOutputType.cs
+  s_56e45659c49d26::t_65372fead2fc9b 1-42
+bindings/web/src/index.ts
+  s_56e45659c49d26::t_65372fead2fc9b 1-36
+docs/content/docs/quickstart.zh.mdx
+  s_56e45659c49d26::t_65372fead2fc9b 8,15,57,89,122,125,147-188,196
+crates/xybrid-core/src/runtime_adapter/tool_call/lfm2.rs
+  s_56e45659c49d26::t_65372fead2fc9b 1-516
+crates/xybrid-core/src/ir/mod.rs
+  s_56e45659c49d26::t_65372fead2fc9b 10
+.github/workflows/bazel.yml
+  s_56e45659c49d26::t_65372fead2fc9b 1-642
+bindings/web/src/internal/model-download.ts
+  s_56e45659c49d26::t_65372fead2fc9b 1-69
+.github/workflows/unity-editor.yml
+  s_56e45659c49d26::t_65372fead2fc9b 1-225
+bindings/flutter/windows/CMakeLists.txt
+  s_56e45659c49d26::t_65372fead2fc9b 12
+bindings/kotlin/consumer-smoke/settings.gradle.kts
+  s_56e45659c49d26::t_65372fead2fc9b 1-26
+bindings/unity/Runtime/Bolt/XybridOutputType.cs.meta
+  s_56e45659c49d26::t_65372fead2fc9b 1-2
+CHANGELOG.md
+  s_56e45659c49d26::t_65372fead2fc9b 16-185,187
+  s_56e45659c49d26::t_cc601b909f6767 186,188
+bindings/python/xybrid/_native/.gitkeep
+  s_56e45659c49d26::t_65372fead2fc9b 1
+bindings/web/playwright.config.ts
+  s_56e45659c49d26::t_65372fead2fc9b 1-19
+crates/llama-cpp-sys/BUILD.bazel
+  s_56e45659c49d26::t_65372fead2fc9b 1-93
+crates/xybrid-core/src/gateway/api.rs
+  s_56e45659c49d26::t_65372fead2fc9b 108-146
+docs/content/docs/introduction.mdx
+  s_56e45659c49d26::t_65372fead2fc9b 27
+integration-tests/tests/system_validation.rs
+  s_56e45659c49d26::t_65372fead2fc9b 1-330
+bindings/react-native/android/build.gradle
+  s_56e45659c49d26::t_65372fead2fc9b 50,94
+tools/README.md
+  s_56e45659c49d26::t_65372fead2fc9b 59,61-62,66,72,75-76,78,80-83,86-87,90-91,93,95-98,101-104,107-109,141,143-144,146-152,160-163,168-169,171-172,174-175,177,180-181
+tools/scripts/stage_unity_native.py
+  s_56e45659c49d26::t_65372fead2fc9b 1-330
+tools/unity-runtime-smoke/Assets/SmokeDriver.cs
+  s_56e45659c49d26::t_65372fead2fc9b 1-46
+bindings/unity/Runtime/Bolt/XybridRunOptions.cs.meta
+  s_56e45659c49d26::t_65372fead2fc9b 1-2
+bindings/unity/Runtime/Api/XybridClient.cs
+  s_56e45659c49d26::t_65372fead2fc9b 37,60,69-73,155-156,158-162,199,216-229,231,255,278
+bindings/flutter/lib/src/rust/api/model.dart
+  s_56e45659c49d26::t_d3c180d652da12 18
+bindings/unity/Runtime/Bolt/XybridBolt.cs.meta
+  s_56e45659c49d26::t_65372fead2fc9b 1-2
+docs/sdk/API_REFERENCE.md
+  s_56e45659c49d26::t_65372fead2fc9b 1608
+bindings/web/example/src/tensor.ts
+  s_56e45659c49d26::t_65372fead2fc9b 1-263
+bindings/flutter/README.md
+  s_56e45659c49d26::t_65372fead2fc9b 18,150-164,271-289
+bindings/web/test/registry.test.ts
+  s_56e45659c49d26::t_65372fead2fc9b 1-402
+bindings/unity/Runtime/Bolt/XybridConversationContext.cs
+  s_56e45659c49d26::t_65372fead2fc9b 1-124
+BUILD.bazel
+  s_56e45659c49d26::t_65372fead2fc9b 1-467
+crates/llama-cpp-sys/src/bindings.rs
+  s_56e45659c49d26::t_65372fead2fc9b 1-1035
+bindings/unity/Runtime/Bolt/XybridStreamToken.cs.meta
+  s_56e45659c49d26::t_65372fead2fc9b 1-2
+crates/xybrid-core/src/execution/strategies/codec_tts.rs
+  s_56e45659c49d26::t_65372fead2fc9b 149
+crates/xybrid-sdk/src/metadata_gen.rs
+  s_56e45659c49d26::t_65372fead2fc9b 7,17-20,63,74,336-337,378-379,395-396,436-447,534-546,576-577,952-957,967-982,1009-1056,1058-1061,1149-1236,1238-1244,2134-2185,2313-2429
+  s_56e45659c49d26::t_21fe15e78194da 1237
+  s_56e45659c49d26::t_b21d378b3e78d7 1004-1008
+  s_56e45659c49d26::t_9b12de420f6e37 1057
+  s_56e45659c49d26::t_bda87c1978e356 2430
+docs/content/docs/cli/index.mdx
+  s_56e45659c49d26::t_65372fead2fc9b 48
+docs/content/docs/(integration)/sdks/ios.zh.mdx
+  s_56e45659c49d26::t_65372fead2fc9b 18
+bindings/web/example/tensor.html
+  s_56e45659c49d26::t_65372fead2fc9b 1-136
+bindings/web/example/vite.config.ts
+  s_56e45659c49d26::t_65372fead2fc9b 1-16
+docs/content/docs/guides/meta.zh.json
+  s_56e45659c49d26::t_65372fead2fc9b 1-7
+crates/xybrid-cli/src/commands/repl/agent_loop.rs
+  s_56e45659c49d26::t_65372fead2fc9b 1-617,619-680
+  s_56e45659c49d26::t_7f53dc60c8b271 618
+crates/xybrid-core/src/runtime_adapter/candle/whisper.rs
+  s_56e45659c49d26::t_65372fead2fc9b 8,10,38-48,139-184,203-215,217-219,245-248,250-252,312-346,359-361,408-412,421-427,435,437-439,441-520,522-531,533-575,583-586,590-608,619-630,633-637,639-644,648,656-660,688-696,706-707,717-758,760-887,891-974,986-1007,1014-1020,1022,1028-1446
+crates/xybrid-ffi-facade/Cargo.toml
+  s_56e45659c49d26::t_65372fead2fc9b 22
+crates/xybrid-core/src/execution/executor.rs
+  s_56e45659c49d26::t_845d042d95ab33 1874,2354
+  s_56e45659c49d26::t_b15f4e6cdf37d8 3397,3772,4093,4173
+  s_56e45659c49d26::t_21422c1f9eaf33 3260,3270,3324
+  s_56e45659c49d26::t_90294cd996de67 444-447,1174,1626,1761-1762,2523,2531
+  s_56e45659c49d26::t_65372fead2fc9b 59-63,438-443,448-450,722-772,830-834,1094-1100,1117-1138,1189,1242,1346-1390,1543-1546,1568-1591,1641,1693,1763,1806,1835,1852,1894-1896,1923,1938-1962,1971,1975-2037,2061-2065,2067,2074-2076,2104,2110,2117-2160,2183,2199-2201,2211,2261-2263,2312,2329,2374-2376,2403,2494,2524-2530,2552,3196-3202,3209,3228-3240,3242-3250,3259,3261-3269,3271-3276,3278-3323,3325-3342,3357-3358,3386-3396,3398-3641,3645-3646,3668-3674,3682-3771,3773-3832,4008-4092,4094-4172,4174-4223,4863-4914
+  s_56e45659c49d26::t_cad470dedb631a 4915
+crates/xybrid-sdk/examples/llm_streaming_metrics.rs
+  s_56e45659c49d26::t_65372fead2fc9b 1-213
+crates/xybrid-core/src/runtime_adapter/mlx/sampler.rs
+  s_56e45659c49d26::t_1ef83af95949b5 317,332
+bindings/apple/BUILD.bazel
+  s_56e45659c49d26::t_65372fead2fc9b 1-45
+bazel/toolchains/windows_msvc/BUILD.bazel
+  s_56e45659c49d26::t_65372fead2fc9b 1-355
+bindings/python/.gitignore
+  s_56e45659c49d26::t_65372fead2fc9b 1-8
+integration-tests/BUILD.bazel
+  s_56e45659c49d26::t_65372fead2fc9b 1-116
+bindings/web/test/fixtures/rust-metadata-litertlm-legacy-null.json
+  s_56e45659c49d26::t_65372fead2fc9b 1-14
+bindings/unity/Runtime/Bolt/XybridBundle.cs
+  s_56e45659c49d26::t_65372fead2fc9b 1-222
+crates/xybrid-core/src/execution/mod.rs
+  s_56e45659c49d26::t_65372fead2fc9b 101-105,108-109,130
+crates/llama-cpp-sys/src/lib.rs
+  s_56e45659c49d26::t_65372fead2fc9b 75-86
+bindings/flutter/rust/Cargo.toml
+  s_56e45659c49d26::t_65372fead2fc9b 3,37-39
+integration-tests/tests/whisper_candle_integration.rs
+  s_56e45659c49d26::t_65372fead2fc9b 1-486
+.agents/skills/test-model/SKILL.md
+  s_56e45659c49d26::t_65372fead2fc9b 1-138
+bindings/react-native/package.json
+  s_56e45659c49d26::t_65372fead2fc9b 3
+crates/xybrid-cli/src/commands/fetch.rs
+  s_56e45659c49d26::t_0d522a03506ce2 216-219,230-234,236-238,252-255,709
+  s_56e45659c49d26::t_bbd115ce1b7508 324-328
+  s_56e45659c49d26::t_998cf5bd7220ef 64-68
+  s_56e45659c49d26::t_b4ad35e9cea42b 687-708
+  s_56e45659c49d26::t_a29dcec496b139 90-91
+  s_56e45659c49d26::t_bc97f262722f5e 710-714
+bindings/kotlin/build.gradle.kts
+  s_56e45659c49d26::t_65372fead2fc9b 8
+bindings/unity/Runtime/Bolt/XybridGenerationConfig.cs
+  s_56e45659c49d26::t_65372fead2fc9b 1-64
+bindings/unity/Tests/Editor/NativeLibraryResolverTests.cs.meta
+  s_56e45659c49d26::t_65372fead2fc9b 1-2
+crates/xybrid-core/src/runtime_adapter/tool_call/gemma.rs
+  s_56e45659c49d26::t_65372fead2fc9b 1-533
+bindings/web/src/internal/runtime.ts
+  s_56e45659c49d26::t_65372fead2fc9b 1-58
+crates/xybrid-bolt/BUILD.bazel
+  s_56e45659c49d26::t_65372fead2fc9b 1-105
+docs/content/docs/(integration)/sdks/android.mdx
+  s_56e45659c49d26::t_65372fead2fc9b 14,33,63,69,72-77,159
+examples/ios/XybridExample/ContentView.swift
+  s_56e45659c49d26::t_65372fead2fc9b 7-8
+rules_rs.patch
+  s_56e45659c49d26::t_65372fead2fc9b 1-166
+tools/unity-runtime-smoke/Assets/SmokeDriver.cs.meta
+  s_56e45659c49d26::t_65372fead2fc9b 1-2
+docs/assets/bazel-ci-build-times.svg
+  s_56e45659c49d26::t_65372fead2fc9b 1-87
+bindings/unity/Runtime/Bolt/XybridBolt.cs
+  s_56e45659c49d26::t_65372fead2fc9b 1-869
+tools/unity-runtime-smoke/README.md
+  s_56e45659c49d26::t_65372fead2fc9b 1-113
+tools/windows-smoke/xybrid-bolt-smoke.csproj
+  s_56e45659c49d26::t_65372fead2fc9b 1-19
+docs/content/docs/concepts/models.zh.mdx
+  s_56e45659c49d26::t_65372fead2fc9b 91
+.github/workflows/build-android.yml
+  s_56e45659c49d26::t_65372fead2fc9b 54-56,71-79,81-84,108-120,122,124-129
+bindings/flutter/rust/src/api/model.rs
+  s_56e45659c49d26::t_65372fead2fc9b 77,91-92,247,249-250,253-255,674-676,727,737-743,812,816-818,894-896,955,960-966,1056,1064-1068,1184-1185,1194-1198,1218-1219,1262,1300
+bindings/web/test/fixtures/hf-tree-smollm2-litertlm.json
+  s_56e45659c49d26::t_65372fead2fc9b 1-26
+bindings/unity/Runtime/Bolt/XybridError.cs
+  s_56e45659c49d26::t_65372fead2fc9b 1-298
+crates/xybrid-core/src/runtime_adapter/llama_cpp/mod.rs
+  s_56e45659c49d26::t_65372fead2fc9b 41,384-390,507,509,533,535,539,566,584,635-694,863-868,908-912,926-937,944-948,1022-1036,1047-1052,1074,1083-1085,1123-1129,1132-1142,1146-1180,1186-1199,1201-1205,1264-1269,1272-1293,1295-1296,1298-1309,1311-1334,1336-1363,1367-1373,1376-1386,1388-1394,1437-1442,1445,1453,1455-1456,1512-1519,1527-1529,1534,1567,1569-1570,1575,1578-1584,1587-1597,1599-1616,1618-1641,1643-1647,1674-1747
+  s_56e45659c49d26::t_9a21ad0f94deb6 1748
+bindings/flutter/cargokit/build_tool/lib/src/precompile_binaries.dart
+  s_56e45659c49d26::t_65372fead2fc9b 32,45-51,109-111,128-141
+bindings/kotlin/consumer-smoke/app/src/main/AndroidManifest.xml
+  s_56e45659c49d26::t_65372fead2fc9b 1-2
+crates/xybrid-core/examples/lfm2_230m_tools_streaming.rs
+  s_56e45659c49d26::t_65372fead2fc9b 1-131
+docs/sdk/MODEL_METADATA.md
+  s_56e45659c49d26::t_65372fead2fc9b 122-139
+bindings/unity/Runtime/Bolt/XybridVoiceInfo.cs
+  s_56e45659c49d26::t_65372fead2fc9b 1-45
+docs/content/docs/quickstart.mdx
+  s_56e45659c49d26::t_65372fead2fc9b 8,15,57,89,103,120,123,145-187,195
+examples/unity/starter/README.md
+  s_56e45659c49d26::t_65372fead2fc9b 30-39,42-44,231,235,253
+bindings/unity/Runtime/Api/ModelLoader.cs
+  s_56e45659c49d26::t_65372fead2fc9b 13-14,18-28,31,34,36-37,45,51,59,65,74,80,84-87,91,97,105,111,121,125,127-147,149-155,167-168,170,172
+bindings/unity/Runtime/Bolt/XybridGenerationConfig.cs.meta
+  s_56e45659c49d26::t_65372fead2fc9b 1-2
+tools/scripts/build-python-bolt.sh
+  s_56e45659c49d26::t_65372fead2fc9b 1-67
+tools/scripts/version-sync.sh
+  s_56e45659c49d26::t_65372fead2fc9b 28-31,38-41,77-83,94-103,159-181,205-224,234,240-247,250,278,281-282,303,306-307
+.bazelignore
+  s_56e45659c49d26::t_65372fead2fc9b 1-3
+.github/workflows/ci.yml
+  s_56e45659c49d26::t_65372fead2fc9b 30-114,367-369,406-408,423-476,481-482,485-506
+  s_56e45659c49d26::t_6e1bde38904a4f 483
+crates/xybrid-cli/tests/reasoning_budget_cli_test.rs
+  s_56e45659c49d26::t_65372fead2fc9b 1-93
+bindings/unity/Runtime/Bolt/XybridStreamEvent.cs.meta
+  s_56e45659c49d26::t_65372fead2fc9b 1-2
+bindings/web/src/internal/loading.ts
+  s_56e45659c49d26::t_65372fead2fc9b 1-535
+docs/INSTALLATION.zh.md
+  s_56e45659c49d26::t_65372fead2fc9b 1-305
+docs/content/docs/(integration)/sdks/ios.mdx
+  s_56e45659c49d26::t_65372fead2fc9b 18,192-198
+bindings/web/biome.json
+  s_56e45659c49d26::t_65372fead2fc9b 1-46
+bindings/unity/Runtime/Bolt/XybridInferenceMetrics.cs.meta
+  s_56e45659c49d26::t_65372fead2fc9b 1-2
+crates/xybrid-core/src/execution/tool_continuation.rs
+  s_56e45659c49d26::t_65372fead2fc9b 1-179
+bindings/react-native/example/plugins/withXybridDevAndroid.js
+  s_56e45659c49d26::t_65372fead2fc9b 15-16
+.github/workflows/test-ci.yml
+  s_56e45659c49d26::t_65372fead2fc9b 285-302
+bindings/web/src/internal/litert-lm-runtime.ts
+  s_56e45659c49d26::t_65372fead2fc9b 1-165
+justfile
+  s_56e45659c49d26::t_65372fead2fc9b 8-9,22-35,40-49
+  s_56e45659c49d26::t_88a4ac3a1d2b2f 50
+bindings/web/browser-test/inference.spec.ts
+  s_56e45659c49d26::t_65372fead2fc9b 1-15
+.github/workflows/build-flutter.yml
+  s_56e45659c49d26::t_65372fead2fc9b 45,47-52,199,201-206,222-343
+bindings/web/src/internal/registry.ts
+  s_56e45659c49d26::t_65372fead2fc9b 1-271
+bindings/unity/docs/.gitignore
+  s_56e45659c49d26::t_65372fead2fc9b 3-6
+crates/xybrid-core/src/runtime_adapter/candle/runtime.rs
+  s_56e45659c49d26::t_65372fead2fc9b 2,154-155,163-165,197-489
+crates/xybrid-core/src/runtime_adapter/mistral/mod.rs
+  s_56e45659c49d26::t_65372fead2fc9b 39-53,479,585
+docs/FEATURE_MATRIX.zh.md
+  s_56e45659c49d26::t_65372fead2fc9b 1-352
+bindings/flutter/linux/CMakeLists.txt
+  s_56e45659c49d26::t_65372fead2fc9b 11
+integration-tests/fixtures/models/models.json
+  s_56e45659c49d26::t_65372fead2fc9b 467-499
+tools/scripts/bazel-output.sh
+  s_56e45659c49d26::t_65372fead2fc9b 1-83
+bazel/toolchains/windows_msvc/declare_toolchains.bzl
+  s_56e45659c49d26::t_65372fead2fc9b 1-99
+bindings/unity/package.json
+  s_56e45659c49d26::t_65372fead2fc9b 3
+bindings/unity/Runtime/Bolt/XybridMessageRole.cs.meta
+  s_56e45659c49d26::t_65372fead2fc9b 1-2
+README.md
+  s_56e45659c49d26::t_65372fead2fc9b 20-25,31-32,36,40-43,47-48,50-52,54-56,58-61,66-70,72,74,76-85,101,113-116,124,128-129,145,162,180,194-196,199,202-204,219,336,409,417-422
+  s_56e45659c49d26::t_cc8a219925dcb4 423
+crates/xybrid-core/src/execution/strategies/llm.rs
+  s_56e45659c49d26::t_65372fead2fc9b 1,3-6,8-9,11-12,15,95-100,114,386,419,458,483,564-568
+  s_56e45659c49d26::t_03c18ecf0b3adb 220-223
+  s_56e45659c49d26::t_d89db6234d2796 26,34,307,313,332,339,494
+  s_56e45659c49d26::t_6e3e97195f04a7 93-94,113,190,385,418,457
+  s_4542096b2d7283::t_9455a2e34101aa 569-570
+bindings/unity/Runtime/Api/TelemetryConfig.cs
+  s_56e45659c49d26::t_65372fead2fc9b 2,34,83,90,92-97,100,103,116,126,140,150,163,173,188,202,214,219,234,251,261,265,267,272-273,276,323,325-328,330
+integration-tests/Cargo.toml
+  s_56e45659c49d26::t_65372fead2fc9b 10-14,33-39
+crates/xybrid-core/src/ir/envelope.rs
+  s_56e45659c49d26::t_65372fead2fc9b 1156-1167,1171-1179,1305-1355,2029-2063
+  s_56e45659c49d26::t_23d29b54ca809f 2064-2065
+bindings/kotlin/bazel/AndroidManifest.xml
+  s_56e45659c49d26::t_65372fead2fc9b 1-7
+bindings/web/example/public/model_metadata.json
+  s_56e45659c49d26::t_65372fead2fc9b 1-15
+crates/xybrid-core/BUILD.bazel
+  s_56e45659c49d26::t_65372fead2fc9b 1-211
+examples/unity/Telemetry/README.md
+  s_56e45659c49d26::t_65372fead2fc9b 135-136,139-143
+bindings/kotlin/README.md
+  s_56e45659c49d26::t_65372fead2fc9b 15,39-40,42-43,46,60,63,120-134,141,143-146,148,159-161,163,165,167,169-175,225,233,247-250,257-258,262,264-265,267-271,336,365
+bindings/flutter/CHANGELOG.md
+  s_56e45659c49d26::t_65372fead2fc9b 3-25
+bindings/unity/Runtime/Api/Envelope.cs
+  s_56e45659c49d26::t_65372fead2fc9b 6,15-17,21-22,25-26,28,30,32,40,47-48,58,65-66,68,70-74,83,90,92-95,105,112,114-120,130,138-139,149,156,158-162,168,170-171,173,177,179-183,185-196,219,224-225,227,229
+docs/FEATURE_MATRIX.md
+  s_56e45659c49d26::t_65372fead2fc9b 9-16,253-254,395-396
+examples/android/README.md
+  s_56e45659c49d26::t_65372fead2fc9b 8,10,31-36,39,139,144,148,205,249
+bindings/react-native/react-native-xybrid.podspec
+  s_56e45659c49d26::t_65372fead2fc9b 20-21,28-32
+bindings/web/src/metadata.ts
+  s_56e45659c49d26::t_65372fead2fc9b 1-155
+crates/xybrid/Cargo.toml
+  s_56e45659c49d26::t_65372fead2fc9b 17
+bindings/web/example/src/main.ts
+  s_56e45659c49d26::t_65372fead2fc9b 1-260
+bindings/react-native/README.md
+  s_56e45659c49d26::t_65372fead2fc9b 31-33,72-76
+bindings/web/test/model.test.ts
+  s_56e45659c49d26::t_65372fead2fc9b 1-539
+crates/xybrid-cli/src/commands/repl/tools.rs
+  s_56e45659c49d26::t_65372fead2fc9b 1-1291
+crates/xybrid-core/src/execution/template/metadata.rs
+  s_56e45659c49d26::t_65372fead2fc9b 10,62-70,484-498,773,838,904,932-1011,1013-1033,1052-1087
+  s_56e45659c49d26::t_b15f4e6cdf37d8 1012
+  s_56e45659c49d26::t_3f09baf33a6578 1088
+Package.swift
+  s_56e45659c49d26::t_65372fead2fc9b 17-20,29,40,45,50-57
+bindings/unity/Runtime/Api/GenerationConfig.cs
+  s_56e45659c49d26::t_65372fead2fc9b 5,20,23,32-38,41-42,44,49,56,58-62,68,70-74,81,84,94,97,104,107,114,117,124,127,134,137,144,149,152-157,159-168,171,173,175,180-181,183,185
+tools/scripts/audit_windows_dll.py
+  s_56e45659c49d26::t_65372fead2fc9b 1-272
+bindings/unity/Runtime/Bolt/XybridMetadataEntry.cs.meta
+  s_56e45659c49d26::t_65372fead2fc9b 1-2
+bindings/python/pyproject.toml
+  s_56e45659c49d26::t_65372fead2fc9b 1-27
+bindings/unity/Runtime/Bolt/XybridMetadataEntry.cs
+  s_56e45659c49d26::t_65372fead2fc9b 1-39
+crates/xybrid-cli/src/main.rs
+  s_56e45659c49d26::t_65372fead2fc9b 234-239,283-292,296-306,329-332,364-373,576,595,613,630,647,664,683,696-697,699-700,710-711,713-714,873-950
+crates/xybrid-core/src/runtime_adapter/types.rs
+  s_56e45659c49d26::t_65372fead2fc9b 14,358-371,414,497-526,734-735,738-748,861-895
+  s_56e45659c49d26::t_c728f206e1646a 896
+docs/why-bazel.md
+  s_56e45659c49d26::t_65372fead2fc9b 1-310
+bindings/python/examples/quickstart.py
+  s_56e45659c49d26::t_65372fead2fc9b 1-123
+bindings/unity/Editor/NativeLibraryBuildHook.cs
+  s_56e45659c49d26::t_65372fead2fc9b 1-53
+bindings/unity/Runtime/Bolt/XybridStreamEvent.cs
+  s_56e45659c49d26::t_65372fead2fc9b 1-42
+bindings/flutter/cargokit/build_tool/lib/src/options.dart
+  s_56e45659c49d26::t_65372fead2fc9b 239,246,300-304
+bindings/web/test/fixtures/registry-resolve-gguf-leak.json
+  s_56e45659c49d26::t_65372fead2fc9b 1-34
+macros/BUILD.bazel
+  s_56e45659c49d26::t_65372fead2fc9b 1-25
+.github/workflows/unity-activation.yml
+  s_56e45659c49d26::t_65372fead2fc9b 1-51
+crates/xybrid-core/src/runtime_adapter/llama_cpp/jinja_template.rs
+  s_56e45659c49d26::t_65372fead2fc9b 14-20,25,52-58,66,88-91,98,119-127,144,151-159,169-285,352,382,404,421-568,571
+  s_56e45659c49d26::t_1cb841459c3e6e 569-570
+examples/unity/README.md
+  s_56e45659c49d26::t_65372fead2fc9b 89-98
+bindings/unity/Runtime/BoltSupplement/XybridInference.cs.meta
+  s_56e45659c49d26::t_65372fead2fc9b 1-2
+tools/unity-runtime-smoke/.gitignore
+  s_56e45659c49d26::t_65372fead2fc9b 1-15
+bindings/python/xybrid/py.typed
+  s_56e45659c49d26::t_65372fead2fc9b 1
+bindings/kotlin/BUILD.bazel
+  s_56e45659c49d26::t_65372fead2fc9b 1-128
+bindings/unity/Runtime/Bolt/XybridModel.cs
+  s_56e45659c49d26::t_65372fead2fc9b 1-272
+bindings/unity/Runtime/Bolt/XybridTelemetryConfig.cs
+  s_56e45659c49d26::t_65372fead2fc9b 1-148
+bindings/unity/Runtime/Bolt/XybridBundle.cs.meta
+  s_56e45659c49d26::t_65372fead2fc9b 1-2
+docs/content/docs/cli/reference/repl.mdx
+  s_56e45659c49d26::t_65372fead2fc9b 1-91
+examples/ios/README.md
+  s_56e45659c49d26::t_65372fead2fc9b 39-43,219,224
+bindings/web/example/index.html
+  s_56e45659c49d26::t_65372fead2fc9b 1-124
+bindings/unity/Runtime/Bolt/XybridThermalState.cs
+  s_56e45659c49d26::t_65372fead2fc9b 1-42
+tools/unity-bolt-compile-check/UnityBoltCompileCheck.csproj
+  s_56e45659c49d26::t_65372fead2fc9b 1-43
+bindings/web/package.json
+  s_56e45659c49d26::t_65372fead2fc9b 1-46
+crates/xybrid-core/src/runtime_adapter/streaming_postprocess.rs
+  s_56e45659c49d26::t_65372fead2fc9b 21-22,79-89,91-108,143-149,152,156,159-171,174,176-177,183-186,192-214,269-271,280-284,287-288,297,300-301,314-315,320-327,333-341,343,362,371-384,389-391,403-406,420,422-434,444-489,507-544,549-589,649-677,716-717,734-892,986-1006
+  s_56e45659c49d26::t_0adcabf2b6d573 1007
+bazel/windows_msvc_smoke/main.cc
+  s_56e45659c49d26::t_65372fead2fc9b 1-11
+bindings/react-native/.gitignore
+  s_56e45659c49d26::t_65372fead2fc9b 11-12,14
+Cargo.toml
+  s_56e45659c49d26::t_65372fead2fc9b 21
+bindings/web/src/internal/response.ts
+  s_56e45659c49d26::t_65372fead2fc9b 1-97
+spike/main.rs
+  s_56e45659c49d26::t_65372fead2fc9b 1-3
+bindings/web/src/internal/verified-download.ts
+  s_56e45659c49d26::t_65372fead2fc9b 1-82
+.bazelrc
+  s_56e45659c49d26::t_65372fead2fc9b 1-125
+crates/xybrid-core/Cargo.toml
+  s_56e45659c49d26::t_65372fead2fc9b 28-29,59-70,99,136-142,147,217-222,230,242-251,294-301,313-318
+crates/xybrid-sdk/src/result.rs
+  s_56e45659c49d26::t_65372fead2fc9b 8,248-263,411-466
+  s_56e45659c49d26::t_796f122ac6e1cc 467
+bindings/web/src/internal/url.ts
+  s_56e45659c49d26::t_65372fead2fc9b 1-42
+bindings/flutter/cargokit/build_tool/lib/src/artifacts_provider.dart
+  s_56e45659c49d26::t_65372fead2fc9b 56-77,88-101,135-188,191,311-352
+  s_56e45659c49d26::t_2dba8f1c279953 353-354
+crates/xybrid-core/src/runtime_adapter/llm.rs
+  s_56e45659c49d26::t_65372fead2fc9b 188-207,1094-1148
+  s_56e45659c49d26::t_c143f31adae879 1149
+docs/content/docs/(integration)/sdks/kotlin.mdx
+  s_56e45659c49d26::t_65372fead2fc9b 51,75-76,98-109
+bindings/unity/Runtime/Api/InferenceResult.cs
+  s_56e45659c49d26::t_65372fead2fc9b 32-33,69-70,72-73,75-76,78-79,81-82,84-85,91,93-94,96-97,99-100,102-103,105-113,115-123,125-131,133-141,144-153,155-173,175-182,184,186-189,191,194-201,210,212,217-218,220,222,225,228-231
+tools/scripts/tests/test_stage_unity_desktop_ort.py
+  s_56e45659c49d26::t_65372fead2fc9b 1-135
+bindings/web/pnpm-workspace.yaml
+  s_56e45659c49d26::t_65372fead2fc9b 1-2
+crates/xybrid-sdk/src/model.rs
+  s_56e45659c49d26::t_65372fead2fc9b 420,517-520,543,605-644,897,900-926,936,948-951,957-958,1090-1151,1316-1320,1760,1765-1769,1771-1778,1780-1781,1783,1788,1793-1799,1982-1995,1997-2000,2180-2193,2232-2252,3395-3397,3447-3450,3465,3910-4065,4067-4078,4083-4121,5165-5177,5179-5186,5188-5193,5209-5284,5431,5492-5547,5618,5649-5717,5749,5819,5868,6534,6593,6631,6669,6709,6755
+  s_56e45659c49d26::t_5e8c13c41522d7 1965
+  s_da9b0a0afc6e02::t_a62dd49f43a6f1 4066
+crates/xybrid-core/examples/gemma4_e2b_tools.rs
+  s_56e45659c49d26::t_65372fead2fc9b 1-241
+docs/content/docs/(integration)/sdks/flutter.mdx
+  s_56e45659c49d26::t_65372fead2fc9b 14
+bindings/python/xybrid/_bolt.py
+  s_56e45659c49d26::t_65372fead2fc9b 1-1555
+crates/xybrid-bolt/src/lib.rs
+  s_56e45659c49d26::t_65372fead2fc9b 35-39,44-46,473-538,651-656,661-662,676-692,702,709,716,724-732,755-759,804-958,968-1203,1265-1280
+integration-tests/tests/asr_integration.rs
+  s_56e45659c49d26::t_65372fead2fc9b 19,56,91,123,176
+bindings/web/example/scripts/prepare-assets.ts
+  s_56e45659c49d26::t_65372fead2fc9b 1-124
+docs/content/docs/guides/reasoning.mdx
+  s_56e45659c49d26::t_65372fead2fc9b 1-160
+bindings/kotlin/.gitignore
+  s_56e45659c49d26::t_65372fead2fc9b 2-3
+bindings/unity/Runtime/Api/ConversationContext.cs
+  s_56e45659c49d26::t_65372fead2fc9b 27-29,34,37-38,43,47-51,56,60-61,66,70-71,76,80-81,83,86,89,95,99,104-105,113,115-119,128,131,142,150,152-156,164,167,170-172,181-182,186,191,195,197
+crates/xybrid-core/src/executor.rs
+  s_56e45659c49d26::t_65372fead2fc9b 1068-1075
+bindings/flutter/cargokit/build_tool/lib/src/build_tool.dart
+  s_56e45659c49d26::t_65372fead2fc9b 133-139,198-219,230
+crates/xybrid-cli/BUILD.bazel
+  s_56e45659c49d26::t_65372fead2fc9b 1-83
+docs/content/docs/guides/tool-calling.zh.mdx
+  s_56e45659c49d26::t_65372fead2fc9b 1-209
+bindings/web/tsconfig.json
+  s_56e45659c49d26::t_65372fead2fc9b 1-25
+crates/xybrid-core/src/execution/strategies/mod.rs
+  s_56e45659c49d26::t_65372fead2fc9b 1,3-7,9-10,21,36,70-71,98-104
+bazel/BUILD.bazel
+  s_56e45659c49d26::t_65372fead2fc9b 1-2
+bindings/unity/Runtime/Bolt/XybridConversationContext.cs.meta
+  s_56e45659c49d26::t_65372fead2fc9b 1-2
+examples/README.md
+  s_56e45659c49d26::t_65372fead2fc9b 9,17-32,97-99,146-151,190-199,202,222,224-226
+tools/unity-runtime-smoke/ProjectSettings/ProjectVersion.txt
+  s_56e45659c49d26::t_65372fead2fc9b 1-2
+bindings/kotlin/consumer-smoke/app/src/main/kotlin/ai/xybrid/smoke/Smoke.kt
+  s_56e45659c49d26::t_65372fead2fc9b 1-13
+bazel/toolchains/windows_msvc/case_insensitivity.bzl
+  s_56e45659c49d26::t_65372fead2fc9b 1-104
+bindings/unity/Runtime/Bolt/XybridError.cs.meta
+  s_56e45659c49d26::t_65372fead2fc9b 1-2
+bazel/toolchains/windows_msvc/link/BUILD.bazel
+  s_56e45659c49d26::t_65372fead2fc9b 1-305
+bindings/unity/Runtime/Bolt/IsExternalInit.cs
+  s_56e45659c49d26::t_65372fead2fc9b 1-10
+bindings/unity/Runtime/Bolt/XybridAbortSignal.cs
+  s_56e45659c49d26::t_65372fead2fc9b 1-42
+bindings/web/test/llm.test.ts
+  s_56e45659c49d26::t_65372fead2fc9b 1-625
+crates/llama-cpp-sys/Cargo.toml
+  s_56e45659c49d26::t_65372fead2fc9b 28-33
+crates/xybrid-sdk/Cargo.toml
+  s_56e45659c49d26::t_65372fead2fc9b 17,31,37,42,57-60
+docs/content/docs/guides/tool-calling.mdx
+  s_56e45659c49d26::t_65372fead2fc9b 1-226
+integration-tests/src/fixtures.rs
+  s_56e45659c49d26::t_65372fead2fc9b 4-8,10-12,75-98
+  s_56e45659c49d26::t_e67da2779059e7 99-100
+bindings/unity/Runtime/BoltSupplement.meta
+  s_56e45659c49d26::t_65372fead2fc9b 1-8
+bindings/web/BUILD.bazel
+  s_56e45659c49d26::t_65372fead2fc9b 1-13
+rules_foreign_cc.patch
+  s_56e45659c49d26::t_65372fead2fc9b 1-250
+crates/llama-cpp-sys/build.rs
+  s_56e45659c49d26::t_65372fead2fc9b 195-214
+xtask/BUILD.bazel
+  s_56e45659c49d26::t_65372fead2fc9b 1-23
+bindings/web/tsdown.config.ts
+  s_56e45659c49d26::t_65372fead2fc9b 1-9
+crates/xybrid-core/src/runtime_adapter/onnx/mod.rs
+  s_56e45659c49d26::t_65372fead2fc9b 35-75
+bindings/web/src/model.ts
+  s_56e45659c49d26::t_65372fead2fc9b 1-418
+bindings/web/src/internal/input.ts
+  s_56e45659c49d26::t_65372fead2fc9b 1-136
+crates/xybrid-core/src/runtime_adapter/onnx/session.rs
+  s_56e45659c49d26::t_65372fead2fc9b 647-654
+bindings/web/test/huggingface.test.ts
+  s_56e45659c49d26::t_65372fead2fc9b 1-437
+bindings/unity/README.md
+  s_56e45659c49d26::t_65372fead2fc9b 7-10,12,14,16-33,37-43,45,50-53,56-66,68,80,82-89,91,93-96,98-100,258,270-271,274,281,284,308-311,326,328-331
+README.ja-JP.md
+  s_56e45659c49d26::t_65372fead2fc9b 20-25,32-34,36,40-43,47-48,50-52,54-56,58-61,64-70,72,74,76-85,157,174,192,206,209,226
+bindings/web/.gitignore
+  s_56e45659c49d26::t_65372fead2fc9b 1-9
+docs/content/docs/(integration)/sdks/web.mdx
+  s_56e45659c49d26::t_65372fead2fc9b 1-206
+bindings/web/example/src/style.css
+  s_56e45659c49d26::t_65372fead2fc9b 1-397
+bindings/web/example/DESIGN.md
+  s_56e45659c49d26::t_65372fead2fc9b 1-112
+docs/content/docs/(integration)/sdks/android.zh.mdx
+  s_56e45659c49d26::t_65372fead2fc9b 14
+bindings/unity/Runtime/Api/XybridException.cs
+  s_56e45659c49d26::t_65372fead2fc9b 66-139
+bindings/unity/Tests/Editor/Xybrid.SDK.Tests.Editor.asmdef
+  s_56e45659c49d26::t_65372fead2fc9b 6
+docs/content/docs/guides/meta.json
+  s_56e45659c49d26::t_65372fead2fc9b 6
+MODULE.bazel
+  s_56e45659c49d26::t_65372fead2fc9b 1-456
+tools/scripts/stage_unity_desktop_ort.py
+  s_56e45659c49d26::t_65372fead2fc9b 1-228
+bindings/python/setup.py
+  s_56e45659c49d26::t_65372fead2fc9b 1-61
+.github/workflows/build-apple.yml
+  s_56e45659c49d26::t_65372fead2fc9b 12-21,28-31,40-46,70-82,84-95,97-101,105-120,135-138
+bindings/web/README.md
+  s_56e45659c49d26::t_65372fead2fc9b 1-135
+CONTRIBUTING.md
+  s_56e45659c49d26::t_65372fead2fc9b 21-50,54-55,60-61,63,71,74-82,85-102
+  s_56e45659c49d26::t_8b4d55b8b725e1 103
+bazel/windows_msvc_smoke/smoke.cc
+  s_56e45659c49d26::t_65372fead2fc9b 1-33
+bindings/python/xybrid/__init__.py
+  s_56e45659c49d26::t_65372fead2fc9b 1-101
+bindings/web/src/llm.ts
+  s_56e45659c49d26::t_65372fead2fc9b 1-380
+crates/xybrid-cli/Cargo.toml
+  s_56e45659c49d26::t_65372fead2fc9b 68-69
+crates/xybrid-llama/BUILD.bazel
+  s_56e45659c49d26::t_65372fead2fc9b 1-84
+docs/content/docs/guides/vision-models.mdx
+  s_56e45659c49d26::t_65372fead2fc9b 105,108
+bindings/unity/Runtime/Api/BundleReader.cs
+  s_56e45659c49d26::t_65372fead2fc9b 2,43,89,91-99,109,114-129,131-136,138,140,150,154,156-161,171,175,177-182,192,195,222,229,231-236,251,253-259,261-268,270-271,276
+docs/vercel.json
+  s_56e45659c49d26::t_65372fead2fc9b 1-3
+tools/unity-runtime-smoke/Packages/manifest.json
+  s_56e45659c49d26::t_65372fead2fc9b 1-9
+.bazelversion
+  s_56e45659c49d26::t_65372fead2fc9b 1
+bindings/kotlin/consumer-smoke/gradle.properties
+  s_56e45659c49d26::t_65372fead2fc9b 1
+.gitignore
+  s_56e45659c49d26::t_65372fead2fc9b 38-40,54,64-70,75-80
+rules_android_ndk.patch
+  s_56e45659c49d26::t_65372fead2fc9b 1-98
+bindings/unity/Runtime/Bolt/XybridStreamEventKind.cs
+  s_56e45659c49d26::t_65372fead2fc9b 1-36
+tools/scripts/tests/test_stage_unity_native.py
+  s_56e45659c49d26::t_65372fead2fc9b 1-164
+crates/xybrid-sdk/BUILD.bazel
+  s_56e45659c49d26::t_65372fead2fc9b 1-179
+tools/scripts/verify_bolt_load.py
+  s_56e45659c49d26::t_65372fead2fc9b 1-89
+bindings/unity/Runtime/Bolt/XybridModel.cs.meta
+  s_56e45659c49d26::t_65372fead2fc9b 1-2
+docs/content/docs/(integration)/sdks/flutter.zh.mdx
+  s_56e45659c49d26::t_65372fead2fc9b 14
+bindings/flutter/pubspec.yaml
+  s_56e45659c49d26::t_65372fead2fc9b 3
+tools/scripts/tests/test_verify_bolt_load.py
+  s_56e45659c49d26::t_65372fead2fc9b 1-95
+bindings/unity/Runtime/Bolt/XybridStageLatency.cs.meta
+  s_56e45659c49d26::t_65372fead2fc9b 1-2
+docs/content/docs/introduction.zh.mdx
+  s_56e45659c49d26::t_65372fead2fc9b 27
+tools/unity-runtime-smoke/Assets/Editor/Builder.cs
+  s_56e45659c49d26::t_65372fead2fc9b 1-77
+bazel/windows_msvc_smoke/BUILD.bazel
+  s_56e45659c49d26::t_65372fead2fc9b 1-36
+bindings/unity/Runtime/Bolt/XybridThermalState.cs.meta
+  s_56e45659c49d26::t_65372fead2fc9b 1-2
+bindings/unity/Runtime/Bolt/XybridInferenceMetrics.cs
+  s_56e45659c49d26::t_65372fead2fc9b 1-53
+AGENTS.md
+  s_56e45659c49d26::t_65372fead2fc9b 100,110-117,123,286,381
+.github/workflows/build-unity.yml
+  s_56e45659c49d26::t_65372fead2fc9b 28,54-60,62-84,87,108,111-114,120,122-124,126-129,131-148,151,153-171,190-197,199,201-212,215,220-226,248-258,260-263,265-282,297,320-326,328-329,340-349,352,376,415-429,437-443,445,447-499,501-502,504,508-511,514,517,519-520,522-524
+bindings/apple/README.md
+  s_56e45659c49d26::t_65372fead2fc9b 15,22,40-41,61-76,81,129-130,149,154-158,161,163-164,169,177-182,203,221
+bindings/unity/Runtime/Bolt/XybridRunOptions.cs
+  s_56e45659c49d26::t_65372fead2fc9b 1-46
+bindings/unity/Runtime/Bolt.meta
+  s_56e45659c49d26::t_65372fead2fc9b 1-8
+bindings/unity/Runtime/Bolt/XybridVoiceInfo.cs.meta
+  s_56e45659c49d26::t_65372fead2fc9b 1-2
+bindings/web/src/internal/huggingface.ts
+  s_56e45659c49d26::t_65372fead2fc9b 1-306
+bindings/web/src/internal/initialization.ts
+  s_56e45659c49d26::t_65372fead2fc9b 1-38
+bindings/web/src/internal/litert-runtime.ts
+  s_56e45659c49d26::t_65372fead2fc9b 1-162
+crates/xybrid-cli/src/commands/repl.rs
+  s_56e45659c49d26::t_65372fead2fc9b 5,7,34,47-48,50-51,83-84,173,198-230,232,235-266,304,314-375,381,395-401,431,450,617-730,758,764-766,783-786,846-909,948,956-962,975-980,1021,1039-1046,1059-1066,1097,1111-1115,1118,1133,1150,1153,1156-1159,1223,1231-1237,1241-1248,1250,1300-1310,1315,1325,1334-1357,1366-1367,1392-1393
+crates/xybrid-sdk/src/lib.rs
+  s_56e45659c49d26::t_65372fead2fc9b 186-187
+crates/xybrid-core/src/gateway/mod.rs
+  s_56e45659c49d26::t_65372fead2fc9b 83-84
+bindings/unity/Tests/Editor/NativeLibraryResolverTests.cs
+  s_56e45659c49d26::t_65372fead2fc9b 1-81
+crates/xybrid-core/src/runtime_adapter/tool_call/cursor.rs
+  s_56e45659c49d26::t_65372fead2fc9b 1-120
+bindings/unity/Runtime/Bolt/XybridAbortSignal.cs.meta
+  s_56e45659c49d26::t_65372fead2fc9b 1-2
+bindings/unity/Runtime/Bolt/XybridTelemetryConfig.cs.meta
+  s_56e45659c49d26::t_65372fead2fc9b 1-2
+xtask/src/main.rs
+  s_56e45659c49d26::t_65372fead2fc9b 226,246,248-254,256,258,260,286,308-315,320,418,420-422,439,444,449,456,463-466,476,478,486-491,494,532,536,538,543,545,606,611-612,653-654,666,674,806,889-897,915,920,945,1426-1441,1443-1448,1450-1461,1464-1465,1467-1476,1478-1479,1481-1487,1489,1492-1494,1497-1500,1503-1514,1517-1518,1520-1525,1527-1532,1535-1539,1542-1552,1554-1555,1558
+crates/xybrid-ffi-facade/src/lib.rs
+  s_56e45659c49d26::t_65372fead2fc9b 41-42,594-625,700-701,728-736,793-795,797-805,815,930-1002,1184-1231,1290-1294,1338,1359-1361,1380-1470,1577-1865,2051-2069,2110-2121,2131-2185,2230-2282
+crates/xybrid/BUILD.bazel
+  s_56e45659c49d26::t_65372fead2fc9b 1-13
+crates/xybrid-sdk/tests/from_directory_test.rs
+  s_56e45659c49d26::t_65372fead2fc9b 8-14
+bindings/web/browser-test/llm.spec.ts
+  s_56e45659c49d26::t_65372fead2fc9b 1-104
+integration-tests/tests/context_budget_clamp.rs
+  s_56e45659c49d26::t_65372fead2fc9b 1-109
+tools/unity-runtime-smoke/Assets/Editor/Builder.cs.meta
+  s_56e45659c49d26::t_65372fead2fc9b 1-2
+rules_rust.patch
+  s_56e45659c49d26::t_65372fead2fc9b 1-15
+hermetic_llvm.patch
+  s_56e45659c49d26::t_65372fead2fc9b 1-240
+tools/scripts/tests/test_bazel_output.py
+  s_56e45659c49d26::t_65372fead2fc9b 1-132
+docs/content/docs/(integration)/sdks/meta.json
+  s_56e45659c49d26::t_65372fead2fc9b 3
+crates/xybrid-cli/src/commands/utils.rs
+  s_56e45659c49d26::t_65372fead2fc9b 4-36,119-146
+tools/scripts/tests/test_audit_windows_dll.py
+  s_56e45659c49d26::t_65372fead2fc9b 1-115
+crates/xybrid-core/src/runtime_adapter/mod.rs
+  s_56e45659c49d26::t_65372fead2fc9b 58-61,419-441
+  s_56e45659c49d26::t_51fd5ce18c23cd 442
+crates/xybrid-core/tests/legacy_cache_names.rs
+  s_56e45659c49d26::t_65372fead2fc9b 22-27
+bindings/unity/Runtime/Bolt/XybridStreamToken.cs
+  s_56e45659c49d26::t_65372fead2fc9b 1-45
+crates/xybrid-core/src/execution/postprocessing/tensor_ops.rs
+  s_56e45659c49d26::t_65372fead2fc9b 58
+docs/content/docs/guides/vision-models.zh.mdx
+  s_56e45659c49d26::t_65372fead2fc9b 1-280
+crates/xybrid-cli/src/commands/run.rs
+  s_56e45659c49d26::t_65372fead2fc9b 27,44,64,253,267-273,296-301,540,674,714,796,921,965,987,1030,1057-1058,1074,1117,1172,1231,1265,1446,1627-1628,1760-1761,1780-1781
+docs/sdk/model_metadata.schema.json
+  s_56e45659c49d26::t_65372fead2fc9b 84-94,361-389,442-453,465-664,1084-1120,1307-1408,1467-1528,1554-1585,1734-1804,1863-1897
+tools/scripts/gen_unity_bolt_csharp.py
+  s_56e45659c49d26::t_65372fead2fc9b 1-468
+crates/xybrid-bolt/boltffi.toml
+  s_56e45659c49d26::t_65372fead2fc9b 110-119,123,127-137,140
+examples/unity/starter/Assets/Plugins/README.md
+  s_56e45659c49d26::t_65372fead2fc9b 13-23
+.github/workflows/release-publish.yml
+  s_56e45659c49d26::t_65372fead2fc9b 361-400
+bindings/unity/Editor/NativeLibraryBuildHook.cs.meta
+  s_56e45659c49d26::t_65372fead2fc9b 1-2
+bindings/unity/Runtime/Bolt/XybridMessageRole.cs
+  s_56e45659c49d26::t_65372fead2fc9b 1-39
+bindings/python/tests/test_bolt.py
+  s_56e45659c49d26::t_65372fead2fc9b 1-122
+bindings/apple/XybridFFI-Info.plist
+  s_56e45659c49d26::t_65372fead2fc9b 1-14
+bindings/web/src/errors.ts
+  s_56e45659c49d26::t_65372fead2fc9b 1-130
+tools/scripts/write-buildbuddy-rc.sh
+  s_56e45659c49d26::t_65372fead2fc9b 1-92
+bindings/unity/Editor/NativeLibraryResolver.cs
+  s_56e45659c49d26::t_65372fead2fc9b 1-412
+tools/unity-bolt-compile-check/.gitignore
+  s_56e45659c49d26::t_65372fead2fc9b 1-2
+bindings/web/test/helpers.ts
+  s_56e45659c49d26::t_65372fead2fc9b 1-237
+bindings/unity/Runtime/Bolt/IsExternalInit.cs.meta
+  s_56e45659c49d26::t_65372fead2fc9b 1-2
+bindings/web/example/public/llm/model_metadata.json
+  s_56e45659c49d26::t_65372fead2fc9b 1-16
+.github/workflows/release-prep.yml
+  s_56e45659c49d26::t_65372fead2fc9b 41-56,78,94,101-104,108-122,126-129,134,137-138,154,159-167,186-187,199-208,210-214,216-217,225-230,247-248,258-262,264-266,268-271,273-315,323-325,335-341,345-351,363-365,367-368,370-373,375-378,380-392,400-403,407-408,424-425,437-443,445-447,449-452,454-460,488-489,499-503,508,558-609,614-618,631-640,647-648,652-657,663,665-667,671-674,676-740,746-749,758-761,766-776,778,788-792,794-797,799,801,803-834,836,838-842,844-872,874-899,906-908,911-913,921,924-950,960-961,1007-1009,1018-1020,1063,1128-1129,1171-1172,1225-1269
+bindings/unity/Editor/NativeLibraryResolver.cs.meta
+  s_56e45659c49d26::t_65372fead2fc9b 1-2
+crates/xybrid-core/src/runtime_adapter/llama_cpp/chat.rs
+  s_56e45659c49d26::t_65372fead2fc9b 2-10,12-13,15,28-35,40,42-56,58-59,101,115-240,272-331
+spike/BUILD.bazel
+  s_56e45659c49d26::t_65372fead2fc9b 1-10
+bindings/kotlin/src/main/kotlin/ai/xybrid/Xybrid.kt
+  s_56e45659c49d26::t_65372fead2fc9b 152-158,213-280
+  s_56e45659c49d26::t_250e65071d9ada 281
+bindings/unity/Runtime/Plugins/.gitignore
+  s_56e45659c49d26::t_65372fead2fc9b 1-6,11
+integration-tests/tests/reasoning_budget.rs
+  s_56e45659c49d26::t_65372fead2fc9b 1-85
+crates/xybrid-core/src/runtime_adapter/mlx/generate.rs
+  s_56e45659c49d26::t_1ef83af95949b5 959,983
+bindings/python/README.md
+  s_56e45659c49d26::t_65372fead2fc9b 1-171
+.github/workflows/test-candle.yml
+  s_56e45659c49d26::t_65372fead2fc9b 13,15,22,24,53-105
+crates/xybrid-core/src/runtime_adapter/tool_call/mod.rs
+  s_56e45659c49d26::t_65372fead2fc9b 1-787
+bindings/unity/Runtime/BoltSupplement/XybridInference.cs
+  s_56e45659c49d26::t_65372fead2fc9b 1-560
+docs/content/docs/concepts/models.mdx
+  s_56e45659c49d26::t_65372fead2fc9b 91
+bindings/flutter/rust/BUILD.bazel
+  s_56e45659c49d26::t_65372fead2fc9b 1-82
+crates/xybrid-core/examples/lfm2_230m_tools.rs
+  s_56e45659c49d26::t_65372fead2fc9b 1-227
+bindings/web/src/types.ts
+  s_56e45659c49d26::t_65372fead2fc9b 1-65
+agents/skills/xybrid-init/SKILL.md
+  s_56e45659c49d26::t_65372fead2fc9b 91-93
+bindings/web/test/metadata.test.ts
+  s_56e45659c49d26::t_65372fead2fc9b 1-281
+bindings/apple/include/xybrid-bolt.h
+  s_56e45659c49d26::t_65372fead2fc9b 1-58
+.agents/skills/xybrid-init/SKILL.md
+  s_56e45659c49d26::t_65372fead2fc9b 1-335
+.github/workflows/release-dryrun.yml
+  s_56e45659c49d26::t_65372fead2fc9b 4-12,19,45-46,87-88,272
+.github/workflows/build-react-native.yml
+  s_56e45659c49d26::t_65372fead2fc9b 51-55,59-63,67,69-71,73-82,84-85,87-90,92-110,217-221,224-233,238-240,264-273,280-285,287-288,290-293,295-301
+bindings/unity/Runtime/Api/Model.cs
+  s_56e45659c49d26::t_65372fead2fc9b 17,19-20,22,25,28,30-31,39,41-43,51,62-65,78-81,93-94,107,110-112,124,136-139,146-147,152,156-157,159-160,165-166,171-172,174,184-186,188,203-204,218-219,230-232,234,239,245,248-249,252-254,259,261,263,265-266,275,278-280,284,286,289,291,293,295-297,305-308,316-319,323,326-332,336-342,344,346,350-376,378,380,382-393,395-397,399,410-411,415,420
+bindings/kotlin/libs/.gitignore
+  s_56e45659c49d26::t_65372fead2fc9b 1-2
+bindings/python/tests/test_sdk.py
+  s_56e45659c49d26::t_65372fead2fc9b 1-148
+bindings/kotlin/consumer-smoke/app/build.gradle.kts
+  s_56e45659c49d26::t_65372fead2fc9b 1-33
+bindings/unity/Runtime/Bolt/XybridStreamEventKind.cs.meta
+  s_56e45659c49d26::t_65372fead2fc9b 1-2
+tools/unity-runtime-smoke/Assets/Editor.meta
+  s_56e45659c49d26::t_65372fead2fc9b 1-8
+bazel/ort_ios_sim.bzl
+  s_56e45659c49d26::t_65372fead2fc9b 1-110
+bindings/unity/Runtime/Bolt/XybridStageLatency.cs
+  s_56e45659c49d26::t_65372fead2fc9b 1-33
+crates/xybrid-ffi-facade/BUILD.bazel
+  s_56e45659c49d26::t_65372fead2fc9b 1-29
+crates/xybrid-llama/Cargo.toml
+  s_56e45659c49d26::t_65372fead2fc9b 24
+docs/content/docs/(integration)/sdks/web.zh.mdx
+  s_56e45659c49d26::t_65372fead2fc9b 1-206
+README.zh-CN.md
+  s_56e45659c49d26::t_65372fead2fc9b 20-25,32-34,36,40-43,47-48,50-52,54-56,58-61,64-70,72,74,76-85,100,157,174,192,206,209,226,237,321
+bindings/web/test/fixtures/rust-metadata-litertlm.json
+  s_56e45659c49d26::t_65372fead2fc9b 1-14
+tools/windows-smoke/Program.cs
+  s_56e45659c49d26::t_65372fead2fc9b 1-85
+docs/content/docs/(integration)/sdks/meta.zh.json
+  s_56e45659c49d26::t_65372fead2fc9b 3
+Cargo.lock
+  s_56e45659c49d26::t_4c5e4c07c3f88f 524,862-878,949-950,959,1090,1122,1135-1143,1162,1260,1394,1526,1759,2149,2152,2174,2177-2178,2276,2282,2470,2725,2728,2730,2735,2738,2764,3001-3006,3122,3137,3192,3441,3627-3628,3630,3633-3634,3636,3638-3643,3647-3648,3765,3874,4041-4096,4139-4149,4188-4193,4204-4212,4404-4405,4410,4412,4422,4457-4462,4511,4684,4704,5264,5288,5857,5891,6003,6048,6057,6075-6077,6079-6082,6175,6178,6189,6196,6205,6209,6213,6229,6237,6249,6251,6256,6306,6308,6316,6325,6334,6343,6353,6357-6358,6381,6560,6574
+bindings/web/pnpm-lock.yaml
+  s_56e45659c49d26::t_04665679ecb9e8 1-1462
+vendor/ort-android/README.md
+  s_56e45659c49d26::t_6cd9cbc6b3158a 28,37
+vendor/ort-ios/README.md
+  s_56e45659c49d26::t_f8a45709c629a2 29
+vendor/ort-macos/README.md
+  s_56e45659c49d26::t_7597d180a26511 1,3-4,6-7,9-12
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "62f99c2a205d8013bd7cb2ccef77143e485aac9f",
+  "prompts": {},
+  "sessions": {
+    "s_4542096b2d7283": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9426035b-8877-4b8c-a503-776f9800ca8d",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    },
+    "s_56e45659c49d26": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "87c220f5-c727-4496-bded-5509074d746c",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    },
+    "s_da9b0a0afc6e02": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "eec73ce8-5f6c-46f7-aa93-411f75c33cc9",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
