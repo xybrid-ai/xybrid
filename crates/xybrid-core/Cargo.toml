@@ -79,7 +79,7 @@ yuvutils-rs = { version = "0.8.3", default-features = false }  # For raw YUV cam
 # static_crt(true) on MSVC, producing /MT objects that conflict with ORT's /MD.
 # We only run tokenizer models, we don't train them — esaxx-rs is only for BPE training.
 tokenizers = { version = "0.22", default-features = false, features = ["onig"] }
-schemars = { version = "0.8", optional = true }  # JSON Schema generation for model_metadata.json
+schemars = { version = "1.0", optional = true }  # JSON Schema generation for model_metadata.json
 hound = "3.5"  # For WAV file reading (audio preprocessing)
 cmudict-fast = "0.8"  # For CMU pronouncing dictionary (TTS phonemization)
 lazy_static = "1.4"  # For static CMU dictionary initialization
