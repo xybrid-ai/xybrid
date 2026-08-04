@@ -1,13 +1,14 @@
-//! Execution strategy trait and the live codec-TTS strategy.
+//! Execution strategy trait and the live strategies.
 //!
 //! Defines the [`ExecutionStrategy`] trait and [`ExecutionContext`], plus the
-//! one strategy that is actually wired into the executor: [`CodecTtsStrategy`]
-//! (GGUF backbone + ONNX codec decoder). The `llm` submodule provides the LLM
-//! inference infrastructure ([`LlmInference`], generation/model config) that
-//! [`CodecTtsStrategy`] builds on.
+//! strategies that are actually wired into the executor: [`CodecTtsStrategy`]
+//! (GGUF backbone + ONNX codec decoder) and, under the `llm-mlx` feature,
+//! [`MlxEmbeddingStrategy`] (MLX SafeTensors embedding models). The `llm`
+//! submodule provides the LLM inference infrastructure ([`LlmInference`],
+//! generation/model config) that [`CodecTtsStrategy`] builds on.
 //!
-//! `CodecTtsStrategy` implements [`ExecutionStrategy`]; the executor dispatches
-//! to it from `TemplateExecutor::execute_impl` (see `executor.rs`).
+//! Both strategies implement [`ExecutionStrategy`]; the executor dispatches
+//! to them from `TemplateExecutor::execute_impl` (see `executor.rs`).
 
 #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp", feature = "llm-mlx"))]
 mod llm;
@@ -18,7 +19,7 @@ mod mlx_embedding;
 // Codec TTS depends on LLM infrastructure (same feature gate)
 mod codec_tts;
 
-#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp", feature = "llm-mlx"))]
 #[allow(unused_imports)]
 pub use llm::{LlmGenerationParams, LlmInference, LlmModelConfig};
 
@@ -68,7 +69,8 @@ impl<'a> ExecutionContext<'a> {
 /// Trait for execution strategies.
 ///
 /// Strategies encapsulate the logic for executing a specific model pattern.
-/// Implemented today by [`CodecTtsStrategy`] (GGUF backbone + ONNX codec decoder).
+/// Implemented today by [`CodecTtsStrategy`] (GGUF backbone + ONNX codec
+/// decoder) and, under `llm-mlx`, [`MlxEmbeddingStrategy`].
 pub trait ExecutionStrategy: Send + Sync {
     /// Check if this strategy can handle the given metadata.
     fn can_handle(&self, metadata: &ModelMetadata) -> bool;

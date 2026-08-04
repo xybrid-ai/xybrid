@@ -67,7 +67,7 @@ fn oracle_config() -> GenerationConfig {
         repetition_penalty: 1.0,
         seed: None,
         stop_sequences: Vec::new(),
-        grammar: None,
+        ..Default::default()
     }
 }
 

@@ -1,0 +1,23 @@
+# mlx-c-sys — raw FFI bindings to mlx-c (Apple Silicon MLX).
+#
+# Bazel builds the NON-LINKING tier only: without the `bindings` cargo feature
+# this crate compiles to an empty shell on every target (see src/lib.rs), so no
+# bindgen build script and no mlx.xcframework link step are needed here. The
+# linked runtime (`bindings`) stays a cargo-only concern on Apple Silicon
+# macOS (CI job: check (llm-mlx-runtime, macos-14)).
+load("@rules_rs//rs:rust_library.bzl", "rust_library")
+
+rust_library(
+    name = "mlx_c_sys",
+    srcs = glob(["src/**/*.rs"]),
+    edition = "2021",
+    visibility = ["//visibility:public"],
+)
+
+# Dir-basename alias so `//crates/mlx-c-sys` (the label all_crate_deps()
+# emits for xybrid-mlx) resolves to the target above.
+alias(
+    name = "mlx-c-sys",
+    actual = ":mlx_c_sys",
+    visibility = ["//visibility:public"],
+)

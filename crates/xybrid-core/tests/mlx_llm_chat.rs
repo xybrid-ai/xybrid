@@ -86,7 +86,7 @@ fn short_greedy_config() -> GenerationConfig {
         repetition_penalty: 1.0,
         seed: None,
         stop_sequences: Vec::new(),
-        grammar: None,
+        ..Default::default()
     }
 }
 
@@ -349,6 +349,41 @@ fn synthetic_gemma_long_context_crosses_sliding_mask_and_cache_page_boundaries()
 }
 
 #[test]
+fn synthetic_gemma_shared_sliding_kv_prefill_uses_current_source_kv() {
+    let _guard = mlx_test_lock();
+    let tmp = tempfile::tempdir().expect("tempdir");
+    const CONTEXT: usize = 64;
+    const PROMPT_TOKENS: usize = 8;
+    write_synthetic_gemma_shared_sliding_bundle(tmp.path(), CONTEXT);
+
+    let prompt = long_wordlevel_prompt(PROMPT_TOKENS);
+    let tokenizer = tokenizers::Tokenizer::from_file(tmp.path().join("tokenizer.json"))
+        .expect("load tiny tokenizer");
+    let prompt_token_count = tokenizer
+        .encode(prompt.as_str(), false)
+        .expect("encode shared-kv prompt")
+        .get_ids()
+        .len();
+    assert_eq!(prompt_token_count, PROMPT_TOKENS);
+
+    let adapter = MlxLlmAdapter::load(tmp.path(), &MlxLlmConfig::new(CONTEXT))
+        .expect("load shared-kv gemma4");
+    let out = LlmBackend::generate_raw(
+        &adapter,
+        &prompt,
+        &GenerationConfig {
+            max_tokens: 1,
+            ..short_greedy_config()
+        },
+    )
+    .expect("shared sliding-kv generation");
+
+    assert_eq!(out.tokens_generated, 1);
+    assert!(out.tokens_per_second.is_finite());
+    assert!(out.tokens_per_second > 0.0);
+}
+
+#[test]
 fn synthetic_lfm_bundle_runs_runtime_forward_without_external_fixture() {
     let _guard = mlx_test_lock();
     let tmp = tempfile::tempdir().expect("tempdir");
@@ -603,7 +638,7 @@ fn streaming_matches_non_streaming_for_same_seed() {
         repetition_penalty: 1.0,
         seed: None,
         stop_sequences: Vec::new(),
-        grammar: None,
+        ..Default::default()
     };
 
     let prompt = "Write a single English sentence about oceans.";
@@ -706,7 +741,7 @@ fn sampling_seed_config(seed: u64) -> GenerationConfig {
         repetition_penalty: 1.0,
         stop_sequences: Vec::new(),
         seed: Some(seed),
-        grammar: None,
+        ..Default::default()
     }
 }
 
@@ -731,8 +766,7 @@ fn streamed_token_ids(
 }
 
 fn long_wordlevel_prompt(tokens: usize) -> String {
-    std::iter::repeat("a")
-        .take(tokens)
+    std::iter::repeat_n("a", tokens)
         .collect::<Vec<_>>()
         .join(" ")
 }
@@ -1039,6 +1073,32 @@ fn write_synthetic_gemma_bundle(dir: &Path) {
 }
 
 fn write_synthetic_gemma_bundle_with_tiny_tokenizer(dir: &Path, max_position_embeddings: usize) {
+    write_synthetic_gemma_bundle_with_tiny_tokenizer_options(
+        dir,
+        max_position_embeddings,
+        128,
+        2,
+        None,
+    );
+}
+
+fn write_synthetic_gemma_shared_sliding_bundle(dir: &Path, max_position_embeddings: usize) {
+    write_synthetic_gemma_bundle_with_tiny_tokenizer_options(
+        dir,
+        max_position_embeddings,
+        3,
+        4,
+        Some(1),
+    );
+}
+
+fn write_synthetic_gemma_bundle_with_tiny_tokenizer_options(
+    dir: &Path,
+    max_position_embeddings: usize,
+    sliding_window: usize,
+    sliding_window_pattern: usize,
+    num_kv_shared_layers: Option<usize>,
+) {
     std::fs::create_dir_all(dir).expect("create bundle dir");
     write_tiny_wordlevel_tokenizer(dir);
 
@@ -1050,7 +1110,7 @@ fn write_synthetic_gemma_bundle_with_tiny_tokenizer(dir: &Path, max_position_emb
     const LAYERS: usize = 2;
     const VOCAB_SIZE: usize = 8;
 
-    let cfg = serde_json::json!({
+    let mut cfg = serde_json::json!({
         "model_type": "gemma4",
         "hidden_size": HIDDEN,
         "num_hidden_layers": LAYERS,
@@ -1064,10 +1124,13 @@ fn write_synthetic_gemma_bundle_with_tiny_tokenizer(dir: &Path, max_position_emb
         "rms_norm_eps": 1.0e-6,
         "tie_word_embeddings": true,
         "head_dim": HEAD_DIM,
-        "sliding_window": 128,
-        "sliding_window_pattern": 2,
+        "sliding_window": sliding_window,
+        "sliding_window_pattern": sliding_window_pattern,
         "query_pre_attn_scalar": HEAD_DIM
     });
+    if let Some(shared_layers) = num_kv_shared_layers {
+        cfg["num_kv_shared_layers"] = serde_json::json!(shared_layers);
+    }
     std::fs::write(dir.join("config.json"), cfg.to_string()).expect("write config");
 
     let mut tensors = Vec::new();

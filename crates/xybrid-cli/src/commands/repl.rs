@@ -1475,6 +1475,7 @@ stages:
             &input,
             &mut conversation_context,
             &loaded_model,
+            None,
             std::time::Instant::now(),
             0,
         ));
@@ -1493,6 +1494,7 @@ stages:
             &input,
             &mut conversation_context,
             &loaded_model,
+            None,
             std::time::Instant::now(),
             0,
         ));

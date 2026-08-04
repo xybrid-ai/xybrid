@@ -478,6 +478,13 @@ impl CacheManager {
         ids
     }
 
+    fn extracted_root(&self) -> PathBuf {
+        self.cache_dir
+            .parent()
+            .unwrap_or(&self.cache_dir)
+            .join("extracted")
+    }
+
     /// Ensures a `.xyb` bundle is extracted and returns the directory path.
     ///
     /// This is the **single source of truth** for bundle extraction.
@@ -684,26 +691,6 @@ impl CacheManager {
         }
 
         let mut roots = self.layout().model_roots(model_id);
-
-        // `model_roots` only covers the base `id` extraction dir. Also remove
-        // explicit format-variant dirs (e.g. `id__safetensors`, `id__gguf`)
-        // written by backend-specific registry downloads.
-        let variant_prefix = format!("{model_id}__");
-        for extracted_root in self.layout().extracted_roots() {
-            let Ok(entries) = std::fs::read_dir(&extracted_root) else {
-                continue;
-            };
-            for entry in entries.flatten() {
-                if entry
-                    .file_name()
-                    .to_str()
-                    .is_some_and(|name| name.starts_with(&variant_prefix))
-                {
-                    roots.push(entry.path());
-                }
-            }
-        }
-
         let mut entry_keys = Vec::new();
         for (key, entry) in &self.entries {
             if entry.id == model_id {
@@ -769,6 +756,84 @@ impl CacheManager {
             Ok(false)
         }
     }
+
+    /// Clears cached files and extracted variants for a single model id.
+    ///
+    /// Removes the standard registry cache directory, legacy `id@version.xyb`
+    /// files, and extracted directories for both the base id and explicit
+    /// format variants such as `id__safetensors`.
+    pub fn clear_model_artifacts(&self, model_id: &str) -> Result<(), SdkError> {
+        let version_prefix = format!("{model_id}@");
+        remove_matching_children(&self.cache_dir, |name| {
+            name == model_id || name.starts_with(&version_prefix)
+        })?;
+
+        let variant_prefix = format!("{model_id}__");
+        remove_matching_children(&self.extracted_root(), |name| {
+            name == model_id || name.starts_with(&variant_prefix)
+        })?;
+
+        Ok(())
+    }
+}
+
+fn remove_matching_children<F>(parent: &Path, mut matches: F) -> Result<(), SdkError>
+where
+    F: FnMut(&str) -> bool,
+{
+    if !parent.exists() {
+        return Ok(());
+    }
+
+    for entry in std::fs::read_dir(parent).map_err(|e| {
+        SdkError::cache_src(
+            format!("Failed to read cache directory {}", parent.display()),
+            e,
+        )
+    })? {
+        let entry = entry.map_err(|e| SdkError::cache_src("Failed to read cache entry", e))?;
+        let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
+            continue;
+        };
+        if !matches(&name) {
+            continue;
+        }
+
+        let path = entry.path();
+        remove_path(&path)?;
+    }
+
+    Ok(())
+}
+
+fn remove_all_children(parent: &Path) -> Result<(), SdkError> {
+    if !parent.exists() {
+        return Ok(());
+    }
+
+    for entry in std::fs::read_dir(parent).map_err(|e| {
+        SdkError::cache_src(
+            format!("Failed to read cache directory {}", parent.display()),
+            e,
+        )
+    })? {
+        let entry = entry.map_err(|e| SdkError::cache_src("Failed to read cache entry", e))?;
+        remove_path(&entry.path())?;
+    }
+
+    Ok(())
+}
+
+fn remove_path(path: &Path) -> Result<(), SdkError> {
+    if path.is_dir() {
+        std::fs::remove_dir_all(path)
+            .map_err(|e| SdkError::cache_src(format!("Failed to remove {}", path.display()), e))?;
+    } else {
+        std::fs::remove_file(path)
+            .map_err(|e| SdkError::cache_src(format!("Failed to remove {}", path.display()), e))?;
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]
@@ -1301,12 +1366,15 @@ mod tests {
     }
 
     #[test]
-    fn clear_model_roots_removes_base_and_format_extractions() {
+    fn clear_model_artifacts_removes_base_and_format_extractions() {
         let temp_dir = TempDir::new().unwrap();
         let cache_dir = temp_dir.path().join("cache").join("models");
         fs::create_dir_all(&cache_dir).unwrap();
 
-        let mut manager = CacheManager::with_dir(cache_dir.clone()).unwrap();
+        let manager = CacheManager::with_dir(cache_dir.clone()).unwrap();
+        fs::create_dir_all(cache_dir.join("qwen3")).unwrap();
+        fs::write(cache_dir.join("qwen3").join("model.safetensors"), b"model").unwrap();
+        fs::write(cache_dir.join("qwen3@1.0.xyb"), b"bundle").unwrap();
 
         for id in ["qwen3", "qwen3__safetensors", "qwen3__gguf"] {
             let dir = manager.extraction_dir(id);
@@ -1317,8 +1385,10 @@ mod tests {
         fs::create_dir_all(&unrelated_dir).unwrap();
         fs::write(unrelated_dir.join("model_metadata.json"), b"{}").unwrap();
 
-        manager.clear_model_roots("qwen3").unwrap();
+        manager.clear_model_artifacts("qwen3").unwrap();
 
+        assert!(!cache_dir.join("qwen3").exists());
+        assert!(!cache_dir.join("qwen3@1.0.xyb").exists());
         assert!(!manager.extraction_dir("qwen3").exists());
         assert!(!manager.extraction_dir("qwen3__safetensors").exists());
         assert!(!manager.extraction_dir("qwen3__gguf").exists());

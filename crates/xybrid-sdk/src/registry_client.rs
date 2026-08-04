@@ -1637,9 +1637,8 @@ impl RegistryClient {
     /// # Returns
     ///
     /// The number of cache roots removed for `mask` across all managed cache
-    /// areas (registry bundle, extracted runtime cache including explicit
-    /// format-variant dirs, HuggingFace downloads). Returns `0` when the model
-    /// was not cached.
+    /// areas (registry bundle, extracted runtime cache, HuggingFace
+    /// downloads). Returns `0` when the model was not cached.
     ///
     /// # Concurrency
     ///

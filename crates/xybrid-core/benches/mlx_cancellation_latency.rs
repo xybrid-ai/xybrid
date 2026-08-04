@@ -222,7 +222,7 @@ mod active {
             repetition_penalty: 1.0,
             stop_sequences: Vec::new(),
             seed: None,
-            grammar: None,
+            ..Default::default()
         }
     }
 

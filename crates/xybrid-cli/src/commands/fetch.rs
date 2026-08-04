@@ -47,32 +47,22 @@ pub(crate) fn handle_fetch_command(
 
     print_resolved_variant(&resolved);
 
-    if is_model_ready(&client, model_id, platform, format)? {
-        ui::ok("Model is already cached and ready");
-        let location = cache_location(&client, model_id, format, &resolved);
-        ui::kv("Location", &location.display().to_string());
+    if let Some(cache_path) = cache_location(&client, model_id, platform, format, &resolved)
+        .context("Failed to check cache status")?
+    {
+        ui::ok("Model is already cached and verified");
+        ui::kv("Location", &cache_path.display().to_string());
         return Ok(());
     }
 
     let pb = ui::download_bar(resolved.size_bytes, model_id);
 
-    let model_path = if let Some(format) = format {
-        client.fetch_extracted_with_format(model_id, platform, format, |progress| {
+    let model_path =
+        fetch_resolved_model(&client, model_id, platform, format, &resolved, |progress| {
             let bytes_done = (progress * resolved.size_bytes as f32) as u64;
             pb.set_position(bytes_done);
         })
-    } else if uses_extracted_model_path(&resolved) {
-        client.fetch_extracted(model_id, platform, |progress| {
-            let bytes_done = (progress * resolved.size_bytes as f32) as u64;
-            pb.set_position(bytes_done);
-        })
-    } else {
-        client.fetch(model_id, platform, |progress| {
-            let bytes_done = (progress * resolved.size_bytes as f32) as u64;
-            pb.set_position(bytes_done);
-        })
-    }
-    .context(format!("Failed to fetch model '{}'", model_id))?;
+        .context(format!("Failed to fetch model '{}'", model_id))?;
 
     pb.finish_and_clear();
     println!();
@@ -217,44 +207,58 @@ fn uses_extracted_model_path(resolved: &xybrid_sdk::registry_client::ResolvedVar
     resolved.passthrough
 }
 
-fn is_model_ready(
+/// Where the model already lives locally, or `None` when a fetch is needed.
+///
+/// Backend-override fetches (`format` set) and passthrough variants resolve to
+/// an extracted directory; classic bundle fetches use the bundle cache.
+fn cache_location(
     client: &RegistryClient,
     model_id: &str,
     platform: Option<&str>,
     format: Option<&str>,
-) -> Result<bool> {
+    resolved: &xybrid_sdk::registry_client::ResolvedVariant,
+) -> Result<Option<std::path::PathBuf>> {
     if let Some(format) = format {
-        Ok(client
-            .resolve_offline_with_format(model_id, format)
-            .is_some())
-    } else if client
-        .is_cached(model_id, platform)
-        .context("Failed to check cache status")?
-    {
-        Ok(true)
-    } else {
-        // Passthrough variants never write a bundle; a prior fetch lives in
-        // the extracted cache instead.
-        Ok(client.resolve_offline(model_id).is_some())
+        return Ok(client.resolve_offline_with_format(model_id, format));
     }
+
+    if uses_extracted_model_path(resolved) {
+        return Ok(client.resolve_offline(model_id));
+    }
+
+    if client
+        .is_cached(model_id, platform)
+        .context("Failed to check bundle cache status")?
+    {
+        return Ok(Some(client.get_cache_path(resolved)));
+    }
+
+    Ok(None)
 }
 
-fn cache_location(
+fn fetch_resolved_model<F>(
     client: &RegistryClient,
     model_id: &str,
+    platform: Option<&str>,
     format: Option<&str>,
     resolved: &xybrid_sdk::registry_client::ResolvedVariant,
-) -> std::path::PathBuf {
+    progress_callback: F,
+) -> Result<std::path::PathBuf>
+where
+    F: Fn(f32),
+{
     if let Some(format) = format {
         client
-            .resolve_offline_with_format(model_id, format)
-            .unwrap_or_else(|| client.extraction_dir_with_format(model_id, format))
+            .fetch_extracted_with_format(model_id, platform, format, progress_callback)
+            .context(format!("Failed to fetch model '{}'", model_id))
     } else if uses_extracted_model_path(resolved) {
         client
-            .resolve_offline(model_id)
-            .unwrap_or_else(|| client.extraction_dir(model_id))
+            .fetch_extracted(model_id, platform, progress_callback)
+            .context(format!("Failed to fetch passthrough model '{}'", model_id))
     } else {
-        client.get_cache_path(resolved)
+        client
+            .fetch(model_id, platform, progress_callback)
+            .context(format!("Failed to fetch model '{}'", model_id))
     }
 }
 
@@ -292,20 +296,6 @@ fn fetch_models_with_selector_cfg(
             }
         };
 
-        match is_model_ready(client, model_id, platform, format) {
-            Ok(true) => {
-                ui::ok(&format!("{} (cached)", model_id));
-                skip_count += 1;
-                continue;
-            }
-            Ok(false) => {}
-            Err(e) => {
-                ui::err(&format!("{} (cache check failed: {})", model_id, e));
-                error_count += 1;
-                continue;
-            }
-        }
-
         let resolved = if let Some(format) = format {
             client.resolve_with_format(model_id, platform, format)
         } else {
@@ -314,26 +304,33 @@ fn fetch_models_with_selector_cfg(
 
         match resolved {
             Ok(resolved) => {
+                match cache_location(client, model_id, platform, format, &resolved) {
+                    Ok(Some(_)) => {
+                        ui::ok(&format!("{} (cached)", model_id));
+                        skip_count += 1;
+                        continue;
+                    }
+                    Ok(None) => {}
+                    Err(e) => {
+                        ui::err(&format!("{} (cache check failed: {})", model_id, e));
+                        error_count += 1;
+                        continue;
+                    }
+                }
+
                 let pb = ui::download_bar(resolved.size_bytes, model_id);
 
-                let fetch_result = if let Some(format) = format {
-                    client.fetch_extracted_with_format(model_id, platform, format, |progress| {
+                match fetch_resolved_model(
+                    client,
+                    model_id,
+                    platform,
+                    format,
+                    &resolved,
+                    |progress| {
                         let bytes_done = (progress * resolved.size_bytes as f32) as u64;
                         pb.set_position(bytes_done);
-                    })
-                } else if uses_extracted_model_path(&resolved) {
-                    client.fetch_extracted(model_id, platform, |progress| {
-                        let bytes_done = (progress * resolved.size_bytes as f32) as u64;
-                        pb.set_position(bytes_done);
-                    })
-                } else {
-                    client.fetch(model_id, platform, |progress| {
-                        let bytes_done = (progress * resolved.size_bytes as f32) as u64;
-                        pb.set_position(bytes_done);
-                    })
-                };
-
-                match fetch_result {
+                    },
+                ) {
                     Ok(_) => {
                         pb.finish_and_clear();
                         ui::ok(model_id);
@@ -399,6 +396,22 @@ mod tests {
             llamacpp_compiled: true,
             mistral_compiled: false,
             mlx_runtime_ok: false,
+        }
+    }
+
+    fn resolved_variant(passthrough: bool) -> xybrid_sdk::registry_client::ResolvedVariant {
+        xybrid_sdk::registry_client::ResolvedVariant {
+            hf_repo: "prism-ml/Bonsai-27B-gguf".to_string(),
+            file: "Bonsai-27B-Q1_0.gguf".to_string(),
+            download_url: "https://example.test/Bonsai-27B-Q1_0.gguf".to_string(),
+            format: "gguf".to_string(),
+            quantization: "q1_0_g128".to_string(),
+            size_bytes: 1,
+            sha256: "a".repeat(64),
+            artifacts: Vec::new(),
+            file_sha256: Default::default(),
+            passthrough,
+            model_metadata: None,
         }
     }
 
@@ -685,31 +698,9 @@ mod tests {
         assert_eq!(counts, (1, 0, 0));
     }
 
-    fn passthrough_resolved_variant(
-        passthrough: bool,
-    ) -> xybrid_sdk::registry_client::ResolvedVariant {
-        xybrid_sdk::registry_client::ResolvedVariant {
-            hf_repo: "prism-ml/Bonsai-27B-gguf".to_string(),
-            file: "Bonsai-27B-Q1_0.gguf".to_string(),
-            download_url: "https://example.test/Bonsai-27B-Q1_0.gguf".to_string(),
-            format: "gguf".to_string(),
-            quantization: "q1_0_g128".to_string(),
-            size_bytes: 1,
-            sha256: "a".repeat(64),
-            artifacts: Vec::new(),
-            file_sha256: Default::default(),
-            passthrough,
-            model_metadata: None,
-        }
-    }
-
     #[test]
     fn passthrough_variants_use_the_extracted_model_path() {
-        assert!(uses_extracted_model_path(&passthrough_resolved_variant(
-            true
-        )));
-        assert!(!uses_extracted_model_path(&passthrough_resolved_variant(
-            false
-        )));
+        assert!(uses_extracted_model_path(&resolved_variant(true)));
+        assert!(!uses_extracted_model_path(&resolved_variant(false)));
     }
 }

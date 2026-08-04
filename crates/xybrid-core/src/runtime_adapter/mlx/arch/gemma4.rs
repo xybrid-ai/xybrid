@@ -1164,9 +1164,20 @@ pub mod runtime {
 
         let layers = &weights.layers;
         let layer_cache = &mut weights.layer_cache;
+        let mut shared_sources = vec![false; layers.len()];
+        for target_layer in 0..cfg.num_hidden_layers {
+            if let Some(source_layer) = cfg.kv_shared_source_layer(target_layer) {
+                shared_sources[source_layer] = true;
+            }
+        }
+        let mut call_local_kv: Vec<Option<(MlxArray, MlxArray)>> = vec![None; layers.len()];
         for (layer_idx, layer) in layers.iter().enumerate() {
             let shared_kv = if let Some(source_layer) = cfg.kv_shared_source_layer(layer_idx) {
-                Some(layer_cache[source_layer].cloned_kv(source_layer, stream)?)
+                if let Some((keys, values)) = call_local_kv[source_layer].as_ref() {
+                    Some((keys.clone(), values.clone()))
+                } else {
+                    Some(layer_cache[source_layer].cloned_kv(source_layer, stream)?)
+                }
             } else {
                 None
             };
@@ -1183,7 +1194,7 @@ pub mod runtime {
                 None
             };
             let cache = &mut layer_cache[layer_idx];
-            hidden = transformer_block(
+            let (next_hidden, own_kv) = transformer_block(
                 cfg,
                 layer,
                 cache,
@@ -1197,6 +1208,10 @@ pub mod runtime {
                 position_offset,
                 stream,
             )?;
+            hidden = next_hidden;
+            if shared_sources[layer_idx] {
+                call_local_kv[layer_idx] = own_kv;
+            }
         }
 
         let final_norm = rms_norm(&hidden, Some(&weights.norm), cfg.rms_norm_eps, stream)?;
@@ -1228,14 +1243,14 @@ pub mod runtime {
         sliding_mask: Option<&MlxArray>,
         position_offset: i32,
         stream: Option<&MlxStream>,
-    ) -> MlxLlmResult<MlxArray> {
+    ) -> MlxLlmResult<(MlxArray, Option<(MlxArray, MlxArray)>)> {
         let attn_in = rms_norm(
             hidden,
             Some(&layer.input_layernorm),
             cfg.rms_norm_eps,
             stream,
         )?;
-        let attn = attention_block(
+        let (attn, own_kv) = attention_block(
             cfg,
             layer,
             cache,
@@ -1277,7 +1292,7 @@ pub mod runtime {
         if let Some(layer_scalar) = layer.layer_scalar.as_ref() {
             hidden = mul(&hidden, layer_scalar, stream)?;
         }
-        Ok(hidden)
+        Ok((hidden, own_kv))
     }
 
     /// Gated-GeLU FFN: `down_proj(gelu_tanh(gate_proj(x)) * up_proj(x))`.
@@ -1452,7 +1467,7 @@ pub mod runtime {
         sliding_mask: Option<&MlxArray>,
         position_offset: i32,
         stream: Option<&MlxStream>,
-    ) -> MlxLlmResult<MlxArray> {
+    ) -> MlxLlmResult<(MlxArray, Option<(MlxArray, MlxArray)>)> {
         let layer_head_dim = head_norm_width(&layer.q_norm)?;
         let k_head_dim = head_norm_width(&layer.k_norm)?;
         if k_head_dim != layer_head_dim {
@@ -1492,8 +1507,8 @@ pub mod runtime {
             stream,
         )?;
 
-        let (k, v) = if let Some((keys, values)) = shared_kv {
-            (keys.clone(), values.clone())
+        let (k, v, own_kv) = if let Some((keys, values)) = shared_kv {
+            (keys.clone(), values.clone(), None)
         } else {
             let k = layer.k_proj.forward(&hidden, stream)?;
             let v = layer.v_proj.forward(&hidden, stream)?;
@@ -1526,7 +1541,8 @@ pub mod runtime {
             let max_cache_len = cache.window();
             let k = append_cached_axis2(&mut cache.keys, &k, max_cache_len, stream)?;
             let v = append_cached_axis2(&mut cache.values, &v, max_cache_len, stream)?;
-            (k, v)
+            let own_kv = Some((k.clone(), v.clone()));
+            (k, v, own_kv)
         };
         let q_len = q.shape().get(2).copied().unwrap_or(1);
 
@@ -1538,13 +1554,19 @@ pub mod runtime {
         } else if sliding_window_is_plain_causal(&q, &k, cfg.sliding_window)? {
             scaled_dot_product_attention(&q, &k, &v, layer_scale, true, None, stream)?
         } else if let Some(mask) = sliding_mask {
-            scaled_dot_product_attention(&q, &k, &v, layer_scale, false, Some(mask), stream)?
+            if sliding_mask_matches_attention(mask, &q, &k)? {
+                scaled_dot_product_attention(&q, &k, &v, layer_scale, false, Some(mask), stream)?
+            } else {
+                let mask = sliding_window_mask(&q, &k, cfg.sliding_window, position_offset)?;
+                scaled_dot_product_attention(&q, &k, &v, layer_scale, false, Some(&mask), stream)?
+            }
         } else {
             let mask = sliding_window_mask(&q, &k, cfg.sliding_window, position_offset)?;
             scaled_dot_product_attention(&q, &k, &v, layer_scale, false, Some(&mask), stream)?
         };
         let attn = merge_heads(&attn, n_heads, layer_head_dim, stream)?;
-        layer.o_proj.forward(&attn, stream)
+        let out = layer.o_proj.forward(&attn, stream)?;
+        Ok((out, own_kv))
     }
 
     fn head_norm_width(weight: &MlxArray) -> MlxLlmResult<usize> {
@@ -2046,6 +2068,22 @@ pub mod runtime {
         Ok(q_len == k_len && q_len <= window_size)
     }
 
+    fn sliding_mask_matches_attention(
+        mask: &MlxArray,
+        queries: &MlxArray,
+        keys: &MlxArray,
+    ) -> MlxLlmResult<bool> {
+        let mask_shape = mask.shape();
+        let query_shape = queries.shape();
+        let key_shape = keys.shape();
+        if mask_shape.len() != 4 || query_shape.len() != 4 || key_shape.len() != 4 {
+            return Err(MlxLlmError::ConfigInvalid(format!(
+                "gemma4 sliding attention expects rank-4 mask/query/key, got mask={mask_shape:?} q={query_shape:?} k={key_shape:?}"
+            )));
+        }
+        Ok(mask_shape[2] == query_shape[2] && mask_shape[3] == key_shape[2])
+    }
+
     fn sliding_window_mask(
         queries: &MlxArray,
         keys: &MlxArray,
@@ -2067,17 +2105,20 @@ pub mod runtime {
         let k_len = shape_dim_usize("gemma4", "key_len", k_len_i32)?;
         let mask_len = shape_product_usize("gemma4", "sliding_window_mask_len", &[q_len, k_len])?;
         let window_size_i32 = shape_dim_i32("gemma4", "sliding_window", window_size)?;
+        let visible_end =
+            checked_i32_add("gemma4", "visible_sequence_end", position_offset, q_len_i32)?;
+        let key_position_offset = visible_end.checked_sub(k_len_i32).ok_or_else(|| {
+            MlxLlmError::ConfigInvalid(format!(
+                "gemma4 key length {k_len_i32} exceeds visible sequence end {visible_end}"
+            ))
+        })?;
         let mut mask = Vec::with_capacity(mask_len);
         for qi in 0..q_len {
             let qi_i32 = shape_dim_i32("gemma4", "query_index", qi)?;
             let q_pos = checked_i32_add("gemma4", "query_position", position_offset, qi_i32)?;
             for kj in 0..k_len {
                 let kj_i32 = shape_dim_i32("gemma4", "key_index", kj)?;
-                let k_pos = if k_len == q_len {
-                    checked_i32_add("gemma4", "key_position", position_offset, kj_i32)?
-                } else {
-                    kj_i32
-                };
+                let k_pos = checked_i32_add("gemma4", "key_position", key_position_offset, kj_i32)?;
                 let window_end =
                     checked_i32_add("gemma4", "sliding_window_end", k_pos, window_size_i32)?;
                 let allowed = k_pos <= q_pos && q_pos < window_end;
@@ -2342,6 +2383,27 @@ pub mod runtime {
         }
 
         #[test]
+        fn cloned_sliding_kv_exposes_stored_tail_only() {
+            let data: Vec<f32> = (0..10).map(|i| i as f32).collect();
+            let prefill = MlxArray::from_slice_f32(&data, &[1, 1, 5, 2]).unwrap();
+            let mut cache = Gemma4LayerCache::new(Gemma4CacheKind::Sliding { window: 3 });
+
+            let max_cache_len = cache.window();
+            let _ = append_cached_axis2(&mut cache.keys, &prefill, max_cache_len, None).unwrap();
+            let _ = append_cached_axis2(&mut cache.values, &prefill, max_cache_len, None).unwrap();
+            let (keys, values) = cache.cloned_kv(0, None).unwrap();
+
+            assert_eq!(keys.shape(), vec![1, 1, 3, 2]);
+            assert_eq!(values.shape(), vec![1, 1, 3, 2]);
+            assert_close(
+                &keys.to_vec_f32().unwrap(),
+                &[4.0, 5.0, 6.0, 7.0, 8.0, 9.0],
+                1.0e-6,
+                "cloned sliding key tail",
+            );
+        }
+
+        #[test]
         fn sliding_cache_decode_keeps_only_window() {
             let seed =
                 MlxArray::from_slice_f32(&[0.0, 1.0, 2.0, 3.0, 4.0, 5.0], &[1, 1, 3, 2]).unwrap();
@@ -2407,6 +2469,32 @@ pub mod runtime {
             assert!(sliding_window_is_plain_causal(&q, &same_len_k, 3).unwrap());
             assert!(!sliding_window_is_plain_causal(&q, &same_len_k, 2).unwrap());
             assert!(!sliding_window_is_plain_causal(&q, &longer_k, 4).unwrap());
+        }
+
+        #[test]
+        fn prebuilt_sliding_mask_must_match_visible_key_length() {
+            let q = MlxArray::from_slice_f32(&[0.0; 40], &[1, 2, 5, 4]).unwrap();
+            let tail_k = MlxArray::from_slice_f32(&[0.0; 12], &[1, 1, 3, 4]).unwrap();
+            let prebuilt = sliding_window_mask_from_lengths(5, 5, 3, 0).unwrap();
+
+            assert_eq!(prebuilt.shape(), vec![1, 1, 5, 5]);
+            assert!(!sliding_mask_matches_attention(&prebuilt, &q, &tail_k).unwrap());
+
+            let fallback = sliding_window_mask(&q, &tail_k, 3, 0).unwrap();
+            assert_eq!(fallback.shape(), vec![1, 1, 5, 3]);
+            assert!(sliding_mask_matches_attention(&fallback, &q, &tail_k).unwrap());
+            assert_close(
+                &fallback.to_vec_f32().unwrap(),
+                &[
+                    -1.0e9, -1.0e9, -1.0e9, //
+                    -1.0e9, -1.0e9, -1.0e9, //
+                    0.0, -1.0e9, -1.0e9, //
+                    0.0, 0.0, -1.0e9, //
+                    0.0, 0.0, 0.0,
+                ],
+                1.0e-3,
+                "tail sliding mask",
+            );
         }
     }
 }

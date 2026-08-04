@@ -1,14 +1,15 @@
-//! LLM inference infrastructure for GGUF models.
+//! LLM inference infrastructure for GGUF and MLX SafeTensors models.
 //!
-//! Provides the building blocks consumed by [`CodecTtsStrategy`](super::CodecTtsStrategy):
+//! Provides the building blocks consumed by [`CodecTtsStrategy`](super::CodecTtsStrategy)
+//! and the executor's inline LLM paths:
 //! - The [`LlmInference`] backend abstraction (mockable for tests)
 //! - [`LlmModelConfig`] and [`LlmGenerationParams`] (incl. stop-sequence handling)
 //! - The default [`DefaultLlmInference`] backend (feature-gated) plus a no-op stub
 //!
-//! The real backend is feature-gated and requires either `llm-mistral` or
-//! `llm-llamacpp`; without them a no-op stub keeps the module compiling.
+//! The real backend is feature-gated and requires `llm-mistral`, `llm-llamacpp`,
+//! or `llm-mlx`; without them a no-op stub keeps the module compiling.
 
-#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp", feature = "llm-mlx"))]
 use log::debug;
 
 use crate::execution::types::ExecutorResult;

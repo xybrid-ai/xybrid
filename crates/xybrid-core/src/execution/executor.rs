@@ -58,9 +58,10 @@ use super::llm_telemetry::{
 use super::strategies::MlxEmbeddingStrategy;
 #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
 use super::tool_continuation::{
-    reject_nested_tool_continuation_parts, reject_tool_continuation_input, run_tool_continuation,
-    text_messages_from_multimodal,
+    reject_nested_tool_continuation_parts, text_messages_from_multimodal,
 };
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp", feature = "llm-mlx"))]
+use super::tool_continuation::{reject_tool_continuation_input, run_tool_continuation};
 
 fn mark_execution_terminal(guard: &ExecutionGuard, error: &AdapterError) {
     if error.cloud_fallback_abort_reason().is_some() {

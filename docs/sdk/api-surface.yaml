@@ -92,8 +92,8 @@ classes:
       withBackend:
         params: [{ name: backend, type: BackendChoice }]
         return: XybridModelLoader
-        notes: "Pins local generation or embedding execution by stamping ModelMetadata.backend at load time. Omit the call for automatic selection. UniFFI exposes withBackend(XybridBackend) on the loader; Dart exposes it as the optional backend: named argument on load()/loadWithProgress()."
-        status: { rust: implemented, dart: implemented, kotlin: implemented, swift: implemented, csharp: planned }
+        notes: "Pins local generation or embedding execution by stamping ModelMetadata.backend at load time. Omit the call for automatic selection. Dart exposes it as the optional backend: named argument on load()/loadWithProgress() (the literal name withBackend is Rust-only, so the source checker flags dart as a false positive). Kotlin/Swift exposure existed on the retired UniFFI loader and still needs re-plumbing through xybrid-ffi-facade/bolt."
+        status: { rust: implemented, dart: implemented, kotlin: planned, swift: planned, csharp: planned }
       load:
         async: true
         return: XybridModel

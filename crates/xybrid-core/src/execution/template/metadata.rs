@@ -1343,4 +1343,87 @@ mod tests {
         assert!(metadata.has_voices());
         assert_eq!(metadata.default_voice().unwrap().id, "voice_1");
     }
+
+    // ========================================================================
+    // MLX SafeTensors routing classifier tests
+    // ========================================================================
+
+    fn create_mlx_safetensors_metadata() -> ModelMetadata {
+        ModelMetadata {
+            model_id: "qwen3.5-0.6b-mlx".to_string(),
+            version: "1.0".to_string(),
+            execution_template: ExecutionTemplate::SafeTensors {
+                model_file: "model.safetensors".to_string(),
+                architecture: Some("qwen3".to_string()),
+                config_file: Some("config.json".to_string()),
+                tokenizer_file: Some("tokenizer.json".to_string()),
+            },
+            preprocessing: vec![],
+            postprocessing: vec![],
+            files: vec![
+                "config.json".to_string(),
+                "tokenizer.json".to_string(),
+                "model.safetensors".to_string(),
+            ],
+            vision_encoder: None,
+            description: None,
+            backend: Some("mlx".to_string()),
+            metadata: HashMap::new(),
+            voices: None,
+            max_chunk_chars: None,
+            trim_trailing_samples: None,
+        }
+    }
+
+    #[test]
+    fn mlx_llm_classifier_accepts_explicit_mlx_backend() {
+        let metadata = create_mlx_safetensors_metadata();
+        assert!(is_mlx_llm_safetensors_metadata(&metadata));
+    }
+
+    #[test]
+    fn mlx_llm_classifier_accepts_auto_backend_for_qwen() {
+        let mut metadata = create_mlx_safetensors_metadata();
+        metadata.backend = Some("auto".to_string());
+        assert!(is_mlx_llm_safetensors_metadata(&metadata));
+    }
+
+    #[test]
+    fn mlx_llm_classifier_accepts_unset_backend_for_qwen() {
+        let mut metadata = create_mlx_safetensors_metadata();
+        metadata.backend = None;
+        assert!(is_mlx_llm_safetensors_metadata(&metadata));
+    }
+
+    #[test]
+    fn mlx_llm_classifier_rejects_other_explicit_backend() {
+        let mut metadata = create_mlx_safetensors_metadata();
+        metadata.backend = Some("llamacpp".to_string());
+        assert!(!is_mlx_llm_safetensors_metadata(&metadata));
+    }
+
+    #[test]
+    fn mlx_llm_classifier_rejects_bert_embedding_metadata() {
+        let mut metadata = create_mlx_safetensors_metadata();
+        metadata.backend = Some("auto".to_string());
+        metadata.execution_template = ExecutionTemplate::SafeTensors {
+            model_file: "model.safetensors".to_string(),
+            architecture: Some("bert".to_string()),
+            config_file: Some("config.json".to_string()),
+            tokenizer_file: Some("tokenizer.json".to_string()),
+        };
+        metadata
+            .metadata
+            .insert("task".to_string(), serde_json::json!("embedding"));
+
+        assert!(!is_mlx_llm_safetensors_metadata(&metadata));
+        assert!(is_mlx_embedding_safetensors_metadata(&metadata));
+    }
+
+    #[test]
+    fn mlx_llm_classifier_rejects_non_safetensors_template() {
+        let metadata = ModelMetadata::onnx("test-model", "1.0", "model.onnx");
+        assert!(!is_mlx_llm_safetensors_metadata(&metadata));
+        assert!(!is_mlx_embedding_safetensors_metadata(&metadata));
+    }
 }
