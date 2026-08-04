@@ -12,7 +12,11 @@ bool _lastMessageWasSeparator = false;
 
 void _log(LogRecord rec) {
   final prefix = '${rec.level.name}: ';
-  final out = rec.level == Level.SEVERE ? stderr : stdout;
+  // xybrid change: SEVERE used to go to stderr, but the Flutter Linux build
+  // swallows the build hook's stderr — the SourceBuildUnavailableException
+  // refusal never reached the build log while WARNING (stdout) did. Route
+  // everything through stdout so failure diagnostics survive on every host.
+  final out = stdout;
   if (rec.message == kSeparator) {
     if (!_lastMessageWasSeparator) {
       out.write(prefix);
