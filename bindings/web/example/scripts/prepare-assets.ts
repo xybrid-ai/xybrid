@@ -84,7 +84,32 @@ const verifyModel = (model: PinnedModel, bytes: Uint8Array): void => {
 
 const downloadModel = async (model: PinnedModel): Promise<Uint8Array> => {
   console.log(`Downloading the ${model.label}...`);
-  return new Uint8Array(await ky.get(model.url, { timeout: 600_000 }).arrayBuffer());
+  return new Uint8Array(
+    await ky
+      .get(model.url, {
+        timeout: 600_000,
+        // The model hosts rate-limit CI egress by IP, and ky's default backoff
+        // (0.3s, then 0.6s) exhausts its two retries inside a second — fast
+        // enough that a routine 429 fails the build. Stretch the window to
+        // roughly a minute, and jitter it so parallel jobs sharing an egress
+        // address stop retrying in lockstep.
+        retry: {
+          limit: 5,
+          delay: (attemptCount) => 2 ** attemptCount * 1_000,
+          backoffLimit: 20_000,
+          maxRetryAfter: 60_000,
+          jitter: (delayMs) => delayMs / 2 + Math.random() * (delayMs / 2),
+        },
+        hooks: {
+          beforeRetry: [
+            ({ error, retryCount }) => {
+              console.log(`  ${model.label}: retry ${retryCount} after ${error.message}`);
+            },
+          ],
+        },
+      })
+      .arrayBuffer(),
+  );
 };
 
 const modelBytes = async (model: PinnedModel): Promise<Uint8Array | undefined> => {
