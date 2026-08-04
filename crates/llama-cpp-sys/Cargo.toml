@@ -5,6 +5,14 @@ edition.workspace = true
 license = "MIT"
 repository.workspace = true
 description = "Raw FFI bindings to llama.cpp. Build-time clones + cmake-compiles the pinned upstream commit; first-party C++ shim lives in wrapper.cpp."
+# Declares the native library this crate links. Cargo permits exactly one
+# package per dependency graph to claim a given `links` name, so a consumer
+# that pulls both this crate and another llama.cpp binding (e.g. crates.io's
+# `llama-cpp-sys-2`, which also claims `llama`) now fails resolution with a
+# clear conflict instead of silently static-linking two copies of the same
+# ggml/llama archives into one binary. Name matches `llama-cpp-sys-2`'s on
+# purpose — a distinct name would hide exactly the collision we want caught.
+links = "llama"
 
 # The llama.cpp source tree (~180MB) is fetched via the workspace-level
 # submodule consumed by build.rs (`vendor/llama-cpp/`). This path does not live under this
