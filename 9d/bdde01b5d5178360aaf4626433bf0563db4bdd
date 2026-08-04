@@ -1,0 +1,65 @@
+crates/xybrid-core/benches/llm_backend_compare.rs
+  s_56e45659c49d26::t_3d14c0720ed825 132-135,248-257,695-698,706-711,745-763,776,778,781,783
+crates/mlx-c-sys/BUILD.bazel
+  s_56e45659c49d26::t_3d14c0720ed825 1-23
+crates/xybrid-core/Cargo.toml
+  s_56e45659c49d26::t_3d14c0720ed825 115-117
+crates/xybrid-core/src/execution/strategies/llm.rs
+  s_56e45659c49d26::t_3d14c0720ed825 1,3-4,9-10,12
+crates/xybrid-core/src/execution/template/metadata.rs
+  s_56e45659c49d26::t_3d14c0720ed825 1346-1428
+crates/xybrid-core/src/runtime_adapter/mlx/bench_report.rs
+  s_56e45659c49d26::t_3d14c0720ed825 1-373
+crates/xybrid-core/benches/mlx_cancellation_latency.rs
+  s_56e45659c49d26::t_3d14c0720ed825 225
+crates/xybrid-cli/src/commands/fetch.rs
+  s_56e45659c49d26::t_3d14c0720ed825 50-54,60-61,65,210-214,219-220,222-229,231,233,235-236,239,242,245-249,252-253,256-257,259-261,307-320,323-329,332-333,402-417,703-704
+crates/xybrid-core/src/runtime_adapter/mlx/generate.rs
+  s_56e45659c49d26::t_3d14c0720ed825 699-700,958,981
+crates/xybrid-core/tests/mlx_golden_parity.rs
+  s_56e45659c49d26::t_3d14c0720ed825 70
+crates/xybrid-core/tests/mlx_llm_chat.rs
+  s_56e45659c49d26::t_3d14c0720ed825 89,351-385,641,744,769,1076-1101,1113,1127-1128,1131-1133
+crates/xybrid-core/src/runtime_adapter/mlx/arch/gemma4.rs
+  s_56e45659c49d26::t_3d14c0720ed825 1167-1173,1176-1180,1197,1211-1214,1246,1253,1295,1470,1510-1511,1544-1545,1557-1562,1568-1569,2071-2086,2108-2114,2121,2385-2405,2473-2498
+crates/xybrid-sdk/src/cache/cache_manager.rs
+  s_56e45659c49d26::t_3d14c0720ed825 481-487,759-836,1369,1374-1377,1388,1390-1391
+crates/xybrid-core/src/runtime_adapter/mlx/mod.rs
+  s_56e45659c49d26::t_3d14c0720ed825 40-41
+crates/xybrid-cli/src/commands/run.rs
+  s_56e45659c49d26::t_3d14c0720ed825 2023
+crates/xybrid-cli/src/commands/repl.rs
+  s_56e45659c49d26::t_3d14c0720ed825 1478,1497
+crates/xybrid-core/src/runtime_adapter/mlx/sampler.rs
+  s_56e45659c49d26::t_3d14c0720ed825 316,330
+crates/xybrid-core/src/execution/executor.rs
+  s_56e45659c49d26::t_3d14c0720ed825 61,63-64
+crates/xybrid-core/src/execution/mod.rs
+  s_56e45659c49d26::t_3d14c0720ed825 103,108
+crates/xybrid-sdk/src/registry_client.rs
+  s_56e45659c49d26::t_3d14c0720ed825 1640-1641
+crates/xybrid-core/src/execution/strategies/mod.rs
+  s_56e45659c49d26::t_3d14c0720ed825 1,4-8,10-11,22,72-73
+crates/xybrid-mlx/BUILD.bazel
+  s_56e45659c49d26::t_3d14c0720ed825 1-29
+docs/sdk/api-surface.yaml
+  s_56e45659c49d26::t_3d14c0720ed825 95-96
+AGENTS.md
+  s_56e45659c49d26::t_3d14c0720ed825 571-581
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "9dbdde01b5d5178360aaf4626433bf0563db4bdd",
+  "prompts": {},
+  "sessions": {
+    "s_56e45659c49d26": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "87c220f5-c727-4496-bded-5509074d746c",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
