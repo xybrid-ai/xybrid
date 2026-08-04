@@ -1,0 +1,19 @@
+bindings/flutter/cargokit/build_tool/lib/src/logging.dart
+  s_56e45659c49d26::t_c7dd86f397c5b6 15-19
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "61e8e5bc168b08eb2ef58b71c65a2ebdf893b53d",
+  "prompts": {},
+  "sessions": {
+    "s_56e45659c49d26": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "87c220f5-c727-4496-bded-5509074d746c",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
