@@ -1,0 +1,42 @@
+bindings/react-native/README.md
+  s_41962081cb4b2a::t_ee59e5877d656f 127-148
+bindings/react-native/src/NativeXybrid.ts
+  s_9e5d0432045ae0::t_208cd9a1b8fad2 69-74
+bindings/react-native/src/types.ts
+  s_41962081cb4b2a::t_0f4ed815be5070 41-46
+bindings/react-native/src/index.ts
+  s_41962081cb4b2a::t_bf725bd7297497 32-53
+bindings/react-native/ios/XybridModuleImpl.swift
+  s_41962081cb4b2a::t_74ae9c03b93f5b 461-462
+  s_41962081cb4b2a::t_0578fe16c6c073 309-325
+bindings/react-native/ios/XybridModule.mm
+  s_41962081cb4b2a::t_9d4866a17f71ec 177-185
+bindings/react-native/android/src/main/java/ai/xybrid/reactnative/XybridModule.kt
+  s_41962081cb4b2a::t_f1ab6c6f45c541 350-364
+  s_41962081cb4b2a::t_4f450fc9c905c0 511
+  s_41962081cb4b2a::t_99f711d33d8f0f 30
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "e5c7b72cd74397548f4cea866b42f718142b5e64",
+  "prompts": {},
+  "sessions": {
+    "s_41962081cb4b2a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "373f2214-d840-46a5-8b85-a4625ec606c8",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    },
+    "s_9e5d0432045ae0": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019fce32-c9b3-7642-a800-be00ebee766a",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
