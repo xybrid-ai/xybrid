@@ -1,0 +1,48 @@
+crates/xybrid-cli/src/commands/repl.rs
+  s_c7f07cda4712df::t_ad69e08ee192cb 35-43,46-50,53-55,57-65,68-71,74-75
+  s_c7f07cda4712df::t_04880c1999143e 104-109
+  s_c7f07cda4712df::t_585980280e4bad 90-100,102-103,110-148
+  s_c7f07cda4712df::t_a9ac63cd0b354f 273-292
+crates/xybrid-sdk/src/model.rs
+  s_c7f07cda4712df::t_5cfce1a19dfd42 3807-3818
+  s_c7f07cda4712df::t_473cf419beb96e 5539
+  s_c7f07cda4712df::t_88b4832e470c5e 3017-3023
+  s_c7f07cda4712df::t_ae4a5e2f3ea91d 1759,2021
+  s_c7f07cda4712df::t_04880c1999143e 1048-1050,1091-1093,1628,4252-4271,4283-4290
+  s_c7f07cda4712df::t_0a1c67c7699f24 1203,1224,1240,1264,1282,1317,1349,1370,1396
+  s_c7f07cda4712df::t_2a35e2b1a10a02 2182-2187
+  s_c7f07cda4712df::t_6f5cba0ca41d78 1162
+  s_c7f07cda4712df::t_ac98e5ff6f7856 3650-3671
+  s_c7f07cda4712df::t_e15aec56123442 1603-1609,1620-1627,1629-1690
+  s_c7f07cda4712df::t_ba5b3c22a4c513 3965
+  s_c7f07cda4712df::t_16423ad4eb1c10 4226-4251,4272-4282,4291-4327
+  s_c7f07cda4712df::t_d9bbfcb65d01ef 2861-2867
+  s_c7f07cda4712df::t_ab14078cbe8492 3225-3230
+  s_c7f07cda4712df::t_de44f718a858d1 1008-1047,1051-1090,1094-1161,1163-1168
+  s_c7f07cda4712df::t_311897cb1b39de 2260-2273
+  s_c7f07cda4712df::t_b25ff8134bf3be 34
+  s_c7f07cda4712df::t_734834a62d0b80 4729
+  s_c7f07cda4712df::t_0edd91b19ca7cc 1436-1462
+  s_c7f07cda4712df::t_3f24af77c3363e 3632-3633
+  s_c7f07cda4712df::t_e2a87dac33d04c 2657-2661
+crates/xybrid-cli/src/main.rs
+  s_c7f07cda4712df::t_9cdc9782dae4a1 474-479
+  s_c7f07cda4712df::t_9f197d896d544e 677-679,682,692-695,699
+  s_c7f07cda4712df::t_a46b35dfca1b9f 271-284
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "df698f758a8892e2bff0174dd8406d367d97f037",
+  "prompts": {},
+  "sessions": {
+    "s_c7f07cda4712df": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "70b35dc2-9f8b-4a71-81e1-4f7709a67d08",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
