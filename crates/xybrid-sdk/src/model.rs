@@ -1111,6 +1111,44 @@ fn publish_speculative_cloud_event(model_id: &str, latency_ms: u32, streaming: b
 
 /// Serve a batch inference from the cloud gateway because the local model is
 /// not ready yet. Shared by `run` and `run_async`.
+/// Completion signal for the background download started by
+/// [`ModelLoader::load_speculative`].
+///
+/// Lets a *failed* cloud leg degrade to the pre-speculation behaviour — block
+/// until the weights land, then run locally — instead of surfacing a gateway
+/// error for a model the caller only ever asked to run. `outcome` is `None`
+/// while the download is in flight, `Some(true)` once the real local handle is
+/// installed, and `Some(false)` if the download failed (cloud keeps serving).
+#[derive(Debug, Default)]
+pub(crate) struct SpeculativeDownload {
+    outcome: Mutex<Option<bool>>,
+    finished: std::sync::Condvar,
+}
+
+impl SpeculativeDownload {
+    /// Record the download outcome and wake every waiter.
+    fn finish(&self, installed_local: bool) {
+        let mut guard = self.outcome.lock().unwrap_or_else(|e| e.into_inner());
+        *guard = Some(installed_local);
+        drop(guard);
+        self.finished.notify_all();
+    }
+
+    /// Block until the background download finishes; `true` if it installed a
+    /// local handle.
+    ///
+    /// Deliberately unbounded: waiting exactly as long as the download takes is
+    /// what a non-speculative `load()` would have done anyway, so degrading
+    /// never blocks longer than not speculating in the first place.
+    fn wait_for_local(&self) -> bool {
+        let mut guard = self.outcome.lock().unwrap_or_else(|e| e.into_inner());
+        while guard.is_none() {
+            guard = self.finished.wait(guard).unwrap_or_else(|e| e.into_inner());
+        }
+        guard.unwrap_or(false)
+    }
+}
+
 fn cloud_serve_batch(
     model_id: &str,
     envelope: &Envelope,
@@ -1129,11 +1167,15 @@ fn cloud_serve_batch(
 
 /// Serve a streaming inference from the cloud gateway because the local model
 /// is not ready yet. Shared by the streaming entry points.
+/// `emitted` counts tokens actually forwarded to `on_token`. A caller degrading
+/// a failed cloud leg to local must not restart a stream the user has already
+/// seen output from, so it checks this before retrying.
 fn cloud_serve_streaming<F>(
     model_id: &str,
     envelope: &Envelope,
     config: Option<&GenerationConfig>,
     on_token: &mut F,
+    emitted: &std::sync::atomic::AtomicU32,
 ) -> SdkResult<InferenceResult>
 where
     F: FnMut(
@@ -1144,7 +1186,10 @@ where
     let start = Instant::now();
     let cloud_envelope = build_speculative_cloud_envelope(model_id, envelope, config);
     speculative_cloud_policy_gate(&cloud_envelope)?;
-    let callback: xybrid_core::runtime_adapter::types::StreamingCallback<'_> = Box::new(on_token);
+    let callback: xybrid_core::runtime_adapter::types::StreamingCallback<'_> = Box::new(|token| {
+        emitted.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        on_token(token)
+    });
     let output = CloudRuntimeAdapter::new()
         .execute_streaming(&cloud_envelope, callback)
         .map_err(streaming_execution_error)?;
@@ -1607,6 +1652,8 @@ impl ModelLoader {
         // Background download + extract, then swap in the real local handle.
         // On failure the placeholder stays put and cloud keeps serving.
         let bg_handle = Arc::clone(&handle);
+        let download = Arc::new(SpeculativeDownload::default());
+        let bg_download = Arc::clone(&download);
         let id_owned = id.to_string();
         let platform_owned = platform.map(String::from);
         let thread_name = format!("speculative-download-{id_owned}");
@@ -1621,8 +1668,12 @@ impl ModelLoader {
                 match built {
                     Ok(real) => {
                         *bg_handle.write().unwrap_or_else(|e| e.into_inner()) = real;
+                        // Signal only after the handle is installed, so a waiter
+                        // woken by `true` always observes `loaded == true`.
+                        bg_download.finish(true);
                     }
                     Err(e) => {
+                        bg_download.finish(false);
                         log::error!("speculative background download failed for '{id_owned}': {e}");
                         crate::telemetry::publish_telemetry_event(
                             crate::telemetry::TelemetryEvent {
@@ -1642,6 +1693,9 @@ impl ModelLoader {
                 }
             })
         {
+            // No thread means no download will ever land: unblock any waiter
+            // rather than leaving a degrading run parked forever.
+            download.finish(false);
             log::error!("failed to spawn speculative download thread for '{id}': {err}");
         }
 
@@ -1654,7 +1708,7 @@ impl ModelLoader {
             output_type: OutputType::Text,
             supports_streaming: true,
             current_run: Arc::new(Mutex::new(None)),
-            speculative: true,
+            speculative: Some(download),
         }
     }
 
@@ -1724,7 +1778,7 @@ impl ModelLoader {
             output_type,
             supports_streaming,
             current_run: Arc::new(Mutex::new(None)),
-            speculative: false,
+            speculative: None,
         })
     }
 
@@ -1986,7 +2040,7 @@ impl ModelLoader {
             output_type,
             supports_streaming,
             current_run: Arc::new(Mutex::new(None)),
-            speculative: false,
+            speculative: None,
         })
     }
 
@@ -2147,12 +2201,15 @@ pub struct XybridModel {
     /// must see the previous concurrent run's token even though it ran on a
     /// different clone.
     current_run: Arc<Mutex<Option<CancellationToken>>>,
-    /// Speculative cloud backing. `true` while this model was loaded under
+    /// Speculative cloud backing. `Some` while this model was loaded under
     /// speculative cloud fallback: until the background download installs a
     /// `loaded` local handle, every run is routed to the gateway (which serves
-    /// the registry model via xycloud — see [`Self::cloud_serve`]). `false` for
-    /// ordinary local models.
-    speculative: bool,
+    /// the registry model via xycloud — see [`Self::cloud_serve`]). `None` for
+    /// ordinary local models. Carries the download's completion signal so a
+    /// failed cloud leg can degrade to waiting for local (see
+    /// [`Self::degrade_to_local`]); `Arc`-shared so every clone observes the
+    /// same download.
+    speculative: Option<Arc<SpeculativeDownload>>,
 }
 
 struct WarmupEventFields {
@@ -2211,6 +2268,93 @@ impl XybridModel {
         self.handle.read().map(|h| h.loaded).unwrap_or(false)
     }
 
+    /// Whether this run should be served speculatively from the cloud.
+    ///
+    /// `true` when this model was loaded under speculative cloud fallback *and*
+    /// the local handle isn't ready yet. Once the background download swaps in a
+    /// `loaded` handle this returns `false` and runs go local. Checked without
+    /// holding the handle write lock so the cloud round-trip never blocks a
+    /// concurrent local promotion.
+    fn cloud_serve(&self) -> bool {
+        self.speculative.is_some() && !self.is_loaded()
+    }
+
+    /// Block until the speculative download finishes, reporting whether a local
+    /// handle is now installed.
+    ///
+    /// Used to degrade a *failed* cloud leg to the pre-speculation behaviour
+    /// rather than surfacing a gateway error: speculation is an optimisation,
+    /// so it must never leave the caller worse off than not speculating.
+    /// Returns `false` for non-speculative models and for failed downloads.
+    fn degrade_to_local(&self) -> bool {
+        self.speculative
+            .as_ref()
+            .is_some_and(|download| download.wait_for_local())
+    }
+
+    /// Run the speculative cloud batch leg. `None` means the cloud leg failed
+    /// but the local handle has since landed — the caller should fall through
+    /// to its normal local path.
+    fn cloud_leg_batch(
+        &self,
+        envelope: &Envelope,
+        config: Option<&GenerationConfig>,
+    ) -> Option<SdkResult<InferenceResult>> {
+        match cloud_serve_batch(&self.model_id, envelope, config) {
+            Ok(result) => Some(Ok(result)),
+            Err(err) => self.after_failed_cloud_leg(err, 0),
+        }
+    }
+
+    /// Streaming counterpart of [`Self::cloud_leg_batch`].
+    fn cloud_leg_streaming<F>(
+        &self,
+        envelope: &Envelope,
+        config: Option<&GenerationConfig>,
+        on_token: &mut F,
+    ) -> Option<SdkResult<InferenceResult>>
+    where
+        F: FnMut(
+                xybrid_core::runtime_adapter::types::PartialToken,
+            ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>
+            + Send,
+    {
+        let emitted = std::sync::atomic::AtomicU32::new(0);
+        match cloud_serve_streaming(&self.model_id, envelope, config, on_token, &emitted) {
+            Ok(result) => Some(Ok(result)),
+            Err(err) => {
+                self.after_failed_cloud_leg(err, emitted.load(std::sync::atomic::Ordering::SeqCst))
+            }
+        }
+    }
+
+    /// Decide what a failed speculative cloud leg turns into: `None` to retry
+    /// locally, `Some(Err)` to surface the gateway failure.
+    ///
+    /// Speculation is an optimisation, so a gateway failure should not be worse
+    /// than never having speculated — wait for the download and run locally.
+    /// The exception is a stream that already emitted tokens: re-running would
+    /// duplicate output the caller has seen, so that failure stays terminal
+    /// (same "no partial-token reuse" rule the reactive fallback follows).
+    fn after_failed_cloud_leg(
+        &self,
+        err: SdkError,
+        emitted: u32,
+    ) -> Option<SdkResult<InferenceResult>> {
+        if emitted > 0 {
+            return Some(Err(err));
+        }
+        if self.degrade_to_local() {
+            log::warn!(
+                target: "xybrid_sdk",
+                "speculative cloud leg failed for '{}' ({err}); falling back to the local model",
+                self.model_id
+            );
+            return None;
+        }
+        Some(Err(err))
+    }
+
     /// Whether the model bundle declares local tool-calling support.
     ///
     /// Advisory tri-state from the bundle's optional `tool_calling` metadata
@@ -2225,25 +2369,34 @@ impl XybridModel {
             .and_then(|h| h.metadata.supports_tool_calling())
     }
 
-    /// Whether this run should be served speculatively from the cloud.
-    ///
-    /// `true` when this model was loaded under speculative cloud fallback *and*
-    /// the local handle isn't ready yet. Once the background download swaps in a
-    /// `loaded` handle this returns `false` and runs go local. Checked without
-    /// holding the handle write lock so the cloud round-trip never blocks a
-    /// concurrent local promotion.
-    fn cloud_serve(&self) -> bool {
-        self.speculative && !self.is_loaded()
-    }
-
     /// Check if this model supports streaming.
+    ///
+    /// A speculative load caches an optimistic value (the placeholder handle
+    /// predates the real metadata), so once the background download installs
+    /// the local handle this reads the truth back off that metadata rather than
+    /// the stale cached field.
     pub fn supports_streaming(&self) -> bool {
-        self.supports_streaming
+        self.metadata_derived(ModelLoader::check_streaming_support)
+            .unwrap_or(self.supports_streaming)
     }
 
     /// Get the expected output type for this model.
+    ///
+    /// Like [`Self::supports_streaming`], this re-derives from the installed
+    /// local metadata once a speculative download lands.
     pub fn output_type(&self) -> OutputType {
-        self.output_type
+        self.metadata_derived(ModelLoader::infer_output_type)
+            .unwrap_or(self.output_type)
+    }
+
+    /// Re-derive a property from the *installed* handle metadata, but only for
+    /// a speculative model whose local handle has landed — every other model's
+    /// cached fields were computed from this same metadata at load, so paying
+    /// for a read lock would buy nothing.
+    fn metadata_derived<T>(&self, derive: impl Fn(&ModelMetadata) -> T) -> Option<T> {
+        self.speculative.as_ref()?;
+        let handle = self.handle.read().ok()?;
+        handle.loaded.then(|| derive(&handle.metadata))
     }
 
     /// Check if this is an LLM model (uses GGUF execution template).
@@ -2622,7 +2775,10 @@ impl XybridModel {
         // Speculative cloud: serve from the gateway until the local handle is
         // ready (see `cloud_serve`).
         if self.cloud_serve() {
-            return cloud_serve_batch(&self.model_id, envelope, config);
+            if let Some(result) = self.cloud_leg_batch(envelope, config) {
+                return result;
+            }
+            // Cloud failed but the download landed — run locally below.
         }
         let start = Instant::now();
         // Begin a resource-telemetry scope for this run. When
@@ -2828,7 +2984,10 @@ impl XybridModel {
         // reactive fallback behaves the same) — full history resumes once the
         // local model takes over.
         if self.cloud_serve() {
-            return cloud_serve_batch(&self.model_id, envelope, config);
+            if let Some(result) = self.cloud_leg_batch(envelope, config) {
+                return result;
+            }
+            // Cloud failed but the download landed — run locally below.
         }
         let start = Instant::now();
         let resource_guard = crate::telemetry::begin_resource_run();
@@ -2983,7 +3142,11 @@ impl XybridModel {
         // ready. The gateway leg is stateless (`context` not replayed, matching
         // the reactive fallback); full history resumes once local takes over.
         if self.cloud_serve() {
-            return cloud_serve_streaming(&self.model_id, envelope, config, &mut on_token);
+            if let Some(result) = self.cloud_leg_streaming(envelope, config, &mut on_token) {
+                return result;
+            }
+            // Cloud failed before emitting a token but the download landed —
+            // stream locally below.
         }
 
         let start = Instant::now();
@@ -3190,7 +3353,11 @@ impl XybridModel {
         // Speculative cloud: stream from the gateway until the local handle is
         // ready (see `cloud_serve`).
         if self.cloud_serve() {
-            return cloud_serve_streaming(&self.model_id, envelope, config, &mut on_token);
+            if let Some(result) = self.cloud_leg_streaming(envelope, config, &mut on_token) {
+                return result;
+            }
+            // Cloud failed before emitting a token but the download landed —
+            // stream locally below.
         }
 
         let start = Instant::now();
@@ -3595,7 +3762,7 @@ impl XybridModel {
         let version = self.version.clone();
         let output_type = self.output_type;
         // Speculative cloud routing decision, captured before the worker spawns.
-        let speculative = self.cloud_serve();
+        let speculative = self.cloud_serve().then(|| self.clone());
 
         // Clone tx for the completion event (before moving into spawn_blocking)
         let tx_completion = tx.clone();
@@ -3614,10 +3781,9 @@ impl XybridModel {
 
                 // Speculative cloud: stream from the gateway until the local
                 // handle is ready, forwarding each token as a StreamEvent.
-                if speculative {
+                if let Some(model) = speculative {
                     let tx_token = tx.clone();
-                    return cloud_serve_streaming(
-                        &model_id,
+                    let cloud = model.cloud_leg_streaming(
                         &envelope,
                         config.as_ref(),
                         &mut |token: PartialToken| {
@@ -3631,6 +3797,11 @@ impl XybridModel {
                             Ok(())
                         },
                     );
+                    if let Some(result) = cloud {
+                        return result;
+                    }
+                    // Cloud failed before emitting a token but the download
+                    // landed — stream locally below.
                 }
 
                 // Get write lock on handle
@@ -3771,14 +3942,19 @@ impl XybridModel {
         // Speculative cloud: serve from the gateway (off the runtime via
         // spawn_blocking, like the local path) until the local handle is ready.
         if self.cloud_serve() {
-            let model_id = self.model_id.clone();
-            let envelope = envelope.clone();
-            let config = config.cloned();
-            return tokio::task::spawn_blocking(move || {
-                cloud_serve_batch(&model_id, &envelope, config.as_ref())
+            let model = self.clone();
+            let cloud_envelope = envelope.clone();
+            let cloud_config = config.cloned();
+            // `None` = the cloud leg failed and the download landed; fall
+            // through to the local path below (also off the runtime).
+            let cloud_result = tokio::task::spawn_blocking(move || {
+                model.cloud_leg_batch(&cloud_envelope, cloud_config.as_ref())
             })
             .await
             .map_err(|e| SdkError::inference_src("Task join error", e))?;
+            if let Some(result) = cloud_result {
+                return result;
+            }
         }
         let handle = self.handle.clone();
         let model_id = self.model_id.clone();
@@ -3926,7 +4102,7 @@ impl Clone for XybridModel {
             // Share the in-flight slot so all clones coordinate preemption
             // through one mutex (see field docs).
             current_run: self.current_run.clone(),
-            speculative: self.speculative,
+            speculative: self.speculative.clone(),
         }
     }
 }
@@ -4264,7 +4440,7 @@ mod tests {
             output_type: OutputType::Text,
             supports_streaming: true,
             current_run: Arc::new(Mutex::new(None)),
-            speculative: true,
+            speculative: Some(Arc::new(SpeculativeDownload::default())),
         };
         assert!(speculating.cloud_serve(), "not loaded -> cloud");
 
@@ -4281,6 +4457,111 @@ mod tests {
 
         // A plain local model with no speculative config never routes to cloud.
         assert!(!test_loaded_model(true).cloud_serve());
+    }
+
+    /// A speculative model caches optimistic `output_type` / `supports_streaming`
+    /// values from its placeholder handle. Once the background download installs
+    /// the real handle, the accessors must report the *installed* metadata — not
+    /// the stale placeholder guess.
+    #[test]
+    fn speculative_accessors_refresh_after_handle_swap() {
+        let mut real = ModelMetadata::onnx("spec-model", "model.onnx", "1.2.3");
+        real.execution_template = ExecutionTemplate::Onnx {
+            model_file: "model.onnx".to_string(),
+        };
+        let speculating = XybridModel {
+            handle: Arc::new(RwLock::new(ModelHandle {
+                executor: TemplateExecutor::default(),
+                metadata: ModelMetadata::onnx("spec-model", "", ""),
+                model_dir: PathBuf::from("."),
+                loaded: false,
+            })),
+            model_id: "spec-model".to_string(),
+            version: String::new(),
+            // Placeholder guesses, matching `load_speculative`.
+            output_type: OutputType::Text,
+            supports_streaming: true,
+            current_run: Arc::new(Mutex::new(None)),
+            speculative: Some(Arc::new(SpeculativeDownload::default())),
+        };
+
+        // Pre-swap: the optimistic cached values stand (the cloud leg streams
+        // text), because the placeholder metadata is not authoritative yet.
+        assert!(speculating.supports_streaming());
+
+        // Swap in a non-streaming ONNX handle, as the download thread would.
+        {
+            let mut guard = speculating
+                .handle
+                .write()
+                .unwrap_or_else(|e| e.into_inner());
+            guard.metadata = real;
+            guard.loaded = true;
+        }
+
+        assert!(
+            !speculating.supports_streaming(),
+            "installed ONNX metadata must override the optimistic placeholder value"
+        );
+        assert_eq!(
+            speculating.output_type(),
+            ModelLoader::infer_output_type(
+                &speculating
+                    .handle
+                    .read()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .metadata
+            ),
+        );
+    }
+
+    /// A failed cloud leg must degrade to the local model rather than surface a
+    /// gateway error — speculation is an optimisation, never a regression. But
+    /// once tokens have reached the caller, restarting would duplicate output,
+    /// so that failure stays terminal.
+    #[test]
+    fn failed_cloud_leg_degrades_only_before_any_token() {
+        let download = Arc::new(SpeculativeDownload::default());
+        let model = XybridModel {
+            handle: Arc::new(RwLock::new(ModelHandle {
+                executor: TemplateExecutor::default(),
+                metadata: ModelMetadata::onnx("spec-model", "", ""),
+                model_dir: PathBuf::from("."),
+                loaded: false,
+            })),
+            model_id: "spec-model".to_string(),
+            version: String::new(),
+            output_type: OutputType::Text,
+            supports_streaming: true,
+            current_run: Arc::new(Mutex::new(None)),
+            speculative: Some(Arc::clone(&download)),
+        };
+
+        // Download already landed, so a token-less failure can retry locally.
+        download.finish(true);
+        assert!(
+            model
+                .after_failed_cloud_leg(SdkError::network("gateway 502"), 0)
+                .is_none(),
+            "no tokens emitted + local ready -> fall through to local"
+        );
+
+        // Tokens already streamed to the caller: the failure is terminal.
+        assert!(
+            model
+                .after_failed_cloud_leg(SdkError::network("gateway 502"), 3)
+                .is_some_and(|r| r.is_err()),
+            "partial stream must not be restarted"
+        );
+    }
+
+    /// A failed *download* must not park a degrading run forever, and must not
+    /// claim a local handle exists.
+    #[test]
+    fn failed_download_reports_no_local_handle() {
+        let download = SpeculativeDownload::default();
+        download.finish(false);
+        assert!(!download.wait_for_local());
     }
 
     /// The inherent `SdkError::is_retryable` / `retry_after` accessors and
@@ -4684,7 +4965,7 @@ mod tests {
             output_type: OutputType::Text,
             supports_streaming,
             current_run: Arc::new(Mutex::new(None)),
-            speculative: false,
+            speculative: None,
         }
     }
 
@@ -4704,6 +4985,7 @@ mod tests {
             output_type: OutputType::Text,
             supports_streaming: true,
             current_run: Arc::new(Mutex::new(None)),
+            speculative: None,
         }
     }
 
@@ -5494,7 +5776,7 @@ mod tests {
             output_type: OutputType::Text,
             supports_streaming: true,
             current_run: Arc::new(Mutex::new(None)),
-            speculative: false,
+            speculative: None,
         }
     }
 
