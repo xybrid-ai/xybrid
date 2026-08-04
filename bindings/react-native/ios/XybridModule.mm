@@ -98,6 +98,31 @@ RCT_REMAP_METHOD(run,
   [_impl run:handle envelope:envelope config:config resolve:resolve reject:reject];
 }
 
+#pragma mark - Streaming
+
+RCT_REMAP_METHOD(streamStart,
+                 streamStart:(NSString *)handle
+                 envelope:(NSDictionary *)envelope
+                 options:(NSDictionary * _Nullable)options
+                 resolver:(RCTPromiseResolveBlock)resolve
+                 rejecter:(RCTPromiseRejectBlock)reject) {
+  [_impl streamStart:handle envelope:envelope options:options resolve:resolve reject:reject];
+}
+
+RCT_REMAP_METHOD(streamNext,
+                 streamNext:(NSString *)streamHandle
+                 resolver:(RCTPromiseResolveBlock)resolve
+                 rejecter:(RCTPromiseRejectBlock)reject) {
+  [_impl streamNext:streamHandle resolve:resolve reject:reject];
+}
+
+RCT_REMAP_METHOD(streamRelease,
+                 streamRelease:(NSString *)streamHandle
+                 resolver:(RCTPromiseResolveBlock)resolve
+                 rejecter:(RCTPromiseRejectBlock)reject) {
+  [_impl streamRelease:streamHandle resolve:resolve reject:reject];
+}
+
 #pragma mark - TTS introspection
 
 RCT_REMAP_METHOD(voices,

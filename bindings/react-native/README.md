@@ -6,12 +6,11 @@ to JavaScript through a TurboModule.
 
 ## Status
 
-**Pre-release.** The synchronous surface is at 1:1 parity with the Apple and
-Kotlin SDKs: loader → `run()` with full `RunOptions` (sampling config plus
-cloud fallback / abort-on-stress / correlation ID), `warmup`/`unload`,
-`GenerationConfigs` presets, voice introspection, and platform-state push.
-Streaming (ASR partials, LLM token streams) is the remaining gap — see
-"Open work" below.
+**Pre-release.** At 1:1 parity with the Apple and Kotlin SDKs: loader →
+`run()` with full `RunOptions` (sampling config plus cloud fallback /
+abort-on-stress / correlation ID), `warmup`/`unload`, `GenerationConfigs`
+presets, voice introspection, platform-state push, and **token streaming** via
+`model.runStreaming()` (pull-based, aborts on break/completion).
 
 ## Architecture
 
@@ -125,6 +124,32 @@ console.log(result.text);
 await model.unload();
 ```
 
+### Streaming
+
+`model.runStreaming()` returns an async generator that yields each token as it
+is generated. It is pull-based: the underlying native run is **aborted
+automatically** when iteration ends — it completes, you `break`, or an error is
+thrown (each of these runs the generator's cleanup) — so stopping a generation
+early never keeps the device busy. Unmounting a component does **not** stop a
+running `for await` loop by itself: break out of the loop (or call
+`gen.return()`) on unmount. A generator that is simply abandoned mid-stream is
+never released until its model is. It takes the same `RunOptions` second
+argument as `run()`.
+
+```ts
+for await (const token of model.runStreaming(
+  { kind: 'text', text: 'Write a haiku about the sea.' },
+  { generationConfig: GenerationConfigs.creative() },
+)) {
+  setOutput((prev) => prev + token.token); // token.cumulativeText also available
+}
+```
+
+The final `InferenceResult` (latency, metrics) is the generator's return value;
+non-LLM models emit a single token carrying the full result, then complete.
+Errors raised mid-stream throw from the loop with the same typed `xybrid_*`
+codes as `run()`.
+
 ## Requirements
 
 - React Native ≥ 0.74 (TurboModules + codegen).
@@ -140,17 +165,15 @@ await model.unload();
 
 ## Open work for GA
 
-1. **Streaming.** ASR partial results and LLM token streams aren't surfaced to
-   JS yet — they need an `EventEmitter` (legacy) or a JSI `HostObject` wrapper
-   for low-jitter token delivery. This is the last synchronous-surface parity
-   gap with the native SDKs.
-2. **Binary payloads.** Audio bytes ride as base64 strings today. Move to
-   `ArrayBuffer` via JSI to drop the encode/decode hop on every chunk.
-3. **TypeScript codegen.** The `Spec` interface and the native shim mappers are
+1. **Binary payloads.** Audio bytes ride as base64 strings today. Move to
+   `ArrayBuffer` via JSI to drop the encode/decode hop on every chunk. This is
+   also where a *push* (`HostObject`) streaming path would land for high-rate
+   binary; the current token streaming is pull-based, which is right for text.
+2. **TypeScript codegen.** The `Spec` interface and the native shim mappers are
    hand-written, so RN is the one binding not generated from the bolt
    `#[data]`/facade source of truth — every new core field must be hand-wired
    here (as `RunOptions` / `warmup` / `unload` just were). Generate them from
    the same definitions the other bindings derive from to keep parity
    structural rather than a manual chase. See the JSI re-architecture plan.
-4. **End-to-end smoke test.** The `example/` Expo app and CI build/lint the
+3. **End-to-end smoke test.** The `example/` Expo app and CI build/lint the
    package, but CI does not yet run inference end-to-end on a device/emulator.

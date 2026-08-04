@@ -77,6 +77,25 @@ export default function App() {
           ok: true,
           detail: result.text,
         });
+
+        // Streaming: accumulate tokens from the async generator. Aborts
+        // automatically if the loop throws or is broken out of.
+        let streamed = '';
+        let tokens = 0;
+        const startedAt = Date.now();
+        for await (const token of loaded.runStreaming({
+          kind: 'text',
+          text: 'Write one sentence about the sea.',
+        })) {
+          streamed += token.token;
+          tokens += 1;
+        }
+        push({
+          label: `→ streamed ${tokens} tokens in ${Date.now() - startedAt} ms`,
+          durationMs: 0,
+          ok: true,
+          detail: streamed,
+        });
       }
     } catch (err) {
       push({
@@ -95,7 +114,7 @@ export default function App() {
       <ScrollView contentContainerStyle={styles.body}>
         <Text style={styles.title}>react-native-xybrid</Text>
         <Text style={styles.subtitle}>
-          Expo dev-build smoke test (init → load → run).
+          Expo dev-build smoke test (init → load → run → stream).
         </Text>
 
         <View style={styles.row}>

@@ -222,6 +222,65 @@ public extension XybridModel {
     func unloadAsync() async throws {
         try await Task.detached { try self.unload() }.value
     }
+
+    /// Stream inference token-by-token as an async sequence.
+    ///
+    /// Yields each `XybridStreamToken` as it is generated and finishes when
+    /// generation completes; throws ``XybridError`` if the run fails
+    /// mid-stream. Cancelling the consuming task — or breaking out of the
+    /// `for try await` loop — aborts generation at the next token boundary:
+    /// the underlying streaming session is closed, which unwinds the backend
+    /// instead of running to `max_tokens`. Ergonomic wrapper over the
+    /// pull-based session API (``runStream(envelope:options:)`` /
+    /// ``streamNext(streamId:)`` / ``streamClose(streamId:)``).
+    ///
+    /// Note: the producing task pulls as fast as generation runs and buffers
+    /// unconsumed tokens in the async sequence (unbounded), so the facade's
+    /// bounded-channel backpressure applies to the raw session pull API, not
+    /// to a slow consumer of this sequence. Buffering is bounded by
+    /// `max_tokens` in practice; a bounded policy here would drop tokens.
+    ///
+    /// ```swift
+    /// for try await token in model.streamTokens(envelope: env) {
+    ///     print(token.token, terminator: "")
+    /// }
+    /// ```
+    func streamTokens(
+        envelope: XybridEnvelope,
+        options: XybridRunOptions? = nil
+    ) -> AsyncThrowingStream<XybridStreamToken, Error> {
+        AsyncThrowingStream { continuation in
+            let task = Task.detached {
+                var streamId: UInt64?
+                do {
+                    let id = try self.runStream(envelope: envelope, options: options)
+                    streamId = id
+                    while !Task.isCancelled {
+                        let event = try self.streamNext(streamId: id)
+                        switch event.kind {
+                        case .token:
+                            if let token = event.token {
+                                continuation.yield(token)
+                            }
+                        case .complete:
+                            self.streamClose(streamId: id)
+                            continuation.finish()
+                            return
+                        }
+                    }
+                    // Cancelled: close the session to abort the in-flight run.
+                    self.streamClose(streamId: id)
+                    continuation.finish()
+                } catch {
+                    // A failed streamNext has already closed the session
+                    // bolt-side; closing again is an idempotent map-remove.
+                    if let id = streamId { self.streamClose(streamId: id) }
+                    continuation.finish(throwing: error)
+                }
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+    }
 }
 
 /// Input data for model inference.

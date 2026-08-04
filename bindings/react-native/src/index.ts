@@ -5,6 +5,8 @@ import type {
   InferenceResult,
   ModelHandle,
   RunOptions,
+  StreamEvent,
+  StreamToken,
   ThermalState,
   VoiceInfo,
 } from './types';
@@ -18,6 +20,8 @@ export type {
   InferenceResult,
   ModelHandle,
   RunOptions,
+  StreamEvent,
+  StreamToken,
   TextEnvelope,
   ThermalState,
   VoiceInfo,
@@ -162,6 +166,82 @@ export class Model {
       normalizeRunOptions(options),
     )) as InferenceResult;
     return result;
+  }
+
+  /**
+   * Stream inference token-by-token. Yields each {@link StreamToken} as it is
+   * generated and returns the final {@link InferenceResult} (latency, metrics)
+   * as the generator's return value. Errors mid-stream are thrown.
+   *
+   * Consume with `for await`:
+   * ```ts
+   * for await (const t of model.runStreaming(envelope)) {
+   *   setText((prev) => prev + t.token);
+   * }
+   * ```
+   *
+   * The underlying native run is aborted automatically when iteration ends —
+   * it completes, you `break`, or an error is thrown; each of these runs this
+   * generator's cleanup (`break`/`throw` call `return()` under the hood). A
+   * generator that is merely *abandoned* mid-stream — the consumer stops
+   * calling `next()` without breaking — is never cleaned up (JS runs no
+   * `finally` on GC), leaving the native run alive until its model is
+   * released. So on unmount, break out of the loop or call `gen.return()`.
+   *
+   * The second argument mirrors {@link run}: a {@link RunOptions} (or a bare
+   * {@link GenerationConfig} shorthand). Non-LLM models emit a single token
+   * carrying the full result, then complete.
+   *
+   * The final {@link InferenceResult} (latency, metrics) is the generator's
+   * *return* value, not a yielded token — capture it via manual iteration:
+   * ```ts
+   * const gen = model.runStreaming(envelope);
+   * let next = await gen.next();
+   * while (!next.done) { append(next.value.token); next = await gen.next(); }
+   * const result = next.value; // InferenceResult | undefined
+   * ```
+   *
+   * Errors raised mid-stream are thrown from the iterator with the same typed
+   * `xybrid_*` codes that {@link run} rejects with (the native `streamNext`
+   * promise rejects, and the rejection propagates out of the generator).
+   */
+  async *runStreaming(
+    envelope: Envelope,
+    options?: RunOptions | GenerationConfig,
+  ): AsyncGenerator<StreamToken, InferenceResult | undefined, void> {
+    const streamHandle = await NativeXybrid.streamStart(
+      this.handle,
+      envelope,
+      normalizeRunOptions(options),
+    );
+    try {
+      for (;;) {
+        const event = (await NativeXybrid.streamNext(streamHandle)) as StreamEvent | null;
+        // `null` means the native stream is exhausted without an explicit
+        // terminal event (e.g. it was released out from under us) — stop.
+        if (event == null) return undefined;
+        switch (event.kind) {
+          case 'token':
+            yield event.token;
+            break;
+          case 'complete':
+            return event.result;
+          default:
+            // Exhaustiveness guard: a new native event kind that this switch
+            // doesn't handle is a contract/version-skew bug, not a silent stop.
+            throw new Error(
+              `Unexpected stream event: ${(event as { kind: string }).kind}`,
+            );
+        }
+      }
+    } finally {
+      // Always release on generator cleanup: covers normal completion, early
+      // `break`, thrown errors, and explicit `gen.return()` — but NOT silent
+      // abandonment (JS never runs `finally` on GC; see the doc comment).
+      // Releasing aborts the native run and is idempotent (releasing an
+      // already-finished stream is a no-op).
+      await NativeXybrid.streamRelease(streamHandle);
+    }
   }
 
   /**
