@@ -1,0 +1,23 @@
+bindings/apple/include/xybrid-bolt.h
+  s_da9b0a0afc6e02::t_ad6dcdbd304867 33-35,51-53,59-62
+bindings/apple/scripts/gen-bolt-bindings.sh
+  s_da9b0a0afc6e02::t_32102ebccb92e0 1-28
+bindings/apple/Sources/Xybrid/xybrid_bolt.swift
+  s_da9b0a0afc6e02::t_ad6dcdbd304867 1168
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "cadddbb1c3fbd39fecd29fd6b90c3a2f8f89d5c0",
+  "prompts": {},
+  "sessions": {
+    "s_da9b0a0afc6e02": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "eec73ce8-5f6c-46f7-aa93-411f75c33cc9",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
