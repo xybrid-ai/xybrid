@@ -124,6 +124,28 @@ console.log(result.text);
 await model.unload();
 ```
 
+### Structured output (JSON Schema / GBNF)
+
+Constrain a local LLM to schema-valid JSON by setting
+`generationConfig.grammar` — produce a grammar from a JSON Schema with
+`jsonSchemaToGbnf()` (the same native converter every other binding uses), or
+pass raw GBNF. Local llama backend only.
+
+```ts
+import { jsonSchemaToGbnf } from 'react-native-xybrid';
+
+const grammar = await jsonSchemaToGbnf({
+  type: 'object',
+  properties: { name: { type: 'string' }, total: { type: 'number' } },
+  required: ['name', 'total'],
+});
+const result = await model.run(
+  { kind: 'text', text: 'Extract: 2x espresso, 8.40 EUR total' },
+  { generationConfig: { grammar, maxTokens: 128 } },
+);
+JSON.parse(result.text!); // guaranteed schema-valid
+```
+
 ### Streaming
 
 `model.runStreaming()` returns an async generator that yields each token as it

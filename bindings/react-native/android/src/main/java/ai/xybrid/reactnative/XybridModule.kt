@@ -27,6 +27,7 @@ import ai.xybrid.clearBatteryLevel
 import ai.xybrid.clearThermalState
 import ai.xybrid.embedding
 import ai.xybrid.initSdkCacheDir
+import ai.xybrid.jsonSchemaToGbnf
 import ai.xybrid.reasoningContent
 import ai.xybrid.setBatteryLevel
 import ai.xybrid.setBinding
@@ -346,6 +347,21 @@ class XybridModule(reactContext: ReactApplicationContext) :
     promise.resolve(null)
   }
 
+  // -- Utilities --
+
+  @ReactMethod
+  fun jsonSchemaToGbnf(schemaJson: String, promise: Promise) {
+    try {
+      // Shared JSON-Schema→GBNF converter from the bolt bindings. Fast (pure
+      // string transform), so no coroutine hop is needed.
+      promise.resolve(jsonSchemaToGbnf(schemaJson))
+    } catch (e: XybridError) {
+      rejectXybrid(promise, e)
+    } catch (t: Throwable) {
+      promise.reject("xybrid", t.message, t)
+    }
+  }
+
   // MARK: - Helpers
 
   private fun runLoad(promise: Promise, factory: suspend () -> XybridModel) {
@@ -492,6 +508,7 @@ class XybridModule(reactContext: ReactApplicationContext) :
       topK = uintOrNull("topK"),
       repetitionPenalty = floatOrNull("repetitionPenalty"),
       stopSequences = stops,
+      grammar = if (map.hasKey("grammar") && !map.isNull("grammar")) map.getString("grammar") else null,
     )
   }
 

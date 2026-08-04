@@ -174,6 +174,15 @@ RCT_REMAP_METHOD(clearThermalState,
   [_impl clearThermalState:resolve reject:reject];
 }
 
+#pragma mark - Utilities
+
+RCT_REMAP_METHOD(jsonSchemaToGbnf,
+                 jsonSchemaToGbnf:(NSString *)schemaJson
+                 resolver:(RCTPromiseResolveBlock)resolve
+                 rejecter:(RCTPromiseRejectBlock)reject) {
+  [_impl jsonSchemaToGbnf:schemaJson resolve:resolve reject:reject];
+}
+
 #ifdef RCT_NEW_ARCH_ENABLED
 - (std::shared_ptr<facebook::react::TurboModule>)getTurboModule:
     (const facebook::react::ObjCTurboModule::InitParams &)params {

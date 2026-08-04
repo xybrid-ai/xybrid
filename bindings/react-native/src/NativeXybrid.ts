@@ -66,6 +66,12 @@ export interface Spec extends TurboModule {
   clearBatteryLevel(): Promise<void>;
   setThermalState(state: string): Promise<void>;
   clearThermalState(): Promise<void>;
+
+  // -- Utilities --
+  // Convert a JSON Schema (as a JSON string) into a GBNF grammar for
+  // `GenerationConfig.grammar`. Rejects on invalid JSON or an unsupported
+  // schema construct.
+  jsonSchemaToGbnf(schemaJson: string): Promise<string>;
 }
 
 export default TurboModuleRegistry.getEnforcing<Spec>('RNXybrid');

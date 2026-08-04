@@ -38,6 +38,12 @@ export interface GenerationConfig {
   topK?: number;
   repetitionPenalty?: number;
   stopSequences?: string[];
+  /**
+   * Optional GBNF grammar constraining generation to structured output
+   * (local llama backend only). Produce one from a JSON Schema with
+   * {@link jsonSchemaToGbnf}, or pass raw GBNF.
+   */
+  grammar?: string;
 }
 
 /**

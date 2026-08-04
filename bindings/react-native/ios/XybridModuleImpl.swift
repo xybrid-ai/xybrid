@@ -306,6 +306,23 @@ public final class XybridModuleImpl: NSObject {
     resolve(nil)
   }
 
+  // -- Utilities --
+
+  @objc public func jsonSchemaToGbnf(_ schemaJson: String,
+                                     resolve: @escaping RCTPromiseResolveBlock,
+                                     reject: @escaping RCTPromiseRejectBlock) {
+    do {
+      // Free function from xybrid_bolt.swift; the shared JSON-Schema→GBNF
+      // converter every binding uses. Fast (pure string transform), so no
+      // Task.detached hop is needed.
+      resolve(try jsonSchemaToGbnf(schemaJson: schemaJson))
+    } catch let error as XybridError {
+      rejectXybrid(error, reject)
+    } catch {
+      reject("xybrid", error.localizedDescription, error)
+    }
+  }
+
   // MARK: - Helpers
 
   private func lookup(_ handle: String) -> XybridModel? {
@@ -441,7 +458,8 @@ public final class XybridModuleImpl: NSObject {
       minP: (dict["minP"] as? NSNumber)?.floatValue,
       topK: uint32OrNil("topK"),
       repetitionPenalty: (dict["repetitionPenalty"] as? NSNumber)?.floatValue,
-      stopSequences: dict["stopSequences"] as? [String] ?? []
+      stopSequences: dict["stopSequences"] as? [String] ?? [],
+      grammar: dict["grammar"] as? String
     )
   }
 

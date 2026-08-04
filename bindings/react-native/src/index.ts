@@ -29,6 +29,28 @@ export type {
 
 export { GenerationConfigs, creative, greedy } from './presets';
 
+/**
+ * Convert a JSON Schema (as an object or JSON string) into a GBNF grammar for
+ * {@link GenerationConfig.grammar}, so a local LLM emits schema-valid JSON.
+ *
+ * ```ts
+ * const grammar = await jsonSchemaToGbnf({
+ *   type: 'object',
+ *   properties: { name: { type: 'string' } },
+ *   required: ['name'],
+ * });
+ * const result = await model.run(envelope, { generationConfig: { grammar } });
+ * ```
+ *
+ * Rejects with a config error on invalid JSON or an unsupported schema
+ * construct. Conversion runs natively — the same converter every other
+ * binding uses.
+ */
+export function jsonSchemaToGbnf(schema: object | string): Promise<string> {
+  const json = typeof schema === 'string' ? schema : JSON.stringify(schema);
+  return NativeXybrid.jsonSchemaToGbnf(json);
+}
+
 // Keys that only appear on `RunOptions`, never on a bare `GenerationConfig`.
 // Used to tell the two apart when a caller passes either form to `run()`.
 const RUN_OPTION_KEYS = [
