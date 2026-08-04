@@ -70,7 +70,7 @@ ureq = { version = "2.9", default-features = false, features = ["json", "tls"] }
 # CLI UI
 indicatif = "0.17"
 console = "0.16"
-dialoguer = "0.11"
+dialoguer = "0.12"
 # Tracing
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
@@ -79,5 +79,5 @@ tracing-flame = "0.2"
 [dev-dependencies]
 httpmock = "0.7"
 safetensors = "0.4"
-tokenizers = { version = "0.21", default-features = false, features = ["onig"] }
+tokenizers = { version = "0.22", default-features = false, features = ["onig"] }
 image = "0.25"

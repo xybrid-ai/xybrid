@@ -109,7 +109,7 @@ dev-tools = ["xybrid-core/dev-tools"]
 [dev-dependencies]
 httpmock = "0.7"
 safetensors = "0.4"
-tokenizers = { version = "0.21", default-features = false, features = ["onig"] }
+tokenizers = { version = "0.22", default-features = false, features = ["onig"] }
 
 # Re-export the macro
 [package.metadata.docs.rs]
