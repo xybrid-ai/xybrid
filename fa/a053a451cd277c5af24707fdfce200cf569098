@@ -1,0 +1,50 @@
+bindings/react-native/src/NativeXybrid.ts
+  s_da9b0a0afc6e02::t_be8c4f33f821f3 47-50
+bindings/react-native/android/src/main/java/ai/xybrid/reactnative/XybridModule.kt
+  s_da9b0a0afc6e02::t_cbec50e0e8c134 133-135,140,144
+  s_da9b0a0afc6e02::t_cfd0734c9c835e 21-22
+  s_da9b0a0afc6e02::t_2dcfc6243f0da2 578-590
+  s_da9b0a0afc6e02::t_b3d8dd85751223 521-525,527-529,533-536
+  s_da9b0a0afc6e02::t_87320eac30789b 72-74
+  s_da9b0a0afc6e02::t_7ed679ffde5394 530-532
+  s_da9b0a0afc6e02::t_8b926acd63aed6 211,213,234-251,253-255,259,267-270
+bindings/react-native/README.md
+  s_da9b0a0afc6e02::t_a1d2ed578c0e4b 178
+  s_da9b0a0afc6e02::t_fe5287d8656595 150-151
+  s_da9b0a0afc6e02::t_e0706699f71ac7 172
+bindings/kotlin/src/main/kotlin/ai/xybrid/XybridBolt.kt
+  s_da9b0a0afc6e02::t_22da1033a94d85 1009-1028,1276-1337,1449-1484,1529-1537,1569-1576,1642-1763,1783-2122,2268-2271,2276,2283,2290-2295,2298-2328
+bindings/react-native/ios/XybridModuleImpl.swift
+  s_da9b0a0afc6e02::t_b74b8cdda1dbc0 88-97
+  s_da9b0a0afc6e02::t_efd91245973f0e 472-484
+  s_da9b0a0afc6e02::t_0ca04810332e85 325,328,331,333,335-342
+  s_da9b0a0afc6e02::t_430ca1674f7679 18-22,24
+  s_da9b0a0afc6e02::t_7c04283cd7f065 169-170,183,190-215,224,226-231
+CHANGELOG.md
+  s_da9b0a0afc6e02::t_9b0ab67647f1c0 12-22
+bindings/react-native/src/index.ts
+  s_da9b0a0afc6e02::t_453594022eee4e 204-206
+bindings/apple/Sources/Xybrid/Xybrid.swift
+  s_da9b0a0afc6e02::t_893f3f181691b1 229-235,239-240,254,256-257,259-264,266,271-272,275-277
+bindings/react-native/src/types.ts
+  s_da9b0a0afc6e02::t_f162f4f4278c36 107-109,118
+bindings/apple/Sources/Xybrid/xybrid_bolt.swift
+  s_da9b0a0afc6e02::t_22da1033a94d85 226-284,628-655,767-790,838-848,877-881,928-994,1009-1270,1272
+  s_da9b0a0afc6e02::t_e5232fd1e71a02 1271,1273
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "faa053a451cd277c5af24707fdfce200cf569098",
+  "prompts": {},
+  "sessions": {
+    "s_da9b0a0afc6e02": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "eec73ce8-5f6c-46f7-aa93-411f75c33cc9",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
