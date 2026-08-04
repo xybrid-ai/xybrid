@@ -304,7 +304,9 @@ jobs:
         run: |
           cd "$APP"
           set +e
-          flutter build linux --debug 2>&1 | tee "$RUNNER_TEMP/build.log"
+          # -v: the Linux build only surfaces the cargokit build hook's output
+          # at trace level, and the assertions below grep for its messages.
+          flutter build linux --debug -v 2>&1 | tee "$RUNNER_TEMP/build.log"
           status=${PIPESTATUS[0]}
           set -e
           echo "BUILD_STATUS=$status" >> "$GITHUB_ENV"
