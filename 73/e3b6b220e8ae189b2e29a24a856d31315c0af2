@@ -1,0 +1,19 @@
+crates/llama-cpp-sys/Cargo.toml
+  s_e32586025370b7::t_e703ac0d65e3b0 8-15
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "73e3b6b220e8ae189b2e29a24a856d31315c0af2",
+  "prompts": {},
+  "sessions": {
+    "s_e32586025370b7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "88d405a1-43f7-4cd8-8276-17ff0f5315ff",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
