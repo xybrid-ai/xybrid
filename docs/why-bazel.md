@@ -13,7 +13,12 @@ heaviest cold-build gates, the measured result was:
 - median total job time fell from **43.77 to 12.04 minutes** (**72.5% less time**,
   or **3.6× faster**).
 
-![Measured build times grouped by SDK and platform](assets/bazel-ci-build-times.svg)
+![Cargo and Bazel CI averages by SDK](assets/bazel-ci-sdk-averages.png)
+
+The chart uses an unweighted arithmetic mean of the platform rows for CLI and Flutter;
+the React Native, Rust, Kotlin, and Unity groups each have one measured row. The
+13-target aggregate covers the rows represented in the chart. It does not include the
+Swift XCFramework result, which is reported separately below.
 
 Those are medians from successful, first-party pull-request runs immediately before
 and after the remote-execution cutover. The exact sample and limitations are documented
@@ -331,6 +336,37 @@ acknowledgements:
   - name: hermetic-llvm
     url: https://github.com/hermeticbuild/hermetic-llvm
     role: Hermetic LLVM/Clang C and C++ cross-compilation toolchain
+chart_sdk_averages_minutes:
+  aggregation: Unweighted arithmetic mean of platform rows within each SDK
+  react_native:
+    cargo: 31.48
+    bazel: 1.79
+    reduction_percent: 94.3
+  rust:
+    cargo: 4.95
+    bazel: 0.55
+    reduction_percent: 88.9
+  kotlin:
+    cargo: 31.07
+    bazel: 4.35
+    reduction_percent: 86.0
+  unity:
+    cargo: 12.53
+    bazel: 2.10
+    reduction_percent: 83.2
+  cli:
+    cargo: 9.50
+    bazel: 3.67
+    reduction_percent: 61.4
+  flutter:
+    cargo: 10.90
+    bazel: 6.06
+    reduction_percent: 44.4
+  all_13_chart_targets:
+    cargo: 13.38
+    bazel: 4.32
+    reduction_percent: 67.7
+    excludes: Swift XCFramework
 claim:
   scope: React Native Android native CI gate
   cutover_date: 2026-07-21
