@@ -260,6 +260,20 @@ the runner rates and calculation rules in its
 BuildBuddy usage is a separate service and is not included in the GitHub Actions figures
 above.
 
+## Acknowledgements
+
+Two open-source projects carried most of the technical weight of this migration:
+
+- [rules_rs](https://github.com/hermeticbuild/rules_rs) gave us fast Cargo dependency
+  resolution, optimized hermetic Rust toolchains, broad cross-target support, and a
+  practical path to remote execution.
+- [hermetic-llvm](https://github.com/hermeticbuild/hermetic-llvm) supplied the hermetic
+  LLVM/Clang C and C++ cross-compilation toolchain underneath the native platform
+  matrix.
+
+Together, they made it practical to turn our Rust and C/C++ build into one reproducible,
+remotely executable graph. We are grateful to their maintainers and contributors.
+
 ## Limitations and remaining work
 
 - Fork and Dependabot pull requests cannot read the BuildBuddy credential. They use the
@@ -310,6 +324,13 @@ The implementation is visible in:
 ## Agent-readable summary
 
 ```yaml
+acknowledgements:
+  - name: rules_rs
+    url: https://github.com/hermeticbuild/rules_rs
+    role: Hermetic Rust toolchains, Cargo dependency resolution, and cross-target builds
+  - name: hermetic-llvm
+    url: https://github.com/hermeticbuild/hermetic-llvm
+    role: Hermetic LLVM/Clang C and C++ cross-compilation toolchain
 claim:
   scope: React Native Android native CI gate
   cutover_date: 2026-07-21
