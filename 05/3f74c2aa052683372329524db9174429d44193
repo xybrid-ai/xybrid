@@ -1,0 +1,33 @@
+README.ja-JP.md
+  s_baf6bc9578b774::t_00969c792cda6a 174
+README.zh-CN.md
+  s_baf6bc9578b774::t_00969c792cda6a 174
+docs/content/docs/(integration)/sdks/android.zh.mdx
+  s_baf6bc9578b774::t_00969c792cda6a 14
+docs/content/docs/quickstart.mdx
+  s_baf6bc9578b774::t_00969c792cda6a 88
+docs/content/docs/quickstart.zh.mdx
+  s_baf6bc9578b774::t_00969c792cda6a 88
+README.md
+  s_baf6bc9578b774::t_00969c792cda6a 162
+docs/content/docs/(integration)/sdks/android.mdx
+  s_baf6bc9578b774::t_00969c792cda6a 14
+bindings/kotlin/README.md
+  s_baf6bc9578b774::t_00969c792cda6a 15
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "053f74c2aa052683372329524db9174429d44193",
+  "prompts": {},
+  "sessions": {
+    "s_baf6bc9578b774": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1d3f75ba-0807-43dc-a010-9c867134a59d",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
