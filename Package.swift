@@ -77,6 +77,11 @@ let package = Package(
                 .linkedFramework("Security"),
             ]
         ),
+        .testTarget(
+            name: "XybridTests",
+            dependencies: ["Xybrid"],
+            path: "bindings/apple/Tests/XybridTests"
+        ),
         xybridFFITarget(),
     ]
 )

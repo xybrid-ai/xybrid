@@ -388,11 +388,9 @@ final class LiveVisionViewModel: ObservableObject {
         if let model, loadedModelId == modelId { return model }
         let targetId = modelId
         status = "Loading \(targetId)…"
-        // bolt collapsed the loader into a synchronous, blocking
-        // `XybridModel(fromRegistry:)`; load OFF the main actor (see `infer`).
-        let loaded = try await Task.detached {
-            try XybridModel(fromRegistry: targetId)
-        }.value
+        // Creating the loader is side-effect free; `load()` owns the expensive
+        // asynchronous boundary.
+        let loaded = try await Xybrid.model(targetId).load()
         model = loaded
         loadedModelId = targetId
         return loaded

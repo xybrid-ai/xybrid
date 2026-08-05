@@ -146,6 +146,90 @@ public enum Xybrid {
     #endif
 }
 
+// MARK: - Model loading
+
+/// A model location that can be prepared without performing I/O.
+public enum ModelSource: Sendable, Equatable {
+    /// A model resolved through the Xybrid registry.
+    case registry(String)
+
+    /// A local `.xyb` model bundle.
+    case bundle(URL)
+
+    /// A local directory containing `model_metadata.json`.
+    case directory(URL)
+
+    /// A Hugging Face repository (`org/repo` or `org/repo:variant`).
+    case huggingFace(String)
+}
+
+/// A cheap model reference that defers all expensive work until ``load()``.
+///
+/// Creating a loader never performs network, disk, or native-runtime work.
+public struct ModelLoader: Sendable {
+    /// The source this loader will resolve.
+    public let source: ModelSource
+
+    /// Create a loader for an already-described source.
+    public init(source: ModelSource) {
+        self.source = source
+    }
+
+    /// Create a loader for a registry model.
+    public static func fromRegistry(_ id: String) -> Self {
+        Self(source: .registry(id))
+    }
+
+    /// Create a loader for a local `.xyb` bundle.
+    public static func fromBundle(_ url: URL) -> Self {
+        Self(source: .bundle(url))
+    }
+
+    /// Create a loader for a local model directory.
+    public static func fromDirectory(_ url: URL) -> Self {
+        Self(source: .directory(url))
+    }
+
+    /// Create a loader for a Hugging Face repository.
+    public static func fromHuggingFace(_ repo: String) -> Self {
+        Self(source: .huggingFace(repo))
+    }
+
+    /// Load the model without blocking the calling task's executor.
+    public func load() async throws -> XybridModel {
+        try await Task.detached { try loadSync() }.value
+    }
+
+    /// Load the model synchronously.
+    ///
+    /// This may resolve registry metadata, download files, access disk, and
+    /// initialize the inference runtime. Do not call it from the main actor.
+    public func loadSync() throws -> XybridModel {
+        switch source {
+        case .registry(let id):
+            return try XybridModel(fromRegistry: id)
+        case .bundle(let url):
+            return try XybridModel(fromBundle: url.path)
+        case .directory(let url):
+            return try XybridModel(fromDirectory: url.path)
+        case .huggingFace(let repo):
+            return try XybridModel(fromHuggingface: repo)
+        }
+    }
+}
+
+public extension Xybrid {
+    /// Describe a registry model without resolving, downloading, or loading it.
+    static func model(_ id: String) -> ModelLoader {
+        model(.registry(id))
+    }
+
+    /// Describe a model source without resolving, downloading, or loading it.
+    static func model(_ source: ModelSource) -> ModelLoader {
+        ModelLoader(source: source)
+    }
+}
+
 // MARK: - Public Type Re-exports
 
 /// A loaded model ready for inference.
@@ -185,23 +269,27 @@ public extension XybridModel {
 // off-thread is therefore the correct, low-risk way to surface async today.)
 public extension XybridModel {
     /// Load a model from the xybrid registry without blocking the caller.
+    @available(*, deprecated, message: "Use Xybrid.model(id).load()")
     static func fromRegistryAsync(_ id: String) async throws -> XybridModel {
-        try await Task.detached { try XybridModel(fromRegistry: id) }.value
+        try await Xybrid.model(id).load()
     }
 
     /// Load a model from a local directory without blocking the caller.
+    @available(*, deprecated, message: "Use Xybrid.model(.directory(url)).load()")
     static func fromDirectoryAsync(_ path: String) async throws -> XybridModel {
-        try await Task.detached { try XybridModel(fromDirectory: path) }.value
+        try await Xybrid.model(.directory(URL(fileURLWithPath: path))).load()
     }
 
     /// Load a model from a local `.xyb` bundle without blocking the caller.
+    @available(*, deprecated, message: "Use Xybrid.model(.bundle(url)).load()")
     static func fromBundleAsync(_ path: String) async throws -> XybridModel {
-        try await Task.detached { try XybridModel(fromBundle: path) }.value
+        try await Xybrid.model(.bundle(URL(fileURLWithPath: path))).load()
     }
 
     /// Resolve and load a model from a HuggingFace repo without blocking the caller.
+    @available(*, deprecated, message: "Use Xybrid.model(.huggingFace(repo)).load()")
     static func fromHuggingfaceAsync(_ repo: String) async throws -> XybridModel {
-        try await Task.detached { try XybridModel(fromHuggingface: repo) }.value
+        try await Xybrid.model(.huggingFace(repo)).load()
     }
 
     /// Run inference without blocking the calling thread or actor.

@@ -67,13 +67,12 @@ import Xybrid
 // 推理轨迹：Xybrid.initialize(apiKey: "...")
 Xybrid.initialize()
 
-// 从注册表加载模型
-let loader = XybridModelLoader.fromRegistry(modelId: "kokoro-82m")
-let model = try loader.load()
+// 先描述模型来源，再显式加载
+let model = try await Xybrid.model("kokoro-82m").load()
 
 // 运行文本转语音
 let envelope = XybridEnvelope.text(text: "Hello from Xybrid!")
-let result = try model.run(envelope: envelope)
+let result = try await model.runAsync(envelope: envelope)
 
 // result.audioBytes 包含生成的语音音频
 ```
@@ -93,20 +92,18 @@ dependencies {
 **运行推理**
 
 ```kotlin
-import ai.xybrid.XybridModelLoader
-import ai.xybrid.XybridEnvelope
+import ai.xybrid.*
 
 // 默认即可本地运行。在 dashboard.xybrid.dev 免费获取密钥即可查看
 // 推理轨迹：Xybrid.init(context, apiKey = "...")
 Xybrid.init(context)
 
-// 从注册表加载模型
-val loader = XybridModelLoader.fromRegistry("kokoro-82m")
-val model = loader.load()
+// 先描述模型来源，再显式加载
+val model = Xybrid.model("kokoro-82m").load()
 
 // 运行文本转语音
 val envelope = XybridEnvelope.Text(text = "Hello from Xybrid!")
-val result = model.run(envelope)
+val result = model.runAsync(envelope)
 
 // result.audioBytes 包含生成的语音音频
 ```

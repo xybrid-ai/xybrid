@@ -38,12 +38,10 @@ classes:
         status: { dart: implemented, kotlin: planned, swift: planned, csharp: planned }
       model:
         params:
-          - { name: modelId, type: "String?" }
-          - { name: platform, type: "String?" }
-          - { name: bundlePath, type: "String?" }
-          - { name: modelDir, type: "String?" }
+          - { name: source, type: ModelSource }
         return: XybridModelLoader
-        status: { dart: implemented, kotlin: planned, swift: planned, csharp: implemented }
+        notes: "Bindings may provide a registry-ID string shorthand. Creating a loader performs no I/O; load() is the explicit expensive boundary."
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
       pipeline:
         params:
           - { name: yaml, type: "String?" }

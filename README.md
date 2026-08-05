@@ -166,8 +166,8 @@ dependencies {
 **Run a model:**
 
 ```kotlin
-val model = XybridModelLoader.fromRegistry("kokoro-82m").load()
-val result = model.run(Envelope.text("Hello world"))
+val model = Xybrid.model("kokoro-82m").load()
+val result = model.runAsync(Envelope.text("Hello world"))
 // result → 24kHz WAV audio
 ```
 
@@ -184,8 +184,8 @@ dependencies: [
 **Run a model:**
 
 ```swift
-let model = try ModelLoader.fromRegistry(modelId: "kokoro-82m").load()
-let result = try model.run(envelope: Envelope.text("Hello world"))
+let model = try await Xybrid.model("kokoro-82m").load()
+let result = try await model.runAsync(envelope: Envelope.text("Hello world"))
 // result → 24kHz WAV audio
 ```
 

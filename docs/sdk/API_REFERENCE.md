@@ -34,6 +34,8 @@ SDKs may prefix or adjust casing:
 |-----------|------|--------|-------|-------------|
 | `Envelope` | `XybridEnvelope` | `XybridEnvelope` | `XybridEnvelope` | `Envelope` |
 | `InferenceResult` | `XybridResult` | `XybridResult` | `XybridResult` | `InferenceResult` |
+| `ModelSource` | loader factories | `ModelSource` | `ModelSource` | loader factories |
+| `ModelLoader` | `XybridModelLoader` | `XybridModelLoader` (`ModelLoader`) | `ModelLoader` | `ModelLoader` |
 | `OutputType` enum | `FfiOutputType` | `OutputType` | `OutputType` | `OutputType` |
 | `PipelineInputType` | `FfiPipelineInputType` | `PipelineInputType` | — | — |
 
@@ -44,10 +46,15 @@ SDKs may prefix or adjust casing:
 All SDKs follow the same three-step pattern:
 
 ```
-1. Create a Loader  →  Xybrid.model(modelId: "whisper-tiny")
+1. Describe a Model →  Xybrid.model("whisper-tiny")
 2. Load the Model   →  await loader.load()
 3. Run Inference    →  await model.run(envelope: input)
 ```
+
+Creating a loader is cheap and performs no network, disk, or native-runtime
+work. `load()` is the explicit boundary for resolving, downloading, and loading
+a model. Bindings may also expose an explicitly named synchronous variant for
+worker-thread and non-async callers.
 
 ---
 
@@ -100,13 +107,19 @@ object Xybrid {
   // API Key Management
   fun setApiKey(apiKey: String)
 
-  // Model Loading
-  fun model(
-    modelId: String? = null,
-    platform: String? = null,
-    bundlePath: String? = null,
-    modelDir: String? = null
-  ): XybridModelLoader
+  // Model description (no I/O)
+  fun model(id: String): ModelLoader
+  fun model(source: ModelSource): ModelLoader
+}
+```
+
+### Swift
+
+```swift
+extension Xybrid {
+  // Model description (no I/O)
+  static func model(_ id: String) -> ModelLoader
+  static func model(_ source: ModelSource) -> ModelLoader
 }
 ```
 
@@ -114,10 +127,10 @@ object Xybrid {
 
 | Method | Dart | Kotlin | Swift | C# |
 |--------|------|--------|-------|----|
-| `init()` | ✅ | ✅ | — | ✅ |
+| `init()` | ✅ | ✅ | ✅ | ✅ |
 | `setApiKey()` | ✅ | — | — | — |
 | `setGatewayUrl()` | ✅ | — | — | — |
-| `model()` | ✅ | — | — | ✅ |
+| `model()` | ✅ | ✅ | ✅ | ✅ |
 | `pipeline()` | ✅ | — | — | — |
 | `isModelCached()` | ✅ | — | — | — |
 
@@ -155,6 +168,25 @@ class XybridModelLoader {
   }
 
   suspend fun load(): XybridModel
+  fun loadBlocking(): XybridModel
+}
+```
+
+### Swift
+
+```swift
+public enum ModelSource {
+  case registry(String)
+  case bundle(URL)
+  case directory(URL)
+  case huggingFace(String)
+}
+
+public struct ModelLoader {
+  let source: ModelSource
+
+  func load() async throws -> XybridModel
+  func loadSync() throws -> XybridModel
 }
 ```
 
@@ -166,7 +198,7 @@ public class ModelLoader
     public static ModelLoader FromRegistry(string modelId);
     public static ModelLoader FromBundle(string bundlePath);
     public static ModelLoader FromDirectory(string directoryPath);
-    public InferenceResult Load();
+    public Model Load();
 }
 ```
 
@@ -201,16 +233,16 @@ final result = await model.run(envelope: XybridEnvelope.text("Hello!"));
 
 ```kotlin
 // Kotlin / Android
-val loader = XybridModelLoader.fromDirectory("/data/local/tmp/my-model")
+val loader = Xybrid.model(ModelSource.directory("/data/local/tmp/my-model"))
 val model = loader.load()
-val result = model.run(XybridEnvelope.text("Hello!"))
+val result = model.runAsync(XybridEnvelope.text("Hello!"))
 ```
 
 ```swift
 // Swift / iOS
-let loader = try XybridModelLoader.fromDirectory(path: modelPath)
+let loader = Xybrid.model(.directory(modelURL))
 let model = try await loader.load()
-let result = try await model.run(envelope: .text("Hello!"))
+let result = try await model.runAsync(envelope: .text("Hello!"))
 ```
 
 ```csharp
@@ -244,16 +276,16 @@ final result = await model.run(envelope: XybridEnvelope.text("Hello!"));
 
 ```kotlin
 // Kotlin / Android
-val loader = XybridModelLoader.fromHuggingface(repo = "xybrid-ai/kokoro-82m")
+val loader = Xybrid.model(ModelSource.huggingFace("xybrid-ai/kokoro-82m"))
 val model = loader.load()
-val result = model.run(XybridEnvelope.text("Hello!"))
+val result = model.runAsync(XybridEnvelope.text("Hello!"))
 ```
 
 ```swift
 // Swift / iOS
-let loader = XybridModelLoader.fromHuggingface(repo: "xybrid-ai/kokoro-82m")
+let loader = Xybrid.model(.huggingFace("xybrid-ai/kokoro-82m"))
 let model = try await loader.load()
-let result = try await model.run(envelope: .text("Hello!"))
+let result = try await model.runAsync(envelope: .text("Hello!"))
 ```
 
 ```csharp
@@ -1525,7 +1557,7 @@ The full wire format and the list of enum values for each header field is docume
 ### Kotlin-specific
 
 - Use `suspend` for async operations
-- Use `sealed class` for sum types (Envelope)
+- Use `sealed interface` for sum types (`Envelope`, `ModelSource`)
 - Use `data class` for value types
 - Use `companion object` for factory methods
 - Use Kotlin naming conventions (camelCase, enum UPPER_CASE)
@@ -1533,8 +1565,9 @@ The full wire format and the list of enum values for each header field is docume
 
 ### Swift-specific
 
-- Currently uses raw UniFFI-generated types with type aliases
-- No `Xybrid` singleton wrapper yet — uses `XybridModelLoader` directly
+- Uses hand-written Swift facades over BoltFFI-generated types
+- Uses `URL` for local bundle and directory model sources
+- Uses `async throws` for model loading; `loadSync()` is the explicit blocking form
 
 ### Unity/C#-specific
 

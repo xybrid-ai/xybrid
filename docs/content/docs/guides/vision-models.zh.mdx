@@ -95,16 +95,17 @@ Studio 使用相同的 Envelope 形态。只有在所选模型支持图像输入
 
 ```kotlin
 import ai.xybrid.Envelope
+import ai.xybrid.Xybrid
 import java.io.File
 
-val model = XybridModelLoader.fromRegistry("gemma-4-e2b").load()
+val model = Xybrid.model("gemma-4-e2b").load()
 val image = Envelope.image(File("cat.jpg").readBytes(), format = "jpeg")
 val prompt = Envelope.userMessage(
     text = "Describe this image.",
     images = listOf(image),
 )
 
-val result = model.run(prompt)
+val result = model.runAsync(prompt)
 println(result.text)
 ```
 
@@ -114,7 +115,7 @@ println(result.text)
 import Foundation
 import Xybrid
 
-let model = try ModelLoader.fromRegistry(modelId: "gemma-4-e2b").load()
+let model = try await Xybrid.model("gemma-4-e2b").load()
 let imageData = try Data(contentsOf: URL(fileURLWithPath: "cat.jpg"))
 let image = try XybridEnvelope.image(imageData, format: "jpeg")
 let prompt = try XybridEnvelope.userMessage(
@@ -122,7 +123,7 @@ let prompt = try XybridEnvelope.userMessage(
     images: [image]
 )
 
-let result = try model.run(envelope: prompt)
+let result = try await model.runAsync(envelope: prompt)
 print(result.text ?? "")
 ```
 

@@ -3,7 +3,7 @@ title: iOS / macOS
 description: Native Swift SDK for on-device ML inference
 ---
 
-The Swift SDK provides native bindings to the Xybrid runtime via UniFFI for iOS and macOS applications.
+The Swift SDK provides native bindings to the Xybrid runtime via BoltFFI for iOS and macOS applications.
 
 <Callout type="info">
 The Swift SDK is in early access. Releases ship a prebuilt `XybridFFI` xcframework via Swift Package Manager. Known issue: building for the iOS Simulator on Apple Silicon requires the `useLocalNatives = true` workaround — see [#179](https://github.com/xybrid-ai/xybrid/issues/179). For cross-platform development, see the [Flutter SDK](/docs/sdks/flutter).
@@ -34,13 +34,12 @@ struct MyApp: App {
     var body: some Scene { /* ... */ }
 }
 
-// Load a model from the registry
-let loader = ModelLoader.fromRegistry(modelId: "kokoro-82m")
-let model = try loader.load()
+// Describe, then explicitly load a model from the registry
+let model = try await Xybrid.model("kokoro-82m").load()
 
 // Run inference
 let envelope = Envelope.text("Hello, world!")
-let result = try model.run(envelope: envelope)
+let result = try await model.runAsync(envelope: envelope)
 
 if result.success {
     print("Output: \(result.text ?? "")")
@@ -69,16 +68,20 @@ Without a key, telemetry is disabled and the first inference logs a one-shot hin
 ### From Registry
 
 ```swift
-let loader = ModelLoader.fromRegistry(modelId: "whisper-tiny")
-let model = try loader.load()
+let model = try await Xybrid.model("whisper-tiny").load()
 ```
 
 ### From Local Bundle
 
 ```swift
-let loader = ModelLoader.fromBundle(path: bundlePath)
-let model = try loader.load()
+let model = try await Xybrid.model(.bundle(bundleURL)).load()
 ```
+
+`Xybrid.model(...)` creates a cheap, unloaded reference. Local bundle and
+directory sources use `URL` through `.bundle(url)` and `.directory(url)`;
+Hugging Face uses `.huggingFace("org/repo")`. Async `load()` is the explicit
+boundary for resolving, downloading, disk access, and runtime initialization.
+Use `loadSync()` only from an existing worker thread.
 
 ---
 
@@ -163,8 +166,8 @@ The SDK uses a Swift error enum for type-safe error handling:
 
 ```swift
 do {
-    let model = try ModelLoader.fromRegistry(modelId: "kokoro-82m").load()
-    let result = try model.run(envelope: envelope)
+    let model = try await Xybrid.model("kokoro-82m").load()
+    let result = try await model.runAsync(envelope: envelope)
 } catch XybridError.ModelNotFound(let modelId) {
     print("Model not found: \(modelId)")
 } catch XybridError.InferenceFailed(let message) {
@@ -193,9 +196,8 @@ The SDK provides short aliases for convenience:
 | `GenerationConfig` | `XybridGenerationConfig` |
 | `XybridSDKError` | `XybridError` |
 
-There is no `ModelLoader` type. Load a model directly with
-`XybridModel(fromRegistry:)`, or `XybridModel(fromBundle:)` /
-`XybridModel(fromDirectory:)` / `XybridModel(fromHuggingface:)`.
+`ModelLoader` is a cheap model reference. Construct it through
+`Xybrid.model(...)`, then call `load()` explicitly before inference.
 
 ---
 

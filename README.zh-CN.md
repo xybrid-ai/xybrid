@@ -178,8 +178,8 @@ dependencies {
 **运行模型：**
 
 ```kotlin
-val model = XybridModelLoader.fromRegistry("kokoro-82m").load()
-val result = model.run(Envelope.text("国破山河在，城春草木深"))
+val model = Xybrid.model("kokoro-82m").load()
+val result = model.runAsync(Envelope.text("国破山河在，城春草木深"))
 // 输出 → 24kHz WAV 音频
 ```
 
@@ -196,8 +196,8 @@ dependencies: [
 **运行模型：**
 
 ```swift
-let model = try ModelLoader.fromRegistry(modelId: "kokoro-82m").load()
-let result = try model.run(envelope: Envelope.text("国破山河在，城春草木深"))
+let model = try await Xybrid.model("kokoro-82m").load()
+let result = try await model.runAsync(envelope: Envelope.text("国破山河在，城春草木深"))
 // 输出 → 24kHz WAV 音频
 ```
 

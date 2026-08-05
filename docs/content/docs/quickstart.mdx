@@ -67,13 +67,12 @@ import Xybrid
 // your inference traces: Xybrid.initialize(apiKey: "...")
 Xybrid.initialize()
 
-// Load a model from the registry
-let loader = ModelLoader.fromRegistry(modelId: "kokoro-82m")
-let model = try loader.load()
+// Describe, then explicitly load a model from the registry
+let model = try await Xybrid.model("kokoro-82m").load()
 
 // Run text-to-speech
 let envelope = Envelope.text("Hello from Xybrid!")
-let result = try model.run(envelope: envelope)
+let result = try await model.runAsync(envelope: envelope)
 
 // result.audioBytes contains the generated speech audio
 ```
@@ -99,12 +98,12 @@ import ai.xybrid.*
 // your inference traces: Xybrid.init(context, apiKey = "...")
 Xybrid.init(context)
 
-// Load a model from the registry
-val model = XybridModel("kokoro-82m")
+// Describe, then explicitly load a model from the registry
+val model = Xybrid.model("kokoro-82m").load()
 
 // Run text-to-speech
 val envelope = Envelope.text("Hello from Xybrid!")
-val result = model.run(envelope)
+val result = model.runAsync(envelope)
 
 // result.audioBytes contains the generated speech audio
 ```
