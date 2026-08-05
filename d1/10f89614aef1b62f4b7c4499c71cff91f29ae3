@@ -1,0 +1,89 @@
+bindings/flutter/CHANGELOG.md
+  s_baf6bc9578b774::t_64b20e5406fecb 3-11
+bindings/apple/README.md
+  s_baf6bc9578b774::t_bd6c9de9810337 15,22
+docs/content/docs/(integration)/sdks/web.zh.mdx
+  s_baf6bc9578b774::t_bd6c9de9810337 9
+bindings/kotlin/README.md
+  s_baf6bc9578b774::t_bd6c9de9810337 15
+README.md
+  s_baf6bc9578b774::t_bd6c9de9810337 145,162,180,219
+docs/content/docs/(integration)/sdks/web.mdx
+  s_baf6bc9578b774::t_bd6c9de9810337 9
+docs/content/docs/quickstart.mdx
+  s_baf6bc9578b774::t_bd6c9de9810337 15,57,88,122,194
+docs/content/docs/(integration)/sdks/android.mdx
+  s_baf6bc9578b774::t_bd6c9de9810337 14
+docs/content/docs/(integration)/sdks/android.zh.mdx
+  s_baf6bc9578b774::t_bd6c9de9810337 14
+docs/content/docs/(integration)/sdks/flutter.mdx
+  s_baf6bc9578b774::t_bd6c9de9810337 14
+docs/content/docs/(integration)/sdks/flutter.zh.mdx
+  s_baf6bc9578b774::t_bd6c9de9810337 14
+docs/content/docs/(integration)/sdks/ios.zh.mdx
+  s_baf6bc9578b774::t_bd6c9de9810337 18
+bindings/unity/README.md
+  s_baf6bc9578b774::t_bd6c9de9810337 45,62
+docs/content/docs/quickstart.zh.mdx
+  s_baf6bc9578b774::t_bd6c9de9810337 15,57,88,122,193
+README.ja-JP.md
+  s_baf6bc9578b774::t_bd6c9de9810337 157,174,192,226
+docs/content/docs/(integration)/sdks/ios.mdx
+  s_baf6bc9578b774::t_bd6c9de9810337 18
+README.zh-CN.md
+  s_baf6bc9578b774::t_bd6c9de9810337 157,174,192,226
+bindings/web/README.md
+  s_baf6bc9578b774::t_bd6c9de9810337 3
+CHANGELOG.md
+  s_baf6bc9578b774::t_6120acc65242f2 10-25,38-49,51,53-83
+bindings/flutter/README.md
+  s_baf6bc9578b774::t_bd6c9de9810337 18
+Cargo.lock
+  s_baf6bc9578b774::t_679c81468aa543 36,38,91,93,1308,1310,1314,2725,2754,2756,2949,2951,3145,3147,3155,3157,4379,4381,5104,5106,6197,6211,6218,6227,6256,6323,6333,6342,6351,6360,6386,6586,6588
+Cargo.toml
+  s_baf6bc9578b774::t_417a634b9df1a4 19
+Package.swift
+  s_baf6bc9578b774::t_303e7a103aa4ea 40
+bindings/apple/XybridFFI-Info.plist
+  s_baf6bc9578b774::t_b2c0c772e3eaea 10,12
+bindings/flutter/pubspec.yaml
+  s_baf6bc9578b774::t_92f54490709296 3
+bindings/flutter/rust/Cargo.toml
+  s_baf6bc9578b774::t_2dc8615d266c3f 3
+bindings/kotlin/build.gradle.kts
+  s_baf6bc9578b774::t_6a742d81222f61 8
+bindings/python/pyproject.toml
+  s_baf6bc9578b774::t_abd2eca63a98b7 7
+bindings/react-native/android/build.gradle
+  s_baf6bc9578b774::t_700d65838ac2df 94
+bindings/react-native/package.json
+  s_baf6bc9578b774::t_e165f6573b42e6 3
+bindings/unity/package.json
+  s_baf6bc9578b774::t_f94b0e2568cc5e 3
+bindings/web/package.json
+  s_baf6bc9578b774::t_7311ca21b18c17 3
+crates/xybrid-core/Cargo.toml
+  s_baf6bc9578b774::t_a14a938f941189 28-29
+crates/xybrid-llama/Cargo.toml
+  s_baf6bc9578b774::t_27a866b59ed1d8 24
+crates/xybrid-sdk/Cargo.toml
+  s_baf6bc9578b774::t_980dd9d2f4c296 17,37,42
+crates/xybrid/Cargo.toml
+  s_baf6bc9578b774::t_3d8da601ab3922 17
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "d110f89614aef1b62f4b7c4499c71cff91f29ae3",
+  "prompts": {},
+  "sessions": {
+    "s_baf6bc9578b774": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1d3f75ba-0807-43dc-a010-9c867134a59d",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
