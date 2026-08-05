@@ -6292,6 +6292,7 @@ dependencies = [
  "objc2-io-kit",
  "objc2-metal",
  "ort",
+ "rayon",
  "regex",
  "rustfft",
  "rustls",

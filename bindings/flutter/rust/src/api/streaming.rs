@@ -254,11 +254,27 @@ fn worker_gone() -> String {
     "ASR session is no longer running; create a new session".to_string()
 }
 
+/// Render an error with its full `source()` chain.
+///
+/// SDK errors carry the root cause as `#[source]`, which `Display` alone
+/// drops — "Feed failed" instead of "Feed failed: Inference error: dtype
+/// mismatch …". Dart gets one string, so the chain has to be flattened here.
+fn error_chain(e: &dyn std::error::Error) -> String {
+    let mut out = e.to_string();
+    let mut source = e.source();
+    while let Some(cause) = source {
+        out.push_str(": ");
+        out.push_str(&cause.to_string());
+        source = cause.source();
+    }
+    out
+}
+
 /// Owns the `XybridStream` and applies commands in order until the channel
 /// closes (all senders dropped) or a `Flush` finalizes the session.
 fn worker_loop(stream: XybridStream, mut cmd_rx: mpsc::UnboundedReceiver<Command>) {
     ensure_logging();
-    log::warn!("xybrid ASR worker started");
+    log::debug!("ASR worker started");
 
     let mut sink: Option<StreamSink<FfiPartialResult>> = None;
     // Latest partial produced before a sink is attached. `feed` is `#[frb(sync)]`
@@ -267,63 +283,65 @@ fn worker_loop(stream: XybridStream, mut cmd_rx: mpsc::UnboundedReceiver<Command
     // only the most recent partial loses nothing — it is flushed the instant the
     // sink registers. This closes that race; early transcripts are never dropped.
     let mut pending: Option<FfiPartialResult> = None;
-
-    // TEMP DIAGNOSTIC counters — confirm audio is arriving and at what rate.
-    let mut total_samples: u64 = 0;
-    let mut next_log_at: u64 = REQUIRED_SAMPLE_RATE as u64; // ~1s
+    // The SDK returns its cached latest partial from *every* `feed` call, and
+    // feeds queued up behind one inference all drain at once when it finishes —
+    // without this, one chunk's partial would be delivered to Dart once per
+    // queued feed.
+    let mut last_sent_seq: Option<u64> = None;
 
     while let Some(cmd) = cmd_rx.blocking_recv() {
         match cmd {
             Command::SetSink(s) => {
-                log::warn!("xybrid ASR: sink attached");
+                log::debug!("ASR sink attached");
                 if let Some(p) = pending.take() {
+                    last_sent_seq = Some(p.chunk_sequence);
                     let _ = s.add(p);
                 }
                 sink = Some(s);
             }
             Command::Feed(samples) => {
-                total_samples += samples.len() as u64;
-                if total_samples >= next_log_at {
-                    log::warn!(
-                        "xybrid ASR: fed ~{}s ({total_samples} samples)",
-                        total_samples / REQUIRED_SAMPLE_RATE as u64
-                    );
-                    next_log_at += REQUIRED_SAMPLE_RATE as u64;
-                }
                 // Inference happens here, on the worker; `feed` returns the
                 // latest partial (if a chunk boundary was crossed).
                 match stream.feed(&samples) {
                     Ok(Some(partial)) => {
-                        log::warn!("xybrid ASR: partial ({} chars)", partial.text.len());
                         let p = FfiPartialResult::from(partial);
+                        if last_sent_seq == Some(p.chunk_sequence) {
+                            continue;
+                        }
+                        log::debug!(
+                            "ASR partial seq={} ({} chars)",
+                            p.chunk_sequence,
+                            p.text.len()
+                        );
                         match sink.as_ref() {
                             Some(s) => {
+                                last_sent_seq = Some(p.chunk_sequence);
                                 let _ = s.add(p);
                             }
                             None => pending = Some(p),
                         }
                     }
                     Ok(None) => {}
-                    Err(e) => log::warn!("xybrid ASR feed error: {e}"),
+                    Err(e) => log::warn!("ASR feed error: {}", error_chain(&e)),
                 }
             }
             Command::Flush(reply) => {
-                log::warn!("xybrid ASR: flush ({total_samples} samples fed total)");
                 let result = stream
                     .flush()
                     .map(|r| r.text)
-                    .map_err(|e| format!("ASR flush failed: {e}"));
+                    .map_err(|e| format!("ASR flush failed: {}", error_chain(&e)));
                 let _ = reply.send(result);
                 break; // session finalized; the worker ends here.
             }
             Command::Reset(reply) => {
                 let result = stream.reset().map_err(|e| format!("ASR reset failed: {e}"));
-                // A fresh utterance starts clean; drop any stale pending partial.
+                // A fresh utterance starts clean; drop any stale pending state.
                 pending = None;
+                last_sent_seq = None;
                 let _ = reply.send(result);
             }
         }
     }
 
-    log::warn!("xybrid ASR worker stopped");
+    log::debug!("ASR worker stopped");
 }
