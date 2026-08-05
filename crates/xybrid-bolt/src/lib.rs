@@ -607,6 +607,34 @@ pub fn clear_battery_level() {
 // Process-global init
 // ============================================================================
 
+/// Initialize the platform-native `log` backend exactly once per process.
+///
+/// Mirrors the Flutter binding's `ensure_native_logging` (see
+/// `bindings/flutter/rust/src/api/mod.rs`): without a registered logger every
+/// `log::warn!` in the SDK — telemetry send failures and registry failovers
+/// in particular — is silently discarded on device. Called from the
+/// process-global init entry points the Swift/Kotlin wrappers hit during
+/// `Xybrid.initialize` / `Xybrid.init`. No-op on desktop targets, where the
+/// host process owns logger setup.
+fn ensure_native_logging() {
+    static LOGGING_INIT: std::sync::Once = std::sync::Once::new();
+    LOGGING_INIT.call_once(|| {
+        #[cfg(target_os = "android")]
+        android_logger::init_once(
+            android_logger::Config::default()
+                .with_max_level(log::LevelFilter::Info)
+                .with_tag("xybrid"),
+        );
+        #[cfg(target_os = "ios")]
+        {
+            // Errors only if a logger is already registered — fine to ignore.
+            let _ = oslog::OsLogger::new("dev.xybrid.sdk")
+                .level_filter(log::LevelFilter::Info)
+                .init();
+        }
+    });
+}
+
 /// One-stop SDK initialization: API key + gateway/ingest URL overrides in
 /// one call. Delegates to [`facade::configure_runtime`]; blank strings are
 /// treated as absent. This is the canonical init the Swift
@@ -618,11 +646,13 @@ pub fn configure_runtime(
     gateway_url: Option<String>,
     ingest_url: Option<String>,
 ) {
+    ensure_native_logging();
     facade::configure_runtime(api_key, gateway_url, ingest_url);
 }
 
 #[export]
 pub fn init_sdk_cache_dir(cache_dir: String) {
+    ensure_native_logging();
     // Param name pinned to `cache_dir` (not `path`) so the emitted Swift
     // is `initSdkCacheDir(cacheDir:)`, matching the existing
     // `examples/ios/XybridExample` call site that uniffi already exposes
@@ -632,16 +662,19 @@ pub fn init_sdk_cache_dir(cache_dir: String) {
 
 #[export]
 pub fn set_binding(binding: String) {
+    ensure_native_logging();
     facade::set_binding(binding);
 }
 
 #[export]
 pub fn set_api_key(api_key: String) {
+    ensure_native_logging();
     facade::set_api_key(api_key);
 }
 
 #[export]
 pub fn set_provider_api_key(provider: String, api_key: String) {
+    ensure_native_logging();
     facade::set_provider_api_key(provider, api_key);
 }
 
