@@ -1,0 +1,19 @@
+bindings/flutter/lib/src/rust/api/streaming.dart
+  s_3924ee211c2cf7::t_609cad1dc9837d 15
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "040353c2fb2e220b0e8251450d6540edb12954ad",
+  "prompts": {},
+  "sessions": {
+    "s_3924ee211c2cf7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "429e711f-063b-41a5-99f1-ea224e07a4a7",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}

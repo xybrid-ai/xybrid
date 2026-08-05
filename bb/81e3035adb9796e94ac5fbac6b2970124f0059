@@ -1,0 +1,60 @@
+crates/xybrid-core/src/runtime_adapter/candle/device.rs
+  s_3924ee211c2cf7::t_1280596a0191a4 198-242
+Cargo.toml
+  s_3924ee211c2cf7::t_8a61ed691c3bd1 46-52
+  s_7c9b0b269e9595::t_19bae197abb386 40-45
+bindings/flutter/rust/src/api/streaming.rs
+  s_3924ee211c2cf7::t_fd4342abec11af 332
+  s_3924ee211c2cf7::t_15dfa1c6213ba2 277,286-290,295,297,308-315,318,325,338,340,346
+  s_3924ee211c2cf7::t_f98ab9602dc28c 257-272
+crates/xybrid-core/Cargo.toml
+  s_3924ee211c2cf7::t_5cd06d1ca13c00 137
+  s_3924ee211c2cf7::t_396d24b29fbbc8 102
+crates/xybrid-core/src/runtime_adapter/candle/whisper.rs
+  s_3924ee211c2cf7::t_bf6b2e724931b0 426-429
+  s_3924ee211c2cf7::t_fa67a700cb9a8f 301,308
+  s_3924ee211c2cf7::t_debf1f521e649b 633-635,642-643
+  s_3924ee211c2cf7::t_4e685c8c9f4da6 798-799,805,811,813-814
+  s_3924ee211c2cf7::t_870cc5528cd24b 616-624
+  s_3924ee211c2cf7::t_cc8182462b4649 250-252
+  s_3924ee211c2cf7::t_426d7f02e06940 360
+  s_3924ee211c2cf7::t_ca23ec0c1ae798 502-505
+  s_3924ee211c2cf7::t_7bdcebc79c4fe8 800-804,806-810,812
+  s_3924ee211c2cf7::t_b85c41c4227a90 195-199
+Cargo.lock
+  s_cc908747fd2ec5::t_cb63b5ce965570 6295
+examples/flutter/pubspec.lock
+  s_cc908747fd2ec5::t_b54857ea0b9bfe 1045
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "bb81e3035adb9796e94ac5fbac6b2970124f0059",
+  "prompts": {},
+  "sessions": {
+    "s_3924ee211c2cf7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "429e711f-063b-41a5-99f1-ea224e07a4a7",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    },
+    "s_7c9b0b269e9595": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019fd187-5e93-7ad1-9146-d65f84c61c22",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    },
+    "s_cc908747fd2ec5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "004e7b96-1346-464d-b65f-050006e985c9",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}

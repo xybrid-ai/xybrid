@@ -1,0 +1,70 @@
+bindings/flutter/rust/src/api/streaming.rs
+  s_5200f9e3b1102f::t_8d4d971713d6d8 313,315
+  s_5200f9e3b1102f::t_33d3710a1c184a 31-32,41-64
+  s_5200f9e3b1102f::t_e8f063d81304ee 260-261,271-274,278,285-292,297,311,328
+  s_5200f9e3b1102f::t_1c861bda516329 1-2,10,12-14,16-30,33-34,36-39,65-83,87-88,92-96,123-137,140-142,145-152,154-157,159-163,168-173,175,180,183-184,188-241,243-247,249-256,258,270,275-276,284,308-310,316-319,324-326,329
+  s_5200f9e3b1102f::t_389c101a7373ec 3-9,11,15,35,40,84-86,89-91,97-122,138-139,143-144,153,158,164-167,174,176-178,181-182,185-187,242,248,257,259,263,293-296,304-307,312,314,320,323
+  s_5200f9e3b1102f::t_ef6b59f58bb3a1 179
+  s_5200f9e3b1102f::t_35a03a4635bd6d 262,264-269,277,279-283,298-303,321-322,327
+bindings/flutter/lib/src/rust/frb_generated.dart
+  s_5200f9e3b1102f::t_aa176c5dc98c51 17,360,363,366,368
+  s_5200f9e3b1102f::t_d338982d30ab22 231-233,1512-1521,1523-1540,2970-2978,3005-3021,3288-3296,3369-3377,3432-3440,3466-3472,3556-3562,3696-3709,3828-3838,3868-3885,4247-4256,4336-4345,4403-4412,4446-4458,4553-4559,4666-4675,4760-4768,4796-4809,5418-5433,5550-5604
+bindings/flutter/lib/src/rust/api/streaming.dart
+  s_5200f9e3b1102f::t_aa176c5dc98c51 1-14,16-18,20-32,36-43,47-50,54-58,62-102,106,110-124,127-152
+  s_5200f9e3b1102f::t_d338982d30ab22 15,19,51,103-105,107-109,125
+AGENTS.md
+  s_5200f9e3b1102f::t_15b1c72d94706f 42-43,64-65,71-72,79-81,377,401
+  s_ff99a2b95d7169::t_cfde499d9013ec 615
+  s_ff99a2b95d7169::t_bd50c6d63a99fd 44-47,50-53,56-78,82,84
+bindings/flutter/rust/src/frb_generated.rs
+  s_5200f9e3b1102f::t_aa176c5dc98c51 34,2390-2391,3668,4541,4750-4753,4755-4756,4759,4761,4787,4820,4829-4830,5433-5436
+  s_5200f9e3b1102f::t_d338982d30ab22 1865-1871,1873-1888,1889-1905,1907-1912,4032-4036,4038-4042,4044-4048,4971,5835-5844,5891,5988-5999
+examples/flutter/lib/screens/live_asr_demo_screen.dart
+  s_5200f9e3b1102f::t_31caee336d83a1 1-359
+bindings/flutter/lib/src/streaming.dart
+  s_5200f9e3b1102f::t_3962c5a80e4593 1-2,6-9,11-20,23-32,34,41-43,45-61,66-85
+  s_5200f9e3b1102f::t_4bf9d470f7b566 62-65
+  s_5200f9e3b1102f::t_df00685c8f6e95 3-5,10,21-22,33,35-40,44
+bindings/flutter/rust/src/api/model.rs
+  s_5200f9e3b1102f::t_82d61dd5ef1648 1038-1058
+bindings/flutter/rust/src/api/mod.rs
+  s_5200f9e3b1102f::t_197fdb41531902 46
+  s_5200f9e3b1102f::t_bfa515c894a1db 57
+bindings/flutter/lib/src/rust/frb_generated.web.dart
+  s_5200f9e3b1102f::t_aa176c5dc98c51 20,58-61,103-107,148,151-152,183,186-187,202,204-205,246,248,285,309,318,452,497,500-501,532,535-536,551,553-554,600,602-603,644,669,671-672,680,821,866-867,901-902,920,969,1015,1045,1057,1249-1260,1340-1346
+bindings/flutter/lib/src/rust/frb_generated.io.dart
+  s_5200f9e3b1102f::t_aa176c5dc98c51 17,244,283,307,316,450,495,530,549,598,600-601,642,667,669-670,678,819,864,899,918,967,1013,1043,1055,1376-1406
+bindings/flutter/lib/xybrid.dart
+  s_5200f9e3b1102f::t_75302e77487e6e 101-102
+examples/flutter/lib/main.dart
+  s_5200f9e3b1102f::t_e58588dc96fe77 8
+  s_5200f9e3b1102f::t_fe8de549f57a1f 44
+bindings/flutter/lib/src/rust/api/model.dart
+  s_5200f9e3b1102f::t_d338982d30ab22 16,174-187
+examples/flutter/lib/screens/hub_screen.dart
+  s_5200f9e3b1102f::t_288fb705287b75 37-41
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "3adc9ecacf72f3cbd56fec5412390e69aea7253b",
+  "prompts": {},
+  "sessions": {
+    "s_5200f9e3b1102f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1fc348a0-4148-4d89-b99d-d79755389b9f",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    },
+    "s_ff99a2b95d7169": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1b067f95-8ca9-450c-ad52-bb5bbb19f69d",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
