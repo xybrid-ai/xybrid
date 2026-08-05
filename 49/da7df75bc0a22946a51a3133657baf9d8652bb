@@ -1,0 +1,19 @@
+Cargo.lock
+  s_a64fe9de419967::t_c8489286df7c36 6220,6222-6223
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "49da7df75bc0a22946a51a3133657baf9d8652bb",
+  "prompts": {},
+  "sessions": {
+    "s_a64fe9de419967": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4322caba-5bc8-4b30-8ba1-51b0b8519417",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
