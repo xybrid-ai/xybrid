@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.1
+
+No Dart API changes. Fixes to the iOS build and to diagnostics on both mobile
+platforms.
+
+* Fixed: iOS builds linked the device ONNX Runtime slice when targeting the simulator and failed with `building for 'iOS-simulator', but linking in object file built for 'iOS'`. The simulator slice is now preferred, falling back to a checksum-pinned fetch of the same artifact (xybrid-ai/xybrid#450)
+* Fixed: telemetry export failures were discarded silently and the binding installed no native log sink, so nothing reached logcat or the unified log. Export errors now log with attempt count and cause, and `Xybrid.init` installs `android_logger` on Android and `oslog` on iOS (xybrid-ai/xybrid#448)
+* Fixed: registry URL failover logged at `debug`, below the default mobile log level, so a failing registry looked like a silent hang. It now logs at `warn` (xybrid-ai/xybrid#449)
+
 ## 0.4.0
 
 Stable release of the 0.4.0 line. No Flutter API changes since `0.4.0-rc1`.

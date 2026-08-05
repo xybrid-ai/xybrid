@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Planned
+
+- **Multimodal KV-prefix reuse**: the per-frame prefill cost lever for live vision — **deferred** from 0.2.0, not yet implemented.
+
+---
+
+## [0.4.1] - 2026-08-05
+
+Patch release on the 0.4.0 line. The headline is the explicit model-loading
+lifecycle restored on Swift and Kotlin: the documented
+`Xybrid.model(...).load()` flow existed on Flutter, Rust, and Unity but not on
+those two SDKs, so their published quickstarts described an API 0.4.0 did not
+ship. Token streaming also reaches Apple, Kotlin, and React Native, speculative
+cloud fallback lands, and the mobile telemetry pipeline is now device-verified
+on both platforms.
+
 ### Added
 
 - **Token streaming on Apple, Kotlin, and React Native.** The pull-based
@@ -19,11 +35,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   breaking out of the loop, cancelling the task/coroutine, or releasing the
   model — closes the session and aborts generation at the next token boundary
   instead of running to `max_tokens`; mid-stream failures carry the same typed
-  errors as `run`.
+  errors as `run` (#438).
+- **Speculative cloud fallback.** When a registry model has not been downloaded
+  yet and an API key is present, the SDK serves inference from the platform
+  gateway while the weights download in the background, then switches to local
+  transparently — exposed as `run`/`repl --speculative-cloud`. Both this path
+  and the existing reactive cloud fallback now send the registry model id to
+  the gateway so it routes to the same model running on the CPU cluster,
+  instead of defaulting to a hosted third-party model (#264).
+- **Grammar-constrained output on React Native.** `GenerationConfig.grammar`
+  now crosses the TurboModule boundary instead of being silently dropped, and
+  `jsonSchemaToGbnf()` is exposed in JavaScript, closing the structured-output
+  gap that Swift, Kotlin, C, and Dart already had (#442).
 
-### Planned
+### Fixed
 
-- **Multimodal KV-prefix reuse**: the per-frame prefill cost lever for live vision — **deferred** from 0.2.0, not yet implemented.
+- **Swift and Kotlin regain an explicit model-loading step.** `Xybrid.model(id)`
+  and `Xybrid.model(source)` return a cheap, unloaded `ModelLoader`; all
+  network, disk, and runtime initialization happens at a named `load()`
+  boundary, with `loadSync()` / `loadBlocking()` for worker threads. Registry,
+  bundle, directory, and Hugging Face sources are strongly typed through
+  `ModelSource`. The direct constructors and factories still work, so existing
+  code compiles unchanged; the hidden-loading async factories are deprecated in
+  favour of the loader flow (#451).
+- **Flutter's iOS build linked the wrong ONNX Runtime slice.** Simulator builds
+  resolved to the device `ios-arm64` slice and failed to link. The build now
+  prefers the simulator slice, falling back to a checksum-pinned fetch of the
+  same artifact the Bazel graph uses (#450).
+- **Telemetry export failures were silently discarded.** Exporter transport
+  errors are now logged with attempt count and cause, and the Flutter binding
+  installs a native log sink on both platforms (`android_logger` on Android,
+  `oslog` on iOS) so those lines reach logcat and the unified log (#448).
+- **Registry URL failover was invisible on mobile.** It now logs at `warn`
+  rather than `debug`, which the default mobile log level hides. Both mobile
+  platforms are now device-verified end to end for the metrics pipeline (#449).
+- **Unity release packaging failed on staged Bazel outputs.** Bazel's outputs
+  are read-only; they are now made owner-writable before post-processing, which
+  unblocks the Linux, macOS, and iOS strip steps (#432).
+
+### Changed
+
+- **`xybrid-llama-sys` declares `links = "llama"`.** A dependency graph pulling
+  in both this crate and crates.io's `llama-cpp-sys-2` now fails at resolution
+  time, naming both packages, instead of static-linking two copies of the same
+  ggml/llama archives into one binary. No effect on compiled output (#441).
+- Dependency bumps: `schemars` 0.8.22 → 1.2.2, `tokenizers` 0.19.1 → 0.22.2,
+  `dialoguer` 0.11.0 → 0.12.0.
 
 ---
 
