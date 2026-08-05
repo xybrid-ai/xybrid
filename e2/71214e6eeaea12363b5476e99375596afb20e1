@@ -1,0 +1,29 @@
+examples/flutter/assets/mnist/model_metadata.json
+  s_a64fe9de419967::t_faa3d33169d27e 1-53
+examples/flutter/pubspec.yaml
+  s_a64fe9de419967::t_ea56d58189d04f 83-88
+examples/flutter/integration_test/telemetry_smoke_test.dart
+  s_a64fe9de419967::t_790ea9b77b615d 4-5,7,39-47
+  s_a64fe9de419967::t_95276645121ff2 8-12,16-25,36-37
+  s_a64fe9de419967::t_82e9e3c1d1509f 1-3,6,13-15,26-35,38,48-54
+crates/xybrid-sdk/src/registry_client.rs
+  s_a64fe9de419967::t_d96b54187f667c 429-433
+examples/flutter/pubspec.lock
+  s_a64fe9de419967::t_0f6fe2cdbe4f55 1045
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "e271214e6eeaea12363b5476e99375596afb20e1",
+  "prompts": {},
+  "sessions": {
+    "s_a64fe9de419967": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4322caba-5bc8-4b30-8ba1-51b0b8519417",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
