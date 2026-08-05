@@ -32,22 +32,43 @@ use warmup::warmup_models;
 use super::utils::{maybe_warn_thinking_budget, thinking_budget_exhausted, THINKING_BUDGET_HINT};
 use crate::ui;
 
+/// Arguments for the interactive REPL, grouped to keep the entry point legible.
+pub(crate) struct ReplArgs {
+    pub config: Option<PathBuf>,
+    pub model: Option<String>,
+    pub model_file: Option<PathBuf>,
+    pub huggingface: Option<String>,
+    pub voice: Option<String>,
+    pub target: Option<String>,
+    pub stream: bool,
+    pub show_reasoning: bool,
+    pub max_tokens: Option<usize>,
+    pub system_prompt: Option<String>,
+    /// Serve from cloud while the registry model downloads, then switch local.
+    pub speculative_cloud: bool,
+    pub no_tools: bool,
+    pub tools_file: Option<PathBuf>,
+    pub verbose: u8,
+}
+
 /// Interactive REPL mode - keeps models loaded for fast repeated inference.
-pub(crate) fn handle_repl_command(
-    config: Option<PathBuf>,
-    model: Option<String>,
-    model_file: Option<PathBuf>,
-    huggingface: Option<String>,
-    voice: Option<String>,
-    target: Option<String>,
-    stream: bool,
-    show_reasoning: bool,
-    max_tokens: Option<usize>,
-    system_prompt: Option<String>,
-    no_tools: bool,
-    tools_file: Option<PathBuf>,
-    verbose: u8,
-) -> Result<()> {
+pub(crate) fn handle_repl_command(args: ReplArgs) -> Result<()> {
+    let ReplArgs {
+        config,
+        model,
+        model_file,
+        huggingface,
+        voice,
+        target,
+        stream,
+        show_reasoning,
+        max_tokens,
+        system_prompt,
+        speculative_cloud,
+        no_tools,
+        tools_file,
+        verbose,
+    } = args;
     use std::io::{self, Write};
 
     ui::brand_with_version(env!("CARGO_PKG_VERSION"));
@@ -62,8 +83,74 @@ pub(crate) fn handle_repl_command(
     }
     println!();
 
+    // Speculative cloud only applies to a bare registry --model (not config /
+    // HuggingFace / GGUF file). When it engages, the model serves from cloud
+    // immediately and the weights download in the background.
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    let want_speculative = speculative_cloud
+        && model.is_some()
+        && config.is_none()
+        && huggingface.is_none()
+        && model_file.is_none();
+    // Without LLM features the loop has no model-driven path that could consume
+    // the cloud-backed handle — fall through to the normal blocking download.
+    #[cfg(not(any(feature = "llm-mistral", feature = "llm-llamacpp")))]
+    let want_speculative = {
+        if speculative_cloud {
+            ui::warning(
+                "--speculative-cloud requires LLM features (llm-llamacpp) — downloading, then running locally",
+            );
+        }
+        false
+    };
+
+    // Holds the cloud-backed (or already-local) model produced by the
+    // speculative path, installed into `loaded_model` below.
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    let mut speculative_model: Option<xybrid_sdk::model::XybridModel> = None;
+
     // --huggingface: load from HuggingFace repo
-    let stages = if let Some(ref repo) = huggingface {
+    let stages = if want_speculative {
+        let model_id = model.clone().expect("want_speculative implies a model id");
+        // Serve the registry model itself: the gateway routes its id to xycloud
+        // (the CPU cluster that runs the edge model) while it downloads locally.
+        let loader = ModelLoader::from_registry(&model_id).with_speculative_cloud(true);
+
+        if loader.will_speculate() {
+            ui::ok(&format!(
+                "Speculative cloud: serving '{}' via xycloud while it downloads in the background",
+                model_id
+            ));
+        } else if xybrid_sdk::cache::CacheManager::new()
+            .map(|c| c.is_extracted(&model_id))
+            .unwrap_or(false)
+        {
+            ui::hint("Model already cached locally — running on device (no speculation needed)");
+        } else {
+            ui::hint(
+                "Speculative cloud unavailable (no API key?) — downloading, then running locally",
+            );
+        }
+
+        let model_obj = loader
+            .load()
+            .context("Failed to load speculative cloud model")?;
+        #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+        {
+            speculative_model = Some(model_obj);
+        }
+        #[cfg(not(any(feature = "llm-mistral", feature = "llm-llamacpp")))]
+        {
+            drop(model_obj);
+        }
+
+        // No bundle_path: the weights aren't on disk yet, so warmup and the
+        // local-load block skip this stage — the speculative model drives the
+        // loop and transparently switches to local once the download lands.
+        let mut stage = StageDescriptor::new(&model_id);
+        stage.target = execution_target.clone();
+        vec![stage]
+    } else if let Some(ref repo) = huggingface {
         let sp = ui::spinner(&format!("Loading from HuggingFace: {}...", repo));
         let loader = ModelLoader::from_huggingface_parsed(repo);
         let _model = loader.load().context(format!(
@@ -184,6 +271,26 @@ pub(crate) fn handle_repl_command(
                     ui::hint("Use 'history' to view conversation, 'clear' to reset");
                 }
             }
+            loaded_model = Some(model);
+        }
+    }
+
+    // Install the speculative model. Its placeholder handle isn't locally
+    // available, so the block above skipped it. Speculation targets LLM/chat,
+    // so enable conversation context up front (the placeholder can't report
+    // `is_llm()` until the local weights land).
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    if loaded_model.is_none() {
+        if let Some(model) = speculative_model.take() {
+            let mut ctx = ConversationContext::new();
+            if let Some(ref prompt) = system_prompt {
+                ui::kv("System", prompt);
+                ctx = ctx.with_system(
+                    Envelope::new(EnvelopeKind::Text(prompt.clone()))
+                        .with_role(MessageRole::System),
+                );
+            }
+            conversation_context = Some(ctx);
             loaded_model = Some(model);
         }
     }
@@ -381,11 +488,18 @@ pub(crate) fn handle_repl_command(
         // Try streaming execution
         #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
         let use_streaming = {
-            let can_stream = stream
-                && !show_reasoning
-                && stages.len() == 1
-                && stage_is_locally_available(&stages[0]);
-            if stream && show_reasoning {
+            let can_stream = stages.len() == 1 && {
+                let locally_available = stage_is_locally_available(&stages[0]);
+                // The speculative cloud-backed model has no local bundle, so the
+                // orchestrator can't run its stage: the model must drive the turn
+                // directly (tokens print as they arrive) even without --stream —
+                // regardless of --show-reasoning. Local models stream only when
+                // asked and when not showing reasoning (which needs the whole
+                // answer up front).
+                let speculative_drives = loaded_model.is_some() && !locally_available;
+                speculative_drives || (stream && !show_reasoning && locally_available)
+            };
+            if stream && show_reasoning && !can_stream {
                 ui::hint("Token streaming disabled so reasoning can be shown before the answer");
             } else if stream && !can_stream {
                 ui::warning("Streaming conditions not met");
@@ -932,12 +1046,10 @@ fn try_streaming_execution(
     start: std::time::Instant,
     verbose: u8,
 ) -> bool {
-    let bundle_path_str = stages[0].bundle_path.as_ref().unwrap();
-    let bundle_path = PathBuf::from(bundle_path_str);
-
-    let model_for_streaming = loaded_model.as_ref();
-
-    if let Some(model) = model_for_streaming {
+    // A pre-loaded model (including the speculative cloud-backed handle, which
+    // has no on-disk bundle) drives the turn directly. Resolve `bundle_path`
+    // only in the fall-back branch below, so a bundle-less stage never panics.
+    if let Some(model) = loaded_model.as_ref() {
         if model.supports_token_streaming() {
             return execute_streaming(
                 model,
@@ -952,6 +1064,14 @@ fn try_streaming_execution(
             return false;
         }
     }
+
+    let bundle_path = match stages[0].bundle_path.as_ref() {
+        Some(path) => PathBuf::from(path),
+        None => {
+            ui::warning("No local bundle for stage, falling back to batch mode");
+            return false;
+        }
+    };
 
     // Fall back to loading the model if not pre-loaded
     let model_result = if bundle_path.extension().is_some_and(|ext| ext == "xyb") {

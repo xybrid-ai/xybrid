@@ -64,6 +64,7 @@ pub(crate) use client::parse_gateway_usage;
 pub use client::Cloud;
 pub use completion::{CompletionRequest, CompletionResponse, Message, Role, Usage};
 pub use config::{
-    has_xybrid_api_key, set_xybrid_api_key, xybrid_api_key, CloudBackend, CloudConfig,
+    has_xybrid_api_key, set_xybrid_api_key, set_xybrid_platform_url, xybrid_api_key,
+    xybrid_platform_url, CloudBackend, CloudConfig,
 };
 pub use error::CloudError;

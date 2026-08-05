@@ -223,6 +223,12 @@ enum Commands {
         /// Export trace to JSON file (Chrome trace format)
         #[arg(long, value_name = "FILE")]
         trace_export: Option<PathBuf>,
+
+        /// Serve from the cloud while the registry model downloads, instead of
+        /// blocking on the download. Requires --api-key (or XYBRID_API_KEY) and
+        /// a registry --model. LLM/chat only.
+        #[arg(long)]
+        speculative_cloud: bool,
     },
     /// Interactive REPL mode - keeps models loaded for fast repeated inference
     Repl {
@@ -268,6 +274,12 @@ enum Commands {
         /// System prompt to set the assistant's behavior
         #[arg(long, value_name = "PROMPT")]
         system: Option<String>,
+
+        /// Serve from the cloud while the registry model downloads in the
+        /// background, then switch to local once ready. Requires --api-key
+        /// (or XYBRID_API_KEY) and a registry --model. LLM/chat only.
+        #[arg(long)]
+        speculative_cloud: bool,
 
         /// Disable built-in tool calling (web_search, fetch_url, current_time),
         /// which is otherwise on for models whose metadata declares support
@@ -457,6 +469,12 @@ fn configure_log_level(cli: &Cli) {
 /// Initialize platform telemetry from CLI args.
 fn init_telemetry(cli: &Cli) -> bool {
     if let Some(ref api_key) = cli.api_key {
+        // Make the key resolvable by the cloud gateway too (speculative cloud,
+        // reactive fallback), not just the telemetry exporter. `--api-key` may
+        // arrive by flag rather than the XYBRID_API_KEY env var, so set the
+        // in-memory cell that CloudConfig::resolve_api_key reads.
+        xybrid_sdk::set_api_key(api_key);
+
         let platform = Platform::detect().to_string();
 
         let device_id = cli.device_id.clone().unwrap_or_else(|| {
@@ -480,6 +498,14 @@ fn init_telemetry(cli: &Cli) -> bool {
 #[allow(clippy::too_many_arguments)]
 fn run_command(cli: Cli) -> Result<()> {
     let verbose = cli.verbose;
+    // Point the SDK's cloud gateway at the same endpoint as telemetry, so cloud
+    // calls (speculative cloud, reactive fallback) don't silently fall back to
+    // the production default (`api.xybrid.dev`) and 401 with a staging key.
+    // `cli.platform_url` already encodes clap's flag > env > default precedence,
+    // so set it unconditionally. Use the in-memory setter rather than
+    // `std::env::set_var`: telemetry threads are already running by now, and a
+    // concurrent `setenv`/`getenv` is UB. XYBRID_GATEWAY_URL still wins if set.
+    xybrid_sdk::set_platform_url(&cli.platform_url);
     match cli.command {
         Commands::Init {
             directory,
@@ -540,6 +566,7 @@ fn run_command(cli: Cli) -> Result<()> {
             show_reasoning,
             max_tokens,
             trace_export,
+            speculative_cloud,
         } => {
             if trace {
                 tracing_viz::reset_collector();
@@ -559,6 +586,26 @@ fn run_command(cli: Cli) -> Result<()> {
                     max_tokens,
                     trace_export.as_ref(),
                 );
+            }
+
+            // A dry run must not hit the network, so let `--dry-run` fall
+            // through to `run_model` (plan-only), which also honours
+            // --trace/--trace-export that the speculative path doesn't emit.
+            if speculative_cloud && !dry_run {
+                if let Some(model_id) = model.as_deref() {
+                    return commands::run::run_model_speculative(
+                        model_id,
+                        input_audio.as_ref(),
+                        input_text.as_deref(),
+                        &input_images,
+                        voice.as_deref(),
+                        output.as_ref(),
+                        max_tokens,
+                    );
+                }
+                return Err(anyhow::anyhow!(
+                    "--speculative-cloud requires a registry --model"
+                ));
             }
 
             if let Some(model_id) = model {
@@ -654,9 +701,10 @@ fn run_command(cli: Cli) -> Result<()> {
             show_reasoning,
             max_tokens,
             system,
+            speculative_cloud,
             no_tools,
             tools_file,
-        } => commands::repl::handle_repl_command(
+        } => commands::repl::handle_repl_command(commands::repl::ReplArgs {
             config,
             model,
             model_file,
@@ -666,11 +714,12 @@ fn run_command(cli: Cli) -> Result<()> {
             stream,
             show_reasoning,
             max_tokens,
-            system,
+            system_prompt: system,
+            speculative_cloud,
             no_tools,
             tools_file,
             verbose,
-        ),
+        }),
         Commands::Trace {
             session,
             latest,

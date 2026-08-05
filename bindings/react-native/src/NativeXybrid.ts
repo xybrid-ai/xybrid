@@ -40,6 +40,18 @@ export interface Spec extends TurboModule {
   // rejects with an Error if it doesn't match a known variant.
   run(handle: string, envelope: Object, options: Object | null): Promise<Object>;
 
+  // -- Streaming (pull-based) --
+  // `streamStart` begins a run and returns an opaque stream-handle id. Pull
+  // events with `streamNext` until it resolves to `null` (exhausted). Each
+  // event Object is the discriminated `StreamEvent` union (narrowed in the TS
+  // facade by its `kind` field); mid-stream failures reject the `streamNext`
+  // promise with the same typed `xybrid_*` codes as `run`. Always
+  // `streamRelease` when stopping early — it aborts the underlying run, which
+  // otherwise keeps generating.
+  streamStart(handle: string, envelope: Object, options: Object | null): Promise<string>;
+  streamNext(streamHandle: string): Promise<Object | null>;
+  streamRelease(streamHandle: string): Promise<void>;
+
   // -- TTS introspection --
   voices(handle: string): Promise<Object[] | null>;
   defaultVoiceId(handle: string): Promise<string | null>;
@@ -54,6 +66,12 @@ export interface Spec extends TurboModule {
   clearBatteryLevel(): Promise<void>;
   setThermalState(state: string): Promise<void>;
   clearThermalState(): Promise<void>;
+
+  // -- Utilities --
+  // Convert a JSON Schema (as a JSON string) into a GBNF grammar for
+  // `GenerationConfig.grammar`. Rejects on invalid JSON or an unsupported
+  // schema construct.
+  jsonSchemaToGbnf(schemaJson: string): Promise<string>;
 }
 
 export default TurboModuleRegistry.getEnforcing<Spec>('RNXybrid');

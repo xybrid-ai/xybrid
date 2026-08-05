@@ -18,6 +18,8 @@ import ai.xybrid.XybridGenerationConfig
 import ai.xybrid.XybridModel
 import ai.xybrid.XybridResult
 import ai.xybrid.XybridRunOptions
+import ai.xybrid.XybridStreamEventKind
+import ai.xybrid.XybridStreamToken
 import ai.xybrid.XybridThermalState
 import ai.xybrid.XybridVoiceInfo
 import ai.xybrid.audioBytes
@@ -25,6 +27,7 @@ import ai.xybrid.clearBatteryLevel
 import ai.xybrid.clearThermalState
 import ai.xybrid.embedding
 import ai.xybrid.initSdkCacheDir
+import ai.xybrid.jsonSchemaToGbnf
 import ai.xybrid.reasoningContent
 import ai.xybrid.setBatteryLevel
 import ai.xybrid.setBinding
@@ -55,16 +58,22 @@ class XybridModule(reactContext: ReactApplicationContext) :
 
   private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
   private val models = ConcurrentHashMap<String, XybridModel>()
+  private val streams = ConcurrentHashMap<String, StreamEntry>()
 
   override fun getName(): String = NAME
 
   // Released when the RN module is torn down (fast refresh, bundle reload,
   // host teardown). Native model weights are hundreds of MB, so failing to
   // close them promptly OOMs the device — cancel in-flight work and free
-  // every handle here.
+  // every handle here. Streams are closed too: a live generation keeps a
+  // worker thread (and the model) alive until it is aborted.
   override fun invalidate() {
     super.invalidate()
     scope.cancel()
+    // Close streaming sessions before their models: streamClose needs the
+    // still-alive model handle, and closing it unwinds the generation thread.
+    streams.values.forEach { it.model.streamClose(it.streamId) }
+    streams.clear()
     models.values.forEach { it.close() }
     models.clear()
   }
@@ -122,6 +131,17 @@ class XybridModule(reactContext: ReactApplicationContext) :
 
   @ReactMethod
   fun releaseModel(handle: String, promise: Promise) {
+    // Abort + drop any live streams started from this model first (streamClose
+    // needs the still-alive model handle), so releasing the model unwinds
+    // their generation instead of orphaning a worker thread.
+    val iter = streams.entries.iterator()
+    while (iter.hasNext()) {
+      val entry = iter.next()
+      if (entry.value.modelHandle == handle) {
+        entry.value.model.streamClose(entry.value.streamId)
+        iter.remove()
+      }
+    }
     models.remove(handle)?.close()
     promise.resolve(null)
   }
@@ -168,6 +188,88 @@ class XybridModule(reactContext: ReactApplicationContext) :
         promise.reject("xybrid", t.message, t)
       }
     }
+  }
+
+  // -- Streaming --
+
+  @ReactMethod
+  fun streamStart(handle: String, envelope: ReadableMap, options: ReadableMap?, promise: Promise) {
+    val model = models[handle]
+    if (model == null) {
+      promise.reject("xybrid_handle", "Unknown model handle: $handle")
+      return
+    }
+    val env = try {
+      decodeEnvelope(envelope)
+    } catch (e: IllegalArgumentException) {
+      promise.reject("xybrid_envelope", e.message, e)
+      return
+    }
+    val opts = options?.let(::decodeRunOptions)
+
+    scope.launch {
+      try {
+        val streamId = model.runStream(env, opts)
+        val id = UUID.randomUUID().toString()
+        streams[id] = StreamEntry(model, streamId, handle)
+        promise.resolve(id)
+      } catch (e: XybridError) {
+        rejectXybrid(promise, e)
+      } catch (t: Throwable) {
+        if (t is CancellationException) throw t
+        promise.reject("xybrid", t.message, t)
+      }
+    }
+  }
+
+  @ReactMethod
+  fun streamNext(streamHandle: String, promise: Promise) {
+    val entry = streams[streamHandle]
+    if (entry == null) {
+      // Released/unknown stream → treat as exhausted, not an error.
+      promise.resolve(null)
+      return
+    }
+    scope.launch {
+      try {
+        // Blocks until the next event is ready; runs on Dispatchers.IO like run.
+        val event = entry.model.streamNext(entry.streamId)
+        when (event.kind) {
+          XybridStreamEventKind.TOKEN -> {
+            val token = event.token
+            if (token == null) promise.resolve(null) else promise.resolve(encodeTokenEvent(token))
+          }
+          XybridStreamEventKind.COMPLETE -> {
+            // `streamResult` also closes the bolt-side session; drop our
+            // bookkeeping entry so later calls resolve null (exhausted).
+            val result = entry.model.streamResult(entry.streamId)
+            streams.remove(streamHandle)
+            val out = Arguments.createMap()
+            out.putString("kind", "complete")
+            out.putMap("result", encodeResult(result))
+            promise.resolve(out)
+          }
+        }
+      } catch (e: XybridError) {
+        // A failed streamNext already closed the session bolt-side; mirror
+        // that here, then reject with the same typed codes as `run`.
+        streams.remove(streamHandle)
+        rejectXybrid(promise, e)
+      } catch (t: Throwable) {
+        if (t is CancellationException) throw t
+        streams.remove(streamHandle)
+        promise.reject("xybrid", t.message, t)
+      }
+    }
+  }
+
+  @ReactMethod
+  fun streamRelease(streamHandle: String, promise: Promise) {
+    // Closing the bolt session aborts the underlying generation run (its
+    // receiver drops, unwinding the backend). Idempotent if the session
+    // already finished or errored.
+    streams.remove(streamHandle)?.let { it.model.streamClose(it.streamId) }
+    promise.resolve(null)
   }
 
   // -- TTS introspection --
@@ -243,6 +345,21 @@ class XybridModule(reactContext: ReactApplicationContext) :
   fun clearThermalState(promise: Promise) {
     clearThermalState()
     promise.resolve(null)
+  }
+
+  // -- Utilities --
+
+  @ReactMethod
+  fun jsonSchemaToGbnf(schemaJson: String, promise: Promise) {
+    try {
+      // Shared JSON-Schema→GBNF converter from the bolt bindings. Fast (pure
+      // string transform), so no coroutine hop is needed.
+      promise.resolve(jsonSchemaToGbnf(schemaJson))
+    } catch (e: XybridError) {
+      rejectXybrid(promise, e)
+    } catch (t: Throwable) {
+      promise.reject("xybrid", t.message, t)
+    }
   }
 
   // MARK: - Helpers
@@ -391,6 +508,7 @@ class XybridModule(reactContext: ReactApplicationContext) :
       topK = uintOrNull("topK"),
       repetitionPenalty = floatOrNull("repetitionPenalty"),
       stopSequences = stops,
+      grammar = if (map.hasKey("grammar") && !map.isNull("grammar")) map.getString("grammar") else null,
     )
   }
 
@@ -414,6 +532,25 @@ class XybridModule(reactContext: ReactApplicationContext) :
       it.forEach { f -> arr.pushDouble(f.toDouble()) }
       out.putArray("embedding", arr)
     }
+    return out
+  }
+
+  // Encode a bolt `XybridStreamToken` as the discriminated `token` event the
+  // JS facade narrows by `kind`. The terminal `complete` event is built at the
+  // call site (it pairs `streamResult` with `encodeResult` so the generator's
+  // return value matches `run`).
+  private fun encodeTokenEvent(t: XybridStreamToken): WritableMap {
+    val out = Arguments.createMap()
+    out.putString("kind", "token")
+    val token = Arguments.createMap()
+    token.putString("token", t.token)
+    // Double, not Int: index is u64 (ULong) and RN numbers are doubles (exact
+    // to 2^53) — toInt() would truncate a large index.
+    token.putDouble("index", t.index.toDouble())
+    token.putString("cumulativeText", t.cumulativeText)
+    t.tokenId?.let { token.putDouble("tokenId", it.toDouble()) }
+    t.finishReason?.let { token.putString("finishReason", it) }
+    out.putMap("token", token)
     return out
   }
 
@@ -454,6 +591,20 @@ class XybridModule(reactContext: ReactApplicationContext) :
     }
     promise.reject(code, e.message ?: "Xybrid error", e)
   }
+
+  // A live streaming session: the model it runs on (bolt sessions are
+  // model-scoped ids, so streamNext/streamClose are model methods), the
+  // session id, and the model's handle string (so releasing a model can drain
+  // its streams). No native handle of its own to free: `streamClose` is an
+  // idempotent map-remove inside the bolt model, and the session `Arc` is
+  // released when the last in-flight `streamNext` returns — so the
+  // use-after-free/deferred-close machinery the old stream *handle* needed
+  // does not apply here. Abort still takes effect at the next token boundary.
+  private data class StreamEntry(
+    val model: XybridModel,
+    val streamId: ULong,
+    val modelHandle: String,
+  )
 
   companion object {
     const val NAME = "RNXybrid"

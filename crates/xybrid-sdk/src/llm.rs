@@ -203,6 +203,14 @@ pub fn default_gateway_url() -> String {
     if let Ok(url) = std::env::var("XYBRID_GATEWAY_URL") {
         return url;
     }
+    // Programmatic platform URL (set via `set_platform_url`, held in the core
+    // in-memory cell) takes precedence over the ambient XYBRID_PLATFORM_URL env
+    // var — same ordering as `xybrid_core::cloud::default_gateway_url`, so this
+    // resolver and the core `Cloud`/`CloudConfig` one stay in agreement.
+    if let Some(url) = xybrid_core::cloud::xybrid_platform_url() {
+        // Platform URL needs /v1 suffix for gateway endpoints
+        return format!("{}/v1", url.trim_end_matches('/'));
+    }
     if let Ok(url) = std::env::var("XYBRID_PLATFORM_URL") {
         // Platform URL needs /v1 suffix for gateway endpoints
         return format!("{}/v1", url.trim_end_matches('/'));
@@ -574,6 +582,29 @@ mod tests {
         set_gateway_url("https://local.gateway.test/v1");
         assert_eq!(default_gateway_url(), "https://local.gateway.test/v1");
         clear_gateway_url_override();
+    }
+
+    /// The core in-memory platform URL (set via `xybrid_sdk::set_platform_url`)
+    /// must reach this resolver too, not just `xybrid_core::cloud`'s — otherwise
+    /// an SDK `llm` consumer would ignore `--platform-url` and hit production.
+    #[test]
+    fn test_core_platform_url_reaches_llm_resolver() {
+        // RAII reset so a failing assertion can't leak the process-global cell.
+        struct ResetOnDrop;
+        impl Drop for ResetOnDrop {
+            fn drop(&mut self) {
+                clear_gateway_url_override();
+                xybrid_core::cloud::set_xybrid_platform_url(None);
+            }
+        }
+        let _reset = ResetOnDrop;
+
+        // The llm-local override must be clear so the core cell is what wins.
+        clear_gateway_url_override();
+        xybrid_core::cloud::set_xybrid_platform_url(Some(
+            "https://staging.example.com".to_string(),
+        ));
+        assert_eq!(default_gateway_url(), "https://staging.example.com/v1");
     }
 
     #[test]
