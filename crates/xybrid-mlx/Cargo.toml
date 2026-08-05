@@ -3,8 +3,8 @@ name = "xybrid-mlx"
 version.workspace = true
 edition.workspace = true
 license = "MIT"
+repository.workspace = true
 description = "Safe Rust wrappers over mlx-c for Apple Silicon MLX inference. Typed shapes, RAII handles, no global state."
-publish = false
 
 [lib]
 name = "xybrid_mlx"
@@ -21,7 +21,7 @@ default = []
 bindings = ["mlx-c-sys/bindings", "dep:metal"]
 
 [dependencies]
-mlx-c-sys = { path = "../mlx-c-sys" }
+mlx-c-sys = { path = "../mlx-c-sys", version = "0.4.0" }
 thiserror = { workspace = true }
 tracing = "0.1"
 

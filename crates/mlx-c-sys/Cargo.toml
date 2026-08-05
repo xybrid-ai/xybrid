@@ -3,8 +3,8 @@ name = "mlx-c-sys"
 version.workspace = true
 edition.workspace = true
 license = "MIT"
-description = "Raw FFI bindings to mlx-c (Apple Silicon). Links against vendor/mlx-apple/mlx.xcframework."
-publish = false
+repository.workspace = true
+description = "Raw FFI bindings to mlx-c (Apple Silicon). Compiles as an empty shell unless the `bindings` feature is enabled, which links a locally materialized mlx.xcframework."
 links = "mlx-combined"
 
 [lib]

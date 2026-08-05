@@ -249,6 +249,8 @@ jobs:
           publish_crate xybrid-macros
           publish_crate xybrid-llama-sys
           publish_crate xybrid-llama
+          publish_crate mlx-c-sys
+          publish_crate xybrid-mlx
           publish_crate xybrid-core
           publish_crate xybrid-sdk
           publish_crate xybrid
