@@ -4,7 +4,7 @@ use flutter_rust_bridge::frb;
 use xybrid_ffi_facade as facade;
 use xybrid_sdk::ResourceTelemetryMode;
 
-use super::FLUTTER_BINDING;
+use super::{ensure_native_logging, FLUTTER_BINDING};
 
 /// Process-wide once-guard for [`XybridSdkClient::init_telemetry`]. Set on
 /// the first successful entry. Re-entry — whether from a duplicate Dart
@@ -73,12 +73,14 @@ fn parse_resource_telemetry_mode(value: Option<&str>) -> Option<ResourceTelemetr
 impl XybridSdkClient {
     #[frb(sync)]
     pub fn init_sdk_cache_dir(cache_dir: String) {
+        ensure_native_logging();
         facade::set_binding(FLUTTER_BINDING.to_string());
         facade::init_sdk_cache_dir(cache_dir);
     }
 
     #[frb(sync)]
     pub fn set_api_key(api_key: &str) {
+        ensure_native_logging();
         facade::set_binding(FLUTTER_BINDING.to_string());
         facade::set_api_key(api_key.to_string());
     }
@@ -113,6 +115,7 @@ impl XybridSdkClient {
     /// spins up its own background thread for batched sends.
     #[frb(sync)]
     pub fn init_telemetry(endpoint: String, api_key: String) {
+        ensure_native_logging();
         facade::set_binding(FLUTTER_BINDING.to_string());
         let config = xybrid_sdk::TelemetryConfig::new(endpoint, api_key);
         initialize_telemetry_once(config);
@@ -136,6 +139,7 @@ impl XybridSdkClient {
         // master's DEFAULT_INGEST_URL defaulting lives in
         // resolve_ingest_endpoint below. Clone the key because it's moved
         // into TelemetryConfig::new on the next line.
+        ensure_native_logging();
         facade::set_binding(FLUTTER_BINDING.to_string());
         facade::set_api_key(api_key.clone());
 

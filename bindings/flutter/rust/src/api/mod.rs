@@ -9,6 +9,33 @@
 /// push-state setters in [`device`]).
 pub(crate) const FLUTTER_BINDING: &str = "flutter";
 
+/// Initialize the platform-native `log` backend exactly once per process.
+///
+/// `android_logger` / `oslog` were declared as dependencies but never
+/// initialized, so every `log::warn!` in the SDK (telemetry send failures
+/// in particular) was silently discarded on device. Called from the
+/// [`sdk_client`] entry points the Dart layer hits during `Xybrid.init`,
+/// so logs flow before any exporter or model work starts. No-op on
+/// desktop targets, where the host process owns logger setup.
+pub(crate) fn ensure_native_logging() {
+    static LOGGING_INIT: std::sync::Once = std::sync::Once::new();
+    LOGGING_INIT.call_once(|| {
+        #[cfg(target_os = "android")]
+        android_logger::init_once(
+            android_logger::Config::default()
+                .with_max_level(log::LevelFilter::Info)
+                .with_tag("xybrid"),
+        );
+        #[cfg(target_os = "ios")]
+        {
+            // Errors only if a logger is already registered — fine to ignore.
+            let _ = oslog::OsLogger::new("dev.xybrid.sdk")
+                .level_filter(log::LevelFilter::Info)
+                .init();
+        }
+    });
+}
+
 pub mod context;
 pub mod device;
 pub mod envelope;
