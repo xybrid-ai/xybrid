@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Token streaming on Apple, Kotlin, and React Native.** The pull-based
+  streaming sessions that 0.4.0 introduced on the bolt surface (`run_stream` →
+  `stream_next` / `stream_result` / `stream_close`, shipped for Unity) now
+  reach the remaining bindings: Apple `model.streamTokens()`
+  (`AsyncThrowingStream`), Kotlin `model.streamTokens()` (`Flow`), and React
+  Native `model.runStreaming()` (async generator). The regenerated Swift and
+  Kotlin bolt bindings surface the streaming methods. Stopping consumption —
+  breaking out of the loop, cancelling the task/coroutine, or releasing the
+  model — closes the session and aborts generation at the next token boundary
+  instead of running to `max_tokens`; mid-stream failures carry the same typed
+  errors as `run`.
+
 ### Planned
 
 - **Multimodal KV-prefix reuse**: the per-frame prefill cost lever for live vision — **deferred** from 0.2.0, not yet implemented.

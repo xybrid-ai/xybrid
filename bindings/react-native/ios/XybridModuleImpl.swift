@@ -15,6 +15,14 @@ public final class XybridModuleImpl: NSObject {
   private let modelsLock = NSLock()
   private var models: [String: XybridModel] = [:]
 
+  // Live streaming sessions, keyed by an opaque stream id string. Bolt
+  // sessions are model-scoped (`runStream` returns a UInt64 id valid on that
+  // model), so each entry keeps the model object (to call streamNext/
+  // streamClose on) plus the model's handle string (so releasing a model can
+  // abort its streams). Guarded by its own lock.
+  private let streamsLock = NSLock()
+  private var streams: [String: (model: XybridModel, id: UInt64, owner: String)] = [:]
+
   // -- Lifecycle --
 
   @objc public func initializeWithCacheDir(_ cacheDir: String?,
@@ -77,6 +85,16 @@ public final class XybridModuleImpl: NSObject {
   @objc public func releaseModel(_ handle: String,
                                  resolve: @escaping RCTPromiseResolveBlock,
                                  reject: @escaping RCTPromiseRejectBlock) {
+    // Close any live streaming sessions started from this model first (the
+    // session needs the still-alive model to abort), so releasing the model
+    // unwinds their in-flight generation instead of orphaning it. The model
+    // object itself is freed by ARC once the last in-flight call returns.
+    streamsLock.lock()
+    for (key, entry) in streams where entry.owner == handle {
+      entry.model.streamClose(streamId: entry.id)
+      streams.removeValue(forKey: key)
+    }
+    streamsLock.unlock()
     modelsLock.lock()
     models.removeValue(forKey: handle)
     modelsLock.unlock()
@@ -126,6 +144,92 @@ public final class XybridModuleImpl: NSObject {
         }
       }
     }
+  }
+
+  // -- Streaming --
+
+  @objc public func streamStart(_ handle: String,
+                                envelope: NSDictionary,
+                                options: NSDictionary?,
+                                resolve: @escaping RCTPromiseResolveBlock,
+                                reject: @escaping RCTPromiseRejectBlock) {
+    guard let model = lookup(handle) else {
+      reject("xybrid_handle", "Unknown model handle: \(handle)", nil)
+      return
+    }
+    let envelopeOrError = decodeEnvelope(envelope)
+    let runOptions = options.map(decodeRunOptions)
+
+    Task.detached {
+      switch envelopeOrError {
+      case .failure(let err):
+        reject("xybrid_envelope", err, nil)
+      case .success(let env):
+        do {
+          let id = try model.runStream(envelope: env, options: runOptions)
+          resolve(self.storeStream(model: model, id: id, owner: handle))
+        } catch let error as XybridError {
+          self.rejectXybrid(error, reject)
+        } catch {
+          reject("xybrid", error.localizedDescription, error)
+        }
+      }
+    }
+  }
+
+  @objc public func streamNext(_ streamHandle: String,
+                               resolve: @escaping RCTPromiseResolveBlock,
+                               reject: @escaping RCTPromiseRejectBlock) {
+    guard let entry = lookupStream(streamHandle) else {
+      // A released/unknown stream is treated as exhausted rather than an
+      // error, so a `streamNext` racing a `streamRelease` resolves to null.
+      resolve(nil)
+      return
+    }
+    Task.detached {
+      do {
+        // `streamNext` blocks until the next event; run off the RN thread
+        // like `run`.
+        let event = try entry.model.streamNext(streamId: entry.id)
+        switch event.kind {
+        case .token:
+          guard let token = event.token else {
+            resolve(nil)
+            return
+          }
+          resolve(["kind": "token", "token": self.encodeStreamToken(token)])
+        case .complete:
+          // `streamResult` also closes the bolt-side session; drop our
+          // bookkeeping entry so later calls resolve null (exhausted).
+          let result = try entry.model.streamResult(streamId: entry.id)
+          self.removeStream(streamHandle)
+          resolve(["kind": "complete", "result": self.encodeResult(result)])
+        }
+      } catch let error as XybridError {
+        // A failed streamNext already closed the session bolt-side; mirror
+        // that in our map, then reject with the same typed codes as `run`.
+        self.removeStream(streamHandle)
+        self.rejectXybrid(error, reject)
+      } catch {
+        self.removeStream(streamHandle)
+        reject("xybrid", error.localizedDescription, error)
+      }
+    }
+  }
+
+  @objc public func streamRelease(_ streamHandle: String,
+                                  resolve: @escaping RCTPromiseResolveBlock,
+                                  reject: @escaping RCTPromiseRejectBlock) {
+    streamsLock.lock()
+    let entry = streams.removeValue(forKey: streamHandle)
+    streamsLock.unlock()
+    // Closing the bolt session aborts the underlying generation run (the
+    // session's receiver drops, unwinding the backend). Idempotent if the
+    // session already finished or errored.
+    if let entry = entry {
+      entry.model.streamClose(streamId: entry.id)
+    }
+    resolve(nil)
   }
 
   // -- TTS introspection --
@@ -202,6 +306,23 @@ public final class XybridModuleImpl: NSObject {
     resolve(nil)
   }
 
+  // -- Utilities --
+
+  @objc public func jsonSchemaToGbnf(_ schemaJson: String,
+                                     resolve: @escaping RCTPromiseResolveBlock,
+                                     reject: @escaping RCTPromiseRejectBlock) {
+    do {
+      // Free function from xybrid_bolt.swift; the shared JSON-Schema→GBNF
+      // converter every binding uses. Fast (pure string transform), so no
+      // Task.detached hop is needed.
+      resolve(try jsonSchemaToGbnf(schemaJson: schemaJson))
+    } catch let error as XybridError {
+      rejectXybrid(error, reject)
+    } catch {
+      reject("xybrid", error.localizedDescription, error)
+    }
+  }
+
   // MARK: - Helpers
 
   private func lookup(_ handle: String) -> XybridModel? {
@@ -216,6 +337,26 @@ public final class XybridModuleImpl: NSObject {
     models[id] = model
     modelsLock.unlock()
     return id
+  }
+
+  private func lookupStream(_ id: String) -> (model: XybridModel, id: UInt64, owner: String)? {
+    streamsLock.lock()
+    defer { streamsLock.unlock() }
+    return streams[id]
+  }
+
+  private func removeStream(_ id: String) {
+    streamsLock.lock()
+    streams.removeValue(forKey: id)
+    streamsLock.unlock()
+  }
+
+  private func storeStream(model: XybridModel, id: UInt64, owner: String) -> String {
+    let key = UUID().uuidString
+    streamsLock.lock()
+    streams[key] = (model, id, owner)
+    streamsLock.unlock()
+    return key
   }
 
   private func runAsyncLoad(resolve: @escaping RCTPromiseResolveBlock,
@@ -317,7 +458,8 @@ public final class XybridModuleImpl: NSObject {
       minP: (dict["minP"] as? NSNumber)?.floatValue,
       topK: uint32OrNil("topK"),
       repetitionPenalty: (dict["repetitionPenalty"] as? NSNumber)?.floatValue,
-      stopSequences: dict["stopSequences"] as? [String] ?? []
+      stopSequences: dict["stopSequences"] as? [String] ?? [],
+      grammar: dict["grammar"] as? String
     )
   }
 
@@ -343,6 +485,21 @@ public final class XybridModuleImpl: NSObject {
     }
     if let emb = r.embedding { out["embedding"] = emb }
     return out
+  }
+
+  // Encode a bolt `XybridStreamToken` as the `token` payload of the
+  // discriminated `StreamEvent` object the JS facade narrows by `kind`.
+  private func encodeStreamToken(_ t: XybridStreamToken) -> [String: Any] {
+    // index as Double, not Int: it is u64 and RN numbers are doubles (exact
+    // to 2^53) — Int() could trap/truncate a large index.
+    var token: [String: Any] = [
+      "token": t.token,
+      "index": Double(t.index),
+      "cumulativeText": t.cumulativeText,
+    ]
+    if let id = t.tokenId { token["tokenId"] = id }
+    if let reason = t.finishReason { token["finishReason"] = reason }
+    return token
   }
 
   private func encodeVoice(_ v: XybridVoiceInfo) -> [String: Any] {

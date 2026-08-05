@@ -20,6 +20,11 @@ import android.os.Build
 import android.os.PowerManager
 import java.io.File
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.withContext
 
 // -- SDK Initialization --
@@ -209,6 +214,44 @@ suspend fun XybridModel.warmupAsync() = withContext(Dispatchers.IO) { this@warmu
 
 /** Unload the model, freeing its memory, off the caller's thread (on [Dispatchers.IO]). */
 suspend fun XybridModel.unloadAsync() = withContext(Dispatchers.IO) { this@unloadAsync.unload() }
+
+/**
+ * Stream inference token-by-token as a cold [Flow].
+ *
+ * Emits each [XybridStreamToken] as it is generated and completes when
+ * generation finishes; throws [XybridError] if the run fails mid-stream.
+ * Cancelling the collecting coroutine aborts generation at the next token
+ * boundary — the session is closed, which unwinds the backend instead of
+ * running to `max_tokens`. Ergonomic wrapper over the pull-based session API
+ * ([XybridModel.runStream] / [XybridModel.streamNext] /
+ * [XybridModel.streamClose]).
+ *
+ * ```kotlin
+ * model.streamTokens(envelope).collect { token -> print(token.token) }
+ * ```
+ */
+fun XybridModel.streamTokens(
+    envelope: XybridEnvelope,
+    options: XybridRunOptions? = null,
+): Flow<XybridStreamToken> = flow {
+    val streamId = runStream(envelope, options)
+    try {
+        while (true) {
+            // Cooperative cancellation: collecting coroutine cancelled -> throws
+            // here at the next token boundary, the finally closes the session.
+            currentCoroutineContext().ensureActive()
+            val event = streamNext(streamId)
+            when (event.kind) {
+                XybridStreamEventKind.TOKEN -> event.token?.let { emit(it) }
+                XybridStreamEventKind.COMPLETE -> break
+            }
+        }
+    } finally {
+        // Idempotent (the session may already be gone after an error), and
+        // aborts an in-flight run when collection stops early.
+        streamClose(streamId)
+    }
+}.flowOn(Dispatchers.IO)
 
 // -- Deprecated: the pre-bolt loader shape --
 //

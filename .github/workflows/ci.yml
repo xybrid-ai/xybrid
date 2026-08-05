@@ -462,6 +462,19 @@ jobs:
         working-directory: bindings/web
         run: pnpm build
 
+      # The example pulls a 136 MB LiteRT-LM model from a shared HuggingFace
+      # mirror that rate-limits CI egress by IP. Both assets are pinned by
+      # checksum in prepare-assets.ts, which re-downloads whatever fails to
+      # verify — so keying the cache on that file makes a restore safe and a
+      # pin change self-invalidating.
+      - name: Cache Web example model assets
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            bindings/web/example/public/model.tflite
+            bindings/web/example/public/llm/SmolLM2_135M_Instruct.litertlm
+          key: web-example-assets-${{ hashFiles('bindings/web/example/scripts/prepare-assets.ts') }}
+
       - name: Build Web example
         working-directory: bindings/web
         run: pnpm build:example

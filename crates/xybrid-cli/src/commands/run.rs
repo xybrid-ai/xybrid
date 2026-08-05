@@ -950,6 +950,75 @@ pub(crate) fn run_model(
     Ok(())
 }
 
+/// Run a one-shot registry-model inference with speculative cloud fallback:
+/// serve the answer from the cloud gateway instead of blocking on the model
+/// download. Streams tokens to stdout and optionally writes the text output.
+///
+/// One-shot, so the background download (started by `load()`) doesn't outlive
+/// the process — the point here is the immediate cloud answer; the REPL is
+/// where the local switchover matters.
+pub(crate) fn run_model_speculative(
+    model_id: &str,
+    input_audio: Option<&PathBuf>,
+    input_text: Option<&str>,
+    input_images: &[PathBuf],
+    voice: Option<&str>,
+    output_path: Option<&PathBuf>,
+    max_tokens: Option<usize>,
+) -> Result<()> {
+    use std::io::Write;
+
+    ui::header(&format!("Run · {} (speculative cloud)", model_id));
+
+    // Serve the registry model itself: the gateway routes its id to xycloud
+    // (the CPU cluster that runs the edge model) while it downloads locally.
+    let loader = xybrid_sdk::ModelLoader::from_registry(model_id).with_speculative_cloud(true);
+
+    if loader.will_speculate() {
+        ui::ok(&format!(
+            "Serving '{}' via xycloud while it downloads in the background",
+            model_id
+        ));
+    } else if xybrid_sdk::cache::CacheManager::new()
+        .map(|c| c.is_extracted(model_id))
+        .unwrap_or(false)
+    {
+        ui::hint("Model already cached locally — running on device (no speculation needed)");
+    } else {
+        ui::hint("Speculative cloud unavailable (no API key?) — downloading, then running locally");
+    }
+
+    let model = loader
+        .load()
+        .context("Failed to load speculative cloud model")?;
+
+    let envelope = build_input_envelope(input_audio, input_text, input_images, voice, max_tokens)?;
+
+    ui::section("Output");
+    let accumulated = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+    let acc = std::sync::Arc::clone(&accumulated);
+    let result = model.run_streaming(&envelope, None, move |token| {
+        print!("{}", token.token);
+        std::io::stdout().flush().ok();
+        if let Ok(mut text) = acc.lock() {
+            text.push_str(&token.token);
+        }
+        Ok(())
+    });
+    println!();
+
+    result.context("Speculative inference failed")?;
+
+    if let Some(path) = output_path {
+        let text = accumulated.lock().map(|t| t.clone()).unwrap_or_default();
+        fs::write(path, text)
+            .with_context(|| format!("Failed to write output to {}", path.display()))?;
+        ui::ok(&format!("Saved output to {}", path.display()));
+    }
+
+    Ok(())
+}
+
 /// Run inference from a local model directory.
 pub(crate) fn run_directory(
     dir: &Path,
