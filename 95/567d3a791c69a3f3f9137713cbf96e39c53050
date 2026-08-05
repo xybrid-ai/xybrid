@@ -1,0 +1,29 @@
+bindings/flutter/cargokit/build_pod.sh
+  s_a64fe9de419967::t_477bfb7df0a5f7 129-171
+examples/flutter/ios/Podfile.lock
+  s_cc908747fd2ec5::t_6730df434e40cb 7-8,22,28,42-43,61-62,69
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "95567d3a791c69a3f3f9137713cbf96e39c53050",
+  "prompts": {},
+  "sessions": {
+    "s_a64fe9de419967": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4322caba-5bc8-4b30-8ba1-51b0b8519417",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    },
+    "s_cc908747fd2ec5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "004e7b96-1346-464d-b65f-050006e985c9",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
