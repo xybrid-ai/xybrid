@@ -142,7 +142,7 @@ See the full [Installation Guide](https://docs.xybrid.dev/en/docs/quickstart) fo
 
 ```yaml
 dependencies:
-  xybrid_flutter: ^0.3.0
+  xybrid_flutter: ^0.4.0
 ```
 
 **Run a model:**
@@ -177,7 +177,7 @@ val result = model.runAsync(Envelope.text("Hello world"))
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/xybrid-ai/xybrid.git", from: "0.3.0")
+    .package(url: "https://github.com/xybrid-ai/xybrid.git", from: "0.4.0")
 ]
 ```
 
@@ -216,7 +216,7 @@ var result = model.Run(Envelope.Text("Hello world"));
 
 ```toml
 [dependencies]
-xybrid = "0.3.0"
+xybrid = "0.4.0"
 ```
 
 **Run a model:**

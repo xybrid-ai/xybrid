@@ -154,7 +154,7 @@ xybrid run --model kokoro-82m --input-text "国破山河在，城春草木深" -
 
 ```yaml
 dependencies:
-  xybrid_flutter: ^0.3.0
+  xybrid_flutter: ^0.4.0
 ```
 
 **运行模型：**
@@ -189,7 +189,7 @@ val result = model.runAsync(Envelope.text("国破山河在，城春草木深"))
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/xybrid-ai/xybrid.git", from: "0.3.0")
+    .package(url: "https://github.com/xybrid-ai/xybrid.git", from: "0.4.0")
 ]
 ```
 
@@ -223,7 +223,7 @@ var result = model.Run(Envelope.Text("国破山河在，城春草木深"));
 
 ```toml
 [dependencies]
-xybrid = "0.3.0"
+xybrid = "0.4.0"
 ```
 
 **运行模型：**
