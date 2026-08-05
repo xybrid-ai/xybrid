@@ -1,0 +1,79 @@
+docs/content/docs/(integration)/sdks/android.mdx
+  s_7c9b0b269e9595::t_b4b75df88676e8 6,32-33,36,63,69,72-77,160-161
+docs/content/docs/guides/vision-models.zh.mdx
+  s_7c9b0b269e9595::t_ab8311fd07594c 98,101,108
+  s_7c9b0b269e9595::t_57228dfb86c9d3 118,126
+docs/content/docs/(integration)/sdks/ios.mdx
+  s_7c9b0b269e9595::t_b4b75df88676e8 6,37-38,42,71,77,80-85,169-170,199-200
+bindings/kotlin/src/test/kotlin/ai/xybrid/ModelLoaderTest.kt
+  s_7c9b0b269e9595::t_1c8d0495bbd7f6 1-33
+bindings/apple/Tests/XybridTests/ModelLoaderTests.swift
+  s_7c9b0b269e9595::t_689ecc23cea21e 1
+  s_7c9b0b269e9595::t_8d9e435342c973 2-20
+docs/content/docs/quickstart.zh.mdx
+  s_7c9b0b269e9595::t_ab8311fd07594c 70-71,75,95,101-102,106
+Package.swift
+  s_7c9b0b269e9595::t_8d9e435342c973 80-84
+bindings/apple/README.md
+  s_7c9b0b269e9595::t_bc17cd8b7ae8ce 40-41,50-51,69-70,81-83
+README.md
+  s_7c9b0b269e9595::t_92ceb35cc73dd9 169-170,187-188
+bindings/kotlin/README.md
+  s_7c9b0b269e9595::t_bc17cd8b7ae8ce 40,42-43,47,60-61,64,142,160-162,168,172-181
+docs/content/docs/(integration)/sdks/kotlin.mdx
+  s_7c9b0b269e9595::t_b4b75df88676e8 6,42-43,47-48,53,69,90,101-105
+docs/content/docs/guides/reasoning.mdx
+  s_7c9b0b269e9595::t_ab8311fd07594c 49-50,60-61
+bindings/kotlin/src/main/kotlin/ai/xybrid/Xybrid.kt
+  s_7c9b0b269e9595::t_3099f1431f4f2a 115-129,170-266
+  s_7c9b0b269e9595::t_0cdb812830d66a 295-298,300,303-306,308,311-314,316,319-322,324
+docs/content/docs/(integration)/sdks/ios.zh.mdx
+  s_7c9b0b269e9595::t_8e3a899efc778b 181
+  s_7c9b0b269e9595::t_b4b75df88676e8 6,31-32,36,63,69,72-74,158-159
+docs/content/docs/(integration)/sdks/kotlin.zh.mdx
+  s_7c9b0b269e9595::t_b4b75df88676e8 6,42,46-47,52,68-69,95-97
+  s_7c9b0b269e9595::t_d7f2f7e49d2df3 98
+examples/ios/XybridExample/ExtractionView.swift
+  s_7c9b0b269e9595::t_8e3a899efc778b 249-251,253
+docs/content/docs/(integration)/sdks/android.zh.mdx
+  s_7c9b0b269e9595::t_b4b75df88676e8 6,25-26,29,54,60,63-65,147-148
+examples/ios/XybridExample/ContentView.swift
+  s_7c9b0b269e9595::t_8e3a899efc778b 356-358,360
+examples/ios/XybridExample/LiveVision.swift
+  s_7c9b0b269e9595::t_8e3a899efc778b 391-393
+bindings/apple/Sources/Xybrid/Xybrid.swift
+  s_7c9b0b269e9595::t_89662cb07b0a90 272,274,278,280,284,286,290,292
+  s_7c9b0b269e9595::t_aa12cd80dbbab8 149-232
+examples/android/app/src/main/java/ai/xybrid/example/XybridExampleApp.kt
+  s_7c9b0b269e9595::t_ede80700d722cc 20
+  s_7c9b0b269e9595::t_8e3a899efc778b 108
+README.zh-CN.md
+  s_7c9b0b269e9595::t_92ceb35cc73dd9 181-182,199-200
+docs/content/docs/guides/vision-models.mdx
+  s_7c9b0b269e9595::t_ab8311fd07594c 105,108,115,125
+  s_7c9b0b269e9595::t_57228dfb86c9d3 133
+docs/content/docs/quickstart.mdx
+  s_7c9b0b269e9595::t_ab8311fd07594c 70-71,75,101-102,106
+README.ja-JP.md
+  s_7c9b0b269e9595::t_92ceb35cc73dd9 181-182,199-200
+docs/sdk/API_REFERENCE.md
+  s_7c9b0b269e9595::t_d00afe8e443f1d 37-38,49,54-58,110-122,130,133,171-189,201,236,238,243,245,279,281,286,288,1560,1568-1570
+docs/sdk/api-surface.yaml
+  s_7c9b0b269e9595::t_cb51b717c9639c 41,43-44
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "271e47f101b3ccd6433d8e21e12f23ee8533a2de",
+  "prompts": {},
+  "sessions": {
+    "s_7c9b0b269e9595": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019fd187-5e93-7ad1-9146-d65f84c61c22",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
