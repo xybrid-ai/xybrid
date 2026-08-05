@@ -62,7 +62,7 @@ jobs:
       # correct).
       BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
         with:
           submodules: true  # Bazel //:llama_src = vendor/llama-cpp
 
@@ -123,7 +123,7 @@ jobs:
           ls -la bindings/react-native/ios/XybridSwift/
 
       - name: Upload iOS staged artifacts
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: rn-ios-staged
           path: |
@@ -136,15 +136,15 @@ jobs:
     needs: stage-ios
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
 
       - name: Use Node.js
-        uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v4
         with:
           node-version: '20'
 
       - name: Download iOS staged artifacts
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: rn-ios-staged
           path: bindings/react-native/ios/
@@ -170,7 +170,7 @@ jobs:
         run: npm pack
 
       - name: Upload tarball
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: react-native-xybrid-tarball
           path: bindings/react-native/react-native-xybrid-*.tgz
@@ -181,10 +181,10 @@ jobs:
     needs: stage-ios
     runs-on: macos-14
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
 
       - name: Download iOS staged artifacts
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: rn-ios-staged
           path: bindings/react-native/ios/
@@ -220,7 +220,7 @@ jobs:
       # correct), same as before.
       BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
         with:
           submodules: true  # //:llama_src = vendor/llama-cpp (the bolt .so builds via Bazel)
 
@@ -249,18 +249,18 @@ jobs:
           swap-storage: true
 
       - name: Set up JDK 17
-        uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9 # v4
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v4
         with:
           distribution: temurin
           java-version: 17
 
       - name: Use Node.js
-        uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v4
         with:
           node-version: '20'
 
       - name: Setup Android SDK
-        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+        uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4.0.1
         with:
           # Don't install the default `tools` package — it drags in the Android
           # Emulator (~1 GB), whose download flakes ("ZipFile unknown archive").
@@ -321,7 +321,7 @@ jobs:
         run: ./gradlew :app:assembleDebug --no-daemon --stacktrace
 
       - name: Upload example APK
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: xybrid-example-android-debug
           path: bindings/react-native/example/android/app/build/outputs/apk/debug/*.apk
