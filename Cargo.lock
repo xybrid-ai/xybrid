@@ -6217,7 +6217,10 @@ dependencies = [
 name = "xybrid-bolt"
 version = "0.4.1"
 dependencies = [
+ "android_logger",
  "boltffi",
+ "log",
+ "oslog",
  "xybrid-ffi-facade",
  "xybrid-sdk",
 ]
