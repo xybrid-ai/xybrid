@@ -1,0 +1,26 @@
+crates/xybrid-mlx/Cargo.toml
+  s_56e45659c49d26::t_54fceaef6c5edb 6
+  s_56e45659c49d26::t_5c7aa535ffe419 24
+crates/mlx-c-sys/Cargo.toml
+  s_56e45659c49d26::t_76bb02aa07c2b6 6-7
+crates/xybrid-core/Cargo.toml
+  s_56e45659c49d26::t_e77ea6e3ea0233 113
+.github/workflows/release-publish.yml
+  s_56e45659c49d26::t_700b856608de48 252-253
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "dc4befb23fb78f05c962db0e416fec106d7c85b5",
+  "prompts": {},
+  "sessions": {
+    "s_56e45659c49d26": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "87c220f5-c727-4496-bded-5509074d746c",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
