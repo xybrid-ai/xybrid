@@ -1,0 +1,24 @@
+docs/content/docs/guides/device-logs.mdx
+  s_a64fe9de419967::t_b546f61f251e4e 65
+  s_a64fe9de419967::t_0517ff833ca105 62-64
+  s_a64fe9de419967::t_edf497e938d014 66-68
+  s_a64fe9de419967::t_aa0eadeb188362 1-61,69-95
+docs/content/docs/guides/meta.json
+  s_a64fe9de419967::t_f17efc2e488338 6
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "7edbf5c545c442bfa98fdc5d110b896f8078bad5",
+  "prompts": {},
+  "sessions": {
+    "s_a64fe9de419967": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4322caba-5bc8-4b30-8ba1-51b0b8519417",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
