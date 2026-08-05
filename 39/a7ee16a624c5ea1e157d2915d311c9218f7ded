@@ -1,0 +1,56 @@
+bindings/apple/README.md
+  s_baf6bc9578b774::t_06fe3b7006f85f 15,22
+README.md
+  s_baf6bc9578b774::t_06fe3b7006f85f 145,180,219
+README.zh-CN.md
+  s_baf6bc9578b774::t_06fe3b7006f85f 157,192,226
+docs/content/docs/quickstart.zh.mdx
+  s_baf6bc9578b774::t_06fe3b7006f85f 15,57,122,193
+bindings/web/README.md
+  s_baf6bc9578b774::t_3081a4fbc931b1 3
+docs/content/docs/(integration)/sdks/ios.mdx
+  s_baf6bc9578b774::t_06fe3b7006f85f 18
+docs/content/docs/(integration)/sdks/web.mdx
+  s_baf6bc9578b774::t_3081a4fbc931b1 9
+docs/content/docs/(integration)/sdks/flutter.mdx
+  s_baf6bc9578b774::t_06fe3b7006f85f 14
+README.ja-JP.md
+  s_baf6bc9578b774::t_06fe3b7006f85f 157,192,226
+docs/content/docs/(integration)/sdks/web.zh.mdx
+  s_baf6bc9578b774::t_3081a4fbc931b1 9
+docs/content/docs/(integration)/sdks/ios.zh.mdx
+  s_baf6bc9578b774::t_06fe3b7006f85f 18
+docs/content/docs/(integration)/sdks/flutter.zh.mdx
+  s_baf6bc9578b774::t_06fe3b7006f85f 14
+docs/content/docs/quickstart.mdx
+  s_baf6bc9578b774::t_06fe3b7006f85f 15,57,194
+  s_baf6bc9578b774::t_f4c2433942c7fd 122
+bindings/flutter/README.md
+  s_baf6bc9578b774::t_06fe3b7006f85f 18
+bindings/unity/README.md
+  s_3924ee211c2cf7::t_b73ea4b867ed04 45,62
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "39a7ee16a624c5ea1e157d2915d311c9218f7ded",
+  "prompts": {},
+  "sessions": {
+    "s_3924ee211c2cf7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "429e711f-063b-41a5-99f1-ea224e07a4a7",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    },
+    "s_baf6bc9578b774": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1d3f75ba-0807-43dc-a010-9c867134a59d",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
