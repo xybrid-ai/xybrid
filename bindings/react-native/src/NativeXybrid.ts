@@ -19,6 +19,12 @@ export interface Spec extends TurboModule {
 
   // -- Loaders (return opaque handle ID) --
   loadFromRegistry(modelId: string): Promise<string>;
+  // Serve from the cloud gateway while the registry weights download in the
+  // background, instead of blocking on the download. Resolves almost
+  // immediately; the model switches to on-device by itself once the download
+  // lands. Requires a resolvable API key and an uncached model, otherwise it
+  // behaves exactly like `loadFromRegistry`. LLM/chat models only.
+  loadFromRegistrySpeculative(modelId: string): Promise<string>;
   loadFromBundle(path: string): Promise<string>;
   loadFromDirectory(path: string): Promise<string>;
   loadFromHuggingface(repo: string): Promise<string>;
@@ -31,6 +37,17 @@ export interface Spec extends TurboModule {
   // Apple/Kotlin/Flutter `warmup`/`unload` surface.
   warmup(handle: string): Promise<void>;
   unload(handle: string): Promise<void>;
+
+  // -- Speculative cloud --
+  // `isCloudServing` predicts the next run; `InferenceResult.executionTarget`
+  // reports what a run that already happened actually did (they differ when a
+  // cloud leg fails and degrades to local mid-call). `downloadStatus` returns
+  // `{ state, progress }` — poll it for a progress bar. `awaitDownload` blocks
+  // natively until the download settles or the timeout elapses, so JS can
+  // await it once instead of running a timer.
+  isCloudServing(handle: string): Promise<boolean>;
+  downloadStatus(handle: string): Promise<Object>;
+  awaitDownload(handle: string, timeoutMs: number): Promise<Object>;
 
   // -- Inference --
   // `envelope` and `options` cross as Objects; the TS facade narrows to the
@@ -72,6 +89,15 @@ export interface Spec extends TurboModule {
   // `GenerationConfig.grammar`. Rejects on invalid JSON or an unsupported
   // schema construct.
   jsonSchemaToGbnf(schemaJson: string): Promise<string>;
+
+  // -- Cloud gateway configuration --
+  // `setPlatformUrl` takes a bare base URL (the `/v1` suffix is internal) and
+  // is held in memory, not the environment. `setSpeculativeCloud` flips the
+  // global default; prefer `loadFromRegistrySpeculative` per model when the app
+  // also loads ASR/TTS models, which cannot be served from the cloud.
+  setPlatformUrl(url: string): Promise<void>;
+  setSpeculativeCloud(enabled: boolean): Promise<void>;
+  isSpeculativeCloudEnabled(): Promise<boolean>;
 }
 
 export default TurboModuleRegistry.getEnforcing<Spec>('RNXybrid');

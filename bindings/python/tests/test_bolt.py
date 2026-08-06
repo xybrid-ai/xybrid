@@ -120,3 +120,40 @@ def test_envelope_and_run_options_wire_roundtrip() -> None:
 
     assert bolt.XybridEnvelope._decode(reader) == envelope
     assert bolt.XybridRunOptions._decode(reader) == options
+
+
+def test_result_wire_roundtrip_carries_execution_target() -> None:
+    """Provenance rides the wire: cloud fallback keeps the model id identical on
+    both legs, so a decoded result must still say which one answered."""
+
+    result = bolt.XybridResult(
+        envelope=bolt.XybridEnvelope(
+            kind=bolt.XybridEnvelopeKind.text("answer"),
+            metadata=[],
+        ),
+        output_type=bolt.XybridOutputType.TEXT,
+        model_id="lfm2.5-350m",
+        latency_ms=42,
+        execution_target=bolt.XybridExecutionTarget.CLOUD,
+        metrics=bolt.XybridInferenceMetrics(total_ms=42),
+    )
+
+    writer = bolt._WireWriter()
+    result._encode(writer)
+    decoded = bolt.XybridResult._decode(bolt._WireReader(writer.finalize()))
+
+    assert decoded == result
+    assert decoded.execution_target is bolt.XybridExecutionTarget.CLOUD
+
+
+def test_download_status_wire_roundtrip() -> None:
+    status = bolt.XybridDownloadStatus(
+        state=bolt.XybridDownloadState.DOWNLOADING,
+        progress=0.5,
+    )
+
+    writer = bolt._WireWriter()
+    status._encode(writer)
+    decoded = bolt.XybridDownloadStatus._decode(bolt._WireReader(writer.finalize()))
+
+    assert decoded == status

@@ -56,6 +56,7 @@ def test_result_conveniences_on_synthetic_result() -> None:
         output_type=xybrid.XybridOutputType.TEXT,
         model_id="model",
         latency_ms=1234,
+        execution_target=xybrid.XybridExecutionTarget.LOCAL,
         metrics=xybrid.XybridInferenceMetrics(total_ms=1234),
     )
     audio_result = xybrid.XybridResult(
@@ -63,6 +64,7 @@ def test_result_conveniences_on_synthetic_result() -> None:
         output_type=xybrid.XybridOutputType.AUDIO,
         model_id="model",
         latency_ms=10,
+        execution_target=xybrid.XybridExecutionTarget.LOCAL,
         metrics=xybrid.XybridInferenceMetrics(total_ms=10),
     )
     embedding_result = xybrid.XybridResult(
@@ -70,6 +72,7 @@ def test_result_conveniences_on_synthetic_result() -> None:
         output_type=xybrid.XybridOutputType.EMBEDDING,
         model_id="model",
         latency_ms=10,
+        execution_target=xybrid.XybridExecutionTarget.LOCAL,
         metrics=xybrid.XybridInferenceMetrics(total_ms=10),
     )
     failed_result = xybrid.XybridResult(
@@ -77,6 +80,7 @@ def test_result_conveniences_on_synthetic_result() -> None:
         output_type=xybrid.XybridOutputType.UNKNOWN,
         model_id="model",
         latency_ms=0,
+        execution_target=xybrid.XybridExecutionTarget.LOCAL,
         metrics=xybrid.XybridInferenceMetrics(total_ms=0),
     )
 
@@ -103,6 +107,7 @@ def test_result_conveniences_on_synthetic_result() -> None:
         output_type=xybrid.XybridOutputType.UNKNOWN,
         model_id="model",
         latency_ms=1,
+        execution_target=xybrid.XybridExecutionTarget.LOCAL,
         metrics=xybrid.XybridInferenceMetrics(total_ms=1),
     )
     assert mislabeled_audio.audio_bytes == b"pcm"
