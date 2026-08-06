@@ -1,0 +1,45 @@
+bindings/apple/Sources/Xybrid/xybrid_bolt.swift
+  s_d67ab5389ed620::t_850890ed90e28e 715-716,878,931-934
+  s_d67ab5389ed620::t_c85a18cade3969 201-203,206,211,219,226,231-253,656-714,857-877,921-930,935,1002-1024
+  s_d67ab5389ed620::t_62533e4fdcba34 717,879,936,1025
+bindings/kotlin/src/main/kotlin/ai/xybrid/XybridBolt.kt
+  s_d67ab5389ed620::t_850890ed90e28e 1540-1542
+  s_d67ab5389ed620::t_815231b8895d5d 1009-1058,1299-1303,1312,1321,1329,1334-1359,1533-1539,1543-1561,1618-1631,1691-1725,2430-2432,2438,2448-2450
+tools/scripts/gen_unity_bolt_csharp.py
+  s_d67ab5389ed620::t_a910758689ab11 126-130
+bindings/unity/Runtime/Bolt/XybridDownloadState.cs
+  s_d67ab5389ed620::t_9a5ef880c351ee 1-45
+bindings/unity/Runtime/Bolt/XybridExecutionTarget.cs
+  s_d67ab5389ed620::t_9a5ef880c351ee 1-39
+bindings/unity/Runtime/Bolt/XybridExecutionTarget.cs.meta
+  s_d67ab5389ed620::t_9a5ef880c351ee 1-2
+bindings/unity/Runtime/Bolt/XybridDownloadStatus.cs
+  s_d67ab5389ed620::t_9a5ef880c351ee 1-36
+bindings/unity/Runtime/Bolt/XybridModel.cs
+  s_d67ab5389ed620::t_9a5ef880c351ee 33-49,135-181
+  s_d67ab5389ed620::t_9a07c911e41a0a 182
+bindings/apple/include/xybrid-bolt.h
+  s_d67ab5389ed620::t_c85a18cade3969 51-57,66
+bindings/unity/Runtime/Bolt/XybridDownloadState.cs.meta
+  s_d67ab5389ed620::t_9a5ef880c351ee 1-2
+bindings/unity/Runtime/Bolt/XybridDownloadStatus.cs.meta
+  s_d67ab5389ed620::t_9a5ef880c351ee 1-2
+bindings/unity/Runtime/Bolt/XybridBolt.cs
+  s_d67ab5389ed620::t_9a5ef880c351ee 105-134,770-776,792-794,815-821
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "ff654d9a4789445f28c0ea4815ecf2f242a43cf1",
+  "prompts": {},
+  "sessions": {
+    "s_d67ab5389ed620": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6da553e1-7594-40a7-afa4-f47c611638a5",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
