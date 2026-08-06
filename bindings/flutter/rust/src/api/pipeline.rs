@@ -76,6 +76,18 @@ impl FfiPipeline {
             audio_bytes: result.audio_bytes().map(|b| b.to_vec()),
             embedding: result.embedding().map(|e| e.to_vec()),
             latency_ms: result.total_latency_ms,
+            // A pipeline can mix local and cloud stages, so there is no single
+            // provenance for the run: report what the final stage stamped on
+            // the output envelope, defaulting to local.
+            execution_target: match result
+                .output
+                .metadata
+                .get("execution_target")
+                .map(String::as_str)
+            {
+                Some("cloud") => crate::api::result::FfiExecutionTarget::Cloud,
+                _ => crate::api::result::FfiExecutionTarget::Local,
+            },
             metrics: crate::api::result::FfiInferenceMetrics::from_core(&metrics),
         })
     }

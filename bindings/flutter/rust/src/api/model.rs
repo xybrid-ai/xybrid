@@ -483,6 +483,41 @@ pub struct FfiStreamToken {
     pub finish_reason: Option<String>,
 }
 
+/// Lifecycle of the background download behind a speculative load.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FfiDownloadState {
+    /// Weights still downloading; runs are served from the cloud.
+    Downloading,
+    /// Local handle installed; runs are on-device.
+    Ready,
+    /// Download failed — the cloud keeps serving and the model never becomes
+    /// local. Surfacing this is the only way the UI can stop waiting.
+    Failed,
+}
+
+/// Download progress + state in one consistent read, so a polling UI cannot
+/// observe a torn pair (for example `Ready` with a stale 0.34 progress).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FfiDownloadStatus {
+    pub state: FfiDownloadState,
+    /// 0.0 to 1.0.
+    pub progress: f64,
+}
+
+impl FfiDownloadStatus {
+    fn from_sdk(status: xybrid_sdk::DownloadStatus) -> Self {
+        let state = match status.state {
+            xybrid_sdk::DownloadState::Downloading => FfiDownloadState::Downloading,
+            xybrid_sdk::DownloadState::Ready => FfiDownloadState::Ready,
+            xybrid_sdk::DownloadState::Failed => FfiDownloadState::Failed,
+        };
+        Self {
+            state,
+            progress: status.progress as f64,
+        }
+    }
+}
+
 /// FFI wrapper for ModelLoader (preparatory step before loading).
 #[frb(opaque)]
 pub struct FfiModelLoader(ModelLoader);
@@ -513,6 +548,26 @@ impl FfiModelLoader {
     #[frb(sync)]
     pub fn from_registry(model_id: String) -> FfiModelLoader {
         FfiModelLoader(ModelLoader::from_registry(&model_id))
+    }
+
+    /// Loader that serves from the cloud gateway while the registry weights
+    /// download in the background, instead of blocking on the download.
+    ///
+    /// `load()` then returns almost immediately with a cloud-backed model that
+    /// switches to on-device by itself once the download lands. Requires a
+    /// resolvable API key and an uncached model — otherwise this behaves
+    /// exactly like [`Self::from_registry`], which [`Self::will_speculate`]
+    /// reports. LLM/chat models only.
+    #[frb(sync)]
+    pub fn from_registry_speculative(model_id: String) -> FfiModelLoader {
+        FfiModelLoader(ModelLoader::from_registry(&model_id).with_speculative_cloud(true))
+    }
+
+    /// Whether `load()` would actually speculate: enabled, an API key
+    /// resolves, and the model is not already cached. Never hits the network.
+    #[frb(sync)]
+    pub fn will_speculate(&self) -> bool {
+        self.0.will_speculate()
     }
 
     #[frb(sync)]
@@ -579,6 +634,63 @@ impl FfiModelLoader {
 }
 
 impl FfiModel {
+    /// Whether runs are currently answered by the cloud because the local
+    /// weights are not ready yet. `false` for ordinary local models.
+    ///
+    /// This predicts the *next* run; `FfiResult.executionTarget` reports what a
+    /// run that already happened actually did. They differ when a cloud leg
+    /// fails and degrades to local mid-call.
+    #[frb(sync)]
+    pub fn is_cloud_serving(&self) -> bool {
+        self.0.is_cloud_serving()
+    }
+
+    /// Download progress + state in one consistent read.
+    ///
+    /// Reports `Ready` at 1.0 for an ordinary local model, so the UI needs no
+    /// special case. Prefer [`Self::download_progress`] to be pushed updates
+    /// rather than polling.
+    #[frb(sync)]
+    pub fn download_status(&self) -> FfiDownloadStatus {
+        FfiDownloadStatus::from_sdk(self.0.download_status())
+    }
+
+    /// Stream download progress for a speculatively-loaded model until it
+    /// reaches a terminal state.
+    ///
+    /// Flutter keeps a push API here (other bindings poll) because
+    /// flutter_rust_bridge stream sinks are safe — unlike the bolt closure ABI
+    /// the native bindings must avoid. Emits `Progress` while downloading, then
+    /// exactly one `Complete` or `Error`. Returns immediately for a model that
+    /// is already local.
+    pub fn download_progress(&self, sink: StreamSink<FfiLoadEvent>) {
+        let model = Arc::clone(&self.0);
+        std::thread::spawn(move || {
+            loop {
+                // Bounded wait: wakes as soon as the download finishes, but
+                // still ticks often enough to animate a progress bar.
+                let status = model.await_download(250);
+                match status.state {
+                    xybrid_sdk::DownloadState::Downloading => {
+                        let _ = sink.add(FfiLoadEvent::Progress(status.progress as f64));
+                    }
+                    xybrid_sdk::DownloadState::Ready => {
+                        let _ = sink.add(FfiLoadEvent::Progress(1.0));
+                        let _ = sink.add(FfiLoadEvent::Complete);
+                        break;
+                    }
+                    xybrid_sdk::DownloadState::Failed => {
+                        let _ = sink.add(FfiLoadEvent::Error(
+                            "speculative model download failed; still serving from cloud"
+                                .to_string(),
+                        ));
+                        break;
+                    }
+                }
+            }
+        });
+    }
+
     /// Run batch inference (non-streaming).
     ///
     /// Pass an optional `config` to control generation parameters.

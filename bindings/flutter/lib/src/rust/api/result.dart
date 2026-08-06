@@ -10,8 +10,18 @@
 import '../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `from_core`, `from_core`, `from_inference_result`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`
+// These functions are ignored because they are not marked as `pub`: `from_core`, `from_core`, `from_inference_result`, `from_sdk`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `eq`, `fmt`
+
+/// Where a result was produced — the observed fact, not a routing preference.
+///
+/// Cloud fallback (speculative or reactive) keeps the model id identical on
+/// both legs by design, so this is the only way to tell them apart.
+enum FfiExecutionTarget {
+  local,
+  cloud,
+  ;
+}
 
 /// Typed inference metrics.
 ///
@@ -78,6 +88,9 @@ class FfiResult {
   final Uint8List? audioBytes;
   final Float32List? embedding;
   final int latencyMs;
+
+  /// Whether this answer came from the device or the cloud gateway.
+  final FfiExecutionTarget executionTarget;
   final FfiInferenceMetrics metrics;
 
   const FfiResult({
@@ -87,6 +100,7 @@ class FfiResult {
     this.audioBytes,
     this.embedding,
     required this.latencyMs,
+    required this.executionTarget,
     required this.metrics,
   });
 
@@ -98,6 +112,7 @@ class FfiResult {
       audioBytes.hashCode ^
       embedding.hashCode ^
       latencyMs.hashCode ^
+      executionTarget.hashCode ^
       metrics.hashCode;
 
   @override
@@ -111,6 +126,7 @@ class FfiResult {
           audioBytes == other.audioBytes &&
           embedding == other.embedding &&
           latencyMs == other.latencyMs &&
+          executionTarget == other.executionTarget &&
           metrics == other.metrics;
 }
 

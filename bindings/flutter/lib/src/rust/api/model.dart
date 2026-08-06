@@ -16,9 +16,9 @@ import 'result.dart';
 import 'streaming.dart';
 part 'model.freezed.dart';
 
-// These functions are ignored because they are not marked as `pub`: `apply_cloud_fallback_metadata`, `is_debug_gateway_host`, `is_ipv6_link_local`, `is_ipv6_unique_local`, `is_v1_gateway_base`, `is_xybrid_gateway_host`, `non_empty`, `normalize_gateway_url`, `should_cancel_on_sink_close`, `streaming_run_options`, `to_facade`, `to_facade`, `to_sdk_over`, `to_sdk_with_cancellation_over`, `validate_cloud_gateway_url`, `validated_cloud_gateway_url`
+// These functions are ignored because they are not marked as `pub`: `apply_cloud_fallback_metadata`, `from_sdk`, `is_debug_gateway_host`, `is_ipv6_link_local`, `is_ipv6_unique_local`, `is_v1_gateway_base`, `is_xybrid_gateway_host`, `non_empty`, `normalize_gateway_url`, `should_cancel_on_sink_close`, `streaming_run_options`, `to_facade`, `to_facade`, `to_sdk_over`, `to_sdk_with_cancellation_over`, `validate_cloud_gateway_url`, `validated_cloud_gateway_url`
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `FlutterFallbackResourceProvider`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `clone`, `clone`, `current_snapshot`, `fmt`, `from`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `current_snapshot`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `from`
 
 /// Convert a JSON Schema (as a JSON string) into a GBNF grammar for
 /// [`FfiGenerationConfig::grammar`].
@@ -50,6 +50,31 @@ abstract class FfiCancellationToken implements RustOpaqueInterface {
 
 // Rust type: RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiModel>>
 abstract class FfiModel implements RustOpaqueInterface {
+  /// Stream download progress for a speculatively-loaded model until it
+  /// reaches a terminal state.
+  ///
+  /// Flutter keeps a push API here (other bindings poll) because
+  /// flutter_rust_bridge stream sinks are safe — unlike the bolt closure ABI
+  /// the native bindings must avoid. Emits `Progress` while downloading, then
+  /// exactly one `Complete` or `Error`. Returns immediately for a model that
+  /// is already local.
+  Stream<FfiLoadEvent> downloadProgress();
+
+  /// Download progress + state in one consistent read.
+  ///
+  /// Reports `Ready` at 1.0 for an ordinary local model, so the UI needs no
+  /// special case. Prefer [`Self::download_progress`] to be pushed updates
+  /// rather than polling.
+  FfiDownloadStatus downloadStatus();
+
+  /// Whether runs are currently answered by the cloud because the local
+  /// weights are not ready yet. `false` for ordinary local models.
+  ///
+  /// This predicts the *next* run; `FfiResult.executionTarget` reports what a
+  /// run that already happened actually did. They differ when a cloud leg
+  /// fails and degrades to local mid-call.
+  bool isCloudServing();
+
   /// Run batch inference (non-streaming).
   ///
   /// Pass an optional `config` to control generation parameters.
@@ -226,6 +251,18 @@ abstract class FfiModelLoader implements RustOpaqueInterface {
       XybridRustLib.instance.api
           .crateApiModelFfiModelLoaderFromRegistry(modelId: modelId);
 
+  /// Loader that serves from the cloud gateway while the registry weights
+  /// download in the background, instead of blocking on the download.
+  ///
+  /// `load()` then returns almost immediately with a cloud-backed model that
+  /// switches to on-device by itself once the download lands. Requires a
+  /// resolvable API key and an uncached model — otherwise this behaves
+  /// exactly like [`Self::from_registry`], which [`Self::will_speculate`]
+  /// reports. LLM/chat models only.
+  static FfiModelLoader fromRegistrySpeculative({required String modelId}) =>
+      XybridRustLib.instance.api
+          .crateApiModelFfiModelLoaderFromRegistrySpeculative(modelId: modelId);
+
   /// Load the model without progress updates.
   Future<FfiModel> load();
 
@@ -238,6 +275,49 @@ abstract class FfiModelLoader implements RustOpaqueInterface {
   ///
   /// After receiving `Complete`, call `load()` to get the cached model instantly.
   Stream<FfiLoadEvent> loadWithProgress();
+
+  /// Whether `load()` would actually speculate: enabled, an API key
+  /// resolves, and the model is not already cached. Never hits the network.
+  bool willSpeculate();
+}
+
+/// Lifecycle of the background download behind a speculative load.
+enum FfiDownloadState {
+  /// Weights still downloading; runs are served from the cloud.
+  downloading,
+
+  /// Local handle installed; runs are on-device.
+  ready,
+
+  /// Download failed — the cloud keeps serving and the model never becomes
+  /// local. Surfacing this is the only way the UI can stop waiting.
+  failed,
+  ;
+}
+
+/// Download progress + state in one consistent read, so a polling UI cannot
+/// observe a torn pair (for example `Ready` with a stale 0.34 progress).
+class FfiDownloadStatus {
+  final FfiDownloadState state;
+
+  /// 0.0 to 1.0.
+  final double progress;
+
+  const FfiDownloadStatus({
+    required this.state,
+    required this.progress,
+  });
+
+  @override
+  int get hashCode => state.hashCode ^ progress.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FfiDownloadStatus &&
+          runtimeType == other.runtimeType &&
+          state == other.state &&
+          progress == other.progress;
 }
 
 /// Generation parameters for LLM inference.

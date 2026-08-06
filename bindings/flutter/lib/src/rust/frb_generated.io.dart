@@ -263,6 +263,15 @@ abstract class XybridRustLibApiImplPlatform
   double dco_decode_f_64(dynamic raw);
 
   @protected
+  FfiDownloadState dco_decode_ffi_download_state(dynamic raw);
+
+  @protected
+  FfiDownloadStatus dco_decode_ffi_download_status(dynamic raw);
+
+  @protected
+  FfiExecutionTarget dco_decode_ffi_execution_target(dynamic raw);
+
+  @protected
   FfiGenerationConfig dco_decode_ffi_generation_config(dynamic raw);
 
   @protected
@@ -617,6 +626,17 @@ abstract class XybridRustLibApiImplPlatform
 
   @protected
   double sse_decode_f_64(SseDeserializer deserializer);
+
+  @protected
+  FfiDownloadState sse_decode_ffi_download_state(SseDeserializer deserializer);
+
+  @protected
+  FfiDownloadStatus sse_decode_ffi_download_status(
+      SseDeserializer deserializer);
+
+  @protected
+  FfiExecutionTarget sse_decode_ffi_execution_target(
+      SseDeserializer deserializer);
 
   @protected
   FfiGenerationConfig sse_decode_ffi_generation_config(
@@ -987,6 +1007,18 @@ abstract class XybridRustLibApiImplPlatform
 
   @protected
   void sse_encode_f_64(double self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_ffi_download_state(
+      FfiDownloadState self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_ffi_download_status(
+      FfiDownloadStatus self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_ffi_execution_target(
+      FfiExecutionTarget self, SseSerializer serializer);
 
   @protected
   void sse_encode_ffi_generation_config(
