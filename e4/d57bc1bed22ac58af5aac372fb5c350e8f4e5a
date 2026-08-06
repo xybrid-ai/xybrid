@@ -1,0 +1,45 @@
+bindings/flutter/lib/src/rust/frb_generated.dart
+  s_d67ab5389ed620::t_02e47b332d1b7b 83,184-186,193-202,307-308,318-322,1202-1228,1238,1268,1287-1393,1408,1448,1509,1567,1612,1648,1676,1703,1729,1753,1778,1803,1829,1858,1883,1909,1936,1963,1990,2019,2043,2067,2090,2114,2137,2161,2186,2213,2238,2265,2291,2316,2334-2358,2364,2389,2413,2438,2456-2505,2511,2534,2558,2991-3014,3139-3140,3148-3149,3854-3877,4027,4036,4878-4899,5008,5570-5603,5833-5839
+bindings/flutter/lib/src/rust/frb_generated.io.dart
+  s_d67ab5389ed620::t_02e47b332d1b7b 265-273,630-640,1011-1021
+  s_d67ab5389ed620::t_978b5bd53e3e23 1022
+bindings/flutter/rust/src/api/sdk_client.rs
+  s_d67ab5389ed620::t_24c57d6f45de3f 88-115
+bindings/flutter/lib/src/rust/api/model.dart
+  s_d67ab5389ed620::t_02e47b332d1b7b 19,21,53-77,254-265,278-320
+bindings/flutter/lib/src/rust/frb_generated.web.dart
+  s_d67ab5389ed620::t_02e47b332d1b7b 267-275,632-642,1013-1023
+  s_d67ab5389ed620::t_9373570c3994ab 1024
+bindings/flutter/rust/src/frb_generated.rs
+  s_d67ab5389ed620::t_02e47b332d1b7b 47,1239-1270,1385-1583,3035-3065,3192-3255,3644-3680,3864-3865,3874,4363-4370,4376-4378,4384,4390,4393,4399-4403,4409,4415,4515-4542,4547,4552,4557,4562,4567,4572,4577,4582,4587,4592,4597,4602,4607,4612,4617,4622,4627-4632,4635,4785-4848,5085,5622-5662,5812
+bindings/flutter/rust/src/api/pipeline.rs
+  s_d67ab5389ed620::t_e0825c1ca11848 79-90
+bindings/flutter/lib/src/rust/api/result.dart
+  s_d67ab5389ed620::t_02e47b332d1b7b 13-24,91-93,103,115,129
+bindings/flutter/rust/src/api/model.rs
+  s_d67ab5389ed620::t_7c8735dc2b3dee 553-572
+  s_d67ab5389ed620::t_bce5362ddd6e67 637-693
+  s_d67ab5389ed620::t_7787f6dc23c513 486-520
+bindings/flutter/rust/src/api/result.rs
+  s_d67ab5389ed620::t_b25409981cbd26 72-73
+  s_d67ab5389ed620::t_8255e7bfc2a96e 86,91-106,109
+  s_d67ab5389ed620::t_4322b63f73bf98 107-108
+bindings/flutter/lib/src/rust/api/sdk_client.dart
+  s_d67ab5389ed620::t_02e47b332d1b7b 74-77,98-116
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "e4d57bc1bed22ac58af5aac372fb5c350e8f4e5a",
+  "prompts": {},
+  "sessions": {
+    "s_d67ab5389ed620": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6da553e1-7594-40a7-afa4-f47c611638a5",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
