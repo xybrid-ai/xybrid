@@ -31,6 +31,23 @@ namespace XybridBolt
         }
 
         /// <summary>
+        /// Load from the registry, serving from the cloud gateway while the weights
+        /// download in the background.
+        ///
+        /// Returns almost immediately instead of blocking on the download. Requires
+        /// a resolvable API key and an uncached model; otherwise it behaves exactly
+        /// like `from_registry`. Poll `download_status` for progress and
+        /// `is_cloud_serving` to know which leg is answering. LLM/chat models only.
+        /// </summary>
+        public static XybridModel FromRegistrySpeculative(string id)
+        {
+            byte[] _idBytes = Encoding.UTF8.GetBytes(id);
+            IntPtr _handle = NativeMethods.XybridModelFromRegistrySpeculative(_idBytes, (UIntPtr)_idBytes.Length);
+            if (_handle == IntPtr.Zero) throw new BoltException(NativeMethods.TakeLastErrorMessage("Factory constructor failed"));
+            return new XybridModel(_handle);
+        }
+
+        /// <summary>
         /// Load from a local model directory (must contain `model_metadata.json`).
         /// </summary>
         public static XybridModel FromDirectory(string path)
@@ -113,6 +130,54 @@ namespace XybridBolt
         {
             ThrowIfDisposed();
             return NativeMethods.XybridModelIsLoaded(_handle);
+        }
+
+        /// <summary>
+        /// Whether runs are currently answered by the cloud because the local
+        /// weights are not ready yet. `false` for ordinary local models.
+        /// </summary>
+        public bool IsCloudServing()
+        {
+            ThrowIfDisposed();
+            return NativeMethods.XybridModelIsCloudServing(_handle);
+        }
+
+        /// <summary>
+        /// Download progress + state in one read — poll this to drive a progress
+        /// bar. Reports `Ready` at 1.0 for an ordinary local model, so hosts need
+        /// no special case.
+        /// </summary>
+        public XybridDownloadStatus DownloadStatus()
+        {
+            ThrowIfDisposed();
+            FfiBuf _buf = NativeMethods.XybridModelDownloadStatus(_handle);
+            try
+            {
+                return XybridDownloadStatus.Decode(new WireReader(_buf));
+            }
+            finally
+            {
+                NativeMethods.FreeBuf(_buf);
+            }
+        }
+
+        /// <summary>
+        /// Block until the download finishes or `timeout_ms` elapses, then report
+        /// the status. Call it off the UI thread (the same place `from_registry` is
+        /// already called). `timeout_ms = 0` makes it a non-blocking read.
+        /// </summary>
+        public XybridDownloadStatus AwaitDownload(ulong timeoutMs)
+        {
+            ThrowIfDisposed();
+            FfiBuf _buf = NativeMethods.XybridModelAwaitDownload(_handle, timeoutMs);
+            try
+            {
+                return XybridDownloadStatus.Decode(new WireReader(_buf));
+            }
+            finally
+            {
+                NativeMethods.FreeBuf(_buf);
+            }
         }
 
         public bool SupportsStreaming()

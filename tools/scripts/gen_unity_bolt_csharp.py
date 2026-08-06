@@ -123,7 +123,11 @@ RECORD_STRUCT_RE = re.compile(
     r"public readonly record struct (?P<name>\w+)\((?P<params>[^)]*)\)\s*\{",
     re.DOTALL,
 )
-EXPECTED_RECORD_STRUCTS = 8
+# 9 since the speculative-cloud surface added XybridDownloadStatus (the
+# download progress + state snapshot hosts poll while a model streams from the
+# gateway). Bump this deliberately: the count is a tripwire for unreviewed
+# boltffi output drift, not a value to auto-sync.
+EXPECTED_RECORD_STRUCTS = 9
 
 # --- Transform (b): .NET 5 float LE writers -> netstandard2.1-safe equivalents.
 # BinaryPrimitives has the integer LE writers in netstandard2.1 but not the

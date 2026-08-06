@@ -103,6 +103,36 @@ namespace XybridBolt
         }
 
         /// <summary>
+        /// Point the cloud gateway at a platform base URL (staging, self-hosted).
+        /// Pass a bare base URL — the `/v1` suffix is applied internally.
+        /// </summary>
+        public static void SetPlatformUrl(string url)
+        {
+            byte[] _urlBytes = Encoding.UTF8.GetBytes(url);
+            NativeMethods.SetPlatformUrl(_urlBytes, (UIntPtr)_urlBytes.Length);
+        }
+
+        /// <summary>
+        /// Enable speculative cloud fallback globally: a registry model that isn't
+        /// downloaded yet is served from the gateway while the weights download.
+        ///
+        /// LLM/chat only — prefer `XybridModel.fromRegistrySpeculative` when the app
+        /// also loads ASR/TTS models, which cannot be served this way.
+        /// </summary>
+        public static void SetSpeculativeCloud(bool enabled)
+        {
+            NativeMethods.SetSpeculativeCloud(enabled);
+        }
+
+        /// <summary>
+        /// Whether the global speculative-cloud default is on.
+        /// </summary>
+        public static bool IsSpeculativeCloudEnabled()
+        {
+            return NativeMethods.IsSpeculativeCloudEnabled();
+        }
+
+        /// <summary>
         /// The SDK version string (tracks `CARGO_PKG_VERSION`).
         /// </summary>
         public static string Version()
@@ -737,6 +767,13 @@ namespace XybridBolt
         internal static extern void SetApiKey(byte[] apiKey, UIntPtr apiKeyLen);
         [DllImport(LibName, EntryPoint = "boltffi_set_provider_api_key")]
         internal static extern void SetProviderApiKey(byte[] provider, UIntPtr providerLen, byte[] apiKey, UIntPtr apiKeyLen);
+        [DllImport(LibName, EntryPoint = "boltffi_set_platform_url")]
+        internal static extern void SetPlatformUrl(byte[] url, UIntPtr urlLen);
+        [DllImport(LibName, EntryPoint = "boltffi_set_speculative_cloud")]
+        internal static extern void SetSpeculativeCloud([MarshalAs(UnmanagedType.I1)] bool enabled);
+        [DllImport(LibName, EntryPoint = "boltffi_is_speculative_cloud_enabled")]
+        [return: MarshalAs(UnmanagedType.I1)]
+        internal static extern bool IsSpeculativeCloudEnabled();
         [DllImport(LibName, EntryPoint = "boltffi_version")]
         internal static extern FfiBuf Version();
         [DllImport(LibName, EntryPoint = "boltffi_telemetry_default_endpoint")]
@@ -751,6 +788,9 @@ namespace XybridBolt
 
         [DllImport(LibName, EntryPoint = "boltffi_xybrid_model_from_registry")]
         internal static extern IntPtr XybridModelFromRegistry(byte[] id, UIntPtr idLen);
+
+        [DllImport(LibName, EntryPoint = "boltffi_xybrid_model_from_registry_speculative")]
+        internal static extern IntPtr XybridModelFromRegistrySpeculative(byte[] id, UIntPtr idLen);
 
         [DllImport(LibName, EntryPoint = "boltffi_xybrid_model_from_directory")]
         internal static extern IntPtr XybridModelFromDirectory(byte[] path, UIntPtr pathLen);
@@ -772,6 +812,13 @@ namespace XybridBolt
         [DllImport(LibName, EntryPoint = "boltffi_xybrid_model_is_loaded")]
         [return: MarshalAs(UnmanagedType.I1)]
         internal static extern bool XybridModelIsLoaded(IntPtr self);
+        [DllImport(LibName, EntryPoint = "boltffi_xybrid_model_is_cloud_serving")]
+        [return: MarshalAs(UnmanagedType.I1)]
+        internal static extern bool XybridModelIsCloudServing(IntPtr self);
+        [DllImport(LibName, EntryPoint = "boltffi_xybrid_model_download_status")]
+        internal static extern FfiBuf XybridModelDownloadStatus(IntPtr self);
+        [DllImport(LibName, EntryPoint = "boltffi_xybrid_model_await_download")]
+        internal static extern FfiBuf XybridModelAwaitDownload(IntPtr self, ulong timeoutMs);
         [DllImport(LibName, EntryPoint = "boltffi_xybrid_model_supports_streaming")]
         [return: MarshalAs(UnmanagedType.I1)]
         internal static extern bool XybridModelSupportsStreaming(IntPtr self);

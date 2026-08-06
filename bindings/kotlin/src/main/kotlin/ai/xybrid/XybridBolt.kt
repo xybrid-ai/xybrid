@@ -1006,6 +1006,56 @@ enum class XybridOutputType(val value: Int) {
     }
 }
 
+/**
+ * Where a result was produced — observed fact, not a routing preference.
+ */
+enum class XybridExecutionTarget(val value: Int) {
+    LOCAL(0),
+    CLOUD(1);
+
+    companion object {
+        fun fromValue(value: Int): XybridExecutionTarget = entries.first { it.value == value }
+        fun fromWireTag(tag: Int): XybridExecutionTarget = entries.getOrElse(tag) {
+            throw FfiException(-1, "Unknown XybridExecutionTarget wire tag: $tag")
+        }
+
+        fun decode(reader: WireReader): XybridExecutionTarget = fromWireTag(reader.readI32())
+    }
+
+    fun wireTag(): Int = ordinal
+
+    fun wireEncodeTo(wire: WireWriter) {
+        wire.writeI32(wireTag())
+    }
+}
+
+/**
+ * Lifecycle of the background download behind a speculative load.
+ */
+enum class XybridDownloadState(val value: Int) {
+    DOWNLOADING(0),
+    READY(1),
+    /**
+     * Download failed; the cloud keeps serving and `isLoaded` never flips.
+     */
+    FAILED(2);
+
+    companion object {
+        fun fromValue(value: Int): XybridDownloadState = entries.first { it.value == value }
+        fun fromWireTag(tag: Int): XybridDownloadState = entries.getOrElse(tag) {
+            throw FfiException(-1, "Unknown XybridDownloadState wire tag: $tag")
+        }
+
+        fun decode(reader: WireReader): XybridDownloadState = fromWireTag(reader.readI32())
+    }
+
+    fun wireTag(): Int = ordinal
+
+    fun wireEncodeTo(wire: WireWriter) {
+        wire.writeI32(wireTag())
+    }
+}
+
 enum class XybridStreamEventKind(val value: Int) {
     TOKEN(0),
     COMPLETE(1);
@@ -1246,6 +1296,11 @@ data class XybridResult(
     val outputType: XybridOutputType,
     val modelId: String,
     val latencyMs: UInt,
+    /**
+     * Where the answer actually came from. Cloud fallback keeps `model_id`
+     * identical on both legs, so this is the only way to tell them apart.
+     */
+    val executionTarget: XybridExecutionTarget,
     val metrics: XybridInferenceMetrics
 ) {
     companion object {
@@ -1254,6 +1309,7 @@ data class XybridResult(
             XybridOutputType.decode(reader),
             reader.readString(),
             reader.readU32(),
+            XybridExecutionTarget.decode(reader),
             XybridInferenceMetrics.decode(reader)
         )
     }
@@ -1262,6 +1318,7 @@ data class XybridResult(
         4 +
         (4 + Utf8Codec.maxBytes(modelId)) +
         4 +
+        4 +
         metrics.wireEncodedSize()
 
     fun wireEncodeTo(wire: WireWriter) {
@@ -1269,7 +1326,34 @@ data class XybridResult(
         outputType.wireEncodeTo(wire)
         wire.writeString(modelId)
         wire.writeU32(latencyMs)
+        executionTarget.wireEncodeTo(wire)
         metrics.wireEncodeTo(wire)
+    }
+}
+
+/**
+ * Download progress + state in one consistent read.
+ */
+data class XybridDownloadStatus(
+    val state: XybridDownloadState,
+    /**
+     * 0.0..=1.0.
+     */
+    val progress: Float
+) {
+    companion object {
+        fun decode(reader: WireReader): XybridDownloadStatus = XybridDownloadStatus(
+            XybridDownloadState.decode(reader),
+            reader.readF32()
+        )
+    }
+    fun wireEncodedSize(): Int =
+        4 +
+        4
+
+    fun wireEncodeTo(wire: WireWriter) {
+        state.wireEncodeTo(wire)
+        wire.writeF32(progress)
     }
 }
 
@@ -1447,6 +1531,35 @@ fun setProviderApiKey(provider: String, apiKey: String) {
 }
 
 /**
+ * Point the cloud gateway at a platform base URL (staging, self-hosted).
+ * Pass a bare base URL — the `/v1` suffix is applied internally.
+ */
+
+fun setPlatformUrl(url: String) {
+    Native.boltffi_set_platform_url(url.toByteArray(Charsets.UTF_8))
+}
+
+/**
+ * Enable speculative cloud fallback globally: a registry model that isn't
+ * downloaded yet is served from the gateway while the weights download.
+ *
+ * LLM/chat only — prefer `XybridModel.fromRegistrySpeculative` when the app
+ * also loads ASR/TTS models, which cannot be served this way.
+ */
+
+fun setSpeculativeCloud(enabled: Boolean) {
+    Native.boltffi_set_speculative_cloud(enabled)
+}
+
+/**
+ * Whether the global speculative-cloud default is on.
+ */
+
+fun isSpeculativeCloudEnabled(): Boolean {
+    return Native.boltffi_is_speculative_cloud_enabled()
+}
+
+/**
  * The SDK version string (tracks `CARGO_PKG_VERSION`).
  */
 
@@ -1502,6 +1615,20 @@ class XybridModel private constructor(internal val handle: Long) : AutoCloseable
     }
 
     companion object {
+        /**
+         * Load from the registry, serving from the cloud gateway while the weights
+         * download in the background.
+         *
+         * Returns almost immediately instead of blocking on the download. Requires
+         * a resolvable API key and an uncached model; otherwise it behaves exactly
+         * like `from_registry`. Poll `download_status` for progress and
+         * `is_cloud_serving` to know which leg is answering. LLM/chat models only.
+         */
+        fun fromRegistrySpeculative(id: String): XybridModel {
+            val handle = Native.boltffi_xybrid_model_from_registry_speculative(id.toByteArray(Charsets.UTF_8))
+            if (handle == 0L) throw FfiException(1, takeLastErrorMessage())
+            return XybridModel(handle)
+        }
         /**
          * Load from a local model directory (must contain `model_metadata.json`).
          */
@@ -1559,6 +1686,41 @@ class XybridModel private constructor(internal val handle: Long) : AutoCloseable
 
     fun isLoaded(): Boolean {
         return Native.boltffi_xybrid_model_is_loaded(handle)
+    }
+
+    /**
+     * Whether runs are currently answered by the cloud because the local
+     * weights are not ready yet. `false` for ordinary local models.
+     */
+
+    fun isCloudServing(): Boolean {
+        return Native.boltffi_xybrid_model_is_cloud_serving(handle)
+    }
+
+    /**
+     * Download progress + state in one read — poll this to drive a progress
+     * bar. Reports `Ready` at 1.0 for an ordinary local model, so hosts need
+     * no special case.
+     */
+
+    fun downloadStatus(): XybridDownloadStatus {
+        val buf = Native.boltffi_xybrid_model_download_status(handle)
+            ?: throw FfiException(-1, "Null buffer returned")
+        val reader = WireReader(buf)
+        return XybridDownloadStatus.decode(reader)
+    }
+
+    /**
+     * Block until the download finishes or `timeout_ms` elapses, then report
+     * the status. Call it off the UI thread (the same place `from_registry` is
+     * already called). `timeout_ms = 0` makes it a non-blocking read.
+     */
+
+    fun awaitDownload(timeoutMs: ULong): XybridDownloadStatus {
+        val buf = Native.boltffi_xybrid_model_await_download(handle, timeoutMs.toLong())
+            ?: throw FfiException(-1, "Null buffer returned")
+        val reader = WireReader(buf)
+        return XybridDownloadStatus.decode(reader)
     }
 
 
@@ -2265,11 +2427,15 @@ private object Native {
     @JvmStatic external fun boltffi_set_binding(binding: ByteArray): Unit
     @JvmStatic external fun boltffi_set_api_key(api_key: ByteArray): Unit
     @JvmStatic external fun boltffi_set_provider_api_key(provider: ByteArray, api_key: ByteArray): Unit
+    @JvmStatic external fun boltffi_set_platform_url(url: ByteArray): Unit
+    @JvmStatic external fun boltffi_set_speculative_cloud(enabled: Boolean): Unit
+    @JvmStatic external fun boltffi_is_speculative_cloud_enabled(): Boolean
     @JvmStatic external fun boltffi_version(): String?
     @JvmStatic external fun boltffi_telemetry_default_endpoint(): String?
     @JvmStatic external fun boltffi_telemetry_flush(): Unit
     @JvmStatic external fun boltffi_telemetry_shutdown(): Unit
     @JvmStatic external fun boltffi_xybrid_model_from_registry(id: ByteArray): Long
+    @JvmStatic external fun boltffi_xybrid_model_from_registry_speculative(id: ByteArray): Long
     @JvmStatic external fun boltffi_xybrid_model_from_directory(path: ByteArray): Long
     @JvmStatic external fun boltffi_xybrid_model_from_bundle(path: ByteArray): Long
     @JvmStatic external fun boltffi_xybrid_model_from_huggingface(repo: ByteArray): Long
@@ -2279,6 +2445,9 @@ private object Native {
     @JvmStatic external fun boltffi_xybrid_model_version(handle: Long): String?
     @JvmStatic external fun boltffi_xybrid_model_output_type(handle: Long): Int
     @JvmStatic external fun boltffi_xybrid_model_is_loaded(handle: Long): Boolean
+    @JvmStatic external fun boltffi_xybrid_model_is_cloud_serving(handle: Long): Boolean
+    @JvmStatic external fun boltffi_xybrid_model_download_status(handle: Long): ByteArray?
+    @JvmStatic external fun boltffi_xybrid_model_await_download(handle: Long, timeout_ms: Long): ByteArray?
     @JvmStatic external fun boltffi_xybrid_model_supports_streaming(handle: Long): Boolean
     @JvmStatic external fun boltffi_xybrid_model_supports_token_streaming(handle: Long): Boolean
     @JvmStatic external fun boltffi_xybrid_model_is_llm(handle: Long): Boolean

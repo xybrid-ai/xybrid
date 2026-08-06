@@ -198,13 +198,17 @@ public struct XybridResult: Hashable, Equatable, Sendable {
     public var outputType: XybridOutputType
     public var modelId: String
     public var latencyMs: UInt32
+    /// Where the answer actually came from. Cloud fallback keeps `model_id`
+    /// identical on both legs, so this is the only way to tell them apart.
+    public var executionTarget: XybridExecutionTarget
     public var metrics: XybridInferenceMetrics
 
-    public init(envelope: XybridEnvelope, outputType: XybridOutputType, modelId: String, latencyMs: UInt32, metrics: XybridInferenceMetrics) {
+    public init(envelope: XybridEnvelope, outputType: XybridOutputType, modelId: String, latencyMs: UInt32, executionTarget: XybridExecutionTarget, metrics: XybridInferenceMetrics) {
         self.envelope = envelope
         self.outputType = outputType
         self.modelId = modelId
         self.latencyMs = latencyMs
+        self.executionTarget = executionTarget
         self.metrics = metrics
     }
 
@@ -212,14 +216,38 @@ public struct XybridResult: Hashable, Equatable, Sendable {
 
 extension XybridResult: WireCodable {
     @inlinable static func decode(from reader: inout WireReader) -> XybridResult {
-        XybridResult(envelope: XybridEnvelope.decode(from: &reader), outputType: XybridOutputType(wireTag: reader.readI32()), modelId: reader.readString(), latencyMs: reader.readU32(), metrics: XybridInferenceMetrics.decode(from: &reader))
+        XybridResult(envelope: XybridEnvelope.decode(from: &reader), outputType: XybridOutputType(wireTag: reader.readI32()), modelId: reader.readString(), latencyMs: reader.readU32(), executionTarget: XybridExecutionTarget(wireTag: reader.readI32()), metrics: XybridInferenceMetrics.decode(from: &reader))
     }
     @inlinable func encode(to writer: inout WireWriter) {
         self.envelope.encode(to: &writer)
         writer.writeI32(self.outputType.wireTag)
         writer.writeString(self.modelId)
         writer.writeU32(self.latencyMs)
+        writer.writeI32(self.executionTarget.wireTag)
         self.metrics.encode(to: &writer)
+    }
+}
+
+/// Download progress + state in one consistent read.
+public struct XybridDownloadStatus: Hashable, Equatable, Sendable {
+    public var state: XybridDownloadState
+    /// 0.0..=1.0.
+    public var progress: Float
+
+    public init(state: XybridDownloadState, progress: Float) {
+        self.state = state
+        self.progress = progress
+    }
+
+}
+
+extension XybridDownloadStatus: WireCodable {
+    @inlinable static func decode(from reader: inout WireReader) -> XybridDownloadStatus {
+        XybridDownloadStatus(state: XybridDownloadState(wireTag: reader.readI32()), progress: reader.readF32())
+    }
+    @inlinable func encode(to writer: inout WireWriter) {
+        writer.writeI32(self.state.wireTag)
+        writer.writeF32(self.progress)
     }
 }
 
@@ -625,6 +653,68 @@ extension XybridOutputType: WireCodable {
     @inlinable func encode(to writer: inout WireWriter) { writer.writeI32(wireTag) }
 }
 
+/// Where a result was produced — observed fact, not a routing preference.
+public enum XybridExecutionTarget: Int32, Hashable, Sendable, CaseIterable {
+    case local = 0
+    case cloud = 1
+
+    @usableFromInline init(fromC c: Int32) { self = XybridExecutionTarget(rawValue: c)! }
+    @usableFromInline var cValue: Int32 { rawValue }
+    @usableFromInline init(wireTag: Int32) {
+        switch wireTag {
+        case 0: self = .local
+        case 1: self = .cloud
+        default: fatalError("Invalid XybridExecutionTarget wire tag: \(wireTag)")
+        }
+    }
+    @usableFromInline var wireTag: Int32 {
+        switch rawValue {
+        case 0: return 0
+        case 1: return 1
+        default: fatalError("Invalid XybridExecutionTarget raw value: \(rawValue)")
+        }
+    }
+
+}
+
+extension XybridExecutionTarget: WireCodable {
+    @inlinable static func decode(from reader: inout WireReader) -> XybridExecutionTarget { XybridExecutionTarget(wireTag: reader.readI32()) }
+    @inlinable func encode(to writer: inout WireWriter) { writer.writeI32(wireTag) }
+}
+
+/// Lifecycle of the background download behind a speculative load.
+public enum XybridDownloadState: Int32, Hashable, Sendable, CaseIterable {
+    case downloading = 0
+    case ready = 1
+    /// Download failed; the cloud keeps serving and `isLoaded` never flips.
+    case failed = 2
+
+    @usableFromInline init(fromC c: Int32) { self = XybridDownloadState(rawValue: c)! }
+    @usableFromInline var cValue: Int32 { rawValue }
+    @usableFromInline init(wireTag: Int32) {
+        switch wireTag {
+        case 0: self = .downloading
+        case 1: self = .ready
+        case 2: self = .failed
+        default: fatalError("Invalid XybridDownloadState wire tag: \(wireTag)")
+        }
+    }
+    @usableFromInline var wireTag: Int32 {
+        switch rawValue {
+        case 0: return 0
+        case 1: return 1
+        case 2: return 2
+        default: fatalError("Invalid XybridDownloadState raw value: \(rawValue)")
+        }
+    }
+
+}
+
+extension XybridDownloadState: WireCodable {
+    @inlinable static func decode(from reader: inout WireReader) -> XybridDownloadState { XybridDownloadState(wireTag: reader.readI32()) }
+    @inlinable func encode(to writer: inout WireWriter) { writer.writeI32(wireTag) }
+}
+
 public enum XybridStreamEventKind: Int32, Hashable, Sendable, CaseIterable {
     case token = 0
     case complete = 1
@@ -764,6 +854,29 @@ public func setProviderApiKey(provider: String, apiKey: String) {
     }
 }
 
+/// Point the cloud gateway at a platform base URL (staging, self-hosted).
+/// Pass a bare base URL — the `/v1` suffix is applied internally.
+public func setPlatformUrl(url: String) {
+    var url = url
+    url.withUTF8 { urlBuf in
+        boltffi_set_platform_url(urlBuf.baseAddress!, UInt(urlBuf.count))
+    }
+}
+
+/// Enable speculative cloud fallback globally: a registry model that isn't
+/// downloaded yet is served from the gateway while the weights download.
+///
+/// LLM/chat only — prefer `XybridModel.fromRegistrySpeculative` when the app
+/// also loads ASR/TTS models, which cannot be served this way.
+public func setSpeculativeCloud(enabled: Bool) {
+    boltffi_set_speculative_cloud(enabled)
+}
+
+/// Whether the global speculative-cloud default is on.
+public func isSpeculativeCloudEnabled() -> Bool {
+    return boltffi_is_speculative_cloud_enabled()
+}
+
 /// The SDK version string (tracks `CARGO_PKG_VERSION`).
 public func version() -> String {
     let buf = boltffi_version()
@@ -799,6 +912,22 @@ public final class XybridModel {
     public convenience init(fromRegistry id: String) throws {
         var id = id
         let ptr = id.withUTF8 { idBuf -> OpaquePointer? in boltffi_xybrid_model_from_registry(idBuf.baseAddress!, UInt(idBuf.count)) }
+        guard let ptr = ptr else {
+            throw FfiError(message: takeLastErrorMessage())
+        }
+        self.init(handle: ptr)
+    }
+
+    /// Load from the registry, serving from the cloud gateway while the weights
+    /// download in the background.
+    ///
+    /// Returns almost immediately instead of blocking on the download. Requires
+    /// a resolvable API key and an uncached model; otherwise it behaves exactly
+    /// like `from_registry`. Poll `download_status` for progress and
+    /// `is_cloud_serving` to know which leg is answering. LLM/chat models only.
+    public convenience init(fromRegistrySpeculative id: String) throws {
+        var id = id
+        let ptr = id.withUTF8 { idBuf -> OpaquePointer? in boltffi_xybrid_model_from_registry_speculative(idBuf.baseAddress!, UInt(idBuf.count)) }
         guard let ptr = ptr else {
             throw FfiError(message: takeLastErrorMessage())
         }
@@ -868,6 +997,30 @@ public final class XybridModel {
 
     public func isLoaded() -> Bool {
         return boltffi_xybrid_model_is_loaded(handle)
+    }
+
+    /// Whether runs are currently answered by the cloud because the local
+    /// weights are not ready yet. `false` for ordinary local models.
+    public func isCloudServing() -> Bool {
+        return boltffi_xybrid_model_is_cloud_serving(handle)
+    }
+
+    /// Download progress + state in one read — poll this to drive a progress
+    /// bar. Reports `Ready` at 1.0 for an ordinary local model, so hosts need
+    /// no special case.
+    public func downloadStatus() -> XybridDownloadStatus {
+        let buf = boltffi_xybrid_model_download_status(handle)
+        defer { boltffi_free_buf(buf) }
+        return boltffiDecodeOwnedBuf(buf.ptr, Int(buf.len)) { reader in XybridDownloadStatus.decode(from: &reader) }
+    }
+
+    /// Block until the download finishes or `timeout_ms` elapses, then report
+    /// the status. Call it off the UI thread (the same place `from_registry` is
+    /// already called). `timeout_ms = 0` makes it a non-blocking read.
+    public func awaitDownload(timeoutMs: UInt64) -> XybridDownloadStatus {
+        let buf = boltffi_xybrid_model_await_download(handle, timeoutMs)
+        defer { boltffi_free_buf(buf) }
+        return boltffiDecodeOwnedBuf(buf.ptr, Int(buf.len)) { reader in XybridDownloadStatus.decode(from: &reader) }
     }
 
     public func supportsStreaming() -> Bool {
