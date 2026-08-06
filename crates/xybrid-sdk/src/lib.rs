@@ -220,7 +220,8 @@ pub use llm::{
 };
 pub use model::SdkError;
 pub use model::{
-    ModelLoader, SdkResult, SeamInfo, StreamConfig, StreamEvent, StreamToken, XybridModel,
+    DownloadState, DownloadStatus, ModelLoader, SdkResult, SeamInfo, StreamConfig, StreamEvent,
+    StreamToken, XybridModel,
 };
 pub use platform::current_platform;
 pub use registry_client::{CacheStats, ModelSummary, RegistryClient, ResolvedVariant};
@@ -254,7 +255,9 @@ pub use pipeline::{
     TextInputConfig,
     Xybrid,
 };
-pub use result::{InferenceMetrics, InferenceResult, OutputType, StageLatency};
+pub use result::{
+    ExecutionProvenance, InferenceMetrics, InferenceResult, OutputType, StageLatency,
+};
 pub use source::ModelSource;
 pub use stream::{PartialResult, StreamState, StreamStats, TranscriptionResult, XybridStream};
 // FFI streaming types for platform bindings (Flutter, Kotlin, Swift)

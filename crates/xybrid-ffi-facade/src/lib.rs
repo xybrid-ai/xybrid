@@ -912,7 +912,56 @@ pub struct InferenceResult {
     pub output_type: OutputType,
     pub model_id: String,
     pub latency_ms: u32,
+    /// Where this result actually came from. Cloud fallback keeps `model_id`
+    /// identical on both legs, so this is the only way to tell them apart.
+    pub execution_target: ExecutionTarget,
     pub metrics: InferenceMetrics,
+}
+
+/// Where a result was produced — the observed fact, not a routing preference.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExecutionTarget {
+    Local,
+    Cloud,
+}
+
+impl ExecutionTarget {
+    fn from_sdk(provenance: sdk::ExecutionProvenance) -> Self {
+        match provenance {
+            sdk::ExecutionProvenance::Local => Self::Local,
+            sdk::ExecutionProvenance::Cloud => Self::Cloud,
+        }
+    }
+}
+
+/// Lifecycle of the background download behind a speculative load.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DownloadState {
+    Downloading,
+    Ready,
+    Failed,
+}
+
+/// One consistent read of download progress + state.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DownloadStatus {
+    pub state: DownloadState,
+    /// 0.0..=1.0.
+    pub progress: f32,
+}
+
+impl DownloadStatus {
+    fn from_sdk(status: sdk::DownloadStatus) -> Self {
+        let state = match status.state {
+            sdk::DownloadState::Downloading => DownloadState::Downloading,
+            sdk::DownloadState::Ready => DownloadState::Ready,
+            sdk::DownloadState::Failed => DownloadState::Failed,
+        };
+        Self {
+            state,
+            progress: status.progress,
+        }
+    }
 }
 
 /// A token emitted by a pull-based inference stream.
@@ -993,6 +1042,7 @@ impl InferenceResult {
         let output_type = OutputType::from_sdk(result.output_type());
         let model_id = result.model_id().to_string();
         let latency_ms = result.latency_ms();
+        let execution_target = ExecutionTarget::from_sdk(result.provenance());
         let metrics = InferenceMetrics::from_sdk(result.metrics());
         let envelope = Envelope::from_sdk(result.into_envelope());
         Self {
@@ -1000,6 +1050,7 @@ impl InferenceResult {
             output_type,
             model_id,
             latency_ms,
+            execution_target,
             metrics,
         }
     }
@@ -1150,6 +1201,33 @@ impl ModelLoader {
         })
     }
 
+    /// Registry load that serves from the cloud gateway while the weights
+    /// download in the background, instead of blocking on the download.
+    ///
+    /// Requires a resolvable API key and an uncached model; otherwise this
+    /// behaves exactly like [`Self::from_registry`]. Check
+    /// [`Self::will_speculate`] to know which you got. LLM/chat models only.
+    pub fn from_registry_speculative(id: String) -> Arc<Self> {
+        Arc::new(Self {
+            inner: sdk::ModelLoader::from_registry(&id).with_speculative_cloud(true),
+        })
+    }
+
+    /// Speculative variant of [`Self::from_registry_with_platform`].
+    pub fn from_registry_speculative_with_platform(id: String, platform: String) -> Arc<Self> {
+        Arc::new(Self {
+            inner: sdk::ModelLoader::from_registry_with_platform(&id, &platform)
+                .with_speculative_cloud(true),
+        })
+    }
+
+    /// Whether [`Self::load`] would actually speculate: speculation enabled, an
+    /// API key resolves, and the model is not already cached. Never touches the
+    /// network.
+    pub fn will_speculate(&self) -> bool {
+        self.inner.will_speculate()
+    }
+
     /// Load from a local model directory (must contain `model_metadata.json`).
     pub fn from_directory(path: String) -> Result<Arc<Self>> {
         let inner = sdk::ModelLoader::from_directory(path).map_err(Error::from)?;
@@ -1269,6 +1347,35 @@ impl XybridModel {
 
     pub fn is_loaded(&self) -> bool {
         self.inner.is_loaded()
+    }
+
+    /// Whether runs are currently answered by the cloud because the local
+    /// weights are not ready yet. `false` for ordinary local models.
+    pub fn is_cloud_serving(&self) -> bool {
+        self.inner.is_cloud_serving()
+    }
+
+    /// Snapshot of the background download: state + progress in one read, so a
+    /// polling host never sees a torn pair. Reports `Ready` at 1.0 for an
+    /// ordinary local model, so hosts need no special case.
+    pub fn download_status(&self) -> DownloadStatus {
+        DownloadStatus::from_sdk(self.inner.download_status())
+    }
+
+    /// Block until the download reaches a terminal state or `timeout_ms`
+    /// elapses, then report it.
+    ///
+    /// The polling helper for hosts that just want "tell me when it's
+    /// on-device": call it from a background thread / coroutine / detached
+    /// task, in the same place `load` is already called off the UI thread.
+    /// Deliberately a blocking call rather than a progress *callback* — no
+    /// closure has to cross the FFI boundary. Returns immediately for a
+    /// non-speculative model.
+    ///
+    /// A `timeout_ms` of 0 makes this a non-blocking read, identical to
+    /// [`Self::download_status`].
+    pub fn await_download(&self, timeout_ms: u64) -> DownloadStatus {
+        DownloadStatus::from_sdk(self.inner.await_download(timeout_ms))
     }
 
     pub fn supports_streaming(&self) -> bool {
@@ -1560,6 +1667,29 @@ pub fn set_provider_api_key(provider: String, api_key: String) {
 
 pub fn has_api_key() -> bool {
     sdk::has_api_key()
+}
+
+/// Point the cloud gateway at a platform base URL (staging, self-hosted).
+///
+/// Held in process memory, not the environment — safe to call after telemetry
+/// threads have started. Pass a bare base URL; the `/v1` suffix is internal.
+pub fn set_platform_url(url: String) {
+    sdk::set_platform_url(&url);
+}
+
+/// Enable speculative cloud fallback globally: a registry model that isn't
+/// downloaded yet is served from the gateway while the weights download.
+///
+/// Only takes effect when an API key resolves. Speculation is LLM/chat-only —
+/// prefer the per-load [`ModelLoader::from_registry_speculative`] when the app
+/// also loads ASR/TTS models, which cannot be served this way.
+pub fn set_speculative_cloud(enabled: bool) {
+    sdk::set_speculative_cloud(enabled);
+}
+
+/// Whether the global speculative-cloud default is on.
+pub fn is_speculative_cloud_enabled() -> bool {
+    sdk::is_speculative_cloud_enabled()
 }
 
 // ============================================================================
@@ -1977,6 +2107,7 @@ mod tests {
             output_type: OutputType::Text,
             model_id: "m".into(),
             latency_ms: 0,
+            execution_target: ExecutionTarget::Local,
             metrics: InferenceMetrics::default(),
         }
     }

@@ -451,7 +451,60 @@ pub struct XybridResult {
     pub output_type: XybridOutputType,
     pub model_id: String,
     pub latency_ms: u32,
+    /// Where the answer actually came from. Cloud fallback keeps `model_id`
+    /// identical on both legs, so this is the only way to tell them apart.
+    pub execution_target: XybridExecutionTarget,
     pub metrics: XybridInferenceMetrics,
+}
+
+/// Where a result was produced — observed fact, not a routing preference.
+#[data]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum XybridExecutionTarget {
+    Local,
+    Cloud,
+}
+
+impl From<facade::ExecutionTarget> for XybridExecutionTarget {
+    fn from(target: facade::ExecutionTarget) -> Self {
+        match target {
+            facade::ExecutionTarget::Local => Self::Local,
+            facade::ExecutionTarget::Cloud => Self::Cloud,
+        }
+    }
+}
+
+/// Lifecycle of the background download behind a speculative load.
+#[data]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum XybridDownloadState {
+    Downloading,
+    Ready,
+    /// Download failed; the cloud keeps serving and `isLoaded` never flips.
+    Failed,
+}
+
+/// Download progress + state in one consistent read.
+#[data]
+#[derive(Clone, Debug, PartialEq)]
+pub struct XybridDownloadStatus {
+    pub state: XybridDownloadState,
+    /// 0.0..=1.0.
+    pub progress: f32,
+}
+
+impl From<facade::DownloadStatus> for XybridDownloadStatus {
+    fn from(status: facade::DownloadStatus) -> Self {
+        let state = match status.state {
+            facade::DownloadState::Downloading => XybridDownloadState::Downloading,
+            facade::DownloadState::Ready => XybridDownloadState::Ready,
+            facade::DownloadState::Failed => XybridDownloadState::Failed,
+        };
+        Self {
+            state,
+            progress: status.progress,
+        }
+    }
 }
 
 impl From<facade::InferenceResult> for XybridResult {
@@ -462,6 +515,7 @@ impl From<facade::InferenceResult> for XybridResult {
             output_type: r.output_type.into(),
             model_id: r.model_id,
             latency_ms: r.latency_ms,
+            execution_target: r.execution_target.into(),
             metrics,
         }
     }
@@ -678,6 +732,31 @@ pub fn set_provider_api_key(provider: String, api_key: String) {
     facade::set_provider_api_key(provider, api_key);
 }
 
+/// Point the cloud gateway at a platform base URL (staging, self-hosted).
+/// Pass a bare base URL — the `/v1` suffix is applied internally.
+#[export]
+pub fn set_platform_url(url: String) {
+    ensure_native_logging();
+    facade::set_platform_url(url);
+}
+
+/// Enable speculative cloud fallback globally: a registry model that isn't
+/// downloaded yet is served from the gateway while the weights download.
+///
+/// LLM/chat only — prefer `XybridModel.fromRegistrySpeculative` when the app
+/// also loads ASR/TTS models, which cannot be served this way.
+#[export]
+pub fn set_speculative_cloud(enabled: bool) {
+    ensure_native_logging();
+    facade::set_speculative_cloud(enabled);
+}
+
+/// Whether the global speculative-cloud default is on.
+#[export]
+pub fn is_speculative_cloud_enabled() -> bool {
+    facade::is_speculative_cloud_enabled()
+}
+
 /// The SDK version string (tracks `CARGO_PKG_VERSION`).
 #[export]
 pub fn version() -> String {
@@ -732,6 +811,20 @@ impl XybridModel {
         Ok(Self::new(model))
     }
 
+    /// Load from the registry, serving from the cloud gateway while the weights
+    /// download in the background.
+    ///
+    /// Returns almost immediately instead of blocking on the download. Requires
+    /// a resolvable API key and an uncached model; otherwise it behaves exactly
+    /// like `from_registry`. Poll `download_status` for progress and
+    /// `is_cloud_serving` to know which leg is answering. LLM/chat models only.
+    pub fn from_registry_speculative(id: String) -> Result<Self, XybridError> {
+        let model = facade::ModelLoader::from_registry_speculative(id)
+            .load()
+            .map_err(XybridError::from)?;
+        Ok(Self::new(model))
+    }
+
     /// Load from a local model directory (must contain `model_metadata.json`).
     pub fn from_directory(path: String) -> Result<Self, XybridError> {
         let loader = facade::ModelLoader::from_directory(path).map_err(XybridError::from)?;
@@ -776,6 +869,26 @@ impl XybridModel {
 
     pub fn is_loaded(&self) -> bool {
         self.inner.is_loaded()
+    }
+
+    /// Whether runs are currently answered by the cloud because the local
+    /// weights are not ready yet. `false` for ordinary local models.
+    pub fn is_cloud_serving(&self) -> bool {
+        self.inner.is_cloud_serving()
+    }
+
+    /// Download progress + state in one read — poll this to drive a progress
+    /// bar. Reports `Ready` at 1.0 for an ordinary local model, so hosts need
+    /// no special case.
+    pub fn download_status(&self) -> XybridDownloadStatus {
+        self.inner.download_status().into()
+    }
+
+    /// Block until the download finishes or `timeout_ms` elapses, then report
+    /// the status. Call it off the UI thread (the same place `from_registry` is
+    /// already called). `timeout_ms = 0` makes it a non-blocking read.
+    pub fn await_download(&self, timeout_ms: u64) -> XybridDownloadStatus {
+        self.inner.await_download(timeout_ms).into()
     }
 
     pub fn supports_streaming(&self) -> bool {

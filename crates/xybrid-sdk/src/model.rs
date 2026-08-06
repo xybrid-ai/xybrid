@@ -747,7 +747,7 @@ where
                         signal_context,
                     );
                     let total_latency_ms = local_latency_ms.saturating_add(cloud_latency_ms);
-                    Ok(InferenceResult::new(
+                    Ok(InferenceResult::new_cloud(
                         cloud_output,
                         cloud_model_id,
                         total_latency_ms,
@@ -1123,6 +1123,76 @@ fn publish_speculative_cloud_event(model_id: &str, latency_ms: u32, streaming: b
 pub(crate) struct SpeculativeDownload {
     outcome: Mutex<Option<bool>>,
     finished: std::sync::Condvar,
+    /// Download completion in basis points (0..=10_000). `f32` has no atomic,
+    /// and a lock here would sit on the download's hot path.
+    progress_bp: std::sync::atomic::AtomicU32,
+}
+
+/// Lifecycle of the background download behind a speculative model.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DownloadState {
+    /// Weights still downloading; runs are served from the cloud.
+    Downloading,
+    /// Local handle installed; runs are on-device.
+    Ready,
+    /// Download failed — the cloud keeps serving, and `is_loaded()` will never
+    /// flip. Surfacing this is the only way a host can stop waiting.
+    Failed,
+}
+
+/// One consistent read of a speculative download's progress and state.
+///
+/// Taken as a snapshot so a polling host cannot observe a torn pair (for
+/// example `Ready` alongside a stale 0.34 progress).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DownloadStatus {
+    pub state: DownloadState,
+    /// 0.0..=1.0.
+    pub progress: f32,
+}
+
+impl SpeculativeDownload {
+    /// Record download progress (0.0..=1.0) from the fetch callback.
+    fn set_progress(&self, fraction: f32) {
+        let bp = (fraction.clamp(0.0, 1.0) * 10_000.0) as u32;
+        self.progress_bp
+            .store(bp, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Snapshot progress + state together.
+    fn status(&self) -> DownloadStatus {
+        let outcome = *self.outcome.lock().unwrap_or_else(|e| e.into_inner());
+        let state = match outcome {
+            None => DownloadState::Downloading,
+            Some(true) => DownloadState::Ready,
+            Some(false) => DownloadState::Failed,
+        };
+        let progress = match state {
+            // A finished download is 1.0 even if the last callback never fired.
+            DownloadState::Ready => 1.0,
+            _ => self.progress_bp.load(std::sync::atomic::Ordering::Relaxed) as f32 / 10_000.0,
+        };
+        DownloadStatus { state, progress }
+    }
+
+    /// Block until the download reaches a terminal state or `timeout` elapses.
+    fn await_terminal(&self, timeout: Duration) -> DownloadStatus {
+        let mut guard = self.outcome.lock().unwrap_or_else(|e| e.into_inner());
+        let deadline = Instant::now() + timeout;
+        while guard.is_none() {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                break;
+            }
+            let (next, _) = self
+                .finished
+                .wait_timeout(guard, remaining)
+                .unwrap_or_else(|e| e.into_inner());
+            guard = next;
+        }
+        drop(guard);
+        self.status()
+    }
 }
 
 impl SpeculativeDownload {
@@ -1162,7 +1232,7 @@ fn cloud_serve_batch(
         .map_err(|e| sdk_execution_error("Speculative cloud execution failed", e))?;
     let latency_ms = start.elapsed().as_millis() as u32;
     publish_speculative_cloud_event(model_id, latency_ms, false);
-    Ok(InferenceResult::new(output, model_id, latency_ms))
+    Ok(InferenceResult::new_cloud(output, model_id, latency_ms))
 }
 
 /// Serve a streaming inference from the cloud gateway because the local model
@@ -1195,7 +1265,7 @@ where
         .map_err(streaming_execution_error)?;
     let latency_ms = start.elapsed().as_millis() as u32;
     publish_speculative_cloud_event(model_id, latency_ms, true);
-    Ok(InferenceResult::new(output, model_id, latency_ms))
+    Ok(InferenceResult::new_cloud(output, model_id, latency_ms))
 }
 
 /// Whether a cloud gateway API key can be resolved right now.
@@ -1661,8 +1731,13 @@ impl ModelLoader {
             .name(thread_name)
             .spawn(move || {
                 let built = RegistryClient::from_env().and_then(|client| {
-                    let dir =
-                        client.fetch_extracted(&id_owned, platform_owned.as_deref(), |_| {})?;
+                    let dir = client.fetch_extracted(
+                        &id_owned,
+                        platform_owned.as_deref(),
+                        // Feed the poll-able progress cell; hosts read it via
+                        // `XybridModel::download_status`.
+                        |fraction| bg_download.set_progress(fraction),
+                    )?;
                     Self::create_model_handle(&dir)
                 });
                 match built {
@@ -2277,6 +2352,45 @@ impl XybridModel {
     /// concurrent local promotion.
     fn cloud_serve(&self) -> bool {
         self.speculative.is_some() && !self.is_loaded()
+    }
+
+    /// Whether runs are currently being answered by the cloud because the local
+    /// weights are not ready yet. `false` for ordinary local models.
+    ///
+    /// This is the *pre-run* prediction; [`InferenceResult::provenance`] is the
+    /// observed fact for a run that already happened. They differ when a cloud
+    /// leg fails and degrades to local mid-call.
+    pub fn is_cloud_serving(&self) -> bool {
+        self.cloud_serve()
+    }
+
+    /// Snapshot of the background download behind a speculative load.
+    ///
+    /// Returns `Ready` at 1.0 for an ordinary (already-local) model, so hosts
+    /// can render one code path regardless of how the model was loaded.
+    /// Poll this to drive a progress bar — there is deliberately no progress
+    /// *callback*, so nothing has to cross an FFI boundary as a closure.
+    pub fn download_status(&self) -> DownloadStatus {
+        match self.speculative.as_ref() {
+            Some(download) => download.status(),
+            None => DownloadStatus {
+                state: DownloadState::Ready,
+                progress: 1.0,
+            },
+        }
+    }
+
+    /// Block until the background download finishes or `timeout_ms` elapses,
+    /// then report the resulting status.
+    ///
+    /// Convenience over polling [`Self::download_status`] for hosts that just
+    /// want "tell me when it's on-device". Call it off the UI thread. Returns
+    /// immediately for a non-speculative model.
+    pub fn await_download(&self, timeout_ms: u64) -> DownloadStatus {
+        match self.speculative.as_ref() {
+            Some(download) => download.await_terminal(Duration::from_millis(timeout_ms)),
+            None => self.download_status(),
+        }
     }
 
     /// Block until the speculative download finishes, reporting whether a local
@@ -4562,6 +4676,82 @@ mod tests {
         let download = SpeculativeDownload::default();
         download.finish(false);
         assert!(!download.wait_for_local());
+    }
+
+    /// Hosts poll `download_status` to drive a progress bar, so progress and
+    /// state must move together and never report a torn pair.
+    #[test]
+    fn download_status_tracks_progress_then_terminal_state() {
+        let download = SpeculativeDownload::default();
+        assert_eq!(download.status().state, DownloadState::Downloading);
+        assert_eq!(download.status().progress, 0.0);
+
+        download.set_progress(0.42);
+        let mid = download.status();
+        assert_eq!(mid.state, DownloadState::Downloading);
+        assert!((mid.progress - 0.42).abs() < 1e-3, "got {}", mid.progress);
+
+        // Out-of-range input from a backend is clamped, not wrapped.
+        download.set_progress(1.7);
+        assert_eq!(download.status().progress, 1.0);
+
+        // A finished download reads 1.0 even if the last callback never fired.
+        let ready = SpeculativeDownload::default();
+        ready.set_progress(0.9);
+        ready.finish(true);
+        let done = ready.status();
+        assert_eq!(done.state, DownloadState::Ready);
+        assert_eq!(done.progress, 1.0);
+
+        // Failure is visible: the host must be able to stop waiting.
+        let failed = SpeculativeDownload::default();
+        failed.finish(false);
+        assert_eq!(failed.status().state, DownloadState::Failed);
+    }
+
+    /// `await_download` must return on timeout rather than parking the caller
+    /// when the download is still running.
+    #[test]
+    fn await_download_times_out_while_downloading() {
+        let download = SpeculativeDownload::default();
+        let status = download.await_terminal(Duration::from_millis(20));
+        assert_eq!(status.state, DownloadState::Downloading);
+    }
+
+    /// A plain local model has no download, but hosts should still get one
+    /// uniform "ready" answer instead of having to special-case it.
+    #[test]
+    fn non_speculative_model_reports_ready_download() {
+        let model = test_loaded_model(true);
+        let status = model.download_status();
+        assert_eq!(status.state, DownloadState::Ready);
+        assert_eq!(status.progress, 1.0);
+        assert!(!model.is_cloud_serving());
+    }
+
+    /// Provenance is the only way to tell the legs apart: cloud fallback keeps
+    /// `model_id` identical by design.
+    #[test]
+    fn result_provenance_distinguishes_cloud_from_local() {
+        use crate::ExecutionProvenance;
+
+        let local = InferenceResult::new(text_envelope("hi"), "lfm2.5-350m", 10);
+        let cloud = InferenceResult::new_cloud(text_envelope("hi"), "lfm2.5-350m", 10);
+
+        assert_eq!(local.provenance(), ExecutionProvenance::Local);
+        assert_eq!(cloud.provenance(), ExecutionProvenance::Cloud);
+        assert_eq!(local.model_id(), cloud.model_id(), "same model both legs");
+
+        // Also stamped on the envelope so FFI hosts see it without a typed
+        // accessor.
+        assert_eq!(
+            cloud.metadata("execution_target").map(String::as_str),
+            Some("cloud")
+        );
+        assert_eq!(
+            local.metadata("execution_target").map(String::as_str),
+            Some("local")
+        );
     }
 
     /// The inherent `SdkError::is_retryable` / `retry_after` accessors and
