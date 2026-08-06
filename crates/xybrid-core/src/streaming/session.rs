@@ -163,15 +163,40 @@ pub struct PartialResult {
     pub chunk_sequence: u64,
 }
 
+/// Maximum number of words checked for a duplicated seam between two
+/// consecutive overlapping chunks. The 0.5 s chunk overlap can only repeat a
+/// couple of words; a short cap keeps the match from gluing to a coincidental
+/// phrase repeat earlier in the sentence.
+const MAX_SEAM_WORDS: usize = 8;
+
+/// One transcribed span of the audio timeline.
+#[derive(Debug, Clone)]
+struct TranscriptSegment {
+    /// Transcribed text for this span (trimmed, may be empty for silence).
+    text: String,
+    /// Audio timeline position where this span starts.
+    start: Duration,
+    /// Audio timeline position where this span ends.
+    end: Duration,
+}
+
 /// Accumulated transcription across chunks.
+///
+/// Chunks arrive as windows over the audio timeline and may *re-cover* audio
+/// that earlier chunks already transcribed (warm-up windows grow from the
+/// stream start; steady-state windows overlap by a fraction of a second).
+/// Text is reconciled by span, not blindly appended:
+///
+/// - a chunk whose window starts at or before an existing segment's start
+///   *replaces* that segment (bigger window over the same audio wins);
+/// - a chunk that partially overlaps the previous segment has its seam
+///   deduplicated at word level, so the 0.5 s overlap doesn't repeat words.
 #[derive(Debug, Default)]
 struct TranscriptAccumulator {
-    /// Segments from completed chunks
-    segments: Vec<String>,
+    /// Reconciled segments, ordered by start time.
+    segments: Vec<TranscriptSegment>,
     /// Current partial (unstable) text
     current_partial: Option<String>,
-    /// Total audio duration processed
-    total_duration: Duration,
 }
 
 impl TranscriptAccumulator {
@@ -179,11 +204,32 @@ impl TranscriptAccumulator {
         Self::default()
     }
 
-    fn add_segment(&mut self, text: String, duration: Duration) {
-        if !text.trim().is_empty() {
-            self.segments.push(text.trim().to_string());
+    /// Reconcile a chunk transcription covering `start..end` into the
+    /// transcript.
+    fn add_chunk(&mut self, text: String, start: Duration, end: Duration) {
+        // Bigger window re-covering earlier spans replaces them.
+        while matches!(self.segments.last(), Some(last) if last.start >= start) {
+            self.segments.pop();
         }
-        self.total_duration += duration;
+
+        let mut text = text.trim().to_string();
+
+        // Word-level seam dedupe against the previous segment when the audio
+        // windows overlap: drop leading words that repeat its tail.
+        if let Some(prev) = self.segments.last_mut() {
+            if prev.end > start && !text.is_empty() {
+                text = strip_seam_overlap(&prev.text, &text);
+            }
+            if text.is_empty() {
+                // Nothing new to say (silence or the whole chunk was seam
+                // overlap) — just extend the covered span.
+                prev.end = prev.end.max(end);
+                self.current_partial = None;
+                return;
+            }
+        }
+
+        self.segments.push(TranscriptSegment { text, start, end });
         self.current_partial = None;
     }
 
@@ -191,25 +237,76 @@ impl TranscriptAccumulator {
         self.current_partial = Some(text);
     }
 
+    /// Audio timeline covered so far.
+    fn covered_duration(&self) -> Duration {
+        self.segments
+            .last()
+            .map(|s| s.end)
+            .unwrap_or(Duration::ZERO)
+    }
+
     fn get_full_text(&self) -> String {
-        let mut parts = self.segments.clone();
+        let mut parts: Vec<&str> = self
+            .segments
+            .iter()
+            .map(|s| s.text.as_str())
+            .filter(|t| !t.is_empty())
+            .collect();
         if let Some(ref partial) = self.current_partial {
             if !partial.trim().is_empty() {
-                parts.push(partial.trim().to_string());
+                parts.push(partial.trim());
             }
         }
         parts.join(" ")
     }
 
     fn get_stable_text(&self) -> String {
-        self.segments.join(" ")
+        self.segments
+            .iter()
+            .map(|s| s.text.as_str())
+            .filter(|t| !t.is_empty())
+            .collect::<Vec<_>>()
+            .join(" ")
     }
 
     fn reset(&mut self) {
         self.segments.clear();
         self.current_partial = None;
-        self.total_duration = Duration::ZERO;
     }
+}
+
+/// Strip from the head of `next` the longest run of words that duplicates the
+/// tail of `prev` (case- and punctuation-insensitive), returning what remains.
+///
+/// Handles the seam between two overlapping audio windows, where the model
+/// transcribes the shared 0.5 s twice — possibly with different punctuation
+/// or casing ("go to the" / "Go to the").
+fn strip_seam_overlap(prev: &str, next: &str) -> String {
+    let prev_words: Vec<&str> = prev.split_whitespace().collect();
+    let next_words: Vec<&str> = next.split_whitespace().collect();
+
+    let normalize = |w: &str| {
+        w.chars()
+            .filter(|c| c.is_alphanumeric())
+            .collect::<String>()
+            .to_lowercase()
+    };
+
+    let max_k = MAX_SEAM_WORDS.min(prev_words.len()).min(next_words.len());
+    let matched = (1..=max_k)
+        .rev()
+        .find(|&k| {
+            prev_words[prev_words.len() - k..]
+                .iter()
+                .zip(&next_words[..k])
+                .all(|(p, n)| {
+                    let (p, n) = (normalize(p), normalize(n));
+                    !p.is_empty() && p == n
+                })
+        })
+        .unwrap_or(0);
+
+    next_words[matched..].join(" ")
 }
 
 /// Streaming ASR session.
@@ -393,12 +490,16 @@ impl StreamSession {
 
         if is_whisper {
             // Whisper: Use 5s chunks for responsive streaming (max 30s supported)
-            // This gives partial results every ~5 seconds while speaking
+            // This gives partial results every ~5 seconds while speaking.
+            // Warm-up windows get the first words on screen after ~1.5 s
+            // instead of a full window; each re-covers the stream from the
+            // start so the 5 s window then replaces them with better context.
             AudioBufferConfig {
                 sample_rate: 16000,
                 chunk_duration_secs: 5.0,
                 overlap_secs: 0.5, // Small overlap for continuity
                 max_buffer_secs: config.buffer_config.max_buffer_secs,
+                warmup_chunk_secs: vec![1.5, 3.0],
             }
         } else {
             // Default/Wav2Vec2: shorter chunks
@@ -407,6 +508,7 @@ impl StreamSession {
                 chunk_duration_secs: 5.0,
                 overlap_secs: config.buffer_config.overlap_secs,
                 max_buffer_secs: config.buffer_config.max_buffer_secs,
+                warmup_chunk_secs: Vec::new(),
             }
         }
     }
@@ -473,7 +575,7 @@ impl StreamSession {
             text,
             confidence: None,
             is_stable: false,
-            audio_duration: self.transcript.total_duration,
+            audio_duration: self.transcript.covered_duration(),
             chunk_sequence: self.buffer.stats().chunks_extracted,
         })
     }
@@ -549,7 +651,7 @@ impl StreamSession {
             samples_processed: buffer_stats.total_processed,
             chunks_processed: buffer_stats.chunks_extracted,
             transcript_length: self.transcript.get_full_text().len(),
-            audio_duration: self.transcript.total_duration,
+            audio_duration: self.transcript.covered_duration(),
         }
     }
 
@@ -612,8 +714,10 @@ impl StreamSession {
             }
         };
 
-        // Update transcript
-        self.transcript.add_segment(text.clone(), chunk.duration());
+        // Reconcile into the transcript (replaces re-covered spans, dedupes
+        // the overlap seam).
+        self.transcript
+            .add_chunk(text.clone(), chunk.start_time, chunk.end_time);
 
         // Fire callback if set
         if let Some(ref callback) = self.on_partial {
@@ -659,15 +763,20 @@ mod tests {
         assert!(config.enable_partial_results);
     }
 
+    fn secs(s: f64) -> Duration {
+        Duration::from_secs_f64(s)
+    }
+
     #[test]
-    fn test_transcript_accumulator() {
+    fn test_transcript_accumulator_disjoint_chunks_append() {
         let mut acc = TranscriptAccumulator::new();
 
-        acc.add_segment("Hello".to_string(), Duration::from_secs(1));
-        acc.add_segment("world".to_string(), Duration::from_secs(1));
+        acc.add_chunk("Hello".to_string(), secs(0.0), secs(1.0));
+        acc.add_chunk("world".to_string(), secs(1.0), secs(2.0));
 
         assert_eq!(acc.get_stable_text(), "Hello world");
         assert_eq!(acc.get_full_text(), "Hello world");
+        assert_eq!(acc.covered_duration(), secs(2.0));
 
         acc.set_partial("testing".to_string());
         assert_eq!(acc.get_full_text(), "Hello world testing");
@@ -675,12 +784,70 @@ mod tests {
     }
 
     #[test]
+    fn test_transcript_accumulator_growing_window_replaces() {
+        let mut acc = TranscriptAccumulator::new();
+
+        // Warm-up windows all start at 0 and grow: each replaces the last.
+        acc.add_chunk("I want".to_string(), secs(0.0), secs(1.5));
+        acc.add_chunk("I want to go".to_string(), secs(0.0), secs(3.0));
+        assert_eq!(acc.get_full_text(), "I want to go");
+
+        acc.add_chunk("I want to go home now".to_string(), secs(0.0), secs(5.0));
+        assert_eq!(acc.get_full_text(), "I want to go home now");
+        assert_eq!(acc.covered_duration(), secs(5.0));
+
+        // Steady-state chunk after warm-up appends, not replaces.
+        acc.add_chunk("and sleep".to_string(), secs(4.5), secs(9.5));
+        assert_eq!(acc.get_full_text(), "I want to go home now and sleep");
+    }
+
+    #[test]
+    fn test_transcript_accumulator_seam_dedupe() {
+        let mut acc = TranscriptAccumulator::new();
+
+        acc.add_chunk("I want to go".to_string(), secs(0.0), secs(5.0));
+        // Overlapping window re-transcribes the shared 0.5s ("to go"),
+        // with different casing/punctuation on the seam.
+        acc.add_chunk("To go, home now".to_string(), secs(4.5), secs(9.5));
+
+        assert_eq!(acc.get_full_text(), "I want to go home now");
+        assert_eq!(acc.covered_duration(), secs(9.5));
+    }
+
+    #[test]
+    fn test_transcript_accumulator_all_seam_extends_span() {
+        let mut acc = TranscriptAccumulator::new();
+
+        acc.add_chunk("go home".to_string(), secs(0.0), secs(5.0));
+        // Trailing chunk is entirely seam overlap (e.g. silence after speech).
+        acc.add_chunk("go home".to_string(), secs(4.5), secs(6.0));
+
+        assert_eq!(acc.get_full_text(), "go home");
+        assert_eq!(acc.covered_duration(), secs(6.0));
+    }
+
+    #[test]
     fn test_transcript_accumulator_reset() {
         let mut acc = TranscriptAccumulator::new();
-        acc.add_segment("Hello".to_string(), Duration::from_secs(1));
+        acc.add_chunk("Hello".to_string(), secs(0.0), secs(1.0));
         acc.reset();
 
         assert_eq!(acc.get_stable_text(), "");
-        assert_eq!(acc.total_duration, Duration::ZERO);
+        assert_eq!(acc.covered_duration(), Duration::ZERO);
+    }
+
+    #[test]
+    fn test_strip_seam_overlap() {
+        assert_eq!(strip_seam_overlap("I want to go", "to go home"), "home");
+        assert_eq!(
+            strip_seam_overlap("I want", "no overlap here"),
+            "no overlap here"
+        );
+        assert_eq!(strip_seam_overlap("same words", "Same words."), "");
+        // Cap: a repeat longer than MAX_SEAM_WORDS can't be a 0.5s seam, so
+        // it is kept as genuine repetition.
+        let prev = "one two three four five six seven eight nine";
+        let next = "one two three four five six seven eight nine ten";
+        assert_eq!(strip_seam_overlap(prev, next), next);
     }
 }
