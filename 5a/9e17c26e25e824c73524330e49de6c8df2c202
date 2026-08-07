@@ -1,0 +1,21 @@
+crates/xybrid-core/src/execution/executor.rs
+  s_9f04bb23700740::t_58db12d9c47b56 484-485
+crates/xybrid-core/src/runtime_adapter/whisper_cpp/runtime.rs
+  s_9f04bb23700740::t_a9a6263fffa16a 182-192
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "5a9e17c26e25e824c73524330e49de6c8df2c202",
+  "prompts": {},
+  "sessions": {
+    "s_9f04bb23700740": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "cf542ea4-a493-4e35-92e5-530163651bf9",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
