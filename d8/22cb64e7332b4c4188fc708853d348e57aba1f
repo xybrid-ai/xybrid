@@ -1,0 +1,45 @@
+tools/scripts/gen_kotlin_bolt.py
+  s_614e8de50f4d44::t_23fb24dcdb91aa 1-122
+bindings/kotlin/src/main/kotlin/ai/xybrid/Xybrid.kt
+  s_ce37b8828fadc9::t_83aa4ff8e3e4a9 449,462
+bindings/unity/Runtime/Bolt/XybridBolt.cs
+  s_ce37b8828fadc9::t_13bfc62433fc3c 602-606,888-890
+  s_614e8de50f4d44::t_6e16d37bfb0c18 601,891
+bindings/kotlin/src/main/kotlin/ai/xybrid/XybridBolt.kt
+  s_ce37b8828fadc9::t_6c7723ebbdbd47 837,2474-2475
+  s_ce37b8828fadc9::t_83aa4ff8e3e4a9 1413,1425,1437,1479,1491,1503,1515,1527,1539,1551,1587,1599,1611,1623,2476,2511
+  s_ce37b8828fadc9::t_79f40b583f45b3 2477
+.github/workflows/build-unity.yml
+  s_ce37b8828fadc9::t_83aa4ff8e3e4a9 169
+bindings/kotlin/README.md
+  s_614e8de50f4d44::t_f5a122596576a1 247-259
+.github/workflows/bazel.yml
+  s_ce37b8828fadc9::t_83aa4ff8e3e4a9 302
+crates/xybrid-bolt/BUILD.bazel
+  s_ce37b8828fadc9::t_2603fdc7be30b8 6-10,16-17,20-31,68-69,120-121
+  s_ce37b8828fadc9::t_0757b151eb5576 18-19
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "d822cb64e7332b4c4188fc708853d348e57aba1f",
+  "prompts": {},
+  "sessions": {
+    "s_614e8de50f4d44": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1d700805-4628-483d-b359-6798786ec414",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    },
+    "s_ce37b8828fadc9": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019fde75-a277-7113-92bb-eb5f7eae53d8",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
