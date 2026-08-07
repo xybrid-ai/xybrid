@@ -2736,7 +2736,7 @@ impl XybridModel {
             crate::telemetry::TelemetryPipelineContextGuard::install(None, Some(trace_id));
 
         let event_fields = {
-            let mut handle = self.handle.write().unwrap_or_else(|e| e.into_inner());
+            let handle = self.handle.write().unwrap_or_else(|e| e.into_inner());
             if !handle.loaded {
                 return Err(SdkError::NotLoaded);
             }
@@ -2839,7 +2839,7 @@ impl XybridModel {
             // path published nothing at all, so async warmups were
             // silent on the wire (visible only via logs).
             let event_fields = {
-                let mut guard = handle.write().unwrap_or_else(|e| e.into_inner());
+                let guard = handle.write().unwrap_or_else(|e| e.into_inner());
                 if !guard.loaded {
                     return Err(SdkError::NotLoaded);
                 }
@@ -2948,7 +2948,7 @@ impl XybridModel {
             crate::telemetry::TelemetryPipelineContextGuard::install(None, Some(trace_id));
 
         // Recover from poisoned RwLock to prevent permanent lock errors
-        let mut handle = self.handle.write().unwrap_or_else(|e| e.into_inner());
+        let handle = self.handle.write().unwrap_or_else(|e| e.into_inner());
 
         if !handle.loaded {
             return Err(SdkError::NotLoaded);
@@ -3019,7 +3019,7 @@ impl XybridModel {
         let _telemetry_ctx =
             crate::telemetry::TelemetryPipelineContextGuard::install(None, Some(trace_id));
 
-        let mut handle = self.handle.write().unwrap_or_else(|e| e.into_inner());
+        let handle = self.handle.write().unwrap_or_else(|e| e.into_inner());
         if !handle.loaded {
             return Err(SdkError::NotLoaded);
         }
@@ -3157,7 +3157,7 @@ impl XybridModel {
             crate::telemetry::TelemetryPipelineContextGuard::install(None, Some(trace_id));
 
         // Recover from poisoned RwLock to prevent permanent lock errors
-        let mut handle = self.handle.write().unwrap_or_else(|e| e.into_inner());
+        let handle = self.handle.write().unwrap_or_else(|e| e.into_inner());
 
         if !handle.loaded {
             return Err(SdkError::NotLoaded);
@@ -3315,7 +3315,7 @@ impl XybridModel {
             crate::telemetry::TelemetryPipelineContextGuard::install(None, Some(trace_id));
 
         // Get write lock on handle
-        let mut handle = self.handle.write().unwrap_or_else(|e| e.into_inner());
+        let handle = self.handle.write().unwrap_or_else(|e| e.into_inner());
 
         if !handle.loaded {
             return Err(SdkError::NotLoaded);
@@ -3529,7 +3529,7 @@ impl XybridModel {
             crate::telemetry::TelemetryPipelineContextGuard::install(None, Some(trace_id));
 
         // Get write lock on handle
-        let mut handle = self.handle.write().unwrap_or_else(|e| e.into_inner());
+        let handle = self.handle.write().unwrap_or_else(|e| e.into_inner());
 
         if !handle.loaded {
             return Err(SdkError::NotLoaded);
@@ -3969,7 +3969,7 @@ impl XybridModel {
                 }
 
                 // Get write lock on handle
-                let mut guard = handle.write().unwrap_or_else(|e| e.into_inner());
+                let guard = handle.write().unwrap_or_else(|e| e.into_inner());
 
                 if !guard.loaded {
                     return Err(SdkError::NotLoaded);
@@ -4143,7 +4143,7 @@ impl XybridModel {
                 crate::telemetry::TelemetryPipelineContextGuard::install(None, Some(trace_id));
 
             // Recover from poisoned RwLock to prevent permanent lock errors
-            let mut guard = handle.write().unwrap_or_else(|e| e.into_inner());
+            let guard = handle.write().unwrap_or_else(|e| e.into_inner());
 
             if !guard.loaded {
                 return Err(SdkError::NotLoaded);
