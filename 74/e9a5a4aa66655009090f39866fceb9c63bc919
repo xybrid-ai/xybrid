@@ -1,0 +1,60 @@
+tools/scripts/gen_python_bolt.py
+  s_614e8de50f4d44::t_91281753d9bb6f 118
+  s_614e8de50f4d44::t_04163c2f82f67d 48-53
+  s_614e8de50f4d44::t_04eaba40862673 98
+.github/workflows/ci.yml
+  s_614e8de50f4d44::t_427399fa3a9efd 123-154
+  s_614e8de50f4d44::t_ef711f845b35c8 36
+  s_614e8de50f4d44::t_1dc9cc3ca8dbe7 442-446
+  s_614e8de50f4d44::t_1587f85516392d 71-77
+  s_614e8de50f4d44::t_af390cb998806c 420
+bindings/python/.gitignore
+  s_614e8de50f4d44::t_86b94261f62dc1 1-9
+  s_614e8de50f4d44::t_af4ca1b47c46c5 13
+bindings/python/xybrid/_sugar.py
+  s_614e8de50f4d44::t_d03d5e8d80c329 278-279,282-283
+  s_614e8de50f4d44::t_4ebfd158f82f3c 1-277,280-281,284-311
+tools/scripts/build-python-bolt.sh
+  s_614e8de50f4d44::t_946b5e5222e4f0 13-15,19-20
+  s_614e8de50f4d44::t_a7d0451ef30780 56-62
+bindings/python/xybrid/_errors.py
+  s_614e8de50f4d44::t_b288380c760674 1-298
+CHANGELOG.md
+  s_614e8de50f4d44::t_1986aaaca36d14 10-40
+bindings/python/pyproject.toml
+  s_614e8de50f4d44::t_8772a323d3a18c 27-31
+bindings/python/setup.py
+  s_614e8de50f4d44::t_a5f372b133f991 60-63,65,67
+  s_614e8de50f4d44::t_dd93c9b11a9658 36-38,42
+  s_614e8de50f4d44::t_1325060f4ebec0 1-12,25-27
+  s_614e8de50f4d44::t_1fcb63409d2c1e 56,59,64,66,68-69,71
+AGENTS.md
+  s_614e8de50f4d44::t_306a0eb2913d69 156-168
+bindings/python/xybrid/__init__.py
+  s_614e8de50f4d44::t_18dfbe5cacc449 13-14,17-25
+  s_614e8de50f4d44::t_dce6cf6f1fb399 101-114
+  s_614e8de50f4d44::t_1f0cb5652079df 26
+bindings/python/tests/test_sdk.py
+  s_614e8de50f4d44::t_16beda243acb38 1-10,13-14,17-33,36-44,47,82-86,88-89,93,96-98,110-111,118,121,126-171,206-253
+bindings/python/README.md
+  s_614e8de50f4d44::t_6db9c8d86b0b3a 3,6-7,13,18-20,29-31
+  s_614e8de50f4d44::t_3be8fe88130aa2 137-138,140-143,145,147-148,151-153,156-167,174,177-178,180-182,184
+crates/xybrid-bolt/boltffi.toml
+  s_614e8de50f4d44::t_5803264fdeea62 113-115
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "74e9a5a4aa66655009090f39866fceb9c63bc919",
+  "prompts": {},
+  "sessions": {
+    "s_614e8de50f4d44": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1d700805-4628-483d-b359-6798786ec414",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
