@@ -1,0 +1,49 @@
+bindings/flutter/lib/src/result.dart
+  s_d67ab5389ed620::t_94054fcf3080ba 90-95
+bindings/unity/Runtime/Api/InferenceResult.cs
+  s_d67ab5389ed620::t_6f9e13e8816ab8 105-113,122-124,134,164-165
+bindings/react-native/android/src/main/java/ai/xybrid/reactnative/XybridModule.kt
+  s_d67ab5389ed620::t_b0518db63621ad 355-365
+bindings/flutter/lib/src/model_loader.dart
+  s_d67ab5389ed620::t_a5b83d4bea400d 252-284,292-293
+  s_d67ab5389ed620::t_5d43fbef8f126a 285-291
+  s_d67ab5389ed620::t_f2e41b6b509c08 142-162
+bindings/python/tests/test_bolt.py
+  s_d67ab5389ed620::t_f3f8d09c957768 160-161,176-218,220-230,232,234-246,248-250
+  s_d67ab5389ed620::t_3ff115e7b07830 162-175,219,231,233,247,251-252
+bindings/flutter/rust/src/api/model.rs
+  s_d67ab5389ed620::t_e8d55b5365bab1 675-678,683-684
+  s_d67ab5389ed620::t_da0db238da8150 679-682
+bindings/python/xybrid/_bolt.py
+  s_d67ab5389ed620::t_242f9c3ce84d12 1565-1568,1572
+  s_d67ab5389ed620::t_b19b4fa23d82a8 1583-1584,1587,1590
+bindings/unity/Runtime/BoltSupplement/XybridInference.cs
+  s_d67ab5389ed620::t_cd5af33a46d04e 161-162,170-177,185,192,196-199,206
+bindings/flutter/lib/xybrid.dart
+  s_d67ab5389ed620::t_57b4aa018e76b6 100-103
+bindings/flutter/lib/src/xybrid.dart
+  s_d67ab5389ed620::t_19f41fab428349 167-187
+bindings/react-native/ios/XybridModuleImpl.swift
+  s_d67ab5389ed620::t_9d79d15823dd8d 378
+  s_d67ab5389ed620::t_71a3d57d2a2ef2 362-365
+  s_d67ab5389ed620::t_ada481ccce8402 372
+crates/xybrid-sdk/src/model.rs
+  s_d67ab5389ed620::t_86db426123d5eb 1187-1191,1193-1196
+  s_d67ab5389ed620::t_53206bb4b40466 1156-1161,1165
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "0d36ebf9bb7c20309345e334eb25c9b314acac32",
+  "prompts": {},
+  "sessions": {
+    "s_d67ab5389ed620": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6da553e1-7594-40a7-afa4-f47c611638a5",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
