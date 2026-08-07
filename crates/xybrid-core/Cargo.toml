@@ -27,6 +27,9 @@ path = "src/lib.rs"
 #   `xybrid-core`    : thin adapter glue (Phase 3 reduction)
 xybrid-llama-sys = { path = "../llama-cpp-sys", version = "0.4.1", optional = true }
 xybrid-llama = { path = "../xybrid-llama", version = "0.4.1", optional = true }
+# Safe whisper.cpp wrappers. Gated behind `asr-whispercpp`, which also pulls
+# `llm-llamacpp` — that is where the shared ggml comes from.
+xybrid-whisper = { path = "../xybrid-whisper", version = "0.4.1", optional = true }
 # Real Jinja engine for the llama.cpp chat-template fallback: when llama.cpp's
 # hardcoded non-Jinja matcher rejects a GGUF's embedded template (returns -1),
 # we render that template here instead. Gated with the deps below into
@@ -165,6 +168,20 @@ llm-llamacpp = [
     "dep:minijinja",
     "dep:minijinja-contrib",
 ]
+# whisper.cpp speech recognition. REQUIRES `llm-llamacpp`, and not as a
+# convenience: whisper.cpp is linked against the ggml that llama.cpp builds,
+# because a second ggml in one binary means duplicate symbols, a larger
+# artifact, and two divergent tensor runtimes in one process. The 3-layer split
+# mirrors llama's:
+#   `xybrid-whisper-sys` : raw FFI + cc build of the single whisper TU
+#   `xybrid-whisper`     : safe RAII + typed errors
+#   `xybrid-core`        : thin adapter glue
+asr-whispercpp = [
+    "llm-llamacpp",
+    "dep:xybrid-whisper",
+    "xybrid-whisper/bindings",
+]
+
 # The Rust vision pipeline (envelopes, preprocessing, strategy dispatch) is
 # always compiled in. This feature gates only the *native* llama multimodal
 # backend (mtmd bindings) on top of `llm-llamacpp`.

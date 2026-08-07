@@ -480,11 +480,15 @@ impl StreamSession {
 
     /// Infer optimal buffer configuration from model metadata.
     fn infer_buffer_config(metadata: &ModelMetadata, config: &StreamConfig) -> AudioBufferConfig {
-        // Check if this is a Whisper model (SafeTensors/Candle)
+        // Whisper on either backend: SafeTensors/Candle or GGML/whisper.cpp.
+        // The window shape is a property of the *model architecture* (30 s
+        // encoder, mel hop), not of the runtime executing it, so both get the
+        // same buffer configuration.
         let is_whisper = match &metadata.execution_template {
             ExecutionTemplate::SafeTensors { architecture, .. } => {
                 architecture.as_deref() == Some("whisper")
             }
+            ExecutionTemplate::GgmlWhisper { .. } => true,
             _ => false,
         };
 

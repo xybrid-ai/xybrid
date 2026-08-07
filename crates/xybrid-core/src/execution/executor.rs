@@ -325,6 +325,11 @@ impl TemplateExecutor {
         runtimes.insert("onnx".to_string(), Box::new(OnnxRuntime::new()));
         #[cfg(feature = "candle")]
         runtimes.insert("candle".to_string(), Box::new(CandleRuntime::new()));
+        #[cfg(feature = "asr-whispercpp")]
+        runtimes.insert(
+            "whispercpp".to_string(),
+            Box::new(crate::runtime_adapter::WhisperCppRuntime::new()),
+        );
         runtimes
     }
 
@@ -674,6 +679,19 @@ impl TemplateExecutor {
         }
 
         // Step 2: Single Model Execution
+        //
+        // Defaults a `GgmlWhisper` bundle declared (language / audio_ctx /
+        // translate). Carried out of the match and merged into the runtime
+        // envelope below rather than configuring the runtime object, so that
+        // per-request metadata keeps winning over bundle defaults — the same
+        // precedence every other runtime option has.
+        //
+        // Gated rather than always-declared-and-never-assigned: without the
+        // feature there is no arm to set it, and an unconditional `mut` binding
+        // would be an unused-mut lint the crate would then have to silence.
+        #[cfg(feature = "asr-whispercpp")]
+        let mut whisper_defaults: Option<Vec<(String, String)>> = None;
+
         let (runtime_type, model_file) = match &metadata.execution_template {
             ExecutionTemplate::SafeTensors { model_file, .. } => ("candle", model_file.clone()),
             ExecutionTemplate::Onnx { model_file } => ("onnx", model_file.clone()),
@@ -735,6 +753,33 @@ impl TemplateExecutor {
                         .to_string(),
                 ));
             }
+            #[cfg(feature = "asr-whispercpp")]
+            ExecutionTemplate::GgmlWhisper {
+                model_file,
+                language,
+                audio_ctx,
+                translate,
+            } => {
+                let mut defaults = Vec::new();
+                if let Some(language) = language {
+                    defaults.push(("language".to_string(), language.clone()));
+                }
+                // Always carried, including 0: 0 means "no encoder truncation",
+                // which is a real choice the bundle made, not an absent value.
+                defaults.push(("audio_ctx".to_string(), audio_ctx.to_string()));
+                if *translate {
+                    defaults.push(("task".to_string(), "translate".to_string()));
+                }
+                whisper_defaults = Some(defaults);
+
+                ("whispercpp", model_file.clone())
+            }
+            #[cfg(not(feature = "asr-whispercpp"))]
+            ExecutionTemplate::GgmlWhisper { .. } => {
+                return Err(AdapterError::RuntimeError(
+                    "GGML Whisper execution requires the 'asr-whispercpp' feature".to_string(),
+                ));
+            }
         };
 
         debug!(
@@ -787,7 +832,34 @@ impl TemplateExecutor {
         } else {
             // Standard execution path
             debug!(target: "xybrid_core", "Using standard execution path");
-            let runtime_input = preprocessed.to_envelope()?;
+            #[cfg_attr(
+                not(feature = "asr-whispercpp"),
+                expect(
+                    unused_mut,
+                    reason = "only the whisper.cpp arm below mutates the envelope metadata"
+                )
+            )]
+            let mut runtime_input = preprocessed.to_envelope()?;
+
+            // Restore the caller's request options, then fill the gaps with the
+            // bundle's declared defaults — so an explicit `language` or `task`
+            // on the request wins over what the bundle chose.
+            //
+            // The restore step is necessary because `to_envelope()` builds a
+            // fresh envelope from the preprocessed payload and does not carry
+            // the input's metadata across. Scoped to the whisper path rather
+            // than done unconditionally: the other runtimes have never seen
+            // request metadata here, and widening that silently would change
+            // behaviour well beyond ASR.
+            #[cfg(feature = "asr-whispercpp")]
+            if let Some(defaults) = whisper_defaults {
+                for (key, value) in &input.metadata {
+                    runtime_input.metadata.insert(key.clone(), value.clone());
+                }
+                for (key, value) in defaults {
+                    runtime_input.metadata.entry(key).or_insert(value);
+                }
+            }
 
             // Get Runtime & Execute
             let runtime = self.runtimes.get_mut(runtime_type).ok_or_else(|| {
