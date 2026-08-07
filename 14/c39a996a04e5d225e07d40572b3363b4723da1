@@ -1,0 +1,36 @@
+crates/whisper-cpp-sys/build.rs
+  s_9f04bb23700740::t_1815bfed594057 162-165,340-346,363-365,379-448
+  s_5d13e36730a591::t_fa2b67bcdf6bf1 449-455
+crates/llama-cpp-sys/build.rs
+  s_9f04bb23700740::t_55bece436900bd 641-647
+examples/flutter/lib/screens/live_asr_demo_screen.dart
+  s_9f04bb23700740::t_39df6202e6d27e 78-99,174,208-209,219-222,244-261
+  s_9f04bb23700740::t_c070617ae1225d 306,309-311,329,345-354,388-389
+  s_9f04bb23700740::t_6c17794535c0e1 2,5,26-52,56-57,110,112,118-132,158-173
+  s_9f04bb23700740::t_0a66c4e6f9bbe7 400-407,438-447
+  s_9f04bb23700740::t_191e2c5363453f 175,262
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "14c39a996a04e5d225e07d40572b3363b4723da1",
+  "prompts": {},
+  "sessions": {
+    "s_5d13e36730a591": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "481cdf5a-1ee6-4b25-a445-cbb7c964ffdc",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    },
+    "s_9f04bb23700740": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "cf542ea4-a493-4e35-92e5-530163651bf9",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
