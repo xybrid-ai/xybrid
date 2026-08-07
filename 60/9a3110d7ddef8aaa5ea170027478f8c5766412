@@ -1,0 +1,177 @@
+crates/xybrid-bolt/src/lib.rs
+  s_d67ab5389ed620::t_b4f817df519f5a 735-759
+  s_d67ab5389ed620::t_dbe19e583a81ba 814-827
+  s_d67ab5389ed620::t_ac183fc4ed8e18 874-893
+  s_d67ab5389ed620::t_cdb65c6b1ee988 454-456,460-509,518
+crates/xybrid-sdk/src/model.rs
+  s_d67ab5389ed620::t_7bca4ebe2f2950 4749-4750
+  s_d67ab5389ed620::t_9f62dc00ff2d9d 4694-4748,4751-4769
+  s_d67ab5389ed620::t_1676df92d846d4 750
+  s_d67ab5389ed620::t_56cf6cbab3bd37 1747-1753
+  s_d67ab5389ed620::t_17eafabf8de484 1179
+  s_d67ab5389ed620::t_e3384ae374ece0 2370-2408
+  s_d67ab5389ed620::t_dc77a8212c15e2 1126-1155,1162-1164,1166-1178,1180-1186,1192,1197-1208
+  s_d67ab5389ed620::t_398dfaf1e141d3 1248,1281
+  s_d67ab5389ed620::t_86db426123d5eb 1187-1191,1193-1196
+  s_d67ab5389ed620::t_53206bb4b40466 1156-1161,1165
+crates/xybrid-sdk/src/result.rs
+  s_d67ab5389ed620::t_177b16fb1ccf45 156-189,192-194,196-215,224,229-232
+  s_d67ab5389ed620::t_7dc0aae4657edb 150-151
+  s_d67ab5389ed620::t_73ddb28c26998f 241-245,252
+  s_5d13e36730a591::t_4554c325031831 233
+crates/xybrid-sdk/src/lib.rs
+  s_d67ab5389ed620::t_36d6e9bc4f38d7 223-224
+  s_d67ab5389ed620::t_518bde4e3b61fd 258-260
+crates/xybrid-ffi-facade/src/lib.rs
+  s_d67ab5389ed620::t_cf014e8d19aea8 1045,1053
+  s_d67ab5389ed620::t_0df6dfaa9efbcf 1204-1230
+  s_d67ab5389ed620::t_2f678a3c2e250d 915-917,921-964
+  s_d67ab5389ed620::t_387b9d79963492 1352-1380
+  s_d67ab5389ed620::t_f439ced265e8ce 965,1672-1694
+  s_d67ab5389ed620::t_cb3e4c199e534d 2110
+  s_d67ab5389ed620::t_0efa144d73e5c7 966
+bindings/flutter/lib/src/rust/frb_generated.dart
+  s_d67ab5389ed620::t_02e47b332d1b7b 83,184-186,193-202,307-308,318-322,1202-1228,1238,1268,1287-1393,1408,1448,1509,1567,1612,1648,1676,1703,1729,1753,1778,1803,1829,1858,1883,1909,1936,1963,1990,2019,2043,2067,2090,2114,2137,2161,2186,2213,2238,2265,2291,2316,2334-2358,2364,2389,2413,2438,2456-2505,2511,2534,2558,2991-3014,3139-3140,3148-3149,3854-3877,4027,4036,4878-4899,5008,5570-5603,5833-5839
+bindings/flutter/lib/src/rust/frb_generated.io.dart
+  s_d67ab5389ed620::t_02e47b332d1b7b 265-273,630-640,1011-1021
+  s_d67ab5389ed620::t_978b5bd53e3e23 1022
+bindings/flutter/rust/src/api/sdk_client.rs
+  s_d67ab5389ed620::t_24c57d6f45de3f 88-115
+bindings/flutter/lib/src/rust/api/model.dart
+  s_d67ab5389ed620::t_02e47b332d1b7b 19,21,53-77,254-265,278-320
+bindings/flutter/lib/src/rust/frb_generated.web.dart
+  s_d67ab5389ed620::t_02e47b332d1b7b 267-275,632-642,1013-1023
+  s_d67ab5389ed620::t_9373570c3994ab 1024
+bindings/flutter/rust/src/frb_generated.rs
+  s_d67ab5389ed620::t_02e47b332d1b7b 47,1239-1270,1385-1583,3035-3065,3192-3255,3644-3680,3864-3865,3874,4363-4370,4376-4378,4384,4390,4393,4399-4403,4409,4415,4515-4542,4547,4552,4557,4562,4567,4572,4577,4582,4587,4592,4597,4602,4607,4612,4617,4622,4627-4632,4635,4785-4848,5085,5622-5662,5812
+bindings/flutter/rust/src/api/pipeline.rs
+  s_d67ab5389ed620::t_e0825c1ca11848 79-90
+bindings/flutter/lib/src/rust/api/result.dart
+  s_d67ab5389ed620::t_02e47b332d1b7b 13-24,91-93,103,115,129
+bindings/flutter/rust/src/api/model.rs
+  s_d67ab5389ed620::t_7c8735dc2b3dee 553-572
+  s_d67ab5389ed620::t_bce5362ddd6e67 637-674,685-702
+  s_d67ab5389ed620::t_7787f6dc23c513 486-520
+  s_d67ab5389ed620::t_e8d55b5365bab1 675-678,683-684
+  s_d67ab5389ed620::t_da0db238da8150 679-682
+bindings/flutter/rust/src/api/result.rs
+  s_d67ab5389ed620::t_b25409981cbd26 72-73
+  s_d67ab5389ed620::t_8255e7bfc2a96e 86,91-106,109
+  s_d67ab5389ed620::t_4322b63f73bf98 107-108
+bindings/flutter/lib/src/rust/api/sdk_client.dart
+  s_d67ab5389ed620::t_02e47b332d1b7b 74-77,98-116
+bindings/react-native/ios/XybridModule.mm
+  s_d67ab5389ed620::t_2ae7b5a27150ea 46-52
+  s_d67ab5389ed620::t_2ad9c6bc136047 184-227
+bindings/python/tests/test_sdk.py
+  s_d67ab5389ed620::t_268142214892eb 59
+  s_d67ab5389ed620::t_42eb69c154b735 67,75,83,110
+bindings/react-native/src/index.ts
+  s_d67ab5389ed620::t_cede8d49712fe5 331-363
+  s_d67ab5389ed620::t_b0466fff1f6675 139-162
+  s_d67ab5389ed620::t_f31b95563ff59f 172-188
+  s_d67ab5389ed620::t_7892b534c70428 3,18-19,22
+bindings/python/tests/test_bolt.py
+  s_d67ab5389ed620::t_aedb67fcb4b98a 123-159
+  s_d67ab5389ed620::t_f3f8d09c957768 160-161,176-218,220-230,232,234-246,248-250
+  s_d67ab5389ed620::t_3ff115e7b07830 162-175,219,231,233,247,251-252
+bindings/python/xybrid/_bolt.py
+  s_d67ab5389ed620::t_44e7d8997ef943 1325-1354
+  s_d67ab5389ed620::t_fdd9b08dec0573 122-141
+  s_d67ab5389ed620::t_a025b0add42e12 45,47,53,55
+  s_d67ab5389ed620::t_bc41b2c81ecdef 841-863
+  s_d67ab5389ed620::t_8655d9555298de 1419-1436
+  s_d67ab5389ed620::t_ea69f8babf34a1 1089-1094
+  s_d67ab5389ed620::t_c578b440bd00ec 1098-1105
+  s_d67ab5389ed620::t_7a8259e1f25667 1696-1697,1701,1717,1722,1724
+  s_d67ab5389ed620::t_b5c2d5577f9dbd 1545-1564,1569-1571,1573-1582,1585-1586,1588-1589,1591
+  s_d67ab5389ed620::t_bb31fe4ca4f661 35,39-40
+  s_d67ab5389ed620::t_1778c0b73313f4 872,882
+  s_d67ab5389ed620::t_852414c28cdfbc 891
+  s_d67ab5389ed620::t_2a91172c5d8b67 840,1418,1544
+  s_d67ab5389ed620::t_242f9c3ce84d12 1565-1568,1572
+  s_d67ab5389ed620::t_b19b4fa23d82a8 1583-1584,1587,1590
+bindings/react-native/src/NativeXybrid.ts
+  s_d67ab5389ed620::t_c6abbf65aaebf8 41-51
+  s_d67ab5389ed620::t_2e9a045567782b 92-100
+  s_d67ab5389ed620::t_40e859d77d09d3 22-27
+bindings/react-native/src/types.ts
+  s_d67ab5389ed620::t_32a416d8c1ae99 92-118
+bindings/react-native/android/src/main/java/ai/xybrid/reactnative/XybridModule.kt
+  s_d67ab5389ed620::t_cbcc53693b3ec5 16,18,32,120-126,323-354,366-387,602-605,617-629,631
+  s_d67ab5389ed620::t_caa3bfd91d76d5 630,632
+  s_d67ab5389ed620::t_b0518db63621ad 355-365
+bindings/react-native/ios/XybridModuleImpl.swift
+  s_d67ab5389ed620::t_6a18e1b1850072 67-76
+  s_d67ab5389ed620::t_e8735ac5fc30ea 319-361,366-371,373-377,379-380
+  s_d67ab5389ed620::t_8c9d4102ef52a5 548-560,565
+  s_d67ab5389ed620::t_9d79d15823dd8d 378
+  s_d67ab5389ed620::t_71a3d57d2a2ef2 362-365
+  s_d67ab5389ed620::t_ada481ccce8402 372
+bindings/apple/Sources/Xybrid/xybrid_bolt.swift
+  s_d67ab5389ed620::t_850890ed90e28e 715-716,878,931-934
+  s_d67ab5389ed620::t_c85a18cade3969 201-203,206,211,219,226,231-253,656-714,857-877,921-930,935,1002-1024
+  s_d67ab5389ed620::t_62533e4fdcba34 717,879,936,1025
+bindings/kotlin/src/main/kotlin/ai/xybrid/XybridBolt.kt
+  s_d67ab5389ed620::t_850890ed90e28e 1540-1542
+  s_d67ab5389ed620::t_815231b8895d5d 1009-1058,1299-1303,1312,1321,1329,1334-1359,1533-1539,1543-1561,1618-1631,1691-1725,2430-2432,2438,2448-2450
+tools/scripts/gen_unity_bolt_csharp.py
+  s_d67ab5389ed620::t_a910758689ab11 126-130
+bindings/unity/Runtime/Bolt/XybridDownloadState.cs
+  s_d67ab5389ed620::t_9a5ef880c351ee 1-45
+bindings/unity/Runtime/Bolt/XybridExecutionTarget.cs
+  s_d67ab5389ed620::t_9a5ef880c351ee 1-39
+bindings/unity/Runtime/Bolt/XybridExecutionTarget.cs.meta
+  s_d67ab5389ed620::t_9a5ef880c351ee 1-2
+bindings/unity/Runtime/Bolt/XybridDownloadStatus.cs
+  s_d67ab5389ed620::t_9a5ef880c351ee 1-36
+bindings/unity/Runtime/Bolt/XybridModel.cs
+  s_d67ab5389ed620::t_9a5ef880c351ee 33-49,135-181
+  s_d67ab5389ed620::t_9a07c911e41a0a 182
+bindings/apple/include/xybrid-bolt.h
+  s_d67ab5389ed620::t_c85a18cade3969 51-57,66
+bindings/unity/Runtime/Bolt/XybridDownloadState.cs.meta
+  s_d67ab5389ed620::t_9a5ef880c351ee 1-2
+bindings/unity/Runtime/Bolt/XybridDownloadStatus.cs.meta
+  s_d67ab5389ed620::t_9a5ef880c351ee 1-2
+bindings/unity/Runtime/Bolt/XybridBolt.cs
+  s_d67ab5389ed620::t_9a5ef880c351ee 105-134,770-776,792-794,815-821
+bindings/flutter/lib/src/result.dart
+  s_d67ab5389ed620::t_94054fcf3080ba 90-95
+bindings/unity/Runtime/Api/InferenceResult.cs
+  s_d67ab5389ed620::t_6f9e13e8816ab8 105-113,122-124,134,164-165
+bindings/flutter/lib/src/model_loader.dart
+  s_d67ab5389ed620::t_a5b83d4bea400d 252-284,292-293
+  s_d67ab5389ed620::t_5d43fbef8f126a 285-291
+  s_d67ab5389ed620::t_f2e41b6b509c08 142-162
+bindings/unity/Runtime/BoltSupplement/XybridInference.cs
+  s_d67ab5389ed620::t_cd5af33a46d04e 161-162,170-177,185,192,196-199,206
+bindings/flutter/lib/xybrid.dart
+  s_d67ab5389ed620::t_57b4aa018e76b6 100-103
+bindings/flutter/lib/src/xybrid.dart
+  s_d67ab5389ed620::t_19f41fab428349 167-187
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "609a3110d7ddef8aaa5ea170027478f8c5766412",
+  "prompts": {},
+  "sessions": {
+    "s_5d13e36730a591": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "481cdf5a-1ee6-4b25-a445-cbb7c964ffdc",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    },
+    "s_d67ab5389ed620": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6da553e1-7594-40a7-afa4-f47c611638a5",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
