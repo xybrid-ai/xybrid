@@ -44,16 +44,32 @@ crates/xybrid-sdk/src/model.rs
   s_37833f24f6cf58::t_e213cd2c50013d 4144
   s_37833f24f6cf58::t_84ec1f64793eba 4469-4554,4559-4619,4621-4657
   s_37833f24f6cf58::t_6d964cb88a688e 2540-2543,2545-2565
+  s_37833f24f6cf58::t_04dff9ad682a0b 1943-1950,1961,4982,5025,5078
+  s_37833f24f6cf58::t_0e4bf913c336c2 20
+  s_37833f24f6cf58::t_063f7926e84208 4275
+  s_37833f24f6cf58::t_9ec01f1d9b1ea5 1877,1881-1884,2735,4974,4991,5016,5039,5070
+  s_37833f24f6cf58::t_2275bdfe809008 2282,3110,3316,3475,3687
 crates/xybrid-sdk/src/lib.rs
   s_37833f24f6cf58::t_0ec4d9255be301 159
   s_37833f24f6cf58::t_c5ad6629997078 574-606
   s_37833f24f6cf58::t_9fdd4462c43176 227
+  s_37833f24f6cf58::t_2075f8aa6ef960 224-225
 crates/xybrid-ffi-facade/src/lib.rs
   s_37833f24f6cf58::t_f79c09d919214e 1707-1734
 bindings/flutter/rust/src/api/sdk_client.rs
   s_da9b0a0afc6e02::t_679f109fb34ee6 116-142
 crates/xybrid-bolt/src/lib.rs
   s_d67ab5389ed620::t_b5278db7d6696c 776-802
+docs/sdk/api-surface.yaml
+  s_37833f24f6cf58::t_d85eceece6de4f 53-68
+bindings/flutter/lib/src/xybrid.dart
+  s_37833f24f6cf58::t_17de0595d32457 188-215
+bindings/flutter/lib/src/rust/frb_generated.dart
+  s_37833f24f6cf58::t_bfa5c3bc9d4dc0 83,305-306,313-314,319-320,2315-2338,2346,2369,2394,2414-2436,2442,2466,2484-2507,2515,2539,2564,2588,2611,2635
+bindings/flutter/lib/src/rust/api/sdk_client.dart
+  s_37833f24f6cf58::t_bfa5c3bc9d4dc0 65-68,88-96,108-115
+bindings/flutter/rust/src/frb_generated.rs
+  s_37833f24f6cf58::t_bfa5c3bc9d4dc0 47,3003-3033,3128-3157,3221-3252,4680-4695,4700,4705,4710,4715,4720,4725,4730,4735,4740,4743
 ---
 {
   "schema_version": "authorship/3.0.0",
