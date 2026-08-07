@@ -276,6 +276,21 @@ fn worker_loop(stream: XybridStream, mut cmd_rx: mpsc::UnboundedReceiver<Command
     ensure_logging();
     log::debug!("ASR worker started");
 
+    // Pay the model's cold-start cost (~5 s for whisper-tiny on a Pixel 8)
+    // while the app is still spinning up the microphone, instead of on top
+    // of the first visible partial. Feeds that arrive meanwhile just queue
+    // on the command channel and drain against a warm model.
+    let warmup_started = std::time::Instant::now();
+    match stream.warmup() {
+        Ok(()) => log::info!(
+            "ASR model warmed up in {} ms",
+            warmup_started.elapsed().as_millis()
+        ),
+        // Non-fatal: the first real chunk will retry the load and surface
+        // any real failure through the partial-event error path.
+        Err(e) => log::warn!("ASR warm-up failed (continuing cold): {}", error_chain(&e)),
+    }
+
     let mut sink: Option<StreamSink<FfiPartialResult>> = None;
     // Latest partial produced before a sink is attached. `feed` is `#[frb(sync)]`
     // and fires immediately, but `subscribe` is async, so the first feeds can

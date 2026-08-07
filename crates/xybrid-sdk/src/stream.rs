@@ -205,6 +205,29 @@ impl XybridStream {
             .unwrap_or_default()
     }
 
+    /// Pay the model's cold-start cost now, before real audio arrives.
+    ///
+    /// The first inference of a session lazily loads weights and pays
+    /// first-run costs; calling this right after creating the stream (e.g.
+    /// on a background thread while the microphone spins up) moves that
+    /// cost off the first visible partial. No-op once audio has been fed.
+    ///
+    /// # Errors
+    ///
+    /// Returns an inference error if the warm-up run fails; the session
+    /// stays usable.
+    pub fn warmup(&self) -> Result<(), SdkError> {
+        let mut handle = self
+            .handle
+            .write()
+            .map_err(|_| SdkError::inference("Failed to acquire stream lock"))?;
+
+        handle
+            .session
+            .warmup()
+            .map_err(|e| SdkError::inference_src("Warm-up failed", e))
+    }
+
     /// Feed audio samples to the stream.
     ///
     /// # Arguments

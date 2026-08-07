@@ -526,6 +526,41 @@ impl StreamSession {
         self.on_partial = Some(Arc::new(callback));
     }
 
+    /// Pay the model's cold-start cost now, before real audio arrives.
+    ///
+    /// Runs a short silent inference through the executor. The first
+    /// execution of a session lazily loads weights and pays first-run
+    /// allocation costs (measured ~5 s for whisper-tiny on a Pixel 8, vs
+    /// ~2.5 s warm) — doing it here overlaps that cost with the user
+    /// starting to speak instead of adding it to the first visible partial.
+    ///
+    /// Only meaningful in [`StreamState::Idle`]; once audio has been fed the
+    /// first chunk already paid the cost, so this becomes a no-op. The
+    /// transcript and audio buffer are untouched either way.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StreamError::InferenceError`] if the warm-up inference
+    /// fails; the session stays usable (state is not poisoned).
+    pub fn warmup(&mut self) -> StreamResult<()> {
+        if self.state != StreamState::Idle {
+            return Ok(());
+        }
+
+        // Half a second of silence. Whisper pads every input to its fixed
+        // mel window, so the duration barely matters — one encoder pass is
+        // the cost either way.
+        let sample_rate = self.buffer.config().sample_rate;
+        let silence = vec![0.0f32; (sample_rate as usize) / 2];
+        let wav_bytes = samples_to_wav(&silence, sample_rate);
+        let envelope = Envelope::new(EnvelopeKind::Audio(wav_bytes));
+
+        self.executor
+            .execute(&self.metadata, &envelope, None)
+            .map(|_| ())
+            .map_err(|e| StreamError::InferenceError(format!("Warm-up failed: {}", e)))
+    }
+
     /// Feed audio samples into the stream.
     ///
     /// # Arguments
