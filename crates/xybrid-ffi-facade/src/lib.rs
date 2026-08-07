@@ -1704,6 +1704,34 @@ pub fn will_speculate_for_model(model_id: String) -> bool {
         .will_speculate()
 }
 
+/// Release every idle loaded model's memory, returning how many were released.
+///
+/// The host hint behind automatic model release: call it from
+/// `didReceiveMemoryWarning` (iOS), `onTrimMemory` (Android), or your own
+/// desktop logic. Models with a run in flight are skipped, and a released
+/// model reloads itself on its next use — the caller never has to reload
+/// anything or handle a new error.
+///
+/// Deliberately a plain call, not a callback registration: nothing is
+/// signalled back across the FFI boundary.
+pub fn release_memory() -> u32 {
+    sdk::release_memory() as u32
+}
+
+/// Enable or disable automatic model release for subsequent loads.
+///
+/// When enabled, loading a model while the device reports memory pressure
+/// first releases least-recently-used idle models. Off by default.
+/// [`release_memory`] works regardless of this setting.
+pub fn set_auto_release(enabled: bool) {
+    sdk::set_auto_release(enabled);
+}
+
+/// Whether automatic model release is enabled process-wide.
+pub fn is_auto_release_enabled() -> bool {
+    sdk::auto_release_policy().on_pressure
+}
+
 // ============================================================================
 // Telemetry (advanced config + lifecycle)
 // ============================================================================

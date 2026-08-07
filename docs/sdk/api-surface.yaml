@@ -50,6 +50,22 @@ classes:
       isSpeculativeCloudEnabled:
         return: bool
         status: { dart: implemented, kotlin: planned, swift: planned, csharp: planned }
+      releaseMemory:
+        return: int
+        # Host-driven memory release: call from the platform's low-memory
+        # signal. Returns how many loaded models were released; each reloads
+        # itself transparently on its next run. Same reach as the other
+        # process-global settings — Dart exposes it on the entry-point class,
+        # the rest go through the generated bolt global.
+        status: { dart: implemented, kotlin: planned, swift: planned, csharp: planned }
+      setAutoRelease:
+        params: [{ name: enabled, type: bool }]
+        # Opt into releasing least-recently-used idle models when a load hits
+        # device memory pressure. Off by default.
+        status: { dart: implemented, kotlin: planned, swift: planned, csharp: planned }
+      isAutoReleaseEnabled:
+        return: bool
+        status: { dart: implemented, kotlin: planned, swift: planned, csharp: planned }
       model:
         params:
           - { name: source, type: ModelSource }

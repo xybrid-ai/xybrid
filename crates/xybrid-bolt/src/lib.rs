@@ -773,6 +773,33 @@ pub fn version() -> String {
     facade::version()
 }
 
+/// Release every idle loaded model's memory; returns how many were released.
+///
+/// Call this from the platform's low-memory hook (`didReceiveMemoryWarning`
+/// on iOS, `onTrimMemory` on Android). Models with a run in flight are
+/// skipped, and a released model reloads itself on next use — no reload call,
+/// no new error to handle.
+#[export]
+pub fn release_memory() -> u32 {
+    facade::release_memory()
+}
+
+/// Enable or disable automatic model release for subsequent loads.
+///
+/// When enabled, loading a model under device memory pressure first releases
+/// least-recently-used idle models. Off by default; [`release_memory`] works
+/// either way.
+#[export]
+pub fn set_auto_release(enabled: bool) {
+    facade::set_auto_release(enabled);
+}
+
+/// Whether automatic model release is enabled process-wide.
+#[export]
+pub fn is_auto_release_enabled() -> bool {
+    facade::is_auto_release_enabled()
+}
+
 // ============================================================================
 // XybridModel handle
 // ============================================================================

@@ -62,6 +62,10 @@ abstract class XybridSdkClient implements RustOpaqueInterface {
       XybridRustLib.instance.api.crateApiSdkClientXybridSdkClientInitTelemetry(
           endpoint: endpoint, apiKey: apiKey);
 
+  /// Whether automatic model release is enabled process-wide.
+  static bool isAutoReleaseEnabled() => XybridRustLib.instance.api
+      .crateApiSdkClientXybridSdkClientIsAutoReleaseEnabled();
+
   /// Check if a model is cached locally (extracted and ready to use).
   ///
   /// This is a pure filesystem check — no network access required.
@@ -81,6 +85,15 @@ abstract class XybridSdkClient implements RustOpaqueInterface {
   static bool isTelemetryInitialized() => XybridRustLib.instance.api
       .crateApiSdkClientXybridSdkClientIsTelemetryInitialized();
 
+  /// Release every idle loaded model's memory; returns how many were released.
+  ///
+  /// Wire this to the app's low-memory signal
+  /// (`WidgetsBindingObserver.didHaveMemoryPressure`). Models with a run in
+  /// flight are skipped, and a released model reloads itself the next time
+  /// it is used — Dart callers get no new error to handle.
+  static int releaseMemory() => XybridRustLib.instance.api
+      .crateApiSdkClientXybridSdkClientReleaseMemory();
+
   /// Return the xybrid runtime features compiled into this native library.
   ///
   /// Studio uses this to decide whether image upload should be enabled for
@@ -91,6 +104,15 @@ abstract class XybridSdkClient implements RustOpaqueInterface {
 
   static void setApiKey({required String apiKey}) => XybridRustLib.instance.api
       .crateApiSdkClientXybridSdkClientSetApiKey(apiKey: apiKey);
+
+  /// Enable or disable automatic model release for subsequent loads.
+  ///
+  /// When enabled, loading a model under device memory pressure first
+  /// releases least-recently-used idle models. Off by default;
+  /// [`Self::release_memory`] works either way.
+  static void setAutoRelease({required bool enabled}) =>
+      XybridRustLib.instance.api
+          .crateApiSdkClientXybridSdkClientSetAutoRelease(enabled: enabled);
 
   static void setGatewayUrl({required String gatewayUrl}) => XybridRustLib
       .instance.api
