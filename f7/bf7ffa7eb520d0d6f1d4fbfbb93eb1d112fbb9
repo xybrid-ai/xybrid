@@ -1,0 +1,23 @@
+BUILD.bazel
+  s_9153f3e3523df0::t_b282abd82b9fba 472,479-480
+  s_9153f3e3523df0::t_52c5dd3e144142 473-478
+crates/whisper-cpp-sys/build.rs
+  s_9153f3e3523df0::t_b282abd82b9fba 349-354
+  s_9153f3e3523df0::t_31090de93647ed 175-179
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "f7bf7ffa7eb520d0d6f1d4fbfbb93eb1d112fbb9",
+  "prompts": {},
+  "sessions": {
+    "s_9153f3e3523df0": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019fdd3f-5fcb-7e60-af1e-5f3623e305a0",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
