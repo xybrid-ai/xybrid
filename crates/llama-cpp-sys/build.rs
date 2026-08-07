@@ -638,6 +638,13 @@ fn emit_link_and_wrapper(
     // This is what keeps exactly one ggml in the binary.
     println!("cargo:root={}", dst.display());
     println!("cargo:src={}", llama_cpp_dir.display());
+    // The resolved NDK, so a dependent's bindgen can point libclang at the
+    // same sysroot. Without it, a cross-build's libclang resolves headers
+    // against the HOST sysroot and fails on `<stdio.h>`. Emitted only when the
+    // detection above actually found one, so its absence is meaningful.
+    if let Some(ndk) = ctx.android_ndk_path() {
+        println!("cargo:ndk={ndk}");
+    }
 
     println!("cargo:rustc-link-search=native={}/lib", dst.display());
     println!("cargo:rustc-link-search=native={}/lib64", dst.display());

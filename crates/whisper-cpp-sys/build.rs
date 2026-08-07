@@ -159,7 +159,10 @@ fn compile_whisper_cpp() {
         );
     }
 
-    generate_bindings(&whisper_dir, &ggml_include, &out_dir);
+    // Forwarded by xybrid-llama-sys (`links = "llama"`) once it has resolved an
+    // NDK. Absent on non-Android builds, which is exactly when it is unused.
+    let ndk_root = env::var("DEP_LLAMA_NDK").ok();
+    generate_bindings(&whisper_dir, &ggml_include, &out_dir, ndk_root.as_deref());
 
     let source = whisper_dir.join("src").join("whisper.cpp");
     assert_no_bundled_ggml(&whisper_dir, &source);
@@ -334,8 +337,13 @@ fn assert_no_bundled_ggml(whisper_dir: &Path, source: &Path) {
 /// already plain C behind `extern "C"`, so unlike the llama.cpp side there is
 /// no first-party `_c` shim to declare — `wrapper.h` only sets the include
 /// order up for bindgen.
-fn generate_bindings(whisper_dir: &Path, ggml_include: &Path, out_dir: &Path) {
-    let bindings = bindgen::Builder::default()
+fn generate_bindings(
+    whisper_dir: &Path,
+    ggml_include: &Path,
+    out_dir: &Path,
+    ndk_root: Option<&str>,
+) {
+    let builder = bindgen::Builder::default()
         .header("wrapper.h")
         .clang_arg(format!("-I{}", whisper_dir.join("include").display()))
         .clang_arg(format!("-I{}", ggml_include.display()))
@@ -352,7 +360,9 @@ fn generate_bindings(whisper_dir: &Path, ggml_include: &Path, out_dir: &Path) {
         // Android armv7. The #[repr(C)] declarations themselves remain
         // target-correct because pointers and usize retain their native size.
         .layout_tests(false)
-        .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
+        .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()));
+
+    let bindings = with_cross_compile_sysroot(builder, ndk_root)
         .generate()
         .unwrap_or_else(|e| fail("xybrid-whisper-sys: bindgen failed", &[format!("{e}")]));
 
@@ -364,6 +374,83 @@ fn generate_bindings(whisper_dir: &Path, ggml_include: &Path, out_dir: &Path) {
                 &[format!("{e}")],
             )
         });
+}
+
+/// Point libclang at the target's sysroot.
+///
+/// bindgen drives libclang, which resolves `<stdio.h>` (reached through
+/// `ggml.h`) against its OWN sysroot — the host's. On any cross-build that is
+/// the wrong one, and the parse fails with `fatal error: 'stdio.h' file not
+/// found` before a single binding is emitted.
+///
+/// This mirrors the same block in `crates/llama-cpp-sys/build.rs`; the two must
+/// stay in sync. The NDK path is not re-detected here — it arrives as
+/// `DEP_LLAMA_NDK` from that crate's `links = "llama"` metadata, so there is
+/// exactly one NDK-resolution implementation in the workspace.
+fn with_cross_compile_sysroot(
+    mut builder: bindgen::Builder,
+    ndk_root: Option<&str>,
+) -> bindgen::Builder {
+    let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
+    let target = env::var("TARGET").unwrap_or_default();
+
+    // clang 21+ rejects Rust's `-sim` simulator triples verbatim and wants the
+    // canonical `<arch>-apple-<os>-simulator` form (`arm64` is clang's spelling
+    // of `aarch64`). Device and other triples pass through unchanged.
+    let clang_target = match target.strip_suffix("-sim") {
+        Some(base) => format!("{}-simulator", base.replace("aarch64", "arm64")),
+        None => target.clone(),
+    };
+    builder = builder.clang_arg(format!("--target={clang_target}"));
+
+    if target_os == "macos" || target_os == "ios" {
+        let sdk = if target_os == "ios" {
+            if target.contains("sim") {
+                "iphonesimulator"
+            } else {
+                "iphoneos"
+            }
+        } else {
+            "macosx"
+        };
+        if let Ok(out) = process::Command::new("xcrun")
+            .args(["--show-sdk-path", "--sdk", sdk])
+            .output()
+        {
+            if out.status.success() {
+                let sdk_path = String::from_utf8_lossy(&out.stdout).trim().to_string();
+                if !sdk_path.is_empty() {
+                    builder = builder.clang_arg(format!("-isysroot{sdk_path}"));
+                }
+            }
+        }
+    } else if target_os == "android" {
+        let Some(ndk) = ndk_root else {
+            fail(
+                "xybrid-whisper-sys: no Android NDK for bindgen",
+                &[
+                    "DEP_LLAMA_NDK is unset, so libclang would resolve <stdio.h>".into(),
+                    "against the host sysroot and fail to parse ggml.h.".into(),
+                    String::new(),
+                    "xybrid-llama-sys emits this once it has detected the NDK;".into(),
+                    "set ANDROID_NDK_HOME if its detection is not finding one.".into(),
+                ],
+            );
+        };
+        let host_tag = if cfg!(target_os = "macos") {
+            "darwin-x86_64"
+        } else if cfg!(target_os = "linux") {
+            "linux-x86_64"
+        } else {
+            "windows-x86_64"
+        };
+        let sysroot = format!("{ndk}/toolchains/llvm/prebuilt/{host_tag}/sysroot");
+        if Path::new(&sysroot).is_dir() {
+            builder = builder.clang_arg(format!("--sysroot={sysroot}"));
+        }
+    }
+
+    builder
 }
 
 /// Clone the pinned commit into `$OUT_DIR` for consumers that don't ship the
