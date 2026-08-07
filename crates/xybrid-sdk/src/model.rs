@@ -1110,9 +1110,6 @@ fn publish_speculative_cloud_event(model_id: &str, latency_ms: u32, streaming: b
     crate::telemetry::publish_telemetry_event(event);
 }
 
-/// Serve a batch inference from the cloud gateway because the local model is
-/// not ready yet. Shared by `run` and `run_async`.
-///
 /// Ceiling for in-flight download progress, in basis points (99.99%).
 ///
 /// `fetch_extracted` restarts at 0 for every artifact, so hitting 1.0 on the

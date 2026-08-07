@@ -480,6 +480,7 @@ impl XybridModel {
 | `downloadStatus()` | ✅ | ✅ | ✅ | ✅ |
 | `awaitDownload()` | — | ✅ | ✅ | ✅ |
 | `downloadProgress()` | ✅ | — | — | — |
+| `executionProviderInfo()` | — | — | — | — |
 
 While a speculative load is still downloading, `isCloudServing()` is true and
 `downloadStatus()` returns the state (`downloading` / `ready` / `failed`) with
@@ -492,7 +493,6 @@ where the bolt bindings must not carry a closure across the FFI boundary.
 `XybridResult.executionTarget` reports whether an answer that already ran came
 from the device or the cloud; cloud fallback keeps the model id identical on
 both legs, so it is the only way to tell them apart.
-| `executionProviderInfo()` | — | — | — | — |
 
 ---
 
