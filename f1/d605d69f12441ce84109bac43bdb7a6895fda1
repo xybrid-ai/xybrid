@@ -1,0 +1,105 @@
+crates/xybrid-core/tests/whispercpp_asr.rs
+  s_9f04bb23700740::t_02d8b8c445e41f 1-9,11-16,18,20,22-94,96-128,130-132,134-140,204
+  s_9f04bb23700740::t_7110e58eaa146b 17,21,141-161,163-203
+  s_9f04bb23700740::t_035c48c8462753 95,133
+  s_9f04bb23700740::t_f21e45416a4979 19,129
+  s_9f04bb23700740::t_9c7d7f191d5e6f 10
+  s_9f04bb23700740::t_8418f9d8e14b1e 162
+integration-tests/fixtures/models/.gitignore
+  s_9f04bb23700740::t_6545a0656c06ee 15
+integration-tests/fixtures/models/whisper-ggml-tiny-en/model_metadata.json
+  s_9f04bb23700740::t_742639f48ce615 1,4-11,14-17,19-22,24,28
+  s_9f04bb23700740::t_7f26bad79103f1 2-3,12-13,18,23,25-27
+crates/llama-cpp-sys/build.rs
+  s_9f04bb23700740::t_8b707a4cf2c9ad 632-641
+crates/xybrid-whisper/Cargo.toml
+  s_9f04bb23700740::t_ce0439fab2d247 1-25
+crates/xybrid-core/src/runtime_adapter/whisper_cpp/mod.rs
+  s_9f04bb23700740::t_03d60973ac292f 1-27
+Cargo.toml
+  s_9f04bb23700740::t_7b641f678f9f99 11,13
+crates/xybrid-whisper/src/model.rs
+  s_9f04bb23700740::t_3a3ffdc0f0aaf7 116-118,134
+  s_9f04bb23700740::t_0aa72e4d6cbb8d 1-115,119-133,135-250
+crates/xybrid-core/src/execution/template/metadata.rs
+  s_9f04bb23700740::t_bb8160ccbe597e 678-681
+  s_9f04bb23700740::t_8d79b4460fa9c4 102-136
+  s_9f04bb23700740::t_07fd5f708a4611 813-816
+crates/whisper-cpp-sys/src/lib.rs
+  s_9f04bb23700740::t_922e4df26e4d1d 1-71
+crates/xybrid-whisper/src/lib.rs
+  s_9f04bb23700740::t_f34f6a1aa6a87e 1-67
+crates/xybrid-sdk/Cargo.toml
+  s_9f04bb23700740::t_134cca1d57f0f5 100-105
+crates/xybrid-whisper/src/error.rs
+  s_9f04bb23700740::t_f994aa2860a9ad 1-69
+crates/xybrid-core/src/runtime_adapter/mod.rs
+  s_9f04bb23700740::t_1d86910cb828f8 150
+  s_9f04bb23700740::t_353c755a6980a9 108-113,147-149
+Cargo.lock
+  s_9f04bb23700740::t_0e5bf138bac764 6321,6389-6406
+crates/whisper-cpp-sys/wrapper.h
+  s_9f04bb23700740::t_777fb7883f9116 1-25
+crates/xybrid-core/src/execution/executor.rs
+  s_9f04bb23700740::t_78a4026d4e7c2d 328-332
+  s_9f04bb23700740::t_e57f87b71b0930 688-692
+  s_9f04bb23700740::t_a68eaaceef903a 844-853,856,858
+  s_9f04bb23700740::t_ef747919d93ea7 854
+  s_9f04bb23700740::t_3a3ffdc0f0aaf7 857
+  s_9f04bb23700740::t_e66d247ab15ce6 835-841
+  s_9f04bb23700740::t_1e24b4303eed93 842-843,855,859-862
+  s_9f04bb23700740::t_2a385b70fb2de0 756-782
+  s_9f04bb23700740::t_53dcdc615d8e9e 682-687,693-694
+crates/whisper-cpp-sys/src/bindings.rs
+  s_9f04bb23700740::t_35cca6999195e1 1-1204
+crates/xybrid-whisper/src/params.rs
+  s_9f04bb23700740::t_3e31900bde39e9 1-158
+crates/xybrid-core/src/runtime_adapter/whisper_cpp/runtime.rs
+  s_9f04bb23700740::t_b05de21bea1334 5,30-37,57,96-101,116-117,184-185,189,192,195-196,220-227,231-235
+  s_9f04bb23700740::t_3a3ffdc0f0aaf7 228-230
+  s_9f04bb23700740::t_78a4026d4e7c2d 132-139
+  s_9f04bb23700740::t_8a66b5a74edd4b 1-4,6-29,38-56,58-95,102-115,118-131,140-183,186-188,190-191,193-194,197-219,236-367
+crates/xybrid-core/Cargo.toml
+  s_9f04bb23700740::t_f8ce5fa50c1a57 30-32,171-184
+crates/whisper-cpp-sys/Cargo.toml
+  s_9f04bb23700740::t_2eba7264d8d492 1-51
+crates/xybrid-whisper/tests/transcribe_smoke.rs
+  s_9f04bb23700740::t_9c7d7f191d5e6f 10
+  s_9f04bb23700740::t_3a3ffdc0f0aaf7 28-29,89-91
+  s_9f04bb23700740::t_d4b62afea284e0 1-9,11-27,30-88,92-168
+.gitmodules
+  s_9f04bb23700740::t_cccf1d9249a7e7 8
+  s_9f04bb23700740::t_c3b225d00f2adb 5-7
+crates/whisper-cpp-sys/build.rs
+  s_9f04bb23700740::t_d8866866770704 251-285
+  s_9f04bb23700740::t_0e4e532b9a23a8 215-248
+  s_9f04bb23700740::t_3a3ffdc0f0aaf7 118-139,203-210,346
+  s_9f04bb23700740::t_0aa88fcf9c948e 1-117,140-166,173-174,176-202,211-214,249-250,286-345,347-403
+  s_9f04bb23700740::t_62bcf8864ede22 167-172,175
+crates/xybrid-whisper/src/segment.rs
+  s_9f04bb23700740::t_3a3ffdc0f0aaf7 58-61
+  s_9f04bb23700740::t_3bec2a5ca00885 1-57,62-79
+crates/xybrid-core/src/streaming/session.rs
+  s_9f04bb23700740::t_8d9d78c5605081 483-486,491
+integration-tests/fixtures/models/models.json
+  s_9f04bb23700740::t_49ba402ddfd784 48
+  s_9f04bb23700740::t_a9a422106d9c32 23-47,49-61
+vendor/whisper-cpp
+  s_9f04bb23700740::t_1058d9eec1561f 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "f1d605d69f12441ce84109bac43bdb7a6895fda1",
+  "prompts": {},
+  "sessions": {
+    "s_9f04bb23700740": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "cf542ea4-a493-4e35-92e5-530163651bf9",
+        "model": "claude-opus-5"
+      },
+      "human_author": null
+    }
+  }
+}
