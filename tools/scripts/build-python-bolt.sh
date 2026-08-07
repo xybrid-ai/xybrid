@@ -10,17 +10,18 @@
 #   package under `bindings/python/xybrid/_bolt/` comes from
 #   `tools/scripts/gen_python_bolt.py`, and it imports a compiled CPython
 #   bridge (`_native`) that dlopens the cdylib sitting beside it.
-# - So this script builds the cdylib for the host, compiles that bridge via
-#   `boltffi pack python`, and stages both next to the generated sources.
+# - So this script runs `boltffi pack python`, which builds the cdylib, compiles
+#   that bridge against it, and emits a wheel; both artifacts are then staged
+#   next to the generated sources.
 #
 # Usage: ./tools/scripts/build-python-bolt.sh
 # Optional env overrides:
-#   XYBRID_FEATURES  Cargo features to enable
+#   XYBRID_FEATURES  Cargo features to enable (defaults per host OS below;
+#                    add llm-llamacpp for GGUF/LLM support)
 #   DEBUG=1          Build target/debug instead of target/release
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-PY_NATIVE_DIR="$REPO_ROOT/bindings/python/xybrid/_native"
 
 case "$(uname -s)" in
     Darwin)
@@ -49,24 +50,16 @@ echo "==> Building Python bolt native library"
 echo "    Features: $FEATURES"
 echo "    Profile:  $PROFILE"
 
-cd "$REPO_ROOT"
-# shellcheck disable=SC2086  # deliberate word-split: empty PROFILE_FLAG = debug
-cargo build -p xybrid_bolt $PROFILE_FLAG --features "$FEATURES"
-
-SRC="$REPO_ROOT/target/$PROFILE/$LIB_NAME"
-if [ ! -f "$SRC" ]; then
-    echo "error: expected native library not found at $SRC" >&2
-    exit 1
-fi
-
 PY_BOLT_DIR="$REPO_ROOT/bindings/python/xybrid/_bolt"
 mkdir -p "$PY_BOLT_DIR"
 
-# Compile the CPython bridge for the host interpreter. `pack` re-runs the
-# generator and builds `_native` next to it; take just that artifact, since the
-# .py sources are committed by gen_python_bolt.py.
-echo "==> Building the CPython bridge (boltffi pack python)"
-(cd "$REPO_ROOT/crates/xybrid-bolt" && boltffi pack python)
+# `pack` owns the cargo build: it compiles the cdylib, then the CPython bridge
+# against it, then wheels both. Features must reach *that* build — a separate
+# `cargo build --features ...` would only warm the cache, since the artifact
+# staged below comes from the wheel.
+# shellcheck disable=SC2086  # deliberate word-split: empty PROFILE_FLAG = debug
+(cd "$REPO_ROOT/crates/xybrid-bolt" && boltffi pack python $PROFILE_FLAG \
+    --cargo-arg=--features --cargo-arg="$FEATURES")
 
 # `pack` leaves the compiled bridge only inside the wheel, so take it from
 # there rather than from dist/, whose package dir holds just the sources.

@@ -110,8 +110,9 @@ enabled = false
 # Enabled on boltffi 0.29, whose Python generator finally expresses handle
 # types and fallible functions — the two gaps that forced bindings/python to
 # hand-port the ctypes wire layer against 0.25.3. `bindings/python/xybrid/
-# _bolt.py` is now generator output, copied by
-# tools/scripts/gen_python_bolt.py.
+# _bolt/` is now generator output, copied by tools/scripts/gen_python_bolt.py.
+# Note the target emits a compiled CPython extension, not ctypes: the SDK
+# therefore requires Python >= 3.10 and ships one wheel per interpreter ABI.
 [targets.python]
 output = "dist/python"
 enabled = true

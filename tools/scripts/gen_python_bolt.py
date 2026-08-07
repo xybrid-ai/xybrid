@@ -45,6 +45,12 @@ PINNED_BOLTFFI = "0.29.3"
 # build-python-bolt.sh compiles; the rest is the pure-Python wire layer.
 TRACKED_SUFFIXES = (".py", ".pyi", ".c", ".typed")
 
+# Binaries build-python-bolt.sh stages into the same directory: the compiled
+# bridge and the cdylib it dlopens. They are git-ignored build outputs, not
+# generator output, so they must survive both the prune and the drift check —
+# otherwise regenerating silently breaks `import xybrid`.
+STAGED_SUFFIXES = (".dylib", ".so", ".dll", ".pyd")
+
 
 def check_boltffi_version() -> None:
     try:
@@ -89,7 +95,7 @@ def main() -> int:
     names = {p.name for p in sources}
 
     if args.check:
-        stale = {p.name for p in DEST_DIR.glob("*") if p.is_file()} - names
+        stale = {p.name for p in DEST_DIR.glob("*") if p.is_file() and p.suffix not in STAGED_SUFFIXES} - names
         differing = [
             p.name
             for p in sources
@@ -109,7 +115,7 @@ def main() -> int:
 
     DEST_DIR.mkdir(parents=True, exist_ok=True)
     for path in DEST_DIR.glob("*"):
-        if path.is_file() and path.name not in names:
+        if path.is_file() and path.name not in names and path.suffix not in STAGED_SUFFIXES:
             path.unlink()
     for src in sources:
         shutil.copy2(src, DEST_DIR / src.name)

@@ -10,9 +10,19 @@ from __future__ import annotations
 import threading
 from typing import Final
 
-from . import _bolt
-from ._bolt import *  # noqa: F403 -- re-export the generated-style surface; _bolt defines __all__
+from . import _bolt, _errors, _sugar
+from ._bolt import *  # noqa: F403 -- re-export the generated surface; _bolt defines __all__
 from ._bolt import XybridEnvelope, XybridGenerationConfig, XybridModel, XybridResult, XybridVoiceInfo
+
+_errors._install()
+_sugar.install()
+
+# Imported after the star-import so the typed exceptions win the name
+# `XybridError`. The generated class of that name is the error *payload* union
+# (plain data, not an exception); it stays reachable as `_bolt.XybridError`,
+# and each of its variants is still re-exported under its own name.
+from ._errors import *  # noqa: E402,F403 -- ordering is deliberate, see above
+from ._errors import XybridError  # noqa: E402
 
 _INIT_LOCK: Final = threading.Lock()
 _INITIALIZED = False
@@ -88,14 +98,17 @@ GenerationConfig = XybridGenerationConfig
 Result = XybridResult
 VoiceInfo = XybridVoiceInfo
 
-__all__ = [
-    *_bolt.__all__,
-    "Envelope",
-    "GenerationConfig",
-    "GenerationConfigs",
-    "Model",
-    "Result",
-    "VoiceInfo",
-    "init",
-    "is_initialized",
-]
+__all__ = sorted(
+    {
+        *_bolt.__all__,
+        *_errors.__all__,
+        "Envelope",
+        "GenerationConfig",
+        "GenerationConfigs",
+        "Model",
+        "Result",
+        "VoiceInfo",
+        "init",
+        "is_initialized",
+    }
+)
