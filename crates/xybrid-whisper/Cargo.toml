@@ -1,0 +1,25 @@
+[package]
+name = "xybrid-whisper"
+version.workspace = true
+edition.workspace = true
+license = "MIT"
+repository.workspace = true
+description = "Safe Rust wrappers over xybrid-whisper-sys: RAII context handle, typed errors, validated transcription parameters. Zero `unsafe` on the public surface."
+
+[lib]
+name = "xybrid_whisper"
+path = "src/lib.rs"
+
+[features]
+# Default: empty crate that compiles on any target. Consumers opt in to the
+# real whisper.cpp-linked implementation via `bindings`, which forwards to
+# `xybrid-whisper-sys/bindings` (and transitively to the llama.cpp build that
+# provides ggml). Off by default so workspace-wide `cargo check` / `cargo
+# clippy` on lean runners stays green.
+default = []
+bindings = ["xybrid-whisper-sys/bindings"]
+
+[dependencies]
+xybrid-whisper-sys = { path = "../whisper-cpp-sys", version = "0.4.1" }
+thiserror = { workspace = true }
+tracing = "0.1"

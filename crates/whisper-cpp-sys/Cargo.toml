@@ -1,0 +1,51 @@
+[package]
+name = "xybrid-whisper-sys"
+version.workspace = true
+edition.workspace = true
+license = "MIT"
+repository.workspace = true
+description = "Raw FFI bindings to whisper.cpp. Compiles the single-translation-unit whisper library against the ggml that xybrid-llama-sys already builds — never a second copy."
+# Declares the native library this crate links. Cargo permits exactly one
+# package per dependency graph to claim a given `links` name, so a consumer
+# that also pulls crates.io's `whisper-rs-sys` (which claims `whisper` and
+# builds its OWN bundled ggml) fails resolution with a clear conflict instead
+# of silently static-linking two copies of ggml into one binary. That
+# collision is the single thing this crate's design exists to prevent, so the
+# name deliberately matches.
+links = "whisper"
+
+# The whisper.cpp source tree is fetched via the workspace-level submodule
+# consumed by build.rs (`vendor/whisper-cpp/`), which does not live under this
+# crate's manifest dir and is therefore never bundled into its tarball.
+
+[lib]
+name = "xybrid_whisper_sys"
+path = "src/lib.rs"
+
+[features]
+# Default: empty crate that compiles on any target. Consumers opt in by
+# enabling `bindings`, which pulls in the extern declarations and compiles
+# whisper.cpp. Mirrors `xybrid-llama-sys`'s gating so `cargo check --workspace`
+# on a CI runner without a C++ toolchain stays green.
+default = []
+bindings = ["xybrid-llama-sys/bindings"]
+# Compile against the committed `src/bindings.rs` snapshot instead of fresh
+# bindgen output in $OUT_DIR. Exists for the Bazel path, which has no build
+# script and therefore no bindgen/libclang. Cargo builds should not enable it.
+committed-bindings = ["bindings"]
+
+[dependencies]
+# Not for its Rust API — for its ggml. This dependency is what makes the
+# "exactly one ggml" invariant enforceable: `links = "llama"` metadata tells
+# us where that ggml's headers and archives are, so whisper.cpp compiles and
+# links against them instead of configuring its own bundled copy.
+xybrid-llama-sys = { path = "../llama-cpp-sys", version = "0.4.1" }
+
+[build-dependencies]
+# whisper.cpp's library is ONE translation unit (`src/whisper.cpp`) whose only
+# dependencies are the ggml headers and Threads — see `src/CMakeLists.txt`
+# upstream. So `cc` is sufficient and `cmake` is deliberately absent: running
+# whisper's CMake would configure its bundled ggml, which is exactly what this
+# crate must not do.
+cc = "1.0"
+bindgen = "0.70"

@@ -6318,6 +6318,7 @@ dependencies = [
  "windows-sys 0.59.0",
  "xybrid-llama",
  "xybrid-llama-sys",
+ "xybrid-whisper",
  "yuvutils-rs",
  "zstd",
 ]
@@ -6383,6 +6384,24 @@ dependencies = [
  "uuid",
  "xybrid-core",
  "xybrid-macros",
+]
+
+[[package]]
+name = "xybrid-whisper"
+version = "0.4.1"
+dependencies = [
+ "thiserror 1.0.69",
+ "tracing",
+ "xybrid-whisper-sys",
+]
+
+[[package]]
+name = "xybrid-whisper-sys"
+version = "0.4.1"
+dependencies = [
+ "bindgen",
+ "cc",
+ "xybrid-llama-sys",
 ]
 
 [[package]]

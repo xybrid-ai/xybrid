@@ -629,6 +629,16 @@ fn emit_link_and_wrapper(
     dst: &Path,
     vision_enabled: bool,
 ) {
+    // Metadata for direct dependents. Because this crate declares
+    // `links = "llama"`, cargo forwards these as `DEP_LLAMA_ROOT` /
+    // `DEP_LLAMA_SRC`. `whisper-cpp-sys` consumes both: `SRC` for the
+    // `ggml/include` headers it compiles whisper.cpp against, `ROOT` for the
+    // ggml archives it must re-emit AFTER `-lwhisper` (GNU ld resolves static
+    // archives left to right, and cargo emits a dependency's flags first).
+    // This is what keeps exactly one ggml in the binary.
+    println!("cargo:root={}", dst.display());
+    println!("cargo:src={}", llama_cpp_dir.display());
+
     println!("cargo:rustc-link-search=native={}/lib", dst.display());
     println!("cargo:rustc-link-search=native={}/lib64", dst.display());
     println!("cargo:rustc-link-search=native={}", dst.display());

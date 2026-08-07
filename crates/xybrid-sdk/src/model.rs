@@ -834,8 +834,11 @@ impl StreamConfig {
 
 /// Internal handle holding the loaded model state.
 struct ModelHandle {
-    /// Template executor for running inference
-    executor: TemplateExecutor,
+    /// Template executor for running inference.
+    ///
+    /// Shared with streaming sessions created by `stream()` so they reuse
+    /// the loaded model instead of paying a fresh cold start.
+    executor: Arc<Mutex<TemplateExecutor>>,
     /// Model metadata
     metadata: ModelMetadata,
     /// Model directory path (permanent extraction in cache)
@@ -1739,7 +1742,9 @@ impl ModelLoader {
         let placeholder = ModelHandle {
             // Lazy executor over the not-yet-populated extraction dir; never run
             // while `loaded == false` (runs route to cloud).
-            executor: TemplateExecutor::with_base_path(&model_dir.to_string_lossy()),
+            executor: Arc::new(Mutex::new(TemplateExecutor::with_base_path(
+                &model_dir.to_string_lossy(),
+            ))),
             metadata,
             model_dir,
             loaded: false,
@@ -2159,7 +2164,7 @@ impl ModelLoader {
         let executor = TemplateExecutor::with_base_path(model_dir.to_str().unwrap_or("."));
 
         Ok(ModelHandle {
-            executor,
+            executor: Arc::new(Mutex::new(executor)),
             metadata,
             model_dir: model_dir.clone(),
             loaded: true,
@@ -2731,13 +2736,15 @@ impl XybridModel {
             crate::telemetry::TelemetryPipelineContextGuard::install(None, Some(trace_id));
 
         let event_fields = {
-            let mut handle = self.handle.write().unwrap_or_else(|e| e.into_inner());
+            let handle = self.handle.write().unwrap_or_else(|e| e.into_inner());
             if !handle.loaded {
                 return Err(SdkError::NotLoaded);
             }
             let metadata = handle.metadata.clone();
             handle
                 .executor
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
                 .execute(&metadata, &warmup_input, None)
                 .map_err(|e| SdkError::inference_src("Warmup execution failed", e))?;
 
@@ -2832,7 +2839,7 @@ impl XybridModel {
             // path published nothing at all, so async warmups were
             // silent on the wire (visible only via logs).
             let event_fields = {
-                let mut guard = handle.write().unwrap_or_else(|e| e.into_inner());
+                let guard = handle.write().unwrap_or_else(|e| e.into_inner());
                 if !guard.loaded {
                     return Err(SdkError::NotLoaded);
                 }
@@ -2840,6 +2847,8 @@ impl XybridModel {
                 let metadata = guard.metadata.clone();
                 guard
                     .executor
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
                     .execute(&metadata, &warmup_input, None)
                     .map_err(|e| SdkError::inference_src("Warmup failed", e))?;
 
@@ -2939,7 +2948,7 @@ impl XybridModel {
             crate::telemetry::TelemetryPipelineContextGuard::install(None, Some(trace_id));
 
         // Recover from poisoned RwLock to prevent permanent lock errors
-        let mut handle = self.handle.write().unwrap_or_else(|e| e.into_inner());
+        let handle = self.handle.write().unwrap_or_else(|e| e.into_inner());
 
         if !handle.loaded {
             return Err(SdkError::NotLoaded);
@@ -2949,6 +2958,8 @@ impl XybridModel {
         let metadata = handle.metadata.clone();
         let output = handle
             .executor
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
             .execute(&metadata, envelope, config)
             .map_err(|e| sdk_execution_error("Execution failed", e))?;
 
@@ -3008,7 +3019,7 @@ impl XybridModel {
         let _telemetry_ctx =
             crate::telemetry::TelemetryPipelineContextGuard::install(None, Some(trace_id));
 
-        let mut handle = self.handle.write().unwrap_or_else(|e| e.into_inner());
+        let handle = self.handle.write().unwrap_or_else(|e| e.into_inner());
         if !handle.loaded {
             return Err(SdkError::NotLoaded);
         }
@@ -3029,6 +3040,8 @@ impl XybridModel {
 
         handle
             .executor
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
             .execute_tts_streaming(&metadata, envelope, &mut adapter)
             .map_err(|e| sdk_execution_error("TTS streaming failed", e))?;
 
@@ -3144,7 +3157,7 @@ impl XybridModel {
             crate::telemetry::TelemetryPipelineContextGuard::install(None, Some(trace_id));
 
         // Recover from poisoned RwLock to prevent permanent lock errors
-        let mut handle = self.handle.write().unwrap_or_else(|e| e.into_inner());
+        let handle = self.handle.write().unwrap_or_else(|e| e.into_inner());
 
         if !handle.loaded {
             return Err(SdkError::NotLoaded);
@@ -3154,6 +3167,8 @@ impl XybridModel {
         let metadata = handle.metadata.clone();
         let output = handle
             .executor
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
             .execute_with_context(&metadata, envelope, context, config)
             .map_err(|e| sdk_execution_error("Execution failed", e))?;
 
@@ -3300,7 +3315,7 @@ impl XybridModel {
             crate::telemetry::TelemetryPipelineContextGuard::install(None, Some(trace_id));
 
         // Get write lock on handle
-        let mut handle = self.handle.write().unwrap_or_else(|e| e.into_inner());
+        let handle = self.handle.write().unwrap_or_else(|e| e.into_inner());
 
         if !handle.loaded {
             return Err(SdkError::NotLoaded);
@@ -3316,6 +3331,8 @@ impl XybridModel {
             // True streaming with context for LLM models
             handle
                 .executor
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
                 .execute_streaming_with_context(
                     &metadata,
                     envelope,
@@ -3328,6 +3345,8 @@ impl XybridModel {
             // For non-LLM models: run with context and emit single "token" with full result
             let result = handle
                 .executor
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
                 .execute_with_context(&metadata, envelope, context, config)
                 .map_err(|e| sdk_execution_error("Execution failed", e))?;
 
@@ -3510,7 +3529,7 @@ impl XybridModel {
             crate::telemetry::TelemetryPipelineContextGuard::install(None, Some(trace_id));
 
         // Get write lock on handle
-        let mut handle = self.handle.write().unwrap_or_else(|e| e.into_inner());
+        let handle = self.handle.write().unwrap_or_else(|e| e.into_inner());
 
         if !handle.loaded {
             return Err(SdkError::NotLoaded);
@@ -3526,12 +3545,16 @@ impl XybridModel {
             // True streaming for LLM models
             handle
                 .executor
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
                 .execute_streaming(&metadata, envelope, Box::new(&mut on_token), config)
                 .map_err(streaming_execution_error)?
         } else {
             // For non-LLM models: run batch and emit single "token" with full result
             let result = handle
                 .executor
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
                 .execute(&metadata, envelope, config)
                 .map_err(|e| sdk_execution_error("Execution failed", e))?;
 
@@ -3946,7 +3969,7 @@ impl XybridModel {
                 }
 
                 // Get write lock on handle
-                let mut guard = handle.write().unwrap_or_else(|e| e.into_inner());
+                let guard = handle.write().unwrap_or_else(|e| e.into_inner());
 
                 if !guard.loaded {
                     return Err(SdkError::NotLoaded);
@@ -3962,6 +3985,8 @@ impl XybridModel {
                     // True streaming for LLM models
                     guard
                         .executor
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
                         .execute_streaming(
                             &metadata,
                             &envelope,
@@ -3985,6 +4010,8 @@ impl XybridModel {
                     // Non-LLM: batch execution, emit single token
                     let result = guard
                         .executor
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
                         .execute(&metadata, &envelope, config.as_ref())
                         .map_err(|e| sdk_execution_error("Execution failed", e))?;
 
@@ -4116,7 +4143,7 @@ impl XybridModel {
                 crate::telemetry::TelemetryPipelineContextGuard::install(None, Some(trace_id));
 
             // Recover from poisoned RwLock to prevent permanent lock errors
-            let mut guard = handle.write().unwrap_or_else(|e| e.into_inner());
+            let guard = handle.write().unwrap_or_else(|e| e.into_inner());
 
             if !guard.loaded {
                 return Err(SdkError::NotLoaded);
@@ -4126,6 +4153,8 @@ impl XybridModel {
             let metadata = guard.metadata.clone();
             let output = guard
                 .executor
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
                 .execute(&metadata, &envelope, config.as_ref())
                 .map_err(|e| sdk_execution_error("Execution failed", e))?;
 
@@ -4213,7 +4242,15 @@ impl XybridModel {
             ..Default::default()
         };
 
-        XybridStream::new(&handle.model_dir, core_config, &self.model_id)
+        // Hand the stream this model's executor: the session reuses the
+        // loaded weights (no per-session cold start), and stream inference
+        // serializes with direct `run` calls on the executor mutex.
+        XybridStream::new(
+            &handle.model_dir,
+            core_config,
+            &self.model_id,
+            Arc::clone(&handle.executor),
+        )
     }
 
     /// Unload the model from memory.
@@ -4225,7 +4262,7 @@ impl XybridModel {
 
         handle.loaded = false;
         // Clear the session cache (drop executor and recreate empty)
-        handle.executor = TemplateExecutor::default();
+        handle.executor = Arc::new(Mutex::new(TemplateExecutor::default()));
 
         Ok(())
     }
@@ -4571,7 +4608,7 @@ mod tests {
     fn cloud_serve_engages_only_while_not_loaded() {
         let speculating = XybridModel {
             handle: Arc::new(RwLock::new(ModelHandle {
-                executor: TemplateExecutor::default(),
+                executor: Arc::new(Mutex::new(TemplateExecutor::default())),
                 metadata: ModelMetadata::onnx("spec-model", "", ""),
                 model_dir: PathBuf::from("."),
                 loaded: false,
@@ -4612,7 +4649,7 @@ mod tests {
         };
         let speculating = XybridModel {
             handle: Arc::new(RwLock::new(ModelHandle {
-                executor: TemplateExecutor::default(),
+                executor: Arc::new(Mutex::new(TemplateExecutor::default())),
                 metadata: ModelMetadata::onnx("spec-model", "", ""),
                 model_dir: PathBuf::from("."),
                 loaded: false,
@@ -4665,7 +4702,7 @@ mod tests {
         let download = Arc::new(SpeculativeDownload::default());
         let model = XybridModel {
             handle: Arc::new(RwLock::new(ModelHandle {
-                executor: TemplateExecutor::default(),
+                executor: Arc::new(Mutex::new(TemplateExecutor::default())),
                 metadata: ModelMetadata::onnx("spec-model", "", ""),
                 model_dir: PathBuf::from("."),
                 loaded: false,
@@ -5184,7 +5221,7 @@ mod tests {
         }
         XybridModel {
             handle: Arc::new(RwLock::new(ModelHandle {
-                executor: TemplateExecutor::default(),
+                executor: Arc::new(Mutex::new(TemplateExecutor::default())),
                 metadata,
                 model_dir: PathBuf::from("."),
                 loaded: true,
@@ -5204,7 +5241,7 @@ mod tests {
         let version = metadata.version.clone();
         XybridModel {
             handle: Arc::new(RwLock::new(ModelHandle {
-                executor: TemplateExecutor::default(),
+                executor: Arc::new(Mutex::new(TemplateExecutor::default())),
                 metadata,
                 model_dir: PathBuf::from("."),
                 loaded: true,
@@ -5995,7 +6032,7 @@ mod tests {
         executor.register_runtime("onnx", runtime);
         XybridModel {
             handle: Arc::new(RwLock::new(ModelHandle {
-                executor,
+                executor: Arc::new(Mutex::new(executor)),
                 metadata,
                 model_dir: PathBuf::from("."),
                 loaded: true,

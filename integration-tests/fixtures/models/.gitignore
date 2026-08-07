@@ -12,6 +12,7 @@
 model_metadata.json
 !/lfm2-vl-450m/model_metadata.json
 !/gemma-4-e2b/model_metadata.json
+!/whisper-ggml-tiny-en/model_metadata.json
 
 # Keep scripts and tooling
 !download_models.sh
