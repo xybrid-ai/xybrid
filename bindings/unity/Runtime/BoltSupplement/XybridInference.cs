@@ -158,7 +158,8 @@ namespace XybridBolt
 
     /// <summary>
     /// The output of <see cref="XybridModel.Run"/>: the result envelope plus
-    /// the model id, output type, latency, and inference metrics.
+    /// the model id, output type, latency, execution target, and inference
+    /// metrics.
     /// </summary>
     public sealed class XybridResult
     {
@@ -166,6 +167,14 @@ namespace XybridBolt
         public XybridOutputType OutputType { get; }
         public string ModelId { get; }
         public uint LatencyMs { get; }
+
+        /// <summary>
+        /// Whether this answer came from the device or the cloud gateway.
+        /// Cloud fallback keeps the model id identical on both legs, so this is
+        /// the only way to tell them apart.
+        /// </summary>
+        public XybridExecutionTarget ExecutionTarget { get; }
+
         public XybridInferenceMetrics Metrics { get; }
 
         internal XybridResult(
@@ -173,21 +182,28 @@ namespace XybridBolt
             XybridOutputType outputType,
             string modelId,
             uint latencyMs,
+            XybridExecutionTarget executionTarget,
             XybridInferenceMetrics metrics)
         {
             Envelope = envelope;
             OutputType = outputType;
             ModelId = modelId;
             LatencyMs = latencyMs;
+            ExecutionTarget = executionTarget;
             Metrics = metrics;
         }
 
+        // Field order must track the Rust `XybridResult` exactly:
+        // execution_target is encoded between latency and metrics, so reading
+        // metrics straight after latency would misalign every field that
+        // follows.
         internal static XybridResult Decode(WireReader reader) =>
             new XybridResult(
                 XybridEnvelope.Decode(reader),
                 XybridOutputTypeWire.Decode(reader),
                 reader.ReadString(),
                 reader.ReadU32(),
+                XybridExecutionTargetWire.Decode(reader),
                 XybridInferenceMetrics.Decode(reader));
     }
 

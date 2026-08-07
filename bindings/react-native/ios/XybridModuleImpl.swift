@@ -359,20 +359,23 @@ public final class XybridModuleImpl: NSObject {
   @objc public func setPlatformUrl(_ url: String,
                                    resolve: @escaping RCTPromiseResolveBlock,
                                    reject: @escaping RCTPromiseRejectBlock) {
-    Xybrid.setPlatformUrl(url)
+    // Module-level generated functions, like the `setBinding` /
+    // `initSdkCacheDir` calls above — `Xybrid` is a namespace enum and has no
+    // such static members.
+    setPlatformUrl(url: url)
     resolve(nil)
   }
 
   @objc public func setSpeculativeCloud(_ enabled: Bool,
                                         resolve: @escaping RCTPromiseResolveBlock,
                                         reject: @escaping RCTPromiseRejectBlock) {
-    Xybrid.setSpeculativeCloud(enabled)
+    setSpeculativeCloud(enabled: enabled)
     resolve(nil)
   }
 
   @objc public func isSpeculativeCloudEnabled(_ resolve: @escaping RCTPromiseResolveBlock,
                                               reject: @escaping RCTPromiseRejectBlock) {
-    resolve(Xybrid.isSpeculativeCloudEnabled())
+    resolve(isSpeculativeCloudEnabled())
   }
 
   // -- Utilities --

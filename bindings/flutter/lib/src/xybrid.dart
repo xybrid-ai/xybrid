@@ -164,6 +164,27 @@ class Xybrid {
     XybridSdkClient.setGatewayUrl(gatewayUrl: gatewayUrl);
   }
 
+  /// Point the cloud gateway at a platform base URL (staging, self-hosted).
+  ///
+  /// Pass a bare base URL — the `/v1` suffix is applied internally.
+  static void setPlatformUrl(String url) {
+    XybridSdkClient.setPlatformUrl(url: url);
+  }
+
+  /// Enable speculative cloud fallback globally: a registry model that isn't
+  /// downloaded yet is served from the gateway while the weights download.
+  ///
+  /// Only takes effect when an API key resolves. Speculation is LLM/chat only —
+  /// prefer [XybridModelLoader.fromRegistrySpeculative] when the app also loads
+  /// ASR/TTS models, which cannot be served this way.
+  static void setSpeculativeCloud(bool enabled) {
+    XybridSdkClient.setSpeculativeCloud(enabled: enabled);
+  }
+
+  /// Whether the global speculative-cloud default is on.
+  static bool get isSpeculativeCloudEnabled =>
+      XybridSdkClient.isSpeculativeCloudEnabled();
+
   static void applyDebugMemoryPressure() {
     XybridDevice.applyDebugMemoryPressure();
   }

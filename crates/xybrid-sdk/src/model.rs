@@ -1153,10 +1153,16 @@ pub struct DownloadStatus {
 
 impl SpeculativeDownload {
     /// Record download progress (0.0..=1.0) from the fetch callback.
+    ///
+    /// Monotonic: `fetch_extracted` reports 0→1 separately for the main file
+    /// and for each extra artifact (a VLM's projector, for example), so a plain
+    /// store would drive a progress bar to 100% and then snap it backwards when
+    /// the next artifact starts. Keeping the high-water mark means progress only
+    /// ever advances — it under-reports mid-download rather than lying.
     fn set_progress(&self, fraction: f32) {
         let bp = (fraction.clamp(0.0, 1.0) * 10_000.0) as u32;
         self.progress_bp
-            .store(bp, std::sync::atomic::Ordering::Relaxed);
+            .fetch_max(bp, std::sync::atomic::Ordering::Relaxed);
     }
 
     /// Snapshot progress + state together.
@@ -1178,9 +1184,16 @@ impl SpeculativeDownload {
     /// Block until the download reaches a terminal state or `timeout` elapses.
     fn await_terminal(&self, timeout: Duration) -> DownloadStatus {
         let mut guard = self.outcome.lock().unwrap_or_else(|e| e.into_inner());
-        let deadline = Instant::now() + timeout;
+        // `Instant + Duration` panics past the platform's representable range,
+        // and the timeout arrives as an unvalidated `u64` from the bindings (a
+        // negative host-side value wraps to ~u64::MAX through `c_uint64`). Fall
+        // back to waiting without a deadline rather than aborting the process.
+        let deadline = Instant::now().checked_add(timeout);
         while guard.is_none() {
-            let remaining = deadline.saturating_duration_since(Instant::now());
+            let remaining = match deadline {
+                Some(deadline) => deadline.saturating_duration_since(Instant::now()),
+                None => Duration::from_secs(3600),
+            };
             if remaining.is_zero() {
                 break;
             }

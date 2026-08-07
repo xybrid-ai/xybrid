@@ -97,6 +97,10 @@ export 'src/model_loader.dart'
 export 'src/pipeline.dart' show XybridPipeline;
 export 'src/result.dart'
     show XybridInferenceMetrics, XybridResult, XybridStageLatency;
+// Speculative cloud: the download snapshot hosts poll while the gateway
+// answers, and the provenance of a finished run.
+export 'src/rust/api/model.dart' show FfiDownloadState, FfiDownloadStatus;
+export 'src/rust/api/result.dart' show FfiExecutionTarget;
 export 'src/run_options.dart' show AbortPolicy, AbortSignal, RunOptions;
 export 'src/streaming.dart'
     show XybridStreamSession, FfiPartialResult, FfiVadMode;

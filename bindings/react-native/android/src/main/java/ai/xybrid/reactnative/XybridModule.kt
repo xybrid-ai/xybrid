@@ -352,8 +352,17 @@ class XybridModule(reactContext: ReactApplicationContext) :
       return
     }
     scope.launch {
-      val status = model.awaitDownload(timeoutMs.coerceAtLeast(0.0).toULong())
-      promise.resolve(encodeDownloadStatus(status))
+      try {
+        val status = model.awaitDownload(timeoutMs.coerceAtLeast(0.0).toULong())
+        promise.resolve(encodeDownloadStatus(status))
+      } catch (e: XybridError) {
+        rejectXybrid(promise, e)
+      } catch (t: Throwable) {
+        // Same discipline as runLoad: let cancellation unwind the scope, but
+        // never leave the JS promise unsettled on a real failure.
+        if (t is CancellationException) throw t
+        promise.reject("xybrid", t.message, t)
+      }
     }
   }
 

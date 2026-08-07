@@ -672,7 +672,16 @@ impl FfiModel {
                 let status = model.await_download(250);
                 match status.state {
                     xybrid_sdk::DownloadState::Downloading => {
-                        let _ = sink.add(FfiLoadEvent::Progress(status.progress as f64));
+                        // A closed sink means Dart cancelled the subscription.
+                        // Stop here instead of waking every 250ms — and holding
+                        // the model alive — until a download that may never
+                        // finish does.
+                        if sink
+                            .add(FfiLoadEvent::Progress(status.progress as f64))
+                            .is_err()
+                        {
+                            break;
+                        }
                     }
                     xybrid_sdk::DownloadState::Ready => {
                         let _ = sink.add(FfiLoadEvent::Progress(1.0));

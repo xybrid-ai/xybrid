@@ -1562,10 +1562,14 @@ class XybridModel:
         special case. Poll this to drive a progress bar.
         """
 
+        # Infallible on the Rust side, so the buffer holds a bare
+        # XybridDownloadStatus with no leading result discriminant — decoding it
+        # through `_decode_result` would eat the state tag as the discriminant
+        # and shift every field after it.
         data = _copy_and_free_buf(
             _load_library().boltffi_xybrid_model_download_status(self._require_handle())
         )
-        return _decode_result(data, XybridDownloadStatus._decode)
+        return XybridDownloadStatus._decode(_WireReader(data))
 
     def await_download(self, timeout_ms: int) -> XybridDownloadStatus:
         """Block until the download finishes or ``timeout_ms`` elapses.
@@ -1576,12 +1580,14 @@ class XybridModel:
         model.
         """
 
+        # Also infallible — see `download_status` for why this must not go
+        # through `_decode_result`.
         data = _copy_and_free_buf(
             _load_library().boltffi_xybrid_model_await_download(
-                self._require_handle(), timeout_ms
+                self._require_handle(), max(0, timeout_ms)
             )
         )
-        return _decode_result(data, XybridDownloadStatus._decode)
+        return XybridDownloadStatus._decode(_WireReader(data))
 
     @property
     def supports_streaming(self) -> bool:

@@ -102,6 +102,15 @@ namespace Xybrid
         /// <summary>Gets the typed inference metrics (TTFT, tok/s, per-stage latencies).</summary>
         public InferenceMetrics Metrics { get; }
 
+        /// <summary>
+        /// Gets whether this answer came from the device or the cloud gateway.
+        /// Cloud fallback keeps the model id identical on both legs, so this is
+        /// the only way to tell them apart. Defaults to
+        /// <see cref="XybridBolt.XybridExecutionTarget.Local"/> for synthesized
+        /// failures, which never reached the cloud.
+        /// </summary>
+        public XybridBolt.XybridExecutionTarget ExecutionTarget { get; }
+
         private InferenceResult(
             bool success,
             string error,
@@ -110,7 +119,9 @@ namespace Xybrid
             OutputType outputType,
             byte[] audioBytes,
             float[] embedding,
-            InferenceMetrics metrics)
+            InferenceMetrics metrics,
+            XybridBolt.XybridExecutionTarget executionTarget =
+                XybridBolt.XybridExecutionTarget.Local)
         {
             Success = success;
             Error = error;
@@ -120,6 +131,7 @@ namespace Xybrid
             AudioBytes = audioBytes;
             Embedding = embedding;
             Metrics = metrics;
+            ExecutionTarget = executionTarget;
         }
 
         /// <summary>Decode a successful bolt result into the public shape.</summary>
@@ -149,7 +161,8 @@ namespace Xybrid
                 outputType: MapOutputType(result.OutputType),
                 audioBytes: audio,
                 embedding: embedding,
-                metrics: MapMetrics(result.Metrics));
+                metrics: MapMetrics(result.Metrics),
+                executionTarget: result.ExecutionTarget);
         }
 
         /// <summary>
