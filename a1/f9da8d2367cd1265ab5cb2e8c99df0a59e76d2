@@ -1,0 +1,19 @@
+crates/xybrid-sdk/src/model.rs
+  s_3924ee211c2cf7::t_c235eb6795cb2a 2598,2701,2810,2881,3019,3177,3391,3831,4005
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "a1f9da8d2367cd1265ab5cb2e8c99df0a59e76d2",
+  "prompts": {},
+  "sessions": {
+    "s_3924ee211c2cf7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "429e711f-063b-41a5-99f1-ea224e07a4a7",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
