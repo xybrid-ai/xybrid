@@ -35,13 +35,20 @@ rust_library(
     edition = "2021",
     # Resolved from the real Cargo.lock by the @crates hub (DEP_DATA). Backend
     # accel features are gated per-platform exactly as cargo's presets unify them.
+    # asr-whispercpp is unconditional, matching cargo: every platform-* preset
+    # enables it (~0.2 MiB stripped on the Android cdylib proxy). `xybrid-whisper`
+    # is the implicit optional-dependency feature cargo derives from the
+    # `dep:xybrid-whisper` entry — the hub resolves it, so it is listed here for
+    # the same reason `xybrid-llama` / `xybrid-llama-sys` are.
     crate_features = [
+        "asr-whispercpp",
         "default",
         "llm-llamacpp",
         "ort-download",  # no-op marker (mode is per-target in Cargo.toml); kept to match the hub's resolved feature set.
         "schema",
         "xybrid-llama",
         "xybrid-llama-sys",
+        "xybrid-whisper",
     ] + select({
         "@rules_rs//rs/platforms/config:aarch64-apple-darwin": [
             "candle",
@@ -90,7 +97,12 @@ rust_library(
         ],
         "//conditions:default": [],
     }),
-    deps = all_crate_deps(normal = True),
+    # `all_crate_deps` resolves from the hub's view of Cargo.lock, which reflects
+    # the workspace's DEFAULT feature set — and `asr-whispercpp` is off by
+    # default, so the optional `xybrid-whisper` path-dep is absent from it. The
+    # feature is force-enabled above, so the dep has to be added by hand or the
+    # crate fails to compile with an unresolved `xybrid_whisper` import.
+    deps = all_crate_deps(normal = True) + ["//crates/xybrid-whisper:xybrid_whisper"],
     visibility = ["//visibility:public"],
 )
 

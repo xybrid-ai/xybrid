@@ -1,0 +1,47 @@
+# Safe Rust wrapper over xybrid-whisper-sys. Builds once that crate links.
+load("@rules_rs//rs:rust_library.bzl", "rust_library")
+load("@rules_rs//rs:rust_test.bzl", "rust_test")
+
+rust_library(
+    name = "xybrid_whisper",
+    srcs = glob(["src/**/*.rs"]),
+    # Plain list, no select: unlike llama's `vision`, this crate has no
+    # per-platform feature delta — whisper.cpp's CPU path is the only one we
+    # build, on every target.
+    crate_features = ["bindings"],
+    edition = "2021",
+    deps = [
+        "//crates/whisper-cpp-sys:xybrid_whisper_sys",
+        "@crates//:thiserror",
+        "@crates//:tracing",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+# Inline `#[cfg(test)] mod tests` in params.rs / segment.rs. `crate = ` inherits
+# srcs, edition and deps; crate_features is a plain list here, which does
+# inherit (the loss on `crate = ` affects selects, see xybrid-llama's note).
+rust_test(
+    name = "xybrid_whisper_test",
+    crate = ":xybrid_whisper",
+)
+
+# Integration test. Opens with `#![cfg(feature = "bindings")]`, so without that
+# feature it compiles to an EMPTY binary and nothing is type-checked. It
+# self-skips when the (gitignored) GGML weights are absent, which is the case on
+# CI — so compiling it is most of the value of having it here.
+rust_test(
+    name = "transcribe_smoke",
+    srcs = ["tests/transcribe_smoke.rs"],
+    crate_features = ["bindings"],
+    edition = "2021",
+    deps = [":xybrid_whisper"],
+)
+
+# Dir-basename alias so `//crates/xybrid-whisper` (the label all_crate_deps()
+# emits for xybrid-core) resolves to the proven target above.
+alias(
+    name = "xybrid-whisper",
+    actual = ":xybrid_whisper",
+    visibility = ["//visibility:public"],
+)

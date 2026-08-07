@@ -51,3 +51,12 @@ platform-desktop = ["xybrid-sdk/platform-desktop"]
 # (and pulls `llm-llamacpp` transitively via xybrid-sdk).
 llm-llamacpp = ["xybrid-sdk/llm-llamacpp"]
 llm-llamacpp-vision = ["xybrid-sdk/llm-llamacpp-vision"]
+
+# whisper.cpp ASR forwarder, same purpose as the two above: it lets
+# measure-binary-size.sh diff `llm-llamacpp-vision` against
+# `llm-llamacpp-vision,asr-whispercpp` through this crate's real
+# staticlib/cdylib. The baseline must already carry llama.cpp, because
+# whisper.cpp links the ggml llama builds rather than its own — measuring
+# against a llama-less baseline would charge whisper for ggml, which every
+# shipped artifact already contains.
+asr-whispercpp = ["xybrid-sdk/asr-whispercpp"]

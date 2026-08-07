@@ -136,14 +136,49 @@ jobs:
           bazelisk build --nobuild \
             //crates/... //bindings/... //macros/... //xtask/... //integration-tests/... //:llama
 
-      # The RBE-proven hermetic linux chain (PR #326 gates 3B/4).
-      - name: Build llama chain on RBE (linux, hermetic)
+      # The RBE-proven hermetic linux chain (PR #326 gates 3B/4), plus the
+      # whisper.cpp chain that sits on the same ggml. //:whisper is a plain
+      # cc_library depending on //:llama, so building both here is what proves
+      # the single-ggml invariant holds in the Bazel graph — not just in cargo,
+      # where the build script has to hand-order the link flags.
+      - name: Build llama + whisper chains on RBE (linux, hermetic)
         if: env.BUILDBUDDY_API_KEY != ''
         run: |
           bazelisk build --config=remote \
             //:llama \
             //crates/llama-cpp-sys:llama_cpp_sys \
-            //crates/xybrid-llama:xybrid_llama
+            //crates/xybrid-llama:xybrid_llama \
+            //:whisper \
+            //crates/whisper-cpp-sys:xybrid_whisper_sys \
+            //crates/xybrid-whisper:xybrid_whisper
+
+      # Exactly one ggml must reach the link. A future whisper.cpp bump that
+      # stops compiling against llama's pinned ggml would otherwise be fixed by
+      # someone reaching for whisper's bundled copy, silently shipping two
+      # tensor runtimes in one binary. This asserts the graph shape instead of
+      # trusting the convention.
+      # cquery, NOT query: the unconfigured `query` loads every arm of every
+      # select in the transitive closure, which drags in hermetic-llvm's
+      # per-arch kernel-headers repos and fails to resolve one of them. cquery
+      # evaluates the resolved configuration only, which is also the graph we
+      # actually care about asserting on.
+      - name: Assert whisper links llama's ggml, not a second copy
+        if: env.BUILDBUDDY_API_KEY != ''
+        run: |
+          deps=$(bazelisk cquery --config=remote 'deps(//:whisper)' --output=label)
+          # //:llama on every hermetic lane; //:llama_metal on --//:metal=true.
+          if ! grep -qE '^//:llama(_metal)? ' <<<"$deps"; then
+            echo "FATAL: //:whisper depends on neither //:llama nor //:llama_metal," >&2
+            echo "       so it is not building on the ggml the rest of the binary" >&2
+            echo "       already links." >&2
+            exit 1
+          fi
+          if grep -q 'vendor/whisper-cpp/ggml' <<<"$deps"; then
+            echo "FATAL: //:whisper pulled in whisper.cpp's bundled ggml." >&2
+            echo "       Two ggml copies in one binary is the failure mode the" >&2
+            echo "       whole design exists to prevent." >&2
+            exit 1
+          fi
 
       # Tests under Bazel. Bazel BUILDS every shipped artifact; these targets are
       # what stop it from shipping unverified. Runs on this ubuntu runner
@@ -174,6 +209,7 @@ jobs:
             //crates/xybrid-ffi-facade:xybrid-ffi-facade_test \
             //crates/xybrid-llama:all \
             //crates/xybrid-sdk:all \
+            //crates/xybrid-whisper:all \
             //integration-tests:all \
             //xtask:xtask_test
 

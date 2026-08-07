@@ -67,17 +67,24 @@ onnx-inspect = ["dep:ort", "ort/download-binaries", "ort/tls-rustls"]
 # ~1.5 MiB on the iOS static-lib proxy — noise against the ~30/160 MiB
 # baselines — so vision runs out of the box rather than being a BYO-build.
 
+# Every preset also ships `asr-whispercpp` (whisper.cpp speech recognition on
+# the ggml `llm-llamacpp-vision` already links). Measured cost is ~0.2 MiB
+# stripped on the Android cdylib proxy — roughly a third of what the vision
+# backend costs, and noise against the ~31/145 MiB baselines — so ASR runs out
+# of the box rather than being a BYO-build. On Linux/Windows it is the ONLY
+# Whisper path, since `platform-desktop` carries no Candle.
+
 # Android: Dynamic ORT loading + Candle + llama.cpp (mistral.rs has SIGILL issues on ARM)
-platform-android = ["xybrid-core/ort-dynamic", "xybrid-core/candle", "llm-llamacpp-vision"]
+platform-android = ["xybrid-core/ort-dynamic", "xybrid-core/candle", "llm-llamacpp-vision", "asr-whispercpp"]
 
 # iOS: CoreML + Metal acceleration + llama.cpp
-platform-ios = ["xybrid-core/ort-download", "xybrid-core/ort-coreml", "xybrid-core/candle-metal", "xybrid-core/candle-hub", "llm-llamacpp-vision"]
+platform-ios = ["xybrid-core/ort-download", "xybrid-core/ort-coreml", "xybrid-core/candle-metal", "xybrid-core/candle-hub", "llm-llamacpp-vision", "asr-whispercpp"]
 
 # macOS: CoreML + Metal + llama.cpp
-platform-macos = ["xybrid-core/ort-download", "xybrid-core/ort-coreml", "xybrid-core/candle-metal", "xybrid-core/candle-hub", "llm-llamacpp-vision"]
+platform-macos = ["xybrid-core/ort-download", "xybrid-core/ort-coreml", "xybrid-core/candle-metal", "xybrid-core/candle-hub", "llm-llamacpp-vision", "asr-whispercpp"]
 
 # Desktop (Linux/Windows): CPU with llama.cpp
-platform-desktop = ["xybrid-core/ort-download", "llm-llamacpp-vision"]
+platform-desktop = ["xybrid-core/ort-download", "llm-llamacpp-vision", "asr-whispercpp"]
 
 # INDIVIDUAL FEATURE FORWARDING (for custom builds)
 
@@ -100,8 +107,8 @@ llm-llamacpp = ["xybrid-core/llm-llamacpp"]
 
 # whisper.cpp speech recognition. Pulls `llm-llamacpp` transitively, because
 # whisper.cpp links the ggml that llama.cpp builds rather than a second copy.
-# Not yet in the `platform-*` presets: the per-artifact size delta is measured
-# in the platform sweep before it ships by default.
+# In every `platform-*` preset above; kept as a standalone forwarder so
+# tools/scripts/measure-binary-size.sh can build the with/without delta.
 asr-whispercpp = ["xybrid-core/asr-whispercpp"]
 llm-llamacpp-vision = ["llm-llamacpp", "xybrid-core/llm-llamacpp-vision"]
 
