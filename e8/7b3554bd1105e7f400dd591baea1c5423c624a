@@ -1,0 +1,43 @@
+crates/xybrid-sdk/src/stream.rs
+  s_3924ee211c2cf7::t_920cb73217198a 208-230
+bindings/flutter/rust/src/api/streaming.rs
+  s_3924ee211c2cf7::t_a00632b3342ca2 279-293
+crates/xybrid-core/src/streaming/session.rs
+  s_fe5ae170899b69::t_870d5bc6694b59 529-563
+examples/flutter/android/build/reports/problems/problems-report.html
+  s_1fb09a9262a417::t_c8f9ddd70b6a90 653
+examples/flutter/pubspec.lock
+  s_1fb09a9262a417::t_5d11caed024ff2 1045
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "e87b3554bd1105e7f400dd591baea1c5423c624a",
+  "prompts": {},
+  "sessions": {
+    "s_1fb09a9262a417": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019fd7fd-82c0-7b90-8ad8-c0961b28e87f",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    },
+    "s_3924ee211c2cf7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "429e711f-063b-41a5-99f1-ea224e07a4a7",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    },
+    "s_fe5ae170899b69": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019fdb9c-89f3-75d2-8baf-f80e3e0093d2",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
