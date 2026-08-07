@@ -299,8 +299,7 @@ jobs:
             --require-export boltffi_configure_runtime \
             --require-export boltffi_free_buf \
             --require-export boltffi_last_error_message \
-            --require-exports-from-csharp bindings/unity/Runtime/Bolt/XybridBolt.cs \
-            --require-exports-from-csharp bindings/unity/Runtime/BoltSupplement/XybridInference.cs
+            --require-exports-from-csharp bindings/unity/Runtime/Bolt/XybridBolt.cs
           mkdir -p /tmp/win-bolt && cp "$DLL" /tmp/win-bolt/xybrid_bolt.dll
           echo "windows bolt DLL payload + audit: OK ✅"
 

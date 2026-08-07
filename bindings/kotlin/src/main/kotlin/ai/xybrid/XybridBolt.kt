@@ -834,6 +834,7 @@ private object Native {
     @JvmStatic external fun boltffi_function_xybrid_bolt_set_provider_api_key(provider: java.nio.ByteBuffer, __boltffi_provider_len: Int, api_key: java.nio.ByteBuffer, __boltffi_api_key_len: Int): Unit
     @JvmStatic external fun boltffi_function_xybrid_bolt_set_platform_url(url: java.nio.ByteBuffer, __boltffi_url_len: Int): Unit
     @JvmStatic external fun boltffi_function_xybrid_bolt_set_speculative_cloud(enabled: Boolean): Unit
+    @JvmStatic external fun boltffi_function_xybrid_bolt_has_api_key(): Boolean
     @JvmStatic external fun boltffi_function_xybrid_bolt_is_speculative_cloud_enabled(): Boolean
     @JvmStatic external fun boltffi_function_xybrid_bolt_will_speculate_for_model(model_id: java.nio.ByteBuffer, __boltffi_model_id_len: Int): Boolean
     @JvmStatic external fun boltffi_function_xybrid_bolt_version(): ByteArray?
@@ -1409,7 +1410,7 @@ sealed class XybridError : Exception() {
         }
     }
     data class MetadataInvalid(
-        val message: String
+        override val message: String
     ) : XybridError() {
         internal override fun wireSize(): Int {
             return 4 + 4 + Utf8Codec.maxBytes(this.message)
@@ -1421,7 +1422,7 @@ sealed class XybridError : Exception() {
         }
     }
     data class LoadError(
-        val message: String
+        override val message: String
     ) : XybridError() {
         internal override fun wireSize(): Int {
             return 4 + 4 + Utf8Codec.maxBytes(this.message)
@@ -1433,7 +1434,7 @@ sealed class XybridError : Exception() {
         }
     }
     data class InferenceError(
-        val message: String
+        override val message: String
     ) : XybridError() {
         internal override fun wireSize(): Int {
             return 4 + 4 + Utf8Codec.maxBytes(this.message)
@@ -1475,7 +1476,7 @@ sealed class XybridError : Exception() {
         }
     }
     data class ConfigError(
-        val message: String
+        override val message: String
     ) : XybridError() {
         internal override fun wireSize(): Int {
             return 4 + 4 + Utf8Codec.maxBytes(this.message)
@@ -1487,7 +1488,7 @@ sealed class XybridError : Exception() {
         }
     }
     data class NetworkError(
-        val message: String
+        override val message: String
     ) : XybridError() {
         internal override fun wireSize(): Int {
             return 4 + 4 + Utf8Codec.maxBytes(this.message)
@@ -1499,7 +1500,7 @@ sealed class XybridError : Exception() {
         }
     }
     data class Offline(
-        val message: String
+        override val message: String
     ) : XybridError() {
         internal override fun wireSize(): Int {
             return 4 + 4 + Utf8Codec.maxBytes(this.message)
@@ -1511,7 +1512,7 @@ sealed class XybridError : Exception() {
         }
     }
     data class IoError(
-        val message: String
+        override val message: String
     ) : XybridError() {
         internal override fun wireSize(): Int {
             return 4 + 4 + Utf8Codec.maxBytes(this.message)
@@ -1523,7 +1524,7 @@ sealed class XybridError : Exception() {
         }
     }
     data class CacheError(
-        val message: String
+        override val message: String
     ) : XybridError() {
         internal override fun wireSize(): Int {
             return 4 + 4 + Utf8Codec.maxBytes(this.message)
@@ -1535,7 +1536,7 @@ sealed class XybridError : Exception() {
         }
     }
     data class PipelineError(
-        val message: String
+        override val message: String
     ) : XybridError() {
         internal override fun wireSize(): Int {
             return 4 + 4 + Utf8Codec.maxBytes(this.message)
@@ -1547,7 +1548,7 @@ sealed class XybridError : Exception() {
         }
     }
     data class CircuitOpen(
-        val message: String
+        override val message: String
     ) : XybridError() {
         internal override fun wireSize(): Int {
             return 4 + 4 + Utf8Codec.maxBytes(this.message)
@@ -1583,7 +1584,7 @@ sealed class XybridError : Exception() {
         }
     }
     data class MissingArtifact(
-        val message: String
+        override val message: String
     ) : XybridError() {
         internal override fun wireSize(): Int {
             return 4 + 4 + Utf8Codec.maxBytes(this.message)
@@ -1595,7 +1596,7 @@ sealed class XybridError : Exception() {
         }
     }
     data class UnsupportedModelCapability(
-        val message: String
+        override val message: String
     ) : XybridError() {
         internal override fun wireSize(): Int {
             return 4 + 4 + Utf8Codec.maxBytes(this.message)
@@ -1607,7 +1608,7 @@ sealed class XybridError : Exception() {
         }
     }
     data class UnsupportedBackendCapability(
-        val message: String
+        override val message: String
     ) : XybridError() {
         internal override fun wireSize(): Int {
             return 4 + 4 + Utf8Codec.maxBytes(this.message)
@@ -1619,7 +1620,7 @@ sealed class XybridError : Exception() {
         }
     }
     data class InvalidImage(
-        val message: String
+        override val message: String
     ) : XybridError() {
         internal override fun wireSize(): Int {
             return 4 + 4 + Utf8Codec.maxBytes(this.message)
@@ -2468,6 +2469,10 @@ fun setPlatformUrl(url: String) {
 
 fun setSpeculativeCloud(enabled: Boolean) {
     Native.boltffi_function_xybrid_bolt_set_speculative_cloud(enabled)
+}
+
+fun hasApiKey(): Boolean {
+    return Native.boltffi_function_xybrid_bolt_has_api_key()
 }
 
 fun isSpeculativeCloudEnabled(): Boolean {

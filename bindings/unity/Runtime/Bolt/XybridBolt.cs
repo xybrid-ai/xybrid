@@ -599,6 +599,12 @@ namespace XybridBolt
         }
 
         /// <summary>
+        /// Whether a Xybrid gateway API key is resolvable (in-memory or env).
+        /// </summary>
+        public static bool HasApiKey()
+            => NativeMethods.NativeHasApiKey();
+
+        /// <summary>
         /// Whether the global speculative-cloud default is on.
         /// </summary>
         public static bool IsSpeculativeCloudEnabled()
@@ -878,6 +884,10 @@ namespace XybridBolt
 
         [DllImport(LibName, EntryPoint = "boltffi_free_buf")]
         internal static extern void FreeBuf(FfiBuf buffer);
+
+        [DllImport(LibName, EntryPoint = "boltffi_function_xybrid_bolt_has_api_key")]
+        [return: MarshalAs(UnmanagedType.I1)]
+        internal static extern bool NativeHasApiKey();
 
         [DllImport(LibName, EntryPoint = "boltffi_function_xybrid_bolt_init_sdk_cache_dir")]
         internal static extern FfiStatus NativeInitSdkCacheDir([In] byte[] cacheDirBytes, nuint cacheDirLength);
