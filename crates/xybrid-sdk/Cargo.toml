@@ -97,6 +97,12 @@ llm-mistral = ["xybrid-core/llm-mistral"]
 llm-mistral-metal = ["xybrid-core/llm-mistral-metal"]
 llm-mistral-cuda = ["xybrid-core/llm-mistral-cuda"]
 llm-llamacpp = ["xybrid-core/llm-llamacpp"]
+
+# whisper.cpp speech recognition. Pulls `llm-llamacpp` transitively, because
+# whisper.cpp links the ggml that llama.cpp builds rather than a second copy.
+# Not yet in the `platform-*` presets: the per-artifact size delta is measured
+# in the platform sweep before it ships by default.
+asr-whispercpp = ["xybrid-core/asr-whispercpp"]
 llm-llamacpp-vision = ["llm-llamacpp", "xybrid-core/llm-llamacpp-vision"]
 
 # Dev-tools (test seams for demos and integration tests)

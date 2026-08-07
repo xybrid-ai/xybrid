@@ -217,9 +217,16 @@ fn try_evict(candidate: &Candidate) -> bool {
 
 /// Evict one model if it is idle and currently loaded.
 ///
-/// Returns `false` without waiting when the model is busy — an in-flight run
-/// holds the handle's write lock for its whole duration, so `try_write`
-/// failing *is* the in-flight check.
+/// Returns `false` without waiting when the model is busy. There are two ways
+/// to be busy, and the write lock only catches one of them:
+///
+/// - An in-flight `run` holds the handle's write lock for its whole duration,
+///   so `try_write` failing *is* the in-flight-run check.
+/// - A live streaming session holds no lock at all — it clones the executor
+///   `Arc` and lets go of the handle — so it is invisible to `try_write`.
+///   Evicting under one would swap the handle's executor while the session
+///   kept the old, still-loaded one alive: no memory actually freed, and a
+///   `release_memory()` count that overstates what it did.
 pub(crate) fn try_evict_handle(handle: &RwLock<ModelHandle>, model_id: &str) -> bool {
     let mut guard = match handle.try_write() {
         Ok(guard) => guard,
@@ -230,6 +237,13 @@ pub(crate) fn try_evict_handle(handle: &RwLock<ModelHandle>, model_id: &str) -> 
     };
 
     if guard.state != LoadState::Loaded {
+        return false;
+    }
+    if guard.executor_is_shared() {
+        log::debug!(
+            target: "xybrid_sdk",
+            "Skipping auto-release of {model_id}: a streaming session holds its executor"
+        );
         return false;
     }
     guard.evict();

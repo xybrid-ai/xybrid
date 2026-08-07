@@ -5,7 +5,8 @@
 
 use crate::model::SdkError;
 use std::path::Path;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
+use xybrid_core::execution::TemplateExecutor;
 use xybrid_core::streaming::{
     PartialResult as CorePartialResult, StreamConfig as CoreStreamConfig, StreamSession,
     StreamState as CoreStreamState, StreamStats as CoreStreamStats,
@@ -154,8 +155,9 @@ impl XybridStream {
         model_dir: P,
         config: CoreStreamConfig,
         model_id: &str,
+        executor: Arc<Mutex<TemplateExecutor>>,
     ) -> Result<Self, SdkError> {
-        let session = StreamSession::new(model_dir, config)
+        let session = StreamSession::with_executor(model_dir, config, executor)
             .map_err(|e| SdkError::load_src("Failed to create stream session", e))?;
 
         Ok(Self {

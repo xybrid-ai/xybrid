@@ -16,6 +16,16 @@ pub trait ModelRuntime: Send + Sync {
     /// Load the model from the specified path
     fn load(&mut self, model_path: &Path) -> AdapterResult<()>;
 
+    /// Whether the model at `model_path` is already loaded in this runtime's
+    /// cache.
+    ///
+    /// Runtimes that keep no cache report `false` (the default), which reads
+    /// as "a load (and its cost) would happen". Used to decide whether a
+    /// warm-up inference is worth paying.
+    fn is_loaded(&self, _model_path: &Path) -> bool {
+        false
+    }
+
     /// Downcast to concrete type
     fn as_any(&self) -> &dyn std::any::Any;
 

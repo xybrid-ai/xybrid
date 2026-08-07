@@ -855,8 +855,13 @@ pub enum LoadState {
 
 /// Internal handle holding the loaded model state.
 pub(crate) struct ModelHandle {
-    /// Template executor for running inference
-    executor: TemplateExecutor,
+    /// Template executor for running inference.
+    ///
+    /// Shared with streaming sessions created by `stream()` so they reuse
+    /// the loaded model instead of paying a fresh cold start. That sharing is
+    /// why auto-release checks the `Arc`'s strong count before evicting — see
+    /// [`crate::model_registry::try_evict_handle`].
+    executor: Arc<Mutex<TemplateExecutor>>,
     /// Model metadata
     metadata: ModelMetadata,
     /// Model directory path (permanent extraction in cache)
@@ -900,9 +905,27 @@ impl ModelHandle {
     /// builds it. `TemplateExecutor::default()` would *not* do — it has an
     /// empty base path, and the reload would look for the weights in the
     /// process working directory.
+    ///
+    /// Installs a *new* `Arc` rather than resetting the old one through its
+    /// mutex, matching [`XybridModel::unload`]. Resetting in place would pull
+    /// the loaded weights out from under any streaming session sharing this
+    /// executor; swapping the `Arc` cannot, because callers only reach this
+    /// through [`crate::model_registry::try_evict_handle`], which refuses to
+    /// evict a handle whose executor is still shared.
     pub(crate) fn evict(&mut self) {
-        self.executor = TemplateExecutor::with_base_path(self.model_dir.to_str().unwrap_or("."));
+        self.executor = Arc::new(Mutex::new(TemplateExecutor::with_base_path(
+            self.model_dir.to_str().unwrap_or("."),
+        )));
         self.state = LoadState::Evicted;
+    }
+
+    /// Whether a streaming session still holds this handle's executor.
+    ///
+    /// `stream()` clones the executor `Arc` into the session, so a strong
+    /// count above one means live streaming work would keep the weights
+    /// resident no matter what this handle does.
+    pub(crate) fn executor_is_shared(&self) -> bool {
+        Arc::strong_count(&self.executor) > 1
     }
 }
 
@@ -1875,7 +1898,9 @@ impl ModelLoader {
         let placeholder = ModelHandle {
             // Lazy executor over the not-yet-populated extraction dir; never run
             // while the state is not `Loaded` (runs route to cloud).
-            executor: TemplateExecutor::with_base_path(&model_dir.to_string_lossy()),
+            executor: Arc::new(Mutex::new(TemplateExecutor::with_base_path(
+                &model_dir.to_string_lossy(),
+            ))),
             metadata,
             model_dir,
             // Not `Evicted`: nothing was ever released, so there is no cached
@@ -2309,7 +2334,7 @@ impl ModelLoader {
         let executor = TemplateExecutor::with_base_path(model_dir.to_str().unwrap_or("."));
 
         Ok(ModelHandle {
-            executor,
+            executor: Arc::new(Mutex::new(executor)),
             metadata,
             model_dir: model_dir.clone(),
             state: LoadState::Loaded,
@@ -2932,6 +2957,8 @@ impl XybridModel {
             let metadata = handle.metadata.clone();
             handle
                 .executor
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
                 .execute(&metadata, &warmup_input, None)
                 .map_err(|e| SdkError::inference_src("Warmup execution failed", e))?;
 
@@ -3033,6 +3060,8 @@ impl XybridModel {
                 let metadata = guard.metadata.clone();
                 guard
                     .executor
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
                     .execute(&metadata, &warmup_input, None)
                     .map_err(|e| SdkError::inference_src("Warmup failed", e))?;
 
@@ -3142,6 +3171,8 @@ impl XybridModel {
         let metadata = handle.metadata.clone();
         let output = handle
             .executor
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
             .execute(&metadata, envelope, config)
             .map_err(|e| sdk_execution_error("Execution failed", e))?;
 
@@ -3221,6 +3252,8 @@ impl XybridModel {
 
         handle
             .executor
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
             .execute_tts_streaming(&metadata, envelope, &mut adapter)
             .map_err(|e| sdk_execution_error("TTS streaming failed", e))?;
 
@@ -3346,6 +3379,8 @@ impl XybridModel {
         let metadata = handle.metadata.clone();
         let output = handle
             .executor
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
             .execute_with_context(&metadata, envelope, context, config)
             .map_err(|e| sdk_execution_error("Execution failed", e))?;
 
@@ -3508,6 +3543,8 @@ impl XybridModel {
             // True streaming with context for LLM models
             handle
                 .executor
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
                 .execute_streaming_with_context(
                     &metadata,
                     envelope,
@@ -3520,6 +3557,8 @@ impl XybridModel {
             // For non-LLM models: run with context and emit single "token" with full result
             let result = handle
                 .executor
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
                 .execute_with_context(&metadata, envelope, context, config)
                 .map_err(|e| sdk_execution_error("Execution failed", e))?;
 
@@ -3718,12 +3757,16 @@ impl XybridModel {
             // True streaming for LLM models
             handle
                 .executor
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
                 .execute_streaming(&metadata, envelope, Box::new(&mut on_token), config)
                 .map_err(streaming_execution_error)?
         } else {
             // For non-LLM models: run batch and emit single "token" with full result
             let result = handle
                 .executor
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
                 .execute(&metadata, envelope, config)
                 .map_err(|e| sdk_execution_error("Execution failed", e))?;
 
@@ -4153,6 +4196,8 @@ impl XybridModel {
                     // True streaming for LLM models
                     guard
                         .executor
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
                         .execute_streaming(
                             &metadata,
                             &envelope,
@@ -4176,6 +4221,8 @@ impl XybridModel {
                     // Non-LLM: batch execution, emit single token
                     let result = guard
                         .executor
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
                         .execute(&metadata, &envelope, config.as_ref())
                         .map_err(|e| sdk_execution_error("Execution failed", e))?;
 
@@ -4317,6 +4364,8 @@ impl XybridModel {
             let metadata = guard.metadata.clone();
             let output = guard
                 .executor
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
                 .execute(&metadata, &envelope, config.as_ref())
                 .map_err(|e| sdk_execution_error("Execution failed", e))?;
 
@@ -4385,20 +4434,22 @@ impl XybridModel {
             return Err(SdkError::StreamingNotSupported);
         }
 
-        // Stamped at stream *creation* only. A long-lived stream owns its own
-        // resources and doesn't run through the parent's executor, so it never
-        // re-stamps — an idle parent stays evictable while a stream runs, which
-        // is what we want: evicting it frees memory the stream isn't using.
+        // Stamped at stream *creation* only: the session runs on its own, so
+        // there is no later point to re-stamp from. That would leave a
+        // long-lived stream's parent looking idle to the LRU order, which is
+        // why eviction separately refuses any handle whose executor is still
+        // shared with a session (see `ModelHandle::executor_is_shared`).
         self.touch();
 
         // Recover from poisoned RwLock to prevent permanent lock errors
         let handle = self.handle.read().unwrap_or_else(|e| e.into_inner());
 
         // The only guard site that takes a *read* lock, so it can't flip an
-        // evicted model back to `Loaded` — and doesn't need to. `XybridStream`
-        // builds its own ASR resources from `model_dir` and never touches the
-        // parent's executor, so an auto-released model can still open a
-        // stream. A user-unloaded one still can't.
+        // evicted model back to `Loaded` — and doesn't need to. The executor
+        // handed to the session below is lazy: for an auto-released model it
+        // is one rooted at `model_dir`, so the session cold-starts from the
+        // cached weights instead of failing. A user-unloaded model still
+        // can't stream, because nothing guarantees its directory survives.
         if handle.state == LoadState::Unloaded {
             return Err(SdkError::NotLoaded);
         }
@@ -4415,7 +4466,15 @@ impl XybridModel {
             ..Default::default()
         };
 
-        XybridStream::new(&handle.model_dir, core_config, &self.model_id)
+        // Hand the stream this model's executor: the session reuses the
+        // loaded weights (no per-session cold start), and stream inference
+        // serializes with direct `run` calls on the executor mutex.
+        XybridStream::new(
+            &handle.model_dir,
+            core_config,
+            &self.model_id,
+            Arc::clone(&handle.executor),
+        )
     }
 
     /// Unload the model from memory.
@@ -4430,7 +4489,7 @@ impl XybridModel {
 
         handle.state = LoadState::Unloaded;
         // Clear the session cache (drop executor and recreate empty)
-        handle.executor = TemplateExecutor::default();
+        handle.executor = Arc::new(Mutex::new(TemplateExecutor::default()));
 
         Ok(())
     }
@@ -4968,7 +5027,7 @@ mod tests {
     fn cloud_serve_engages_only_while_not_loaded() {
         let speculating = XybridModel {
             handle: Arc::new(RwLock::new(ModelHandle {
-                executor: TemplateExecutor::default(),
+                executor: Arc::new(Mutex::new(TemplateExecutor::default())),
                 metadata: ModelMetadata::onnx("spec-model", "", ""),
                 model_dir: PathBuf::from("."),
                 state: LoadState::Unloaded,
@@ -5010,7 +5069,7 @@ mod tests {
         };
         let speculating = XybridModel {
             handle: Arc::new(RwLock::new(ModelHandle {
-                executor: TemplateExecutor::default(),
+                executor: Arc::new(Mutex::new(TemplateExecutor::default())),
                 metadata: ModelMetadata::onnx("spec-model", "", ""),
                 model_dir: PathBuf::from("."),
                 state: LoadState::Unloaded,
@@ -5064,7 +5123,7 @@ mod tests {
         let download = Arc::new(SpeculativeDownload::default());
         let model = XybridModel {
             handle: Arc::new(RwLock::new(ModelHandle {
-                executor: TemplateExecutor::default(),
+                executor: Arc::new(Mutex::new(TemplateExecutor::default())),
                 metadata: ModelMetadata::onnx("spec-model", "", ""),
                 model_dir: PathBuf::from("."),
                 state: LoadState::Unloaded,
@@ -5584,7 +5643,7 @@ mod tests {
         }
         XybridModel {
             handle: Arc::new(RwLock::new(ModelHandle {
-                executor: TemplateExecutor::default(),
+                executor: Arc::new(Mutex::new(TemplateExecutor::default())),
                 metadata,
                 model_dir: PathBuf::from("."),
                 state: LoadState::Loaded,
@@ -5605,7 +5664,7 @@ mod tests {
         let version = metadata.version.clone();
         XybridModel {
             handle: Arc::new(RwLock::new(ModelHandle {
-                executor: TemplateExecutor::default(),
+                executor: Arc::new(Mutex::new(TemplateExecutor::default())),
                 metadata,
                 model_dir: PathBuf::from("."),
                 state: LoadState::Loaded,
@@ -6397,7 +6456,7 @@ mod tests {
         executor.register_runtime("onnx", runtime);
         XybridModel {
             handle: Arc::new(RwLock::new(ModelHandle {
-                executor,
+                executor: Arc::new(Mutex::new(executor)),
                 metadata,
                 model_dir: PathBuf::from("."),
                 state: LoadState::Loaded,
