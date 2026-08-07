@@ -3,32 +3,48 @@
 // </auto-generated>
 #nullable enable
 
-using System;
-using System.Threading;
-using System.Text;
-
 namespace XybridBolt
 {
-    public sealed partial class XybridModel : IDisposable
+    public sealed partial class XybridModel : global::System.IDisposable
     {
-        private IntPtr _handle;
+        private long handle;
 
-        // Private handle-adopting ctor; used only by chained `: this(...)` and the static factories below.
-        private XybridModel(IntPtr handle)
+        internal ulong Handle => unchecked((ulong)(ulong)global::System.Threading.Interlocked.Read(ref handle));
+
+        internal XybridModel(ulong handle)
         {
-            _handle = handle;
+            if (handle == 0) throw new global::System.ArgumentException("handle must not be zero", nameof(handle));
+            this.handle = unchecked((long)(ulong)handle);
         }
+
 
         /// <summary>
         /// Load from the xybrid registry. Recommended path.
         /// </summary>
         public static XybridModel FromRegistry(string id)
         {
-            byte[] _idBytes = Encoding.UTF8.GetBytes(id);
-            IntPtr _handle = NativeMethods.XybridModelFromRegistry(_idBytes, (UIntPtr)_idBytes.Length);
-            if (_handle == IntPtr.Zero) throw new BoltException(NativeMethods.TakeLastErrorMessage("Factory constructor failed"));
-            return new XybridModel(_handle);
+            WireWriter idWriter = new WireWriter();
+            {
+                idWriter.WriteString(id);
+            }
+            byte[] idBytes = idWriter.ToArray();
+            FfiBuf boltffiErrorBuffer = NativeMethods.NativeXybridModelFromRegistry(idBytes, (nuint)idBytes.Length, out ulong boltffiHandle);
+            if (boltffiErrorBuffer.ptr != 0)
+            {
+                try
+                {
+                    WireReader boltffiErrorReader = new WireReader(boltffiErrorBuffer);
+                    throw new global::XybridBolt.XybridErrorException(global::XybridBolt.XybridError.Decode(boltffiErrorReader));
+                }
+                finally
+                {
+                    NativeMethods.FreeBuf(boltffiErrorBuffer);
+                }
+            }
+            return boltffiHandle == 0 ? throw new global::System.InvalidOperationException("BoltFFI returned a null XybridModel handle") : new XybridModel(boltffiHandle);
         }
+
+
 
         /// <summary>
         /// Load from the registry, serving from the cloud gateway while the weights
@@ -41,44 +57,112 @@ namespace XybridBolt
         /// </summary>
         public static XybridModel FromRegistrySpeculative(string id)
         {
-            byte[] _idBytes = Encoding.UTF8.GetBytes(id);
-            IntPtr _handle = NativeMethods.XybridModelFromRegistrySpeculative(_idBytes, (UIntPtr)_idBytes.Length);
-            if (_handle == IntPtr.Zero) throw new BoltException(NativeMethods.TakeLastErrorMessage("Factory constructor failed"));
-            return new XybridModel(_handle);
+            WireWriter idWriter = new WireWriter();
+            {
+                idWriter.WriteString(id);
+            }
+            byte[] idBytes = idWriter.ToArray();
+            FfiBuf boltffiErrorBuffer = NativeMethods.NativeXybridModelFromRegistrySpeculative(idBytes, (nuint)idBytes.Length, out ulong boltffiHandle);
+            if (boltffiErrorBuffer.ptr != 0)
+            {
+                try
+                {
+                    WireReader boltffiErrorReader = new WireReader(boltffiErrorBuffer);
+                    throw new global::XybridBolt.XybridErrorException(global::XybridBolt.XybridError.Decode(boltffiErrorReader));
+                }
+                finally
+                {
+                    NativeMethods.FreeBuf(boltffiErrorBuffer);
+                }
+            }
+            return boltffiHandle == 0 ? throw new global::System.InvalidOperationException("BoltFFI returned a null XybridModel handle") : new XybridModel(boltffiHandle);
         }
+
+
 
         /// <summary>
         /// Load from a local model directory (must contain `model_metadata.json`).
         /// </summary>
         public static XybridModel FromDirectory(string path)
         {
-            byte[] _pathBytes = Encoding.UTF8.GetBytes(path);
-            IntPtr _handle = NativeMethods.XybridModelFromDirectory(_pathBytes, (UIntPtr)_pathBytes.Length);
-            if (_handle == IntPtr.Zero) throw new BoltException(NativeMethods.TakeLastErrorMessage("Factory constructor failed"));
-            return new XybridModel(_handle);
+            WireWriter pathWriter = new WireWriter();
+            {
+                pathWriter.WriteString(path);
+            }
+            byte[] pathBytes = pathWriter.ToArray();
+            FfiBuf boltffiErrorBuffer = NativeMethods.NativeXybridModelFromDirectory(pathBytes, (nuint)pathBytes.Length, out ulong boltffiHandle);
+            if (boltffiErrorBuffer.ptr != 0)
+            {
+                try
+                {
+                    WireReader boltffiErrorReader = new WireReader(boltffiErrorBuffer);
+                    throw new global::XybridBolt.XybridErrorException(global::XybridBolt.XybridError.Decode(boltffiErrorReader));
+                }
+                finally
+                {
+                    NativeMethods.FreeBuf(boltffiErrorBuffer);
+                }
+            }
+            return boltffiHandle == 0 ? throw new global::System.InvalidOperationException("BoltFFI returned a null XybridModel handle") : new XybridModel(boltffiHandle);
         }
+
+
 
         /// <summary>
         /// Load from a local `.xyb` bundle.
         /// </summary>
         public static XybridModel FromBundle(string path)
         {
-            byte[] _pathBytes = Encoding.UTF8.GetBytes(path);
-            IntPtr _handle = NativeMethods.XybridModelFromBundle(_pathBytes, (UIntPtr)_pathBytes.Length);
-            if (_handle == IntPtr.Zero) throw new BoltException(NativeMethods.TakeLastErrorMessage("Factory constructor failed"));
-            return new XybridModel(_handle);
+            WireWriter pathWriter = new WireWriter();
+            {
+                pathWriter.WriteString(path);
+            }
+            byte[] pathBytes = pathWriter.ToArray();
+            FfiBuf boltffiErrorBuffer = NativeMethods.NativeXybridModelFromBundle(pathBytes, (nuint)pathBytes.Length, out ulong boltffiHandle);
+            if (boltffiErrorBuffer.ptr != 0)
+            {
+                try
+                {
+                    WireReader boltffiErrorReader = new WireReader(boltffiErrorBuffer);
+                    throw new global::XybridBolt.XybridErrorException(global::XybridBolt.XybridError.Decode(boltffiErrorReader));
+                }
+                finally
+                {
+                    NativeMethods.FreeBuf(boltffiErrorBuffer);
+                }
+            }
+            return boltffiHandle == 0 ? throw new global::System.InvalidOperationException("BoltFFI returned a null XybridModel handle") : new XybridModel(boltffiHandle);
         }
+
+
 
         /// <summary>
         /// Resolve and load from a HuggingFace repo (`org/repo` or `org/repo:variant`).
         /// </summary>
         public static XybridModel FromHuggingface(string repo)
         {
-            byte[] _repoBytes = Encoding.UTF8.GetBytes(repo);
-            IntPtr _handle = NativeMethods.XybridModelFromHuggingface(_repoBytes, (UIntPtr)_repoBytes.Length);
-            if (_handle == IntPtr.Zero) throw new BoltException(NativeMethods.TakeLastErrorMessage("Factory constructor failed"));
-            return new XybridModel(_handle);
+            WireWriter repoWriter = new WireWriter();
+            {
+                repoWriter.WriteString(repo);
+            }
+            byte[] repoBytes = repoWriter.ToArray();
+            FfiBuf boltffiErrorBuffer = NativeMethods.NativeXybridModelFromHuggingface(repoBytes, (nuint)repoBytes.Length, out ulong boltffiHandle);
+            if (boltffiErrorBuffer.ptr != 0)
+            {
+                try
+                {
+                    WireReader boltffiErrorReader = new WireReader(boltffiErrorBuffer);
+                    throw new global::XybridBolt.XybridErrorException(global::XybridBolt.XybridError.Decode(boltffiErrorReader));
+                }
+                finally
+                {
+                    NativeMethods.FreeBuf(boltffiErrorBuffer);
+                }
+            }
+            return boltffiHandle == 0 ? throw new global::System.InvalidOperationException("BoltFFI returned a null XybridModel handle") : new XybridModel(boltffiHandle);
         }
+
+
 
         /// <summary>
         /// Load from a raw GGUF file, auto-generating `model_metadata.json` from the
@@ -86,51 +170,77 @@ namespace XybridBolt
         /// </summary>
         public static XybridModel FromModelFile(string path)
         {
-            byte[] _pathBytes = Encoding.UTF8.GetBytes(path);
-            IntPtr _handle = NativeMethods.XybridModelFromModelFile(_pathBytes, (UIntPtr)_pathBytes.Length);
-            if (_handle == IntPtr.Zero) throw new BoltException(NativeMethods.TakeLastErrorMessage("Factory constructor failed"));
-            return new XybridModel(_handle);
+            WireWriter pathWriter = new WireWriter();
+            {
+                pathWriter.WriteString(path);
+            }
+            byte[] pathBytes = pathWriter.ToArray();
+            FfiBuf boltffiErrorBuffer = NativeMethods.NativeXybridModelFromModelFile(pathBytes, (nuint)pathBytes.Length, out ulong boltffiHandle);
+            if (boltffiErrorBuffer.ptr != 0)
+            {
+                try
+                {
+                    WireReader boltffiErrorReader = new WireReader(boltffiErrorBuffer);
+                    throw new global::XybridBolt.XybridErrorException(global::XybridBolt.XybridError.Decode(boltffiErrorReader));
+                }
+                finally
+                {
+                    NativeMethods.FreeBuf(boltffiErrorBuffer);
+                }
+            }
+            return boltffiHandle == 0 ? throw new global::System.InvalidOperationException("BoltFFI returned a null XybridModel handle") : new XybridModel(boltffiHandle);
         }
+
 
         public string ModelId()
         {
             ThrowIfDisposed();
-            FfiBuf _buf = NativeMethods.XybridModelModelId(_handle);
+            FfiBuf boltffiResultBuffer = NativeMethods.NativeXybridModelModelId(this.Handle);
             try
             {
-                return new WireReader(_buf).ReadString();
+                WireReader resultReader = new WireReader(boltffiResultBuffer);
+                return resultReader.ReadString();
             }
             finally
             {
-                NativeMethods.FreeBuf(_buf);
+                NativeMethods.FreeBuf(boltffiResultBuffer);
+                // StreamNext can block for the full inter-token gap. Keep
+                // this wrapper alive so its finalizer cannot free the
+                // native handle while the call is still using it.
+                global::System.GC.KeepAlive(this);
             }
         }
+
 
         public string Version()
         {
             ThrowIfDisposed();
-            FfiBuf _buf = NativeMethods.XybridModelVersion(_handle);
+            FfiBuf boltffiResultBuffer = NativeMethods.NativeXybridModelVersion(this.Handle);
             try
             {
-                return new WireReader(_buf).ReadString();
+                WireReader resultReader = new WireReader(boltffiResultBuffer);
+                return resultReader.ReadString();
             }
             finally
             {
-                NativeMethods.FreeBuf(_buf);
+                NativeMethods.FreeBuf(boltffiResultBuffer);
             }
         }
 
-        public XybridOutputType OutputType()
+
+        public global::XybridBolt.XybridOutputType OutputType()
         {
             ThrowIfDisposed();
-            return NativeMethods.XybridModelOutputType(_handle);
+            return NativeMethods.NativeXybridModelOutputType(this.Handle);
         }
+
 
         public bool IsLoaded()
         {
             ThrowIfDisposed();
-            return NativeMethods.XybridModelIsLoaded(_handle);
+            return NativeMethods.NativeXybridModelIsLoaded(this.Handle);
         }
+
 
         /// <summary>
         /// Whether runs are currently answered by the cloud because the local
@@ -139,52 +249,58 @@ namespace XybridBolt
         public bool IsCloudServing()
         {
             ThrowIfDisposed();
-            return NativeMethods.XybridModelIsCloudServing(_handle);
+            return NativeMethods.NativeXybridModelIsCloudServing(this.Handle);
         }
+
 
         /// <summary>
         /// Download progress + state in one read — poll this to drive a progress
         /// bar. Reports `Ready` at 1.0 for an ordinary local model, so hosts need
         /// no special case.
         /// </summary>
-        public XybridDownloadStatus DownloadStatus()
+        public global::XybridBolt.XybridDownloadStatus DownloadStatus()
         {
             ThrowIfDisposed();
-            FfiBuf _buf = NativeMethods.XybridModelDownloadStatus(_handle);
+            FfiBuf boltffiResultBuffer = NativeMethods.NativeXybridModelDownloadStatus(this.Handle);
             try
             {
-                return XybridDownloadStatus.Decode(new WireReader(_buf));
+                WireReader resultReader = new WireReader(boltffiResultBuffer);
+                return global::XybridBolt.XybridDownloadStatus.Decode(resultReader);
             }
             finally
             {
-                NativeMethods.FreeBuf(_buf);
+                NativeMethods.FreeBuf(boltffiResultBuffer);
             }
         }
+
 
         /// <summary>
         /// Block until the download finishes or `timeout_ms` elapses, then report
         /// the status. Call it off the UI thread (the same place `from_registry` is
         /// already called). `timeout_ms = 0` makes it a non-blocking read.
         /// </summary>
-        public XybridDownloadStatus AwaitDownload(ulong timeoutMs)
+        public global::XybridBolt.XybridDownloadStatus AwaitDownload(ulong timeoutMs)
         {
             ThrowIfDisposed();
-            FfiBuf _buf = NativeMethods.XybridModelAwaitDownload(_handle, timeoutMs);
+            FfiBuf boltffiResultBuffer = NativeMethods.NativeXybridModelAwaitDownload(this.Handle, timeoutMs);
             try
             {
-                return XybridDownloadStatus.Decode(new WireReader(_buf));
+                WireReader resultReader = new WireReader(boltffiResultBuffer);
+                return global::XybridBolt.XybridDownloadStatus.Decode(resultReader);
             }
             finally
             {
-                NativeMethods.FreeBuf(_buf);
+                NativeMethods.FreeBuf(boltffiResultBuffer);
             }
         }
+
 
         public bool SupportsStreaming()
         {
             ThrowIfDisposed();
-            return NativeMethods.XybridModelSupportsStreaming(_handle);
+            return NativeMethods.NativeXybridModelSupportsStreaming(this.Handle);
         }
+
 
         /// <summary>
         /// Whether this model emits true token-by-token output.
@@ -192,88 +308,235 @@ namespace XybridBolt
         public bool SupportsTokenStreaming()
         {
             ThrowIfDisposed();
-            return NativeMethods.XybridModelSupportsTokenStreaming(_handle);
+            return NativeMethods.NativeXybridModelSupportsTokenStreaming(this.Handle);
         }
+
 
         public bool IsLlm()
         {
             ThrowIfDisposed();
-            return NativeMethods.XybridModelIsLlm(_handle);
+            return NativeMethods.NativeXybridModelIsLlm(this.Handle);
         }
+
 
         public bool HasVoices()
         {
             ThrowIfDisposed();
-            return NativeMethods.XybridModelHasVoices(_handle);
+            return NativeMethods.NativeXybridModelHasVoices(this.Handle);
         }
 
-        public XybridVoiceInfo[] Voices()
+
+        public global::XybridBolt.XybridVoiceInfo[] Voices()
         {
             ThrowIfDisposed();
-            FfiBuf _buf = NativeMethods.XybridModelVoices(_handle);
+            FfiBuf boltffiResultBuffer = NativeMethods.NativeXybridModelVoices(this.Handle);
             try
             {
-                return new WireReader(_buf).ReadEncodedArray<XybridVoiceInfo>(r0 => XybridVoiceInfo.Decode(r0));
+                WireReader resultReader = new WireReader(boltffiResultBuffer);
+                return resultReader.ReadArray(reader => global::XybridBolt.XybridVoiceInfo.Decode(resultReader));
             }
             finally
             {
-                NativeMethods.FreeBuf(_buf);
+                NativeMethods.FreeBuf(boltffiResultBuffer);
             }
         }
 
-        public XybridVoiceInfo? DefaultVoice()
+
+        public global::XybridBolt.XybridVoiceInfo? DefaultVoice()
         {
             ThrowIfDisposed();
-            FfiBuf _buf = NativeMethods.XybridModelDefaultVoice(_handle);
+            FfiBuf boltffiResultBuffer = NativeMethods.NativeXybridModelDefaultVoice(this.Handle);
             try
             {
-                var reader = new WireReader(_buf);
-                return reader.ReadU8() == 0 ? (XybridVoiceInfo?)null : XybridVoiceInfo.Decode(reader);
+                WireReader resultReader = new WireReader(boltffiResultBuffer);
+                return resultReader.ReadU8() == 0 ? default(global::XybridBolt.XybridVoiceInfo?) : global::XybridBolt.XybridVoiceInfo.Decode(resultReader);
             }
             finally
             {
-                NativeMethods.FreeBuf(_buf);
+                NativeMethods.FreeBuf(boltffiResultBuffer);
             }
         }
 
-        public XybridVoiceInfo? Voice(string voiceId)
+
+        public global::XybridBolt.XybridVoiceInfo? Voice(string voiceId)
         {
             ThrowIfDisposed();
-            byte[] _voiceIdBytes = Encoding.UTF8.GetBytes(voiceId);
-            FfiBuf _buf = NativeMethods.XybridModelVoice(_handle, _voiceIdBytes, (UIntPtr)_voiceIdBytes.Length);
+            WireWriter voiceIdWriter = new WireWriter();
+            {
+                voiceIdWriter.WriteString(voiceId);
+            }
+            byte[] voiceIdBytes = voiceIdWriter.ToArray();
+            FfiBuf boltffiResultBuffer = NativeMethods.NativeXybridModelVoice(this.Handle, voiceIdBytes, (nuint)voiceIdBytes.Length);
             try
             {
-                var reader = new WireReader(_buf);
-                return reader.ReadU8() == 0 ? (XybridVoiceInfo?)null : XybridVoiceInfo.Decode(reader);
+                WireReader resultReader = new WireReader(boltffiResultBuffer);
+                return resultReader.ReadU8() == 0 ? default(global::XybridBolt.XybridVoiceInfo?) : global::XybridBolt.XybridVoiceInfo.Decode(resultReader);
             }
             finally
             {
-                NativeMethods.FreeBuf(_buf);
+                NativeMethods.FreeBuf(boltffiResultBuffer);
             }
         }
+
+
+        /// <summary>
+        /// Run inference, optionally with [`XybridRunOptions`] (generation config,
+        /// abort signals, cloud-fallback). Pass `None` for the model's defaults.
+        ///
+        /// The hand-written wrappers add a one-arg `run(envelope)` convenience that
+        /// forwards `None`, so simple call sites stay ergonomic.
+        /// </summary>
+        public global::XybridBolt.XybridResult Run(global::XybridBolt.XybridEnvelope envelope, global::XybridBolt.XybridRunOptions? options)
+        {
+            ThrowIfDisposed();
+            WireWriter envelopeWriter = new WireWriter();
+            {
+                envelope.Encode(envelopeWriter);
+            }
+            byte[] envelopeBytes = envelopeWriter.ToArray();
+            WireWriter optionsWriter = new WireWriter();
+            {
+                if (options is { } boltffiValue0)
+                {
+                    optionsWriter.WriteU8(1);
+                    boltffiValue0.Encode(optionsWriter);
+                }
+                else
+                {
+                    optionsWriter.WriteU8(0);
+                }
+            }
+            byte[] optionsBytes = optionsWriter.ToArray();
+            FfiBuf boltffiErrorBuffer = NativeMethods.NativeXybridModelRun(this.Handle, envelopeBytes, (nuint)envelopeBytes.Length, optionsBytes, (nuint)optionsBytes.Length, out FfiBuf boltffiResultBuffer);
+            if (boltffiErrorBuffer.ptr != 0)
+            {
+                try
+                {
+                    WireReader boltffiErrorReader = new WireReader(boltffiErrorBuffer);
+                    throw new global::XybridBolt.XybridErrorException(global::XybridBolt.XybridError.Decode(boltffiErrorReader));
+                }
+                finally
+                {
+                    NativeMethods.FreeBuf(boltffiErrorBuffer);
+                }
+            }
+            try
+            {
+                WireReader resultReader = new WireReader(boltffiResultBuffer);
+                return global::XybridBolt.XybridResult.Decode(resultReader);
+            }
+            finally
+            {
+                NativeMethods.FreeBuf(boltffiResultBuffer);
+            }
+        }
+
+
+        /// <summary>
+        /// Start token streaming and return a model-scoped session identifier.
+        ///
+        /// The identifier remains valid until the final result is taken, an error
+        /// is returned, or [`Self::stream_close`] is called.
+        /// </summary>
+        public ulong RunStream(global::XybridBolt.XybridEnvelope envelope, global::XybridBolt.XybridRunOptions? options)
+        {
+            ThrowIfDisposed();
+            WireWriter envelopeWriter = new WireWriter();
+            {
+                envelope.Encode(envelopeWriter);
+            }
+            byte[] envelopeBytes = envelopeWriter.ToArray();
+            WireWriter optionsWriter = new WireWriter();
+            {
+                if (options is { } boltffiValue0)
+                {
+                    optionsWriter.WriteU8(1);
+                    boltffiValue0.Encode(optionsWriter);
+                }
+                else
+                {
+                    optionsWriter.WriteU8(0);
+                }
+            }
+            byte[] optionsBytes = optionsWriter.ToArray();
+            FfiBuf boltffiErrorBuffer = NativeMethods.NativeXybridModelRunStream(this.Handle, envelopeBytes, (nuint)envelopeBytes.Length, optionsBytes, (nuint)optionsBytes.Length, out ulong boltffiResult);
+            if (boltffiErrorBuffer.ptr != 0)
+            {
+                try
+                {
+                    WireReader boltffiErrorReader = new WireReader(boltffiErrorBuffer);
+                    throw new global::XybridBolt.XybridErrorException(global::XybridBolt.XybridError.Decode(boltffiErrorReader));
+                }
+                finally
+                {
+                    NativeMethods.FreeBuf(boltffiErrorBuffer);
+                }
+            }
+            return boltffiResult;
+        }
+
 
         /// <summary>
         /// Block until the next item for `stream_id` is ready.
         /// </summary>
-        public XybridStreamEvent StreamNext(ulong streamId)
+        public global::XybridBolt.XybridStreamEvent StreamNext(ulong streamId)
         {
             ThrowIfDisposed();
-            FfiBuf _buf = NativeMethods.XybridModelStreamNext(_handle, streamId);
+            FfiBuf boltffiErrorBuffer = NativeMethods.NativeXybridModelStreamNext(this.Handle, streamId, out FfiBuf boltffiResultBuffer);
+            if (boltffiErrorBuffer.ptr != 0)
+            {
+                try
+                {
+                    WireReader boltffiErrorReader = new WireReader(boltffiErrorBuffer);
+                    throw new global::XybridBolt.XybridErrorException(global::XybridBolt.XybridError.Decode(boltffiErrorReader));
+                }
+                finally
+                {
+                    NativeMethods.FreeBuf(boltffiErrorBuffer);
+                }
+            }
             try
             {
-                var reader = new WireReader(_buf);
-                if (reader.ReadU8() != 0) throw new XybridErrorException(XybridError.Decode(reader));
-                return XybridStreamEvent.Decode(reader);
+                WireReader resultReader = new WireReader(boltffiResultBuffer);
+                return global::XybridBolt.XybridStreamEvent.Decode(resultReader);
             }
             finally
             {
-                NativeMethods.FreeBuf(_buf);
-                // StreamNext can block for the full inter-token gap. Keep
-                // this wrapper alive so its finalizer cannot free _handle
-                // while the native call is still using it.
-                GC.KeepAlive(this);
+                NativeMethods.FreeBuf(boltffiResultBuffer);
             }
         }
+
+
+        /// <summary>
+        /// Take the final result after receiving a `Complete` event.
+        /// </summary>
+        public global::XybridBolt.XybridResult StreamResult(ulong streamId)
+        {
+            ThrowIfDisposed();
+            FfiBuf boltffiErrorBuffer = NativeMethods.NativeXybridModelStreamResult(this.Handle, streamId, out FfiBuf boltffiResultBuffer);
+            if (boltffiErrorBuffer.ptr != 0)
+            {
+                try
+                {
+                    WireReader boltffiErrorReader = new WireReader(boltffiErrorBuffer);
+                    throw new global::XybridBolt.XybridErrorException(global::XybridBolt.XybridError.Decode(boltffiErrorReader));
+                }
+                finally
+                {
+                    NativeMethods.FreeBuf(boltffiErrorBuffer);
+                }
+            }
+            try
+            {
+                WireReader resultReader = new WireReader(boltffiResultBuffer);
+                return global::XybridBolt.XybridResult.Decode(resultReader);
+            }
+            finally
+            {
+                NativeMethods.FreeBuf(boltffiResultBuffer);
+            }
+        }
+
 
         /// <summary>
         /// Forget a streaming session.
@@ -281,57 +544,168 @@ namespace XybridBolt
         public void StreamClose(ulong streamId)
         {
             ThrowIfDisposed();
-            NativeMethods.XybridModelStreamClose(_handle, streamId);
+            FfiStatus status = NativeMethods.NativeXybridModelStreamClose(this.Handle, streamId);
+            if (status.code != 0)
+            {
+                throw new global::System.InvalidOperationException($"BoltFFI call failed with status code {status.code}");
+            }
         }
+
+
+        /// <summary>
+        /// Run inference seeded with a conversation `context` (multi-turn chat).
+        ///
+        /// Only the generation config from `options` is applied — abort signals and
+        /// cloud fallback are not wired on the context path (matches the facade's
+        /// `run_with_context`).
+        /// </summary>
+        public global::XybridBolt.XybridResult RunWithContext(global::XybridBolt.XybridEnvelope envelope, XybridConversationContext context, global::XybridBolt.XybridRunOptions? options)
+        {
+            ThrowIfDisposed();
+            WireWriter envelopeWriter = new WireWriter();
+            {
+                envelope.Encode(envelopeWriter);
+            }
+            byte[] envelopeBytes = envelopeWriter.ToArray();
+            WireWriter optionsWriter = new WireWriter();
+            {
+                if (options is { } boltffiValue0)
+                {
+                    optionsWriter.WriteU8(1);
+                    boltffiValue0.Encode(optionsWriter);
+                }
+                else
+                {
+                    optionsWriter.WriteU8(0);
+                }
+            }
+            byte[] optionsBytes = optionsWriter.ToArray();
+            FfiBuf boltffiErrorBuffer = NativeMethods.NativeXybridModelRunWithContext(this.Handle, envelopeBytes, (nuint)envelopeBytes.Length, context.Handle, optionsBytes, (nuint)optionsBytes.Length, out FfiBuf boltffiResultBuffer);
+            if (boltffiErrorBuffer.ptr != 0)
+            {
+                try
+                {
+                    WireReader boltffiErrorReader = new WireReader(boltffiErrorBuffer);
+                    throw new global::XybridBolt.XybridErrorException(global::XybridBolt.XybridError.Decode(boltffiErrorReader));
+                }
+                finally
+                {
+                    NativeMethods.FreeBuf(boltffiErrorBuffer);
+                }
+            }
+            try
+            {
+                WireReader resultReader = new WireReader(boltffiResultBuffer);
+                return global::XybridBolt.XybridResult.Decode(resultReader);
+            }
+            finally
+            {
+                NativeMethods.FreeBuf(boltffiResultBuffer);
+            }
+        }
+
+
+        /// <summary>
+        /// Start context-aware token streaming; returns a model-scoped session id.
+        /// The pull protocol is identical to [`Self::run_stream`]
+        /// (`stream_next` / `stream_result` / `stream_close`).
+        /// </summary>
+        public ulong RunStreamWithContext(global::XybridBolt.XybridEnvelope envelope, XybridConversationContext context, global::XybridBolt.XybridRunOptions? options)
+        {
+            ThrowIfDisposed();
+            WireWriter envelopeWriter = new WireWriter();
+            {
+                envelope.Encode(envelopeWriter);
+            }
+            byte[] envelopeBytes = envelopeWriter.ToArray();
+            WireWriter optionsWriter = new WireWriter();
+            {
+                if (options is { } boltffiValue0)
+                {
+                    optionsWriter.WriteU8(1);
+                    boltffiValue0.Encode(optionsWriter);
+                }
+                else
+                {
+                    optionsWriter.WriteU8(0);
+                }
+            }
+            byte[] optionsBytes = optionsWriter.ToArray();
+            FfiBuf boltffiErrorBuffer = NativeMethods.NativeXybridModelRunStreamWithContext(this.Handle, envelopeBytes, (nuint)envelopeBytes.Length, context.Handle, optionsBytes, (nuint)optionsBytes.Length, out ulong boltffiResult);
+            if (boltffiErrorBuffer.ptr != 0)
+            {
+                try
+                {
+                    WireReader boltffiErrorReader = new WireReader(boltffiErrorBuffer);
+                    throw new global::XybridBolt.XybridErrorException(global::XybridBolt.XybridError.Decode(boltffiErrorReader));
+                }
+                finally
+                {
+                    NativeMethods.FreeBuf(boltffiErrorBuffer);
+                }
+            }
+            return boltffiResult;
+        }
+
 
         public void Warmup()
         {
             ThrowIfDisposed();
-            FfiBuf _buf = NativeMethods.XybridModelWarmup(_handle);
-            try
+            FfiBuf boltffiErrorBuffer = NativeMethods.NativeXybridModelWarmup(this.Handle);
+            if (boltffiErrorBuffer.ptr != 0)
             {
-                var reader = new WireReader(_buf);
-                if (reader.ReadU8() != 0) throw new XybridErrorException(XybridError.Decode(reader));
-            }
-            finally
-            {
-                NativeMethods.FreeBuf(_buf);
+                try
+                {
+                    WireReader boltffiErrorReader = new WireReader(boltffiErrorBuffer);
+                    throw new global::XybridBolt.XybridErrorException(global::XybridBolt.XybridError.Decode(boltffiErrorReader));
+                }
+                finally
+                {
+                    NativeMethods.FreeBuf(boltffiErrorBuffer);
+                }
             }
         }
+
 
         public void Unload()
         {
             ThrowIfDisposed();
-            FfiBuf _buf = NativeMethods.XybridModelUnload(_handle);
-            try
+            FfiBuf boltffiErrorBuffer = NativeMethods.NativeXybridModelUnload(this.Handle);
+            if (boltffiErrorBuffer.ptr != 0)
             {
-                var reader = new WireReader(_buf);
-                if (reader.ReadU8() != 0) throw new XybridErrorException(XybridError.Decode(reader));
-            }
-            finally
-            {
-                NativeMethods.FreeBuf(_buf);
+                try
+                {
+                    WireReader boltffiErrorReader = new WireReader(boltffiErrorBuffer);
+                    throw new global::XybridBolt.XybridErrorException(global::XybridBolt.XybridError.Decode(boltffiErrorReader));
+                }
+                finally
+                {
+                    NativeMethods.FreeBuf(boltffiErrorBuffer);
+                }
             }
         }
 
-        internal IntPtr RawHandle => _handle;
+
+        private ulong TakeHandle() => unchecked((ulong)(ulong)global::System.Threading.Interlocked.Exchange(ref handle, 0));
 
         private void ThrowIfDisposed()
         {
-            if (_handle == IntPtr.Zero) throw new ObjectDisposedException(nameof(XybridModel));
+            if (global::System.Threading.Interlocked.Read(ref handle) == 0)
+                throw new global::System.ObjectDisposedException(nameof(XybridModel));
         }
+
+        private void Release()
+        {
+            ulong released = unchecked((ulong)(ulong)global::System.Threading.Interlocked.Exchange(ref handle, 0));
+            if (released != 0) NativeMethods.NativeXybridModelRelease(released);
+        }
+
+        ~XybridModel() => Release();
 
         public void Dispose()
         {
-            IntPtr handle = Interlocked.Exchange(ref _handle, IntPtr.Zero);
-            if (handle == IntPtr.Zero) return;
-            NativeMethods.XybridModelFree(handle);
-            GC.SuppressFinalize(this);
-        }
-
-        ~XybridModel()
-        {
-            Dispose();
+            Release();
+            global::System.GC.SuppressFinalize(this);
         }
     }
 }

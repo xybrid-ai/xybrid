@@ -3,8 +3,7 @@
 // </auto-generated>
 #nullable enable
 
-using System;
-using System.Text;
+using System.Runtime.InteropServices;
 
 namespace XybridBolt
 {
@@ -20,26 +19,46 @@ namespace XybridBolt
         internal static XybridStreamToken Decode(WireReader reader) =>
             new XybridStreamToken(
                 reader.ReadString(),
-                reader.ReadU8() == 0 ? (long?)null : reader.ReadI64(),
+                reader.ReadU8() == 0 ? default(long?) : reader.ReadI64(),
                 reader.ReadU64(),
                 reader.ReadString(),
-                reader.ReadU8() == 0 ? (string?)null : reader.ReadString()
+                reader.ReadU8() == 0 ? default(string?) : reader.ReadString()
             );
 
-        internal int WireEncodedSize() =>
-            (4 + Encoding.UTF8.GetByteCount(this.Token)) +
-            (1 + (this.TokenId is { } sizeOpt0 ? 8 : 0)) +
-            8 +
-            (4 + Encoding.UTF8.GetByteCount(this.CumulativeText)) +
-            (1 + (this.FinishReason is { } sizeOpt1 ? (4 + Encoding.UTF8.GetByteCount(sizeOpt1)) : 0));
-
-        internal void WireEncodeTo(WireWriter wire)
+        internal void Encode(WireWriter writer)
         {
-            wire.WriteString(this.Token);
-            if (this.TokenId is { } opt0) { wire.WriteU8((byte)1); wire.WriteI64(opt0); } else { wire.WriteU8((byte)0); };
-            wire.WriteU64(this.Index);
-            wire.WriteString(this.CumulativeText);
-            if (this.FinishReason is { } opt1) { wire.WriteU8((byte)1); wire.WriteString(opt1); } else { wire.WriteU8((byte)0); };
+            {
+                writer.WriteString(this.Token);
+            }
+            {
+                if (this.TokenId is { } boltffiValue0)
+                {
+                    writer.WriteU8(1);
+                    writer.WriteI64(boltffiValue0);
+                }
+                else
+                {
+                    writer.WriteU8(0);
+                }
+            }
+            {
+                writer.WriteU64(this.Index);
+            }
+            {
+                writer.WriteString(this.CumulativeText);
+            }
+            {
+                if (this.FinishReason is { } boltffiValue0)
+                {
+                    writer.WriteU8(1);
+                    writer.WriteString(boltffiValue0);
+                }
+                else
+                {
+                    writer.WriteU8(0);
+                }
+            }
         }
+
     }
 }

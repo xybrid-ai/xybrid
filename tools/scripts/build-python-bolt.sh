@@ -53,7 +53,7 @@ echo "    Profile:  $PROFILE"
 
 cd "$REPO_ROOT"
 # shellcheck disable=SC2086  # deliberate word-split: empty PROFILE_FLAG = debug
-cargo build -p xybrid-bolt $PROFILE_FLAG --features "$FEATURES"
+cargo build -p xybrid_bolt $PROFILE_FLAG --features "$FEATURES"
 
 SRC="$REPO_ROOT/target/$PROFILE/$LIB_NAME"
 if [ ! -f "$SRC" ]; then

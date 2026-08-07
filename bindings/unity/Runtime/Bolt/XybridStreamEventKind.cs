@@ -3,34 +3,11 @@
 // </auto-generated>
 #nullable enable
 
-using System;
-
 namespace XybridBolt
 {
     public enum XybridStreamEventKind : int
     {
         Token = 0,
         Complete = 1
-    }
-
-    internal static class XybridStreamEventKindWire
-    {
-        internal const int WireEncodedSize = 4;
-
-        internal static XybridStreamEventKind Decode(WireReader reader) =>
-            reader.ReadI32() switch
-            {
-                0 => XybridStreamEventKind.Token,
-                1 => XybridStreamEventKind.Complete,
-                int tag => throw new InvalidOperationException($"Unknown XybridStreamEventKind wire tag: {tag}"),
-            };
-
-        internal static void WireEncodeTo(this XybridStreamEventKind value, WireWriter wire) =>
-            wire.WriteI32(value switch
-            {
-                XybridStreamEventKind.Token => 0,
-                XybridStreamEventKind.Complete => 1,
-                _ => throw new InvalidOperationException($"Unknown XybridStreamEventKind variant: {value}"),
-            });
     }
 }
