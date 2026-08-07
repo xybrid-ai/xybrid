@@ -1,0 +1,89 @@
+crates/xybrid-sdk/src/model_registry.rs
+  s_37833f24f6cf58::t_925911791d53dd 152-155,160-165
+  s_37833f24f6cf58::t_40e3cfac26e085 187
+  s_37833f24f6cf58::t_7bcf3bf10721d3 156-159
+  s_37833f24f6cf58::t_3046f1de1ee8d8 1-151,166-186,188-213,219-222,225-237,239-377,405-411
+  s_37833f24f6cf58::t_33ed94476e7ef3 214-218,223-224,238
+  s_37833f24f6cf58::t_f152109bad686f 378-404
+crates/xybrid-sdk/src/model.rs
+  s_37833f24f6cf58::t_29845977bfc6c5 2465-2480,2485
+  s_37833f24f6cf58::t_2e3ba8d8262498 1080-1082
+  s_37833f24f6cf58::t_7bcf3bf10721d3 10,1673,2481-2484,4620
+  s_37833f24f6cf58::t_af51409861b09e 3031
+  s_37833f24f6cf58::t_b96ca2155c9891 3499
+  s_37833f24f6cf58::t_99c77282606a7c 4397-4402
+  s_37833f24f6cf58::t_01b93c3d0615c0 836-855,857,864-906
+  s_37833f24f6cf58::t_dc3f7b044fc4d8 2983
+  s_37833f24f6cf58::t_ae5da0f4b8ccf2 3206
+  s_37833f24f6cf58::t_736bce4aed8eb4 4452-4454
+  s_37833f24f6cf58::t_c8bedc3aba08eb 5590,5611,6403
+  s_37833f24f6cf58::t_47582f938936ae 3686
+  s_37833f24f6cf58::t_d140f848c00ef4 3315
+  s_37833f24f6cf58::t_5304babe35e706 1395,1416,1432,1456,1474,1509,1541,1562,1588
+  s_37833f24f6cf58::t_8807fb8490cab0 4092
+  s_37833f24f6cf58::t_be2ca21b6aafa9 4423-4426,4431
+  s_37833f24f6cf58::t_cbf02fafe80962 3198
+  s_37833f24f6cf58::t_29ad96a7b86d3e 4106
+  s_37833f24f6cf58::t_9b6fd6f8a1c680 3709
+  s_37833f24f6cf58::t_dc2c2954020464 3109
+  s_37833f24f6cf58::t_c68a3442eb6043 2931
+  s_37833f24f6cf58::t_6d0366b57e3efc 1636-1672,1674-1692
+  s_37833f24f6cf58::t_55d60ec79432b0 4314
+  s_37833f24f6cf58::t_cc93fbe5d2afb4 4555-4558
+  s_37833f24f6cf58::t_b5d628397f0635 2879
+  s_37833f24f6cf58::t_d625b5c59e1cf7 3343
+  s_37833f24f6cf58::t_6aa7b835812c34 2315
+  s_37833f24f6cf58::t_0618a74ee4dba4 3139
+  s_37833f24f6cf58::t_9d9ca711d1f4ba 4274
+  s_37833f24f6cf58::t_047ef45c2c35e9 1777-1781
+  s_37833f24f6cf58::t_cc592ed062cee5 2268-2276,2281,2283-2288,2295-2296
+  s_37833f24f6cf58::t_b6cdebba36bc57 3474
+  s_37833f24f6cf58::t_9371a736c93fb6 4388-4393
+  s_37833f24f6cf58::t_7c5f163c5cdb81 2019
+  s_37833f24f6cf58::t_825caabe617e6b 5598,5619,6411
+  s_37833f24f6cf58::t_e213cd2c50013d 4144
+  s_37833f24f6cf58::t_84ec1f64793eba 4469-4554,4559-4619,4621-4657
+  s_37833f24f6cf58::t_6d964cb88a688e 2540-2543,2545-2565
+crates/xybrid-sdk/src/lib.rs
+  s_37833f24f6cf58::t_0ec4d9255be301 159
+  s_37833f24f6cf58::t_c5ad6629997078 574-606
+  s_37833f24f6cf58::t_9fdd4462c43176 227
+crates/xybrid-ffi-facade/src/lib.rs
+  s_37833f24f6cf58::t_f79c09d919214e 1707-1734
+bindings/flutter/rust/src/api/sdk_client.rs
+  s_da9b0a0afc6e02::t_679f109fb34ee6 116-142
+crates/xybrid-bolt/src/lib.rs
+  s_d67ab5389ed620::t_b5278db7d6696c 776-802
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "6a261b5e75f8715c48f7c4b1184cce5b32359122",
+  "prompts": {},
+  "sessions": {
+    "s_37833f24f6cf58": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "bdb9b554-ada8-4989-892b-f443209aa81d",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    },
+    "s_d67ab5389ed620": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6da553e1-7594-40a7-afa4-f47c611638a5",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    },
+    "s_da9b0a0afc6e02": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "eec73ce8-5f6c-46f7-aa93-411f75c33cc9",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
