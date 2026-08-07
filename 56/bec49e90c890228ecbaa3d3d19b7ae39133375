@@ -1,0 +1,21 @@
+docs/sdk/API_REFERENCE.md
+  s_d67ab5389ed620::t_5bf19f8f292e7a 483
+bindings/flutter/rust/src/api/pipeline.rs
+  s_d67ab5389ed620::t_5ca9210dcb1bf2 79,81-87,89-91
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "56bec49e90c890228ecbaa3d3d19b7ae39133375",
+  "prompts": {},
+  "sessions": {
+    "s_d67ab5389ed620": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6da553e1-7594-40a7-afa4-f47c611638a5",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
