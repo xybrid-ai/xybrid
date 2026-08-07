@@ -391,7 +391,7 @@ fn stream_with_gateway_sse(
         ));
     }
 
-    let body = gateway_chat_body(&request, config, true);
+    let body = gateway_chat_body(&request, config, true)?;
     let url = format!("{}/chat/completions", config.gateway_url);
     let agent = ureq::AgentBuilder::new()
         .timeout_connect(Duration::from_millis(10_000))
@@ -529,11 +529,21 @@ fn stream_with_gateway_sse(
     })
 }
 
+/// Build the OpenAI-compatible chat body for the gateway.
+///
+/// # Errors
+///
+/// Returns [`AdapterError::InvalidInput`] when neither the request nor the
+/// config names a model. This used to fall back to `"gpt-4o-mini"`, which the
+/// gateway routes to OpenAI — so a caller that simply forgot the model silently
+/// billed a third-party provider instead of running the model it asked for.
+/// That exact default is what made a missing `model` look like a gateway 502
+/// rather than a client bug.
 fn gateway_chat_body(
     request: &CompletionRequest,
     config: &CloudConfig,
     force_stream: bool,
-) -> serde_json::Value {
+) -> AdapterResult<serde_json::Value> {
     let messages: Vec<serde_json::Value> = request
         .to_messages()
         .into_iter()
@@ -553,7 +563,13 @@ fn gateway_chat_body(
         .model
         .clone()
         .or_else(|| config.default_model.clone())
-        .unwrap_or_else(|| "gpt-4o-mini".to_string());
+        .ok_or_else(|| {
+            AdapterError::InvalidInput(
+                "no model specified for the cloud request: set it on the envelope's `model` \
+                 metadata or via CloudConfig::default_model"
+                    .to_string(),
+            )
+        })?;
 
     let mut body = json!({
         "model": model,
@@ -576,7 +592,7 @@ fn gateway_chat_body(
         body["stream"] = json!(true);
     }
 
-    body
+    Ok(body)
 }
 
 fn gateway_stream_error(error: ureq::Error, timeout_ms: u32) -> AdapterError {
@@ -664,7 +680,7 @@ mod tests {
             .with_temperature(0.2)
             .with_max_tokens(42);
 
-        let body = gateway_chat_body(&request, &config, true);
+        let body = gateway_chat_body(&request, &config, true).expect("model is set");
 
         assert_eq!(body["stream"], true);
         assert_eq!(body["model"], "explicit-model");
@@ -672,6 +688,36 @@ mod tests {
         assert_eq!(body["max_tokens"], 42);
         assert_eq!(body["messages"][0]["role"], "user");
         assert_eq!(body["messages"][0]["content"], "hello");
+    }
+
+    /// A request naming no model must fail loudly. It used to default to
+    /// `gpt-4o-mini`, so a caller who forgot `model` silently ran (and paid
+    /// for) OpenAI instead of the model they meant — and the resulting
+    /// upstream failure surfaced as an opaque gateway error.
+    #[test]
+    fn gateway_chat_body_rejects_a_missing_model() {
+        let config = CloudConfig::gateway();
+        assert!(config.default_model.is_none(), "guard the premise");
+        let request = CompletionRequest::new("hello");
+
+        let err = gateway_chat_body(&request, &config, false)
+            .expect_err("a model-less request must not fall back to a hosted default");
+
+        assert!(
+            matches!(err, AdapterError::InvalidInput(ref m) if m.contains("no model specified")),
+            "unexpected error: {err:?}"
+        );
+    }
+
+    /// The config default still satisfies the requirement.
+    #[test]
+    fn gateway_chat_body_accepts_the_config_default_model() {
+        let config = CloudConfig::gateway().with_default_model("lfm2.5-350m");
+        let request = CompletionRequest::new("hello");
+
+        let body = gateway_chat_body(&request, &config, false).expect("config supplies the model");
+
+        assert_eq!(body["model"], "lfm2.5-350m");
     }
 
     #[test]
