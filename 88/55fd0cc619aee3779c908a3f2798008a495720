@@ -1,0 +1,115 @@
+crates/xybrid-whisper/Cargo.toml
+  s_37833f24f6cf58::t_acd9a6e303f3b3 1-25
+crates/xybrid-core/Cargo.toml
+  s_37833f24f6cf58::t_acd9a6e303f3b3 30-32,171-184
+crates/xybrid-sdk/src/stream.rs
+  s_37833f24f6cf58::t_acd9a6e303f3b3 8-9,158,160
+crates/whisper-cpp-sys/build.rs
+  s_37833f24f6cf58::t_acd9a6e303f3b3 1-403
+crates/xybrid-core/src/streaming/session.rs
+  s_37833f24f6cf58::t_acd9a6e303f3b3 13,341-346,396-415,504-507,512,575-584,593,774-775
+integration-tests/fixtures/models/.gitignore
+  s_37833f24f6cf58::t_acd9a6e303f3b3 15
+.gitmodules
+  s_37833f24f6cf58::t_acd9a6e303f3b3 5-8
+crates/xybrid-sdk/src/model_registry.rs
+  s_37833f24f6cf58::t_cd100b3e2ab6c1 220-229,242-246
+  s_cc908747fd2ec5::t_e1de11bec90df6 247-248
+crates/xybrid-whisper/src/model.rs
+  s_37833f24f6cf58::t_acd9a6e303f3b3 1-250
+crates/xybrid-core/src/execution/executor.rs
+  s_37833f24f6cf58::t_acd9a6e303f3b3 328-332,473-492,702-714,776-802,855-882
+crates/xybrid-sdk/src/model.rs
+  s_37833f24f6cf58::t_acd9a6e303f3b3 858-860,864,1901-1903,2337,2960-2961,3063-3064,3174-3175,3255-3256,3382-3383,3546-3547,3560-3561,3760-3761,3768-3769,4199-4200,4224-4225,4367-4368,4469-4477,4492,5030,5072,5126,5646,5667,6459
+  s_37833f24f6cf58::t_475334e760f685 861-863
+  s_37833f24f6cf58::t_0366770d79e571 908-914,916-918,921-928
+  s_37833f24f6cf58::t_fa7ee72046e8de 4437-4441
+  s_37833f24f6cf58::t_745237b8a7976e 4448-4452
+  s_37833f24f6cf58::t_af952283c6ae3e 929
+crates/xybrid-core/src/runtime_adapter/whisper_cpp/runtime.rs
+  s_37833f24f6cf58::t_acd9a6e303f3b3 1-367
+integration-tests/fixtures/models/models.json
+  s_37833f24f6cf58::t_acd9a6e303f3b3 23-61
+crates/xybrid-whisper/tests/transcribe_smoke.rs
+  s_37833f24f6cf58::t_acd9a6e303f3b3 1-168
+crates/xybrid-core/src/runtime_adapter/whisper_cpp/mod.rs
+  s_37833f24f6cf58::t_acd9a6e303f3b3 1-27
+crates/whisper-cpp-sys/Cargo.toml
+  s_37833f24f6cf58::t_acd9a6e303f3b3 1-51
+crates/xybrid-core/src/execution/template/metadata.rs
+  s_37833f24f6cf58::t_acd9a6e303f3b3 102-136,678-681,813-816
+crates/xybrid-whisper/src/segment.rs
+  s_37833f24f6cf58::t_acd9a6e303f3b3 1-79
+integration-tests/fixtures/models/whisper-ggml-tiny-en/model_metadata.json
+  s_37833f24f6cf58::t_acd9a6e303f3b3 1-28
+crates/xybrid-core/src/runtime_adapter/candle/runtime.rs
+  s_37833f24f6cf58::t_acd9a6e303f3b3 86-96
+crates/xybrid-core/src/runtime_adapter/mod.rs
+  s_37833f24f6cf58::t_acd9a6e303f3b3 108-113,147-149
+  s_37833f24f6cf58::t_a827ee80ac7fbd 150
+Cargo.toml
+  s_37833f24f6cf58::t_acd9a6e303f3b3 11,13
+crates/xybrid-core/src/runtime_adapter/traits.rs
+  s_37833f24f6cf58::t_acd9a6e303f3b3 19-28
+crates/xybrid-core/src/runtime_adapter/cloud/mod.rs
+  s_37833f24f6cf58::t_acd9a6e303f3b3 394,532-541,546,566-572,595,683,693-721
+  s_37833f24f6cf58::t_5f10a28a70876a 722
+crates/whisper-cpp-sys/wrapper.h
+  s_37833f24f6cf58::t_acd9a6e303f3b3 1-25
+crates/xybrid-sdk/Cargo.toml
+  s_37833f24f6cf58::t_acd9a6e303f3b3 100-105
+crates/xybrid-whisper/src/params.rs
+  s_37833f24f6cf58::t_acd9a6e303f3b3 1-158
+crates/llama-cpp-sys/build.rs
+  s_37833f24f6cf58::t_acd9a6e303f3b3 632-641
+crates/xybrid-core/src/cloud/client.rs
+  s_37833f24f6cf58::t_acd9a6e303f3b3 173-175,180-186
+crates/whisper-cpp-sys/src/lib.rs
+  s_37833f24f6cf58::t_acd9a6e303f3b3 1-71
+crates/xybrid-whisper/src/lib.rs
+  s_37833f24f6cf58::t_acd9a6e303f3b3 1-67
+crates/whisper-cpp-sys/src/bindings.rs
+  s_37833f24f6cf58::t_acd9a6e303f3b3 1-1204
+crates/xybrid-whisper/src/error.rs
+  s_37833f24f6cf58::t_acd9a6e303f3b3 1-69
+crates/xybrid-core/tests/whispercpp_asr.rs
+  s_37833f24f6cf58::t_acd9a6e303f3b3 1-204
+Cargo.lock
+  s_37833f24f6cf58::t_025a2998a5b699 6321,6389-6406
+vendor/llama-cpp
+  s_37833f24f6cf58::t_29e1fdb9c6388e 1
+vendor/whisper-cpp
+  s_d67ab5389ed620::t_02a177a7b65f01 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "8855fd0cc619aee3779c908a3f2798008a495720",
+  "prompts": {},
+  "sessions": {
+    "s_37833f24f6cf58": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "bdb9b554-ada8-4989-892b-f443209aa81d",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    },
+    "s_cc908747fd2ec5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "004e7b96-1346-464d-b65f-050006e985c9",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    },
+    "s_d67ab5389ed620": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6da553e1-7594-40a7-afa4-f47c611638a5",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
