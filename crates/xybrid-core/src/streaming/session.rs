@@ -10,7 +10,7 @@ use crate::audio::vad::{VadConfig, VadSession};
 use crate::execution::{ExecutionTemplate, ModelMetadata, TemplateExecutor};
 use crate::ir::{Envelope, EnvelopeKind};
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 /// Error type for streaming operations.
@@ -338,8 +338,12 @@ pub struct StreamSession {
     // model_dir: PathBuf,
     /// Loaded model metadata
     metadata: ModelMetadata,
-    /// Template executor for inference
-    executor: TemplateExecutor,
+    /// Template executor for inference.
+    ///
+    /// Shared so a caller that already loaded the model (e.g. the SDK's
+    /// `XybridModel`) can hand its executor to the session and the stream
+    /// reuses the loaded weights instead of paying a fresh cold start.
+    executor: Arc<Mutex<TemplateExecutor>>,
     /// Configuration
     config: StreamConfig,
     /// Audio buffer
@@ -389,6 +393,26 @@ impl StreamSession {
     /// # }
     /// ```
     pub fn new<P: AsRef<Path>>(model_dir: P, config: StreamConfig) -> StreamResult<Self> {
+        // Fresh executor owned by this session alone; the model loads on the
+        // first inference (or `warmup`).
+        let executor = Arc::new(Mutex::new(TemplateExecutor::with_base_path(
+            model_dir.as_ref().to_str().unwrap_or("."),
+        )));
+        Self::with_executor(model_dir, config, executor)
+    }
+
+    /// Create a streaming session that reuses an existing executor.
+    ///
+    /// The executor keeps its loaded-model cache, so a caller that already
+    /// ran (or warmed up) this model skips the cold start entirely — the
+    /// session's first chunk executes against warm weights. Inference from
+    /// other holders of the same executor serializes with this session on
+    /// the mutex.
+    pub fn with_executor<P: AsRef<Path>>(
+        model_dir: P,
+        config: StreamConfig,
+        executor: Arc<Mutex<TemplateExecutor>>,
+    ) -> StreamResult<Self> {
         let model_dir = model_dir.as_ref().to_path_buf();
 
         // Validate model directory exists
@@ -413,9 +437,6 @@ impl StreamSession {
 
         let metadata: ModelMetadata = serde_json::from_str(&metadata_str)
             .map_err(|e| StreamError::ConfigError(format!("Failed to parse metadata: {}", e)))?;
-
-        // Create executor with model directory as base path
-        let executor = TemplateExecutor::with_base_path(model_dir.to_str().unwrap_or("."));
 
         // Infer optimal buffer config from model type
         let buffer_config = Self::infer_buffer_config(&metadata, &config);
@@ -551,6 +572,16 @@ impl StreamSession {
             return Ok(());
         }
 
+        let mut executor = self.executor.lock().unwrap_or_else(|e| e.into_inner());
+
+        // A shared executor may already hold the loaded model (a previous
+        // session or a direct run paid the cold start). The warm-up pass
+        // itself costs a full encoder pass (~2.5 s for whisper-tiny on a
+        // Pixel 8), so skip it when there is nothing left to warm.
+        if executor.is_model_loaded(&self.metadata) {
+            return Ok(());
+        }
+
         // Half a second of silence. Whisper pads every input to its fixed
         // mel window, so the duration barely matters — one encoder pass is
         // the cost either way.
@@ -559,7 +590,7 @@ impl StreamSession {
         let wav_bytes = samples_to_wav(&silence, sample_rate);
         let envelope = Envelope::new(EnvelopeKind::Audio(wav_bytes));
 
-        self.executor
+        executor
             .execute(&self.metadata, &envelope, None)
             .map(|_| ())
             .map_err(|e| StreamError::InferenceError(format!("Warm-up failed: {}", e)))
@@ -740,6 +771,8 @@ impl StreamSession {
         // Execute through TemplateExecutor (handles ONNX, Candle, etc.)
         let output = self
             .executor
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
             .execute(&self.metadata, &envelope, None)
             .map_err(|e| StreamError::InferenceError(format!("Execution failed: {}", e)))?;
 

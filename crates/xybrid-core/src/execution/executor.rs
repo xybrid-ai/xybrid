@@ -470,6 +470,26 @@ impl TemplateExecutor {
     }
 
     /// Execute a model based on its metadata.
+    /// Whether the model this metadata describes is already loaded in the
+    /// responsible runtime's cache.
+    ///
+    /// `false` when the template has no cache-aware runtime (GGUF, graphs,
+    /// browser-only templates) — read it as "an execution would pay a load".
+    pub fn is_model_loaded(&self, metadata: &ModelMetadata) -> bool {
+        let (runtime_type, model_file) = match &metadata.execution_template {
+            ExecutionTemplate::SafeTensors { model_file, .. } => ("candle", model_file),
+            ExecutionTemplate::Onnx { model_file } => ("onnx", model_file),
+            ExecutionTemplate::CoreMl { model_file } => ("coreml", model_file),
+            ExecutionTemplate::TfLite { model_file } => ("tflite", model_file),
+            _ => return false,
+        };
+        let model_full_path = Path::new(&self.base_path).join(model_file);
+        self.runtimes
+            .get(runtime_type)
+            .map(|r| r.is_loaded(&model_full_path))
+            .unwrap_or(false)
+    }
+
     pub fn execute(
         &mut self,
         metadata: &ModelMetadata,
