@@ -1,0 +1,57 @@
+bindings/unity/Runtime/Bolt/XybridBolt.cs
+  s_d67ab5389ed620::t_f163769245dc92 136-147,790-792
+  s_d67ab5389ed620::t_8dae5d1b7bc17a 135
+docs/sdk/API_REFERENCE.md
+  s_d67ab5389ed620::t_890be66e0d066e 152-157,174,177-178,192,198-200,321-329
+  s_d67ab5389ed620::t_da6b96cc2d8b40 479-494
+crates/xybrid-sdk/src/model.rs
+  s_d67ab5389ed620::t_d6884869017132 1166-1178,1182
+  s_d67ab5389ed620::t_575af3060ee9d1 19
+  s_d67ab5389ed620::t_28d44c8fb2f53b 1196
+  s_d67ab5389ed620::t_51d2aaa0303aed 1115-1122
+  s_d67ab5389ed620::t_63e08dd3cb22ef 4724-4726,4728-4738
+bindings/apple/Sources/Xybrid/xybrid_bolt.swift
+  s_d67ab5389ed620::t_f163769245dc92 880-891
+bindings/kotlin/src/main/kotlin/ai/xybrid/Xybrid.kt
+  s_d67ab5389ed620::t_b3134038132ee7 191-197,214-217,245-246,249-260,270-283
+  s_d67ab5389ed620::t_a47e2b020c46b0 284
+bindings/apple/include/xybrid-bolt.h
+  s_d67ab5389ed620::t_f163769245dc92 66
+bindings/apple/Sources/Xybrid/Xybrid.swift
+  s_d67ab5389ed620::t_c4d64aea2afc03 164-168,188-211,246-247
+bindings/react-native/ios/XybridModuleImpl.swift
+  s_d67ab5389ed620::t_45e78dde3dcbb3 13-38
+  s_d67ab5389ed620::t_efd3b40cbbefec 378
+  s_d67ab5389ed620::t_4242091d23b1fc 388
+  s_d67ab5389ed620::t_8bf8377c5ef3a8 395
+  s_d67ab5389ed620::t_6610af7c746523 401
+bindings/flutter/rust/src/api/pipeline.rs
+  s_d67ab5389ed620::t_db7679cddbd67b 80-84
+  s_d67ab5389ed620::t_a8828f48fc404d 85
+crates/xybrid-ffi-facade/src/lib.rs
+  s_d67ab5389ed620::t_dd746c44b82ee3 1695-1706
+docs/sdk/api-surface.yaml
+  s_d67ab5389ed620::t_021f8f0e5a8485 39-52,111-123
+  s_d67ab5389ed620::t_769dad4c9515e3 230-248,422-427
+bindings/kotlin/src/main/kotlin/ai/xybrid/XybridBolt.kt
+  s_d67ab5389ed620::t_f163769245dc92 1563-1573,2445
+  s_d67ab5389ed620::t_5291776622daa6 1562
+crates/xybrid-bolt/src/lib.rs
+  s_d67ab5389ed620::t_705dc3ab36f428 760-769
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "89943074bbbdcc538aba78bbabad2e50697666dc",
+  "prompts": {},
+  "sessions": {
+    "s_d67ab5389ed620": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6da553e1-7594-40a7-afa4-f47c611638a5",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
