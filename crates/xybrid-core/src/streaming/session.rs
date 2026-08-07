@@ -572,6 +572,16 @@ impl StreamSession {
             return Ok(());
         }
 
+        let mut executor = self.executor.lock().unwrap_or_else(|e| e.into_inner());
+
+        // A shared executor may already hold the loaded model (a previous
+        // session or a direct run paid the cold start). The warm-up pass
+        // itself costs a full encoder pass (~2.5 s for whisper-tiny on a
+        // Pixel 8), so skip it when there is nothing left to warm.
+        if executor.is_model_loaded(&self.metadata) {
+            return Ok(());
+        }
+
         // Half a second of silence. Whisper pads every input to its fixed
         // mel window, so the duration barely matters — one encoder pass is
         // the cost either way.
@@ -580,9 +590,7 @@ impl StreamSession {
         let wav_bytes = samples_to_wav(&silence, sample_rate);
         let envelope = Envelope::new(EnvelopeKind::Audio(wav_bytes));
 
-        self.executor
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
+        executor
             .execute(&self.metadata, &envelope, None)
             .map(|_| ())
             .map_err(|e| StreamError::InferenceError(format!("Warm-up failed: {}", e)))
