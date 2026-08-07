@@ -481,6 +481,8 @@ impl TemplateExecutor {
             ExecutionTemplate::Onnx { model_file } => ("onnx", model_file),
             ExecutionTemplate::CoreMl { model_file } => ("coreml", model_file),
             ExecutionTemplate::TfLite { model_file } => ("tflite", model_file),
+            #[cfg(feature = "asr-whispercpp")]
+            ExecutionTemplate::GgmlWhisper { model_file, .. } => ("whispercpp", model_file),
             _ => return false,
         };
         let model_full_path = Path::new(&self.base_path).join(model_file);
