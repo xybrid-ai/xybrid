@@ -469,7 +469,15 @@ cc_library(
     # step with `project(... VERSION x.y.z)` in vendor/whisper-cpp/CMakeLists.txt
     # on every submodule bump — the cargo build script parses that file for the
     # same value.
-    local_defines = ['WHISPER_VERSION=\\"1.9.2\\"'],
+    local_defines = [
+        # whisper-arch.h pulls in C++ headers before whisper.cpp defines this
+        # itself. MinGW can therefore process <math.h> too early and hide the
+        # non-standard M_PI constant in strict language modes. Define it from
+        # the command line so it is visible from the first header; the empty
+        # replacement matches upstream's later definition without a warning.
+        "_USE_MATH_DEFINES=",
+        'WHISPER_VERSION=\\"1.9.2\\"',
+    ],
     includes = [
         "vendor/whisper-cpp/include",
         "vendor/whisper-cpp/src",

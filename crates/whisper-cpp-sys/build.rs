@@ -172,6 +172,11 @@ fn compile_whisper_cpp() {
 
     let mut build = cc::Build::new();
     build
+        // whisper-arch.h includes C++ headers before whisper.cpp defines this
+        // itself. Define it from the command line so Windows CRT headers expose
+        // M_PI from their first inclusion. The empty replacement matches the
+        // later source definition without producing a redefinition warning.
+        .define("_USE_MATH_DEFINES", "")
         .define("WHISPER_VERSION", format!("\"{version}\"").as_str())
         .cpp(true)
         // Upstream pins C++11 for `whisper` with a "don't bump" comment in
@@ -341,6 +346,12 @@ fn generate_bindings(whisper_dir: &Path, ggml_include: &Path, out_dir: &Path) {
         .allowlist_function("whisper_.*")
         .allowlist_type("whisper_.*")
         .allowlist_var("WHISPER_.*")
+        // This output is also committed for Bazel and compiled for every
+        // supported target. Bindgen's layout tests bake in the generator
+        // host's pointer width, so a 64-bit snapshot cannot compile for
+        // Android armv7. The #[repr(C)] declarations themselves remain
+        // target-correct because pointers and usize retain their native size.
+        .layout_tests(false)
         .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
         .generate()
         .unwrap_or_else(|e| fail("xybrid-whisper-sys: bindgen failed", &[format!("{e}")]));
