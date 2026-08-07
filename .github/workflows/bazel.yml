@@ -1,36 +1,23 @@
-# Bazel — ADVISORY (Phase 1 of the migration; see .context/bazel-per-platform-today-vs-ideal.md
-# in the spike workspace and PR #326). This job is NOT a required check: cargo remains the
-# build of record. It validates the Bazel graph on every PR and builds the RBE-proven targets
-# (the hermetic linux llama chain + the Android AAR) against the shared BuildBuddy cache.
+# Bazel — REQUIRED-READY. Runs on every PR to master so it can be marked a
+# required status check in branch protection (the "make Bazel the build of
+# record" toggle — that switch is a repo setting, not this file).
+#
+# To avoid blocking unrelated PRs, the cheap `changes` job decides whether the
+# PR touches any Bazel input; if not, the heavy `bazel` job is skipped, and a
+# skipped required check counts as passing.
 #
 # Fork-safe: PRs from forks have no secrets, so the RBE steps skip and only the
-# analyze-everything phase runs (no remote, no network beyond repo fetches).
-name: Bazel (advisory)
+# analyze phase runs (no remote, no network beyond repo fetches).
+name: Bazel
 
 on:
+  # No path filter here (unlike push): a required check must report on EVERY PR
+  # or GitHub blocks the merge waiting for a status that never comes. The
+  # `changes` job is the path filter instead.
   pull_request:
     branches: [master]
-    paths:
-      - "MODULE.bazel"
-      - ".bazelrc"
-      - ".bazelversion"
-      - ".bazelignore"
-      - "BUILD.bazel"
-      - "**/BUILD.bazel"
-      - "rules_android_ndk.patch"
-      - "rules_foreign_cc.patch"
-      - "rules_rs.patch"
-      - "hermetic_llvm.patch"
-      - "crates/**"
-      - "bindings/kotlin/**"
-      - "macros/**"
-      - "vendor/llama-cpp"
-      - "vendor/ort-macos/**"
-      - "Cargo.toml"
-      - "Cargo.lock"
-      - ".github/workflows/bazel.yml"
-  # Same path set as pull_request: a master merge touching any Bazel input
-  # re-warms the shared cache so the next PR starts warm.
+  # Path-filtered: a master merge touching any Bazel input re-warms the shared
+  # cache so the next PR starts warm.
   push:
     branches: [master]
     paths:
@@ -40,9 +27,15 @@ on:
       - ".bazelignore"
       - "BUILD.bazel"
       - "**/BUILD.bazel"
+      # Starlark that BUILD files load — toolchain logic lives here, and
+      # `**/BUILD.bazel` alone would let a .bzl-only change slip through.
+      - "**/*.bzl"
+      - "bazel/**"
+      - "tools/scripts/**"
       - "rules_android_ndk.patch"
       - "rules_foreign_cc.patch"
       - "rules_rs.patch"
+      - "rules_rust.patch"
       - "hermetic_llvm.patch"
       - "crates/**"
       - "bindings/kotlin/**"
@@ -51,6 +44,7 @@ on:
       - "vendor/ort-macos/**"
       - "Cargo.toml"
       - "Cargo.lock"
+      - "tools/unity-runtime-smoke/**"
       - ".github/workflows/bazel.yml"
   workflow_dispatch:
 
@@ -62,8 +56,41 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Cheap path gate (no checkout — just the PR's file list). Lets the heavy
+  # `bazel` job be a required check without blocking PRs that only touch
+  # unrelated files (docs, other workflows, ...).
+  changes:
+    name: Detect Bazel-relevant changes
+    runs-on: ubuntu-latest
+    outputs:
+      relevant: ${{ steps.filter.outputs.relevant }}
+    steps:
+      - name: Check changed paths
+        id: filter
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # push / dispatch already path-filter at the trigger → always relevant.
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          FILES=$(gh api --paginate \
+            "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" \
+            --jq '.[].filename')
+          if printf '%s\n' "$FILES" | grep -qE '^(MODULE\.bazel|\.bazelrc|\.bazelversion|\.bazelignore|BUILD\.bazel|.*/BUILD\.bazel|.*\.bzl|bazel/|tools/scripts/|rules_android_ndk\.patch|rules_foreign_cc\.patch|rules_rs\.patch|rules_rust\.patch|hermetic_llvm\.patch|crates/|bindings/kotlin/|macros/|vendor/llama-cpp|vendor/ort-macos/|Cargo\.toml|Cargo\.lock|tools/unity-runtime-smoke/|\.github/workflows/bazel\.yml)'; then
+            REL=true
+          else
+            REL=false
+          fi
+          echo "relevant=$REL" >> "$GITHUB_OUTPUT"
+          echo "Bazel-relevant PR: $REL"
+
   bazel:
     name: Bazel graph + RBE targets
+    # Skipped (→ passing) on PRs that touch no Bazel input; runs otherwise.
+    needs: changes
+    if: needs.changes.outputs.relevant == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
@@ -98,21 +125,9 @@ jobs:
       # .bazelrc try-imports this gitignored file; in CI it's materialized from
       # the secret. Absent secret (forks) → no :remote config → RBE steps skip.
       - name: Configure BuildBuddy remote config
-        if: env.BUILDBUDDY_API_KEY != ''
-        run: |
-          mkdir -p .context
-          cat > .context/buildbuddy.bazelrc <<EOF
-          common:remote --bes_results_url=https://app.buildbuddy.io/invocation/
-          common:remote --bes_backend=grpcs://remote.buildbuddy.io
-          common:remote --remote_header=x-buildbuddy-api-key=${BUILDBUDDY_API_KEY}
-          common:remote --remote_cache=grpcs://remote.buildbuddy.io
-          common:remote --remote_executor=grpcs://remote.buildbuddy.io
-          common:remote --remote_cache_compression
-          common:remote --remote_download_toplevel
-          common:remote --remote_timeout=600
-          common:remote --jobs=200
-          common:remote --extra_execution_platforms=@llvm//:rbe_linux_x86_64
-          EOF
+        env:
+          BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
+        run: tools/scripts/write-buildbuddy-rc.sh
 
       # Structural gate (always, fork-safe): every BUILD file in the workspace
       # must configure. Same target set Gate 5 proved (13 targets analyze-clean).
@@ -130,6 +145,38 @@ jobs:
             //crates/llama-cpp-sys:llama_cpp_sys \
             //crates/xybrid-llama:xybrid_llama
 
+      # Tests under Bazel. Bazel BUILDS every shipped artifact; these targets are
+      # what stop it from shipping unverified. Runs on this ubuntu runner
+      # (host == linux == the RBE executor platform), which is what lets the test
+      # binaries execute remotely at all — a darwin-target build of the same
+      # targets fails with Exit 126 on a Linux worker.
+      #
+      # The inline `#[cfg(test)] mod tests` of each crate, plus the `tests/`
+      # integration binaries (one target per file, since each is its own binary).
+      #
+      # Every tests/ binary in the workspace is now covered. The two exceptions
+      # are both cargo-gated the same way in cargo itself:
+      #  - xybrid-sdk's cloud_fallback_e2e (required-features = ["dev-tools"])
+      #    needs `test-util` propagated sdk -> core, and Bazel has no cross-crate
+      #    feature propagation.
+      #  - integration-tests' local_llm is gated on llm-mistral, a backend
+      #    xybrid-core's Bazel target does not build at all.
+      #
+      # Adding a target is not enough on its own: a file wrapped in
+      # `#![cfg(feature = ...)]` compiles to an EMPTY binary that still reports
+      # success, so each target's `--list` count is checked against cargo's.
+      - name: Run Rust tests on RBE
+        if: env.BUILDBUDDY_API_KEY != ''
+        run: |
+          bazelisk test --config=remote -c opt --test_output=errors \
+            //crates/xybrid-cli:all \
+            //crates/xybrid-core:all \
+            //crates/xybrid-ffi-facade:xybrid-ffi-facade_test \
+            //crates/xybrid-llama:all \
+            //crates/xybrid-sdk:all \
+            //integration-tests:all \
+            //xtask:xtask_test
+
       # Desktop lanes on RBE: linux CLI (native) + the macOS-CPU cross
       # (hermetic clang + @macos_sdk + vendored ort; Metal/Swift stay Mac-bound
       # and are NOT built here) + the full windows-gnu CLI (the .exe chapter —
@@ -141,12 +188,14 @@ jobs:
         if: env.BUILDBUDDY_API_KEY != ''
         run: |
           bazelisk build --config=remote -c opt \
-            //crates/xybrid-cli:xybrid
+            //crates/xybrid-cli:xybrid \
+            //bindings/flutter/rust:xybrid_flutter_ffi_cdylib
           bazelisk build --config=remote --config=macos \
             //crates/xybrid-cli:xybrid \
             //crates/xybrid-bolt:xybrid_bolt_staticlib
           bazelisk build --config=remote --config=windows -c opt \
-            //crates/xybrid-cli:xybrid
+            //crates/xybrid-cli:xybrid \
+            //crates/xybrid-bolt:xybrid_bolt_cdylib
 
       # Linux-CLI smoke + parity gate (Flip 1): this is the SHIPPED artifact
       # since the release-prep build-cli-linux cutover — run it, verify the
@@ -159,7 +208,7 @@ jobs:
       - name: Smoke the linux CLI (run + features + glibc floor)
         if: env.BUILDBUDDY_API_KEY != ''
         run: |
-          BIN=$(bazelisk cquery --config=remote -c opt --output=files //crates/xybrid-cli:xybrid | head -1)
+          BIN=$(tools/scripts/bazel-output.sh //crates/xybrid-cli:xybrid --config=remote -c opt)
           echo "resolved linux CLI: $BIN"
           file "$BIN"
           "$BIN" --help >/dev/null
@@ -178,7 +227,7 @@ jobs:
       - name: Verify + stage the windows CLI (.exe)
         if: env.BUILDBUDDY_API_KEY != ''
         run: |
-          EXE=$(bazelisk cquery --config=remote --config=windows -c opt --output=files //crates/xybrid-cli:xybrid | head -1)
+          EXE=$(tools/scripts/bazel-output.sh //crates/xybrid-cli:xybrid --config=remote --config=windows -c opt)
           echo "resolved windows CLI: $EXE"
           file "$EXE"
           file "$EXE" | grep -q 'PE32+.*x86-64' || { echo "NOT a PE32+ x86-64 binary"; exit 1; }
@@ -195,6 +244,38 @@ jobs:
           path: /tmp/win-exe/xybrid.exe
           retention-days: 7
 
+      # Windows bolt cdylib (Unity native) — NON-SHIPPING proof lane. Unity still
+      # ships the cargo/MSVC DLL; this validates the windows-gnu Bazel DLL end to
+      # end before any flip. Byte-inspect + audit here (PE shape, and the import
+      # table must be Windows-system-only — the static libc++/unwind trio means
+      # no MinGW/MSVC runtime carriers leak out); the run-it half loads it on
+      # windows-latest below (bazel-windows-bolt-smoke).
+      - name: Verify + audit + stage the windows bolt DLL
+        if: env.BUILDBUDDY_API_KEY != ''
+        run: |
+          DLL=$(tools/scripts/bazel-output.sh //crates/xybrid-bolt:xybrid_bolt_cdylib --config=remote --config=windows -c opt)
+          echo "resolved windows bolt DLL: $DLL"
+          file "$DLL"
+          file "$DLL" | grep -q 'PE32+.*x86-64' || { echo "NOT a PE32+ x86-64 DLL"; exit 1; }
+          python3 -m pip install --quiet --user pefile
+          python3 tools/scripts/audit_windows_dll.py --dll "$DLL" \
+            --require-export boltffi_version \
+            --require-export boltffi_configure_runtime \
+            --require-export boltffi_free_buf \
+            --require-export boltffi_last_error_message \
+            --require-exports-from-csharp bindings/unity/Runtime/Bolt/XybridBolt.cs \
+            --require-exports-from-csharp bindings/unity/Runtime/BoltSupplement/XybridInference.cs
+          mkdir -p /tmp/win-bolt && cp "$DLL" /tmp/win-bolt/xybrid_bolt.dll
+          echo "windows bolt DLL payload + audit: OK ✅"
+
+      - name: Upload windows bolt DLL artifact
+        if: env.BUILDBUDDY_API_KEY != ''
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: bazel-xybrid-bolt-windows-dll
+          path: /tmp/win-bolt/xybrid_bolt.dll
+          retention-days: 7
+
       # The RBE-proven Android row (PR #326 gates 6-10): NDK cross-compile +
       # one-link .so + complete AAR. ABI fan-out (arm64-v8a / armeabi-v7a /
       # x86_64) happens via transitions inside the graph — one invocation,
@@ -204,6 +285,20 @@ jobs:
         run: |
           bazelisk build --config=remote -c opt \
             //bindings/kotlin:xybrid_kotlin_aar
+
+      # The Flutter android cdylibs are release-critical since the precompile
+      # flip (release-prep precompile-flutter-linux ships them) — keep them a
+      # standing gate. Cheap: the Rust graph is cache-shared with the AAR
+      # build above; only the flutter crate + link are new per ABI.
+      - name: Build Flutter android cdylibs on RBE (3 ABIs)
+        if: env.BUILDBUDDY_API_KEY != ''
+        run: |
+          bazelisk build --config=remote --config=android-arm64 \
+            //bindings/flutter/rust:xybrid_flutter_ffi_cdylib
+          bazelisk build --config=remote --config=android-armv7 \
+            //bindings/flutter/rust:xybrid_flutter_ffi_cdylib
+          bazelisk build --config=remote --config=android-x86_64 \
+            //bindings/flutter/rust:xybrid_flutter_ffi_cdylib
 
       - name: Upload AAR artifact
         if: env.BUILDBUDDY_API_KEY != ''
@@ -269,32 +364,40 @@ jobs:
           which pkg-config >/dev/null || brew install pkg-config
 
       - name: Configure BuildBuddy remote config
-        if: env.BUILDBUDDY_API_KEY != ''
-        run: |
-          mkdir -p .context
-          cat > .context/buildbuddy.bazelrc <<EOF
-          common:remote --bes_results_url=https://app.buildbuddy.io/invocation/
-          common:remote --bes_backend=grpcs://remote.buildbuddy.io
-          common:remote --remote_header=x-buildbuddy-api-key=${BUILDBUDDY_API_KEY}
-          common:remote --remote_cache=grpcs://remote.buildbuddy.io
-          common:remote --remote_executor=grpcs://remote.buildbuddy.io
-          common:remote --remote_cache_compression
-          common:remote --remote_download_toplevel
-          common:remote --remote_timeout=600
-          common:remote --jobs=200
-          common:remote --extra_execution_platforms=@llvm//:rbe_linux_x86_64
-          EOF
+        env:
+          BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
+        run: tools/scripts/write-buildbuddy-rc.sh
 
       - name: Build Metal CLI (mixed execution)
         if: env.BUILDBUDDY_API_KEY != ''
         run: |
           bazelisk build --config=remote --config=macos-metal -c opt \
-            //crates/xybrid-cli:xybrid
+            //crates/xybrid-cli:xybrid \
+            //bindings/flutter/rust:xybrid_flutter_ffi_staticlib
+
+      # Release-critical since the Flutter precompile flip: release-prep's
+      # precompile-flutter-darwin stages THREE Apple slices of this staticlib —
+      # aarch64-apple-darwin (built above), aarch64-apple-ios and
+      # aarch64-apple-ios-sim. Both ios configs are Mac-local, like the configs
+      # themselves.
+      #
+      # The device slice used to be skipped here on the grounds that
+      # build-apple.yml already covered it. It does not: that workflow builds
+      # //bindings/apple:XybridFFI, which is the BOLT staticlib from a different
+      # crate. Nothing was compiling //bindings/flutter/rust for iOS-device
+      # until release time.
+      - name: Build Flutter iOS staticlibs (device + simulator)
+        if: env.BUILDBUDDY_API_KEY != ''
+        run: |
+          bazelisk build --config=ios \
+            //bindings/flutter/rust:xybrid_flutter_ffi_staticlib
+          bazelisk build --config=ios-sim \
+            //bindings/flutter/rust:xybrid_flutter_ffi_staticlib
 
       - name: Smoke the Metal CLI (run + Metal + features)
         if: env.BUILDBUDDY_API_KEY != ''
         run: |
-          BIN=$(bazelisk cquery --config=remote --config=macos-metal -c opt --output=files //crates/xybrid-cli:xybrid | head -1)
+          BIN=$(tools/scripts/bazel-output.sh //crates/xybrid-cli:xybrid --config=remote --config=macos-metal -c opt)
           echo "resolved CLI: $BIN"
           file "$BIN"
           "$BIN" --help >/dev/null
@@ -302,6 +405,169 @@ jobs:
           test "$(nm "$BIN" | grep -c '_mtmd_')" -gt 0 || { echo "MISSING vision symbols"; exit 1; }
           strings "$BIN" | grep -q 'huggingface\.co' || { echo "MISSING huggingface"; exit 1; }
           echo "Metal CLI smoke: OK"
+
+  # The windows-MSVC lane — NON-SHIPPING proof, like the windows-gnu bolt DLL
+  # above. Everything compiles on Linux RBE workers; the runner only fetches
+  # repositories and inspects outputs.
+  #
+  # Master-merge / dispatch only (same shape as bazel-macos-metal), because
+  # @msvc_runtime + @windows_sdk are ~1.3 GB of Microsoft payload fetched
+  # CLIENT-side, and this workflow keeps no repository cache. Putting that on
+  # every Bazel-touching PR would cost more than the lane is worth until the
+  # Flutter windows producer actually flips to it.
+  bazel-windows-msvc:
+    name: Bazel windows-MSVC lane (non-shipping)
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          submodules: true
+
+      # The Microsoft payload lands on top of the usual LLVM/rustc/NDK fetches,
+      # so this job needs the headroom more than the others do.
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/.ghcup \
+            /opt/hostedtoolcache/CodeQL
+          sudo docker image prune --all --force || true
+          df -h /
+
+      - name: Configure BuildBuddy remote config
+        env:
+          BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
+        run: tools/scripts/write-buildbuddy-rc.sh
+
+      # The toolchain smokes come first and are cheap: they pull windows.h, the
+      # MSVC STL and clang's builtin headers, so a sysroot or include-order
+      # regression fails here rather than 20 minutes into llama.cpp.
+      - name: Build the windows-MSVC toolchain smokes
+        if: env.BUILDBUDDY_API_KEY != ''
+        run: |
+          bazelisk build --config=remote --config=windows-msvc \
+            //bazel/windows_msvc_smoke:smoke_exe \
+            //bazel/windows_msvc_smoke:smoke_dll
+
+      - name: Build llama.cpp + the Flutter native for windows-MSVC
+        if: env.BUILDBUDDY_API_KEY != ''
+        run: |
+          bazelisk build --config=remote --config=windows-msvc -c opt \
+            //:llama \
+            //bindings/flutter/rust:xybrid_flutter_ffi_cdylib
+
+      # The gate that actually distinguishes this lane from windows-gnu: the DLL
+      # must import the MSVC runtime (VCRUNTIME140/MSVCP140), and cargokit needs
+      # a real MSVC import library beside it. A MinGW build satisfies neither.
+      - name: Verify the MSVC ABI + import library
+        if: env.BUILDBUDDY_API_KEY != ''
+        run: |
+          set -euo pipefail
+          DLL=$(tools/scripts/bazel-output.sh --ext dll \
+            //bindings/flutter/rust:xybrid_flutter_ffi_cdylib \
+            --config=remote --config=windows-msvc -c opt)
+          IMPLIB=$(tools/scripts/bazel-output.sh --ext dll.lib \
+            //bindings/flutter/rust:xybrid_flutter_ffi_cdylib \
+            --config=remote --config=windows-msvc -c opt)
+          echo "resolved DLL: $DLL"
+          echo "resolved import library: $IMPLIB"
+          file "$DLL"
+          file "$DLL" | grep -q 'PE32+.*x86-64' || { echo "NOT a PE32+ x86-64 DLL"; exit 1; }
+          python3 -m pip install --quiet --user pefile
+          python3 tools/scripts/audit_windows_dll.py --dll "$DLL" \
+            --require-import vcruntime140.dll \
+            --require-import msvcp140.dll
+          python3 - "$DLL" "$IMPLIB" <<'PYEOF'
+          import sys
+
+          import pefile
+
+          dll_path, implib_path = sys.argv[1], sys.argv[2]
+          exports = len(pefile.PE(dll_path).DIRECTORY_ENTRY_EXPORT.symbols)
+
+          blob = open(implib_path, "rb").read()
+          if blob[:8] != b"!<arch>\n":
+              raise SystemExit(f"{implib_path}: not a COFF archive")
+          offset, short_imports = 8, 0
+          while offset + 60 <= len(blob):
+              size = int(blob[offset + 48:offset + 58].decode().strip())
+              # 0x0000FFFF marks a short-import member: the MSVC-only encoding
+              # that a MinGW `.dll.a` never contains.
+              if blob[offset + 60:offset + 64] == b"\x00\x00\xff\xff":
+                  short_imports += 1
+              offset += 60 + size + (size & 1)
+
+          print(f"exports: {exports}, short-import members: {short_imports}")
+          if short_imports != exports:
+              raise SystemExit("import library does not cover every export")
+          PYEOF
+          mkdir -p /tmp/win-msvc
+          cp "$DLL" "$IMPLIB" /tmp/win-msvc/
+          echo "windows-MSVC payload: OK"
+
+      - name: Upload windows-MSVC Flutter native
+        if: env.BUILDBUDDY_API_KEY != ''
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: bazel-xybrid-flutter-windows-msvc
+          path: /tmp/win-msvc/
+          retention-days: 7
+
+  # The run-it half of the windows-MSVC gate. bazel-windows-msvc can build the
+  # DLL and byte-inspect it, but a PE that inspects clean can still fail to load
+  # — a missing Visual C++ redistributable or a bad import is only visible when
+  # Windows actually resolves it. This is the first time anything built by the
+  # MSVC toolchain runs on Windows; it compiles nothing (the build happened on
+  # Linux workers) and costs a couple of windows-latest minutes per master merge.
+  bazel-windows-msvc-smoke:
+    name: Bazel windows-MSVC Flutter DLL smoke (loads it on Windows)
+    needs: bazel-windows-msvc
+    if: github.event_name != 'pull_request'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: bazel-xybrid-flutter-windows-msvc
+          path: native
+
+      # LoadLibrary is the real test: it resolves the whole import table against
+      # the machine, so a DLL that needs a runtime this box lacks fails here.
+      # GetProcAddress then proves the export table is usable, which is what
+      # Flutter reaches the library through.
+      - name: Load the DLL and resolve an export
+        shell: pwsh
+        run: |
+          $dll = (Resolve-Path native/xybrid_flutter_ffi.dll).Path
+          Write-Host "loading $dll"
+
+          Add-Type -Namespace Win -Name Native -MemberDefinition @'
+          [System.Runtime.InteropServices.DllImport("kernel32", SetLastError = true)]
+          public static extern System.IntPtr LoadLibrary(string path);
+          [System.Runtime.InteropServices.DllImport("kernel32", SetLastError = true)]
+          public static extern System.IntPtr GetProcAddress(System.IntPtr module, string name);
+          '@
+
+          $handle = [Win.Native]::LoadLibrary($dll)
+          if ($handle -eq [System.IntPtr]::Zero) {
+            $code = [System.Runtime.InteropServices.Marshal]::GetLastWin32Error()
+            throw "LoadLibrary failed (Win32 error $code)"
+          }
+          Write-Host "loaded, handle $handle"
+
+          # flutter_rust_bridge's Dart-API entry point: present in every frb
+          # build and the first thing Dart calls, so its absence would break
+          # the binding outright.
+          foreach ($export in @('frb_init_frb_dart_api_dl', 'store_dart_post_cobject')) {
+            $address = [Win.Native]::GetProcAddress($handle, $export)
+            if ($address -eq [System.IntPtr]::Zero) {
+              throw "GetProcAddress('$export') failed"
+            }
+            Write-Host "resolved $export at $address"
+          }
+
+          Write-Host "windows-MSVC Flutter DLL smoke: OK"
 
   # The run-it half of the windows .exe gate: the linux job can build and
   # byte-inspect the PE but not execute it — a real Windows runner downloads
@@ -328,3 +594,49 @@ jobs:
           grep -aq 'mtmd_' xybrid.exe || { echo "MISSING vision (mtmd) markers"; exit 1; }
           grep -aq 'huggingface\.co' xybrid.exe || { echo "MISSING huggingface support"; exit 1; }
           echo "windows .exe smoke: OK"
+
+  # Run-it half of the windows bolt-DLL proof (Unity native): a real Windows
+  # runner downloads the RBE-built xybrid_bolt.dll, stages ORT beside it, and
+  # runs a MANAGED C# smoke — loads the DLL under the CLR and P/Invokes a real
+  # boltffi entry point (stronger than a bare ctypes load, and the runtime
+  # validation the linux byte-inspection can't do). NON-SHIPPING: Unity keeps
+  # shipping the cargo/MSVC DLL until this windows-gnu lane is trusted.
+  bazel-windows-bolt-smoke:
+    name: Bazel windows bolt DLL smoke (managed C# P/Invoke)
+    needs: bazel
+    if: needs.bazel.outputs.rbe == 'true'
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: bazel-xybrid-bolt-windows-dll
+          path: tools/windows-smoke
+
+      - name: Build the managed smoke
+        run: dotnet build tools/windows-smoke/xybrid-bolt-smoke.csproj -c Release
+
+      - name: Stage natives beside the smoke exe (bolt DLL + ORT)
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT=tools/windows-smoke/bin/Release/net8.0
+          cp tools/windows-smoke/xybrid_bolt.dll "$OUT/"
+          python tools/scripts/stage_unity_desktop_ort.py windows "$OUT"
+          ls -la "$OUT"
+
+      - name: Run managed C# smoke (load DLL + boltffi P/Invoke)
+        shell: bash
+        run: ./tools/windows-smoke/bin/Release/net8.0/xybrid-bolt-smoke.exe
+
+  # The Windows Unity 6.3 EditMode + IL2CPP player smoke runs as a ONE-TIME
+  # MANUAL validation — NOT as a hosted-runner CI lane. Unity licensing on
+  # ephemeral GitHub-hosted Windows runners is not viable: service accounts
+  # cannot activate Editor licenses, and a locally-activated .ulf is
+  # machine-bound ("Machine bindings don't match" on a fresh image). The
+  # reusable smoke project under tools/unity-runtime-smoke/ is committed here
+  # so it can be driven once on a Windows box that's already Unity-licensed;
+  # the build-unity.yml cargo->Bazel flip is gated on that manual sign-off.
+  # See tools/unity-runtime-smoke/README.md for the exact commands.

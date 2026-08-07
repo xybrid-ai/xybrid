@@ -74,10 +74,7 @@ impl FfiGenerationConfig {
     }
 
     /// Re-shape into the facade POD. The facade owns the single canonical
-    /// mapping into [`xybrid_sdk::GenerationConfig`] (`Option` overrides →
-    /// SDK defaults); calling [`to_sdk`](Self::to_sdk) delegates through
-    /// it instead of duplicating the 20-line `if let Some(...)` chain we
-    /// used to maintain here.
+    /// mapping into [`xybrid_sdk::GenerationConfig`].
     pub(crate) fn to_facade(&self) -> facade::GenerationConfig {
         facade::GenerationConfig {
             max_tokens: self.max_tokens,
@@ -91,8 +88,8 @@ impl FfiGenerationConfig {
         }
     }
 
-    pub(crate) fn to_sdk(&self) -> GenerationConfig {
-        self.to_facade().to_sdk()
+    pub(crate) fn to_sdk_over(&self, base: GenerationConfig) -> GenerationConfig {
+        self.to_facade().apply_over(base)
     }
 }
 
@@ -210,24 +207,15 @@ impl FfiRunOptions {
     ///
     /// When `cancellation_token` is `None` the abort policy is left untouched,
     /// preserving the default chat / cloud-fallback semantics exactly.
-    fn to_sdk_with_cancellation(
+    fn to_sdk_with_cancellation_over(
         &self,
-        generation_config: Option<GenerationConfig>,
+        generation_config: Option<facade::GenerationConfig>,
+        generation_base: GenerationConfig,
         cancellation_token: Option<&FfiCancellationToken>,
     ) -> RunOptions {
-        let facade_gc = generation_config
-            .as_ref()
-            .map(|cfg| facade::GenerationConfig {
-                max_tokens: Some(cfg.max_tokens as u32),
-                temperature: Some(cfg.temperature),
-                top_p: Some(cfg.top_p),
-                min_p: Some(cfg.min_p),
-                top_k: Some(cfg.top_k as u32),
-                repetition_penalty: Some(cfg.repetition_penalty),
-                stop_sequences: cfg.stop_sequences.clone(),
-                grammar: cfg.grammar.clone(),
-            });
-        let mut options = self.to_facade(facade_gc).to_sdk(None);
+        let mut options = self
+            .to_facade(generation_config)
+            .to_sdk_over(None, generation_base);
 
         // Flutter-specific resource provider; the facade omits this field so it
         // stays FFI-safe (the trait object isn't portable across generators).
@@ -495,6 +483,41 @@ pub struct FfiStreamToken {
     pub finish_reason: Option<String>,
 }
 
+/// Lifecycle of the background download behind a speculative load.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FfiDownloadState {
+    /// Weights still downloading; runs are served from the cloud.
+    Downloading,
+    /// Local handle installed; runs are on-device.
+    Ready,
+    /// Download failed — the cloud keeps serving and the model never becomes
+    /// local. Surfacing this is the only way the UI can stop waiting.
+    Failed,
+}
+
+/// Download progress + state in one consistent read, so a polling UI cannot
+/// observe a torn pair (for example `Ready` with a stale 0.34 progress).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FfiDownloadStatus {
+    pub state: FfiDownloadState,
+    /// 0.0 to 1.0.
+    pub progress: f64,
+}
+
+impl FfiDownloadStatus {
+    fn from_sdk(status: xybrid_sdk::DownloadStatus) -> Self {
+        let state = match status.state {
+            xybrid_sdk::DownloadState::Downloading => FfiDownloadState::Downloading,
+            xybrid_sdk::DownloadState::Ready => FfiDownloadState::Ready,
+            xybrid_sdk::DownloadState::Failed => FfiDownloadState::Failed,
+        };
+        Self {
+            state,
+            progress: status.progress as f64,
+        }
+    }
+}
+
 /// FFI wrapper for ModelLoader (preparatory step before loading).
 #[frb(opaque)]
 pub struct FfiModelLoader(ModelLoader);
@@ -525,6 +548,26 @@ impl FfiModelLoader {
     #[frb(sync)]
     pub fn from_registry(model_id: String) -> FfiModelLoader {
         FfiModelLoader(ModelLoader::from_registry(&model_id))
+    }
+
+    /// Loader that serves from the cloud gateway while the registry weights
+    /// download in the background, instead of blocking on the download.
+    ///
+    /// `load()` then returns almost immediately with a cloud-backed model that
+    /// switches to on-device by itself once the download lands. Requires a
+    /// resolvable API key and an uncached model — otherwise this behaves
+    /// exactly like [`Self::from_registry`], which [`Self::will_speculate`]
+    /// reports. LLM/chat models only.
+    #[frb(sync)]
+    pub fn from_registry_speculative(model_id: String) -> FfiModelLoader {
+        FfiModelLoader(ModelLoader::from_registry(&model_id).with_speculative_cloud(true))
+    }
+
+    /// Whether `load()` would actually speculate: enabled, an API key
+    /// resolves, and the model is not already cached. Never hits the network.
+    #[frb(sync)]
+    pub fn will_speculate(&self) -> bool {
+        self.0.will_speculate()
     }
 
     #[frb(sync)]
@@ -591,6 +634,72 @@ impl FfiModelLoader {
 }
 
 impl FfiModel {
+    /// Whether runs are currently answered by the cloud because the local
+    /// weights are not ready yet. `false` for ordinary local models.
+    ///
+    /// This predicts the *next* run; `FfiResult.executionTarget` reports what a
+    /// run that already happened actually did. They differ when a cloud leg
+    /// fails and degrades to local mid-call.
+    #[frb(sync)]
+    pub fn is_cloud_serving(&self) -> bool {
+        self.0.is_cloud_serving()
+    }
+
+    /// Download progress + state in one consistent read.
+    ///
+    /// Reports `Ready` at 1.0 for an ordinary local model, so the UI needs no
+    /// special case. Prefer [`Self::download_progress`] to be pushed updates
+    /// rather than polling.
+    #[frb(sync)]
+    pub fn download_status(&self) -> FfiDownloadStatus {
+        FfiDownloadStatus::from_sdk(self.0.download_status())
+    }
+
+    /// Stream download progress for a speculatively-loaded model until it
+    /// reaches a terminal state.
+    ///
+    /// Flutter keeps a push API here (other bindings poll) because
+    /// flutter_rust_bridge stream sinks are safe — unlike the bolt closure ABI
+    /// the native bindings must avoid. Emits `Progress` while downloading, then
+    /// exactly one `Complete` or `Error`. Returns immediately for a model that
+    /// is already local.
+    pub fn download_progress(&self, sink: StreamSink<FfiLoadEvent>) {
+        let model = Arc::clone(&self.0);
+        std::thread::spawn(move || {
+            loop {
+                // Bounded wait: wakes as soon as the download finishes, but
+                // still ticks often enough to animate a progress bar.
+                let status = model.await_download(250);
+                match status.state {
+                    xybrid_sdk::DownloadState::Downloading => {
+                        // A closed sink means Dart cancelled the subscription.
+                        // Stop here instead of waking every 250ms — and holding
+                        // the model alive — until a download that may never
+                        // finish does.
+                        if sink
+                            .add(FfiLoadEvent::Progress(status.progress as f64))
+                            .is_err()
+                        {
+                            break;
+                        }
+                    }
+                    xybrid_sdk::DownloadState::Ready => {
+                        let _ = sink.add(FfiLoadEvent::Progress(1.0));
+                        let _ = sink.add(FfiLoadEvent::Complete);
+                        break;
+                    }
+                    xybrid_sdk::DownloadState::Failed => {
+                        let _ = sink.add(FfiLoadEvent::Error(
+                            "speculative model download failed; still serving from cloud"
+                                .to_string(),
+                        ));
+                        break;
+                    }
+                }
+            }
+        });
+    }
+
     /// Run batch inference (non-streaming).
     ///
     /// Pass an optional `config` to control generation parameters.
@@ -600,7 +709,9 @@ impl FfiModel {
         envelope: super::envelope::FfiEnvelope,
         config: Option<FfiGenerationConfig>,
     ) -> Result<FfiResult, String> {
-        let sdk_config = config.as_ref().map(|c| c.to_sdk());
+        let sdk_config = config
+            .as_ref()
+            .map(|c| c.to_sdk_over(self.0.default_generation_config()));
         let result = self
             .0
             .run(&envelope.into_envelope(), sdk_config.as_ref())
@@ -651,21 +762,23 @@ impl FfiModel {
     ) {
         let model = self.0.clone();
         let env = envelope.into_envelope();
-        let sdk_config = config.map(|c| c.to_sdk());
+        let facade_config = config.map(|c| c.to_facade());
 
         // Build per-run options carrying the cancellation token (when present).
         // The token is also kept as `cancel_handle` so a closed/unsubscribed
         // sink can drive the same cancellation flag the abort check observes.
         // A non-empty `frame_session_id` tags the run as live-capture so the SDK
         // rate-limits its telemetry per session.
-        let run_options = streaming_run_options(
-            sdk_config,
-            cancellation_token.as_ref(),
-            frame_session_id.as_deref(),
-        );
         let cancel_handle = cancellation_token;
 
         std::thread::spawn(move || {
+            let sdk_config =
+                facade_config.map(|config| config.apply_over(model.default_generation_config()));
+            let run_options = streaming_run_options(
+                sdk_config,
+                cancel_handle.as_ref(),
+                frame_session_id.as_deref(),
+            );
             let reached_terminal = Arc::new(std::sync::atomic::AtomicBool::new(false));
             let mut token_index = 0u32;
             let result = {
@@ -734,11 +847,13 @@ impl FfiModel {
     ) {
         let model = self.0.clone();
         let env = envelope.into_envelope();
-        let sdk_config = config.map(|c| c.to_sdk());
-        let run_options = streaming_run_options(sdk_config, cancellation_token.as_ref(), None);
+        let facade_config = config.map(|c| c.to_facade());
         let cancel_handle = cancellation_token;
 
         std::thread::spawn(move || {
+            let sdk_config =
+                facade_config.map(|config| config.apply_over(model.default_generation_config()));
+            let run_options = streaming_run_options(sdk_config, cancel_handle.as_ref(), None);
             let reached_terminal = Arc::new(std::sync::atomic::AtomicBool::new(false));
             let result = {
                 let reached_terminal = reached_terminal.clone();
@@ -813,7 +928,9 @@ impl FfiModel {
         context: &FfiConversationContext,
         config: Option<FfiGenerationConfig>,
     ) -> Result<FfiResult, String> {
-        let sdk_config = config.as_ref().map(|c| c.to_sdk());
+        let sdk_config = config
+            .as_ref()
+            .map(|c| c.to_sdk_over(self.0.default_generation_config()));
         let ctx_guard = context
             .0
             .read()
@@ -872,16 +989,18 @@ impl FfiModel {
         let model = self.0.clone();
         let env = envelope.into_envelope();
         let ctx = context.0.clone();
-        let sdk_config = config.map(|c| c.to_sdk());
-        let run_options = streaming_run_options(
-            sdk_config,
-            cancellation_token.as_ref(),
-            frame_session_id.as_deref(),
-        );
+        let facade_config = config.map(|c| c.to_facade());
         let cancel_handle = cancellation_token;
 
         // Spawn a background thread
         std::thread::spawn(move || {
+            let sdk_config =
+                facade_config.map(|config| config.apply_over(model.default_generation_config()));
+            let run_options = streaming_run_options(
+                sdk_config,
+                cancel_handle.as_ref(),
+                frame_session_id.as_deref(),
+            );
             // Get read lock on context
             let ctx_guard = match ctx.read() {
                 Ok(guard) => guard,
@@ -971,8 +1090,7 @@ impl FfiModel {
                 return;
             }
         };
-        let sdk_config = config.map(|c| c.to_sdk());
-        let run_options = options.to_sdk_with_cancellation(sdk_config, cancellation_token.as_ref());
+        let facade_config = config.map(|c| c.to_facade());
         let cancel_handle = cancellation_token;
         let cloud_adapter = match gateway_url.as_deref() {
             Some(gateway_url) => CloudRuntimeAdapter::with_gateway(gateway_url),
@@ -980,6 +1098,11 @@ impl FfiModel {
         };
 
         std::thread::spawn(move || {
+            let run_options = options.to_sdk_with_cancellation_over(
+                facade_config,
+                model.default_generation_config(),
+                cancel_handle.as_ref(),
+            );
             let reached_terminal = Arc::new(std::sync::atomic::AtomicBool::new(false));
             let mut token_index = 0u32;
             let result = {
@@ -1034,6 +1157,27 @@ impl FfiModel {
         });
     }
 
+    /// Open a live (rolling-window) ASR streaming session for this model.
+    ///
+    /// The model's on-disk location is resolved from the already-loaded handle,
+    /// so a model loaded from the registry, Hugging Face, a bundle, or a
+    /// directory all stream the same way — no path is passed here. Feed audio
+    /// with [`FfiStreamSession::feed`] and read partials from
+    /// [`FfiStreamSession::subscribe`].
+    ///
+    /// # Errors
+    ///
+    /// - If `config.sample_rate` is not 16 kHz.
+    /// - If the model does not support streaming, or the stream cannot start.
+    pub fn stream(
+        &self,
+        config: super::streaming::FfiStreamingConfig,
+    ) -> Result<super::streaming::FfiStreamSession, String> {
+        let sdk_config = config.to_sdk()?;
+        let stream = self.0.stream(sdk_config).map_err(|e| e.to_string())?;
+        Ok(super::streaming::FfiStreamSession::spawn(stream))
+    }
+
     /// Warm up the model by running a tiny inference so the first real call
     /// pays no cold-start cost.
     ///
@@ -1076,7 +1220,8 @@ mod tests {
 
     #[test]
     fn to_sdk_without_cancellation_token_does_not_observe_user_cancelled() {
-        let sdk = sample_options().to_sdk_with_cancellation(None, None);
+        let sdk =
+            sample_options().to_sdk_with_cancellation_over(None, GenerationConfig::default(), None);
 
         assert!(!sdk.abort_policy.observes(AbortSignal::UserCancelled));
         assert!(sdk.cancellation_token.is_none());
@@ -1085,7 +1230,11 @@ mod tests {
     #[test]
     fn to_sdk_with_cancellation_token_observes_user_cancelled_and_sets_token() {
         let token = FfiCancellationToken::new();
-        let sdk = sample_options().to_sdk_with_cancellation(None, Some(&token));
+        let sdk = sample_options().to_sdk_with_cancellation_over(
+            None,
+            GenerationConfig::default(),
+            Some(&token),
+        );
 
         assert!(sdk.abort_policy.observes(AbortSignal::UserCancelled));
         assert!(sdk.cancellation_token.is_some());
@@ -1105,7 +1254,8 @@ mod tests {
         ffi.abort_on_thermal_critical = true;
         let token = FfiCancellationToken::new();
 
-        let sdk = ffi.to_sdk_with_cancellation(None, Some(&token));
+        let sdk =
+            ffi.to_sdk_with_cancellation_over(None, GenerationConfig::default(), Some(&token));
 
         assert!(sdk
             .abort_policy
@@ -1148,7 +1298,7 @@ mod tests {
     fn to_sdk_with_frame_session_id_enables_live_mode() {
         let mut ffi = sample_options();
         ffi.frame_session_id = Some("frame-sess-9".to_string());
-        let sdk = ffi.to_sdk_with_cancellation(None, None);
+        let sdk = ffi.to_sdk_with_cancellation_over(None, GenerationConfig::default(), None);
         assert!(sdk.live_mode);
         assert_eq!(sdk.frame_session_id.as_deref(), Some("frame-sess-9"));
     }
@@ -1186,7 +1336,7 @@ mod tests {
             frame_session_id: None,
         };
 
-        let sdk = ffi.to_sdk_with_cancellation(None, None);
+        let sdk = ffi.to_sdk_with_cancellation_over(None, GenerationConfig::default(), None);
 
         assert!(sdk
             .abort_policy

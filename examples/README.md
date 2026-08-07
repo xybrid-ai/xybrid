@@ -6,10 +6,27 @@ Platform-specific reference implementations demonstrating how to integrate the X
 
 | Platform | Directory | Command | Sample |
 |----------|-----------|---------|--------|
+| [Browser/Web preview](#browserweb-preview) | `../bindings/web/` | `cd ../bindings/web && pnpm install && pnpm dev:example` | In-browser LiteRT a+b tensor demo |
 | [Flutter](#flutter) | `flutter/` | `cd flutter && flutter run` | [README](flutter/README.md) |
 | [iOS (Swift)](#ios-swift) | `ios/` | `open ios/XybridExample.xcodeproj` | [README](ios/README.md) |
 | [Android (Kotlin)](#android-kotlin) | `android/` | `cd android && ./gradlew assembleDebug` | [README](android/README.md) |
 | [Unity](#unity) | `unity/` | Open in Unity Hub | [xybrid-unity-tavern](https://github.com/xybrid-ai/xybrid-unity-tavern) |
+
+---
+
+## Browser/Web Preview
+
+Browser-native LiteRT.js adapter example: loads a pinned TFLite addition model,
+runs it entirely in the browser on wasm or WebGPU, and verifies every output
+equals elementwise a+b.
+
+### Getting Started
+
+```bash
+cd ../bindings/web
+pnpm install
+pnpm dev:example
+```
 
 ---
 
@@ -77,7 +94,9 @@ xcodebuild -project XybridExample.xcodeproj \
 
 ```bash
 # From xybrid repo root
-cargo xtask build-xcframework
+bazel build --config=ios //bindings/apple:XybridFFI
+unzip -o bazel-bin/bindings/apple/XybridFFI.xcframework.zip -d bindings/apple/XCFrameworks
+./bindings/apple/scripts/set-natives-mode.sh --set-local   # revert with --set-remote before committing
 ```
 
 ### Features Demonstrated
@@ -124,8 +143,12 @@ adb install app/build/outputs/apk/debug/app-debug.apk
 **Note**: To enable full SDK functionality, build native libraries first:
 
 ```bash
-# From xybrid repo root
-cargo xtask build-android
+# From xybrid repo root — build the AAR, then stage its jniLibs where the
+# example's Gradle module looks (bindings/kotlin/libs/)
+bazel build -c opt //bindings/kotlin:xybrid_kotlin_aar
+rm -rf bindings/kotlin/libs && mkdir -p bindings/kotlin/libs /tmp/aar
+unzip -o -q bazel-bin/bindings/kotlin/xybrid-kotlin.aar 'jni/*' -d /tmp/aar
+cp -r /tmp/aar/jni/* bindings/kotlin/libs/
 ```
 
 ### Features Demonstrated
@@ -164,15 +187,19 @@ Unity example project for on-device ML inference in games.
 **Note**: To enable full SDK functionality, build native libraries first:
 
 ```bash
-# From xybrid repo root
-# For iOS/macOS
-cargo xtask build-xcframework
+# Host platform — builds and stages into the Unity package (editor testing)
+cargo xtask build-ffi --deploy-unity
 
-# For Android
-cargo xtask build-android
+# Device targets mirror .github/workflows/build-unity.yml: build the bolt
+# native with Bazel, then stage it (with its Unity .meta) into
+# bindings/unity/Runtime/Plugins/<Platform>/ — no manual copying:
+bazel build --config=ios //crates/xybrid-bolt:xybrid_bolt_staticlib               # iOS
+bazel build --config=macos-metal -c opt //crates/xybrid-bolt:xybrid_bolt_cdylib   # macOS
+bazel build --config=android-arm64 //crates/xybrid-bolt:xybrid_bolt_cdylib        # Android (also android-armv7, android-x86_64)
+python3 tools/scripts/stage_unity_native.py --lib <bazelisk cquery --output=files path> --target <triple>
 ```
 
-Then copy the built libraries to `Assets/Plugins/` (see [unity/README.md](unity/README.md) for paths).
+See [unity/README.md](unity/README.md) for details.
 
 ### Features Demonstrated
 
@@ -192,10 +219,11 @@ See [unity/README.md](unity/README.md) for detailed documentation.
 
 Native libraries need to be built from Rust before the SDK works:
 
-| Platform | Build Command |
+| Example | Build Command |
 |----------|---------------|
-| iOS/macOS | `cargo xtask build-xcframework` |
-| Android | `cargo xtask build-android` |
+| iOS | `bazel build --config=ios //bindings/apple:XybridFFI` + unzip into `bindings/apple/XCFrameworks` (see the iOS section above) |
+| Android | `bazel build -c opt //bindings/kotlin:xybrid_kotlin_aar` + stage jniLibs into `bindings/kotlin/libs/` (see the Android section above) |
+| Unity | `cargo xtask build-ffi --deploy-unity` (see the Unity section above) |
 
 ### "Model not found"
 

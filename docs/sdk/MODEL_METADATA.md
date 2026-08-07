@@ -119,6 +119,24 @@ TensorFlow Lite model execution (mobile).
 }
 ```
 
+### `LiteRtLm`
+
+LiteRT-LM text generation. Runs only in the browser SDK (`@xybrid/web`);
+native runtimes reject this template with an explicit error.
+
+```json
+{
+  "type": "LiteRtLm",
+  "model_file": "model.litertlm",
+  "context_length": 2048
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `model_file` | string | yes | Path to `.litertlm` file (relative to model directory) |
+| `context_length` | integer | no | Maximum context length in tokens; omit when unset and the engine default applies. Must be at least 1 when present; the browser SDK caps it at 32768 |
+
 ### `ModelGraph`
 
 Multi-model DAG execution (pipeline of multiple models in a single bundle).

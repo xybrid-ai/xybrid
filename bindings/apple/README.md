@@ -12,14 +12,14 @@ Add Xybrid to your Xcode project:
 
 1. In Xcode, select **File > Add Package Dependencies...**
 2. Enter: `https://github.com/xybrid-ai/xybrid`
-3. Set **Dependency Rule** to **Up to Next Major Version** → `0.3.0`
+3. Set **Dependency Rule** to **Up to Next Major Version** → `0.4.1`
 4. Select the **Xybrid** library product
 
 Or add it to your `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/xybrid-ai/xybrid", from: "0.3.0")
+    .package(url: "https://github.com/xybrid-ai/xybrid", from: "0.4.1")
 ]
 ```
 
@@ -37,8 +37,8 @@ Then add the dependency to your target:
 ```swift
 import Xybrid
 
-// Load a model from the registry (the initializer resolves + loads it)
-let model = try XybridModel(fromRegistry: "kokoro-82m")
+// Describing the source is cheap; load() is the explicit async boundary.
+let model = try await Xybrid.model("kokoro-82m").load()
 
 // Create an envelope for TTS
 let envelope = XybridEnvelope.text(
@@ -47,8 +47,8 @@ let envelope = XybridEnvelope.text(
     speed: 1.0
 )
 
-// Run inference
-let result = try model.run(envelope: envelope)
+// Run inference without blocking the caller's executor.
+let result = try await model.runAsync(envelope: envelope)
 
 // Access the result
 if result.success {
@@ -66,8 +66,8 @@ answer text and surfaces it on `reasoningContent` — `nil` for non-thinking
 models. Nothing to enable; just read it if you want it.
 
 ```swift
-let model = try XybridModel(fromRegistry: "lfm2.5-1.2b-thinking")
-let result = try model.run(envelope: XybridEnvelope.text(
+let model = try await Xybrid.model("lfm2.5-1.2b-thinking").load()
+let result = try await model.runAsync(envelope: XybridEnvelope.text(
     "Is 97 a prime number? Reason, then answer."))
 
 if let answer = result.text { print("Answer:", answer) }
@@ -78,7 +78,9 @@ if let reasoning = result.reasoningContent { print("Reasoning:", reasoning) }
 
 | Type | Description |
 |------|-------------|
-| `XybridModel` | A loaded model ready for inference — construct via `XybridModel(fromRegistry:)`, `(fromBundle:)`, `(fromDirectory:)`, or `(fromHuggingface:)` |
+| `ModelSource` | Registry, bundle, directory, or Hugging Face model location |
+| `ModelLoader` | Cheap model reference; call `load()` to perform I/O |
+| `XybridModel` | A loaded model ready for inference |
 | `XybridEnvelope` | Input data container (audio, text, embedding, image, or multi-part user message) |
 | `XybridResult` | Inference result with success status and output data |
 | `XybridError` | Error enum for error handling |
@@ -126,9 +128,8 @@ apple/
 │   └── Xybrid/                      # Swift source
 │       ├── Xybrid.swift             # Public API, extensions, type aliases
 │       └── xybrid_bolt.swift        # BoltFFI-generated Swift bindings (DO NOT EDIT)
-└── XCFrameworks/                    # Pre-built binary frameworks (C headers bundled inside)
-    ├── XybridFFI.xcframework/       # Latest build (for local dev)
-    └── XybridFFI-{version}.xcframework/  # Versioned copy
+└── XCFrameworks/                    # Local-dev unzip target for the Bazel-built xcframework
+    └── XybridFFI.xcframework/       # (gitignored; unzipped from bazel-bin)
 ```
 
 ## Supported Platforms
@@ -147,42 +148,27 @@ The XCFramework containing the compiled Rust library must be built before using 
 | Tool | Required Version | Installation |
 |------|------------------|--------------|
 | Xcode | 14.0+ | Mac App Store |
-| Rust | 1.70+ | [rustup.rs](https://rustup.rs) |
+| Bazel (via bazelisk) | per `.bazelversion` | `brew install bazelisk` |
 | Xcode Command Line Tools | Latest | `xcode-select --install` |
-
-### Installing Rust Targets
-
-Install the required cross-compilation targets:
-
-```bash
-# From the xybrid repo root
-cargo xtask setup-targets
-
-# Or manually:
-rustup target add aarch64-apple-ios        # iOS device (arm64)
-rustup target add aarch64-apple-ios-sim    # iOS simulator (arm64)
-rustup target add x86_64-apple-ios         # iOS simulator (x86_64)
-rustup target add aarch64-apple-darwin     # macOS (arm64)
-rustup target add x86_64-apple-darwin      # macOS (x86_64)
-```
 
 ### Building
 
+The xcframework builds with Bazel (which brings its own Rust toolchain — no
+rustup targets needed). Install Bazel via
+[bazelisk](https://github.com/bazelbuild/bazelisk) (`brew install bazelisk`),
+then:
+
 ```bash
 # From the xybrid repo root
-cargo xtask build-xcframework
+bazel build --config=ios //bindings/apple:XybridFFI
 
-# With debug symbols (slower, larger binaries)
-cargo xtask build-xcframework --debug
-
-# With explicit version
-cargo xtask build-xcframework --version 0.2.0
+# Unzip it where the Swift package's local-natives mode looks
+unzip -o bazel-bin/bindings/apple/XybridFFI.xcframework.zip -d bindings/apple/XCFrameworks
 ```
 
 This produces `XCFrameworks/XybridFFI.xcframework` containing:
 - iOS device (arm64)
-- iOS simulator (arm64, x86_64 universal)
-- macOS (arm64, x86_64 universal)
+- iOS simulator (arm64)
 
 ### Build Output
 
@@ -190,14 +176,12 @@ After a successful build:
 
 ```
 bindings/apple/XCFrameworks/
-├── XybridFFI.xcframework/
-│   ├── ios-arm64/
-│   │   └── libxybrid-bolt.a
-│   ├── ios-arm64_x86_64-simulator/
-│   │   └── libxybrid-bolt.a
-│   └── macos-arm64_x86_64/
-│       └── libxybrid-bolt.a
-└── XybridFFI-{version}.xcframework/    # Versioned copy
+└── XybridFFI.xcframework/
+    ├── Info.plist
+    ├── ios-arm64/
+    │   └── XybridFFI.framework/        # static framework (binary, Headers/, Modules/)
+    └── ios-arm64-simulator/
+        └── XybridFFI.framework/
 ```
 
 ### Environment Variables
@@ -218,7 +202,7 @@ bindings/apple/XCFrameworks/
 
 **Cause**: Missing Rust target.
 
-**Fix**: Run `cargo xtask setup-targets` or `rustup target add aarch64-apple-ios`
+**Fix**: Build via Bazel (`bazel build --config=ios //bindings/apple:XybridFFI`) — it provides its own Rust toolchain and targets
 
 #### "xcodebuild: error: cannot be used together with -create-xcframework"
 
@@ -236,7 +220,7 @@ bindings/apple/XCFrameworks/
 
 **Cause**: XCFramework built for different architecture than target.
 
-**Fix**: Rebuild with `cargo xtask build-xcframework` ensuring all targets are installed.
+**Fix**: Rebuild with `bazel build --config=ios //bindings/apple:XybridFFI`.
 
 ### Non-macOS Developers
 

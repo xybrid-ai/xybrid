@@ -1,3 +1,8 @@
+---
+name: xybrid-init
+description: Generate model metadata for an ML model so it works with xybrid.
+---
+
 Generate a `model_metadata.json` for any ML model so it works with xybrid.
 
 The user may provide a HuggingFace repo, a local directory, or nothing (in which case ask).

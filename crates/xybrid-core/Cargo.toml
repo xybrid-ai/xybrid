@@ -25,8 +25,8 @@ path = "src/lib.rs"
 #   `xybrid-llama-sys`  : raw FFI + cmake build (Phase 1)
 #   `xybrid-llama`   : safe RAII + typed errors + streaming trampoline (Phase 2)
 #   `xybrid-core`    : thin adapter glue (Phase 3 reduction)
-xybrid-llama-sys = { path = "../llama-cpp-sys", version = "0.3.0", optional = true }
-xybrid-llama = { path = "../xybrid-llama", version = "0.3.0", optional = true }
+xybrid-llama-sys = { path = "../llama-cpp-sys", version = "0.4.1", optional = true }
+xybrid-llama = { path = "../xybrid-llama", version = "0.4.1", optional = true }
 # Real Jinja engine for the llama.cpp chat-template fallback: when llama.cpp's
 # hardcoded non-Jinja matcher rejects a GGUF's embedded template (returns -1),
 # we render that template here instead. Gated with the deps below into
@@ -78,8 +78,8 @@ yuvutils-rs = { version = "0.8.3", default-features = false }  # For raw YUV cam
 # Disable default features to exclude esaxx_fast (esaxx-rs/cpp) which hardcodes
 # static_crt(true) on MSVC, producing /MT objects that conflict with ORT's /MD.
 # We only run tokenizer models, we don't train them — esaxx-rs is only for BPE training.
-tokenizers = { version = "0.19", default-features = false, features = ["onig"] }
-schemars = { version = "0.8", optional = true }  # JSON Schema generation for model_metadata.json
+tokenizers = { version = "0.22", default-features = false, features = ["onig"] }
+schemars = { version = "1.0", optional = true }  # JSON Schema generation for model_metadata.json
 hound = "3.5"  # For WAV file reading (audio preprocessing)
 cmudict-fast = "0.8"  # For CMU pronouncing dictionary (TTS phonemization)
 lazy_static = "1.4"  # For static CMU dictionary initialization
@@ -99,6 +99,7 @@ safetensors = { version = "0.4", optional = true }
 hf-hub = { version = "0.5", optional = true, default-features = false, features = ["ureq", "rustls-tls"] }  # HF model downloads; rustls (no native-tls/openssl), unified with xybrid-sdk's 0.5
 byteorder = { version = "1.5", optional = true }  # For reading mel filter bytes
 num-traits = { version = "0.2", optional = true }  # Required by candle audio
+rayon = { version = "1.8", optional = true }  # Bounded mobile compute pool (candle/device.rs)
 
 # Mistral.rs - Pure Rust LLM inference (optional, for local LLMs)
 # DISABLED for the crates.io publish — `mistralrs` is currently a git dep
@@ -133,7 +134,7 @@ ort-dynamic = []   # no-op marker (was: ort/load-dynamic)
 ort-coreml = ["ort/coreml"]                                 # Apple Neural Engine acceleration
 
 # Candle (Pure Rust ML)
-candle = ["dep:candle-core", "dep:candle-nn", "dep:candle-transformers", "dep:safetensors", "dep:byteorder", "dep:num-traits"]
+candle = ["dep:candle-core", "dep:candle-nn", "dep:candle-transformers", "dep:safetensors", "dep:byteorder", "dep:num-traits", "dep:rayon"]
 candle-hub = ["candle", "dep:hf-hub"]   # HuggingFace Hub download (hf-hub on rustls — no OpenSSL)
 
 candle-metal = ["candle", "candle-core/metal", "candle-nn/metal"]
@@ -185,8 +186,13 @@ dev-tools = []
 # `llamacpp-crate-split` epic, and `xybrid-core/build.rs` is now a stub.
 
 [dev-dependencies]
+# NOTE: deliberately NO xybrid-sdk here. xybrid-sdk depends on xybrid-core, so a
+# dev-dependency back on the sdk forms a cycle — Cargo tolerates it (dev-deps sit
+# outside the published graph) but Bazel cannot express it, and it inverts the
+# dependency direction the workspace is built on. The single test that needed it
+# (system_validation.rs) now lives in //integration-tests, which may depend on
+# core and sdk both.
 tempfile = "3.8"
-xybrid-sdk = { path = "../xybrid-sdk" }
 dirs = "6.0"
 filetime = "0.2"
 hound = "3.5"  # WAV file reading for tests

@@ -1,30 +1,20 @@
 {
-  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "ModelMetadata",
   "description": "Complete model metadata describing execution strategy",
   "type": "object",
-  "required": [
-    "execution_template",
-    "files",
-    "model_id",
-    "version"
-  ],
   "properties": {
     "description": {
       "description": "Optional: Human-readable description",
-      "default": null,
       "type": [
         "string",
         "null"
-      ]
+      ],
+      "default": null
     },
     "execution_template": {
       "description": "Execution template defining how to run the model",
-      "allOf": [
-        {
-          "$ref": "#/definitions/ExecutionTemplate"
-        }
-      ]
+      "$ref": "#/$defs/ExecutionTemplate"
     },
     "files": {
       "description": "List of files included in the model bundle",
@@ -34,19 +24,19 @@
       }
     },
     "max_chunk_chars": {
-      "description": "Optional: Maximum text characters per TTS chunk.\n\nOverrides the default chunking limit (350 chars) for models that need shorter sequences. Smaller models (e.g., KittenTTS nano with 15M params) produce better quality with shorter chunks (150-200 chars).",
+      "description": "Optional: Maximum text characters per TTS chunk.\n\nOverrides the default chunking limit (350 chars) for models that need\nshorter sequences. Smaller models (e.g., KittenTTS nano with 15M params)\nproduce better quality with shorter chunks (150-200 chars).",
       "type": [
         "integer",
         "null"
       ],
       "format": "uint",
-      "minimum": 0.0
+      "minimum": 0
     },
     "metadata": {
       "description": "Optional: Additional metadata",
-      "default": {},
       "type": "object",
-      "additionalProperties": true
+      "additionalProperties": true,
+      "default": {}
     },
     "model_id": {
       "description": "Model identifier",
@@ -54,38 +44,49 @@
     },
     "postprocessing": {
       "description": "Postprocessing steps to apply to output data",
-      "default": [],
       "type": "array",
+      "default": [],
       "items": {
-        "$ref": "#/definitions/PostprocessingStep"
+        "$ref": "#/$defs/PostprocessingStep"
       }
     },
     "preprocessing": {
       "description": "Preprocessing steps to apply to input data",
-      "default": [],
       "type": "array",
+      "default": [],
       "items": {
-        "$ref": "#/definitions/PreprocessingStep"
+        "$ref": "#/$defs/PreprocessingStep"
       }
     },
     "trim_trailing_samples": {
-      "description": "Optional: Number of trailing audio samples to trim per TTS chunk.\n\nSome TTS models produce trailing artifacts at the end of each chunk. KittenTTS trims 5000 samples (~208ms at 24kHz) per chunk. Set to 0 or omit to disable trimming.",
+      "description": "Optional: Number of trailing audio samples to trim per TTS chunk.\n\nSome TTS models produce trailing artifacts at the end of each chunk.\nKittenTTS trims 5000 samples (~208ms at 24kHz) per chunk.\nSet to 0 or omit to disable trimming.",
       "type": [
         "integer",
         "null"
       ],
       "format": "uint",
-      "minimum": 0.0
+      "minimum": 0
     },
     "version": {
       "description": "Model version",
       "type": "string"
     },
+    "vision_encoder": {
+      "description": "Optional sibling vision encoder / mmproj declaration for VLMs.",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/VisionEncoderConfig"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "voices": {
       "description": "Optional: Voice configuration for TTS models",
       "anyOf": [
         {
-          "$ref": "#/definitions/VoiceConfig"
+          "$ref": "#/$defs/VoiceConfig"
         },
         {
           "type": "null"
@@ -93,34 +94,32 @@
       ]
     }
   },
-  "definitions": {
+  "required": [
+    "model_id",
+    "version",
+    "execution_template",
+    "files"
+  ],
+  "$defs": {
     "ExecutionMode": {
       "description": "Execution mode for a pipeline stage",
       "oneOf": [
         {
           "description": "Run the model once (default)",
           "type": "object",
-          "required": [
-            "type"
-          ],
           "properties": {
             "type": {
               "type": "string",
-              "enum": [
-                "SingleShot"
-              ]
+              "const": "SingleShot"
             }
-          }
+          },
+          "required": [
+            "type"
+          ]
         },
         {
           "description": "Run the model in an autoregressive loop",
           "type": "object",
-          "required": [
-            "end_token_id",
-            "max_tokens",
-            "start_token_id",
-            "type"
-          ],
           "properties": {
             "end_token_id": {
               "type": "integer",
@@ -129,12 +128,12 @@
             "max_tokens": {
               "type": "integer",
               "format": "uint",
-              "minimum": 0.0
+              "minimum": 0
             },
             "repetition_penalty": {
-              "default": 0.0,
               "type": "number",
-              "format": "float"
+              "format": "float",
+              "default": 0.0
             },
             "start_token_id": {
               "type": "integer",
@@ -142,24 +141,19 @@
             },
             "type": {
               "type": "string",
-              "enum": [
-                "Autoregressive"
-              ]
+              "const": "Autoregressive"
             }
-          }
+          },
+          "required": [
+            "type",
+            "max_tokens",
+            "start_token_id",
+            "end_token_id"
+          ]
         },
         {
           "description": "Whisper-specific decoder with KV cache and forced tokens",
           "type": "object",
-          "required": [
-            "end_token_id",
-            "language_token_id",
-            "max_tokens",
-            "no_timestamps_token_id",
-            "start_token_id",
-            "task_token_id",
-            "type"
-          ],
           "properties": {
             "end_token_id": {
               "type": "integer",
@@ -172,24 +166,24 @@
             "max_tokens": {
               "type": "integer",
               "format": "uint",
-              "minimum": 0.0
+              "minimum": 0
             },
             "no_timestamps_token_id": {
               "type": "integer",
               "format": "int64"
             },
             "repetition_penalty": {
-              "default": 1.100000023841858,
               "type": "number",
-              "format": "float"
+              "format": "float",
+              "default": 1.100000023841858
             },
             "start_token_id": {
               "type": "integer",
               "format": "int64"
             },
             "suppress_tokens": {
-              "default": [],
               "type": "array",
+              "default": [],
               "items": {
                 "type": "integer",
                 "format": "int64"
@@ -201,42 +195,43 @@
             },
             "type": {
               "type": "string",
-              "enum": [
-                "WhisperDecoder"
-              ]
+              "const": "WhisperDecoder"
             }
-          }
+          },
+          "required": [
+            "type",
+            "max_tokens",
+            "start_token_id",
+            "end_token_id",
+            "language_token_id",
+            "task_token_id",
+            "no_timestamps_token_id"
+          ]
         },
         {
           "description": "Run the model iteratively with refinement (diffusion)",
           "type": "object",
-          "required": [
-            "num_steps",
-            "type"
-          ],
           "properties": {
             "num_steps": {
               "type": "integer",
               "format": "uint",
-              "minimum": 0.0
+              "minimum": 0
             },
             "schedule": {
+              "$ref": "#/$defs/RefinementSchedule",
               "default": {
                 "type": "Linear"
-              },
-              "allOf": [
-                {
-                  "$ref": "#/definitions/RefinementSchedule"
-                }
-              ]
+              }
             },
             "type": {
               "type": "string",
-              "enum": [
-                "IterativeRefinement"
-              ]
+              "const": "IterativeRefinement"
             }
-          }
+          },
+          "required": [
+            "type",
+            "num_steps"
+          ]
         }
       ]
     },
@@ -246,10 +241,6 @@
         {
           "description": "ONNX model execution via ONNX Runtime",
           "type": "object",
-          "required": [
-            "model_file",
-            "type"
-          ],
           "properties": {
             "model_file": {
               "description": "Path to the ONNX model file (relative to bundle root)",
@@ -257,35 +248,33 @@
             },
             "type": {
               "type": "string",
-              "enum": [
-                "Onnx"
-              ]
+              "const": "Onnx"
             }
-          }
+          },
+          "required": [
+            "type",
+            "model_file"
+          ]
         },
         {
           "description": "SafeTensors model execution via Candle runtime (pure Rust)",
           "type": "object",
-          "required": [
-            "model_file",
-            "type"
-          ],
           "properties": {
             "architecture": {
               "description": "Model architecture for routing to Rust implementation",
-              "default": null,
               "type": [
                 "string",
                 "null"
-              ]
+              ],
+              "default": null
             },
             "config_file": {
               "description": "Path to model configuration JSON",
-              "default": null,
               "type": [
                 "string",
                 "null"
-              ]
+              ],
+              "default": null
             },
             "model_file": {
               "description": "Path to the SafeTensors model file (relative to bundle root)",
@@ -293,27 +282,25 @@
             },
             "tokenizer_file": {
               "description": "Path to tokenizer JSON",
-              "default": null,
               "type": [
                 "string",
                 "null"
-              ]
+              ],
+              "default": null
             },
             "type": {
               "type": "string",
-              "enum": [
-                "SafeTensors"
-              ]
+              "const": "SafeTensors"
             }
-          }
+          },
+          "required": [
+            "type",
+            "model_file"
+          ]
         },
         {
           "description": "CoreML model execution (Apple platforms)",
           "type": "object",
-          "required": [
-            "model_file",
-            "type"
-          ],
           "properties": {
             "model_file": {
               "description": "Path to the CoreML model file",
@@ -321,19 +308,17 @@
             },
             "type": {
               "type": "string",
-              "enum": [
-                "CoreMl"
-              ]
+              "const": "CoreMl"
             }
-          }
+          },
+          "required": [
+            "type",
+            "model_file"
+          ]
         },
         {
           "description": "TensorFlow Lite model execution (mobile)",
           "type": "object",
-          "required": [
-            "model_file",
-            "type"
-          ],
           "properties": {
             "model_file": {
               "description": "Path to the TFLite model file",
@@ -341,63 +326,98 @@
             },
             "type": {
               "type": "string",
-              "enum": [
-                "TfLite"
-              ]
+              "const": "TfLite"
             }
-          }
+          },
+          "required": [
+            "type",
+            "model_file"
+          ]
+        },
+        {
+          "description": "LiteRT-LM model execution (browser SDK / @xybrid/web only)",
+          "type": "object",
+          "properties": {
+            "context_length": {
+              "description": "Maximum context length (tokens); engine default when absent",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint",
+              "minimum": 1
+            },
+            "model_file": {
+              "description": "Path to the .litertlm model file (relative to bundle root)",
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "LiteRtLm"
+            }
+          },
+          "required": [
+            "type",
+            "model_file"
+          ]
         },
         {
           "description": "Multi-model graph execution (DAG of models)",
           "type": "object",
-          "required": [
-            "stages",
-            "type"
-          ],
           "properties": {
             "config": {
               "description": "Model-specific configuration",
-              "default": {},
               "type": "object",
-              "additionalProperties": true
+              "additionalProperties": true,
+              "default": {}
             },
             "stages": {
               "description": "Sequence of execution stages",
               "type": "array",
               "items": {
-                "$ref": "#/definitions/PipelineStage"
+                "$ref": "#/$defs/PipelineStage"
               }
             },
             "type": {
               "type": "string",
-              "enum": [
-                "ModelGraph"
-              ]
+              "const": "ModelGraph"
             }
-          }
+          },
+          "required": [
+            "type",
+            "stages"
+          ]
         },
         {
           "description": "GGUF model execution for local LLMs",
           "type": "object",
-          "required": [
-            "model_file",
-            "type"
-          ],
           "properties": {
             "chat_template": {
               "description": "Path to chat template JSON file",
-              "default": null,
               "type": [
                 "string",
                 "null"
-              ]
+              ],
+              "default": null
             },
             "context_length": {
               "description": "Maximum context length (tokens)",
-              "default": 4096,
               "type": "integer",
               "format": "uint",
-              "minimum": 0.0
+              "default": 4096,
+              "minimum": 0
+            },
+            "generation_params": {
+              "description": "Per-model generation sampling parameters. When absent or when a\nfield is absent, the consuming strategy supplies its own defaults.\nUsed by codec TTS models (e.g. NeuTTS) that need specific sampling\nconfig for speech-token generation.",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/GenerationParams"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
             },
             "model_file": {
               "description": "Path to the GGUF model file",
@@ -405,11 +425,195 @@
             },
             "type": {
               "type": "string",
-              "enum": [
-                "Gguf"
+              "const": "Gguf"
+            }
+          },
+          "required": [
+            "type",
+            "model_file"
+          ]
+        },
+        {
+          "description": "Vision-language model execution for image+text LLM inputs.",
+          "type": "object",
+          "properties": {
+            "chat_template": {
+              "description": "Path to chat template JSON file.",
+              "type": [
+                "string",
+                "null"
+              ],
+              "default": null
+            },
+            "context_length": {
+              "description": "Maximum context length (tokens).",
+              "type": "integer",
+              "format": "uint",
+              "default": 4096,
+              "minimum": 0
+            },
+            "generation_params": {
+              "description": "Per-model generation sampling parameters.",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/GenerationParams"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "model_file": {
+              "description": "Path to the language model file (usually GGUF) relative to bundle root.",
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "VisionLanguage"
+            }
+          },
+          "required": [
+            "type",
+            "model_file"
+          ]
+        }
+      ]
+    },
+    "GenerationParams": {
+      "description": "Sampling parameters for GGUF generation. All fields optional so metadata\nonly needs to specify overrides; absent fields use strategy defaults.",
+      "type": "object",
+      "properties": {
+        "max_tokens": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint",
+          "minimum": 0
+        },
+        "repetition_penalty": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "float"
+        },
+        "stop_sequences": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "temperature": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "float"
+        },
+        "top_k": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint",
+          "minimum": 0
+        },
+        "top_p": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "float"
+        }
+      }
+    },
+    "ImageNormalizePreset": {
+      "description": "Named per-channel normalization presets for vision inputs.",
+      "oneOf": [
+        {
+          "description": "ImageNet RGB normalization.",
+          "type": "string",
+          "const": "ImageNet"
+        },
+        {
+          "description": "OpenAI CLIP RGB normalization.",
+          "type": "string",
+          "const": "Clip"
+        },
+        {
+          "description": "SigLIP RGB normalization.",
+          "type": "string",
+          "const": "SigLip"
+        },
+        {
+          "description": "Custom per-channel normalization.",
+          "type": "object",
+          "properties": {
+            "Custom": {
+              "type": "object",
+              "properties": {
+                "mean": {
+                  "type": "array",
+                  "items": {
+                    "type": "number",
+                    "format": "float"
+                  }
+                },
+                "std": {
+                  "type": "array",
+                  "items": {
+                    "type": "number",
+                    "format": "float"
+                  }
+                }
+              },
+              "required": [
+                "mean",
+                "std"
               ]
             }
-          }
+          },
+          "additionalProperties": false,
+          "required": [
+            "Custom"
+          ]
+        }
+      ]
+    },
+    "ImageResizeMode": {
+      "description": "Aspect-ratio handling mode for `ImageResize`.",
+      "oneOf": [
+        {
+          "description": "Resize directly to the target dimensions.",
+          "type": "string",
+          "const": "Stretch"
+        },
+        {
+          "description": "Preserve aspect ratio and pad the remaining area.",
+          "type": "string",
+          "const": "Letterbox"
+        },
+        {
+          "description": "Preserve aspect ratio and center-crop the overflow.",
+          "type": "string",
+          "const": "Center"
+        }
+      ]
+    },
+    "ImageTensorLayout": {
+      "description": "Tensor layout emitted by `ImageDecode`.",
+      "oneOf": [
+        {
+          "description": "Batch, channels, height, width.",
+          "type": "string",
+          "const": "Nchw"
+        },
+        {
+          "description": "Batch, height, width, channels.",
+          "type": "string",
+          "const": "Nhwc"
         }
       ]
     },
@@ -423,21 +627,17 @@
       ]
     },
     "MelScaleType": {
-      "description": "Mel frequency scale type for mel spectrogram preprocessing.\n\nDifferent models use different mel scale formulas. Using the wrong scale will produce incorrect mel spectrograms and poor model performance.",
+      "description": "Mel frequency scale type for mel spectrogram preprocessing.\n\nDifferent models use different mel scale formulas. Using the wrong scale\nwill produce incorrect mel spectrograms and poor model performance.",
       "oneOf": [
         {
-          "description": "Slaney mel scale (used by Whisper, transformers.js, librosa default).\n\nFormula: - For freq < 1000 Hz: `mel = 3 * freq / 200` - For freq >= 1000 Hz: `mel = 15 + 27 * ln(freq / 1000) / ln(6.4)`",
+          "description": "Slaney mel scale (used by Whisper, transformers.js, librosa default).\n\nFormula:\n- For freq < 1000 Hz: `mel = 3 * freq / 200`\n- For freq >= 1000 Hz: `mel = 15 + 27 * ln(freq / 1000) / ln(6.4)`",
           "type": "string",
-          "enum": [
-            "slaney"
-          ]
+          "const": "slaney"
         },
         {
           "description": "HTK mel scale (used by older implementations, mel-spec library).\n\nFormula: `mel = 2595 * log10(1 + freq / 700)`",
           "type": "string",
-          "enum": [
-            "htk"
-          ]
+          "const": "htk"
         }
       ]
     },
@@ -447,59 +647,41 @@
         {
           "description": "Legacy. ARPABET-based. May produce lower quality for models trained on Misaki/espeak IPA.",
           "type": "string",
-          "enum": [
-            "CmuDictionary"
-          ]
+          "const": "CmuDictionary"
         },
         {
-          "description": "Multi-language. Requires espeak-ng system installation. Install with: `brew install espeak-ng` (macOS) or `apt-get install espeak-ng` (Linux)",
+          "description": "Multi-language. Requires espeak-ng system installation.\nInstall with: `brew install espeak-ng` (macOS) or `apt-get install espeak-ng` (Linux)",
           "type": "string",
-          "enum": [
-            "EspeakNG"
-          ]
+          "const": "EspeakNG"
         },
         {
-          "description": "Default. Pure Rust, no system dependencies. Recommended for all TTS models (Kokoro, KittenTTS). Uses bundled JSON dictionaries (us_gold.json + us_silver.json) Falls back to rule-based G2P for out-of-vocabulary words",
+          "description": "Default. Pure Rust, no system dependencies. Recommended for all TTS models (Kokoro, KittenTTS).\nUses bundled JSON dictionaries (us_gold.json + us_silver.json)\nFalls back to rule-based G2P for out-of-vocabulary words",
           "type": "string",
-          "enum": [
-            "MisakiDictionary"
-          ]
+          "const": "MisakiDictionary"
         },
         {
-          "description": "Hybrid dictionary + ONNX neural G2P fallback. No system dependencies. Uses a ~274k word dictionary for fast lookup and a small ONNX model (~59MB) for unknown words via CTC decoding. Requires `open-phonemizer.onnx` and `dictionary.json` in the model directory.",
+          "description": "Hybrid dictionary + ONNX neural G2P fallback. No system dependencies.\nUses a ~274k word dictionary for fast lookup and a small ONNX model (~59MB)\nfor unknown words via CTC decoding.\nRequires `open-phonemizer.onnx` and `dictionary.json` in the model directory.",
           "type": "string",
-          "enum": [
-            "OpenPhonemizer"
-          ]
+          "const": "OpenPhonemizer"
         }
       ]
     },
     "PipelineStage": {
       "description": "A single stage in a pipeline execution",
       "type": "object",
-      "required": [
-        "inputs",
-        "model_file",
-        "name",
-        "outputs"
-      ],
       "properties": {
         "config": {
           "description": "Optional stage-specific configuration",
-          "default": {},
           "type": "object",
-          "additionalProperties": true
+          "additionalProperties": true,
+          "default": {}
         },
         "execution_mode": {
           "description": "Execution mode for this stage",
+          "$ref": "#/$defs/ExecutionMode",
           "default": {
             "type": "SingleShot"
-          },
-          "allOf": [
-            {
-              "$ref": "#/definitions/ExecutionMode"
-            }
-          ]
+          }
         },
         "inputs": {
           "description": "Input tensor names expected by this stage",
@@ -523,7 +705,13 @@
             "type": "string"
           }
         }
-      }
+      },
+      "required": [
+        "name",
+        "model_file",
+        "inputs",
+        "outputs"
+      ]
     },
     "PostprocessingStep": {
       "description": "Postprocessing step applied after model execution",
@@ -531,117 +719,105 @@
         {
           "description": "Decode BPE tokens to text\n\nUse for: Language models, ASR models (Whisper)",
           "type": "object",
-          "required": [
-            "type",
-            "vocab_file"
-          ],
           "properties": {
             "type": {
               "type": "string",
-              "enum": [
-                "BPEDecode"
-              ]
+              "const": "BPEDecode"
             },
             "vocab_file": {
               "description": "Path to vocabulary file (same as used in tokenization)",
               "type": "string"
             }
-          }
+          },
+          "required": [
+            "type",
+            "vocab_file"
+          ]
         },
         {
           "description": "Apply argmax to get class index or token ID\n\nUse for: Classifiers, greedy decoding",
           "type": "object",
-          "required": [
-            "type"
-          ],
           "properties": {
             "dim": {
               "description": "Dimension to apply argmax over (default: last dimension)",
-              "default": null,
               "type": [
                 "integer",
                 "null"
               ],
               "format": "uint",
-              "minimum": 0.0
+              "default": null,
+              "minimum": 0
             },
             "type": {
               "type": "string",
-              "enum": [
-                "Argmax"
-              ]
+              "const": "Argmax"
             }
-          }
+          },
+          "required": [
+            "type"
+          ]
         },
         {
           "description": "Apply softmax to get probabilities\n\nUse for: Classifiers, probability distributions",
           "type": "object",
-          "required": [
-            "type"
-          ],
           "properties": {
             "dim": {
               "description": "Dimension to apply softmax over (default: last dimension)",
-              "default": null,
               "type": [
                 "integer",
                 "null"
               ],
               "format": "uint",
-              "minimum": 0.0
+              "default": null,
+              "minimum": 0
             },
             "type": {
               "type": "string",
-              "enum": [
-                "Softmax"
-              ]
+              "const": "Softmax"
             }
-          }
+          },
+          "required": [
+            "type"
+          ]
         },
         {
           "description": "Get top-K predictions with scores\n\nUse for: Multi-class classification, recommendation systems",
           "type": "object",
-          "required": [
-            "k",
-            "type"
-          ],
           "properties": {
             "dim": {
               "description": "Dimension to apply top-k over (default: last dimension)",
-              "default": null,
               "type": [
                 "integer",
                 "null"
               ],
               "format": "uint",
-              "minimum": 0.0
+              "default": null,
+              "minimum": 0
             },
             "k": {
               "description": "Number of top predictions to return",
               "type": "integer",
               "format": "uint",
-              "minimum": 0.0
+              "minimum": 0
             },
             "type": {
               "type": "string",
-              "enum": [
-                "TopK"
-              ]
+              "const": "TopK"
             }
-          }
+          },
+          "required": [
+            "type",
+            "k"
+          ]
         },
         {
           "description": "Apply threshold to convert probabilities to binary predictions\n\nUse for: Binary classification, object detection confidence filtering",
           "type": "object",
-          "required": [
-            "threshold",
-            "type"
-          ],
           "properties": {
             "return_indices": {
               "description": "Whether to return indices (true) or binary mask (false)",
-              "default": false,
-              "type": "boolean"
+              "type": "boolean",
+              "default": false
             },
             "threshold": {
               "description": "Threshold value (0.0-1.0)",
@@ -650,19 +826,17 @@
             },
             "type": {
               "type": "string",
-              "enum": [
-                "Threshold"
-              ]
+              "const": "Threshold"
             }
-          }
+          },
+          "required": [
+            "type",
+            "threshold"
+          ]
         },
         {
           "description": "Apply temperature sampling for token generation\n\nUse for: Creative text generation",
           "type": "object",
-          "required": [
-            "temperature",
-            "type"
-          ],
           "properties": {
             "temperature": {
               "description": "Temperature value (higher = more random, lower = more deterministic)",
@@ -671,39 +845,36 @@
             },
             "top_k": {
               "description": "Optional: Top-k filtering",
-              "default": null,
               "type": [
                 "integer",
                 "null"
               ],
               "format": "uint",
-              "minimum": 0.0
+              "default": null,
+              "minimum": 0
             },
             "top_p": {
               "description": "Optional: Top-p (nucleus) filtering",
-              "default": null,
               "type": [
                 "number",
                 "null"
               ],
-              "format": "float"
+              "format": "float",
+              "default": null
             },
             "type": {
               "type": "string",
-              "enum": [
-                "TemperatureSample"
-              ]
+              "const": "TemperatureSample"
             }
-          }
+          },
+          "required": [
+            "type",
+            "temperature"
+          ]
         },
         {
           "description": "Denormalize tensor values (inverse of Normalize)\n\nUse for: Image generation, reversing preprocessing",
           "type": "object",
-          "required": [
-            "mean",
-            "std",
-            "type"
-          ],
           "properties": {
             "mean": {
               "description": "Mean values used in normalization",
@@ -723,100 +894,93 @@
             },
             "type": {
               "type": "string",
-              "enum": [
-                "Denormalize"
-              ]
+              "const": "Denormalize"
             }
-          }
+          },
+          "required": [
+            "type",
+            "mean",
+            "std"
+          ]
         },
         {
           "description": "Mean pooling over token embeddings to get sentence embedding\n\nUse for: Sentence transformers (BERT, DistilBERT, all-MiniLM)",
           "type": "object",
-          "required": [
-            "type"
-          ],
           "properties": {
             "dim": {
               "description": "Dimension to pool over (default: 1, the sequence dimension)",
-              "default": 1,
               "type": "integer",
               "format": "uint",
-              "minimum": 0.0
+              "default": 1,
+              "minimum": 0
             },
             "type": {
               "type": "string",
-              "enum": [
-                "MeanPool"
-              ]
+              "const": "MeanPool"
             }
-          }
+          },
+          "required": [
+            "type"
+          ]
         },
         {
           "description": "CTC (Connectionist Temporal Classification) decoding for ASR\n\nUse for: Wav2Vec2, Hubert, other CTC-based ASR models",
           "type": "object",
-          "required": [
-            "type",
-            "vocab_file"
-          ],
           "properties": {
             "blank_index": {
               "description": "Blank token index (usually 0)",
-              "default": 0,
               "type": "integer",
               "format": "uint",
-              "minimum": 0.0
+              "default": 0,
+              "minimum": 0
             },
             "type": {
               "type": "string",
-              "enum": [
-                "CTCDecode"
-              ]
+              "const": "CTCDecode"
             },
             "vocab_file": {
               "description": "Path to vocabulary file (character or word-level)",
               "type": "string"
             }
-          }
+          },
+          "required": [
+            "type",
+            "vocab_file"
+          ]
         },
         {
           "description": "Convert TTS waveform output to audio bytes\n\nUse for: TTS models (KittenTTS, Piper) that output float32 waveforms",
           "type": "object",
-          "required": [
-            "sample_rate",
-            "type"
-          ],
           "properties": {
             "apply_postprocessing": {
               "description": "Whether to apply postprocessing (normalization, silence trimming)",
-              "default": true,
-              "type": "boolean"
+              "type": "boolean",
+              "default": true
             },
             "sample_rate": {
               "description": "Output sample rate in Hz",
               "type": "integer",
               "format": "uint32",
-              "minimum": 0.0
+              "minimum": 0
             },
             "trim_trailing_silence": {
               "description": "Whether to trim trailing near-silence from the waveform (default: false)",
-              "default": false,
-              "type": "boolean"
+              "type": "boolean",
+              "default": false
             },
             "type": {
               "type": "string",
-              "enum": [
-                "TTSAudioEncode"
-              ]
+              "const": "TTSAudioEncode"
             }
-          }
+          },
+          "required": [
+            "type",
+            "sample_rate"
+          ]
         },
         {
           "description": "Decode Whisper token IDs to text using HuggingFace tokenizer\n\nUse for: Whisper ASR models with HuggingFace tokenizer format",
           "type": "object",
-          "required": [
-            "tokenizer_file",
-            "type"
-          ],
           "properties": {
             "tokenizer_file": {
               "description": "Path to tokenizer.json file (HuggingFace format)",
@@ -824,11 +988,48 @@
             },
             "type": {
               "type": "string",
-              "enum": [
-                "WhisperDecode"
-              ]
+              "const": "WhisperDecode"
             }
-          }
+          },
+          "required": [
+            "type",
+            "tokenizer_file"
+          ]
+        },
+        {
+          "description": "Decode LLM speech token output to audio via an ONNX codec decoder\n\nUse for: Codec-based TTS models (NeuTTS, MARS5, F5-TTS)",
+          "type": "object",
+          "properties": {
+            "apply_postprocessing": {
+              "description": "Whether to apply postprocessing (normalization, silence trimming)",
+              "type": "boolean",
+              "default": true
+            },
+            "decoder_model": {
+              "description": "Path to the ONNX codec decoder model (relative to bundle root)",
+              "type": "string"
+            },
+            "sample_rate": {
+              "description": "Output sample rate in Hz",
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "token_pattern": {
+              "description": "Regex pattern to extract speech token IDs from LLM output text",
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "CodecDecode"
+            }
+          },
+          "required": [
+            "type",
+            "decoder_model",
+            "sample_rate",
+            "token_pattern"
+          ]
         }
       ]
     },
@@ -836,122 +1037,105 @@
       "description": "Preprocessing step applied before model execution",
       "oneOf": [
         {
-          "description": "Convert audio to mel spectrogram\n\nUse for: ASR models (Whisper), audio classifiers\n\n# Presets\n\nInstead of specifying individual parameters, you can use a preset: ```json { \"type\": \"MelSpectrogram\", \"preset\": \"whisper\" } ```\n\nAvailable presets: `whisper`, `whisper-large`",
+          "description": "Convert audio to mel spectrogram\n\nUse for: ASR models (Whisper), audio classifiers\n\n# Presets\n\nInstead of specifying individual parameters, you can use a preset:\n```json\n{ \"type\": \"MelSpectrogram\", \"preset\": \"whisper\" }\n```\n\nAvailable presets: `whisper`, `whisper-large`",
           "type": "object",
-          "required": [
-            "type"
-          ],
           "properties": {
             "fft_size": {
               "description": "FFT window size (default: 400)",
-              "default": 400,
               "type": "integer",
               "format": "uint",
-              "minimum": 0.0
+              "default": 400,
+              "minimum": 0
             },
             "hop_length": {
               "description": "Hop length between frames (default: 160)",
-              "default": 160,
               "type": "integer",
               "format": "uint",
-              "minimum": 0.0
+              "default": 160,
+              "minimum": 0
             },
             "max_frames": {
               "description": "Maximum number of output frames (default: 3000 for 30 seconds)",
-              "default": 3000,
               "type": [
                 "integer",
                 "null"
               ],
               "format": "uint",
-              "minimum": 0.0
+              "default": 3000,
+              "minimum": 0
             },
             "mel_scale": {
               "description": "Mel frequency scale (default: Slaney)",
-              "default": "slaney",
-              "allOf": [
-                {
-                  "$ref": "#/definitions/MelScaleType"
-                }
-              ]
+              "$ref": "#/$defs/MelScaleType",
+              "default": "slaney"
             },
             "n_mels": {
               "description": "Number of mel frequency bins (default: 80)",
-              "default": 80,
               "type": "integer",
               "format": "uint",
-              "minimum": 0.0
+              "default": 80,
+              "minimum": 0
             },
             "preset": {
-              "description": "Optional: Use a preset configuration (overrides other fields) Available: \"whisper\", \"whisper-large\"",
-              "default": null,
+              "description": "Optional: Use a preset configuration (overrides other fields)\nAvailable: \"whisper\", \"whisper-large\"",
               "type": [
                 "string",
                 "null"
-              ]
+              ],
+              "default": null
             },
             "sample_rate": {
               "description": "Audio sample rate (Hz) (default: 16000)",
-              "default": 16000,
               "type": "integer",
               "format": "uint32",
-              "minimum": 0.0
+              "default": 16000,
+              "minimum": 0
             },
             "type": {
               "type": "string",
-              "enum": [
-                "MelSpectrogram"
-              ]
+              "const": "MelSpectrogram"
             }
-          }
+          },
+          "required": [
+            "type"
+          ]
         },
         {
           "description": "Tokenize text using a vocabulary file\n\nUse for: Language models, text classifiers",
           "type": "object",
-          "required": [
-            "tokenizer_type",
-            "type",
-            "vocab_file"
-          ],
           "properties": {
             "max_length": {
               "description": "Optional: Maximum sequence length",
-              "default": null,
               "type": [
                 "integer",
                 "null"
               ],
               "format": "uint",
-              "minimum": 0.0
+              "default": null,
+              "minimum": 0
             },
             "tokenizer_type": {
               "description": "Type of tokenizer (BPE, WordPiece, SentencePiece)",
-              "allOf": [
-                {
-                  "$ref": "#/definitions/TokenizerType"
-                }
-              ]
+              "$ref": "#/$defs/TokenizerType"
             },
             "type": {
               "type": "string",
-              "enum": [
-                "Tokenize"
-              ]
+              "const": "Tokenize"
             },
             "vocab_file": {
               "description": "Path to vocabulary file (relative to bundle root)",
               "type": "string"
             }
-          }
+          },
+          "required": [
+            "type",
+            "vocab_file",
+            "tokenizer_type"
+          ]
         },
         {
           "description": "Normalize tensor values\n\nUse for: Image models (ResNet, CLIP), any model with standardized inputs",
           "type": "object",
-          "required": [
-            "mean",
-            "std",
-            "type"
-          ],
           "properties": {
             "mean": {
               "description": "Mean values for normalization (per channel)",
@@ -971,115 +1155,232 @@
             },
             "type": {
               "type": "string",
-              "enum": [
-                "Normalize"
-              ]
+              "const": "Normalize"
             }
-          }
+          },
+          "required": [
+            "type",
+            "mean",
+            "std"
+          ]
         },
         {
           "description": "Resize image to target dimensions\n\nUse for: Image classifiers, vision models",
           "type": "object",
-          "required": [
-            "height",
-            "type",
-            "width"
-          ],
           "properties": {
             "height": {
               "description": "Target height",
               "type": "integer",
               "format": "uint",
-              "minimum": 0.0
+              "minimum": 0
             },
             "interpolation": {
               "description": "Interpolation method",
-              "default": "Bilinear",
-              "allOf": [
-                {
-                  "$ref": "#/definitions/InterpolationMethod"
-                }
-              ]
+              "$ref": "#/$defs/InterpolationMethod",
+              "default": "Bilinear"
             },
             "type": {
               "type": "string",
-              "enum": [
-                "Resize"
-              ]
+              "const": "Resize"
             },
             "width": {
               "description": "Target width",
               "type": "integer",
               "format": "uint",
-              "minimum": 0.0
+              "minimum": 0
             }
-          }
+          },
+          "required": [
+            "type",
+            "width",
+            "height"
+          ]
+        },
+        {
+          "description": "Resize an image tensor with explicit aspect-ratio policy.\n\nUse for: Vision models that need deterministic stretch, letterbox, or\ncenter-crop resizing after `ImageDecode`.",
+          "type": "object",
+          "properties": {
+            "fill": {
+              "description": "Letterbox fill color in normalized channel values.",
+              "type": "array",
+              "default": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "items": {
+                "type": "number",
+                "format": "float"
+              }
+            },
+            "height": {
+              "description": "Target height.",
+              "type": "integer",
+              "format": "uint",
+              "minimum": 0
+            },
+            "interpolation": {
+              "description": "Interpolation method.",
+              "$ref": "#/$defs/InterpolationMethod",
+              "default": "Bilinear"
+            },
+            "layout": {
+              "description": "Input/output tensor layout.",
+              "$ref": "#/$defs/ImageTensorLayout",
+              "default": "Nchw"
+            },
+            "mode": {
+              "description": "Aspect-ratio handling mode.",
+              "$ref": "#/$defs/ImageResizeMode",
+              "default": "Stretch"
+            },
+            "type": {
+              "type": "string",
+              "const": "ImageResize"
+            },
+            "width": {
+              "description": "Target width.",
+              "type": "integer",
+              "format": "uint",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "type",
+            "width",
+            "height"
+          ]
+        },
+        {
+          "description": "Normalize an image tensor with a known vision-model preset.\n\nUse for: ImageNet classifiers, CLIP/SigLIP encoders, and VLM\npreprocessors that require per-channel mean/std normalization.",
+          "type": "object",
+          "properties": {
+            "layout": {
+              "description": "Tensor layout to use when locating the channel axis.",
+              "$ref": "#/$defs/ImageTensorLayout",
+              "default": "Nchw"
+            },
+            "preset": {
+              "description": "Normalization preset or custom per-channel values.",
+              "$ref": "#/$defs/ImageNormalizePreset",
+              "default": "ImageNet"
+            },
+            "type": {
+              "type": "string",
+              "const": "ImageNormalize"
+            }
+          },
+          "required": [
+            "type"
+          ]
         },
         {
           "description": "Center crop image to target dimensions\n\nUse for: Image classifiers (ResNet, EfficientNet) that need centered crops",
           "type": "object",
-          "required": [
-            "height",
-            "type",
-            "width"
-          ],
           "properties": {
             "height": {
               "description": "Target height",
               "type": "integer",
               "format": "uint",
-              "minimum": 0.0
+              "minimum": 0
             },
             "type": {
               "type": "string",
-              "enum": [
-                "CenterCrop"
-              ]
+              "const": "CenterCrop"
             },
             "width": {
               "description": "Target width",
               "type": "integer",
               "format": "uint",
-              "minimum": 0.0
+              "minimum": 0
             }
-          }
+          },
+          "required": [
+            "type",
+            "width",
+            "height"
+          ]
         },
         {
           "description": "Convert audio bytes to PCM samples\n\nUse for: Audio models that need raw PCM input",
           "type": "object",
-          "required": [
-            "channels",
-            "sample_rate",
-            "type"
-          ],
           "properties": {
             "channels": {
               "description": "Number of channels (1 = mono, 2 = stereo)",
               "type": "integer",
               "format": "uint",
-              "minimum": 0.0
+              "minimum": 0
             },
             "sample_rate": {
               "description": "Target sample rate (Hz)",
               "type": "integer",
               "format": "uint32",
-              "minimum": 0.0
+              "minimum": 0
             },
             "type": {
               "type": "string",
-              "enum": [
-                "AudioDecode"
-              ]
+              "const": "AudioDecode"
             }
-          }
+          },
+          "required": [
+            "type",
+            "sample_rate",
+            "channels"
+          ]
+        },
+        {
+          "description": "Decode an image envelope into a float tensor in [0, 1].\n\nUse for: Image classifiers and vision-language models that need\nencoded PNG/JPEG/WebP bytes converted before resize/normalize steps.",
+          "type": "object",
+          "properties": {
+            "channels": {
+              "description": "Output channel count. Supported: 1 (grayscale) or 3 (RGB).",
+              "type": "integer",
+              "format": "uint",
+              "default": 3,
+              "minimum": 0
+            },
+            "layout": {
+              "description": "Output tensor layout.",
+              "$ref": "#/$defs/ImageTensorLayout",
+              "default": "Nchw"
+            },
+            "type": {
+              "type": "string",
+              "const": "ImageDecode"
+            }
+          },
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "description": "Ingress an image envelope into a float tensor in [0, 1].\n\nUse for: image classifiers and vision-language models that accept either\nencoded PNG/JPEG/WebP bytes or raw camera/canvas frames.",
+          "type": "object",
+          "properties": {
+            "channels": {
+              "description": "Output channel count. Supported: 1 (grayscale) or 3 (RGB).",
+              "type": "integer",
+              "format": "uint",
+              "default": 3,
+              "minimum": 0
+            },
+            "layout": {
+              "description": "Output tensor layout.",
+              "$ref": "#/$defs/ImageTensorLayout",
+              "default": "Nchw"
+            },
+            "type": {
+              "type": "string",
+              "const": "ImageIngress"
+            }
+          },
+          "required": [
+            "type"
+          ]
         },
         {
           "description": "Reshape tensor to target dimensions\n\nUse for: Converting flat embeddings to multi-dimensional tensors",
           "type": "object",
-          "required": [
-            "shape",
-            "type"
-          ],
           "properties": {
             "shape": {
               "description": "Target shape (e.g., [1, 1, 28, 28] for MNIST)",
@@ -1087,69 +1388,90 @@
               "items": {
                 "type": "integer",
                 "format": "uint",
-                "minimum": 0.0
+                "minimum": 0
               }
             },
             "type": {
               "type": "string",
-              "enum": [
-                "Reshape"
-              ]
+              "const": "Reshape"
             }
-          }
+          },
+          "required": [
+            "type",
+            "shape"
+          ]
+        },
+        {
+          "description": "Convert text to raw IPA phoneme strings without token-ID mapping\n\nUse for: LLM-based TTS models (NeuTTS) that inject phonemes into text prompts",
+          "type": "object",
+          "properties": {
+            "backend": {
+              "description": "Phonemization backend to use (default: MisakiDictionary)",
+              "$ref": "#/$defs/PhonemizerBackend",
+              "default": "MisakiDictionary"
+            },
+            "language": {
+              "description": "Language code (e.g., \"en-us\")",
+              "type": [
+                "string",
+                "null"
+              ],
+              "default": null
+            },
+            "type": {
+              "type": "string",
+              "const": "PhonemeRaw"
+            }
+          },
+          "required": [
+            "type"
+          ]
         },
         {
           "description": "Phonemize text to IPA symbols for TTS\n\nUse for: TTS models (KittenTTS, Piper, Kokoro) that require phoneme input",
           "type": "object",
-          "required": [
-            "tokens_file",
-            "type"
-          ],
           "properties": {
             "add_padding": {
               "description": "Whether to add padding tokens at start/end (default: true)",
-              "default": true,
-              "type": "boolean"
+              "type": "boolean",
+              "default": true
             },
             "backend": {
               "description": "Phonemization backend to use (default: MisakiDictionary)",
-              "default": "MisakiDictionary",
-              "allOf": [
-                {
-                  "$ref": "#/definitions/PhonemizerBackend"
-                }
-              ]
+              "$ref": "#/$defs/PhonemizerBackend",
+              "default": "MisakiDictionary"
             },
             "dict_file": {
-              "description": "Path to dictionary file (cmudict.dict for CMU, not needed for EspeakNG) If not specified, will try to load from default locations (CMU only)",
-              "default": null,
+              "description": "Path to dictionary file (cmudict.dict for CMU, not needed for EspeakNG)\nIf not specified, will try to load from default locations (CMU only)",
               "type": [
                 "string",
                 "null"
-              ]
+              ],
+              "default": null
             },
             "language": {
-              "description": "Language code for espeak-ng (e.g., \"en-us\", \"en-gb\") Only used when backend is EspeakNG",
-              "default": null,
+              "description": "Language code for espeak-ng (e.g., \"en-us\", \"en-gb\")\nOnly used when backend is EspeakNG",
               "type": [
                 "string",
                 "null"
-              ]
+              ],
+              "default": null
             },
             "normalize_text": {
-              "description": "Whether to normalize text before phonemization (default: false) Applies text cleanup (quotes, abbreviations, etc.) before phonemization",
-              "default": false,
-              "type": "boolean"
+              "description": "Whether to normalize text before phonemization (default: false)\nApplies text cleanup (quotes, abbreviations, etc.) before phonemization",
+              "type": "boolean",
+              "default": false
             },
             "silence_tokens": {
-              "description": "Number of silence tokens to prepend before speech onset (default: None/0). Helps smooth plosive-initial words (e.g., \"b\", \"p\", \"t\" sounds). Uses token ID 30 (Kokoro silence token).",
-              "default": null,
+              "description": "Number of silence tokens to prepend before speech onset (default: None/0).\nHelps smooth plosive-initial words (e.g., \"b\", \"p\", \"t\" sounds).\nUses token ID 30 (Kokoro silence token).",
               "type": [
                 "integer",
                 "null"
               ],
               "format": "uint8",
-              "minimum": 0.0
+              "default": null,
+              "maximum": 255,
+              "minimum": 0
             },
             "tokens_file": {
               "description": "Path to tokens.txt or vocab file (maps IPA symbols to token IDs)",
@@ -1157,11 +1479,13 @@
             },
             "type": {
               "type": "string",
-              "enum": [
-                "Phonemize"
-              ]
+              "const": "Phonemize"
             }
-          }
+          },
+          "required": [
+            "type",
+            "tokens_file"
+          ]
         }
       ]
     },
@@ -1170,38 +1494,30 @@
       "oneOf": [
         {
           "type": "object",
-          "required": [
-            "type"
-          ],
           "properties": {
             "type": {
               "type": "string",
-              "enum": [
-                "Linear"
-              ]
+              "const": "Linear"
             }
-          }
+          },
+          "required": [
+            "type"
+          ]
         },
         {
           "type": "object",
-          "required": [
-            "type"
-          ],
           "properties": {
             "type": {
               "type": "string",
-              "enum": [
-                "Cosine"
-              ]
+              "const": "Cosine"
             }
-          }
+          },
+          "required": [
+            "type"
+          ]
         },
         {
           "type": "object",
-          "required": [
-            "timesteps",
-            "type"
-          ],
           "properties": {
             "timesteps": {
               "type": "array",
@@ -1212,11 +1528,13 @@
             },
             "type": {
               "type": "string",
-              "enum": [
-                "Custom"
-              ]
+              "const": "Custom"
             }
-          }
+          },
+          "required": [
+            "type",
+            "timesteps"
+          ]
         }
       ]
     },
@@ -1226,38 +1544,103 @@
         {
           "description": "Byte-Pair Encoding (GPT-2, GPT-3, Whisper)",
           "type": "string",
-          "enum": [
-            "BPE"
-          ]
+          "const": "BPE"
         },
         {
           "description": "WordPiece (BERT, DistilBERT)",
           "type": "string",
-          "enum": [
-            "WordPiece"
-          ]
+          "const": "WordPiece"
         },
         {
           "description": "SentencePiece (T5, ALBERT, XLNet)",
           "type": "string",
-          "enum": [
-            "SentencePiece"
-          ]
+          "const": "SentencePiece"
+        }
+      ]
+    },
+    "VisionEncoderConfig": {
+      "description": "Optional sibling vision encoder declaration in `model_metadata.json`.",
+      "type": "object",
+      "properties": {
+        "file": {
+          "description": "Sibling mmproj / vision encoder file, relative to bundle root.",
+          "type": "string"
+        },
+        "image_size": {
+          "description": "Square image size expected by the encoder.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "patch_size": {
+          "description": "Optional patch size for patch-count/capability planning.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint",
+          "minimum": 0
+        },
+        "preprocessing_preset": {
+          "description": "Named preprocessing preset for the encoder.",
+          "$ref": "#/$defs/VisionPreprocessingPreset"
+        }
+      },
+      "required": [
+        "file",
+        "preprocessing_preset",
+        "image_size"
+      ]
+    },
+    "VisionPreprocessingPreset": {
+      "description": "Named vision preprocessing preset used by sibling vision encoders.",
+      "oneOf": [
+        {
+          "description": "Gemma 3 / SigLIP-style image preprocessing.",
+          "type": "string",
+          "const": "gemma3_vision"
+        },
+        {
+          "description": "Gemma 4 image preprocessing.",
+          "type": "string",
+          "const": "gemma4_vision"
+        },
+        {
+          "description": "CLIP ViT-style preprocessing.",
+          "type": "string",
+          "const": "clip_vit"
+        },
+        {
+          "description": "SigLIP-style preprocessing.",
+          "type": "string",
+          "const": "siglip"
         }
       ]
     },
     "VoiceConfig": {
-      "description": "Complete voice configuration for a TTS model.\n\nThis struct describes all available voices for a TTS model, including how they are stored and which one is the default.\n\nExample: ```json { \"format\": \"embedded\", \"file\": \"voices.bin\", \"loader\": \"binary_f32_256\", \"default\": \"af_bella\", \"selection_strategy\": \"FixedIndex\", \"catalog\": [ {\"id\": \"af_bella\", \"name\": \"Bella\", \"gender\": \"female\", \"language\": \"en-US\", \"index\": 0} ] } ```",
+      "description": "Complete voice configuration for a TTS model.\n\nThis struct describes all available voices for a TTS model,\nincluding how they are stored and which one is the default.\n\nExample:\n```json\n{\n  \"format\": \"embedded\",\n  \"file\": \"voices.bin\",\n  \"loader\": \"binary_f32_256\",\n  \"default\": \"af_bella\",\n  \"selection_strategy\": \"FixedIndex\",\n  \"catalog\": [\n    {\"id\": \"af_bella\", \"name\": \"Bella\", \"gender\": \"female\", \"language\": \"en-US\", \"index\": 0}\n  ]\n}\n```",
       "type": "object",
+      "properties": {
+        "catalog": {
+          "description": "Voice catalog with metadata",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/VoiceInfo"
+          }
+        },
+        "default": {
+          "description": "Default voice ID (used when no voice specified)",
+          "type": "string"
+        },
+        "selection_strategy": {
+          "description": "How voice embeddings are selected at inference time.\n\nDefaults to `FixedIndex` if not specified (backwards compatible).",
+          "$ref": "#/$defs/VoiceSelectionStrategy"
+        }
+      },
       "oneOf": [
         {
-          "description": "Voices embedded in single file (Kokoro, KittenTTS)\n\nExample: ```json { \"format\": \"embedded\", \"file\": \"voices.bin\", \"loader\": \"binary_f32_256\" } ```",
+          "description": "Voices embedded in single file (Kokoro, KittenTTS)\n\nExample:\n```json\n{\n  \"format\": \"embedded\",\n  \"file\": \"voices.bin\",\n  \"loader\": \"binary_f32_256\"\n}\n```",
           "type": "object",
-          "required": [
-            "file",
-            "format",
-            "loader"
-          ],
           "properties": {
             "file": {
               "description": "Path to voice embedding file (relative to bundle root)",
@@ -1265,34 +1648,26 @@
             },
             "format": {
               "type": "string",
-              "enum": [
-                "embedded"
-              ]
+              "const": "embedded"
             },
             "loader": {
               "description": "Loader type for parsing the file",
-              "allOf": [
-                {
-                  "$ref": "#/definitions/VoiceLoader"
-                }
-              ]
+              "$ref": "#/$defs/VoiceLoader"
             }
-          }
-        },
-        {
-          "description": "Each voice is a separate model file (Piper)\n\nExample: ```json { \"format\": \"per_model\", \"voice_dir\": \"voices/\", \"pattern\": \"{voice_id}.onnx\" } ```",
-          "type": "object",
+          },
           "required": [
             "format",
-            "pattern",
-            "voice_dir"
-          ],
+            "file",
+            "loader"
+          ]
+        },
+        {
+          "description": "Each voice is a separate model file (Piper)\n\nExample:\n```json\n{\n  \"format\": \"per_model\",\n  \"voice_dir\": \"voices/\",\n  \"pattern\": \"{voice_id}.onnx\"\n}\n```",
+          "type": "object",
           "properties": {
             "format": {
               "type": "string",
-              "enum": [
-                "per_model"
-              ]
+              "const": "per_model"
             },
             "pattern": {
               "description": "File pattern (e.g., \"{voice_id}.onnx\")",
@@ -1302,17 +1677,49 @@
               "description": "Directory containing voice model files",
               "type": "string"
             }
-          }
+          },
+          "required": [
+            "format",
+            "voice_dir",
+            "pattern"
+          ]
         },
         {
-          "description": "Voice cloning from reference audio (Chatterbox, future)\n\nExample: ```json { \"format\": \"cloning\", \"encoder_model\": \"voice_encoder.onnx\", \"min_audio_seconds\": 3.0, \"max_audio_seconds\": 30.0 } ```",
+          "description": "Pre-encoded codec tokens for codec-based TTS (NeuTTS, MARS5)\n\nExample:\n```json\n{\n  \"format\": \"precomputed_codes\",\n  \"codes_dir\": \"voices/\",\n  \"codes_pattern\": \"{voice_id}.bin\",\n  \"transcript_dir\": \"voices/\",\n  \"transcript_pattern\": \"{voice_id}.txt\"\n}\n```",
           "type": "object",
+          "properties": {
+            "codes_dir": {
+              "description": "Directory containing binary code files",
+              "type": "string"
+            },
+            "codes_pattern": {
+              "description": "File pattern (e.g., \"{voice_id}.bin\")",
+              "type": "string"
+            },
+            "format": {
+              "type": "string",
+              "const": "precomputed_codes"
+            },
+            "transcript_dir": {
+              "description": "Directory containing reference transcript files",
+              "type": "string"
+            },
+            "transcript_pattern": {
+              "description": "File pattern (e.g., \"{voice_id}.txt\")",
+              "type": "string"
+            }
+          },
           "required": [
-            "encoder_model",
             "format",
-            "max_audio_seconds",
-            "min_audio_seconds"
-          ],
+            "codes_dir",
+            "codes_pattern",
+            "transcript_dir",
+            "transcript_pattern"
+          ]
+        },
+        {
+          "description": "Voice cloning from reference audio (Chatterbox, future)\n\nExample:\n```json\n{\n  \"format\": \"cloning\",\n  \"encoder_model\": \"voice_encoder.onnx\",\n  \"min_audio_seconds\": 3.0,\n  \"max_audio_seconds\": 30.0\n}\n```",
+          "type": "object",
           "properties": {
             "encoder_model": {
               "description": "Voice encoder model file",
@@ -1320,9 +1727,7 @@
             },
             "format": {
               "type": "string",
-              "enum": [
-                "cloning"
-              ]
+              "const": "cloning"
             },
             "max_audio_seconds": {
               "description": "Maximum reference audio duration (seconds)",
@@ -1334,42 +1739,23 @@
               "type": "number",
               "format": "float"
             }
-          }
+          },
+          "required": [
+            "format",
+            "encoder_model",
+            "min_audio_seconds",
+            "max_audio_seconds"
+          ]
         }
       ],
       "required": [
-        "catalog",
-        "default"
-      ],
-      "properties": {
-        "catalog": {
-          "description": "Voice catalog with metadata",
-          "type": "array",
-          "items": {
-            "$ref": "#/definitions/VoiceInfo"
-          }
-        },
-        "default": {
-          "description": "Default voice ID (used when no voice specified)",
-          "type": "string"
-        },
-        "selection_strategy": {
-          "description": "How voice embeddings are selected at inference time.\n\nDefaults to `FixedIndex` if not specified (backwards compatible).",
-          "allOf": [
-            {
-              "$ref": "#/definitions/VoiceSelectionStrategy"
-            }
-          ]
-        }
-      }
+        "default",
+        "catalog"
+      ]
     },
     "VoiceInfo": {
       "description": "Voice catalog entry with rich metadata.\n\nEach voice in a TTS model has an entry describing its properties.",
       "type": "object",
-      "required": [
-        "id",
-        "name"
-      ],
       "properties": {
         "gender": {
           "description": "Gender: \"male\", \"female\", \"neutral\"",
@@ -1389,7 +1775,7 @@
             "null"
           ],
           "format": "uint",
-          "minimum": 0.0
+          "minimum": 0
         },
         "language": {
           "description": "BCP-47 language tag (e.g., \"en-US\", \"ja-JP\")",
@@ -1416,50 +1802,44 @@
             "null"
           ]
         }
-      }
+      },
+      "required": [
+        "id",
+        "name"
+      ]
     },
     "VoiceLoader": {
       "description": "Voice embedding loader type.\n\nSpecifies how to parse the voice embedding file.",
       "oneOf": [
         {
-          "description": "Binary f32 embeddings, 256 dimensions\n\nUsed by: KittenTTS v0.1, Kokoro Format: Contiguous f32 little-endian arrays, 1024 bytes per voice",
+          "description": "Binary f32 embeddings, 256 dimensions\n\nUsed by: KittenTTS v0.1, Kokoro\nFormat: Contiguous f32 little-endian arrays, 1024 bytes per voice",
           "type": "string",
-          "enum": [
-            "binary_f32_256"
-          ]
+          "const": "binary_f32_256"
         },
         {
-          "description": "NumPy .npz archive\n\nUsed by: KittenTTS v0.2 Format: ZIP archive with NumPy arrays",
+          "description": "NumPy .npz archive\n\nUsed by: KittenTTS v0.2\nFormat: ZIP archive with NumPy arrays",
           "type": "string",
-          "enum": [
-            "numpy_npz"
-          ]
+          "const": "numpy_npz"
         },
         {
           "description": "JSON with base64-encoded embeddings (future)",
           "type": "string",
-          "enum": [
-            "json_base64"
-          ]
+          "const": "json_base64"
         }
       ]
     },
     "VoiceSelectionStrategy": {
-      "description": "Strategy for selecting voice embeddings at inference time.\n\nDifferent TTS models use different voice selection mechanisms: - KittenTTS: Select by fixed catalog index - Kokoro: Select from voicepack by phoneme token count",
+      "description": "Strategy for selecting voice embeddings at inference time.\n\nDifferent TTS models use different voice selection mechanisms:\n- KittenTTS: Select by fixed catalog index\n- Kokoro: Select from voicepack by phoneme token count",
       "oneOf": [
         {
-          "description": "Select voice by catalog index (default).\n\nUsed by: KittenTTS and other models with simple voice catalogs. The voice embedding is loaded at the catalog entry's fixed index.",
+          "description": "Select voice by catalog index (default).\n\nUsed by: KittenTTS and other models with simple voice catalogs.\nThe voice embedding is loaded at the catalog entry's fixed index.",
           "type": "string",
-          "enum": [
-            "FixedIndex"
-          ]
+          "const": "FixedIndex"
         },
         {
-          "description": "Select voice embedding slice by phoneme token count.\n\nUsed by: Kokoro-style voicepacks (3D arrays, shape `[510, 1, 256]`). The style vector is indexed by: `pack[min(max(token_count - 2, 0), 509)]`.",
+          "description": "Select voice embedding slice by phoneme token count.\n\nUsed by: Kokoro-style voicepacks (3D arrays, shape `[510, 1, 256]`).\nThe style vector is indexed by: `pack[min(max(token_count - 2, 0), 509)]`.",
           "type": "string",
-          "enum": [
-            "TokenLength"
-          ]
+          "const": "TokenLength"
         }
       ]
     }

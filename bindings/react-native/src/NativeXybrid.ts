@@ -19,6 +19,12 @@ export interface Spec extends TurboModule {
 
   // -- Loaders (return opaque handle ID) --
   loadFromRegistry(modelId: string): Promise<string>;
+  // Serve from the cloud gateway while the registry weights download in the
+  // background, instead of blocking on the download. Resolves almost
+  // immediately; the model switches to on-device by itself once the download
+  // lands. Requires a resolvable API key and an uncached model, otherwise it
+  // behaves exactly like `loadFromRegistry`. LLM/chat models only.
+  loadFromRegistrySpeculative(modelId: string): Promise<string>;
   loadFromBundle(path: string): Promise<string>;
   loadFromDirectory(path: string): Promise<string>;
   loadFromHuggingface(repo: string): Promise<string>;
@@ -32,6 +38,17 @@ export interface Spec extends TurboModule {
   warmup(handle: string): Promise<void>;
   unload(handle: string): Promise<void>;
 
+  // -- Speculative cloud --
+  // `isCloudServing` predicts the next run; `InferenceResult.executionTarget`
+  // reports what a run that already happened actually did (they differ when a
+  // cloud leg fails and degrades to local mid-call). `downloadStatus` returns
+  // `{ state, progress }` — poll it for a progress bar. `awaitDownload` blocks
+  // natively until the download settles or the timeout elapses, so JS can
+  // await it once instead of running a timer.
+  isCloudServing(handle: string): Promise<boolean>;
+  downloadStatus(handle: string): Promise<Object>;
+  awaitDownload(handle: string, timeoutMs: number): Promise<Object>;
+
   // -- Inference --
   // `envelope` and `options` cross as Objects; the TS facade narrows to the
   // discriminated `Envelope` union and normalizes the second arg to a
@@ -39,6 +56,18 @@ export interface Spec extends TurboModule {
   // maxGraceTokens, correlationId }`). Native side validates `kind` and
   // rejects with an Error if it doesn't match a known variant.
   run(handle: string, envelope: Object, options: Object | null): Promise<Object>;
+
+  // -- Streaming (pull-based) --
+  // `streamStart` begins a run and returns an opaque stream-handle id. Pull
+  // events with `streamNext` until it resolves to `null` (exhausted). Each
+  // event Object is the discriminated `StreamEvent` union (narrowed in the TS
+  // facade by its `kind` field); mid-stream failures reject the `streamNext`
+  // promise with the same typed `xybrid_*` codes as `run`. Always
+  // `streamRelease` when stopping early — it aborts the underlying run, which
+  // otherwise keeps generating.
+  streamStart(handle: string, envelope: Object, options: Object | null): Promise<string>;
+  streamNext(streamHandle: string): Promise<Object | null>;
+  streamRelease(streamHandle: string): Promise<void>;
 
   // -- TTS introspection --
   voices(handle: string): Promise<Object[] | null>;
@@ -54,6 +83,21 @@ export interface Spec extends TurboModule {
   clearBatteryLevel(): Promise<void>;
   setThermalState(state: string): Promise<void>;
   clearThermalState(): Promise<void>;
+
+  // -- Utilities --
+  // Convert a JSON Schema (as a JSON string) into a GBNF grammar for
+  // `GenerationConfig.grammar`. Rejects on invalid JSON or an unsupported
+  // schema construct.
+  jsonSchemaToGbnf(schemaJson: string): Promise<string>;
+
+  // -- Cloud gateway configuration --
+  // `setPlatformUrl` takes a bare base URL (the `/v1` suffix is internal) and
+  // is held in memory, not the environment. `setSpeculativeCloud` flips the
+  // global default; prefer `loadFromRegistrySpeculative` per model when the app
+  // also loads ASR/TTS models, which cannot be served from the cloud.
+  setPlatformUrl(url: string): Promise<void>;
+  setSpeculativeCloud(enabled: boolean): Promise<void>;
+  isSpeculativeCloudEnabled(): Promise<boolean>;
 }
 
 export default TurboModuleRegistry.getEnforcing<Spec>('RNXybrid');

@@ -1,0 +1,14 @@
+{
+  "model_id": "litertlm-contract-fixture",
+  "version": "1.0",
+  "execution_template": {
+    "type": "LiteRtLm",
+    "model_file": "model.litertlm",
+    "context_length": null
+  },
+  "preprocessing": [],
+  "postprocessing": [],
+  "files": ["model.litertlm"],
+  "description": null,
+  "metadata": {}
+}

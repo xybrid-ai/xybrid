@@ -6,12 +6,11 @@ to JavaScript through a TurboModule.
 
 ## Status
 
-**Pre-release.** The synchronous surface is at 1:1 parity with the Apple and
-Kotlin SDKs: loader → `run()` with full `RunOptions` (sampling config plus
-cloud fallback / abort-on-stress / correlation ID), `warmup`/`unload`,
-`GenerationConfigs` presets, voice introspection, and platform-state push.
-Streaming (ASR partials, LLM token streams) is the remaining gap — see
-"Open work" below.
+**Pre-release.** At 1:1 parity with the Apple and Kotlin SDKs: loader →
+`run()` with full `RunOptions` (sampling config plus cloud fallback /
+abort-on-stress / correlation ID), `warmup`/`unload`, `GenerationConfigs`
+presets, voice introspection, platform-state push, and **token streaming** via
+`model.runStreaming()` (pull-based, aborts on break/completion).
 
 ## Architecture
 
@@ -28,8 +27,9 @@ JS / TS
 The two platforms consume the bolt core differently:
 
 - **iOS** vendors the `XybridFFI.xcframework` + the bolt Swift wrapper sources,
-  staged into this package by `cargo xtask stage-react-native` (from the same
-  `build-xcframework` output the standalone Apple SDK uses).
+  staged into this package from the Bazel build (the same
+  `//bindings/apple:XybridFFI` target the standalone Apple SDK ships from —
+  see Local development below for the commands).
 - **Android** depends on the published `ai.xybrid:xybrid-kotlin` Maven AAR,
   which bundles `libxybrid-bolt.so` + the ONNX Runtime alongside the
   `ai.xybrid.*` Kotlin classes. Nothing is staged per-package.
@@ -68,7 +68,11 @@ binding + natives from Maven, so there is nothing to stage there.
 ```bash
 # 1. Stage the iOS native artifacts (XCFramework + Swift wrapper). macOS only.
 #    Android needs nothing — gradle resolves the Maven AAR.
-cargo xtask stage-react-native --release
+bazel build --config=ios //bindings/apple:XybridFFI
+rm -rf ios/Frameworks/XybridFFI.xcframework ios/XybridSwift
+mkdir -p ios/Frameworks ios/XybridSwift
+unzip -o -q ../../bazel-bin/bindings/apple/XybridFFI.xcframework.zip -d ios/Frameworks
+cp ../apple/Sources/Xybrid/{Xybrid.swift,xybrid_bolt.swift} ios/XybridSwift/
 
 # 2. Use a yarn link or relative path in a sample app
 cd ../my-sample-rn-app
@@ -120,6 +124,54 @@ console.log(result.text);
 await model.unload();
 ```
 
+### Structured output (JSON Schema / GBNF)
+
+Constrain a local LLM to schema-valid JSON by setting
+`generationConfig.grammar` — produce a grammar from a JSON Schema with
+`jsonSchemaToGbnf()` (the same native converter every other binding uses), or
+pass raw GBNF. Local llama backend only.
+
+```ts
+import { jsonSchemaToGbnf } from 'react-native-xybrid';
+
+const grammar = await jsonSchemaToGbnf({
+  type: 'object',
+  properties: { name: { type: 'string' }, total: { type: 'number' } },
+  required: ['name', 'total'],
+});
+const result = await model.run(
+  { kind: 'text', text: 'Extract: 2x espresso, 8.40 EUR total' },
+  { generationConfig: { grammar, maxTokens: 128 } },
+);
+JSON.parse(result.text!); // guaranteed schema-valid
+```
+
+### Streaming
+
+`model.runStreaming()` returns an async generator that yields each token as it
+is generated. It is pull-based: the underlying native run is **aborted
+automatically** when iteration ends — it completes, you `break`, or an error is
+thrown (each of these runs the generator's cleanup) — so stopping a generation
+early never keeps the device busy. Unmounting a component does **not** stop a
+running `for await` loop by itself: break out of the loop (or call
+`gen.return()`) on unmount. A generator that is simply abandoned mid-stream is
+never released until its model is. It takes the same `RunOptions` second
+argument as `run()`.
+
+```ts
+for await (const token of model.runStreaming(
+  { kind: 'text', text: 'Write a haiku about the sea.' },
+  { generationConfig: GenerationConfigs.creative() },
+)) {
+  setOutput((prev) => prev + token.token); // token.cumulativeText also available
+}
+```
+
+The final `InferenceResult` (latency, metrics) is the generator's return value;
+non-LLM models emit a single token carrying the full result, then complete.
+Errors raised mid-stream throw from the loop with the same typed `xybrid_*`
+codes as `run()`.
+
 ## Requirements
 
 - React Native ≥ 0.74 (TurboModules + codegen).
@@ -135,17 +187,15 @@ await model.unload();
 
 ## Open work for GA
 
-1. **Streaming.** ASR partial results and LLM token streams aren't surfaced to
-   JS yet — they need an `EventEmitter` (legacy) or a JSI `HostObject` wrapper
-   for low-jitter token delivery. This is the last synchronous-surface parity
-   gap with the native SDKs.
-2. **Binary payloads.** Audio bytes ride as base64 strings today. Move to
-   `ArrayBuffer` via JSI to drop the encode/decode hop on every chunk.
-3. **TypeScript codegen.** The `Spec` interface and the native shim mappers are
+1. **Binary payloads.** Audio bytes ride as base64 strings today. Move to
+   `ArrayBuffer` via JSI to drop the encode/decode hop on every chunk. This is
+   also where a *push* (`HostObject`) streaming path would land for high-rate
+   binary; the current token streaming is pull-based, which is right for text.
+2. **TypeScript codegen.** The `Spec` interface and the native shim mappers are
    hand-written, so RN is the one binding not generated from the bolt
    `#[data]`/facade source of truth — every new core field must be hand-wired
    here (as `RunOptions` / `warmup` / `unload` just were). Generate them from
    the same definitions the other bindings derive from to keep parity
    structural rather than a manual chase. See the JSI re-architecture plan.
-4. **End-to-end smoke test.** The `example/` Expo app and CI build/lint the
+3. **End-to-end smoke test.** The `example/` Expo app and CI build/lint the
    package, but CI does not yet run inference end-to-end on a device/emulator.

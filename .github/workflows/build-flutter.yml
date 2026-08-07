@@ -42,8 +42,14 @@ env:
 
 jobs:
   # Linux-only on push/PR. macOS + Windows Flutter binaries are built and
-  # validated in release.yml (precompile-flutter-* jobs) at release time.
+  # validated in release-prep.yml (precompile-flutter-* jobs) at release time.
   # Use workflow_dispatch + test-ci.yml for ad-hoc per-platform validation.
+  #
+  # This job is deliberately cargo, not Bazel: it covers the CONTRIBUTOR
+  # path. Inside the monorepo, `flutter run` → cargokit → `cargo build`
+  # (cargokit's from-source branch — the published package downloads
+  # precompiled binaries instead). Bazel is never in that loop, so pointing
+  # this job at Bazel would stop testing the path contributors actually use.
   build-flutter:
     name: Build Flutter (${{ matrix.platform }})
     strategy:
@@ -190,10 +196,14 @@ jobs:
       - name: Verify build output (Unix)
         if: runner.os != 'Windows'
         run: |
+          set -euo pipefail
           echo "Build output for ${{ matrix.platform }}:"
-          find bindings/flutter/rust/target -name "libxybrid_flutter_ffi*" -type f 2>/dev/null || \
-          find target -name "libxybrid_flutter_ffi*" -type f 2>/dev/null || \
-          echo "Note: Library may have been built to different location"
+          FOUND=$(find bindings/flutter/rust/target target -name "libxybrid_flutter_ffi*" -type f 2>/dev/null || true)
+          if [ -z "$FOUND" ]; then
+            echo "ERROR: no libxybrid_flutter_ffi* produced — the build claimed success but emitted nothing"
+            exit 1
+          fi
+          echo "$FOUND"
 
       - name: Verify build output (Windows)
         if: runner.os == 'Windows'
@@ -209,3 +219,125 @@ jobs:
             bindings/flutter/rust/target/**/release/*xybrid_flutter_ffi*
             target/**/release/*xybrid_flutter_ffi*
           if-no-files-found: error
+
+  # Builds a scratch app against the package as consumers receive it, rather
+  # than against the monorepo. The job above goes through `cargo xtask`, and
+  # the release jobs go through cargokit's `precompile-binaries`, so neither
+  # exercises `ArtifactProvider` — the code path that decides between a
+  # downloaded binary and a source build. That gap let xybrid-ai/xybrid#338
+  # ship: every consumer with a Rust toolchain installed was routed into a
+  # source build the published package cannot perform, and CI was green
+  # throughout.
+  #
+  # A Rust toolchain is installed here on purpose. It is the condition that
+  # triggered the bug.
+  packaged-consumer:
+    name: Build a consumer app against the packaged layout
+    runs-on: ubuntu-latest
+    env:
+      # Surfaces cargokit's decision (crate hash, precompiled on/off) in the
+      # build log, which the assertions below read.
+      CARGOKIT_VERBOSE: '1'
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
+        with:
+          toolchain: stable
+
+      - name: Install Flutter SDK
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Install Linux desktop build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev
+
+      # `git archive` gives us the committed tree only — no workspace root, no
+      # `crates/`, no build output — which is what pub.dev serves. The extra
+      # deletions mirror .pubignore entries that are gitignored anyway.
+      - name: Materialize the packaged layout outside the workspace
+        run: |
+          set -euo pipefail
+          PKG="$RUNNER_TEMP/pkg"
+          mkdir -p "$PKG"
+          git archive HEAD bindings/flutter | tar -x -C "$PKG"
+          mv "$PKG/bindings/flutter" "$PKG/xybrid_flutter"
+          rmdir "$PKG/bindings"
+          rm -rf "$PKG/xybrid_flutter/android/src/main/jniLibs" \
+                 "$PKG/xybrid_flutter/ios/Frameworks" \
+                 "$PKG/xybrid_flutter/rust/target"
+          if [ -e "$PKG/Cargo.toml" ] || [ -d "$PKG/crates" ]; then
+            echo "::error::packaged layout is not isolated from the workspace"
+            exit 1
+          fi
+          echo "PKG=$PKG" >> "$GITHUB_ENV"
+
+      - name: Create a consumer app depending on it
+        run: |
+          set -euo pipefail
+          APP="$RUNNER_TEMP/consumer"
+          flutter config --enable-linux-desktop
+          flutter create --platforms=linux --project-name xybrid_consumer "$APP"
+          python3 - "$APP/pubspec.yaml" "$PKG/xybrid_flutter" <<'PY'
+          import sys
+          pubspec, package = sys.argv[1], sys.argv[2]
+          anchor = "dependencies:\n  flutter:\n    sdk: flutter\n"
+          text = open(pubspec).read()
+          assert anchor in text, "flutter create emitted an unexpected pubspec"
+          open(pubspec, "w").write(
+              text.replace(anchor, f"{anchor}  xybrid_flutter:\n    path: {package}\n", 1)
+          )
+          PY
+          cd "$APP"
+          flutter pub get
+          echo "APP=$APP" >> "$GITHUB_ENV"
+
+      # A failure here is not necessarily a problem — see the assertions below —
+      # so record the status instead of letting the step abort on it.
+      - name: Build it
+        run: |
+          cd "$APP"
+          set +e
+          flutter build linux --debug 2>&1 | tee "$RUNNER_TEMP/build.log"
+          status=${PIPESTATUS[0]}
+          set -e
+          echo "BUILD_STATUS=$status" >> "$GITHUB_ENV"
+
+      - name: Assert the packaged layout never falls back to a source build
+        run: |
+          set -euo pipefail
+          LOG="$RUNNER_TEMP/build.log"
+
+          # The published package cannot compile its Rust — no workspace root
+          # to inherit `edition` from, and its xybrid-* path dependencies are
+          # not shipped. Reaching cargo at all is the #338 regression.
+          if grep -q 'Building xybrid_flutter for' "$LOG"; then
+            echo "::error::cargokit ran a source build from the packaged layout"
+            exit 1
+          fi
+
+          if [ "$BUILD_STATUS" -eq 0 ]; then
+            if ! find "$APP/build" -type d -name precompiled | grep -q .; then
+              echo "::error::build succeeded without downloading a precompiled binary"
+              exit 1
+            fi
+            echo "::notice::consumer app linked the downloaded precompiled binary"
+            exit 0
+          fi
+
+          # Expected when this commit changes bindings/flutter/rust: the crate
+          # hash is new, so no precompiled_<hash> release exists yet. The
+          # packaged layout still has to refuse the source fallback and say why.
+          if grep -q 'No native library available for' "$LOG"; then
+            echo "::notice::no precompiled release for this crate hash yet; the packaged layout correctly refused to fall back to a source build"
+            exit 0
+          fi
+
+          echo "::error::consumer app failed to build for an unexpected reason"
+          exit 1

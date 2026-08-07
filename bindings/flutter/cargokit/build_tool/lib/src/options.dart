@@ -13,7 +13,6 @@ import 'package:yaml/yaml.dart';
 
 import 'builder.dart';
 import 'environment.dart';
-import 'rustup.dart';
 
 final _log = Logger('options');
 
@@ -231,26 +230,20 @@ class CargokitCrateOptions {
 }
 
 class CargokitUserOptions {
-  // When Rustup is installed always build locally unless user opts into
-  // using precompiled binaries.
-  static bool defaultUsePrecompiledBinaries() {
-    return Rustup.executablePath() == null;
-  }
-
   CargokitUserOptions({
     required this.usePrecompiledBinaries,
     required this.verboseLogging,
   });
 
   CargokitUserOptions._()
-      : usePrecompiledBinaries = defaultUsePrecompiledBinaries(),
+      : usePrecompiledBinaries = null,
         verboseLogging = false;
 
   static CargokitUserOptions parse(YamlNode node) {
     if (node is! YamlMap) {
       throw SourceSpanException('Cargokit options must be a map', node.span);
     }
-    bool usePrecompiledBinaries = defaultUsePrecompiledBinaries();
+    bool? usePrecompiledBinaries;
     bool verboseLogging = false;
 
     for (final entry in node.nodes.entries) {
@@ -304,6 +297,10 @@ class CargokitUserOptions {
     return CargokitUserOptions._();
   }
 
-  final bool usePrecompiledBinaries;
+  /// `use_precompiled_binaries` as set in `cargokit_options.yaml`, or `null`
+  /// when the user did not express a preference. xybrid deviates from upstream
+  /// cargokit in resolving that default per crate location rather than globally
+  /// — see `ArtifactProvider.usePrecompiledBinaries`.
+  final bool? usePrecompiledBinaries;
   final bool verboseLogging;
 }

@@ -4,6 +4,8 @@ PODS:
   - audioplayers_darwin (0.0.1):
     - Flutter
     - FlutterMacOS
+  - battery_plus (1.0.0):
+    - Flutter
   - Flutter (1.0.0)
   - integration_test (0.0.1):
     - Flutter
@@ -17,12 +19,13 @@ PODS:
     - Flutter
   - record_ios (1.2.0):
     - Flutter
-  - xybrid_flutter (0.0.1):
+  - xybrid_flutter (0.1.0):
     - Flutter
 
 DEPENDENCIES:
   - audio_session (from `.symlinks/plugins/audio_session/ios`)
   - audioplayers_darwin (from `.symlinks/plugins/audioplayers_darwin/darwin`)
+  - battery_plus (from `.symlinks/plugins/battery_plus/ios`)
   - Flutter (from `Flutter`)
   - integration_test (from `.symlinks/plugins/integration_test/ios`)
   - just_audio (from `.symlinks/plugins/just_audio/darwin`)
@@ -36,6 +39,8 @@ EXTERNAL SOURCES:
     :path: ".symlinks/plugins/audio_session/ios"
   audioplayers_darwin:
     :path: ".symlinks/plugins/audioplayers_darwin/darwin"
+  battery_plus:
+    :path: ".symlinks/plugins/battery_plus/ios"
   Flutter:
     :path: Flutter
   integration_test:
@@ -53,14 +58,15 @@ EXTERNAL SOURCES:
 
 SPEC CHECKSUMS:
   audio_session: 19e9480dbdd4e5f6c4543826b2e8b0e4ab6145fe
-  audioplayers_darwin: 4027b33a8f471d996c13f71cb77f0b1583b5d923
+  audioplayers_darwin: f15e209a3e856d1a7edcf98dc029f484fead2242
+  battery_plus: 34f72fa2afeeea83bbae306c72a25828d3ec727a
   Flutter: cabc95a1d2626b1b06e7179b784ebcf0c0cde467
   integration_test: 252f60fa39af5e17c3aa9899d35d908a0721b573
   just_audio: a42c63806f16995daf5b219ae1d679deb76e6a79
   path_provider_foundation: 0b743cbb62d8e47eab856f09262bb8c1ddcfe6ba
   permission_handler_apple: 9878588469a2b0d0fc1e048d9f43605f92e6cec2
   record_ios: 26294aaa39e4bb7665b0fef78bdc23d723b432f2
-  xybrid_flutter: 6d496fba1d413a438d565ae8f7c152cd94ec1314
+  xybrid_flutter: 620b4479aee6d76d57da5a30ffc8cb18e42d4af0
 
 PODFILE CHECKSUM: 3c63482e143d1b91d2d2560aee9fb04ecc74ac7e
 

@@ -39,6 +39,52 @@ Crate-wide lint opt-outs go in `lib.rs` at the crate root (see e.g.
 `crates/xybrid-core/src/lib.rs`). Don't sprinkle `#[allow(...)]` at call sites —
 push it to crate level or fix the lint. Never bypass hooks (`--no-verify`).
 
+### Building native bindings / cross-compiled artifacts
+
+**Native artifacts are built by Bazel**, not `xtask`. Bazel brings its own
+hermetic toolchains (Rust, Android NDK, clang, Windows SDK), so these are the
+same targets the release ships from — do **not** hand-roll `cargo ndk` or raw
+`cargo build --target <triple>` to reproduce them:
+
+```bash
+bazel build -c opt //bindings/kotlin:xybrid_kotlin_aar        # Android AAR (jniLibs inside)
+bazel build --config=ios //bindings/apple:XybridFFI           # Apple XCFramework (macOS host + Xcode)
+bazel build --config=macos-metal //crates/xybrid-cli:xybrid   # CLI (see .bazelrc for other configs)
+bazel build --config=windows-msvc //...                       # MSVC-ABI Windows, cross-built
+```
+
+Use `bazelisk` (reads `.bazelversion`). `just bazel-build | bazel-analyze |
+bazel-test` are the shortcuts; each forwards extra Bazel flags. Full setup,
+including the Windows MSVC EULA note, is in `CONTRIBUTING.md`.
+
+`xtask` is **not** the native-binding entry point anymore. `build-android`,
+`build-xcframework`, `build-uniffi`, `stage-react-native`, `setup-targets`,
+`build-all`, and `package` were all removed once Bazel took over. What remains
+is Flutter, Unity staging, and dev-env chores:
+
+```bash
+cargo xtask build-flutter --platform <linux|macos|windows>  # Flutter native (deliberately cargo)
+cargo xtask build-ffi --target <triple> --release           # xybrid-bolt cdylib (Unity native)
+cargo xtask build-unity                                     # xybrid-bolt across Unity platforms
+cargo xtask deploy-unity-native --lib <path> --target <triple>  # stage a Bazel-built lib into Unity
+cargo xtask setup-test-env                                  # dev-env chore
+```
+
+Flutter native is cargo **on purpose**: `flutter run` inside the repo goes
+through cargokit → cargo, so the contributor path must match. `build-ffi` /
+`build-unity` build `xybrid-bolt` (the pre-bolt `xybrid-ffi` C ABI is retired);
+`deploy-unity-native` exists so a Bazel-built lib can be staged into
+`bindings/unity/Runtime/Plugins/` with the right per-platform `.meta`.
+
+After editing `bindings/flutter/rust`, regenerate the Dart glue with
+`flutter_rust_bridge_codegen generate` (CLI version must match the pinned
+`flutter_rust_bridge` in `bindings/flutter/rust/Cargo.toml`); `flutter run` then
+rebuilds the native lib via cargokit.
+
+Note: `tools/README.md` still documents the pre-Bazel xtask matrix and is stale.
+
+### Releases
+
 **Releases are cut by branch name, not by hand.** Push a `release/v<version>`
 branch and `.github/workflows/release-prep.yml` does the rest (manifest-version
 check, artifact builds, `Package.swift` checksum patch, draft GitHub Release, and
@@ -97,8 +143,7 @@ Cargo workspace, `resolver = "2"`, edition 2021, MSRV not pinned. Members:
 | `crates/xybrid-sdk`            | Public Rust SDK; model load/run/stream + platform init (auth, telemetry) | lib      |
 | `crates/xybrid-cli`            | `xybrid` binary                                            | bin      |
 | `crates/xybrid-ffi-facade`     | FFI-agnostic POD/Arc facade over the SDK (one canonical translation) | FFI |
-| `crates/xybrid-bolt`           | BoltFFI bindings: Swift / Kotlin / Java / C# / WASM + C header (Apple/Android SDKs) | FFI |
-| `crates/xybrid-ffi`            | C ABI for Unity / C / C++ (pre-bolt; Unity migration pending) | FFI    |
+| `crates/xybrid-bolt`           | BoltFFI bindings: Swift / Kotlin / Java / C# (Unity) / WASM + C header — the sole native binding crate | FFI |
 | `bindings/flutter/rust`        | flutter_rust_bridge wrapper for Dart                       | FFI      |
 | `macros`                       | proc-macros (`xybrid-macros`); syn/quote only              | proc     |
 | `xtask`                        | build / codegen automation                                 | tool     |
@@ -121,8 +166,7 @@ fallible functions. Refresh the native lib with
 ```
 xybrid-cli  ──────────────────────► xybrid-sdk ─► xybrid-core
 xybrid-bolt ──► xybrid-ffi-facade ─► xybrid-sdk ─► xybrid-core
-xybrid-ffi  ─┐
-flutter rust─┴────────────────────► xybrid-sdk ─► xybrid-core
+flutter rust──► xybrid-ffi-facade ─► xybrid-sdk ─► xybrid-core
 xtask ────────────────────────────► xybrid-core
 integration-tests ────────────────► xybrid-core
 ```
@@ -157,12 +201,6 @@ Sub-error enums (`InferenceError`, `PipelineError`, `AdapterError`, …) live
 next to the modules that raise them and convert into the canonical type via
 `#[from]` / `impl From`. Follow that pattern for new modules — don't invent
 parallel top-level error types.
-
-`xybrid-ffi` is **different**: it's a C-ABI crate and uses opaque handles
-plus error strings/codes carried in result structs (see
-`crates/xybrid-ffi/src/lib.rs`). Don't bolt a public `thiserror` enum onto
-it — match the existing C-ABI pattern when adding new endpoints, and only
-surface error info through the documented handle/result conventions.
 
 Binaries (`xybrid-cli`, `xtask`) use **`anyhow`** with `.context(...)` at the
 boundaries where errors get printed.
@@ -386,7 +424,7 @@ rules are the ones you'll consult most often in this repo.**
 - **`M-MODULE-DOCS`** — every public module needs `//!` docs covering contents, when to use, examples, side effects.
 
 ### FFI
-- **`M-ISOLATE-DLL-STATE`** — only portable (`#[repr(C)]`, no statics/TypeId/non-portable refs) data crosses DLL boundaries. Critical for `xybrid-ffi`.
+- **`M-ISOLATE-DLL-STATE`** — only portable (`#[repr(C)]`, no statics/TypeId/non-portable refs) data crosses DLL boundaries. Critical for `xybrid-bolt` (the cdylib crossing DLL boundaries).
 
 ### Performance
 - `M-HOTPATH` — identify hot paths early, bench with criterion, profile (Intel VTune / Superluminal). Enable `debug = 1` in `[profile.bench]`.
@@ -574,5 +612,5 @@ opt-level = 3  # optimize deps in dev builds
 ```
 
 Cross-check against xybrid's actual `Cargo.toml` before changing — some of
-these (notably `panic = "abort"`) interact with FFI/UniFFI in ways the
+these (notably `panic = "abort"`) interact with the FFI boundary in ways the
 project may have decided against.

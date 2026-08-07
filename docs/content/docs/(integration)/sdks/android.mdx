@@ -3,7 +3,7 @@ title: Android
 description: Native Android SDK for on-device ML inference
 ---
 
-The Android SDK provides native Kotlin bindings to the Xybrid runtime via UniFFI, enabling on-device ML inference in Android applications.
+The Android SDK provides native Kotlin bindings to the Xybrid runtime via BoltFFI, enabling on-device ML inference in Android applications.
 
 ## Installation
 
@@ -11,7 +11,7 @@ Add the Xybrid SDK from Maven Central:
 
 ```kotlin title="build.gradle.kts"
 dependencies {
-    implementation("ai.xybrid:xybrid-kotlin:0.3.0")
+    implementation("ai.xybrid:xybrid-kotlin:0.4.1")
 }
 ```
 
@@ -29,12 +29,11 @@ class MyApplication : Application() {
     }
 }
 
-// Load a model from the registry
-val loader = XybridModelLoader.fromRegistry("kokoro-82m")
-val model = loader.load()
+// Describe, then explicitly load a model from the registry
+val model = Xybrid.model("kokoro-82m").load()
 
 // Run inference
-val result = model.run(Envelope.text("Hello, world!"))
+val result = model.runAsync(Envelope.text("Hello, world!"))
 
 if (result.success) {
     println("Output: ${result.text}")
@@ -61,16 +60,21 @@ Without a key, telemetry is disabled and the first inference logs a one-shot hin
 ### From Registry
 
 ```kotlin
-val loader = XybridModelLoader.fromRegistry("whisper-tiny")
-val model = loader.load()
+val model = Xybrid.model("whisper-tiny").load()
 ```
 
 ### From Local Bundle
 
 ```kotlin
-val loader = XybridModelLoader.fromBundle("/path/to/model.xyb")
-val model = loader.load()
+val model = Xybrid.model(ModelSource.bundle("/path/to/model.xyb")).load()
 ```
+
+`Xybrid.model(...)` creates a cheap, unloaded reference. Use
+`ModelSource.directory(path)` and `ModelSource.huggingFace("org/repo")` for an
+unpacked directory and Hugging Face respectively. Suspending `load()` is the
+explicit boundary that may resolve metadata, download artifacts, access disk,
+and initialize the runtime. Use `loadBlocking()` only from Java or an existing
+worker thread.
 
 ---
 
@@ -153,8 +157,8 @@ The SDK uses sealed exception classes for type-safe error handling:
 
 ```kotlin
 try {
-    val model = XybridModelLoader.fromRegistry("kokoro-82m").load()
-    val result = model.run(envelope)
+    val model = Xybrid.model("kokoro-82m").load()
+    val result = model.runAsync(envelope)
 } catch (e: XybridException.ModelNotFound) {
     println("Model not found: ${e.modelId}")
 } catch (e: XybridException.InferenceFailed) {

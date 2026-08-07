@@ -2,13 +2,82 @@
 # name `xybrid` per the resolved DEP_DATA). Deps = core + sdk + clap/console/etc,
 # all auto-resolved. Compiles once the xybrid-core ort ceiling is addressed.
 load("@rules_rs//rs:rust_binary.bzl", "rust_binary")
+load("@rules_rs//rs:rust_test.bzl", "rust_test")
 load("@crates//:defs.bzl", "all_crate_deps")
 
+# crate_features mirrors the LLM half of cargo's `platform-desktop`
+# (= ort-download + llm-llamacpp-vision + huggingface), which is what the shipped
+# cargo CLI is built with. Only two of those names are gated in this crate's own
+# source — llm-llamacpp and llm-mistral, 7 sites each in commands/repl.rs — the
+# rest are pure passthroughs to xybrid-sdk. Bazel does not propagate features to
+# dependencies (core/sdk set their own), so this list exists purely to open this
+# crate's cfgs.
+#
+# Without it the shipped binary took the `#[cfg(not(any(feature =
+# "llm-mistral", feature = "llm-llamacpp")))]` arms: `repl --stream` answered
+# "Streaming requested but LLM features not enabled" and refused to stream, while
+# the cargo-built CLI streams. The linux CLI smoke did not catch it because the
+# mtmd/huggingface symbols it greps for come from the dependency crates, not
+# from these cfgs.
 rust_binary(
     name = "xybrid",
     srcs = glob(["src/**/*.rs"]),
     edition = "2021",
-    crate_features = ["default"],
+    # Listed flat, not as the preset: Bazel does not expand transitive features
+    # the way Cargo does, so "llm-llamacpp-vision" alone would NOT imply
+    # "llm-llamacpp" and the cfgs would stay closed (verified against the built
+    # binary's strings). Same rule the core/sdk targets follow.
+    crate_features = [
+        "default",
+        "llm-llamacpp",
+        "llm-llamacpp-vision",
+    ],
     deps = all_crate_deps(normal = True),
     visibility = ["//visibility:public"],
 )
+
+# Integration tests. Every one of these spawns the built CLI, locating it through
+# `env!("CARGO_BIN_EXE_xybrid")`.
+#
+# That variable is not something we set by hand: rules_rust populates
+# CARGO_BIN_EXE_<name> for any `bin` crate listed in a target's `data`
+# (rust/private/rustc.bzl — "Make bin crate data deps available to tests"), using
+# the binary's runfiles-relative short_path. So `:xybrid` belongs in data, not
+# deps, and the binary is staged into the test's runfiles at the same path the
+# compile-time variable records.
+_CLI_INTEGRATION_TESTS = {
+    "init_json_test": [
+        "@crates//:serde_json",
+        "@crates//:tempfile",
+    ],
+    "reasoning_budget_cli_test": [
+        "//crates/xybrid-core:xybrid-core",
+        "@crates//:tempfile",
+    ],
+    "telemetry_status_test": [],
+    "vlm_cli_test": [
+        "//crates/xybrid-core:xybrid-core",
+        "@crates//:image",
+        "@crates//:serde_json",
+        "@crates//:tempfile",
+    ],
+}
+
+# Two of the four open with `#![cfg(feature = "llm-llamacpp")]`; without the
+# feature they compile to EMPTY binaries that still report success.
+_CLI_TEST_FEATURES = {
+    "reasoning_budget_cli_test": ["llm-llamacpp"],
+    "vlm_cli_test": ["llm-llamacpp"],
+}
+
+[
+    rust_test(
+        name = name,
+        srcs = ["tests/{}.rs".format(name)],
+        crate_features = _CLI_TEST_FEATURES.get(name, []),
+        data = [":xybrid"],
+        edition = "2021",
+        deps = deps,
+    )
+    for name, deps in _CLI_INTEGRATION_TESTS.items()
+]

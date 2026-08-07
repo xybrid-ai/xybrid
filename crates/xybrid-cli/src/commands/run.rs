@@ -16,7 +16,7 @@ use xybrid_core::target::{Platform, TargetResolver};
 use xybrid_core::template_executor::TemplateExecutor;
 use xybrid_sdk::registry_client::RegistryClient;
 
-use super::utils::{display_stage_name, format_size, save_wav_file};
+use super::utils::{display_stage_name, format_size, maybe_warn_thinking_budget, save_wav_file};
 use crate::ui;
 
 /// Run a pipeline from a configuration file.
@@ -32,6 +32,7 @@ pub(crate) fn run_pipeline(
     target: Option<&str>,
     trace_enabled: bool,
     show_reasoning: bool,
+    max_tokens: Option<usize>,
     trace_export: Option<&PathBuf>,
 ) -> Result<()> {
     let _pipeline_span = if trace_enabled {
@@ -51,7 +52,7 @@ pub(crate) fn run_pipeline(
 
     let client = RegistryClient::from_env().context("Failed to initialize registry client")?;
     let stages = resolve_pipeline_stages(&config, &client)?;
-    let input = build_input_envelope(input_audio, input_text, input_images, voice)?;
+    let input = build_input_envelope(input_audio, input_text, input_images, voice, max_tokens)?;
 
     let metrics = DeviceMetrics::default();
     let availability_fn = build_availability_fn(&stages);
@@ -186,6 +187,7 @@ fn build_input_envelope(
     input_text: Option<&str>,
     input_images: &[PathBuf],
     voice: Option<&str>,
+    max_tokens: Option<usize>,
 ) -> Result<Envelope> {
     if !input_images.is_empty() {
         if input_audio.is_some() {
@@ -199,7 +201,13 @@ fn build_input_envelope(
             ));
         }
 
-        return build_multimodal_input_envelope(input_text, input_images);
+        let mut input = build_multimodal_input_envelope(input_text, input_images)?;
+        if let Some(max_tokens) = max_tokens {
+            input
+                .metadata
+                .insert("max_tokens".to_string(), max_tokens.to_string());
+        }
+        return Ok(input);
     }
 
     let mut input = if let Some(audio_path) = input_audio {
@@ -220,6 +228,12 @@ fn build_input_envelope(
         input
             .metadata
             .insert("voice_id".to_string(), voice_id.to_string());
+    }
+
+    if let Some(max_tokens) = max_tokens {
+        input
+            .metadata
+            .insert("max_tokens".to_string(), max_tokens.to_string());
     }
 
     Ok(input)
@@ -459,6 +473,7 @@ fn print_pipeline_results(
                         println!("    {}", reasoning);
                     }
                 }
+                maybe_warn_thinking_budget(&result.output);
             }
             EnvelopeKind::Audio(data) => {
                 ui::kv("  Size", &format!("{} bytes", data.len()));
@@ -560,6 +575,7 @@ pub(crate) fn run_bundle(
     dry_run: bool,
     trace_enabled: bool,
     show_reasoning: bool,
+    max_tokens: Option<usize>,
     trace_export: Option<&PathBuf>,
 ) -> Result<()> {
     if trace_enabled {
@@ -598,6 +614,7 @@ pub(crate) fn run_bundle(
         input_images,
         voice,
         dry_run,
+        max_tokens,
     )?;
 
     emit_pipeline_start_event(&metadata, &bundle_path.display().to_string());
@@ -678,6 +695,7 @@ pub(crate) fn run_model(
     dry_run: bool,
     trace_enabled: bool,
     show_reasoning: bool,
+    max_tokens: Option<usize>,
     trace_export: Option<&PathBuf>,
 ) -> Result<()> {
     if trace_enabled {
@@ -771,6 +789,7 @@ pub(crate) fn run_model(
         input_images,
         voice,
         dry_run,
+        max_tokens,
     )?;
 
     emit_pipeline_start_event(&metadata, "registry");
@@ -802,6 +821,75 @@ pub(crate) fn run_model(
     Ok(())
 }
 
+/// Run a one-shot registry-model inference with speculative cloud fallback:
+/// serve the answer from the cloud gateway instead of blocking on the model
+/// download. Streams tokens to stdout and optionally writes the text output.
+///
+/// One-shot, so the background download (started by `load()`) doesn't outlive
+/// the process — the point here is the immediate cloud answer; the REPL is
+/// where the local switchover matters.
+pub(crate) fn run_model_speculative(
+    model_id: &str,
+    input_audio: Option<&PathBuf>,
+    input_text: Option<&str>,
+    input_images: &[PathBuf],
+    voice: Option<&str>,
+    output_path: Option<&PathBuf>,
+    max_tokens: Option<usize>,
+) -> Result<()> {
+    use std::io::Write;
+
+    ui::header(&format!("Run · {} (speculative cloud)", model_id));
+
+    // Serve the registry model itself: the gateway routes its id to xycloud
+    // (the CPU cluster that runs the edge model) while it downloads locally.
+    let loader = xybrid_sdk::ModelLoader::from_registry(model_id).with_speculative_cloud(true);
+
+    if loader.will_speculate() {
+        ui::ok(&format!(
+            "Serving '{}' via xycloud while it downloads in the background",
+            model_id
+        ));
+    } else if xybrid_sdk::cache::CacheManager::new()
+        .map(|c| c.is_extracted(model_id))
+        .unwrap_or(false)
+    {
+        ui::hint("Model already cached locally — running on device (no speculation needed)");
+    } else {
+        ui::hint("Speculative cloud unavailable (no API key?) — downloading, then running locally");
+    }
+
+    let model = loader
+        .load()
+        .context("Failed to load speculative cloud model")?;
+
+    let envelope = build_input_envelope(input_audio, input_text, input_images, voice, max_tokens)?;
+
+    ui::section("Output");
+    let accumulated = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+    let acc = std::sync::Arc::clone(&accumulated);
+    let result = model.run_streaming(&envelope, None, move |token| {
+        print!("{}", token.token);
+        std::io::stdout().flush().ok();
+        if let Ok(mut text) = acc.lock() {
+            text.push_str(&token.token);
+        }
+        Ok(())
+    });
+    println!();
+
+    result.context("Speculative inference failed")?;
+
+    if let Some(path) = output_path {
+        let text = accumulated.lock().map(|t| t.clone()).unwrap_or_default();
+        fs::write(path, text)
+            .with_context(|| format!("Failed to write output to {}", path.display()))?;
+        ui::ok(&format!("Saved output to {}", path.display()));
+    }
+
+    Ok(())
+}
+
 /// Run inference from a local model directory.
 pub(crate) fn run_directory(
     dir: &Path,
@@ -813,6 +901,7 @@ pub(crate) fn run_directory(
     dry_run: bool,
     trace_enabled: bool,
     show_reasoning: bool,
+    max_tokens: Option<usize>,
     trace_export: Option<&PathBuf>,
 ) -> Result<()> {
     if trace_enabled {
@@ -826,8 +915,15 @@ pub(crate) fn run_directory(
         return Err(anyhow::anyhow!("Directory not found: {}", dir.display()));
     }
 
-    let (metadata, input) =
-        prepare_bundle_execution(dir, input_audio, input_text, input_images, voice, dry_run)?;
+    let (metadata, input) = prepare_bundle_execution(
+        dir,
+        input_audio,
+        input_text,
+        input_images,
+        voice,
+        dry_run,
+        max_tokens,
+    )?;
 
     emit_pipeline_start_event(&metadata, "directory");
 
@@ -868,6 +964,7 @@ pub(crate) fn run_huggingface(
     dry_run: bool,
     trace_enabled: bool,
     show_reasoning: bool,
+    max_tokens: Option<usize>,
     trace_export: Option<&PathBuf>,
 ) -> Result<()> {
     if trace_enabled {
@@ -887,7 +984,8 @@ pub(crate) fn run_huggingface(
     ui::ok(&format!("Model loaded: {}", model.model_id()));
     println!();
 
-    let sanitized = repo.replace('/', "--");
+    let cache_repo = xybrid_sdk::ModelSource::parse_huggingface(repo);
+    let sanitized = cache_repo.model_id().unwrap_or(repo).replace('/', "--");
     let cache_dir = dirs::home_dir()
         .ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))?
         .join(".xybrid")
@@ -902,6 +1000,7 @@ pub(crate) fn run_huggingface(
         input_images,
         voice,
         dry_run,
+        max_tokens,
     )?;
 
     emit_pipeline_start_event(&metadata, "huggingface");
@@ -943,6 +1042,7 @@ pub(crate) fn run_model_file(
     dry_run: bool,
     trace_enabled: bool,
     show_reasoning: bool,
+    max_tokens: Option<usize>,
     trace_export: Option<&PathBuf>,
 ) -> Result<()> {
     if trace_enabled {
@@ -996,7 +1096,7 @@ pub(crate) fn run_model_file(
     }
 
     let input = if input_audio.is_some() || input_text.is_some() || !input_images.is_empty() {
-        build_input_envelope(input_audio, input_text, input_images, voice)?
+        build_input_envelope(input_audio, input_text, input_images, voice, max_tokens)?
     } else {
         return Err(anyhow::anyhow!(
             "No input provided. Use --input-audio <file>, --input-text <text>, or --input-image <file>"
@@ -1054,6 +1154,7 @@ fn prepare_bundle_execution(
     input_images: &[PathBuf],
     voice: Option<&str>,
     dry_run: bool,
+    max_tokens: Option<usize>,
 ) -> Result<(ModelMetadata, Option<Envelope>)> {
     let metadata_path = extract_dir.join("model_metadata.json");
     let metadata_content =
@@ -1086,7 +1187,7 @@ fn prepare_bundle_execution(
         return Ok((metadata, None));
     }
 
-    let input = build_input_envelope(input_audio, input_text, input_images, voice)?;
+    let input = build_input_envelope(input_audio, input_text, input_images, voice, max_tokens)?;
     println!();
 
     Ok((metadata, Some(input)))
@@ -1155,6 +1256,7 @@ fn print_inference_results(
                 println!();
                 ui::ok(&format!("Output saved to {}", path.display()));
             }
+            maybe_warn_thinking_budget(output);
         }
         EnvelopeKind::Audio(data) => {
             ui::kv("Size", &format!("{} bytes", data.len()));
@@ -1325,7 +1427,8 @@ mod tests {
         let image_path = dir.path().join("fixture.png");
         fs::write(&image_path, png_image(2, 3)).unwrap();
 
-        let input = build_input_envelope(None, Some("describe this"), &[image_path], None).unwrap();
+        let input =
+            build_input_envelope(None, Some("describe this"), &[image_path], None, None).unwrap();
         let parts = input.as_multipart().expect("text+image input is multipart");
 
         assert_eq!(parts.len(), 2);
@@ -1346,8 +1449,8 @@ mod tests {
         let image_path = dir.path().join("corrupt.jpeg");
         fs::write(&image_path, [42_u8, 42, 42, 42]).unwrap();
 
-        let err =
-            build_input_envelope(None, Some("describe this"), &[image_path], None).unwrap_err();
+        let err = build_input_envelope(None, Some("describe this"), &[image_path], None, None)
+            .unwrap_err();
         let message = format!("{err:#}");
 
         assert!(message.contains("Invalid image input"));
@@ -1366,8 +1469,8 @@ mod tests {
         )
         .unwrap();
 
-        let err =
-            build_input_envelope(None, Some("describe this"), &[image_path], None).unwrap_err();
+        let err = build_input_envelope(None, Some("describe this"), &[image_path], None, None)
+            .unwrap_err();
         let message = format!("{err:#}");
 
         assert!(message.contains("Invalid image input"));

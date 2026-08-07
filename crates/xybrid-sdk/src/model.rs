@@ -16,6 +16,7 @@ use crate::source::{detect_platform, ModelSource};
 use crate::stream::XybridStream;
 use std::path::PathBuf;
 use std::pin::Pin;
+use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
 use std::time::{Duration, Instant};
 use tempfile::TempDir;
@@ -31,6 +32,7 @@ use xybrid_core::orchestrator::authority::{
 };
 use xybrid_core::orchestrator::routing_engine::LocalReliabilityHint;
 use xybrid_core::runtime_adapter::types::GenerationConfig;
+use xybrid_core::runtime_adapter::{CloudRuntimeAdapter, CloudStreaming, RuntimeAdapter};
 use xybrid_core::streaming::{StreamConfig as CoreStreamConfig, VadStreamConfig as CoreVadConfig};
 
 /// A token generated during streaming inference.
@@ -558,19 +560,28 @@ where
             on_seam(seam);
 
             // FR-6: reuse the original prompt; no partial-token reuse.
-            let cloud_envelope = envelope.clone();
+            let mut cloud_envelope = envelope.clone();
+            // Default the cloud-leg routing to the registry model when the caller
+            // didn't pick an explicit hosted override: the platform gateway routes
+            // an id it doesn't recognise as a hosted provider's model through to
+            // xycloud (the CPU cluster that runs the same edge LLM), so the
+            // fallback serves the *same* model rather than erroring or silently
+            // defaulting to `gpt-4o-mini`. `provider` is a benign validation label
+            // — the gateway dispatches on `model` alone.
+            cloud_envelope
+                .metadata
+                .entry("model".to_string())
+                .or_insert_with(|| model_id.to_string());
+            cloud_envelope
+                .metadata
+                .entry("provider".to_string())
+                .or_insert_with(|| "openai".to_string());
             let cloud_provider = cloud_envelope.metadata.get("provider").cloned();
-            // The cloud leg almost always runs a different model than the
-            // local leg (e.g. local `qwen2.5-0.5b-instruct` falling back to
-            // cloud `deepseek-chat`). The dashboard reads `model_id` off
-            // the published event, so passing the local `model_id` through
-            // to the cloud event makes the trace lie about which model
-            // actually produced the cloud tokens. Pull the cloud model from
-            // the envelope's `model` metadata (the same field the gateway
-            // dispatches on) and fall back to the local id only when the
-            // caller didn't set one — in that case the dispatch would have
-            // failed at the gateway anyway, so the local id is a fine
-            // last-resort label.
+            // The cloud leg runs a different model than the local leg only when the
+            // caller set an explicit override (e.g. local `qwen2.5-0.5b-instruct` →
+            // cloud `deepseek-chat`); otherwise it is the registry id defaulted
+            // above, routed to xycloud. Read it back off the envelope so the
+            // published event names the model that actually produced the tokens.
             let cloud_model_id = cloud_envelope
                 .metadata
                 .get("model")
@@ -737,7 +748,7 @@ where
                         signal_context,
                     );
                     let total_latency_ms = local_latency_ms.saturating_add(cloud_latency_ms);
-                    Ok(InferenceResult::new(
+                    Ok(InferenceResult::new_cloud(
                         cloud_output,
                         cloud_model_id,
                         total_latency_ms,
@@ -868,8 +879,35 @@ struct ModelHandle {
 /// GGUF quantization preference order for automatic selection.
 /// Q4_K_M is the default — best quality/size tradeoff for edge devices.
 const GGUF_PREFERENCE_ORDER: &[&str] = &[
-    "Q4_K_M", "Q4_K_S", "Q4_0", "Q5_K_M", "Q5_K_S", "Q6_K", "Q8_0", "F16", "BF16", "F32",
+    "Q4_K_M", "Q4_K_S", "Q4_0", "Q5_K_M", "Q5_K_S", "Q6_K", "Q8_0", "Q1_0", "F16", "BF16", "F32",
 ];
+
+const VISION_PROJECTOR_PREFERENCE_ORDER: &[&str] =
+    &["Q8_0", "Q6_K", "Q5_K_M", "Q4_K_M", "F16", "BF16"];
+
+fn is_gguf_companion(filename: &str) -> bool {
+    let filename = filename.to_ascii_lowercase();
+    filename.contains("mmproj") || filename.contains("drafter") || filename.contains("dspark")
+}
+
+fn is_gguf_vision_projector(filename: &str) -> bool {
+    filename.to_ascii_lowercase().contains("mmproj")
+}
+
+fn select_vision_projector<'a>(gguf_files: &[&'a str]) -> Option<&'a str> {
+    for preference in VISION_PROJECTOR_PREFERENCE_ORDER {
+        if let Some(projector) = gguf_files.iter().find(|filename| {
+            is_gguf_vision_projector(filename) && filename.to_uppercase().contains(preference)
+        }) {
+            return Some(projector);
+        }
+    }
+
+    gguf_files
+        .iter()
+        .find(|filename| is_gguf_vision_projector(filename))
+        .copied()
+}
 
 /// Select the best GGUF file from a list based on user preference or default ranking.
 ///
@@ -878,10 +916,9 @@ const GGUF_PREFERENCE_ORDER: &[&str] = &[
 fn select_gguf_variant(gguf_files: &[&str], variant: Option<&str>) -> SdkResult<String> {
     if let Some(v) = variant {
         let v_upper = v.to_uppercase();
-        // Find a file containing the variant string (case-insensitive)
         if let Some(found) = gguf_files
             .iter()
-            .find(|f| f.to_uppercase().contains(&v_upper))
+            .find(|f| !is_gguf_companion(f) && f.to_uppercase().contains(&v_upper))
         {
             return Ok(found.to_string());
         }
@@ -892,18 +929,82 @@ fn select_gguf_variant(gguf_files: &[&str], variant: Option<&str>) -> SdkResult<
         )));
     }
 
-    // Auto-select: try each preferred quantization in order
     for pref in GGUF_PREFERENCE_ORDER {
-        if let Some(found) = gguf_files.iter().find(|f| f.to_uppercase().contains(pref)) {
+        if let Some(found) = gguf_files
+            .iter()
+            .find(|f| !is_gguf_companion(f) && f.to_uppercase().contains(pref))
+        {
             return Ok(found.to_string());
         }
     }
 
-    // Fallback: pick the smallest file (likely the most quantized)
     Ok(gguf_files
-        .first()
+        .iter()
+        .find(|file| !is_gguf_companion(file))
         .ok_or_else(|| SdkError::load("No GGUF files found"))?
         .to_string())
+}
+
+fn select_huggingface_files_to_download<'a>(
+    repo: &str,
+    all_filenames: &[&'a str],
+    selected_gguf: Option<&str>,
+    selected_projector: Option<&str>,
+) -> SdkResult<Vec<&'a str>> {
+    let gguf_files: Vec<&str> = all_filenames
+        .iter()
+        .filter(|filename| filename.ends_with(".gguf") && !is_gguf_companion(filename))
+        .copied()
+        .collect();
+
+    let has_native_model = all_filenames.iter().any(|filename| {
+        filename.ends_with(".gguf")
+            || filename.ends_with(".onnx")
+            || filename.ends_with(".safetensors")
+    });
+    let has_browser_only_model = all_filenames
+        .iter()
+        .any(|filename| filename.ends_with(".tflite") || filename.ends_with(".litertlm"));
+
+    if has_browser_only_model && !has_native_model {
+        return Err(SdkError::load(format!(
+            "HuggingFace repo '{}' contains only .tflite and/or .litertlm model files. \
+             TFLite and LiteRT-LM models run in the browser SDK (@xybrid/web); no native \
+             TFLite/LiteRT-LM runtime is registered",
+            repo
+        )));
+    }
+
+    Ok(all_filenames
+        .iter()
+        .filter(|filename| {
+            if filename.starts_with('.') || filename.ends_with('/') {
+                return false;
+            }
+
+            if filename.ends_with(".tflite") || filename.ends_with(".litertlm") {
+                return false;
+            }
+
+            if filename.ends_with(".gguf") && is_gguf_companion(filename) {
+                return selected_projector == Some(**filename);
+            }
+
+            if let Some(selected) = selected_gguf {
+                if filename.ends_with(".gguf") && **filename != selected {
+                    return false;
+                }
+            }
+
+            let dominated_by_model = selected_gguf.is_some() || gguf_files.len() == 1;
+            if dominated_by_model {
+                ModelLoader::is_essential_file(filename)
+            } else {
+                true
+            }
+        })
+        .copied()
+        .collect())
 }
 
 #[derive(Debug, Clone)]
@@ -914,6 +1015,284 @@ pub struct ModelLoader {
     /// Per-load speculative-cloud override. `None` inherits the process-global
     /// default set via [`crate::set_speculative_cloud`].
     speculative_cloud: Option<bool>,
+}
+
+/// Build the cloud-bound envelope for serving a not-yet-local model from the
+/// gateway. Sets `model` to the registry id so the gateway routes it to xycloud
+/// (the CPU cluster that runs the edge model) — an id it doesn't recognise as a
+/// hosted provider's model falls through there. `provider` is a benign
+/// validation/trace label, never sent on the wire (the gateway routes on
+/// `model` alone). `backend`/`max_tokens`/`temperature` defer to caller values.
+fn build_speculative_cloud_envelope(
+    model_id: &str,
+    envelope: &Envelope,
+    config: Option<&GenerationConfig>,
+) -> Envelope {
+    let mut cloud = envelope.clone();
+    cloud
+        .metadata
+        .insert("provider".to_string(), "openai".to_string());
+    cloud
+        .metadata
+        .insert("model".to_string(), model_id.to_string());
+    cloud
+        .metadata
+        .entry("backend".to_string())
+        .or_insert_with(|| "gateway".to_string());
+    if let Some(cfg) = config {
+        cloud
+            .metadata
+            .entry("max_tokens".to_string())
+            .or_insert_with(|| cfg.max_tokens.to_string());
+        cloud
+            .metadata
+            .entry("temperature".to_string())
+            .or_insert_with(|| cfg.temperature.to_string());
+    }
+    cloud
+}
+
+/// Privacy gate for the speculative cloud leg: run the orchestrator policy over
+/// the cloud-bound envelope and fail closed unless it is explicitly allowed.
+///
+/// Mirrors the `Deny`/`Transform` handling in [`dispatch_after_local`] — the
+/// SDK has no redact seam yet, so `Transform` (which the orchestrator would
+/// satisfy by redacting) hard-fails rather than dispatching an un-redacted
+/// prompt to cloud.
+fn speculative_cloud_policy_gate(cloud_envelope: &Envelope) -> SdkResult<()> {
+    let model = cloud_envelope
+        .metadata
+        .get("model")
+        .cloned()
+        .unwrap_or_default();
+    let metrics = xybrid_core::context::DeviceMetrics::default().with_live_snapshot(
+        xybrid_core::device::ResourceMonitor::global()
+            .current_snapshot(FALLBACK_POLICY_RESOURCE_MAX_AGE),
+    );
+    let decision = fallback_authority().apply_policy(&PolicyRequest {
+        stage_id: model,
+        envelope: cloud_envelope.clone(),
+        metrics,
+    });
+    match decision.result {
+        PolicyOutcome::Allow => Ok(()),
+        PolicyOutcome::Deny { reason } => Err(SdkError::inference(format!(
+            "cloud_denied_by_policy: {reason}"
+        ))),
+        PolicyOutcome::Transform { transforms } => Err(SdkError::inference(format!(
+            "cloud_denied_by_policy: transforms_unsupported_in_speculation: {transforms:?}"
+        ))),
+    }
+}
+
+/// Emit a `ModelComplete` telemetry event for a speculative cloud serve.
+fn publish_speculative_cloud_event(model_id: &str, latency_ms: u32, streaming: bool) {
+    let event = crate::telemetry::TelemetryEvent {
+        event_type: "ModelComplete".to_string(),
+        stage_name: Some(model_id.to_string()),
+        target: Some("cloud".to_string()),
+        latency_ms: Some(latency_ms),
+        error: None,
+        data: Some(
+            serde_json::json!({
+                "model_id": model_id,
+                "target": "cloud",
+                "speculative": true,
+                "streaming": streaming,
+            })
+            .to_string(),
+        ),
+        timestamp_ms: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0),
+    };
+    crate::telemetry::publish_telemetry_event(event);
+}
+
+/// Ceiling for in-flight download progress, in basis points (99.99%).
+///
+/// `fetch_extracted` restarts at 0 for every artifact, so hitting 1.0 on the
+/// first one would announce a finished download while later artifacts are
+/// still transferring. 1.0 is reserved for [`DownloadState::Ready`].
+const MAX_IN_FLIGHT_PROGRESS_BP: u32 = 9_999;
+
+/// Completion signal for the background download started by
+/// [`ModelLoader::load_speculative`].
+///
+/// Lets a *failed* cloud leg degrade to the pre-speculation behaviour — block
+/// until the weights land, then run locally — instead of surfacing a gateway
+/// error for a model the caller only ever asked to run. `outcome` is `None`
+/// while the download is in flight, `Some(true)` once the real local handle is
+/// installed, and `Some(false)` if the download failed (cloud keeps serving).
+#[derive(Debug, Default)]
+pub(crate) struct SpeculativeDownload {
+    outcome: Mutex<Option<bool>>,
+    finished: std::sync::Condvar,
+    /// Download completion in basis points (0..=10_000). `f32` has no atomic,
+    /// and a lock here would sit on the download's hot path.
+    progress_bp: std::sync::atomic::AtomicU32,
+}
+
+/// Lifecycle of the background download behind a speculative model.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DownloadState {
+    /// Weights still downloading; runs are served from the cloud.
+    Downloading,
+    /// Local handle installed; runs are on-device.
+    Ready,
+    /// Download failed — the cloud keeps serving, and `is_loaded()` will never
+    /// flip. Surfacing this is the only way a host can stop waiting.
+    Failed,
+}
+
+/// One consistent read of a speculative download's progress and state.
+///
+/// Taken as a snapshot so a polling host cannot observe a torn pair (for
+/// example `Ready` alongside a stale 0.34 progress).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DownloadStatus {
+    pub state: DownloadState,
+    /// 0.0..=1.0.
+    pub progress: f32,
+}
+
+impl SpeculativeDownload {
+    /// Record download progress (0.0..=1.0) from the fetch callback.
+    ///
+    /// `fetch_extracted` reports 0→1 *per artifact* — the main file, then each
+    /// extra (a VLM's projector, for example) — and never says how many are
+    /// coming. Two consequences are handled here:
+    ///
+    /// - monotonic (`fetch_max`), so a bar cannot snap backwards when the next
+    ///   artifact restarts at 0;
+    /// - capped just below 1.0, so finishing the *first* artifact cannot claim
+    ///   the whole download is done. Only the terminal `Ready` state reports
+    ///   1.0 (see [`Self::status`]).
+    ///
+    /// The result under-reports mid-download rather than lying about being
+    /// finished. True aggregation would need an artifact count the registry
+    /// client does not expose.
+    fn set_progress(&self, fraction: f32) {
+        let bp = (fraction.clamp(0.0, 1.0) * 10_000.0) as u32;
+        self.progress_bp
+            .fetch_max(bp.min(MAX_IN_FLIGHT_PROGRESS_BP), Ordering::Relaxed);
+    }
+
+    /// Snapshot progress + state together.
+    fn status(&self) -> DownloadStatus {
+        let outcome = *self.outcome.lock().unwrap_or_else(|e| e.into_inner());
+        let state = match outcome {
+            None => DownloadState::Downloading,
+            Some(true) => DownloadState::Ready,
+            Some(false) => DownloadState::Failed,
+        };
+        let progress = match state {
+            // A finished download is 1.0 even if the last callback never fired.
+            DownloadState::Ready => 1.0,
+            _ => self.progress_bp.load(Ordering::Relaxed) as f32 / 10_000.0,
+        };
+        DownloadStatus { state, progress }
+    }
+
+    /// Block until the download reaches a terminal state or `timeout` elapses.
+    fn await_terminal(&self, timeout: Duration) -> DownloadStatus {
+        let mut guard = self.outcome.lock().unwrap_or_else(|e| e.into_inner());
+        // `Instant + Duration` panics past the platform's representable range,
+        // and the timeout arrives as an unvalidated `u64` from the bindings (a
+        // negative host-side value wraps to ~u64::MAX through `c_uint64`). Fall
+        // back to waiting without a deadline rather than aborting the process.
+        let deadline = Instant::now().checked_add(timeout);
+        while guard.is_none() {
+            let remaining = match deadline {
+                Some(deadline) => deadline.saturating_duration_since(Instant::now()),
+                None => Duration::from_secs(3600),
+            };
+            if remaining.is_zero() {
+                break;
+            }
+            let (next, _) = self
+                .finished
+                .wait_timeout(guard, remaining)
+                .unwrap_or_else(|e| e.into_inner());
+            guard = next;
+        }
+        drop(guard);
+        self.status()
+    }
+}
+
+impl SpeculativeDownload {
+    /// Record the download outcome and wake every waiter.
+    fn finish(&self, installed_local: bool) {
+        let mut guard = self.outcome.lock().unwrap_or_else(|e| e.into_inner());
+        *guard = Some(installed_local);
+        drop(guard);
+        self.finished.notify_all();
+    }
+
+    /// Block until the background download finishes; `true` if it installed a
+    /// local handle.
+    ///
+    /// Deliberately unbounded: waiting exactly as long as the download takes is
+    /// what a non-speculative `load()` would have done anyway, so degrading
+    /// never blocks longer than not speculating in the first place.
+    fn wait_for_local(&self) -> bool {
+        let mut guard = self.outcome.lock().unwrap_or_else(|e| e.into_inner());
+        while guard.is_none() {
+            guard = self.finished.wait(guard).unwrap_or_else(|e| e.into_inner());
+        }
+        guard.unwrap_or(false)
+    }
+}
+
+fn cloud_serve_batch(
+    model_id: &str,
+    envelope: &Envelope,
+    config: Option<&GenerationConfig>,
+) -> SdkResult<InferenceResult> {
+    let start = Instant::now();
+    let cloud_envelope = build_speculative_cloud_envelope(model_id, envelope, config);
+    speculative_cloud_policy_gate(&cloud_envelope)?;
+    let output = CloudRuntimeAdapter::new()
+        .execute(&cloud_envelope)
+        .map_err(|e| sdk_execution_error("Speculative cloud execution failed", e))?;
+    let latency_ms = start.elapsed().as_millis() as u32;
+    publish_speculative_cloud_event(model_id, latency_ms, false);
+    Ok(InferenceResult::new_cloud(output, model_id, latency_ms))
+}
+
+/// Serve a streaming inference from the cloud gateway because the local model
+/// is not ready yet. Shared by the streaming entry points.
+/// `emitted` counts tokens actually forwarded to `on_token`. A caller degrading
+/// a failed cloud leg to local must not restart a stream the user has already
+/// seen output from, so it checks this before retrying.
+fn cloud_serve_streaming<F>(
+    model_id: &str,
+    envelope: &Envelope,
+    config: Option<&GenerationConfig>,
+    on_token: &mut F,
+    emitted: &std::sync::atomic::AtomicU32,
+) -> SdkResult<InferenceResult>
+where
+    F: FnMut(
+            xybrid_core::runtime_adapter::types::PartialToken,
+        ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>
+        + Send,
+{
+    let start = Instant::now();
+    let cloud_envelope = build_speculative_cloud_envelope(model_id, envelope, config);
+    speculative_cloud_policy_gate(&cloud_envelope)?;
+    let callback: xybrid_core::runtime_adapter::types::StreamingCallback<'_> = Box::new(|token| {
+        emitted.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        on_token(token)
+    });
+    let output = CloudRuntimeAdapter::new()
+        .execute_streaming(&cloud_envelope, callback)
+        .map_err(streaming_execution_error)?;
+    let latency_ms = start.elapsed().as_millis() as u32;
+    publish_speculative_cloud_event(model_id, latency_ms, true);
+    Ok(InferenceResult::new_cloud(output, model_id, latency_ms))
 }
 
 /// Whether a cloud gateway API key can be resolved right now.
@@ -1063,9 +1442,11 @@ impl ModelLoader {
     /// Create loader from a HuggingFace Hub repository.
     ///
     /// Downloads model files from the HuggingFace Hub and caches them locally.
-    /// Subsequent calls use the cached files. The repository must contain a
-    /// `model_metadata.json` for the model to be loadable (auto-generation
-    /// is planned for a future version).
+    /// Subsequent calls use the cached files. When the repository does not ship
+    /// a `model_metadata.json`, one is auto-generated from the model card and
+    /// native model files (.onnx, .gguf, .safetensors). Browser-only formats
+    /// (.tflite, .litertlm) are rejected before download — they run via the
+    /// `@xybrid/web` SDK.
     ///
     /// Requires the `huggingface` feature flag at load time.
     /// The constructor itself is always available, but `load()` will return
@@ -1310,6 +1691,13 @@ impl ModelLoader {
     where
         F: Fn(f32),
     {
+        // Speculative cloud: when enabled, a key is set, and the model isn't
+        // cached yet, serve from cloud while the weights download in the
+        // background instead of blocking the caller on the download.
+        if self.will_speculate() {
+            return Ok(self.load_speculative(id, platform));
+        }
+
         // Create registry client (uses default API or environment variable)
         let client = RegistryClient::from_env()?;
 
@@ -1318,6 +1706,112 @@ impl ModelLoader {
 
         // Load from extracted directory
         self.load_from_directory(&model_dir)
+    }
+
+    /// Build a cloud-backed [`XybridModel`] that serves from the gateway while
+    /// the registry weights download in a background thread, then transparently
+    /// switches to local once the real handle is swapped in.
+    ///
+    /// The returned model holds a placeholder handle (`loaded == false`); every
+    /// run routes to cloud via [`XybridModel::speculative`] until the download
+    /// thread installs the extracted local handle. Never blocks the caller.
+    fn load_speculative(&self, id: &str, platform: Option<&str>) -> XybridModel {
+        // The future extraction directory for the placeholder executor. The
+        // executor is lazy (no weights touched until `execute`), so pointing it
+        // at a not-yet-populated path is fine — it is never executed while the
+        // handle stays `loaded == false`.
+        let model_dir = crate::cache::CacheManager::new()
+            .map(|cache| cache.extraction_dir(id))
+            .unwrap_or_else(|_| PathBuf::from(id));
+
+        // Speculation is LLM/chat-only and the gateway streams tokens, so mark
+        // the placeholder as GGUF. Otherwise `is_llm()` / `supports_token_streaming()`
+        // read this metadata and report `false`, dropping the REPL to batch mode
+        // until the real handle swaps in. The background download replaces the
+        // whole handle (with real metadata) once it completes.
+        let mut metadata = ModelMetadata::onnx(id, "", "");
+        metadata.execution_template = ExecutionTemplate::Gguf {
+            model_file: String::new(),
+            chat_template: None,
+            context_length: 2048,
+            generation_params: None,
+        };
+        let placeholder = ModelHandle {
+            // Lazy executor over the not-yet-populated extraction dir; never run
+            // while `loaded == false` (runs route to cloud).
+            executor: TemplateExecutor::with_base_path(&model_dir.to_string_lossy()),
+            metadata,
+            model_dir,
+            loaded: false,
+        };
+        let handle = Arc::new(RwLock::new(placeholder));
+
+        // Background download + extract, then swap in the real local handle.
+        // On failure the placeholder stays put and cloud keeps serving.
+        let bg_handle = Arc::clone(&handle);
+        let download = Arc::new(SpeculativeDownload::default());
+        let bg_download = Arc::clone(&download);
+        let id_owned = id.to_string();
+        let platform_owned = platform.map(String::from);
+        let thread_name = format!("speculative-download-{id_owned}");
+        if let Err(err) = std::thread::Builder::new()
+            .name(thread_name)
+            .spawn(move || {
+                let built = RegistryClient::from_env().and_then(|client| {
+                    let dir = client.fetch_extracted(
+                        &id_owned,
+                        platform_owned.as_deref(),
+                        // Feed the poll-able progress cell; hosts read it via
+                        // `XybridModel::download_status`.
+                        |fraction| bg_download.set_progress(fraction),
+                    )?;
+                    Self::create_model_handle(&dir)
+                });
+                match built {
+                    Ok(real) => {
+                        *bg_handle.write().unwrap_or_else(|e| e.into_inner()) = real;
+                        // Signal only after the handle is installed, so a waiter
+                        // woken by `true` always observes `loaded == true`.
+                        bg_download.finish(true);
+                    }
+                    Err(e) => {
+                        bg_download.finish(false);
+                        log::error!("speculative background download failed for '{id_owned}': {e}");
+                        crate::telemetry::publish_telemetry_event(
+                            crate::telemetry::TelemetryEvent {
+                                event_type: "SpeculativeDownloadFailed".to_string(),
+                                stage_name: Some(id_owned.clone()),
+                                target: Some("local".to_string()),
+                                latency_ms: None,
+                                error: Some(e.to_string()),
+                                data: None,
+                                timestamp_ms: std::time::SystemTime::now()
+                                    .duration_since(std::time::UNIX_EPOCH)
+                                    .map(|d| d.as_millis() as u64)
+                                    .unwrap_or(0),
+                            },
+                        );
+                    }
+                }
+            })
+        {
+            // No thread means no download will ever land: unblock any waiter
+            // rather than leaving a degrading run parked forever.
+            download.finish(false);
+            log::error!("failed to spawn speculative download thread for '{id}': {err}");
+        }
+
+        XybridModel {
+            handle,
+            model_id: id.to_string(),
+            version: String::new(),
+            // Speculation only serves the gateway's text/chat surface; the real
+            // output type is refreshed implicitly once the local handle lands.
+            output_type: OutputType::Text,
+            supports_streaming: true,
+            current_run: Arc::new(Mutex::new(None)),
+            speculative: Some(download),
+        }
     }
 
     /// Load from legacy registry (deprecated - use load_from_registry_api instead).
@@ -1386,6 +1880,7 @@ impl ModelLoader {
             output_type,
             supports_streaming,
             current_run: Arc::new(Mutex::new(None)),
+            speculative: None,
         })
     }
 
@@ -1455,56 +1950,48 @@ impl ModelLoader {
 
         // Classify files by type to enable smart filtering
         let all_filenames: Vec<&str> = siblings.iter().map(|s| s.rfilename.as_str()).collect();
-        let gguf_files: Vec<&str> = all_filenames
+        let all_gguf_files: Vec<&str> = all_filenames
             .iter()
             .filter(|f| f.ends_with(".gguf"))
             .copied()
             .collect();
+        let gguf_files: Vec<&str> = all_gguf_files
+            .iter()
+            .copied()
+            .filter(|filename| !is_gguf_companion(filename))
+            .collect();
 
-        // If multiple GGUF files exist, select the best one instead of downloading all
-        let selected_gguf = if gguf_files.len() > 1 {
-            Some(select_gguf_variant(&gguf_files, variant)?)
-        } else {
+        if !all_gguf_files.is_empty() && gguf_files.is_empty() {
+            return Err(SdkError::load(format!(
+                "HuggingFace repo '{}' contains GGUF companion files but no language model",
+                repo
+            )));
+        }
+
+        let selected_gguf = if gguf_files.is_empty() {
             None
+        } else {
+            Some(select_gguf_variant(&gguf_files, variant)?)
         };
+        let selected_projector = select_vision_projector(&all_gguf_files);
 
         if let Some(ref selected) = selected_gguf {
             log::info!(
                 target: "xybrid_sdk",
-                "Selected GGUF variant: {} (from {} available)",
+                "Selected GGUF variant: {} (from {} language weights)",
                 selected, gguf_files.len()
             );
         }
 
+        let files_to_download = select_huggingface_files_to_download(
+            repo,
+            &all_filenames,
+            selected_gguf.as_deref(),
+            selected_projector,
+        )?;
+
         // Create cache directory
         std::fs::create_dir_all(&cache_dir)?;
-
-        // Filter to only files we need
-        let files_to_download: Vec<&str> = all_filenames
-            .iter()
-            .filter(|filename| {
-                // Skip hidden files and directories
-                if filename.starts_with('.') || filename.ends_with('/') {
-                    return false;
-                }
-
-                // If we have a selected GGUF, skip other GGUF files
-                if let Some(ref selected) = selected_gguf {
-                    if filename.ends_with(".gguf") && **filename != *selected {
-                        return false;
-                    }
-                }
-
-                // Skip non-essential files (LICENSE, subdirectories like leap/)
-                let dominated_by_model = selected_gguf.is_some() || gguf_files.len() == 1;
-                if dominated_by_model {
-                    Self::is_essential_file(filename)
-                } else {
-                    true
-                }
-            })
-            .copied()
-            .collect();
 
         let total_files = files_to_download.len();
         for (i, filename) in files_to_download.iter().enumerate() {
@@ -1655,6 +2142,7 @@ impl ModelLoader {
             output_type,
             supports_streaming,
             current_run: Arc::new(Mutex::new(None)),
+            speculative: None,
         })
     }
 
@@ -1665,6 +2153,7 @@ impl ModelLoader {
             .map_err(|e| SdkError::load_src("Failed to read model_metadata.json", e))?;
         let metadata: ModelMetadata = serde_json::from_str(&metadata_str)
             .map_err(|e| SdkError::load_src("Failed to parse metadata", e))?;
+        Self::validate_native_execution_template(&metadata)?;
 
         // Create executor with base path
         let executor = TemplateExecutor::with_base_path(model_dir.to_str().unwrap_or("."));
@@ -1677,8 +2166,25 @@ impl ModelLoader {
         })
     }
 
+    fn validate_native_execution_template(metadata: &ModelMetadata) -> SdkResult<()> {
+        let browser_format = match &metadata.execution_template {
+            ExecutionTemplate::TfLite { .. } => "TFLite",
+            ExecutionTemplate::LiteRtLm { .. } => "LiteRT-LM",
+            _ => return Ok(()),
+        };
+
+        Err(SdkError::load(format!(
+            "Model '{}' uses the browser-only {} format. TFLite and LiteRT-LM models run in the \
+             browser SDK (@xybrid/web); no native TFLite/LiteRT-LM runtime is registered",
+            metadata.model_id, browser_format
+        )))
+    }
+
     fn is_llm_template(metadata: &ModelMetadata) -> bool {
-        matches!(metadata.execution_template, ExecutionTemplate::Gguf { .. })
+        matches!(
+            metadata.execution_template,
+            ExecutionTemplate::Gguf { .. } | ExecutionTemplate::VisionLanguage { .. }
+        )
     }
 
     fn check_streaming_support(metadata: &ModelMetadata) -> bool {
@@ -1797,6 +2303,15 @@ pub struct XybridModel {
     /// must see the previous concurrent run's token even though it ran on a
     /// different clone.
     current_run: Arc<Mutex<Option<CancellationToken>>>,
+    /// Speculative cloud backing. `Some` while this model was loaded under
+    /// speculative cloud fallback: until the background download installs a
+    /// `loaded` local handle, every run is routed to the gateway (which serves
+    /// the registry model via xycloud — see [`Self::cloud_serve`]). `None` for
+    /// ordinary local models. Carries the download's completion signal so a
+    /// failed cloud leg can degrade to waiting for local (see
+    /// [`Self::degrade_to_local`]); `Arc`-shared so every clone observes the
+    /// same download.
+    speculative: Option<Arc<SpeculativeDownload>>,
 }
 
 struct WarmupEventFields {
@@ -1855,6 +2370,132 @@ impl XybridModel {
         self.handle.read().map(|h| h.loaded).unwrap_or(false)
     }
 
+    /// Whether this run should be served speculatively from the cloud.
+    ///
+    /// `true` when this model was loaded under speculative cloud fallback *and*
+    /// the local handle isn't ready yet. Once the background download swaps in a
+    /// `loaded` handle this returns `false` and runs go local. Checked without
+    /// holding the handle write lock so the cloud round-trip never blocks a
+    /// concurrent local promotion.
+    fn cloud_serve(&self) -> bool {
+        self.speculative.is_some() && !self.is_loaded()
+    }
+
+    /// Whether runs are currently being answered by the cloud because the local
+    /// weights are not ready yet. `false` for ordinary local models.
+    ///
+    /// This is the *pre-run* prediction; [`InferenceResult::provenance`] is the
+    /// observed fact for a run that already happened. They differ when a cloud
+    /// leg fails and degrades to local mid-call.
+    pub fn is_cloud_serving(&self) -> bool {
+        self.cloud_serve()
+    }
+
+    /// Snapshot of the background download behind a speculative load.
+    ///
+    /// Returns `Ready` at 1.0 for an ordinary (already-local) model, so hosts
+    /// can render one code path regardless of how the model was loaded.
+    /// Poll this to drive a progress bar — there is deliberately no progress
+    /// *callback*, so nothing has to cross an FFI boundary as a closure.
+    pub fn download_status(&self) -> DownloadStatus {
+        match self.speculative.as_ref() {
+            Some(download) => download.status(),
+            None => DownloadStatus {
+                state: DownloadState::Ready,
+                progress: 1.0,
+            },
+        }
+    }
+
+    /// Block until the background download finishes or `timeout_ms` elapses,
+    /// then report the resulting status.
+    ///
+    /// Convenience over polling [`Self::download_status`] for hosts that just
+    /// want "tell me when it's on-device". Call it off the UI thread. Returns
+    /// immediately for a non-speculative model.
+    pub fn await_download(&self, timeout_ms: u64) -> DownloadStatus {
+        match self.speculative.as_ref() {
+            Some(download) => download.await_terminal(Duration::from_millis(timeout_ms)),
+            None => self.download_status(),
+        }
+    }
+
+    /// Block until the speculative download finishes, reporting whether a local
+    /// handle is now installed.
+    ///
+    /// Used to degrade a *failed* cloud leg to the pre-speculation behaviour
+    /// rather than surfacing a gateway error: speculation is an optimisation,
+    /// so it must never leave the caller worse off than not speculating.
+    /// Returns `false` for non-speculative models and for failed downloads.
+    fn degrade_to_local(&self) -> bool {
+        self.speculative
+            .as_ref()
+            .is_some_and(|download| download.wait_for_local())
+    }
+
+    /// Run the speculative cloud batch leg. `None` means the cloud leg failed
+    /// but the local handle has since landed — the caller should fall through
+    /// to its normal local path.
+    fn cloud_leg_batch(
+        &self,
+        envelope: &Envelope,
+        config: Option<&GenerationConfig>,
+    ) -> Option<SdkResult<InferenceResult>> {
+        match cloud_serve_batch(&self.model_id, envelope, config) {
+            Ok(result) => Some(Ok(result)),
+            Err(err) => self.after_failed_cloud_leg(err, 0),
+        }
+    }
+
+    /// Streaming counterpart of [`Self::cloud_leg_batch`].
+    fn cloud_leg_streaming<F>(
+        &self,
+        envelope: &Envelope,
+        config: Option<&GenerationConfig>,
+        on_token: &mut F,
+    ) -> Option<SdkResult<InferenceResult>>
+    where
+        F: FnMut(
+                xybrid_core::runtime_adapter::types::PartialToken,
+            ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>
+            + Send,
+    {
+        let emitted = std::sync::atomic::AtomicU32::new(0);
+        match cloud_serve_streaming(&self.model_id, envelope, config, on_token, &emitted) {
+            Ok(result) => Some(Ok(result)),
+            Err(err) => {
+                self.after_failed_cloud_leg(err, emitted.load(std::sync::atomic::Ordering::SeqCst))
+            }
+        }
+    }
+
+    /// Decide what a failed speculative cloud leg turns into: `None` to retry
+    /// locally, `Some(Err)` to surface the gateway failure.
+    ///
+    /// Speculation is an optimisation, so a gateway failure should not be worse
+    /// than never having speculated — wait for the download and run locally.
+    /// The exception is a stream that already emitted tokens: re-running would
+    /// duplicate output the caller has seen, so that failure stays terminal
+    /// (same "no partial-token reuse" rule the reactive fallback follows).
+    fn after_failed_cloud_leg(
+        &self,
+        err: SdkError,
+        emitted: u32,
+    ) -> Option<SdkResult<InferenceResult>> {
+        if emitted > 0 {
+            return Some(Err(err));
+        }
+        if self.degrade_to_local() {
+            log::warn!(
+                target: "xybrid_sdk",
+                "speculative cloud leg failed for '{}' ({err}); falling back to the local model",
+                self.model_id
+            );
+            return None;
+        }
+        Some(Err(err))
+    }
+
     /// Whether the model bundle declares local tool-calling support.
     ///
     /// Advisory tri-state from the bundle's optional `tool_calling` metadata
@@ -1870,13 +2511,33 @@ impl XybridModel {
     }
 
     /// Check if this model supports streaming.
+    ///
+    /// A speculative load caches an optimistic value (the placeholder handle
+    /// predates the real metadata), so once the background download installs
+    /// the local handle this reads the truth back off that metadata rather than
+    /// the stale cached field.
     pub fn supports_streaming(&self) -> bool {
-        self.supports_streaming
+        self.metadata_derived(ModelLoader::check_streaming_support)
+            .unwrap_or(self.supports_streaming)
     }
 
     /// Get the expected output type for this model.
+    ///
+    /// Like [`Self::supports_streaming`], this re-derives from the installed
+    /// local metadata once a speculative download lands.
     pub fn output_type(&self) -> OutputType {
-        self.output_type
+        self.metadata_derived(ModelLoader::infer_output_type)
+            .unwrap_or(self.output_type)
+    }
+
+    /// Re-derive a property from the *installed* handle metadata, but only for
+    /// a speculative model whose local handle has landed — every other model's
+    /// cached fields were computed from this same metadata at load, so paying
+    /// for a read lock would buy nothing.
+    fn metadata_derived<T>(&self, derive: impl Fn(&ModelMetadata) -> T) -> Option<T> {
+        self.speculative.as_ref()?;
+        let handle = self.handle.read().ok()?;
+        handle.loaded.then(|| derive(&handle.metadata))
     }
 
     /// Check if this is an LLM model (uses GGUF execution template).
@@ -1903,13 +2564,29 @@ impl XybridModel {
         self.handle
             .read()
             .ok()
-            .map(|h| {
-                matches!(
-                    h.metadata.execution_template,
-                    ExecutionTemplate::Gguf { .. }
-                )
-            })
+            .map(|h| ModelLoader::is_llm_template(&h.metadata))
             .unwrap_or(false)
+    }
+
+    /// The generation config this model resolves when `run*` is called without an
+    /// explicit config: template `generation_params` and the reasoning-budget
+    /// floor layered over global defaults. Callers who need an explicit config
+    /// (tools, budget overrides) should start from this instead of
+    /// `GenerationConfig::default()`, because an explicit config replaces the
+    /// model-level defaults wholesale.
+    pub fn default_generation_config(&self) -> GenerationConfig {
+        #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+        {
+            self.handle
+                .read()
+                .ok()
+                .map(|h| xybrid_core::execution::model_default_gen_config(&h.metadata))
+                .unwrap_or_default()
+        }
+        #[cfg(not(any(feature = "llm-mistral", feature = "llm-llamacpp")))]
+        {
+            GenerationConfig::default()
+        }
     }
 
     // =========================================================================
@@ -2236,6 +2913,14 @@ impl XybridModel {
         config: Option<&GenerationConfig>,
     ) -> SdkResult<InferenceResult> {
         crate::telemetry::maybe_emit_dev_nudge();
+        // Speculative cloud: serve from the gateway until the local handle is
+        // ready (see `cloud_serve`).
+        if self.cloud_serve() {
+            if let Some(result) = self.cloud_leg_batch(envelope, config) {
+                return result;
+            }
+            // Cloud failed but the download landed — run locally below.
+        }
         let start = Instant::now();
         // Begin a resource-telemetry scope for this run. When
         // `resource_telemetry_mode()` is `Off` the guard is a no-op; otherwise
@@ -2435,6 +3120,16 @@ impl XybridModel {
         context: &ConversationContext,
         config: Option<&GenerationConfig>,
     ) -> SdkResult<InferenceResult> {
+        // Speculative cloud: serve from the gateway until the local handle is
+        // ready. The gateway leg is stateless — `context` is not replayed (the
+        // reactive fallback behaves the same) — full history resumes once the
+        // local model takes over.
+        if self.cloud_serve() {
+            if let Some(result) = self.cloud_leg_batch(envelope, config) {
+                return result;
+            }
+            // Cloud failed but the download landed — run locally below.
+        }
         let start = Instant::now();
         let resource_guard = crate::telemetry::begin_resource_run();
 
@@ -2582,8 +3277,18 @@ impl XybridModel {
             ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>
             + Send,
     {
-        use xybrid_core::execution::ExecutionTemplate;
         use xybrid_core::runtime_adapter::types::PartialToken;
+
+        // Speculative cloud: stream from the gateway until the local handle is
+        // ready. The gateway leg is stateless (`context` not replayed, matching
+        // the reactive fallback); full history resumes once local takes over.
+        if self.cloud_serve() {
+            if let Some(result) = self.cloud_leg_streaming(envelope, config, &mut on_token) {
+                return result;
+            }
+            // Cloud failed before emitting a token but the download landed —
+            // stream locally below.
+        }
 
         let start = Instant::now();
 
@@ -2605,7 +3310,7 @@ impl XybridModel {
         let metadata = handle.metadata.clone();
 
         // Check if this is an LLM model (GGUF template)
-        let is_llm = matches!(metadata.execution_template, ExecutionTemplate::Gguf { .. });
+        let is_llm = ModelLoader::is_llm_template(&metadata);
 
         let output = if is_llm {
             // True streaming with context for LLM models
@@ -2784,8 +3489,17 @@ impl XybridModel {
             ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>
             + Send,
     {
-        use xybrid_core::execution::ExecutionTemplate;
         use xybrid_core::runtime_adapter::types::PartialToken;
+
+        // Speculative cloud: stream from the gateway until the local handle is
+        // ready (see `cloud_serve`).
+        if self.cloud_serve() {
+            if let Some(result) = self.cloud_leg_streaming(envelope, config, &mut on_token) {
+                return result;
+            }
+            // Cloud failed before emitting a token but the download landed —
+            // stream locally below.
+        }
 
         let start = Instant::now();
 
@@ -2806,7 +3520,7 @@ impl XybridModel {
         let metadata = handle.metadata.clone();
 
         // Check if this is an LLM model (GGUF template)
-        let is_llm = matches!(metadata.execution_template, ExecutionTemplate::Gguf { .. });
+        let is_llm = ModelLoader::is_llm_template(&metadata);
 
         let output = if is_llm {
             // True streaming for LLM models
@@ -3188,6 +3902,8 @@ impl XybridModel {
         let model_id = self.model_id.clone();
         let version = self.version.clone();
         let output_type = self.output_type;
+        // Speculative cloud routing decision, captured before the worker spawns.
+        let speculative = self.cloud_serve().then(|| self.clone());
 
         // Clone tx for the completion event (before moving into spawn_blocking)
         let tx_completion = tx.clone();
@@ -3204,6 +3920,31 @@ impl XybridModel {
                 let _telemetry_ctx =
                     crate::telemetry::TelemetryPipelineContextGuard::install(None, Some(trace_id));
 
+                // Speculative cloud: stream from the gateway until the local
+                // handle is ready, forwarding each token as a StreamEvent.
+                if let Some(model) = speculative {
+                    let tx_token = tx.clone();
+                    let cloud = model.cloud_leg_streaming(
+                        &envelope,
+                        config.as_ref(),
+                        &mut |token: PartialToken| {
+                            let _ = tx_token.blocking_send(StreamEvent::Token(StreamToken {
+                                token: token.token.clone(),
+                                token_id: token.token_id,
+                                index: token.index,
+                                cumulative_text: token.cumulative_text.clone(),
+                                finish_reason: token.finish_reason.clone(),
+                            }));
+                            Ok(())
+                        },
+                    );
+                    if let Some(result) = cloud {
+                        return result;
+                    }
+                    // Cloud failed before emitting a token but the download
+                    // landed — stream locally below.
+                }
+
                 // Get write lock on handle
                 let mut guard = handle.write().unwrap_or_else(|e| e.into_inner());
 
@@ -3212,10 +3953,7 @@ impl XybridModel {
                 }
 
                 let metadata = guard.metadata.clone();
-                let is_llm = matches!(
-                    metadata.execution_template,
-                    xybrid_core::execution::ExecutionTemplate::Gguf { .. }
-                );
+                let is_llm = ModelLoader::is_llm_template(&metadata);
 
                 // Clone tx for the streaming callback (so we can use tx in the else branch)
                 let tx_for_callback = tx.clone();
@@ -3323,17 +4061,10 @@ impl XybridModel {
     pub fn supports_token_streaming(&self) -> bool {
         #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
         {
-            use xybrid_core::execution::ExecutionTemplate;
-
             self.handle
                 .read()
                 .ok()
-                .map(|h| {
-                    matches!(
-                        h.metadata.execution_template,
-                        ExecutionTemplate::Gguf { .. }
-                    )
-                })
+                .map(|h| ModelLoader::is_llm_template(&h.metadata))
                 .unwrap_or(false)
         }
         #[cfg(not(any(feature = "llm-mistral", feature = "llm-llamacpp")))]
@@ -3349,6 +4080,23 @@ impl XybridModel {
         config: Option<&GenerationConfig>,
     ) -> SdkResult<InferenceResult> {
         crate::telemetry::maybe_emit_dev_nudge();
+        // Speculative cloud: serve from the gateway (off the runtime via
+        // spawn_blocking, like the local path) until the local handle is ready.
+        if self.cloud_serve() {
+            let model = self.clone();
+            let cloud_envelope = envelope.clone();
+            let cloud_config = config.cloned();
+            // `None` = the cloud leg failed and the download landed; fall
+            // through to the local path below (also off the runtime).
+            let cloud_result = tokio::task::spawn_blocking(move || {
+                model.cloud_leg_batch(&cloud_envelope, cloud_config.as_ref())
+            })
+            .await
+            .map_err(|e| SdkError::inference_src("Task join error", e))?;
+            if let Some(result) = cloud_result {
+                return result;
+            }
+        }
         let handle = self.handle.clone();
         let model_id = self.model_id.clone();
         let version = self.version.clone();
@@ -3495,6 +4243,7 @@ impl Clone for XybridModel {
             // Share the in-flight slot so all clones coordinate preemption
             // through one mutex (see field docs).
             current_run: self.current_run.clone(),
+            speculative: self.speculative.clone(),
         }
     }
 }
@@ -3503,9 +4252,216 @@ impl Clone for XybridModel {
 mod tests {
     use super::*;
 
+    #[test]
+    fn browser_only_model_files_are_not_essential() {
+        assert!(!ModelLoader::is_essential_file("model.tflite"));
+        assert!(!ModelLoader::is_essential_file("model.litertlm"));
+    }
+
+    #[test]
+    fn huggingface_gguf_repo_selection_is_unchanged() {
+        let filenames = [
+            "model-Q4_K_M.gguf",
+            "model-Q8_0.gguf",
+            "config.json",
+            "README.md",
+            "LICENSE",
+        ];
+
+        let files = select_huggingface_files_to_download(
+            "org/model",
+            &filenames,
+            Some("model-Q4_K_M.gguf"),
+            None,
+        )
+        .expect("GGUF repository selection should succeed");
+
+        assert_eq!(files, vec!["model-Q4_K_M.gguf", "config.json", "README.md"]);
+    }
+
+    #[test]
+    fn huggingface_vision_repo_downloads_selected_projector() {
+        let filenames = [
+            "model-Q4_K_M.gguf",
+            "mmproj-model-f16.gguf",
+            "config.json",
+            "README.md",
+        ];
+
+        let files = select_huggingface_files_to_download(
+            "org/model",
+            &filenames,
+            Some("model-Q4_K_M.gguf"),
+            Some("mmproj-model-f16.gguf"),
+        )
+        .expect("vision repository selection should succeed");
+
+        assert_eq!(
+            files,
+            vec![
+                "model-Q4_K_M.gguf",
+                "mmproj-model-f16.gguf",
+                "config.json",
+                "README.md"
+            ]
+        );
+    }
+
+    #[test]
+    fn huggingface_litertlm_only_repo_fails_before_download() {
+        let filenames = ["model.litertlm", "README.md"];
+
+        let error =
+            select_huggingface_files_to_download("litert-community/gemma", &filenames, None, None)
+                .expect_err("LiteRtLm-only repositories must be rejected");
+        let message = error.to_string();
+
+        assert!(message.contains("litert-community/gemma"));
+        assert!(message.contains("only .tflite and/or .litertlm model files"));
+        assert!(message.contains("browser SDK (@xybrid/web)"));
+        assert!(message.contains("no native TFLite/LiteRT-LM runtime is registered"));
+    }
+
+    #[test]
+    fn huggingface_mixed_repo_excludes_litertlm() {
+        let filenames = ["model.gguf", "model.litertlm", "README.md", "LICENSE"];
+
+        let files = select_huggingface_files_to_download("org/model", &filenames, None, None)
+            .expect("mixed native and browser-only repository should succeed");
+
+        assert_eq!(files, vec!["model.gguf", "README.md"]);
+    }
+
+    #[test]
+    fn huggingface_tflite_only_repo_fails_before_download() {
+        let filenames = ["model.tflite", "README.md", "LICENSE"];
+
+        let error = select_huggingface_files_to_download("org/model", &filenames, None, None)
+            .expect_err("TFLite-only repositories must be rejected");
+        let message = error.to_string();
+
+        assert!(message.contains("org/model"));
+        assert!(message.contains("only .tflite and/or .litertlm model files"));
+        assert!(message.contains("browser SDK (@xybrid/web)"));
+        assert!(message.contains("no native TFLite/LiteRT-LM runtime is registered"));
+    }
+
+    #[test]
+    fn huggingface_tflite_and_litertlm_only_repo_fails_before_download() {
+        let filenames = ["model.tflite", "model.litertlm", "README.md"];
+
+        let error =
+            select_huggingface_files_to_download("org/browser-model", &filenames, None, None)
+                .expect_err("TFLite and LiteRT-LM-only repositories must be rejected");
+        let message = error.to_string();
+
+        assert!(message.contains("org/browser-model"));
+        assert!(message.contains("only .tflite and/or .litertlm model files"));
+        assert!(message.contains("browser SDK (@xybrid/web)"));
+        assert!(message.contains("no native TFLite/LiteRT-LM runtime is registered"));
+    }
+
+    #[test]
+    fn huggingface_mixed_repo_excludes_tflite() {
+        let filenames = ["model.gguf", "model.tflite", "README.md", "LICENSE"];
+
+        let files = select_huggingface_files_to_download("org/model", &filenames, None, None)
+            .expect("mixed native and browser-only repository should succeed");
+
+        assert_eq!(files, vec!["model.gguf", "README.md"]);
+    }
+
+    #[test]
+    fn huggingface_hidden_files_are_skipped() {
+        let filenames = ["model.gguf", ".gitattributes", "subdir/", "README.md"];
+
+        let files = select_huggingface_files_to_download("org/model", &filenames, None, None)
+            .expect("repository selection should succeed");
+
+        assert_eq!(files, vec!["model.gguf", "README.md"]);
+    }
+
+    #[test]
+    fn create_model_handle_rejects_browser_only_templates_at_load_time() {
+        let templates = [
+            (
+                "TFLite",
+                ExecutionTemplate::TfLite {
+                    model_file: "model.tflite".to_string(),
+                },
+            ),
+            (
+                "LiteRT-LM",
+                ExecutionTemplate::LiteRtLm {
+                    model_file: "model.litertlm".to_string(),
+                    context_length: None,
+                },
+            ),
+        ];
+
+        for (format, template) in templates {
+            let temp_dir = tempfile::tempdir().expect("temporary model directory should exist");
+            let mut metadata = ModelMetadata::onnx("browser-only-model", "1.0", "model.bin");
+            metadata.execution_template = template;
+            let metadata_json =
+                serde_json::to_string(&metadata).expect("model metadata should serialize");
+            std::fs::write(temp_dir.path().join("model_metadata.json"), metadata_json)
+                .expect("model metadata should be written");
+
+            let error = match ModelLoader::create_model_handle(&temp_dir.path().to_path_buf()) {
+                Ok(_) => panic!("{format} metadata must be rejected during load"),
+                Err(error) => error,
+            };
+            let message = error.to_string();
+
+            assert!(message.contains(&format!("browser-only {format} format")));
+            assert!(message.contains("browser SDK (@xybrid/web)"));
+            assert!(message.contains("no native TFLite/LiteRT-LM runtime is registered"));
+        }
+    }
+
     /// Serializes the tests that mutate the process-global speculative flag so
     /// they don't observe each other's writes within the test binary.
     static SPEC_GLOBAL_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    #[test]
+    fn select_gguf_variant_chooses_language_model_over_projector_and_drafter() {
+        let files = [
+            "Bonsai-27B-Q1_0.gguf",
+            "Bonsai-27B-mmproj-Q8_0.gguf",
+            "Bonsai-27B-dspark-Q4_1.gguf",
+        ];
+
+        assert_eq!(
+            select_gguf_variant(&files, None).unwrap(),
+            "Bonsai-27B-Q1_0.gguf"
+        );
+    }
+
+    #[test]
+    fn select_vision_projector_prefers_q8_over_bf16() {
+        let files = ["Bonsai-27B-mmproj-BF16.gguf", "Bonsai-27B-mmproj-Q8_0.gguf"];
+
+        assert_eq!(
+            select_vision_projector(&files),
+            Some("Bonsai-27B-mmproj-Q8_0.gguf")
+        );
+    }
+
+    #[test]
+    fn vision_language_template_is_treated_as_llm() {
+        let mut metadata = ModelMetadata::onnx("bonsai-27b", "1.0", "Bonsai-27B-Q1_0.gguf");
+        metadata.execution_template = ExecutionTemplate::VisionLanguage {
+            model_file: "Bonsai-27B-Q1_0.gguf".to_string(),
+            chat_template: None,
+            context_length: 4096,
+            generation_params: None,
+        };
+
+        assert!(ModelLoader::is_llm_template(&metadata));
+        assert!(ModelLoader::check_streaming_support(&metadata));
+        assert_eq!(ModelLoader::infer_output_type(&metadata), OutputType::Text);
+    }
 
     #[test]
     fn with_speculative_cloud_records_override() {
@@ -3546,6 +4502,295 @@ mod tests {
         assert!(!ModelLoader::from_registry("m").speculative_enabled());
 
         crate::set_speculative_cloud(prev);
+    }
+
+    #[test]
+    fn speculative_envelope_sends_registry_id_to_gateway() {
+        // The registry id goes out as the gateway `model`, so the gateway routes
+        // it to xycloud (runs the real edge model) instead of a hosted provider.
+        let input = Envelope::new(xybrid_core::ir::EnvelopeKind::Text("hi".to_string()));
+        let cloud = build_speculative_cloud_envelope("lfm2.5-350m", &input, None);
+        assert_eq!(
+            cloud.metadata.get("model").map(String::as_str),
+            Some("lfm2.5-350m")
+        );
+    }
+
+    #[test]
+    fn build_envelope_overlays_cloud_routing_metadata() {
+        let input = Envelope::new(xybrid_core::ir::EnvelopeKind::Text("hi".to_string()));
+        let config = GenerationConfig {
+            max_tokens: 64,
+            temperature: 0.3,
+            ..Default::default()
+        };
+        let cloud = build_speculative_cloud_envelope("lfm2.5-350m", &input, Some(&config));
+        assert_eq!(
+            cloud.metadata.get("provider").map(String::as_str),
+            Some("openai")
+        );
+        assert_eq!(
+            cloud.metadata.get("model").map(String::as_str),
+            Some("lfm2.5-350m")
+        );
+        assert_eq!(
+            cloud.metadata.get("backend").map(String::as_str),
+            Some("gateway")
+        );
+        assert_eq!(
+            cloud.metadata.get("max_tokens").map(String::as_str),
+            Some("64")
+        );
+        assert_eq!(
+            cloud.metadata.get("temperature").map(String::as_str),
+            Some("0.3")
+        );
+    }
+
+    #[test]
+    fn build_envelope_does_not_clobber_caller_backend() {
+        let mut input = Envelope::new(xybrid_core::ir::EnvelopeKind::Text("hi".to_string()));
+        input
+            .metadata
+            .insert("backend".to_string(), "direct".to_string());
+        let cloud = build_speculative_cloud_envelope("lfm2.5-350m", &input, None);
+        // provider/model are forced; backend defers to the caller's value.
+        assert_eq!(
+            cloud.metadata.get("provider").map(String::as_str),
+            Some("openai")
+        );
+        assert_eq!(
+            cloud.metadata.get("backend").map(String::as_str),
+            Some("direct")
+        );
+    }
+
+    /// A not-yet-downloaded speculative model routes to cloud; a loaded local
+    /// model never does.
+    #[test]
+    fn cloud_serve_engages_only_while_not_loaded() {
+        let speculating = XybridModel {
+            handle: Arc::new(RwLock::new(ModelHandle {
+                executor: TemplateExecutor::default(),
+                metadata: ModelMetadata::onnx("spec-model", "", ""),
+                model_dir: PathBuf::from("."),
+                loaded: false,
+            })),
+            model_id: "spec-model".to_string(),
+            version: String::new(),
+            output_type: OutputType::Text,
+            supports_streaming: true,
+            current_run: Arc::new(Mutex::new(None)),
+            speculative: Some(Arc::new(SpeculativeDownload::default())),
+        };
+        assert!(speculating.cloud_serve(), "not loaded -> cloud");
+
+        // Flip the placeholder to loaded: the local handle is now ready.
+        speculating
+            .handle
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .loaded = true;
+        assert!(
+            !speculating.cloud_serve(),
+            "loaded local handle -> no speculation"
+        );
+
+        // A plain local model with no speculative config never routes to cloud.
+        assert!(!test_loaded_model(true).cloud_serve());
+    }
+
+    /// A speculative model caches optimistic `output_type` / `supports_streaming`
+    /// values from its placeholder handle. Once the background download installs
+    /// the real handle, the accessors must report the *installed* metadata — not
+    /// the stale placeholder guess.
+    #[test]
+    fn speculative_accessors_refresh_after_handle_swap() {
+        let mut real = ModelMetadata::onnx("spec-model", "model.onnx", "1.2.3");
+        real.execution_template = ExecutionTemplate::Onnx {
+            model_file: "model.onnx".to_string(),
+        };
+        let speculating = XybridModel {
+            handle: Arc::new(RwLock::new(ModelHandle {
+                executor: TemplateExecutor::default(),
+                metadata: ModelMetadata::onnx("spec-model", "", ""),
+                model_dir: PathBuf::from("."),
+                loaded: false,
+            })),
+            model_id: "spec-model".to_string(),
+            version: String::new(),
+            // Placeholder guesses, matching `load_speculative`.
+            output_type: OutputType::Text,
+            supports_streaming: true,
+            current_run: Arc::new(Mutex::new(None)),
+            speculative: Some(Arc::new(SpeculativeDownload::default())),
+        };
+
+        // Pre-swap: the optimistic cached values stand (the cloud leg streams
+        // text), because the placeholder metadata is not authoritative yet.
+        assert!(speculating.supports_streaming());
+
+        // Swap in a non-streaming ONNX handle, as the download thread would.
+        {
+            let mut guard = speculating
+                .handle
+                .write()
+                .unwrap_or_else(|e| e.into_inner());
+            guard.metadata = real;
+            guard.loaded = true;
+        }
+
+        assert!(
+            !speculating.supports_streaming(),
+            "installed ONNX metadata must override the optimistic placeholder value"
+        );
+        assert_eq!(
+            speculating.output_type(),
+            ModelLoader::infer_output_type(
+                &speculating
+                    .handle
+                    .read()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .metadata
+            ),
+        );
+    }
+
+    /// A failed cloud leg must degrade to the local model rather than surface a
+    /// gateway error — speculation is an optimisation, never a regression. But
+    /// once tokens have reached the caller, restarting would duplicate output,
+    /// so that failure stays terminal.
+    #[test]
+    fn failed_cloud_leg_degrades_only_before_any_token() {
+        let download = Arc::new(SpeculativeDownload::default());
+        let model = XybridModel {
+            handle: Arc::new(RwLock::new(ModelHandle {
+                executor: TemplateExecutor::default(),
+                metadata: ModelMetadata::onnx("spec-model", "", ""),
+                model_dir: PathBuf::from("."),
+                loaded: false,
+            })),
+            model_id: "spec-model".to_string(),
+            version: String::new(),
+            output_type: OutputType::Text,
+            supports_streaming: true,
+            current_run: Arc::new(Mutex::new(None)),
+            speculative: Some(Arc::clone(&download)),
+        };
+
+        // Download already landed, so a token-less failure can retry locally.
+        download.finish(true);
+        assert!(
+            model
+                .after_failed_cloud_leg(SdkError::network("gateway 502"), 0)
+                .is_none(),
+            "no tokens emitted + local ready -> fall through to local"
+        );
+
+        // Tokens already streamed to the caller: the failure is terminal.
+        assert!(
+            model
+                .after_failed_cloud_leg(SdkError::network("gateway 502"), 3)
+                .is_some_and(|r| r.is_err()),
+            "partial stream must not be restarted"
+        );
+    }
+
+    /// A failed *download* must not park a degrading run forever, and must not
+    /// claim a local handle exists.
+    #[test]
+    fn failed_download_reports_no_local_handle() {
+        let download = SpeculativeDownload::default();
+        download.finish(false);
+        assert!(!download.wait_for_local());
+    }
+
+    /// Hosts poll `download_status` to drive a progress bar, so progress and
+    /// state must move together and never report a torn pair.
+    #[test]
+    fn download_status_tracks_progress_then_terminal_state() {
+        let download = SpeculativeDownload::default();
+        assert_eq!(download.status().state, DownloadState::Downloading);
+        assert_eq!(download.status().progress, 0.0);
+
+        download.set_progress(0.42);
+        let mid = download.status();
+        assert_eq!(mid.state, DownloadState::Downloading);
+        assert!((mid.progress - 0.42).abs() < 1e-3, "got {}", mid.progress);
+
+        // Out-of-range input from a backend is clamped, not wrapped — and a
+        // still-running download never claims 1.0, because `fetch_extracted`
+        // reports 1.0 per artifact and more may follow.
+        download.set_progress(1.7);
+        let capped = download.status();
+        assert_eq!(capped.state, DownloadState::Downloading);
+        assert!(
+            capped.progress < 1.0,
+            "in-flight progress must stay below 1.0, got {}",
+            capped.progress
+        );
+
+        // Monotonic: a later artifact restarting at 0 cannot rewind the bar.
+        download.set_progress(0.0);
+        assert_eq!(download.status().progress, capped.progress);
+
+        // A finished download reads 1.0 even if the last callback never fired.
+        let ready = SpeculativeDownload::default();
+        ready.set_progress(0.9);
+        ready.finish(true);
+        let done = ready.status();
+        assert_eq!(done.state, DownloadState::Ready);
+        assert_eq!(done.progress, 1.0);
+
+        // Failure is visible: the host must be able to stop waiting.
+        let failed = SpeculativeDownload::default();
+        failed.finish(false);
+        assert_eq!(failed.status().state, DownloadState::Failed);
+    }
+
+    /// `await_download` must return on timeout rather than parking the caller
+    /// when the download is still running.
+    #[test]
+    fn await_download_times_out_while_downloading() {
+        let download = SpeculativeDownload::default();
+        let status = download.await_terminal(Duration::from_millis(20));
+        assert_eq!(status.state, DownloadState::Downloading);
+    }
+
+    /// A plain local model has no download, but hosts should still get one
+    /// uniform "ready" answer instead of having to special-case it.
+    #[test]
+    fn non_speculative_model_reports_ready_download() {
+        let model = test_loaded_model(true);
+        let status = model.download_status();
+        assert_eq!(status.state, DownloadState::Ready);
+        assert_eq!(status.progress, 1.0);
+        assert!(!model.is_cloud_serving());
+    }
+
+    /// Provenance is the only way to tell the legs apart: cloud fallback keeps
+    /// `model_id` identical by design.
+    #[test]
+    fn result_provenance_distinguishes_cloud_from_local() {
+        use crate::ExecutionProvenance;
+
+        let local = InferenceResult::new(text_envelope("hi"), "lfm2.5-350m", 10);
+        let cloud = InferenceResult::new_cloud(text_envelope("hi"), "lfm2.5-350m", 10);
+
+        assert_eq!(local.provenance(), ExecutionProvenance::Local);
+        assert_eq!(cloud.provenance(), ExecutionProvenance::Cloud);
+        assert_eq!(local.model_id(), cloud.model_id(), "same model both legs");
+
+        // Also stamped on the envelope so FFI hosts see it without a typed
+        // accessor.
+        assert_eq!(
+            cloud.metadata("execution_target").map(String::as_str),
+            Some("cloud")
+        );
+        assert_eq!(
+            local.metadata("execution_target").map(String::as_str),
+            Some("local")
+        );
     }
 
     /// The inherent `SdkError::is_retryable` / `retry_after` accessors and
@@ -3949,7 +5194,64 @@ mod tests {
             output_type: OutputType::Text,
             supports_streaming,
             current_run: Arc::new(Mutex::new(None)),
+            speculative: None,
         }
+    }
+
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    fn test_model_with_metadata(metadata: ModelMetadata) -> XybridModel {
+        let model_id = metadata.model_id.clone();
+        let version = metadata.version.clone();
+        XybridModel {
+            handle: Arc::new(RwLock::new(ModelHandle {
+                executor: TemplateExecutor::default(),
+                metadata,
+                model_dir: PathBuf::from("."),
+                loaded: true,
+            })),
+            model_id,
+            version,
+            output_type: OutputType::Text,
+            supports_streaming: true,
+            current_run: Arc::new(Mutex::new(None)),
+            speculative: None,
+        }
+    }
+
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[test]
+    fn default_generation_config_resolves_template_params_and_reasoning_floor() {
+        let mut template_metadata = ModelMetadata::onnx("template-model", "1.0", "model.gguf");
+        template_metadata.execution_template = ExecutionTemplate::Gguf {
+            model_file: "model.gguf".to_string(),
+            chat_template: None,
+            context_length: 4096,
+            generation_params: Some(xybrid_core::execution::template::GenerationParams {
+                max_tokens: Some(64),
+                temperature: Some(0.7),
+                ..Default::default()
+            }),
+        };
+
+        let template_config =
+            test_model_with_metadata(template_metadata).default_generation_config();
+        assert_eq!(template_config.max_tokens, 64);
+        assert_eq!(template_config.temperature, 0.7);
+
+        let mut reasoning_metadata = ModelMetadata::onnx("reasoning-model", "1.0", "model.gguf");
+        reasoning_metadata.execution_template = ExecutionTemplate::Gguf {
+            model_file: "model.gguf".to_string(),
+            chat_template: None,
+            context_length: 4096,
+            generation_params: None,
+        };
+        reasoning_metadata
+            .metadata
+            .insert("reasoning".to_string(), serde_json::Value::Bool(true));
+
+        let reasoning_config =
+            test_model_with_metadata(reasoning_metadata).default_generation_config();
+        assert_eq!(reasoning_config.max_tokens, 3584);
     }
 
     #[test]
@@ -4703,6 +6005,7 @@ mod tests {
             output_type: OutputType::Text,
             supports_streaming: true,
             current_run: Arc::new(Mutex::new(None)),
+            speculative: None,
         }
     }
 

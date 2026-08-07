@@ -6,15 +6,14 @@
 
 1. [xybrid-core Feature 标志](#xybrid-core-feature-标志)
 2. [xybrid-sdk Feature 标志](#xybrid-sdk-feature-标志)
-3. [xybrid-ffi Feature 标志](#xybrid-ffi-feature-标志)
-4. [xybrid-cli Feature 标志](#xybrid-cli-feature-标志)
-5. [平台预设](#平台预设)
-6. [受 Feature 控制的类型与模块](#受-feature-控制的类型与模块)
-7. [无效的 Feature 组合](#无效的-feature-组合)
-8. [发布门禁](#发布门禁)
-9. [ORT 加载策略](#ort-加载策略)
-10. [xtask 命令](#xtask-命令)
-11. [构建架构](#构建架构)
+3. [xybrid-cli Feature 标志](#xybrid-cli-feature-标志)
+4. [平台预设](#平台预设)
+5. [受 Feature 控制的类型与模块](#受-feature-控制的类型与模块)
+6. [无效的 Feature 组合](#无效的-feature-组合)
+7. [发布门禁](#发布门禁)
+8. [ORT 加载策略](#ort-加载策略)
+9. [xtask 命令](#xtask-命令)
+10. [构建架构](#构建架构)
 
 ---
 
@@ -78,32 +77,6 @@
 
 ---
 
-## xybrid-ffi Feature 标志
-
-| Feature | 说明 | 转发到 xybrid-sdk |
-|---------|-------------|------------------------|
-| **default** | 无默认特性 | *（无）* |
-| **csharp** | 为 Unity 生成 C# 绑定 | *（仅构建期）* |
-| **platform-android** | Android 预设 | `xybrid-sdk/platform-android` |
-| **platform-ios** | iOS 预设 | `xybrid-sdk/platform-ios` |
-| **platform-macos** | macOS 预设 | `xybrid-sdk/platform-macos` |
-| **platform-desktop** | 桌面预设 | `xybrid-sdk/platform-desktop` |
-| **ort-download** | 转发到 SDK | `xybrid-sdk/ort-download` |
-| **ort-dynamic** | 转发到 SDK | `xybrid-sdk/ort-dynamic` |
-| **ort-coreml** | 转发到 SDK | `xybrid-sdk/ort-coreml` |
-| **candle** | 转发到 SDK | `xybrid-sdk/candle` |
-| **candle-metal** | 转发到 SDK | `xybrid-sdk/candle-metal` |
-| **candle-cuda** | 转发到 SDK | `xybrid-sdk/candle-cuda` |
-| **llm-mistral** | 转发到 SDK | `xybrid-sdk/llm-mistral` |
-| **llm-mistral-metal** | 转发到 SDK | `xybrid-sdk/llm-mistral-metal` |
-| **llm-mistral-cuda** | 转发到 SDK | `xybrid-sdk/llm-mistral-cuda` |
-| **llm-llamacpp** | 转发到 SDK | `xybrid-sdk/llm-llamacpp` |
-| **vision** | 转发到 SDK 的图像 Envelope 原语 | `xybrid-sdk/vision` |
-| **llm-llamacpp-vision** | 转发到 SDK 的 llama.cpp VLM 路径 | `xybrid-sdk/llm-llamacpp-vision` |
-| **huggingface** | 转发到 SDK 的注册表/HuggingFace 加载 | `xybrid-sdk/huggingface` |
-
----
-
 ## xybrid-cli Feature 标志
 
 | Feature | 说明 | 启用 |
@@ -140,7 +113,6 @@ VLM 构建示例：
 ```bash
 cargo build -p xybrid-cli --features platform-macos,llm-llamacpp-vision
 cargo check -p xybrid-sdk --features platform-desktop,llm-llamacpp-vision
-cargo check -p xybrid-ffi --features platform-ios,llm-llamacpp-vision
 ```
 
 ### 为什么 llm-mistral 不用于 Android
@@ -228,8 +200,8 @@ llama.cpp 通过 ggml 使用**运行时 SIMD 检测**，因此对所有 Android 
 | 平台 | 构建主机 | 规范门禁 |
 |---------|-----------|---------|
 | macOS arm64 / x86_64 | macOS | `cargo clippy --workspace --features platform-macos -- -D warnings` + `cargo test --workspace --features platform-macos` |
-| iOS arm64 + 模拟器 | macOS | `cargo xtask build-xcframework --release`（为 `aarch64-apple-ios`、`aarch64-apple-ios-sim`、`x86_64-apple-ios` 交叉编译 `xybrid-uniffi`）。CI 变体（含 vision 矩阵作业）参见 [`.github/workflows/build-apple.yml`](../.github/workflows/build-apple.yml)。 |
-| Android arm64-v8a / armeabi-v7a / x86_64 | 装有 NDK 的 Linux 或 macOS | `cargo xtask build-android --release`（针对全部三个 ABI 对 `xybrid-uniffi` 驱动 `cargo ndk`）。矩阵并行化的 CI 变体参见 [`.github/workflows/build-android.yml`](../.github/workflows/build-android.yml)。 |
+| iOS arm64 + 模拟器 | macOS | `bazel build --config=ios //bindings/apple:XybridFFI`（rules_apple xcframework，设备 + 模拟器切片）。CI 变体参见 [`.github/workflows/build-apple.yml`](../.github/workflows/build-apple.yml)。 |
+| Android arm64-v8a / armeabi-v7a / x86_64 | 任意（Bazel 自带 NDK） | `bazel build -c opt //bindings/kotlin:xybrid_kotlin_aar`（功能完整的 3-ABI AAR）。CI 变体参见 [`.github/workflows/build-android.yml`](../.github/workflows/build-android.yml)。 |
 | 桌面 Linux x86_64 | Linux | `cargo clippy --workspace --features platform-desktop -- -D warnings` + `cargo test --workspace --features platform-desktop` |
 | 桌面 Windows x86_64 | Windows | 与 Linux 桌面相同 |
 
@@ -295,20 +267,12 @@ export ORT_IOS_XCFWK_LOCATION=/path/to/onnxruntime.xcframework
 | 命令 | 用途 | 平台 | 示例 |
 |---------|---------|----------|---------|
 | `setup-test-env` | 为集成测试下载模型 | 任意 | `cargo xtask setup-test-env` |
-| `build-ffi` | 构建 xybrid-ffi 库（C ABI） | 任意 | `cargo xtask build-ffi --release` |
-| `build-xcframework` | 通过 boltffi 构建 Apple XCFramework（Swift 绑定 + xcframework） | 仅 macOS | `cargo xtask build-xcframework --release` |
-| `build-android` | 构建 Android .so 文件 | 任意 | `cargo xtask build-android --release` |
 | `build-flutter` | 构建 Flutter 原生库 | 视情况而定 | `cargo xtask build-flutter --platform macos` |
-| `setup-targets` | 安装 Rust 交叉编译目标 | 任意 | `cargo xtask setup-targets` |
-| `build-all` | 构建所有平台 | 视情况而定 | `cargo xtask build-all --release` |
-| `package` | 打包用于分发的构件 | 任意 | `cargo xtask package --version 0.2.0` |
 
 ### xtask 与 Feature 预设的映射
 
 | xtask 命令 | 使用的平台预设 | 构建的目标 |
 |---------------|---------------------|---------------|
-| `build-xcframework` | `platform-macos` / `platform-ios` | iOS arm64、iOS Simulator（arm64、x86_64）、macOS（arm64、x86_64） |
-| `build-android` | `platform-android` | arm64-v8a、armeabi-v7a、x86_64 |
 | `build-flutter --platform ios` | `platform-ios` | aarch64-apple-ios、aarch64-apple-ios-sim |
 | `build-flutter --platform android` | `platform-android` | aarch64-linux-android、armv7-linux-androideabi、x86_64-linux-android |
 | `build-flutter --platform macos` | `platform-macos` | aarch64-apple-darwin、x86_64-apple-darwin |
@@ -353,54 +317,6 @@ Xybrid 使用**两层构建架构**：
 - 通过 `xybrid-core/llm-llamacpp` 触达的 `llama-cpp-sys/bindings` 特性
 - 编译 llm-llamacpp 时的 Cargo 构建流程
 
-### NDK 检测的重复
-
-xtask 和 build.rs 都需要检测 Android NDK：
-
-| 组件 | 用途 | 检查的环境变量 |
-|-----------|---------|------------------------------|
-| **xtask** | 为 `cargo-ndk` 调用定位 NDK | `ANDROID_NDK_HOME`，并检查 `cargo ndk --version` |
-| **llama-cpp-sys build.rs** | 为 CMake 工具链文件定位 NDK | `ANDROID_NDK_HOME`、`NDK_HOME`、`CC_*`、`ANDROID_HOME`、`ANDROID_SDK_ROOT`、常见路径 |
-
-存在这种重复的原因：
-1. xtask 在 cargo 构建该 crate **之前**运行
-2. build.rs 在 cargo 构建**期间**运行
-3. cargo-ndk 设置了 Rust 交叉编译器，但不会将 NDK 位置传递给 CMake
-
-### 构建流程图
-
-```
-用户运行: cargo xtask build-android --release
-
-┌─────────────────────────────────────────────────────────────┐
-│ xtask (Orchestration)                                       │
-├─────────────────────────────────────────────────────────────┤
-│ 1. Parse command-line arguments                             │
-│ 2. Detect NDK (for cargo-ndk)                               │
-│ 3. For each ABI (arm64-v8a, armeabi-v7a, x86_64):           │
-│    └─ Run: cargo ndk --target <rust-target> build           │
-│       ├─ cargo-ndk sets CC/CXX environment variables        │
-│       └─ cargo-ndk invokes cargo build                      │
-│ 4. Copy .so files to bindings/kotlin/libs/                  │
-└─────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────┐
-│ llama-cpp-sys build.rs (Compilation) - runs for each target │
-├─────────────────────────────────────────────────────────────┤
-│ 1. Runs when llama-cpp-sys/bindings is enabled              │
-│ 2. If enabled:                                              │
-│    a. Find Android NDK (from CC env var or ANDROID_NDK_HOME)│
-│    b. Configure CMake with NDK toolchain file               │
-│    c. Build llama.cpp static libraries                      │
-│    d. Build wrapper.cpp                                     │
-│    e. Output cargo:rustc-link-lib directives                │
-│ 3. Cargo links everything together                          │
-└─────────────────────────────────────────────────────────────┘
-```
-
----
-
 ## 快速参考
 
 ### 最小构建（无 LLM）
@@ -424,8 +340,8 @@ cargo build -p xybrid-core --features "ort-download,ort-coreml,llm-llamacpp-visi
 ### Android 构建
 
 ```bash
-# 需要：Android NDK、cargo-ndk
-cargo xtask build-android --release
+# Bazel 自带固定版本的 NDK — 无需机器配置
+bazel build -c opt //bindings/kotlin:xybrid_kotlin_aar
 ```
 
 ### 完整特性检查

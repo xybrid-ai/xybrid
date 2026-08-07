@@ -223,7 +223,7 @@ enum Commands {
         registry: Option<String>,
     },
 
-    /// Build the xybrid-ffi library (C ABI for Unity/C++)
+    /// Build the xybrid-bolt native library (the BoltFFI native Unity loads)
     BuildFfi {
         /// Target triple (e.g., aarch64-apple-darwin, x86_64-unknown-linux-gnu)
         #[arg(long)]
@@ -238,66 +238,26 @@ enum Commands {
         #[arg(long)]
         platform_preset: Option<String>,
 
-        /// Generate C# bindings for Unity (enables csharp feature)
-        #[arg(long)]
-        csharp: bool,
-
         /// Copy built library to Unity bindings directory
         #[arg(long)]
         deploy_unity: bool,
     },
 
-    /// Build Apple XCFramework for iOS and macOS platforms
-    BuildXcframework {
-        /// Build in release mode (default: true)
-        #[arg(long, default_value = "true")]
-        release: bool,
-
-        /// Build in debug mode (overrides --release)
-        #[arg(long)]
-        debug: bool,
-
-        /// Override the version (defaults to Cargo.toml version or git tag)
-        #[arg(long)]
-        version: Option<String>,
-    },
-
-    /// Stage the bolt iOS artifacts into bindings/react-native for npm packaging
+    /// Stage a pre-built native library into the Unity plugins tree.
     ///
-    /// Builds the XCFramework, then copies it plus the bolt Swift wrapper
-    /// sources into `bindings/react-native/ios/`. Android needs no staging —
-    /// the RN module depends on the `ai.xybrid:xybrid-kotlin` Maven AAR.
-    StageReactNative {
-        /// Build in release mode (default: true)
-        #[arg(long, default_value = "true")]
-        release: bool,
-
-        /// Build in debug mode (overrides --release)
+    /// Decouples staging from the cargo build so a Bazel-built
+    /// `//crates/xybrid-bolt:xybrid_bolt_cdylib` (or `_staticlib`) can be dropped
+    /// into `bindings/unity/Runtime/Plugins/<Platform>/` with the correct
+    /// per-platform `.meta`. Same copy + meta logic `build-ffi --deploy-unity`
+    /// uses; the source lib just comes from Bazel instead of cargo.
+    DeployUnityNative {
+        /// Path to the pre-built native library (e.g. bazel-bin/crates/xybrid-bolt/libxybrid_bolt.dylib).
         #[arg(long)]
-        debug: bool,
+        lib: PathBuf,
 
-        /// Override the version (defaults to Cargo.toml version or git tag)
+        /// Target triple the lib was built for (selects the Unity platform dir + .meta).
         #[arg(long)]
-        version: Option<String>,
-    },
-
-    /// Build Android .so files for all ABIs (armeabi-v7a, arm64-v8a, x86_64)
-    BuildAndroid {
-        /// Build in release mode (default: true)
-        #[arg(long, default_value = "true")]
-        release: bool,
-
-        /// Build in debug mode (overrides --release)
-        #[arg(long)]
-        debug: bool,
-
-        /// Build only specific ABI(s). Can be specified multiple times.
-        #[arg(long, value_enum)]
-        abi: Vec<AndroidAbi>,
-
-        /// Override the version (defaults to Cargo.toml version or git tag)
-        #[arg(long)]
-        version: Option<String>,
+        target: Option<String>,
     },
 
     /// Build Flutter native libraries for a specific platform
@@ -323,29 +283,7 @@ enum Commands {
         skip_frb_codegen: bool,
     },
 
-    /// Install required Rust cross-compilation targets for iOS, macOS, and Android
-    SetupTargets,
-
-    /// Build all platforms with one command
-    BuildAll {
-        /// Build in release mode (default: true)
-        #[arg(long, default_value = "true")]
-        release: bool,
-
-        /// Build in debug mode (overrides --release)
-        #[arg(long)]
-        debug: bool,
-
-        /// Run builds concurrently where possible (experimental)
-        #[arg(long)]
-        parallel: bool,
-
-        /// Override the version (defaults to Cargo.toml version or git tag)
-        #[arg(long)]
-        version: Option<String>,
-    },
-
-    /// Build xybrid-ffi for Unity target platforms
+    /// Build xybrid-bolt for Unity target platforms
     ///
     /// Convenience wrapper around build-ffi that orchestrates builds for all Unity-supported
     /// platforms. By default, builds for the host platform only. Use --all-platforms to build
@@ -354,10 +292,6 @@ enum Commands {
         /// Build all Unity target platforms available on the current host OS
         #[arg(long)]
         all_platforms: bool,
-
-        /// Generate C# bindings (NativeMethods.g.cs) via csbindgen
-        #[arg(long)]
-        csharp: bool,
 
         /// Copy built libraries to bindings/unity/Runtime/Plugins/<Platform>/
         #[arg(long)]
@@ -369,29 +303,6 @@ enum Commands {
         /// Output file path (default: docs/sdk/model_metadata.schema.json)
         #[arg(long)]
         output: Option<PathBuf>,
-    },
-
-    /// Package build artifacts for distribution (creates dist/ with .zip files and checksums)
-    Package {
-        /// Override the version (defaults to Cargo.toml version or git tag)
-        #[arg(long)]
-        version: Option<String>,
-
-        /// Output directory for packages (default: dist/)
-        #[arg(long, default_value = "dist")]
-        output_dir: PathBuf,
-
-        /// Skip packaging XCFramework (Apple artifacts)
-        #[arg(long)]
-        skip_apple: bool,
-
-        /// Skip packaging Android .so files
-        #[arg(long)]
-        skip_android: bool,
-
-        /// Skip packaging Flutter plugin
-        #[arg(long)]
-        skip_flutter: bool,
     },
 
     /// Package per-platform Unity native bundles + resolver manifest into dist/.
@@ -410,32 +321,6 @@ enum Commands {
         #[arg(long, default_value = "dist")]
         output_dir: PathBuf,
     },
-}
-
-#[derive(Clone, Copy, ValueEnum, Debug, PartialEq, Eq)]
-enum AndroidAbi {
-    /// ARM 32-bit (armeabi-v7a)
-    #[value(name = "armeabi-v7a")]
-    ArmeabiV7a,
-    /// ARM 64-bit (arm64-v8a)
-    #[value(name = "arm64-v8a")]
-    Arm64V8a,
-    /// x86_64 (x86_64)
-    #[value(name = "x86_64")]
-    X86_64,
-}
-
-impl AndroidAbi {
-    /// ABI directory name under `bindings/kotlin/libs/`. Used for the
-    /// `--abi` warning in `build_android` (the bolt wrapper always builds
-    /// the full set, so the filter is informational).
-    fn ndk_arch(&self) -> &'static str {
-        match self {
-            AndroidAbi::ArmeabiV7a => "armeabi-v7a",
-            AndroidAbi::Arm64V8a => "arm64-v8a",
-            AndroidAbi::X86_64 => "x86_64",
-        }
-    }
 }
 
 #[derive(Clone, Copy, ValueEnum, Debug, PartialEq, Eq)]
@@ -528,38 +413,13 @@ fn main() -> Result<()> {
             target,
             release,
             platform_preset,
-            csharp,
             deploy_unity,
         } => {
-            build_ffi(target, release, platform_preset, csharp, deploy_unity)?;
+            build_ffi(target, release, platform_preset, deploy_unity)?;
         }
-        Commands::BuildXcframework {
-            release,
-            debug,
-            version,
-        } => {
-            let is_release = !debug && release;
-            let ver = get_version(version.as_deref());
-            build_xcframework(is_release, &ver)?;
-        }
-        Commands::StageReactNative {
-            release,
-            debug,
-            version,
-        } => {
-            let is_release = !debug && release;
-            let ver = get_version(version.as_deref());
-            stage_react_native_ios(is_release, &ver)?;
-        }
-        Commands::BuildAndroid {
-            release,
-            debug,
-            abi,
-            version,
-        } => {
-            let is_release = !debug && release;
-            let ver = get_version(version.as_deref());
-            build_android(is_release, abi, &ver)?;
+        Commands::DeployUnityNative { lib, target } => {
+            let lib_str = lib.to_str().context("--lib path is not valid UTF-8")?;
+            deploy_ffi_to_unity(lib_str, target.as_deref())?;
         }
         Commands::BuildFlutter {
             platform,
@@ -572,38 +432,14 @@ fn main() -> Result<()> {
             let ver = get_version(version.as_deref());
             build_flutter(platform, is_release, &ver, skip_frb_codegen)?;
         }
-        Commands::SetupTargets => {
-            setup_targets()?;
-        }
-        Commands::BuildAll {
-            release,
-            debug,
-            parallel,
-            version,
-        } => {
-            let is_release = !debug && release;
-            let ver = get_version(version.as_deref());
-            build_all(is_release, parallel, &ver)?;
-        }
         Commands::BuildUnity {
             all_platforms,
-            csharp,
             deploy,
         } => {
-            build_unity(all_platforms, csharp, deploy)?;
+            build_unity(all_platforms, deploy)?;
         }
         Commands::GenerateSchema { output } => {
             generate_schema(output)?;
-        }
-        Commands::Package {
-            version,
-            output_dir,
-            skip_apple,
-            skip_android,
-            skip_flutter,
-        } => {
-            let ver = get_version(version.as_deref());
-            package_artifacts(&ver, &output_dir, skip_apple, skip_android, skip_flutter)?;
         }
         Commands::PackageUnityNatives {
             version,
@@ -617,14 +453,17 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-/// Build the xybrid-ffi library (C ABI)
+/// Build the xybrid-bolt native library (the Unity BoltFFI native).
 fn build_ffi(
     target: Option<String>,
     release: bool,
     platform_preset: Option<String>,
-    csharp: bool,
     deploy_unity: bool,
 ) -> Result<()> {
+    // Unity loads `xybrid_bolt`; the pre-bolt `xybrid-ffi` C ABI was retired.
+    let crate_name = "xybrid-bolt";
+    let lib_stem = "xybrid_bolt";
+
     // Resolve the platform preset: use override if provided, otherwise auto-detect
     let preset = if let Some(ref p) = platform_preset {
         p.clone()
@@ -634,17 +473,9 @@ fn build_ffi(
         host_platform_preset().to_string()
     };
 
-    // Build features list
-    let mut features = vec![preset.clone()];
-    if csharp {
-        features.push("csharp".to_string());
-    }
-    let features_str = features.join(",");
+    let features_str = preset;
 
-    println!(
-        "Building xybrid-ffi{}...",
-        if csharp { " with C# bindings" } else { "" }
-    );
+    println!("Building xybrid-bolt...");
     println!("  Features: {}", features_str);
 
     // Android targets use cargo-ndk (same as Kotlin/Flutter CI) which handles
@@ -652,10 +483,15 @@ fn build_ffi(
     let is_android = target.as_deref().is_some_and(|t| t.contains("android"));
 
     if is_android {
-        build_ffi_android(target.as_deref().unwrap(), release, &features_str)?;
+        build_ffi_android(
+            crate_name,
+            target.as_deref().unwrap(),
+            release,
+            &features_str,
+        )?;
     } else {
         let mut cmd = Command::new("cargo");
-        cmd.arg("build").arg("-p").arg("xybrid-ffi");
+        cmd.arg("build").arg("-p").arg(crate_name);
         cmd.arg("--features").arg(&features_str);
 
         if release {
@@ -693,20 +529,20 @@ fn build_ffi(
     let target_str = target.as_deref().unwrap_or("");
     let dylib_name =
         if target_str.contains("apple") || (target_str.is_empty() && cfg!(target_os = "macos")) {
-            "libxybrid_ffi.dylib"
+            format!("lib{lib_stem}.dylib")
         } else if target_str.contains("windows")
             || (target_str.is_empty() && cfg!(target_os = "windows"))
         {
-            "xybrid_ffi.dll"
+            format!("{lib_stem}.dll")
         } else {
-            "libxybrid_ffi.so"
+            format!("lib{lib_stem}.so")
         };
     let staticlib_name = if target_str.contains("windows")
         || (target_str.is_empty() && cfg!(target_os = "windows"))
     {
-        "xybrid_ffi.lib"
+        format!("{lib_stem}.lib")
     } else {
-        "libxybrid_ffi.a"
+        format!("lib{lib_stem}.a")
     };
 
     let (dylib_path, staticlib_path) = if let Some(ref t) = target {
@@ -724,11 +560,6 @@ fn build_ffi(
     println!("\n✓ Build successful!");
     println!("  Dynamic library: {}", dylib_path);
     println!("  Static library:  {}", staticlib_path);
-    println!("  C header:        crates/xybrid-ffi/include/xybrid.h");
-
-    if csharp {
-        println!("  C# bindings:     bindings/unity/Runtime/Native/NativeMethods.g.cs");
-    }
 
     // Deploy to Unity if requested
     // iOS targets produce a static library (.a), not a dylib — deploy the .a
@@ -772,13 +603,13 @@ fn unity_targets_for_host() -> Vec<&'static str> {
         .collect()
 }
 
-/// Build xybrid-ffi for Unity target platforms.
+/// Build xybrid-bolt for Unity target platforms.
 ///
 /// Orchestrates calls to `build_ffi()` for each target. By default, builds only
 /// for the host platform. With `--all-platforms`, builds all targets available
 /// on the current host OS.
-fn build_unity(all_platforms: bool, csharp: bool, deploy: bool) -> Result<()> {
-    println!("Building xybrid-ffi for Unity...\n");
+fn build_unity(all_platforms: bool, deploy: bool) -> Result<()> {
+    println!("Building xybrid-bolt for Unity...\n");
 
     if all_platforms {
         let buildable = unity_targets_for_host();
@@ -819,9 +650,8 @@ fn build_unity(all_platforms: bool, csharp: bool, deploy: bool) -> Result<()> {
             );
             build_ffi(
                 Some(target.to_string()),
-                true,             // always release for Unity
-                None,             // auto-detect preset
-                csharp && i == 0, // only generate C# on first build
+                true, // always release for Unity
+                None, // auto-detect preset
                 deploy,
             )?;
             println!();
@@ -833,7 +663,7 @@ fn build_unity(all_platforms: bool, csharp: bool, deploy: bool) -> Result<()> {
             None, // host platform
             true, // always release
             None, // auto-detect preset
-            csharp, deploy,
+            deploy,
         )?;
     }
 
@@ -841,7 +671,7 @@ fn build_unity(all_platforms: bool, csharp: bool, deploy: bool) -> Result<()> {
     Ok(())
 }
 
-/// Deploy the built xybrid-ffi library to the Unity bindings directory
+/// Deploy the built xybrid-bolt library to the Unity bindings directory
 fn deploy_ffi_to_unity(dylib_path: &str, target: Option<&str>) -> Result<()> {
     println!("\nDeploying to Unity...");
 
@@ -973,7 +803,7 @@ fn deploy_ffi_to_unity(dylib_path: &str, target: Option<&str>) -> Result<()> {
         println!("  ✓ Created plugin .meta: {}", meta_path.display());
     }
 
-    // Bundle ORT Android .so files alongside libxybrid_ffi.so (Android only)
+    // Bundle ORT Android .so files alongside libxybrid_bolt.so (Android only)
     if let Some(abi) = android_abi {
         if let Some(ort_android_path) = resolve_ort_android_libs() {
             let ort_abi_dir = ort_android_path.join(abi);
@@ -1023,18 +853,6 @@ fn deploy_ffi_to_unity(dylib_path: &str, target: Option<&str>) -> Result<()> {
         }
     }
 
-    // Also copy the C header
-    let header_src = PathBuf::from("crates/xybrid-ffi/include/xybrid.h");
-    if header_src.exists() {
-        let header_dst = PathBuf::from("bindings/unity/Runtime/Native/xybrid.h");
-        if let Some(parent) = header_dst.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        std::fs::copy(&header_src, &header_dst)
-            .with_context(|| format!("Failed to copy header to {:?}", header_dst))?;
-        println!("  ✓ Header copied to: {}", header_dst.display());
-    }
-
     Ok(())
 }
 
@@ -1068,199 +886,15 @@ fn generate_android_plugin_meta(guid: &str, cpu: &str) -> String {
     )
 }
 
-/// Build the Apple XCFramework via boltffi.
-///
-/// Delegates the actual build to `boltffi pack apple --release`, which
-/// compiles `xybrid-bolt` for every Apple slice configured in
-/// `crates/xybrid-bolt/boltffi.toml`, generates the Swift wrapper, and
-/// packs everything into an `Xybrid.xcframework`. We then mirror the
-/// output into the layout the release workflow + local SPM consumer
-/// expect:
-///
-/// - `bindings/apple/XCFrameworks/XybridFFI.xcframework/`  (unversioned;
-///   the `Package.swift` binary-target path points here when
-///   `useLocalNatives = true`).
-/// - `bindings/apple/XCFrameworks/XybridFFI-<version>.xcframework/`  (the
-///   versioned snapshot the release-prep workflow zips).
-/// - `bindings/apple/Sources/Xybrid/xybrid_bolt.swift`  (the generated
-///   Swift wrapper that the SPM target compiles alongside the
-///   hand-written `Xybrid.swift`).
-///
-/// The previous uniffi-based implementation built `xybrid-uniffi` per
-/// target with `cargo build`, then assembled the framework by hand via
-/// `xcodebuild -create-xcframework` against `libxybrid_uniffi.a`. Bolt's
-/// pack handles all of that internally — including the ORT iOS path
-/// resolution that the old code probed via `vendor/ort-ios/` — because
-/// `platform-ios` pulls in `xybrid-core/ort-download`, which fetches the
-/// runtime through `ort` at build time. The macOS-only fallback is gone:
-/// every slice we ship today (`ios-arm64`, `ios-arm64-simulator`) is in
-/// the `boltffi.toml` config, and ORT availability is a normal `cargo
-/// build` concern now rather than a bespoke `cfg!` branch.
-fn build_xcframework(release: bool, version: &str) -> Result<()> {
-    if !cfg!(target_os = "macos") {
-        anyhow::bail!("XCFramework builds are only supported on macOS");
-    }
-
-    let profile = if release { "release" } else { "debug" };
-    println!(
-        "Building XCFramework via boltffi ({} mode, version {})...",
-        profile, version
-    );
-
-    // Single delegated build. boltffi reads
-    // `crates/xybrid-bolt/boltffi.toml` for the slice list and
-    // module/output naming; we just pass through `--release` and the
-    // Cargo feature that pulls in ORT + LLM backends for iOS.
-    let bolt_crate_dir = PathBuf::from("crates/xybrid-bolt");
-    let mut cmd = Command::new("boltffi");
-    cmd.current_dir(&bolt_crate_dir).arg("pack").arg("apple");
-    if release {
-        cmd.arg("--release");
-    }
-    cmd.arg("--cargo-arg=--features")
-        .arg("--cargo-arg=platform-ios");
-
-    let status = cmd
-        .status()
-        .context("Failed to run `boltffi pack apple`. Install with `cargo install boltffi_cli`.")?;
-    if !status.success() {
-        anyhow::bail!("`boltffi pack apple` failed");
-    }
-
-    // Map bolt's output → the layout release-prep + Package.swift expect.
-    let bolt_xcframework = bolt_crate_dir.join("dist/apple/Xybrid.xcframework");
-    if !bolt_xcframework.is_dir() {
-        anyhow::bail!(
-            "boltffi pack succeeded but {} doesn't exist",
-            bolt_xcframework.display()
-        );
-    }
-    let bolt_swift_wrapper =
-        bolt_crate_dir.join("dist/apple/Sources/BoltFFI/Xybrid-boltBoltFFI.swift");
-    if !bolt_swift_wrapper.is_file() {
-        anyhow::bail!(
-            "boltffi pack succeeded but {} doesn't exist",
-            bolt_swift_wrapper.display()
-        );
-    }
-
-    let xcframework_dir = PathBuf::from("bindings/apple/XCFrameworks");
-    std::fs::create_dir_all(&xcframework_dir).with_context(|| {
-        format!(
-            "Failed to create XCFrameworks directory at {}",
-            xcframework_dir.display()
-        )
-    })?;
-    let xcframework_versioned = xcframework_dir.join(format!("XybridFFI-{}.xcframework", version));
-    let xcframework_latest = xcframework_dir.join("XybridFFI.xcframework");
-
-    for path in [&xcframework_versioned, &xcframework_latest] {
-        if path.exists() {
-            std::fs::remove_dir_all(path)
-                .with_context(|| format!("Failed to remove existing {}", path.display()))?;
-        }
-    }
-
-    println!("  Copying XCFramework into bindings/apple/XCFrameworks/...");
-    copy_dir_recursive(&bolt_xcframework, &xcframework_versioned)
-        .context("Failed to copy versioned XCFramework")?;
-    copy_dir_recursive(&bolt_xcframework, &xcframework_latest)
-        .context("Failed to copy unversioned XCFramework")?;
-
-    // The Swift wrapper sits next to the hand-written `Xybrid.swift` in
-    // the SPM target. We rename to `xybrid_bolt.swift` so it's easy to
-    // grep for and so `release-publish.yml`'s staging copy step lines
-    // up against a stable filename.
-    let swift_dst = PathBuf::from("bindings/apple/Sources/Xybrid/xybrid_bolt.swift");
-    if let Some(parent) = swift_dst.parent() {
-        std::fs::create_dir_all(parent)
-            .with_context(|| format!("Failed to create {}", parent.display()))?;
-    }
-    std::fs::copy(&bolt_swift_wrapper, &swift_dst).with_context(|| {
-        format!(
-            "Failed to copy bolt Swift wrapper to {}",
-            swift_dst.display()
-        )
-    })?;
-
-    println!();
-    println!("✓ XCFramework build successful!");
-    println!("  Version:    {}", version);
-    println!("  Versioned:  {}", xcframework_versioned.display());
-    println!("  Unversioned: {}", xcframework_latest.display());
-    println!("  Swift:      {}", swift_dst.display());
-
-    Ok(())
-}
-
-/// Stage the bolt iOS artifacts into the React Native module for npm packaging.
-///
-/// Builds the XCFramework, then copies it plus the bolt Swift wrapper sources
-/// (`Xybrid.swift`, `xybrid_bolt.swift`) into `bindings/react-native/ios/`,
-/// where `react-native-xybrid.podspec` vendors them. Android needs no
-/// equivalent — the RN module depends on the `ai.xybrid:xybrid-kotlin` AAR.
-fn stage_react_native_ios(release: bool, version: &str) -> Result<()> {
-    if !cfg!(target_os = "macos") {
-        anyhow::bail!("React Native iOS staging is only supported on macOS");
-    }
-
-    // 1. Build the XCFramework (also refreshes bindings/apple's Swift wrapper).
-    build_xcframework(release, version)?;
-
-    let rn_ios = PathBuf::from("bindings/react-native/ios");
-
-    // 2. Stage the XCFramework (unversioned copy) into ios/Frameworks/.
-    let src_xcfw = PathBuf::from("bindings/apple/XCFrameworks/XybridFFI.xcframework");
-    if !src_xcfw.is_dir() {
-        anyhow::bail!(
-            "Expected XCFramework at {} after build — build_xcframework failed silently?",
-            src_xcfw.display()
-        );
-    }
-    let dst_xcfw = rn_ios.join("Frameworks/XybridFFI.xcframework");
-    if dst_xcfw.exists() {
-        std::fs::remove_dir_all(&dst_xcfw)
-            .with_context(|| format!("Failed to remove existing {}", dst_xcfw.display()))?;
-    }
-    std::fs::create_dir_all(rn_ios.join("Frameworks"))?;
-    copy_dir_recursive(&src_xcfw, &dst_xcfw)
-        .context("Failed to copy XCFramework into RN module")?;
-    println!("  ✓ XCFramework -> {}", dst_xcfw.display());
-
-    // 3. Stage the bolt Swift wrapper sources into ios/XybridSwift/. The RN
-    //    Swift glue (XybridModuleImpl.swift) calls into these directly.
-    let dst_swift = rn_ios.join("XybridSwift");
-    if dst_swift.exists() {
-        std::fs::remove_dir_all(&dst_swift)
-            .with_context(|| format!("Failed to clean {}", dst_swift.display()))?;
-    }
-    std::fs::create_dir_all(&dst_swift)?;
-    for fname in ["Xybrid.swift", "xybrid_bolt.swift"] {
-        let src = PathBuf::from("bindings/apple/Sources/Xybrid").join(fname);
-        if !src.is_file() {
-            anyhow::bail!(
-                "Expected {} — run `cargo xtask build-xcframework` first",
-                src.display()
-            );
-        }
-        let dst = dst_swift.join(fname);
-        std::fs::copy(&src, &dst)
-            .with_context(|| format!("Failed to copy {} to {}", src.display(), dst.display()))?;
-        println!("  ✓ {} -> {}", fname, dst.display());
-    }
-
-    println!();
-    println!("✓ React Native iOS staging complete (version {})", version);
-    println!("  Next: cd bindings/react-native && npm pack");
-
-    Ok(())
-}
-
-// The previous `build_xcframework_macos_only` fallback (built only the
-// macOS slice when ORT iOS was unavailable) is gone — boltffi's pack
-// drives target selection from `crates/xybrid-bolt/boltffi.toml`. If a
-// slice is broken on a given host, fix the config rather than papering
-// over the failure in xtask.
+// The Bazel-era removals: `stage-react-native` and `build-android` were thin
+// proxies over Bazel (`--config=ios //bindings/apple:XybridFFI`,
+// `//bindings/kotlin:xybrid_kotlin_aar`) — CI and local dev now run Bazel
+// directly and stage outputs with plain `unzip`/`cp`. `build-xcframework`
+// (boltffi pack) was superseded by the rules_apple target that ships the
+// release; `setup-targets`, `build-all`, and `package` had no remaining
+// consumers (Bazel brings its own toolchains, cargokit installs its own
+// rustup targets, and release-prep.yml assembles release artifacts itself).
+// See `CONTRIBUTING.md` for the replacement commands.
 
 /// Recursively copy a directory
 fn copy_dir_recursive(src: &PathBuf, dst: &PathBuf) -> Result<()> {
@@ -1278,101 +912,12 @@ fn copy_dir_recursive(src: &PathBuf, dst: &PathBuf) -> Result<()> {
     Ok(())
 }
 
-/// Build the Android AAR (all shipped ABIs) via Bazel and stage its jniLibs.
-///
-/// Delegates to `bazel build //bindings/kotlin:xybrid_kotlin_aar`, which
-/// produces the feature-complete 3-ABI AAR (text llama + candle voice + mtmd
-/// vision) and, per ABI, `libxybrid-bolt.so` (one clean linker output — 16 KB
-/// aligned, `libc++_shared.so` in DT_NEEDED, no patchelf) + the vendored
-/// `libonnxruntime.so` + `libc++_shared.so`. This replaces the retired
-/// `tools/scripts/build-android-bolt.sh` (boltffi pack + clang-shim relink).
-///
-/// The AAR's `jni/<abi>/` payload is staged into `bindings/kotlin/libs/` — the
-/// layout Gradle publishes from. Uses BuildBuddy RBE when a config is present,
-/// else a local build (the NDK is a pinned Bazel download; no machine setup).
-///
-/// The `--abi` knob is accepted for interface compatibility but ignored: the
-/// AAR always builds every ABI in `bindings/kotlin/build.gradle.kts`'s
-/// `abiFilters`.
-fn build_android(release: bool, abis: Vec<AndroidAbi>, version: &str) -> Result<()> {
-    let profile = if release { "release" } else { "debug" };
-    if !abis.is_empty() {
-        eprintln!(
-            "warning: --abi filter ignored; the Bazel AAR always builds every ABI \
-             configured in bindings/kotlin/build.gradle.kts. Requested: {:?}",
-            abis.iter().map(|a| a.ndk_arch()).collect::<Vec<_>>()
-        );
-    }
-
-    println!(
-        "Building the Android AAR via Bazel ({} mode, version {})...",
-        profile, version
-    );
-
-    // Build the feature-complete 3-ABI AAR (text + candle voice + mtmd vision).
-    // Use RBE if a BuildBuddy config is present (.context/buildbuddy.bazelrc,
-    // gitignored — CI writes it from a secret); otherwise a local build. The NDK
-    // is a pinned Bazel download, so no machine setup is needed either way.
-    let compilation_mode = if release { "opt" } else { "fastbuild" };
-    let mut args: Vec<String> = vec!["build".into()];
-    if PathBuf::from(".context/buildbuddy.bazelrc").is_file() {
-        args.push("--config=remote".into());
-    }
-    args.push("-c".into());
-    args.push(compilation_mode.into());
-    args.push("//bindings/kotlin:xybrid_kotlin_aar".into());
-
-    let status = Command::new("bazelisk")
-        .args(&args)
-        .status()
-        .or_else(|_| Command::new("bazel").args(&args).status())
-        .context("Failed to run bazelisk/bazel — is Bazel installed?")?;
-    if !status.success() {
-        anyhow::bail!("bazel build //bindings/kotlin:xybrid_kotlin_aar failed");
-    }
-
-    // Stage the AAR's jniLibs into bindings/kotlin/libs/ — the layout Gradle
-    // publishes from and the CI verify/dlopen-gate steps consume.
-    let aar = "bazel-bin/bindings/kotlin/xybrid-kotlin.aar";
-    let libs = PathBuf::from("bindings/kotlin/libs");
-    let _ = std::fs::remove_dir_all(&libs);
-    std::fs::create_dir_all(&libs).context("create bindings/kotlin/libs")?;
-    let extract = PathBuf::from("target/aar-jnilibs");
-    let _ = std::fs::remove_dir_all(&extract);
-    if !Command::new("unzip")
-        .args(["-o", "-q", aar, "jni/*", "-d", extract.to_str().unwrap()])
-        .status()
-        .context("extract the AAR jniLibs")?
-        .success()
-    {
-        anyhow::bail!("failed to extract jniLibs from {aar}");
-    }
-    if !Command::new("cp")
-        .args([
-            "-a",
-            &format!("{}/jni/.", extract.display()),
-            libs.to_str().unwrap(),
-        ])
-        .status()?
-        .success()
-    {
-        anyhow::bail!("failed to stage jniLibs into {}", libs.display());
-    }
-
-    println!();
-    println!("✓ Android AAR built via Bazel ({compilation_mode} mode).");
-    println!("  Version: {version}");
-    println!("  Output:  bindings/kotlin/libs/{{abi}}/*.so");
-
-    Ok(())
-}
-
-/// Build xybrid-ffi for an Android target using cargo-ndk.
+/// Build xybrid-bolt for an Android target using cargo-ndk.
 ///
 /// This uses the same cargo-ndk approach as the working Kotlin and Flutter
 /// Android CI workflows, which handles all NDK toolchain setup automatically
 /// (CC, CXX, linker, cmake, PATH, etc.).
-fn build_ffi_android(target: &str, release: bool, features: &str) -> Result<()> {
+fn build_ffi_android(crate_name: &str, target: &str, release: bool, features: &str) -> Result<()> {
     let has_cargo_ndk = Command::new("cargo")
         .args(["ndk", "--version"])
         .output()
@@ -1397,7 +942,7 @@ fn build_ffi_android(target: &str, release: bool, features: &str) -> Result<()> 
         .arg("28")
         .arg("build")
         .arg("-p")
-        .arg("xybrid-ffi")
+        .arg(crate_name)
         .arg("--features")
         .arg(features);
 
@@ -1711,355 +1256,6 @@ fn get_flutter_lib_name(target: &str) -> &'static str {
     }
 }
 
-/// All required targets for cross-compilation
-const ALL_TARGETS: &[(&str, &str)] = &[
-    // iOS targets (Apple Silicon only)
-    ("aarch64-apple-ios", "iOS arm64"),
-    ("aarch64-apple-ios-sim", "iOS Simulator arm64"),
-    // macOS targets (Apple Silicon only — ort-sys has no x86_64 prebuilt binaries)
-    ("aarch64-apple-darwin", "macOS arm64"),
-    // Android targets
-    ("aarch64-linux-android", "Android arm64-v8a"),
-    ("armv7-linux-androideabi", "Android armeabi-v7a"),
-    ("x86_64-linux-android", "Android x86_64"),
-];
-
-/// Install required Rust cross-compilation targets
-fn setup_targets() -> Result<()> {
-    println!("Setting up Rust cross-compilation targets...");
-    println!();
-
-    // Get currently installed targets
-    let output = Command::new("rustup")
-        .args(["target", "list", "--installed"])
-        .output()
-        .context("Failed to run rustup target list")?;
-
-    if !output.status.success() {
-        anyhow::bail!("rustup target list failed");
-    }
-
-    let installed_targets: Vec<String> = String::from_utf8_lossy(&output.stdout)
-        .lines()
-        .map(|s| s.trim().to_string())
-        .collect();
-
-    let mut installed_count = 0;
-    let mut skipped_count = 0;
-
-    // Check and install each target
-    for (target, description) in ALL_TARGETS {
-        if installed_targets.contains(&target.to_string()) {
-            println!("  ✓ {} ({}) - already installed", target, description);
-            skipped_count += 1;
-            continue;
-        }
-
-        print!("  Installing {} ({})...", target, description);
-
-        let status = Command::new("rustup")
-            .args(["target", "add", target])
-            .output()
-            .with_context(|| format!("Failed to run rustup target add {}", target))?;
-
-        if status.status.success() {
-            println!(" ✓");
-            installed_count += 1;
-        } else {
-            let stderr = String::from_utf8_lossy(&status.stderr);
-            println!(" ✗");
-            eprintln!("    Error: {}", stderr.trim());
-        }
-    }
-
-    println!();
-    println!("✓ Setup complete!");
-    println!();
-    println!("Summary:");
-    println!("  - {} targets newly installed", installed_count);
-    println!("  - {} targets already installed", skipped_count);
-    println!();
-    println!("Installed targets:");
-
-    // List all targets grouped by platform
-    println!();
-    println!("  iOS:");
-    println!("    - aarch64-apple-ios (device)");
-    println!("    - aarch64-apple-ios-sim (simulator arm64)");
-    println!();
-    println!("  macOS:");
-    println!("    - aarch64-apple-darwin (arm64)");
-    println!();
-    println!("  Android:");
-    println!("    - aarch64-linux-android (arm64-v8a)");
-    println!("    - armv7-linux-androideabi (armeabi-v7a)");
-    println!("    - x86_64-linux-android (x86_64)");
-
-    Ok(())
-}
-
-/// Represents a platform build task
-#[derive(Debug, Clone, Copy)]
-enum BuildPlatform {
-    XCFramework,
-    Android,
-    FlutterIos,
-    FlutterAndroid,
-    FlutterMacos,
-    FlutterWindows,
-    FlutterLinux,
-}
-
-impl BuildPlatform {
-    /// Returns the name of the platform
-    fn name(&self) -> &'static str {
-        match self {
-            BuildPlatform::XCFramework => "XCFramework (iOS/macOS)",
-            BuildPlatform::Android => "Android",
-            BuildPlatform::FlutterIos => "Flutter iOS",
-            BuildPlatform::FlutterAndroid => "Flutter Android",
-            BuildPlatform::FlutterMacos => "Flutter macOS",
-            BuildPlatform::FlutterWindows => "Flutter Windows",
-            BuildPlatform::FlutterLinux => "Flutter Linux",
-        }
-    }
-
-    /// Check if this platform can be built on the current OS
-    fn can_build_on_current_os(&self) -> bool {
-        match self {
-            BuildPlatform::XCFramework => cfg!(target_os = "macos"),
-            BuildPlatform::Android | BuildPlatform::FlutterAndroid => true, // Cross-compile from any OS
-            BuildPlatform::FlutterIos | BuildPlatform::FlutterMacos => cfg!(target_os = "macos"),
-            BuildPlatform::FlutterWindows => cfg!(target_os = "windows"),
-            BuildPlatform::FlutterLinux => cfg!(target_os = "linux"),
-        }
-    }
-
-    /// Returns the skip reason if this platform cannot be built
-    fn skip_reason(&self) -> &'static str {
-        match self {
-            BuildPlatform::XCFramework => "XCFramework builds require macOS",
-            BuildPlatform::Android | BuildPlatform::FlutterAndroid => {
-                "Android builds require Android NDK"
-            }
-            BuildPlatform::FlutterIos => "iOS builds require macOS",
-            BuildPlatform::FlutterMacos => "macOS builds require macOS",
-            BuildPlatform::FlutterWindows => "Windows builds require Windows",
-            BuildPlatform::FlutterLinux => "Linux builds require Linux",
-        }
-    }
-
-    /// Get all platforms
-    fn all() -> Vec<BuildPlatform> {
-        vec![
-            BuildPlatform::XCFramework,
-            BuildPlatform::Android,
-            BuildPlatform::FlutterIos,
-            BuildPlatform::FlutterAndroid,
-            BuildPlatform::FlutterMacos,
-            BuildPlatform::FlutterWindows,
-            BuildPlatform::FlutterLinux,
-        ]
-    }
-}
-
-/// Build all platforms with one command
-fn build_all(release: bool, parallel: bool, version: &str) -> Result<()> {
-    use std::sync::{Arc, Mutex};
-    use std::thread;
-
-    let profile = if release { "release" } else { "debug" };
-
-    println!(
-        "Building all platforms ({} mode, version {})...",
-        profile, version
-    );
-    println!();
-
-    // Categorize platforms into buildable and skipped
-    let all_platforms = BuildPlatform::all();
-    let (buildable, skipped): (Vec<_>, Vec<_>) = all_platforms
-        .into_iter()
-        .partition(|p| p.can_build_on_current_os());
-
-    // Report skipped platforms upfront
-    if !skipped.is_empty() {
-        println!("Skipping (not supported on this OS):");
-        for platform in &skipped {
-            println!("  • {} - {}", platform.name(), platform.skip_reason());
-        }
-        println!();
-    }
-
-    if buildable.is_empty() {
-        println!("No platforms can be built on the current OS.");
-        return Ok(());
-    }
-
-    println!("Building:");
-    for platform in &buildable {
-        println!("  • {}", platform.name());
-    }
-    println!();
-
-    // Track results
-    let built: Arc<Mutex<Vec<BuildPlatform>>> = Arc::new(Mutex::new(Vec::new()));
-    let failed: Arc<Mutex<Vec<(BuildPlatform, String)>>> = Arc::new(Mutex::new(Vec::new()));
-
-    if parallel {
-        // Parallel builds (experimental)
-        println!("Running builds in parallel (experimental)...");
-        println!();
-
-        let version_owned = version.to_string();
-        let handles: Vec<_> = buildable
-            .iter()
-            .map(|&platform| {
-                let built = Arc::clone(&built);
-                let failed = Arc::clone(&failed);
-                let ver = version_owned.clone();
-
-                thread::spawn(move || {
-                    let result = run_platform_build(platform, release, &ver);
-                    match result {
-                        Ok(()) => {
-                            built.lock().unwrap().push(platform);
-                        }
-                        Err(e) => {
-                            failed.lock().unwrap().push((platform, e.to_string()));
-                        }
-                    }
-                })
-            })
-            .collect();
-
-        // Wait for all builds to complete
-        for handle in handles {
-            handle.join().expect("Thread panicked");
-        }
-    } else {
-        // Sequential builds
-        for platform in &buildable {
-            println!(
-                "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-            );
-            println!("Building {}...", platform.name());
-            println!(
-                "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-            );
-            println!();
-
-            match run_platform_build(*platform, release, version) {
-                Ok(()) => {
-                    built.lock().unwrap().push(*platform);
-                    println!();
-                    println!("✓ {} build complete", platform.name());
-                    println!();
-                }
-                Err(e) => {
-                    failed.lock().unwrap().push((*platform, e.to_string()));
-                    println!();
-                    eprintln!("✗ {} build failed: {}", platform.name(), e);
-                    println!();
-                }
-            }
-        }
-    }
-
-    // Print summary
-    println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-    println!("Build Summary");
-    println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-    println!();
-
-    let built_list = built.lock().unwrap();
-    let failed_list = failed.lock().unwrap();
-
-    if !built_list.is_empty() {
-        println!("✓ Successfully built ({}):", built_list.len());
-        for platform in built_list.iter() {
-            println!("    • {}", platform.name());
-        }
-        println!();
-    }
-
-    if !failed_list.is_empty() {
-        println!("✗ Failed ({}):", failed_list.len());
-        for (platform, error) in failed_list.iter() {
-            println!("    • {}: {}", platform.name(), error);
-        }
-        println!();
-    }
-
-    if !skipped.is_empty() {
-        println!("⊘ Skipped ({}):", skipped.len());
-        for platform in &skipped {
-            println!("    • {}", platform.name());
-        }
-        println!();
-    }
-
-    // Summary line
-    let total = buildable.len();
-    let success = built_list.len();
-    let fail = failed_list.len();
-    let skip = skipped.len();
-
-    println!(
-        "Total: {} built, {} failed, {} skipped",
-        success, fail, skip
-    );
-
-    if fail > 0 {
-        anyhow::bail!("{} of {} builds failed", fail, total);
-    }
-
-    Ok(())
-}
-
-/// Execute the build for a specific platform
-fn run_platform_build(platform: BuildPlatform, release: bool, version: &str) -> Result<()> {
-    match platform {
-        BuildPlatform::XCFramework => build_xcframework(release, version),
-        BuildPlatform::Android => build_android(release, vec![], version),
-        BuildPlatform::FlutterIos => build_flutter(FlutterPlatform::Ios, release, version, false),
-        BuildPlatform::FlutterAndroid => {
-            build_flutter(FlutterPlatform::Android, release, version, false)
-        }
-        BuildPlatform::FlutterMacos => {
-            build_flutter(FlutterPlatform::Macos, release, version, false)
-        }
-        BuildPlatform::FlutterWindows => {
-            build_flutter(FlutterPlatform::Windows, release, version, false)
-        }
-        BuildPlatform::FlutterLinux => {
-            build_flutter(FlutterPlatform::Linux, release, version, false)
-        }
-    }
-}
-
-/// Package info for manifest.json
-#[derive(serde::Serialize)]
-struct PackageInfo {
-    name: String,
-    version: String,
-    filename: String,
-    size: u64,
-    sha256: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    platform: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    architectures: Option<Vec<String>>,
-}
-
-/// Manifest containing all packages
-#[derive(serde::Serialize)]
-struct Manifest {
-    version: String,
-    created_at: String,
-    packages: Vec<PackageInfo>,
-}
-
 /// Calculate SHA256 checksum of a file
 fn calculate_sha256(path: &PathBuf) -> Result<String> {
     use std::io::Read;
@@ -2227,126 +1423,6 @@ fn create_zip(source_dir: &Path, output_path: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Package build artifacts for distribution
-fn package_artifacts(
-    version: &str,
-    output_dir: &Path,
-    skip_apple: bool,
-    skip_android: bool,
-    skip_flutter: bool,
-) -> Result<()> {
-    println!("Packaging artifacts (version {})...", version);
-    println!();
-
-    // Create output directory
-    std::fs::create_dir_all(output_dir)
-        .with_context(|| format!("Failed to create output directory: {:?}", output_dir))?;
-
-    let mut packages: Vec<PackageInfo> = Vec::new();
-
-    // Package XCFramework (Apple)
-    if !skip_apple {
-        if let Some(pkg) = package_xcframework(version, output_dir)? {
-            packages.push(pkg);
-        }
-    } else {
-        println!("Skipping Apple artifacts (--skip-apple)");
-    }
-
-    // Package Android .so files
-    if !skip_android {
-        if let Some(pkg) = package_android(version, output_dir)? {
-            packages.push(pkg);
-        }
-    } else {
-        println!("Skipping Android artifacts (--skip-android)");
-    }
-
-    // Package Flutter plugin
-    if !skip_flutter {
-        if let Some(pkg) = package_flutter(version, output_dir)? {
-            packages.push(pkg);
-        }
-    } else {
-        println!("Skipping Flutter artifacts (--skip-flutter)");
-    }
-
-    if packages.is_empty() {
-        println!();
-        println!("No artifacts were packaged.");
-        println!("Run build commands first to generate artifacts:");
-        println!("  cargo xtask build-xcframework");
-        println!("  cargo xtask build-android");
-        println!("  cargo xtask build-flutter --platform <platform>");
-        return Ok(());
-    }
-
-    // Generate checksums file
-    println!();
-    println!("Generating checksums...");
-    let checksums_path = output_dir.join("checksums.sha256");
-    let mut checksums_content = String::new();
-    for pkg in &packages {
-        checksums_content.push_str(&format!("{}  {}\n", pkg.sha256, pkg.filename));
-    }
-    std::fs::write(&checksums_path, &checksums_content)
-        .context("Failed to write checksums file")?;
-    println!("  ✓ {}", checksums_path.display());
-
-    // Generate manifest.json
-    println!();
-    println!("Generating manifest.json...");
-    let manifest = Manifest {
-        version: version.to_string(),
-        created_at: chrono_now(),
-        packages,
-    };
-    let manifest_path = output_dir.join("manifest.json");
-    let manifest_json =
-        serde_json::to_string_pretty(&manifest).context("Failed to serialize manifest")?;
-    std::fs::write(&manifest_path, &manifest_json).context("Failed to write manifest.json")?;
-    println!("  ✓ {}", manifest_path.display());
-
-    // Print summary
-    println!();
-    println!("✓ Packaging complete!");
-    println!();
-    println!("Output directory: {}", output_dir.display());
-    println!();
-    println!("Packages:");
-    for pkg in &manifest.packages {
-        let size_kb = pkg.size / 1024;
-        let size_str = if size_kb > 1024 {
-            format!("{:.1} MB", size_kb as f64 / 1024.0)
-        } else {
-            format!("{} KB", size_kb)
-        };
-        println!("  • {} ({})", pkg.filename, size_str);
-    }
-    println!();
-    println!("Files:");
-    println!("  • manifest.json");
-    println!("  • checksums.sha256");
-
-    Ok(())
-}
-
-/// Get current timestamp in ISO 8601 format (simplified, no external dependencies)
-fn chrono_now() -> String {
-    // Use the date command to get ISO 8601 timestamp
-    if let Ok(output) = Command::new("date")
-        .arg("-u")
-        .arg("+%Y-%m-%dT%H:%M:%SZ")
-        .output()
-    {
-        if output.status.success() {
-            return String::from_utf8_lossy(&output.stdout).trim().to_string();
-        }
-    }
-    // Fallback
-    "unknown".to_string()
-}
-
 /// One platform entry in the Unity native-resolver manifest.
 ///
 /// Field names/shape are the wire contract consumed by
@@ -2380,7 +1456,7 @@ fn package_unity_natives(version: &str, output_dir: &Path) -> Result<()> {
     if !plugins_dir.exists() {
         anyhow::bail!(
             "Unity plugins dir not found at {:?} — run \
-             `cargo xtask build-unity --all-platforms --deploy` first",
+             `cargo xtask build-unity --all-platforms --deploy --bolt` first",
             plugins_dir
         );
     }
@@ -2391,10 +1467,10 @@ fn package_unity_natives(version: &str, output_dir: &Path) -> Result<()> {
     // (platform key, Unity plugin subdir, primary native library relative path).
     // Presence of the primary library gates whether the platform is packaged.
     let platforms: [(&str, &str, &str); 5] = [
-        ("macos", "macOS", "libxybrid_ffi.dylib"),
-        ("windows", "Windows", "xybrid_ffi.dll"),
-        ("linux", "Linux", "libxybrid_ffi.so"),
-        ("ios", "iOS", "libxybrid_ffi.a"),
+        ("macos", "macOS", "libxybrid_bolt.dylib"),
+        ("windows", "Windows", "xybrid_bolt.dll"),
+        ("linux", "Linux", "libxybrid_bolt.so"),
+        ("ios", "iOS", "libxybrid_bolt.a"),
         // Android has per-ABI subdirs; presence is checked separately below.
         ("android", "Android", ""),
     ];
@@ -2405,10 +1481,10 @@ fn package_unity_natives(version: &str, output_dir: &Path) -> Result<()> {
     for (key, plugin_dir, primary_lib) in platforms {
         let src_dir = plugins_dir.join(plugin_dir);
         let present = if key == "android" {
-            // At least one ABI subdir must contain the FFI .so.
+            // At least one ABI subdir must contain the bolt .so.
             ["arm64-v8a", "armeabi-v7a", "x86_64"]
                 .iter()
-                .any(|abi| src_dir.join(abi).join("libxybrid_ffi.so").exists())
+                .any(|abi| src_dir.join(abi).join("libxybrid_bolt.so").exists())
         } else {
             src_dir.join(primary_lib).exists()
         };
@@ -2459,7 +1535,7 @@ fn package_unity_natives(version: &str, output_dir: &Path) -> Result<()> {
     if entries.is_empty() {
         anyhow::bail!(
             "No Unity native platforms were present to package — run \
-             `cargo xtask build-unity --all-platforms --deploy` first"
+             `cargo xtask build-unity --all-platforms --deploy --bolt` first"
         );
     }
 
@@ -2480,234 +1556,6 @@ fn package_unity_natives(version: &str, output_dir: &Path) -> Result<()> {
     );
 
     Ok(())
-}
-
-/// Package XCFramework as a .zip file
-fn package_xcframework(version: &str, output_dir: &Path) -> Result<Option<PackageInfo>> {
-    let xcframework_dir = PathBuf::from("bindings/apple/XCFrameworks");
-    let xcframework_path = xcframework_dir.join("XybridFFI.xcframework");
-
-    if !xcframework_path.exists() {
-        println!("Skipping XCFramework - not found at {:?}", xcframework_path);
-        println!("  Run 'cargo xtask build-xcframework' first");
-        return Ok(None);
-    }
-
-    println!("Packaging XCFramework...");
-
-    let filename = format!("XybridFFI-{}.xcframework.zip", version);
-    let output_path = output_dir.join(&filename);
-
-    // Remove existing file
-    if output_path.exists() {
-        std::fs::remove_file(&output_path)?;
-    }
-
-    // Create zip from XCFramework directory
-    let status = Command::new("zip")
-        .arg("-r")
-        .arg("-q")
-        .arg(&output_path)
-        .arg("XybridFFI.xcframework")
-        .current_dir(&xcframework_dir)
-        .status()
-        .context("Failed to run zip command")?;
-
-    if !status.success() {
-        anyhow::bail!("Failed to create XCFramework zip");
-    }
-
-    let size = std::fs::metadata(&output_path)?.len();
-    let sha256 = calculate_sha256(&output_path)?;
-
-    println!(
-        "  ✓ {} ({} bytes, sha256: {}...)",
-        filename,
-        size,
-        &sha256[..16]
-    );
-
-    Ok(Some(PackageInfo {
-        name: "XybridFFI.xcframework".to_string(),
-        version: version.to_string(),
-        filename,
-        size,
-        sha256,
-        platform: Some("apple".to_string()),
-        architectures: Some(vec![
-            "ios-arm64".to_string(),
-            "ios-arm64_x86_64-simulator".to_string(),
-            "macos-arm64_x86_64".to_string(),
-        ]),
-    }))
-}
-
-/// Package Android .so files as a .zip file
-fn package_android(version: &str, output_dir: &Path) -> Result<Option<PackageInfo>> {
-    let libs_dir = PathBuf::from("bindings/kotlin/libs");
-
-    if !libs_dir.exists() {
-        println!("Skipping Android libs - not found at {:?}", libs_dir);
-        println!("  Run 'cargo xtask build-android' first");
-        return Ok(None);
-    }
-
-    // Check for at least one ABI directory containing any .so. The bolt
-    // build drops `libxybrid-bolt.so` plus the bundled ORT runtime
-    // (`libonnxruntime.so`, `libc++_shared.so`); match on "directory has
-    // ≥1 .so" rather than a hard-coded filename so the packaged set stays
-    // correct as those names evolve.
-    let abis = ["arm64-v8a", "armeabi-v7a", "x86_64"];
-    let mut found_abis = Vec::new();
-
-    for abi in &abis {
-        let abi_dir = libs_dir.join(abi);
-        let has_so = std::fs::read_dir(&abi_dir)
-            .map(|entries| {
-                entries.flatten().any(|e| {
-                    let p = e.path();
-                    p.is_file() && p.extension().and_then(|x| x.to_str()) == Some("so")
-                })
-            })
-            .unwrap_or(false);
-        if has_so {
-            found_abis.push(abi.to_string());
-        }
-    }
-
-    if found_abis.is_empty() {
-        println!("Skipping Android libs - no .so files found");
-        println!("  Run 'cargo xtask build-android' first");
-        return Ok(None);
-    }
-
-    println!("Packaging Android libs...");
-
-    let filename = format!("xybrid-android-{}.zip", version);
-    let output_path = output_dir.join(&filename);
-
-    // Remove existing file
-    if output_path.exists() {
-        std::fs::remove_file(&output_path)?;
-    }
-
-    // Create a temporary directory structure for zipping
-    let temp_dir = output_dir.join(".android-package-temp");
-    if temp_dir.exists() {
-        std::fs::remove_dir_all(&temp_dir)?;
-    }
-    std::fs::create_dir_all(&temp_dir)?;
-
-    // Copy every .so in each ABI dir (libxybrid-bolt.so + the bundled
-    // ORT runtime) to the temp directory.
-    for abi in &found_abis {
-        let src_dir = libs_dir.join(abi);
-        let dst_dir = temp_dir.join(abi);
-        std::fs::create_dir_all(&dst_dir)?;
-
-        for entry in std::fs::read_dir(&src_dir)? {
-            let path = entry?.path();
-            if path.is_file() && path.extension().and_then(|x| x.to_str()) == Some("so") {
-                let name = path.file_name().expect("dir entry has a filename");
-                std::fs::copy(&path, dst_dir.join(name))?;
-            }
-        }
-    }
-
-    // Create zip
-    create_zip(&temp_dir, &output_path)?;
-
-    // Cleanup temp directory
-    std::fs::remove_dir_all(&temp_dir)?;
-
-    let size = std::fs::metadata(&output_path)?.len();
-    let sha256 = calculate_sha256(&output_path)?;
-
-    println!(
-        "  ✓ {} ({} bytes, sha256: {}...)",
-        filename,
-        size,
-        &sha256[..16]
-    );
-
-    Ok(Some(PackageInfo {
-        name: "xybrid-android".to_string(),
-        version: version.to_string(),
-        filename,
-        size,
-        sha256,
-        platform: Some("android".to_string()),
-        architectures: Some(found_abis),
-    }))
-}
-
-/// Package Flutter plugin as a tarball
-fn package_flutter(version: &str, output_dir: &Path) -> Result<Option<PackageInfo>> {
-    let flutter_dir = PathBuf::from("bindings/flutter");
-
-    if !flutter_dir.exists() {
-        println!("Skipping Flutter plugin - not found at {:?}", flutter_dir);
-        return Ok(None);
-    }
-
-    // Check for pubspec.yaml to verify it's a Flutter plugin
-    let pubspec_path = flutter_dir.join("pubspec.yaml");
-    if !pubspec_path.exists() {
-        println!("Skipping Flutter plugin - pubspec.yaml not found");
-        return Ok(None);
-    }
-
-    println!("Packaging Flutter plugin...");
-
-    let filename = format!("xybrid-flutter-{}.tar.gz", version);
-    let output_path = output_dir.join(&filename);
-
-    // Remove existing file
-    if output_path.exists() {
-        std::fs::remove_file(&output_path)?;
-    }
-
-    // Create tarball, excluding build artifacts and generated code
-    let parent = flutter_dir.parent().unwrap_or(&flutter_dir);
-
-    let status = Command::new("tar")
-        .arg("-czf")
-        .arg(&output_path)
-        .arg("--exclude=.dart_tool")
-        .arg("--exclude=build")
-        .arg("--exclude=.packages")
-        .arg("--exclude=pubspec.lock")
-        .arg("--exclude=lib/src/rust") // Exclude FRB-generated code
-        .arg("--exclude=rust/target") // Exclude Rust build artifacts
-        .arg("-C")
-        .arg(parent)
-        .arg("flutter")
-        .status()
-        .context("Failed to run tar command")?;
-
-    if !status.success() {
-        anyhow::bail!("Failed to create Flutter plugin tarball");
-    }
-
-    let size = std::fs::metadata(&output_path)?.len();
-    let sha256 = calculate_sha256(&output_path)?;
-
-    println!(
-        "  ✓ {} ({} bytes, sha256: {}...)",
-        filename,
-        size,
-        &sha256[..16]
-    );
-
-    Ok(Some(PackageInfo {
-        name: "xybrid-flutter".to_string(),
-        version: version.to_string(),
-        filename,
-        size,
-        sha256,
-        platform: Some("flutter".to_string()),
-        architectures: None,
-    }))
 }
 
 #[cfg(test)]

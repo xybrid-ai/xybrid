@@ -32,20 +32,27 @@ _SYMBOLS: Final = frozenset(
         "boltffi_free_buf",
         "boltffi_free_string",
         "boltffi_init_sdk_cache_dir",
+        "boltffi_is_speculative_cloud_enabled",
         "boltffi_json_schema_to_gbnf",
         "boltffi_last_error_message",
         "boltffi_set_api_key",
+        "boltffi_set_platform_url",
+        "boltffi_set_speculative_cloud",
         "boltffi_set_battery_level",
         "boltffi_set_binding",
         "boltffi_set_provider_api_key",
         "boltffi_set_thermal_state",
+        "boltffi_xybrid_model_await_download",
         "boltffi_xybrid_model_default_voice",
+        "boltffi_xybrid_model_download_status",
         "boltffi_xybrid_model_free",
         "boltffi_xybrid_model_from_bundle",
         "boltffi_xybrid_model_from_directory",
         "boltffi_xybrid_model_from_huggingface",
         "boltffi_xybrid_model_from_registry",
+        "boltffi_xybrid_model_from_registry_speculative",
         "boltffi_xybrid_model_has_voices",
+        "boltffi_xybrid_model_is_cloud_serving",
         "boltffi_xybrid_model_is_llm",
         "boltffi_xybrid_model_is_loaded",
         "boltffi_xybrid_model_model_id",
@@ -110,6 +117,26 @@ class XybridOutputType(IntEnum):
     AUDIO = 1
     EMBEDDING = 2
     UNKNOWN = 3
+
+
+class XybridExecutionTarget(IntEnum):
+    """Where a result was actually produced.
+
+    Cloud fallback keeps the model id identical on both legs, so this is the
+    only way to tell a device answer from a gateway answer.
+    """
+
+    LOCAL = 0
+    CLOUD = 1
+
+
+class XybridDownloadState(IntEnum):
+    """Lifecycle of the background download behind a speculative load."""
+
+    DOWNLOADING = 0
+    READY = 1
+    #: Download failed; the cloud keeps serving and ``is_loaded`` never flips.
+    FAILED = 2
 
 
 class XybridThermalState(IntEnum):
@@ -811,6 +838,30 @@ class XybridInferenceMetrics:
 
 
 @dataclass(frozen=True, slots=True)
+class XybridDownloadStatus:
+    """Download progress and state in one consistent read.
+
+    Taken as a snapshot so a polling caller never sees a torn pair (for
+    example ``READY`` alongside a stale ``0.34`` progress).
+    """
+
+    state: XybridDownloadState
+    #: 0.0 to 1.0.
+    progress: float
+
+    @staticmethod
+    def _decode(reader: _WireReader) -> "XybridDownloadStatus":
+        return XybridDownloadStatus(
+            state=XybridDownloadState(reader.read_i32()),
+            progress=reader.read_f32(),
+        )
+
+    def _encode(self, writer: _WireWriter) -> None:
+        writer.write_i32(self.state.value)
+        writer.write_f32(self.progress)
+
+
+@dataclass(frozen=True, slots=True)
 class XybridResult:
     """Inference output returned from a model run."""
 
@@ -818,6 +869,7 @@ class XybridResult:
     output_type: XybridOutputType
     model_id: str
     latency_ms: int
+    execution_target: XybridExecutionTarget
     metrics: XybridInferenceMetrics
 
     @staticmethod
@@ -827,6 +879,7 @@ class XybridResult:
             output_type=XybridOutputType(reader.read_i32()),
             model_id=reader.read_string(),
             latency_ms=reader.read_u32(),
+            execution_target=XybridExecutionTarget(reader.read_i32()),
             metrics=XybridInferenceMetrics._decode(reader),
         )
 
@@ -835,6 +888,7 @@ class XybridResult:
         writer.write_i32(self.output_type.value)
         writer.write_string(self.model_id)
         writer.write_u32(self.latency_ms)
+        writer.write_i32(self.execution_target.value)
         self.metrics._encode(writer)
 
     # -- Accessors mirroring the hand-written Swift/Kotlin wrappers; payload
@@ -1032,9 +1086,23 @@ def _load_library_locked() -> ctypes.CDLL:
     lib.boltffi_set_api_key.restype = None
     lib.boltffi_set_provider_api_key.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_void_p, ctypes.c_size_t]
     lib.boltffi_set_provider_api_key.restype = None
+    lib.boltffi_set_platform_url.argtypes = [ctypes.c_void_p, ctypes.c_size_t]
+    lib.boltffi_set_platform_url.restype = None
+    lib.boltffi_set_speculative_cloud.argtypes = [ctypes.c_bool]
+    lib.boltffi_set_speculative_cloud.restype = None
+    lib.boltffi_is_speculative_cloud_enabled.argtypes = []
+    lib.boltffi_is_speculative_cloud_enabled.restype = ctypes.c_bool
 
     lib.boltffi_xybrid_model_from_registry.argtypes = [ctypes.c_void_p, ctypes.c_size_t]
     lib.boltffi_xybrid_model_from_registry.restype = ctypes.c_void_p
+    lib.boltffi_xybrid_model_from_registry_speculative.argtypes = [ctypes.c_void_p, ctypes.c_size_t]
+    lib.boltffi_xybrid_model_from_registry_speculative.restype = ctypes.c_void_p
+    lib.boltffi_xybrid_model_is_cloud_serving.argtypes = [ctypes.c_void_p]
+    lib.boltffi_xybrid_model_is_cloud_serving.restype = ctypes.c_bool
+    lib.boltffi_xybrid_model_download_status.argtypes = [ctypes.c_void_p]
+    lib.boltffi_xybrid_model_download_status.restype = _FfiBuf
+    lib.boltffi_xybrid_model_await_download.argtypes = [ctypes.c_void_p, ctypes.c_uint64]
+    lib.boltffi_xybrid_model_await_download.restype = _FfiBuf
     lib.boltffi_xybrid_model_from_directory.argtypes = [ctypes.c_void_p, ctypes.c_size_t]
     lib.boltffi_xybrid_model_from_directory.restype = ctypes.c_void_p
     lib.boltffi_xybrid_model_from_bundle.argtypes = [ctypes.c_void_p, ctypes.c_size_t]
@@ -1254,6 +1322,36 @@ def set_api_key(api_key: str) -> None:
     _load_library().boltffi_set_api_key(ptr, size)
 
 
+def set_platform_url(url: str) -> None:
+    """Point the cloud gateway at a platform base URL (staging, self-hosted).
+
+    Held in process memory rather than the environment. Pass a bare base URL;
+    the ``/v1`` suffix is applied internally.
+    """
+
+    ptr, size = _string_arg(url)
+    _load_library().boltffi_set_platform_url(ptr, size)
+
+
+def set_speculative_cloud(enabled: bool) -> None:
+    """Enable speculative cloud fallback globally.
+
+    A registry model that is not downloaded yet is then served from the gateway
+    while the weights download in the background. Only takes effect when an API
+    key resolves. Speculation is LLM/chat only, so prefer
+    :meth:`XybridModel.from_registry_speculative` when the process also loads
+    ASR/TTS models, which cannot be served this way.
+    """
+
+    _load_library().boltffi_set_speculative_cloud(enabled)
+
+
+def is_speculative_cloud_enabled() -> bool:
+    """Return whether the global speculative-cloud default is on."""
+
+    return bool(_load_library().boltffi_is_speculative_cloud_enabled())
+
+
 def set_provider_api_key(provider: str, api_key: str) -> None:
     """Set a provider-specific API key."""
 
@@ -1313,6 +1411,25 @@ class XybridModel:
 
         ptr, size = _string_arg(id)
         handle = _load_library().boltffi_xybrid_model_from_registry(ptr, size)
+        if handle is None:
+            _raise_last_error()
+        return cls(handle)
+
+    @classmethod
+    def from_registry_speculative(cls, id: str) -> "XybridModel":
+        """Load from the registry, serving from the cloud while it downloads.
+
+        Returns almost immediately instead of blocking on the download, and
+        switches to on-device by itself once the weights land. Requires a
+        resolvable API key and an uncached model; otherwise this behaves exactly
+        like :meth:`from_registry`. LLM/chat models only.
+
+        Raises:
+            XybridError: If the native constructor fails.
+        """
+
+        ptr, size = _string_arg(id)
+        handle = _load_library().boltffi_xybrid_model_from_registry_speculative(ptr, size)
         if handle is None:
             _raise_last_error()
         return cls(handle)
@@ -1425,6 +1542,54 @@ class XybridModel:
         return bool(_load_library().boltffi_xybrid_model_is_loaded(self._handle))
 
     @property
+    def is_cloud_serving(self) -> bool:
+        """Return whether runs are currently answered by the cloud.
+
+        ``True`` while a speculative model's weights are still downloading.
+        ``False`` for ordinary local models. This predicts the next run;
+        :attr:`XybridResult.execution_target` reports what a run that already
+        happened actually did.
+        """
+
+        if self._handle is None:
+            return False
+        return bool(_load_library().boltffi_xybrid_model_is_cloud_serving(self._handle))
+
+    def download_status(self) -> XybridDownloadStatus:
+        """Return download progress and state in one consistent read.
+
+        Reports ``READY`` at 1.0 for an ordinary local model, so callers need no
+        special case. Poll this to drive a progress bar.
+        """
+
+        # Infallible on the Rust side, so the buffer holds a bare
+        # XybridDownloadStatus with no leading result discriminant — decoding it
+        # through `_decode_result` would eat the state tag as the discriminant
+        # and shift every field after it.
+        data = _copy_and_free_buf(
+            _load_library().boltffi_xybrid_model_download_status(self._require_handle())
+        )
+        return XybridDownloadStatus._decode(_WireReader(data))
+
+    def await_download(self, timeout_ms: int) -> XybridDownloadStatus:
+        """Block until the download finishes or ``timeout_ms`` elapses.
+
+        The convenience helper for "tell me when it is on-device". A
+        ``timeout_ms`` of 0 makes this a non-blocking read, identical to
+        :meth:`download_status`. Returns immediately for a non-speculative
+        model.
+        """
+
+        # Also infallible — see `download_status` for why this must not go
+        # through `_decode_result`.
+        data = _copy_and_free_buf(
+            _load_library().boltffi_xybrid_model_await_download(
+                self._require_handle(), max(0, timeout_ms)
+            )
+        )
+        return XybridDownloadStatus._decode(_WireReader(data))
+
+    @property
     def supports_streaming(self) -> bool:
         """Return whether streaming is supported."""
 
@@ -1528,9 +1693,12 @@ __all__ = [
     "UnsupportedBackendCapability",
     "UnsupportedModelCapability",
     "XybridAbortSignal",
+    "XybridDownloadState",
+    "XybridDownloadStatus",
     "XybridEnvelope",
     "XybridEnvelopeKind",
     "XybridError",
+    "XybridExecutionTarget",
     "XybridGenerationConfig",
     "XybridInferenceMetrics",
     "XybridMessageRole",
@@ -1546,10 +1714,13 @@ __all__ = [
     "clear_thermal_state",
     "configure_runtime",
     "init_sdk_cache_dir",
+    "is_speculative_cloud_enabled",
     "json_schema_to_gbnf",
     "set_api_key",
     "set_battery_level",
     "set_binding",
+    "set_platform_url",
     "set_provider_api_key",
+    "set_speculative_cloud",
     "set_thermal_state",
 ]

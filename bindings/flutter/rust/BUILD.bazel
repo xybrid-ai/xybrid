@@ -1,12 +1,23 @@
 # GATE 5 — flutter_rust_bridge wrapper (Dart cdylib + staticlib).
 #
+# These targets are the RELEASE precompile producers (Flutter G2):
+# release-prep.yml's precompile-flutter-{darwin,linux,windows} jobs build them
+# (staticlib: macOS / iOS / iOS-sim; cdylib: linux + 3 android ABIs + windows) and
+# cargokit signs + uploads the results via --prebuilt-artifact — its asset
+# naming, crate hash, and ed25519 contract are unchanged. Windows joined them
+# once //bazel/toolchains/windows_msvc landed: the cdylib is cross-compiled
+# MSVC-ABI on Linux RBE, and rustc emits the `.dll.lib` import library cargokit
+# needs alongside it. One cargo residual remains — i686-linux-android, which
+# has no Bazel triple in the workspace yet.
+#
 # Builds the Rust artifacts from @crates. Its build.rs is link-glue only —
 # `cargo:rustc-link-lib=c++` on macOS/iOS and the Android 16KB-page link-arg —
-# and a no-op on Linux, so the Linux/desktop cdylib compiles without it. On
-# Apple/Android those link directives must be ported to Bazel linkopts (the same
-# per-platform native glue as the other -sys/FFI crates); flagged below, not
-# wired (desktop-first spike). The frb Dart-bridge codegen is a separate
-# `flutter_rust_bridge_codegen` CLI step (not a build script) and stays in CI.
+# and a no-op on Linux, so the Linux/desktop cdylib compiles without it. Bazel
+# does NOT run this build.rs (no cargo_build_script target), so those link
+# directives are ported to the cdylib's rustc_flags below (+ the android
+# c++_shared that cargo picks up from .cargo/config.toml). The frb Dart-bridge
+# codegen is a separate `flutter_rust_bridge_codegen` CLI step (not a build
+# script) and stays in CI.
 load("@rules_rs//rs:rust_shared_library.bzl", "rust_shared_library")
 load("@rules_rs//rs:rust_static_library.bzl", "rust_static_library")
 load("@crates//:defs.bzl", "all_crate_deps")
@@ -17,16 +28,45 @@ rust_shared_library(
     srcs = glob(["src/**/*.rs"]),
     crate_name = "xybrid_flutter_ffi",
     edition = "2021",
+    # Same reason as //crates/xybrid-bolt:xybrid_bolt_cdylib: rules_rust hands
+    # cdylibs the cc toolchain's DYNAMIC C++ runtime by default, which put
+    # libc++.so.1 in DT_NEEDED even though the hermetic toolchain ships no such
+    # shared object — so the link resolved only inside the build container.
+    # "static" selects static_runtime_lib, the runtime the CLI binary gets.
+    #
+    # LINUX ONLY: on android the dynamic runtime lib is the NDK's
+    # libc++_shared.so, whose DT_NEEDED is load-bearing (see the bolt cdylib's
+    # note — A/B showed a blanket "static" drops it).
+    cc_runtime_linkage = select({
+        "@rules_rs//rs/platforms/config:x86_64-unknown-linux-gnu": "static",
+        "//conditions:default": "dynamic",
+    }),
+    # ["default"] matches the cargokit ship (it passes no --features); the real
+    # candle/vision/coreml feature set flows transitively from the //crates/
+    # xybrid-sdk target this links (verified: the darwin staticlib carries
+    # ggml_metal/mtmd/candle/CoreML symbols with default features only).
     crate_features = ["default"],
     deps = all_crate_deps(normal = True),
-    # APPLE/ANDROID TODO (not wired, desktop-first): the build.rs link directives
-    # become linkopts here, e.g.
-    #   select({
-    #       "@platforms//os:macos": ["-lc++"],
-    #       "@platforms//os:ios":   ["-lc++"],
-    #       "@platforms//os:android": ["-Wl,-z,max-page-size=16384"],
-    #       "//conditions:default": [],
-    #   })
+    # build.rs is NOT run under Bazel (no cargo_build_script target here), so its
+    # link directives are ported to rustc_flags — the proven xybrid-bolt form
+    # (-Clink-arg=, not bare linkopts). cdylib ONLY: the staticlib is an unlinked
+    # archive, so link args are inert there.
+    rustc_flags = select({
+        # ort/llama.cpp/candle are C++ — the C++ runtime must be linked
+        # (build.rs: cargo:rustc-link-lib=c++ on macos/ios).
+        "@platforms//os:macos": ["-Clink-arg=-lc++"],
+        "@platforms//os:ios": ["-Clink-arg=-lc++"],  # covers ios-sim
+        "@platforms//os:android": [
+            # candle/llama.cpp built -DANDROID_STL=c++_shared leave undefined C++
+            # ABI symbols needing a DT_NEEDED. cargo gets this from
+            # .cargo/config.toml (which Bazel doesn't read); build.rs emits only
+            # the 16KB arg — so both are needed here.
+            "-Clink-arg=-lc++_shared",
+            # Android 15+ (API 35) 16KB page alignment; last -z wins with lld.
+            "-Clink-arg=-Wl,-z,max-page-size=16384",
+        ],
+        "//conditions:default": [],
+    }),
     visibility = ["//visibility:public"],
 )
 

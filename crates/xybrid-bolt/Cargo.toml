@@ -21,6 +21,13 @@ xybrid-sdk = { path = "../xybrid-sdk", default-features = false }
 # wires in by default — we describe identifiers as plain `String` to
 # stay consistent with the facade and the FRB/uniffi crates.
 boltffi = { version = "0.25", default-features = false }
+log = "0.4"
+
+[target.'cfg(target_os = "android")'.dependencies]
+android_logger = "0.15"
+
+[target.'cfg(target_os = "ios")'.dependencies]
+oslog = "0.2"
 
 [features]
 default = []

@@ -87,6 +87,12 @@ class XybridResult {
   /// Whether the inference completed successfully.
   bool get success => _inner.success;
 
+  /// Whether this answer came from the device or the cloud gateway.
+  ///
+  /// Cloud fallback — speculative or reactive — keeps the model id identical on
+  /// both legs by design, so this is the only way to tell them apart.
+  FfiExecutionTarget get executionTarget => _inner.executionTarget;
+
   /// Text output (for ASR models).
   ///
   /// Returns null if the model doesn't produce text output.

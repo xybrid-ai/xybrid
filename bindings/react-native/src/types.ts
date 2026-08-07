@@ -38,6 +38,12 @@ export interface GenerationConfig {
   topK?: number;
   repetitionPenalty?: number;
   stopSequences?: string[];
+  /**
+   * Optional GBNF grammar constraining generation to structured output
+   * (local llama backend only). Produce one from a JSON Schema with
+   * {@link jsonSchemaToGbnf}, or pass raw GBNF.
+   */
+  grammar?: string;
 }
 
 /**
@@ -83,7 +89,66 @@ export interface InferenceResult {
   audioBytesBase64?: string;
   embedding?: number[];
   latencyMs: number;
+  /**
+   * Where this answer actually came from. Cloud fallback keeps the model id
+   * identical on both legs by design, so this is the only way to tell a
+   * device answer from a gateway answer.
+   */
+  executionTarget: ExecutionTarget;
 }
+
+/** Where a result was produced — observed fact, not a routing preference. */
+export type ExecutionTarget = 'local' | 'cloud';
+
+/** Lifecycle of the background download behind a speculative load. */
+export type DownloadState =
+  | 'downloading'
+  /** Local handle installed; runs are on-device. */
+  | 'ready'
+  /**
+   * Download failed. The cloud keeps serving and the model never becomes
+   * local — surfacing this is the only way the UI can stop waiting.
+   */
+  | 'failed';
+
+/** Download progress and state in one consistent read. */
+export interface DownloadStatus {
+  state: DownloadState;
+  /** 0.0 to 1.0. */
+  progress: number;
+}
+
+/** One token produced during streaming inference. */
+export interface StreamToken {
+  /** The decoded token text for this step. */
+  token: string;
+  /** Raw token id, when the backend exposes one. */
+  tokenId?: number;
+  /** Zero-based index of this token in the generation sequence. */
+  index: number;
+  /** All text generated so far (every token so far, concatenated). */
+  cumulativeText: string;
+  /**
+   * Set only on the final token: `'stop'` (hit EOS / a stop sequence) or
+   * `'length'` (hit the `maxTokens` cap). Absent while generation continues.
+   */
+  finishReason?: string;
+}
+
+/**
+ * An event pulled from a streaming run. A stream yields zero or more `token`
+ * events, then exactly one terminal `complete`. Mid-stream failures are not
+ * an event: the native `streamNext` call rejects with the same typed
+ * `xybrid_*` error codes as `run`.
+ *
+ * Crosses the codegen boundary as a plain object (the TurboModule spec can't
+ * express a union — see `NativeXybrid.ts`) and is narrowed by its `kind`
+ * discriminant (matching {@link Envelope}). Consumers normally use
+ * {@link Model.runStreaming} rather than reading these directly.
+ */
+export type StreamEvent =
+  | { kind: 'token'; token: StreamToken }
+  | { kind: 'complete'; result: InferenceResult };
 
 export interface VoiceInfo {
   id: string;

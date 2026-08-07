@@ -2,8 +2,6 @@
 // Wrapper for a loaded model ready for inference.
 
 using System;
-using System.Runtime.InteropServices;
-using Xybrid.Native;
 
 namespace Xybrid
 {
@@ -16,35 +14,21 @@ namespace Xybrid
     /// </remarks>
     public sealed class Model : IDisposable
     {
-        private unsafe XybridModelHandle* _handle;
-        private bool _disposed;
+        private readonly XybridBolt.XybridModel _bolt;
         private readonly string _modelId;
+        private bool _disposed;
+        private VoiceInfo[] _cachedVoices;
 
-        /// <summary>
-        /// Gets whether this model has been disposed.
-        /// </summary>
+        /// <summary>Gets whether this model has been disposed.</summary>
         public bool IsDisposed => _disposed;
 
-        /// <summary>
-        /// Gets the model ID.
-        /// </summary>
+        /// <summary>Gets the model ID.</summary>
         public string ModelId => _modelId;
 
-        internal unsafe Model(XybridModelHandle* handle)
+        internal Model(XybridBolt.XybridModel bolt)
         {
-            _handle = handle;
-
-            // Cache model ID
-            byte* idPtr = NativeMethods.xybrid_model_id(handle);
-            if (idPtr != null)
-            {
-                _modelId = NativeHelpers.FromUtf8Ptr(idPtr);
-                NativeMethods.xybrid_free_string(idPtr);
-            }
-            else
-            {
-                _modelId = "unknown";
-            }
+            _bolt = bolt;
+            _modelId = bolt.ModelId();
         }
 
         /// <summary>
@@ -52,37 +36,19 @@ namespace Xybrid
         /// </summary>
         /// <param name="envelope">The input data for inference.</param>
         /// <param name="config">Optional generation config for LLM parameters. Pass null for model defaults.</param>
-        /// <returns>The inference result.</returns>
+        /// <returns>The inference result (<see cref="InferenceResult.Success"/> is false if inference failed).</returns>
         /// <exception cref="ArgumentNullException">Thrown if envelope is null.</exception>
-        /// <exception cref="ObjectDisposedException">Thrown if this model or the envelope is disposed.</exception>
-        /// <exception cref="XybridException">Thrown if inference fails to start.</exception>
-        /// <remarks>
-        /// The envelope is not consumed - it can be reused for multiple inferences.
-        /// Remember to dispose the returned <see cref="InferenceResult"/> when done.
-        /// </remarks>
-        public unsafe InferenceResult Run(Envelope envelope, GenerationConfig config = null)
+        /// <exception cref="ObjectDisposedException">Thrown if this model is disposed.</exception>
+        /// <exception cref="XybridException">Thrown only on a catastrophic backend failure; ordinary inference failures (including a not-loaded model) set <see cref="InferenceResult.Success"/> to false instead.</exception>
+        public InferenceResult Run(Envelope envelope, GenerationConfig config = null)
         {
             ThrowIfDisposed();
-
             if (envelope == null)
             {
                 throw new ArgumentNullException(nameof(envelope));
             }
 
-            if (envelope.IsDisposed)
-            {
-                throw new ObjectDisposedException(nameof(envelope));
-            }
-
-            var configHandle = config != null ? config.Handle : null;
-            XybridResultHandle* resultHandle = NativeMethods.xybrid_model_run(
-                _handle, envelope.Handle, configHandle);
-            if (resultHandle == null)
-            {
-                NativeHelpers.ThrowLastError("Failed to run inference");
-            }
-
-            return new InferenceResult(resultHandle);
+            return Execute(() => _bolt.Run(envelope.Bolt, ToOptions(config)));
         }
 
         /// <summary>
@@ -91,18 +57,12 @@ namespace Xybrid
         /// <param name="text">The input text for TTS or LLM inference.</param>
         /// <returns>The text output from the model.</returns>
         /// <exception cref="InferenceException">Thrown if inference fails.</exception>
-        /// <remarks>
-        /// This is a convenience method that creates an envelope, runs inference,
-        /// and extracts the text result. For more control, use <see cref="Run"/>.
-        /// </remarks>
         public string RunText(string text)
         {
-            using (var envelope = Envelope.Text(text))
-            using (var result = Run(envelope))
-            {
-                result.ThrowIfFailed();
-                return result.Text;
-            }
+            var envelope = Envelope.Text(text);
+            var result = Run(envelope);
+            result.ThrowIfFailed();
+            return result.Text;
         }
 
         /// <summary>
@@ -115,12 +75,10 @@ namespace Xybrid
         /// <exception cref="InferenceException">Thrown if inference fails.</exception>
         public string RunAudio(byte[] audioBytes, uint sampleRate = 16000, uint channels = 1)
         {
-            using (var envelope = Envelope.Audio(audioBytes, sampleRate, channels))
-            using (var result = Run(envelope))
-            {
-                result.ThrowIfFailed();
-                return result.Text;
-            }
+            var envelope = Envelope.Audio(audioBytes, sampleRate, channels);
+            var result = Run(envelope);
+            result.ThrowIfFailed();
+            return result.Text;
         }
 
         /// <summary>
@@ -130,24 +88,10 @@ namespace Xybrid
         /// <returns>Raw PCM audio bytes (16-bit signed little-endian, typically 24kHz mono).</returns>
         /// <exception cref="InferenceException">Thrown if inference fails.</exception>
         /// <exception cref="InvalidOperationException">Thrown if the result does not contain audio.</exception>
-        /// <remarks>
-        /// This is a convenience method for TTS models. For more control, use <see cref="Run"/>.
-        /// The returned bytes can be loaded into a Unity AudioClip via AudioClip.Create() + SetData().
-        /// </remarks>
         public byte[] RunTts(string text)
         {
-            using (var envelope = Envelope.Text(text))
-            using (var result = Run(envelope))
-            {
-                result.ThrowIfFailed();
-                if (!result.HasAudio)
-                {
-                    throw new InvalidOperationException(
-                        "Model did not produce audio output. " +
-                        $"Output type was: {result.OutputType}");
-                }
-                return result.AudioBytes;
-            }
+            var envelope = Envelope.Text(text);
+            return TtsAudio(Run(envelope));
         }
 
         /// <summary>
@@ -160,44 +104,24 @@ namespace Xybrid
         /// <remarks>
         /// The context provides conversation history which is formatted into the prompt
         /// using the model's chat template. The context is NOT automatically updated
-        /// with the result - call context.Push() to add the response.
+        /// with the result — call context.Push() to add the response.
         /// </remarks>
         /// <exception cref="ArgumentNullException">Thrown if envelope or context is null.</exception>
-        /// <exception cref="ObjectDisposedException">Thrown if this model, envelope, or context is disposed.</exception>
-        /// <exception cref="XybridException">Thrown if inference fails to start.</exception>
-        public unsafe InferenceResult Run(Envelope envelope, ConversationContext context, GenerationConfig config = null)
+        /// <exception cref="ObjectDisposedException">Thrown if this model is disposed.</exception>
+        /// <exception cref="XybridException">Thrown only on a catastrophic backend failure; ordinary inference failures set <see cref="InferenceResult.Success"/> to false instead.</exception>
+        public InferenceResult Run(Envelope envelope, ConversationContext context, GenerationConfig config = null)
         {
             ThrowIfDisposed();
-
             if (envelope == null)
             {
                 throw new ArgumentNullException(nameof(envelope));
             }
-
             if (context == null)
             {
                 throw new ArgumentNullException(nameof(context));
             }
 
-            if (envelope.IsDisposed)
-            {
-                throw new ObjectDisposedException(nameof(envelope));
-            }
-
-            if (context.IsDisposed)
-            {
-                throw new ObjectDisposedException(nameof(context));
-            }
-
-            var configHandle = config != null ? config.Handle : null;
-            XybridResultHandle* resultHandle = NativeMethods.xybrid_model_run_with_context(
-                _handle, envelope.Handle, context.Handle, configHandle);
-            if (resultHandle == null)
-            {
-                NativeHelpers.ThrowLastError("Failed to run inference with context");
-            }
-
-            return new InferenceResult(resultHandle);
+            return Execute(() => _bolt.RunWithContext(envelope.Bolt, context.Bolt, ToOptions(config)));
         }
 
         /// <summary>
@@ -206,72 +130,48 @@ namespace Xybrid
         /// <param name="text">The input text for LLM inference.</param>
         /// <param name="context">The conversation context with history.</param>
         /// <returns>The text output from the model.</returns>
-        /// <remarks>
-        /// This is a convenience method. The input message is NOT automatically pushed
-        /// to the context - you must call context.Push() for both input and output.
-        /// </remarks>
         /// <exception cref="InferenceException">Thrown if inference fails.</exception>
         public string RunText(string text, ConversationContext context)
         {
-            using (var envelope = Envelope.Text(text))
-            using (var result = Run(envelope, context))
-            {
-                result.ThrowIfFailed();
-                return result.Text;
-            }
+            var envelope = Envelope.Text(text);
+            var result = Run(envelope, context);
+            result.ThrowIfFailed();
+            return result.Text;
         }
 
         // ================================================================
         // Voice Discovery
         // ================================================================
 
-        private VoiceInfo[] _cachedVoices;
-
-        /// <summary>
-        /// Gets whether this model has voice support (TTS models with voice catalog).
-        /// </summary>
-        public unsafe bool HasVoices
+        /// <summary>Gets whether this model has voice support (TTS models with voice catalog).</summary>
+        public bool HasVoices
         {
             get
             {
                 ThrowIfDisposed();
-                return NativeMethods.xybrid_model_has_voices(_handle) != 0;
+                return _bolt.HasVoices();
             }
         }
 
-        /// <summary>
-        /// Gets the number of voices available for this model.
-        /// </summary>
-        public unsafe int VoiceCount
+        /// <summary>Gets the number of voices available for this model.</summary>
+        public int VoiceCount => Voices.Length;
+
+        /// <summary>Gets the default voice ID for this model, or null if not a TTS model.</summary>
+        public string DefaultVoiceId
         {
             get
             {
                 ThrowIfDisposed();
-                return (int)NativeMethods.xybrid_model_voice_count(_handle);
+                XybridBolt.XybridVoiceInfo? voice = _bolt.DefaultVoice();
+                return voice is { } value ? value.Id : null;
             }
         }
 
         /// <summary>
-        /// Gets the default voice ID for this model, or null if not a TTS model.
+        /// Gets all available voices for this model. Returns an empty array if the
+        /// model has no voice support. The result is cached after the first call.
         /// </summary>
-        public unsafe string DefaultVoiceId
-        {
-            get
-            {
-                ThrowIfDisposed();
-                byte* ptr = NativeMethods.xybrid_model_default_voice_id(_handle);
-                return NativeHelpers.FromUtf8Ptr(ptr);
-            }
-        }
-
-        /// <summary>
-        /// Gets all available voices for this model.
-        /// Returns an empty array if the model has no voice support.
-        /// </summary>
-        /// <remarks>
-        /// The result is cached after the first call.
-        /// </remarks>
-        public unsafe VoiceInfo[] Voices
+        public VoiceInfo[] Voices
         {
             get
             {
@@ -281,37 +181,11 @@ namespace Xybrid
                     return _cachedVoices;
                 }
 
-                int count = VoiceCount;
-                if (count == 0)
+                XybridBolt.XybridVoiceInfo[] boltVoices = _bolt.Voices();
+                var voices = new VoiceInfo[boltVoices.Length];
+                for (int i = 0; i < boltVoices.Length; i++)
                 {
-                    _cachedVoices = Array.Empty<VoiceInfo>();
-                    return _cachedVoices;
-                }
-
-                var voices = new VoiceInfo[count];
-                for (int i = 0; i < count; i++)
-                {
-                    byte* idPtr = NativeMethods.xybrid_model_voice_id(_handle, (uint)i);
-                    byte* namePtr = NativeMethods.xybrid_model_voice_name(_handle, (uint)i);
-                    string id = NativeHelpers.FromUtf8Ptr(idPtr);
-                    string name = NativeHelpers.FromUtf8Ptr(namePtr);
-
-                    // Parse full metadata from JSON for gender/language/style
-                    string gender = null;
-                    string language = null;
-                    string style = null;
-                    byte* jsonPtr = NativeMethods.xybrid_model_voice_json(_handle, (uint)i);
-                    if (jsonPtr != null)
-                    {
-                        string json = NativeHelpers.FromUtf8Ptr(jsonPtr);
-                        NativeMethods.xybrid_free_string(jsonPtr);
-                        // Simple JSON parsing for optional fields
-                        gender = ExtractJsonString(json, "gender");
-                        language = ExtractJsonString(json, "language");
-                        style = ExtractJsonString(json, "style");
-                    }
-
-                    voices[i] = new VoiceInfo(id, name, gender, language, style);
+                    voices[i] = MapVoice(boltVoices[i]);
                 }
 
                 _cachedVoices = voices;
@@ -323,18 +197,11 @@ namespace Xybrid
         /// Gets a specific voice by ID, or null if not found.
         /// </summary>
         /// <param name="voiceId">The voice identifier (e.g., "af_bella").</param>
-        /// <returns>The voice info, or null if the voice is not found.</returns>
         public VoiceInfo GetVoice(string voiceId)
         {
             ThrowIfDisposed();
-            foreach (var voice in Voices)
-            {
-                if (voice.Id == voiceId)
-                {
-                    return voice;
-                }
-            }
-            return null;
+            XybridBolt.XybridVoiceInfo? voice = _bolt.Voice(voiceId);
+            return voice is { } value ? MapVoice(value) : null;
         }
 
         /// <summary>
@@ -348,51 +215,8 @@ namespace Xybrid
         /// <exception cref="InvalidOperationException">Thrown if the result does not contain audio.</exception>
         public byte[] RunTts(string text, string voiceId, double speed = 1.0)
         {
-            using (var envelope = Envelope.Text(text, voiceId, speed))
-            using (var result = Run(envelope))
-            {
-                result.ThrowIfFailed();
-                if (!result.HasAudio)
-                {
-                    throw new InvalidOperationException(
-                        "Model did not produce audio output. " +
-                        $"Output type was: {result.OutputType}");
-                }
-                return result.AudioBytes;
-            }
-        }
-
-        /// <summary>
-        /// Extracts a string value from a simple JSON object.
-        /// </summary>
-        private static string ExtractJsonString(string json, string key)
-        {
-            // Look for "key":"value" or "key": "value"
-            string pattern = $"\"{key}\"";
-            int keyIndex = json.IndexOf(pattern, StringComparison.Ordinal);
-            if (keyIndex < 0) return null;
-
-            int colonIndex = json.IndexOf(':', keyIndex + pattern.Length);
-            if (colonIndex < 0) return null;
-
-            // Skip whitespace after colon
-            int valueStart = colonIndex + 1;
-            while (valueStart < json.Length && json[valueStart] == ' ')
-                valueStart++;
-
-            if (valueStart >= json.Length) return null;
-
-            // Check for null
-            if (json.Length >= valueStart + 4 && json.Substring(valueStart, 4) == "null")
-                return null;
-
-            // Must be a quoted string
-            if (json[valueStart] != '"') return null;
-
-            int valueEnd = json.IndexOf('"', valueStart + 1);
-            if (valueEnd < 0) return null;
-
-            return json.Substring(valueStart + 1, valueEnd - valueStart - 1);
+            var envelope = Envelope.Text(text, voiceId, speed);
+            return TtsAudio(Run(envelope));
         }
 
         // ================================================================
@@ -403,69 +227,43 @@ namespace Xybrid
         /// Gets whether this model supports true token-by-token streaming.
         /// </summary>
         /// <remarks>
-        /// Returns true for LLM models (GGUF format with LLM features enabled).
-        /// Non-LLM models can still use <see cref="RunStreaming"/> but will receive
-        /// a single callback with the complete result instead of token-by-token output.
+        /// Returns true for LLM models. Non-LLM models can still use
+        /// <see cref="RunStreaming(Envelope, Action{StreamToken}, GenerationConfig)"/>
+        /// but will receive a single callback with the complete result.
         /// </remarks>
-        public unsafe bool SupportsTokenStreaming
+        public bool SupportsTokenStreaming
         {
             get
             {
                 ThrowIfDisposed();
-                return NativeMethods.xybrid_model_supports_token_streaming(_handle) != 0;
+                return _bolt.SupportsTokenStreaming();
             }
         }
 
         /// <summary>
         /// Runs streaming inference, invoking the callback for each generated token.
+        /// Blocks until inference is complete.
         /// </summary>
         /// <param name="envelope">The input data for inference.</param>
-        /// <param name="onToken">Callback invoked for each token. Called on the calling thread.</param>
-        /// <param name="config">Optional generation config for LLM parameters. Pass null for model defaults.</param>
+        /// <param name="onToken">Callback invoked for each token, on the calling thread.</param>
+        /// <param name="config">Optional generation config. Pass null for model defaults.</param>
         /// <returns>The final inference result after all tokens are emitted.</returns>
-        /// <remarks>
-        /// This method blocks until inference is complete. For LLM models, the callback
-        /// is invoked for each generated token. For non-LLM models, a single callback
-        /// is invoked with the complete result.
-        /// </remarks>
         /// <exception cref="ArgumentNullException">Thrown if envelope or onToken is null.</exception>
-        /// <exception cref="ObjectDisposedException">Thrown if this model or the envelope is disposed.</exception>
-        /// <exception cref="XybridException">Thrown if inference fails to start.</exception>
-        public unsafe InferenceResult RunStreaming(Envelope envelope, Action<StreamToken> onToken, GenerationConfig config = null)
+        /// <exception cref="ObjectDisposedException">Thrown if this model is disposed.</exception>
+        /// <exception cref="XybridException">Thrown only on a catastrophic backend failure; ordinary inference failures set <see cref="InferenceResult.Success"/> to false instead.</exception>
+        public InferenceResult RunStreaming(Envelope envelope, Action<StreamToken> onToken, GenerationConfig config = null)
         {
             ThrowIfDisposed();
-
             if (envelope == null)
+            {
                 throw new ArgumentNullException(nameof(envelope));
+            }
             if (onToken == null)
+            {
                 throw new ArgumentNullException(nameof(onToken));
-            if (envelope.IsDisposed)
-                throw new ObjectDisposedException(nameof(envelope));
-
-            var configHandle = config != null ? config.Handle : null;
-
-            // Pin the managed callback so it survives the native call
-            var gcHandle = GCHandle.Alloc(onToken);
-            try
-            {
-                XybridResultHandle* resultHandle = NativeMethods.xybrid_model_run_streaming(
-                    _handle,
-                    envelope.Handle,
-                    configHandle,
-                    StreamCallbackTrampoline,
-                    (void*)GCHandle.ToIntPtr(gcHandle));
-
-                if (resultHandle == null)
-                {
-                    NativeHelpers.ThrowLastError("Failed to run streaming inference");
-                }
-
-                return new InferenceResult(resultHandle);
             }
-            finally
-            {
-                gcHandle.Free();
-            }
+
+            return Execute(() => _bolt.RunStreaming(envelope.Bolt, Forward(onToken), ToOptions(config)));
         }
 
         /// <summary>
@@ -474,147 +272,131 @@ namespace Xybrid
         /// <param name="envelope">The input data for inference.</param>
         /// <param name="context">The conversation context with history.</param>
         /// <param name="onToken">Callback invoked for each token.</param>
-        /// <param name="config">Optional generation config for LLM parameters. Pass null for model defaults.</param>
+        /// <param name="config">Optional generation config. Pass null for model defaults.</param>
         /// <returns>The final inference result after all tokens are emitted.</returns>
         /// <exception cref="ArgumentNullException">Thrown if any argument is null.</exception>
-        /// <exception cref="ObjectDisposedException">Thrown if this model, envelope, or context is disposed.</exception>
-        /// <exception cref="XybridException">Thrown if inference fails to start.</exception>
-        public unsafe InferenceResult RunStreaming(Envelope envelope, ConversationContext context, Action<StreamToken> onToken, GenerationConfig config = null)
+        /// <exception cref="ObjectDisposedException">Thrown if this model is disposed.</exception>
+        /// <exception cref="XybridException">Thrown only on a catastrophic backend failure; ordinary inference failures set <see cref="InferenceResult.Success"/> to false instead.</exception>
+        public InferenceResult RunStreaming(Envelope envelope, ConversationContext context, Action<StreamToken> onToken, GenerationConfig config = null)
         {
             ThrowIfDisposed();
-
             if (envelope == null)
+            {
                 throw new ArgumentNullException(nameof(envelope));
+            }
             if (context == null)
+            {
                 throw new ArgumentNullException(nameof(context));
+            }
             if (onToken == null)
+            {
                 throw new ArgumentNullException(nameof(onToken));
-            if (envelope.IsDisposed)
-                throw new ObjectDisposedException(nameof(envelope));
-            if (context.IsDisposed)
-                throw new ObjectDisposedException(nameof(context));
-
-            var configHandle = config != null ? config.Handle : null;
-            var gcHandle = GCHandle.Alloc(onToken);
-            try
-            {
-                XybridResultHandle* resultHandle = NativeMethods.xybrid_model_run_streaming_with_context(
-                    _handle,
-                    envelope.Handle,
-                    context.Handle,
-                    configHandle,
-                    StreamCallbackTrampolineWithContext,
-                    (void*)GCHandle.ToIntPtr(gcHandle));
-
-                if (resultHandle == null)
-                {
-                    NativeHelpers.ThrowLastError("Failed to run streaming inference with context");
-                }
-
-                return new InferenceResult(resultHandle);
             }
-            finally
-            {
-                gcHandle.Free();
-            }
+
+            return Execute(() => _bolt.RunStreamingWithContext(
+                envelope.Bolt, Forward(onToken), context.Bolt, ToOptions(config)));
         }
 
         /// <summary>
         /// Convenience method: stream text inference with a callback.
         /// </summary>
-        /// <param name="text">The input text.</param>
-        /// <param name="onToken">Callback invoked for each token.</param>
-        /// <returns>The full text result after streaming completes.</returns>
         public string RunStreamingText(string text, Action<StreamToken> onToken)
         {
-            using (var envelope = Envelope.Text(text))
-            using (var result = RunStreaming(envelope, onToken))
-            {
-                result.ThrowIfFailed();
-                return result.Text;
-            }
+            var envelope = Envelope.Text(text);
+            var result = RunStreaming(envelope, onToken);
+            result.ThrowIfFailed();
+            return result.Text;
         }
 
         /// <summary>
         /// Convenience method: stream text inference with conversation context.
         /// </summary>
-        /// <param name="text">The input text.</param>
-        /// <param name="context">The conversation context.</param>
-        /// <param name="onToken">Callback invoked for each token.</param>
-        /// <returns>The full text result after streaming completes.</returns>
         public string RunStreamingText(string text, ConversationContext context, Action<StreamToken> onToken)
         {
-            using (var envelope = Envelope.Text(text))
-            using (var result = RunStreaming(envelope, context, onToken))
-            {
-                result.ThrowIfFailed();
-                return result.Text;
-            }
+            var envelope = Envelope.Text(text);
+            var result = RunStreaming(envelope, context, onToken);
+            result.ThrowIfFailed();
+            return result.Text;
         }
 
         // ================================================================
-        // Static callback trampolines for P/Invoke
+        // Internal helpers
         // ================================================================
 
-        /// <summary>
-        /// Static trampoline that bridges the unmanaged callback to the managed Action.
-        /// Must be static for IL2CPP compatibility.
-        /// </summary>
-#if ENABLE_IL2CPP
-        [AOT.MonoPInvokeCallback(typeof(NativeMethods.xybrid_model_run_streaming_callback_delegate))]
-#endif
-        private static unsafe void StreamCallbackTrampoline(
-            byte* token, long tokenId, uint index,
-            byte* cumulativeText, byte* finishReason, void* userData)
+        // Preserve the pre-bolt contract: xybrid_model_run returned a failed
+        // result handle (Success == false) for EVERY SDK run error and only
+        // threw for null/invalid handles. Bolt surfaces those SDK errors as
+        // XybridErrorException, so map all of them to a failed InferenceResult
+        // (callers inspecting Success keep working). A BoltException is the
+        // catastrophic analog of the old null-handle path and is rethrown.
+        private static InferenceResult Execute(Func<XybridBolt.XybridResult> run)
         {
             try
             {
-                var gcHandle = GCHandle.FromIntPtr((IntPtr)userData);
-                var callback = (Action<StreamToken>)gcHandle.Target;
-
-                var streamToken = new StreamToken(
-                    token: NativeHelpers.FromUtf8Ptr(token),
-                    tokenId: tokenId >= 0 ? tokenId : (long?)null,
-                    index: index,
-                    cumulativeText: NativeHelpers.FromUtf8Ptr(cumulativeText),
-                    finishReason: NativeHelpers.FromUtf8Ptr(finishReason)
-                );
-
-                callback(streamToken);
+                return InferenceResult.FromBolt(run());
             }
-            catch (Exception)
+            catch (XybridBolt.XybridErrorException ex)
             {
-                // Swallow exceptions to prevent unwinding through native frames.
-                // Errors are reported via the returned InferenceResult.
+                // Match the pre-bolt failure text: "Inference failed: <message>"
+                // with the error's inner message (not its record ToString()).
+                return InferenceResult.Failed("Inference failed: " + BoltErrors.Describe(ex.Error));
+            }
+            catch (XybridBolt.BoltException ex)
+            {
+                throw BoltErrors.Translate(ex);
             }
         }
 
-#if ENABLE_IL2CPP
-        [AOT.MonoPInvokeCallback(typeof(NativeMethods.xybrid_model_run_streaming_with_context_callback_delegate))]
-#endif
-        private static unsafe void StreamCallbackTrampolineWithContext(
-            byte* token, long tokenId, uint index,
-            byte* cumulativeText, byte* finishReason, void* userData)
+        // Wrap the user callback so a throw doesn't abort streaming — the
+        // pre-bolt native trampoline swallowed callback exceptions; preserved.
+        private static Action<XybridBolt.XybridStreamToken> Forward(Action<StreamToken> onToken) =>
+            bolt =>
+            {
+                try
+                {
+                    onToken(MapToken(bolt));
+                }
+                catch
+                {
+                    // Intentionally swallowed (see above).
+                }
+            };
+
+        private static StreamToken MapToken(XybridBolt.XybridStreamToken token) =>
+            new StreamToken(
+                token.Token,
+                token.TokenId,
+                (uint)token.Index,
+                token.CumulativeText,
+                token.FinishReason);
+
+        private static VoiceInfo MapVoice(XybridBolt.XybridVoiceInfo voice) =>
+            new VoiceInfo(voice.Id, voice.Name, voice.Gender, voice.Language, voice.Style);
+
+        private static XybridBolt.XybridRunOptions? ToOptions(GenerationConfig config)
         {
-            try
+            if (config == null)
             {
-                var gcHandle = GCHandle.FromIntPtr((IntPtr)userData);
-                var callback = (Action<StreamToken>)gcHandle.Target;
-
-                var streamToken = new StreamToken(
-                    token: NativeHelpers.FromUtf8Ptr(token),
-                    tokenId: tokenId >= 0 ? tokenId : (long?)null,
-                    index: index,
-                    cumulativeText: NativeHelpers.FromUtf8Ptr(cumulativeText),
-                    finishReason: NativeHelpers.FromUtf8Ptr(finishReason)
-                );
-
-                callback(streamToken);
+                return null;
             }
-            catch (Exception)
+            return new XybridBolt.XybridRunOptions(
+                config.ToBolt(),
+                Array.Empty<XybridBolt.XybridAbortSignal>(),
+                false,
+                0u,
+                null);
+        }
+
+        private static byte[] TtsAudio(InferenceResult result)
+        {
+            result.ThrowIfFailed();
+            if (!result.HasAudio)
             {
-                // Swallow exceptions to prevent unwinding through native frames.
+                throw new InvalidOperationException(
+                    "Model did not produce audio output. " +
+                    $"Output type was: {result.OutputType}");
             }
+            return result.AudioBytes;
         }
 
         private void ThrowIfDisposed()
@@ -625,33 +407,17 @@ namespace Xybrid
             }
         }
 
-        /// <summary>
-        /// Releases the native resources used by this model.
-        /// </summary>
-        public unsafe void Dispose()
+        /// <summary>Releases the native resources used by this model.</summary>
+        public void Dispose()
         {
             if (!_disposed)
             {
-                if (_handle != null)
-                {
-                    NativeMethods.xybrid_model_free(_handle);
-                    _handle = null;
-                }
+                _bolt.Dispose();
                 _disposed = true;
             }
         }
 
-        /// <summary>
-        /// Finalizer to ensure native resources are released.
-        /// </summary>
-        ~Model()
-        {
-            Dispose();
-        }
-
-        /// <summary>
-        /// Returns a string representation of the model.
-        /// </summary>
+        /// <summary>Returns a string representation of the model.</summary>
         public override string ToString()
         {
             return $"Model({ModelId})";

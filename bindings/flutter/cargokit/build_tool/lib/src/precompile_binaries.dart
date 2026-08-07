@@ -29,6 +29,7 @@ class PrecompileBinaries {
     this.androidNdkVersion,
     this.androidMinSdkVersion,
     this.tempDir,
+    this.prebuiltArtifacts = const {},
   });
 
   final PrivateKey privateKey;
@@ -40,6 +41,13 @@ class PrecompileBinaries {
   final String? androidNdkVersion;
   final int? androidMinSdkVersion;
   final String? tempDir;
+
+  /// Local addition (not upstream Cargokit): rust triple -> directory holding
+  /// an already-built artifact for that target (e.g. a Bazel output). Targets
+  /// in this map skip the cargo build; the crate hash, asset naming, ed25519
+  /// signing, and upload are unchanged, so the consumer-side contract is
+  /// byte-identical to a cargo-built asset.
+  final Map<String, String> prebuiltArtifacts;
 
   static String fileName(Target target, String name) {
     return '${target.rust}_$name';
@@ -98,7 +106,9 @@ class PrecompileBinaries {
       androidMinSdkVersion: androidMinSdkVersion,
     );
 
-    final rustup = Rustup();
+    // Lazy: only touch rustup when a target actually needs a cargo build, so
+    // a run where every target is prebuilt works on a runner without Rust.
+    Rustup? rustup;
 
     for (final target in targets) {
       final artifactNames = getArtifactNames(
@@ -115,12 +125,20 @@ class PrecompileBinaries {
         continue;
       }
 
-      _log.info('Building for $target');
+      final String res;
+      final prebuiltDir = prebuiltArtifacts[target.rust];
+      if (prebuiltDir != null) {
+        _log.info('Using prebuilt artifacts for $target from $prebuiltDir');
+        res = prebuiltDir;
+      } else {
+        _log.info('Building for $target');
 
-      final builder =
-          RustBuilder(target: target, environment: buildEnvironment);
-      builder.prepare(rustup);
-      final res = await builder.build();
+        rustup ??= Rustup();
+        final builder =
+            RustBuilder(target: target, environment: buildEnvironment);
+        builder.prepare(rustup);
+        res = await builder.build();
+      }
 
       final assets = <CreateReleaseAsset>[];
       for (final name in artifactNames) {

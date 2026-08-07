@@ -246,12 +246,11 @@ struct ExtractionView: View {
         inferenceState = .loading
         let modelId = self.modelId
 
-        // `Task.detached`, NOT `Task {}`: the synchronous, blocking
-        // `XybridModel(fromRegistry:)` (resolve + download + load) must not
-        // run on the main actor. Same discipline as InferenceView.
-        Task.detached {
+        // The loader is cheap to create; its async load performs resolution,
+        // download, disk access, and runtime initialization off the main actor.
+        Task {
             do {
-                let loadedModel = try XybridModel(fromRegistry: modelId)
+                let loadedModel = try await Xybrid.model(modelId).load()
                 await MainActor.run {
                     self.model = loadedModel
                     inferenceState = .idle

@@ -26,7 +26,7 @@ The library is automatically detected by xtask commands that build for iOS targe
 1. Download the new version from [HuggingFace](https://huggingface.co/csukuangfj/ios-onnxruntime)
 2. Extract and replace the contents of `onnxruntime.xcframework/`
 3. Update this README with the new version number
-4. Test with `cargo xtask build-xcframework`
+4. Test with `bazel build --config=ios //bindings/apple:XybridFFI`
 
 ## Symlinks
 

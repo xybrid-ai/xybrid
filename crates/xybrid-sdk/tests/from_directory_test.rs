@@ -5,8 +5,13 @@ use xybrid_sdk::model::{ModelLoader, SdkError};
 
 /// Helper to get the path to fixture models from the workspace root.
 fn fixtures_dir() -> PathBuf {
-    // Tests run from the crate directory; fixtures are at the workspace level
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    // Tests run from the crate directory; fixtures are at the workspace level.
+    // Resolve at RUNTIME rather than with `env!`: the compile-time value is baked
+    // into the binary and does not point anywhere useful when the test runs in a
+    // sandbox. Both cargo and Bazel set the variable for test execution.
+    let manifest_dir = PathBuf::from(
+        std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR is set for tests"),
+    );
     manifest_dir
         .parent() // crates/
         .unwrap()

@@ -426,7 +426,11 @@ impl RegistryClient {
                     if !err.is_retryable() {
                         return Err(err);
                     }
-                    debug!("URL {} failed: {}, trying next", api_url, err);
+                    // warn, not debug: on mobile the default native log level is
+                    // Info, and a registry endpoint failing over is exactly the
+                    // signal needed to diagnose "models/metrics not working"
+                    // reports from devices.
+                    warn!("URL {} failed: {}, trying next", api_url, err);
                     last_error = Some(err);
                 }
             }

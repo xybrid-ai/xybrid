@@ -2,7 +2,6 @@
 // Factory for loading models from registry or local bundles.
 
 using System;
-using Xybrid.Native;
 
 namespace Xybrid
 {
@@ -11,80 +10,59 @@ namespace Xybrid
     /// </summary>
     /// <remarks>
     /// Use the static factory methods to create a loader, then call <see cref="Load"/>
-    /// to get a ready-to-use <see cref="Model"/>.
+    /// to get a ready-to-use <see cref="Model"/>. The loader records the source and
+    /// defers the actual load (and any download) to <see cref="Load"/>.
     /// </remarks>
     public sealed class ModelLoader : IDisposable
     {
-        private unsafe XybridModelLoaderHandle* _handle;
+        private enum Source
+        {
+            Registry,
+            Bundle,
+            Directory,
+            HuggingFace,
+            ModelFile,
+        }
+
+        private readonly Source _source;
+        private readonly string _value;
         private bool _disposed;
 
-        /// <summary>
-        /// Gets whether this loader has been disposed.
-        /// </summary>
+        /// <summary>Gets whether this loader has been disposed.</summary>
         public bool IsDisposed => _disposed;
 
-        private unsafe ModelLoader(XybridModelLoaderHandle* handle)
+        private ModelLoader(Source source, string value)
         {
-            _handle = handle;
+            _source = source;
+            _value = value;
         }
 
         /// <summary>
         /// Creates a model loader that will fetch from the xybrid registry.
         /// </summary>
         /// <param name="modelId">The model ID (e.g., "kokoro-82m", "whisper-tiny").</param>
-        /// <returns>A new ModelLoader configured to load from the registry.</returns>
         /// <exception cref="ArgumentNullException">Thrown if modelId is null.</exception>
-        /// <exception cref="XybridException">Thrown if loader creation fails.</exception>
-        /// <remarks>
-        /// The model will be downloaded from the registry if not already cached locally.
-        /// </remarks>
-        public static unsafe ModelLoader FromRegistry(string modelId)
+        public static ModelLoader FromRegistry(string modelId)
         {
             if (modelId == null)
             {
                 throw new ArgumentNullException(nameof(modelId));
             }
-
-            byte[] modelIdBytes = NativeHelpers.ToUtf8Bytes(modelId);
-
-            fixed (byte* modelIdPtr = modelIdBytes)
-            {
-                XybridModelLoaderHandle* handle = NativeMethods.xybrid_model_loader_from_registry(modelIdPtr);
-                if (handle == null)
-                {
-                    NativeHelpers.ThrowLastError($"Failed to create loader for model '{modelId}'");
-                }
-
-                return new ModelLoader(handle);
-            }
+            return new ModelLoader(Source.Registry, modelId);
         }
 
         /// <summary>
         /// Creates a model loader that will load from a local bundle path.
         /// </summary>
         /// <param name="path">The file path to the model bundle (.xyb file or directory).</param>
-        /// <returns>A new ModelLoader configured to load from the local bundle.</returns>
         /// <exception cref="ArgumentNullException">Thrown if path is null.</exception>
-        /// <exception cref="XybridException">Thrown if loader creation fails.</exception>
-        public static unsafe ModelLoader FromBundle(string path)
+        public static ModelLoader FromBundle(string path)
         {
             if (path == null)
             {
                 throw new ArgumentNullException(nameof(path));
             }
-
-            byte[] pathBytes = NativeHelpers.ToUtf8Bytes(path);
-
-            fixed (byte* pathPtr = pathBytes)
-            {
-                XybridModelLoaderHandle* handle = NativeMethods.xybrid_model_loader_from_bundle(pathPtr);
-                if (handle == null)
-                {
-                    NativeHelpers.ThrowLastError($"Failed to create loader for bundle at '{path}'");
-                }
-
-                return new ModelLoader(handle);
-            }
+            return new ModelLoader(Source.Bundle, path);
         }
 
         /// <summary>
@@ -92,92 +70,45 @@ namespace Xybrid
         /// and a <c>model_metadata.json</c>.
         /// </summary>
         /// <param name="directoryPath">Path to the directory containing model files and model_metadata.json.</param>
-        /// <returns>A new ModelLoader configured to load from the directory.</returns>
         /// <exception cref="ArgumentNullException">Thrown if directoryPath is null.</exception>
-        /// <exception cref="XybridException">Thrown if the directory does not exist, or the metadata is missing or invalid.</exception>
-        public static unsafe ModelLoader FromDirectory(string directoryPath)
+        public static ModelLoader FromDirectory(string directoryPath)
         {
             if (directoryPath == null)
             {
                 throw new ArgumentNullException(nameof(directoryPath));
             }
-
-            byte[] pathBytes = NativeHelpers.ToUtf8Bytes(directoryPath);
-
-            fixed (byte* pathPtr = pathBytes)
-            {
-                XybridModelLoaderHandle* handle = NativeMethods.xybrid_model_loader_from_directory(pathPtr);
-                if (handle == null)
-                {
-                    NativeHelpers.ThrowLastError($"Failed to create loader from directory '{directoryPath}'");
-                }
-
-                return new ModelLoader(handle);
-            }
+            return new ModelLoader(Source.Directory, directoryPath);
         }
 
         /// <summary>
-        /// Creates a model loader from a raw GGUF model file.
-        /// Auto-generates <c>model_metadata.json</c> by reading the GGUF binary header
-        /// (architecture, context length), writes it to the file's parent directory
-        /// if not already present, then loads from that directory.
+        /// Creates a model loader from a raw GGUF model file. On load, metadata is
+        /// auto-generated from the GGUF header and written as a
+        /// <c>model_metadata.json</c> sidecar next to the file if one isn't already
+        /// present.
         /// </summary>
         /// <param name="filePath">Path to the GGUF model file.</param>
-        /// <returns>A new ModelLoader configured to load the GGUF model.</returns>
         /// <exception cref="ArgumentNullException">Thrown if filePath is null.</exception>
-        /// <exception cref="XybridException">Thrown if the file does not exist or metadata generation fails.</exception>
-        public static unsafe ModelLoader FromModelFile(string filePath)
+        public static ModelLoader FromModelFile(string filePath)
         {
             if (filePath == null)
             {
                 throw new ArgumentNullException(nameof(filePath));
             }
-
-            byte[] pathBytes = NativeHelpers.ToUtf8Bytes(filePath);
-
-            fixed (byte* pathPtr = pathBytes)
-            {
-                XybridModelLoaderHandle* handle = NativeMethods.xybrid_model_loader_from_model_file(pathPtr);
-                if (handle == null)
-                {
-                    NativeHelpers.ThrowLastError($"Failed to create loader for GGUF file '{filePath}'");
-                }
-
-                return new ModelLoader(handle);
-            }
+            return new ModelLoader(Source.ModelFile, filePath);
         }
 
         /// <summary>
         /// Creates a model loader from a HuggingFace Hub repository.
-        /// Downloads model files from HuggingFace and caches them locally.
-        /// Model metadata is auto-generated if not present in the repository.
         /// </summary>
         /// <param name="repo">The HuggingFace repository ID (e.g., "xybrid-ai/kokoro-82m").</param>
-        /// <returns>A new ModelLoader configured to download from HuggingFace.</returns>
         /// <exception cref="ArgumentNullException">Thrown if repo is null.</exception>
-        /// <exception cref="XybridException">Thrown if loader creation fails.</exception>
-        /// <remarks>
-        /// Requires the <c>huggingface</c> feature flag to be enabled at compile time.
-        /// </remarks>
-        public static unsafe ModelLoader FromHuggingFace(string repo)
+        public static ModelLoader FromHuggingFace(string repo)
         {
             if (repo == null)
             {
                 throw new ArgumentNullException(nameof(repo));
             }
-
-            byte[] repoBytes = NativeHelpers.ToUtf8Bytes(repo);
-
-            fixed (byte* repoPtr = repoBytes)
-            {
-                XybridModelLoaderHandle* handle = NativeMethods.xybrid_model_loader_from_huggingface(repoPtr);
-                if (handle == null)
-                {
-                    NativeHelpers.ThrowLastError($"Failed to create loader for HuggingFace repo '{repo}'");
-                }
-
-                return new ModelLoader(handle);
-            }
+            return new ModelLoader(Source.HuggingFace, repo);
         }
 
         /// <summary>
@@ -187,21 +118,41 @@ namespace Xybrid
         /// <exception cref="ObjectDisposedException">Thrown if this loader is disposed.</exception>
         /// <exception cref="XybridException">Thrown if model loading fails.</exception>
         /// <exception cref="ModelNotFoundException">Thrown if the model cannot be found.</exception>
-        /// <remarks>
-        /// For registry models, this may download the model if not already cached.
-        /// The loader can be disposed after loading - the model is independent.
-        /// </remarks>
-        public unsafe Model Load()
+        public Model Load()
         {
             ThrowIfDisposed();
 
-            XybridModelHandle* modelHandle = NativeMethods.xybrid_model_loader_load(_handle);
-            if (modelHandle == null)
+            try
             {
-                NativeHelpers.ThrowLastError("Failed to load model");
-            }
+                XybridBolt.XybridModel bolt;
+                switch (_source)
+                {
+                    case Source.Registry:
+                        bolt = XybridBolt.XybridModel.FromRegistry(_value);
+                        break;
+                    case Source.Bundle:
+                        bolt = XybridBolt.XybridModel.FromBundle(_value);
+                        break;
+                    case Source.Directory:
+                        bolt = XybridBolt.XybridModel.FromDirectory(_value);
+                        break;
+                    case Source.HuggingFace:
+                        bolt = XybridBolt.XybridModel.FromHuggingface(_value);
+                        break;
+                    case Source.ModelFile:
+                        bolt = XybridBolt.XybridModel.FromModelFile(_value);
+                        break;
+                    default:
+                        throw new InvalidOperationException("Unknown model source.");
+                }
 
-            return new Model(modelHandle);
+                return new Model(bolt);
+            }
+            catch (Exception ex) when (
+                ex is XybridBolt.XybridErrorException || ex is XybridBolt.BoltException)
+            {
+                throw BoltErrors.Translate(ex);
+            }
         }
 
         private void ThrowIfDisposed()
@@ -213,27 +164,12 @@ namespace Xybrid
         }
 
         /// <summary>
-        /// Releases the native resources used by this loader.
+        /// No-op: the loader holds no native resources until <see cref="Load"/>.
+        /// Retained so existing <c>using</c> call sites keep compiling.
         /// </summary>
-        public unsafe void Dispose()
+        public void Dispose()
         {
-            if (!_disposed)
-            {
-                if (_handle != null)
-                {
-                    NativeMethods.xybrid_model_loader_free(_handle);
-                    _handle = null;
-                }
-                _disposed = true;
-            }
-        }
-
-        /// <summary>
-        /// Finalizer to ensure native resources are released.
-        /// </summary>
-        ~ModelLoader()
-        {
-            Dispose();
+            _disposed = true;
         }
     }
 }

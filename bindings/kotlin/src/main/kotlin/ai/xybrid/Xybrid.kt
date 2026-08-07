@@ -20,6 +20,11 @@ import android.os.Build
 import android.os.PowerManager
 import java.io.File
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.withContext
 
 // -- SDK Initialization --
@@ -107,6 +112,21 @@ object Xybrid {
     @JvmStatic
     val isInitialized: Boolean get() = initialized
 
+    /**
+     * Describe a registry model without resolving, downloading, or loading it.
+     *
+     * Call [XybridModelLoader.load] from a coroutine to perform the load, or
+     * [XybridModelLoader.loadBlocking] from an existing worker thread.
+     */
+    @JvmStatic
+    fun model(id: String): ModelLoader = model(ModelSource.registry(id))
+
+    /**
+     * Describe a model source without resolving, downloading, or loading it.
+     */
+    @JvmStatic
+    fun model(source: ModelSource): ModelLoader = XybridModelLoader.from(source)
+
     private fun registerPlatformObservers(appContext: Context) {
         val batteryReceiver = object : BroadcastReceiver() {
             override fun onReceive(received: Context, intent: Intent) {
@@ -147,12 +167,144 @@ object Xybrid {
     }
 }
 
+// -- Model loading --
+
+/**
+ * A model location that can be prepared without performing I/O.
+ *
+ * Construct a loader with [Xybrid.model] or [XybridModelLoader.from]. Loading
+ * is always a separate, explicit operation.
+ */
+sealed interface ModelSource {
+    /** A model resolved through the Xybrid registry. */
+    data class Registry(val id: String) : ModelSource
+
+    /** A local `.xyb` model bundle. */
+    data class Bundle(val path: String) : ModelSource
+
+    /** A local directory containing `model_metadata.json`. */
+    data class Directory(val path: String) : ModelSource
+
+    /** A Hugging Face repository (`org/repo` or `org/repo:variant`). */
+    data class HuggingFace(val repo: String) : ModelSource
+
+    /**
+     * A registry model served from the cloud gateway while its weights
+     * download in the background. See
+     * [XybridModelLoader.fromRegistrySpeculative].
+     */
+    data class RegistrySpeculative(val id: String) : ModelSource
+
+    companion object {
+        /** Describe a registry model. */
+        @JvmStatic
+        fun registry(id: String): ModelSource = Registry(id)
+
+        /** Describe a local `.xyb` bundle. */
+        @JvmStatic
+        fun bundle(path: String): ModelSource = Bundle(path)
+
+        /** Describe a local model directory. */
+        @JvmStatic
+        fun directory(path: String): ModelSource = Directory(path)
+
+        /** Describe a Hugging Face repository. */
+        @JvmStatic
+        fun huggingFace(repo: String): ModelSource = HuggingFace(repo)
+
+        /** Describe a registry model to be served from the cloud while it downloads. */
+        @JvmStatic
+        fun registrySpeculative(id: String): ModelSource = RegistrySpeculative(id)
+    }
+}
+
+/**
+ * A cheap model reference that defers all expensive work until [load].
+ *
+ * Creating a loader never performs network, disk, or native-runtime work.
+ */
+class XybridModelLoader private constructor(
+    /** The source this loader will resolve. */
+    val source: ModelSource,
+) {
+    /** Load the model without blocking the calling coroutine's thread. */
+    suspend fun load(): XybridModel = withContext(Dispatchers.IO) { loadBlocking() }
+
+    /**
+     * Load the model synchronously.
+     *
+     * This may resolve registry metadata, download files, access disk, and
+     * initialize the inference runtime. Do not call it from Android's main
+     * thread.
+     */
+    fun loadBlocking(): XybridModel = when (val current = source) {
+        is ModelSource.Registry -> XybridModel(current.id)
+        is ModelSource.Bundle -> XybridModel.fromBundle(current.path)
+        is ModelSource.Directory -> XybridModel.fromDirectory(current.path)
+        is ModelSource.HuggingFace -> XybridModel.fromHuggingface(current.repo)
+        is ModelSource.RegistrySpeculative ->
+            XybridModel.fromRegistrySpeculative(current.id)
+    }
+
+    /**
+     * Whether [load] would actually speculate: speculation is possible for this
+     * source, an API key resolves, and the model is not already cached.
+     *
+     * Always `false` for non-speculative sources. Never touches the network.
+     */
+    val willSpeculate: Boolean
+        get() = when (val current = source) {
+            is ModelSource.RegistrySpeculative -> willSpeculateForModel(current.id)
+            else -> false
+        }
+
+    companion object {
+        /** Create a loader for an already-described source. */
+        @JvmStatic
+        fun from(source: ModelSource): XybridModelLoader = XybridModelLoader(source)
+
+        /** Create a loader for a registry model. */
+        @JvmStatic
+        fun fromRegistry(id: String): XybridModelLoader = from(ModelSource.registry(id))
+
+        /**
+         * Create a loader that answers from the cloud gateway while the
+         * registry weights download in the background, instead of blocking on
+         * the download.
+         *
+         * [load] returns almost immediately with a cloud-backed model that
+         * switches to on-device by itself once the download lands. Requires an
+         * API key and an uncached model — otherwise it behaves exactly like
+         * [fromRegistry], which [willSpeculate] reports up front. LLM/chat
+         * models only.
+         */
+        @JvmStatic
+        fun fromRegistrySpeculative(id: String): XybridModelLoader =
+            from(ModelSource.registrySpeculative(id))
+
+        /** Create a loader for a local `.xyb` bundle. */
+        @JvmStatic
+        fun fromBundle(path: String): XybridModelLoader = from(ModelSource.bundle(path))
+
+        /** Create a loader for a local model directory. */
+        @JvmStatic
+        fun fromDirectory(path: String): XybridModelLoader = from(ModelSource.directory(path))
+
+        /** Create a loader for a Hugging Face repository. */
+        @JvmStatic
+        fun fromHuggingFace(repo: String): XybridModelLoader =
+            from(ModelSource.huggingFace(repo))
+
+        /** Compatibility spelling retained for existing Kotlin callers. */
+        @JvmStatic
+        fun fromHuggingface(repo: String): XybridModelLoader = fromHuggingFace(repo)
+    }
+}
+
+/** Idiomatic short name for the high-level model loader. */
+typealias ModelLoader = XybridModelLoader
+
 // -- Public Type Aliases --
-//
-// Bolt collapsed `XybridModelLoader.fromRegistry(id).load()` into the
-// `XybridModel.fromRegistry(id)` companion-object factory — there is no
-// loader type anymore. The Model / Result / Envelope / VoiceInfo /
-// GenerationConfig aliases stay for convenience.
 
 /** A loaded model ready for inference. */
 typealias Model = XybridModel
@@ -180,20 +332,36 @@ fun XybridModel.run(envelope: XybridEnvelope): XybridResult = this.run(envelope,
 // dispatcher is therefore the correct, low-risk way to surface suspend today.)
 
 /** Load a model from the xybrid registry off the caller's thread. */
+@Deprecated(
+    message = "Use Xybrid.model(id).load().",
+    replaceWith = ReplaceWith("Xybrid.model(id).load()"),
+)
 suspend fun XybridModel.Companion.fromRegistryAsync(id: String): XybridModel =
-    withContext(Dispatchers.IO) { XybridModel(id) }
+    Xybrid.model(id).load()
 
 /** Load a model from a local directory off the caller's thread. */
+@Deprecated(
+    message = "Use Xybrid.model(ModelSource.directory(path)).load().",
+    replaceWith = ReplaceWith("Xybrid.model(ModelSource.directory(path)).load()"),
+)
 suspend fun XybridModel.Companion.fromDirectoryAsync(path: String): XybridModel =
-    withContext(Dispatchers.IO) { fromDirectory(path) }
+    Xybrid.model(ModelSource.directory(path)).load()
 
 /** Load a model from a local `.xyb` bundle off the caller's thread. */
+@Deprecated(
+    message = "Use Xybrid.model(ModelSource.bundle(path)).load().",
+    replaceWith = ReplaceWith("Xybrid.model(ModelSource.bundle(path)).load()"),
+)
 suspend fun XybridModel.Companion.fromBundleAsync(path: String): XybridModel =
-    withContext(Dispatchers.IO) { fromBundle(path) }
+    Xybrid.model(ModelSource.bundle(path)).load()
 
 /** Resolve and load a model from a HuggingFace repo off the caller's thread. */
+@Deprecated(
+    message = "Use Xybrid.model(ModelSource.huggingFace(repo)).load().",
+    replaceWith = ReplaceWith("Xybrid.model(ModelSource.huggingFace(repo)).load()"),
+)
 suspend fun XybridModel.Companion.fromHuggingfaceAsync(repo: String): XybridModel =
-    withContext(Dispatchers.IO) { fromHuggingface(repo) }
+    Xybrid.model(ModelSource.huggingFace(repo)).load()
 
 /** Run inference off the caller's thread (on [Dispatchers.IO]). */
 suspend fun XybridModel.runAsync(
@@ -206,6 +374,44 @@ suspend fun XybridModel.warmupAsync() = withContext(Dispatchers.IO) { this@warmu
 
 /** Unload the model, freeing its memory, off the caller's thread (on [Dispatchers.IO]). */
 suspend fun XybridModel.unloadAsync() = withContext(Dispatchers.IO) { this@unloadAsync.unload() }
+
+/**
+ * Stream inference token-by-token as a cold [Flow].
+ *
+ * Emits each [XybridStreamToken] as it is generated and completes when
+ * generation finishes; throws [XybridError] if the run fails mid-stream.
+ * Cancelling the collecting coroutine aborts generation at the next token
+ * boundary — the session is closed, which unwinds the backend instead of
+ * running to `max_tokens`. Ergonomic wrapper over the pull-based session API
+ * ([XybridModel.runStream] / [XybridModel.streamNext] /
+ * [XybridModel.streamClose]).
+ *
+ * ```kotlin
+ * model.streamTokens(envelope).collect { token -> print(token.token) }
+ * ```
+ */
+fun XybridModel.streamTokens(
+    envelope: XybridEnvelope,
+    options: XybridRunOptions? = null,
+): Flow<XybridStreamToken> = flow {
+    val streamId = runStream(envelope, options)
+    try {
+        while (true) {
+            // Cooperative cancellation: collecting coroutine cancelled -> throws
+            // here at the next token boundary, the finally closes the session.
+            currentCoroutineContext().ensureActive()
+            val event = streamNext(streamId)
+            when (event.kind) {
+                XybridStreamEventKind.TOKEN -> event.token?.let { emit(it) }
+                XybridStreamEventKind.COMPLETE -> break
+            }
+        }
+    } finally {
+        // Idempotent (the session may already be gone after an error), and
+        // aborts an in-flight run when collection stops early.
+        streamClose(streamId)
+    }
+}.flowOn(Dispatchers.IO)
 
 /** The result of a model inference operation. */
 typealias Result = XybridResult

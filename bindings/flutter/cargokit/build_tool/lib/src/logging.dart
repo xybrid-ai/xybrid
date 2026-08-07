@@ -11,7 +11,11 @@ const String kDoubleSeparator = "==";
 bool _lastMessageWasSeparator = false;
 
 void _log(LogRecord rec) {
-  final prefix = '${rec.level.name}: ';
+  // Flutter's non-verbose desktop builds only surface ninja stdout lines that
+  // match `error:` / `warning:` (build_linux.dart errorMatcher), and ninja
+  // merges our stderr into its stdout. Dart's SEVERE label matches neither, so
+  // failure messages would be silently dropped — print ERROR instead.
+  final prefix = rec.level == Level.SEVERE ? 'ERROR: ' : '${rec.level.name}: ';
   final out = rec.level == Level.SEVERE ? stderr : stdout;
   if (rec.message == kSeparator) {
     if (!_lastMessageWasSeparator) {

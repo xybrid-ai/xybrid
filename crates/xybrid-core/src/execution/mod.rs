@@ -105,6 +105,8 @@ pub(crate) mod tool_continuation;
 
 // Main executor
 mod executor;
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+pub use executor::model_default_gen_config;
 pub use executor::TemplateExecutor;
 
 // Preprocessing steps (internal implementation details)
@@ -125,4 +127,4 @@ pub mod listener;
 // Execution strategies (modular execution paths, internal)
 pub(crate) mod strategies;
 #[allow(unused_imports)]
-pub(crate) use strategies::{ExecutionContext, ExecutionStrategy, StrategyResolver};
+pub(crate) use strategies::{ExecutionContext, ExecutionStrategy};

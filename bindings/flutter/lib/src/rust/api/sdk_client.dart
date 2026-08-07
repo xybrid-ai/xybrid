@@ -71,6 +71,10 @@ abstract class XybridSdkClient implements RustOpaqueInterface {
       XybridRustLib.instance.api
           .crateApiSdkClientXybridSdkClientIsModelCached(modelId: modelId);
 
+  /// Whether the global speculative-cloud default is on.
+  static bool isSpeculativeCloudEnabled() => XybridRustLib.instance.api
+      .crateApiSdkClientXybridSdkClientIsSpeculativeCloudEnabled();
+
   /// Whether [`Self::init_telemetry`] has run at least once in this
   /// process. Reflects the authoritative process-wide state, not any
   /// Dart-side flag — survives hot-restart, multiple isolates, etc.
@@ -91,4 +95,23 @@ abstract class XybridSdkClient implements RustOpaqueInterface {
   static void setGatewayUrl({required String gatewayUrl}) => XybridRustLib
       .instance.api
       .crateApiSdkClientXybridSdkClientSetGatewayUrl(gatewayUrl: gatewayUrl);
+
+  /// Point the cloud gateway at a platform base URL (staging, self-hosted).
+  ///
+  /// Held in process memory rather than the environment, so it is safe to
+  /// call after telemetry threads have started. Pass a bare base URL — the
+  /// `/v1` suffix is applied internally.
+  static void setPlatformUrl({required String url}) =>
+      XybridRustLib.instance.api
+          .crateApiSdkClientXybridSdkClientSetPlatformUrl(url: url);
+
+  /// Enable speculative cloud fallback globally: a registry model that isn't
+  /// downloaded yet is served from the gateway while the weights download.
+  ///
+  /// Only takes effect when an API key resolves. Speculation is LLM/chat
+  /// only — prefer `FfiModelLoader.fromRegistrySpeculative` when the app also
+  /// loads ASR/TTS models, which cannot be served this way.
+  static void setSpeculativeCloud({required bool enabled}) => XybridRustLib
+      .instance.api
+      .crateApiSdkClientXybridSdkClientSetSpeculativeCloud(enabled: enabled);
 }

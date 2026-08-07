@@ -62,8 +62,8 @@ namespace Xybrid.Tests.Editor
         {
             var root = Path.Combine(Path.GetTempPath(), "xybrid-extract-root");
             Assert.IsTrue(
-                NativeLibraryResolver.TryResolveSafeExtractPath(root, "macOS/libxybrid_ffi.dylib", out var dest));
-            StringAssert.Contains("libxybrid_ffi.dylib", dest);
+                NativeLibraryResolver.TryResolveSafeExtractPath(root, "macOS/libxybrid_bolt.dylib", out var dest));
+            StringAssert.Contains("libxybrid_bolt.dylib", dest);
         }
 
         [Test]

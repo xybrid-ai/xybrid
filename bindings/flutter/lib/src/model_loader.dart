@@ -139,6 +139,27 @@ class XybridModelLoader {
     return XybridModelLoader._(FfiModelLoader.fromRegistry(modelId: modelId));
   }
 
+  /// Create a loader that serves from the cloud gateway while the registry
+  /// weights download in the background, instead of blocking on the download.
+  ///
+  /// [load] then returns almost immediately with a cloud-backed model that
+  /// switches to on-device by itself once the download lands. Requires an API
+  /// key (see [Xybrid.setApiKey]) and an uncached model — otherwise this
+  /// behaves exactly like [XybridModelLoader.fromRegistry], which
+  /// [willSpeculate] reports. LLM/chat models only.
+  ///
+  /// Watch the handover with [XybridModel.isCloudServing],
+  /// [XybridModel.downloadStatus] and [XybridModel.downloadProgress].
+  factory XybridModelLoader.fromRegistrySpeculative(String modelId) {
+    return XybridModelLoader._(
+      FfiModelLoader.fromRegistrySpeculative(modelId: modelId),
+    );
+  }
+
+  /// Whether [load] would actually speculate: speculation enabled, an API key
+  /// resolves, and the model is not already cached. Never touches the network.
+  bool get willSpeculate => _inner.willSpeculate();
+
   /// Create a loader for a model from a local bundle path.
   ///
   /// The [path] should point to a directory containing model_metadata.json.
@@ -227,6 +248,48 @@ class XybridModel {
   final FfiModel inner;
 
   XybridModel._(this.inner);
+
+  /// Whether runs are currently answered by the cloud because the local
+  /// weights are not ready yet. `false` for ordinary local models.
+  ///
+  /// This predicts the *next* run; [XybridResult.executionTarget] reports what
+  /// a run that already happened actually did. They differ when a cloud leg
+  /// fails and degrades to local mid-call.
+  bool get isCloudServing => inner.isCloudServing();
+
+  /// Download progress + state in one consistent read.
+  ///
+  /// Reports [FfiDownloadState.ready] at 1.0 for an ordinary local model, so
+  /// the UI needs no special case. Prefer [downloadProgress] to be pushed
+  /// updates instead of polling.
+  FfiDownloadStatus get downloadStatus => inner.downloadStatus();
+
+  /// Stream download progress for a speculatively-loaded model until it
+  /// reaches a terminal state.
+  ///
+  /// Emits [LoadProgress] while downloading, then exactly one [LoadComplete]
+  /// (now running on-device) or [LoadError] (download failed; the cloud keeps
+  /// serving). Cancelling the subscription stops the native poller.
+  ///
+  /// ```dart
+  /// final model = await XybridModelLoader
+  ///     .fromRegistrySpeculative('lfm2.5-350m')
+  ///     .load();
+  ///
+  /// model.downloadProgress().listen((event) {
+  ///   if (event is LoadProgress) setState(() => _pct = event.progress);
+  ///   if (event is LoadComplete) setState(() => _banner = null);
+  /// });
+  /// ```
+  Stream<LoadEvent> downloadProgress() {
+    return inner.downloadProgress().map((ffiEvent) {
+      return switch (ffiEvent) {
+        FfiLoadEvent_Progress(:final field0) => LoadProgress(field0),
+        FfiLoadEvent_Complete() => const LoadComplete(),
+        FfiLoadEvent_Error(:final field0) => LoadError(field0),
+      };
+    });
+  }
 
   /// Run inference with the given envelope.
   ///

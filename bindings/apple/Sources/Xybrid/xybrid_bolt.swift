@@ -198,13 +198,17 @@ public struct XybridResult: Hashable, Equatable, Sendable {
     public var outputType: XybridOutputType
     public var modelId: String
     public var latencyMs: UInt32
+    /// Where the answer actually came from. Cloud fallback keeps `model_id`
+    /// identical on both legs, so this is the only way to tell them apart.
+    public var executionTarget: XybridExecutionTarget
     public var metrics: XybridInferenceMetrics
 
-    public init(envelope: XybridEnvelope, outputType: XybridOutputType, modelId: String, latencyMs: UInt32, metrics: XybridInferenceMetrics) {
+    public init(envelope: XybridEnvelope, outputType: XybridOutputType, modelId: String, latencyMs: UInt32, executionTarget: XybridExecutionTarget, metrics: XybridInferenceMetrics) {
         self.envelope = envelope
         self.outputType = outputType
         self.modelId = modelId
         self.latencyMs = latencyMs
+        self.executionTarget = executionTarget
         self.metrics = metrics
     }
 
@@ -212,14 +216,97 @@ public struct XybridResult: Hashable, Equatable, Sendable {
 
 extension XybridResult: WireCodable {
     @inlinable static func decode(from reader: inout WireReader) -> XybridResult {
-        XybridResult(envelope: XybridEnvelope.decode(from: &reader), outputType: XybridOutputType(wireTag: reader.readI32()), modelId: reader.readString(), latencyMs: reader.readU32(), metrics: XybridInferenceMetrics.decode(from: &reader))
+        XybridResult(envelope: XybridEnvelope.decode(from: &reader), outputType: XybridOutputType(wireTag: reader.readI32()), modelId: reader.readString(), latencyMs: reader.readU32(), executionTarget: XybridExecutionTarget(wireTag: reader.readI32()), metrics: XybridInferenceMetrics.decode(from: &reader))
     }
     @inlinable func encode(to writer: inout WireWriter) {
         self.envelope.encode(to: &writer)
         writer.writeI32(self.outputType.wireTag)
         writer.writeString(self.modelId)
         writer.writeU32(self.latencyMs)
+        writer.writeI32(self.executionTarget.wireTag)
         self.metrics.encode(to: &writer)
+    }
+}
+
+/// Download progress + state in one consistent read.
+public struct XybridDownloadStatus: Hashable, Equatable, Sendable {
+    public var state: XybridDownloadState
+    /// 0.0..=1.0.
+    public var progress: Float
+
+    public init(state: XybridDownloadState, progress: Float) {
+        self.state = state
+        self.progress = progress
+    }
+
+}
+
+extension XybridDownloadStatus: WireCodable {
+    @inlinable static func decode(from reader: inout WireReader) -> XybridDownloadStatus {
+        XybridDownloadStatus(state: XybridDownloadState(wireTag: reader.readI32()), progress: reader.readF32())
+    }
+    @inlinable func encode(to writer: inout WireWriter) {
+        writer.writeI32(self.state.wireTag)
+        writer.writeF32(self.progress)
+    }
+}
+
+public struct XybridStreamToken: Hashable, Equatable, Sendable {
+    public var token: String
+    public var tokenId: Int64?
+    public var index: UInt64
+    public var cumulativeText: String
+    public var finishReason: String?
+
+    public init(token: String, tokenId: Int64? = nil, index: UInt64, cumulativeText: String, finishReason: String? = nil) {
+        self.token = token
+        self.tokenId = tokenId
+        self.index = index
+        self.cumulativeText = cumulativeText
+        self.finishReason = finishReason
+    }
+
+}
+
+extension XybridStreamToken: WireCodable {
+    @inlinable static func decode(from reader: inout WireReader) -> XybridStreamToken {
+        XybridStreamToken(token: reader.readString(), tokenId: reader.readOptional { reader in reader.readI64() }, index: reader.readU64(), cumulativeText: reader.readString(), finishReason: reader.readOptional { reader in reader.readString() })
+    }
+    @inlinable func encode(to writer: inout WireWriter) {
+        writer.writeString(self.token)
+        writer.writeOptional(self.tokenId) { writer, v in writer.writeI64(v) }
+        writer.writeU64(self.index)
+        writer.writeString(self.cumulativeText)
+        writer.writeOptional(self.finishReason) { writer, v in writer.writeString(v) }
+    }
+}
+
+/// One pull from a streaming inference session.
+///
+/// This is a flat record instead of a data-carrying enum because the pinned
+/// C# generator cannot lower that enum shape reliably. `kind` selects the one
+/// populated payload: `token` for `Token`, none for `Complete`. A `Complete`
+/// event is followed by [`XybridModel::stream_result`] to retrieve the final
+/// result. Inference failures are returned as typed [`XybridError`] values by
+/// [`XybridModel::stream_next`].
+public struct XybridStreamEvent: Hashable, Equatable, Sendable {
+    public var kind: XybridStreamEventKind
+    public var token: XybridStreamToken?
+
+    public init(kind: XybridStreamEventKind, token: XybridStreamToken? = nil) {
+        self.kind = kind
+        self.token = token
+    }
+
+}
+
+extension XybridStreamEvent: WireCodable {
+    @inlinable static func decode(from reader: inout WireReader) -> XybridStreamEvent {
+        XybridStreamEvent(kind: XybridStreamEventKind(wireTag: reader.readI32()), token: reader.readOptional { reader in XybridStreamToken.decode(from: &reader) })
+    }
+    @inlinable func encode(to writer: inout WireWriter) {
+        writer.writeI32(self.kind.wireTag)
+        writer.writeOptional(self.token) { writer, v in v.encode(to: &writer) }
     }
 }
 
@@ -566,6 +653,96 @@ extension XybridOutputType: WireCodable {
     @inlinable func encode(to writer: inout WireWriter) { writer.writeI32(wireTag) }
 }
 
+/// Where a result was produced — observed fact, not a routing preference.
+public enum XybridExecutionTarget: Int32, Hashable, Sendable, CaseIterable {
+    case local = 0
+    case cloud = 1
+
+    @usableFromInline init(fromC c: Int32) { self = XybridExecutionTarget(rawValue: c)! }
+    @usableFromInline var cValue: Int32 { rawValue }
+    @usableFromInline init(wireTag: Int32) {
+        switch wireTag {
+        case 0: self = .local
+        case 1: self = .cloud
+        default: fatalError("Invalid XybridExecutionTarget wire tag: \(wireTag)")
+        }
+    }
+    @usableFromInline var wireTag: Int32 {
+        switch rawValue {
+        case 0: return 0
+        case 1: return 1
+        default: fatalError("Invalid XybridExecutionTarget raw value: \(rawValue)")
+        }
+    }
+
+}
+
+extension XybridExecutionTarget: WireCodable {
+    @inlinable static func decode(from reader: inout WireReader) -> XybridExecutionTarget { XybridExecutionTarget(wireTag: reader.readI32()) }
+    @inlinable func encode(to writer: inout WireWriter) { writer.writeI32(wireTag) }
+}
+
+/// Lifecycle of the background download behind a speculative load.
+public enum XybridDownloadState: Int32, Hashable, Sendable, CaseIterable {
+    case downloading = 0
+    case ready = 1
+    /// Download failed; the cloud keeps serving and `isLoaded` never flips.
+    case failed = 2
+
+    @usableFromInline init(fromC c: Int32) { self = XybridDownloadState(rawValue: c)! }
+    @usableFromInline var cValue: Int32 { rawValue }
+    @usableFromInline init(wireTag: Int32) {
+        switch wireTag {
+        case 0: self = .downloading
+        case 1: self = .ready
+        case 2: self = .failed
+        default: fatalError("Invalid XybridDownloadState wire tag: \(wireTag)")
+        }
+    }
+    @usableFromInline var wireTag: Int32 {
+        switch rawValue {
+        case 0: return 0
+        case 1: return 1
+        case 2: return 2
+        default: fatalError("Invalid XybridDownloadState raw value: \(rawValue)")
+        }
+    }
+
+}
+
+extension XybridDownloadState: WireCodable {
+    @inlinable static func decode(from reader: inout WireReader) -> XybridDownloadState { XybridDownloadState(wireTag: reader.readI32()) }
+    @inlinable func encode(to writer: inout WireWriter) { writer.writeI32(wireTag) }
+}
+
+public enum XybridStreamEventKind: Int32, Hashable, Sendable, CaseIterable {
+    case token = 0
+    case complete = 1
+
+    @usableFromInline init(fromC c: Int32) { self = XybridStreamEventKind(rawValue: c)! }
+    @usableFromInline var cValue: Int32 { rawValue }
+    @usableFromInline init(wireTag: Int32) {
+        switch wireTag {
+        case 0: self = .token
+        case 1: self = .complete
+        default: fatalError("Invalid XybridStreamEventKind wire tag: \(wireTag)")
+        }
+    }
+    @usableFromInline var wireTag: Int32 {
+        switch rawValue {
+        case 0: return 0
+        case 1: return 1
+        default: fatalError("Invalid XybridStreamEventKind raw value: \(rawValue)")
+        }
+    }
+
+}
+
+extension XybridStreamEventKind: WireCodable {
+    @inlinable static func decode(from reader: inout WireReader) -> XybridStreamEventKind { XybridStreamEventKind(wireTag: reader.readI32()) }
+    @inlinable func encode(to writer: inout WireWriter) { writer.writeI32(wireTag) }
+}
+
 public enum XybridThermalState: Int32, Hashable, Sendable, CaseIterable {
     case normal = 0
     case warm = 1
@@ -677,6 +854,65 @@ public func setProviderApiKey(provider: String, apiKey: String) {
     }
 }
 
+/// Point the cloud gateway at a platform base URL (staging, self-hosted).
+/// Pass a bare base URL — the `/v1` suffix is applied internally.
+public func setPlatformUrl(url: String) {
+    var url = url
+    url.withUTF8 { urlBuf in
+        boltffi_set_platform_url(urlBuf.baseAddress!, UInt(urlBuf.count))
+    }
+}
+
+/// Enable speculative cloud fallback globally: a registry model that isn't
+/// downloaded yet is served from the gateway while the weights download.
+///
+/// LLM/chat only — prefer `XybridModel.fromRegistrySpeculative` when the app
+/// also loads ASR/TTS models, which cannot be served this way.
+public func setSpeculativeCloud(enabled: Bool) {
+    boltffi_set_speculative_cloud(enabled)
+}
+
+/// Whether the global speculative-cloud default is on.
+public func isSpeculativeCloudEnabled() -> Bool {
+    return boltffi_is_speculative_cloud_enabled()
+}
+
+/// Whether `XybridModel::from_registry_speculative(model_id)` would actually
+/// speculate: an API key resolves and the model is not already cached.
+///
+/// Lets the hand-written Swift/Kotlin loader facades answer "will this
+/// speculate?" before loading. Never touches the network.
+public func willSpeculateForModel(modelId: String) -> Bool {
+    var modelId = modelId
+    return modelId.withUTF8 { modelIdBuf in
+        return boltffi_will_speculate_for_model(modelIdBuf.baseAddress!, UInt(modelIdBuf.count))
+    }
+}
+
+/// The SDK version string (tracks `CARGO_PKG_VERSION`).
+public func version() -> String {
+    let buf = boltffi_version()
+    defer { boltffi_free_buf(buf) }
+    return boltffiDecodeOwnedBuf(buf.ptr, Int(buf.len)) { reader in reader.readString() }
+}
+
+/// The SDK's default telemetry ingest endpoint (for display alongside a config).
+public func telemetryDefaultEndpoint() -> String {
+    let buf = boltffi_telemetry_default_endpoint()
+    defer { boltffi_free_buf(buf) }
+    return boltffiDecodeOwnedBuf(buf.ptr, Int(buf.len)) { reader in reader.readString() }
+}
+
+/// Flush pending telemetry events. Safe before init / after shutdown.
+public func telemetryFlush() {
+    boltffi_telemetry_flush()
+}
+
+/// Shut down the telemetry exporter. Idempotent.
+public func telemetryShutdown() {
+    boltffi_telemetry_shutdown()
+}
+
 public final class XybridModel {
     let handle: OpaquePointer
 
@@ -688,6 +924,22 @@ public final class XybridModel {
     public convenience init(fromRegistry id: String) throws {
         var id = id
         let ptr = id.withUTF8 { idBuf -> OpaquePointer? in boltffi_xybrid_model_from_registry(idBuf.baseAddress!, UInt(idBuf.count)) }
+        guard let ptr = ptr else {
+            throw FfiError(message: takeLastErrorMessage())
+        }
+        self.init(handle: ptr)
+    }
+
+    /// Load from the registry, serving from the cloud gateway while the weights
+    /// download in the background.
+    ///
+    /// Returns almost immediately instead of blocking on the download. Requires
+    /// a resolvable API key and an uncached model; otherwise it behaves exactly
+    /// like `from_registry`. Poll `download_status` for progress and
+    /// `is_cloud_serving` to know which leg is answering. LLM/chat models only.
+    public convenience init(fromRegistrySpeculative id: String) throws {
+        var id = id
+        let ptr = id.withUTF8 { idBuf -> OpaquePointer? in boltffi_xybrid_model_from_registry_speculative(idBuf.baseAddress!, UInt(idBuf.count)) }
         guard let ptr = ptr else {
             throw FfiError(message: takeLastErrorMessage())
         }
@@ -724,6 +976,17 @@ public final class XybridModel {
         self.init(handle: ptr)
     }
 
+    /// Load from a raw GGUF file, auto-generating `model_metadata.json` from the
+    /// GGUF header (written next to the file if absent).
+    public convenience init(fromModelFile path: String) throws {
+        var path = path
+        let ptr = path.withUTF8 { pathBuf -> OpaquePointer? in boltffi_xybrid_model_from_model_file(pathBuf.baseAddress!, UInt(pathBuf.count)) }
+        guard let ptr = ptr else {
+            throw FfiError(message: takeLastErrorMessage())
+        }
+        self.init(handle: ptr)
+    }
+
     deinit {
         boltffi_xybrid_model_free(handle)
     }
@@ -748,8 +1011,37 @@ public final class XybridModel {
         return boltffi_xybrid_model_is_loaded(handle)
     }
 
+    /// Whether runs are currently answered by the cloud because the local
+    /// weights are not ready yet. `false` for ordinary local models.
+    public func isCloudServing() -> Bool {
+        return boltffi_xybrid_model_is_cloud_serving(handle)
+    }
+
+    /// Download progress + state in one read — poll this to drive a progress
+    /// bar. Reports `Ready` at 1.0 for an ordinary local model, so hosts need
+    /// no special case.
+    public func downloadStatus() -> XybridDownloadStatus {
+        let buf = boltffi_xybrid_model_download_status(handle)
+        defer { boltffi_free_buf(buf) }
+        return boltffiDecodeOwnedBuf(buf.ptr, Int(buf.len)) { reader in XybridDownloadStatus.decode(from: &reader) }
+    }
+
+    /// Block until the download finishes or `timeout_ms` elapses, then report
+    /// the status. Call it off the UI thread (the same place `from_registry` is
+    /// already called). `timeout_ms = 0` makes it a non-blocking read.
+    public func awaitDownload(timeoutMs: UInt64) -> XybridDownloadStatus {
+        let buf = boltffi_xybrid_model_await_download(handle, timeoutMs)
+        defer { boltffi_free_buf(buf) }
+        return boltffiDecodeOwnedBuf(buf.ptr, Int(buf.len)) { reader in XybridDownloadStatus.decode(from: &reader) }
+    }
+
     public func supportsStreaming() -> Bool {
         return boltffi_xybrid_model_supports_streaming(handle)
+    }
+
+    /// Whether this model emits true token-by-token output.
+    public func supportsTokenStreaming() -> Bool {
+        return boltffi_xybrid_model_supports_token_streaming(handle)
     }
 
     public func isLlm() -> Bool {
@@ -798,6 +1090,73 @@ public final class XybridModel {
         }
     }
 
+    /// Start token streaming and return a model-scoped session identifier.
+    ///
+    /// The identifier remains valid until the final result is taken, an error
+    /// is returned, or [`Self::stream_close`] is called.
+    public func runStream(envelope: XybridEnvelope, options: XybridRunOptions?) throws -> UInt64 {
+        let envelopeBytes = boltffiEncode { writer in envelope.encode(to: &writer) }
+        let optionsBytes = boltffiEncode { writer in writer.writeOptional(options) { writer, v in v.encode(to: &writer) } }
+        return try envelopeBytes.withUnsafeBufferPointer { envelopeBuf in
+            return try optionsBytes.withUnsafeBufferPointer { optionsBuf in
+                let buf = boltffi_xybrid_model_run_stream(handle, envelopeBuf.baseAddress, UInt(envelopeBuf.count), optionsBuf.baseAddress, UInt(optionsBuf.count))
+                defer { boltffi_free_buf(buf) }
+                return try boltffiDecodeOwnedBuf(buf.ptr, Int(buf.len)) { reader in try { let tag = reader.readU8(); if tag == 0 { return reader.readU64() } else { throw XybridError.decode(from: &reader) } }() }
+            }
+        }
+    }
+
+    /// Block until the next item for `stream_id` is ready.
+    public func streamNext(streamId: UInt64) throws -> XybridStreamEvent {
+        let buf = boltffi_xybrid_model_stream_next(handle, streamId)
+        defer { boltffi_free_buf(buf) }
+        return try boltffiDecodeOwnedBuf(buf.ptr, Int(buf.len)) { reader in try { let tag = reader.readU8(); if tag == 0 { return XybridStreamEvent.decode(from: &reader) } else { throw XybridError.decode(from: &reader) } }() }
+    }
+
+    /// Take the final result after receiving a `Complete` event.
+    public func streamResult(streamId: UInt64) throws -> XybridResult {
+        let buf = boltffi_xybrid_model_stream_result(handle, streamId)
+        defer { boltffi_free_buf(buf) }
+        return try boltffiDecodeOwnedBuf(buf.ptr, Int(buf.len)) { reader in try { let tag = reader.readU8(); if tag == 0 { return XybridResult.decode(from: &reader) } else { throw XybridError.decode(from: &reader) } }() }
+    }
+
+    /// Forget a streaming session.
+    public func streamClose(streamId: UInt64) {
+        boltffi_xybrid_model_stream_close(handle, streamId)
+    }
+
+    /// Run inference seeded with a conversation `context` (multi-turn chat).
+    ///
+    /// Only the generation config from `options` is applied — abort signals and
+    /// cloud fallback are not wired on the context path (matches the facade's
+    /// `run_with_context`).
+    public func runWithContext(envelope: XybridEnvelope, context: XybridConversationContext, options: XybridRunOptions?) throws -> XybridResult {
+        let envelopeBytes = boltffiEncode { writer in envelope.encode(to: &writer) }
+        let optionsBytes = boltffiEncode { writer in writer.writeOptional(options) { writer, v in v.encode(to: &writer) } }
+        return try envelopeBytes.withUnsafeBufferPointer { envelopeBuf in
+            return try optionsBytes.withUnsafeBufferPointer { optionsBuf in
+                let buf = boltffi_xybrid_model_run_with_context(handle, envelopeBuf.baseAddress, UInt(envelopeBuf.count), context.handle, optionsBuf.baseAddress, UInt(optionsBuf.count))
+                defer { boltffi_free_buf(buf) }
+                return try boltffiDecodeOwnedBuf(buf.ptr, Int(buf.len)) { reader in try { let tag = reader.readU8(); if tag == 0 { return XybridResult.decode(from: &reader) } else { throw XybridError.decode(from: &reader) } }() }
+            }
+        }
+    }
+
+    /// Start context-aware token streaming; returns a model-scoped session id.
+    /// The pull protocol is identical to [`Self::run_stream`]
+    /// (`stream_next` / `stream_result` / `stream_close`).
+    public func runStreamWithContext(envelope: XybridEnvelope, context: XybridConversationContext, options: XybridRunOptions?) throws -> UInt64 {
+        let envelopeBytes = boltffiEncode { writer in envelope.encode(to: &writer) }
+        let optionsBytes = boltffiEncode { writer in writer.writeOptional(options) { writer, v in v.encode(to: &writer) } }
+        return try envelopeBytes.withUnsafeBufferPointer { envelopeBuf in
+            return try optionsBytes.withUnsafeBufferPointer { optionsBuf in
+                let buf = boltffi_xybrid_model_run_stream_with_context(handle, envelopeBuf.baseAddress, UInt(envelopeBuf.count), context.handle, optionsBuf.baseAddress, UInt(optionsBuf.count))
+                defer { boltffi_free_buf(buf) }
+                return try boltffiDecodeOwnedBuf(buf.ptr, Int(buf.len)) { reader in try { let tag = reader.readU8(); if tag == 0 { return reader.readU64() } else { throw XybridError.decode(from: &reader) } }() }
+            }
+        }
+    }
+
     public func warmup() throws {
         let buf = boltffi_xybrid_model_warmup(handle)
         defer { boltffi_free_buf(buf) }
@@ -808,6 +1167,271 @@ public final class XybridModel {
         let buf = boltffi_xybrid_model_unload(handle)
         defer { boltffi_free_buf(buf) }
         return try boltffiDecodeOwnedBuf(buf.ptr, Int(buf.len)) { reader in try { let tag = reader.readU8(); if tag == 0 { return () } else { throw XybridError.decode(from: &reader) } }() }
+    }
+
+}
+
+/// Opaque handle for multi-turn conversation history.
+///
+/// Build it up with [`push`](Self::push) / [`set_system`](Self::set_system),
+/// then pass it to [`XybridModel::run_with_context`] /
+/// [`XybridModel::run_stream_with_context`]. Wraps the facade's
+/// interior-mutable, thread-safe `ConversationContextHandle`.
+public final class XybridConversationContext {
+    let handle: OpaquePointer
+
+    init(handle: OpaquePointer) {
+        self.handle = handle
+    }
+
+    /// Create an empty conversation context (fresh id).
+    public init() {
+        let ptr = boltffi_xybrid_conversation_context_new()!
+        self.handle = ptr
+    }
+
+    /// Create a context with a caller-supplied id (for telemetry correlation
+    /// across turns).
+    public convenience init(withId id: String) {
+        var id = id
+        let ptr = id.withUTF8 { idBuf -> OpaquePointer? in boltffi_xybrid_conversation_context_with_id(idBuf.baseAddress!, UInt(idBuf.count)) }!
+        self.init(handle: ptr)
+    }
+
+    deinit {
+        boltffi_xybrid_conversation_context_free(handle)
+    }
+
+    /// Append a turn — typically a user or assistant message envelope.
+    public func push(envelope: XybridEnvelope) throws {
+        let envelopeBytes = boltffiEncode { writer in envelope.encode(to: &writer) }
+        return try envelopeBytes.withUnsafeBufferPointer { envelopeBuf in
+            let buf = boltffi_xybrid_conversation_context_push(handle, envelopeBuf.baseAddress, UInt(envelopeBuf.count))
+            defer { boltffi_free_buf(buf) }
+            return try boltffiDecodeOwnedBuf(buf.ptr, Int(buf.len)) { reader in try { let tag = reader.readU8(); if tag == 0 { return () } else { throw XybridError.decode(from: &reader) } }() }
+        }
+    }
+
+    /// Set the persistent system-prompt envelope (survives [`clear`](Self::clear)).
+    public func setSystem(envelope: XybridEnvelope) throws {
+        let envelopeBytes = boltffiEncode { writer in envelope.encode(to: &writer) }
+        return try envelopeBytes.withUnsafeBufferPointer { envelopeBuf in
+            let buf = boltffi_xybrid_conversation_context_set_system(handle, envelopeBuf.baseAddress, UInt(envelopeBuf.count))
+            defer { boltffi_free_buf(buf) }
+            return try boltffiDecodeOwnedBuf(buf.ptr, Int(buf.len)) { reader in try { let tag = reader.readU8(); if tag == 0 { return () } else { throw XybridError.decode(from: &reader) } }() }
+        }
+    }
+
+    /// Drop the history; the system envelope (if any) is preserved.
+    public func clear() {
+        boltffi_xybrid_conversation_context_clear(handle)
+    }
+
+    /// The context id.
+    public func id() -> String {
+        let buf = boltffi_xybrid_conversation_context_id(handle)
+        defer { boltffi_free_buf(buf) }
+        return boltffiDecodeOwnedBuf(buf.ptr, Int(buf.len)) { reader in reader.readString() }
+    }
+
+    /// Number of history turns (excludes the system envelope).
+    public func historyLen() -> UInt32 {
+        return boltffi_xybrid_conversation_context_history_len(handle)
+    }
+
+    /// Whether a persistent system-prompt envelope is set.
+    public func hasSystem() -> Bool {
+        return boltffi_xybrid_conversation_context_has_system(handle)
+    }
+
+    /// Set the max history length before FIFO pruning.
+    public func setMaxHistoryLen(len: UInt32) {
+        boltffi_xybrid_conversation_context_set_max_history_len(handle, len)
+    }
+
+}
+
+/// Advanced telemetry configuration builder.
+///
+/// Create with [`new`](Self::new), tune via the setters, then hand to
+/// [`telemetry_init`]. Wraps the facade's interior-mutable, thread-safe
+/// `TelemetryConfigHandle`.
+public final class XybridTelemetryConfig {
+    let handle: OpaquePointer
+
+    init(handle: OpaquePointer) {
+        self.handle = handle
+    }
+
+    /// A new config bound to the default ingest endpoint and the given API key.
+    public init(apiKey: String) {
+        var apiKey = apiKey
+        let ptr = apiKey.withUTF8 { apiKeyBuf -> OpaquePointer? in boltffi_xybrid_telemetry_config_new(apiKeyBuf.baseAddress!, UInt(apiKeyBuf.count)) }!
+        self.handle = ptr
+    }
+
+    deinit {
+        boltffi_xybrid_telemetry_config_free(handle)
+    }
+
+    /// Override the ingest endpoint (self-hosted collector / non-prod).
+    public func setEndpoint(endpoint: String) {
+        var endpoint = endpoint
+        endpoint.withUTF8 { endpointBuf in
+            boltffi_xybrid_telemetry_config_set_endpoint(handle, endpointBuf.baseAddress!, UInt(endpointBuf.count))
+        }
+    }
+
+    /// Set the app version reported with every event.
+    public func setAppVersion(version: String) {
+        var version = version
+        version.withUTF8 { versionBuf in
+            boltffi_xybrid_telemetry_config_set_app_version(handle, versionBuf.baseAddress!, UInt(versionBuf.count))
+        }
+    }
+
+    /// Set the human-friendly device label reported with every event.
+    public func setDeviceLabel(label: String) {
+        var label = label
+        label.withUTF8 { labelBuf in
+            boltffi_xybrid_telemetry_config_set_device_label(handle, labelBuf.baseAddress!, UInt(labelBuf.count))
+        }
+    }
+
+    /// Attach an app-provided device attribute (stored under `device.custom`).
+    public func setDeviceAttribute(key: String, value: String) {
+        var key = key
+        var value = value
+        key.withUTF8 { keyBuf in
+            value.withUTF8 { valueBuf in
+                boltffi_xybrid_telemetry_config_set_device_attribute(handle, keyBuf.baseAddress!, UInt(keyBuf.count), valueBuf.baseAddress!, UInt(valueBuf.count))
+            }
+        }
+    }
+
+    /// Set the number of events buffered before a flush.
+    public func setBatchSize(batchSize: UInt32) {
+        boltffi_xybrid_telemetry_config_set_batch_size(handle, batchSize)
+    }
+
+    /// Set the background flush interval, in seconds.
+    public func setFlushIntervalSecs(secs: UInt32) {
+        boltffi_xybrid_telemetry_config_set_flush_interval_secs(handle, secs)
+    }
+
+    /// Start the process-global telemetry exporter from this config.
+    ///
+    /// Consumes the config: subsequent setters no-op and a second `init` on the
+    /// same handle errors. Modeled as a method (not a free `telemetry_init`)
+    /// because boltffi 0.25.3 drops free functions that take a handle
+    /// parameter, but lowers a handle self-method fine (same reason the
+    /// generated `run` lives on `XybridModel`).
+    ///
+    /// # Errors
+    /// Errors if this config was already consumed, or if telemetry is already
+    /// initialized without an intervening [`telemetry_shutdown`].
+    public func `init`() throws {
+        let buf = boltffi_xybrid_telemetry_config_init(handle)
+        defer { boltffi_free_buf(buf) }
+        return try boltffiDecodeOwnedBuf(buf.ptr, Int(buf.len)) { reader in try { let tag = reader.readU8(); if tag == 0 { return () } else { throw XybridError.decode(from: &reader) } }() }
+    }
+
+}
+
+/// An opened `.xyb` model bundle.
+///
+/// Create with [`open`](Self::open); read the manifest/metadata, enumerate
+/// files, and [`extract`](Self::extract). Wraps the facade's immutable
+/// `BundleHandle`.
+public final class XybridBundle {
+    let handle: OpaquePointer
+
+    init(handle: OpaquePointer) {
+        self.handle = handle
+    }
+
+    /// Open and parse a `.xyb` bundle (decompress zstd, parse tar, validate the
+    /// manifest).
+    public convenience init(open path: String) throws {
+        var path = path
+        let ptr = path.withUTF8 { pathBuf -> OpaquePointer? in boltffi_xybrid_bundle_open(pathBuf.baseAddress!, UInt(pathBuf.count)) }
+        guard let ptr = ptr else {
+            throw FfiError(message: takeLastErrorMessage())
+        }
+        self.init(handle: ptr)
+    }
+
+    deinit {
+        boltffi_xybrid_bundle_free(handle)
+    }
+
+    /// The model identifier from the manifest.
+    public func modelId() -> String {
+        let buf = boltffi_xybrid_bundle_model_id(handle)
+        defer { boltffi_free_buf(buf) }
+        return boltffiDecodeOwnedBuf(buf.ptr, Int(buf.len)) { reader in reader.readString() }
+    }
+
+    /// The version string from the manifest.
+    public func version() -> String {
+        let buf = boltffi_xybrid_bundle_version(handle)
+        defer { boltffi_free_buf(buf) }
+        return boltffiDecodeOwnedBuf(buf.ptr, Int(buf.len)) { reader in reader.readString() }
+    }
+
+    /// The target platform from the manifest.
+    public func target() -> String {
+        let buf = boltffi_xybrid_bundle_target(handle)
+        defer { boltffi_free_buf(buf) }
+        return boltffiDecodeOwnedBuf(buf.ptr, Int(buf.len)) { reader in reader.readString() }
+    }
+
+    /// The SHA-256 hash from the manifest.
+    public func hash() -> String {
+        let buf = boltffi_xybrid_bundle_hash(handle)
+        defer { boltffi_free_buf(buf) }
+        return boltffiDecodeOwnedBuf(buf.ptr, Int(buf.len)) { reader in reader.readString() }
+    }
+
+    /// Whether the bundle carries a `model_metadata.json`.
+    public func hasMetadata() -> Bool {
+        return boltffi_xybrid_bundle_has_metadata(handle)
+    }
+
+    /// Number of files in the bundle (excludes `manifest.json`).
+    public func fileCount() -> UInt32 {
+        return boltffi_xybrid_bundle_file_count(handle)
+    }
+
+    /// The file name at `index`, or `None` if out of bounds.
+    public func fileName(index: UInt32) -> String? {
+        let buf = boltffi_xybrid_bundle_file_name(handle, index)
+        defer { boltffi_free_buf(buf) }
+        return boltffiDecodeOwnedBuf(buf.ptr, Int(buf.len)) { reader in reader.readOptional { reader in reader.readString() } }
+    }
+
+    /// The full bundle manifest serialized as JSON.
+    public func manifestJson() throws -> String {
+        let buf = boltffi_xybrid_bundle_manifest_json(handle)
+        defer { boltffi_free_buf(buf) }
+        return try boltffiDecodeOwnedBuf(buf.ptr, Int(buf.len)) { reader in try { let tag = reader.readU8(); if tag == 0 { return reader.readString() } else { throw XybridError.decode(from: &reader) } }() }
+    }
+
+    /// The `model_metadata.json` contents, or `None` if the bundle has none.
+    public func metadataJson() throws -> String? {
+        let buf = boltffi_xybrid_bundle_metadata_json(handle)
+        defer { boltffi_free_buf(buf) }
+        return try boltffiDecodeOwnedBuf(buf.ptr, Int(buf.len)) { reader in try { let tag = reader.readU8(); if tag == 0 { return reader.readOptional { reader in reader.readString() } } else { throw XybridError.decode(from: &reader) } }() }
+    }
+
+    /// Extract every bundle file to `output_dir` (created if absent).
+    public func extract(outputDir: String) throws {
+        var outputDir = outputDir
+        return try outputDir.withUTF8 { outputDirBuf in
+            let buf = boltffi_xybrid_bundle_extract(handle, outputDirBuf.baseAddress!, UInt(outputDirBuf.count))
+            defer { boltffi_free_buf(buf) }
+            return try boltffiDecodeOwnedBuf(buf.ptr, Int(buf.len)) { reader in try { let tag = reader.readU8(); if tag == 0 { return () } else { throw XybridError.decode(from: &reader) } }() }
+        }
     }
 
 }

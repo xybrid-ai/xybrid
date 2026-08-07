@@ -8,6 +8,7 @@
 # That stays in xtask/CI consuming these outputs (the build-once -> fan-out
 # boundary). boltffi itself is codegen, not a build script, so nothing is
 # generated at compile time.
+load("@rules_cc//cc:defs.bzl", "cc_library")
 load("@rules_rs//rs:rust_shared_library.bzl", "rust_shared_library")
 load("@rules_rs//rs:rust_static_library.bzl", "rust_static_library")
 load("@crates//:defs.bzl", "all_crate_deps")
@@ -27,6 +28,26 @@ rust_shared_library(
     srcs = glob(["src/**/*.rs"]),
     crate_name = "xybrid_bolt",
     edition = "2021",
+    # rules_rust hands cdylibs the cc toolchain's DYNAMIC C++ runtime by default
+    # (rustc.bzl: `if crate_type in ["dylib", "cdylib"] and linkage != "static"`),
+    # which put libc++.so.1 / libc++abi.so.1 / libunwind.so.1 in DT_NEEDED on
+    # linux. The hermetic toolchain ships no such shared objects, so the link only
+    # resolved inside the build container and the plugin failed to load anywhere
+    # else — Unity Editor CI caught it as
+    #   DllNotFoundException : libc++.so.1: cannot open shared object file
+    # "static" selects static_runtime_lib, the runtime the CLI binary already
+    # gets, which is why executables were never affected.
+    #
+    # LINUX ONLY, deliberately. On android the dynamic runtime lib IS the NDK's
+    # libc++_shared.so, and its DT_NEEDED is load-bearing (the boltffi relink /
+    # 16KB-page work, guarded by a dlopen gate). Verified by A/B: with "static"
+    # applied everywhere, libc++_shared.so disappeared from the android .so.
+    # Windows is left on the default too — its cdylib is already proven clean by
+    # the PE import audit, via the static trio in :win_cxx_runtime.
+    cc_runtime_linkage = select({
+        "@rules_rs//rs/platforms/config:x86_64-unknown-linux-gnu": "static",
+        "//conditions:default": "dynamic",
+    }),
     crate_features = ["default"],
     rustc_flags = select({
         "@platforms//os:android": [
@@ -39,8 +60,37 @@ rust_shared_library(
         ],
         "//conditions:default": [],
     }),
-    deps = all_crate_deps(normal = True),
+    # Windows (GNU/MinGW) cdylib: the hermetic toolchain links libc++ into
+    # EXECUTABLES by default (the CLI .exe links clean — xybrid-cli needs no
+    # windows linkopts) but NOT into a -shared cdylib, so llama.cpp's C++
+    # (libllama.a / libwrapper_cc.a) leaves __cxa_* / std::* undefined at the
+    # final link. :win_cxx_runtime hands the link the same static libc++/abi/
+    # unwind trio the llama tool exes get (//BUILD.bazel:200) — self-contained
+    # in the DLL (Bolt's boundary is C ABI, no C++ objects cross it). A
+    # cc_library dep, NOT compile_data: compile_data perturbs the crate's source
+    # staging and breaks boltffi's macro source-scan on RBE, and lld resolves
+    # the archives order-independently so no link-order plumbing is needed.
+    deps = all_crate_deps(normal = True) + select({
+        "@rules_rs//rs/platforms/config:x86_64-pc-windows-gnu": [":win_cxx_runtime"],
+        "//conditions:default": [],
+    }),
     visibility = ["//visibility:public"],
+)
+
+# Static C++ runtime trio for the windows-gnu cdylib link (see the cdylib's
+# deps note). Windows-target-built by the hermetic llvm (it compiles its
+# runtimes per target); the srcs select keeps it an empty no-op under every
+# other config so a package-wide build elsewhere never demands the win archives.
+cc_library(
+    name = "win_cxx_runtime",
+    srcs = select({
+        "@rules_rs//rs/platforms/config:x86_64-pc-windows-gnu": [
+            "@llvm//runtimes/libcxx:libcxx.static",
+            "@llvm//runtimes/libcxx:libcxxabi.static",
+            "@llvm//runtimes/libunwind:libunwind.static",
+        ],
+        "//conditions:default": [],
+    }),
 )
 
 # staticlib — libxybrid_bolt.a (what `boltffi pack` relinks into the xcframework/aar)

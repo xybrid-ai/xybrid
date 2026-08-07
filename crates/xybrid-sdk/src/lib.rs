@@ -220,7 +220,8 @@ pub use llm::{
 };
 pub use model::SdkError;
 pub use model::{
-    ModelLoader, SdkResult, SeamInfo, StreamConfig, StreamEvent, StreamToken, XybridModel,
+    DownloadState, DownloadStatus, ModelLoader, SdkResult, SeamInfo, StreamConfig, StreamEvent,
+    StreamToken, XybridModel,
 };
 pub use platform::current_platform;
 pub use registry_client::{CacheStats, ModelSummary, RegistryClient, ResolvedVariant};
@@ -254,7 +255,9 @@ pub use pipeline::{
     TextInputConfig,
     Xybrid,
 };
-pub use result::{InferenceMetrics, InferenceResult, OutputType, StageLatency};
+pub use result::{
+    ExecutionProvenance, InferenceMetrics, InferenceResult, OutputType, StageLatency,
+};
 pub use source::ModelSource;
 pub use stream::{PartialResult, StreamState, StreamStats, TranscriptionResult, XybridStream};
 // FFI streaming types for platform bindings (Flutter, Kotlin, Swift)
@@ -484,6 +487,18 @@ pub fn is_sdk_cache_configured() -> bool {
 /// The key persists in memory for the app lifetime.
 pub fn set_api_key(api_key: &str) {
     xybrid_core::cloud::set_xybrid_api_key(Some(api_key.to_string()));
+}
+
+/// Point the cloud gateway at a specific platform base URL, held in memory.
+///
+/// Mirrors [`set_api_key`]: the value is stored in a process-memory cell rather
+/// than the environment, so it is safe to call after telemetry threads have
+/// started (a concurrent `setenv`/`getenv` is UB). Consulted by the gateway
+/// ahead of the `XYBRID_PLATFORM_URL` env var; `XYBRID_GATEWAY_URL` (explicit,
+/// `/v1`-suffixed) still takes precedence. Pass a bare base URL — the `/v1`
+/// suffix is applied internally.
+pub fn set_platform_url(url: &str) {
+    xybrid_core::cloud::set_xybrid_platform_url(Some(url.to_string()));
 }
 
 /// Set a provider-specific API key for direct API calls.

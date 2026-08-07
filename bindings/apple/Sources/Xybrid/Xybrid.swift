@@ -146,6 +146,121 @@ public enum Xybrid {
     #endif
 }
 
+// MARK: - Model loading
+
+/// A model location that can be prepared without performing I/O.
+public enum ModelSource: Sendable, Equatable {
+    /// A model resolved through the Xybrid registry.
+    case registry(String)
+
+    /// A local `.xyb` model bundle.
+    case bundle(URL)
+
+    /// A local directory containing `model_metadata.json`.
+    case directory(URL)
+
+    /// A Hugging Face repository (`org/repo` or `org/repo:variant`).
+    case huggingFace(String)
+
+    /// A registry model served from the cloud gateway while its weights
+    /// download in the background. See
+    /// ``ModelLoader/fromRegistrySpeculative(_:)``.
+    case registrySpeculative(String)
+}
+
+/// A cheap model reference that defers all expensive work until ``load()``.
+///
+/// Creating a loader never performs network, disk, or native-runtime work.
+public struct ModelLoader: Sendable {
+    /// The source this loader will resolve.
+    public let source: ModelSource
+
+    /// Create a loader for an already-described source.
+    public init(source: ModelSource) {
+        self.source = source
+    }
+
+    /// Create a loader for a registry model.
+    public static func fromRegistry(_ id: String) -> Self {
+        Self(source: .registry(id))
+    }
+
+    /// Create a loader that answers from the cloud gateway while the registry
+    /// weights download in the background, instead of blocking on the download.
+    ///
+    /// ``load()`` returns almost immediately with a cloud-backed model that
+    /// switches to on-device by itself once the download lands. Requires an API
+    /// key and an uncached model — otherwise it behaves exactly like
+    /// ``fromRegistry(_:)``, which ``willSpeculate`` reports up front. LLM/chat
+    /// models only.
+    ///
+    /// Track the handover with ``XybridModel/isCloudServing()``,
+    /// ``XybridModel/downloadStatus()`` and ``XybridModel/awaitDownload(timeoutMs:)``.
+    public static func fromRegistrySpeculative(_ id: String) -> Self {
+        Self(source: .registrySpeculative(id))
+    }
+
+    /// Whether ``load()`` would actually speculate: speculation is possible for
+    /// this source, an API key resolves, and the model is not already cached.
+    ///
+    /// Always `false` for non-speculative sources. Never touches the network.
+    public var willSpeculate: Bool {
+        guard case .registrySpeculative(let id) = source else { return false }
+        return willSpeculateForModel(modelId: id)
+    }
+
+    /// Create a loader for a local `.xyb` bundle.
+    public static func fromBundle(_ url: URL) -> Self {
+        Self(source: .bundle(url))
+    }
+
+    /// Create a loader for a local model directory.
+    public static func fromDirectory(_ url: URL) -> Self {
+        Self(source: .directory(url))
+    }
+
+    /// Create a loader for a Hugging Face repository.
+    public static func fromHuggingFace(_ repo: String) -> Self {
+        Self(source: .huggingFace(repo))
+    }
+
+    /// Load the model without blocking the calling task's executor.
+    public func load() async throws -> XybridModel {
+        try await Task.detached { try loadSync() }.value
+    }
+
+    /// Load the model synchronously.
+    ///
+    /// This may resolve registry metadata, download files, access disk, and
+    /// initialize the inference runtime. Do not call it from the main actor.
+    public func loadSync() throws -> XybridModel {
+        switch source {
+        case .registry(let id):
+            return try XybridModel(fromRegistry: id)
+        case .bundle(let url):
+            return try XybridModel(fromBundle: url.path)
+        case .directory(let url):
+            return try XybridModel(fromDirectory: url.path)
+        case .huggingFace(let repo):
+            return try XybridModel(fromHuggingface: repo)
+        case .registrySpeculative(let id):
+            return try XybridModel(fromRegistrySpeculative: id)
+        }
+    }
+}
+
+public extension Xybrid {
+    /// Describe a registry model without resolving, downloading, or loading it.
+    static func model(_ id: String) -> ModelLoader {
+        model(.registry(id))
+    }
+
+    /// Describe a model source without resolving, downloading, or loading it.
+    static func model(_ source: ModelSource) -> ModelLoader {
+        ModelLoader(source: source)
+    }
+}
+
 // MARK: - Public Type Re-exports
 
 /// A loaded model ready for inference.
@@ -185,23 +300,27 @@ public extension XybridModel {
 // off-thread is therefore the correct, low-risk way to surface async today.)
 public extension XybridModel {
     /// Load a model from the xybrid registry without blocking the caller.
+    @available(*, deprecated, message: "Use Xybrid.model(id).load()")
     static func fromRegistryAsync(_ id: String) async throws -> XybridModel {
-        try await Task.detached { try XybridModel(fromRegistry: id) }.value
+        try await Xybrid.model(id).load()
     }
 
     /// Load a model from a local directory without blocking the caller.
+    @available(*, deprecated, message: "Use Xybrid.model(.directory(url)).load()")
     static func fromDirectoryAsync(_ path: String) async throws -> XybridModel {
-        try await Task.detached { try XybridModel(fromDirectory: path) }.value
+        try await Xybrid.model(.directory(URL(fileURLWithPath: path))).load()
     }
 
     /// Load a model from a local `.xyb` bundle without blocking the caller.
+    @available(*, deprecated, message: "Use Xybrid.model(.bundle(url)).load()")
     static func fromBundleAsync(_ path: String) async throws -> XybridModel {
-        try await Task.detached { try XybridModel(fromBundle: path) }.value
+        try await Xybrid.model(.bundle(URL(fileURLWithPath: path))).load()
     }
 
     /// Resolve and load a model from a HuggingFace repo without blocking the caller.
+    @available(*, deprecated, message: "Use Xybrid.model(.huggingFace(repo)).load()")
     static func fromHuggingfaceAsync(_ repo: String) async throws -> XybridModel {
-        try await Task.detached { try XybridModel(fromHuggingface: repo) }.value
+        try await Xybrid.model(.huggingFace(repo)).load()
     }
 
     /// Run inference without blocking the calling thread or actor.
@@ -221,6 +340,65 @@ public extension XybridModel {
     /// thread or actor.
     func unloadAsync() async throws {
         try await Task.detached { try self.unload() }.value
+    }
+
+    /// Stream inference token-by-token as an async sequence.
+    ///
+    /// Yields each `XybridStreamToken` as it is generated and finishes when
+    /// generation completes; throws ``XybridError`` if the run fails
+    /// mid-stream. Cancelling the consuming task — or breaking out of the
+    /// `for try await` loop — aborts generation at the next token boundary:
+    /// the underlying streaming session is closed, which unwinds the backend
+    /// instead of running to `max_tokens`. Ergonomic wrapper over the
+    /// pull-based session API (``runStream(envelope:options:)`` /
+    /// ``streamNext(streamId:)`` / ``streamClose(streamId:)``).
+    ///
+    /// Note: the producing task pulls as fast as generation runs and buffers
+    /// unconsumed tokens in the async sequence (unbounded), so the facade's
+    /// bounded-channel backpressure applies to the raw session pull API, not
+    /// to a slow consumer of this sequence. Buffering is bounded by
+    /// `max_tokens` in practice; a bounded policy here would drop tokens.
+    ///
+    /// ```swift
+    /// for try await token in model.streamTokens(envelope: env) {
+    ///     print(token.token, terminator: "")
+    /// }
+    /// ```
+    func streamTokens(
+        envelope: XybridEnvelope,
+        options: XybridRunOptions? = nil
+    ) -> AsyncThrowingStream<XybridStreamToken, Error> {
+        AsyncThrowingStream { continuation in
+            let task = Task.detached {
+                var streamId: UInt64?
+                do {
+                    let id = try self.runStream(envelope: envelope, options: options)
+                    streamId = id
+                    while !Task.isCancelled {
+                        let event = try self.streamNext(streamId: id)
+                        switch event.kind {
+                        case .token:
+                            if let token = event.token {
+                                continuation.yield(token)
+                            }
+                        case .complete:
+                            self.streamClose(streamId: id)
+                            continuation.finish()
+                            return
+                        }
+                    }
+                    // Cancelled: close the session to abort the in-flight run.
+                    self.streamClose(streamId: id)
+                    continuation.finish()
+                } catch {
+                    // A failed streamNext has already closed the session
+                    // bolt-side; closing again is an idempotent map-remove.
+                    if let id = streamId { self.streamClose(streamId: id) }
+                    continuation.finish(throwing: error)
+                }
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
     }
 }
 

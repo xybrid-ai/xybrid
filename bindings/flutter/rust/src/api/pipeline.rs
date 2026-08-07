@@ -76,6 +76,21 @@ impl FfiPipeline {
             audio_bytes: result.audio_bytes().map(|b| b.to_vec()),
             embedding: result.embedding().map(|e| e.to_vec()),
             latency_ms: result.total_latency_ms,
+            // A pipeline can mix local and remote stages, so there is no single
+            // provenance for the run: report the final stage's target, which is
+            // what produced `output`. The stage records it directly; the
+            // envelope carries no `execution_target` key on this path, since
+            // pipeline stages do not go through `InferenceResult`.
+            //
+            // `ResolvedTarget` stringifies as "local" / "cloud" /
+            // "fallback:<endpoint>" — the last being a xybrid-hosted server, so
+            // it is remote too and must not be reported as on-device.
+            execution_target: match result.stages.last().map(|stage| stage.target.as_str()) {
+                Some(target) if target == "cloud" || target.starts_with("fallback:") => {
+                    crate::api::result::FfiExecutionTarget::Cloud
+                }
+                _ => crate::api::result::FfiExecutionTarget::Local,
+            },
             metrics: crate::api::result::FfiInferenceMetrics::from_core(&metrics),
         })
     }

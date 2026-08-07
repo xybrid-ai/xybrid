@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="Run a small language model entirely in your browser with @xybrid/web."
+    />
+    <link rel="icon" href="data:," />
+    <title>Xybrid browser demo: run a small language model locally</title>
+  </head>
+  <body>
+    <main class="shell">
+      <header class="masthead">
+        <p class="eyebrow">@xybrid/web preview</p>
+        <h1>Run a small language model in your browser</h1>
+        <p class="summary">
+          This page downloads SmolLM2-135M-Instruct, a 136 MB open language model, and generates
+          text entirely in this tab, on your GPU when WebGPU is available. Nothing is uploaded:
+          the prompt, the model, and every generated token stay on your device. Prefer raw
+          tensors? <a href="/tensor.html">Run the deterministic TFLite addition model
+          instead</a>.
+        </p>
+      </header>
+
+      <section class="panel" aria-labelledby="run-title">
+        <h2 id="run-title">Run it</h2>
+        <form id="run-form" class="run-form">
+          <div class="field">
+            <label for="accelerator">Accelerator</label>
+            <select id="accelerator" name="accelerator">
+              <option value="auto">auto (WebGPU when available)</option>
+              <option value="webgpu">webgpu (GPU)</option>
+              <option value="wasm">wasm (CPU)</option>
+            </select>
+            <p class="hint" id="accelerator-hint">
+              auto runs on WebGPU and falls back to the CPU engine when the browser has no GPU
+              support.
+            </p>
+          </div>
+          <div class="field prompt-field">
+            <label for="prompt">Prompt</label>
+            <textarea id="prompt" name="prompt" rows="3" required>Write a two-sentence bedtime story about a robot fox.</textarea>
+            <p class="hint">
+              Sent to the model as a single user turn. Replies are capped at 256 tokens.
+            </p>
+          </div>
+          <button id="run-button" type="submit">Load model and generate</button>
+        </form>
+      </section>
+
+      <section class="status-region" aria-labelledby="status-title">
+        <h2 id="status-title">Result</h2>
+        <div class="result-stack">
+          <ol class="steps" id="steps">
+            <li data-step="load" data-state="idle">
+              <p class="step-body">
+                <span class="step-name">Load</span>
+                download the 136 MB model (the browser caches it) and start the on-device engine
+              </p>
+              <span class="step-note" data-note></span>
+            </li>
+            <li data-step="generate" data-state="idle">
+              <p class="step-body">
+                <span class="step-name">Generate</span>
+                stream the reply token by token from the on-device engine
+              </p>
+              <span class="step-note" data-note></span>
+            </li>
+          </ol>
+
+          <output id="status" class="status" data-state="ready" aria-live="polite">
+            <strong>READY</strong>
+            <span>Pick an accelerator, edit the prompt, and press run. The model executes
+              locally in this tab.</span>
+          </output>
+
+          <div id="run-facts" hidden>
+            <dl class="facts">
+              <div>
+                <dt>Engine</dt>
+                <dd id="fact-accelerator">-</dd>
+              </div>
+              <div>
+                <dt>Model load</dt>
+                <dd id="fact-load">-</dd>
+              </div>
+              <div>
+                <dt>First token</dt>
+                <dd id="fact-first-token">-</dd>
+              </div>
+              <div>
+                <dt>Generation</dt>
+                <dd id="fact-run">-</dd>
+              </div>
+            </dl>
+            <p class="hint">
+              First token measures prefill latency; generation is the total streaming time. A
+              135M-parameter model is small enough to answer quickly, and small enough to be
+              charmingly wrong.
+            </p>
+          </div>
+
+          <div id="output-view" class="output-view">
+            <p class="output-empty">The streamed reply will appear here after a run.</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel" aria-labelledby="code-title">
+        <h2 id="code-title">The code this page runs</h2>
+        <div class="code-stack">
+          <pre class="code"><code id="code-sample"></code></pre>
+          <p class="hint">
+            The snippet follows your settings above. Full page source lives in
+            bindings/web/example.
+          </p>
+        </div>
+      </section>
+    </main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

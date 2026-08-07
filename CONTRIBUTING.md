@@ -18,16 +18,49 @@ Medium-difficulty tasks are labeled [`help wanted`](https://github.com/xybrid-ai
 
 ## Prerequisites
 
+We use Bazel to build xybrid and its dependencies. The only build prerequisite
+is Bazel, which we recommend installing through
+[bazelisk](https://github.com/bazelbuild/bazelisk) — it reads `.bazelversion`
+and fetches the matching Bazel automatically.
+
+**macOS**
+
+```bash
+brew install bazelisk
+```
+
+**Linux**
+
+```bash
+case "$(uname -m)" in
+  x86_64)  BAZELISK=bazelisk-linux-amd64; SHA=1d03e564dab205d7da72fbbf506679931ab2b33bc2bc92d1dc886dfedb6ef8a7 ;;
+  aarch64) BAZELISK=bazelisk-linux-arm64; SHA=534875f42090b9cb04742c37386585eb8ac1abda114285bcdcd825de54cfb9f5 ;;
+esac
+curl -LO "https://github.com/bazelbuild/bazelisk/releases/download/v1.28.0/$BAZELISK"
+echo "$SHA  $BAZELISK" | sha256sum -c
+sudo install -m 0755 "$BAZELISK" /usr/local/bin/bazel
+```
+
+Bazel brings its own hermetic toolchains — Rust, the Android NDK, clang, and
+every C/C++ dependency. No rustup targets or NDK install are needed to build
+the native artifacts.
+
+For working on the Rust workspace itself (the `cargo build` / `cargo test`
+dev loop):
+
 - **Rust** 1.75+ with `cargo` ([rustup.rs](https://rustup.rs))
 - **just** task runner ([github.com/casey/just](https://github.com/casey/just))
 - **Git** for version control
-- **Flutter** 3.x, **Xcode** 15+, or **Android NDK** (only if working on those bindings)
+- **Flutter** 3.x or **Xcode** 15+ (only if working on those bindings —
+  Apple builds are Mac-only)
 
 ## Dev Environment Setup
 
 ```bash
-git clone https://github.com/xybrid-ai/xybrid.git
+# --recurse-submodules matters: the Bazel llama.cpp build reads vendor/llama-cpp
+git clone --recurse-submodules https://github.com/xybrid-ai/xybrid.git
 cd xybrid
+# (already cloned without it? run: git submodule update --init)
 cargo build --workspace
 cargo test --workspace
 ```
@@ -35,12 +68,38 @@ cargo test --workspace
 ## Building
 
 ```bash
+# Rust workspace (dev loop)
 cargo build --workspace                   # Build all packages
 cargo build --workspace --release         # Release mode
-cargo xtask build-xcframework             # Apple XCFramework (iOS + macOS)
-cargo xtask build-android                 # Android .so libraries
-cargo xtask build-flutter                 # Flutter native libraries
+
+# Native artifacts — Bazel (same targets the release ships from)
+bazel build -c opt //bindings/kotlin:xybrid_kotlin_aar   # Android AAR (jniLibs inside)
+bazel build --config=ios //bindings/apple:XybridFFI      # Apple XCFramework (Mac + Xcode)
+bazel build --config=macos-metal //crates/xybrid-cli:xybrid   # CLI (macOS; see .bazelrc for other configs)
+
+# Flutter native — deliberately cargo, not Bazel: `flutter run` inside the
+# repo goes through cargokit → cargo, so this is the contributor path.
+cargo xtask build-flutter --platform <linux|macos|windows>
 ```
+
+If you use `just`, the matching Bazel shortcuts are `just bazel-build`
+(the local CLI), `just bazel-analyze`, and `just bazel-test`. Each accepts
+additional Bazel flags, for example:
+
+```bash
+just bazel-build -c opt
+```
+
+### Building for Windows (MSVC)
+
+`bazel build --config=windows-msvc //...` cross-compiles MSVC-ABI Windows
+binaries from Linux or macOS. It downloads Microsoft's Visual C++ runtime and
+Windows SDK (~1.3 GB) via the [`windows_support`](https://github.com/hermeticbuild/windows_support)
+Bazel module, which requires accepting Microsoft's terms. `.bazelrc` sets
+`BAZEL_MSVC_RUNTIME_VISUAL_STUDIO_EULA=1` on the project's behalf — by building
+this configuration you are asserting your machine may use those files under the
+[Visual Studio license terms](https://visualstudio.microsoft.com/license-terms).
+No other build configuration fetches them.
 
 ## Testing
 

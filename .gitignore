@@ -35,6 +35,9 @@ rust-project.json
 *.log
 
 *.wav
+# ...except the integration-test audio inputs, which are committed fixtures
+# rather than artifacts. Without this the tests' own inputs need `git add -f`.
+!integration-tests/fixtures/input/*.wav
 
 # Xcode user data
 xcuserdata/
@@ -48,7 +51,7 @@ xcuserdata/
 /.build/
 Package.resolved
 
-# Build artifacts - XCFrameworks (built by `cargo xtask build-xcframework`)
+# Build artifacts - XCFrameworks (unzipped from the Bazel //bindings/apple:XybridFFI build)
 bindings/apple/XCFrameworks/*.xcframework/
 # Python bytecode
 __pycache__/
@@ -58,7 +61,7 @@ __pycache__/
 # in CI; never committed (they go stale and bloat the repo).
 *.cdx.json
 
-# Bazel (Phase-0 spike — see .context/bazel-hermetic-evaluation.md)
+# Bazel
 /bazel-*
 MODULE.bazel.lock
 

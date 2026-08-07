@@ -3,7 +3,7 @@ title: iOS / macOS
 description: 面向 iOS 和 macOS 的原生 Swift SDK，支持本地 ML 推理
 ---
 
-Swift SDK 通过 UniFFI 为 iOS 和 macOS 应用提供到 Xybrid 运行时的原生绑定。
+Swift SDK 通过 BoltFFI 为 iOS 和 macOS 应用提供到 Xybrid 运行时的原生绑定。
 
 <Callout type="info">
 Swift SDK 处于早期访问阶段。正式版本通过 Swift Package Manager 分发预编译的 `XybridFFI` xcframework。已知问题：在 Apple Silicon 上为 iOS 模拟器构建需要 `useLocalNatives = true` 的临时方案 — 详见 [#179](https://github.com/xybrid-ai/xybrid/issues/179)。跨平台开发可使用 [Flutter SDK](/zh/docs/sdks/flutter)。
@@ -15,7 +15,7 @@ Swift SDK 处于早期访问阶段。正式版本通过 Swift Package Manager �
 
 ```swift title="Package.swift"
 dependencies: [
-    .package(url: "https://github.com/xybrid-ai/xybrid", from: "0.3.0")
+    .package(url: "https://github.com/xybrid-ai/xybrid", from: "0.4.1")
 ]
 ```
 
@@ -28,13 +28,12 @@ dependencies: [
 ```swift
 import Xybrid
 
-// 从注册表加载模型
-let loader = ModelLoader.fromRegistry(modelId: "kokoro-82m")
-let model = try loader.load()
+// 先描述模型来源，再显式加载
+let model = try await Xybrid.model("kokoro-82m").load()
 
 // 执行推理
 let envelope = Envelope.text("Hello, world!")
-let result = try model.run(envelope: envelope)
+let result = try await model.runAsync(envelope: envelope)
 
 if result.success {
     print("Output: \(result.text ?? "")")
@@ -61,16 +60,17 @@ Xybrid.initialize(
 ### 从注册表
 
 ```swift
-let loader = ModelLoader.fromRegistry(modelId: "whisper-tiny")
-let model = try loader.load()
+let model = try await Xybrid.model("whisper-tiny").load()
 ```
 
 ### 从本地 Bundle
 
 ```swift
-let loader = ModelLoader.fromBundle(path: bundlePath)
-let model = try loader.load()
+let model = try await Xybrid.model(.bundle(bundleURL)).load()
 ```
+
+`Xybrid.model(...)` 只创建廉价的、未加载的引用。本地 Bundle 和目录使用
+`URL` 与 `.bundle(url)` / `.directory(url)`。`load()` 是显式的异步加载边界。
 
 ---
 
@@ -155,8 +155,8 @@ SDK 使用 Swift 错误枚举实现类型安全的错误处理：
 
 ```swift
 do {
-    let model = try ModelLoader.fromRegistry(modelId: "kokoro-82m").load()
-    let result = try model.run(envelope: envelope)
+    let model = try await Xybrid.model("kokoro-82m").load()
+    let result = try await model.runAsync(envelope: envelope)
 } catch XybridError.ModelNotFound(let modelId) {
     print("Model not found: \(modelId)")
 } catch XybridError.InferenceFailed(let message) {
@@ -178,7 +178,7 @@ SDK 提供便捷短别名：
 
 | 别名 | 完整类型 |
 |-------|-----------|
-| `ModelLoader` | `XybridModelLoader` |
+| `ModelLoader` | 显式加载模型的具体类型 |
 | `Model` | `XybridModel` |
 | `Envelope` | `XybridEnvelope` |
 | `Result` | `XybridResult` |

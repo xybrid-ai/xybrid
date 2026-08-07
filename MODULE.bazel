@@ -1,11 +1,13 @@
-# PHASE-0 BAZEL SPIKE — throwaway. See .context/bazel-hermetic-evaluation.md.
-# Goal: get real cold-build / cache-hit / reproducibility numbers for the
-# hermeticbuild stack (rules_rs + hermetic-llvm) on xybrid's REAL Cargo.lock.
+# Bazel build of xybrid and its dependencies. Pinned from the Bazel Central
+# Registry at versions re-validated on BuildBuddy RBE; the stack is the release
+# build of record (see .github/workflows/release-prep.yml and the build-*.yml
+# workflows in the same directory).
 #
-# The three hermeticbuild modules are pinned to the local clones under
-# .context/bazel-research/ so this uses exactly the source that was evaluated.
+# The three hermeticbuild modules (rules_rs + hermetic-llvm + hermetic_launcher)
+# were validated against xybrid's real Cargo.lock; the pins below carry forward
+# what that validation proved.
 
-module(name = "xybrid_bazel_spike", version = "0.0.0")
+module(name = "xybrid", version = "0.0.0")
 
 # --- hermeticbuild stack, pinned from the Bazel Central Registry (replaces the
 # earlier git_override commit pins; re-validated on RBE at these versions).
@@ -35,11 +37,75 @@ single_version_override(
 )
 bazel_dep(name = "hermetic_launcher", version = "0.0.11")
 
+# Microsoft's CRT + Windows SDK, the sysroot half of the Windows-MSVC lane
+# (--config=windows-msvc). windows_support deliberately ships no cc_toolchain:
+# @llvm stays the compiler provider and //bazel/toolchains/windows_msvc composes
+# the two. Pinned exactly — upstream is pre-1.0 and documents that its extension
+# APIs may change without notice. Fetching either repository below downloads
+# ~1.3 GB, and is gated on the EULA acknowledgement in .bazelrc.
+bazel_dep(name = "windows_support", version = "0.2.0")
+
+msvc_runtime = use_extension(
+    "@windows_support//windows:extensions.bzl",
+    "msvc_runtime",
+)
+msvc_runtime.configure(
+    architectures = ["x64"],
+    msvc_version = "14.50.35717",
+    visual_studio_installer_manifest_integrity = "sha256-qOhU+p8/uurCfXME4pfxZg1xN0ATid61fPeYPzPBb+8=",
+    visual_studio_installer_manifest_url = "https://download.visualstudio.microsoft.com/download/pr/fdc37f6e-59f6-4054-838a-b476eeaa6ec3/1d82370739911457e0a2f6be15d8b5f569531b352b2eabb961429eea1e99e356/VisualStudio.vsman",
+)
+use_repo(msvc_runtime, "msvc_runtime")
+
+windows_sdk = use_extension(
+    "@windows_support//windows:extensions.bzl",
+    "windows_sdk",
+)
+# NOTE: upstream's `transformations` attribute is deliberately NOT used. It runs
+# in the repository rule, i.e. on the Bazel *client*: on a case-insensitive macOS
+# volume its aliases collapse onto the originals, so a Mac-fetched sysroot
+# reaches a Linux RBE worker still missing them — and the two hosts would
+# materialise different repositories, splitting the remote cache. The case
+# handling lives in //bazel/toolchains/windows_msvc:case_insensitivity.bzl
+# instead, derived from the file list and therefore host-independent.
+windows_sdk.configure(
+    architectures = ["x64"],
+    windows_sdk_integrity = {
+        "Microsoft.Windows.SDK.CPP": "sha256-/0VWYL7gcadEcVqWZWZvopwHaBV509gVlZqe7FpVZCQ=",
+        "Microsoft.Windows.SDK.CPP.x64": "sha256-rWzpD/lAEGmdKVSLPCseUsieuBFD4hmRVdmlw4ABtSs=",
+    },
+    windows_sdk_version = "10.0.26100.7705",
+)
+use_repo(windows_sdk, "windows_sdk")
+
 # rules_cc must be a direct dep so the `@rules_cc//...` flag in .bazelrc resolves.
 bazel_dep(name = "rules_cc", version = "0.2.20")
+
+# Apple cc toolchain for iOS (Apple G1). hermetic-llvm has NO iOS target and
+# @macos_sdk is macOS-only/link-only, so the iOS cc toolchain — used for the
+# C-sys build-script compiles (ring, zstd-sys, ...), the wrapper cc_library, and
+# //:llama's cmake — comes from apple_support, which resolves the host Xcode's
+# iphoneos SDK. Already in the graph transitively (rules_rs -> apple_support) and
+# self-registers; os:ios is a UNIQUE match, so it resolves for aarch64-apple-ios
+# while hermetic-llvm keeps every desktop target (no conflict with the macOS
+# lanes). Pinned here for explicitness/stability.
+# apple_support: the iOS cc toolchain (G1). Bumped 1.24.2 -> 2.2.0 by
+# rules_apple 4.5.x below — the older rules_apple that kept 1.24.2 (4.0/4.1) uses
+# apple fragment APIs Bazel 9 removed (multi_arch_platform / apple_crosstool_top),
+# so the Bazel-9-compatible rules_apple forces this bump. Re-validated: the iOS
+# staticlib (G1/G2) still builds under 2.2.0.
+bazel_dep(name = "apple_support", version = "2.2.0", repo_name = "build_bazel_apple_support")
+
+# Apple Gate 3: rules_apple's apple_static_xcframework assembles the iOS
+# XybridFFI.xcframework from the G1/G2 rust staticlib + the committed C header
+# (FFI-only — no rules_swift rules used; the Swift wrapper is committed SPM
+# source compiled by the consumer). 4.5.3 is the Bazel-9-compatible line
+# (4.0/4.1 use removed apple fragment APIs); it floors apple_support at 2.2.0.
+bazel_dep(name = "rules_apple", version = "4.5.3", repo_name = "build_bazel_rules_apple")
 # bool_flag for the //:metal build setting (the macOS GPU lane toggle).
 bazel_dep(name = "bazel_skylib", version = "1.9.0")
-# platforms must be a direct dep so the `@platforms//...` constraints in //:android_arm64 resolve.
+# platforms must be a direct dep so the `@platforms//...` constraints in the root
+# BUILD file resolve (//:host_linux_gnu's parent, //:llama_metal's exec platform).
 bazel_dep(name = "platforms", version = "1.0.0")
 
 # --- Option B: rules_foreign_cc drives llama.cpp's own CMakeLists with the
@@ -97,6 +163,15 @@ bazel_dep(name = "rules_java", version = "8.11.0")
 http_archive = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 http_jar = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_jar")
 
+# The pyke aarch64-apple-ios-sim ONNX Runtime slice, fetched + raw-LZMA2-decoded
+# at repo-fetch time (see //bazel:ort_ios_sim.bzl) — the SAME binary the boltffi
+# release ships in its ios-arm64-simulator slice. Feeds the ort-sys annotation's
+# ORT_LIB_LOCATION for the simulator triple below. The device slice stays
+# committed under vendor/ort-ios/; this only ADDS the simulator slice.
+ort_ios_sim = use_repo_rule("//bazel:ort_ios_sim.bzl", "ort_ios_sim_repository")
+
+ort_ios_sim(name = "ort_ios_arm64_sim")
+
 http_archive(
     name = "android_sdk_34",
     build_file_content = """
@@ -151,6 +226,12 @@ register_toolchains("@androidndk//:all")
 # )
 
 # --- C/C++ toolchain: hermetic LLVM (desktop targets) -------------------------
+# ORDER MATTERS. @llvm's Windows toolchain declares no ABI constraint, so it also
+# matches a *-pc-windows-msvc platform; ours constrains on
+# @llvm//constraints/windows/abi:msvc and must be registered first to win there.
+# On windows-gnu platforms ours does not match at all and @llvm's is used.
+register_toolchains("//bazel/toolchains/windows_msvc:all")
+
 register_toolchains("@llvm//toolchain:all")
 
 # Hermetic macOS SDK (replaces xcrun) — needed on darwin host/target.
@@ -194,6 +275,18 @@ use_repo(osx, "macos_sdk")
 
 # --- Rust toolchain: rules_rs (facade over rules_rust) ------------------------
 rules_rust = use_extension("@rules_rs//rs:rules_rust.bzl", "rules_rust")
+
+# rules_rust fix (report upstream): the shared-library rule unconditionally
+# declares a mandatory `.dll.lib` import-library output for EVERY windows cdylib
+# (rust/private/rustc.bzl), but that `.dll.lib` name is MSVC-only — windows-GNU
+# (MinGW) rustc emits `.dll.a`, so a good gnu cdylib fails with "mandatory output
+# not created". The patch gates that output on target_abi == "msvc" (the same
+# check the rule already uses elsewhere). Needed for the bolt windows-gnu cdylib
+# (Unity), which is loaded via P/Invoke and needs no import library at all.
+rules_rust.patch(
+    patches = ["//:rules_rust.patch"],
+    strip = 1,
+)
 use_repo(rules_rust, "rules_rust")
 
 toolchains = use_extension("@rules_rs//rs/toolchains:module_extension.bzl", "toolchains")
@@ -238,7 +331,17 @@ crate.from_cargo(
         "x86_64-unknown-linux-gnu",
         # Desktop Windows cross (GNU/MinGW ABI — hermetic-llvm ships no MSVC CRT).
         "x86_64-pc-windows-gnu",
+        # Desktop Windows cross (MSVC ABI — the CRT + SDK come from
+        # @windows_support; see //bazel/toolchains/windows_msvc).
+        "x86_64-pc-windows-msvc",
         "aarch64-apple-darwin",
+        # iOS device (Apple G1). Mac-bound — builds locally via Xcode's iOS SDK
+        # (apple_support toolchain), never on Linux RBE.
+        "aarch64-apple-ios",
+        # iOS simulator (Apple G4a — arm64 sim on Apple-Silicon Macs). Mac-bound
+        # like the device triple; its ONNX Runtime slice is FETCHED (not vendored)
+        # via @ort_ios_arm64_sim so the xcframework ships a simulator slice too.
+        "aarch64-apple-ios-sim",
         "aarch64-linux-android",
         "armv7-linux-androideabi",
         "x86_64-linux-android",
@@ -258,6 +361,8 @@ crate.annotation(
     # all platforms — input-only, outputs unchanged.
     build_script_data_select = {
         "aarch64-apple-darwin": ["@@//:ort_macos_arm64"],
+        "aarch64-apple-ios": ["@@//:ort_ios_arm64"],
+        "aarch64-apple-ios-sim": ["@ort_ios_arm64_sim//:lib"],
     },
     # CC=/usr/bin/false: ort-sys's bs probes `$CC --print-search-dirs` to find
     # Xcode's clang_rt dir and, on success, emits -lclang_rt.osx — which only
@@ -268,8 +373,30 @@ crate.annotation(
     # CC is otherwise unused by this bs (no C compiled on the LIB_LOCATION path).
     build_script_env_select = {
         "aarch64-apple-darwin": "{\"ORT_LIB_LOCATION\": \"$${pwd}/vendor/ort-macos/aarch64-apple-darwin\", \"CC\": \"/usr/bin/false\"}",
+        # iOS: the vendored slice lives inside the committed xcframework
+        # (vendor/ort-ios/onnxruntime.xcframework/ios-arm64/libonnxruntime.a).
+        "aarch64-apple-ios": "{\"ORT_LIB_LOCATION\": \"$${pwd}/vendor/ort-ios/onnxruntime.xcframework/ios-arm64\", \"CC\": \"/usr/bin/false\"}",
+        # iOS simulator: the slice is FETCHED (@ort_ios_arm64_sim), so it stages
+        # in the execroot under external/<canonical>/ (default repo layout),
+        # not vendor/. ORT_LIB_LOCATION wants the DIRECTORY holding
+        # libonnxruntime.a; $${pwd} = execroot.
+        #
+        # NOTE: the `+ort_ios_sim_repository+ort_ios_arm64_sim` segment is the
+        # Bzlmod CANONICAL repo name (`+<repo-rule-symbol>+<repo-name>`), a Bazel
+        # implementation detail. It is stable for xybrid (pinned Bazel in
+        # .bazelversion; xybrid is the ROOT module, so no parent-module prefix),
+        # but a Bazel major bump or importing this module as a dependency could
+        # change it. If the sim build then fails to find libonnxruntime.a,
+        # re-derive with:
+        #   bazel cquery @ort_ios_arm64_sim//:lib --output=starlark \
+        #     --starlark:expr='[f.dirname for f in target.files.to_list()]'
+        "aarch64-apple-ios-sim": "{\"ORT_LIB_LOCATION\": \"$${pwd}/external/+ort_ios_sim_repository+ort_ios_arm64_sim\", \"CC\": \"/usr/bin/false\"}",
     },
-    data = ["@@//:ort_macos_arm64"],
+    data = [
+        "@@//:ort_macos_arm64",
+        "@@//:ort_ios_arm64",
+        "@ort_ios_arm64_sim//:lib",
+    ],
     allow_build_script_to_detect_nonhermetic_paths = True,
 )
 

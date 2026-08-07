@@ -1,5 +1,5 @@
 // Xybrid SDK - Editor Native Library Resolver
-// Downloads the per-platform native libraries (libxybrid_ffi.*) from the GitHub
+// Downloads the per-platform native libraries (libxybrid_bolt.*) from the GitHub
 // Release matching the installed package version and installs them into the
 // consuming project's Assets/ folder.
 //

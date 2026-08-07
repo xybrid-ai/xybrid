@@ -195,6 +195,51 @@ pub fn device_name(device: &Device) -> &'static str {
     }
 }
 
+/// Ceiling for the global compute pool on mobile targets.
+///
+/// A phone SoC's cores are asymmetric (Pixel 8: 1 prime + 4 mid + 4 little);
+/// Whisper-tiny's matmuls are small enough that threads beyond the prime+mid
+/// tier add coordination and little-core stragglers instead of throughput —
+/// measured on a Pixel 8, the unbounded default (9 threads) ran a 16 s clip
+/// in minutes, not seconds.
+#[cfg(any(target_os = "android", target_os = "ios"))]
+const MOBILE_COMPUTE_THREADS: usize = 4;
+
+/// Cap the global rayon pool that candle's CPU kernels compute on.
+///
+/// Without this, rayon sizes itself from `available_parallelism`. In an app
+/// sandbox the cgroup files that would scale that number down are unreadable
+/// (SELinux denies them), so it falls back to every core in the SoC and the
+/// pool oversubscribes. Must run before the first inference anywhere in the
+/// process — the pool can only be sized once; if some embedder already built
+/// a global pool, theirs wins and this is a no-op.
+///
+/// Desktop targets are untouched: batch throughput there benefits from the
+/// default pool, and no desktop sandbox blocks the cgroup read.
+pub(super) fn init_mobile_compute_pool() {
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    {
+        use std::sync::Once;
+        static POOL_INIT: Once = Once::new();
+        POOL_INIT.call_once(|| {
+            let threads = std::thread::available_parallelism()
+                .map(|n| n.get())
+                .unwrap_or(MOBILE_COMPUTE_THREADS)
+                .min(MOBILE_COMPUTE_THREADS);
+            match rayon::ThreadPoolBuilder::new()
+                .num_threads(threads)
+                .thread_name(|i| format!("xybrid-compute-{i}"))
+                .build_global()
+            {
+                Ok(()) => info!("compute pool capped at {threads} threads (mobile)"),
+                // Someone (host app / another component) already built the
+                // global pool; keep theirs rather than fighting over it.
+                Err(e) => debug!("global compute pool already initialized: {e}"),
+            }
+        });
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

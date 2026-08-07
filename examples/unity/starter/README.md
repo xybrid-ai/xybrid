@@ -27,17 +27,21 @@ Before the SDK will work, you need to build the native libraries from the Rust s
 # From the repository root
 cd repos/xybrid
 
-# Build for iOS/macOS
-cargo xtask build-xcframework
+# Host platform — builds and stages into the Unity package (editor testing)
+cargo xtask build-ffi --deploy-unity
 
-# Build for Android
-cargo xtask build-android
+# Device targets mirror .github/workflows/build-unity.yml: build the bolt
+# native with Bazel, then stage it (with its Unity .meta) into
+# bindings/unity/Runtime/Plugins/<Platform>/ — no manual copying:
+bazel build --config=ios //crates/xybrid-bolt:xybrid_bolt_staticlib               # iOS
+bazel build --config=macos-metal -c opt //crates/xybrid-bolt:xybrid_bolt_cdylib   # macOS
+bazel build --config=android-arm64 //crates/xybrid-bolt:xybrid_bolt_cdylib        # Android (also android-armv7, android-x86_64)
+python3 tools/scripts/stage_unity_native.py --lib <bazelisk cquery --output=files path> --target <triple>
 ```
 
-Copy the built libraries to `Assets/Plugins/`:
-- iOS: `libxybrid.a` → `Assets/Plugins/iOS/`
-- Android: `libxybrid.so` → `Assets/Plugins/Android/{arm64-v8a,armeabi-v7a}/`
-- macOS: `libxybrid.dylib` → `Assets/Plugins/macOS/`
+The staging step places each library (with its Unity `.meta`) under
+`bindings/unity/Runtime/Plugins/<Platform>/`, which this example consumes —
+no manual copying into `Assets/Plugins/`.
 
 ### 3. Play in Editor
 
@@ -224,11 +228,11 @@ For testing in the Unity Editor on macOS:
 1. Build the macOS native library:
    ```bash
    cd repos/xybrid
-   cargo build --release --package xybrid-ffi
+   cargo build --release --package xybrid-bolt --features platform-macos
    ```
 2. Copy the library:
    ```bash
-   cp target/release/libxybrid_ffi.dylib examples/unity/starter/Assets/Plugins/macOS/libxybrid.dylib
+   cp target/release/libxybrid_bolt.dylib examples/unity/starter/Assets/Plugins/macOS/libxybrid.dylib
    ```
 3. In Unity, press **Play** to run the demo scene
 
@@ -246,7 +250,7 @@ Windows support is planned but not yet implemented. Native library builds for Wi
 
 ## Troubleshooting
 
-### "DllNotFoundException: xybrid_ffi"
+### "DllNotFoundException: xybrid_bolt"
 
 The native library hasn't been built or copied to the correct location. See **Build Native Libraries** section above.
 

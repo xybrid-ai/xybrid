@@ -9,14 +9,12 @@ on:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
-  NDK_VERSION: "26.1.10909125"
 
 permissions: read-all
 
 jobs:
   #
   # Version check - verify all package versions match the git tag
-  # (reuses the same logic as release.yml)
   #
   check-version:
     name: Verify Version
@@ -27,6 +25,7 @@ jobs:
 
       - name: Check versions match git tag
         run: |
+          ./tools/scripts/version-sync.sh --check
           TAG_VERSION=${GITHUB_REF#refs/tags/v}
           UNITY_VERSION=$(python3 -c "import json; print(json.load(open('bindings/unity/package.json'))['version'])")
           echo "Git tag version: $TAG_VERSION"
@@ -38,56 +37,6 @@ jobs:
             exit 1
           fi
           echo "Unity version matches v$TAG_VERSION"
-
-  #
-  # C# bindings sync check - verify NativeMethods.g.cs is up-to-date
-  #
-  check-csharp-bindings:
-    name: Check C# Bindings
-    needs: [check-version]
-    if: always() && (needs.check-version.result == 'success' || needs.check-version.result == 'skipped')
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-        with:
-          submodules: true
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
-        with:
-          toolchain: stable
-
-      - name: Setup sccache
-        uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
-
-      - name: Configure sccache environment
-        shell: bash
-        run: |
-          echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
-          echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
-          echo "CMAKE_C_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
-          echo "CMAKE_CXX_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
-
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-        with:
-          prefix-key: "v1-rust"
-          shared-key: "unity-csharp-check"
-
-      - name: Regenerate C# bindings
-        run: cargo xtask build-ffi --csharp
-
-      - name: Check C# bindings are up-to-date
-        run: |
-          if ! git diff --exit-code bindings/unity/Runtime/Native/NativeMethods.g.cs; then
-            echo ""
-            echo "ERROR: C# bindings (NativeMethods.g.cs) are out of date."
-            echo "A Rust FFI change was committed without regenerating C# bindings."
-            echo ""
-            echo "Fix: run 'cargo xtask build-ffi --csharp' and commit the result."
-            exit 1
-          fi
-          echo "C# bindings are up-to-date."
 
   #
   # macOS native library builds (arm64 + x86_64)
@@ -102,38 +51,40 @@ jobs:
         with:
           submodules: true
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
-        with:
-          toolchain: stable
-          targets: aarch64-apple-darwin
-
-      - name: Setup sccache
-        uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
-
-      - name: Configure sccache environment
-        shell: bash
+      # Unity's macOS native is built by Bazel — the same
+      # //crates/xybrid-bolt:xybrid_bolt_cdylib target every other binding uses —
+      # on this macos-14 runner because --config=macos-metal compiles the
+      # llama.cpp Metal shaders locally (no Mac RBE; same as build-apple.yml).
+      # bazelisk ships on macos runners and honors .bazelversion; local_tools
+      # (rules_foreign_cc) needs cmake + pkg-config.
+      - name: Install Bazel build tools
         run: |
-          echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
-          echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
-          echo "CMAKE_C_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
-          echo "CMAKE_CXX_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
+          which cmake >/dev/null || brew install cmake
+          which pkg-config >/dev/null || brew install pkg-config
 
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-        with:
-          prefix-key: "v1-rust"
-          shared-key: "unity-macos"
-          cache-all-crates: "true"
-          save-if: "true"
+      # Note: arm64 only. ORT has no x86_64-apple-darwin prebuilt; Intel Macs run
+      # arm64 via Rosetta 2.
+      # `-c opt` is required: --config=macos-metal sets the platform + Metal but
+      # NOT compilation_mode (unlike the android configs), so without it Bazel
+      # defaults to fastbuild — a non-optimized native. Matches the release
+      # profile the replaced `build-ffi --release` shipped.
+      - name: Build xybrid-bolt native (Bazel, Metal ON, opt)
+        run: bazelisk build --config=macos-metal -c opt //crates/xybrid-bolt:xybrid_bolt_cdylib
 
-      # Note: Only building arm64. ORT does not provide prebuilt binaries for x86_64-apple-darwin.
-      # Intel Macs can run arm64 binaries via Rosetta 2.
-      - name: Build for aarch64-apple-darwin
-        run: cargo xtask build-ffi --target aarch64-apple-darwin --deploy-unity
+      # Stage the Bazel output into the Unity plugins tree (copy + generate the
+      # per-platform .meta) — the same staging build-ffi --deploy-unity did, just
+      # fed from Bazel instead of cargo. Must match the build's `-c opt` so cquery
+      # resolves the same (opt) output path.
+      - name: Stage into Unity plugins
+        run: |
+          LIB=$(tools/scripts/bazel-output.sh //crates/xybrid-bolt:xybrid_bolt_cdylib --config=macos-metal -c opt)
+          echo "Bazel output: $LIB"
+          python3 tools/scripts/stage_unity_native.py \
+            --lib "$LIB" \
+            --target aarch64-apple-darwin
 
       - name: Strip debug symbols (macOS)
-        run: strip -x bindings/unity/Runtime/Plugins/macOS/libxybrid_ffi.dylib
+        run: strip -x bindings/unity/Runtime/Plugins/macOS/libxybrid_bolt.dylib
 
       - name: Verify deployed libraries
         run: |
@@ -154,52 +105,70 @@ jobs:
   # Windows native library build (x86_64)
   #
   build-unity-windows:
-    name: Build Windows Libraries
+    name: Build Unity native (Windows)
     needs: [check-version]
     if: always() && (needs.check-version.result == 'success' || needs.check-version.result == 'skipped')
-    runs-on: windows-latest
+    # No Windows runner: the DLL is cross-compiled MSVC-ABI on Linux RBE
+    # workers by //bazel/toolchains/windows_msvc, the same toolchain the
+    # shipped Flutter windows native uses. Mirrors build-unity-linux below.
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           submodules: true
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
-        with:
-          toolchain: stable
-          targets: x86_64-pc-windows-msvc
-
-      - name: Setup sccache
-        uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
-
-      - name: Configure sccache environment
-        shell: bash
+      - name: Free disk space
         run: |
-          echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
-          echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
-          echo "CMAKE_C_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
-          echo "CMAKE_CXX_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/.ghcup \
+            /opt/hostedtoolcache/CodeQL
+          sudo docker image prune --all --force || true
 
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-        with:
-          prefix-key: "v1-rust"
-          shared-key: "unity-windows"
-          cache-all-crates: "true"
-          save-if: "true"
+      - name: Configure BuildBuddy remote config
+        env:
+          BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
+        run: tools/scripts/write-buildbuddy-rc.sh remote
 
-      - name: Build for x86_64-pc-windows-msvc
-        run: cargo xtask build-ffi --target x86_64-pc-windows-msvc --deploy-unity
+      - name: Build + stage Windows native (Bazel)
+        run: |
+          set -euo pipefail
+          remote_args=()
+          [[ -n "${REMOTE:-}" ]] && remote_args+=("$REMOTE")
+          bazelisk build "${remote_args[@]}" --config=windows-msvc -c opt \
+            //crates/xybrid-bolt:xybrid_bolt_cdylib
+          LIB=$(tools/scripts/bazel-output.sh --ext dll //crates/xybrid-bolt:xybrid_bolt_cdylib \
+            "${remote_args[@]}" --config=windows-msvc -c opt)
+          echo "Bazel output: $LIB"
+          python3 tools/scripts/stage_unity_native.py --lib "$LIB" --target x86_64-pc-windows-msvc
 
-      - name: Strip debug symbols (Windows)
-        shell: bash
-        run: llvm-strip bindings/unity/Runtime/Plugins/Windows/xybrid_ffi.dll
+      - name: Stage ONNX Runtime (Windows)
+        run: python3 tools/scripts/stage_unity_desktop_ort.py windows bindings/unity/Runtime/Plugins/Windows
 
+      # No strip step: lld-link puts no debug data in the image (verified — the
+      # DLL has no debug sections, only a reference to a .pdb we never ship),
+      # unlike the cargo/MSVC build this replaces.
       - name: Verify deployed libraries
-        shell: bash
         run: |
+          set -euo pipefail
           echo "Windows plugin directory:"
-          ls -la bindings/unity/Runtime/Plugins/Windows/ || echo "WARNING: Windows plugin directory not found"
+          PLUGINS=bindings/unity/Runtime/Plugins/Windows
+          ls -la "$PLUGINS"
+          test -f "$PLUGINS/xybrid_bolt.dll"
+          test -f "$PLUGINS/onnxruntime.dll"
+          test -f "$PLUGINS/onnxruntime.dll.meta"
+          # The linux job ctypes-loads its ORT here; a Windows DLL cannot be
+          # loaded on this host, so check the format instead. The bolt DLL is
+          # load-tested for real by bazel-windows-msvc-smoke in bazel.yml.
+          file "$PLUGINS/onnxruntime.dll" | grep -q 'PE32+.*x86-64' || { echo "ORT is not a PE32+ x86-64 DLL"; exit 1; }
+          file "$PLUGINS/xybrid_bolt.dll" | grep -q 'PE32+.*x86-64' || { echo "bolt is not a PE32+ x86-64 DLL"; exit 1; }
+          # Unity reaches the native purely through P/Invoke, so the export
+          # table IS the contract — assert every EntryPoint the C# declares.
+          python3 -m pip install --quiet --user pefile
+          python3 tools/scripts/audit_windows_dll.py --dll "$PLUGINS/xybrid_bolt.dll" \
+            --require-import vcruntime140.dll \
+            --require-import msvcp140.dll \
+            --require-exports-from-csharp bindings/unity/Runtime/Bolt/XybridBolt.cs \
+            --require-exports-from-csharp bindings/unity/Runtime/BoltSupplement/XybridInference.cs
+          echo "Windows Unity native: OK"
 
       - name: Upload Windows plugins
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -208,9 +177,6 @@ jobs:
           path: bindings/unity/Runtime/Plugins/Windows/
           if-no-files-found: error
 
-  #
-  # Linux native library build (x86_64)
-  #
   build-unity-linux:
     name: Build Linux Libraries
     needs: [check-version]
@@ -221,41 +187,43 @@ jobs:
         with:
           submodules: true
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
-        with:
-          toolchain: stable
-          targets: x86_64-unknown-linux-gnu
+      # Bazel builds the Linux bolt cdylib — a host build on the ubuntu runner,
+      # RBE cache-fed. ORT ships dynamically on Linux, so the following
+      # stage_unity_desktop_ort.py step still bundles libonnxruntime.so beside it.
+      # Bazel doesn't strip desktop libs, so the strip step below is kept.
+      - name: Configure BuildBuddy remote config
+        env:
+          BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
+        run: tools/scripts/write-buildbuddy-rc.sh remote
 
-      - name: Setup sccache
-        uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
-
-      - name: Configure sccache environment
-        shell: bash
+      - name: Build + stage Linux native (Bazel)
         run: |
-          echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
-          echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
-          echo "CMAKE_C_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
-          echo "CMAKE_CXX_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
+          set -euo pipefail
+          remote_args=()
+          [[ -n "${REMOTE:-}" ]] && remote_args+=("$REMOTE")
+          bazelisk build "${remote_args[@]}" -c opt //crates/xybrid-bolt:xybrid_bolt_cdylib
+          LIB=$(tools/scripts/bazel-output.sh //crates/xybrid-bolt:xybrid_bolt_cdylib "${remote_args[@]}" -c opt)
+          echo "Bazel output: $LIB"
+          python3 tools/scripts/stage_unity_native.py --lib "$LIB" --target x86_64-unknown-linux-gnu
 
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-        with:
-          prefix-key: "v1-rust"
-          shared-key: "unity-linux"
-          cache-all-crates: "true"
-          save-if: "true"
-
-      - name: Build for x86_64-unknown-linux-gnu
-        run: cargo xtask build-ffi --target x86_64-unknown-linux-gnu --deploy-unity
+      - name: Stage ONNX Runtime (Linux)
+        run: >-
+          python3 tools/scripts/stage_unity_desktop_ort.py linux
+          bindings/unity/Runtime/Plugins/Linux
 
       - name: Strip debug symbols (Linux)
-        run: strip --strip-unneeded bindings/unity/Runtime/Plugins/Linux/libxybrid_ffi.so
+        run: strip --strip-unneeded bindings/unity/Runtime/Plugins/Linux/libxybrid_bolt.so
 
       - name: Verify deployed libraries
         run: |
           echo "Linux plugin directory:"
-          ls -la bindings/unity/Runtime/Plugins/Linux/ || echo "WARNING: Linux plugin directory not found"
+          PLUGINS=bindings/unity/Runtime/Plugins/Linux
+          ls -la "$PLUGINS"
+          test -f "$PLUGINS/libxybrid_bolt.so"
+          test -f "$PLUGINS/libonnxruntime.so"
+          test -f "$PLUGINS/libonnxruntime.so.meta"
+          python3 -c "import ctypes; ctypes.CDLL('$PLUGINS/libonnxruntime.so')"
+          echo "Linux ORT runtime loads successfully."
 
       - name: Upload Linux plugins
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -277,83 +245,41 @@ jobs:
         with:
           submodules: true
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
-        with:
-          toolchain: stable
-          targets: >-
-            aarch64-linux-android,
-            armv7-linux-androideabi,
-            x86_64-linux-android
+      # Android's bolt .so is built by Bazel — the same
+      # //crates/xybrid-bolt:xybrid_bolt_cdylib target the Kotlin AAR ships (and
+      # dlopen-gates on 16 KB-page emulators), one build per ABI. The Bazel link
+      # already strips, 16 KB-aligns, and links libc++_shared (see the android
+      # rustc_flags in crates/xybrid-bolt/BUILD.bazel), so there's no NDK,
+      # cargo-ndk, or strip step here. Android builds remotely only (Linux RBE);
+      # creds come from a gitignored try-import written from the BuildBuddy secret.
+      - name: Configure BuildBuddy remote config
+        env:
+          BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
+        run: tools/scripts/write-buildbuddy-rc.sh remote
 
-      - name: Setup sccache
-        uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
-
-      - name: Configure sccache environment
-        shell: bash
+      # stage_unity_native.py copies each ABI's .so into
+      # Runtime/Plugins/Android/<abi>/ and bundles the vendored ORT and
+      # libc++_shared beside it when that ABI is available.
+      - name: Build + stage Android natives (Bazel, per ABI)
         run: |
-          echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
-          echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
-          echo "CMAKE_C_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
-          echo "CMAKE_CXX_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
-
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-        with:
-          prefix-key: "v1-rust"
-          shared-key: "unity-android"
-          cache-all-crates: "true"
-          save-if: "true"
-
-      - name: Cache Android NDK
-        id: cache-ndk
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        with:
-          path: ${{ env.ANDROID_HOME }}/ndk/${{ env.NDK_VERSION }}
-          key: android-ndk-${{ env.NDK_VERSION }}
-
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
-
-      - name: Install NDK
-        if: steps.cache-ndk.outputs.cache-hit != 'true'
-        run: sdkmanager --install "ndk;${{ env.NDK_VERSION }}"
-
-      - name: Set NDK environment
-        run: echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/${{ env.NDK_VERSION }}" >> $GITHUB_ENV
-
-      - name: Cache cargo-ndk
-        id: cache-cargo-ndk
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        with:
-          path: ~/.cargo/bin/cargo-ndk
-          key: cargo-ndk-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            cargo-ndk-${{ runner.os }}-
-
-      - name: Install cargo-ndk
-        # actions/cache sets cache-hit only on EXACT key match; with
-        # restore-keys, a fallback can populate ~/.cargo/bin/cargo-ndk while
-        # leaving cache-hit empty, which made the previous `if:`-gated
-        # `cargo install` re-run and fail with "binary already exists".
-        # `which || install` is idempotent in both states.
-        run: which cargo-ndk || cargo install cargo-ndk
-
-      - name: Build for aarch64-linux-android
-        run: cargo xtask build-ffi --target aarch64-linux-android --deploy-unity
-
-      - name: Build for armv7-linux-androideabi
-        run: cargo xtask build-ffi --target armv7-linux-androideabi --deploy-unity
-
-      - name: Build for x86_64-linux-android
-        run: cargo xtask build-ffi --target x86_64-linux-android --deploy-unity
-
-      - name: Strip debug symbols (Android)
-        run: |
-          NDK_STRIP="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip"
-          "$NDK_STRIP" bindings/unity/Runtime/Plugins/Android/arm64-v8a/libxybrid_ffi.so
-          "$NDK_STRIP" bindings/unity/Runtime/Plugins/Android/armeabi-v7a/libxybrid_ffi.so
-          "$NDK_STRIP" bindings/unity/Runtime/Plugins/Android/x86_64/libxybrid_ffi.so
+          set -euo pipefail
+          remote_args=()
+          if [[ -n "${REMOTE:-}" ]]; then
+            remote_args+=("$REMOTE")
+          fi
+          for spec in \
+            "aarch64-linux-android:android-arm64" \
+            "armv7-linux-androideabi:android-armv7" \
+            "x86_64-linux-android:android-x86_64"; do
+            triple="${spec%%:*}"; cfg="${spec##*:}"
+            echo "=== $triple ($cfg) ==="
+            bazelisk build "${remote_args[@]}" --config="$cfg" //crates/xybrid-bolt:xybrid_bolt_cdylib
+            LIB=$(tools/scripts/bazel-output.sh //crates/xybrid-bolt:xybrid_bolt_cdylib "${remote_args[@]}" --config="$cfg")
+            echo "Bazel output: $LIB"
+            python3 tools/scripts/stage_unity_native.py \
+              --lib "$LIB" \
+              --target "$triple"
+          done
 
       - name: Verify deployed libraries
         run: |
@@ -368,7 +294,7 @@ jobs:
             echo ""
             echo "=== $abi ==="
             ls -la "$ABI_DIR/"
-            file "$ABI_DIR/libxybrid_ffi.so"
+            file "$ABI_DIR/libxybrid_bolt.so"
           done
 
       - name: Upload Android plugins
@@ -391,30 +317,16 @@ jobs:
         with:
           submodules: true
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
-        with:
-          toolchain: stable
-          targets: aarch64-apple-ios
-
-      - name: Setup sccache
-        uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
-
-      - name: Configure sccache environment
-        shell: bash
+      # iOS bolt STATICLIB (.a) is built by Bazel on this macos-14 runner —
+      # --config=ios is Mac-local (iphoneos SDK + llama.cpp Metal shaders; no Mac
+      # RBE), the SAME //crates/xybrid-bolt:xybrid_bolt_staticlib the Apple
+      # xcframework already ships. ORT links statically (vendored), so no separate
+      # ORT bundle. bazelisk ships on macos runners; local_tools (rules_foreign_cc)
+      # needs cmake + pkg-config.
+      - name: Install Bazel build tools
         run: |
-          echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
-          echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
-          echo "CMAKE_C_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
-          echo "CMAKE_CXX_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
-
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-        with:
-          prefix-key: "v1-rust"
-          shared-key: "unity-ios"
-          cache-all-crates: "true"
-          save-if: "true"
+          which cmake >/dev/null || brew install cmake
+          which pkg-config >/dev/null || brew install pkg-config
 
       - name: Verify ORT iOS library
         run: |
@@ -425,11 +337,19 @@ jobs:
           fi
           echo "ORT iOS library found."
 
-      - name: Build for aarch64-apple-ios
-        run: cargo xtask build-ffi --target aarch64-apple-ios --deploy-unity
+      # --config=ios already sets compilation_mode=opt (unlike macos-metal), so
+      # no explicit -c opt here.
+      - name: Build iOS bolt staticlib (Bazel)
+        run: bazelisk build --config=ios //crates/xybrid-bolt:xybrid_bolt_staticlib
+
+      - name: Stage into Unity plugins
+        run: |
+          LIB=$(tools/scripts/bazel-output.sh //crates/xybrid-bolt:xybrid_bolt_staticlib --config=ios)
+          echo "Bazel output: $LIB"
+          python3 tools/scripts/stage_unity_native.py --lib "$LIB" --target aarch64-apple-ios
 
       - name: Strip debug symbols (iOS)
-        run: strip -S bindings/unity/Runtime/Plugins/iOS/libxybrid_ffi.a
+        run: strip -S bindings/unity/Runtime/Plugins/iOS/libxybrid_bolt.a
 
       - name: Verify deployed libraries
         run: |
@@ -453,7 +373,7 @@ jobs:
     name: Package Unity SDK
     permissions:
       contents: write   # gh release upload of the packaged SDK tarball
-    needs: [check-csharp-bindings, build-unity-macos, build-unity-windows, build-unity-linux, build-unity-ios, build-unity-android]
+    needs: [build-unity-macos, build-unity-windows, build-unity-linux, build-unity-ios, build-unity-android]
     if: always() && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled')
     runs-on: ubuntu-latest
     steps:
@@ -492,6 +412,21 @@ jobs:
           echo "Final plugin directory structure:"
           find bindings/unity/Runtime/Plugins -type f | sort
 
+      - name: Verify desktop runtime dependencies
+        run: |
+          set -euo pipefail
+          PLUGINS=bindings/unity/Runtime/Plugins
+          for path in \
+            Windows/xybrid_bolt.dll \
+            Windows/onnxruntime.dll \
+            Windows/onnxruntime.dll.meta \
+            Linux/libxybrid_bolt.so \
+            Linux/libonnxruntime.so \
+            Linux/libonnxruntime.so.meta; do
+            test -f "$PLUGINS/$path" || { echo "Missing Unity runtime: $path"; exit 1; }
+          done
+          echo "Unity desktop bundles contain xybrid_bolt + ONNX Runtime."
+
       - name: Extract version
         id: version
         run: |
@@ -513,10 +448,10 @@ jobs:
           mkdir -p dist
           # platform-key:PluginDir:primary-lib-relative-path ("" = any-ABI Android)
           MAPPINGS=(
-            "macos:macOS:libxybrid_ffi.dylib"
-            "windows:Windows:xybrid_ffi.dll"
-            "linux:Linux:libxybrid_ffi.so"
-            "ios:iOS:libxybrid_ffi.a"
+            "macos:macOS:libxybrid_bolt.dylib"
+            "windows:Windows:xybrid_bolt.dll"
+            "linux:Linux:libxybrid_bolt.so"
+            "ios:iOS:libxybrid_bolt.a"
             "android:Android:"
           )
           ENTRIES=()
@@ -526,7 +461,7 @@ jobs:
             if [ "$KEY" = "android" ]; then
               PRESENT=false
               for abi in arm64-v8a armeabi-v7a x86_64; do
-                [ -f "$SRC/$abi/libxybrid_ffi.so" ] && PRESENT=true
+                [ -f "$SRC/$abi/libxybrid_bolt.so" ] && PRESENT=true
               done
             else
               PRESENT=false; [ -f "$SRC/$LIB" ] && PRESENT=true

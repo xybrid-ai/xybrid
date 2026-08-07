@@ -32,21 +32,18 @@
 //! - **Records and `XybridError`**: complete.
 //! - **Free functions** (init / push API): complete for the subset every
 //!   binding needs at startup.
-//! - **`XybridModel`**: minimal `#[export]` block covering the load / run /
-//!   warmup / voice surface. Enough to validate the proc-macro shape
-//!   against the facade.
+//! - **`XybridModel`**: load / run / pull-stream / conversation-context runs /
+//!   warmup / voice surface.
+//! - **`XybridConversationContext`**: opaque handle (new / with_id / push /
+//!   set_system / clear / id) feeding `run_with_context` and
+//!   `run_stream_with_context`.
 //! - **Deferred to follow-up commits**:
-//!   - Token streaming (`run_stream` / `run_stream_with_context`) — needs
-//!     BoltFFI's stream-event convention nailed down across all targets.
 //!   - `XybridCancellationToken` as an `Arc<Self>` handle.
-//!   - `XybridConversationContext` (uniffi opaque object equivalent).
-//!   - `run_with_options` / `run_with_context`.
 //!   - Pipeline surface.
 //!
-//! Until `xybrid-uniffi` and `xybrid-ffi` are removed, this crate exists
-//! alongside them. The deletion happens once the Swift / Kotlin example
-//! apps in `examples/` build against bolt-generated bindings and the
-//! Unity package is rewired against bolt's emitted C header.
+//! This is now the sole native binding crate: `xybrid-uniffi` and the
+//! pre-bolt `xybrid-ffi` C ABI have both been removed, and every foreign SDK
+//! (Swift / Kotlin / Unity C# / …) rides bolt via [`xybrid_ffi_facade`].
 
 use boltffi::*;
 use xybrid_ffi_facade as facade;
@@ -454,7 +451,60 @@ pub struct XybridResult {
     pub output_type: XybridOutputType,
     pub model_id: String,
     pub latency_ms: u32,
+    /// Where the answer actually came from. Cloud fallback keeps `model_id`
+    /// identical on both legs, so this is the only way to tell them apart.
+    pub execution_target: XybridExecutionTarget,
     pub metrics: XybridInferenceMetrics,
+}
+
+/// Where a result was produced — observed fact, not a routing preference.
+#[data]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum XybridExecutionTarget {
+    Local,
+    Cloud,
+}
+
+impl From<facade::ExecutionTarget> for XybridExecutionTarget {
+    fn from(target: facade::ExecutionTarget) -> Self {
+        match target {
+            facade::ExecutionTarget::Local => Self::Local,
+            facade::ExecutionTarget::Cloud => Self::Cloud,
+        }
+    }
+}
+
+/// Lifecycle of the background download behind a speculative load.
+#[data]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum XybridDownloadState {
+    Downloading,
+    Ready,
+    /// Download failed; the cloud keeps serving and `isLoaded` never flips.
+    Failed,
+}
+
+/// Download progress + state in one consistent read.
+#[data]
+#[derive(Clone, Debug, PartialEq)]
+pub struct XybridDownloadStatus {
+    pub state: XybridDownloadState,
+    /// 0.0..=1.0.
+    pub progress: f32,
+}
+
+impl From<facade::DownloadStatus> for XybridDownloadStatus {
+    fn from(status: facade::DownloadStatus) -> Self {
+        let state = match status.state {
+            facade::DownloadState::Downloading => XybridDownloadState::Downloading,
+            facade::DownloadState::Ready => XybridDownloadState::Ready,
+            facade::DownloadState::Failed => XybridDownloadState::Failed,
+        };
+        Self {
+            state,
+            progress: status.progress,
+        }
+    }
 }
 
 impl From<facade::InferenceResult> for XybridResult {
@@ -465,7 +515,74 @@ impl From<facade::InferenceResult> for XybridResult {
             output_type: r.output_type.into(),
             model_id: r.model_id,
             latency_ms: r.latency_ms,
+            execution_target: r.execution_target.into(),
             metrics,
+        }
+    }
+}
+
+// ============================================================================
+// Pull-based token streaming
+// ============================================================================
+
+#[data]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum XybridStreamEventKind {
+    Token,
+    Complete,
+}
+
+#[data]
+#[derive(Clone)]
+pub struct XybridStreamToken {
+    pub token: String,
+    pub token_id: Option<i64>,
+    pub index: u64,
+    pub cumulative_text: String,
+    pub finish_reason: Option<String>,
+}
+
+impl From<facade::StreamToken> for XybridStreamToken {
+    fn from(token: facade::StreamToken) -> Self {
+        Self {
+            token: token.token,
+            token_id: token.token_id,
+            index: token.index,
+            cumulative_text: token.cumulative_text,
+            finish_reason: token.finish_reason,
+        }
+    }
+}
+
+/// One pull from a streaming inference session.
+///
+/// This is a flat record instead of a data-carrying enum because the pinned
+/// C# generator cannot lower that enum shape reliably. `kind` selects the one
+/// populated payload: `token` for `Token`, none for `Complete`. A `Complete`
+/// event is followed by [`XybridModel::stream_result`] to retrieve the final
+/// result. Inference failures are returned as typed [`XybridError`] values by
+/// [`XybridModel::stream_next`].
+#[data]
+#[derive(Clone)]
+pub struct XybridStreamEvent {
+    pub kind: XybridStreamEventKind,
+    pub token: Option<XybridStreamToken>,
+}
+
+impl From<facade::StreamEvent> for XybridStreamEvent {
+    fn from(event: facade::StreamEvent) -> Self {
+        match event {
+            facade::StreamEvent::Token(token) => Self {
+                kind: XybridStreamEventKind::Token,
+                token: Some(token.into()),
+            },
+            facade::StreamEvent::Complete(_) => Self {
+                kind: XybridStreamEventKind::Complete,
+                token: None,
+            },
+            facade::StreamEvent::Error(_) => {
+                unreachable!("stream errors are returned before event conversion")
+            }
         }
     }
 }
@@ -544,6 +661,34 @@ pub fn clear_battery_level() {
 // Process-global init
 // ============================================================================
 
+/// Initialize the platform-native `log` backend exactly once per process.
+///
+/// Mirrors the Flutter binding's `ensure_native_logging` (see
+/// `bindings/flutter/rust/src/api/mod.rs`): without a registered logger every
+/// `log::warn!` in the SDK — telemetry send failures and registry failovers
+/// in particular — is silently discarded on device. Called from the
+/// process-global init entry points the Swift/Kotlin wrappers hit during
+/// `Xybrid.initialize` / `Xybrid.init`. No-op on desktop targets, where the
+/// host process owns logger setup.
+fn ensure_native_logging() {
+    static LOGGING_INIT: std::sync::Once = std::sync::Once::new();
+    LOGGING_INIT.call_once(|| {
+        #[cfg(target_os = "android")]
+        android_logger::init_once(
+            android_logger::Config::default()
+                .with_max_level(log::LevelFilter::Info)
+                .with_tag("xybrid"),
+        );
+        #[cfg(target_os = "ios")]
+        {
+            // Errors only if a logger is already registered — fine to ignore.
+            let _ = oslog::OsLogger::new("dev.xybrid.sdk")
+                .level_filter(log::LevelFilter::Info)
+                .init();
+        }
+    });
+}
+
 /// One-stop SDK initialization: API key + gateway/ingest URL overrides in
 /// one call. Delegates to [`facade::configure_runtime`]; blank strings are
 /// treated as absent. This is the canonical init the Swift
@@ -555,11 +700,13 @@ pub fn configure_runtime(
     gateway_url: Option<String>,
     ingest_url: Option<String>,
 ) {
+    ensure_native_logging();
     facade::configure_runtime(api_key, gateway_url, ingest_url);
 }
 
 #[export]
 pub fn init_sdk_cache_dir(cache_dir: String) {
+    ensure_native_logging();
     // Param name pinned to `cache_dir` (not `path`) so the emitted Swift
     // is `initSdkCacheDir(cacheDir:)`, matching the existing
     // `examples/ios/XybridExample` call site that uniffi already exposes
@@ -569,27 +716,69 @@ pub fn init_sdk_cache_dir(cache_dir: String) {
 
 #[export]
 pub fn set_binding(binding: String) {
+    ensure_native_logging();
     facade::set_binding(binding);
 }
 
 #[export]
 pub fn set_api_key(api_key: String) {
+    ensure_native_logging();
     facade::set_api_key(api_key);
 }
 
 #[export]
 pub fn set_provider_api_key(provider: String, api_key: String) {
+    ensure_native_logging();
     facade::set_provider_api_key(provider, api_key);
+}
+
+/// Point the cloud gateway at a platform base URL (staging, self-hosted).
+/// Pass a bare base URL — the `/v1` suffix is applied internally.
+#[export]
+pub fn set_platform_url(url: String) {
+    ensure_native_logging();
+    facade::set_platform_url(url);
+}
+
+/// Enable speculative cloud fallback globally: a registry model that isn't
+/// downloaded yet is served from the gateway while the weights download.
+///
+/// LLM/chat only — prefer `XybridModel.fromRegistrySpeculative` when the app
+/// also loads ASR/TTS models, which cannot be served this way.
+#[export]
+pub fn set_speculative_cloud(enabled: bool) {
+    ensure_native_logging();
+    facade::set_speculative_cloud(enabled);
+}
+
+/// Whether the global speculative-cloud default is on.
+#[export]
+pub fn is_speculative_cloud_enabled() -> bool {
+    facade::is_speculative_cloud_enabled()
+}
+
+/// Whether `XybridModel::from_registry_speculative(model_id)` would actually
+/// speculate: an API key resolves and the model is not already cached.
+///
+/// Lets the hand-written Swift/Kotlin loader facades answer "will this
+/// speculate?" before loading. Never touches the network.
+#[export]
+pub fn will_speculate_for_model(model_id: String) -> bool {
+    facade::will_speculate_for_model(model_id)
+}
+
+/// The SDK version string (tracks `CARGO_PKG_VERSION`).
+#[export]
+pub fn version() -> String {
+    facade::version()
 }
 
 // ============================================================================
 // XybridModel handle
 // ============================================================================
 //
-// Sketch scope: load / run / warmup / unload / voice accessors only.
-// Streaming + cancellation + conversation context are wired in follow-up
-// commits once the bolt artifact emission has been validated against
-// the existing Swift / Kotlin / Unity examples.
+// Scope: load / run / pull-stream / warmup / unload / voice accessors.
+// Cancellation and conversation context remain follow-up work.
 //
 // `ModelLoader` is intentionally **not** mirrored as a separate
 // `#[export]` type. BoltFFI's wire layer treats opaque types as handle
@@ -603,6 +792,23 @@ pub fn set_provider_api_key(provider: String, api_key: String) {
 
 pub struct XybridModel {
     inner: std::sync::Arc<facade::XybridModel>,
+    streams: std::sync::Mutex<std::collections::HashMap<u64, std::sync::Arc<StreamEntry>>>,
+    next_stream_id: std::sync::atomic::AtomicU64,
+}
+
+struct StreamEntry {
+    session: std::sync::Arc<facade::StreamingSession>,
+    result: std::sync::Mutex<Option<facade::InferenceResult>>,
+}
+
+impl XybridModel {
+    fn new(inner: std::sync::Arc<facade::XybridModel>) -> Self {
+        Self {
+            inner,
+            streams: std::sync::Mutex::new(std::collections::HashMap::new()),
+            next_stream_id: std::sync::atomic::AtomicU64::new(1),
+        }
+    }
 }
 
 #[export]
@@ -612,21 +818,35 @@ impl XybridModel {
         let model = facade::ModelLoader::from_registry(id)
             .load()
             .map_err(XybridError::from)?;
-        Ok(Self { inner: model })
+        Ok(Self::new(model))
+    }
+
+    /// Load from the registry, serving from the cloud gateway while the weights
+    /// download in the background.
+    ///
+    /// Returns almost immediately instead of blocking on the download. Requires
+    /// a resolvable API key and an uncached model; otherwise it behaves exactly
+    /// like `from_registry`. Poll `download_status` for progress and
+    /// `is_cloud_serving` to know which leg is answering. LLM/chat models only.
+    pub fn from_registry_speculative(id: String) -> Result<Self, XybridError> {
+        let model = facade::ModelLoader::from_registry_speculative(id)
+            .load()
+            .map_err(XybridError::from)?;
+        Ok(Self::new(model))
     }
 
     /// Load from a local model directory (must contain `model_metadata.json`).
     pub fn from_directory(path: String) -> Result<Self, XybridError> {
         let loader = facade::ModelLoader::from_directory(path).map_err(XybridError::from)?;
         let model = loader.load().map_err(XybridError::from)?;
-        Ok(Self { inner: model })
+        Ok(Self::new(model))
     }
 
     /// Load from a local `.xyb` bundle.
     pub fn from_bundle(path: String) -> Result<Self, XybridError> {
         let loader = facade::ModelLoader::from_bundle(path).map_err(XybridError::from)?;
         let model = loader.load().map_err(XybridError::from)?;
-        Ok(Self { inner: model })
+        Ok(Self::new(model))
     }
 
     /// Resolve and load from a HuggingFace repo (`org/repo` or `org/repo:variant`).
@@ -634,7 +854,15 @@ impl XybridModel {
         let model = facade::ModelLoader::from_huggingface(repo)
             .load()
             .map_err(XybridError::from)?;
-        Ok(Self { inner: model })
+        Ok(Self::new(model))
+    }
+
+    /// Load from a raw GGUF file, auto-generating `model_metadata.json` from the
+    /// GGUF header (written next to the file if absent).
+    pub fn from_model_file(path: String) -> Result<Self, XybridError> {
+        let loader = facade::ModelLoader::from_model_file(path).map_err(XybridError::from)?;
+        let model = loader.load().map_err(XybridError::from)?;
+        Ok(Self::new(model))
     }
 
     pub fn model_id(&self) -> String {
@@ -653,8 +881,33 @@ impl XybridModel {
         self.inner.is_loaded()
     }
 
+    /// Whether runs are currently answered by the cloud because the local
+    /// weights are not ready yet. `false` for ordinary local models.
+    pub fn is_cloud_serving(&self) -> bool {
+        self.inner.is_cloud_serving()
+    }
+
+    /// Download progress + state in one read — poll this to drive a progress
+    /// bar. Reports `Ready` at 1.0 for an ordinary local model, so hosts need
+    /// no special case.
+    pub fn download_status(&self) -> XybridDownloadStatus {
+        self.inner.download_status().into()
+    }
+
+    /// Block until the download finishes or `timeout_ms` elapses, then report
+    /// the status. Call it off the UI thread (the same place `from_registry` is
+    /// already called). `timeout_ms = 0` makes it a non-blocking read.
+    pub fn await_download(&self, timeout_ms: u64) -> XybridDownloadStatus {
+        self.inner.await_download(timeout_ms).into()
+    }
+
     pub fn supports_streaming(&self) -> bool {
         self.inner.supports_streaming()
+    }
+
+    /// Whether this model emits true token-by-token output.
+    pub fn supports_token_streaming(&self) -> bool {
+        self.inner.supports_token_streaming()
     }
 
     pub fn is_llm(&self) -> bool {
@@ -701,12 +954,403 @@ impl XybridModel {
         Ok(result.into())
     }
 
+    /// Start token streaming and return a model-scoped session identifier.
+    ///
+    /// The identifier remains valid until the final result is taken, an error
+    /// is returned, or [`Self::stream_close`] is called.
+    pub fn run_stream(
+        &self,
+        envelope: XybridEnvelope,
+        options: Option<XybridRunOptions>,
+    ) -> Result<u64, XybridError> {
+        let session = self
+            .inner
+            .run_stream(
+                envelope.into(),
+                options.map(Into::into).unwrap_or_default(),
+                None,
+            )
+            .map_err(XybridError::from)?;
+        let stream_id = self
+            .next_stream_id
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.streams
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .insert(
+                stream_id,
+                std::sync::Arc::new(StreamEntry {
+                    session,
+                    result: std::sync::Mutex::new(None),
+                }),
+            );
+        Ok(stream_id)
+    }
+
+    /// Block until the next item for `stream_id` is ready.
+    pub fn stream_next(&self, stream_id: u64) -> Result<XybridStreamEvent, XybridError> {
+        let entry = self
+            .streams
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .get(&stream_id)
+            .cloned()
+            .ok_or_else(|| XybridError::InferenceError {
+                message: "unknown streaming session".into(),
+            })?;
+        match entry.session.next() {
+            Some(facade::StreamEvent::Complete(result)) => {
+                *entry
+                    .result
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(result);
+                Ok(XybridStreamEvent {
+                    kind: XybridStreamEventKind::Complete,
+                    token: None,
+                })
+            }
+            Some(facade::StreamEvent::Error(error)) => {
+                self.stream_close(stream_id);
+                Err(error.into())
+            }
+            Some(event @ facade::StreamEvent::Token(_)) => Ok(event.into()),
+            None => {
+                self.stream_close(stream_id);
+                Err(XybridError::InferenceError {
+                    message: "stream ended without a terminal event".into(),
+                })
+            }
+        }
+    }
+
+    /// Take the final result after receiving a `Complete` event.
+    pub fn stream_result(&self, stream_id: u64) -> Result<XybridResult, XybridError> {
+        let entry = self
+            .streams
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .get(&stream_id)
+            .cloned()
+            .ok_or_else(|| XybridError::InferenceError {
+                message: "unknown streaming session".into(),
+            })?;
+        let result = entry
+            .result
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .take()
+            .ok_or_else(|| XybridError::InferenceError {
+                message: "streaming result is not ready".into(),
+            })?;
+        self.stream_close(stream_id);
+        Ok(result.into())
+    }
+
+    /// Forget a streaming session.
+    pub fn stream_close(&self, stream_id: u64) {
+        self.streams
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .remove(&stream_id);
+    }
+
+    /// Run inference seeded with a conversation `context` (multi-turn chat).
+    ///
+    /// Only the generation config from `options` is applied — abort signals and
+    /// cloud fallback are not wired on the context path (matches the facade's
+    /// `run_with_context`).
+    pub fn run_with_context(
+        &self,
+        envelope: XybridEnvelope,
+        context: &XybridConversationContext,
+        options: Option<XybridRunOptions>,
+    ) -> Result<XybridResult, XybridError> {
+        let generation_config = options
+            .and_then(|opts| opts.generation_config)
+            .map(Into::into);
+        let result = self
+            .inner
+            .run_with_context(envelope.into(), context.inner.clone(), generation_config)
+            .map_err(XybridError::from)?;
+        Ok(result.into())
+    }
+
+    /// Start context-aware token streaming; returns a model-scoped session id.
+    /// The pull protocol is identical to [`Self::run_stream`]
+    /// (`stream_next` / `stream_result` / `stream_close`).
+    pub fn run_stream_with_context(
+        &self,
+        envelope: XybridEnvelope,
+        context: &XybridConversationContext,
+        options: Option<XybridRunOptions>,
+    ) -> Result<u64, XybridError> {
+        let session = self
+            .inner
+            .run_stream_with_context(
+                envelope.into(),
+                context.inner.clone(),
+                options.map(Into::into).unwrap_or_default(),
+                None,
+            )
+            .map_err(XybridError::from)?;
+        let stream_id = self
+            .next_stream_id
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.streams
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .insert(
+                stream_id,
+                std::sync::Arc::new(StreamEntry {
+                    session,
+                    result: std::sync::Mutex::new(None),
+                }),
+            );
+        Ok(stream_id)
+    }
+
     pub fn warmup(&self) -> Result<(), XybridError> {
         self.inner.warmup().map_err(XybridError::from)
     }
 
     pub fn unload(&self) -> Result<(), XybridError> {
         self.inner.unload().map_err(XybridError::from)
+    }
+}
+
+/// Opaque handle for multi-turn conversation history.
+///
+/// Build it up with [`push`](Self::push) / [`set_system`](Self::set_system),
+/// then pass it to [`XybridModel::run_with_context`] /
+/// [`XybridModel::run_stream_with_context`]. Wraps the facade's
+/// interior-mutable, thread-safe `ConversationContextHandle`.
+pub struct XybridConversationContext {
+    inner: std::sync::Arc<facade::ConversationContextHandle>,
+}
+
+#[export]
+impl XybridConversationContext {
+    /// Create an empty conversation context (fresh id).
+    #[allow(clippy::new_without_default)]
+    pub fn new() -> Self {
+        Self {
+            inner: facade::ConversationContextHandle::new(),
+        }
+    }
+
+    /// Create a context with a caller-supplied id (for telemetry correlation
+    /// across turns).
+    pub fn with_id(id: String) -> Self {
+        Self {
+            inner: facade::ConversationContextHandle::with_id(id),
+        }
+    }
+
+    /// Append a turn — typically a user or assistant message envelope.
+    pub fn push(&self, envelope: XybridEnvelope) -> Result<(), XybridError> {
+        self.inner.push(envelope.into()).map_err(XybridError::from)
+    }
+
+    /// Set the persistent system-prompt envelope (survives [`clear`](Self::clear)).
+    pub fn set_system(&self, envelope: XybridEnvelope) -> Result<(), XybridError> {
+        self.inner
+            .set_system(envelope.into())
+            .map_err(XybridError::from)
+    }
+
+    /// Drop the history; the system envelope (if any) is preserved.
+    pub fn clear(&self) {
+        self.inner.clear();
+    }
+
+    /// The context id.
+    pub fn id(&self) -> String {
+        self.inner.id()
+    }
+
+    /// Number of history turns (excludes the system envelope).
+    pub fn history_len(&self) -> u32 {
+        self.inner.history_len()
+    }
+
+    /// Whether a persistent system-prompt envelope is set.
+    pub fn has_system(&self) -> bool {
+        self.inner.has_system()
+    }
+
+    /// Set the max history length before FIFO pruning.
+    pub fn set_max_history_len(&self, len: u32) {
+        self.inner.set_max_history_len(len);
+    }
+}
+
+// ============================================================================
+// Telemetry (advanced config + lifecycle)
+// ============================================================================
+//
+// Mirrors the pre-bolt C ABI's telemetry surface. The apiKey-only fast path is
+// [`configure_runtime`]; this is the advanced builder (batch size, flush
+// interval, device label/attributes) plus the init/flush/shutdown lifecycle.
+// Telemetry *events* never cross the FFI — only this config/lifecycle control
+// plane does. Every setter takes simple scalars/strings, so the whole surface
+// generates natively (no hand-port needed).
+
+/// The SDK's default telemetry ingest endpoint (for display alongside a config).
+#[export]
+pub fn telemetry_default_endpoint() -> String {
+    facade::telemetry_default_endpoint()
+}
+
+/// Flush pending telemetry events. Safe before init / after shutdown.
+#[export]
+pub fn telemetry_flush() {
+    facade::telemetry_flush();
+}
+
+/// Shut down the telemetry exporter. Idempotent.
+#[export]
+pub fn telemetry_shutdown() {
+    facade::telemetry_shutdown();
+}
+
+/// Advanced telemetry configuration builder.
+///
+/// Create with [`new`](Self::new), tune via the setters, then hand to
+/// [`telemetry_init`]. Wraps the facade's interior-mutable, thread-safe
+/// `TelemetryConfigHandle`.
+pub struct XybridTelemetryConfig {
+    inner: std::sync::Arc<facade::TelemetryConfigHandle>,
+}
+
+#[export]
+impl XybridTelemetryConfig {
+    /// A new config bound to the default ingest endpoint and the given API key.
+    pub fn new(api_key: String) -> Self {
+        Self {
+            inner: facade::TelemetryConfigHandle::new(api_key),
+        }
+    }
+
+    /// Override the ingest endpoint (self-hosted collector / non-prod).
+    pub fn set_endpoint(&self, endpoint: String) {
+        self.inner.set_endpoint(endpoint);
+    }
+
+    /// Set the app version reported with every event.
+    pub fn set_app_version(&self, version: String) {
+        self.inner.set_app_version(version);
+    }
+
+    /// Set the human-friendly device label reported with every event.
+    pub fn set_device_label(&self, label: String) {
+        self.inner.set_device_label(label);
+    }
+
+    /// Attach an app-provided device attribute (stored under `device.custom`).
+    pub fn set_device_attribute(&self, key: String, value: String) {
+        self.inner.set_device_attribute(key, value);
+    }
+
+    /// Set the number of events buffered before a flush.
+    pub fn set_batch_size(&self, batch_size: u32) {
+        self.inner.set_batch_size(batch_size);
+    }
+
+    /// Set the background flush interval, in seconds.
+    pub fn set_flush_interval_secs(&self, secs: u32) {
+        self.inner.set_flush_interval_secs(secs);
+    }
+
+    /// Start the process-global telemetry exporter from this config.
+    ///
+    /// Consumes the config: subsequent setters no-op and a second `init` on the
+    /// same handle errors. Modeled as a method (not a free `telemetry_init`)
+    /// because boltffi 0.25.3 drops free functions that take a handle
+    /// parameter, but lowers a handle self-method fine (same reason the
+    /// generated `run` lives on `XybridModel`).
+    ///
+    /// # Errors
+    /// Errors if this config was already consumed, or if telemetry is already
+    /// initialized without an intervening [`telemetry_shutdown`].
+    pub fn init(&self) -> Result<(), XybridError> {
+        facade::telemetry_init(&self.inner).map_err(XybridError::from)
+    }
+}
+
+// ============================================================================
+// Bundle inspection
+// ============================================================================
+//
+// Read-only inspection of `.xyb` model bundles for editor tooling / asset
+// workflows. Mirrors the pre-bolt C ABI's bundle surface; every method takes or
+// returns simple types, so it generates natively (no hand-port).
+
+/// An opened `.xyb` model bundle.
+///
+/// Create with [`open`](Self::open); read the manifest/metadata, enumerate
+/// files, and [`extract`](Self::extract). Wraps the facade's immutable
+/// `BundleHandle`.
+pub struct XybridBundle {
+    inner: std::sync::Arc<facade::BundleHandle>,
+}
+
+#[export]
+impl XybridBundle {
+    /// Open and parse a `.xyb` bundle (decompress zstd, parse tar, validate the
+    /// manifest).
+    pub fn open(path: String) -> Result<Self, XybridError> {
+        let inner = facade::BundleHandle::open(path).map_err(XybridError::from)?;
+        Ok(Self { inner })
+    }
+
+    /// The model identifier from the manifest.
+    pub fn model_id(&self) -> String {
+        self.inner.model_id()
+    }
+
+    /// The version string from the manifest.
+    pub fn version(&self) -> String {
+        self.inner.version()
+    }
+
+    /// The target platform from the manifest.
+    pub fn target(&self) -> String {
+        self.inner.target()
+    }
+
+    /// The SHA-256 hash from the manifest.
+    pub fn hash(&self) -> String {
+        self.inner.hash()
+    }
+
+    /// Whether the bundle carries a `model_metadata.json`.
+    pub fn has_metadata(&self) -> bool {
+        self.inner.has_metadata()
+    }
+
+    /// Number of files in the bundle (excludes `manifest.json`).
+    pub fn file_count(&self) -> u32 {
+        self.inner.file_count()
+    }
+
+    /// The file name at `index`, or `None` if out of bounds.
+    pub fn file_name(&self, index: u32) -> Option<String> {
+        self.inner.file_name(index)
+    }
+
+    /// The full bundle manifest serialized as JSON.
+    pub fn manifest_json(&self) -> Result<String, XybridError> {
+        self.inner.manifest_json().map_err(XybridError::from)
+    }
+
+    /// The `model_metadata.json` contents, or `None` if the bundle has none.
+    pub fn metadata_json(&self) -> Result<Option<String>, XybridError> {
+        self.inner.metadata_json().map_err(XybridError::from)
+    }
+
+    /// Extract every bundle file to `output_dir` (created if absent).
+    pub fn extract(&self, output_dir: String) -> Result<(), XybridError> {
+        self.inner.extract(output_dir).map_err(XybridError::from)
     }
 }
 
@@ -770,5 +1414,21 @@ mod tests {
             facade_opts.abort_on,
             vec![facade::AbortSignal::ThermalCritical]
         );
+    }
+
+    #[test]
+    fn stream_token_event_flattens_for_the_wire() {
+        let event = XybridStreamEvent::from(facade::StreamEvent::Token(facade::StreamToken {
+            token: "hi".into(),
+            token_id: Some(7),
+            index: 3,
+            cumulative_text: "say hi".into(),
+            finish_reason: None,
+        }));
+
+        assert_eq!(event.kind, XybridStreamEventKind::Token);
+        let token = event.token.expect("token event should carry a token");
+        assert_eq!(token.token, "hi");
+        assert_eq!(token.index, 3);
     }
 }

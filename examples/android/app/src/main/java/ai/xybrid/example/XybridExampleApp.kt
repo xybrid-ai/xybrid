@@ -17,6 +17,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 // Xybrid SDK imports
+import ai.xybrid.Xybrid
 import ai.xybrid.XybridModel
 import ai.xybrid.XybridError
 import ai.xybrid.Envelope
@@ -104,15 +105,7 @@ fun XybridExampleApp() {
                 modelState = ModelState.Loading
                 coroutineScope.launch {
                     try {
-                        val loaded = withContext(Dispatchers.IO) {
-                            // Bolt collapsed the loader-then-load 2-step into a
-                            // single XybridModel constructor. (The Kotlin
-                            // emitter exposes from_registry as the primary
-                            // secondary constructor; from_directory /
-                            // from_bundle / from_huggingface remain on the
-                            // companion object.)
-                            XybridModel(model.id)
-                        }
+                        val loaded = Xybrid.model(model.id).load()
                         modelState = ModelState.Loaded(loaded)
 
                         // Pick default voice for TTS models. Bolt returns the

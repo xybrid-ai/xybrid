@@ -3,8 +3,6 @@
 
 using System;
 using System.Collections.Generic;
-using System.Runtime.InteropServices;
-using Xybrid.Native;
 
 namespace Xybrid
 {
@@ -31,12 +29,8 @@ namespace Xybrid
     /// <remarks>
     /// LLM-specific fields (<see cref="TtftMs"/>, <see cref="TokensPerSecond"/>,
     /// <see cref="PrefillTps"/>, <see cref="DecodeTps"/>, <see cref="TokensOut"/>)
-    /// are <c>null</c> for ASR/TTS/embedding runs. For pipeline runs they are
-    /// parsed from the final stage's envelope only, so they are also <c>null</c>
-    /// when the final stage isn't the LLM (e.g. an ASR → LLM → TTS pipeline).
-    ///
-    /// <see cref="StageLatenciesMs"/> is empty for <c>model.Run()</c> and
-    /// populated for pipeline runs.
+    /// are <c>null</c> for ASR/TTS/embedding runs. <see cref="StageLatenciesMs"/>
+    /// is empty for <c>model.Run()</c> and populated for pipeline runs.
     /// </remarks>
     public sealed class InferenceMetrics
     {
@@ -70,163 +64,154 @@ namespace Xybrid
     /// <summary>
     /// Represents the result of model inference.
     /// </summary>
-    /// <remarks>
-    /// This class wraps a native result handle and must be disposed when no longer needed.
-    /// Access the result properties before disposing.
-    /// </remarks>
     public sealed class InferenceResult : IDisposable
     {
-        private unsafe XybridResultHandle* _handle;
-        private bool _disposed;
+        /// <summary>Gets whether this result has been disposed.</summary>
+        public bool IsDisposed { get; private set; }
 
-        // Cached values (extracted before potential disposal)
-        private readonly bool _success;
-        private readonly string _error;
-        private readonly string _text;
-        private readonly uint _latencyMs;
-        private readonly OutputType _outputType;
-        private readonly byte[] _audioBytes;
-        private readonly float[] _embedding;
-        private readonly InferenceMetrics _metrics;
+        /// <summary>Gets whether the inference was successful.</summary>
+        public bool Success { get; }
 
-        /// <summary>
-        /// Gets whether this result has been disposed.
-        /// </summary>
-        public bool IsDisposed => _disposed;
+        /// <summary>Gets the error message if inference failed, or null if successful.</summary>
+        public string Error { get; }
 
-        /// <summary>
-        /// Gets whether the inference was successful.
-        /// </summary>
-        public bool Success => _success;
+        /// <summary>Gets the text output (for ASR or LLM models), or null if not applicable.</summary>
+        public string Text { get; }
 
-        /// <summary>
-        /// Gets the error message if inference failed, or null if successful.
-        /// </summary>
-        public string Error => _error;
+        /// <summary>Gets the inference latency in milliseconds.</summary>
+        public uint LatencyMs { get; }
 
-        /// <summary>
-        /// Gets the text output (for ASR or LLM models), or null if not applicable.
-        /// </summary>
-        public string Text => _text;
-
-        /// <summary>
-        /// Gets the inference latency in milliseconds.
-        /// </summary>
-        public uint LatencyMs => _latencyMs;
-
-        /// <summary>
-        /// Gets the type of output produced by inference.
-        /// </summary>
-        public OutputType OutputType => _outputType;
+        /// <summary>Gets the type of output produced by inference.</summary>
+        public OutputType OutputType { get; }
 
         /// <summary>
         /// Gets the raw audio bytes (for TTS models), or null if not applicable.
         /// Audio format is raw PCM 16-bit signed little-endian, typically 24kHz mono.
         /// </summary>
-        public byte[] AudioBytes => _audioBytes;
+        public byte[] AudioBytes { get; }
+
+        /// <summary>Gets the embedding vector (for embedding models), or null if not applicable.</summary>
+        public float[] Embedding { get; }
+
+        /// <summary>Gets whether this result contains audio data.</summary>
+        public bool HasAudio => AudioBytes != null && AudioBytes.Length > 0;
+
+        /// <summary>Gets whether this result contains an embedding.</summary>
+        public bool HasEmbedding => Embedding != null && Embedding.Length > 0;
+
+        /// <summary>Gets the typed inference metrics (TTFT, tok/s, per-stage latencies).</summary>
+        public InferenceMetrics Metrics { get; }
 
         /// <summary>
-        /// Gets the embedding vector (for embedding models), or null if not applicable.
+        /// Gets whether this answer came from the device or the cloud gateway.
+        /// Cloud fallback keeps the model id identical on both legs, so this is
+        /// the only way to tell them apart. Defaults to
+        /// <see cref="XybridBolt.XybridExecutionTarget.Local"/> for synthesized
+        /// failures, which never reached the cloud.
         /// </summary>
-        public float[] Embedding => _embedding;
+        public XybridBolt.XybridExecutionTarget ExecutionTarget { get; }
 
-        /// <summary>
-        /// Gets whether this result contains audio data.
-        /// </summary>
-        public bool HasAudio => _audioBytes != null && _audioBytes.Length > 0;
-
-        /// <summary>
-        /// Gets whether this result contains an embedding.
-        /// </summary>
-        public bool HasEmbedding => _embedding != null && _embedding.Length > 0;
-
-        /// <summary>
-        /// Gets the typed inference metrics (TTFT, tok/s, per-stage latencies).
-        /// </summary>
-        /// <remarks>
-        /// LLM-specific fields are <c>null</c> for ASR/TTS/embedding runs;
-        /// <see cref="InferenceMetrics.StageLatenciesMs"/> is empty for
-        /// single-model runs.
-        /// </remarks>
-        public InferenceMetrics Metrics => _metrics;
-
-        internal unsafe InferenceResult(XybridResultHandle* handle)
+        private InferenceResult(
+            bool success,
+            string error,
+            string text,
+            uint latencyMs,
+            OutputType outputType,
+            byte[] audioBytes,
+            float[] embedding,
+            InferenceMetrics metrics,
+            XybridBolt.XybridExecutionTarget executionTarget =
+                XybridBolt.XybridExecutionTarget.Local)
         {
-            _handle = handle;
+            Success = success;
+            Error = error;
+            Text = text;
+            LatencyMs = latencyMs;
+            OutputType = outputType;
+            AudioBytes = audioBytes;
+            Embedding = embedding;
+            Metrics = metrics;
+            ExecutionTarget = executionTarget;
+        }
 
-            // Cache all values immediately so they survive disposal
-            _success = NativeMethods.xybrid_result_success(handle) != 0;
-            _latencyMs = NativeMethods.xybrid_result_latency_ms(handle);
-
-            if (_success)
+        /// <summary>Decode a successful bolt result into the public shape.</summary>
+        internal static InferenceResult FromBolt(XybridBolt.XybridResult result)
+        {
+            string text = null;
+            byte[] audio = null;
+            float[] embedding = null;
+            switch (result.Envelope.Kind)
             {
-                byte* textPtr = NativeMethods.xybrid_result_text(handle);
-                _text = NativeHelpers.FromUtf8Ptr(textPtr);
-                _error = null;
-            }
-            else
-            {
-                byte* errorPtr = NativeMethods.xybrid_result_error(handle);
-                _error = NativeHelpers.FromUtf8Ptr(errorPtr);
-                _text = null;
-            }
-
-            // Cache output type
-            byte* outputTypePtr = NativeMethods.xybrid_result_output_type(handle);
-            string outputTypeStr = NativeHelpers.FromUtf8Ptr(outputTypePtr);
-            _outputType = ParseOutputType(outputTypeStr);
-
-            // Cache audio bytes
-            nuint audioLen = NativeMethods.xybrid_result_audio_len(handle);
-            if (audioLen > 0)
-            {
-                byte* audioPtr = NativeMethods.xybrid_result_audio_data(handle);
-                if (audioPtr != null)
-                {
-                    _audioBytes = new byte[(int)audioLen];
-                    Marshal.Copy((IntPtr)audioPtr, _audioBytes, 0, (int)audioLen);
-                }
+                case XybridBolt.XybridEnvelopeKind.Text t:
+                    text = t.Value;
+                    break;
+                case XybridBolt.XybridEnvelopeKind.Audio a:
+                    audio = a.Bytes;
+                    break;
+                case XybridBolt.XybridEnvelopeKind.Embedding e:
+                    embedding = e.Values;
+                    break;
             }
 
-            // Cache embedding
-            nuint embLen = NativeMethods.xybrid_result_embedding_len(handle);
-            if (embLen > 0)
+            return new InferenceResult(
+                success: true,
+                error: null,
+                text: text,
+                latencyMs: result.LatencyMs,
+                outputType: MapOutputType(result.OutputType),
+                audioBytes: audio,
+                embedding: embedding,
+                metrics: MapMetrics(result.Metrics),
+                executionTarget: result.ExecutionTarget);
+        }
+
+        /// <summary>
+        /// A failed result. Bolt inference throws on error; <see cref="Model"/>
+        /// catches inference failures and synthesizes this so callers that
+        /// inspect <see cref="Success"/> keep their contract.
+        /// </summary>
+        internal static InferenceResult Failed(string error) =>
+            new InferenceResult(
+                success: false,
+                error: error,
+                text: null,
+                latencyMs: 0,
+                outputType: OutputType.Unknown,
+                audioBytes: null,
+                embedding: null,
+                metrics: new InferenceMetrics(0, null, null, null, null, null, Array.Empty<StageLatency>()));
+
+        private static OutputType MapOutputType(XybridBolt.XybridOutputType outputType)
+        {
+            switch (outputType)
             {
-                float* embPtr = NativeMethods.xybrid_result_embedding_data(handle);
-                if (embPtr != null)
-                {
-                    _embedding = new float[(int)embLen];
-                    Marshal.Copy((IntPtr)embPtr, _embedding, 0, (int)embLen);
-                }
+                case XybridBolt.XybridOutputType.Text:
+                    return OutputType.Text;
+                case XybridBolt.XybridOutputType.Audio:
+                    return OutputType.Audio;
+                case XybridBolt.XybridOutputType.Embedding:
+                    return OutputType.Embedding;
+                default:
+                    return OutputType.Unknown;
+            }
+        }
+
+        private static InferenceMetrics MapMetrics(XybridBolt.XybridInferenceMetrics metrics)
+        {
+            var stages = new List<StageLatency>(metrics.StageLatenciesMs.Length);
+            foreach (XybridBolt.XybridStageLatency stage in metrics.StageLatenciesMs)
+            {
+                stages.Add(new StageLatency(stage.StageId, stage.LatencyMs));
             }
 
-            // Cache typed metrics. Sentinel conventions match the C ABI:
-            // -1 for absent optional integers, NaN for absent optional floats.
-            long ttft = NativeMethods.xybrid_result_ttft_ms(handle);
-            float tps = NativeMethods.xybrid_result_tokens_per_second(handle);
-            float prefill = NativeMethods.xybrid_result_prefill_tps(handle);
-            float decode = NativeMethods.xybrid_result_decode_tps(handle);
-            long tokensOut = NativeMethods.xybrid_result_tokens_out(handle);
-
-            nuint stageCount = NativeMethods.xybrid_result_stage_count(handle);
-            var stages = new List<StageLatency>((int)stageCount);
-            for (nuint i = 0; i < stageCount; i++)
-            {
-                byte* stageIdPtr = NativeMethods.xybrid_result_stage_id(handle, i);
-                string stageId = NativeHelpers.FromUtf8Ptr(stageIdPtr) ?? string.Empty;
-                uint stageLatencyMs = NativeMethods.xybrid_result_stage_latency_ms(handle, i);
-                stages.Add(new StageLatency(stageId, stageLatencyMs));
-            }
-
-            _metrics = new InferenceMetrics(
-                totalMs: _latencyMs,
-                ttftMs: ttft < 0 ? (uint?)null : (uint)ttft,
-                tokensPerSecond: float.IsNaN(tps) ? (float?)null : tps,
-                prefillTps: float.IsNaN(prefill) ? (float?)null : prefill,
-                decodeTps: float.IsNaN(decode) ? (float?)null : decode,
-                tokensOut: tokensOut < 0 ? (uint?)null : (uint)tokensOut,
-                stageLatenciesMs: stages
-            );
+            return new InferenceMetrics(
+                totalMs: metrics.TotalMs,
+                ttftMs: metrics.TtftMs,
+                tokensPerSecond: metrics.TokensPerSecond,
+                prefillTps: metrics.PrefillTps,
+                decodeTps: metrics.DecodeTps,
+                tokensOut: metrics.TokensOut,
+                stageLatenciesMs: stages);
         }
 
         /// <summary>
@@ -235,61 +220,28 @@ namespace Xybrid
         /// <exception cref="InferenceException">Thrown if Success is false.</exception>
         public void ThrowIfFailed()
         {
-            if (!_success)
+            if (!Success)
             {
-                throw new InferenceException(_error ?? "Unknown inference error");
+                throw new InferenceException(Error ?? "Unknown inference error");
             }
         }
 
         /// <summary>
-        /// Releases the native resources used by this result.
+        /// No-op: the result holds no native resources. Retained so existing
+        /// <c>using</c> call sites keep compiling.
         /// </summary>
-        public unsafe void Dispose()
+        public void Dispose()
         {
-            if (!_disposed)
-            {
-                if (_handle != null)
-                {
-                    NativeMethods.xybrid_result_free(_handle);
-                    _handle = null;
-                }
-                _disposed = true;
-            }
+            IsDisposed = true;
         }
 
-        /// <summary>
-        /// Finalizer to ensure native resources are released.
-        /// </summary>
-        ~InferenceResult()
-        {
-            Dispose();
-        }
-
-        /// <summary>
-        /// Returns a string representation of the result.
-        /// </summary>
+        /// <summary>Returns a string representation of the result.</summary>
         public override string ToString()
         {
-            if (_success)
-            {
-                return $"InferenceResult(Success, OutputType={_outputType}, LatencyMs={_latencyMs}, " +
-                       $"Text=\"{_text ?? "null"}\", AudioBytes={_audioBytes?.Length ?? 0})";
-            }
-            else
-            {
-                return $"InferenceResult(Failed, Error=\"{_error}\")";
-            }
-        }
-
-        private static OutputType ParseOutputType(string type)
-        {
-            switch (type)
-            {
-                case "text": return OutputType.Text;
-                case "audio": return OutputType.Audio;
-                case "embedding": return OutputType.Embedding;
-                default: return OutputType.Unknown;
-            }
+            return Success
+                ? $"InferenceResult(Success, OutputType={OutputType}, LatencyMs={LatencyMs}, " +
+                  $"Text=\"{Text ?? "null"}\", AudioBytes={AudioBytes?.Length ?? 0})"
+                : $"InferenceResult(Failed, Error=\"{Error}\")";
         }
     }
 }

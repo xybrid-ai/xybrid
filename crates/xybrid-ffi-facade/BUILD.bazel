@@ -2,6 +2,7 @@
 # canonical SDK->foreign POD/Arc facade the bolt/flutter/ffi crates route through.
 # Free via @crates: deps = xybrid-core + xybrid-sdk + tokio, all auto-resolved.
 load("@rules_rs//rs:rust_library.bzl", "rust_library")
+load("@rules_rs//rs:rust_test.bzl", "rust_test")
 load("@crates//:defs.bzl", "all_crate_deps")
 
 rust_library(
@@ -11,4 +12,18 @@ rust_library(
     crate_features = ["default"],
     deps = all_crate_deps(normal = True),
     visibility = ["//visibility:public"],
+)
+
+# FIRST test target in the workspace — the tests-under-Bazel pilot. Every
+# workspace `#[test]` runs only under cargo today, so Bazel builds everything it
+# ships but verifies none of it. This crate is the cheapest proof of the pattern:
+# 26 inline tests, pure Rust, no dev-dependencies, no model fixtures.
+#
+# `crate = ` (not `srcs = `) recompiles the library above with `--test`, which is
+# the rules_rust idiom for inline `#[cfg(test)] mod tests` — it inherits srcs,
+# edition, features and deps, so the two targets cannot drift.
+rust_test(
+    name = "xybrid-ffi-facade_test",
+    crate = ":xybrid-ffi-facade",
+    crate_features = ["default"],
 )

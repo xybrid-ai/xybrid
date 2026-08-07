@@ -214,9 +214,21 @@ enum Commands {
         #[arg(long, default_value = "false")]
         show_reasoning: bool,
 
+        /// Token budget for LLM generation, shared by thinking and answer
+        /// (default 2048; auto-raised for known thinking models). For multi-stage
+        /// pipelines this applies to the first stage.
+        #[arg(long, value_name = "N", value_parser = parse_max_tokens)]
+        max_tokens: Option<usize>,
+
         /// Export trace to JSON file (Chrome trace format)
         #[arg(long, value_name = "FILE")]
         trace_export: Option<PathBuf>,
+
+        /// Serve from the cloud while the registry model downloads, instead of
+        /// blocking on the download. Requires --api-key (or XYBRID_API_KEY) and
+        /// a registry --model. LLM/chat only.
+        #[arg(long)]
+        speculative_cloud: bool,
     },
     /// Interactive REPL mode - keeps models loaded for fast repeated inference
     Repl {
@@ -254,9 +266,20 @@ enum Commands {
         #[arg(long, default_value = "false")]
         show_reasoning: bool,
 
+        /// Token budget for LLM generation, shared by thinking and answer
+        /// (default 2048; auto-raised for known thinking models). Applies to every REPL turn.
+        #[arg(long, value_name = "N", value_parser = parse_max_tokens)]
+        max_tokens: Option<usize>,
+
         /// System prompt to set the assistant's behavior
         #[arg(long, value_name = "PROMPT")]
         system: Option<String>,
+
+        /// Serve from the cloud while the registry model downloads in the
+        /// background, then switch to local once ready. Requires --api-key
+        /// (or XYBRID_API_KEY) and a registry --model. LLM/chat only.
+        #[arg(long)]
+        speculative_cloud: bool,
 
         /// Disable built-in tool calling (web_search, fetch_url, current_time),
         /// which is otherwise on for models whose metadata declares support
@@ -323,6 +346,16 @@ enum Commands {
         #[command(subcommand)]
         command: TelemetryCommand,
     },
+}
+
+/// `--max-tokens 0` would load the model and only then fail in the native
+/// layer ("non-positive max_tokens"); reject it at parse time instead.
+fn parse_max_tokens(s: &str) -> Result<usize, String> {
+    match s.parse::<usize>() {
+        Ok(0) => Err("must be at least 1".to_string()),
+        Ok(n) => Ok(n),
+        Err(e) => Err(e.to_string()),
+    }
 }
 
 fn main() -> Result<()> {
@@ -436,6 +469,12 @@ fn configure_log_level(cli: &Cli) {
 /// Initialize platform telemetry from CLI args.
 fn init_telemetry(cli: &Cli) -> bool {
     if let Some(ref api_key) = cli.api_key {
+        // Make the key resolvable by the cloud gateway too (speculative cloud,
+        // reactive fallback), not just the telemetry exporter. `--api-key` may
+        // arrive by flag rather than the XYBRID_API_KEY env var, so set the
+        // in-memory cell that CloudConfig::resolve_api_key reads.
+        xybrid_sdk::set_api_key(api_key);
+
         let platform = Platform::detect().to_string();
 
         let device_id = cli.device_id.clone().unwrap_or_else(|| {
@@ -459,6 +498,14 @@ fn init_telemetry(cli: &Cli) -> bool {
 #[allow(clippy::too_many_arguments)]
 fn run_command(cli: Cli) -> Result<()> {
     let verbose = cli.verbose;
+    // Point the SDK's cloud gateway at the same endpoint as telemetry, so cloud
+    // calls (speculative cloud, reactive fallback) don't silently fall back to
+    // the production default (`api.xybrid.dev`) and 401 with a staging key.
+    // `cli.platform_url` already encodes clap's flag > env > default precedence,
+    // so set it unconditionally. Use the in-memory setter rather than
+    // `std::env::set_var`: telemetry threads are already running by now, and a
+    // concurrent `setenv`/`getenv` is UB. XYBRID_GATEWAY_URL still wins if set.
+    xybrid_sdk::set_platform_url(&cli.platform_url);
     match cli.command {
         Commands::Init {
             directory,
@@ -517,7 +564,9 @@ fn run_command(cli: Cli) -> Result<()> {
             target,
             trace,
             show_reasoning,
+            max_tokens,
             trace_export,
+            speculative_cloud,
         } => {
             if trace {
                 tracing_viz::reset_collector();
@@ -534,8 +583,29 @@ fn run_command(cli: Cli) -> Result<()> {
                     dry_run,
                     trace,
                     show_reasoning,
+                    max_tokens,
                     trace_export.as_ref(),
                 );
+            }
+
+            // A dry run must not hit the network, so let `--dry-run` fall
+            // through to `run_model` (plan-only), which also honours
+            // --trace/--trace-export that the speculative path doesn't emit.
+            if speculative_cloud && !dry_run {
+                if let Some(model_id) = model.as_deref() {
+                    return commands::run::run_model_speculative(
+                        model_id,
+                        input_audio.as_ref(),
+                        input_text.as_deref(),
+                        &input_images,
+                        voice.as_deref(),
+                        output.as_ref(),
+                        max_tokens,
+                    );
+                }
+                return Err(anyhow::anyhow!(
+                    "--speculative-cloud requires a registry --model"
+                ));
             }
 
             if let Some(model_id) = model {
@@ -550,6 +620,7 @@ fn run_command(cli: Cli) -> Result<()> {
                     dry_run,
                     trace,
                     show_reasoning,
+                    max_tokens,
                     trace_export.as_ref(),
                 );
             }
@@ -565,6 +636,7 @@ fn run_command(cli: Cli) -> Result<()> {
                     dry_run,
                     trace,
                     show_reasoning,
+                    max_tokens,
                     trace_export.as_ref(),
                 );
             }
@@ -580,6 +652,7 @@ fn run_command(cli: Cli) -> Result<()> {
                     dry_run,
                     trace,
                     show_reasoning,
+                    max_tokens,
                     trace_export.as_ref(),
                 );
             }
@@ -595,6 +668,7 @@ fn run_command(cli: Cli) -> Result<()> {
                     dry_run,
                     trace,
                     show_reasoning,
+                    max_tokens,
                     trace_export.as_ref(),
                 );
             }
@@ -612,6 +686,7 @@ fn run_command(cli: Cli) -> Result<()> {
                 target.as_deref(),
                 trace,
                 show_reasoning,
+                max_tokens,
                 trace_export.as_ref(),
             )
         }
@@ -624,10 +699,12 @@ fn run_command(cli: Cli) -> Result<()> {
             target,
             stream,
             show_reasoning,
+            max_tokens,
             system,
+            speculative_cloud,
             no_tools,
             tools_file,
-        } => commands::repl::handle_repl_command(
+        } => commands::repl::handle_repl_command(commands::repl::ReplArgs {
             config,
             model,
             model_file,
@@ -636,11 +713,13 @@ fn run_command(cli: Cli) -> Result<()> {
             target,
             stream,
             show_reasoning,
-            system,
+            max_tokens,
+            system_prompt: system,
+            speculative_cloud,
             no_tools,
             tools_file,
             verbose,
-        ),
+        }),
         Commands::Trace {
             session,
             latest,
@@ -750,5 +829,57 @@ mod tests {
             panic!("expected repl command");
         };
         assert!(show_reasoning);
+    }
+
+    #[test]
+    fn run_and_repl_accept_max_tokens_flag() {
+        let run = Cli::try_parse_from([
+            "xybrid",
+            "run",
+            "--max-tokens",
+            "64",
+            "--model-file",
+            "model.gguf",
+        ])
+        .unwrap_or_else(|err| panic!("run should accept --max-tokens: {err}"));
+        let Commands::Run { max_tokens, .. } = run.command else {
+            panic!("expected run command");
+        };
+        assert_eq!(max_tokens, Some(64));
+
+        let repl = Cli::try_parse_from([
+            "xybrid",
+            "repl",
+            "--max-tokens",
+            "64",
+            "--model-file",
+            "model.gguf",
+        ])
+        .unwrap_or_else(|err| panic!("repl should accept --max-tokens: {err}"));
+        let Commands::Repl { max_tokens, .. } = repl.command else {
+            panic!("expected repl command");
+        };
+        assert_eq!(max_tokens, Some(64));
+    }
+
+    #[test]
+    fn run_and_repl_reject_zero_max_tokens_at_parse_time() {
+        for cmd in ["run", "repl"] {
+            let result = Cli::try_parse_from([
+                "xybrid",
+                cmd,
+                "--max-tokens",
+                "0",
+                "--model-file",
+                "model.gguf",
+            ]);
+            let Err(err) = result else {
+                panic!("--max-tokens 0 must be rejected before any model loads");
+            };
+            assert!(
+                err.to_string().contains("must be at least 1"),
+                "unexpected parse error: {err}"
+            );
+        }
     }
 }
