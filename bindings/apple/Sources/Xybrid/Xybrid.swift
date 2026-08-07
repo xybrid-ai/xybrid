@@ -161,6 +161,11 @@ public enum ModelSource: Sendable, Equatable {
 
     /// A Hugging Face repository (`org/repo` or `org/repo:variant`).
     case huggingFace(String)
+
+    /// A registry model served from the cloud gateway while its weights
+    /// download in the background. See
+    /// ``ModelLoader/fromRegistrySpeculative(_:)``.
+    case registrySpeculative(String)
 }
 
 /// A cheap model reference that defers all expensive work until ``load()``.
@@ -178,6 +183,30 @@ public struct ModelLoader: Sendable {
     /// Create a loader for a registry model.
     public static func fromRegistry(_ id: String) -> Self {
         Self(source: .registry(id))
+    }
+
+    /// Create a loader that answers from the cloud gateway while the registry
+    /// weights download in the background, instead of blocking on the download.
+    ///
+    /// ``load()`` returns almost immediately with a cloud-backed model that
+    /// switches to on-device by itself once the download lands. Requires an API
+    /// key and an uncached model — otherwise it behaves exactly like
+    /// ``fromRegistry(_:)``, which ``willSpeculate`` reports up front. LLM/chat
+    /// models only.
+    ///
+    /// Track the handover with ``XybridModel/isCloudServing()``,
+    /// ``XybridModel/downloadStatus()`` and ``XybridModel/awaitDownload(timeoutMs:)``.
+    public static func fromRegistrySpeculative(_ id: String) -> Self {
+        Self(source: .registrySpeculative(id))
+    }
+
+    /// Whether ``load()`` would actually speculate: speculation is possible for
+    /// this source, an API key resolves, and the model is not already cached.
+    ///
+    /// Always `false` for non-speculative sources. Never touches the network.
+    public var willSpeculate: Bool {
+        guard case .registrySpeculative(let id) = source else { return false }
+        return willSpeculateForModel(modelId: id)
     }
 
     /// Create a loader for a local `.xyb` bundle.
@@ -214,6 +243,8 @@ public struct ModelLoader: Sendable {
             return try XybridModel(fromDirectory: url.path)
         case .huggingFace(let repo):
             return try XybridModel(fromHuggingface: repo)
+        case .registrySpeculative(let id):
+            return try XybridModel(fromRegistrySpeculative: id)
         }
     }
 }

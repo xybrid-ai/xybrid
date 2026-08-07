@@ -10,6 +10,32 @@ import React
 // React Native module thread isn't blocked. Errors map to NSError with the
 // underlying XybridError's `errorDescription` as the message.
 
+// File-scope trampolines to the generated module-level configuration
+// functions. The TurboModule methods below carry the same base names, and an
+// unqualified call inside the class binds to the *instance method* instead —
+// "use of 'setPlatformUrl' refers to instance method rather than global
+// function". Declaring these outside the type puts no instance members in
+// scope, so they resolve to the globals.
+private func boltSetPlatformUrl(_ url: String) { setPlatformUrl(url: url) }
+
+private func boltSetSpeculativeCloud(_ enabled: Bool) {
+  setSpeculativeCloud(enabled: enabled)
+}
+
+private func boltIsSpeculativeCloudEnabled() -> Bool { isSpeculativeCloudEnabled() }
+
+/// Clamp a JS-supplied millisecond timeout into `UInt64`.
+///
+/// JavaScript numbers are `Double`s, and `UInt64(someDouble)` traps on NaN,
+/// infinity, negatives, and anything at or above 2^64. `UInt64.max` is not
+/// exactly representable as a `Double`, so comparing against it rounds up and
+/// lets the trap through — compare against 2^63, which is exact.
+private func boltClampTimeoutMs(_ raw: Double) -> UInt64 {
+  guard raw.isFinite, raw > 0 else { return 0 }
+  let ceiling = Double(UInt64(1) << 63)
+  return raw >= ceiling ? UInt64(1) << 63 : UInt64(raw)
+}
+
 @objc(XybridModuleImpl)
 public final class XybridModuleImpl: NSObject {
   private let modelsLock = NSLock()
@@ -349,7 +375,7 @@ public final class XybridModuleImpl: NSObject {
       return
     }
     Task.detached {
-      let status = model.awaitDownload(timeoutMs: UInt64(max(0, timeoutMs)))
+      let status = model.awaitDownload(timeoutMs: boltClampTimeoutMs(timeoutMs))
       resolve(self.encodeDownloadStatus(status))
     }
   }
@@ -359,23 +385,20 @@ public final class XybridModuleImpl: NSObject {
   @objc public func setPlatformUrl(_ url: String,
                                    resolve: @escaping RCTPromiseResolveBlock,
                                    reject: @escaping RCTPromiseRejectBlock) {
-    // Module-level generated functions, like the `setBinding` /
-    // `initSdkCacheDir` calls above — `Xybrid` is a namespace enum and has no
-    // such static members.
-    setPlatformUrl(url: url)
+    boltSetPlatformUrl(url)
     resolve(nil)
   }
 
   @objc public func setSpeculativeCloud(_ enabled: Bool,
                                         resolve: @escaping RCTPromiseResolveBlock,
                                         reject: @escaping RCTPromiseRejectBlock) {
-    setSpeculativeCloud(enabled: enabled)
+    boltSetSpeculativeCloud(enabled)
     resolve(nil)
   }
 
   @objc public func isSpeculativeCloudEnabled(_ resolve: @escaping RCTPromiseResolveBlock,
                                               reject: @escaping RCTPromiseRejectBlock) {
-    resolve(isSpeculativeCloudEnabled())
+    resolve(boltIsSpeculativeCloudEnabled())
   }
 
   // -- Utilities --

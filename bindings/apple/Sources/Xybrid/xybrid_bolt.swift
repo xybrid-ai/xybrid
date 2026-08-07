@@ -877,6 +877,18 @@ public func isSpeculativeCloudEnabled() -> Bool {
     return boltffi_is_speculative_cloud_enabled()
 }
 
+/// Whether `XybridModel::from_registry_speculative(model_id)` would actually
+/// speculate: an API key resolves and the model is not already cached.
+///
+/// Lets the hand-written Swift/Kotlin loader facades answer "will this
+/// speculate?" before loading. Never touches the network.
+public func willSpeculateForModel(modelId: String) -> Bool {
+    var modelId = modelId
+    return modelId.withUTF8 { modelIdBuf in
+        return boltffi_will_speculate_for_model(modelIdBuf.baseAddress!, UInt(modelIdBuf.count))
+    }
+}
+
 /// The SDK version string (tracks `CARGO_PKG_VERSION`).
 public func version() -> String {
     let buf = boltffi_version()

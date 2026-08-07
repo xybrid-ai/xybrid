@@ -149,6 +149,12 @@ class XybridModelLoader {
   factory XybridModelLoader.fromBundle(String path);
   factory XybridModelLoader.fromDirectory(String path);
 
+  // Serve from the cloud gateway while the weights download in the background
+  factory XybridModelLoader.fromRegistrySpeculative(String modelId);
+
+  // Would load() actually speculate? (enabled + API key + not cached)
+  bool get willSpeculate;
+
   // Load the model
   Future<XybridModel> load();
 
@@ -165,7 +171,10 @@ class XybridModelLoader {
     fun fromRegistry(modelId: String): XybridModelLoader
     fun fromBundle(path: String): XybridModelLoader
     fun fromDirectory(path: String): XybridModelLoader
+    fun fromRegistrySpeculative(id: String): XybridModelLoader
   }
+
+  val willSpeculate: Boolean
 
   suspend fun load(): XybridModel
   fun loadBlocking(): XybridModel
@@ -180,10 +189,14 @@ public enum ModelSource {
   case bundle(URL)
   case directory(URL)
   case huggingFace(String)
+  case registrySpeculative(String)
 }
 
 public struct ModelLoader {
   let source: ModelSource
+
+  static func fromRegistrySpeculative(_ id: String) -> Self
+  var willSpeculate: Bool { get }
 
   func load() async throws -> XybridModel
   func loadSync() throws -> XybridModel
@@ -305,6 +318,15 @@ var result = model.Run(Envelope.Text("Hello!"));
 | `fromHuggingFace()` | ✅ | ✅ | ✅ | ✅ |
 | `load()` | ✅ | ✅ | ✅ | ✅ |
 | `loadWithProgress()` | ✅ | — | — | — |
+| `fromRegistrySpeculative()` | ✅ | ✅ | ✅ | — |
+| `willSpeculate` | ✅ | ✅ | ✅ | — |
+
+`fromRegistrySpeculative()` answers from the cloud gateway while the registry
+weights download in the background, then switches to on-device by itself. It
+needs an API key and an uncached model — otherwise it behaves exactly like
+`fromRegistry()`, which `willSpeculate` reports up front. LLM/chat models only.
+Unity has no loader facade; it calls the generated
+`XybridModel.FromRegistrySpeculative(id)` constructor directly.
 
 ---
 
@@ -454,6 +476,22 @@ impl XybridModel {
 | `benchmark()` | — | — | — | — |
 | `warmup()` | ✅ | ✅ | ✅ | — |
 | `unload()` | ✅ | ✅ | ✅ | — |
+| `isCloudServing()` | ✅ | ✅ | ✅ | ✅ |
+| `downloadStatus()` | ✅ | ✅ | ✅ | ✅ |
+| `awaitDownload()` | — | ✅ | ✅ | ✅ |
+| `downloadProgress()` | ✅ | — | — | — |
+
+While a speculative load is still downloading, `isCloudServing()` is true and
+`downloadStatus()` returns the state (`downloading` / `ready` / `failed`) with
+progress in `0.0..=1.0`; `1.0` is reserved for `ready`, since the underlying
+fetch reports progress per artifact. `awaitDownload(timeoutMs)` blocks until the
+download settles — call it off the UI thread. Dart instead exposes a pushed
+`downloadProgress()` stream, because flutter_rust_bridge stream sinks are safe
+where the bolt bindings must not carry a closure across the FFI boundary.
+
+`XybridResult.executionTarget` reports whether an answer that already ran came
+from the device or the cloud; cloud fallback keeps the model id identical on
+both legs, so it is the only way to tell them apart.
 | `executionProviderInfo()` | — | — | — | — |
 
 ---

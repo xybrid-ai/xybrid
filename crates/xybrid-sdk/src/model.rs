@@ -16,6 +16,7 @@ use crate::source::{detect_platform, ModelSource};
 use crate::stream::XybridStream;
 use std::path::PathBuf;
 use std::pin::Pin;
+use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
 use std::time::{Duration, Instant};
 use tempfile::TempDir;
@@ -1111,6 +1112,14 @@ fn publish_speculative_cloud_event(model_id: &str, latency_ms: u32, streaming: b
 
 /// Serve a batch inference from the cloud gateway because the local model is
 /// not ready yet. Shared by `run` and `run_async`.
+///
+/// Ceiling for in-flight download progress, in basis points (99.99%).
+///
+/// `fetch_extracted` restarts at 0 for every artifact, so hitting 1.0 on the
+/// first one would announce a finished download while later artifacts are
+/// still transferring. 1.0 is reserved for [`DownloadState::Ready`].
+const MAX_IN_FLIGHT_PROGRESS_BP: u32 = 9_999;
+
 /// Completion signal for the background download started by
 /// [`ModelLoader::load_speculative`].
 ///
@@ -1154,15 +1163,23 @@ pub struct DownloadStatus {
 impl SpeculativeDownload {
     /// Record download progress (0.0..=1.0) from the fetch callback.
     ///
-    /// Monotonic: `fetch_extracted` reports 0→1 separately for the main file
-    /// and for each extra artifact (a VLM's projector, for example), so a plain
-    /// store would drive a progress bar to 100% and then snap it backwards when
-    /// the next artifact starts. Keeping the high-water mark means progress only
-    /// ever advances — it under-reports mid-download rather than lying.
+    /// `fetch_extracted` reports 0→1 *per artifact* — the main file, then each
+    /// extra (a VLM's projector, for example) — and never says how many are
+    /// coming. Two consequences are handled here:
+    ///
+    /// - monotonic (`fetch_max`), so a bar cannot snap backwards when the next
+    ///   artifact restarts at 0;
+    /// - capped just below 1.0, so finishing the *first* artifact cannot claim
+    ///   the whole download is done. Only the terminal `Ready` state reports
+    ///   1.0 (see [`Self::status`]).
+    ///
+    /// The result under-reports mid-download rather than lying about being
+    /// finished. True aggregation would need an artifact count the registry
+    /// client does not expose.
     fn set_progress(&self, fraction: f32) {
         let bp = (fraction.clamp(0.0, 1.0) * 10_000.0) as u32;
         self.progress_bp
-            .fetch_max(bp, std::sync::atomic::Ordering::Relaxed);
+            .fetch_max(bp.min(MAX_IN_FLIGHT_PROGRESS_BP), Ordering::Relaxed);
     }
 
     /// Snapshot progress + state together.
@@ -1176,7 +1193,7 @@ impl SpeculativeDownload {
         let progress = match state {
             // A finished download is 1.0 even if the last callback never fired.
             DownloadState::Ready => 1.0,
-            _ => self.progress_bp.load(std::sync::atomic::Ordering::Relaxed) as f32 / 10_000.0,
+            _ => self.progress_bp.load(Ordering::Relaxed) as f32 / 10_000.0,
         };
         DownloadStatus { state, progress }
     }
@@ -4704,9 +4721,21 @@ mod tests {
         assert_eq!(mid.state, DownloadState::Downloading);
         assert!((mid.progress - 0.42).abs() < 1e-3, "got {}", mid.progress);
 
-        // Out-of-range input from a backend is clamped, not wrapped.
+        // Out-of-range input from a backend is clamped, not wrapped — and a
+        // still-running download never claims 1.0, because `fetch_extracted`
+        // reports 1.0 per artifact and more may follow.
         download.set_progress(1.7);
-        assert_eq!(download.status().progress, 1.0);
+        let capped = download.status();
+        assert_eq!(capped.state, DownloadState::Downloading);
+        assert!(
+            capped.progress < 1.0,
+            "in-flight progress must stay below 1.0, got {}",
+            capped.progress
+        );
+
+        // Monotonic: a later artifact restarting at 0 cannot rewind the bar.
+        download.set_progress(0.0);
+        assert_eq!(download.status().progress, capped.progress);
 
         // A finished download reads 1.0 even if the last callback never fired.
         let ready = SpeculativeDownload::default();

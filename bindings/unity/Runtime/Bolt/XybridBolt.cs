@@ -133,6 +133,19 @@ namespace XybridBolt
         }
 
         /// <summary>
+        /// Whether `XybridModel::from_registry_speculative(model_id)` would actually
+        /// speculate: an API key resolves and the model is not already cached.
+        ///
+        /// Lets the hand-written Swift/Kotlin loader facades answer "will this
+        /// speculate?" before loading. Never touches the network.
+        /// </summary>
+        public static bool WillSpeculateForModel(string modelId)
+        {
+            byte[] _modelIdBytes = Encoding.UTF8.GetBytes(modelId);
+            return NativeMethods.WillSpeculateForModel(_modelIdBytes, (UIntPtr)_modelIdBytes.Length);
+        }
+
+        /// <summary>
         /// The SDK version string (tracks `CARGO_PKG_VERSION`).
         /// </summary>
         public static string Version()
@@ -774,6 +787,9 @@ namespace XybridBolt
         [DllImport(LibName, EntryPoint = "boltffi_is_speculative_cloud_enabled")]
         [return: MarshalAs(UnmanagedType.I1)]
         internal static extern bool IsSpeculativeCloudEnabled();
+        [DllImport(LibName, EntryPoint = "boltffi_will_speculate_for_model")]
+        [return: MarshalAs(UnmanagedType.I1)]
+        internal static extern bool WillSpeculateForModel(byte[] modelId, UIntPtr modelIdLen);
         [DllImport(LibName, EntryPoint = "boltffi_version")]
         internal static extern FfiBuf Version();
         [DllImport(LibName, EntryPoint = "boltffi_telemetry_default_endpoint")]

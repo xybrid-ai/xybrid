@@ -757,6 +757,16 @@ pub fn is_speculative_cloud_enabled() -> bool {
     facade::is_speculative_cloud_enabled()
 }
 
+/// Whether `XybridModel::from_registry_speculative(model_id)` would actually
+/// speculate: an API key resolves and the model is not already cached.
+///
+/// Lets the hand-written Swift/Kotlin loader facades answer "will this
+/// speculate?" before loading. Never touches the network.
+#[export]
+pub fn will_speculate_for_model(model_id: String) -> bool {
+    facade::will_speculate_for_model(model_id)
+}
+
 /// The SDK version string (tracks `CARGO_PKG_VERSION`).
 #[export]
 pub fn version() -> String {

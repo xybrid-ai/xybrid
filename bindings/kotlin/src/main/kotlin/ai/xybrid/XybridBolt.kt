@@ -1560,6 +1560,18 @@ fun isSpeculativeCloudEnabled(): Boolean {
 }
 
 /**
+ * Whether `XybridModel::from_registry_speculative(model_id)` would actually
+ * speculate: an API key resolves and the model is not already cached.
+ *
+ * Lets the hand-written Swift/Kotlin loader facades answer "will this
+ * speculate?" before loading. Never touches the network.
+ */
+
+fun willSpeculateForModel(modelId: String): Boolean {
+    return Native.boltffi_will_speculate_for_model(modelId.toByteArray(Charsets.UTF_8))
+}
+
+/**
  * The SDK version string (tracks `CARGO_PKG_VERSION`).
  */
 
@@ -2430,6 +2442,7 @@ private object Native {
     @JvmStatic external fun boltffi_set_platform_url(url: ByteArray): Unit
     @JvmStatic external fun boltffi_set_speculative_cloud(enabled: Boolean): Unit
     @JvmStatic external fun boltffi_is_speculative_cloud_enabled(): Boolean
+    @JvmStatic external fun boltffi_will_speculate_for_model(model_id: ByteArray): Boolean
     @JvmStatic external fun boltffi_version(): String?
     @JvmStatic external fun boltffi_telemetry_default_endpoint(): String?
     @JvmStatic external fun boltffi_telemetry_flush(): Unit

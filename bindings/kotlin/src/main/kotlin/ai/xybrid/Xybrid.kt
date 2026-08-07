@@ -188,6 +188,13 @@ sealed interface ModelSource {
     /** A Hugging Face repository (`org/repo` or `org/repo:variant`). */
     data class HuggingFace(val repo: String) : ModelSource
 
+    /**
+     * A registry model served from the cloud gateway while its weights
+     * download in the background. See
+     * [XybridModelLoader.fromRegistrySpeculative].
+     */
+    data class RegistrySpeculative(val id: String) : ModelSource
+
     companion object {
         /** Describe a registry model. */
         @JvmStatic
@@ -204,6 +211,10 @@ sealed interface ModelSource {
         /** Describe a Hugging Face repository. */
         @JvmStatic
         fun huggingFace(repo: String): ModelSource = HuggingFace(repo)
+
+        /** Describe a registry model to be served from the cloud while it downloads. */
+        @JvmStatic
+        fun registrySpeculative(id: String): ModelSource = RegistrySpeculative(id)
     }
 }
 
@@ -231,7 +242,21 @@ class XybridModelLoader private constructor(
         is ModelSource.Bundle -> XybridModel.fromBundle(current.path)
         is ModelSource.Directory -> XybridModel.fromDirectory(current.path)
         is ModelSource.HuggingFace -> XybridModel.fromHuggingface(current.repo)
+        is ModelSource.RegistrySpeculative ->
+            XybridModel.fromRegistrySpeculative(current.id)
     }
+
+    /**
+     * Whether [load] would actually speculate: speculation is possible for this
+     * source, an API key resolves, and the model is not already cached.
+     *
+     * Always `false` for non-speculative sources. Never touches the network.
+     */
+    val willSpeculate: Boolean
+        get() = when (val current = source) {
+            is ModelSource.RegistrySpeculative -> willSpeculateForModel(current.id)
+            else -> false
+        }
 
     companion object {
         /** Create a loader for an already-described source. */
@@ -241,6 +266,21 @@ class XybridModelLoader private constructor(
         /** Create a loader for a registry model. */
         @JvmStatic
         fun fromRegistry(id: String): XybridModelLoader = from(ModelSource.registry(id))
+
+        /**
+         * Create a loader that answers from the cloud gateway while the
+         * registry weights download in the background, instead of blocking on
+         * the download.
+         *
+         * [load] returns almost immediately with a cloud-backed model that
+         * switches to on-device by itself once the download lands. Requires an
+         * API key and an uncached model — otherwise it behaves exactly like
+         * [fromRegistry], which [willSpeculate] reports up front. LLM/chat
+         * models only.
+         */
+        @JvmStatic
+        fun fromRegistrySpeculative(id: String): XybridModelLoader =
+            from(ModelSource.registrySpeculative(id))
 
         /** Create a loader for a local `.xyb` bundle. */
         @JvmStatic

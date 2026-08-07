@@ -1692,6 +1692,18 @@ pub fn is_speculative_cloud_enabled() -> bool {
     sdk::is_speculative_cloud_enabled()
 }
 
+/// Whether a speculative load of `model_id` would actually speculate right now:
+/// an API key resolves and the model is not already cached.
+///
+/// A free function rather than a method because the foreign bindings collapse
+/// the loader into `XybridModel::from_*` constructors, leaving nowhere to hang
+/// a pre-load query. Never touches the network.
+pub fn will_speculate_for_model(model_id: String) -> bool {
+    sdk::ModelLoader::from_registry(&model_id)
+        .with_speculative_cloud(true)
+        .will_speculate()
+}
+
 // ============================================================================
 // Telemetry (advanced config + lifecycle)
 // ============================================================================

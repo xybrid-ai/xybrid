@@ -77,14 +77,12 @@ impl FfiPipeline {
             embedding: result.embedding().map(|e| e.to_vec()),
             latency_ms: result.total_latency_ms,
             // A pipeline can mix local and cloud stages, so there is no single
-            // provenance for the run: report what the final stage stamped on
-            // the output envelope, defaulting to local.
-            execution_target: match result
-                .output
-                .metadata
-                .get("execution_target")
-                .map(String::as_str)
-            {
+            // provenance for the run: report the final stage's target, which is
+            // what produced `output`. The stage records it directly ("local" /
+            // "device" / "cloud"); the envelope carries no `execution_target`
+            // key on this path, since pipeline stages do not go through
+            // `InferenceResult`.
+            execution_target: match result.stages.last().map(|stage| stage.target.as_str()) {
                 Some("cloud") => crate::api::result::FfiExecutionTarget::Cloud,
                 _ => crate::api::result::FfiExecutionTarget::Local,
             },

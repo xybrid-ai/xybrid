@@ -36,6 +36,20 @@ classes:
       setGatewayUrl:
         params: [{ name: gatewayUrl, type: String }]
         status: { dart: implemented, kotlin: planned, swift: planned, csharp: planned }
+      setPlatformUrl:
+        params: [{ name: url, type: String }]
+        # Points the cloud gateway at staging / self-hosted. Kotlin, Swift and
+        # C# reach it through the generated bolt global rather than a facade
+        # method, so only Dart exposes it on the entry-point class today.
+        status: { dart: implemented, kotlin: planned, swift: planned, csharp: planned }
+      setSpeculativeCloud:
+        params: [{ name: enabled, type: bool }]
+        # Global default for serving an undownloaded registry model from the
+        # cloud while its weights download.
+        status: { dart: implemented, kotlin: planned, swift: planned, csharp: planned }
+      isSpeculativeCloudEnabled:
+        return: bool
+        status: { dart: implemented, kotlin: planned, swift: planned, csharp: planned }
       model:
         params:
           - { name: source, type: ModelSource }
@@ -94,6 +108,19 @@ classes:
       loadWithProgress:
         return: "Stream<LoadEvent>"
         status: { dart: implemented, kotlin: planned, swift: planned, csharp: planned }
+      fromRegistrySpeculative:
+        static: true
+        params: [{ name: modelId, type: String }]
+        return: XybridModelLoader
+        # Serves from the cloud gateway while the weights download, instead of
+        # blocking on the download. C# consumes the generated bolt constructor
+        # (XybridModel.FromRegistrySpeculative) — no loader facade there.
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: planned }
+      willSpeculate:
+        return: bool
+        # Whether load() would actually speculate: enabled, an API key
+        # resolves, and the model is not already cached. Never hits the network.
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: planned }
 
   # -------------------------------------------------------------------
   # 3. XybridModel
@@ -200,6 +227,25 @@ classes:
       unload:
         notes: "Genuinely frees model memory: resets the SDK executor and drops the backend session (ONNX session removed from cache; llama.cpp model/context dropped). Dart binds it as Future<void> (NOT a sync void). Not yet on the Unity C-ABI (pending migration off the pre-bolt C ABI)."
         status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: planned }
+      isCloudServing:
+        return: bool
+        # True while the cloud answers because the local weights are not ready.
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+      downloadStatus:
+        return: DownloadStatus
+        # Download state + progress in one consistent read; poll to drive a bar.
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+      awaitDownload:
+        params: [{ name: timeoutMs, type: int }]
+        return: DownloadStatus
+        # Blocks until the download settles or the timeout elapses. Dart uses
+        # the pushed downloadProgress() stream instead.
+        status: { dart: planned, kotlin: implemented, swift: implemented, csharp: implemented }
+      downloadProgress:
+        return: "Stream<LoadEvent>"
+        # Dart-only: flutter_rust_bridge stream sinks are safe, whereas the bolt
+        # bindings must not carry a closure across the FFI boundary.
+        status: { dart: implemented, kotlin: planned, swift: planned, csharp: planned }
       executionProviderInfo:
         return: ExecutionProviderInfo
         status: { dart: planned, kotlin: planned, swift: planned, csharp: planned }
@@ -373,6 +419,12 @@ classes:
       modelId:
         type: String
         status: { dart: planned, kotlin: planned, swift: planned, csharp: implemented }
+      executionTarget:
+        type: ExecutionTarget
+        # Whether the answer came from the device or the cloud gateway. Cloud
+        # fallback keeps modelId identical on both legs, so this is the only
+        # way to tell them apart.
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
       isFailure:
         type: bool
         status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
