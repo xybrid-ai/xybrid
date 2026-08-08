@@ -153,13 +153,19 @@ Cargo workspace, `resolver = "2"`, edition 2021, MSRV not pinned. Members:
 the FFI binding crates now route their SDK→foreign-language translation
 through `xybrid-ffi-facade` rather than each re-translating SDK types.
 
-The Python SDK (`bindings/python`, pure Python — not a workspace member)
-consumes `xybrid-bolt`'s cdylib via a hand-ported ctypes wire layer
-(`bindings/python/xybrid/_bolt.py`) pinned to the boltffi 0.25.3 ABI: the
-pinned boltffi's experimental Python generator cannot express handles or
-fallible functions. Refresh the native lib with
-`tools/scripts/build-python-bolt.sh`; see the `[targets.python]` note in
-`crates/xybrid-bolt/boltffi.toml` for the boltffi >= 0.26 migration plan.
+The Python SDK (`bindings/python`, not a workspace member) runs on boltffi's
+**generated** bindings as of 0.29: `xybrid/_bolt/` is generator output
+(`tools/scripts/gen_python_bolt.py`, byte-compared in CI via `--check`), and it
+imports a compiled CPython bridge that dlopens the `xybrid-bolt` cdylib. Both
+binaries are staged by `tools/scripts/build-python-bolt.sh` and are **build
+outputs, never committed** — so wheels are per-interpreter (`cp3XX`) and the
+SDK requires Python >= 3.10.
+
+Because the generated package is byte-compared, it carries no hand-written
+code. The Pythonic surface (envelope factories, `result.text`, model
+properties, typed exceptions) is attached to the generated classes at import by
+`xybrid/_sugar.py` and `xybrid/_errors.py`, guarded by `tests/test_sdk.py`. Add
+SDK ergonomics there, never in `xybrid/_bolt/`.
 
 **Dependency direction (do not reverse):**
 

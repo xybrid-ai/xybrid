@@ -3,8 +3,7 @@
 // </auto-generated>
 #nullable enable
 
-using System;
-using System.Text;
+using System.Runtime.InteropServices;
 
 namespace XybridBolt
 {
@@ -20,14 +19,15 @@ namespace XybridBolt
                 reader.ReadU32()
             );
 
-        internal int WireEncodedSize() =>
-            (4 + Encoding.UTF8.GetByteCount(this.StageId)) +
-            4;
-
-        internal void WireEncodeTo(WireWriter wire)
+        internal void Encode(WireWriter writer)
         {
-            wire.WriteString(this.StageId);
-            wire.WriteU32(this.LatencyMs);
+            {
+                writer.WriteString(this.StageId);
+            }
+            {
+                writer.WriteU32(this.LatencyMs);
+            }
         }
+
     }
 }

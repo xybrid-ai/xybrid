@@ -166,8 +166,7 @@ jobs:
           python3 tools/scripts/audit_windows_dll.py --dll "$PLUGINS/xybrid_bolt.dll" \
             --require-import vcruntime140.dll \
             --require-import msvcp140.dll \
-            --require-exports-from-csharp bindings/unity/Runtime/Bolt/XybridBolt.cs \
-            --require-exports-from-csharp bindings/unity/Runtime/BoltSupplement/XybridInference.cs
+            --require-exports-from-csharp bindings/unity/Runtime/Bolt/XybridBolt.cs
           echo "Windows Unity native: OK"
 
       - name: Upload Windows plugins

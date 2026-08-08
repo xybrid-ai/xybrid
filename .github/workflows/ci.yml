@@ -33,6 +33,7 @@ jobs:
     outputs:
       relevant: ${{ steps.filter.outputs.relevant }}
       unity_bolt: ${{ steps.filter.outputs.unity_bolt }}
+      python_sdk: ${{ steps.filter.outputs.python_sdk }}
     steps:
       - name: Check changed paths
         id: filter
@@ -67,6 +68,13 @@ jobs:
           fi
           echo "unity_bolt=$UNITY_BOLT" >> "$GITHUB_OUTPUT"
           echo "Unity bolt binding changes: $UNITY_BOLT"
+          if printf '%s\n' "$FILES" | grep -qE '^(bindings/python/|tools/scripts/gen_python_bolt\.py$|tools/scripts/build-python-bolt\.sh$|crates/xybrid-bolt/|\.github/workflows/ci\.yml$)'; then
+            PYTHON_SDK=true
+          else
+            PYTHON_SDK=false
+          fi
+          echo "python_sdk=$PYTHON_SDK" >> "$GITHUB_OUTPUT"
+          echo "Python SDK changes: $PYTHON_SDK"
 
   tooling-tests:
     name: Tooling tests (${{ matrix.platform }})
@@ -111,6 +119,42 @@ jobs:
         run: |
           dotnet --version
           dotnet build tools/unity-bolt-compile-check/UnityBoltCompileCheck.csproj -c Release
+
+  # The Python SDK is the one binding CI cannot test from the committed tree
+  # alone: boltffi's Python target compiles a CPython bridge per interpreter,
+  # and the cdylib that bridge dlopens needs boltffi's relink — a plain cargo
+  # build omits the generated `boltffi_release_class_*` shims, so importing the
+  # package fails on an unresolved symbol. This job installs the pinned CLI,
+  # proves the committed bindings still match the crate, then builds and tests.
+  python-sdk:
+    name: Python SDK (ubuntu-latest)
+    needs: tooling-changes
+    if: needs.tooling-changes.outputs.python_sdk == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          # Floor of the SDK: boltffi's generated package needs >= 3.10.
+          python-version: '3.12'
+      - name: Install the pinned boltffi CLI
+        run: cargo install boltffi_cli --version 0.29.3 --locked
+      - name: Check the committed bindings match the crate
+        run: python3 tools/scripts/gen_python_bolt.py --check
+      - name: Build and stage the native artifacts
+        run: ./tools/scripts/build-python-bolt.sh
+      - name: Install and test
+        run: |
+          python -m pip install -e './bindings/python[dev]'
+          # The suite skips itself when the native bridge is unimportable, so
+          # prove it loads first — otherwise a staging break reports green
+          # having run nothing.
+          python -c "import xybrid; print('xybrid', xybrid.version())"
+          python -m pytest bindings/python/tests -q
 
   fmt:
     name: Format
@@ -377,7 +421,7 @@ jobs:
     runs-on: ubuntu-latest
     # Inspect dependency results even when the tooling path gate skips its matrix.
     if: ${{ !cancelled() }}
-    needs: [tooling-changes, tooling-tests, unity-bolt-compile, fmt, clippy, check-no-default-features, check-platform-macos, check-platform-desktop, check-vision-platforms, clippy-llm, test-llm, test, api-contract, web]
+    needs: [tooling-changes, tooling-tests, unity-bolt-compile, python-sdk, fmt, clippy, check-no-default-features, check-platform-macos, check-platform-desktop, check-vision-platforms, clippy-llm, test-llm, test, api-contract, web]
     steps:
       - name: Verify required job results
         env:
@@ -398,6 +442,11 @@ jobs:
                   .key == "unity-bolt-compile"
                   and .value.result == "skipped"
                   and $needs["tooling-changes"].outputs.unity_bolt == "false"
+                )
+                or (
+                  .key == "python-sdk"
+                  and .value.result == "skipped"
+                  and $needs["tooling-changes"].outputs.python_sdk == "false"
                 )
               )
           ' <<<"$NEEDS_JSON"

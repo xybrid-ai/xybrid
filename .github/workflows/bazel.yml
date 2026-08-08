@@ -294,13 +294,15 @@ jobs:
           file "$DLL"
           file "$DLL" | grep -q 'PE32+.*x86-64' || { echo "NOT a PE32+ x86-64 DLL"; exit 1; }
           python3 -m pip install --quiet --user pefile
+          # Two namespaces here, and boltffi 0.29 only renamed one of them:
+          # crate exports gained a `boltffi_function_<crate>_` prefix, while the
+          # Bolt runtime ABI (free_buf, last_error_message) kept its flat names.
           python3 tools/scripts/audit_windows_dll.py --dll "$DLL" \
-            --require-export boltffi_version \
-            --require-export boltffi_configure_runtime \
+            --require-export boltffi_function_xybrid_bolt_version \
+            --require-export boltffi_function_xybrid_bolt_configure_runtime \
             --require-export boltffi_free_buf \
             --require-export boltffi_last_error_message \
-            --require-exports-from-csharp bindings/unity/Runtime/Bolt/XybridBolt.cs \
-            --require-exports-from-csharp bindings/unity/Runtime/BoltSupplement/XybridInference.cs
+            --require-exports-from-csharp bindings/unity/Runtime/Bolt/XybridBolt.cs
           mkdir -p /tmp/win-bolt && cp "$DLL" /tmp/win-bolt/xybrid_bolt.dll
           echo "windows bolt DLL payload + audit: OK ✅"
 

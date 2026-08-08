@@ -446,6 +446,7 @@ object GenerationConfigs {
         topK = 0u,
         repetitionPenalty = null,
         stopSequences = emptyList(),
+        grammar = null,
     )
 
     /** Creative generation preset (higher temperature). */
@@ -458,6 +459,7 @@ object GenerationConfigs {
         topK = 50u,
         repetitionPenalty = null,
         stopSequences = emptyList(),
+        grammar = null,
     )
 }
 

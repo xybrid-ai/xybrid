@@ -3,15 +3,31 @@
 # This is the "other hard crate" the evaluation flagged. Bazel can build the
 # RUST ARTIFACTS — the cdylib (.so/.dylib) and the staticlib (.a) — straight
 # from @crates, no build.rs involved. What Bazel does NOT own here is the
-# `boltffi pack` step: it relinks the staticlib (the c++_shared / 16KB-align
-# fight), generates the Swift/Kotlin sources, and packs the xcframework/aar.
-# That stays in xtask/CI consuming these outputs (the build-once -> fan-out
-# boundary). boltffi itself is codegen, not a build script, so nothing is
-# generated at compile time.
+# `boltffi pack` step: it packages the xcframework/aar and generates their
+# language sources. BoltFFI 0.29 does, however, generate the native ABI wrappers
+# while compiling the Rust crate. Bazel therefore mirrors the expansion
+# environment that `boltffi pack` passes to Cargo; without it only the small
+# Bolt runtime ABI is exported.
 load("@rules_cc//cc:defs.bzl", "cc_library")
 load("@rules_rs//rs:rust_shared_library.bzl", "rust_shared_library")
 load("@rules_rs//rs:rust_static_library.bzl", "rust_static_library")
 load("@crates//:defs.bzl", "all_crate_deps")
+
+_BOLTFFI_EXPANSION_ENV = {
+    "BOLTFFI_BINDING_EXPANSION": "1",
+    "BOLTFFI_BINDING_EXPANSION_ROOT": "$${pwd}/crates/xybrid-bolt",
+    "BOLTFFI_BINDING_EXPANSION_SOURCE": "$${pwd}/crates/xybrid-bolt/src/lib.rs",
+    "BOLTFFI_BINDING_EXPANSION_SURFACE": "native",
+    "BOLTFFI_BINDING_METADATA_FEATURES": "default",
+    # rules_rust derives CARGO_PKG_NAME from the Bazel target name. BoltFFI
+    # uses the Cargo package name as the exported-symbol prefix.
+    "CARGO_PKG_NAME": "xybrid_bolt",
+}
+
+_BOLTFFI_EXPANSION_FLAGS = [
+    "--cfg",
+    "boltffi_binding_expansion",
+]
 
 # cdylib — libxybrid_bolt.{so,dylib}
 #
@@ -49,7 +65,8 @@ rust_shared_library(
         "//conditions:default": "dynamic",
     }),
     crate_features = ["default"],
-    rustc_flags = select({
+    rustc_env = _BOLTFFI_EXPANSION_ENV,
+    rustc_flags = _BOLTFFI_EXPANSION_FLAGS + select({
         "@platforms//os:android": [
             "-Clink-arg=-lc++_shared",
             "-Clink-arg=-llog",
@@ -100,6 +117,8 @@ rust_static_library(
     crate_name = "xybrid_bolt",
     edition = "2021",
     crate_features = ["default"],
+    rustc_env = _BOLTFFI_EXPANSION_ENV,
+    rustc_flags = _BOLTFFI_EXPANSION_FLAGS,
     deps = all_crate_deps(normal = True),
     visibility = ["//visibility:public"],
 )

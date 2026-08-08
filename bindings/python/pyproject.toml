@@ -24,4 +24,8 @@ where = ["."]
 include = ["xybrid*"]
 
 [tool.setuptools.package-data]
-xybrid = ["py.typed", "_native/*.dylib", "_native/*.so", "_native/*.dll"]
+xybrid = ["py.typed"]
+# The generated package ships its type stubs plus the two binaries
+# build-python-bolt.sh stages: the CPython bridge and the cdylib it dlopens.
+# `_native.c` is build input, not a runtime artifact, so it stays out.
+"xybrid._bolt" = ["py.typed", "*.pyi", "*.dylib", "*.so", "*.dll", "*.pyd"]

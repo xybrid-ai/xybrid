@@ -3,8 +3,6 @@
 // </auto-generated>
 #nullable enable
 
-using System;
-
 namespace XybridBolt
 {
     /// <summary>
@@ -14,26 +12,5 @@ namespace XybridBolt
     {
         Local = 0,
         Cloud = 1
-    }
-
-    internal static class XybridExecutionTargetWire
-    {
-        internal const int WireEncodedSize = 4;
-
-        internal static XybridExecutionTarget Decode(WireReader reader) =>
-            reader.ReadI32() switch
-            {
-                0 => XybridExecutionTarget.Local,
-                1 => XybridExecutionTarget.Cloud,
-                int tag => throw new InvalidOperationException($"Unknown XybridExecutionTarget wire tag: {tag}"),
-            };
-
-        internal static void WireEncodeTo(this XybridExecutionTarget value, WireWriter wire) =>
-            wire.WriteI32(value switch
-            {
-                XybridExecutionTarget.Local => 0,
-                XybridExecutionTarget.Cloud => 1,
-                _ => throw new InvalidOperationException($"Unknown XybridExecutionTarget variant: {value}"),
-            });
     }
 }

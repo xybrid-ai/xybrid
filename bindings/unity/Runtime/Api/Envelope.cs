@@ -45,7 +45,7 @@ namespace Xybrid
             }
 
             return new Envelope(new XybridBolt.XybridEnvelope(
-                new XybridBolt.XybridEnvelopeKind.Text(text)));
+                new XybridBolt.XybridEnvelopeKind.Text(text), System.Array.Empty<XybridBolt.XybridMetadataEntry>()));
         }
 
         /// <summary>
@@ -136,7 +136,8 @@ namespace Xybrid
 
             string normalizedFormat = NormalizeImageFormat(format);
             return new Envelope(new XybridBolt.XybridEnvelope(
-                new XybridBolt.XybridEnvelopeKind.Image(bytes, normalizedFormat)));
+                new XybridBolt.XybridEnvelopeKind.Image(bytes, normalizedFormat),
+                System.Array.Empty<XybridBolt.XybridMetadataEntry>()));
         }
 
         /// <summary>
@@ -155,7 +156,8 @@ namespace Xybrid
 
             var parts = new List<XybridBolt.XybridEnvelope>
             {
-                new XybridBolt.XybridEnvelope(new XybridBolt.XybridEnvelopeKind.Text(text)),
+                new XybridBolt.XybridEnvelope(
+                    new XybridBolt.XybridEnvelopeKind.Text(text), System.Array.Empty<XybridBolt.XybridMetadataEntry>()),
             };
             if (images != null)
             {

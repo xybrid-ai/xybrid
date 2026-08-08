@@ -76,44 +76,8 @@ RAW_DIR = BOLT_DIR / "dist" / "csharp"
 DEST_DIR = REPO_ROOT / "bindings" / "unity" / "Runtime" / "Bolt"
 # Path used to key deterministic GUIDs and to build the folder .meta location.
 DEST_REL = "bindings/unity/Runtime/Bolt"
-PINNED_BOLTFFI = "0.25.3"
+PINNED_BOLTFFI = "0.29.3"
 
-# The exact non-empty-input block boltffi 0.25.3 emits, and its Unity-safe
-# replacement. Kept as a literal so a boltffi output change trips the assertion
-# below instead of silently shipping a file that will not compile under Unity.
-# The whole block (alloc + copy + return) is replaced so no unreachable code is
-# left behind the `throw`.
-SHIM_TARGET = (
-    "            void* allocated = NativeMemory.Alloc((nuint)bytes.Length);\n"
-    "            Marshal.Copy(bytes, 0, (IntPtr)allocated, bytes.Length);\n"
-    "            return new FfiBuf\n"
-    "            {\n"
-    "                ptr = (IntPtr)allocated,\n"
-    "                len = (UIntPtr)bytes.Length,\n"
-    "                cap = (UIntPtr)bytes.Length,\n"
-    "                align = (UIntPtr)1,\n"
-    "            };\n"
-)
-SHIM_REPLACEMENT = (
-    "            // xybrid Unity shim (tools/scripts/gen_unity_bolt_csharp.py):\n"
-    "            // boltffi 0.25.3 emits `NativeMemory.Alloc` here, a .NET 6 API\n"
-    "            // absent from Unity's Mono/IL2CPP scripting profile. It also\n"
-    "            // hands an owned buffer to Rust, which frees it with its global\n"
-    "            // allocator in boltffi_free_buf (std::alloc::dealloc) -- a free\n"
-    "            // no C# allocator matches on Windows (malloc/AllocHGlobal use\n"
-    "            // the CRT heap; Rust frees on GetProcessHeap() = cross-heap free\n"
-    "            // = UB). No generated entry point passes an owned FfiBuf into\n"
-    "            // Rust today, so we fail closed rather than ship latent UB. When\n"
-    "            // a call site is added, expose a Rust-side allocator (e.g.\n"
-    "            // boltffi_alloc_buf) so alloc and free share one allocator.\n"
-    "            throw new NotSupportedException(\n"
-    "                \"FfiBuf.FromBytes: passing an owned buffer from C# into Rust\"\n"
-    "                + \" is not supported by the Unity binding; boltffi_free_buf\"\n"
-    "                + \" would free it with Rust's allocator, which no C#\"\n"
-    "                + \" allocator matches on Windows. Expose a Rust-side\"\n"
-    "                + \" allocator before using this path.\");\n"
-)
-SHIM_FILE = "XybridBolt.cs"
 
 # --- Transform (a): readonly record struct (C# 10) -> plain readonly struct ---
 # Matches a positional `public readonly record struct Name( params ) {`. The
@@ -123,28 +87,12 @@ RECORD_STRUCT_RE = re.compile(
     r"public readonly record struct (?P<name>\w+)\((?P<params>[^)]*)\)\s*\{",
     re.DOTALL,
 )
-# 9 since the speculative-cloud surface added XybridDownloadStatus (the
-# download progress + state snapshot hosts poll while a model streams from the
-# gateway). Bump this deliberately: the count is a tripwire for unreviewed
-# boltffi output drift, not a value to auto-sync.
-EXPECTED_RECORD_STRUCTS = 9
+# 11 on boltffi 0.29, which emits the whole inference path the 0.25.3 C#
+# lowering dropped (XybridResult / XybridEnvelope / XybridStreamEvent / …).
+# Bump this deliberately: the count is a tripwire for unreviewed boltffi output
+# drift, not a value to auto-sync.
+EXPECTED_RECORD_STRUCTS = 11
 
-# --- Transform (b): .NET 5 float LE writers -> netstandard2.1-safe equivalents.
-# BinaryPrimitives has the integer LE writers in netstandard2.1 but not the
-# float ones; BitConverter.SingleToInt32Bits / DoubleToInt64Bits are both in
-# netstandard2.1, so bit-reinterpret then write the integer. Byte-identical.
-LE_FLOAT_REWRITES = (
-    (
-        "BinaryPrimitives.WriteSingleLittleEndian(_buffer.AsSpan(_pos), v)",
-        "BinaryPrimitives.WriteInt32LittleEndian(_buffer.AsSpan(_pos), "
-        "BitConverter.SingleToInt32Bits(v))",
-    ),
-    (
-        "BinaryPrimitives.WriteDoubleLittleEndian(_buffer.AsSpan(_pos), v)",
-        "BinaryPrimitives.WriteInt64LittleEndian(_buffer.AsSpan(_pos), "
-        "BitConverter.DoubleToInt64Bits(v))",
-    ),
-)
 
 # --- Transform (g): Unsafe.SizeOf<T>() -> Marshal.SizeOf<T>(). boltffi's wire
 # codec sizes blittable arrays with System.Runtime.CompilerServices.Unsafe, whose
@@ -153,9 +101,13 @@ LE_FLOAT_REWRITES = (
 # `where T : unmanaged`, so Marshal.SizeOf<T>() (core BCL, already used
 # throughout the generated wire layer) returns the identical size. Verified with
 # an in-editor `unity test` compile on 6.3.
-UNSAFE_SIZEOF_TARGET = "Unsafe.SizeOf<T>()"
-UNSAFE_SIZEOF_REPLACEMENT = "Marshal.SizeOf<T>()"
-EXPECTED_UNSAFE_SIZEOF = 3
+UNSAFE_SIZEOF_TARGET = (
+    "global::System.Runtime.CompilerServices.Unsafe.SizeOf<T>()"
+)
+UNSAFE_SIZEOF_REPLACEMENT = (
+    "global::System.Runtime.InteropServices.Marshal.SizeOf<T>()"
+)
+EXPECTED_UNSAFE_SIZEOF = 1
 
 # --- Transform (d): make XybridModel partial. boltffi 0.25.3's C# generator
 # drops the entire inference path -- no `run`, and no XybridEnvelope /
@@ -166,44 +118,96 @@ EXPECTED_UNSAFE_SIZEOF = 3
 # bindings/python/xybrid/_bolt.py. Marking the generated class partial lets the
 # supplement extend it and reach its private _handle.
 MODEL_FILE = "XybridModel.cs"
-MODEL_PARTIAL_TARGET = "public sealed class XybridModel : IDisposable"
-MODEL_PARTIAL_REPLACEMENT = "public sealed partial class XybridModel : IDisposable"
+MODEL_PARTIAL_TARGET = (
+    "public sealed class XybridModel : global::System.IDisposable"
+)
+MODEL_PARTIAL_REPLACEMENT = (
+    "public sealed partial class XybridModel : global::System.IDisposable"
+)
 
 # XybridConversationContext is likewise extended in BoltSupplement with the
 # envelope-input methods the generator drops (push / set_system), so it too
 # must be partial.
 CONTEXT_FILE = "XybridConversationContext.cs"
-CONTEXT_PARTIAL_TARGET = "public sealed class XybridConversationContext : IDisposable"
+CONTEXT_PARTIAL_TARGET = (
+    "public sealed class XybridConversationContext : global::System.IDisposable"
+)
 CONTEXT_PARTIAL_REPLACEMENT = (
-    "public sealed partial class XybridConversationContext : IDisposable"
+    "public sealed partial class XybridConversationContext : global::System.IDisposable"
 )
 
 # --- Transform (e): keep the managed model alive across blocking StreamNext.
+# Anchored on the 0.29 body, which returns the error and result buffers through
+# separate out-params rather than one tagged buffer.
 STREAM_NEXT_FREE_TARGET = (
-    "        public XybridStreamEvent StreamNext(ulong streamId)\n"
-    "        {\n"
-    "            ThrowIfDisposed();\n"
-    "            FfiBuf _buf = NativeMethods.XybridModelStreamNext(_handle, streamId);\n"
-    "            try\n"
-    "            {\n"
-    "                var reader = new WireReader(_buf);\n"
-    "                if (reader.ReadU8() != 0) throw new XybridErrorException(XybridError.Decode(reader));\n"
-    "                return XybridStreamEvent.Decode(reader);\n"
-    "            }\n"
     "            finally\n"
     "            {\n"
-    "                NativeMethods.FreeBuf(_buf);\n"
+    "                NativeMethods.FreeBuf(boltffiResultBuffer);\n"
     "            }\n"
     "        }\n"
 )
-STREAM_NEXT_FREE_REPLACEMENT = STREAM_NEXT_FREE_TARGET.replace(
-    "                NativeMethods.FreeBuf(_buf);\n",
-    "                NativeMethods.FreeBuf(_buf);\n"
+STREAM_NEXT_FREE_REPLACEMENT = (
+    "            finally\n"
+    "            {\n"
+    "                NativeMethods.FreeBuf(boltffiResultBuffer);\n"
     "                // StreamNext can block for the full inter-token gap. Keep\n"
-    "                // this wrapper alive so its finalizer cannot free _handle\n"
-    "                // while the native call is still using it.\n"
-    "                GC.KeepAlive(this);\n",
+    "                // this wrapper alive so its finalizer cannot free the\n"
+    "                // native handle while the call is still using it.\n"
+    "                global::System.GC.KeepAlive(this);\n"
+    "            }\n"
+    "        }\n"
 )
+
+# --- Transform (i): un-collide the `Text` envelope variant. boltffi emits
+# `sealed record Text(string Text)`, but C# forbids a member sharing its
+# enclosing type's name (CS0542 / CS8866), so the generated file does not
+# compile as-is. Rename the positional parameter to `Value` — which is also the
+# name Unity's Runtime/Api already reads (`case XybridEnvelopeKind.Text t =>
+# t.Value`), and leaves the positional constructor callers untouched.
+ENVELOPE_KIND_FILE = "XybridEnvelopeKind.cs"
+TEXT_VARIANT_REWRITES = (
+    (
+        "public sealed record Text(string Text) : XybridEnvelopeKind;",
+        "public sealed record Text(string Value) : XybridEnvelopeKind;",
+    ),
+    ("writer.WriteString(value.Text);", "writer.WriteString(value.Value);"),
+)
+
+# --- Transform (j): the Guid wire codecs use the .NET 8 `bigEndian:` overloads
+# of `new Guid(...)` / `Guid.TryWriteBytes(...)`, which netstandard2.1 lacks. No
+# generated type reads or writes a Guid (only these two definitions mention
+# them), so fail closed rather than hand-roll an endian swap nothing exercises —
+# the same call the script already makes for unreachable wire paths. Add a real
+# down-level here if a Guid ever reaches the surface.
+GUID_REWRITES = (
+    (
+        "            return new global::System.Guid(bytes, bigEndian: true);",
+        "            throw new global::System.NotSupportedException(\n"
+        "                \"WireReader.ReadGuid: the netstandard2.1 profile Unity targets has no\"\n"
+        "                + \" big-endian Guid constructor, and no xybrid type crosses the wire\"\n"
+        "                + \" as a Guid. Add a down-level in\"\n"
+        "                + \" tools/scripts/gen_unity_bolt_csharp.py before using one.\");",
+    ),
+    (
+        "            if (!value.TryWriteBytes(bytes, bigEndian: true, out _))\n"
+        "                throw new global::System.InvalidOperationException(\"Guid conversion failed\");",
+        "            throw new global::System.NotSupportedException(\n"
+        "                \"WireWriter.WriteGuid: the netstandard2.1 profile Unity targets has no\"\n"
+        "                + \" big-endian Guid writer, and no xybrid type crosses the wire as a\"\n"
+        "                + \" Guid. Add a down-level in\"\n"
+        "                + \" tools/scripts/gen_unity_bolt_csharp.py before using one.\");",
+    ),
+)
+
+# --- Transform (h): rename the generated static class. 0.29 derives it from the
+# Cargo package name, and `xybrid_bolt` pascal-cases to `Xybrid_bolt` (the casing
+# does not split on underscores). Unity's package has always called this
+# `XybridBolt`, and 117 call sites in Runtime/ depend on that name, so rename it
+# here rather than churn the public surface for a generator artifact.
+BOLT_CLASS_FILE = "Xybrid_bolt.cs"
+BOLT_CLASS_DEST = "XybridBolt.cs"
+BOLT_CLASS_TARGET = "public static class Xybrid_bolt"
+BOLT_CLASS_REPLACEMENT = "public static class XybridBolt"
 
 # --- Transform (c): IsExternalInit polyfill (a Unity-only supplement) ---
 POLYFILL_FILE = "IsExternalInit.cs"
@@ -245,16 +249,6 @@ def _downlevel_record_structs(content: str) -> tuple[str, int]:
         )
 
     return RECORD_STRUCT_RE.sub(repl, content), count
-
-
-def _rewrite_le_floats(content: str) -> tuple[str, int]:
-    """Rewrite the two .NET 5 float little-endian writers to netstandard2.1."""
-    count = 0
-    for old, new in LE_FLOAT_REWRITES:
-        if old in content:
-            content = content.replace(old, new, 1)
-            count += 1
-    return content, count
 
 
 def _rewrite_unsafe_sizeof(content: str) -> tuple[str, int]:
@@ -330,9 +324,10 @@ def generate() -> dict[str, str]:
 
     tree: dict[str, str] = {}
     record_structs = 0
-    le_floats = 0
     unsafe_sizeof = 0
-    native_memory_shimmed = False
+    bolt_class_renamed = False
+    text_variant_fixed = False
+    guid_fenced = False
     model_made_partial = False
     context_made_partial = False
     stream_next_kept_alive = False
@@ -340,17 +335,27 @@ def generate() -> dict[str, str]:
         content = src.read_text(encoding="utf-8")
         content, n = _downlevel_record_structs(content)
         record_structs += n
-        content, n = _rewrite_le_floats(content)
-        le_floats += n
         content, n = _rewrite_unsafe_sizeof(content)
         unsafe_sizeof += n
-        if src.name == SHIM_FILE:
+        if src.name == ENVELOPE_KIND_FILE:
+            for target, replacement in TEXT_VARIANT_REWRITES:
+                _drift(
+                    target in content,
+                    f"expected `{target}` in {src.name}",
+                )
+                content = content.replace(target, replacement, 1)
+            text_variant_fixed = True
+        if src.name == BOLT_CLASS_FILE:
+            for target, replacement in GUID_REWRITES:
+                _drift(target in content, f"expected a Guid codec body in {src.name}")
+                content = content.replace(target, replacement, 1)
+            guid_fenced = True
             _drift(
-                SHIM_TARGET in content,
-                f"expected `NativeMemory.Alloc` block not found in {src.name}",
+                BOLT_CLASS_TARGET in content,
+                f"expected the generated static class declaration in {src.name}",
             )
-            content = content.replace(SHIM_TARGET, SHIM_REPLACEMENT, 1)
-            native_memory_shimmed = True
+            content = content.replace(BOLT_CLASS_TARGET, BOLT_CLASS_REPLACEMENT, 1)
+            bolt_class_renamed = True
         if src.name == MODEL_FILE:
             _drift(
                 MODEL_PARTIAL_TARGET in content,
@@ -377,8 +382,9 @@ def generate() -> dict[str, str]:
                 CONTEXT_PARTIAL_TARGET, CONTEXT_PARTIAL_REPLACEMENT, 1
             )
             context_made_partial = True
-        tree[src.name] = content
-        tree[src.name + ".meta"] = script_meta(f"{DEST_REL}/{src.name}")
+        out_name = BOLT_CLASS_DEST if src.name == BOLT_CLASS_FILE else src.name
+        tree[out_name] = content
+        tree[out_name + ".meta"] = script_meta(f"{DEST_REL}/{out_name}")
 
     # Transform (c): emit the IsExternalInit polyfill next to the sources.
     tree[POLYFILL_FILE] = POLYFILL_CONTENT
@@ -390,15 +396,15 @@ def generate() -> dict[str, str]:
         f"{EXPECTED_RECORD_STRUCTS}",
     )
     _drift(
-        le_floats == len(LE_FLOAT_REWRITES),
-        f"rewrote {le_floats} float LE writers, expected {len(LE_FLOAT_REWRITES)}",
-    )
-    _drift(
         unsafe_sizeof == EXPECTED_UNSAFE_SIZEOF,
         f"rewrote {unsafe_sizeof} Unsafe.SizeOf calls, expected "
         f"{EXPECTED_UNSAFE_SIZEOF}",
     )
-    _drift(native_memory_shimmed, f"{SHIM_FILE} not found in boltffi output")
+    _drift(bolt_class_renamed, f"{BOLT_CLASS_FILE} not found in boltffi output")
+    _drift(guid_fenced, "Guid codec bodies not found in boltffi output")
+    _drift(
+        text_variant_fixed, f"{ENVELOPE_KIND_FILE} not found in boltffi output"
+    )
     _drift(model_made_partial, f"{MODEL_FILE} not found in boltffi output")
     _drift(stream_next_kept_alive, f"StreamNext not found in {MODEL_FILE}")
     _drift(context_made_partial, f"{CONTEXT_FILE} not found in boltffi output")
