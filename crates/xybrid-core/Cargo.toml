@@ -272,7 +272,7 @@ rustls = { version = "0.23", default-features = false, features = ["ring", "std"
 # shipped alongside (the Android jniLibs model, now also the desktop/Bazel/RBE
 # hermetic path). No build-time download.
 [target.'cfg(not(any(target_os = "macos", target_os = "ios")))'.dependencies]
-ort = { version = "=2.0.0-rc.11", default-features = false, features = ["ndarray", "std", "load-dynamic"] }
+ort = { version = "=2.0.0-rc.13", default-features = false, features = ["ndarray", "std", "load-dynamic"] }
 
 # Apple thermal poller (macOS + iOS): NSProcessInfo.thermalState — same
 # Foundation API on both, no entitlement, microsecond-class. The
