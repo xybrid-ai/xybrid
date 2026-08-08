@@ -21,7 +21,6 @@ PLATFORMS = [
 # Android's `platform-android` preset expansion, set directly (Bazel doesn't
 # propagate the preset across crates). Mirrors sdk's platform-android.
 _SDK_ANDROID = [
-    "candle",
     "llm-llamacpp-vision",
     "platform-android",
 ]

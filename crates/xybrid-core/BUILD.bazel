@@ -20,12 +20,16 @@ load("@rules_rs//rs:rust_library.bzl", "rust_library")
 load("@rules_rs//rs:rust_test.bzl", "rust_test")
 load("@crates//:defs.bzl", "all_crate_deps")
 
-# Android ships the `platform-android` backend set: candle (Whisper ASR/voice) +
-# llm-llamacpp-vision (mtmd multimodal). Bazel has no cross-crate feature
-# propagation, so the preset's expansion is set directly on each first-party box
-# — this is core's slice. (ort-dynamic is a no-op marker; linking is cfg-driven.)
+# Android ships the `platform-android` backend set: llm-llamacpp-vision (mtmd
+# multimodal) plus the unconditional asr-whispercpp below. Bazel has no
+# cross-crate feature propagation, so the preset's expansion is set directly on
+# each first-party box — this is core's slice, and it must be kept in step with
+# `crates/xybrid-sdk/Cargo.toml` by hand. (ort-dynamic is a no-op marker;
+# linking is cfg-driven.)
+#
+# Candle was retired from the presets: whisper.cpp supersedes it for ASR at a
+# fraction of the size. The feature is still declared, just not enabled here.
 _ANDROID_BACKENDS = [
-    "candle",
     "llm-llamacpp-vision",
 ]
 
@@ -51,11 +55,6 @@ rust_library(
         "xybrid-whisper",
     ] + select({
         "@rules_rs//rs/platforms/config:aarch64-apple-darwin": [
-            "candle",
-            "candle-core",
-            "candle-hub",
-            "candle-metal",
-            "candle-nn",
             "ort-coreml",
             # Flip 2: parity with the shipped platform-macos CLI (vision).
             "llm-llamacpp-vision",
@@ -63,21 +62,11 @@ rust_library(
         # Apple G1-G2 parity: platform-ios expands to the SAME core backend set
         # as platform-macos (candle-metal + coreml + vision), so mirror darwin.
         "@rules_rs//rs/platforms/config:aarch64-apple-ios": [
-            "candle",
-            "candle-core",
-            "candle-hub",
-            "candle-metal",
-            "candle-nn",
             "ort-coreml",
             "llm-llamacpp-vision",
         ],
         # iOS simulator (Apple G4a): identical backend set to the device slice.
         "@rules_rs//rs/platforms/config:aarch64-apple-ios-sim": [
-            "candle",
-            "candle-core",
-            "candle-hub",
-            "candle-metal",
-            "candle-nn",
             "ort-coreml",
             "llm-llamacpp-vision",
         ],

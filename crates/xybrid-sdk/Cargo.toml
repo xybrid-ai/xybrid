@@ -67,21 +67,31 @@ onnx-inspect = ["dep:ort", "ort/download-binaries", "ort/tls-rustls"]
 # ~1.5 MiB on the iOS static-lib proxy — noise against the ~30/160 MiB
 # baselines — so vision runs out of the box rather than being a BYO-build.
 
-# Every preset also ships `asr-whispercpp` (whisper.cpp speech recognition on
-# the ggml `llm-llamacpp-vision` already links). Measured cost is ~0.2 MiB
-# stripped on the Android cdylib proxy — roughly a third of what the vision
-# backend costs, and noise against the ~31/145 MiB baselines — so ASR runs out
-# of the box rather than being a BYO-build. On Linux/Windows it is the ONLY
-# Whisper path, since `platform-desktop` carries no Candle.
+# Whisper speech recognition runs on `asr-whispercpp` (whisper.cpp on the ggml
+# that `llm-llamacpp-vision` already links) on EVERY platform. Measured cost is
+# ~0.2 MiB stripped on the Android cdylib proxy — noise against the ~31 MiB
+# baseline — so ASR works out of the box rather than being a BYO-build.
+#
+# Candle was retired from these presets once whisper.cpp superseded it. It cost
+# ~1.3 MiB stripped on the same proxy (~1.9 MiB on the Apple shape, which also
+# links candle-metal), i.e. 6.5-9.5x its replacement, and its only live model in
+# this workspace was Whisper — `runtime_adapter/candle/model.rs` returns
+# `Unsupported` for LLaMA and Bert. Measured on a Pixel 8, whisper.cpp reaches a
+# first partial in 2.7 s against Candle's 9.9 s.
+#
+# The `candle*` features below are still declared and buildable, so anyone who
+# wants the SafeTensors path can opt in explicitly. They are simply not on by
+# default any more.
 
-# Android: Dynamic ORT loading + Candle + llama.cpp (mistral.rs has SIGILL issues on ARM)
-platform-android = ["xybrid-core/ort-dynamic", "xybrid-core/candle", "llm-llamacpp-vision", "asr-whispercpp"]
+# Android: Dynamic ORT loading + llama.cpp (mistral.rs has SIGILL issues on ARM)
+platform-android = ["xybrid-core/ort-dynamic", "llm-llamacpp-vision", "asr-whispercpp"]
 
 # iOS: CoreML + Metal acceleration + llama.cpp
-platform-ios = ["xybrid-core/ort-download", "xybrid-core/ort-coreml", "xybrid-core/candle-metal", "xybrid-core/candle-hub", "llm-llamacpp-vision", "asr-whispercpp"]
+# (`ort-coreml` is ONNX Runtime's CoreML execution provider — unrelated to Candle.)
+platform-ios = ["xybrid-core/ort-download", "xybrid-core/ort-coreml", "llm-llamacpp-vision", "asr-whispercpp"]
 
 # macOS: CoreML + Metal + llama.cpp
-platform-macos = ["xybrid-core/ort-download", "xybrid-core/ort-coreml", "xybrid-core/candle-metal", "xybrid-core/candle-hub", "llm-llamacpp-vision", "asr-whispercpp"]
+platform-macos = ["xybrid-core/ort-download", "xybrid-core/ort-coreml", "llm-llamacpp-vision", "asr-whispercpp"]
 
 # Desktop (Linux/Windows): CPU with llama.cpp
 platform-desktop = ["xybrid-core/ort-download", "llm-llamacpp-vision", "asr-whispercpp"]

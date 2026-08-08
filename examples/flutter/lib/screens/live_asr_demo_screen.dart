@@ -25,23 +25,25 @@ enum _Phase { idle, loadingModel, loadError, ready, listening, finalizing }
 
 /// Which ASR engine runs the rolling window.
 ///
-/// Both transcribe Whisper; they differ in weight format and therefore in cost.
-/// Candle runs F32 safetensors and always feeds the encoder a full 30 s window;
-/// whisper.cpp runs quantized GGML weights on the ggml the local LLM backend
-/// already links, and can truncate the encoder to the audio actually present.
+/// Only whisper.cpp remains. The Candle arm was removed when Candle left the
+/// platform presets — a button that always fails is worse than no button. The
+/// A/B harness that produced the comparison lives in git history at the
+/// measurement commit, and the numbers are recorded in
+/// `.context/whispercpp-design.md`: 9871 ms to first partial on Candle vs
+/// 2724 ms on whisper.cpp, same Pixel 8, same session.
 enum _Backend {
-  /// `whisper-tiny` from the registry — F32 safetensors via Candle.
-  candle('Candle (F32 safetensors)', 'whisper-tiny'),
-
   /// A GGML bundle side-loaded onto the device — quantized, via whisper.cpp.
   ///
-  /// Not served by the registry yet, so it is loaded from the app's external
-  /// files directory. Push it with:
+  /// Loaded from the app's external files directory rather than the registry.
+  /// Push it with:
   ///
   /// ```text
   /// adb push integration-tests/fixtures/models/whisper-ggml-tiny-en \
   ///   /sdcard/Android/data/com.example.xybrid_example/files/
   /// ```
+  ///
+  /// Once the registry serves a GGML Whisper this can go back to
+  /// `XybridModelLoader.fromRegistry('whisper-tiny')`.
   whisperCpp('whisper.cpp (Q5_1 GGML)', 'whisper-ggml-tiny-en');
 
   const _Backend(this.label, this.id);
@@ -117,15 +119,12 @@ class _LiveAsrScreenState extends State<LiveAsrScreen> {
 
     final XybridModelLoader loader;
     try {
-      loader = switch (backend) {
-        _Backend.candle => XybridModelLoader.fromRegistry(backend.id),
-        // Side-loaded bundle: a directory holding model.bin +
-        // model_metadata.json, whose `GgmlWhisper` template routes the engine
-        // to whisper.cpp.
-        _Backend.whisperCpp => XybridModelLoader.fromDirectory(
-          await _sideloadedBundlePath(backend.id),
-        ),
-      };
+      // Side-loaded bundle: a directory holding model.bin +
+      // model_metadata.json, whose `GgmlWhisper` template routes the engine to
+      // whisper.cpp.
+      loader = XybridModelLoader.fromDirectory(
+        await _sideloadedBundlePath(backend.id),
+      );
     } catch (e) {
       _showLoadError(e);
       return;

@@ -301,10 +301,14 @@ jobs:
             file "$lib" | grep -q 'archive' || { echo "$1: not a static archive"; exit 1; }
             test "$(nm "$lib" 2>/dev/null | grep -c '_ggml_metal')" -gt 0 || { echo "$1: MISSING Metal symbols"; exit 1; }
             test "$(nm "$lib" 2>/dev/null | grep -c '_mtmd_')" -gt 0 || { echo "$1: MISSING vision (mtmd) symbols"; exit 1; }
-            # No early-exit consumers (grep -q / awk exit) on big pipes: under
-            # pipefail, the writer dies on EPIPE and fails the step ("strings:
-            # failed to flush output"). Count matches instead — full read.
-            test "$(strings "$lib" | grep -ci 'candle')" -gt 0 || { echo "$1: MISSING candle support"; exit 1; }
+            # Speech recognition. This replaced a `strings | grep -ci candle`
+            # assertion that could never fail: `candle-cuda` / `candle-metal`
+            # live in the feature-name blob in xybrid-core/src/features.rs and
+            # `candle` in the backend-label table, so a candle-free build still
+            # scored 2 hits and passed. Symbols are the honest signal — measured
+            # 0 vs 158 on real slices. (`nm`, not `strings`, for the same
+            # reason the sibling ggml_metal / mtmd gates use it.)
+            test "$(nm "$lib" 2>/dev/null | grep -c '_whisper_')" -gt 0 || { echo "$1: MISSING whisper.cpp (ASR) symbols"; exit 1; }
             local platform
             platform=$(otool -l "$lib" | awk '/LC_BUILD_VERSION/{f=1} f && /platform/ && !p {p=$2} END{print p}')
             test "$platform" = "$2" || { echo "$1: wrong platform $platform (want $2)"; exit 1; }
@@ -378,8 +382,8 @@ jobs:
             //crates/xybrid-cli:xybrid
 
       # The payload gate: must run, and carry the full platform-macos surface —
-      # Metal GPU (ggml_metal), vision (mtmd), candle voice, huggingface.
-      # (Mach-O symbols carry a leading underscore.)
+      # Metal GPU (ggml_metal), vision (mtmd), speech recognition (whisper.cpp),
+      # huggingface. (Mach-O symbols carry a leading underscore.)
       - name: Verify CLI payload (run + Metal + features)
         run: |
           BIN=$(tools/scripts/bazel-output.sh //crates/xybrid-cli:xybrid --config=remote --config=macos-metal -c opt)
@@ -389,7 +393,7 @@ jobs:
           test "$(nm "$BIN" | grep -c '_ggml_metal')" -gt 0 || { echo "MISSING Metal (ggml_metal) symbols"; exit 1; }
           test "$(nm "$BIN" | grep -c '_mtmd_')" -gt 0 || { echo "MISSING vision (mtmd) symbols"; exit 1; }
           strings "$BIN" | grep -q 'huggingface\.co' || { echo "MISSING huggingface support"; exit 1; }
-          strings "$BIN" | grep -qi 'candle' || { echo "MISSING candle (voice) support"; exit 1; }
+          test "$(nm "$BIN" | grep -c '_whisper_')" -gt 0 || { echo "MISSING whisper.cpp (ASR) symbols"; exit 1; }
 
       - name: Prepare CLI artifact
         shell: bash
