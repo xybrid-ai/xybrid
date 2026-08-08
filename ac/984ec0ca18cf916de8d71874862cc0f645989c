@@ -1,0 +1,25 @@
+crates/xybrid-sdk/Cargo.toml
+  s_9f04bb23700740::t_dc0acfe6528d0a 70-84,86-87,90-91,94
+crates/xybrid-core/BUILD.bazel
+  s_9f04bb23700740::t_1695e2154e1931 23-31
+.github/workflows/release-prep.yml
+  s_9f04bb23700740::t_f28483e9261236 304-311,385-386,396
+examples/flutter/lib/screens/live_asr_demo_screen.dart
+  s_9f04bb23700740::t_6091e40824f4b6 28-33,37-38,44-46,122-127
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "ac984ec0ca18cf916de8d71874862cc0f645989c",
+  "prompts": {},
+  "sessions": {
+    "s_9f04bb23700740": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "cf542ea4-a493-4e35-92e5-530163651bf9",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
