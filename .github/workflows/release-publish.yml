@@ -79,7 +79,7 @@ jobs:
       merge_sha: ${{ steps.meta.outputs.merge_sha }}
       already_published: ${{ steps.meta.outputs.already_published }}
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
         with:
           ref: master
           fetch-depth: 0
@@ -159,7 +159,7 @@ jobs:
     needs: [publish-release]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
         with:
           ref: ${{ needs.publish-release.outputs.tag }}
 
@@ -188,11 +188,11 @@ jobs:
     needs: [publish-release]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
         with:
           ref: ${{ needs.publish-release.outputs.tag }}
 
-      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # stable
         with:
           toolchain: stable
 
@@ -286,14 +286,14 @@ jobs:
     permissions:
       id-token: write
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
         with:
           ref: ${{ needs.publish-release.outputs.tag }}
-      - uses: dart-lang/setup-dart@65eb853c7ba17dde3be364c3d2858773e7144260 # v1.7.2
+      - uses: dart-lang/setup-dart@7654d458321ee25acccccfdb86cd48bd95768ff1 # v1.8.0
       # flutter-actions/setup-flutter is pinned to an untagged commit
       # (mirrors the SHA the upstream pub.dev publish workflow uses; no
       # corresponding release tag exists on flutter-actions/setup-flutter).
-      - uses: flutter-actions/setup-flutter@18c66a64fb6f6d3338c63cabbc5cd6da395e7f1d
+      - uses: flutter-actions/setup-flutter@adb607ae976a9e00473569facfc69813c637a060
       - name: Install dependencies
         run: dart pub get
         working-directory: bindings/flutter
@@ -415,18 +415,18 @@ jobs:
     needs: [publish-release]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
         with:
           ref: ${{ needs.publish-release.outputs.tag }}
 
       - name: Set up JDK 17
-        uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9 # v4
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v4
         with:
           distribution: temurin
           java-version: 17
 
       - name: Setup Android SDK
-        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+        uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4.0.1
 
       - name: Download Android .so files from release
         env:
@@ -473,7 +473,7 @@ jobs:
     needs: [publish-release]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
         with:
           ref: ${{ needs.publish-release.outputs.tag }}
           fetch-depth: 0
