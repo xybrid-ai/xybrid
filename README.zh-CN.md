@@ -396,7 +396,7 @@ Skills 与 agent 无关，位于 [`agents/skills/`](agents/skills/)。安装脚�
 | 嵌入模型 | 🔜 | 🔜 | 🔜 | 🔜 | 🔜 |
 | 多模型流水线（MMP） | ✅ | ✅ | ✅ | ✅ | ✅ |
 | 模型下载与缓存 | ✅ | ✅ | ✅ | ✅ | ✅ |
-| 硬件加速 | Metal, ANE | CPU | Metal, ANE | CUDA | CUDA |
+| 硬件加速 | Metal, ANE | CPU | Metal, ANE | CUDA, Vulkan | CUDA, Vulkan |
 
 **SDK MMP 支持：** Flutter ✅ · Rust ✅ · Kotlin 🔜 · Swift 🔜 · Unity 🔜
 
@@ -408,7 +408,7 @@ Skills 与 agent 无关，位于 [`agents/skills/`](agents/skills/)。安装脚�
 - **离线可用** — 初次模型下载后无需互联网。
 - **跨平台** — iOS、Android、macOS、Linux 和 Windows 使用统一的 API。
 - **多模型流水线（MMP）** — 在单次调用中链接多个模型（ASR → LLM → TTS）。
-- **自动优化** — 在 Apple Neural Engine、Metal 和 CUDA 上进行硬件加速。
+- **硬件加速** — 支持 Apple Neural Engine、Metal、CUDA，以及桌面 llama.cpp 构建可选的 Vulkan。
 
 ### 与其他方案对比
 

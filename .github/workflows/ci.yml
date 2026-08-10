@@ -259,6 +259,35 @@ jobs:
       - name: Check vision build without model artifacts
         run: cargo check -p xybrid-sdk --features ${{ matrix.features }}
 
+  check-llamacpp-vulkan:
+    name: check llama.cpp Vulkan (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux
+            os: ubuntu-latest
+            cache-key: linux-llamacpp-vulkan
+          - name: windows
+            os: windows-latest
+            cache-key: windows-llamacpp-vulkan
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          submodules: true
+      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
+        with:
+          toolchain: stable
+      - uses: ./.github/actions/setup-vulkan-sdk
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          key: ${{ matrix.cache-key }}
+      - name: Check llama.cpp Vulkan build
+        env:
+          XYBRID_LLAMA_CPP_VULKAN: "1"
+        run: cargo check -p xybrid-sdk --features platform-desktop
+
   clippy-llm:
     name: clippy (llm-llamacpp, ubuntu-latest)
     runs-on: ubuntu-latest
@@ -421,7 +450,7 @@ jobs:
     runs-on: ubuntu-latest
     # Inspect dependency results even when the tooling path gate skips its matrix.
     if: ${{ !cancelled() }}
-    needs: [tooling-changes, tooling-tests, unity-bolt-compile, python-sdk, fmt, clippy, check-no-default-features, check-platform-macos, check-platform-desktop, check-vision-platforms, clippy-llm, test-llm, test, api-contract, web]
+    needs: [tooling-changes, tooling-tests, unity-bolt-compile, python-sdk, fmt, clippy, check-no-default-features, check-platform-macos, check-platform-desktop, check-vision-platforms, check-llamacpp-vulkan, clippy-llm, test-llm, test, api-contract, web]
     steps:
       - name: Verify required job results
         env:

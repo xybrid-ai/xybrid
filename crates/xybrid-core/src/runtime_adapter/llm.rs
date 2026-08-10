@@ -44,9 +44,10 @@ pub type LlmResult<T> = Result<T, AdapterError>;
 /// Build flags determine the answer because backend selection happens at
 /// compile time: `llm-mistral-metal` and `llm-mistral-cuda` switch
 /// mistralrs to the corresponding accelerator; `llm-llamacpp` on macOS
-/// builds with `GGML_METAL=ON` by default (see `build.rs`). For unknown
-/// or mock backends we report `cpu` rather than guessing — wrong is
-/// worse than missing on a diagnostic field.
+/// builds with `GGML_METAL=ON` by default. On Linux/Windows,
+/// `XYBRID_LLAMA_CPP_VULKAN=1` builds llama.cpp with `GGML_VULKAN=ON`.
+/// For unknown or mock backends we report `cpu` rather than guessing —
+/// wrong is worse than missing on a diagnostic field.
 pub(crate) fn local_execution_provider(backend_name: &str) -> &'static str {
     match backend_name {
         "llama-cpp" => llamacpp_execution_provider(),
@@ -66,9 +67,11 @@ fn llamacpp_execution_provider() -> &'static str {
     not(any(target_os = "macos", target_os = "ios"))
 ))]
 fn llamacpp_execution_provider() -> &'static str {
-    // Linux / Windows / Android currently build llama.cpp without
-    // GGML_CUDA. When we add a CUDA build flag, switch on it here.
-    "cpu"
+    if option_env!("XYBRID_LLAMA_CPP_VULKAN") == Some("1") {
+        "vulkan"
+    } else {
+        "cpu"
+    }
 }
 
 #[cfg(not(feature = "llm-llamacpp"))]
@@ -782,6 +785,20 @@ mod tests {
         assert!(!llama.is_empty(), "llama-cpp must map to a label");
         let mistral = local_execution_provider("mistral");
         assert!(!mistral.is_empty(), "mistral must map to a label");
+    }
+
+    #[cfg(all(
+        feature = "llm-llamacpp",
+        any(target_os = "linux", target_os = "windows")
+    ))]
+    #[test]
+    fn llamacpp_execution_provider_matches_vulkan_build_setting() {
+        let expected = if option_env!("XYBRID_LLAMA_CPP_VULKAN") == Some("1") {
+            "vulkan"
+        } else {
+            "cpu"
+        };
+        assert_eq!(local_execution_provider("llama-cpp"), expected);
     }
 
     #[test]

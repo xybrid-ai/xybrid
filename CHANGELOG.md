@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **llama.cpp Vulkan builds for desktop**: Linux/Windows consumers can now
+  set `XYBRID_LLAMA_CPP_VULKAN=1` when building `platform-desktop` to compile
+  the bundled backend with `GGML_VULKAN=ON`; local LLM telemetry reports
+  `vulkan` for those builds.
+
 ### Changed
 
 - **BoltFFI 0.25.3 → 0.29.3.** Every exported C symbol is renamed

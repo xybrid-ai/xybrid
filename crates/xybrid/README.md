@@ -18,7 +18,7 @@ Feature flags forward 1:1 to `xybrid-sdk`. Pick the preset that matches your tar
 - `platform-android` — Dynamic ORT + llama.cpp (vision) + whisper.cpp ASR
 - `platform-desktop` — CPU ORT + llama.cpp (vision) + whisper.cpp ASR (Linux/Windows)
 
-For finer-grained control, enable individual features such as `ort-download`, `candle`, `llm-llamacpp`, `huggingface`, etc.
+For finer-grained control, enable individual features such as `ort-download`, `candle`, `llm-llamacpp`, `huggingface`, etc. Set `XYBRID_LLAMA_CPP_VULKAN=1` when building `platform-desktop` to opt into Vulkan acceleration.
 
 ## License
 

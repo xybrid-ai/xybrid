@@ -52,9 +52,22 @@ cargo install --git https://github.com/xybrid-ai/xybrid xybrid-cli --features pl
 
 # Linux / Windows — ONNX + llama.cpp
 cargo install --git https://github.com/xybrid-ai/xybrid xybrid-cli --features platform-desktop
+
+# Linux — ONNX + llama.cpp with Vulkan acceleration
+XYBRID_LLAMA_CPP_VULKAN=1 cargo install --git https://github.com/xybrid-ai/xybrid xybrid-cli --features platform-desktop
+
+# Windows PowerShell — ONNX + llama.cpp with Vulkan acceleration
+$env:XYBRID_LLAMA_CPP_VULKAN = "1"
+cargo install --git https://github.com/xybrid-ai/xybrid xybrid-cli --features platform-desktop
 ```
 
-The prebuilt binaries from the install script already include the correct features for each platform.
+Vulkan is a build-time setting, not a Cargo feature. Install the Vulkan SDK
+before enabling it; the build uses `VULKAN_SDK/lib` on Linux and
+`VULKAN_SDK/Lib` on Windows when resolving the loader. Unset
+`XYBRID_LLAMA_CPP_VULKAN` (or set it to `0`) for the normal CPU build.
+
+The prebuilt binaries use the release platform configuration. The Vulkan
+environment variable only affects binaries you compile yourself.
 
 <details>
 <summary>All available feature flags</summary>

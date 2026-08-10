@@ -164,6 +164,10 @@ jobs:
       - name: Setup oras
         uses: oras-project/setup-oras@38de303aac69abb66f3e6255b7198bff35f323e3 # v2.0.0
 
+      - name: Setup Vulkan SDK
+        if: contains(matrix.feature, 'vulkan')
+        uses: ./.github/actions/setup-vulkan-sdk
+
       # Log in via `oras login`, not docker/login-action: the macOS runners have
       # no docker binary (the action errors there). oras (set up above) needs no
       # docker and works on every runner OS. Token passed via env (not the
@@ -191,13 +195,13 @@ jobs:
             echo "already published — nothing to build"
             exit 0
           fi
-          # `vision` adds the -sys crate's `vision` feature (mtmd/clip); `base`
-          # is plain `bindings`. Both transitively trigger the cmake compile.
-          if [ "${{ matrix.feature }}" = "vision" ]; then
-            FEATURES="bindings,vision"
-          else
-            FEATURES="bindings"
-          fi
+          case "${{ matrix.feature }}" in
+            base) FEATURES="bindings" ;;
+            vision) FEATURES="bindings,vision" ;;
+            vulkan) FEATURES="bindings"; export XYBRID_LLAMA_CPP_VULKAN=1 ;;
+            vision-vulkan) FEATURES="bindings,vision"; export XYBRID_LLAMA_CPP_VULKAN=1 ;;
+            *) echo "unknown native feature set: ${{ matrix.feature }}" >&2; exit 1 ;;
+          esac
           if [ "${{ matrix.needs-ndk }}" = "true" ]; then
             cargo ndk --target ${{ matrix.target }} --platform 28 \
               build --release -p xybrid-llama-sys --features "$FEATURES"
