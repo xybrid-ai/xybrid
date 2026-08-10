@@ -221,7 +221,7 @@ Inference events (`ModelComplete`, `PipelineComplete`) carry per-call attributio
 
 | field | type | events | values | source |
 |---|---|---|---|---|
-| `backend` | string | inference | `llamacpp` \| `mlx` \| `mistralrs` \| `ort` \| `candle` \| `cloud` | `ExecutionTemplate` variant + `metadata.backend` hint (GGUF requires the hint; SafeTensors defaults to `candle` and accepts `mlx` to override on Apple Silicon); `cloud` for the cloud adapter |
+| `backend` | string | inference | `llamacpp` \| `whispercpp` \| `mlx` \| `mistralrs` \| `ort` \| `candle` \| `cloud` | `ExecutionTemplate` variant + `metadata.backend` hint. `GgmlWhisper` → `whispercpp` unconditionally (the template fixes the runtime, so no hint is consulted); `Gguf` / `VisionLanguage` → the hint when it normalises to `mistralrs`, else `llamacpp`; `SafeTensors` → `candle` (a deferred `mlx` hint does **not** override it); `Onnx` → `ort`; `cloud` for the cloud adapter |
 | `provider` | string | inference (cloud only) | `openai` \| `anthropic` \| `google` \| `elevenlabs` \| `openrouter` \| `custom` | Cloud `IntegrationProvider` resolved from envelope metadata |
 | `task` | string | inference | `chat` \| `vlm` \| `asr` \| `tts` \| `embedding` \| `image-gen` \| `ocr` \| `rerank` \| `classify` (open string for forward-compat) | `ModelMetadata.metadata["task"]` from `model_metadata.json` |
 | `quantization` | string | inference | `q4_0` \| `q4_k_m` \| `q5_k_m` \| `q8_0` \| `fp16` \| `fp32` (open string — common GGUF labels) | `ModelMetadata.metadata["quantization"]` first; falls back to GGUF filename inference; absent (not empty) when unknown |

@@ -62,10 +62,10 @@ The prebuilt binaries from the install script already include the correct featur
 | Feature | Description |
 |---------|-------------|
 | **Platform presets** | |
-| `platform-macos` | ONNX download + CoreML + Metal + text-only llama.cpp |
-| `platform-ios` | ONNX download + CoreML + Metal + text-only llama.cpp |
-| `platform-android` | ONNX dynamic + text-only llama.cpp |
-| `platform-desktop` | ONNX download + text-only llama.cpp |
+| `platform-macos` | ONNX download + CoreML + Metal + llama.cpp with vision + whisper.cpp ASR |
+| `platform-ios` | ONNX download + CoreML + Metal + llama.cpp with vision + whisper.cpp ASR |
+| `platform-android` | ONNX dynamic + llama.cpp with vision + whisper.cpp ASR |
+| `platform-desktop` | ONNX download + llama.cpp with vision + whisper.cpp ASR |
 | **Individual flags** | |
 | `ort-download` | Download prebuilt ONNX Runtime binaries |
 | `ort-dynamic` | Load ONNX Runtime .so at runtime |
@@ -129,8 +129,12 @@ xybrid run --model kokoro-82m --input-text "Hello world" --output hello.wav
 ### Speech-to-Text
 
 ```bash
-xybrid run --model whisper-tiny --input-audio recording.wav
+xybrid run --model whisper-tiny-ggml --input-audio recording.wav
 ```
+
+`whisper-tiny-ggml` is the GGML bundle that runs on whisper.cpp, which every
+platform preset ships. The older `whisper-tiny` id serves the SafeTensors
+bundle and needs a build with `--features candle`.
 
 ### Chat with an LLM
 
@@ -191,7 +195,7 @@ Chain models together with a YAML file:
 # voice-assistant.yaml
 name: voice-assistant
 stages:
-  - model: whisper-tiny
+  - model: whisper-tiny-ggml
   - model: smollm2-360m
   - model: kokoro-82m
 ```

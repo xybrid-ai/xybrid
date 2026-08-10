@@ -245,9 +245,9 @@ let result = model.run(&Envelope::text("国破山河在，城春草木深"))?;
 # voice-assistant.yaml
 name: voice-assistant
 stages:
-  - model: whisper-tiny    # 语音 → 文本
-  - model: qwen2.5-0.5b    # 用 LLM 处理
-  - model: kokoro-82m      # 文本 → 语音
+  - model: whisper-tiny-ggml  # 语音 → 文本
+  - model: qwen2.5-0.5b       # 用 LLM 处理
+  - model: kokoro-82m         # 文本 → 语音
 ```
 
 **CLI:**
@@ -303,7 +303,8 @@ let result = pipeline.run(&Envelope::audio(audio_bytes))?;
 
 | 模型 | 参数量 | 格式 | 简介 |
 |------|--------|------|------|
-| Whisper Tiny | 39M | SafeTensors | 多语言转录（Candle 运行时） |
+| Whisper Tiny（`whisper-tiny-ggml`） | 39M | GGML Q5_1 | 多语言转录，基于 whisper.cpp — 所有平台预设均已内置 |
+| Whisper Tiny（`whisper-tiny`） | 39M | SafeTensors | 相同权重，运行于 Candle — 需要启用 `candle` 特性重新构建 |
 | Wav2Vec2 Base | 95M | ONNX | 英语 ASR，CTC 解码 |
 
 ### 文本转语音

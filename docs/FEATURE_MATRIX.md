@@ -25,7 +25,7 @@ This document provides a comprehensive reference for all feature flags, platform
 | **ort-download** | Download prebuilt ONNX Runtime binaries | `ort/download-binaries`, `ort/tls-native` |
 | **ort-dynamic** | Load ONNX Runtime .so at runtime | `ort/load-dynamic` |
 | **ort-coreml** | Apple Neural Engine acceleration | `ort/coreml` |
-| **candle** | Pure Rust ML framework (Whisper) — Android-compatible | `candle-core`, `candle-nn`, `candle-transformers`, `safetensors`, `byteorder`, `num-traits` |
+| **candle** | Pure Rust ML framework — the SafeTensors Whisper path. **Opt-in only**: no `platform-*` preset enables it (`asr-whispercpp` / whisper.cpp is the shipped ASR backend). Android-compatible | `candle-core`, `candle-nn`, `candle-transformers`, `safetensors`, `byteorder`, `num-traits`, `rayon` |
 | **candle-hub** | Candle + HuggingFace Hub download support | `candle`, `hf-hub` (requires OpenSSL — **not for Android**) |
 | **candle-metal** | Candle with Metal GPU acceleration | `candle`, `candle-core/metal`, `candle-nn/metal` |
 | **candle-cuda** | Candle with CUDA GPU acceleration | `candle`, `candle-core/cuda` |
@@ -34,7 +34,8 @@ This document provides a comprehensive reference for all feature flags, platform
 | **llm-mistral-cuda** | mistral.rs with CUDA acceleration | `llm-mistral`, `mistralrs/cuda` |
 | **vision** | Image envelope primitives and image preprocessing | *(no additional dependencies; uses the always-present `image` crate)* |
 | **llm-llamacpp** | llama.cpp backend (cmake build + link) | `llama-cpp-sys/bindings`, `xybrid-llama/bindings` |
-| **llm-llamacpp-vision** | llama.cpp VLM path with `mmproj` / `mtmd` support | `llm-llamacpp`, `vision`, `llama-cpp-sys/vision`, `xybrid-llama/vision` |
+| **llm-llamacpp-vision** | Native llama multimodal (`mmproj` / `mtmd`) backend on top of `llm-llamacpp` | `llm-llamacpp`, `xybrid-llama-sys/vision`, `xybrid-llama/vision` |
+| **asr-whispercpp** | whisper.cpp speech recognition. Requires `llm-llamacpp` — whisper.cpp links the ggml that llama.cpp builds rather than a second copy | `llm-llamacpp`, `xybrid-whisper/bindings` |
 
 ### Notes
 
@@ -58,10 +59,10 @@ This document provides a comprehensive reference for all feature flags, platform
 | Feature | Description | Forwards to xybrid-core |
 |---------|-------------|-------------------------|
 | **default** | No default features | *(none)* |
-| **platform-android** | Android preset | `ort-dynamic`, `candle`, `llm-llamacpp` |
-| **platform-ios** | iOS preset | `ort-download`, `ort-coreml`, `candle-metal`, `candle-hub`, `llm-llamacpp` |
-| **platform-macos** | macOS preset | `ort-download`, `ort-coreml`, `candle-metal`, `candle-hub`, `llm-llamacpp` |
-| **platform-desktop** | Desktop (Linux/Windows) preset | `ort-download`, `llm-llamacpp` |
+| **platform-android** | Android preset | `ort-dynamic`, `llm-llamacpp-vision`, `asr-whispercpp` |
+| **platform-ios** | iOS preset | `ort-download`, `ort-coreml`, `llm-llamacpp-vision`, `asr-whispercpp` |
+| **platform-macos** | macOS preset | `ort-download`, `ort-coreml`, `llm-llamacpp-vision`, `asr-whispercpp` |
+| **platform-desktop** | Desktop (Linux/Windows) preset | `ort-download`, `llm-llamacpp-vision`, `asr-whispercpp` |
 | **ort-download** | Forward to core | `xybrid-core/ort-download` |
 | **ort-dynamic** | Forward to core | `xybrid-core/ort-dynamic` |
 | **ort-coreml** | Forward to core | `xybrid-core/ort-coreml` |
@@ -73,6 +74,7 @@ This document provides a comprehensive reference for all feature flags, platform
 | **llm-mistral-metal** | Forward to core | `xybrid-core/llm-mistral-metal` |
 | **llm-mistral-cuda** | Forward to core | `xybrid-core/llm-mistral-cuda` |
 | **llm-llamacpp** | Forward to core | `xybrid-core/llm-llamacpp` |
+| **asr-whispercpp** | Forward to core (pulls `llm-llamacpp` transitively) | `xybrid-core/asr-whispercpp` |
 | **vision** | Forward to core | `xybrid-core/vision` |
 | **llm-llamacpp-vision** | Forward to core VLM path | `xybrid-core/llm-llamacpp-vision`, `llm-llamacpp`, `vision` |
 
@@ -86,11 +88,12 @@ This document provides a comprehensive reference for all feature flags, platform
 | **huggingface** | Direct HuggingFace loading for `xybrid run --huggingface` | `xybrid-sdk/huggingface` |
 | **onnx-inspect** | ONNX metadata inspection for `xybrid init` | `xybrid-sdk/onnx-inspect` |
 | **vision** | `xybrid run --input-image` and REPL `/image` envelope construction for VLM turns | `xybrid-core/vision`, `xybrid-sdk/vision` |
-| **llm-llamacpp-vision** | llama.cpp VLM runtime plus CLI image input support | `llm-llamacpp`, `vision`, `xybrid-sdk/llm-llamacpp-vision` |
-| **platform-android** | Android release preset | `ort-dynamic`, `llm-llamacpp`, `candle`, `huggingface` |
-| **platform-ios** | iOS release preset | `ort-download`, `ort-coreml`, `candle-metal`, `candle-hub`, `llm-llamacpp`, `huggingface` |
-| **platform-macos** | macOS release preset | `ort-download`, `ort-coreml`, `candle-metal`, `candle-hub`, `llm-llamacpp`, `huggingface` |
-| **platform-desktop** | Linux/Windows release preset | `ort-download`, `llm-llamacpp`, `huggingface` |
+| **llm-llamacpp-vision** | Native llama.cpp VLM runtime for image turns | `llm-llamacpp`, `xybrid-sdk/llm-llamacpp-vision` |
+| **asr-whispercpp** | whisper.cpp speech recognition for `xybrid run --input-audio` | `xybrid-sdk/asr-whispercpp` |
+| **platform-android** | Android release preset — forwards to `xybrid-sdk/platform-android` | `ort-dynamic`, `llm-llamacpp-vision`, `asr-whispercpp`, `llm-llamacpp`, `huggingface` |
+| **platform-ios** | iOS release preset — forwards to `xybrid-sdk/platform-ios` | `ort-download`, `ort-coreml`, `llm-llamacpp-vision`, `asr-whispercpp`, `llm-llamacpp`, `huggingface` |
+| **platform-macos** | macOS release preset — forwards to `xybrid-sdk/platform-macos` | `ort-download`, `ort-coreml`, `llm-llamacpp-vision`, `asr-whispercpp`, `llm-llamacpp`, `huggingface` |
+| **platform-desktop** | Linux/Windows release preset — forwards to `xybrid-sdk/platform-desktop` | `ort-download`, `llm-llamacpp-vision`, `asr-whispercpp`, `llm-llamacpp`, `huggingface` |
 
 ---
 
@@ -98,22 +101,30 @@ This document provides a comprehensive reference for all feature flags, platform
 
 Platform presets are the **single source of truth** for platform-specific feature combinations. They are defined in `xybrid-sdk/Cargo.toml` and forwarded through the crate hierarchy.
 
-All current platform presets default to **text-only** llama.cpp support. Vision-language builds must compose the platform preset with `llm-llamacpp-vision`; use `vision` alone only when a crate needs image envelope/preprocessing types without the llama.cpp VLM runtime.
+All four platform presets ship the vision-language llama.cpp path (`llm-llamacpp-vision`, ~0.7 MiB stripped on the Android `.so` proxy / ~1.5 MiB on the iOS static-lib proxy) **and** whisper.cpp speech recognition (`asr-whispercpp`, ~0.2 MiB stripped). VLM and ASR work out of the box — there is nothing extra to compose.
 
-| Preset | Target Platform | Core Features Enabled | VLM Default | Rationale |
-|--------|-----------------|----------------------|-------------|-----------|
-| **platform-android** | Android (all ABIs) | `ort-dynamic`, `candle`, `llm-llamacpp` | Off; add `llm-llamacpp-vision` | Dynamic ORT loading for AAR distribution; Candle (CPU) for Whisper ASR; llama.cpp has runtime SIMD detection; mistral.rs causes SIGILL on devices without ARMv8.2-A FP16 |
-| **platform-ios** | iOS (arm64, simulator) | `ort-download`, `ort-coreml`, `candle-metal`, `candle-hub`, `llm-llamacpp` | Off; add `llm-llamacpp-vision` | Static ORT linking; CoreML for ANE acceleration; Metal for GPU |
-| **platform-macos** | macOS (arm64, x86_64) | `ort-download`, `ort-coreml`, `candle-metal`, `candle-hub`, `llm-llamacpp` | Off; add `llm-llamacpp-vision` | Same as iOS - unified Apple platform features |
-| **platform-desktop** | Linux, Windows | `ort-download`, `llm-llamacpp` | Off; add `llm-llamacpp-vision` | Static ORT linking; llama.cpp for LLM inference (unified across all platforms) |
+Candle is **not** in any preset. It cost ~1.3 MiB stripped on the same Android proxy and ~1.9 MiB on the Apple shape (which also links `candle-metal`), i.e. 6.5-9.5x its replacement, and on a Pixel 8 reached a first partial in 9871 ms against whisper.cpp's 2724 ms. The `candle*` features stay declared and buildable, so anyone who wants the SafeTensors path can opt in explicitly — they are simply not on by default any more.
+
+| Preset | Target Platform | Core Features Enabled | VLM Default | ASR Default | Rationale |
+|--------|-----------------|----------------------|-------------|-------------|-----------|
+| **platform-android** | Android (all ABIs) | `ort-dynamic`, `llm-llamacpp-vision`, `asr-whispercpp` | On | whisper.cpp | Dynamic ORT loading for AAR distribution; whisper.cpp for Whisper ASR on the ggml llama.cpp already links (+0.2 MiB stripped); llama.cpp has runtime SIMD detection; mistral.rs causes SIGILL on devices without ARMv8.2-A FP16 |
+| **platform-ios** | iOS (arm64, simulator) | `ort-download`, `ort-coreml`, `llm-llamacpp-vision`, `asr-whispercpp` | On | whisper.cpp | Static ORT linking; CoreML for ANE acceleration; Metal for GPU via ggml |
+| **platform-macos** | macOS (arm64, x86_64) | `ort-download`, `ort-coreml`, `llm-llamacpp-vision`, `asr-whispercpp` | On | whisper.cpp | Same as iOS - unified Apple platform features |
+| **platform-desktop** | Linux, Windows | `ort-download`, `llm-llamacpp-vision`, `asr-whispercpp` | On | whisper.cpp | Static ORT linking; llama.cpp for LLM inference and whisper.cpp for ASR (unified across all platforms) |
 
 > **Note**: The CLI (`xybrid-cli`) adds `huggingface` to all its platform presets so `xybrid run --huggingface` works in release builds. SDK/FFI presets do not include `huggingface` by default — add it individually if needed.
 
-Example VLM builds:
+The presets already carry `llm-llamacpp-vision` and `asr-whispercpp`, so a plain preset build is a VLM + ASR build:
 
 ```bash
-cargo build -p xybrid-cli --features platform-macos,llm-llamacpp-vision
-cargo check -p xybrid-sdk --features platform-desktop,llm-llamacpp-vision
+cargo build -p xybrid-cli --features platform-macos
+cargo check -p xybrid-sdk --features platform-desktop
+```
+
+To opt back into the Candle SafeTensors path on top of a preset:
+
+```bash
+cargo check -p xybrid-sdk --features platform-macos,candle-metal
 ```
 
 ### Why llm-mistral is NOT on Android
@@ -133,7 +144,8 @@ The following types and modules are conditionally compiled based on feature flag
 | Module | Condition | Description |
 |--------|-----------|-------------|
 | `coreml` | `target_os = "macos" OR target_os = "ios" OR test` | CoreML runtime adapter |
-| `candle` | `feature = "candle"` | Candle (pure Rust) runtime adapter |
+| `candle` | `feature = "candle"` | Candle (pure Rust) runtime adapter — opt-in, not in any preset |
+| `whisper_cpp` | `feature = "asr-whispercpp"` | whisper.cpp ASR runtime adapter (shares llama.cpp's ggml) |
 | `llm` | `feature = "llm-mistral" OR feature = "llm-llamacpp"` | Shared LLM types and adapter |
 | `mistral` | `feature = "llm-mistral"` | MistralBackend implementation |
 | `llama_cpp` | `feature = "llm-llamacpp"` | LlamaCppBackend implementation |
@@ -145,6 +157,8 @@ The following types and modules are conditionally compiled based on feature flag
 | `LlmRuntimeAdapter` import | `feature = "llm-mistral" OR feature = "llm-llamacpp"` | LLM adapter import |
 | `llm_adapter_cache` field | `feature = "llm-mistral" OR feature = "llm-llamacpp"` | Cached LLM adapter in TemplateExecutor |
 | `ExecutionTemplate::Gguf` handling | `feature = "llm-mistral" OR feature = "llm-llamacpp"` | GGUF model execution path |
+| `ExecutionTemplate::GgmlWhisper` handling | `feature = "asr-whispercpp"` | GGML Whisper (whisper.cpp) execution path. Fields: `model_file`, `language` (`null` = auto-detect), `audio_ctx` (`0` = no truncation), `translate`. Without the feature the arm errors `GGML Whisper execution requires the 'asr-whispercpp' feature` |
+| `ExecutionTemplate::SafeTensors` handling | `feature = "candle"` | Candle SafeTensors path. Without the feature the arm errors `SafeTensors execution requires the 'candle' feature…` and points at a GGML bundle instead |
 | `execute_streaming()` full impl | `feature = "llm-mistral" OR feature = "llm-llamacpp"` | Streaming with callback |
 | `execute_streaming()` stub | `NOT (llm-mistral OR llm-llamacpp)` | Falls back to regular execution |
 | `execute_streaming_with_context()` | Same as above | Streaming with conversation context |
@@ -158,6 +172,7 @@ The following types and modules are conditionally compiled based on feature flag
 | `ONNXMobileRuntimeAdapter` | `target_os = "android" OR test` |
 | `CoreMLRuntimeAdapter` | `target_os = "macos" OR target_os = "ios" OR test` |
 | `CandleBackend`, `CandleRuntimeAdapter` | `feature = "candle"` |
+| `WhisperCppRuntime` | `feature = "asr-whispercpp"` |
 | `ChatMessage`, `GenerationConfig`, `GenerationOutput`, `LlmBackend`, `LlmConfig`, `LlmResult`, `LlmRuntimeAdapter` | `feature = "llm-mistral" OR feature = "llm-llamacpp"` |
 | `MistralBackend` | `feature = "llm-mistral"` |
 | `LlamaCppBackend` | `feature = "llm-llamacpp"` |
