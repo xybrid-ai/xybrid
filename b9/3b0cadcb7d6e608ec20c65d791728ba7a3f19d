@@ -1,0 +1,79 @@
+docs/content/docs/(integration)/sdks/android.zh.mdx
+  s_9f04bb23700740::t_307e2576b297ae 54
+docs/FEATURE_MATRIX.md
+  s_9f04bb23700740::t_516e68f41838a0 28,37-38,62-65,77,91-96,104,106-113,117-124,127,147-148,160-161,175
+docs/content/docs/(integration)/sdks/flutter.mdx
+  s_9f04bb23700740::t_307e2576b297ae 73
+docs/content/docs/(integration)/sdks/android.mdx
+  s_9f04bb23700740::t_307e2576b297ae 63
+docs/content/docs/(integration)/sdks/flutter.zh.mdx
+  s_9f04bb23700740::t_307e2576b297ae 71
+docs/telemetry/registry.md
+  s_9f04bb23700740::t_516e68f41838a0 40,49,83-85,88,94
+docs/content/docs/concepts/hybrid-execution.mdx
+  s_9f04bb23700740::t_307e2576b297ae 20
+docs/content/docs/quickstart.mdx
+  s_9f04bb23700740::t_307e2576b297ae 245
+README.md
+  s_9f04bb23700740::t_516e68f41838a0 261-263,319-320
+docs/FEATURE_MATRIX.zh.md
+  s_9f04bb23700740::t_118332849a0274 28-29,61-64,90-93,101,103-110
+crates/xybrid/README.md
+  s_9f04bb23700740::t_516e68f41838a0 16-19
+README.ja-JP.md
+  s_9f04bb23700740::t_516e68f41838a0 248-250,306-307
+docs/content/docs/(integration)/sdks/ios.zh.mdx
+  s_9f04bb23700740::t_307e2576b297ae 63
+crates/xybrid-cli/README.md
+  s_9f04bb23700740::t_664cfd23a3600d 38
+agents/skills/xybrid-init/SKILL.md
+  s_9f04bb23700740::t_516e68f41838a0 60-61,103-111
+examples/flutter/README.md
+  s_9f04bb23700740::t_664cfd23a3600d 113,166
+docs/content/docs/quickstart.zh.mdx
+  s_9f04bb23700740::t_307e2576b297ae 244
+docs/sdk/telemetry.md
+  s_9f04bb23700740::t_516e68f41838a0 224
+docs/sdk/API_REFERENCE.md
+  s_9f04bb23700740::t_664cfd23a3600d 49,850,866
+docs/content/docs/cli/index.zh.mdx
+  s_9f04bb23700740::t_307e2576b297ae 67
+agents/skills/test-model/SKILL.md
+  s_9f04bb23700740::t_516e68f41838a0 44-45,78-79,134-135
+docs/INSTALLATION.md
+  s_9f04bb23700740::t_516e68f41838a0 65-68,132,135-138,198
+docs/INSTALLATION.zh.md
+  s_9f04bb23700740::t_44c4b2abd671f9 196
+  s_9f04bb23700740::t_516e68f41838a0 65-68,132,135-136
+  s_9f04bb23700740::t_ea1abf27e70a82 137
+.agents/skills/xybrid-init/SKILL.md
+  s_9f04bb23700740::t_a6d0efdb7d76ca 65-66,108-116
+docs/content/docs/cli/index.mdx
+  s_9f04bb23700740::t_307e2576b297ae 67
+docs/content/docs/(integration)/sdks/ios.mdx
+  s_9f04bb23700740::t_307e2576b297ae 71
+README.zh-CN.md
+  s_9f04bb23700740::t_516e68f41838a0 248-250,306-307
+.agents/skills/test-model/SKILL.md
+  s_9f04bb23700740::t_a6d0efdb7d76ca 49-50,83-84,139-140
+bindings/react-native/README.md
+  s_9f04bb23700740::t_664cfd23a3600d 86
+docs/content/docs/concepts/hybrid-execution.zh.mdx
+  s_9f04bb23700740::t_307e2576b297ae 20
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "b93b0cadcb7d6e608ec20c65d791728ba7a3f19d",
+  "prompts": {},
+  "sessions": {
+    "s_9f04bb23700740": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "cf542ea4-a493-4e35-92e5-530163651bf9",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
