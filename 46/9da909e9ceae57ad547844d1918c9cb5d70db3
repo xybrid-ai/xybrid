@@ -1,0 +1,43 @@
+crates/xybrid-whisper/src/model.rs
+  s_dc3be19ce126cb::t_fa1af874f03533 20-22,125-132
+  s_dc3be19ce126cb::t_159b6748c1da97 139-144
+integration-tests/download.sh
+  s_dc3be19ce126cb::t_7bb07038bd405a 117-120
+  s_dc3be19ce126cb::t_35fd309c97d7da 238-247
+  s_dc3be19ce126cb::t_e9160ddb0fce5d 65,68
+  s_dc3be19ce126cb::t_2ef562f4ee805b 101-114,203-204,208-209,216-219,226,231-237,248-273
+crates/xybrid-whisper/src/params.rs
+  s_dc3be19ce126cb::t_fa1af874f03533 57-60
+integration-tests/BUILD.bazel
+  s_dc3be19ce126cb::t_159b6748c1da97 75,83-85
+crates/xybrid-core/src/runtime_adapter/whisper_cpp/runtime.rs
+  s_dc3be19ce126cb::t_159b6748c1da97 151-160,371-382
+  s_dc3be19ce126cb::t_dd4e6a5105a649 383-384
+integration-tests/fixtures/models/models.json
+  s_dc3be19ce126cb::t_159b6748c1da97 23-29
+integration-tests/tests/whispercpp_integration.rs
+  s_dc3be19ce126cb::t_f5451a6a8c4f2e 77,90-101
+  s_dc3be19ce126cb::t_9e471ac4132aab 1-76,78-89,102-170,172-241,246-476
+  s_dc3be19ce126cb::t_a0c0bf6c484340 171,242-245
+.github/workflows/test-whispercpp.yml
+  s_dc3be19ce126cb::t_d8e91fb17695cb 1-71,73-95
+  s_dc3be19ce126cb::t_839391efcb144f 72
+integration-tests/Cargo.toml
+  s_dc3be19ce126cb::t_159b6748c1da97 15-18
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "469da909e9ceae57ad547844d1918c9cb5d70db3",
+  "prompts": {},
+  "sessions": {
+    "s_dc3be19ce126cb": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019fecaa-2d7f-7542-b30a-25af5e5d7101",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
