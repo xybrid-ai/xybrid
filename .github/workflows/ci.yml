@@ -259,6 +259,9 @@ jobs:
       - name: Check vision build without model artifacts
         run: cargo check -p xybrid-sdk --features ${{ matrix.features }}
 
+  # Linux only. Windows cannot build ggml's `vulkan-shaders-gen` under cargo's
+  # OUT_DIR: the nested CMake ExternalProject blows past MAX_PATH and MSBuild's
+  # FileTracker fails (FTK1011). See the comment in llama-cpp-sys/build.rs.
   check-llamacpp-vulkan:
     name: check llama.cpp Vulkan (${{ matrix.name }})
     runs-on: ${{ matrix.os }}
@@ -269,9 +272,6 @@ jobs:
           - name: linux
             os: ubuntu-latest
             cache-key: linux-llamacpp-vulkan
-          - name: windows
-            os: windows-latest
-            cache-key: windows-llamacpp-vulkan
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:

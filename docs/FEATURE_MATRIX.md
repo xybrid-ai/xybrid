@@ -51,10 +51,14 @@ This document provides a comprehensive reference for all feature flags, platform
 - `vision` alone enables image envelopes and image preprocessing. Local llama.cpp
   VLM generation requires `llm-llamacpp-vision`, which composes `vision` with
   the llama.cpp backend and links the vendored `mtmd` helpers.
-- Vulkan is a build-time opt-in rather than a Cargo feature. On Linux/Windows,
-  set `XYBRID_LLAMA_CPP_VULKAN=1` while building `platform-desktop` (or another
+- Vulkan is a build-time opt-in rather than a Cargo feature. On Linux, set
+  `XYBRID_LLAMA_CPP_VULKAN=1` while building `platform-desktop` (or another
   feature set containing `llm-llamacpp`). This sets `GGML_VULKAN=ON` and
   requires the Vulkan SDK/loader to be available to CMake and the linker.
+  Windows is not supported yet: ggml builds `vulkan-shaders-gen` as a nested
+  CMake project, and under cargo's `OUT_DIR` the paths MSBuild generates for it
+  exceed the 260-character `MAX_PATH` limit. Every other target rejects the
+  variable at build time.
 
 ---
 
@@ -217,7 +221,7 @@ These are the canonical feature combinations CI must run to gate a release. Any 
 |------|---------|--------|
 | Default-features workspace clippy | `cargo clippy --workspace -- -D warnings` | Default `ort-download` shape; vendored crates compile cleanly with nothing else enabled. |
 | Vision umbrella workspace clippy | `cargo clippy --workspace --features llm-llamacpp-vision --tests --examples -- -D warnings` | The full VLM path through llama.cpp `mtmd`, including vision tests/examples that gate on `llm-llamacpp-vision`. |
-| llama.cpp Vulkan check | `XYBRID_LLAMA_CPP_VULKAN=1 cargo check -p xybrid-sdk --features platform-desktop` | Linux/Windows CI installs the Vulkan SDK/loader first, then verifies the opt-in llama.cpp Vulkan build. |
+| llama.cpp Vulkan check | `XYBRID_LLAMA_CPP_VULKAN=1 cargo check -p xybrid-sdk --features platform-desktop` | Linux CI installs the Vulkan SDK/loader first, then verifies the opt-in llama.cpp Vulkan build. |
 | **`--all-features` is forbidden.** | — | See conflict table above. |
 
 ### Platform preset matrix

@@ -492,9 +492,17 @@ fn compile_llama_cpp() {
     let vision_enabled = env::var_os("CARGO_FEATURE_VISION").is_some();
     let vulkan_enabled = env_flag("XYBRID_LLAMA_CPP_VULKAN");
 
-    if vulkan_enabled && !matches!(ctx.target_os.as_str(), "linux" | "windows") {
+    // Windows is deliberately excluded. ggml builds its GLSL compiler
+    // (`vulkan-shaders-gen`) as a nested CMake ExternalProject, and under
+    // cargo's `target/<profile>/build/<crate>-<hash>/out/` prefix the paths
+    // MSBuild's FileTracker generates for it exceed Windows' 260-character
+    // MAX_PATH (`error FTK1011`, surfacing as a bogus "no working C
+    // compiler"). Only ~17 characters remain for the repo root, so no
+    // realistic checkout location builds. Re-enabling needs the Ninja
+    // generator, which does not use FileTracker at all.
+    if vulkan_enabled && ctx.target_os != "linux" {
         fatal(
-            "llama.cpp Vulkan backend is only supported by xybrid on Linux/Windows.",
+            "llama.cpp Vulkan backend is only supported by xybrid on Linux.",
             &[
                 format!(
                     "Target `{}` does not support `XYBRID_LLAMA_CPP_VULKAN=1`.",
@@ -647,10 +655,12 @@ fn build_from_source(
             .define("GGML_CUDA", "OFF")
             .define("GGML_VULKAN", if vulkan_enabled { "ON" } else { "OFF" });
     } else if ctx.target_os == "windows" {
+        // GGML_VULKAN stays OFF here: `vulkan_enabled` is rejected above for
+        // every non-Linux target, so this arm is only ever reached without it.
         cmake_config
             .define("GGML_METAL", "OFF")
             .define("GGML_CUDA", "OFF")
-            .define("GGML_VULKAN", if vulkan_enabled { "ON" } else { "OFF" });
+            .define("GGML_VULKAN", "OFF");
 
         // Force CMake Release build on Windows to match the cc crate's CRT choice.
         // The cc crate always emits /MD (release CRT) — it never emits /MDd, even in
@@ -757,8 +767,6 @@ fn emit_link_and_wrapper(
         println!("cargo:rustc-link-lib=framework=Foundation");
         println!("cargo:rustc-link-lib=framework=MetalKit");
         println!("cargo:rustc-link-lib=static=ggml-metal");
-    } else if ctx.target_os == "windows" && vulkan_enabled {
-        println!("cargo:rustc-link-lib=vulkan-1");
     }
 }
 

@@ -55,16 +55,20 @@ cargo install --git https://github.com/xybrid-ai/xybrid xybrid-cli --features pl
 
 # Linux — ONNX + llama.cpp with Vulkan acceleration
 XYBRID_LLAMA_CPP_VULKAN=1 cargo install --git https://github.com/xybrid-ai/xybrid xybrid-cli --features platform-desktop
-
-# Windows PowerShell — ONNX + llama.cpp with Vulkan acceleration
-$env:XYBRID_LLAMA_CPP_VULKAN = "1"
-cargo install --git https://github.com/xybrid-ai/xybrid xybrid-cli --features platform-desktop
 ```
 
-Vulkan is a build-time setting, not a Cargo feature. Install the Vulkan SDK
-before enabling it; the build uses `VULKAN_SDK/lib` on Linux and
-`VULKAN_SDK/Lib` on Windows when resolving the loader. Unset
-`XYBRID_LLAMA_CPP_VULKAN` (or set it to `0`) for the normal CPU build.
+Vulkan is a build-time setting, not a Cargo feature, and it is **Linux-only**
+today. Install the Vulkan SDK before enabling it; the build reads
+`VULKAN_SDK/lib` when resolving the loader. Unset `XYBRID_LLAMA_CPP_VULKAN`
+(or set it to `0`) for the normal CPU build. Any non-Linux target fails the
+build with an explicit error rather than silently ignoring the variable.
+
+Windows Vulkan is not supported yet. ggml compiles its GLSL shaders with
+`vulkan-shaders-gen`, built as a nested CMake project; under cargo's
+`target/<profile>/build/<crate>-<hash>/out/` prefix the paths MSBuild's
+FileTracker generates for it exceed Windows' 260-character `MAX_PATH`, leaving
+about 17 characters for the repository root. It fails from any realistic
+checkout location, so it is gated off rather than shipped broken.
 
 The prebuilt binaries use the release platform configuration. The Vulkan
 environment variable only affects binaries you compile yourself.
