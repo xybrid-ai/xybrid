@@ -40,20 +40,27 @@ cc_library(
     # Metal lane: the frameworks cargo's build.rs emits on apple (build.rs:
     # 675-680). The Rust crates' #[link] attrs already pull Metal/Foundation/
     # Accelerate; MetalKit exists ONLY here — ggml-metal.m needs it.
-    # Vulkan lane: the loader, which ggml-vulkan.cpp calls directly
-    # (vkGetInstanceProcAddr bootstraps vulkan-hpp's dynamic dispatcher, so the
-    # static archive still leaves that one symbol undefined). Cargo does this as
+    # Vulkan lane: three loader symbols ggml-vulkan.cpp calls directly, which
+    # the static archives leave undefined (everything else goes through
+    # vulkan-hpp's dynamic dispatcher). Cargo satisfies them with
     # `rustc-link-lib=vulkan` + a $VULKAN_SDK/lib search path (build.rs:760,773);
-    # here it is an ABSOLUTE path on purpose — `-L/usr/lib/x86_64-linux-gnu`
-    # would put the host's libraries on the search path for EVERY other -l on
-    # the link (-lm, -lpthread, …), where they would outrank hermetic-llvm's
-    # sysroot and raise the glibc floor. A bare path pulls in exactly one file,
-    # and libvulkan.so's SONAME still lands in DT_NEEDED as libvulkan.so.1.
-    # The /opt path is staged by the CI job — see //:llama_vulkan.
+    # here they come from //bazel/vulkan:libvulkan.so, a stub built by our own
+    # toolchain, because the exec machine's real loader neither links against
+    # the hermetic sysroot nor exists on a remote worker (bazel/vulkan/
+    # vulkan_stub.c has the full story). The stub carries the real SONAME, so
+    # DT_NEEDED still says libvulkan.so.1 and the machine's real loader is what
+    # actually binds at runtime.
     #
-    # NOTE that DT_NEEDED makes the loader a hard runtime dependency of the
+    # `additional_linker_inputs` + `$(execpath)` rather than a bare path: that
+    # is what makes the file an input to the link action wherever it runs.
+    #
+    # NOTE that DT_NEEDED makes a Vulkan loader a hard runtime dependency of the
     # produced binary — which is why the lane is opt-in and would ship as its
     # own artifact, never as the default Linux CLI.
+    additional_linker_inputs = select({
+        "//:vulkan_enabled": ["//bazel/vulkan:libvulkan.so"],
+        "//conditions:default": [],
+    }),
     linkopts = select({
         "//:metal_enabled": [
             "-framework Accelerate",
@@ -62,10 +69,7 @@ cc_library(
             "-framework Foundation",
         ],
         "//:vulkan_enabled": [
-            "/opt/xybrid-vulkan-lib/libvulkan.so",
-            # The loader's own glibc imports are resolved by the machine that
-            # runs the binary, not by our sysroot — see //:llama_vulkan.
-            "-Wl,--allow-shlib-undefined",
+            "$(execpath //bazel/vulkan:libvulkan.so)",
         ],
         "//conditions:default": [],
     }),

@@ -488,33 +488,32 @@ jobs:
       - name: Setup Vulkan SDK
         uses: ./.github/actions/setup-vulkan-sdk
 
-      # //:llama_vulkan reads the Vulkan headers and loader from two fixed /opt
-      # paths, which this step points at whatever the runner actually has. Fixed,
-      # because a cmake cache value has to be known at analysis time — the SDK's
-      # own directory is version-stamped.
+      # //:llama_vulkan reads the Vulkan headers from a fixed /opt path, which
+      # this step points at whatever the runner actually has. Fixed, because a
+      # cmake cache value has to be known at analysis time — the SDK's own
+      # directory is version-stamped.
       #
-      # Headers are staged rather than used in place because cmake turns
-      # Vulkan_INCLUDE_DIR into a `-I`, and a `-I` outranks the toolchain
-      # sysroot: handing it /usr/include would shadow hermetic-llvm's libc
-      # headers with this runner's glibc 2.39 ones while the link still uses
-      # glibc 2.28. A directory holding only the Vulkan trees cannot do that.
-      - name: Stage the Vulkan headers and loader
+      # Staged rather than used in place because cmake turns Vulkan_INCLUDE_DIR
+      # into a `-I`, and a `-I` outranks the toolchain sysroot: handing it
+      # /usr/include would shadow hermetic-llvm's libc headers with this
+      # runner's glibc 2.39 ones while the link still uses glibc 2.28. A
+      # directory holding only the Vulkan trees cannot do that.
+      #
+      # The loader is NOT staged — it comes from //bazel/vulkan:libvulkan.so,
+      # built by our own toolchain (see bazel/vulkan/vulkan_stub.c).
+      - name: Stage the Vulkan headers
         run: |
-          sudo mkdir -p /opt/xybrid-vulkan-include /opt/xybrid-vulkan-lib
-          # Prefer the LunarG SDK: it is what the cargo Vulkan job (ci.yml)
-          # builds against, so it is the proven set, and it keeps the headers
-          # and the loader on the same version.
-          SDK="${VULKAN_SDK:-}"
-          if [ -d "${SDK:-}/include" ] && [ -e "${SDK:-}/lib/libvulkan.so" ]; then
-            INC="$SDK/include"; LIB="$SDK/lib/libvulkan.so"
-          else
+          sudo mkdir -p /opt/xybrid-vulkan-include
+          # Prefer the LunarG SDK's tree: it is what the cargo Vulkan job
+          # (ci.yml) builds against, so it is the proven header set.
+          INC="${VULKAN_SDK:+$VULKAN_SDK/include}"
+          if [ ! -d "${INC:-}" ]; then
             # No usable SDK: fall back to apt. libvulkan-dev does not depend on
             # spirv-headers, so ask for it explicitly.
             sudo apt-get install -y spirv-headers
-            INC=/usr/include; LIB=/usr/lib/x86_64-linux-gnu/libvulkan.so
+            INC=/usr/include
           fi
           echo "headers: $INC"
-          echo "loader:  $LIB"
           # vulkan/ is the obvious one; vk_video/ because vulkan_core.h includes
           # the video codec headers; spirv/ because ggml-vulkan.cpp includes
           # <spirv/unified1/spirv.hpp> for its cooperative-matrix paths.
@@ -522,8 +521,7 @@ jobs:
             test -d "$INC/$tree" || { echo "missing $INC/$tree"; exit 1; }
             sudo ln -sfn "$INC/$tree" "/opt/xybrid-vulkan-include/$tree"
           done
-          sudo ln -sfn "$LIB" /opt/xybrid-vulkan-lib/libvulkan.so
-          ls -l /opt/xybrid-vulkan-include /opt/xybrid-vulkan-lib
+          ls -l /opt/xybrid-vulkan-include
 
       - name: Configure BuildBuddy remote config
         env:

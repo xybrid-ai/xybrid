@@ -85,16 +85,18 @@ builds remotely. Two things to set up first:
 ```bash
 sudo apt-get install glslc libvulkan-dev spirv-headers
 
-# //:llama_vulkan reads the headers and the loader from two fixed paths. The
-# headers are staged rather than used in place so that cmake's `-I` for them
-# cannot shadow the hermetic toolchain's libc headers. Use $VULKAN_SDK/include
-# and $VULKAN_SDK/lib instead if you have the LunarG SDK.
-sudo mkdir -p /opt/xybrid-vulkan-include /opt/xybrid-vulkan-lib
+# //:llama_vulkan reads the Vulkan headers from a fixed path, staged rather
+# than used in place so that cmake's `-I` for them cannot shadow the hermetic
+# toolchain's libc headers. Use $VULKAN_SDK/include if you have the LunarG SDK.
+sudo mkdir -p /opt/xybrid-vulkan-include
 for tree in vulkan vk_video spirv; do
   sudo ln -sfn "/usr/include/$tree" "/opt/xybrid-vulkan-include/$tree"
 done
-sudo ln -sfn /usr/lib/x86_64-linux-gnu/libvulkan.so /opt/xybrid-vulkan-lib/libvulkan.so
 ```
+
+The loader is not taken from your system at build time: `//bazel/vulkan` builds a
+link-time stub carrying the real `libvulkan.so.1` SONAME, so the binary binds to
+whatever Vulkan loader the machine running it has.
 
 A Vulkan build links `libvulkan.so.1` dynamically, so the machine that *runs*
 it needs a Vulkan loader too, and a driver to reach the GPU.

@@ -158,34 +158,29 @@ _METAL_CMAKE_FLAGS = {
 # holding ONLY the vulkan trees, and the smoke asserts the floor.
 _VULKAN_INCLUDE_DIR = "/opt/xybrid-vulkan-include"
 
-# THE LOADER, same staging trick for a different reason. The exec machine's
-# libvulkan.so is built against ITS glibc, so linking it against hermetic-llvm's
-# 2.28 sysroot leaves the loader's own imports unresolved — lld rejects it under
-# its default --no-allow-shlib-undefined:
+# THE LOADER is NOT taken from the exec machine, for two independent reasons
+# (both learned the hard way in CI):
 #
-#   ld.lld: error: undefined reference: __isoc23_sscanf@GLIBC_2.38
-#   >>> referenced by /usr/lib/x86_64-linux-gnu/libvulkan.so
+#   1. Its libvulkan.so is built against ITS glibc, so resolving it against
+#      hermetic-llvm's 2.28 sysroot leaves the loader's own imports undefined —
+#      `ld.lld: error: undefined reference: __isoc23_sscanf@GLIBC_2.38`.
+#   2. A host path is not an action input, so it is simply absent when the
+#      final Rust link runs on a remote worker.
 #
-# Those symbols are the LOADER's business, resolved on the machine that runs the
-# binary by the same glibc that ships its libvulkan — not ours to satisfy at
-# link time. `--allow-shlib-undefined` (below) says exactly that. It relaxes the
-# check only for symbols a shared library needs, never for undefined symbols in
-# our own objects, and the smoke still asserts OUR glibc floor.
-#
-# A path under /opt, not the real one, so the CI job can point it at the SDK's
-# loader (matching the headers it stages) or apt's, without this file caring.
-_VULKAN_LIBRARY = "/opt/xybrid-vulkan-lib/libvulkan.so"
+# //bazel/vulkan:libvulkan.so is a link-time stub built by our own toolchain,
+# carrying the real SONAME so the binary still binds to the machine's real
+# loader at runtime. See bazel/vulkan/vulkan_stub.c for the full reasoning.
+# `data` + `$(execpath)` is the same shape the linux/windows arms already use
+# for the static C++ runtime archives.
+_VULKAN_LIBRARY = "$$EXT_BUILD_ROOT/$(execpath //bazel/vulkan:libvulkan.so)"
 
 _VULKAN_CMAKE_FLAGS = {
     "GGML_VULKAN": "ON",
     "Vulkan_INCLUDE_DIR": _VULKAN_INCLUDE_DIR,
     "Vulkan_LIBRARY": _VULKAN_LIBRARY,
-    # glslc is executed, never linked, so it has neither hazard.
+    # glslc is executed, never linked or included, so it has neither hazard and
+    # comes straight from the exec machine.
     "Vulkan_GLSLC_EXECUTABLE": "/usr/bin/glslc",
-    # For llama.cpp's throwaway tool executables, which link ggml-vulkan and so
-    # drag the loader in. (A `-Wl,` flag is position-independent, unlike the
-    # libraries that have to ride on CMAKE_CXX_STANDARD_LIBRARIES.)
-    "CMAKE_EXE_LINKER_FLAGS": "-Wl,--allow-shlib-undefined",
 }
 
 # The static C++ runtime archives the linux and windows-gnu lanes hand to cmake
@@ -540,7 +535,9 @@ cmake(
     # runner's gcc (for vulkan-shaders-gen) live.
     env = {"PATH": "/usr/local/bin:/usr/bin:/bin"},
     cache_entries = _LINUX_LLAMA | _VULKAN_CMAKE_FLAGS,
-    data = _STATIC_CXX_RUNTIME_LIBS,
+    # The C++ runtime archives the linux arm needs, plus the loader stub that
+    # _VULKAN_CMAKE_FLAGS references by $(execpath).
+    data = _STATIC_CXX_RUNTIME_LIBS + ["//bazel/vulkan:libvulkan.so"],
     lib_source = ":llama_src",
     out_static_libs = [
         "libmtmd.a",
