@@ -1,0 +1,31 @@
+.github/workflows/bazel.yml
+  s_a8e2ccb50c72bb::t_ed3b364edb4b19 491-494,496-504,506-510,514,524
+BUILD.bazel
+  s_a8e2ccb50c72bb::t_6fb09df0222700 538-540
+  s_a8e2ccb50c72bb::t_00deedc4ed29ec 161-162,164-168,170-175,181-182
+bazel/vulkan/BUILD.bazel
+  s_a8e2ccb50c72bb::t_e83f31144ed150 1-21
+crates/llama-cpp-sys/BUILD.bazel
+  s_a8e2ccb50c72bb::t_fecf9803a7fedd 43-45,47-52,54-57,60-63,72
+docs/INSTALLATION.md
+  s_a8e2ccb50c72bb::t_488c48d3b71ccc 88-91,97-99
+  s_a8e2ccb50c72bb::t_c793c75c415f7d 100
+bazel/vulkan/vulkan_stub.c
+  s_a8e2ccb50c72bb::t_268fddf3c9674c 1-45
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "626786241bc4ed63215ed1602e6858c336c0c34d",
+  "prompts": {},
+  "sessions": {
+    "s_a8e2ccb50c72bb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a39b6157-4a0e-4b93-9fc2-8830a3134ec6",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
