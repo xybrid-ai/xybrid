@@ -1,0 +1,57 @@
+crates/xybrid-core/src/runtime_adapter/llm.rs
+  s_e32586025370b7::t_33cf86730ed607 47-50,70-74,790-802
+  s_e32586025370b7::t_24f9f77c73818a 803
+crates/llama-cpp-sys/build.rs
+  s_e32586025370b7::t_33cf86730ed607 63,493,500,504,572,574-591,716,760-779
+  s_e32586025370b7::t_f210e64ef58b0c 64,495-499,501-503,505-507,552,561,564-571,599-604,640,647-648,652-653,663,666,684,714-715,717,749-751,780,788,806-808,835-839,854
+  s_e32586025370b7::t_a3fa9ec175f70c 494,573
+docs/FEATURE_MATRIX.md
+  s_e32586025370b7::t_33cf86730ed607 53-56,112,121,186,200
+README.md
+  s_e32586025370b7::t_f210e64ef58b0c 413
+  s_e32586025370b7::t_33cf86730ed607 432
+tools/scripts/natives-fingerprint.sh
+  s_e32586025370b7::t_f210e64ef58b0c 18-19
+CHANGELOG.md
+  s_e32586025370b7::t_f210e64ef58b0c 10-12,16
+  s_e32586025370b7::t_33cf86730ed607 13-15
+docs/INSTALLATION.md
+  s_e32586025370b7::t_33cf86730ed607 56-61,64-70
+  s_e32586025370b7::t_f210e64ef58b0c 55
+tools/scripts/natives-push.sh
+  s_e32586025370b7::t_f210e64ef58b0c 44-45,54-59
+crates/xybrid/README.md
+  s_e32586025370b7::t_33cf86730ed607 21
+README.zh-CN.md
+  s_e32586025370b7::t_33cf86730ed607 410
+  s_e32586025370b7::t_f210e64ef58b0c 398
+.github/actions/setup-vulkan-sdk/action.yml
+  s_e32586025370b7::t_33cf86730ed607 1-17
+docs/sdk/telemetry.md
+  s_e32586025370b7::t_33cf86730ed607 228
+README.ja-JP.md
+  s_e32586025370b7::t_f210e64ef58b0c 397
+  s_e32586025370b7::t_33cf86730ed607 409
+.github/workflows/build-natives.yml
+  s_e32586025370b7::t_33cf86730ed607 161-164,195-196
+  s_e32586025370b7::t_f210e64ef58b0c 192-194,197-198
+.github/workflows/ci.yml
+  s_e32586025370b7::t_33cf86730ed607 262-290
+  s_e32586025370b7::t_0a49a071bd7c5e 453
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "ea6fc4084809b8d056e5ef06b350043bc4610a55",
+  "prompts": {},
+  "sessions": {
+    "s_e32586025370b7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "88d405a1-43f7-4cd8-8276-17ff0f5315ff",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
