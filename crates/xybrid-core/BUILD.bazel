@@ -86,6 +86,17 @@ rust_library(
         ],
         "//conditions:default": [],
     }),
+    # Vulkan lane (--//:vulkan=true): `local_execution_provider` decides between
+    # "vulkan" and "cpu" with `option_env!("XYBRID_LLAMA_CPP_VULKAN")`
+    # (runtime_adapter/llm.rs) — a rustc-time lookup, which cargo satisfies from
+    # the shell and Bazel has to set explicitly. Without it a Vulkan-linked
+    # binary reports "cpu" on every inference span. Costs this rlib and its
+    # reverse deps their own cache entries on that lane; the llama.cpp compile,
+    # which is the expensive half, is untouched.
+    rustc_env = select({
+        "//:vulkan_enabled": {"XYBRID_LLAMA_CPP_VULKAN": "1"},
+        "//conditions:default": {},
+    }),
     # `all_crate_deps` resolves from the hub's view of Cargo.lock, which reflects
     # the workspace's DEFAULT feature set — and `asr-whispercpp` is off by
     # default, so the optional `xybrid-whisper` path-dep is absent from it. The

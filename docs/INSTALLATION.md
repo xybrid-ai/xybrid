@@ -70,8 +70,35 @@ FileTracker generates for it exceed Windows' 260-character `MAX_PATH`, leaving
 about 17 characters for the repository root. It fails from any realistic
 checkout location, so it is gated off rather than shipped broken.
 
-The prebuilt binaries use the release platform configuration. The Vulkan
-environment variable only affects binaries you compile yourself.
+Under Bazel the knob is a build flag, not an environment variable — Bazel sets
+llama.cpp's cmake defines itself and never reads `XYBRID_LLAMA_CPP_VULKAN`:
+
+```bash
+bazel build --config=remote --config=linux-vulkan -c opt //crates/xybrid-cli:xybrid
+```
+
+That config needs the Vulkan SDK on the machine driving the build — ggml
+compiles its GLSL shaders with a nested `vulkan-shaders-gen` project, so
+`//:llama_vulkan` is pinned to local execution while the rest of the graph still
+builds remotely. Two things to set up first:
+
+```bash
+sudo apt-get install glslc libvulkan-dev
+
+# A Vulkan-only include dir. //:llama_vulkan points cmake here instead of at
+# /usr/include, so that a `-I` for the Vulkan headers cannot shadow the
+# hermetic toolchain's libc headers.
+sudo mkdir -p /opt/xybrid-vulkan-include
+sudo ln -sfn /usr/include/vulkan   /opt/xybrid-vulkan-include/vulkan
+sudo ln -sfn /usr/include/vk_video /opt/xybrid-vulkan-include/vk_video
+```
+
+A Vulkan build links `libvulkan.so.1` dynamically, so the machine that *runs*
+it needs a Vulkan loader too, and a driver to reach the GPU.
+
+The prebuilt binaries use the release platform configuration, which is CPU-only
+on Linux — no Vulkan asset is published yet. Both Vulkan paths above affect
+only binaries you compile yourself.
 
 <details>
 <summary>All available feature flags</summary>

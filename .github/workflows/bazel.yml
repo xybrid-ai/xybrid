@@ -444,6 +444,109 @@ jobs:
           strings "$BIN" | grep -q 'huggingface\.co' || { echo "MISSING huggingface"; exit 1; }
           echo "Metal CLI smoke: OK"
 
+  # The desktop-Linux GPU lane: the CLI with ggml's Vulkan backend linked in.
+  #
+  # #307 gave the CARGO build a Vulkan opt-in (XYBRID_LLAMA_CPP_VULKAN=1), but
+  # the shipped Linux CLI comes from Bazel, which sets the cmake defines itself
+  # and never reads that variable — so this job is what makes a distributed
+  # binary able to use a GPU.
+  #
+  # Mixed execution, like bazel-macos-metal: the Rust graph compiles on RBE and
+  # only //:llama_vulkan runs here, because ggml's Vulkan build needs glslc, the
+  # Vulkan headers/loader and a host compiler on the machine running cmake, and
+  # the RBE image is a bare ubuntu:22.04 that has none of them. Hence the SDK
+  # install step below.
+  #
+  # Runs on PRs (unlike the metal/MSVC lanes): this lane is new, and llama.cpp
+  # with GGML_VULKAN=ON is exactly the compile most likely to break on an
+  # upstream bump. The build steps stay RBE-gated, so a fork PR — which has no
+  # secret and would otherwise compile the entire graph on the runner — only
+  # pays for the analysis phase.
+  bazel-linux-vulkan:
+    name: Bazel linux Vulkan lane
+    needs: changes
+    if: needs.changes.outputs.relevant == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          submodules: true
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/.ghcup \
+            /opt/hostedtoolcache/CodeQL
+          sudo docker image prune --all --force || true
+          df -h /
+
+      # glslc + libvulkan-dev, which is where //:llama_vulkan's pinned
+      # Vulkan_LIBRARY / Vulkan_GLSLC_EXECUTABLE point. Shared with ci.yml's
+      # cargo Vulkan job.
+      - name: Setup Vulkan SDK
+        uses: ./.github/actions/setup-vulkan-sdk
+
+      # cmake turns Vulkan_INCLUDE_DIR into a `-I` on ggml-vulkan's TUs, and a
+      # `-I` outranks the toolchain sysroot — so handing it /usr/include would
+      # shadow hermetic-llvm's libc headers with this runner's glibc 2.39 ones
+      # while the link still uses glibc 2.28. Stage a directory carrying ONLY
+      # the Vulkan headers so that cannot happen; //:llama_vulkan hardcodes this
+      # path, because a cache_entries value has to be known at analysis time —
+      # hence a fixed directory rather than the SDK's versioned $VULKAN_SDK.
+      - name: Stage a Vulkan-only include dir
+        run: |
+          sudo mkdir -p /opt/xybrid-vulkan-include
+          # vk_video/ too: vulkan_core.h includes the video codec headers.
+          for tree in vulkan vk_video; do
+            test -d "/usr/include/$tree" || { echo "missing /usr/include/$tree"; exit 1; }
+            sudo ln -sfn "/usr/include/$tree" "/opt/xybrid-vulkan-include/$tree"
+          done
+          ls -l /opt/xybrid-vulkan-include
+
+      - name: Configure BuildBuddy remote config
+        env:
+          BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
+        run: tools/scripts/write-buildbuddy-rc.sh
+
+      # Fork-safe structural gate: the flag, the config_settings and the
+      # //:llama_vulkan selects have to resolve even with no secret present.
+      - name: Analyze the Vulkan lane (no build)
+        run: |
+          bazelisk build --nobuild --config=linux-vulkan -c opt \
+            //crates/xybrid-cli:xybrid //:llama_vulkan
+
+      - name: Build the Vulkan CLI (mixed execution)
+        if: env.BUILDBUDDY_API_KEY != ''
+        run: |
+          bazelisk build --config=remote --config=linux-vulkan -c opt \
+            //crates/xybrid-cli:xybrid
+
+      # What a green build does NOT prove: that Vulkan is actually USED. The
+      # runner has a loader but no GPU, so llama.cpp falls back to CPU at
+      # runtime. This asserts the parts that are checkable here — the backend
+      # is compiled in, the loader is a real link dependency, and the feature
+      # set still matches the CPU lane.
+      - name: Smoke the Vulkan CLI (run + backend + loader + features)
+        if: env.BUILDBUDDY_API_KEY != ''
+        run: |
+          BIN=$(tools/scripts/bazel-output.sh //crates/xybrid-cli:xybrid --config=remote --config=linux-vulkan -c opt)
+          echo "resolved Vulkan CLI: $BIN"
+          file "$BIN"
+          "$BIN" --help >/dev/null
+          test "$(nm "$BIN" | grep -c 'ggml_backend_vk')" -gt 0 || { echo "MISSING Vulkan backend symbols"; exit 1; }
+          readelf -d "$BIN" | grep -q 'libvulkan\.so\.1' || { echo "NOT linked against the Vulkan loader"; exit 1; }
+          test "$(nm "$BIN" | grep -c ' mtmd_')" -gt 0 || { echo "MISSING vision (mtmd) symbols"; exit 1; }
+          strings "$BIN" | grep -q 'huggingface\.co' || { echo "MISSING huggingface support"; exit 1; }
+          # Same floor the CPU lane holds. This is the guard on the Vulkan
+          # include path: if ggml-vulkan's TUs ever pick up the runner's glibc
+          # headers instead of the hermetic sysroot's, the floor jumps here.
+          MAX_GLIBC=$(strings "$BIN" | grep -oE 'GLIBC_[0-9]+\.[0-9]+' | sort -Vu | tail -1)
+          echo "glibc floor: $MAX_GLIBC"
+          [ "$(printf '%s\n' "$MAX_GLIBC" GLIBC_2.31 | sort -V | tail -1)" = "GLIBC_2.31" ] || { echo "glibc floor regressed above 2.31: $MAX_GLIBC"; exit 1; }
+          echo "Vulkan CLI smoke: OK ✅"
+
   # The windows-MSVC lane — NON-SHIPPING proof, like the windows-gnu bolt DLL
   # above. Everything compiles on Linux RBE workers; the runner only fetches
   # repositories and inspects outputs.

@@ -75,6 +75,19 @@ build:macos-metal --config=local_tools
 # (-fstack-protector, which needs a libssp hermetic-llvm's MinGW sysroot doesn't
 # ship, is disabled for windows at the toolchain level in hermetic_llvm.patch.)
 
+# Desktop Linux GPU lane: ggml's Vulkan backend ON (//:llama_vulkan). Mixed
+# execution, same model as macos-metal above — everything except the llama.cpp
+# compile still runs on RBE; that one action is pinned local because it needs
+# glslc, the Vulkan headers/loader and a host compiler on the EXEC machine, and
+# the RBE image is a bare ubuntu:22.04 that has none of them. So the runner must
+# have the SDK installed first (.github/actions/setup-vulkan-sdk).
+#
+# The resulting binary links libvulkan.so.1 dynamically, so it needs a Vulkan
+# loader (and a driver, to use the GPU) on the machine that runs it — this lane
+# is an additional artifact, never a replacement for the CPU-only linux CLI.
+build:linux-vulkan --platforms=@rules_rs//rs/platforms:x86_64-unknown-linux-gnu
+build:linux-vulkan --//:vulkan=true
+
 # --- Apple Gate 1: iOS device staticlib, built LOCALLY on a Mac (Xcode iphoneos
 # SDK via apple_support). CPU-only, Metal OFF. Mac-bound end-to-end — NEVER
 # combine with --config=remote (no Mac RBE; the iOS closure needs an iphoneos

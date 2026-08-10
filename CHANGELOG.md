@@ -16,6 +16,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   compiler as a nested CMake project whose paths exceed Windows' 260-character
   limit under cargo's `OUT_DIR`, so the build fails wherever the repo is
   checked out. Every other target rejects the variable with a clear error.
+- **A Vulkan lane on the Bazel graph** (`--config=linux-vulkan`). The Linux CLI
+  builds from Bazel, which writes llama.cpp's cmake defines itself and never
+  reads `XYBRID_LLAMA_CPP_VULKAN` — so the environment variable above reaches
+  cargo builds only. The new `--//:vulkan` flag selects `//:llama_vulkan`,
+  mirroring how `--//:metal` selects `//:llama_metal`, and a CI job builds and
+  smokes the resulting CLI (Vulkan backend symbols present, `libvulkan.so.1` a
+  real link dependency). That target runs on the local machine rather than a
+  remote worker, because ggml's Vulkan build needs `glslc`, the Vulkan headers
+  and a host compiler where cmake runs, and the remote image has none of them.
+  Published Linux binaries are unchanged and stay CPU-only: a Vulkan build
+  requires a Vulkan loader on the machine that runs it, so it belongs in a
+  separate artifact rather than in place of the default one.
 
 ### Changed
 
