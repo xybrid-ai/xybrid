@@ -1,0 +1,47 @@
+crates/xybrid-core/src/runtime_adapter/llama_cpp/mod.rs
+  s_a8e2ccb50c72bb::t_a6258e6fbc41e4 825-826
+  s_a8e2ccb50c72bb::t_949fc900b4621b 684-714
+  s_a8e2ccb50c72bb::t_c988a7b7824e3c 1717-1732
+  s_a8e2ccb50c72bb::t_96c28f5c2b60cf 37-38
+README.zh-CN.md
+  s_a8e2ccb50c72bb::t_b54942c646a4db 399
+  s_a8e2ccb50c72bb::t_1cbda46bc7db58 411
+CHANGELOG.md
+  s_a8e2ccb50c72bb::t_483b66d0f54724 31-45
+README.ja-JP.md
+  s_7ed717f28d9266::t_22671992c39c5d 398,410
+README.md
+  s_58e60c0e5155d8::t_e88ccb72874c44 414,433
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "0d60bd71b578a340ce945ae08e66910dd5f60989",
+  "prompts": {},
+  "sessions": {
+    "s_58e60c0e5155d8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "79df6e76-09fe-4e3f-92fb-c507cee484a4",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    },
+    "s_7ed717f28d9266": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019fedf4-a35e-7c22-9cd1-1879729e483c",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    },
+    "s_a8e2ccb50c72bb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a39b6157-4a0e-4b93-9fc2-8830a3134ec6",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
