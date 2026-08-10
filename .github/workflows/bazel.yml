@@ -498,10 +498,23 @@ jobs:
       - name: Stage a Vulkan-only include dir
         run: |
           sudo mkdir -p /opt/xybrid-vulkan-include
-          # vk_video/ too: vulkan_core.h includes the video codec headers.
-          for tree in vulkan vk_video; do
-            test -d "/usr/include/$tree" || { echo "missing /usr/include/$tree"; exit 1; }
-            sudo ln -sfn "/usr/include/$tree" "/opt/xybrid-vulkan-include/$tree"
+          # Prefer the LunarG SDK's include tree: it is what the cargo Vulkan
+          # job (ci.yml) compiles against, so it is the proven set, and it
+          # carries every tree ggml reaches for in one place.
+          SRC="${VULKAN_SDK:+$VULKAN_SDK/include}"
+          if [ ! -d "${SRC:-}" ]; then
+            # No SDK env: fall back to apt. libvulkan-dev does not depend on
+            # spirv-headers, so ask for it explicitly.
+            sudo apt-get install -y spirv-headers
+            SRC=/usr/include
+          fi
+          echo "include source: $SRC"
+          # vulkan/ is the obvious one; vk_video/ because vulkan_core.h includes
+          # the video codec headers; spirv/ because ggml-vulkan.cpp includes
+          # <spirv/unified1/spirv.hpp> for its cooperative-matrix paths.
+          for tree in vulkan vk_video spirv; do
+            test -d "$SRC/$tree" || { echo "missing $SRC/$tree"; exit 1; }
+            sudo ln -sfn "$SRC/$tree" "/opt/xybrid-vulkan-include/$tree"
           done
           ls -l /opt/xybrid-vulkan-include
 

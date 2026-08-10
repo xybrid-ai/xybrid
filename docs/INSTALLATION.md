@@ -83,14 +83,16 @@ compiles its GLSL shaders with a nested `vulkan-shaders-gen` project, so
 builds remotely. Two things to set up first:
 
 ```bash
-sudo apt-get install glslc libvulkan-dev
+sudo apt-get install glslc libvulkan-dev spirv-headers
 
 # A Vulkan-only include dir. //:llama_vulkan points cmake here instead of at
 # /usr/include, so that a `-I` for the Vulkan headers cannot shadow the
-# hermetic toolchain's libc headers.
+# hermetic toolchain's libc headers. Point these at $VULKAN_SDK/include instead
+# if you have the LunarG SDK installed.
 sudo mkdir -p /opt/xybrid-vulkan-include
-sudo ln -sfn /usr/include/vulkan   /opt/xybrid-vulkan-include/vulkan
-sudo ln -sfn /usr/include/vk_video /opt/xybrid-vulkan-include/vk_video
+for tree in vulkan vk_video spirv; do
+  sudo ln -sfn "/usr/include/$tree" "/opt/xybrid-vulkan-include/$tree"
+done
 ```
 
 A Vulkan build links `libvulkan.so.1` dynamically, so the machine that *runs*
