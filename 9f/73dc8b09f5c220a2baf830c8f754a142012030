@@ -1,0 +1,49 @@
+.github/workflows/bazel.yml
+  s_a8e2ccb50c72bb::t_2a37f25dc23cd6 496-497
+  s_a8e2ccb50c72bb::t_284f9c85404805 542-547
+  s_a8e2ccb50c72bb::t_9fb500f7426289 447-484,488-489,507-541,548-549
+  s_a8e2ccb50c72bb::t_97c1b50eae4680 485-487,490-495,498-506
+CHANGELOG.md
+  s_a8e2ccb50c72bb::t_f6f48d06c74979 19-30
+crates/llama-cpp-sys/BUILD.bazel
+  s_a8e2ccb50c72bb::t_cd721488d519b3 64
+  s_a8e2ccb50c72bb::t_80013bc8f702ec 95
+  s_a8e2ccb50c72bb::t_2e92e38f5f2735 43-44,63,65,70-71,73
+  s_a8e2ccb50c72bb::t_858ab1ca16c441 45-55
+docs/INSTALLATION.md
+  s_a8e2ccb50c72bb::t_2337b487417666 73-79,82,98-101
+  s_a8e2ccb50c72bb::t_16c9cab6cf2815 80-81,83-97
+docs/FEATURE_MATRIX.md
+  s_a8e2ccb50c72bb::t_ff7ed4bbfa3bc1 62-67
+  s_a8e2ccb50c72bb::t_5260800a7e5590 231
+.bazelrc
+  s_a8e2ccb50c72bb::t_22b9eb04c99457 78-90
+crates/xybrid-core/BUILD.bazel
+  s_a8e2ccb50c72bb::t_e0a7df6fdb7a70 89-99
+BUILD.bazel
+  s_a8e2ccb50c72bb::t_9364abcdae1a81 490-539
+  s_a8e2ccb50c72bb::t_34eb66266294bd 28-49
+  s_a8e2ccb50c72bb::t_c31c2cf6fb5731 139-148,161-162,166-169,174-203
+  s_a8e2ccb50c72bb::t_6aa65d5f484451 601
+  s_a8e2ccb50c72bb::t_e6939fe8c13a1f 560-563
+  s_a8e2ccb50c72bb::t_c8cbfb3cf2a341 170-173
+  s_a8e2ccb50c72bb::t_9e82cbb266243b 379-380
+  s_a8e2ccb50c72bb::t_5cfc7af94120e3 149-160,163-165
+  s_a8e2ccb50c72bb::t_b5ce85f5c1014b 323-327
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "9f73dc8b09f5c220a2baf830c8f754a142012030",
+  "prompts": {},
+  "sessions": {
+    "s_a8e2ccb50c72bb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a39b6157-4a0e-4b93-9fc2-8830a3134ec6",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
