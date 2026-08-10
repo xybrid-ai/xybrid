@@ -1,0 +1,26 @@
+docs/INSTALLATION.md
+  s_a8e2ccb50c72bb::t_02cd3417afc815 88-92,96
+.github/workflows/bazel.yml
+  s_a8e2ccb50c72bb::t_b8826f1173cc58 491-501,503-511,514,516-517,522-523,525-526
+crates/llama-cpp-sys/BUILD.bazel
+  s_a8e2ccb50c72bb::t_f17e4db36a4da9 65-68
+  s_a8e2ccb50c72bb::t_26e3e1fa320f88 52
+BUILD.bazel
+  s_a8e2ccb50c72bb::t_c99688805b9776 161-178,182-183,185-188
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "054f9fc041e088e5c11fbea1ff10f522ed469d89",
+  "prompts": {},
+  "sessions": {
+    "s_a8e2ccb50c72bb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a39b6157-4a0e-4b93-9fc2-8830a3134ec6",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
