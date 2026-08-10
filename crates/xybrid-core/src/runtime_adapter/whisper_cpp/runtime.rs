@@ -179,6 +179,17 @@ impl ModelRuntime for WhisperCppRuntime {
         vec!["bin"]
     }
 
+    fn is_loaded(&self, model_path: &Path) -> bool {
+        // Same key as `load`, so the two always agree.
+        let Ok(guard) = self.model.lock() else {
+            // A poisoned lock means the context is unusable and the caller will
+            // have to reload, so "not loaded" is the honest answer.
+            return false;
+        };
+        self.loaded_path.as_deref() == Some(model_path.display().to_string().as_str())
+            && guard.is_some()
+    }
+
     fn load(&mut self, model_path: &Path) -> AdapterResult<()> {
         let key = model_path.display().to_string();
         let mut guard = lock(&self.model)?;

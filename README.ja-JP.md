@@ -245,9 +245,9 @@ let result = model.run(&Envelope::text("Hello world"))?;
 # voice-assistant.yaml
 name: voice-assistant
 stages:
-  - model: whisper-tiny    # 音声 → テキスト
-  - model: qwen2.5-0.5b    # LLMで処理
-  - model: kokoro-82m      # テキスト → 音声
+  - model: whisper-tiny-ggml  # 音声 → テキスト
+  - model: qwen2.5-0.5b       # LLMで処理
+  - model: kokoro-82m         # テキスト → 音声
 ```
 
 **CLI:**
@@ -303,7 +303,8 @@ let result = pipeline.run(&Envelope::audio(audio_bytes))?;
 
 | モデル | パラメータ数 | フォーマット | 説明 |
 |-------|--------|--------|-------------|
-| Whisper Tiny | 39M | SafeTensors | 多言語文字起こし（Candleランタイム） |
+| Whisper Tiny（`whisper-tiny-ggml`） | 39M | GGML Q5_1 | whisper.cpp による多言語文字起こし — すべてのプラットフォームプリセットに同梱 |
+| Whisper Tiny（`whisper-tiny`） | 39M | SafeTensors | 同じ重みを Candle ランタイムで実行 — `candle` フィーチャを有効にしたビルドが必要 |
 | Wav2Vec2 Base | 95M | ONNX | CTC復号による英語ASR |
 
 ### テキスト読み上げ（Text-to-Speech）
@@ -394,7 +395,7 @@ claude /xybrid-init hexgrad/Kokoro-82M-v1.0-ONNX
 | 埋め込み | 🔜 | 🔜 | 🔜 | 🔜 | 🔜 |
 | マルチモデルパイプライン（MMP） | ✅ | ✅ | ✅ | ✅ | ✅ |
 | モデルのダウンロードとキャッシュ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| ハードウェアアクセラレーション | Metal, ANE | CPU | Metal, ANE | CUDA | CUDA |
+| ハードウェアアクセラレーション | Metal, ANE | CPU | Metal, ANE | CUDA, Vulkan | CUDA |
 
 **SDK MMP サポート:** Flutter ✅ · Rust ✅ · Kotlin 🔜 · Swift 🔜 · Unity 🔜
 
@@ -406,7 +407,7 @@ claude /xybrid-init hexgrad/Kokoro-82M-v1.0-ONNX
 - **オフライン対応** — 初回のモデルダウンロード後はインターネット不要。
 - **クロスプラットフォーム** — iOS、Android、macOS、Linux、Windowsで統一されたAPI。
 - **マルチモデルパイプライン（MMP）** — モデルを連鎖（ASR → LLM → TTS）して1回の呼び出しで実行。
-- **自動最適化** — Apple Neural Engine、Metal、CUDAによるハードウェアアクセラレーション。
+- **ハードウェアアクセラレーション** — Apple Neural Engine、Metal、CUDAに加え、Linux向けllama.cppビルドではVulkanをオプトイン可能。
 
 ### 比較
 

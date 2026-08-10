@@ -244,6 +244,19 @@ The Kotlin bindings are generated from `crates/xybrid-bolt/` using [BoltFFI](htt
 - Single Rust source generates Swift, Kotlin, Java, C#, WASM, and a C header
 - Memory-safe wrappers with proper resource cleanup
 
+Regenerate `XybridBolt.kt` with the script, never by hand:
+
+```bash
+python3 tools/scripts/gen_kotlin_bolt.py            # regenerate + write
+python3 tools/scripts/gen_kotlin_bolt.py --check    # fail on drift
+```
+
+It runs `boltffi generate kotlin` and applies the one post-process the output
+needs: boltffi 0.29 emits each `XybridError` payload field verbatim, so the
+fourteen variants carrying a `message` collide with `Throwable.message` and the
+binding does not compile without an `override` modifier. A plain copy of the
+generator output silently reintroduces that break.
+
 ## Building Native Libraries
 
 Native `.so` files must be built for each target architecture before the library can be used.

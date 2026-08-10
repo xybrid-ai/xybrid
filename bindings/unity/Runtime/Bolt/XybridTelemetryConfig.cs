@@ -3,40 +3,38 @@
 // </auto-generated>
 #nullable enable
 
-using System;
-using System.Threading;
-using System.Text;
-
 namespace XybridBolt
 {
-    /// <summary>
-    /// Advanced telemetry configuration builder.
-    ///
-    /// Create with [`new`](Self::new), tune via the setters, then hand to
-    /// [`telemetry_init`]. Wraps the facade's interior-mutable, thread-safe
-    /// `TelemetryConfigHandle`.
-    /// </summary>
-    public sealed class XybridTelemetryConfig : IDisposable
+    public sealed class XybridTelemetryConfig : global::System.IDisposable
     {
-        private IntPtr _handle;
+        private long handle;
 
-        // Private handle-adopting ctor; used only by chained `: this(...)` and the static factories below.
-        private XybridTelemetryConfig(IntPtr handle)
+        internal ulong Handle => unchecked((ulong)(ulong)global::System.Threading.Interlocked.Read(ref handle));
+
+        internal XybridTelemetryConfig(ulong handle)
         {
-            _handle = handle;
+            if (handle == 0) throw new global::System.ArgumentException("handle must not be zero", nameof(handle));
+            this.handle = unchecked((long)(ulong)handle);
         }
 
         /// <summary>
         /// A new config bound to the default ingest endpoint and the given API key.
         /// </summary>
         public XybridTelemetryConfig(string apiKey)
-            : this(XybridTelemetryConfigNewHandle(apiKey)) { }
+            : this(BoltFfiNew(apiKey).TakeHandle()) { }
 
-        private static IntPtr XybridTelemetryConfigNewHandle(string apiKey)
+
+        private static XybridTelemetryConfig BoltFfiNew(string apiKey)
         {
-            byte[] _apiKeyBytes = Encoding.UTF8.GetBytes(apiKey);
-            return NativeMethods.XybridTelemetryConfigNew(_apiKeyBytes, (UIntPtr)_apiKeyBytes.Length);
+            WireWriter apiKeyWriter = new WireWriter();
+            {
+                apiKeyWriter.WriteString(apiKey);
+            }
+            byte[] apiKeyBytes = apiKeyWriter.ToArray();
+            ulong boltffiHandle = NativeMethods.NativeXybridTelemetryConfigNew(apiKeyBytes, (nuint)apiKeyBytes.Length);
+            return boltffiHandle == 0 ? throw new global::System.InvalidOperationException("BoltFFI returned a null XybridTelemetryConfig handle") : new XybridTelemetryConfig(boltffiHandle);
         }
+
 
         /// <summary>
         /// Override the ingest endpoint (self-hosted collector / non-prod).
@@ -44,9 +42,18 @@ namespace XybridBolt
         public void SetEndpoint(string endpoint)
         {
             ThrowIfDisposed();
-            byte[] _endpointBytes = Encoding.UTF8.GetBytes(endpoint);
-            NativeMethods.XybridTelemetryConfigSetEndpoint(_handle, _endpointBytes, (UIntPtr)_endpointBytes.Length);
+            WireWriter endpointWriter = new WireWriter();
+            {
+                endpointWriter.WriteString(endpoint);
+            }
+            byte[] endpointBytes = endpointWriter.ToArray();
+            FfiStatus status = NativeMethods.NativeXybridTelemetryConfigSetEndpoint(this.Handle, endpointBytes, (nuint)endpointBytes.Length);
+            if (status.code != 0)
+            {
+                throw new global::System.InvalidOperationException($"BoltFFI call failed with status code {status.code}");
+            }
         }
+
 
         /// <summary>
         /// Set the app version reported with every event.
@@ -54,9 +61,18 @@ namespace XybridBolt
         public void SetAppVersion(string version)
         {
             ThrowIfDisposed();
-            byte[] _versionBytes = Encoding.UTF8.GetBytes(version);
-            NativeMethods.XybridTelemetryConfigSetAppVersion(_handle, _versionBytes, (UIntPtr)_versionBytes.Length);
+            WireWriter versionWriter = new WireWriter();
+            {
+                versionWriter.WriteString(version);
+            }
+            byte[] versionBytes = versionWriter.ToArray();
+            FfiStatus status = NativeMethods.NativeXybridTelemetryConfigSetAppVersion(this.Handle, versionBytes, (nuint)versionBytes.Length);
+            if (status.code != 0)
+            {
+                throw new global::System.InvalidOperationException($"BoltFFI call failed with status code {status.code}");
+            }
         }
+
 
         /// <summary>
         /// Set the human-friendly device label reported with every event.
@@ -64,9 +80,18 @@ namespace XybridBolt
         public void SetDeviceLabel(string label)
         {
             ThrowIfDisposed();
-            byte[] _labelBytes = Encoding.UTF8.GetBytes(label);
-            NativeMethods.XybridTelemetryConfigSetDeviceLabel(_handle, _labelBytes, (UIntPtr)_labelBytes.Length);
+            WireWriter labelWriter = new WireWriter();
+            {
+                labelWriter.WriteString(label);
+            }
+            byte[] labelBytes = labelWriter.ToArray();
+            FfiStatus status = NativeMethods.NativeXybridTelemetryConfigSetDeviceLabel(this.Handle, labelBytes, (nuint)labelBytes.Length);
+            if (status.code != 0)
+            {
+                throw new global::System.InvalidOperationException($"BoltFFI call failed with status code {status.code}");
+            }
         }
+
 
         /// <summary>
         /// Attach an app-provided device attribute (stored under `device.custom`).
@@ -74,10 +99,23 @@ namespace XybridBolt
         public void SetDeviceAttribute(string key, string value)
         {
             ThrowIfDisposed();
-            byte[] _keyBytes = Encoding.UTF8.GetBytes(key);
-            byte[] _valueBytes = Encoding.UTF8.GetBytes(value);
-            NativeMethods.XybridTelemetryConfigSetDeviceAttribute(_handle, _keyBytes, (UIntPtr)_keyBytes.Length, _valueBytes, (UIntPtr)_valueBytes.Length);
+            WireWriter keyWriter = new WireWriter();
+            {
+                keyWriter.WriteString(key);
+            }
+            byte[] keyBytes = keyWriter.ToArray();
+            WireWriter valueWriter = new WireWriter();
+            {
+                valueWriter.WriteString(value);
+            }
+            byte[] valueBytes = valueWriter.ToArray();
+            FfiStatus status = NativeMethods.NativeXybridTelemetryConfigSetDeviceAttribute(this.Handle, keyBytes, (nuint)keyBytes.Length, valueBytes, (nuint)valueBytes.Length);
+            if (status.code != 0)
+            {
+                throw new global::System.InvalidOperationException($"BoltFFI call failed with status code {status.code}");
+            }
         }
+
 
         /// <summary>
         /// Set the number of events buffered before a flush.
@@ -85,8 +123,13 @@ namespace XybridBolt
         public void SetBatchSize(uint batchSize)
         {
             ThrowIfDisposed();
-            NativeMethods.XybridTelemetryConfigSetBatchSize(_handle, batchSize);
+            FfiStatus status = NativeMethods.NativeXybridTelemetryConfigSetBatchSize(this.Handle, batchSize);
+            if (status.code != 0)
+            {
+                throw new global::System.InvalidOperationException($"BoltFFI call failed with status code {status.code}");
+            }
         }
+
 
         /// <summary>
         /// Set the background flush interval, in seconds.
@@ -94,8 +137,13 @@ namespace XybridBolt
         public void SetFlushIntervalSecs(uint secs)
         {
             ThrowIfDisposed();
-            NativeMethods.XybridTelemetryConfigSetFlushIntervalSecs(_handle, secs);
+            FfiStatus status = NativeMethods.NativeXybridTelemetryConfigSetFlushIntervalSecs(this.Handle, secs);
+            if (status.code != 0)
+            {
+                throw new global::System.InvalidOperationException($"BoltFFI call failed with status code {status.code}");
+            }
         }
+
 
         /// <summary>
         /// Start the process-global telemetry exporter from this config.
@@ -113,36 +161,42 @@ namespace XybridBolt
         public void Init()
         {
             ThrowIfDisposed();
-            FfiBuf _buf = NativeMethods.XybridTelemetryConfigInit(_handle);
-            try
+            FfiBuf boltffiErrorBuffer = NativeMethods.NativeXybridTelemetryConfigInit(this.Handle);
+            if (boltffiErrorBuffer.ptr != 0)
             {
-                var reader = new WireReader(_buf);
-                if (reader.ReadU8() != 0) throw new XybridErrorException(XybridError.Decode(reader));
-            }
-            finally
-            {
-                NativeMethods.FreeBuf(_buf);
+                try
+                {
+                    WireReader boltffiErrorReader = new WireReader(boltffiErrorBuffer);
+                    throw new global::XybridBolt.XybridErrorException(global::XybridBolt.XybridError.Decode(boltffiErrorReader));
+                }
+                finally
+                {
+                    NativeMethods.FreeBuf(boltffiErrorBuffer);
+                }
             }
         }
 
-        internal IntPtr RawHandle => _handle;
+
+        private ulong TakeHandle() => unchecked((ulong)(ulong)global::System.Threading.Interlocked.Exchange(ref handle, 0));
 
         private void ThrowIfDisposed()
         {
-            if (_handle == IntPtr.Zero) throw new ObjectDisposedException(nameof(XybridTelemetryConfig));
+            if (global::System.Threading.Interlocked.Read(ref handle) == 0)
+                throw new global::System.ObjectDisposedException(nameof(XybridTelemetryConfig));
         }
+
+        private void Release()
+        {
+            ulong released = unchecked((ulong)(ulong)global::System.Threading.Interlocked.Exchange(ref handle, 0));
+            if (released != 0) NativeMethods.NativeXybridTelemetryConfigRelease(released);
+        }
+
+        ~XybridTelemetryConfig() => Release();
 
         public void Dispose()
         {
-            IntPtr handle = Interlocked.Exchange(ref _handle, IntPtr.Zero);
-            if (handle == IntPtr.Zero) return;
-            NativeMethods.XybridTelemetryConfigFree(handle);
-            GC.SuppressFinalize(this);
-        }
-
-        ~XybridTelemetryConfig()
-        {
-            Dispose();
+            Release();
+            global::System.GC.SuppressFinalize(this);
         }
     }
 }

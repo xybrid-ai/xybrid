@@ -477,10 +477,13 @@ impl TemplateExecutor {
     /// browser-only templates) — read it as "an execution would pay a load".
     pub fn is_model_loaded(&self, metadata: &ModelMetadata) -> bool {
         let (runtime_type, model_file) = match &metadata.execution_template {
+            #[cfg(feature = "candle")]
             ExecutionTemplate::SafeTensors { model_file, .. } => ("candle", model_file),
             ExecutionTemplate::Onnx { model_file } => ("onnx", model_file),
             ExecutionTemplate::CoreMl { model_file } => ("coreml", model_file),
             ExecutionTemplate::TfLite { model_file } => ("tflite", model_file),
+            #[cfg(feature = "asr-whispercpp")]
+            ExecutionTemplate::GgmlWhisper { model_file, .. } => ("whispercpp", model_file),
             _ => return false,
         };
         let model_full_path = Path::new(&self.base_path).join(model_file);
@@ -713,7 +716,21 @@ impl TemplateExecutor {
         let mut whisper_defaults: Option<Vec<(String, String)>> = None;
 
         let (runtime_type, model_file) = match &metadata.execution_template {
+            #[cfg(feature = "candle")]
             ExecutionTemplate::SafeTensors { model_file, .. } => ("candle", model_file.clone()),
+            // Without the feature there is no "candle" runtime in the registry, so
+            // the lookup below would fail with a bare `Runtime 'candle' not
+            // configured` that names neither the feature nor the alternative.
+            // Mirrors the Gguf / GgmlWhisper arms, which have always said this.
+            #[cfg(not(feature = "candle"))]
+            ExecutionTemplate::SafeTensors { .. } => {
+                return Err(AdapterError::RuntimeError(
+                    "SafeTensors execution requires the 'candle' feature. For Whisper \
+                     speech recognition, prefer a GGML bundle (ExecutionTemplate::GgmlWhisper) \
+                     on the 'asr-whispercpp' backend."
+                        .to_string(),
+                ));
+            }
             ExecutionTemplate::Onnx { model_file } => ("onnx", model_file.clone()),
             ExecutionTemplate::CoreMl { model_file } => ("coreml", model_file.clone()),
             ExecutionTemplate::TfLite { model_file } => ("tflite", model_file.clone()),

@@ -3221,12 +3221,13 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
   FfiStreamingConfig dco_decode_ffi_streaming_config(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 3)
-      throw Exception('unexpected arr length: expect 3 but see ${arr.length}');
+    if (arr.length != 4)
+      throw Exception('unexpected arr length: expect 4 but see ${arr.length}');
     return FfiStreamingConfig(
       sampleRate: dco_decode_u_32(arr[0]),
       vad: dco_decode_ffi_vad_mode(arr[1]),
       language: dco_decode_opt_String(arr[2]),
+      audioCtx: dco_decode_opt_box_autoadd_u_32(arr[3]),
     );
   }
 
@@ -4112,8 +4113,12 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
     var var_sampleRate = sse_decode_u_32(deserializer);
     var var_vad = sse_decode_ffi_vad_mode(deserializer);
     var var_language = sse_decode_opt_String(deserializer);
+    var var_audioCtx = sse_decode_opt_box_autoadd_u_32(deserializer);
     return FfiStreamingConfig(
-        sampleRate: var_sampleRate, vad: var_vad, language: var_language);
+        sampleRate: var_sampleRate,
+        vad: var_vad,
+        language: var_language,
+        audioCtx: var_audioCtx);
   }
 
   @protected
@@ -5067,6 +5072,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
     sse_encode_u_32(self.sampleRate, serializer);
     sse_encode_ffi_vad_mode(self.vad, serializer);
     sse_encode_opt_String(self.language, serializer);
+    sse_encode_opt_box_autoadd_u_32(self.audioCtx, serializer);
   }
 
   @protected

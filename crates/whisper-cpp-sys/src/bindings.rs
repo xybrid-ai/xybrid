@@ -62,30 +62,12 @@ pub struct whisper_ahead {
     pub n_text_layer: ::std::os::raw::c_int,
     pub n_head: ::std::os::raw::c_int,
 }
-#[allow(clippy::unnecessary_operation, clippy::identity_op)]
-const _: () = {
-    ["Size of whisper_ahead"][::std::mem::size_of::<whisper_ahead>() - 8usize];
-    ["Alignment of whisper_ahead"][::std::mem::align_of::<whisper_ahead>() - 4usize];
-    ["Offset of field: whisper_ahead::n_text_layer"]
-        [::std::mem::offset_of!(whisper_ahead, n_text_layer) - 0usize];
-    ["Offset of field: whisper_ahead::n_head"]
-        [::std::mem::offset_of!(whisper_ahead, n_head) - 4usize];
-};
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct whisper_aheads {
     pub n_heads: usize,
     pub heads: *const whisper_ahead,
 }
-#[allow(clippy::unnecessary_operation, clippy::identity_op)]
-const _: () = {
-    ["Size of whisper_aheads"][::std::mem::size_of::<whisper_aheads>() - 16usize];
-    ["Alignment of whisper_aheads"][::std::mem::align_of::<whisper_aheads>() - 8usize];
-    ["Offset of field: whisper_aheads::n_heads"]
-        [::std::mem::offset_of!(whisper_aheads, n_heads) - 0usize];
-    ["Offset of field: whisper_aheads::heads"]
-        [::std::mem::offset_of!(whisper_aheads, heads) - 8usize];
-};
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct whisper_context_params {
@@ -98,28 +80,6 @@ pub struct whisper_context_params {
     pub dtw_aheads: whisper_aheads,
     pub dtw_mem_size: usize,
 }
-#[allow(clippy::unnecessary_operation, clippy::identity_op)]
-const _: () = {
-    ["Size of whisper_context_params"][::std::mem::size_of::<whisper_context_params>() - 48usize];
-    ["Alignment of whisper_context_params"]
-        [::std::mem::align_of::<whisper_context_params>() - 8usize];
-    ["Offset of field: whisper_context_params::use_gpu"]
-        [::std::mem::offset_of!(whisper_context_params, use_gpu) - 0usize];
-    ["Offset of field: whisper_context_params::flash_attn"]
-        [::std::mem::offset_of!(whisper_context_params, flash_attn) - 1usize];
-    ["Offset of field: whisper_context_params::gpu_device"]
-        [::std::mem::offset_of!(whisper_context_params, gpu_device) - 4usize];
-    ["Offset of field: whisper_context_params::dtw_token_timestamps"]
-        [::std::mem::offset_of!(whisper_context_params, dtw_token_timestamps) - 8usize];
-    ["Offset of field: whisper_context_params::dtw_aheads_preset"]
-        [::std::mem::offset_of!(whisper_context_params, dtw_aheads_preset) - 12usize];
-    ["Offset of field: whisper_context_params::dtw_n_top"]
-        [::std::mem::offset_of!(whisper_context_params, dtw_n_top) - 16usize];
-    ["Offset of field: whisper_context_params::dtw_aheads"]
-        [::std::mem::offset_of!(whisper_context_params, dtw_aheads) - 24usize];
-    ["Offset of field: whisper_context_params::dtw_mem_size"]
-        [::std::mem::offset_of!(whisper_context_params, dtw_mem_size) - 40usize];
-};
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct whisper_token_data {
@@ -134,31 +94,6 @@ pub struct whisper_token_data {
     pub t_dtw: i64,
     pub vlen: f32,
 }
-#[allow(clippy::unnecessary_operation, clippy::identity_op)]
-const _: () = {
-    ["Size of whisper_token_data"][::std::mem::size_of::<whisper_token_data>() - 56usize];
-    ["Alignment of whisper_token_data"][::std::mem::align_of::<whisper_token_data>() - 8usize];
-    ["Offset of field: whisper_token_data::id"]
-        [::std::mem::offset_of!(whisper_token_data, id) - 0usize];
-    ["Offset of field: whisper_token_data::tid"]
-        [::std::mem::offset_of!(whisper_token_data, tid) - 4usize];
-    ["Offset of field: whisper_token_data::p"]
-        [::std::mem::offset_of!(whisper_token_data, p) - 8usize];
-    ["Offset of field: whisper_token_data::plog"]
-        [::std::mem::offset_of!(whisper_token_data, plog) - 12usize];
-    ["Offset of field: whisper_token_data::pt"]
-        [::std::mem::offset_of!(whisper_token_data, pt) - 16usize];
-    ["Offset of field: whisper_token_data::ptsum"]
-        [::std::mem::offset_of!(whisper_token_data, ptsum) - 20usize];
-    ["Offset of field: whisper_token_data::t0"]
-        [::std::mem::offset_of!(whisper_token_data, t0) - 24usize];
-    ["Offset of field: whisper_token_data::t1"]
-        [::std::mem::offset_of!(whisper_token_data, t1) - 32usize];
-    ["Offset of field: whisper_token_data::t_dtw"]
-        [::std::mem::offset_of!(whisper_token_data, t_dtw) - 40usize];
-    ["Offset of field: whisper_token_data::vlen"]
-        [::std::mem::offset_of!(whisper_token_data, vlen) - 48usize];
-};
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct whisper_model_loader {
@@ -173,19 +108,6 @@ pub struct whisper_model_loader {
     pub eof: ::std::option::Option<unsafe extern "C" fn(ctx: *mut ::std::os::raw::c_void) -> bool>,
     pub close: ::std::option::Option<unsafe extern "C" fn(ctx: *mut ::std::os::raw::c_void)>,
 }
-#[allow(clippy::unnecessary_operation, clippy::identity_op)]
-const _: () = {
-    ["Size of whisper_model_loader"][::std::mem::size_of::<whisper_model_loader>() - 32usize];
-    ["Alignment of whisper_model_loader"][::std::mem::align_of::<whisper_model_loader>() - 8usize];
-    ["Offset of field: whisper_model_loader::context"]
-        [::std::mem::offset_of!(whisper_model_loader, context) - 0usize];
-    ["Offset of field: whisper_model_loader::read"]
-        [::std::mem::offset_of!(whisper_model_loader, read) - 8usize];
-    ["Offset of field: whisper_model_loader::eof"]
-        [::std::mem::offset_of!(whisper_model_loader, eof) - 16usize];
-    ["Offset of field: whisper_model_loader::close"]
-        [::std::mem::offset_of!(whisper_model_loader, close) - 24usize];
-};
 pub const whisper_gretype_WHISPER_GRETYPE_END: whisper_gretype = 0;
 pub const whisper_gretype_WHISPER_GRETYPE_ALT: whisper_gretype = 1;
 pub const whisper_gretype_WHISPER_GRETYPE_RULE_REF: whisper_gretype = 2;
@@ -200,16 +122,6 @@ pub struct whisper_grammar_element {
     pub type_: whisper_gretype,
     pub value: u32,
 }
-#[allow(clippy::unnecessary_operation, clippy::identity_op)]
-const _: () = {
-    ["Size of whisper_grammar_element"][::std::mem::size_of::<whisper_grammar_element>() - 8usize];
-    ["Alignment of whisper_grammar_element"]
-        [::std::mem::align_of::<whisper_grammar_element>() - 4usize];
-    ["Offset of field: whisper_grammar_element::type_"]
-        [::std::mem::offset_of!(whisper_grammar_element, type_) - 0usize];
-    ["Offset of field: whisper_grammar_element::value"]
-        [::std::mem::offset_of!(whisper_grammar_element, value) - 4usize];
-};
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct whisper_vad_params {
@@ -220,23 +132,6 @@ pub struct whisper_vad_params {
     pub speech_pad_ms: ::std::os::raw::c_int,
     pub samples_overlap: f32,
 }
-#[allow(clippy::unnecessary_operation, clippy::identity_op)]
-const _: () = {
-    ["Size of whisper_vad_params"][::std::mem::size_of::<whisper_vad_params>() - 24usize];
-    ["Alignment of whisper_vad_params"][::std::mem::align_of::<whisper_vad_params>() - 4usize];
-    ["Offset of field: whisper_vad_params::threshold"]
-        [::std::mem::offset_of!(whisper_vad_params, threshold) - 0usize];
-    ["Offset of field: whisper_vad_params::min_speech_duration_ms"]
-        [::std::mem::offset_of!(whisper_vad_params, min_speech_duration_ms) - 4usize];
-    ["Offset of field: whisper_vad_params::min_silence_duration_ms"]
-        [::std::mem::offset_of!(whisper_vad_params, min_silence_duration_ms) - 8usize];
-    ["Offset of field: whisper_vad_params::max_speech_duration_s"]
-        [::std::mem::offset_of!(whisper_vad_params, max_speech_duration_s) - 12usize];
-    ["Offset of field: whisper_vad_params::speech_pad_ms"]
-        [::std::mem::offset_of!(whisper_vad_params, speech_pad_ms) - 16usize];
-    ["Offset of field: whisper_vad_params::samples_overlap"]
-        [::std::mem::offset_of!(whisper_vad_params, samples_overlap) - 20usize];
-};
 extern "C" {
     pub fn whisper_version() -> *const ::std::os::raw::c_char;
 }
@@ -560,21 +455,6 @@ pub struct whisper_timings {
     pub batchd_ms: f32,
     pub prompt_ms: f32,
 }
-#[allow(clippy::unnecessary_operation, clippy::identity_op)]
-const _: () = {
-    ["Size of whisper_timings"][::std::mem::size_of::<whisper_timings>() - 20usize];
-    ["Alignment of whisper_timings"][::std::mem::align_of::<whisper_timings>() - 4usize];
-    ["Offset of field: whisper_timings::sample_ms"]
-        [::std::mem::offset_of!(whisper_timings, sample_ms) - 0usize];
-    ["Offset of field: whisper_timings::encode_ms"]
-        [::std::mem::offset_of!(whisper_timings, encode_ms) - 4usize];
-    ["Offset of field: whisper_timings::decode_ms"]
-        [::std::mem::offset_of!(whisper_timings, decode_ms) - 8usize];
-    ["Offset of field: whisper_timings::batchd_ms"]
-        [::std::mem::offset_of!(whisper_timings, batchd_ms) - 12usize];
-    ["Offset of field: whisper_timings::prompt_ms"]
-        [::std::mem::offset_of!(whisper_timings, prompt_ms) - 16usize];
-};
 extern "C" {
     pub fn whisper_get_timings(ctx: *mut whisper_context) -> *mut whisper_timings;
 }
@@ -689,151 +569,12 @@ pub struct whisper_full_params {
 pub struct whisper_full_params__bindgen_ty_1 {
     pub best_of: ::std::os::raw::c_int,
 }
-#[allow(clippy::unnecessary_operation, clippy::identity_op)]
-const _: () = {
-    ["Size of whisper_full_params__bindgen_ty_1"]
-        [::std::mem::size_of::<whisper_full_params__bindgen_ty_1>() - 4usize];
-    ["Alignment of whisper_full_params__bindgen_ty_1"]
-        [::std::mem::align_of::<whisper_full_params__bindgen_ty_1>() - 4usize];
-    ["Offset of field: whisper_full_params__bindgen_ty_1::best_of"]
-        [::std::mem::offset_of!(whisper_full_params__bindgen_ty_1, best_of) - 0usize];
-};
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct whisper_full_params__bindgen_ty_2 {
     pub beam_size: ::std::os::raw::c_int,
     pub patience: f32,
 }
-#[allow(clippy::unnecessary_operation, clippy::identity_op)]
-const _: () = {
-    ["Size of whisper_full_params__bindgen_ty_2"]
-        [::std::mem::size_of::<whisper_full_params__bindgen_ty_2>() - 8usize];
-    ["Alignment of whisper_full_params__bindgen_ty_2"]
-        [::std::mem::align_of::<whisper_full_params__bindgen_ty_2>() - 4usize];
-    ["Offset of field: whisper_full_params__bindgen_ty_2::beam_size"]
-        [::std::mem::offset_of!(whisper_full_params__bindgen_ty_2, beam_size) - 0usize];
-    ["Offset of field: whisper_full_params__bindgen_ty_2::patience"]
-        [::std::mem::offset_of!(whisper_full_params__bindgen_ty_2, patience) - 4usize];
-};
-#[allow(clippy::unnecessary_operation, clippy::identity_op)]
-const _: () = {
-    ["Size of whisper_full_params"][::std::mem::size_of::<whisper_full_params>() - 304usize];
-    ["Alignment of whisper_full_params"][::std::mem::align_of::<whisper_full_params>() - 8usize];
-    ["Offset of field: whisper_full_params::strategy"]
-        [::std::mem::offset_of!(whisper_full_params, strategy) - 0usize];
-    ["Offset of field: whisper_full_params::n_threads"]
-        [::std::mem::offset_of!(whisper_full_params, n_threads) - 4usize];
-    ["Offset of field: whisper_full_params::n_max_text_ctx"]
-        [::std::mem::offset_of!(whisper_full_params, n_max_text_ctx) - 8usize];
-    ["Offset of field: whisper_full_params::offset_ms"]
-        [::std::mem::offset_of!(whisper_full_params, offset_ms) - 12usize];
-    ["Offset of field: whisper_full_params::duration_ms"]
-        [::std::mem::offset_of!(whisper_full_params, duration_ms) - 16usize];
-    ["Offset of field: whisper_full_params::translate"]
-        [::std::mem::offset_of!(whisper_full_params, translate) - 20usize];
-    ["Offset of field: whisper_full_params::no_context"]
-        [::std::mem::offset_of!(whisper_full_params, no_context) - 21usize];
-    ["Offset of field: whisper_full_params::no_timestamps"]
-        [::std::mem::offset_of!(whisper_full_params, no_timestamps) - 22usize];
-    ["Offset of field: whisper_full_params::single_segment"]
-        [::std::mem::offset_of!(whisper_full_params, single_segment) - 23usize];
-    ["Offset of field: whisper_full_params::print_special"]
-        [::std::mem::offset_of!(whisper_full_params, print_special) - 24usize];
-    ["Offset of field: whisper_full_params::print_progress"]
-        [::std::mem::offset_of!(whisper_full_params, print_progress) - 25usize];
-    ["Offset of field: whisper_full_params::print_realtime"]
-        [::std::mem::offset_of!(whisper_full_params, print_realtime) - 26usize];
-    ["Offset of field: whisper_full_params::print_timestamps"]
-        [::std::mem::offset_of!(whisper_full_params, print_timestamps) - 27usize];
-    ["Offset of field: whisper_full_params::token_timestamps"]
-        [::std::mem::offset_of!(whisper_full_params, token_timestamps) - 28usize];
-    ["Offset of field: whisper_full_params::thold_pt"]
-        [::std::mem::offset_of!(whisper_full_params, thold_pt) - 32usize];
-    ["Offset of field: whisper_full_params::thold_ptsum"]
-        [::std::mem::offset_of!(whisper_full_params, thold_ptsum) - 36usize];
-    ["Offset of field: whisper_full_params::max_len"]
-        [::std::mem::offset_of!(whisper_full_params, max_len) - 40usize];
-    ["Offset of field: whisper_full_params::split_on_word"]
-        [::std::mem::offset_of!(whisper_full_params, split_on_word) - 44usize];
-    ["Offset of field: whisper_full_params::max_tokens"]
-        [::std::mem::offset_of!(whisper_full_params, max_tokens) - 48usize];
-    ["Offset of field: whisper_full_params::debug_mode"]
-        [::std::mem::offset_of!(whisper_full_params, debug_mode) - 52usize];
-    ["Offset of field: whisper_full_params::audio_ctx"]
-        [::std::mem::offset_of!(whisper_full_params, audio_ctx) - 56usize];
-    ["Offset of field: whisper_full_params::tdrz_enable"]
-        [::std::mem::offset_of!(whisper_full_params, tdrz_enable) - 60usize];
-    ["Offset of field: whisper_full_params::suppress_regex"]
-        [::std::mem::offset_of!(whisper_full_params, suppress_regex) - 64usize];
-    ["Offset of field: whisper_full_params::initial_prompt"]
-        [::std::mem::offset_of!(whisper_full_params, initial_prompt) - 72usize];
-    ["Offset of field: whisper_full_params::carry_initial_prompt"]
-        [::std::mem::offset_of!(whisper_full_params, carry_initial_prompt) - 80usize];
-    ["Offset of field: whisper_full_params::prompt_tokens"]
-        [::std::mem::offset_of!(whisper_full_params, prompt_tokens) - 88usize];
-    ["Offset of field: whisper_full_params::prompt_n_tokens"]
-        [::std::mem::offset_of!(whisper_full_params, prompt_n_tokens) - 96usize];
-    ["Offset of field: whisper_full_params::language"]
-        [::std::mem::offset_of!(whisper_full_params, language) - 104usize];
-    ["Offset of field: whisper_full_params::detect_language"]
-        [::std::mem::offset_of!(whisper_full_params, detect_language) - 112usize];
-    ["Offset of field: whisper_full_params::suppress_blank"]
-        [::std::mem::offset_of!(whisper_full_params, suppress_blank) - 113usize];
-    ["Offset of field: whisper_full_params::suppress_nst"]
-        [::std::mem::offset_of!(whisper_full_params, suppress_nst) - 114usize];
-    ["Offset of field: whisper_full_params::temperature"]
-        [::std::mem::offset_of!(whisper_full_params, temperature) - 116usize];
-    ["Offset of field: whisper_full_params::max_initial_ts"]
-        [::std::mem::offset_of!(whisper_full_params, max_initial_ts) - 120usize];
-    ["Offset of field: whisper_full_params::length_penalty"]
-        [::std::mem::offset_of!(whisper_full_params, length_penalty) - 124usize];
-    ["Offset of field: whisper_full_params::temperature_inc"]
-        [::std::mem::offset_of!(whisper_full_params, temperature_inc) - 128usize];
-    ["Offset of field: whisper_full_params::entropy_thold"]
-        [::std::mem::offset_of!(whisper_full_params, entropy_thold) - 132usize];
-    ["Offset of field: whisper_full_params::logprob_thold"]
-        [::std::mem::offset_of!(whisper_full_params, logprob_thold) - 136usize];
-    ["Offset of field: whisper_full_params::no_speech_thold"]
-        [::std::mem::offset_of!(whisper_full_params, no_speech_thold) - 140usize];
-    ["Offset of field: whisper_full_params::greedy"]
-        [::std::mem::offset_of!(whisper_full_params, greedy) - 144usize];
-    ["Offset of field: whisper_full_params::beam_search"]
-        [::std::mem::offset_of!(whisper_full_params, beam_search) - 148usize];
-    ["Offset of field: whisper_full_params::new_segment_callback"]
-        [::std::mem::offset_of!(whisper_full_params, new_segment_callback) - 160usize];
-    ["Offset of field: whisper_full_params::new_segment_callback_user_data"]
-        [::std::mem::offset_of!(whisper_full_params, new_segment_callback_user_data) - 168usize];
-    ["Offset of field: whisper_full_params::progress_callback"]
-        [::std::mem::offset_of!(whisper_full_params, progress_callback) - 176usize];
-    ["Offset of field: whisper_full_params::progress_callback_user_data"]
-        [::std::mem::offset_of!(whisper_full_params, progress_callback_user_data) - 184usize];
-    ["Offset of field: whisper_full_params::encoder_begin_callback"]
-        [::std::mem::offset_of!(whisper_full_params, encoder_begin_callback) - 192usize];
-    ["Offset of field: whisper_full_params::encoder_begin_callback_user_data"]
-        [::std::mem::offset_of!(whisper_full_params, encoder_begin_callback_user_data) - 200usize];
-    ["Offset of field: whisper_full_params::abort_callback"]
-        [::std::mem::offset_of!(whisper_full_params, abort_callback) - 208usize];
-    ["Offset of field: whisper_full_params::abort_callback_user_data"]
-        [::std::mem::offset_of!(whisper_full_params, abort_callback_user_data) - 216usize];
-    ["Offset of field: whisper_full_params::logits_filter_callback"]
-        [::std::mem::offset_of!(whisper_full_params, logits_filter_callback) - 224usize];
-    ["Offset of field: whisper_full_params::logits_filter_callback_user_data"]
-        [::std::mem::offset_of!(whisper_full_params, logits_filter_callback_user_data) - 232usize];
-    ["Offset of field: whisper_full_params::grammar_rules"]
-        [::std::mem::offset_of!(whisper_full_params, grammar_rules) - 240usize];
-    ["Offset of field: whisper_full_params::n_grammar_rules"]
-        [::std::mem::offset_of!(whisper_full_params, n_grammar_rules) - 248usize];
-    ["Offset of field: whisper_full_params::i_start_rule"]
-        [::std::mem::offset_of!(whisper_full_params, i_start_rule) - 256usize];
-    ["Offset of field: whisper_full_params::grammar_penalty"]
-        [::std::mem::offset_of!(whisper_full_params, grammar_penalty) - 264usize];
-    ["Offset of field: whisper_full_params::vad"]
-        [::std::mem::offset_of!(whisper_full_params, vad) - 268usize];
-    ["Offset of field: whisper_full_params::vad_model_path"]
-        [::std::mem::offset_of!(whisper_full_params, vad_model_path) - 272usize];
-    ["Offset of field: whisper_full_params::vad_params"]
-        [::std::mem::offset_of!(whisper_full_params, vad_params) - 280usize];
-};
 extern "C" {
     pub fn whisper_context_default_params_by_ref() -> *mut whisper_context_params;
 }
@@ -1078,19 +819,6 @@ pub struct whisper_vad_context_params {
     pub use_gpu: bool,
     pub gpu_device: ::std::os::raw::c_int,
 }
-#[allow(clippy::unnecessary_operation, clippy::identity_op)]
-const _: () = {
-    ["Size of whisper_vad_context_params"]
-        [::std::mem::size_of::<whisper_vad_context_params>() - 12usize];
-    ["Alignment of whisper_vad_context_params"]
-        [::std::mem::align_of::<whisper_vad_context_params>() - 4usize];
-    ["Offset of field: whisper_vad_context_params::n_threads"]
-        [::std::mem::offset_of!(whisper_vad_context_params, n_threads) - 0usize];
-    ["Offset of field: whisper_vad_context_params::use_gpu"]
-        [::std::mem::offset_of!(whisper_vad_context_params, use_gpu) - 4usize];
-    ["Offset of field: whisper_vad_context_params::gpu_device"]
-        [::std::mem::offset_of!(whisper_vad_context_params, gpu_device) - 8usize];
-};
 extern "C" {
     pub fn whisper_vad_default_context_params() -> whisper_vad_context_params;
 }

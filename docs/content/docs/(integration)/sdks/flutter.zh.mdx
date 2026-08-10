@@ -68,7 +68,7 @@ final wavBytes = result.audioAsWav(sampleRate: 24000);
 ## 语音转文字
 
 ```dart
-final model = await Xybrid.model('whisper-tiny').load();
+final model = await Xybrid.model('whisper-tiny-ggml').load();
 final envelope = XybridEnvelope.audio(bytes: audioBytes, sampleRate: 16000);
 final result = await model.run(envelope);
 print(result.text); // "Hello, how are you?"

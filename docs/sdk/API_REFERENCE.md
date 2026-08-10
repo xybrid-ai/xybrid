@@ -46,7 +46,7 @@ SDKs may prefix or adjust casing:
 All SDKs follow the same three-step pattern:
 
 ```
-1. Describe a Model →  Xybrid.model("whisper-tiny")
+1. Describe a Model →  Xybrid.model("whisper-tiny-ggml")
 2. Load the Model   →  await loader.load()
 3. Run Inference    →  await model.run(envelope: input)
 ```
@@ -847,7 +847,7 @@ The optional `voiceId` and `speed` parameters work seamlessly in pipelines:
 final pipeline = XybridPipeline.fromYaml('''
 name: voice-assistant
 stages:
-  - model: whisper-tiny
+  - model: whisper-tiny-ggml
   - model: llama-3-8b
   - model: kokoro-82m
 ''');
@@ -863,7 +863,7 @@ For pipeline-level voice configuration, use stage config in YAML:
 ```yaml
 name: voice-assistant
 stages:
-  - model: whisper-tiny
+  - model: whisper-tiny-ggml
   - model: llama-3-8b
   - model: kokoro-82m
     config:

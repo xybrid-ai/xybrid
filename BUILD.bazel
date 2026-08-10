@@ -6,6 +6,7 @@ exports_files([
 ])
 
 load("@bazel_skylib//rules:common_settings.bzl", "bool_flag")
+load("@rules_cc//cc:defs.bzl", "cc_library")
 
 # The macOS GPU lane toggle (Flip 2). Both darwin lanes share the SAME Rust
 # feature set (candle-metal/CoreML/vision are bindings — pure Rust, cross-
@@ -419,6 +420,72 @@ cmake(
         "manual",
         "no-remote-exec",
     ],
+    visibility = ["//visibility:public"],
+)
+
+# whisper.cpp, built on the ggml //:llama already produced.
+#
+# A plain cc_library, NOT a second rules_foreign_cc cmake() target. Two reasons,
+# and the first is the whole point of the design:
+#
+#  1. **Exactly one ggml in the binary.** whisper.cpp vendors its own ggml under
+#     `vendor/whisper-cpp/ggml/`, and driving its CMakeLists would configure and
+#     build that copy. A second ggml means duplicate symbols, a bigger artifact,
+#     and two divergent tensor runtimes in one process. Depending on `//:llama`
+#     for both the headers and the archives makes the single-ggml invariant a
+#     property of the build graph rather than a convention.
+#  2. It is cheap and portable. Upstream's `src/CMakeLists.txt` builds
+#     `libwhisper` from ONE translation unit whose only dependencies are the
+#     ggml headers and Threads — nothing is generated at configure time. So this
+#     needs no cmake toolchain, works identically on the NDK / windows-msvc /
+#     apple lanes, and is remote-cacheable like any other cc_library.
+#
+# `src/parakeet.cpp` is deliberately not compiled: a second architecture behind
+# its own header, worth nothing until there is a Parakeet model story.
+#
+# The `//:metal_enabled` select mirrors //crates/llama-cpp-sys:wrapper_cc — on
+# that lane ggml comes from //:llama_metal instead, and linking whisper against
+# the CPU llama there would reintroduce the duplicate this target exists to
+# avoid.
+cc_library(
+    name = "whisper",
+    srcs = ["vendor/whisper-cpp/src/whisper.cpp"],
+    hdrs = [
+        "vendor/whisper-cpp/include/whisper.h",
+        "vendor/whisper-cpp/src/whisper-arch.h",
+    ],
+    copts = [
+        # Upstream pins cxx_std_11 with a "don't bump" comment, but C++17 is a
+        # superset for this TU and matches the rest of our native surface.
+        "-std=c++17",
+        # Vendored third-party code: silence its noise so it cannot drown real
+        # diagnostics from first-party targets.
+        "-Wno-unused-function",
+        "-Wno-unused-variable",
+        "-Wno-deprecated-declarations",
+    ],
+    # Upstream's CMake injects this as a private compile definition and
+    # `whisper_version()` returns it; without it the TU does not compile. Keep in
+    # step with `project(... VERSION x.y.z)` in vendor/whisper-cpp/CMakeLists.txt
+    # on every submodule bump — the cargo build script parses that file for the
+    # same value.
+    local_defines = [
+        # whisper-arch.h pulls in C++ headers before whisper.cpp defines this
+        # itself. MinGW can therefore process <math.h> too early and hide the
+        # non-standard M_PI constant in strict language modes. Define it from
+        # the command line so it is visible from the first header; the empty
+        # replacement matches upstream's later definition without a warning.
+        "_USE_MATH_DEFINES=",
+        'WHISPER_VERSION=\\"1.9.2\\"',
+    ],
+    includes = [
+        "vendor/whisper-cpp/include",
+        "vendor/whisper-cpp/src",
+    ],
+    deps = select({
+        "//:metal_enabled": ["//:llama_metal"],
+        "//conditions:default": ["//:llama"],
+    }),
     visibility = ["//visibility:public"],
 )
 

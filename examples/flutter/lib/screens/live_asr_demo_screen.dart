@@ -21,11 +21,34 @@ class LiveAsrScreen extends StatefulWidget {
 /// High-level screen phases.
 enum _Phase { idle, loadingModel, loadError, ready, listening, finalizing }
 
+/// Which ASR engine runs the rolling window.
+///
+/// Only whisper.cpp remains. The Candle arm was removed when Candle left the
+/// platform presets — a button that always fails is worse than no button. The
+/// A/B harness that produced the comparison lives in git history at the
+/// measurement commit, and the numbers are recorded in
+/// `.context/whispercpp-design.md`: 9871 ms to first partial on Candle vs
+/// 2724 ms on whisper.cpp, same Pixel 8, same session.
+enum _Backend {
+  /// The multilingual Q5_1 GGML bundle from the registry, run by whisper.cpp.
+  ///
+  /// Served as its own mask id rather than replacing `whisper-tiny` in place:
+  /// that id still resolves to the SafeTensors/Candle bundle, so both
+  /// generations of client keep working and neither ever gets an artifact it
+  /// cannot execute.
+  whisperCpp('whisper.cpp (Q5_1 GGML)', 'whisper-tiny-ggml');
+
+  const _Backend(this.label, this.id);
+
+  final String label;
+  final String id;
+}
+
 class _LiveAsrScreenState extends State<LiveAsrScreen> {
   final _recorder = XybridRecorder();
 
-  /// ASR model loaded from the registry (backend auto-detected by the engine).
-  static const _modelId = 'whisper-tiny';
+  /// Which engine the loaded model runs on.
+  _Backend _backend = _Backend.whisperCpp;
 
   _Phase _phase = _Phase.idle;
   double? _loadProgress;
@@ -46,6 +69,28 @@ class _LiveAsrScreenState extends State<LiveAsrScreen> {
   /// Chunks seen this session, for a bit of live feedback.
   int _chunks = 0;
 
+  /// When the microphone started feeding the engine — the origin for the
+  /// first-partial latency below.
+  DateTime? _streamStartedAt;
+
+  /// When the previous partial arrived, so each new one yields a cadence.
+  DateTime? _lastPartialAt;
+
+  /// Milliseconds from stream start to the first partial transcript.
+  int? _firstPartialMs;
+
+  /// Gaps between consecutive partials, in milliseconds.
+  final List<int> _cadencesMs = [];
+
+  /// Median cadence, which is more honest than a mean here: the first steady
+  /// window after the warm-up ones is systematically slower and would drag an
+  /// average that a user never experiences.
+  int? get _medianCadenceMs {
+    if (_cadencesMs.isEmpty) return null;
+    final sorted = [..._cadencesMs]..sort();
+    return sorted[sorted.length ~/ 2];
+  }
+
   @override
   void dispose() {
     _loadSub?.cancel();
@@ -56,14 +101,16 @@ class _LiveAsrScreenState extends State<LiveAsrScreen> {
 
   // ── Model loading ──────────────────────────────────────────────────────
 
-  void _loadModel() {
+  Future<void> _loadModel(_Backend backend) async {
     setState(() {
+      _backend = backend;
       _phase = _Phase.loadingModel;
       _loadProgress = null;
       _errorMessage = '';
     });
 
-    final loader = XybridModelLoader.fromRegistry(_modelId);
+    // The bundle's `GgmlWhisper` template routes the engine to whisper.cpp.
+    final loader = XybridModelLoader.fromRegistry(backend.id);
     _loadSub = loader.loadWithProgress().listen(
       (event) async {
         if (!mounted) return;
@@ -121,6 +168,8 @@ class _LiveAsrScreenState extends State<LiveAsrScreen> {
 
       // Listen for partials *before* feeding any audio.
       _partialSub = session.partials.listen((partial) {
+        final now = DateTime.now();
+        _recordPartialTiming(now);
         if (!mounted) return;
         setState(() {
           _liveText = partial.text;
@@ -130,6 +179,10 @@ class _LiveAsrScreenState extends State<LiveAsrScreen> {
 
       // Pipe microphone PCM (already f32 mono 16 kHz) straight into the engine.
       await _recorder.startStreaming(onSamples: session.feed);
+      _streamStartedAt = DateTime.now();
+      _lastPartialAt = null;
+      _firstPartialMs = null;
+      _cadencesMs.clear();
 
       setState(() {
         _session = session;
@@ -149,6 +202,25 @@ class _LiveAsrScreenState extends State<LiveAsrScreen> {
         ).showSnackBar(SnackBar(content: Text('Failed to start: $e')));
       }
     }
+  }
+
+  /// Record first-partial latency and inter-partial cadence.
+  ///
+  /// Also logged to the console with a grep-able prefix so a run can be
+  /// measured over `adb logcat` without reading the screen.
+  void _recordPartialTiming(DateTime now) {
+    final startedAt = _streamStartedAt;
+    if (startedAt == null) return;
+
+    if (_firstPartialMs == null) {
+      _firstPartialMs = now.difference(startedAt).inMilliseconds;
+      debugPrint('[ASRPERF] backend=${_backend.id} first_partial_ms=$_firstPartialMs');
+    } else if (_lastPartialAt != null) {
+      final cadence = now.difference(_lastPartialAt!).inMilliseconds;
+      _cadencesMs.add(cadence);
+      debugPrint('[ASRPERF] backend=${_backend.id} cadence_ms=$cadence');
+    }
+    _lastPartialAt = now;
   }
 
   Future<void> _stop() async {
@@ -194,10 +266,12 @@ class _LiveAsrScreenState extends State<LiveAsrScreen> {
           _Phase.loadingModel => _LoadingView(progress: _loadProgress),
           _Phase.loadError => ErrorCard(
             errorMessage: _errorMessage,
-            onRetry: _loadModel,
+            onRetry: () => _loadModel(_backend),
           ),
           _ => _ActiveView(
-            modelId: _modelId,
+            modelId: _backend.label,
+            firstPartialMs: _firstPartialMs,
+            medianCadenceMs: _medianCadenceMs,
             listening: _phase == _Phase.listening,
             finalizing: _phase == _Phase.finalizing,
             liveText: _liveText,
@@ -215,7 +289,7 @@ class _LiveAsrScreenState extends State<LiveAsrScreen> {
 class _IdleView extends StatelessWidget {
   const _IdleView({required this.onLoad});
 
-  final VoidCallback onLoad;
+  final ValueChanged<_Backend> onLoad;
 
   @override
   Widget build(BuildContext context) {
@@ -231,11 +305,16 @@ class _IdleView extends StatelessWidget {
             textAlign: TextAlign.center,
           ),
           const SizedBox(height: 24),
-          FilledButton.icon(
-            onPressed: onLoad,
-            icon: const Icon(Icons.download),
-            label: const Text('Load ASR model'),
-          ),
+          // One button per engine: the point of this screen is the comparison,
+          // so make it a choice rather than a build-time constant.
+          for (final backend in _Backend.values) ...[
+            FilledButton.icon(
+              onPressed: () => onLoad(backend),
+              icon: const Icon(Icons.download),
+              label: Text(backend.label),
+            ),
+            const SizedBox(height: 12),
+          ],
         ],
       ),
     );
@@ -269,6 +348,8 @@ class _LoadingView extends StatelessWidget {
 class _ActiveView extends StatelessWidget {
   const _ActiveView({
     required this.modelId,
+    required this.firstPartialMs,
+    required this.medianCadenceMs,
     required this.listening,
     required this.finalizing,
     required this.liveText,
@@ -279,6 +360,14 @@ class _ActiveView extends StatelessWidget {
   });
 
   final String modelId;
+
+  /// Milliseconds from stream start to the first partial — the number a user
+  /// actually feels when they start speaking.
+  final int? firstPartialMs;
+
+  /// Median gap between partials once the stream is running.
+  final int? medianCadenceMs;
+
   final bool listening;
   final bool finalizing;
   final String liveText;
@@ -309,6 +398,16 @@ class _ActiveView extends StatelessWidget {
                       ? 'Listening ($chunks chunks)'
                       : 'Ready',
                 ),
+                if (firstPartialMs != null)
+                  InfoRow(
+                    label: 'First partial',
+                    value: '${(firstPartialMs! / 1000).toStringAsFixed(1)} s',
+                  ),
+                if (medianCadenceMs != null)
+                  InfoRow(
+                    label: 'Cadence (median)',
+                    value: '${(medianCadenceMs! / 1000).toStringAsFixed(1)} s',
+                  ),
               ],
             ),
           ),

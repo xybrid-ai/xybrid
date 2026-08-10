@@ -258,9 +258,9 @@ Chain models together into a single multi-model inference pipeline (MMP) — bui
 # voice-assistant.yaml
 name: voice-assistant
 stages:
-  - model: whisper-tiny    # Speech → text
-  - model: qwen2.5-0.5b    # Process with LLM
-  - model: kokoro-82m      # Text → speech
+  - model: whisper-tiny-ggml  # Speech → text
+  - model: qwen2.5-0.5b       # Process with LLM
+  - model: kokoro-82m         # Text → speech
 ```
 
 **CLI:**
@@ -316,7 +316,8 @@ All models run entirely on-device. No cloud, no API keys required. Browse the fu
 
 | Model | Params | Format | Description |
 |-------|--------|--------|-------------|
-| Whisper Tiny | 39M | SafeTensors | Multilingual transcription (Candle runtime) |
+| Whisper Tiny (`whisper-tiny-ggml`) | 39M | GGML Q5_1 | Multilingual transcription on whisper.cpp — in every platform preset |
+| Whisper Tiny (`whisper-tiny`) | 39M | SafeTensors | Same weights on the Candle runtime — needs a build with the `candle` feature |
 | Wav2Vec2 Base | 95M | ONNX | English ASR with CTC decoding |
 
 ### Text-to-Speech
@@ -410,7 +411,7 @@ See the [model metadata docs](docs/sdk/API_REFERENCE.md) for the full schema, or
 | Embeddings | 🔜 | 🔜 | 🔜 | 🔜 | 🔜 |
 | Multi-Model Pipelines (MMP) | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Model Download & Caching | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Hardware Acceleration | Metal, ANE | CPU | Metal, ANE | CUDA | CUDA |
+| Hardware Acceleration | Metal, ANE | CPU | Metal, ANE | CUDA, Vulkan | CUDA |
 
 **SDK MMP support:** Flutter ✅ · Rust ✅ · Kotlin 🔜 · Swift 🔜 · Unity 🔜
 
@@ -429,7 +430,7 @@ CLI today (`xybrid repl` ships built-in `web_search` + your own via
 - **Offline capable** — No internet required after initial model download.
 - **Cross-platform** — One API across iOS, Android, macOS, Linux, and Windows.
 - **Multi-model pipelines (MMP)** — Chain models together (ASR → LLM → TTS) in a single call.
-- **Automatic optimization** — Hardware acceleration on Apple Neural Engine, Metal, and CUDA.
+- **Hardware acceleration** — Apple Neural Engine, Metal, CUDA, plus opt-in Vulkan for Linux llama.cpp builds.
 
 ### How it compares
 

@@ -37,7 +37,7 @@ The command exits 0 in both cases — it is a status report, not an error.
 The header is a single line, semicolon-separated:
 
 ```
-X-Xybrid-Client: binding=flutter; sdk_version=0.1.0-beta12; core_version=0.1.0-beta12; platform=ios-arm64; backends=candle-metal,llm-llamacpp,ort-coreml,ort-download
+X-Xybrid-Client: binding=flutter; sdk_version=0.4.1; core_version=0.4.1; platform=ios-arm64; backends=asr-whispercpp,llm-llamacpp,llm-llamacpp-vision,ort-coreml,ort-download,vision
 ```
 
 | Field | Type | Description |
@@ -46,7 +46,7 @@ X-Xybrid-Client: binding=flutter; sdk_version=0.1.0-beta12; core_version=0.1.0-b
 | `sdk_version` | semver-ish string | `xybrid-sdk` package version, baked in at compile time via `CARGO_PKG_VERSION`. |
 | `core_version` | semver-ish string | `xybrid-core` package version, baked in via the same mechanism. Usually equal to `sdk_version` but reported independently so version skews surface. |
 | `platform` | enum string | Compile-time target triple summary. See the table below. |
-| `backends` | comma-separated list | Alphabetical list of enabled runtime feature flags from `xybrid_core::features::enabled()`. May be empty (`backends=`) if no backends are compiled in. |
+| `backends` | comma-separated list | Alphabetical list of enabled runtime feature flags from `xybrid_core::features::enabled()`. Never empty: `vision` is reported unconditionally because the vision pipeline is always compiled in. |
 
 ### `binding` values
 
@@ -80,15 +80,18 @@ Source: `xybrid_sdk::current_platform()` (`crates/xybrid-sdk/src/platform.rs`). 
 
 | Value | Cargo feature | Notes |
 |-------|---------------|-------|
-| `candle-cuda` | `candle-cuda` | Candle backend with CUDA acceleration |
-| `candle-metal` | `candle-metal` | Candle backend with Metal acceleration |
+| `asr-whispercpp` | `asr-whispercpp` | whisper.cpp speech recognition; in every `platform-*` preset. Pulls `llm-llamacpp` transitively — whisper.cpp links the ggml that llama.cpp builds |
+| `candle-cuda` | `candle-cuda` | Candle backend with CUDA acceleration. Opt-in only — no `platform-*` preset enables it |
+| `candle-metal` | `candle-metal` | Candle backend with Metal acceleration. Opt-in only — no `platform-*` preset enables it |
 | `espeak` | `espeak` | espeak-ng phonemizer (multi-language TTS) |
 | `llm-llamacpp` | `llm-llamacpp` | llama.cpp backend (universal LLM runtime) |
+| `llm-llamacpp-vision` | `llm-llamacpp-vision` | Native llama multimodal (mtmd) VLM backend layered on `llm-llamacpp`; in every `platform-*` preset |
 | `llm-mistral` | `llm-mistral` | mistral.rs backend |
 | `ort-coreml` | `ort-coreml` | ONNX Runtime with CoreML execution provider |
 | `ort-cuda` | `ort-cuda` | ONNX Runtime with CUDA execution provider |
 | `ort-download` | `ort-download` | ONNX Runtime resolved via prebuilt downloads |
 | `ort-dynamic` | `ort-dynamic` | ONNX Runtime loaded dynamically at runtime (Android) |
+| `vision` | _(none — always on)_ | Vision envelopes + preprocessing pipeline; compiled in unconditionally, so this value appears on every build |
 
 Source: `xybrid_core::features::enabled()` (`crates/xybrid-core/src/features.rs`). The list is computed once per process from `cfg!(feature = "...")` checks and cached.
 

@@ -751,6 +751,12 @@ pub fn set_speculative_cloud(enabled: bool) {
     facade::set_speculative_cloud(enabled);
 }
 
+/// Whether a Xybrid gateway API key is resolvable (in-memory or env).
+#[export]
+pub fn has_api_key() -> bool {
+    facade::has_api_key()
+}
+
 /// Whether the global speculative-cloud default is on.
 #[export]
 pub fn is_speculative_cloud_enabled() -> bool {

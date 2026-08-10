@@ -245,9 +245,9 @@ let result = model.run(&Envelope::text("国破山河在，城春草木深"))?;
 # voice-assistant.yaml
 name: voice-assistant
 stages:
-  - model: whisper-tiny    # 语音 → 文本
-  - model: qwen2.5-0.5b    # 用 LLM 处理
-  - model: kokoro-82m      # 文本 → 语音
+  - model: whisper-tiny-ggml  # 语音 → 文本
+  - model: qwen2.5-0.5b       # 用 LLM 处理
+  - model: kokoro-82m         # 文本 → 语音
 ```
 
 **CLI:**
@@ -303,7 +303,8 @@ let result = pipeline.run(&Envelope::audio(audio_bytes))?;
 
 | 模型 | 参数量 | 格式 | 简介 |
 |------|--------|------|------|
-| Whisper Tiny | 39M | SafeTensors | 多语言转录（Candle 运行时） |
+| Whisper Tiny（`whisper-tiny-ggml`） | 39M | GGML Q5_1 | 多语言转录，基于 whisper.cpp — 所有平台预设均已内置 |
+| Whisper Tiny（`whisper-tiny`） | 39M | SafeTensors | 相同权重，运行于 Candle — 需要启用 `candle` 特性重新构建 |
 | Wav2Vec2 Base | 95M | ONNX | 英语 ASR，CTC 解码 |
 
 ### 文本转语音
@@ -395,7 +396,7 @@ Skills 与 agent 无关，位于 [`agents/skills/`](agents/skills/)。安装脚�
 | 嵌入模型 | 🔜 | 🔜 | 🔜 | 🔜 | 🔜 |
 | 多模型流水线（MMP） | ✅ | ✅ | ✅ | ✅ | ✅ |
 | 模型下载与缓存 | ✅ | ✅ | ✅ | ✅ | ✅ |
-| 硬件加速 | Metal, ANE | CPU | Metal, ANE | CUDA | CUDA |
+| 硬件加速 | Metal, ANE | CPU | Metal, ANE | CUDA, Vulkan | CUDA |
 
 **SDK MMP 支持：** Flutter ✅ · Rust ✅ · Kotlin 🔜 · Swift 🔜 · Unity 🔜
 
@@ -407,7 +408,7 @@ Skills 与 agent 无关，位于 [`agents/skills/`](agents/skills/)。安装脚�
 - **离线可用** — 初次模型下载后无需互联网。
 - **跨平台** — iOS、Android、macOS、Linux 和 Windows 使用统一的 API。
 - **多模型流水线（MMP）** — 在单次调用中链接多个模型（ASR → LLM → TTS）。
-- **自动优化** — 在 Apple Neural Engine、Metal 和 CUDA 上进行硬件加速。
+- **硬件加速** — 支持 Apple Neural Engine、Metal、CUDA，以及 Linux llama.cpp 构建可选的 Vulkan。
 
 ### 与其他方案对比
 

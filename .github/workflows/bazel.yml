@@ -136,14 +136,49 @@ jobs:
           bazelisk build --nobuild \
             //crates/... //bindings/... //macros/... //xtask/... //integration-tests/... //:llama
 
-      # The RBE-proven hermetic linux chain (PR #326 gates 3B/4).
-      - name: Build llama chain on RBE (linux, hermetic)
+      # The RBE-proven hermetic linux chain (PR #326 gates 3B/4), plus the
+      # whisper.cpp chain that sits on the same ggml. //:whisper is a plain
+      # cc_library depending on //:llama, so building both here is what proves
+      # the single-ggml invariant holds in the Bazel graph — not just in cargo,
+      # where the build script has to hand-order the link flags.
+      - name: Build llama + whisper chains on RBE (linux, hermetic)
         if: env.BUILDBUDDY_API_KEY != ''
         run: |
           bazelisk build --config=remote \
             //:llama \
             //crates/llama-cpp-sys:llama_cpp_sys \
-            //crates/xybrid-llama:xybrid_llama
+            //crates/xybrid-llama:xybrid_llama \
+            //:whisper \
+            //crates/whisper-cpp-sys:xybrid_whisper_sys \
+            //crates/xybrid-whisper:xybrid_whisper
+
+      # Exactly one ggml must reach the link. A future whisper.cpp bump that
+      # stops compiling against llama's pinned ggml would otherwise be fixed by
+      # someone reaching for whisper's bundled copy, silently shipping two
+      # tensor runtimes in one binary. This asserts the graph shape instead of
+      # trusting the convention.
+      # cquery, NOT query: the unconfigured `query` loads every arm of every
+      # select in the transitive closure, which drags in hermetic-llvm's
+      # per-arch kernel-headers repos and fails to resolve one of them. cquery
+      # evaluates the resolved configuration only, which is also the graph we
+      # actually care about asserting on.
+      - name: Assert whisper links llama's ggml, not a second copy
+        if: env.BUILDBUDDY_API_KEY != ''
+        run: |
+          deps=$(bazelisk cquery --config=remote 'deps(//:whisper)' --output=label)
+          # //:llama on every hermetic lane; //:llama_metal on --//:metal=true.
+          if ! grep -qE '^//:llama(_metal)? ' <<<"$deps"; then
+            echo "FATAL: //:whisper depends on neither //:llama nor //:llama_metal," >&2
+            echo "       so it is not building on the ggml the rest of the binary" >&2
+            echo "       already links." >&2
+            exit 1
+          fi
+          if grep -q 'vendor/whisper-cpp/ggml' <<<"$deps"; then
+            echo "FATAL: //:whisper pulled in whisper.cpp's bundled ggml." >&2
+            echo "       Two ggml copies in one binary is the failure mode the" >&2
+            echo "       whole design exists to prevent." >&2
+            exit 1
+          fi
 
       # Tests under Bazel. Bazel BUILDS every shipped artifact; these targets are
       # what stop it from shipping unverified. Runs on this ubuntu runner
@@ -174,6 +209,7 @@ jobs:
             //crates/xybrid-ffi-facade:xybrid-ffi-facade_test \
             //crates/xybrid-llama:all \
             //crates/xybrid-sdk:all \
+            //crates/xybrid-whisper:all \
             //integration-tests:all \
             //xtask:xtask_test
 
@@ -258,13 +294,15 @@ jobs:
           file "$DLL"
           file "$DLL" | grep -q 'PE32+.*x86-64' || { echo "NOT a PE32+ x86-64 DLL"; exit 1; }
           python3 -m pip install --quiet --user pefile
+          # Two namespaces here, and boltffi 0.29 only renamed one of them:
+          # crate exports gained a `boltffi_function_<crate>_` prefix, while the
+          # Bolt runtime ABI (free_buf, last_error_message) kept its flat names.
           python3 tools/scripts/audit_windows_dll.py --dll "$DLL" \
-            --require-export boltffi_version \
-            --require-export boltffi_configure_runtime \
+            --require-export boltffi_function_xybrid_bolt_version \
+            --require-export boltffi_function_xybrid_bolt_configure_runtime \
             --require-export boltffi_free_buf \
             --require-export boltffi_last_error_message \
-            --require-exports-from-csharp bindings/unity/Runtime/Bolt/XybridBolt.cs \
-            --require-exports-from-csharp bindings/unity/Runtime/BoltSupplement/XybridInference.cs
+            --require-exports-from-csharp bindings/unity/Runtime/Bolt/XybridBolt.cs
           mkdir -p /tmp/win-bolt && cp "$DLL" /tmp/win-bolt/xybrid_bolt.dll
           echo "windows bolt DLL payload + audit: OK ✅"
 
@@ -422,10 +460,20 @@ jobs:
     timeout-minutes: 60
     env:
       BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
+    # Every build step below is secret-gated, so without RBE this job succeeds
+    # having produced nothing. Downstream jobs can't read secrets in a job-level
+    # `if`, so publish the same fork-safety signal the `bazel` job does — else a
+    # consumer sees a green producer and fails on the missing artifact.
+    outputs:
+      rbe: ${{ steps.rbe-check.outputs.rbe }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           submodules: true
+
+      - name: Check RBE availability
+        id: rbe-check
+        run: echo "rbe=${{ env.BUILDBUDDY_API_KEY != '' }}" >> "$GITHUB_OUTPUT"
 
       # The Microsoft payload lands on top of the usual LLVM/rustc/NDK fetches,
       # so this job needs the headroom more than the others do.
@@ -524,7 +572,11 @@ jobs:
   bazel-windows-msvc-smoke:
     name: Bazel windows-MSVC Flutter DLL smoke (loads it on Windows)
     needs: bazel-windows-msvc
-    if: github.event_name != 'pull_request'
+    # Gate on the producer's RBE signal, not the event name: a push in a fork is
+    # not a pull_request, so the event check alone let this run against a
+    # producer that had skipped every build step, and the download failed with
+    # "Artifact not found". Matches bazel-windows-smoke / bazel-windows-bolt-smoke.
+    if: needs.bazel-windows-msvc.outputs.rbe == 'true'
     runs-on: windows-latest
     steps:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4

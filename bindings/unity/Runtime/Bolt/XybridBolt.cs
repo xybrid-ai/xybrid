@@ -3,15 +3,388 @@
 // </auto-generated>
 #nullable enable
 
-using System;
 using System.Runtime.InteropServices;
-using System.Buffers;
-using System.Buffers.Binary;
-using System.Runtime.CompilerServices;
-using System.Text;
 
 namespace XybridBolt
 {
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct FfiBuf
+    {
+        internal nint ptr;
+        internal nuint len;
+        internal nuint cap;
+        internal nuint align;
+
+        internal static FfiBuf FromBytes(byte[] bytes) =>
+            NativeMethods.BufFromBytes(bytes, (nuint)bytes.Length);
+
+        internal static FfiBuf FromRawArray<T>(T[] values) where T : unmanaged =>
+            FromBytes(global::System.Runtime.InteropServices.MemoryMarshal.AsBytes(global::System.MemoryExtensions.AsSpan(values)).ToArray());
+
+        internal static FfiBuf FromRawBoolArray(bool[] values)
+        {
+            byte[] bytes = new byte[values.Length];
+            for (int index = 0; index < values.Length; index++) bytes[index] = values[index] ? (byte)1 : (byte)0;
+            return FromBytes(bytes);
+        }
+    }
+
+    internal sealed class WireReader
+    {
+        private readonly nint pointer;
+        private readonly int length;
+        private int position;
+
+        internal WireReader(FfiBuf buffer) : this(buffer.ptr, buffer.len) { }
+
+        internal WireReader(nint pointer, nuint length)
+        {
+            this.pointer = pointer;
+            this.length = pointer == 0 ? 0 : checked((int)length);
+        }
+
+        internal bool ReadBool() => ReadU8() != 0;
+
+        internal sbyte ReadI8()
+        {
+            Require(1, "i8");
+            sbyte value = (sbyte)Marshal.ReadByte(pointer, position);
+            position += 1;
+            return value;
+        }
+
+        internal byte ReadU8()
+        {
+            Require(1, "u8");
+            byte value = Marshal.ReadByte(pointer, position);
+            position += 1;
+            return value;
+        }
+
+        internal short ReadI16()
+        {
+            Require(2, "i16");
+            short value = Marshal.ReadInt16(pointer, position);
+            position += 2;
+            return global::System.BitConverter.IsLittleEndian
+                ? value
+                : global::System.Buffers.Binary.BinaryPrimitives.ReverseEndianness(value);
+        }
+
+        internal ushort ReadU16() => unchecked((ushort)ReadI16());
+
+        internal int ReadI32()
+        {
+            Require(4, "i32");
+            int value = Marshal.ReadInt32(pointer, position);
+            position += 4;
+            return global::System.BitConverter.IsLittleEndian
+                ? value
+                : global::System.Buffers.Binary.BinaryPrimitives.ReverseEndianness(value);
+        }
+
+        internal uint ReadU32() => unchecked((uint)ReadI32());
+
+        internal long ReadI64()
+        {
+            Require(8, "i64");
+            long value = Marshal.ReadInt64(pointer, position);
+            position += 8;
+            return global::System.BitConverter.IsLittleEndian
+                ? value
+                : global::System.Buffers.Binary.BinaryPrimitives.ReverseEndianness(value);
+        }
+
+        internal ulong ReadU64() => unchecked((ulong)ReadI64());
+
+        internal float ReadF32() => global::System.BitConverter.Int32BitsToSingle(ReadI32());
+        internal double ReadF64() => global::System.BitConverter.Int64BitsToDouble(ReadI64());
+        internal nint ReadNInt() => checked((nint)ReadI64());
+        internal nuint ReadNUInt() => checked((nuint)ReadU64());
+
+        internal string ReadString()
+        {
+            int count = ReadI32();
+            if (count < 0) throw new global::System.InvalidOperationException("corrupt wire: negative string length");
+            if (count == 0) return string.Empty;
+            Require(count, "string payload");
+            string value = Marshal.PtrToStringUTF8(pointer + position, count)
+                ?? throw new global::System.InvalidOperationException("corrupt wire: null string");
+            position += count;
+            return value;
+        }
+
+        internal byte[] ReadBytes()
+        {
+            int count = ReadI32();
+            if (count < 0) throw new global::System.InvalidOperationException("corrupt wire: negative byte length");
+            if (count == 0) return global::System.Array.Empty<byte>();
+            Require(count, "byte payload");
+            byte[] value = new byte[count];
+            Marshal.Copy(pointer + position, value, 0, count);
+            position += count;
+            return value;
+        }
+
+        internal T[] ReadRawArray<T>() where T : unmanaged
+        {
+            int byteCount = length - position;
+            if (byteCount == 0) return global::System.Array.Empty<T>();
+            int elementSize = global::System.Runtime.InteropServices.Marshal.SizeOf<T>();
+            if (byteCount % elementSize != 0)
+                throw new global::System.InvalidOperationException("corrupt direct vector: partial element");
+            byte[] bytes = new byte[byteCount];
+            Marshal.Copy(pointer + position, bytes, 0, byteCount);
+            position += byteCount;
+            return global::System.Runtime.InteropServices.MemoryMarshal.Cast<byte, T>(bytes).ToArray();
+        }
+
+        internal bool[] ReadRawBoolArray()
+        {
+            int count = length - position;
+            if (count == 0) return global::System.Array.Empty<bool>();
+            bool[] values = new bool[count];
+            for (int index = 0; index < count; index++)
+                values[index] = Marshal.ReadByte(pointer, position + index) != 0;
+            position += count;
+            return values;
+        }
+
+        internal global::System.TimeSpan ReadDuration()
+        {
+            long seconds = ReadI64();
+            int nanos = ReadI32();
+            if (seconds < 0 || nanos < 0 || nanos >= 1_000_000_000)
+                throw new global::System.InvalidOperationException("corrupt wire: invalid duration");
+            return new global::System.TimeSpan(checked(
+                seconds * global::System.TimeSpan.TicksPerSecond + nanos / 100));
+        }
+
+        internal global::System.DateTime ReadDateTime()
+        {
+            long seconds = ReadI64();
+            int nanos = ReadI32();
+            if (nanos < 0 || nanos >= 1_000_000_000)
+                throw new global::System.InvalidOperationException("corrupt wire: invalid date-time");
+            return global::System.DateTime.UnixEpoch.AddTicks(checked(
+                seconds * global::System.TimeSpan.TicksPerSecond + nanos / 100));
+        }
+
+        internal global::System.Guid ReadGuid()
+        {
+            long mostSignificant = ReadI64();
+            long leastSignificant = ReadI64();
+            global::System.Span<byte> bytes = stackalloc byte[16];
+            global::System.Buffers.Binary.BinaryPrimitives.WriteInt64BigEndian(bytes[..8], mostSignificant);
+            global::System.Buffers.Binary.BinaryPrimitives.WriteInt64BigEndian(bytes[8..], leastSignificant);
+            throw new global::System.NotSupportedException(
+                "WireReader.ReadGuid: the netstandard2.1 profile Unity targets has no"
+                + " big-endian Guid constructor, and no xybrid type crosses the wire"
+                + " as a Guid. Add a down-level in"
+                + " tools/scripts/gen_unity_bolt_csharp.py before using one.");
+        }
+
+        internal global::System.Uri ReadUri() => new global::System.Uri(ReadString());
+
+        internal T[] ReadArray<T>(global::System.Func<WireReader, T> read)
+        {
+            int count = checked((int)ReadU32());
+            T[] values = new T[count];
+            for (int index = 0; index < count; index++) values[index] = read(this);
+            return values;
+        }
+
+        internal BoltFFIResult<TOk, TErr> ReadResult<TOk, TErr>(
+            global::System.Func<WireReader, TOk> readOk,
+            global::System.Func<WireReader, TErr> readErr) =>
+            ReadU8() switch
+            {
+                0 => BoltFFIResult<TOk, TErr>.Ok(readOk(this)),
+                1 => BoltFFIResult<TOk, TErr>.Err(readErr(this)),
+                _ => throw new global::System.InvalidOperationException("corrupt wire: invalid result tag"),
+            };
+
+        internal global::System.Collections.Generic.Dictionary<TKey, TValue> ReadMap<TKey, TValue>(
+            global::System.Func<WireReader, TKey> readKey,
+            global::System.Func<WireReader, TValue> readValue)
+            where TKey : notnull
+        {
+            int count = checked((int)ReadU32());
+            var values = new global::System.Collections.Generic.Dictionary<TKey, TValue>(count);
+            for (int index = 0; index < count; index++)
+                values.Add(readKey(this), readValue(this));
+            return values;
+        }
+
+        private void Require(int count, string kind)
+        {
+            if (count < 0 || count > length - position)
+                throw new global::System.InvalidOperationException("corrupt wire: truncated " + kind);
+        }
+    }
+
+    internal sealed class WireWriter
+    {
+        private byte[] buffer = new byte[64];
+        private int position;
+
+        internal byte[] ToArray()
+        {
+            if (position == 0) return global::System.Array.Empty<byte>();
+            byte[] value = new byte[position];
+            global::System.Buffer.BlockCopy(buffer, 0, value, 0, position);
+            return value;
+        }
+
+        internal void WriteBool(bool value) => WriteU8(value ? (byte)1 : (byte)0);
+        internal void WriteI8(sbyte value) => WriteU8(unchecked((byte)value));
+
+        internal void WriteU8(byte value)
+        {
+            EnsureCapacity(1);
+            buffer[position++] = value;
+        }
+
+        internal void WriteI16(short value)
+        {
+            EnsureCapacity(2);
+            global::System.Buffers.Binary.BinaryPrimitives.WriteInt16LittleEndian(global::System.MemoryExtensions.AsSpan(buffer, position), value);
+            position += 2;
+        }
+
+        internal void WriteU16(ushort value)
+        {
+            EnsureCapacity(2);
+            global::System.Buffers.Binary.BinaryPrimitives.WriteUInt16LittleEndian(global::System.MemoryExtensions.AsSpan(buffer, position), value);
+            position += 2;
+        }
+
+        internal void WriteI32(int value)
+        {
+            EnsureCapacity(4);
+            global::System.Buffers.Binary.BinaryPrimitives.WriteInt32LittleEndian(global::System.MemoryExtensions.AsSpan(buffer, position), value);
+            position += 4;
+        }
+
+        internal void WriteU32(uint value)
+        {
+            EnsureCapacity(4);
+            global::System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(global::System.MemoryExtensions.AsSpan(buffer, position), value);
+            position += 4;
+        }
+
+        internal void WriteI64(long value)
+        {
+            EnsureCapacity(8);
+            global::System.Buffers.Binary.BinaryPrimitives.WriteInt64LittleEndian(global::System.MemoryExtensions.AsSpan(buffer, position), value);
+            position += 8;
+        }
+
+        internal void WriteU64(ulong value)
+        {
+            EnsureCapacity(8);
+            global::System.Buffers.Binary.BinaryPrimitives.WriteUInt64LittleEndian(global::System.MemoryExtensions.AsSpan(buffer, position), value);
+            position += 8;
+        }
+
+        internal void WriteF32(float value) => WriteI32(global::System.BitConverter.SingleToInt32Bits(value));
+        internal void WriteF64(double value) => WriteI64(global::System.BitConverter.DoubleToInt64Bits(value));
+        internal void WriteNInt(nint value) => WriteI64((long)value);
+        internal void WriteNUInt(nuint value) => WriteU64((ulong)value);
+
+        internal void WriteString(string value)
+        {
+            int count = global::System.Text.Encoding.UTF8.GetByteCount(value);
+            WriteI32(count);
+            if (count == 0) return;
+            EnsureCapacity(count);
+            global::System.Text.Encoding.UTF8.GetBytes(value, 0, value.Length, buffer, position);
+            position += count;
+        }
+
+        internal void WriteBytes(byte[] value)
+        {
+            WriteI32(value.Length);
+            if (value.Length == 0) return;
+            EnsureCapacity(value.Length);
+            global::System.Buffer.BlockCopy(value, 0, buffer, position, value.Length);
+            position += value.Length;
+        }
+
+        internal void WriteDuration(global::System.TimeSpan value)
+        {
+            if (value.Ticks < 0) throw new global::System.ArgumentException("duration must be non-negative", nameof(value));
+            WriteI64(value.Ticks / global::System.TimeSpan.TicksPerSecond);
+            WriteI32(checked((int)((value.Ticks % global::System.TimeSpan.TicksPerSecond) * 100)));
+        }
+
+        internal void WriteDateTime(global::System.DateTime value)
+        {
+            if (value.Kind == global::System.DateTimeKind.Unspecified)
+                throw new global::System.ArgumentException("DateTime kind must not be unspecified", nameof(value));
+            long ticks = (value.ToUniversalTime() - global::System.DateTime.UnixEpoch).Ticks;
+            long seconds = ticks / global::System.TimeSpan.TicksPerSecond;
+            long subsecond = ticks % global::System.TimeSpan.TicksPerSecond;
+            if (subsecond < 0)
+            {
+                seconds -= 1;
+                subsecond += global::System.TimeSpan.TicksPerSecond;
+            }
+            WriteI64(seconds);
+            WriteI32(checked((int)(subsecond * 100)));
+        }
+
+        internal void WriteGuid(global::System.Guid value)
+        {
+            global::System.Span<byte> bytes = stackalloc byte[16];
+            throw new global::System.NotSupportedException(
+                "WireWriter.WriteGuid: the netstandard2.1 profile Unity targets has no"
+                + " big-endian Guid writer, and no xybrid type crosses the wire as a"
+                + " Guid. Add a down-level in"
+                + " tools/scripts/gen_unity_bolt_csharp.py before using one.");
+            WriteI64(global::System.Buffers.Binary.BinaryPrimitives.ReadInt64BigEndian(bytes[..8]));
+            WriteI64(global::System.Buffers.Binary.BinaryPrimitives.ReadInt64BigEndian(bytes[8..]));
+        }
+
+        internal void WriteUri(global::System.Uri value) => WriteString(value.ToString());
+
+        private void EnsureCapacity(int additional)
+        {
+            if (position + additional <= buffer.Length) return;
+            global::System.Array.Resize(ref buffer, global::System.Math.Max(buffer.Length * 2, position + additional));
+        }
+    }
+
+    public readonly struct BoltFFIResult<TOk, TErr>
+    {
+        private readonly TOk okValue;
+        private readonly TErr errValue;
+
+        private BoltFFIResult(TOk okValue, TErr errValue, bool isOk)
+        {
+            this.okValue = okValue;
+            this.errValue = errValue;
+            IsOk = isOk;
+        }
+
+        public bool IsOk { get; }
+        public bool IsErr => !IsOk;
+        public TOk OkValue => IsOk ? okValue : throw new global::System.InvalidOperationException("result is Err");
+        public TErr ErrValue => IsOk ? throw new global::System.InvalidOperationException("result is Ok") : errValue;
+
+        public static BoltFFIResult<TOk, TErr> Ok(TOk value) => new BoltFFIResult<TOk, TErr>(value, default!, true);
+        public static BoltFFIResult<TOk, TErr> Err(TErr value) => new BoltFFIResult<TOk, TErr>(default!, value, false);
+    }
+
+    public sealed class BoltException : global::System.Exception
+    {
+        public BoltException(string message) : base(message) { }
+    }
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct FfiStatus
+    {
+        internal int code;
+    }
 
     public static class XybridBolt
     {
@@ -22,39 +395,58 @@ namespace XybridBolt
         /// </summary>
         public static string JsonSchemaToGbnf(string schemaJson)
         {
-            byte[] _schemaJsonBytes = Encoding.UTF8.GetBytes(schemaJson);
-            FfiBuf _buf = NativeMethods.JsonSchemaToGbnf(_schemaJsonBytes, (UIntPtr)_schemaJsonBytes.Length);
+            WireWriter schemaJsonWriter = new WireWriter();
+            {
+                schemaJsonWriter.WriteString(schemaJson);
+            }
+            byte[] schemaJsonBytes = schemaJsonWriter.ToArray();
+            FfiBuf boltffiErrorBuffer = NativeMethods.NativeJsonSchemaToGbnf(schemaJsonBytes, (nuint)schemaJsonBytes.Length, out FfiBuf boltffiResultBuffer);
+            if (boltffiErrorBuffer.ptr != 0)
+            {
+                try
+                {
+                    WireReader boltffiErrorReader = new WireReader(boltffiErrorBuffer);
+                    throw new global::XybridBolt.XybridErrorException(global::XybridBolt.XybridError.Decode(boltffiErrorReader));
+                }
+                finally
+                {
+                    NativeMethods.FreeBuf(boltffiErrorBuffer);
+                }
+            }
             try
             {
-                var reader = new WireReader(_buf);
-                if (reader.ReadU8() != 0) throw new XybridErrorException(XybridError.Decode(reader));
-                return reader.ReadString();
+                WireReader resultReader = new WireReader(boltffiResultBuffer);
+                return resultReader.ReadString();
             }
             finally
             {
-                NativeMethods.FreeBuf(_buf);
+                NativeMethods.FreeBuf(boltffiResultBuffer);
             }
         }
 
-        public static void SetThermalState(XybridThermalState state)
+        public static void SetThermalState(global::XybridBolt.XybridThermalState state)
         {
-            NativeMethods.SetThermalState(state);
+            FfiStatus status = NativeMethods.NativeSetThermalState(state);
+            if (status.code != 0)
+            {
+                throw new global::System.InvalidOperationException($"BoltFFI call failed with status code {status.code}");
+            }
         }
 
         public static void ClearThermalState()
-        {
-            NativeMethods.ClearThermalState();
-        }
+            => NativeMethods.NativeClearThermalState();
 
         public static void SetBatteryLevel(byte percent)
         {
-            NativeMethods.SetBatteryLevel(percent);
+            FfiStatus status = NativeMethods.NativeSetBatteryLevel(percent);
+            if (status.code != 0)
+            {
+                throw new global::System.InvalidOperationException($"BoltFFI call failed with status code {status.code}");
+            }
         }
 
         public static void ClearBatteryLevel()
-        {
-            NativeMethods.ClearBatteryLevel();
-        }
+            => NativeMethods.NativeClearBatteryLevel();
 
         /// <summary>
         /// One-stop SDK initialization: API key + gateway/ingest URL overrides in
@@ -65,41 +457,111 @@ namespace XybridBolt
         /// </summary>
         public static void ConfigureRuntime(string? apiKey, string? gatewayUrl, string? ingestUrl)
         {
-            using var _wire_apiKey = new WireWriter((1 + (apiKey is { } sizeOpt0 ? (4 + Encoding.UTF8.GetByteCount(sizeOpt0)) : 0)));
-            if (apiKey is { } opt0) { _wire_apiKey.WriteU8((byte)1); _wire_apiKey.WriteString(opt0); } else { _wire_apiKey.WriteU8((byte)0); };
-            byte[] _apiKeyBytes = _wire_apiKey.ToArray();
-            using var _wire_gatewayUrl = new WireWriter((1 + (gatewayUrl is { } sizeOpt1 ? (4 + Encoding.UTF8.GetByteCount(sizeOpt1)) : 0)));
-            if (gatewayUrl is { } opt1) { _wire_gatewayUrl.WriteU8((byte)1); _wire_gatewayUrl.WriteString(opt1); } else { _wire_gatewayUrl.WriteU8((byte)0); };
-            byte[] _gatewayUrlBytes = _wire_gatewayUrl.ToArray();
-            using var _wire_ingestUrl = new WireWriter((1 + (ingestUrl is { } sizeOpt2 ? (4 + Encoding.UTF8.GetByteCount(sizeOpt2)) : 0)));
-            if (ingestUrl is { } opt2) { _wire_ingestUrl.WriteU8((byte)1); _wire_ingestUrl.WriteString(opt2); } else { _wire_ingestUrl.WriteU8((byte)0); };
-            byte[] _ingestUrlBytes = _wire_ingestUrl.ToArray();
-            NativeMethods.ConfigureRuntime(_apiKeyBytes, (UIntPtr)_apiKeyBytes.Length, _gatewayUrlBytes, (UIntPtr)_gatewayUrlBytes.Length, _ingestUrlBytes, (UIntPtr)_ingestUrlBytes.Length);
+            WireWriter apiKeyWriter = new WireWriter();
+            {
+                if (apiKey is { } boltffiValue0)
+                {
+                    apiKeyWriter.WriteU8(1);
+                    apiKeyWriter.WriteString(boltffiValue0);
+                }
+                else
+                {
+                    apiKeyWriter.WriteU8(0);
+                }
+            }
+            byte[] apiKeyBytes = apiKeyWriter.ToArray();
+            WireWriter gatewayUrlWriter = new WireWriter();
+            {
+                if (gatewayUrl is { } boltffiValue0)
+                {
+                    gatewayUrlWriter.WriteU8(1);
+                    gatewayUrlWriter.WriteString(boltffiValue0);
+                }
+                else
+                {
+                    gatewayUrlWriter.WriteU8(0);
+                }
+            }
+            byte[] gatewayUrlBytes = gatewayUrlWriter.ToArray();
+            WireWriter ingestUrlWriter = new WireWriter();
+            {
+                if (ingestUrl is { } boltffiValue0)
+                {
+                    ingestUrlWriter.WriteU8(1);
+                    ingestUrlWriter.WriteString(boltffiValue0);
+                }
+                else
+                {
+                    ingestUrlWriter.WriteU8(0);
+                }
+            }
+            byte[] ingestUrlBytes = ingestUrlWriter.ToArray();
+            FfiStatus status = NativeMethods.NativeConfigureRuntime(apiKeyBytes, (nuint)apiKeyBytes.Length, gatewayUrlBytes, (nuint)gatewayUrlBytes.Length, ingestUrlBytes, (nuint)ingestUrlBytes.Length);
+            if (status.code != 0)
+            {
+                throw new global::System.InvalidOperationException($"BoltFFI call failed with status code {status.code}");
+            }
         }
 
         public static void InitSdkCacheDir(string cacheDir)
         {
-            byte[] _cacheDirBytes = Encoding.UTF8.GetBytes(cacheDir);
-            NativeMethods.InitSdkCacheDir(_cacheDirBytes, (UIntPtr)_cacheDirBytes.Length);
+            WireWriter cacheDirWriter = new WireWriter();
+            {
+                cacheDirWriter.WriteString(cacheDir);
+            }
+            byte[] cacheDirBytes = cacheDirWriter.ToArray();
+            FfiStatus status = NativeMethods.NativeInitSdkCacheDir(cacheDirBytes, (nuint)cacheDirBytes.Length);
+            if (status.code != 0)
+            {
+                throw new global::System.InvalidOperationException($"BoltFFI call failed with status code {status.code}");
+            }
         }
 
         public static void SetBinding(string binding)
         {
-            byte[] _bindingBytes = Encoding.UTF8.GetBytes(binding);
-            NativeMethods.SetBinding(_bindingBytes, (UIntPtr)_bindingBytes.Length);
+            WireWriter bindingWriter = new WireWriter();
+            {
+                bindingWriter.WriteString(binding);
+            }
+            byte[] bindingBytes = bindingWriter.ToArray();
+            FfiStatus status = NativeMethods.NativeSetBinding(bindingBytes, (nuint)bindingBytes.Length);
+            if (status.code != 0)
+            {
+                throw new global::System.InvalidOperationException($"BoltFFI call failed with status code {status.code}");
+            }
         }
 
         public static void SetApiKey(string apiKey)
         {
-            byte[] _apiKeyBytes = Encoding.UTF8.GetBytes(apiKey);
-            NativeMethods.SetApiKey(_apiKeyBytes, (UIntPtr)_apiKeyBytes.Length);
+            WireWriter apiKeyWriter = new WireWriter();
+            {
+                apiKeyWriter.WriteString(apiKey);
+            }
+            byte[] apiKeyBytes = apiKeyWriter.ToArray();
+            FfiStatus status = NativeMethods.NativeSetApiKey(apiKeyBytes, (nuint)apiKeyBytes.Length);
+            if (status.code != 0)
+            {
+                throw new global::System.InvalidOperationException($"BoltFFI call failed with status code {status.code}");
+            }
         }
 
         public static void SetProviderApiKey(string provider, string apiKey)
         {
-            byte[] _providerBytes = Encoding.UTF8.GetBytes(provider);
-            byte[] _apiKeyBytes = Encoding.UTF8.GetBytes(apiKey);
-            NativeMethods.SetProviderApiKey(_providerBytes, (UIntPtr)_providerBytes.Length, _apiKeyBytes, (UIntPtr)_apiKeyBytes.Length);
+            WireWriter providerWriter = new WireWriter();
+            {
+                providerWriter.WriteString(provider);
+            }
+            byte[] providerBytes = providerWriter.ToArray();
+            WireWriter apiKeyWriter = new WireWriter();
+            {
+                apiKeyWriter.WriteString(apiKey);
+            }
+            byte[] apiKeyBytes = apiKeyWriter.ToArray();
+            FfiStatus status = NativeMethods.NativeSetProviderApiKey(providerBytes, (nuint)providerBytes.Length, apiKeyBytes, (nuint)apiKeyBytes.Length);
+            if (status.code != 0)
+            {
+                throw new global::System.InvalidOperationException($"BoltFFI call failed with status code {status.code}");
+            }
         }
 
         /// <summary>
@@ -108,8 +570,16 @@ namespace XybridBolt
         /// </summary>
         public static void SetPlatformUrl(string url)
         {
-            byte[] _urlBytes = Encoding.UTF8.GetBytes(url);
-            NativeMethods.SetPlatformUrl(_urlBytes, (UIntPtr)_urlBytes.Length);
+            WireWriter urlWriter = new WireWriter();
+            {
+                urlWriter.WriteString(url);
+            }
+            byte[] urlBytes = urlWriter.ToArray();
+            FfiStatus status = NativeMethods.NativeSetPlatformUrl(urlBytes, (nuint)urlBytes.Length);
+            if (status.code != 0)
+            {
+                throw new global::System.InvalidOperationException($"BoltFFI call failed with status code {status.code}");
+            }
         }
 
         /// <summary>
@@ -121,16 +591,24 @@ namespace XybridBolt
         /// </summary>
         public static void SetSpeculativeCloud(bool enabled)
         {
-            NativeMethods.SetSpeculativeCloud(enabled);
+            FfiStatus status = NativeMethods.NativeSetSpeculativeCloud(enabled);
+            if (status.code != 0)
+            {
+                throw new global::System.InvalidOperationException($"BoltFFI call failed with status code {status.code}");
+            }
         }
+
+        /// <summary>
+        /// Whether a Xybrid gateway API key is resolvable (in-memory or env).
+        /// </summary>
+        public static bool HasApiKey()
+            => NativeMethods.NativeHasApiKey();
 
         /// <summary>
         /// Whether the global speculative-cloud default is on.
         /// </summary>
         public static bool IsSpeculativeCloudEnabled()
-        {
-            return NativeMethods.IsSpeculativeCloudEnabled();
-        }
+            => NativeMethods.NativeIsSpeculativeCloudEnabled();
 
         /// <summary>
         /// Whether `XybridModel::from_registry_speculative(model_id)` would actually
@@ -141,8 +619,12 @@ namespace XybridBolt
         /// </summary>
         public static bool WillSpeculateForModel(string modelId)
         {
-            byte[] _modelIdBytes = Encoding.UTF8.GetBytes(modelId);
-            return NativeMethods.WillSpeculateForModel(_modelIdBytes, (UIntPtr)_modelIdBytes.Length);
+            WireWriter modelIdWriter = new WireWriter();
+            {
+                modelIdWriter.WriteString(modelId);
+            }
+            byte[] modelIdBytes = modelIdWriter.ToArray();
+            return NativeMethods.NativeWillSpeculateForModel(modelIdBytes, (nuint)modelIdBytes.Length);
         }
 
         /// <summary>
@@ -150,14 +632,15 @@ namespace XybridBolt
         /// </summary>
         public static string Version()
         {
-            FfiBuf _buf = NativeMethods.Version();
+            FfiBuf boltffiResultBuffer = NativeMethods.NativeVersion();
             try
             {
-                return new WireReader(_buf).ReadString();
+                WireReader resultReader = new WireReader(boltffiResultBuffer);
+                return resultReader.ReadString();
             }
             finally
             {
-                NativeMethods.FreeBuf(_buf);
+                NativeMethods.FreeBuf(boltffiResultBuffer);
             }
         }
 
@@ -166,14 +649,15 @@ namespace XybridBolt
         /// </summary>
         public static string TelemetryDefaultEndpoint()
         {
-            FfiBuf _buf = NativeMethods.TelemetryDefaultEndpoint();
+            FfiBuf boltffiResultBuffer = NativeMethods.NativeTelemetryDefaultEndpoint();
             try
             {
-                return new WireReader(_buf).ReadString();
+                WireReader resultReader = new WireReader(boltffiResultBuffer);
+                return resultReader.ReadString();
             }
             finally
             {
-                NativeMethods.FreeBuf(_buf);
+                NativeMethods.FreeBuf(boltffiResultBuffer);
             }
         }
 
@@ -181,752 +665,276 @@ namespace XybridBolt
         /// Flush pending telemetry events. Safe before init / after shutdown.
         /// </summary>
         public static void TelemetryFlush()
-        {
-            NativeMethods.TelemetryFlush();
-        }
+            => NativeMethods.NativeTelemetryFlush();
 
         /// <summary>
         /// Shut down the telemetry exporter. Idempotent.
         /// </summary>
         public static void TelemetryShutdown()
-        {
-            NativeMethods.TelemetryShutdown();
-        }
+            => NativeMethods.NativeTelemetryShutdown();
 
     }
-
-
-    [StructLayout(LayoutKind.Sequential)]
-    internal struct FfiStatus
-    {
-        public int code;
-    }
-
-
-    [StructLayout(LayoutKind.Sequential)]
-    internal struct FfiString
-    {
-        public IntPtr ptr;
-        public UIntPtr len;
-        public UIntPtr cap;
-    }
-
-
-    [StructLayout(LayoutKind.Sequential)]
-    internal struct FfiBuf
-    {
-        public IntPtr ptr;
-        public UIntPtr len;
-        public UIntPtr cap;
-        public UIntPtr align;
-
-        internal static unsafe FfiBuf FromBytes(byte[] bytes)
-        {
-            if (bytes.Length == 0)
-            {
-                return default;
-            }
-
-            // xybrid Unity shim (tools/scripts/gen_unity_bolt_csharp.py):
-            // boltffi 0.25.3 emits `NativeMemory.Alloc` here, a .NET 6 API
-            // absent from Unity's Mono/IL2CPP scripting profile. It also
-            // hands an owned buffer to Rust, which frees it with its global
-            // allocator in boltffi_free_buf (std::alloc::dealloc) -- a free
-            // no C# allocator matches on Windows (malloc/AllocHGlobal use
-            // the CRT heap; Rust frees on GetProcessHeap() = cross-heap free
-            // = UB). No generated entry point passes an owned FfiBuf into
-            // Rust today, so we fail closed rather than ship latent UB. When
-            // a call site is added, expose a Rust-side allocator (e.g.
-            // boltffi_alloc_buf) so alloc and free share one allocator.
-            throw new NotSupportedException(
-                "FfiBuf.FromBytes: passing an owned buffer from C# into Rust"
-                + " is not supported by the Unity binding; boltffi_free_buf"
-                + " would free it with Rust's allocator, which no C#"
-                + " allocator matches on Windows. Expose a Rust-side"
-                + " allocator before using this path.");
-        }
-    }
-
-
-    internal sealed class WireReader
-    {
-        // Reads directly from the unmanaged FfiBuf pointer — no eager copy into
-        // a managed byte[]. Safe APIs only: Marshal.Read* for primitives,
-        // Marshal.PtrToStringUTF8 for length-prefixed UTF-8, Marshal.Copy for
-        // bytes. BitConverter.IsLittleEndian is a JIT intrinsic that folds the
-        // byte-swap branch away on little-endian hosts (all our supported
-        // targets).
-        private readonly IntPtr _ptr;
-        private readonly int _length;
-        private int _pos;
-
-        internal WireReader(FfiBuf buf)
-        {
-            _ptr = buf.ptr;
-            _length = buf.ptr == IntPtr.Zero ? 0 : checked((int)(nuint)buf.len);
-            _pos = 0;
-        }
-
-        internal WireReader(IntPtr ptr, UIntPtr len)
-        {
-            _ptr = ptr;
-            _length = ptr == IntPtr.Zero ? 0 : checked((int)(nuint)len);
-            _pos = 0;
-        }
-
-        internal bool ReadBool() => ReadU8() != 0;
-
-        internal sbyte ReadI8()
-        {
-            Require(1, "i8");
-            sbyte v = (sbyte)Marshal.ReadByte(_ptr, _pos);
-            _pos += 1;
-            return v;
-        }
-
-        internal byte ReadU8()
-        {
-            Require(1, "u8");
-            byte v = Marshal.ReadByte(_ptr, _pos);
-            _pos += 1;
-            return v;
-        }
-
-        internal short ReadI16()
-        {
-            Require(2, "i16");
-            short v = Marshal.ReadInt16(_ptr, _pos);
-            _pos += 2;
-            return BitConverter.IsLittleEndian ? v : BinaryPrimitives.ReverseEndianness(v);
-        }
-
-        internal ushort ReadU16()
-        {
-            Require(2, "u16");
-            ushort v = (ushort)Marshal.ReadInt16(_ptr, _pos);
-            _pos += 2;
-            return BitConverter.IsLittleEndian ? v : BinaryPrimitives.ReverseEndianness(v);
-        }
-
-        internal int ReadI32()
-        {
-            Require(4, "i32");
-            int v = Marshal.ReadInt32(_ptr, _pos);
-            _pos += 4;
-            return BitConverter.IsLittleEndian ? v : BinaryPrimitives.ReverseEndianness(v);
-        }
-
-        internal uint ReadU32()
-        {
-            Require(4, "u32");
-            uint v = (uint)Marshal.ReadInt32(_ptr, _pos);
-            _pos += 4;
-            return BitConverter.IsLittleEndian ? v : BinaryPrimitives.ReverseEndianness(v);
-        }
-
-        internal long ReadI64()
-        {
-            Require(8, "i64");
-            long v = Marshal.ReadInt64(_ptr, _pos);
-            _pos += 8;
-            return BitConverter.IsLittleEndian ? v : BinaryPrimitives.ReverseEndianness(v);
-        }
-
-        internal ulong ReadU64()
-        {
-            Require(8, "u64");
-            ulong v = (ulong)Marshal.ReadInt64(_ptr, _pos);
-            _pos += 8;
-            return BitConverter.IsLittleEndian ? v : BinaryPrimitives.ReverseEndianness(v);
-        }
-
-        internal float ReadF32()
-        {
-            Require(4, "f32");
-            int bits = Marshal.ReadInt32(_ptr, _pos);
-            _pos += 4;
-            return BitConverter.Int32BitsToSingle(BitConverter.IsLittleEndian ? bits : BinaryPrimitives.ReverseEndianness(bits));
-        }
-
-        internal double ReadF64()
-        {
-            Require(8, "f64");
-            long bits = Marshal.ReadInt64(_ptr, _pos);
-            _pos += 8;
-            return BitConverter.Int64BitsToDouble(BitConverter.IsLittleEndian ? bits : BinaryPrimitives.ReverseEndianness(bits));
-        }
-
-        // usize/isize travel as 64-bit integers on the wire so the wire
-        // layout stays stable across pointer widths.
-        internal nint ReadNInt() => (nint)ReadI64();
-        internal nuint ReadNUInt() => (nuint)ReadU64();
-
-        // Built-in value types travel as (seconds, nanos) for Duration and
-        // SystemTime, two i64s for UUID, length-prefixed UTF-8 for URL.
-        // Mirrors Java's WireReader contract; the C# stdlib types
-        // (TimeSpan, DateTime, Guid, Uri) carry 100ns precision so a Rust
-        // Duration / SystemTime whose nanos isn't a multiple of 100 is
-        // rounded toward zero on decode. All references go through
-        // `global::System.` so a user contract that defines a same-named
-        // record can't shadow these signatures. Each helper is gated on
-        // the contract actually using that builtin so unused helpers
-        // don't appear in the generated source.
-
-        internal string ReadString()
-        {
-            int len = ReadI32();
-            if (len == 0) return "";
-            if (len < 0) throw new InvalidOperationException("corrupt wire: negative string length");
-            Require(len, "string payload");
-            string v = Marshal.PtrToStringUTF8(_ptr + _pos, len)
-                ?? throw new InvalidOperationException("PtrToStringUTF8 returned null");
-            _pos += len;
-            return v;
-        }
-
-        internal byte[] ReadBytes()
-        {
-            int len = ReadI32();
-            if (len == 0) return Array.Empty<byte>();
-            if (len < 0) throw new InvalidOperationException("corrupt wire: negative bytes length");
-            Require(len, "bytes payload");
-            byte[] v = new byte[len];
-            Marshal.Copy(_ptr + _pos, v, 0, len);
-            _pos += len;
-            return v;
-        }
-
-        /// Reads the remaining bytes of this buffer as a `T[]`, assuming
-        /// the buffer holds a raw element array with no length prefix.
-        /// This matches the wire shape of a top-level `Vec<T>` return,
-        /// where the FfiBuf's own `len` provides the element count.
-        internal T[] ReadBlittableArray<T>() where T : unmanaged
-        {
-            int byteCount = _length - _pos;
-            if (byteCount < 0)
-                throw new InvalidOperationException("corrupt wire: read position past end");
-            int elementSize = Marshal.SizeOf<T>();
-            if (byteCount % elementSize != 0)
-                throw new InvalidOperationException(
-                    "corrupt wire: blittable array byte count is not a multiple of element size");
-            if (byteCount == 0) return Array.Empty<T>();
-            int count = byteCount / elementSize;
-            T[] result = new T[count];
-            // Fast path via Marshal.Copy's per-type overloads for the types
-            // that ship with one (byte, short, int, long, float, double).
-            // Unsigned primitives and any other unmanaged T fall through to
-            // a byte scratch buffer reinterpreted via MemoryMarshal.AsBytes.
-            // Little-endian hosts only; big-endian would need byte-swap.
-            switch (result)
-            {
-                case byte[] dst:
-                    Marshal.Copy(_ptr + _pos, dst, 0, byteCount);
-                    break;
-                case short[] dst:
-                    Marshal.Copy(_ptr + _pos, dst, 0, count);
-                    break;
-                case int[] dst:
-                    Marshal.Copy(_ptr + _pos, dst, 0, count);
-                    break;
-                case long[] dst:
-                    Marshal.Copy(_ptr + _pos, dst, 0, count);
-                    break;
-                case float[] dst:
-                    Marshal.Copy(_ptr + _pos, dst, 0, count);
-                    break;
-                case double[] dst:
-                    Marshal.Copy(_ptr + _pos, dst, 0, count);
-                    break;
-                default:
-                    byte[] scratch = new byte[byteCount];
-                    Marshal.Copy(_ptr + _pos, scratch, 0, byteCount);
-                    scratch.AsSpan().CopyTo(MemoryMarshal.AsBytes(result.AsSpan()));
-                    break;
-            }
-            _pos += byteCount;
-            return result;
-        }
-
-        internal bool[] ReadBoolArray()
-        {
-            int count = _length - _pos;
-            if (count < 0)
-                throw new InvalidOperationException("corrupt wire: read position past end");
-            if (count == 0) return Array.Empty<bool>();
-            bool[] result = new bool[count];
-            for (int i = 0; i < count; i++)
-            {
-                result[i] = Marshal.ReadByte(_ptr, _pos + i) != 0;
-            }
-            _pos += count;
-            return result;
-        }
-
-        internal nint[] ReadNIntArray()
-        {
-            long[] raw = ReadBlittableArray<long>();
-            nint[] result = new nint[raw.Length];
-            for (int i = 0; i < raw.Length; i++) result[i] = (nint)raw[i];
-            return result;
-        }
-
-        internal nuint[] ReadNUIntArray()
-        {
-            long[] raw = ReadBlittableArray<long>();
-            nuint[] result = new nuint[raw.Length];
-            for (int i = 0; i < raw.Length; i++) result[i] = (nuint)(ulong)raw[i];
-            return result;
-        }
-
-        /// Reads a length-prefixed `T[]` whose bytes follow the 4-byte count.
-        /// Used for `Vec<T>` nested inside an encoded outer container, where
-        /// the outer codec needs an explicit count to know how far to advance
-        /// the cursor between sibling elements.
-        internal T[] ReadLengthPrefixedBlittableArray<T>() where T : unmanaged
-        {
-            int count = ReadI32();
-            if (count < 0) throw new InvalidOperationException("corrupt wire: negative array length");
-            if (count == 0) return Array.Empty<T>();
-            int elementSize = Marshal.SizeOf<T>();
-            int byteCount = checked(count * elementSize);
-            Require(byteCount, "blittable array payload");
-            T[] result = new T[count];
-            switch (result)
-            {
-                case byte[] dst:
-                    Marshal.Copy(_ptr + _pos, dst, 0, byteCount);
-                    break;
-                case short[] dst:
-                    Marshal.Copy(_ptr + _pos, dst, 0, count);
-                    break;
-                case int[] dst:
-                    Marshal.Copy(_ptr + _pos, dst, 0, count);
-                    break;
-                case long[] dst:
-                    Marshal.Copy(_ptr + _pos, dst, 0, count);
-                    break;
-                case float[] dst:
-                    Marshal.Copy(_ptr + _pos, dst, 0, count);
-                    break;
-                case double[] dst:
-                    Marshal.Copy(_ptr + _pos, dst, 0, count);
-                    break;
-                default:
-                    byte[] scratch = new byte[byteCount];
-                    Marshal.Copy(_ptr + _pos, scratch, 0, byteCount);
-                    scratch.AsSpan().CopyTo(MemoryMarshal.AsBytes(result.AsSpan()));
-                    break;
-            }
-            _pos += byteCount;
-            return result;
-        }
-
-        internal bool[] ReadLengthPrefixedBoolArray()
-        {
-            int count = ReadI32();
-            if (count < 0) throw new InvalidOperationException("corrupt wire: negative array length");
-            if (count == 0) return Array.Empty<bool>();
-            Require(count, "bool array payload");
-            bool[] result = new bool[count];
-            for (int i = 0; i < count; i++)
-            {
-                result[i] = Marshal.ReadByte(_ptr, _pos + i) != 0;
-            }
-            _pos += count;
-            return result;
-        }
-
-        internal nint[] ReadLengthPrefixedNIntArray()
-        {
-            long[] raw = ReadLengthPrefixedBlittableArray<long>();
-            nint[] result = new nint[raw.Length];
-            for (int i = 0; i < raw.Length; i++) result[i] = (nint)raw[i];
-            return result;
-        }
-
-        internal nuint[] ReadLengthPrefixedNUIntArray()
-        {
-            long[] raw = ReadLengthPrefixedBlittableArray<long>();
-            nuint[] result = new nuint[raw.Length];
-            for (int i = 0; i < raw.Length; i++) result[i] = (nuint)(ulong)raw[i];
-            return result;
-        }
-
-        /// Reads a length-prefixed array whose elements are decoded by
-        /// invoking `read` once per slot. Used for `Vec<T>` where each
-        /// element has variable wire width (strings, nested encoded vecs,
-        /// records).
-        internal T[] ReadEncodedArray<T>(Func<WireReader, T> read)
-        {
-            int count = ReadI32();
-            if (count < 0) throw new InvalidOperationException("corrupt wire: negative array length");
-            if (count == 0) return Array.Empty<T>();
-            T[] result = new T[count];
-            for (int i = 0; i < count; i++)
-            {
-                result[i] = read(this);
-            }
-            return result;
-        }
-
-        private void Require(int n, string kind)
-        {
-            if (n < 0 || n > _length - _pos) throw new InvalidOperationException("corrupt wire: truncated " + kind);
-        }
-    }
-
-
-    internal sealed class WireWriter : IDisposable
-    {
-        private const int MinCapacity = 16;
-
-        private byte[] _buffer;
-        private int _pos;
-        private bool _disposed;
-
-        internal WireWriter(int initialCapacity)
-        {
-            int cap = Math.Max(initialCapacity, MinCapacity);
-            _buffer = ArrayPool<byte>.Shared.Rent(cap);
-            _pos = 0;
-            _disposed = false;
-        }
-
-        /// <summary>Copy the written bytes into a fresh managed array.</summary>
-        internal byte[] ToArray()
-        {
-            if (_pos == 0) return Array.Empty<byte>();
-            byte[] result = new byte[_pos];
-            Buffer.BlockCopy(_buffer, 0, result, 0, _pos);
-            return result;
-        }
-
-        internal int Position => _pos;
-
-        internal void WriteBool(bool v) { EnsureCapacity(1); _buffer[_pos++] = (byte)(v ? 1 : 0); }
-        internal void WriteI8(sbyte v) { EnsureCapacity(1); _buffer[_pos++] = (byte)v; }
-        internal void WriteU8(byte v) { EnsureCapacity(1); _buffer[_pos++] = v; }
-        internal void WriteI16(short v) { EnsureCapacity(2); BinaryPrimitives.WriteInt16LittleEndian(_buffer.AsSpan(_pos), v); _pos += 2; }
-        internal void WriteU16(ushort v) { EnsureCapacity(2); BinaryPrimitives.WriteUInt16LittleEndian(_buffer.AsSpan(_pos), v); _pos += 2; }
-        internal void WriteI32(int v) { EnsureCapacity(4); BinaryPrimitives.WriteInt32LittleEndian(_buffer.AsSpan(_pos), v); _pos += 4; }
-        internal void WriteU32(uint v) { EnsureCapacity(4); BinaryPrimitives.WriteUInt32LittleEndian(_buffer.AsSpan(_pos), v); _pos += 4; }
-        internal void WriteI64(long v) { EnsureCapacity(8); BinaryPrimitives.WriteInt64LittleEndian(_buffer.AsSpan(_pos), v); _pos += 8; }
-        internal void WriteU64(ulong v) { EnsureCapacity(8); BinaryPrimitives.WriteUInt64LittleEndian(_buffer.AsSpan(_pos), v); _pos += 8; }
-        internal void WriteF32(float v) { EnsureCapacity(4); BinaryPrimitives.WriteInt32LittleEndian(_buffer.AsSpan(_pos), BitConverter.SingleToInt32Bits(v)); _pos += 4; }
-        internal void WriteF64(double v) { EnsureCapacity(8); BinaryPrimitives.WriteInt64LittleEndian(_buffer.AsSpan(_pos), BitConverter.DoubleToInt64Bits(v)); _pos += 8; }
-
-        internal void WriteNInt(nint v) => WriteI64((long)v);
-        internal void WriteNUInt(nuint v) => WriteU64((ulong)v);
-
-        // Built-in value-type writers. Floor-divide so a pre-epoch
-        // DateTime (negative tick offset from UnixEpoch) lands at the
-        // floor-second with a positive nanos remainder, matching the
-        // Rust SystemTime wire shape and Java's WriteInstant. All
-        // references go through `global::System.` so a user contract
-        // that defines a same-named record can't shadow the signature.
-        // Each helper is gated on the contract actually using that
-        // builtin so unused helpers don't appear in the generated source.
-
-        internal void WriteString(string v)
-        {
-            int byteCount = Encoding.UTF8.GetByteCount(v);
-            WriteI32(byteCount);
-            if (byteCount == 0) return;
-            EnsureCapacity(byteCount);
-            Encoding.UTF8.GetBytes(v, 0, v.Length, _buffer, _pos);
-            _pos += byteCount;
-        }
-
-        internal void WriteBytes(byte[] v)
-        {
-            WriteI32(v.Length);
-            if (v.Length == 0) return;
-            EnsureCapacity(v.Length);
-            Buffer.BlockCopy(v, 0, _buffer, _pos, v.Length);
-            _pos += v.Length;
-        }
-
-        internal void WriteBlittableArray<T>(T[] v) where T : unmanaged
-        {
-            WriteI32(v.Length);
-            if (v.Length == 0) return;
-            int byteCount = checked(v.Length * Marshal.SizeOf<T>());
-            EnsureCapacity(byteCount);
-            // Reinterpret the source T[] as bytes and block-copy into the
-            // managed buffer. Zero extra allocations, one copy. Little-endian
-            // hosts only; big-endian would need byte-swap.
-            MemoryMarshal.AsBytes(v.AsSpan()).CopyTo(_buffer.AsSpan(_pos, byteCount));
-            _pos += byteCount;
-        }
-
-        internal void WriteBoolArray(bool[] v)
-        {
-            WriteI32(v.Length);
-            if (v.Length == 0) return;
-            EnsureCapacity(v.Length);
-            for (int i = 0; i < v.Length; i++)
-            {
-                _buffer[_pos + i] = (byte)(v[i] ? 1 : 0);
-            }
-            _pos += v.Length;
-        }
-
-        internal void WriteNIntArray(nint[] v)
-        {
-            long[] widened = new long[v.Length];
-            for (int i = 0; i < v.Length; i++) widened[i] = (long)v[i];
-            WriteBlittableArray(widened);
-        }
-
-        internal void WriteNUIntArray(nuint[] v)
-        {
-            long[] widened = new long[v.Length];
-            for (int i = 0; i < v.Length; i++) widened[i] = (long)(ulong)v[i];
-            WriteBlittableArray(widened);
-        }
-
-        /// Byte size of an encoded `T[]`: the `sizeof(int)` length prefix
-        /// plus the per-element size. Size expressions for `Vec<T>` with
-        /// variable-width elements (strings, nested vecs, records) use this
-        /// helper to drive the `WireWriter` pre-size so its initial
-        /// capacity matches the payload and no growth copy is needed.
-        internal static int EncodedArraySize<T>(T[] v, Func<T, int> sizer)
-        {
-            int total = sizeof(int);
-            for (int i = 0; i < v.Length; i++) total += sizer(v[i]);
-            return total;
-        }
-
-        private void EnsureCapacity(int additional)
-        {
-            if (_pos + additional <= _buffer.Length) return;
-            int next = Math.Max(_buffer.Length * 2, _pos + additional);
-            byte[] grown = ArrayPool<byte>.Shared.Rent(next);
-            Buffer.BlockCopy(_buffer, 0, grown, 0, _pos);
-            ArrayPool<byte>.Shared.Return(_buffer);
-            _buffer = grown;
-        }
-
-        public void Dispose()
-        {
-            if (_disposed) return;
-            _disposed = true;
-            ArrayPool<byte>.Shared.Return(_buffer);
-            _buffer = Array.Empty<byte>();
-        }
-    }
-
-
-    /// <summary>
-    /// Thrown by generated wrapper methods and fallible constructors
-    /// when a Rust <c>Result</c> returns an <c>Err</c> whose payload
-    /// isn't a typed <c>#[error]</c> enum or record. The message is the
-    /// underlying error rendered as a string. Catch this to handle
-    /// plain <c>Result&lt;_, String&gt;</c> errors and untyped <c>Err</c>
-    /// payloads; catch a typed <c>&lt;Name&gt;Exception</c> instead
-    /// when the Rust side declared an <c>#[error]</c> type.
-    /// </summary>
-    public sealed class BoltException : Exception
-    {
-        public BoltException(string message) : base(message) { }
-    }
-
 
     internal static class NativeMethods
     {
         internal const string LibName = "xybrid_bolt";
 
-        [DllImport(LibName, EntryPoint = "boltffi_last_error_message")]
-        private static extern FfiStatus LastErrorMessage(out FfiString message);
+        [DllImport(LibName, EntryPoint = "boltffi_init_class_xybrid_bolt_xybrid_bundle_open")]
+        internal static extern FfiBuf NativeXybridBundleOpen([In] byte[] pathBytes, nuint pathLength, out ulong boltffiHandle);
 
-        [DllImport(LibName, EntryPoint = "boltffi_free_string")]
-        private static extern void FreeString(FfiString message);
+        [DllImport(LibName, EntryPoint = "boltffi_init_class_xybrid_bolt_xybrid_conversation_context_new")]
+        internal static extern ulong NativeXybridConversationContextNew();
 
-        internal static string TakeLastErrorMessage(string fallback)
-        {
-            FfiStatus status = LastErrorMessage(out FfiString message);
-            if (status.code != 0) return fallback;
+        [DllImport(LibName, EntryPoint = "boltffi_init_class_xybrid_bolt_xybrid_conversation_context_with_id")]
+        internal static extern ulong NativeXybridConversationContextWithId([In] byte[] idBytes, nuint idLength);
 
-            try
-            {
-                if (message.ptr == IntPtr.Zero || message.len == UIntPtr.Zero) return fallback;
-                return Marshal.PtrToStringUTF8(message.ptr, checked((int)(nuint)message.len)) ?? fallback;
-            }
-            finally
-            {
-                FreeString(message);
-            }
-        }
+        [DllImport(LibName, EntryPoint = "boltffi_init_class_xybrid_bolt_xybrid_model_from_bundle")]
+        internal static extern FfiBuf NativeXybridModelFromBundle([In] byte[] pathBytes, nuint pathLength, out ulong boltffiHandle);
+
+        [DllImport(LibName, EntryPoint = "boltffi_init_class_xybrid_bolt_xybrid_model_from_directory")]
+        internal static extern FfiBuf NativeXybridModelFromDirectory([In] byte[] pathBytes, nuint pathLength, out ulong boltffiHandle);
+
+        [DllImport(LibName, EntryPoint = "boltffi_init_class_xybrid_bolt_xybrid_model_from_huggingface")]
+        internal static extern FfiBuf NativeXybridModelFromHuggingface([In] byte[] repoBytes, nuint repoLength, out ulong boltffiHandle);
+
+        [DllImport(LibName, EntryPoint = "boltffi_init_class_xybrid_bolt_xybrid_model_from_model_file")]
+        internal static extern FfiBuf NativeXybridModelFromModelFile([In] byte[] pathBytes, nuint pathLength, out ulong boltffiHandle);
+
+        [DllImport(LibName, EntryPoint = "boltffi_init_class_xybrid_bolt_xybrid_model_from_registry")]
+        internal static extern FfiBuf NativeXybridModelFromRegistry([In] byte[] idBytes, nuint idLength, out ulong boltffiHandle);
+
+        [DllImport(LibName, EntryPoint = "boltffi_init_class_xybrid_bolt_xybrid_model_from_registry_speculative")]
+        internal static extern FfiBuf NativeXybridModelFromRegistrySpeculative([In] byte[] idBytes, nuint idLength, out ulong boltffiHandle);
+
+        [DllImport(LibName, EntryPoint = "boltffi_init_class_xybrid_bolt_xybrid_telemetry_config_new")]
+        internal static extern ulong NativeXybridTelemetryConfigNew([In] byte[] apiKeyBytes, nuint apiKeyLength);
+
+        [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_bundle_extract")]
+        internal static extern FfiBuf NativeXybridBundleExtract(ulong receiver, [In] byte[] outputDirBytes, nuint outputDirLength);
+
+        [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_bundle_file_count")]
+        internal static extern uint NativeXybridBundleFileCount(ulong receiver);
+
+        [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_bundle_file_name")]
+        internal static extern FfiBuf NativeXybridBundleFileName(ulong receiver, uint index);
+
+        [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_bundle_has_metadata")]
+        [return: MarshalAs(UnmanagedType.I1)]
+        internal static extern bool NativeXybridBundleHasMetadata(ulong receiver);
+
+        [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_bundle_hash")]
+        internal static extern FfiBuf NativeXybridBundleHash(ulong receiver);
+
+        [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_bundle_manifest_json")]
+        internal static extern FfiBuf NativeXybridBundleManifestJson(ulong receiver, out FfiBuf boltffiResultBuffer);
+
+        [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_bundle_metadata_json")]
+        internal static extern FfiBuf NativeXybridBundleMetadataJson(ulong receiver, out FfiBuf boltffiResultBuffer);
+
+        [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_bundle_model_id")]
+        internal static extern FfiBuf NativeXybridBundleModelId(ulong receiver);
+
+        [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_bundle_target")]
+        internal static extern FfiBuf NativeXybridBundleTarget(ulong receiver);
+
+        [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_bundle_version")]
+        internal static extern FfiBuf NativeXybridBundleVersion(ulong receiver);
+
+        [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_conversation_context_clear")]
+        internal static extern FfiStatus NativeXybridConversationContextClear(ulong receiver);
+
+        [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_conversation_context_has_system")]
+        [return: MarshalAs(UnmanagedType.I1)]
+        internal static extern bool NativeXybridConversationContextHasSystem(ulong receiver);
+
+        [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_conversation_context_history_len")]
+        internal static extern uint NativeXybridConversationContextHistoryLen(ulong receiver);
+
+        [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_conversation_context_id")]
+        internal static extern FfiBuf NativeXybridConversationContextId(ulong receiver);
+
+        [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_conversation_context_push")]
+        internal static extern FfiBuf NativeXybridConversationContextPush(ulong receiver, [In] byte[] envelopeBytes, nuint envelopeLength);
+
+        [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_conversation_context_set_max_history_len")]
+        internal static extern FfiStatus NativeXybridConversationContextSetMaxHistoryLen(ulong receiver, uint len);
+
+        [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_conversation_context_set_system")]
+        internal static extern FfiBuf NativeXybridConversationContextSetSystem(ulong receiver, [In] byte[] envelopeBytes, nuint envelopeLength);
+
+        [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_model_await_download")]
+        internal static extern FfiBuf NativeXybridModelAwaitDownload(ulong receiver, ulong timeoutMs);
+
+        [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_model_default_voice")]
+        internal static extern FfiBuf NativeXybridModelDefaultVoice(ulong receiver);
+
+        [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_model_download_status")]
+        internal static extern FfiBuf NativeXybridModelDownloadStatus(ulong receiver);
+
+        [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_model_has_voices")]
+        [return: MarshalAs(UnmanagedType.I1)]
+        internal static extern bool NativeXybridModelHasVoices(ulong receiver);
+
+        [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_model_is_cloud_serving")]
+        [return: MarshalAs(UnmanagedType.I1)]
+        internal static extern bool NativeXybridModelIsCloudServing(ulong receiver);
+
+        [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_model_is_llm")]
+        [return: MarshalAs(UnmanagedType.I1)]
+        internal static extern bool NativeXybridModelIsLlm(ulong receiver);
+
+        [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_model_is_loaded")]
+        [return: MarshalAs(UnmanagedType.I1)]
+        internal static extern bool NativeXybridModelIsLoaded(ulong receiver);
+
+        [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_model_model_id")]
+        internal static extern FfiBuf NativeXybridModelModelId(ulong receiver);
+
+        [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_model_output_type")]
+        internal static extern global::XybridBolt.XybridOutputType NativeXybridModelOutputType(ulong receiver);
+
+        [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_model_run")]
+        internal static extern FfiBuf NativeXybridModelRun(ulong receiver, [In] byte[] envelopeBytes, nuint envelopeLength, [In] byte[] optionsBytes, nuint optionsLength, out FfiBuf boltffiResultBuffer);
+
+        [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_model_run_stream")]
+        internal static extern FfiBuf NativeXybridModelRunStream(ulong receiver, [In] byte[] envelopeBytes, nuint envelopeLength, [In] byte[] optionsBytes, nuint optionsLength, out ulong boltffiResult);
+
+        [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_model_run_stream_with_context")]
+        internal static extern FfiBuf NativeXybridModelRunStreamWithContext(ulong receiver, [In] byte[] envelopeBytes, nuint envelopeLength, ulong context, [In] byte[] optionsBytes, nuint optionsLength, out ulong boltffiResult);
+
+        [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_model_run_with_context")]
+        internal static extern FfiBuf NativeXybridModelRunWithContext(ulong receiver, [In] byte[] envelopeBytes, nuint envelopeLength, ulong context, [In] byte[] optionsBytes, nuint optionsLength, out FfiBuf boltffiResultBuffer);
+
+        [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_model_stream_close")]
+        internal static extern FfiStatus NativeXybridModelStreamClose(ulong receiver, ulong streamId);
+
+        [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_model_stream_next")]
+        internal static extern FfiBuf NativeXybridModelStreamNext(ulong receiver, ulong streamId, out FfiBuf boltffiResultBuffer);
+
+        [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_model_stream_result")]
+        internal static extern FfiBuf NativeXybridModelStreamResult(ulong receiver, ulong streamId, out FfiBuf boltffiResultBuffer);
+
+        [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_model_supports_streaming")]
+        [return: MarshalAs(UnmanagedType.I1)]
+        internal static extern bool NativeXybridModelSupportsStreaming(ulong receiver);
+
+        [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_model_supports_token_streaming")]
+        [return: MarshalAs(UnmanagedType.I1)]
+        internal static extern bool NativeXybridModelSupportsTokenStreaming(ulong receiver);
+
+        [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_model_unload")]
+        internal static extern FfiBuf NativeXybridModelUnload(ulong receiver);
+
+        [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_model_version")]
+        internal static extern FfiBuf NativeXybridModelVersion(ulong receiver);
+
+        [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_model_voice")]
+        internal static extern FfiBuf NativeXybridModelVoice(ulong receiver, [In] byte[] voiceIdBytes, nuint voiceIdLength);
+
+        [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_model_voices")]
+        internal static extern FfiBuf NativeXybridModelVoices(ulong receiver);
+
+        [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_model_warmup")]
+        internal static extern FfiBuf NativeXybridModelWarmup(ulong receiver);
+
+        [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_telemetry_config_init")]
+        internal static extern FfiBuf NativeXybridTelemetryConfigInit(ulong receiver);
+
+        [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_telemetry_config_set_app_version")]
+        internal static extern FfiStatus NativeXybridTelemetryConfigSetAppVersion(ulong receiver, [In] byte[] versionBytes, nuint versionLength);
+
+        [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_telemetry_config_set_batch_size")]
+        internal static extern FfiStatus NativeXybridTelemetryConfigSetBatchSize(ulong receiver, uint batchSize);
+
+        [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_telemetry_config_set_device_attribute")]
+        internal static extern FfiStatus NativeXybridTelemetryConfigSetDeviceAttribute(ulong receiver, [In] byte[] keyBytes, nuint keyLength, [In] byte[] valueBytes, nuint valueLength);
+
+        [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_telemetry_config_set_device_label")]
+        internal static extern FfiStatus NativeXybridTelemetryConfigSetDeviceLabel(ulong receiver, [In] byte[] labelBytes, nuint labelLength);
+
+        [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_telemetry_config_set_endpoint")]
+        internal static extern FfiStatus NativeXybridTelemetryConfigSetEndpoint(ulong receiver, [In] byte[] endpointBytes, nuint endpointLength);
+
+        [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_telemetry_config_set_flush_interval_secs")]
+        internal static extern FfiStatus NativeXybridTelemetryConfigSetFlushIntervalSecs(ulong receiver, uint secs);
+
+        [DllImport(LibName, EntryPoint = "boltffi_release_class_xybrid_bolt_xybrid_bundle")]
+        internal static extern void NativeXybridBundleRelease(ulong handle);
+
+        [DllImport(LibName, EntryPoint = "boltffi_release_class_xybrid_bolt_xybrid_conversation_context")]
+        internal static extern void NativeXybridConversationContextRelease(ulong handle);
+
+        [DllImport(LibName, EntryPoint = "boltffi_release_class_xybrid_bolt_xybrid_model")]
+        internal static extern void NativeXybridModelRelease(ulong handle);
+
+        [DllImport(LibName, EntryPoint = "boltffi_release_class_xybrid_bolt_xybrid_telemetry_config")]
+        internal static extern void NativeXybridTelemetryConfigRelease(ulong handle);
+
+        [DllImport(LibName, EntryPoint = "boltffi_function_xybrid_bolt_clear_battery_level")]
+        internal static extern void NativeClearBatteryLevel();
+
+        [DllImport(LibName, EntryPoint = "boltffi_function_xybrid_bolt_clear_thermal_state")]
+        internal static extern void NativeClearThermalState();
+
+        [DllImport(LibName, EntryPoint = "boltffi_function_xybrid_bolt_configure_runtime")]
+        internal static extern FfiStatus NativeConfigureRuntime([In] byte[] apiKeyBytes, nuint apiKeyLength, [In] byte[] gatewayUrlBytes, nuint gatewayUrlLength, [In] byte[] ingestUrlBytes, nuint ingestUrlLength);
+
+        [DllImport(LibName, EntryPoint = "boltffi_buf_from_bytes")]
+        internal static extern FfiBuf BufFromBytes([In] byte[] bytes, nuint length);
 
         [DllImport(LibName, EntryPoint = "boltffi_free_buf")]
-        internal static extern void FreeBuf(FfiBuf buf);
-        [DllImport(LibName, EntryPoint = "boltffi_json_schema_to_gbnf")]
-        internal static extern FfiBuf JsonSchemaToGbnf(byte[] schemaJson, UIntPtr schemaJsonLen);
-        [DllImport(LibName, EntryPoint = "boltffi_set_thermal_state")]
-        internal static extern void SetThermalState(XybridThermalState state);
-        [DllImport(LibName, EntryPoint = "boltffi_clear_thermal_state")]
-        internal static extern void ClearThermalState();
-        [DllImport(LibName, EntryPoint = "boltffi_set_battery_level")]
-        internal static extern void SetBatteryLevel(byte percent);
-        [DllImport(LibName, EntryPoint = "boltffi_clear_battery_level")]
-        internal static extern void ClearBatteryLevel();
-        [DllImport(LibName, EntryPoint = "boltffi_configure_runtime")]
-        internal static extern void ConfigureRuntime(byte[] apiKey, UIntPtr apiKeyLen, byte[] gatewayUrl, UIntPtr gatewayUrlLen, byte[] ingestUrl, UIntPtr ingestUrlLen);
-        [DllImport(LibName, EntryPoint = "boltffi_init_sdk_cache_dir")]
-        internal static extern void InitSdkCacheDir(byte[] cacheDir, UIntPtr cacheDirLen);
-        [DllImport(LibName, EntryPoint = "boltffi_set_binding")]
-        internal static extern void SetBinding(byte[] binding, UIntPtr bindingLen);
-        [DllImport(LibName, EntryPoint = "boltffi_set_api_key")]
-        internal static extern void SetApiKey(byte[] apiKey, UIntPtr apiKeyLen);
-        [DllImport(LibName, EntryPoint = "boltffi_set_provider_api_key")]
-        internal static extern void SetProviderApiKey(byte[] provider, UIntPtr providerLen, byte[] apiKey, UIntPtr apiKeyLen);
-        [DllImport(LibName, EntryPoint = "boltffi_set_platform_url")]
-        internal static extern void SetPlatformUrl(byte[] url, UIntPtr urlLen);
-        [DllImport(LibName, EntryPoint = "boltffi_set_speculative_cloud")]
-        internal static extern void SetSpeculativeCloud([MarshalAs(UnmanagedType.I1)] bool enabled);
-        [DllImport(LibName, EntryPoint = "boltffi_is_speculative_cloud_enabled")]
+        internal static extern void FreeBuf(FfiBuf buffer);
+
+        [DllImport(LibName, EntryPoint = "boltffi_function_xybrid_bolt_has_api_key")]
         [return: MarshalAs(UnmanagedType.I1)]
-        internal static extern bool IsSpeculativeCloudEnabled();
-        [DllImport(LibName, EntryPoint = "boltffi_will_speculate_for_model")]
+        internal static extern bool NativeHasApiKey();
+
+        [DllImport(LibName, EntryPoint = "boltffi_function_xybrid_bolt_init_sdk_cache_dir")]
+        internal static extern FfiStatus NativeInitSdkCacheDir([In] byte[] cacheDirBytes, nuint cacheDirLength);
+
+        [DllImport(LibName, EntryPoint = "boltffi_function_xybrid_bolt_is_speculative_cloud_enabled")]
         [return: MarshalAs(UnmanagedType.I1)]
-        internal static extern bool WillSpeculateForModel(byte[] modelId, UIntPtr modelIdLen);
-        [DllImport(LibName, EntryPoint = "boltffi_version")]
-        internal static extern FfiBuf Version();
-        [DllImport(LibName, EntryPoint = "boltffi_telemetry_default_endpoint")]
-        internal static extern FfiBuf TelemetryDefaultEndpoint();
-        [DllImport(LibName, EntryPoint = "boltffi_telemetry_flush")]
-        internal static extern void TelemetryFlush();
-        [DllImport(LibName, EntryPoint = "boltffi_telemetry_shutdown")]
-        internal static extern void TelemetryShutdown();
+        internal static extern bool NativeIsSpeculativeCloudEnabled();
 
-        [DllImport(LibName, EntryPoint = "boltffi_xybrid_model_free")]
-        internal static extern void XybridModelFree(IntPtr handle);
+        [DllImport(LibName, EntryPoint = "boltffi_function_xybrid_bolt_json_schema_to_gbnf")]
+        internal static extern FfiBuf NativeJsonSchemaToGbnf([In] byte[] schemaJsonBytes, nuint schemaJsonLength, out FfiBuf boltffiResultBuffer);
 
-        [DllImport(LibName, EntryPoint = "boltffi_xybrid_model_from_registry")]
-        internal static extern IntPtr XybridModelFromRegistry(byte[] id, UIntPtr idLen);
+        [DllImport(LibName, EntryPoint = "boltffi_function_xybrid_bolt_set_api_key")]
+        internal static extern FfiStatus NativeSetApiKey([In] byte[] apiKeyBytes, nuint apiKeyLength);
 
-        [DllImport(LibName, EntryPoint = "boltffi_xybrid_model_from_registry_speculative")]
-        internal static extern IntPtr XybridModelFromRegistrySpeculative(byte[] id, UIntPtr idLen);
+        [DllImport(LibName, EntryPoint = "boltffi_function_xybrid_bolt_set_battery_level")]
+        internal static extern FfiStatus NativeSetBatteryLevel(byte percent);
 
-        [DllImport(LibName, EntryPoint = "boltffi_xybrid_model_from_directory")]
-        internal static extern IntPtr XybridModelFromDirectory(byte[] path, UIntPtr pathLen);
+        [DllImport(LibName, EntryPoint = "boltffi_function_xybrid_bolt_set_binding")]
+        internal static extern FfiStatus NativeSetBinding([In] byte[] bindingBytes, nuint bindingLength);
 
-        [DllImport(LibName, EntryPoint = "boltffi_xybrid_model_from_bundle")]
-        internal static extern IntPtr XybridModelFromBundle(byte[] path, UIntPtr pathLen);
+        [DllImport(LibName, EntryPoint = "boltffi_function_xybrid_bolt_set_platform_url")]
+        internal static extern FfiStatus NativeSetPlatformUrl([In] byte[] urlBytes, nuint urlLength);
 
-        [DllImport(LibName, EntryPoint = "boltffi_xybrid_model_from_huggingface")]
-        internal static extern IntPtr XybridModelFromHuggingface(byte[] repo, UIntPtr repoLen);
+        [DllImport(LibName, EntryPoint = "boltffi_function_xybrid_bolt_set_provider_api_key")]
+        internal static extern FfiStatus NativeSetProviderApiKey([In] byte[] providerBytes, nuint providerLength, [In] byte[] apiKeyBytes, nuint apiKeyLength);
 
-        [DllImport(LibName, EntryPoint = "boltffi_xybrid_model_from_model_file")]
-        internal static extern IntPtr XybridModelFromModelFile(byte[] path, UIntPtr pathLen);
-        [DllImport(LibName, EntryPoint = "boltffi_xybrid_model_model_id")]
-        internal static extern FfiBuf XybridModelModelId(IntPtr self);
-        [DllImport(LibName, EntryPoint = "boltffi_xybrid_model_version")]
-        internal static extern FfiBuf XybridModelVersion(IntPtr self);
-        [DllImport(LibName, EntryPoint = "boltffi_xybrid_model_output_type")]
-        internal static extern XybridOutputType XybridModelOutputType(IntPtr self);
-        [DllImport(LibName, EntryPoint = "boltffi_xybrid_model_is_loaded")]
+        [DllImport(LibName, EntryPoint = "boltffi_function_xybrid_bolt_set_speculative_cloud")]
+        internal static extern FfiStatus NativeSetSpeculativeCloud([MarshalAs(UnmanagedType.I1)] bool enabled);
+
+        [DllImport(LibName, EntryPoint = "boltffi_function_xybrid_bolt_set_thermal_state")]
+        internal static extern FfiStatus NativeSetThermalState(global::XybridBolt.XybridThermalState state);
+
+        [DllImport(LibName, EntryPoint = "boltffi_function_xybrid_bolt_telemetry_default_endpoint")]
+        internal static extern FfiBuf NativeTelemetryDefaultEndpoint();
+
+        [DllImport(LibName, EntryPoint = "boltffi_function_xybrid_bolt_telemetry_flush")]
+        internal static extern void NativeTelemetryFlush();
+
+        [DllImport(LibName, EntryPoint = "boltffi_function_xybrid_bolt_telemetry_shutdown")]
+        internal static extern void NativeTelemetryShutdown();
+
+        [DllImport(LibName, EntryPoint = "boltffi_function_xybrid_bolt_version")]
+        internal static extern FfiBuf NativeVersion();
+
+        [DllImport(LibName, EntryPoint = "boltffi_function_xybrid_bolt_will_speculate_for_model")]
         [return: MarshalAs(UnmanagedType.I1)]
-        internal static extern bool XybridModelIsLoaded(IntPtr self);
-        [DllImport(LibName, EntryPoint = "boltffi_xybrid_model_is_cloud_serving")]
-        [return: MarshalAs(UnmanagedType.I1)]
-        internal static extern bool XybridModelIsCloudServing(IntPtr self);
-        [DllImport(LibName, EntryPoint = "boltffi_xybrid_model_download_status")]
-        internal static extern FfiBuf XybridModelDownloadStatus(IntPtr self);
-        [DllImport(LibName, EntryPoint = "boltffi_xybrid_model_await_download")]
-        internal static extern FfiBuf XybridModelAwaitDownload(IntPtr self, ulong timeoutMs);
-        [DllImport(LibName, EntryPoint = "boltffi_xybrid_model_supports_streaming")]
-        [return: MarshalAs(UnmanagedType.I1)]
-        internal static extern bool XybridModelSupportsStreaming(IntPtr self);
-        [DllImport(LibName, EntryPoint = "boltffi_xybrid_model_supports_token_streaming")]
-        [return: MarshalAs(UnmanagedType.I1)]
-        internal static extern bool XybridModelSupportsTokenStreaming(IntPtr self);
-        [DllImport(LibName, EntryPoint = "boltffi_xybrid_model_is_llm")]
-        [return: MarshalAs(UnmanagedType.I1)]
-        internal static extern bool XybridModelIsLlm(IntPtr self);
-        [DllImport(LibName, EntryPoint = "boltffi_xybrid_model_has_voices")]
-        [return: MarshalAs(UnmanagedType.I1)]
-        internal static extern bool XybridModelHasVoices(IntPtr self);
-        [DllImport(LibName, EntryPoint = "boltffi_xybrid_model_voices")]
-        internal static extern FfiBuf XybridModelVoices(IntPtr self);
-        [DllImport(LibName, EntryPoint = "boltffi_xybrid_model_default_voice")]
-        internal static extern FfiBuf XybridModelDefaultVoice(IntPtr self);
-        [DllImport(LibName, EntryPoint = "boltffi_xybrid_model_voice")]
-        internal static extern FfiBuf XybridModelVoice(IntPtr self, byte[] voiceId, UIntPtr voiceIdLen);
-        [DllImport(LibName, EntryPoint = "boltffi_xybrid_model_stream_next")]
-        internal static extern FfiBuf XybridModelStreamNext(IntPtr self, ulong streamId);
-        [DllImport(LibName, EntryPoint = "boltffi_xybrid_model_stream_close")]
-        internal static extern void XybridModelStreamClose(IntPtr self, ulong streamId);
-        [DllImport(LibName, EntryPoint = "boltffi_xybrid_model_warmup")]
-        internal static extern FfiBuf XybridModelWarmup(IntPtr self);
-        [DllImport(LibName, EntryPoint = "boltffi_xybrid_model_unload")]
-        internal static extern FfiBuf XybridModelUnload(IntPtr self);
+        internal static extern bool NativeWillSpeculateForModel([In] byte[] modelIdBytes, nuint modelIdLength);
 
-        [DllImport(LibName, EntryPoint = "boltffi_xybrid_conversation_context_free")]
-        internal static extern void XybridConversationContextFree(IntPtr handle);
-
-        [DllImport(LibName, EntryPoint = "boltffi_xybrid_conversation_context_new")]
-        internal static extern IntPtr XybridConversationContextNew();
-
-        [DllImport(LibName, EntryPoint = "boltffi_xybrid_conversation_context_with_id")]
-        internal static extern IntPtr XybridConversationContextWithId(byte[] id, UIntPtr idLen);
-        [DllImport(LibName, EntryPoint = "boltffi_xybrid_conversation_context_clear")]
-        internal static extern void XybridConversationContextClear(IntPtr self);
-        [DllImport(LibName, EntryPoint = "boltffi_xybrid_conversation_context_id")]
-        internal static extern FfiBuf XybridConversationContextId(IntPtr self);
-        [DllImport(LibName, EntryPoint = "boltffi_xybrid_conversation_context_history_len")]
-        internal static extern uint XybridConversationContextHistoryLen(IntPtr self);
-        [DllImport(LibName, EntryPoint = "boltffi_xybrid_conversation_context_has_system")]
-        [return: MarshalAs(UnmanagedType.I1)]
-        internal static extern bool XybridConversationContextHasSystem(IntPtr self);
-        [DllImport(LibName, EntryPoint = "boltffi_xybrid_conversation_context_set_max_history_len")]
-        internal static extern void XybridConversationContextSetMaxHistoryLen(IntPtr self, uint len);
-
-        [DllImport(LibName, EntryPoint = "boltffi_xybrid_telemetry_config_free")]
-        internal static extern void XybridTelemetryConfigFree(IntPtr handle);
-
-        [DllImport(LibName, EntryPoint = "boltffi_xybrid_telemetry_config_new")]
-        internal static extern IntPtr XybridTelemetryConfigNew(byte[] apiKey, UIntPtr apiKeyLen);
-        [DllImport(LibName, EntryPoint = "boltffi_xybrid_telemetry_config_set_endpoint")]
-        internal static extern void XybridTelemetryConfigSetEndpoint(IntPtr self, byte[] endpoint, UIntPtr endpointLen);
-        [DllImport(LibName, EntryPoint = "boltffi_xybrid_telemetry_config_set_app_version")]
-        internal static extern void XybridTelemetryConfigSetAppVersion(IntPtr self, byte[] version, UIntPtr versionLen);
-        [DllImport(LibName, EntryPoint = "boltffi_xybrid_telemetry_config_set_device_label")]
-        internal static extern void XybridTelemetryConfigSetDeviceLabel(IntPtr self, byte[] label, UIntPtr labelLen);
-        [DllImport(LibName, EntryPoint = "boltffi_xybrid_telemetry_config_set_device_attribute")]
-        internal static extern void XybridTelemetryConfigSetDeviceAttribute(IntPtr self, byte[] key, UIntPtr keyLen, byte[] value, UIntPtr valueLen);
-        [DllImport(LibName, EntryPoint = "boltffi_xybrid_telemetry_config_set_batch_size")]
-        internal static extern void XybridTelemetryConfigSetBatchSize(IntPtr self, uint batchSize);
-        [DllImport(LibName, EntryPoint = "boltffi_xybrid_telemetry_config_set_flush_interval_secs")]
-        internal static extern void XybridTelemetryConfigSetFlushIntervalSecs(IntPtr self, uint secs);
-        [DllImport(LibName, EntryPoint = "boltffi_xybrid_telemetry_config_init")]
-        internal static extern FfiBuf XybridTelemetryConfigInit(IntPtr self);
-
-        [DllImport(LibName, EntryPoint = "boltffi_xybrid_bundle_free")]
-        internal static extern void XybridBundleFree(IntPtr handle);
-
-        [DllImport(LibName, EntryPoint = "boltffi_xybrid_bundle_open")]
-        internal static extern IntPtr XybridBundleOpen(byte[] path, UIntPtr pathLen);
-        [DllImport(LibName, EntryPoint = "boltffi_xybrid_bundle_model_id")]
-        internal static extern FfiBuf XybridBundleModelId(IntPtr self);
-        [DllImport(LibName, EntryPoint = "boltffi_xybrid_bundle_version")]
-        internal static extern FfiBuf XybridBundleVersion(IntPtr self);
-        [DllImport(LibName, EntryPoint = "boltffi_xybrid_bundle_target")]
-        internal static extern FfiBuf XybridBundleTarget(IntPtr self);
-        [DllImport(LibName, EntryPoint = "boltffi_xybrid_bundle_hash")]
-        internal static extern FfiBuf XybridBundleHash(IntPtr self);
-        [DllImport(LibName, EntryPoint = "boltffi_xybrid_bundle_has_metadata")]
-        [return: MarshalAs(UnmanagedType.I1)]
-        internal static extern bool XybridBundleHasMetadata(IntPtr self);
-        [DllImport(LibName, EntryPoint = "boltffi_xybrid_bundle_file_count")]
-        internal static extern uint XybridBundleFileCount(IntPtr self);
-        [DllImport(LibName, EntryPoint = "boltffi_xybrid_bundle_file_name")]
-        internal static extern FfiBuf XybridBundleFileName(IntPtr self, uint index);
-        [DllImport(LibName, EntryPoint = "boltffi_xybrid_bundle_manifest_json")]
-        internal static extern FfiBuf XybridBundleManifestJson(IntPtr self);
-        [DllImport(LibName, EntryPoint = "boltffi_xybrid_bundle_metadata_json")]
-        internal static extern FfiBuf XybridBundleMetadataJson(IntPtr self);
-        [DllImport(LibName, EntryPoint = "boltffi_xybrid_bundle_extract")]
-        internal static extern FfiBuf XybridBundleExtract(IntPtr self, byte[] outputDir, UIntPtr outputDirLen);
     }
 }
