@@ -1,0 +1,39 @@
+README.zh-CN.md
+  s_e32586025370b7::t_eb90e5666f8a82 398,410
+README.ja-JP.md
+  s_e32586025370b7::t_eb90e5666f8a82 397,409
+crates/llama-cpp-sys/build.rs
+  s_e32586025370b7::t_dbaf6c356be91a 658-659,663
+  s_e32586025370b7::t_a2ac936dbe751b 495-503,505
+.github/workflows/ci.yml
+  s_e32586025370b7::t_66369ff031cda8 262-264
+README.md
+  s_e32586025370b7::t_b7e76c16fdbf41 413
+  s_e32586025370b7::t_e0a3c5eb292520 432
+crates/xybrid/README.md
+  s_e32586025370b7::t_eb90e5666f8a82 21
+docs/INSTALLATION.md
+  s_e32586025370b7::t_c6123d71300d9d 60-71
+CHANGELOG.md
+  s_e32586025370b7::t_e00779ef901727 12-18
+docs/FEATURE_MATRIX.md
+  s_e32586025370b7::t_1d449263da0d19 116
+  s_e32586025370b7::t_6113672730de94 53-54,57-60
+  s_e32586025370b7::t_1789cf9f53fddd 204
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "eeae28b0bc47c2e11a281dc46d9a6f7a7a456f2e",
+  "prompts": {},
+  "sessions": {
+    "s_e32586025370b7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "88d405a1-43f7-4cd8-8276-17ff0f5315ff",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
