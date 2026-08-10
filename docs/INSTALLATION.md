@@ -85,14 +85,15 @@ builds remotely. Two things to set up first:
 ```bash
 sudo apt-get install glslc libvulkan-dev spirv-headers
 
-# A Vulkan-only include dir. //:llama_vulkan points cmake here instead of at
-# /usr/include, so that a `-I` for the Vulkan headers cannot shadow the
-# hermetic toolchain's libc headers. Point these at $VULKAN_SDK/include instead
-# if you have the LunarG SDK installed.
-sudo mkdir -p /opt/xybrid-vulkan-include
+# //:llama_vulkan reads the headers and the loader from two fixed paths. The
+# headers are staged rather than used in place so that cmake's `-I` for them
+# cannot shadow the hermetic toolchain's libc headers. Use $VULKAN_SDK/include
+# and $VULKAN_SDK/lib instead if you have the LunarG SDK.
+sudo mkdir -p /opt/xybrid-vulkan-include /opt/xybrid-vulkan-lib
 for tree in vulkan vk_video spirv; do
   sudo ln -sfn "/usr/include/$tree" "/opt/xybrid-vulkan-include/$tree"
 done
+sudo ln -sfn /usr/lib/x86_64-linux-gnu/libvulkan.so /opt/xybrid-vulkan-lib/libvulkan.so
 ```
 
 A Vulkan build links `libvulkan.so.1` dynamically, so the machine that *runs*

@@ -49,6 +49,7 @@ cc_library(
     # the link (-lm, -lpthread, …), where they would outrank hermetic-llvm's
     # sysroot and raise the glibc floor. A bare path pulls in exactly one file,
     # and libvulkan.so's SONAME still lands in DT_NEEDED as libvulkan.so.1.
+    # The /opt path is staged by the CI job — see //:llama_vulkan.
     #
     # NOTE that DT_NEEDED makes the loader a hard runtime dependency of the
     # produced binary — which is why the lane is opt-in and would ship as its
@@ -61,7 +62,10 @@ cc_library(
             "-framework Foundation",
         ],
         "//:vulkan_enabled": [
-            "/usr/lib/x86_64-linux-gnu/libvulkan.so",
+            "/opt/xybrid-vulkan-lib/libvulkan.so",
+            # The loader's own glibc imports are resolved by the machine that
+            # runs the binary, not by our sysroot — see //:llama_vulkan.
+            "-Wl,--allow-shlib-undefined",
         ],
         "//conditions:default": [],
     }),

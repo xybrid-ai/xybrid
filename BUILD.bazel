@@ -158,13 +158,34 @@ _METAL_CMAKE_FLAGS = {
 # holding ONLY the vulkan trees, and the smoke asserts the floor.
 _VULKAN_INCLUDE_DIR = "/opt/xybrid-vulkan-include"
 
+# THE LOADER, same staging trick for a different reason. The exec machine's
+# libvulkan.so is built against ITS glibc, so linking it against hermetic-llvm's
+# 2.28 sysroot leaves the loader's own imports unresolved — lld rejects it under
+# its default --no-allow-shlib-undefined:
+#
+#   ld.lld: error: undefined reference: __isoc23_sscanf@GLIBC_2.38
+#   >>> referenced by /usr/lib/x86_64-linux-gnu/libvulkan.so
+#
+# Those symbols are the LOADER's business, resolved on the machine that runs the
+# binary by the same glibc that ships its libvulkan — not ours to satisfy at
+# link time. `--allow-shlib-undefined` (below) says exactly that. It relaxes the
+# check only for symbols a shared library needs, never for undefined symbols in
+# our own objects, and the smoke still asserts OUR glibc floor.
+#
+# A path under /opt, not the real one, so the CI job can point it at the SDK's
+# loader (matching the headers it stages) or apt's, without this file caring.
+_VULKAN_LIBRARY = "/opt/xybrid-vulkan-lib/libvulkan.so"
+
 _VULKAN_CMAKE_FLAGS = {
     "GGML_VULKAN": "ON",
     "Vulkan_INCLUDE_DIR": _VULKAN_INCLUDE_DIR,
-    # The loader and glslc are binaries, not headers — taking those straight
-    # from the apt payload carries no include-path hazard.
-    "Vulkan_LIBRARY": "/usr/lib/x86_64-linux-gnu/libvulkan.so",
+    "Vulkan_LIBRARY": _VULKAN_LIBRARY,
+    # glslc is executed, never linked, so it has neither hazard.
     "Vulkan_GLSLC_EXECUTABLE": "/usr/bin/glslc",
+    # For llama.cpp's throwaway tool executables, which link ggml-vulkan and so
+    # drag the loader in. (A `-Wl,` flag is position-independent, unlike the
+    # libraries that have to ride on CMAKE_CXX_STANDARD_LIBRARIES.)
+    "CMAKE_EXE_LINKER_FLAGS": "-Wl,--allow-shlib-undefined",
 }
 
 # The static C++ runtime archives the linux and windows-gnu lanes hand to cmake

@@ -488,35 +488,42 @@ jobs:
       - name: Setup Vulkan SDK
         uses: ./.github/actions/setup-vulkan-sdk
 
-      # cmake turns Vulkan_INCLUDE_DIR into a `-I` on ggml-vulkan's TUs, and a
-      # `-I` outranks the toolchain sysroot — so handing it /usr/include would
-      # shadow hermetic-llvm's libc headers with this runner's glibc 2.39 ones
-      # while the link still uses glibc 2.28. Stage a directory carrying ONLY
-      # the Vulkan headers so that cannot happen; //:llama_vulkan hardcodes this
-      # path, because a cache_entries value has to be known at analysis time —
-      # hence a fixed directory rather than the SDK's versioned $VULKAN_SDK.
-      - name: Stage a Vulkan-only include dir
+      # //:llama_vulkan reads the Vulkan headers and loader from two fixed /opt
+      # paths, which this step points at whatever the runner actually has. Fixed,
+      # because a cmake cache value has to be known at analysis time — the SDK's
+      # own directory is version-stamped.
+      #
+      # Headers are staged rather than used in place because cmake turns
+      # Vulkan_INCLUDE_DIR into a `-I`, and a `-I` outranks the toolchain
+      # sysroot: handing it /usr/include would shadow hermetic-llvm's libc
+      # headers with this runner's glibc 2.39 ones while the link still uses
+      # glibc 2.28. A directory holding only the Vulkan trees cannot do that.
+      - name: Stage the Vulkan headers and loader
         run: |
-          sudo mkdir -p /opt/xybrid-vulkan-include
-          # Prefer the LunarG SDK's include tree: it is what the cargo Vulkan
-          # job (ci.yml) compiles against, so it is the proven set, and it
-          # carries every tree ggml reaches for in one place.
-          SRC="${VULKAN_SDK:+$VULKAN_SDK/include}"
-          if [ ! -d "${SRC:-}" ]; then
-            # No SDK env: fall back to apt. libvulkan-dev does not depend on
+          sudo mkdir -p /opt/xybrid-vulkan-include /opt/xybrid-vulkan-lib
+          # Prefer the LunarG SDK: it is what the cargo Vulkan job (ci.yml)
+          # builds against, so it is the proven set, and it keeps the headers
+          # and the loader on the same version.
+          SDK="${VULKAN_SDK:-}"
+          if [ -d "${SDK:-}/include" ] && [ -e "${SDK:-}/lib/libvulkan.so" ]; then
+            INC="$SDK/include"; LIB="$SDK/lib/libvulkan.so"
+          else
+            # No usable SDK: fall back to apt. libvulkan-dev does not depend on
             # spirv-headers, so ask for it explicitly.
             sudo apt-get install -y spirv-headers
-            SRC=/usr/include
+            INC=/usr/include; LIB=/usr/lib/x86_64-linux-gnu/libvulkan.so
           fi
-          echo "include source: $SRC"
+          echo "headers: $INC"
+          echo "loader:  $LIB"
           # vulkan/ is the obvious one; vk_video/ because vulkan_core.h includes
           # the video codec headers; spirv/ because ggml-vulkan.cpp includes
           # <spirv/unified1/spirv.hpp> for its cooperative-matrix paths.
           for tree in vulkan vk_video spirv; do
-            test -d "$SRC/$tree" || { echo "missing $SRC/$tree"; exit 1; }
-            sudo ln -sfn "$SRC/$tree" "/opt/xybrid-vulkan-include/$tree"
+            test -d "$INC/$tree" || { echo "missing $INC/$tree"; exit 1; }
+            sudo ln -sfn "$INC/$tree" "/opt/xybrid-vulkan-include/$tree"
           done
-          ls -l /opt/xybrid-vulkan-include
+          sudo ln -sfn "$LIB" /opt/xybrid-vulkan-lib/libvulkan.so
+          ls -l /opt/xybrid-vulkan-include /opt/xybrid-vulkan-lib
 
       - name: Configure BuildBuddy remote config
         env:
