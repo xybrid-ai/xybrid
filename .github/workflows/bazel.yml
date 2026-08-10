@@ -460,10 +460,20 @@ jobs:
     timeout-minutes: 60
     env:
       BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
+    # Every build step below is secret-gated, so without RBE this job succeeds
+    # having produced nothing. Downstream jobs can't read secrets in a job-level
+    # `if`, so publish the same fork-safety signal the `bazel` job does — else a
+    # consumer sees a green producer and fails on the missing artifact.
+    outputs:
+      rbe: ${{ steps.rbe-check.outputs.rbe }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           submodules: true
+
+      - name: Check RBE availability
+        id: rbe-check
+        run: echo "rbe=${{ env.BUILDBUDDY_API_KEY != '' }}" >> "$GITHUB_OUTPUT"
 
       # The Microsoft payload lands on top of the usual LLVM/rustc/NDK fetches,
       # so this job needs the headroom more than the others do.
@@ -562,7 +572,11 @@ jobs:
   bazel-windows-msvc-smoke:
     name: Bazel windows-MSVC Flutter DLL smoke (loads it on Windows)
     needs: bazel-windows-msvc
-    if: github.event_name != 'pull_request'
+    # Gate on the producer's RBE signal, not the event name: a push in a fork is
+    # not a pull_request, so the event check alone let this run against a
+    # producer that had skipped every build step, and the download failed with
+    # "Artifact not found". Matches bazel-windows-smoke / bazel-windows-bolt-smoke.
+    if: needs.bazel-windows-msvc.outputs.rbe == 'true'
     runs-on: windows-latest
     steps:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4

@@ -74,10 +74,17 @@ jobs:
       # So assert up front, and only for runs that should have secrets: same-repo
       # PRs, master pushes, and manual dispatches. Fork PRs fall through to the
       # skips by design.
+      #
+      # The `github.repository` test is what makes that true for pushes as well.
+      # A contributor who syncs their fork's master triggers this workflow in
+      # THEIR repo, where no secret exists — and a push is not a pull_request, so
+      # the event test alone let the assertion fire and failed every fork's
+      # Actions tab. Secrets are only ever expected in the canonical repo.
       - name: Require credentials (non-fork runs)
         if: >-
-          github.event_name != 'pull_request' ||
-          github.event.pull_request.head.repo.full_name == github.repository
+          github.repository == 'xybrid-ai/xybrid' &&
+          (github.event_name != 'pull_request' ||
+           github.event.pull_request.head.repo.full_name == github.repository)
         env:
           UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
           UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}

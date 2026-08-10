@@ -54,6 +54,12 @@ env:
 jobs:
   publish-native:
     name: Publish native (${{ matrix.target }}, ${{ matrix.feature }})
+    # Publisher only, and only from the canonical repo. A fork inherits the
+    # weekly cron but its GITHUB_TOKEN cannot write ghcr.io/xybrid-ai/*, so every
+    # row died on `response status code 403: Forbidden` after paying the full
+    # llama.cpp compile — a standing red cron in every fork, for a cache only we
+    # publish. Forks consume the slices; they never produce them.
+    if: github.repository == 'xybrid-ai/xybrid'
     permissions:
       contents: read
       packages: write   # oras login + push of the prebuilt native slice to ghcr
