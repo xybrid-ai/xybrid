@@ -116,10 +116,16 @@ pub fn model_path(model_name: &str) -> Option<PathBuf> {
 /// Check if a model directory has actual model binary files downloaded.
 ///
 /// A model is only considered ready if it has at least one binary file
-/// (`.onnx`, `.safetensors`, or `.gguf`). Having only `model_metadata.json`
-/// is not sufficient since metadata is checked into git but binaries are not.
+/// (`.onnx`, `.safetensors`, `.gguf`, or `.bin`). Having only
+/// `model_metadata.json` is not sufficient since metadata is checked into git
+/// but binaries are not.
+///
+/// `.bin` covers whisper.cpp's GGML container. whisper.cpp never adopted GGUF —
+/// it still verifies `GGML_FILE_MAGIC` — so a fully downloaded GGML bundle would
+/// otherwise report as MISSING here and every fixture-backed example asking for
+/// one would panic with "not downloaded".
 fn has_model_binaries(dir: &Path) -> bool {
-    const MODEL_EXTENSIONS: &[&str] = &["onnx", "safetensors", "gguf"];
+    const MODEL_EXTENSIONS: &[&str] = &["onnx", "safetensors", "gguf", "bin"];
     if let Ok(entries) = std::fs::read_dir(dir) {
         for entry in entries.flatten() {
             if let Some(ext) = entry.path().extension() {

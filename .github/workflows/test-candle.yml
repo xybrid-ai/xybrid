@@ -12,6 +12,16 @@ on:
       - 'crates/xybrid-core/src/runtime_adapter/candle/**'
       - 'crates/xybrid-core/src/audio/**'
       - 'crates/xybrid-core/Cargo.toml'
+      # The executor holds the candle-conditional dispatch arms (the
+      # SafeTensors -> "candle" runtime mapping and its
+      # #[cfg(not(feature = "candle"))] counterpart). Without this path the
+      # Candle jobs did not run on either commit that retired Candle from the
+      # platform presets -- candle-conditional code changed with zero coverage
+      # from the one workflow that builds with the feature on.
+      - 'crates/xybrid-core/src/execution/**'
+      # The presets themselves live here; a change that drops candle from one
+      # must be seen by the job that still builds with it.
+      - 'crates/xybrid-sdk/Cargo.toml'
       - 'integration-tests/**'
       - 'Cargo.lock'
       - '.github/workflows/test-candle.yml'
@@ -21,6 +31,16 @@ on:
       - 'crates/xybrid-core/src/runtime_adapter/candle/**'
       - 'crates/xybrid-core/src/audio/**'
       - 'crates/xybrid-core/Cargo.toml'
+      # The executor holds the candle-conditional dispatch arms (the
+      # SafeTensors -> "candle" runtime mapping and its
+      # #[cfg(not(feature = "candle"))] counterpart). Without this path the
+      # Candle jobs did not run on either commit that retired Candle from the
+      # platform presets -- candle-conditional code changed with zero coverage
+      # from the one workflow that builds with the feature on.
+      - 'crates/xybrid-core/src/execution/**'
+      # The presets themselves live here; a change that drops candle from one
+      # must be seen by the job that still builds with it.
+      - 'crates/xybrid-sdk/Cargo.toml'
       - 'integration-tests/**'
       - 'Cargo.lock'
       - '.github/workflows/test-candle.yml'

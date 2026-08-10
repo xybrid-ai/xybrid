@@ -1,8 +1,6 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:xybrid_example/ui.dart';
 import 'package:xybrid_example/utils/recorder.dart';
 import 'package:xybrid_flutter/xybrid.dart';
@@ -32,19 +30,13 @@ enum _Phase { idle, loadingModel, loadError, ready, listening, finalizing }
 /// `.context/whispercpp-design.md`: 9871 ms to first partial on Candle vs
 /// 2724 ms on whisper.cpp, same Pixel 8, same session.
 enum _Backend {
-  /// A GGML bundle side-loaded onto the device — quantized, via whisper.cpp.
+  /// The multilingual Q5_1 GGML bundle from the registry, run by whisper.cpp.
   ///
-  /// Loaded from the app's external files directory rather than the registry.
-  /// Push it with:
-  ///
-  /// ```text
-  /// adb push integration-tests/fixtures/models/whisper-ggml-tiny-en \
-  ///   /sdcard/Android/data/com.example.xybrid_example/files/
-  /// ```
-  ///
-  /// Once the registry serves a GGML Whisper this can go back to
-  /// `XybridModelLoader.fromRegistry('whisper-tiny')`.
-  whisperCpp('whisper.cpp (Q5_1 GGML)', 'whisper-ggml-tiny-en');
+  /// Served as its own mask id rather than replacing `whisper-tiny` in place:
+  /// that id still resolves to the SafeTensors/Candle bundle, so both
+  /// generations of client keep working and neither ever gets an artifact it
+  /// cannot execute.
+  whisperCpp('whisper.cpp (Q5_1 GGML)', 'whisper-tiny-ggml');
 
   const _Backend(this.label, this.id);
 
@@ -117,18 +109,8 @@ class _LiveAsrScreenState extends State<LiveAsrScreen> {
       _errorMessage = '';
     });
 
-    final XybridModelLoader loader;
-    try {
-      // Side-loaded bundle: a directory holding model.bin +
-      // model_metadata.json, whose `GgmlWhisper` template routes the engine to
-      // whisper.cpp.
-      loader = XybridModelLoader.fromDirectory(
-        await _sideloadedBundlePath(backend.id),
-      );
-    } catch (e) {
-      _showLoadError(e);
-      return;
-    }
+    // The bundle's `GgmlWhisper` template routes the engine to whisper.cpp.
+    final loader = XybridModelLoader.fromRegistry(backend.id);
     _loadSub = loader.loadWithProgress().listen(
       (event) async {
         if (!mounted) return;
@@ -152,24 +134,6 @@ class _LiveAsrScreenState extends State<LiveAsrScreen> {
       },
       onError: _showLoadError,
     );
-  }
-
-  /// Resolve the side-loaded bundle directory, failing with an actionable
-  /// message rather than a bare `PathNotFound` when it has not been pushed.
-  Future<String> _sideloadedBundlePath(String id) async {
-    final base = await getExternalStorageDirectory();
-    if (base == null) {
-      throw StateError('No external files directory on this device');
-    }
-    final dir = Directory('${base.path}/$id');
-    if (!dir.existsSync()) {
-      throw StateError(
-        'Bundle not found at ${dir.path}.\n\n'
-        'Push it first:\n'
-        '  adb push integration-tests/fixtures/models/$id ${base.path}/',
-      );
-    }
-    return dir.path;
   }
 
   void _showLoadError(Object error) {
