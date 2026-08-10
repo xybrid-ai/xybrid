@@ -99,6 +99,8 @@ pub struct StreamConfig {
     pub enable_partial_results: bool,
     /// Language hint (passed to model if supported)
     pub language: Option<String>,
+    /// Whisper encoder context override in mel frames; `None` uses the model default
+    pub audio_ctx: Option<u32>,
     /// VAD configuration for smart chunking
     pub vad: VadStreamConfig,
 }
@@ -110,6 +112,7 @@ impl Default for StreamConfig {
             min_chunk_secs: 1.0, // At least 1 second before processing
             enable_partial_results: true,
             language: Some("en".to_string()),
+            audio_ctx: None,
             vad: VadStreamConfig::default(),
         }
     }
@@ -130,6 +133,22 @@ impl StreamConfig {
             vad: VadStreamConfig::with_model(model_dir),
             ..Default::default()
         }
+    }
+
+    /// Create an audio envelope carrying the configured ASR overrides.
+    fn inference_envelope(&self, wav_bytes: Vec<u8>) -> Envelope {
+        let mut envelope = Envelope::new(EnvelopeKind::Audio(wav_bytes));
+        if let Some(language) = &self.language {
+            envelope
+                .metadata
+                .insert("language".to_string(), language.clone());
+        }
+        if let Some(audio_ctx) = self.audio_ctx {
+            envelope
+                .metadata
+                .insert("audio_ctx".to_string(), audio_ctx.to_string());
+        }
+        envelope
     }
 }
 
@@ -588,7 +607,7 @@ impl StreamSession {
         let sample_rate = self.buffer.config().sample_rate;
         let silence = vec![0.0f32; (sample_rate as usize) / 2];
         let wav_bytes = samples_to_wav(&silence, sample_rate);
-        let envelope = Envelope::new(EnvelopeKind::Audio(wav_bytes));
+        let envelope = self.config.inference_envelope(wav_bytes);
 
         executor
             .execute(&self.metadata, &envelope, None)
@@ -765,8 +784,8 @@ impl StreamSession {
         // Convert samples to WAV bytes
         let wav_bytes = samples_to_wav(&chunk.samples, self.buffer.config().sample_rate);
 
-        // Create envelope with audio data
-        let envelope = Envelope::new(EnvelopeKind::Audio(wav_bytes));
+        // Create envelope with audio data and per-session ASR overrides.
+        let envelope = self.config.inference_envelope(wav_bytes);
 
         // Execute through TemplateExecutor (handles ONNX, Candle, etc.)
         let output = self
@@ -833,6 +852,41 @@ mod tests {
         let config = StreamConfig::default();
         assert_eq!(config.buffer_config.sample_rate, 16000);
         assert!(config.enable_partial_results);
+        assert_eq!(config.audio_ctx, None);
+    }
+
+    #[test]
+    fn configured_asr_overrides_are_added_to_the_inference_envelope() {
+        let config = StreamConfig {
+            language: Some("fr".to_string()),
+            audio_ctx: Some(500),
+            ..Default::default()
+        };
+
+        let envelope = config.inference_envelope(vec![1, 2, 3]);
+
+        assert_eq!(
+            envelope.metadata.get("language").map(String::as_str),
+            Some("fr")
+        );
+        assert_eq!(
+            envelope.metadata.get("audio_ctx").map(String::as_str),
+            Some("500")
+        );
+    }
+
+    #[test]
+    fn absent_asr_overrides_leave_bundle_defaults_in_control() {
+        let config = StreamConfig {
+            language: None,
+            audio_ctx: None,
+            ..Default::default()
+        };
+
+        let envelope = config.inference_envelope(vec![1, 2, 3]);
+
+        assert!(!envelope.metadata.contains_key("language"));
+        assert!(!envelope.metadata.contains_key("audio_ctx"));
     }
 
     fn secs(s: f64) -> Duration {

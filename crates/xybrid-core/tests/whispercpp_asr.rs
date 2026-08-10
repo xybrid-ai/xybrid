@@ -194,6 +194,41 @@ fn live_streaming_produces_a_growing_transcript() {
     );
 }
 
+#[test]
+fn streaming_language_override_reaches_whisper_transcribe_params() {
+    let Some((dir, _metadata)) = bundle_if_available() else {
+        eprintln!("skipping: whisper GGML fixture weights not present");
+        return;
+    };
+    let Some(wav) = jfk_wav() else {
+        eprintln!("skipping: jfk.wav fixture not present");
+        return;
+    };
+
+    // The fixture is English-only. Asking the streaming API for Japanese can
+    // only produce this error after StreamConfig reaches TranscribeParams;
+    // falling back to the bundle's `en` would transcribe successfully.
+    let config = StreamConfig {
+        language: Some("ja".to_string()),
+        ..Default::default()
+    };
+    let mut session =
+        StreamSession::new(&dir, config).expect("GgmlWhisper bundle opens as a streaming session");
+    let pcm = decode_wav_16k_mono(&wav);
+
+    let err = pcm
+        .chunks(8_000)
+        .find_map(|slice| session.feed(slice).err())
+        .or_else(|| session.flush().err())
+        .expect("an .en model cannot honour a Japanese streaming request");
+
+    let message = err.to_string();
+    assert!(
+        message.contains("ja") || message.to_lowercase().contains("language"),
+        "error should name the rejected language, got: {message}"
+    );
+}
+
 /// Decode the committed 16 kHz mono 16-bit fixture into float samples.
 fn decode_wav_16k_mono(bytes: &[u8]) -> Vec<f32> {
     assert!(bytes.len() > 44, "WAV shorter than its header");

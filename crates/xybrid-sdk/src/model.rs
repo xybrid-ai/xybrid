@@ -795,6 +795,8 @@ pub struct StreamConfig {
     pub vad_threshold: f32,
     /// Language hint for ASR
     pub language: Option<String>,
+    /// Whisper encoder context override in mel frames; `None` uses the model default
+    pub audio_ctx: Option<u32>,
     /// Path to VAD model (uses default if None)
     pub vad_model_dir: Option<String>,
 }
@@ -805,6 +807,7 @@ impl Default for StreamConfig {
             enable_vad: false,
             vad_threshold: 0.5,
             language: Some("en".to_string()),
+            audio_ctx: None,
             vad_model_dir: None,
         }
     }
@@ -822,6 +825,12 @@ impl StreamConfig {
     /// Set language hint.
     pub fn language(mut self, lang: impl Into<String>) -> Self {
         self.language = Some(lang.into());
+        self
+    }
+
+    /// Override Whisper's encoder context in mel frames.
+    pub fn audio_ctx(mut self, audio_ctx: u32) -> Self {
+        self.audio_ctx = Some(audio_ctx);
         self
     }
 
@@ -4239,6 +4248,7 @@ impl XybridModel {
                 ..Default::default()
             },
             language: config.language,
+            audio_ctx: config.audio_ctx,
             ..Default::default()
         };
 
@@ -5065,13 +5075,18 @@ mod tests {
         let config = StreamConfig::default();
         assert!(!config.enable_vad);
         assert_eq!(config.language, Some("en".to_string()));
+        assert_eq!(config.audio_ctx, None);
     }
 
     #[test]
     fn test_stream_config_with_vad() {
-        let config = StreamConfig::with_vad().language("fr").vad_threshold(0.7);
+        let config = StreamConfig::with_vad()
+            .language("fr")
+            .audio_ctx(500)
+            .vad_threshold(0.7);
         assert!(config.enable_vad);
         assert_eq!(config.language, Some("fr".to_string()));
+        assert_eq!(config.audio_ctx, Some(500));
         assert_eq!(config.vad_threshold, 0.7);
     }
 

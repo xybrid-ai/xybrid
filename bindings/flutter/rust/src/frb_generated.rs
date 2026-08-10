@@ -3963,10 +3963,12 @@ impl SseDecode for crate::api::streaming::FfiStreamingConfig {
         let mut var_sampleRate = <u32>::sse_decode(deserializer);
         let mut var_vad = <crate::api::streaming::FfiVadMode>::sse_decode(deserializer);
         let mut var_language = <Option<String>>::sse_decode(deserializer);
+        let mut var_audioCtx = <Option<u32>>::sse_decode(deserializer);
         return crate::api::streaming::FfiStreamingConfig {
             sample_rate: var_sampleRate,
             vad: var_vad,
             language: var_language,
+            audio_ctx: var_audioCtx,
         };
     }
 }
@@ -5208,6 +5210,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::streaming::FfiStreamingConfig
             self.sample_rate.into_into_dart().into_dart(),
             self.vad.into_into_dart().into_dart(),
             self.language.into_into_dart().into_dart(),
+            self.audio_ctx.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -5877,6 +5880,7 @@ impl SseEncode for crate::api::streaming::FfiStreamingConfig {
         <u32>::sse_encode(self.sample_rate, serializer);
         <crate::api::streaming::FfiVadMode>::sse_encode(self.vad, serializer);
         <Option<String>>::sse_encode(self.language, serializer);
+        <Option<u32>>::sse_encode(self.audio_ctx, serializer);
     }
 }
 
