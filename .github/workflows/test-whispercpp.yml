@@ -1,0 +1,95 @@
+name: Test whisper.cpp
+
+# Real multilingual weights exercise behavior that compile-only lanes cannot:
+# translation, per-request language selection, long-window handling, and the
+# suppression of bracketed non-speech tokens in user-facing transcripts.
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'crates/whisper-cpp-sys/**'
+      - 'crates/xybrid-whisper/**'
+      - 'crates/llama-cpp-sys/**'
+      - 'crates/xybrid-llama/**'
+      - 'crates/xybrid-core/src/runtime_adapter/whisper_cpp/**'
+      - 'crates/xybrid-core/src/audio/**'
+      - 'crates/xybrid-core/src/execution/**'
+      - 'crates/xybrid-core/Cargo.toml'
+      - 'integration-tests/**'
+      - 'vendor/llama.cpp'
+      - 'vendor/whisper-cpp'
+      - 'Cargo.lock'
+      - '.github/workflows/test-whispercpp.yml'
+  pull_request:
+    branches: [master]
+    paths:
+      - 'crates/whisper-cpp-sys/**'
+      - 'crates/xybrid-whisper/**'
+      - 'crates/llama-cpp-sys/**'
+      - 'crates/xybrid-llama/**'
+      - 'crates/xybrid-core/src/runtime_adapter/whisper_cpp/**'
+      - 'crates/xybrid-core/src/audio/**'
+      - 'crates/xybrid-core/src/execution/**'
+      - 'crates/xybrid-core/Cargo.toml'
+      - 'integration-tests/**'
+      - 'vendor/llama.cpp'
+      - 'vendor/whisper-cpp'
+      - 'Cargo.lock'
+      - '.github/workflows/test-whispercpp.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions: read-all
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  test-whispercpp-integration:
+    name: Test whisper.cpp (integration, real model)
+    runs-on: macos-14
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          key: whispercpp-integration
+
+      - name: Ensure download tooling (jq, zstd)
+        run: |
+          for tool in jq zstd; do
+            command -v "$tool" >/dev/null || brew install "$tool"
+          done
+
+      # The checksum pins the exact multilingual Q5_1 weights whose quality
+      # thresholds this suite calibrates. The registry remains convenient
+      # for download, but a mutable artifact cannot silently redefine the test.
+      - name: Cache whisper-tiny-ggml
+        id: cache-whisper-tiny-ggml
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: integration-tests/fixtures/models/whisper-tiny-ggml
+          key: whisper-tiny-ggml-${{ runner.os }}-818710568da3ca15689e31a743197b520007872ff9576237bda97bd1b469c3d7
+
+      - name: Download whisper-tiny-ggml
+        if: steps.cache-whisper-tiny-ggml.outputs.cache-hit != 'true'
+        run: ./integration-tests/download.sh whisper-tiny-ggml
+
+      - name: Verify multilingual Q5_1 weights
+        run: |
+          echo '818710568da3ca15689e31a743197b520007872ff9576237bda97bd1b469c3d7  integration-tests/fixtures/models/whisper-tiny-ggml/ggml-tiny-q5_1.bin' \
+            | shasum -a 256 -c -
+
+      - name: Test Whisper end to end
+        env:
+          XYBRID_REQUIRE_MODELS: 1
+        run: |
+          cargo test -p integration-tests --features asr-whispercpp \
+            --test whispercpp_integration -- --nocapture

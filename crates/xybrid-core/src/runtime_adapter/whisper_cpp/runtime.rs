@@ -148,6 +148,16 @@ impl WhisperCppRuntime {
             }
         }
 
+        // whisper.cpp supports an initial prompt, but xybrid has not exposed
+        // or validated that capability yet. Reject it rather than silently
+        // claiming to honour caller input; do not echo the prompt because it
+        // may contain private user text.
+        if metadata_value(metadata, "prompt").is_some() {
+            return Err(AdapterError::InvalidInput(
+                "'prompt' is not supported by the whisper.cpp runtime".to_string(),
+            ));
+        }
+
         // Rejected rather than ignored: greedy decoding with temperature
         // fallback disabled never samples, so silently accepting a temperature
         // would misreport what ran. Mirrors the Candle runtime's contract.
@@ -356,6 +366,20 @@ mod tests {
             .params_for(&meta(&[("temperature", "hot")]))
             .expect_err("not a number");
         assert!(matches!(err, AdapterError::InvalidInput(_)), "{err:?}");
+    }
+
+    #[test]
+    fn prompt_is_rejected_without_echoing_its_contents() {
+        let runtime = WhisperCppRuntime::new();
+        let private_prompt = "PRIVATE_PROMPT_SENTINEL_7c1f";
+        let err = runtime
+            .params_for(&meta(&[("prompt", private_prompt)]))
+            .expect_err("prompt handling is not implemented");
+
+        assert!(matches!(err, AdapterError::InvalidInput(_)), "{err:?}");
+        let message = err.to_string();
+        assert!(message.contains("prompt"), "{message}");
+        assert!(!message.contains(private_prompt), "{message}");
     }
 
     #[test]

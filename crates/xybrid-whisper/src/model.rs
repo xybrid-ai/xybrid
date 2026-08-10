@@ -17,6 +17,9 @@ use crate::segment::Segment;
 /// only padding, and decoding padding fabricates text.
 const MIN_SAMPLES: usize = 400;
 
+/// Samples in Whisper's full 30-second encoder window.
+const FULL_WINDOW_SAMPLES: usize = SAMPLE_RATE as usize * 30;
+
 /// An owning handle to a whisper.cpp context.
 ///
 /// Dropping frees the native context. Transcription takes `&mut self` because
@@ -119,13 +122,26 @@ impl WhisperModel {
 
         wparams.n_threads = i32::try_from(params.n_threads).unwrap_or(i32::MAX).max(1);
         wparams.audio_ctx = i32::try_from(params.normalized_audio_ctx()).unwrap_or(i32::MAX);
-        wparams.no_timestamps = !params.timestamps;
+        // Timestamp tokens let whisper.cpp advance to the true end of speech
+        // inside each 30 s window. They are optional for one-window live
+        // partials, but required for longer input: without them, the final
+        // short window is padded to 30 s and tiny can fill that padding with a
+        // long repetition loop. Segment spans remain an internal part of our
+        // return type either way, so enabling them here does not change the IO
+        // shape.
+        wparams.no_timestamps = !params.timestamps && pcm.len() <= FULL_WINDOW_SAMPLES;
         wparams.no_context = !params.use_context;
         wparams.translate = params.task == Task::Translate;
         wparams.print_progress = false;
         wparams.print_realtime = false;
         wparams.print_special = false;
         wparams.print_timestamps = false;
+        // Keep Whisper's non-speech vocabulary out of user-facing text. The
+        // upstream default is false, which lets bracketed annotations such as
+        // "[BLANK_AUDIO]" and "[Speaking in French]" surface as transcripts.
+        // Candle applies the equivalent suppress-token mask, so enabling
+        // whisper.cpp's built-in mask preserves that behavior across backends.
+        wparams.suppress_nst = true;
         // Disable temperature fallback. A fallback re-runs the whole window at
         // a higher temperature, which on a live path turns one slow window into
         // several — the measured 2.7 s outlier behind an otherwise 0.7 s
