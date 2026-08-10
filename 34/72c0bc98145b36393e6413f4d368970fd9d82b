@@ -1,0 +1,35 @@
+examples/android/app/src/main/java/ai/xybrid/example/data/ModelCatalog.kt
+  s_9f04bb23700740::t_4dbf61fdc9a79c 73
+bindings/react-native/example/App.tsx
+  s_9f04bb23700740::t_4dbf61fdc9a79c 23
+.github/workflows/test-candle.yml
+  s_9f04bb23700740::t_374a548374a081 15-24,34-43
+examples/flutter/lib/screens/pipeline_demo_screen.dart
+  s_9f04bb23700740::t_4dbf61fdc9a79c 21
+examples/flutter/lib/screens/asr_demo_screen.dart
+  s_9f04bb23700740::t_4dbf61fdc9a79c 76
+examples/flutter/lib/screens/errors_demo_screen.dart
+  s_9f04bb23700740::t_4dbf61fdc9a79c 62
+crates/xybrid-core/src/testing/model_fixtures.rs
+  s_9f04bb23700740::t_374a548374a081 119-126,128
+examples/flutter/lib/screens/model_loading_screen.dart
+  s_9f04bb23700740::t_4dbf61fdc9a79c 17,152
+examples/flutter/lib/screens/live_asr_demo_screen.dart
+  s_9f04bb23700740::t_cb519c69d82559 33,35-39,112-113
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "3472c0bc98145b36393e6413f4d368970fd9d82b",
+  "prompts": {},
+  "sessions": {
+    "s_9f04bb23700740": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "cf542ea4-a493-4e35-92e5-530163651bf9",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
