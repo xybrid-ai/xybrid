@@ -395,7 +395,7 @@ claude /xybrid-init hexgrad/Kokoro-82M-v1.0-ONNX
 | 埋め込み | 🔜 | 🔜 | 🔜 | 🔜 | 🔜 |
 | マルチモデルパイプライン（MMP） | ✅ | ✅ | ✅ | ✅ | ✅ |
 | モデルのダウンロードとキャッシュ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| ハードウェアアクセラレーション | Metal, ANE | CPU | Metal, ANE | CUDA, Vulkan | CUDA |
+| ハードウェアアクセラレーション | Metal, ANE | CPU | Metal, ANE | CPU、オプトインのVulkan | CPU |
 
 **SDK MMP サポート:** Flutter ✅ · Rust ✅ · Kotlin 🔜 · Swift 🔜 · Unity 🔜
 
@@ -407,7 +407,7 @@ claude /xybrid-init hexgrad/Kokoro-82M-v1.0-ONNX
 - **オフライン対応** — 初回のモデルダウンロード後はインターネット不要。
 - **クロスプラットフォーム** — iOS、Android、macOS、Linux、Windowsで統一されたAPI。
 - **マルチモデルパイプライン（MMP）** — モデルを連鎖（ASR → LLM → TTS）して1回の呼び出しで実行。
-- **ハードウェアアクセラレーション** — Apple Neural Engine、Metal、CUDAに加え、Linux向けllama.cppビルドではVulkanをオプトイン可能。
+- **ハードウェアアクセラレーション** — Appleプラットフォームでは Apple Neural Engine と Metal、Linux向けllama.cppビルドでは Vulkan をオプトイン可能。Android と Windows は現時点ではCPU実行で、配布済みのLinuxバイナリもCPUのみ（Vulkanはビルド時のオプトイン — [インストール](docs/INSTALLATION.md#platform-features) を参照）。
 
 ### 比較
 
