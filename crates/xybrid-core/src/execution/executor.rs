@@ -39,7 +39,7 @@ use crate::ir::{Envelope, MessageRole};
 use crate::runtime_adapter::{AdapterError, ModelRuntime};
 use crate::tracing as xybrid_trace;
 use ndarray::ArrayD;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -175,6 +175,7 @@ use crate::runtime_adapter::{MultimodalChatMessage, MultimodalMessagePart, Visio
 #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
 use crate::runtime_adapter::llm::LlmRuntimeAdapter;
 
+use super::modes::tts::PiperInferenceConfig;
 use super::modes::{
     execute_autoregressive_stage, execute_bert_inference, execute_single_shot_stage,
     execute_tts_inference, execute_whisper_decoder_stage,
@@ -248,10 +249,8 @@ pub struct TemplateExecutor {
     /// This ensures the struct has consistent fields regardless of features.
     #[cfg(not(any(feature = "llm-mistral", feature = "llm-llamacpp")))]
     llm_adapter_cache: Option<()>,
-    /// Cached ONNX session for the TTS path (see [`TtsSessionCache`]). Lives for
-    /// the executor's lifetime — i.e. the TTS model's load — and drops on unload,
-    /// exactly like `llm_adapter_cache`; no separate eviction needed.
-    tts_session_cache: Option<TtsSessionCache>,
+    tts_session_cache: VecDeque<TtsSessionCache>,
+    tts_session_capacity: usize,
     /// Optional embedding-style vision encoders keyed by metadata `vision_encoder.file`.
     ///
     /// llama.cpp VLMs do not use this registry: they consume raw ordered
@@ -311,7 +310,12 @@ impl TemplateExecutor {
             runtimes,
             base_path: base_path.into(),
             llm_adapter_cache: None,
-            tts_session_cache: None,
+            tts_session_cache: VecDeque::new(),
+            tts_session_capacity: std::env::var("XYBRID_TTS_VOICE_SESSIONS")
+                .ok()
+                .and_then(|value| value.parse::<usize>().ok())
+                .filter(|value| *value > 0)
+                .unwrap_or(4),
             vision_encoders: HashMap::new(),
         }
     }
@@ -839,7 +843,10 @@ impl TemplateExecutor {
         );
         if is_tts {
             debug!(target: "xybrid_core", "TTS detected, calling execute_tts_chunked");
-            return self.execute_tts_chunked(metadata, input, &model_full_path);
+            let voice_model = TtsVoiceLoader::new(&self.base_path)
+                .resolve_voice_model_path(metadata, input)?
+                .unwrap_or(model_full_path);
+            return self.execute_tts_chunked(metadata, input, &voice_model);
         }
 
         // Run Preprocessing for non-TTS models
@@ -2841,27 +2848,30 @@ impl TemplateExecutor {
     /// default options, so path + file identity is a sufficient key.
     fn tts_session(&mut self, model_path: &Path) -> ExecutorResult<Arc<ONNXSession>> {
         let identity = tts_file_identity(model_path);
-        if let Some(cache) = &self.tts_session_cache {
-            // Reuse only when the path matches AND the file identity is both
-            // readable and unchanged — an unreadable identity (`None`) forces a
-            // rebuild rather than trusting a possibly-stale session.
-            if cache.model_path == model_path
-                && identity.is_some()
-                && cache.file_identity == identity
-            {
-                return Ok(Arc::clone(&cache.session));
+        if let Some(position) = self.tts_session_cache.iter().position(|cache| {
+            cache.model_path == model_path && identity.is_some() && cache.file_identity == identity
+        }) {
+            if let Some(cache) = self.tts_session_cache.remove(position) {
+                let session = Arc::clone(&cache.session);
+                self.tts_session_cache.push_back(cache);
+                return Ok(session);
             }
         }
+        self.tts_session_cache
+            .retain(|cache| cache.model_path != model_path);
         let session = Arc::new(OnnxSessionFactory::create_session(
             model_path,
             ExecutionProviderKind::Cpu,
             SessionOptions::default(),
         )?);
-        self.tts_session_cache = Some(TtsSessionCache {
+        self.tts_session_cache.push_back(TtsSessionCache {
             model_path: model_path.to_path_buf(),
             file_identity: identity,
             session: Arc::clone(&session),
         });
+        while self.tts_session_cache.len() > self.tts_session_capacity {
+            self.tts_session_cache.pop_front();
+        }
         Ok(session)
     }
 
@@ -2919,13 +2929,21 @@ impl TemplateExecutor {
         // identical for every chunk, so load it once here.
         let session = self.tts_session(model_path)?;
         let speed = extract_tts_speed(input);
+        let piper = PiperInferenceConfig::from_model_path(model_path);
         let voice_embedding = TtsVoiceLoader::new(&self.base_path).load(metadata, input)?;
 
         let mut audio_chunks: Vec<Vec<f32>> = Vec::new();
         for (i, chunk) in chunks.iter().enumerate() {
             debug!(target: "xybrid_core", "TTS: Processing chunk {}/{}: {} chars", i + 1, chunks.len(), chunk.len());
-            let chunk_audio =
-                self.synthesize_chunk(&session, metadata, input, chunk, &voice_embedding, speed)?;
+            let chunk_audio = self.synthesize_chunk(
+                &session,
+                metadata,
+                input,
+                chunk,
+                &voice_embedding,
+                speed,
+                piper,
+            )?;
             // Inference always yields a waveform; guard the degenerate empty case
             // so it can't enter the crossfade (matches the pre-refactor skip).
             if chunk_audio.is_empty() {
@@ -2964,6 +2982,7 @@ impl TemplateExecutor {
         // the graph load + Level-3 optimization (the dominant short-TTS latency).
         let session = self.tts_session(model_path)?;
         let speed = extract_tts_speed(input);
+        let piper = PiperInferenceConfig::from_model_path(model_path);
         let voice_embedding = TtsVoiceLoader::new(&self.base_path).load(metadata, input)?;
         let text = match &input.kind {
             crate::ir::EnvelopeKind::Text(t) => t.clone(),
@@ -2976,8 +2995,15 @@ impl TemplateExecutor {
 
         // The whole (short) text is one chunk; the synthesis body is shared with
         // the chunked/streaming paths via synthesize_chunk.
-        let audio =
-            self.synthesize_chunk(&session, metadata, input, &text, &voice_embedding, speed)?;
+        let audio = self.synthesize_chunk(
+            &session,
+            metadata,
+            input,
+            &text,
+            &voice_embedding,
+            speed,
+            piper,
+        )?;
 
         // Wrap the already-trimmed waveform for postprocessing (mirrors the
         // chunked path's single-tensor map keyed by the model's output name).
@@ -3007,6 +3033,7 @@ impl TemplateExecutor {
         chunk: &str,
         voice_embedding: &[f32],
         speed: f32,
+        piper: PiperInferenceConfig,
     ) -> ExecutorResult<Vec<f32>> {
         let chunk_input = Envelope {
             kind: crate::ir::EnvelopeKind::Text(chunk.to_string()),
@@ -3017,7 +3044,7 @@ impl TemplateExecutor {
             .as_phoneme_ids()
             .ok_or_else(|| AdapterError::InvalidInput("Expected phoneme IDs".to_string()))?;
         let raw_outputs =
-            execute_tts_inference(session, phoneme_ids, voice_embedding.to_vec(), speed)?;
+            execute_tts_inference(session, phoneme_ids, voice_embedding.to_vec(), speed, piper)?;
         let mut audio: Vec<f32> = raw_outputs
             .values()
             .next()
@@ -3106,12 +3133,17 @@ impl TemplateExecutor {
             return Ok(());
         }
 
-        let model_path = self.tts_model_path(metadata)?;
+        let model_path =
+            match TtsVoiceLoader::new(&self.base_path).resolve_voice_model_path(metadata, input)? {
+                Some(path) => path,
+                None => self.tts_model_path(metadata)?,
+            };
         let sample_rate = Self::tts_output_sample_rate(metadata);
         let fade_samples = (sample_rate as usize * 5) / 1000; // ~5ms edge fade
         let chunks = super::text_chunking::chunk_text_for_tts(&text, max_tts_chars);
         let session = self.tts_session(&model_path)?;
         let speed = extract_tts_speed(input);
+        let piper = PiperInferenceConfig::from_model_path(&model_path);
         let voice_embedding = TtsVoiceLoader::new(&self.base_path).load(metadata, input)?;
         let output_name = session
             .output_names()
@@ -3121,8 +3153,15 @@ impl TemplateExecutor {
 
         for (i, chunk) in chunks.iter().enumerate() {
             debug!(target: "xybrid_core", "TTS stream: chunk {}/{} ({} chars)", i + 1, chunks.len(), chunk.len());
-            let chunk_audio =
-                self.synthesize_chunk(&session, metadata, input, chunk, &voice_embedding, speed)?;
+            let chunk_audio = self.synthesize_chunk(
+                &session,
+                metadata,
+                input,
+                chunk,
+                &voice_embedding,
+                speed,
+                piper,
+            )?;
             if chunk_audio.is_empty() {
                 continue; // degenerate empty inference output — skip (pre-refactor behavior)
             }
@@ -5333,6 +5372,7 @@ mod tests {
                 add_padding: true,
                 normalize_text: false,
                 silence_tokens: None,
+                id_style: Default::default(),
             },
         );
         assert!(TemplateExecutor::is_tts_model(&metadata));
@@ -5370,6 +5410,7 @@ mod tests {
                 add_padding: true,
                 normalize_text: false,
                 silence_tokens: None,
+                id_style: Default::default(),
             });
         assert!(TemplateExecutor::is_tts_model(&metadata));
     }
