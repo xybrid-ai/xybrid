@@ -42,7 +42,7 @@ Or edit `Packages/manifest.json` directly:
     }
   ],
   "dependencies": {
-    "ai.xybrid.sdk": "0.4.1"
+    "ai.xybrid.sdk": "0.5.0"
   }
 }
 ```
@@ -59,7 +59,7 @@ https://github.com/xybrid-ai/xybrid.git?path=/bindings/unity
 Pin a version by appending a tag:
 
 ```
-https://github.com/xybrid-ai/xybrid.git?path=/bindings/unity#v0.4.1
+https://github.com/xybrid-ai/xybrid.git?path=/bindings/unity#v0.5.0
 ```
 
 (**Window → Package Manager → + → Add package from git URL**, or add it under
