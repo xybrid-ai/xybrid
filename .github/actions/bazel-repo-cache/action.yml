@@ -29,8 +29,10 @@ inputs:
     description: >
       Optional replacement download location for hermetic-llvm's pinned macOS SDK
       package, as host+path with no scheme (Bazel adds https). Empty by default,
-      which changes nothing. Pass `${{ vars.MACOS_SDK_MIRROR }}` so the mirror can
-      be turned on by setting one repository variable — see the note below.
+      which changes nothing. Callers pass the MACOS_SDK_MIRROR repository variable,
+      so the mirror is turned on by setting that one variable — see the note below.
+      (No expression syntax in this description: an action manifest is evaluated as
+      a template, and `vars` does not exist in that context.)
     required: false
     default: ""
 
@@ -71,11 +73,16 @@ runs:
     - name: Configure the macOS SDK mirror
       if: inputs.macos-sdk-mirror != ''
       shell: bash
+      # Via env, not interpolated into the script: an input reaching a shell
+      # command directly is the standard Actions injection shape, even when the
+      # value comes from a repository variable an admin set.
+      env:
+        MIRROR: ${{ inputs.macos-sdk-mirror }}
       run: |
         cfg="$PWD/.context/downloader.cfg"
         # Match the pinned package by name, whatever build-id path Apple used.
         printf 'rewrite swcdn\\.apple\\.com/.*/CLTools_macOSNMOS_SDK\\.pkg %s\n' \
-          '${{ inputs.macos-sdk-mirror }}' > "$cfg"
+          "$MIRROR" > "$cfg"
         echo "common --downloader_config=$cfg" >> .context/local.bazelrc
-        echo "macOS SDK downloads rewritten to: ${{ inputs.macos-sdk-mirror }}"
+        echo "macOS SDK downloads rewritten to: $MIRROR"
         cat "$cfg"
