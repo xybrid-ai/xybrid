@@ -88,6 +88,11 @@ and ships one wheel per interpreter ABI.
   Published Linux binaries are unchanged and stay CPU-only: a Vulkan build
   requires a Vulkan loader on the machine that runs it, so it belongs in a
   separate artifact rather than in place of the default one.
+- **A warning when a GPU offload request cannot be honored.** `gpu_layers`
+  defaults to 99 and llama.cpp keeps every layer on the CPU when no GPU backend
+  was compiled in, so until now the only symptom of a CPU-only build on a
+  machine with an idle GPU was that inference ran slowly. Model load now logs
+  this once, pointing at the platform's GPU build options (#485).
 - **A Device Logs guide** — where SDK logs land per platform (logcat tag
   `xybrid`, unified-log subsystem `dev.xybrid.sdk`, host-registered logger on
   desktop), the commands to read them, and what the telemetry-export and
@@ -151,6 +156,13 @@ and ships one wheel per interpreter ABI.
 
 ### Fixed
 
+- **The READMEs claimed CUDA acceleration on Linux and Windows, which no build
+  provides.** `GGML_CUDA` is `OFF` on every target in both the cargo and Bazel
+  paths, `llm-mistral-cuda` is a marker feature whose backing crate is commented
+  out of the workspace, and Candle — the one component with a real CUDA path —
+  was retired from the platform presets. The hardware-acceleration table now
+  reads CPU for Linux (with Vulkan as a build-time opt-in) and CPU for Windows,
+  in all three translations (#485).
 - **A gateway request with no model no longer silently runs OpenAI.** Both
   request builders fell back to `gpt-4o-mini`, so a caller who forgot to set a
   model paid for a third-party provider and saw the resulting failure as an

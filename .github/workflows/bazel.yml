@@ -122,6 +122,13 @@ jobs:
       # r27 as a normal Bazel repository input (rules_android_ndk.patch +
       # XYBRID_NDK_URL/SHA256 in the committed .bazelrc).
 
+      # Yes, on a Linux lane: @macos_sdk is analyzed regardless of target
+      # platform, and its Apple URL 403s permanently now — see the action.
+      - name: Cache the pinned macOS SDK
+        uses: ./.github/actions/bazel-repo-cache
+        with:
+          macos-sdk-mirror: ${{ vars.MACOS_SDK_MIRROR }}
+
       # .bazelrc try-imports this gitignored file; in CI it's materialized from
       # the secret. Absent secret (forks) → no :remote config → RBE steps skip.
       - name: Configure BuildBuddy remote config
@@ -401,6 +408,13 @@ jobs:
           which cmake >/dev/null || brew install cmake
           which pkg-config >/dev/null || brew install pkg-config
 
+      # Apple's pinned SDK URL 403s permanently now; this serves it from cache
+      # instead — see the action.
+      - name: Cache the pinned macOS SDK
+        uses: ./.github/actions/bazel-repo-cache
+        with:
+          macos-sdk-mirror: ${{ vars.MACOS_SDK_MIRROR }}
+
       - name: Configure BuildBuddy remote config
         env:
           BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
@@ -522,6 +536,13 @@ jobs:
             sudo ln -sfn "$INC/$tree" "/opt/xybrid-vulkan-include/$tree"
           done
           ls -l /opt/xybrid-vulkan-include
+
+      # One shared cache entry across every lane — see the action for why this
+      # download in particular needs it.
+      - name: Cache the pinned macOS SDK
+        uses: ./.github/actions/bazel-repo-cache
+        with:
+          macos-sdk-mirror: ${{ vars.MACOS_SDK_MIRROR }}
 
       - name: Configure BuildBuddy remote config
         env:

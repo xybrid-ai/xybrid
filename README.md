@@ -411,7 +411,7 @@ See the [model metadata docs](docs/sdk/API_REFERENCE.md) for the full schema, or
 | Embeddings | 🔜 | 🔜 | 🔜 | 🔜 | 🔜 |
 | Multi-Model Pipelines (MMP) | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Model Download & Caching | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Hardware Acceleration | Metal, ANE | CPU | Metal, ANE | CUDA, Vulkan | CUDA |
+| Hardware Acceleration | Metal, ANE | CPU | Metal, ANE | CPU, opt-in Vulkan | CPU |
 
 **SDK MMP support:** Flutter ✅ · Rust ✅ · Kotlin 🔜 · Swift 🔜 · Unity 🔜
 
@@ -430,7 +430,7 @@ CLI today (`xybrid repl` ships built-in `web_search` + your own via
 - **Offline capable** — No internet required after initial model download.
 - **Cross-platform** — One API across iOS, Android, macOS, Linux, and Windows.
 - **Multi-model pipelines (MMP)** — Chain models together (ASR → LLM → TTS) in a single call.
-- **Hardware acceleration** — Apple Neural Engine, Metal, CUDA, plus opt-in Vulkan for Linux llama.cpp builds.
+- **Hardware acceleration** — Apple Neural Engine and Metal on Apple platforms; opt-in Vulkan for Linux llama.cpp builds. Android and Windows run on CPU today, and prebuilt Linux binaries are CPU-only (Vulkan is a build-time opt-in — see [installation](docs/INSTALLATION.md#platform-features)).
 
 ### How it compares
 
