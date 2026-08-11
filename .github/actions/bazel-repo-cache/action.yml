@@ -25,6 +25,14 @@ inputs:
     description: Cache key prefix, so lanes with different fetch sets stay separate.
     required: false
     default: bazel-repo
+  macos-sdk-mirror:
+    description: >
+      Optional replacement download location for hermetic-llvm's pinned macOS SDK
+      package, as host+path with no scheme (Bazel adds https). Empty by default,
+      which changes nothing. Pass `${{ vars.MACOS_SDK_MIRROR }}` so the mirror can
+      be turned on by setting one repository variable — see the note below.
+    required: false
+    default: ""
 
 runs:
   using: composite
@@ -44,3 +52,30 @@ runs:
       run: |
         mkdir -p .context
         echo "common --repository_cache=$HOME/.cache/bazel-repo" >> .context/local.bazelrc
+
+    # THE COLD-CACHE HOLE, and the one-variable switch that closes it.
+    #
+    # A cache hit needs a previous successful fetch, and right now neither host
+    # serving the pinned SDK is reliable: Apple's URL is gone for good and the
+    # Wayback mirror refuses Actions IP ranges. So a cold cache still fails.
+    #
+    # Bazel's downloader config rewrites a URL without touching anyone's pins —
+    # the sha256 in hermetic-llvm's MODULE.bazel still has to match, so a mirror
+    # cannot substitute different content. Set the repository variable
+    # MACOS_SDK_MIRROR to wherever the package is hosted (host+path, no scheme)
+    # and every lane picks it up; leave it unset and this is a no-op.
+    #
+    # Deliberately NOT a default pointing at some public mirror: that package is
+    # Apple's, and where it may be republished is a licensing decision for the
+    # repository owner, not something to hardcode here.
+    - name: Configure the macOS SDK mirror
+      if: inputs.macos-sdk-mirror != ''
+      shell: bash
+      run: |
+        cfg="$PWD/.context/downloader.cfg"
+        # Match the pinned package by name, whatever build-id path Apple used.
+        printf 'rewrite swcdn\\.apple\\.com/.*/CLTools_macOSNMOS_SDK\\.pkg %s\n' \
+          '${{ inputs.macos-sdk-mirror }}' > "$cfg"
+        echo "common --downloader_config=$cfg" >> .context/local.bazelrc
+        echo "macOS SDK downloads rewritten to: ${{ inputs.macos-sdk-mirror }}"
+        cat "$cfg"

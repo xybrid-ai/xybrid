@@ -129,6 +129,7 @@ jobs:
         uses: ./.github/actions/bazel-repo-cache
         with:
           key-prefix: bazel-repo-linux
+          macos-sdk-mirror: ${{ vars.MACOS_SDK_MIRROR }}
 
       # .bazelrc try-imports this gitignored file; in CI it's materialized from
       # the secret. Absent secret (forks) → no :remote config → RBE steps skip.
@@ -415,6 +416,7 @@ jobs:
         uses: ./.github/actions/bazel-repo-cache
         with:
           key-prefix: bazel-repo-macos-metal
+          macos-sdk-mirror: ${{ vars.MACOS_SDK_MIRROR }}
 
       - name: Configure BuildBuddy remote config
         env:
@@ -545,6 +547,7 @@ jobs:
         uses: ./.github/actions/bazel-repo-cache
         with:
           key-prefix: bazel-repo-linux
+          macos-sdk-mirror: ${{ vars.MACOS_SDK_MIRROR }}
 
       - name: Configure BuildBuddy remote config
         env:

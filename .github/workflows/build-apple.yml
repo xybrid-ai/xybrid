@@ -91,6 +91,7 @@ jobs:
         uses: ./.github/actions/bazel-repo-cache
         with:
           key-prefix: bazel-repo-apple
+          macos-sdk-mirror: ${{ vars.MACOS_SDK_MIRROR }}
 
       - name: Build XCFramework (Bazel)
         run: bazelisk build --config=ios //bindings/apple:XybridFFI
