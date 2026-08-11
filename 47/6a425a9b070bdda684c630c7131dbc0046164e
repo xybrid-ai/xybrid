@@ -1,0 +1,28 @@
+.github/workflows/build-apple.yml
+  s_a8e2ccb50c72bb::t_87e329351d8470 90,92,94
+  s_a8e2ccb50c72bb::t_eb60aab1d16555 88-89,91,93
+.github/actions/bazel-repo-cache/action.yml
+  s_a8e2ccb50c72bb::t_f561db1227bcde 1-46
+.github/workflows/bazel.yml
+  s_a8e2ccb50c72bb::t_0b6fa9aa98ea4b 541-543
+  s_a8e2ccb50c72bb::t_c15fed7cf51d9d 125-127
+  s_a8e2ccb50c72bb::t_0c3ea826e73bec 128-132,412-417,544-547
+  s_a8e2ccb50c72bb::t_f551b27a85e225 418
+  s_a8e2ccb50c72bb::t_05db35f61331ee 548
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "476a425a9b070bdda684c630c7131dbc0046164e",
+  "prompts": {},
+  "sessions": {
+    "s_a8e2ccb50c72bb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a39b6157-4a0e-4b93-9fc2-8830a3134ec6",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
