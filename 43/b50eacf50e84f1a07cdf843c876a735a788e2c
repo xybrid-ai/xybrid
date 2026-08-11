@@ -1,0 +1,100 @@
+docs/content/docs/(integration)/sdks/android.zh.mdx
+  s_296174d8a13f4f::t_3f9a27b00f37c7 14
+bindings/flutter/pubspec.yaml
+  s_296174d8a13f4f::t_bd7e4af672b851 3
+Cargo.toml
+  s_296174d8a13f4f::t_bd7e4af672b851 21
+docs/content/docs/quickstart.mdx
+  s_296174d8a13f4f::t_74813cd9afe9d9 122
+  s_296174d8a13f4f::t_3f9a27b00f37c7 15,57,88,194
+bindings/react-native/android/build.gradle
+  s_296174d8a13f4f::t_bd7e4af672b851 94
+bindings/react-native/package.json
+  s_296174d8a13f4f::t_bd7e4af672b851 3
+docs/content/docs/(integration)/sdks/android.mdx
+  s_296174d8a13f4f::t_3f9a27b00f37c7 14
+bindings/flutter/rust/Cargo.toml
+  s_296174d8a13f4f::t_bd7e4af672b851 3
+Package.swift
+  s_296174d8a13f4f::t_bd7e4af672b851 40
+crates/xybrid/Cargo.toml
+  s_296174d8a13f4f::t_6b6ca1544c7bf4 17
+bindings/web/package.json
+  s_296174d8a13f4f::t_bd7e4af672b851 3
+bindings/kotlin/README.md
+  s_296174d8a13f4f::t_3f9a27b00f37c7 15
+README.ja-JP.md
+  s_296174d8a13f4f::t_3f9a27b00f37c7 157,174,192,226
+README.zh-CN.md
+  s_296174d8a13f4f::t_3f9a27b00f37c7 157,174,192,226
+README.md
+  s_296174d8a13f4f::t_3f9a27b00f37c7 145,162,180,219
+crates/xybrid-llama/Cargo.toml
+  s_296174d8a13f4f::t_6b6ca1544c7bf4 24
+bindings/apple/XybridFFI-Info.plist
+  s_296174d8a13f4f::t_bd7e4af672b851 10,12
+bindings/apple/README.md
+  s_296174d8a13f4f::t_3f9a27b00f37c7 15,22
+CHANGELOG.md
+  s_296174d8a13f4f::t_97ff55ab17aa2d 91-94,98-124
+  s_296174d8a13f4f::t_ad86db7c14bd6d 10-34,37-71
+  s_296174d8a13f4f::t_4aef8c30141c74 143-150,154-180,188-193
+bindings/flutter/CHANGELOG.md
+  s_296174d8a13f4f::t_c1eabd2035baa6 3-32
+bindings/kotlin/build.gradle.kts
+  s_296174d8a13f4f::t_bd7e4af672b851 8
+bindings/web/README.md
+  s_296174d8a13f4f::t_3f9a27b00f37c7 3
+docs/content/docs/(integration)/sdks/ios.zh.mdx
+  s_296174d8a13f4f::t_3f9a27b00f37c7 18
+crates/xybrid-whisper/Cargo.toml
+  s_296174d8a13f4f::t_6b6ca1544c7bf4 23
+docs/content/docs/(integration)/sdks/flutter.mdx
+  s_296174d8a13f4f::t_3f9a27b00f37c7 14
+docs/content/docs/quickstart.zh.mdx
+  s_296174d8a13f4f::t_74813cd9afe9d9 122
+  s_296174d8a13f4f::t_3f9a27b00f37c7 15,57,88,193
+crates/xybrid-core/Cargo.toml
+  s_296174d8a13f4f::t_6b6ca1544c7bf4 28-29,32
+bindings/unity/package.json
+  s_296174d8a13f4f::t_bd7e4af672b851 3
+bindings/flutter/README.md
+  s_296174d8a13f4f::t_3f9a27b00f37c7 18
+docs/telemetry/registry.md
+  s_296174d8a13f4f::t_3f9a27b00f37c7 40
+crates/whisper-cpp-sys/Cargo.toml
+  s_296174d8a13f4f::t_6b6ca1544c7bf4 42
+bindings/unity/README.md
+  s_296174d8a13f4f::t_74813cd9afe9d9 62
+  s_296174d8a13f4f::t_3f9a27b00f37c7 45
+docs/content/docs/(integration)/sdks/ios.mdx
+  s_296174d8a13f4f::t_3f9a27b00f37c7 18
+docs/content/docs/(integration)/sdks/web.zh.mdx
+  s_296174d8a13f4f::t_3f9a27b00f37c7 9
+bindings/python/pyproject.toml
+  s_296174d8a13f4f::t_bd7e4af672b851 7
+crates/xybrid-sdk/Cargo.toml
+  s_296174d8a13f4f::t_6b6ca1544c7bf4 17,37,42
+docs/content/docs/(integration)/sdks/web.mdx
+  s_296174d8a13f4f::t_3f9a27b00f37c7 9
+docs/content/docs/(integration)/sdks/flutter.zh.mdx
+  s_296174d8a13f4f::t_3f9a27b00f37c7 14
+Cargo.lock
+  s_296174d8a13f4f::t_f65d883614605b 386,388,428,489-494,738,740,744,867,869,963,965,973,975,1102,1104,1713,1715,1826,1828,1841,1843,1851,1853,1857,1859,1868,1870,1887,1889,1893,1898,1900,1904,1906,1910,1912,2315-2316,2755,2868,2870,3175,3177,3185,3187,3665,3676,3909,3911,4105,4127,4263,4372,5060,5062,5064,5080,5082,5233,5622,5624,5626,5643,5645,5647,5761,5763,5774,5776,5784,5786,5794,5796,5807,5809,5829,5831,6227,6241,6248,6277,6346,6356,6365,6374,6383,6409,6418,6427,6439,6518,6520,6527,6529,6691,6693
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "43b50eacf50e84f1a07cdf843c876a735a788e2c",
+  "prompts": {},
+  "sessions": {
+    "s_296174d8a13f4f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5a2849c7-608b-4642-9e29-e8cef9623d53",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
