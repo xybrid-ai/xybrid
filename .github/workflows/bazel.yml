@@ -122,13 +122,11 @@ jobs:
       # r27 as a normal Bazel repository input (rules_android_ndk.patch +
       # XYBRID_NDK_URL/SHA256 in the committed .bazelrc).
 
-      # Keeps pinned archives — notably hermetic-llvm's macOS SDK, whose Apple
-      # CDN URL now 403s — out of the per-run network path. @macos_sdk is
-      # analyzed even here, where nothing targets Apple.
-      - name: Cache Bazel repository fetches
+      # Yes, on a Linux lane: @macos_sdk is analyzed regardless of target
+      # platform, and its Apple URL 403s permanently now — see the action.
+      - name: Cache the pinned macOS SDK
         uses: ./.github/actions/bazel-repo-cache
         with:
-          key-prefix: bazel-repo-linux
           macos-sdk-mirror: ${{ vars.MACOS_SDK_MIRROR }}
 
       # .bazelrc try-imports this gitignored file; in CI it's materialized from
@@ -410,12 +408,11 @@ jobs:
           which cmake >/dev/null || brew install cmake
           which pkg-config >/dev/null || brew install pkg-config
 
-      # Keeps pinned archives — notably hermetic-llvm's macOS SDK, whose
-      # Apple CDN URL now 403s — out of the per-run network path.
-      - name: Cache Bazel repository fetches
+      # Apple's pinned SDK URL 403s permanently now; this serves it from cache
+      # instead — see the action.
+      - name: Cache the pinned macOS SDK
         uses: ./.github/actions/bazel-repo-cache
         with:
-          key-prefix: bazel-repo-macos-metal
           macos-sdk-mirror: ${{ vars.MACOS_SDK_MIRROR }}
 
       - name: Configure BuildBuddy remote config
@@ -540,13 +537,11 @@ jobs:
           done
           ls -l /opt/xybrid-vulkan-include
 
-      # Keeps pinned archives — notably hermetic-llvm's macOS SDK, whose Apple
-      # CDN URL now 403s — out of the per-run network path. Shares the linux
-      # lane's key prefix: same fetch set, so whichever runs first warms the other.
-      - name: Cache Bazel repository fetches
+      # One shared cache entry across every lane — see the action for why this
+      # download in particular needs it.
+      - name: Cache the pinned macOS SDK
         uses: ./.github/actions/bazel-repo-cache
         with:
-          key-prefix: bazel-repo-linux
           macos-sdk-mirror: ${{ vars.MACOS_SDK_MIRROR }}
 
       - name: Configure BuildBuddy remote config

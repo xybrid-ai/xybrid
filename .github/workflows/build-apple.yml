@@ -87,10 +87,9 @@ jobs:
 
       # Without this the macOS SDK is re-fetched from Apple's CDN every run, and
       # that pinned URL now 403s — see the action for the full failure mode.
-      - name: Cache Bazel repository fetches
+      - name: Cache the pinned macOS SDK
         uses: ./.github/actions/bazel-repo-cache
         with:
-          key-prefix: bazel-repo-apple
           macos-sdk-mirror: ${{ vars.MACOS_SDK_MIRROR }}
 
       - name: Build XCFramework (Bazel)
