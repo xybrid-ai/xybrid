@@ -1,0 +1,37 @@
+CHANGELOG.md
+  s_296174d8a13f4f::t_8bde71e04b95c8 159-165
+  s_296174d8a13f4f::t_a56305b9de3a27 95
+  s_296174d8a13f4f::t_45353327d23e65 91-94
+README.zh-CN.md
+  s_296174d8a13f4f::t_45353327d23e65 399,411
+.github/workflows/build-apple.yml
+  s_296174d8a13f4f::t_45353327d23e65 88-94
+.github/workflows/bazel.yml
+  s_296174d8a13f4f::t_45353327d23e65 125-131,411-417,540-545
+  s_296174d8a13f4f::t_7798d19be86520 546
+.github/actions/bazel-repo-cache/action.yml
+  s_296174d8a13f4f::t_45353327d23e65 1-94
+README.md
+  s_296174d8a13f4f::t_45353327d23e65 414,433
+crates/xybrid-core/src/runtime_adapter/llama_cpp/mod.rs
+  s_296174d8a13f4f::t_45353327d23e65 37-38,684-714,825-826,1717-1731
+  s_296174d8a13f4f::t_d10c19c3205c53 1732
+README.ja-JP.md
+  s_296174d8a13f4f::t_45353327d23e65 398,410
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "a1095246b0290ee87b2e8be95277004a05b0357e",
+  "prompts": {},
+  "sessions": {
+    "s_296174d8a13f4f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5a2849c7-608b-4642-9e29-e8cef9623d53",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
