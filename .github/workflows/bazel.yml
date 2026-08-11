@@ -122,6 +122,14 @@ jobs:
       # r27 as a normal Bazel repository input (rules_android_ndk.patch +
       # XYBRID_NDK_URL/SHA256 in the committed .bazelrc).
 
+      # Keeps pinned archives — notably hermetic-llvm's macOS SDK, whose Apple
+      # CDN URL now 403s — out of the per-run network path. @macos_sdk is
+      # analyzed even here, where nothing targets Apple.
+      - name: Cache Bazel repository fetches
+        uses: ./.github/actions/bazel-repo-cache
+        with:
+          key-prefix: bazel-repo-linux
+
       # .bazelrc try-imports this gitignored file; in CI it's materialized from
       # the secret. Absent secret (forks) → no :remote config → RBE steps skip.
       - name: Configure BuildBuddy remote config
@@ -401,6 +409,13 @@ jobs:
           which cmake >/dev/null || brew install cmake
           which pkg-config >/dev/null || brew install pkg-config
 
+      # Keeps pinned archives — notably hermetic-llvm's macOS SDK, whose
+      # Apple CDN URL now 403s — out of the per-run network path.
+      - name: Cache Bazel repository fetches
+        uses: ./.github/actions/bazel-repo-cache
+        with:
+          key-prefix: bazel-repo-macos-metal
+
       - name: Configure BuildBuddy remote config
         env:
           BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
@@ -522,6 +537,14 @@ jobs:
             sudo ln -sfn "$INC/$tree" "/opt/xybrid-vulkan-include/$tree"
           done
           ls -l /opt/xybrid-vulkan-include
+
+      # Keeps pinned archives — notably hermetic-llvm's macOS SDK, whose Apple
+      # CDN URL now 403s — out of the per-run network path. Shares the linux
+      # lane's key prefix: same fetch set, so whichever runs first warms the other.
+      - name: Cache Bazel repository fetches
+        uses: ./.github/actions/bazel-repo-cache
+        with:
+          key-prefix: bazel-repo-linux
 
       - name: Configure BuildBuddy remote config
         env:

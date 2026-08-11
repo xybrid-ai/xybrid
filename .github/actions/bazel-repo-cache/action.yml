@@ -1,0 +1,46 @@
+name: Cache Bazel repository fetches
+description: >
+  Persist Bazel's content-addressed repository cache across runs, so pinned
+  external archives are not re-downloaded from the network on every job.
+
+# WHY THIS EXISTS. Repository fetches are client-side — remote execution and the
+# BuildBuddy action cache do nothing for them — so each job re-downloaded every
+# pinned archive, including hermetic-llvm's macOS SDK. That one comes from
+# Apple's CDN, whose pinned URL now returns 403, leaving only the
+# web.archive.org mirror hermetic-llvm lists beside it, which throttles Actions
+# IP ranges. On 2026-08-11 both refused within seconds of each other and the
+# Apple job failed in analysis having built nothing.
+#
+# @macos_sdk is reached even by jobs that target neither macOS nor iOS, because
+# @llvm//toolchain/args/macos:macos_sdk_sysroot is analyzed regardless of target
+# platform — so this is worth having on the Linux lanes too.
+#
+# The cache is content-addressed by sha256, so a hit serves a pinned archive
+# without contacting its host at all: one successful fetch covers later runs
+# instead of re-rolling the dice. `restore-keys` carries most of the value —
+# an older cache still holds the same SDK entry when only MODULE.bazel moved.
+
+inputs:
+  key-prefix:
+    description: Cache key prefix, so lanes with different fetch sets stay separate.
+    required: false
+    default: bazel-repo
+
+runs:
+  using: composite
+  steps:
+    - name: Restore the repository cache
+      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      with:
+        path: ~/.cache/bazel-repo
+        key: ${{ inputs.key-prefix }}-${{ runner.os }}-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', '.bazelversion') }}
+        restore-keys: |
+          ${{ inputs.key-prefix }}-${{ runner.os }}-
+
+    # .bazelrc try-imports this gitignored file, so one line here applies to
+    # every bazelisk invocation in the job — no per-command flag to forget.
+    - name: Point Bazel at the cached repository fetches
+      shell: bash
+      run: |
+        mkdir -p .context
+        echo "common --repository_cache=$HOME/.cache/bazel-repo" >> .context/local.bazelrc
