@@ -584,6 +584,9 @@ class XybridModule(reactContext: ReactApplicationContext) :
       repetitionPenalty = floatOrNull("repetitionPenalty"),
       stopSequences = stops,
       grammar = if (map.hasKey("grammar") && !map.isNull("grammar")) map.getString("grammar") else null,
+      // Tool calling is not part of the React Native surface yet; an empty
+      // list keeps the pre-tool-calling behavior.
+      tools = emptyList(),
     )
   }
 
