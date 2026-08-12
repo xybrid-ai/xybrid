@@ -97,7 +97,11 @@ pub struct StreamConfig {
     pub min_chunk_secs: f32,
     /// Enable partial results during streaming
     pub enable_partial_results: bool,
-    /// Language hint (passed to model if supported)
+    /// Language hint passed to the model when supported.
+    ///
+    /// When absent, a reporting ASR runtime may auto-detect from the first
+    /// full audio window; [`StreamSession`] reuses that language for later
+    /// windows until the session is reset.
     pub language: Option<String>,
     /// Whisper encoder context override in mel frames; `None` uses the model default
     pub audio_ctx: Option<u32>,
@@ -135,13 +139,15 @@ impl StreamConfig {
         }
     }
 
-    /// Create an audio envelope carrying the configured ASR overrides.
-    fn inference_envelope(&self, wav_bytes: Vec<u8>) -> Envelope {
+    /// Create an audio envelope carrying the effective ASR overrides.
+    fn inference_envelope(&self, wav_bytes: Vec<u8>, detected_language: Option<&str>) -> Envelope {
         let mut envelope = Envelope::new(EnvelopeKind::Audio(wav_bytes));
-        if let Some(language) = &self.language {
+        // A caller override always wins. Otherwise, reuse the language the ASR
+        // runtime auto-detected on this session's first successful window.
+        if let Some(language) = self.language.as_deref().or(detected_language) {
             envelope
                 .metadata
-                .insert("language".to_string(), language.clone());
+                .insert("language".to_string(), language.to_string());
         }
         if let Some(audio_ctx) = self.audio_ctx {
             envelope
@@ -365,6 +371,8 @@ pub struct StreamSession {
     executor: Arc<Mutex<TemplateExecutor>>,
     /// Configuration
     config: StreamConfig,
+    /// Language auto-detected for this stream, reused by later windows.
+    detected_language: Option<String>,
     /// Audio buffer
     buffer: AudioBuffer,
     /// Transcript accumulator
@@ -472,6 +480,7 @@ impl StreamSession {
                         metadata,
                         executor,
                         config,
+                        detected_language: None,
                         buffer,
                         transcript: TranscriptAccumulator::new(),
                         state: StreamState::Idle,
@@ -507,6 +516,7 @@ impl StreamSession {
             metadata,
             executor,
             config,
+            detected_language: None,
             buffer,
             transcript: TranscriptAccumulator::new(),
             state: StreamState::Idle,
@@ -607,7 +617,7 @@ impl StreamSession {
         let sample_rate = self.buffer.config().sample_rate;
         let silence = vec![0.0f32; (sample_rate as usize) / 2];
         let wav_bytes = samples_to_wav(&silence, sample_rate);
-        let envelope = self.config.inference_envelope(wav_bytes);
+        let envelope = self.config.inference_envelope(wav_bytes, None);
 
         executor
             .execute(&self.metadata, &envelope, None)
@@ -713,6 +723,7 @@ impl StreamSession {
         self.transcript.reset();
         self.state = StreamState::Idle;
         self.last_error = None;
+        self.detected_language = None;
         // Reset VAD state
         if let Some(ref mut vad) = self.vad {
             vad.reset();
@@ -729,6 +740,15 @@ impl StreamSession {
     /// Get current session state.
     pub fn state(&self) -> StreamState {
         self.state
+    }
+
+    /// Return the language auto-detected for the current stream.
+    ///
+    /// This remains `None` when the caller configured an explicit language or
+    /// the active ASR runtime does not report language detection.
+    #[must_use]
+    pub fn detected_language(&self) -> Option<&str> {
+        self.detected_language.as_deref()
     }
 
     /// Get buffer statistics.
@@ -785,7 +805,9 @@ impl StreamSession {
         let wav_bytes = samples_to_wav(&chunk.samples, self.buffer.config().sample_rate);
 
         // Create envelope with audio data and per-session ASR overrides.
-        let envelope = self.config.inference_envelope(wav_bytes);
+        let envelope = self
+            .config
+            .inference_envelope(wav_bytes, self.detected_language.as_deref());
 
         // Execute through TemplateExecutor (handles ONNX, Candle, etc.)
         let output = self
@@ -804,6 +826,25 @@ impl StreamSession {
                 ));
             }
         };
+
+        // Short warm-up windows are deliberately excluded. The committed
+        // French fixture is misidentified from its first 1.5 s but correctly
+        // identified from the full 5 s window; caching the early guess would
+        // make every later transcript consistently wrong. Explicit session
+        // configuration takes precedence forever, and the first full-window
+        // detection remains stable until `reset` starts a new stream.
+        if self.config.language.is_none()
+            && self.detected_language.is_none()
+            && !self.buffer.config().is_warmup_chunk(chunk.sequence)
+        {
+            self.detected_language = output
+                .metadata
+                .get(Envelope::DETECTED_LANGUAGE_METADATA_KEY)
+                .map(String::as_str)
+                .map(str::trim)
+                .filter(|language| !language.is_empty())
+                .map(str::to_owned);
+        }
 
         // Reconcile into the transcript (replaces re-covered spans, dedupes
         // the overlap seam).
@@ -863,7 +904,7 @@ mod tests {
             ..Default::default()
         };
 
-        let envelope = config.inference_envelope(vec![1, 2, 3]);
+        let envelope = config.inference_envelope(vec![1, 2, 3], Some("de"));
 
         assert_eq!(
             envelope.metadata.get("language").map(String::as_str),
@@ -883,10 +924,40 @@ mod tests {
             ..Default::default()
         };
 
-        let envelope = config.inference_envelope(vec![1, 2, 3]);
+        let envelope = config.inference_envelope(vec![1, 2, 3], None);
 
         assert!(!envelope.metadata.contains_key("language"));
         assert!(!envelope.metadata.contains_key("audio_ctx"));
+    }
+
+    #[test]
+    fn detected_language_is_reused_when_no_override_is_configured() {
+        let config = StreamConfig {
+            language: None,
+            ..Default::default()
+        };
+
+        let envelope = config.inference_envelope(vec![1, 2, 3], Some("fr"));
+
+        assert_eq!(
+            envelope.metadata.get("language").map(String::as_str),
+            Some("fr")
+        );
+    }
+
+    #[test]
+    fn configured_language_takes_precedence_over_detected_language() {
+        let config = StreamConfig {
+            language: Some("en".to_string()),
+            ..Default::default()
+        };
+
+        let envelope = config.inference_envelope(vec![1, 2, 3], Some("fr"));
+
+        assert_eq!(
+            envelope.metadata.get("language").map(String::as_str),
+            Some("en")
+        );
     }
 
     fn secs(s: f64) -> Duration {

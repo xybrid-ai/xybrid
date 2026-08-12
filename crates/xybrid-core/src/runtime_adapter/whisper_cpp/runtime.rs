@@ -20,6 +20,14 @@ use crate::runtime_adapter::{AdapterError, AdapterResult, ModelRuntime};
 /// it is the default here for the same reason `candle::device` caps its pool.
 const DEFAULT_THREADS: u32 = 4;
 
+/// One completed whisper.cpp request, including data needed by stream-level
+/// orchestration but not repeated in the user-facing text payload.
+#[derive(Debug)]
+struct Transcription {
+    segments: Vec<Segment>,
+    detected_language: Option<String>,
+}
+
 /// whisper.cpp-backed model runtime.
 ///
 /// Holds at most one loaded model. Unlike [`crate::runtime_adapter::candle`]'s
@@ -98,8 +106,8 @@ impl WhisperCppRuntime {
         pcm: &[f32],
         params: &TranscribeParams,
     ) -> AdapterResult<String> {
-        let segments = self.transcribe_pcm_segments(pcm, params)?;
-        Ok(Segment::join(&segments))
+        let transcription = self.transcribe_pcm_result(pcm, params)?;
+        Ok(Segment::join(&transcription.segments))
     }
 
     /// Transcribe and keep the per-segment spans, which the streaming
@@ -113,11 +121,26 @@ impl WhisperCppRuntime {
         pcm: &[f32],
         params: &TranscribeParams,
     ) -> AdapterResult<Vec<Segment>> {
+        Ok(self.transcribe_pcm_result(pcm, params)?.segments)
+    }
+
+    /// Transcribe once and retain the auto-detected language while the model
+    /// lock still protects the result that produced it.
+    fn transcribe_pcm_result(
+        &mut self,
+        pcm: &[f32],
+        params: &TranscribeParams,
+    ) -> AdapterResult<Transcription> {
         let mut guard = lock(&self.model)?;
         let model = guard.as_mut().ok_or_else(|| {
             AdapterError::ModelNotLoaded("No whisper.cpp model loaded".to_string())
         })?;
-        model.transcribe(pcm, params).map_err(native_error)
+        let segments = model.transcribe(pcm, params).map_err(native_error)?;
+        let detected_language = model.detected_language().map(str::to_owned);
+        Ok(Transcription {
+            segments,
+            detected_language,
+        })
     }
 
     /// The parameters this runtime would use for a request carrying
@@ -235,8 +258,16 @@ impl ModelRuntime for WhisperCppRuntime {
         let samples = decode_wav_audio(bytes, SAMPLE_RATE, 1)
             .map_err(|e| AdapterError::InvalidInput(format!("Audio decode failed: {e}")))?;
 
-        let text = self.transcribe_pcm(&samples, &params)?;
-        Ok(Envelope::new(EnvelopeKind::Text(text)))
+        let transcription = self.transcribe_pcm_result(&samples, &params)?;
+        let text = Segment::join(&transcription.segments);
+        let mut output = Envelope::new(EnvelopeKind::Text(text));
+        if let Some(language) = transcription.detected_language {
+            output.metadata.insert(
+                Envelope::DETECTED_LANGUAGE_METADATA_KEY.to_string(),
+                language,
+            );
+        }
+        Ok(output)
     }
 }
 
