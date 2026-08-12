@@ -1,0 +1,41 @@
+bindings/react-native/android/src/main/java/ai/xybrid/reactnative/XybridModule.kt
+  s_31e214a7e9a108::t_6edfe4cdfcc1a3 587-589
+bindings/python/xybrid/__init__.py
+  s_31e214a7e9a108::t_3d3dafc51e0ef2 77
+  s_31e214a7e9a108::t_a2c6b07b35dbaf 93
+bindings/python/examples/quickstart.py
+  s_31e214a7e9a108::t_11d35ea4d476bb 82
+bindings/react-native/ios/XybridModuleImpl.swift
+  s_31e214a7e9a108::t_cfb3ee39531ac4 557-560
+bindings/flutter/cargokit/build_tool/lib/src/artifacts_provider.dart
+  s_31e214a7e9a108::t_c79d44efeb67dd 270-277
+  s_ab4e8876ff9adf::t_56f85324404032 265-269
+bindings/python/tests/test_sdk.py
+  s_31e214a7e9a108::t_752a455b287be0 44
+  s_31e214a7e9a108::t_a12cb8837c90a3 187
+  s_31e214a7e9a108::t_8f32628dbf9fc4 198
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "86d71dfcccdf15945c3df2775f2280c0cebb2867",
+  "prompts": {},
+  "sessions": {
+    "s_31e214a7e9a108": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "72e3c535-5189-429b-acfe-4c0ebbc36729",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    },
+    "s_ab4e8876ff9adf": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c8a22c10-e154-40c0-9825-d9022edf611f",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
