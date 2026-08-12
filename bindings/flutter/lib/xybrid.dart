@@ -69,6 +69,7 @@
 /// - [ConversationContext] - Multi-turn conversation memory for LLMs
 /// - [MessageRole] - Message role for conversation turns
 /// - [GenerationConfig] - LLM generation parameters (temperature, top-p, etc.)
+/// - [ToolDefinition] / [ToolCall] / [ToolResult] - LLM tool (function) calling
 library;
 
 export 'src/context.dart' show ConversationContext, MessageRole;
@@ -106,5 +107,6 @@ export 'src/rust/api/result.dart' show FfiExecutionTarget;
 export 'src/run_options.dart' show AbortPolicy, AbortSignal, RunOptions;
 export 'src/streaming.dart'
     show XybridStreamSession, FfiPartialResult, FfiVadMode;
+export 'src/tools.dart' show ToolCall, ToolDefinition, ToolResult;
 export 'src/utils/utils.dart';
 export 'src/xybrid.dart' show Xybrid;

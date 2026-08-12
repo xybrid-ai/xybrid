@@ -67,4 +67,63 @@ void main() {
   test('jsonSchemaToGbnf is exported from the public surface', () {
     expect(jsonSchemaToGbnf, isA<Function>());
   });
+
+  group('tools', () {
+    const tool = ToolDefinition(
+      name: 'get_weather',
+      description: 'Current weather for a city.',
+      parametersJson: '{"type":"object","properties":{"city":{"type":"string"}}}',
+    );
+
+    test('tools default to null so nothing changes for non-tool runs', () {
+      expect(const GenerationConfig().tools, isNull);
+      expect(const GenerationConfig().toFfi().tools, isNull);
+    });
+
+    test('tools reach the FFI config', () {
+      final ffi = const GenerationConfig(tools: [tool]).toFfi();
+
+      expect(ffi.tools, hasLength(1));
+      expect(ffi.tools!.single.name, 'get_weather');
+      expect(ffi.tools!.single.description, 'Current weather for a city.');
+      expect(ffi.tools!.single.parametersJson, contains('"city"'));
+    });
+
+    test('greedy preset carries tools — the usual tool-calling shape', () {
+      final ffi = const GenerationConfig.greedy(tools: [tool]).toFfi();
+
+      expect(ffi.tools, hasLength(1));
+      expect(ffi.temperature, 0.0);
+    });
+
+    test('creative preset carries tools', () {
+      expect(
+        const GenerationConfig.creative(tools: [tool]).toFfi().tools,
+        hasLength(1),
+      );
+    });
+
+    test('grammar and tools coexist on one config', () {
+      final ffi = const GenerationConfig.greedy(
+        grammar: _grammar,
+        tools: [tool],
+      ).toFfi();
+
+      expect(ffi.grammar, _grammar);
+      expect(ffi.tools, hasLength(1));
+    });
+
+    test('ToolResult maps onto the FFI shape', () {
+      const result = ToolResult(
+        callId: 'call_0',
+        name: 'get_weather',
+        contentJson: '{"temperature_c":17.5}',
+      );
+      final ffi = result.toFfi();
+
+      expect(ffi.callId, 'call_0');
+      expect(ffi.name, 'get_weather');
+      expect(ffi.contentJson, '{"temperature_c":17.5}');
+    });
+  });
 }

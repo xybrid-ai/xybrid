@@ -9,6 +9,7 @@
 
 import '../frb_generated.dart';
 import 'envelope.dart';
+import 'model.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import 'result.dart';
 

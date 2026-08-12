@@ -27,6 +27,7 @@
 library;
 
 import 'rust/api/model.dart';
+import 'tools.dart';
 
 /// Generation parameters for LLM inference.
 ///
@@ -65,6 +66,16 @@ class GenerationConfig {
   /// Local llama backend only — other backends ignore it.
   final String? grammar;
 
+  /// Tools the model may call this turn.
+  ///
+  /// `null` or empty means no tool calling. Read the calls the model emits
+  /// from [XybridResult.toolCalls], run them yourself, then feed the outcomes
+  /// back with [XybridEnvelope.toolResults] — one run is one model turn.
+  ///
+  /// Local llama backend only. Unsupported paths reject a tool-bearing
+  /// request rather than quietly generating without the tools.
+  final List<ToolDefinition>? tools;
+
   /// Create a custom generation config.
   ///
   /// Only set fields you want to override — `null` fields use model defaults.
@@ -77,13 +88,14 @@ class GenerationConfig {
     this.repetitionPenalty,
     this.stopSequences,
     this.grammar,
+    this.tools,
   });
 
   /// Greedy decoding preset (deterministic, temperature=0).
   ///
   /// Produces the same output every time for the same input. Pass [grammar]
   /// to pair it with structured output — the usual shape for extraction.
-  const GenerationConfig.greedy({this.grammar})
+  const GenerationConfig.greedy({this.grammar, this.tools})
       : maxTokens = null,
         temperature = 0.0,
         topP = 1.0,
@@ -95,7 +107,7 @@ class GenerationConfig {
   /// Creative generation preset (higher temperature).
   ///
   /// Produces more varied and creative output.
-  const GenerationConfig.creative({this.grammar})
+  const GenerationConfig.creative({this.grammar, this.tools})
       : maxTokens = null,
         temperature = 0.9,
         topP = 0.95,
@@ -115,6 +127,7 @@ class GenerationConfig {
       repetitionPenalty: repetitionPenalty,
       stopSequences: stopSequences,
       grammar: grammar,
+      tools: tools?.map((t) => t.toFfi()).toList(growable: false),
     );
   }
 }

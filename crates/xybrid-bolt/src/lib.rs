@@ -34,6 +34,10 @@
 //!   binding needs at startup.
 //! - **`XybridModel`**: load / run / pull-stream / conversation-context runs /
 //!   warmup / voice surface.
+//! - **Tool calling**: `XybridToolDefinition` on the generation config,
+//!   `XybridToolCall` on the result, and `tool_results_envelope` for the
+//!   continuation turn. One `run` is one model turn — the loop lives in the
+//!   caller's code, not behind a cross-boundary callback.
 //! - **`XybridConversationContext`**: opaque handle (new / with_id / push /
 //!   set_system / clear / id) feeding `run_with_context` and
 //!   `run_stream_with_context`.
@@ -288,6 +292,98 @@ impl From<XybridMessageRole> for facade::MessageRole {
 }
 
 // ============================================================================
+// Tool calling
+// ============================================================================
+
+/// A tool (function) the model may ask to call.
+///
+/// `parameters_json` is the JSON Schema for the arguments, carried as a JSON
+/// string because no binding generator can describe an arbitrary JSON tree.
+#[data]
+#[derive(Clone)]
+pub struct XybridToolDefinition {
+    pub name: String,
+    pub description: String,
+    pub parameters_json: String,
+}
+
+impl From<XybridToolDefinition> for facade::ToolDefinition {
+    fn from(t: XybridToolDefinition) -> Self {
+        Self {
+            name: t.name,
+            description: t.description,
+            parameters_json: t.parameters_json,
+        }
+    }
+}
+
+/// One tool call the model emitted, from [`XybridResult::tool_calls`].
+#[data]
+#[derive(Clone)]
+pub struct XybridToolCall {
+    pub id: String,
+    pub name: String,
+    pub arguments_json: String,
+}
+
+impl From<facade::ToolCall> for XybridToolCall {
+    fn from(c: facade::ToolCall) -> Self {
+        Self {
+            id: c.id,
+            name: c.name,
+            arguments_json: c.arguments_json,
+        }
+    }
+}
+
+/// The outcome of running one tool, fed back with [`tool_results_envelope`].
+#[data]
+#[derive(Clone)]
+pub struct XybridToolResult {
+    /// The [`XybridToolCall::id`] this answers.
+    pub call_id: String,
+    pub name: String,
+    /// The tool's output as a JSON string.
+    pub content_json: String,
+}
+
+impl From<XybridToolResult> for facade::ToolResult {
+    fn from(r: XybridToolResult) -> Self {
+        Self {
+            call_id: r.call_id,
+            name: r.name,
+            content_json: r.content_json,
+        }
+    }
+}
+
+/// Build the continuation envelope for the turn after the model asked for
+/// tools.
+///
+/// One `run` is one model turn, so the loop lives in your code: run a
+/// tools-bearing request, execute every [`XybridToolCall`] it returns, then
+/// run this envelope to feed the outcomes back. Pass the same tools on the
+/// continuation's [`XybridGenerationConfig`] as on the original turn.
+///
+/// A free function rather than a constructor because `XybridEnvelope` is a
+/// `#[data]` record, not a handle type — records carry no methods across the
+/// generated bindings.
+#[export]
+pub fn tool_results_envelope(
+    user_text: String,
+    prior_assistant_text: String,
+    results: Vec<XybridToolResult>,
+) -> Result<XybridEnvelope, XybridError> {
+    facade::Envelope::tool_results(
+        user_text,
+        prior_assistant_text,
+        results.into_iter().map(Into::into).collect(),
+    )
+    .map(Into::into)
+    .map_err(XybridError::from)
+}
+
+// ============================================================================
 // Generation + Run options
 // ============================================================================
 
@@ -306,6 +402,14 @@ pub struct XybridGenerationConfig {
     /// [`json_schema_to_gbnf`], or pass raw GBNF. Appended last: `#[data]`
     /// PODs serialize by field order across the FFI boundary.
     pub grammar: Option<String>,
+    /// Tools the model may call this turn. Empty means no tool calling —
+    /// existing behavior, unchanged. Appended after `grammar` for the same
+    /// field-order reason.
+    ///
+    /// Tool calling is llama.cpp-only today; unsupported paths (no embedded
+    /// chat template, the mistralrs backend, the cloud fallback leg) reject
+    /// tool-bearing requests rather than quietly generating without them.
+    pub tools: Vec<XybridToolDefinition>,
 }
 
 impl From<XybridGenerationConfig> for facade::GenerationConfig {
@@ -319,6 +423,7 @@ impl From<XybridGenerationConfig> for facade::GenerationConfig {
             repetition_penalty: c.repetition_penalty,
             stop_sequences: c.stop_sequences,
             grammar: c.grammar,
+            tools: c.tools.into_iter().map(Into::into).collect(),
         }
     }
 }
@@ -455,6 +560,10 @@ pub struct XybridResult {
     /// identical on both legs, so this is the only way to tell them apart.
     pub execution_target: XybridExecutionTarget,
     pub metrics: XybridInferenceMetrics,
+    /// Tool calls the model emitted this turn. Empty unless the request
+    /// offered tools via [`XybridGenerationConfig::tools`]. Appended last:
+    /// `#[data]` PODs serialize by field order across the FFI boundary.
+    pub tool_calls: Vec<XybridToolCall>,
 }
 
 /// Where a result was produced — observed fact, not a routing preference.
@@ -517,6 +626,7 @@ impl From<facade::InferenceResult> for XybridResult {
             latency_ms: r.latency_ms,
             execution_target: r.execution_target.into(),
             metrics,
+            tool_calls: r.tool_calls.into_iter().map(Into::into).collect(),
         }
     }
 }

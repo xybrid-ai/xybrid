@@ -347,14 +347,13 @@ final class LiveVisionViewModel: ObservableObject {
             let image = try XybridEnvelope.image(frame.jpegData, format: "jpeg")
             let envelope = try XybridEnvelope.userMessage(prompt, images: [image])
             let options = XybridRunOptions(
-                generationConfig: XybridGenerationConfig(
+                generationConfig: .make(
                     maxTokens: 96,
                     temperature: 0.0,
                     topP: 0.9,
                     minP: 0.05,
                     topK: 40,
-                    repetitionPenalty: 1.05,
-                    stopSequences: []
+                    repetitionPenalty: 1.05
                 ),
                 abortOn: [],
                 fallbackToCloud: false,

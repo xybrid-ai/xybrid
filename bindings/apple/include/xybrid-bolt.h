@@ -194,6 +194,7 @@ FfiBuf_u8 boltffi_method_class_xybrid_bolt_xybrid_bundle_file_name(uint64_t rece
 FfiBuf_u8 boltffi_method_class_xybrid_bolt_xybrid_bundle_manifest_json(uint64_t receiver, FfiBuf_u8 *return_out);
 FfiBuf_u8 boltffi_method_class_xybrid_bolt_xybrid_bundle_metadata_json(uint64_t receiver, FfiBuf_u8 *return_out);
 FfiBuf_u8 boltffi_method_class_xybrid_bolt_xybrid_bundle_extract(uint64_t receiver, const uint8_t *output_dir_ptr, uintptr_t output_dir_len);
+FfiBuf_u8 boltffi_function_xybrid_bolt_tool_results_envelope(const uint8_t *user_text_ptr, uintptr_t user_text_len, const uint8_t *prior_assistant_text_ptr, uintptr_t prior_assistant_text_len, const uint8_t *results_ptr, uintptr_t results_len, FfiBuf_u8 *return_out);
 FfiBuf_u8 boltffi_function_xybrid_bolt_json_schema_to_gbnf(const uint8_t *schema_json_ptr, uintptr_t schema_json_len, FfiBuf_u8 *return_out);
 FfiStatus boltffi_function_xybrid_bolt_set_thermal_state(___XybridThermalState state);
 void boltffi_function_xybrid_bolt_clear_thermal_state(void);
@@ -206,6 +207,7 @@ FfiStatus boltffi_function_xybrid_bolt_set_api_key(const uint8_t *api_key_ptr, u
 FfiStatus boltffi_function_xybrid_bolt_set_provider_api_key(const uint8_t *provider_ptr, uintptr_t provider_len, const uint8_t *api_key_ptr, uintptr_t api_key_len);
 FfiStatus boltffi_function_xybrid_bolt_set_platform_url(const uint8_t *url_ptr, uintptr_t url_len);
 FfiStatus boltffi_function_xybrid_bolt_set_speculative_cloud(bool enabled);
+bool boltffi_function_xybrid_bolt_has_api_key(void);
 bool boltffi_function_xybrid_bolt_is_speculative_cloud_enabled(void);
 bool boltffi_function_xybrid_bolt_will_speculate_for_model(const uint8_t *model_id_ptr, uintptr_t model_id_len);
 FfiBuf_u8 boltffi_function_xybrid_bolt_version(void);

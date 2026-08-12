@@ -283,12 +283,8 @@ struct ExtractionView: View {
 
                 // Greedy decoding (temperature 0) — extraction wants the
                 // most likely tokens, reproducibly, not creative sampling.
-                let config = XybridGenerationConfig(
+                let config = XybridGenerationConfig.greedy(
                     maxTokens: 200,
-                    temperature: 0.0,
-                    topP: 1.0,
-                    topK: 0,
-                    stopSequences: [],
                     grammar: grammar
                 )
                 let options = XybridRunOptions(

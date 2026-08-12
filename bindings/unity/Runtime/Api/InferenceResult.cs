@@ -111,6 +111,21 @@ namespace Xybrid
         /// </summary>
         public XybridBolt.XybridExecutionTarget ExecutionTarget { get; }
 
+        /// <summary>
+        /// Tool calls the model asked for this turn.
+        /// </summary>
+        /// <remarks>
+        /// Empty unless the request offered tools via
+        /// <see cref="GenerationConfig.AddTool"/>. Run each call yourself, then
+        /// feed the outcomes back with <see cref="Envelope.ToolResults"/>. The
+        /// raw tool-call block stays in <see cref="Text"/> untouched, and
+        /// malformed model output yields an empty list rather than an error.
+        /// </remarks>
+        public IReadOnlyList<XybridBolt.XybridToolCall> ToolCalls { get; }
+
+        /// <summary>Gets whether the model asked to call at least one tool.</summary>
+        public bool HasToolCalls => ToolCalls != null && ToolCalls.Count > 0;
+
         private InferenceResult(
             bool success,
             string error,
@@ -121,7 +136,8 @@ namespace Xybrid
             float[] embedding,
             InferenceMetrics metrics,
             XybridBolt.XybridExecutionTarget executionTarget =
-                XybridBolt.XybridExecutionTarget.Local)
+                XybridBolt.XybridExecutionTarget.Local,
+            IReadOnlyList<XybridBolt.XybridToolCall> toolCalls = null)
         {
             Success = success;
             Error = error;
@@ -132,6 +148,7 @@ namespace Xybrid
             Embedding = embedding;
             Metrics = metrics;
             ExecutionTarget = executionTarget;
+            ToolCalls = toolCalls ?? System.Array.Empty<XybridBolt.XybridToolCall>();
         }
 
         /// <summary>Decode a successful bolt result into the public shape.</summary>
@@ -162,7 +179,8 @@ namespace Xybrid
                 audioBytes: audio,
                 embedding: embedding,
                 metrics: MapMetrics(result.Metrics),
-                executionTarget: result.ExecutionTarget);
+                executionTarget: result.ExecutionTarget,
+                toolCalls: result.ToolCalls ?? System.Array.Empty<XybridBolt.XybridToolCall>());
         }
 
         /// <summary>

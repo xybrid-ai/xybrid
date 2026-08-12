@@ -327,6 +327,16 @@ classes:
           - { name: sampleRate, type: int, default: "16000" }
           - { name: channels, type: int, default: "1" }
         status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+      toolResults:
+        # The continuation turn after the model asked for tools. Only the
+        # immediately prior assistant turn is replayed, and continuation runs
+        # on the non-streaming text path only.
+        params:
+          - { name: userText, type: String }
+          - { name: priorAssistantText, type: String }
+          - { name: results, type: "List<ToolResult>" }
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+        since: "0.5.0"
       embedding:
         params: [{ name: embedding, type: "List<double>" }]
         status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
@@ -428,6 +438,12 @@ classes:
       isFailure:
         type: bool
         status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+      toolCalls:
+        type: "List<ToolCall>"
+        # Tool calls the model emitted. Empty unless the request offered
+        # tools. The raw tool-call block stays in `text`.
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+        since: "0.5.0"
       audioAsWav:
         type: "Uint8List?"
         status: { dart: implemented, kotlin: planned, swift: planned, csharp: planned }
@@ -583,11 +599,42 @@ classes:
       stopSequences:
         type: "List<String>?"
         status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+      tools:
+        type: "List<ToolDefinition>?"
+        # Tools the model may call this turn. Empty/null = no tool calling.
+        # llama.cpp-only; unsupported paths reject a tool-bearing request
+        # rather than generating without the tools.
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+        since: "0.5.0"
     factories:
       greedy:
         status: { dart: implemented, kotlin: implemented, swift: planned, csharp: implemented }
       creative:
         status: { dart: implemented, kotlin: implemented, swift: planned, csharp: implemented }
+
+  ToolDefinition:
+    type: data
+    section: "8. Supporting Types"
+    csharp_name: XybridToolDefinition
+    since: "0.5.0"
+    notes: "A tool the model may call. `parametersJson` is the argument JSON Schema carried as a JSON string — no FFI generator can describe an arbitrary JSON tree. Invalid JSON fails the run rather than dropping the tool. On C# the tool is added via GenerationConfig.AddTool(name, description, parametersJson)."
+    status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+
+  ToolCall:
+    type: data
+    section: "8. Supporting Types"
+    csharp_name: XybridToolCall
+    since: "0.5.0"
+    notes: "One tool call the model emitted, read from XybridResult.toolCalls. Echo `id` back as ToolResult.callId."
+    status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+
+  ToolResult:
+    type: data
+    section: "8. Supporting Types"
+    csharp_name: XybridToolResult
+    since: "0.5.0"
+    notes: "The outcome of running one tool, fed back via Envelope.toolResults. One run is one model turn, so the tool loop lives in app code."
+    status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
 
   StreamToken:
     type: data
