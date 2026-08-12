@@ -1,0 +1,32 @@
+bindings/flutter/lib/src/generation_config.dart
+  s_3302b990834071::t_99a6d3f0992221 59-67,79
+  s_3302b990834071::t_9e18f223bc7699 17-26
+  s_3302b990834071::t_833d0a07cb3e4f 84-86,98
+  s_3302b990834071::t_53eca80a52ba4b 117
+bindings/flutter/lib/src/result.dart
+  s_3302b990834071::t_f55104409fa719 101-110
+bindings/flutter/lib/xybrid.dart
+  s_3302b990834071::t_f780dc99709633 101-104
+.github/workflows/build-flutter.yml
+  s_3302b990834071::t_f6106a228797cf 44-78
+bindings/flutter/test/generation_config_test.dart
+  s_3302b990834071::t_a6abf586df8a42 1-70
+bindings/flutter/test/result_test.dart
+  s_3302b990834071::t_d07d5ac4a435ce 1-32
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "bbda2056c2b4e897fc4789126e25bddec82b351b",
+  "prompts": {},
+  "sessions": {
+    "s_3302b990834071": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "56d61d61-1096-4124-95cf-58cae7c630bf",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
