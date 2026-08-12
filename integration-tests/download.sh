@@ -377,6 +377,7 @@ download_from_url() {
             else
                 echo -e "  ${RED}✗${NC} Extraction failed"
                 rm -f "$archive_file"
+                rm -rf "$model_dir"
                 return 1
             fi
         else
@@ -447,6 +448,12 @@ download_from_url() {
         done <<< "$files"
     fi
 
+    if [ "$download_failed" = true ]; then
+        echo -e "${RED}✗ $model_name download incomplete${NC}"
+        rm -rf "$model_dir"
+        return 1
+    fi
+
     # Generate model_metadata.json if defined in manifest
     local has_metadata
     has_metadata=$(jq -r ".models[\"$model_name\"].model_metadata // empty" "$MANIFEST")
@@ -455,12 +462,6 @@ download_from_url() {
         echo "  Generating model_metadata.json..."
         jq ".models[\"$model_name\"].model_metadata" "$MANIFEST" > "$model_dir/model_metadata.json"
         echo -e "  ${GREEN}✓${NC} model_metadata.json"
-    fi
-
-    # Verify download
-    if [ "$download_failed" = true ]; then
-        echo -e "${RED}✗ $model_name download incomplete${NC}"
-        return 1
     fi
 
     # Check we have at least one model file (onnx, gguf, safetensors, etc.)
@@ -482,6 +483,7 @@ download_from_url() {
     else
         echo -e "${RED}✗ $model_name missing model file (no .onnx, .gguf, .safetensors, or .bin found)${NC}"
         ls -la "$model_dir" 2>/dev/null || true
+        rm -rf "$model_dir"
         return 1
     fi
 }
