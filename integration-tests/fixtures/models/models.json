@@ -82,7 +82,8 @@
       "files": [
         {
           "url": "https://huggingface.co/ggml-org/functiongemma-270m-it-GGUF/resolve/2566ce14aedfc14fdd0de955ba67346425e67126/functiongemma-270m-it-q8_0.gguf",
-          "output": "functiongemma-270m-it-q8_0.gguf"
+          "output": "functiongemma-270m-it-q8_0.gguf",
+          "sha256": "83940d4dd9676710856f43523bed096164a595a96f6b34771610a03937de5270"
         }
       ],
       "model_metadata": {
