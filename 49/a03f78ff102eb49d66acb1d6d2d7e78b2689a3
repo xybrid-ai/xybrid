@@ -1,0 +1,19 @@
+.github/workflows/build-react-native.yml
+  s_296174d8a13f4f::t_4af1ae5768a5ef 95-116
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "49a03f78ff102eb49d66acb1d6d2d7e78b2689a3",
+  "prompts": {},
+  "sessions": {
+    "s_296174d8a13f4f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5a2849c7-608b-4642-9e29-e8cef9623d53",
+        "model": "unknown"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
