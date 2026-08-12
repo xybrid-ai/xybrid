@@ -1,0 +1,31 @@
+.github/workflows/bazel.yml
+  s_a8e2ccb50c72bb::t_3732606fa728cc 634-641
+.github/workflows/build-android.yml
+  s_a8e2ccb50c72bb::t_86ed0e63be0af0 116-123
+.github/workflows/build-react-native.yml
+  s_a8e2ccb50c72bb::t_2e220643c7325e 87-94,319-326
+.github/workflows/build-unity.yml
+  s_a8e2ccb50c72bb::t_c1f2991295d267 65-72,139-146,214-221,283-290,371-378
+.github/workflows/release-prep.yml
+  s_a8e2ccb50c72bb::t_765ac57df1f9cb 216-223,281-288,395-402,482-489,599-606,720-727,851-858,939-946
+.github/workflows/test-ci.yml
+  s_a8e2ccb50c72bb::t_9cafe52484cb85 292-299
+.github/workflows/unity-editor.yml
+  s_a8e2ccb50c72bb::t_6781138a2b387d 127-134
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "395555c375a4f4170b409f57b9ef0559ef1513fe",
+  "prompts": {},
+  "sessions": {
+    "s_a8e2ccb50c72bb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a39b6157-4a0e-4b93-9fc2-8830a3134ec6",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
