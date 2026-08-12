@@ -138,8 +138,8 @@ fn render_with_tools(
     // The tool shape is template-dependent, keyed on the template's own
     // protocol markers:
     //
-    // - gemma-4-family templates (they emit `<|tool>` declaration blocks)
-    //   index `tool['function']['name']` — they need the FULL OpenAI wrapper
+    // - Structured Gemma templates index `tool['function']['name']` — they
+    //   need the FULL OpenAI wrapper
     //   ({"type": "function", "function": {...}}).
     // - LFM2-family (and HF-generic `tojson`-the-entry) templates get the
     //   BARE function objects ({name, description, parameters}): they inline
@@ -147,7 +147,7 @@ fn render_with_tools(
     //   wrapper shape is not what those models were trained on (verified
     //   against the LFM2.5-230M/350M GGUF templates).
     let entries = match ToolCallProtocol::detect_from_template(&template) {
-        ToolCallProtocol::Gemma => tools
+        ToolCallProtocol::Gemma | ToolCallProtocol::FunctionGemma => tools
             .iter()
             .map(serde_json::to_value)
             .collect::<Result<Vec<_>, _>>(),

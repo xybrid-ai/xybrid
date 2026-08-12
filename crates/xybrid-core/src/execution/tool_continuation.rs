@@ -28,9 +28,8 @@ use super::types::ExecutorResult;
 ///
 /// The chat prefix is re-rendered byte-identically (maximizing KV-prefix
 /// reuse), then the prior assistant turn and the tool responses are appended
-/// in the model's own protocol — ChatML/LFM2 or gemma-4, detected from the
-/// rendered base by `compose_tool_continuation` — and generation continues
-/// through `generate_raw`.
+/// in the model's own protocol, detected from the rendered base by
+/// `compose_tool_continuation`, and generation continues through `generate_raw`.
 ///
 /// Reasoning models: the raw path itself never splits `<think>` blocks
 /// (its other callers feed non-chat prompts), so this function does it —
@@ -63,9 +62,9 @@ pub(crate) fn run_tool_continuation(
     // generate_raw applies only caller-supplied stop sequences (no
     // chat-marker merging like the chat path). The composed continuation
     // ends at the next turn marker of whichever protocol the template
-    // speaks; neither family legitimately emits the other's markers, so the
-    // shared marker set is safe. Belt-and-braces alongside the model's own
-    // EOS (`<|im_end|>` for LFM2-family, `<turn|>` for gemma-4-family).
+    // speaks; supported families do not legitimately emit one another's
+    // markers, so the shared set is safe. Belt-and-braces alongside each
+    // model's own end-of-turn token.
     let mut raw_config = gen_config.clone();
     for stop in TURN_MARKERS {
         if !raw_config.stop_sequences.iter().any(|s| s == stop) {

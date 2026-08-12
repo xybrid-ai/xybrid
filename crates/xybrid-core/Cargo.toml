@@ -238,6 +238,10 @@ name = "lfm2_230m_tools_streaming"
 # Real inference — needs llama.cpp linked.
 required-features = ["llm-llamacpp"]
 
+[[example]]
+name = "functiongemma_tools"
+required-features = ["llm-llamacpp"]
+
 [[bench]]
 name = "inference_backends"
 harness = false
