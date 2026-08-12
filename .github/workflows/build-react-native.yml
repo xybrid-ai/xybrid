@@ -92,7 +92,28 @@ jobs:
         run: |
           set -euo pipefail
           REMOTE=""; [ -n "$BUILDBUDDY_API_KEY" ] && REMOTE="--config=remote-cache"
-          bazelisk build $REMOTE --config=ios //bindings/apple:XybridFFI
+
+          # Retry the whole invocation: repo fetches out of this runner
+          # intermittently fail TLS verification mid-analysis —
+          #   TLS error: (certificate_unknown) PKIX path building failed
+          #   ... downloading rules_go-v0.59.0.zip
+          # which aborts the build before a single action runs (seen on the
+          # v0.5.0 release branch; the same job had passed 40 minutes earlier).
+          # Bazel's own --experimental_repository_downloader_retries (default
+          # 5) is already exhausted by then, so only a fresh invocation, later
+          # in wall-clock time, recovers. Same shape as the emulator-install
+          # retry in build-android.yml.
+          for i in 1 2 3; do
+            if bazelisk build $REMOTE --config=ios //bindings/apple:XybridFFI; then
+              break
+            fi
+            if [ "$i" = 3 ]; then
+              echo "::error::bazel build failed after 3 attempts"
+              exit 1
+            fi
+            echo "::warning::bazel build attempt $i failed; retrying in 30s"
+            sleep 30
+          done
 
           RN_IOS="bindings/react-native/ios"
           ZIP="bazel-bin/bindings/apple/XybridFFI.xcframework.zip"
