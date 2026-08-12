@@ -1172,6 +1172,8 @@ impl Envelope {
     /// Metadata key carrying the parsed tool calls (JSON array of gateway
     /// `ToolCall`) on an LLM response envelope whose request offered tools.
     pub const TOOL_CALLS_METADATA_KEY: &'static str = "tool_calls";
+    /// Metadata key carrying an ASR runtime's auto-detected language code.
+    pub const DETECTED_LANGUAGE_METADATA_KEY: &'static str = "detected_language";
 
     /// Creates a new envelope with the specified kind and empty metadata.
     ///

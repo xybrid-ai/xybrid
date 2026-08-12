@@ -24,6 +24,7 @@ use xybrid_core::execution::{ExecutionTemplate, ModelMetadata};
 use xybrid_core::ir::{Envelope, EnvelopeKind};
 use xybrid_core::runtime_adapter::whisper_cpp::WhisperCppRuntime;
 use xybrid_core::runtime_adapter::{AdapterError, ModelRuntime};
+use xybrid_core::streaming::{StreamConfig, StreamSession};
 
 const MODEL: &str = "whisper-tiny-ggml";
 const MODEL_OVERRIDE_ENV: &str = "XYBRID_WHISPER_TEST_MODEL";
@@ -149,11 +150,11 @@ fn transcript_repeated(times: usize) -> String {
     vec![JFK_TRANSCRIPT; times].join(" ")
 }
 
-fn transcribe(
+fn execute(
     runtime: &mut WhisperCppRuntime,
     pcm: &[f32],
     metadata: &[(&str, &str)],
-) -> Result<String, AdapterError> {
+) -> Result<Envelope, AdapterError> {
     let envelope = Envelope {
         kind: EnvelopeKind::Audio(samples_to_wav(pcm, SAMPLE_RATE)),
         metadata: metadata
@@ -162,7 +163,15 @@ fn transcribe(
             .collect(),
     };
 
-    match runtime.execute(&envelope)?.kind {
+    runtime.execute(&envelope)
+}
+
+fn transcribe(
+    runtime: &mut WhisperCppRuntime,
+    pcm: &[f32],
+    metadata: &[(&str, &str)],
+) -> Result<String, AdapterError> {
+    match execute(runtime, pcm, metadata)?.kind {
         EnvelopeKind::Text(text) => Ok(text),
         other => panic!("expected text output, got {other:?}"),
     }
@@ -397,6 +406,72 @@ fn language_metadata_applies_per_request_not_per_load() {
         "language=fr changed after an intervening language=en request"
     );
     assert_no_hallucinated_annotation("language=en", &english_first);
+}
+
+#[test]
+fn auto_detected_language_is_reported_for_stream_reuse() {
+    let _serial = serial_model_test();
+    let Some(mut runtime) = whisper_runtime() else {
+        skip_notice();
+        return;
+    };
+
+    let french = read_pcm(FRENCH_CLIP);
+    let pcm = &french[..5 * SAMPLE_RATE as usize];
+
+    let auto_output = execute(&mut runtime, pcm, &[]).expect("auto-detecting transcription");
+    let detected = auto_output
+        .metadata
+        .get(Envelope::DETECTED_LANGUAGE_METADATA_KEY)
+        .expect("an auto-detecting request reports its language");
+    assert_eq!(detected, "fr");
+
+    let hinted_output = execute(&mut runtime, pcm, &[("language", detected)])
+        .expect("transcription with the detected language as a hint");
+
+    assert!(
+        !hinted_output
+            .metadata
+            .contains_key(Envelope::DETECTED_LANGUAGE_METADATA_KEY),
+        "an explicit language should not be reported as auto-detected"
+    );
+    assert_eq!(
+        auto_output.kind, hinted_output.kind,
+        "reusing the detected language must preserve the transcript"
+    );
+}
+
+#[test]
+fn streaming_caches_auto_detection_until_reset() {
+    let _serial = serial_model_test();
+    let Some(model_dir) = fixtures::model_for_test(MODEL) else {
+        skip_notice();
+        return;
+    };
+    let model_path = model_dir.join("ggml-tiny-q5_1.bin");
+    if !model_path.is_file() {
+        skip_notice();
+        return;
+    }
+
+    let config = StreamConfig {
+        language: None,
+        ..Default::default()
+    };
+    let mut session = StreamSession::new(&model_dir, config)
+        .expect("multilingual Whisper bundle opens as a streaming session");
+    let pcm = read_pcm(FRENCH_CLIP);
+
+    // The 8 s fixture crosses the 1.5 s and 3 s warm-up windows, then reaches
+    // the first full 5 s window that is allowed to seed the cache.
+    session.feed(&pcm).expect("first streaming window succeeds");
+    assert_eq!(session.detected_language(), Some("fr"));
+    session
+        .flush()
+        .expect("remaining audio uses the cached hint");
+
+    session.reset();
+    assert_eq!(session.detected_language(), None);
 }
 
 #[test]

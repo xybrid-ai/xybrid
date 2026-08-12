@@ -917,6 +917,27 @@ impl TemplateExecutor {
         let raw_outputs = RawOutputs::from_envelope(&result_envelope)?;
         let result = self.run_postprocessing(metadata, raw_outputs)?;
 
+        // `RawOutputs` intentionally carries only model payloads, so the
+        // postprocessing round-trip above rebuilds the envelope. Preserve the
+        // whisper.cpp language signal explicitly: StreamSession needs it to
+        // avoid auto-detecting again on every rolling window.
+        #[cfg(feature = "asr-whispercpp")]
+        let result = {
+            let mut result = result;
+            if runtime_type == "whispercpp" {
+                if let Some(language) = result_envelope
+                    .metadata
+                    .get(Envelope::DETECTED_LANGUAGE_METADATA_KEY)
+                {
+                    result.metadata.insert(
+                        Envelope::DETECTED_LANGUAGE_METADATA_KEY.to_string(),
+                        language.clone(),
+                    );
+                }
+            }
+            result
+        };
+
         info!(
             target: "xybrid_core",
             "Model execution complete: {} -> {}",

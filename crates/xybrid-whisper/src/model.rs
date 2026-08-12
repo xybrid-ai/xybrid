@@ -43,6 +43,7 @@ fn default_context_params() -> sys::whisper_context_params {
 pub struct WhisperModel {
     ctx: NonNull<sys::whisper_context>,
     multilingual: bool,
+    last_detected_language: Option<String>,
 }
 
 // SAFETY: a `whisper_context` owns only heap allocations reachable through the
@@ -84,7 +85,11 @@ impl WhisperModel {
         // SAFETY: `ctx` was just checked non-null and is a live context.
         let multilingual = unsafe { sys::whisper_is_multilingual(ctx.as_ptr()) } != 0;
 
-        Ok(Self { ctx, multilingual })
+        Ok(Self {
+            ctx,
+            multilingual,
+            last_detected_language: None,
+        })
     }
 
     /// Whether this model's vocabulary carries language tokens beyond English.
@@ -93,10 +98,22 @@ impl WhisperModel {
         self.multilingual
     }
 
+    /// Return the language auto-detected by the most recent successful transcription.
+    ///
+    /// Returns `None` before the first transcription, when the caller supplied
+    /// an explicit language, or when whisper.cpp did not report a valid
+    /// language code.
+    #[must_use]
+    pub fn detected_language(&self) -> Option<&str> {
+        self.last_detected_language.as_deref()
+    }
+
     /// Transcribe 16 kHz mono PCM in `[-1.0, 1.0]`.
     ///
     /// Returns one [`Segment`] per text span whisper emitted. Callers wanting
-    /// the plain string can [`Segment::join`] them.
+    /// the plain string can [`Segment::join`] them. When `params.language` is
+    /// absent, [`WhisperModel::detected_language`] exposes the selected code
+    /// after this call succeeds.
     ///
     /// # Errors
     ///
@@ -114,6 +131,10 @@ impl WhisperModel {
         pcm: &[f32],
         params: &TranscribeParams,
     ) -> WhisperResult<Vec<Segment>> {
+        // A failed or explicitly-languaged request must not expose a stale
+        // auto-detection from an earlier transcription.
+        self.last_detected_language = None;
+
         if pcm.len() < MIN_SAMPLES {
             return Err(WhisperError::AudioTooShort {
                 samples: pcm.len(),
@@ -176,7 +197,35 @@ impl WhisperModel {
             return Err(WhisperError::InferenceFailed { code });
         }
 
-        self.collect_segments()
+        let segments = self.collect_segments()?;
+        if params.language.is_none() {
+            self.last_detected_language = self.read_detected_language();
+        }
+        Ok(segments)
+    }
+
+    /// Read the language selected by the preceding auto-detecting inference.
+    fn read_detected_language(&self) -> Option<String> {
+        // SAFETY: `self.ctx` is live and `whisper_full_lang_id` only reads the
+        // state populated by the preceding successful `whisper_full` call.
+        let id = unsafe { sys::whisper_full_lang_id(self.ctx.as_ptr()) };
+        if id < 0 {
+            return None;
+        }
+
+        // SAFETY: `whisper_lang_str` returns either null or a pointer to a
+        // process-lifetime, null-terminated language-code string owned by
+        // whisper.cpp. We check for null before reading and copy the result.
+        let language_ptr = unsafe { sys::whisper_lang_str(id) };
+        if language_ptr.is_null() {
+            return None;
+        }
+        // SAFETY: checked non-null above; whisper.cpp guarantees null
+        // termination for its static language-code strings.
+        unsafe { CStr::from_ptr(language_ptr) }
+            .to_str()
+            .ok()
+            .map(str::to_owned)
     }
 
     /// Map a caller-supplied language code to a C string whisper accepts,
@@ -270,6 +319,7 @@ impl std::fmt::Debug for WhisperModel {
         // leaks address-space layout into logs.
         f.debug_struct("WhisperModel")
             .field("multilingual", &self.multilingual)
+            .field("last_detected_language", &self.last_detected_language)
             .field("sample_rate", &SAMPLE_RATE)
             .finish()
     }
