@@ -6,7 +6,7 @@ description: 基于 WebAssembly 与 WebGPU 的浏览器端设备内 ML 推理 SD
 Web SDK（`@xybrid/web`）让 Xybrid 模型直接在浏览器中运行。它包含两个界面：用于 TfLite 模型的张量界面（`XybridModel`），以及用于 `.litertlm` 语言模型的文本生成界面（`XybridLlm`）。推理通过 WebAssembly 在本地执行，在可用时使用 WebGPU 加速——无需服务器往返。
 
 <Callout type="info">
-`@xybrid/web` `0.4.1` 为**私有预览版**，尚未发布到 npm。它位于 Xybrid 仓库的 [`bindings/web`](https://github.com/xybrid-ai/xybrid/tree/master/bindings/web) 目录中，仅提供 ESM 格式，API 可能发生变化。底层引擎属于实现细节——应用代码应只使用 `@xybrid/web` 的概念。
+`@xybrid/web` `0.5.0` 为**私有预览版**，尚未发布到 npm。它位于 Xybrid 仓库的 [`bindings/web`](https://github.com/xybrid-ai/xybrid/tree/master/bindings/web) 目录中，仅提供 ESM 格式，API 可能发生变化。底层引擎属于实现细节——应用代码应只使用 `@xybrid/web` 的概念。
 </Callout>
 
 ## 体验示例

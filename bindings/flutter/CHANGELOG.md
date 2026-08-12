@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.5.0
+
+Live streaming speech recognition, now on the whisper.cpp backend, plus the
+speculative-cloud surface.
+
+* Added: live streaming ASR — `XybridStreamSession` with a rolling window over
+  fed audio, partial and final transcript events, and a demo screen in the
+  example app (xybrid-ai/xybrid#453)
+* Added: `XybridStreamSession.fromModel(..., audioCtx:)`, an optional Whisper
+  encoder-context override in mel frames. `null` keeps the model bundle's
+  default (xybrid-ai/xybrid#481)
+* Added: speculative cloud fallback and download visibility —
+  `fromRegistrySpeculative`, `willSpeculate`, `isCloudServing`,
+  `downloadStatus`, `downloadProgress` (a push `StreamSink` of load events),
+  `setPlatformUrl`, and `setSpeculativeCloud`. Results carry
+  `executionTarget`, so a device answer is distinguishable from a gateway one;
+  a pipeline reports its final stage's target (xybrid-ai/xybrid#459)
+* Changed: ASR runs on whisper.cpp rather than Candle — 3.6x faster to a first
+  partial on a Pixel 8, and the first partial itself arrives ~3.5 s sooner
+  thanks to warm-up windowing. **The registry id `whisper-tiny` no longer
+  loads**; use `whisper-tiny-ggml` (xybrid-ai/xybrid#462, xybrid-ai/xybrid#465,
+  xybrid-ai/xybrid#476, xybrid-ai/xybrid#458)
+* Changed: transcripts no longer contain bracketed non-speech annotations such
+  as `[BLANK_AUDIO]`, audio longer than 30 seconds no longer repeats text past
+  its end, and unsupported `prompt` metadata now returns an input error instead
+  of being ignored (xybrid-ai/xybrid#484)
+* Fixed: building the example for Android from source failed in
+  `xybrid-whisper-sys` with `'stdio.h' file not found`; bindgen now gets the
+  NDK sysroot (xybrid-ai/xybrid#468)
+
 ## 0.4.1
 
 No Dart API changes. Fixes to the iOS build and to diagnostics on both mobile

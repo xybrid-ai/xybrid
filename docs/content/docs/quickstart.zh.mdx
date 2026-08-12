@@ -12,7 +12,7 @@ description: 几分钟内开始使用 Xybrid
 ```yaml
 # pubspec.yaml
 dependencies:
-  xybrid_flutter: ^0.4.1
+  xybrid_flutter: ^0.5.0
 ```
 
 ```bash
@@ -54,7 +54,7 @@ https://github.com/xybrid-ai/xybrid
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/xybrid-ai/xybrid", from: "0.4.1")
+    .package(url: "https://github.com/xybrid-ai/xybrid", from: "0.5.0")
 ]
 ```
 
@@ -85,7 +85,7 @@ let result = try await model.runAsync(envelope: envelope)
 ```kotlin
 // build.gradle.kts
 dependencies {
-    implementation("ai.xybrid:xybrid-kotlin:0.4.1")
+    implementation("ai.xybrid:xybrid-kotlin:0.5.0")
 }
 ```
 
@@ -119,7 +119,7 @@ val result = model.runAsync(envelope)
 https://github.com/xybrid-ai/xybrid.git?path=/bindings/unity
 ```
 
-或通过 [OpenUPM](https://openupm.com/packages/ai.xybrid.sdk/) 安装：`openupm add ai.xybrid.sdk`。原生库在首次导入时自动下载（经 SHA-256 校验）；如需固定版本，在 git URL 后追加 `#v0.4.1`。
+或通过 [OpenUPM](https://openupm.com/packages/ai.xybrid.sdk/) 安装：`openupm add ai.xybrid.sdk`。原生库在首次导入时自动下载（经 SHA-256 校验）；如需固定版本，在 git URL 后追加 `#v0.5.0`。
 
 **运行推理**
 
@@ -190,7 +190,7 @@ const llm = await XybridLlm.fromHuggingFace("litert-community/SmolLM2-135M-Instr
 ```toml
 # Cargo.toml
 [dependencies]
-xybrid = "0.4.1"
+xybrid = "0.5.0"
 ```
 
 **运行推理**
