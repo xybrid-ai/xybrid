@@ -9,6 +9,8 @@
 //! with the definitions in the Jinja context. In every case the policy is
 //! the same: never silently substitute a different prompt family.
 
+mod functiongemma;
+
 use super::jinja_template::{JinjaChatTemplate, JinjaTemplateError, RenderOptions};
 use crate::gateway::Tool;
 use crate::runtime_adapter::llm::LlmResult;
@@ -146,7 +148,8 @@ fn render_with_tools(
     //   each entry verbatim into their system-prompt tool list, and the
     //   wrapper shape is not what those models were trained on (verified
     //   against the LFM2.5-230M/350M GGUF templates).
-    let entries = match ToolCallProtocol::detect_from_template(&template) {
+    let protocol = ToolCallProtocol::detect_from_template(&template);
+    let entries = match protocol {
         ToolCallProtocol::Gemma | ToolCallProtocol::FunctionGemma => tools
             .iter()
             .map(serde_json::to_value)
@@ -159,11 +162,12 @@ fn render_with_tools(
     let entries = entries.map_err(|e| {
         AdapterError::InvalidInput(format!("tool definition failed to serialize: {e}"))
     })?;
+    let messages = functiongemma::messages_for_tool_protocol(protocol, messages);
 
     let prompt = render_embedded(
         model,
         &template,
-        messages,
+        messages.as_ref(),
         Some(serde_json::Value::Array(entries)),
     )
     .map_err(|render_err| {
