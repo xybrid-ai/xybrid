@@ -98,6 +98,16 @@ class XybridResult {
   /// Returns null if the model doesn't produce text output.
   String? get text => _inner.text;
 
+  /// The model's chain-of-thought / reasoning, if it emitted any.
+  ///
+  /// Reasoning models wrap their scratchpad in `<think>` blocks. [text]
+  /// always excludes those; this getter is where they surface, so you can
+  /// show or hide the reasoning independently of the answer.
+  ///
+  /// Returns null when the model emitted no reasoning, or the backend
+  /// doesn't surface one.
+  String? get reasoningContent => _inner.reasoningContent;
+
   /// Audio bytes output (for TTS models).
   ///
   /// Returns raw PCM audio bytes (16-bit signed, little-endian).

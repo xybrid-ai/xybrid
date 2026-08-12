@@ -41,6 +41,41 @@ env:
   FRB_VERSION: "2.11.1"
 
 jobs:
+  # Pure-Dart gate for the hand-written wrapper in bindings/flutter/lib.
+  #
+  # Cheap and native-free on purpose: the wrapper classes are plain Dart and
+  # the cdylib is only dlopened by `Xybrid.init()`, which no unit test calls.
+  # That means this job needs no Rust, no FRB codegen and no cargokit — it
+  # runs in ~1 minute alongside the (much slower) native build below.
+  #
+  # No `dart format --set-exit-if-changed` gate: several checked-in wrapper
+  # files predate one and would fail on untouched code. Reformat them in a
+  # dedicated pass before adding that check.
+  analyze-test-dart:
+    name: Analyze + test Dart wrapper
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Install Flutter SDK
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Install Dart dependencies
+        working-directory: bindings/flutter
+        run: flutter pub get
+
+      - name: Analyze
+        working-directory: bindings/flutter
+        run: flutter analyze --no-pub
+
+      - name: Test
+        working-directory: bindings/flutter
+        run: flutter test --no-pub
+
   # Linux-only on push/PR. macOS + Windows Flutter binaries are built and
   # validated in release-prep.yml (precompile-flutter-* jobs) at release time.
   # Use workflow_dispatch + test-ci.yml for ad-hoc per-platform validation.
