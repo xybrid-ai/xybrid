@@ -20,6 +20,21 @@ const MIN_SAMPLES: usize = 400;
 /// Samples in Whisper's full 30-second encoder window.
 const FULL_WINDOW_SAMPLES: usize = SAMPLE_RATE as usize * 30;
 
+/// Whether new contexts request GPU offload on this target.
+///
+/// Metal was 2.7–7.8x faster in end-to-end ASR benchmarks on an M1 Pro, with
+/// no word-level regressions in the release cases. Other targets remain on the
+/// CPU path until they are measured independently.
+const DEFAULT_USE_GPU: bool = cfg!(all(target_os = "macos", target_arch = "aarch64"));
+
+fn default_context_params() -> sys::whisper_context_params {
+    // SAFETY: `whisper_context_default_params` is a pure value constructor
+    // with no preconditions.
+    let mut params = unsafe { sys::whisper_context_default_params() };
+    params.use_gpu = DEFAULT_USE_GPU;
+    params
+}
+
 /// An owning handle to a whisper.cpp context.
 ///
 /// Dropping frees the native context. Transcription takes `&mut self` because
@@ -56,12 +71,7 @@ impl WhisperModel {
         let c_path = CString::new(path_str)
             .map_err(|_| WhisperError::InvalidInput("model path contains a null byte".into()))?;
 
-        // SAFETY: `whisper_context_default_params` is a pure value constructor
-        // with no preconditions.
-        let mut cparams = unsafe { sys::whisper_context_default_params() };
-        // GPU offload is a per-platform decision xybrid-core makes; the wrapper
-        // stays on the CPU path that every target supports.
-        cparams.use_gpu = false;
+        let cparams = default_context_params();
 
         // SAFETY: `c_path` is a valid null-terminated string that outlives the
         // call, and `cparams` is a by-value POD struct. A null return is the
@@ -262,5 +272,22 @@ impl std::fmt::Debug for WhisperModel {
             .field("multilingual", &self.multilingual)
             .field("sample_rate", &SAMPLE_RATE)
             .finish()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::default_context_params;
+
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    #[test]
+    fn apple_silicon_macos_requests_gpu_by_default() {
+        assert!(default_context_params().use_gpu);
+    }
+
+    #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
+    #[test]
+    fn other_targets_keep_gpu_disabled_by_default() {
+        assert!(!default_context_params().use_gpu);
     }
 }

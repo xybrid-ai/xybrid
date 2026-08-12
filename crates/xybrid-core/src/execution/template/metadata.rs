@@ -810,10 +810,27 @@ pub fn span_kind_from_template(template: &ExecutionTemplate) -> &'static str {
                 "cpu"
             }
         }
-        // whisper.cpp is loaded with `use_gpu = false` in the safe wrapper, so
-        // unlike the GGUF arms above there is no Metal case to branch on.
-        ExecutionTemplate::GgmlWhisper { .. }
-        | ExecutionTemplate::Onnx { .. }
+        ExecutionTemplate::GgmlWhisper { .. } => {
+            // The safe wrapper requests Metal only on Apple-silicon macOS.
+            // Keep the outer span aligned with that platform default.
+            #[cfg(all(
+                feature = "asr-whispercpp",
+                target_os = "macos",
+                target_arch = "aarch64"
+            ))]
+            {
+                "gpu"
+            }
+            #[cfg(not(all(
+                feature = "asr-whispercpp",
+                target_os = "macos",
+                target_arch = "aarch64"
+            )))]
+            {
+                "cpu"
+            }
+        }
+        ExecutionTemplate::Onnx { .. }
         | ExecutionTemplate::TfLite { .. }
         | ExecutionTemplate::LiteRtLm { .. }
         | ExecutionTemplate::ModelGraph { .. } => "cpu",
@@ -827,6 +844,35 @@ pub fn span_kind_from_template(template: &ExecutionTemplate) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn ggml_whisper_template() -> ExecutionTemplate {
+        ExecutionTemplate::GgmlWhisper {
+            model_file: "ggml-tiny-q5_1.bin".into(),
+            language: None,
+            audio_ctx: 0,
+            translate: false,
+        }
+    }
+
+    #[cfg(all(
+        feature = "asr-whispercpp",
+        target_os = "macos",
+        target_arch = "aarch64"
+    ))]
+    #[test]
+    fn ggml_whisper_uses_gpu_span_on_apple_silicon_macos() {
+        assert_eq!(span_kind_from_template(&ggml_whisper_template()), "gpu");
+    }
+
+    #[cfg(not(all(
+        feature = "asr-whispercpp",
+        target_os = "macos",
+        target_arch = "aarch64"
+    )))]
+    #[test]
+    fn ggml_whisper_uses_cpu_span_without_macos_metal() {
+        assert_eq!(span_kind_from_template(&ggml_whisper_template()), "cpu");
+    }
 
     #[test]
     fn test_onnx_serialization() {
