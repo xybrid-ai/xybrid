@@ -235,6 +235,7 @@ _MODEL_PROPERTIES = (
     "is_cloud_serving",
     "supports_streaming",
     "supports_token_streaming",
+    "supports_tool_calling",
     "is_llm",
     "has_voices",
 )

@@ -1586,6 +1586,16 @@ impl XybridModel {
         self.inner.is_llm()
     }
 
+    /// Whether the model bundle declares local tool-calling support.
+    ///
+    /// Advisory tri-state: `None` means the bundle says nothing, so the host
+    /// cannot tell. Gate tool UI on it; enforcement stays at run time — a
+    /// tools-bearing request against a model whose chat template has no tool
+    /// support fails as invalid input regardless of what this reports.
+    pub fn supports_tool_calling(&self) -> Option<bool> {
+        self.inner.supports_tool_calling()
+    }
+
     pub fn has_voices(&self) -> bool {
         self.inner.has_voices()
     }

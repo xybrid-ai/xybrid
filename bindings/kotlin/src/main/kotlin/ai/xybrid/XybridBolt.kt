@@ -778,6 +778,7 @@ private object Native {
     @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_model_supports_streaming(`receiver`: Long): Boolean
     @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_model_supports_token_streaming(`receiver`: Long): Boolean
     @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_model_is_llm(`receiver`: Long): Boolean
+    @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_model_supports_tool_calling(`receiver`: Long): ByteArray?
     @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_model_has_voices(`receiver`: Long): Boolean
     @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_model_voices(`receiver`: Long): ByteArray?
     @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_model_default_voice(`receiver`: Long): ByteArray?
@@ -2116,6 +2117,12 @@ class XybridModel internal constructor(internal val handle: Long) : AutoCloseabl
 
     fun isLlm(): Boolean {
         return Native.boltffi_method_class_xybrid_bolt_xybrid_model_is_llm(this.boltffiHandle())
+    }
+
+    fun supportsToolCalling(): Boolean? {
+        val __boltffi_result = Native.boltffi_method_class_xybrid_bolt_xybrid_model_supports_tool_calling(this.boltffiHandle()) ?: throw IllegalStateException("null buffer returned")
+        val __boltffi_reader = WireReader(__boltffi_result)
+        return __boltffi_reader.readOptionalBool()
     }
 
     fun hasVoices(): Boolean {
