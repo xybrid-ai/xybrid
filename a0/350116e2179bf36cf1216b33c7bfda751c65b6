@@ -1,0 +1,43 @@
+crates/xybrid-core/src/streaming/session.rs
+  s_dc3be19ce126cb::t_7e0b229f9bf021 101,142,145-147,150,374-375,483,519,620,726,745-753,808-810,907,927,933-961
+  s_dc3be19ce126cb::t_bd8e07bbf59dd8 838
+  s_dc3be19ce126cb::t_004fbe5b21e5c5 830-837,839,841-847
+  s_dc3be19ce126cb::t_ffcf86b2e9091c 143
+  s_dc3be19ce126cb::t_35cf3027599233 100
+  s_dc3be19ce126cb::t_451803fd64856b 102-104
+  s_dc3be19ce126cb::t_aef9285b9788f5 840
+  s_dc3be19ce126cb::t_15a6982a30ef59 848
+  s_dc3be19ce126cb::t_71d11a39d22d00 962
+crates/xybrid-core/src/runtime_adapter/whisper_cpp/runtime.rs
+  s_dc3be19ce126cb::t_f5d41fcedc36b0 23-30,109-110,124-133,138-143,261-270
+crates/xybrid-core/src/execution/executor.rs
+  s_dc3be19ce126cb::t_004fbe5b21e5c5 920-927,937
+  s_dc3be19ce126cb::t_a2a2bfe5613719 928-936
+  s_dc3be19ce126cb::t_e693c145a34d10 938-940
+crates/xybrid-whisper/src/model.rs
+  s_dc3be19ce126cb::t_f5d41fcedc36b0 46,88-92,101-110,114-116,134-137,200-228,322
+integration-tests/tests/whispercpp_integration.rs
+  s_dc3be19ce126cb::t_e836ccfd3a5b22 27,153,157,166-174,411-418,421,423-428,430-464,467-468,472-475
+  s_dc3be19ce126cb::t_5260c460c5d818 465-466
+  s_dc3be19ce126cb::t_8b571f23122e8a 469-471
+  s_dc3be19ce126cb::t_fb039bd526e615 419-420,422,429
+  s_dc3be19ce126cb::t_de91d340745c92 476
+crates/xybrid-core/src/ir/envelope.rs
+  s_dc3be19ce126cb::t_f5d41fcedc36b0 1175-1176
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "a0350116e2179bf36cf1216b33c7bfda751c65b6",
+  "prompts": {},
+  "sessions": {
+    "s_dc3be19ce126cb": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019fecaa-2d7f-7542-b30a-25af5e5d7101",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
