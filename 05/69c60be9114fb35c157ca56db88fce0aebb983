@@ -1,0 +1,25 @@
+crates/xybrid-whisper/BUILD.bazel
+  s_dc3be19ce126cb::t_6f58acfc601166 9-11
+crates/xybrid-whisper/src/model.rs
+  s_dc3be19ce126cb::t_6f58acfc601166 23-29,277-279,281-284,286-290,292
+  s_dc3be19ce126cb::t_944be6ac28c3eb 30-37,74,280,285,291,293
+crates/xybrid-core/src/execution/template/metadata.rs
+  s_dc3be19ce126cb::t_6f58acfc601166 813-833,848-875
+  s_dc3be19ce126cb::t_3151e3305b73b4 876
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "0569c60be9114fb35c157ca56db88fce0aebb983",
+  "prompts": {},
+  "sessions": {
+    "s_dc3be19ce126cb": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019fecaa-2d7f-7542-b30a-25af5e5d7101",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
