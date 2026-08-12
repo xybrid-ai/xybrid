@@ -1,7 +1,7 @@
 use crate::runtime_adapter::AdapterError;
 use serde_json::{Map, Number, Value};
 
-use super::cursor::{is_identifier_start, Cursor, ParseError, ParsedCall};
+use super::cursor::{is_identifier_continue, is_identifier_start, Cursor, ParseError, ParsedCall};
 use super::{
     sanitize_tool_result_content, tool_response_content, FUNCTION_GEMMA_STRING_DELIMITER,
     FUNCTION_GEMMA_TOOL_RESPONSE_END, FUNCTION_GEMMA_TOOL_RESPONSE_START, GEMMA_TOOL_RESPONSE_END,
@@ -53,6 +53,11 @@ impl GemmaDialect {
         for (index, response) in responses.iter().enumerate() {
             let content = tool_response_content(response, index)?;
             let content = sanitize_tool_result_content(content);
+            if !gemma_object_keys_are_valid(&content) {
+                return Err(AdapterError::InvalidInput(format!(
+                    "tool response at index {index} contains an invalid Gemma object key"
+                )));
+            }
             let name = response
                 .get("name")
                 .and_then(Value::as_str)
@@ -98,8 +103,8 @@ impl Cursor<'_> {
         self.expect_str("call")?;
         if self.consume_char(':') {
             self.skip_ws();
-        } else if matches!(self.peek_char(), Some(ch) if ch.is_whitespace()) {
-            self.skip_ws();
+        } else if self.consume_char(' ') {
+            while self.consume_char(' ') {}
         } else {
             return Err(ParseError);
         }
@@ -296,6 +301,19 @@ fn format_gemma_response_body(value: &Value, out: &mut String, string_delimiter:
     } else {
         out.push_str("value:");
         format_gemma_value(value, out, string_delimiter);
+    }
+}
+
+fn gemma_object_keys_are_valid(value: &Value) -> bool {
+    match value {
+        Value::Array(values) => values.iter().all(gemma_object_keys_are_valid),
+        Value::Object(map) => map.iter().all(|(key, value)| {
+            let mut chars = key.chars();
+            matches!(chars.next(), Some(ch) if is_identifier_start(ch))
+                && chars.all(is_identifier_continue)
+                && gemma_object_keys_are_valid(value)
+        }),
+        Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => true,
     }
 }
 
