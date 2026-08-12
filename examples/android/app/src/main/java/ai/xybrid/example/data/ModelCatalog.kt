@@ -70,7 +70,7 @@ val MODEL_CATALOG = listOf(
         parameterCount = "Nano"
     ),
     CatalogModel(
-        id = "whisper-tiny",
+        id = "whisper-tiny-ggml",
         displayName = "Whisper Tiny",
         task = ModelTask.ASR,
         description = "OpenAI Whisper tiny model for speech-to-text",

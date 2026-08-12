@@ -25,8 +25,11 @@ path = "src/lib.rs"
 #   `xybrid-llama-sys`  : raw FFI + cmake build (Phase 1)
 #   `xybrid-llama`   : safe RAII + typed errors + streaming trampoline (Phase 2)
 #   `xybrid-core`    : thin adapter glue (Phase 3 reduction)
-xybrid-llama-sys = { path = "../llama-cpp-sys", version = "0.4.0", optional = true }
-xybrid-llama = { path = "../xybrid-llama", version = "0.4.0", optional = true }
+xybrid-llama-sys = { path = "../llama-cpp-sys", version = "0.5.0", optional = true }
+xybrid-llama = { path = "../xybrid-llama", version = "0.5.0", optional = true }
+# Safe whisper.cpp wrappers. Gated behind `asr-whispercpp`, which also pulls
+# `llm-llamacpp` — that is where the shared ggml comes from.
+xybrid-whisper = { path = "../xybrid-whisper", version = "0.5.0", optional = true }
 # Real Jinja engine for the llama.cpp chat-template fallback: when llama.cpp's
 # hardcoded non-Jinja matcher rejects a GGUF's embedded template (returns -1),
 # we render that template here instead. Gated with the deps below into
@@ -99,6 +102,7 @@ safetensors = { version = "0.4", optional = true }
 hf-hub = { version = "0.5", optional = true, default-features = false, features = ["ureq", "rustls-tls"] }  # HF model downloads; rustls (no native-tls/openssl), unified with xybrid-sdk's 0.5
 byteorder = { version = "1.5", optional = true }  # For reading mel filter bytes
 num-traits = { version = "0.2", optional = true }  # Required by candle audio
+rayon = { version = "1.8", optional = true }  # Bounded mobile compute pool (candle/device.rs)
 
 # Mistral.rs - Pure Rust LLM inference (optional, for local LLMs)
 # DISABLED for the crates.io publish — `mistralrs` is currently a git dep
@@ -110,7 +114,7 @@ num-traits = { version = "0.2", optional = true }  # Required by candle audio
 # MLX adapter dep (US-010+). `llm-mlx` uses the non-linking portion of
 # `xybrid-mlx` on every platform, while `llm-mlx-runtime` forwards
 # `xybrid-mlx/bindings` for Apple Silicon runtime execution.
-xybrid-mlx = { path = "../xybrid-mlx", version = "0.4.0", optional = true }
+xybrid-mlx = { path = "../xybrid-mlx", version = "0.5.0", optional = true }
 
 # minijinja (declared above with the llama.cpp deps) is also pulled in by
 # `llm-mlx` for the MLX adapter's chat template renderer (US-014) — the
@@ -143,7 +147,7 @@ ort-dynamic = []   # no-op marker (was: ort/load-dynamic)
 ort-coreml = ["ort/coreml"]                                 # Apple Neural Engine acceleration
 
 # Candle (Pure Rust ML)
-candle = ["dep:candle-core", "dep:candle-nn", "dep:candle-transformers", "dep:safetensors", "dep:byteorder", "dep:num-traits"]
+candle = ["dep:candle-core", "dep:candle-nn", "dep:candle-transformers", "dep:safetensors", "dep:byteorder", "dep:num-traits", "dep:rayon"]
 candle-hub = ["candle", "dep:hf-hub"]   # HuggingFace Hub download (hf-hub on rustls — no OpenSSL)
 
 candle-metal = ["candle", "candle-core/metal", "candle-nn/metal"]
@@ -174,6 +178,20 @@ llm-llamacpp = [
     "dep:minijinja",
     "dep:minijinja-contrib",
 ]
+# whisper.cpp speech recognition. REQUIRES `llm-llamacpp`, and not as a
+# convenience: whisper.cpp is linked against the ggml that llama.cpp builds,
+# because a second ggml in one binary means duplicate symbols, a larger
+# artifact, and two divergent tensor runtimes in one process. The 3-layer split
+# mirrors llama's:
+#   `xybrid-whisper-sys` : raw FFI + cc build of the single whisper TU
+#   `xybrid-whisper`     : safe RAII + typed errors
+#   `xybrid-core`        : thin adapter glue
+asr-whispercpp = [
+    "llm-llamacpp",
+    "dep:xybrid-whisper",
+    "xybrid-whisper/bindings",
+]
+
 # The Rust vision pipeline (envelopes, preprocessing, strategy dispatch) is
 # always compiled in. This feature gates only the *native* llama multimodal
 # backend (mtmd bindings) on top of `llm-llamacpp`.

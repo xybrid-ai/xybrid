@@ -353,14 +353,11 @@ struct InferenceView: View {
         // Capture the @State input on the main actor before detaching.
         let modelId = self.modelId
 
-        // `Task.detached`, NOT `Task {}`: this method runs on the main
-        // actor (SwiftUI View), and a plain `Task` inherits that
-        // executor — the synchronous, blocking `XybridModel(fromRegistry:)`
-        // (model resolve + download + load) would run on the main thread
-        // and freeze the UI. Detaching runs it on a background executor.
-        Task.detached {
+        // The loader is cheap to create; its async load performs resolution,
+        // download, disk access, and runtime initialization off the main actor.
+        Task {
             do {
-                let loadedModel = try XybridModel(fromRegistry: modelId)
+                let loadedModel = try await Xybrid.model(modelId).load()
                 let modelVoices = loadedModel.voices()
                 let defaultVoice = loadedModel.defaultVoice()?.id
 

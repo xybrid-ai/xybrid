@@ -3,7 +3,7 @@ title: Kotlin
 description: Kotlin SDK 模式与高级用法
 ---
 
-Kotlin SDK（`ai.xybrid:xybrid-kotlin`）发布于 Maven Central，使用 UniFFI 生成的绑定实现类型安全的 Kotlin ML 推理。安装与核心 API 参考请见 [Android SDK 指南](/zh/docs/sdks/android)。
+Kotlin SDK（`ai.xybrid:xybrid-kotlin`）发布于 Maven Central，通过 BoltFFI 生成的绑定与 Kotlin 风格的 facade 实现类型安全的本地 ML 推理。安装与核心 API 参考请见 [Android SDK 指南](/zh/docs/sdks/android)。
 
 本页介绍 Kotlin 特有的使用模式与高级用法。
 
@@ -39,24 +39,17 @@ val result = try {
 
 ## 协程集成
 
-使用协程将同步的 SDK 调用封装为非阻塞 UI 操作：
+模型加载是显式的挂起操作。`Xybrid.model(...)` 只描述来源，不执行 I/O：
 
 ```kotlin
-import kotlinx.coroutines.*
-
 class InferenceRepository {
-    private val dispatcher = Dispatchers.IO
-
-    suspend fun loadModel(modelId: String): XybridModel = withContext(dispatcher) {
-        XybridModelLoader.fromRegistry(modelId).load()
-    }
+    suspend fun loadModel(modelId: String): XybridModel =
+        Xybrid.model(modelId).load()
 
     suspend fun runInference(
         model: XybridModel,
         envelope: XybridEnvelope
-    ): XybridResult = withContext(dispatcher) {
-        model.run(envelope)
-    }
+    ): XybridResult = model.runAsync(envelope)
 }
 ```
 
@@ -72,12 +65,8 @@ fun InferenceScreen() {
     Button(onClick = {
         scope.launch {
             isLoading = true
-            val model = withContext(Dispatchers.IO) {
-                XybridModelLoader.fromRegistry("kokoro-82m").load()
-            }
-            result = withContext(Dispatchers.IO) {
-                model.run(Envelope.text("Hello from Compose!"))
-            }
+            val model = Xybrid.model("kokoro-82m").load()
+            result = model.runAsync(Envelope.text("Hello from Compose!"))
             isLoading = false
         }
     }) {
@@ -102,5 +91,9 @@ SDK 提供与完整限定名对应的短别名：
 | `Envelope` | `XybridEnvelope` |
 | `Result` | `XybridResult` |
 | `XybridError` | `XybridException` |
+
+`Xybrid.model(id)` 是注册表模型的简写。本地来源使用
+`ModelSource.bundle(...)` 或 `ModelSource.directory(...)`。这些调用只返回
+未加载的 `ModelLoader`；调用 `load()` 才会执行解析、下载和加载。
 
 完整 API 参考请见 [Android SDK 指南](/zh/docs/sdks/android)。

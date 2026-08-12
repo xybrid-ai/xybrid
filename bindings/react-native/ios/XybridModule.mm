@@ -43,6 +43,13 @@ RCT_REMAP_METHOD(loadFromRegistry,
   [_impl loadFromRegistry:modelId resolve:resolve reject:reject];
 }
 
+RCT_REMAP_METHOD(loadFromRegistrySpeculative,
+                 loadFromRegistrySpeculative:(NSString *)modelId
+                 resolver:(RCTPromiseResolveBlock)resolve
+                 rejecter:(RCTPromiseRejectBlock)reject) {
+  [_impl loadFromRegistrySpeculative:modelId resolve:resolve reject:reject];
+}
+
 RCT_REMAP_METHOD(loadFromBundle,
                  loadFromBundle:(NSString *)path
                  resolver:(RCTPromiseResolveBlock)resolve
@@ -172,6 +179,50 @@ RCT_REMAP_METHOD(clearThermalState,
                  clearThermalStateWithResolver:(RCTPromiseResolveBlock)resolve
                  rejecter:(RCTPromiseRejectBlock)reject) {
   [_impl clearThermalState:resolve reject:reject];
+}
+
+#pragma mark - Speculative cloud
+
+RCT_REMAP_METHOD(isCloudServing,
+                 isCloudServing:(NSString *)handle
+                 resolver:(RCTPromiseResolveBlock)resolve
+                 rejecter:(RCTPromiseRejectBlock)reject) {
+  [_impl isCloudServing:handle resolve:resolve reject:reject];
+}
+
+RCT_REMAP_METHOD(downloadStatus,
+                 downloadStatus:(NSString *)handle
+                 resolver:(RCTPromiseResolveBlock)resolve
+                 rejecter:(RCTPromiseRejectBlock)reject) {
+  [_impl downloadStatus:handle resolve:resolve reject:reject];
+}
+
+RCT_REMAP_METHOD(awaitDownload,
+                 awaitDownload:(NSString *)handle
+                 timeoutMs:(double)timeoutMs
+                 resolver:(RCTPromiseResolveBlock)resolve
+                 rejecter:(RCTPromiseRejectBlock)reject) {
+  [_impl awaitDownload:handle timeoutMs:timeoutMs resolve:resolve reject:reject];
+}
+
+RCT_REMAP_METHOD(setPlatformUrl,
+                 setPlatformUrl:(NSString *)url
+                 resolver:(RCTPromiseResolveBlock)resolve
+                 rejecter:(RCTPromiseRejectBlock)reject) {
+  [_impl setPlatformUrl:url resolve:resolve reject:reject];
+}
+
+RCT_REMAP_METHOD(setSpeculativeCloud,
+                 setSpeculativeCloud:(BOOL)enabled
+                 resolver:(RCTPromiseResolveBlock)resolve
+                 rejecter:(RCTPromiseRejectBlock)reject) {
+  [_impl setSpeculativeCloud:enabled resolve:resolve reject:reject];
+}
+
+RCT_REMAP_METHOD(isSpeculativeCloudEnabled,
+                 isSpeculativeCloudEnabledWithResolver:(RCTPromiseResolveBlock)resolve
+                 rejecter:(RCTPromiseRejectBlock)reject) {
+  [_impl isSpeculativeCloudEnabled:resolve reject:reject];
 }
 
 #pragma mark - Utilities

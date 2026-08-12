@@ -10,6 +10,32 @@ import React
 // React Native module thread isn't blocked. Errors map to NSError with the
 // underlying XybridError's `errorDescription` as the message.
 
+// File-scope trampolines to the generated module-level configuration
+// functions. The TurboModule methods below carry the same base names, and an
+// unqualified call inside the class binds to the *instance method* instead —
+// "use of 'setPlatformUrl' refers to instance method rather than global
+// function". Declaring these outside the type puts no instance members in
+// scope, so they resolve to the globals.
+private func boltSetPlatformUrl(_ url: String) { setPlatformUrl(url: url) }
+
+private func boltSetSpeculativeCloud(_ enabled: Bool) {
+  setSpeculativeCloud(enabled: enabled)
+}
+
+private func boltIsSpeculativeCloudEnabled() -> Bool { isSpeculativeCloudEnabled() }
+
+/// Clamp a JS-supplied millisecond timeout into `UInt64`.
+///
+/// JavaScript numbers are `Double`s, and `UInt64(someDouble)` traps on NaN,
+/// infinity, negatives, and anything at or above 2^64. `UInt64.max` is not
+/// exactly representable as a `Double`, so comparing against it rounds up and
+/// lets the trap through — compare against 2^63, which is exact.
+private func boltClampTimeoutMs(_ raw: Double) -> UInt64 {
+  guard raw.isFinite, raw > 0 else { return 0 }
+  let ceiling = Double(UInt64(1) << 63)
+  return raw >= ceiling ? UInt64(1) << 63 : UInt64(raw)
+}
+
 @objc(XybridModuleImpl)
 public final class XybridModuleImpl: NSObject {
   private let modelsLock = NSLock()
@@ -62,6 +88,16 @@ public final class XybridModuleImpl: NSObject {
                                      resolve: @escaping RCTPromiseResolveBlock,
                                      reject: @escaping RCTPromiseRejectBlock) {
     runAsyncLoad(resolve: resolve, reject: reject) { try XybridModel(fromRegistry: modelId) }
+  }
+
+  // Serves from the cloud gateway while the weights download in the
+  // background, so this returns without waiting on the download.
+  @objc public func loadFromRegistrySpeculative(_ modelId: String,
+                                                resolve: @escaping RCTPromiseResolveBlock,
+                                                reject: @escaping RCTPromiseRejectBlock) {
+    runAsyncLoad(resolve: resolve, reject: reject) {
+      try XybridModel(fromRegistrySpeculative: modelId)
+    }
   }
 
   @objc public func loadFromBundle(_ path: String,
@@ -306,6 +342,65 @@ public final class XybridModuleImpl: NSObject {
     resolve(nil)
   }
 
+  // -- Speculative cloud --
+
+  @objc public func isCloudServing(_ handle: String,
+                                   resolve: @escaping RCTPromiseResolveBlock,
+                                   reject: @escaping RCTPromiseRejectBlock) {
+    guard let model = lookup(handle) else {
+      reject("xybrid_handle", "Unknown model handle: \(handle)", nil)
+      return
+    }
+    resolve(model.isCloudServing())
+  }
+
+  @objc public func downloadStatus(_ handle: String,
+                                   resolve: @escaping RCTPromiseResolveBlock,
+                                   reject: @escaping RCTPromiseRejectBlock) {
+    guard let model = lookup(handle) else {
+      reject("xybrid_handle", "Unknown model handle: \(handle)", nil)
+      return
+    }
+    resolve(encodeDownloadStatus(model.downloadStatus()))
+  }
+
+  // Blocks natively until the download settles, so it must not run on the RN
+  // thread — hence the detached Task, same as the load path.
+  @objc public func awaitDownload(_ handle: String,
+                                  timeoutMs: Double,
+                                  resolve: @escaping RCTPromiseResolveBlock,
+                                  reject: @escaping RCTPromiseRejectBlock) {
+    guard let model = lookup(handle) else {
+      reject("xybrid_handle", "Unknown model handle: \(handle)", nil)
+      return
+    }
+    Task.detached {
+      let status = model.awaitDownload(timeoutMs: boltClampTimeoutMs(timeoutMs))
+      resolve(self.encodeDownloadStatus(status))
+    }
+  }
+
+  // -- Cloud gateway configuration --
+
+  @objc public func setPlatformUrl(_ url: String,
+                                   resolve: @escaping RCTPromiseResolveBlock,
+                                   reject: @escaping RCTPromiseRejectBlock) {
+    boltSetPlatformUrl(url)
+    resolve(nil)
+  }
+
+  @objc public func setSpeculativeCloud(_ enabled: Bool,
+                                        resolve: @escaping RCTPromiseResolveBlock,
+                                        reject: @escaping RCTPromiseRejectBlock) {
+    boltSetSpeculativeCloud(enabled)
+    resolve(nil)
+  }
+
+  @objc public func isSpeculativeCloudEnabled(_ resolve: @escaping RCTPromiseResolveBlock,
+                                              reject: @escaping RCTPromiseRejectBlock) {
+    resolve(boltIsSpeculativeCloudEnabled())
+  }
+
   // -- Utilities --
 
   @objc public func jsonSchemaToGbnf(_ schemaJson: String,
@@ -459,7 +554,10 @@ public final class XybridModuleImpl: NSObject {
       topK: uint32OrNil("topK"),
       repetitionPenalty: (dict["repetitionPenalty"] as? NSNumber)?.floatValue,
       stopSequences: dict["stopSequences"] as? [String] ?? [],
-      grammar: dict["grammar"] as? String
+      grammar: dict["grammar"] as? String,
+      // Tool calling is not part of the React Native surface yet; an empty
+      // list keeps the pre-tool-calling behavior.
+      tools: []
     )
   }
 
@@ -473,10 +571,24 @@ public final class XybridModuleImpl: NSObject {
     }
   }
 
+  // Encode the download snapshot as the `DownloadStatus` object the JS facade
+  // expects; the state is a lowercase string tag, matching the `DownloadState`
+  // union in src/types.ts.
+  private func encodeDownloadStatus(_ s: XybridDownloadStatus) -> [String: Any] {
+    let state: String
+    switch s.state {
+    case .downloading: state = "downloading"
+    case .ready: state = "ready"
+    case .failed: state = "failed"
+    }
+    return ["state": state, "progress": s.progress]
+  }
+
   private func encodeResult(_ r: XybridResult) -> [String: Any] {
     var out: [String: Any] = [
       "success": r.success,
       "latencyMs": r.latencyMs,
+      "executionTarget": r.executionTarget == .cloud ? "cloud" : "local",
     ]
     if let text = r.text { out["text"] = text }
     if let reasoning = r.reasoningContent { out["reasoningContent"] = reasoning }

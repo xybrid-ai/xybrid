@@ -89,6 +89,33 @@ export interface InferenceResult {
   audioBytesBase64?: string;
   embedding?: number[];
   latencyMs: number;
+  /**
+   * Where this answer actually came from. Cloud fallback keeps the model id
+   * identical on both legs by design, so this is the only way to tell a
+   * device answer from a gateway answer.
+   */
+  executionTarget: ExecutionTarget;
+}
+
+/** Where a result was produced — observed fact, not a routing preference. */
+export type ExecutionTarget = 'local' | 'cloud';
+
+/** Lifecycle of the background download behind a speculative load. */
+export type DownloadState =
+  | 'downloading'
+  /** Local handle installed; runs are on-device. */
+  | 'ready'
+  /**
+   * Download failed. The cloud keeps serving and the model never becomes
+   * local — surfacing this is the only way the UI can stop waiting.
+   */
+  | 'failed';
+
+/** Download progress and state in one consistent read. */
+export interface DownloadStatus {
+  state: DownloadState;
+  /** 0.0 to 1.0. */
+  progress: number;
 }
 
 /** One token produced during streaming inference. */

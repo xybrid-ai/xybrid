@@ -13,7 +13,9 @@ import ai.xybrid.Envelope
 import ai.xybrid.Xybrid
 import ai.xybrid.XybridAbortSignal
 import ai.xybrid.XybridEnvelope
+import ai.xybrid.XybridDownloadStatus
 import ai.xybrid.XybridError
+import ai.xybrid.XybridExecutionTarget
 import ai.xybrid.XybridGenerationConfig
 import ai.xybrid.XybridModel
 import ai.xybrid.XybridResult
@@ -27,6 +29,7 @@ import ai.xybrid.clearBatteryLevel
 import ai.xybrid.clearThermalState
 import ai.xybrid.embedding
 import ai.xybrid.initSdkCacheDir
+import ai.xybrid.isSpeculativeCloudEnabled
 import ai.xybrid.jsonSchemaToGbnf
 import ai.xybrid.reasoningContent
 import ai.xybrid.setBatteryLevel
@@ -112,6 +115,13 @@ class XybridModule(reactContext: ReactApplicationContext) :
   @ReactMethod
   fun loadFromRegistry(modelId: String, promise: Promise) {
     runLoad(promise) { XybridModel(modelId) }
+  }
+
+  // Serves from the cloud gateway while the weights download in the
+  // background, so this resolves without waiting on the download.
+  @ReactMethod
+  fun loadFromRegistrySpeculative(modelId: String, promise: Promise) {
+    runLoad(promise) { XybridModel.fromRegistrySpeculative(modelId) }
   }
 
   @ReactMethod
@@ -308,6 +318,71 @@ class XybridModule(reactContext: ReactApplicationContext) :
       return
     }
     promise.resolve(model.hasVoices())
+  }
+
+  // -- Speculative cloud --
+
+  @ReactMethod
+  fun isCloudServing(handle: String, promise: Promise) {
+    val model = models[handle]
+    if (model == null) {
+      promise.reject("xybrid_handle", "Unknown model handle: $handle")
+      return
+    }
+    promise.resolve(model.isCloudServing())
+  }
+
+  @ReactMethod
+  fun downloadStatus(handle: String, promise: Promise) {
+    val model = models[handle]
+    if (model == null) {
+      promise.reject("xybrid_handle", "Unknown model handle: $handle")
+      return
+    }
+    promise.resolve(encodeDownloadStatus(model.downloadStatus()))
+  }
+
+  // Blocks natively until the download settles, so it runs on the module scope
+  // rather than the RN thread.
+  @ReactMethod
+  fun awaitDownload(handle: String, timeoutMs: Double, promise: Promise) {
+    val model = models[handle]
+    if (model == null) {
+      promise.reject("xybrid_handle", "Unknown model handle: $handle")
+      return
+    }
+    scope.launch {
+      try {
+        val status = model.awaitDownload(timeoutMs.coerceAtLeast(0.0).toULong())
+        promise.resolve(encodeDownloadStatus(status))
+      } catch (e: XybridError) {
+        rejectXybrid(promise, e)
+      } catch (t: Throwable) {
+        // Same discipline as runLoad: let cancellation unwind the scope, but
+        // never leave the JS promise unsettled on a real failure.
+        if (t is CancellationException) throw t
+        promise.reject("xybrid", t.message, t)
+      }
+    }
+  }
+
+  // -- Cloud gateway configuration --
+
+  @ReactMethod
+  fun setPlatformUrl(url: String, promise: Promise) {
+    ai.xybrid.setPlatformUrl(url)
+    promise.resolve(null)
+  }
+
+  @ReactMethod
+  fun setSpeculativeCloud(enabled: Boolean, promise: Promise) {
+    ai.xybrid.setSpeculativeCloud(enabled)
+    promise.resolve(null)
+  }
+
+  @ReactMethod
+  fun isSpeculativeCloudEnabled(promise: Promise) {
+    promise.resolve(isSpeculativeCloudEnabled())
   }
 
   // -- Platform-state push --
@@ -509,6 +584,9 @@ class XybridModule(reactContext: ReactApplicationContext) :
       repetitionPenalty = floatOrNull("repetitionPenalty"),
       stopSequences = stops,
       grammar = if (map.hasKey("grammar") && !map.isNull("grammar")) map.getString("grammar") else null,
+      // Tool calling is not part of the React Native surface yet; an empty
+      // list keeps the pre-tool-calling behavior.
+      tools = emptyList(),
     )
   }
 
@@ -524,6 +602,10 @@ class XybridModule(reactContext: ReactApplicationContext) :
     val out = Arguments.createMap()
     out.putBoolean("success", r.success)
     out.putInt("latencyMs", r.latencyMs.toInt())
+    out.putString(
+      "executionTarget",
+      if (r.executionTarget == XybridExecutionTarget.CLOUD) "cloud" else "local",
+    )
     r.text?.let { out.putString("text", it) }
     r.reasoningContent?.let { out.putString("reasoningContent", it) }
     r.audioBytes?.let { out.putString("audioBytesBase64", Base64.encodeToString(it, Base64.NO_WRAP)) }
@@ -532,6 +614,22 @@ class XybridModule(reactContext: ReactApplicationContext) :
       it.forEach { f -> arr.pushDouble(f.toDouble()) }
       out.putArray("embedding", arr)
     }
+    return out
+  }
+
+  // Encode the download snapshot as the `DownloadStatus` object the JS facade
+  // expects; the state is a lowercase string tag matching `DownloadState`.
+  private fun encodeDownloadStatus(s: XybridDownloadStatus): WritableMap {
+    val out = Arguments.createMap()
+    out.putString(
+      "state",
+      when (s.state) {
+        ai.xybrid.XybridDownloadState.DOWNLOADING -> "downloading"
+        ai.xybrid.XybridDownloadState.READY -> "ready"
+        ai.xybrid.XybridDownloadState.FAILED -> "failed"
+      },
+    )
+    out.putDouble("progress", s.progress.toDouble())
     return out
   }
 

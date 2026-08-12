@@ -122,6 +122,13 @@ jobs:
       # r27 as a normal Bazel repository input (rules_android_ndk.patch +
       # XYBRID_NDK_URL/SHA256 in the committed .bazelrc).
 
+      # Yes, on a Linux lane: @macos_sdk is analyzed regardless of target
+      # platform, and its Apple URL 403s permanently now — see the action.
+      - name: Cache the pinned macOS SDK
+        uses: ./.github/actions/bazel-repo-cache
+        with:
+          macos-sdk-mirror: ${{ vars.MACOS_SDK_MIRROR }}
+
       # .bazelrc try-imports this gitignored file; in CI it's materialized from
       # the secret. Absent secret (forks) → no :remote config → RBE steps skip.
       - name: Configure BuildBuddy remote config
@@ -136,14 +143,49 @@ jobs:
           bazelisk build --nobuild \
             //crates/... //bindings/... //macros/... //xtask/... //integration-tests/... //:llama
 
-      # The RBE-proven hermetic linux chain (PR #326 gates 3B/4).
-      - name: Build llama chain on RBE (linux, hermetic)
+      # The RBE-proven hermetic linux chain (PR #326 gates 3B/4), plus the
+      # whisper.cpp chain that sits on the same ggml. //:whisper is a plain
+      # cc_library depending on //:llama, so building both here is what proves
+      # the single-ggml invariant holds in the Bazel graph — not just in cargo,
+      # where the build script has to hand-order the link flags.
+      - name: Build llama + whisper chains on RBE (linux, hermetic)
         if: env.BUILDBUDDY_API_KEY != ''
         run: |
           bazelisk build --config=remote \
             //:llama \
             //crates/llama-cpp-sys:llama_cpp_sys \
-            //crates/xybrid-llama:xybrid_llama
+            //crates/xybrid-llama:xybrid_llama \
+            //:whisper \
+            //crates/whisper-cpp-sys:xybrid_whisper_sys \
+            //crates/xybrid-whisper:xybrid_whisper
+
+      # Exactly one ggml must reach the link. A future whisper.cpp bump that
+      # stops compiling against llama's pinned ggml would otherwise be fixed by
+      # someone reaching for whisper's bundled copy, silently shipping two
+      # tensor runtimes in one binary. This asserts the graph shape instead of
+      # trusting the convention.
+      # cquery, NOT query: the unconfigured `query` loads every arm of every
+      # select in the transitive closure, which drags in hermetic-llvm's
+      # per-arch kernel-headers repos and fails to resolve one of them. cquery
+      # evaluates the resolved configuration only, which is also the graph we
+      # actually care about asserting on.
+      - name: Assert whisper links llama's ggml, not a second copy
+        if: env.BUILDBUDDY_API_KEY != ''
+        run: |
+          deps=$(bazelisk cquery --config=remote 'deps(//:whisper)' --output=label)
+          # //:llama on every hermetic lane; //:llama_metal on --//:metal=true.
+          if ! grep -qE '^//:llama(_metal)? ' <<<"$deps"; then
+            echo "FATAL: //:whisper depends on neither //:llama nor //:llama_metal," >&2
+            echo "       so it is not building on the ggml the rest of the binary" >&2
+            echo "       already links." >&2
+            exit 1
+          fi
+          if grep -q 'vendor/whisper-cpp/ggml' <<<"$deps"; then
+            echo "FATAL: //:whisper pulled in whisper.cpp's bundled ggml." >&2
+            echo "       Two ggml copies in one binary is the failure mode the" >&2
+            echo "       whole design exists to prevent." >&2
+            exit 1
+          fi
 
       # Tests under Bazel. Bazel BUILDS every shipped artifact; these targets are
       # what stop it from shipping unverified. Runs on this ubuntu runner
@@ -174,6 +216,7 @@ jobs:
             //crates/xybrid-ffi-facade:xybrid-ffi-facade_test \
             //crates/xybrid-llama:all \
             //crates/xybrid-sdk:all \
+            //crates/xybrid-whisper:all \
             //integration-tests:all \
             //xtask:xtask_test
 
@@ -258,13 +301,15 @@ jobs:
           file "$DLL"
           file "$DLL" | grep -q 'PE32+.*x86-64' || { echo "NOT a PE32+ x86-64 DLL"; exit 1; }
           python3 -m pip install --quiet --user pefile
+          # Two namespaces here, and boltffi 0.29 only renamed one of them:
+          # crate exports gained a `boltffi_function_<crate>_` prefix, while the
+          # Bolt runtime ABI (free_buf, last_error_message) kept its flat names.
           python3 tools/scripts/audit_windows_dll.py --dll "$DLL" \
-            --require-export boltffi_version \
-            --require-export boltffi_configure_runtime \
+            --require-export boltffi_function_xybrid_bolt_version \
+            --require-export boltffi_function_xybrid_bolt_configure_runtime \
             --require-export boltffi_free_buf \
             --require-export boltffi_last_error_message \
-            --require-exports-from-csharp bindings/unity/Runtime/Bolt/XybridBolt.cs \
-            --require-exports-from-csharp bindings/unity/Runtime/BoltSupplement/XybridInference.cs
+            --require-exports-from-csharp bindings/unity/Runtime/Bolt/XybridBolt.cs
           mkdir -p /tmp/win-bolt && cp "$DLL" /tmp/win-bolt/xybrid_bolt.dll
           echo "windows bolt DLL payload + audit: OK ✅"
 
@@ -363,6 +408,13 @@ jobs:
           which cmake >/dev/null || brew install cmake
           which pkg-config >/dev/null || brew install pkg-config
 
+      # Apple's pinned SDK URL 403s permanently now; this serves it from cache
+      # instead — see the action.
+      - name: Cache the pinned macOS SDK
+        uses: ./.github/actions/bazel-repo-cache
+        with:
+          macos-sdk-mirror: ${{ vars.MACOS_SDK_MIRROR }}
+
       - name: Configure BuildBuddy remote config
         env:
           BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
@@ -406,6 +458,134 @@ jobs:
           strings "$BIN" | grep -q 'huggingface\.co' || { echo "MISSING huggingface"; exit 1; }
           echo "Metal CLI smoke: OK"
 
+  # The desktop-Linux GPU lane: the CLI with ggml's Vulkan backend linked in.
+  #
+  # #307 gave the CARGO build a Vulkan opt-in (XYBRID_LLAMA_CPP_VULKAN=1), but
+  # the shipped Linux CLI comes from Bazel, which sets the cmake defines itself
+  # and never reads that variable — so this job is what makes a distributed
+  # binary able to use a GPU.
+  #
+  # Mixed execution, like bazel-macos-metal: the Rust graph compiles on RBE and
+  # only //:llama_vulkan runs here, because ggml's Vulkan build needs glslc, the
+  # Vulkan headers/loader and a host compiler on the machine running cmake, and
+  # the RBE image is a bare ubuntu:22.04 that has none of them. Hence the SDK
+  # install step below.
+  #
+  # Runs on PRs (unlike the metal/MSVC lanes): this lane is new, and llama.cpp
+  # with GGML_VULKAN=ON is exactly the compile most likely to break on an
+  # upstream bump. The build steps stay RBE-gated, so a fork PR — which has no
+  # secret and would otherwise compile the entire graph on the runner — only
+  # pays for the analysis phase.
+  bazel-linux-vulkan:
+    name: Bazel linux Vulkan lane
+    needs: changes
+    if: needs.changes.outputs.relevant == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          submodules: true
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/.ghcup \
+            /opt/hostedtoolcache/CodeQL
+          sudo docker image prune --all --force || true
+          df -h /
+
+      # glslc + libvulkan-dev, which is where //:llama_vulkan's pinned
+      # Vulkan_LIBRARY / Vulkan_GLSLC_EXECUTABLE point. Shared with ci.yml's
+      # cargo Vulkan job.
+      - name: Setup Vulkan SDK
+        uses: ./.github/actions/setup-vulkan-sdk
+
+      # //:llama_vulkan reads the Vulkan headers from a fixed /opt path, which
+      # this step points at whatever the runner actually has. Fixed, because a
+      # cmake cache value has to be known at analysis time — the SDK's own
+      # directory is version-stamped.
+      #
+      # Staged rather than used in place because cmake turns Vulkan_INCLUDE_DIR
+      # into a `-I`, and a `-I` outranks the toolchain sysroot: handing it
+      # /usr/include would shadow hermetic-llvm's libc headers with this
+      # runner's glibc 2.39 ones while the link still uses glibc 2.28. A
+      # directory holding only the Vulkan trees cannot do that.
+      #
+      # The loader is NOT staged — it comes from //bazel/vulkan:libvulkan.so,
+      # built by our own toolchain (see bazel/vulkan/vulkan_stub.c).
+      - name: Stage the Vulkan headers
+        run: |
+          sudo mkdir -p /opt/xybrid-vulkan-include
+          # Prefer the LunarG SDK's tree: it is what the cargo Vulkan job
+          # (ci.yml) builds against, so it is the proven header set.
+          INC="${VULKAN_SDK:+$VULKAN_SDK/include}"
+          if [ ! -d "${INC:-}" ]; then
+            # No usable SDK: fall back to apt. libvulkan-dev does not depend on
+            # spirv-headers, so ask for it explicitly.
+            sudo apt-get install -y spirv-headers
+            INC=/usr/include
+          fi
+          echo "headers: $INC"
+          # vulkan/ is the obvious one; vk_video/ because vulkan_core.h includes
+          # the video codec headers; spirv/ because ggml-vulkan.cpp includes
+          # <spirv/unified1/spirv.hpp> for its cooperative-matrix paths.
+          for tree in vulkan vk_video spirv; do
+            test -d "$INC/$tree" || { echo "missing $INC/$tree"; exit 1; }
+            sudo ln -sfn "$INC/$tree" "/opt/xybrid-vulkan-include/$tree"
+          done
+          ls -l /opt/xybrid-vulkan-include
+
+      # One shared cache entry across every lane — see the action for why this
+      # download in particular needs it.
+      - name: Cache the pinned macOS SDK
+        uses: ./.github/actions/bazel-repo-cache
+        with:
+          macos-sdk-mirror: ${{ vars.MACOS_SDK_MIRROR }}
+
+      - name: Configure BuildBuddy remote config
+        env:
+          BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
+        run: tools/scripts/write-buildbuddy-rc.sh
+
+      # Fork-safe structural gate: the flag, the config_settings and the
+      # //:llama_vulkan selects have to resolve even with no secret present.
+      - name: Analyze the Vulkan lane (no build)
+        run: |
+          bazelisk build --nobuild --config=linux-vulkan -c opt \
+            //crates/xybrid-cli:xybrid //:llama_vulkan
+
+      - name: Build the Vulkan CLI (mixed execution)
+        if: env.BUILDBUDDY_API_KEY != ''
+        run: |
+          bazelisk build --config=remote --config=linux-vulkan -c opt \
+            //crates/xybrid-cli:xybrid
+
+      # What a green build does NOT prove: that Vulkan is actually USED. The
+      # runner has a loader but no GPU, so llama.cpp falls back to CPU at
+      # runtime. This asserts the parts that are checkable here — the backend
+      # is compiled in, the loader is a real link dependency, and the feature
+      # set still matches the CPU lane.
+      - name: Smoke the Vulkan CLI (run + backend + loader + features)
+        if: env.BUILDBUDDY_API_KEY != ''
+        run: |
+          BIN=$(tools/scripts/bazel-output.sh //crates/xybrid-cli:xybrid --config=remote --config=linux-vulkan -c opt)
+          echo "resolved Vulkan CLI: $BIN"
+          file "$BIN"
+          "$BIN" --help >/dev/null
+          test "$(nm "$BIN" | grep -c 'ggml_backend_vk')" -gt 0 || { echo "MISSING Vulkan backend symbols"; exit 1; }
+          readelf -d "$BIN" | grep -q 'libvulkan\.so\.1' || { echo "NOT linked against the Vulkan loader"; exit 1; }
+          test "$(nm "$BIN" | grep -c ' mtmd_')" -gt 0 || { echo "MISSING vision (mtmd) symbols"; exit 1; }
+          strings "$BIN" | grep -q 'huggingface\.co' || { echo "MISSING huggingface support"; exit 1; }
+          # Same floor the CPU lane holds. This is the guard on the Vulkan
+          # include path: if ggml-vulkan's TUs ever pick up the runner's glibc
+          # headers instead of the hermetic sysroot's, the floor jumps here.
+          MAX_GLIBC=$(strings "$BIN" | grep -oE 'GLIBC_[0-9]+\.[0-9]+' | sort -Vu | tail -1)
+          echo "glibc floor: $MAX_GLIBC"
+          [ "$(printf '%s\n' "$MAX_GLIBC" GLIBC_2.31 | sort -V | tail -1)" = "GLIBC_2.31" ] || { echo "glibc floor regressed above 2.31: $MAX_GLIBC"; exit 1; }
+          echo "Vulkan CLI smoke: OK ✅"
+
   # The windows-MSVC lane — NON-SHIPPING proof, like the windows-gnu bolt DLL
   # above. Everything compiles on Linux RBE workers; the runner only fetches
   # repositories and inspects outputs.
@@ -422,10 +602,20 @@ jobs:
     timeout-minutes: 60
     env:
       BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
+    # Every build step below is secret-gated, so without RBE this job succeeds
+    # having produced nothing. Downstream jobs can't read secrets in a job-level
+    # `if`, so publish the same fork-safety signal the `bazel` job does — else a
+    # consumer sees a green producer and fails on the missing artifact.
+    outputs:
+      rbe: ${{ steps.rbe-check.outputs.rbe }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           submodules: true
+
+      - name: Check RBE availability
+        id: rbe-check
+        run: echo "rbe=${{ env.BUILDBUDDY_API_KEY != '' }}" >> "$GITHUB_OUTPUT"
 
       # The Microsoft payload lands on top of the usual LLVM/rustc/NDK fetches,
       # so this job needs the headroom more than the others do.
@@ -440,6 +630,14 @@ jobs:
         env:
           BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
         run: tools/scripts/write-buildbuddy-rc.sh
+
+      # Serve hermetic-llvm's pinned macOS SDK from cache: Apple's URL 403s
+      # permanently and its only mirror throttles Actions runners. Analyzed on
+      # every target platform, not just Apple ones — see the action.
+      - name: Cache the pinned macOS SDK
+        uses: ./.github/actions/bazel-repo-cache
+        with:
+          macos-sdk-mirror: ${{ vars.MACOS_SDK_MIRROR }}
 
       # The toolchain smokes come first and are cheap: they pull windows.h, the
       # MSVC STL and clang's builtin headers, so a sysroot or include-order
@@ -524,7 +722,11 @@ jobs:
   bazel-windows-msvc-smoke:
     name: Bazel windows-MSVC Flutter DLL smoke (loads it on Windows)
     needs: bazel-windows-msvc
-    if: github.event_name != 'pull_request'
+    # Gate on the producer's RBE signal, not the event name: a push in a fork is
+    # not a pull_request, so the event check alone let this run against a
+    # producer that had skipped every build step, and the download failed with
+    # "Artifact not found". Matches bazel-windows-smoke / bazel-windows-bolt-smoke.
+    if: needs.bazel-windows-msvc.outputs.rbe == 'true'
     runs-on: windows-latest
     steps:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4

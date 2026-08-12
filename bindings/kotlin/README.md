@@ -12,7 +12,7 @@ Add to your `build.gradle.kts`:
 
 ```gradle
 dependencies {
-    implementation("ai.xybrid:xybrid-kotlin:0.3.0")
+    implementation("ai.xybrid:xybrid-kotlin:0.5.0")
 }
 ```
 
@@ -36,15 +36,15 @@ dependencies {
 ### Loading a Model from Registry
 
 ```kotlin
-import ai.xybrid.XybridModel
 import ai.xybrid.Envelope
+import ai.xybrid.Xybrid
 
-// Load a model from the registry (the constructor resolves + loads it)
-val model = XybridModel("kokoro-82m")
+// Describing the source is cheap; load() is the explicit suspend boundary.
+val model = Xybrid.model("kokoro-82m").load()
 
 // Run text-to-speech
 val envelope = Envelope.text("Hello, world!", voiceId = "af_bella", speed = 1.0)
-val result = model.run(envelope)
+val result = model.runAsync(envelope)
 
 if (result.success) {
     val audioBytes = result.audioBytes
@@ -57,10 +57,11 @@ if (result.success) {
 ### Loading a Model from Bundle
 
 ```kotlin
-import ai.xybrid.XybridModel
+import ai.xybrid.ModelSource
+import ai.xybrid.Xybrid
 
 // Load from a local bundle path
-val model = XybridModel.fromBundle("/path/to/model/bundle")
+val model = Xybrid.model(ModelSource.bundle("/path/to/model/bundle")).load()
 ```
 
 ### Speech Recognition (ASR)
@@ -138,7 +139,7 @@ result.reasoningContent?.let { println("Reasoning: $it") }
 import ai.xybrid.XybridException
 
 try {
-    val model = XybridModel("unknown-model")
+    val model = Xybrid.model("unknown-model").load()
 } catch (e: XybridException.ModelNotFound) {
     println("Model not found: ${e.id}")
 } catch (e: XybridException.LoadError) {
@@ -156,23 +157,28 @@ try {
 
 | Type | Description |
 |------|-------------|
-| `XybridModel` | Loaded model ready for inference (construct/factory to load) |
+| `ModelSource` | Registry, bundle, directory, or Hugging Face model location |
+| `ModelLoader` / `XybridModelLoader` | Cheap model reference; call `load()` to perform I/O |
+| `XybridModel` | Loaded model ready for inference |
 | `Envelope` | Factory for `XybridEnvelope` inputs (`text`, `audio`, `embedding`, `image`, `userMessage`) |
 | `XybridEnvelope` | Input data container |
 | `XybridResult` | Inference output with success/error and result data |
 | `XybridException` | Error types (ModelNotFound, InferenceError, etc.) |
 
-### XybridModel (loading)
+### ModelLoader
 
 | Call | Description |
 |--------|-------------|
-| `XybridModel(id: String)` | Resolve and load a model from the Xybrid registry |
-| `XybridModel.fromBundle(path: String)` | Load a model from a local `.xyb` bundle |
-| `XybridModel.fromDirectory(path: String)` | Load a model from an extracted directory |
-| `XybridModel.fromHuggingface(repo: String)` | Resolve and load a HuggingFace repo |
+| `Xybrid.model(id: String)` | Describe a registry model without performing I/O |
+| `Xybrid.model(source: ModelSource)` | Describe an explicitly typed model source |
+| `ModelLoader.fromBundle(path: String)` | Describe a local `.xyb` bundle |
+| `ModelLoader.fromDirectory(path: String)` | Describe an extracted directory |
+| `ModelLoader.fromHuggingFace(repo: String)` | Describe a Hugging Face repository |
+| `loader.load()` | Resolve, download if needed, and load without blocking the caller's thread |
+| `loader.loadBlocking()` | Explicit synchronous load for an existing worker thread |
 
-Each loads synchronously; use the `…Async` suspend variants
-(`XybridModel.fromRegistryAsync(id)`, etc.) to load off the calling thread.
+Creating a source or loader is always cheap. Only `load()` and
+`loadBlocking()` may access the network, disk, or native inference runtime.
 
 ### XybridEnvelope
 
@@ -237,6 +243,19 @@ The Bazel AAR bundles the ORT libraries into `jni/<abi>/` automatically, so stag
 The Kotlin bindings are generated from `crates/xybrid-bolt/` using [BoltFFI](https://crates.io/crates/boltffi):
 - Single Rust source generates Swift, Kotlin, Java, C#, WASM, and a C header
 - Memory-safe wrappers with proper resource cleanup
+
+Regenerate `XybridBolt.kt` with the script, never by hand:
+
+```bash
+python3 tools/scripts/gen_kotlin_bolt.py            # regenerate + write
+python3 tools/scripts/gen_kotlin_bolt.py --check    # fail on drift
+```
+
+It runs `boltffi generate kotlin` and applies the one post-process the output
+needs: boltffi 0.29 emits each `XybridError` payload field verbatim, so the
+fourteen variants carrying a `message` collide with `Throwable.message` and the
+binding does not compile without an `override` modifier. A plain copy of the
+generator output silently reintroduces that break.
 
 ## Building Native Libraries
 

@@ -34,6 +34,12 @@ class DemoHubScreen extends StatelessWidget {
             onTap: () => Navigator.pushNamed(context, '/demos/speech-to-text'),
           ),
           _DemoTile(
+            icon: Icons.graphic_eq,
+            title: 'Live ASR',
+            subtitle: 'Real-time rolling-window transcription',
+            onTap: () => Navigator.pushNamed(context, '/demos/live-asr'),
+          ),
+          _DemoTile(
             icon: Icons.account_tree,
             title: 'Pipelines',
             subtitle: 'Multi-stage inference workflows',

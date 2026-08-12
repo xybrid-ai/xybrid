@@ -14,7 +14,7 @@ class ModelLoadingScreen extends StatefulWidget {
 
 class _ModelLoadingScreenState extends State<ModelLoadingScreen> {
   /// Controller for the model ID text field.
-  final _modelIdController = TextEditingController(text: 'whisper-tiny');
+  final _modelIdController = TextEditingController(text: 'whisper-tiny-ggml');
 
   /// Current loading state.
   _ModelLoadState _state = _ModelLoadState.idle;
@@ -149,7 +149,7 @@ class _ModelLoadingScreenState extends State<ModelLoadingScreen> {
               controller: _modelIdController,
               decoration: const InputDecoration(
                 labelText: 'Model ID',
-                hintText: 'e.g., whisper-tiny, kokoro-82m',
+                hintText: 'e.g., whisper-tiny-ggml, kokoro-82m',
                 border: OutlineInputBorder(),
                 prefixIcon: Icon(Icons.smart_toy),
               ),

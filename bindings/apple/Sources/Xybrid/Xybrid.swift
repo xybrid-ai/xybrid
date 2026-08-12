@@ -146,6 +146,121 @@ public enum Xybrid {
     #endif
 }
 
+// MARK: - Model loading
+
+/// A model location that can be prepared without performing I/O.
+public enum ModelSource: Sendable, Equatable {
+    /// A model resolved through the Xybrid registry.
+    case registry(String)
+
+    /// A local `.xyb` model bundle.
+    case bundle(URL)
+
+    /// A local directory containing `model_metadata.json`.
+    case directory(URL)
+
+    /// A Hugging Face repository (`org/repo` or `org/repo:variant`).
+    case huggingFace(String)
+
+    /// A registry model served from the cloud gateway while its weights
+    /// download in the background. See
+    /// ``ModelLoader/fromRegistrySpeculative(_:)``.
+    case registrySpeculative(String)
+}
+
+/// A cheap model reference that defers all expensive work until ``load()``.
+///
+/// Creating a loader never performs network, disk, or native-runtime work.
+public struct ModelLoader: Sendable {
+    /// The source this loader will resolve.
+    public let source: ModelSource
+
+    /// Create a loader for an already-described source.
+    public init(source: ModelSource) {
+        self.source = source
+    }
+
+    /// Create a loader for a registry model.
+    public static func fromRegistry(_ id: String) -> Self {
+        Self(source: .registry(id))
+    }
+
+    /// Create a loader that answers from the cloud gateway while the registry
+    /// weights download in the background, instead of blocking on the download.
+    ///
+    /// ``load()`` returns almost immediately with a cloud-backed model that
+    /// switches to on-device by itself once the download lands. Requires an API
+    /// key and an uncached model — otherwise it behaves exactly like
+    /// ``fromRegistry(_:)``, which ``willSpeculate`` reports up front. LLM/chat
+    /// models only.
+    ///
+    /// Track the handover with ``XybridModel/isCloudServing()``,
+    /// ``XybridModel/downloadStatus()`` and ``XybridModel/awaitDownload(timeoutMs:)``.
+    public static func fromRegistrySpeculative(_ id: String) -> Self {
+        Self(source: .registrySpeculative(id))
+    }
+
+    /// Whether ``load()`` would actually speculate: speculation is possible for
+    /// this source, an API key resolves, and the model is not already cached.
+    ///
+    /// Always `false` for non-speculative sources. Never touches the network.
+    public var willSpeculate: Bool {
+        guard case .registrySpeculative(let id) = source else { return false }
+        return willSpeculateForModel(modelId: id)
+    }
+
+    /// Create a loader for a local `.xyb` bundle.
+    public static func fromBundle(_ url: URL) -> Self {
+        Self(source: .bundle(url))
+    }
+
+    /// Create a loader for a local model directory.
+    public static func fromDirectory(_ url: URL) -> Self {
+        Self(source: .directory(url))
+    }
+
+    /// Create a loader for a Hugging Face repository.
+    public static func fromHuggingFace(_ repo: String) -> Self {
+        Self(source: .huggingFace(repo))
+    }
+
+    /// Load the model without blocking the calling task's executor.
+    public func load() async throws -> XybridModel {
+        try await Task.detached { try loadSync() }.value
+    }
+
+    /// Load the model synchronously.
+    ///
+    /// This may resolve registry metadata, download files, access disk, and
+    /// initialize the inference runtime. Do not call it from the main actor.
+    public func loadSync() throws -> XybridModel {
+        switch source {
+        case .registry(let id):
+            return try XybridModel(fromRegistry: id)
+        case .bundle(let url):
+            return try XybridModel(fromBundle: url.path)
+        case .directory(let url):
+            return try XybridModel(fromDirectory: url.path)
+        case .huggingFace(let repo):
+            return try XybridModel(fromHuggingface: repo)
+        case .registrySpeculative(let id):
+            return try XybridModel(fromRegistrySpeculative: id)
+        }
+    }
+}
+
+public extension Xybrid {
+    /// Describe a registry model without resolving, downloading, or loading it.
+    static func model(_ id: String) -> ModelLoader {
+        model(.registry(id))
+    }
+
+    /// Describe a model source without resolving, downloading, or loading it.
+    static func model(_ source: ModelSource) -> ModelLoader {
+        ModelLoader(source: source)
+    }
+}
+
 // MARK: - Public Type Re-exports
 
 /// A loaded model ready for inference.
@@ -185,23 +300,27 @@ public extension XybridModel {
 // off-thread is therefore the correct, low-risk way to surface async today.)
 public extension XybridModel {
     /// Load a model from the xybrid registry without blocking the caller.
+    @available(*, deprecated, message: "Use Xybrid.model(id).load()")
     static func fromRegistryAsync(_ id: String) async throws -> XybridModel {
-        try await Task.detached { try XybridModel(fromRegistry: id) }.value
+        try await Xybrid.model(id).load()
     }
 
     /// Load a model from a local directory without blocking the caller.
+    @available(*, deprecated, message: "Use Xybrid.model(.directory(url)).load()")
     static func fromDirectoryAsync(_ path: String) async throws -> XybridModel {
-        try await Task.detached { try XybridModel(fromDirectory: path) }.value
+        try await Xybrid.model(.directory(URL(fileURLWithPath: path))).load()
     }
 
     /// Load a model from a local `.xyb` bundle without blocking the caller.
+    @available(*, deprecated, message: "Use Xybrid.model(.bundle(url)).load()")
     static func fromBundleAsync(_ path: String) async throws -> XybridModel {
-        try await Task.detached { try XybridModel(fromBundle: path) }.value
+        try await Xybrid.model(.bundle(URL(fileURLWithPath: path))).load()
     }
 
     /// Resolve and load a model from a HuggingFace repo without blocking the caller.
+    @available(*, deprecated, message: "Use Xybrid.model(.huggingFace(repo)).load()")
     static func fromHuggingfaceAsync(_ repo: String) async throws -> XybridModel {
-        try await Task.detached { try XybridModel(fromHuggingface: repo) }.value
+        try await Xybrid.model(.huggingFace(repo)).load()
     }
 
     /// Run inference without blocking the calling thread or actor.
@@ -298,6 +417,119 @@ public typealias VoiceInfo = XybridVoiceInfo
 
 /// Generation parameters for LLM inference (temperature, top_p, max_tokens, etc.).
 public typealias GenerationConfig = XybridGenerationConfig
+
+/// A tool the model may ask to call.
+public typealias ToolDefinition = XybridToolDefinition
+
+/// One tool call the model emitted, from `XybridResult.toolCalls`.
+public typealias ToolCall = XybridToolCall
+
+/// The outcome of running one tool, fed back with `Envelope.toolResults`.
+public typealias ToolResult = XybridToolResult
+
+// MARK: - GenerationConfig ergonomics
+//
+// The generated memberwise init takes every field positionally, so setting one
+// parameter means spelling out all nine. These factories default the rest.
+// They're static funcs rather than a defaulted `init` because an extension
+// init with the same argument labels would collide with the generated one.
+
+public extension XybridGenerationConfig {
+    /// Build a config, defaulting every field you don't set to the model's own
+    /// default.
+    static func make(
+        maxTokens: UInt32? = nil,
+        temperature: Float? = nil,
+        topP: Float? = nil,
+        minP: Float? = nil,
+        topK: UInt32? = nil,
+        repetitionPenalty: Float? = nil,
+        stopSequences: [String] = [],
+        grammar: String? = nil,
+        tools: [XybridToolDefinition] = []
+    ) -> XybridGenerationConfig {
+        XybridGenerationConfig(
+            maxTokens: maxTokens,
+            temperature: temperature,
+            topP: topP,
+            minP: minP,
+            topK: topK,
+            repetitionPenalty: repetitionPenalty,
+            stopSequences: stopSequences,
+            grammar: grammar,
+            tools: tools
+        )
+    }
+
+    /// Greedy decoding (deterministic, temperature 0). The usual choice for
+    /// extraction and for tool calling, where you want the most likely tokens
+    /// rather than creative sampling.
+    static func greedy(
+        maxTokens: UInt32? = nil,
+        grammar: String? = nil,
+        tools: [XybridToolDefinition] = []
+    ) -> XybridGenerationConfig {
+        .make(
+            maxTokens: maxTokens,
+            temperature: 0.0,
+            topP: 1.0,
+            topK: 0,
+            grammar: grammar,
+            tools: tools
+        )
+    }
+
+    /// Higher temperature, for more varied output.
+    static func creative(
+        maxTokens: UInt32? = nil,
+        tools: [XybridToolDefinition] = []
+    ) -> XybridGenerationConfig {
+        .make(
+            maxTokens: maxTokens,
+            temperature: 0.9,
+            topP: 0.95,
+            topK: 50,
+            tools: tools
+        )
+    }
+
+    /// The same config, offering `tools` to the model.
+    func withTools(_ tools: [XybridToolDefinition]) -> XybridGenerationConfig {
+        var copy = self
+        copy.tools = tools
+        return copy
+    }
+}
+
+// MARK: - Tool-calling ergonomics
+
+public extension XybridEnvelope {
+    /// The continuation envelope for the turn after the model asked for tools.
+    ///
+    /// One `run` is one model turn, so the tool loop lives in your code: run a
+    /// request carrying tools, execute every `XybridResult.toolCalls` entry,
+    /// then run this envelope to feed the outcomes back. Run the continuation
+    /// with the same tools as the original turn so the executor rebuilds an
+    /// identical chat prefix.
+    ///
+    /// - Parameters:
+    ///   - userText: The original user message of the turn being continued.
+    ///   - priorAssistantText: That turn's raw output text, tool-call block
+    ///     included — i.e. `XybridResult.text` verbatim.
+    ///   - results: Tool outcomes, in call order.
+    /// - Throws: `XybridError` if a result's content isn't valid JSON.
+    static func toolResults(
+        _ userText: String,
+        priorAssistantText: String,
+        results: [XybridToolResult]
+    ) throws -> XybridEnvelope {
+        try toolResultsEnvelope(
+            userText: userText,
+            priorAssistantText: priorAssistantText,
+            results: results
+        )
+    }
+}
 
 // MARK: - XybridResult compatibility shim
 //

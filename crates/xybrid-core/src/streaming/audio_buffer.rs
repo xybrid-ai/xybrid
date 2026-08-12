@@ -17,6 +17,14 @@ pub struct AudioBufferConfig {
     pub overlap_secs: f32,
     /// Maximum buffer duration before oldest samples are discarded
     pub max_buffer_secs: f32,
+    /// Warm-up window durations for the first chunks of a stream (seconds).
+    ///
+    /// Each entry is a *growing* window measured from the stream start: the
+    /// buffer does not advance past a warm-up chunk, so the next chunk
+    /// re-covers the same audio with more context. This gets a first partial
+    /// out after `warmup_chunk_secs[0]` seconds instead of a full
+    /// `chunk_duration_secs`. Empty (the default) disables warm-up.
+    pub warmup_chunk_secs: Vec<f32>,
 }
 
 impl Default for AudioBufferConfig {
@@ -26,6 +34,7 @@ impl Default for AudioBufferConfig {
             chunk_duration_secs: 30.0, // Whisper's 30-second window
             overlap_secs: 1.0,         // 1 second overlap for continuity
             max_buffer_secs: 120.0,    // 2 minutes max buffer
+            warmup_chunk_secs: Vec::new(),
         }
     }
 }
@@ -43,6 +52,7 @@ impl AudioBufferConfig {
             chunk_duration_secs: 10.0, // Wav2Vec2 works better with shorter chunks
             overlap_secs: 0.5,
             max_buffer_secs: 60.0,
+            warmup_chunk_secs: Vec::new(),
         }
     }
 
@@ -59,6 +69,22 @@ impl AudioBufferConfig {
     /// Maximum buffer samples
     pub fn max_buffer_samples(&self) -> usize {
         (self.sample_rate as f32 * self.max_buffer_secs) as usize
+    }
+
+    /// Window size in samples for the chunk with the given sequence number.
+    ///
+    /// Warm-up sequences use their (smaller, growing) configured window; all
+    /// later sequences use the steady-state `chunk_samples()`.
+    pub fn chunk_samples_for(&self, sequence: u64) -> usize {
+        self.warmup_chunk_secs
+            .get(sequence as usize)
+            .map(|secs| (self.sample_rate as f32 * secs) as usize)
+            .unwrap_or_else(|| self.chunk_samples())
+    }
+
+    /// Whether the chunk with the given sequence number is a warm-up chunk.
+    pub fn is_warmup_chunk(&self, sequence: u64) -> bool {
+        (sequence as usize) < self.warmup_chunk_secs.len()
     }
 }
 
@@ -174,8 +200,11 @@ impl AudioBuffer {
     }
 
     /// Check if a full chunk is ready for processing.
+    ///
+    /// During warm-up the required window is smaller, so early chunks become
+    /// ready sooner than the steady-state `chunk_duration_secs`.
     pub fn has_chunk_ready(&self) -> bool {
-        self.available_samples() >= self.config.chunk_samples()
+        self.available_samples() >= self.config.chunk_samples_for(self.next_sequence)
     }
 
     /// Check if any audio is available (for final flush).
@@ -189,7 +218,8 @@ impl AudioBuffer {
     /// Use `force = true` to get a partial chunk (e.g., at end of stream).
     pub fn extract_chunk(&mut self, force: bool) -> Option<AudioChunk> {
         let available = self.available_samples();
-        let chunk_size = self.config.chunk_samples();
+        let is_warmup = self.config.is_warmup_chunk(self.next_sequence);
+        let chunk_size = self.config.chunk_samples_for(self.next_sequence);
 
         // Check if we have enough samples (or forcing partial chunk)
         if !force && available < chunk_size {
@@ -200,9 +230,11 @@ impl AudioBuffer {
             return None;
         }
 
-        // Calculate how many samples to extract
+        // Calculate how many samples to extract. A forced (flush) chunk is
+        // capped at the steady-state window, not the warm-up one, so a flush
+        // mid-warm-up still carries everything buffered so far.
         let extract_size = if force {
-            available.min(chunk_size)
+            available.min(self.config.chunk_samples())
         } else {
             chunk_size
         };
@@ -224,9 +256,14 @@ impl AudioBuffer {
             .copied()
             .collect();
 
-        // Advance processed counter (minus overlap for next chunk)
+        // Advance processed counter. Warm-up chunks don't advance at all —
+        // the next chunk re-covers the same audio from the stream start with
+        // a bigger window; the transcript layer replaces the earlier text.
+        // Steady-state chunks advance minus overlap; final chunks fully.
         let advance = if force {
             extract_size // No overlap on final chunk
+        } else if is_warmup {
+            0
         } else {
             extract_size.saturating_sub(overlap)
         };
@@ -357,6 +394,7 @@ mod tests {
             chunk_duration_secs: 0.1, // 100ms = 1600 samples
             overlap_secs: 0.01,       // 10ms = 160 samples overlap
             max_buffer_secs: 1.0,
+            warmup_chunk_secs: Vec::new(),
         };
         let mut buffer = AudioBuffer::with_config(config);
 
@@ -379,6 +417,7 @@ mod tests {
             chunk_duration_secs: 1.0,
             overlap_secs: 0.2, // 200 sample overlap
             max_buffer_secs: 10.0,
+            warmup_chunk_secs: Vec::new(),
         };
         let mut buffer = AudioBuffer::with_config(config);
 
@@ -395,6 +434,69 @@ mod tests {
         assert_eq!(chunk2.samples.len(), 1000);
         // First sample of chunk2 should be sample 800 (1000 - 200 overlap)
         assert_eq!(chunk2.samples[0], 800.0);
+    }
+
+    #[test]
+    fn test_buffer_warmup_windows_grow_from_stream_start() {
+        let config = AudioBufferConfig {
+            sample_rate: 1000, // Simplified for testing
+            chunk_duration_secs: 5.0,
+            overlap_secs: 0.5,
+            max_buffer_secs: 60.0,
+            warmup_chunk_secs: vec![1.5, 3.0],
+        };
+        let mut buffer = AudioBuffer::with_config(config);
+
+        // 1.5s in: first warm-up chunk ready, covers [0, 1.5).
+        buffer.push(&vec![0.0; 1500]);
+        assert!(buffer.has_chunk_ready());
+        let c0 = buffer.extract_chunk(false).unwrap();
+        assert_eq!(c0.samples.len(), 1500);
+        assert_eq!(c0.start_time, Duration::ZERO);
+
+        // No advance: not ready again until the *bigger* window fills.
+        assert!(!buffer.has_chunk_ready());
+
+        // 3s in: second warm-up chunk re-covers [0, 3).
+        buffer.push(&vec![0.0; 1500]);
+        let c1 = buffer.extract_chunk(false).unwrap();
+        assert_eq!(c1.samples.len(), 3000);
+        assert_eq!(c1.start_time, Duration::ZERO);
+
+        // 5s in: steady chunk covers [0, 5) and advances past the overlap.
+        buffer.push(&vec![0.0; 2000]);
+        let c2 = buffer.extract_chunk(false).unwrap();
+        assert_eq!(c2.samples.len(), 5000);
+        assert_eq!(c2.start_time, Duration::ZERO);
+
+        // 9.5s in: next steady chunk starts at 4.5s (5s - 0.5s overlap).
+        buffer.push(&vec![0.0; 4500]);
+        let c3 = buffer.extract_chunk(false).unwrap();
+        assert_eq!(c3.samples.len(), 5000);
+        assert_eq!(c3.start_time, Duration::from_millis(4500));
+    }
+
+    #[test]
+    fn test_buffer_flush_mid_warmup_carries_everything() {
+        let config = AudioBufferConfig {
+            sample_rate: 1000,
+            chunk_duration_secs: 5.0,
+            overlap_secs: 0.5,
+            max_buffer_secs: 60.0,
+            warmup_chunk_secs: vec![1.5, 3.0],
+        };
+        let mut buffer = AudioBuffer::with_config(config);
+
+        // Stop after the first warm-up chunk: 2s of audio, 0 advanced.
+        buffer.push(&vec![0.0; 2000]);
+        let _ = buffer.extract_chunk(false).unwrap(); // warm-up [0, 1.5)
+        buffer.end_stream();
+
+        // Flush must re-cover from 0, not just the un-consumed tail.
+        let flushed = buffer.extract_chunk(true).unwrap();
+        assert_eq!(flushed.start_time, Duration::ZERO);
+        assert_eq!(flushed.samples.len(), 2000);
+        assert!(flushed.is_final);
     }
 
     #[test]

@@ -34,6 +34,8 @@ SDKs may prefix or adjust casing:
 |-----------|------|--------|-------|-------------|
 | `Envelope` | `XybridEnvelope` | `XybridEnvelope` | `XybridEnvelope` | `Envelope` |
 | `InferenceResult` | `XybridResult` | `XybridResult` | `XybridResult` | `InferenceResult` |
+| `ModelSource` | loader factories | `ModelSource` | `ModelSource` | loader factories |
+| `ModelLoader` | `XybridModelLoader` | `XybridModelLoader` (`ModelLoader`) | `ModelLoader` | `ModelLoader` |
 | `OutputType` enum | `FfiOutputType` | `OutputType` | `OutputType` | `OutputType` |
 | `PipelineInputType` | `FfiPipelineInputType` | `PipelineInputType` | — | — |
 
@@ -44,10 +46,15 @@ SDKs may prefix or adjust casing:
 All SDKs follow the same three-step pattern:
 
 ```
-1. Create a Loader  →  Xybrid.model(modelId: "whisper-tiny")
+1. Describe a Model →  Xybrid.model("whisper-tiny-ggml")
 2. Load the Model   →  await loader.load()
 3. Run Inference    →  await model.run(envelope: input)
 ```
+
+Creating a loader is cheap and performs no network, disk, or native-runtime
+work. `load()` is the explicit boundary for resolving, downloading, and loading
+a model. Bindings may also expose an explicitly named synchronous variant for
+worker-thread and non-async callers.
 
 ---
 
@@ -100,13 +107,19 @@ object Xybrid {
   // API Key Management
   fun setApiKey(apiKey: String)
 
-  // Model Loading
-  fun model(
-    modelId: String? = null,
-    platform: String? = null,
-    bundlePath: String? = null,
-    modelDir: String? = null
-  ): XybridModelLoader
+  // Model description (no I/O)
+  fun model(id: String): ModelLoader
+  fun model(source: ModelSource): ModelLoader
+}
+```
+
+### Swift
+
+```swift
+extension Xybrid {
+  // Model description (no I/O)
+  static func model(_ id: String) -> ModelLoader
+  static func model(_ source: ModelSource) -> ModelLoader
 }
 ```
 
@@ -123,14 +136,14 @@ impl Xybrid {
 
 ### Implementation Status
 
-| Method | Rust | Dart | Kotlin | Swift | C# |
-|--------|------|------|--------|-------|----|
-| `init()` | — | ✅ | ✅ | — | ✅ |
-| `setApiKey()` | — | ✅ | — | — | — |
-| `setGatewayUrl()` | — | ✅ | — | — | — |
-| `model()` | ✅ | ✅ | — | — | ✅ |
-| `pipeline()` | ✅ | ✅ | — | — | — |
-| `isModelCached()` | — | ✅ | — | — | — |
+| Method | Dart | Kotlin | Swift | C# |
+|--------|------|--------|-------|----|
+| `init()` | ✅ | ✅ | ✅ | ✅ |
+| `setApiKey()` | ✅ | — | — | — |
+| `setGatewayUrl()` | ✅ | — | — | — |
+| `model()` | ✅ | ✅ | ✅ | ✅ |
+| `pipeline()` | ✅ | — | — | — |
+| `isModelCached()` | ✅ | — | — | — |
 
 ---
 
@@ -146,6 +159,12 @@ class XybridModelLoader {
   factory XybridModelLoader.fromRegistry(String modelId);
   factory XybridModelLoader.fromBundle(String path);
   factory XybridModelLoader.fromDirectory(String path);
+
+  // Serve from the cloud gateway while the weights download in the background
+  factory XybridModelLoader.fromRegistrySpeculative(String modelId);
+
+  // Would load() actually speculate? (enabled + API key + not cached)
+  bool get willSpeculate;
 
   // Load the model
   Future<XybridModel> load();
@@ -163,9 +182,35 @@ class XybridModelLoader {
     fun fromRegistry(modelId: String): XybridModelLoader
     fun fromBundle(path: String): XybridModelLoader
     fun fromDirectory(path: String): XybridModelLoader
+    fun fromRegistrySpeculative(id: String): XybridModelLoader
   }
 
+  val willSpeculate: Boolean
+
   suspend fun load(): XybridModel
+  fun loadBlocking(): XybridModel
+}
+```
+
+### Swift
+
+```swift
+public enum ModelSource {
+  case registry(String)
+  case bundle(URL)
+  case directory(URL)
+  case huggingFace(String)
+  case registrySpeculative(String)
+}
+
+public struct ModelLoader {
+  let source: ModelSource
+
+  static func fromRegistrySpeculative(_ id: String) -> Self
+  var willSpeculate: Bool { get }
+
+  func load() async throws -> XybridModel
+  func loadSync() throws -> XybridModel
 }
 ```
 
@@ -177,7 +222,7 @@ public class ModelLoader
     public static ModelLoader FromRegistry(string modelId);
     public static ModelLoader FromBundle(string bundlePath);
     public static ModelLoader FromDirectory(string directoryPath);
-    public InferenceResult Load();
+    public Model Load();
 }
 ```
 
@@ -227,16 +272,16 @@ final result = await model.run(envelope: XybridEnvelope.text("Hello!"));
 
 ```kotlin
 // Kotlin / Android
-val loader = XybridModelLoader.fromDirectory("/data/local/tmp/my-model")
+val loader = Xybrid.model(ModelSource.directory("/data/local/tmp/my-model"))
 val model = loader.load()
-val result = model.run(XybridEnvelope.text("Hello!"))
+val result = model.runAsync(XybridEnvelope.text("Hello!"))
 ```
 
 ```swift
 // Swift / iOS
-let loader = try XybridModelLoader.fromDirectory(path: modelPath)
+let loader = Xybrid.model(.directory(modelURL))
 let model = try await loader.load()
-let result = try await model.run(envelope: .text("Hello!"))
+let result = try await model.runAsync(envelope: .text("Hello!"))
 ```
 
 ```csharp
@@ -270,16 +315,16 @@ final result = await model.run(envelope: XybridEnvelope.text("Hello!"));
 
 ```kotlin
 // Kotlin / Android
-val loader = XybridModelLoader.fromHuggingface(repo = "xybrid-ai/kokoro-82m")
+val loader = Xybrid.model(ModelSource.huggingFace("xybrid-ai/kokoro-82m"))
 val model = loader.load()
-val result = model.run(XybridEnvelope.text("Hello!"))
+val result = model.runAsync(XybridEnvelope.text("Hello!"))
 ```
 
 ```swift
 // Swift / iOS
-let loader = XybridModelLoader.fromHuggingface(repo: "xybrid-ai/kokoro-82m")
+let loader = Xybrid.model(.huggingFace("xybrid-ai/kokoro-82m"))
 let model = try await loader.load()
-let result = try await model.run(envelope: .text("Hello!"))
+let result = try await model.runAsync(envelope: .text("Hello!"))
 ```
 
 ```csharp
@@ -308,15 +353,24 @@ let model = Xybrid::model("qwen3.5-0.8b")
 
 ### Implementation Status
 
-| Method | Rust | Dart | Kotlin | Swift | C# |
-|--------|------|------|--------|-------|----|
-| `fromRegistry()` | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `fromBundle()` | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `fromDirectory()` | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `fromHuggingFace()` | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `withBackend()` | ✅ | — | — | — | — |
-| `load()` | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `loadWithProgress()` | ✅ | ✅ | — | — | — |
+| Method | Dart | Kotlin | Swift | C# |
+|--------|------|--------|-------|----|
+| `fromRegistry()` | ✅ | ✅ | ✅ | ✅ |
+| `fromBundle()` | ✅ | ✅ | ✅ | ✅ |
+| `fromDirectory()` | ✅ | ✅ | ✅ | ✅ |
+| `fromHuggingFace()` | ✅ | ✅ | ✅ | ✅ |
+| `load()` | ✅ | ✅ | ✅ | ✅ |
+| `loadWithProgress()` | ✅ | — | — | — |
+| `fromRegistrySpeculative()` | ✅ | ✅ | ✅ | — |
+| `willSpeculate` | ✅ | ✅ | ✅ | — |
+| `withBackend()` (Dart: `backend:` on `load()`) | ✅ | — | — | — |
+
+`fromRegistrySpeculative()` answers from the cloud gateway while the registry
+weights download in the background, then switches to on-device by itself. It
+needs an API key and an uncached model — otherwise it behaves exactly like
+`fromRegistry()`, which `willSpeculate` reports up front. LLM/chat models only.
+Unity has no loader facade; it calls the generated
+`XybridModel.FromRegistrySpeculative(id)` constructor directly.
 
 ---
 
@@ -454,28 +508,43 @@ impl XybridModel {
 
 ### Implementation Status
 
-| Method | Rust | Dart | Kotlin | Swift | C# |
-|--------|------|------|--------|-------|----|
-| `modelId` | ✅ | — | — | — | ✅ |
-| `voices` | ✅ | — | ✅ | ✅ | ✅ |
-| `defaultVoice` | ✅ | — | 🚧 | 🚧 | ✅ |
-| `hasVoices` | ✅ | — | ✅ | ✅ | ✅ |
-| `voice()` | ✅ | — | ✅ | ✅ | ✅ |
-| `run()` | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `runWithOptions()` / `run_with_options()` | ✅ | planned | planned | planned | planned |
-| `runWithContext()` / `run_with_context()` | ✅ | ✅ | — | — | ✅ |
-| `runWithContextOptions()` / `run_with_context_options()` | ✅ | planned | planned | planned | planned |
-| `runStreaming()` / `run_streaming()` | ✅ | ✅ | — | — | ✅ |
-| `runStreamingWithOptions()` / `run_streaming_with_options()` | ✅ | planned | planned | planned | planned |
-| `runTtsStreaming()` / `run_tts_streaming()` | ✅ | ✅ | — | — | — |
-| `runStreamingWithFallback()` / `run_streaming_with_fallback()` | ✅ | ✅ | planned | planned | planned |
-| `runStreamingWithContext()` / `run_streaming_with_context()` | ✅ | ✅ | — | — | ✅ |
-| `runStreamingWithContextOptions()` / `run_streaming_with_context_options()` | ✅ | planned | planned | planned | planned |
-| `supportsTokenStreaming()` / `supports_token_streaming()` | ✅ | ✅ | — | — | ✅ |
-| `benchmark()` | — | — | — | — | — |
-| `warmup()` | ✅ | ✅ | ✅ | ✅ | — |
-| `unload()` | ✅ | ✅ | ✅ | ✅ | — |
-| `executionProviderInfo()` | — | — | — | — | — |
+| Method | Dart | Kotlin | Swift | C# |
+|--------|------|--------|-------|----|
+| `modelId` | — | — | — | ✅ |
+| `voices` | — | ✅ | ✅ | ✅ |
+| `defaultVoice` | — | 🚧 | 🚧 | ✅ |
+| `hasVoices` | — | ✅ | ✅ | ✅ |
+| `voice()` | — | ✅ | ✅ | ✅ |
+| `run()` | ✅ | ✅ | ✅ | ✅ |
+| `runWithOptions()` / `run_with_options()` | Rust ✅ | planned | planned | planned |
+| `runWithContext()` | ✅ | — | — | ✅ |
+| `runWithContextOptions()` / `run_with_context_options()` | Rust ✅ | planned | planned | planned |
+| `runStreaming()` | ✅ | — | — | ✅ |
+| `runStreamingWithOptions()` / `run_streaming_with_options()` | Rust ✅ | planned | planned | planned |
+| `runTtsStreaming()` / `run_tts_streaming()` | ✅ | — | — | — |
+| `runStreamingWithFallback()` | ✅ | planned | planned | planned |
+| `runStreamingWithContext()` | ✅ | — | — | ✅ |
+| `runStreamingWithContextOptions()` / `run_streaming_with_context_options()` | Rust ✅ | planned | planned | planned |
+| `benchmark()` | — | — | — | — |
+| `warmup()` | ✅ | ✅ | ✅ | — |
+| `unload()` | ✅ | ✅ | ✅ | — |
+| `isCloudServing()` | ✅ | ✅ | ✅ | ✅ |
+| `downloadStatus()` | ✅ | ✅ | ✅ | ✅ |
+| `awaitDownload()` | — | ✅ | ✅ | ✅ |
+| `downloadProgress()` | ✅ | — | — | — |
+| `executionProviderInfo()` | — | — | — | — |
+
+While a speculative load is still downloading, `isCloudServing()` is true and
+`downloadStatus()` returns the state (`downloading` / `ready` / `failed`) with
+progress in `0.0..=1.0`; `1.0` is reserved for `ready`, since the underlying
+fetch reports progress per artifact. `awaitDownload(timeoutMs)` blocks until the
+download settles — call it off the UI thread. Dart instead exposes a pushed
+`downloadProgress()` stream, because flutter_rust_bridge stream sinks are safe
+where the bolt bindings must not carry a closure across the FFI boundary.
+
+`XybridResult.executionTarget` reports whether an answer that already ran came
+from the device or the cloud; cloud fallback keeps the model id identical on
+both legs, so it is the only way to tell them apart.
 
 ---
 
@@ -830,7 +899,7 @@ The optional `voiceId` and `speed` parameters work seamlessly in pipelines:
 final pipeline = XybridPipeline.fromYaml('''
 name: voice-assistant
 stages:
-  - model: whisper-tiny
+  - model: whisper-tiny-ggml
   - model: llama-3-8b
   - model: kokoro-82m
 ''');
@@ -846,7 +915,7 @@ For pipeline-level voice configuration, use stage config in YAML:
 ```yaml
 name: voice-assistant
 stages:
-  - model: whisper-tiny
+  - model: whisper-tiny-ggml
   - model: llama-3-8b
   - model: kokoro-82m
     config:
@@ -1591,7 +1660,7 @@ The full wire format and the list of enum values for each header field is docume
 ### Kotlin-specific
 
 - Use `suspend` for async operations
-- Use `sealed class` for sum types (Envelope)
+- Use `sealed interface` for sum types (`Envelope`, `ModelSource`)
 - Use `data class` for value types
 - Use `companion object` for factory methods
 - Use Kotlin naming conventions (camelCase, enum UPPER_CASE)
@@ -1599,8 +1668,9 @@ The full wire format and the list of enum values for each header field is docume
 
 ### Swift-specific
 
-- Currently uses raw UniFFI-generated types with type aliases
-- No `Xybrid` singleton wrapper yet — uses `XybridModelLoader` directly
+- Uses hand-written Swift facades over BoltFFI-generated types
+- Uses `URL` for local bundle and directory model sources
+- Uses `async throws` for model loading; `loadSync()` is the explicit blocking form
 
 ### Unity/C#-specific
 

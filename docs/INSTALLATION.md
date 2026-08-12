@@ -56,6 +56,9 @@ cargo install --git https://github.com/xybrid-ai/xybrid xybrid-cli --features pl
 
 # Linux / Windows — ONNX + llama.cpp
 cargo install --git https://github.com/xybrid-ai/xybrid xybrid-cli --features platform-desktop
+
+# Linux — ONNX + llama.cpp with Vulkan acceleration
+XYBRID_LLAMA_CPP_VULKAN=1 cargo install --git https://github.com/xybrid-ai/xybrid xybrid-cli --features platform-desktop
 ```
 
 The prebuilt binaries from the install script include the stable platform
@@ -64,16 +67,64 @@ opt-in: without `llm-mlx-runtime`, MLX registry variants and local SafeTensors
 metadata are visible for selector checks, but generation falls back to
 llama.cpp or fails for explicit `--backend mlx`.
 
+Vulkan is a build-time setting, not a Cargo feature, and it is **Linux-only**
+today. Install the Vulkan SDK before enabling it; the build reads
+`VULKAN_SDK/lib` when resolving the loader. Unset `XYBRID_LLAMA_CPP_VULKAN`
+(or set it to `0`) for the normal CPU build. Any non-Linux target fails the
+build with an explicit error rather than silently ignoring the variable.
+
+Windows Vulkan is not supported yet. ggml compiles its GLSL shaders with
+`vulkan-shaders-gen`, built as a nested CMake project; under cargo's
+`target/<profile>/build/<crate>-<hash>/out/` prefix the paths MSBuild's
+FileTracker generates for it exceed Windows' 260-character `MAX_PATH`, leaving
+about 17 characters for the repository root. It fails from any realistic
+checkout location, so it is gated off rather than shipped broken.
+
+Under Bazel the knob is a build flag, not an environment variable — Bazel sets
+llama.cpp's cmake defines itself and never reads `XYBRID_LLAMA_CPP_VULKAN`:
+
+```bash
+bazel build --config=remote --config=linux-vulkan -c opt //crates/xybrid-cli:xybrid
+```
+
+That config needs the Vulkan SDK on the machine driving the build — ggml
+compiles its GLSL shaders with a nested `vulkan-shaders-gen` project, so
+`//:llama_vulkan` is pinned to local execution while the rest of the graph still
+builds remotely. Two things to set up first:
+
+```bash
+sudo apt-get install glslc libvulkan-dev spirv-headers
+
+# //:llama_vulkan reads the Vulkan headers from a fixed path, staged rather
+# than used in place so that cmake's `-I` for them cannot shadow the hermetic
+# toolchain's libc headers. Use $VULKAN_SDK/include if you have the LunarG SDK.
+sudo mkdir -p /opt/xybrid-vulkan-include
+for tree in vulkan vk_video spirv; do
+  sudo ln -sfn "/usr/include/$tree" "/opt/xybrid-vulkan-include/$tree"
+done
+```
+
+The loader is not taken from your system at build time: `//bazel/vulkan` builds a
+link-time stub carrying the real `libvulkan.so.1` SONAME, so the binary binds to
+whatever Vulkan loader the machine running it has.
+
+A Vulkan build links `libvulkan.so.1` dynamically, so the machine that *runs*
+it needs a Vulkan loader too, and a driver to reach the GPU.
+
+The prebuilt binaries use the release platform configuration, which is CPU-only
+on Linux — no Vulkan asset is published yet. Both Vulkan paths above affect
+only binaries you compile yourself.
+
 <details>
 <summary>All available feature flags</summary>
 
 | Feature | Description |
 |---------|-------------|
 | **Platform presets** | |
-| `platform-macos` | ONNX download + CoreML + Metal + text-only llama.cpp |
-| `platform-ios` | ONNX download + CoreML + Metal + text-only llama.cpp |
-| `platform-android` | ONNX dynamic + text-only llama.cpp |
-| `platform-desktop` | ONNX download + text-only llama.cpp |
+| `platform-macos` | ONNX download + CoreML + Metal + llama.cpp with vision + whisper.cpp ASR |
+| `platform-ios` | ONNX download + CoreML + Metal + llama.cpp with vision + whisper.cpp ASR |
+| `platform-android` | ONNX dynamic + llama.cpp with vision + whisper.cpp ASR |
+| `platform-desktop` | ONNX download + llama.cpp with vision + whisper.cpp ASR |
 | **Individual flags** | |
 | `ort-download` | Download prebuilt ONNX Runtime binaries |
 | `ort-dynamic` | Load ONNX Runtime .so at runtime |
@@ -154,8 +205,12 @@ xybrid run --model kokoro-82m --input-text "Hello world" --output hello.wav
 ### Speech-to-Text
 
 ```bash
-xybrid run --model whisper-tiny --input-audio recording.wav
+xybrid run --model whisper-tiny-ggml --input-audio recording.wav
 ```
+
+`whisper-tiny-ggml` is the GGML bundle that runs on whisper.cpp, which every
+platform preset ships. The older `whisper-tiny` id serves the SafeTensors
+bundle and needs a build with `--features candle`.
 
 ### Chat with an LLM
 
@@ -216,7 +271,7 @@ Chain models together with a YAML file:
 # voice-assistant.yaml
 name: voice-assistant
 stages:
-  - model: whisper-tiny
+  - model: whisper-tiny-ggml
   - model: smollm2-360m
   - model: kokoro-82m
 ```

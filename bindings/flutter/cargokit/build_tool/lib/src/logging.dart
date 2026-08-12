@@ -11,12 +11,12 @@ const String kDoubleSeparator = "==";
 bool _lastMessageWasSeparator = false;
 
 void _log(LogRecord rec) {
-  final prefix = '${rec.level.name}: ';
-  // xybrid change: SEVERE used to go to stderr, but the Flutter Linux build
-  // swallows the build hook's stderr — the SourceBuildUnavailableException
-  // refusal never reached the build log while WARNING (stdout) did. Route
-  // everything through stdout so failure diagnostics survive on every host.
-  final out = stdout;
+  // Flutter's non-verbose desktop builds only surface ninja stdout lines that
+  // match `error:` / `warning:` (build_linux.dart errorMatcher), and ninja
+  // merges our stderr into its stdout. Dart's SEVERE label matches neither, so
+  // failure messages would be silently dropped — print ERROR instead.
+  final prefix = rec.level == Level.SEVERE ? 'ERROR: ' : '${rec.level.name}: ';
+  final out = rec.level == Level.SEVERE ? stderr : stdout;
   if (rec.message == kSeparator) {
     if (!_lastMessageWasSeparator) {
       out.write(prefix);

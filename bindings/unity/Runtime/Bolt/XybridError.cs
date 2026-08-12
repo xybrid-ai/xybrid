@@ -3,9 +3,6 @@
 // </auto-generated>
 #nullable enable
 
-using System;
-using System.Text;
-
 namespace XybridBolt
 {
     /// <summary>
@@ -27,266 +24,261 @@ namespace XybridBolt
     /// </summary>
     public abstract record XybridError
     {
-        private XybridError() { }
-        public sealed record ModelNotFound(
-            string Id
-        ) : XybridError;
-        public sealed record DirectoryNotFound(
-            string Path
-        ) : XybridError;
-        public sealed record MetadataNotFound(
-            string Path
-        ) : XybridError;
-        public sealed record MetadataInvalid(
-            string Message
-        ) : XybridError;
-        public sealed record LoadError(
-            string Message
-        ) : XybridError;
-        public sealed record InferenceError(
-            string Message
-        ) : XybridError;
-        public sealed record AbortedForCloudFallback(
-            string Reason
-        ) : XybridError;
-        public sealed record StreamingNotSupported() : XybridError;
-        public sealed record NotLoaded() : XybridError;
-        public sealed record ConfigError(
-            string Message
-        ) : XybridError;
-        public sealed record NetworkError(
-            string Message
-        ) : XybridError;
-        public sealed record Offline(
-            string Message
-        ) : XybridError;
-        public sealed record IoError(
-            string Message
-        ) : XybridError;
-        public sealed record CacheError(
-            string Message
-        ) : XybridError;
-        public sealed record PipelineError(
-            string Message
-        ) : XybridError;
-        public sealed record CircuitOpen(
-            string Message
-        ) : XybridError;
-        public sealed record RateLimited(
-            ulong RetryAfterSecs
-        ) : XybridError;
-        public sealed record Timeout(
-            ulong TimeoutMs
-        ) : XybridError;
-        public sealed record MissingArtifact(
-            string Message
-        ) : XybridError;
-        public sealed record UnsupportedModelCapability(
-            string Message
-        ) : XybridError;
-        public sealed record UnsupportedBackendCapability(
-            string Message
-        ) : XybridError;
-        public sealed record InvalidImage(
-            string Message
-        ) : XybridError;
-
         internal static XybridError Decode(WireReader reader) =>
-            reader.ReadI32() switch
+            reader.ReadU32() switch
             {
-                0 => new ModelNotFound(
-                    reader.ReadString()
-                ),
-                1 => new DirectoryNotFound(
-                    reader.ReadString()
-                ),
-                2 => new MetadataNotFound(
-                    reader.ReadString()
-                ),
-                3 => new MetadataInvalid(
-                    reader.ReadString()
-                ),
-                4 => new LoadError(
-                    reader.ReadString()
-                ),
-                5 => new InferenceError(
-                    reader.ReadString()
-                ),
-                6 => new AbortedForCloudFallback(
-                    reader.ReadString()
-                ),
+                0 => new ModelNotFound(reader.ReadString()),
+                1 => new DirectoryNotFound(reader.ReadString()),
+                2 => new MetadataNotFound(reader.ReadString()),
+                3 => new MetadataInvalid(reader.ReadString()),
+                4 => new LoadError(reader.ReadString()),
+                5 => new InferenceError(reader.ReadString()),
+                6 => new AbortedForCloudFallback(reader.ReadString()),
                 7 => new StreamingNotSupported(),
                 8 => new NotLoaded(),
-                9 => new ConfigError(
-                    reader.ReadString()
-                ),
-                10 => new NetworkError(
-                    reader.ReadString()
-                ),
-                11 => new Offline(
-                    reader.ReadString()
-                ),
-                12 => new IoError(
-                    reader.ReadString()
-                ),
-                13 => new CacheError(
-                    reader.ReadString()
-                ),
-                14 => new PipelineError(
-                    reader.ReadString()
-                ),
-                15 => new CircuitOpen(
-                    reader.ReadString()
-                ),
-                16 => new RateLimited(
-                    reader.ReadU64()
-                ),
-                17 => new Timeout(
-                    reader.ReadU64()
-                ),
-                18 => new MissingArtifact(
-                    reader.ReadString()
-                ),
-                19 => new UnsupportedModelCapability(
-                    reader.ReadString()
-                ),
-                20 => new UnsupportedBackendCapability(
-                    reader.ReadString()
-                ),
-                21 => new InvalidImage(
-                    reader.ReadString()
-                ),
-                int tag => throw new InvalidOperationException($"Unknown XybridError tag: {tag}"),
+                9 => new ConfigError(reader.ReadString()),
+                10 => new NetworkError(reader.ReadString()),
+                11 => new Offline(reader.ReadString()),
+                12 => new IoError(reader.ReadString()),
+                13 => new CacheError(reader.ReadString()),
+                14 => new PipelineError(reader.ReadString()),
+                15 => new CircuitOpen(reader.ReadString()),
+                16 => new RateLimited(reader.ReadU64()),
+                17 => new Timeout(reader.ReadU64()),
+                18 => new MissingArtifact(reader.ReadString()),
+                19 => new UnsupportedModelCapability(reader.ReadString()),
+                20 => new UnsupportedBackendCapability(reader.ReadString()),
+                21 => new InvalidImage(reader.ReadString()),
+                uint tag => throw new global::System.InvalidOperationException($"Invalid XybridError tag: {tag}"),
             };
 
-        internal int WireEncodedSize() => 4 + this switch
-        {
-            ModelNotFound _v => (4 + Encoding.UTF8.GetByteCount(_v.Id)),
-            DirectoryNotFound _v => (4 + Encoding.UTF8.GetByteCount(_v.Path)),
-            MetadataNotFound _v => (4 + Encoding.UTF8.GetByteCount(_v.Path)),
-            MetadataInvalid _v => (4 + Encoding.UTF8.GetByteCount(_v.Message)),
-            LoadError _v => (4 + Encoding.UTF8.GetByteCount(_v.Message)),
-            InferenceError _v => (4 + Encoding.UTF8.GetByteCount(_v.Message)),
-            AbortedForCloudFallback _v => (4 + Encoding.UTF8.GetByteCount(_v.Reason)),
-            StreamingNotSupported => 0,
-            NotLoaded => 0,
-            ConfigError _v => (4 + Encoding.UTF8.GetByteCount(_v.Message)),
-            NetworkError _v => (4 + Encoding.UTF8.GetByteCount(_v.Message)),
-            Offline _v => (4 + Encoding.UTF8.GetByteCount(_v.Message)),
-            IoError _v => (4 + Encoding.UTF8.GetByteCount(_v.Message)),
-            CacheError _v => (4 + Encoding.UTF8.GetByteCount(_v.Message)),
-            PipelineError _v => (4 + Encoding.UTF8.GetByteCount(_v.Message)),
-            CircuitOpen _v => (4 + Encoding.UTF8.GetByteCount(_v.Message)),
-            RateLimited _v => 8,
-            Timeout _v => 8,
-            MissingArtifact _v => (4 + Encoding.UTF8.GetByteCount(_v.Message)),
-            UnsupportedModelCapability _v => (4 + Encoding.UTF8.GetByteCount(_v.Message)),
-            UnsupportedBackendCapability _v => (4 + Encoding.UTF8.GetByteCount(_v.Message)),
-            InvalidImage _v => (4 + Encoding.UTF8.GetByteCount(_v.Message)),
-            _ => throw new InvalidOperationException($"Unknown XybridError variant"),
-        };
-
-        internal void WireEncodeTo(WireWriter wire)
+        internal void Encode(WireWriter writer)
         {
             switch (this)
             {
-                case ModelNotFound _v:
-                    wire.WriteI32(0);
-                    wire.WriteString(_v.Id);
+                case ModelNotFound value:
+                {
+                    writer.WriteU32(0);
+                    {
+                        writer.WriteString(value.Id);
+                    }
                     break;
-                case DirectoryNotFound _v:
-                    wire.WriteI32(1);
-                    wire.WriteString(_v.Path);
+                }
+                case DirectoryNotFound value:
+                {
+                    writer.WriteU32(1);
+                    {
+                        writer.WriteString(value.Path);
+                    }
                     break;
-                case MetadataNotFound _v:
-                    wire.WriteI32(2);
-                    wire.WriteString(_v.Path);
+                }
+                case MetadataNotFound value:
+                {
+                    writer.WriteU32(2);
+                    {
+                        writer.WriteString(value.Path);
+                    }
                     break;
-                case MetadataInvalid _v:
-                    wire.WriteI32(3);
-                    wire.WriteString(_v.Message);
+                }
+                case MetadataInvalid value:
+                {
+                    writer.WriteU32(3);
+                    {
+                        writer.WriteString(value.Message);
+                    }
                     break;
-                case LoadError _v:
-                    wire.WriteI32(4);
-                    wire.WriteString(_v.Message);
+                }
+                case LoadError value:
+                {
+                    writer.WriteU32(4);
+                    {
+                        writer.WriteString(value.Message);
+                    }
                     break;
-                case InferenceError _v:
-                    wire.WriteI32(5);
-                    wire.WriteString(_v.Message);
+                }
+                case InferenceError value:
+                {
+                    writer.WriteU32(5);
+                    {
+                        writer.WriteString(value.Message);
+                    }
                     break;
-                case AbortedForCloudFallback _v:
-                    wire.WriteI32(6);
-                    wire.WriteString(_v.Reason);
+                }
+                case AbortedForCloudFallback value:
+                {
+                    writer.WriteU32(6);
+                    {
+                        writer.WriteString(value.Reason);
+                    }
                     break;
-                case StreamingNotSupported:
-                    wire.WriteI32(7);
+                }
+                case StreamingNotSupported value:
+                {
+                    writer.WriteU32(7);
                     break;
-                case NotLoaded:
-                    wire.WriteI32(8);
+                }
+                case NotLoaded value:
+                {
+                    writer.WriteU32(8);
                     break;
-                case ConfigError _v:
-                    wire.WriteI32(9);
-                    wire.WriteString(_v.Message);
+                }
+                case ConfigError value:
+                {
+                    writer.WriteU32(9);
+                    {
+                        writer.WriteString(value.Message);
+                    }
                     break;
-                case NetworkError _v:
-                    wire.WriteI32(10);
-                    wire.WriteString(_v.Message);
+                }
+                case NetworkError value:
+                {
+                    writer.WriteU32(10);
+                    {
+                        writer.WriteString(value.Message);
+                    }
                     break;
-                case Offline _v:
-                    wire.WriteI32(11);
-                    wire.WriteString(_v.Message);
+                }
+                case Offline value:
+                {
+                    writer.WriteU32(11);
+                    {
+                        writer.WriteString(value.Message);
+                    }
                     break;
-                case IoError _v:
-                    wire.WriteI32(12);
-                    wire.WriteString(_v.Message);
+                }
+                case IoError value:
+                {
+                    writer.WriteU32(12);
+                    {
+                        writer.WriteString(value.Message);
+                    }
                     break;
-                case CacheError _v:
-                    wire.WriteI32(13);
-                    wire.WriteString(_v.Message);
+                }
+                case CacheError value:
+                {
+                    writer.WriteU32(13);
+                    {
+                        writer.WriteString(value.Message);
+                    }
                     break;
-                case PipelineError _v:
-                    wire.WriteI32(14);
-                    wire.WriteString(_v.Message);
+                }
+                case PipelineError value:
+                {
+                    writer.WriteU32(14);
+                    {
+                        writer.WriteString(value.Message);
+                    }
                     break;
-                case CircuitOpen _v:
-                    wire.WriteI32(15);
-                    wire.WriteString(_v.Message);
+                }
+                case CircuitOpen value:
+                {
+                    writer.WriteU32(15);
+                    {
+                        writer.WriteString(value.Message);
+                    }
                     break;
-                case RateLimited _v:
-                    wire.WriteI32(16);
-                    wire.WriteU64(_v.RetryAfterSecs);
+                }
+                case RateLimited value:
+                {
+                    writer.WriteU32(16);
+                    {
+                        writer.WriteU64(value.RetryAfterSecs);
+                    }
                     break;
-                case Timeout _v:
-                    wire.WriteI32(17);
-                    wire.WriteU64(_v.TimeoutMs);
+                }
+                case Timeout value:
+                {
+                    writer.WriteU32(17);
+                    {
+                        writer.WriteU64(value.TimeoutMs);
+                    }
                     break;
-                case MissingArtifact _v:
-                    wire.WriteI32(18);
-                    wire.WriteString(_v.Message);
+                }
+                case MissingArtifact value:
+                {
+                    writer.WriteU32(18);
+                    {
+                        writer.WriteString(value.Message);
+                    }
                     break;
-                case UnsupportedModelCapability _v:
-                    wire.WriteI32(19);
-                    wire.WriteString(_v.Message);
+                }
+                case UnsupportedModelCapability value:
+                {
+                    writer.WriteU32(19);
+                    {
+                        writer.WriteString(value.Message);
+                    }
                     break;
-                case UnsupportedBackendCapability _v:
-                    wire.WriteI32(20);
-                    wire.WriteString(_v.Message);
+                }
+                case UnsupportedBackendCapability value:
+                {
+                    writer.WriteU32(20);
+                    {
+                        writer.WriteString(value.Message);
+                    }
                     break;
-                case InvalidImage _v:
-                    wire.WriteI32(21);
-                    wire.WriteString(_v.Message);
+                }
+                case InvalidImage value:
+                {
+                    writer.WriteU32(21);
+                    {
+                        writer.WriteString(value.Message);
+                    }
                     break;
+                }
+                default:
+                    throw new global::System.InvalidOperationException("Unknown XybridError variant");
             }
         }
+
+        public sealed record ModelNotFound(string Id) : XybridError;
+
+        public sealed record DirectoryNotFound(string Path) : XybridError;
+
+        public sealed record MetadataNotFound(string Path) : XybridError;
+
+        public sealed record MetadataInvalid(string Message) : XybridError;
+
+        public sealed record LoadError(string Message) : XybridError;
+
+        public sealed record InferenceError(string Message) : XybridError;
+
+        public sealed record AbortedForCloudFallback(string Reason) : XybridError;
+
+        public sealed record StreamingNotSupported() : XybridError;
+
+        public sealed record NotLoaded() : XybridError;
+
+        public sealed record ConfigError(string Message) : XybridError;
+
+        public sealed record NetworkError(string Message) : XybridError;
+
+        public sealed record Offline(string Message) : XybridError;
+
+        public sealed record IoError(string Message) : XybridError;
+
+        public sealed record CacheError(string Message) : XybridError;
+
+        public sealed record PipelineError(string Message) : XybridError;
+
+        public sealed record CircuitOpen(string Message) : XybridError;
+
+        public sealed record RateLimited(ulong RetryAfterSecs) : XybridError;
+
+        public sealed record Timeout(ulong TimeoutMs) : XybridError;
+
+        public sealed record MissingArtifact(string Message) : XybridError;
+
+        public sealed record UnsupportedModelCapability(string Message) : XybridError;
+
+        public sealed record UnsupportedBackendCapability(string Message) : XybridError;
+
+        public sealed record InvalidImage(string Message) : XybridError;
+
     }
-    /// <summary>
-    /// Thrown by generated wrapper methods when the Rust side returns
-    /// a <c>XybridError</c> as the error. The original value is
-    /// exposed through <c>Error</c>; the inherited <c>Message</c>
-    /// derives from it (forwarded from a <c>Message</c> field when the
-    /// wrapped type has one, otherwise the value's <c>ToString()</c>).
-    /// </summary>
-    public sealed class XybridErrorException : Exception
+
+
+    public sealed class XybridErrorException : global::System.Exception
     {
         public XybridError Error { get; }
 

@@ -192,6 +192,11 @@ pub struct WhisperModel {
     config: Config,
     /// Device for inference
     device: Device,
+    /// Weight/activation precision the model was loaded in — see
+    /// [`inference_dtype`]. Inputs are cast in on the way to the encoder and
+    /// logits are cast back to `F32` before scoring, so everything outside
+    /// the model's own forward passes stays `F32`.
+    dtype: candle_core::DType,
     /// Mel filter bank for audio preprocessing
     mel_filters: Vec<f32>,
     /// Special token IDs
@@ -242,6 +247,9 @@ impl WhisperModel {
         device: &Device,
         user_config: WhisperConfig,
     ) -> WhisperResult<Self> {
+        // Before any tensor work: on mobile, cap the pool those kernels run on.
+        super::device::init_mobile_compute_pool();
+
         // Load configuration. Parsed twice on purpose: candle's `Config` keeps
         // `suppress_tokens` but drops `begin_suppress_tokens`, and both are
         // decoding parameters shipped with the weights rather than something a
@@ -290,15 +298,14 @@ impl WhisperModel {
 
         // Load model weights
         let weights_path = model_dir.join("model.safetensors");
+        let dtype = inference_dtype();
         // SAFETY: `from_mmaped_safetensors` memory-maps the weights file, and
         // the resulting borrow is sound only while the file is not mutated
         // underneath the mapping. `weights_path` is inside xybrid's
         // app-controlled model cache (written once at download, read-only
         // thereafter), so no concurrent writer aliases the mapping for the
         // lifetime of the returned `VarBuilder`.
-        let vb = unsafe {
-            VarBuilder::from_mmaped_safetensors(&[weights_path], candle_core::DType::F32, device)?
-        };
+        let vb = unsafe { VarBuilder::from_mmaped_safetensors(&[weights_path], dtype, device)? };
 
         let model = m::model::Whisper::load(&vb, config.clone())?;
 
@@ -350,6 +357,7 @@ impl WhisperModel {
             tokenizer,
             config,
             device: device.clone(),
+            dtype,
             mel_filters,
             sot_token,
             eot_token,
@@ -415,7 +423,10 @@ impl WhisperModel {
     ///
     /// Encoder output tensor
     pub fn encode(&mut self, mel: &Tensor) -> candle_core::Result<Tensor> {
-        self.model.encoder.forward(mel, true)
+        // Mels are produced in F32; match the model's precision at its door.
+        // (`to_dtype` is a refcount clone when the dtypes already agree.)
+        let mel = mel.to_dtype(self.dtype)?;
+        self.model.encoder.forward(&mel, true)
     }
 
     /// Transcribe audio from mel spectrogram using the model's load-time
@@ -487,6 +498,10 @@ impl WhisperModel {
     /// dropped, which is an empty transcript, not an error.
     fn transcribe_mel(&mut self, mel: &Tensor, prefix: &[u32]) -> WhisperResult<String> {
         let (_, _, content_frames) = mel.dims3()?;
+
+        // Mels arrive in F32; cast once to the model's precision before the
+        // window loop rather than per segment.
+        let mel = mel.to_dtype(self.dtype)?;
 
         let mut segments: Vec<String> = Vec::new();
         for (start, len) in mel_windows(content_frames) {
@@ -598,7 +613,15 @@ impl WhisperModel {
             // every time.
             if i == 0 {
                 if let Some(no_speech_token) = self.no_speech_token {
-                    let first_logits = self.model.decoder.final_linear(&ys.i(..1)?)?.i(0)?.i(0)?;
+                    // Scoring is F32 regardless of model precision (see
+                    // `inference_dtype`).
+                    let first_logits = self
+                        .model
+                        .decoder
+                        .final_linear(&ys.i(..1)?)?
+                        .i(0)?
+                        .i(0)?
+                        .to_dtype(candle_core::DType::F32)?;
                     no_speech_prob = f64::from(
                         softmax(&first_logits, 0)?
                             .i(no_speech_token as usize)?
@@ -607,14 +630,17 @@ impl WhisperModel {
                 }
             }
 
-            // Get logits for last position
+            // Get logits for last position, in F32: the suppress masks are F32
+            // tensors and the softmax/argmax scoring below stays full-precision
+            // whatever the model's forward passes ran in.
             let (_, seq_len, _) = ys.dims3()?;
             let logits = self
                 .model
                 .decoder
                 .final_linear(&ys.i((.., seq_len - 1.., ..))?)?
                 .i(0)?
-                .i(0)?;
+                .i(0)?
+                .to_dtype(candle_core::DType::F32)?;
 
             let logits = logits.broadcast_add(&self.suppress_mask)?;
             // `begin_suppress_tokens` (a leading space, and end-of-text) is a
@@ -767,6 +793,23 @@ impl WhisperModel {
 
         self.transcribe_mel(&mel, &prefix)
     }
+}
+
+/// Precision Whisper weights are loaded — and its forward passes run — in.
+///
+/// Always `F32` today, but kept as the single switch (with the matching cast
+/// seams at the encoder door and the logits exit) because `F16` is the obvious
+/// mobile win once it is possible: on aarch64 the fp16 extension roughly
+/// doubles matmul throughput at half the memory traffic, and the Android
+/// builds already compile with `+fp16`.
+///
+/// Why not now: candle-transformers 0.8.4 hard-casts the encoder's sinusoidal
+/// positional embedding to `F32` (`models/whisper/model.rs:217`) and adds it
+/// to the activations, so an `F16`-loaded model fails its first encoder
+/// forward with a dtype mismatch — verified on-device. Flip this to `F16`
+/// (per-arch) only after candle's whisper encoder is dtype-consistent.
+fn inference_dtype() -> candle_core::DType {
+    candle_core::DType::F32
 }
 
 /// The forced-token prefix Whisper's decoder starts every window from.

@@ -83,7 +83,7 @@ cd ios && pod install && cd ..
 import { Xybrid, ModelLoader } from 'react-native-xybrid';
 
 await Xybrid.initialize();
-const model = await ModelLoader.fromRegistry('whisper-tiny').load();
+const model = await ModelLoader.fromRegistry('whisper-tiny-ggml').load();
 const result = await model.run({ kind: 'audio', bytesBase64, sampleRate: 16000, channels: 1 });
 console.log(result.text);
 await model.release();

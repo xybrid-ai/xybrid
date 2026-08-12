@@ -3,40 +3,34 @@
 // </auto-generated>
 #nullable enable
 
-using System;
-using System.Threading;
-using System.Text;
-
 namespace XybridBolt
 {
-    /// <summary>
-    /// Opaque handle for multi-turn conversation history.
-    ///
-    /// Build it up with [`push`](Self::push) / [`set_system`](Self::set_system),
-    /// then pass it to [`XybridModel::run_with_context`] /
-    /// [`XybridModel::run_stream_with_context`]. Wraps the facade's
-    /// interior-mutable, thread-safe `ConversationContextHandle`.
-    /// </summary>
-    public sealed partial class XybridConversationContext : IDisposable
+    public sealed partial class XybridConversationContext : global::System.IDisposable
     {
-        private IntPtr _handle;
+        private long handle;
 
-        // Private handle-adopting ctor; used only by chained `: this(...)` and the static factories below.
-        private XybridConversationContext(IntPtr handle)
+        internal ulong Handle => unchecked((ulong)(ulong)global::System.Threading.Interlocked.Read(ref handle));
+
+        internal XybridConversationContext(ulong handle)
         {
-            _handle = handle;
+            if (handle == 0) throw new global::System.ArgumentException("handle must not be zero", nameof(handle));
+            this.handle = unchecked((long)(ulong)handle);
         }
 
         /// <summary>
         /// Create an empty conversation context (fresh id).
         /// </summary>
         public XybridConversationContext()
-            : this(XybridConversationContextNewHandle()) { }
+            : this(BoltFfiNew().TakeHandle()) { }
 
-        private static IntPtr XybridConversationContextNewHandle()
+
+        private static XybridConversationContext BoltFfiNew()
         {
-            return NativeMethods.XybridConversationContextNew();
+            ulong boltffiHandle = NativeMethods.NativeXybridConversationContextNew();
+            return boltffiHandle == 0 ? throw new global::System.InvalidOperationException("BoltFFI returned a null XybridConversationContext handle") : new XybridConversationContext(boltffiHandle);
         }
+
+
 
         /// <summary>
         /// Create a context with a caller-supplied id (for telemetry correlation
@@ -44,9 +38,69 @@ namespace XybridBolt
         /// </summary>
         public static XybridConversationContext WithId(string id)
         {
-            byte[] _idBytes = Encoding.UTF8.GetBytes(id);
-            return new XybridConversationContext(NativeMethods.XybridConversationContextWithId(_idBytes, (UIntPtr)_idBytes.Length));
+            WireWriter idWriter = new WireWriter();
+            {
+                idWriter.WriteString(id);
+            }
+            byte[] idBytes = idWriter.ToArray();
+            ulong boltffiHandle = NativeMethods.NativeXybridConversationContextWithId(idBytes, (nuint)idBytes.Length);
+            return boltffiHandle == 0 ? throw new global::System.InvalidOperationException("BoltFFI returned a null XybridConversationContext handle") : new XybridConversationContext(boltffiHandle);
         }
+
+
+        /// <summary>
+        /// Append a turn — typically a user or assistant message envelope.
+        /// </summary>
+        public void Push(global::XybridBolt.XybridEnvelope envelope)
+        {
+            ThrowIfDisposed();
+            WireWriter envelopeWriter = new WireWriter();
+            {
+                envelope.Encode(envelopeWriter);
+            }
+            byte[] envelopeBytes = envelopeWriter.ToArray();
+            FfiBuf boltffiErrorBuffer = NativeMethods.NativeXybridConversationContextPush(this.Handle, envelopeBytes, (nuint)envelopeBytes.Length);
+            if (boltffiErrorBuffer.ptr != 0)
+            {
+                try
+                {
+                    WireReader boltffiErrorReader = new WireReader(boltffiErrorBuffer);
+                    throw new global::XybridBolt.XybridErrorException(global::XybridBolt.XybridError.Decode(boltffiErrorReader));
+                }
+                finally
+                {
+                    NativeMethods.FreeBuf(boltffiErrorBuffer);
+                }
+            }
+        }
+
+
+        /// <summary>
+        /// Set the persistent system-prompt envelope (survives [`clear`](Self::clear)).
+        /// </summary>
+        public void SetSystem(global::XybridBolt.XybridEnvelope envelope)
+        {
+            ThrowIfDisposed();
+            WireWriter envelopeWriter = new WireWriter();
+            {
+                envelope.Encode(envelopeWriter);
+            }
+            byte[] envelopeBytes = envelopeWriter.ToArray();
+            FfiBuf boltffiErrorBuffer = NativeMethods.NativeXybridConversationContextSetSystem(this.Handle, envelopeBytes, (nuint)envelopeBytes.Length);
+            if (boltffiErrorBuffer.ptr != 0)
+            {
+                try
+                {
+                    WireReader boltffiErrorReader = new WireReader(boltffiErrorBuffer);
+                    throw new global::XybridBolt.XybridErrorException(global::XybridBolt.XybridError.Decode(boltffiErrorReader));
+                }
+                finally
+                {
+                    NativeMethods.FreeBuf(boltffiErrorBuffer);
+                }
+            }
+        }
+
 
         /// <summary>
         /// Drop the history; the system envelope (if any) is preserved.
@@ -54,8 +108,13 @@ namespace XybridBolt
         public void Clear()
         {
             ThrowIfDisposed();
-            NativeMethods.XybridConversationContextClear(_handle);
+            FfiStatus status = NativeMethods.NativeXybridConversationContextClear(this.Handle);
+            if (status.code != 0)
+            {
+                throw new global::System.InvalidOperationException($"BoltFFI call failed with status code {status.code}");
+            }
         }
+
 
         /// <summary>
         /// The context id.
@@ -63,16 +122,18 @@ namespace XybridBolt
         public string Id()
         {
             ThrowIfDisposed();
-            FfiBuf _buf = NativeMethods.XybridConversationContextId(_handle);
+            FfiBuf boltffiResultBuffer = NativeMethods.NativeXybridConversationContextId(this.Handle);
             try
             {
-                return new WireReader(_buf).ReadString();
+                WireReader resultReader = new WireReader(boltffiResultBuffer);
+                return resultReader.ReadString();
             }
             finally
             {
-                NativeMethods.FreeBuf(_buf);
+                NativeMethods.FreeBuf(boltffiResultBuffer);
             }
         }
+
 
         /// <summary>
         /// Number of history turns (excludes the system envelope).
@@ -80,8 +141,9 @@ namespace XybridBolt
         public uint HistoryLen()
         {
             ThrowIfDisposed();
-            return NativeMethods.XybridConversationContextHistoryLen(_handle);
+            return NativeMethods.NativeXybridConversationContextHistoryLen(this.Handle);
         }
+
 
         /// <summary>
         /// Whether a persistent system-prompt envelope is set.
@@ -89,8 +151,9 @@ namespace XybridBolt
         public bool HasSystem()
         {
             ThrowIfDisposed();
-            return NativeMethods.XybridConversationContextHasSystem(_handle);
+            return NativeMethods.NativeXybridConversationContextHasSystem(this.Handle);
         }
+
 
         /// <summary>
         /// Set the max history length before FIFO pruning.
@@ -98,27 +161,34 @@ namespace XybridBolt
         public void SetMaxHistoryLen(uint len)
         {
             ThrowIfDisposed();
-            NativeMethods.XybridConversationContextSetMaxHistoryLen(_handle, len);
+            FfiStatus status = NativeMethods.NativeXybridConversationContextSetMaxHistoryLen(this.Handle, len);
+            if (status.code != 0)
+            {
+                throw new global::System.InvalidOperationException($"BoltFFI call failed with status code {status.code}");
+            }
         }
 
-        internal IntPtr RawHandle => _handle;
+
+        private ulong TakeHandle() => unchecked((ulong)(ulong)global::System.Threading.Interlocked.Exchange(ref handle, 0));
 
         private void ThrowIfDisposed()
         {
-            if (_handle == IntPtr.Zero) throw new ObjectDisposedException(nameof(XybridConversationContext));
+            if (global::System.Threading.Interlocked.Read(ref handle) == 0)
+                throw new global::System.ObjectDisposedException(nameof(XybridConversationContext));
         }
+
+        private void Release()
+        {
+            ulong released = unchecked((ulong)(ulong)global::System.Threading.Interlocked.Exchange(ref handle, 0));
+            if (released != 0) NativeMethods.NativeXybridConversationContextRelease(released);
+        }
+
+        ~XybridConversationContext() => Release();
 
         public void Dispose()
         {
-            IntPtr handle = Interlocked.Exchange(ref _handle, IntPtr.Zero);
-            if (handle == IntPtr.Zero) return;
-            NativeMethods.XybridConversationContextFree(handle);
-            GC.SuppressFinalize(this);
-        }
-
-        ~XybridConversationContext()
-        {
-            Dispose();
+            Release();
+            global::System.GC.SuppressFinalize(this);
         }
     }
 }

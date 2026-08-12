@@ -12,6 +12,7 @@ use std::sync::OnceLock;
 // parallel Cargo.toml edit.
 #[allow(unexpected_cfgs)]
 const ALL_FEATURES: &[(&str, bool)] = &[
+    ("asr-whispercpp", cfg!(feature = "asr-whispercpp")),
     ("candle-cuda", cfg!(feature = "candle-cuda")),
     ("candle-metal", cfg!(feature = "candle-metal")),
     ("espeak", cfg!(feature = "espeak")),

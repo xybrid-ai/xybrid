@@ -113,6 +113,14 @@ jobs:
           BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
         run: tools/scripts/write-buildbuddy-rc.sh
 
+      # Serve hermetic-llvm's pinned macOS SDK from cache: Apple's URL 403s
+      # permanently and its only mirror throttles Actions runners. Analyzed on
+      # every target platform, not just Apple ones — see the action.
+      - name: Cache the pinned macOS SDK
+        uses: ./.github/actions/bazel-repo-cache
+        with:
+          macos-sdk-mirror: ${{ vars.MACOS_SDK_MIRROR }}
+
       # Build the feature-complete 3-ABI AAR with Bazel and stage its jniLibs
       # into bindings/kotlin/libs/ (the layout the verify + gate steps and the
       # Kotlin AAR expect). Replaces build-android-bolt.sh (boltffi pack +

@@ -5,7 +5,8 @@
 
 use crate::model::SdkError;
 use std::path::Path;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
+use xybrid_core::execution::TemplateExecutor;
 use xybrid_core::streaming::{
     PartialResult as CorePartialResult, StreamConfig as CoreStreamConfig, StreamSession,
     StreamState as CoreStreamState, StreamStats as CoreStreamStats,
@@ -154,8 +155,9 @@ impl XybridStream {
         model_dir: P,
         config: CoreStreamConfig,
         model_id: &str,
+        executor: Arc<Mutex<TemplateExecutor>>,
     ) -> Result<Self, SdkError> {
-        let session = StreamSession::new(model_dir, config)
+        let session = StreamSession::with_executor(model_dir, config, executor)
             .map_err(|e| SdkError::load_src("Failed to create stream session", e))?;
 
         Ok(Self {
@@ -203,6 +205,29 @@ impl XybridStream {
             .read()
             .map(|h| h.model_id.clone())
             .unwrap_or_default()
+    }
+
+    /// Pay the model's cold-start cost now, before real audio arrives.
+    ///
+    /// The first inference of a session lazily loads weights and pays
+    /// first-run costs; calling this right after creating the stream (e.g.
+    /// on a background thread while the microphone spins up) moves that
+    /// cost off the first visible partial. No-op once audio has been fed.
+    ///
+    /// # Errors
+    ///
+    /// Returns an inference error if the warm-up run fails; the session
+    /// stays usable.
+    pub fn warmup(&self) -> Result<(), SdkError> {
+        let mut handle = self
+            .handle
+            .write()
+            .map_err(|_| SdkError::inference("Failed to acquire stream lock"))?;
+
+        handle
+            .session
+            .warmup()
+            .map_err(|e| SdkError::inference_src("Warm-up failed", e))
     }
 
     /// Feed audio samples to the stream.

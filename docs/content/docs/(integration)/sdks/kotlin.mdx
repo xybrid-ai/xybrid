@@ -3,7 +3,7 @@ title: Kotlin
 description: Kotlin SDK patterns and advanced usage
 ---
 
-The Kotlin SDK (`ai.xybrid:xybrid-kotlin`) is published on Maven Central and uses UniFFI-generated bindings for type-safe ML inference from Kotlin. For installation and core API reference, see the [Android SDK guide](/docs/sdks/android).
+The Kotlin SDK (`ai.xybrid:xybrid-kotlin`) is published on Maven Central and uses BoltFFI-generated bindings with an idiomatic Kotlin facade. For installation and core API reference, see the [Android SDK guide](/docs/sdks/android).
 
 This page covers Kotlin-specific patterns and advanced usage.
 
@@ -39,24 +39,18 @@ val result = try {
 
 ## Coroutines Integration
 
-Wrap synchronous SDK calls with coroutines for non-blocking UI:
+Model loading is an explicit suspending operation. `Xybrid.model(...)` only
+describes the source and performs no I/O:
 
 ```kotlin
-import kotlinx.coroutines.*
-
 class InferenceRepository {
-    private val dispatcher = Dispatchers.IO
-
-    suspend fun loadModel(modelId: String): XybridModel = withContext(dispatcher) {
-        XybridModel(modelId)
-    }
+    suspend fun loadModel(modelId: String): XybridModel =
+        Xybrid.model(modelId).load()
 
     suspend fun runInference(
         model: XybridModel,
         envelope: XybridEnvelope
-    ): XybridResult = withContext(dispatcher) {
-        model.run(envelope)
-    }
+    ): XybridResult = model.runAsync(envelope)
 }
 ```
 
@@ -72,7 +66,7 @@ fun InferenceScreen() {
     Button(onClick = {
         scope.launch {
             isLoading = true
-            val model = XybridModel.fromRegistryAsync("kokoro-82m")
+            val model = Xybrid.model("kokoro-82m").load()
             result = model.runAsync(Envelope.text("Hello from Compose!"))
             isLoading = false
         }
@@ -93,6 +87,7 @@ The SDK provides short aliases matching the full qualified names:
 
 | Alias | Full Type |
 |-------|-----------|
+| `ModelLoader` | `XybridModelLoader` |
 | `Model` | `XybridModel` |
 | `Result` | `XybridResult` |
 | `VoiceInfo` | `XybridVoiceInfo` |
@@ -103,9 +98,10 @@ The SDK provides short aliases matching the full qualified names:
 (`Envelope.text(...)`, `Envelope.image(...)`, `Envelope.userMessage(...)`) that
 return `XybridEnvelope`.
 
-There is no `ModelLoader` type. Load a model directly with `XybridModel(id)` for
-the registry, or `XybridModel.fromBundle` / `fromDirectory` / `fromHuggingface`.
-A deprecated `XybridModelLoader` shim keeps pre-0.4.0 code compiling and will be
-removed in 0.5.0.
+Use `Xybrid.model(id)` for the registry shorthand, or pass a typed
+`ModelSource.bundle(...)`, `ModelSource.directory(...)`, or
+`ModelSource.huggingFace(...)`. These calls return an unloaded `ModelLoader`;
+call suspending `load()` to perform the work. Java and existing worker-thread
+callers can use the explicitly blocking `loadBlocking()` method.
 
 See the [Android SDK guide](/docs/sdks/android) for the complete API reference.

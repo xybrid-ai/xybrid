@@ -21,6 +21,7 @@ use crate::source::{detect_platform, ModelSource};
 use crate::stream::XybridStream;
 use std::path::PathBuf;
 use std::pin::Pin;
+use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tempfile::TempDir;
@@ -773,7 +774,7 @@ where
                         signal_context,
                     );
                     let total_latency_ms = local_latency_ms.saturating_add(cloud_latency_ms);
-                    Ok(InferenceResult::new(
+                    Ok(InferenceResult::new_cloud(
                         cloud_output,
                         cloud_model_id,
                         total_latency_ms,
@@ -820,6 +821,8 @@ pub struct StreamConfig {
     pub vad_threshold: f32,
     /// Language hint for ASR
     pub language: Option<String>,
+    /// Whisper encoder context override in mel frames; `None` uses the model default
+    pub audio_ctx: Option<u32>,
     /// Path to VAD model (uses default if None)
     pub vad_model_dir: Option<String>,
 }
@@ -830,6 +833,7 @@ impl Default for StreamConfig {
             enable_vad: false,
             vad_threshold: 0.5,
             language: Some("en".to_string()),
+            audio_ctx: None,
             vad_model_dir: None,
         }
     }
@@ -850,6 +854,12 @@ impl StreamConfig {
         self
     }
 
+    /// Override Whisper's encoder context in mel frames.
+    pub fn audio_ctx(mut self, audio_ctx: u32) -> Self {
+        self.audio_ctx = Some(audio_ctx);
+        self
+    }
+
     /// Set VAD threshold.
     pub fn vad_threshold(mut self, threshold: f32) -> Self {
         self.vad_threshold = threshold;
@@ -859,8 +869,11 @@ impl StreamConfig {
 
 /// Internal handle holding the loaded model state.
 struct ModelHandle {
-    /// Template executor for running inference
-    executor: TemplateExecutor,
+    /// Template executor for running inference.
+    ///
+    /// Shared with streaming sessions created by `stream()` so they reuse
+    /// the loaded model instead of paying a fresh cold start.
+    executor: Arc<Mutex<TemplateExecutor>>,
     /// Model metadata
     metadata: ModelMetadata,
     /// Model directory path (permanent extraction in cache)
@@ -1263,8 +1276,13 @@ fn publish_speculative_cloud_event(model_id: &str, latency_ms: u32, streaming: b
     crate::telemetry::publish_telemetry_event(event);
 }
 
-/// Serve a batch inference from the cloud gateway because the local model is
-/// not ready yet. Shared by `run` and `run_async`.
+/// Ceiling for in-flight download progress, in basis points (99.99%).
+///
+/// `fetch_extracted` restarts at 0 for every artifact, so hitting 1.0 on the
+/// first one would announce a finished download while later artifacts are
+/// still transferring. 1.0 is reserved for [`DownloadState::Ready`].
+const MAX_IN_FLIGHT_PROGRESS_BP: u32 = 9_999;
+
 /// Completion signal for the background download started by
 /// [`ModelLoader::load_speculative`].
 ///
@@ -1277,6 +1295,97 @@ fn publish_speculative_cloud_event(model_id: &str, latency_ms: u32, streaming: b
 pub(crate) struct SpeculativeDownload {
     outcome: Mutex<Option<bool>>,
     finished: std::sync::Condvar,
+    /// Download completion in basis points (0..=10_000). `f32` has no atomic,
+    /// and a lock here would sit on the download's hot path.
+    progress_bp: std::sync::atomic::AtomicU32,
+}
+
+/// Lifecycle of the background download behind a speculative model.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DownloadState {
+    /// Weights still downloading; runs are served from the cloud.
+    Downloading,
+    /// Local handle installed; runs are on-device.
+    Ready,
+    /// Download failed — the cloud keeps serving, and `is_loaded()` will never
+    /// flip. Surfacing this is the only way a host can stop waiting.
+    Failed,
+}
+
+/// One consistent read of a speculative download's progress and state.
+///
+/// Taken as a snapshot so a polling host cannot observe a torn pair (for
+/// example `Ready` alongside a stale 0.34 progress).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DownloadStatus {
+    pub state: DownloadState,
+    /// 0.0..=1.0.
+    pub progress: f32,
+}
+
+impl SpeculativeDownload {
+    /// Record download progress (0.0..=1.0) from the fetch callback.
+    ///
+    /// `fetch_extracted` reports 0→1 *per artifact* — the main file, then each
+    /// extra (a VLM's projector, for example) — and never says how many are
+    /// coming. Two consequences are handled here:
+    ///
+    /// - monotonic (`fetch_max`), so a bar cannot snap backwards when the next
+    ///   artifact restarts at 0;
+    /// - capped just below 1.0, so finishing the *first* artifact cannot claim
+    ///   the whole download is done. Only the terminal `Ready` state reports
+    ///   1.0 (see [`Self::status`]).
+    ///
+    /// The result under-reports mid-download rather than lying about being
+    /// finished. True aggregation would need an artifact count the registry
+    /// client does not expose.
+    fn set_progress(&self, fraction: f32) {
+        let bp = (fraction.clamp(0.0, 1.0) * 10_000.0) as u32;
+        self.progress_bp
+            .fetch_max(bp.min(MAX_IN_FLIGHT_PROGRESS_BP), Ordering::Relaxed);
+    }
+
+    /// Snapshot progress + state together.
+    fn status(&self) -> DownloadStatus {
+        let outcome = *self.outcome.lock().unwrap_or_else(|e| e.into_inner());
+        let state = match outcome {
+            None => DownloadState::Downloading,
+            Some(true) => DownloadState::Ready,
+            Some(false) => DownloadState::Failed,
+        };
+        let progress = match state {
+            // A finished download is 1.0 even if the last callback never fired.
+            DownloadState::Ready => 1.0,
+            _ => self.progress_bp.load(Ordering::Relaxed) as f32 / 10_000.0,
+        };
+        DownloadStatus { state, progress }
+    }
+
+    /// Block until the download reaches a terminal state or `timeout` elapses.
+    fn await_terminal(&self, timeout: Duration) -> DownloadStatus {
+        let mut guard = self.outcome.lock().unwrap_or_else(|e| e.into_inner());
+        // `Instant + Duration` panics past the platform's representable range,
+        // and the timeout arrives as an unvalidated `u64` from the bindings (a
+        // negative host-side value wraps to ~u64::MAX through `c_uint64`). Fall
+        // back to waiting without a deadline rather than aborting the process.
+        let deadline = Instant::now().checked_add(timeout);
+        while guard.is_none() {
+            let remaining = match deadline {
+                Some(deadline) => deadline.saturating_duration_since(Instant::now()),
+                None => Duration::from_secs(3600),
+            };
+            if remaining.is_zero() {
+                break;
+            }
+            let (next, _) = self
+                .finished
+                .wait_timeout(guard, remaining)
+                .unwrap_or_else(|e| e.into_inner());
+            guard = next;
+        }
+        drop(guard);
+        self.status()
+    }
 }
 
 impl SpeculativeDownload {
@@ -1316,7 +1425,7 @@ fn cloud_serve_batch(
         .map_err(|e| sdk_execution_error("Speculative cloud execution failed", e))?;
     let latency_ms = start.elapsed().as_millis() as u32;
     publish_speculative_cloud_event(model_id, latency_ms, false);
-    Ok(InferenceResult::new(output, model_id, latency_ms))
+    Ok(InferenceResult::new_cloud(output, model_id, latency_ms))
 }
 
 /// Serve a streaming inference from the cloud gateway because the local model
@@ -1349,7 +1458,7 @@ where
         .map_err(streaming_execution_error)?;
     let latency_ms = start.elapsed().as_millis() as u32;
     publish_speculative_cloud_event(model_id, latency_ms, true);
-    Ok(InferenceResult::new(output, model_id, latency_ms))
+    Ok(InferenceResult::new_cloud(output, model_id, latency_ms))
 }
 
 /// Whether a cloud gateway API key can be resolved right now.
@@ -1852,7 +1961,9 @@ impl ModelLoader {
         let placeholder = ModelHandle {
             // Lazy executor over the not-yet-populated extraction dir; never run
             // while `loaded == false` (runs route to cloud).
-            executor: TemplateExecutor::with_base_path(&model_dir.to_string_lossy()),
+            executor: Arc::new(Mutex::new(TemplateExecutor::with_base_path(
+                &model_dir.to_string_lossy(),
+            ))),
             metadata,
             model_dir,
             loaded: false,
@@ -1872,8 +1983,13 @@ impl ModelLoader {
             .name(thread_name)
             .spawn(move || {
                 let built = RegistryClient::from_env().and_then(|client| {
-                    let dir =
-                        client.fetch_extracted(&id_owned, platform_owned.as_deref(), |_| {})?;
+                    let dir = client.fetch_extracted(
+                        &id_owned,
+                        platform_owned.as_deref(),
+                        // Feed the poll-able progress cell; hosts read it via
+                        // `XybridModel::download_status`.
+                        |fraction| bg_download.set_progress(fraction),
+                    )?;
                     Self::create_model_handle(&dir, backend_override)
                 });
                 match built {
@@ -2275,7 +2391,7 @@ impl ModelLoader {
         let executor = TemplateExecutor::with_base_path(model_dir.to_str().unwrap_or("."));
 
         Ok(ModelHandle {
-            executor,
+            executor: Arc::new(Mutex::new(executor)),
             metadata,
             model_dir: model_dir.clone(),
             loaded: true,
@@ -2498,6 +2614,45 @@ impl XybridModel {
     /// concurrent local promotion.
     fn cloud_serve(&self) -> bool {
         self.speculative.is_some() && !self.is_loaded()
+    }
+
+    /// Whether runs are currently being answered by the cloud because the local
+    /// weights are not ready yet. `false` for ordinary local models.
+    ///
+    /// This is the *pre-run* prediction; [`InferenceResult::provenance`] is the
+    /// observed fact for a run that already happened. They differ when a cloud
+    /// leg fails and degrades to local mid-call.
+    pub fn is_cloud_serving(&self) -> bool {
+        self.cloud_serve()
+    }
+
+    /// Snapshot of the background download behind a speculative load.
+    ///
+    /// Returns `Ready` at 1.0 for an ordinary (already-local) model, so hosts
+    /// can render one code path regardless of how the model was loaded.
+    /// Poll this to drive a progress bar — there is deliberately no progress
+    /// *callback*, so nothing has to cross an FFI boundary as a closure.
+    pub fn download_status(&self) -> DownloadStatus {
+        match self.speculative.as_ref() {
+            Some(download) => download.status(),
+            None => DownloadStatus {
+                state: DownloadState::Ready,
+                progress: 1.0,
+            },
+        }
+    }
+
+    /// Block until the background download finishes or `timeout_ms` elapses,
+    /// then report the resulting status.
+    ///
+    /// Convenience over polling [`Self::download_status`] for hosts that just
+    /// want "tell me when it's on-device". Call it off the UI thread. Returns
+    /// immediately for a non-speculative model.
+    pub fn await_download(&self, timeout_ms: u64) -> DownloadStatus {
+        match self.speculative.as_ref() {
+            Some(download) => download.await_terminal(Duration::from_millis(timeout_ms)),
+            None => self.download_status(),
+        }
     }
 
     /// Block until the speculative download finishes, reporting whether a local
@@ -2811,13 +2966,15 @@ impl XybridModel {
             crate::telemetry::TelemetryPipelineContextGuard::install(None, Some(trace_id));
 
         let event_fields = {
-            let mut handle = self.handle.write().unwrap_or_else(|e| e.into_inner());
+            let handle = self.handle.write().unwrap_or_else(|e| e.into_inner());
             if !handle.loaded {
                 return Err(SdkError::NotLoaded);
             }
             let metadata = handle.metadata.clone();
             handle
                 .executor
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
                 .execute(&metadata, &warmup_input, None)
                 .map_err(|e| SdkError::inference_src("Warmup execution failed", e))?;
 
@@ -2912,7 +3069,7 @@ impl XybridModel {
             // path published nothing at all, so async warmups were
             // silent on the wire (visible only via logs).
             let event_fields = {
-                let mut guard = handle.write().unwrap_or_else(|e| e.into_inner());
+                let guard = handle.write().unwrap_or_else(|e| e.into_inner());
                 if !guard.loaded {
                     return Err(SdkError::NotLoaded);
                 }
@@ -2920,6 +3077,8 @@ impl XybridModel {
                 let metadata = guard.metadata.clone();
                 guard
                     .executor
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
                     .execute(&metadata, &warmup_input, None)
                     .map_err(|e| SdkError::inference_src("Warmup failed", e))?;
 
@@ -3019,7 +3178,7 @@ impl XybridModel {
             crate::telemetry::TelemetryPipelineContextGuard::install(None, Some(trace_id));
 
         // Recover from poisoned RwLock to prevent permanent lock errors
-        let mut handle = self.handle.write().unwrap_or_else(|e| e.into_inner());
+        let handle = self.handle.write().unwrap_or_else(|e| e.into_inner());
 
         if !handle.loaded {
             return Err(SdkError::NotLoaded);
@@ -3029,6 +3188,8 @@ impl XybridModel {
         let metadata = handle.metadata.clone();
         let output = handle
             .executor
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
             .execute(&metadata, envelope, config)
             .map_err(|e| sdk_execution_error("Execution failed", e))?;
 
@@ -3085,7 +3246,7 @@ impl XybridModel {
         let _telemetry_ctx =
             crate::telemetry::TelemetryPipelineContextGuard::install(None, Some(trace_id));
 
-        let mut handle = self.handle.write().unwrap_or_else(|e| e.into_inner());
+        let handle = self.handle.write().unwrap_or_else(|e| e.into_inner());
         if !handle.loaded {
             return Err(SdkError::NotLoaded);
         }
@@ -3106,6 +3267,8 @@ impl XybridModel {
 
         handle
             .executor
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
             .execute_tts_streaming(&metadata, envelope, &mut adapter)
             .map_err(|e| sdk_execution_error("TTS streaming failed", e))?;
 
@@ -3221,7 +3384,7 @@ impl XybridModel {
             crate::telemetry::TelemetryPipelineContextGuard::install(None, Some(trace_id));
 
         // Recover from poisoned RwLock to prevent permanent lock errors
-        let mut handle = self.handle.write().unwrap_or_else(|e| e.into_inner());
+        let handle = self.handle.write().unwrap_or_else(|e| e.into_inner());
 
         if !handle.loaded {
             return Err(SdkError::NotLoaded);
@@ -3231,6 +3394,8 @@ impl XybridModel {
         let metadata = handle.metadata.clone();
         let output = handle
             .executor
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
             .execute_with_context(&metadata, envelope, context, config)
             .map_err(|e| sdk_execution_error("Execution failed", e))?;
 
@@ -3374,7 +3539,7 @@ impl XybridModel {
             crate::telemetry::TelemetryPipelineContextGuard::install(None, Some(trace_id));
 
         // Get write lock on handle
-        let mut handle = self.handle.write().unwrap_or_else(|e| e.into_inner());
+        let handle = self.handle.write().unwrap_or_else(|e| e.into_inner());
 
         if !handle.loaded {
             return Err(SdkError::NotLoaded);
@@ -3389,6 +3554,8 @@ impl XybridModel {
             // True streaming with context for LLM models
             handle
                 .executor
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
                 .execute_streaming_with_context(
                     &metadata,
                     envelope,
@@ -3401,6 +3568,8 @@ impl XybridModel {
             // For non-LLM models: run with context and emit single "token" with full result
             let result = handle
                 .executor
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
                 .execute_with_context(&metadata, envelope, context, config)
                 .map_err(|e| sdk_execution_error("Execution failed", e))?;
 
@@ -3582,7 +3751,7 @@ impl XybridModel {
             crate::telemetry::TelemetryPipelineContextGuard::install(None, Some(trace_id));
 
         // Get write lock on handle
-        let mut handle = self.handle.write().unwrap_or_else(|e| e.into_inner());
+        let handle = self.handle.write().unwrap_or_else(|e| e.into_inner());
 
         if !handle.loaded {
             return Err(SdkError::NotLoaded);
@@ -3597,12 +3766,16 @@ impl XybridModel {
             // True streaming for LLM models
             handle
                 .executor
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
                 .execute_streaming(&metadata, envelope, Box::new(&mut on_token), config)
                 .map_err(streaming_execution_error)?
         } else {
             // For non-LLM models: run batch and emit single "token" with full result
             let result = handle
                 .executor
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
                 .execute(&metadata, envelope, config)
                 .map_err(|e| sdk_execution_error("Execution failed", e))?;
 
@@ -4014,7 +4187,7 @@ impl XybridModel {
                 }
 
                 // Get write lock on handle
-                let mut guard = handle.write().unwrap_or_else(|e| e.into_inner());
+                let guard = handle.write().unwrap_or_else(|e| e.into_inner());
 
                 if !guard.loaded {
                     return Err(SdkError::NotLoaded);
@@ -4030,6 +4203,8 @@ impl XybridModel {
                     // True streaming for LLM models
                     guard
                         .executor
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
                         .execute_streaming(
                             &metadata,
                             &envelope,
@@ -4053,6 +4228,8 @@ impl XybridModel {
                     // Non-LLM: batch execution, emit single token
                     let result = guard
                         .executor
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
                         .execute(&metadata, &envelope, config.as_ref())
                         .map_err(|e| sdk_execution_error("Execution failed", e))?;
 
@@ -4175,7 +4352,7 @@ impl XybridModel {
                 crate::telemetry::TelemetryPipelineContextGuard::install(None, Some(trace_id));
 
             // Recover from poisoned RwLock to prevent permanent lock errors
-            let mut guard = handle.write().unwrap_or_else(|e| e.into_inner());
+            let guard = handle.write().unwrap_or_else(|e| e.into_inner());
 
             if !guard.loaded {
                 return Err(SdkError::NotLoaded);
@@ -4185,6 +4362,8 @@ impl XybridModel {
             let metadata = guard.metadata.clone();
             let output = guard
                 .executor
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
                 .execute(&metadata, &envelope, config.as_ref())
                 .map_err(|e| sdk_execution_error("Execution failed", e))?;
 
@@ -4266,10 +4445,19 @@ impl XybridModel {
                 ..Default::default()
             },
             language: config.language,
+            audio_ctx: config.audio_ctx,
             ..Default::default()
         };
 
-        XybridStream::new(&handle.model_dir, core_config, &self.model_id)
+        // Hand the stream this model's executor: the session reuses the
+        // loaded weights (no per-session cold start), and stream inference
+        // serializes with direct `run` calls on the executor mutex.
+        XybridStream::new(
+            &handle.model_dir,
+            core_config,
+            &self.model_id,
+            Arc::clone(&handle.executor),
+        )
     }
 
     /// Unload the model from memory.
@@ -4281,7 +4469,7 @@ impl XybridModel {
 
         handle.loaded = false;
         // Clear the session cache (drop executor and recreate empty)
-        handle.executor = TemplateExecutor::default();
+        handle.executor = Arc::new(Mutex::new(TemplateExecutor::default()));
 
         Ok(())
     }
@@ -4730,7 +4918,7 @@ mod tests {
     fn cloud_serve_engages_only_while_not_loaded() {
         let speculating = XybridModel {
             handle: Arc::new(RwLock::new(ModelHandle {
-                executor: TemplateExecutor::default(),
+                executor: Arc::new(Mutex::new(TemplateExecutor::default())),
                 metadata: ModelMetadata::onnx("spec-model", "", ""),
                 model_dir: PathBuf::from("."),
                 loaded: false,
@@ -4771,7 +4959,7 @@ mod tests {
         };
         let speculating = XybridModel {
             handle: Arc::new(RwLock::new(ModelHandle {
-                executor: TemplateExecutor::default(),
+                executor: Arc::new(Mutex::new(TemplateExecutor::default())),
                 metadata: ModelMetadata::onnx("spec-model", "", ""),
                 model_dir: PathBuf::from("."),
                 loaded: false,
@@ -4824,7 +5012,7 @@ mod tests {
         let download = Arc::new(SpeculativeDownload::default());
         let model = XybridModel {
             handle: Arc::new(RwLock::new(ModelHandle {
-                executor: TemplateExecutor::default(),
+                executor: Arc::new(Mutex::new(TemplateExecutor::default())),
                 metadata: ModelMetadata::onnx("spec-model", "", ""),
                 model_dir: PathBuf::from("."),
                 loaded: false,
@@ -4862,6 +5050,94 @@ mod tests {
         let download = SpeculativeDownload::default();
         download.finish(false);
         assert!(!download.wait_for_local());
+    }
+
+    /// Hosts poll `download_status` to drive a progress bar, so progress and
+    /// state must move together and never report a torn pair.
+    #[test]
+    fn download_status_tracks_progress_then_terminal_state() {
+        let download = SpeculativeDownload::default();
+        assert_eq!(download.status().state, DownloadState::Downloading);
+        assert_eq!(download.status().progress, 0.0);
+
+        download.set_progress(0.42);
+        let mid = download.status();
+        assert_eq!(mid.state, DownloadState::Downloading);
+        assert!((mid.progress - 0.42).abs() < 1e-3, "got {}", mid.progress);
+
+        // Out-of-range input from a backend is clamped, not wrapped — and a
+        // still-running download never claims 1.0, because `fetch_extracted`
+        // reports 1.0 per artifact and more may follow.
+        download.set_progress(1.7);
+        let capped = download.status();
+        assert_eq!(capped.state, DownloadState::Downloading);
+        assert!(
+            capped.progress < 1.0,
+            "in-flight progress must stay below 1.0, got {}",
+            capped.progress
+        );
+
+        // Monotonic: a later artifact restarting at 0 cannot rewind the bar.
+        download.set_progress(0.0);
+        assert_eq!(download.status().progress, capped.progress);
+
+        // A finished download reads 1.0 even if the last callback never fired.
+        let ready = SpeculativeDownload::default();
+        ready.set_progress(0.9);
+        ready.finish(true);
+        let done = ready.status();
+        assert_eq!(done.state, DownloadState::Ready);
+        assert_eq!(done.progress, 1.0);
+
+        // Failure is visible: the host must be able to stop waiting.
+        let failed = SpeculativeDownload::default();
+        failed.finish(false);
+        assert_eq!(failed.status().state, DownloadState::Failed);
+    }
+
+    /// `await_download` must return on timeout rather than parking the caller
+    /// when the download is still running.
+    #[test]
+    fn await_download_times_out_while_downloading() {
+        let download = SpeculativeDownload::default();
+        let status = download.await_terminal(Duration::from_millis(20));
+        assert_eq!(status.state, DownloadState::Downloading);
+    }
+
+    /// A plain local model has no download, but hosts should still get one
+    /// uniform "ready" answer instead of having to special-case it.
+    #[test]
+    fn non_speculative_model_reports_ready_download() {
+        let model = test_loaded_model(true);
+        let status = model.download_status();
+        assert_eq!(status.state, DownloadState::Ready);
+        assert_eq!(status.progress, 1.0);
+        assert!(!model.is_cloud_serving());
+    }
+
+    /// Provenance is the only way to tell the legs apart: cloud fallback keeps
+    /// `model_id` identical by design.
+    #[test]
+    fn result_provenance_distinguishes_cloud_from_local() {
+        use crate::ExecutionProvenance;
+
+        let local = InferenceResult::new(text_envelope("hi"), "lfm2.5-350m", 10);
+        let cloud = InferenceResult::new_cloud(text_envelope("hi"), "lfm2.5-350m", 10);
+
+        assert_eq!(local.provenance(), ExecutionProvenance::Local);
+        assert_eq!(cloud.provenance(), ExecutionProvenance::Cloud);
+        assert_eq!(local.model_id(), cloud.model_id(), "same model both legs");
+
+        // Also stamped on the envelope so FFI hosts see it without a typed
+        // accessor.
+        assert_eq!(
+            cloud.metadata("execution_target").map(String::as_str),
+            Some("cloud")
+        );
+        assert_eq!(
+            local.metadata("execution_target").map(String::as_str),
+            Some("local")
+        );
     }
 
     /// The inherent `SdkError::is_retryable` / `retry_after` accessors and
@@ -5532,13 +5808,18 @@ mod tests {
         let config = StreamConfig::default();
         assert!(!config.enable_vad);
         assert_eq!(config.language, Some("en".to_string()));
+        assert_eq!(config.audio_ctx, None);
     }
 
     #[test]
     fn test_stream_config_with_vad() {
-        let config = StreamConfig::with_vad().language("fr").vad_threshold(0.7);
+        let config = StreamConfig::with_vad()
+            .language("fr")
+            .audio_ctx(500)
+            .vad_threshold(0.7);
         assert!(config.enable_vad);
         assert_eq!(config.language, Some("fr".to_string()));
+        assert_eq!(config.audio_ctx, Some(500));
         assert_eq!(config.vad_threshold, 0.7);
     }
 
@@ -5853,7 +6134,7 @@ mod tests {
     fn test_loaded_model_with_metadata(metadata: ModelMetadata) -> XybridModel {
         XybridModel {
             handle: Arc::new(RwLock::new(ModelHandle {
-                executor: TemplateExecutor::default(),
+                executor: Arc::new(Mutex::new(TemplateExecutor::default())),
                 metadata,
                 model_dir: PathBuf::from("."),
                 loaded: true,
@@ -5898,7 +6179,7 @@ mod tests {
         }
         XybridModel {
             handle: Arc::new(RwLock::new(ModelHandle {
-                executor: TemplateExecutor::default(),
+                executor: Arc::new(Mutex::new(TemplateExecutor::default())),
                 metadata,
                 model_dir: PathBuf::from("."),
                 loaded: true,
@@ -5918,7 +6199,7 @@ mod tests {
         let version = metadata.version.clone();
         XybridModel {
             handle: Arc::new(RwLock::new(ModelHandle {
-                executor: TemplateExecutor::default(),
+                executor: Arc::new(Mutex::new(TemplateExecutor::default())),
                 metadata,
                 model_dir: PathBuf::from("."),
                 loaded: true,
@@ -6709,7 +6990,7 @@ mod tests {
         executor.register_runtime("onnx", runtime);
         XybridModel {
             handle: Arc::new(RwLock::new(ModelHandle {
-                executor,
+                executor: Arc::new(Mutex::new(executor)),
                 metadata,
                 model_dir: PathBuf::from("."),
                 loaded: true,

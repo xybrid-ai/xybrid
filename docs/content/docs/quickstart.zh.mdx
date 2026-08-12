@@ -12,7 +12,7 @@ description: 几分钟内开始使用 Xybrid
 ```yaml
 # pubspec.yaml
 dependencies:
-  xybrid_flutter: ^0.3.0
+  xybrid_flutter: ^0.5.0
 ```
 
 ```bash
@@ -54,7 +54,7 @@ https://github.com/xybrid-ai/xybrid
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/xybrid-ai/xybrid", from: "0.3.0")
+    .package(url: "https://github.com/xybrid-ai/xybrid", from: "0.5.0")
 ]
 ```
 
@@ -67,13 +67,12 @@ import Xybrid
 // 推理轨迹：Xybrid.initialize(apiKey: "...")
 Xybrid.initialize()
 
-// 从注册表加载模型
-let loader = XybridModelLoader.fromRegistry(modelId: "kokoro-82m")
-let model = try loader.load()
+// 先描述模型来源，再显式加载
+let model = try await Xybrid.model("kokoro-82m").load()
 
 // 运行文本转语音
 let envelope = XybridEnvelope.text(text: "Hello from Xybrid!")
-let result = try model.run(envelope: envelope)
+let result = try await model.runAsync(envelope: envelope)
 
 // result.audioBytes 包含生成的语音音频
 ```
@@ -86,27 +85,25 @@ let result = try model.run(envelope: envelope)
 ```kotlin
 // build.gradle.kts
 dependencies {
-    implementation("ai.xybrid:xybrid-kotlin:0.3.0")
+    implementation("ai.xybrid:xybrid-kotlin:0.5.0")
 }
 ```
 
 **运行推理**
 
 ```kotlin
-import ai.xybrid.XybridModelLoader
-import ai.xybrid.XybridEnvelope
+import ai.xybrid.*
 
 // 默认即可本地运行。在 dashboard.xybrid.dev 免费获取密钥即可查看
 // 推理轨迹：Xybrid.init(context, apiKey = "...")
 Xybrid.init(context)
 
-// 从注册表加载模型
-val loader = XybridModelLoader.fromRegistry("kokoro-82m")
-val model = loader.load()
+// 先描述模型来源，再显式加载
+val model = Xybrid.model("kokoro-82m").load()
 
 // 运行文本转语音
 val envelope = XybridEnvelope.Text(text = "Hello from Xybrid!")
-val result = model.run(envelope)
+val result = model.runAsync(envelope)
 
 // result.audioBytes 包含生成的语音音频
 ```
@@ -122,7 +119,7 @@ val result = model.run(envelope)
 https://github.com/xybrid-ai/xybrid.git?path=/bindings/unity
 ```
 
-或通过 [OpenUPM](https://openupm.com/packages/ai.xybrid.sdk/) 安装：`openupm add ai.xybrid.sdk`。原生库在首次导入时自动下载（经 SHA-256 校验）；如需固定版本，在 git URL 后追加 `#v0.3.0`。
+或通过 [OpenUPM](https://openupm.com/packages/ai.xybrid.sdk/) 安装：`openupm add ai.xybrid.sdk`。原生库在首次导入时自动下载（经 SHA-256 校验）；如需固定版本，在 git URL 后追加 `#v0.5.0`。
 
 **运行推理**
 
@@ -193,7 +190,7 @@ const llm = await XybridLlm.fromHuggingFace("litert-community/SmolLM2-135M-Instr
 ```toml
 # Cargo.toml
 [dependencies]
-xybrid = "0.3.0"
+xybrid = "0.5.0"
 ```
 
 **运行推理**
@@ -244,7 +241,7 @@ xybrid models list
 xybrid run --model kokoro-82m --input-text "Hello from Xybrid!" --output hello.wav
 
 # 运行语音转文字
-xybrid run --model whisper-tiny --input-audio recording.wav
+xybrid run --model whisper-tiny-ggml --input-audio recording.wav
 ```
 
 **预期输出：**

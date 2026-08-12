@@ -99,6 +99,41 @@ pub enum ExecutionTemplate {
         generation_params: Option<GenerationParams>,
     },
 
+    /// GGML-format Whisper speech recognition, executed by whisper.cpp on the
+    /// same ggml the local LLM backend already links.
+    ///
+    /// Distinct from [`ExecutionTemplate::SafeTensors`] with
+    /// `architecture: "whisper"`, which routes to the pure-Rust Candle
+    /// implementation. Both transcribe; they differ in weight format (GGML
+    /// quantized vs F32 safetensors) and therefore in cost, which is the whole
+    /// reason this variant exists.
+    GgmlWhisper {
+        /// Path to the GGML model file (relative to bundle root), e.g.
+        /// `ggml-base.en-q5_1.bin`.
+        model_file: String,
+
+        /// Language code to force (e.g. `"en"`). Absent means auto-detect.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        language: Option<String>,
+
+        /// Encoder context in mel frames, where 1500 covers the full 30 s
+        /// window. `0` (the default) means no truncation.
+        ///
+        /// Truncating is the largest single speed lever for live streaming,
+        /// but truncating too far makes the decoder emit repetition loops.
+        /// Measured on a Pixel 8 with `tiny.en` Q5_1: 500 is safe for a 5 s
+        /// window and 2.8x faster than full context; 250 degenerates. So a
+        /// model opts in here after its own quality check rather than
+        /// inheriting a fast-but-fragile default.
+        #[serde(default)]
+        audio_ctx: u32,
+
+        /// Translate into English instead of transcribing in the source
+        /// language.
+        #[serde(default)]
+        translate: bool,
+    },
+
     /// Vision-language model execution for image+text LLM inputs.
     VisionLanguage {
         /// Path to the language model file (usually GGUF) relative to bundle root.
@@ -761,13 +796,21 @@ pub fn backend_label_from_template(
         // names a backend that cannot execute GGUF artifacts.
         // Unannotated bundles in the registry then surface `llamacpp`
         // on the dashboard instead of a blank column.
-        ExecutionTemplate::Gguf { .. } | ExecutionTemplate::VisionLanguage { .. } => {
-            match hint.and_then(normalize_llm_backend_hint) {
-                Some("mistralrs") => Some("mistralrs"),
-                Some("llamacpp") | Some("mlx") | None => Some("llamacpp"),
-                Some(_) => Some("llamacpp"),
-            }
-        }
+        // An `mlx` hint on a GGUF/VLM bundle cannot be executed by MLX
+        // (MLX runs SafeTensors only) — the llama.cpp default runs it, so
+        // label what actually executes.
+        ExecutionTemplate::Gguf { .. } => hint
+            .and_then(normalize_llm_backend_hint)
+            .filter(|hint| *hint != "mlx")
+            .or(Some("llamacpp")),
+        ExecutionTemplate::VisionLanguage { .. } => hint
+            .and_then(normalize_llm_backend_hint)
+            .filter(|hint| *hint != "mlx")
+            .or(Some("llamacpp")),
+        // The template fixes the runtime — there is no alternative whisper.cpp
+        // engine to hint at — so this is reported unconditionally rather than
+        // deferring to the hint like the GGUF arms above.
+        ExecutionTemplate::GgmlWhisper { .. } => Some("whispercpp"),
         ExecutionTemplate::CoreMl { .. }
         | ExecutionTemplate::TfLite { .. }
         | ExecutionTemplate::LiteRtLm { .. }
@@ -899,6 +942,26 @@ pub fn span_kind_from_template(template: &ExecutionTemplate) -> &'static str {
                 "cpu"
             }
         }
+        ExecutionTemplate::GgmlWhisper { .. } => {
+            // The safe wrapper requests Metal only on Apple-silicon macOS.
+            // Keep the outer span aligned with that platform default.
+            #[cfg(all(
+                feature = "asr-whispercpp",
+                target_os = "macos",
+                target_arch = "aarch64"
+            ))]
+            {
+                "gpu"
+            }
+            #[cfg(not(all(
+                feature = "asr-whispercpp",
+                target_os = "macos",
+                target_arch = "aarch64"
+            )))]
+            {
+                "cpu"
+            }
+        }
         ExecutionTemplate::Onnx { .. }
         | ExecutionTemplate::TfLite { .. }
         | ExecutionTemplate::LiteRtLm { .. }
@@ -913,6 +976,35 @@ pub fn span_kind_from_template(template: &ExecutionTemplate) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn ggml_whisper_template() -> ExecutionTemplate {
+        ExecutionTemplate::GgmlWhisper {
+            model_file: "ggml-tiny-q5_1.bin".into(),
+            language: None,
+            audio_ctx: 0,
+            translate: false,
+        }
+    }
+
+    #[cfg(all(
+        feature = "asr-whispercpp",
+        target_os = "macos",
+        target_arch = "aarch64"
+    ))]
+    #[test]
+    fn ggml_whisper_uses_gpu_span_on_apple_silicon_macos() {
+        assert_eq!(span_kind_from_template(&ggml_whisper_template()), "gpu");
+    }
+
+    #[cfg(not(all(
+        feature = "asr-whispercpp",
+        target_os = "macos",
+        target_arch = "aarch64"
+    )))]
+    #[test]
+    fn ggml_whisper_uses_cpu_span_without_macos_metal() {
+        assert_eq!(span_kind_from_template(&ggml_whisper_template()), "cpu");
+    }
 
     #[test]
     fn test_onnx_serialization() {

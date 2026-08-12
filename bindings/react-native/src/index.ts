@@ -1,5 +1,6 @@
 import NativeXybrid from './NativeXybrid';
 import type {
+  DownloadStatus,
   Envelope,
   GenerationConfig,
   InferenceResult,
@@ -14,8 +15,11 @@ import type {
 export type {
   AbortSignalKind,
   AudioEnvelope,
+  DownloadState,
+  DownloadStatus,
   EmbeddingEnvelope,
   Envelope,
+  ExecutionTarget,
   GenerationConfig,
   InferenceResult,
   ModelHandle,
@@ -132,6 +136,30 @@ export const Xybrid = {
   clearThermalState(): Promise<void> {
     return NativeXybrid.clearThermalState();
   },
+
+  /**
+   * Point the cloud gateway at a platform base URL (staging, self-hosted).
+   * Pass a bare base URL — the `/v1` suffix is applied internally.
+   */
+  setPlatformUrl(url: string): Promise<void> {
+    return NativeXybrid.setPlatformUrl(url);
+  },
+
+  /**
+   * Enable speculative cloud fallback globally: a registry model that isn't
+   * downloaded yet is served from the gateway while the weights download.
+   *
+   * Only takes effect when an API key resolves. Speculation is LLM/chat only —
+   * prefer {@link ModelLoader.fromRegistrySpeculative} when the app also loads
+   * ASR/TTS models, which cannot be served this way.
+   */
+  setSpeculativeCloud(enabled: boolean): Promise<void> {
+    return NativeXybrid.setSpeculativeCloud(enabled);
+  },
+
+  isSpeculativeCloudEnabled(): Promise<boolean> {
+    return NativeXybrid.isSpeculativeCloudEnabled();
+  },
 };
 
 export class ModelLoader {
@@ -139,6 +167,23 @@ export class ModelLoader {
 
   static fromRegistry(modelId: string): ModelLoader {
     return new ModelLoader(() => NativeXybrid.loadFromRegistry(modelId));
+  }
+
+  /**
+   * Serve from the cloud gateway while the registry weights download in the
+   * background, instead of blocking on the download.
+   *
+   * `load()` then resolves almost immediately with a cloud-backed model that
+   * switches to on-device by itself once the download lands. Requires a
+   * resolvable API key and an uncached model — otherwise this behaves exactly
+   * like {@link fromRegistry}. Poll {@link Model.downloadStatus} for progress
+   * and {@link Model.isCloudServing} to know which leg is answering.
+   * LLM/chat models only.
+   */
+  static fromRegistrySpeculative(modelId: string): ModelLoader {
+    return new ModelLoader(() =>
+      NativeXybrid.loadFromRegistrySpeculative(modelId),
+    );
   }
 
   static fromBundle(path: string): ModelLoader {
@@ -281,6 +326,39 @@ export class Model {
    */
   unload(): Promise<void> {
     return NativeXybrid.unload(this.handle);
+  }
+
+  /**
+   * Whether runs are currently answered by the cloud because the local weights
+   * are not ready yet. `false` for ordinary local models.
+   *
+   * This predicts the *next* run; {@link InferenceResult.executionTarget}
+   * reports what a run that already happened actually did. They differ when a
+   * cloud leg fails and degrades to local mid-call.
+   */
+  isCloudServing(): Promise<boolean> {
+    return NativeXybrid.isCloudServing(this.handle);
+  }
+
+  /**
+   * Download progress and state in one consistent read. Reports `ready` at 1.0
+   * for an ordinary local model, so the UI needs no special case.
+   */
+  async downloadStatus(): Promise<DownloadStatus> {
+    return (await NativeXybrid.downloadStatus(this.handle)) as DownloadStatus;
+  }
+
+  /**
+   * Block until the download settles or `timeoutMs` elapses, then report it.
+   *
+   * The blocking wait happens natively, so a host can `await` this once
+   * instead of driving a JS timer. Pass `0` for a non-blocking read.
+   */
+  async awaitDownload(timeoutMs: number): Promise<DownloadStatus> {
+    return (await NativeXybrid.awaitDownload(
+      this.handle,
+      timeoutMs,
+    )) as DownloadStatus;
   }
 
   async voices(): Promise<VoiceInfo[] | null> {

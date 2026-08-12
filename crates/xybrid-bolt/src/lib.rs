@@ -34,6 +34,10 @@
 //!   binding needs at startup.
 //! - **`XybridModel`**: load / run / pull-stream / conversation-context runs /
 //!   warmup / voice surface.
+//! - **Tool calling**: `XybridToolDefinition` on the generation config,
+//!   `XybridToolCall` on the result, and `tool_results_envelope` for the
+//!   continuation turn. One `run` is one model turn — the loop lives in the
+//!   caller's code, not behind a cross-boundary callback.
 //! - **`XybridConversationContext`**: opaque handle (new / with_id / push /
 //!   set_system / clear / id) feeding `run_with_context` and
 //!   `run_stream_with_context`.
@@ -291,6 +295,98 @@ impl From<XybridMessageRole> for facade::MessageRole {
 }
 
 // ============================================================================
+// Tool calling
+// ============================================================================
+
+/// A tool (function) the model may ask to call.
+///
+/// `parameters_json` is the JSON Schema for the arguments, carried as a JSON
+/// string because no binding generator can describe an arbitrary JSON tree.
+#[data]
+#[derive(Clone)]
+pub struct XybridToolDefinition {
+    pub name: String,
+    pub description: String,
+    pub parameters_json: String,
+}
+
+impl From<XybridToolDefinition> for facade::ToolDefinition {
+    fn from(t: XybridToolDefinition) -> Self {
+        Self {
+            name: t.name,
+            description: t.description,
+            parameters_json: t.parameters_json,
+        }
+    }
+}
+
+/// One tool call the model emitted, from [`XybridResult::tool_calls`].
+#[data]
+#[derive(Clone)]
+pub struct XybridToolCall {
+    pub id: String,
+    pub name: String,
+    pub arguments_json: String,
+}
+
+impl From<facade::ToolCall> for XybridToolCall {
+    fn from(c: facade::ToolCall) -> Self {
+        Self {
+            id: c.id,
+            name: c.name,
+            arguments_json: c.arguments_json,
+        }
+    }
+}
+
+/// The outcome of running one tool, fed back with [`tool_results_envelope`].
+#[data]
+#[derive(Clone)]
+pub struct XybridToolResult {
+    /// The [`XybridToolCall::id`] this answers.
+    pub call_id: String,
+    pub name: String,
+    /// The tool's output as a JSON string.
+    pub content_json: String,
+}
+
+impl From<XybridToolResult> for facade::ToolResult {
+    fn from(r: XybridToolResult) -> Self {
+        Self {
+            call_id: r.call_id,
+            name: r.name,
+            content_json: r.content_json,
+        }
+    }
+}
+
+/// Build the continuation envelope for the turn after the model asked for
+/// tools.
+///
+/// One `run` is one model turn, so the loop lives in your code: run a
+/// tools-bearing request, execute every [`XybridToolCall`] it returns, then
+/// run this envelope to feed the outcomes back. Pass the same tools on the
+/// continuation's [`XybridGenerationConfig`] as on the original turn.
+///
+/// A free function rather than a constructor because `XybridEnvelope` is a
+/// `#[data]` record, not a handle type — records carry no methods across the
+/// generated bindings.
+#[export]
+pub fn tool_results_envelope(
+    user_text: String,
+    prior_assistant_text: String,
+    results: Vec<XybridToolResult>,
+) -> Result<XybridEnvelope, XybridError> {
+    facade::Envelope::tool_results(
+        user_text,
+        prior_assistant_text,
+        results.into_iter().map(Into::into).collect(),
+    )
+    .map(Into::into)
+    .map_err(XybridError::from)
+}
+
+// ============================================================================
 // Generation + Run options
 // ============================================================================
 
@@ -309,6 +405,14 @@ pub struct XybridGenerationConfig {
     /// [`json_schema_to_gbnf`], or pass raw GBNF. Appended last: `#[data]`
     /// PODs serialize by field order across the FFI boundary.
     pub grammar: Option<String>,
+    /// Tools the model may call this turn. Empty means no tool calling —
+    /// existing behavior, unchanged. Appended after `grammar` for the same
+    /// field-order reason.
+    ///
+    /// Tool calling is llama.cpp-only today; unsupported paths (no embedded
+    /// chat template, the mistralrs backend, the cloud fallback leg) reject
+    /// tool-bearing requests rather than quietly generating without them.
+    pub tools: Vec<XybridToolDefinition>,
 }
 
 impl From<XybridGenerationConfig> for facade::GenerationConfig {
@@ -322,6 +426,7 @@ impl From<XybridGenerationConfig> for facade::GenerationConfig {
             repetition_penalty: c.repetition_penalty,
             stop_sequences: c.stop_sequences,
             grammar: c.grammar,
+            tools: c.tools.into_iter().map(Into::into).collect(),
         }
     }
 }
@@ -454,7 +559,64 @@ pub struct XybridResult {
     pub output_type: XybridOutputType,
     pub model_id: String,
     pub latency_ms: u32,
+    /// Where the answer actually came from. Cloud fallback keeps `model_id`
+    /// identical on both legs, so this is the only way to tell them apart.
+    pub execution_target: XybridExecutionTarget,
     pub metrics: XybridInferenceMetrics,
+    /// Tool calls the model emitted this turn. Empty unless the request
+    /// offered tools via [`XybridGenerationConfig::tools`]. Appended last:
+    /// `#[data]` PODs serialize by field order across the FFI boundary.
+    pub tool_calls: Vec<XybridToolCall>,
+}
+
+/// Where a result was produced — observed fact, not a routing preference.
+#[data]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum XybridExecutionTarget {
+    Local,
+    Cloud,
+}
+
+impl From<facade::ExecutionTarget> for XybridExecutionTarget {
+    fn from(target: facade::ExecutionTarget) -> Self {
+        match target {
+            facade::ExecutionTarget::Local => Self::Local,
+            facade::ExecutionTarget::Cloud => Self::Cloud,
+        }
+    }
+}
+
+/// Lifecycle of the background download behind a speculative load.
+#[data]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum XybridDownloadState {
+    Downloading,
+    Ready,
+    /// Download failed; the cloud keeps serving and `isLoaded` never flips.
+    Failed,
+}
+
+/// Download progress + state in one consistent read.
+#[data]
+#[derive(Clone, Debug, PartialEq)]
+pub struct XybridDownloadStatus {
+    pub state: XybridDownloadState,
+    /// 0.0..=1.0.
+    pub progress: f32,
+}
+
+impl From<facade::DownloadStatus> for XybridDownloadStatus {
+    fn from(status: facade::DownloadStatus) -> Self {
+        let state = match status.state {
+            facade::DownloadState::Downloading => XybridDownloadState::Downloading,
+            facade::DownloadState::Ready => XybridDownloadState::Ready,
+            facade::DownloadState::Failed => XybridDownloadState::Failed,
+        };
+        Self {
+            state,
+            progress: status.progress,
+        }
+    }
 }
 
 impl From<facade::InferenceResult> for XybridResult {
@@ -465,7 +627,9 @@ impl From<facade::InferenceResult> for XybridResult {
             output_type: r.output_type.into(),
             model_id: r.model_id,
             latency_ms: r.latency_ms,
+            execution_target: r.execution_target.into(),
             metrics,
+            tool_calls: r.tool_calls.into_iter().map(Into::into).collect(),
         }
     }
 }
@@ -610,6 +774,34 @@ pub fn clear_battery_level() {
 // Process-global init
 // ============================================================================
 
+/// Initialize the platform-native `log` backend exactly once per process.
+///
+/// Mirrors the Flutter binding's `ensure_native_logging` (see
+/// `bindings/flutter/rust/src/api/mod.rs`): without a registered logger every
+/// `log::warn!` in the SDK — telemetry send failures and registry failovers
+/// in particular — is silently discarded on device. Called from the
+/// process-global init entry points the Swift/Kotlin wrappers hit during
+/// `Xybrid.initialize` / `Xybrid.init`. No-op on desktop targets, where the
+/// host process owns logger setup.
+fn ensure_native_logging() {
+    static LOGGING_INIT: std::sync::Once = std::sync::Once::new();
+    LOGGING_INIT.call_once(|| {
+        #[cfg(target_os = "android")]
+        android_logger::init_once(
+            android_logger::Config::default()
+                .with_max_level(log::LevelFilter::Info)
+                .with_tag("xybrid"),
+        );
+        #[cfg(target_os = "ios")]
+        {
+            // Errors only if a logger is already registered — fine to ignore.
+            let _ = oslog::OsLogger::new("dev.xybrid.sdk")
+                .level_filter(log::LevelFilter::Info)
+                .init();
+        }
+    });
+}
+
 /// One-stop SDK initialization: API key + gateway/ingest URL overrides in
 /// one call. Delegates to [`facade::configure_runtime`]; blank strings are
 /// treated as absent. This is the canonical init the Swift
@@ -621,11 +813,13 @@ pub fn configure_runtime(
     gateway_url: Option<String>,
     ingest_url: Option<String>,
 ) {
+    ensure_native_logging();
     facade::configure_runtime(api_key, gateway_url, ingest_url);
 }
 
 #[export]
 pub fn init_sdk_cache_dir(cache_dir: String) {
+    ensure_native_logging();
     // Param name pinned to `cache_dir` (not `path`) so the emitted Swift
     // is `initSdkCacheDir(cacheDir:)`, matching the existing
     // `examples/ios/XybridExample` call site that uniffi already exposes
@@ -635,17 +829,61 @@ pub fn init_sdk_cache_dir(cache_dir: String) {
 
 #[export]
 pub fn set_binding(binding: String) {
+    ensure_native_logging();
     facade::set_binding(binding);
 }
 
 #[export]
 pub fn set_api_key(api_key: String) {
+    ensure_native_logging();
     facade::set_api_key(api_key);
 }
 
 #[export]
 pub fn set_provider_api_key(provider: String, api_key: String) {
+    ensure_native_logging();
     facade::set_provider_api_key(provider, api_key);
+}
+
+/// Point the cloud gateway at a platform base URL (staging, self-hosted).
+/// Pass a bare base URL — the `/v1` suffix is applied internally.
+#[export]
+pub fn set_platform_url(url: String) {
+    ensure_native_logging();
+    facade::set_platform_url(url);
+}
+
+/// Enable speculative cloud fallback globally: a registry model that isn't
+/// downloaded yet is served from the gateway while the weights download.
+///
+/// LLM/chat only — prefer `XybridModel.fromRegistrySpeculative` when the app
+/// also loads ASR/TTS models, which cannot be served this way.
+#[export]
+pub fn set_speculative_cloud(enabled: bool) {
+    ensure_native_logging();
+    facade::set_speculative_cloud(enabled);
+}
+
+/// Whether a Xybrid gateway API key is resolvable (in-memory or env).
+#[export]
+pub fn has_api_key() -> bool {
+    facade::has_api_key()
+}
+
+/// Whether the global speculative-cloud default is on.
+#[export]
+pub fn is_speculative_cloud_enabled() -> bool {
+    facade::is_speculative_cloud_enabled()
+}
+
+/// Whether `XybridModel::from_registry_speculative(model_id)` would actually
+/// speculate: an API key resolves and the model is not already cached.
+///
+/// Lets the hand-written Swift/Kotlin loader facades answer "will this
+/// speculate?" before loading. Never touches the network.
+#[export]
+pub fn will_speculate_for_model(model_id: String) -> bool {
+    facade::will_speculate_for_model(model_id)
 }
 
 /// The SDK version string (tracks `CARGO_PKG_VERSION`).
@@ -702,6 +940,20 @@ impl XybridModel {
         Ok(Self::new(model))
     }
 
+    /// Load from the registry, serving from the cloud gateway while the weights
+    /// download in the background.
+    ///
+    /// Returns almost immediately instead of blocking on the download. Requires
+    /// a resolvable API key and an uncached model; otherwise it behaves exactly
+    /// like `from_registry`. Poll `download_status` for progress and
+    /// `is_cloud_serving` to know which leg is answering. LLM/chat models only.
+    pub fn from_registry_speculative(id: String) -> Result<Self, XybridError> {
+        let model = facade::ModelLoader::from_registry_speculative(id)
+            .load()
+            .map_err(XybridError::from)?;
+        Ok(Self::new(model))
+    }
+
     /// Load from a local model directory (must contain `model_metadata.json`).
     pub fn from_directory(path: String) -> Result<Self, XybridError> {
         let loader = facade::ModelLoader::from_directory(path).map_err(XybridError::from)?;
@@ -746,6 +998,26 @@ impl XybridModel {
 
     pub fn is_loaded(&self) -> bool {
         self.inner.is_loaded()
+    }
+
+    /// Whether runs are currently answered by the cloud because the local
+    /// weights are not ready yet. `false` for ordinary local models.
+    pub fn is_cloud_serving(&self) -> bool {
+        self.inner.is_cloud_serving()
+    }
+
+    /// Download progress + state in one read — poll this to drive a progress
+    /// bar. Reports `Ready` at 1.0 for an ordinary local model, so hosts need
+    /// no special case.
+    pub fn download_status(&self) -> XybridDownloadStatus {
+        self.inner.download_status().into()
+    }
+
+    /// Block until the download finishes or `timeout_ms` elapses, then report
+    /// the status. Call it off the UI thread (the same place `from_registry` is
+    /// already called). `timeout_ms = 0` makes it a non-blocking read.
+    pub fn await_download(&self, timeout_ms: u64) -> XybridDownloadStatus {
+        self.inner.await_download(timeout_ms).into()
     }
 
     pub fn supports_streaming(&self) -> bool {

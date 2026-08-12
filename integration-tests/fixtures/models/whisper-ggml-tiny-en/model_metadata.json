@@ -1,0 +1,28 @@
+{
+  "model_id": "whisper-ggml-tiny-en",
+  "version": "1.0",
+  "description": "Whisper Tiny English, GGML Q5_1 - fast ASR via whisper.cpp on the shared ggml",
+  "execution_template": {
+    "type": "GgmlWhisper",
+    "model_file": "model.bin",
+    "language": "en",
+    "audio_ctx": 0,
+    "translate": false
+  },
+  "preprocessing": [],
+  "postprocessing": [],
+  "files": [
+    "model.bin"
+  ],
+  "metadata": {
+    "task": "speech-recognition",
+    "family": "openai",
+    "language": "english",
+    "license": "MIT",
+    "runtime": "whispercpp",
+    "quantization": "q5_1",
+    "sample_rate": 16000,
+    "parameters": 39000000,
+    "notes": "GGML format (GGML_FILE_MAGIC), not GGUF - whisper.cpp kept the legacy container while llama.cpp moved to GGUF. audio_ctx is 0 (no encoder truncation) on purpose: truncation is the largest speed lever for live streaming, but too much of it makes the decoder emit repetition loops, and the safe threshold is model-specific. Measured on a Pixel 8: 500 is safe for a 5 s window, 250 degenerates."
+  }
+}

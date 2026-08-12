@@ -80,6 +80,12 @@ flutter:
   # the material Icons class.
   uses-material-design: true
 
+  # MNIST fixture bundled for the on-device telemetry smoke test
+  # (integration_test/telemetry_smoke_test.dart) — the test network blocks
+  # outbound TCP 443, so models cannot come from the registry on-device.
+  assets:
+    - assets/mnist/
+
   # To add assets to your application, add an assets section, like this:
   # assets:
   #   - images/a_dot_burr.jpeg

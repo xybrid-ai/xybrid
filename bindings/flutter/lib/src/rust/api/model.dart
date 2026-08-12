@@ -13,11 +13,12 @@ import 'envelope.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import 'package:freezed_annotation/freezed_annotation.dart' hide protected;
 import 'result.dart';
+import 'streaming.dart';
 part 'model.freezed.dart';
 
-// These functions are ignored because they are not marked as `pub`: `apply_backend_to_loader`, `apply_cloud_fallback_metadata`, `cloud_fallback_abort_event`, `is_debug_gateway_host`, `is_ipv6_link_local`, `is_ipv6_unique_local`, `is_v1_gateway_base`, `is_xybrid_gateway_host`, `non_empty`, `normalize_gateway_url`, `should_cancel_on_sink_close`, `stream_error_event`, `streaming_run_options`, `to_facade`, `to_facade`, `to_sdk_over`, `to_sdk_with_cancellation_over`, `to_sdk`, `validate_cloud_gateway_url`, `validated_cloud_gateway_url`
+// These functions are ignored because they are not marked as `pub`: `apply_backend_to_loader`, `apply_cloud_fallback_metadata`, `cloud_fallback_abort_event`, `from_sdk`, `into_facade`, `into_facade`, `is_debug_gateway_host`, `is_ipv6_link_local`, `is_ipv6_unique_local`, `is_v1_gateway_base`, `is_xybrid_gateway_host`, `non_empty`, `normalize_gateway_url`, `should_cancel_on_sink_close`, `stream_error_event`, `streaming_run_options`, `to_facade`, `to_facade`, `to_sdk_over`, `to_sdk_with_cancellation_over`, `to_sdk`, `validate_cloud_gateway_url`, `validated_cloud_gateway_url`
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `FlutterFallbackResourceProvider`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `current_snapshot`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `from`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `current_snapshot`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `from`
 
 /// Convert a JSON Schema (as a JSON string) into a GBNF grammar for
 /// [`FfiGenerationConfig::grammar`].
@@ -49,6 +50,31 @@ abstract class FfiCancellationToken implements RustOpaqueInterface {
 
 // Rust type: RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiModel>>
 abstract class FfiModel implements RustOpaqueInterface {
+  /// Stream download progress for a speculatively-loaded model until it
+  /// reaches a terminal state.
+  ///
+  /// Flutter keeps a push API here (other bindings poll) because
+  /// flutter_rust_bridge stream sinks are safe — unlike the bolt closure ABI
+  /// the native bindings must avoid. Emits `Progress` while downloading, then
+  /// exactly one `Complete` or `Error`. Returns immediately for a model that
+  /// is already local.
+  Stream<FfiLoadEvent> downloadProgress();
+
+  /// Download progress + state in one consistent read.
+  ///
+  /// Reports `Ready` at 1.0 for an ordinary local model, so the UI needs no
+  /// special case. Prefer [`Self::download_progress`] to be pushed updates
+  /// rather than polling.
+  FfiDownloadStatus downloadStatus();
+
+  /// Whether runs are currently answered by the cloud because the local
+  /// weights are not ready yet. `false` for ordinary local models.
+  ///
+  /// This predicts the *next* run; `FfiResult.executionTarget` reports what a
+  /// run that already happened actually did. They differ when a cloud leg
+  /// fails and degrades to local mid-call.
+  bool isCloudServing();
+
   /// Run batch inference (non-streaming).
   ///
   /// Pass an optional `config` to control generation parameters.
@@ -171,6 +197,20 @@ abstract class FfiModel implements RustOpaqueInterface {
       required FfiConversationContext context,
       FfiGenerationConfig? config});
 
+  /// Open a live (rolling-window) ASR streaming session for this model.
+  ///
+  /// The model's on-disk location is resolved from the already-loaded handle,
+  /// so a model loaded from the registry, Hugging Face, a bundle, or a
+  /// directory all stream the same way — no path is passed here. Feed audio
+  /// with [`FfiStreamSession::feed`] and read partials from
+  /// [`FfiStreamSession::subscribe`].
+  ///
+  /// # Errors
+  ///
+  /// - If `config.sample_rate` is not 16 kHz.
+  /// - If the model does not support streaming, or the stream cannot start.
+  Future<FfiStreamSession> stream({required FfiStreamingConfig config});
+
   /// Check if this model supports true token-by-token streaming.
   ///
   /// Returns `true` for token-streaming LLM models (GGUF or runtime-ready
@@ -218,6 +258,18 @@ abstract class FfiModelLoader implements RustOpaqueInterface {
       XybridRustLib.instance.api
           .crateApiModelFfiModelLoaderFromRegistry(modelId: modelId);
 
+  /// Loader that serves from the cloud gateway while the registry weights
+  /// download in the background, instead of blocking on the download.
+  ///
+  /// `load()` then returns almost immediately with a cloud-backed model that
+  /// switches to on-device by itself once the download lands. Requires a
+  /// resolvable API key and an uncached model — otherwise this behaves
+  /// exactly like [`Self::from_registry`], which [`Self::will_speculate`]
+  /// reports. LLM/chat models only.
+  static FfiModelLoader fromRegistrySpeculative({required String modelId}) =>
+      XybridRustLib.instance.api
+          .crateApiModelFfiModelLoaderFromRegistrySpeculative(modelId: modelId);
+
   /// Load the model without progress updates.
   Future<FfiModel> load({FfiBackend? backend});
 
@@ -230,6 +282,10 @@ abstract class FfiModelLoader implements RustOpaqueInterface {
   ///
   /// After receiving `Complete`, call `load()` to get the cached model instantly.
   Stream<FfiLoadEvent> loadWithProgress({FfiBackend? backend});
+
+  /// Whether `load()` would actually speculate: enabled, an API key
+  /// resolves, and the model is not already cached. Never hits the network.
+  bool willSpeculate();
 }
 
 /// Local generation or embedding backend override for model loading.
@@ -284,6 +340,45 @@ enum FfiCloudFallbackReason {
   ;
 }
 
+/// Lifecycle of the background download behind a speculative load.
+enum FfiDownloadState {
+  /// Weights still downloading; runs are served from the cloud.
+  downloading,
+
+  /// Local handle installed; runs are on-device.
+  ready,
+
+  /// Download failed — the cloud keeps serving and the model never becomes
+  /// local. Surfacing this is the only way the UI can stop waiting.
+  failed,
+  ;
+}
+
+/// Download progress + state in one consistent read, so a polling UI cannot
+/// observe a torn pair (for example `Ready` with a stale 0.34 progress).
+class FfiDownloadStatus {
+  final FfiDownloadState state;
+
+  /// 0.0 to 1.0.
+  final double progress;
+
+  const FfiDownloadStatus({
+    required this.state,
+    required this.progress,
+  });
+
+  @override
+  int get hashCode => state.hashCode ^ progress.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FfiDownloadStatus &&
+          runtimeType == other.runtimeType &&
+          state == other.state &&
+          progress == other.progress;
+}
+
 /// Generation parameters for LLM inference.
 ///
 /// All fields are optional. When `None`, the model's default value is used.
@@ -315,6 +410,14 @@ class FfiGenerationConfig {
   /// a JSON Schema with `jsonSchemaToGbnf`, or pass raw GBNF.
   final String? grammar;
 
+  /// Tools the model may call this turn. `None` or empty means no tool
+  /// calling — existing behavior, unchanged.
+  ///
+  /// Tool calling is llama.cpp-only today; unsupported paths (no embedded
+  /// chat template, the mistralrs backend, the cloud fallback leg) reject
+  /// tool-bearing requests rather than quietly generating without them.
+  final List<FfiToolDefinition>? tools;
+
   const FfiGenerationConfig({
     this.maxTokens,
     this.temperature,
@@ -324,6 +427,7 @@ class FfiGenerationConfig {
     this.repetitionPenalty,
     this.stopSequences,
     this.grammar,
+    this.tools,
   });
 
   /// Create a creative generation config (higher temperature).
@@ -343,7 +447,8 @@ class FfiGenerationConfig {
       topK.hashCode ^
       repetitionPenalty.hashCode ^
       stopSequences.hashCode ^
-      grammar.hashCode;
+      grammar.hashCode ^
+      tools.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -357,7 +462,8 @@ class FfiGenerationConfig {
           topK == other.topK &&
           repetitionPenalty == other.repetitionPenalty &&
           stopSequences == other.stopSequences &&
-          grammar == other.grammar;
+          grammar == other.grammar &&
+          tools == other.tools;
 }
 
 @freezed
@@ -509,6 +615,101 @@ class FfiStreamToken {
           index == other.index &&
           cumulativeText == other.cumulativeText &&
           finishReason == other.finishReason;
+}
+
+/// One tool call the model emitted, from `FfiResult.toolCalls`.
+class FfiToolCall {
+  /// Correlation id, e.g. `call_0`. Echo it back as `FfiToolResult.callId`.
+  final String id;
+
+  /// Which tool the model wants to run.
+  final String name;
+
+  /// Arguments as a JSON object string.
+  final String argumentsJson;
+
+  const FfiToolCall({
+    required this.id,
+    required this.name,
+    required this.argumentsJson,
+  });
+
+  @override
+  int get hashCode => id.hashCode ^ name.hashCode ^ argumentsJson.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FfiToolCall &&
+          runtimeType == other.runtimeType &&
+          id == other.id &&
+          name == other.name &&
+          argumentsJson == other.argumentsJson;
+}
+
+/// A tool (function) the model may ask to call.
+///
+/// `parameters_json` is the JSON Schema for the arguments, carried as a JSON
+/// string because FRB can't describe an arbitrary JSON tree.
+class FfiToolDefinition {
+  /// Function name the model will emit, e.g. `get_weather`.
+  final String name;
+
+  /// What the tool does. The model reads this to decide when to call it.
+  final String description;
+
+  /// JSON Schema for the arguments, as a JSON string. Pass
+  /// `{"type":"object","properties":{}}` for a tool that takes none.
+  final String parametersJson;
+
+  const FfiToolDefinition({
+    required this.name,
+    required this.description,
+    required this.parametersJson,
+  });
+
+  @override
+  int get hashCode =>
+      name.hashCode ^ description.hashCode ^ parametersJson.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FfiToolDefinition &&
+          runtimeType == other.runtimeType &&
+          name == other.name &&
+          description == other.description &&
+          parametersJson == other.parametersJson;
+}
+
+/// The outcome of running one tool, fed back with `FfiEnvelope::tool_results`.
+class FfiToolResult {
+  /// The `FfiToolCall.id` this answers.
+  final String callId;
+
+  /// The tool that was invoked.
+  final String name;
+
+  /// The tool's output as a JSON string.
+  final String contentJson;
+
+  const FfiToolResult({
+    required this.callId,
+    required this.name,
+    required this.contentJson,
+  });
+
+  @override
+  int get hashCode => callId.hashCode ^ name.hashCode ^ contentJson.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FfiToolResult &&
+          runtimeType == other.runtimeType &&
+          callId == other.callId &&
+          name == other.name &&
+          contentJson == other.contentJson;
 }
 
 @freezed

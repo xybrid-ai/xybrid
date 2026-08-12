@@ -115,6 +115,12 @@ pub mod llama_cpp;
 #[cfg(feature = "llm-mlx")]
 pub mod mlx;
 
+// whisper.cpp ASR (feature-gated). Shares llama.cpp's ggml rather than
+// linking a second one — see the module docs for why that constraint shapes
+// the whole backend.
+#[cfg(feature = "asr-whispercpp")]
+pub mod whisper_cpp;
+
 // Re-exports from runtime backends
 pub use cloud::{CloudRuntimeAdapter, CloudStreaming};
 pub use metadata_driven::MetadataDrivenAdapter;
@@ -147,6 +153,10 @@ pub use llama_cpp::LlamaCppBackend;
 // llama.cpp log control exports.
 #[cfg(feature = "llm-llamacpp")]
 pub use llama_cpp::{llama_log_get_verbosity, llama_log_set_verbosity};
+
+// whisper.cpp ASR export.
+#[cfg(feature = "asr-whispercpp")]
+pub use whisper_cpp::WhisperCppRuntime;
 
 // Re-export inference backend types
 pub use inference_backend::{BackendError, BackendResult, InferenceBackend, RuntimeType};

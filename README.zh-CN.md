@@ -154,7 +154,7 @@ xybrid run --model kokoro-82m --input-text "国破山河在，城春草木深" -
 
 ```yaml
 dependencies:
-  xybrid_flutter: ^0.3.0
+  xybrid_flutter: ^0.5.0
 ```
 
 **运行模型：**
@@ -171,15 +171,15 @@ final result = await model.run(XybridEnvelope.text('国破山河在，城春草�
 
 ```gradle
 dependencies {
-    implementation("ai.xybrid:xybrid-kotlin:0.3.0")
+    implementation("ai.xybrid:xybrid-kotlin:0.5.0")
 }
 ```
 
 **运行模型：**
 
 ```kotlin
-val model = XybridModelLoader.fromRegistry("kokoro-82m").load()
-val result = model.run(Envelope.text("国破山河在，城春草木深"))
+val model = Xybrid.model("kokoro-82m").load()
+val result = model.runAsync(Envelope.text("国破山河在，城春草木深"))
 // 输出 → 24kHz WAV 音频
 ```
 
@@ -189,15 +189,15 @@ val result = model.run(Envelope.text("国破山河在，城春草木深"))
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/xybrid-ai/xybrid.git", from: "0.3.0")
+    .package(url: "https://github.com/xybrid-ai/xybrid.git", from: "0.5.0")
 ]
 ```
 
 **运行模型：**
 
 ```swift
-let model = try ModelLoader.fromRegistry(modelId: "kokoro-82m").load()
-let result = try model.run(envelope: Envelope.text("国破山河在，城春草木深"))
+let model = try await Xybrid.model("kokoro-82m").load()
+let result = try await model.runAsync(envelope: Envelope.text("国破山河在，城春草木深"))
 // 输出 → 24kHz WAV 音频
 ```
 
@@ -223,7 +223,7 @@ var result = model.Run(Envelope.Text("国破山河在，城春草木深"));
 
 ```toml
 [dependencies]
-xybrid = "0.3.0"
+xybrid = "0.5.0"
 ```
 
 **运行模型：**
@@ -245,9 +245,9 @@ let result = model.run(&Envelope::text("国破山河在，城春草木深"))?;
 # voice-assistant.yaml
 name: voice-assistant
 stages:
-  - model: whisper-tiny    # 语音 → 文本
-  - model: qwen2.5-0.5b    # 用 LLM 处理
-  - model: kokoro-82m      # 文本 → 语音
+  - model: whisper-tiny-ggml  # 语音 → 文本
+  - model: qwen2.5-0.5b       # 用 LLM 处理
+  - model: kokoro-82m         # 文本 → 语音
 ```
 
 **CLI:**
@@ -303,7 +303,8 @@ let result = pipeline.run(&Envelope::audio(audio_bytes))?;
 
 | 模型 | 参数量 | 格式 | 简介 |
 |------|--------|------|------|
-| Whisper Tiny | 39M | SafeTensors | 多语言转录（Candle 运行时） |
+| Whisper Tiny（`whisper-tiny-ggml`） | 39M | GGML Q5_1 | 多语言转录，基于 whisper.cpp — 所有平台预设均已内置 |
+| Whisper Tiny（`whisper-tiny`） | 39M | SafeTensors | 相同权重，运行于 Candle — 需要启用 `candle` 特性重新构建 |
 | Wav2Vec2 Base | 95M | ONNX | 英语 ASR，CTC 解码 |
 
 ### 文本转语音
@@ -395,7 +396,7 @@ Skills 与 agent 无关，位于 [`agents/skills/`](agents/skills/)。安装脚�
 | 嵌入模型 | 🔜 | 🔜 | 🔜 | 🔜 | 🔜 |
 | 多模型流水线（MMP） | ✅ | ✅ | ✅ | ✅ | ✅ |
 | 模型下载与缓存 | ✅ | ✅ | ✅ | ✅ | ✅ |
-| 硬件加速 | Metal, ANE | CPU | Metal, ANE | CUDA | CUDA |
+| 硬件加速 | Metal, ANE | CPU | Metal, ANE | CPU，可选 Vulkan | CPU |
 
 **SDK MMP 支持：** Flutter ✅ · Rust ✅ · Kotlin 🔜 · Swift 🔜 · Unity 🔜
 
@@ -407,7 +408,7 @@ Skills 与 agent 无关，位于 [`agents/skills/`](agents/skills/)。安装脚�
 - **离线可用** — 初次模型下载后无需互联网。
 - **跨平台** — iOS、Android、macOS、Linux 和 Windows 使用统一的 API。
 - **多模型流水线（MMP）** — 在单次调用中链接多个模型（ASR → LLM → TTS）。
-- **自动优化** — 在 Apple Neural Engine、Metal 和 CUDA 上进行硬件加速。
+- **硬件加速** — Apple 平台支持 Apple Neural Engine 与 Metal；Linux 的 llama.cpp 构建可选启用 Vulkan。Android 与 Windows 目前使用 CPU，预编译的 Linux 二进制也仅为 CPU（Vulkan 需在构建时启用 — 参见[安装说明](docs/INSTALLATION.md#platform-features)）。
 
 ### 与其他方案对比
 

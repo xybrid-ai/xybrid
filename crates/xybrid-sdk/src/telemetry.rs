@@ -897,8 +897,18 @@ fn send_batch_inner(
                     return Ok(());
                 }
             }
-            Err(ureq::Error::Transport(_)) => {
+            Err(ureq::Error::Transport(transport)) => {
                 circuit.record_failure();
+                // Surface the transport-level cause (DNS, TLS handshake,
+                // connect timeout, ...) — previously discarded, which made
+                // send failures invisible on devices with no other signal.
+                log::warn!(
+                    target: "xybrid_telemetry",
+                    "Transport error sending telemetry batch (attempt {}/{}): {}",
+                    attempt + 1,
+                    retry_policy.max_attempts,
+                    transport
+                );
                 // Continue to retry
             }
         }

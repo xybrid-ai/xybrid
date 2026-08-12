@@ -126,8 +126,49 @@ if [[ "$PLATFORM_NAME" == "iphoneos" || "$PLATFORM_NAME" == "iphonesimulator" ]]
   if [[ "$PLATFORM_NAME" == "iphoneos" ]]; then
     ORT_LIB_PATH="$ORT_XCFRAMEWORK_BASE/ios-arm64"
   else
-    # Simulator — currently only arm64 (M1+ Macs)
-    ORT_LIB_PATH="$ORT_XCFRAMEWORK_BASE/ios-arm64"
+    # Simulator builds need the simulator-ABI slice — the device `ios-arm64`
+    # slice fails the link with "built for 'iOS'" (arm64 alone is not enough;
+    # the object files carry a device platform marker). Newer xcframeworks
+    # ship an `ios-arm64-simulator` slice; older archives are device-only, so
+    # fall back to fetching the pyke `aarch64-apple-ios-sim` static lib — the
+    # SAME artifact Bazel's //bazel:ort_ios_sim.bzl fetches (raw-LZMA2 tar,
+    # decoded with `xz --format=raw`).
+    ORT_LIB_PATH="$ORT_XCFRAMEWORK_BASE/ios-arm64-simulator"
+    if [[ ! -f "$ORT_LIB_PATH/libonnxruntime.a" ]]; then
+      SIM_CACHE_DIR="$ORT_CACHE_DIR/ios-arm64-simulator"
+      if [[ ! -f "$SIM_CACHE_DIR/libonnxruntime.a" ]]; then
+        SIM_URL="https://cdn.pyke.io/0/pyke:ort-rs/ms@${ORT_VERSION}/aarch64-apple-ios-sim.tar.lzma2"
+        SIM_SHA256="8ae2dfc164b21d0a9f7b8ad046193eb20b4e9c198a21ba8dba0a71e962e15776"
+        if ! command -v xz >/dev/null 2>&1; then
+          echo "ERROR: xz is required to decode the ONNX Runtime simulator slice"
+          echo "       Run: brew install xz"
+          exit 1
+        fi
+        echo "=== ORT: Downloading iOS-simulator slice from pyke CDN ==="
+        mkdir -p "$SIM_CACHE_DIR"
+        SIM_ARCHIVE="$SIM_CACHE_DIR/ort.tar.lzma2"
+        if ! curl -fSL --progress-bar -o "$SIM_ARCHIVE" "$SIM_URL"; then
+          echo "ERROR: Failed to download ORT simulator slice from $SIM_URL"
+          rm -f "$SIM_ARCHIVE"
+          exit 1
+        fi
+        echo "$SIM_SHA256  $SIM_ARCHIVE" | shasum -a 256 -c - || {
+          echo "ERROR: checksum mismatch for ORT simulator slice"
+          rm -f "$SIM_ARCHIVE"
+          exit 1
+        }
+        # pyke ships a raw LZMA2 stream (not an xz container); 64 MiB dict
+        # matches ort-sys's own decoder settings.
+        xz -dc --format=raw --lzma2=dict=64MiB "$SIM_ARCHIVE" | tar -x -C "$SIM_CACHE_DIR"
+        rm -f "$SIM_ARCHIVE"
+        if [[ ! -f "$SIM_CACHE_DIR/libonnxruntime.a" ]]; then
+          echo "ERROR: libonnxruntime.a missing after extracting the simulator slice"
+          exit 1
+        fi
+        echo "=== ORT: Simulator slice cached at $SIM_CACHE_DIR ==="
+      fi
+      ORT_LIB_PATH="$SIM_CACHE_DIR"
+    fi
   fi
 
   if [[ -f "$ORT_LIB_PATH/libonnxruntime.a" ]]; then

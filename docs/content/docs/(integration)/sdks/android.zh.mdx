@@ -3,7 +3,7 @@ title: Android
 description: 面向 Android 的原生 SDK，支持本地 ML 推理
 ---
 
-Android SDK 通过 UniFFI 为 Xybrid 运行时提供原生 Kotlin 绑定，支持在 Android 应用中进行本地 ML 推理。
+Android SDK 通过 BoltFFI 为 Xybrid 运行时提供原生 Kotlin 绑定，支持在 Android 应用中进行本地 ML 推理。
 
 ## 安装
 
@@ -11,7 +11,7 @@ Android SDK 通过 UniFFI 为 Xybrid 运行时提供原生 Kotlin 绑定，支�
 
 ```kotlin title="build.gradle.kts"
 dependencies {
-    implementation("ai.xybrid:xybrid-kotlin:0.3.0")
+    implementation("ai.xybrid:xybrid-kotlin:0.5.0")
 }
 ```
 
@@ -22,12 +22,11 @@ dependencies {
 ```kotlin
 import ai.xybrid.*
 
-// 从注册表加载模型
-val loader = XybridModelLoader.fromRegistry("kokoro-82m")
-val model = loader.load()
+// 先描述模型来源，再显式加载
+val model = Xybrid.model("kokoro-82m").load()
 
 // 运行推理
-val result = model.run(Envelope.text("Hello, world!"))
+val result = model.runAsync(Envelope.text("Hello, world!"))
 
 if (result.success) {
     println("Output: ${result.text}")
@@ -52,16 +51,17 @@ Xybrid.init(this, apiKey = BuildConfig.XYBRID_API_KEY)
 ### 从注册表
 
 ```kotlin
-val loader = XybridModelLoader.fromRegistry("whisper-tiny")
-val model = loader.load()
+val model = Xybrid.model("whisper-tiny-ggml").load()
 ```
 
 ### 从本地 Bundle
 
 ```kotlin
-val loader = XybridModelLoader.fromBundle("/path/to/model.xyb")
-val model = loader.load()
+val model = Xybrid.model(ModelSource.bundle("/path/to/model.xyb")).load()
 ```
+
+`Xybrid.model(...)` 只创建廉价的、未加载的引用。`load()` 是显式的加载边界，
+可能解析元数据、下载文件、访问磁盘并初始化运行时。
 
 ---
 
@@ -144,8 +144,8 @@ SDK 使用密封异常类实现类型安全的错误处理：
 
 ```kotlin
 try {
-    val model = XybridModelLoader.fromRegistry("kokoro-82m").load()
-    val result = model.run(envelope)
+    val model = Xybrid.model("kokoro-82m").load()
+    val result = model.runAsync(envelope)
 } catch (e: XybridException.ModelNotFound) {
     println("Model not found: ${e.modelId}")
 } catch (e: XybridException.InferenceFailed) {

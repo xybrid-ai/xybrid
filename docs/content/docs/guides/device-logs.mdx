@@ -1,0 +1,95 @@
+---
+title: Device Logs
+description: Where xybrid logs appear on Android and iOS, and how to read them when something silently fails
+---
+
+The SDK reports problems — telemetry batches that can't reach the ingest
+endpoint, registry endpoints failing over, model resolution errors — through
+each platform's native log system. Nothing crashes when the network is blocked
+or an API key is wrong; the SDK degrades gracefully and says why in the logs.
+This page is where to look.
+
+Logging starts automatically the moment your app initializes the SDK
+(`Xybrid.init` / `Xybrid.initialize` — any entry point). There is nothing to
+enable.
+
+## Where logs appear
+
+| Platform | Destination | Filter |
+|----------|-------------|--------|
+| Android | logcat | tag `xybrid` |
+| iOS / macOS app | unified log (Console.app) | subsystem `dev.xybrid.sdk` |
+| Desktop (Rust, Python, CLI) | host process | register your own `log` backend |
+
+On mobile the SDK registers the sink itself. In desktop host processes the SDK
+stays silent unless the host registers a logger (`env_logger`, `tracing`
+subscriber with a `log` bridge, etc.) — the SDK never claims the global logger
+out from under an application that owns it.
+
+## Reading logs
+
+<Tabs items={['Android', 'iOS']}>
+  <Tab value="Android">
+
+```bash
+# Everything from the SDK, live:
+adb logcat -s xybrid
+
+# Only warnings and errors:
+adb logcat -s xybrid:W
+```
+
+  </Tab>
+  <Tab value="iOS">
+
+```bash
+# Simulator:
+xcrun simctl spawn booted log stream --predicate 'subsystem == "dev.xybrid.sdk"'
+
+# Physical device (or use Console.app and filter by subsystem):
+log stream --device --predicate 'subsystem == "dev.xybrid.sdk"'
+```
+
+In Console.app, enable **Action → Include Info Messages** — the SDK logs at
+Info level and below, which Console hides by default.
+
+  </Tab>
+</Tabs>
+
+## What to look for
+
+**Telemetry not reaching the dashboard.** Each failed export logs the attempt
+count and the underlying transport error:
+
+```
+W/xybrid: Transport error sending telemetry batch (attempt 1/3): Connection Failed
+```
+
+If you see nothing at all, telemetry isn't enabled — it starts only when an
+API key is configured at init.
+
+**Models failing to download.** The registry client logs every endpoint it
+tries before giving up:
+
+```
+W/xybrid: URL https://registry.xybrid.dev failed: Registry unreachable:
+          Failed to resolve model (connection refused or host unreachable), trying next
+```
+
+Both lines above share one common cause worth checking early: **networks that
+block outbound TCP 443** (corporate and guest Wi-Fi are the usual suspects).
+The device can look "online" — ping works, captive portal passed — while every
+HTTPS connection from the app times out. Try another network or a hotspot
+before debugging further.
+
+**Model execution.** Load and inference steps log at Info level (execution
+provider selection, preprocessing steps, completion), which makes it easy to
+confirm the SDK is actually being reached before suspecting anything deeper.
+
+## Log levels
+
+The sinks are registered at **Info** level: warnings and errors always appear;
+per-request debug detail (HTTP connection traces, cache probing) is compiled
+in at Debug level and not emitted. There is currently no runtime knob to raise
+verbosity — if an Info-level log doesn't explain a failure, file an issue with
+the log lines you have.

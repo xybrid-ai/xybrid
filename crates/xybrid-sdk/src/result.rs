@@ -147,13 +147,72 @@ pub struct InferenceResult {
     latency_ms: u32,
     /// Model ID that produced this result
     model_id: String,
+    /// Whether this ran on-device or was answered by the cloud gateway
+    provenance: ExecutionProvenance,
     /// Typed metrics parsed from `envelope.metadata`
     metrics: InferenceMetrics,
 }
 
+/// Where a result was actually produced.
+///
+/// Deliberately *not* one of the two existing `ExecutionTarget` enums
+/// (`pipeline::target`, `pipeline_config`): those describe routing **intent**
+/// and carry `Auto`/`Server` variants, which are meaningless as an observed
+/// outcome. This is the two-state fact "who answered".
+///
+/// It matters because cloud fallback — speculative or reactive — keeps
+/// `model_id` identical on both legs by design, so the model id cannot tell a
+/// caller which leg ran.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ExecutionProvenance {
+    /// Ran on-device.
+    #[default]
+    Local,
+    /// Answered by the platform gateway (which serves the same model via
+    /// xycloud).
+    Cloud,
+}
+
+impl ExecutionProvenance {
+    /// Stable wire string, also stamped onto the result envelope as
+    /// `execution_target` so FFI hosts can read it without a typed accessor.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Local => "local",
+            Self::Cloud => "cloud",
+        }
+    }
+}
+
+/// Envelope metadata key carrying [`ExecutionProvenance`].
+pub(crate) const EXECUTION_TARGET_KEY: &str = "execution_target";
+
 impl InferenceResult {
     /// Create a new inference result from an envelope.
+    ///
+    /// Provenance defaults to [`ExecutionProvenance::Local`] — cloud legs must
+    /// use [`Self::new_cloud`].
     pub fn new(envelope: Envelope, model_id: impl Into<String>, latency_ms: u32) -> Self {
+        Self::with_provenance(envelope, model_id, latency_ms, ExecutionProvenance::Local)
+    }
+
+    /// Create a result produced by a cloud leg (speculative or reactive
+    /// fallback). Stamps `execution_target = "cloud"` on the envelope so FFI
+    /// hosts see it too.
+    pub fn new_cloud(envelope: Envelope, model_id: impl Into<String>, latency_ms: u32) -> Self {
+        Self::with_provenance(envelope, model_id, latency_ms, ExecutionProvenance::Cloud)
+    }
+
+    fn with_provenance(
+        mut envelope: Envelope,
+        model_id: impl Into<String>,
+        latency_ms: u32,
+        provenance: ExecutionProvenance,
+    ) -> Self {
+        envelope.metadata.insert(
+            EXECUTION_TARGET_KEY.to_string(),
+            provenance.as_str().to_string(),
+        );
         let output_type = output_type_for_envelope(&envelope);
         let metrics = InferenceMetrics::from_metadata(&envelope.metadata, latency_ms);
 
@@ -162,8 +221,14 @@ impl InferenceResult {
             output_type,
             latency_ms,
             model_id: model_id.into(),
+            provenance,
             metrics,
         }
+    }
+
+    /// Where this result was actually produced — local or cloud.
+    pub fn provenance(&self) -> ExecutionProvenance {
+        self.provenance
     }
 
     /// Create from envelope with pre-computed output type.
@@ -173,12 +238,18 @@ impl InferenceResult {
         model_id: impl Into<String>,
         latency_ms: u32,
     ) -> Self {
+        let mut envelope = envelope;
+        envelope.metadata.insert(
+            EXECUTION_TARGET_KEY.to_string(),
+            ExecutionProvenance::Local.as_str().to_string(),
+        );
         let metrics = InferenceMetrics::from_metadata(&envelope.metadata, latency_ms);
         Self {
             envelope,
             output_type,
             latency_ms,
             model_id: model_id.into(),
+            provenance: ExecutionProvenance::Local,
             metrics,
         }
     }

@@ -10,7 +10,7 @@ use crate::audio::vad::{VadConfig, VadSession};
 use crate::execution::{ExecutionTemplate, ModelMetadata, TemplateExecutor};
 use crate::ir::{Envelope, EnvelopeKind};
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 /// Error type for streaming operations.
@@ -97,8 +97,14 @@ pub struct StreamConfig {
     pub min_chunk_secs: f32,
     /// Enable partial results during streaming
     pub enable_partial_results: bool,
-    /// Language hint (passed to model if supported)
+    /// Language hint passed to the model when supported.
+    ///
+    /// When absent, a reporting ASR runtime may auto-detect from the first
+    /// full audio window; [`StreamSession`] reuses that language for later
+    /// windows until the session is reset.
     pub language: Option<String>,
+    /// Whisper encoder context override in mel frames; `None` uses the model default
+    pub audio_ctx: Option<u32>,
     /// VAD configuration for smart chunking
     pub vad: VadStreamConfig,
 }
@@ -110,6 +116,7 @@ impl Default for StreamConfig {
             min_chunk_secs: 1.0, // At least 1 second before processing
             enable_partial_results: true,
             language: Some("en".to_string()),
+            audio_ctx: None,
             vad: VadStreamConfig::default(),
         }
     }
@@ -130,6 +137,24 @@ impl StreamConfig {
             vad: VadStreamConfig::with_model(model_dir),
             ..Default::default()
         }
+    }
+
+    /// Create an audio envelope carrying the effective ASR overrides.
+    fn inference_envelope(&self, wav_bytes: Vec<u8>, detected_language: Option<&str>) -> Envelope {
+        let mut envelope = Envelope::new(EnvelopeKind::Audio(wav_bytes));
+        // A caller override always wins. Otherwise, reuse the language the ASR
+        // runtime auto-detected on this session's first successful window.
+        if let Some(language) = self.language.as_deref().or(detected_language) {
+            envelope
+                .metadata
+                .insert("language".to_string(), language.to_string());
+        }
+        if let Some(audio_ctx) = self.audio_ctx {
+            envelope
+                .metadata
+                .insert("audio_ctx".to_string(), audio_ctx.to_string());
+        }
+        envelope
     }
 }
 
@@ -163,15 +188,40 @@ pub struct PartialResult {
     pub chunk_sequence: u64,
 }
 
+/// Maximum number of words checked for a duplicated seam between two
+/// consecutive overlapping chunks. The 0.5 s chunk overlap can only repeat a
+/// couple of words; a short cap keeps the match from gluing to a coincidental
+/// phrase repeat earlier in the sentence.
+const MAX_SEAM_WORDS: usize = 8;
+
+/// One transcribed span of the audio timeline.
+#[derive(Debug, Clone)]
+struct TranscriptSegment {
+    /// Transcribed text for this span (trimmed, may be empty for silence).
+    text: String,
+    /// Audio timeline position where this span starts.
+    start: Duration,
+    /// Audio timeline position where this span ends.
+    end: Duration,
+}
+
 /// Accumulated transcription across chunks.
+///
+/// Chunks arrive as windows over the audio timeline and may *re-cover* audio
+/// that earlier chunks already transcribed (warm-up windows grow from the
+/// stream start; steady-state windows overlap by a fraction of a second).
+/// Text is reconciled by span, not blindly appended:
+///
+/// - a chunk whose window starts at or before an existing segment's start
+///   *replaces* that segment (bigger window over the same audio wins);
+/// - a chunk that partially overlaps the previous segment has its seam
+///   deduplicated at word level, so the 0.5 s overlap doesn't repeat words.
 #[derive(Debug, Default)]
 struct TranscriptAccumulator {
-    /// Segments from completed chunks
-    segments: Vec<String>,
+    /// Reconciled segments, ordered by start time.
+    segments: Vec<TranscriptSegment>,
     /// Current partial (unstable) text
     current_partial: Option<String>,
-    /// Total audio duration processed
-    total_duration: Duration,
 }
 
 impl TranscriptAccumulator {
@@ -179,11 +229,32 @@ impl TranscriptAccumulator {
         Self::default()
     }
 
-    fn add_segment(&mut self, text: String, duration: Duration) {
-        if !text.trim().is_empty() {
-            self.segments.push(text.trim().to_string());
+    /// Reconcile a chunk transcription covering `start..end` into the
+    /// transcript.
+    fn add_chunk(&mut self, text: String, start: Duration, end: Duration) {
+        // Bigger window re-covering earlier spans replaces them.
+        while matches!(self.segments.last(), Some(last) if last.start >= start) {
+            self.segments.pop();
         }
-        self.total_duration += duration;
+
+        let mut text = text.trim().to_string();
+
+        // Word-level seam dedupe against the previous segment when the audio
+        // windows overlap: drop leading words that repeat its tail.
+        if let Some(prev) = self.segments.last_mut() {
+            if prev.end > start && !text.is_empty() {
+                text = strip_seam_overlap(&prev.text, &text);
+            }
+            if text.is_empty() {
+                // Nothing new to say (silence or the whole chunk was seam
+                // overlap) — just extend the covered span.
+                prev.end = prev.end.max(end);
+                self.current_partial = None;
+                return;
+            }
+        }
+
+        self.segments.push(TranscriptSegment { text, start, end });
         self.current_partial = None;
     }
 
@@ -191,25 +262,76 @@ impl TranscriptAccumulator {
         self.current_partial = Some(text);
     }
 
+    /// Audio timeline covered so far.
+    fn covered_duration(&self) -> Duration {
+        self.segments
+            .last()
+            .map(|s| s.end)
+            .unwrap_or(Duration::ZERO)
+    }
+
     fn get_full_text(&self) -> String {
-        let mut parts = self.segments.clone();
+        let mut parts: Vec<&str> = self
+            .segments
+            .iter()
+            .map(|s| s.text.as_str())
+            .filter(|t| !t.is_empty())
+            .collect();
         if let Some(ref partial) = self.current_partial {
             if !partial.trim().is_empty() {
-                parts.push(partial.trim().to_string());
+                parts.push(partial.trim());
             }
         }
         parts.join(" ")
     }
 
     fn get_stable_text(&self) -> String {
-        self.segments.join(" ")
+        self.segments
+            .iter()
+            .map(|s| s.text.as_str())
+            .filter(|t| !t.is_empty())
+            .collect::<Vec<_>>()
+            .join(" ")
     }
 
     fn reset(&mut self) {
         self.segments.clear();
         self.current_partial = None;
-        self.total_duration = Duration::ZERO;
     }
+}
+
+/// Strip from the head of `next` the longest run of words that duplicates the
+/// tail of `prev` (case- and punctuation-insensitive), returning what remains.
+///
+/// Handles the seam between two overlapping audio windows, where the model
+/// transcribes the shared 0.5 s twice — possibly with different punctuation
+/// or casing ("go to the" / "Go to the").
+fn strip_seam_overlap(prev: &str, next: &str) -> String {
+    let prev_words: Vec<&str> = prev.split_whitespace().collect();
+    let next_words: Vec<&str> = next.split_whitespace().collect();
+
+    let normalize = |w: &str| {
+        w.chars()
+            .filter(|c| c.is_alphanumeric())
+            .collect::<String>()
+            .to_lowercase()
+    };
+
+    let max_k = MAX_SEAM_WORDS.min(prev_words.len()).min(next_words.len());
+    let matched = (1..=max_k)
+        .rev()
+        .find(|&k| {
+            prev_words[prev_words.len() - k..]
+                .iter()
+                .zip(&next_words[..k])
+                .all(|(p, n)| {
+                    let (p, n) = (normalize(p), normalize(n));
+                    !p.is_empty() && p == n
+                })
+        })
+        .unwrap_or(0);
+
+    next_words[matched..].join(" ")
 }
 
 /// Streaming ASR session.
@@ -241,10 +363,16 @@ pub struct StreamSession {
     // model_dir: PathBuf,
     /// Loaded model metadata
     metadata: ModelMetadata,
-    /// Template executor for inference
-    executor: TemplateExecutor,
+    /// Template executor for inference.
+    ///
+    /// Shared so a caller that already loaded the model (e.g. the SDK's
+    /// `XybridModel`) can hand its executor to the session and the stream
+    /// reuses the loaded weights instead of paying a fresh cold start.
+    executor: Arc<Mutex<TemplateExecutor>>,
     /// Configuration
     config: StreamConfig,
+    /// Language auto-detected for this stream, reused by later windows.
+    detected_language: Option<String>,
     /// Audio buffer
     buffer: AudioBuffer,
     /// Transcript accumulator
@@ -292,6 +420,26 @@ impl StreamSession {
     /// # }
     /// ```
     pub fn new<P: AsRef<Path>>(model_dir: P, config: StreamConfig) -> StreamResult<Self> {
+        // Fresh executor owned by this session alone; the model loads on the
+        // first inference (or `warmup`).
+        let executor = Arc::new(Mutex::new(TemplateExecutor::with_base_path(
+            model_dir.as_ref().to_str().unwrap_or("."),
+        )));
+        Self::with_executor(model_dir, config, executor)
+    }
+
+    /// Create a streaming session that reuses an existing executor.
+    ///
+    /// The executor keeps its loaded-model cache, so a caller that already
+    /// ran (or warmed up) this model skips the cold start entirely — the
+    /// session's first chunk executes against warm weights. Inference from
+    /// other holders of the same executor serializes with this session on
+    /// the mutex.
+    pub fn with_executor<P: AsRef<Path>>(
+        model_dir: P,
+        config: StreamConfig,
+        executor: Arc<Mutex<TemplateExecutor>>,
+    ) -> StreamResult<Self> {
         let model_dir = model_dir.as_ref().to_path_buf();
 
         // Validate model directory exists
@@ -317,9 +465,6 @@ impl StreamSession {
         let metadata: ModelMetadata = serde_json::from_str(&metadata_str)
             .map_err(|e| StreamError::ConfigError(format!("Failed to parse metadata: {}", e)))?;
 
-        // Create executor with model directory as base path
-        let executor = TemplateExecutor::with_base_path(model_dir.to_str().unwrap_or("."));
-
         // Infer optimal buffer config from model type
         let buffer_config = Self::infer_buffer_config(&metadata, &config);
         let buffer = AudioBuffer::with_config(buffer_config);
@@ -335,6 +480,7 @@ impl StreamSession {
                         metadata,
                         executor,
                         config,
+                        detected_language: None,
                         buffer,
                         transcript: TranscriptAccumulator::new(),
                         state: StreamState::Idle,
@@ -370,6 +516,7 @@ impl StreamSession {
             metadata,
             executor,
             config,
+            detected_language: None,
             buffer,
             transcript: TranscriptAccumulator::new(),
             state: StreamState::Idle,
@@ -383,22 +530,30 @@ impl StreamSession {
 
     /// Infer optimal buffer configuration from model metadata.
     fn infer_buffer_config(metadata: &ModelMetadata, config: &StreamConfig) -> AudioBufferConfig {
-        // Check if this is a Whisper model (SafeTensors/Candle)
+        // Whisper on either backend: SafeTensors/Candle or GGML/whisper.cpp.
+        // The window shape is a property of the *model architecture* (30 s
+        // encoder, mel hop), not of the runtime executing it, so both get the
+        // same buffer configuration.
         let is_whisper = match &metadata.execution_template {
             ExecutionTemplate::SafeTensors { architecture, .. } => {
                 architecture.as_deref() == Some("whisper")
             }
+            ExecutionTemplate::GgmlWhisper { .. } => true,
             _ => false,
         };
 
         if is_whisper {
             // Whisper: Use 5s chunks for responsive streaming (max 30s supported)
-            // This gives partial results every ~5 seconds while speaking
+            // This gives partial results every ~5 seconds while speaking.
+            // Warm-up windows get the first words on screen after ~1.5 s
+            // instead of a full window; each re-covers the stream from the
+            // start so the 5 s window then replaces them with better context.
             AudioBufferConfig {
                 sample_rate: 16000,
                 chunk_duration_secs: 5.0,
                 overlap_secs: 0.5, // Small overlap for continuity
                 max_buffer_secs: config.buffer_config.max_buffer_secs,
+                warmup_chunk_secs: vec![1.5, 3.0],
             }
         } else {
             // Default/Wav2Vec2: shorter chunks
@@ -407,6 +562,7 @@ impl StreamSession {
                 chunk_duration_secs: 5.0,
                 overlap_secs: config.buffer_config.overlap_secs,
                 max_buffer_secs: config.buffer_config.max_buffer_secs,
+                warmup_chunk_secs: Vec::new(),
             }
         }
     }
@@ -422,6 +578,51 @@ impl StreamSession {
         F: Fn(PartialResult) + Send + Sync + 'static,
     {
         self.on_partial = Some(Arc::new(callback));
+    }
+
+    /// Pay the model's cold-start cost now, before real audio arrives.
+    ///
+    /// Runs a short silent inference through the executor. The first
+    /// execution of a session lazily loads weights and pays first-run
+    /// allocation costs (measured ~5 s for whisper-tiny on a Pixel 8, vs
+    /// ~2.5 s warm) — doing it here overlaps that cost with the user
+    /// starting to speak instead of adding it to the first visible partial.
+    ///
+    /// Only meaningful in [`StreamState::Idle`]; once audio has been fed the
+    /// first chunk already paid the cost, so this becomes a no-op. The
+    /// transcript and audio buffer are untouched either way.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StreamError::InferenceError`] if the warm-up inference
+    /// fails; the session stays usable (state is not poisoned).
+    pub fn warmup(&mut self) -> StreamResult<()> {
+        if self.state != StreamState::Idle {
+            return Ok(());
+        }
+
+        let mut executor = self.executor.lock().unwrap_or_else(|e| e.into_inner());
+
+        // A shared executor may already hold the loaded model (a previous
+        // session or a direct run paid the cold start). The warm-up pass
+        // itself costs a full encoder pass (~2.5 s for whisper-tiny on a
+        // Pixel 8), so skip it when there is nothing left to warm.
+        if executor.is_model_loaded(&self.metadata) {
+            return Ok(());
+        }
+
+        // Half a second of silence. Whisper pads every input to its fixed
+        // mel window, so the duration barely matters — one encoder pass is
+        // the cost either way.
+        let sample_rate = self.buffer.config().sample_rate;
+        let silence = vec![0.0f32; (sample_rate as usize) / 2];
+        let wav_bytes = samples_to_wav(&silence, sample_rate);
+        let envelope = self.config.inference_envelope(wav_bytes, None);
+
+        executor
+            .execute(&self.metadata, &envelope, None)
+            .map(|_| ())
+            .map_err(|e| StreamError::InferenceError(format!("Warm-up failed: {}", e)))
     }
 
     /// Feed audio samples into the stream.
@@ -473,7 +674,7 @@ impl StreamSession {
             text,
             confidence: None,
             is_stable: false,
-            audio_duration: self.transcript.total_duration,
+            audio_duration: self.transcript.covered_duration(),
             chunk_sequence: self.buffer.stats().chunks_extracted,
         })
     }
@@ -522,6 +723,7 @@ impl StreamSession {
         self.transcript.reset();
         self.state = StreamState::Idle;
         self.last_error = None;
+        self.detected_language = None;
         // Reset VAD state
         if let Some(ref mut vad) = self.vad {
             vad.reset();
@@ -540,6 +742,15 @@ impl StreamSession {
         self.state
     }
 
+    /// Return the language auto-detected for the current stream.
+    ///
+    /// This remains `None` when the caller configured an explicit language or
+    /// the active ASR runtime does not report language detection.
+    #[must_use]
+    pub fn detected_language(&self) -> Option<&str> {
+        self.detected_language.as_deref()
+    }
+
     /// Get buffer statistics.
     pub fn stats(&self) -> StreamStats {
         let buffer_stats = self.buffer.stats();
@@ -549,7 +760,7 @@ impl StreamSession {
             samples_processed: buffer_stats.total_processed,
             chunks_processed: buffer_stats.chunks_extracted,
             transcript_length: self.transcript.get_full_text().len(),
-            audio_duration: self.transcript.total_duration,
+            audio_duration: self.transcript.covered_duration(),
         }
     }
 
@@ -593,12 +804,16 @@ impl StreamSession {
         // Convert samples to WAV bytes
         let wav_bytes = samples_to_wav(&chunk.samples, self.buffer.config().sample_rate);
 
-        // Create envelope with audio data
-        let envelope = Envelope::new(EnvelopeKind::Audio(wav_bytes));
+        // Create envelope with audio data and per-session ASR overrides.
+        let envelope = self
+            .config
+            .inference_envelope(wav_bytes, self.detected_language.as_deref());
 
         // Execute through TemplateExecutor (handles ONNX, Candle, etc.)
         let output = self
             .executor
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
             .execute(&self.metadata, &envelope, None)
             .map_err(|e| StreamError::InferenceError(format!("Execution failed: {}", e)))?;
 
@@ -612,8 +827,29 @@ impl StreamSession {
             }
         };
 
-        // Update transcript
-        self.transcript.add_segment(text.clone(), chunk.duration());
+        // Short warm-up windows are deliberately excluded. The committed
+        // French fixture is misidentified from its first 1.5 s but correctly
+        // identified from the full 5 s window; caching the early guess would
+        // make every later transcript consistently wrong. Explicit session
+        // configuration takes precedence forever, and the first full-window
+        // detection remains stable until `reset` starts a new stream.
+        if self.config.language.is_none()
+            && self.detected_language.is_none()
+            && !self.buffer.config().is_warmup_chunk(chunk.sequence)
+        {
+            self.detected_language = output
+                .metadata
+                .get(Envelope::DETECTED_LANGUAGE_METADATA_KEY)
+                .map(String::as_str)
+                .map(str::trim)
+                .filter(|language| !language.is_empty())
+                .map(str::to_owned);
+        }
+
+        // Reconcile into the transcript (replaces re-covered spans, dedupes
+        // the overlap seam).
+        self.transcript
+            .add_chunk(text.clone(), chunk.start_time, chunk.end_time);
 
         // Fire callback if set
         if let Some(ref callback) = self.on_partial {
@@ -657,17 +893,87 @@ mod tests {
         let config = StreamConfig::default();
         assert_eq!(config.buffer_config.sample_rate, 16000);
         assert!(config.enable_partial_results);
+        assert_eq!(config.audio_ctx, None);
     }
 
     #[test]
-    fn test_transcript_accumulator() {
+    fn configured_asr_overrides_are_added_to_the_inference_envelope() {
+        let config = StreamConfig {
+            language: Some("fr".to_string()),
+            audio_ctx: Some(500),
+            ..Default::default()
+        };
+
+        let envelope = config.inference_envelope(vec![1, 2, 3], Some("de"));
+
+        assert_eq!(
+            envelope.metadata.get("language").map(String::as_str),
+            Some("fr")
+        );
+        assert_eq!(
+            envelope.metadata.get("audio_ctx").map(String::as_str),
+            Some("500")
+        );
+    }
+
+    #[test]
+    fn absent_asr_overrides_leave_bundle_defaults_in_control() {
+        let config = StreamConfig {
+            language: None,
+            audio_ctx: None,
+            ..Default::default()
+        };
+
+        let envelope = config.inference_envelope(vec![1, 2, 3], None);
+
+        assert!(!envelope.metadata.contains_key("language"));
+        assert!(!envelope.metadata.contains_key("audio_ctx"));
+    }
+
+    #[test]
+    fn detected_language_is_reused_when_no_override_is_configured() {
+        let config = StreamConfig {
+            language: None,
+            ..Default::default()
+        };
+
+        let envelope = config.inference_envelope(vec![1, 2, 3], Some("fr"));
+
+        assert_eq!(
+            envelope.metadata.get("language").map(String::as_str),
+            Some("fr")
+        );
+    }
+
+    #[test]
+    fn configured_language_takes_precedence_over_detected_language() {
+        let config = StreamConfig {
+            language: Some("en".to_string()),
+            ..Default::default()
+        };
+
+        let envelope = config.inference_envelope(vec![1, 2, 3], Some("fr"));
+
+        assert_eq!(
+            envelope.metadata.get("language").map(String::as_str),
+            Some("en")
+        );
+    }
+
+    fn secs(s: f64) -> Duration {
+        Duration::from_secs_f64(s)
+    }
+
+    #[test]
+    fn test_transcript_accumulator_disjoint_chunks_append() {
         let mut acc = TranscriptAccumulator::new();
 
-        acc.add_segment("Hello".to_string(), Duration::from_secs(1));
-        acc.add_segment("world".to_string(), Duration::from_secs(1));
+        acc.add_chunk("Hello".to_string(), secs(0.0), secs(1.0));
+        acc.add_chunk("world".to_string(), secs(1.0), secs(2.0));
 
         assert_eq!(acc.get_stable_text(), "Hello world");
         assert_eq!(acc.get_full_text(), "Hello world");
+        assert_eq!(acc.covered_duration(), secs(2.0));
 
         acc.set_partial("testing".to_string());
         assert_eq!(acc.get_full_text(), "Hello world testing");
@@ -675,12 +981,70 @@ mod tests {
     }
 
     #[test]
+    fn test_transcript_accumulator_growing_window_replaces() {
+        let mut acc = TranscriptAccumulator::new();
+
+        // Warm-up windows all start at 0 and grow: each replaces the last.
+        acc.add_chunk("I want".to_string(), secs(0.0), secs(1.5));
+        acc.add_chunk("I want to go".to_string(), secs(0.0), secs(3.0));
+        assert_eq!(acc.get_full_text(), "I want to go");
+
+        acc.add_chunk("I want to go home now".to_string(), secs(0.0), secs(5.0));
+        assert_eq!(acc.get_full_text(), "I want to go home now");
+        assert_eq!(acc.covered_duration(), secs(5.0));
+
+        // Steady-state chunk after warm-up appends, not replaces.
+        acc.add_chunk("and sleep".to_string(), secs(4.5), secs(9.5));
+        assert_eq!(acc.get_full_text(), "I want to go home now and sleep");
+    }
+
+    #[test]
+    fn test_transcript_accumulator_seam_dedupe() {
+        let mut acc = TranscriptAccumulator::new();
+
+        acc.add_chunk("I want to go".to_string(), secs(0.0), secs(5.0));
+        // Overlapping window re-transcribes the shared 0.5s ("to go"),
+        // with different casing/punctuation on the seam.
+        acc.add_chunk("To go, home now".to_string(), secs(4.5), secs(9.5));
+
+        assert_eq!(acc.get_full_text(), "I want to go home now");
+        assert_eq!(acc.covered_duration(), secs(9.5));
+    }
+
+    #[test]
+    fn test_transcript_accumulator_all_seam_extends_span() {
+        let mut acc = TranscriptAccumulator::new();
+
+        acc.add_chunk("go home".to_string(), secs(0.0), secs(5.0));
+        // Trailing chunk is entirely seam overlap (e.g. silence after speech).
+        acc.add_chunk("go home".to_string(), secs(4.5), secs(6.0));
+
+        assert_eq!(acc.get_full_text(), "go home");
+        assert_eq!(acc.covered_duration(), secs(6.0));
+    }
+
+    #[test]
     fn test_transcript_accumulator_reset() {
         let mut acc = TranscriptAccumulator::new();
-        acc.add_segment("Hello".to_string(), Duration::from_secs(1));
+        acc.add_chunk("Hello".to_string(), secs(0.0), secs(1.0));
         acc.reset();
 
         assert_eq!(acc.get_stable_text(), "");
-        assert_eq!(acc.total_duration, Duration::ZERO);
+        assert_eq!(acc.covered_duration(), Duration::ZERO);
+    }
+
+    #[test]
+    fn test_strip_seam_overlap() {
+        assert_eq!(strip_seam_overlap("I want to go", "to go home"), "home");
+        assert_eq!(
+            strip_seam_overlap("I want", "no overlap here"),
+            "no overlap here"
+        );
+        assert_eq!(strip_seam_overlap("same words", "Same words."), "");
+        // Cap: a repeat longer than MAX_SEAM_WORDS can't be a 0.5s seam, so
+        // it is kept as genuine repetition.
+        let prev = "one two three four five six seven eight nine";
+        let next = "one two three four five six seven eight nine ten";
+        assert_eq!(strip_seam_overlap(prev, next), next);
     }
 }

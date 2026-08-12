@@ -142,7 +142,7 @@ See the full [Installation Guide](https://docs.xybrid.dev/en/docs/quickstart) fo
 
 ```yaml
 dependencies:
-  xybrid_flutter: ^0.3.0
+  xybrid_flutter: ^0.5.0
 ```
 
 **Run a model:**
@@ -159,15 +159,15 @@ final result = await model.run(XybridEnvelope.text('Hello world'));
 
 ```gradle
 dependencies {
-    implementation("ai.xybrid:xybrid-kotlin:0.3.0")
+    implementation("ai.xybrid:xybrid-kotlin:0.5.0")
 }
 ```
 
 **Run a model:**
 
 ```kotlin
-val model = XybridModelLoader.fromRegistry("kokoro-82m").load()
-val result = model.run(Envelope.text("Hello world"))
+val model = Xybrid.model("kokoro-82m").load()
+val result = model.runAsync(Envelope.text("Hello world"))
 // result → 24kHz WAV audio
 ```
 
@@ -177,15 +177,15 @@ val result = model.run(Envelope.text("Hello world"))
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/xybrid-ai/xybrid.git", from: "0.3.0")
+    .package(url: "https://github.com/xybrid-ai/xybrid.git", from: "0.5.0")
 ]
 ```
 
 **Run a model:**
 
 ```swift
-let model = try ModelLoader.fromRegistry(modelId: "kokoro-82m").load()
-let result = try model.run(envelope: Envelope.text("Hello world"))
+let model = try await Xybrid.model("kokoro-82m").load()
+let result = try await model.runAsync(envelope: Envelope.text("Hello world"))
 // result → 24kHz WAV audio
 ```
 
@@ -216,7 +216,7 @@ var result = model.Run(Envelope.Text("Hello world"));
 
 ```toml
 [dependencies]
-xybrid = "0.3.0"
+xybrid = "0.5.0"
 ```
 
 **Run a model:**
@@ -258,9 +258,9 @@ Chain models together into a single multi-model inference pipeline (MMP) — bui
 # voice-assistant.yaml
 name: voice-assistant
 stages:
-  - model: whisper-tiny    # Speech → text
-  - model: qwen2.5-0.5b    # Process with LLM
-  - model: kokoro-82m      # Text → speech
+  - model: whisper-tiny-ggml  # Speech → text
+  - model: qwen2.5-0.5b       # Process with LLM
+  - model: kokoro-82m         # Text → speech
 ```
 
 **CLI:**
@@ -316,7 +316,8 @@ All models run entirely on-device. No cloud, no API keys required. Browse the fu
 
 | Model | Params | Format | Description |
 |-------|--------|--------|-------------|
-| Whisper Tiny | 39M | SafeTensors | Multilingual transcription (Candle runtime) |
+| Whisper Tiny (`whisper-tiny-ggml`) | 39M | GGML Q5_1 | Multilingual transcription on whisper.cpp — in every platform preset |
+| Whisper Tiny (`whisper-tiny`) | 39M | SafeTensors | Same weights on the Candle runtime — needs a build with the `candle` feature |
 | Wav2Vec2 Base | 95M | ONNX | English ASR with CTC decoding |
 
 ### Text-to-Speech
@@ -410,7 +411,7 @@ See the [model metadata docs](docs/sdk/API_REFERENCE.md) for the full schema, or
 | Embeddings | 🔜 | 🔜 | 🔜 | 🔜 | 🔜 |
 | Multi-Model Pipelines (MMP) | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Model Download & Caching | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Hardware Acceleration | Metal, ANE | CPU | Metal, ANE | CUDA | CUDA |
+| Hardware Acceleration | Metal, ANE | CPU | Metal, ANE | CPU, opt-in Vulkan | CPU |
 
 **SDK MMP support:** Flutter ✅ · Rust ✅ · Kotlin 🔜 · Swift 🔜 · Unity 🔜
 
@@ -445,7 +446,7 @@ MLX is selected automatically on Apple Silicon when a model has an `mlx` variant
 - **Offline capable** — No internet required after initial model download.
 - **Cross-platform** — One API across iOS, Android, macOS, Linux, and Windows.
 - **Multi-model pipelines (MMP)** — Chain models together (ASR → LLM → TTS) in a single call.
-- **Automatic optimization** — Hardware acceleration on Apple Neural Engine, Metal, MLX, and CUDA.
+- **Hardware acceleration** — Apple Neural Engine and Metal on Apple platforms; opt-in Vulkan for Linux llama.cpp builds. Android and Windows run on CPU today, and prebuilt Linux binaries are CPU-only (Vulkan is a build-time opt-in — see [installation](docs/INSTALLATION.md#platform-features)).
 
 ### How it compares
 

@@ -41,7 +41,8 @@ SLICE="$EXPORT/$TARGET"
 # archives build.rs's resolve_prebuilt requires are present and non-empty in
 # lib/ OR lib64/ before publishing. Mirror required_archives() in build.rs:
 # MSVC names static libs `<name>.lib` (no prefix); every other target is
-# Unix-style `lib<name>.a`. Base set, plus ggml-metal on Apple and mtmd on vision.
+# Unix-style `lib<name>.a`. Base set, plus ggml-metal on Apple, mtmd on vision,
+# and ggml-vulkan on Vulkan feature sets.
 case "$TARGET" in
   *windows-msvc*) pfx=''; sfx='.lib' ;;
   *) pfx='lib'; sfx='.a' ;;
@@ -50,7 +51,12 @@ archives=("${pfx}llama${sfx}" "${pfx}ggml${sfx}" "${pfx}ggml-base${sfx}" "${pfx}
 case "$TARGET" in
   *apple*) archives+=("${pfx}ggml-metal${sfx}") ;;
 esac
-[ "$FEATURES" = "vision" ] && archives+=("${pfx}mtmd${sfx}")
+case "$FEATURES" in
+  vision|vision-vulkan) archives+=("${pfx}mtmd${sfx}") ;;
+esac
+case "$FEATURES" in
+  vulkan|vision-vulkan) archives+=("${pfx}ggml-vulkan${sfx}") ;;
+esac
 for a in "${archives[@]}"; do
   [ -s "$SLICE/lib/$a" ] || [ -s "$SLICE/lib64/$a" ] || {
     echo "natives-push: required archive $a missing — refusing to publish incomplete slice" >&2

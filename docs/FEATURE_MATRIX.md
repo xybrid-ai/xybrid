@@ -25,7 +25,7 @@ This document provides a comprehensive reference for all feature flags, platform
 | **ort-download** | Download prebuilt ONNX Runtime binaries | `ort/download-binaries`, `ort/tls-native` |
 | **ort-dynamic** | Load ONNX Runtime .so at runtime | `ort/load-dynamic` |
 | **ort-coreml** | Apple Neural Engine acceleration | `ort/coreml` |
-| **candle** | Pure Rust ML framework (Whisper) — Android-compatible | `candle-core`, `candle-nn`, `candle-transformers`, `safetensors`, `byteorder`, `num-traits` |
+| **candle** | Pure Rust ML framework — the SafeTensors Whisper path. **Opt-in only**: no `platform-*` preset enables it (`asr-whispercpp` / whisper.cpp is the shipped ASR backend). Android-compatible | `candle-core`, `candle-nn`, `candle-transformers`, `safetensors`, `byteorder`, `num-traits`, `rayon` |
 | **candle-hub** | Candle + HuggingFace Hub download support | `candle`, `hf-hub` (requires OpenSSL — **not for Android**) |
 | **candle-metal** | Candle with Metal GPU acceleration | `candle`, `candle-core/metal`, `candle-nn/metal` |
 | **candle-cuda** | Candle with CUDA GPU acceleration | `candle`, `candle-core/cuda` |
@@ -34,6 +34,9 @@ This document provides a comprehensive reference for all feature flags, platform
 | **llm-mistral-cuda** | mistral.rs with CUDA acceleration | `llm-mistral`, `mistralrs/cuda` |
 | **vision** | Image envelope primitives and image preprocessing | *(no additional dependencies; uses the always-present `image` crate)* |
 | **llm-llamacpp** | llama.cpp backend (cmake build + link) | `llama-cpp-sys/bindings`, `xybrid-llama/bindings` |
+| **llm-llamacpp-vision** | Native llama multimodal (`mmproj` / `mtmd`) backend on top of `llm-llamacpp` | `llm-llamacpp`, `xybrid-llama-sys/vision`, `xybrid-llama/vision` |
+| **asr-whispercpp** | whisper.cpp speech recognition. Requires `llm-llamacpp` — whisper.cpp links the ggml that llama.cpp builds rather than a second copy | `llm-llamacpp`, `xybrid-whisper/bindings` |
+
 | **llm-llamacpp-vision** | llama.cpp VLM path with `mmproj` / `mtmd` support | `llm-llamacpp`, `vision`, `llama-cpp-sys/vision`, `xybrid-llama/vision` |
 | **llm-mlx** | MLX SafeTensors metadata, selector, tokenizer, weight-validation, and adapter routing tier — cross-platform, no MLX linkage | `xybrid-mlx`, `safetensors`, `minijinja`, `rand` |
 | **llm-mlx-runtime** | MLX SafeTensors LLM and embedding forward pass via Metal — Apple Silicon Mac runtime; iOS remains staged until upstream MLX ships Metal-enabled iOS slices | `llm-mlx`, `xybrid-mlx/bindings` |
@@ -52,6 +55,20 @@ This document provides a comprehensive reference for all feature flags, platform
 - `vision` alone enables image envelopes and image preprocessing. Local llama.cpp
   VLM generation requires `llm-llamacpp-vision`, which composes `vision` with
   the llama.cpp backend and links the vendored `mtmd` helpers.
+- Vulkan is a build-time opt-in rather than a Cargo feature. On Linux, set
+  `XYBRID_LLAMA_CPP_VULKAN=1` while building `platform-desktop` (or another
+  feature set containing `llm-llamacpp`). This sets `GGML_VULKAN=ON` and
+  requires the Vulkan SDK/loader to be available to CMake and the linker.
+  Windows is not supported yet: ggml builds `vulkan-shaders-gen` as a nested
+  CMake project, and under cargo's `OUT_DIR` the paths MSBuild generates for it
+  exceed the 260-character `MAX_PATH` limit. Every other target rejects the
+  variable at build time.
+- Bazel has its own Vulkan switch, `--config=linux-vulkan` (which sets
+  `--//:vulkan=true`), because Bazel writes llama.cpp's cmake defines directly
+  and never reads `XYBRID_LLAMA_CPP_VULKAN`. It selects `//:llama_vulkan`, a
+  locally-executed target — the exec machine needs `glslc`, the Vulkan headers
+  and the loader. This is the lane that matters for shipped Linux artifacts,
+  since the CLI builds from Bazel; the published binaries are still CPU-only.
 
 - `llm-mlx` gates the `runtime_adapter/mlx` module (config parsing, tokenizer,
   chat template, sampler, weight-key validation, selector/error surfaces, and
@@ -102,10 +119,10 @@ This document provides a comprehensive reference for all feature flags, platform
 | Feature | Description | Forwards to xybrid-core |
 |---------|-------------|-------------------------|
 | **default** | No default features | *(none)* |
-| **platform-android** | Android preset | `ort-dynamic`, `candle`, `llm-llamacpp` |
-| **platform-ios** | iOS preset | `ort-download`, `ort-coreml`, `candle-metal`, `candle-hub`, `llm-llamacpp` |
-| **platform-macos** | macOS preset | `ort-download`, `ort-coreml`, `candle-metal`, `candle-hub`, `llm-llamacpp` |
-| **platform-desktop** | Desktop (Linux/Windows) preset | `ort-download`, `llm-llamacpp` |
+| **platform-android** | Android preset | `ort-dynamic`, `llm-llamacpp-vision`, `asr-whispercpp` |
+| **platform-ios** | iOS preset | `ort-download`, `ort-coreml`, `llm-llamacpp-vision`, `asr-whispercpp`, `llm-mlx` |
+| **platform-macos** | macOS preset | `ort-download`, `ort-coreml`, `llm-llamacpp-vision`, `asr-whispercpp`, `llm-mlx` |
+| **platform-desktop** | Desktop (Linux/Windows) preset | `ort-download`, `llm-llamacpp-vision`, `asr-whispercpp` |
 | **ort-download** | Forward to core | `xybrid-core/ort-download` |
 | **ort-dynamic** | Forward to core | `xybrid-core/ort-dynamic` |
 | **ort-coreml** | Forward to core | `xybrid-core/ort-coreml` |
@@ -117,6 +134,7 @@ This document provides a comprehensive reference for all feature flags, platform
 | **llm-mistral-metal** | Forward to core | `xybrid-core/llm-mistral-metal` |
 | **llm-mistral-cuda** | Forward to core | `xybrid-core/llm-mistral-cuda` |
 | **llm-llamacpp** | Forward to core | `xybrid-core/llm-llamacpp` |
+| **asr-whispercpp** | Forward to core (pulls `llm-llamacpp` transitively) | `xybrid-core/asr-whispercpp` |
 | **vision** | Forward to core | `xybrid-core/vision` |
 | **llm-llamacpp-vision** | Forward to core VLM path | `xybrid-core/llm-llamacpp-vision`, `llm-llamacpp`, `vision` |
 
@@ -130,11 +148,12 @@ This document provides a comprehensive reference for all feature flags, platform
 | **huggingface** | Direct HuggingFace loading for `xybrid run --huggingface` | `xybrid-sdk/huggingface` |
 | **onnx-inspect** | ONNX metadata inspection for `xybrid init` | `xybrid-sdk/onnx-inspect` |
 | **vision** | `xybrid run --input-image` and REPL `/image` envelope construction for VLM turns | `xybrid-core/vision`, `xybrid-sdk/vision` |
-| **llm-llamacpp-vision** | llama.cpp VLM runtime plus CLI image input support | `llm-llamacpp`, `vision`, `xybrid-sdk/llm-llamacpp-vision` |
-| **platform-android** | Android release preset | `ort-dynamic`, `llm-llamacpp`, `candle`, `huggingface` |
-| **platform-ios** | iOS release preset | `ort-download`, `ort-coreml`, `candle-metal`, `candle-hub`, `llm-llamacpp`, `huggingface` |
-| **platform-macos** | macOS release preset | `ort-download`, `ort-coreml`, `candle-metal`, `candle-hub`, `llm-llamacpp`, `huggingface` |
-| **platform-desktop** | Linux/Windows release preset | `ort-download`, `llm-llamacpp`, `huggingface` |
+| **llm-llamacpp-vision** | Native llama.cpp VLM runtime for image turns | `llm-llamacpp`, `xybrid-sdk/llm-llamacpp-vision` |
+| **asr-whispercpp** | whisper.cpp speech recognition for `xybrid run --input-audio` | `xybrid-sdk/asr-whispercpp` |
+| **platform-android** | Android release preset — forwards to `xybrid-sdk/platform-android` | `ort-dynamic`, `llm-llamacpp-vision`, `asr-whispercpp`, `llm-llamacpp`, `huggingface` |
+| **platform-ios** | iOS release preset — forwards to `xybrid-sdk/platform-ios` | `ort-download`, `ort-coreml`, `llm-llamacpp-vision`, `asr-whispercpp`, `llm-llamacpp`, `llm-mlx`, `huggingface` |
+| **platform-macos** | macOS release preset — forwards to `xybrid-sdk/platform-macos` | `ort-download`, `ort-coreml`, `llm-llamacpp-vision`, `asr-whispercpp`, `llm-llamacpp`, `llm-mlx`, `huggingface` |
+| **platform-desktop** | Linux/Windows release preset — forwards to `xybrid-sdk/platform-desktop` | `ort-download`, `llm-llamacpp-vision`, `asr-whispercpp`, `llm-llamacpp`, `huggingface` |
 
 ---
 
@@ -142,24 +161,38 @@ This document provides a comprehensive reference for all feature flags, platform
 
 Platform presets are the **single source of truth** for platform-specific feature combinations. They are defined in `xybrid-sdk/Cargo.toml` and forwarded through the crate hierarchy.
 
-All current platform presets default to **text-only** llama.cpp support. Vision-language builds must compose the platform preset with `llm-llamacpp-vision`; use `vision` alone only when a crate needs image envelope/preprocessing types without the llama.cpp VLM runtime.
+All four platform presets ship the vision-language llama.cpp path (`llm-llamacpp-vision`, ~0.7 MiB stripped on the Android `.so` proxy / ~1.5 MiB on the iOS static-lib proxy) **and** whisper.cpp speech recognition (`asr-whispercpp`, ~0.2 MiB stripped). VLM and ASR work out of the box — there is nothing extra to compose.
 
-| Preset | Target Platform | Core Features Enabled | VLM Default | Rationale |
-|--------|-----------------|----------------------|-------------|-----------|
-| **platform-android** | Android (all ABIs) | `ort-dynamic`, `candle`, `llm-llamacpp` | Off; add `llm-llamacpp-vision` | Dynamic ORT loading for AAR distribution; Candle (CPU) for Whisper ASR; llama.cpp has runtime SIMD detection; mistral.rs causes SIGILL on devices without ARMv8.2-A FP16 |
-| **platform-ios** | iOS (arm64, simulator) | `ort-download`, `ort-coreml`, `candle-metal`, `candle-hub`, `llm-llamacpp`, `llm-mlx` | Off; add `llm-llamacpp-vision` | Static ORT linking; CoreML for ANE acceleration; Metal for Candle; non-linking MLX metadata/registry/selector parity while real MLX runtime remains staged |
-| **platform-macos** | macOS (arm64, x86_64) | `ort-download`, `ort-coreml`, `candle-metal`, `candle-hub`, `llm-llamacpp`, `llm-mlx` | Off; add `llm-llamacpp-vision` | Static ORT linking; CoreML/Candle Metal; llama.cpp LLM inference; non-linking MLX metadata/selector support by default, with real Apple Silicon MLX execution available through explicit `llm-mlx-runtime` |
-| **platform-desktop** | Linux, Windows | `ort-download`, `llm-llamacpp` | Off; add `llm-llamacpp-vision` | Static ORT linking; llama.cpp for LLM inference (unified across all platforms) |
+Candle is **not** in any preset. It cost ~1.3 MiB stripped on the same Android proxy and ~1.9 MiB on the Apple shape (which also links `candle-metal`), i.e. 6.5-9.5x its replacement, and on a Pixel 8 reached a first partial in 9871 ms against whisper.cpp's 2724 ms. The `candle*` features stay declared and buildable, so anyone who wants the SafeTensors path can opt in explicitly — they are simply not on by default any more.
+
+| Preset | Target Platform | Core Features Enabled | VLM Default | ASR Default | Rationale |
+|--------|-----------------|----------------------|-------------|-------------|-----------|
+| **platform-android** | Android (all ABIs) | `ort-dynamic`, `llm-llamacpp-vision`, `asr-whispercpp` | On | whisper.cpp | Dynamic ORT loading for AAR distribution; whisper.cpp for Whisper ASR on the ggml llama.cpp already links (+0.2 MiB stripped); llama.cpp has runtime SIMD detection; mistral.rs causes SIGILL on devices without ARMv8.2-A FP16 |
+| **platform-ios** | iOS (arm64, simulator) | `ort-download`, `ort-coreml`, `llm-llamacpp-vision`, `asr-whispercpp`, `llm-mlx` | On | whisper.cpp | Static ORT linking; CoreML for ANE acceleration; Metal for GPU via ggml |
+| **platform-macos** | macOS (arm64, x86_64) | `ort-download`, `ort-coreml`, `llm-llamacpp-vision`, `asr-whispercpp`, `llm-mlx` | On | whisper.cpp | Same as iOS - unified Apple platform features |
+| **platform-desktop** | Linux, Windows | `ort-download`, `llm-llamacpp-vision`, `asr-whispercpp` | On | whisper.cpp | Static ORT linking; llama.cpp for LLM inference and whisper.cpp for ASR (unified across all platforms); on Linux set `XYBRID_LLAMA_CPP_VULKAN=1` for Vulkan-enabled custom builds |
 
 > **Note on MLX**: `llm-mlx` is included in the Apple-platform presets (`platform-ios`, `platform-macos`) for metadata, registry, tokenizer, selector, and local SafeTensors routing parity. It is **mutually compatible** with `llm-llamacpp` — both can be enabled in the same build. Automatic registry loading through the Rust SDK model loader, SDK pipelines, `xybrid run`, `xybrid repl`, and `xybrid fetch` asks the selector before fetching LLM and embedding models, but registry MLX is selected only when `llm-mlx-runtime` is enabled and the Metal runtime probe succeeds. Explicit SDK/CLI registry backend overrides request format-specific variants before loading for LLM tasks, fail when the requested backend is unavailable, and reject known embedding tasks for non-MLX local backends. `llm-mlx` itself is cross-platform and non-linking; `llm-mlx-runtime` is the Apple feature that links Metal/Accelerate through `xybrid-mlx/bindings`, with runtime readiness currently validated on Apple Silicon macOS only. CI can validate that runtime from pinned source SHAs when no published xcframework release exists.
 
 > **Note**: The CLI (`xybrid-cli`) adds `huggingface` to all its platform presets so `xybrid run --huggingface` works in release builds. SDK/FFI presets do not include `huggingface` by default — add it individually if needed.
 
-Example VLM builds:
+The presets already carry `llm-llamacpp-vision` and `asr-whispercpp`, so a plain preset build is a VLM + ASR build:
 
 ```bash
-cargo build -p xybrid-cli --features platform-macos,llm-llamacpp-vision
-cargo check -p xybrid-sdk --features platform-desktop,llm-llamacpp-vision
+cargo build -p xybrid-cli --features platform-macos
+cargo check -p xybrid-sdk --features platform-desktop
+```
+
+On Linux, opt into the Vulkan-accelerated llama.cpp build:
+
+```bash
+XYBRID_LLAMA_CPP_VULKAN=1 cargo build -p xybrid-cli --features platform-desktop
+```
+
+To opt back into the Candle SafeTensors path on top of a preset:
+
+```bash
+cargo check -p xybrid-sdk --features platform-macos,candle-metal
 ```
 
 ### Why llm-mistral is NOT on Android
@@ -179,7 +212,8 @@ The following types and modules are conditionally compiled based on feature flag
 | Module | Condition | Description |
 |--------|-----------|-------------|
 | `coreml` | `target_os = "macos" OR target_os = "ios" OR test` | CoreML runtime adapter |
-| `candle` | `feature = "candle"` | Candle (pure Rust) runtime adapter |
+| `candle` | `feature = "candle"` | Candle (pure Rust) runtime adapter — opt-in, not in any preset |
+| `whisper_cpp` | `feature = "asr-whispercpp"` | whisper.cpp ASR runtime adapter (shares llama.cpp's ggml) |
 | `llm` | `feature = "llm-mistral" OR feature = "llm-llamacpp"` | Shared LLM types and adapter |
 | `mistral` | `feature = "llm-mistral"` | MistralBackend implementation |
 | `llama_cpp` | `feature = "llm-llamacpp"` | LlamaCppBackend implementation |
@@ -191,6 +225,7 @@ The following types and modules are conditionally compiled based on feature flag
 | `LlmRuntimeAdapter` import | `feature = "llm-mistral" OR feature = "llm-llamacpp" OR feature = "llm-mlx"` | LLM adapter import |
 | `llm_adapter_cache` field | `feature = "llm-mistral" OR feature = "llm-llamacpp" OR feature = "llm-mlx"` | Cached LLM adapter in TemplateExecutor |
 | `mlx_embedding_strategy` field | `feature = "llm-mlx"` | Cached MLX embedding strategy in TemplateExecutor |
+| `ExecutionTemplate::GgmlWhisper` handling | `feature = "asr-whispercpp"` | GGML Whisper (whisper.cpp) execution path |
 | `ExecutionTemplate::Gguf` handling | `feature = "llm-mistral" OR feature = "llm-llamacpp"` | GGUF model execution path; `llm-mlx` alone does not execute GGUF |
 | `ExecutionTemplate::SafeTensors` with `backend: mlx`, or `backend: auto` plus supported MLX LLM / embedding architecture | `feature = "llm-mlx"` | MLX bundle-root execution path |
 | `execute_streaming()` callback-capable impl | `feature = "llm-mistral" OR feature = "llm-llamacpp" OR feature = "llm-mlx"` | Streams for compiled GGUF backends and runtime-ready MLX SafeTensors; non-linking MLX builds surface the MLX runtime gate |
@@ -206,6 +241,7 @@ The following types and modules are conditionally compiled based on feature flag
 | `ONNXMobileRuntimeAdapter` | `target_os = "android" OR test` |
 | `CoreMLRuntimeAdapter` | `target_os = "macos" OR target_os = "ios" OR test` |
 | `CandleBackend`, `CandleRuntimeAdapter` | `feature = "candle"` |
+| `WhisperCppRuntime` | `feature = "asr-whispercpp"` |
 | `ChatMessage`, `GenerationConfig`, `GenerationOutput`, `LlmBackend`, `LlmConfig`, `LlmResult`, `LlmRuntimeAdapter` | `feature = "llm-mistral" OR feature = "llm-llamacpp"` |
 | `MistralBackend` | `feature = "llm-mistral"` |
 | `LlamaCppBackend` | `feature = "llm-llamacpp"` |
@@ -227,7 +263,7 @@ The following feature combinations are invalid and should produce compile-time e
 | `cargo … --all-features` | Target-dependent: on every supported triple `--all-features` triggers at least one row above (ORT load-mode conflict is universal; the Candle Metal/CUDA + ORT CoreML rows fire on the opposite of their supported target). It also enables the marker-only `llm-mistral*` features whose backing crate is currently commented out of the workspace, so the build fails on the missing `mistralrs` import regardless of target. | Use a [release gate](#release-gates) below; never `--all-features` as a CI gate. |
 | `llm-mlx-runtime` outside `aarch64-apple-darwin` | Runtime readiness is validated only on Apple Silicon macOS; current iOS slices are link-layout artifacts without Metal runtime readiness | Use `llm-mlx` for selector/docs checks or `llm-llamacpp` for inference |
 
-**Note**: The per-row `compile_error!` guards listed in the table above are **implemented** in [`crates/xybrid-core/src/lib.rs`](../crates/xybrid-core/src/lib.rs). Each conflict fires a typed compile error with a remediation message — see `compile_error!` blocks for `llm-mistral` on Android, `ort-download` vs `ort-dynamic`, `candle-metal` off Apple, `candle-cuda` on Apple, and `ort-coreml` off Apple. The `--all-features` row is enforced through these per-row guards plus the marker-only `llm-mistral*` build break.
+**Note**: The per-row `compile_error!` guards listed in the table above are **implemented** in [`crates/xybrid-core/src/lib.rs`](../crates/xybrid-core/src/lib.rs). Each conflict fires a typed compile error with a remediation message — see `compile_error!` blocks for `llm-mistral` on Android, `ort-download` vs `ort-dynamic`, `candle-metal` off Apple, `candle-cuda` on Apple, and `ort-coreml` off Apple. The `--all-features` row is enforced through these per-row guards plus the marker-only `llm-mistral*` build break. Invalid Vulkan environment values and unsupported Vulkan targets are rejected by `llama-cpp-sys/build.rs`.
 
 ---
 
@@ -241,6 +277,8 @@ These are the canonical feature combinations CI must run to gate a release. Any 
 |------|---------|--------|
 | Default-features workspace clippy | `cargo clippy --workspace -- -D warnings` | Default `ort-download` shape; vendored crates compile cleanly with nothing else enabled. |
 | Vision umbrella workspace clippy | `cargo clippy --workspace --features llm-llamacpp-vision --tests --examples -- -D warnings` | The full VLM path through llama.cpp `mtmd`, including vision tests/examples that gate on `llm-llamacpp-vision`. |
+| llama.cpp Vulkan check | `XYBRID_LLAMA_CPP_VULKAN=1 cargo check -p xybrid-sdk --features platform-desktop` | Linux CI installs the Vulkan SDK/loader first, then verifies the opt-in llama.cpp Vulkan build. |
+| Bazel Vulkan lane | `bazel build --config=remote --config=linux-vulkan -c opt //crates/xybrid-cli:xybrid` | The same backend on the Bazel graph — the lane shipped artifacts would come from. Links and smokes the CLI, so unlike the `cargo check` row above it also proves the loader link. |
 | **`--all-features` is forbidden.** | — | See conflict table above. |
 
 ### Platform preset matrix

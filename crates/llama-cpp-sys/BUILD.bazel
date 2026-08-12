@@ -40,6 +40,27 @@ cc_library(
     # Metal lane: the frameworks cargo's build.rs emits on apple (build.rs:
     # 675-680). The Rust crates' #[link] attrs already pull Metal/Foundation/
     # Accelerate; MetalKit exists ONLY here — ggml-metal.m needs it.
+    # Vulkan lane: three loader symbols ggml-vulkan.cpp calls directly, which
+    # the static archives leave undefined (everything else goes through
+    # vulkan-hpp's dynamic dispatcher). Cargo satisfies them with
+    # `rustc-link-lib=vulkan` + a $VULKAN_SDK/lib search path (build.rs:760,773);
+    # here they come from //bazel/vulkan:libvulkan.so, a stub built by our own
+    # toolchain, because the exec machine's real loader neither links against
+    # the hermetic sysroot nor exists on a remote worker (bazel/vulkan/
+    # vulkan_stub.c has the full story). The stub carries the real SONAME, so
+    # DT_NEEDED still says libvulkan.so.1 and the machine's real loader is what
+    # actually binds at runtime.
+    #
+    # `additional_linker_inputs` + `$(execpath)` rather than a bare path: that
+    # is what makes the file an input to the link action wherever it runs.
+    #
+    # NOTE that DT_NEEDED makes a Vulkan loader a hard runtime dependency of the
+    # produced binary — which is why the lane is opt-in and would ship as its
+    # own artifact, never as the default Linux CLI.
+    additional_linker_inputs = select({
+        "//:vulkan_enabled": ["//bazel/vulkan:libvulkan.so"],
+        "//conditions:default": [],
+    }),
     linkopts = select({
         "//:metal_enabled": [
             "-framework Accelerate",
@@ -47,13 +68,17 @@ cc_library(
             "-framework MetalKit",
             "-framework Foundation",
         ],
+        "//:vulkan_enabled": [
+            "$(execpath //bazel/vulkan:libvulkan.so)",
+        ],
         "//conditions:default": [],
     }),
     deps = select({
         # --//:metal=true swaps in the Metal llama (a separate, local-pinned
-        # target — see //:llama_metal). Everything above this select is
-        # identical between the lanes by design.
+        # target — see //:llama_metal), --//:vulkan=true the Vulkan one.
+        # Everything above these selects is identical between the lanes by design.
         "//:metal_enabled": ["//:llama_metal"],
+        "//:vulkan_enabled": ["//:llama_vulkan"],
         "//conditions:default": ["//:llama"],
     }),
 )
@@ -75,6 +100,7 @@ rust_library(
     edition = "2021",
     deps = [":wrapper_cc"] + select({
         "//:metal_enabled": ["//:llama_metal"],
+        "//:vulkan_enabled": ["//:llama_vulkan"],
         "//conditions:default": ["//:llama"],
     }),
     visibility = ["//visibility:public"],

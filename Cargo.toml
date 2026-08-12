@@ -8,9 +8,11 @@ members = [
     "crates/xybrid-bolt",
     "crates/xybrid-cli",
     "crates/llama-cpp-sys",
+    "crates/whisper-cpp-sys",
     "crates/xybrid-llama",
     "crates/mlx-c-sys",
     "crates/xybrid-mlx",
+    "crates/xybrid-whisper",
     "bindings/flutter/rust",
     "macros",
     "xtask",
@@ -18,7 +20,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.4.0"
+version = "0.5.0"
 edition = "2021"
 license = "Apache-2.0"
 repository = "https://github.com/xybrid-ai/xybrid"
@@ -39,3 +41,16 @@ serde_yaml = "0.9"
 anyhow = "1.0"
 thiserror = "1.0"
 tokio = { version = "1.0", features = ["rt", "rt-multi-thread", "sync"] }
+
+# Optimize external dependencies even in dev builds. Workspace crates keep
+# opt-level 0 (fast incremental compiles); candle/ort/tokenizers get real
+# codegen. Without this, a `flutter run` debug build ships unoptimized
+# inference kernels — measured on a Pixel 8: one 5 s Whisper-tiny window took
+# minutes in debug versus ~3.5 s in release. Cost is a slower first cold
+# build; dependency artifacts are cached after that. `debug = false` because
+# optimized dependency artifacts with full debuginfo are enormous (a single
+# Android cargokit build exceeded 45 GB); workspace crates keep their
+# debuginfo, dependencies keep their names in backtraces via symbols only.
+[profile.dev.package."*"]
+opt-level = 3
+debug = false

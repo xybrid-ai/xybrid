@@ -170,11 +170,20 @@ impl Cloud {
             })
             .collect();
 
+        // No silent default: falling back to a hosted model here would route a
+        // caller who merely forgot to set `model` to OpenAI, quietly billing a
+        // third-party provider instead of running the model they asked for.
         let model = request
             .model
             .clone()
             .or_else(|| self.config.default_model.clone())
-            .unwrap_or_else(|| "gpt-4o-mini".to_string());
+            .ok_or_else(|| {
+                CloudError::GatewayError(
+                    "no model specified for the gateway request: set CompletionRequest::model or \
+                     CloudConfig::default_model"
+                        .to_string(),
+                )
+            })?;
 
         let mut body = json!({
             "model": model,

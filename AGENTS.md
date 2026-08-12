@@ -39,6 +39,52 @@ Crate-wide lint opt-outs go in `lib.rs` at the crate root (see e.g.
 `crates/xybrid-core/src/lib.rs`). Don't sprinkle `#[allow(...)]` at call sites —
 push it to crate level or fix the lint. Never bypass hooks (`--no-verify`).
 
+### Building native bindings / cross-compiled artifacts
+
+**Native artifacts are built by Bazel**, not `xtask`. Bazel brings its own
+hermetic toolchains (Rust, Android NDK, clang, Windows SDK), so these are the
+same targets the release ships from — do **not** hand-roll `cargo ndk` or raw
+`cargo build --target <triple>` to reproduce them:
+
+```bash
+bazel build -c opt //bindings/kotlin:xybrid_kotlin_aar        # Android AAR (jniLibs inside)
+bazel build --config=ios //bindings/apple:XybridFFI           # Apple XCFramework (macOS host + Xcode)
+bazel build --config=macos-metal //crates/xybrid-cli:xybrid   # CLI (see .bazelrc for other configs)
+bazel build --config=windows-msvc //...                       # MSVC-ABI Windows, cross-built
+```
+
+Use `bazelisk` (reads `.bazelversion`). `just bazel-build | bazel-analyze |
+bazel-test` are the shortcuts; each forwards extra Bazel flags. Full setup,
+including the Windows MSVC EULA note, is in `CONTRIBUTING.md`.
+
+`xtask` is **not** the native-binding entry point anymore. `build-android`,
+`build-xcframework`, `build-uniffi`, `stage-react-native`, `setup-targets`,
+`build-all`, and `package` were all removed once Bazel took over. What remains
+is Flutter, Unity staging, and dev-env chores:
+
+```bash
+cargo xtask build-flutter --platform <linux|macos|windows>  # Flutter native (deliberately cargo)
+cargo xtask build-ffi --target <triple> --release           # xybrid-bolt cdylib (Unity native)
+cargo xtask build-unity                                     # xybrid-bolt across Unity platforms
+cargo xtask deploy-unity-native --lib <path> --target <triple>  # stage a Bazel-built lib into Unity
+cargo xtask setup-test-env                                  # dev-env chore
+```
+
+Flutter native is cargo **on purpose**: `flutter run` inside the repo goes
+through cargokit → cargo, so the contributor path must match. `build-ffi` /
+`build-unity` build `xybrid-bolt` (the pre-bolt `xybrid-ffi` C ABI is retired);
+`deploy-unity-native` exists so a Bazel-built lib can be staged into
+`bindings/unity/Runtime/Plugins/` with the right per-platform `.meta`.
+
+After editing `bindings/flutter/rust`, regenerate the Dart glue with
+`flutter_rust_bridge_codegen generate` (CLI version must match the pinned
+`flutter_rust_bridge` in `bindings/flutter/rust/Cargo.toml`); `flutter run` then
+rebuilds the native lib via cargokit.
+
+Note: `tools/README.md` still documents the pre-Bazel xtask matrix and is stale.
+
+### Releases
+
 **Releases are cut by branch name, not by hand.** Push a `release/v<version>`
 branch and `.github/workflows/release-prep.yml` does the rest (manifest-version
 check, artifact builds, `Package.swift` checksum patch, draft GitHub Release, and
@@ -107,13 +153,19 @@ Cargo workspace, `resolver = "2"`, edition 2021, MSRV not pinned. Members:
 the FFI binding crates now route their SDK→foreign-language translation
 through `xybrid-ffi-facade` rather than each re-translating SDK types.
 
-The Python SDK (`bindings/python`, pure Python — not a workspace member)
-consumes `xybrid-bolt`'s cdylib via a hand-ported ctypes wire layer
-(`bindings/python/xybrid/_bolt.py`) pinned to the boltffi 0.25.3 ABI: the
-pinned boltffi's experimental Python generator cannot express handles or
-fallible functions. Refresh the native lib with
-`tools/scripts/build-python-bolt.sh`; see the `[targets.python]` note in
-`crates/xybrid-bolt/boltffi.toml` for the boltffi >= 0.26 migration plan.
+The Python SDK (`bindings/python`, not a workspace member) runs on boltffi's
+**generated** bindings as of 0.29: `xybrid/_bolt/` is generator output
+(`tools/scripts/gen_python_bolt.py`, byte-compared in CI via `--check`), and it
+imports a compiled CPython bridge that dlopens the `xybrid-bolt` cdylib. Both
+binaries are staged by `tools/scripts/build-python-bolt.sh` and are **build
+outputs, never committed** — so wheels are per-interpreter (`cp3XX`) and the
+SDK requires Python >= 3.10.
+
+Because the generated package is byte-compared, it carries no hand-written
+code. The Pythonic surface (envelope factories, `result.text`, model
+properties, typed exceptions) is attached to the generated classes at import by
+`xybrid/_sugar.py` and `xybrid/_errors.py`, guarded by `tests/test_sdk.py`. Add
+SDK ergonomics there, never in `xybrid/_bolt/`.
 
 **Dependency direction (do not reverse):**
 
@@ -566,7 +618,7 @@ opt-level = 3  # optimize deps in dev builds
 ```
 
 Cross-check against xybrid's actual `Cargo.toml` before changing — some of
-these (notably `panic = "abort"`) interact with FFI/UniFFI in ways the
+these (notably `panic = "abort"`) interact with the FFI boundary in ways the
 project may have decided against.
 
 <!-- CODEGRAPH_START -->

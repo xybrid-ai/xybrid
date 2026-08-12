@@ -154,7 +154,7 @@ xybrid run --model kokoro-82m --input-text "Hello world" -o output.wav
 
 ```yaml
 dependencies:
-  xybrid_flutter: ^0.3.0
+  xybrid_flutter: ^0.5.0
 ```
 
 **モデルを実行:**
@@ -171,15 +171,15 @@ final result = await model.run(XybridEnvelope.text('Hello world'));
 
 ```gradle
 dependencies {
-    implementation("ai.xybrid:xybrid-kotlin:0.3.0")
+    implementation("ai.xybrid:xybrid-kotlin:0.5.0")
 }
 ```
 
 **モデルを実行:**
 
 ```kotlin
-val model = XybridModelLoader.fromRegistry("kokoro-82m").load()
-val result = model.run(Envelope.text("Hello world"))
+val model = Xybrid.model("kokoro-82m").load()
+val result = model.runAsync(Envelope.text("Hello world"))
 // result → 24kHz WAVオーディオ
 ```
 
@@ -189,15 +189,15 @@ val result = model.run(Envelope.text("Hello world"))
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/xybrid-ai/xybrid.git", from: "0.3.0")
+    .package(url: "https://github.com/xybrid-ai/xybrid.git", from: "0.5.0")
 ]
 ```
 
 **モデルを実行:**
 
 ```swift
-let model = try ModelLoader.fromRegistry(modelId: "kokoro-82m").load()
-let result = try model.run(envelope: Envelope.text("Hello world"))
+let model = try await Xybrid.model("kokoro-82m").load()
+let result = try await model.runAsync(envelope: Envelope.text("Hello world"))
 // result → 24kHz WAVオーディオ
 ```
 
@@ -223,7 +223,7 @@ var result = model.Run(Envelope.Text("Hello world"));
 
 ```toml
 [dependencies]
-xybrid = "0.3.0"
+xybrid = "0.5.0"
 ```
 
 **モデルを実行:**
@@ -245,9 +245,9 @@ let result = model.run(&Envelope::text("Hello world"))?;
 # voice-assistant.yaml
 name: voice-assistant
 stages:
-  - model: whisper-tiny    # 音声 → テキスト
-  - model: qwen2.5-0.5b    # LLMで処理
-  - model: kokoro-82m      # テキスト → 音声
+  - model: whisper-tiny-ggml  # 音声 → テキスト
+  - model: qwen2.5-0.5b       # LLMで処理
+  - model: kokoro-82m         # テキスト → 音声
 ```
 
 **CLI:**
@@ -303,7 +303,8 @@ let result = pipeline.run(&Envelope::audio(audio_bytes))?;
 
 | モデル | パラメータ数 | フォーマット | 説明 |
 |-------|--------|--------|-------------|
-| Whisper Tiny | 39M | SafeTensors | 多言語文字起こし（Candleランタイム） |
+| Whisper Tiny（`whisper-tiny-ggml`） | 39M | GGML Q5_1 | whisper.cpp による多言語文字起こし — すべてのプラットフォームプリセットに同梱 |
+| Whisper Tiny（`whisper-tiny`） | 39M | SafeTensors | 同じ重みを Candle ランタイムで実行 — `candle` フィーチャを有効にしたビルドが必要 |
 | Wav2Vec2 Base | 95M | ONNX | CTC復号による英語ASR |
 
 ### テキスト読み上げ（Text-to-Speech）
@@ -394,7 +395,7 @@ claude /xybrid-init hexgrad/Kokoro-82M-v1.0-ONNX
 | 埋め込み | 🔜 | 🔜 | 🔜 | 🔜 | 🔜 |
 | マルチモデルパイプライン（MMP） | ✅ | ✅ | ✅ | ✅ | ✅ |
 | モデルのダウンロードとキャッシュ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| ハードウェアアクセラレーション | Metal, ANE | CPU | Metal, ANE | CUDA | CUDA |
+| ハードウェアアクセラレーション | Metal, ANE | CPU | Metal, ANE | CPU、オプトインのVulkan | CPU |
 
 **SDK MMP サポート:** Flutter ✅ · Rust ✅ · Kotlin 🔜 · Swift 🔜 · Unity 🔜
 
@@ -406,7 +407,7 @@ claude /xybrid-init hexgrad/Kokoro-82M-v1.0-ONNX
 - **オフライン対応** — 初回のモデルダウンロード後はインターネット不要。
 - **クロスプラットフォーム** — iOS、Android、macOS、Linux、Windowsで統一されたAPI。
 - **マルチモデルパイプライン（MMP）** — モデルを連鎖（ASR → LLM → TTS）して1回の呼び出しで実行。
-- **自動最適化** — Apple Neural Engine、Metal、CUDAによるハードウェアアクセラレーション。
+- **ハードウェアアクセラレーション** — Appleプラットフォームでは Apple Neural Engine と Metal、Linux向けllama.cppビルドでは Vulkan をオプトイン可能。Android と Windows は現時点ではCPU実行で、配布済みのLinuxバイナリもCPUのみ（Vulkanはビルド時のオプトイン — [インストール](docs/INSTALLATION.md#platform-features) を参照）。
 
 ### 比較
 

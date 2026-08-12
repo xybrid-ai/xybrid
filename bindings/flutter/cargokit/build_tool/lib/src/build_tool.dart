@@ -10,6 +10,7 @@ import 'package:hex/hex.dart';
 import 'package:logging/logging.dart';
 
 import 'android_environment.dart';
+import 'artifacts_provider.dart';
 import 'build_cmake.dart';
 import 'build_gradle.dart';
 import 'build_pod.dart';
@@ -287,9 +288,9 @@ Future<void> runMain(List<String> args) async {
     log.severe('Cargokit BuildTool failed with error:');
     log.severe(kSeparator);
     log.severe(e);
-    // This tells user to install Rust, there's no need to pollute the log with
-    // stack trace.
-    if (e is! RustupNotFoundException) {
+    // These carry a complete, actionable message; a stack trace would only
+    // pollute the log.
+    if (e is! RustupNotFoundException && e is! SourceBuildUnavailableException) {
       log.severe(kSeparator);
       log.severe(s);
       log.severe(kSeparator);

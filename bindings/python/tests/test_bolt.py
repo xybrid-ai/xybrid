@@ -1,122 +1,77 @@
-from __future__ import annotations
+"""Behavioural checks against the generated BoltFFI bindings.
 
-import threading
+Before boltffi 0.29 this file tested a hand-ported ctypes wire layer — its
+loader precedence, `_WireReader`/`_WireWriter` round-trips, and the tagged
+result decoding. boltffi generates all of that now
+(`tools/scripts/gen_python_bolt.py`), so those internals are no longer ours to
+test; asserting on them would just pin the generator's private shape. What is
+still worth guarding is that the package loads its native bridge and that the
+surface the SDK depends on is actually exported.
+"""
+
+from __future__ import annotations
 
 import pytest
 
 try:
     import xybrid._bolt as bolt
-
-    bolt._load_library()
-except ImportError as exc:
+except ImportError as exc:  # pragma: no cover - native artifacts not built
     pytest.skip(str(exc), allow_module_level=True)
 
 
-def test_loader_resolution_precedence() -> None:
-    path = bolt._resolve_library_path()
+def test_native_bridge_loads_and_reports_a_version() -> None:
+    """Proves the compiled bridge resolved against the staged cdylib.
 
-    # A bundled copy in xybrid/_native wins when present (the state after
-    # tools/scripts/build-python-bolt.sh); otherwise the loader falls back
-    # to the workspace target/ directory.
-    assert path.name == "libxybrid_bolt.dylib"
-    bundled = path.parts[-3:-1] == ("xybrid", "_native")
-    dev_fallback = path.parts[-3] == "target"
-    assert bundled or dev_fallback
+    A mismatch between the two (for example a cdylib built without boltffi's
+    export shims) fails at import with an unresolved-symbol ImportError.
+    """
+
+    assert bolt.version()
 
 
-def test_primitive_calls_succeed() -> None:
-    bolt.set_battery_level(50)
-    bolt.clear_battery_level()
-    bolt.set_thermal_state(bolt.XybridThermalState.WARM)
-    bolt.clear_thermal_state()
-    bolt.set_binding("python")
+@pytest.mark.parametrize(
+    "name",
+    [
+        # Free functions the `xybrid` wrapper calls directly.
+        "set_api_key",
+        "has_api_key",
+        "set_binding",
+        "configure_runtime",
+        "set_platform_url",
+        "set_speculative_cloud",
+        "is_speculative_cloud_enabled",
+        "will_speculate_for_model",
+        # Handle + record types re-exported as the public API.
+        "XybridModel",
+        "XybridEnvelope",
+        "XybridGenerationConfig",
+        "XybridResult",
+        "XybridVoiceInfo",
+        "XybridDownloadStatus",
+        "XybridExecutionTarget",
+    ],
+)
+def test_surface_is_exported(name: str) -> None:
+    assert name in bolt.__all__, f"{name} missing from generated __all__"
+    assert hasattr(bolt, name)
 
 
-def test_parse_last_error_degrades_gracefully() -> None:
-    # Non-numeric payload for an integer-carrying variant must stay inside
-    # the typed error surface instead of leaking ValueError.
-    error = bolt._parse_last_error("RateLimited { retry_after_secs: n/a }")
-    assert isinstance(error, bolt.LoadError)
-    assert isinstance(bolt._parse_last_error("Timeout { timeout_ms: 42 }"), bolt.Timeout)
+def test_speculative_cloud_toggle_round_trips() -> None:
+    """A real call through the bridge, not just an attribute lookup."""
+
+    previous = bolt.is_speculative_cloud_enabled()
+    try:
+        bolt.set_speculative_cloud(True)
+        assert bolt.is_speculative_cloud_enabled() is True
+        bolt.set_speculative_cloud(False)
+        assert bolt.is_speculative_cloud_enabled() is False
+    finally:
+        bolt.set_speculative_cloud(previous)
 
 
-def test_read_string_is_lossy_like_the_swift_reference() -> None:
-    # 2-byte string with an invalid UTF-8 sequence decodes with replacement
-    # characters (Swift String(decoding:) semantics), never raises.
-    value = bolt._WireReader(bytes([2, 0, 0, 0, 0xFF, 0xFE])).read_string()
-    assert value == "��"
+def test_will_speculate_is_false_without_an_api_key() -> None:
+    """Speculation needs a resolvable key; absent one it must not engage."""
 
-
-def test_f32_array_roundtrip_bulk_codec() -> None:
-    values = [float(i) / 7.0 for i in range(4096)]
-    writer = bolt._WireWriter()
-    writer.write_f32_array(values)
-    decoded = bolt._WireReader(writer.finalize()).read_f32_array()
-    assert len(decoded) == 4096
-    assert decoded[1] == pytest.approx(values[1])
-
-
-def test_battery_level_is_clamped() -> None:
-    # u8 parameter: out-of-range input clamps (Kotlin coerceIn semantics)
-    # instead of wrapping modulo 256.
-    bolt.set_battery_level(300)
-    bolt.set_battery_level(-5)
-    bolt.clear_battery_level()
-
-
-def test_is_loaded_reports_false_after_close() -> None:
-    model = bolt.XybridModel.__new__(bolt.XybridModel)
-    model._handle = None
-    model._handle_lock = threading.Lock()
-    assert model.is_loaded is False
-    model.close()
-
-
-def test_json_schema_to_gbnf_returns_grammar() -> None:
-    schema = '{"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}'
-
-    grammar = bolt.json_schema_to_gbnf(schema)
-
-    assert grammar.strip()
-
-
-def test_json_schema_to_gbnf_raises_typed_error_for_garbage() -> None:
-    with pytest.raises(bolt.XybridError):
-        bolt.json_schema_to_gbnf("{not-json")
-
-
-def test_from_directory_raises_directory_not_found_for_missing_path() -> None:
-    with pytest.raises(bolt.DirectoryNotFound) as raised:
-        bolt.XybridModel.from_directory("/nonexistent/path/xyz")
-    assert raised.value.path == "/nonexistent/path/xyz"
-
-
-def test_envelope_and_run_options_wire_roundtrip() -> None:
-    envelope = bolt.XybridEnvelope(
-        kind=bolt.XybridEnvelopeKind.text("hello"),
-        metadata=[bolt.XybridMetadataEntry(key="role", value="user")],
-    )
-    options = bolt.XybridRunOptions(
-        generation_config=bolt.XybridGenerationConfig(
-            max_tokens=16,
-            temperature=0.5,
-            top_p=0.75,
-            min_p=None,
-            top_k=40,
-            repetition_penalty=1.25,
-            stop_sequences=["</s>"],
-            grammar="root ::= \"ok\"",
-        ),
-        abort_on=[bolt.XybridAbortSignal.THERMAL_HOT],
-        fallback_to_cloud=True,
-        max_grace_tokens=2,
-        correlation_id="corr-1",
-    )
-
-    writer = bolt._WireWriter()
-    envelope._encode(writer)
-    options._encode(writer)
-    reader = bolt._WireReader(writer.finalize())
-
-    assert bolt.XybridEnvelope._decode(reader) == envelope
-    assert bolt.XybridRunOptions._decode(reader) == options
+    if bolt.has_api_key():
+        pytest.skip("an API key is configured in this environment")
+    assert bolt.will_speculate_for_model("lfm2.5-350m") is False

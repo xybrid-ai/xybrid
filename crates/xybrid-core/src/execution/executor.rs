@@ -433,6 +433,11 @@ impl TemplateExecutor {
         runtimes.insert("onnx".to_string(), Box::new(OnnxRuntime::new()));
         #[cfg(feature = "candle")]
         runtimes.insert("candle".to_string(), Box::new(CandleRuntime::new()));
+        #[cfg(feature = "asr-whispercpp")]
+        runtimes.insert(
+            "whispercpp".to_string(),
+            Box::new(crate::runtime_adapter::WhisperCppRuntime::new()),
+        );
         runtimes
     }
 
@@ -576,6 +581,29 @@ impl TemplateExecutor {
     }
 
     /// Execute a model based on its metadata.
+    /// Whether the model this metadata describes is already loaded in the
+    /// responsible runtime's cache.
+    ///
+    /// `false` when the template has no cache-aware runtime (GGUF, graphs,
+    /// browser-only templates) — read it as "an execution would pay a load".
+    pub fn is_model_loaded(&self, metadata: &ModelMetadata) -> bool {
+        let (runtime_type, model_file) = match &metadata.execution_template {
+            #[cfg(feature = "candle")]
+            ExecutionTemplate::SafeTensors { model_file, .. } => ("candle", model_file),
+            ExecutionTemplate::Onnx { model_file } => ("onnx", model_file),
+            ExecutionTemplate::CoreMl { model_file } => ("coreml", model_file),
+            ExecutionTemplate::TfLite { model_file } => ("tflite", model_file),
+            #[cfg(feature = "asr-whispercpp")]
+            ExecutionTemplate::GgmlWhisper { model_file, .. } => ("whispercpp", model_file),
+            _ => return false,
+        };
+        let model_full_path = Path::new(&self.base_path).join(model_file);
+        self.runtimes
+            .get(runtime_type)
+            .map(|r| r.is_loaded(&model_full_path))
+            .unwrap_or(false)
+    }
+
     pub fn execute(
         &mut self,
         metadata: &ModelMetadata,
@@ -818,8 +846,35 @@ impl TemplateExecutor {
         }
 
         // Step 2: Single Model Execution
+        //
+        // Defaults a `GgmlWhisper` bundle declared (language / audio_ctx /
+        // translate). Carried out of the match and merged into the runtime
+        // envelope below rather than configuring the runtime object, so that
+        // per-request metadata keeps winning over bundle defaults — the same
+        // precedence every other runtime option has.
+        //
+        // Gated rather than always-declared-and-never-assigned: without the
+        // feature there is no arm to set it, and an unconditional `mut` binding
+        // would be an unused-mut lint the crate would then have to silence.
+        #[cfg(feature = "asr-whispercpp")]
+        let mut whisper_defaults: Option<Vec<(String, String)>> = None;
+
         let (runtime_type, model_file) = match &metadata.execution_template {
+            #[cfg(feature = "candle")]
             ExecutionTemplate::SafeTensors { model_file, .. } => ("candle", model_file.clone()),
+            // Without the feature there is no "candle" runtime in the registry, so
+            // the lookup below would fail with a bare `Runtime 'candle' not
+            // configured` that names neither the feature nor the alternative.
+            // Mirrors the Gguf / GgmlWhisper arms, which have always said this.
+            #[cfg(not(feature = "candle"))]
+            ExecutionTemplate::SafeTensors { .. } => {
+                return Err(AdapterError::RuntimeError(
+                    "SafeTensors execution requires the 'candle' feature. For Whisper \
+                     speech recognition, prefer a GGML bundle (ExecutionTemplate::GgmlWhisper) \
+                     on the 'asr-whispercpp' backend."
+                        .to_string(),
+                ));
+            }
             ExecutionTemplate::Onnx { model_file } => ("onnx", model_file.clone()),
             ExecutionTemplate::CoreMl { model_file } => ("coreml", model_file.clone()),
             ExecutionTemplate::TfLite { model_file } => ("tflite", model_file.clone()),
@@ -879,6 +934,33 @@ impl TemplateExecutor {
                         .to_string(),
                 ));
             }
+            #[cfg(feature = "asr-whispercpp")]
+            ExecutionTemplate::GgmlWhisper {
+                model_file,
+                language,
+                audio_ctx,
+                translate,
+            } => {
+                let mut defaults = Vec::new();
+                if let Some(language) = language {
+                    defaults.push(("language".to_string(), language.clone()));
+                }
+                // Always carried, including 0: 0 means "no encoder truncation",
+                // which is a real choice the bundle made, not an absent value.
+                defaults.push(("audio_ctx".to_string(), audio_ctx.to_string()));
+                if *translate {
+                    defaults.push(("task".to_string(), "translate".to_string()));
+                }
+                whisper_defaults = Some(defaults);
+
+                ("whispercpp", model_file.clone())
+            }
+            #[cfg(not(feature = "asr-whispercpp"))]
+            ExecutionTemplate::GgmlWhisper { .. } => {
+                return Err(AdapterError::RuntimeError(
+                    "GGML Whisper execution requires the 'asr-whispercpp' feature".to_string(),
+                ));
+            }
         };
 
         debug!(
@@ -931,7 +1013,34 @@ impl TemplateExecutor {
         } else {
             // Standard execution path
             debug!(target: "xybrid_core", "Using standard execution path");
-            let runtime_input = preprocessed.to_envelope()?;
+            #[cfg_attr(
+                not(feature = "asr-whispercpp"),
+                expect(
+                    unused_mut,
+                    reason = "only the whisper.cpp arm below mutates the envelope metadata"
+                )
+            )]
+            let mut runtime_input = preprocessed.to_envelope()?;
+
+            // Restore the caller's request options, then fill the gaps with the
+            // bundle's declared defaults — so an explicit `language` or `task`
+            // on the request wins over what the bundle chose.
+            //
+            // The restore step is necessary because `to_envelope()` builds a
+            // fresh envelope from the preprocessed payload and does not carry
+            // the input's metadata across. Scoped to the whisper path rather
+            // than done unconditionally: the other runtimes have never seen
+            // request metadata here, and widening that silently would change
+            // behaviour well beyond ASR.
+            #[cfg(feature = "asr-whispercpp")]
+            if let Some(defaults) = whisper_defaults {
+                for (key, value) in &input.metadata {
+                    runtime_input.metadata.insert(key.clone(), value.clone());
+                }
+                for (key, value) in defaults {
+                    runtime_input.metadata.entry(key).or_insert(value);
+                }
+            }
 
             // Get Runtime & Execute
             let runtime = self.runtimes.get_mut(runtime_type).ok_or_else(|| {
@@ -951,6 +1060,27 @@ impl TemplateExecutor {
         // Run Postprocessing
         let raw_outputs = RawOutputs::from_envelope(&result_envelope)?;
         let result = self.run_postprocessing(metadata, raw_outputs)?;
+
+        // `RawOutputs` intentionally carries only model payloads, so the
+        // postprocessing round-trip above rebuilds the envelope. Preserve the
+        // whisper.cpp language signal explicitly: StreamSession needs it to
+        // avoid auto-detecting again on every rolling window.
+        #[cfg(feature = "asr-whispercpp")]
+        let result = {
+            let mut result = result;
+            if runtime_type == "whispercpp" {
+                if let Some(language) = result_envelope
+                    .metadata
+                    .get(Envelope::DETECTED_LANGUAGE_METADATA_KEY)
+                {
+                    result.metadata.insert(
+                        Envelope::DETECTED_LANGUAGE_METADATA_KEY.to_string(),
+                        language.clone(),
+                    );
+                }
+            }
+            result
+        };
 
         info!(
             target: "xybrid_core",
