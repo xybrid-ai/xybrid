@@ -1,0 +1,20 @@
+tools/scripts/version-sync.sh
+  s_a0af81294c520e::t_35e49b26264d5d 41-44,104-107,220-224,247,295,321
+  s_a0af81294c520e::t_f6399ef9e3e754 38-39
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "c970b392006c724b66b4888986cb1a3592b767b2",
+  "prompts": {},
+  "sessions": {
+    "s_a0af81294c520e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019ff57f-e354-7b52-9ef6-92113d859c71",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
