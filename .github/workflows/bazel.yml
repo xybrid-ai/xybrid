@@ -631,6 +631,14 @@ jobs:
           BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
         run: tools/scripts/write-buildbuddy-rc.sh
 
+      # Serve hermetic-llvm's pinned macOS SDK from cache: Apple's URL 403s
+      # permanently and its only mirror throttles Actions runners. Analyzed on
+      # every target platform, not just Apple ones — see the action.
+      - name: Cache the pinned macOS SDK
+        uses: ./.github/actions/bazel-repo-cache
+        with:
+          macos-sdk-mirror: ${{ vars.MACOS_SDK_MIRROR }}
+
       # The toolchain smokes come first and are cheap: they pull windows.h, the
       # MSVC STL and clang's builtin headers, so a sysroot or include-order
       # regression fails here rather than 20 minutes into llama.cpp.
