@@ -53,6 +53,21 @@ fn parses_functiongemma_call_with_nested_arguments() -> Result<(), serde_json::E
 }
 
 #[test]
+fn parses_functiongemma_call_with_space_separator() {
+    let output = concat!(
+        "<start_function_call>",
+        "call get_current_temperature{location:<escape>London<escape>}",
+        "<end_function_call>"
+    );
+
+    let calls = parse_tool_calls(output);
+
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].function.name, "get_current_temperature");
+    assert_eq!(calls[0].function.arguments, r#"{"location":"London"}"#);
+}
+
+#[test]
 fn strips_and_recognizes_functiongemma_protocol_blocks() {
     let output = format!(
         "before {CALL_START}call:weather{{city:<escape>Paris<escape>}}{CALL_END}{RESPONSE_START}response:weather{{temp:21}}{RESPONSE_END} after"

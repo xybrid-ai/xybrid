@@ -106,8 +106,9 @@ That's the whole surface. Multi-step loops (budgets, retries, parallel tools)
 are ordinary application code — see
 [`crates/xybrid-core/examples/lfm2_230m_tools.rs`](https://github.com/xybrid-ai/xybrid/blob/master/crates/xybrid-core/examples/lfm2_230m_tools.rs)
 and `gemma4_e2b_tools.rs` for complete reference loops, including streaming.
-The runnable `functiongemma_tools.rs` example uses the pinned Q8_0 fixture and
-Google's required function-calling system prompt:
+The runnable `functiongemma_tools.rs` example uses the pinned Q8_0 fixture
+through the standard `GenerationConfig::with_tools` and
+`Envelope::tool_results` flow:
 
 ```bash
 ./integration-tests/download.sh functiongemma-270m-it

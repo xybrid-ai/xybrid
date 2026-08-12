@@ -95,8 +95,14 @@ impl Cursor<'_> {
         mut self,
         string_delimiter: &str,
     ) -> Result<ParsedCall, ParseError> {
-        self.expect_str("call:")?;
-        self.skip_ws();
+        self.expect_str("call")?;
+        if self.consume_char(':') {
+            self.skip_ws();
+        } else if matches!(self.peek_char(), Some(ch) if ch.is_whitespace()) {
+            self.skip_ws();
+        } else {
+            return Err(ParseError);
+        }
         let name = self.parse_identifier(true)?;
         self.skip_ws();
         let arguments = self.parse_gemma_arguments(string_delimiter)?;

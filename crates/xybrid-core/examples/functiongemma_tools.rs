@@ -8,8 +8,6 @@ use xybrid_core::runtime_adapter::types::GenerationConfig;
 use xybrid_core::testing::model_fixtures;
 
 const MODEL_ID: &str = "functiongemma-270m-it";
-const SYSTEM_PROMPT: &str =
-    "You are a model that can do function calling with the following functions";
 
 fn weather_tool() -> Tool {
     Tool::function(
@@ -74,10 +72,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = GenerationConfig::greedy()
         .with_max_tokens(128)
         .with_tools(vec![weather_tool()]);
-    let mut request = Envelope::new(EnvelopeKind::Text(user_prompt.to_string()));
-    request
-        .metadata
-        .insert("system_prompt".to_string(), SYSTEM_PROMPT.to_string());
+    let request = Envelope::new(EnvelopeKind::Text(user_prompt.to_string()));
 
     let response = executor.execute(&metadata, &request, Some(&config))?;
     let raw_text = match &response.kind {
@@ -108,10 +103,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         name: call.function.name.clone(),
         content: serde_json::json!({"location": location, "temperature_c": 21}),
     };
-    let mut continuation = Envelope::tool_results(user_prompt, raw_text, &[result]);
-    continuation
-        .metadata
-        .insert("system_prompt".to_string(), SYSTEM_PROMPT.to_string());
+    let continuation = Envelope::tool_results(user_prompt, raw_text, &[result]);
     let final_response = executor.execute(&metadata, &continuation, Some(&config))?;
     let final_text = match &final_response.kind {
         EnvelopeKind::Text(text) => strip_tool_calls(text),
