@@ -3,12 +3,22 @@
 use std::env;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
-use std::process::Command;
+use std::path::PathBuf;
+use std::process::{Command, Output};
 
-#[test]
-fn direct_url_download_rejects_sha256_mismatch() -> Result<(), Box<dyn std::error::Error>> {
-    // Given a direct-download manifest with a checksum that does not match the
-    // bytes returned by curl.
+const PAYLOAD_SHA256: &str = "4aec73f34f94387203f6b7b5b6977085006ccea54136b82960dc7d0d8dada0c1";
+const MISMATCH_SHA256: &str = "0000000000000000000000000000000000000000000000000000000000000000";
+
+struct DownloadRun {
+    _temp: tempfile::TempDir,
+    model_dir: PathBuf,
+    output: Output,
+}
+
+fn run_download(
+    file_sha256: Option<&str>,
+    metadata_sha256: Option<&str>,
+) -> Result<DownloadRun, Box<dyn std::error::Error>> {
     let temp = tempfile::tempdir()?;
     let integration_dir = temp.path().join("integration-tests");
     let models_dir = integration_dir.join("fixtures/models");
@@ -29,7 +39,7 @@ fn direct_url_download_rejects_sha256_mismatch() -> Result<(), Box<dyn std::erro
                 "files": [{
                     "url": "https://example.invalid/fixture.gguf",
                     "output": "fixture.gguf",
-                    "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+                    "sha256": file_sha256
                 }],
                 "model_metadata": {
                     "model_id": "checksum-fixture",
@@ -38,7 +48,10 @@ fn direct_url_download_rejects_sha256_mismatch() -> Result<(), Box<dyn std::erro
                         "type": "Gguf",
                         "model_file": "fixture.gguf"
                     },
-                    "files": ["fixture.gguf"]
+                    "files": ["fixture.gguf"],
+                    "metadata": {
+                        "sha256": metadata_sha256
+                    }
                 }
             }
         }
@@ -68,21 +81,60 @@ exit 1
     let existing_path = env::var_os("PATH").unwrap_or_default();
     let path =
         env::join_paths(std::iter::once(fake_bin.clone()).chain(env::split_paths(&existing_path)))?;
-
-    // When the normal downloader fetches that model.
     let output = Command::new("bash")
         .arg(&downloader)
         .arg("checksum-fixture")
         .env("PATH", path)
         .output()?;
 
-    // Then it rejects and removes the untrusted artifact.
-    let stdout = String::from_utf8_lossy(&output.stdout);
+    Ok(DownloadRun {
+        _temp: temp,
+        model_dir: models_dir.join("checksum-fixture"),
+        output,
+    })
+}
+
+#[test]
+fn direct_url_download_rejects_sha256_mismatch() -> Result<(), Box<dyn std::error::Error>> {
+    // Given a manifest whose declared hashes do not match the downloaded bytes.
+    // When the normal downloader fetches that model.
+    let run = run_download(Some(MISMATCH_SHA256), Some(MISMATCH_SHA256))?;
+
+    // Then it rejects and removes the complete partial model directory.
+    let stdout = String::from_utf8_lossy(&run.output.stdout);
     assert!(
-        !output.status.success(),
+        !run.output.status.success(),
         "download unexpectedly passed:\n{stdout}"
     );
     assert!(stdout.contains("SHA-256 mismatch"), "output was:\n{stdout}");
-    assert!(!models_dir.join("checksum-fixture/fixture.gguf").exists());
+    assert!(!run.model_dir.exists());
+    Ok(())
+}
+
+#[test]
+fn direct_url_download_requires_declared_model_checksum_per_file(
+) -> Result<(), Box<dyn std::error::Error>> {
+    // Given model metadata that declares a checksum but a file entry that omits it.
+    // When the normal downloader fetches that model.
+    let run = run_download(None, Some(PAYLOAD_SHA256))?;
+
+    // Then it rejects the incomplete manifest and leaves no partial model.
+    let stdout = String::from_utf8_lossy(&run.output.stdout);
+    assert!(!run.output.status.success(), "output was:\n{stdout}");
+    assert!(stdout.contains("missing SHA-256"), "output was:\n{stdout}");
+    assert!(!run.model_dir.exists());
+    Ok(())
+}
+
+#[test]
+fn direct_url_download_accepts_matching_sha256() -> Result<(), Box<dyn std::error::Error>> {
+    // Given matching per-file and model metadata checksums.
+    // When the normal downloader fetches those exact bytes.
+    let run = run_download(Some(PAYLOAD_SHA256), Some(PAYLOAD_SHA256))?;
+
+    // Then the model download succeeds and keeps the verified artifact.
+    let stdout = String::from_utf8_lossy(&run.output.stdout);
+    assert!(run.output.status.success(), "output was:\n{stdout}");
+    assert!(run.model_dir.join("fixture.gguf").is_file());
     Ok(())
 }

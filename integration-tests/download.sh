@@ -388,7 +388,11 @@ download_from_url() {
     else
         # Download each file
         local files
+        local primary_model_file
+        local declared_model_sha256
         files=$(jq -c ".models[\"$model_name\"].files[]" "$MANIFEST")
+        primary_model_file=$(jq -r ".models[\"$model_name\"].model_metadata.execution_template.model_file // empty" "$MANIFEST")
+        declared_model_sha256=$(jq -r ".models[\"$model_name\"].model_metadata.metadata.sha256 // empty" "$MANIFEST")
 
         while IFS= read -r file_entry; do
             local url
@@ -398,20 +402,33 @@ download_from_url() {
             output=$(echo "$file_entry" | jq -r '.output')
             expected_sha256=$(echo "$file_entry" | jq -r '.sha256 // empty')
 
+            if [ "$output" = "$primary_model_file" ] && [ -n "$declared_model_sha256" ]; then
+                if [ -z "$expected_sha256" ]; then
+                    echo -e "  ${RED}✗${NC} $output (missing SHA-256)"
+                    rm -rf "$model_dir"
+                    return 1
+                fi
+                if [ "$expected_sha256" != "$declared_model_sha256" ]; then
+                    echo -e "  ${RED}✗${NC} $output (SHA-256 declarations disagree)"
+                    rm -rf "$model_dir"
+                    return 1
+                fi
+            fi
+
             echo "  Downloading $output..."
             if curl -L -# -f -o "$model_dir/$output" "$url" 2>/dev/null; then
                 if validate_file "$model_dir/$output"; then
                     if [ -n "$expected_sha256" ]; then
                         local actual_sha256
                         if ! actual_sha256=$(sha256_file "$model_dir/$output"); then
-                            rm -f "$model_dir/$output"
-                            download_failed=true
+                            rm -rf "$model_dir"
+                            return 1
                         elif [ "$actual_sha256" != "$expected_sha256" ]; then
                             echo -e "  ${RED}✗${NC} $output (SHA-256 mismatch)"
                             echo "    Expected: $expected_sha256"
                             echo "    Actual:   $actual_sha256"
-                            rm -f "$model_dir/$output"
-                            download_failed=true
+                            rm -rf "$model_dir"
+                            return 1
                         else
                             echo -e "  ${GREEN}✓${NC} $output"
                         fi
