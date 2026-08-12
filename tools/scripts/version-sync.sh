@@ -35,9 +35,13 @@ SWIFT_FFI_PLIST="$REPO_ROOT/bindings/apple/XybridFFI-Info.plist"
 # AAR pin its Android binding consumes from Maven Central.
 RN_PACKAGE="$REPO_ROOT/bindings/react-native/package.json"
 RN_GRADLE="$REPO_ROOT/bindings/react-native/android/build.gradle"
-# Python SDK wheel manifest. Hand-maintained (the ctypes binding is not
-# generated), so like RN it must be wired here or it drifts.
+# Python SDK wheel manifest. The manifest itself is hand-maintained, so like RN
+# it must be wired here or it drifts.
 PYTHON_PYPROJECT="$REPO_ROOT/bindings/python/pyproject.toml"
+# BoltFFI's generated Python package embeds the workspace version. Keep it in
+# the lightweight version check as well as regenerating it below, so release
+# validation catches drift without requiring the boltffi CLI in every CI job.
+PYTHON_BOLT_INIT="$REPO_ROOT/bindings/python/xybrid/_bolt/__init__.py"
 WEB_PACKAGE="$REPO_ROOT/bindings/web/package.json"
 
 # Extract current workspace version from Cargo.toml
@@ -95,6 +99,10 @@ get_rn_aar_version() {
 # file's only `version = ` line).
 get_python_version() {
     grep '^version = ' "$PYTHON_PYPROJECT" | head -1 | sed 's/version = "\(.*\)"/\1/'
+}
+
+get_python_bolt_version() {
+    grep '^PACKAGE_VERSION = ' "$PYTHON_BOLT_INIT" | head -1 | sed 's/PACKAGE_VERSION = "\(.*\)"/\1/'
 }
 
 get_web_version() {
@@ -209,6 +217,11 @@ set_python_version() {
     rm -f "$PYTHON_PYPROJECT.bak"
 }
 
+regenerate_python_bolt() {
+    echo "Regenerating Python BoltFFI bindings..."
+    python3 "$REPO_ROOT/tools/scripts/gen_python_bolt.py"
+}
+
 set_web_version() {
     local version="$1"
     python3 -c "
@@ -231,7 +244,7 @@ check_versions() {
     echo "Cargo workspace version: $cargo_version"
     echo ""
 
-    for name_func in "Flutter:get_flutter_version" "Flutter rust crate:get_flutter_rust_version" "Unity:get_unity_version" "Kotlin:get_kotlin_version" "Swift:get_swift_version" "Swift FFI plist:get_swift_ffi_version" "React Native:get_rn_version" "React Native AAR:get_rn_aar_version" "Python:get_python_version" "Browser/Web:get_web_version"; do
+    for name_func in "Flutter:get_flutter_version" "Flutter rust crate:get_flutter_rust_version" "Unity:get_unity_version" "Kotlin:get_kotlin_version" "Swift:get_swift_version" "Swift FFI plist:get_swift_ffi_version" "React Native:get_rn_version" "React Native AAR:get_rn_aar_version" "Python:get_python_version" "Python generated binding:get_python_bolt_version" "Browser/Web:get_web_version"; do
         local name="${name_func%%:*}"
         local func="${name_func##*:}"
         local version
@@ -279,6 +292,7 @@ case "${1:-}" in
         set_rn_version "$VERSION"
         set_rn_aar_version "$VERSION"
         set_python_version "$VERSION"
+        regenerate_python_bolt
         set_web_version "$VERSION"
         echo "Done. Run '$0 --check' to verify."
         ;;
@@ -304,6 +318,7 @@ case "${1:-}" in
         set_rn_version "$VERSION"
         set_rn_aar_version "$VERSION"
         set_python_version "$VERSION"
+        regenerate_python_bolt
         set_web_version "$VERSION"
         echo ""
         echo "Rust crates inherit via version.workspace = true."
