@@ -165,25 +165,6 @@ namespace XybridBolt
 
 
         /// <summary>
-        /// Return the persistent system envelope, if one is set.
-        /// </summary>
-        public global::XybridBolt.XybridEnvelope? System()
-        {
-            ThrowIfDisposed();
-            FfiBuf boltffiResultBuffer = NativeMethods.NativeXybridConversationContextSystem(this.Handle);
-            try
-            {
-                WireReader resultReader = new WireReader(boltffiResultBuffer);
-                return resultReader.ReadU8() == 0 ? default(global::XybridBolt.XybridEnvelope?) : global::XybridBolt.XybridEnvelope.Decode(resultReader);
-            }
-            finally
-            {
-                NativeMethods.FreeBuf(boltffiResultBuffer);
-            }
-        }
-
-
-        /// <summary>
         /// Whether a persistent system-prompt envelope is set.
         /// </summary>
         public bool HasSystem()

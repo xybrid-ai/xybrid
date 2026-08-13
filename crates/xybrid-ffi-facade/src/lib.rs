@@ -645,14 +645,6 @@ impl ConversationContextHandle {
         self.lock().system_envelope().is_some()
     }
 
-    /// Return a snapshot of the persistent system envelope, if one is set.
-    pub fn system(&self) -> Option<Envelope> {
-        self.lock()
-            .system_envelope()
-            .cloned()
-            .map(Envelope::from_sdk)
-    }
-
     /// Set the max history length before FIFO pruning.
     ///
     /// Rebuilds the context and re-pushes history so pruning runs immediately
@@ -920,7 +912,9 @@ impl GenerationConfig {
         if let Some(v) = self.repetition_penalty {
             cfg.repetition_penalty = v;
         }
-        cfg.stop_sequences = self.stop_sequences.clone();
+        if !self.stop_sequences.is_empty() {
+            cfg.stop_sequences = self.stop_sequences.clone();
+        }
         if let Some(g) = &self.grammar {
             cfg.grammar = Some(g.clone());
         }
@@ -2474,7 +2468,7 @@ mod tests {
     }
 
     #[test]
-    fn generation_config_empty_stop_sequences_clear_model_defaults() {
+    fn generation_config_empty_stop_sequences_preserve_model_defaults() {
         // Given
         let base = sdk::GenerationConfig {
             stop_sequences: vec!["</s>".to_string()],
@@ -2487,7 +2481,7 @@ mod tests {
             .expect("empty tools cannot fail to lower");
 
         // Then
-        assert!(from_facade.stop_sequences.is_empty());
+        assert_eq!(from_facade.stop_sequences, vec!["</s>"]);
     }
 
     #[test]
@@ -2844,19 +2838,6 @@ mod tests {
 
         ctx.clear();
         assert!(ctx.history().is_empty());
-    }
-
-    #[test]
-    fn conversation_context_system_is_retrievable_outside_history() {
-        let ctx = ConversationContextHandle::new();
-        ctx.set_system(Envelope::text("stay concise".into()))
-            .unwrap();
-        ctx.push(Envelope::text("hello".into())).unwrap();
-
-        let system = ctx.system().expect("system envelope should be set");
-
-        assert!(matches!(system.kind, EnvelopeKind::Text { ref text } if text == "stay concise"));
-        assert_eq!(ctx.history().len(), 1);
     }
 
     #[test]

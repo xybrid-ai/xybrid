@@ -803,7 +803,6 @@ private object Native {
     @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_conversation_context_id(`receiver`: Long): ByteArray?
     @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_conversation_context_history_len(`receiver`: Long): Int
     @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_conversation_context_history(`receiver`: Long): ByteArray?
-    @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_conversation_context_system(`receiver`: Long): ByteArray?
     @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_conversation_context_has_system(`receiver`: Long): Boolean
     @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_conversation_context_set_max_history_len(`receiver`: Long, len: Int): Unit
     @JvmStatic external fun boltffi_release_class_xybrid_bolt_xybrid_telemetry_config(handle: Long): Unit
@@ -2346,12 +2345,6 @@ class XybridConversationContext internal constructor(internal val handle: Long) 
         val __boltffi_result = Native.boltffi_method_class_xybrid_bolt_xybrid_conversation_context_history(this.boltffiHandle()) ?: throw IllegalStateException("null buffer returned")
         val __boltffi_reader = WireReader(__boltffi_result)
         return __boltffi_reader.readSequence({ __boltffi_reader -> XybridEnvelope.fromReader(__boltffi_reader) })
-    }
-
-    fun system(): XybridEnvelope? {
-        val __boltffi_result = Native.boltffi_method_class_xybrid_bolt_xybrid_conversation_context_system(this.boltffiHandle()) ?: throw IllegalStateException("null buffer returned")
-        val __boltffi_reader = WireReader(__boltffi_result)
-        return __boltffi_reader.readOptionalValue({ __boltffi_reader -> XybridEnvelope.fromReader(__boltffi_reader) })
     }
 
     fun hasSystem(): Boolean {

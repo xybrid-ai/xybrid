@@ -142,20 +142,6 @@ def test_result_reasoning_field_defaults_to_none() -> None:
     assert result.reasoning_content is None
 
 
-def test_conversation_context_keeps_system_outside_history() -> None:
-    context = xybrid.XybridConversationContext()
-    context.set_system(xybrid.XybridEnvelope.text("stay concise"))
-    context.push(xybrid.XybridEnvelope.text("hello"))
-
-    system = context.system()
-
-    assert system is not None
-    assert isinstance(system.kind, xybrid.XybridEnvelopeKindText)
-    assert system.kind.text == "stay concise"
-    assert context.history_len() == 1
-    assert len(context.history()) == 1
-
-
 def test_voice_gender_helpers() -> None:
     female = xybrid.XybridVoiceInfo(id="af_heart", name="Heart", gender="female", language="en", style=None)
     male = xybrid.XybridVoiceInfo(id="am_adam", name="Adam", gender="male", language="en", style=None)

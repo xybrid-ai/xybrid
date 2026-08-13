@@ -1087,14 +1087,12 @@ class ConversationContext {
   fun withSystem(systemMessage: Envelope): ConversationContext
   fun push(message: Envelope)
   fun history(): List<Envelope>
-  fun system(): Envelope?
 }
 ```
 
 The generated Swift and C# context types expose the same `history()` /
-`History()` and `system()` / `System()` snapshots. `history()` deliberately
-excludes the persistent system envelope; callers that persist a conversation
-must store both snapshots and restore the system envelope separately.
+`History()` snapshot. History deliberately excludes the persistent system
+envelope.
 
 **Multi-turn vision** (planned): when a user message contains images
 (built via `Envelope.userMessage(text, images: [...])`), the image-bearing envelope

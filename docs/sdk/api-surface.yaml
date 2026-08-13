@@ -530,10 +530,6 @@ classes:
         return: "List<Envelope>"
         notes: "Snapshot of history turns; excludes the persistent system envelope."
         status: { dart: planned, kotlin: implemented, swift: implemented, csharp: implemented }
-      system:
-        return: "Envelope?"
-        notes: "Snapshot of the persistent system envelope for lossless persistence."
-        status: { dart: planned, kotlin: implemented, swift: implemented, csharp: implemented }
     status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
 
   MessageRole:

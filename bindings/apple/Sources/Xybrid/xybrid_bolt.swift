@@ -1290,13 +1290,6 @@ public final class XybridConversationContext {
         return boltffiDecodeOwnedBuf(boltffiResult.ptr, Int(boltffiResult.len)) { boltffiReader in boltffiReader.readArray { boltffiReader in XybridEnvelope.decode(from: &boltffiReader) } }
     }
 
-    /// Return the persistent system envelope, if one is set.
-    public func system() -> XybridEnvelope? {
-        let boltffiResult = boltffi_method_class_xybrid_bolt_xybrid_conversation_context_system(self.handle)
-        defer { boltffi_free_buf(boltffiResult) }
-        return boltffiDecodeOwnedBuf(boltffiResult.ptr, Int(boltffiResult.len)) { boltffiReader in boltffiReader.readOptional { boltffiReader in XybridEnvelope.decode(from: &boltffiReader) } }
-    }
-
     /// Whether a persistent system-prompt envelope is set.
     public func hasSystem() -> Bool {
         return boltffi_method_class_xybrid_bolt_xybrid_conversation_context_has_system(self.handle)

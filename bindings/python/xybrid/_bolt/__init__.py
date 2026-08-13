@@ -450,13 +450,6 @@ def _boltffi_read_3cfe09c223256b1b(data: bytes):
 _native._register_wire_codec("read_3cfe09c223256b1b", _boltffi_read_3cfe09c223256b1b)
 
 
-def _boltffi_read_f49bf06e24fc845f(data: bytes):
-    return _boltffi_read_wire(data, lambda reader: reader.optional(lambda: XybridEnvelope._boltffi_from_reader(reader)))
-
-
-_native._register_wire_codec("read_f49bf06e24fc845f", _boltffi_read_f49bf06e24fc845f)
-
-
 def _boltffi_read_9415281aa52df749(data: bytes):
     return _boltffi_read_wire(data, lambda reader: reader.optional(lambda: reader.string()))
 
@@ -1978,9 +1971,6 @@ class XybridConversationContext:
 
     def history(self) -> list[XybridEnvelope]:
         return _boltffi_read_wire(_native._boltffi_xybrid_conversation_context_history(self._handle), lambda reader: reader.sequence(lambda: XybridEnvelope._boltffi_from_reader(reader)))
-
-    def system(self) -> XybridEnvelope | None:
-        return _boltffi_read_wire(_native._boltffi_xybrid_conversation_context_system(self._handle), lambda reader: reader.optional(lambda: XybridEnvelope._boltffi_from_reader(reader)))
 
     def has_system(self) -> bool:
         return _native._boltffi_xybrid_conversation_context_has_system(self._handle)

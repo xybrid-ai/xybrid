@@ -659,9 +659,9 @@ impl From<facade::DownloadStatus> for XybridDownloadStatus {
 }
 
 impl From<facade::InferenceResult> for XybridResult {
-    fn from(mut r: facade::InferenceResult) -> Self {
+    fn from(r: facade::InferenceResult) -> Self {
         let metrics = XybridInferenceMetrics::from(&r.metrics);
-        let reasoning_content = r.envelope.metadata.remove("reasoning_content");
+        let reasoning_content = r.envelope.metadata.get("reasoning_content").cloned();
         Self {
             envelope: r.envelope.into(),
             output_type: r.output_type.into(),
@@ -1364,11 +1364,6 @@ impl XybridConversationContext {
         self.inner.history().into_iter().map(Into::into).collect()
     }
 
-    /// Return the persistent system envelope, if one is set.
-    pub fn system(&self) -> Option<XybridEnvelope> {
-        self.inner.system().map(Into::into)
-    }
-
     /// Whether a persistent system-prompt envelope is set.
     pub fn has_system(&self) -> bool {
         self.inner.has_system()
@@ -1696,7 +1691,7 @@ mod tests {
             .envelope
             .metadata
             .iter()
-            .all(|entry| entry.key != "reasoning_content"));
+            .any(|entry| { entry.key == "reasoning_content" && entry.value == "reasoning" }));
     }
 
     #[test]
@@ -1763,26 +1758,5 @@ mod tests {
             &history[0].kind,
             XybridEnvelopeKind::Text { text } if text == "hello"
         ));
-    }
-
-    #[test]
-    fn conversation_context_system_crosses_the_wire_separately() {
-        let context = XybridConversationContext::new();
-        context
-            .set_system(XybridEnvelope {
-                kind: XybridEnvelopeKind::Text {
-                    text: "stay concise".into(),
-                },
-                metadata: Vec::new(),
-            })
-            .expect("test system envelope should be accepted");
-
-        let system = context.system().expect("system envelope should be set");
-
-        assert!(matches!(
-            system.kind,
-            XybridEnvelopeKind::Text { ref text } if text == "stay concise"
-        ));
-        assert!(context.history().is_empty());
     }
 }

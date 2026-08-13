@@ -826,9 +826,6 @@ namespace XybridBolt
         [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_conversation_context_set_system")]
         internal static extern FfiBuf NativeXybridConversationContextSetSystem(ulong receiver, [In] byte[] envelopeBytes, nuint envelopeLength);
 
-        [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_conversation_context_system")]
-        internal static extern FfiBuf NativeXybridConversationContextSystem(ulong receiver);
-
         [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_model_await_download")]
         internal static extern FfiBuf NativeXybridModelAwaitDownload(ulong receiver, ulong timeoutMs);
 
