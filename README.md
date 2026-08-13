@@ -142,7 +142,7 @@ See the full [Installation Guide](https://docs.xybrid.dev/en/docs/quickstart) fo
 
 ```yaml
 dependencies:
-  xybrid_flutter: ^0.4.1
+  xybrid_flutter: ^0.5.0
 ```
 
 **Run a model:**
@@ -159,7 +159,7 @@ final result = await model.run(XybridEnvelope.text('Hello world'));
 
 ```gradle
 dependencies {
-    implementation("ai.xybrid:xybrid-kotlin:0.4.1")
+    implementation("ai.xybrid:xybrid-kotlin:0.5.0")
 }
 ```
 
@@ -177,7 +177,7 @@ val result = model.runAsync(Envelope.text("Hello world"))
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/xybrid-ai/xybrid.git", from: "0.4.1")
+    .package(url: "https://github.com/xybrid-ai/xybrid.git", from: "0.5.0")
 ]
 ```
 
@@ -216,7 +216,7 @@ var result = model.Run(Envelope.Text("Hello world"));
 
 ```toml
 [dependencies]
-xybrid = "0.4.1"
+xybrid = "0.5.0"
 ```
 
 **Run a model:**
@@ -411,7 +411,7 @@ See the [model metadata docs](docs/sdk/API_REFERENCE.md) for the full schema, or
 | Embeddings | 🔜 | 🔜 | 🔜 | 🔜 | 🔜 |
 | Multi-Model Pipelines (MMP) | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Model Download & Caching | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Hardware Acceleration | Metal, ANE | CPU | Metal, ANE | CUDA, Vulkan | CUDA |
+| Hardware Acceleration | Metal, ANE | CPU | Metal, ANE | CPU, opt-in Vulkan | CPU |
 
 **SDK MMP support:** Flutter ✅ · Rust ✅ · Kotlin 🔜 · Swift 🔜 · Unity 🔜
 
@@ -430,7 +430,7 @@ CLI today (`xybrid repl` ships built-in `web_search` + your own via
 - **Offline capable** — No internet required after initial model download.
 - **Cross-platform** — One API across iOS, Android, macOS, Linux, and Windows.
 - **Multi-model pipelines (MMP)** — Chain models together (ASR → LLM → TTS) in a single call.
-- **Hardware acceleration** — Apple Neural Engine, Metal, CUDA, plus opt-in Vulkan for Linux llama.cpp builds.
+- **Hardware acceleration** — Apple Neural Engine and Metal on Apple platforms; opt-in Vulkan for Linux llama.cpp builds. Android and Windows run on CPU today, and prebuilt Linux binaries are CPU-only (Vulkan is a build-time opt-in — see [installation](docs/INSTALLATION.md#platform-features)).
 
 ### How it compares
 

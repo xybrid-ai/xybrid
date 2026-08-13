@@ -34,7 +34,8 @@ pub use xybrid_llama::{
 };
 
 use crate::runtime_adapter::llm::{
-    ChatMessage, GenerationConfig, GenerationOutput, LlmBackend, LlmConfig, LlmResult, PartialToken,
+    local_execution_provider, ChatMessage, GenerationConfig, GenerationOutput, LlmBackend,
+    LlmConfig, LlmResult, PartialToken,
 };
 use crate::runtime_adapter::llm_telemetry::{StreamingTelemetry, StreamingTelemetryFields};
 use crate::runtime_adapter::streaming_postprocess::{
@@ -680,6 +681,37 @@ fn text_tokens_without_terminal_eog(output_tokens: &[i32], ended_on_eog: bool) -
     }
 }
 
+/// Whether a GPU offload request cannot be honored by this build at all.
+///
+/// `gpu_layers` defaults to 99 (`types::default_gpu_layers`) and llama.cpp
+/// keeps every layer on the CPU when no GPU backend was compiled in, so an
+/// honored request and an impossible one look identical from the outside.
+fn gpu_layers_are_a_no_op(gpu_layers: i32) -> bool {
+    gpu_layers > 0 && local_execution_provider("llama-cpp") == "cpu"
+}
+
+/// Say once, at load, that a GPU offload request will not happen.
+///
+/// The silence is the bug this exists to fix: without it the only symptom of a
+/// CPU-only build on a machine with an idle GPU is that inference is slow.
+/// Once per process, not per load — the answer is fixed at compile time.
+fn warn_if_gpu_layers_are_a_no_op(gpu_layers: i32) {
+    static WARNED: std::sync::Once = std::sync::Once::new();
+
+    if !gpu_layers_are_a_no_op(gpu_layers) {
+        return;
+    }
+
+    WARNED.call_once(|| {
+        log::warn!(
+            target: "xybrid_core",
+            "gpu_layers={gpu_layers} requested, but this build has no llama.cpp GPU backend \
+             compiled in — every layer runs on the CPU. See docs/INSTALLATION.md for the GPU \
+             build options on this platform."
+        );
+    });
+}
+
 fn generation_would_overflow_context(
     prefix_len: usize,
     prompt_tokens: usize,
@@ -789,6 +821,8 @@ impl LlmBackend for LlamaCppBackend {
 
             gguf_files[0].path().to_string_lossy().to_string()
         };
+
+        warn_if_gpu_layers_are_a_no_op(config.gpu_layers);
 
         // Load model
         let model = xybrid_llama::LlamaModel::load(&gguf_path, config.gpu_layers).map_err(|e| {
@@ -1678,6 +1712,22 @@ mod tests {
         assert_eq!(text_tokens_without_terminal_eog(&tokens, false), &[1, 2, 3]);
         let empty: [i32; 0] = [];
         assert_eq!(text_tokens_without_terminal_eog(&empty, false), &empty[..]);
+    }
+
+    #[test]
+    fn no_gpu_offload_request_is_never_a_no_op() {
+        // Nothing was asked for, so there is nothing to warn about — whatever
+        // backend this build has.
+        assert!(!gpu_layers_are_a_no_op(0));
+        assert!(!gpu_layers_are_a_no_op(-1));
+    }
+
+    #[test]
+    fn gpu_offload_request_is_a_no_op_exactly_when_the_build_is_cpu_only() {
+        // Tracks the build, not a hardcoded expectation: on a Metal or Vulkan
+        // build the request is honored, on a CPU-only one it is not.
+        let cpu_only = local_execution_provider("llama-cpp") == "cpu";
+        assert_eq!(gpu_layers_are_a_no_op(99), cpu_only);
     }
 
     #[test]

@@ -72,6 +72,7 @@ _E2E_TESTS = {
     "reasoning_budget": ["llm-llamacpp"],
     "reasoning_capture": ["llm-llamacpp"],
     "tts_integration": [],
+    "whispercpp_integration": ["asr-whispercpp"],
 }
 
 # local_llm is absent on purpose: it is gated on `llm-mistral`, and xybrid-core's
@@ -79,7 +80,9 @@ _E2E_TESTS = {
 # be satisfied here the way llm-llamacpp can. whisper_candle_integration is
 # absent for the same reason — it is gated on `candle`, which xybrid-core's
 # crate_features above do not enable. It runs under cargo, in the Test Candle
-# workflow.
+# workflow. whisper.cpp is included because core's Bazel target enables it;
+# the real weights remain a cargo-only CI download, while this target proves
+# the test and skip path compile in the Bazel graph.
 
 [
     rust_test(

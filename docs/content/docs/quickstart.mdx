@@ -12,7 +12,7 @@ Get Xybrid running in your app with a few lines of code. Choose your SDK below.
 ```yaml
 # pubspec.yaml
 dependencies:
-  xybrid_flutter: ^0.4.1
+  xybrid_flutter: ^0.5.0
 ```
 
 ```bash
@@ -54,7 +54,7 @@ Or add to `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/xybrid-ai/xybrid", from: "0.4.1")
+    .package(url: "https://github.com/xybrid-ai/xybrid", from: "0.5.0")
 ]
 ```
 
@@ -85,7 +85,7 @@ let result = try await model.runAsync(envelope: envelope)
 ```kotlin
 // build.gradle.kts
 dependencies {
-    implementation("ai.xybrid:xybrid-kotlin:0.4.1")
+    implementation("ai.xybrid:xybrid-kotlin:0.5.0")
 }
 ```
 
@@ -119,7 +119,7 @@ In Unity, go to **Window > Package Manager > + > Add package from git URL** and 
 https://github.com/xybrid-ai/xybrid.git?path=/bindings/unity
 ```
 
-Or via [OpenUPM](https://openupm.com/packages/ai.xybrid.sdk/): `openupm add ai.xybrid.sdk`. Native libraries download automatically on first import (SHA-256 verified); pin a version by appending `#v0.4.1` to the git URL.
+Or via [OpenUPM](https://openupm.com/packages/ai.xybrid.sdk/): `openupm add ai.xybrid.sdk`. Native libraries download automatically on first import (SHA-256 verified); pin a version by appending `#v0.5.0` to the git URL.
 
 **Run inference**
 
@@ -191,7 +191,7 @@ See the [Web SDK guide](/docs/sdks/web) for the tensor surface, registry loading
 ```toml
 # Cargo.toml
 [dependencies]
-xybrid = "0.4.1"
+xybrid = "0.5.0"
 ```
 
 **Run inference**

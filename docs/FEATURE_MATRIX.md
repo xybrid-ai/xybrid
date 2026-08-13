@@ -59,6 +59,12 @@ This document provides a comprehensive reference for all feature flags, platform
   CMake project, and under cargo's `OUT_DIR` the paths MSBuild generates for it
   exceed the 260-character `MAX_PATH` limit. Every other target rejects the
   variable at build time.
+- Bazel has its own Vulkan switch, `--config=linux-vulkan` (which sets
+  `--//:vulkan=true`), because Bazel writes llama.cpp's cmake defines directly
+  and never reads `XYBRID_LLAMA_CPP_VULKAN`. It selects `//:llama_vulkan`, a
+  locally-executed target — the exec machine needs `glslc`, the Vulkan headers
+  and the loader. This is the lane that matters for shipped Linux artifacts,
+  since the CLI builds from Bazel; the published binaries are still CPU-only.
 
 ---
 
@@ -222,6 +228,7 @@ These are the canonical feature combinations CI must run to gate a release. Any 
 | Default-features workspace clippy | `cargo clippy --workspace -- -D warnings` | Default `ort-download` shape; vendored crates compile cleanly with nothing else enabled. |
 | Vision umbrella workspace clippy | `cargo clippy --workspace --features llm-llamacpp-vision --tests --examples -- -D warnings` | The full VLM path through llama.cpp `mtmd`, including vision tests/examples that gate on `llm-llamacpp-vision`. |
 | llama.cpp Vulkan check | `XYBRID_LLAMA_CPP_VULKAN=1 cargo check -p xybrid-sdk --features platform-desktop` | Linux CI installs the Vulkan SDK/loader first, then verifies the opt-in llama.cpp Vulkan build. |
+| Bazel Vulkan lane | `bazel build --config=remote --config=linux-vulkan -c opt //crates/xybrid-cli:xybrid` | The same backend on the Bazel graph — the lane shipped artifacts would come from. Links and smokes the CLI, so unlike the `cargo check` row above it also proves the loader link. |
 | **`--all-features` is forbidden.** | — | See conflict table above. |
 
 ### Platform preset matrix

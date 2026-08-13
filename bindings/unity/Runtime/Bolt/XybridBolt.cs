@@ -389,6 +389,64 @@ namespace XybridBolt
     public static class XybridBolt
     {
         /// <summary>
+        /// Build the continuation envelope for the turn after the model asked for
+        /// tools.
+        ///
+        /// One `run` is one model turn, so the loop lives in your code: run a
+        /// tools-bearing request, execute every [`XybridToolCall`] it returns, then
+        /// run this envelope to feed the outcomes back. Pass the same tools on the
+        /// continuation's [`XybridGenerationConfig`] as on the original turn.
+        ///
+        /// A free function rather than a constructor because `XybridEnvelope` is a
+        /// `#[data]` record, not a handle type — records carry no methods across the
+        /// generated bindings.
+        /// </summary>
+        public static global::XybridBolt.XybridEnvelope ToolResultsEnvelope(string userText, string priorAssistantText, global::XybridBolt.XybridToolResult[] results)
+        {
+            WireWriter userTextWriter = new WireWriter();
+            {
+                userTextWriter.WriteString(userText);
+            }
+            byte[] userTextBytes = userTextWriter.ToArray();
+            WireWriter priorAssistantTextWriter = new WireWriter();
+            {
+                priorAssistantTextWriter.WriteString(priorAssistantText);
+            }
+            byte[] priorAssistantTextBytes = priorAssistantTextWriter.ToArray();
+            WireWriter resultsWriter = new WireWriter();
+            {
+                resultsWriter.WriteU32(checked((uint)results.Length));
+                foreach (var boltffiValue0 in results)
+                {
+                    boltffiValue0.Encode(resultsWriter);
+                }
+            }
+            byte[] resultsBytes = resultsWriter.ToArray();
+            FfiBuf boltffiErrorBuffer = NativeMethods.NativeToolResultsEnvelope(userTextBytes, (nuint)userTextBytes.Length, priorAssistantTextBytes, (nuint)priorAssistantTextBytes.Length, resultsBytes, (nuint)resultsBytes.Length, out FfiBuf boltffiResultBuffer);
+            if (boltffiErrorBuffer.ptr != 0)
+            {
+                try
+                {
+                    WireReader boltffiErrorReader = new WireReader(boltffiErrorBuffer);
+                    throw new global::XybridBolt.XybridErrorException(global::XybridBolt.XybridError.Decode(boltffiErrorReader));
+                }
+                finally
+                {
+                    NativeMethods.FreeBuf(boltffiErrorBuffer);
+                }
+            }
+            try
+            {
+                WireReader resultReader = new WireReader(boltffiResultBuffer);
+                return global::XybridBolt.XybridEnvelope.Decode(resultReader);
+            }
+            finally
+            {
+                NativeMethods.FreeBuf(boltffiResultBuffer);
+            }
+        }
+
+        /// <summary>
         /// Convert a JSON Schema (as a JSON string) into a GBNF grammar for
         /// [`XybridGenerationConfig::grammar`]. Fails on invalid JSON or schema
         /// constructs outside the supported subset.
@@ -928,6 +986,9 @@ namespace XybridBolt
 
         [DllImport(LibName, EntryPoint = "boltffi_function_xybrid_bolt_telemetry_shutdown")]
         internal static extern void NativeTelemetryShutdown();
+
+        [DllImport(LibName, EntryPoint = "boltffi_function_xybrid_bolt_tool_results_envelope")]
+        internal static extern FfiBuf NativeToolResultsEnvelope([In] byte[] userTextBytes, nuint userTextLength, [In] byte[] priorAssistantTextBytes, nuint priorAssistantTextLength, [In] byte[] resultsBytes, nuint resultsLength, out FfiBuf boltffiResultBuffer);
 
         [DllImport(LibName, EntryPoint = "boltffi_function_xybrid_bolt_version")]
         internal static extern FfiBuf NativeVersion();

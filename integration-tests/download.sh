@@ -62,10 +62,10 @@ check_models() {
         # Check for model.onnx or model_metadata.json
         if [ -d "$model_dir" ] && { [ -f "$model_dir/model_metadata.json" ] || [ -f "$model_dir/model.onnx" ]; }; then
             echo -e "  ${GREEN}✓${NC} $model [$source]"
-            ((present++))
+            present=$((present + 1))
         else
             echo -e "  ${RED}✗${NC} $model [$source] (missing)"
-            ((missing++))
+            missing=$((missing + 1))
         fi
     done
 
@@ -98,10 +98,26 @@ validate_file() {
     return 0
 }
 
+# Portable SHA-256 for registry passthrough files. Linux images provide
+# sha256sum; macOS provides shasum.
+sha256_file() {
+    local file="$1"
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$file" | cut -d' ' -f1
+    elif command -v shasum >/dev/null 2>&1; then
+        shasum -a 256 "$file" | cut -d' ' -f1
+    else
+        echo "No SHA-256 tool found (need sha256sum or shasum)" >&2
+        return 1
+    fi
+}
+
 # Detect current platform
 detect_platform() {
-    local os=$(uname -s | tr '[:upper:]' '[:lower:]')
-    local arch=$(uname -m)
+    local os
+    local arch
+    os=$(uname -s | tr '[:upper:]' '[:lower:]')
+    arch=$(uname -m)
 
     case "$os" in
         darwin)
@@ -184,13 +200,21 @@ download_from_registry() {
     local download_url
     local file_name
     local size_bytes
+    local passthrough
+    local expected_sha256
     download_url=$(echo "$resolve_response" | jq -r '.resolved.download_url // empty')
     file_name=$(echo "$resolve_response" | jq -r '.resolved.file // empty')
     size_bytes=$(echo "$resolve_response" | jq -r '.resolved.size_bytes // 0')
+    passthrough=$(echo "$resolve_response" | jq -r '.resolved.passthrough // false')
+    expected_sha256=$(echo "$resolve_response" | jq -r '.resolved.sha256 // empty')
 
     if [ -z "$download_url" ]; then
         echo -e "${RED}✗ No download URL found for $model_name${NC}"
         echo "  Response: $resolve_response"
+        return 1
+    fi
+    if [ -z "$file_name" ] || [ "$(basename "$file_name")" != "$file_name" ]; then
+        echo -e "${RED}✗ Registry returned an invalid file name: $file_name${NC}"
         return 1
     fi
 
@@ -199,11 +223,54 @@ download_from_registry() {
 
     mkdir -p "$model_dir"
 
-    # Download the bundle
+    # Download the bundle or raw passthrough model.
     local bundle_file="$model_dir/$file_name"
     echo "  Downloading..."
 
     if curl -L -# -f -o "$bundle_file" "$download_url"; then
+        if [ "$passthrough" = "true" ]; then
+            if ! validate_file "$bundle_file" "$size_bytes"; then
+                echo -e "${RED}✗ Downloaded passthrough file is invalid${NC}"
+                rm -rf "$model_dir"
+                return 1
+            fi
+
+            local actual_size
+            actual_size=$(wc -c < "$bundle_file" | tr -d ' ')
+            if [ "$size_bytes" -gt 0 ] && [ "$actual_size" -ne "$size_bytes" ]; then
+                echo -e "${RED}✗ Size mismatch for $file_name${NC}"
+                echo "  Expected: $size_bytes bytes"
+                echo "  Actual:   $actual_size bytes"
+                rm -rf "$model_dir"
+                return 1
+            fi
+
+            if [ -n "$expected_sha256" ]; then
+                local actual_sha256
+                actual_sha256=$(sha256_file "$bundle_file") || {
+                    rm -rf "$model_dir"
+                    return 1
+                }
+                if [ "$actual_sha256" != "$expected_sha256" ]; then
+                    echo -e "${RED}✗ SHA-256 mismatch for $file_name${NC}"
+                    echo "  Expected: $expected_sha256"
+                    echo "  Actual:   $actual_sha256"
+                    rm -rf "$model_dir"
+                    return 1
+                fi
+            fi
+
+            if ! echo "$resolve_response" | jq -e '.resolved.model_metadata | type == "object"' >/dev/null; then
+                echo -e "${RED}✗ Passthrough response is missing model metadata${NC}"
+                rm -rf "$model_dir"
+                return 1
+            fi
+            echo "$resolve_response" | jq '.resolved.model_metadata' > "$model_dir/model_metadata.json"
+            chmod -R u+rw "$model_dir" 2>/dev/null || true
+            echo -e "${GREEN}✓ $model_name downloaded successfully${NC}"
+            return 0
+        fi
+
         echo "  Extracting bundle..."
 
         # Detect archive type by magic bytes

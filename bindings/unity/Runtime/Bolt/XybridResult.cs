@@ -16,15 +16,21 @@ namespace XybridBolt
     /// Where the answer actually came from. Cloud fallback keeps `model_id`
     /// identical on both legs, so this is the only way to tell them apart.
     /// </param>
+    /// <param name="ToolCalls">
+    /// Tool calls the model emitted this turn. Empty unless the request
+    /// offered tools via [`XybridGenerationConfig::tools`]. Appended last:
+    /// `#[data]` PODs serialize by field order across the FFI boundary.
+    /// </param>
     public readonly struct XybridResult
     {
-        public XybridResult(XybridEnvelope Envelope, XybridOutputType OutputType, string ModelId, uint LatencyMs, XybridExecutionTarget ExecutionTarget, XybridInferenceMetrics Metrics) { this.Envelope = Envelope; this.OutputType = OutputType; this.ModelId = ModelId; this.LatencyMs = LatencyMs; this.ExecutionTarget = ExecutionTarget; this.Metrics = Metrics; }
+        public XybridResult(XybridEnvelope Envelope, XybridOutputType OutputType, string ModelId, uint LatencyMs, XybridExecutionTarget ExecutionTarget, XybridInferenceMetrics Metrics, XybridToolCall[] ToolCalls) { this.Envelope = Envelope; this.OutputType = OutputType; this.ModelId = ModelId; this.LatencyMs = LatencyMs; this.ExecutionTarget = ExecutionTarget; this.Metrics = Metrics; this.ToolCalls = ToolCalls; }
         public XybridEnvelope Envelope { get; }
         public XybridOutputType OutputType { get; }
         public string ModelId { get; }
         public uint LatencyMs { get; }
         public XybridExecutionTarget ExecutionTarget { get; }
         public XybridInferenceMetrics Metrics { get; }
+        public XybridToolCall[] ToolCalls { get; }
 
         internal static XybridResult Decode(WireReader reader) =>
             new XybridResult(
@@ -33,7 +39,8 @@ namespace XybridBolt
                 reader.ReadString(),
                 reader.ReadU32(),
                 (XybridExecutionTarget)reader.ReadI32(),
-                XybridInferenceMetrics.Decode(reader)
+                XybridInferenceMetrics.Decode(reader),
+                reader.ReadArray(reader => XybridToolCall.Decode(reader))
             );
 
         internal void Encode(WireWriter writer)
@@ -55,6 +62,13 @@ namespace XybridBolt
             }
             {
                 this.Metrics.Encode(writer);
+            }
+            {
+                writer.WriteU32(checked((uint)this.ToolCalls.Length));
+                foreach (var boltffiValue0 in this.ToolCalls)
+                {
+                    boltffiValue0.Encode(writer);
+                }
             }
         }
 

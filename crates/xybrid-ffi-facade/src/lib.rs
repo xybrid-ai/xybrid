@@ -390,6 +390,62 @@ impl Envelope {
         .with_role(MessageRole::User)
     }
 
+    /// Continuation envelope for the turn *after* the model asked for tools.
+    ///
+    /// One `run` is one model turn, so the tool loop lives in your code: run
+    /// a tools-bearing request, execute the calls on
+    /// [`InferenceResult::tool_calls`], then run this envelope to feed the
+    /// outcomes back.
+    ///
+    /// `user_text` is the original user message of the turn being continued;
+    /// `prior_assistant_text` is that turn's raw output text, tool-call block
+    /// included (i.e. [`InferenceResult::text`] verbatim). Pass `results` in
+    /// call order, and run the continuation with the same
+    /// [`GenerationConfig::tools`] as the original turn so the executor
+    /// recomposes an identical chat prefix.
+    ///
+    /// Only the immediately prior assistant turn is replayed: multi-hop
+    /// chains work turn by turn, but earlier tool exchanges are not re-sent.
+    /// Continuation runs on the non-streaming text paths only — the
+    /// streaming and image-bearing paths reject these envelopes.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::ConfigError`] when a [`ToolResult::content_json`]
+    /// isn't valid JSON.
+    pub fn tool_results(
+        user_text: String,
+        prior_assistant_text: String,
+        results: Vec<ToolResult>,
+    ) -> Result<Self> {
+        let sdk_results = results
+            .into_iter()
+            .map(|r| {
+                let content: serde_json::Value =
+                    serde_json::from_str(&r.content_json).map_err(|e| Error::ConfigError {
+                        message: format!(
+                            "tool result for '{}' has invalid content JSON: {e}",
+                            r.name
+                        ),
+                    })?;
+                Ok(sdk::ir::ToolCallResult {
+                    call_id: r.call_id,
+                    name: r.name,
+                    content,
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        // Built through the SDK constructor rather than by re-deriving the
+        // metadata keys here, so the continuation wire format has exactly one
+        // definition and this can't silently drift from the executor.
+        Ok(Self::from_sdk(sdk::ir::Envelope::tool_results(
+            user_text,
+            prior_assistant_text,
+            &sdk_results,
+        )))
+    }
+
     /// Set the LLM message role on this envelope. Stored under
     /// `xybrid.role` metadata — matches the SDK's own convention so the
     /// envelope is interchangeable with `xybrid_sdk::ir::Envelope::with_role`.
@@ -643,6 +699,93 @@ impl ConversationContextHandle {
 }
 
 // ============================================================================
+// Tool calling
+// ============================================================================
+
+/// A tool (function) the model may ask to call.
+///
+/// FFI-safe mirror of [`sdk::Tool`]: the JSON Schema describing the
+/// arguments travels as a JSON *string* rather than a `serde_json::Value`,
+/// because no FFI generator can describe an arbitrary JSON tree.
+///
+/// Offer tools by putting them on [`GenerationConfig::tools`]; the calls the
+/// model emits come back on [`InferenceResult::tool_calls`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ToolDefinition {
+    /// Function name the model will emit, e.g. `get_weather`.
+    pub name: String,
+    /// What the tool does. The model reads this to decide when to call it.
+    pub description: String,
+    /// JSON Schema for the arguments, as a JSON string. Pass
+    /// `{"type":"object","properties":{}}` for a tool that takes none.
+    pub parameters_json: String,
+}
+
+impl ToolDefinition {
+    /// Lower to the SDK type.
+    ///
+    /// # Errors
+    /// Returns [`Error::ConfigError`] when `parameters_json` is not valid
+    /// JSON. Validated up front by [`GenerationConfig::validate`] so this
+    /// surfaces from the run call rather than from deep inside the executor.
+    fn to_sdk(&self) -> Result<sdk::Tool> {
+        let parameters: serde_json::Value =
+            serde_json::from_str(&self.parameters_json).map_err(|e| Error::ConfigError {
+                message: format!(
+                    "tool '{}' has invalid parameters JSON Schema: {e}",
+                    self.name
+                ),
+            })?;
+        Ok(sdk::Tool::function(
+            self.name.clone(),
+            self.description.clone(),
+            parameters,
+        ))
+    }
+}
+
+/// One tool call the model emitted this turn.
+///
+/// FFI-safe mirror of [`sdk::ToolCall`] — `arguments_json` is the raw JSON
+/// object the model produced, left as a string for the same reason as
+/// [`ToolDefinition::parameters_json`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ToolCall {
+    /// Correlation id for this call, e.g. `call_0`. Echo it back as
+    /// [`ToolResult::call_id`].
+    pub id: String,
+    /// Which tool the model wants to run.
+    pub name: String,
+    /// Arguments as a JSON object string.
+    pub arguments_json: String,
+}
+
+impl ToolCall {
+    fn from_sdk(call: sdk::ToolCall) -> Self {
+        Self {
+            id: call.id,
+            name: call.function.name,
+            arguments_json: call.function.arguments,
+        }
+    }
+}
+
+/// The outcome of running one tool, fed back to the model next turn.
+///
+/// FFI-safe mirror of [`sdk::ir::ToolCallResult`]. Build the continuation
+/// envelope with [`Envelope::tool_results`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ToolResult {
+    /// The [`ToolCall::id`] this answers.
+    pub call_id: String,
+    /// The tool that was invoked.
+    pub name: String,
+    /// The tool's output as a JSON string. Wrap plain values — `"42"`,
+    /// `"\"sunny\""` — so the whole field parses as JSON.
+    pub content_json: String,
+}
+
+// ============================================================================
 // Generation + Run options
 // ============================================================================
 
@@ -662,6 +805,14 @@ pub struct GenerationConfig {
     /// (local llama backend only; other backends ignore it). Produce one from
     /// a JSON Schema with [`json_schema_to_gbnf`], or pass raw GBNF.
     pub grammar: Option<String>,
+    /// Tools the model may call this turn. Empty means no tool calling — the
+    /// existing behavior, byte-for-byte unchanged.
+    ///
+    /// Tool calling is llama.cpp-only today and unsupported paths fail
+    /// closed rather than silently generating without the tools: a model
+    /// with no embedded chat template, the mistralrs backend, and the cloud
+    /// fallback leg all reject tool-bearing requests.
+    pub tools: Vec<ToolDefinition>,
 }
 
 impl GenerationConfig {
@@ -686,7 +837,16 @@ impl GenerationConfig {
     }
 
     /// Apply the explicitly set fields over a caller-provided SDK config.
-    pub fn apply_over(&self, mut cfg: sdk::GenerationConfig) -> sdk::GenerationConfig {
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::ConfigError`] when a [`ToolDefinition`] carries a
+    /// `parameters_json` that isn't valid JSON. Every other field lowers
+    /// infallibly; tools are the one place a foreign caller hands us a
+    /// string we have to parse, and lowering it here — rather than dropping
+    /// the tool — means a typo'd schema surfaces at the `run` call instead
+    /// of silently producing a model that was never offered the tool.
+    pub fn apply_over(&self, mut cfg: sdk::GenerationConfig) -> Result<sdk::GenerationConfig> {
         if let Some(v) = self.max_tokens {
             cfg.max_tokens = v as usize;
         }
@@ -711,7 +871,14 @@ impl GenerationConfig {
         if let Some(g) = &self.grammar {
             cfg.grammar = Some(g.clone());
         }
-        cfg
+        if !self.tools.is_empty() {
+            cfg.tools = self
+                .tools
+                .iter()
+                .map(ToolDefinition::to_sdk)
+                .collect::<Result<Vec<_>>>()?;
+        }
+        Ok(cfg)
     }
 
     /// Materialize the SDK type over the global defaults.
@@ -719,7 +886,11 @@ impl GenerationConfig {
     /// Run paths with a model in scope should prefer
     /// `apply_over(model.default_generation_config())` so model-level defaults
     /// are preserved.
-    pub fn to_sdk(&self) -> sdk::GenerationConfig {
+    ///
+    /// # Errors
+    ///
+    /// See [`apply_over`](Self::apply_over).
+    pub fn to_sdk(&self) -> Result<sdk::GenerationConfig> {
         self.apply_over(sdk::GenerationConfig::default())
     }
 }
@@ -781,16 +952,24 @@ impl RunOptions {
     /// Materialize the SDK type over global defaults.
     ///
     /// Run paths with a model in scope should prefer [`Self::to_sdk_over`].
-    pub fn to_sdk(&self, cancel: Option<&CancellationToken>) -> sdk::RunOptions {
+    ///
+    /// # Errors
+    ///
+    /// See [`GenerationConfig::apply_over`].
+    pub fn to_sdk(&self, cancel: Option<&CancellationToken>) -> Result<sdk::RunOptions> {
         self.to_sdk_over(cancel, sdk::GenerationConfig::default())
     }
 
     /// Materialize the SDK type over model-resolved generation defaults.
+    ///
+    /// # Errors
+    ///
+    /// See [`GenerationConfig::apply_over`].
     pub fn to_sdk_over(
         &self,
         cancel: Option<&CancellationToken>,
         generation_base: sdk::GenerationConfig,
-    ) -> sdk::RunOptions {
+    ) -> Result<sdk::RunOptions> {
         let mut policy = sdk::AbortPolicy::default()
             .with_cloud_fallback(self.fallback_to_cloud)
             .with_max_grace_tokens(self.max_grace_tokens);
@@ -800,7 +979,7 @@ impl RunOptions {
 
         let mut opts = sdk::RunOptions::new().with_abort_policy(policy);
         if let Some(gc) = &self.generation_config {
-            opts = opts.with_generation_config(gc.apply_over(generation_base));
+            opts = opts.with_generation_config(gc.apply_over(generation_base)?);
         }
         if let Some(cid) = &self.correlation_id {
             opts = opts.with_correlation_id(cid.clone());
@@ -808,7 +987,7 @@ impl RunOptions {
         if let Some(tok) = cancel {
             opts = opts.with_cancellation_token(tok.inner.clone());
         }
-        opts
+        Ok(opts)
     }
 }
 
@@ -916,6 +1095,16 @@ pub struct InferenceResult {
     /// identical on both legs, so this is the only way to tell them apart.
     pub execution_target: ExecutionTarget,
     pub metrics: InferenceMetrics,
+    /// Tool calls the model emitted this turn.
+    ///
+    /// Non-empty only when the request offered tools via
+    /// [`GenerationConfig::tools`] and the model emitted at least one
+    /// well-formed call. Run each one, then feed the outcomes back with
+    /// [`Envelope::tool_results`].
+    ///
+    /// The raw tool-call block stays in [`text`](Self::text) untouched, and
+    /// malformed model output yields an empty vec rather than an error.
+    pub tool_calls: Vec<ToolCall>,
 }
 
 /// Where a result was produced — the observed fact, not a routing preference.
@@ -1044,6 +1233,11 @@ impl InferenceResult {
         let latency_ms = result.latency_ms();
         let execution_target = ExecutionTarget::from_sdk(result.provenance());
         let metrics = InferenceMetrics::from_sdk(result.metrics());
+        let tool_calls = result
+            .tool_calls()
+            .into_iter()
+            .map(ToolCall::from_sdk)
+            .collect();
         let envelope = Envelope::from_sdk(result.into_envelope());
         Self {
             envelope,
@@ -1052,6 +1246,7 @@ impl InferenceResult {
             latency_ms,
             execution_target,
             metrics,
+            tool_calls,
         }
     }
 
@@ -1430,7 +1625,8 @@ impl XybridModel {
         cancel: Option<Arc<CancellationToken>>,
     ) -> Result<InferenceResult> {
         let env = envelope.into_sdk()?;
-        let opts = options.to_sdk_over(cancel.as_deref(), self.inner.default_generation_config());
+        let opts =
+            options.to_sdk_over(cancel.as_deref(), self.inner.default_generation_config())?;
         let result = self
             .inner
             .run_with_options(&env, &opts)
@@ -1453,7 +1649,8 @@ impl XybridModel {
         let ctx = context.snapshot();
         let gc = generation_config
             .as_ref()
-            .map(|config| config.apply_over(self.inner.default_generation_config()));
+            .map(|config| config.apply_over(self.inner.default_generation_config()))
+            .transpose()?;
         let result = self
             .inner
             .run_with_context(&env, &ctx, gc.as_ref())
@@ -1490,7 +1687,7 @@ impl XybridModel {
     ) -> Result<Arc<StreamingSession>> {
         let envelope = envelope.into_sdk()?;
         let options =
-            options.to_sdk_over(cancel.as_deref(), self.inner.default_generation_config());
+            options.to_sdk_over(cancel.as_deref(), self.inner.default_generation_config())?;
         let model = self.inner.clone();
 
         StreamingSession::spawn(move |sender| {
@@ -1535,7 +1732,7 @@ impl XybridModel {
         let envelope = envelope.into_sdk()?;
         let ctx = context.snapshot();
         let options =
-            options.to_sdk_over(cancel.as_deref(), self.inner.default_generation_config());
+            options.to_sdk_over(cancel.as_deref(), self.inner.default_generation_config())?;
         let model = self.inner.clone();
 
         StreamingSession::spawn(move |sender| {
@@ -2121,6 +2318,7 @@ mod tests {
             latency_ms: 0,
             execution_target: ExecutionTarget::Local,
             metrics: InferenceMetrics::default(),
+            tool_calls: Vec::new(),
         }
     }
 
@@ -2172,7 +2370,7 @@ mod tests {
             stop_sequences: vec!["</s>".into()],
             ..GenerationConfig::default()
         };
-        let sdk_gc = gc.to_sdk();
+        let sdk_gc = gc.to_sdk().expect("no tools, so lowering cannot fail");
         assert_eq!(sdk_gc.max_tokens, 64);
         assert!((sdk_gc.temperature - 0.3).abs() < f32::EPSILON);
         assert_eq!(sdk_gc.top_k, 40);
@@ -2191,7 +2389,9 @@ mod tests {
             ..GenerationConfig::default()
         };
 
-        let sdk_gc = gc.apply_over(base);
+        let sdk_gc = gc
+            .apply_over(base)
+            .expect("no tools, so lowering cannot fail");
 
         assert_eq!(sdk_gc.max_tokens, 3584);
         assert!((sdk_gc.temperature - 0.7).abs() < f32::EPSILON);
@@ -2203,7 +2403,9 @@ mod tests {
         // An empty facade config must not silently override the SDK's
         // baked-in defaults. Verifies the `if let Some(...)` guards.
         let baseline = sdk::GenerationConfig::default();
-        let from_facade = GenerationConfig::default().to_sdk();
+        let from_facade = GenerationConfig::default()
+            .to_sdk()
+            .expect("no tools, so lowering cannot fail");
         assert_eq!(from_facade.max_tokens, baseline.max_tokens);
         assert_eq!(from_facade.temperature, baseline.temperature);
         assert_eq!(from_facade.top_k, baseline.top_k);
@@ -2223,7 +2425,9 @@ mod tests {
             max_grace_tokens: 16,
             correlation_id: Some("trace-1".into()),
         };
-        let sdk_opts = opts.to_sdk(Some(&cancel));
+        let sdk_opts = opts
+            .to_sdk(Some(&cancel))
+            .expect("no tools, so lowering cannot fail");
 
         assert!(sdk_opts.generation_config.is_some());
         assert!(sdk_opts.abort_policy.fallback_to_cloud);
@@ -2245,9 +2449,168 @@ mod tests {
             ..sdk::GenerationConfig::default()
         };
 
-        let sdk_opts = RunOptions::default().to_sdk_over(None, base);
+        let sdk_opts = RunOptions::default()
+            .to_sdk_over(None, base)
+            .expect("no tools, so lowering cannot fail");
 
         assert!(sdk_opts.generation_config.is_none());
+    }
+
+    fn weather_tool() -> ToolDefinition {
+        ToolDefinition {
+            name: "get_weather".into(),
+            description: "Current weather for a city.".into(),
+            parameters_json: r#"{"type":"object","properties":{"city":{"type":"string"}}}"#.into(),
+        }
+    }
+
+    #[test]
+    fn tools_lower_into_the_sdk_generation_config() {
+        let gc = GenerationConfig {
+            tools: vec![weather_tool()],
+            ..GenerationConfig::default()
+        };
+
+        let sdk_gc = gc.to_sdk().expect("valid schema lowers");
+
+        assert_eq!(sdk_gc.tools.len(), 1);
+        let function = &sdk_gc.tools[0].function;
+        assert_eq!(function.name, "get_weather");
+        assert_eq!(
+            function.description.as_deref(),
+            Some("Current weather for a city.")
+        );
+        assert_eq!(
+            function.parameters.as_ref().and_then(|p| p.get("type")),
+            Some(&serde_json::json!("object"))
+        );
+    }
+
+    #[test]
+    fn no_tools_leaves_the_sdk_tool_list_empty() {
+        // The zero-tool path must stay byte-for-byte what it was before tool
+        // calling existed — an empty `tools` vec, not a `Some(vec![])`.
+        let sdk_gc = GenerationConfig::default().to_sdk().expect("lowers");
+        assert!(sdk_gc.tools.is_empty());
+    }
+
+    #[test]
+    fn invalid_tool_schema_fails_the_run_instead_of_dropping_the_tool() {
+        let gc = GenerationConfig {
+            tools: vec![ToolDefinition {
+                name: "broken".into(),
+                description: "d".into(),
+                parameters_json: "{not json".into(),
+            }],
+            ..GenerationConfig::default()
+        };
+
+        let error = gc.to_sdk().expect_err("invalid schema must not lower");
+
+        assert!(matches!(error, Error::ConfigError { .. }));
+        assert!(error.to_string().contains("broken"));
+    }
+
+    #[test]
+    fn invalid_tool_schema_surfaces_through_run_options() {
+        let opts = RunOptions {
+            generation_config: Some(GenerationConfig {
+                tools: vec![ToolDefinition {
+                    name: "broken".into(),
+                    description: "d".into(),
+                    parameters_json: "[".into(),
+                }],
+                ..GenerationConfig::default()
+            }),
+            ..RunOptions::default()
+        };
+
+        assert!(matches!(opts.to_sdk(None), Err(Error::ConfigError { .. })));
+    }
+
+    #[test]
+    fn tool_calls_are_parsed_off_the_response_envelope() {
+        let mut metadata = HashMap::new();
+        metadata.insert(
+            "tool_calls".to_string(),
+            r#"[{"id":"call_0","type":"function","function":{"name":"get_weather","arguments":"{\"city\":\"Paris\"}"}}]"#
+                .to_string(),
+        );
+        let sdk_result = sdk::InferenceResult::new(
+            sdk::ir::Envelope::with_metadata(
+                sdk::ir::EnvelopeKind::Text("calling a tool".into()),
+                metadata,
+            ),
+            "m",
+            0,
+        );
+
+        let result = InferenceResult::from_sdk(sdk_result);
+
+        assert_eq!(
+            result.tool_calls,
+            vec![ToolCall {
+                id: "call_0".into(),
+                name: "get_weather".into(),
+                arguments_json: r#"{"city":"Paris"}"#.into(),
+            }]
+        );
+        // The raw block is left in the text — parsing is additive.
+        assert_eq!(result.text(), Some("calling a tool"));
+    }
+
+    #[test]
+    fn a_response_without_tool_calls_yields_an_empty_vec() {
+        let result = text_result_with_metadata(HashMap::new());
+        assert!(result.tool_calls.is_empty());
+    }
+
+    #[test]
+    fn tool_results_envelope_carries_the_continuation_metadata() {
+        let envelope = Envelope::tool_results(
+            "weather in Paris?".into(),
+            r#"<|tool_call_start|>[get_weather(city="Paris")]<|tool_call_end|>"#.into(),
+            vec![ToolResult {
+                call_id: "call_0".into(),
+                name: "get_weather".into(),
+                content_json: r#"{"temperature_c":17.5}"#.into(),
+            }],
+        )
+        .expect("valid JSON content");
+
+        assert_eq!(
+            envelope.kind,
+            EnvelopeKind::Text {
+                text: "weather in Paris?".into()
+            }
+        );
+        assert!(envelope
+            .metadata
+            .get("tool_prior_text")
+            .expect("prior text is carried")
+            .contains("get_weather"));
+        assert!(envelope
+            .metadata
+            .get("tool_responses")
+            .expect("responses are carried")
+            .contains("17.5"));
+    }
+
+    #[test]
+    fn tool_results_envelope_rejects_non_json_content() {
+        let error = Envelope::tool_results(
+            "u".into(),
+            "prior".into(),
+            vec![ToolResult {
+                call_id: "call_0".into(),
+                name: "get_weather".into(),
+                content_json: "not json".into(),
+            }],
+        )
+        .expect_err("invalid content must not build an envelope");
+
+        assert!(matches!(error, Error::ConfigError { .. }));
+        assert!(error.to_string().contains("get_weather"));
     }
 
     #[test]

@@ -41,6 +41,7 @@ def _result(envelope: xybrid.XybridEnvelope, output_type: xybrid.XybridOutputTyp
         latency_ms=latency_ms,
         execution_target=xybrid.XybridExecutionTarget.LOCAL,
         metrics=_metrics(latency_ms),
+        tool_calls=[],
     )
 
 
@@ -183,6 +184,7 @@ def test_generation_configs_presets_match_kotlin_values() -> None:
         repetition_penalty=None,
         stop_sequences=[],
         grammar=None,
+        tools=[],
     )
     assert creative == xybrid.XybridGenerationConfig(
         max_tokens=None,
@@ -193,6 +195,7 @@ def test_generation_configs_presets_match_kotlin_values() -> None:
         repetition_penalty=None,
         stop_sequences=[],
         grammar=None,
+        tools=[],
     )
 
 

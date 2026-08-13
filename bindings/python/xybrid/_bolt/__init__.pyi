@@ -11,6 +11,9 @@ from enum import IntEnum
 
 
 
+from collections.abc import Sequence
+
+
 
 MODULE_NAME: str
 PACKAGE_NAME: str
@@ -31,6 +34,30 @@ class XybridEnvelope:
 
 
 @dataclass(frozen=True, slots=True)
+class XybridToolDefinition:
+    name: str
+    description: str
+    parameters_json: str
+
+
+
+@dataclass(frozen=True, slots=True)
+class XybridToolCall:
+    id: str
+    name: str
+    arguments_json: str
+
+
+
+@dataclass(frozen=True, slots=True)
+class XybridToolResult:
+    call_id: str
+    name: str
+    content_json: str
+
+
+
+@dataclass(frozen=True, slots=True)
 class XybridGenerationConfig:
     max_tokens: int | None
     temperature: float | None
@@ -40,6 +67,7 @@ class XybridGenerationConfig:
     repetition_penalty: float | None
     stop_sequences: list[str]
     grammar: str | None
+    tools: list[XybridToolDefinition]
 
 
 
@@ -80,6 +108,7 @@ class XybridResult:
     latency_ms: int
     execution_target: XybridExecutionTarget
     metrics: XybridInferenceMetrics
+    tool_calls: list[XybridToolCall]
 
 
 
@@ -428,6 +457,7 @@ class XybridBundle:
 
 
 
+def tool_results_envelope(user_text: str, prior_assistant_text: str, results: Sequence[XybridToolResult]) -> XybridEnvelope: ...
 def json_schema_to_gbnf(schema_json: str) -> str: ...
 def set_thermal_state(state: XybridThermalState) -> None: ...
 def clear_thermal_state() -> None: ...

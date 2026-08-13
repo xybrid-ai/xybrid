@@ -16,9 +16,9 @@ import 'result.dart';
 import 'streaming.dart';
 part 'model.freezed.dart';
 
-// These functions are ignored because they are not marked as `pub`: `apply_cloud_fallback_metadata`, `from_sdk`, `is_debug_gateway_host`, `is_ipv6_link_local`, `is_ipv6_unique_local`, `is_v1_gateway_base`, `is_xybrid_gateway_host`, `non_empty`, `normalize_gateway_url`, `should_cancel_on_sink_close`, `streaming_run_options`, `to_facade`, `to_facade`, `to_sdk_over`, `to_sdk_with_cancellation_over`, `validate_cloud_gateway_url`, `validated_cloud_gateway_url`
+// These functions are ignored because they are not marked as `pub`: `apply_cloud_fallback_metadata`, `from_sdk`, `into_facade`, `into_facade`, `is_debug_gateway_host`, `is_ipv6_link_local`, `is_ipv6_unique_local`, `is_v1_gateway_base`, `is_xybrid_gateway_host`, `non_empty`, `normalize_gateway_url`, `should_cancel_on_sink_close`, `streaming_run_options`, `to_facade`, `to_facade`, `to_sdk_over`, `to_sdk_with_cancellation_over`, `validate_cloud_gateway_url`, `validated_cloud_gateway_url`
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `FlutterFallbackResourceProvider`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `current_snapshot`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `from`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `current_snapshot`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`
 
 /// Convert a JSON Schema (as a JSON string) into a GBNF grammar for
 /// [`FfiGenerationConfig::grammar`].
@@ -351,6 +351,14 @@ class FfiGenerationConfig {
   /// a JSON Schema with `jsonSchemaToGbnf`, or pass raw GBNF.
   final String? grammar;
 
+  /// Tools the model may call this turn. `None` or empty means no tool
+  /// calling — existing behavior, unchanged.
+  ///
+  /// Tool calling is llama.cpp-only today; unsupported paths (no embedded
+  /// chat template, the mistralrs backend, the cloud fallback leg) reject
+  /// tool-bearing requests rather than quietly generating without them.
+  final List<FfiToolDefinition>? tools;
+
   const FfiGenerationConfig({
     this.maxTokens,
     this.temperature,
@@ -360,6 +368,7 @@ class FfiGenerationConfig {
     this.repetitionPenalty,
     this.stopSequences,
     this.grammar,
+    this.tools,
   });
 
   /// Create a creative generation config (higher temperature).
@@ -379,7 +388,8 @@ class FfiGenerationConfig {
       topK.hashCode ^
       repetitionPenalty.hashCode ^
       stopSequences.hashCode ^
-      grammar.hashCode;
+      grammar.hashCode ^
+      tools.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -393,7 +403,8 @@ class FfiGenerationConfig {
           topK == other.topK &&
           repetitionPenalty == other.repetitionPenalty &&
           stopSequences == other.stopSequences &&
-          grammar == other.grammar;
+          grammar == other.grammar &&
+          tools == other.tools;
 }
 
 @freezed
@@ -540,6 +551,101 @@ class FfiStreamToken {
           index == other.index &&
           cumulativeText == other.cumulativeText &&
           finishReason == other.finishReason;
+}
+
+/// One tool call the model emitted, from `FfiResult.toolCalls`.
+class FfiToolCall {
+  /// Correlation id, e.g. `call_0`. Echo it back as `FfiToolResult.callId`.
+  final String id;
+
+  /// Which tool the model wants to run.
+  final String name;
+
+  /// Arguments as a JSON object string.
+  final String argumentsJson;
+
+  const FfiToolCall({
+    required this.id,
+    required this.name,
+    required this.argumentsJson,
+  });
+
+  @override
+  int get hashCode => id.hashCode ^ name.hashCode ^ argumentsJson.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FfiToolCall &&
+          runtimeType == other.runtimeType &&
+          id == other.id &&
+          name == other.name &&
+          argumentsJson == other.argumentsJson;
+}
+
+/// A tool (function) the model may ask to call.
+///
+/// `parameters_json` is the JSON Schema for the arguments, carried as a JSON
+/// string because FRB can't describe an arbitrary JSON tree.
+class FfiToolDefinition {
+  /// Function name the model will emit, e.g. `get_weather`.
+  final String name;
+
+  /// What the tool does. The model reads this to decide when to call it.
+  final String description;
+
+  /// JSON Schema for the arguments, as a JSON string. Pass
+  /// `{"type":"object","properties":{}}` for a tool that takes none.
+  final String parametersJson;
+
+  const FfiToolDefinition({
+    required this.name,
+    required this.description,
+    required this.parametersJson,
+  });
+
+  @override
+  int get hashCode =>
+      name.hashCode ^ description.hashCode ^ parametersJson.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FfiToolDefinition &&
+          runtimeType == other.runtimeType &&
+          name == other.name &&
+          description == other.description &&
+          parametersJson == other.parametersJson;
+}
+
+/// The outcome of running one tool, fed back with `FfiEnvelope::tool_results`.
+class FfiToolResult {
+  /// The `FfiToolCall.id` this answers.
+  final String callId;
+
+  /// The tool that was invoked.
+  final String name;
+
+  /// The tool's output as a JSON string.
+  final String contentJson;
+
+  const FfiToolResult({
+    required this.callId,
+    required this.name,
+    required this.contentJson,
+  });
+
+  @override
+  int get hashCode => callId.hashCode ^ name.hashCode ^ contentJson.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FfiToolResult &&
+          runtimeType == other.runtimeType &&
+          callId == other.callId &&
+          name == other.name &&
+          contentJson == other.contentJson;
 }
 
 @freezed

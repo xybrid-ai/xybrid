@@ -70,8 +70,40 @@ FileTracker generates for it exceed Windows' 260-character `MAX_PATH`, leaving
 about 17 characters for the repository root. It fails from any realistic
 checkout location, so it is gated off rather than shipped broken.
 
-The prebuilt binaries use the release platform configuration. The Vulkan
-environment variable only affects binaries you compile yourself.
+Under Bazel the knob is a build flag, not an environment variable — Bazel sets
+llama.cpp's cmake defines itself and never reads `XYBRID_LLAMA_CPP_VULKAN`:
+
+```bash
+bazel build --config=remote --config=linux-vulkan -c opt //crates/xybrid-cli:xybrid
+```
+
+That config needs the Vulkan SDK on the machine driving the build — ggml
+compiles its GLSL shaders with a nested `vulkan-shaders-gen` project, so
+`//:llama_vulkan` is pinned to local execution while the rest of the graph still
+builds remotely. Two things to set up first:
+
+```bash
+sudo apt-get install glslc libvulkan-dev spirv-headers
+
+# //:llama_vulkan reads the Vulkan headers from a fixed path, staged rather
+# than used in place so that cmake's `-I` for them cannot shadow the hermetic
+# toolchain's libc headers. Use $VULKAN_SDK/include if you have the LunarG SDK.
+sudo mkdir -p /opt/xybrid-vulkan-include
+for tree in vulkan vk_video spirv; do
+  sudo ln -sfn "/usr/include/$tree" "/opt/xybrid-vulkan-include/$tree"
+done
+```
+
+The loader is not taken from your system at build time: `//bazel/vulkan` builds a
+link-time stub carrying the real `libvulkan.so.1` SONAME, so the binary binds to
+whatever Vulkan loader the machine running it has.
+
+A Vulkan build links `libvulkan.so.1` dynamically, so the machine that *runs*
+it needs a Vulkan loader too, and a driver to reach the GPU.
+
+The prebuilt binaries use the release platform configuration, which is CPU-only
+on Linux — no Vulkan asset is published yet. Both Vulkan paths above affect
+only binaries you compile yourself.
 
 <details>
 <summary>All available feature flags</summary>

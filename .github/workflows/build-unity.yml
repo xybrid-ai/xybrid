@@ -62,6 +62,14 @@ jobs:
           which cmake >/dev/null || brew install cmake
           which pkg-config >/dev/null || brew install pkg-config
 
+      # Serve hermetic-llvm's pinned macOS SDK from cache: Apple's URL 403s
+      # permanently and its only mirror throttles Actions runners. Analyzed on
+      # every target platform, not just Apple ones — see the action.
+      - name: Cache the pinned macOS SDK
+        uses: ./.github/actions/bazel-repo-cache
+        with:
+          macos-sdk-mirror: ${{ vars.MACOS_SDK_MIRROR }}
+
       # Note: arm64 only. ORT has no x86_64-apple-darwin prebuilt; Intel Macs run
       # arm64 via Rosetta 2.
       # `-c opt` is required: --config=macos-metal sets the platform + Metal but
@@ -127,6 +135,14 @@ jobs:
         env:
           BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
         run: tools/scripts/write-buildbuddy-rc.sh remote
+
+      # Serve hermetic-llvm's pinned macOS SDK from cache: Apple's URL 403s
+      # permanently and its only mirror throttles Actions runners. Analyzed on
+      # every target platform, not just Apple ones — see the action.
+      - name: Cache the pinned macOS SDK
+        uses: ./.github/actions/bazel-repo-cache
+        with:
+          macos-sdk-mirror: ${{ vars.MACOS_SDK_MIRROR }}
 
       - name: Build + stage Windows native (Bazel)
         run: |
@@ -195,6 +211,14 @@ jobs:
           BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
         run: tools/scripts/write-buildbuddy-rc.sh remote
 
+      # Serve hermetic-llvm's pinned macOS SDK from cache: Apple's URL 403s
+      # permanently and its only mirror throttles Actions runners. Analyzed on
+      # every target platform, not just Apple ones — see the action.
+      - name: Cache the pinned macOS SDK
+        uses: ./.github/actions/bazel-repo-cache
+        with:
+          macos-sdk-mirror: ${{ vars.MACOS_SDK_MIRROR }}
+
       - name: Build + stage Linux native (Bazel)
         run: |
           set -euo pipefail
@@ -255,6 +279,14 @@ jobs:
         env:
           BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
         run: tools/scripts/write-buildbuddy-rc.sh remote
+
+      # Serve hermetic-llvm's pinned macOS SDK from cache: Apple's URL 403s
+      # permanently and its only mirror throttles Actions runners. Analyzed on
+      # every target platform, not just Apple ones — see the action.
+      - name: Cache the pinned macOS SDK
+        uses: ./.github/actions/bazel-repo-cache
+        with:
+          macos-sdk-mirror: ${{ vars.MACOS_SDK_MIRROR }}
 
       # stage_unity_native.py copies each ABI's .so into
       # Runtime/Plugins/Android/<abi>/ and bundles the vendored ORT and
@@ -335,6 +367,14 @@ jobs:
             exit 1
           fi
           echo "ORT iOS library found."
+
+      # Serve hermetic-llvm's pinned macOS SDK from cache: Apple's URL 403s
+      # permanently and its only mirror throttles Actions runners. Analyzed on
+      # every target platform, not just Apple ones — see the action.
+      - name: Cache the pinned macOS SDK
+        uses: ./.github/actions/bazel-repo-cache
+        with:
+          macos-sdk-mirror: ${{ vars.MACOS_SDK_MIRROR }}
 
       # --config=ios already sets compilation_mode=opt (unlike macos-metal), so
       # no explicit -c opt here.

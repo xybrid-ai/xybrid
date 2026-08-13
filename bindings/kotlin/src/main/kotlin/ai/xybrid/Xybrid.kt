@@ -447,6 +447,7 @@ object GenerationConfigs {
         repetitionPenalty = null,
         stopSequences = emptyList(),
         grammar = null,
+        tools = emptyList(),
     )
 
     /** Creative generation preset (higher temperature). */
@@ -460,6 +461,7 @@ object GenerationConfigs {
         repetitionPenalty = null,
         stopSequences = emptyList(),
         grammar = null,
+        tools = emptyList(),
     )
 }
 
@@ -559,6 +561,29 @@ object Envelope {
     @JvmStatic
     fun embedding(data: FloatArray): XybridEnvelope =
         XybridEnvelope(kind = XybridEnvelopeKind.Embedding(data), metadata = emptyList())
+
+    /**
+     * Creates the continuation envelope for the turn after the model asked for
+     * tools.
+     *
+     * One `run` is one model turn, so the tool loop lives in your code: run a
+     * request carrying tools, execute every [XybridResult.toolCalls] entry,
+     * then run this envelope to feed the outcomes back. Run the continuation
+     * with the same tools as the original turn so the executor rebuilds an
+     * identical chat prefix.
+     *
+     * @param userText The original user message of the turn being continued.
+     * @param priorAssistantText That turn's raw output text, tool-call block
+     *   included — i.e. [XybridResult.text] verbatim.
+     * @param results Tool outcomes, in call order.
+     * @throws XybridError.ConfigError if a result's content is not valid JSON.
+     */
+    @JvmStatic
+    fun toolResults(
+        userText: String,
+        priorAssistantText: String,
+        results: List<XybridToolResult>,
+    ): XybridEnvelope = toolResultsEnvelope(userText, priorAssistantText, results)
 
     /**
      * Creates an encoded image envelope for vision-language models. The format

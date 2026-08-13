@@ -154,7 +154,7 @@ xybrid run --model kokoro-82m --input-text "国破山河在，城春草木深" -
 
 ```yaml
 dependencies:
-  xybrid_flutter: ^0.4.1
+  xybrid_flutter: ^0.5.0
 ```
 
 **运行模型：**
@@ -171,7 +171,7 @@ final result = await model.run(XybridEnvelope.text('国破山河在，城春草�
 
 ```gradle
 dependencies {
-    implementation("ai.xybrid:xybrid-kotlin:0.4.1")
+    implementation("ai.xybrid:xybrid-kotlin:0.5.0")
 }
 ```
 
@@ -189,7 +189,7 @@ val result = model.runAsync(Envelope.text("国破山河在，城春草木深"))
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/xybrid-ai/xybrid.git", from: "0.4.1")
+    .package(url: "https://github.com/xybrid-ai/xybrid.git", from: "0.5.0")
 ]
 ```
 
@@ -223,7 +223,7 @@ var result = model.Run(Envelope.Text("国破山河在，城春草木深"));
 
 ```toml
 [dependencies]
-xybrid = "0.4.1"
+xybrid = "0.5.0"
 ```
 
 **运行模型：**
@@ -396,7 +396,7 @@ Skills 与 agent 无关，位于 [`agents/skills/`](agents/skills/)。安装脚�
 | 嵌入模型 | 🔜 | 🔜 | 🔜 | 🔜 | 🔜 |
 | 多模型流水线（MMP） | ✅ | ✅ | ✅ | ✅ | ✅ |
 | 模型下载与缓存 | ✅ | ✅ | ✅ | ✅ | ✅ |
-| 硬件加速 | Metal, ANE | CPU | Metal, ANE | CUDA, Vulkan | CUDA |
+| 硬件加速 | Metal, ANE | CPU | Metal, ANE | CPU，可选 Vulkan | CPU |
 
 **SDK MMP 支持：** Flutter ✅ · Rust ✅ · Kotlin 🔜 · Swift 🔜 · Unity 🔜
 
@@ -408,7 +408,7 @@ Skills 与 agent 无关，位于 [`agents/skills/`](agents/skills/)。安装脚�
 - **离线可用** — 初次模型下载后无需互联网。
 - **跨平台** — iOS、Android、macOS、Linux 和 Windows 使用统一的 API。
 - **多模型流水线（MMP）** — 在单次调用中链接多个模型（ASR → LLM → TTS）。
-- **硬件加速** — 支持 Apple Neural Engine、Metal、CUDA，以及 Linux llama.cpp 构建可选的 Vulkan。
+- **硬件加速** — Apple 平台支持 Apple Neural Engine 与 Metal；Linux 的 llama.cpp 构建可选启用 Vulkan。Android 与 Windows 目前使用 CPU，预编译的 Linux 二进制也仅为 CPU（Vulkan 需在构建时启用 — 参见[安装说明](docs/INSTALLATION.md#platform-features)）。
 
 ### 与其他方案对比
 

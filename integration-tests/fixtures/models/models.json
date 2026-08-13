@@ -20,6 +20,13 @@
       "size_mb": 150,
       "task": "speech-recognition"
     },
+    "whisper-tiny-ggml": {
+      "description": "Whisper tiny multilingual GGML Q5_1 for ASR via whisper.cpp",
+      "source": "registry",
+      "size_mb": 31,
+      "task": "speech-recognition",
+      "feature_gate": "asr-whispercpp"
+    },
     "whisper-ggml-tiny-en": {
       "description": "Whisper tiny.en, GGML Q5_1 - fast English ASR via whisper.cpp on the shared ggml",
       "source": "url",

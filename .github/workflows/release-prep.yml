@@ -213,6 +213,14 @@ jobs:
           # (bazel/ort_ios_sim.bzl).
           which xz >/dev/null || brew install xz
 
+      # Serve hermetic-llvm's pinned macOS SDK from cache: Apple's URL 403s
+      # permanently and its only mirror throttles Actions runners. Analyzed on
+      # every target platform, not just Apple ones — see the action.
+      - name: Cache the pinned macOS SDK
+        uses: ./.github/actions/bazel-repo-cache
+        with:
+          macos-sdk-mirror: ${{ vars.MACOS_SDK_MIRROR }}
+
       - name: Build XCFramework (Bazel)
         run: bazelisk build --config=ios //bindings/apple:XybridFFI
 
@@ -269,6 +277,14 @@ jobs:
         env:
           BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
         run: tools/scripts/write-buildbuddy-rc.sh
+
+      # Serve hermetic-llvm's pinned macOS SDK from cache: Apple's URL 403s
+      # permanently and its only mirror throttles Actions runners. Analyzed on
+      # every target platform, not just Apple ones — see the action.
+      - name: Cache the pinned macOS SDK
+        uses: ./.github/actions/bazel-repo-cache
+        with:
+          macos-sdk-mirror: ${{ vars.MACOS_SDK_MIRROR }}
 
       # Three configs, one bazel-bin symlink — resolve every artifact via
       # cquery + cp -L immediately after its build (never reference bazel-bin
@@ -376,6 +392,14 @@ jobs:
           BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
         run: tools/scripts/write-buildbuddy-rc.sh
 
+      # Serve hermetic-llvm's pinned macOS SDK from cache: Apple's URL 403s
+      # permanently and its only mirror throttles Actions runners. Analyzed on
+      # every target platform, not just Apple ones — see the action.
+      - name: Cache the pinned macOS SDK
+        uses: ./.github/actions/bazel-repo-cache
+        with:
+          macos-sdk-mirror: ${{ vars.MACOS_SDK_MIRROR }}
+
       - name: Build CLI (Bazel mixed execution, shipping mode)
         run: |
           bazelisk build --config=remote --config=macos-metal -c opt \
@@ -454,6 +478,14 @@ jobs:
         env:
           BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
         run: tools/scripts/write-buildbuddy-rc.sh
+
+      # Serve hermetic-llvm's pinned macOS SDK from cache: Apple's URL 403s
+      # permanently and its only mirror throttles Actions runners. Analyzed on
+      # every target platform, not just Apple ones — see the action.
+      - name: Cache the pinned macOS SDK
+        uses: ./.github/actions/bazel-repo-cache
+        with:
+          macos-sdk-mirror: ${{ vars.MACOS_SDK_MIRROR }}
 
       - name: Build Android jniLibs (Bazel AAR on RBE)
         run: |
@@ -563,6 +595,14 @@ jobs:
         env:
           BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
         run: tools/scripts/write-buildbuddy-rc.sh
+
+      # Serve hermetic-llvm's pinned macOS SDK from cache: Apple's URL 403s
+      # permanently and its only mirror throttles Actions runners. Analyzed on
+      # every target platform, not just Apple ones — see the action.
+      - name: Cache the pinned macOS SDK
+        uses: ./.github/actions/bazel-repo-cache
+        with:
+          macos-sdk-mirror: ${{ vars.MACOS_SDK_MIRROR }}
 
       # Four configs, one bazel-bin symlink — resolve every artifact via
       # cquery + cp -L immediately after its build. build-android (a needs)
@@ -676,6 +716,14 @@ jobs:
         env:
           BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
         run: tools/scripts/write-buildbuddy-rc.sh
+
+      # Serve hermetic-llvm's pinned macOS SDK from cache: Apple's URL 403s
+      # permanently and its only mirror throttles Actions runners. Analyzed on
+      # every target platform, not just Apple ones — see the action.
+      - name: Cache the pinned macOS SDK
+        uses: ./.github/actions/bazel-repo-cache
+        with:
+          macos-sdk-mirror: ${{ vars.MACOS_SDK_MIRROR }}
 
       # cargokit wants `<libName>.dll` + `<libName>.dll.lib` in the prebuilt
       # dir (artifacts_provider.dart), which is exactly what rustc emits for an
@@ -800,6 +848,14 @@ jobs:
           BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
         run: tools/scripts/write-buildbuddy-rc.sh
 
+      # Serve hermetic-llvm's pinned macOS SDK from cache: Apple's URL 403s
+      # permanently and its only mirror throttles Actions runners. Analyzed on
+      # every target platform, not just Apple ones — see the action.
+      - name: Cache the pinned macOS SDK
+        uses: ./.github/actions/bazel-repo-cache
+        with:
+          macos-sdk-mirror: ${{ vars.MACOS_SDK_MIRROR }}
+
       - name: Build CLI (Bazel on RBE, shipping mode)
         run: |
           bazelisk build --config=remote -c opt //crates/xybrid-cli:xybrid
@@ -879,6 +935,14 @@ jobs:
         env:
           BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
         run: tools/scripts/write-buildbuddy-rc.sh
+
+      # Serve hermetic-llvm's pinned macOS SDK from cache: Apple's URL 403s
+      # permanently and its only mirror throttles Actions runners. Analyzed on
+      # every target platform, not just Apple ones — see the action.
+      - name: Cache the pinned macOS SDK
+        uses: ./.github/actions/bazel-repo-cache
+        with:
+          macos-sdk-mirror: ${{ vars.MACOS_SDK_MIRROR }}
 
       - name: Build CLI (Bazel on RBE, shipping mode)
         run: |

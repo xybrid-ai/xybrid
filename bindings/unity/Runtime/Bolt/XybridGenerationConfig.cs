@@ -13,9 +13,18 @@ namespace XybridBolt
     /// [`json_schema_to_gbnf`], or pass raw GBNF. Appended last: `#[data]`
     /// PODs serialize by field order across the FFI boundary.
     /// </param>
+    /// <param name="Tools">
+    /// Tools the model may call this turn. Empty means no tool calling —
+    /// existing behavior, unchanged. Appended after `grammar` for the same
+    /// field-order reason.
+    ///
+    /// Tool calling is llama.cpp-only today; unsupported paths (no embedded
+    /// chat template, the mistralrs backend, the cloud fallback leg) reject
+    /// tool-bearing requests rather than quietly generating without them.
+    /// </param>
     public readonly struct XybridGenerationConfig
     {
-        public XybridGenerationConfig(uint? MaxTokens, float? Temperature, float? TopP, float? MinP, uint? TopK, float? RepetitionPenalty, string[] StopSequences, string? Grammar) { this.MaxTokens = MaxTokens; this.Temperature = Temperature; this.TopP = TopP; this.MinP = MinP; this.TopK = TopK; this.RepetitionPenalty = RepetitionPenalty; this.StopSequences = StopSequences; this.Grammar = Grammar; }
+        public XybridGenerationConfig(uint? MaxTokens, float? Temperature, float? TopP, float? MinP, uint? TopK, float? RepetitionPenalty, string[] StopSequences, string? Grammar, XybridToolDefinition[] Tools) { this.MaxTokens = MaxTokens; this.Temperature = Temperature; this.TopP = TopP; this.MinP = MinP; this.TopK = TopK; this.RepetitionPenalty = RepetitionPenalty; this.StopSequences = StopSequences; this.Grammar = Grammar; this.Tools = Tools; }
         public uint? MaxTokens { get; }
         public float? Temperature { get; }
         public float? TopP { get; }
@@ -24,6 +33,7 @@ namespace XybridBolt
         public float? RepetitionPenalty { get; }
         public string[] StopSequences { get; }
         public string? Grammar { get; }
+        public XybridToolDefinition[] Tools { get; }
 
         internal static XybridGenerationConfig Decode(WireReader reader) =>
             new XybridGenerationConfig(
@@ -34,7 +44,8 @@ namespace XybridBolt
                 reader.ReadU8() == 0 ? default(uint?) : reader.ReadU32(),
                 reader.ReadU8() == 0 ? default(float?) : reader.ReadF32(),
                 reader.ReadArray(reader => reader.ReadString()),
-                reader.ReadU8() == 0 ? default(string?) : reader.ReadString()
+                reader.ReadU8() == 0 ? default(string?) : reader.ReadString(),
+                reader.ReadArray(reader => XybridToolDefinition.Decode(reader))
             );
 
         internal void Encode(WireWriter writer)
@@ -121,6 +132,13 @@ namespace XybridBolt
                 else
                 {
                     writer.WriteU8(0);
+                }
+            }
+            {
+                writer.WriteU32(checked((uint)this.Tools.Length));
+                foreach (var boltffiValue0 in this.Tools)
+                {
+                    boltffiValue0.Encode(writer);
                 }
             }
         }

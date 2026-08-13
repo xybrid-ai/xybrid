@@ -8,6 +8,7 @@
 // ignore_for_file: invalid_use_of_internal_member, unused_import, unnecessary_import
 
 import '../frb_generated.dart';
+import 'model.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
 // These functions are ignored because they are not marked as `pub`: `from_core`, `from_core`, `from_inference_result`, `from_sdk`
@@ -93,6 +94,15 @@ class FfiResult {
   final FfiExecutionTarget executionTarget;
   final FfiInferenceMetrics metrics;
 
+  /// Tool calls the model asked for this turn.
+  ///
+  /// Empty unless the request offered tools via
+  /// `FfiGenerationConfig.tools`. Run each call yourself, then feed the
+  /// outcomes back with `FfiEnvelope::tool_results` — one run is one model
+  /// turn. The raw tool-call block stays in `text` untouched, and malformed
+  /// model output yields an empty list rather than an error.
+  final List<FfiToolCall> toolCalls;
+
   const FfiResult({
     required this.success,
     this.text,
@@ -102,6 +112,7 @@ class FfiResult {
     required this.latencyMs,
     required this.executionTarget,
     required this.metrics,
+    required this.toolCalls,
   });
 
   @override
@@ -113,7 +124,8 @@ class FfiResult {
       embedding.hashCode ^
       latencyMs.hashCode ^
       executionTarget.hashCode ^
-      metrics.hashCode;
+      metrics.hashCode ^
+      toolCalls.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -127,7 +139,8 @@ class FfiResult {
           embedding == other.embedding &&
           latencyMs == other.latencyMs &&
           executionTarget == other.executionTarget &&
-          metrics == other.metrics;
+          metrics == other.metrics &&
+          toolCalls == other.toolCalls;
 }
 
 /// Per-stage latency entry for pipeline runs.
