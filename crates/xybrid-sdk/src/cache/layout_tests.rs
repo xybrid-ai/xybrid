@@ -1,4 +1,6 @@
 use super::layout::{CacheEntryLocation, CacheLayout};
+#[cfg(feature = "huggingface")]
+use hf_hub::{Cache, Repo, RepoType};
 use std::fs;
 use std::path::Path;
 use std::path::PathBuf;
@@ -24,6 +26,14 @@ fn layout_uses_model_cache_parent_as_cache_root() {
     assert!(repo_dir_name.starts_with("repo--"));
     assert_eq!(repo_dir_name.len(), "repo--".len() + 64);
     assert_eq!(layout.huggingface_hub_root(), cache_root.join("hf-hub"));
+    let hub_repo_root = layout.huggingface_hub_repo_root("owner/repo");
+    assert_eq!(
+        hub_repo_root.parent(),
+        Some(cache_root.join("hf-hub").as_path())
+    );
+    let hub_repo_name = hub_repo_root.file_name().unwrap().to_str().unwrap();
+    assert!(hub_repo_name.starts_with("repo--"));
+    assert_eq!(hub_repo_name.len(), "repo--".len() + 64);
 }
 
 #[test]
@@ -107,12 +117,16 @@ fn direct_huggingface_roots_include_legacy_nested_locations() {
         vec![current_repo, canonical_legacy_repo, nested_legacy_repo]
     );
 
-    let legacy_hub_repo = models_dir.join("hf-hub").join("models--owner--repo");
-    fs::create_dir_all(&legacy_hub_repo).unwrap();
-
+    let hub_repo_root = layout
+        .prepare_huggingface_hub_repo_root("owner/repo")
+        .unwrap();
     assert_eq!(
-        layout.preferred_huggingface_hub_root("owner/repo"),
-        models_dir.join("hf-hub")
+        hub_repo_root,
+        layout.huggingface_hub_repo_root("owner/repo")
+    );
+    assert_eq!(
+        fs::read_to_string(hub_repo_root.join(".repo-id")).unwrap(),
+        "owner/repo"
     );
 }
 
@@ -308,6 +322,32 @@ fn colliding_legacy_repo_labels_have_distinct_cache_namespaces() {
         layout.huggingface_repo_revision_dir(first_repo, first_commit, None),
         layout.huggingface_repo_revision_dir(second_repo, first_commit, None)
     );
+    let first_hub_root = layout
+        .prepare_huggingface_hub_repo_root(first_repo)
+        .unwrap();
+    let second_hub_root = layout
+        .prepare_huggingface_hub_repo_root(second_repo)
+        .unwrap();
+    assert_ne!(first_hub_root, second_hub_root);
+    assert_eq!(
+        fs::read_to_string(first_hub_root.join(".repo-id")).unwrap(),
+        first_repo
+    );
+    assert_eq!(
+        fs::read_to_string(second_hub_root.join(".repo-id")).unwrap(),
+        second_repo
+    );
+    let hub_entries = layout.cache_entries().unwrap();
+    assert!(hub_entries.iter().any(|entry| {
+        entry.location == CacheEntryLocation::HuggingFaceHub
+            && entry.model_id == first_repo
+            && entry.path == first_hub_root
+    }));
+    assert!(hub_entries.iter().any(|entry| {
+        entry.location == CacheEntryLocation::HuggingFaceHub
+            && entry.model_id == second_repo
+            && entry.path == second_hub_root
+    }));
 
     layout
         .record_huggingface_revision(first_repo, requested_revision, first_commit, None)
@@ -333,6 +373,43 @@ fn colliding_legacy_repo_labels_have_distinct_cache_namespaces() {
             .cached_huggingface_revision(second_repo, requested_revision, None)
             .unwrap(),
         Some(second_commit.to_string())
+    );
+}
+
+#[cfg(feature = "huggingface")]
+#[test]
+fn colliding_repo_ids_cannot_read_each_others_hub_snapshots() {
+    let temp_dir = TempDir::new().unwrap();
+    let layout = CacheLayout::from_registry_root(temp_dir.path().join("cache/models"));
+    let first_repo = "a/b--c";
+    let second_repo = "a--b/c";
+    let commit = "commit-a";
+    let filename = "model.gguf";
+
+    let first_root = layout
+        .prepare_huggingface_hub_repo_root(first_repo)
+        .unwrap();
+    let second_root = layout
+        .prepare_huggingface_hub_repo_root(second_repo)
+        .unwrap();
+    let first_cache = Cache::new(first_root);
+    let second_cache = Cache::new(second_root);
+    let first = first_cache.repo(Repo::new(first_repo.to_string(), RepoType::Model));
+    let second = second_cache.repo(Repo::new(second_repo.to_string(), RepoType::Model));
+
+    first.create_ref(commit).unwrap();
+    let first_snapshot = first.pointer_path(commit);
+    fs::create_dir_all(&first_snapshot).unwrap();
+    fs::write(first_snapshot.join(filename), b"attacker-controlled").unwrap();
+
+    assert_eq!(
+        fs::read(first.get(filename).expect("primed repository should hit")).unwrap(),
+        b"attacker-controlled"
+    );
+    assert_eq!(
+        second.get(filename),
+        None,
+        "a colliding repository ID must not consume another repo's hub snapshot"
     );
 }
 
@@ -377,10 +454,10 @@ fn model_clear_roots_cover_canonical_and_legacy_repo_locations() {
     assert!(roots.contains(&cache_root.join("hf").join("owner/repo")));
     assert!(roots.contains(&layout.huggingface_repo_dir("owner/repo")));
     assert!(!roots.contains(&cache_root.join("hf").join("owner--repo")));
-    assert!(roots.contains(&cache_root.join("hf-hub").join("models--owner--repo")));
+    assert!(roots.contains(&layout.huggingface_hub_repo_root("owner/repo")));
     assert!(roots.contains(&models_dir.join("hf").join("owner/repo")));
     assert!(!roots.contains(&models_dir.join("hf").join("owner--repo")));
-    assert!(roots.contains(&models_dir.join("hf-hub").join("models--owner--repo")));
+    assert!(!roots.contains(&models_dir.join("hf-hub").join("models--owner--repo")));
 }
 
 #[test]

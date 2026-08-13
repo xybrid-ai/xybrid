@@ -253,12 +253,19 @@ impl CacheLayout {
         self.cache_root().join("hf-hub")
     }
 
-    pub(crate) fn preferred_huggingface_hub_root(&self, repo: &str) -> PathBuf {
-        let repo_dir = huggingface_hub_repo_dir_name(repo);
-        self.huggingface_hub_roots()
-            .into_iter()
-            .find(|root| root.join(&repo_dir).exists())
-            .unwrap_or_else(|| self.huggingface_hub_root())
+    pub(crate) fn huggingface_hub_repo_root(&self, repo: &str) -> PathBuf {
+        self.huggingface_hub_root()
+            .join(huggingface_repo_cache_dir_name(repo))
+    }
+
+    pub(crate) fn prepare_huggingface_hub_repo_root(
+        &self,
+        repo: &str,
+    ) -> Result<PathBuf, SdkError> {
+        let repo_root = self.huggingface_hub_repo_root(repo);
+        std::fs::create_dir_all(&repo_root)?;
+        std::fs::write(repo_root.join(HF_REPO_ID_FILE), repo)?;
+        Ok(repo_root)
     }
 
     pub(crate) fn entry_roots(&self) -> Vec<CacheEntryRoot> {
@@ -299,14 +306,12 @@ impl CacheLayout {
 
     pub(crate) fn model_roots(&self, model_id: &str) -> Vec<PathBuf> {
         let sanitized_repo = sanitize_repo_id(model_id);
-        let hf_hub_repo = huggingface_hub_repo_dir_name(model_id);
         let mut roots = vec![
             self.registry_root.join(model_id),
             self.huggingface_root().join(model_id),
             self.huggingface_repo_dir(model_id),
-            self.huggingface_hub_root().join(&hf_hub_repo),
+            self.huggingface_hub_repo_root(model_id),
             self.registry_root.join("hf").join(model_id),
-            self.registry_root.join("hf-hub").join(&hf_hub_repo),
         ];
         roots.extend(
             [
@@ -385,19 +390,46 @@ fn cache_entries_for_root(
             continue;
         }
 
-        if location == CacheEntryLocation::HuggingFace {
-            entries.extend(huggingface_cache_entries(&model_id, &entry.path())?);
-        } else {
-            entries.push(CacheEntryInfo {
-                model_id,
-                location,
-                path: entry.path(),
-                size_bytes: dir_size(&entry.path())?,
-            });
+        match location {
+            CacheEntryLocation::HuggingFace => {
+                entries.extend(huggingface_cache_entries(&model_id, &entry.path())?);
+            }
+            CacheEntryLocation::HuggingFaceHub => {
+                entries.extend(huggingface_hub_cache_entries(&model_id, &entry.path())?);
+            }
+            CacheEntryLocation::Registry | CacheEntryLocation::Extracted => {
+                entries.push(CacheEntryInfo {
+                    model_id,
+                    location,
+                    path: entry.path(),
+                    size_bytes: dir_size(&entry.path())?,
+                });
+            }
         }
     }
 
     Ok(entries)
+}
+
+fn huggingface_hub_cache_entries(
+    model_id: &str,
+    repo_root: &Path,
+) -> Result<Vec<CacheEntryInfo>, SdkError> {
+    let recorded_repo = match std::fs::read_to_string(repo_root.join(HF_REPO_ID_FILE)) {
+        Ok(value) if !value.is_empty() => Some(value),
+        Ok(_) => None,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => return Err(error.into()),
+    };
+    if model_id.starts_with(HF_REPO_DIR_PREFIX) && recorded_repo.is_none() {
+        return Ok(Vec::new());
+    }
+    Ok(vec![CacheEntryInfo {
+        model_id: recorded_repo.as_deref().unwrap_or(model_id).to_string(),
+        location: CacheEntryLocation::HuggingFaceHub,
+        path: repo_root.to_path_buf(),
+        size_bytes: dir_size_excluding(repo_root, &[HF_REPO_ID_FILE])?,
+    }])
 }
 
 fn huggingface_cache_entries(
@@ -550,10 +582,6 @@ fn repo_leaf(repo: &str) -> &str {
 
 fn sanitize_repo_id(repo: &str) -> String {
     repo.replace('/', "--")
-}
-
-fn huggingface_hub_repo_dir_name(repo: &str) -> String {
-    format!("models--{}", sanitize_repo_id(repo))
 }
 
 fn is_models_dir(path: &Path) -> bool {

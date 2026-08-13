@@ -684,6 +684,9 @@ impl CacheManager {
         }
 
         let mut roots = self.layout().model_roots(model_id);
+        if let Some((repository_id, _)) = model_id.split_once('@') {
+            roots.push(self.layout().huggingface_hub_repo_root(repository_id));
+        }
         roots.extend(
             self.layout()
                 .cache_entries()?
@@ -824,7 +827,10 @@ mod tests {
         let registry_model_dir = models_dir.join("Kokoro-82M-v1.0-ONNX");
         let extracted_model_dir = cache_root.join("extracted").join("kokoro-82m");
         let hf_model_dir = cache_root.join("hf").join("owner--repo");
-        let hf_hub_model_dir = cache_root.join("hf-hub").join("models--owner--repo");
+        let layout = CacheLayout::from_registry_root(models_dir.clone());
+        let hf_hub_model_dir = layout
+            .prepare_huggingface_hub_repo_root("owner/repo")
+            .unwrap();
         fs::create_dir_all(&registry_model_dir).unwrap();
         fs::create_dir_all(&extracted_model_dir).unwrap();
         fs::create_dir_all(&hf_model_dir).unwrap();
@@ -897,7 +903,9 @@ mod tests {
         let models_dir = cache_root.join("models");
         let layout = CacheLayout::from_registry_root(models_dir.clone());
         let hf_model_dir = layout.huggingface_repo_dir("owner/repo");
-        let hf_hub_model_dir = cache_root.join("hf-hub").join("models--owner--repo");
+        let hf_hub_model_dir = layout
+            .prepare_huggingface_hub_repo_root("owner/repo")
+            .unwrap();
         fs::create_dir_all(&hf_model_dir).unwrap();
         fs::create_dir_all(&hf_hub_model_dir).unwrap();
         fs::write(hf_model_dir.join("model.gguf"), b"weights").unwrap();
@@ -959,20 +967,26 @@ mod tests {
             layout
                 .record_huggingface_revision(repo, "main", commit, None)
                 .unwrap();
+            let hub_root = layout.prepare_huggingface_hub_repo_root(repo).unwrap();
+            fs::write(hub_root.join("blob"), repo.as_bytes()).unwrap();
             let revision_dir = layout.huggingface_repo_revision_dir(repo, commit, None);
             fs::write(revision_dir.join("model_metadata.json"), b"{}").unwrap();
         }
         let first_dir = layout.huggingface_repo_revision_dir(first_repo, commit, None);
         let second_dir = layout.huggingface_repo_revision_dir(second_repo, commit, None);
+        let first_hub_root = layout.huggingface_hub_repo_root(first_repo);
+        let second_hub_root = layout.huggingface_hub_repo_root(second_repo);
         let mut manager = CacheManager::with_dir(models_dir).unwrap();
 
         let removed = manager
             .clear_model_roots(&format!("{first_repo}@{commit}"))
             .unwrap();
 
-        assert_eq!(removed, 1);
+        assert_eq!(removed, 2);
         assert!(!first_dir.exists());
+        assert!(!first_hub_root.exists());
         assert!(second_dir.exists());
+        assert!(second_hub_root.exists());
     }
 
     #[test]

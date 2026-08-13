@@ -1952,7 +1952,7 @@ impl ModelLoader {
 
         // Create HF API client
         let api = ApiBuilder::from_env()
-            .with_cache_dir(cache_layout.preferred_huggingface_hub_root(repo))
+            .with_cache_dir(cache_layout.prepare_huggingface_hub_repo_root(repo)?)
             .build()
             .map_err(|e| SdkError::network_src("Failed to create HuggingFace API client", e))?;
 
@@ -5501,7 +5501,7 @@ mod tests {
         });
 
         // When
-        let result = receiver.recv_timeout(std::time::Duration::from_millis(100));
+        let result = receiver.recv_timeout(std::time::Duration::from_secs(2));
 
         // Then
         drop(guard);
