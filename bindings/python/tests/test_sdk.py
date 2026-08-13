@@ -136,6 +136,7 @@ def test_result_reasoning_field_defaults_to_none() -> None:
         latency_ms=1,
         execution_target=xybrid.XybridExecutionTarget.LOCAL,
         metrics=_metrics(1),
+        tool_calls=[],
     )
 
     assert result.reasoning_content is None
