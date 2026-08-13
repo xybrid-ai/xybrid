@@ -3,7 +3,7 @@ use sha2::{Digest, Sha256};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-const HF_REVISIONS_DIR: &str = ".revisions";
+pub(super) const HF_REVISIONS_DIR: &str = ".revisions";
 const HF_REFS_DIR: &str = ".refs";
 const HF_REPO_ID_FILE: &str = ".repo-id";
 const HF_RESOLVED_REVISION_FILE: &str = ".resolved-revision";
@@ -421,6 +421,10 @@ fn huggingface_hub_cache_entries(
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
         Err(error) => return Err(error.into()),
     };
+    // A hash-named directory without its identity marker is incomplete and
+    // cannot be attributed safely. Pre-hash hf-hub directories use the
+    // `models--owner--repo` form instead; keep those visible under that legacy
+    // label so users can list and explicitly evict them after upgrading.
     if model_id.starts_with(HF_REPO_DIR_PREFIX) && recorded_repo.is_none() {
         return Ok(Vec::new());
     }
@@ -442,6 +446,10 @@ fn huggingface_cache_entries(
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
         Err(error) => return Err(error.into()),
     };
+    // Do not infer an original `org/repo` from an unmarked legacy label: the
+    // old slash-to-`--` encoding was not injective. Listing the on-disk label
+    // still makes that cache discoverable and explicitly evictable without
+    // trusting it as model input.
     if model_id.starts_with(HF_REPO_DIR_PREFIX) && recorded_repo.is_none() {
         return Ok(Vec::new());
     }

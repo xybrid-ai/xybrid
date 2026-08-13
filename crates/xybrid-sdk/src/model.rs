@@ -15,7 +15,7 @@ use crate::run_options::{
 };
 use crate::source::{detect_platform, ModelSource};
 use crate::stream::XybridStream;
-use std::path::PathBuf;
+use std::path::{Component, Path, PathBuf};
 use std::pin::Pin;
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
@@ -964,6 +964,15 @@ fn select_huggingface_files_to_download<'a>(
     selected_gguf: Option<&str>,
     selected_projector: Option<&str>,
 ) -> SdkResult<Vec<&'a str>> {
+    if let Some(filename) = all_filenames
+        .iter()
+        .find(|filename| !is_safe_huggingface_filename(filename))
+    {
+        return Err(SdkError::load(format!(
+            "HuggingFace repo '{repo}' contains unsafe file path {filename:?}"
+        )));
+    }
+
     let gguf_files: Vec<&str> = all_filenames
         .iter()
         .filter(|filename| filename.ends_with(".gguf") && !is_gguf_companion(filename))
@@ -1018,6 +1027,14 @@ fn select_huggingface_files_to_download<'a>(
         })
         .copied()
         .collect())
+}
+
+fn is_safe_huggingface_filename(filename: &str) -> bool {
+    !filename.is_empty()
+        && !filename.contains('\\')
+        && Path::new(filename)
+            .components()
+            .all(|component| matches!(component, Component::Normal(_)))
 }
 
 fn huggingface_materialized_cache_dir(
@@ -4603,6 +4620,39 @@ mod tests {
             .expect("repository selection should succeed");
 
         assert_eq!(files, vec!["model.gguf", "README.md"]);
+    }
+
+    #[test]
+    fn huggingface_repository_file_paths_cannot_escape_the_cache() {
+        for unsafe_filename in [
+            "../outside/model.gguf",
+            "nested/../../outside.gguf",
+            "/absolute/model.gguf",
+            r"nested\..\outside.gguf",
+        ] {
+            let filenames = [unsafe_filename, "model.gguf"];
+
+            let error = select_huggingface_files_to_download("org/model", &filenames, None, None)
+                .expect_err("unsafe repository paths must be rejected before download");
+
+            assert!(error.to_string().contains("unsafe file path"));
+            assert!(error.to_string().contains(&format!("{unsafe_filename:?}")));
+        }
+    }
+
+    #[test]
+    fn huggingface_repository_file_paths_allow_nested_files() {
+        let filenames = ["weights/model.gguf", "tokenizer/config.json"];
+
+        let files = select_huggingface_files_to_download(
+            "org/model",
+            &filenames,
+            Some("weights/model.gguf"),
+            None,
+        )
+        .expect("normal nested repository files should remain supported");
+
+        assert_eq!(files, filenames);
     }
 
     #[test]
