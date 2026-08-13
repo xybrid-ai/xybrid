@@ -33,8 +33,8 @@ use super::template::is_mlx_embedding_safetensors_metadata;
 use super::template::PostprocessingStep;
 use super::template::{
     backend_label_from_template, explicit_llm_backend_hint, is_mlx_llm_safetensors_metadata,
-    quantization_label_from_metadata, span_kind_from_template, stage_kind_from_task, ExecutionMode,
-    ExecutionTemplate, ModelMetadata, PipelineStage,
+    quantization_label_from_metadata, raw_llm_backend_hint, span_kind_from_template,
+    stage_kind_from_task, ExecutionMode, ExecutionTemplate, ModelMetadata, PipelineStage,
 };
 use crate::conversation::ConversationContext;
 use crate::ir::EnvelopeKind;
@@ -60,7 +60,7 @@ use super::strategies::MlxEmbeddingStrategy;
 use super::tool_continuation::{
     reject_nested_tool_continuation_parts, text_messages_from_multimodal,
 };
-#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp", feature = "llm-mlx"))]
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
 use super::tool_continuation::{reject_tool_continuation_input, run_tool_continuation};
 
 fn mark_execution_terminal(guard: &ExecutionGuard, error: &AdapterError) {
@@ -681,7 +681,7 @@ impl TemplateExecutor {
         // itself fixes the label. Omitted when the runtime isn't part of
         // the closed set yet (CoreML / TFLite / ModelGraph) so analytics
         // sees "absent" not "guessed".
-        let backend_hint = metadata.metadata.get("backend").and_then(|v| v.as_str());
+        let backend_hint = raw_llm_backend_hint(metadata);
         if let Some(label) = backend_label_from_template(&metadata.execution_template, backend_hint)
         {
             xybrid_trace::add_metadata("backend", label);
@@ -747,7 +747,7 @@ impl TemplateExecutor {
             ..
         } = &metadata.execution_template
         {
-            let backend_hint = metadata.metadata.get("backend").and_then(|v| v.as_str());
+            let backend_hint = llm_backend_hint(metadata);
             return if Self::requires_multimodal_generation(input) {
                 self.execute_vision_language(
                     metadata,
@@ -845,6 +845,26 @@ impl TemplateExecutor {
                 .execute(&mut ctx, metadata, input);
         }
 
+        // An explicit `backend: mlx` on an architecture neither MLX whitelist
+        // recognises would otherwise fall through to the generic SafeTensors
+        // path silently, dropping the user's explicit request. Warn loudly so
+        // the routing decision is visible; the generic path stays the
+        // executable fallback.
+        if matches!(
+            metadata.execution_template,
+            ExecutionTemplate::SafeTensors { .. }
+        ) && explicit_llm_backend_hint(metadata)
+            .is_some_and(|hint| hint.eq_ignore_ascii_case("mlx"))
+        {
+            log::warn!(
+                target: "xybrid_core",
+                "model '{}' requests backend `mlx` but its architecture is not MLX-supported \
+                 (LLM whitelist: qwen3/gemma4/lfm; embedding whitelist: bert/nomic_bert); \
+                 falling back to the generic SafeTensors runtime",
+                metadata.model_id
+            );
+        }
+
         // Step 2: Single Model Execution
         //
         // Defaults a `GgmlWhisper` bundle declared (language / audio_ctx /
@@ -908,7 +928,7 @@ impl TemplateExecutor {
                 );
 
                 // Extract backend hint from metadata (e.g., "llamacpp" for Gemma 3)
-                let backend_hint = metadata.metadata.get("backend").and_then(|v| v.as_str());
+                let backend_hint = llm_backend_hint(metadata);
 
                 // LLM execution via LlmRuntimeAdapter
                 return self.execute_llm(
@@ -1243,7 +1263,7 @@ impl TemplateExecutor {
             );
 
             let messages = Self::multimodal_messages_with_context(input, context)?;
-            let backend_hint = metadata.metadata.get("backend").and_then(|v| v.as_str());
+            let backend_hint = llm_backend_hint(metadata);
 
             let mut result = if messages.iter().any(|message| message.image_count() > 0) {
                 self.execute_llm_multimodal_messages(
@@ -1327,10 +1347,7 @@ impl TemplateExecutor {
                 "LLM model detected, converting context to ChatMessages"
             );
 
-            #[cfg(all(
-                feature = "llm-llamacpp-vision",
-                any(feature = "llm-mistral", feature = "llm-llamacpp")
-            ))]
+            #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
             reject_text_only_model_image_input(metadata, input)?;
 
             // Convert ConversationContext + input to ChatMessages directly.
@@ -1365,7 +1382,7 @@ impl TemplateExecutor {
                 chat_messages.len()
             );
 
-            let backend_hint = metadata.metadata.get("backend").and_then(|v| v.as_str());
+            let backend_hint = llm_backend_hint(metadata);
 
             let mut result = self.execute_llm_with_messages(
                 metadata,
@@ -1472,7 +1489,7 @@ impl TemplateExecutor {
                 ..
             } = &metadata.execution_template
             {
-                let backend_hint = metadata.metadata.get("backend").and_then(|v| v.as_str());
+                let backend_hint = llm_backend_hint(metadata);
 
                 return if Self::requires_multimodal_generation(input) {
                     self.execute_vision_language_streaming(
@@ -1544,7 +1561,7 @@ impl TemplateExecutor {
                 ..
             } = &metadata.execution_template
             {
-                let backend_hint = metadata.metadata.get("backend").and_then(|v| v.as_str());
+                let backend_hint = llm_backend_hint(metadata);
 
                 return self.execute_llm_streaming(
                     metadata,
@@ -1694,7 +1711,7 @@ impl TemplateExecutor {
                 );
 
                 let messages = Self::multimodal_messages_with_context(input, context)?;
-                let backend_hint = metadata.metadata.get("backend").and_then(|v| v.as_str());
+                let backend_hint = llm_backend_hint(metadata);
 
                 let result = if messages.iter().any(|message| message.image_count() > 0) {
                     self.execute_llm_multimodal_streaming_messages(
@@ -1779,10 +1796,7 @@ impl TemplateExecutor {
                     "LLM model detected, converting context to ChatMessages for streaming"
                 );
 
-                #[cfg(all(
-                    feature = "llm-llamacpp-vision",
-                    any(feature = "llm-mistral", feature = "llm-llamacpp")
-                ))]
+                #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
                 reject_text_only_model_image_input(metadata, input)?;
 
                 // Convert ConversationContext + input to ChatMessages
@@ -1816,7 +1830,7 @@ impl TemplateExecutor {
                 );
 
                 // Execute streaming with ChatMessages directly
-                let backend_hint = metadata.metadata.get("backend").and_then(|v| v.as_str());
+                let backend_hint = llm_backend_hint(metadata);
 
                 let result = self.execute_llm_streaming_with_messages(
                     metadata,
@@ -1884,10 +1898,7 @@ impl TemplateExecutor {
         xybrid_trace::add_metadata("streaming", "true");
         stamp_llm_span_cost_attribution(metadata);
 
-        #[cfg(all(
-            feature = "llm-llamacpp-vision",
-            any(feature = "llm-mistral", feature = "llm-llamacpp")
-        ))]
+        #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
         reject_text_only_model_image_input(metadata, input)?;
         // Fail closed: continuations are non-streaming (v1).
         #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
@@ -2572,10 +2583,7 @@ impl TemplateExecutor {
         // entry points.
         stamp_llm_span_cost_attribution(metadata);
 
-        #[cfg(all(
-            feature = "llm-llamacpp-vision",
-            any(feature = "llm-mistral", feature = "llm-llamacpp")
-        ))]
+        #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
         reject_text_only_model_image_input(metadata, input)?;
 
         let cache_key = llm_adapter_cache_key(
@@ -4648,10 +4656,7 @@ mod tests {
         }
     }
 
-    #[cfg(all(
-        feature = "llm-llamacpp-vision",
-        any(feature = "llm-mistral", feature = "llm-llamacpp")
-    ))]
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
     #[test]
     fn gguf_image_input_returns_text_only_model_error_before_load() {
         let metadata = ModelMetadata {

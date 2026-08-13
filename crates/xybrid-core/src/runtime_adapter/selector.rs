@@ -408,10 +408,28 @@ pub fn select_with_cfg(
         return Ok(BackendChoice::Mistral);
     }
 
-    // (5) Nothing available.
+    // (5) MLX without a registry-reported SafeTensors variant. On an
+    // mlx-only build (no llamacpp/mistral) a registry view that cannot
+    // answer `has_variant` — the SDK's EmptyRegistryView, local bundles —
+    // must not report "no local text backend compiled in" while MLX is
+    // compiled and probe-verified. Whether the model actually is MLX
+    // SafeTensors is decided downstream at load; this branch only refuses
+    // to claim nothing is available.
+    if cfg.host_is_apple_arm64 && cfg.mlx_compiled && cfg.mlx_runtime_ok {
+        log_decision(
+            params.model_id,
+            BackendChoice::Mlx,
+            &available,
+            "fallback to mlx (only compiled backend with runtime ok)",
+        );
+        return Ok(BackendChoice::Mlx);
+    }
+
+    // (6) Nothing available.
     log::info!(
         "backend_selector: chosen_backend=err \
-         available_backends=[] reason=\"no local text backend compiled in\" model_id={}",
+         available_backends=[{}] reason=\"no local text backend compiled in\" model_id={}",
+        fmt_backend_list(&available),
         params.model_id,
     );
     Err(SelectorError::NoBackendAvailable {

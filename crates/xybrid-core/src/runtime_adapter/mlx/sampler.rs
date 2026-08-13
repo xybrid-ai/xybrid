@@ -263,12 +263,22 @@ fn apply_top_p(probs: &mut [f32], top_p: f32) {
             .unwrap_or(std::cmp::Ordering::Equal)
     });
 
+    // top_k / min_p zero mass without renormalising, so the surviving
+    // distribution can sum to < 1. HF's TopPLogitsWarper softmaxes over the
+    // masked logits (i.e. renormalises) before accumulating — match that by
+    // taking the threshold relative to the surviving mass instead of 1.0.
+    let total: f32 = probs.iter().sum();
+    if total <= 0.0 {
+        return;
+    }
+    let threshold = top_p * total;
+
     let mut cum = 0.0f32;
     let mut nucleus: Vec<usize> = Vec::new();
     for &i in &idxs {
         nucleus.push(i);
         cum += probs[i];
-        if cum >= top_p {
+        if cum >= threshold {
             break;
         }
     }

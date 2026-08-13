@@ -1741,7 +1741,7 @@ impl Xybrid {
     /// Uses `RunOptions::device_metrics` for the single-stage streaming LLM
     /// routing fast path, so the streaming path observes the same caller-supplied
     /// routing context as non-streaming `run_pipeline_with_options`.
-    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp", feature = "llm-mlx"))]
     pub fn run_pipeline_streaming_with_options<'a>(
         yaml: &str,
         envelope: &Envelope,
@@ -1769,6 +1769,9 @@ impl Xybrid {
             let stage_name = handle.stage_descriptors[0].name.clone();
             if let Some(bundle_path) = handle.bundle_paths.get(&stage_name) {
                 let bundle_path = bundle_path.clone(); // Clone to avoid borrow issues
+                                                       // Only the GGUF routing fast path below consumes the
+                                                       // descriptor; its helpers stay gated on the llama backends.
+                #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
                 let stage_descriptor =
                     stage_descriptor_with_bundle_path(&handle.stage_descriptors[0], &bundle_path);
                 let metadata_path = bundle_path.join("model_metadata.json");
@@ -1792,7 +1795,21 @@ impl Xybrid {
 
                     if is_streaming_llm_metadata(&metadata) {
                         let model_id = metadata.model_id.clone();
+                        #[cfg_attr(
+                            not(any(feature = "llm-mistral", feature = "llm-llamacpp")),
+                            expect(
+                                unused_mut,
+                                reason = "only the GGUF routing fast path below reassigns these"
+                            )
+                        )]
                         let mut stage_target = "local".to_string();
+                        #[cfg_attr(
+                            not(any(feature = "llm-mistral", feature = "llm-llamacpp")),
+                            expect(
+                                unused_mut,
+                                reason = "only the GGUF routing fast path below reassigns these"
+                            )
+                        )]
                         let mut stage_reason = "local_streaming_llm".to_string();
 
                         #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
@@ -1932,7 +1949,7 @@ impl Xybrid {
     }
 
     /// Stub for when LLM features are disabled.
-    #[cfg(not(any(feature = "llm-mistral", feature = "llm-llamacpp")))]
+    #[cfg(not(any(feature = "llm-mistral", feature = "llm-llamacpp", feature = "llm-mlx")))]
     #[allow(unused_variables)]
     pub fn run_pipeline_streaming_with_options<'a>(
         yaml: &str,

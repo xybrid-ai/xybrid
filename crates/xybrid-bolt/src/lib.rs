@@ -193,9 +193,14 @@ pub enum XybridEnvelopeKind {
     Text { text: String },
     Audio { bytes: Vec<u8> },
     Embedding { values: Vec<f32> },
-    TokenIds { ids: Vec<i64> },
     Image { bytes: Vec<u8>, format: String },
     MultiPart { parts: Vec<XybridEnvelope> },
+    // Appended AFTER MultiPart: boltffi assigns wire tags by declaration
+    // order, and the shipped Swift/Kotlin/C# wrappers already decode
+    // image=3 / multiPart=4. Inserting mid-enum would shift those tags and
+    // break the envelope ABI for existing clients; new variants must always
+    // append. (Foreign wrappers gain TokenIds when they are regenerated.)
+    TokenIds { ids: Vec<i64> },
 }
 
 impl From<XybridEnvelopeKind> for facade::EnvelopeKind {

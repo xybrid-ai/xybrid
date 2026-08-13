@@ -9,7 +9,7 @@
 //! The real backend is feature-gated and requires `llm-mistral`, `llm-llamacpp`,
 //! or `llm-mlx`; without them a no-op stub keeps the module compiling.
 
-#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp", feature = "llm-mlx"))]
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
 use log::debug;
 
 use crate::execution::types::ExecutorResult;

@@ -139,7 +139,7 @@ fn classify_download_source(url: &str) -> &'static str {
     }
 }
 
-fn format_cache_key(mask: &str, format: &str) -> String {
+pub(crate) fn format_cache_key(mask: &str, format: &str) -> String {
     let format = sanitize_cache_component(format);
     format!("{mask}__{format}")
 }
@@ -465,6 +465,15 @@ pub(crate) fn registry_metadata_error_can_fall_back_to_default(err: &SdkError) -
             | SdkError::NetworkError { .. }
             | SdkError::Timeout { .. }
             | SdkError::CircuitOpen(_)
+            // Non-transient registry answers must not brick a fully-cached
+            // model either: a delisted id (404), auth misconfig (401/403) or
+            // persistent 429 falls back to the offline format resolution, and
+            // paths that genuinely need the registry fail later with the
+            // specific error. Loads ran entirely offline-first before format
+            // selection existed.
+            | SdkError::ModelNotFound(_)
+            | SdkError::ConfigError(_)
+            | SdkError::RateLimited { .. }
     )
 }
 
@@ -1298,6 +1307,18 @@ impl RegistryClient {
         F: Fn(f32),
     {
         let cache_key = format_cache_key(mask, format);
+
+        // Offline-first, mirroring `fetch_extracted`: a fully-extracted
+        // format-variant copy must load without touching the network (or the
+        // circuit breaker) — otherwise a cached MLX model cannot load offline.
+        if let Some(extract_dir) = self.resolve_offline_with_format(mask, format) {
+            debug!(
+                "Using locally extracted model '{}' ({format}) at {} (skipping registry)",
+                mask,
+                extract_dir.display()
+            );
+            return Ok(extract_dir);
+        }
 
         let resolved = self.resolve_with_format(mask, platform, format)?;
 

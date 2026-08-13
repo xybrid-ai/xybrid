@@ -600,12 +600,24 @@ mod runtime {
                     break;
                 }
 
-                // Non-terminal token → emit without finish_reason.
-                emit_callback(
-                    callback.as_mut(),
-                    PartialToken::new(token_text, step, cumulative_text.clone())
-                        .with_token_id(next_token),
-                )?;
+                // Last budgeted token → terminal, finish_reason = "length",
+                // matching the llama.cpp adapter and the PartialToken contract
+                // so streaming consumers can detect truncation per-token.
+                if step + 1 == max_decode {
+                    emit_callback(
+                        callback.as_mut(),
+                        PartialToken::new(token_text, step, cumulative_text.clone())
+                            .with_token_id(next_token)
+                            .with_finish_reason("length"),
+                    )?;
+                } else {
+                    // Non-terminal token → emit without finish_reason.
+                    emit_callback(
+                        callback.as_mut(),
+                        PartialToken::new(token_text, step, cumulative_text.clone())
+                            .with_token_id(next_token),
+                    )?;
+                }
 
                 // Bound MLX's memory-pool growth on long generations. Same
                 // cadence as mlx-lm's decode loop (`mx.clear_cache()` every

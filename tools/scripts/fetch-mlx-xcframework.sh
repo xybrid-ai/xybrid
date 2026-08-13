@@ -87,7 +87,10 @@ read_pin() {
 }
 
 RELEASE_TAG=$(read_pin release)
-EXPECTED_SHA=$(read_pin sha256)
+# Normalize to lowercase: shasum/sha256sum emit lowercase and the
+# comparisons below are case-sensitive, so an uppercase pin must not
+# fail verification of a correct artifact.
+EXPECTED_SHA=$(read_pin sha256 | tr '[:upper:]' '[:lower:]')
 
 write_output() {
     if [ -n "${GITHUB_OUTPUT:-}" ]; then
@@ -154,7 +157,7 @@ fi
 
 # Idempotency short-circuit.
 if [ "$FORCE" != true ] && [ -d "$XCFRAMEWORK_DIR" ] && [ -f "$INSTALLED_MARKER" ]; then
-    INSTALLED_SHA=$(tr -d '[:space:]' < "$INSTALLED_MARKER")
+    INSTALLED_SHA=$(tr -d '[:space:]' < "$INSTALLED_MARKER" | tr '[:upper:]' '[:lower:]')
     if [ "$INSTALLED_SHA" = "$EXPECTED_SHA" ]; then
         echo "mlx.xcframework already installed (sha256 ${EXPECTED_SHA})"
         exit 0

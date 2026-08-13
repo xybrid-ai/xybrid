@@ -194,6 +194,38 @@ pub(crate) unsafe fn array_ndim(arr: mlx_array) -> usize {
 /// `arr` must be a live array handle. We immediately copy the returned C
 /// pointer into a `Vec<i32>` so the caller never holds a dangling slice
 /// across further FFI calls.
+/// Whether the evaluated array's storage is row-contiguous (C order,
+/// zero offset semantics for typed readback). Strides are in ELEMENTS.
+///
+/// # Safety
+/// `arr` must be a live, evaluated mlx_array handle.
+pub(crate) unsafe fn array_is_row_contiguous(arr: mlx_array) -> bool {
+    let ndim = sys::mlx_array_ndim(arr);
+    if ndim == 0 {
+        return true;
+    }
+    let shape = sys::mlx_array_shape(arr);
+    let strides = sys::mlx_array_strides(arr);
+    if shape.is_null() || strides.is_null() {
+        return false;
+    }
+    let mut expected: usize = 1;
+    for axis in (0..ndim).rev() {
+        let dim = *shape.add(axis);
+        if dim < 0 {
+            return false;
+        }
+        // Size-0/1 axes impose no stride constraint.
+        if dim > 1 {
+            if *strides.add(axis) != expected {
+                return false;
+            }
+        }
+        expected = expected.saturating_mul(dim as usize);
+    }
+    true
+}
+
 pub(crate) unsafe fn array_shape(arr: mlx_array) -> Vec<i32> {
     let ndim = sys::mlx_array_ndim(arr);
     if ndim == 0 {
@@ -299,6 +331,10 @@ pub(crate) unsafe fn array_new_data_raw(
     shape: &[i32],
     dtype: mlx_dtype,
 ) -> mlx_array {
+    // Like every other constructor: install the recording error handler
+    // BEFORE the first mlx-c call, or a raising allocation aborts the
+    // process via mlx-c's default handler instead of returning null.
+    ensure_error_handler();
     sys::mlx_array_new_data(
         data.cast::<std::ffi::c_void>(),
         shape.as_ptr(),

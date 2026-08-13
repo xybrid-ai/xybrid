@@ -323,6 +323,21 @@ impl MlxEmbeddingAdapter {
             token_ids_to_mlx_i32(raw_token_ids, truncated_len, state.bert_config.vocab_size)?;
         let attention_mask = &attention_mask[..truncated_len];
 
+        // The encoder forward pass takes no attention mask: self-attention
+        // would attend over `[PAD]` positions and contaminate every content
+        // token's hidden state BEFORE the mask-aware pooling runs. Single-text
+        // encoding never pads, so a padding token here means the bundle's
+        // tokenizer.json configures fixed/right padding — fail loudly instead
+        // of silently returning corrupted embeddings.
+        if attention_mask.contains(&0) {
+            return Err(MlxLlmError::ConfigInvalid(
+                "tokenizer produced padding tokens, but the MLX BERT encoder does not \
+                 support padded input (the forward pass takes no attention mask); \
+                 disable fixed padding in the bundle's tokenizer.json"
+                    .into(),
+            ));
+        }
+
         let hidden_dim = state.bert_config.hidden_size;
         let hidden = run_encoder(state, &token_ids, attention_mask, hidden_dim)?;
 

@@ -22,6 +22,14 @@ fn registry_metadata_error_can_fall_back_to_default(err: &SdkError) -> bool {
             | SdkError::NetworkError { .. }
             | SdkError::Timeout { .. }
             | SdkError::CircuitOpen(_)
+            // Non-transient registry answers must not brick a fully-cached
+            // model either: a delisted id (404), auth misconfig (401/403) or
+            // persistent 429 falls back to the offline format resolution, and
+            // paths that genuinely need the registry fail later with the
+            // specific error. Master ran these entirely offline-first.
+            | SdkError::ModelNotFound(_)
+            | SdkError::ConfigError(_)
+            | SdkError::RateLimited { .. }
     )
 }
 

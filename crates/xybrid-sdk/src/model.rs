@@ -1791,7 +1791,17 @@ impl ModelLoader {
                 // A local cache check only — instantiate `CacheManager` directly
                 // rather than `RegistryClient::from_env()`, which would spin up
                 // an HTTP agent and circuit breakers we don't need here.
-                CacheManager::new().is_ok_and(|cache| cache.is_extracted(id))
+                // Registry downloads may extract under a format-variant key
+                // (`id__safetensors` / `id__gguf`) instead of the base id, so
+                // check those too — otherwise a fully-downloaded variant keeps
+                // `will_speculate()` true forever.
+                CacheManager::new().is_ok_and(|cache| {
+                    cache.is_extracted(id)
+                        || ["safetensors", "gguf"].iter().any(|format| {
+                            cache
+                                .is_extracted(&crate::registry_client::format_cache_key(id, format))
+                        })
+                })
             }
             _ => true,
         }

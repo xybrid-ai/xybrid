@@ -446,9 +446,22 @@ impl MlxArray {
             });
         }
         self.eval()?;
-        // SAFETY: self.raw is live per struct invariant; we just checked dtype
-        // and evaluated the caller-provided materialized array.
-        unsafe { ffi::array_data_u32(self.raw) }
+        // The fast path reads the raw data pointer, which is only sound for
+        // row-contiguous storage. Views (slice/transpose/negative stride) can
+        // be evaluated yet still alias offset or reordered storage — reading
+        // them raw would be out-of-bounds or storage-order garbage, so fall
+        // back to the materializing readback instead of trusting the caller.
+        // SAFETY: self.raw is live per struct invariant and evaluated.
+        if unsafe { ffi::array_is_row_contiguous(self.raw) } {
+            // SAFETY: self.raw is live per struct invariant; dtype checked,
+            // evaluated, and row-contiguous.
+            unsafe { ffi::array_data_u32(self.raw) }
+        } else {
+            let materialized = self.contiguous_for_readback()?;
+            materialized.eval()?;
+            // SAFETY: materialized.raw is live, evaluated, and contiguous.
+            unsafe { ffi::array_data_u32(materialized.raw) }
+        }
     }
 
     /// Read the array's contents as an owned `Vec<i64>`.
