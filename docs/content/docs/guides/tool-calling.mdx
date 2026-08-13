@@ -36,6 +36,7 @@ The tool-call syntax is auto-detected from the model's own chat template:
 |-----------------|--------|----------------|
 | LFM2-family | `<\|tool_call_start\|>[name(k=v)]<\|tool_call_end\|>` (pythonic) | LFM2.5 230M / 350M |
 | gemma-4-family | `<\|tool_call>call:name{...}<tool_call\|>` | gemma-4 E2B |
+| FunctionGemma | `<start_function_call>call:name{...}<end_function_call>` | FunctionGemma 270M IT |
 
 A bundle advertises support with an advisory `tool_calling: true` flag in
 `model_metadata.json` (`ModelMetadata::supports_tool_calling()` /
@@ -105,6 +106,14 @@ That's the whole surface. Multi-step loops (budgets, retries, parallel tools)
 are ordinary application code — see
 [`crates/xybrid-core/examples/lfm2_230m_tools.rs`](https://github.com/xybrid-ai/xybrid/blob/master/crates/xybrid-core/examples/lfm2_230m_tools.rs)
 and `gemma4_e2b_tools.rs` for complete reference loops, including streaming.
+The runnable `functiongemma_tools.rs` example uses the pinned Q8_0 fixture
+through the standard `GenerationConfig::with_tools` and
+`Envelope::tool_results` flow:
+
+```bash
+./integration-tests/download.sh functiongemma-270m-it
+cargo run -p xybrid-core --example functiongemma_tools --features llm-llamacpp
+```
 
 ### Rules the loop must follow (v1)
 

@@ -1,63 +1,116 @@
 use crate::runtime_adapter::AdapterError;
 use serde_json::{Map, Number, Value};
 
-use super::cursor::{is_identifier_start, Cursor, ParseError, ParsedCall};
+use super::cursor::{is_identifier_continue, is_identifier_start, Cursor, ParseError, ParsedCall};
 use super::{
-    sanitize_tool_result_content, tool_response_content, GEMMA_TOOL_RESPONSE_END,
+    sanitize_tool_result_content, tool_response_content, FUNCTION_GEMMA_STRING_DELIMITER,
+    FUNCTION_GEMMA_TOOL_RESPONSE_END, FUNCTION_GEMMA_TOOL_RESPONSE_START, GEMMA_TOOL_RESPONSE_END,
     GEMMA_TOOL_RESPONSE_START,
 };
 
 const GEMMA_STRING_DELIMITER: &str = "<|\"|>";
 const GEMMA_MAX_DEPTH: usize = 16;
 
+#[derive(Clone, Copy)]
+struct GemmaDialect {
+    string_delimiter: &'static str,
+    response_start: &'static str,
+    response_end: &'static str,
+}
+
+const GEMMA_4: GemmaDialect = GemmaDialect {
+    string_delimiter: GEMMA_STRING_DELIMITER,
+    response_start: GEMMA_TOOL_RESPONSE_START,
+    response_end: GEMMA_TOOL_RESPONSE_END,
+};
+
+const FUNCTION_GEMMA: GemmaDialect = GemmaDialect {
+    string_delimiter: FUNCTION_GEMMA_STRING_DELIMITER,
+    response_start: FUNCTION_GEMMA_TOOL_RESPONSE_START,
+    response_end: FUNCTION_GEMMA_TOOL_RESPONSE_END,
+};
+
+impl GemmaDialect {
+    fn compose_continuation(
+        self,
+        base_prompt: &str,
+        prior_assistant_text: &str,
+        responses: &[Value],
+    ) -> Result<String, AdapterError> {
+        let mut continuation = String::new();
+        continuation.push_str(base_prompt);
+        // Gemma-4 models are trained to emit a bare `<|tool_response>` opener
+        // right after their call block and stop there — the runtime is expected
+        // to fill in the response. Our blocks below bring their own opener, so
+        // a trailing dangling opener in the prior text would double the marker.
+        let prior_trimmed = prior_assistant_text.trim_end();
+        continuation.push_str(
+            prior_trimmed
+                .strip_suffix(self.response_start)
+                .unwrap_or(prior_trimmed),
+        );
+
+        for (index, response) in responses.iter().enumerate() {
+            let content = tool_response_content(response, index)?;
+            let content = sanitize_tool_result_content(content);
+            if !gemma_object_keys_are_valid(&content) {
+                return Err(AdapterError::InvalidInput(format!(
+                    "tool response at index {index} contains an invalid Gemma object key"
+                )));
+            }
+            let name = response
+                .get("name")
+                .and_then(Value::as_str)
+                .ok_or_else(|| {
+                    AdapterError::InvalidInput(format!(
+                        "tool response at index {index} must include name"
+                    ))
+                })?;
+            continuation.push_str(self.response_start);
+            continuation.push_str("response:");
+            continuation.push_str(name);
+            continuation.push('{');
+            format_gemma_response_body(&content, &mut continuation, self.string_delimiter);
+            continuation.push('}');
+            continuation.push_str(self.response_end);
+        }
+
+        Ok(continuation)
+    }
+}
+
 pub(super) fn compose_gemma_continuation(
     base_prompt: &str,
     prior_assistant_text: &str,
     responses: &[Value],
 ) -> Result<String, AdapterError> {
-    let mut continuation = String::new();
-    continuation.push_str(base_prompt);
-    // Gemma-4 models are trained to emit a bare `<|tool_response>` opener
-    // right after their call block and stop there — the runtime is expected
-    // to fill in the response. Our blocks below bring their own opener, so
-    // a trailing dangling opener in the prior text would double the marker.
-    let prior_trimmed = prior_assistant_text.trim_end();
-    continuation.push_str(
-        prior_trimmed
-            .strip_suffix(GEMMA_TOOL_RESPONSE_START)
-            .unwrap_or(prior_trimmed),
-    );
+    GEMMA_4.compose_continuation(base_prompt, prior_assistant_text, responses)
+}
 
-    for (index, response) in responses.iter().enumerate() {
-        let content = tool_response_content(response, index)?;
-        let content = sanitize_tool_result_content(content);
-        let name = response
-            .get("name")
-            .and_then(Value::as_str)
-            .ok_or_else(|| {
-                AdapterError::InvalidInput(format!(
-                    "tool response at index {index} must include name"
-                ))
-            })?;
-        continuation.push_str(GEMMA_TOOL_RESPONSE_START);
-        continuation.push_str("response:");
-        continuation.push_str(name);
-        continuation.push('{');
-        format_gemma_response_body(&content, &mut continuation);
-        continuation.push('}');
-        continuation.push_str(GEMMA_TOOL_RESPONSE_END);
-    }
-
-    Ok(continuation)
+pub(super) fn compose_function_gemma_continuation(
+    base_prompt: &str,
+    prior_assistant_text: &str,
+    responses: &[Value],
+) -> Result<String, AdapterError> {
+    FUNCTION_GEMMA.compose_continuation(base_prompt, prior_assistant_text, responses)
 }
 
 impl Cursor<'_> {
-    fn parse_complete_gemma_call(mut self) -> Result<ParsedCall, ParseError> {
-        self.expect_str("call:")?;
-        self.skip_ws();
+    fn parse_complete_gemma_call(
+        mut self,
+        string_delimiter: &str,
+    ) -> Result<ParsedCall, ParseError> {
+        self.expect_str("call")?;
+        if self.consume_char(':') {
+            self.skip_ws();
+        } else if self.consume_char(' ') {
+            while self.consume_char(' ') {}
+        } else {
+            return Err(ParseError);
+        }
         let name = self.parse_identifier(true)?;
         self.skip_ws();
-        let arguments = self.parse_gemma_arguments()?;
+        let arguments = self.parse_gemma_arguments(string_delimiter)?;
         self.skip_ws();
         if self.is_eof() {
             Ok(ParsedCall {
@@ -69,14 +122,21 @@ impl Cursor<'_> {
         }
     }
 
-    fn parse_gemma_arguments(&mut self) -> Result<Map<String, Value>, ParseError> {
-        self.parse_gemma_object(0)
+    fn parse_gemma_arguments(
+        &mut self,
+        string_delimiter: &str,
+    ) -> Result<Map<String, Value>, ParseError> {
+        self.parse_gemma_object(0, string_delimiter)
     }
 
-    fn parse_gemma_value(&mut self, depth: usize) -> Result<Value, ParseError> {
+    fn parse_gemma_value(
+        &mut self,
+        depth: usize,
+        string_delimiter: &str,
+    ) -> Result<Value, ParseError> {
         self.skip_ws();
-        if self.starts_with(GEMMA_STRING_DELIMITER) {
-            return self.parse_gemma_string().map(Value::String);
+        if self.starts_with(string_delimiter) {
+            return self.parse_gemma_string(string_delimiter).map(Value::String);
         }
 
         match self.peek_char() {
@@ -84,13 +144,14 @@ impl Cursor<'_> {
                 if depth >= GEMMA_MAX_DEPTH {
                     return Err(ParseError);
                 }
-                self.parse_gemma_object(depth + 1).map(Value::Object)
+                self.parse_gemma_object(depth + 1, string_delimiter)
+                    .map(Value::Object)
             }
             Some('[') => {
                 if depth >= GEMMA_MAX_DEPTH {
                     return Err(ParseError);
                 }
-                self.parse_gemma_list(depth + 1)
+                self.parse_gemma_list(depth + 1, string_delimiter)
             }
             Some('-') => self.parse_gemma_number(),
             Some(ch) if ch.is_ascii_digit() => self.parse_gemma_number(),
@@ -99,7 +160,11 @@ impl Cursor<'_> {
         }
     }
 
-    fn parse_gemma_object(&mut self, depth: usize) -> Result<Map<String, Value>, ParseError> {
+    fn parse_gemma_object(
+        &mut self,
+        depth: usize,
+        string_delimiter: &str,
+    ) -> Result<Map<String, Value>, ParseError> {
         if depth > GEMMA_MAX_DEPTH {
             return Err(ParseError);
         }
@@ -116,7 +181,7 @@ impl Cursor<'_> {
             self.skip_ws();
             self.expect_char(':')?;
             self.skip_ws();
-            let value = self.parse_gemma_value(depth)?;
+            let value = self.parse_gemma_value(depth, string_delimiter)?;
             map.insert(key, value);
             self.skip_ws();
 
@@ -128,7 +193,11 @@ impl Cursor<'_> {
         }
     }
 
-    fn parse_gemma_list(&mut self, depth: usize) -> Result<Value, ParseError> {
+    fn parse_gemma_list(
+        &mut self,
+        depth: usize,
+        string_delimiter: &str,
+    ) -> Result<Value, ParseError> {
         if depth > GEMMA_MAX_DEPTH {
             return Err(ParseError);
         }
@@ -140,7 +209,7 @@ impl Cursor<'_> {
         }
 
         loop {
-            values.push(self.parse_gemma_value(depth)?);
+            values.push(self.parse_gemma_value(depth, string_delimiter)?);
             self.skip_ws();
             if self.consume_char(',') {
                 continue;
@@ -150,14 +219,14 @@ impl Cursor<'_> {
         }
     }
 
-    fn parse_gemma_string(&mut self) -> Result<String, ParseError> {
-        self.expect_str(GEMMA_STRING_DELIMITER)?;
+    fn parse_gemma_string(&mut self, string_delimiter: &str) -> Result<String, ParseError> {
+        self.expect_str(string_delimiter)?;
         let start = self.pos;
         let offset = self.input[self.pos..]
-            .find(GEMMA_STRING_DELIMITER)
+            .find(string_delimiter)
             .ok_or(ParseError)?;
         let value = self.input[start..start + offset].to_string();
-        self.pos = start + offset + GEMMA_STRING_DELIMITER.len();
+        self.pos = start + offset + string_delimiter.len();
         Ok(value)
     }
 
@@ -173,7 +242,7 @@ impl Cursor<'_> {
             return Err(ParseError);
         }
 
-        let is_float = if self.consume_char('.') {
+        let mut is_float = if self.consume_char('.') {
             if self.consume_digits() == 0 {
                 self.pos = start;
                 return Err(ParseError);
@@ -182,6 +251,17 @@ impl Cursor<'_> {
         } else {
             false
         };
+
+        if self.consume_char('e') || self.consume_char('E') {
+            is_float = true;
+            if !self.consume_char('+') {
+                self.consume_char('-');
+            }
+            if self.consume_digits() == 0 {
+                self.pos = start;
+                return Err(ParseError);
+            }
+        }
 
         let literal = &self.input[start..self.pos];
         if is_float {
@@ -209,31 +289,54 @@ impl Cursor<'_> {
 }
 
 pub(super) fn parse_gemma_block(content: &str) -> Option<ParsedCall> {
+    parse_structured_gemma_block(content, GEMMA_4)
+}
+
+pub(super) fn parse_function_gemma_block(content: &str) -> Option<ParsedCall> {
+    parse_structured_gemma_block(content, FUNCTION_GEMMA)
+}
+
+fn parse_structured_gemma_block(content: &str, dialect: GemmaDialect) -> Option<ParsedCall> {
     if content.is_empty() {
         return None;
     }
 
-    Cursor::new(content).parse_complete_gemma_call().ok()
+    Cursor::new(content)
+        .parse_complete_gemma_call(dialect.string_delimiter)
+        .ok()
 }
 
-fn format_gemma_response_body(value: &Value, out: &mut String) {
+fn format_gemma_response_body(value: &Value, out: &mut String, string_delimiter: &str) {
     if let Value::Object(map) = value {
-        format_gemma_object_entries(map, out);
+        format_gemma_object_entries(map, out, string_delimiter);
     } else {
         out.push_str("value:");
-        format_gemma_value(value, out);
+        format_gemma_value(value, out, string_delimiter);
     }
 }
 
-fn format_gemma_value(value: &Value, out: &mut String) {
+fn gemma_object_keys_are_valid(value: &Value) -> bool {
+    match value {
+        Value::Array(values) => values.iter().all(gemma_object_keys_are_valid),
+        Value::Object(map) => map.iter().all(|(key, value)| {
+            let mut chars = key.chars();
+            matches!(chars.next(), Some(ch) if is_identifier_start(ch))
+                && chars.all(is_identifier_continue)
+                && gemma_object_keys_are_valid(value)
+        }),
+        Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => true,
+    }
+}
+
+fn format_gemma_value(value: &Value, out: &mut String, string_delimiter: &str) {
     match value {
         Value::Null => out.push_str("None"),
         Value::Bool(value) => out.push_str(if *value { "true" } else { "false" }),
         Value::Number(value) => out.push_str(&value.to_string()),
         Value::String(value) => {
-            out.push_str(GEMMA_STRING_DELIMITER);
+            out.push_str(string_delimiter);
             out.push_str(value);
-            out.push_str(GEMMA_STRING_DELIMITER);
+            out.push_str(string_delimiter);
         }
         Value::Array(values) => {
             out.push('[');
@@ -241,19 +344,19 @@ fn format_gemma_value(value: &Value, out: &mut String) {
                 if index > 0 {
                     out.push(',');
                 }
-                format_gemma_value(value, out);
+                format_gemma_value(value, out, string_delimiter);
             }
             out.push(']');
         }
         Value::Object(map) => {
             out.push('{');
-            format_gemma_object_entries(map, out);
+            format_gemma_object_entries(map, out, string_delimiter);
             out.push('}');
         }
     }
 }
 
-fn format_gemma_object_entries(map: &Map<String, Value>, out: &mut String) {
+fn format_gemma_object_entries(map: &Map<String, Value>, out: &mut String, string_delimiter: &str) {
     let mut keys = map.keys().collect::<Vec<_>>();
     keys.sort();
 
@@ -264,7 +367,7 @@ fn format_gemma_object_entries(map: &Map<String, Value>, out: &mut String) {
         out.push_str(key);
         out.push(':');
         if let Some(value) = map.get(key) {
-            format_gemma_value(value, out);
+            format_gemma_value(value, out, string_delimiter);
         }
     }
 }

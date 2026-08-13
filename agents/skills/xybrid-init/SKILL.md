@@ -90,7 +90,7 @@ The `model_metadata.json` must conform to this exact schema:
 ```
 
 Common optional `metadata` fields:
-- `tool_calling` (boolean, LLMs only): advisory declaration that xybrid's local tool calling works end-to-end for this model — the template accepts a `tools` context AND the model emits a call format xybrid parses (currently LFM2-family pythonic and gemma-4-family `call:` notation). Declare `true` only for those verified families; omit when unknown (never infer from architecture); a model whose template renders tools but whose emissions xybrid cannot parse must NOT declare `true` — it would produce silent no-call responses.
+- `tool_calling` (boolean, LLMs only): advisory declaration that xybrid's local tool calling works end-to-end for this model — the template accepts a `tools` context AND the model emits a call format xybrid parses (currently LFM2-family pythonic, gemma-4-family `call:`, and FunctionGemma `<start_function_call>` notation). Declare `true` only for those verified families; omit when unknown (never infer from architecture); a model whose template renders tools but whose emissions xybrid cannot parse must NOT declare `true` — it would produce silent no-call responses.
 
 ### Execution Templates
 
