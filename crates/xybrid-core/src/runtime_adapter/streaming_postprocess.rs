@@ -44,6 +44,7 @@ pub(crate) const CHAT_STOP_PATTERNS: &[&str] = &[
     "<|endoftext|>",
     "</s>",
     "<end_of_turn>",
+    "<start_function_response>",
     "<turn|>",
     "<end_of_utterance>",
 ];
