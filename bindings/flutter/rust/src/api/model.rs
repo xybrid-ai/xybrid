@@ -722,6 +722,17 @@ impl FfiModel {
         self.0.is_cloud_serving()
     }
 
+    /// Whether the model bundle declares local tool-calling support.
+    ///
+    /// Advisory tri-state: `null` means the bundle says nothing, so the app
+    /// cannot tell. Gate tool UI on it; enforcement stays at run time — a
+    /// tools-bearing request against a model whose chat template has no tool
+    /// support fails as invalid input regardless of what this reports.
+    #[frb(sync)]
+    pub fn supports_tool_calling(&self) -> Option<bool> {
+        self.0.supports_tool_calling()
+    }
+
     /// Download progress + state in one consistent read.
     ///
     /// Reports `Ready` at 1.0 for an ordinary local model, so the UI needs no

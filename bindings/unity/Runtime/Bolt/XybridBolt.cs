@@ -880,6 +880,9 @@ namespace XybridBolt
         [return: MarshalAs(UnmanagedType.I1)]
         internal static extern bool NativeXybridModelSupportsTokenStreaming(ulong receiver);
 
+        [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_model_supports_tool_calling")]
+        internal static extern FfiBuf NativeXybridModelSupportsToolCalling(ulong receiver);
+
         [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_model_unload")]
         internal static extern FfiBuf NativeXybridModelUnload(ulong receiver);
 

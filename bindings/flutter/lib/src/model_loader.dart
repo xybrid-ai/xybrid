@@ -257,6 +257,14 @@ class XybridModel {
   /// fails and degrades to local mid-call.
   bool get isCloudServing => inner.isCloudServing();
 
+  /// Whether the model bundle declares local tool-calling support.
+  ///
+  /// Advisory tri-state: `null` means the bundle says nothing, so the app
+  /// cannot tell. Gate tool UI on it — enforcement stays at run time, where a
+  /// request carrying [GenerationConfig.tools] against a model whose chat
+  /// template has no tool support fails regardless of what this reports.
+  bool? get supportsToolCalling => inner.supportsToolCalling();
+
   /// Download progress + state in one consistent read.
   ///
   /// Reports [FfiDownloadState.ready] at 1.0 for an ordinary local model, so

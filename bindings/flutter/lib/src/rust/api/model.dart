@@ -211,6 +211,14 @@ abstract class FfiModel implements RustOpaqueInterface {
   /// - If the model does not support streaming, or the stream cannot start.
   Future<FfiStreamSession> stream({required FfiStreamingConfig config});
 
+  /// Whether the model bundle declares local tool-calling support.
+  ///
+  /// Advisory tri-state: `null` means the bundle says nothing, so the app
+  /// cannot tell. Gate tool UI on it; enforcement stays at run time — a
+  /// tools-bearing request against a model whose chat template has no tool
+  /// support fails as invalid input regardless of what this reports.
+  bool? supportsToolCalling();
+
   /// Unload the model, dropping the executor and freeing the underlying
   /// ORT / GGUF inference session.
   ///

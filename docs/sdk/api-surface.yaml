@@ -231,6 +231,13 @@ classes:
         return: bool
         # True while the cloud answers because the local weights are not ready.
         status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+      supportsToolCalling:
+        return: "bool?"
+        # Advisory tri-state read off the bundle's tool_calling metadata flag:
+        # null means the bundle says nothing. Gate tool UI on it; enforcement
+        # is independent, at run time — a tools-bearing request against a model
+        # whose chat template has no tool support fails either way.
+        status: { rust: implemented, dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
       downloadStatus:
         return: DownloadStatus
         # Download state + progress in one consistent read; poll to drive a bar.

@@ -144,6 +144,7 @@ def test_voice_gender_helpers() -> None:
         "is_cloud_serving",
         "supports_streaming",
         "supports_token_streaming",
+        "supports_tool_calling",
         "is_llm",
         "has_voices",
     ],
