@@ -58,6 +58,8 @@ typedef bool (*boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_supp
 static boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_supports_token_streaming_fn boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_supports_token_streaming = NULL;
 typedef bool (*boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_is_llm_fn)(uint64_t);
 static boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_is_llm_fn boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_is_llm = NULL;
+typedef FfiBuf_u8 (*boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_supports_tool_calling_fn)(uint64_t);
+static boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_supports_tool_calling_fn boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_supports_tool_calling = NULL;
 typedef bool (*boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_has_voices_fn)(uint64_t);
 static boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_has_voices_fn boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_has_voices = NULL;
 typedef FfiBuf_u8 (*boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_voices_fn)(uint64_t);
@@ -220,6 +222,7 @@ static void boltffi_python_clear_symbols(void) {
     boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_supports_streaming = NULL;
     boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_supports_token_streaming = NULL;
     boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_is_llm = NULL;
+    boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_supports_tool_calling = NULL;
     boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_has_voices = NULL;
     boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_voices = NULL;
     boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_default_voice = NULL;
@@ -570,6 +573,16 @@ static int boltffi_python_bind_symbols(void) {
     if (boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_is_llm == NULL) {
         boltffi_python_unload_library();
         PyErr_SetString(PyExc_ImportError, "failed to resolve native symbol " "boltffi_method_class_xybrid_bolt_xybrid_model_is_llm");
+        return 0;
+    }
+#ifdef _WIN32
+    boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_supports_tool_calling = (boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_supports_tool_calling_fn)GetProcAddress(boltffi_python_library_handle, "boltffi_method_class_xybrid_bolt_xybrid_model_supports_tool_calling");
+#else
+    boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_supports_tool_calling = (boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_supports_tool_calling_fn)dlsym(boltffi_python_library_handle, "boltffi_method_class_xybrid_bolt_xybrid_model_supports_tool_calling");
+#endif
+    if (boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_supports_tool_calling == NULL) {
+        boltffi_python_unload_library();
+        PyErr_SetString(PyExc_ImportError, "failed to resolve native symbol " "boltffi_method_class_xybrid_bolt_xybrid_model_supports_tool_calling");
         return 0;
     }
 #ifdef _WIN32
@@ -2086,6 +2099,86 @@ static PyObject *boltffi_python_box_u64(uint64_t value) {
 
 
 
+
+
+static PyObject *boltffi_python_decode_owned_bool(FfiBuf_u8 buffer) {
+    PyObject *result = NULL;
+    if (!boltffi_python_validate_owned_fixed_buffer(buffer, 1)) {
+        goto done;
+    }
+    if (buffer.ptr[0] > 1) {
+        PyErr_SetString(PyExc_RuntimeError, "native function returned invalid bool wire value");
+        goto done;
+    }
+    result = boltffi_python_box_bool(buffer.ptr[0] == 1);
+done:
+    boltffi_python_release_owned_buffer(buffer);
+    return result;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+static PyObject *boltffi_python_decode_owned_optional_bool(FfiBuf_u8 buffer) {
+    PyObject *result = NULL;
+
+
+    if (!boltffi_python_validate_owned_memory(buffer)) {
+        goto done;
+    }
+    if (buffer.len < 1) {
+        PyErr_SetString(PyExc_RuntimeError, "native function returned truncated optional scalar");
+        goto done;
+    }
+    if (buffer.ptr[0] == 0) {
+        if (buffer.len != 1) {
+            PyErr_SetString(PyExc_RuntimeError, "native function returned invalid none scalar payload");
+            goto done;
+        }
+        Py_INCREF(Py_None);
+        result = Py_None;
+        goto done;
+    }
+    if (buffer.ptr[0] != 1) {
+        PyErr_SetString(PyExc_RuntimeError, "native function returned invalid optional scalar tag");
+        goto done;
+    }
+    if (buffer.len != 1 + 1) {
+        PyErr_SetString(PyExc_RuntimeError, "native function returned invalid optional scalar payload");
+        goto done;
+    }
+
+    if (buffer.ptr[1] > 1) {
+        PyErr_SetString(PyExc_RuntimeError, "native function returned invalid bool wire value");
+        goto done;
+    }
+    result = boltffi_python_box_bool(buffer.ptr[1] == 1);
+
+
+
+
+
+
+
+
+
+
+
+
+
+done:
+    boltffi_python_release_owned_buffer(buffer);
+    return result;
+}
 
 
 
@@ -5228,6 +5321,26 @@ done:
     return result;
 }
 
+static PyObject *boltffi_python_callable_wrapper_boltffi_method_class_xybrid_bolt_xybrid_model_supports_tool_calling(PyObject *self, PyObject *const *args, Py_ssize_t nargs) {
+    uint64_t receiver;
+    PyObject *result = NULL;
+    (void)self;
+    if (nargs != 1) {
+        PyErr_Format(PyExc_TypeError, "_boltffi_xybrid_model_supports_tool_calling() takes 1 positional arguments but %zd were given", nargs);
+        goto done;
+    }
+    if (boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_supports_tool_calling == NULL) {
+        PyErr_SetString(PyExc_ImportError, "native library is not initialized");
+        goto done;
+    }
+    if (!boltffi_python_parse_u64(args[0], &receiver)) {
+        goto done;
+    }
+    result = boltffi_python_decode_owned_optional_bool(boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_supports_tool_calling(receiver));
+done:
+    return result;
+}
+
 static PyObject *boltffi_python_callable_wrapper_boltffi_method_class_xybrid_bolt_xybrid_model_has_voices(PyObject *self, PyObject *const *args, Py_ssize_t nargs) {
     uint64_t receiver;
     PyObject *result = NULL;
@@ -7041,6 +7154,7 @@ static PyMethodDef boltffi_python_methods[] = {
     {"_boltffi_xybrid_model_supports_streaming", (PyCFunction)boltffi_python_callable_wrapper_boltffi_method_class_xybrid_bolt_xybrid_model_supports_streaming, METH_FASTCALL, NULL},
     {"_boltffi_xybrid_model_supports_token_streaming", (PyCFunction)boltffi_python_callable_wrapper_boltffi_method_class_xybrid_bolt_xybrid_model_supports_token_streaming, METH_FASTCALL, NULL},
     {"_boltffi_xybrid_model_is_llm", (PyCFunction)boltffi_python_callable_wrapper_boltffi_method_class_xybrid_bolt_xybrid_model_is_llm, METH_FASTCALL, NULL},
+    {"_boltffi_xybrid_model_supports_tool_calling", (PyCFunction)boltffi_python_callable_wrapper_boltffi_method_class_xybrid_bolt_xybrid_model_supports_tool_calling, METH_FASTCALL, NULL},
     {"_boltffi_xybrid_model_has_voices", (PyCFunction)boltffi_python_callable_wrapper_boltffi_method_class_xybrid_bolt_xybrid_model_has_voices, METH_FASTCALL, NULL},
     {"_boltffi_xybrid_model_voices", (PyCFunction)boltffi_python_callable_wrapper_boltffi_method_class_xybrid_bolt_xybrid_model_voices, METH_FASTCALL, NULL},
     {"_boltffi_xybrid_model_default_voice", (PyCFunction)boltffi_python_callable_wrapper_boltffi_method_class_xybrid_bolt_xybrid_model_default_voice, METH_FASTCALL, NULL},

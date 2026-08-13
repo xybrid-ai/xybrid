@@ -319,6 +319,30 @@ namespace XybridBolt
         }
 
 
+        /// <summary>
+        /// Whether the model bundle declares local tool-calling support.
+        ///
+        /// Advisory tri-state: `null` means the bundle says nothing, so the host
+        /// cannot tell. Gate tool UI on it; enforcement stays at run time — a
+        /// tools-bearing request against a model whose chat template has no tool
+        /// support fails as invalid input regardless of what this reports.
+        /// </summary>
+        public bool? SupportsToolCalling()
+        {
+            ThrowIfDisposed();
+            FfiBuf boltffiResultBuffer = NativeMethods.NativeXybridModelSupportsToolCalling(this.Handle);
+            try
+            {
+                WireReader resultReader = new WireReader(boltffiResultBuffer);
+                return resultReader.ReadU8() == 0 ? default(bool?) : resultReader.ReadBool();
+            }
+            finally
+            {
+                NativeMethods.FreeBuf(boltffiResultBuffer);
+            }
+        }
+
+
         public bool HasVoices()
         {
             ThrowIfDisposed();

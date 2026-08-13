@@ -1853,6 +1853,9 @@ class XybridModel:
     def is_llm(self) -> bool:
         return _native._boltffi_xybrid_model_is_llm(self._handle)
 
+    def supports_tool_calling(self) -> bool | None:
+        return _native._boltffi_xybrid_model_supports_tool_calling(self._handle)
+
     def has_voices(self) -> bool:
         return _native._boltffi_xybrid_model_has_voices(self._handle)
 

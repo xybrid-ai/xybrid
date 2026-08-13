@@ -970,6 +970,18 @@ public final class XybridModel {
         return boltffi_method_class_xybrid_bolt_xybrid_model_is_llm(self.handle)
     }
 
+    /// Whether the model bundle declares local tool-calling support.
+    ///
+    /// Advisory tri-state: `null` means the bundle says nothing, so the host
+    /// cannot tell. Gate tool UI on it; enforcement stays at run time — a
+    /// tools-bearing request against a model whose chat template has no tool
+    /// support fails as invalid input regardless of what this reports.
+    public func supportsToolCalling() -> Bool? {
+        let boltffiResult = boltffi_method_class_xybrid_bolt_xybrid_model_supports_tool_calling(self.handle)
+        defer { boltffi_free_buf(boltffiResult) }
+        return boltffiDecodeOwnedBuf(boltffiResult.ptr, Int(boltffiResult.len)) { boltffiReader in boltffiReader.readOptional { reader in reader.readBool() } }
+    }
+
     public func hasVoices() -> Bool {
         return boltffi_method_class_xybrid_bolt_xybrid_model_has_voices(self.handle)
     }
