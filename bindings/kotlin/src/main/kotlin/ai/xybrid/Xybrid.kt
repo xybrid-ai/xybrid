@@ -484,17 +484,6 @@ val XybridResult.isFailure: Boolean get() = outputType == XybridOutputType.UNKNO
 val XybridResult.text: String?
     get() = (envelope.kind as? XybridEnvelopeKind.Text)?.text
 
-/**
- * The model's chain-of-thought / reasoning text (LLM `<think>` blocks),
- * surfaced separately from [text], which always excludes it. `null` when the
- * model emitted no reasoning or the backend doesn't surface one.
- *
- * Carried on the envelope's `reasoning_content` metadata rather than the
- * payload `kind`, so it reads from `metadata` rather than the enum.
- */
-val XybridResult.reasoningContent: String?
-    get() = envelope.metadata.firstOrNull { it.key == "reasoning_content" }?.value
-
 /** Audio bytes, if the result is `.Audio`. `null` otherwise. */
 val XybridResult.audioBytes: ByteArray?
     get() = (envelope.kind as? XybridEnvelopeKind.Audio)?.bytes

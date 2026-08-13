@@ -3154,9 +3154,7 @@ fn build_llm_response_envelope(
     }
 }
 
-#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
 const REASONING_MAX_TOKENS_CEILING: usize = 3584;
-#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
 const REASONING_PROMPT_HEADROOM: usize = 512;
 
 /// The generation config resolved when a caller passes no explicit config.
@@ -3166,7 +3164,6 @@ const REASONING_PROMPT_HEADROOM: usize = 512;
 /// reasoning floor is a ceiling-bounded raise that leaves
 /// `REASONING_PROMPT_HEADROOM` tokens of prompt room inside the model's
 /// operational context and never drops below the global default.
-#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
 pub fn model_default_gen_config(metadata: &ModelMetadata) -> GenerationConfig {
     let (generation_params, context_length) = match &metadata.execution_template {
         ExecutionTemplate::Gguf {

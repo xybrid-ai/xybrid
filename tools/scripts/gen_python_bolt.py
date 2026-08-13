@@ -73,6 +73,22 @@ def check_boltffi_version() -> None:
 
 def generate() -> list[Path]:
     subprocess.run(["boltffi", "generate", "python"], cwd=BOLT_DIR, check=True)
+    defaults = {
+        "__init__.py": (
+            "    reasoning_content: str | None\n\n    def _boltffi_wire",
+            "    reasoning_content: str | None = None\n\n    def _boltffi_wire",
+        ),
+        "__init__.pyi": (
+            "    reasoning_content: str | None\n\n\n\n@dataclass",
+            "    reasoning_content: str | None = None\n\n\n\n@dataclass",
+        ),
+    }
+    for name, (target, replacement) in defaults.items():
+        path = RAW_DIR / name
+        source = path.read_text()
+        if source.count(target) != 1:
+            sys.exit(f"error: expected one XybridResult reasoning field in {path}")
+        path.write_text(source.replace(target, replacement))
     sources = sorted(
         p for p in RAW_DIR.iterdir() if p.is_file() and p.suffix in TRACKED_SUFFIXES
     )

@@ -18,12 +18,16 @@ namespace XybridBolt
     /// </param>
     /// <param name="ToolCalls">
     /// Tool calls the model emitted this turn. Empty unless the request
-    /// offered tools via [`XybridGenerationConfig::tools`]. Appended last:
+    /// offered tools via [`XybridGenerationConfig::tools`].
     /// `#[data]` PODs serialize by field order across the FFI boundary.
+    /// </param>
+    /// <param name="ReasoningContent">
+    /// Model reasoning emitted separately from the final answer text.
+    /// Appended last because `#[data]` fields serialize in declaration order.
     /// </param>
     public readonly struct XybridResult
     {
-        public XybridResult(XybridEnvelope Envelope, XybridOutputType OutputType, string ModelId, uint LatencyMs, XybridExecutionTarget ExecutionTarget, XybridInferenceMetrics Metrics, XybridToolCall[] ToolCalls) { this.Envelope = Envelope; this.OutputType = OutputType; this.ModelId = ModelId; this.LatencyMs = LatencyMs; this.ExecutionTarget = ExecutionTarget; this.Metrics = Metrics; this.ToolCalls = ToolCalls; }
+        public XybridResult(XybridEnvelope Envelope, XybridOutputType OutputType, string ModelId, uint LatencyMs, XybridExecutionTarget ExecutionTarget, XybridInferenceMetrics Metrics, XybridToolCall[] ToolCalls, string? ReasoningContent = null) { this.Envelope = Envelope; this.OutputType = OutputType; this.ModelId = ModelId; this.LatencyMs = LatencyMs; this.ExecutionTarget = ExecutionTarget; this.Metrics = Metrics; this.ToolCalls = ToolCalls; this.ReasoningContent = ReasoningContent; }
         public XybridEnvelope Envelope { get; }
         public XybridOutputType OutputType { get; }
         public string ModelId { get; }
@@ -31,6 +35,7 @@ namespace XybridBolt
         public XybridExecutionTarget ExecutionTarget { get; }
         public XybridInferenceMetrics Metrics { get; }
         public XybridToolCall[] ToolCalls { get; }
+        public string? ReasoningContent { get; }
 
         internal static XybridResult Decode(WireReader reader) =>
             new XybridResult(
@@ -40,7 +45,8 @@ namespace XybridBolt
                 reader.ReadU32(),
                 (XybridExecutionTarget)reader.ReadI32(),
                 XybridInferenceMetrics.Decode(reader),
-                reader.ReadArray(reader => XybridToolCall.Decode(reader))
+                reader.ReadArray(reader => XybridToolCall.Decode(reader)),
+                reader.ReadU8() == 0 ? default(string?) : reader.ReadString()
             );
 
         internal void Encode(WireWriter writer)
@@ -68,6 +74,17 @@ namespace XybridBolt
                 foreach (var boltffiValue0 in this.ToolCalls)
                 {
                     boltffiValue0.Encode(writer);
+                }
+            }
+            {
+                if (this.ReasoningContent is { } boltffiValue0)
+                {
+                    writer.WriteU8(1);
+                    writer.WriteString(boltffiValue0);
+                }
+                else
+                {
+                    writer.WriteU8(0);
                 }
             }
         }

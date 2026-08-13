@@ -684,6 +684,13 @@ impl CacheManager {
         }
 
         let mut roots = self.layout().model_roots(model_id);
+        roots.extend(
+            self.layout()
+                .cache_entries()?
+                .into_iter()
+                .filter(|entry| entry.model_id == model_id)
+                .map(|entry| entry.path),
+        );
         let mut entry_keys = Vec::new();
         for (key, entry) in &self.entries {
             if entry.id == model_id {
@@ -888,12 +895,14 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let cache_root = temp_dir.path().join("cache");
         let models_dir = cache_root.join("models");
-        let hf_model_dir = cache_root.join("hf").join("owner--repo");
+        let layout = CacheLayout::from_registry_root(models_dir.clone());
+        let hf_model_dir = layout.huggingface_repo_dir("owner/repo");
         let hf_hub_model_dir = cache_root.join("hf-hub").join("models--owner--repo");
         fs::create_dir_all(&hf_model_dir).unwrap();
         fs::create_dir_all(&hf_hub_model_dir).unwrap();
         fs::write(hf_model_dir.join("model.gguf"), b"weights").unwrap();
         fs::write(hf_hub_model_dir.join("blob"), b"weights").unwrap();
+        layout.record_huggingface_repo("owner/repo").unwrap();
 
         let mut manager = CacheManager::with_dir(models_dir).unwrap();
 
@@ -908,6 +917,62 @@ mod tests {
             !hf_hub_model_dir.exists(),
             "owned HuggingFace blob cache should be removed"
         );
+    }
+
+    #[test]
+    fn clear_model_roots_removes_one_resolved_hf_revision() {
+        let temp_dir = TempDir::new().unwrap();
+        let models_dir = temp_dir.path().join("cache/models");
+        let layout = CacheLayout::from_registry_root(models_dir.clone());
+        let first_commit = "commit-a";
+        let second_commit = "commit-b";
+        for commit in [first_commit, second_commit] {
+            layout
+                .record_huggingface_revision("owner/repo", commit, commit, None)
+                .unwrap();
+            let revision_dir = layout.huggingface_repo_revision_dir("owner/repo", commit, None);
+            fs::write(revision_dir.join("model_metadata.json"), b"{}").unwrap();
+        }
+        let first_dir = layout.huggingface_repo_revision_dir("owner/repo", first_commit, None);
+        let second_dir = layout.huggingface_repo_revision_dir("owner/repo", second_commit, None);
+        let mut manager = CacheManager::with_dir(models_dir).unwrap();
+
+        let removed = manager
+            .clear_model_roots(&format!("owner/repo@{first_commit}"))
+            .unwrap();
+
+        assert_eq!(removed, 1);
+        assert!(!first_dir.exists());
+        assert!(second_dir.exists());
+    }
+
+    #[test]
+    fn clear_model_roots_does_not_remove_a_colliding_repo_revision() {
+        let temp_dir = TempDir::new().unwrap();
+        let models_dir = temp_dir.path().join("cache/models");
+        let layout = CacheLayout::from_registry_root(models_dir.clone());
+        let first_repo = "a/b--c";
+        let second_repo = "a--b/c";
+        let commit = "commit-a";
+
+        for repo in [first_repo, second_repo] {
+            layout
+                .record_huggingface_revision(repo, "main", commit, None)
+                .unwrap();
+            let revision_dir = layout.huggingface_repo_revision_dir(repo, commit, None);
+            fs::write(revision_dir.join("model_metadata.json"), b"{}").unwrap();
+        }
+        let first_dir = layout.huggingface_repo_revision_dir(first_repo, commit, None);
+        let second_dir = layout.huggingface_repo_revision_dir(second_repo, commit, None);
+        let mut manager = CacheManager::with_dir(models_dir).unwrap();
+
+        let removed = manager
+            .clear_model_roots(&format!("{first_repo}@{commit}"))
+            .unwrap();
+
+        assert_eq!(removed, 1);
+        assert!(!first_dir.exists());
+        assert!(second_dir.exists());
     }
 
     #[test]

@@ -41,6 +41,10 @@ def _result(envelope: xybrid.XybridEnvelope, output_type: xybrid.XybridOutputTyp
         latency_ms=latency_ms,
         execution_target=xybrid.XybridExecutionTarget.LOCAL,
         metrics=_metrics(latency_ms),
+        reasoning_content=next(
+            (entry.value for entry in envelope.metadata if entry.key == "reasoning_content"),
+            None,
+        ),
         tool_calls=[],
     )
 
@@ -122,6 +126,33 @@ def test_result_conveniences_on_synthetic_result() -> None:
     # The conveniences are class members, visible to type checkers.
     assert isinstance(xybrid.XybridResult.text, property)
     assert isinstance(xybrid.XybridVoiceInfo.is_female, property)
+
+
+def test_result_reasoning_field_defaults_to_none() -> None:
+    result = xybrid.XybridResult(
+        envelope=xybrid.XybridEnvelope.text("answer"),
+        output_type=xybrid.XybridOutputType.TEXT,
+        model_id="model",
+        latency_ms=1,
+        execution_target=xybrid.XybridExecutionTarget.LOCAL,
+        metrics=_metrics(1),
+    )
+
+    assert result.reasoning_content is None
+
+
+def test_conversation_context_keeps_system_outside_history() -> None:
+    context = xybrid.XybridConversationContext()
+    context.set_system(xybrid.XybridEnvelope.text("stay concise"))
+    context.push(xybrid.XybridEnvelope.text("hello"))
+
+    system = context.system()
+
+    assert system is not None
+    assert isinstance(system.kind, xybrid.XybridEnvelopeKindText)
+    assert system.kind.text == "stay concise"
+    assert context.history_len() == 1
+    assert len(context.history()) == 1
 
 
 def test_voice_gender_helpers() -> None:

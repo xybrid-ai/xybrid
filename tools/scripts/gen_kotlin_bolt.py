@@ -82,6 +82,13 @@ def render() -> str:
         sys.exit(f"error: boltffi produced no Kotlin source at {RAW_FILE}")
 
     source, overrides = _add_message_override(RAW_FILE.read_text())
+    result_field = "    val reasoningContent: String?\n) {"
+    if source.count(result_field) != 1:
+        sys.exit("error: expected one XybridResult reasoning constructor field")
+    source = source.replace(
+        result_field,
+        "    val reasoningContent: String? = null\n) {",
+    )
     if overrides == 0:
         # Either boltffi fixed this upstream or the error shape moved. Both
         # want a human to re-read the transform before it silently no-ops.

@@ -138,6 +138,10 @@ CONTEXT_PARTIAL_REPLACEMENT = (
     "public sealed partial class XybridConversationContext : global::System.IDisposable"
 )
 
+RESULT_FILE = "XybridResult.cs"
+RESULT_REASONING_TARGET = "string? ReasoningContent) {"
+RESULT_REASONING_REPLACEMENT = "string? ReasoningContent = null) {"
+
 # --- Transform (e): keep the managed model alive across blocking StreamNext.
 # Anchored on the 0.29 body, which returns the error and result buffers through
 # separate out-params rather than one tagged buffer.
@@ -332,6 +336,7 @@ def generate() -> dict[str, str]:
     guid_fenced = False
     model_made_partial = False
     context_made_partial = False
+    result_defaulted = False
     stream_next_kept_alive = False
     for src in sources:
         content = src.read_text(encoding="utf-8")
@@ -384,6 +389,15 @@ def generate() -> dict[str, str]:
                 CONTEXT_PARTIAL_TARGET, CONTEXT_PARTIAL_REPLACEMENT, 1
             )
             context_made_partial = True
+        if src.name == RESULT_FILE:
+            _drift(
+                content.count(RESULT_REASONING_TARGET) == 1,
+                f"expected XybridResult reasoning constructor in {src.name}",
+            )
+            content = content.replace(
+                RESULT_REASONING_TARGET, RESULT_REASONING_REPLACEMENT, 1
+            )
+            result_defaulted = True
         out_name = BOLT_CLASS_DEST if src.name == BOLT_CLASS_FILE else src.name
         tree[out_name] = content
         tree[out_name + ".meta"] = script_meta(f"{DEST_REL}/{out_name}")
@@ -410,6 +424,7 @@ def generate() -> dict[str, str]:
     _drift(model_made_partial, f"{MODEL_FILE} not found in boltffi output")
     _drift(stream_next_kept_alive, f"StreamNext not found in {MODEL_FILE}")
     _drift(context_made_partial, f"{CONTEXT_FILE} not found in boltffi output")
+    _drift(result_defaulted, f"{RESULT_FILE} not found in boltffi output")
     return tree
 
 
