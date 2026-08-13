@@ -322,6 +322,15 @@ abstract class XybridRustLibApiImplPlatform
   FfiThermalState dco_decode_ffi_thermal_state(dynamic raw);
 
   @protected
+  FfiToolCall dco_decode_ffi_tool_call(dynamic raw);
+
+  @protected
+  FfiToolDefinition dco_decode_ffi_tool_definition(dynamic raw);
+
+  @protected
+  FfiToolResult dco_decode_ffi_tool_result(dynamic raw);
+
+  @protected
   FfiTtsStreamEvent dco_decode_ffi_tts_stream_event(dynamic raw);
 
   @protected
@@ -355,6 +364,15 @@ abstract class XybridRustLibApiImplPlatform
 
   @protected
   List<FfiStageLatency> dco_decode_list_ffi_stage_latency(dynamic raw);
+
+  @protected
+  List<FfiToolCall> dco_decode_list_ffi_tool_call(dynamic raw);
+
+  @protected
+  List<FfiToolDefinition> dco_decode_list_ffi_tool_definition(dynamic raw);
+
+  @protected
+  List<FfiToolResult> dco_decode_list_ffi_tool_result(dynamic raw);
 
   @protected
   List<double> dco_decode_list_prim_f_32_loose(dynamic raw);
@@ -403,6 +421,9 @@ abstract class XybridRustLibApiImplPlatform
 
   @protected
   List<String>? dco_decode_opt_list_String(dynamic raw);
+
+  @protected
+  List<FfiToolDefinition>? dco_decode_opt_list_ffi_tool_definition(dynamic raw);
 
   @protected
   Float32List? dco_decode_opt_list_prim_f_32_strict(dynamic raw);
@@ -694,6 +715,16 @@ abstract class XybridRustLibApiImplPlatform
   FfiThermalState sse_decode_ffi_thermal_state(SseDeserializer deserializer);
 
   @protected
+  FfiToolCall sse_decode_ffi_tool_call(SseDeserializer deserializer);
+
+  @protected
+  FfiToolDefinition sse_decode_ffi_tool_definition(
+      SseDeserializer deserializer);
+
+  @protected
+  FfiToolResult sse_decode_ffi_tool_result(SseDeserializer deserializer);
+
+  @protected
   FfiTtsStreamEvent sse_decode_ffi_tts_stream_event(
       SseDeserializer deserializer);
 
@@ -730,6 +761,17 @@ abstract class XybridRustLibApiImplPlatform
 
   @protected
   List<FfiStageLatency> sse_decode_list_ffi_stage_latency(
+      SseDeserializer deserializer);
+
+  @protected
+  List<FfiToolCall> sse_decode_list_ffi_tool_call(SseDeserializer deserializer);
+
+  @protected
+  List<FfiToolDefinition> sse_decode_list_ffi_tool_definition(
+      SseDeserializer deserializer);
+
+  @protected
+  List<FfiToolResult> sse_decode_list_ffi_tool_result(
       SseDeserializer deserializer);
 
   @protected
@@ -781,6 +823,10 @@ abstract class XybridRustLibApiImplPlatform
 
   @protected
   List<String>? sse_decode_opt_list_String(SseDeserializer deserializer);
+
+  @protected
+  List<FfiToolDefinition>? sse_decode_opt_list_ffi_tool_definition(
+      SseDeserializer deserializer);
 
   @protected
   Float32List? sse_decode_opt_list_prim_f_32_strict(
@@ -1083,6 +1129,16 @@ abstract class XybridRustLibApiImplPlatform
       FfiThermalState self, SseSerializer serializer);
 
   @protected
+  void sse_encode_ffi_tool_call(FfiToolCall self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_ffi_tool_definition(
+      FfiToolDefinition self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_ffi_tool_result(FfiToolResult self, SseSerializer serializer);
+
+  @protected
   void sse_encode_ffi_tts_stream_event(
       FfiTtsStreamEvent self, SseSerializer serializer);
 
@@ -1122,6 +1178,18 @@ abstract class XybridRustLibApiImplPlatform
   @protected
   void sse_encode_list_ffi_stage_latency(
       List<FfiStageLatency> self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_list_ffi_tool_call(
+      List<FfiToolCall> self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_list_ffi_tool_definition(
+      List<FfiToolDefinition> self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_list_ffi_tool_result(
+      List<FfiToolResult> self, SseSerializer serializer);
 
   @protected
   void sse_encode_list_prim_f_32_loose(
@@ -1176,6 +1244,10 @@ abstract class XybridRustLibApiImplPlatform
 
   @protected
   void sse_encode_opt_list_String(List<String>? self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_opt_list_ffi_tool_definition(
+      List<FfiToolDefinition>? self, SseSerializer serializer);
 
   @protected
   void sse_encode_opt_list_prim_f_32_strict(

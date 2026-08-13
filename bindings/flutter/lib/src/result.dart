@@ -7,6 +7,7 @@ library;
 import 'dart:typed_data';
 
 import 'rust/api/result.dart';
+import 'tools.dart';
 import 'utils/audio.dart';
 
 /// Per-stage latency entry for pipeline runs.
@@ -98,6 +99,16 @@ class XybridResult {
   /// Returns null if the model doesn't produce text output.
   String? get text => _inner.text;
 
+  /// The model's chain-of-thought / reasoning, if it emitted any.
+  ///
+  /// Reasoning models wrap their scratchpad in `<think>` blocks. [text]
+  /// always excludes those; this getter is where they surface, so you can
+  /// show or hide the reasoning independently of the answer.
+  ///
+  /// Returns null when the model emitted no reasoning, or the backend
+  /// doesn't surface one.
+  String? get reasoningContent => _inner.reasoningContent;
+
   /// Audio bytes output (for TTS models).
   ///
   /// Returns raw PCM audio bytes (16-bit signed, little-endian).
@@ -129,6 +140,21 @@ class XybridResult {
   ///
   /// Returns null if the model doesn't produce embeddings.
   List<double>? get embedding => _inner.embedding?.toList();
+
+  /// Tool calls the model asked for this turn.
+  ///
+  /// Empty unless the request offered tools via [GenerationConfig.tools]. Run
+  /// each call yourself, then feed the outcomes back with
+  /// [XybridEnvelope.toolResults] — one run is one model turn.
+  ///
+  /// The raw tool-call block stays in [text] untouched, and malformed model
+  /// output yields an empty list rather than an error.
+  late final List<ToolCall> toolCalls = _inner.toolCalls
+      .map(ToolCall.fromFfi)
+      .toList(growable: false);
+
+  /// Whether the model asked to call at least one tool.
+  bool get hasToolCalls => toolCalls.isNotEmpty;
 
   /// Inference latency in milliseconds.
   int get latencyMs => _inner.latencyMs;

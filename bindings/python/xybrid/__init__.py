@@ -74,6 +74,7 @@ class GenerationConfigs:
             repetition_penalty=None,
             stop_sequences=[],
             grammar=None,
+            tools=[],
         )
 
     @staticmethod
@@ -89,6 +90,7 @@ class GenerationConfigs:
             repetition_penalty=None,
             stop_sequences=[],
             grammar=None,
+            tools=[],
         )
 
 

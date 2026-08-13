@@ -822,6 +822,7 @@ private object Native {
     @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_bundle_manifest_json(`receiver`: Long): ByteArray?
     @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_bundle_metadata_json(`receiver`: Long): ByteArray?
     @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_bundle_extract(`receiver`: Long, output_dir: java.nio.ByteBuffer, __boltffi_output_dir_len: Int): Unit
+    @JvmStatic external fun boltffi_function_xybrid_bolt_tool_results_envelope(user_text: java.nio.ByteBuffer, __boltffi_user_text_len: Int, prior_assistant_text: java.nio.ByteBuffer, __boltffi_prior_assistant_text_len: Int, results: java.nio.ByteBuffer, __boltffi_results_len: Int): ByteArray?
     @JvmStatic external fun boltffi_function_xybrid_bolt_json_schema_to_gbnf(schema_json: java.nio.ByteBuffer, __boltffi_schema_json_len: Int): ByteArray?
     @JvmStatic external fun boltffi_function_xybrid_bolt_set_thermal_state(state: Int): Unit
     @JvmStatic external fun boltffi_function_xybrid_bolt_clear_thermal_state(): Unit
@@ -924,6 +925,135 @@ data class XybridEnvelope(
 }
 
 
+data class XybridToolDefinition(
+    val name: String,
+    val description: String,
+    val parametersJson: String
+) {
+    internal fun wireSize(): Int {
+        return 4 + Utf8Codec.maxBytes(this.name) + 4 + Utf8Codec.maxBytes(this.description) + 4 + Utf8Codec.maxBytes(this.parametersJson)
+    }
+
+    internal fun writeTo(writer: WireWriter) {
+        writer.writeString(this.name)
+        writer.writeString(this.description)
+        writer.writeString(this.parametersJson)
+    }
+
+    internal fun toByteArray(): ByteArray {
+        val buffer = WireWriterPool.acquire(wireSize())
+        val writer = buffer.writer
+        try {
+            writeTo(writer)
+            return buffer.bytes()
+        } finally {
+            buffer.close()
+        }
+    }
+
+    companion object {
+        internal fun fromReader(reader: WireReader): XybridToolDefinition {
+            return XybridToolDefinition(
+                reader.readString(),
+                reader.readString(),
+                reader.readString()
+            )
+        }
+
+        internal fun fromByteArray(bytes: ByteArray): XybridToolDefinition {
+            val reader = WireReader(bytes)
+            return fromReader(reader)
+        }
+    }
+}
+
+
+data class XybridToolCall(
+    val id: String,
+    val name: String,
+    val argumentsJson: String
+) {
+    internal fun wireSize(): Int {
+        return 4 + Utf8Codec.maxBytes(this.id) + 4 + Utf8Codec.maxBytes(this.name) + 4 + Utf8Codec.maxBytes(this.argumentsJson)
+    }
+
+    internal fun writeTo(writer: WireWriter) {
+        writer.writeString(this.id)
+        writer.writeString(this.name)
+        writer.writeString(this.argumentsJson)
+    }
+
+    internal fun toByteArray(): ByteArray {
+        val buffer = WireWriterPool.acquire(wireSize())
+        val writer = buffer.writer
+        try {
+            writeTo(writer)
+            return buffer.bytes()
+        } finally {
+            buffer.close()
+        }
+    }
+
+    companion object {
+        internal fun fromReader(reader: WireReader): XybridToolCall {
+            return XybridToolCall(
+                reader.readString(),
+                reader.readString(),
+                reader.readString()
+            )
+        }
+
+        internal fun fromByteArray(bytes: ByteArray): XybridToolCall {
+            val reader = WireReader(bytes)
+            return fromReader(reader)
+        }
+    }
+}
+
+
+data class XybridToolResult(
+    val callId: String,
+    val name: String,
+    val contentJson: String
+) {
+    internal fun wireSize(): Int {
+        return 4 + Utf8Codec.maxBytes(this.callId) + 4 + Utf8Codec.maxBytes(this.name) + 4 + Utf8Codec.maxBytes(this.contentJson)
+    }
+
+    internal fun writeTo(writer: WireWriter) {
+        writer.writeString(this.callId)
+        writer.writeString(this.name)
+        writer.writeString(this.contentJson)
+    }
+
+    internal fun toByteArray(): ByteArray {
+        val buffer = WireWriterPool.acquire(wireSize())
+        val writer = buffer.writer
+        try {
+            writeTo(writer)
+            return buffer.bytes()
+        } finally {
+            buffer.close()
+        }
+    }
+
+    companion object {
+        internal fun fromReader(reader: WireReader): XybridToolResult {
+            return XybridToolResult(
+                reader.readString(),
+                reader.readString(),
+                reader.readString()
+            )
+        }
+
+        internal fun fromByteArray(bytes: ByteArray): XybridToolResult {
+            val reader = WireReader(bytes)
+            return fromReader(reader)
+        }
+    }
+}
+
+
 data class XybridGenerationConfig(
     val maxTokens: UInt?,
     val temperature: Float?,
@@ -932,10 +1062,11 @@ data class XybridGenerationConfig(
     val topK: UInt?,
     val repetitionPenalty: Float?,
     val stopSequences: List<String>,
-    val grammar: String?
+    val grammar: String?,
+    val tools: List<XybridToolDefinition>
 ) {
     internal fun wireSize(): Int {
-        return 1 + (this.maxTokens?.let { __boltffi_value_0 -> 4 } ?: 0) + 1 + (this.temperature?.let { __boltffi_value_0 -> 4 } ?: 0) + 1 + (this.topP?.let { __boltffi_value_0 -> 4 } ?: 0) + 1 + (this.minP?.let { __boltffi_value_0 -> 4 } ?: 0) + 1 + (this.topK?.let { __boltffi_value_0 -> 4 } ?: 0) + 1 + (this.repetitionPenalty?.let { __boltffi_value_0 -> 4 } ?: 0) + 4 + this.stopSequences.sumOf { __boltffi_value_0 -> (4 + Utf8Codec.maxBytes(__boltffi_value_0)).toInt() } + 1 + (this.grammar?.let { __boltffi_value_0 -> 4 + Utf8Codec.maxBytes(__boltffi_value_0) } ?: 0)
+        return 1 + (this.maxTokens?.let { __boltffi_value_0 -> 4 } ?: 0) + 1 + (this.temperature?.let { __boltffi_value_0 -> 4 } ?: 0) + 1 + (this.topP?.let { __boltffi_value_0 -> 4 } ?: 0) + 1 + (this.minP?.let { __boltffi_value_0 -> 4 } ?: 0) + 1 + (this.topK?.let { __boltffi_value_0 -> 4 } ?: 0) + 1 + (this.repetitionPenalty?.let { __boltffi_value_0 -> 4 } ?: 0) + 4 + this.stopSequences.sumOf { __boltffi_value_0 -> (4 + Utf8Codec.maxBytes(__boltffi_value_0)).toInt() } + 1 + (this.grammar?.let { __boltffi_value_0 -> 4 + Utf8Codec.maxBytes(__boltffi_value_0) } ?: 0) + 4 + this.tools.sumOf { __boltffi_value_0 -> (__boltffi_value_0.wireSize()).toInt() }
     }
 
     internal fun writeTo(writer: WireWriter) {
@@ -947,6 +1078,7 @@ data class XybridGenerationConfig(
         writer.writeOptionalValue(this.repetitionPenalty, { writer, __boltffi_value_0 -> writer.writeF32(__boltffi_value_0) })
         writer.writeSequence(this.stopSequences, this.stopSequences.size, { writer, __boltffi_value_0 -> writer.writeString(__boltffi_value_0) })
         writer.writeOptionalValue(this.grammar, { writer, __boltffi_value_0 -> writer.writeString(__boltffi_value_0) })
+        writer.writeSequence(this.tools, this.tools.size, { writer, __boltffi_value_0 -> __boltffi_value_0.writeTo(writer) })
     }
 
     internal fun toByteArray(): ByteArray {
@@ -970,7 +1102,8 @@ data class XybridGenerationConfig(
                 reader.readOptionalValue({ reader -> reader.readU32() }),
                 reader.readOptionalValue({ reader -> reader.readF32() }),
                 reader.readSequence({ reader -> reader.readString() }),
-                reader.readOptionalValue({ reader -> reader.readString() })
+                reader.readOptionalValue({ reader -> reader.readString() }),
+                reader.readSequence({ reader -> XybridToolDefinition.fromReader(reader) })
             )
         }
 
@@ -1132,10 +1265,11 @@ data class XybridResult(
     val modelId: String,
     val latencyMs: UInt,
     val executionTarget: XybridExecutionTarget,
-    val metrics: XybridInferenceMetrics
+    val metrics: XybridInferenceMetrics,
+    val toolCalls: List<XybridToolCall>
 ) {
     internal fun wireSize(): Int {
-        return this.envelope.wireSize() + 4 + 4 + Utf8Codec.maxBytes(this.modelId) + 4 + 4 + this.metrics.wireSize()
+        return this.envelope.wireSize() + 4 + 4 + Utf8Codec.maxBytes(this.modelId) + 4 + 4 + this.metrics.wireSize() + 4 + this.toolCalls.sumOf { __boltffi_value_0 -> (__boltffi_value_0.wireSize()).toInt() }
     }
 
     internal fun writeTo(writer: WireWriter) {
@@ -1145,6 +1279,7 @@ data class XybridResult(
         writer.writeU32(this.latencyMs)
         writer.writeI32(this.executionTarget.value)
         this.metrics.writeTo(writer)
+        writer.writeSequence(this.toolCalls, this.toolCalls.size, { writer, __boltffi_value_0 -> __boltffi_value_0.writeTo(writer) })
     }
 
     internal fun toByteArray(): ByteArray {
@@ -1166,7 +1301,8 @@ data class XybridResult(
                 reader.readString(),
                 reader.readU32(),
                 XybridExecutionTarget.fromValue(reader.readI32()),
-                XybridInferenceMetrics.fromReader(reader)
+                XybridInferenceMetrics.fromReader(reader),
+                reader.readSequence({ reader -> XybridToolCall.fromReader(reader) })
             )
         }
 
@@ -2357,6 +2493,27 @@ class XybridBundle internal constructor(internal val handle: Long) : AutoCloseab
         } finally {
             __boltffi_outputDir_wire.close()
         }
+    }
+}
+
+fun toolResultsEnvelope(userText: String, priorAssistantText: String, results: List<XybridToolResult>): XybridEnvelope {
+    val __boltffi_userText_wire = WireWriterPool.acquire(4 + Utf8Codec.maxBytes(userText))
+    val __boltffi_userText_writer = __boltffi_userText_wire.writer
+    __boltffi_userText_writer.writeString(userText)
+    val __boltffi_priorAssistantText_wire = WireWriterPool.acquire(4 + Utf8Codec.maxBytes(priorAssistantText))
+    val __boltffi_priorAssistantText_writer = __boltffi_priorAssistantText_wire.writer
+    __boltffi_priorAssistantText_writer.writeString(priorAssistantText)
+    val __boltffi_results_wire = WireWriterPool.acquire(4 + results.sumOf { __boltffi_value_0 -> (__boltffi_value_0.wireSize()).toInt() })
+    val __boltffi_results_writer = __boltffi_results_wire.writer
+    __boltffi_results_writer.writeSequence(results, results.size, { __boltffi_results_writer, __boltffi_value_0 -> __boltffi_value_0.writeTo(__boltffi_results_writer) })
+    try {
+        val __boltffi_result = try { Native.boltffi_function_xybrid_bolt_tool_results_envelope(__boltffi_userText_wire.directBuffer(), __boltffi_userText_wire.size(), __boltffi_priorAssistantText_wire.directBuffer(), __boltffi_priorAssistantText_wire.size(), __boltffi_results_wire.directBuffer(), __boltffi_results_wire.size()) } catch (__boltffi_error: BoltFfiErrorBufferException) { run { val __boltffi_error_reader = WireReader(__boltffi_error.bytes); throw XybridError.fromReader(__boltffi_error_reader) } } ?: throw IllegalStateException("null buffer returned")
+        val __boltffi_reader = WireReader(__boltffi_result)
+        return XybridEnvelope.fromReader(__boltffi_reader)
+    } finally {
+        __boltffi_userText_wire.close()
+        __boltffi_priorAssistantText_wire.close()
+        __boltffi_results_wire.close()
     }
 }
 

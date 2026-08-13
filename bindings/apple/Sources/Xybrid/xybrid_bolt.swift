@@ -55,6 +55,80 @@ public struct XybridEnvelope: Hashable, Equatable, Sendable {
     }
 }
 
+/// A tool (function) the model may ask to call.
+///
+/// `parameters_json` is the JSON Schema for the arguments, carried as a JSON
+/// string because no binding generator can describe an arbitrary JSON tree.
+public struct XybridToolDefinition: Hashable, Equatable, Sendable {
+    public var name: String
+    public var description: String
+    public var parametersJson: String
+
+    public init(name: String, description: String, parametersJson: String) {
+        self.name = name
+        self.description = description
+        self.parametersJson = parametersJson
+    }
+
+    @inlinable static func decode(from reader: inout WireReader) -> XybridToolDefinition {
+        XybridToolDefinition(name: reader.readString(), description: reader.readString(), parametersJson: reader.readString())
+    }
+
+    @inlinable func encode(to writer: inout WireWriter) {
+        writer.writeString(self.name)
+        writer.writeString(self.description)
+        writer.writeString(self.parametersJson)
+    }
+}
+
+/// One tool call the model emitted, from [`XybridResult::tool_calls`].
+public struct XybridToolCall: Hashable, Equatable, Sendable {
+    public var id: String
+    public var name: String
+    public var argumentsJson: String
+
+    public init(id: String, name: String, argumentsJson: String) {
+        self.id = id
+        self.name = name
+        self.argumentsJson = argumentsJson
+    }
+
+    @inlinable static func decode(from reader: inout WireReader) -> XybridToolCall {
+        XybridToolCall(id: reader.readString(), name: reader.readString(), argumentsJson: reader.readString())
+    }
+
+    @inlinable func encode(to writer: inout WireWriter) {
+        writer.writeString(self.id)
+        writer.writeString(self.name)
+        writer.writeString(self.argumentsJson)
+    }
+}
+
+/// The outcome of running one tool, fed back with [`tool_results_envelope`].
+public struct XybridToolResult: Hashable, Equatable, Sendable {
+    /// The [`XybridToolCall::id`] this answers.
+    public var callId: String
+    public var name: String
+    /// The tool's output as a JSON string.
+    public var contentJson: String
+
+    public init(callId: String, name: String, contentJson: String) {
+        self.callId = callId
+        self.name = name
+        self.contentJson = contentJson
+    }
+
+    @inlinable static func decode(from reader: inout WireReader) -> XybridToolResult {
+        XybridToolResult(callId: reader.readString(), name: reader.readString(), contentJson: reader.readString())
+    }
+
+    @inlinable func encode(to writer: inout WireWriter) {
+        writer.writeString(self.callId)
+        writer.writeString(self.name)
+        writer.writeString(self.contentJson)
+    }
+}
+
 public struct XybridGenerationConfig: Hashable, Equatable, Sendable {
     public var maxTokens: UInt32?
     public var temperature: Float?
@@ -68,6 +142,14 @@ public struct XybridGenerationConfig: Hashable, Equatable, Sendable {
     /// [`json_schema_to_gbnf`], or pass raw GBNF. Appended last: `#[data]`
     /// PODs serialize by field order across the FFI boundary.
     public var grammar: String?
+    /// Tools the model may call this turn. Empty means no tool calling —
+    /// existing behavior, unchanged. Appended after `grammar` for the same
+    /// field-order reason.
+    ///
+    /// Tool calling is llama.cpp-only today; unsupported paths (no embedded
+    /// chat template, the mistralrs backend, the cloud fallback leg) reject
+    /// tool-bearing requests rather than quietly generating without them.
+    public var tools: [XybridToolDefinition]
 
     public init(
         maxTokens: UInt32?,
@@ -77,7 +159,8 @@ public struct XybridGenerationConfig: Hashable, Equatable, Sendable {
         topK: UInt32?,
         repetitionPenalty: Float?,
         stopSequences: [String],
-        grammar: String?
+        grammar: String?,
+        tools: [XybridToolDefinition]
     ) {
         self.maxTokens = maxTokens
         self.temperature = temperature
@@ -87,6 +170,7 @@ public struct XybridGenerationConfig: Hashable, Equatable, Sendable {
         self.repetitionPenalty = repetitionPenalty
         self.stopSequences = stopSequences
         self.grammar = grammar
+        self.tools = tools
     }
 
     @inlinable static func decode(from reader: inout WireReader) -> XybridGenerationConfig {
@@ -98,7 +182,8 @@ public struct XybridGenerationConfig: Hashable, Equatable, Sendable {
             topK: reader.readOptional { reader in reader.readU32() },
             repetitionPenalty: reader.readOptional { reader in reader.readF32() },
             stopSequences: reader.readArray { reader in reader.readString() },
-            grammar: reader.readOptional { reader in reader.readString() }
+            grammar: reader.readOptional { reader in reader.readString() },
+            tools: reader.readArray { reader in XybridToolDefinition.decode(from: &reader) }
         )
     }
 
@@ -111,6 +196,7 @@ public struct XybridGenerationConfig: Hashable, Equatable, Sendable {
         writer.writeOptional(self.repetitionPenalty) { writer, boltffiValue0 in writer.writeF32(boltffiValue0) }
         writer.writeArray(self.stopSequences) { writer, boltffiValue0 in writer.writeString(boltffiValue0) }
         writer.writeOptional(self.grammar) { writer, boltffiValue0 in writer.writeString(boltffiValue0) }
+        writer.writeArray(self.tools) { writer, boltffiValue0 in boltffiValue0.encode(to: &writer) }
     }
 }
 
@@ -235,6 +321,10 @@ public struct XybridResult: Hashable, Equatable, Sendable {
     /// identical on both legs, so this is the only way to tell them apart.
     public var executionTarget: XybridExecutionTarget
     public var metrics: XybridInferenceMetrics
+    /// Tool calls the model emitted this turn. Empty unless the request
+    /// offered tools via [`XybridGenerationConfig::tools`]. Appended last:
+    /// `#[data]` PODs serialize by field order across the FFI boundary.
+    public var toolCalls: [XybridToolCall]
 
     public init(
         envelope: XybridEnvelope,
@@ -242,7 +332,8 @@ public struct XybridResult: Hashable, Equatable, Sendable {
         modelId: String,
         latencyMs: UInt32,
         executionTarget: XybridExecutionTarget,
-        metrics: XybridInferenceMetrics
+        metrics: XybridInferenceMetrics,
+        toolCalls: [XybridToolCall]
     ) {
         self.envelope = envelope
         self.outputType = outputType
@@ -250,6 +341,7 @@ public struct XybridResult: Hashable, Equatable, Sendable {
         self.latencyMs = latencyMs
         self.executionTarget = executionTarget
         self.metrics = metrics
+        self.toolCalls = toolCalls
     }
 
     @inlinable static func decode(from reader: inout WireReader) -> XybridResult {
@@ -259,7 +351,8 @@ public struct XybridResult: Hashable, Equatable, Sendable {
             modelId: reader.readString(),
             latencyMs: reader.readU32(),
             executionTarget: XybridExecutionTarget(rawValue: reader.readI32())!,
-            metrics: XybridInferenceMetrics.decode(from: &reader)
+            metrics: XybridInferenceMetrics.decode(from: &reader),
+            toolCalls: reader.readArray { reader in XybridToolCall.decode(from: &reader) }
         )
     }
 
@@ -270,6 +363,7 @@ public struct XybridResult: Hashable, Equatable, Sendable {
         writer.writeU32(self.latencyMs)
         writer.writeI32(self.executionTarget.rawValue)
         self.metrics.encode(to: &writer)
+        writer.writeArray(self.toolCalls) { writer, boltffiValue0 in boltffiValue0.encode(to: &writer) }
     }
 }
 
@@ -1338,6 +1432,45 @@ public final class XybridBundle {
     }
 }
 
+/// Build the continuation envelope for the turn after the model asked for
+/// tools.
+///
+/// One `run` is one model turn, so the loop lives in your code: run a
+/// tools-bearing request, execute every [`XybridToolCall`] it returns, then
+/// run this envelope to feed the outcomes back. Pass the same tools on the
+/// continuation's [`XybridGenerationConfig`] as on the original turn.
+///
+/// A free function rather than a constructor because `XybridEnvelope` is a
+/// `#[data]` record, not a handle type — records carry no methods across the
+/// generated bindings.
+public func toolResultsEnvelope(userText: String, priorAssistantText: String, results: [XybridToolResult]) throws -> XybridEnvelope {
+    let boltffiUserTextBytes = boltffiEncode { boltffiUserTextWriter in boltffiUserTextWriter.writeString(userText) }
+    return try boltffiUserTextBytes.withUnsafeBufferPointer { boltffiUserTextBuffer in
+        let boltffiPriorAssistantTextBytes = boltffiEncode { boltffiPriorAssistantTextWriter in boltffiPriorAssistantTextWriter.writeString(priorAssistantText) }
+        return try boltffiPriorAssistantTextBytes.withUnsafeBufferPointer { boltffiPriorAssistantTextBuffer in
+            let boltffiResultsBytes = boltffiEncode { boltffiResultsWriter in boltffiResultsWriter.writeArray(results) { boltffiResultsWriter, boltffiValue0 in boltffiValue0.encode(to: &boltffiResultsWriter) } }
+            return try boltffiResultsBytes.withUnsafeBufferPointer { boltffiResultsBuffer in
+                var boltffiResult: FfiBuf_u8 = FfiBuf_u8()
+                let boltffiError = boltffi_function_xybrid_bolt_tool_results_envelope(
+                    boltffiUserTextBuffer.baseAddress!,
+                    UInt(boltffiUserTextBuffer.count),
+                    boltffiPriorAssistantTextBuffer.baseAddress!,
+                    UInt(boltffiPriorAssistantTextBuffer.count),
+                    boltffiResultsBuffer.baseAddress!,
+                    UInt(boltffiResultsBuffer.count),
+                    &boltffiResult
+                )
+                if boltffiError.ptr != nil || Int(boltffiError.len) != 0 {
+                    defer { boltffi_free_buf(boltffiError) }
+                    throw boltffiDecodeOwnedBuf(boltffiError.ptr, Int(boltffiError.len)) { boltffiErrorReader in XybridError.decode(from: &boltffiErrorReader) }
+                }
+                defer { boltffi_free_buf(boltffiResult) }
+                return boltffiDecodeOwnedBuf(boltffiResult.ptr, Int(boltffiResult.len)) { boltffiReader in XybridEnvelope.decode(from: &boltffiReader) }
+            }
+        }
+    }
+}
+
 /// Convert a JSON Schema (as a JSON string) into a GBNF grammar for
 /// [`XybridGenerationConfig::grammar`]. Fails on invalid JSON or schema
 /// constructs outside the supported subset.
@@ -1448,6 +1581,11 @@ public func setPlatformUrl(url: String) {
 /// also loads ASR/TTS models, which cannot be served this way.
 public func setSpeculativeCloud(enabled: Bool) {
     boltffi_function_xybrid_bolt_set_speculative_cloud(enabled)
+}
+
+/// Whether a Xybrid gateway API key is resolvable (in-memory or env).
+public func hasApiKey() -> Bool {
+    return boltffi_function_xybrid_bolt_has_api_key()
 }
 
 /// Whether the global speculative-cloud default is on.

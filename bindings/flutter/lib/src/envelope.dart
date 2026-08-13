@@ -6,6 +6,7 @@ library;
 
 import 'context.dart';
 import 'rust/api/envelope.dart';
+import 'tools.dart';
 
 /// Raw pixel-buffer format accepted by [XybridEnvelope.imageRaw].
 ///
@@ -179,6 +180,39 @@ class XybridEnvelope {
   factory XybridEnvelope.text(String text, {String? voiceId, double? speed}) {
     return XybridEnvelope._(
       FfiEnvelope.text(text: text, voiceId: voiceId, speed: speed),
+      _EnvelopeModality.text,
+    );
+  }
+
+  /// Create the continuation envelope for the turn after the model asked for
+  /// tools.
+  ///
+  /// One run is one model turn, so the tool loop lives in your code: run a
+  /// request carrying [GenerationConfig.tools], execute every
+  /// [XybridResult.toolCalls] entry, then run this envelope to feed the
+  /// outcomes back. Run the continuation with the same tools as the original
+  /// turn so the executor rebuilds an identical chat prefix.
+  ///
+  /// [userText] - The original user message of the turn being continued
+  /// [priorAssistantText] - That turn's raw output text, tool-call block
+  /// included, i.e. [XybridResult.text] verbatim
+  /// [results] - Tool outcomes, in call order
+  ///
+  /// Only the immediately prior assistant turn is replayed, and continuation
+  /// runs on the non-streaming text path only.
+  ///
+  /// Throws [XybridException] if a result's content is not valid JSON.
+  factory XybridEnvelope.toolResults({
+    required String userText,
+    required String priorAssistantText,
+    required List<ToolResult> results,
+  }) {
+    return XybridEnvelope._(
+      FfiEnvelope.toolResults(
+        userText: userText,
+        priorAssistantText: priorAssistantText,
+        results: results.map((r) => r.toFfi()).toList(growable: false),
+      ),
       _EnvelopeModality.text,
     );
   }

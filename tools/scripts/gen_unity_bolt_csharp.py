@@ -88,10 +88,12 @@ RECORD_STRUCT_RE = re.compile(
     re.DOTALL,
 )
 # 11 on boltffi 0.29, which emits the whole inference path the 0.25.3 C#
-# lowering dropped (XybridResult / XybridEnvelope / XybridStreamEvent / …).
+# lowering dropped (XybridResult / XybridEnvelope / XybridStreamEvent / …),
+# plus 3 for the tool-calling records (XybridToolDefinition / XybridToolCall /
+# XybridToolResult).
 # Bump this deliberately: the count is a tripwire for unreviewed boltffi output
 # drift, not a value to auto-sync.
-EXPECTED_RECORD_STRUCTS = 11
+EXPECTED_RECORD_STRUCTS = 14
 
 
 # --- Transform (g): Unsafe.SizeOf<T>() -> Marshal.SizeOf<T>(). boltffi's wire

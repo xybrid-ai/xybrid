@@ -5,7 +5,10 @@ use xybrid_sdk::ir::{
     Envelope, EnvelopeKind, ImagePlane, PixelFormat, YuvColorInfo, YuvColorMatrix, YuvColorRange,
 };
 
+use xybrid_ffi_facade as facade;
+
 use super::context::FfiMessageRole;
+use super::model::FfiToolResult;
 
 /// Raw pixel-buffer format for [`FfiEnvelope::image_raw`].
 ///
@@ -204,6 +207,41 @@ impl FfiEnvelope {
         Envelope::user_message(text, images)
             .map(FfiEnvelope)
             .map_err(|err| err.to_string())
+    }
+
+    /// Create the continuation envelope for the turn after the model asked
+    /// for tools.
+    ///
+    /// One `run` is one model turn, so the tool loop lives in Dart: run a
+    /// request carrying tools, execute every `FfiResult.toolCalls` entry, then
+    /// run this envelope to feed the outcomes back. Run the continuation with
+    /// the same tools as the original turn so the executor rebuilds an
+    /// identical chat prefix.
+    ///
+    /// `user_text` is the original user message of the turn being continued;
+    /// `prior_assistant_text` is that turn's raw output text, tool-call block
+    /// included. Pass `results` in call order.
+    ///
+    /// Only the immediately prior assistant turn is replayed, and continuation
+    /// runs on the non-streaming text path only.
+    #[frb(sync)]
+    pub fn tool_results(
+        user_text: String,
+        prior_assistant_text: String,
+        results: Vec<FfiToolResult>,
+    ) -> Result<FfiEnvelope, String> {
+        facade::Envelope::tool_results(
+            user_text,
+            prior_assistant_text,
+            results
+                .into_iter()
+                .map(FfiToolResult::into_facade)
+                .collect(),
+        )
+        .map_err(|err| err.to_string())?
+        .into_sdk()
+        .map(FfiEnvelope)
+        .map_err(|err| err.to_string())
     }
 
     /// Create a text envelope with a specific message role.

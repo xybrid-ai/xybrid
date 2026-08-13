@@ -9,6 +9,9 @@ from enum import IntEnum
 
 
 
+from collections.abc import Sequence
+
+
 
 
 import struct
@@ -398,39 +401,39 @@ def _boltffi_read_89cd31291d2aefa4(data: bytes):
 _native._register_wire_codec("read_89cd31291d2aefa4", _boltffi_read_89cd31291d2aefa4)
 
 
-def _boltffi_read_09db55a1bda9afc4(data: bytes):
+def _boltffi_read_29c0b1cb6cb65e99(data: bytes):
     return _boltffi_read_wire(data, lambda reader: XybridDownloadStatus._boltffi_from_reader(reader))
 
 
-_native._register_wire_codec("read_09db55a1bda9afc4", _boltffi_read_09db55a1bda9afc4)
+_native._register_wire_codec("read_29c0b1cb6cb65e99", _boltffi_read_29c0b1cb6cb65e99)
 
 
-def _boltffi_read_5d38a5666ed650e0(data: bytes):
+def _boltffi_read_bd1359a0ca4e78d7(data: bytes):
     return _boltffi_read_wire(data, lambda reader: reader.sequence(lambda: XybridVoiceInfo._boltffi_from_reader(reader)))
 
 
-_native._register_wire_codec("read_5d38a5666ed650e0", _boltffi_read_5d38a5666ed650e0)
+_native._register_wire_codec("read_bd1359a0ca4e78d7", _boltffi_read_bd1359a0ca4e78d7)
 
 
-def _boltffi_read_14d68c1270ad6a24(data: bytes):
+def _boltffi_read_74dbe00a1a77ad93(data: bytes):
     return _boltffi_read_wire(data, lambda reader: reader.optional(lambda: XybridVoiceInfo._boltffi_from_reader(reader)))
 
 
-_native._register_wire_codec("read_14d68c1270ad6a24", _boltffi_read_14d68c1270ad6a24)
-
-
-def _boltffi_read_a9d601aa13df6c55(data: bytes):
-    return _boltffi_read_wire(data, lambda reader: XybridResult._boltffi_from_reader(reader))
-
-
-_native._register_wire_codec("read_a9d601aa13df6c55", _boltffi_read_a9d601aa13df6c55)
+_native._register_wire_codec("read_74dbe00a1a77ad93", _boltffi_read_74dbe00a1a77ad93)
 
 
 def _boltffi_read_c9bb5dd3c2ec1b2a(data: bytes):
-    return _boltffi_read_wire(data, lambda reader: XybridStreamEvent._boltffi_from_reader(reader))
+    return _boltffi_read_wire(data, lambda reader: XybridResult._boltffi_from_reader(reader))
 
 
 _native._register_wire_codec("read_c9bb5dd3c2ec1b2a", _boltffi_read_c9bb5dd3c2ec1b2a)
+
+
+def _boltffi_read_e9a0b9fd71f8c9ff(data: bytes):
+    return _boltffi_read_wire(data, lambda reader: XybridStreamEvent._boltffi_from_reader(reader))
+
+
+_native._register_wire_codec("read_e9a0b9fd71f8c9ff", _boltffi_read_e9a0b9fd71f8c9ff)
 
 
 def _boltffi_read_9415281aa52df749(data: bytes):
@@ -438,6 +441,13 @@ def _boltffi_read_9415281aa52df749(data: bytes):
 
 
 _native._register_wire_codec("read_9415281aa52df749", _boltffi_read_9415281aa52df749)
+
+
+def _boltffi_read_c9e5fd91113e36a2(data: bytes):
+    return _boltffi_read_wire(data, lambda reader: XybridEnvelope._boltffi_from_reader(reader))
+
+
+_native._register_wire_codec("read_c9e5fd91113e36a2", _boltffi_read_c9e5fd91113e36a2)
 
 
 
@@ -476,11 +486,11 @@ def _boltffi_write_62eeac930738df49(envelope) -> bytes:
 _native._register_wire_codec("write_62eeac930738df49", _boltffi_write_62eeac930738df49)
 
 
-def _boltffi_write_721e171ca074fa46(options) -> bytes:
+def _boltffi_write_922e13039dd3c493(options) -> bytes:
     return _boltffi_wire_optional(options, lambda __boltffi_value_0: __boltffi_value_0._boltffi_wire())
 
 
-_native._register_wire_codec("write_721e171ca074fa46", _boltffi_write_721e171ca074fa46)
+_native._register_wire_codec("write_922e13039dd3c493", _boltffi_write_922e13039dd3c493)
 
 
 def _boltffi_write_45cfac4c89613282(api_key) -> bytes:
@@ -530,6 +540,27 @@ def _boltffi_write_1b888e23ceb4a009(output_dir) -> bytes:
 
 
 _native._register_wire_codec("write_1b888e23ceb4a009", _boltffi_write_1b888e23ceb4a009)
+
+
+def _boltffi_write_3f05cdfbd6f68333(user_text) -> bytes:
+    return _boltffi_wire_string(user_text)
+
+
+_native._register_wire_codec("write_3f05cdfbd6f68333", _boltffi_write_3f05cdfbd6f68333)
+
+
+def _boltffi_write_544f2725dda888e0(prior_assistant_text) -> bytes:
+    return _boltffi_wire_string(prior_assistant_text)
+
+
+_native._register_wire_codec("write_544f2725dda888e0", _boltffi_write_544f2725dda888e0)
+
+
+def _boltffi_write_d82fa724b184c72a(results) -> bytes:
+    return _boltffi_wire_sequence(results, len(results), lambda __boltffi_value_0: __boltffi_value_0._boltffi_wire())
+
+
+_native._register_wire_codec("write_d82fa724b184c72a", _boltffi_write_d82fa724b184c72a)
 
 
 def _boltffi_write_cd5b56c1c6bfc6e0(schema_json) -> bytes:
@@ -663,6 +694,114 @@ _native._register_xybrid_envelope(XybridEnvelope)
 
 
 @dataclass(frozen=True, slots=True)
+class XybridToolDefinition:
+    name: str
+    description: str
+    parameters_json: str
+
+    def _boltffi_wire(self) -> bytes:
+        return b"".join((
+            _boltffi_wire_string(self.name),
+            _boltffi_wire_string(self.description),
+            _boltffi_wire_string(self.parameters_json),
+        ))
+
+    @classmethod
+    def _boltffi_from_wire(cls, data: bytes) -> "XybridToolDefinition":
+        reader = _BoltFfiWireReader(data)
+        try:
+            value = cls._boltffi_from_reader(reader)
+        except struct.error as error:
+            raise ValueError("truncated BoltFFI wire bytes") from error
+        reader.finish()
+        return value
+
+    @classmethod
+    def _boltffi_from_reader(cls, reader: "_BoltFfiWireReader") -> "XybridToolDefinition":
+        return cls(
+            name=reader.string(),
+            description=reader.string(),
+            parameters_json=reader.string(),
+        )
+
+
+_native._register_xybrid_tool_definition(XybridToolDefinition)
+
+
+
+@dataclass(frozen=True, slots=True)
+class XybridToolCall:
+    id: str
+    name: str
+    arguments_json: str
+
+    def _boltffi_wire(self) -> bytes:
+        return b"".join((
+            _boltffi_wire_string(self.id),
+            _boltffi_wire_string(self.name),
+            _boltffi_wire_string(self.arguments_json),
+        ))
+
+    @classmethod
+    def _boltffi_from_wire(cls, data: bytes) -> "XybridToolCall":
+        reader = _BoltFfiWireReader(data)
+        try:
+            value = cls._boltffi_from_reader(reader)
+        except struct.error as error:
+            raise ValueError("truncated BoltFFI wire bytes") from error
+        reader.finish()
+        return value
+
+    @classmethod
+    def _boltffi_from_reader(cls, reader: "_BoltFfiWireReader") -> "XybridToolCall":
+        return cls(
+            id=reader.string(),
+            name=reader.string(),
+            arguments_json=reader.string(),
+        )
+
+
+_native._register_xybrid_tool_call(XybridToolCall)
+
+
+
+@dataclass(frozen=True, slots=True)
+class XybridToolResult:
+    call_id: str
+    name: str
+    content_json: str
+
+    def _boltffi_wire(self) -> bytes:
+        return b"".join((
+            _boltffi_wire_string(self.call_id),
+            _boltffi_wire_string(self.name),
+            _boltffi_wire_string(self.content_json),
+        ))
+
+    @classmethod
+    def _boltffi_from_wire(cls, data: bytes) -> "XybridToolResult":
+        reader = _BoltFfiWireReader(data)
+        try:
+            value = cls._boltffi_from_reader(reader)
+        except struct.error as error:
+            raise ValueError("truncated BoltFFI wire bytes") from error
+        reader.finish()
+        return value
+
+    @classmethod
+    def _boltffi_from_reader(cls, reader: "_BoltFfiWireReader") -> "XybridToolResult":
+        return cls(
+            call_id=reader.string(),
+            name=reader.string(),
+            content_json=reader.string(),
+        )
+
+
+_native._register_xybrid_tool_result(XybridToolResult)
+
+
+
+@dataclass(frozen=True, slots=True)
 class XybridGenerationConfig:
     max_tokens: int | None
     temperature: float | None
@@ -672,6 +811,7 @@ class XybridGenerationConfig:
     repetition_penalty: float | None
     stop_sequences: list[str]
     grammar: str | None
+    tools: list[XybridToolDefinition]
 
     def _boltffi_wire(self) -> bytes:
         return b"".join((
@@ -683,6 +823,7 @@ class XybridGenerationConfig:
             _boltffi_wire_optional(self.repetition_penalty, lambda __boltffi_value_0: _boltffi_wire_f32(__boltffi_value_0)),
             _boltffi_wire_sequence(self.stop_sequences, len(self.stop_sequences), lambda __boltffi_value_0: _boltffi_wire_string(__boltffi_value_0)),
             _boltffi_wire_optional(self.grammar, lambda __boltffi_value_0: _boltffi_wire_string(__boltffi_value_0)),
+            _boltffi_wire_sequence(self.tools, len(self.tools), lambda __boltffi_value_0: __boltffi_value_0._boltffi_wire()),
         ))
 
     @classmethod
@@ -706,6 +847,7 @@ class XybridGenerationConfig:
             repetition_penalty=reader.optional(lambda: reader.f32()),
             stop_sequences=reader.sequence(lambda: reader.string()),
             grammar=reader.optional(lambda: reader.string()),
+            tools=reader.sequence(lambda: XybridToolDefinition._boltffi_from_reader(reader)),
         )
 
 
@@ -844,6 +986,7 @@ class XybridResult:
     latency_ms: int
     execution_target: XybridExecutionTarget
     metrics: XybridInferenceMetrics
+    tool_calls: list[XybridToolCall]
 
     def _boltffi_wire(self) -> bytes:
         return b"".join((
@@ -853,6 +996,7 @@ class XybridResult:
             _boltffi_wire_u32(self.latency_ms),
             _boltffi_wire_i32(_boltffi_enum_value(self.execution_target, XybridExecutionTarget, "XybridExecutionTarget")),
             self.metrics._boltffi_wire(),
+            _boltffi_wire_sequence(self.tool_calls, len(self.tool_calls), lambda __boltffi_value_0: __boltffi_value_0._boltffi_wire()),
         ))
 
     @classmethod
@@ -874,6 +1018,7 @@ class XybridResult:
             latency_ms=reader.u32(),
             execution_target=XybridExecutionTarget(reader.i32()),
             metrics=XybridInferenceMetrics._boltffi_from_reader(reader),
+            tool_calls=reader.sequence(lambda: XybridToolCall._boltffi_from_reader(reader)),
         )
 
 
@@ -1902,6 +2047,8 @@ class XybridBundle:
 
 
 
+def tool_results_envelope(user_text: str, prior_assistant_text: str, results: Sequence[XybridToolResult]) -> XybridEnvelope:
+    return _boltffi_read_wire(_boltffi_call(_boltffi_read_fe83cddcf3822a1d, lambda: _native.tool_results_envelope(user_text, prior_assistant_text, results)), lambda reader: XybridEnvelope._boltffi_from_reader(reader))
 def json_schema_to_gbnf(schema_json: str) -> str:
     return _boltffi_call(_boltffi_read_fe83cddcf3822a1d, lambda: _native.json_schema_to_gbnf(schema_json))
 def set_thermal_state(state: XybridThermalState) -> None:
@@ -1951,6 +2098,9 @@ __all__ = [
     "PACKAGE_VERSION",
     "XybridMetadataEntry",
     "XybridEnvelope",
+    "XybridToolDefinition",
+    "XybridToolCall",
+    "XybridToolResult",
     "XybridGenerationConfig",
     "XybridRunOptions",
     "XybridStageLatency",
@@ -2001,6 +2151,7 @@ __all__ = [
     "XybridConversationContext",
     "XybridTelemetryConfig",
     "XybridBundle",
+    "tool_results_envelope",
     "json_schema_to_gbnf",
     "set_thermal_state",
     "clear_thermal_state",

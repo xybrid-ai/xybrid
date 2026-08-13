@@ -418,6 +418,119 @@ public typealias VoiceInfo = XybridVoiceInfo
 /// Generation parameters for LLM inference (temperature, top_p, max_tokens, etc.).
 public typealias GenerationConfig = XybridGenerationConfig
 
+/// A tool the model may ask to call.
+public typealias ToolDefinition = XybridToolDefinition
+
+/// One tool call the model emitted, from `XybridResult.toolCalls`.
+public typealias ToolCall = XybridToolCall
+
+/// The outcome of running one tool, fed back with `Envelope.toolResults`.
+public typealias ToolResult = XybridToolResult
+
+// MARK: - GenerationConfig ergonomics
+//
+// The generated memberwise init takes every field positionally, so setting one
+// parameter means spelling out all nine. These factories default the rest.
+// They're static funcs rather than a defaulted `init` because an extension
+// init with the same argument labels would collide with the generated one.
+
+public extension XybridGenerationConfig {
+    /// Build a config, defaulting every field you don't set to the model's own
+    /// default.
+    static func make(
+        maxTokens: UInt32? = nil,
+        temperature: Float? = nil,
+        topP: Float? = nil,
+        minP: Float? = nil,
+        topK: UInt32? = nil,
+        repetitionPenalty: Float? = nil,
+        stopSequences: [String] = [],
+        grammar: String? = nil,
+        tools: [XybridToolDefinition] = []
+    ) -> XybridGenerationConfig {
+        XybridGenerationConfig(
+            maxTokens: maxTokens,
+            temperature: temperature,
+            topP: topP,
+            minP: minP,
+            topK: topK,
+            repetitionPenalty: repetitionPenalty,
+            stopSequences: stopSequences,
+            grammar: grammar,
+            tools: tools
+        )
+    }
+
+    /// Greedy decoding (deterministic, temperature 0). The usual choice for
+    /// extraction and for tool calling, where you want the most likely tokens
+    /// rather than creative sampling.
+    static func greedy(
+        maxTokens: UInt32? = nil,
+        grammar: String? = nil,
+        tools: [XybridToolDefinition] = []
+    ) -> XybridGenerationConfig {
+        .make(
+            maxTokens: maxTokens,
+            temperature: 0.0,
+            topP: 1.0,
+            topK: 0,
+            grammar: grammar,
+            tools: tools
+        )
+    }
+
+    /// Higher temperature, for more varied output.
+    static func creative(
+        maxTokens: UInt32? = nil,
+        tools: [XybridToolDefinition] = []
+    ) -> XybridGenerationConfig {
+        .make(
+            maxTokens: maxTokens,
+            temperature: 0.9,
+            topP: 0.95,
+            topK: 50,
+            tools: tools
+        )
+    }
+
+    /// The same config, offering `tools` to the model.
+    func withTools(_ tools: [XybridToolDefinition]) -> XybridGenerationConfig {
+        var copy = self
+        copy.tools = tools
+        return copy
+    }
+}
+
+// MARK: - Tool-calling ergonomics
+
+public extension XybridEnvelope {
+    /// The continuation envelope for the turn after the model asked for tools.
+    ///
+    /// One `run` is one model turn, so the tool loop lives in your code: run a
+    /// request carrying tools, execute every `XybridResult.toolCalls` entry,
+    /// then run this envelope to feed the outcomes back. Run the continuation
+    /// with the same tools as the original turn so the executor rebuilds an
+    /// identical chat prefix.
+    ///
+    /// - Parameters:
+    ///   - userText: The original user message of the turn being continued.
+    ///   - priorAssistantText: That turn's raw output text, tool-call block
+    ///     included — i.e. `XybridResult.text` verbatim.
+    ///   - results: Tool outcomes, in call order.
+    /// - Throws: `XybridError` if a result's content isn't valid JSON.
+    static func toolResults(
+        _ userText: String,
+        priorAssistantText: String,
+        results: [XybridToolResult]
+    ) throws -> XybridEnvelope {
+        try toolResultsEnvelope(
+            userText: userText,
+            priorAssistantText: priorAssistantText,
+            results: results
+        )
+    }
+}
+
 // MARK: - XybridResult compatibility shim
 //
 // The bolt-generated `XybridResult` carries an `envelope` whose `kind` is

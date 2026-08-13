@@ -172,13 +172,10 @@ if let audio = result.audioBytes {
 ### Generation Config (LLM)
 
 ```swift
-let config = XybridGenerationConfig(
+let config = XybridGenerationConfig.make(
     maxTokens: 512,
     temperature: 0.7,
-    topP: 0.9,
-    minP: nil, topK: nil,
-    repetitionPenalty: nil,
-    stopSequences: []
+    topP: 0.9
 )
 let result = try model.run(
     envelope: envelope,
