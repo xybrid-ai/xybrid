@@ -52,6 +52,8 @@ const FAMILY_MARKERS: &[&str] = &[
     GEMMA_TOOL_CALL_END,
     GEMMA_TOOL_RESPONSE_START,
     GEMMA_TOOL_RESPONSE_END,
+    FUNCTION_GEMMA_DECLARATION_START,
+    FUNCTION_GEMMA_DECLARATION_END,
     FUNCTION_GEMMA_TOOL_CALL_START,
     FUNCTION_GEMMA_TOOL_CALL_END,
     FUNCTION_GEMMA_TOOL_RESPONSE_START,
@@ -96,10 +98,9 @@ pub(crate) const TURN_MARKERS: &[&str] = &[
 
 /// Complete tool-protocol block delimiters as `(start, end, is_call_block)`,
 /// for streaming suppression and any consumer that must recognize whole
-/// blocks. Includes each family's call blocks and the structured Gemma
-/// tool-response blocks (those models emit a response opener as trained
-/// scaffolding after their calls); a response block is suppressible protocol
-/// traffic but not a tool call, hence the flag.
+/// blocks. Includes each family's calls plus structured Gemma declaration and
+/// response blocks. Declarations and responses are suppressible protocol
+/// traffic but not tool calls, hence the flag.
 pub(crate) const TOOL_BLOCK_MARKERS: &[(&str, &str, bool)] = &[
     (TOOL_CALL_START, TOOL_CALL_END, true),
     (GEMMA_TOOL_CALL_START, GEMMA_TOOL_CALL_END, true),
@@ -112,6 +113,11 @@ pub(crate) const TOOL_BLOCK_MARKERS: &[(&str, &str, bool)] = &[
     (
         FUNCTION_GEMMA_TOOL_RESPONSE_START,
         FUNCTION_GEMMA_TOOL_RESPONSE_END,
+        false,
+    ),
+    (
+        FUNCTION_GEMMA_DECLARATION_START,
+        FUNCTION_GEMMA_DECLARATION_END,
         false,
     ),
 ];
@@ -147,15 +153,17 @@ impl ToolCallProtocol {
         }
     }
 
-    /// Detect from a rendered prompt. FunctionGemma prompts retain their
-    /// declaration markers and gemma-4 prompts frame turns with `<|turn>`.
-    pub(crate) fn detect_from_prompt(prompt: &str) -> Self {
-        if prompt.contains(FUNCTION_GEMMA_DECLARATION_START) {
-            Self::FunctionGemma
+    pub(crate) fn detect_from_prompt(prompt: &str) -> Option<Self> {
+        if prompt.contains(FUNCTION_GEMMA_DECLARATION_START)
+            || prompt.contains(FUNCTION_GEMMA_DECLARATION_END)
+        {
+            Some(Self::FunctionGemma)
         } else if prompt.contains("<|turn>") {
-            Self::Gemma
+            Some(Self::Gemma)
+        } else if prompt.contains("<|im_start|>") {
+            Some(Self::Lfm2)
         } else {
-            Self::Lfm2
+            None
         }
     }
 
@@ -274,6 +282,10 @@ pub fn strip_tool_calls(text: &str) -> String {
         (TOOL_RESPONSE_START, TOOL_RESPONSE_END),
         (GEMMA_TOOL_CALL_START, GEMMA_TOOL_CALL_END),
         (GEMMA_TOOL_RESPONSE_START, GEMMA_TOOL_RESPONSE_END),
+        (
+            FUNCTION_GEMMA_DECLARATION_START,
+            FUNCTION_GEMMA_DECLARATION_END,
+        ),
         (FUNCTION_GEMMA_TOOL_CALL_START, FUNCTION_GEMMA_TOOL_CALL_END),
         (
             FUNCTION_GEMMA_TOOL_RESPONSE_START,
@@ -337,8 +349,8 @@ pub fn has_tool_markers(text: &str) -> bool {
 ///
 /// # Errors
 ///
-/// Returns [`AdapterError::InvalidInput`] when `tool_responses_json` does not
-/// exactly answer the calls from `prior_assistant_text`.
+/// Returns [`AdapterError::InvalidInput`] when responses do not exactly answer
+/// the prior calls or `base_prompt` has no supported protocol markers.
 pub(crate) fn compose_tool_continuation(
     base_prompt: &str,
     prior_assistant_text: &str,
@@ -350,7 +362,15 @@ pub(crate) fn compose_tool_continuation(
     let calls = parse_tool_calls(prior_assistant_text);
     let responses = validate_tool_responses(&value, &calls)?;
 
-    match ToolCallProtocol::detect_from_prompt(base_prompt) {
+    let protocol = ToolCallProtocol::detect_from_prompt(base_prompt).ok_or_else(|| {
+        AdapterError::InvalidInput(
+            "could not detect a supported tool-call protocol in the rendered prompt; refusing \
+             to substitute a ChatML continuation"
+                .to_string(),
+        )
+    })?;
+
+    match protocol {
         ToolCallProtocol::Lfm2 => {
             lfm2::compose_chatml_continuation(base_prompt, prior_assistant_text, &responses)
         }
@@ -620,7 +640,7 @@ hi<|im_end|>
 
         assert_eq!(
             ToolCallProtocol::detect_from_prompt(prompt),
-            ToolCallProtocol::Lfm2
+            Some(ToolCallProtocol::Lfm2)
         );
     }
 
@@ -633,8 +653,18 @@ hi<turn|>
 
         assert_eq!(
             ToolCallProtocol::detect_from_prompt(prompt),
-            ToolCallProtocol::Gemma
+            Some(ToolCallProtocol::Gemma)
         );
+    }
+
+    #[test]
+    fn continuation_rejects_an_unrecognized_prompt_protocol() {
+        let prior = wrapped("[weather(city='Paris')]");
+        let responses = r#"[{"call_id":"call_0","name":"weather","content":{"temperature_c":21}}]"#;
+
+        let result = compose_tool_continuation("plain prompt", &prior, responses);
+
+        assert_invalid_input(result);
     }
 
     #[test]
@@ -724,9 +754,12 @@ hi<turn|>
     #[test]
     fn compose_preserves_response_order_when_two_responses() {
         let prior = format!("{}{}", wrapped("[first()]"), wrapped("[second()]"));
-        let result =
-            compose_tool_continuation("base", &prior, r#"[{"content":"one"},{"content":2}]"#)
-                .unwrap();
+        let result = compose_tool_continuation(
+            "<|im_start|>assistant\n",
+            &prior,
+            r#"[{"content":"one"},{"content":2}]"#,
+        )
+        .unwrap();
 
         assert!(result.contains(
             "<|tool_response_start|>\"one\"<|tool_response_end|><|tool_response_start|>2<|tool_response_end|>"
@@ -816,7 +849,7 @@ hi<turn|>
     fn compose_orders_explicit_call_ids_by_prior_call_order() {
         let prior = format!("{}{}", wrapped("[first()]"), wrapped("[second()]"));
         let result = compose_tool_continuation(
-            "base",
+            "<|im_start|>assistant\n",
             &prior,
             r#"[
                 {"call_id":"call_1","name":"second","content":"two"},

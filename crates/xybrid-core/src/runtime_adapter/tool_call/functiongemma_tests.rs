@@ -8,6 +8,8 @@ use crate::runtime_adapter::AdapterError;
 
 const CALL_START: &str = "<start_function_call>";
 const CALL_END: &str = "<end_function_call>";
+const DECLARATION_START: &str = "<start_function_declaration>";
+const DECLARATION_END: &str = "<end_function_declaration>";
 const RESPONSE_START: &str = "<start_function_response>";
 const RESPONSE_END: &str = "<end_function_response>";
 
@@ -21,7 +23,9 @@ fn detects_functiongemma_template_and_rendered_prompt() {
         CALL_START
     );
     assert_eq!(
-        ToolCallProtocol::detect_from_prompt(prompt).call_start(),
+        ToolCallProtocol::detect_from_prompt(prompt)
+            .expect("declaration marker should identify FunctionGemma")
+            .call_start(),
         CALL_START
     );
 }
@@ -86,6 +90,36 @@ fn strips_and_recognizes_functiongemma_protocol_blocks() {
 
     assert!(has_tool_markers(&output));
     assert_eq!(strip_tool_calls(&output), "before  after");
+}
+
+#[test]
+fn strips_and_recognizes_functiongemma_declaration_blocks() {
+    let output =
+        format!("before {DECLARATION_START}declaration:weather{{}}{DECLARATION_END} after");
+
+    assert!(has_tool_markers(&output));
+    assert_eq!(strip_tool_calls(&output), "before  after");
+}
+
+#[test]
+fn parses_functiongemma_exponent_numbers() -> Result<(), serde_json::Error> {
+    let output = format!("{CALL_START}call:measure{{small:1e-7,large:-2E+8}}{CALL_END}");
+
+    let calls = parse_tool_calls(&output);
+
+    assert_eq!(calls.len(), 1);
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&calls[0].function.arguments)?,
+        serde_json::json!({"small": 1e-7, "large": -2e8})
+    );
+    Ok(())
+}
+
+#[test]
+fn rejects_functiongemma_numbers_with_two_exponent_signs() {
+    let output = format!("{CALL_START}call:measure{{value:1e+-2}}{CALL_END}");
+
+    assert!(parse_tool_calls(&output).is_empty());
 }
 
 #[test]
@@ -172,6 +206,20 @@ fn streaming_filter_suppresses_split_functiongemma_call() {
     );
     assert!(filter.saw_tool_call_block());
     assert_eq!(filter.cumulative_emitted(), "Checking ");
+}
+
+#[test]
+#[cfg(feature = "llm-llamacpp")]
+fn streaming_filter_suppresses_split_functiongemma_declaration() {
+    let mut filter = StreamingTextFilter::new(vec![]).with_tool_call_suppression();
+
+    assert_eq!(filter.push("before <start_func"), Some("before ".into()));
+    assert_eq!(
+        filter.push("tion_declaration>declaration:weather{}<end_function_declaration> after"),
+        Some(" after".into())
+    );
+    assert!(!filter.saw_tool_call_block());
+    assert_eq!(filter.cumulative_emitted(), "before  after");
 }
 
 #[test]

@@ -242,7 +242,7 @@ impl Cursor<'_> {
             return Err(ParseError);
         }
 
-        let is_float = if self.consume_char('.') {
+        let mut is_float = if self.consume_char('.') {
             if self.consume_digits() == 0 {
                 self.pos = start;
                 return Err(ParseError);
@@ -251,6 +251,17 @@ impl Cursor<'_> {
         } else {
             false
         };
+
+        if self.consume_char('e') || self.consume_char('E') {
+            is_float = true;
+            if !self.consume_char('+') {
+                self.consume_char('-');
+            }
+            if self.consume_digits() == 0 {
+                self.pos = start;
+                return Err(ParseError);
+            }
+        }
 
         let literal = &self.input[start..self.pos];
         if is_float {
