@@ -2668,7 +2668,23 @@ impl XybridModel {
     /// a speculative model whose local handle has landed — every other model's
     /// cached fields were computed from this same metadata at load, so paying
     /// for a read lock would buy nothing.
+    ///
+    /// Blocks on the handle lock: an in-flight run holds it for the whole
+    /// inference, and returning the pre-download placeholder mid-run would make
+    /// these accessors answer differently depending on whether a run happens to
+    /// be active. Callers that must not block use
+    /// [`Self::metadata_derived_nonblocking`] instead.
     fn metadata_derived<T>(&self, derive: impl Fn(&ModelMetadata) -> T) -> Option<T> {
+        self.speculative.as_ref()?;
+        let handle = self.handle.read().ok()?;
+        handle.loaded.then(|| derive(&handle.metadata))
+    }
+
+    /// [`Self::metadata_derived`] without the wait: yields `None` rather than
+    /// blocking when a run holds the handle write lock, so the caller falls
+    /// back to its load-time value. Only for accessors whose fallback is a
+    /// usable answer and whose callers may be on a UI thread.
+    fn metadata_derived_nonblocking<T>(&self, derive: impl Fn(&ModelMetadata) -> T) -> Option<T> {
         self.speculative.as_ref()?;
         let handle = self.handle.try_read().ok()?;
         handle.loaded.then(|| derive(&handle.metadata))
@@ -2708,8 +2724,12 @@ impl XybridModel {
     /// (tools, budget overrides) should start from this instead of
     /// `GenerationConfig::default()`, because an explicit config replaces the
     /// model-level defaults wholesale.
+    /// Reads without waiting on the handle lock — bindings call this from UI
+    /// threads to seed a config before a run, and a run in flight must not
+    /// stall that. A speculative model still downloading falls back to the
+    /// load-time defaults.
     pub fn default_generation_config(&self) -> GenerationConfig {
-        self.metadata_derived(xybrid_core::execution::model_default_gen_config)
+        self.metadata_derived_nonblocking(xybrid_core::execution::model_default_gen_config)
             .unwrap_or_else(|| self.default_generation_config.clone())
     }
 
