@@ -1,0 +1,61 @@
+crates/xybrid-core/src/execution/template/mod.rs
+  s_56e45659c49d26::t_08d5a42a6b52f3 19-20
+crates/xybrid-sdk/src/model.rs
+  s_56e45659c49d26::t_60880161d52688 1801-1802
+  s_56e45659c49d26::t_eb32ee7d4fdb9a 1794-1800,1803-1804
+crates/xybrid-core/src/runtime_adapter/mlx/generate.rs
+  s_56e45659c49d26::t_8798594976fa50 603-620
+crates/xybrid-core/src/execution/executor.rs
+  s_56e45659c49d26::t_2f8a9c4bdf352e 63
+  s_56e45659c49d26::t_7619cb124fee6d 848-855,858-867
+  s_56e45659c49d26::t_60880161d52688 856-857
+  s_56e45659c49d26::t_4bc5f220063acd 1350,1799,1901,2586
+  s_56e45659c49d26::t_6b96d6b7a91a5a 4659
+  s_56e45659c49d26::t_08aa527a92d404 36-37
+  s_56e45659c49d26::t_e2e526b7d8481b 684,750,931,1266,1385,1492,1564,1714,1833
+tools/scripts/fetch-mlx-xcframework.sh
+  s_56e45659c49d26::t_68fa2f3f3db786 90-93,160
+crates/xybrid-sdk/src/pipeline/mod.rs
+  s_56e45659c49d26::t_1cd9dad3a5f331 1774
+  s_56e45659c49d26::t_32751f8e90201a 1798-1804,1806-1812
+  s_56e45659c49d26::t_60880161d52688 1772-1773
+  s_56e45659c49d26::t_ffc0e4d014d0bb 1744
+  s_56e45659c49d26::t_7641b862076eda 1952
+crates/xybrid-mlx/src/array.rs
+  s_56e45659c49d26::t_105b59e053c74d 449-464
+crates/xybrid-mlx/src/ffi.rs
+  s_56e45659c49d26::t_105b59e053c74d 197-228
+  s_56e45659c49d26::t_68fa2f3f3db786 334-337
+crates/xybrid-cli/src/commands/registry_format.rs
+  s_56e45659c49d26::t_90da7254c1decd 25-32
+crates/xybrid-bolt/src/lib.rs
+  s_56e45659c49d26::t_68fa2f3f3db786 198-203
+crates/xybrid-sdk/src/registry_client.rs
+  s_56e45659c49d26::t_e7269152b5f297 468-476
+  s_56e45659c49d26::t_2341129ff3f587 1311-1322
+  s_56e45659c49d26::t_eb32ee7d4fdb9a 142
+crates/xybrid-core/src/runtime_adapter/mlx/embedding.rs
+  s_56e45659c49d26::t_a031dff5b042eb 326-340
+crates/xybrid-core/src/execution/strategies/llm.rs
+  s_56e45659c49d26::t_2f8a9c4bdf352e 12
+crates/xybrid-core/src/runtime_adapter/selector.rs
+  s_56e45659c49d26::t_3a5d46bd7cbe56 411-428,431-432
+crates/xybrid-core/src/runtime_adapter/mlx/sampler.rs
+  s_56e45659c49d26::t_b5ba6793c54f4a 266-275,281
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "305367de6828dff3d2a228eb757620c14f28f2c7",
+  "prompts": {},
+  "sessions": {
+    "s_56e45659c49d26": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "87c220f5-c727-4496-bded-5509074d746c",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
