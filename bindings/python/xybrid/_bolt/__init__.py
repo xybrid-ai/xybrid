@@ -226,6 +226,9 @@ class _BoltFfiWireReader:
         if self._offset != len(self._data):
             raise ValueError("trailing BoltFFI wire bytes")
 
+    def has_remaining(self) -> bool:
+        return self._offset < len(self._data)
+
     def read(self, count: int) -> bytes:
         offset = self._offset
         end = offset + count
@@ -1034,15 +1037,30 @@ class XybridResult:
 
     @classmethod
     def _boltffi_from_reader(cls, reader: "_BoltFfiWireReader") -> "XybridResult":
+        envelope = XybridEnvelope._boltffi_from_reader(reader)
+        output_type = XybridOutputType(reader.i32())
+        model_id = reader.string()
+        latency_ms = reader.u32()
+        execution_target = XybridExecutionTarget(reader.i32())
+        metrics = XybridInferenceMetrics._boltffi_from_reader(reader)
+        tool_calls = reader.sequence(lambda: XybridToolCall._boltffi_from_reader(reader))
+        reasoning_content = (
+            reader.optional(lambda: reader.string())
+            if reader.has_remaining()
+            else next(
+                (entry.value for entry in envelope.metadata if entry.key == "reasoning_content"),
+                None,
+            )
+        )
         return cls(
-            envelope=XybridEnvelope._boltffi_from_reader(reader),
-            output_type=XybridOutputType(reader.i32()),
-            model_id=reader.string(),
-            latency_ms=reader.u32(),
-            execution_target=XybridExecutionTarget(reader.i32()),
-            metrics=XybridInferenceMetrics._boltffi_from_reader(reader),
-            tool_calls=reader.sequence(lambda: XybridToolCall._boltffi_from_reader(reader)),
-            reasoning_content=reader.optional(lambda: reader.string()),
+            envelope=envelope,
+            output_type=output_type,
+            model_id=model_id,
+            latency_ms=latency_ms,
+            execution_target=execution_target,
+            metrics=metrics,
+            tool_calls=tool_calls,
+            reasoning_content=reasoning_content,
         )
 
 

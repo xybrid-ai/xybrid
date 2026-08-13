@@ -119,6 +119,8 @@ private object DirectVectorCodec {
 internal class WireReader(private val bytes: ByteArray) {
     private var position = 0
 
+    fun hasRemaining(): Boolean = position < bytes.size
+
     fun readBool(): Boolean = readI8() != 0.toByte()
 
     fun readI8(): Byte {
@@ -1301,15 +1303,27 @@ data class XybridResult(
 
     companion object {
         internal fun fromReader(reader: WireReader): XybridResult {
-            return XybridResult(
-                XybridEnvelope.fromReader(reader),
-                XybridOutputType.fromValue(reader.readI32()),
-                reader.readString(),
-                reader.readU32(),
-                XybridExecutionTarget.fromValue(reader.readI32()),
-                XybridInferenceMetrics.fromReader(reader),
-                reader.readSequence({ reader -> XybridToolCall.fromReader(reader) }),
+            val envelope = XybridEnvelope.fromReader(reader)
+            val outputType = XybridOutputType.fromValue(reader.readI32())
+            val modelId = reader.readString()
+            val latencyMs = reader.readU32()
+            val executionTarget = XybridExecutionTarget.fromValue(reader.readI32())
+            val metrics = XybridInferenceMetrics.fromReader(reader)
+            val toolCalls = reader.readSequence({ reader -> XybridToolCall.fromReader(reader) })
+            val reasoningContent = if (reader.hasRemaining()) {
                 reader.readOptionalValue({ reader -> reader.readString() })
+            } else {
+                envelope.metadata.firstOrNull { it.key == "reasoning_content" }?.value
+            }
+            return XybridResult(
+                envelope,
+                outputType,
+                modelId,
+                latencyMs,
+                executionTarget,
+                metrics,
+                toolCalls,
+                reasoningContent
             )
         }
 

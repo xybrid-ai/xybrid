@@ -356,9 +356,7 @@ public struct XybridResult: Hashable, Equatable, Sendable {
         let latencyMs = reader.readU32()
         let executionTarget = XybridExecutionTarget(rawValue: reader.readI32())!
         let metrics = XybridInferenceMetrics.decode(from: &reader)
-        let toolCalls = reader.position < reader.data.count
-            ? reader.readArray { reader in XybridToolCall.decode(from: &reader) }
-            : []
+        let toolCalls = reader.readArray { reader in XybridToolCall.decode(from: &reader) }
         let reasoningContent = reader.position < reader.data.count
             ? reader.readOptional { reader in reader.readString() }
             : envelope.metadata.first { $0.key == "reasoning_content" }?.value

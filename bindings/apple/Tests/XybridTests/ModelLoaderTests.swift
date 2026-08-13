@@ -18,7 +18,7 @@ final class ModelLoaderTests: XCTestCase {
         XCTAssertEqual(loader.source, source)
     }
 
-    func testResultDecodesReleasedNativeWireWithoutReasoningTail() {
+    func testResultDecodesToolCallingWireWithoutReasoningTail() {
         let envelope = XybridEnvelope(
             kind: .text(text: "answer"),
             metadata: [XybridMetadataEntry(key: "reasoning_content", value: "thinking")]
@@ -38,7 +38,8 @@ final class ModelLoaderTests: XCTestCase {
             modelId: "model",
             latencyMs: 1,
             executionTarget: .local,
-            metrics: metrics
+            metrics: metrics,
+            toolCalls: []
         )
         var writer = WireWriter()
         envelope.encode(to: &writer)
@@ -47,6 +48,7 @@ final class ModelLoaderTests: XCTestCase {
         writer.writeU32(1)
         writer.writeI32(XybridExecutionTarget.local.rawValue)
         metrics.encode(to: &writer)
+        writer.writeArray([] as [XybridToolCall]) { writer, call in call.encode(to: &writer) }
 
         var reader = WireReader(data: writer.data)
         let result = XybridResult.decode(from: &reader)

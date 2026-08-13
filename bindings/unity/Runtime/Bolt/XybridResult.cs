@@ -37,17 +37,38 @@ namespace XybridBolt
         public XybridToolCall[] ToolCalls { get; }
         public string? ReasoningContent { get; }
 
-        internal static XybridResult Decode(WireReader reader) =>
-            new XybridResult(
-                XybridEnvelope.Decode(reader),
-                (XybridOutputType)reader.ReadI32(),
-                reader.ReadString(),
-                reader.ReadU32(),
-                (XybridExecutionTarget)reader.ReadI32(),
-                XybridInferenceMetrics.Decode(reader),
-                reader.ReadArray(reader => XybridToolCall.Decode(reader)),
-                reader.ReadU8() == 0 ? default(string?) : reader.ReadString()
+        internal static XybridResult Decode(WireReader reader)
+        {
+            XybridEnvelope envelope = XybridEnvelope.Decode(reader);
+            XybridOutputType outputType = (XybridOutputType)reader.ReadI32();
+            string modelId = reader.ReadString();
+            uint latencyMs = reader.ReadU32();
+            XybridExecutionTarget executionTarget = (XybridExecutionTarget)reader.ReadI32();
+            XybridInferenceMetrics metrics = XybridInferenceMetrics.Decode(reader);
+            XybridToolCall[] toolCalls = reader.ReadArray(reader => XybridToolCall.Decode(reader));
+            string? reasoningContent = reader.HasRemaining
+                ? reader.ReadU8() == 0 ? default(string?) : reader.ReadString()
+                : ReasoningFromMetadata(envelope);
+            return new XybridResult(
+                envelope,
+                outputType,
+                modelId,
+                latencyMs,
+                executionTarget,
+                metrics,
+                toolCalls,
+                reasoningContent
             );
+        }
+
+        private static string? ReasoningFromMetadata(XybridEnvelope envelope)
+        {
+            foreach (XybridMetadataEntry entry in envelope.Metadata)
+            {
+                if (entry.Key == "reasoning_content") return entry.Value;
+            }
+            return null;
+        }
 
         internal void Encode(WireWriter writer)
         {

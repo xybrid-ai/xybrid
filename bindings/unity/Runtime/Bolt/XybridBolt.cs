@@ -43,6 +43,8 @@ namespace XybridBolt
             this.length = pointer == 0 ? 0 : checked((int)length);
         }
 
+        internal bool HasRemaining => position < length;
+
         internal bool ReadBool() => ReadU8() != 0;
 
         internal sbyte ReadI8()

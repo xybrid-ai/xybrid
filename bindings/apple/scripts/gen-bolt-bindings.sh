@@ -6,7 +6,7 @@
 #
 # The Swift source receives one compatibility transform: XybridResult's
 # append-only reasoning field defaults to nil and decodes results from the
-# released 0.5.0 binary, which does not emit that trailing field.
+# merged tool-calling wire shape, which does not emit that trailing field.
 set -euo pipefail
 
 repo_root="$(git -C "$(cd "$(dirname "$0")" && pwd)" rev-parse --show-toplevel)"
@@ -53,9 +53,7 @@ replacement = '''    @inlinable static func decode(from reader: inout WireReader
         let latencyMs = reader.readU32()
         let executionTarget = XybridExecutionTarget(rawValue: reader.readI32())!
         let metrics = XybridInferenceMetrics.decode(from: &reader)
-        let toolCalls = reader.position < reader.data.count
-            ? reader.readArray { reader in XybridToolCall.decode(from: &reader) }
-            : []
+        let toolCalls = reader.readArray { reader in XybridToolCall.decode(from: &reader) }
         let reasoningContent = reader.position < reader.data.count
             ? reader.readOptional { reader in reader.readString() }
             : envelope.metadata.first { $0.key == "reasoning_content" }?.value
