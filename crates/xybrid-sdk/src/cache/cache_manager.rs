@@ -318,6 +318,28 @@ impl CacheManager {
             .any(|key| key.starts_with(&format!("{}@", model_id)))
     }
 
+    /// Resolve the local directory a HuggingFace repo materialized into.
+    ///
+    /// Covers the current hashed layout plus marked legacy locations, and
+    /// returns the first directory holding a `model_metadata.json`. The
+    /// on-disk directory name is a repository hash, so callers must resolve
+    /// paths through this rather than deriving them from the repo id.
+    ///
+    /// # Arguments
+    ///
+    /// * `repo` - Repository id (format: "owner/repo", no variant suffix)
+    ///
+    /// # Returns
+    ///
+    /// Path to the materialized repo directory, or `None` when the repo has
+    /// not been downloaded into this cache.
+    pub fn huggingface_cache_dir(&self, repo: &str) -> Option<PathBuf> {
+        self.layout()
+            .huggingface_repo_dirs(repo)
+            .into_iter()
+            .find(|dir| dir.join("model_metadata.json").is_file())
+    }
+
     /// Gets the path to a cached bundle.
     ///
     /// # Arguments
@@ -907,6 +929,30 @@ mod tests {
             "extracted model cache should be removed"
         );
         assert!(other_model_dir.exists(), "unrelated model should remain");
+    }
+
+    #[test]
+    fn huggingface_cache_dir_resolves_materialized_hashed_repo() {
+        let temp_dir = TempDir::new().unwrap();
+        let models_dir = temp_dir.path().join("cache").join("models");
+        let layout = CacheLayout::from_registry_root(models_dir.clone());
+        let repo_dir = layout.huggingface_repo_dir("owner/repo");
+        fs::create_dir_all(&repo_dir).unwrap();
+        fs::write(repo_dir.join("model_metadata.json"), b"{}").unwrap();
+        layout.record_huggingface_repo("owner/repo").unwrap();
+
+        let manager = CacheManager::with_dir(models_dir).unwrap();
+
+        assert_eq!(
+            manager.huggingface_cache_dir("owner/repo"),
+            Some(repo_dir),
+            "materialized repo must resolve through its hashed directory"
+        );
+        assert_eq!(
+            manager.huggingface_cache_dir("owner/other"),
+            None,
+            "a repo that never downloaded has no cache directory"
+        );
     }
 
     #[test]
