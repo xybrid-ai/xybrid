@@ -1,0 +1,28 @@
+.github/workflows/star-history.yml
+  s_507e7acfc1590f::t_02043557aad0ff 78-79
+  s_507e7acfc1590f::t_3f2afcf9946ab3 1-38,50-77,80
+  s_507e7acfc1590f::t_5ad2a72c90d54d 39-49
+.gitignore
+  s_507e7acfc1590f::t_2459bdc0ad68f3 81-87
+README.md
+  s_507e7acfc1590f::t_46e2ea1dae3e49 81
+  s_507e7acfc1590f::t_b70342cebc636d 463-466
+tools/scripts/star-history.py
+  s_507e7acfc1590f::t_541a0af1526fa3 1-322
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "d0725ba75e68da6e1d67b8272f2c6faa5e7302f9",
+  "prompts": {},
+  "sessions": {
+    "s_507e7acfc1590f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c9a6a556-9427-4d01-8607-fd8a56fd507f",
+        "model": "claude-opus-5"
+      },
+      "human_author": "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
+    }
+  }
+}
