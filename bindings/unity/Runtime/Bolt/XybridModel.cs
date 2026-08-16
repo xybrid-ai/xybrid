@@ -165,6 +165,39 @@ namespace XybridBolt
 
 
         /// <summary>
+        /// Resolve and load a HuggingFace repository pinned to a revision.
+        /// </summary>
+        public static XybridModel FromHuggingfaceWithRevision(string repo, string revision)
+        {
+            WireWriter repoWriter = new WireWriter();
+            {
+                repoWriter.WriteString(repo);
+            }
+            byte[] repoBytes = repoWriter.ToArray();
+            WireWriter revisionWriter = new WireWriter();
+            {
+                revisionWriter.WriteString(revision);
+            }
+            byte[] revisionBytes = revisionWriter.ToArray();
+            FfiBuf boltffiErrorBuffer = NativeMethods.NativeXybridModelFromHuggingfaceWithRevision(repoBytes, (nuint)repoBytes.Length, revisionBytes, (nuint)revisionBytes.Length, out ulong boltffiHandle);
+            if (boltffiErrorBuffer.ptr != 0)
+            {
+                try
+                {
+                    WireReader boltffiErrorReader = new WireReader(boltffiErrorBuffer);
+                    throw new global::XybridBolt.XybridErrorException(global::XybridBolt.XybridError.Decode(boltffiErrorReader));
+                }
+                finally
+                {
+                    NativeMethods.FreeBuf(boltffiErrorBuffer);
+                }
+            }
+            return boltffiHandle == 0 ? throw new global::System.InvalidOperationException("BoltFFI returned a null XybridModel handle") : new XybridModel(boltffiHandle);
+        }
+
+
+
+        /// <summary>
         /// Load from a raw GGUF file, auto-generating `model_metadata.json` from the
         /// GGUF header (written next to the file if absent).
         /// </summary>
@@ -309,6 +342,25 @@ namespace XybridBolt
         {
             ThrowIfDisposed();
             return NativeMethods.NativeXybridModelSupportsTokenStreaming(this.Handle);
+        }
+
+
+        /// <summary>
+        /// Return the model's resolved generation defaults.
+        /// </summary>
+        public global::XybridBolt.XybridGenerationConfig DefaultGenerationConfig()
+        {
+            ThrowIfDisposed();
+            FfiBuf boltffiResultBuffer = NativeMethods.NativeXybridModelDefaultGenerationConfig(this.Handle);
+            try
+            {
+                WireReader resultReader = new WireReader(boltffiResultBuffer);
+                return global::XybridBolt.XybridGenerationConfig.Decode(resultReader);
+            }
+            finally
+            {
+                NativeMethods.FreeBuf(boltffiResultBuffer);
+            }
         }
 
 

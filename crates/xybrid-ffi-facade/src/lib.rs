@@ -667,6 +667,7 @@ impl ConversationContextHandle {
         *guard = new_ctx;
     }
 
+    /// Return history turns, excluding the persistent system envelope.
     pub fn history(&self) -> Vec<Envelope> {
         self.lock()
             .history()
@@ -816,6 +817,52 @@ pub struct GenerationConfig {
 }
 
 impl GenerationConfig {
+    fn from_sdk(config: sdk::GenerationConfig) -> Self {
+        let sdk::GenerationConfig {
+            max_tokens,
+            temperature,
+            top_p,
+            min_p,
+            top_k,
+            repetition_penalty,
+            stop_sequences,
+            grammar,
+            tools,
+        } = config;
+        let tools = tools
+            .into_iter()
+            .map(|tool| {
+                let sdk::Tool {
+                    tool_type: _,
+                    function,
+                } = tool;
+                let sdk::FunctionDefinition {
+                    name,
+                    description,
+                    parameters,
+                } = function;
+                ToolDefinition {
+                    name,
+                    description: description.unwrap_or_default(),
+                    parameters_json: parameters
+                        .unwrap_or_else(|| serde_json::json!({}))
+                        .to_string(),
+                }
+            })
+            .collect();
+        Self {
+            max_tokens: Some(u32::try_from(max_tokens).unwrap_or(u32::MAX)),
+            temperature: Some(temperature),
+            top_p: Some(top_p),
+            min_p: Some(min_p),
+            top_k: Some(u32::try_from(top_k).unwrap_or(u32::MAX)),
+            repetition_penalty: Some(repetition_penalty),
+            stop_sequences,
+            grammar,
+            tools,
+        }
+    }
+
     /// Greedy decoding — deterministic, temperature 0.
     pub fn greedy() -> Self {
         Self {
@@ -1442,6 +1489,13 @@ impl ModelLoader {
         })
     }
 
+    /// Resolve a HuggingFace repository pinned to an explicit revision.
+    pub fn from_huggingface_with_revision(repo: String, revision: String) -> Arc<Self> {
+        Arc::new(Self {
+            inner: sdk::ModelLoader::from_huggingface_with_revision(&repo, &revision),
+        })
+    }
+
     /// Load from a raw GGUF file: auto-generate `model_metadata.json` from the
     /// GGUF header (writing it next to the file if absent), then load the parent
     /// directory. Mirrors the pre-bolt C ABI's `from_model_file`.
@@ -1580,6 +1634,11 @@ impl XybridModel {
     /// Whether this model emits true token-by-token output.
     pub fn supports_token_streaming(&self) -> bool {
         self.inner.supports_token_streaming()
+    }
+
+    /// Return the model's resolved generation defaults.
+    pub fn default_generation_config(&self) -> GenerationConfig {
+        GenerationConfig::from_sdk(self.inner.default_generation_config())
     }
 
     pub fn is_llm(&self) -> bool {
@@ -2406,6 +2465,84 @@ mod tests {
         assert_eq!(sdk_gc.max_tokens, 3584);
         assert!((sdk_gc.temperature - 0.7).abs() < f32::EPSILON);
         assert_eq!(sdk_gc.top_k, 12);
+    }
+
+    #[test]
+    fn generation_config_empty_stop_sequences_preserve_model_defaults() {
+        // Given
+        let base = sdk::GenerationConfig {
+            stop_sequences: vec!["</s>".to_string()],
+            ..sdk::GenerationConfig::default()
+        };
+
+        // When
+        let from_facade = GenerationConfig::default()
+            .apply_over(base)
+            .expect("empty tools cannot fail to lower");
+
+        // Then
+        assert_eq!(from_facade.stop_sequences, vec!["</s>"]);
+    }
+
+    #[test]
+    fn generation_config_from_sdk_preserves_resolved_fields() {
+        // Given
+        let sdk_config = sdk::GenerationConfig {
+            max_tokens: 321,
+            temperature: 0.4,
+            top_p: 0.8,
+            min_p: 0.1,
+            top_k: 17,
+            repetition_penalty: 1.2,
+            stop_sequences: vec!["stop".into()],
+            grammar: Some("root ::= \"ok\"".into()),
+            tools: vec![sdk::Tool::function(
+                "weather",
+                "Weather lookup",
+                serde_json::json!({"type": "object"}),
+            )],
+        };
+
+        // When
+        let config = GenerationConfig::from_sdk(sdk_config);
+
+        // Then
+        assert_eq!(config.max_tokens, Some(321));
+        assert_eq!(config.temperature, Some(0.4));
+        assert_eq!(config.top_p, Some(0.8));
+        assert_eq!(config.min_p, Some(0.1));
+        assert_eq!(config.top_k, Some(17));
+        assert_eq!(config.repetition_penalty, Some(1.2));
+        assert_eq!(config.stop_sequences, vec!["stop"]);
+        assert_eq!(config.grammar.as_deref(), Some("root ::= \"ok\""));
+        assert_eq!(config.tools.len(), 1);
+        assert_eq!(config.tools[0].name, "weather");
+        assert_eq!(config.tools[0].description, "Weather lookup");
+        assert_eq!(config.tools[0].parameters_json, r#"{"type":"object"}"#);
+    }
+
+    #[test]
+    fn huggingface_revision_loader_preserves_requested_revision() {
+        // Given / When
+        let loader = ModelLoader::from_huggingface_with_revision(
+            "xybrid-ai/model".into(),
+            "revision-123".into(),
+        );
+
+        // Then
+        assert_eq!(loader.model_id().as_deref(), Some("xybrid-ai/model"));
+        assert_eq!(loader.version().as_deref(), Some("revision-123"));
+    }
+
+    #[test]
+    fn huggingface_revision_loader_preserves_variant() {
+        let loader = ModelLoader::from_huggingface_with_revision(
+            "xybrid-ai/model-GGUF:Q8_0".into(),
+            "revision-123".into(),
+        );
+
+        assert_eq!(loader.model_id().as_deref(), Some("xybrid-ai/model-GGUF"));
+        assert_eq!(loader.version().as_deref(), Some("revision-123"));
     }
 
     #[test]

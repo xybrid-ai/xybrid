@@ -119,6 +119,8 @@ private object DirectVectorCodec {
 internal class WireReader(private val bytes: ByteArray) {
     private var position = 0
 
+    fun hasRemaining(): Boolean = position < bytes.size
+
     fun readBool(): Boolean = readI8() != 0.toByte()
 
     fun readI8(): Byte {
@@ -767,6 +769,7 @@ private object Native {
     @JvmStatic external fun boltffi_init_class_xybrid_bolt_xybrid_model_from_directory(path: java.nio.ByteBuffer, __boltffi_path_len: Int): Long
     @JvmStatic external fun boltffi_init_class_xybrid_bolt_xybrid_model_from_bundle(path: java.nio.ByteBuffer, __boltffi_path_len: Int): Long
     @JvmStatic external fun boltffi_init_class_xybrid_bolt_xybrid_model_from_huggingface(repo: java.nio.ByteBuffer, __boltffi_repo_len: Int): Long
+    @JvmStatic external fun boltffi_init_class_xybrid_bolt_xybrid_model_from_huggingface_with_revision(repo: java.nio.ByteBuffer, __boltffi_repo_len: Int, revision: java.nio.ByteBuffer, __boltffi_revision_len: Int): Long
     @JvmStatic external fun boltffi_init_class_xybrid_bolt_xybrid_model_from_model_file(path: java.nio.ByteBuffer, __boltffi_path_len: Int): Long
     @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_model_model_id(`receiver`: Long): ByteArray?
     @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_model_version(`receiver`: Long): ByteArray?
@@ -777,6 +780,7 @@ private object Native {
     @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_model_await_download(`receiver`: Long, timeout_ms: Long): ByteArray?
     @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_model_supports_streaming(`receiver`: Long): Boolean
     @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_model_supports_token_streaming(`receiver`: Long): Boolean
+    @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_model_default_generation_config(`receiver`: Long): ByteArray?
     @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_model_is_llm(`receiver`: Long): Boolean
     @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_model_supports_tool_calling(`receiver`: Long): ByteArray?
     @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_model_has_voices(`receiver`: Long): Boolean
@@ -800,6 +804,7 @@ private object Native {
     @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_conversation_context_clear(`receiver`: Long): Unit
     @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_conversation_context_id(`receiver`: Long): ByteArray?
     @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_conversation_context_history_len(`receiver`: Long): Int
+    @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_conversation_context_history(`receiver`: Long): ByteArray?
     @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_conversation_context_has_system(`receiver`: Long): Boolean
     @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_conversation_context_set_max_history_len(`receiver`: Long, len: Int): Unit
     @JvmStatic external fun boltffi_release_class_xybrid_bolt_xybrid_telemetry_config(handle: Long): Unit
@@ -1267,10 +1272,11 @@ data class XybridResult(
     val latencyMs: UInt,
     val executionTarget: XybridExecutionTarget,
     val metrics: XybridInferenceMetrics,
-    val toolCalls: List<XybridToolCall>
+    val toolCalls: List<XybridToolCall>,
+    val reasoningContent: String? = null
 ) {
     internal fun wireSize(): Int {
-        return this.envelope.wireSize() + 4 + 4 + Utf8Codec.maxBytes(this.modelId) + 4 + 4 + this.metrics.wireSize() + 4 + this.toolCalls.sumOf { __boltffi_value_0 -> (__boltffi_value_0.wireSize()).toInt() }
+        return this.envelope.wireSize() + 4 + 4 + Utf8Codec.maxBytes(this.modelId) + 4 + 4 + this.metrics.wireSize() + 4 + this.toolCalls.sumOf { __boltffi_value_0 -> (__boltffi_value_0.wireSize()).toInt() } + 1 + (this.reasoningContent?.let { __boltffi_value_0 -> 4 + Utf8Codec.maxBytes(__boltffi_value_0) } ?: 0)
     }
 
     internal fun writeTo(writer: WireWriter) {
@@ -1281,6 +1287,7 @@ data class XybridResult(
         writer.writeI32(this.executionTarget.value)
         this.metrics.writeTo(writer)
         writer.writeSequence(this.toolCalls, this.toolCalls.size, { writer, __boltffi_value_0 -> __boltffi_value_0.writeTo(writer) })
+        writer.writeOptionalValue(this.reasoningContent, { writer, __boltffi_value_0 -> writer.writeString(__boltffi_value_0) })
     }
 
     internal fun toByteArray(): ByteArray {
@@ -1296,14 +1303,27 @@ data class XybridResult(
 
     companion object {
         internal fun fromReader(reader: WireReader): XybridResult {
+            val envelope = XybridEnvelope.fromReader(reader)
+            val outputType = XybridOutputType.fromValue(reader.readI32())
+            val modelId = reader.readString()
+            val latencyMs = reader.readU32()
+            val executionTarget = XybridExecutionTarget.fromValue(reader.readI32())
+            val metrics = XybridInferenceMetrics.fromReader(reader)
+            val toolCalls = reader.readSequence({ reader -> XybridToolCall.fromReader(reader) })
+            val reasoningContent = if (reader.hasRemaining()) {
+                reader.readOptionalValue({ reader -> reader.readString() })
+            } else {
+                envelope.metadata.firstOrNull { it.key == "reasoning_content" }?.value
+            }
             return XybridResult(
-                XybridEnvelope.fromReader(reader),
-                XybridOutputType.fromValue(reader.readI32()),
-                reader.readString(),
-                reader.readU32(),
-                XybridExecutionTarget.fromValue(reader.readI32()),
-                XybridInferenceMetrics.fromReader(reader),
-                reader.readSequence({ reader -> XybridToolCall.fromReader(reader) })
+                envelope,
+                outputType,
+                modelId,
+                latencyMs,
+                executionTarget,
+                metrics,
+                toolCalls,
+                reasoningContent
             )
         }
 
@@ -2008,6 +2028,8 @@ class XybridModel internal constructor(internal val handle: Long) : AutoCloseabl
 
     constructor(id: String) : this(fromRegistry(id).handle)
 
+    constructor(repo: String, revision: String) : this(fromHuggingfaceWithRevision(repo, revision).handle)
+
     companion object {
         fun fromRegistry(id: String): XybridModel {
             val __boltffi_id_wire = WireWriterPool.acquire(4 + Utf8Codec.maxBytes(id))
@@ -2057,6 +2079,20 @@ class XybridModel internal constructor(internal val handle: Long) : AutoCloseabl
                 return XybridModel(try { Native.boltffi_init_class_xybrid_bolt_xybrid_model_from_huggingface(__boltffi_repo_wire.directBuffer(), __boltffi_repo_wire.size()) } catch (__boltffi_error: BoltFfiErrorBufferException) { run { val __boltffi_error_reader = WireReader(__boltffi_error.bytes); throw XybridError.fromReader(__boltffi_error_reader) } })
             } finally {
                 __boltffi_repo_wire.close()
+            }
+        }
+        fun fromHuggingfaceWithRevision(repo: String, revision: String): XybridModel {
+            val __boltffi_repo_wire = WireWriterPool.acquire(4 + Utf8Codec.maxBytes(repo))
+            val __boltffi_repo_writer = __boltffi_repo_wire.writer
+            __boltffi_repo_writer.writeString(repo)
+            val __boltffi_revision_wire = WireWriterPool.acquire(4 + Utf8Codec.maxBytes(revision))
+            val __boltffi_revision_writer = __boltffi_revision_wire.writer
+            __boltffi_revision_writer.writeString(revision)
+            try {
+                return XybridModel(try { Native.boltffi_init_class_xybrid_bolt_xybrid_model_from_huggingface_with_revision(__boltffi_repo_wire.directBuffer(), __boltffi_repo_wire.size(), __boltffi_revision_wire.directBuffer(), __boltffi_revision_wire.size()) } catch (__boltffi_error: BoltFfiErrorBufferException) { run { val __boltffi_error_reader = WireReader(__boltffi_error.bytes); throw XybridError.fromReader(__boltffi_error_reader) } })
+            } finally {
+                __boltffi_repo_wire.close()
+                __boltffi_revision_wire.close()
             }
         }
         fun fromModelFile(path: String): XybridModel {
@@ -2113,6 +2149,12 @@ class XybridModel internal constructor(internal val handle: Long) : AutoCloseabl
 
     fun supportsTokenStreaming(): Boolean {
         return Native.boltffi_method_class_xybrid_bolt_xybrid_model_supports_token_streaming(this.boltffiHandle())
+    }
+
+    fun defaultGenerationConfig(): XybridGenerationConfig {
+        val __boltffi_result = Native.boltffi_method_class_xybrid_bolt_xybrid_model_default_generation_config(this.boltffiHandle()) ?: throw IllegalStateException("null buffer returned")
+        val __boltffi_reader = WireReader(__boltffi_result)
+        return XybridGenerationConfig.fromReader(__boltffi_reader)
     }
 
     fun isLlm(): Boolean {
@@ -2311,6 +2353,12 @@ class XybridConversationContext internal constructor(internal val handle: Long) 
 
     fun historyLen(): UInt {
         return Native.boltffi_method_class_xybrid_bolt_xybrid_conversation_context_history_len(this.boltffiHandle()).toUInt()
+    }
+
+    fun history(): List<XybridEnvelope> {
+        val __boltffi_result = Native.boltffi_method_class_xybrid_bolt_xybrid_conversation_context_history(this.boltffiHandle()) ?: throw IllegalStateException("null buffer returned")
+        val __boltffi_reader = WireReader(__boltffi_result)
+        return __boltffi_reader.readSequence({ __boltffi_reader -> XybridEnvelope.fromReader(__boltffi_reader) })
     }
 
     fun hasSystem(): Boolean {

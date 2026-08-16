@@ -101,6 +101,14 @@ classes:
         return: XybridModelLoader
         notes: "Requires huggingface feature flag. Downloads and caches model files from HuggingFace Hub."
         status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+      fromHuggingfaceWithRevision:
+        static: true
+        params:
+          - { name: repo, type: String }
+          - { name: revision, type: String }
+        return: XybridModel
+        notes: "Pins the load to the commit resolved from a branch, tag, or SHA. The Bolt languages expose this as a synchronous XybridModel constructor; call it off the UI thread."
+        status: { dart: planned, kotlin: implemented, swift: implemented, csharp: implemented }
       load:
         async: true
         return: XybridModel
@@ -140,6 +148,10 @@ classes:
         status: { dart: planned, kotlin: partial, swift: partial, csharp: implemented }
       hasVoices:
         type: bool
+        status: { dart: planned, kotlin: implemented, swift: implemented, csharp: implemented }
+      defaultGenerationConfig:
+        type: GenerationConfig
+        notes: "Resolved model defaults, including template generation parameters and the reasoning-token floor."
         status: { dart: planned, kotlin: implemented, swift: implemented, csharp: implemented }
     methods:
       voice:
@@ -436,6 +448,10 @@ classes:
       modelId:
         type: String
         status: { dart: planned, kotlin: planned, swift: planned, csharp: implemented }
+      reasoningContent:
+        type: "String?"
+        notes: "Model reasoning emitted separately from the final answer text."
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
       executionTarget:
         type: ExecutionTarget
         # Whether the answer came from the device or the cloud gateway. Cloud
@@ -509,7 +525,12 @@ classes:
   ConversationContext:
     type: class
     section: "8. Supporting Types"
-    status: { dart: implemented, kotlin: planned, swift: planned, csharp: implemented }
+    methods:
+      history:
+        return: "List<Envelope>"
+        notes: "Snapshot of history turns; excludes the persistent system envelope."
+        status: { dart: planned, kotlin: implemented, swift: implemented, csharp: implemented }
+    status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
 
   MessageRole:
     type: enum

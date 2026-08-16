@@ -43,6 +43,8 @@ namespace XybridBolt
             this.length = pointer == 0 ? 0 : checked((int)length);
         }
 
+        internal bool HasRemaining => position < length;
+
         internal bool ReadBool() => ReadU8() != 0;
 
         internal sbyte ReadI8()
@@ -755,6 +757,9 @@ namespace XybridBolt
         [DllImport(LibName, EntryPoint = "boltffi_init_class_xybrid_bolt_xybrid_model_from_huggingface")]
         internal static extern FfiBuf NativeXybridModelFromHuggingface([In] byte[] repoBytes, nuint repoLength, out ulong boltffiHandle);
 
+        [DllImport(LibName, EntryPoint = "boltffi_init_class_xybrid_bolt_xybrid_model_from_huggingface_with_revision")]
+        internal static extern FfiBuf NativeXybridModelFromHuggingfaceWithRevision([In] byte[] repoBytes, nuint repoLength, [In] byte[] revisionBytes, nuint revisionLength, out ulong boltffiHandle);
+
         [DllImport(LibName, EntryPoint = "boltffi_init_class_xybrid_bolt_xybrid_model_from_model_file")]
         internal static extern FfiBuf NativeXybridModelFromModelFile([In] byte[] pathBytes, nuint pathLength, out ulong boltffiHandle);
 
@@ -805,6 +810,9 @@ namespace XybridBolt
         [return: MarshalAs(UnmanagedType.I1)]
         internal static extern bool NativeXybridConversationContextHasSystem(ulong receiver);
 
+        [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_conversation_context_history")]
+        internal static extern FfiBuf NativeXybridConversationContextHistory(ulong receiver);
+
         [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_conversation_context_history_len")]
         internal static extern uint NativeXybridConversationContextHistoryLen(ulong receiver);
 
@@ -822,6 +830,9 @@ namespace XybridBolt
 
         [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_model_await_download")]
         internal static extern FfiBuf NativeXybridModelAwaitDownload(ulong receiver, ulong timeoutMs);
+
+        [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_model_default_generation_config")]
+        internal static extern FfiBuf NativeXybridModelDefaultGenerationConfig(ulong receiver);
 
         [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_model_default_voice")]
         internal static extern FfiBuf NativeXybridModelDefaultVoice(ulong receiver);

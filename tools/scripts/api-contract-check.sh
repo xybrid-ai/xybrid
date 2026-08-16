@@ -134,7 +134,7 @@ check_method_in_sdk() {
             [ ! -d "$src_dir" ] && return 2
             # Match plain declarations and record-field forms produced by
             # UniFFI's Swift generator (`public var foo`, `public let foo`).
-            pattern="(func ${method_name}|var ${method_name}|let ${method_name}|public var ${method_name}|public let ${method_name}|${method_name}\()"
+            pattern="(func ${method_name}|var ${method_name}|let ${method_name}|public var ${method_name}|public let ${method_name}|init\(${method_name}[[:space:]]|${method_name}\()"
             ;;
         csharp)
             src_dir="$UNITY_SRC"

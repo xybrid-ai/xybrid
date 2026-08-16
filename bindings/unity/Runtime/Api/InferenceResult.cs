@@ -78,6 +78,9 @@ namespace Xybrid
         /// <summary>Gets the text output (for ASR or LLM models), or null if not applicable.</summary>
         public string Text { get; }
 
+        /// <summary>Gets model reasoning separately from the final answer text.</summary>
+        public string ReasoningContent { get; }
+
         /// <summary>Gets the inference latency in milliseconds.</summary>
         public uint LatencyMs { get; }
 
@@ -135,6 +138,7 @@ namespace Xybrid
             byte[] audioBytes,
             float[] embedding,
             InferenceMetrics metrics,
+            string reasoningContent,
             XybridBolt.XybridExecutionTarget executionTarget =
                 XybridBolt.XybridExecutionTarget.Local,
             IReadOnlyList<XybridBolt.XybridToolCall> toolCalls = null)
@@ -147,6 +151,7 @@ namespace Xybrid
             AudioBytes = audioBytes;
             Embedding = embedding;
             Metrics = metrics;
+            ReasoningContent = reasoningContent;
             ExecutionTarget = executionTarget;
             ToolCalls = toolCalls ?? System.Array.Empty<XybridBolt.XybridToolCall>();
         }
@@ -179,6 +184,7 @@ namespace Xybrid
                 audioBytes: audio,
                 embedding: embedding,
                 metrics: MapMetrics(result.Metrics),
+                reasoningContent: result.ReasoningContent,
                 executionTarget: result.ExecutionTarget,
                 toolCalls: result.ToolCalls ?? System.Array.Empty<XybridBolt.XybridToolCall>());
         }
@@ -197,7 +203,8 @@ namespace Xybrid
                 outputType: OutputType.Unknown,
                 audioBytes: null,
                 embedding: null,
-                metrics: new InferenceMetrics(0, null, null, null, null, null, Array.Empty<StageLatency>()));
+                metrics: new InferenceMetrics(0, null, null, null, null, null, Array.Empty<StageLatency>()),
+                reasoningContent: null);
 
         private static OutputType MapOutputType(XybridBolt.XybridOutputType outputType)
         {

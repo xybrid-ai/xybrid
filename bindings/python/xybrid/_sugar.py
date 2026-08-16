@@ -182,14 +182,6 @@ def _install_result_accessors() -> None:
         kind = self.envelope.kind
         return kind.values if isinstance(kind, _bolt.XybridEnvelopeKindEmbedding) else None
 
-    def reasoning_content(self: Any) -> str | None:
-        """Chain-of-thought text carried on the ``reasoning_content`` metadata key."""
-
-        for entry in self.envelope.metadata:
-            if entry.key == "reasoning_content":
-                return entry.value
-        return None
-
     def success(self: Any) -> bool:
         """Always ``True``; failures raise instead. Shape-compat with Swift/Kotlin."""
 
@@ -205,7 +197,7 @@ def _install_result_accessors() -> None:
 
         return self.latency_ms / 1000.0
 
-    for accessor in (text, audio_bytes, embedding, reasoning_content, success, is_failure, latency_seconds):
+    for accessor in (text, audio_bytes, embedding, success, is_failure, latency_seconds):
         setattr(result, accessor.__name__, property(accessor, doc=accessor.__doc__))
 
 

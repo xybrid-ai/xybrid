@@ -2,11 +2,9 @@
 
 Before boltffi 0.29 this file tested a hand-ported ctypes wire layer — its
 loader precedence, `_WireReader`/`_WireWriter` round-trips, and the tagged
-result decoding. boltffi generates all of that now
-(`tools/scripts/gen_python_bolt.py`), so those internals are no longer ours to
-test; asserting on them would just pin the generator's private shape. What is
-still worth guarding is that the package loads its native bridge and that the
-surface the SDK depends on is actually exported.
+result decoding. boltffi generates those internals now, except for the
+append-only result fallback owned by `tools/scripts/gen_python_bolt.py`.
+These checks cover that compatibility transform, native loading, and exports.
 """
 
 from __future__ import annotations
@@ -75,3 +73,56 @@ def test_will_speculate_is_false_without_an_api_key() -> None:
     if bolt.has_api_key():
         pytest.skip("an API key is configured in this environment")
     assert bolt.will_speculate_for_model("lfm2.5-350m") is False
+
+
+def test_result_decoder_accepts_tool_calling_wire_without_reasoning_tail() -> None:
+    tool_calling = bolt.XybridResult._boltffi_from_wire(_result_wire())
+    assert [call.id for call in tool_calling.tool_calls] == ["call-1"]
+    assert tool_calling.reasoning_content == "metadata reasoning"
+
+    current = bolt.XybridResult._boltffi_from_wire(
+        _result_wire(typed_reasoning="typed reasoning")
+    )
+    assert [call.id for call in current.tool_calls] == ["call-1"]
+    assert current.reasoning_content == "typed reasoning"
+
+
+def _result_wire(*, typed_reasoning: str | None = None) -> bytes:
+    envelope = bolt.XybridEnvelope(
+        kind=bolt.XybridEnvelopeKindText(text="answer"),
+        metadata=[
+            bolt.XybridMetadataEntry(
+                key="reasoning_content", value="metadata reasoning"
+            )
+        ],
+    )
+    metrics = bolt.XybridInferenceMetrics(
+        total_ms=7,
+        ttft_ms=None,
+        tokens_per_second=None,
+        prefill_tps=None,
+        decode_tps=None,
+        tokens_out=None,
+        stage_latencies_ms=[],
+    )
+    fields = [
+        envelope._boltffi_wire(),
+        bolt._boltffi_wire_i32(bolt.XybridOutputType.TEXT.value),
+        bolt._boltffi_wire_string("model"),
+        bolt._boltffi_wire_u32(9),
+        bolt._boltffi_wire_i32(bolt.XybridExecutionTarget.LOCAL.value),
+        metrics._boltffi_wire(),
+    ]
+    tool_calls = [
+        bolt.XybridToolCall(id="call-1", name="lookup", arguments_json="{}")
+    ]
+    fields.append(
+        bolt._boltffi_wire_sequence(
+            tool_calls, len(tool_calls), lambda call: call._boltffi_wire()
+        )
+    )
+    if typed_reasoning is not None:
+        fields.append(
+            bolt._boltffi_wire_optional(typed_reasoning, bolt._boltffi_wire_string)
+        )
+    return b"".join(fields)

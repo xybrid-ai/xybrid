@@ -36,6 +36,8 @@ typedef FfiBuf_u8 (*boltffi_python_boltffi_init_class_xybrid_bolt_xybrid_model_f
 static boltffi_python_boltffi_init_class_xybrid_bolt_xybrid_model_from_bundle_fn boltffi_python_boltffi_init_class_xybrid_bolt_xybrid_model_from_bundle = NULL;
 typedef FfiBuf_u8 (*boltffi_python_boltffi_init_class_xybrid_bolt_xybrid_model_from_huggingface_fn)(const uint8_t *, uintptr_t, uint64_t *);
 static boltffi_python_boltffi_init_class_xybrid_bolt_xybrid_model_from_huggingface_fn boltffi_python_boltffi_init_class_xybrid_bolt_xybrid_model_from_huggingface = NULL;
+typedef FfiBuf_u8 (*boltffi_python_boltffi_init_class_xybrid_bolt_xybrid_model_from_huggingface_with_revision_fn)(const uint8_t *, uintptr_t, const uint8_t *, uintptr_t, uint64_t *);
+static boltffi_python_boltffi_init_class_xybrid_bolt_xybrid_model_from_huggingface_with_revision_fn boltffi_python_boltffi_init_class_xybrid_bolt_xybrid_model_from_huggingface_with_revision = NULL;
 typedef FfiBuf_u8 (*boltffi_python_boltffi_init_class_xybrid_bolt_xybrid_model_from_model_file_fn)(const uint8_t *, uintptr_t, uint64_t *);
 static boltffi_python_boltffi_init_class_xybrid_bolt_xybrid_model_from_model_file_fn boltffi_python_boltffi_init_class_xybrid_bolt_xybrid_model_from_model_file = NULL;
 typedef FfiBuf_u8 (*boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_model_id_fn)(uint64_t);
@@ -56,6 +58,8 @@ typedef bool (*boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_supp
 static boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_supports_streaming_fn boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_supports_streaming = NULL;
 typedef bool (*boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_supports_token_streaming_fn)(uint64_t);
 static boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_supports_token_streaming_fn boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_supports_token_streaming = NULL;
+typedef FfiBuf_u8 (*boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_default_generation_config_fn)(uint64_t);
+static boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_default_generation_config_fn boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_default_generation_config = NULL;
 typedef bool (*boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_is_llm_fn)(uint64_t);
 static boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_is_llm_fn boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_is_llm = NULL;
 typedef FfiBuf_u8 (*boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_supports_tool_calling_fn)(uint64_t);
@@ -102,6 +106,8 @@ typedef FfiBuf_u8 (*boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_conve
 static boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_conversation_context_id_fn boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_conversation_context_id = NULL;
 typedef uint32_t (*boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_conversation_context_history_len_fn)(uint64_t);
 static boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_conversation_context_history_len_fn boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_conversation_context_history_len = NULL;
+typedef FfiBuf_u8 (*boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_conversation_context_history_fn)(uint64_t);
+static boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_conversation_context_history_fn boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_conversation_context_history = NULL;
 typedef bool (*boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_conversation_context_has_system_fn)(uint64_t);
 static boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_conversation_context_has_system_fn boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_conversation_context_has_system = NULL;
 typedef FfiStatus (*boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_conversation_context_set_max_history_len_fn)(uint64_t, uint32_t);
@@ -211,6 +217,7 @@ static void boltffi_python_clear_symbols(void) {
     boltffi_python_boltffi_init_class_xybrid_bolt_xybrid_model_from_directory = NULL;
     boltffi_python_boltffi_init_class_xybrid_bolt_xybrid_model_from_bundle = NULL;
     boltffi_python_boltffi_init_class_xybrid_bolt_xybrid_model_from_huggingface = NULL;
+    boltffi_python_boltffi_init_class_xybrid_bolt_xybrid_model_from_huggingface_with_revision = NULL;
     boltffi_python_boltffi_init_class_xybrid_bolt_xybrid_model_from_model_file = NULL;
     boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_model_id = NULL;
     boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_version = NULL;
@@ -221,6 +228,7 @@ static void boltffi_python_clear_symbols(void) {
     boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_await_download = NULL;
     boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_supports_streaming = NULL;
     boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_supports_token_streaming = NULL;
+    boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_default_generation_config = NULL;
     boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_is_llm = NULL;
     boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_supports_tool_calling = NULL;
     boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_has_voices = NULL;
@@ -244,6 +252,7 @@ static void boltffi_python_clear_symbols(void) {
     boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_conversation_context_clear = NULL;
     boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_conversation_context_id = NULL;
     boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_conversation_context_history_len = NULL;
+    boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_conversation_context_history = NULL;
     boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_conversation_context_has_system = NULL;
     boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_conversation_context_set_max_history_len = NULL;
     boltffi_python_boltffi_release_class_xybrid_bolt_xybrid_telemetry_config = NULL;
@@ -466,6 +475,16 @@ static int boltffi_python_bind_symbols(void) {
         return 0;
     }
 #ifdef _WIN32
+    boltffi_python_boltffi_init_class_xybrid_bolt_xybrid_model_from_huggingface_with_revision = (boltffi_python_boltffi_init_class_xybrid_bolt_xybrid_model_from_huggingface_with_revision_fn)GetProcAddress(boltffi_python_library_handle, "boltffi_init_class_xybrid_bolt_xybrid_model_from_huggingface_with_revision");
+#else
+    boltffi_python_boltffi_init_class_xybrid_bolt_xybrid_model_from_huggingface_with_revision = (boltffi_python_boltffi_init_class_xybrid_bolt_xybrid_model_from_huggingface_with_revision_fn)dlsym(boltffi_python_library_handle, "boltffi_init_class_xybrid_bolt_xybrid_model_from_huggingface_with_revision");
+#endif
+    if (boltffi_python_boltffi_init_class_xybrid_bolt_xybrid_model_from_huggingface_with_revision == NULL) {
+        boltffi_python_unload_library();
+        PyErr_SetString(PyExc_ImportError, "failed to resolve native symbol " "boltffi_init_class_xybrid_bolt_xybrid_model_from_huggingface_with_revision");
+        return 0;
+    }
+#ifdef _WIN32
     boltffi_python_boltffi_init_class_xybrid_bolt_xybrid_model_from_model_file = (boltffi_python_boltffi_init_class_xybrid_bolt_xybrid_model_from_model_file_fn)GetProcAddress(boltffi_python_library_handle, "boltffi_init_class_xybrid_bolt_xybrid_model_from_model_file");
 #else
     boltffi_python_boltffi_init_class_xybrid_bolt_xybrid_model_from_model_file = (boltffi_python_boltffi_init_class_xybrid_bolt_xybrid_model_from_model_file_fn)dlsym(boltffi_python_library_handle, "boltffi_init_class_xybrid_bolt_xybrid_model_from_model_file");
@@ -563,6 +582,16 @@ static int boltffi_python_bind_symbols(void) {
     if (boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_supports_token_streaming == NULL) {
         boltffi_python_unload_library();
         PyErr_SetString(PyExc_ImportError, "failed to resolve native symbol " "boltffi_method_class_xybrid_bolt_xybrid_model_supports_token_streaming");
+        return 0;
+    }
+#ifdef _WIN32
+    boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_default_generation_config = (boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_default_generation_config_fn)GetProcAddress(boltffi_python_library_handle, "boltffi_method_class_xybrid_bolt_xybrid_model_default_generation_config");
+#else
+    boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_default_generation_config = (boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_default_generation_config_fn)dlsym(boltffi_python_library_handle, "boltffi_method_class_xybrid_bolt_xybrid_model_default_generation_config");
+#endif
+    if (boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_default_generation_config == NULL) {
+        boltffi_python_unload_library();
+        PyErr_SetString(PyExc_ImportError, "failed to resolve native symbol " "boltffi_method_class_xybrid_bolt_xybrid_model_default_generation_config");
         return 0;
     }
 #ifdef _WIN32
@@ -793,6 +822,16 @@ static int boltffi_python_bind_symbols(void) {
     if (boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_conversation_context_history_len == NULL) {
         boltffi_python_unload_library();
         PyErr_SetString(PyExc_ImportError, "failed to resolve native symbol " "boltffi_method_class_xybrid_bolt_xybrid_conversation_context_history_len");
+        return 0;
+    }
+#ifdef _WIN32
+    boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_conversation_context_history = (boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_conversation_context_history_fn)GetProcAddress(boltffi_python_library_handle, "boltffi_method_class_xybrid_bolt_xybrid_conversation_context_history");
+#else
+    boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_conversation_context_history = (boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_conversation_context_history_fn)dlsym(boltffi_python_library_handle, "boltffi_method_class_xybrid_bolt_xybrid_conversation_context_history");
+#endif
+    if (boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_conversation_context_history == NULL) {
+        boltffi_python_unload_library();
+        PyErr_SetString(PyExc_ImportError, "failed to resolve native symbol " "boltffi_method_class_xybrid_bolt_xybrid_conversation_context_history");
         return 0;
     }
 #ifdef _WIN32
@@ -1434,6 +1473,10 @@ static PyObject *boltffi_python_decode_read_29c0b1cb6cb65e99(const uint8_t *ptr,
     return boltffi_python_decode_wire_codec("read_29c0b1cb6cb65e99", ptr, len);
 }
 
+static PyObject *boltffi_python_decode_read_49d0adb26a1528e6(const uint8_t *ptr, uintptr_t len) {
+    return boltffi_python_decode_wire_codec("read_49d0adb26a1528e6", ptr, len);
+}
+
 static PyObject *boltffi_python_decode_read_bd1359a0ca4e78d7(const uint8_t *ptr, uintptr_t len) {
     return boltffi_python_decode_wire_codec("read_bd1359a0ca4e78d7", ptr, len);
 }
@@ -1448,6 +1491,10 @@ static PyObject *boltffi_python_decode_read_c9bb5dd3c2ec1b2a(const uint8_t *ptr,
 
 static PyObject *boltffi_python_decode_read_e9a0b9fd71f8c9ff(const uint8_t *ptr, uintptr_t len) {
     return boltffi_python_decode_wire_codec("read_e9a0b9fd71f8c9ff", ptr, len);
+}
+
+static PyObject *boltffi_python_decode_read_3cfe09c223256b1b(const uint8_t *ptr, uintptr_t len) {
+    return boltffi_python_decode_wire_codec("read_3cfe09c223256b1b", ptr, len);
 }
 
 static PyObject *boltffi_python_decode_read_9415281aa52df749(const uint8_t *ptr, uintptr_t len) {
@@ -1469,6 +1516,10 @@ static int boltffi_python_encode_write_766cdeb069dd2b0a(PyObject *value, PyObjec
 
 static int boltffi_python_encode_write_23c08924af812de7(PyObject *value, PyObject **out_wire, const uint8_t **out_ptr, uintptr_t *out_len) {
     return boltffi_python_encode_wire_codec("write_23c08924af812de7", value, out_wire, out_ptr, out_len);
+}
+
+static int boltffi_python_encode_write_8b5b57b4a65a4084(PyObject *value, PyObject **out_wire, const uint8_t **out_ptr, uintptr_t *out_len) {
+    return boltffi_python_encode_wire_codec("write_8b5b57b4a65a4084", value, out_wire, out_ptr, out_len);
 }
 
 static int boltffi_python_encode_write_8d84d7157f6e715c(PyObject *value, PyObject **out_wire, const uint8_t **out_ptr, uintptr_t *out_len) {
@@ -5082,6 +5133,48 @@ done:
     return result;
 }
 
+static PyObject *boltffi_python_callable_wrapper_boltffi_init_class_xybrid_bolt_xybrid_model_from_huggingface_with_revision(PyObject *self, PyObject *const *args, Py_ssize_t nargs) {
+    PyObject *repo_wire = NULL;
+    const uint8_t *repo_ptr = NULL;
+    uintptr_t repo_len = 0;
+    PyObject *revision_wire = NULL;
+    const uint8_t *revision_ptr = NULL;
+    uintptr_t revision_len = 0;
+    uint64_t return_success;
+    FfiBuf_u8 return_error = {0};
+    PyObject *error = NULL;
+    PyObject *result = NULL;
+    (void)self;
+    if (nargs != 2) {
+        PyErr_Format(PyExc_TypeError, "_boltffi_xybrid_model_from_huggingface_with_revision() takes 2 positional arguments but %zd were given", nargs);
+        goto done;
+    }
+    if (boltffi_python_boltffi_init_class_xybrid_bolt_xybrid_model_from_huggingface_with_revision == NULL) {
+        PyErr_SetString(PyExc_ImportError, "native library is not initialized");
+        goto done;
+    }
+    if (!boltffi_python_wire_string(args[0], &repo_wire, &repo_ptr, &repo_len)) {
+        goto done;
+    }
+    if (!boltffi_python_wire_string(args[1], &revision_wire, &revision_ptr, &revision_len)) {
+        goto done;
+    }
+    return_error = boltffi_python_boltffi_init_class_xybrid_bolt_xybrid_model_from_huggingface_with_revision(repo_ptr, repo_len, revision_ptr, revision_len, &return_success);
+    if (return_error.len != 0) {
+        error = boltffi_python_decode_owned_raw_wire(return_error);
+        if (error != NULL) {
+            PyErr_SetObject(PyExc_RuntimeError, error);
+        }
+        goto done;
+    }
+    result = boltffi_python_box_u64(return_success);
+done:
+    Py_XDECREF(repo_wire);
+    Py_XDECREF(revision_wire);
+    Py_XDECREF(error);
+    return result;
+}
+
 static PyObject *boltffi_python_callable_wrapper_boltffi_init_class_xybrid_bolt_xybrid_model_from_model_file(PyObject *self, PyObject *const *args, Py_ssize_t nargs) {
     PyObject *path_wire = NULL;
     const uint8_t *path_ptr = NULL;
@@ -5297,6 +5390,26 @@ static PyObject *boltffi_python_callable_wrapper_boltffi_method_class_xybrid_bol
         goto done;
     }
     result = boltffi_python_box_bool(boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_supports_token_streaming(receiver));
+done:
+    return result;
+}
+
+static PyObject *boltffi_python_callable_wrapper_boltffi_method_class_xybrid_bolt_xybrid_model_default_generation_config(PyObject *self, PyObject *const *args, Py_ssize_t nargs) {
+    uint64_t receiver;
+    PyObject *result = NULL;
+    (void)self;
+    if (nargs != 1) {
+        PyErr_Format(PyExc_TypeError, "_boltffi_xybrid_model_default_generation_config() takes 1 positional arguments but %zd were given", nargs);
+        goto done;
+    }
+    if (boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_default_generation_config == NULL) {
+        PyErr_SetString(PyExc_ImportError, "native library is not initialized");
+        goto done;
+    }
+    if (!boltffi_python_parse_u64(args[0], &receiver)) {
+        goto done;
+    }
+    result = boltffi_python_decode_owned_raw_wire(boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_default_generation_config(receiver));
 done:
     return result;
 }
@@ -5975,6 +6088,26 @@ static PyObject *boltffi_python_callable_wrapper_boltffi_method_class_xybrid_bol
         goto done;
     }
     result = boltffi_python_box_u32(boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_conversation_context_history_len(receiver));
+done:
+    return result;
+}
+
+static PyObject *boltffi_python_callable_wrapper_boltffi_method_class_xybrid_bolt_xybrid_conversation_context_history(PyObject *self, PyObject *const *args, Py_ssize_t nargs) {
+    uint64_t receiver;
+    PyObject *result = NULL;
+    (void)self;
+    if (nargs != 1) {
+        PyErr_Format(PyExc_TypeError, "_boltffi_xybrid_conversation_context_history() takes 1 positional arguments but %zd were given", nargs);
+        goto done;
+    }
+    if (boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_conversation_context_history == NULL) {
+        PyErr_SetString(PyExc_ImportError, "native library is not initialized");
+        goto done;
+    }
+    if (!boltffi_python_parse_u64(args[0], &receiver)) {
+        goto done;
+    }
+    result = boltffi_python_decode_owned_raw_wire(boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_conversation_context_history(receiver));
 done:
     return result;
 }
@@ -7143,6 +7276,7 @@ static PyMethodDef boltffi_python_methods[] = {
     {"_boltffi_xybrid_model_from_directory", (PyCFunction)boltffi_python_callable_wrapper_boltffi_init_class_xybrid_bolt_xybrid_model_from_directory, METH_FASTCALL, NULL},
     {"_boltffi_xybrid_model_from_bundle", (PyCFunction)boltffi_python_callable_wrapper_boltffi_init_class_xybrid_bolt_xybrid_model_from_bundle, METH_FASTCALL, NULL},
     {"_boltffi_xybrid_model_from_huggingface", (PyCFunction)boltffi_python_callable_wrapper_boltffi_init_class_xybrid_bolt_xybrid_model_from_huggingface, METH_FASTCALL, NULL},
+    {"_boltffi_xybrid_model_from_huggingface_with_revision", (PyCFunction)boltffi_python_callable_wrapper_boltffi_init_class_xybrid_bolt_xybrid_model_from_huggingface_with_revision, METH_FASTCALL, NULL},
     {"_boltffi_xybrid_model_from_model_file", (PyCFunction)boltffi_python_callable_wrapper_boltffi_init_class_xybrid_bolt_xybrid_model_from_model_file, METH_FASTCALL, NULL},
     {"_boltffi_xybrid_model_model_id", (PyCFunction)boltffi_python_callable_wrapper_boltffi_method_class_xybrid_bolt_xybrid_model_model_id, METH_FASTCALL, NULL},
     {"_boltffi_xybrid_model_version", (PyCFunction)boltffi_python_callable_wrapper_boltffi_method_class_xybrid_bolt_xybrid_model_version, METH_FASTCALL, NULL},
@@ -7153,6 +7287,7 @@ static PyMethodDef boltffi_python_methods[] = {
     {"_boltffi_xybrid_model_await_download", (PyCFunction)boltffi_python_callable_wrapper_boltffi_method_class_xybrid_bolt_xybrid_model_await_download, METH_FASTCALL, NULL},
     {"_boltffi_xybrid_model_supports_streaming", (PyCFunction)boltffi_python_callable_wrapper_boltffi_method_class_xybrid_bolt_xybrid_model_supports_streaming, METH_FASTCALL, NULL},
     {"_boltffi_xybrid_model_supports_token_streaming", (PyCFunction)boltffi_python_callable_wrapper_boltffi_method_class_xybrid_bolt_xybrid_model_supports_token_streaming, METH_FASTCALL, NULL},
+    {"_boltffi_xybrid_model_default_generation_config", (PyCFunction)boltffi_python_callable_wrapper_boltffi_method_class_xybrid_bolt_xybrid_model_default_generation_config, METH_FASTCALL, NULL},
     {"_boltffi_xybrid_model_is_llm", (PyCFunction)boltffi_python_callable_wrapper_boltffi_method_class_xybrid_bolt_xybrid_model_is_llm, METH_FASTCALL, NULL},
     {"_boltffi_xybrid_model_supports_tool_calling", (PyCFunction)boltffi_python_callable_wrapper_boltffi_method_class_xybrid_bolt_xybrid_model_supports_tool_calling, METH_FASTCALL, NULL},
     {"_boltffi_xybrid_model_has_voices", (PyCFunction)boltffi_python_callable_wrapper_boltffi_method_class_xybrid_bolt_xybrid_model_has_voices, METH_FASTCALL, NULL},
@@ -7176,6 +7311,7 @@ static PyMethodDef boltffi_python_methods[] = {
     {"_boltffi_xybrid_conversation_context_clear", (PyCFunction)boltffi_python_callable_wrapper_boltffi_method_class_xybrid_bolt_xybrid_conversation_context_clear, METH_FASTCALL, NULL},
     {"_boltffi_xybrid_conversation_context_id", (PyCFunction)boltffi_python_callable_wrapper_boltffi_method_class_xybrid_bolt_xybrid_conversation_context_id, METH_FASTCALL, NULL},
     {"_boltffi_xybrid_conversation_context_history_len", (PyCFunction)boltffi_python_callable_wrapper_boltffi_method_class_xybrid_bolt_xybrid_conversation_context_history_len, METH_FASTCALL, NULL},
+    {"_boltffi_xybrid_conversation_context_history", (PyCFunction)boltffi_python_callable_wrapper_boltffi_method_class_xybrid_bolt_xybrid_conversation_context_history, METH_FASTCALL, NULL},
     {"_boltffi_xybrid_conversation_context_has_system", (PyCFunction)boltffi_python_callable_wrapper_boltffi_method_class_xybrid_bolt_xybrid_conversation_context_has_system, METH_FASTCALL, NULL},
     {"_boltffi_xybrid_conversation_context_set_max_history_len", (PyCFunction)boltffi_python_callable_wrapper_boltffi_method_class_xybrid_bolt_xybrid_conversation_context_set_max_history_len, METH_FASTCALL, NULL},
     {"_boltffi_xybrid_telemetry_config_release", (PyCFunction)boltffi_python_callable_wrapper_boltffi_release_class_xybrid_bolt_xybrid_telemetry_config, METH_FASTCALL, NULL},

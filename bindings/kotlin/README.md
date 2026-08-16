@@ -126,8 +126,6 @@ answer text and surfaces it on `reasoningContent` — `null` for non-thinking
 models. Nothing to enable; just read it if you want it.
 
 ```kotlin
-import ai.xybrid.reasoningContent
-
 val result = model.run(Envelope.text("Is 97 a prime number? Reason, then answer."))
 result.text?.let { println("Answer: $it") }
 result.reasoningContent?.let { println("Reasoning: $it") }

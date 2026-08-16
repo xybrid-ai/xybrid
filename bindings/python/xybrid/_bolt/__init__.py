@@ -226,6 +226,9 @@ class _BoltFfiWireReader:
         if self._offset != len(self._data):
             raise ValueError("trailing BoltFFI wire bytes")
 
+    def has_remaining(self) -> bool:
+        return self._offset < len(self._data)
+
     def read(self, count: int) -> bytes:
         offset = self._offset
         end = offset + count
@@ -408,6 +411,13 @@ def _boltffi_read_29c0b1cb6cb65e99(data: bytes):
 _native._register_wire_codec("read_29c0b1cb6cb65e99", _boltffi_read_29c0b1cb6cb65e99)
 
 
+def _boltffi_read_49d0adb26a1528e6(data: bytes):
+    return _boltffi_read_wire(data, lambda reader: XybridGenerationConfig._boltffi_from_reader(reader))
+
+
+_native._register_wire_codec("read_49d0adb26a1528e6", _boltffi_read_49d0adb26a1528e6)
+
+
 def _boltffi_read_bd1359a0ca4e78d7(data: bytes):
     return _boltffi_read_wire(data, lambda reader: reader.sequence(lambda: XybridVoiceInfo._boltffi_from_reader(reader)))
 
@@ -434,6 +444,13 @@ def _boltffi_read_e9a0b9fd71f8c9ff(data: bytes):
 
 
 _native._register_wire_codec("read_e9a0b9fd71f8c9ff", _boltffi_read_e9a0b9fd71f8c9ff)
+
+
+def _boltffi_read_3cfe09c223256b1b(data: bytes):
+    return _boltffi_read_wire(data, lambda reader: reader.sequence(lambda: XybridEnvelope._boltffi_from_reader(reader)))
+
+
+_native._register_wire_codec("read_3cfe09c223256b1b", _boltffi_read_3cfe09c223256b1b)
 
 
 def _boltffi_read_9415281aa52df749(data: bytes):
@@ -470,6 +487,13 @@ def _boltffi_write_23c08924af812de7(repo) -> bytes:
 
 
 _native._register_wire_codec("write_23c08924af812de7", _boltffi_write_23c08924af812de7)
+
+
+def _boltffi_write_8b5b57b4a65a4084(revision) -> bytes:
+    return _boltffi_wire_string(revision)
+
+
+_native._register_wire_codec("write_8b5b57b4a65a4084", _boltffi_write_8b5b57b4a65a4084)
 
 
 def _boltffi_write_8d84d7157f6e715c(voice_id) -> bytes:
@@ -987,6 +1011,7 @@ class XybridResult:
     execution_target: XybridExecutionTarget
     metrics: XybridInferenceMetrics
     tool_calls: list[XybridToolCall]
+    reasoning_content: str | None = None
 
     def _boltffi_wire(self) -> bytes:
         return b"".join((
@@ -997,6 +1022,7 @@ class XybridResult:
             _boltffi_wire_i32(_boltffi_enum_value(self.execution_target, XybridExecutionTarget, "XybridExecutionTarget")),
             self.metrics._boltffi_wire(),
             _boltffi_wire_sequence(self.tool_calls, len(self.tool_calls), lambda __boltffi_value_0: __boltffi_value_0._boltffi_wire()),
+            _boltffi_wire_optional(self.reasoning_content, lambda __boltffi_value_0: _boltffi_wire_string(__boltffi_value_0)),
         ))
 
     @classmethod
@@ -1011,14 +1037,30 @@ class XybridResult:
 
     @classmethod
     def _boltffi_from_reader(cls, reader: "_BoltFfiWireReader") -> "XybridResult":
+        envelope = XybridEnvelope._boltffi_from_reader(reader)
+        output_type = XybridOutputType(reader.i32())
+        model_id = reader.string()
+        latency_ms = reader.u32()
+        execution_target = XybridExecutionTarget(reader.i32())
+        metrics = XybridInferenceMetrics._boltffi_from_reader(reader)
+        tool_calls = reader.sequence(lambda: XybridToolCall._boltffi_from_reader(reader))
+        reasoning_content = (
+            reader.optional(lambda: reader.string())
+            if reader.has_remaining()
+            else next(
+                (entry.value for entry in envelope.metadata if entry.key == "reasoning_content"),
+                None,
+            )
+        )
         return cls(
-            envelope=XybridEnvelope._boltffi_from_reader(reader),
-            output_type=XybridOutputType(reader.i32()),
-            model_id=reader.string(),
-            latency_ms=reader.u32(),
-            execution_target=XybridExecutionTarget(reader.i32()),
-            metrics=XybridInferenceMetrics._boltffi_from_reader(reader),
-            tool_calls=reader.sequence(lambda: XybridToolCall._boltffi_from_reader(reader)),
+            envelope=envelope,
+            output_type=output_type,
+            model_id=model_id,
+            latency_ms=latency_ms,
+            execution_target=execution_target,
+            metrics=metrics,
+            tool_calls=tool_calls,
+            reasoning_content=reasoning_content,
         )
 
 
@@ -1820,6 +1862,10 @@ class XybridModel:
         return XybridModel._from_handle(_boltffi_call(_boltffi_read_fe83cddcf3822a1d, lambda: _native._boltffi_xybrid_model_from_huggingface(repo)))
 
     @classmethod
+    def from_huggingface_with_revision(cls, repo: str, revision: str) -> "XybridModel":
+        return XybridModel._from_handle(_boltffi_call(_boltffi_read_fe83cddcf3822a1d, lambda: _native._boltffi_xybrid_model_from_huggingface_with_revision(repo, revision)))
+
+    @classmethod
     def from_model_file(cls, path: str) -> "XybridModel":
         return XybridModel._from_handle(_boltffi_call(_boltffi_read_fe83cddcf3822a1d, lambda: _native._boltffi_xybrid_model_from_model_file(path)))
 
@@ -1849,6 +1895,9 @@ class XybridModel:
 
     def supports_token_streaming(self) -> bool:
         return _native._boltffi_xybrid_model_supports_token_streaming(self._handle)
+
+    def default_generation_config(self) -> XybridGenerationConfig:
+        return _boltffi_read_wire(_native._boltffi_xybrid_model_default_generation_config(self._handle), lambda reader: XybridGenerationConfig._boltffi_from_reader(reader))
 
     def is_llm(self) -> bool:
         return _native._boltffi_xybrid_model_is_llm(self._handle)
@@ -1937,6 +1986,9 @@ class XybridConversationContext:
 
     def history_len(self) -> int:
         return _native._boltffi_xybrid_conversation_context_history_len(self._handle)
+
+    def history(self) -> list[XybridEnvelope]:
+        return _boltffi_read_wire(_native._boltffi_xybrid_conversation_context_history(self._handle), lambda reader: reader.sequence(lambda: XybridEnvelope._boltffi_from_reader(reader)))
 
     def has_system(self) -> bool:
         return _native._boltffi_xybrid_conversation_context_has_system(self._handle)

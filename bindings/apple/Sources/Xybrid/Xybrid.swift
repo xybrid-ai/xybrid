@@ -556,16 +556,6 @@ public extension XybridResult {
         return nil
     }
 
-    /// The model's chain-of-thought / reasoning text (LLM `<think>` blocks),
-    /// surfaced separately from `text`, which always excludes it. `nil` when
-    /// the model emitted no reasoning or the backend doesn't surface one.
-    ///
-    /// Carried on the envelope's `reasoning_content` metadata rather than the
-    /// payload `kind`, so it reads from `metadata` rather than the enum.
-    var reasoningContent: String? {
-        envelope.metadata.first { $0.key == "reasoning_content" }?.value
-    }
-
     /// Audio bytes, if the result is `.audio`. `nil` otherwise.
     ///
     /// Returns `Data` (not `[UInt8]`) because that's what BoltFFI emits

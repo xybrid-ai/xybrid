@@ -322,9 +322,12 @@ public struct XybridResult: Hashable, Equatable, Sendable {
     public var executionTarget: XybridExecutionTarget
     public var metrics: XybridInferenceMetrics
     /// Tool calls the model emitted this turn. Empty unless the request
-    /// offered tools via [`XybridGenerationConfig::tools`]. Appended last:
+    /// offered tools via [`XybridGenerationConfig::tools`].
     /// `#[data]` PODs serialize by field order across the FFI boundary.
     public var toolCalls: [XybridToolCall]
+    /// Model reasoning emitted separately from the final answer text.
+    /// Appended last because `#[data]` fields serialize in declaration order.
+    public var reasoningContent: String?
 
     public init(
         envelope: XybridEnvelope,
@@ -333,7 +336,8 @@ public struct XybridResult: Hashable, Equatable, Sendable {
         latencyMs: UInt32,
         executionTarget: XybridExecutionTarget,
         metrics: XybridInferenceMetrics,
-        toolCalls: [XybridToolCall]
+        toolCalls: [XybridToolCall],
+        reasoningContent: String? = nil
     ) {
         self.envelope = envelope
         self.outputType = outputType
@@ -342,17 +346,29 @@ public struct XybridResult: Hashable, Equatable, Sendable {
         self.executionTarget = executionTarget
         self.metrics = metrics
         self.toolCalls = toolCalls
+        self.reasoningContent = reasoningContent
     }
 
     @inlinable static func decode(from reader: inout WireReader) -> XybridResult {
-        XybridResult(
-            envelope: XybridEnvelope.decode(from: &reader),
-            outputType: XybridOutputType(rawValue: reader.readI32())!,
-            modelId: reader.readString(),
-            latencyMs: reader.readU32(),
-            executionTarget: XybridExecutionTarget(rawValue: reader.readI32())!,
-            metrics: XybridInferenceMetrics.decode(from: &reader),
-            toolCalls: reader.readArray { reader in XybridToolCall.decode(from: &reader) }
+        let envelope = XybridEnvelope.decode(from: &reader)
+        let outputType = XybridOutputType(rawValue: reader.readI32())!
+        let modelId = reader.readString()
+        let latencyMs = reader.readU32()
+        let executionTarget = XybridExecutionTarget(rawValue: reader.readI32())!
+        let metrics = XybridInferenceMetrics.decode(from: &reader)
+        let toolCalls = reader.readArray { reader in XybridToolCall.decode(from: &reader) }
+        let reasoningContent = reader.position < reader.data.count
+            ? reader.readOptional { reader in reader.readString() }
+            : envelope.metadata.first { $0.key == "reasoning_content" }?.value
+        return XybridResult(
+            envelope: envelope,
+            outputType: outputType,
+            modelId: modelId,
+            latencyMs: latencyMs,
+            executionTarget: executionTarget,
+            metrics: metrics,
+            toolCalls: toolCalls,
+            reasoningContent: reasoningContent
         )
     }
 
@@ -364,6 +380,7 @@ public struct XybridResult: Hashable, Equatable, Sendable {
         writer.writeI32(self.executionTarget.rawValue)
         self.metrics.encode(to: &writer)
         writer.writeArray(self.toolCalls) { writer, boltffiValue0 in boltffiValue0.encode(to: &writer) }
+        writer.writeOptional(self.reasoningContent) { writer, boltffiValue0 in writer.writeString(boltffiValue0) }
     }
 }
 
@@ -897,6 +914,30 @@ public final class XybridModel {
         self.handle = boltffiHandle
     }
 
+    /// Resolve and load a HuggingFace repository pinned to a revision.
+    public init(fromHuggingfaceWithRevision repo: String, revision: String) throws {
+        let boltffiRepoBytes = boltffiEncode { boltffiRepoWriter in boltffiRepoWriter.writeString(repo) }
+        let boltffiHandle = try boltffiRepoBytes.withUnsafeBufferPointer { boltffiRepoBuffer in
+            let boltffiRevisionBytes = boltffiEncode { boltffiRevisionWriter in boltffiRevisionWriter.writeString(revision) }
+            return try boltffiRevisionBytes.withUnsafeBufferPointer { boltffiRevisionBuffer in
+                var boltffiResult: UInt64 = UInt64()
+                let boltffiError = boltffi_init_class_xybrid_bolt_xybrid_model_from_huggingface_with_revision(
+                    boltffiRepoBuffer.baseAddress!,
+                    UInt(boltffiRepoBuffer.count),
+                    boltffiRevisionBuffer.baseAddress!,
+                    UInt(boltffiRevisionBuffer.count),
+                    &boltffiResult
+                )
+                if boltffiError.ptr != nil || Int(boltffiError.len) != 0 {
+                    defer { boltffi_free_buf(boltffiError) }
+                    throw boltffiDecodeOwnedBuf(boltffiError.ptr, Int(boltffiError.len)) { boltffiErrorReader in XybridError.decode(from: &boltffiErrorReader) }
+                }
+                return boltffiResult
+            }
+        }
+        self.handle = boltffiHandle
+    }
+
     /// Load from a raw GGUF file, auto-generating `model_metadata.json` from the
     /// GGUF header (written next to the file if absent).
     public init(fromModelFile path: String) throws {
@@ -964,6 +1005,13 @@ public final class XybridModel {
     /// Whether this model emits true token-by-token output.
     public func supportsTokenStreaming() -> Bool {
         return boltffi_method_class_xybrid_bolt_xybrid_model_supports_token_streaming(self.handle)
+    }
+
+    /// Return the model's resolved generation defaults.
+    public func defaultGenerationConfig() -> XybridGenerationConfig {
+        let boltffiResult = boltffi_method_class_xybrid_bolt_xybrid_model_default_generation_config(self.handle)
+        defer { boltffi_free_buf(boltffiResult) }
+        return boltffiDecodeOwnedBuf(boltffiResult.ptr, Int(boltffiResult.len)) { boltffiReader in XybridGenerationConfig.decode(from: &boltffiReader) }
     }
 
     public func isLlm() -> Bool {
@@ -1231,6 +1279,13 @@ public final class XybridConversationContext {
     /// Number of history turns (excludes the system envelope).
     public func historyLen() -> UInt32 {
         return boltffi_method_class_xybrid_bolt_xybrid_conversation_context_history_len(self.handle)
+    }
+
+    /// Return history turns, excluding the persistent system envelope.
+    public func history() -> [XybridEnvelope] {
+        let boltffiResult = boltffi_method_class_xybrid_bolt_xybrid_conversation_context_history(self.handle)
+        defer { boltffi_free_buf(boltffiResult) }
+        return boltffiDecodeOwnedBuf(boltffiResult.ptr, Int(boltffiResult.len)) { boltffiReader in boltffiReader.readArray { boltffiReader in XybridEnvelope.decode(from: &boltffiReader) } }
     }
 
     /// Whether a persistent system-prompt envelope is set.

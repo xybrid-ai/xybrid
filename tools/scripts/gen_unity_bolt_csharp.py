@@ -48,6 +48,8 @@ What it does:
         entry point passes an owned FfiBuf into Rust today, so the body throws
         NotSupportedException; the correct fix if a call site is ever added is
         a Rust-side allocator (e.g. boltffi_alloc_buf).
+     g. Probes before decoding the append-only `XybridResult` reasoning tail,
+        preserving compatibility with the merged tool-calling wire shape.
   3. Writes deterministic Unity .meta files (GUID = sha256(asset path)[:32],
      the same scheme as stage_unity_desktop_ort.py).
   4. Syncs the result into bindings/unity/Runtime/Bolt, pruning stale files.
@@ -137,6 +139,74 @@ CONTEXT_PARTIAL_TARGET = (
 CONTEXT_PARTIAL_REPLACEMENT = (
     "public sealed partial class XybridConversationContext : global::System.IDisposable"
 )
+
+RESULT_FILE = "XybridResult.cs"
+RESULT_REASONING_TARGET = "string? ReasoningContent) {"
+RESULT_REASONING_REPLACEMENT = "string? ReasoningContent = null) {"
+
+READER_REMAINING_TARGET = (
+    "        internal WireReader(nint pointer, nuint length)\n"
+    "        {\n"
+    "            this.pointer = pointer;\n"
+    "            this.length = pointer == 0 ? 0 : checked((int)length);\n"
+    "        }\n\n"
+    "        internal bool ReadBool() => ReadU8() != 0;"
+)
+READER_REMAINING_REPLACEMENT = (
+    "        internal WireReader(nint pointer, nuint length)\n"
+    "        {\n"
+    "            this.pointer = pointer;\n"
+    "            this.length = pointer == 0 ? 0 : checked((int)length);\n"
+    "        }\n\n"
+    "        internal bool HasRemaining => position < length;\n\n"
+    "        internal bool ReadBool() => ReadU8() != 0;"
+)
+
+RESULT_DECODER_TARGET = """        internal static XybridResult Decode(WireReader reader) =>
+            new XybridResult(
+                XybridEnvelope.Decode(reader),
+                (XybridOutputType)reader.ReadI32(),
+                reader.ReadString(),
+                reader.ReadU32(),
+                (XybridExecutionTarget)reader.ReadI32(),
+                XybridInferenceMetrics.Decode(reader),
+                reader.ReadArray(reader => XybridToolCall.Decode(reader)),
+                reader.ReadU8() == 0 ? default(string?) : reader.ReadString()
+            );
+"""
+RESULT_DECODER_REPLACEMENT = """        internal static XybridResult Decode(WireReader reader)
+        {
+            XybridEnvelope envelope = XybridEnvelope.Decode(reader);
+            XybridOutputType outputType = (XybridOutputType)reader.ReadI32();
+            string modelId = reader.ReadString();
+            uint latencyMs = reader.ReadU32();
+            XybridExecutionTarget executionTarget = (XybridExecutionTarget)reader.ReadI32();
+            XybridInferenceMetrics metrics = XybridInferenceMetrics.Decode(reader);
+            XybridToolCall[] toolCalls = reader.ReadArray(reader => XybridToolCall.Decode(reader));
+            string? reasoningContent = reader.HasRemaining
+                ? reader.ReadU8() == 0 ? default(string?) : reader.ReadString()
+                : ReasoningFromMetadata(envelope);
+            return new XybridResult(
+                envelope,
+                outputType,
+                modelId,
+                latencyMs,
+                executionTarget,
+                metrics,
+                toolCalls,
+                reasoningContent
+            );
+        }
+
+        private static string? ReasoningFromMetadata(XybridEnvelope envelope)
+        {
+            foreach (XybridMetadataEntry entry in envelope.Metadata)
+            {
+                if (entry.Key == "reasoning_content") return entry.Value;
+            }
+            return null;
+        }
+"""
 
 # --- Transform (e): keep the managed model alive across blocking StreamNext.
 # Anchored on the 0.29 body, which returns the error and result buffers through
@@ -332,6 +402,9 @@ def generate() -> dict[str, str]:
     guid_fenced = False
     model_made_partial = False
     context_made_partial = False
+    result_defaulted = False
+    reader_remaining_added = False
+    result_compatibility_added = False
     stream_next_kept_alive = False
     for src in sources:
         content = src.read_text(encoding="utf-8")
@@ -358,6 +431,14 @@ def generate() -> dict[str, str]:
             )
             content = content.replace(BOLT_CLASS_TARGET, BOLT_CLASS_REPLACEMENT, 1)
             bolt_class_renamed = True
+            _drift(
+                content.count(READER_REMAINING_TARGET) == 1,
+                f"expected WireReader constructor in {src.name}",
+            )
+            content = content.replace(
+                READER_REMAINING_TARGET, READER_REMAINING_REPLACEMENT, 1
+            )
+            reader_remaining_added = True
         if src.name == MODEL_FILE:
             _drift(
                 MODEL_PARTIAL_TARGET in content,
@@ -384,6 +465,23 @@ def generate() -> dict[str, str]:
                 CONTEXT_PARTIAL_TARGET, CONTEXT_PARTIAL_REPLACEMENT, 1
             )
             context_made_partial = True
+        if src.name == RESULT_FILE:
+            _drift(
+                content.count(RESULT_REASONING_TARGET) == 1,
+                f"expected XybridResult reasoning constructor in {src.name}",
+            )
+            content = content.replace(
+                RESULT_REASONING_TARGET, RESULT_REASONING_REPLACEMENT, 1
+            )
+            result_defaulted = True
+            _drift(
+                content.count(RESULT_DECODER_TARGET) == 1,
+                f"expected XybridResult decoder in {src.name}",
+            )
+            content = content.replace(
+                RESULT_DECODER_TARGET, RESULT_DECODER_REPLACEMENT, 1
+            )
+            result_compatibility_added = True
         out_name = BOLT_CLASS_DEST if src.name == BOLT_CLASS_FILE else src.name
         tree[out_name] = content
         tree[out_name + ".meta"] = script_meta(f"{DEST_REL}/{out_name}")
@@ -403,6 +501,7 @@ def generate() -> dict[str, str]:
         f"{EXPECTED_UNSAFE_SIZEOF}",
     )
     _drift(bolt_class_renamed, f"{BOLT_CLASS_FILE} not found in boltffi output")
+    _drift(reader_remaining_added, f"WireReader not found in {BOLT_CLASS_FILE}")
     _drift(guid_fenced, "Guid codec bodies not found in boltffi output")
     _drift(
         text_variant_fixed, f"{ENVELOPE_KIND_FILE} not found in boltffi output"
@@ -410,6 +509,8 @@ def generate() -> dict[str, str]:
     _drift(model_made_partial, f"{MODEL_FILE} not found in boltffi output")
     _drift(stream_next_kept_alive, f"StreamNext not found in {MODEL_FILE}")
     _drift(context_made_partial, f"{CONTEXT_FILE} not found in boltffi output")
+    _drift(result_defaulted, f"{RESULT_FILE} not found in boltffi output")
+    _drift(result_compatibility_added, f"decoder not found in {RESULT_FILE}")
     return tree
 
 
