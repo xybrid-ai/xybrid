@@ -41,6 +41,10 @@ def _result(envelope: xybrid.XybridEnvelope, output_type: xybrid.XybridOutputTyp
         latency_ms=latency_ms,
         execution_target=xybrid.XybridExecutionTarget.LOCAL,
         metrics=_metrics(latency_ms),
+        reasoning_content=next(
+            (entry.value for entry in envelope.metadata if entry.key == "reasoning_content"),
+            None,
+        ),
         tool_calls=[],
     )
 
@@ -124,6 +128,20 @@ def test_result_conveniences_on_synthetic_result() -> None:
     assert isinstance(xybrid.XybridVoiceInfo.is_female, property)
 
 
+def test_result_reasoning_field_defaults_to_none() -> None:
+    result = xybrid.XybridResult(
+        envelope=xybrid.XybridEnvelope.text("answer"),
+        output_type=xybrid.XybridOutputType.TEXT,
+        model_id="model",
+        latency_ms=1,
+        execution_target=xybrid.XybridExecutionTarget.LOCAL,
+        metrics=_metrics(1),
+        tool_calls=[],
+    )
+
+    assert result.reasoning_content is None
+
+
 def test_voice_gender_helpers() -> None:
     female = xybrid.XybridVoiceInfo(id="af_heart", name="Heart", gender="female", language="en", style=None)
     male = xybrid.XybridVoiceInfo(id="am_adam", name="Adam", gender="male", language="en", style=None)
@@ -144,6 +162,7 @@ def test_voice_gender_helpers() -> None:
         "is_cloud_serving",
         "supports_streaming",
         "supports_token_streaming",
+        "supports_tool_calling",
         "is_llm",
         "has_voices",
     ],

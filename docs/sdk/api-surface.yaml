@@ -61,7 +61,7 @@ classes:
           - { name: yaml, type: "String?" }
           - { name: filePath, type: "String?" }
         return: XybridPipelineRef
-        status: { rust: implemented, dart: implemented, kotlin: planned, swift: planned, csharp: planned }
+        status: { dart: implemented, kotlin: planned, swift: planned, csharp: planned }
       isModelCached:
         params: [{ name: modelId, type: String }]
         return: bool
@@ -78,17 +78,17 @@ classes:
         static: true
         params: [{ name: modelId, type: String }]
         return: XybridModelLoader
-        status: { rust: implemented, dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
       fromBundle:
         static: true
         params: [{ name: path, type: String }]
         return: XybridModelLoader
-        status: { rust: implemented, dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
       fromDirectory:
         static: true
         params: [{ name: path, type: String }]
         return: XybridModelLoader
-        status: { rust: implemented, dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
       fromModelFile:
         static: true
         params: [{ name: filePath, type: String }]
@@ -100,16 +100,24 @@ classes:
         params: [{ name: repo, type: String }]
         return: XybridModelLoader
         notes: "Requires huggingface feature flag. Downloads and caches model files from HuggingFace Hub."
-        status: { rust: implemented, dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+      fromHuggingfaceWithRevision:
+        static: true
+        params:
+          - { name: repo, type: String }
+          - { name: revision, type: String }
+        return: XybridModel
+        notes: "Pins the load to the commit resolved from a branch, tag, or SHA. The Bolt languages expose this as a synchronous XybridModel constructor; call it off the UI thread."
+        status: { dart: planned, kotlin: implemented, swift: implemented, csharp: implemented }
       withBackend:
         params: [{ name: backend, type: BackendChoice }]
         return: XybridModelLoader
         notes: "Pins local generation or embedding execution by stamping ModelMetadata.backend at load time. Omit the call for automatic selection. Dart exposes it as the optional backend: named argument on load()/loadWithProgress() (the literal name withBackend is Rust-only, so the source checker flags dart as a false positive). Kotlin/Swift exposure existed on the retired UniFFI loader and still needs re-plumbing through xybrid-ffi-facade/bolt."
-        status: { rust: implemented, dart: implemented, kotlin: planned, swift: planned, csharp: planned }
+        status: { dart: implemented, kotlin: planned, swift: planned, csharp: planned }
       load:
         async: true
         return: XybridModel
-        status: { rust: implemented, dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
       loadWithProgress:
         return: "Stream<LoadEvent>"
         status: { dart: implemented, kotlin: planned, swift: planned, csharp: planned }
@@ -136,28 +144,32 @@ classes:
     properties:
       modelId:
         type: String
-        status: { rust: implemented, dart: planned, kotlin: planned, swift: planned, csharp: implemented }
+        status: { dart: planned, kotlin: planned, swift: planned, csharp: implemented }
       voices:
         type: "List<VoiceInfo>?"
-        status: { rust: implemented, dart: planned, kotlin: implemented, swift: implemented, csharp: implemented }
+        status: { dart: planned, kotlin: implemented, swift: implemented, csharp: implemented }
       defaultVoice:
         type: "VoiceInfo?"
-        status: { rust: implemented, dart: planned, kotlin: partial, swift: partial, csharp: implemented }
+        status: { dart: planned, kotlin: partial, swift: partial, csharp: implemented }
       hasVoices:
         type: bool
-        status: { rust: implemented, dart: planned, kotlin: implemented, swift: implemented, csharp: implemented }
+        status: { dart: planned, kotlin: implemented, swift: implemented, csharp: implemented }
+      defaultGenerationConfig:
+        type: GenerationConfig
+        notes: "Resolved model defaults, including template generation parameters and the reasoning-token floor."
+        status: { dart: planned, kotlin: implemented, swift: implemented, csharp: implemented }
     methods:
       voice:
         params: [{ name: voiceId, type: String }]
         return: "VoiceInfo?"
-        status: { rust: implemented, dart: planned, kotlin: implemented, swift: implemented, csharp: implemented }
+        status: { dart: planned, kotlin: implemented, swift: implemented, csharp: implemented }
       run:
         async: true
         params:
           - { name: envelope, type: Envelope }
           - { name: config, type: "GenerationConfig?", default: "null" }
         return: XybridResult
-        status: { rust: implemented, dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
       runWithOptions:
         async: true
         params:
@@ -172,7 +184,7 @@ classes:
           - { name: context, type: ConversationContext }
           - { name: config, type: "GenerationConfig?", default: "null" }
         return: XybridResult
-        status: { rust: implemented, dart: implemented, kotlin: planned, swift: planned, csharp: implemented }
+        status: { dart: implemented, kotlin: planned, swift: planned, csharp: implemented }
       runWithContextOptions:
         async: true
         params:
@@ -187,7 +199,7 @@ classes:
           - { name: config, type: "GenerationConfig?" }
         return: "Stream<StreamToken>"
         notes: "Dart accepts two extra optional named params beyond the contract shape: cancellationToken (issue 10) and preempt (issue 11). preempt defaults to false (drop-if-busy / serialized — the existing behavior). When preempt=true AND a cancellationToken is supplied, the run cancels the model's previously in-flight streaming run before acquiring the model write lock (latest-frame-wins), so a continuous live-capture loop can flip from drop-if-busy to cancel-and-replace without head-of-line blocking. preempt with no token is a no-op. Threaded Dart→FFI→SDK (run_streaming_with_options_preempt); the cancel-and-replace slot is a separate mutex on the model, never held across the handle write lock."
-        status: { rust: implemented, dart: implemented, kotlin: planned, swift: planned, csharp: implemented }
+        status: { dart: implemented, kotlin: planned, swift: planned, csharp: implemented }
       runStreamingWithOptions:
         params:
           - { name: envelope, type: Envelope }
@@ -215,7 +227,7 @@ classes:
           - { name: config, type: "GenerationConfig?" }
         return: "Stream<StreamToken>"
         notes: "Dart accepts the same two extra optional named params as runStreaming: cancellationToken (issue 10) and preempt (issue 11, default false). preempt=true + a cancellationToken makes this run cancel the model's previously in-flight streaming run before taking the write lock (latest-frame-wins). See runStreaming notes for the full cancel-and-replace contract."
-        status: { rust: implemented, dart: implemented, kotlin: planned, swift: planned, csharp: implemented }
+        status: { dart: implemented, kotlin: planned, swift: planned, csharp: implemented }
       runStreamingWithContextOptions:
         params:
           - { name: envelope, type: Envelope }
@@ -226,7 +238,7 @@ classes:
       supportsTokenStreaming:
         return: bool
         notes: "Returns true for token-streaming LLM backends such as GGUF and runtime-available MLX SafeTensors; returns false for batch-only models and non-linking MLX builds."
-        status: { rust: implemented, dart: implemented, kotlin: planned, swift: planned, csharp: implemented }
+        status: { dart: implemented, kotlin: planned, swift: planned, csharp: implemented }
       benchmark:
         async: true
         status: { dart: implemented, kotlin: planned, swift: planned, csharp: planned }
@@ -240,6 +252,13 @@ classes:
         return: bool
         # True while the cloud answers because the local weights are not ready.
         status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+      supportsToolCalling:
+        return: "bool?"
+        # Advisory tri-state read off the bundle's tool_calling metadata flag:
+        # null means the bundle says nothing. Gate tool UI on it; enforcement
+        # is independent, at run time — a tools-bearing request against a model
+        # whose chat template has no tool support fails either way.
+        status: { rust: implemented, dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
       downloadStatus:
         return: DownloadStatus
         # Download state + progress in one consistent read; poll to drive a bar.
@@ -438,6 +457,10 @@ classes:
       modelId:
         type: String
         status: { dart: planned, kotlin: planned, swift: planned, csharp: implemented }
+      reasoningContent:
+        type: "String?"
+        notes: "Model reasoning emitted separately from the final answer text."
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
       executionTarget:
         type: ExecutionTarget
         # Whether the answer came from the device or the cloud gateway. Cloud
@@ -511,7 +534,12 @@ classes:
   ConversationContext:
     type: class
     section: "8. Supporting Types"
-    status: { dart: implemented, kotlin: planned, swift: planned, csharp: implemented }
+    methods:
+      history:
+        return: "List<Envelope>"
+        notes: "Snapshot of history turns; excludes the persistent system envelope."
+        status: { dart: planned, kotlin: implemented, swift: implemented, csharp: implemented }
+    status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
 
   MessageRole:
     type: enum
@@ -587,7 +615,7 @@ classes:
     section: "8. Supporting Types"
     values: [mlx, llamacpp, mistral]
     notes: "Use by omission for auto. Explicit values hard-require that backend for local generation or embedding models."
-    status: { rust: implemented, dart: planned, kotlin: planned, swift: planned, csharp: planned }
+    status: { dart: planned, kotlin: planned, swift: planned, csharp: planned }
 
   GenerationConfig:
     type: data

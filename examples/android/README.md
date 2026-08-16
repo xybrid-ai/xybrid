@@ -178,7 +178,6 @@ separately on `result.reasoningContent` — `null` for non-thinking models.
 ```kotlin
 import ai.xybrid.Envelope
 import ai.xybrid.text
-import ai.xybrid.reasoningContent
 
 val result = model.run(Envelope.text("Is 97 a prime number? Reason, then answer."))
 

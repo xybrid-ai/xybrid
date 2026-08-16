@@ -17,6 +17,8 @@ What it does:
   2. Copies the generated package into bindings/python/xybrid/_bolt/, which the
      hand-written `xybrid/__init__.py` wrapper re-exports.
   3. Prunes stale files so a removed export cannot linger.
+  4. Makes the append-only `XybridResult.reasoning_content` tail optional while
+     decoding the merged tool-calling wire shape.
 
 The compiled extension is NOT built here — `tools/scripts/build-python-bolt.sh`
 runs `boltffi pack python`, which compiles `_native` and stages the cdylib.
@@ -52,6 +54,72 @@ TRACKED_SUFFIXES = (".py", ".pyi", ".c", ".typed")
 STAGED_SUFFIXES = (".dylib", ".so", ".dll", ".pyd")
 
 
+def _add_result_wire_compatibility(source: str) -> str:
+    reader_target = """    def finish(self) -> None:
+        if self._offset != len(self._data):
+            raise ValueError("trailing BoltFFI wire bytes")
+
+    def read(self, count: int) -> bytes:
+"""
+    reader_replacement = """    def finish(self) -> None:
+        if self._offset != len(self._data):
+            raise ValueError("trailing BoltFFI wire bytes")
+
+    def has_remaining(self) -> bool:
+        return self._offset < len(self._data)
+
+    def read(self, count: int) -> bytes:
+"""
+    if source.count(reader_target) != 1:
+        sys.exit("error: expected one Python BoltFFI wire reader")
+    source = source.replace(reader_target, reader_replacement, 1)
+
+    decoder_target = """    @classmethod
+    def _boltffi_from_reader(cls, reader: "_BoltFfiWireReader") -> "XybridResult":
+        return cls(
+            envelope=XybridEnvelope._boltffi_from_reader(reader),
+            output_type=XybridOutputType(reader.i32()),
+            model_id=reader.string(),
+            latency_ms=reader.u32(),
+            execution_target=XybridExecutionTarget(reader.i32()),
+            metrics=XybridInferenceMetrics._boltffi_from_reader(reader),
+            tool_calls=reader.sequence(lambda: XybridToolCall._boltffi_from_reader(reader)),
+            reasoning_content=reader.optional(lambda: reader.string()),
+        )
+"""
+    decoder_replacement = """    @classmethod
+    def _boltffi_from_reader(cls, reader: "_BoltFfiWireReader") -> "XybridResult":
+        envelope = XybridEnvelope._boltffi_from_reader(reader)
+        output_type = XybridOutputType(reader.i32())
+        model_id = reader.string()
+        latency_ms = reader.u32()
+        execution_target = XybridExecutionTarget(reader.i32())
+        metrics = XybridInferenceMetrics._boltffi_from_reader(reader)
+        tool_calls = reader.sequence(lambda: XybridToolCall._boltffi_from_reader(reader))
+        reasoning_content = (
+            reader.optional(lambda: reader.string())
+            if reader.has_remaining()
+            else next(
+                (entry.value for entry in envelope.metadata if entry.key == "reasoning_content"),
+                None,
+            )
+        )
+        return cls(
+            envelope=envelope,
+            output_type=output_type,
+            model_id=model_id,
+            latency_ms=latency_ms,
+            execution_target=execution_target,
+            metrics=metrics,
+            tool_calls=tool_calls,
+            reasoning_content=reasoning_content,
+        )
+"""
+    if source.count(decoder_target) != 1:
+        sys.exit("error: expected one generated Python XybridResult decoder")
+    return source.replace(decoder_target, decoder_replacement, 1)
+
+
 def check_boltffi_version() -> None:
     try:
         out = subprocess.run(
@@ -73,6 +141,25 @@ def check_boltffi_version() -> None:
 
 def generate() -> list[Path]:
     subprocess.run(["boltffi", "generate", "python"], cwd=BOLT_DIR, check=True)
+    defaults = {
+        "__init__.py": (
+            "    reasoning_content: str | None\n\n    def _boltffi_wire",
+            "    reasoning_content: str | None = None\n\n    def _boltffi_wire",
+        ),
+        "__init__.pyi": (
+            "    reasoning_content: str | None\n\n\n\n@dataclass",
+            "    reasoning_content: str | None = None\n\n\n\n@dataclass",
+        ),
+    }
+    for name, (target, replacement) in defaults.items():
+        path = RAW_DIR / name
+        source = path.read_text()
+        if source.count(target) != 1:
+            sys.exit(f"error: expected one XybridResult reasoning field in {path}")
+        source = source.replace(target, replacement)
+        if name == "__init__.py":
+            source = _add_result_wire_compatibility(source)
+        path.write_text(source)
     sources = sorted(
         p for p in RAW_DIR.iterdir() if p.is_file() and p.suffix in TRACKED_SUFFIXES
     )

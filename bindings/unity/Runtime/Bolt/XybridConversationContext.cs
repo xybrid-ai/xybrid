@@ -146,6 +146,25 @@ namespace XybridBolt
 
 
         /// <summary>
+        /// Return history turns, excluding the persistent system envelope.
+        /// </summary>
+        public global::XybridBolt.XybridEnvelope[] History()
+        {
+            ThrowIfDisposed();
+            FfiBuf boltffiResultBuffer = NativeMethods.NativeXybridConversationContextHistory(this.Handle);
+            try
+            {
+                WireReader resultReader = new WireReader(boltffiResultBuffer);
+                return resultReader.ReadArray(reader => global::XybridBolt.XybridEnvelope.Decode(resultReader));
+            }
+            finally
+            {
+                NativeMethods.FreeBuf(boltffiResultBuffer);
+            }
+        }
+
+
+        /// <summary>
         /// Whether a persistent system-prompt envelope is set.
         /// </summary>
         public bool HasSystem()

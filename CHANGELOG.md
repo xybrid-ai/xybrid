@@ -7,6 +7,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+**Upgrade notes.** The HuggingFace cache moves to a repository-hash layout, so
+caches written by 0.5.0 and earlier are not reused: the next
+`from_huggingface(...)` load re-downloads the model, and the old copy stays on
+disk until it is evicted. It remains listed under its raw on-disk label
+(`owner--repo` under `hf/`, `models--owner--repo` under `hf-hub/`) and is
+removed by a targeted eviction on that label. Kotlin callers should drop
+`import ai.xybrid.reasoningContent` — `reasoningContent` is now a member of
+`XybridResult` rather than an extension property, which is source-compatible at
+the call site but needs a recompile against the new AAR.
+
+### Added
+
+- **Reasoning text as a typed field on the Bolt bindings.** `XybridResult`
+  gains `reasoningContent`, carrying what a thinking model emits separately
+  from its answer, on Swift, Kotlin, Python, and Unity C#. It is appended last
+  on the wire — `#[data]` PODs serialize in declaration order — and the
+  envelope keeps its `reasoning_content` metadata, so a consumer reading that
+  metadata is unaffected. Each generator's decoder probes for the tail before
+  reading it and falls back to the metadata when it is absent (#508).
+- **Conversation history readback.** `ConversationContext.history()` returns
+  the turns a context holds, excluding the persistent system envelope, on
+  Swift, Kotlin, Python, and Unity C# (#508).
+- **Revision-pinned HuggingFace loading.** `from_huggingface_with_revision`
+  resolves a branch, tag, or commit SHA to an immutable commit and pins the
+  load to it. Pinned and mutable refs occupy separate cache namespaces, so
+  `main` and a commit of `main` no longer alias, and a resolved revision that
+  is already materialized still loads when the Hub is unreachable (#508).
+- **The resolved default generation config.** `defaultGenerationConfig` returns
+  what a `run*` call uses when given no explicit config — template
+  `generation_params` layered over global defaults, including the
+  reasoning-budget floor — so a caller building an explicit config can start
+  from the model's own defaults rather than `GenerationConfig::default()`. It
+  no longer requires an LLM backend feature to be compiled in, and reads
+  without waiting on an in-flight run (#508).
+
+### Changed
+
+- **The HuggingFace cache is keyed by repository hash.** Both `hf/` and
+  `hf-hub/` directories move from a slash-to-`--` encoding (`owner--repo`,
+  `models--owner--repo`) to `repo--<sha256(repo)>`, with the repository id
+  recorded in a `.repo-id` marker inside each directory. The old encoding was
+  not injective — `a/b--c` and `a--b/c` both wrote to `a--b--c` — so two
+  unrelated repositories could share one cache. Directories under the old
+  layout are not adopted, because their label cannot be decoded back to a
+  repository id; they stay visible to cache listing and evictable under that
+  raw label. See the upgrade note above (#508).
+- **Envelope metadata crosses the FFI boundary in a deterministic order.**
+  `XybridEnvelope.metadata` is sorted by key rather than emitted in `HashMap`
+  iteration order, so two conversions of the same envelope produce identical
+  wire bytes (#508).
+
 ### Planned
 
 - **Multimodal KV-prefix reuse**: the per-frame prefill cost lever for live vision — **deferred** from 0.2.0, not yet implemented.

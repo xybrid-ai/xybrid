@@ -174,6 +174,23 @@ class XybridModelLoader {
 }
 ```
 
+Pinned revisions are available on the generated Bolt model surface. The Hub
+resolves a branch, tag, or commit input to an immutable commit SHA before
+selecting the materialized cache. These constructors load synchronously and
+must run off the UI thread:
+
+```kotlin
+val model = XybridModel.fromHuggingfaceWithRevision("org/repo:Q8_0", "v1.0")
+```
+
+```swift
+let model = try XybridModel(fromHuggingfaceWithRevision: "org/repo:Q8_0", revision: "v1.0")
+```
+
+```csharp
+var model = XybridModel.FromHuggingfaceWithRevision("org/repo:Q8_0", "v1.0");
+```
+
 ### Kotlin
 
 ```kotlin
@@ -359,6 +376,7 @@ let model = Xybrid::model("qwen3.5-0.8b")
 | `fromBundle()` | ✅ | ✅ | ✅ | ✅ |
 | `fromDirectory()` | ✅ | ✅ | ✅ | ✅ |
 | `fromHuggingFace()` | ✅ | ✅ | ✅ | ✅ |
+| `fromHuggingfaceWithRevision()` | — | ✅ | ✅ | ✅ |
 | `load()` | ✅ | ✅ | ✅ | ✅ |
 | `loadWithProgress()` | ✅ | — | — | — |
 | `fromRegistrySpeculative()` | ✅ | ✅ | ✅ | — |
@@ -456,6 +474,7 @@ class XybridModel {
 ```kotlin
 class XybridModel {
   val modelId: String
+  fun defaultGenerationConfig(): XybridGenerationConfig
 
   // Voice discovery (TTS models only)
   val voices: List<VoiceInfo>?
@@ -506,6 +525,11 @@ impl XybridModel {
 }
 ```
 
+The generated Swift and C# model types expose the same generation-default call
+as `defaultGenerationConfig()` / `DefaultGenerationConfig()`. These reads use
+load-time metadata snapshots, so they do not wait behind an in-flight
+inference's model write lock.
+
 ### Implementation Status
 
 | Method | Dart | Kotlin | Swift | C# |
@@ -514,6 +538,7 @@ impl XybridModel {
 | `voices` | — | ✅ | ✅ | ✅ |
 | `defaultVoice` | — | 🚧 | 🚧 | ✅ |
 | `hasVoices` | — | ✅ | ✅ | ✅ |
+| `defaultGenerationConfig()` | — | ✅ | ✅ | ✅ |
 | `voice()` | — | ✅ | ✅ | ✅ |
 | `run()` | ✅ | ✅ | ✅ | ✅ |
 | `runWithOptions()` / `run_with_options()` | Rust ✅ | planned | planned | planned |
@@ -941,6 +966,7 @@ class XybridResult {
   final Uint8List? audioBytes;   // Raw PCM bytes (16-bit signed LE)
   final Float32List? embedding;
   final int latencyMs;
+  final String? reasoningContent;
 
   // Convenience
   bool get isFailure;
@@ -959,7 +985,8 @@ data class XybridResult(
   val embedding: FloatArray?,
   val outputType: OutputType,
   val latencyMs: Int,
-  val modelId: String
+  val modelId: String,
+  val reasoningContent: String?
 ) {
   val isFailure: Boolean
   val latencySeconds: Double
@@ -980,6 +1007,7 @@ public sealed class InferenceResult : IDisposable
   public float[] Embedding { get; }
   public OutputType OutputType { get; }
   public uint LatencyMs { get; }
+  public string ReasoningContent { get; }
   public bool HasAudio { get; }
   public bool HasEmbedding { get; }
 }
@@ -1082,6 +1110,7 @@ public sealed class StageLatency
 | `outputType` | — | — | — | ✅ |
 | `latencyMs` | ✅ | ✅ | ✅ | ✅ |
 | `modelId` | — | — | — | ✅ |
+| `reasoningContent` | ✅ | ✅ | ✅ | ✅ |
 | `isFailure` | ✅ | ✅ | ✅ | ✅ |
 | `audioAsWav()` | ✅ | — | — | — |
 | `metrics` | ✅ | ✅ | ✅ | ✅ |
@@ -1109,8 +1138,13 @@ class ConversationContext {
 class ConversationContext {
   fun withSystem(systemMessage: Envelope): ConversationContext
   fun push(message: Envelope)
+  fun history(): List<Envelope>
 }
 ```
+
+The generated Swift and C# context types expose the same `history()` /
+`History()` snapshot. History deliberately excludes the persistent system
+envelope.
 
 **Multi-turn vision** (planned): when a user message contains images
 (built via `Envelope.userMessage(text, images: [...])`), the image-bearing envelope
@@ -1424,22 +1458,22 @@ stream stays low-cardinality.
 
 ### Implementation Status
 
-| Type | Rust | Dart | Kotlin | Swift | C# |
-|------|------|------|--------|-------|----|
-| `ConversationContext` | ✅ | ✅ | — | — | ✅ |
-| `MessageRole` | ✅ | ✅ | — | — | ✅ |
-| `BackendChoice` | ✅ | — | — | — | — |
-| `GenerationConfig` | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `PixelFormat` | ✅ | ✅ | 📋 | 📋 | 📋 |
-| `ImagePlane` | ✅ | ✅ | 📋 | 📋 | 📋 |
-| `YuvColorInfo` | ✅ | ✅ | 📋 | 📋 | 📋 |
-| `RunOptions` | ✅ | ✅ | planned | planned | planned |
-| `RunOptions.frameSessionId` / `liveMode` | ✅ | ✅ | 📋 | 📋 | 📋 |
-| `AbortPolicy` | ✅ | ✅ | planned | planned | planned |
-| `AbortSignal` | ✅ | ✅ | planned | planned | planned |
-| `AbortSignal.userCancelled` (Dart surface via CancellationToken) | ✅ | ✅ | 📋 | 📋 | 📋 |
-| `CancellationToken` | ✅ | ✅ | planned | planned | planned |
-| `StreamToken` | ✅ | ✅ | — | — | ✅ |
+| Type | Dart | Kotlin | Swift | C# |
+|------|------|--------|-------|----|
+| `ConversationContext` | ✅ | ✅ | ✅ | ✅ |
+| `MessageRole` | ✅ | — | — | ✅ |
+| `BackendChoice` (Dart: `XybridBackend`) | ✅ | — | — | — |
+| `GenerationConfig` | ✅ | ✅ | ✅ | ✅ |
+| `PixelFormat` | ✅ | 📋 | 📋 | 📋 |
+| `ImagePlane` | ✅ | 📋 | 📋 | 📋 |
+| `YuvColorInfo` | ✅ | 📋 | 📋 | 📋 |
+| `RunOptions` | ✅ | planned | planned | planned |
+| `RunOptions.frameSessionId` / `liveMode` | ✅ | 📋 | 📋 | 📋 |
+| `AbortPolicy` | ✅ | planned | planned | planned |
+| `AbortSignal` | ✅ | planned | planned | planned |
+| `AbortSignal.userCancelled` (Dart surface via CancellationToken) | ✅ | 📋 | 📋 | 📋 |
+| `CancellationToken` | ✅ | planned | planned | planned |
+| `StreamToken` | ✅ | — | — | ✅ |
 
 ---
 

@@ -417,8 +417,8 @@ See the [model metadata docs](docs/sdk/API_REFERENCE.md) for the full schema, or
 
 **Tool calling:** local models call functions you define — your tools are
 plain data (`Tool::function(...)`) and the loop is your code, so any tooling
-plugs in. On-device via llama.cpp (LFM2 and gemma-4 protocols); Rust SDK and
-CLI today (`xybrid repl` ships built-in `web_search` + your own via
+plugs in. On-device via llama.cpp (LFM2, gemma-4, and FunctionGemma protocols);
+Rust SDK and CLI today (`xybrid repl` ships built-in `web_search` + your own via
 `--tools-file`), Swift/Kotlin/Flutter bindings next. See the
 [Tool Calling guide](https://docs.xybrid.dev/en/docs/guides/tool-calling).
 
