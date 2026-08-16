@@ -1219,19 +1219,18 @@ mod tests {
         assert_eq!(f.cumulative_emitted(), "x");
     }
 
-    /// The clamp itself, exercised via the same entry points: even when the
-    /// stop match lands below already-emitted text, `cumulative_emitted()`
-    /// must never slice past the truncated buffer.
+    /// Tool suppression can splice a stop sequence together behind the emit
+    /// boundary. The boundary must follow the resulting truncation.
     #[test]
-    fn streaming_filter_cumulative_emitted_never_exceeds_truncated_text() {
-        // Two patterns: the tail of one chunk is simultaneously a complete
-        // non-match for "END" and a partial prefix for nothing — then a stop
-        // arrives that matches earlier in the buffer than the emit boundary.
+    fn streaming_filter_clamps_emit_boundary_after_suppression_splices_stop() {
+        let (start, end, _) = TOOL_BLOCK_MARKERS[2];
         let mut f = StreamingTextFilter::new(vec!["ab".to_string()]);
-        assert_eq!(f.push("xa").as_deref(), Some("x")); // "a" held (prefix of "ab")
-        assert_eq!(f.push("b"), None); // completes "ab" at pos 1
+        f = f.with_tool_call_suppression();
+
+        assert_eq!(f.push(&format!("a{start}")).as_deref(), Some("a"));
+        assert_eq!(f.push(&format!("payload{end}b")), None);
         assert!(f.is_stopped());
-        assert_eq!(f.cumulative_emitted(), "x");
+        assert_eq!(f.cumulative_emitted(), "");
     }
 
     /// Across patterns the EARLIEST hold position must win — holding for the
