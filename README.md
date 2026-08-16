@@ -78,7 +78,7 @@
 [deepwiki-shield]: https://deepwiki.com/badge.svg
 [deepwiki-url]: https://deepwiki.com/xybrid-ai/xybrid
 [stars-shield]: https://img.shields.io/github/stars/xybrid-ai/xybrid?style=flat-square
-[stars-url]: https://github.com/xybrid-ai/xybrid/stargazers
+[stars-url]: https://github.com/xybrid-ai/xybrid#star-history
 [twitter-shield]: https://img.shields.io/badge/Follow-%40xybrid__ai-000000?style=for-the-badge&logo=x&logoColor=white
 [twitter-url]: https://x.com/xybrid_ai
 [visitors-shield]: https://visitor-badge.laobi.icu/badge?page_id=xybrid-ai.xybrid
@@ -460,7 +460,10 @@ We welcome contributions! See [CONTRIBUTING.md](./CONTRIBUTING.md) for guideline
 
 ## Star History
 
-[![Star History Chart](https://api.star-history.com/svg?repos=xybrid-ai/xybrid&type=date&legend=bottom-right)](https://www.star-history.com/#xybrid-ai/xybrid&type=date&legend=bottom-right)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/xybrid-ai/xybrid/star-history/star-history-dark.svg">
+  <img alt="Star history for xybrid-ai/xybrid" src="https://raw.githubusercontent.com/xybrid-ai/xybrid/star-history/star-history.svg">
+</picture>
 
 ## License
 
