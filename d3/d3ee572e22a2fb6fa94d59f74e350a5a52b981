@@ -1,0 +1,19 @@
+crates/xybrid-core/src/runtime_adapter/streaming_postprocess.rs
+  s_df2139388dad3d::t_8ab6eb7a369a99 1222-1223,1225-1226,1228-1231,1233
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "d3d3ee572e22a2fb6fa94d59f74e350a5a52b981",
+  "prompts": {},
+  "sessions": {
+    "s_df2139388dad3d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0098e-a838-73f0-9a5f-eda4ad99197c",
+        "model": "unknown"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
