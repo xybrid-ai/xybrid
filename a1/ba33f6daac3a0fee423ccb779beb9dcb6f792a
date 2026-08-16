@@ -1,0 +1,23 @@
+star-history-dark.svg
+  s_88ca1c7d7b7c53::t_19e54a1de0d062 1-27
+star-history.svg
+  s_88ca1c7d7b7c53::t_147a44e4dd62ca 1-27
+stars.jsonl
+  s_88ca1c7d7b7c53::t_e806f96e9b5ad3 1-187
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "a1ba33f6daac3a0fee423ccb779beb9dcb6f792a",
+  "prompts": {},
+  "sessions": {
+    "s_88ca1c7d7b7c53": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a00bcd-c710-7fd3-bc40-23431bd7d929",
+        "model": "gpt-5.6-terra"
+      },
+      "human_author": "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
+    }
+  }
+}
