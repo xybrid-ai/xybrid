@@ -435,7 +435,7 @@ claude /xybrid-init hexgrad/Kokoro-82M-v1.0-ONNX
 
 ## スター履歴
 
-[![Star History Chart](https://api.star-history.com/svg?repos=xybrid-ai/xybrid&type=date&legend=bottom-right)](https://www.star-history.com/#xybrid-ai/xybrid&type=date&legend=bottom-right)
+[![Star History Chart](https://star-history.dera.page/svg?repos=xybrid-ai/xybrid&type=date&legend=bottom-right)](https://star-history.dera.page/#xybrid-ai/xybrid&type=date&legend=bottom-right)
 
 ## ライセンス
 
