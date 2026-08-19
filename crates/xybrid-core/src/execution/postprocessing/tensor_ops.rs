@@ -4,6 +4,7 @@
 //! - `argmax_step`: Get class ID with highest probability
 //! - `softmax_step`: Apply softmax normalization
 //! - `topk_step`: Get top-K predictions
+//! - `temperature_sample_step`: Sample a class from filtered logits
 //! - `threshold_step`: Apply threshold to probabilities
 //! - `meanpool_step`: Mean pooling over sequence dimension
 //! - `denormalize_step`: Denormalize tensor values (inverse of Normalize preprocessing)
@@ -11,6 +12,7 @@
 use super::super::types::{ExecutorResult, RawOutputs};
 use crate::runtime_adapter::AdapterError;
 use ndarray::{ArrayD, IxDyn};
+use rand::Rng;
 use std::collections::HashMap;
 
 /// Apply argmax to get class ID with highest probability.
@@ -103,6 +105,61 @@ pub fn topk_step(data: RawOutputs, k: usize, dim: Option<usize>) -> ExecutorResu
     result_map.insert("topk".to_string(), topk_tensor);
 
     Ok(RawOutputs::TensorMap(result_map))
+}
+
+/// Sample a class ID from temperature-scaled, optionally filtered logits.
+///
+/// `temperature = 0` and `top_k = 1` use exact argmax. Positive temperatures
+/// use a production RNG for a weighted draw after top-k and top-p filters.
+///
+/// # Errors
+/// Returns [`AdapterError::InvalidInput`] for invalid parameters or logits,
+/// unsupported/empty tensors, and inputs other than a tensor map.
+pub fn temperature_sample_step(
+    data: RawOutputs,
+    temperature: f32,
+    top_k: Option<usize>,
+    top_p: Option<f32>,
+) -> ExecutorResult<RawOutputs> {
+    let mut rng = rand::rng();
+    temperature_sample_step_with_rng(data, temperature, top_k, top_p, &mut rng)
+}
+
+fn temperature_sample_step_with_rng<R: Rng + ?Sized>(
+    data: RawOutputs,
+    temperature: f32,
+    top_k: Option<usize>,
+    top_p: Option<f32>,
+    rng: &mut R,
+) -> ExecutorResult<RawOutputs> {
+    validate_sampling_params(temperature, top_k, top_p)?;
+    let tensor_map = match data {
+        RawOutputs::TensorMap(map) => map,
+        _ => {
+            return Err(AdapterError::InvalidInput(
+                "TemperatureSample requires tensor map".to_string(),
+            ))
+        }
+    };
+    let tensor = tensor_map.values().next().ok_or_else(|| {
+        AdapterError::InvalidInput("No outputs for TemperatureSample".to_string())
+    })?;
+    let logits = sampling_logits(tensor)?;
+
+    if logits.iter().any(|logit| !logit.is_finite()) {
+        return Err(AdapterError::InvalidInput(
+            "TemperatureSample requires finite logits".to_string(),
+        ));
+    }
+    if temperature == 0.0 || top_k == Some(1) {
+        return Ok(RawOutputs::ClassId(argmax_token(tensor)?));
+    }
+
+    let candidates = filtered_sampling_weights(logits, temperature, top_k, top_p);
+    Ok(RawOutputs::ClassId(sample_weighted_index(
+        &candidates,
+        rng,
+    )?))
 }
 
 /// Apply threshold to convert probabilities to binary predictions.
@@ -348,6 +405,118 @@ pub fn argmax_token(logits: &ArrayD<f32>) -> ExecutorResult<usize> {
     }
 }
 
+fn validate_sampling_params(
+    temperature: f32,
+    top_k: Option<usize>,
+    top_p: Option<f32>,
+) -> ExecutorResult<()> {
+    if !temperature.is_finite() || temperature < 0.0 {
+        return Err(AdapterError::InvalidInput(format!(
+            "TemperatureSample temperature must be finite and non-negative, got {}",
+            temperature
+        )));
+    }
+    if top_k == Some(0) {
+        return Err(AdapterError::InvalidInput(
+            "TemperatureSample top_k must be greater than zero".to_string(),
+        ));
+    }
+    if let Some(top_p) = top_p {
+        if !top_p.is_finite() || !(0.0 < top_p && top_p <= 1.0) {
+            return Err(AdapterError::InvalidInput(format!(
+                "TemperatureSample top_p must be finite and in (0, 1], got {}",
+                top_p
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn sampling_logits(tensor: &ArrayD<f32>) -> ExecutorResult<&[f32]> {
+    let shape = tensor.shape();
+    if !(1..=3).contains(&shape.len()) || shape.contains(&0) {
+        return Err(AdapterError::InvalidInput(format!(
+            "TemperatureSample expects a non-empty 1D, 2D, or 3D logits tensor, got {:?}",
+            shape
+        )));
+    }
+
+    let data = tensor.as_slice().ok_or_else(|| {
+        AdapterError::InvalidInput(
+            "TemperatureSample requires a contiguous logits tensor".to_string(),
+        )
+    })?;
+    let vocab_size = *shape.last().ok_or_else(|| {
+        AdapterError::InvalidInput("TemperatureSample received an empty tensor shape".to_string())
+    })?;
+    Ok(&data[..vocab_size])
+}
+
+fn filtered_sampling_weights(
+    logits: &[f32],
+    temperature: f32,
+    top_k: Option<usize>,
+    top_p: Option<f32>,
+) -> Vec<(usize, f64)> {
+    let max_logit = logits.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+    let mut candidates: Vec<(usize, f64)> = logits
+        .iter()
+        .enumerate()
+        .map(|(index, &logit)| {
+            let scaled = (f64::from(logit) - f64::from(max_logit)) / f64::from(temperature);
+            (index, scaled.exp())
+        })
+        .collect();
+
+    if top_k.is_some() || top_p.is_some_and(|top_p| top_p < 1.0) {
+        candidates.sort_by(|a, b| b.1.total_cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    }
+    if let Some(top_k) = top_k {
+        candidates.truncate(top_k.min(candidates.len()));
+    }
+    if let Some(top_p) = top_p.filter(|top_p| *top_p < 1.0) {
+        let total_weight: f64 = candidates.iter().map(|(_, weight)| weight).sum();
+        let cutoff = total_weight * f64::from(top_p);
+        let mut cumulative = 0.0;
+        let keep = candidates
+            .iter()
+            .position(|(_, weight)| {
+                cumulative += weight;
+                cumulative >= cutoff
+            })
+            .map_or(candidates.len(), |position| position + 1)
+            .max(1);
+        candidates.truncate(keep);
+    }
+    candidates
+}
+
+fn sample_weighted_index<R: Rng + ?Sized>(
+    candidates: &[(usize, f64)],
+    rng: &mut R,
+) -> ExecutorResult<usize> {
+    let total_weight: f64 = candidates.iter().map(|(_, weight)| weight).sum();
+    if candidates.is_empty() || !total_weight.is_finite() || total_weight <= 0.0 {
+        return Err(AdapterError::InvalidInput(
+            "TemperatureSample could not construct a probability distribution".to_string(),
+        ));
+    }
+
+    let draw = rng.random_range(0.0..total_weight);
+    let mut cumulative = 0.0;
+    for &(index, weight) in candidates {
+        cumulative += weight;
+        if draw < cumulative {
+            return Ok(index);
+        }
+    }
+    candidates.last().map(|(index, _)| *index).ok_or_else(|| {
+        AdapterError::InvalidInput(
+            "TemperatureSample could not select from an empty distribution".to_string(),
+        )
+    })
+}
+
 /// Apply softmax to a tensor along a dimension.
 fn apply_softmax(tensor: &mut ArrayD<f32>, dim: Option<usize>) -> ExecutorResult<()> {
     let shape = tensor.shape().to_vec(); // Clone shape to avoid borrow conflicts
@@ -462,6 +631,189 @@ mod tests {
     use super::*;
     use crate::execution::preprocessing::tensor::normalize_step;
     use crate::execution::types::PreprocessedData;
+    use ndarray::Array2;
+    use rand::{rngs::StdRng, SeedableRng};
+
+    fn logits_data(logits: &[f32]) -> RawOutputs {
+        let tensor = ArrayD::from_shape_vec(IxDyn(&[logits.len()]), logits.to_vec())
+            .expect("valid logits shape");
+        RawOutputs::TensorMap(HashMap::from([("logits".to_string(), tensor)]))
+    }
+
+    fn sampled_class(result: RawOutputs) -> usize {
+        match result {
+            RawOutputs::ClassId(class_id) => class_id,
+            other => panic!("expected ClassId, got {other:?}"),
+        }
+    }
+
+    fn sample_with_seed(
+        data: RawOutputs,
+        temperature: f32,
+        top_k: Option<usize>,
+        top_p: Option<f32>,
+    ) -> ExecutorResult<RawOutputs> {
+        let mut rng = StdRng::seed_from_u64(42);
+        temperature_sample_step_with_rng(data, temperature, top_k, top_p, &mut rng)
+    }
+
+    fn assert_invalid(result: ExecutorResult<RawOutputs>) {
+        assert!(matches!(result, Err(AdapterError::InvalidInput(_))));
+    }
+
+    #[test]
+    fn temperature_zero_returns_exact_argmax() {
+        let result = sample_with_seed(logits_data(&[0.5, 3.0, 1.0]), 0.0, None, None).unwrap();
+
+        assert_eq!(sampled_class(result), 1);
+    }
+
+    #[test]
+    fn top_k_one_returns_exact_argmax() {
+        let result =
+            sample_with_seed(logits_data(&[0.5, 3.0, 1.0]), 100.0, Some(1), Some(0.1)).unwrap();
+
+        assert_eq!(sampled_class(result), 1);
+    }
+
+    #[test]
+    fn fixed_seed_repeats_the_same_sample_sequence() {
+        let mut first_rng = StdRng::seed_from_u64(7);
+        let mut second_rng = StdRng::seed_from_u64(7);
+
+        let first: Vec<_> = (0..32)
+            .map(|_| {
+                let result = temperature_sample_step_with_rng(
+                    logits_data(&[0.0, 0.5, 1.0]),
+                    1.0,
+                    None,
+                    None,
+                    &mut first_rng,
+                )
+                .unwrap();
+                sampled_class(result)
+            })
+            .collect();
+        let second: Vec<_> = (0..32)
+            .map(|_| {
+                let result = temperature_sample_step_with_rng(
+                    logits_data(&[0.0, 0.5, 1.0]),
+                    1.0,
+                    None,
+                    None,
+                    &mut second_rng,
+                )
+                .unwrap();
+                sampled_class(result)
+            })
+            .collect();
+
+        assert_eq!(first, second);
+    }
+
+    #[test]
+    fn top_k_and_top_p_filters_compose() {
+        let candidates = filtered_sampling_weights(&[4.0, 3.0, 2.0, 1.0], 1.0, Some(3), Some(0.8));
+        let indices: Vec<_> = candidates.iter().map(|(index, _)| *index).collect();
+
+        assert_eq!(indices, vec![0, 1]);
+    }
+
+    #[test]
+    fn top_p_always_retains_one_token() {
+        let candidates = filtered_sampling_weights(&[2.0, 1.0, 0.0], 1.0, None, Some(f32::EPSILON));
+
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].0, 0);
+    }
+
+    #[test]
+    fn top_p_one_retains_all_tokens() {
+        let candidates = filtered_sampling_weights(&[3.0, 2.0, 1.0], 0.001, None, Some(1.0));
+        let indices: Vec<_> = candidates.iter().map(|(index, _)| *index).collect();
+
+        assert_eq!(indices, vec![0, 1, 2]);
+    }
+
+    #[test]
+    fn high_temperature_with_full_top_p_is_nearly_uniform() {
+        const SAMPLES: usize = 20_000;
+        const EXPECTED_PER_CLASS: usize = SAMPLES / 4;
+        const TOLERANCE: usize = 400;
+
+        let mut rng = StdRng::seed_from_u64(2026);
+        let mut counts = [0usize; 4];
+        for _ in 0..SAMPLES {
+            let result = temperature_sample_step_with_rng(
+                logits_data(&[0.0, 1.0, 2.0, 3.0]),
+                1_000_000.0,
+                None,
+                Some(1.0),
+                &mut rng,
+            )
+            .unwrap();
+            counts[sampled_class(result)] += 1;
+        }
+
+        for count in counts {
+            assert!(
+                count.abs_diff(EXPECTED_PER_CLASS) <= TOLERANCE,
+                "expected near-uniform counts, got {counts:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn temperature_sample_rejects_invalid_parameters() {
+        for (temperature, top_k, top_p) in [
+            (-0.1, None, None),
+            (f32::NAN, None, None),
+            (f32::INFINITY, None, None),
+            (1.0, Some(0), None),
+            (1.0, None, Some(0.0)),
+            (1.0, None, Some(-0.1)),
+            (1.0, None, Some(1.1)),
+            (1.0, None, Some(f32::NAN)),
+            (1.0, None, Some(f32::INFINITY)),
+        ] {
+            assert_invalid(sample_with_seed(
+                logits_data(&[0.0, 1.0]),
+                temperature,
+                top_k,
+                top_p,
+            ));
+        }
+    }
+
+    #[test]
+    fn temperature_sample_rejects_invalid_inputs() {
+        assert_invalid(sample_with_seed(
+            RawOutputs::Text("not logits".to_string()),
+            1.0,
+            None,
+            None,
+        ));
+        assert_invalid(sample_with_seed(
+            RawOutputs::TensorMap(HashMap::new()),
+            1.0,
+            None,
+            None,
+        ));
+        assert_invalid(sample_with_seed(logits_data(&[]), 1.0, None, None));
+        assert_invalid(sample_with_seed(
+            logits_data(&[0.0, f32::NAN]),
+            1.0,
+            None,
+            None,
+        ));
+
+        let non_contiguous = Array2::from_shape_vec((2, 2), vec![0.0, 1.0, 2.0, 3.0])
+            .expect("valid shape")
+            .reversed_axes()
+            .into_dyn();
+        let data = RawOutputs::TensorMap(HashMap::from([("logits".to_string(), non_contiguous)]));
+        assert_invalid(sample_with_seed(data, 1.0, None, None));
+    }
 
     #[test]
     fn test_denormalize_step_round_trip() {
