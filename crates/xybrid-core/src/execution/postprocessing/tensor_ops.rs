@@ -141,9 +141,7 @@ fn temperature_sample_step_with_rng<R: Rng + ?Sized>(
             ))
         }
     };
-    let tensor = tensor_map.values().next().ok_or_else(|| {
-        AdapterError::InvalidInput("No outputs for TemperatureSample".to_string())
-    })?;
+    let tensor = select_logits_output(&tensor_map)?;
     let logits = sampling_logits(tensor)?;
 
     if logits.iter().any(|logit| !logit.is_finite()) {
@@ -362,8 +360,14 @@ pub fn argmax_token(logits: &ArrayD<f32>) -> ExecutorResult<usize> {
 
     // Handle 3D logits [batch, seq_len, vocab_size]
     if shape.len() == 3 {
+        if shape.contains(&0) {
+            return Err(AdapterError::InvalidInput(format!(
+                "Unexpected empty logits shape: {:?}",
+                shape
+            )));
+        }
         let vocab_size = shape[2];
-        let start_idx = 0; // First batch, first position
+        let start_idx = (shape[1] - 1) * vocab_size; // First batch, final position
         let end_idx = start_idx + vocab_size;
 
         let slice = &data[start_idx..end_idx];
@@ -402,6 +406,25 @@ pub fn argmax_token(logits: &ArrayD<f32>) -> ExecutorResult<usize> {
             "Unexpected logits shape: {:?}",
             shape
         )))
+    }
+}
+
+fn select_logits_output(tensor_map: &HashMap<String, ArrayD<f32>>) -> ExecutorResult<&ArrayD<f32>> {
+    if let Some(logits) = tensor_map.get("logits") {
+        return Ok(logits);
+    }
+
+    match tensor_map.len() {
+        0 => Err(AdapterError::InvalidInput(
+            "No outputs for TemperatureSample".to_string(),
+        )),
+        1 => tensor_map.values().next().ok_or_else(|| {
+            AdapterError::InvalidInput("No outputs for TemperatureSample".to_string())
+        }),
+        _ => Err(AdapterError::InvalidInput(
+            "TemperatureSample requires a named 'logits' output when multiple outputs are present"
+                .to_string(),
+        )),
     }
 }
 
@@ -449,7 +472,12 @@ fn sampling_logits(tensor: &ArrayD<f32>) -> ExecutorResult<&[f32]> {
     let vocab_size = *shape.last().ok_or_else(|| {
         AdapterError::InvalidInput("TemperatureSample received an empty tensor shape".to_string())
     })?;
-    Ok(&data[..vocab_size])
+    let start_idx = if shape.len() == 3 {
+        (shape[1] - 1) * vocab_size
+    } else {
+        0
+    };
+    Ok(&data[start_idx..start_idx + vocab_size])
 }
 
 fn filtered_sampling_weights(
@@ -672,6 +700,77 @@ mod tests {
     fn top_k_one_returns_exact_argmax() {
         let result =
             sample_with_seed(logits_data(&[0.5, 3.0, 1.0]), 100.0, Some(1), Some(0.1)).unwrap();
+
+        assert_eq!(sampled_class(result), 1);
+    }
+
+    #[test]
+    fn temperature_sample_argmax_uses_final_sequence_position() {
+        let tensor = ArrayD::from_shape_vec(
+            IxDyn(&[1, 2, 3]),
+            vec![1_000.0, -1_000.0, -1_000.0, -1_000.0, 1_000.0, -1_000.0],
+        )
+        .expect("valid logits shape");
+        let data = RawOutputs::TensorMap(HashMap::from([("logits".to_string(), tensor)]));
+
+        let result = sample_with_seed(data, 0.0, None, None).unwrap();
+
+        assert_eq!(sampled_class(result), 1);
+    }
+
+    #[test]
+    fn temperature_sample_weighted_draw_uses_final_sequence_position() {
+        let tensor = ArrayD::from_shape_vec(
+            IxDyn(&[1, 2, 3]),
+            vec![1_000.0, -1_000.0, -1_000.0, -1_000.0, 1_000.0, -1_000.0],
+        )
+        .expect("valid logits shape");
+        let data = RawOutputs::TensorMap(HashMap::from([("logits".to_string(), tensor)]));
+
+        let result = sample_with_seed(data, 1.0, None, None).unwrap();
+
+        assert_eq!(sampled_class(result), 1);
+    }
+
+    #[test]
+    fn temperature_sample_prefers_named_logits_output() {
+        let logits =
+            ArrayD::from_shape_vec(IxDyn(&[2]), vec![0.0, 10.0]).expect("valid logits shape");
+        let cache =
+            ArrayD::from_shape_vec(IxDyn(&[2]), vec![10.0, 0.0]).expect("valid cache shape");
+        let data = RawOutputs::TensorMap(HashMap::from([
+            ("logits".to_string(), logits),
+            ("present.0.key".to_string(), cache),
+        ]));
+
+        let result = sample_with_seed(data, 0.0, None, None).unwrap();
+
+        assert_eq!(sampled_class(result), 1);
+    }
+
+    #[test]
+    fn temperature_sample_rejects_multiple_unnamed_outputs() {
+        let first =
+            ArrayD::from_shape_vec(IxDyn(&[2]), vec![0.0, 1.0]).expect("valid output shape");
+        let second =
+            ArrayD::from_shape_vec(IxDyn(&[2]), vec![1.0, 0.0]).expect("valid output shape");
+        let data = RawOutputs::TensorMap(HashMap::from([
+            ("output_a".to_string(), first),
+            ("output_b".to_string(), second),
+        ]));
+
+        let result = sample_with_seed(data, 0.0, None, None);
+
+        assert_invalid(result);
+    }
+
+    #[test]
+    fn temperature_sample_accepts_single_unnamed_output() {
+        let tensor =
+            ArrayD::from_shape_vec(IxDyn(&[2]), vec![0.0, 1.0]).expect("valid output shape");
+        let data = RawOutputs::TensorMap(HashMap::from([("scores".to_string(), tensor)]));
+
+        let result = sample_with_seed(data, 0.0, None, None).unwrap();
 
         assert_eq!(sampled_class(result), 1);
     }
