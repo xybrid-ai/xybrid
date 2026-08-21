@@ -233,7 +233,9 @@ fn streaming_language_override_reaches_whisper_transcribe_params() {
 fn decode_wav_16k_mono(bytes: &[u8]) -> Vec<f32> {
     assert!(bytes.len() > 44, "WAV shorter than its header");
     bytes[44..]
-        .chunks_exact(2)
-        .map(|c| f32::from(i16::from_le_bytes([c[0], c[1]])) / 32_768.0)
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|c| f32::from(i16::from_le_bytes(*c)) / 32_768.0)
         .collect()
 }
