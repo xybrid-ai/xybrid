@@ -1,0 +1,51 @@
+tools/scripts/natives-fingerprint.sh
+  s_85687e95bd025d::t_c26695e8dc72f2 58,84-91,117
+crates/llama-cpp-sys/natives-manifest.txt
+  s_85687e95bd025d::t_3945aff88adfc2 1-14
+  s_85687e95bd025d::t_58ed9012c2333f 15
+crates/llama-cpp-sys/Cargo.toml
+  s_85687e95bd025d::t_089186186b2c68 54-63
+AGENTS.md
+  s_85687e95bd025d::t_337f15be34eb1e 86-119
+crates/llama-cpp-sys/build.rs
+  s_85687e95bd025d::t_fe3e74e961834b 550-557,559-578,903-1103,1114-1123,1128-1164,1175-1267,1286,1303,1310-1311,1318,1325,1335-1391
+  s_85687e95bd025d::t_47a7782c1e967c 37,1268-1285,1287-1302,1304-1309,1326-1334
+  s_85687e95bd025d::t_f87130cbd24fe0 1104-1113,1165-1174
+  s_85687e95bd025d::t_4c36f57e025e29 558,1312-1317,1319-1324
+  s_85687e95bd025d::t_6c77a675f5648c 588-590,1124-1127
+  s_85687e95bd025d::t_cbf7f58cc49008 1392
+tools/scripts/natives-manifest.sh
+  s_85687e95bd025d::t_3945aff88adfc2 22,24-26,28-32,35-41,112
+  s_85687e95bd025d::t_396a741089ed7f 1-21,23,27,33-34,42-93,98-105,107,111,113-117,119-120
+  s_85687e95bd025d::t_a2e6ef1dbfab45 94-97,106,108-110,118
+.github/workflows/build-natives.yml
+  s_85687e95bd025d::t_311787b2dadf7b 11-19,91-94,119-136
+  s_85687e95bd025d::t_2594502f3684ae 214-215,217,222-230,235-250,252-260,262-302,306,308-325,327-328,330-346,354-357
+  s_85687e95bd025d::t_80337e64af50ee 303-305,307
+  s_85687e95bd025d::t_ebdb507b9f4763 347-353,358
+  s_85687e95bd025d::t_1f509733aa38c8 359-366
+tools/scripts/natives-pull.sh
+  s_85687e95bd025d::t_4c36f57e025e29 14-17
+tools/scripts/natives-verify-anon.sh
+  s_85687e95bd025d::t_1605385507156d 1-61
+docs/INSTALLATION.md
+  s_85687e95bd025d::t_543ab15739bc45 132-171
+Cargo.lock
+  s_85687e95bd025d::t_070bd88308746f 6370-6373
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "299969693bdf15987f1852e6986596e49bdc00e4",
+  "prompts": {},
+  "sessions": {
+    "s_85687e95bd025d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f084c1af-5fcd-48ea-aead-5c392cc4c54e",
+        "model": "claude-opus-5"
+      },
+      "human_author": "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
+    }
+  }
+}
