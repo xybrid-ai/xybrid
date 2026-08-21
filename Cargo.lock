@@ -6367,6 +6367,10 @@ dependencies = [
  "bindgen",
  "cc",
  "cmake",
+ "flate2",
+ "sha2",
+ "tar",
+ "ureq 2.12.1",
 ]
 
 [[package]]

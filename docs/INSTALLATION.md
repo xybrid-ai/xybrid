@@ -129,6 +129,46 @@ only binaries you compile yourself.
 
 </details>
 
+### Prebuilt llama.cpp (no CMake, no 20-minute build)
+
+Enabling `llm-llamacpp` normally means compiling llama.cpp from source with
+CMake — the single most expensive part of a cold build, around twenty minutes.
+
+You do not have to. `xybrid-llama-sys`'s build script looks up your target
+triple and feature set in a manifest shipped inside the crate, downloads the
+matching prebuilt static archives over HTTPS, verifies their SHA-256, and links
+those instead:
+
+```
+$ cargo build --release -p xybrid-cli --features platform-desktop
+warning: llama.cpp: downloading prebuilt natives for aarch64-apple-darwin (vision) ...
+warning: llama.cpp: linked prebuilt natives for aarch64-apple-darwin (vision); skipped the cmake build
+```
+
+Nothing to install and nothing to configure. Slices are cached under
+`$CARGO_HOME/xybrid-natives/` and shared across every project on the machine.
+
+Every miss falls back to the source build, so this can only make a build
+faster, never break one. It is skipped when no slice is published for your
+target, when your local sources differ from what was published (an edited
+`wrapper.cpp` or a bumped llama.cpp pin), when the CRT or glibc would not
+match, and when you are offline.
+
+Controls:
+
+| Variable | Effect |
+|---|---|
+| `XYBRID_NATIVES_FORCE_SOURCE=1` | Never download; always build with CMake |
+| `CARGO_NET_OFFLINE=true` | Same, via cargo's standard offline switch |
+| `XYBRID_NATIVES_CACHE_DIR` | Where downloaded slices are unpacked |
+| `XYBRID_NATIVES_PREBUILT_DIR` | Link a slice you staged yourself, `<dir>/<target>/{lib,include}` |
+| `XYBRID_NATIVES_PKG` | Pull from a different OCI repository |
+| `XYBRID_NATIVES_TOKEN` | Bearer token, for a private mirror |
+
+The download replaces the CMake compile, not the whole native build: a C++
+compiler is still needed for xybrid's small `wrapper.cpp` shim, and libclang
+for bindgen.
+
 ### Build from a Local Clone
 
 ```bash

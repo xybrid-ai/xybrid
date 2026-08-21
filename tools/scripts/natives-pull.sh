@@ -11,7 +11,10 @@
 # XYBRID_NATIVES_PREBUILT_DIR/<target>; see resolve_prebuilt in build.rs).
 #
 # Usage: natives-pull.sh <target-triple> <feature-set> <dest-base-dir>
-# Requires: oras on PATH (public package pulls anonymously).
+# Requires: oras on PATH, and read access to $XYBRID_NATIVES_PKG. Anonymous
+# pulls only work once that package is public — until then callers must
+# `oras login` first (our CI jobs do). tools/scripts/natives-verify-anon.sh
+# checks the anonymous path, which is the one external cargo consumers use.
 set -euo pipefail
 
 TARGET="${1:?usage: natives-pull.sh <target-triple> <feature-set> <dest-base-dir>}"

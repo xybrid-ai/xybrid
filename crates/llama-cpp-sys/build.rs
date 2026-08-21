@@ -34,6 +34,7 @@
 use std::env;
 use std::path::{Path, PathBuf};
 use std::process;
+use std::time::Duration;
 
 const LLAMA_CPP_REPO: &str = "https://github.com/ggml-org/llama.cpp";
 // Pinned llama.cpp upstream — keep in sync with the git submodule SHA in
@@ -546,17 +547,35 @@ fn compile_llama_cpp() {
             llama_cpp_dir.join("tools/mtmd/mtmd-helper.h").display()
         );
     }
-    // The prebuilt fast path and the publisher export hook are selected by
-    // these env vars; declare them so toggling either re-runs the script.
-    println!("cargo:rerun-if-env-changed=XYBRID_NATIVES_PREBUILT_DIR");
-    println!("cargo:rerun-if-env-changed=XYBRID_NATIVES_EXPORT_DIR");
+    // The prebuilt fast paths and the publisher export hook are selected by
+    // these env vars; declare them so toggling any of them re-runs the script.
+    for var in [
+        "XYBRID_NATIVES_PREBUILT_DIR",
+        "XYBRID_NATIVES_EXPORT_DIR",
+        "XYBRID_NATIVES_FORCE_SOURCE",
+        "XYBRID_NATIVES_CACHE_DIR",
+        "XYBRID_NATIVES_PKG",
+        "XYBRID_NATIVES_TOKEN",
+        "CARGO_NET_OFFLINE",
+    ] {
+        println!("cargo:rerun-if-env-changed={var}");
+    }
+    // Republishing changes the manifest, which changes which slice (if any)
+    // the download path resolves.
+    println!(
+        "cargo:rerun-if-changed={}",
+        ctx.manifest_dir.join(NATIVES_MANIFEST_FILE).display()
+    );
 
-    // Resolve the install prefix (`dst`) one of two ways:
-    //   - Fast path: a complete prebuilt slice staged for this target+feature
-    //     in `XYBRID_NATIVES_PREBUILT_DIR/<target>` — link it, skip the cmake
-    //     compile (the dominant cold-build cost on Android/Apple).
-    //   - Source path: today's cmake build, also the fallback when the fast
-    //     path misses for any reason (absent dir, incomplete slice).
+    // Resolve the install prefix (`dst`) one of three ways, in order:
+    //   1. Staged slice: a complete prebuilt staged for this target+feature in
+    //      `XYBRID_NATIVES_PREBUILT_DIR/<target>`. Explicit, so it wins — this
+    //      is how our own CI jobs pin exactly what they pulled.
+    //   2. Downloaded slice: a published slice resolved from
+    //      `natives-manifest.txt` and fetched over HTTPS. This is what makes
+    //      a plain `cargo build` cheap for an external consumer.
+    //   3. Source path: today's cmake build, also the fallback whenever
+    //      either fast path misses for any reason.
     let dst = match resolve_prebuilt(&ctx, vision_enabled, vulkan_enabled) {
         Some(prebuilt) => {
             println!(
@@ -566,7 +585,9 @@ fn compile_llama_cpp() {
             );
             prebuilt
         }
-        None => build_from_source(&ctx, &llama_cpp_dir, vision_enabled, vulkan_enabled),
+        None => resolve_downloaded(&ctx, vision_enabled, vulkan_enabled).unwrap_or_else(|| {
+            build_from_source(&ctx, &llama_cpp_dir, vision_enabled, vulkan_enabled)
+        }),
     };
 
     emit_link_and_wrapper(
@@ -877,6 +898,496 @@ fn resolve_prebuilt(
         return None;
     }
     Some(dir)
+}
+
+// =========================================================================
+// Prebuilt natives — automatic download
+// =========================================================================
+//
+// `XYBRID_NATIVES_PREBUILT_DIR` (above) requires the consumer to stage a
+// slice themselves. That works for our own CI, but an external cargo user who
+// merely runs `cargo build --features llm-llamacpp` still pays the full cmake
+// compile. The functions below close that gap: build.rs resolves a published
+// slice on its own, over plain HTTPS, with no `oras`, no env var, and no
+// CMake on the machine.
+//
+// Selection is driven by `natives-manifest.txt`, a generated file committed
+// next to this script and therefore present in the crates.io tarball. It maps
+// (target triple, feature set) to a content digest published at
+// `ghcr.io/xybrid-ai/llama-natives`, and it pins the source identity the
+// slices were built from.
+//
+// Deliberately, the CONSUMER never recomputes the publisher's fingerprint
+// (`tools/scripts/natives-fingerprint.sh`). That fingerprint folds in the
+// *local* cmake/cc/NDK versions, which is right for build-cache parity and
+// wrong for binary distribution: a user without cmake would compute a
+// different key and always miss. Here the publisher declares the digest and
+// the consumer selects by target + features + ABI constraints instead.
+//
+// Every failure mode — absent manifest, stale manifest, no row for this
+// target, offline, HTTP error, digest mismatch, corrupt archive — returns
+// `None` and falls through to the source build. The fast path can never fail
+// a build, only fail to accelerate one.
+
+/// Generated manifest mapping (target, feature-set) to a published slice.
+/// Lives next to this build script so it ships inside the crate tarball.
+const NATIVES_MANIFEST_FILE: &str = "natives-manifest.txt";
+
+/// Hard cap on a downloaded slice so a malformed or hostile response cannot
+/// balloon build-script memory. Real slices are tens of megabytes.
+const MAX_SLICE_BYTES: u64 = 512 * 1024 * 1024;
+
+/// Parsed `natives-manifest.txt`.
+struct NativesManifest {
+    /// OCI repository the slices are published to, e.g.
+    /// `ghcr.io/xybrid-ai/llama-natives`.
+    registry: String,
+    /// Source identity the published slices were built from. All four must
+    /// match the local files or the manifest is stale and is ignored.
+    llama_commit: String,
+    wrapper_cpp: String,
+    wrapper_h: String,
+    build_rs: String,
+    slices: Vec<ManifestSlice>,
+}
+
+/// One published slice row.
+struct ManifestSlice {
+    target: String,
+    /// `base` | `vision` | `vulkan` | `vision-vulkan` — mirrors the
+    /// feature-set names used by `tools/scripts/natives-*.sh`.
+    features: String,
+    /// `sha256:<hex>` of the `native.tar.gz` layer blob.
+    digest: String,
+    /// Oldest glibc the archives link against (linux-gnu rows only).
+    min_glibc: Option<String>,
+    /// MSVC CRT flavour the archives were compiled with (windows rows only).
+    crt: Option<String>,
+}
+
+/// The feature-set name used by the publisher scripts and the manifest.
+fn feature_set_name(vision_enabled: bool, vulkan_enabled: bool) -> &'static str {
+    match (vision_enabled, vulkan_enabled) {
+        (true, true) => "vision-vulkan",
+        (true, false) => "vision",
+        (false, true) => "vulkan",
+        (false, false) => "base",
+    }
+}
+
+/// Read + parse `natives-manifest.txt`. Returns `None` when the file is
+/// absent, unreadable, a future format version, or missing a required
+/// header field — all of which mean "no fast path", never "fail the build".
+///
+/// Unknown keys and unknown `key=value` slice attributes are ignored so a
+/// newer manifest stays readable by an older build script.
+fn load_natives_manifest(manifest_dir: &Path) -> Option<NativesManifest> {
+    let text = std::fs::read_to_string(manifest_dir.join(NATIVES_MANIFEST_FILE)).ok()?;
+
+    let mut registry = None;
+    let mut llama_commit = None;
+    let mut wrapper_cpp = None;
+    let mut wrapper_h = None;
+    let mut build_rs = None;
+    let mut slices = Vec::new();
+
+    for line in text.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let mut fields = line.split_whitespace();
+        let Some(key) = fields.next() else { continue };
+        match key {
+            // A bumped format version means this script cannot be trusted to
+            // read the rows correctly — decline the fast path outright.
+            "version" => {
+                if fields.next() != Some("1") {
+                    return None;
+                }
+            }
+            "registry" => registry = fields.next().map(str::to_string),
+            "llama_commit" => llama_commit = fields.next().map(str::to_string),
+            "wrapper_cpp" => wrapper_cpp = fields.next().map(str::to_string),
+            "wrapper_h" => wrapper_h = fields.next().map(str::to_string),
+            "build_rs" => build_rs = fields.next().map(str::to_string),
+            "slice" => {
+                let (Some(target), Some(features), Some(digest)) =
+                    (fields.next(), fields.next(), fields.next())
+                else {
+                    continue;
+                };
+                let mut min_glibc = None;
+                let mut crt = None;
+                for attr in fields {
+                    if let Some(value) = attr.strip_prefix("min_glibc=") {
+                        min_glibc = Some(value.to_string());
+                    } else if let Some(value) = attr.strip_prefix("crt=") {
+                        crt = Some(value.to_string());
+                    }
+                }
+                slices.push(ManifestSlice {
+                    target: target.to_string(),
+                    features: features.to_string(),
+                    digest: digest.to_string(),
+                    min_glibc,
+                    crt,
+                });
+            }
+            _ => {}
+        }
+    }
+
+    Some(NativesManifest {
+        registry: registry?,
+        llama_commit: llama_commit?,
+        wrapper_cpp: wrapper_cpp?,
+        wrapper_h: wrapper_h?,
+        build_rs: build_rs?,
+        slices,
+    })
+}
+
+/// True when the published slices were built from exactly the sources present
+/// on this machine.
+///
+/// This is the guard that makes a *local* edit safe: change `wrapper.cpp`,
+/// `wrapper.h`, this script, or the pinned llama.cpp commit without
+/// republishing, and the manifest no longer describes what you are building,
+/// so the download is skipped and cmake runs. Each field is a plain hash of a
+/// single file — no derived formula — so the publisher script and this
+/// function cannot drift apart.
+fn manifest_matches_source(manifest: &NativesManifest, manifest_dir: &Path) -> bool {
+    manifest.llama_commit == LLAMA_CPP_COMMIT
+        && sha256_file(&manifest_dir.join("wrapper.cpp")).as_deref() == Some(&manifest.wrapper_cpp)
+        && sha256_file(&manifest_dir.join("wrapper.h")).as_deref() == Some(&manifest.wrapper_h)
+        && sha256_file(&manifest_dir.join("build.rs")).as_deref() == Some(&manifest.build_rs)
+}
+
+/// Quiet completeness check: all archives the link step needs, plus headers.
+/// Mirrors [`resolve_prebuilt`]'s validation without its warnings, which are
+/// meant for a hand-staged directory rather than a cache entry.
+fn slice_complete(dir: &Path, target_os: &str, vision_enabled: bool, vulkan_enabled: bool) -> bool {
+    dir.join("include").is_dir()
+        && required_archives(target_os, vision_enabled, vulkan_enabled)
+            .iter()
+            .all(|archive| archive_present(dir, archive))
+}
+
+/// Reject a slice whose ABI cannot link into *this* build even though the
+/// triple matches. These are the two dimensions the target triple does not
+/// capture; getting them wrong is a link error, not a graceful miss, so they
+/// are checked before the download rather than after.
+fn slice_abi_compatible(ctx: &BuildContext, slice: &ManifestSlice) -> bool {
+    // MSVC: mixing a /MD (dynamic CRT) archive into a /MT (`crt-static`)
+    // build is LNK2038. The publisher builds /MD; a crt-static consumer must
+    // compile from source until a /MT slice exists.
+    if ctx.target_os == "windows" {
+        let crt_static = env::var("CARGO_CFG_TARGET_FEATURE")
+            .map(|features| features.split(',').any(|f| f == "crt-static"))
+            .unwrap_or(false);
+        let wanted = if crt_static { "MT" } else { "MD" };
+        if slice.crt.as_deref().unwrap_or("MD") != wanted {
+            println!(
+                "cargo:warning=llama.cpp: prebuilt slice for {} is CRT {} but this build needs {wanted}; compiling from source",
+                ctx.target,
+                slice.crt.as_deref().unwrap_or("MD")
+            );
+            return false;
+        }
+    }
+
+    // glibc: static archives carry versioned symbol references, so archives
+    // built against a NEWER glibc fail to link on an older host. Only
+    // meaningful when a linux-gnu target is being built on a linux host —
+    // elsewhere `ldd` is absent and the check silently passes.
+    let host_glibc = (ctx.target_os == "linux" && cfg!(target_os = "linux"))
+        .then(host_glibc_version)
+        .flatten();
+    if let (Some(min), Some(host)) = (slice.min_glibc.as_deref(), host_glibc.as_deref()) {
+        if version_lt(host, min) {
+            println!(
+                "cargo:warning=llama.cpp: prebuilt slice for {} needs glibc >= {min} (host has {host}); compiling from source",
+                ctx.target
+            );
+            return false;
+        }
+    }
+
+    true
+}
+
+/// Host glibc version parsed from `ldd --version`'s first line, whose last
+/// whitespace-separated token is the version (e.g. `... GLIBC 2.39-...) 2.39`).
+/// `None` on any non-glibc or non-Linux host.
+fn host_glibc_version() -> Option<String> {
+    let output = process::Command::new("ldd")
+        .arg("--version")
+        .output()
+        .ok()?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let token = stdout.lines().next()?.split_whitespace().last()?;
+    token
+        .chars()
+        .next()
+        .is_some_and(|c| c.is_ascii_digit())
+        .then(|| token.to_string())
+}
+
+/// Dotted-numeric `<` comparison (`2.35 < 2.39`). Non-numeric components
+/// compare as 0, which is fine for the glibc `major.minor` strings this sees.
+fn version_lt(lhs: &str, rhs: &str) -> bool {
+    let parse = |v: &str| -> Vec<u64> {
+        v.split(['.', '-'])
+            .map(|part| part.parse::<u64>().unwrap_or(0))
+            .collect()
+    };
+    let (lhs, rhs) = (parse(lhs), parse(rhs));
+    for index in 0..lhs.len().max(rhs.len()) {
+        let (l, r) = (
+            lhs.get(index).copied().unwrap_or(0),
+            rhs.get(index).copied().unwrap_or(0),
+        );
+        if l != r {
+            return l < r;
+        }
+    }
+    false
+}
+
+/// Where downloaded slices are unpacked. Keyed by content digest, so entries
+/// are immutable and shared across every crate, target, and profile that
+/// resolves the same slice.
+///
+/// `$CARGO_HOME` is preferred so the cache survives `cargo clean`; `$OUT_DIR`
+/// is the last resort and merely scopes the cache to one build directory.
+fn natives_cache_dir(ctx: &BuildContext) -> PathBuf {
+    let dir_from = |var: &str| {
+        env::var_os(var)
+            .filter(|value| !value.is_empty())
+            .map(PathBuf::from)
+    };
+    if let Some(explicit) = dir_from("XYBRID_NATIVES_CACHE_DIR") {
+        return explicit;
+    }
+    if let Some(cargo_home) = dir_from("CARGO_HOME") {
+        return cargo_home.join("xybrid-natives");
+    }
+    ctx.out_dir.join("xybrid-natives")
+}
+
+/// Fast path #2: resolve a published slice for this target + feature set,
+/// downloading it if it is not already cached, and return the install prefix
+/// to link. `None` on any miss — the caller compiles from source.
+fn resolve_downloaded(
+    ctx: &BuildContext,
+    vision_enabled: bool,
+    vulkan_enabled: bool,
+) -> Option<PathBuf> {
+    if env_flag("XYBRID_NATIVES_FORCE_SOURCE") {
+        return None;
+    }
+    // Respect the user's global "no network during builds" switch rather than
+    // hanging on a connect timeout in a sandboxed or air-gapped build.
+    if env::var("CARGO_NET_OFFLINE").is_ok_and(|value| value == "true") {
+        return None;
+    }
+
+    let manifest = load_natives_manifest(&ctx.manifest_dir)?;
+    if !manifest_matches_source(&manifest, &ctx.manifest_dir) {
+        println!(
+            "cargo:warning=llama.cpp: natives manifest does not match the local sources (edited wrapper/build.rs, or a bumped llama.cpp pin); compiling from source"
+        );
+        return None;
+    }
+
+    let features = feature_set_name(vision_enabled, vulkan_enabled);
+    // A target with no published row is the common case for exotic triples —
+    // stay silent, this is not a problem worth a warning.
+    let slice = manifest
+        .slices
+        .iter()
+        .find(|slice| slice.target == ctx.target && slice.features == features)?;
+    if !slice_abi_compatible(ctx, slice) {
+        return None;
+    }
+
+    let hex = slice.digest.strip_prefix("sha256:")?;
+    let cache_root = natives_cache_dir(ctx);
+    let dir = cache_root.join(hex);
+
+    if slice_complete(&dir, &ctx.target_os, vision_enabled, vulkan_enabled) {
+        println!(
+            "cargo:warning=llama.cpp: using cached prebuilt natives for {} ({features})",
+            ctx.target
+        );
+        return Some(dir);
+    }
+
+    let registry = env::var("XYBRID_NATIVES_PKG").unwrap_or_else(|_| manifest.registry.clone());
+    println!(
+        "cargo:warning=llama.cpp: downloading prebuilt natives for {} ({features}) from {registry} — set XYBRID_NATIVES_FORCE_SOURCE=1 to build from source instead",
+        ctx.target
+    );
+
+    let bytes = fetch_slice_blob(&registry, &slice.digest)?;
+    let actual = sha256_hex(&bytes);
+    if actual != hex {
+        println!(
+            "cargo:warning=llama.cpp: prebuilt slice digest mismatch (expected {hex}, got {actual}); compiling from source"
+        );
+        return None;
+    }
+    unpack_slice(&bytes, &cache_root, &dir)?;
+
+    if !slice_complete(&dir, &ctx.target_os, vision_enabled, vulkan_enabled) {
+        println!(
+            "cargo:warning=llama.cpp: downloaded slice for {} is incomplete; compiling from source",
+            ctx.target
+        );
+        return None;
+    }
+    println!(
+        "cargo:warning=llama.cpp: linked prebuilt natives for {} ({features}); skipped the cmake build",
+        ctx.target
+    );
+    Some(dir)
+}
+
+/// Download one layer blob by digest from an OCI registry, anonymously.
+///
+/// Two requests: a pull-scoped token, then the content-addressed blob. Going
+/// straight to the blob by digest skips the tag/manifest lookup entirely,
+/// which is also what makes the download tamper-evident — the digest is
+/// pinned in the committed manifest and verified by the caller.
+fn fetch_slice_blob(registry: &str, digest: &str) -> Option<Vec<u8>> {
+    use std::io::Read;
+
+    let (host, repository) = registry.split_once('/')?;
+    let url = format!("https://{host}/v2/{repository}/blobs/{digest}");
+    let token = registry_pull_token(host, repository);
+
+    // Explicit timeouts: ureq applies none by default, and a build script that
+    // hangs on a wedged connection is far worse than one that gives up and
+    // compiles. The read timeout is generous because slices are tens of MB.
+    let agent = ureq::AgentBuilder::new()
+        .timeout_connect(Duration::from_secs(15))
+        .timeout_read(Duration::from_secs(600))
+        .build();
+
+    // Two attempts: losing a 20-minute cmake compile to one transient blip is
+    // a bad trade, and a genuinely dead network costs only the connect timeout
+    // twice before falling through.
+    let mut last_error = None;
+    for _ in 0..2 {
+        let mut request = agent.get(&url).set("Accept", "application/octet-stream");
+        if let Some(token) = &token {
+            request = request.set("Authorization", &format!("Bearer {token}"));
+        }
+        let response = match request.call() {
+            Ok(response) => response,
+            Err(e) => {
+                last_error = Some(e.to_string());
+                continue;
+            }
+        };
+        let mut buffer = Vec::new();
+        match response
+            .into_reader()
+            .take(MAX_SLICE_BYTES)
+            .read_to_end(&mut buffer)
+        {
+            Ok(_) => return Some(buffer),
+            Err(e) => last_error = Some(e.to_string()),
+        }
+    }
+
+    println!(
+        "cargo:warning=llama.cpp: prebuilt natives download failed ({}); compiling from source",
+        last_error.as_deref().unwrap_or("unknown error")
+    );
+    None
+}
+
+/// Pull token for the slice registry.
+///
+/// `XYBRID_NATIVES_TOKEN` wins when set — that is the escape hatch for a
+/// PRIVATE mirror (or for our own package before its visibility is flipped).
+/// Otherwise an anonymous pull token is requested, which only a public
+/// repository will issue; `None` degrades to an unauthenticated request.
+fn registry_pull_token(host: &str, repository: &str) -> Option<String> {
+    if let Some(token) = env::var("XYBRID_NATIVES_TOKEN")
+        .ok()
+        .filter(|token| !token.is_empty())
+    {
+        return Some(token);
+    }
+    let url = format!("https://{host}/token?scope=repository:{repository}:pull&service={host}");
+    let body = ureq::AgentBuilder::new()
+        .timeout_connect(Duration::from_secs(15))
+        .timeout_read(Duration::from_secs(30))
+        .build()
+        .get(&url)
+        .call()
+        .ok()?
+        .into_string()
+        .ok()?;
+    json_string_field(&body, "token").or_else(|| json_string_field(&body, "access_token"))
+}
+
+/// Minimal `{"key":"value"}` extractor, so the build script needs no JSON
+/// dependency. Registry tokens are JWT/base64url text with no escapes; a
+/// value containing a backslash yields `None` rather than being mis-decoded.
+fn json_string_field(body: &str, key: &str) -> Option<String> {
+    let needle = format!("\"{key}\"");
+    let rest = &body[body.find(&needle)? + needle.len()..];
+    let rest = rest.trim_start().strip_prefix(':')?.trim_start();
+    let rest = rest.strip_prefix('"')?;
+    let value = &rest[..rest.find('"')?];
+    (!value.is_empty() && !value.contains('\\')).then(|| value.to_string())
+}
+
+/// Unpack `native.tar.gz` bytes into `dst` atomically: extract to a
+/// process-private temp dir, then rename into place. A concurrent build that
+/// wins the race leaves a complete `dst`, which we adopt.
+///
+/// `tar::Archive::unpack` rejects absolute and `..` paths, so a hostile
+/// archive cannot escape the cache directory.
+fn unpack_slice(bytes: &[u8], cache_root: &Path, dst: &Path) -> Option<()> {
+    std::fs::create_dir_all(cache_root).ok()?;
+    let tmp = cache_root.join(format!(".tmp-{}", process::id()));
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::create_dir_all(&tmp).ok()?;
+
+    let unpacked = tar::Archive::new(flate2::read::GzDecoder::new(bytes)).unpack(&tmp);
+    if let Err(e) = unpacked {
+        println!("cargo:warning=llama.cpp: prebuilt natives archive is corrupt: {e}");
+        let _ = std::fs::remove_dir_all(&tmp);
+        return None;
+    }
+
+    match std::fs::rename(&tmp, dst) {
+        Ok(()) => Some(()),
+        Err(_) => {
+            // Either another build populated `dst` first (fine — content is
+            // digest-addressed, so it is the same bytes) or the rename failed
+            // for real, in which case `dst` is absent and we fall to source.
+            let _ = std::fs::remove_dir_all(&tmp);
+            dst.is_dir().then_some(())
+        }
+    }
+}
+
+/// Lowercase hex SHA-256 of a byte slice.
+fn sha256_hex(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    let digest = Sha256::digest(bytes);
+    digest.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+/// Lowercase hex SHA-256 of a file; `None` when it cannot be read.
+fn sha256_file(path: &Path) -> Option<String> {
+    std::fs::read(path).ok().map(|bytes| sha256_hex(&bytes))
 }
 
 /// Publisher hook: when `XYBRID_NATIVES_EXPORT_DIR` is set, copy the freshly
