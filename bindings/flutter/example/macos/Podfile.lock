@@ -1,0 +1,35 @@
+PODS:
+  - battery_plus (0.0.1):
+    - FlutterMacOS
+  - FlutterMacOS (1.0.0)
+  - path_provider_foundation (0.0.1):
+    - Flutter
+    - FlutterMacOS
+  - xybrid_flutter (0.1.0):
+    - FlutterMacOS
+
+DEPENDENCIES:
+  - battery_plus (from `Flutter/ephemeral/.symlinks/plugins/battery_plus/macos`)
+  - FlutterMacOS (from `Flutter/ephemeral`)
+  - path_provider_foundation (from `Flutter/ephemeral/.symlinks/plugins/path_provider_foundation/darwin`)
+  - xybrid_flutter (from `Flutter/ephemeral/.symlinks/plugins/xybrid_flutter/macos`)
+
+EXTERNAL SOURCES:
+  battery_plus:
+    :path: Flutter/ephemeral/.symlinks/plugins/battery_plus/macos
+  FlutterMacOS:
+    :path: Flutter/ephemeral
+  path_provider_foundation:
+    :path: Flutter/ephemeral/.symlinks/plugins/path_provider_foundation/darwin
+  xybrid_flutter:
+    :path: Flutter/ephemeral/.symlinks/plugins/xybrid_flutter/macos
+
+SPEC CHECKSUMS:
+  battery_plus: 0ed4cf1e771b535a89ac7323e0855ec734cf745f
+  FlutterMacOS: d0db08ddef1a9af05a5ec4b724367152bb0500b1
+  path_provider_foundation: 0b743cbb62d8e47eab856f09262bb8c1ddcfe6ba
+  xybrid_flutter: 6bdc9742e4ad5a35f7587b7951a37382ed03f7ca
+
+PODFILE CHECKSUM: 54d867c82ac51cbd61b565781b9fada492027009
+
+COCOAPODS: 1.16.2
