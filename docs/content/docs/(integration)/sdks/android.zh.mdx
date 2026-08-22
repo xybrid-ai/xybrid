@@ -34,6 +34,8 @@ if (result.success) {
 }
 ```
 
+`Xybrid.init(context)` 还会注册 `BatteryManager` 以及（在 API 29+ 上）`PowerManager.OnThermalStatusChangedListener` 观察者，将读数转发给路由引擎。
+
 ## 初始化
 
 无论是否鉴权，推理都完全在本地运行。传入 `apiKey` 即可点亮[控制台](https://dashboard.xybrid.dev)——这一次调用会启动遥测导出器，你的 `model.run(...)` 调用便会自动上报执行轨迹：

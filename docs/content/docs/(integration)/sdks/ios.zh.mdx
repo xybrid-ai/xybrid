@@ -41,6 +41,8 @@ if result.success {
 }
 ```
 
+在 iOS 上，`Xybrid.initialize()` 会启用 `UIDevice` 电池监测并订阅 `UIDevice.batteryLevelDidChangeNotification`，将读数转发给路由引擎。Apple 平台上的温度状态则直接在 `xybrid-core` 中从 `NSProcessInfo.thermalState` 获取。
+
 ## 初始化
 
 无论是否鉴权，推理都完全在本地运行。传入 `apiKey` 即可点亮[控制台](https://dashboard.xybrid.dev)——这一次调用会启动遥测导出器，你的 `model.run(...)` 调用便会自动上报执行轨迹：
@@ -178,10 +180,15 @@ SDK 提供便捷短别名：
 
 | 别名 | 完整类型 |
 |-------|-----------|
-| `ModelLoader` | 显式加载模型的具体类型 |
 | `Model` | `XybridModel` |
 | `Envelope` | `XybridEnvelope` |
 | `Result` | `XybridResult` |
+| `VoiceInfo` | `XybridVoiceInfo` |
+| `GenerationConfig` | `XybridGenerationConfig` |
+| `XybridSDKError` | `XybridError` |
+
+`ModelLoader` 是廉价的模型引用。通过 `Xybrid.model(...)` 构造，
+再在推理前显式调用 `load()`。
 
 ---
 
