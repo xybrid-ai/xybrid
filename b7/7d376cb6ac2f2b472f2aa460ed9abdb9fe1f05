@@ -1,0 +1,40 @@
+.github/workflows/build-flutter.yml
+  s_c142039d7a2326::t_b97cacd92b6a2b 39-41,110,285
+.github/workflows/test-candle.yml
+  s_c142039d7a2326::t_b97cacd92b6a2b 57-59,70,90
+.github/workflows/test-ci.yml
+  s_c142039d7a2326::t_b97cacd92b6a2b 18-20,46,103,172,247
+AGENTS.md
+  s_c142039d7a2326::t_03378daf0899a0 42-70,167-168,420-423
+.github/workflows/ci.yml
+  s_c142039d7a2326::t_fdfbeeae9b29e1 27-29,141,174,185,198,214,231,263,289,308,325,355
+  s_c142039d7a2326::t_627c80d865b639 167-171
+.github/workflows/release-prep.yml
+  s_c142039d7a2326::t_b97cacd92b6a2b 67-69,546,1212
+tools/scripts/toolchain-sync.sh
+  s_c142039d7a2326::t_722646579be17e 1-92
+.github/workflows/release-publish.yml
+  s_c142039d7a2326::t_b97cacd92b6a2b 59-61,205
+rust-toolchain.toml
+  s_c142039d7a2326::t_047a086341741a 1-26
+.github/workflows/build-natives.yml
+  s_c142039d7a2326::t_b97cacd92b6a2b 48-50,119
+.github/workflows/test-whispercpp.yml
+  s_c142039d7a2326::t_b52c7b3aa2d6fb 49-51,63
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "b77d376cb6ac2f2b472f2aa460ed9abdb9fe1f05",
+  "prompts": {},
+  "sessions": {
+    "s_c142039d7a2326": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0e80a701-2459-4c6d-b428-08e244ede94d",
+        "model": "claude-opus-5"
+      },
+      "human_author": "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
+    }
+  }
+}
