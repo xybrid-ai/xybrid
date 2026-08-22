@@ -1,0 +1,21 @@
+bindings/flutter/example/macos/Podfile.lock
+  s_c142039d7a2326::t_1d43808c1caf5c 1-35
+bindings/flutter/example/macos/Runner.xcodeproj/project.pbxproj
+  s_c142039d7a2326::t_7ea9bf13c30b1b 30-31,65-66,71,83-86,88,90,98,106,140,188-201,205-206,218,237,243,364-424,476,491,506
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "07d449a33a6cc7c33b58b5885f602e04c50fa15a",
+  "prompts": {},
+  "sessions": {
+    "s_c142039d7a2326": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0e80a701-2459-4c6d-b428-08e244ede94d",
+        "model": "unknown"
+      },
+      "human_author": "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
+    }
+  }
+}
