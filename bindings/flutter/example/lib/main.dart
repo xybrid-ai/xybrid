@@ -39,7 +39,7 @@ class DemoHomePageState extends State<DemoHomePage> {
 
       if (!mounted) return;
       setState(() => status = "Loading whisper tiny");
-      await XybridModelLoader.fromRegistry('whisper-tiny').load();
+      await XybridModelLoader.fromRegistry('whisper-tiny-ggml').load();
 
       if (!mounted) return;
       setState(() => status = "Whisper loaded");
