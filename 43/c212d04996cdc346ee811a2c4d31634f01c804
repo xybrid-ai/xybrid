@@ -1,0 +1,25 @@
+docs/content/docs/(integration)/sdks/ios.zh.mdx
+  s_c142039d7a2326::t_0427c0cfe641c2 44-45,186-191
+docs/content/docs/(integration)/sdks/android.zh.mdx
+  s_c142039d7a2326::t_0427c0cfe641c2 37-38
+docs/content/docs/(integration)/sdks/kotlin.zh.mdx
+  s_c142039d7a2326::t_0427c0cfe641c2 92-97
+  s_c142039d7a2326::t_512ccbf0df0afb 99-103
+  s_c142039d7a2326::t_13e5824f1980ca 98
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "43c212d04996cdc346ee811a2c4d31634f01c804",
+  "prompts": {},
+  "sessions": {
+    "s_c142039d7a2326": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0e80a701-2459-4c6d-b428-08e244ede94d",
+        "model": "claude-opus-5"
+      },
+      "human_author": "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
+    }
+  }
+}
