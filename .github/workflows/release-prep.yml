@@ -64,6 +64,9 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
+  # Pinned Rust toolchain. Canonical value lives in rust-toolchain.toml;
+  # `tools/scripts/toolchain-sync.sh --check` fails CI if they drift.
+  RUST_VERSION: "1.98.0"
   RUST_BACKTRACE: 1
   NDK_VERSION: "26.1.10909125"
   FLUTTER_VERSION: "3.35.7"
@@ -540,7 +543,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
         with:
-          toolchain: stable
+          toolchain: ${{ env.RUST_VERSION }}
           targets: i686-linux-android
 
       - name: Setup sccache
@@ -1206,7 +1209,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
         with:
-          toolchain: stable
+          toolchain: ${{ env.RUST_VERSION }}
 
       - name: Install cargo-cyclonedx
         run: cargo install cargo-cyclonedx --locked

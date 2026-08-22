@@ -54,6 +54,9 @@ permissions: read-all
 
 env:
   CARGO_TERM_COLOR: always
+  # Pinned Rust toolchain. Canonical value lives in rust-toolchain.toml;
+  # `tools/scripts/toolchain-sync.sh --check` fails CI if they drift.
+  RUST_VERSION: "1.98.0"
   RUST_BACKTRACE: 1
 
 jobs:
@@ -64,7 +67,7 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
         with:
-          toolchain: stable
+          toolchain: ${{ env.RUST_VERSION }}
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           key: candle
@@ -84,7 +87,7 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
         with:
-          toolchain: stable
+          toolchain: ${{ env.RUST_VERSION }}
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           key: candle-integration
