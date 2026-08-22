@@ -1,0 +1,21 @@
+.github/workflows/build-natives.yml
+  s_570d7ab18f5032::t_fda903de611697 202-203,205,223-227,297-299,327-332,337,369-372,377
+tools/scripts/natives-manifest.sh
+  s_570d7ab18f5032::t_ccb2d0c4363f42 22-28,40-47,62-69,84-87,97-98,118-121,131,135-162,165-167,169
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "91868687c82d16f4644add89378d84d609956a12",
+  "prompts": {},
+  "sessions": {
+    "s_570d7ab18f5032": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c82da43a-5146-4f39-91b8-559de56586f7",
+        "model": "claude-fable-5"
+      },
+      "human_author": "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
+    }
+  }
+}
