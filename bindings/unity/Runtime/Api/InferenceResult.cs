@@ -78,6 +78,9 @@ namespace Xybrid
         /// <summary>Gets the text output (for ASR or LLM models), or null if not applicable.</summary>
         public string Text { get; }
 
+        /// <summary>Gets model reasoning separately from the final answer text.</summary>
+        public string ReasoningContent { get; }
+
         /// <summary>Gets the inference latency in milliseconds.</summary>
         public uint LatencyMs { get; }
 
@@ -111,6 +114,21 @@ namespace Xybrid
         /// </summary>
         public XybridBolt.XybridExecutionTarget ExecutionTarget { get; }
 
+        /// <summary>
+        /// Tool calls the model asked for this turn.
+        /// </summary>
+        /// <remarks>
+        /// Empty unless the request offered tools via
+        /// <see cref="GenerationConfig.AddTool"/>. Run each call yourself, then
+        /// feed the outcomes back with <see cref="Envelope.ToolResults"/>. The
+        /// raw tool-call block stays in <see cref="Text"/> untouched, and
+        /// malformed model output yields an empty list rather than an error.
+        /// </remarks>
+        public IReadOnlyList<XybridBolt.XybridToolCall> ToolCalls { get; }
+
+        /// <summary>Gets whether the model asked to call at least one tool.</summary>
+        public bool HasToolCalls => ToolCalls != null && ToolCalls.Count > 0;
+
         private InferenceResult(
             bool success,
             string error,
@@ -120,8 +138,10 @@ namespace Xybrid
             byte[] audioBytes,
             float[] embedding,
             InferenceMetrics metrics,
+            string reasoningContent,
             XybridBolt.XybridExecutionTarget executionTarget =
-                XybridBolt.XybridExecutionTarget.Local)
+                XybridBolt.XybridExecutionTarget.Local,
+            IReadOnlyList<XybridBolt.XybridToolCall> toolCalls = null)
         {
             Success = success;
             Error = error;
@@ -131,7 +151,9 @@ namespace Xybrid
             AudioBytes = audioBytes;
             Embedding = embedding;
             Metrics = metrics;
+            ReasoningContent = reasoningContent;
             ExecutionTarget = executionTarget;
+            ToolCalls = toolCalls ?? System.Array.Empty<XybridBolt.XybridToolCall>();
         }
 
         /// <summary>Decode a successful bolt result into the public shape.</summary>
@@ -162,7 +184,9 @@ namespace Xybrid
                 audioBytes: audio,
                 embedding: embedding,
                 metrics: MapMetrics(result.Metrics),
-                executionTarget: result.ExecutionTarget);
+                reasoningContent: result.ReasoningContent,
+                executionTarget: result.ExecutionTarget,
+                toolCalls: result.ToolCalls ?? System.Array.Empty<XybridBolt.XybridToolCall>());
         }
 
         /// <summary>
@@ -179,7 +203,8 @@ namespace Xybrid
                 outputType: OutputType.Unknown,
                 audioBytes: null,
                 embedding: null,
-                metrics: new InferenceMetrics(0, null, null, null, null, null, Array.Empty<StageLatency>()));
+                metrics: new InferenceMetrics(0, null, null, null, null, null, Array.Empty<StageLatency>()),
+                reasoningContent: null);
 
         private static OutputType MapOutputType(XybridBolt.XybridOutputType outputType)
         {

@@ -2,7 +2,7 @@
 """Load a deployed bolt native library and exercise a real boltffi call.
 
 Proves a native plugin is *functional* — loads under the OS loader and completes
-a live FFI round-trip (boltffi_version -> owned wire buffer -> decode -> free) —
+a live FFI round-trip (boltffi_function_xybrid_bolt_version -> owned wire buffer -> decode -> free) —
 not merely present on disk. Used by the Windows Unity verify to guard the shipped
 cargo/MSVC `xybrid_bolt.dll`; the Bazel windows-gnu DLL gets a fuller managed C#
 smoke in `.github/workflows/bazel.yml`.
@@ -42,7 +42,7 @@ def _decode_wire_string(raw: bytes) -> str:
 
 
 def verify(lib_path: str) -> str:
-    """Load `lib_path`, call boltffi_version, and return the decoded version."""
+    """Load `lib_path`, call the version export, and return the decoded version."""
     directory = os.path.dirname(os.path.abspath(lib_path))
     # Let the OS loader resolve sibling deps (e.g. a co-located onnxruntime.dll)
     # if the library references any. Keep the returned handle alive through the
@@ -55,18 +55,18 @@ def verify(lib_path: str) -> str:
     )
     with dll_directory:
         lib = ctypes.CDLL(os.path.abspath(lib_path))
-        lib.boltffi_version.restype = FfiBuf
+        lib.boltffi_function_xybrid_bolt_version.restype = FfiBuf
         lib.boltffi_free_buf.argtypes = [FfiBuf]
         lib.boltffi_free_buf.restype = None
 
-        buf = lib.boltffi_version()
+        buf = lib.boltffi_function_xybrid_bolt_version()
         try:
             if not buf.ptr or not buf.len:
-                raise RuntimeError("boltffi_version returned an empty buffer")
+                raise RuntimeError("the version export returned an empty buffer")
             raw = ctypes.string_at(buf.ptr, int(buf.len))
             version = _decode_wire_string(raw)
             if not version:
-                raise RuntimeError("boltffi_version decoded to an empty string")
+                raise RuntimeError("the version export decoded to an empty string")
             return version
         finally:
             lib.boltffi_free_buf(buf)
@@ -81,7 +81,7 @@ def main() -> int:
     except (OSError, RuntimeError, UnicodeDecodeError) as error:
         print(f"verify-bolt-load: {error}", file=sys.stderr)
         return 1
-    print(f"bolt native loads; boltffi_version -> {version!r}")
+    print(f"bolt native loads; version -> {version!r}")
     return 0
 
 

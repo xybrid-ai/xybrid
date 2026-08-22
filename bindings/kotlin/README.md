@@ -12,7 +12,7 @@ Add to your `build.gradle.kts`:
 
 ```gradle
 dependencies {
-    implementation("ai.xybrid:xybrid-kotlin:0.4.1")
+    implementation("ai.xybrid:xybrid-kotlin:0.5.0")
 }
 ```
 
@@ -126,8 +126,6 @@ answer text and surfaces it on `reasoningContent` — `null` for non-thinking
 models. Nothing to enable; just read it if you want it.
 
 ```kotlin
-import ai.xybrid.reasoningContent
-
 val result = model.run(Envelope.text("Is 97 a prime number? Reason, then answer."))
 result.text?.let { println("Answer: $it") }
 result.reasoningContent?.let { println("Reasoning: $it") }
@@ -243,6 +241,19 @@ The Bazel AAR bundles the ORT libraries into `jni/<abi>/` automatically, so stag
 The Kotlin bindings are generated from `crates/xybrid-bolt/` using [BoltFFI](https://crates.io/crates/boltffi):
 - Single Rust source generates Swift, Kotlin, Java, C#, WASM, and a C header
 - Memory-safe wrappers with proper resource cleanup
+
+Regenerate `XybridBolt.kt` with the script, never by hand:
+
+```bash
+python3 tools/scripts/gen_kotlin_bolt.py            # regenerate + write
+python3 tools/scripts/gen_kotlin_bolt.py --check    # fail on drift
+```
+
+It runs `boltffi generate kotlin` and applies the one post-process the output
+needs: boltffi 0.29 emits each `XybridError` payload field verbatim, so the
+fourteen variants carrying a `message` collide with `Throwable.message` and the
+binding does not compile without an `override` modifier. A plain copy of the
+generator output silently reintroduces that break.
 
 ## Building Native Libraries
 

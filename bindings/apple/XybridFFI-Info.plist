@@ -7,8 +7,8 @@
 	     CFBundlePackageType) on top of these; only the version keys must be
 	     supplied. This is the embedded static framework's Info.plist. -->
 	<key>CFBundleVersion</key>
-	<string>0.4.1</string>
+	<string>0.5.0</string>
 	<key>CFBundleShortVersionString</key>
-	<string>0.4.1</string>
+	<string>0.5.0</string>
 </dict>
 </plist>

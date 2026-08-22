@@ -3,8 +3,7 @@
 // </auto-generated>
 #nullable enable
 
-using System;
-using System.Text;
+using System.Runtime.InteropServices;
 
 namespace XybridBolt
 {
@@ -14,9 +13,18 @@ namespace XybridBolt
     /// [`json_schema_to_gbnf`], or pass raw GBNF. Appended last: `#[data]`
     /// PODs serialize by field order across the FFI boundary.
     /// </param>
+    /// <param name="Tools">
+    /// Tools the model may call this turn. Empty means no tool calling —
+    /// existing behavior, unchanged. Appended after `grammar` for the same
+    /// field-order reason.
+    ///
+    /// Tool calling is llama.cpp-only today; unsupported paths (no embedded
+    /// chat template, the mistralrs backend, the cloud fallback leg) reject
+    /// tool-bearing requests rather than quietly generating without them.
+    /// </param>
     public readonly struct XybridGenerationConfig
     {
-        public XybridGenerationConfig(uint? MaxTokens, float? Temperature, float? TopP, float? MinP, uint? TopK, float? RepetitionPenalty, string[] StopSequences, string? Grammar) { this.MaxTokens = MaxTokens; this.Temperature = Temperature; this.TopP = TopP; this.MinP = MinP; this.TopK = TopK; this.RepetitionPenalty = RepetitionPenalty; this.StopSequences = StopSequences; this.Grammar = Grammar; }
+        public XybridGenerationConfig(uint? MaxTokens, float? Temperature, float? TopP, float? MinP, uint? TopK, float? RepetitionPenalty, string[] StopSequences, string? Grammar, XybridToolDefinition[] Tools) { this.MaxTokens = MaxTokens; this.Temperature = Temperature; this.TopP = TopP; this.MinP = MinP; this.TopK = TopK; this.RepetitionPenalty = RepetitionPenalty; this.StopSequences = StopSequences; this.Grammar = Grammar; this.Tools = Tools; }
         public uint? MaxTokens { get; }
         public float? Temperature { get; }
         public float? TopP { get; }
@@ -25,40 +33,115 @@ namespace XybridBolt
         public float? RepetitionPenalty { get; }
         public string[] StopSequences { get; }
         public string? Grammar { get; }
+        public XybridToolDefinition[] Tools { get; }
 
         internal static XybridGenerationConfig Decode(WireReader reader) =>
             new XybridGenerationConfig(
-                reader.ReadU8() == 0 ? (uint?)null : reader.ReadU32(),
-                reader.ReadU8() == 0 ? (float?)null : reader.ReadF32(),
-                reader.ReadU8() == 0 ? (float?)null : reader.ReadF32(),
-                reader.ReadU8() == 0 ? (float?)null : reader.ReadF32(),
-                reader.ReadU8() == 0 ? (uint?)null : reader.ReadU32(),
-                reader.ReadU8() == 0 ? (float?)null : reader.ReadF32(),
-                reader.ReadEncodedArray<string>(r0 => r0.ReadString()),
-                reader.ReadU8() == 0 ? (string?)null : reader.ReadString()
+                reader.ReadU8() == 0 ? default(uint?) : reader.ReadU32(),
+                reader.ReadU8() == 0 ? default(float?) : reader.ReadF32(),
+                reader.ReadU8() == 0 ? default(float?) : reader.ReadF32(),
+                reader.ReadU8() == 0 ? default(float?) : reader.ReadF32(),
+                reader.ReadU8() == 0 ? default(uint?) : reader.ReadU32(),
+                reader.ReadU8() == 0 ? default(float?) : reader.ReadF32(),
+                reader.ReadArray(reader => reader.ReadString()),
+                reader.ReadU8() == 0 ? default(string?) : reader.ReadString(),
+                reader.ReadArray(reader => XybridToolDefinition.Decode(reader))
             );
 
-        internal int WireEncodedSize() =>
-            (1 + (this.MaxTokens is { } sizeOpt0 ? 4 : 0)) +
-            (1 + (this.Temperature is { } sizeOpt1 ? 4 : 0)) +
-            (1 + (this.TopP is { } sizeOpt2 ? 4 : 0)) +
-            (1 + (this.MinP is { } sizeOpt3 ? 4 : 0)) +
-            (1 + (this.TopK is { } sizeOpt4 ? 4 : 0)) +
-            (1 + (this.RepetitionPenalty is { } sizeOpt5 ? 4 : 0)) +
-            WireWriter.EncodedArraySize(this.StopSequences, sizeItem0 => (4 + Encoding.UTF8.GetByteCount(sizeItem0))) +
-            (1 + (this.Grammar is { } sizeOpt6 ? (4 + Encoding.UTF8.GetByteCount(sizeOpt6)) : 0));
-
-        internal void WireEncodeTo(WireWriter wire)
+        internal void Encode(WireWriter writer)
         {
-            if (this.MaxTokens is { } opt0) { wire.WriteU8((byte)1); wire.WriteU32(opt0); } else { wire.WriteU8((byte)0); };
-            if (this.Temperature is { } opt1) { wire.WriteU8((byte)1); wire.WriteF32(opt1); } else { wire.WriteU8((byte)0); };
-            if (this.TopP is { } opt2) { wire.WriteU8((byte)1); wire.WriteF32(opt2); } else { wire.WriteU8((byte)0); };
-            if (this.MinP is { } opt3) { wire.WriteU8((byte)1); wire.WriteF32(opt3); } else { wire.WriteU8((byte)0); };
-            if (this.TopK is { } opt4) { wire.WriteU8((byte)1); wire.WriteU32(opt4); } else { wire.WriteU8((byte)0); };
-            if (this.RepetitionPenalty is { } opt5) { wire.WriteU8((byte)1); wire.WriteF32(opt5); } else { wire.WriteU8((byte)0); };
-            wire.WriteI32(this.StopSequences.Length);
-            foreach (string item0 in this.StopSequences) { wire.WriteString(item0); };
-            if (this.Grammar is { } opt6) { wire.WriteU8((byte)1); wire.WriteString(opt6); } else { wire.WriteU8((byte)0); };
+            {
+                if (this.MaxTokens is { } boltffiValue0)
+                {
+                    writer.WriteU8(1);
+                    writer.WriteU32(boltffiValue0);
+                }
+                else
+                {
+                    writer.WriteU8(0);
+                }
+            }
+            {
+                if (this.Temperature is { } boltffiValue0)
+                {
+                    writer.WriteU8(1);
+                    writer.WriteF32(boltffiValue0);
+                }
+                else
+                {
+                    writer.WriteU8(0);
+                }
+            }
+            {
+                if (this.TopP is { } boltffiValue0)
+                {
+                    writer.WriteU8(1);
+                    writer.WriteF32(boltffiValue0);
+                }
+                else
+                {
+                    writer.WriteU8(0);
+                }
+            }
+            {
+                if (this.MinP is { } boltffiValue0)
+                {
+                    writer.WriteU8(1);
+                    writer.WriteF32(boltffiValue0);
+                }
+                else
+                {
+                    writer.WriteU8(0);
+                }
+            }
+            {
+                if (this.TopK is { } boltffiValue0)
+                {
+                    writer.WriteU8(1);
+                    writer.WriteU32(boltffiValue0);
+                }
+                else
+                {
+                    writer.WriteU8(0);
+                }
+            }
+            {
+                if (this.RepetitionPenalty is { } boltffiValue0)
+                {
+                    writer.WriteU8(1);
+                    writer.WriteF32(boltffiValue0);
+                }
+                else
+                {
+                    writer.WriteU8(0);
+                }
+            }
+            {
+                writer.WriteU32(checked((uint)this.StopSequences.Length));
+                foreach (var boltffiValue0 in this.StopSequences)
+                {
+                    writer.WriteString(boltffiValue0);
+                }
+            }
+            {
+                if (this.Grammar is { } boltffiValue0)
+                {
+                    writer.WriteU8(1);
+                    writer.WriteString(boltffiValue0);
+                }
+                else
+                {
+                    writer.WriteU8(0);
+                }
+            }
+            {
+                writer.WriteU32(checked((uint)this.Tools.Length));
+                foreach (var boltffiValue0 in this.Tools)
+                {
+                    boltffiValue0.Encode(writer);
+                }
+            }
         }
+
     }
 }

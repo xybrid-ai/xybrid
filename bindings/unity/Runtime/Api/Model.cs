@@ -241,6 +241,25 @@ namespace Xybrid
         }
 
         /// <summary>
+        /// Gets whether the model bundle declares local tool-calling support.
+        /// </summary>
+        /// <remarks>
+        /// Advisory tri-state: null means the bundle says nothing, so the app
+        /// cannot tell. Gate tool UI on it; enforcement stays at run time — a
+        /// request carrying <see cref="GenerationConfig.AddTool"/> tools against a
+        /// model whose chat template has no tool support fails regardless of what
+        /// this reports.
+        /// </remarks>
+        public bool? SupportsToolCalling
+        {
+            get
+            {
+                ThrowIfDisposed();
+                return _bolt.SupportsToolCalling();
+            }
+        }
+
+        /// <summary>
         /// Runs streaming inference, invoking the callback for each generated token.
         /// Blocks until inference is complete.
         /// </summary>

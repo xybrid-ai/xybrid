@@ -164,6 +164,11 @@ abstract class XybridRustLibApi extends BaseApi {
   FfiEnvelope crateApiEnvelopeFfiEnvelopeTextWithRole(
       {required String text, required FfiMessageRole role});
 
+  FfiEnvelope crateApiEnvelopeFfiEnvelopeToolResults(
+      {required String userText,
+      required String priorAssistantText,
+      required List<FfiToolResult> results});
+
   FfiEnvelope crateApiEnvelopeFfiEnvelopeUserMessage(
       {required String text, required List<FfiEnvelope> images});
 
@@ -243,6 +248,8 @@ abstract class XybridRustLibApi extends BaseApi {
 
   Future<FfiStreamSession> crateApiModelFfiModelStream(
       {required FfiModel that, required FfiStreamingConfig config});
+
+  bool? crateApiModelFfiModelSupportsToolCalling({required FfiModel that});
 
   Future<void> crateApiModelFfiModelUnload({required FfiModel that});
 
@@ -1047,6 +1054,36 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
       );
 
   @override
+  FfiEnvelope crateApiEnvelopeFfiEnvelopeToolResults(
+      {required String userText,
+      required String priorAssistantText,
+      required List<FfiToolResult> results}) {
+    return handler.executeSync(SyncTask(
+      callFfi: () {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_String(userText, serializer);
+        sse_encode_String(priorAssistantText, serializer);
+        sse_encode_list_ffi_tool_result(results, serializer);
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 24)!;
+      },
+      codec: SseCodec(
+        decodeSuccessData:
+            sse_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiEnvelope,
+        decodeErrorData: sse_decode_String,
+      ),
+      constMeta: kCrateApiEnvelopeFfiEnvelopeToolResultsConstMeta,
+      argValues: [userText, priorAssistantText, results],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateApiEnvelopeFfiEnvelopeToolResultsConstMeta =>
+      const TaskConstMeta(
+        debugName: "FfiEnvelope_tool_results",
+        argNames: ["userText", "priorAssistantText", "results"],
+      );
+
+  @override
   FfiEnvelope crateApiEnvelopeFfiEnvelopeUserMessage(
       {required String text, required List<FfiEnvelope> images}) {
     return handler.executeSync(SyncTask(
@@ -1055,7 +1092,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
         sse_encode_String(text, serializer);
         sse_encode_list_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiEnvelope(
             images, serializer);
-        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 24)!;
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 25)!;
       },
       codec: SseCodec(
         decodeSuccessData:
@@ -1083,7 +1120,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
         sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiEnvelope(
             that, serializer);
         sse_encode_ffi_message_role(role, serializer);
-        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 25)!;
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 26)!;
       },
       codec: SseCodec(
         decodeSuccessData:
@@ -1108,7 +1145,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
       callFfi: () {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_String(path, serializer);
-        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 26)!;
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 27)!;
       },
       codec: SseCodec(
         decodeSuccessData:
@@ -1134,7 +1171,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
       callFfi: () {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_String(path, serializer);
-        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 27)!;
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 28)!;
       },
       codec: SseCodec(
         decodeSuccessData:
@@ -1160,7 +1197,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
       callFfi: () {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_String(repo, serializer);
-        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 28)!;
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 29)!;
       },
       codec: SseCodec(
         decodeSuccessData:
@@ -1186,7 +1223,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
       callFfi: () {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_String(modelId, serializer);
-        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 29)!;
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 30)!;
       },
       codec: SseCodec(
         decodeSuccessData:
@@ -1212,7 +1249,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
       callFfi: () {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_String(modelId, serializer);
-        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 30)!;
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 31)!;
       },
       codec: SseCodec(
         decodeSuccessData:
@@ -1241,7 +1278,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
         sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModelLoader(
             that, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 31, port: port_);
+            funcId: 32, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData:
@@ -1271,7 +1308,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
             that, serializer);
         sse_encode_StreamSink_ffi_load_event_Sse(sink, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 32, port: port_);
+            funcId: 33, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -1298,7 +1335,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModelLoader(
             that, serializer);
-        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 33)!;
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 34)!;
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_bool,
@@ -1327,7 +1364,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
             that, serializer);
         sse_encode_StreamSink_ffi_load_event_Sse(sink, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 34, port: port_);
+            funcId: 35, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -1354,7 +1391,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModel(
             that, serializer);
-        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 35)!;
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 36)!;
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_ffi_download_status,
@@ -1379,7 +1416,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModel(
             that, serializer);
-        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 36)!;
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 37)!;
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_bool,
@@ -1411,7 +1448,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
             envelope, serializer);
         sse_encode_opt_box_autoadd_ffi_generation_config(config, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 37, port: port_);
+            funcId: 38, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_ffi_result,
@@ -1451,7 +1488,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
         sse_encode_opt_String(frameSessionId, serializer);
         sse_encode_StreamSink_ffi_stream_event_Sse(sink, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 38, port: port_);
+            funcId: 39, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -1512,7 +1549,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
         sse_encode_opt_String(frameSessionId, serializer);
         sse_encode_StreamSink_ffi_stream_event_Sse(sink, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 39, port: port_);
+            funcId: 40, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -1570,7 +1607,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
             cancellationToken, serializer);
         sse_encode_StreamSink_ffi_stream_event_Sse(sink, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 40, port: port_);
+            funcId: 41, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -1615,7 +1652,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
             cancellationToken, serializer);
         sse_encode_StreamSink_ffi_tts_stream_event_Sse(sink, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 41, port: port_);
+            funcId: 42, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -1651,7 +1688,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
             context, serializer);
         sse_encode_opt_box_autoadd_ffi_generation_config(config, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 42, port: port_);
+            funcId: 43, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_ffi_result,
@@ -1679,7 +1716,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
             that, serializer);
         sse_encode_box_autoadd_ffi_streaming_config(config, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 43, port: port_);
+            funcId: 44, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData:
@@ -1699,6 +1736,31 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
       );
 
   @override
+  bool? crateApiModelFfiModelSupportsToolCalling({required FfiModel that}) {
+    return handler.executeSync(SyncTask(
+      callFfi: () {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModel(
+            that, serializer);
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 45)!;
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_opt_box_autoadd_bool,
+        decodeErrorData: null,
+      ),
+      constMeta: kCrateApiModelFfiModelSupportsToolCallingConstMeta,
+      argValues: [that],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateApiModelFfiModelSupportsToolCallingConstMeta =>
+      const TaskConstMeta(
+        debugName: "FfiModel_supports_tool_calling",
+        argNames: ["that"],
+      );
+
+  @override
   Future<void> crateApiModelFfiModelUnload({required FfiModel that}) {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
@@ -1706,7 +1768,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
         sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModel(
             that, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 44, port: port_);
+            funcId: 46, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -1732,7 +1794,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
         sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiModel(
             that, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 45, port: port_);
+            funcId: 47, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -1756,7 +1818,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
       callFfi: () {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_String(path, serializer);
-        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 46)!;
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 48)!;
       },
       codec: SseCodec(
         decodeSuccessData:
@@ -1781,7 +1843,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
       callFfi: () {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_String(path, serializer);
-        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 47)!;
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 49)!;
       },
       codec: SseCodec(
         decodeSuccessData:
@@ -1806,7 +1868,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
       callFfi: () {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_String(yaml, serializer);
-        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 48)!;
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 50)!;
       },
       codec: SseCodec(
         decodeSuccessData:
@@ -1832,7 +1894,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiPipeline(
             that, serializer);
-        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 49)!;
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 51)!;
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_opt_String,
@@ -1861,7 +1923,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
         sse_encode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiEnvelope(
             envelope, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 50, port: port_);
+            funcId: 52, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_ffi_result,
@@ -1886,7 +1948,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiPipeline(
             that, serializer);
-        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 51)!;
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 53)!;
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_usize,
@@ -1912,7 +1974,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiPipeline(
             that, serializer);
-        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 52)!;
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 54)!;
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_list_String,
@@ -1939,7 +2001,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
         sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiStreamSession(
             that, serializer);
         sse_encode_list_prim_f_32_loose(samples, serializer);
-        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 53)!;
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 55)!;
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -1966,7 +2028,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
         sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiStreamSession(
             that, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 54, port: port_);
+            funcId: 56, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_String,
@@ -1993,7 +2055,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
         sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiStreamSession(
             that, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 55, port: port_);
+            funcId: 57, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -2022,7 +2084,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
             that, serializer);
         sse_encode_StreamSink_ffi_partial_result_Sse(sink, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 56, port: port_);
+            funcId: 58, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -2046,7 +2108,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
     return handler.executeSync(SyncTask(
       callFfi: () {
         final serializer = SseSerializer(generalizedFrbRustBinding);
-        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 57)!;
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 59)!;
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -2070,7 +2132,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
     return handler.executeSync(SyncTask(
       callFfi: () {
         final serializer = SseSerializer(generalizedFrbRustBinding);
-        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 58)!;
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 60)!;
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -2093,7 +2155,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
     return handler.executeSync(SyncTask(
       callFfi: () {
         final serializer = SseSerializer(generalizedFrbRustBinding);
-        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 59)!;
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 61)!;
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -2117,7 +2179,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
     return handler.executeSync(SyncTask(
       callFfi: () {
         final serializer = SseSerializer(generalizedFrbRustBinding);
-        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 60)!;
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 62)!;
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -2140,7 +2202,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
     return handler.executeSync(SyncTask(
       callFfi: () {
         final serializer = SseSerializer(generalizedFrbRustBinding);
-        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 61)!;
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 63)!;
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_ffi_resource_snapshot,
@@ -2164,7 +2226,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
       callFfi: () {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_u_8(percent, serializer);
-        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 62)!;
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 64)!;
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -2189,7 +2251,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
       callFfi: () {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_ffi_thermal_state(state, serializer);
-        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 63)!;
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 65)!;
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -2216,7 +2278,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
         sse_encode_String(apiKey, serializer);
         sse_encode_opt_String(ingestUrl, serializer);
         sse_encode_opt_String(resourceTelemetry, serializer);
-        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 64)!;
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 66)!;
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -2241,7 +2303,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
     return handler.executeSync(SyncTask(
       callFfi: () {
         final serializer = SseSerializer(generalizedFrbRustBinding);
-        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 65)!;
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 67)!;
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -2268,7 +2330,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
       callFfi: () {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_String(cacheDir, serializer);
-        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 66)!;
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 70)!;
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -2294,7 +2356,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_String(endpoint, serializer);
         sse_encode_String(apiKey, serializer);
-        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 67)!;
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 69)!;
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -2343,7 +2405,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
       callFfi: () {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_String(modelId, serializer);
-        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 69)!;
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 71)!;
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_bool,
@@ -2366,7 +2428,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
     return handler.executeSync(SyncTask(
       callFfi: () {
         final serializer = SseSerializer(generalizedFrbRustBinding);
-        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 70)!;
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 72)!;
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_bool,
@@ -2391,7 +2453,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
     return handler.executeSync(SyncTask(
       callFfi: () {
         final serializer = SseSerializer(generalizedFrbRustBinding);
-        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 71)!;
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 73)!;
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_bool,
@@ -2416,7 +2478,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
     return handler.executeSync(SyncTask(
       callFfi: () {
         final serializer = SseSerializer(generalizedFrbRustBinding);
-        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 72)!;
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 74)!;
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_u_32,
@@ -2439,7 +2501,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
     return handler.executeSync(SyncTask(
       callFfi: () {
         final serializer = SseSerializer(generalizedFrbRustBinding);
-        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 73)!;
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 75)!;
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_list_String,
@@ -2463,7 +2525,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
       callFfi: () {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_String(apiKey, serializer);
-        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 74)!;
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 76)!;
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -2487,7 +2549,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
       callFfi: () {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_bool(enabled, serializer);
-        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 75)!;
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 77)!;
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -2512,7 +2574,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
       callFfi: () {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_String(gatewayUrl, serializer);
-        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 76)!;
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 78)!;
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -2536,7 +2598,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
       callFfi: () {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_String(url, serializer);
-        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 77)!;
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 79)!;
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -2561,7 +2623,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
       callFfi: () {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_bool(enabled, serializer);
-        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 78)!;
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 80)!;
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -2585,7 +2647,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
     return handler.executeSync(SyncTask(
       callFfi: () {
         final serializer = SseSerializer(generalizedFrbRustBinding);
-        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 79)!;
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 81)!;
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_ffi_generation_config,
@@ -2608,7 +2670,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
     return handler.executeSync(SyncTask(
       callFfi: () {
         final serializer = SseSerializer(generalizedFrbRustBinding);
-        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 80)!;
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 82)!;
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_ffi_generation_config,
@@ -2632,7 +2694,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
       callFfi: () {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_String(schemaJson, serializer);
-        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 81)!;
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 83)!;
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_String,
@@ -2981,6 +3043,12 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
   }
 
   @protected
+  bool dco_decode_box_autoadd_bool(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw as bool;
+  }
+
+  @protected
   double dco_decode_box_autoadd_f_32(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return raw as double;
@@ -3093,8 +3161,8 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
   FfiGenerationConfig dco_decode_ffi_generation_config(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 8)
-      throw Exception('unexpected arr length: expect 8 but see ${arr.length}');
+    if (arr.length != 9)
+      throw Exception('unexpected arr length: expect 9 but see ${arr.length}');
     return FfiGenerationConfig(
       maxTokens: dco_decode_opt_box_autoadd_u_32(arr[0]),
       temperature: dco_decode_opt_box_autoadd_f_32(arr[1]),
@@ -3104,6 +3172,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
       repetitionPenalty: dco_decode_opt_box_autoadd_f_32(arr[5]),
       stopSequences: dco_decode_opt_list_String(arr[6]),
       grammar: dco_decode_opt_String(arr[7]),
+      tools: dco_decode_opt_list_ffi_tool_definition(arr[8]),
     );
   }
 
@@ -3213,8 +3282,8 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
   FfiResult dco_decode_ffi_result(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 8)
-      throw Exception('unexpected arr length: expect 8 but see ${arr.length}');
+    if (arr.length != 9)
+      throw Exception('unexpected arr length: expect 9 but see ${arr.length}');
     return FfiResult(
       success: dco_decode_bool(arr[0]),
       text: dco_decode_opt_String(arr[1]),
@@ -3224,6 +3293,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
       latencyMs: dco_decode_u_32(arr[5]),
       executionTarget: dco_decode_ffi_execution_target(arr[6]),
       metrics: dco_decode_ffi_inference_metrics(arr[7]),
+      toolCalls: dco_decode_list_ffi_tool_call(arr[8]),
     );
   }
 
@@ -3298,12 +3368,13 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
   FfiStreamingConfig dco_decode_ffi_streaming_config(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 3)
-      throw Exception('unexpected arr length: expect 3 but see ${arr.length}');
+    if (arr.length != 4)
+      throw Exception('unexpected arr length: expect 4 but see ${arr.length}');
     return FfiStreamingConfig(
       sampleRate: dco_decode_u_32(arr[0]),
       vad: dco_decode_ffi_vad_mode(arr[1]),
       language: dco_decode_opt_String(arr[2]),
+      audioCtx: dco_decode_opt_box_autoadd_u_32(arr[3]),
     );
   }
 
@@ -3311,6 +3382,45 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
   FfiThermalState dco_decode_ffi_thermal_state(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return FfiThermalState.values[raw as int];
+  }
+
+  @protected
+  FfiToolCall dco_decode_ffi_tool_call(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 3)
+      throw Exception('unexpected arr length: expect 3 but see ${arr.length}');
+    return FfiToolCall(
+      id: dco_decode_String(arr[0]),
+      name: dco_decode_String(arr[1]),
+      argumentsJson: dco_decode_String(arr[2]),
+    );
+  }
+
+  @protected
+  FfiToolDefinition dco_decode_ffi_tool_definition(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 3)
+      throw Exception('unexpected arr length: expect 3 but see ${arr.length}');
+    return FfiToolDefinition(
+      name: dco_decode_String(arr[0]),
+      description: dco_decode_String(arr[1]),
+      parametersJson: dco_decode_String(arr[2]),
+    );
+  }
+
+  @protected
+  FfiToolResult dco_decode_ffi_tool_result(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 3)
+      throw Exception('unexpected arr length: expect 3 but see ${arr.length}');
+    return FfiToolResult(
+      callId: dco_decode_String(arr[0]),
+      name: dco_decode_String(arr[1]),
+      contentJson: dco_decode_String(arr[2]),
+    );
   }
 
   @protected
@@ -3416,6 +3526,24 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
   }
 
   @protected
+  List<FfiToolCall> dco_decode_list_ffi_tool_call(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>).map(dco_decode_ffi_tool_call).toList();
+  }
+
+  @protected
+  List<FfiToolDefinition> dco_decode_list_ffi_tool_definition(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>).map(dco_decode_ffi_tool_definition).toList();
+  }
+
+  @protected
+  List<FfiToolResult> dco_decode_list_ffi_tool_result(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>).map(dco_decode_ffi_tool_result).toList();
+  }
+
+  @protected
   List<double> dco_decode_list_prim_f_32_loose(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return raw as List<double>;
@@ -3454,6 +3582,12 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
         ? null
         : dco_decode_box_autoadd_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiCancellationToken(
             raw);
+  }
+
+  @protected
+  bool? dco_decode_opt_box_autoadd_bool(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw == null ? null : dco_decode_box_autoadd_bool(raw);
   }
 
   @protected
@@ -3511,6 +3645,13 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
   List<String>? dco_decode_opt_list_String(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return raw == null ? null : dco_decode_list_String(raw);
+  }
+
+  @protected
+  List<FfiToolDefinition>? dco_decode_opt_list_ffi_tool_definition(
+      dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw == null ? null : dco_decode_list_ffi_tool_definition(raw);
   }
 
   @protected
@@ -3839,6 +3980,12 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
   }
 
   @protected
+  bool sse_decode_box_autoadd_bool(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_bool(deserializer));
+  }
+
+  @protected
   double sse_decode_box_autoadd_f_32(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return (sse_decode_f_32(deserializer));
@@ -3964,6 +4111,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
     var var_repetitionPenalty = sse_decode_opt_box_autoadd_f_32(deserializer);
     var var_stopSequences = sse_decode_opt_list_String(deserializer);
     var var_grammar = sse_decode_opt_String(deserializer);
+    var var_tools = sse_decode_opt_list_ffi_tool_definition(deserializer);
     return FfiGenerationConfig(
         maxTokens: var_maxTokens,
         temperature: var_temperature,
@@ -3972,7 +4120,8 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
         topK: var_topK,
         repetitionPenalty: var_repetitionPenalty,
         stopSequences: var_stopSequences,
-        grammar: var_grammar);
+        grammar: var_grammar,
+        tools: var_tools);
   }
 
   @protected
@@ -4103,6 +4252,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
     var var_latencyMs = sse_decode_u_32(deserializer);
     var var_executionTarget = sse_decode_ffi_execution_target(deserializer);
     var var_metrics = sse_decode_ffi_inference_metrics(deserializer);
+    var var_toolCalls = sse_decode_list_ffi_tool_call(deserializer);
     return FfiResult(
         success: var_success,
         text: var_text,
@@ -4111,7 +4261,8 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
         embedding: var_embedding,
         latencyMs: var_latencyMs,
         executionTarget: var_executionTarget,
-        metrics: var_metrics);
+        metrics: var_metrics,
+        toolCalls: var_toolCalls);
   }
 
   @protected
@@ -4189,8 +4340,12 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
     var var_sampleRate = sse_decode_u_32(deserializer);
     var var_vad = sse_decode_ffi_vad_mode(deserializer);
     var var_language = sse_decode_opt_String(deserializer);
+    var var_audioCtx = sse_decode_opt_box_autoadd_u_32(deserializer);
     return FfiStreamingConfig(
-        sampleRate: var_sampleRate, vad: var_vad, language: var_language);
+        sampleRate: var_sampleRate,
+        vad: var_vad,
+        language: var_language,
+        audioCtx: var_audioCtx);
   }
 
   @protected
@@ -4198,6 +4353,39 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
     // Codec=Sse (Serialization based), see doc to use other codecs
     var inner = sse_decode_i_32(deserializer);
     return FfiThermalState.values[inner];
+  }
+
+  @protected
+  FfiToolCall sse_decode_ffi_tool_call(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_id = sse_decode_String(deserializer);
+    var var_name = sse_decode_String(deserializer);
+    var var_argumentsJson = sse_decode_String(deserializer);
+    return FfiToolCall(
+        id: var_id, name: var_name, argumentsJson: var_argumentsJson);
+  }
+
+  @protected
+  FfiToolDefinition sse_decode_ffi_tool_definition(
+      SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_name = sse_decode_String(deserializer);
+    var var_description = sse_decode_String(deserializer);
+    var var_parametersJson = sse_decode_String(deserializer);
+    return FfiToolDefinition(
+        name: var_name,
+        description: var_description,
+        parametersJson: var_parametersJson);
+  }
+
+  @protected
+  FfiToolResult sse_decode_ffi_tool_result(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_callId = sse_decode_String(deserializer);
+    var var_name = sse_decode_String(deserializer);
+    var var_contentJson = sse_decode_String(deserializer);
+    return FfiToolResult(
+        callId: var_callId, name: var_name, contentJson: var_contentJson);
   }
 
   @protected
@@ -4331,6 +4519,45 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
   }
 
   @protected
+  List<FfiToolCall> sse_decode_list_ffi_tool_call(
+      SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <FfiToolCall>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_ffi_tool_call(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
+  List<FfiToolDefinition> sse_decode_list_ffi_tool_definition(
+      SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <FfiToolDefinition>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_ffi_tool_definition(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
+  List<FfiToolResult> sse_decode_list_ffi_tool_result(
+      SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <FfiToolResult>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_ffi_tool_result(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
   List<double> sse_decode_list_prim_f_32_loose(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var len_ = sse_decode_i_32(deserializer);
@@ -4378,6 +4605,17 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
     if (sse_decode_bool(deserializer)) {
       return (sse_decode_box_autoadd_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiCancellationToken(
           deserializer));
+    } else {
+      return null;
+    }
+  }
+
+  @protected
+  bool? sse_decode_opt_box_autoadd_bool(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    if (sse_decode_bool(deserializer)) {
+      return (sse_decode_box_autoadd_bool(deserializer));
     } else {
       return null;
     }
@@ -4480,6 +4718,18 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
 
     if (sse_decode_bool(deserializer)) {
       return (sse_decode_list_String(deserializer));
+    } else {
+      return null;
+    }
+  }
+
+  @protected
+  List<FfiToolDefinition>? sse_decode_opt_list_ffi_tool_definition(
+      SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    if (sse_decode_bool(deserializer)) {
+      return (sse_decode_list_ffi_tool_definition(deserializer));
     } else {
       return null;
     }
@@ -4861,6 +5111,12 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
   }
 
   @protected
+  void sse_encode_box_autoadd_bool(bool self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_bool(self, serializer);
+  }
+
+  @protected
   void sse_encode_box_autoadd_f_32(double self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_f_32(self, serializer);
@@ -4986,6 +5242,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
     sse_encode_opt_box_autoadd_f_32(self.repetitionPenalty, serializer);
     sse_encode_opt_list_String(self.stopSequences, serializer);
     sse_encode_opt_String(self.grammar, serializer);
+    sse_encode_opt_list_ffi_tool_definition(self.tools, serializer);
   }
 
   @protected
@@ -5084,6 +5341,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
     sse_encode_u_32(self.latencyMs, serializer);
     sse_encode_ffi_execution_target(self.executionTarget, serializer);
     sse_encode_ffi_inference_metrics(self.metrics, serializer);
+    sse_encode_list_ffi_tool_call(self.toolCalls, serializer);
   }
 
   @protected
@@ -5144,6 +5402,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
     sse_encode_u_32(self.sampleRate, serializer);
     sse_encode_ffi_vad_mode(self.vad, serializer);
     sse_encode_opt_String(self.language, serializer);
+    sse_encode_opt_box_autoadd_u_32(self.audioCtx, serializer);
   }
 
   @protected
@@ -5151,6 +5410,32 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
       FfiThermalState self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_i_32(self.index, serializer);
+  }
+
+  @protected
+  void sse_encode_ffi_tool_call(FfiToolCall self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.id, serializer);
+    sse_encode_String(self.name, serializer);
+    sse_encode_String(self.argumentsJson, serializer);
+  }
+
+  @protected
+  void sse_encode_ffi_tool_definition(
+      FfiToolDefinition self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.name, serializer);
+    sse_encode_String(self.description, serializer);
+    sse_encode_String(self.parametersJson, serializer);
+  }
+
+  @protected
+  void sse_encode_ffi_tool_result(
+      FfiToolResult self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.callId, serializer);
+    sse_encode_String(self.name, serializer);
+    sse_encode_String(self.contentJson, serializer);
   }
 
   @protected
@@ -5263,6 +5548,36 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
   }
 
   @protected
+  void sse_encode_list_ffi_tool_call(
+      List<FfiToolCall> self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_ffi_tool_call(item, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_list_ffi_tool_definition(
+      List<FfiToolDefinition> self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_ffi_tool_definition(item, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_list_ffi_tool_result(
+      List<FfiToolResult> self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_ffi_tool_result(item, serializer);
+    }
+  }
+
+  @protected
   void sse_encode_list_prim_f_32_loose(
       List<double> self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
@@ -5316,6 +5631,16 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
     if (self != null) {
       sse_encode_box_autoadd_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiCancellationToken(
           self, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_opt_box_autoadd_bool(bool? self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    sse_encode_bool(self != null, serializer);
+    if (self != null) {
+      sse_encode_box_autoadd_bool(self, serializer);
     }
   }
 
@@ -5411,6 +5736,17 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
     sse_encode_bool(self != null, serializer);
     if (self != null) {
       sse_encode_list_String(self, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_opt_list_ffi_tool_definition(
+      List<FfiToolDefinition>? self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    sse_encode_bool(self != null, serializer);
+    if (self != null) {
+      sse_encode_list_ffi_tool_definition(self, serializer);
     }
   }
 
@@ -5845,6 +6181,17 @@ class FfiModelImpl extends RustOpaque implements FfiModel {
   Future<FfiStreamSession> stream({required FfiStreamingConfig config}) =>
       XybridRustLib.instance.api
           .crateApiModelFfiModelStream(that: this, config: config);
+
+  /// Whether the model bundle declares local tool-calling support.
+  ///
+  /// Advisory tri-state: `null` means the bundle says nothing, so the app
+  /// cannot tell. Gate tool UI on it; enforcement stays at run time — a
+  /// tools-bearing request against a model whose chat template has no tool
+  /// support fails as invalid input regardless of what this reports.
+  bool? supportsToolCalling() =>
+      XybridRustLib.instance.api.crateApiModelFfiModelSupportsToolCalling(
+        that: this,
+      );
 
   /// Unload the model, dropping the executor and freeing the underlying
   /// ORT / GGUF inference session.

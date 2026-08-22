@@ -11,7 +11,7 @@ Flutter SDK（`xybrid_flutter`）通过 FFI 提供到 Xybrid Rust 核心的 Dart
 
 ```yaml
 dependencies:
-  xybrid_flutter: ^0.4.1
+  xybrid_flutter: ^0.5.0
 ```
 
 ## 初始化
@@ -68,7 +68,7 @@ final wavBytes = result.audioAsWav(sampleRate: 24000);
 ## 语音转文字
 
 ```dart
-final model = await Xybrid.model('whisper-tiny').load();
+final model = await Xybrid.model('whisper-tiny-ggml').load();
 final envelope = XybridEnvelope.audio(bytes: audioBytes, sampleRate: 16000);
 final result = await model.run(envelope);
 print(result.text); // "Hello, how are you?"

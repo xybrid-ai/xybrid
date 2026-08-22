@@ -85,6 +85,13 @@ jobs:
           which pkg-config >/dev/null || brew install pkg-config
           which xz >/dev/null || brew install xz   # decodes the fetched sim ORT slice
 
+      # Without this the macOS SDK is re-fetched from Apple's CDN every run, and
+      # that pinned URL now 403s — see the action for the full failure mode.
+      - name: Cache the pinned macOS SDK
+        uses: ./.github/actions/bazel-repo-cache
+        with:
+          macos-sdk-mirror: ${{ vars.MACOS_SDK_MIRROR }}
+
       - name: Build XCFramework (Bazel)
         run: bazelisk build --config=ios //bindings/apple:XybridFFI
 

@@ -15,7 +15,8 @@
 # CRT dimensions are deferred (see the plan doc).
 #
 # Usage: natives-fingerprint.sh <target-triple> <feature-set>
-#   <feature-set>: "base" (shipped llm-llamacpp) | "vision" (+ mtmd)
+#   <feature-set>: "base" (llm-llamacpp), "vision" (+ mtmd),
+#                  "vulkan" (+ GGML_VULKAN), or "vision-vulkan" (both)
 # Prints the hex fingerprint to stdout.
 set -euo pipefail
 

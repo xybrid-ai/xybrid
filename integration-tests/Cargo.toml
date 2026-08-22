@@ -12,6 +12,10 @@ default = []
 # CI turns it on in the Test Candle workflow.
 candle = ["xybrid-core/candle"]
 
+# whisper.cpp ASR backend — gates tests/whispercpp_integration.rs. The real
+# multilingual model is downloaded only by the dedicated model-test workflow.
+asr-whispercpp = ["xybrid-core/asr-whispercpp"]
+
 # Local LLM inference
 llm-mistral = ["xybrid-core/llm-mistral"]              # mistral.rs (CPU)
 llm-mistral-metal = ["xybrid-core/llm-mistral-metal"]  # mistral.rs + Metal (macOS)

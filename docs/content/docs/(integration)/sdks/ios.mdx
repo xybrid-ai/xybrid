@@ -15,7 +15,7 @@ Add the Xybrid package via Swift Package Manager:
 
 ```swift title="Package.swift"
 dependencies: [
-    .package(url: "https://github.com/xybrid-ai/xybrid", from: "0.4.1")
+    .package(url: "https://github.com/xybrid-ai/xybrid", from: "0.5.0")
 ]
 ```
 
@@ -68,7 +68,7 @@ Without a key, telemetry is disabled and the first inference logs a one-shot hin
 ### From Registry
 
 ```swift
-let model = try await Xybrid.model("whisper-tiny").load()
+let model = try await Xybrid.model("whisper-tiny-ggml").load()
 ```
 
 ### From Local Bundle

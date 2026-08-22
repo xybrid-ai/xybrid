@@ -1,0 +1,44 @@
+# xybrid-whisper-sys, Bazel-native. No build.rs, no bindgen, no libclang —
+# build.rs's three jobs are replaced by:
+#   whisper compile -> //:whisper (a cc_library on //:llama's ggml)
+#   bindgen         -> COMMITTED src/bindings.rs (regenerated offline via cargo)
+#   link ordering   -> the cc_library dep edge, which Bazel orders for us
+#
+# That third one is the interesting difference. On the cargo path the build
+# script must re-emit `-lggml*` and the platform libraries AFTER `-lwhisper`,
+# because cargo emits a dependency's link flags before its dependents' and GNU
+# ld resolves static archives left to right. Bazel derives link order from the
+# dep graph, so //:whisper depending on //:llama is enough.
+load("@rules_rs//rs:rust_library.bzl", "rust_library")
+
+# `committed-bindings` makes lib.rs `include!` the committed src/bindings.rs
+# instead of $OUT_DIR. Cargo builds do NOT enable it — they stay on fresh
+# bindgen output so whisper.cpp bumps keep working there.
+rust_library(
+    name = "xybrid_whisper_sys",
+    srcs = glob(["src/**/*.rs"]),
+    crate_features = [
+        "bindings",
+        "committed-bindings",
+    ],
+    edition = "2021",
+    # //:whisper carries llama's ggml transitively, so this single edge supplies
+    # the whisper archive, the ggml archives and their platform link deps.
+    #
+    # The cargo manifest's dependency on xybrid-llama-sys exists ONLY so the
+    # build script can read its `links = "llama"` metadata (DEP_LLAMA_SRC /
+    # DEP_LLAMA_ROOT). There is no build script here and no Rust-level use of
+    # it, so it is deliberately absent from this dep list.
+    deps = ["//:whisper"],
+    visibility = ["//visibility:public"],
+)
+
+# Dir-basename alias so `//crates/whisper-cpp-sys` (the label all_crate_deps()
+# emits) resolves to the target above. Same -sys lib-name-override gotcha as
+# llama's: the package is `xybrid-whisper-sys` but its [lib] name is
+# `xybrid_whisper_sys`, so package-derived auto-aliasing would diverge.
+alias(
+    name = "whisper-cpp-sys",
+    actual = ":xybrid_whisper_sys",
+    visibility = ["//visibility:public"],
+)

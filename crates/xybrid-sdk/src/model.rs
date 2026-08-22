@@ -6,6 +6,7 @@
 //! - `ModelHandle`: Internal state management for the loaded model
 //! - `StreamEvent`: Events emitted during streaming inference
 
+use crate::cache::layout::CacheLayout;
 use crate::cache::CacheManager;
 use crate::model_registry::AutoReleasePolicy;
 use crate::registry_client::RegistryClient;
@@ -15,7 +16,7 @@ use crate::run_options::{
 };
 use crate::source::{detect_platform, ModelSource};
 use crate::stream::XybridStream;
-use std::path::PathBuf;
+use std::path::{Component, Path, PathBuf};
 use std::pin::Pin;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
@@ -796,6 +797,8 @@ pub struct StreamConfig {
     pub vad_threshold: f32,
     /// Language hint for ASR
     pub language: Option<String>,
+    /// Whisper encoder context override in mel frames; `None` uses the model default
+    pub audio_ctx: Option<u32>,
     /// Path to VAD model (uses default if None)
     pub vad_model_dir: Option<String>,
 }
@@ -806,6 +809,7 @@ impl Default for StreamConfig {
             enable_vad: false,
             vad_threshold: 0.5,
             language: Some("en".to_string()),
+            audio_ctx: None,
             vad_model_dir: None,
         }
     }
@@ -823,6 +827,12 @@ impl StreamConfig {
     /// Set language hint.
     pub fn language(mut self, lang: impl Into<String>) -> Self {
         self.language = Some(lang.into());
+        self
+    }
+
+    /// Override Whisper's encoder context in mel frames.
+    pub fn audio_ctx(mut self, audio_ctx: u32) -> Self {
+        self.audio_ctx = Some(audio_ctx);
         self
     }
 
@@ -1036,6 +1046,15 @@ fn select_huggingface_files_to_download<'a>(
     selected_gguf: Option<&str>,
     selected_projector: Option<&str>,
 ) -> SdkResult<Vec<&'a str>> {
+    if let Some(filename) = all_filenames
+        .iter()
+        .find(|filename| !is_safe_huggingface_filename(filename))
+    {
+        return Err(SdkError::load(format!(
+            "HuggingFace repo '{repo}' contains unsafe file path {filename:?}"
+        )));
+    }
+
     let gguf_files: Vec<&str> = all_filenames
         .iter()
         .filter(|filename| filename.ends_with(".gguf") && !is_gguf_companion(filename))
@@ -1090,6 +1109,30 @@ fn select_huggingface_files_to_download<'a>(
         })
         .copied()
         .collect())
+}
+
+fn is_safe_huggingface_filename(filename: &str) -> bool {
+    !filename.is_empty()
+        && !filename.contains('\\')
+        && Path::new(filename)
+            .components()
+            .all(|component| matches!(component, Component::Normal(_)))
+}
+
+fn huggingface_materialized_cache_dir(
+    cache_layout: &CacheLayout,
+    repo: &str,
+    resolved_revision: Option<&str>,
+    variant: Option<&str>,
+) -> PathBuf {
+    match resolved_revision {
+        Some(revision) => cache_layout.huggingface_repo_revision_dir(repo, revision, variant),
+        None => cache_layout
+            .huggingface_repo_dirs(repo)
+            .into_iter()
+            .find(|dir| dir.join("model_metadata.json").exists())
+            .unwrap_or_else(|| cache_layout.huggingface_repo_dir(repo)),
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -1577,9 +1620,10 @@ impl ModelLoader {
     /// # }
     /// ```
     pub fn from_huggingface_with_revision(repo: &str, revision: &str) -> Self {
+        let source = ModelSource::parse_huggingface_with_revision(repo, revision);
         Self {
-            source: ModelSource::huggingface_with_revision(repo, revision),
-            model_id: Some(repo.to_string()),
+            model_id: source.model_id().map(str::to_owned),
+            source,
             version: Some(revision.to_string()),
             speculative_cloud: None,
             auto_release: None,
@@ -1895,6 +1939,7 @@ impl ModelLoader {
             context_length: 2048,
             generation_params: None,
         };
+        let default_generation_config = xybrid_core::execution::model_default_gen_config(&metadata);
         let placeholder = ModelHandle {
             // Lazy executor over the not-yet-populated extraction dir; never run
             // while the state is not `Loaded` (runs route to cloud).
@@ -1981,6 +2026,7 @@ impl ModelLoader {
             // output type is refreshed implicitly once the local handle lands.
             output_type: OutputType::Text,
             supports_streaming: true,
+            default_generation_config,
             current_run: Arc::new(Mutex::new(None)),
             speculative: Some(download),
             last_accessed,
@@ -2063,42 +2109,106 @@ impl ModelLoader {
 
         // Determine our cache directory
         let cache_layout = CacheManager::layout_from_config()?;
-        let cache_dir = cache_layout
-            .huggingface_repo_dirs(repo)
-            .into_iter()
-            .find(|dir| dir.join("model_metadata.json").exists())
-            .unwrap_or_else(|| cache_layout.huggingface_repo_dir(repo));
-
-        // Check if we already have a cached copy with model_metadata.json
-        let metadata_path = cache_dir.join("model_metadata.json");
-        if metadata_path.exists() {
-            log::info!(target: "xybrid_sdk", "Loading HuggingFace model from cache: {}", cache_dir.display());
-            return self.load_from_directory(&cache_dir);
+        if revision.is_none() {
+            let cache_dir = huggingface_materialized_cache_dir(&cache_layout, repo, None, variant);
+            if cache_layout.is_huggingface_repo_materialized(repo, &cache_dir) {
+                log::info!(target: "xybrid_sdk", "Loading HuggingFace model from cache: {}", cache_dir.display());
+                return self.load_from_directory(&cache_dir);
+            }
         }
 
         log::info!(target: "xybrid_sdk", "Downloading model from HuggingFace: {}", repo);
 
         // Create HF API client
         let api = ApiBuilder::from_env()
-            .with_cache_dir(cache_layout.preferred_huggingface_hub_root(repo))
+            .with_cache_dir(cache_layout.prepare_huggingface_hub_repo_root(repo)?)
             .build()
             .map_err(|e| SdkError::network_src("Failed to create HuggingFace API client", e))?;
 
-        // Create repo reference with optional revision
-        let hf_repo = if let Some(rev) = revision {
-            Repo::with_revision(repo.to_string(), RepoType::Model, rev.to_string())
+        let (cache_dir, repo_api, repo_info) = if let Some(requested_revision) = revision {
+            let requested_repo = Repo::with_revision(
+                repo.to_string(),
+                RepoType::Model,
+                requested_revision.to_string(),
+            );
+            let requested_api = api.repo(requested_repo);
+            let repo_info = match requested_api.info() {
+                Ok(info) => info,
+                Err(error) => {
+                    if let Some(resolved_revision) = cache_layout.cached_huggingface_revision(
+                        repo,
+                        requested_revision,
+                        variant,
+                    )? {
+                        let cache_dir = huggingface_materialized_cache_dir(
+                            &cache_layout,
+                            repo,
+                            Some(&resolved_revision),
+                            variant,
+                        );
+                        if cache_layout.is_huggingface_revision_materialized(
+                            repo,
+                            &resolved_revision,
+                            variant,
+                        ) {
+                            let cache_dir = cache_layout
+                                .materialized_huggingface_revision_dir(
+                                    repo,
+                                    &resolved_revision,
+                                    variant,
+                                )
+                                .unwrap_or(cache_dir);
+                            log::info!(target: "xybrid_sdk", "Loading offline HuggingFace revision from cache: {}", cache_dir.display());
+                            return self.load_from_directory(&cache_dir);
+                        }
+                    }
+                    return Err(SdkError::network_src(
+                        format!("Failed to get HuggingFace repo info for '{}'", repo),
+                        error,
+                    ));
+                }
+            };
+            if repo_info.sha.is_empty() {
+                return Err(SdkError::load(format!(
+                    "HuggingFace repo '{}' returned an empty commit revision",
+                    repo
+                )));
+            }
+            let cache_dir = huggingface_materialized_cache_dir(
+                &cache_layout,
+                repo,
+                Some(&repo_info.sha),
+                variant,
+            );
+            if cache_layout.is_huggingface_revision_materialized(repo, &repo_info.sha, variant) {
+                cache_layout.record_huggingface_revision(
+                    repo,
+                    requested_revision,
+                    &repo_info.sha,
+                    variant,
+                )?;
+                let cache_dir = cache_layout
+                    .materialized_huggingface_revision_dir(repo, &repo_info.sha, variant)
+                    .unwrap_or(cache_dir);
+                log::info!(target: "xybrid_sdk", "Loading HuggingFace model from cache: {}", cache_dir.display());
+                return self.load_from_directory(&cache_dir);
+            }
+            let resolved_repo =
+                Repo::with_revision(repo.to_string(), RepoType::Model, repo_info.sha.clone());
+            (cache_dir, api.repo(resolved_repo), repo_info)
         } else {
-            Repo::new(repo.to_string(), RepoType::Model)
+            let cache_dir = huggingface_materialized_cache_dir(&cache_layout, repo, None, variant);
+            let repo_api = api.repo(Repo::new(repo.to_string(), RepoType::Model));
+            let repo_info = repo_api.info().map_err(|error| {
+                SdkError::network_src(
+                    format!("Failed to get HuggingFace repo info for '{}'", repo),
+                    error,
+                )
+            })?;
+            (cache_dir, repo_api, repo_info)
         };
-        let repo_api = api.repo(hf_repo);
 
-        // Get repo info to list all files
-        let repo_info = repo_api.info().map_err(|e| {
-            SdkError::network_src(
-                format!("Failed to get HuggingFace repo info for '{}'", repo),
-                e,
-            )
-        })?;
+        let metadata_path = cache_dir.join("model_metadata.json");
 
         let siblings = repo_info.siblings;
         if siblings.is_empty() {
@@ -2231,8 +2341,20 @@ impl ModelLoader {
             }
         }
 
+        let model = self.load_from_directory(&cache_dir)?;
+        if let Some(requested_revision) = revision {
+            cache_layout.record_huggingface_revision(
+                repo,
+                requested_revision,
+                &repo_info.sha,
+                variant,
+            )?;
+        } else {
+            cache_layout.record_huggingface_repo(repo)?;
+        }
+
         log::info!(target: "xybrid_sdk", "Model cached at: {}", cache_dir.display());
-        self.load_from_directory(&cache_dir)
+        Ok(model)
     }
 
     /// Not available without the `huggingface` feature.
@@ -2304,6 +2426,8 @@ impl ModelLoader {
         let supports_streaming = Self::check_streaming_support(&handle.metadata);
         let output_type = Self::infer_output_type(&handle.metadata);
         let approx_size_mb = declared_size_mb(&handle.metadata);
+        let default_generation_config =
+            xybrid_core::execution::model_default_gen_config(&handle.metadata);
 
         let handle = Arc::new(RwLock::new(handle));
         let last_accessed = Arc::new(AtomicU64::new(crate::model_registry::now_ms()));
@@ -2315,6 +2439,7 @@ impl ModelLoader {
             version,
             output_type,
             supports_streaming,
+            default_generation_config,
             current_run: Arc::new(Mutex::new(None)),
             speculative: None,
             last_accessed,
@@ -2463,6 +2588,7 @@ pub struct XybridModel {
     version: String,
     output_type: OutputType,
     supports_streaming: bool,
+    default_generation_config: GenerationConfig,
     /// In-flight cancellation token for the preemptive cancel-and-replace
     /// ("latest-frame-wins") streaming slot. Guarded by its **own** mutex,
     /// deliberately separate from `handle`'s write lock: a preempting start
@@ -2754,10 +2880,26 @@ impl XybridModel {
     /// a speculative model whose local handle has landed — every other model's
     /// cached fields were computed from this same metadata at load, so paying
     /// for a read lock would buy nothing.
+    ///
+    /// Blocks on the handle lock: an in-flight run holds it for the whole
+    /// inference, and returning the pre-download placeholder mid-run would make
+    /// these accessors answer differently depending on whether a run happens to
+    /// be active. Callers that must not block use
+    /// [`Self::metadata_derived_nonblocking`] instead.
     fn metadata_derived<T>(&self, derive: impl Fn(&ModelMetadata) -> T) -> Option<T> {
         self.speculative.as_ref()?;
         let handle = self.handle.read().ok()?;
         (handle.state == LoadState::Loaded).then(|| derive(&handle.metadata))
+    }
+
+    /// [`Self::metadata_derived`] without the wait: yields `None` rather than
+    /// blocking when a run holds the handle write lock, so the caller falls
+    /// back to its load-time value. Only for accessors whose fallback is a
+    /// usable answer and whose callers may be on a UI thread.
+    fn metadata_derived_nonblocking<T>(&self, derive: impl Fn(&ModelMetadata) -> T) -> Option<T> {
+        self.speculative.as_ref()?;
+        let handle = self.handle.try_read().ok()?;
+        handle.loaded.then(|| derive(&handle.metadata))
     }
 
     /// Check if this is an LLM model (uses GGUF execution template).
@@ -2794,19 +2936,13 @@ impl XybridModel {
     /// (tools, budget overrides) should start from this instead of
     /// `GenerationConfig::default()`, because an explicit config replaces the
     /// model-level defaults wholesale.
+    /// Reads without waiting on the handle lock — bindings call this from UI
+    /// threads to seed a config before a run, and a run in flight must not
+    /// stall that. A speculative model still downloading falls back to the
+    /// load-time defaults.
     pub fn default_generation_config(&self) -> GenerationConfig {
-        #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
-        {
-            self.handle
-                .read()
-                .ok()
-                .map(|h| xybrid_core::execution::model_default_gen_config(&h.metadata))
-                .unwrap_or_default()
-        }
-        #[cfg(not(any(feature = "llm-mistral", feature = "llm-llamacpp")))]
-        {
-            GenerationConfig::default()
-        }
+        self.metadata_derived_nonblocking(xybrid_core::execution::model_default_gen_config)
+            .unwrap_or_else(|| self.default_generation_config.clone())
     }
 
     // =========================================================================
@@ -4463,6 +4599,7 @@ impl XybridModel {
                 ..Default::default()
             },
             language: config.language,
+            audio_ctx: config.audio_ctx,
             ..Default::default()
         };
 
@@ -4504,6 +4641,7 @@ impl Clone for XybridModel {
             version: self.version.clone(),
             output_type: self.output_type,
             supports_streaming: self.supports_streaming,
+            default_generation_config: self.default_generation_config.clone(),
             // Share the in-flight slot so all clones coordinate preemption
             // through one mutex (see field docs).
             current_run: self.current_run.clone(),
@@ -4518,6 +4656,89 @@ impl Clone for XybridModel {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn distinct_huggingface_commits_do_not_share_materialized_cache() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let cache_layout =
+            CacheLayout::from_registry_root(temp_dir.path().join("cache").join("models"));
+        let unpinned = cache_layout.huggingface_repo_dir("owner/repo");
+        std::fs::create_dir_all(&unpinned).unwrap();
+        std::fs::write(unpinned.join("model_metadata.json"), "{}").unwrap();
+
+        let revision_a = huggingface_materialized_cache_dir(
+            &cache_layout,
+            "owner/repo",
+            Some("revision-a"),
+            None,
+        );
+        std::fs::create_dir_all(&revision_a).unwrap();
+        std::fs::write(revision_a.join("model_metadata.json"), "{}").unwrap();
+
+        let revision_b = huggingface_materialized_cache_dir(
+            &cache_layout,
+            "owner/repo",
+            Some("revision-b"),
+            None,
+        );
+
+        assert_ne!(revision_a, revision_b);
+        assert_ne!(revision_b, unpinned);
+        assert!(!revision_b.join("model_metadata.json").exists());
+    }
+
+    #[test]
+    fn mutable_huggingface_ref_moves_to_new_resolved_commit_cache() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let cache_layout =
+            CacheLayout::from_registry_root(temp_dir.path().join("cache").join("models"));
+        let repo = "owner/repo";
+        let requested_revision = "main";
+        let first_commit = "commit-a";
+        let second_commit = "commit-b";
+
+        cache_layout
+            .record_huggingface_revision(repo, requested_revision, first_commit, None)
+            .unwrap();
+        let first =
+            huggingface_materialized_cache_dir(&cache_layout, repo, Some(first_commit), None);
+        std::fs::write(first.join("model_metadata.json"), "{}").unwrap();
+        assert_eq!(
+            cache_layout
+                .cached_huggingface_revision(repo, requested_revision, None)
+                .unwrap(),
+            Some(first_commit.to_string())
+        );
+        assert!(cache_layout.is_huggingface_revision_materialized(repo, first_commit, None));
+
+        cache_layout
+            .record_huggingface_revision(repo, requested_revision, second_commit, None)
+            .unwrap();
+        let second =
+            huggingface_materialized_cache_dir(&cache_layout, repo, Some(second_commit), None);
+
+        assert_eq!(
+            cache_layout
+                .cached_huggingface_revision(repo, requested_revision, None)
+                .unwrap(),
+            Some(second_commit.to_string())
+        );
+        assert!(!cache_layout.is_huggingface_revision_materialized(repo, second_commit, None));
+        assert!(first.join("model_metadata.json").is_file());
+        assert!(!second.join("model_metadata.json").exists());
+    }
+
+    #[test]
+    fn revision_loader_preserves_gguf_variant_suffix() {
+        // Given / When
+        let loader =
+            ModelLoader::from_huggingface_with_revision("owner/repo-GGUF:Q8_0", "revision-123");
+
+        // Then
+        assert_eq!(loader.model_id(), Some("owner/repo-GGUF"));
+        assert_eq!(loader.version(), Some("revision-123"));
+        assert_eq!(loader.source.variant(), Some("Q8_0"));
+    }
 
     #[test]
     fn browser_only_model_files_are_not_essential() {
@@ -4838,6 +5059,39 @@ mod tests {
     }
 
     #[test]
+    fn huggingface_repository_file_paths_cannot_escape_the_cache() {
+        for unsafe_filename in [
+            "../outside/model.gguf",
+            "nested/../../outside.gguf",
+            "/absolute/model.gguf",
+            r"nested\..\outside.gguf",
+        ] {
+            let filenames = [unsafe_filename, "model.gguf"];
+
+            let error = select_huggingface_files_to_download("org/model", &filenames, None, None)
+                .expect_err("unsafe repository paths must be rejected before download");
+
+            assert!(error.to_string().contains("unsafe file path"));
+            assert!(error.to_string().contains(&format!("{unsafe_filename:?}")));
+        }
+    }
+
+    #[test]
+    fn huggingface_repository_file_paths_allow_nested_files() {
+        let filenames = ["weights/model.gguf", "tokenizer/config.json"];
+
+        let files = select_huggingface_files_to_download(
+            "org/model",
+            &filenames,
+            Some("weights/model.gguf"),
+            None,
+        )
+        .expect("normal nested repository files should remain supported");
+
+        assert_eq!(files, filenames);
+    }
+
+    #[test]
     fn create_model_handle_rejects_browser_only_templates_at_load_time() {
         let templates = [
             (
@@ -5036,6 +5290,7 @@ mod tests {
             version: String::new(),
             output_type: OutputType::Text,
             supports_streaming: true,
+            default_generation_config: GenerationConfig::default(),
             current_run: Arc::new(Mutex::new(None)),
             speculative: Some(Arc::new(SpeculativeDownload::default())),
             last_accessed: Arc::new(AtomicU64::new(crate::model_registry::now_ms())),
@@ -5079,6 +5334,7 @@ mod tests {
             // Placeholder guesses, matching `load_speculative`.
             output_type: OutputType::Text,
             supports_streaming: true,
+            default_generation_config: GenerationConfig::default(),
             current_run: Arc::new(Mutex::new(None)),
             speculative: Some(Arc::new(SpeculativeDownload::default())),
             last_accessed: Arc::new(AtomicU64::new(crate::model_registry::now_ms())),
@@ -5132,6 +5388,7 @@ mod tests {
             version: String::new(),
             output_type: OutputType::Text,
             supports_streaming: true,
+            default_generation_config: GenerationConfig::default(),
             current_run: Arc::new(Mutex::new(None)),
             speculative: Some(Arc::clone(&download)),
             last_accessed: Arc::new(AtomicU64::new(crate::model_registry::now_ms())),
@@ -5487,13 +5744,18 @@ mod tests {
         let config = StreamConfig::default();
         assert!(!config.enable_vad);
         assert_eq!(config.language, Some("en".to_string()));
+        assert_eq!(config.audio_ctx, None);
     }
 
     #[test]
     fn test_stream_config_with_vad() {
-        let config = StreamConfig::with_vad().language("fr").vad_threshold(0.7);
+        let config = StreamConfig::with_vad()
+            .language("fr")
+            .audio_ctx(500)
+            .vad_threshold(0.7);
         assert!(config.enable_vad);
         assert_eq!(config.language, Some("fr".to_string()));
+        assert_eq!(config.audio_ctx, Some(500));
         assert_eq!(config.vad_threshold, 0.7);
     }
 
@@ -5641,6 +5903,7 @@ mod tests {
                 serde_json::Value::Bool(supports_tool_calling),
             );
         }
+        let default_generation_config = xybrid_core::execution::model_default_gen_config(&metadata);
         XybridModel {
             handle: Arc::new(RwLock::new(ModelHandle {
                 executor: Arc::new(Mutex::new(TemplateExecutor::default())),
@@ -5652,16 +5915,17 @@ mod tests {
             version: "1.0".to_string(),
             output_type: OutputType::Text,
             supports_streaming,
+            default_generation_config,
             current_run: Arc::new(Mutex::new(None)),
             speculative: None,
             last_accessed: Arc::new(AtomicU64::new(crate::model_registry::now_ms())),
         }
     }
 
-    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
     fn test_model_with_metadata(metadata: ModelMetadata) -> XybridModel {
         let model_id = metadata.model_id.clone();
         let version = metadata.version.clone();
+        let default_generation_config = xybrid_core::execution::model_default_gen_config(&metadata);
         XybridModel {
             handle: Arc::new(RwLock::new(ModelHandle {
                 executor: Arc::new(Mutex::new(TemplateExecutor::default())),
@@ -5673,13 +5937,13 @@ mod tests {
             version,
             output_type: OutputType::Text,
             supports_streaming: true,
+            default_generation_config,
             current_run: Arc::new(Mutex::new(None)),
             speculative: None,
             last_accessed: Arc::new(AtomicU64::new(crate::model_registry::now_ms())),
         }
     }
 
-    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
     #[test]
     fn default_generation_config_resolves_template_params_and_reasoning_floor() {
         let mut template_metadata = ModelMetadata::onnx("template-model", "1.0", "model.gguf");
@@ -5713,6 +5977,29 @@ mod tests {
         let reasoning_config =
             test_model_with_metadata(reasoning_metadata).default_generation_config();
         assert_eq!(reasoning_config.max_tokens, 3584);
+    }
+
+    #[test]
+    fn default_generation_config_does_not_wait_for_inference_write_lock() {
+        // Given
+        let model = test_loaded_model(true);
+        let expected = model.default_generation_config();
+        let guard = model.handle.write().unwrap();
+        let reader = model.clone();
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            sender.send(reader.default_generation_config()).unwrap();
+        });
+
+        // When
+        let result = receiver.recv_timeout(std::time::Duration::from_secs(2));
+
+        // Then
+        drop(guard);
+        worker.join().unwrap();
+        let actual = result.expect("default generation config read must remain non-blocking");
+        assert_eq!(actual.max_tokens, expected.max_tokens);
+        assert_eq!(actual.temperature, expected.temperature);
     }
 
     #[test]
@@ -6451,6 +6738,7 @@ mod tests {
     ) -> XybridModel {
         let metadata =
             xybrid_core::execution::ModelMetadata::onnx("local-test-model", "1.0", "model.onnx");
+        let default_generation_config = xybrid_core::execution::model_default_gen_config(&metadata);
         let mut executor = TemplateExecutor::default();
         // Register under "onnx" so the bare-Onnx execute path uses our fake.
         executor.register_runtime("onnx", runtime);
@@ -6465,6 +6753,7 @@ mod tests {
             version: "1.0".to_string(),
             output_type: OutputType::Text,
             supports_streaming: true,
+            default_generation_config,
             current_run: Arc::new(Mutex::new(None)),
             speculative: None,
             last_accessed: Arc::new(AtomicU64::new(crate::model_registry::now_ms())),

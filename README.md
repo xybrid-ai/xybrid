@@ -78,7 +78,7 @@
 [deepwiki-shield]: https://deepwiki.com/badge.svg
 [deepwiki-url]: https://deepwiki.com/xybrid-ai/xybrid
 [stars-shield]: https://img.shields.io/github/stars/xybrid-ai/xybrid?style=flat-square
-[stars-url]: https://github.com/xybrid-ai/xybrid/stargazers
+[stars-url]: https://github.com/xybrid-ai/xybrid#star-history
 [twitter-shield]: https://img.shields.io/badge/Follow-%40xybrid__ai-000000?style=for-the-badge&logo=x&logoColor=white
 [twitter-url]: https://x.com/xybrid_ai
 [visitors-shield]: https://visitor-badge.laobi.icu/badge?page_id=xybrid-ai.xybrid
@@ -142,7 +142,7 @@ See the full [Installation Guide](https://docs.xybrid.dev/en/docs/quickstart) fo
 
 ```yaml
 dependencies:
-  xybrid_flutter: ^0.4.1
+  xybrid_flutter: ^0.5.0
 ```
 
 **Run a model:**
@@ -159,7 +159,7 @@ final result = await model.run(XybridEnvelope.text('Hello world'));
 
 ```gradle
 dependencies {
-    implementation("ai.xybrid:xybrid-kotlin:0.4.1")
+    implementation("ai.xybrid:xybrid-kotlin:0.5.0")
 }
 ```
 
@@ -177,7 +177,7 @@ val result = model.runAsync(Envelope.text("Hello world"))
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/xybrid-ai/xybrid.git", from: "0.4.1")
+    .package(url: "https://github.com/xybrid-ai/xybrid.git", from: "0.5.0")
 ]
 ```
 
@@ -216,7 +216,7 @@ var result = model.Run(Envelope.Text("Hello world"));
 
 ```toml
 [dependencies]
-xybrid = "0.4.1"
+xybrid = "0.5.0"
 ```
 
 **Run a model:**
@@ -258,9 +258,9 @@ Chain models together into a single multi-model inference pipeline (MMP) — bui
 # voice-assistant.yaml
 name: voice-assistant
 stages:
-  - model: whisper-tiny    # Speech → text
-  - model: qwen2.5-0.5b    # Process with LLM
-  - model: kokoro-82m      # Text → speech
+  - model: whisper-tiny-ggml  # Speech → text
+  - model: qwen2.5-0.5b       # Process with LLM
+  - model: kokoro-82m         # Text → speech
 ```
 
 **CLI:**
@@ -316,7 +316,8 @@ All models run entirely on-device. No cloud, no API keys required. Browse the fu
 
 | Model | Params | Format | Description |
 |-------|--------|--------|-------------|
-| Whisper Tiny | 39M | SafeTensors | Multilingual transcription (Candle runtime) |
+| Whisper Tiny (`whisper-tiny-ggml`) | 39M | GGML Q5_1 | Multilingual transcription on whisper.cpp — in every platform preset |
+| Whisper Tiny (`whisper-tiny`) | 39M | SafeTensors | Same weights on the Candle runtime — needs a build with the `candle` feature |
 | Wav2Vec2 Base | 95M | ONNX | English ASR with CTC decoding |
 
 ### Text-to-Speech
@@ -410,14 +411,14 @@ See the [model metadata docs](docs/sdk/API_REFERENCE.md) for the full schema, or
 | Embeddings | 🔜 | 🔜 | 🔜 | 🔜 | 🔜 |
 | Multi-Model Pipelines (MMP) | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Model Download & Caching | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Hardware Acceleration | Metal, ANE | CPU | Metal, ANE | CUDA | CUDA |
+| Hardware Acceleration | Metal, ANE | CPU | Metal, ANE | CPU, opt-in Vulkan | CPU |
 
 **SDK MMP support:** Flutter ✅ · Rust ✅ · Kotlin 🔜 · Swift 🔜 · Unity 🔜
 
 **Tool calling:** local models call functions you define — your tools are
 plain data (`Tool::function(...)`) and the loop is your code, so any tooling
-plugs in. On-device via llama.cpp (LFM2 and gemma-4 protocols); Rust SDK and
-CLI today (`xybrid repl` ships built-in `web_search` + your own via
+plugs in. On-device via llama.cpp (LFM2, gemma-4, and FunctionGemma protocols);
+Rust SDK and CLI today (`xybrid repl` ships built-in `web_search` + your own via
 `--tools-file`), Swift/Kotlin/Flutter bindings next. See the
 [Tool Calling guide](https://docs.xybrid.dev/en/docs/guides/tool-calling).
 
@@ -429,7 +430,7 @@ CLI today (`xybrid repl` ships built-in `web_search` + your own via
 - **Offline capable** — No internet required after initial model download.
 - **Cross-platform** — One API across iOS, Android, macOS, Linux, and Windows.
 - **Multi-model pipelines (MMP)** — Chain models together (ASR → LLM → TTS) in a single call.
-- **Automatic optimization** — Hardware acceleration on Apple Neural Engine, Metal, and CUDA.
+- **Hardware acceleration** — Apple Neural Engine and Metal on Apple platforms; opt-in Vulkan for Linux llama.cpp builds. Android and Windows run on CPU today, and prebuilt Linux binaries are CPU-only (Vulkan is a build-time opt-in — see [installation](docs/INSTALLATION.md#platform-features)).
 
 ### How it compares
 
@@ -459,7 +460,10 @@ We welcome contributions! See [CONTRIBUTING.md](./CONTRIBUTING.md) for guideline
 
 ## Star History
 
-[![Star History Chart](https://api.star-history.com/svg?repos=xybrid-ai/xybrid&type=date&legend=bottom-right)](https://www.star-history.com/#xybrid-ai/xybrid&type=date&legend=bottom-right)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/xybrid-ai/xybrid/star-history/star-history-dark.svg">
+  <img alt="Star history for xybrid-ai/xybrid" src="https://raw.githubusercontent.com/xybrid-ai/xybrid/star-history/star-history.svg">
+</picture>
 
 ## License
 

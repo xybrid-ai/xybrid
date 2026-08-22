@@ -117,6 +117,14 @@ classes:
         return: XybridModelLoader
         notes: "Requires huggingface feature flag. Downloads and caches model files from HuggingFace Hub."
         status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+      fromHuggingfaceWithRevision:
+        static: true
+        params:
+          - { name: repo, type: String }
+          - { name: revision, type: String }
+        return: XybridModel
+        notes: "Pins the load to the commit resolved from a branch, tag, or SHA. The Bolt languages expose this as a synchronous XybridModel constructor; call it off the UI thread."
+        status: { dart: planned, kotlin: implemented, swift: implemented, csharp: implemented }
       load:
         async: true
         return: XybridModel
@@ -156,6 +164,10 @@ classes:
         status: { dart: planned, kotlin: partial, swift: partial, csharp: implemented }
       hasVoices:
         type: bool
+        status: { dart: planned, kotlin: implemented, swift: implemented, csharp: implemented }
+      defaultGenerationConfig:
+        type: GenerationConfig
+        notes: "Resolved model defaults, including template generation parameters and the reasoning-token floor."
         status: { dart: planned, kotlin: implemented, swift: implemented, csharp: implemented }
     methods:
       voice:
@@ -247,6 +259,13 @@ classes:
         return: bool
         # True while the cloud answers because the local weights are not ready.
         status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+      supportsToolCalling:
+        return: "bool?"
+        # Advisory tri-state read off the bundle's tool_calling metadata flag:
+        # null means the bundle says nothing. Gate tool UI on it; enforcement
+        # is independent, at run time — a tools-bearing request against a model
+        # whose chat template has no tool support fails either way.
+        status: { rust: implemented, dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
       downloadStatus:
         return: DownloadStatus
         # Download state + progress in one consistent read; poll to drive a bar.
@@ -343,6 +362,16 @@ classes:
           - { name: sampleRate, type: int, default: "16000" }
           - { name: channels, type: int, default: "1" }
         status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+      toolResults:
+        # The continuation turn after the model asked for tools. Only the
+        # immediately prior assistant turn is replayed, and continuation runs
+        # on the non-streaming text path only.
+        params:
+          - { name: userText, type: String }
+          - { name: priorAssistantText, type: String }
+          - { name: results, type: "List<ToolResult>" }
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+        since: "0.5.0"
       embedding:
         params: [{ name: embedding, type: "List<double>" }]
         status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
@@ -435,6 +464,10 @@ classes:
       modelId:
         type: String
         status: { dart: planned, kotlin: planned, swift: planned, csharp: implemented }
+      reasoningContent:
+        type: "String?"
+        notes: "Model reasoning emitted separately from the final answer text."
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
       executionTarget:
         type: ExecutionTarget
         # Whether the answer came from the device or the cloud gateway. Cloud
@@ -444,6 +477,12 @@ classes:
       isFailure:
         type: bool
         status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+      toolCalls:
+        type: "List<ToolCall>"
+        # Tool calls the model emitted. Empty unless the request offered
+        # tools. The raw tool-call block stays in `text`.
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+        since: "0.5.0"
       audioAsWav:
         type: "Uint8List?"
         status: { dart: implemented, kotlin: planned, swift: planned, csharp: planned }
@@ -502,7 +541,12 @@ classes:
   ConversationContext:
     type: class
     section: "8. Supporting Types"
-    status: { dart: implemented, kotlin: planned, swift: planned, csharp: implemented }
+    methods:
+      history:
+        return: "List<Envelope>"
+        notes: "Snapshot of history turns; excludes the persistent system envelope."
+        status: { dart: planned, kotlin: implemented, swift: implemented, csharp: implemented }
+    status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
 
   MessageRole:
     type: enum
@@ -599,11 +643,42 @@ classes:
       stopSequences:
         type: "List<String>?"
         status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+      tools:
+        type: "List<ToolDefinition>?"
+        # Tools the model may call this turn. Empty/null = no tool calling.
+        # llama.cpp-only; unsupported paths reject a tool-bearing request
+        # rather than generating without the tools.
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+        since: "0.5.0"
     factories:
       greedy:
         status: { dart: implemented, kotlin: implemented, swift: planned, csharp: implemented }
       creative:
         status: { dart: implemented, kotlin: implemented, swift: planned, csharp: implemented }
+
+  ToolDefinition:
+    type: data
+    section: "8. Supporting Types"
+    csharp_name: XybridToolDefinition
+    since: "0.5.0"
+    notes: "A tool the model may call. `parametersJson` is the argument JSON Schema carried as a JSON string — no FFI generator can describe an arbitrary JSON tree. Invalid JSON fails the run rather than dropping the tool. On C# the tool is added via GenerationConfig.AddTool(name, description, parametersJson)."
+    status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+
+  ToolCall:
+    type: data
+    section: "8. Supporting Types"
+    csharp_name: XybridToolCall
+    since: "0.5.0"
+    notes: "One tool call the model emitted, read from XybridResult.toolCalls. Echo `id` back as ToolResult.callId."
+    status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+
+  ToolResult:
+    type: data
+    section: "8. Supporting Types"
+    csharp_name: XybridToolResult
+    since: "0.5.0"
+    notes: "The outcome of running one tool, fed back via Envelope.toolResults. One run is one model turn, so the tool loop lives in app code."
+    status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
 
   StreamToken:
     type: data

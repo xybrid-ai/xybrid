@@ -301,9 +301,11 @@ fn decode_audio_to_samples(audio_data: &[u8]) -> AdapterResult<Vec<f32>> {
             }
 
             let samples: Vec<f32> = audio_data
-                .chunks_exact(2)
+                .as_chunks::<2>()
+                .0
+                .iter()
                 .map(|chunk| {
-                    let sample = i16::from_le_bytes([chunk[0], chunk[1]]);
+                    let sample = i16::from_le_bytes(*chunk);
                     sample as f32 / 32768.0
                 })
                 .collect();

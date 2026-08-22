@@ -477,10 +477,13 @@ impl TemplateExecutor {
     /// browser-only templates) — read it as "an execution would pay a load".
     pub fn is_model_loaded(&self, metadata: &ModelMetadata) -> bool {
         let (runtime_type, model_file) = match &metadata.execution_template {
+            #[cfg(feature = "candle")]
             ExecutionTemplate::SafeTensors { model_file, .. } => ("candle", model_file),
             ExecutionTemplate::Onnx { model_file } => ("onnx", model_file),
             ExecutionTemplate::CoreMl { model_file } => ("coreml", model_file),
             ExecutionTemplate::TfLite { model_file } => ("tflite", model_file),
+            #[cfg(feature = "asr-whispercpp")]
+            ExecutionTemplate::GgmlWhisper { model_file, .. } => ("whispercpp", model_file),
             _ => return false,
         };
         let model_full_path = Path::new(&self.base_path).join(model_file);
@@ -713,7 +716,21 @@ impl TemplateExecutor {
         let mut whisper_defaults: Option<Vec<(String, String)>> = None;
 
         let (runtime_type, model_file) = match &metadata.execution_template {
+            #[cfg(feature = "candle")]
             ExecutionTemplate::SafeTensors { model_file, .. } => ("candle", model_file.clone()),
+            // Without the feature there is no "candle" runtime in the registry, so
+            // the lookup below would fail with a bare `Runtime 'candle' not
+            // configured` that names neither the feature nor the alternative.
+            // Mirrors the Gguf / GgmlWhisper arms, which have always said this.
+            #[cfg(not(feature = "candle"))]
+            ExecutionTemplate::SafeTensors { .. } => {
+                return Err(AdapterError::RuntimeError(
+                    "SafeTensors execution requires the 'candle' feature. For Whisper \
+                     speech recognition, prefer a GGML bundle (ExecutionTemplate::GgmlWhisper) \
+                     on the 'asr-whispercpp' backend."
+                        .to_string(),
+                ));
+            }
             ExecutionTemplate::Onnx { model_file } => ("onnx", model_file.clone()),
             ExecutionTemplate::CoreMl { model_file } => ("coreml", model_file.clone()),
             ExecutionTemplate::TfLite { model_file } => ("tflite", model_file.clone()),
@@ -899,6 +916,27 @@ impl TemplateExecutor {
         // Run Postprocessing
         let raw_outputs = RawOutputs::from_envelope(&result_envelope)?;
         let result = self.run_postprocessing(metadata, raw_outputs)?;
+
+        // `RawOutputs` intentionally carries only model payloads, so the
+        // postprocessing round-trip above rebuilds the envelope. Preserve the
+        // whisper.cpp language signal explicitly: StreamSession needs it to
+        // avoid auto-detecting again on every rolling window.
+        #[cfg(feature = "asr-whispercpp")]
+        let result = {
+            let mut result = result;
+            if runtime_type == "whispercpp" {
+                if let Some(language) = result_envelope
+                    .metadata
+                    .get(Envelope::DETECTED_LANGUAGE_METADATA_KEY)
+                {
+                    result.metadata.insert(
+                        Envelope::DETECTED_LANGUAGE_METADATA_KEY.to_string(),
+                        language.clone(),
+                    );
+                }
+            }
+            result
+        };
 
         info!(
             target: "xybrid_core",
@@ -3116,9 +3154,7 @@ fn build_llm_response_envelope(
     }
 }
 
-#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
 const REASONING_MAX_TOKENS_CEILING: usize = 3584;
-#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
 const REASONING_PROMPT_HEADROOM: usize = 512;
 
 /// The generation config resolved when a caller passes no explicit config.
@@ -3128,7 +3164,6 @@ const REASONING_PROMPT_HEADROOM: usize = 512;
 /// reasoning floor is a ceiling-bounded raise that leaves
 /// `REASONING_PROMPT_HEADROOM` tokens of prompt room inside the model's
 /// operational context and never drops below the global default.
-#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
 pub fn model_default_gen_config(metadata: &ModelMetadata) -> GenerationConfig {
     let (generation_params, context_length) = match &metadata.execution_template {
         ExecutionTemplate::Gguf {

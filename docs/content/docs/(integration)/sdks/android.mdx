@@ -11,7 +11,7 @@ Add the Xybrid SDK from Maven Central:
 
 ```kotlin title="build.gradle.kts"
 dependencies {
-    implementation("ai.xybrid:xybrid-kotlin:0.4.1")
+    implementation("ai.xybrid:xybrid-kotlin:0.5.0")
 }
 ```
 
@@ -60,7 +60,7 @@ Without a key, telemetry is disabled and the first inference logs a one-shot hin
 ### From Registry
 
 ```kotlin
-val model = Xybrid.model("whisper-tiny").load()
+val model = Xybrid.model("whisper-tiny-ggml").load()
 ```
 
 ### From Local Bundle

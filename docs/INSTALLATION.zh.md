@@ -62,10 +62,10 @@ cargo install --git https://github.com/xybrid-ai/xybrid xybrid-cli --features pl
 | Feature | 说明 |
 |---------|-------------|
 | **平台预设** | |
-| `platform-macos` | ONNX 下载 + CoreML + Metal + 纯文本输入llama.cpp |
-| `platform-ios` | ONNX 下载 + CoreML + Metal + 纯文本输入llama.cpp |
-| `platform-android` | ONNX 动态加载 + 纯文本输入llama.cpp |
-| `platform-desktop` | ONNX 下载 + 纯文本输入llama.cpp |
+| `platform-macos` | ONNX 下载 + CoreML + Metal + 支持视觉的 llama.cpp + whisper.cpp 语音识别 |
+| `platform-ios` | ONNX 下载 + CoreML + Metal + 支持视觉的 llama.cpp + whisper.cpp 语音识别 |
+| `platform-android` | ONNX 动态加载 + 支持视觉的 llama.cpp + whisper.cpp 语音识别 |
+| `platform-desktop` | ONNX 下载 + 支持视觉的 llama.cpp + whisper.cpp 语音识别 |
 | **独立标志** | |
 | `ort-download` | 下载预编译的 ONNX Runtime 二进制文件 |
 | `ort-dynamic` | 在运行时加载 ONNX Runtime 的 .so |
@@ -129,8 +129,11 @@ xybrid run --model kokoro-82m --input-text "Hello world" --output hello.wav
 ### 语音识别 (STT)
 
 ```bash
-xybrid run --model whisper-tiny --input-audio recording.wav
+xybrid run --model whisper-tiny-ggml --input-audio recording.wav
 ```
+
+`whisper-tiny-ggml` 是运行在 whisper.cpp 上的 GGML 模型包，所有平台预设都已内置。
+旧的 `whisper-tiny` 对应 SafeTensors 模型包，需要使用 `--features candle` 重新构建才能运行。
 
 ### 与LLM对话
 
@@ -190,7 +193,7 @@ xybrid run --model-file ./my-model.gguf --input-text "Hello!"
 # voice-assistant.yaml
 name: voice-assistant
 stages:
-  - model: whisper-tiny
+  - model: whisper-tiny-ggml
   - model: smollm2-360m
   - model: kokoro-82m
 ```

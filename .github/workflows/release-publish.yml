@@ -175,7 +175,12 @@ jobs:
   # =========================================================================
   # Publish Rust crates to crates.io.
   #
-  # Dependency order: macros -> core -> sdk -> xybrid. Each publish waits
+  # Dependency order: every crate xybrid-core depends on must precede it, or
+  # `cargo publish -p xybrid-core` fails resolving a path dep that is not yet
+  # on the index ("no matching package named `<dep>` found"). Optional deps
+  # count — cargo resolves them at package time regardless of the feature
+  # set. Adding a crate under crates/ that xybrid-core depends on therefore
+  # means adding a publish_crate line below. Each publish waits
   # for the new version to become visible on the sparse index before moving
   # on. Idempotent: a re-run skips crates whose <name>@<version> is already
   # on crates.io.
@@ -249,6 +254,10 @@ jobs:
           publish_crate xybrid-macros
           publish_crate xybrid-llama-sys
           publish_crate xybrid-llama
+          # whisper-sys depends on llama-sys (it compiles against that crate's
+          # ggml via DEP_LLAMA_*), so it follows llama, and both precede core.
+          publish_crate xybrid-whisper-sys
+          publish_crate xybrid-whisper
           publish_crate xybrid-core
           publish_crate xybrid-sdk
           publish_crate xybrid

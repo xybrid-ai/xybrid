@@ -7,9 +7,253 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+**Upgrade notes.** The HuggingFace cache moves to a repository-hash layout, so
+caches written by 0.5.0 and earlier are not reused: the next
+`from_huggingface(...)` load re-downloads the model, and the old copy stays on
+disk until it is evicted. It remains listed under its raw on-disk label
+(`owner--repo` under `hf/`, `models--owner--repo` under `hf-hub/`) and is
+removed by a targeted eviction on that label. Kotlin callers should drop
+`import ai.xybrid.reasoningContent` — `reasoningContent` is now a member of
+`XybridResult` rather than an extension property, which is source-compatible at
+the call site but needs a recompile against the new AAR.
+
+### Added
+
+- **Reasoning text as a typed field on the Bolt bindings.** `XybridResult`
+  gains `reasoningContent`, carrying what a thinking model emits separately
+  from its answer, on Swift, Kotlin, Python, and Unity C#. It is appended last
+  on the wire — `#[data]` PODs serialize in declaration order — and the
+  envelope keeps its `reasoning_content` metadata, so a consumer reading that
+  metadata is unaffected. Each generator's decoder probes for the tail before
+  reading it and falls back to the metadata when it is absent (#508).
+- **Conversation history readback.** `ConversationContext.history()` returns
+  the turns a context holds, excluding the persistent system envelope, on
+  Swift, Kotlin, Python, and Unity C# (#508).
+- **Revision-pinned HuggingFace loading.** `from_huggingface_with_revision`
+  resolves a branch, tag, or commit SHA to an immutable commit and pins the
+  load to it. Pinned and mutable refs occupy separate cache namespaces, so
+  `main` and a commit of `main` no longer alias, and a resolved revision that
+  is already materialized still loads when the Hub is unreachable (#508).
+- **The resolved default generation config.** `defaultGenerationConfig` returns
+  what a `run*` call uses when given no explicit config — template
+  `generation_params` layered over global defaults, including the
+  reasoning-budget floor — so a caller building an explicit config can start
+  from the model's own defaults rather than `GenerationConfig::default()`. It
+  no longer requires an LLM backend feature to be compiled in, and reads
+  without waiting on an in-flight run (#508).
+
+### Changed
+
+- **The HuggingFace cache is keyed by repository hash.** Both `hf/` and
+  `hf-hub/` directories move from a slash-to-`--` encoding (`owner--repo`,
+  `models--owner--repo`) to `repo--<sha256(repo)>`, with the repository id
+  recorded in a `.repo-id` marker inside each directory. The old encoding was
+  not injective — `a/b--c` and `a--b/c` both wrote to `a--b--c` — so two
+  unrelated repositories could share one cache. Directories under the old
+  layout are not adopted, because their label cannot be decoded back to a
+  repository id; they stay visible to cache listing and evictable under that
+  raw label. See the upgrade note above (#508).
+- **Envelope metadata crosses the FFI boundary in a deterministic order.**
+  `XybridEnvelope.metadata` is sorted by key rather than emitted in `HashMap`
+  iteration order, so two conversions of the same envelope produce identical
+  wire bytes (#508).
+
 ### Planned
 
 - **Multimodal KV-prefix reuse**: the per-frame prefill cost lever for live vision — **deferred** from 0.2.0, not yet implemented.
+
+---
+
+## [0.5.0] - 2026-08-11
+
+Speech recognition moves off Candle and onto whisper.cpp, running on the same
+ggml that llama.cpp already links — 3.6x faster to a first partial on a Pixel 8
+for 0.2 MiB of binary, and the first time Linux and Windows have local Whisper
+at all. Candle is retired from all four platform presets as a result; the
+features remain opt-in, so this removes a default, not a capability. Live
+streaming ASR lands on Flutter with warm-up windowing and a span-reconciled
+transcript, every binding gains the speculative-cloud surface that 0.4.1 shipped
+Rust-only, all bindings move to BoltFFI 0.29.3 (the Python SDK is now generated
+rather than hand-ported), and desktop Linux gets an opt-in Vulkan build of
+llama.cpp.
+
+**Upgrade notes.** Registry model id `whisper-tiny` resolves to a
+SafeTensors/Candle bundle and no longer runs on a default build — use
+`whisper-tiny-ggml`, a multilingual Q5_1 GGML bundle served as its own id, or
+build with `--features candle`. The Python SDK now requires **Python >= 3.10**
+and ships one wheel per interpreter ABI.
+
+### Added
+
+- **whisper.cpp speech recognition on the shared ggml.** A three-layer stack
+  mirroring the llama.cpp one — `crates/whisper-cpp-sys` (raw FFI, compiled
+  with `cc` against llama's ggml headers, never whisper's bundled copy),
+  `crates/xybrid-whisper` (safe RAII handle, no `unsafe` on the public surface),
+  and a `WhisperCppRuntime` in core behind `ExecutionTemplate::GgmlWhisper`.
+  Measured on a Pixel 8 (5 s window, tiny.en Q5_1, 4 threads): 744 ms against
+  ~3.5 s for the Candle path. Note the container: whisper.cpp verifies
+  `GGML_FILE_MAGIC` and never moved to GGUF, so these are `ggml-*.bin` files
+  (#462).
+- **whisper.cpp is built by Bazel and enabled in every platform preset.**
+  `//:whisper` is a plain `cc_library` on `//:llama` rather than a second
+  `cmake()` target, so "exactly one ggml" is a property of the build graph and
+  CI fails if that stops being true. Cost on the stripped cdylib: +0.2 MiB
+  (#465).
+- **Live streaming ASR on Flutter**, with the rolling-window streaming API
+  bound through `flutter_rust_bridge` and a demo screen in the example app
+  (#453).
+- **Warm-up windows and a span-reconciled transcript for live streaming.** The
+  first chunks use growing windows (1.5 s, 3 s) instead of waiting for a full
+  5 s one, landing the first partial ~3.5 s sooner, and the accumulator tracks
+  the audio span each segment covers so overlapping windows replace rather than
+  repeat earlier text (#458).
+- **An `audio_ctx` streaming override**, threaded through core `StreamConfig`,
+  the SDK builder, and the Flutter binding, so a caller can trim the Whisper
+  encoder window without repackaging the model bundle. `None` keeps the bundle
+  default (#481).
+- **Speculative cloud, download progress, and result provenance on every
+  binding.** `ExecutionProvenance` on `InferenceResult` tells a device answer
+  from a gateway answer, `DownloadState`/`DownloadStatus` plus
+  `download_status`/`await_download`/`is_cloud_serving` expose the background
+  download, and `set_speculative_cloud` / `from_registry_speculative` /
+  `set_platform_url` reach Swift, Kotlin, Unity C#, Python, React Native, and
+  Dart. Progress is polled everywhere except Flutter, which gets a push
+  `StreamSink`: FRB sinks are safe, while boltffi's inline-closure return ABI
+  is not, so no closure crosses that boundary (#459).
+- **llama.cpp Vulkan builds for desktop Linux**: consumers can now set
+  `XYBRID_LLAMA_CPP_VULKAN=1` when building `platform-desktop` to compile the
+  bundled backend with `GGML_VULKAN=ON`; local LLM telemetry reports `vulkan`
+  for those builds. Windows is not supported yet — ggml builds its GLSL
+  compiler as a nested CMake project whose paths exceed Windows' 260-character
+  limit under cargo's `OUT_DIR`, so the build fails wherever the repo is
+  checked out. Every other target rejects the variable with a clear error.
+- **A Vulkan lane on the Bazel graph** (`--config=linux-vulkan`). The Linux CLI
+  builds from Bazel, which writes llama.cpp's cmake defines itself and never
+  reads `XYBRID_LLAMA_CPP_VULKAN` — so the environment variable above reaches
+  cargo builds only. The new `--//:vulkan` flag selects `//:llama_vulkan`,
+  mirroring how `--//:metal` selects `//:llama_metal`, and a CI job builds and
+  smokes the resulting CLI (Vulkan backend symbols present, `libvulkan.so.1` a
+  real link dependency). That target runs on the local machine rather than a
+  remote worker, because ggml's Vulkan build needs `glslc`, the Vulkan headers
+  and a host compiler where cmake runs, and the remote image has none of them.
+  Published Linux binaries are unchanged and stay CPU-only: a Vulkan build
+  requires a Vulkan loader on the machine that runs it, so it belongs in a
+  separate artifact rather than in place of the default one.
+- **A warning when a GPU offload request cannot be honored.** `gpu_layers`
+  defaults to 99 and llama.cpp keeps every layer on the CPU when no GPU backend
+  was compiled in, so until now the only symptom of a CPU-only build on a
+  machine with an idle GPU was that inference ran slowly. Model load now logs
+  this once, pointing at the platform's GPU build options (#485).
+- **A Device Logs guide** — where SDK logs land per platform (logcat tag
+  `xybrid`, unified-log subsystem `dev.xybrid.sdk`, host-registered logger on
+  desktop), the commands to read them, and what the telemetry-export and
+  registry-failover warnings look like (#457).
+
+### Changed
+
+- **Candle is retired from all four platform presets.** whisper.cpp supersedes
+  it for ASR at a fraction of the cost — measured on the stripped cdylib,
+  Candle is 1.3–1.9 MiB against whisper.cpp's 0.2 MiB, 6.5–9.5x its
+  replacement — and Whisper was its only live model here. The `candle*`
+  features stay declared and buildable as an opt-in. Consequence for callers:
+  the registry id `whisper-tiny` (a SafeTensors bundle) no longer loads on a
+  default build, and fails with a message naming both the feature and the GGML
+  alternative rather than a bare `Runtime 'candle' not configured`. The demos
+  and examples point at `whisper-tiny-ggml` (#476).
+- **whisper.cpp transcription is hardened**, with three user-visible changes:
+  bracketed non-speech annotations such as `[BLANK_AUDIO]` are suppressed
+  rather than emitted as transcript text (a caller-facing opt-out is tracked in
+  #483); timestamp tokens are decoded for audio longer than 30 seconds, so a
+  padded final window no longer repeats text past the end of the real audio;
+  and unsupported `prompt` metadata returns `InvalidInput` instead of being
+  silently ignored, without echoing the prompt back. Twelve real-model
+  regression cases move off Candle onto a checksum-pinned multilingual GGML
+  model, covering WER, window boundaries, 66-second input, per-request language
+  and translation, and the two behaviours above (#484).
+- **Streaming sessions share the model's loaded executor.** Each session used
+  to build its own, reloading whisper weights from disk on every open (~2.5 s),
+  and then ran a full silent warm-up inference even when the weights were
+  already resident. `ModelHandle.executor` is now shared, `ModelRuntime` gained
+  `is_loaded`, and the warm-up returns early when the executor is already warm,
+  so second and later sessions open with no hidden compute. Unloading mid-stream
+  swaps in a fresh executor rather than pulling weights out from under a running
+  transcription (#461, #464).
+- **BoltFFI 0.25.3 → 0.29.3.** Every exported C symbol is renamed
+  (`boltffi_set_api_key` → `boltffi_function_xybrid_bolt_set_api_key`), so all
+  generated bindings — Swift, Kotlin, Unity C#, Python — were regenerated
+  together; the wire format itself is unchanged. The Cargo package is renamed
+  `xybrid-bolt` → `xybrid_bolt` because 0.29's C# generator rejects the
+  hyphenated name; the cdylib and Bazel `crate_name` were already
+  `xybrid_bolt`, so no artifact moved. Unity's 576-line hand-ported inference
+  supplement collapsed to ~85 lines, since 0.29 emits the inference path 0.25.3
+  dropped.
+- **Python SDK on generated bindings.** The 1,900-line hand-ported ctypes wire
+  layer is gone; `xybrid/_bolt/` is boltffi output, regenerated by
+  `tools/scripts/gen_python_bolt.py` and byte-compared in CI. The SDK's
+  Pythonic surface (envelope factories, `result.text`, model properties, typed
+  `xybrid.ModelNotFound`-style exceptions) is unchanged for callers but now
+  lives in `xybrid/_sugar.py` and `xybrid/_errors.py`. **Breaking for the
+  distribution**: 0.29's Python target compiles a CPython extension rather than
+  emitting ctypes, so the SDK requires **Python >= 3.10** and ships one wheel
+  per interpreter ABI instead of a single `py3-none` wheel.
+- **Docs corrected for the Candle retirement.** Preset tables, platform
+  rationales, and every runnable example that named the now-unloadable
+  `whisper-tiny`; the `candle` feature-reference rows stay and now say
+  explicitly that they are opt-in. Also fills gaps that predate the change:
+  `asr-whispercpp` and `ExecutionTemplate::GgmlWhisper` were absent from these
+  docs despite shipping in every preset, telemetry's `backend` enum lacked
+  `whispercpp`, and the feature matrix claimed every preset is text-only when
+  they have carried the llama.cpp vision path for far longer (#479).
+
+### Fixed
+
+- **The READMEs claimed CUDA acceleration on Linux and Windows, which no build
+  provides.** `GGML_CUDA` is `OFF` on every target in both the cargo and Bazel
+  paths, `llm-mistral-cuda` is a marker feature whose backing crate is commented
+  out of the workspace, and Candle — the one component with a real CUDA path —
+  was retired from the platform presets. The hardware-acceleration table now
+  reads CPU for Linux (with Vulkan as a build-time opt-in) and CPU for Windows,
+  in all three translations (#485).
+- **A gateway request with no model no longer silently runs OpenAI.** Both
+  request builders fell back to `gpt-4o-mini`, so a caller who forgot to set a
+  model paid for a third-party provider and saw the resulting failure as an
+  opaque gateway 502 rather than a client bug. It is now an `InvalidInput`
+  error. The per-provider defaults stay, since there the caller has already
+  chosen the provider (#463).
+- **Swift and Kotlin SDKs register a native log sink.** `xybrid-bolt` never
+  registered a log backend, so every `log::warn!` in the SDK — telemetry send
+  failures, registry failovers — was discarded on those two SDKs, the same hole
+  #448 closed for Flutter (#452).
+- **The cargo-built CLI had no whisper.cpp on any platform.** Its manifest
+  re-listed its own backend sets instead of forwarding to the SDK presets, so
+  `asr-whispercpp` never reached it and only the Bazel-built CLI had ASR. It
+  now forwards, removing the drift class rather than this instance of it
+  (#476).
+- **`asr-whispercpp` is advertised in the registry client's backend list.** It
+  was missing from `ALL_FEATURES`, so the `backends=` header under-reported the
+  backend set for as long as the backend had existed (#476).
+- **Cross-compiling whisper.cpp gave bindgen the wrong sysroot.** A cargo
+  Android build — which is what cargokit does for Flutter — died on
+  `ggml.h:214:10: fatal error: 'stdio.h' file not found`, because libclang
+  resolves headers against the host sysroot. `xybrid-llama-sys` now emits
+  `cargo:ndk=<path>` and the whisper crate consumes it, keeping one
+  NDK-resolution implementation in the workspace; the Apple `-isysroot` and
+  simulator-triple handling come along in the same helper. CI missed it because
+  every Android lane goes through Bazel, which compiles committed bindings and
+  never runs bindgen (#468).
+- **`gen_python_bolt.py` no longer deletes the staged native artifacts.** It
+  pruned every file it had not generated, so regenerating removed the compiled
+  bridge and the cdylib beside it and broke `import xybrid`.
+- **`XYBRID_FEATURES` reaches the Python native build again.** The staged
+  cdylib comes from the wheel `boltffi pack python` builds, so features are now
+  forwarded to that build (`--cargo-arg`) instead of only to a separate
+  `cargo build` whose output was discarded.
+- **Three workflows no longer fail in every fork.** Unity Editor CI, the
+  Bazel Windows Flutter DLL smoke, and the weekly Build Natives cron each
+  assumed a non-`pull_request` event implies secrets are present, which is
+  false for a contributor syncing their fork's master and for inherited crons.
+  None of them gated anything here, but they buried real failures in forks
+  under noise a contributor cannot fix (#480).
 
 ---
 

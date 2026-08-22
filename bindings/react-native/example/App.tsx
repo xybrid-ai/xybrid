@@ -20,7 +20,7 @@ import { Model, ModelLoader, Xybrid } from 'react-native-xybrid';
 // NOTE: this requires an Expo *development build* (`expo run:ios` /
 // `expo run:android`), NOT Expo Go — the module ships custom native code.
 
-const DEFAULT_MODEL = 'whisper-tiny';
+const DEFAULT_MODEL = 'whisper-tiny-ggml';
 
 type Step = { label: string; durationMs: number; ok: boolean; detail?: string };
 

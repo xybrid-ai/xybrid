@@ -45,7 +45,7 @@ namespace Xybrid
             }
 
             return new Envelope(new XybridBolt.XybridEnvelope(
-                new XybridBolt.XybridEnvelopeKind.Text(text)));
+                new XybridBolt.XybridEnvelopeKind.Text(text), System.Array.Empty<XybridBolt.XybridMetadataEntry>()));
         }
 
         /// <summary>
@@ -136,7 +136,8 @@ namespace Xybrid
 
             string normalizedFormat = NormalizeImageFormat(format);
             return new Envelope(new XybridBolt.XybridEnvelope(
-                new XybridBolt.XybridEnvelopeKind.Image(bytes, normalizedFormat)));
+                new XybridBolt.XybridEnvelopeKind.Image(bytes, normalizedFormat),
+                System.Array.Empty<XybridBolt.XybridMetadataEntry>()));
         }
 
         /// <summary>
@@ -155,7 +156,8 @@ namespace Xybrid
 
             var parts = new List<XybridBolt.XybridEnvelope>
             {
-                new XybridBolt.XybridEnvelope(new XybridBolt.XybridEnvelopeKind.Text(text)),
+                new XybridBolt.XybridEnvelope(
+                    new XybridBolt.XybridEnvelopeKind.Text(text), System.Array.Empty<XybridBolt.XybridMetadataEntry>()),
             };
             if (images != null)
             {
@@ -180,6 +182,53 @@ namespace Xybrid
             };
             return new Envelope(new XybridBolt.XybridEnvelope(
                 new XybridBolt.XybridEnvelopeKind.MultiPart(parts.ToArray()), metadata));
+        }
+
+        /// <summary>
+        /// Creates the continuation envelope for the turn after the model asked
+        /// for tools.
+        /// </summary>
+        /// <remarks>
+        /// One Run is one model turn, so the tool loop lives in your code: run a
+        /// request carrying <see cref="GenerationConfig.AddTool"/> definitions,
+        /// execute every <see cref="InferenceResult.ToolCalls"/> entry, then run
+        /// this envelope to feed the outcomes back. Run the continuation with
+        /// the same tools as the original turn so the executor rebuilds an
+        /// identical chat prefix.
+        ///
+        /// Only the immediately prior assistant turn is replayed, and
+        /// continuation runs on the non-streaming text path only.
+        /// </remarks>
+        /// <param name="userText">The original user message of the turn being continued.</param>
+        /// <param name="priorAssistantText">
+        /// That turn's raw output text, tool-call block included — i.e.
+        /// <see cref="InferenceResult.Text"/> verbatim.
+        /// </param>
+        /// <param name="results">Tool outcomes, in call order.</param>
+        /// <exception cref="ArgumentNullException">Thrown if any argument is null.</exception>
+        /// <exception cref="XybridException">Thrown if a result's content is not valid JSON.</exception>
+        public static Envelope ToolResults(
+            string userText,
+            string priorAssistantText,
+            IList<XybridBolt.XybridToolResult> results)
+        {
+            if (userText == null)
+            {
+                throw new ArgumentNullException(nameof(userText));
+            }
+            if (priorAssistantText == null)
+            {
+                throw new ArgumentNullException(nameof(priorAssistantText));
+            }
+            if (results == null)
+            {
+                throw new ArgumentNullException(nameof(results));
+            }
+
+            var array = new XybridBolt.XybridToolResult[results.Count];
+            results.CopyTo(array, 0);
+            return new Envelope(
+                XybridBolt.XybridBolt.ToolResultsEnvelope(userText, priorAssistantText, array));
         }
 
         private static string RoleString(MessageRole role)

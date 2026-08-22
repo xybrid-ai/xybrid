@@ -34,6 +34,10 @@
 //!   binding needs at startup.
 //! - **`XybridModel`**: load / run / pull-stream / conversation-context runs /
 //!   warmup / voice surface.
+//! - **Tool calling**: `XybridToolDefinition` on the generation config,
+//!   `XybridToolCall` on the result, and `tool_results_envelope` for the
+//!   continuation turn. One `run` is one model turn — the loop lives in the
+//!   caller's code, not behind a cross-boundary callback.
 //! - **`XybridConversationContext`**: opaque handle (new / with_id / push /
 //!   set_system / clear / id) feeding `run_with_context` and
 //!   `run_stream_with_context`.
@@ -258,13 +262,15 @@ impl From<XybridEnvelope> for facade::Envelope {
 
 impl From<facade::Envelope> for XybridEnvelope {
     fn from(e: facade::Envelope) -> Self {
+        let mut metadata: Vec<_> = e
+            .metadata
+            .into_iter()
+            .map(|(key, value)| XybridMetadataEntry { key, value })
+            .collect();
+        metadata.sort_unstable_by(|left, right| left.key.cmp(&right.key));
         Self {
             kind: e.kind.into(),
-            metadata: e
-                .metadata
-                .into_iter()
-                .map(|(key, value)| XybridMetadataEntry { key, value })
-                .collect(),
+            metadata,
         }
     }
 }
@@ -288,6 +294,108 @@ impl From<XybridMessageRole> for facade::MessageRole {
 }
 
 // ============================================================================
+// Tool calling
+// ============================================================================
+
+/// A tool (function) the model may ask to call.
+///
+/// `parameters_json` is the JSON Schema for the arguments, carried as a JSON
+/// string because no binding generator can describe an arbitrary JSON tree.
+#[data]
+#[derive(Clone)]
+pub struct XybridToolDefinition {
+    pub name: String,
+    pub description: String,
+    pub parameters_json: String,
+}
+
+impl From<XybridToolDefinition> for facade::ToolDefinition {
+    fn from(t: XybridToolDefinition) -> Self {
+        Self {
+            name: t.name,
+            description: t.description,
+            parameters_json: t.parameters_json,
+        }
+    }
+}
+
+impl From<facade::ToolDefinition> for XybridToolDefinition {
+    fn from(t: facade::ToolDefinition) -> Self {
+        Self {
+            name: t.name,
+            description: t.description,
+            parameters_json: t.parameters_json,
+        }
+    }
+}
+
+/// One tool call the model emitted, from [`XybridResult::tool_calls`].
+#[data]
+#[derive(Clone)]
+pub struct XybridToolCall {
+    pub id: String,
+    pub name: String,
+    pub arguments_json: String,
+}
+
+impl From<facade::ToolCall> for XybridToolCall {
+    fn from(c: facade::ToolCall) -> Self {
+        Self {
+            id: c.id,
+            name: c.name,
+            arguments_json: c.arguments_json,
+        }
+    }
+}
+
+/// The outcome of running one tool, fed back with [`tool_results_envelope`].
+#[data]
+#[derive(Clone)]
+pub struct XybridToolResult {
+    /// The [`XybridToolCall::id`] this answers.
+    pub call_id: String,
+    pub name: String,
+    /// The tool's output as a JSON string.
+    pub content_json: String,
+}
+
+impl From<XybridToolResult> for facade::ToolResult {
+    fn from(r: XybridToolResult) -> Self {
+        Self {
+            call_id: r.call_id,
+            name: r.name,
+            content_json: r.content_json,
+        }
+    }
+}
+
+/// Build the continuation envelope for the turn after the model asked for
+/// tools.
+///
+/// One `run` is one model turn, so the loop lives in your code: run a
+/// tools-bearing request, execute every [`XybridToolCall`] it returns, then
+/// run this envelope to feed the outcomes back. Pass the same tools on the
+/// continuation's [`XybridGenerationConfig`] as on the original turn.
+///
+/// A free function rather than a constructor because `XybridEnvelope` is a
+/// `#[data]` record, not a handle type — records carry no methods across the
+/// generated bindings.
+#[export]
+pub fn tool_results_envelope(
+    user_text: String,
+    prior_assistant_text: String,
+    results: Vec<XybridToolResult>,
+) -> Result<XybridEnvelope, XybridError> {
+    facade::Envelope::tool_results(
+        user_text,
+        prior_assistant_text,
+        results.into_iter().map(Into::into).collect(),
+    )
+    .map(Into::into)
+    .map_err(XybridError::from)
+}
+
+// ============================================================================
 // Generation + Run options
 // ============================================================================
 
@@ -306,6 +414,14 @@ pub struct XybridGenerationConfig {
     /// [`json_schema_to_gbnf`], or pass raw GBNF. Appended last: `#[data]`
     /// PODs serialize by field order across the FFI boundary.
     pub grammar: Option<String>,
+    /// Tools the model may call this turn. Empty means no tool calling —
+    /// existing behavior, unchanged. Appended after `grammar` for the same
+    /// field-order reason.
+    ///
+    /// Tool calling is llama.cpp-only today; unsupported paths (no embedded
+    /// chat template, the mistralrs backend, the cloud fallback leg) reject
+    /// tool-bearing requests rather than quietly generating without them.
+    pub tools: Vec<XybridToolDefinition>,
 }
 
 impl From<XybridGenerationConfig> for facade::GenerationConfig {
@@ -319,6 +435,34 @@ impl From<XybridGenerationConfig> for facade::GenerationConfig {
             repetition_penalty: c.repetition_penalty,
             stop_sequences: c.stop_sequences,
             grammar: c.grammar,
+            tools: c.tools.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+impl From<facade::GenerationConfig> for XybridGenerationConfig {
+    fn from(config: facade::GenerationConfig) -> Self {
+        let facade::GenerationConfig {
+            max_tokens,
+            temperature,
+            top_p,
+            min_p,
+            top_k,
+            repetition_penalty,
+            stop_sequences,
+            grammar,
+            tools,
+        } = config;
+        Self {
+            max_tokens,
+            temperature,
+            top_p,
+            min_p,
+            top_k,
+            repetition_penalty,
+            stop_sequences,
+            grammar,
+            tools: tools.into_iter().map(Into::into).collect(),
         }
     }
 }
@@ -455,6 +599,13 @@ pub struct XybridResult {
     /// identical on both legs, so this is the only way to tell them apart.
     pub execution_target: XybridExecutionTarget,
     pub metrics: XybridInferenceMetrics,
+    /// Tool calls the model emitted this turn. Empty unless the request
+    /// offered tools via [`XybridGenerationConfig::tools`].
+    /// `#[data]` PODs serialize by field order across the FFI boundary.
+    pub tool_calls: Vec<XybridToolCall>,
+    /// Model reasoning emitted separately from the final answer text.
+    /// Appended last because `#[data]` fields serialize in declaration order.
+    pub reasoning_content: Option<String>,
 }
 
 /// Where a result was produced — observed fact, not a routing preference.
@@ -510,6 +661,7 @@ impl From<facade::DownloadStatus> for XybridDownloadStatus {
 impl From<facade::InferenceResult> for XybridResult {
     fn from(r: facade::InferenceResult) -> Self {
         let metrics = XybridInferenceMetrics::from(&r.metrics);
+        let reasoning_content = r.envelope.metadata.get("reasoning_content").cloned();
         Self {
             envelope: r.envelope.into(),
             output_type: r.output_type.into(),
@@ -517,6 +669,8 @@ impl From<facade::InferenceResult> for XybridResult {
             latency_ms: r.latency_ms,
             execution_target: r.execution_target.into(),
             metrics,
+            tool_calls: r.tool_calls.into_iter().map(Into::into).collect(),
+            reasoning_content,
         }
     }
 }
@@ -751,6 +905,12 @@ pub fn set_speculative_cloud(enabled: bool) {
     facade::set_speculative_cloud(enabled);
 }
 
+/// Whether a Xybrid gateway API key is resolvable (in-memory or env).
+#[export]
+pub fn has_api_key() -> bool {
+    facade::has_api_key()
+}
+
 /// Whether the global speculative-cloud default is on.
 #[export]
 pub fn is_speculative_cloud_enabled() -> bool {
@@ -884,6 +1044,17 @@ impl XybridModel {
         Ok(Self::new(model))
     }
 
+    /// Resolve and load a HuggingFace repository pinned to a revision.
+    pub fn from_huggingface_with_revision(
+        repo: String,
+        revision: String,
+    ) -> Result<Self, XybridError> {
+        let model = facade::ModelLoader::from_huggingface_with_revision(repo, revision)
+            .load()
+            .map_err(XybridError::from)?;
+        Ok(Self::new(model))
+    }
+
     /// Load from a raw GGUF file, auto-generating `model_metadata.json` from the
     /// GGUF header (written next to the file if absent).
     pub fn from_model_file(path: String) -> Result<Self, XybridError> {
@@ -937,8 +1108,23 @@ impl XybridModel {
         self.inner.supports_token_streaming()
     }
 
+    /// Return the model's resolved generation defaults.
+    pub fn default_generation_config(&self) -> XybridGenerationConfig {
+        self.inner.default_generation_config().into()
+    }
+
     pub fn is_llm(&self) -> bool {
         self.inner.is_llm()
+    }
+
+    /// Whether the model bundle declares local tool-calling support.
+    ///
+    /// Advisory tri-state: `null` means the bundle says nothing, so the host
+    /// cannot tell. Gate tool UI on it; enforcement stays at run time — a
+    /// tools-bearing request against a model whose chat template has no tool
+    /// support fails as invalid input regardless of what this reports.
+    pub fn supports_tool_calling(&self) -> Option<bool> {
+        self.inner.supports_tool_calling()
     }
 
     pub fn has_voices(&self) -> bool {
@@ -1200,6 +1386,11 @@ impl XybridConversationContext {
         self.inner.history_len()
     }
 
+    /// Return history turns, excluding the persistent system envelope.
+    pub fn history(&self) -> Vec<XybridEnvelope> {
+        self.inner.history().into_iter().map(Into::into).collect()
+    }
+
     /// Whether a persistent system-prompt envelope is set.
     pub fn has_system(&self) -> bool {
         self.inner.has_system()
@@ -1457,5 +1648,142 @@ mod tests {
         let token = event.token.expect("token event should carry a token");
         assert_eq!(token.token, "hi");
         assert_eq!(token.index, 3);
+    }
+
+    #[test]
+    fn generation_config_crosses_from_facade_with_resolved_values() {
+        let config = facade::GenerationConfig {
+            max_tokens: Some(128),
+            temperature: Some(0.25),
+            top_p: Some(0.75),
+            min_p: Some(0.05),
+            top_k: Some(32),
+            repetition_penalty: Some(1.1),
+            stop_sequences: vec!["</s>".into(), "END".into()],
+            grammar: Some("root ::= \"ok\"".into()),
+            tools: vec![facade::ToolDefinition {
+                name: "weather".into(),
+                description: "Weather lookup".into(),
+                parameters_json: r#"{"type":"object"}"#.into(),
+            }],
+        };
+
+        let wire = XybridGenerationConfig::from(config);
+
+        assert_eq!(wire.max_tokens, Some(128));
+        assert_eq!(wire.temperature, Some(0.25));
+        assert_eq!(wire.top_p, Some(0.75));
+        assert_eq!(wire.min_p, Some(0.05));
+        assert_eq!(wire.top_k, Some(32));
+        assert_eq!(wire.repetition_penalty, Some(1.1));
+        assert_eq!(wire.stop_sequences, vec!["</s>", "END"]);
+        assert_eq!(wire.grammar.as_deref(), Some("root ::= \"ok\""));
+        assert_eq!(wire.tools.len(), 1);
+        assert_eq!(wire.tools[0].name, "weather");
+        assert_eq!(wire.tools[0].description, "Weather lookup");
+        assert_eq!(wire.tools[0].parameters_json, r#"{"type":"object"}"#);
+    }
+
+    #[test]
+    fn result_conversion_exposes_reasoning_content() {
+        // Given
+        let mut envelope = facade::Envelope::text("answer".into());
+        envelope
+            .metadata
+            .insert("reasoning_content".into(), "reasoning".into());
+        let result = facade::InferenceResult {
+            envelope,
+            output_type: facade::OutputType::Text,
+            model_id: "model".into(),
+            latency_ms: 1,
+            execution_target: facade::ExecutionTarget::Local,
+            metrics: facade::InferenceMetrics {
+                total_ms: 1,
+                ttft_ms: None,
+                tokens_per_second: None,
+                prefill_tps: None,
+                decode_tps: None,
+                tokens_out: None,
+                stage_latencies_ms: Vec::new(),
+            },
+            tool_calls: Vec::new(),
+        };
+
+        // When
+        let wire = XybridResult::from(result);
+
+        // Then
+        assert_eq!(wire.reasoning_content.as_deref(), Some("reasoning"));
+        assert!(wire
+            .envelope
+            .metadata
+            .iter()
+            .any(|entry| { entry.key == "reasoning_content" && entry.value == "reasoning" }));
+    }
+
+    #[test]
+    fn envelope_metadata_order_is_stable_across_wire_conversions() {
+        // Given
+        let envelope = facade::Envelope {
+            kind: facade::EnvelopeKind::Text {
+                text: "hello".into(),
+            },
+            metadata: [
+                ("zeta".to_string(), "last".to_string()),
+                ("alpha".to_string(), "first".to_string()),
+            ]
+            .into_iter()
+            .collect(),
+        };
+
+        // When
+        let first = XybridEnvelope::from(envelope.clone());
+        let second = XybridEnvelope::from(envelope);
+
+        // Then
+        assert_eq!(
+            first
+                .metadata
+                .iter()
+                .map(|entry| entry.key.as_str())
+                .collect::<Vec<_>>(),
+            vec!["alpha", "zeta"]
+        );
+        assert_eq!(
+            first
+                .metadata
+                .iter()
+                .map(|entry| (entry.key.as_str(), entry.value.as_str()))
+                .collect::<Vec<_>>(),
+            second
+                .metadata
+                .iter()
+                .map(|entry| (entry.key.as_str(), entry.value.as_str()))
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn conversation_context_history_crosses_the_wire() {
+        // Given
+        let context = XybridConversationContext::new();
+        context
+            .push(XybridEnvelope {
+                kind: XybridEnvelopeKind::Text {
+                    text: "hello".into(),
+                },
+                metadata: Vec::new(),
+            })
+            .expect("test envelope should be accepted");
+
+        // When
+        let history = context.history();
+
+        // Then
+        assert_eq!(history.len(), 1);
+        assert!(matches!(
+            &history[0].kind,
+            XybridEnvelopeKind::Text { text } if text == "hello"
+        ));
     }
 }

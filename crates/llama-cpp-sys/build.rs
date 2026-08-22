@@ -60,6 +60,8 @@ fn main() {
         "CC_aarch64_linux_android",
         "TARGET_CC",
         "CC",
+        "XYBRID_LLAMA_CPP_VULKAN",
+        "VULKAN_SDK",
         "LLAMA_CPP_SYS_WORKSPACE_ROOT",
     ] {
         println!("cargo:rerun-if-env-changed={var}");
@@ -488,6 +490,29 @@ fn compile_llama_cpp() {
     let ctx = BuildContext::from_env();
     let wrapper_path = ctx.manifest_dir.join("wrapper.cpp");
     let vision_enabled = env::var_os("CARGO_FEATURE_VISION").is_some();
+    let vulkan_enabled = env_flag("XYBRID_LLAMA_CPP_VULKAN");
+
+    // Windows is deliberately excluded. ggml builds its GLSL compiler
+    // (`vulkan-shaders-gen`) as a nested CMake ExternalProject, and under
+    // cargo's `target/<profile>/build/<crate>-<hash>/out/` prefix the paths
+    // MSBuild's FileTracker generates for it exceed Windows' 260-character
+    // MAX_PATH (`error FTK1011`, surfacing as a bogus "no working C
+    // compiler"). Only ~17 characters remain for the repo root, so no
+    // realistic checkout location builds. Re-enabling needs the Ninja
+    // generator, which does not use FileTracker at all.
+    if vulkan_enabled && ctx.target_os != "linux" {
+        fatal(
+            "llama.cpp Vulkan backend is only supported by xybrid on Linux.",
+            &[
+                format!(
+                    "Target `{}` does not support `XYBRID_LLAMA_CPP_VULKAN=1`.",
+                    ctx.target
+                ),
+                String::new(),
+                "Unset `XYBRID_LLAMA_CPP_VULKAN` or set it to `0` for this target.".to_string(),
+            ],
+        );
+    }
 
     // Source-lookup order (see header comment for rationale):
     //   1. workspace/vendor/llama-cpp (canonical, declared in `.gitmodules`)
@@ -532,7 +557,7 @@ fn compile_llama_cpp() {
     //     compile (the dominant cold-build cost on Android/Apple).
     //   - Source path: today's cmake build, also the fallback when the fast
     //     path misses for any reason (absent dir, incomplete slice).
-    let dst = match resolve_prebuilt(&ctx, vision_enabled) {
+    let dst = match resolve_prebuilt(&ctx, vision_enabled, vulkan_enabled) {
         Some(prebuilt) => {
             println!(
                 "cargo:warning=llama.cpp: using prebuilt natives for {} ({})",
@@ -541,10 +566,37 @@ fn compile_llama_cpp() {
             );
             prebuilt
         }
-        None => build_from_source(&ctx, &llama_cpp_dir, vision_enabled),
+        None => build_from_source(&ctx, &llama_cpp_dir, vision_enabled, vulkan_enabled),
     };
 
-    emit_link_and_wrapper(&ctx, &llama_cpp_dir, &wrapper_path, &dst, vision_enabled);
+    emit_link_and_wrapper(
+        &ctx,
+        &llama_cpp_dir,
+        &wrapper_path,
+        &dst,
+        vision_enabled,
+        vulkan_enabled,
+    );
+}
+
+fn env_flag(name: &str) -> bool {
+    match env::var(name) {
+        Ok(value) if value == "1" => true,
+        Ok(value) if value == "0" => false,
+        Err(env::VarError::NotPresent) => false,
+        Ok(value) => fatal(
+            &format!("Invalid value for `{name}`."),
+            &[
+                format!("Expected `0` or `1`, but received `{value}`."),
+                String::new(),
+                format!("Set `{name}=1` to enable it, or unset it to disable it."),
+            ],
+        ),
+        Err(env::VarError::NotUnicode(_)) => fatal(
+            &format!("Invalid value for `{name}`."),
+            &["The value must be valid UTF-8 and either `0` or `1`.".to_string()],
+        ),
+    }
 }
 
 /// Compile llama.cpp (+ the mtmd vision libs when enabled) from source via
@@ -552,7 +604,12 @@ fn compile_llama_cpp() {
 /// taken whenever the prebuilt fast path misses. When
 /// `XYBRID_NATIVES_EXPORT_DIR` is set, the produced archives + headers are also
 /// copied out so a publisher job can upload them as a reusable slice.
-fn build_from_source(ctx: &BuildContext, llama_cpp_dir: &Path, vision_enabled: bool) -> PathBuf {
+fn build_from_source(
+    ctx: &BuildContext,
+    llama_cpp_dir: &Path,
+    vision_enabled: bool,
+    vulkan_enabled: bool,
+) -> PathBuf {
     if !check_cmake_available() {
         fatal(
             "CMake not found!",
@@ -588,17 +645,22 @@ fn build_from_source(ctx: &BuildContext, llama_cpp_dir: &Path, vision_enabled: b
     } else if ctx.target_os == "macos" || ctx.target_os == "ios" {
         cmake_config
             .define("GGML_METAL", "ON")
+            .define("GGML_VULKAN", "OFF")
             .define("GGML_ACCELERATE", "ON")
             .define("GGML_BLAS", "OFF");
         metal_enabled = true;
     } else if ctx.target_os == "linux" {
         cmake_config
             .define("GGML_METAL", "OFF")
-            .define("GGML_CUDA", "OFF");
+            .define("GGML_CUDA", "OFF")
+            .define("GGML_VULKAN", if vulkan_enabled { "ON" } else { "OFF" });
     } else if ctx.target_os == "windows" {
+        // GGML_VULKAN stays OFF here: `vulkan_enabled` is rejected above for
+        // every non-Linux target, so this arm is only ever reached without it.
         cmake_config
             .define("GGML_METAL", "OFF")
-            .define("GGML_CUDA", "OFF");
+            .define("GGML_CUDA", "OFF")
+            .define("GGML_VULKAN", "OFF");
 
         // Force CMake Release build on Windows to match the cc crate's CRT choice.
         // The cc crate always emits /MD (release CRT) — it never emits /MDd, even in
@@ -608,9 +670,10 @@ fn build_from_source(ctx: &BuildContext, llama_cpp_dir: &Path, vision_enabled: b
     }
 
     println!(
-        "cargo:warning=llama.cpp build: target={}, metal={}, ndk={}",
+        "cargo:warning=llama.cpp build: target={}, metal={}, vulkan={}, ndk={}",
         ctx.target,
         if metal_enabled { "yes" } else { "no" },
+        if vulkan_enabled { "yes" } else { "no" },
         ndk_path_used.as_deref().unwrap_or("N/A")
     );
 
@@ -628,6 +691,7 @@ fn emit_link_and_wrapper(
     wrapper_path: &Path,
     dst: &Path,
     vision_enabled: bool,
+    vulkan_enabled: bool,
 ) {
     // Metadata for direct dependents. Because this crate declares
     // `links = "llama"`, cargo forwards these as `DEP_LLAMA_ROOT` /
@@ -638,6 +702,13 @@ fn emit_link_and_wrapper(
     // This is what keeps exactly one ggml in the binary.
     println!("cargo:root={}", dst.display());
     println!("cargo:src={}", llama_cpp_dir.display());
+    // The resolved NDK, so a dependent's bindgen can point libclang at the
+    // same sysroot. Without it, a cross-build's libclang resolves headers
+    // against the HOST sysroot and fails on `<stdio.h>`. Emitted only when the
+    // detection above actually found one, so its absence is meaningful.
+    if let Some(ndk) = ctx.android_ndk_path() {
+        println!("cargo:ndk={ndk}");
+    }
 
     println!("cargo:rustc-link-search=native={}/lib", dst.display());
     println!("cargo:rustc-link-search=native={}/lib64", dst.display());
@@ -650,6 +721,10 @@ fn emit_link_and_wrapper(
     println!("cargo:rustc-link-lib=static=ggml");
     println!("cargo:rustc-link-lib=static=ggml-base");
     println!("cargo:rustc-link-lib=static=ggml-cpu");
+    if vulkan_enabled {
+        println!("cargo:rustc-link-lib=static=ggml-vulkan");
+        emit_vulkan_sdk_link_search(&ctx.target_os);
+    }
 
     // Build our C++ wrapper (C++17 required by llama.cpp headers)
     // Note: The cc crate always uses /MD (release CRT) on MSVC — it never emits /MDd.
@@ -681,6 +756,9 @@ fn emit_link_and_wrapper(
     } else if ctx.target_os == "linux" {
         println!("cargo:rustc-link-lib=stdc++");
         println!("cargo:rustc-link-lib=pthread");
+        if vulkan_enabled {
+            println!("cargo:rustc-link-lib=vulkan");
+        }
     } else if ctx.target_os == "macos" || ctx.target_os == "ios" {
         println!("cargo:rustc-link-lib=c++");
         println!("cargo:rustc-link-lib=framework=Accelerate");
@@ -689,8 +767,25 @@ fn emit_link_and_wrapper(
         println!("cargo:rustc-link-lib=framework=Foundation");
         println!("cargo:rustc-link-lib=framework=MetalKit");
         println!("cargo:rustc-link-lib=static=ggml-metal");
-    } else if ctx.target_os == "windows" {
-        // Windows linking handled by CMake
+    }
+}
+
+fn emit_vulkan_sdk_link_search(target_os: &str) {
+    let Some(sdk) = env::var_os("VULKAN_SDK") else {
+        return;
+    };
+    let sdk = PathBuf::from(sdk);
+    let dirs: &[&str] = if target_os == "windows" {
+        &["Lib"]
+    } else {
+        &["lib"]
+    };
+
+    for dir in dirs {
+        let path = sdk.join(dir);
+        if path.is_dir() {
+            println!("cargo:rustc-link-search=native={}", path.display());
+        }
     }
 }
 
@@ -698,7 +793,7 @@ fn emit_link_and_wrapper(
 /// must stay in sync with the `rustc-link-lib=static=` directives in
 /// [`emit_link_and_wrapper`]. Used to validate a prebuilt slice before
 /// trusting it.
-fn required_archives(target_os: &str, vision_enabled: bool) -> Vec<String> {
+fn required_archives(target_os: &str, vision_enabled: bool, vulkan_enabled: bool) -> Vec<String> {
     // MSVC names static libs `<name>.lib` (no `lib` prefix); every other target
     // we build for is Unix-style `lib<name>.a`.
     let (prefix, suffix) = if target_os == "windows" {
@@ -715,6 +810,9 @@ fn required_archives(target_os: &str, vision_enabled: bool) -> Vec<String> {
     if target_os == "macos" || target_os == "ios" {
         // Apple links ggml-metal unconditionally (see emit_link_and_wrapper).
         libs.push(format!("{prefix}ggml-metal{suffix}"));
+    }
+    if vulkan_enabled {
+        libs.push(format!("{prefix}ggml-vulkan{suffix}"));
     }
     if vision_enabled {
         libs.push(format!("{prefix}mtmd{suffix}"));
@@ -742,7 +840,11 @@ fn archive_present(dir: &Path, name: &str) -> bool {
 /// full target triple lets one base dir serve a multi-ABI build (the Android
 /// build compiles every ABI from one cargo invocation, each running this
 /// script for its own `TARGET`).
-fn resolve_prebuilt(ctx: &BuildContext, vision_enabled: bool) -> Option<PathBuf> {
+fn resolve_prebuilt(
+    ctx: &BuildContext,
+    vision_enabled: bool,
+    vulkan_enabled: bool,
+) -> Option<PathBuf> {
     let base = env::var_os("XYBRID_NATIVES_PREBUILT_DIR")?;
     let base = PathBuf::from(base);
     if base.as_os_str().is_empty() {
@@ -757,7 +859,7 @@ fn resolve_prebuilt(ctx: &BuildContext, vision_enabled: bool) -> Option<PathBuf>
         return None;
     }
 
-    for archive in required_archives(&ctx.target_os, vision_enabled) {
+    for archive in required_archives(&ctx.target_os, vision_enabled, vulkan_enabled) {
         if !archive_present(&dir, &archive) {
             println!(
                 "cargo:warning=llama.cpp: prebuilt slice for {} incomplete (missing {archive}); compiling from source",

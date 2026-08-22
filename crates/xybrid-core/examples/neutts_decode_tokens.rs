@@ -63,8 +63,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Err("waveform.f32 size is not a multiple of 4".into());
     }
     let all: Vec<f32> = bytes
-        .chunks_exact(4)
-        .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|c| f32::from_le_bytes(*c))
         .collect();
     let total_ms = (all.len() as f32 / sample_rate as f32 * 1000.0) as usize;
     println!(

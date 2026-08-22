@@ -1,8 +1,15 @@
-xybrid/_native/*.dylib
-xybrid/_native/*.so
-xybrid/_native/*.dll
+# Build artifacts staged by tools/scripts/build-python-bolt.sh: the xybrid-bolt
+# cdylib and the CPython bridge boltffi compiles against it. Both are
+# host- and interpreter-specific (`_native.cpython-<abi>-<platform>.so`), so
+# they are built, never committed. `_bolt/_native.c` is generated *source* and
+# stays tracked.
+xybrid/_bolt/*.dylib
+xybrid/_bolt/*.so
+xybrid/_bolt/*.dll
+xybrid/_bolt/*.pyd
 __pycache__/
 .pytest_cache/
 *.egg-info/
+build/
 dist/
 .venv/

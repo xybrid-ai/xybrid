@@ -1,6 +1,6 @@
 # @xybrid/web preview
 
-`@xybrid/web` is the future umbrella browser package for Xybrid. Version `0.4.1` is a private preview with two surfaces: a low-level LiteRT tensor surface backed by `@litertjs/core` `2.5.2`, and a text-generation surface backed by `@litert-lm/core` `0.14.0`.
+`@xybrid/web` is the future umbrella browser package for Xybrid. Version `0.5.0` is a private preview with two surfaces: a low-level LiteRT tensor surface backed by `@litertjs/core` `2.5.2`, and a text-generation surface backed by `@litert-lm/core` `0.14.0`.
 
 ## Supported now
 

@@ -20,12 +20,16 @@ load("@rules_rs//rs:rust_library.bzl", "rust_library")
 load("@rules_rs//rs:rust_test.bzl", "rust_test")
 load("@crates//:defs.bzl", "all_crate_deps")
 
-# Android ships the `platform-android` backend set: candle (Whisper ASR/voice) +
-# llm-llamacpp-vision (mtmd multimodal). Bazel has no cross-crate feature
-# propagation, so the preset's expansion is set directly on each first-party box
-# — this is core's slice. (ort-dynamic is a no-op marker; linking is cfg-driven.)
+# Android ships the `platform-android` backend set: llm-llamacpp-vision (mtmd
+# multimodal) plus the unconditional asr-whispercpp below. Bazel has no
+# cross-crate feature propagation, so the preset's expansion is set directly on
+# each first-party box — this is core's slice, and it must be kept in step with
+# `crates/xybrid-sdk/Cargo.toml` by hand. (ort-dynamic is a no-op marker;
+# linking is cfg-driven.)
+#
+# Candle was retired from the presets: whisper.cpp supersedes it for ASR at a
+# fraction of the size. The feature is still declared, just not enabled here.
 _ANDROID_BACKENDS = [
-    "candle",
     "llm-llamacpp-vision",
 ]
 
@@ -35,20 +39,22 @@ rust_library(
     edition = "2021",
     # Resolved from the real Cargo.lock by the @crates hub (DEP_DATA). Backend
     # accel features are gated per-platform exactly as cargo's presets unify them.
+    # asr-whispercpp is unconditional, matching cargo: every platform-* preset
+    # enables it (~0.2 MiB stripped on the Android cdylib proxy). `xybrid-whisper`
+    # is the implicit optional-dependency feature cargo derives from the
+    # `dep:xybrid-whisper` entry — the hub resolves it, so it is listed here for
+    # the same reason `xybrid-llama` / `xybrid-llama-sys` are.
     crate_features = [
+        "asr-whispercpp",
         "default",
         "llm-llamacpp",
         "ort-download",  # no-op marker (mode is per-target in Cargo.toml); kept to match the hub's resolved feature set.
         "schema",
         "xybrid-llama",
         "xybrid-llama-sys",
+        "xybrid-whisper",
     ] + select({
         "@rules_rs//rs/platforms/config:aarch64-apple-darwin": [
-            "candle",
-            "candle-core",
-            "candle-hub",
-            "candle-metal",
-            "candle-nn",
             "ort-coreml",
             # Flip 2: parity with the shipped platform-macos CLI (vision).
             "llm-llamacpp-vision",
@@ -56,21 +62,11 @@ rust_library(
         # Apple G1-G2 parity: platform-ios expands to the SAME core backend set
         # as platform-macos (candle-metal + coreml + vision), so mirror darwin.
         "@rules_rs//rs/platforms/config:aarch64-apple-ios": [
-            "candle",
-            "candle-core",
-            "candle-hub",
-            "candle-metal",
-            "candle-nn",
             "ort-coreml",
             "llm-llamacpp-vision",
         ],
         # iOS simulator (Apple G4a): identical backend set to the device slice.
         "@rules_rs//rs/platforms/config:aarch64-apple-ios-sim": [
-            "candle",
-            "candle-core",
-            "candle-hub",
-            "candle-metal",
-            "candle-nn",
             "ort-coreml",
             "llm-llamacpp-vision",
         ],
@@ -90,7 +86,23 @@ rust_library(
         ],
         "//conditions:default": [],
     }),
-    deps = all_crate_deps(normal = True),
+    # Vulkan lane (--//:vulkan=true): `local_execution_provider` decides between
+    # "vulkan" and "cpu" with `option_env!("XYBRID_LLAMA_CPP_VULKAN")`
+    # (runtime_adapter/llm.rs) — a rustc-time lookup, which cargo satisfies from
+    # the shell and Bazel has to set explicitly. Without it a Vulkan-linked
+    # binary reports "cpu" on every inference span. Costs this rlib and its
+    # reverse deps their own cache entries on that lane; the llama.cpp compile,
+    # which is the expensive half, is untouched.
+    rustc_env = select({
+        "//:vulkan_enabled": {"XYBRID_LLAMA_CPP_VULKAN": "1"},
+        "//conditions:default": {},
+    }),
+    # `all_crate_deps` resolves from the hub's view of Cargo.lock, which reflects
+    # the workspace's DEFAULT feature set — and `asr-whispercpp` is off by
+    # default, so the optional `xybrid-whisper` path-dep is absent from it. The
+    # feature is force-enabled above, so the dep has to be added by hand or the
+    # crate fails to compile with an unresolved `xybrid_whisper` import.
+    deps = all_crate_deps(normal = True) + ["//crates/xybrid-whisper:xybrid_whisper"],
     visibility = ["//visibility:public"],
 )
 

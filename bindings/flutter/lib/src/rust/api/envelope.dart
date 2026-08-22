@@ -9,6 +9,7 @@
 
 import '../frb_generated.dart';
 import 'context.dart';
+import 'model.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
 // These functions are ignored because they are not marked as `pub`: `clone_envelope`, `into_envelope`
@@ -77,6 +78,30 @@ abstract class FfiEnvelope implements RustOpaqueInterface {
           {required String text, required FfiMessageRole role}) =>
       XybridRustLib.instance.api
           .crateApiEnvelopeFfiEnvelopeTextWithRole(text: text, role: role);
+
+  /// Create the continuation envelope for the turn after the model asked
+  /// for tools.
+  ///
+  /// One `run` is one model turn, so the tool loop lives in Dart: run a
+  /// request carrying tools, execute every `FfiResult.toolCalls` entry, then
+  /// run this envelope to feed the outcomes back. Run the continuation with
+  /// the same tools as the original turn so the executor rebuilds an
+  /// identical chat prefix.
+  ///
+  /// `user_text` is the original user message of the turn being continued;
+  /// `prior_assistant_text` is that turn's raw output text, tool-call block
+  /// included. Pass `results` in call order.
+  ///
+  /// Only the immediately prior assistant turn is replayed, and continuation
+  /// runs on the non-streaming text path only.
+  static FfiEnvelope toolResults(
+          {required String userText,
+          required String priorAssistantText,
+          required List<FfiToolResult> results}) =>
+      XybridRustLib.instance.api.crateApiEnvelopeFfiEnvelopeToolResults(
+          userText: userText,
+          priorAssistantText: priorAssistantText,
+          results: results);
 
   /// Create a user-role multi-part envelope with image attachments.
   static FfiEnvelope userMessage(

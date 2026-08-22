@@ -3,7 +3,7 @@
 // </auto-generated>
 #nullable enable
 
-using System;
+using System.Runtime.InteropServices;
 
 namespace XybridBolt
 {
@@ -21,33 +21,82 @@ namespace XybridBolt
         internal static XybridInferenceMetrics Decode(WireReader reader) =>
             new XybridInferenceMetrics(
                 reader.ReadU32(),
-                reader.ReadU8() == 0 ? (uint?)null : reader.ReadU32(),
-                reader.ReadU8() == 0 ? (float?)null : reader.ReadF32(),
-                reader.ReadU8() == 0 ? (float?)null : reader.ReadF32(),
-                reader.ReadU8() == 0 ? (float?)null : reader.ReadF32(),
-                reader.ReadU8() == 0 ? (uint?)null : reader.ReadU32(),
-                reader.ReadEncodedArray<XybridStageLatency>(r0 => XybridStageLatency.Decode(r0))
+                reader.ReadU8() == 0 ? default(uint?) : reader.ReadU32(),
+                reader.ReadU8() == 0 ? default(float?) : reader.ReadF32(),
+                reader.ReadU8() == 0 ? default(float?) : reader.ReadF32(),
+                reader.ReadU8() == 0 ? default(float?) : reader.ReadF32(),
+                reader.ReadU8() == 0 ? default(uint?) : reader.ReadU32(),
+                reader.ReadArray(reader => XybridStageLatency.Decode(reader))
             );
 
-        internal int WireEncodedSize() =>
-            4 +
-            (1 + (this.TtftMs is { } sizeOpt0 ? 4 : 0)) +
-            (1 + (this.TokensPerSecond is { } sizeOpt1 ? 4 : 0)) +
-            (1 + (this.PrefillTps is { } sizeOpt2 ? 4 : 0)) +
-            (1 + (this.DecodeTps is { } sizeOpt3 ? 4 : 0)) +
-            (1 + (this.TokensOut is { } sizeOpt4 ? 4 : 0)) +
-            WireWriter.EncodedArraySize(this.StageLatenciesMs, sizeItem0 => sizeItem0.WireEncodedSize());
-
-        internal void WireEncodeTo(WireWriter wire)
+        internal void Encode(WireWriter writer)
         {
-            wire.WriteU32(this.TotalMs);
-            if (this.TtftMs is { } opt0) { wire.WriteU8((byte)1); wire.WriteU32(opt0); } else { wire.WriteU8((byte)0); };
-            if (this.TokensPerSecond is { } opt1) { wire.WriteU8((byte)1); wire.WriteF32(opt1); } else { wire.WriteU8((byte)0); };
-            if (this.PrefillTps is { } opt2) { wire.WriteU8((byte)1); wire.WriteF32(opt2); } else { wire.WriteU8((byte)0); };
-            if (this.DecodeTps is { } opt3) { wire.WriteU8((byte)1); wire.WriteF32(opt3); } else { wire.WriteU8((byte)0); };
-            if (this.TokensOut is { } opt4) { wire.WriteU8((byte)1); wire.WriteU32(opt4); } else { wire.WriteU8((byte)0); };
-            wire.WriteI32(this.StageLatenciesMs.Length);
-            foreach (XybridStageLatency item0 in this.StageLatenciesMs) { item0.WireEncodeTo(wire); };
+            {
+                writer.WriteU32(this.TotalMs);
+            }
+            {
+                if (this.TtftMs is { } boltffiValue0)
+                {
+                    writer.WriteU8(1);
+                    writer.WriteU32(boltffiValue0);
+                }
+                else
+                {
+                    writer.WriteU8(0);
+                }
+            }
+            {
+                if (this.TokensPerSecond is { } boltffiValue0)
+                {
+                    writer.WriteU8(1);
+                    writer.WriteF32(boltffiValue0);
+                }
+                else
+                {
+                    writer.WriteU8(0);
+                }
+            }
+            {
+                if (this.PrefillTps is { } boltffiValue0)
+                {
+                    writer.WriteU8(1);
+                    writer.WriteF32(boltffiValue0);
+                }
+                else
+                {
+                    writer.WriteU8(0);
+                }
+            }
+            {
+                if (this.DecodeTps is { } boltffiValue0)
+                {
+                    writer.WriteU8(1);
+                    writer.WriteF32(boltffiValue0);
+                }
+                else
+                {
+                    writer.WriteU8(0);
+                }
+            }
+            {
+                if (this.TokensOut is { } boltffiValue0)
+                {
+                    writer.WriteU8(1);
+                    writer.WriteU32(boltffiValue0);
+                }
+                else
+                {
+                    writer.WriteU8(0);
+                }
+            }
+            {
+                writer.WriteU32(checked((uint)this.StageLatenciesMs.Length));
+                foreach (var boltffiValue0 in this.StageLatenciesMs)
+                {
+                    boltffiValue0.Encode(writer);
+                }
+            }
         }
+
     }
 }
