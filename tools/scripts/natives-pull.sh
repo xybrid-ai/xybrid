@@ -43,7 +43,9 @@ if [ ! -f "$SLICE/native.tar.gz" ]; then
   echo "natives-pull: pulled artifact missing native.tar.gz" >&2
   exit 1
 fi
-tar -C "$SLICE" -xzf "$SLICE/native.tar.gz" && rm -f "$SLICE/native.tar.gz" || exit 1
+# Relative -f from inside the dir: GNU tar parses a `D:` drive-letter prefix
+# in -f as a remote host on the windows runner (same fix as natives-push.sh).
+(cd "$SLICE" && tar -xzf native.tar.gz && rm -f native.tar.gz) || exit 1
 
 # build.rs re-validates completeness (required archives + include/) before
 # trusting the slice, so a partial unpack here just degrades to source.
