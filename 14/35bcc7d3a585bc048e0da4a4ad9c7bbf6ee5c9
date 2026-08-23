@@ -1,0 +1,21 @@
+tools/scripts/natives-push.sh
+  s_570d7ab18f5032::t_ca6048b19be819 70-74,78
+tools/scripts/natives-pull.sh
+  s_570d7ab18f5032::t_ca6048b19be819 46-48
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "1435bcc7d3a585bc048e0da4a4ad9c7bbf6ee5c9",
+  "prompts": {},
+  "sessions": {
+    "s_570d7ab18f5032": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c82da43a-5146-4f39-91b8-559de56586f7",
+        "model": "claude-fable-5"
+      },
+      "human_author": "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
+    }
+  }
+}
