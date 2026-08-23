@@ -659,6 +659,12 @@ fn build_from_source(
         )
         .define("LLAMA_BUILD_SERVER", "OFF")
         .define("LLAMA_CURL", "OFF")
+        // Default-ON upstream, but never let vendored cpp-httplib pick up a
+        // host OpenSSL: we only ship the static archives, so tool-binary TLS
+        // is dead weight — and on the arm64 macOS runners cross-building
+        // x86_64 it finds the arm64 homebrew libcrypto and the vision tools
+        // fail to link ("symbol(s) not found for architecture x86_64").
+        .define("LLAMA_OPENSSL", "OFF")
         .define("GGML_OPENMP", "OFF");
 
     if ctx.target_os == "android" {
