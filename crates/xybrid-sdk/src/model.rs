@@ -898,7 +898,7 @@ const GGUF_PREFERENCE_ORDER: &[&str] = &[
 const VISION_PROJECTOR_PREFERENCE_ORDER: &[&str] =
     &["Q8_0", "Q6_K", "Q5_K_M", "Q4_K_M", "F16", "BF16"];
 
-fn is_gguf_companion(filename: &str) -> bool {
+pub(crate) fn is_gguf_companion(filename: &str) -> bool {
     let filename = filename.to_ascii_lowercase();
     filename.contains("mmproj") || filename.contains("drafter") || filename.contains("dspark")
 }
@@ -907,7 +907,7 @@ fn is_gguf_vision_projector(filename: &str) -> bool {
     filename.to_ascii_lowercase().contains("mmproj")
 }
 
-fn select_vision_projector<'a>(gguf_files: &[&'a str]) -> Option<&'a str> {
+pub(crate) fn select_vision_projector<'a>(gguf_files: &[&'a str]) -> Option<&'a str> {
     for preference in VISION_PROJECTOR_PREFERENCE_ORDER {
         if let Some(projector) = gguf_files.iter().find(|filename| {
             is_gguf_vision_projector(filename) && filename.to_uppercase().contains(preference)
@@ -926,7 +926,7 @@ fn select_vision_projector<'a>(gguf_files: &[&'a str]) -> Option<&'a str> {
 ///
 /// If `variant` is specified, finds a file containing that quantization string (case-insensitive).
 /// Otherwise, selects the file matching the highest-priority quantization from `GGUF_PREFERENCE_ORDER`.
-fn select_gguf_variant(gguf_files: &[&str], variant: Option<&str>) -> SdkResult<String> {
+pub(crate) fn select_gguf_variant(gguf_files: &[&str], variant: Option<&str>) -> SdkResult<String> {
     if let Some(v) = variant {
         let v_upper = v.to_uppercase();
         if let Some(found) = gguf_files
@@ -958,7 +958,7 @@ fn select_gguf_variant(gguf_files: &[&str], variant: Option<&str>) -> SdkResult<
         .to_string())
 }
 
-fn select_huggingface_files_to_download<'a>(
+pub(crate) fn select_huggingface_files_to_download<'a>(
     repo: &str,
     all_filenames: &[&'a str],
     selected_gguf: Option<&str>,
@@ -1962,6 +1962,84 @@ impl ModelLoader {
             if cache_layout.is_huggingface_repo_materialized(repo, &cache_dir) {
                 log::info!(target: "xybrid_sdk", "Loading HuggingFace model from cache: {}", cache_dir.display());
                 return self.load_from_directory(&cache_dir);
+            }
+        }
+
+        // Before falling back to the network, check whether the standard
+        // shared Hugging Face cache (~/.cache/huggingface/hub — populated by
+        // `huggingface-cli download`, transformers, etc.) already holds this
+        // repo's snapshot. If it does, materialize from it with zero network
+        // I/O. On iOS/Android `find_shared_snapshot` always returns `None`,
+        // keeping mobile behavior unchanged.
+        if let Some(snapshot) = crate::cache::hf_shared::find_shared_snapshot(repo, revision) {
+            log::debug!(target: "xybrid_sdk", "Shared Hugging Face cache snapshot for '{}' at commit {}", repo, snapshot.commit);
+            if let Some(shared_files) =
+                crate::cache::hf_shared::select_snapshot_files(&snapshot, repo, variant)
+            {
+                let cache_dir = huggingface_materialized_cache_dir(
+                    &cache_layout,
+                    repo,
+                    revision.map(|_| snapshot.commit.as_str()),
+                    variant,
+                );
+                std::fs::create_dir_all(&cache_dir)?;
+                let shared_files: Vec<&str> = shared_files.iter().map(String::as_str).collect();
+                crate::cache::hf_shared::materialize_from_shared(
+                    &snapshot,
+                    &shared_files,
+                    &cache_dir,
+                )
+                .map_err(|e| {
+                    SdkError::cache_src(
+                        format!(
+                            "Failed to materialize '{}' from shared Hugging Face cache",
+                            repo
+                        ),
+                        e,
+                    )
+                })?;
+                _progress_callback(1.0);
+
+                let metadata_path = cache_dir.join("model_metadata.json");
+                if !metadata_path.exists() {
+                    log::info!(
+                        target: "xybrid_sdk",
+                        "No model_metadata.json in shared-cache snapshot of '{}', attempting auto-generation...",
+                        repo
+                    );
+                    match crate::metadata_gen::generate_metadata(&cache_dir, repo) {
+                        Ok((_metadata, _task_inference)) => {
+                            log::info!(
+                                target: "xybrid_sdk",
+                                "Auto-generated model_metadata.json for '{}'. \
+                                 Review and adjust if inference results are unexpected.",
+                                repo
+                            );
+                        }
+                        Err(e) => {
+                            return Err(SdkError::MetadataNotFound(format!(
+                                "HuggingFace repo '{}' does not contain model_metadata.json and \
+                                 auto-generation failed: {}. \
+                                 Create one manually — see docs/sdk/MODEL_METADATA.md",
+                                repo, e
+                            )));
+                        }
+                    }
+                }
+
+                let model = self.load_from_directory(&cache_dir)?;
+                if let Some(requested_revision) = revision {
+                    cache_layout.record_huggingface_revision(
+                        repo,
+                        requested_revision,
+                        &snapshot.commit,
+                        variant,
+                    )?;
+                } else {
+                    cache_layout.record_huggingface_repo(repo)?;
+                }
+                log::info!(target: "xybrid_sdk", "Reusing model from local Hugging Face cache: {}", cache_dir.display());
+                return Ok(model);
             }
         }
 
