@@ -1,0 +1,61 @@
+bindings/unity/package.json
+  s_570d7ab18f5032::t_1e0a7b25bd89e3 3
+bindings/web/package.json
+  s_570d7ab18f5032::t_cb8a422efffd62 3
+bindings/flutter/CHANGELOG.md
+  s_570d7ab18f5032::t_3f20c4087ef5c4 3-25
+bindings/kotlin/build.gradle.kts
+  s_570d7ab18f5032::t_1e0a7b25bd89e3 8
+crates/xybrid-whisper/Cargo.toml
+  s_570d7ab18f5032::t_5b0f8d9e072989 23
+Package.swift
+  s_570d7ab18f5032::t_1e0a7b25bd89e3 40
+bindings/flutter/pubspec.yaml
+  s_570d7ab18f5032::t_1e0a7b25bd89e3 3
+CHANGELOG.md
+  s_570d7ab18f5032::t_d9407db364150d 10-26
+  s_570d7ab18f5032::t_7a6aea3ca91c36 39-80
+  s_570d7ab18f5032::t_0da28edc63980e 120,122-165
+crates/xybrid/Cargo.toml
+  s_570d7ab18f5032::t_5b0f8d9e072989 17
+crates/whisper-cpp-sys/Cargo.toml
+  s_570d7ab18f5032::t_5b0f8d9e072989 42
+bindings/react-native/package.json
+  s_570d7ab18f5032::t_1e0a7b25bd89e3 3
+bindings/react-native/android/build.gradle
+  s_570d7ab18f5032::t_1e0a7b25bd89e3 94
+bindings/python/pyproject.toml
+  s_570d7ab18f5032::t_1e0a7b25bd89e3 7
+Cargo.toml
+  s_570d7ab18f5032::t_1e0a7b25bd89e3 21
+bindings/python/xybrid/_bolt/__init__.py
+  s_570d7ab18f5032::t_3be9b658281f84 2148
+crates/xybrid-llama/Cargo.toml
+  s_570d7ab18f5032::t_5b0f8d9e072989 24
+bindings/apple/XybridFFI-Info.plist
+  s_570d7ab18f5032::t_1e0a7b25bd89e3 10,12
+bindings/flutter/rust/Cargo.toml
+  s_570d7ab18f5032::t_1e0a7b25bd89e3 3
+crates/xybrid-sdk/Cargo.toml
+  s_570d7ab18f5032::t_5b0f8d9e072989 17,37,42
+crates/xybrid-core/Cargo.toml
+  s_570d7ab18f5032::t_5b0f8d9e072989 28-29,32
+Cargo.lock
+  s_570d7ab18f5032::t_13f59f0c0b5671 392,614,616,744,867,869,992,1176,1178,1344,1478,1530,1532,1713,1715,1800,1893,2387,2389,2552,2554,2566,2568,2579,2581,2593,2595,2599,2601,2603,2614,2616,2620,2622,2756,2980,2982,2995,2997,3016,3018,3176,3178,3186,3188,3420,3422,3746,3748,3756,3758,3766,3768,3779,3781,3836,3838,3925,3927,4114,4116,4378,4380,4387,4389,4393,4558,4560,4620,4662,4673,4935,4937,5087,5174,5176,5265,5686,5688,6212,6214,6228,6242,6249,6278,6348,6358,6367,6380,6389,6415,6424,6433,6445,6571,6573,6582,6584,6593,6595,6599
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "361744b80a3e10dc5559961371041b04e15409c9",
+  "prompts": {},
+  "sessions": {
+    "s_570d7ab18f5032": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c82da43a-5146-4f39-91b8-559de56586f7",
+        "model": "claude-opus-5"
+      },
+      "human_author": "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
+    }
+  }
+}
