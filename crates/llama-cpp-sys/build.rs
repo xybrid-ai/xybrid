@@ -665,7 +665,37 @@ fn build_from_source(
         // x86_64 it finds the arm64 homebrew libcrypto and the vision tools
         // fail to link ("symbol(s) not found for architecture x86_64").
         .define("LLAMA_OPENSSL", "OFF")
-        .define("GGML_OPENMP", "OFF");
+        .define("GGML_OPENMP", "OFF")
+        // Distribution baseline: never optimize for the build machine's CPU.
+        // GGML_NATIVE defaults ON for non-cross builds and bakes
+        // -march=native / -mcpu=native into the archives. The published
+        // 2026-08-24 x86_64-linux vision slice picked up AVX-512 + AMX from a
+        // Sapphire-Rapids runner and SIGILLed every consumer without them,
+        // and the aarch64-linux slice carried Graviton SVE. Slices must run
+        // on any reasonable consumer CPU; publishers and consumers do not
+        // share hardware.
+        .define("GGML_NATIVE", "OFF");
+
+    // GGML_NATIVE=OFF alone is not a baseline: llama.cpp then defaults every
+    // x86 SIMD family (SSE4.2/AVX/AVX2/FMA/F16C/BMI2) to OFF for cross builds
+    // and scalar ggml is 3-5x slower. Pin x86-64-v3 (Haswell 2013 / Zen1
+    // 2017) explicitly — every GitHub runner and effectively all consumer
+    // x86_64 hardware clears it. Android x86_64 is excluded: its ABI only
+    // guarantees SSE4.2, and configure_android keeps today's conservative
+    // flags. Pre-Haswell hosts can XYBRID_NATIVES_FORCE_SOURCE=1.
+    if ctx.target_arch == "x86_64" && ctx.target_os != "android" {
+        cmake_config
+            .define("GGML_SSE42", "ON")
+            .define("GGML_AVX", "ON")
+            .define("GGML_AVX2", "ON")
+            .define("GGML_BMI2", "ON")
+            .define("GGML_FMA", "ON")
+            .define("GGML_F16C", "ON");
+    }
+    // aarch64 stays on the compiler's plain armv8-a default: adding dotprod
+    // would break Cortex-A72 (Raspberry Pi 4) consumers with a runtime
+    // SIGILL, the one failure mode a prebuilt slice must never have. Apple
+    // arm64 is unaffected (the M1 baseline already includes dotprod).
 
     if ctx.target_os == "android" {
         ndk_path_used = configure_android(&mut cmake_config, ctx);
