@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Planned
+
+- **Multimodal KV-prefix reuse**: the per-frame prefill cost lever for live vision — **deferred** from 0.2.0, not yet implemented.
+
+---
+
+## [0.6.0] - 2026-08-25
+
+Tool calling reaches every binding, and an external `cargo build --features
+llm-llamacpp` stops compiling llama.cpp. FunctionGemma joins the local
+tool-calling backends, tool calls cross the FFI boundary into Swift, Kotlin,
+Python, Unity C# and Dart, and `supportsToolCalling` lets an app gate its tool
+UI on what a bundle actually declares. Separately, `xybrid-llama-sys` resolves a
+prebuilt, SHA-256-verified llama.cpp slice over plain HTTPS — no oras, no
+environment variable, no CMake — turning the dominant cold-build cost from
+roughly twenty minutes into a download.
+
 **Upgrade notes.** The HuggingFace cache moves to a repository-hash layout, so
 caches written by 0.5.0 and earlier are not reused: the next
 `from_huggingface(...)` load re-downloads the model, and the old copy stays on
@@ -19,6 +36,48 @@ the call site but needs a recompile against the new AAR.
 
 ### Added
 
+- **Prebuilt llama.cpp for a plain `cargo build`.** `xybrid-llama-sys` resolves
+  its native archives in three steps — an explicitly staged
+  `XYBRID_NATIVES_PREBUILT_DIR/<target>`, then a slice named in the generated
+  `natives-manifest.txt`, then the CMake source build. The middle step is new:
+  it fetches the layer over plain HTTPS from `ghcr.io/xybrid-ai/llama-natives`
+  and verifies its SHA-256, needing no oras, no environment variable and no
+  CMake, which takes the dominant cold-build cost for an external
+  `--features llm-llamacpp` consumer from roughly twenty minutes to a download.
+  Slices are cached by digest under `$CARGO_HOME/xybrid-natives/` and shared
+  across projects. Every miss falls through to the source build, so the fast
+  path can only fail to accelerate a build, never break one; the manifest pins
+  the sha256 of `build.rs`, `wrapper.cpp`, `wrapper.h` and the llama.cpp commit,
+  so a local edit to any of them disarms every row until CI republishes. Set
+  `XYBRID_NATIVES_FORCE_SOURCE=1` to opt out (#526).
+- **FunctionGemma tool calling.** The local llama.cpp backend recognizes
+  FunctionGemma's call protocol, including its space-separated form, alongside
+  the existing tool-calling models (#512).
+- **Tool calls cross the FFI boundary.** Tool definitions travel out on
+  `RunOptions` and parsed calls come back on the result, so Swift, Kotlin,
+  Python and Unity C# callers drive a tool loop turn by turn — the caller
+  executes the tool and issues another `run`, with no cross-boundary callback
+  (#513).
+- **`supportsToolCalling` on every binding.** `XybridModel` surfaces the
+  bundle's `tool_calling` metadata flag as an advisory tri-state — `null` means
+  the bundle says nothing — so an app can gate its tool UI on model capability.
+  Available on Swift, Kotlin, Python, Unity C# and Flutter. Enforcement stays at
+  run time: a tools-bearing request against a model whose chat template has no
+  tool support fails either way (#515).
+- **Grammar, `jsonSchemaToGbnf` and `reasoningContent` in Dart.** All three had
+  reached the generated layer and stopped at the hand-written Flutter wrapper.
+  `GenerationConfig.grammar` now passes through, the greedy and creative presets
+  take an optional grammar so the usual extraction shape is one call,
+  `jsonSchemaToGbnf` is re-exported, and `XybridResult.reasoningContent` is
+  readable. The Dart unit tests under `bindings/flutter/test` also run in CI for
+  the first time (#511).
+- **`TemperatureSample` postprocessing step.** Pipeline templates can sample a
+  token from logits with temperature, optional top-k and optional top-p, rather
+  than taking the argmax — sampling from the final sequence position, with
+  temperature zero preserved as exact argmax (#521).
+- **A runnable Flutter example app.** `xybrid_flutter` ships a real
+  single-screen app in `example/` instead of a snippet file, so a consumer of
+  the published package has something to run (#525, #152).
 - **Reasoning text as a typed field on the Bolt bindings.** `XybridResult`
   gains `reasoningContent`, carrying what a thinking model emits separately
   from its answer, on Swift, Kotlin, Python, and Unity C#. It is appended last
@@ -58,9 +117,52 @@ the call site but needs a recompile against the new AAR.
   iteration order, so two conversions of the same envelope produce identical
   wire bytes (#508).
 
-### Planned
+### Fixed
 
-- **Multimodal KV-prefix reuse**: the per-frame prefill cost lever for live vision — **deferred** from 0.2.0, not yet implemented.
+- **Streaming stop-boundary panics.** Three fixes in `StreamingTextFilter`'s
+  `last_emitted_len` invariant: a stop sequence completing across chunks could
+  land the emission boundary below already-emitted text, after which the
+  cumulative slice went out of bounds and panicked mid-stream. The boundary is
+  now clamped after a complete-stop truncation, and the potential-stop scan
+  holds the longest matching tail prefix per pattern and the earliest hold
+  across patterns, rather than the shortest prefix of the first pattern that
+  matched — the under-hold that let a later chunk complete a stop behind the
+  boundary (#518).
+- **A second ggml bundled into staticlib targets.** `flutter build macos` failed
+  on the example app with 1287 duplicate `ggml_*` symbols: one Rust staticlib
+  carried two copies, from `whisper-cpp-sys`'s deliberate ggml re-emission on
+  top of the one llama.cpp already links (#528).
+- **Published native slices are portable.** llama.cpp's `GGML_NATIVE` defaults
+  on for non-cross builds, so each published slice inherited the CPU of the
+  runner that built it — the x86_64 Linux slice carried AVX-512 and AMX, and the
+  aarch64 Linux slice carried SVE, either of which is an illegal-instruction
+  trap on a consumer without them, while the cross-built darwin x86_64 slices
+  had the inverse problem and shipped scalar ggml. Slices now pin an explicit
+  x86-64-v3 baseline (SSE4.2/AVX/AVX2/BMI2/FMA/F16C) on non-Android x86_64 and
+  plain armv8-a on aarch64, so no consumer traps and the cross-built slices
+  regain SIMD (#534).
+- **Windows slice publishing and darwin cross-arch linking.** GNU tar on the
+  Windows runner read the `D:` drive-letter prefix as a remote host, so neither
+  `x86_64-pc-windows-msvc` slice ever published; and llama.cpp's vendored
+  cpp-httplib defaults `LLAMA_OPENSSL` on, so the arm64 macOS runner
+  cross-building x86_64 picked up an arm64 libcrypto and failed to link. The
+  slices ship only static archives, so tool-binary TLS is now off (#529).
+- **`clippy::chunks_exact_to_as_chunks` under Rust 1.98.** Constant-size slice
+  chunking moves to `as_chunks`, restoring a green `-D warnings` build on the
+  stable toolchain (#522).
+- **crates.io publish ordering.** The whisper crates publish before
+  `xybrid-core`, which is what broke v0.5.0's publish run, and the generated
+  Python binding's `PACKAGE_VERSION` is synced by the version bump rather than
+  being left behind for `gen_python_bolt.py --check` to reject (#488, #490).
+
+### Performance
+
+- **Metal for whisper.cpp on Apple silicon.** Measured inference latency drops
+  2.7-7.8x on an M1 Pro with no word-level regressions. Other targets stay on
+  CPU until measured independently (#491).
+- **Cached stream language detection.** A streaming session detects its language
+  once and reuses the result across windows instead of re-detecting per chunk
+  (#493).
 
 ---
 
