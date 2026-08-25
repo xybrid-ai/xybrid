@@ -51,8 +51,8 @@ use super::llm_telemetry::{
 };
 #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
 use super::tool_continuation::{
-    reject_nested_tool_continuation_parts, reject_tool_continuation_input, run_tool_continuation,
-    text_messages_from_multimodal,
+    reject_nested_tool_continuation_parts, run_tool_continuation, run_tool_continuation_streaming,
+    text_messages_from_multimodal, ToolContinuation,
 };
 
 fn mark_execution_terminal(guard: &ExecutionGuard, error: &AdapterError) {
@@ -666,7 +666,7 @@ impl TemplateExecutor {
                 // and run the non-vision LLM path. Audio/Embedding parts (and
                 // any other non-text/image kind) still fail here, inside
                 // `MultimodalChatMessage::from_envelope`.
-                reject_tool_continuation_input(input, "text-only vision-language")?;
+                reject_nested_tool_continuation_parts(input, "text-only vision-language")?;
                 let messages = vec![MultimodalChatMessage::from_envelope(input)?];
                 let mut chat_messages = text_messages_from_multimodal(&messages)?;
                 // Mirror the flat-Text path's envelope handling: the
@@ -686,6 +686,7 @@ impl TemplateExecutor {
                     &chat_messages,
                     backend_hint,
                     Some(&gen_config),
+                    ToolContinuation::from_input(input),
                 )
             };
         }
@@ -1078,12 +1079,16 @@ impl TemplateExecutor {
             }
         }
 
-        // Fail closed: tool-result continuations do not compose with
-        // conversation context (v1). Without this guard the continuation
-        // metadata would be silently dropped and the turn would run as a
-        // fresh question, producing a plausible but ungrounded answer.
+        // A tool-result continuation composes fine with conversation
+        // context: the rendered chat prefix is history + this turn's user
+        // text, and the replayed assistant turn plus the tool responses are
+        // appended after it. Resolve the payload here — the messages-based
+        // functions below never see the envelope, so it has to be threaded
+        // explicitly or it would be silently dropped.
         #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
-        reject_tool_continuation_input(input, "context")?;
+        let continuation = ToolContinuation::from_input(input);
+        #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+        reject_nested_tool_continuation_parts(input, "context")?;
 
         #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
         if let ExecutionTemplate::VisionLanguage {
@@ -1121,6 +1126,7 @@ impl TemplateExecutor {
                     &chat_messages,
                     backend_hint,
                     config,
+                    continuation,
                 )?
             };
 
@@ -1186,6 +1192,7 @@ impl TemplateExecutor {
                 &chat_messages,
                 backend_hint,
                 config,
+                continuation,
             )?;
 
             // Tag the result as an assistant message
@@ -1307,7 +1314,10 @@ impl TemplateExecutor {
                     // Text-only MultiPart: same conversion as the
                     // non-streaming path (see `execute_impl`), routed through
                     // the streaming ChatMessages entry point.
-                    reject_tool_continuation_input(input, "text-only vision-language streaming")?;
+                    reject_nested_tool_continuation_parts(
+                        input,
+                        "text-only vision-language streaming",
+                    )?;
                     let messages = vec![MultimodalChatMessage::from_envelope(input)?];
                     let mut chat_messages = text_messages_from_multimodal(&messages)?;
                     // Same envelope lift as the non-streaming branch above.
@@ -1324,6 +1334,7 @@ impl TemplateExecutor {
                         backend_hint,
                         on_token,
                         Some(&gen_config),
+                        ToolContinuation::from_input(input),
                     )
                 };
             }
@@ -1463,9 +1474,13 @@ impl TemplateExecutor {
             }
         }
 
-        // Fail closed: continuations are non-streaming and context-free (v1).
+        // Continuations stream, and they compose with conversation context —
+        // see `execute_with_context_impl` for why the payload is resolved
+        // here and threaded down rather than re-read further in.
         #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
-        reject_tool_continuation_input(input, "streaming context")?;
+        let continuation = ToolContinuation::from_input(input);
+        #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+        reject_nested_tool_continuation_parts(input, "streaming context")?;
 
         #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
         {
@@ -1506,6 +1521,7 @@ impl TemplateExecutor {
                         backend_hint,
                         on_token,
                         config,
+                        continuation,
                     )?
                 };
 
@@ -1569,6 +1585,7 @@ impl TemplateExecutor {
                     backend_hint,
                     on_token,
                     config,
+                    continuation,
                 )?;
 
                 // Tag the result as an assistant message
@@ -1627,7 +1644,7 @@ impl TemplateExecutor {
         stamp_llm_span_cost_attribution(metadata);
 
         reject_text_only_model_image_input(metadata, input)?;
-        reject_tool_continuation_input(input, "streaming")?;
+        let continuation = ToolContinuation::from_input(input);
 
         // Build full model path
         let model_path = Path::new(&self.base_path).join(model_file);
@@ -1694,7 +1711,20 @@ impl TemplateExecutor {
                 // bundle metadata).
                 stamp_llm_runtime_backend(adapter);
                 let backend = adapter.backend();
-                let out = backend.generate_streaming(&messages, &gen_config, on_token)?;
+                // A continuation replays the prior assistant turn plus the
+                // tool responses through the raw streaming path; a first turn
+                // goes through the chat path. Both stream token-by-token.
+                let out = match continuation {
+                    Some(continuation) => run_tool_continuation_streaming(
+                        backend,
+                        &messages,
+                        &gen_config,
+                        continuation.input,
+                        continuation.responses_json,
+                        on_token,
+                    )?,
+                    None => backend.generate_streaming(&messages, &gen_config, on_token)?,
+                };
                 let name = backend.name().to_string();
                 let cached = backend.last_cached_prefix_len();
                 (out, name, cached)
@@ -1721,7 +1751,12 @@ impl TemplateExecutor {
     ///
     /// Used by `execute_with_context` to pass conversation history
     /// to the LLM without our custom template formatting.
+    ///
+    /// `continuation` carries the tool-result payload when this turn is a
+    /// continuation (see `tool_continuation::ToolContinuation`); `messages`
+    /// is then the chat prefix the continuation prompt is composed on top of.
     #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[allow(clippy::too_many_arguments)]
     fn execute_llm_with_messages(
         &mut self,
         metadata: &ModelMetadata,
@@ -1731,6 +1766,7 @@ impl TemplateExecutor {
         messages: &[ChatMessage],
         backend_hint: Option<&str>,
         config: Option<&GenerationConfig>,
+        continuation: Option<ToolContinuation<'_>>,
     ) -> ExecutorResult<Envelope> {
         info!(
             target: "xybrid_core",
@@ -1792,7 +1828,16 @@ impl TemplateExecutor {
                 // bundle metadata).
                 stamp_llm_runtime_backend(adapter);
                 let backend = adapter.backend();
-                let out = backend.generate(messages, &gen_config)?;
+                let out = match continuation {
+                    Some(continuation) => run_tool_continuation(
+                        backend,
+                        messages,
+                        &gen_config,
+                        continuation.input,
+                        continuation.responses_json,
+                    )?,
+                    None => backend.generate(messages, &gen_config)?,
+                };
                 let name = backend.name().to_string();
                 let cached = backend.last_cached_prefix_len();
                 (out, name, cached)
@@ -1912,6 +1957,75 @@ impl TemplateExecutor {
                 "LLM adapter cache unexpectedly empty".to_string(),
             ));
         };
+
+        Ok(build_llm_response_envelope(
+            output,
+            &backend_name,
+            cached_prefix,
+            None,
+            !gen_config.tools.is_empty(),
+        ))
+    }
+
+    /// Streaming sibling of `execute_vlm_tool_continuation`.
+    ///
+    /// Same replay, same text-only constraint — an image-bearing
+    /// conversation is refused by `text_messages_from_multimodal` here just
+    /// as it is on the batch path, because image embeddings cannot be
+    /// re-evaluated from a composed text prompt.
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[allow(clippy::too_many_arguments)]
+    fn execute_vlm_tool_continuation_streaming(
+        &mut self,
+        metadata: &ModelMetadata,
+        model_file: &str,
+        chat_template: Option<&str>,
+        context_length: usize,
+        input: &Envelope,
+        responses_json: &str,
+        backend_hint: Option<&str>,
+        on_token: StreamingCallback<'_>,
+        config: Option<&GenerationConfig>,
+    ) -> ExecutorResult<Envelope> {
+        let _llm_span = xybrid_trace::SpanGuard::new("vlm_inference_streaming_with_messages");
+        xybrid_trace::add_metadata("model", model_file);
+        xybrid_trace::add_metadata("streaming", "true");
+        stamp_llm_span_cost_attribution(metadata);
+
+        self.ensure_vlm_adapter(
+            metadata,
+            model_file,
+            chat_template,
+            context_length,
+            backend_hint,
+        )?;
+
+        let gen_config = config
+            .cloned()
+            .unwrap_or_else(|| model_default_gen_config(metadata));
+        let messages = vec![MultimodalChatMessage::from_envelope(input)?];
+        let chat_messages = text_messages_from_multimodal(&messages)?;
+
+        let (output, backend_name, cached_prefix) =
+            if let Some((_, adapter)) = &self.llm_adapter_cache {
+                stamp_llm_runtime_backend(adapter);
+                let backend = adapter.backend();
+                let out = run_tool_continuation_streaming(
+                    backend,
+                    &chat_messages,
+                    &gen_config,
+                    input,
+                    responses_json,
+                    on_token,
+                )?;
+                let name = backend.name().to_string();
+                let cached = backend.last_cached_prefix_len();
+                (out, name, cached)
+            } else {
+                return Err(AdapterError::RuntimeError(
+                    "LLM adapter cache unexpectedly empty".to_string(),
+                ));
+            };
 
         Ok(build_llm_response_envelope(
             output,
@@ -2085,7 +2199,25 @@ impl TemplateExecutor {
     ) -> ExecutorResult<Envelope> {
         let gen_config = build_gen_config_from_input(metadata, input, config);
 
-        reject_tool_continuation_input(input, "vision-language streaming")?;
+        // Mirror of the batch path: continuations replay through the raw
+        // text path and must be intercepted before envelope → message
+        // conversion, since the messages-based functions never see
+        // continuation metadata.
+        if let Some(responses_json) = input.metadata.get(Envelope::TOOL_RESPONSES_METADATA_KEY) {
+            return self.execute_vlm_tool_continuation_streaming(
+                metadata,
+                model_file,
+                chat_template,
+                context_length,
+                input,
+                responses_json,
+                backend_hint,
+                on_token,
+                Some(&gen_config),
+            );
+        }
+
+        reject_nested_tool_continuation_parts(input, "vision-language streaming")?;
         let messages = vec![MultimodalChatMessage::from_envelope(input)?];
         self.execute_llm_multimodal_streaming_messages(
             metadata,
@@ -2209,7 +2341,11 @@ impl TemplateExecutor {
     ///
     /// Used by `execute_streaming_with_context` to pass conversation history
     /// to the LLM without our custom template formatting.
+    ///
+    /// `continuation` carries the tool-result payload when this turn is a
+    /// continuation — see `execute_llm_with_messages`.
     #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[allow(clippy::too_many_arguments)]
     fn execute_llm_streaming_with_messages(
         &mut self,
         metadata: &ModelMetadata,
@@ -2220,6 +2356,7 @@ impl TemplateExecutor {
         backend_hint: Option<&str>,
         on_token: StreamingCallback<'_>,
         config: Option<&GenerationConfig>,
+        continuation: Option<ToolContinuation<'_>>,
     ) -> ExecutorResult<Envelope> {
         // GenerationConfig, LlmConfig are imported at module level from types
 
@@ -2283,7 +2420,17 @@ impl TemplateExecutor {
                 // bundle metadata).
                 stamp_llm_runtime_backend(adapter);
                 let backend = adapter.backend();
-                let out = backend.generate_streaming(messages, &gen_config, on_token)?;
+                let out = match continuation {
+                    Some(continuation) => run_tool_continuation_streaming(
+                        backend,
+                        messages,
+                        &gen_config,
+                        continuation.input,
+                        continuation.responses_json,
+                        on_token,
+                    )?,
+                    None => backend.generate_streaming(messages, &gen_config, on_token)?,
+                };
                 let name = backend.name().to_string();
                 let cached = backend.last_cached_prefix_len();
                 (out, name, cached)
@@ -3619,35 +3766,21 @@ mod tests {
     }
 
     #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
-    #[test]
-    fn tool_continuation_envelopes_are_rejected_on_unsupported_paths() {
-        let envelope = crate::ir::Envelope::tool_results(
-            "user text",
-            "prior assistant text",
+    fn sample_tool_continuation_envelope() -> crate::ir::Envelope {
+        crate::ir::Envelope::tool_results(
+            "what is the weather?",
+            "<|tool_call_start|>[weather(city=\"Paris\")]<|tool_call_end|>",
             &[crate::ir::ToolCallResult {
                 call_id: "call_0".to_string(),
-                name: "f".to_string(),
-                content: serde_json::json!({"ok": true}),
+                name: "weather".to_string(),
+                content: serde_json::json!({"temperature_c": 21}),
             }],
-        );
-        let err = reject_tool_continuation_input(&envelope, "streaming").unwrap_err();
-        assert!(
-            matches!(err, AdapterError::InvalidInput(ref msg) if msg.contains("streaming")),
-            "continuation envelopes must be rejected loudly, got: {err:?}"
-        );
-
-        // A plain envelope passes through untouched.
-        let plain = crate::ir::Envelope::new(EnvelopeKind::Text("hi".to_string()));
-        assert!(reject_tool_continuation_input(&plain, "streaming").is_ok());
+        )
     }
 
     #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
-    #[test]
-    fn execute_with_context_rejects_tool_continuation_envelopes() {
-        // The context path does not compose continuations (v1) — it must
-        // fail closed rather than silently drop the tool results and answer
-        // the replayed user text as a fresh question.
-        let metadata = ModelMetadata {
+    fn llm_metadata_for_continuation_tests() -> ModelMetadata {
+        ModelMetadata {
             model_id: "test-llm".into(),
             version: "1".into(),
             execution_template: ExecutionTemplate::Gguf {
@@ -3665,39 +3798,302 @@ mod tests {
             voices: None,
             max_chunk_chars: None,
             trim_trailing_samples: None,
-        };
-        let envelope = crate::ir::Envelope::tool_results(
-            "user text",
-            "prior assistant text",
-            &[crate::ir::ToolCallResult {
-                call_id: "call_0".to_string(),
-                name: "f".to_string(),
-                content: serde_json::json!({"ok": true}),
-            }],
+        }
+    }
+
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[test]
+    fn tool_continuation_payload_is_resolved_off_the_envelope() {
+        let envelope = sample_tool_continuation_envelope();
+        let continuation = ToolContinuation::from_input(&envelope).expect(
+            "a tool_results envelope is a
+ continuation",
         );
-        let context = crate::conversation::ConversationContext::new();
+        assert!(
+            continuation.responses_json.contains("call_0"),
+            "the resolved payload must carry the serialized tool responses"
+        );
+
+        let plain = crate::ir::Envelope::new(EnvelopeKind::Text("hi".to_string()));
+        assert!(
+            ToolContinuation::from_input(&plain).is_none(),
+            "a first-turn envelope is not a continuation"
+        );
+    }
+
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[test]
+    fn nested_multipart_tool_continuation_is_rejected() {
+        // Continuation metadata inside a MultiPart part would be discarded by
+        // the multimodal conversion, so it must fail loudly rather than run
+        // as an ungrounded fresh turn.
+        let nested = crate::ir::Envelope::new(EnvelopeKind::MultiPart(vec![
+            sample_tool_continuation_envelope(),
+        ]));
+        let err = reject_nested_tool_continuation_parts(&nested, "context").unwrap_err();
+        assert!(
+            matches!(err, AdapterError::InvalidInput(ref msg) if msg.contains("MultiPart")),
+            "nested continuations must be rejected loudly, got: {err:?}"
+        );
+
+        let plain = crate::ir::Envelope::new(EnvelopeKind::Text("hi".to_string()));
+        assert!(reject_nested_tool_continuation_parts(&plain, "context").is_ok());
+    }
+
+    /// Backend that records the prompts it is handed and refuses the chat
+    /// path, so a test can prove a continuation composed a raw prompt rather
+    /// than silently replaying the user text as a fresh question.
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[derive(Default)]
+    struct ContinuationProbeBackend {
+        raw_prompts: std::sync::Mutex<Vec<String>>,
+    }
+
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    impl ContinuationProbeBackend {
+        const ANSWER: &'static str = "It is 21C in Paris.";
+
+        fn output(&self) -> crate::runtime_adapter::GenerationOutput {
+            let mut out = sample_generation_output(4);
+            out.text = Self::ANSWER.to_string();
+            out
+        }
+    }
+
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    impl crate::runtime_adapter::LlmBackend for ContinuationProbeBackend {
+        fn name(&self) -> &str {
+            "continuation-probe"
+        }
+
+        fn supported_formats(&self) -> Vec<&'static str> {
+            vec!["gguf"]
+        }
+
+        fn load(&mut self, _config: &crate::runtime_adapter::LlmConfig) -> ExecutorResult<()> {
+            Ok(())
+        }
+
+        fn is_loaded(&self) -> bool {
+            true
+        }
+
+        fn unload(&mut self) -> ExecutorResult<()> {
+            Ok(())
+        }
+
+        fn generate(
+            &self,
+            _messages: &[ChatMessage],
+            _config: &GenerationConfig,
+        ) -> ExecutorResult<crate::runtime_adapter::GenerationOutput> {
+            panic!("a continuation must not run through the chat path")
+        }
+
+        fn generate_streaming(
+            &self,
+            _messages: &[ChatMessage],
+            _config: &GenerationConfig,
+            _on_token: StreamingCallback<'_>,
+        ) -> ExecutorResult<crate::runtime_adapter::GenerationOutput> {
+            panic!("a continuation must not run through the streaming chat path")
+        }
+
+        fn render_chat_prompt(
+            &self,
+            messages: &[ChatMessage],
+            _config: &GenerationConfig,
+        ) -> ExecutorResult<String> {
+            // Minimal ChatML so `compose_tool_continuation` detects the LFM2
+            // protocol the way a real template would.
+            let mut prompt = String::new();
+            for message in messages {
+                prompt.push_str(&format!(
+                    "<|im_start|>{}\n{}<|im_end|>\n",
+                    message.role.as_str(),
+                    message.content
+                ));
+            }
+            prompt.push_str("<|im_start|>assistant\n");
+            Ok(prompt)
+        }
+
+        fn generate_raw(
+            &self,
+            prompt: &str,
+            _config: &GenerationConfig,
+        ) -> ExecutorResult<crate::runtime_adapter::GenerationOutput> {
+            self.raw_prompts
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .push(prompt.to_string());
+            Ok(self.output())
+        }
+    }
+
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    fn cache_continuation_probe_backend(
+        executor: &mut TemplateExecutor,
+    ) -> std::sync::Arc<ContinuationProbeBackend> {
+        let backend = std::sync::Arc::new(ContinuationProbeBackend::default());
+        executor.llm_adapter_cache = Some((
+            LlmAdapterCacheKey::new("model.gguf".to_string(), None, 2048, None, None),
+            crate::runtime_adapter::LlmRuntimeAdapter::with_backend(Box::new(ProbeHandle(
+                backend.clone(),
+            ))),
+        ));
+        backend
+    }
+
+    /// Shared-ownership shim so a test can keep reading the probe's recorded
+    /// prompts after the adapter takes the boxed backend.
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    struct ProbeHandle(std::sync::Arc<ContinuationProbeBackend>);
+
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    impl crate::runtime_adapter::LlmBackend for ProbeHandle {
+        fn name(&self) -> &str {
+            self.0.name()
+        }
+
+        fn supported_formats(&self) -> Vec<&'static str> {
+            self.0.supported_formats()
+        }
+
+        fn load(&mut self, _config: &crate::runtime_adapter::LlmConfig) -> ExecutorResult<()> {
+            Ok(())
+        }
+
+        fn is_loaded(&self) -> bool {
+            self.0.is_loaded()
+        }
+
+        fn unload(&mut self) -> ExecutorResult<()> {
+            Ok(())
+        }
+
+        fn generate(
+            &self,
+            messages: &[ChatMessage],
+            config: &GenerationConfig,
+        ) -> ExecutorResult<crate::runtime_adapter::GenerationOutput> {
+            self.0.generate(messages, config)
+        }
+
+        fn generate_streaming(
+            &self,
+            messages: &[ChatMessage],
+            config: &GenerationConfig,
+            on_token: StreamingCallback<'_>,
+        ) -> ExecutorResult<crate::runtime_adapter::GenerationOutput> {
+            self.0.generate_streaming(messages, config, on_token)
+        }
+
+        fn render_chat_prompt(
+            &self,
+            messages: &[ChatMessage],
+            config: &GenerationConfig,
+        ) -> ExecutorResult<String> {
+            self.0.render_chat_prompt(messages, config)
+        }
+
+        fn generate_raw(
+            &self,
+            prompt: &str,
+            config: &GenerationConfig,
+        ) -> ExecutorResult<crate::runtime_adapter::GenerationOutput> {
+            self.0.generate_raw(prompt, config)
+        }
+    }
+
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[test]
+    fn execute_with_context_composes_a_tool_continuation() {
+        let metadata = llm_metadata_for_continuation_tests();
+        let envelope = sample_tool_continuation_envelope();
+        let mut context = crate::conversation::ConversationContext::new();
+        context.push(
+            crate::ir::Envelope::new(EnvelopeKind::Text("earlier question".to_string()))
+                .with_role(MessageRole::User),
+        );
 
         let mut executor = TemplateExecutor::default();
-        let err = executor
+        let probe = cache_continuation_probe_backend(&mut executor);
+
+        let result = executor
             .execute_with_context(&metadata, &envelope, &context, None)
-            .unwrap_err();
+            .expect("the context path must compose the continuation, not reject it");
+
+        match &result.kind {
+            EnvelopeKind::Text(text) => assert_eq!(text, ContinuationProbeBackend::ANSWER),
+            other => panic!("expected a text envelope, got {other:?}"),
+        }
+
+        let prompts = probe
+            .raw_prompts
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let prompt = prompts.first().expect("the raw path must have run once");
         assert!(
-            matches!(err, AdapterError::InvalidInput(ref msg) if msg.contains("context")),
-            "context path must reject continuation envelopes, got: {err:?}"
+            prompt.contains("earlier question"),
+            "the continuation prompt must keep conversation history: {prompt}"
+        );
+        assert!(
+            prompt.contains("<|tool_response_start|>"),
+            "the continuation prompt must replay the tool responses: {prompt}"
+        );
+    }
+
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[test]
+    fn execute_streaming_with_context_streams_a_tool_continuation() {
+        let metadata = llm_metadata_for_continuation_tests();
+        let envelope = sample_tool_continuation_envelope();
+        let mut context = crate::conversation::ConversationContext::new();
+        context.push(
+            crate::ir::Envelope::new(EnvelopeKind::Text("earlier question".to_string()))
+                .with_role(MessageRole::User),
         );
 
-        let streaming_err = executor
+        let mut executor = TemplateExecutor::default();
+        let probe = cache_continuation_probe_backend(&mut executor);
+
+        let streamed = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let sink = streamed.clone();
+        let result = executor
             .execute_streaming_with_context(
                 &metadata,
                 &envelope,
                 &context,
-                Box::new(|_| Ok(())),
+                Box::new(move |token| {
+                    sink.lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner())
+                        .push(token.token);
+                    Ok(())
+                }),
                 None,
             )
-            .unwrap_err();
+            .expect("the streaming context path must compose the continuation, not reject it");
+
+        match &result.kind {
+            EnvelopeKind::Text(text) => assert_eq!(text, ContinuationProbeBackend::ANSWER),
+            other => panic!("expected a text envelope, got {other:?}"),
+        }
+        assert_eq!(
+            streamed
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .concat(),
+            ContinuationProbeBackend::ANSWER,
+            "the continuation turn must reach the token callback"
+        );
         assert!(
-            matches!(streaming_err, AdapterError::InvalidInput(ref msg) if msg.contains("streaming context")),
-            "streaming context path must reject continuation envelopes, got: {streaming_err:?}"
+            !probe
+                .raw_prompts
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .is_empty(),
+            "the streaming continuation must go through the raw path"
         );
     }
 

@@ -4037,12 +4037,16 @@ impl SseDecode for crate::api::model::FfiStreamToken {
         let mut var_index = <u32>::sse_decode(deserializer);
         let mut var_cumulativeText = <String>::sse_decode(deserializer);
         let mut var_finishReason = <Option<String>>::sse_decode(deserializer);
+        let mut var_toolCalls = <Vec<crate::api::model::FfiToolCall>>::sse_decode(deserializer);
+        let mut var_rawText = <Option<String>>::sse_decode(deserializer);
         return crate::api::model::FfiStreamToken {
             token: var_token,
             token_id: var_tokenId,
             index: var_index,
             cumulative_text: var_cumulativeText,
             finish_reason: var_finishReason,
+            tool_calls: var_toolCalls,
+            raw_text: var_rawText,
         };
     }
 }
@@ -5392,6 +5396,8 @@ impl flutter_rust_bridge::IntoDart for crate::api::model::FfiStreamToken {
             self.index.into_into_dart().into_dart(),
             self.cumulative_text.into_into_dart().into_dart(),
             self.finish_reason.into_into_dart().into_dart(),
+            self.tool_calls.into_into_dart().into_dart(),
+            self.raw_text.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -6143,6 +6149,8 @@ impl SseEncode for crate::api::model::FfiStreamToken {
         <u32>::sse_encode(self.index, serializer);
         <String>::sse_encode(self.cumulative_text, serializer);
         <Option<String>>::sse_encode(self.finish_reason, serializer);
+        <Vec<crate::api::model::FfiToolCall>>::sse_encode(self.tool_calls, serializer);
+        <Option<String>>::sse_encode(self.raw_text, serializer);
     }
 }
 

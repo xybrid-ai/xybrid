@@ -243,6 +243,11 @@ required-features = ["llm-llamacpp"]
 name = "functiongemma_tools"
 required-features = ["llm-llamacpp"]
 
+[[example]]
+name = "functiongemma_tools_streaming_context"
+# Real inference — needs llama.cpp linked.
+required-features = ["llm-llamacpp"]
+
 [[bench]]
 name = "inference_backends"
 harness = false

@@ -49,8 +49,23 @@ pub struct StreamToken {
     pub index: usize,
     /// All text generated so far (cumulative)
     pub cumulative_text: String,
-    /// Reason for stopping (only set on the final token)
+    /// Reason for stopping (only set on the final token). `"tool_calls"` when
+    /// the turn ended on a parseable tool-call block.
     pub finish_reason: Option<String>,
+    /// Tool calls parsed from the completed turn, on the **terminal** token
+    /// only (see [`xybrid_core::runtime_adapter::types::PartialToken::tool_calls`]).
+    ///
+    /// A streaming caller dispatches on this instead of parsing raw text:
+    /// tool-call blocks are suppressed from the emitted stream, so they never
+    /// reach the callback. Empty on mid-stream tokens and on turns that
+    /// emitted no call.
+    pub tool_calls: Vec<xybrid_core::gateway::ToolCall>,
+    /// The completed turn's raw output text, tool-call block included —
+    /// exactly what `Envelope::tool_results` wants as `prior_assistant_text`.
+    /// `Some` only alongside a non-empty [`Self::tool_calls`], because
+    /// `cumulative_text` reports the *emitted* text with protocol blocks
+    /// suppressed. This is what makes the streaming tool loop closable.
+    pub raw_text: Option<String>,
 }
 
 /// Events emitted during streaming inference.
@@ -3497,6 +3512,9 @@ impl XybridModel {
                     index: 0,
                     cumulative_text: text.clone(),
                     finish_reason: Some("stop".to_string()),
+                    // Non-LLM template: tool calling is an LLM feature.
+                    tool_calls: Vec::new(),
+                    raw_text: None,
                 };
                 on_token(token).map_err(streaming_callback_error)?;
             }
@@ -3705,6 +3723,9 @@ impl XybridModel {
                     index: 0,
                     cumulative_text: text.clone(),
                     finish_reason: Some("stop".to_string()),
+                    // Non-LLM template: tool calling is an LLM feature.
+                    tool_calls: Vec::new(),
+                    raw_text: None,
                 };
                 on_token(token).map_err(streaming_callback_error)?;
             }
@@ -4096,6 +4117,8 @@ impl XybridModel {
                                 index: token.index,
                                 cumulative_text: token.cumulative_text.clone(),
                                 finish_reason: token.finish_reason.clone(),
+                                tool_calls: token.tool_calls.clone(),
+                                raw_text: token.raw_text.clone(),
                             }));
                             Ok(())
                         },
@@ -4136,6 +4159,8 @@ impl XybridModel {
                                     index: token.index,
                                     cumulative_text: token.cumulative_text.clone(),
                                     finish_reason: token.finish_reason.clone(),
+                                    tool_calls: token.tool_calls.clone(),
+                                    raw_text: token.raw_text.clone(),
                                 };
                                 // Ignore send errors (receiver dropped)
                                 let _ =
@@ -4162,6 +4187,9 @@ impl XybridModel {
                             index: 0,
                             cumulative_text: text.clone(),
                             finish_reason: Some("stop".to_string()),
+                            // Non-LLM template: tool calling is an LLM feature.
+                            tool_calls: Vec::new(),
+                            raw_text: None,
                         };
                         let _ = tx.blocking_send(StreamEvent::Token(stream_token));
                     }
@@ -5391,6 +5419,8 @@ mod tests {
                 index: 0,
                 cumulative_text: self.response_text.clone(),
                 finish_reason: Some("stop".to_string()),
+                tool_calls: Vec::new(),
+                raw_text: None,
             };
             on_token(token).map_err(|e| {
                 xybrid_core::runtime_adapter::AdapterError::InferenceFailed(format!("{}", e))

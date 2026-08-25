@@ -348,8 +348,9 @@ classes:
         status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
       toolResults:
         # The continuation turn after the model asked for tools. Only the
-        # immediately prior assistant turn is replayed, and continuation runs
-        # on the non-streaming text path only.
+        # immediately prior assistant turn is replayed. A continuation runs on
+        # every text path — batch, streaming, and both conversation-context
+        # variants; image-bearing conversations are rejected.
         params:
           - { name: userText, type: String }
           - { name: priorAssistantText, type: String }
@@ -668,6 +669,22 @@ classes:
     type: data
     section: "8. Supporting Types"
     status: { dart: implemented, kotlin: planned, swift: planned, csharp: implemented }
+    properties:
+      toolCalls:
+        type: "List<ToolCall>"
+        # Tool calls the model emitted, on the terminal token only. Tool-call
+        # blocks are suppressed from the streamed text, so a streaming caller
+        # dispatches these rather than parsing token text.
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+        since: "0.7.0"
+      rawText:
+        type: "String?"
+        # The completed turn's raw output text, tool-call block included —
+        # what the tool-results envelope needs as priorAssistantText. Set only
+        # alongside a non-empty toolCalls; NOT the same as cumulativeText,
+        # which is the emitted (block-suppressed) text.
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+        since: "0.7.0"
 
   # -------------------------------------------------------------------
   # 9. Configuration Types

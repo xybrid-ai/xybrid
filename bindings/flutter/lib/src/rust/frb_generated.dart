@@ -3276,14 +3276,16 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
   FfiStreamToken dco_decode_ffi_stream_token(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 5)
-      throw Exception('unexpected arr length: expect 5 but see ${arr.length}');
+    if (arr.length != 7)
+      throw Exception('unexpected arr length: expect 7 but see ${arr.length}');
     return FfiStreamToken(
       token: dco_decode_String(arr[0]),
       tokenId: dco_decode_opt_box_autoadd_i_64(arr[1]),
       index: dco_decode_u_32(arr[2]),
       cumulativeText: dco_decode_String(arr[3]),
       finishReason: dco_decode_opt_String(arr[4]),
+      toolCalls: dco_decode_list_ffi_tool_call(arr[5]),
+      rawText: dco_decode_opt_String(arr[6]),
     );
   }
 
@@ -4248,12 +4250,16 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
     var var_index = sse_decode_u_32(deserializer);
     var var_cumulativeText = sse_decode_String(deserializer);
     var var_finishReason = sse_decode_opt_String(deserializer);
+    var var_toolCalls = sse_decode_list_ffi_tool_call(deserializer);
+    var var_rawText = sse_decode_opt_String(deserializer);
     return FfiStreamToken(
         token: var_token,
         tokenId: var_tokenId,
         index: var_index,
         cumulativeText: var_cumulativeText,
-        finishReason: var_finishReason);
+        finishReason: var_finishReason,
+        toolCalls: var_toolCalls,
+        rawText: var_rawText);
   }
 
   @protected
@@ -5316,6 +5322,8 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
     sse_encode_u_32(self.index, serializer);
     sse_encode_String(self.cumulativeText, serializer);
     sse_encode_opt_String(self.finishReason, serializer);
+    sse_encode_list_ffi_tool_call(self.toolCalls, serializer);
+    sse_encode_opt_String(self.rawText, serializer);
   }
 
   @protected

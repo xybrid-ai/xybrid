@@ -24,8 +24,16 @@ what a tool does, only its declaration and its JSON result.
 Tool calling runs on the local llama.cpp backend. Paths that cannot honor a
 tool-bearing request fail closed with an invalid-input error instead of
 silently generating without the tools: models without an embedded chat
-template, the mistralrs backend, streaming continuations,
-conversation-context continuations, and the SDK's cloud-fallback leg.
+template, the mistralrs backend, and the SDK's cloud-fallback leg.
+
+Streaming and conversation context are **not** in that list. A tools-bearing
+run streams, and a `tool_results` continuation runs on every text path —
+batch, streaming, and both conversation-context variants — so a streaming chat
+screen keeps its history and its token-by-token output. The one shape that
+stays closed is an **image-bearing conversation**: a continuation replays the
+prior turns as a composed text prompt, and image embeddings cannot be
+re-evaluated from text. That is a property of the replay mechanism, not an
+unfinished path.
 </Callout>
 
 ## Supported Models
@@ -121,14 +129,87 @@ cargo run -p xybrid-core --example functiongemma_tools --features llm-llamacpp
   immediately prior assistant turn — for multi-hop chains, fold earlier
   results into the user text you pass to `tool_results` (the examples show
   the pattern).
-- **Continuations are non-streaming and context-free.** A `tool_results`
-  envelope on a streaming or conversation-context path is rejected as
-  invalid input. The tools-*offering* turn may stream — tool-call blocks are
-  suppressed from the token stream and the terminal token carries
-  `finish_reason: "tool_calls"`.
+- **Streaming halts at the call boundary.** A tools-bearing streaming run
+  suppresses tool-call blocks from the token stream, and the terminal token
+  carries `finish_reason: "tool_calls"`, the parsed calls
+  (`PartialToken::tool_calls`), and the raw turn text to replay
+  (`PartialToken::raw_text`) — all surfaced on every binding's stream token,
+  so a streaming caller never parses raw text.
+- **Continuations stream, and they keep context.** Feed the `tool_results`
+  envelope back through the same call you started with, streaming or not,
+  with or without a `ConversationContext`. Only image-bearing conversations
+  are refused (see the callout above).
+- **Push to history after the loop, not between turns.** A continuation
+  envelope replays the user turn itself, so pushing it to the context first
+  duplicates it in the prompt. Commit the user message and the final answer
+  once the loop settles. Reference loop:
+  [`crates/xybrid-core/examples/functiongemma_tools_streaming_context.rs`](https://github.com/xybrid-ai/xybrid/blob/master/crates/xybrid-core/examples/functiongemma_tools_streaming_context.rs).
 - **Budget your turns.** Small models can search forever without settling;
   cap the loop and force a tools-off synthesis turn from your accumulated
   notes when the budget runs out.
+
+## Streaming Chat With Tools
+
+A chat UI wants both: tokens as they arrive, and history across turns. The
+loop is the same three steps as above, run through
+`runStreamingWithContext` — the model streams its answer, halts at the call
+boundary, and the continuation streams too:
+
+```dart
+Stream<StreamToken> turn(XybridEnvelope input) =>
+    model.runStreamingWithContext(input, context,
+        config: GenerationConfig.greedy(tools: tools));
+
+var input = XybridEnvelope.text(userText);
+var prior = '';
+
+for (var step = 0; step < maxSteps; step++) {
+  List<ToolCall> calls = const [];
+
+  await for (final token in turn(input)) {
+    buffer.write(token.token);          // paint tokens as they arrive
+    if (token.hasToolCalls) {
+      calls = token.toolCalls;          // typed, already parsed
+      prior = token.rawText!;           // the turn text to replay
+    }
+  }
+
+  if (calls.isEmpty) break;             // the model answered; done
+
+  input = XybridEnvelope.toolResults(
+    userText: userText,
+    priorAssistantText: prior,
+    results: [
+      for (final call in calls)
+        ToolResult(
+          callId: call.id,
+          name: call.name,
+          contentJson: await runMyTool(call.name, call.argumentsJson),
+        ),
+    ],
+  );
+}
+```
+
+Push to the context **once the exchange settles**, not between turns: the
+`tool_results` envelope replays `userText` itself, so a mid-loop push puts the
+question in the prompt twice.
+
+Three things make this work without any parsing on your side:
+
+- Tool-call blocks are **suppressed from the token stream**, so `token.token`
+  is always display text. The calls arrive typed on the terminal token
+  instead.
+- `rawText` on that same token is the turn's raw output *including* the
+  tool-call block — the streaming equivalent of `XybridResult.text`, and what
+  `priorAssistantText` needs. Don't use `cumulativeText`: that is what your UI
+  painted, with the blocks suppressed.
+- The `tool_results` envelope goes back through the **same** call, so the
+  continuation keeps the conversation context and keeps streaming.
+
+Swift, Kotlin, Python, and Unity C# expose the same trio on their stream
+token — `toolCalls`, `rawText`, `finishReason` — and feed the continuation
+back through the same streaming call.
 
 ## Tool Calling in the CLI (`xybrid repl`)
 

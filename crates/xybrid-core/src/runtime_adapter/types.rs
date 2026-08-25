@@ -11,7 +11,7 @@
 //! - `GenerationConfig` - Generation parameters for LLM inference
 //! - `LlmConfig` - Configuration for loading a local LLM
 
-use crate::gateway::Tool;
+use crate::gateway::{Tool, ToolCall};
 use crate::ir::MessageRole;
 use crate::{
     conversation::ConversationContext,
@@ -38,8 +38,27 @@ pub struct PartialToken {
     /// Cumulative text generated so far (all tokens concatenated)
     pub cumulative_text: String,
     /// Finish reason if this is the final token, None otherwise.
-    /// Values: "stop" (hit stop sequence/EOS), "length" (hit max_tokens)
+    /// Values: "stop" (hit stop sequence/EOS), "length" (hit max_tokens),
+    /// "tool_calls" (the turn ended on a parseable tool-call block).
     pub finish_reason: Option<String>,
+    /// Tool calls parsed from the completed turn. Only ever populated on the
+    /// **terminal** token (the one carrying `finish_reason`), and only for a
+    /// request that offered tools.
+    ///
+    /// A streaming caller dispatches on this instead of re-parsing the token
+    /// text: the protocol blocks are suppressed from the emitted stream, so
+    /// the raw call text never reaches the callback in the first place.
+    /// Empty on every mid-stream token and on turns that emitted no call.
+    pub tool_calls: Vec<ToolCall>,
+    /// The completed turn's raw output text, tool-call block included —
+    /// exactly what `Envelope::tool_results` wants as `prior_assistant_text`.
+    ///
+    /// `Some` only alongside a non-empty [`Self::tool_calls`], which is the
+    /// only situation it is useful in. It exists because `cumulative_text`
+    /// deliberately reports the *emitted* text (protocol blocks suppressed),
+    /// so without this a streaming caller would have no way to compose the
+    /// continuation turn.
+    pub raw_text: Option<String>,
 }
 
 impl PartialToken {
@@ -51,6 +70,8 @@ impl PartialToken {
             index,
             cumulative_text,
             finish_reason: None,
+            tool_calls: Vec::new(),
+            raw_text: None,
         }
     }
 
@@ -63,6 +84,22 @@ impl PartialToken {
     /// Mark this as the final token with the given finish reason.
     pub fn with_finish_reason(mut self, reason: impl Into<String>) -> Self {
         self.finish_reason = Some(reason.into());
+        self
+    }
+
+    /// Attach the tool calls parsed from the completed turn, plus the raw
+    /// turn text needed to compose the continuation. Terminal tokens only —
+    /// see [`PartialToken::tool_calls`] and [`PartialToken::raw_text`].
+    ///
+    /// A call-free turn is left untouched: `raw_text` is only meaningful next
+    /// to calls, and stamping it unconditionally would put the unsuppressed
+    /// protocol text on every terminal token for no consumer.
+    pub fn with_tool_calls(mut self, calls: Vec<ToolCall>, raw_text: &str) -> Self {
+        if calls.is_empty() {
+            return self;
+        }
+        self.tool_calls = calls;
+        self.raw_text = Some(raw_text.to_string());
         self
     }
 

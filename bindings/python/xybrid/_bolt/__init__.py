@@ -1108,6 +1108,8 @@ class XybridStreamToken:
     index: int
     cumulative_text: str
     finish_reason: str | None
+    tool_calls: list[XybridToolCall]
+    raw_text: str | None
 
     def _boltffi_wire(self) -> bytes:
         return b"".join((
@@ -1116,6 +1118,8 @@ class XybridStreamToken:
             _boltffi_wire_u64(self.index),
             _boltffi_wire_string(self.cumulative_text),
             _boltffi_wire_optional(self.finish_reason, lambda __boltffi_value_0: _boltffi_wire_string(__boltffi_value_0)),
+            _boltffi_wire_sequence(self.tool_calls, len(self.tool_calls), lambda __boltffi_value_0: __boltffi_value_0._boltffi_wire()),
+            _boltffi_wire_optional(self.raw_text, lambda __boltffi_value_0: _boltffi_wire_string(__boltffi_value_0)),
         ))
 
     @classmethod
@@ -1136,6 +1140,8 @@ class XybridStreamToken:
             index=reader.u64(),
             cumulative_text=reader.string(),
             finish_reason=reader.optional(lambda: reader.string()),
+            tool_calls=reader.sequence(lambda: XybridToolCall._boltffi_from_reader(reader)),
+            raw_text=reader.optional(lambda: reader.string()),
         )
 
 

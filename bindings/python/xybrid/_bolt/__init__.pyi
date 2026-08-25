@@ -127,6 +127,8 @@ class XybridStreamToken:
     index: int
     cumulative_text: str
     finish_reason: str | None
+    tool_calls: list[XybridToolCall]
+    raw_text: str | None
 
 
 
