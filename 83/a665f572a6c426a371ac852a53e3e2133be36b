@@ -1,0 +1,23 @@
+crates/xybrid-core/src/execution/postprocessing/tensor_ops.rs
+  s_37833f24f6cf58::t_ad7be062c83024 448
+crates/llama-cpp-sys/build.rs
+  s_37833f24f6cf58::t_1f9f67088ad8a3 1041-1042
+crates/xybrid-sdk/src/model.rs
+  s_37833f24f6cf58::t_436751129278b2 2902,4876-4884
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "83a665f572a6c426a371ac852a53e3e2133be36b",
+  "prompts": {},
+  "sessions": {
+    "s_37833f24f6cf58": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "bdb9b554-ada8-4989-892b-f443209aa81d",
+        "model": "claude-opus-5"
+      },
+      "human_author": "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
+    }
+  }
+}
