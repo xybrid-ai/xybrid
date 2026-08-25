@@ -1,0 +1,23 @@
+bindings/python/xybrid/_bolt/__init__.py
+  s_37833f24f6cf58::t_cc604fff878c8d 2139-2144,2232-2234
+bindings/python/xybrid/_bolt/_native.c
+  s_37833f24f6cf58::t_cc604fff878c8d 191-196,302-304,1246-1275,7228-7284,7451-7453
+bindings/python/xybrid/_bolt/__init__.pyi
+  s_37833f24f6cf58::t_cc604fff878c8d 483-485
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "1cbb4a40b7e5a37aeca3e49168825f3dbc797d94",
+  "prompts": {},
+  "sessions": {
+    "s_37833f24f6cf58": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "bdb9b554-ada8-4989-892b-f443209aa81d",
+        "model": "claude-opus-5"
+      },
+      "human_author": "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
+    }
+  }
+}
