@@ -81,7 +81,6 @@ After editing `bindings/flutter/rust`, regenerate the Dart glue with
 `flutter_rust_bridge` in `bindings/flutter/rust/Cargo.toml`); `flutter run` then
 rebuilds the native lib via cargokit.
 
-Note: `tools/README.md` still documents the pre-Bazel xtask matrix and is stale.
 
 ### Prebuilt llama.cpp natives (the cargo fast path)
 

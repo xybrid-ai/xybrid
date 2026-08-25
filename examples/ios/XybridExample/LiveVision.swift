@@ -357,7 +357,8 @@ final class LiveVisionViewModel: ObservableObject {
                 ),
                 abortOn: [],
                 fallbackToCloud: false,
-                maxGraceTokens: 0
+                maxGraceTokens: 0,
+                correlationId: nil
             )
             // bolt's `run` is synchronous + blocking; execute it OFF the main
             // actor so the camera feed and UI stay responsive (the realtime gate

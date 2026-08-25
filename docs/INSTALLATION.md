@@ -145,21 +145,37 @@ warning: llama.cpp: downloading prebuilt natives for aarch64-apple-darwin (visio
 warning: llama.cpp: linked prebuilt natives for aarch64-apple-darwin (vision); skipped the cmake build
 ```
 
-Nothing to install and nothing to configure. Slices are cached under
-`$CARGO_HOME/xybrid-natives/` and shared across every project on the machine.
+Nothing to install and nothing to configure. Slices are cached by content
+digest under `$CARGO_HOME/xybrid-natives/` and shared across every project on
+the machine. If `CARGO_HOME` is not set in your environment the cache falls back
+to the build directory, which is per-project and does not survive `cargo clean`
+— rustup's `cargo` shim exports it for you, so this mostly affects a cargo
+installed from a distro package, Homebrew, or Nix.
 
 Every miss falls back to the source build, so this can only make a build
 faster, never break one. It is skipped when no slice is published for your
 target, when your local sources differ from what was published (an edited
-`wrapper.cpp` or a bumped llama.cpp pin), when the CRT or glibc would not
-match, and when you are offline.
+`wrapper.cpp` or a bumped llama.cpp pin), and when the CRT or glibc would not
+match.
+
+Two cases are worth knowing about because they look like the fast path is
+broken when it is working as designed:
+
+- **Linux glibc floor.** Published Linux slices record the glibc of the machine
+  that built them, and a host on anything older declines the slice rather than
+  hitting an unresolved-versioned-symbol link error. Distributions older than
+  the publisher's therefore build from source.
+- **Cross-compiling.** The glibc check reads the *build host*, so it cannot see
+  a foreign sysroot. If you cross-compile to `*-unknown-linux-gnu` (for example
+  with `cargo-zigbuild`) against an older glibc than the slice was built for,
+  set `XYBRID_NATIVES_FORCE_SOURCE=1`.
 
 Controls:
 
 | Variable | Effect |
 |---|---|
 | `XYBRID_NATIVES_FORCE_SOURCE=1` | Never download; always build with CMake |
-| `CARGO_NET_OFFLINE=true` | Same, via cargo's standard offline switch |
+| `CARGO_NET_OFFLINE=true` | Same. Must be exported as an environment variable — cargo does not pass `--offline` or `net.offline` through to build scripts |
 | `XYBRID_NATIVES_CACHE_DIR` | Where downloaded slices are unpacked |
 | `XYBRID_NATIVES_PREBUILT_DIR` | Link a slice you staged yourself, `<dir>/<target>/{lib,include}` |
 | `XYBRID_NATIVES_PKG` | Pull from a different OCI repository |
