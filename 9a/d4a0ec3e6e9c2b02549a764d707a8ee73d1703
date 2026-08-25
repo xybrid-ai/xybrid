@@ -1,0 +1,23 @@
+README.ja-JP.md
+  s_570d7ab18f5032::t_89269470074beb 35,95,97,100-108,111-112,189-201,207-209,290-292,296-299,303-325,329-332,334-335,382,392-393,400-408
+README.md
+  s_570d7ab18f5032::t_be9322ffeee8ee 321
+README.zh-CN.md
+  s_570d7ab18f5032::t_49b77b1199bc4b 35,95,97,100-108,111-112,189-201,207-209,290-291,295-298,302-324,328-331,333-334,381,391-392,398-406
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "9ad4a0ec3e6e9c2b02549a764d707a8ee73d1703",
+  "prompts": {},
+  "sessions": {
+    "s_570d7ab18f5032": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c82da43a-5146-4f39-91b8-559de56586f7",
+        "model": "claude-opus-5"
+      },
+      "human_author": "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
+    }
+  }
+}
