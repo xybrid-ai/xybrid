@@ -90,7 +90,9 @@
   <img src="docs/demo-android.gif" alt="Android demo" width="150">
 </p>
 
-## SDKs
+## Quick Start
+
+Install and run a model in your language of choice.
 
 <p align="center">
   <a href="https://docs.xybrid.dev/en/docs/sdks/flutter"><img src="https://img.shields.io/badge/Flutter-02569B?style=for-the-badge&logo=flutter&logoColor=white" alt="Flutter SDK"></a>
@@ -104,16 +106,7 @@
   <a href="https://github.com/xybrid-ai/xybrid/releases"><img src="https://img.shields.io/badge/CLI-4EAA25?style=for-the-badge&logo=gnubash&logoColor=white" alt="CLI"></a>
 </p>
 
-Every SDK above shares the same Rust core. The Browser/Web preview is the one
-exception — a separate LiteRT.js adapter limited to raw typed-tensor I/O.
-
----
-
-## Quick Start
-
-Install and run a model in your language of choice.
-
-Platform-specific setup lives behind each badge above. See the full
+Each badge links to its platform setup. See the full
 [Installation Guide](https://docs.xybrid.dev/en/docs/quickstart) for all options.
 
 ### Flutter
@@ -298,39 +291,41 @@ full catalogue at **[xybrid.ai/models](https://www.xybrid.ai/models)**, or run
 
 | Model | Params | Description |
 |-------|--------|-------------|
-| Whisper Tiny (`whisper-tiny-ggml`) | 39M | Multilingual transcription on whisper.cpp — in every platform preset |
-| Wav2Vec2 Base | 95M | English ASR with CTC decoding |
+| [Whisper Tiny](https://www.xybrid.ai/models/whisper-tiny-ggml) | 39M | Multilingual transcription on whisper.cpp — in every platform preset |
+| [Wav2Vec2 Base](https://www.xybrid.ai/models/wav2vec2-base-960h) | 95M | English ASR with CTC decoding |
 
 ### Text-to-Speech
 
 | Model | Params | Description |
 |-------|--------|-------------|
-| Kokoro 82M | 82M | High-quality, 24 natural voices |
-| KittenTTS Nano | 15M | Ultra-lightweight, 8 voices |
-| NeuTTS Nano | 120M | Codec TTS with voice cloning |
+| [Kokoro 82M](https://www.xybrid.ai/models/kokoro-82m) | 82M | High-quality, 24 natural voices |
+| [KittenTTS Nano](https://www.xybrid.ai/models/kitten-tts-nano-0.8) | 15M | Ultra-lightweight, 8 voices |
+| [NeuTTS Nano](https://www.xybrid.ai/models/neutts-nano-q4) | 120M | Codec TTS with voice cloning |
 
 ### LLM
 
 | Model | Params | Description |
 |-------|--------|-------------|
-| LFM2.5 230M | 230M | Liquid AI's smallest hybrid conv+attention LLM — 9 languages, tool calling |
-| LFM2.5 350M | 354M | Same architecture, more headroom — 9 languages, tool calling |
-| LFM2.5 1.2B Instruct | 1.2B | Agentic tasks and data extraction |
-| LFM2.5 1.2B Thinking | 1.2B | Reasoning model — chain-of-thought via `reasoningContent` ([guide](https://docs.xybrid.dev/en/docs/guides/reasoning)) |
-| SmolLM2 360M | 360M | Best tiny LLM, excellent quality/size ratio |
-| FunctionGemma 270M | 270M | Purpose-built for function calling |
-| Gemma 3 1B | 1B | Google's mobile-optimized LLM, 32K context |
-| Llama 3.2 1B | 1B | Meta's general purpose, 128K context |
-| Qwen 3.5 0.8B | 800M | Reasoning (thinking mode), 201 languages |
-| Qwen 3.5 2B | 2B | Larger Qwen 3.5 with extended reasoning |
+| [LFM2.5 230M](https://www.xybrid.ai/models/lfm2.5-230m) | 230M | Liquid AI's smallest hybrid conv+attention LLM — 9 languages, tool calling |
+| [LFM2.5 350M](https://www.xybrid.ai/models/lfm2.5-350m) | 354M | Same architecture, more headroom — 9 languages, tool calling |
+| [LFM2.5 1.2B Instruct](https://www.xybrid.ai/models/lfm2.5-1.2b-instruct) | 1.2B | Agentic tasks and data extraction |
+| [LFM2.5 1.2B Thinking](https://www.xybrid.ai/models/lfm2.5-1.2b-thinking) | 1.2B | Reasoning model — chain-of-thought via `reasoningContent` ([guide](https://docs.xybrid.dev/en/docs/guides/reasoning)) |
+| [SmolLM2 360M](https://www.xybrid.ai/models/smollm2-360m) | 360M | Best tiny LLM, excellent quality/size ratio |
+| [FunctionGemma 270M](https://www.xybrid.ai/models/functiongemma-270m-it) | 270M | Purpose-built for function calling |
+| [Gemma 3 1B](https://www.xybrid.ai/models/gemma-3-1b) | 1B | Google's mobile-optimized LLM, 32K context |
+| [Gemma 4 E2B](https://www.xybrid.ai/models/gemma-4-e2b) | 5.1B | Google's compact multimodal LLM, 2.3B effective params |
+| [Gemma 4 E4B](https://www.xybrid.ai/models/gemma-4-e4b) | 8B | Google's mid-range multimodal LLM, 4.5B effective params |
+| [Llama 3.2 1B](https://www.xybrid.ai/models/llama-3.2-1b) | 1B | Meta's general purpose, 128K context |
+| [Qwen 3.5 0.8B](https://www.xybrid.ai/models/qwen3.5-0.8b) | 800M | Reasoning (thinking mode), 201 languages |
+| [Qwen 3.5 2B](https://www.xybrid.ai/models/qwen3.5-2b) | 2B | Larger Qwen 3.5 with extended reasoning |
 
 ### Vision-Language
 
 | Model | Params | Description |
 |-------|--------|-------------|
-| LFM2-VL 450M | 450M | Liquid AI's compact VLM (SigLIP2 vision) |
-| LFM2.5-VL 3B | 3B | Larger Liquid VLM for local inference |
-| Bonsai 27B | 27B | PrismML's 1-bit VLM for local reasoning |
+| [LFM2-VL 450M](https://www.xybrid.ai/models/lfm2-vl-450m) | 450M | Liquid AI's compact VLM (SigLIP2 vision) |
+| [LFM2.5-VL 3B](https://www.xybrid.ai/models/lfm2.5-vl-3b) | 3B | Larger Liquid VLM for local inference |
+| [Bonsai 27B](https://www.xybrid.ai/models/bonsai-27b) | 27B | PrismML's 1-bit VLM for local reasoning |
 
 **Tool calling:** see the
 [Tool Calling guide](https://docs.xybrid.dev/en/docs/guides/tool-calling).
@@ -398,23 +393,22 @@ data and the loop is your code. See the
 
 ## Why Xybrid?
 
-- **Private by default** — inference runs on-device; your data stays there.
-- **Offline capable** — no internet needed after the first model download.
+- **Private / offline** — inference runs on-device and keeps working with no
+  network after the first model download.
 - **One API, five platforms** — iOS, Android, macOS, Linux, Windows.
 - **Many backends, one API** — ONNX Runtime, llama.cpp (GGUF), whisper.cpp,
-  Candle and CoreML under a single call.
+  Candle and CoreML.
 - **Multi-model pipelines** — chain ASR → LLM → TTS in one call.
 - **Tool calling** — local models call functions you define, on every SDK.
 - **Swap models without shipping an app** — models resolve from the registry at
-  runtime and cache on device, so changing one is a config change.
-- **Cloud fallback** — opt in per run (`fallbackToCloud`) and a request routes
-  out only when the device cannot serve it.
-- **Telemetry you control** — inference traces are opt-in behind an API key.
-  Registry metadata calls carry one attribution header; opt out with
-  `XYBRID_TELEMETRY_OPTOUT=1` ([details](docs/telemetry/registry.md)).
-- **Hardware acceleration** — Metal and the Apple Neural Engine on Apple
-  platforms, opt-in Vulkan on Linux; Android and Windows are CPU today
-  ([details](docs/INSTALLATION.md#platform-features)).
+  runtime and cache on device.
+- **Cloud fallback** — opt in per run
+  ([docs](https://docs.xybrid.dev/en/docs/concepts/hybrid-execution)).
+- **Telemetry you control** — opt-in behind an API key
+  ([docs](docs/telemetry/registry.md)).
+- **Hardware acceleration** — Metal and the Apple Neural Engine on Apple, opt-in
+  Vulkan on Linux; Android and Windows are CPU today
+  ([docs](docs/INSTALLATION.md#platform-features)).
 
 ### How it compares
 
