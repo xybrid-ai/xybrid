@@ -180,6 +180,68 @@ xybrid repl --model-file ./LFM2.5-350M-Q4_K_M.gguf --tools-file my-tools.json
   `tool_calling` 的模型启用工具（不受支持的模板在运行时仍会明确报错）。声明了
   `tool_calling: false` 的 Bundle 则保持关闭。
 
+## 在移动端与桌面端 SDK 中使用
+
+自 0.6.0 起，工具调用可以跨越 FFI 边界，因此 Swift、Kotlin、Python、Unity C#
+与 Dart 都能驱动同一套循环。它保持**按轮次进行**：一次 `run` 就是模型的一轮，
+由你的代码执行工具，再用一个续接 Envelope 把结果回传。不存在跨边界回调。
+
+整个循环由三部分组成：
+
+1. 把工具的 schema 放到 `GenerationConfig.tools`。
+2. 读取 `XybridResult.toolCalls`——每一项包含 `id`、`name` 和 `argumentsJson`。
+3. 用 `XybridEnvelope.toolResults(...)` 构造续接 Envelope，并**使用与原始轮次
+   相同的工具**来运行它，这样执行器才能重建出完全一致的对话前缀。
+
+```swift
+let tools = [XybridToolDefinition(
+    name: "get_weather",
+    description: "Current weather for a city",
+    parametersJson: #"{"type":"object","properties":{"city":{"type":"string"}}}"#
+)]
+let config = XybridGenerationConfig.greedy(tools: tools)
+
+let options = XybridRunOptions(
+    generationConfig: config,
+    abortOn: [],
+    fallbackToCloud: false,
+    maxGraceTokens: 0,
+    correlationId: nil
+)
+let first = try model.run(envelope: .text("Weather in Paris?"), options: options)
+
+if !first.toolCalls.isEmpty {
+    let results = first.toolCalls.map { call in
+        XybridToolResult(callId: call.id, name: call.name, contentJson: execute(call))
+    }
+    let continuation = try XybridEnvelope.toolResults(
+        "Weather in Paris?",
+        priorAssistantText: first.text ?? "",  // 原始输出，包含工具调用块
+        results: results
+    )
+    // same options — the continuation must carry the same tools
+    let answer = try model.run(envelope: continuation, options: options)
+}
+```
+
+Kotlin 的对应写法是 `XybridEnvelope.toolResults(userText, priorAssistantText,
+results)`；Python 使用 `tool_results_envelope(...)` 与 snake_case 字段；Dart 使用
+具名参数工厂 `XybridEnvelope.toolResults(userText:, priorAssistantText:,
+results:)`，搭配 `GenerationConfig.greedy(tools: ...)` 与 `result.hasToolCalls`。
+
+`priorAssistantText` 必须是该轮**原封不动**的 `text`——包含工具调用块在内。删掉
+它会破坏模型续写所依赖的前缀。
+
+请依据 Bundle 的建议性标志来控制工具相关的界面，而不要想当然：
+
+```swift
+if model.supportsToolCalling() == true { showToolsToggle() }
+```
+
+`nil` 表示该 Bundle 未作声明，绝不意味着支持。强制校验仍在运行时进行：工具调用
+目前仅支持 llama.cpp，不受支持的路径——没有内嵌对话模板、mistralrs 后端、云端
+回退分支——会直接拒绝带工具的请求，而不是悄悄地在没有工具的情况下生成。
+
 ## 在你自己的 Bundle 中声明支持
 
 为聊天模板能渲染工具的模型，在 `model_metadata.json` 中添加该标志

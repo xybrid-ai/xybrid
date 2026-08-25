@@ -15,7 +15,7 @@ Or add to your `pubspec.yaml`:
 
 ```yaml
 dependencies:
-  xybrid_flutter: ^0.5.0
+  xybrid_flutter: ^0.6.0
 ```
 
 <details>
@@ -161,6 +161,78 @@ final result = await model.run(XybridEnvelope.text(
 if (result.text != null) print('Answer: ${result.text}');
 if (result.reasoningContent != null) print('Reasoning: ${result.reasoningContent}');
 ```
+
+### Structured Output (JSON Schema)
+
+Constrain a local llama model so its output is always schema-valid — no
+retry loop, no parse failures. `jsonSchemaToGbnf` turns a JSON Schema into the
+GBNF grammar `GenerationConfig.grammar` expects:
+
+```dart
+final grammar = jsonSchemaToGbnf(
+  schemaJson: '{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]}',
+);
+
+final result = await model.run(
+  XybridEnvelope.text('Extract the city: "I flew into Paris last night."'),
+  config: GenerationConfig.greedy(grammar: grammar),
+);
+// result.text is guaranteed to parse against the schema
+```
+
+`GenerationConfig.greedy` is the usual pairing — deterministic decoding plus a
+grammar is the standard extraction shape. Raw GBNF works too: pass it to
+`grammar` directly.
+
+### Tool Calling
+
+One `run` is one model turn, so the loop lives in your code: run a request
+carrying tools, execute the calls the model asks for, then run a continuation
+envelope that feeds the outcomes back.
+
+```dart
+final tools = [
+  ToolDefinition(
+    name: 'get_weather',
+    description: 'Current weather for a city',
+    parametersJson: '{"type":"object","properties":{"city":{"type":"string"}}}',
+  ),
+];
+final config = GenerationConfig.greedy(tools: tools);
+
+const question = 'Weather in Paris?';
+final first = await model.run(XybridEnvelope.text(question), config: config);
+
+if (first.hasToolCalls) {
+  final results = [
+    for (final call in first.toolCalls)
+      ToolResult(callId: call.id, name: call.name, contentJson: runTool(call)),
+  ];
+
+  final answer = await model.run(
+    XybridEnvelope.toolResults(
+      userText: question,
+      priorAssistantText: first.text!,  // raw output, tool-call block included
+      results: results,
+    ),
+    config: config,  // same tools as the first turn
+  );
+}
+```
+
+Two rules the loop depends on: run the continuation with the **same tools** as
+the original turn so the executor rebuilds an identical chat prefix, and pass
+`priorAssistantText` **verbatim** — tool-call block included.
+
+Gate your tool UI on the bundle's advisory flag:
+
+```dart
+if (model.supportsToolCalling == true) showToolsToggle();
+```
+
+`null` means the bundle says nothing and never implies support. Tool calling is
+llama.cpp-only; unsupported paths reject tool-bearing requests rather than
+silently generating without them.
 
 ### LLM Streaming
 

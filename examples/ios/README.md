@@ -183,7 +183,8 @@ let result = try model.run(
         generationConfig: config,
         abortOn: [],
         fallbackToCloud: false,
-        maxGraceTokens: 0
+        maxGraceTokens: 0,
+        correlationId: nil
     )
 )
 ```
@@ -201,7 +202,8 @@ let result = try model.run(
         generationConfig: config,
         abortOn: [],
         fallbackToCloud: false,
-        maxGraceTokens: 0
+        maxGraceTokens: 0,
+        correlationId: nil
     )
 )
 let caption = result.text
