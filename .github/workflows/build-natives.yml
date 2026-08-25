@@ -30,6 +30,8 @@ on:
       - 'crates/llama-cpp-sys/**'
       - 'tools/scripts/natives-*.sh'
       - '.github/workflows/build-natives.yml'
+      # Markdown inside any path above cannot affect this build.
+      - "!**.md"
   # Weekly re-publish: GitHub rotates the macOS/Linux runner images, changing
   # the host toolchain (Xcode SDK, gcc) folded into apple/host fingerprints.
   # Re-running weekly re-warms those slices under the current image so the cache

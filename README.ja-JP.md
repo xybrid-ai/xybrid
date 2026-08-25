@@ -28,11 +28,11 @@
 <p align="center">
 
 [![Build][build-shield]][build-url]
-[![Release][release-shield]][release-url]
 [![License][license-shield]][license-url]
 [![OpenSSF Scorecard][scorecard-shield]][scorecard-url]
 [![OpenSSF Best Practices][bestpractices-shield]][bestpractices-url]
 <br>
+[![Release][release-shield]][release-url]
 [![crates.io][crates-shield]][crates-url]
 [![pub.dev][pubdev-shield]][pubdev-url]
 [![Maven Central][maven-shield]][maven-url]
@@ -92,41 +92,24 @@
 
 
 
-## はじめに
-
-| 目的 | パス |
-|------|------|
-| 最速デモ（2分） | [CLIをインストール →](#クイックスタート) |
-| モバイルまたはデスクトップアプリを構築 | [Flutter SDK →](bindings/flutter/) |
-| ゲームにAI NPCを追加 | [Unity SDK →](bindings/unity/) および [3D酒場デモ](https://github.com/xybrid-ai/xybrid-unity-tavern) を試す |
-| Androidネイティブ | [Kotlin SDK →](bindings/kotlin/) |
-| Rust / 組み込み | [Coreクレート →](crates/) |
----
-
-<p align="center">
-  <img src="docs/game-demo.gif" alt="ゲームデモ" width="540">
-</p>
-
-## SDK
-
-Xybridは**Rustベースのランタイム**であり、すべての主要プラットフォーム向けのネイティブバインディングを提供します。
-
-| SDK | プラットフォーム | インストール | ステータス | サンプル |
-|-----|-----------|---------|--------|--------|
-| **[Flutter](bindings/flutter/)** | iOS, Android, macOS, Linux, Windows | [pub.dev](https://pub.dev/packages/xybrid_flutter) | 利用可能 | [README](examples/flutter/README.md) |
-| **[Unity](bindings/unity/)** | macOS, Windows, Linux, iOS, Android | [下記参照](#クイックスタート) | 利用可能 | [Unity 3D AI酒場](https://github.com/xybrid-ai/xybrid-unity-tavern) |
-| **[Swift](bindings/apple/)** | iOS, macOS | Swift Package Manager | 近日公開 | [README](examples/ios/README.md) |
-| **[Kotlin](bindings/kotlin/)** | Android | Maven Central | 利用可能 | [README](examples/android/README.md) |
-| **[CLI](https://github.com/xybrid-ai/xybrid/releases)** | macOS, Linux, Windows | `curl -sSL .../install.sh \| sh` | 利用可能 | — |
-| **[Rust](crates/)** | すべて | [crates.io](https://crates.io/crates/xybrid) | 利用可能 | — |
-
-すべてのSDKは同じRustコアをラップしており、すべてのプラットフォームで同一のモデルサポートと動作を提供します。
-
----
-
 ## クイックスタート
 
-お好みの言語でインストールしてモデルを実行できます。各セクションにはインストール手順と最小限のサンプルが含まれています。
+お好みの言語でインストールしてモデルを実行できます。
+
+<p align="center">
+  <a href="https://docs.xybrid.dev/en/docs/sdks/flutter"><img src="https://img.shields.io/badge/Flutter-02569B?style=for-the-badge&logo=flutter&logoColor=white" alt="Flutter SDK"></a>
+  <a href="https://docs.xybrid.dev/en/docs/sdks/ios"><img src="https://img.shields.io/badge/Swift-F05138?style=for-the-badge&logo=swift&logoColor=white" alt="Swift SDK"></a>
+  <a href="https://docs.xybrid.dev/en/docs/sdks/kotlin"><img src="https://img.shields.io/badge/Kotlin-7F52FF?style=for-the-badge&logo=kotlin&logoColor=white" alt="Kotlin SDK"></a>
+  <a href="https://docs.xybrid.dev/en/docs/sdks/unity"><img src="https://img.shields.io/badge/Unity-000000?style=for-the-badge&logo=unity&logoColor=white" alt="Unity SDK"></a>
+  <br>
+  <a href="https://crates.io/crates/xybrid"><img src="https://img.shields.io/badge/Rust-000000?style=for-the-badge&logo=rust&logoColor=white" alt="Rust crate"></a>
+  <a href="bindings/python/"><img src="https://img.shields.io/badge/Python-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python SDK"></a>
+  <a href="https://docs.xybrid.dev/en/docs/sdks/web"><img src="https://img.shields.io/badge/Web_preview-F7DF1E?style=for-the-badge&logo=javascript&logoColor=black" alt="Web SDK preview"></a>
+  <a href="https://github.com/xybrid-ai/xybrid/releases"><img src="https://img.shields.io/badge/CLI-4EAA25?style=for-the-badge&logo=gnubash&logoColor=white" alt="CLI"></a>
+</p>
+
+各バッジからプラットフォームごとのセットアップ手順を参照できます。すべての
+オプションは[インストールガイド](https://docs.xybrid.dev/en/docs/quickstart)をご覧ください。
 
 ### CLI
 
@@ -203,11 +186,26 @@ let result = try await model.runAsync(envelope: Envelope.text("Hello world"))
 
 ### Unity
 
-**インストール** [OpenUPM](https://openupm.com/packages/ai.xybrid.sdk/)（`openupm add ai.xybrid.sdk`）、または git サブフォルダから:
+<p align="center">
+  <img src="docs/game-demo.gif" alt="ゲームデモ" width="480">
+</p>
+
+**OpenUPM でインストール**（推奨）:
+
+```sh
+openupm add ai.xybrid.sdk
+```
+
+または `https://package.openupm.com` をスコープ `ai.xybrid` の scoped registry として追加します。
+
+**手動インストール** — git サブフォルダを UPM パッケージとして追加:
 
 ```sh
 https://github.com/xybrid-ai/xybrid.git?path=/bindings/unity
 ```
+
+ネイティブライブラリは初回インポート時に自動でダウンロードされます。詳細は
+[Unity SDK ガイド](https://docs.xybrid.dev/en/docs/sdks/unity)を参照してください。
 
 **モデルを実行:**
 
@@ -289,61 +287,52 @@ let result = pipeline.run(&Envelope::audio(audio_bytes))?;
 
 ## 対応モデル
 
-すべてのモデルは完全にオンデバイスで実行されます。クラウド不要、APIキー不要です。完全なレジストリは `xybrid models list` で閲覧できます。
-
-### まずはこれから
-
-| モデル | タイプ | パラメータ数 | おすすめの理由 |
-|-------|------|--------|----------------|
-| **SmolLM2 360M** | LLM | 360M | あらゆるデバイスで最高の品質対サイズ比 |
-| **Kokoro 82M** | TTS | 82M | 高品質な音声、24種類の声、高速 |
-| **Whisper Tiny** | ASR | 39M | 正確な多言語文字起こし |
+すべてのモデルは完全にオンデバイスで実行されます。クラウド不要、APIキー不要です。
+全カタログは **[xybrid.ai/models](https://www.xybrid.ai/models)** で閲覧できます
+（`xybrid models list` でも一覧できます）。
 
 ### 音声認識（Speech-to-Text）
 
-| モデル | パラメータ数 | フォーマット | 説明 |
-|-------|--------|--------|-------------|
-| Whisper Tiny（`whisper-tiny-ggml`） | 39M | GGML Q5_1 | whisper.cpp による多言語文字起こし — すべてのプラットフォームプリセットに同梱 |
-| Whisper Tiny（`whisper-tiny`） | 39M | SafeTensors | 同じ重みを Candle ランタイムで実行 — `candle` フィーチャを有効にしたビルドが必要 |
-| Wav2Vec2 Base | 95M | ONNX | CTC復号による英語ASR |
+| モデル | パラメータ | 説明 |
+|--------|-----------|------|
+| [Whisper Tiny](https://www.xybrid.ai/models/whisper-tiny-ggml) | 39M | whisper.cpp による多言語文字起こし——すべてのプラットフォームプリセットに同梱 |
+| [Wav2Vec2 Base](https://www.xybrid.ai/models/wav2vec2-base-960h) | 95M | CTC デコードによる英語 ASR |
 
 ### テキスト読み上げ（Text-to-Speech）
 
-| モデル | パラメータ数 | フォーマット | 説明 |
-|-------|--------|--------|-------------|
-| Kokoro 82M | 82M | ONNX | 高品質、24種類の自然な声 |
-| KittenTTS Nano | 15M | ONNX | 超軽量、8種類の声 |
+| モデル | パラメータ | 説明 |
+|--------|-----------|------|
+| [Kokoro 82M](https://www.xybrid.ai/models/kokoro-82m) | 82M | 高品質、24種類の自然な音声 |
+| [KittenTTS Nano](https://www.xybrid.ai/models/kitten-tts-nano-0.8) | 15M | 超軽量、8種類の音声 |
+| [NeuTTS Nano](https://www.xybrid.ai/models/neutts-nano-q4) | 120M | コーデック TTS、音声クローン対応 |
 
-### 言語モデル
+### LLM
 
-| モデル | パラメータ数 | フォーマット | 説明 |
-|-------|--------|--------|-------------|
-| Gemma 3 1B | 1B | GGUF Q4_K_M | Googleのモバイル最適化LLM |
-| LFM2.5 350M | 354M | GGUF Q4_K_M | Liquid AIのハイブリッドconv+attention、9言語、ツール呼び出し対応 |
-| Llama 3.2 1B | 1B | GGUF Q4_K_M | Metaの汎用LLM、128Kコンテキスト |
-| Qwen 2.5 0.5B | 500M | GGUF Q4_K_M | コンパクトなオンデバイスチャット |
-| Qwen 3.5 0.8B | 800M | GGUF Q4_K_M | 推論機能付き最新Qwen（思考モード） |
-| Qwen 3.5 2B | 2B | GGUF Q4_K_M | 拡張推論機能付き大型Qwen 3.5 |
-| SmolLM2 360M | 360M | GGUF Q4_K_M | 最高の小型LLM、優れた品質/サイズ比 |
+| モデル | パラメータ | 説明 |
+|--------|-----------|------|
+| [LFM2.5 230M](https://www.xybrid.ai/models/lfm2.5-230m) | 230M | Liquid AI 最小のハイブリッド conv+attention LLM——9言語、ツール呼び出し対応 |
+| [LFM2.5 350M](https://www.xybrid.ai/models/lfm2.5-350m) | 354M | 同じアーキテクチャでより余裕のある構成——9言語、ツール呼び出し対応 |
+| [LFM2.5 1.2B Instruct](https://www.xybrid.ai/models/lfm2.5-1.2b-instruct) | 1.2B | エージェント的タスクとデータ抽出向け |
+| [LFM2.5 1.2B Thinking](https://www.xybrid.ai/models/lfm2.5-1.2b-thinking) | 1.2B | 推論モデル——`reasoningContent` で思考過程を出力（[ガイド](https://docs.xybrid.dev/en/docs/guides/reasoning)） |
+| [SmolLM2 360M](https://www.xybrid.ai/models/smollm2-360m) | 360M | 最良の小型 LLM、品質とサイズのバランスに優れる |
+| [FunctionGemma 270M](https://www.xybrid.ai/models/functiongemma-270m-it) | 270M | 関数呼び出しに特化 |
+| [Gemma 3 1B](https://www.xybrid.ai/models/gemma-3-1b) | 1B | Google のモバイル最適化 LLM、32K コンテキスト |
+| [Gemma 4 E2B](https://www.xybrid.ai/models/gemma-4-e2b) | 5.1B | Google のコンパクトなマルチモーダル LLM、実効パラメータ 2.3B |
+| [Gemma 4 E4B](https://www.xybrid.ai/models/gemma-4-e4b) | 8B | Google のミドルレンジ マルチモーダル LLM、実効パラメータ 4.5B |
+| [Llama 3.2 1B](https://www.xybrid.ai/models/llama-3.2-1b) | 1B | Meta の汎用モデル、128K コンテキスト |
+| [Qwen 3.5 0.8B](https://www.xybrid.ai/models/qwen3.5-0.8b) | 800M | 推論（thinking モード）対応、201言語 |
+| [Qwen 3.5 2B](https://www.xybrid.ai/models/qwen3.5-2b) | 2B | より大きな Qwen 3.5、推論能力を強化 |
+| [Bonsai 27B](https://www.xybrid.ai/models/bonsai-27b) | 27B | PrismML の 1-bit マルチモーダル LLM（テキスト + 画像）、ハイブリッドアテンション |
 
 ### 視覚言語モデル（VLM）
 
-| モデル | パラメータ数 | フォーマット | 説明 |
-|-------|--------|--------|-------------|
-| LFM2-VL 450M | 450M | GGUF Q4_0 + mmproj | Liquid AIのコンパクトVLM（SigLIP2ビジョン）— 画像＋テキスト入力、llama.cpp mtmdで動作 |
+| モデル | パラメータ | 説明 |
+|--------|-----------|------|
+| [LFM2-VL 450M](https://www.xybrid.ai/models/lfm2-vl-450m) | 450M | Liquid AI のコンパクトな VLM（SigLIP2 ビジョンエンコーダ） |
+| [LFM2.5-VL 3B](https://www.xybrid.ai/models/lfm2.5-vl-3b) | 3B | より大きな Liquid VLM、ローカル推論向け |
 
-### 近日公開
-
-| モデル | タイプ | パラメータ数 | 優先度 | ステータス |
-|-------|------|--------|----------|--------|
-| Phi-4 Mini | LLM | 3.8B | P2 | 仕様準備完了（初のマルチ量子化: Q4, Q8, FP16） |
-| Qwen3 0.6B | LLM | 600M | P2 | 計画中 |
-| Trinity Nano | LLM (MoE) | 6B (1Bアクティブ) | P2 | 計画中 |
-| LFM2-VL 700M | Vision+LLM | 700M | P2 | 計画中 |
-| Nomic Embed Text v1.5 | Embeddings | 137M | P1 | ブロック中（Tokenize/MeanPoolステップが必要） |
-| Whisper Tiny CoreML | ASR | 39M | P2 | 計画中 |
-| Qwen3-TTS 0.6B | TTS | 600M | P2 | ブロック中（カスタムSafeTensorsランタイムが必要） |
-| Chatterbox Turbo | TTS | 350M | P3 | ブロック中（ModelGraphテンプレートが必要） |
+**ツール呼び出し:**
+[ツール呼び出しガイド](https://docs.xybrid.dev/en/docs/guides/tool-calling)を参照してください。
 
 <details>
 <summary><h3>独自モデルの使用（実験的機能）</h3></summary>
@@ -390,8 +379,9 @@ claude /xybrid-init hexgrad/Kokoro-82M-v1.0-ONNX
 |------------|-----|---------|-------|-------|---------|
 | 音声認識 | ✅ | ✅ | ✅ | ✅ | ✅ |
 | テキスト読み上げ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| 言語モデル | ✅ | ✅ | ✅ | ✅ | ✅ |
+| LLM | ✅ | ✅ | ✅ | ✅ | ✅ |
 | 画像認識モデル | ✅ | ✅ | ✅ | ✅ | ✅ |
+| ツール呼び出し | ✅ | ✅ | ✅ | ✅ | ✅ |
 | 埋め込み | 🔜 | 🔜 | 🔜 | 🔜 | 🔜 |
 | マルチモデルパイプライン（MMP） | ✅ | ✅ | ✅ | ✅ | ✅ |
 | モデルのダウンロードとキャッシュ | ✅ | ✅ | ✅ | ✅ | ✅ |
@@ -399,15 +389,23 @@ claude /xybrid-init hexgrad/Kokoro-82M-v1.0-ONNX
 
 **SDK MMP サポート:** Flutter ✅ · Rust ✅ · Kotlin 🔜 · Swift 🔜 · Unity 🔜
 
+**ツール呼び出し:** ローカルモデルが自分で定義した関数を呼び出せます。ツールは単なる
+データで、ループを回すのは自分のコードです。詳しくは
+[ツール呼び出しガイド](https://docs.xybrid.dev/en/docs/guides/tool-calling)を参照してください。
+
 ---
 
 ## なぜXybridなのか？
 
-- **プライバシー最優先** — すべての推論はオンデバイスで実行。データがデバイスから出ることはありません。
-- **オフライン対応** — 初回のモデルダウンロード後はインターネット不要。
-- **クロスプラットフォーム** — iOS、Android、macOS、Linux、Windowsで統一されたAPI。
-- **マルチモデルパイプライン（MMP）** — モデルを連鎖（ASR → LLM → TTS）して1回の呼び出しで実行。
-- **ハードウェアアクセラレーション** — Appleプラットフォームでは Apple Neural Engine と Metal、Linux向けllama.cppビルドでは Vulkan をオプトイン可能。Android と Windows は現時点ではCPU実行で、配布済みのLinuxバイナリもCPUのみ（Vulkanはビルド時のオプトイン — [インストール](docs/INSTALLATION.md#platform-features) を参照）。
+- **プライベート / オフライン** — 推論はオンデバイスで実行され、初回のモデルダウンロード後はネットワークなしでも動作します。
+- **1つのAPIで5プラットフォーム** — iOS、Android、macOS、Linux、Windows。
+- **複数バックエンドを1つのAPIで** — ONNX Runtime、llama.cpp（GGUF）、whisper.cpp、Candle、CoreML。
+- **マルチモデルパイプライン** — ASR → LLM → TTS を1回の呼び出しで連鎖。
+- **ツール呼び出し** — ローカルモデルが自分で定義した関数を呼び出せます。すべてのSDKで利用可能。
+- **アプリを再リリースせずにモデルを差し替え** — モデルは実行時にレジストリから解決され、デバイス上にキャッシュされます。
+- **クラウドフォールバック** — 実行ごとにオプトイン（[ドキュメント](https://docs.xybrid.dev/en/docs/concepts/hybrid-execution)）。
+- **制御できるテレメトリ** — APIキーによるオプトイン（[ドキュメント](docs/telemetry/registry.md)）。
+- **ハードウェアアクセラレーション** — Apple では Metal と Apple Neural Engine、Linux ではオプトインの Vulkan。Android と Windows は現時点では CPU（[ドキュメント](docs/INSTALLATION.md#platform-features)）。
 
 ### 比較
 

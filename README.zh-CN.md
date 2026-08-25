@@ -28,11 +28,11 @@
 <p align="center">
 
 [![Build][build-shield]][build-url]
-[![Release][release-shield]][release-url]
 [![License][license-shield]][license-url]
 [![OpenSSF Scorecard][scorecard-shield]][scorecard-url]
 [![OpenSSF Best Practices][bestpractices-shield]][bestpractices-url]
 <br>
+[![Release][release-shield]][release-url]
 [![crates.io][crates-shield]][crates-url]
 [![pub.dev][pubdev-shield]][pubdev-url]
 [![Maven Central][maven-shield]][maven-url]
@@ -92,41 +92,24 @@
 
 
 
-## 从这里开始
-
-| 目标 | 路径 |
-|------|------|
-| 最快上手（2 分钟） | [安装 CLI →](#快速开始) |
-| 开发移动端或桌面应用 | [Flutter SDK →](bindings/flutter/) |
-| 为游戏添加 AI NPC | [Unity SDK →](bindings/unity/)，体验 [3D 酒馆示例](https://github.com/xybrid-ai/xybrid-unity-tavern) |
-| Android 原生开发 | [Kotlin SDK →](bindings/kotlin/) |
-| Rust / 嵌入式 | [核心 crate →](crates/) |
----
-
-<p align="center">
-  <img src="docs/game-demo.gif" alt="游戏演示" width="540">
-</p>
-
-## SDK
-
-Xybrid 是一个 **Rust 驱动的运行时**，为所有主流平台提供原生绑定：
-
-| SDK | 平台 | 安装 | 状态 | 示例 |
-|-----|------|------|------|------|
-| **[Flutter](bindings/flutter/)** | iOS, Android, macOS, Linux, Windows | [pub.dev](https://pub.dev/packages/xybrid_flutter) | 可用 | [README](examples/flutter/README.md) |
-| **[Unity](bindings/unity/)** | macOS, Windows, Linux, iOS, Android | [见下方](#快速开始) | 可用 | [Unity 3D AI 酒馆](https://github.com/xybrid-ai/xybrid-unity-tavern) |
-| **[Swift](bindings/apple/)** | iOS, macOS | Swift Package Manager | 即将推出 | [README](examples/ios/README.md) |
-| **[Kotlin](bindings/kotlin/)** | Android | Maven Central | 可用 | [README](examples/android/README.md) |
-| **[CLI](https://github.com/xybrid-ai/xybrid/releases)** | macOS, Linux, Windows | `curl -sSL .../install.sh \| sh` | 可用 | — |
-| **[Rust](crates/)** | 全平台 | [crates.io](https://crates.io/crates/xybrid) | 可用 | — |
-
-所有 SDK 封装同一个 Rust 核心——跨平台行为和模型支持完全一致。
-
----
-
 ## 快速开始
 
-选择你喜欢的语言，安装并运行模型。每个语言下都包含安装片段和最小示例。
+选择你喜欢的语言，安装并运行模型。
+
+<p align="center">
+  <a href="https://docs.xybrid.dev/zh/docs/sdks/flutter"><img src="https://img.shields.io/badge/Flutter-02569B?style=for-the-badge&logo=flutter&logoColor=white" alt="Flutter SDK"></a>
+  <a href="https://docs.xybrid.dev/zh/docs/sdks/ios"><img src="https://img.shields.io/badge/Swift-F05138?style=for-the-badge&logo=swift&logoColor=white" alt="Swift SDK"></a>
+  <a href="https://docs.xybrid.dev/zh/docs/sdks/kotlin"><img src="https://img.shields.io/badge/Kotlin-7F52FF?style=for-the-badge&logo=kotlin&logoColor=white" alt="Kotlin SDK"></a>
+  <a href="https://docs.xybrid.dev/zh/docs/sdks/unity"><img src="https://img.shields.io/badge/Unity-000000?style=for-the-badge&logo=unity&logoColor=white" alt="Unity SDK"></a>
+  <br>
+  <a href="https://crates.io/crates/xybrid"><img src="https://img.shields.io/badge/Rust-000000?style=for-the-badge&logo=rust&logoColor=white" alt="Rust crate"></a>
+  <a href="bindings/python/"><img src="https://img.shields.io/badge/Python-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python SDK"></a>
+  <a href="https://docs.xybrid.dev/zh/docs/sdks/web"><img src="https://img.shields.io/badge/Web_preview-F7DF1E?style=for-the-badge&logo=javascript&logoColor=black" alt="Web SDK preview"></a>
+  <a href="https://github.com/xybrid-ai/xybrid/releases"><img src="https://img.shields.io/badge/CLI-4EAA25?style=for-the-badge&logo=gnubash&logoColor=white" alt="CLI"></a>
+</p>
+
+每个徽章都链接到对应平台的配置说明。完整选项请参阅
+[安装指南](https://docs.xybrid.dev/zh/docs/quickstart)。
 
 ### CLI
 
@@ -203,11 +186,26 @@ let result = try await model.runAsync(envelope: Envelope.text("国破山河在�
 
 ### Unity
 
-**安装** 通过 [OpenUPM](https://openupm.com/packages/ai.xybrid.sdk/)（`openupm add ai.xybrid.sdk`），或直接从 git 子目录安装：
+<p align="center">
+  <img src="docs/game-demo.gif" alt="游戏演示" width="480">
+</p>
+
+**通过 OpenUPM 安装**（推荐）：
+
+```sh
+openupm add ai.xybrid.sdk
+```
+
+或将 `https://package.openupm.com` 添加为作用域 `ai.xybrid` 的 scoped registry。
+
+**手动安装** —— 将 git 子目录作为 UPM 包添加：
 
 ```sh
 https://github.com/xybrid-ai/xybrid.git?path=/bindings/unity
 ```
+
+原生库会在首次导入时自动下载。详情参见
+[Unity SDK 指南](https://docs.xybrid.dev/zh/docs/sdks/unity)。
 
 **运行模型：**
 
@@ -289,62 +287,51 @@ let result = pipeline.run(&Envelope::audio(audio_bytes))?;
 
 ## 支持的模型
 
-所有模型完全在设备端运行。无需云端，无需 API 密钥。使用 `xybrid models list` 查看完整的模型注册表。
-
-### 从这些模型开始
-
-| 模型 | 类型 | 参数量 | 推荐理由 |
-|------|------|--------|----------|
-| **SmolLM2 360M** | LLM | 360M | 最佳质量/体积比，适合任何设备 |
-| **Kokoro 82M** | TTS | 82M | 高质量语音合成，24 种声音，速度快 |
-| **Whisper Tiny** | ASR | 39M | 多语言转录，准确率高 |
+所有模型完全在设备端运行。无需云端，无需 API 密钥。完整目录请浏览
+**[xybrid.ai/models](https://www.xybrid.ai/models)**，或运行 `xybrid models list`。
 
 ### 语音转文本
 
-| 模型 | 参数量 | 格式 | 简介 |
-|------|--------|------|------|
-| Whisper Tiny（`whisper-tiny-ggml`） | 39M | GGML Q5_1 | 多语言转录，基于 whisper.cpp — 所有平台预设均已内置 |
-| Whisper Tiny（`whisper-tiny`） | 39M | SafeTensors | 相同权重，运行于 Candle — 需要启用 `candle` 特性重新构建 |
-| Wav2Vec2 Base | 95M | ONNX | 英语 ASR，CTC 解码 |
+| 模型 | 参数量 | 说明 |
+|------|--------|------|
+| [Whisper Tiny](https://www.xybrid.ai/models/whisper-tiny-ggml) | 39M | 基于 whisper.cpp 的多语言转写——已包含在所有平台预设中 |
+| [Wav2Vec2 Base](https://www.xybrid.ai/models/wav2vec2-base-960h) | 95M | 英语 ASR，使用 CTC 解码 |
 
 ### 文本转语音
 
-| 模型 | 参数量 | 格式 | 简介 |
-|------|--------|------|------|
-| Kokoro 82M | 82M | ONNX | 高质量，24 种自然声音 |
-| KittenTTS Nano | 15M | ONNX | 超轻量级，8 种声音 |
+| 模型 | 参数量 | 说明 |
+|------|--------|------|
+| [Kokoro 82M](https://www.xybrid.ai/models/kokoro-82m) | 82M | 高质量，24 种自然音色 |
+| [KittenTTS Nano](https://www.xybrid.ai/models/kitten-tts-nano-0.8) | 15M | 超轻量，8 种音色 |
+| [NeuTTS Nano](https://www.xybrid.ai/models/neutts-nano-q4) | 120M | 编解码器 TTS，支持声音克隆 |
 
-### 语言模型
+### LLM
 
-| 模型 | 参数量 | 格式 | 简介 |
-|------|--------|------|------|
-| Gemma 3 1B | 1B | GGUF Q4_K_M | Google 为移动端优化的模型 |
-| LFM2.5 230M | 230M | GGUF Q4_K_M | 最小的采用 Liquid AI 混合卷积+注意力架构的 LLM，适合边缘设备 |
-| LFM2.5 350M | 354M | GGUF Q4_K_M | Liquid AI 混合卷积+注意力架构，9 种语言，工具调用 |
-| Llama 3.2 1B | 1B | GGUF Q4_K_M | Meta 的通用模型，128K 上下文 |
-| Qwen 2.5 0.5B | 500M | GGUF Q4_K_M | 紧凑的本地聊天模型 |
-| Qwen 3.5 0.8B | 800M | GGUF Q4_K_M | 最新 Qwen，支持推理（思考模式） |
-| Qwen 3.5 2B | 2B | GGUF Q4_K_M | 更大的 Qwen 3.5，扩展推理能力 |
-| SmolLM2 360M | 360M | GGUF Q4_K_M | 最佳的微型模型，优秀的质量/体积比 |
+| 模型 | 参数量 | 说明 |
+|------|--------|------|
+| [LFM2.5 230M](https://www.xybrid.ai/models/lfm2.5-230m) | 230M | Liquid AI 最小的混合 conv+attention 模型——9 种语言，支持工具调用 |
+| [LFM2.5 350M](https://www.xybrid.ai/models/lfm2.5-350m) | 354M | 同架构，容量更大——9 种语言，支持工具调用 |
+| [LFM2.5 1.2B Instruct](https://www.xybrid.ai/models/lfm2.5-1.2b-instruct) | 1.2B | 面向 Agent 任务与数据抽取 |
+| [LFM2.5 1.2B Thinking](https://www.xybrid.ai/models/lfm2.5-1.2b-thinking) | 1.2B | 推理模型——通过 `reasoningContent` 输出思维链（[指南](https://docs.xybrid.dev/zh/docs/guides/reasoning)） |
+| [SmolLM2 360M](https://www.xybrid.ai/models/smollm2-360m) | 360M | 最佳超小型 LLM，质量与体积比出色 |
+| [FunctionGemma 270M](https://www.xybrid.ai/models/functiongemma-270m-it) | 270M | 专为函数调用打造 |
+| [Gemma 3 1B](https://www.xybrid.ai/models/gemma-3-1b) | 1B | Google 面向移动端优化的 LLM，32K 上下文 |
+| [Gemma 4 E2B](https://www.xybrid.ai/models/gemma-4-e2b) | 5.1B | Google 紧凑型多模态 LLM，有效参数 2.3B |
+| [Gemma 4 E4B](https://www.xybrid.ai/models/gemma-4-e4b) | 8B | Google 中端多模态 LLM，有效参数 4.5B |
+| [Llama 3.2 1B](https://www.xybrid.ai/models/llama-3.2-1b) | 1B | Meta 通用模型，128K 上下文 |
+| [Qwen 3.5 0.8B](https://www.xybrid.ai/models/qwen3.5-0.8b) | 800M | 支持推理（thinking 模式），201 种语言 |
+| [Qwen 3.5 2B](https://www.xybrid.ai/models/qwen3.5-2b) | 2B | 更大的 Qwen 3.5，推理能力更强 |
+| [Bonsai 27B](https://www.xybrid.ai/models/bonsai-27b) | 27B | PrismML 的 1-bit 多模态 LLM（文本 + 视觉），混合注意力 |
 
 ### 视觉语言模型（VLM）
 
-| 模型 | 参数量 | 格式 | 简介 |
-|------|--------|------|------|
-| LFM2-VL 450M | 450M | GGUF Q4_0 + mmproj | Liquid AI 的紧凑型 VLM（SigLIP2 视觉）— 图像+文本输入，通过 llama.cpp mtmd 运行 |
+| 模型 | 参数量 | 说明 |
+|------|--------|------|
+| [LFM2-VL 450M](https://www.xybrid.ai/models/lfm2-vl-450m) | 450M | Liquid AI 紧凑型 VLM（SigLIP2 视觉编码器） |
+| [LFM2.5-VL 3B](https://www.xybrid.ai/models/lfm2.5-vl-3b) | 3B | 更大的 Liquid VLM，用于本地推理 |
 
-### 即将推出
-
-| 模型 | 类型 | 参数量 | 优先级 | 状态 |
-|------|------|--------|--------|------|
-| Phi-4 Mini | LLM | 3.8B | P2 | 规格就绪（首个多量化：Q4, Q8, FP16） |
-| Qwen3 0.6B | LLM | 600M | P2 | 计划中 |
-| Trinity Nano | LLM (MoE) | 6B（1B 活跃） | P2 | 计划中 |
-| LFM2-VL 700M | Vision+LLM | 700M | P2 | 计划中 |
-| Nomic Embed Text v1.5 | 嵌入 | 137M | P1 | 受阻（需要 Tokenize/MeanPool 步骤） |
-| Whisper Tiny CoreML | ASR | 39M | P2 | 计划中 |
-| Qwen3-TTS 0.6B | TTS | 600M | P2 | 受阻（需要自定义 SafeTensors 运行时） |
-| Chatterbox Turbo | TTS | 350M | P3 | 受阻（需要 ModelGraph 模板） |
+**工具调用：** 参见
+[工具调用指南](https://docs.xybrid.dev/zh/docs/guides/tool-calling)。
 
 <details>
 <summary><h3>自定义模型（实验性）</h3></summary>
@@ -391,8 +378,9 @@ Skills 与 agent 无关，位于 [`agents/skills/`](agents/skills/)。安装脚�
 |------|-----|---------|-------|-------|---------|
 | 语音转文本 | ✅ | ✅ | ✅ | ✅ | ✅ |
 | 文本转语音 | ✅ | ✅ | ✅ | ✅ | ✅ |
-| 语言模型 | ✅ | ✅ | ✅ | ✅ | ✅ |
+| LLM | ✅ | ✅ | ✅ | ✅ | ✅ |
 | 视觉模型 | ✅ | ✅ | ✅ | ✅ | ✅ |
+| 工具调用 | ✅ | ✅ | ✅ | ✅ | ✅ |
 | 嵌入模型 | 🔜 | 🔜 | 🔜 | 🔜 | 🔜 |
 | 多模型流水线（MMP） | ✅ | ✅ | ✅ | ✅ | ✅ |
 | 模型下载与缓存 | ✅ | ✅ | ✅ | ✅ | ✅ |
@@ -400,15 +388,22 @@ Skills 与 agent 无关，位于 [`agents/skills/`](agents/skills/)。安装脚�
 
 **SDK MMP 支持：** Flutter ✅ · Rust ✅ · Kotlin 🔜 · Swift 🔜 · Unity 🔜
 
+**工具调用：** 本地模型调用你定义的函数——工具就是普通数据，循环由你的代码掌控。
+参见[工具调用指南](https://docs.xybrid.dev/zh/docs/guides/tool-calling)。
+
 ---
 
 ## 为什么选择 Xybrid？
 
-- **隐私优先** — 所有推理在设备端运行。你的数据永远不会离开你的设备。
-- **离线可用** — 初次模型下载后无需互联网。
-- **跨平台** — iOS、Android、macOS、Linux 和 Windows 使用统一的 API。
-- **多模型流水线（MMP）** — 在单次调用中链接多个模型（ASR → LLM → TTS）。
-- **硬件加速** — Apple 平台支持 Apple Neural Engine 与 Metal；Linux 的 llama.cpp 构建可选启用 Vulkan。Android 与 Windows 目前使用 CPU，预编译的 Linux 二进制也仅为 CPU（Vulkan 需在构建时启用 — 参见[安装说明](docs/INSTALLATION.md#platform-features)）。
+- **私密 / 离线** — 推理在设备端运行，首次下载模型后即使无网络也能继续使用。
+- **一套 API，五个平台** — iOS、Android、macOS、Linux、Windows。
+- **多后端，统一 API** — ONNX Runtime、llama.cpp（GGUF）、whisper.cpp、Candle 与 CoreML。
+- **多模型流水线** — 在单次调用中串联 ASR → LLM → TTS。
+- **工具调用** — 本地模型调用你定义的函数，所有 SDK 均支持。
+- **无需发版即可更换模型** — 模型在运行时从注册表解析并缓存在设备上。
+- **云端回退** — 按次调用选择启用（[文档](https://docs.xybrid.dev/zh/docs/concepts/hybrid-execution)）。
+- **可控的遥测** — 需通过 API 密钥主动启用（[文档](docs/telemetry/registry.md)）。
+- **硬件加速** — Apple 平台支持 Metal 与 Apple Neural Engine，Linux 可选启用 Vulkan；Android 与 Windows 目前为 CPU（[文档](docs/INSTALLATION.md#platform-features)）。
 
 ### 与其他方案对比
 

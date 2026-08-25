@@ -28,11 +28,11 @@
 <p align="center">
 
 [![Build][build-shield]][build-url]
-[![Release][release-shield]][release-url]
 [![License][license-shield]][license-url]
 [![OpenSSF Scorecard][scorecard-shield]][scorecard-url]
 [![OpenSSF Best Practices][bestpractices-shield]][bestpractices-url]
 <br>
+[![Release][release-shield]][release-url]
 [![crates.io][crates-shield]][crates-url]
 [![pub.dev][pubdev-shield]][pubdev-url]
 [![Maven Central][maven-shield]][maven-url]
@@ -90,51 +90,24 @@
   <img src="docs/demo-android.gif" alt="Android demo" width="150">
 </p>
 
-
-
-## Start Here
-
-| Goal | Path |
-|------|------|
-| Fastest demo (2 min) | [Install CLI →](#quick-start) |
-| Build a mobile or desktop app | [Flutter SDK →](bindings/flutter/) |
-| Try the browser preview | [Web SDK →](bindings/web/) |
-| Add AI NPCs to your game | [Unity SDK →](bindings/unity/) and try the [3D tavern demo](https://github.com/xybrid-ai/xybrid-unity-tavern) |
-| Android native | [Kotlin SDK →](bindings/kotlin/) |
-| Rust / embedded | [Core crate →](crates/) |
----
-
-<p align="center">
-  <img src="docs/game-demo.gif" alt="Game demo" width="540">
-</p>
-
-## SDKs
-
-Native SDKs are powered by the Rust runtime and expose its native model
-capabilities. The Browser/Web preview is a separate browser-native LiteRT.js
-adapter that consumes `model_metadata.json` and currently supports only LiteRT
-raw typed-tensor I/O.
-
-| SDK | Platforms | Install | Status | Sample |
-|-----|-----------|---------|--------|--------|
-| **[Flutter](bindings/flutter/)** | iOS, Android, macOS, Linux, Windows | [pub.dev](https://pub.dev/packages/xybrid_flutter) | Available | [README](examples/flutter/README.md) |
-| **[Unity](bindings/unity/)** | macOS, Windows, Linux, iOS, Android | [See below](#quick-start) | Available | [Unity 3D AI tavern](https://github.com/xybrid-ai/xybrid-unity-tavern) |
-| **[Swift](bindings/apple/)** | iOS, macOS | Swift Package Manager | Coming Soon | [README](examples/ios/README.md) |
-| **[Kotlin](bindings/kotlin/)** | Android | Maven Central | Available | [README](examples/android/README.md) |
-| **[Browser/Web preview](bindings/web/)** | Modern browsers | `@xybrid/web` | Preview | [In-browser a+b demo](bindings/web/example/) |
-| **[CLI](https://github.com/xybrid-ai/xybrid/releases)** | macOS, Linux, Windows | `curl -sSL .../install.sh \| sh` | Available | — |
-| **[Rust](crates/)** | All | [crates.io](https://crates.io/crates/xybrid) | Available | — |
-
-The native SDKs share the Rust core; the Browser/Web preview does not and has the
-limited LiteRT tensor surface described above.
-
----
-
 ## Quick Start
 
-Install and run a model in your language of choice. Each section includes the install snippet and a minimal example.
+Install and run a model in your language of choice.
 
-See the full [Installation Guide](https://docs.xybrid.dev/en/docs/quickstart) for all options.
+<p align="center">
+  <a href="https://docs.xybrid.dev/en/docs/sdks/flutter"><img src="https://img.shields.io/badge/Flutter-02569B?style=for-the-badge&logo=flutter&logoColor=white" alt="Flutter SDK"></a>
+  <a href="https://docs.xybrid.dev/en/docs/sdks/ios"><img src="https://img.shields.io/badge/Swift-F05138?style=for-the-badge&logo=swift&logoColor=white" alt="Swift SDK"></a>
+  <a href="https://docs.xybrid.dev/en/docs/sdks/kotlin"><img src="https://img.shields.io/badge/Kotlin-7F52FF?style=for-the-badge&logo=kotlin&logoColor=white" alt="Kotlin SDK"></a>
+  <a href="https://docs.xybrid.dev/en/docs/sdks/unity"><img src="https://img.shields.io/badge/Unity-000000?style=for-the-badge&logo=unity&logoColor=white" alt="Unity SDK"></a>
+  <br>
+  <a href="https://crates.io/crates/xybrid"><img src="https://img.shields.io/badge/Rust-000000?style=for-the-badge&logo=rust&logoColor=white" alt="Rust crate"></a>
+  <a href="bindings/python/"><img src="https://img.shields.io/badge/Python-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python SDK"></a>
+  <a href="https://docs.xybrid.dev/en/docs/sdks/web"><img src="https://img.shields.io/badge/Web_preview-F7DF1E?style=for-the-badge&logo=javascript&logoColor=black" alt="Web SDK preview"></a>
+  <a href="https://github.com/xybrid-ai/xybrid/releases"><img src="https://img.shields.io/badge/CLI-4EAA25?style=for-the-badge&logo=gnubash&logoColor=white" alt="CLI"></a>
+</p>
+
+Each badge links to its platform setup. See the full
+[Installation Guide](https://docs.xybrid.dev/en/docs/quickstart) for all options.
 
 ### Flutter
 
@@ -191,16 +164,26 @@ let result = try await model.runAsync(envelope: Envelope.text("Hello world"))
 
 ### Unity
 
-**Install** via [OpenUPM](https://openupm.com/packages/ai.xybrid.sdk/) —
-`openupm add ai.xybrid.sdk`, or add the `https://package.openupm.com` scoped
-registry for scope `ai.xybrid` — or straight from the git subfolder:
+<p align="center">
+  <img src="docs/game-demo.gif" alt="Game demo" width="480">
+</p>
+
+**Install via OpenUPM** (recommended):
+
+```sh
+openupm add ai.xybrid.sdk
+```
+
+Or add `https://package.openupm.com` as a scoped registry for scope `ai.xybrid`.
+
+**Install manually** — add the git subfolder as a UPM package:
 
 ```sh
 https://github.com/xybrid-ai/xybrid.git?path=/bindings/unity
 ```
 
 Native libraries download automatically on import. See the
-[Unity SDK README](bindings/unity/README.md) for details.
+[Unity SDK guide](https://docs.xybrid.dev/en/docs/sdks/unity) for details.
 
 **Run a model:**
 
@@ -246,8 +229,6 @@ irm https://raw.githubusercontent.com/xybrid-ai/xybrid/master/install.ps1 | iex
 ```sh
 xybrid run --model kokoro-82m --input-text "Hello world" -o output.wav
 ```
-
-For platform-specific setup, see each SDK's README: [Flutter](bindings/flutter/) · [Unity](bindings/unity/) · [Swift](bindings/apple/) · [Kotlin](bindings/kotlin/) · [Rust](crates/).
 
 <details>
 <summary><h3>Multi-Model Inference Pipelines — MMP (Experimental)</h3></summary>
@@ -302,63 +283,52 @@ let result = pipeline.run(&Envelope::audio(audio_bytes))?;
 
 ## Supported Models
 
-All models run entirely on-device. No cloud, no API keys required. Browse the full registry with `xybrid models list`.
-
-### Start with these
-
-| Model | Type | Params | Why start here |
-|-------|------|--------|----------------|
-| **SmolLM2 360M** | LLM | 360M | Best quality-to-size ratio for any device |
-| **Kokoro 82M** | TTS | 82M | High-quality speech, 24 voices, fast |
-| **Whisper Tiny** | ASR | 39M | Accurate multilingual transcription |
+All models run entirely on-device. No cloud, no API keys required. Browse the
+full catalogue at **[xybrid.ai/models](https://www.xybrid.ai/models)**, or run
+`xybrid models list`.
 
 ### Speech-to-Text
 
-| Model | Params | Format | Description |
-|-------|--------|--------|-------------|
-| Whisper Tiny (`whisper-tiny-ggml`) | 39M | GGML Q5_1 | Multilingual transcription on whisper.cpp — in every platform preset |
-| Whisper Tiny (`whisper-tiny`) | 39M | SafeTensors | Same weights on the Candle runtime — needs a build with the `candle` feature |
-| Wav2Vec2 Base | 95M | ONNX | English ASR with CTC decoding |
+| Model | Params | Description |
+|-------|--------|-------------|
+| [Whisper Tiny](https://www.xybrid.ai/models/whisper-tiny-ggml) | 39M | Multilingual transcription on whisper.cpp — in every platform preset |
+| [Wav2Vec2 Base](https://www.xybrid.ai/models/wav2vec2-base-960h) | 95M | English ASR with CTC decoding |
 
 ### Text-to-Speech
 
-| Model | Params | Format | Description |
-|-------|--------|--------|-------------|
-| Kokoro 82M | 82M | ONNX | High-quality, 24 natural voices |
-| KittenTTS Nano | 15M | ONNX | Ultra-lightweight, 8 voices |
+| Model | Params | Description |
+|-------|--------|-------------|
+| [Kokoro 82M](https://www.xybrid.ai/models/kokoro-82m) | 82M | High-quality, 24 natural voices |
+| [KittenTTS Nano](https://www.xybrid.ai/models/kitten-tts-nano-0.8) | 15M | Ultra-lightweight, 8 voices |
+| [NeuTTS Nano](https://www.xybrid.ai/models/neutts-nano-q4) | 120M | Codec TTS with voice cloning |
 
-### Language Models
+### LLM
 
-| Model | Params | Format | Description |
-|-------|--------|--------|-------------|
-| Gemma 3 1B | 1B | GGUF Q4_K_M | Google's mobile-optimized LLM |
-| LFM2.5 230M | 230M | GGUF Q4_K_M | Liquid AI's smallest hybrid conv+attention LLM for edge devices |
-| LFM2.5 350M | 354M | GGUF Q4_K_M | Liquid AI's hybrid conv+attention, 9 languages, tool calling |
-| LFM2.5 1.2B Thinking | 1.2B | GGUF Q4_K_M | Liquid AI reasoning model — chain-of-thought via `reasoningContent` ([guide](https://docs.xybrid.dev/en/docs/guides/reasoning)) |
-| Llama 3.2 1B | 1B | GGUF Q4_K_M | Meta's general purpose, 128K context |
-| Qwen 2.5 0.5B | 500M | GGUF Q4_K_M | Compact on-device chat |
-| Qwen 3.5 0.8B | 800M | GGUF Q4_K_M | Latest Qwen with reasoning (thinking mode) |
-| Qwen 3.5 2B | 2B | GGUF Q4_K_M | Larger Qwen 3.5 with extended reasoning |
-| SmolLM2 360M | 360M | GGUF Q4_K_M | Best tiny LLM, excellent quality/size ratio |
+| Model | Params | Description |
+|-------|--------|-------------|
+| [LFM2.5 230M](https://www.xybrid.ai/models/lfm2.5-230m) | 230M | Liquid AI's smallest hybrid conv+attention LLM — 9 languages, tool calling |
+| [LFM2.5 350M](https://www.xybrid.ai/models/lfm2.5-350m) | 354M | Same architecture, more headroom — 9 languages, tool calling |
+| [LFM2.5 1.2B Instruct](https://www.xybrid.ai/models/lfm2.5-1.2b-instruct) | 1.2B | Agentic tasks and data extraction |
+| [LFM2.5 1.2B Thinking](https://www.xybrid.ai/models/lfm2.5-1.2b-thinking) | 1.2B | Reasoning model — chain-of-thought via `reasoningContent` ([guide](https://docs.xybrid.dev/en/docs/guides/reasoning)) |
+| [SmolLM2 360M](https://www.xybrid.ai/models/smollm2-360m) | 360M | Best tiny LLM, excellent quality/size ratio |
+| [FunctionGemma 270M](https://www.xybrid.ai/models/functiongemma-270m-it) | 270M | Purpose-built for function calling |
+| [Gemma 3 1B](https://www.xybrid.ai/models/gemma-3-1b) | 1B | Google's mobile-optimized LLM, 32K context |
+| [Gemma 4 E2B](https://www.xybrid.ai/models/gemma-4-e2b) | 5.1B | Google's compact multimodal LLM, 2.3B effective params |
+| [Gemma 4 E4B](https://www.xybrid.ai/models/gemma-4-e4b) | 8B | Google's mid-range multimodal LLM, 4.5B effective params |
+| [Llama 3.2 1B](https://www.xybrid.ai/models/llama-3.2-1b) | 1B | Meta's general purpose, 128K context |
+| [Qwen 3.5 0.8B](https://www.xybrid.ai/models/qwen3.5-0.8b) | 800M | Reasoning (thinking mode), 201 languages |
+| [Qwen 3.5 2B](https://www.xybrid.ai/models/qwen3.5-2b) | 2B | Larger Qwen 3.5 with extended reasoning |
+| [Bonsai 27B](https://www.xybrid.ai/models/bonsai-27b) | 27B | PrismML's 1-bit multimodal LLM (text + vision), hybrid attention |
 
 ### Vision-Language
 
-| Model | Params | Format | Description |
-|-------|--------|--------|-------------|
-| LFM2-VL 450M | 450M | GGUF Q4_0 + mmproj | Liquid AI's compact VLM (SigLIP2 vision) — image + text in, runs via llama.cpp mtmd |
+| Model | Params | Description |
+|-------|--------|-------------|
+| [LFM2-VL 450M](https://www.xybrid.ai/models/lfm2-vl-450m) | 450M | Liquid AI's compact VLM (SigLIP2 vision) |
+| [LFM2.5-VL 3B](https://www.xybrid.ai/models/lfm2.5-vl-3b) | 3B | Larger Liquid VLM for local inference |
 
-### Coming Soon
-
-| Model | Type | Params | Priority | Status |
-|-------|------|--------|----------|--------|
-| Phi-4 Mini | LLM | 3.8B | P2 | Spec Ready (first multi-quant: Q4, Q8, FP16) |
-| Qwen3 0.6B | LLM | 600M | P2 | Planned |
-| Trinity Nano | LLM (MoE) | 6B (1B active) | P2 | Planned |
-| LFM2-VL 700M | Vision+LLM | 700M | P2 | Planned |
-| Nomic Embed Text v1.5 | Embeddings | 137M | P1 | Blocked (needs Tokenize/MeanPool steps) |
-| Whisper Tiny CoreML | ASR | 39M | P2 | Planned |
-| Qwen3-TTS 0.6B | TTS | 600M | P2 | Blocked (needs custom SafeTensors runtime) |
-| Chatterbox Turbo | TTS | 350M | P3 | Blocked (needs ModelGraph template) |
+**Tool calling:** see the
+[Tool Calling guide](https://docs.xybrid.dev/en/docs/guides/tool-calling).
 
 <details>
 <summary><h3>Bring Your Own Model (Experimental)</h3></summary>
@@ -405,9 +375,9 @@ See the [model metadata docs](docs/sdk/API_REFERENCE.md) for the full schema, or
 |------------|-----|---------|-------|-------|---------|
 | Speech-to-Text | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Text-to-Speech | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Language Models | ✅ | ✅ | ✅ | ✅ | ✅ |
+| LLM | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Vision Models | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Tool Calling | 🔜 | 🔜 | ✅ | ✅ | ✅ |
+| Tool Calling | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Embeddings | 🔜 | 🔜 | 🔜 | 🔜 | 🔜 |
 | Multi-Model Pipelines (MMP) | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Model Download & Caching | ✅ | ✅ | ✅ | ✅ | ✅ |
@@ -415,22 +385,30 @@ See the [model metadata docs](docs/sdk/API_REFERENCE.md) for the full schema, or
 
 **SDK MMP support:** Flutter ✅ · Rust ✅ · Kotlin 🔜 · Swift 🔜 · Unity 🔜
 
-**Tool calling:** local models call functions you define — your tools are
-plain data (`Tool::function(...)`) and the loop is your code, so any tooling
-plugs in. On-device via llama.cpp (LFM2, gemma-4, and FunctionGemma protocols);
-Rust SDK and CLI today (`xybrid repl` ships built-in `web_search` + your own via
-`--tools-file`), Swift/Kotlin/Flutter bindings next. See the
+**Tool calling:** local models call functions you define — your tools are plain
+data and the loop is your code. See the
 [Tool Calling guide](https://docs.xybrid.dev/en/docs/guides/tool-calling).
 
 ---
 
 ## Why Xybrid?
 
-- **Privacy first** — All inference runs on-device. Your data never leaves the device. The SDK attaches a small fleet-attribution header on registry metadata calls — see [registry telemetry](docs/telemetry/registry.md).
-- **Offline capable** — No internet required after initial model download.
-- **Cross-platform** — One API across iOS, Android, macOS, Linux, and Windows.
-- **Multi-model pipelines (MMP)** — Chain models together (ASR → LLM → TTS) in a single call.
-- **Hardware acceleration** — Apple Neural Engine and Metal on Apple platforms; opt-in Vulkan for Linux llama.cpp builds. Android and Windows run on CPU today, and prebuilt Linux binaries are CPU-only (Vulkan is a build-time opt-in — see [installation](docs/INSTALLATION.md#platform-features)).
+- **Private / offline** — inference runs on-device and keeps working with no
+  network after the first model download.
+- **One API, five platforms** — iOS, Android, macOS, Linux, Windows.
+- **Many backends, one API** — ONNX Runtime, llama.cpp (GGUF), whisper.cpp,
+  Candle and CoreML.
+- **Multi-model pipelines** — chain ASR → LLM → TTS in one call.
+- **Tool calling** — local models call functions you define, on every SDK.
+- **Swap models without shipping an app** — models resolve from the registry at
+  runtime and cache on device.
+- **Cloud fallback** — opt in per run
+  ([docs](https://docs.xybrid.dev/en/docs/concepts/hybrid-execution)).
+- **Telemetry you control** — opt-in behind an API key
+  ([docs](docs/telemetry/registry.md)).
+- **Hardware acceleration** — Metal and the Apple Neural Engine on Apple, opt-in
+  Vulkan on Linux; Android and Windows are CPU today
+  ([docs](docs/INSTALLATION.md#platform-features)).
 
 ### How it compares
 
