@@ -1,0 +1,19 @@
+docs/content/docs/guides/tool-calling.zh.mdx
+  s_08904def5f9a48::t_a734023995f2df 131-188
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "3dd910d845c9b9c80a5e7864ae973ea3cd1322ca",
+  "prompts": {},
+  "sessions": {
+    "s_08904def5f9a48": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "dfb79340-d3ed-4701-8aa2-99ea102c9443",
+        "model": "claude-opus-5"
+      },
+      "human_author": "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
+    }
+  }
+}
