@@ -1,0 +1,21 @@
+bindings/flutter/lib/src/rust/frb_generated.dart
+  s_37833f24f6cf58::t_5e6c7aa4fc3bb9 83,2333,2382
+bindings/flutter/rust/src/frb_generated.rs
+  s_37833f24f6cf58::t_7783cc0e8c938a 47
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "e636d2e8e0a945e26725ba90361d3b402c06113f",
+  "prompts": {},
+  "sessions": {
+    "s_37833f24f6cf58": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "bdb9b554-ada8-4989-892b-f443209aa81d",
+        "model": "claude-opus-5"
+      },
+      "human_author": "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
+    }
+  }
+}
