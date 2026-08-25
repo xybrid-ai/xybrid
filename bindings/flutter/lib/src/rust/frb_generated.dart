@@ -80,7 +80,7 @@ class XybridRustLib extends BaseEntrypoint<XybridRustLibApi,
   String get codegenVersion => '2.11.1';
 
   @override
-  int get rustContentHash => 1158323446;
+  int get rustContentHash => -1010643771;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -2330,7 +2330,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
       callFfi: () {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_String(cacheDir, serializer);
-        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 70)!;
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 68)!;
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -2379,7 +2379,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
     return handler.executeSync(SyncTask(
       callFfi: () {
         final serializer = SseSerializer(generalizedFrbRustBinding);
-        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 68)!;
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 70)!;
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_bool,
