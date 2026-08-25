@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.6.0
+
+Structured output, reasoning text, and tool-capability reporting reach the Dart
+surface, and the package finally ships a runnable example app.
+
+* Added: `GenerationConfig.grammar` and `jsonSchemaToGbnf` — constrain
+  generation to a JSON Schema, with the greedy and creative presets taking an
+  optional grammar so the usual extraction shape is a single call. Both had
+  reached the generated layer and stopped at the hand-written wrapper
+  (xybrid-ai/xybrid#511)
+* Added: `XybridResult.reasoningContent`, what a thinking model emits separately
+  from its answer (xybrid-ai/xybrid#511)
+* Added: `XybridModel.supportsToolCalling`, the bundle's tool-calling metadata
+  flag as an advisory tri-state — `null` means the bundle says nothing
+  (xybrid-ai/xybrid#515)
+* Added: a runnable single-screen example app in `example/`, replacing the
+  `example.md` snippet file. The snippets themselves remain in the package
+  README (xybrid-ai/xybrid#525, xybrid-ai/xybrid#152)
+* Fixed: `flutter build macos` failed with 1287 duplicate `ggml_*` symbols — one
+  Rust staticlib carried two copies of ggml (xybrid-ai/xybrid#528)
+* Changed: the Dart unit tests under `test/` run in CI for the first time, so
+  wrapper-level regressions are caught before release (xybrid-ai/xybrid#511)
+
 ## 0.5.0
 
 Live streaming speech recognition, now on the whisper.cpp backend, plus the

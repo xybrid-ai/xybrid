@@ -202,6 +202,73 @@ Contract:
   template still fails loudly at run time). A bundle that declares
   `tool_calling: false` stays off.
 
+## From the Mobile and Desktop SDKs
+
+Tool calling crosses the FFI boundary as of 0.6.0, so Swift, Kotlin, Python,
+Unity C# and Dart drive the same loop. It stays **turn-based**: one `run` is one model
+turn, your code executes the tools, and a continuation envelope feeds the
+outcomes back. There is no cross-boundary callback.
+
+Three pieces make up the loop:
+
+1. Put your tool schemas on `GenerationConfig.tools`.
+2. Read `XybridResult.toolCalls` — each carries `id`, `name` and
+   `argumentsJson`.
+3. Build the continuation with `XybridEnvelope.toolResults(...)` and run it
+   **with the same tools as the original turn**, so the executor rebuilds an
+   identical chat prefix.
+
+```swift
+let tools = [XybridToolDefinition(
+    name: "get_weather",
+    description: "Current weather for a city",
+    parametersJson: #"{"type":"object","properties":{"city":{"type":"string"}}}"#
+)]
+let config = XybridGenerationConfig.greedy(tools: tools)
+
+let options = XybridRunOptions(
+    generationConfig: config,
+    abortOn: [],
+    fallbackToCloud: false,
+    maxGraceTokens: 0,
+    correlationId: nil
+)
+let first = try model.run(envelope: .text("Weather in Paris?"), options: options)
+
+if !first.toolCalls.isEmpty {
+    let results = first.toolCalls.map { call in
+        XybridToolResult(callId: call.id, name: call.name, contentJson: execute(call))
+    }
+    let continuation = try XybridEnvelope.toolResults(
+        "Weather in Paris?",
+        priorAssistantText: first.text ?? "",  // raw output, tool-call block included
+        results: results
+    )
+    // same options — the continuation must carry the same tools
+    let answer = try model.run(envelope: continuation, options: options)
+}
+```
+
+Kotlin mirrors it with `XybridEnvelope.toolResults(userText, priorAssistantText,
+results)`. Python uses `tool_results_envelope(...)` and snake_case fields. Dart
+uses the named-argument factory `XybridEnvelope.toolResults(userText:,
+priorAssistantText:, results:)` with `GenerationConfig.greedy(tools: ...)` and
+`result.hasToolCalls`.
+
+`priorAssistantText` must be the turn's raw `text` verbatim — tool-call block
+included. Stripping it breaks the prefix the model continues from.
+
+Gate your tool UI on the bundle's advisory flag rather than assuming:
+
+```swift
+if model.supportsToolCalling() == true { showToolsToggle() }
+```
+
+`nil` means the bundle says nothing and never implies support. Enforcement
+still happens at run time: tool calling is llama.cpp-only, and unsupported
+paths — no embedded chat template, the mistralrs backend, the cloud fallback
+leg — reject tool-bearing requests rather than quietly generating without them.
+
 ## Declaring Support in Your Own Bundles
 
 Add the flag to `model_metadata.json` for models whose chat template renders

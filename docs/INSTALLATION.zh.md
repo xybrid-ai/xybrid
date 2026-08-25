@@ -80,6 +80,50 @@ cargo install --git https://github.com/xybrid-ai/xybrid xybrid-cli --features pl
 
 </details>
 
+### 预编译的 llama.cpp（无需 CMake，省去 20 分钟构建）
+
+启用 `llm-llamacpp` 通常意味着用 CMake 从源码编译 llama.cpp——这是冷构建中最
+昂贵的一步，大约需要二十分钟。
+
+其实不必如此。`xybrid-llama-sys` 的构建脚本会在 crate 内置的清单中查找你的目标
+三元组与 feature 组合，通过 HTTPS 下载对应的预编译静态库，校验其 SHA-256，然后
+直接链接：
+
+```
+$ cargo build --release -p xybrid-cli --features platform-desktop
+warning: llama.cpp: downloading prebuilt natives for aarch64-apple-darwin (vision) ...
+warning: llama.cpp: linked prebuilt natives for aarch64-apple-darwin (vision); skipped the cmake build
+```
+
+无需安装、无需配置。切片按内容摘要缓存在 `$CARGO_HOME/xybrid-natives/`，供本机
+所有项目共用。若环境中未设置 `CARGO_HOME`，缓存会退回到构建目录——那是按项目
+隔离的，且无法在 `cargo clean` 后保留。rustup 的 `cargo` 包装器会自动导出该变量，
+因此这一情况主要出现在通过发行版软件包、Homebrew 或 Nix 安装的 cargo 上。
+
+任何一步未命中都会退回源码构建，所以这条路径只会让构建更快，绝不会让构建失败。
+以下情况会跳过下载：你的目标平台没有已发布的切片；本地源码与发布时不一致（改动
+过 `wrapper.cpp` 或提升了 llama.cpp 的 pin）；以及 CRT 或 glibc 不匹配。
+
+有两种情况看起来像是快速路径失效，其实是设计使然：
+
+- **Linux 的 glibc 下限。** 已发布的 Linux 切片会记录构建机器的 glibc 版本；低于
+  该版本的主机会主动放弃该切片，而不是撞上无法解析的符号版本链接错误。因此比
+  发布方更旧的发行版会走源码构建。
+- **交叉编译。** glibc 检查读取的是*构建主机*，无法感知外部 sysroot。若你交叉
+  编译到 `*-unknown-linux-gnu`（例如使用 `cargo-zigbuild`）且目标 glibc 比切片
+  构建时更旧，请设置 `XYBRID_NATIVES_FORCE_SOURCE=1`。
+
+控制变量：
+
+| 变量 | 作用 |
+|---|---|
+| `XYBRID_NATIVES_FORCE_SOURCE=1` | 从不下载，始终用 CMake 构建 |
+| `CARGO_NET_OFFLINE=true` | 同上。必须作为环境变量导出——cargo 不会把 `--offline` 或 `net.offline` 传递给构建脚本 |
+| `XYBRID_NATIVES_CACHE_DIR` | 下载的切片解压到何处 |
+| `XYBRID_NATIVES_PREBUILT_DIR` | 链接你自行准备的切片，路径为 `<dir>/<target>/{lib,include}` |
+| `XYBRID_NATIVES_PKG` | 从其他 OCI 仓库拉取 |
+| `XYBRID_NATIVES_TOKEN` | Bearer token，用于私有镜像 |
+
 ### 从本地克隆构建
 
 ```bash
