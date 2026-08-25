@@ -15,8 +15,11 @@
 //!    stale local `main` ref can never win over the remote — and file
 //!    selection runs against the authoritative repo manifest. Each selected
 //!    file already present in the shared snapshot at that exact commit is
-//!    then materialized from it (symlinked on unix, copied elsewhere);
-//!    only the missing files are downloaded.
+//!    then materialized from it (symlinked on unix, copied elsewhere). A
+//!    file with no snapshot at that commit can still be reused
+//!    content-addressed from the repo's `blobs/` store when its hash matches
+//!    the Hub's manifest (e.g. the commit moved but the file didn't); only
+//!    files the shared cache truly lacks are downloaded.
 //! 2. **Full-SHA fast path.** A request pinned to a full 40-hex commit SHA is
 //!    immutable, so a complete shared snapshot of that commit loads with zero
 //!    network I/O.
@@ -137,6 +140,65 @@ pub(crate) fn find_shared_snapshot(repo: &str, revision: Option<&str>) -> Option
 #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
 pub(crate) fn find_shared_snapshot(_repo: &str, _revision: Option<&str>) -> Option<SharedSnapshot> {
     None
+}
+
+/// Whether the shared cache holds a `blobs/` store for `repo` at all — a
+/// cheap local pre-check before the caller pays a network request for the
+/// repo's file hashes.
+#[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
+pub(crate) fn shared_repo_has_blobs(repo: &str) -> bool {
+    let Some(root) = shared_cache_root() else {
+        return false;
+    };
+    if !is_safe_repo_id(repo) {
+        return false;
+    }
+    root.join(repo_folder_name(repo)).join("blobs").is_dir()
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+pub(crate) fn shared_repo_has_blobs(_repo: &str) -> bool {
+    false
+}
+
+/// Locate one content-addressed blob in the shared cache's per-repo
+/// `blobs/` store.
+///
+/// The hub cache names blobs by content hash — the LFS sha256 for large
+/// files, the git blob sha1 for small ones — so a hit means the shared cache
+/// already holds these exact bytes even when no snapshot of the wanted
+/// commit exists (e.g. the commit moved but this file didn't). Both inputs
+/// are validated before being joined into a path.
+#[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
+pub(crate) fn shared_repo_blob_path(repo: &str, oid: &str) -> Option<PathBuf> {
+    let root = shared_cache_root()?;
+    shared_repo_blob_path_with_root(&root, repo, oid)
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+pub(crate) fn shared_repo_blob_path(_repo: &str, _oid: &str) -> Option<PathBuf> {
+    None
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
+fn shared_repo_blob_path_with_root(root: &Path, repo: &str, oid: &str) -> Option<PathBuf> {
+    if !is_safe_repo_id(repo) || !is_hex_oid(oid) {
+        return None;
+    }
+    let path = root.join(repo_folder_name(repo)).join("blobs").join(oid);
+    path.is_file().then_some(path)
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
+fn repo_folder_name(repo: &str) -> String {
+    hf_hub::Repo::new(repo.to_string(), hf_hub::RepoType::Model).folder_name()
+}
+
+/// A git blob sha1 (40 hex) or an LFS sha256 (64 hex) — the two shapes the
+/// hub cache uses for blob filenames.
+#[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
+fn is_hex_oid(value: &str) -> bool {
+    (value.len() == 40 || value.len() == 64) && value.bytes().all(|b| b.is_ascii_hexdigit())
 }
 
 /// Probe a specific hub root directly (used by tests to avoid process env).
@@ -1044,6 +1106,30 @@ mod tests {
         );
 
         assert!(find_with_root(tmp.path(), None).is_none());
+    }
+
+    #[test]
+    fn shared_repo_blob_path_validates_inputs_and_finds_blobs() {
+        let tmp = TempDir::new().unwrap();
+        let folder = repo_folder(REPO);
+        let sha256 = "7e6f72643caafc9a68256686638c4d7916f2cec76d1df478d4c3ddcd95a6aed4";
+        let sha1 = "0123456789abcdef0123456789abcdef01234567";
+        write_file(tmp.path(), &format!("{folder}/blobs/{sha256}"), "payload");
+        write_file(tmp.path(), &format!("{folder}/blobs/{sha1}"), "small");
+
+        // Both hash shapes resolve when the blob exists.
+        assert!(shared_repo_blob_path_with_root(tmp.path(), REPO, sha256).is_some());
+        assert!(shared_repo_blob_path_with_root(tmp.path(), REPO, sha1).is_some());
+        // A missing blob is a miss, not an error.
+        assert!(shared_repo_blob_path_with_root(tmp.path(), REPO, &"a".repeat(64)).is_none());
+        // Invalid hashes and repo ids must never become probe paths.
+        for oid in ["", "xyz", "..", "../../etc/passwd", &"a".repeat(63)] {
+            assert!(
+                shared_repo_blob_path_with_root(tmp.path(), REPO, oid).is_none(),
+                "oid {oid:?} must be rejected"
+            );
+        }
+        assert!(shared_repo_blob_path_with_root(tmp.path(), "a/../b", sha256).is_none());
     }
 
     #[test]

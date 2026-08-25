@@ -1053,6 +1053,114 @@ fn huggingface_materialized_cache_dir(
     }
 }
 
+/// Fetch `filename -> blob hash` for every file of `repo` at `revision_sha`
+/// from the Hub's tree API — the LFS sha256 for large files, the git blob
+/// sha1 for the rest, matching how the shared hub cache names its blobs.
+///
+/// Best-effort: any failure returns `None` (with a debug log) and the caller
+/// downloads instead.
+#[cfg(feature = "huggingface")]
+fn fetch_huggingface_blob_ids(
+    repo: &str,
+    revision_sha: &str,
+) -> Option<std::collections::HashMap<String, String>> {
+    use std::io::Read;
+
+    let endpoint = std::env::var("HF_ENDPOINT")
+        .ok()
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "https://huggingface.co".to_string());
+    let url = format!(
+        "{}/api/models/{}/tree/{}?recursive=true",
+        endpoint.trim_end_matches('/'),
+        repo,
+        revision_sha
+    );
+    let mut request = ureq::get(&url);
+    if let Some(token) = huggingface_api_token() {
+        request = request.set("Authorization", &format!("Bearer {token}"));
+    }
+    let response = match request.call() {
+        Ok(response) => response,
+        Err(e) => {
+            log::debug!(
+                target: "xybrid_sdk",
+                "Failed to fetch file hashes for '{}'@{} ({}); skipping blob reuse",
+                repo, revision_sha, e
+            );
+            return None;
+        }
+    };
+    // Cap the read: a tree listing is small, and a huge response should not
+    // buffer unbounded.
+    let entries: Vec<serde_json::Value> =
+        match serde_json::from_reader(response.into_reader().take(8 * 1024 * 1024)) {
+            Ok(entries) => entries,
+            Err(e) => {
+                log::debug!(
+                    target: "xybrid_sdk",
+                    "Unparseable tree listing for '{}'@{} ({}); skipping blob reuse",
+                    repo, revision_sha, e
+                );
+                return None;
+            }
+        };
+    Some(blob_ids_from_tree_entries(&entries))
+}
+
+/// Extract `path -> blob hash` from Hub tree-API entries, preferring the LFS
+/// sha256 over the git blob sha1 (the shared cache names LFS blobs by
+/// sha256). Non-file entries are skipped.
+#[cfg(feature = "huggingface")]
+fn blob_ids_from_tree_entries(
+    entries: &[serde_json::Value],
+) -> std::collections::HashMap<String, String> {
+    entries
+        .iter()
+        .filter(|entry| entry.get("type").and_then(|t| t.as_str()) == Some("file"))
+        .filter_map(|entry| {
+            let path = entry.get("path").and_then(|p| p.as_str())?;
+            let oid = entry
+                .get("lfs")
+                .and_then(|lfs| lfs.get("oid"))
+                .and_then(|oid| oid.as_str())
+                .or_else(|| entry.get("oid").and_then(|oid| oid.as_str()))?;
+            Some((path.to_string(), oid.to_string()))
+        })
+        .collect()
+}
+
+/// Resolve the Hub API token the way `hf auth login` stores it: `HF_TOKEN`,
+/// then the token file at `HF_TOKEN_PATH`, then
+/// `{HF_HOME:-~/.cache/huggingface}/token`.
+#[cfg(feature = "huggingface")]
+fn huggingface_api_token() -> Option<String> {
+    if let Ok(token) = std::env::var("HF_TOKEN") {
+        if !token.is_empty() {
+            return Some(token);
+        }
+    }
+    let token_path = std::env::var("HF_TOKEN_PATH")
+        .ok()
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| {
+            std::env::var("HF_HOME")
+                .ok()
+                .filter(|value| !value.is_empty())
+                .map(PathBuf::from)
+                .or_else(|| dirs::home_dir().map(|home| home.join(".cache").join("huggingface")))
+                .map(|hf_home| hf_home.join("token"))
+        })?;
+    let token = std::fs::read_to_string(token_path).ok()?;
+    let token = token.trim();
+    if token.is_empty() {
+        None
+    } else {
+        Some(token.to_string())
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ModelLoader {
     source: ModelSource,
@@ -2298,6 +2406,9 @@ impl ModelLoader {
 
         let total_files = files_to_download.len();
         let mut reused_files = 0usize;
+        // Lazily fetched `filename -> blob hash` map for content-addressed
+        // reuse; outer None = not fetched yet, inner None = fetch failed.
+        let mut remote_blob_ids: Option<Option<std::collections::HashMap<String, String>>> = None;
         for (i, filename) in files_to_download.iter().enumerate() {
             // Report approximate progress
             _progress_callback((i as f32) / (total_files as f32));
@@ -2328,6 +2439,37 @@ impl ModelLoader {
                             log::debug!(
                                 target: "xybrid_sdk",
                                 "Failed to reuse '{}' from shared Hugging Face cache ({}); downloading instead",
+                                filename, e
+                            );
+                        }
+                    }
+                }
+            }
+
+            // Content-addressed fallback: even without a snapshot at this
+            // commit, the shared cache may hold these exact bytes under
+            // `blobs/<hash>` — e.g. the commit moved but this file didn't.
+            // Expected hashes come from the Hub's tree API, fetched at most
+            // once per load and only when the repo has a local blob store;
+            // any failure here just downloads.
+            if remote_blob_ids.is_none() && crate::cache::hf_shared::shared_repo_has_blobs(repo) {
+                remote_blob_ids = Some(fetch_huggingface_blob_ids(repo, &repo_info.sha));
+            }
+            if let Some(Some(blob_ids)) = &remote_blob_ids {
+                if let Some(source_path) = blob_ids
+                    .get(*filename)
+                    .and_then(|oid| crate::cache::hf_shared::shared_repo_blob_path(repo, oid))
+                {
+                    match crate::cache::hf_shared::link_or_copy(&source_path, &target_path) {
+                        Ok(()) => {
+                            log::debug!(target: "xybrid_sdk", "Reusing [{}/{}] from shared Hugging Face blob store: {}", i + 1, total_files, filename);
+                            reused_files += 1;
+                            continue;
+                        }
+                        Err(e) => {
+                            log::debug!(
+                                target: "xybrid_sdk",
+                                "Failed to reuse '{}' from shared Hugging Face blob store ({}); downloading instead",
                                 filename, e
                             );
                         }
@@ -4632,6 +4774,38 @@ impl Clone for XybridModel {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(feature = "huggingface")]
+    #[test]
+    fn blob_ids_prefer_lfs_sha256_and_skip_non_files() {
+        let entries: Vec<serde_json::Value> = serde_json::from_str(
+            r#"[
+                {"type":"file","path":"model.gguf","oid":"1111111111111111111111111111111111111111",
+                 "lfs":{"oid":"7e6f72643caafc9a68256686638c4d7916f2cec76d1df478d4c3ddcd95a6aed4"}},
+                {"type":"file","path":"config.json","oid":"2222222222222222222222222222222222222222"},
+                {"type":"directory","path":"onnx","oid":"3333333333333333333333333333333333333333"},
+                {"type":"file","path":"broken"}
+            ]"#,
+        )
+        .unwrap();
+
+        let ids = blob_ids_from_tree_entries(&entries);
+        assert_eq!(
+            ids.get("model.gguf").map(String::as_str),
+            Some("7e6f72643caafc9a68256686638c4d7916f2cec76d1df478d4c3ddcd95a6aed4"),
+            "LFS files map to their sha256, not the git oid"
+        );
+        assert_eq!(
+            ids.get("config.json").map(String::as_str),
+            Some("2222222222222222222222222222222222222222"),
+            "non-LFS files map to their git blob sha1"
+        );
+        assert!(!ids.contains_key("onnx"), "directories are skipped");
+        assert!(
+            !ids.contains_key("broken"),
+            "entries without a hash are skipped"
+        );
+    }
 
     #[test]
     fn distinct_huggingface_commits_do_not_share_materialized_cache() {
