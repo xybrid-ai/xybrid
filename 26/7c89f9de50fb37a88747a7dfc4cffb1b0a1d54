@@ -1,0 +1,37 @@
+.github/workflows/bazel.yml
+  s_570d7ab18f5032::t_83e8488d28c772 49-50,80-82,85
+.github/workflows/build-natives.yml
+  s_570d7ab18f5032::t_fe8f0ce9071092 33-34
+.github/workflows/ci-docs.yml
+  s_570d7ab18f5032::t_48f285fb19473b 19,27
+.github/workflows/ci.yml
+  s_570d7ab18f5032::t_2bcee607310afe 9,17
+.github/workflows/test-candle.yml
+  s_570d7ab18f5032::t_a5d995ff490d1d 28-29,49-50
+.github/workflows/test-whispercpp.yml
+  s_570d7ab18f5032::t_236f4df45af9dd 23-24,41-42
+.github/workflows/unity-editor.yml
+  s_570d7ab18f5032::t_3e95728a27c462 32-33,46-47
+README.ja-JP.md
+  s_570d7ab18f5032::t_47d2bcd5a759b4 118,395,403-410
+README.md
+  s_570d7ab18f5032::t_c70bfe3b1307cf 122,410,419-423
+README.zh-CN.md
+  s_570d7ab18f5032::t_1ec386a309f5a0 118,396,404-410
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "267c89f9de50fb37a88747a7dfc4cffb1b0a1d54",
+  "prompts": {},
+  "sessions": {
+    "s_570d7ab18f5032": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c82da43a-5146-4f39-91b8-559de56586f7",
+        "model": "claude-opus-5"
+      },
+      "human_author": "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
+    }
+  }
+}
