@@ -2078,8 +2078,9 @@ impl ModelLoader {
         // Mutable revisions (branches/tags, or none) must resolve through the
         // Hub API first so a stale local ref never wins over the remote —
         // their shared-cache reuse happens per-file in the download loop
-        // below. On iOS/Android `find_shared_snapshot` always returns `None`,
-        // keeping mobile behavior unchanged.
+        // below. Outside the desktop allowlist (macOS/Linux/Windows)
+        // `find_shared_snapshot` always returns `None`, keeping mobile and
+        // other non-desktop behavior unchanged.
         if revision.is_some_and(crate::cache::hf_shared::is_full_commit_sha) {
             if let Some(result) = self.try_load_from_shared_snapshot(
                 &cache_layout,

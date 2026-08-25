@@ -2,9 +2,10 @@
 //!
 //! The Hugging Face ecosystem (`huggingface-cli download`, the `transformers`
 //! and `diffusers` libraries, ...) keeps downloaded models in a shared hub
-//! cache at `~/.cache/huggingface/hub` (overridable via `HF_HOME` or
-//! `HUGGINGFACE_HUB_CACHE`). When xybrid is asked to load a model the user
-//! already downloaded with those tools, re-downloading wastes bandwidth.
+//! cache at `~/.cache/huggingface/hub` by default, overridable through the
+//! same env vars those tools honor (see [`shared_cache_root`]). When xybrid
+//! is asked to load a model the user already downloaded with those tools,
+//! re-downloading wastes bandwidth.
 //!
 //! This module probes that shared cache read-only and
 //! [`crate::model::ModelLoader::load_from_huggingface`] uses it three ways:
@@ -23,8 +24,10 @@
 //!    cached refs resolve the revision instead — with a warning, since a
 //!    mutable ref may be stale.
 //!
-//! The probe is desktop-only: on iOS/Android [`find_shared_snapshot`] always
-//! returns `None`, keeping mobile behavior unchanged.
+//! The probe is desktop-only (macOS/Linux/Windows allowlist): on every other
+//! target — iOS, Android, and anything else non-desktop —
+//! [`find_shared_snapshot`] is a stub returning `None`, keeping their
+//! behavior unchanged.
 
 use std::path::{Path, PathBuf};
 
@@ -45,7 +48,7 @@ pub(crate) struct SharedSnapshot {
 /// Returns `None` when no home directory can be determined; callers then
 /// silently skip the probe. Unlike `hf_hub::Cache::from_env()` /
 /// `hf_hub::Cache::default()` this never panics on a missing home directory.
-#[cfg(not(any(target_os = "ios", target_os = "android")))]
+#[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
 pub(crate) fn shared_cache_root() -> Option<PathBuf> {
     resolve_shared_cache_root(
         std::env::var("HF_HUB_CACHE").ok(),
@@ -60,7 +63,7 @@ pub(crate) fn shared_cache_root() -> Option<PathBuf> {
 /// without touching process env vars). Empty values fall through to the next
 /// candidate; a leading `~`/`~/` is expanded against the home directory (a
 /// tilde value with no known home also falls through).
-#[cfg(not(any(target_os = "ios", target_os = "android")))]
+#[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
 fn resolve_shared_cache_root(
     hub_cache: Option<String>,
     legacy_hub_cache: Option<String>,
@@ -85,7 +88,7 @@ fn resolve_shared_cache_root(
 
 /// Turn an env-var value into a usable path: `None` for unset/empty (or a
 /// tilde value when no home directory is known), tilde-expanded otherwise.
-#[cfg(not(any(target_os = "ios", target_os = "android")))]
+#[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
 fn env_path(value: Option<String>, home: Option<&Path>) -> Option<PathBuf> {
     let value = value?;
     if value.is_empty() {
@@ -115,7 +118,7 @@ fn env_path(value: Option<String>, home: Option<&Path>) -> Option<PathBuf> {
 /// cache, the revision cannot be resolved, or the snapshot holds no model
 /// payload — the caller then falls through to the normal download path
 /// unchanged.
-#[cfg(not(any(target_os = "ios", target_os = "android")))]
+#[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
 pub(crate) fn find_shared_snapshot(repo: &str, revision: Option<&str>) -> Option<SharedSnapshot> {
     let Some(root) = shared_cache_root() else {
         log::debug!(
@@ -128,14 +131,16 @@ pub(crate) fn find_shared_snapshot(repo: &str, revision: Option<&str>) -> Option
     find_shared_snapshot_with_root(&root, repo, revision)
 }
 
-/// Mobile: the shared-cache probe is a desktop feature, so never hit it.
-#[cfg(any(target_os = "ios", target_os = "android"))]
+/// Non-desktop targets (iOS, Android, and anything else outside the
+/// macOS/Linux/Windows allowlist): the shared-cache probe is a desktop
+/// feature, so never hit it.
+#[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
 pub(crate) fn find_shared_snapshot(_repo: &str, _revision: Option<&str>) -> Option<SharedSnapshot> {
     None
 }
 
 /// Probe a specific hub root directly (used by tests to avoid process env).
-#[cfg(not(any(target_os = "ios", target_os = "android")))]
+#[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
 fn find_shared_snapshot_with_root(
     root: &Path,
     repo: &str,
@@ -189,7 +194,7 @@ fn find_shared_snapshot_with_root(
 /// and the revision is a full 40-hex commit SHA, use it directly (a SHA may
 /// not have a ref entry of its own). Without a requested revision: try
 /// `main`, then `master`.
-#[cfg(not(any(target_os = "ios", target_os = "android")))]
+#[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
 fn resolve_commit(
     root: &Path,
     folder_name: &str,
@@ -227,7 +232,7 @@ fn resolve_commit(
 /// exactly a 40-hex commit SHA: the result is later joined under
 /// `snapshots/`, so a ref file holding an arbitrary path must never redirect
 /// the snapshot lookup outside the cache.
-#[cfg(not(any(target_os = "ios", target_os = "android")))]
+#[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
 fn read_ref(root: &Path, folder_name: &str, revision: &str) -> Option<String> {
     use std::io::Read;
 
@@ -261,7 +266,7 @@ fn read_ref(root: &Path, folder_name: &str, revision: &str) -> Option<String> {
 
 /// A revision usable as a relative `refs/` path: no traversal, no absolute
 /// paths, no backslashes. Nested names (`pr/123`) are allowed.
-#[cfg(not(any(target_os = "ios", target_os = "android")))]
+#[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
 fn is_safe_ref_name(revision: &str) -> bool {
     use std::path::Component;
     !revision.is_empty()
@@ -273,7 +278,7 @@ fn is_safe_ref_name(revision: &str) -> bool {
 
 /// A Hugging Face repo id: `owner/name` segments over [A-Za-z0-9._-], no
 /// empty/dot/dot-dot segments.
-#[cfg(not(any(target_os = "ios", target_os = "android")))]
+#[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
 fn is_safe_repo_id(repo: &str) -> bool {
     !repo.is_empty()
         && repo
@@ -291,7 +296,7 @@ pub(crate) fn is_full_commit_sha(value: &str) -> bool {
 /// Whether the snapshot contains at least one model weight file
 /// (`.gguf`/`.onnx`/`.safetensors`). A snapshot holding only metadata or
 /// config files has nothing worth reusing.
-#[cfg(not(any(target_os = "ios", target_os = "android")))]
+#[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
 fn snapshot_has_model_payload(snapshot_dir: &Path) -> bool {
     list_snapshot_files(snapshot_dir)
         .iter()
