@@ -327,6 +327,12 @@ pub(crate) fn materialize_from_shared(
         if target_path.exists() {
             continue;
         }
+        // A dangling symlink from an earlier materialization (its source cache
+        // was pruned) reports `!exists()` but still occupies the directory
+        // entry, so linking over it would fail; remove it first.
+        if target_path.symlink_metadata().is_ok() {
+            std::fs::remove_file(&target_path)?;
+        }
         if let Some(parent) = target_path.parent() {
             std::fs::create_dir_all(parent)?;
         }
@@ -341,6 +347,52 @@ pub(crate) fn materialize_from_shared(
         }
     }
     Ok(())
+}
+
+/// Detect (and best-effort remove) dangling symlinks under a materialized
+/// cache directory, returning how many were found.
+///
+/// On unix both materialization paths symlink instead of copying — the
+/// download path into xybrid's own hub cache, the shared-cache path into the
+/// user's Hugging Face hub cache. Pruning either source cache (e.g.
+/// `huggingface-cli delete-cache`) leaves those links dangling while the
+/// materialized directory still looks complete to the marker/metadata checks,
+/// so a load from it would fail hard. Callers run this before trusting a
+/// materialized directory: a non-zero return means the payload is gone and
+/// they must fall through to re-materialization instead of loading.
+///
+/// Removal is best-effort (failures are logged and still counted) so callers
+/// always learn the directory is unusable even when cleanup itself fails.
+/// Regular files and symlinks that still resolve are never touched.
+pub(crate) fn remove_dangling_files(dir: &Path) -> usize {
+    fn walk(dir: &Path, dangling: &mut usize) {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let Ok(file_type) = entry.file_type() else {
+                continue;
+            };
+            let path = entry.path();
+            if file_type.is_dir() {
+                walk(&path, dangling);
+            } else if file_type.is_symlink() && std::fs::metadata(&path).is_err() {
+                *dangling += 1;
+                if let Err(e) = std::fs::remove_file(&path) {
+                    log::debug!(
+                        target: "xybrid_sdk",
+                        "Failed to remove dangling symlink {}: {}",
+                        path.display(),
+                        e
+                    );
+                }
+            }
+        }
+    }
+
+    let mut dangling = 0;
+    walk(dir, &mut dangling);
+    dangling
 }
 
 #[cfg(test)]
@@ -644,5 +696,63 @@ mod tests {
             std::fs::read(target.join("sub/config.json")).unwrap(),
             b"custom"
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn materialize_from_shared_replaces_dangling_target() {
+        let tmp = TempDir::new().unwrap();
+        let snapshot = SharedSnapshot {
+            commit: COMMIT_MAIN.to_string(),
+            dir: tmp.path().join("snapshots").join(COMMIT_MAIN),
+        };
+        write_file(&snapshot.dir, "model.gguf", "payload");
+        let target = tmp.path().join("target");
+        // The target already holds a dangling symlink for the file (its
+        // previous source was pruned): materialization must replace it
+        // instead of failing with EEXIST.
+        std::fs::create_dir_all(&target).unwrap();
+        std::os::unix::fs::symlink(tmp.path().join("gone-blob"), target.join("model.gguf"))
+            .unwrap();
+
+        materialize_from_shared(&snapshot, &["model.gguf"], &target).unwrap();
+        assert_eq!(
+            std::fs::read(target.join("model.gguf")).unwrap(),
+            b"payload"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn remove_dangling_files_removes_only_dangling_entries() {
+        let tmp = TempDir::new().unwrap();
+        let dir = tmp.path().join("materialized");
+        write_file(&dir, "model_metadata.json", "{}");
+        write_file(tmp.path(), "blob", "payload");
+        std::os::unix::fs::symlink(tmp.path().join("blob"), dir.join("model.gguf")).unwrap();
+        std::fs::create_dir_all(dir.join("sub")).unwrap();
+        std::os::unix::fs::symlink(tmp.path().join("gone"), dir.join("sub/tokenizer.json"))
+            .unwrap();
+
+        assert_eq!(remove_dangling_files(&dir), 1);
+        // The dangling entry is gone; the real file and the live symlink stay.
+        assert!(dir.join("sub/tokenizer.json").symlink_metadata().is_err());
+        assert_eq!(std::fs::read(dir.join("model.gguf")).unwrap(), b"payload");
+        assert_eq!(
+            std::fs::read(dir.join("model_metadata.json")).unwrap(),
+            b"{}"
+        );
+        // A second pass finds nothing left to heal.
+        assert_eq!(remove_dangling_files(&dir), 0);
+    }
+
+    #[test]
+    fn remove_dangling_files_is_zero_for_regular_files_and_missing_dirs() {
+        let tmp = TempDir::new().unwrap();
+        let dir = tmp.path().join("materialized");
+        write_file(&dir, "model.gguf", "payload");
+
+        assert_eq!(remove_dangling_files(&dir), 0);
+        assert_eq!(remove_dangling_files(&tmp.path().join("absent")), 0);
     }
 }

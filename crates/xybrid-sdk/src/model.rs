@@ -1960,8 +1960,16 @@ impl ModelLoader {
         if revision.is_none() {
             let cache_dir = huggingface_materialized_cache_dir(&cache_layout, repo, None, variant);
             if cache_layout.is_huggingface_repo_materialized(repo, &cache_dir) {
-                log::info!(target: "xybrid_sdk", "Loading HuggingFace model from cache: {}", cache_dir.display());
-                return self.load_from_directory(&cache_dir);
+                let dangling = crate::cache::hf_shared::remove_dangling_files(&cache_dir);
+                if dangling == 0 {
+                    log::info!(target: "xybrid_sdk", "Loading HuggingFace model from cache: {}", cache_dir.display());
+                    return self.load_from_directory(&cache_dir);
+                }
+                log::info!(
+                    target: "xybrid_sdk",
+                    "Cached copy of '{}' had {} dangling symlink(s) (source cache pruned?); re-materializing",
+                    repo, dangling
+                );
             }
         }
 
@@ -2084,8 +2092,15 @@ impl ModelLoader {
                                     variant,
                                 )
                                 .unwrap_or(cache_dir);
-                            log::info!(target: "xybrid_sdk", "Loading offline HuggingFace revision from cache: {}", cache_dir.display());
-                            return self.load_from_directory(&cache_dir);
+                            if crate::cache::hf_shared::remove_dangling_files(&cache_dir) == 0 {
+                                log::info!(target: "xybrid_sdk", "Loading offline HuggingFace revision from cache: {}", cache_dir.display());
+                                return self.load_from_directory(&cache_dir);
+                            }
+                            log::warn!(
+                                target: "xybrid_sdk",
+                                "Offline cache for '{}'@{} has dangling symlinks (source cache pruned?) and cannot be re-downloaded without network",
+                                repo, requested_revision
+                            );
                         }
                     }
                     return Err(SdkError::network_src(
@@ -2107,17 +2122,24 @@ impl ModelLoader {
                 variant,
             );
             if cache_layout.is_huggingface_revision_materialized(repo, &repo_info.sha, variant) {
-                cache_layout.record_huggingface_revision(
-                    repo,
-                    requested_revision,
-                    &repo_info.sha,
-                    variant,
-                )?;
-                let cache_dir = cache_layout
+                let materialized_dir = cache_layout
                     .materialized_huggingface_revision_dir(repo, &repo_info.sha, variant)
-                    .unwrap_or(cache_dir);
-                log::info!(target: "xybrid_sdk", "Loading HuggingFace model from cache: {}", cache_dir.display());
-                return self.load_from_directory(&cache_dir);
+                    .unwrap_or_else(|| cache_dir.clone());
+                if crate::cache::hf_shared::remove_dangling_files(&materialized_dir) == 0 {
+                    cache_layout.record_huggingface_revision(
+                        repo,
+                        requested_revision,
+                        &repo_info.sha,
+                        variant,
+                    )?;
+                    log::info!(target: "xybrid_sdk", "Loading HuggingFace model from cache: {}", materialized_dir.display());
+                    return self.load_from_directory(&materialized_dir);
+                }
+                log::info!(
+                    target: "xybrid_sdk",
+                    "Cached revision of '{}' had dangling symlink(s) (source cache pruned?); re-downloading",
+                    repo
+                );
             }
             let resolved_repo =
                 Repo::with_revision(repo.to_string(), RepoType::Model, repo_info.sha.clone());
@@ -2215,6 +2237,13 @@ impl ModelLoader {
             // Skip if already exists in our cache
             if target_path.exists() {
                 continue;
+            }
+
+            // A dangling symlink from an earlier materialization reports
+            // `!exists()` but still occupies the directory entry, so linking
+            // over it would fail; remove it first.
+            if target_path.symlink_metadata().is_ok() {
+                std::fs::remove_file(&target_path)?;
             }
 
             // Create symlink to hf-hub's cached file (avoids duplication)
