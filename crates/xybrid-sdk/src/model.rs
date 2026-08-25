@@ -2899,7 +2899,7 @@ impl XybridModel {
     fn metadata_derived_nonblocking<T>(&self, derive: impl Fn(&ModelMetadata) -> T) -> Option<T> {
         self.speculative.as_ref()?;
         let handle = self.handle.try_read().ok()?;
-        handle.loaded.then(|| derive(&handle.metadata))
+        (handle.state == LoadState::Loaded).then(|| derive(&handle.metadata))
     }
 
     /// Check if this is an LLM model (uses GGUF execution template).
@@ -4869,10 +4869,18 @@ mod tests {
             !crate::model_registry::try_evict_handle(&busy.handle, "busy-model"),
             "eviction must not touch a model with a run in flight"
         );
-        assert_eq!(busy.load_state(), LoadState::Loaded);
 
         release_tx.send(()).expect("worker alive");
         worker.join().expect("worker finished cleanly");
+
+        // Only now is it safe to read the state: `load_state()` takes a
+        // *blocking* read lock, so asking while the worker still held the
+        // write lock would deadlock the test rather than fail it.
+        assert_eq!(
+            busy.load_state(),
+            LoadState::Loaded,
+            "the skipped eviction must have left the model untouched"
+        );
 
         assert!(
             crate::model_registry::try_evict_handle(&busy.handle, "busy-model"),
