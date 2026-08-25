@@ -318,6 +318,7 @@ full catalogue at **[xybrid.ai/models](https://www.xybrid.ai/models)**, or run
 | [Llama 3.2 1B](https://www.xybrid.ai/models/llama-3.2-1b) | 1B | Meta's general purpose, 128K context |
 | [Qwen 3.5 0.8B](https://www.xybrid.ai/models/qwen3.5-0.8b) | 800M | Reasoning (thinking mode), 201 languages |
 | [Qwen 3.5 2B](https://www.xybrid.ai/models/qwen3.5-2b) | 2B | Larger Qwen 3.5 with extended reasoning |
+| [Bonsai 27B](https://www.xybrid.ai/models/bonsai-27b) | 27B | PrismML's 1-bit multimodal LLM (text + vision), hybrid attention |
 
 ### Vision-Language
 
@@ -325,7 +326,6 @@ full catalogue at **[xybrid.ai/models](https://www.xybrid.ai/models)**, or run
 |-------|--------|-------------|
 | [LFM2-VL 450M](https://www.xybrid.ai/models/lfm2-vl-450m) | 450M | Liquid AI's compact VLM (SigLIP2 vision) |
 | [LFM2.5-VL 3B](https://www.xybrid.ai/models/lfm2.5-vl-3b) | 3B | Larger Liquid VLM for local inference |
-| [Bonsai 27B](https://www.xybrid.ai/models/bonsai-27b) | 27B | PrismML's 1-bit VLM for local reasoning |
 
 **Tool calling:** see the
 [Tool Calling guide](https://docs.xybrid.dev/en/docs/guides/tool-calling).
