@@ -20,12 +20,14 @@
 //!    content-addressed from the repo's `blobs/` store when its hash matches
 //!    the Hub's manifest (e.g. the commit moved but the file didn't); only
 //!    files the shared cache truly lacks are downloaded.
-//! 2. **Full-SHA fast path.** A request pinned to a full 40-hex commit SHA is
-//!    immutable, so a complete shared snapshot of that commit loads with zero
-//!    network I/O.
-//! 3. **Offline fallback.** When the Hub API is unreachable, the locally
-//!    cached refs resolve the revision instead — with a warning, since a
-//!    mutable ref may be stale.
+//! 2. **Explicit offline mode.** With `HF_HUB_OFFLINE` set, the locally
+//!    cached refs resolve the revision and the snapshot loads with zero
+//!    network I/O — with a warning, since neither freshness nor completeness
+//!    against the remote repo can be verified offline.
+//! 3. **Connectivity fallback.** When the Hub API fails with a transport
+//!    error or a server-side 5xx, the same local-refs path is tried; client
+//!    errors (bad repo, bad revision, bad auth) propagate instead of being
+//!    masked by a stale local copy.
 //!
 //! The probe is desktop-only (macOS/Linux/Windows allowlist): on every other
 //! target — iOS, Android, and anything else non-desktop —
@@ -60,6 +62,20 @@ pub(crate) fn shared_cache_root() -> Option<PathBuf> {
         std::env::var("XDG_CACHE_HOME").ok(),
         dirs::home_dir(),
     )
+    .and_then(absolutize)
+}
+
+/// Anchor a relative cache root (e.g. `HF_HUB_CACHE=./hf-cache`) to the
+/// working directory. Left relative, it would later become a relative
+/// symlink *target*, which the OS resolves against the link's own directory
+/// instead of the working directory — a silently dangling link.
+#[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
+fn absolutize(path: PathBuf) -> Option<PathBuf> {
+    if path.is_absolute() {
+        Some(path)
+    } else {
+        std::env::current_dir().ok().map(|cwd| cwd.join(path))
+    }
 }
 
 /// Pure resolution of the shared cache root from explicit inputs (testable
@@ -252,10 +268,11 @@ fn find_shared_snapshot_with_root(
 
 /// Resolve a commit hash from the shared cache's refs without network I/O.
 ///
-/// With a requested revision: read `refs/<revision>`; if that ref is absent
-/// and the revision is a full 40-hex commit SHA, use it directly (a SHA may
-/// not have a ref entry of its own). Without a requested revision: try
-/// `main`, then `master`.
+/// A revision that already is a full 40-hex commit SHA is returned as-is and
+/// never looked up through `refs/` — a planted `refs/<sha>` file must not be
+/// able to redirect an immutable request to a different commit. Other
+/// revisions read `refs/<revision>`; without a requested revision, `main`
+/// is tried, then `master`.
 #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
 fn resolve_commit(
     root: &Path,
@@ -264,15 +281,10 @@ fn resolve_commit(
     revision: Option<&str>,
 ) -> Option<String> {
     if let Some(requested) = revision {
-        let resolved = read_ref(root, folder_name, requested);
-        if resolved.is_none() && is_full_commit_sha(requested) {
-            log::debug!(
-                target: "xybrid_sdk",
-                "No shared Hugging Face ref for '{}'@{}; probing commit SHA directly",
-                repo, requested
-            );
+        if is_full_commit_sha(requested) {
             return Some(requested.to_string());
         }
+        let resolved = read_ref(root, folder_name, requested);
         if resolved.is_none() {
             log::debug!(
                 target: "xybrid_sdk",
@@ -338,20 +350,35 @@ fn is_safe_ref_name(revision: &str) -> bool {
             .all(|component| matches!(component, Component::Normal(_)))
 }
 
-/// A Hugging Face repo id: `owner/name` segments over [A-Za-z0-9._-], no
-/// empty/dot/dot-dot segments.
+/// Mirror Hugging Face's canonical repo-id validation: at most one `/`, at
+/// most 96 chars, segments over [A-Za-z0-9._-] that don't start or end with
+/// `.`/`-`, and no `--`, `..`, or `.git` suffix.
+///
+/// The `--` rule matters beyond hygiene: the hub cache encodes `/` as `--`
+/// in folder names, so an id containing `--` (e.g. `org--model`) would alias
+/// another repo's cache folder (`org/model`) and let a lookup under one name
+/// silently return the other repo's snapshot.
 #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
 fn is_safe_repo_id(repo: &str) -> bool {
-    !repo.is_empty()
-        && repo
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '/'))
-        && !repo
-            .split('/')
-            .any(|segment| segment.is_empty() || segment == "." || segment == "..")
+    if repo.is_empty() || repo.len() > 96 {
+        return false;
+    }
+    if repo.contains("--") || repo.contains("..") || repo.ends_with(".git") {
+        return false;
+    }
+    repo.split('/').count() <= 2
+        && repo.split('/').all(|segment| {
+            !segment.is_empty()
+                && segment
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+                && !segment.starts_with(['.', '-'])
+                && !segment.ends_with(['.', '-'])
+        })
 }
 
-pub(crate) fn is_full_commit_sha(value: &str) -> bool {
+#[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
+fn is_full_commit_sha(value: &str) -> bool {
     value.len() == 40 && value.bytes().all(|b| b.is_ascii_hexdigit())
 }
 
@@ -586,38 +613,6 @@ pub(crate) fn remove_dangling_files(dir: &Path) -> usize {
     unusable
 }
 
-/// Remove `model_metadata.json` from a materialized dir if (and only if) it
-/// was auto-generated (`"auto_generated": true`).
-///
-/// Called when healing found dangling links in a mutable (unpinned)
-/// materialized dir: the payload about to be re-materialized may come from a
-/// newer commit, and metadata generated against the old commit's files must
-/// not survive to describe the new ones. Hand-written metadata (no
-/// `auto_generated` flag) is preserved — replacing it is the user's call.
-pub(crate) fn remove_auto_generated_metadata(dir: &Path) {
-    let path = dir.join("model_metadata.json");
-    let auto_generated = std::fs::read_to_string(&path)
-        .ok()
-        .and_then(|contents| serde_json::from_str::<serde_json::Value>(&contents).ok())
-        .is_some_and(|value| value.get("auto_generated") == Some(&serde_json::Value::Bool(true)));
-    if auto_generated {
-        if let Err(e) = std::fs::remove_file(&path) {
-            log::debug!(
-                target: "xybrid_sdk",
-                "Failed to remove auto-generated metadata {}: {}",
-                path.display(),
-                e
-            );
-        } else {
-            log::debug!(
-                target: "xybrid_sdk",
-                "Removed stale auto-generated metadata {}; it will be regenerated",
-                path.display()
-            );
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -817,40 +812,22 @@ mod tests {
     }
 
     #[test]
-    fn colliding_repo_ids_resolve_snapshots_without_cross_reads() {
+    fn aliasing_repo_ids_cannot_read_another_repos_snapshot() {
         let tmp = TempDir::new().unwrap();
-        let first_repo = "a/b--c";
-        let second_repo = "a--b/c";
-        // The collision premise: both ids sanitize to the same hub folder.
-        assert_eq!(repo_folder(first_repo), repo_folder(second_repo));
-
-        // Two separate hub roots: neither repo may read the other's snapshot.
-        let root_a = tmp.path().join("hub-a");
-        let root_b = tmp.path().join("hub-b");
-        let folder = repo_folder(first_repo);
-        write_file(&root_a, &format!("{folder}/refs/main"), COMMIT_MAIN);
+        // The hub cache encodes '/' as "--" in folder names, so the invalid
+        // id "org--model" would resolve to the SAME folder as "org/model".
+        assert_eq!(repo_folder("org--model"), repo_folder(REPO));
         write_file(
-            &root_a,
-            &format!("{folder}/snapshots/{COMMIT_MAIN}/model.gguf"),
-            "payload",
+            tmp.path(),
+            &format!("{}/refs/main", repo_folder(REPO)),
+            COMMIT_MAIN,
         );
-        write_file(&root_b, &format!("{folder}/refs/main"), COMMIT_V1);
-        write_file(
-            &root_b,
-            &format!("{folder}/snapshots/{COMMIT_V1}/model.gguf"),
-            "payload",
-        );
+        build_snapshot(tmp.path(), COMMIT_MAIN);
 
-        let first = find_shared_snapshot_with_root(&root_a, first_repo, Some("main")).unwrap();
-        assert_eq!(first.commit, COMMIT_MAIN);
-        let second = find_shared_snapshot_with_root(&root_b, second_repo, Some("main")).unwrap();
-        assert_eq!(second.commit, COMMIT_V1);
-
-        // Within a single shared root both ids resolve the same hub folder —
-        // that is the shared cache's own layout, not ours to fix; the folder
-        // name must not be mangled per-repo.
-        let first_in_b = find_shared_snapshot_with_root(&root_b, first_repo, Some("main")).unwrap();
-        assert_eq!(first_in_b.commit, COMMIT_V1);
+        // The valid id reads its own snapshot; the aliasing id is rejected
+        // by validation and must never reach that folder.
+        assert!(find_shared_snapshot_with_root(tmp.path(), REPO, Some("main")).is_some());
+        assert!(find_shared_snapshot_with_root(tmp.path(), "org--model", Some("main")).is_none());
     }
 
     #[test]
@@ -978,12 +955,58 @@ mod tests {
     #[test]
     fn unsafe_repo_ids_are_not_probed() {
         let tmp = TempDir::new().unwrap();
-        for repo in ["../escape/x", "a/../b", "org\\model", "", "/abs/x", "a//b"] {
+        for repo in [
+            "../escape/x",
+            "a/../b",
+            "org\\model",
+            "",
+            "/abs/x",
+            "a//b",
+            "a/b/c",
+            "org--model",
+            "org/model.git",
+            "-org/model",
+            "org/model-",
+            ".org/model",
+            "org/model.",
+        ] {
             assert!(
                 find_shared_snapshot_with_root(tmp.path(), repo, None).is_none(),
                 "repo id {repo:?} must not be probed"
             );
         }
+        let oversized = format!("org/{}", "a".repeat(96));
+        assert!(find_shared_snapshot_with_root(tmp.path(), &oversized, None).is_none());
+    }
+
+    #[test]
+    fn full_commit_sha_ignores_planted_ref_files() {
+        let tmp = TempDir::new().unwrap();
+        let folder = repo_folder(REPO);
+        // A planted ref file named after commit A points at commit B.
+        write_file(
+            tmp.path(),
+            &format!("{folder}/refs/{COMMIT_MAIN}"),
+            COMMIT_V1,
+        );
+        build_snapshot(tmp.path(), COMMIT_MAIN);
+        build_snapshot(tmp.path(), COMMIT_V1);
+
+        // Requesting immutable commit A must resolve to A — never through
+        // refs, which could redirect it.
+        let snapshot = find_with_root(tmp.path(), Some(COMMIT_MAIN)).unwrap();
+        assert_eq!(snapshot.commit, COMMIT_MAIN);
+    }
+
+    #[test]
+    fn absolutize_anchors_relative_roots() {
+        assert_eq!(
+            absolutize(PathBuf::from("/abs/root")),
+            Some(PathBuf::from("/abs/root"))
+        );
+        let anchored = absolutize(PathBuf::from("rel/root")).unwrap();
+        assert!(anchored.is_absolute());
+        assert!(anchored.ends_with("rel/root"));
     }
 
     #[cfg(unix)]
@@ -1130,26 +1153,5 @@ mod tests {
             );
         }
         assert!(shared_repo_blob_path_with_root(tmp.path(), "a/../b", sha256).is_none());
-    }
-
-    #[test]
-    fn remove_auto_generated_metadata_spares_hand_written_files() {
-        let tmp = TempDir::new().unwrap();
-        let generated = tmp.path().join("generated");
-        write_file(
-            &generated,
-            "model_metadata.json",
-            r#"{"model_id":"m","auto_generated":true}"#,
-        );
-        remove_auto_generated_metadata(&generated);
-        assert!(!generated.join("model_metadata.json").exists());
-
-        let hand_written = tmp.path().join("hand-written");
-        write_file(&hand_written, "model_metadata.json", r#"{"model_id":"m"}"#);
-        remove_auto_generated_metadata(&hand_written);
-        assert!(hand_written.join("model_metadata.json").exists());
-
-        // Absent file: no panic, nothing created.
-        remove_auto_generated_metadata(&tmp.path().join("absent"));
     }
 }

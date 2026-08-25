@@ -360,6 +360,11 @@ jobs:
       - name: Run doc tests
         run: cargo test --workspace --features ort-download --doc
 
+      # The optional `huggingface` feature isn't covered by ort-download
+      # above; run its unit tests (shared HF cache reuse) explicitly.
+      - name: Run tests (huggingface cache integration)
+        run: cargo test -p xybrid-sdk --features huggingface --lib
+
   # (Retired) The cargo linux-CLI build lived here. The required Bazel check
   # ("Bazel graph + RBE targets", bazel.yml) now builds + smokes the linux CLI
   # on every Bazel-relevant PR, so this cargo build was redundant.

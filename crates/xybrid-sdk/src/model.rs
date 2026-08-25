@@ -1130,6 +1130,38 @@ fn blob_ids_from_tree_entries(
         .collect()
 }
 
+/// Whether a Hub API failure warrants falling back to local caches: a
+/// transport-level failure (DNS, connection refused, timeout) or a
+/// server-side 5xx. Client errors (401/403/404 — bad repo, bad revision, bad
+/// auth) and malformed responses propagate instead, so a stale local copy
+/// never masks them.
+#[cfg(feature = "huggingface")]
+fn hub_error_is_connectivity(error: &hf_hub::api::sync::ApiError) -> bool {
+    match error {
+        // hf-hub's transport layer is ureq 3 (named here as `ureq3`; the
+        // SDK's own calls use ureq 2).
+        hf_hub::api::sync::ApiError::RequestError(request_error) => match request_error.as_ref() {
+            ureq3::Error::Io(_)
+            | ureq3::Error::Timeout(_)
+            | ureq3::Error::HostNotFound
+            | ureq3::Error::ConnectionFailed => true,
+            ureq3::Error::StatusCode(code) => *code >= 500,
+            _ => false,
+        },
+        _ => false,
+    }
+}
+
+/// The standard `HF_HUB_OFFLINE` switch: any value other than
+/// empty/`0`/`false` forces local-only loads, matching the rest of the
+/// Hugging Face ecosystem.
+#[cfg(feature = "huggingface")]
+fn huggingface_offline_mode() -> bool {
+    std::env::var("HF_HUB_OFFLINE").is_ok_and(|value| {
+        !value.is_empty() && value != "0" && !value.eq_ignore_ascii_case("false")
+    })
+}
+
 /// Resolve the Hub API token the way `hf auth login` stores it: `HF_TOKEN`,
 /// then the token file at `HF_TOKEN_PATH`, then
 /// `{HF_HOME:-~/.cache/huggingface}/token`.
@@ -2054,11 +2086,14 @@ impl ModelLoader {
     /// `Some(result)` means a complete snapshot was found and the load was
     /// attempted from it.
     ///
-    /// Because the revision resolves through the shared cache's *local* refs,
-    /// callers must only use this where staleness is acceptable: a revision
-    /// pinned to an immutable commit SHA, or an offline fallback (with a
-    /// warning) when the Hub API is unreachable. The online path instead
-    /// resolves through the Hub API and reuses shared files per-file.
+    /// Because the revision resolves through the shared cache's *local* refs
+    /// and file selection runs over the snapshot's own (possibly partial)
+    /// listing, neither freshness nor completeness against the remote repo
+    /// can be verified here. Callers must only use this where that is
+    /// acceptable: explicit offline mode (`HF_HUB_OFFLINE`), or a
+    /// connectivity fallback (with a warning) when the Hub API is
+    /// unreachable. The online path instead resolves through the Hub API and
+    /// reuses shared files per-file against the authoritative manifest.
     #[cfg(feature = "huggingface")]
     fn try_load_from_shared_snapshot<F>(
         &self,
@@ -2167,29 +2202,33 @@ impl ModelLoader {
                     log::info!(target: "xybrid_sdk", "Loading HuggingFace model from cache: {}", cache_dir.display());
                     return self.load_from_directory(&cache_dir);
                 }
-                log::info!(
+                log::warn!(
                     target: "xybrid_sdk",
-                    "Cached copy of '{}' had {} dangling symlink(s) (source cache pruned?); re-materializing",
+                    "Cached copy of '{}' has {} dangling symlink(s) (source cache pruned?); removing it and re-materializing",
                     repo, dangling
                 );
-                // The re-materialized payload may come from a newer commit;
-                // metadata generated against the old files must not survive
-                // to describe the new ones.
-                crate::cache::hf_shared::remove_auto_generated_metadata(&cache_dir);
+                // Surviving entries may belong to an older commit than the
+                // one about to be materialized, and refilling around them
+                // would mix commits in one directory. This unpinned dir is
+                // not commit-keyed, so the only safe repair is rebuilding it
+                // from scratch at a single resolved commit.
+                if let Err(e) = std::fs::remove_dir_all(&cache_dir) {
+                    log::warn!(
+                        target: "xybrid_sdk",
+                        "Failed to remove corrupt cache dir {}: {}",
+                        cache_dir.display(),
+                        e
+                    );
+                }
             }
         }
 
-        // A revision pinned to a full commit SHA is immutable, so a complete
-        // snapshot of it in the standard shared Hugging Face cache
-        // (~/.cache/huggingface/hub — populated by `huggingface-cli
-        // download`, transformers, etc.) can be reused with zero network I/O.
-        // Mutable revisions (branches/tags, or none) must resolve through the
-        // Hub API first so a stale local ref never wins over the remote —
-        // their shared-cache reuse happens per-file in the download loop
-        // below. Outside the desktop allowlist (macOS/Linux/Windows)
-        // `find_shared_snapshot` always returns `None`, keeping mobile and
-        // other non-desktop behavior unchanged.
-        if revision.is_some_and(crate::cache::hf_shared::is_full_commit_sha) {
+        // Explicit offline mode (the standard HF_HUB_OFFLINE switch): load
+        // from the shared Hugging Face cache's local refs or fail — never
+        // touch the network. Outside the desktop allowlist
+        // (macOS/Linux/Windows) `find_shared_snapshot` always returns `None`,
+        // keeping mobile and other non-desktop behavior unchanged.
+        if huggingface_offline_mode() {
             if let Some(result) = self.try_load_from_shared_snapshot(
                 &cache_layout,
                 repo,
@@ -2197,8 +2236,17 @@ impl ModelLoader {
                 variant,
                 &_progress_callback,
             ) {
+                log::warn!(
+                    target: "xybrid_sdk",
+                    "HF_HUB_OFFLINE is set; loading '{}' from the shared Hugging Face cache — freshness and completeness cannot be verified offline",
+                    repo
+                );
                 return result;
             }
+            return Err(SdkError::offline(format!(
+                "HF_HUB_OFFLINE is set and no usable local copy of '{}' exists in the shared Hugging Face cache",
+                repo
+            )));
         }
 
         log::info!(target: "xybrid_sdk", "Downloading model from HuggingFace: {}", repo);
@@ -2253,21 +2301,25 @@ impl ModelLoader {
                             );
                         }
                     }
-                    // Offline fallback: resolve the revision through the
-                    // shared cache's local refs instead of the Hub API.
-                    if let Some(result) = self.try_load_from_shared_snapshot(
-                        &cache_layout,
-                        repo,
-                        revision,
-                        variant,
-                        &_progress_callback,
-                    ) {
-                        log::warn!(
-                            target: "xybrid_sdk",
-                            "Hub API unreachable; falling back to the shared Hugging Face cache for '{}'@{} — a mutable revision may be stale",
-                            repo, requested_revision
-                        );
-                        return result;
+                    // Connectivity fallback: resolve the revision through
+                    // the shared cache's local refs instead of the Hub API.
+                    // Client errors (bad repo, bad revision, bad auth)
+                    // propagate instead of being masked by a stale copy.
+                    if hub_error_is_connectivity(&error) {
+                        if let Some(result) = self.try_load_from_shared_snapshot(
+                            &cache_layout,
+                            repo,
+                            revision,
+                            variant,
+                            &_progress_callback,
+                        ) {
+                            log::warn!(
+                                target: "xybrid_sdk",
+                                "Hub API unreachable; falling back to the shared Hugging Face cache for '{}'@{} — a mutable revision may be stale",
+                                repo, requested_revision
+                            );
+                            return result;
+                        }
                     }
                     return Err(SdkError::network_src(
                         format!("Failed to get HuggingFace repo info for '{}'", repo),
@@ -2316,21 +2368,25 @@ impl ModelLoader {
             let repo_info = match repo_api.info() {
                 Ok(info) => info,
                 Err(error) => {
-                    // Offline fallback: resolve `main`/`master` through the
-                    // shared cache's local refs instead of the Hub API.
-                    if let Some(result) = self.try_load_from_shared_snapshot(
-                        &cache_layout,
-                        repo,
-                        None,
-                        variant,
-                        &_progress_callback,
-                    ) {
-                        log::warn!(
-                            target: "xybrid_sdk",
-                            "Hub API unreachable; falling back to the shared Hugging Face cache for '{}' — the local ref may be stale",
-                            repo
-                        );
-                        return result;
+                    // Connectivity fallback: resolve `main`/`master` through
+                    // the shared cache's local refs instead of the Hub API.
+                    // Client errors (bad repo, bad revision, bad auth)
+                    // propagate instead of being masked by a stale copy.
+                    if hub_error_is_connectivity(&error) {
+                        if let Some(result) = self.try_load_from_shared_snapshot(
+                            &cache_layout,
+                            repo,
+                            None,
+                            variant,
+                            &_progress_callback,
+                        ) {
+                            log::warn!(
+                                target: "xybrid_sdk",
+                                "Hub API unreachable; falling back to the shared Hugging Face cache for '{}' — the local ref may be stale",
+                                repo
+                            );
+                            return result;
+                        }
                     }
                     return Err(SdkError::network_src(
                         format!("Failed to get HuggingFace repo info for '{}'", repo),
@@ -2338,7 +2394,13 @@ impl ModelLoader {
                     ));
                 }
             };
-            (cache_dir, repo_api, repo_info)
+            // Pin every subsequent file request to the commit `info()` just
+            // resolved — `Repo::new` stays on mutable `main`, which could
+            // move between `info()` and the downloads below and produce a
+            // directory mixing two commits.
+            let resolved_repo =
+                Repo::with_revision(repo.to_string(), RepoType::Model, repo_info.sha.clone());
+            (cache_dir, api.repo(resolved_repo), repo_info)
         };
 
         let metadata_path = cache_dir.join("model_metadata.json");
