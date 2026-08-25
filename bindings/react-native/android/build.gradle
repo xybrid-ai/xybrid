@@ -91,5 +91,5 @@ dependencies {
   // native layer over JNI directly, so there is no JNA dependency (unlike
   // the previous uniffi binding). Keep this version in lockstep with the
   // workspace SDK version (bindings/kotlin/build.gradle.kts `version`).
-  implementation "ai.xybrid:xybrid-kotlin:0.5.0"
+  implementation "ai.xybrid:xybrid-kotlin:0.6.0"
 }

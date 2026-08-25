@@ -206,8 +206,16 @@ fn compile_whisper_cpp() {
     // Re-emit the ggml archives AFTER it: GNU ld resolves static archives left
     // to right, and cargo emits a dependency's link flags before its
     // dependents', so xybrid-llama-sys's `-lggml` lands too early to satisfy
-    // whisper's references. Repeating an archive on the link line is free;
-    // getting the order wrong is a link failure on Linux.
+    // whisper's references. Getting the order wrong is a link failure on Linux.
+    //
+    // The `-bundle` modifier is load-bearing. Repeating an archive is free for
+    // an executable or a cdylib, because ld only pulls members that resolve a
+    // pending undefined symbol. It is NOT free for a `staticlib`: rustc bundles
+    // every member of every named archive into the output `.a`, so a plain
+    // repeat lands a second copy of all of ggml and the final link dies with
+    // ~1300 duplicate symbols. That is the Flutter macOS/iOS path.
+    // `-bundle` keeps the ordering fix while leaving the single copy that
+    // xybrid-llama-sys bundles as the only one in the archive.
     println!(
         "cargo:rustc-link-search=native={}/lib",
         llama_root.display()
@@ -217,9 +225,9 @@ fn compile_whisper_cpp() {
         llama_root.display()
     );
     println!("cargo:rustc-link-search=native={}", llama_root.display());
-    println!("cargo:rustc-link-lib=static=ggml");
-    println!("cargo:rustc-link-lib=static=ggml-base");
-    println!("cargo:rustc-link-lib=static=ggml-cpu");
+    println!("cargo:rustc-link-lib=static:-bundle=ggml");
+    println!("cargo:rustc-link-lib=static:-bundle=ggml-base");
+    println!("cargo:rustc-link-lib=static:-bundle=ggml-cpu");
     emit_platform_deps();
 }
 
@@ -249,7 +257,7 @@ fn emit_platform_deps() {
             println!("cargo:rustc-link-lib=framework=Metal");
             println!("cargo:rustc-link-lib=framework=Foundation");
             println!("cargo:rustc-link-lib=framework=MetalKit");
-            println!("cargo:rustc-link-lib=static=ggml-metal");
+            println!("cargo:rustc-link-lib=static:-bundle=ggml-metal");
         }
         // Windows link deps are handled by llama.cpp's cmake export.
         _ => {}

@@ -83,6 +83,40 @@ rebuilds the native lib via cargokit.
 
 Note: `tools/README.md` still documents the pre-Bazel xtask matrix and is stale.
 
+### Prebuilt llama.cpp natives (the cargo fast path)
+
+`crates/llama-cpp-sys/build.rs` does not always run cmake. It resolves the
+llama.cpp static archives in this order, falling through on any miss:
+
+1. `XYBRID_NATIVES_PREBUILT_DIR/<target>` — a slice staged by the caller. Our
+   CI jobs pull with `tools/scripts/natives-pull.sh` and point at it.
+2. A slice named in `crates/llama-cpp-sys/natives-manifest.txt`, downloaded
+   over plain HTTPS from `ghcr.io/xybrid-ai/llama-natives` and SHA-256
+   verified. Needs no oras, no env var, no cmake — this is what makes an
+   **external** `cargo build --features llm-llamacpp` cheap.
+3. The cmake source build.
+
+The manifest is GENERATED — `.github/workflows/build-natives.yml` publishes the
+slices, then its `publish-manifest` job regenerates the file via
+`tools/scripts/natives-manifest.sh` and opens a PR. Never hand-edit it.
+
+Two traps:
+
+- **The manifest goes stale on purpose.** It pins plain hashes of
+  `wrapper.cpp`, `wrapper.h`, `build.rs`, and the llama.cpp commit. Touch any
+  of them and every row is ignored until CI republishes — that is the guard
+  that stops a local edit from linking archives that predate it. A dropped
+  fast path after editing `build.rs` is expected, not a bug.
+- **Anonymous reachability is not covered by our own CI.** Every job here
+  `oras login`s first, so a private package looks healthy internally and 401s
+  for everyone outside. `tools/scripts/natives-verify-anon.sh` is the check
+  that catches it; it runs credential-free at the end of `build-natives`.
+
+The publisher fingerprint (`natives-fingerprint.sh`) folds in the LOCAL
+cmake/cc/NDK versions. That is right for publisher/consumer cache parity and
+wrong for distribution, which is why the download path selects by target +
+feature set + ABI attributes from the manifest instead of recomputing it.
+
 ### Releases
 
 **Releases are cut by branch name, not by hand.** Push a `release/v<version>`

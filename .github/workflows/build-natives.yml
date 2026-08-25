@@ -8,10 +8,15 @@ name: Build Natives (prebuilt llama.cpp)
 # .context/natives-prebuilt-plan.md.
 #
 # SCOPE: the three shipped Android ABIs + the two iOS slices the xcframework
-# ships (device + arm64 simulator), baseline (non-vision). macOS/Linux/Windows
-# rows land once a consumer pulls them. NOTE: apple/host slices fold the runner
-# image's toolchain (Xcode SDK, gcc) into their fingerprint, so the weekly cron
-# re-warms them across GitHub image rotations.
+# ships, plus the desktop triples an external `cargo build` runs on (macOS
+# arm64/x86_64, Linux arm64/x86_64, Windows MSVC). NOTE: apple/host slices fold
+# the runner image's toolchain (Xcode SDK, gcc) into their fingerprint, so the
+# weekly cron re-warms them across GitHub image rotations.
+#
+# Every row also emits a `natives-row-*` artifact holding its published layer
+# digest. The `publish-manifest` job collects those into
+# crates/llama-cpp-sys/natives-manifest.txt and opens a PR, which is what lets
+# a plain `cargo build` download a slice with no oras and no env var.
 
 on:
   # Primary trigger: anything that feeds the fingerprint changed, so the cache
@@ -83,6 +88,10 @@ jobs:
           - aarch64-apple-ios
           - aarch64-apple-ios-sim
           - x86_64-unknown-linux-gnu
+          - aarch64-unknown-linux-gnu
+          - aarch64-apple-darwin
+          - x86_64-apple-darwin
+          - x86_64-pc-windows-msvc
         include:
           # --- Android (cross-compiled on Linux via cargo-ndk + NDK) ---
           - target: aarch64-linux-android
@@ -106,6 +115,24 @@ jobs:
           # --- Linux (host build; consumed by the Flutter linux leg) ---
           - target: x86_64-unknown-linux-gnu
             runner: ubuntu-latest
+            needs-ndk: false
+          # --- Desktop rows: not consumed by any xybrid CI job. These exist
+          #     purely so an EXTERNAL `cargo build --features llm-llamacpp`
+          #     downloads instead of running cmake for ~20 min. Linux rows
+          #     record the runner's glibc as `min_glibc` so a consumer on an
+          #     older distro declines the slice rather than hitting an
+          #     unresolved-versioned-symbol link error. ---
+          - target: aarch64-unknown-linux-gnu
+            runner: ubuntu-24.04-arm
+            needs-ndk: false
+          - target: aarch64-apple-darwin
+            runner: macos-14
+            needs-ndk: false
+          - target: x86_64-apple-darwin
+            runner: macos-14
+            needs-ndk: false
+          - target: x86_64-pc-windows-msvc
+            runner: windows-latest
             needs-ndk: false
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -172,7 +199,10 @@ jobs:
       # no docker binary (the action errors there). oras (set up above) needs no
       # docker and works on every runner OS. Token passed via env (not the
       # command line) and --password-stdin so it never lands in argv/logs.
+      # `shell: bash`: the windows-msvc row defaults to pwsh, where "$GHCR_TOKEN"
+      # expands to an empty pwsh variable and the login silently fails.
       - name: Log in to ghcr
+        shell: bash
         env:
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: echo "$GHCR_TOKEN" | oras login ghcr.io -u "${{ github.actor }}" --password-stdin
@@ -184,29 +214,172 @@ jobs:
       # the -sys crate directly (not the full SDK) because the cmake defines are
       # a deterministic function of target+vision, so this slice is
       # byte-equivalent to what the shipped binding build produces.
+      # `shell: bash` is required for the windows-msvc row — that runner
+      # defaults to pwsh, where none of this script parses.
       - name: Build + publish native slice (best-effort skip if already present)
+        shell: bash
         env:
           XYBRID_NATIVES_EXPORT_DIR: ${{ runner.temp }}/natives-export
+          # The publisher must never take build.rs's own manifest download
+          # path: on a fingerprint miss (rotated runner toolchain) the source
+          # pins still match, so without this it would link the OLD slice,
+          # export nothing, and natives-push.sh would fail on an empty dir.
+          XYBRID_NATIVES_FORCE_SOURCE: "1"
         run: |
           set -euo pipefail
+          # macOS host slices are linked on developer laptops, not just this
+          # runner image, so pin the deployment target instead of inheriting
+          # the runner's. Folded into the fingerprint (natives-fingerprint.sh)
+          # so changing it publishes a new slice rather than shadowing the old
+          # one. iOS rows must NOT set this — CMake would apply it to the wrong
+          # platform.
+          case "${{ matrix.target }}" in
+            *apple-darwin*) export MACOSX_DEPLOYMENT_TARGET=11.0 ;;
+          esac
           FP="$(tools/scripts/natives-fingerprint.sh ${{ matrix.target }} ${{ matrix.feature }})"
           echo "fingerprint=$FP"
           if oras manifest fetch --descriptor "$XYBRID_NATIVES_PKG:$FP" >/dev/null 2>&1; then
             echo "already published — nothing to build"
+          else
+            case "${{ matrix.feature }}" in
+              base) FEATURES="bindings" ;;
+              vision) FEATURES="bindings,vision" ;;
+              vulkan) FEATURES="bindings"; export XYBRID_LLAMA_CPP_VULKAN=1 ;;
+              vision-vulkan) FEATURES="bindings,vision"; export XYBRID_LLAMA_CPP_VULKAN=1 ;;
+              *) echo "unknown native feature set: ${{ matrix.feature }}" >&2; exit 1 ;;
+            esac
+            if [ "${{ matrix.needs-ndk }}" = "true" ]; then
+              cargo ndk --target ${{ matrix.target }} --platform 28 \
+                build --release -p xybrid-llama-sys --features "$FEATURES"
+            else
+              cargo build --release -p xybrid-llama-sys --features "$FEATURES" \
+                --target ${{ matrix.target }}
+            fi
+            tools/scripts/natives-push.sh ${{ matrix.target }} ${{ matrix.feature }} "$XYBRID_NATIVES_EXPORT_DIR"
+          fi
+
+          # Emit this row's LAYER digest for publish-manifest. Written on both
+          # branches above: a re-run that skips the build must still contribute
+          # its row, or the regenerated manifest would silently drop a slice
+          # that is in fact published.
+          DIGEST="$(oras manifest fetch "$XYBRID_NATIVES_PKG:$FP" | jq -r '.layers[0].digest')"
+          case "$DIGEST" in
+            sha256:*) ;;
+            *) echo "no layer digest for $XYBRID_NATIVES_PKG:$FP" >&2; exit 1 ;;
+          esac
+          # ABI dimensions the target triple does not capture, which build.rs
+          # checks before trusting a slice.
+          EXTRA=""
+          case "${{ matrix.target }}" in
+            *linux-gnu*) EXTRA=" min_glibc=$(ldd --version | head -1 | awk '{print $NF}')" ;;
+            *windows-msvc*) EXTRA=" crt=MD" ;;
+          esac
+          mkdir -p rows
+          echo "${{ matrix.target }} ${{ matrix.feature }} $DIGEST$EXTRA" \
+            > "rows/${{ matrix.target }}-${{ matrix.feature }}.row"
+          cat "rows/${{ matrix.target }}-${{ matrix.feature }}.row"
+
+      - name: Upload slice row
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: natives-row-${{ matrix.target }}-${{ matrix.feature }}
+          path: rows/
+          retention-days: 1
+
+  # =========================================================================
+  # Collect every published row into crates/llama-cpp-sys/natives-manifest.txt
+  # and open a PR with the result. That committed manifest is the ONLY thing an
+  # external consumer needs: build.rs reads it out of the crate tarball,
+  # matches its target + feature set to a row, and downloads that digest over
+  # plain HTTPS — no oras, no env var, no cmake.
+  #
+  # `always()`: rows are independent (fail-fast: false), so a partial matrix
+  # still yields a useful manifest. A row that failed contributes nothing this
+  # run; natives-manifest.sh carries its previous row forward (same source
+  # pins) so a flake never produces a PR that deletes a still-valid slice.
+  # =========================================================================
+  publish-manifest:
+    name: Update natives manifest
+    needs: publish-native
+    if: always() && github.repository == 'xybrid-ai/xybrid'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write        # push the manifest branch
+      pull-requests: write   # gh pr create
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      # continue-on-error: v4 fails outright when the pattern matches nothing,
+      # which is the normal outcome if every publish row failed. The next step
+      # already handles an empty/absent rows dir by leaving the manifest alone.
+      - name: Download slice rows
+        continue-on-error: true
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: natives-row-*
+          path: rows
+          merge-multiple: true
+
+      - name: Regenerate manifest
+        id: regen
+        run: |
+          set -euo pipefail
+          # Exit 2 = nothing published this run (benign). Anything else is a
+          # broken regeneration and must stay red — swallowing it would let
+          # the manifest go stale with no signal.
+          rc=0
+          tools/scripts/natives-manifest.sh rows || rc=$?
+          if [ "$rc" -eq 2 ]; then
+            echo "no rows published — leaving the manifest untouched"
+            echo "changed=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          case "${{ matrix.feature }}" in
-            base) FEATURES="bindings" ;;
-            vision) FEATURES="bindings,vision" ;;
-            vulkan) FEATURES="bindings"; export XYBRID_LLAMA_CPP_VULKAN=1 ;;
-            vision-vulkan) FEATURES="bindings,vision"; export XYBRID_LLAMA_CPP_VULKAN=1 ;;
-            *) echo "unknown native feature set: ${{ matrix.feature }}" >&2; exit 1 ;;
-          esac
-          if [ "${{ matrix.needs-ndk }}" = "true" ]; then
-            cargo ndk --target ${{ matrix.target }} --platform 28 \
-              build --release -p xybrid-llama-sys --features "$FEATURES"
+          [ "$rc" -eq 0 ] || exit "$rc"
+          if git diff --quiet -- crates/llama-cpp-sys/natives-manifest.txt; then
+            echo "manifest already up to date"
+            echo "changed=false" >> "$GITHUB_OUTPUT"
           else
-            cargo build --release -p xybrid-llama-sys --features "$FEATURES" \
-              --target ${{ matrix.target }}
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            git --no-pager diff -- crates/llama-cpp-sys/natives-manifest.txt
           fi
-          tools/scripts/natives-push.sh ${{ matrix.target }} ${{ matrix.feature }} "$XYBRID_NATIVES_EXPORT_DIR"
+
+      - name: Open manifest PR
+        if: steps.regen.outputs.changed == 'true'
+        env:
+          # Same reasoning as release-prep.yml: a PR opened with GITHUB_TOKEN
+          # does not trigger `pull_request` workflows, so the required
+          # `CI Success` check never reports and the PR cannot merge. Prefer
+          # the PAT; fall back so the run still surfaces the change.
+          GH_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          BRANCH="chore/natives-manifest-${GITHUB_SHA::7}"
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$BRANCH"
+          git add crates/llama-cpp-sys/natives-manifest.txt
+          git commit -m "chore(natives): refresh prebuilt llama.cpp manifest"
+          # Plain --force: the branch is bot-owned and keyed to this commit, and
+          # --force-with-lease errors on a re-run because the shallow checkout
+          # never learned the remote ref it would be leasing against.
+          git push -u origin "$BRANCH" --force
+          BODY="Regenerated by \`build-natives\` from the slices published for ${GITHUB_SHA::7}."
+          BODY="$BODY Merging this lets a plain \`cargo build --features llm-llamacpp\`"
+          BODY="$BODY download the prebuilt llama.cpp archives instead of compiling them."
+          # `gh pr view` also resolves CLOSED PRs, which would suppress
+          # re-creation forever on a quiet master; check for an OPEN one.
+          if [ -z "$(gh pr list --state open --head "$BRANCH" --json number --jq '.[].number')" ]; then
+            gh pr create \
+            --base master \
+            --head "$BRANCH" \
+            --title "chore(natives): refresh prebuilt llama.cpp manifest" \
+            --body "$BODY"
+          fi
+
+      # Runs LAST, and deliberately without any registry credentials: every
+      # other job here does `oras login`, which makes a private package look
+      # perfectly healthy while every external consumer gets a 401 and silently
+      # falls back to cmake. Placed after the PR is opened so a red result
+      # reports the setting to fix without also blocking the manifest.
+      - name: Verify slices are anonymously pullable
+        run: tools/scripts/natives-verify-anon.sh
