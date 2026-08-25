@@ -188,6 +188,12 @@ typedef bool (*boltffi_python_boltffi_function_xybrid_bolt_will_speculate_for_mo
 static boltffi_python_boltffi_function_xybrid_bolt_will_speculate_for_model_fn boltffi_python_boltffi_function_xybrid_bolt_will_speculate_for_model = NULL;
 typedef FfiBuf_u8 (*boltffi_python_boltffi_function_xybrid_bolt_version_fn)(void);
 static boltffi_python_boltffi_function_xybrid_bolt_version_fn boltffi_python_boltffi_function_xybrid_bolt_version = NULL;
+typedef uint32_t (*boltffi_python_boltffi_function_xybrid_bolt_release_memory_fn)(void);
+static boltffi_python_boltffi_function_xybrid_bolt_release_memory_fn boltffi_python_boltffi_function_xybrid_bolt_release_memory = NULL;
+typedef FfiStatus (*boltffi_python_boltffi_function_xybrid_bolt_set_auto_release_fn)(bool);
+static boltffi_python_boltffi_function_xybrid_bolt_set_auto_release_fn boltffi_python_boltffi_function_xybrid_bolt_set_auto_release = NULL;
+typedef bool (*boltffi_python_boltffi_function_xybrid_bolt_is_auto_release_enabled_fn)(void);
+static boltffi_python_boltffi_function_xybrid_bolt_is_auto_release_enabled_fn boltffi_python_boltffi_function_xybrid_bolt_is_auto_release_enabled = NULL;
 typedef FfiBuf_u8 (*boltffi_python_boltffi_function_xybrid_bolt_telemetry_default_endpoint_fn)(void);
 static boltffi_python_boltffi_function_xybrid_bolt_telemetry_default_endpoint_fn boltffi_python_boltffi_function_xybrid_bolt_telemetry_default_endpoint = NULL;
 typedef void (*boltffi_python_boltffi_function_xybrid_bolt_telemetry_flush_fn)(void);
@@ -293,6 +299,9 @@ static void boltffi_python_clear_symbols(void) {
     boltffi_python_boltffi_function_xybrid_bolt_is_speculative_cloud_enabled = NULL;
     boltffi_python_boltffi_function_xybrid_bolt_will_speculate_for_model = NULL;
     boltffi_python_boltffi_function_xybrid_bolt_version = NULL;
+    boltffi_python_boltffi_function_xybrid_bolt_release_memory = NULL;
+    boltffi_python_boltffi_function_xybrid_bolt_set_auto_release = NULL;
+    boltffi_python_boltffi_function_xybrid_bolt_is_auto_release_enabled = NULL;
     boltffi_python_boltffi_function_xybrid_bolt_telemetry_default_endpoint = NULL;
     boltffi_python_boltffi_function_xybrid_bolt_telemetry_flush = NULL;
     boltffi_python_boltffi_function_xybrid_bolt_telemetry_shutdown = NULL;
@@ -1232,6 +1241,36 @@ static int boltffi_python_bind_symbols(void) {
     if (boltffi_python_boltffi_function_xybrid_bolt_version == NULL) {
         boltffi_python_unload_library();
         PyErr_SetString(PyExc_ImportError, "failed to resolve native symbol " "boltffi_function_xybrid_bolt_version");
+        return 0;
+    }
+#ifdef _WIN32
+    boltffi_python_boltffi_function_xybrid_bolt_release_memory = (boltffi_python_boltffi_function_xybrid_bolt_release_memory_fn)GetProcAddress(boltffi_python_library_handle, "boltffi_function_xybrid_bolt_release_memory");
+#else
+    boltffi_python_boltffi_function_xybrid_bolt_release_memory = (boltffi_python_boltffi_function_xybrid_bolt_release_memory_fn)dlsym(boltffi_python_library_handle, "boltffi_function_xybrid_bolt_release_memory");
+#endif
+    if (boltffi_python_boltffi_function_xybrid_bolt_release_memory == NULL) {
+        boltffi_python_unload_library();
+        PyErr_SetString(PyExc_ImportError, "failed to resolve native symbol " "boltffi_function_xybrid_bolt_release_memory");
+        return 0;
+    }
+#ifdef _WIN32
+    boltffi_python_boltffi_function_xybrid_bolt_set_auto_release = (boltffi_python_boltffi_function_xybrid_bolt_set_auto_release_fn)GetProcAddress(boltffi_python_library_handle, "boltffi_function_xybrid_bolt_set_auto_release");
+#else
+    boltffi_python_boltffi_function_xybrid_bolt_set_auto_release = (boltffi_python_boltffi_function_xybrid_bolt_set_auto_release_fn)dlsym(boltffi_python_library_handle, "boltffi_function_xybrid_bolt_set_auto_release");
+#endif
+    if (boltffi_python_boltffi_function_xybrid_bolt_set_auto_release == NULL) {
+        boltffi_python_unload_library();
+        PyErr_SetString(PyExc_ImportError, "failed to resolve native symbol " "boltffi_function_xybrid_bolt_set_auto_release");
+        return 0;
+    }
+#ifdef _WIN32
+    boltffi_python_boltffi_function_xybrid_bolt_is_auto_release_enabled = (boltffi_python_boltffi_function_xybrid_bolt_is_auto_release_enabled_fn)GetProcAddress(boltffi_python_library_handle, "boltffi_function_xybrid_bolt_is_auto_release_enabled");
+#else
+    boltffi_python_boltffi_function_xybrid_bolt_is_auto_release_enabled = (boltffi_python_boltffi_function_xybrid_bolt_is_auto_release_enabled_fn)dlsym(boltffi_python_library_handle, "boltffi_function_xybrid_bolt_is_auto_release_enabled");
+#endif
+    if (boltffi_python_boltffi_function_xybrid_bolt_is_auto_release_enabled == NULL) {
+        boltffi_python_unload_library();
+        PyErr_SetString(PyExc_ImportError, "failed to resolve native symbol " "boltffi_function_xybrid_bolt_is_auto_release_enabled");
         return 0;
     }
 #ifdef _WIN32
@@ -7186,6 +7225,63 @@ done:
 }
 
 
+static PyObject *boltffi_python_callable_wrapper_boltffi_function_xybrid_bolt_release_memory(PyObject *self, PyObject *const *args, Py_ssize_t nargs) {
+    PyObject *result = NULL;
+    (void)self;
+    if (nargs != 0) {
+        PyErr_Format(PyExc_TypeError, "release_memory() takes 0 positional arguments but %zd were given", nargs);
+        goto done;
+    }
+    if (boltffi_python_boltffi_function_xybrid_bolt_release_memory == NULL) {
+        PyErr_SetString(PyExc_ImportError, "native library is not initialized");
+        goto done;
+    }
+    result = boltffi_python_box_u32(boltffi_python_boltffi_function_xybrid_bolt_release_memory());
+done:
+    return result;
+}
+
+
+static PyObject *boltffi_python_callable_wrapper_boltffi_function_xybrid_bolt_set_auto_release(PyObject *self, PyObject *const *args, Py_ssize_t nargs) {
+    bool enabled;
+    PyObject *result = NULL;
+    (void)self;
+    if (nargs != 1) {
+        PyErr_Format(PyExc_TypeError, "set_auto_release() takes 1 positional arguments but %zd were given", nargs);
+        goto done;
+    }
+    if (boltffi_python_boltffi_function_xybrid_bolt_set_auto_release == NULL) {
+        PyErr_SetString(PyExc_ImportError, "native library is not initialized");
+        goto done;
+    }
+    if (!boltffi_python_parse_bool(args[0], &enabled)) {
+        goto done;
+    }
+    boltffi_python_boltffi_function_xybrid_bolt_set_auto_release(enabled);
+    Py_INCREF(Py_None);
+    result = Py_None;
+done:
+    return result;
+}
+
+
+static PyObject *boltffi_python_callable_wrapper_boltffi_function_xybrid_bolt_is_auto_release_enabled(PyObject *self, PyObject *const *args, Py_ssize_t nargs) {
+    PyObject *result = NULL;
+    (void)self;
+    if (nargs != 0) {
+        PyErr_Format(PyExc_TypeError, "is_auto_release_enabled() takes 0 positional arguments but %zd were given", nargs);
+        goto done;
+    }
+    if (boltffi_python_boltffi_function_xybrid_bolt_is_auto_release_enabled == NULL) {
+        PyErr_SetString(PyExc_ImportError, "native library is not initialized");
+        goto done;
+    }
+    result = boltffi_python_box_bool(boltffi_python_boltffi_function_xybrid_bolt_is_auto_release_enabled());
+done:
+    return result;
+}
+
+
 static PyObject *boltffi_python_callable_wrapper_boltffi_function_xybrid_bolt_telemetry_default_endpoint(PyObject *self, PyObject *const *args, Py_ssize_t nargs) {
     PyObject *result = NULL;
     (void)self;
@@ -7352,6 +7448,9 @@ static PyMethodDef boltffi_python_methods[] = {
     {"is_speculative_cloud_enabled", (PyCFunction)boltffi_python_callable_wrapper_boltffi_function_xybrid_bolt_is_speculative_cloud_enabled, METH_FASTCALL, NULL},
     {"will_speculate_for_model", (PyCFunction)boltffi_python_callable_wrapper_boltffi_function_xybrid_bolt_will_speculate_for_model, METH_FASTCALL, NULL},
     {"version", (PyCFunction)boltffi_python_callable_wrapper_boltffi_function_xybrid_bolt_version, METH_FASTCALL, NULL},
+    {"release_memory", (PyCFunction)boltffi_python_callable_wrapper_boltffi_function_xybrid_bolt_release_memory, METH_FASTCALL, NULL},
+    {"set_auto_release", (PyCFunction)boltffi_python_callable_wrapper_boltffi_function_xybrid_bolt_set_auto_release, METH_FASTCALL, NULL},
+    {"is_auto_release_enabled", (PyCFunction)boltffi_python_callable_wrapper_boltffi_function_xybrid_bolt_is_auto_release_enabled, METH_FASTCALL, NULL},
     {"telemetry_default_endpoint", (PyCFunction)boltffi_python_callable_wrapper_boltffi_function_xybrid_bolt_telemetry_default_endpoint, METH_FASTCALL, NULL},
     {"telemetry_flush", (PyCFunction)boltffi_python_callable_wrapper_boltffi_function_xybrid_bolt_telemetry_flush, METH_FASTCALL, NULL},
     {"telemetry_shutdown", (PyCFunction)boltffi_python_callable_wrapper_boltffi_function_xybrid_bolt_telemetry_shutdown, METH_FASTCALL, NULL},

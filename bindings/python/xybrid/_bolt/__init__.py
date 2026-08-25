@@ -2136,6 +2136,12 @@ def will_speculate_for_model(model_id: str) -> bool:
     return _native.will_speculate_for_model(model_id)
 def version() -> str:
     return _native.version()
+def release_memory() -> int:
+    return _native.release_memory()
+def set_auto_release(enabled: bool) -> None:
+    _native.set_auto_release(enabled)
+def is_auto_release_enabled() -> bool:
+    return _native.is_auto_release_enabled()
 def telemetry_default_endpoint() -> str:
     return _native.telemetry_default_endpoint()
 def telemetry_flush() -> None:
@@ -2223,6 +2229,9 @@ __all__ = [
     "is_speculative_cloud_enabled",
     "will_speculate_for_model",
     "version",
+    "release_memory",
+    "set_auto_release",
+    "is_auto_release_enabled",
     "telemetry_default_endpoint",
     "telemetry_flush",
     "telemetry_shutdown",
