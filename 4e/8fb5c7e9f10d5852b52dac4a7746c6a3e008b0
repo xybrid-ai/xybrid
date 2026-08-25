@@ -1,0 +1,73 @@
+tools/README.md
+  s_570d7ab18f5032::t_e6636bd95ccc5e 9-15
+docs/content/docs/guides/tool-calling.mdx
+  s_570d7ab18f5032::t_4e2e29745558a4 229-236,247-248
+  s_570d7ab18f5032::t_4cd97447407bf0 205-228,237-246,249-271
+docs/content/docs/guides/tool-calling.zh.mdx
+  s_570d7ab18f5032::t_4e2e29745558a4 204-223
+  s_570d7ab18f5032::t_55f0752fa11d4c 183-203,224-244
+README.ja-JP.md
+  s_570d7ab18f5032::t_65ab745d150850 157,174,192,226
+README.md
+  s_570d7ab18f5032::t_d66339dcba0c47 145,162,180,219
+README.zh-CN.md
+  s_570d7ab18f5032::t_c275d229228cda 157,174,192,226
+bindings/apple/README.md
+  s_570d7ab18f5032::t_3d54e3139f41bd 15,22
+bindings/flutter/README.md
+  s_570d7ab18f5032::t_49e05c1965e514 18,165-236
+bindings/kotlin/README.md
+  s_570d7ab18f5032::t_35243c50250f2a 15
+bindings/unity/README.md
+  s_570d7ab18f5032::t_86b529d143cdf3 45,62
+bindings/web/README.md
+  s_570d7ab18f5032::t_fc27be64792ae6 3
+docs/INSTALLATION.md
+  s_570d7ab18f5032::t_398d31009025a9 148-153,158-171,178
+docs/INSTALLATION.zh.md
+  s_570d7ab18f5032::t_2889665c3d63c8 83-126
+docs/content/docs/(integration)/sdks/android.mdx
+  s_570d7ab18f5032::t_7e3ac17f448f50 14
+docs/content/docs/(integration)/sdks/android.zh.mdx
+  s_570d7ab18f5032::t_19ccccebd58144 14
+docs/content/docs/(integration)/sdks/flutter.mdx
+  s_570d7ab18f5032::t_2c553a5411d75a 14
+docs/content/docs/(integration)/sdks/flutter.zh.mdx
+  s_570d7ab18f5032::t_09f0d590ec11a4 14
+docs/content/docs/(integration)/sdks/ios.mdx
+  s_570d7ab18f5032::t_c2e6c270c1ef2e 18
+docs/content/docs/(integration)/sdks/ios.zh.mdx
+  s_570d7ab18f5032::t_c222ad88208b42 18
+docs/content/docs/(integration)/sdks/web.mdx
+  s_570d7ab18f5032::t_fd543bc28c7157 9
+docs/content/docs/(integration)/sdks/web.zh.mdx
+  s_570d7ab18f5032::t_d03a2b5041ec69 9
+docs/content/docs/quickstart.mdx
+  s_570d7ab18f5032::t_6366ed24e323cb 15,57,88,122,194
+docs/content/docs/quickstart.zh.mdx
+  s_570d7ab18f5032::t_4c64a08241a917 15,57,88,122,193
+docs/telemetry/registry.md
+  s_570d7ab18f5032::t_349acf5c0dbb65 40
+examples/ios/README.md
+  s_570d7ab18f5032::t_6cd2325f5b8b2f 186-187,205-206
+examples/ios/XybridExample/ExtractionView.swift
+  s_570d7ab18f5032::t_b6a979a00b52ce 294-295
+examples/ios/XybridExample/LiveVision.swift
+  s_570d7ab18f5032::t_bb83593e1b2357 360-361
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "4e8fb5c7e9f10d5852b52dac4a7746c6a3e008b0",
+  "prompts": {},
+  "sessions": {
+    "s_570d7ab18f5032": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c82da43a-5146-4f39-91b8-559de56586f7",
+        "model": "claude-opus-5"
+      },
+      "human_author": "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
+    }
+  }
+}
