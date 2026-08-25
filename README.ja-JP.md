@@ -115,7 +115,7 @@ Xybridは**Rustベースのランタイム**であり、すべての主要プラ
 |-----|-----------|---------|--------|--------|
 | **[Flutter](bindings/flutter/)** | iOS, Android, macOS, Linux, Windows | [pub.dev](https://pub.dev/packages/xybrid_flutter) | 利用可能 | [README](examples/flutter/README.md) |
 | **[Unity](bindings/unity/)** | macOS, Windows, Linux, iOS, Android | [下記参照](#クイックスタート) | 利用可能 | [Unity 3D AI酒場](https://github.com/xybrid-ai/xybrid-unity-tavern) |
-| **[Swift](bindings/apple/)** | iOS, macOS | Swift Package Manager | 近日公開 | [README](examples/ios/README.md) |
+| **[Swift](bindings/apple/)** | iOS, macOS | Swift Package Manager | 利用可能 | [README](examples/ios/README.md) |
 | **[Kotlin](bindings/kotlin/)** | Android | Maven Central | 利用可能 | [README](examples/android/README.md) |
 | **[CLI](https://github.com/xybrid-ai/xybrid/releases)** | macOS, Linux, Windows | `curl -sSL .../install.sh \| sh` | 利用可能 | — |
 | **[Rust](crates/)** | すべて | [crates.io](https://crates.io/crates/xybrid) | 利用可能 | — |
@@ -392,12 +392,21 @@ claude /xybrid-init hexgrad/Kokoro-82M-v1.0-ONNX
 | テキスト読み上げ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | 言語モデル | ✅ | ✅ | ✅ | ✅ | ✅ |
 | 画像認識モデル | ✅ | ✅ | ✅ | ✅ | ✅ |
+| ツール呼び出し | ✅ | ✅ | ✅ | ✅ | ✅ |
 | 埋め込み | 🔜 | 🔜 | 🔜 | 🔜 | 🔜 |
 | マルチモデルパイプライン（MMP） | ✅ | ✅ | ✅ | ✅ | ✅ |
 | モデルのダウンロードとキャッシュ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | ハードウェアアクセラレーション | Metal, ANE | CPU | Metal, ANE | CPU、オプトインのVulkan | CPU |
 
 **SDK MMP サポート:** Flutter ✅ · Rust ✅ · Kotlin 🔜 · Swift 🔜 · Unity 🔜
+
+**ツール呼び出し:** ローカルモデルが自分で定義した関数を呼び出せます。ツールは
+単なるデータで、ループを回すのは自分のコードなので、どんなツールでも組み込めます。
+llama.cpp によりオンデバイスで動作（LFM2、gemma-4、FunctionGemma の各プロトコルに
+対応）。Rust SDK と CLI（`xybrid repl` には `web_search` が組み込み済みで、
+`--tools-file` で独自のツールも使えます）に加え、0.6.0 以降は Swift、Kotlin、
+Flutter、Python、Unity C# でも利用できます。詳しくは
+[ツール呼び出しガイド](https://docs.xybrid.dev/en/docs/guides/tool-calling)を参照してください。
 
 ---
 

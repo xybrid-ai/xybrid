@@ -115,7 +115,7 @@ Xybrid 是一个 **Rust 驱动的运行时**，为所有主流平台提供原生
 |-----|------|------|------|------|
 | **[Flutter](bindings/flutter/)** | iOS, Android, macOS, Linux, Windows | [pub.dev](https://pub.dev/packages/xybrid_flutter) | 可用 | [README](examples/flutter/README.md) |
 | **[Unity](bindings/unity/)** | macOS, Windows, Linux, iOS, Android | [见下方](#快速开始) | 可用 | [Unity 3D AI 酒馆](https://github.com/xybrid-ai/xybrid-unity-tavern) |
-| **[Swift](bindings/apple/)** | iOS, macOS | Swift Package Manager | 即将推出 | [README](examples/ios/README.md) |
+| **[Swift](bindings/apple/)** | iOS, macOS | Swift Package Manager | 可用 | [README](examples/ios/README.md) |
 | **[Kotlin](bindings/kotlin/)** | Android | Maven Central | 可用 | [README](examples/android/README.md) |
 | **[CLI](https://github.com/xybrid-ai/xybrid/releases)** | macOS, Linux, Windows | `curl -sSL .../install.sh \| sh` | 可用 | — |
 | **[Rust](crates/)** | 全平台 | [crates.io](https://crates.io/crates/xybrid) | 可用 | — |
@@ -393,12 +393,20 @@ Skills 与 agent 无关，位于 [`agents/skills/`](agents/skills/)。安装脚�
 | 文本转语音 | ✅ | ✅ | ✅ | ✅ | ✅ |
 | 语言模型 | ✅ | ✅ | ✅ | ✅ | ✅ |
 | 视觉模型 | ✅ | ✅ | ✅ | ✅ | ✅ |
+| 工具调用 | ✅ | ✅ | ✅ | ✅ | ✅ |
 | 嵌入模型 | 🔜 | 🔜 | 🔜 | 🔜 | 🔜 |
 | 多模型流水线（MMP） | ✅ | ✅ | ✅ | ✅ | ✅ |
 | 模型下载与缓存 | ✅ | ✅ | ✅ | ✅ | ✅ |
 | 硬件加速 | Metal, ANE | CPU | Metal, ANE | CPU，可选 Vulkan | CPU |
 
 **SDK MMP 支持：** Flutter ✅ · Rust ✅ · Kotlin 🔜 · Swift 🔜 · Unity 🔜
+
+**工具调用：** 本地模型可以调用你自己定义的函数——工具就是普通数据，循环由你的
+代码掌控，因此任何工具链都能接入。通过 llama.cpp 在设备端运行（支持 LFM2、
+gemma-4 与 FunctionGemma 协议）。Rust SDK、CLI（`xybrid repl` 内置 `web_search`，
+也可通过 `--tools-file` 使用你自己的工具）均已支持；自 0.6.0 起，Swift、Kotlin、
+Flutter、Python 与 Unity C# 也全部支持。参见
+[工具调用指南](https://docs.xybrid.dev/zh/docs/guides/tool-calling)。
 
 ---
 

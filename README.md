@@ -119,7 +119,7 @@ raw typed-tensor I/O.
 |-----|-----------|---------|--------|--------|
 | **[Flutter](bindings/flutter/)** | iOS, Android, macOS, Linux, Windows | [pub.dev](https://pub.dev/packages/xybrid_flutter) | Available | [README](examples/flutter/README.md) |
 | **[Unity](bindings/unity/)** | macOS, Windows, Linux, iOS, Android | [See below](#quick-start) | Available | [Unity 3D AI tavern](https://github.com/xybrid-ai/xybrid-unity-tavern) |
-| **[Swift](bindings/apple/)** | iOS, macOS | Swift Package Manager | Coming Soon | [README](examples/ios/README.md) |
+| **[Swift](bindings/apple/)** | iOS, macOS | Swift Package Manager | Available | [README](examples/ios/README.md) |
 | **[Kotlin](bindings/kotlin/)** | Android | Maven Central | Available | [README](examples/android/README.md) |
 | **[Browser/Web preview](bindings/web/)** | Modern browsers | `@xybrid/web` | Preview | [In-browser a+b demo](bindings/web/example/) |
 | **[CLI](https://github.com/xybrid-ai/xybrid/releases)** | macOS, Linux, Windows | `curl -sSL .../install.sh \| sh` | Available | — |
@@ -407,7 +407,7 @@ See the [model metadata docs](docs/sdk/API_REFERENCE.md) for the full schema, or
 | Text-to-Speech | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Language Models | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Vision Models | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Tool Calling | 🔜 | 🔜 | ✅ | ✅ | ✅ |
+| Tool Calling | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Embeddings | 🔜 | 🔜 | 🔜 | 🔜 | 🔜 |
 | Multi-Model Pipelines (MMP) | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Model Download & Caching | ✅ | ✅ | ✅ | ✅ | ✅ |
@@ -416,10 +416,11 @@ See the [model metadata docs](docs/sdk/API_REFERENCE.md) for the full schema, or
 **SDK MMP support:** Flutter ✅ · Rust ✅ · Kotlin 🔜 · Swift 🔜 · Unity 🔜
 
 **Tool calling:** local models call functions you define — your tools are
-plain data (`Tool::function(...)`) and the loop is your code, so any tooling
-plugs in. On-device via llama.cpp (LFM2, gemma-4, and FunctionGemma protocols);
-Rust SDK and CLI today (`xybrid repl` ships built-in `web_search` + your own via
-`--tools-file`), Swift/Kotlin/Flutter bindings next. See the
+plain data and the loop is your code, so any tooling plugs in. On-device via
+llama.cpp (LFM2, gemma-4, and FunctionGemma protocols). Available from the Rust
+SDK, the CLI (`xybrid repl` ships built-in `web_search` plus your own via
+`--tools-file`), and — since 0.6.0 — Swift, Kotlin, Flutter, Python and Unity
+C#. See the
 [Tool Calling guide](https://docs.xybrid.dev/en/docs/guides/tool-calling).
 
 ---

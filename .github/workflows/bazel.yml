@@ -46,6 +46,8 @@ on:
       - "Cargo.lock"
       - "tools/unity-runtime-smoke/**"
       - ".github/workflows/bazel.yml"
+      # Markdown inside any path above cannot change a Bazel build.
+      - "!**.md"
   workflow_dispatch:
 
 permissions:
@@ -75,9 +77,12 @@ jobs:
             echo "relevant=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
+          # Drop docs before matching: the patterns below are directory
+          # prefixes (`crates/`, `bindings/kotlin/`, ...), so a README inside
+          # one of them would otherwise trigger the full RBE matrix.
           FILES=$(gh api --paginate \
             "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" \
-            --jq '.[].filename')
+            --jq '.[].filename' | grep -vE '\.mdx?$' || true)
           if printf '%s\n' "$FILES" | grep -qE '^(MODULE\.bazel|\.bazelrc|\.bazelversion|\.bazelignore|BUILD\.bazel|.*/BUILD\.bazel|.*\.bzl|bazel/|tools/scripts/|rules_android_ndk\.patch|rules_foreign_cc\.patch|rules_rs\.patch|rules_rust\.patch|hermetic_llvm\.patch|crates/|bindings/kotlin/|macros/|vendor/llama-cpp|vendor/ort-macos/|Cargo\.toml|Cargo\.lock|tools/unity-runtime-smoke/|\.github/workflows/bazel\.yml)'; then
             REL=true
           else
