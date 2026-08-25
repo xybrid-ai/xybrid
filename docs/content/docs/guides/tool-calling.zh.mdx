@@ -128,6 +128,64 @@ println!("{}", final_turn.text().unwrap_or_default());
 - **为你的轮次设定预算。** 小模型可能会无休止地搜索而始终无法收敛；请限制
   循环次数，并在预算耗尽时，强制基于你已累积的笔记进行一次关闭工具的总结轮次。
 
+## 带工具的流式聊天
+
+聊天界面同时需要两件事：token 逐个到达，以及跨轮次的历史。循环仍是上面那
+三步，只是走 `runStreamingWithContext`——模型流式输出回答，在工具调用边界
+处停下，续接同样是流式的：
+
+```dart
+Stream<StreamToken> turn(XybridEnvelope input) =>
+    model.runStreamingWithContext(input, context,
+        config: GenerationConfig.greedy(tools: tools));
+
+var input = XybridEnvelope.text(userText);
+var prior = '';
+
+for (var step = 0; step < maxSteps; step++) {
+  List<ToolCall> calls = const [];
+
+  await for (final token in turn(input)) {
+    buffer.write(token.token);          // token 到达即渲染
+    if (token.hasToolCalls) {
+      calls = token.toolCalls;          // 带类型，已解析
+      prior = token.rawText!;           // 待回放的轮次文本
+    }
+  }
+
+  if (calls.isEmpty) break;             // 模型已作答，结束
+
+  input = XybridEnvelope.toolResults(
+    userText: userText,
+    priorAssistantText: prior,
+    results: [
+      for (final call in calls)
+        ToolResult(
+          callId: call.id,
+          name: call.name,
+          contentJson: await runMyTool(call.name, call.argumentsJson),
+        ),
+    ],
+  );
+}
+```
+
+请在**这一轮交流收敛之后**再写入上下文，而不是在轮次之间：`tool_results`
+Envelope 自身会回放 `userText`，因此循环中途的 push 会让问题在提示中出现两次。
+
+有三点让这套流程无需你解析任何文本：
+
+- 工具调用块会**从 token 流中被抑制**，所以 `token.token` 始终是可展示的
+  文本；调用则以带类型的形式出现在终止 token 上。
+- 同一个 token 上的 `rawText` 是该轮次**包含**工具调用块的原始输出——相当于
+  流式版的 `XybridResult.text`，也正是 `priorAssistantText` 所需要的。不要用
+  `cumulativeText`：那是你的界面已经渲染出来的内容，其中的块已被抑制。
+- `tool_results` Envelope 通过**同一个**方法送回，因此续接既保留对话上下文，
+  也继续保持流式。
+
+Swift、Kotlin、Python 与 Unity C# 在各自的 stream token 上暴露同样的三件套
+——`toolCalls`、`rawText`、`finishReason`——并同样通过原来的流式方法送回续接。
+
 ## 在 CLI 中进行工具调用（`xybrid repl`）
 
 REPL 提供了参考体验。对于元数据声明了 `tool_calling: true` 的模型，有三个内置
