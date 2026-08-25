@@ -6,11 +6,22 @@
 //! `HUGGINGFACE_HUB_CACHE`). When xybrid is asked to load a model the user
 //! already downloaded with those tools, re-downloading wastes bandwidth.
 //!
-//! This module probes that shared cache read-only — zero network I/O — before
-//! the network download path in
-//! [`crate::model::ModelLoader::load_from_huggingface`] runs. On a hit, the
-//! files xybrid needs are materialized (symlinked on unix, copied elsewhere)
-//! into xybrid's own materialized layout and the model loads from there.
+//! This module probes that shared cache read-only and
+//! [`crate::model::ModelLoader::load_from_huggingface`] uses it three ways:
+//!
+//! 1. **Per-file reuse (the normal online path).** The requested revision is
+//!    first resolved to its current commit SHA through the Hub API — so a
+//!    stale local `main` ref can never win over the remote — and file
+//!    selection runs against the authoritative repo manifest. Each selected
+//!    file already present in the shared snapshot at that exact commit is
+//!    then materialized from it (symlinked on unix, copied elsewhere);
+//!    only the missing files are downloaded.
+//! 2. **Full-SHA fast path.** A request pinned to a full 40-hex commit SHA is
+//!    immutable, so a complete shared snapshot of that commit loads with zero
+//!    network I/O.
+//! 3. **Offline fallback.** When the Hub API is unreachable, the locally
+//!    cached refs resolve the revision instead — with a warning, since a
+//!    mutable ref may be stale.
 //!
 //! The probe is desktop-only: on iOS/Android [`find_shared_snapshot`] always
 //! returns `None`, keeping mobile behavior unchanged.
@@ -26,8 +37,10 @@ pub(crate) struct SharedSnapshot {
     pub(crate) dir: PathBuf,
 }
 
-/// Resolve the shared Hugging Face hub cache root, honoring
-/// `HUGGINGFACE_HUB_CACHE`, then `HF_HOME`, then `~/.cache/huggingface/hub`.
+/// Resolve the shared Hugging Face hub cache root the way current
+/// `huggingface_hub` does: `HF_HUB_CACHE`, then the legacy
+/// `HUGGINGFACE_HUB_CACHE`, then `HF_HOME/hub`, then
+/// `XDG_CACHE_HOME/huggingface/hub`, then `~/.cache/huggingface/hub`.
 ///
 /// Returns `None` when no home directory can be determined; callers then
 /// silently skip the probe. Unlike `hf_hub::Cache::from_env()` /
@@ -35,34 +48,56 @@ pub(crate) struct SharedSnapshot {
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub(crate) fn shared_cache_root() -> Option<PathBuf> {
     resolve_shared_cache_root(
+        std::env::var("HF_HUB_CACHE").ok(),
         std::env::var("HUGGINGFACE_HUB_CACHE").ok(),
         std::env::var("HF_HOME").ok(),
+        std::env::var("XDG_CACHE_HOME").ok(),
         dirs::home_dir(),
     )
 }
 
 /// Pure resolution of the shared cache root from explicit inputs (testable
-/// without touching process env vars).
-///
-/// Order: non-empty `HUGGINGFACE_HUB_CACHE` (the hub root itself), non-empty
-/// `HF_HOME` (hub root is `<HF_HOME>/hub`), then `<home>/.cache/huggingface/hub`.
+/// without touching process env vars). Empty values fall through to the next
+/// candidate; a leading `~`/`~/` is expanded against the home directory (a
+/// tilde value with no known home also falls through).
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 fn resolve_shared_cache_root(
     hub_cache: Option<String>,
+    legacy_hub_cache: Option<String>,
     hf_home: Option<String>,
+    xdg_cache_home: Option<String>,
     home: Option<PathBuf>,
 ) -> Option<PathBuf> {
-    if let Some(value) = hub_cache {
-        if !value.is_empty() {
-            return Some(PathBuf::from(value));
+    let home_dir = home.as_deref();
+    for value in [hub_cache, legacy_hub_cache] {
+        if let Some(path) = env_path(value, home_dir) {
+            return Some(path);
         }
     }
-    if let Some(value) = hf_home {
-        if !value.is_empty() {
-            return Some(PathBuf::from(value).join("hub"));
-        }
+    if let Some(path) = env_path(hf_home, home_dir) {
+        return Some(path.join("hub"));
+    }
+    if let Some(path) = env_path(xdg_cache_home, home_dir) {
+        return Some(path.join("huggingface").join("hub"));
     }
     home.map(|home| home.join(".cache").join("huggingface").join("hub"))
+}
+
+/// Turn an env-var value into a usable path: `None` for unset/empty (or a
+/// tilde value when no home directory is known), tilde-expanded otherwise.
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+fn env_path(value: Option<String>, home: Option<&Path>) -> Option<PathBuf> {
+    let value = value?;
+    if value.is_empty() {
+        return None;
+    }
+    if value == "~" {
+        return home.map(Path::to_path_buf);
+    }
+    if let Some(rest) = value.strip_prefix("~/") {
+        return home.map(|home| home.join(rest));
+    }
+    Some(PathBuf::from(value))
 }
 
 /// Find a usable snapshot of `repo` in the shared Hugging Face hub cache
@@ -73,8 +108,8 @@ fn resolve_shared_cache_root(
 /// probed directly as `snapshots/<revision>` (tools write refs under branch
 /// names, so a SHA may have no ref entry); (b) without a requested revision,
 /// the `main` ref, then the `master` ref. The resolved commit's snapshot
-/// directory must exist and contain at least one model payload file
-/// (`.gguf`/`.onnx`/`.safetensors` or `model_metadata.json`).
+/// directory must exist and contain at least one model weight file
+/// (`.gguf`/`.onnx`/`.safetensors`).
 ///
 /// Returns `None` (with a debug log) when the repo is absent from the shared
 /// cache, the revision cannot be resolved, or the snapshot holds no model
@@ -107,6 +142,18 @@ fn find_shared_snapshot_with_root(
     revision: Option<&str>,
 ) -> Option<SharedSnapshot> {
     use hf_hub::{Cache, Repo, RepoType};
+
+    // Hugging Face repo ids are `owner/name` over [A-Za-z0-9._-]; anything
+    // else (backslashes, dot-dot segments, ...) must not be turned into a
+    // filesystem probe path.
+    if !is_safe_repo_id(repo) {
+        log::debug!(
+            target: "xybrid_sdk",
+            "Skipping shared Hugging Face cache probe for unsafe repo id '{}'",
+            repo
+        );
+        return None;
+    }
 
     let cache = Cache::new(root.to_path_buf());
     let repo_cache = cache.repo(Repo::new(repo.to_string(), RepoType::Model));
@@ -171,37 +218,88 @@ fn resolve_commit(
     read_ref(root, folder_name, "main").or_else(|| read_ref(root, folder_name, "master"))
 }
 
-/// Read and trim `refs/<revision>` inside the repo folder.
+/// Read `refs/<revision>` inside the repo folder and return the commit SHA it
+/// names.
+///
+/// The revision is validated before it is joined into a path (relative,
+/// `Normal` components only — nested refs like `pr/123` are fine, traversal
+/// and absolute paths are not), the read is capped, and the contents must be
+/// exactly a 40-hex commit SHA: the result is later joined under
+/// `snapshots/`, so a ref file holding an arbitrary path must never redirect
+/// the snapshot lookup outside the cache.
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 fn read_ref(root: &Path, folder_name: &str, revision: &str) -> Option<String> {
-    let value = std::fs::read_to_string(root.join(folder_name).join("refs").join(revision)).ok()?;
+    use std::io::Read;
+
+    if !is_safe_ref_name(revision) {
+        log::debug!(
+            target: "xybrid_sdk",
+            "Ignoring unsafe Hugging Face revision '{}'",
+            revision
+        );
+        return None;
+    }
+    let path = root.join(folder_name).join("refs").join(revision);
+    let mut value = String::new();
+    std::fs::File::open(path)
+        .ok()?
+        .take(256)
+        .read_to_string(&mut value)
+        .ok()?;
     let value = value.trim();
-    if value.is_empty() {
-        None
-    } else {
+    if is_full_commit_sha(value) {
         Some(value.to_string())
+    } else {
+        log::debug!(
+            target: "xybrid_sdk",
+            "Shared Hugging Face ref '{}' does not name a commit SHA; ignoring",
+            revision
+        );
+        None
     }
 }
 
-fn is_full_commit_sha(value: &str) -> bool {
+/// A revision usable as a relative `refs/` path: no traversal, no absolute
+/// paths, no backslashes. Nested names (`pr/123`) are allowed.
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+fn is_safe_ref_name(revision: &str) -> bool {
+    use std::path::Component;
+    !revision.is_empty()
+        && !revision.contains('\\')
+        && Path::new(revision)
+            .components()
+            .all(|component| matches!(component, Component::Normal(_)))
+}
+
+/// A Hugging Face repo id: `owner/name` segments over [A-Za-z0-9._-], no
+/// empty/dot/dot-dot segments.
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+fn is_safe_repo_id(repo: &str) -> bool {
+    !repo.is_empty()
+        && repo
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '/'))
+        && !repo
+            .split('/')
+            .any(|segment| segment.is_empty() || segment == "." || segment == "..")
+}
+
+pub(crate) fn is_full_commit_sha(value: &str) -> bool {
     value.len() == 40 && value.bytes().all(|b| b.is_ascii_hexdigit())
 }
 
-/// Whether the snapshot contains at least one model payload file
-/// (`.gguf`/`.onnx`/`.safetensors` or `model_metadata.json`).
+/// Whether the snapshot contains at least one model weight file
+/// (`.gguf`/`.onnx`/`.safetensors`). A snapshot holding only metadata or
+/// config files has nothing worth reusing.
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 fn snapshot_has_model_payload(snapshot_dir: &Path) -> bool {
     list_snapshot_files(snapshot_dir)
         .iter()
-        .any(|filename| is_model_payload_file(filename))
+        .any(|filename| is_model_weight_file(filename))
 }
 
-fn is_model_payload_file(filename: &str) -> bool {
-    let basename = filename.rsplit('/').next().unwrap_or(filename);
-    basename == "model_metadata.json"
-        || filename.ends_with(".gguf")
-        || filename.ends_with(".onnx")
-        || filename.ends_with(".safetensors")
+fn is_model_weight_file(filename: &str) -> bool {
+    filename.ends_with(".gguf") || filename.ends_with(".onnx") || filename.ends_with(".safetensors")
 }
 
 /// Recursively list the files under `dir` as repo-relative paths (POSIX
@@ -323,30 +421,38 @@ pub(crate) fn materialize_from_shared(
     target_dir: &Path,
 ) -> std::io::Result<()> {
     for filename in filenames {
-        let target_path = target_dir.join(filename);
-        if target_path.exists() {
-            continue;
-        }
-        // A dangling symlink from an earlier materialization (its source cache
-        // was pruned) reports `!exists()` but still occupies the directory
-        // entry, so linking over it would fail; remove it first.
-        if target_path.symlink_metadata().is_ok() {
-            std::fs::remove_file(&target_path)?;
-        }
-        if let Some(parent) = target_path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        let source_path = snapshot.dir.join(filename);
-        #[cfg(unix)]
-        {
-            std::os::unix::fs::symlink(&source_path, &target_path)?;
-        }
-        #[cfg(not(unix))]
-        {
-            std::fs::copy(&source_path, &target_path)?;
-        }
+        link_or_copy(&snapshot.dir.join(filename), &target_dir.join(filename))?;
     }
     Ok(())
+}
+
+/// Materialize one file: symlink on unix, copy elsewhere.
+///
+/// Idempotent and race-tolerant: an existing target is left untouched, a
+/// dangling symlink occupying the entry is replaced, and losing an
+/// `AlreadyExists` race against a concurrent materialization of the same
+/// target counts as success.
+pub(crate) fn link_or_copy(source_path: &Path, target_path: &Path) -> std::io::Result<()> {
+    if target_path.exists() {
+        return Ok(());
+    }
+    // A dangling symlink from an earlier materialization (its source cache
+    // was pruned) reports `!exists()` but still occupies the directory
+    // entry, so linking over it would fail; remove it first.
+    if target_path.symlink_metadata().is_ok() {
+        std::fs::remove_file(target_path)?;
+    }
+    if let Some(parent) = target_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    #[cfg(unix)]
+    let result = std::os::unix::fs::symlink(source_path, target_path);
+    #[cfg(not(unix))]
+    let result = std::fs::copy(source_path, target_path).map(|_| ());
+    match result {
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists && target_path.exists() => Ok(()),
+        other => other,
+    }
 }
 
 /// Detect (and best-effort remove) dangling symlinks under a materialized
@@ -361,11 +467,15 @@ pub(crate) fn materialize_from_shared(
 /// materialized directory: a non-zero return means the payload is gone and
 /// they must fall through to re-materialization instead of loading.
 ///
-/// Removal is best-effort (failures are logged and still counted) so callers
-/// always learn the directory is unusable even when cleanup itself fails.
-/// Regular files and symlinks that still resolve are never touched.
+/// Removal only happens when the target is definitively gone
+/// (`ErrorKind::NotFound`); a target that errors for another reason
+/// (permissions, symlink loop, unreachable mount) is counted — so the caller
+/// still refuses to load from the directory — but not deleted, since the
+/// error may be transient. Removal itself is best-effort (failures are
+/// logged and still counted). Regular files and symlinks that resolve are
+/// never touched.
 pub(crate) fn remove_dangling_files(dir: &Path) -> usize {
-    fn walk(dir: &Path, dangling: &mut usize) {
+    fn walk(dir: &Path, unusable: &mut usize) {
         let Ok(entries) = std::fs::read_dir(dir) else {
             return;
         };
@@ -375,24 +485,70 @@ pub(crate) fn remove_dangling_files(dir: &Path) -> usize {
             };
             let path = entry.path();
             if file_type.is_dir() {
-                walk(&path, dangling);
-            } else if file_type.is_symlink() && std::fs::metadata(&path).is_err() {
-                *dangling += 1;
-                if let Err(e) = std::fs::remove_file(&path) {
-                    log::debug!(
-                        target: "xybrid_sdk",
-                        "Failed to remove dangling symlink {}: {}",
-                        path.display(),
-                        e
-                    );
+                walk(&path, unusable);
+            } else if file_type.is_symlink() {
+                match std::fs::metadata(&path) {
+                    Ok(_) => {}
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                        *unusable += 1;
+                        if let Err(e) = std::fs::remove_file(&path) {
+                            log::debug!(
+                                target: "xybrid_sdk",
+                                "Failed to remove dangling symlink {}: {}",
+                                path.display(),
+                                e
+                            );
+                        }
+                    }
+                    Err(e) => {
+                        *unusable += 1;
+                        log::debug!(
+                            target: "xybrid_sdk",
+                            "Symlink {} is unreadable ({}); leaving it in place",
+                            path.display(),
+                            e
+                        );
+                    }
                 }
             }
         }
     }
 
-    let mut dangling = 0;
-    walk(dir, &mut dangling);
-    dangling
+    let mut unusable = 0;
+    walk(dir, &mut unusable);
+    unusable
+}
+
+/// Remove `model_metadata.json` from a materialized dir if (and only if) it
+/// was auto-generated (`"auto_generated": true`).
+///
+/// Called when healing found dangling links in a mutable (unpinned)
+/// materialized dir: the payload about to be re-materialized may come from a
+/// newer commit, and metadata generated against the old commit's files must
+/// not survive to describe the new ones. Hand-written metadata (no
+/// `auto_generated` flag) is preserved — replacing it is the user's call.
+pub(crate) fn remove_auto_generated_metadata(dir: &Path) {
+    let path = dir.join("model_metadata.json");
+    let auto_generated = std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|contents| serde_json::from_str::<serde_json::Value>(&contents).ok())
+        .is_some_and(|value| value.get("auto_generated") == Some(&serde_json::Value::Bool(true)));
+    if auto_generated {
+        if let Err(e) = std::fs::remove_file(&path) {
+            log::debug!(
+                target: "xybrid_sdk",
+                "Failed to remove auto-generated metadata {}: {}",
+                path.display(),
+                e
+            );
+        } else {
+            log::debug!(
+                target: "xybrid_sdk",
+                "Removed stale auto-generated metadata {}; it will be regenerated",
+                path.display()
+            );
+        }
+    }
 }
 
 #[cfg(test)]
@@ -632,35 +788,135 @@ mod tests {
 
     #[test]
     fn shared_cache_root_resolution_order() {
+        let home = || Some(PathBuf::from("/home"));
+        // HF_HUB_CACHE wins over everything.
         assert_eq!(
             resolve_shared_cache_root(
-                Some("/hub/custom".into()),
+                Some("/hub/new".into()),
+                Some("/hub/legacy".into()),
                 Some("/hf/home".into()),
-                Some("/home".into())
+                Some("/xdg".into()),
+                home()
             ),
-            Some(PathBuf::from("/hub/custom"))
+            Some(PathBuf::from("/hub/new"))
         );
-        // An empty HUGGINGFACE_HUB_CACHE falls through to HF_HOME.
+        // Legacy HUGGINGFACE_HUB_CACHE is next.
+        assert_eq!(
+            resolve_shared_cache_root(
+                None,
+                Some("/hub/legacy".into()),
+                Some("/hf/home".into()),
+                Some("/xdg".into()),
+                home()
+            ),
+            Some(PathBuf::from("/hub/legacy"))
+        );
+        // Empty values fall through instead of resolving to "".
         assert_eq!(
             resolve_shared_cache_root(
                 Some(String::new()),
+                Some(String::new()),
                 Some("/hf/home".into()),
-                Some("/home".into())
+                None,
+                home()
             ),
             Some(PathBuf::from("/hf/home").join("hub"))
         );
-        // HF_HOME beats the home-directory default.
+        // HF_HOME beats XDG_CACHE_HOME and the home default.
         assert_eq!(
-            resolve_shared_cache_root(None, Some("/hf/home".into()), Some("/home".into())),
+            resolve_shared_cache_root(
+                None,
+                None,
+                Some("/hf/home".into()),
+                Some("/xdg".into()),
+                home()
+            ),
             Some(PathBuf::from("/hf/home").join("hub"))
+        );
+        // XDG_CACHE_HOME beats the home default.
+        assert_eq!(
+            resolve_shared_cache_root(None, None, None, Some("/xdg".into()), home()),
+            Some(PathBuf::from("/xdg/huggingface/hub"))
         );
         // No env at all: ~/.cache/huggingface/hub.
         assert_eq!(
-            resolve_shared_cache_root(None, None, Some("/home".into())),
+            resolve_shared_cache_root(None, None, None, None, home()),
             Some(PathBuf::from("/home/.cache/huggingface/hub"))
         );
+        // Tilde values expand against the home directory.
+        assert_eq!(
+            resolve_shared_cache_root(Some("~/hf-hub".into()), None, None, None, home()),
+            Some(PathBuf::from("/home/hf-hub"))
+        );
+        assert_eq!(
+            resolve_shared_cache_root(None, None, Some("~".into()), None, home()),
+            Some(PathBuf::from("/home").join("hub"))
+        );
+        // A tilde value with no known home falls through to the next source.
+        assert_eq!(
+            resolve_shared_cache_root(
+                Some("~/hf-hub".into()),
+                Some("/hub/legacy".into()),
+                None,
+                None,
+                None
+            ),
+            Some(PathBuf::from("/hub/legacy"))
+        );
         // No home directory: None — the probe is skipped, never a panic.
-        assert_eq!(resolve_shared_cache_root(None, None, None), None);
+        assert_eq!(
+            resolve_shared_cache_root(None, None, None, None, None),
+            None
+        );
+    }
+
+    #[test]
+    fn unsafe_revisions_and_ref_contents_are_rejected() {
+        let tmp = TempDir::new().unwrap();
+        let folder = repo_folder(REPO);
+        build_snapshot(tmp.path(), COMMIT_MAIN);
+
+        // A traversal or absolute revision must never be joined into a path.
+        // Plant a well-formed "ref file" outside refs/ to prove it is not
+        // read: the lookup must fail on the name alone.
+        write_file(tmp.path(), &format!("{folder}/outside"), COMMIT_MAIN);
+        assert!(find_with_root(tmp.path(), Some("../outside")).is_none());
+        assert!(find_with_root(tmp.path(), Some("refs/../../outside")).is_none());
+        let absolute = tmp.path().join(&folder).join("outside");
+        assert!(find_with_root(tmp.path(), Some(absolute.to_str().unwrap())).is_none());
+
+        // Ref contents that are not a 40-hex commit SHA are ignored: an
+        // absolute path, a traversal, or junk must never become a snapshot
+        // lookup key.
+        for (name, contents) in [
+            ("abs", "/etc/passwd"),
+            ("traversal", "../../../outside"),
+            ("junk", "not-a-commit"),
+            ("empty", ""),
+            ("oversized", &"a".repeat(4096) as &str),
+        ] {
+            write_file(tmp.path(), &format!("{folder}/refs/{name}"), contents);
+            assert!(
+                find_with_root(tmp.path(), Some(name)).is_none(),
+                "ref '{name}' with contents {contents:?} must be rejected"
+            );
+        }
+
+        // Nested ref names (Hugging Face PR refs) still work.
+        write_file(tmp.path(), &format!("{folder}/refs/pr/123"), COMMIT_MAIN);
+        let snapshot = find_with_root(tmp.path(), Some("pr/123")).unwrap();
+        assert_eq!(snapshot.commit, COMMIT_MAIN);
+    }
+
+    #[test]
+    fn unsafe_repo_ids_are_not_probed() {
+        let tmp = TempDir::new().unwrap();
+        for repo in ["../escape/x", "a/../b", "org\\model", "", "/abs/x", "a//b"] {
+            assert!(
+                find_shared_snapshot_with_root(tmp.path(), repo, None).is_none(),
+                "repo id {repo:?} must not be probed"
+            );
+        }
     }
 
     #[cfg(unix)]
@@ -754,5 +1010,55 @@ mod tests {
 
         assert_eq!(remove_dangling_files(&dir), 0);
         assert_eq!(remove_dangling_files(&tmp.path().join("absent")), 0);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn remove_dangling_files_counts_but_keeps_unreadable_symlinks() {
+        let tmp = TempDir::new().unwrap();
+        let dir = tmp.path().join("materialized");
+        std::fs::create_dir_all(&dir).unwrap();
+        // A symlink loop errors with something other than NotFound: the dir
+        // must be reported unusable, but the entry must not be deleted.
+        std::os::unix::fs::symlink(dir.join("loop"), dir.join("loop")).unwrap();
+
+        assert_eq!(remove_dangling_files(&dir), 1);
+        assert!(dir.join("loop").symlink_metadata().is_ok(), "not deleted");
+    }
+
+    #[test]
+    fn metadata_only_snapshot_is_not_reused() {
+        let tmp = TempDir::new().unwrap();
+        let folder = repo_folder(REPO);
+        write_file(tmp.path(), &format!("{folder}/refs/main"), COMMIT_MAIN);
+        // model_metadata.json without any weight file is not a usable model.
+        write_file(
+            tmp.path(),
+            &format!("{folder}/snapshots/{COMMIT_MAIN}/model_metadata.json"),
+            "{}",
+        );
+
+        assert!(find_with_root(tmp.path(), None).is_none());
+    }
+
+    #[test]
+    fn remove_auto_generated_metadata_spares_hand_written_files() {
+        let tmp = TempDir::new().unwrap();
+        let generated = tmp.path().join("generated");
+        write_file(
+            &generated,
+            "model_metadata.json",
+            r#"{"model_id":"m","auto_generated":true}"#,
+        );
+        remove_auto_generated_metadata(&generated);
+        assert!(!generated.join("model_metadata.json").exists());
+
+        let hand_written = tmp.path().join("hand-written");
+        write_file(&hand_written, "model_metadata.json", r#"{"model_id":"m"}"#);
+        remove_auto_generated_metadata(&hand_written);
+        assert!(hand_written.join("model_metadata.json").exists());
+
+        // Absent file: no panic, nothing created.
+        remove_auto_generated_metadata(&tmp.path().join("absent"));
     }
 }

@@ -1938,6 +1938,100 @@ impl ModelLoader {
         })
     }
 
+    /// Try to load `repo` entirely from the shared Hugging Face cache with
+    /// zero network I/O.
+    ///
+    /// `None` means no usable snapshot (absent repo, unresolvable revision,
+    /// or an incomplete selection) — the caller proceeds with its own flow.
+    /// `Some(result)` means a complete snapshot was found and the load was
+    /// attempted from it.
+    ///
+    /// Because the revision resolves through the shared cache's *local* refs,
+    /// callers must only use this where staleness is acceptable: a revision
+    /// pinned to an immutable commit SHA, or an offline fallback (with a
+    /// warning) when the Hub API is unreachable. The online path instead
+    /// resolves through the Hub API and reuses shared files per-file.
+    #[cfg(feature = "huggingface")]
+    fn try_load_from_shared_snapshot<F>(
+        &self,
+        cache_layout: &CacheLayout,
+        repo: &str,
+        revision: Option<&str>,
+        variant: Option<&str>,
+        progress_callback: &F,
+    ) -> Option<SdkResult<XybridModel>>
+    where
+        F: Fn(f32),
+    {
+        let snapshot = crate::cache::hf_shared::find_shared_snapshot(repo, revision)?;
+        log::debug!(target: "xybrid_sdk", "Shared Hugging Face cache snapshot for '{}' at commit {}", repo, snapshot.commit);
+        let shared_files =
+            crate::cache::hf_shared::select_snapshot_files(&snapshot, repo, variant)?;
+        let result = (|| {
+            let cache_dir = huggingface_materialized_cache_dir(
+                cache_layout,
+                repo,
+                revision.map(|_| snapshot.commit.as_str()),
+                variant,
+            );
+            std::fs::create_dir_all(&cache_dir)?;
+            let shared_files: Vec<&str> = shared_files.iter().map(String::as_str).collect();
+            crate::cache::hf_shared::materialize_from_shared(&snapshot, &shared_files, &cache_dir)
+                .map_err(|e| {
+                    SdkError::cache_src(
+                        format!(
+                            "Failed to materialize '{}' from shared Hugging Face cache",
+                            repo
+                        ),
+                        e,
+                    )
+                })?;
+            progress_callback(1.0);
+
+            let metadata_path = cache_dir.join("model_metadata.json");
+            if !metadata_path.exists() {
+                log::info!(
+                    target: "xybrid_sdk",
+                    "No model_metadata.json in shared-cache snapshot of '{}', attempting auto-generation...",
+                    repo
+                );
+                match crate::metadata_gen::generate_metadata(&cache_dir, repo) {
+                    Ok((_metadata, _task_inference)) => {
+                        log::info!(
+                            target: "xybrid_sdk",
+                            "Auto-generated model_metadata.json for '{}'. \
+                             Review and adjust if inference results are unexpected.",
+                            repo
+                        );
+                    }
+                    Err(e) => {
+                        return Err(SdkError::MetadataNotFound(format!(
+                            "HuggingFace repo '{}' does not contain model_metadata.json and \
+                             auto-generation failed: {}. \
+                             Create one manually — see docs/sdk/MODEL_METADATA.md",
+                            repo, e
+                        )));
+                    }
+                }
+            }
+
+            let model = self.load_from_directory(&cache_dir)?;
+            if let Some(requested_revision) = revision {
+                cache_layout.record_huggingface_revision(
+                    repo,
+                    requested_revision,
+                    &snapshot.commit,
+                    variant,
+                )?;
+            } else {
+                cache_layout.record_huggingface_repo(repo)?;
+            }
+            log::info!(target: "xybrid_sdk", "Reusing model from local Hugging Face cache: {}", cache_dir.display());
+            Ok(model)
+        })();
+        Some(result)
+    }
+
     /// Load a model from HuggingFace Hub.
     ///
     /// Only downloads the selected GGUF variant (defaults to Q4_K_M) plus essential
@@ -1970,84 +2064,31 @@ impl ModelLoader {
                     "Cached copy of '{}' had {} dangling symlink(s) (source cache pruned?); re-materializing",
                     repo, dangling
                 );
+                // The re-materialized payload may come from a newer commit;
+                // metadata generated against the old files must not survive
+                // to describe the new ones.
+                crate::cache::hf_shared::remove_auto_generated_metadata(&cache_dir);
             }
         }
 
-        // Before falling back to the network, check whether the standard
-        // shared Hugging Face cache (~/.cache/huggingface/hub — populated by
-        // `huggingface-cli download`, transformers, etc.) already holds this
-        // repo's snapshot. If it does, materialize from it with zero network
-        // I/O. On iOS/Android `find_shared_snapshot` always returns `None`,
+        // A revision pinned to a full commit SHA is immutable, so a complete
+        // snapshot of it in the standard shared Hugging Face cache
+        // (~/.cache/huggingface/hub — populated by `huggingface-cli
+        // download`, transformers, etc.) can be reused with zero network I/O.
+        // Mutable revisions (branches/tags, or none) must resolve through the
+        // Hub API first so a stale local ref never wins over the remote —
+        // their shared-cache reuse happens per-file in the download loop
+        // below. On iOS/Android `find_shared_snapshot` always returns `None`,
         // keeping mobile behavior unchanged.
-        if let Some(snapshot) = crate::cache::hf_shared::find_shared_snapshot(repo, revision) {
-            log::debug!(target: "xybrid_sdk", "Shared Hugging Face cache snapshot for '{}' at commit {}", repo, snapshot.commit);
-            if let Some(shared_files) =
-                crate::cache::hf_shared::select_snapshot_files(&snapshot, repo, variant)
-            {
-                let cache_dir = huggingface_materialized_cache_dir(
-                    &cache_layout,
-                    repo,
-                    revision.map(|_| snapshot.commit.as_str()),
-                    variant,
-                );
-                std::fs::create_dir_all(&cache_dir)?;
-                let shared_files: Vec<&str> = shared_files.iter().map(String::as_str).collect();
-                crate::cache::hf_shared::materialize_from_shared(
-                    &snapshot,
-                    &shared_files,
-                    &cache_dir,
-                )
-                .map_err(|e| {
-                    SdkError::cache_src(
-                        format!(
-                            "Failed to materialize '{}' from shared Hugging Face cache",
-                            repo
-                        ),
-                        e,
-                    )
-                })?;
-                _progress_callback(1.0);
-
-                let metadata_path = cache_dir.join("model_metadata.json");
-                if !metadata_path.exists() {
-                    log::info!(
-                        target: "xybrid_sdk",
-                        "No model_metadata.json in shared-cache snapshot of '{}', attempting auto-generation...",
-                        repo
-                    );
-                    match crate::metadata_gen::generate_metadata(&cache_dir, repo) {
-                        Ok((_metadata, _task_inference)) => {
-                            log::info!(
-                                target: "xybrid_sdk",
-                                "Auto-generated model_metadata.json for '{}'. \
-                                 Review and adjust if inference results are unexpected.",
-                                repo
-                            );
-                        }
-                        Err(e) => {
-                            return Err(SdkError::MetadataNotFound(format!(
-                                "HuggingFace repo '{}' does not contain model_metadata.json and \
-                                 auto-generation failed: {}. \
-                                 Create one manually — see docs/sdk/MODEL_METADATA.md",
-                                repo, e
-                            )));
-                        }
-                    }
-                }
-
-                let model = self.load_from_directory(&cache_dir)?;
-                if let Some(requested_revision) = revision {
-                    cache_layout.record_huggingface_revision(
-                        repo,
-                        requested_revision,
-                        &snapshot.commit,
-                        variant,
-                    )?;
-                } else {
-                    cache_layout.record_huggingface_repo(repo)?;
-                }
-                log::info!(target: "xybrid_sdk", "Reusing model from local Hugging Face cache: {}", cache_dir.display());
-                return Ok(model);
+        if revision.is_some_and(crate::cache::hf_shared::is_full_commit_sha) {
+            if let Some(result) = self.try_load_from_shared_snapshot(
+                &cache_layout,
+                repo,
+                revision,
+                variant,
+                &_progress_callback,
+            ) {
+                return result;
             }
         }
 
@@ -2098,10 +2139,26 @@ impl ModelLoader {
                             }
                             log::warn!(
                                 target: "xybrid_sdk",
-                                "Offline cache for '{}'@{} has dangling symlinks (source cache pruned?) and cannot be re-downloaded without network",
+                                "Offline cache for '{}'@{} has dangling symlinks (source cache pruned?); trying the shared Hugging Face cache",
                                 repo, requested_revision
                             );
                         }
+                    }
+                    // Offline fallback: resolve the revision through the
+                    // shared cache's local refs instead of the Hub API.
+                    if let Some(result) = self.try_load_from_shared_snapshot(
+                        &cache_layout,
+                        repo,
+                        revision,
+                        variant,
+                        &_progress_callback,
+                    ) {
+                        log::warn!(
+                            target: "xybrid_sdk",
+                            "Hub API unreachable; falling back to the shared Hugging Face cache for '{}'@{} — a mutable revision may be stale",
+                            repo, requested_revision
+                        );
+                        return result;
                     }
                     return Err(SdkError::network_src(
                         format!("Failed to get HuggingFace repo info for '{}'", repo),
@@ -2147,12 +2204,31 @@ impl ModelLoader {
         } else {
             let cache_dir = huggingface_materialized_cache_dir(&cache_layout, repo, None, variant);
             let repo_api = api.repo(Repo::new(repo.to_string(), RepoType::Model));
-            let repo_info = repo_api.info().map_err(|error| {
-                SdkError::network_src(
-                    format!("Failed to get HuggingFace repo info for '{}'", repo),
-                    error,
-                )
-            })?;
+            let repo_info = match repo_api.info() {
+                Ok(info) => info,
+                Err(error) => {
+                    // Offline fallback: resolve `main`/`master` through the
+                    // shared cache's local refs instead of the Hub API.
+                    if let Some(result) = self.try_load_from_shared_snapshot(
+                        &cache_layout,
+                        repo,
+                        None,
+                        variant,
+                        &_progress_callback,
+                    ) {
+                        log::warn!(
+                            target: "xybrid_sdk",
+                            "Hub API unreachable; falling back to the shared Hugging Face cache for '{}' — the local ref may be stale",
+                            repo
+                        );
+                        return result;
+                    }
+                    return Err(SdkError::network_src(
+                        format!("Failed to get HuggingFace repo info for '{}'", repo),
+                        error,
+                    ));
+                }
+            };
             (cache_dir, repo_api, repo_info)
         };
 
@@ -2211,25 +2287,21 @@ impl ModelLoader {
         // Create cache directory
         std::fs::create_dir_all(&cache_dir)?;
 
-        let total_files = files_to_download.len();
-        for (i, filename) in files_to_download.iter().enumerate() {
-            log::debug!(target: "xybrid_sdk", "Downloading [{}/{}]: {}", i + 1, total_files, filename);
+        // Shared Hugging Face cache snapshot at the exact commit the Hub API
+        // just resolved, if the user already has one (via `huggingface-cli
+        // download`, transformers, ...). Files it holds are reused below
+        // instead of downloaded; because resolution went through the Hub API,
+        // a stale local ref can never divert this.
+        let shared_snapshot =
+            crate::cache::hf_shared::find_shared_snapshot(repo, Some(&repo_info.sha));
 
+        let total_files = files_to_download.len();
+        let mut reused_files = 0usize;
+        for (i, filename) in files_to_download.iter().enumerate() {
             // Report approximate progress
             _progress_callback((i as f32) / (total_files as f32));
 
-            // Download file (hf-hub caches internally)
-            let cached_path = repo_api.get(filename).map_err(|e| {
-                SdkError::network_src(
-                    format!("Failed to download '{}' from '{}'", filename, repo),
-                    e,
-                )
-            })?;
-
-            // Create target path in our cache directory
             let target_path = cache_dir.join(filename);
-
-            // Create parent directories if the file is in a subdirectory
             if let Some(parent) = target_path.parent() {
                 std::fs::create_dir_all(parent)?;
             }
@@ -2239,31 +2311,54 @@ impl ModelLoader {
                 continue;
             }
 
-            // A dangling symlink from an earlier materialization reports
-            // `!exists()` but still occupies the directory entry, so linking
-            // over it would fail; remove it first.
-            if target_path.symlink_metadata().is_ok() {
-                std::fs::remove_file(&target_path)?;
+            // Reuse the file from the shared cache when the snapshot holds
+            // it; any failure here falls back to the download below instead
+            // of failing the load.
+            if let Some(snapshot) = &shared_snapshot {
+                let source_path = snapshot.dir.join(filename);
+                if source_path.is_file() {
+                    match crate::cache::hf_shared::link_or_copy(&source_path, &target_path) {
+                        Ok(()) => {
+                            log::debug!(target: "xybrid_sdk", "Reusing [{}/{}] from shared Hugging Face cache: {}", i + 1, total_files, filename);
+                            reused_files += 1;
+                            continue;
+                        }
+                        Err(e) => {
+                            log::debug!(
+                                target: "xybrid_sdk",
+                                "Failed to reuse '{}' from shared Hugging Face cache ({}); downloading instead",
+                                filename, e
+                            );
+                        }
+                    }
+                }
             }
 
-            // Create symlink to hf-hub's cached file (avoids duplication)
-            #[cfg(unix)]
-            {
-                std::os::unix::fs::symlink(&cached_path, &target_path).map_err(|e| {
-                    SdkError::IoError(std::io::Error::other(format!(
-                        "Failed to symlink {} -> {}: {}",
-                        cached_path.display(),
-                        target_path.display(),
-                        e
-                    )))
-                })?;
-            }
+            log::debug!(target: "xybrid_sdk", "Downloading [{}/{}]: {}", i + 1, total_files, filename);
 
-            // On Windows, copy the file instead
-            #[cfg(not(unix))]
-            {
-                std::fs::copy(&cached_path, &target_path)?;
-            }
+            // Download file (hf-hub caches internally), then materialize it
+            // (symlink on unix, copy elsewhere — avoids duplication)
+            let cached_path = repo_api.get(filename).map_err(|e| {
+                SdkError::network_src(
+                    format!("Failed to download '{}' from '{}'", filename, repo),
+                    e,
+                )
+            })?;
+            crate::cache::hf_shared::link_or_copy(&cached_path, &target_path).map_err(|e| {
+                SdkError::IoError(std::io::Error::other(format!(
+                    "Failed to materialize {} -> {}: {}",
+                    cached_path.display(),
+                    target_path.display(),
+                    e
+                )))
+            })?;
+        }
+        if reused_files > 0 {
+            log::info!(
+                target: "xybrid_sdk",
+                "Reused {}/{} files for '{}' from the shared Hugging Face cache",
+                reused_files, total_files, repo
+            );
         }
 
         // Report completion
