@@ -239,8 +239,15 @@ Converts text to phoneme token IDs for TTS models.
 |---------|-------------|-------|
 | `MisakiDictionary` | None (pure Rust) | **Recommended.** Bundled dictionaries + rule-based G2P fallback |
 | `CmuDictionary` | None (pure Rust) | Legacy ARPABET-based, English only |
-| `EspeakNG` | `espeak-ng` system install | Multi-language support |
+| `EspeakNG` | `espeak-ng` binary on `PATH` | Multi-language; desktop/server only (see below) |
 | `OpenPhonemizer` | ONNX model (~59MB) | Dictionary + neural G2P fallback |
+
+`EspeakNG` shells out to the `espeak-ng` executable at inference time — it is
+not linked or bundled. That makes it desktop/server-only: iOS and Android
+cannot spawn system binaries, so models that declare this backend (Piper
+voices, for example) do not run on mobile. There is no load-time check; a
+missing binary surfaces as an inference error with install instructions
+(`brew install espeak-ng` on macOS, `apt-get install espeak-ng` on Linux).
 
 **Input**: `Envelope::Text(string)` → **Output**: Token IDs (i64)
 
