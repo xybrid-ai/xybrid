@@ -142,11 +142,29 @@ pub(crate) fn touch(last_accessed: &AtomicU64) {
 
 /// A registry entry resolved to a live handle, taken while the registry lock
 /// was held and used after it was released.
-struct Candidate {
+pub(crate) struct Candidate {
     handle: Arc<RwLock<ModelHandle>>,
     model_id: String,
     last_accessed_ms: u64,
     approx_size_mb: Option<u32>,
+}
+
+impl Candidate {
+    /// Build a candidate directly, for tests that need handles in known states
+    /// rather than whatever the process-global registry happens to hold.
+    #[cfg(test)]
+    pub(crate) fn for_test(
+        handle: &Arc<RwLock<ModelHandle>>,
+        model_id: &str,
+        last_accessed_ms: u64,
+    ) -> Self {
+        Self {
+            handle: Arc::clone(handle),
+            model_id: model_id.to_string(),
+            last_accessed_ms,
+            approx_size_mb: None,
+        }
+    }
 }
 
 /// Sort key placing least-recently-used first, breaking ties toward the larger
@@ -209,6 +227,20 @@ pub(crate) fn eviction_budget(pressure: MemoryPressure, loaded_count: usize) -> 
 /// Whether a reading still calls for eviction.
 fn pressure_calls_for_eviction(pressure: MemoryPressure) -> bool {
     matches!(pressure, MemoryPressure::Warn | MemoryPressure::Critical)
+}
+
+/// Whether this handle currently holds weights, and so is worth counting
+/// toward an eviction budget.
+///
+/// Uses `try_read` so a sweep never blocks on a busy model. A handle whose
+/// lock is already held for writing is mid-run, which means it is resident —
+/// count it, and let `try_evict_handle` skip it a moment later.
+pub(crate) fn holds_weights(handle: &RwLock<ModelHandle>) -> bool {
+    match handle.try_read() {
+        Ok(guard) => guard.state == LoadState::Loaded,
+        Err(TryLockError::Poisoned(poisoned)) => poisoned.into_inner().state == LoadState::Loaded,
+        Err(TryLockError::WouldBlock) => true,
+    }
 }
 
 fn try_evict(candidate: &Candidate) -> bool {
@@ -281,7 +313,26 @@ pub fn release_memory() -> usize {
 /// Re-reads pressure after each eviction so a sweep stops as soon as the device
 /// recovers instead of clearing the whole registry.
 pub(crate) fn evict_for_pressure(provider: &dyn ResourceSnapshotProvider) -> usize {
-    let candidates = ranked_candidates();
+    sweep(ranked_candidates(), provider)
+}
+
+/// The sweep itself, over an already-ranked candidate list.
+///
+/// Split from [`evict_for_pressure`] so the budget accounting can be tested
+/// against handles in known states, without going through the process-global
+/// registry (which other tests share).
+pub(crate) fn sweep(ranked: Vec<Candidate>, provider: &dyn ResourceSnapshotProvider) -> usize {
+    // Only models that actually hold weights may count toward the budget or be
+    // spent from it. The registry also holds evicted models, explicitly
+    // unloaded ones, and speculative placeholders that have never loaded —
+    // none of which can be released. Counting them would break the `Warn` rule
+    // in both directions: a budget of one spent on an unloadable entry frees
+    // nothing, and two entries of which only one is loaded would look like
+    // "more than one loaded" and evict the sole loaded model.
+    let candidates: Vec<Candidate> = ranked
+        .into_iter()
+        .filter(|candidate| holds_weights(&candidate.handle))
+        .collect();
     let pressure = provider.current_snapshot(PRESSURE_MAX_AGE).memory_pressure;
     let budget = eviction_budget(pressure, candidates.len());
     if budget == 0 {

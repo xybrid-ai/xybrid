@@ -2734,12 +2734,18 @@ impl XybridModel {
     /// Whether this run should be served speculatively from the cloud.
     ///
     /// `true` when this model was loaded under speculative cloud fallback *and*
-    /// the local handle isn't ready yet. Once the background download swaps in a
-    /// `loaded` handle this returns `false` and runs go local. Checked without
-    /// holding the handle write lock so the cloud round-trip never blocks a
-    /// concurrent local promotion.
+    /// the local weights have never become ready. Once the background download
+    /// swaps in a loaded handle this returns `false` and runs go local. Checked
+    /// without holding the handle write lock so the cloud round-trip never
+    /// blocks a concurrent local promotion.
+    ///
+    /// Tests `Unloaded` specifically rather than `!is_loaded()`. An *evicted*
+    /// speculative model has working local weights on disk and must reload
+    /// them, not fall back to the gateway: `!is_loaded()` is also true for
+    /// `Evicted`, which would silently turn a downloaded model into a
+    /// permanently cloud-served one the first time auto-release touched it.
     fn cloud_serve(&self) -> bool {
-        self.speculative.is_some() && !self.is_loaded()
+        self.speculative.is_some() && self.load_state() == LoadState::Unloaded
     }
 
     /// Whether runs are currently being answered by the cloud because the local
@@ -4605,18 +4611,32 @@ impl XybridModel {
         // shared with a session (see `ModelHandle::executor_is_shared`).
         self.touch();
 
-        // Recover from poisoned RwLock to prevent permanent lock errors
-        let handle = self.handle.read().unwrap_or_else(|e| e.into_inner());
-
-        // The only guard site that takes a *read* lock, so it can't flip an
-        // evicted model back to `Loaded` — and doesn't need to. The executor
-        // handed to the session below is lazy: for an auto-released model it
-        // is one rooted at `model_dir`, so the session cold-starts from the
-        // cached weights instead of failing. A user-unloaded model still
-        // can't stream, because nothing guarantees its directory survives.
-        if handle.state == LoadState::Unloaded {
-            return Err(SdkError::NotLoaded);
+        // The session below takes a reference to this model's executor and
+        // materializes the weights into it. So an evicted model has to be
+        // promoted back to `Loaded` *first*: if the handle stayed `Evicted`
+        // while its executor went resident, the model would be both loaded in
+        // memory and permanently unevictable, since auto-release only touches
+        // `Loaded` handles. That is a leak for the life of the process.
+        //
+        // Read first and only upgrade to a write lock on the evicted path, so
+        // the common case still cannot block behind an in-flight run. A
+        // user-unloaded model still can't stream — nothing guarantees its
+        // directory survives.
+        {
+            // Recover from poisoned RwLock to prevent permanent lock errors
+            let state = self.handle.read().unwrap_or_else(|e| e.into_inner()).state;
+            match state {
+                LoadState::Unloaded => return Err(SdkError::NotLoaded),
+                LoadState::Evicted => self
+                    .handle
+                    .write()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .ensure_runnable()?,
+                LoadState::Loaded => {}
+            }
         }
+
+        let handle = self.handle.read().unwrap_or_else(|e| e.into_inner());
 
         // Convert to core StreamConfig
         let core_config = CoreStreamConfig {
@@ -4915,6 +4935,165 @@ mod tests {
             "the same model is evictable once the run finishes"
         );
         assert_eq!(busy.load_state(), LoadState::Evicted);
+    }
+
+    /// An evicted *speculative* model has real weights on disk. It must reload
+    /// them, not fall back to the gateway — otherwise the first auto-release
+    /// would quietly convert a downloaded model into a permanently
+    /// cloud-served one, and every later run would pay a network round trip.
+    #[test]
+    fn eviction_does_not_send_a_downloaded_speculative_model_back_to_cloud() {
+        let model = XybridModel {
+            speculative: Some(Arc::new(SpeculativeDownload::default())),
+            ..test_loaded_model(false)
+        };
+        // The download landed, so runs are local.
+        assert!(!model.cloud_serve(), "a loaded local handle serves locally");
+
+        model.handle.write().expect("unpoisoned").evict();
+
+        assert_eq!(model.load_state(), LoadState::Evicted);
+        assert!(
+            !model.cloud_serve(),
+            "an evicted speculative model must reload locally, not route to cloud"
+        );
+    }
+
+    /// A speculative model whose weights never arrived still serves from the
+    /// gateway — the fix above must not disable speculation itself.
+    #[test]
+    fn a_never_loaded_speculative_model_still_serves_from_cloud() {
+        let model = XybridModel {
+            speculative: Some(Arc::new(SpeculativeDownload::default())),
+            ..test_loaded_model(false)
+        };
+        model.handle.write().expect("unpoisoned").state = LoadState::Unloaded;
+
+        assert!(model.cloud_serve(), "weights never landed -> cloud serves");
+    }
+
+    /// Opening a stream hands the session this model's executor, which then
+    /// materializes the weights into it. If the handle stayed `Evicted` the
+    /// model would be resident *and* unevictable forever, since auto-release
+    /// only touches `Loaded` handles.
+    #[test]
+    fn streaming_an_evicted_model_promotes_it_back_to_loaded() {
+        let model = test_loaded_model(true);
+        model.handle.write().expect("unpoisoned").evict();
+        assert_eq!(model.load_state(), LoadState::Evicted);
+
+        // The session itself cannot start from this fixture (no real weights
+        // on disk), but the guard must already have promoted the handle, and
+        // must not have refused the stream outright.
+        assert!(
+            !matches!(
+                model.stream(StreamConfig::default()),
+                Err(SdkError::NotLoaded)
+            ),
+            "an evicted model may still open a stream"
+        );
+        assert_eq!(
+            model.load_state(),
+            LoadState::Loaded,
+            "a streamed model must be evictable again once the stream ends"
+        );
+    }
+
+    /// Only models that actually hold weights may count toward an eviction
+    /// budget. Counting an evicted, unloaded, or never-loaded handle spends
+    /// budget that frees nothing.
+    #[test]
+    fn only_resident_models_count_toward_the_eviction_budget() {
+        let loaded = test_loaded_model(false);
+        assert!(crate::model_registry::holds_weights(&loaded.handle));
+
+        let evicted = test_loaded_model(false);
+        evicted.handle.write().expect("unpoisoned").evict();
+        assert!(!crate::model_registry::holds_weights(&evicted.handle));
+
+        let unloaded = test_loaded_model(false);
+        unloaded.unload().expect("unload succeeds");
+        assert!(!crate::model_registry::holds_weights(&unloaded.handle));
+
+        // A model mid-run holds its own write lock. It is resident, so it
+        // counts; `try_evict_handle` skips it a moment later.
+        let busy = test_loaded_model(false);
+        let guard = busy.handle.write().expect("unpoisoned");
+        assert!(crate::model_registry::holds_weights(&busy.handle));
+        drop(guard);
+    }
+
+    /// `Warn` keeps the most-recently-used model and evicts the rest — but
+    /// only counting models that are actually resident. One loaded model
+    /// alongside an unloadable registry entry is still *one* loaded model, so
+    /// nothing may be evicted; the naive count would see two and take the
+    /// sole loaded one.
+    #[test]
+    fn warn_pressure_ignores_unloadable_registry_entries() {
+        use crate::model_registry::Candidate;
+        use xybrid_core::device::MemoryPressure;
+
+        // The resident model is the *stalest*, so a budget computed over the
+        // unfiltered list would spend its one slot on exactly this model.
+        let only_loaded = test_loaded_model(false);
+        let fresher_but_evicted = test_loaded_model(false);
+        fresher_but_evicted
+            .handle
+            .write()
+            .expect("unpoisoned")
+            .evict();
+
+        // Stalest first, exactly as `ranked_candidates` would order them.
+        let ranked = vec![
+            Candidate::for_test(&only_loaded.handle, "only-loaded", 1),
+            Candidate::for_test(&fresher_but_evicted.handle, "fresher-evicted", 2),
+        ];
+
+        let evicted = crate::model_registry::sweep(ranked, &ConstantPressure(MemoryPressure::Warn));
+
+        assert_eq!(evicted, 0, "one resident model under Warn is never evicted");
+        assert_eq!(
+            only_loaded.load_state(),
+            LoadState::Loaded,
+            "the sole loaded model must survive"
+        );
+    }
+
+    /// With two genuinely resident models, `Warn` does evict the stalest —
+    /// the guard above must not disable the policy outright.
+    #[test]
+    fn warn_pressure_still_evicts_the_stalest_of_two_resident_models() {
+        use crate::model_registry::Candidate;
+        use xybrid_core::device::MemoryPressure;
+
+        let stale = test_loaded_model(false);
+        let fresh = test_loaded_model(false);
+        let ranked = vec![
+            Candidate::for_test(&stale.handle, "stale", 1),
+            Candidate::for_test(&fresh.handle, "fresh", 2),
+        ];
+
+        let evicted = crate::model_registry::sweep(ranked, &ConstantPressure(MemoryPressure::Warn));
+
+        assert_eq!(evicted, 1);
+        assert_eq!(stale.load_state(), LoadState::Evicted);
+        assert_eq!(fresh.load_state(), LoadState::Loaded);
+    }
+
+    /// Fixed pressure reading, for sweeps that should not depend on the host.
+    #[derive(Debug)]
+    struct ConstantPressure(xybrid_core::device::MemoryPressure);
+
+    impl xybrid_core::device::ResourceSnapshotProvider for ConstantPressure {
+        fn current_snapshot(
+            &self,
+            _max_age: std::time::Duration,
+        ) -> xybrid_core::device::ResourceSnapshot {
+            xybrid_core::device::ResourceSnapshot {
+                memory_pressure: self.0,
+                ..Default::default()
+            }
+        }
     }
 
     #[test]
