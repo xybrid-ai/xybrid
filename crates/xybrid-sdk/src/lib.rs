@@ -156,6 +156,7 @@ pub mod device;
 pub mod llm;
 pub mod metadata_gen;
 pub mod model;
+pub mod model_registry;
 pub mod pipeline;
 pub mod platform;
 pub mod registry_client;
@@ -220,9 +221,10 @@ pub use llm::{
 };
 pub use model::SdkError;
 pub use model::{
-    DownloadState, DownloadStatus, ModelLoader, SdkResult, SeamInfo, StreamConfig, StreamEvent,
-    StreamToken, XybridModel,
+    DownloadState, DownloadStatus, LoadState, ModelLoader, SdkResult, SeamInfo, StreamConfig,
+    StreamEvent, StreamToken, XybridModel,
 };
+pub use model_registry::{release_memory, AutoReleasePolicy};
 pub use platform::current_platform;
 pub use registry_client::{CacheStats, ModelSummary, RegistryClient, ResolvedVariant};
 pub use run_options::{AbortPolicy, AbortReason, AbortSignal, CancellationToken, RunOptions};
@@ -568,6 +570,39 @@ pub fn is_speculative_cloud_enabled() -> bool {
 
 /// Process-global speculative-cloud default. See [`set_speculative_cloud`].
 static SPECULATIVE_CLOUD: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Enable or disable automatic model release globally.
+///
+/// When enabled, loading a model while the device reports memory pressure
+/// first releases least-recently-used idle models. A released model reloads
+/// itself the next time it is used — no reload call is needed and no run
+/// starts failing. Individual loads override this with
+/// [`ModelLoader::with_auto_release`]. The flag persists in memory for the app
+/// lifetime.
+///
+/// [`release_memory`] ignores this flag: calling it *is* the consent.
+///
+/// # Examples
+/// ```
+/// xybrid_sdk::set_auto_release(true);
+/// assert!(xybrid_sdk::auto_release_policy().on_pressure);
+/// # xybrid_sdk::set_auto_release(false);
+/// ```
+pub fn set_auto_release(enabled: bool) {
+    AUTO_RELEASE.store(enabled, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// The process-global auto-release policy.
+///
+/// Reflects the most recent [`set_auto_release`] call; defaults to disabled.
+/// A per-load override via [`ModelLoader::with_auto_release`] takes precedence
+/// for that load.
+pub fn auto_release_policy() -> AutoReleasePolicy {
+    AutoReleasePolicy::from(AUTO_RELEASE.load(std::sync::atomic::Ordering::Relaxed))
+}
+
+/// Process-global auto-release default. See [`set_auto_release`].
+static AUTO_RELEASE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// Get the currently configured Xybrid API key (if set).
 ///

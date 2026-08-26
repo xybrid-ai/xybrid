@@ -410,20 +410,41 @@ public struct XybridStreamToken: Hashable, Equatable, Sendable {
     public var tokenId: Int64?
     public var index: UInt64
     public var cumulativeText: String
+    /// `"tool_calls"` when the turn ended on a parseable tool-call block.
     public var finishReason: String?
+    /// Tool calls parsed from the completed turn — populated on the
+    /// **terminal** token only (the one carrying `finish_reason`).
+    ///
+    /// Tool-call blocks are suppressed from the emitted stream, so there is
+    /// nothing in the token text to parse: a streaming caller halts here,
+    /// runs the tools, then continues the turn by streaming a
+    /// [`tool_results_envelope`] through the same call. Empty on every
+    /// mid-stream token and on turns that emitted no call.
+    public var toolCalls: [XybridToolCall]
+    /// The completed turn's raw output text, tool-call block included — pass
+    /// it to [`tool_results_envelope`] as `prior_assistant_text`.
+    ///
+    /// Present only alongside a non-empty [`Self::tool_calls`]. Not the same
+    /// as `cumulative_text`, which reports the *emitted* text with the
+    /// protocol blocks suppressed — which is why this field exists at all.
+    public var rawText: String?
 
     public init(
         token: String,
         tokenId: Int64?,
         index: UInt64,
         cumulativeText: String,
-        finishReason: String?
+        finishReason: String?,
+        toolCalls: [XybridToolCall],
+        rawText: String?
     ) {
         self.token = token
         self.tokenId = tokenId
         self.index = index
         self.cumulativeText = cumulativeText
         self.finishReason = finishReason
+        self.toolCalls = toolCalls
+        self.rawText = rawText
     }
 
     @inlinable static func decode(from reader: inout WireReader) -> XybridStreamToken {
@@ -432,7 +453,9 @@ public struct XybridStreamToken: Hashable, Equatable, Sendable {
             tokenId: reader.readOptional { reader in reader.readI64() },
             index: reader.readU64(),
             cumulativeText: reader.readString(),
-            finishReason: reader.readOptional { reader in reader.readString() }
+            finishReason: reader.readOptional { reader in reader.readString() },
+            toolCalls: reader.readArray { reader in XybridToolCall.decode(from: &reader) },
+            rawText: reader.readOptional { reader in reader.readString() }
         )
     }
 
@@ -442,6 +465,8 @@ public struct XybridStreamToken: Hashable, Equatable, Sendable {
         writer.writeU64(self.index)
         writer.writeString(self.cumulativeText)
         writer.writeOptional(self.finishReason) { writer, boltffiValue0 in writer.writeString(boltffiValue0) }
+        writer.writeArray(self.toolCalls) { writer, boltffiValue0 in boltffiValue0.encode(to: &writer) }
+        writer.writeOptional(self.rawText) { writer, boltffiValue0 in writer.writeString(boltffiValue0) }
     }
 }
 

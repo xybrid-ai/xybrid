@@ -222,8 +222,11 @@ impl FfiEnvelope {
     /// `prior_assistant_text` is that turn's raw output text, tool-call block
     /// included. Pass `results` in call order.
     ///
-    /// Only the immediately prior assistant turn is replayed, and continuation
-    /// runs on the non-streaming text path only.
+    /// Only the immediately prior assistant turn is replayed. A continuation
+    /// runs on every text path — batch, streaming, and both conversation-context
+    /// variants. Image-bearing conversations are the one exception and are
+    /// rejected: image embeddings cannot be re-evaluated from the composed
+    /// text prompt.
     #[frb(sync)]
     pub fn tool_results(
         user_text: String,

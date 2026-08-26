@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Tool calling works in a streaming chat.** A tools-bearing streaming run now
+  halts at the call boundary and hands back typed calls: the terminal stream
+  token carries `finish_reason: "tool_calls"`, the parsed `tool_calls`, and
+  `raw_text` (the turn's output *with* its protocol block, which is what the
+  continuation replays). Nothing needs parsing on the caller's side — call
+  blocks were already suppressed from the token feed. Exposed on every stream
+  token: Rust, Swift, Kotlin, Python, Unity C#, and Dart.
+- **`tool_results` continuations run on every text path.** `execute_with_context`,
+  `execute_streaming`, and `execute_streaming_with_context` compose the
+  continuation instead of rejecting it, so a chat screen keeps both its history
+  and its token-by-token output across a tool turn. Backed by a new
+  `LlmBackend::generate_raw_streaming`. Reference loop:
+  `crates/xybrid-core/examples/functiongemma_tools_streaming_context.rs`.
+
+### Changed
+
+- The only tool-continuation shape that still fails closed is an
+  **image-bearing conversation** — a continuation replays prior turns as a
+  composed text prompt, and image embeddings cannot be re-evaluated from text.
+  The error message and the tool-calling guide now say that it is a property of
+  the replay mechanism rather than an unfinished path.
+
 ### Planned
 
 - **Multimodal KV-prefix reuse**: the per-frame prefill cost lever for live vision — **deferred** from 0.2.0, not yet implemented.

@@ -1038,7 +1038,8 @@ fn load_natives_manifest(manifest_dir: &Path) -> Option<NativesManifest> {
             // A bumped format version means this script cannot be trusted to
             // read the rows correctly — decline the fast path outright.
             "version" => {
-                if fields.next() != Some("1") {
+                let format_version = fields.next();
+                if format_version != Some("1") {
                     return None;
                 }
             }
