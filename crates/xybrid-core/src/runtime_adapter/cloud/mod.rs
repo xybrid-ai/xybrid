@@ -486,6 +486,10 @@ fn stream_with_gateway_sse(
                 index: token_index,
                 cumulative_text: cumulative.clone(),
                 finish_reason: choice_finish.clone(),
+                // The cloud gateway rejects tool-bearing requests today, so a
+                // cloud stream never carries parsed calls.
+                tool_calls: Vec::new(),
+                raw_text: None,
             };
             terminal_emitted = choice_finish.is_some();
             token_index += 1;
@@ -503,6 +507,8 @@ fn stream_with_gateway_sse(
             index: token_index,
             cumulative_text: cumulative.clone(),
             finish_reason: Some(reason.clone()),
+            tool_calls: Vec::new(),
+            raw_text: None,
         };
         finish_reason = Some(reason);
         on_token(token).map_err(|e| {

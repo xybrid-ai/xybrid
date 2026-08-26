@@ -556,8 +556,47 @@ pub struct FfiStreamToken {
     pub index: u32,
     /// Cumulative text generated so far
     pub cumulative_text: String,
-    /// Reason for stopping (if this is the final token)
+    /// Reason for stopping (if this is the final token). `"tool_calls"` when
+    /// the turn ended on a parseable tool-call block.
     pub finish_reason: Option<String>,
+    /// Tool calls the model emitted this turn — final token only.
+    ///
+    /// Tool-call blocks are suppressed from the streamed text, so there is
+    /// nothing in `token` to parse: halt here, run the tools, then continue
+    /// the turn by streaming a `FfiEnvelope::tool_results` envelope through
+    /// the same call. Empty on every other token.
+    pub tool_calls: Vec<FfiToolCall>,
+    /// The completed turn's raw output text, tool-call block included — pass
+    /// it to `FfiEnvelope::tool_results` as `prior_assistant_text`.
+    ///
+    /// Set only alongside a non-empty `tool_calls`. Deliberately not the same
+    /// as `cumulative_text`, which reports the *emitted* text with the
+    /// protocol blocks suppressed.
+    pub raw_text: Option<String>,
+}
+
+impl FfiStreamToken {
+    /// Translate one SDK stream token, index rebased onto the FFI stream's
+    /// own counter (the callers own that numbering).
+    fn from_sdk(token: &xybrid_core::runtime_adapter::types::PartialToken, index: u32) -> Self {
+        Self {
+            token: token.token.clone(),
+            token_id: token.token_id,
+            index,
+            cumulative_text: token.cumulative_text.clone(),
+            finish_reason: token.finish_reason.clone(),
+            tool_calls: token
+                .tool_calls
+                .iter()
+                .map(|call| FfiToolCall {
+                    id: call.id.clone(),
+                    name: call.function.name.clone(),
+                    arguments_json: call.function.arguments.clone(),
+                })
+                .collect(),
+            raw_text: token.raw_text.clone(),
+        }
+    }
 }
 
 /// Lifecycle of the background download behind a speculative load.
@@ -612,6 +651,16 @@ impl From<xybrid_sdk::StreamEvent> for FfiStreamEvent {
                 index: token.index as u32,
                 cumulative_text: token.cumulative_text,
                 finish_reason: token.finish_reason,
+                tool_calls: token
+                    .tool_calls
+                    .into_iter()
+                    .map(|call| FfiToolCall {
+                        id: call.id,
+                        name: call.function.name,
+                        arguments_json: call.function.arguments,
+                    })
+                    .collect(),
+                raw_text: token.raw_text,
             }),
             xybrid_sdk::StreamEvent::Complete(result) => {
                 FfiStreamEvent::Complete(FfiResult::from_inference_result(&result))
@@ -889,13 +938,7 @@ impl FfiModel {
                 let token_sink = sink.clone();
                 let on_token = move |token: xybrid_core::runtime_adapter::types::PartialToken| {
                     let is_final = token.finish_reason.is_some();
-                    let ffi_token = FfiStreamToken {
-                        token: token.token.clone(),
-                        token_id: token.token_id,
-                        index: token_index,
-                        cumulative_text: token.cumulative_text.clone(),
-                        finish_reason: token.finish_reason.clone(),
-                    };
+                    let ffi_token = FfiStreamToken::from_sdk(&token, token_index);
                     token_index = token_index.saturating_add(1);
                     // Mark terminal *before* the final emit so a sink-close that
                     // races the last token does not look like a mid-stream cancel.
@@ -1152,13 +1195,7 @@ impl FfiModel {
                     preempt,
                     move |token| {
                         let is_final = token.finish_reason.is_some();
-                        let ffi_token = FfiStreamToken {
-                            token: token.token.clone(),
-                            token_id: token.token_id,
-                            index: token_index,
-                            cumulative_text: token.cumulative_text.clone(),
-                            finish_reason: token.finish_reason.clone(),
-                        };
+                        let ffi_token = FfiStreamToken::from_sdk(&token, token_index);
                         token_index = token_index.saturating_add(1);
                         if is_final {
                             reached_terminal.store(true, std::sync::atomic::Ordering::SeqCst);
@@ -1243,13 +1280,7 @@ impl FfiModel {
                 let token_sink = sink.clone();
                 let mut on_token = |token: xybrid_core::runtime_adapter::types::PartialToken| {
                     let is_final = token.finish_reason.is_some();
-                    let ffi_token = FfiStreamToken {
-                        token: token.token.clone(),
-                        token_id: token.token_id,
-                        index: token_index,
-                        cumulative_text: token.cumulative_text.clone(),
-                        finish_reason: token.finish_reason.clone(),
-                    };
+                    let ffi_token = FfiStreamToken::from_sdk(&token, token_index);
                     token_index = token_index.saturating_add(1);
                     if is_final {
                         reached_terminal.store(true, std::sync::atomic::Ordering::SeqCst);

@@ -7,14 +7,35 @@ using System.Runtime.InteropServices;
 
 namespace XybridBolt
 {
+    /// <param name="FinishReason">`"tool_calls"` when the turn ended on a parseable tool-call block.</param>
+    /// <param name="ToolCalls">
+    /// Tool calls parsed from the completed turn — populated on the
+    /// **terminal** token only (the one carrying `finish_reason`).
+    ///
+    /// Tool-call blocks are suppressed from the emitted stream, so there is
+    /// nothing in the token text to parse: a streaming caller halts here,
+    /// runs the tools, then continues the turn by streaming a
+    /// [`tool_results_envelope`] through the same call. Empty on every
+    /// mid-stream token and on turns that emitted no call.
+    /// </param>
+    /// <param name="RawText">
+    /// The completed turn's raw output text, tool-call block included — pass
+    /// it to [`tool_results_envelope`] as `prior_assistant_text`.
+    ///
+    /// Present only alongside a non-empty [`Self::tool_calls`]. Not the same
+    /// as `cumulative_text`, which reports the *emitted* text with the
+    /// protocol blocks suppressed — which is why this field exists at all.
+    /// </param>
     public readonly struct XybridStreamToken
     {
-        public XybridStreamToken(string Token, long? TokenId, ulong Index, string CumulativeText, string? FinishReason) { this.Token = Token; this.TokenId = TokenId; this.Index = Index; this.CumulativeText = CumulativeText; this.FinishReason = FinishReason; }
+        public XybridStreamToken(string Token, long? TokenId, ulong Index, string CumulativeText, string? FinishReason, XybridToolCall[] ToolCalls, string? RawText) { this.Token = Token; this.TokenId = TokenId; this.Index = Index; this.CumulativeText = CumulativeText; this.FinishReason = FinishReason; this.ToolCalls = ToolCalls; this.RawText = RawText; }
         public string Token { get; }
         public long? TokenId { get; }
         public ulong Index { get; }
         public string CumulativeText { get; }
         public string? FinishReason { get; }
+        public XybridToolCall[] ToolCalls { get; }
+        public string? RawText { get; }
 
         internal static XybridStreamToken Decode(WireReader reader) =>
             new XybridStreamToken(
@@ -22,6 +43,8 @@ namespace XybridBolt
                 reader.ReadU8() == 0 ? default(long?) : reader.ReadI64(),
                 reader.ReadU64(),
                 reader.ReadString(),
+                reader.ReadU8() == 0 ? default(string?) : reader.ReadString(),
+                reader.ReadArray(reader => XybridToolCall.Decode(reader)),
                 reader.ReadU8() == 0 ? default(string?) : reader.ReadString()
             );
 
@@ -49,6 +72,24 @@ namespace XybridBolt
             }
             {
                 if (this.FinishReason is { } boltffiValue0)
+                {
+                    writer.WriteU8(1);
+                    writer.WriteString(boltffiValue0);
+                }
+                else
+                {
+                    writer.WriteU8(0);
+                }
+            }
+            {
+                writer.WriteU32(checked((uint)this.ToolCalls.Length));
+                foreach (var boltffiValue0 in this.ToolCalls)
+                {
+                    boltffiValue0.Encode(writer);
+                }
+            }
+            {
+                if (this.RawText is { } boltffiValue0)
                 {
                     writer.WriteU8(1);
                     writer.WriteString(boltffiValue0);

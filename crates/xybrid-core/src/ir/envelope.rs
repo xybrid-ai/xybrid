@@ -1313,9 +1313,10 @@ impl Envelope {
     ///
     /// Only the immediately prior assistant turn is replayed: multi-hop
     /// chains work turn by turn, but earlier tool exchanges are not re-sent.
-    /// Continuation runs on the non-streaming text paths; streaming paths
-    /// and image-bearing conversations reject these envelopes as invalid
-    /// input (image embeddings cannot replay through the raw text path).
+    /// A continuation runs on every text path — batch, streaming, and both
+    /// conversation-context variants. Image-bearing conversations are the one
+    /// exception and are rejected as invalid input: image embeddings cannot
+    /// replay through the raw text path a continuation is composed on.
     ///
     /// # Examples
     ///
