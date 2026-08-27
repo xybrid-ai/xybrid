@@ -34,7 +34,10 @@ use xybrid_core::orchestrator::authority::{
 };
 use xybrid_core::orchestrator::routing_engine::LocalReliabilityHint;
 use xybrid_core::runtime_adapter::types::GenerationConfig;
-use xybrid_core::runtime_adapter::{CloudRuntimeAdapter, CloudStreaming, RuntimeAdapter};
+use xybrid_core::runtime_adapter::{
+    encode_stop_sequences, CloudRuntimeAdapter, CloudStreaming, RuntimeAdapter,
+    STOP_SEQUENCES_METADATA_KEY,
+};
 use xybrid_core::streaming::{StreamConfig as CoreStreamConfig, VadStreamConfig as CoreVadConfig};
 
 /// A token generated during streaming inference.
@@ -512,6 +515,12 @@ fn local_reliability_hint_after_abort(
 /// would silently drop `GenerationConfig::tools`. On any other shape the
 /// original result is returned unchanged.
 ///
+/// `generation_config` is the caller's [`RunOptions::generation_config`]. It
+/// serves two purposes on the cloud leg: its `tools` gate the tool refusal
+/// below, and [`apply_generation_config_metadata`] copies its sampling knobs
+/// onto the cloud envelope so the gateway honours them instead of falling back
+/// to its own defaults.
+///
 /// `cancellation_token`, when set, makes the cloud retry leg honour
 /// caller-driven cancellation. The cloud leg cannot meaningfully react to
 /// resource pressure on the device, so only `UserCancelled` is consulted —
@@ -533,7 +542,7 @@ fn dispatch_after_local<F, S>(
     policy_metrics: xybrid_core::context::DeviceMetrics,
     signal_context: Option<SignalContext>,
     cancellation_token: Option<CancellationToken>,
-    tools_requested: bool,
+    generation_config: Option<&GenerationConfig>,
     on_token: &mut F,
     on_seam: &mut S,
 ) -> SdkResult<InferenceResult>
@@ -544,6 +553,7 @@ where
         + Send,
     S: FnMut(SeamInfo) + Send,
 {
+    let tools_requested = generation_config.is_some_and(|config| !config.tools.is_empty());
     match local_result {
         Ok(result) => Ok(result),
         Err(SdkError::AbortedForCloudFallback { reason }) => {
@@ -578,6 +588,10 @@ where
 
             // FR-6: reuse the original prompt; no partial-token reuse.
             let mut cloud_envelope = envelope.clone();
+            // The cloud adapter reads its request settings off metadata alone,
+            // so the caller's sampling config has to be projected onto the
+            // envelope here or the gateway silently answers with its defaults.
+            apply_generation_config_metadata(&mut cloud_envelope, generation_config);
             // Default the cloud-leg routing to the registry model when the caller
             // didn't pick an explicit hosted override: the platform gateway routes
             // an id it doesn't recognise as a hosted provider's model through to
@@ -1163,12 +1177,54 @@ pub struct ModelLoader {
     auto_release: Option<AutoReleasePolicy>,
 }
 
+/// Copy a caller's [`GenerationConfig`] onto a cloud-bound envelope's metadata.
+///
+/// Envelope metadata is the *only* channel
+/// [`CloudRuntimeAdapter`](xybrid_core::runtime_adapter::CloudRuntimeAdapter)
+/// reads request settings from, so a config that never lands here is silently
+/// dropped and the gateway answers with its own defaults. Every sampling knob
+/// the cloud request shape can express is forwarded: `max_tokens`,
+/// `temperature`, `top_p`, and `stop_sequences`. The rest of
+/// [`GenerationConfig`] (`top_k`, `min_p`, `repetition_penalty`, `grammar`,
+/// `tools`) has no OpenAI-compatible wire field and stays local-only.
+///
+/// **Precedence: existing metadata wins.** A caller who wrote `temperature`
+/// straight onto the envelope is addressing the cloud leg specifically, while
+/// `GenerationConfig` describes the run in general — so the config only fills
+/// keys the envelope left empty.
+fn apply_generation_config_metadata(cloud: &mut Envelope, config: Option<&GenerationConfig>) {
+    let Some(cfg) = config else {
+        return;
+    };
+    cloud
+        .metadata
+        .entry("max_tokens".to_string())
+        .or_insert_with(|| cfg.max_tokens.to_string());
+    cloud
+        .metadata
+        .entry("temperature".to_string())
+        .or_insert_with(|| cfg.temperature.to_string());
+    cloud
+        .metadata
+        .entry("top_p".to_string())
+        .or_insert_with(|| cfg.top_p.to_string());
+    // An empty list is not an instruction — writing the key would only add
+    // noise the adapter then has to special-case.
+    if !cfg.stop_sequences.is_empty() {
+        cloud
+            .metadata
+            .entry(STOP_SEQUENCES_METADATA_KEY.to_string())
+            .or_insert_with(|| encode_stop_sequences(&cfg.stop_sequences));
+    }
+}
+
 /// Build the cloud-bound envelope for serving a not-yet-local model from the
 /// gateway. Sets `model` to the registry id so the gateway routes it to xycloud
 /// (the CPU cluster that runs the edge model) — an id it doesn't recognise as a
 /// hosted provider's model falls through there. `provider` is a benign
 /// validation/trace label, never sent on the wire (the gateway routes on
-/// `model` alone). `backend`/`max_tokens`/`temperature` defer to caller values.
+/// `model` alone). `backend` and every key
+/// [`apply_generation_config_metadata`] writes defer to caller values.
 fn build_speculative_cloud_envelope(
     model_id: &str,
     envelope: &Envelope,
@@ -1185,16 +1241,7 @@ fn build_speculative_cloud_envelope(
         .metadata
         .entry("backend".to_string())
         .or_insert_with(|| "gateway".to_string());
-    if let Some(cfg) = config {
-        cloud
-            .metadata
-            .entry("max_tokens".to_string())
-            .or_insert_with(|| cfg.max_tokens.to_string());
-        cloud
-            .metadata
-            .entry("temperature".to_string())
-            .or_insert_with(|| cfg.temperature.to_string());
-    }
+    apply_generation_config_metadata(&mut cloud, config);
     cloud
 }
 
@@ -4177,9 +4224,16 @@ impl XybridModel {
     /// - `correlation_id` is taken from `options.correlation_id` if set,
     ///   otherwise generated via `uuid::Uuid::new_v4()`.
     /// - The `envelope` must carry cloud-side routing metadata (`provider`,
-    ///   `model`, `system_prompt`, `temperature`, …) for the retry leg. See
+    ///   `model`, `system_prompt`, …) for the retry leg. See
     ///   [`CloudRuntimeAdapter`](xybrid_core::runtime_adapter::CloudRuntimeAdapter)
     ///   for supported keys.
+    /// - `options.generation_config` reaches the cloud leg: `max_tokens`,
+    ///   `temperature`, `top_p`, and `stop_sequences` are copied onto the
+    ///   cloud envelope's metadata. Metadata already present on the envelope
+    ///   wins — it targets the cloud leg specifically, so it overrides the
+    ///   generic config. The remaining knobs (`top_k`, `min_p`,
+    ///   `repetition_penalty`, `grammar`) have no OpenAI-compatible wire field
+    ///   and stay local-only.
     /// - Requests with `GenerationConfig::tools` do not enter the cloud leg yet:
     ///   the gateway adapter does not forward tools, so the wrapper emits the
     ///   local abort seam and then fails closed before policy or cloud dispatch.
@@ -4232,10 +4286,6 @@ impl XybridModel {
         let local_resource_summary = local_resource_guard.finish();
         let policy_metrics = fallback_policy_metrics(options);
         let signal_context = Some(SignalContext::from_metrics(&policy_metrics));
-        let tools_requested = options
-            .generation_config
-            .as_ref()
-            .is_some_and(|config| !config.tools.is_empty());
 
         dispatch_after_local(
             local_result,
@@ -4250,7 +4300,7 @@ impl XybridModel {
             policy_metrics,
             signal_context,
             options.cancellation_token.clone(),
-            tools_requested,
+            options.generation_config.as_ref(),
             on_token,
             on_seam,
         )
@@ -5472,6 +5522,67 @@ mod tests {
         );
     }
 
+    /// Every sampling knob the cloud request shape can express must land in
+    /// metadata — `top_p` and `stop_sequences` used to be dropped on *every*
+    /// cloud path, so a caller's nucleus threshold and stop words never
+    /// reached the gateway.
+    #[test]
+    fn build_envelope_forwards_top_p_and_stop_sequences() {
+        let input = Envelope::new(xybrid_core::ir::EnvelopeKind::Text("hi".to_string()));
+        let config = GenerationConfig {
+            top_p: 0.72,
+            stop_sequences: vec!["STOP".to_string(), "END".to_string()],
+            ..Default::default()
+        };
+        let cloud = build_speculative_cloud_envelope("lfm2.5-350m", &input, Some(&config));
+        assert_eq!(
+            cloud.metadata.get("top_p").map(String::as_str),
+            Some("0.72")
+        );
+        assert_eq!(
+            cloud
+                .metadata
+                .get(STOP_SEQUENCES_METADATA_KEY)
+                .map(String::as_str),
+            Some(r#"["STOP","END"]"#)
+        );
+    }
+
+    /// An empty stop list is not an instruction — writing `[]` would be noise
+    /// the adapter then has to special-case.
+    #[test]
+    fn build_envelope_omits_empty_stop_sequences() {
+        let input = Envelope::new(xybrid_core::ir::EnvelopeKind::Text("hi".to_string()));
+        let config = GenerationConfig::default();
+        assert!(config.stop_sequences.is_empty(), "guard the premise");
+        let cloud = build_speculative_cloud_envelope("lfm2.5-350m", &input, Some(&config));
+        assert!(!cloud.metadata.contains_key(STOP_SEQUENCES_METADATA_KEY));
+    }
+
+    /// Metadata written straight onto the envelope targets the cloud leg
+    /// specifically, so it outranks the generic `GenerationConfig`.
+    #[test]
+    fn build_envelope_lets_caller_metadata_outrank_generation_config() {
+        let mut input = Envelope::new(xybrid_core::ir::EnvelopeKind::Text("hi".to_string()));
+        input
+            .metadata
+            .insert("max_tokens".to_string(), "7".to_string());
+        input
+            .metadata
+            .insert("top_p".to_string(), "0.1".to_string());
+        let config = GenerationConfig {
+            max_tokens: 999,
+            top_p: 0.95,
+            ..Default::default()
+        };
+        let cloud = build_speculative_cloud_envelope("lfm2.5-350m", &input, Some(&config));
+        assert_eq!(
+            cloud.metadata.get("max_tokens").map(String::as_str),
+            Some("7")
+        );
+        assert_eq!(cloud.metadata.get("top_p").map(String::as_str), Some("0.1"));
+    }
+
     #[test]
     fn build_envelope_does_not_clobber_caller_backend() {
         let mut input = Envelope::new(xybrid_core::ir::EnvelopeKind::Text("hi".to_string()));
@@ -6386,7 +6497,7 @@ mod tests {
             default_metrics(),
             Some(default_signal()),
             None,
-            false,
+            None,
             &mut on_token,
             &mut on_seam,
         )
@@ -6403,6 +6514,161 @@ mod tests {
         let tokens = collected.lock().unwrap().clone();
         assert_eq!(tokens.len(), 1);
         assert_eq!(tokens[0], "hello from cloud");
+    }
+
+    /// Regression: the explicit-adapter fallback path used to hand
+    /// `dispatch_after_local` the untouched envelope, so a caller's
+    /// `GenerationConfig` never reached `CloudRuntimeAdapter` — which reads its
+    /// settings from metadata alone. The request still succeeded with
+    /// plausible-looking output generated under the gateway's defaults, so
+    /// nothing signalled that `max_tokens`/`temperature`/`top_p`/
+    /// `stop_sequences` had been dropped.
+    #[test]
+    fn dispatch_after_local_forwards_generation_config_to_the_cloud_envelope() {
+        let cloud = FakeCloudAdapter::new("hello from cloud");
+        let authority = FakeAuthority::allow();
+        let envelope = text_envelope("write me a haiku");
+        let mut on_token =
+            |_: xybrid_core::runtime_adapter::types::PartialToken| -> Result<(), Box<dyn std::error::Error + Send + Sync>> { Ok(()) };
+        let mut on_seam = |_s: SeamInfo| {};
+        let local_result: SdkResult<InferenceResult> = Err(SdkError::AbortedForCloudFallback {
+            reason: xybrid_core::abort::AbortReason::StressMemory,
+        });
+        let config = GenerationConfig {
+            max_tokens: 13,
+            temperature: 0.31,
+            top_p: 0.72,
+            stop_sequences: vec!["STOP".to_string(), "END".to_string()],
+            ..Default::default()
+        };
+
+        dispatch_after_local(
+            local_result,
+            &envelope,
+            &cloud,
+            "corr-genconfig".to_string(),
+            "test-model",
+            3,
+            100,
+            None,
+            &authority,
+            default_metrics(),
+            Some(default_signal()),
+            None,
+            Some(&config),
+            &mut on_token,
+            &mut on_seam,
+        )
+        .expect("retry should succeed");
+
+        let calls = cloud.calls();
+        assert_eq!(calls.len(), 1);
+        let sent = &calls[0].metadata;
+        assert_eq!(sent.get("max_tokens").map(String::as_str), Some("13"));
+        assert_eq!(sent.get("temperature").map(String::as_str), Some("0.31"));
+        assert_eq!(sent.get("top_p").map(String::as_str), Some("0.72"));
+        assert_eq!(
+            sent.get(STOP_SEQUENCES_METADATA_KEY).map(String::as_str),
+            Some(r#"["STOP","END"]"#)
+        );
+    }
+
+    /// No config means no invented settings: the fallback leg must not stamp
+    /// `GenerationConfig::default()` onto the envelope, which would pin
+    /// `temperature = 0.0` on callers who never asked for greedy decoding.
+    #[test]
+    fn dispatch_after_local_writes_no_sampling_metadata_without_a_config() {
+        let cloud = FakeCloudAdapter::new("hello from cloud");
+        let authority = FakeAuthority::allow();
+        let envelope = text_envelope("write me a haiku");
+        let mut on_token =
+            |_: xybrid_core::runtime_adapter::types::PartialToken| -> Result<(), Box<dyn std::error::Error + Send + Sync>> { Ok(()) };
+        let mut on_seam = |_s: SeamInfo| {};
+        let local_result: SdkResult<InferenceResult> = Err(SdkError::AbortedForCloudFallback {
+            reason: xybrid_core::abort::AbortReason::StressMemory,
+        });
+
+        dispatch_after_local(
+            local_result,
+            &envelope,
+            &cloud,
+            "corr-no-genconfig".to_string(),
+            "test-model",
+            3,
+            100,
+            None,
+            &authority,
+            default_metrics(),
+            Some(default_signal()),
+            None,
+            None,
+            &mut on_token,
+            &mut on_seam,
+        )
+        .expect("retry should succeed");
+
+        let calls = cloud.calls();
+        assert_eq!(calls.len(), 1);
+        let sent = &calls[0].metadata;
+        for key in [
+            "max_tokens",
+            "temperature",
+            "top_p",
+            STOP_SEQUENCES_METADATA_KEY,
+        ] {
+            assert!(
+                !sent.contains_key(key),
+                "unexpected `{key}` on the cloud envelope"
+            );
+        }
+    }
+
+    /// Cloud-targeted metadata already on the envelope outranks the generic
+    /// `GenerationConfig` on the fallback leg too, matching the speculative path.
+    #[test]
+    fn dispatch_after_local_lets_envelope_metadata_outrank_generation_config() {
+        let cloud = FakeCloudAdapter::new("hello from cloud");
+        let authority = FakeAuthority::allow();
+        let mut envelope = text_envelope("write me a haiku");
+        envelope
+            .metadata
+            .insert("max_tokens".to_string(), "7".to_string());
+        let mut on_token =
+            |_: xybrid_core::runtime_adapter::types::PartialToken| -> Result<(), Box<dyn std::error::Error + Send + Sync>> { Ok(()) };
+        let mut on_seam = |_s: SeamInfo| {};
+        let local_result: SdkResult<InferenceResult> = Err(SdkError::AbortedForCloudFallback {
+            reason: xybrid_core::abort::AbortReason::StressMemory,
+        });
+        let config = GenerationConfig {
+            max_tokens: 999,
+            ..Default::default()
+        };
+
+        dispatch_after_local(
+            local_result,
+            &envelope,
+            &cloud,
+            "corr-precedence".to_string(),
+            "test-model",
+            3,
+            100,
+            None,
+            &authority,
+            default_metrics(),
+            Some(default_signal()),
+            None,
+            Some(&config),
+            &mut on_token,
+            &mut on_seam,
+        )
+        .expect("retry should succeed");
+
+        let calls = cloud.calls();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(
+            calls[0].metadata.get("max_tokens").map(String::as_str),
+            Some("7")
+        );
     }
 
     #[test]
@@ -6573,7 +6839,7 @@ mod tests {
             default_metrics(),
             Some(default_signal()),
             None,
-            false,
+            None,
             &mut on_token,
             &mut on_seam,
         )
@@ -6625,6 +6891,14 @@ mod tests {
         let local_result: SdkResult<InferenceResult> = Err(SdkError::AbortedForCloudFallback {
             reason: xybrid_core::abort::AbortReason::StressMemory,
         });
+        let tool_config = GenerationConfig {
+            tools: vec![xybrid_core::gateway::Tool::function(
+                "get_weather",
+                "Current weather for a city.",
+                serde_json::json!({"type": "object", "properties": {}}),
+            )],
+            ..Default::default()
+        };
 
         let result = dispatch_after_local(
             local_result,
@@ -6639,7 +6913,7 @@ mod tests {
             default_metrics(),
             Some(default_signal()),
             None,
-            true,
+            Some(&tool_config),
             &mut on_token,
             &mut on_seam,
         );
@@ -6704,7 +6978,7 @@ mod tests {
             default_metrics(),
             Some(default_signal()),
             None,
-            false,
+            None,
             &mut on_token,
             &mut on_seam,
         );
@@ -6774,7 +7048,7 @@ mod tests {
             default_metrics(),
             Some(default_signal()),
             None,
-            false,
+            None,
             &mut on_token,
             &mut on_seam,
         )
@@ -6823,7 +7097,7 @@ mod tests {
             default_metrics(),
             Some(default_signal()),
             Some(cancellation),
-            false,
+            None,
             &mut on_token,
             &mut on_seam,
         );
@@ -7493,7 +7767,7 @@ mod tests {
             default_metrics(),
             Some(default_signal()),
             None,
-            false,
+            None,
             &mut on_token,
             &mut on_seam,
         );
@@ -7552,7 +7826,7 @@ mod tests {
             default_metrics(),
             Some(default_signal()),
             None,
-            false,
+            None,
             &mut on_token,
             &mut on_seam,
         )
@@ -7590,7 +7864,7 @@ mod tests {
             default_metrics(),
             Some(default_signal()),
             None,
-            false,
+            None,
             &mut on_token,
             &mut on_seam,
         )
@@ -7628,7 +7902,7 @@ mod tests {
             default_metrics(),
             Some(default_signal()),
             None,
-            false,
+            None,
             &mut on_token,
             &mut on_seam,
         )
@@ -7668,7 +7942,7 @@ mod tests {
             default_metrics(),
             Some(default_signal()),
             None,
-            false,
+            None,
             &mut on_token,
             &mut on_seam,
         );
@@ -7714,7 +7988,7 @@ mod tests {
             default_metrics(),
             Some(default_signal()),
             None,
-            false,
+            None,
             &mut on_token,
             &mut on_seam,
         );

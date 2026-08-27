@@ -154,7 +154,8 @@ pub use traits::ModelRuntime;
 
 // Always-available streaming and chat types (NOT feature-gated)
 pub use types::{
-    ChatMessage, GenerationConfig, LlmConfig, PartialToken, StreamingCallback, StreamingError,
+    encode_stop_sequences, parse_stop_sequences, ChatMessage, GenerationConfig, LlmConfig,
+    PartialToken, StreamingCallback, StreamingError, STOP_SEQUENCES_METADATA_KEY,
 };
 pub use types::{MultimodalChatMessage, MultimodalImagePart, MultimodalMessagePart};
 pub use vision::{VisionEmbeddings, VisionEncoder, VisionTokenId};

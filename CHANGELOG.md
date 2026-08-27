@@ -23,6 +23,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `LlmBackend::generate_raw_streaming`. Reference loop:
   `crates/xybrid-core/examples/functiongemma_tools_streaming_context.rs`.
 
+### Fixed
+
+- **Cloud fallback no longer discards the caller's `GenerationConfig`.**
+  `run_streaming_with_fallback` handed the cloud adapter the untouched
+  envelope, and that adapter reads its request settings from envelope metadata
+  alone — so `max_tokens`, `temperature`, `top_p`, and `stop_sequences` were
+  dropped and the gateway answered with its own defaults. The run still
+  succeeded with plausible output, so nothing signalled the loss. All four now
+  reach the cloud leg. Metadata already on the envelope still wins: it targets
+  the cloud leg specifically, while `GenerationConfig` describes the run in
+  general.
+- **Stop sequences survive the metadata bridge.** `stop_sequences` crosses the
+  envelope as a JSON array now, not a comma-delimited string. The old encoding
+  corrupted the most common values there are: `"\n\n"` trimmed away to empty
+  and was dropped, so a run that should have stopped at a blank line continued
+  to `max_tokens`; `"\nUser:"` arrived as `"User:"`; anything containing a
+  comma was split in two. The local leg kept the caller's exact values, so the
+  two legs stopped on different text. Local and cloud now share one encoder and
+  one parser; hand-written comma-separated metadata is still read.
+- **`top_p` and `stop_sequences` reach cloud at all.** `CloudRuntimeAdapter`
+  never read either from metadata, so both were dropped on *every* cloud path
+  — speculative serving included — even though the gateway request body has
+  always serialised them.
+
 ### Changed
 
 - The only tool-continuation shape that still fails closed is an
