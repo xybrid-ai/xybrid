@@ -1,0 +1,59 @@
+bindings/flutter/pubspec.yaml
+  s_0fe805ecb6fc7b::t_309e8f1c364b32 3
+bindings/flutter/rust/Cargo.toml
+  s_0fe805ecb6fc7b::t_309e8f1c364b32 3
+crates/xybrid-whisper/Cargo.toml
+  s_0fe805ecb6fc7b::t_c7dfd115cec56f 23
+crates/xybrid-core/Cargo.toml
+  s_0fe805ecb6fc7b::t_c7dfd115cec56f 28-29,32
+bindings/react-native/package.json
+  s_0fe805ecb6fc7b::t_309e8f1c364b32 3
+crates/xybrid-sdk/Cargo.toml
+  s_0fe805ecb6fc7b::t_c7dfd115cec56f 17,37,42
+bindings/web/package.json
+  s_0fe805ecb6fc7b::t_9a6286ac49763d 3
+bindings/apple/XybridFFI-Info.plist
+  s_0fe805ecb6fc7b::t_309e8f1c364b32 10,12
+bindings/react-native/android/build.gradle
+  s_0fe805ecb6fc7b::t_309e8f1c364b32 94
+bindings/python/xybrid/_bolt/__init__.py
+  s_0fe805ecb6fc7b::t_9a6286ac49763d 2160
+crates/xybrid-llama/Cargo.toml
+  s_0fe805ecb6fc7b::t_c7dfd115cec56f 24
+bindings/python/pyproject.toml
+  s_0fe805ecb6fc7b::t_309e8f1c364b32 7
+crates/xybrid/Cargo.toml
+  s_0fe805ecb6fc7b::t_c7dfd115cec56f 17
+bindings/unity/package.json
+  s_0fe805ecb6fc7b::t_309e8f1c364b32 3
+bindings/flutter/CHANGELOG.md
+  s_0fe805ecb6fc7b::t_172f1104bcb252 3-29
+crates/whisper-cpp-sys/Cargo.toml
+  s_0fe805ecb6fc7b::t_c7dfd115cec56f 42
+CHANGELOG.md
+  s_0fe805ecb6fc7b::t_172f1104bcb252 10-30,39-41,47-55,87
+bindings/kotlin/build.gradle.kts
+  s_0fe805ecb6fc7b::t_309e8f1c364b32 8
+Package.swift
+  s_0fe805ecb6fc7b::t_309e8f1c364b32 40
+Cargo.toml
+  s_0fe805ecb6fc7b::t_309e8f1c364b32 21
+Cargo.lock
+  s_0fe805ecb6fc7b::t_0d434becefb841 900,902,905,1167,1169,2714,2716,2756,2980,2982,5686,5688,6228,6242,6249,6278,6348,6358,6367,6380,6389,6415,6424,6433,6445
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "b7b04effc59e8d3f6f5da4ae4d1fe90117269374",
+  "prompts": {},
+  "sessions": {
+    "s_0fe805ecb6fc7b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0457d-6fad-7b32-86dd-efceae0c5f20",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
+    }
+  }
+}
