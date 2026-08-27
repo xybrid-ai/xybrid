@@ -5544,7 +5544,7 @@ mod tests {
                 .metadata
                 .get(STOP_SEQUENCES_METADATA_KEY)
                 .map(String::as_str),
-            Some("STOP,END")
+            Some(r#"["STOP","END"]"#)
         );
     }
 
@@ -6569,7 +6569,7 @@ mod tests {
         assert_eq!(sent.get("top_p").map(String::as_str), Some("0.72"));
         assert_eq!(
             sent.get(STOP_SEQUENCES_METADATA_KEY).map(String::as_str),
-            Some("STOP,END")
+            Some(r#"["STOP","END"]"#)
         );
     }
 

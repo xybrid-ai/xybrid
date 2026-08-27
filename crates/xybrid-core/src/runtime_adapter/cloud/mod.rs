@@ -25,42 +25,14 @@ use crate::cloud::{
 use crate::gateway::ChatCompletionChunk;
 use crate::ir::{Envelope, EnvelopeKind};
 use crate::pipeline::IntegrationProvider;
-use crate::runtime_adapter::types::{PartialToken, StreamingCallback};
+use crate::runtime_adapter::types::{
+    parse_stop_sequences, PartialToken, StreamingCallback, STOP_SEQUENCES_METADATA_KEY,
+};
 use crate::runtime_adapter::{AdapterError, AdapterResult, RuntimeAdapter};
 use crate::tracing as trace;
 use serde_json::json;
 use std::io::{BufRead, BufReader};
 use std::time::{Duration, Instant};
-
-/// Envelope-metadata key carrying stop sequences.
-///
-/// The metadata map is `String`-valued, so a list needs an encoding: this one
-/// is comma-separated, matching what
-/// `LlmGenerationParams::from_envelope_metadata` already reads on the local
-/// path. One envelope therefore yields the same stop list either side of the
-/// local/cloud seam.
-pub const STOP_SEQUENCES_METADATA_KEY: &str = "stop_sequences";
-
-/// Split a comma-separated `stop_sequences` metadata value, trimming each
-/// entry and dropping empties.
-///
-/// A stop sequence containing a comma cannot be expressed. That is a
-/// pre-existing limit of the `String`-valued metadata channel — the local path
-/// has it too — not something the cloud leg introduces.
-pub fn parse_stop_sequences(value: &str) -> Vec<String> {
-    value
-        .split(',')
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .collect()
-}
-
-/// Encode stop sequences for [`STOP_SEQUENCES_METADATA_KEY`]. Inverse of
-/// [`parse_stop_sequences`] for any sequence free of commas and edge
-/// whitespace.
-pub fn encode_stop_sequences(stop_sequences: &[String]) -> String {
-    stop_sequences.join(",")
-}
 
 /// Cloud runtime adapter for third-party LLM API integrations.
 ///
@@ -736,7 +708,7 @@ mod tests {
             .insert("top_p".to_string(), "0.72".to_string());
         input.metadata.insert(
             STOP_SEQUENCES_METADATA_KEY.to_string(),
-            "STOP,END".to_string(),
+            r#"["STOP","END"]"#.to_string(),
         );
 
         let request = adapter.build_request("hello", &input);
@@ -746,15 +718,6 @@ mod tests {
             request.stop.as_deref(),
             Some(["STOP".to_string(), "END".to_string()].as_slice())
         );
-    }
-
-    /// The cloud leg reads the same encoding the local path writes, so a
-    /// hand-written `" STOP , END "` behaves identically on both sides.
-    #[test]
-    fn stop_sequences_round_trip_through_the_metadata_encoding() {
-        let stop = vec!["STOP".to_string(), "END".to_string()];
-        assert_eq!(parse_stop_sequences(&encode_stop_sequences(&stop)), stop);
-        assert_eq!(parse_stop_sequences(" STOP , END "), stop);
     }
 
     /// An empty value must not become `"stop": []` on the wire.
@@ -785,7 +748,7 @@ mod tests {
             .insert("top_p".to_string(), "0.72".to_string());
         input.metadata.insert(
             STOP_SEQUENCES_METADATA_KEY.to_string(),
-            "STOP,END".to_string(),
+            r#"["STOP","END"]"#.to_string(),
         );
 
         let request = adapter.build_request("hello", &input);

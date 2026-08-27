@@ -112,10 +112,7 @@ pub mod llama_cpp;
 pub mod whisper_cpp;
 
 // Re-exports from runtime backends
-pub use cloud::{
-    encode_stop_sequences, parse_stop_sequences, CloudRuntimeAdapter, CloudStreaming,
-    STOP_SEQUENCES_METADATA_KEY,
-};
+pub use cloud::{CloudRuntimeAdapter, CloudStreaming};
 pub use metadata_driven::MetadataDrivenAdapter;
 pub use onnx::OnnxBackend;
 pub use onnx::OnnxRuntimeAdapter;
@@ -157,7 +154,8 @@ pub use traits::ModelRuntime;
 
 // Always-available streaming and chat types (NOT feature-gated)
 pub use types::{
-    ChatMessage, GenerationConfig, LlmConfig, PartialToken, StreamingCallback, StreamingError,
+    encode_stop_sequences, parse_stop_sequences, ChatMessage, GenerationConfig, LlmConfig,
+    PartialToken, StreamingCallback, StreamingError, STOP_SEQUENCES_METADATA_KEY,
 };
 pub use types::{MultimodalChatMessage, MultimodalImagePart, MultimodalMessagePart};
 pub use vision::{VisionEmbeddings, VisionEncoder, VisionTokenId};
