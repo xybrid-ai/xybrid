@@ -1,0 +1,44 @@
+docs/sdk/api-surface.yaml
+  s_08904def5f9a48::t_02af3fe43dd49c 488-493,694-696,713-719
+  s_08904def5f9a48::t_6ef3a7acdd9e25 5-6
+bindings/python/tests/test_sdk.py
+  s_08904def5f9a48::t_7c6ce75c03d893 131-181
+bindings/kotlin/src/main/kotlin/ai/xybrid/Xybrid.kt
+  s_08904def5f9a48::t_9f659ef45c95e6 435-440,504-514
+  s_08904def5f9a48::t_a0b8cab2efe5dc 515
+bindings/apple/Tests/XybridTests/ModelLoaderTests.swift
+  s_08904def5f9a48::t_94b0a8cf2fe364 60-120
+tools/scripts/api-contract-check.sh
+  s_08904def5f9a48::t_21ca6a4e51a848 128-133
+  s_08904def5f9a48::t_4679616eb5506d 238-242
+docs/content/docs/guides/tool-calling.mdx
+  s_08904def5f9a48::t_2c8bbda3584b67 210-213
+bindings/python/xybrid/_sugar.py
+  s_08904def5f9a48::t_fde06655c8796e 200-213,217-234
+  s_08904def5f9a48::t_602c20f4df8249 335
+  s_08904def5f9a48::t_6f6bc4a5ea9a98 235-236
+bindings/apple/Sources/Xybrid/Xybrid.swift
+  s_08904def5f9a48::t_f82f22387ec1ca 430-433,581-594
+bindings/kotlin/src/test/kotlin/ai/xybrid/ToolCallConveniencesTest.kt
+  s_08904def5f9a48::t_14b621eac2e6ad 1-70
+docs/content/docs/guides/tool-calling.zh.mdx
+  s_08904def5f9a48::t_2c8bbda3584b67 186-189
+bindings/flutter/example/pubspec.lock
+  s_08904def5f9a48::t_ce37a554ce3398 422
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "e6f7ab7c97ac2b369f3f4e6be23017917bc31f20",
+  "prompts": {},
+  "sessions": {
+    "s_08904def5f9a48": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "dfb79340-d3ed-4701-8aa2-99ea102c9443",
+        "model": "claude-opus-5"
+      },
+      "human_author": "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
+    }
+  }
+}
