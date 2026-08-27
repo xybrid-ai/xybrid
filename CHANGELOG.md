@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Planned
+
+- **Multimodal KV-prefix reuse**: the per-frame prefill cost lever for live vision — **deferred** from 0.2.0, not yet implemented.
+
+---
+
+## [0.7.0] - 2026-08-28
+
+Streaming tool loops now keep both live token delivery and conversation history.
+The terminal token carries parsed calls plus the raw assistant turn needed for
+the continuation, and every text execution path accepts that continuation.
+Separately, apps can opt into releasing idle models under memory pressure; an
+evicted model reloads itself transparently on its next use.
+
+**Upgrade notes.** `PartialToken`, the SDK `StreamToken`, and the FFI facade
+`StreamToken` gain `tool_calls` and `raw_text`. Code using their constructors is
+unchanged, but external Rust code that builds these public types with struct
+literals must populate the new fields. Image-bearing tool continuations remain
+unsupported because their embeddings cannot be reconstructed from replayed
+text.
+
 ### Added
 
 - **Tool calling works in a streaming chat.** A tools-bearing streaming run now
@@ -15,13 +36,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `raw_text` (the turn's output *with* its protocol block, which is what the
   continuation replays). Nothing needs parsing on the caller's side — call
   blocks were already suppressed from the token feed. Exposed on every stream
-  token: Rust, Swift, Kotlin, Python, Unity C#, and Dart.
+  token: Rust, Swift, Kotlin, Python, Unity C#, and Dart. Every foreign binding
+  also exposes the idiomatic `hasToolCalls` / `has_tool_calls` convenience on
+  results and stream tokens (#542, #546).
 - **`tool_results` continuations run on every text path.** `execute_with_context`,
   `execute_streaming`, and `execute_streaming_with_context` compose the
   continuation instead of rejecting it, so a chat screen keeps both its history
   and its token-by-token output across a tool turn. Backed by a new
   `LlmBackend::generate_raw_streaming`. Reference loop:
-  `crates/xybrid-core/examples/functiongemma_tools_streaming_context.rs`.
+  `crates/xybrid-core/examples/functiongemma_tools_streaming_context.rs` (#542).
+- **Idle models can release their memory without invalidating their handles.**
+  `release_memory()` evicts least-recently-used idle models and skips busy runs;
+  the next use reloads an evicted model from disk transparently. Automatic
+  release is opt-in through `ModelLoader::with_auto_release` or the
+  process-global `set_auto_release`, and only runs before a load when the device
+  reports memory pressure. The explicit release call works regardless of that
+  setting. The Rust, BoltFFI, Python, and Dart surfaces expose the controls
+  (#539).
 
 ### Fixed
 
@@ -53,11 +84,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   **image-bearing conversation** — a continuation replays prior turns as a
   composed text prompt, and image embeddings cannot be re-evaluated from text.
   The error message and the tool-calling guide now say that it is a property of
-  the replay mechanism rather than an unfinished path.
-
-### Planned
-
-- **Multimodal KV-prefix reuse**: the per-frame prefill cost lever for live vision — **deferred** from 0.2.0, not yet implemented.
+  the replay mechanism rather than an unfinished path (#542).
 
 ---
 

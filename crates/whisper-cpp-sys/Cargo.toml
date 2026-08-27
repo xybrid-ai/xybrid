@@ -39,7 +39,7 @@ committed-bindings = ["bindings"]
 # "exactly one ggml" invariant enforceable: `links = "llama"` metadata tells
 # us where that ggml's headers and archives are, so whisper.cpp compiles and
 # links against them instead of configuring its own bundled copy.
-xybrid-llama-sys = { path = "../llama-cpp-sys", version = "0.6.0" }
+xybrid-llama-sys = { path = "../llama-cpp-sys", version = "0.7.0" }
 
 [build-dependencies]
 # whisper.cpp's library is ONE translation unit (`src/whisper.cpp`) whose only
