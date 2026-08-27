@@ -112,7 +112,10 @@ pub mod llama_cpp;
 pub mod whisper_cpp;
 
 // Re-exports from runtime backends
-pub use cloud::{CloudRuntimeAdapter, CloudStreaming};
+pub use cloud::{
+    encode_stop_sequences, parse_stop_sequences, CloudRuntimeAdapter, CloudStreaming,
+    STOP_SEQUENCES_METADATA_KEY,
+};
 pub use metadata_driven::MetadataDrivenAdapter;
 pub use onnx::OnnxBackend;
 pub use onnx::OnnxRuntimeAdapter;

@@ -32,6 +32,36 @@ use serde_json::json;
 use std::io::{BufRead, BufReader};
 use std::time::{Duration, Instant};
 
+/// Envelope-metadata key carrying stop sequences.
+///
+/// The metadata map is `String`-valued, so a list needs an encoding: this one
+/// is comma-separated, matching what
+/// `LlmGenerationParams::from_envelope_metadata` already reads on the local
+/// path. One envelope therefore yields the same stop list either side of the
+/// local/cloud seam.
+pub const STOP_SEQUENCES_METADATA_KEY: &str = "stop_sequences";
+
+/// Split a comma-separated `stop_sequences` metadata value, trimming each
+/// entry and dropping empties.
+///
+/// A stop sequence containing a comma cannot be expressed. That is a
+/// pre-existing limit of the `String`-valued metadata channel — the local path
+/// has it too — not something the cloud leg introduces.
+pub fn parse_stop_sequences(value: &str) -> Vec<String> {
+    value
+        .split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect()
+}
+
+/// Encode stop sequences for [`STOP_SEQUENCES_METADATA_KEY`]. Inverse of
+/// [`parse_stop_sequences`] for any sequence free of commas and edge
+/// whitespace.
+pub fn encode_stop_sequences(stop_sequences: &[String]) -> String {
+    stop_sequences.join(",")
+}
+
 /// Cloud runtime adapter for third-party LLM API integrations.
 ///
 /// This adapter handles cloud-based inference through providers like OpenAI,
@@ -188,6 +218,21 @@ impl CloudRuntimeAdapter {
         if let Some(max_str) = envelope.metadata.get("max_tokens") {
             if let Ok(max) = max_str.parse::<u32>() {
                 request = request.with_max_tokens(max);
+            }
+        }
+
+        // Top-p (nucleus) sampling
+        if let Some(top_p_str) = envelope.metadata.get("top_p") {
+            if let Ok(top_p) = top_p_str.parse::<f32>() {
+                request = request.with_top_p(top_p);
+            }
+        }
+
+        // Stop sequences
+        if let Some(stop_str) = envelope.metadata.get(STOP_SEQUENCES_METADATA_KEY) {
+            let stop = parse_stop_sequences(stop_str);
+            if !stop.is_empty() {
+                request = request.with_stop(stop);
             }
         }
 
@@ -676,6 +721,78 @@ mod tests {
 
         let result = adapter.execute(&input);
         assert!(matches!(result, Err(AdapterError::InvalidInput(_))));
+    }
+
+    /// The adapter reads every request setting off envelope metadata, so a key
+    /// it ignores is a caller value silently dropped. `top_p` and
+    /// `stop_sequences` were ignored even though `gateway_chat_body` already
+    /// serialises both.
+    #[test]
+    fn build_request_reads_top_p_and_stop_sequences_from_metadata() {
+        let adapter = CloudRuntimeAdapter::new();
+        let mut input = Envelope::new(EnvelopeKind::Text("hello".to_string()));
+        input
+            .metadata
+            .insert("top_p".to_string(), "0.72".to_string());
+        input.metadata.insert(
+            STOP_SEQUENCES_METADATA_KEY.to_string(),
+            "STOP,END".to_string(),
+        );
+
+        let request = adapter.build_request("hello", &input);
+
+        assert!((request.top_p.unwrap() - 0.72).abs() < 1e-6);
+        assert_eq!(
+            request.stop.as_deref(),
+            Some(["STOP".to_string(), "END".to_string()].as_slice())
+        );
+    }
+
+    /// The cloud leg reads the same encoding the local path writes, so a
+    /// hand-written `" STOP , END "` behaves identically on both sides.
+    #[test]
+    fn stop_sequences_round_trip_through_the_metadata_encoding() {
+        let stop = vec!["STOP".to_string(), "END".to_string()];
+        assert_eq!(parse_stop_sequences(&encode_stop_sequences(&stop)), stop);
+        assert_eq!(parse_stop_sequences(" STOP , END "), stop);
+    }
+
+    /// An empty value must not become `"stop": []` on the wire.
+    #[test]
+    fn build_request_omits_an_empty_stop_list() {
+        let adapter = CloudRuntimeAdapter::new();
+        let mut input = Envelope::new(EnvelopeKind::Text("hello".to_string()));
+        input
+            .metadata
+            .insert(STOP_SEQUENCES_METADATA_KEY.to_string(), String::new());
+
+        let request = adapter.build_request("hello", &input);
+
+        assert!(request.stop.is_none());
+    }
+
+    /// End to end through the body serialiser: metadata in, wire fields out.
+    #[test]
+    fn gateway_chat_body_carries_top_p_and_stop_from_metadata() {
+        let adapter = CloudRuntimeAdapter::new();
+        let config = CloudConfig::gateway();
+        let mut input = Envelope::new(EnvelopeKind::Text("hello".to_string()));
+        input
+            .metadata
+            .insert("model".to_string(), "lfm2.5-350m".to_string());
+        input
+            .metadata
+            .insert("top_p".to_string(), "0.72".to_string());
+        input.metadata.insert(
+            STOP_SEQUENCES_METADATA_KEY.to_string(),
+            "STOP,END".to_string(),
+        );
+
+        let request = adapter.build_request("hello", &input);
+        let body = gateway_chat_body(&request, &config, false).expect("model is set");
+
+        assert!((body["top_p"].as_f64().unwrap() - 0.72).abs() < 1e-6);
+        assert_eq!(body["stop"], json!(["STOP", "END"]));
     }
 
     #[test]

@@ -23,6 +23,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `LlmBackend::generate_raw_streaming`. Reference loop:
   `crates/xybrid-core/examples/functiongemma_tools_streaming_context.rs`.
 
+### Fixed
+
+- **Cloud fallback no longer discards the caller's `GenerationConfig`.**
+  `run_streaming_with_fallback` handed the cloud adapter the untouched
+  envelope, and that adapter reads its request settings from envelope metadata
+  alone — so `max_tokens`, `temperature`, `top_p`, and `stop_sequences` were
+  dropped and the gateway answered with its own defaults. The run still
+  succeeded with plausible output, so nothing signalled the loss. All four now
+  reach the cloud leg. Metadata already on the envelope still wins: it targets
+  the cloud leg specifically, while `GenerationConfig` describes the run in
+  general.
+- **`top_p` and `stop_sequences` reach cloud at all.** `CloudRuntimeAdapter`
+  never read either from metadata, so both were dropped on *every* cloud path
+  — speculative serving included — even though the gateway request body has
+  always serialised them. `stop_sequences` uses the same comma-separated
+  encoding the local path already reads.
+
 ### Changed
 
 - The only tool-continuation shape that still fails closed is an
