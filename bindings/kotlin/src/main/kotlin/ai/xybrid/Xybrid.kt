@@ -432,6 +432,12 @@ typealias VoiceInfo = XybridVoiceInfo
 /** LLM generation parameters (temperature, top-p, max tokens, etc.). */
 typealias GenerationConfig = XybridGenerationConfig
 
+/**
+ * One token emitted by a streaming run. The terminal token carries the
+ * turn's [XybridStreamToken.toolCalls] and [XybridStreamToken.rawText].
+ */
+typealias StreamToken = XybridStreamToken
+
 // -- GenerationConfig Presets --
 
 /** Preset factory methods for [GenerationConfig]. */
@@ -494,6 +500,18 @@ val XybridResult.embedding: FloatArray?
 
 /** The latency in seconds as a Double. */
 val XybridResult.latencySeconds: Double get() = latencyMs.toDouble() / 1000.0
+
+/** `true` if the model asked to call at least one tool this turn. */
+val XybridResult.hasToolCalls: Boolean get() = toolCalls.isNotEmpty()
+
+/**
+ * `true` if this token carries tool calls to execute.
+ *
+ * Only ever true on the terminal token. Tool-call blocks are suppressed from
+ * the streamed text, so this — not the token text — is what a streaming loop
+ * branches on.
+ */
+val XybridStreamToken.hasToolCalls: Boolean get() = toolCalls.isNotEmpty()
 
 // -- XybridEnvelope Factory Methods --
 //

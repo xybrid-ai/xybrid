@@ -128,6 +128,57 @@ def test_result_conveniences_on_synthetic_result() -> None:
     assert isinstance(xybrid.XybridVoiceInfo.is_female, property)
 
 
+def test_tool_call_conveniences_on_result_and_stream_token() -> None:
+    call = xybrid.XybridToolCall(id="call_0", name="get_weather", arguments_json='{"city":"Paris"}')
+
+    without = _result(xybrid.XybridEnvelope.text("plain answer"), xybrid.XybridOutputType.TEXT)
+    assert not without.has_tool_calls
+
+    with_calls = xybrid.XybridResult(
+        envelope=xybrid.XybridEnvelope.text("checking"),
+        output_type=xybrid.XybridOutputType.TEXT,
+        model_id="model",
+        latency_ms=0,
+        execution_target=xybrid.XybridExecutionTarget.LOCAL,
+        metrics=_metrics(0),
+        reasoning_content=None,
+        tool_calls=[call],
+    )
+    assert with_calls.has_tool_calls
+
+    # The terminal stream token is where a streaming loop branches: call
+    # blocks are suppressed from the emitted text, so the token text never
+    # carries them.
+    mid_stream = xybrid.XybridStreamToken(
+        token="check",
+        token_id=None,
+        index=0,
+        cumulative_text="check",
+        finish_reason=None,
+        tool_calls=[],
+        raw_text=None,
+    )
+    terminal = xybrid.XybridStreamToken(
+        token="",
+        token_id=None,
+        index=1,
+        cumulative_text="checking",
+        finish_reason="tool_calls",
+        tool_calls=[call],
+        raw_text="checking<|tool_call_start|>[get_weather(city=\"Paris\")]<|tool_call_end|>",
+    )
+
+    assert not mid_stream.has_tool_calls
+    assert terminal.has_tool_calls
+    # raw_text, not cumulative_text, is what the continuation replays.
+    assert terminal.raw_text is not None
+    assert "tool_call_start" in terminal.raw_text
+    assert "tool_call_start" not in terminal.cumulative_text
+
+    assert isinstance(xybrid.XybridResult.has_tool_calls, property)
+    assert isinstance(xybrid.XybridStreamToken.has_tool_calls, property)
+
+
 def test_result_reasoning_field_defaults_to_none() -> None:
     result = xybrid.XybridResult(
         envelope=xybrid.XybridEnvelope.text("answer"),

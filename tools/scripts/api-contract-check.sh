@@ -125,9 +125,12 @@ check_method_in_sdk() {
         kotlin)
             src_dir="$KOTLIN_SRC"
             [ ! -d "$src_dir" ] && return 2
-            # Match both plain (val foo) and backticked (var `foo`) — UniFFI
-            # generates the backticked form for record fields.
-            pattern="(fun ${method_name}|val ${method_name}|var ${method_name}|val \`${method_name}\`|var \`${method_name}\`|${method_name}\()"
+            # Match plain (val foo), backticked (var `foo`, the form UniFFI
+            # generated for record fields), and extension properties
+            # (val XybridResult.foo) — the Kotlin SDK layers most of its
+            # ergonomics on the generated bolt types as extensions, so without
+            # that last form every one of them reports a false "not found".
+            pattern="(fun ${method_name}|val ${method_name}|var ${method_name}|val [A-Za-z0-9_]+\.${method_name}|var [A-Za-z0-9_]+\.${method_name}|val \`${method_name}\`|var \`${method_name}\`|${method_name}\()"
             ;;
         swift)
             src_dir="$SWIFT_SRC"
@@ -232,7 +235,11 @@ validate_implementations() {
 # ─── Check for valid status values ────────────────────────────────────────
 check_status_values() {
     info "Checking status values are valid..."
-    local valid_statuses="implemented partial stub planned"
+    # `na` = deliberately not applicable to that language, as opposed to
+    # `planned` (intended, not built yet). runTtsStreaming has used it since
+    # the vision PR; without it here the whole check exits non-zero forever,
+    # which buries the warnings it exists to surface.
+    local valid_statuses="implemented partial stub planned na"
 
     # Extract all status values
     local statuses

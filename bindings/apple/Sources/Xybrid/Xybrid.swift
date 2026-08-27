@@ -427,6 +427,10 @@ public typealias ToolCall = XybridToolCall
 /// The outcome of running one tool, fed back with `Envelope.toolResults`.
 public typealias ToolResult = XybridToolResult
 
+/// One token emitted by a streaming run. The terminal token carries the
+/// turn's `toolCalls` and `rawText`.
+public typealias StreamToken = XybridStreamToken
+
 // MARK: - GenerationConfig ergonomics
 //
 // The generated memberwise init takes every field positionally, so setting one
@@ -574,6 +578,20 @@ public extension XybridResult {
 
     /// The latency as a `TimeInterval` in seconds.
     var latency: TimeInterval { TimeInterval(latencyMs) / 1000.0 }
+
+    /// `true` if the model asked to call at least one tool this turn.
+    var hasToolCalls: Bool { !toolCalls.isEmpty }
+}
+
+// MARK: - XybridStreamToken ergonomics
+
+public extension XybridStreamToken {
+    /// `true` if this token carries tool calls to execute.
+    ///
+    /// Only ever true on the terminal token. Tool-call blocks are suppressed
+    /// from the streamed text, so this — not the token text — is what a
+    /// streaming loop branches on.
+    var hasToolCalls: Bool { !toolCalls.isEmpty }
 }
 
 // MARK: - XybridEnvelope compatibility factories

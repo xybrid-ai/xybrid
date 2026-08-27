@@ -197,8 +197,41 @@ def _install_result_accessors() -> None:
 
         return self.latency_ms / 1000.0
 
-    for accessor in (text, audio_bytes, embedding, success, is_failure, latency_seconds):
+    def has_tool_calls(self: Any) -> bool:
+        """``True`` when the model asked to call at least one tool this turn."""
+
+        return bool(self.tool_calls)
+
+    for accessor in (
+        text,
+        audio_bytes,
+        embedding,
+        success,
+        is_failure,
+        latency_seconds,
+        has_tool_calls,
+    ):
         setattr(result, accessor.__name__, property(accessor, doc=accessor.__doc__))
+
+
+def _install_stream_token_accessors() -> None:
+    stream_token = _bolt.XybridStreamToken
+
+    def has_tool_calls(self: Any) -> bool:
+        """``True`` when this token carries tool calls to execute.
+
+        Only ever true on the terminal token. Tool-call blocks are suppressed
+        from the streamed text, so this — not the token text — is what a
+        streaming loop branches on.
+        """
+
+        return bool(self.tool_calls)
+
+    setattr(
+        stream_token,
+        has_tool_calls.__name__,
+        property(has_tool_calls, doc=has_tool_calls.__doc__),
+    )
 
 
 def _install_voice_accessors() -> None:
@@ -299,6 +332,7 @@ def install() -> None:
     _install_envelope_kind_factories()
     _install_envelope_factories()
     _install_result_accessors()
+    _install_stream_token_accessors()
     _install_voice_accessors()
     _install_model_accessors()
     _bolt._xybrid_sugar_installed = True

@@ -183,8 +183,10 @@ Envelope 自身会回放 `userText`，因此循环中途的 push 会让问题在
 - `tool_results` Envelope 通过**同一个**方法送回，因此续接既保留对话上下文，
   也继续保持流式。
 
-Swift、Kotlin、Python 与 Unity C# 在各自的 stream token 上暴露同样的三件套
-——`toolCalls`、`rawText`、`finishReason`——并同样通过原来的流式方法送回续接。
+Swift、Kotlin、Python 与 Unity C# 在各自的 stream token 上暴露同样的字段
+——`toolCalls`、`rawText`、`finishReason`，外加一个 `hasToolCalls` 便捷属性
+——并同样通过原来的流式方法送回续接。Python 写作 `has_tool_calls`，
+Unity C# 写作 `HasToolCalls`。
 
 ## 在 CLI 中进行工具调用（`xybrid repl`）
 
