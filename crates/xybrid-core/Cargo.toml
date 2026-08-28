@@ -344,7 +344,7 @@ objc2-core-foundation = { version = "0.3", features = ["CFString", "CFNumber", "
 # for COM/WMI, so it joins `windows-sys` here scoped to the WMI feature
 # set. Lazy-linked bindings keep the binary impact minimal.
 [target.'cfg(target_os = "windows")'.dependencies]
-windows-sys = { version = "0.59", features = ["Win32_System_Power", "Win32_Foundation"] }
+windows-sys = { version = "0.61", features = ["Win32_System_Power", "Win32_Foundation"] }
 windows = { version = "0.61", features = [
     "Win32_System_Com",
     "Win32_System_Ole",
