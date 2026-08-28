@@ -2,7 +2,8 @@
 # Machine-readable companion to API_REFERENCE.md
 #
 # This file is parsed by tools/scripts/api-contract-check.sh and the /sync-api command.
-# Status values: implemented, partial, stub, planned
+# Status values: implemented, partial, stub, planned, na (not applicable
+# to that language, as opposed to `planned` = intended but not built yet)
 #
 # IMPORTANT: When modifying SDK public APIs, update BOTH this file and API_REFERENCE.md.
 
@@ -484,6 +485,12 @@ classes:
         # tools. The raw tool-call block stays in `text`.
         status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
         since: "0.5.0"
+      hasToolCalls:
+        type: bool
+        # Convenience over `toolCalls.isEmpty`, so the branch a tool loop
+        # actually writes reads the same in every language.
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+        since: "0.7.0"
       audioAsWav:
         type: "Uint8List?"
         status: { dart: implemented, kotlin: planned, swift: planned, csharp: planned }
@@ -684,7 +691,9 @@ classes:
   StreamToken:
     type: data
     section: "8. Supporting Types"
-    status: { dart: implemented, kotlin: planned, swift: planned, csharp: implemented }
+    # Kotlin and Swift reach this through a `StreamToken` typealias over the
+    # generated bolt type, the same way ToolCall/GenerationConfig work there.
+    status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
     properties:
       toolCalls:
         type: "List<ToolCall>"
@@ -699,6 +708,13 @@ classes:
         # what the tool-results envelope needs as priorAssistantText. Set only
         # alongside a non-empty toolCalls; NOT the same as cumulativeText,
         # which is the emitted (block-suppressed) text.
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+        since: "0.7.0"
+      hasToolCalls:
+        type: bool
+        # Only ever true on the terminal token. Call blocks are suppressed
+        # from the streamed text, so this is what a streaming loop branches
+        # on rather than the token text.
         status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
         since: "0.7.0"
 

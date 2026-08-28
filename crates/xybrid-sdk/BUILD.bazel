@@ -46,8 +46,21 @@ _HF_PLATFORMS = [
 
 _ORIG_DBP = original_sdk_deps.get("deps_by_platform", {})
 
+# Flip 1b: the `huggingface` feature also carries the renamed optional dep
+# `ureq3` (package `ureq` v3 — the types hf-hub surfaces its transport errors
+# as). Like hf-hub above, the hub's per-platform resolution drops the
+# optional-dep expansion, so it is appended by hand. Unlike hf-hub there is no
+# unversioned hub alias for the second ureq major, so the versioned label is
+# read from the generated aliases map (which records cargo renames) rather
+# than hand-pinned — a lockfile bump re-renders it.
+_UREQ3_LABELS = [
+    _label
+    for _label, _extern in original_sdk_deps.get("aliases", {}).items()
+    if _extern == "ureq3"
+]
+
 filtered_sdk_deps["deps_by_platform"] = _ORIG_DBP | {
-    _cfg: _ORIG_DBP.get(_cfg, []) + ["@crates//:hf-hub"]
+    _cfg: _ORIG_DBP.get(_cfg, []) + ["@crates//:hf-hub"] + _UREQ3_LABELS
     for _cfg in _HF_PLATFORMS
 }
 
@@ -99,6 +112,11 @@ rust_library(
         "//conditions:default": [],
     }),
     proc_macro_deps = ["//macros"],
+    # The cargo rename (`ureq3` = package `ureq` v3) must reach rustc as
+    # `--extern ureq3=...`; without the alias the dep would collide with the
+    # direct ureq 2 dependency's extern name. Harmless on platforms where the
+    # dep itself is absent (aliases only apply to deps that are present).
+    aliases = {_label: "ureq3" for _label in _UREQ3_LABELS},
     deps = _all_crate_deps(
         filtered_sdk_deps,
         platforms = PLATFORMS,

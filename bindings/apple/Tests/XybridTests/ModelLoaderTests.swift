@@ -57,4 +57,65 @@ final class ModelLoaderTests: XCTestCase {
         XCTAssertNil(sourceCompatible.reasoningContent)
         XCTAssertEqual(reader.position, writer.data.count)
     }
+
+    /// Guards the `hasToolCalls` conveniences. They exist so the branch a
+    /// tool loop actually writes reads the same in Swift as it does in Dart,
+    /// Kotlin and C#.
+    func testToolCallConveniencesOnResultAndStreamToken() {
+        let call = XybridToolCall(
+            id: "call_0",
+            name: "get_weather",
+            argumentsJson: #"{"city":"Paris"}"#
+        )
+        let metrics = XybridInferenceMetrics(
+            totalMs: 0,
+            ttftMs: nil,
+            tokensPerSecond: nil,
+            prefillTps: nil,
+            decodeTps: nil,
+            tokensOut: nil,
+            stageLatenciesMs: []
+        )
+        func result(_ toolCalls: [XybridToolCall]) -> XybridResult {
+            XybridResult(
+                envelope: XybridEnvelope(kind: .text(text: "answer"), metadata: []),
+                outputType: .text,
+                modelId: "model",
+                latencyMs: 0,
+                executionTarget: .local,
+                metrics: metrics,
+                toolCalls: toolCalls
+            )
+        }
+
+        XCTAssertFalse(result([]).hasToolCalls)
+        XCTAssertTrue(result([call]).hasToolCalls)
+
+        let midStream = XybridStreamToken(
+            token: "check",
+            tokenId: nil,
+            index: 0,
+            cumulativeText: "check",
+            finishReason: nil,
+            toolCalls: [],
+            rawText: nil
+        )
+        let terminal = XybridStreamToken(
+            token: "",
+            tokenId: nil,
+            index: 1,
+            cumulativeText: "checking",
+            finishReason: "tool_calls",
+            toolCalls: [call],
+            rawText: #"checking<|tool_call_start|>[get_weather(city="Paris")]<|tool_call_end|>"#
+        )
+
+        XCTAssertFalse(midStream.hasToolCalls)
+        XCTAssertTrue(terminal.hasToolCalls)
+
+        // rawText, not cumulativeText, is what the continuation replays: call
+        // blocks are suppressed from the emitted text.
+        XCTAssertTrue(terminal.rawText?.contains("tool_call_start") == true)
+        XCTAssertFalse(terminal.cumulativeText.contains("tool_call_start"))
+    }
 }

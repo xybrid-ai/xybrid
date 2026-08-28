@@ -18,6 +18,7 @@
 # The `ort-download` feature below is a retained NO-OP marker (invocation compat).
 load("@rules_rs//rs:rust_library.bzl", "rust_library")
 load("@rules_rs//rs:rust_test.bzl", "rust_test")
+load("@crates//:data.bzl", "DEP_DATA")
 load("@crates//:defs.bzl", "all_crate_deps")
 
 # Android ships the `platform-android` backend set: llm-llamacpp-vision (mtmd
@@ -200,6 +201,19 @@ _CORE_TEST_DATA = {
     for name, deps in _CORE_INTEGRATION_TESTS.items()
 ]
 
+# The inline-test target needs the ureq 2 dev-dependency, but the hub's bare
+# `@crates//:ureq` alias tracks the highest resolved version — which flipped
+# to ureq 3 when the sdk grew a renamed `ureq3` dep (hf-hub's transport error
+# types). Two majors of the same extern on one compile line is E0464, so the
+# exact-version label is read from the generated dev_deps instead; it
+# re-renders on lockfile bumps. (The trailing char check keeps `ureq-proto`
+# out.)
+_CORE_TEST_UREQ = [
+    _d
+    for _d in DEP_DATA.get("crates/xybrid-core", {}).get("dev_deps", [])
+    if _d.startswith("@crates//:ureq-") and _d[len("@crates//:ureq-")].isdigit()
+]
+
 rust_test(
     name = "xybrid-core_test",
     crate = ":xybrid-core",
@@ -218,6 +232,5 @@ rust_test(
         "@crates//:hound",
         "@crates//:libloading",
         "@crates//:tempfile",
-        "@crates//:ureq",
-    ],
+    ] + _CORE_TEST_UREQ,
 )

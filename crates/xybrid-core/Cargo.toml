@@ -25,11 +25,11 @@ path = "src/lib.rs"
 #   `xybrid-llama-sys`  : raw FFI + cmake build (Phase 1)
 #   `xybrid-llama`   : safe RAII + typed errors + streaming trampoline (Phase 2)
 #   `xybrid-core`    : thin adapter glue (Phase 3 reduction)
-xybrid-llama-sys = { path = "../llama-cpp-sys", version = "0.6.0", optional = true }
-xybrid-llama = { path = "../xybrid-llama", version = "0.6.0", optional = true }
+xybrid-llama-sys = { path = "../llama-cpp-sys", version = "0.7.0", optional = true }
+xybrid-llama = { path = "../xybrid-llama", version = "0.7.0", optional = true }
 # Safe whisper.cpp wrappers. Gated behind `asr-whispercpp`, which also pulls
 # `llm-llamacpp` — that is where the shared ggml comes from.
-xybrid-whisper = { path = "../xybrid-whisper", version = "0.6.0", optional = true }
+xybrid-whisper = { path = "../xybrid-whisper", version = "0.7.0", optional = true }
 # Real Jinja engine for the llama.cpp chat-template fallback: when llama.cpp's
 # hardcoded non-Jinja matcher rejects a GGUF's embedded template (returns -1),
 # we render that template here instead. Gated with the deps below into

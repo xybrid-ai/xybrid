@@ -207,9 +207,10 @@ Three things make this work without any parsing on your side:
 - The `tool_results` envelope goes back through the **same** call, so the
   continuation keeps the conversation context and keeps streaming.
 
-Swift, Kotlin, Python, and Unity C# expose the same trio on their stream
-token — `toolCalls`, `rawText`, `finishReason` — and feed the continuation
-back through the same streaming call.
+Swift, Kotlin, Python, and Unity C# expose the same fields on their stream
+token — `toolCalls`, `rawText`, `finishReason`, plus a `hasToolCalls`
+convenience — and feed the continuation back through the same streaming call.
+Python spells it `has_tool_calls`; Unity C# spells it `HasToolCalls`.
 
 ## Tool Calling in the CLI (`xybrid repl`)
 

@@ -34,7 +34,10 @@ use xybrid_core::orchestrator::authority::{
 };
 use xybrid_core::orchestrator::routing_engine::LocalReliabilityHint;
 use xybrid_core::runtime_adapter::types::GenerationConfig;
-use xybrid_core::runtime_adapter::{CloudRuntimeAdapter, CloudStreaming, RuntimeAdapter};
+use xybrid_core::runtime_adapter::{
+    encode_stop_sequences, CloudRuntimeAdapter, CloudStreaming, RuntimeAdapter,
+    STOP_SEQUENCES_METADATA_KEY,
+};
 use xybrid_core::streaming::{StreamConfig as CoreStreamConfig, VadStreamConfig as CoreVadConfig};
 
 /// A token generated during streaming inference.
@@ -512,6 +515,12 @@ fn local_reliability_hint_after_abort(
 /// would silently drop `GenerationConfig::tools`. On any other shape the
 /// original result is returned unchanged.
 ///
+/// `generation_config` is the caller's [`RunOptions::generation_config`]. It
+/// serves two purposes on the cloud leg: its `tools` gate the tool refusal
+/// below, and [`apply_generation_config_metadata`] copies its sampling knobs
+/// onto the cloud envelope so the gateway honours them instead of falling back
+/// to its own defaults.
+///
 /// `cancellation_token`, when set, makes the cloud retry leg honour
 /// caller-driven cancellation. The cloud leg cannot meaningfully react to
 /// resource pressure on the device, so only `UserCancelled` is consulted —
@@ -533,7 +542,7 @@ fn dispatch_after_local<F, S>(
     policy_metrics: xybrid_core::context::DeviceMetrics,
     signal_context: Option<SignalContext>,
     cancellation_token: Option<CancellationToken>,
-    tools_requested: bool,
+    generation_config: Option<&GenerationConfig>,
     on_token: &mut F,
     on_seam: &mut S,
 ) -> SdkResult<InferenceResult>
@@ -544,6 +553,7 @@ where
         + Send,
     S: FnMut(SeamInfo) + Send,
 {
+    let tools_requested = generation_config.is_some_and(|config| !config.tools.is_empty());
     match local_result {
         Ok(result) => Ok(result),
         Err(SdkError::AbortedForCloudFallback { reason }) => {
@@ -578,6 +588,10 @@ where
 
             // FR-6: reuse the original prompt; no partial-token reuse.
             let mut cloud_envelope = envelope.clone();
+            // The cloud adapter reads its request settings off metadata alone,
+            // so the caller's sampling config has to be projected onto the
+            // envelope here or the gateway silently answers with its defaults.
+            apply_generation_config_metadata(&mut cloud_envelope, generation_config);
             // Default the cloud-leg routing to the registry model when the caller
             // didn't pick an explicit hosted override: the platform gateway routes
             // an id it doesn't recognise as a hosted provider's model through to
@@ -995,7 +1009,7 @@ const GGUF_PREFERENCE_ORDER: &[&str] = &[
 const VISION_PROJECTOR_PREFERENCE_ORDER: &[&str] =
     &["Q8_0", "Q6_K", "Q5_K_M", "Q4_K_M", "F16", "BF16"];
 
-fn is_gguf_companion(filename: &str) -> bool {
+pub(crate) fn is_gguf_companion(filename: &str) -> bool {
     let filename = filename.to_ascii_lowercase();
     filename.contains("mmproj") || filename.contains("drafter") || filename.contains("dspark")
 }
@@ -1004,7 +1018,7 @@ fn is_gguf_vision_projector(filename: &str) -> bool {
     filename.to_ascii_lowercase().contains("mmproj")
 }
 
-fn select_vision_projector<'a>(gguf_files: &[&'a str]) -> Option<&'a str> {
+pub(crate) fn select_vision_projector<'a>(gguf_files: &[&'a str]) -> Option<&'a str> {
     for preference in VISION_PROJECTOR_PREFERENCE_ORDER {
         if let Some(projector) = gguf_files.iter().find(|filename| {
             is_gguf_vision_projector(filename) && filename.to_uppercase().contains(preference)
@@ -1023,7 +1037,7 @@ fn select_vision_projector<'a>(gguf_files: &[&'a str]) -> Option<&'a str> {
 ///
 /// If `variant` is specified, finds a file containing that quantization string (case-insensitive).
 /// Otherwise, selects the file matching the highest-priority quantization from `GGUF_PREFERENCE_ORDER`.
-fn select_gguf_variant(gguf_files: &[&str], variant: Option<&str>) -> SdkResult<String> {
+pub(crate) fn select_gguf_variant(gguf_files: &[&str], variant: Option<&str>) -> SdkResult<String> {
     if let Some(v) = variant {
         let v_upper = v.to_uppercase();
         if let Some(found) = gguf_files
@@ -1055,7 +1069,7 @@ fn select_gguf_variant(gguf_files: &[&str], variant: Option<&str>) -> SdkResult<
         .to_string())
 }
 
-fn select_huggingface_files_to_download<'a>(
+pub(crate) fn select_huggingface_files_to_download<'a>(
     repo: &str,
     all_filenames: &[&'a str],
     selected_gguf: Option<&str>,
@@ -1150,6 +1164,146 @@ fn huggingface_materialized_cache_dir(
     }
 }
 
+/// Fetch `filename -> blob hash` for every file of `repo` at `revision_sha`
+/// from the Hub's tree API — the LFS sha256 for large files, the git blob
+/// sha1 for the rest, matching how the shared hub cache names its blobs.
+///
+/// Best-effort: any failure returns `None` (with a debug log) and the caller
+/// downloads instead.
+#[cfg(feature = "huggingface")]
+fn fetch_huggingface_blob_ids(
+    repo: &str,
+    revision_sha: &str,
+) -> Option<std::collections::HashMap<String, String>> {
+    use std::io::Read;
+
+    let endpoint = std::env::var("HF_ENDPOINT")
+        .ok()
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "https://huggingface.co".to_string());
+    let url = format!(
+        "{}/api/models/{}/tree/{}?recursive=true",
+        endpoint.trim_end_matches('/'),
+        repo,
+        revision_sha
+    );
+    let mut request = ureq::get(&url);
+    if let Some(token) = huggingface_api_token() {
+        request = request.set("Authorization", &format!("Bearer {token}"));
+    }
+    let response = match request.call() {
+        Ok(response) => response,
+        Err(e) => {
+            log::debug!(
+                target: "xybrid_sdk",
+                "Failed to fetch file hashes for '{}'@{} ({}); skipping blob reuse",
+                repo, revision_sha, e
+            );
+            return None;
+        }
+    };
+    // Cap the read: a tree listing is small, and a huge response should not
+    // buffer unbounded.
+    let entries: Vec<serde_json::Value> =
+        match serde_json::from_reader(response.into_reader().take(8 * 1024 * 1024)) {
+            Ok(entries) => entries,
+            Err(e) => {
+                log::debug!(
+                    target: "xybrid_sdk",
+                    "Unparseable tree listing for '{}'@{} ({}); skipping blob reuse",
+                    repo, revision_sha, e
+                );
+                return None;
+            }
+        };
+    Some(blob_ids_from_tree_entries(&entries))
+}
+
+/// Extract `path -> blob hash` from Hub tree-API entries, preferring the LFS
+/// sha256 over the git blob sha1 (the shared cache names LFS blobs by
+/// sha256). Non-file entries are skipped.
+#[cfg(feature = "huggingface")]
+fn blob_ids_from_tree_entries(
+    entries: &[serde_json::Value],
+) -> std::collections::HashMap<String, String> {
+    entries
+        .iter()
+        .filter(|entry| entry.get("type").and_then(|t| t.as_str()) == Some("file"))
+        .filter_map(|entry| {
+            let path = entry.get("path").and_then(|p| p.as_str())?;
+            let oid = entry
+                .get("lfs")
+                .and_then(|lfs| lfs.get("oid"))
+                .and_then(|oid| oid.as_str())
+                .or_else(|| entry.get("oid").and_then(|oid| oid.as_str()))?;
+            Some((path.to_string(), oid.to_string()))
+        })
+        .collect()
+}
+
+/// Whether a Hub API failure warrants falling back to local caches: a
+/// transport-level failure (DNS, connection refused, timeout) or a
+/// server-side 5xx. Client errors (401/403/404 — bad repo, bad revision, bad
+/// auth) and malformed responses propagate instead, so a stale local copy
+/// never masks them.
+#[cfg(feature = "huggingface")]
+fn hub_error_is_connectivity(error: &hf_hub::api::sync::ApiError) -> bool {
+    match error {
+        // hf-hub's transport layer is ureq 3 (named here as `ureq3`; the
+        // SDK's own calls use ureq 2).
+        hf_hub::api::sync::ApiError::RequestError(request_error) => match request_error.as_ref() {
+            ureq3::Error::Io(_)
+            | ureq3::Error::Timeout(_)
+            | ureq3::Error::HostNotFound
+            | ureq3::Error::ConnectionFailed => true,
+            ureq3::Error::StatusCode(code) => *code >= 500,
+            _ => false,
+        },
+        _ => false,
+    }
+}
+
+/// The standard `HF_HUB_OFFLINE` switch: any value other than
+/// empty/`0`/`false` forces local-only loads, matching the rest of the
+/// Hugging Face ecosystem.
+#[cfg(feature = "huggingface")]
+fn huggingface_offline_mode() -> bool {
+    std::env::var("HF_HUB_OFFLINE").is_ok_and(|value| {
+        !value.is_empty() && value != "0" && !value.eq_ignore_ascii_case("false")
+    })
+}
+
+/// Resolve the Hub API token the way `hf auth login` stores it: `HF_TOKEN`,
+/// then the token file at `HF_TOKEN_PATH`, then
+/// `{HF_HOME:-~/.cache/huggingface}/token`.
+#[cfg(feature = "huggingface")]
+fn huggingface_api_token() -> Option<String> {
+    if let Ok(token) = std::env::var("HF_TOKEN") {
+        if !token.is_empty() {
+            return Some(token);
+        }
+    }
+    let token_path = std::env::var("HF_TOKEN_PATH")
+        .ok()
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| {
+            std::env::var("HF_HOME")
+                .ok()
+                .filter(|value| !value.is_empty())
+                .map(PathBuf::from)
+                .or_else(|| dirs::home_dir().map(|home| home.join(".cache").join("huggingface")))
+                .map(|hf_home| hf_home.join("token"))
+        })?;
+    let token = std::fs::read_to_string(token_path).ok()?;
+    let token = token.trim();
+    if token.is_empty() {
+        None
+    } else {
+        Some(token.to_string())
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ModelLoader {
     source: ModelSource,
@@ -1163,12 +1317,54 @@ pub struct ModelLoader {
     auto_release: Option<AutoReleasePolicy>,
 }
 
+/// Copy a caller's [`GenerationConfig`] onto a cloud-bound envelope's metadata.
+///
+/// Envelope metadata is the *only* channel
+/// [`CloudRuntimeAdapter`](xybrid_core::runtime_adapter::CloudRuntimeAdapter)
+/// reads request settings from, so a config that never lands here is silently
+/// dropped and the gateway answers with its own defaults. Every sampling knob
+/// the cloud request shape can express is forwarded: `max_tokens`,
+/// `temperature`, `top_p`, and `stop_sequences`. The rest of
+/// [`GenerationConfig`] (`top_k`, `min_p`, `repetition_penalty`, `grammar`,
+/// `tools`) has no OpenAI-compatible wire field and stays local-only.
+///
+/// **Precedence: existing metadata wins.** A caller who wrote `temperature`
+/// straight onto the envelope is addressing the cloud leg specifically, while
+/// `GenerationConfig` describes the run in general — so the config only fills
+/// keys the envelope left empty.
+fn apply_generation_config_metadata(cloud: &mut Envelope, config: Option<&GenerationConfig>) {
+    let Some(cfg) = config else {
+        return;
+    };
+    cloud
+        .metadata
+        .entry("max_tokens".to_string())
+        .or_insert_with(|| cfg.max_tokens.to_string());
+    cloud
+        .metadata
+        .entry("temperature".to_string())
+        .or_insert_with(|| cfg.temperature.to_string());
+    cloud
+        .metadata
+        .entry("top_p".to_string())
+        .or_insert_with(|| cfg.top_p.to_string());
+    // An empty list is not an instruction — writing the key would only add
+    // noise the adapter then has to special-case.
+    if !cfg.stop_sequences.is_empty() {
+        cloud
+            .metadata
+            .entry(STOP_SEQUENCES_METADATA_KEY.to_string())
+            .or_insert_with(|| encode_stop_sequences(&cfg.stop_sequences));
+    }
+}
+
 /// Build the cloud-bound envelope for serving a not-yet-local model from the
 /// gateway. Sets `model` to the registry id so the gateway routes it to xycloud
 /// (the CPU cluster that runs the edge model) — an id it doesn't recognise as a
 /// hosted provider's model falls through there. `provider` is a benign
 /// validation/trace label, never sent on the wire (the gateway routes on
-/// `model` alone). `backend`/`max_tokens`/`temperature` defer to caller values.
+/// `model` alone). `backend` and every key
+/// [`apply_generation_config_metadata`] writes defer to caller values.
 fn build_speculative_cloud_envelope(
     model_id: &str,
     envelope: &Envelope,
@@ -1185,16 +1381,7 @@ fn build_speculative_cloud_envelope(
         .metadata
         .entry("backend".to_string())
         .or_insert_with(|| "gateway".to_string());
-    if let Some(cfg) = config {
-        cloud
-            .metadata
-            .entry("max_tokens".to_string())
-            .or_insert_with(|| cfg.max_tokens.to_string());
-        cloud
-            .metadata
-            .entry("temperature".to_string())
-            .or_insert_with(|| cfg.temperature.to_string());
-    }
+    apply_generation_config_metadata(&mut cloud, config);
     cloud
 }
 
@@ -2105,6 +2292,103 @@ impl ModelLoader {
         Ok(Self::publish_loaded_model(handle))
     }
 
+    /// Try to load `repo` entirely from the shared Hugging Face cache with
+    /// zero network I/O.
+    ///
+    /// `None` means no usable snapshot (absent repo, unresolvable revision,
+    /// or an incomplete selection) — the caller proceeds with its own flow.
+    /// `Some(result)` means a complete snapshot was found and the load was
+    /// attempted from it.
+    ///
+    /// Because the revision resolves through the shared cache's *local* refs
+    /// and file selection runs over the snapshot's own (possibly partial)
+    /// listing, neither freshness nor completeness against the remote repo
+    /// can be verified here. Callers must only use this where that is
+    /// acceptable: explicit offline mode (`HF_HUB_OFFLINE`), or a
+    /// connectivity fallback (with a warning) when the Hub API is
+    /// unreachable. The online path instead resolves through the Hub API and
+    /// reuses shared files per-file against the authoritative manifest.
+    #[cfg(feature = "huggingface")]
+    fn try_load_from_shared_snapshot<F>(
+        &self,
+        cache_layout: &CacheLayout,
+        repo: &str,
+        revision: Option<&str>,
+        variant: Option<&str>,
+        progress_callback: &F,
+    ) -> Option<SdkResult<XybridModel>>
+    where
+        F: Fn(f32),
+    {
+        let snapshot = crate::cache::hf_shared::find_shared_snapshot(repo, revision)?;
+        log::debug!(target: "xybrid_sdk", "Shared Hugging Face cache snapshot for '{}' at commit {}", repo, snapshot.commit);
+        let shared_files =
+            crate::cache::hf_shared::select_snapshot_files(&snapshot, repo, variant)?;
+        let result = (|| {
+            let cache_dir = huggingface_materialized_cache_dir(
+                cache_layout,
+                repo,
+                revision.map(|_| snapshot.commit.as_str()),
+                variant,
+            );
+            std::fs::create_dir_all(&cache_dir)?;
+            let shared_files: Vec<&str> = shared_files.iter().map(String::as_str).collect();
+            crate::cache::hf_shared::materialize_from_shared(&snapshot, &shared_files, &cache_dir)
+                .map_err(|e| {
+                    SdkError::cache_src(
+                        format!(
+                            "Failed to materialize '{}' from shared Hugging Face cache",
+                            repo
+                        ),
+                        e,
+                    )
+                })?;
+            progress_callback(1.0);
+
+            let metadata_path = cache_dir.join("model_metadata.json");
+            if !metadata_path.exists() {
+                log::info!(
+                    target: "xybrid_sdk",
+                    "No model_metadata.json in shared-cache snapshot of '{}', attempting auto-generation...",
+                    repo
+                );
+                match crate::metadata_gen::generate_metadata(&cache_dir, repo) {
+                    Ok((_metadata, _task_inference)) => {
+                        log::info!(
+                            target: "xybrid_sdk",
+                            "Auto-generated model_metadata.json for '{}'. \
+                             Review and adjust if inference results are unexpected.",
+                            repo
+                        );
+                    }
+                    Err(e) => {
+                        return Err(SdkError::MetadataNotFound(format!(
+                            "HuggingFace repo '{}' does not contain model_metadata.json and \
+                             auto-generation failed: {}. \
+                             Create one manually — see docs/sdk/MODEL_METADATA.md",
+                            repo, e
+                        )));
+                    }
+                }
+            }
+
+            let model = self.load_from_directory(&cache_dir)?;
+            if let Some(requested_revision) = revision {
+                cache_layout.record_huggingface_revision(
+                    repo,
+                    requested_revision,
+                    &snapshot.commit,
+                    variant,
+                )?;
+            } else {
+                cache_layout.record_huggingface_repo(repo)?;
+            }
+            log::info!(target: "xybrid_sdk", "Reusing model from local Hugging Face cache: {}", cache_dir.display());
+            Ok(model)
+        })();
+        Some(result)
+    }
+
     /// Load a model from HuggingFace Hub.
     ///
     /// Only downloads the selected GGUF variant (defaults to Q4_K_M) plus essential
@@ -2127,9 +2411,56 @@ impl ModelLoader {
         if revision.is_none() {
             let cache_dir = huggingface_materialized_cache_dir(&cache_layout, repo, None, variant);
             if cache_layout.is_huggingface_repo_materialized(repo, &cache_dir) {
-                log::info!(target: "xybrid_sdk", "Loading HuggingFace model from cache: {}", cache_dir.display());
-                return self.load_from_directory(&cache_dir);
+                let dangling = crate::cache::hf_shared::remove_dangling_files(&cache_dir);
+                if dangling == 0 {
+                    log::info!(target: "xybrid_sdk", "Loading HuggingFace model from cache: {}", cache_dir.display());
+                    return self.load_from_directory(&cache_dir);
+                }
+                log::warn!(
+                    target: "xybrid_sdk",
+                    "Cached copy of '{}' has {} dangling symlink(s) (source cache pruned?); removing it and re-materializing",
+                    repo, dangling
+                );
+                // Surviving entries may belong to an older commit than the
+                // one about to be materialized, and refilling around them
+                // would mix commits in one directory. This unpinned dir is
+                // not commit-keyed, so the only safe repair is rebuilding it
+                // from scratch at a single resolved commit.
+                if let Err(e) = std::fs::remove_dir_all(&cache_dir) {
+                    log::warn!(
+                        target: "xybrid_sdk",
+                        "Failed to remove corrupt cache dir {}: {}",
+                        cache_dir.display(),
+                        e
+                    );
+                }
             }
+        }
+
+        // Explicit offline mode (the standard HF_HUB_OFFLINE switch): load
+        // from the shared Hugging Face cache's local refs or fail — never
+        // touch the network. Outside the desktop allowlist
+        // (macOS/Linux/Windows) `find_shared_snapshot` always returns `None`,
+        // keeping mobile and other non-desktop behavior unchanged.
+        if huggingface_offline_mode() {
+            if let Some(result) = self.try_load_from_shared_snapshot(
+                &cache_layout,
+                repo,
+                revision,
+                variant,
+                &_progress_callback,
+            ) {
+                log::warn!(
+                    target: "xybrid_sdk",
+                    "HF_HUB_OFFLINE is set; loading '{}' from the shared Hugging Face cache — freshness and completeness cannot be verified offline",
+                    repo
+                );
+                return result;
+            }
+            return Err(SdkError::offline(format!(
+                "HF_HUB_OFFLINE is set and no usable local copy of '{}' exists in the shared Hugging Face cache",
+                repo
+            )));
         }
 
         log::info!(target: "xybrid_sdk", "Downloading model from HuggingFace: {}", repo);
@@ -2173,8 +2504,35 @@ impl ModelLoader {
                                     variant,
                                 )
                                 .unwrap_or(cache_dir);
-                            log::info!(target: "xybrid_sdk", "Loading offline HuggingFace revision from cache: {}", cache_dir.display());
-                            return self.load_from_directory(&cache_dir);
+                            if crate::cache::hf_shared::remove_dangling_files(&cache_dir) == 0 {
+                                log::info!(target: "xybrid_sdk", "Loading offline HuggingFace revision from cache: {}", cache_dir.display());
+                                return self.load_from_directory(&cache_dir);
+                            }
+                            log::warn!(
+                                target: "xybrid_sdk",
+                                "Offline cache for '{}'@{} has dangling symlinks (source cache pruned?); trying the shared Hugging Face cache",
+                                repo, requested_revision
+                            );
+                        }
+                    }
+                    // Connectivity fallback: resolve the revision through
+                    // the shared cache's local refs instead of the Hub API.
+                    // Client errors (bad repo, bad revision, bad auth)
+                    // propagate instead of being masked by a stale copy.
+                    if hub_error_is_connectivity(&error) {
+                        if let Some(result) = self.try_load_from_shared_snapshot(
+                            &cache_layout,
+                            repo,
+                            revision,
+                            variant,
+                            &_progress_callback,
+                        ) {
+                            log::warn!(
+                                target: "xybrid_sdk",
+                                "Hub API unreachable; falling back to the shared Hugging Face cache for '{}'@{} — a mutable revision may be stale",
+                                repo, requested_revision
+                            );
+                            return result;
                         }
                     }
                     return Err(SdkError::network_src(
@@ -2196,17 +2554,24 @@ impl ModelLoader {
                 variant,
             );
             if cache_layout.is_huggingface_revision_materialized(repo, &repo_info.sha, variant) {
-                cache_layout.record_huggingface_revision(
-                    repo,
-                    requested_revision,
-                    &repo_info.sha,
-                    variant,
-                )?;
-                let cache_dir = cache_layout
+                let materialized_dir = cache_layout
                     .materialized_huggingface_revision_dir(repo, &repo_info.sha, variant)
-                    .unwrap_or(cache_dir);
-                log::info!(target: "xybrid_sdk", "Loading HuggingFace model from cache: {}", cache_dir.display());
-                return self.load_from_directory(&cache_dir);
+                    .unwrap_or_else(|| cache_dir.clone());
+                if crate::cache::hf_shared::remove_dangling_files(&materialized_dir) == 0 {
+                    cache_layout.record_huggingface_revision(
+                        repo,
+                        requested_revision,
+                        &repo_info.sha,
+                        variant,
+                    )?;
+                    log::info!(target: "xybrid_sdk", "Loading HuggingFace model from cache: {}", materialized_dir.display());
+                    return self.load_from_directory(&materialized_dir);
+                }
+                log::info!(
+                    target: "xybrid_sdk",
+                    "Cached revision of '{}' had dangling symlink(s) (source cache pruned?); re-downloading",
+                    repo
+                );
             }
             let resolved_repo =
                 Repo::with_revision(repo.to_string(), RepoType::Model, repo_info.sha.clone());
@@ -2214,13 +2579,42 @@ impl ModelLoader {
         } else {
             let cache_dir = huggingface_materialized_cache_dir(&cache_layout, repo, None, variant);
             let repo_api = api.repo(Repo::new(repo.to_string(), RepoType::Model));
-            let repo_info = repo_api.info().map_err(|error| {
-                SdkError::network_src(
-                    format!("Failed to get HuggingFace repo info for '{}'", repo),
-                    error,
-                )
-            })?;
-            (cache_dir, repo_api, repo_info)
+            let repo_info = match repo_api.info() {
+                Ok(info) => info,
+                Err(error) => {
+                    // Connectivity fallback: resolve `main`/`master` through
+                    // the shared cache's local refs instead of the Hub API.
+                    // Client errors (bad repo, bad revision, bad auth)
+                    // propagate instead of being masked by a stale copy.
+                    if hub_error_is_connectivity(&error) {
+                        if let Some(result) = self.try_load_from_shared_snapshot(
+                            &cache_layout,
+                            repo,
+                            None,
+                            variant,
+                            &_progress_callback,
+                        ) {
+                            log::warn!(
+                                target: "xybrid_sdk",
+                                "Hub API unreachable; falling back to the shared Hugging Face cache for '{}' — the local ref may be stale",
+                                repo
+                            );
+                            return result;
+                        }
+                    }
+                    return Err(SdkError::network_src(
+                        format!("Failed to get HuggingFace repo info for '{}'", repo),
+                        error,
+                    ));
+                }
+            };
+            // Pin every subsequent file request to the commit `info()` just
+            // resolved — `Repo::new` stays on mutable `main`, which could
+            // move between `info()` and the downloads below and produce a
+            // directory mixing two commits.
+            let resolved_repo =
+                Repo::with_revision(repo.to_string(), RepoType::Model, repo_info.sha.clone());
+            (cache_dir, api.repo(resolved_repo), repo_info)
         };
 
         let metadata_path = cache_dir.join("model_metadata.json");
@@ -2278,25 +2672,24 @@ impl ModelLoader {
         // Create cache directory
         std::fs::create_dir_all(&cache_dir)?;
 
-        let total_files = files_to_download.len();
-        for (i, filename) in files_to_download.iter().enumerate() {
-            log::debug!(target: "xybrid_sdk", "Downloading [{}/{}]: {}", i + 1, total_files, filename);
+        // Shared Hugging Face cache snapshot at the exact commit the Hub API
+        // just resolved, if the user already has one (via `huggingface-cli
+        // download`, transformers, ...). Files it holds are reused below
+        // instead of downloaded; because resolution went through the Hub API,
+        // a stale local ref can never divert this.
+        let shared_snapshot =
+            crate::cache::hf_shared::find_shared_snapshot(repo, Some(&repo_info.sha));
 
+        let total_files = files_to_download.len();
+        let mut reused_files = 0usize;
+        // Lazily fetched `filename -> blob hash` map for content-addressed
+        // reuse; outer None = not fetched yet, inner None = fetch failed.
+        let mut remote_blob_ids: Option<Option<std::collections::HashMap<String, String>>> = None;
+        for (i, filename) in files_to_download.iter().enumerate() {
             // Report approximate progress
             _progress_callback((i as f32) / (total_files as f32));
 
-            // Download file (hf-hub caches internally)
-            let cached_path = repo_api.get(filename).map_err(|e| {
-                SdkError::network_src(
-                    format!("Failed to download '{}' from '{}'", filename, repo),
-                    e,
-                )
-            })?;
-
-            // Create target path in our cache directory
             let target_path = cache_dir.join(filename);
-
-            // Create parent directories if the file is in a subdirectory
             if let Some(parent) = target_path.parent() {
                 std::fs::create_dir_all(parent)?;
             }
@@ -2306,24 +2699,85 @@ impl ModelLoader {
                 continue;
             }
 
-            // Create symlink to hf-hub's cached file (avoids duplication)
-            #[cfg(unix)]
-            {
-                std::os::unix::fs::symlink(&cached_path, &target_path).map_err(|e| {
-                    SdkError::IoError(std::io::Error::other(format!(
-                        "Failed to symlink {} -> {}: {}",
-                        cached_path.display(),
-                        target_path.display(),
-                        e
-                    )))
-                })?;
+            // Reuse the file from the shared cache when the snapshot holds
+            // it; any failure here falls back to the download below instead
+            // of failing the load.
+            if let Some(snapshot) = &shared_snapshot {
+                let source_path = snapshot.dir.join(filename);
+                if source_path.is_file() {
+                    match crate::cache::hf_shared::link_or_copy(&source_path, &target_path) {
+                        Ok(()) => {
+                            log::debug!(target: "xybrid_sdk", "Reusing [{}/{}] from shared Hugging Face cache: {}", i + 1, total_files, filename);
+                            reused_files += 1;
+                            continue;
+                        }
+                        Err(e) => {
+                            log::debug!(
+                                target: "xybrid_sdk",
+                                "Failed to reuse '{}' from shared Hugging Face cache ({}); downloading instead",
+                                filename, e
+                            );
+                        }
+                    }
+                }
             }
 
-            // On Windows, copy the file instead
-            #[cfg(not(unix))]
-            {
-                std::fs::copy(&cached_path, &target_path)?;
+            // Content-addressed fallback: even without a snapshot at this
+            // commit, the shared cache may hold these exact bytes under
+            // `blobs/<hash>` — e.g. the commit moved but this file didn't.
+            // Expected hashes come from the Hub's tree API, fetched at most
+            // once per load and only when the repo has a local blob store;
+            // any failure here just downloads.
+            if remote_blob_ids.is_none() && crate::cache::hf_shared::shared_repo_has_blobs(repo) {
+                remote_blob_ids = Some(fetch_huggingface_blob_ids(repo, &repo_info.sha));
             }
+            if let Some(Some(blob_ids)) = &remote_blob_ids {
+                if let Some(source_path) = blob_ids
+                    .get(*filename)
+                    .and_then(|oid| crate::cache::hf_shared::shared_repo_blob_path(repo, oid))
+                {
+                    match crate::cache::hf_shared::link_or_copy(&source_path, &target_path) {
+                        Ok(()) => {
+                            log::debug!(target: "xybrid_sdk", "Reusing [{}/{}] from shared Hugging Face blob store: {}", i + 1, total_files, filename);
+                            reused_files += 1;
+                            continue;
+                        }
+                        Err(e) => {
+                            log::debug!(
+                                target: "xybrid_sdk",
+                                "Failed to reuse '{}' from shared Hugging Face blob store ({}); downloading instead",
+                                filename, e
+                            );
+                        }
+                    }
+                }
+            }
+
+            log::debug!(target: "xybrid_sdk", "Downloading [{}/{}]: {}", i + 1, total_files, filename);
+
+            // Download file (hf-hub caches internally), then materialize it
+            // (symlink on unix, copy elsewhere — avoids duplication)
+            let cached_path = repo_api.get(filename).map_err(|e| {
+                SdkError::network_src(
+                    format!("Failed to download '{}' from '{}'", filename, repo),
+                    e,
+                )
+            })?;
+            crate::cache::hf_shared::link_or_copy(&cached_path, &target_path).map_err(|e| {
+                SdkError::IoError(std::io::Error::other(format!(
+                    "Failed to materialize {} -> {}: {}",
+                    cached_path.display(),
+                    target_path.display(),
+                    e
+                )))
+            })?;
+        }
+        if reused_files > 0 {
+            log::info!(
+                target: "xybrid_sdk",
+                "Reused {}/{} files for '{}' from the shared Hugging Face cache",
+                reused_files, total_files, repo
+            );
         }
 
         // Report completion
@@ -4177,9 +4631,16 @@ impl XybridModel {
     /// - `correlation_id` is taken from `options.correlation_id` if set,
     ///   otherwise generated via `uuid::Uuid::new_v4()`.
     /// - The `envelope` must carry cloud-side routing metadata (`provider`,
-    ///   `model`, `system_prompt`, `temperature`, …) for the retry leg. See
+    ///   `model`, `system_prompt`, …) for the retry leg. See
     ///   [`CloudRuntimeAdapter`](xybrid_core::runtime_adapter::CloudRuntimeAdapter)
     ///   for supported keys.
+    /// - `options.generation_config` reaches the cloud leg: `max_tokens`,
+    ///   `temperature`, `top_p`, and `stop_sequences` are copied onto the
+    ///   cloud envelope's metadata. Metadata already present on the envelope
+    ///   wins — it targets the cloud leg specifically, so it overrides the
+    ///   generic config. The remaining knobs (`top_k`, `min_p`,
+    ///   `repetition_penalty`, `grammar`) have no OpenAI-compatible wire field
+    ///   and stay local-only.
     /// - Requests with `GenerationConfig::tools` do not enter the cloud leg yet:
     ///   the gateway adapter does not forward tools, so the wrapper emits the
     ///   local abort seam and then fails closed before policy or cloud dispatch.
@@ -4232,10 +4693,6 @@ impl XybridModel {
         let local_resource_summary = local_resource_guard.finish();
         let policy_metrics = fallback_policy_metrics(options);
         let signal_context = Some(SignalContext::from_metrics(&policy_metrics));
-        let tools_requested = options
-            .generation_config
-            .as_ref()
-            .is_some_and(|config| !config.tools.is_empty());
 
         dispatch_after_local(
             local_result,
@@ -4250,7 +4707,7 @@ impl XybridModel {
             policy_metrics,
             signal_context,
             options.cancellation_token.clone(),
-            tools_requested,
+            options.generation_config.as_ref(),
             on_token,
             on_seam,
         )
@@ -4704,6 +5161,38 @@ impl Clone for XybridModel {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(feature = "huggingface")]
+    #[test]
+    fn blob_ids_prefer_lfs_sha256_and_skip_non_files() {
+        let entries: Vec<serde_json::Value> = serde_json::from_str(
+            r#"[
+                {"type":"file","path":"model.gguf","oid":"1111111111111111111111111111111111111111",
+                 "lfs":{"oid":"7e6f72643caafc9a68256686638c4d7916f2cec76d1df478d4c3ddcd95a6aed4"}},
+                {"type":"file","path":"config.json","oid":"2222222222222222222222222222222222222222"},
+                {"type":"directory","path":"onnx","oid":"3333333333333333333333333333333333333333"},
+                {"type":"file","path":"broken"}
+            ]"#,
+        )
+        .unwrap();
+
+        let ids = blob_ids_from_tree_entries(&entries);
+        assert_eq!(
+            ids.get("model.gguf").map(String::as_str),
+            Some("7e6f72643caafc9a68256686638c4d7916f2cec76d1df478d4c3ddcd95a6aed4"),
+            "LFS files map to their sha256, not the git oid"
+        );
+        assert_eq!(
+            ids.get("config.json").map(String::as_str),
+            Some("2222222222222222222222222222222222222222"),
+            "non-LFS files map to their git blob sha1"
+        );
+        assert!(!ids.contains_key("onnx"), "directories are skipped");
+        assert!(
+            !ids.contains_key("broken"),
+            "entries without a hash are skipped"
+        );
+    }
 
     #[test]
     fn distinct_huggingface_commits_do_not_share_materialized_cache() {
@@ -5470,6 +5959,67 @@ mod tests {
             cloud.metadata.get("temperature").map(String::as_str),
             Some("0.3")
         );
+    }
+
+    /// Every sampling knob the cloud request shape can express must land in
+    /// metadata — `top_p` and `stop_sequences` used to be dropped on *every*
+    /// cloud path, so a caller's nucleus threshold and stop words never
+    /// reached the gateway.
+    #[test]
+    fn build_envelope_forwards_top_p_and_stop_sequences() {
+        let input = Envelope::new(xybrid_core::ir::EnvelopeKind::Text("hi".to_string()));
+        let config = GenerationConfig {
+            top_p: 0.72,
+            stop_sequences: vec!["STOP".to_string(), "END".to_string()],
+            ..Default::default()
+        };
+        let cloud = build_speculative_cloud_envelope("lfm2.5-350m", &input, Some(&config));
+        assert_eq!(
+            cloud.metadata.get("top_p").map(String::as_str),
+            Some("0.72")
+        );
+        assert_eq!(
+            cloud
+                .metadata
+                .get(STOP_SEQUENCES_METADATA_KEY)
+                .map(String::as_str),
+            Some(r#"["STOP","END"]"#)
+        );
+    }
+
+    /// An empty stop list is not an instruction — writing `[]` would be noise
+    /// the adapter then has to special-case.
+    #[test]
+    fn build_envelope_omits_empty_stop_sequences() {
+        let input = Envelope::new(xybrid_core::ir::EnvelopeKind::Text("hi".to_string()));
+        let config = GenerationConfig::default();
+        assert!(config.stop_sequences.is_empty(), "guard the premise");
+        let cloud = build_speculative_cloud_envelope("lfm2.5-350m", &input, Some(&config));
+        assert!(!cloud.metadata.contains_key(STOP_SEQUENCES_METADATA_KEY));
+    }
+
+    /// Metadata written straight onto the envelope targets the cloud leg
+    /// specifically, so it outranks the generic `GenerationConfig`.
+    #[test]
+    fn build_envelope_lets_caller_metadata_outrank_generation_config() {
+        let mut input = Envelope::new(xybrid_core::ir::EnvelopeKind::Text("hi".to_string()));
+        input
+            .metadata
+            .insert("max_tokens".to_string(), "7".to_string());
+        input
+            .metadata
+            .insert("top_p".to_string(), "0.1".to_string());
+        let config = GenerationConfig {
+            max_tokens: 999,
+            top_p: 0.95,
+            ..Default::default()
+        };
+        let cloud = build_speculative_cloud_envelope("lfm2.5-350m", &input, Some(&config));
+        assert_eq!(
+            cloud.metadata.get("max_tokens").map(String::as_str),
+            Some("7")
+        );
+        assert_eq!(cloud.metadata.get("top_p").map(String::as_str), Some("0.1"));
     }
 
     #[test]
@@ -6386,7 +6936,7 @@ mod tests {
             default_metrics(),
             Some(default_signal()),
             None,
-            false,
+            None,
             &mut on_token,
             &mut on_seam,
         )
@@ -6403,6 +6953,161 @@ mod tests {
         let tokens = collected.lock().unwrap().clone();
         assert_eq!(tokens.len(), 1);
         assert_eq!(tokens[0], "hello from cloud");
+    }
+
+    /// Regression: the explicit-adapter fallback path used to hand
+    /// `dispatch_after_local` the untouched envelope, so a caller's
+    /// `GenerationConfig` never reached `CloudRuntimeAdapter` — which reads its
+    /// settings from metadata alone. The request still succeeded with
+    /// plausible-looking output generated under the gateway's defaults, so
+    /// nothing signalled that `max_tokens`/`temperature`/`top_p`/
+    /// `stop_sequences` had been dropped.
+    #[test]
+    fn dispatch_after_local_forwards_generation_config_to_the_cloud_envelope() {
+        let cloud = FakeCloudAdapter::new("hello from cloud");
+        let authority = FakeAuthority::allow();
+        let envelope = text_envelope("write me a haiku");
+        let mut on_token =
+            |_: xybrid_core::runtime_adapter::types::PartialToken| -> Result<(), Box<dyn std::error::Error + Send + Sync>> { Ok(()) };
+        let mut on_seam = |_s: SeamInfo| {};
+        let local_result: SdkResult<InferenceResult> = Err(SdkError::AbortedForCloudFallback {
+            reason: xybrid_core::abort::AbortReason::StressMemory,
+        });
+        let config = GenerationConfig {
+            max_tokens: 13,
+            temperature: 0.31,
+            top_p: 0.72,
+            stop_sequences: vec!["STOP".to_string(), "END".to_string()],
+            ..Default::default()
+        };
+
+        dispatch_after_local(
+            local_result,
+            &envelope,
+            &cloud,
+            "corr-genconfig".to_string(),
+            "test-model",
+            3,
+            100,
+            None,
+            &authority,
+            default_metrics(),
+            Some(default_signal()),
+            None,
+            Some(&config),
+            &mut on_token,
+            &mut on_seam,
+        )
+        .expect("retry should succeed");
+
+        let calls = cloud.calls();
+        assert_eq!(calls.len(), 1);
+        let sent = &calls[0].metadata;
+        assert_eq!(sent.get("max_tokens").map(String::as_str), Some("13"));
+        assert_eq!(sent.get("temperature").map(String::as_str), Some("0.31"));
+        assert_eq!(sent.get("top_p").map(String::as_str), Some("0.72"));
+        assert_eq!(
+            sent.get(STOP_SEQUENCES_METADATA_KEY).map(String::as_str),
+            Some(r#"["STOP","END"]"#)
+        );
+    }
+
+    /// No config means no invented settings: the fallback leg must not stamp
+    /// `GenerationConfig::default()` onto the envelope, which would pin
+    /// `temperature = 0.0` on callers who never asked for greedy decoding.
+    #[test]
+    fn dispatch_after_local_writes_no_sampling_metadata_without_a_config() {
+        let cloud = FakeCloudAdapter::new("hello from cloud");
+        let authority = FakeAuthority::allow();
+        let envelope = text_envelope("write me a haiku");
+        let mut on_token =
+            |_: xybrid_core::runtime_adapter::types::PartialToken| -> Result<(), Box<dyn std::error::Error + Send + Sync>> { Ok(()) };
+        let mut on_seam = |_s: SeamInfo| {};
+        let local_result: SdkResult<InferenceResult> = Err(SdkError::AbortedForCloudFallback {
+            reason: xybrid_core::abort::AbortReason::StressMemory,
+        });
+
+        dispatch_after_local(
+            local_result,
+            &envelope,
+            &cloud,
+            "corr-no-genconfig".to_string(),
+            "test-model",
+            3,
+            100,
+            None,
+            &authority,
+            default_metrics(),
+            Some(default_signal()),
+            None,
+            None,
+            &mut on_token,
+            &mut on_seam,
+        )
+        .expect("retry should succeed");
+
+        let calls = cloud.calls();
+        assert_eq!(calls.len(), 1);
+        let sent = &calls[0].metadata;
+        for key in [
+            "max_tokens",
+            "temperature",
+            "top_p",
+            STOP_SEQUENCES_METADATA_KEY,
+        ] {
+            assert!(
+                !sent.contains_key(key),
+                "unexpected `{key}` on the cloud envelope"
+            );
+        }
+    }
+
+    /// Cloud-targeted metadata already on the envelope outranks the generic
+    /// `GenerationConfig` on the fallback leg too, matching the speculative path.
+    #[test]
+    fn dispatch_after_local_lets_envelope_metadata_outrank_generation_config() {
+        let cloud = FakeCloudAdapter::new("hello from cloud");
+        let authority = FakeAuthority::allow();
+        let mut envelope = text_envelope("write me a haiku");
+        envelope
+            .metadata
+            .insert("max_tokens".to_string(), "7".to_string());
+        let mut on_token =
+            |_: xybrid_core::runtime_adapter::types::PartialToken| -> Result<(), Box<dyn std::error::Error + Send + Sync>> { Ok(()) };
+        let mut on_seam = |_s: SeamInfo| {};
+        let local_result: SdkResult<InferenceResult> = Err(SdkError::AbortedForCloudFallback {
+            reason: xybrid_core::abort::AbortReason::StressMemory,
+        });
+        let config = GenerationConfig {
+            max_tokens: 999,
+            ..Default::default()
+        };
+
+        dispatch_after_local(
+            local_result,
+            &envelope,
+            &cloud,
+            "corr-precedence".to_string(),
+            "test-model",
+            3,
+            100,
+            None,
+            &authority,
+            default_metrics(),
+            Some(default_signal()),
+            None,
+            Some(&config),
+            &mut on_token,
+            &mut on_seam,
+        )
+        .expect("retry should succeed");
+
+        let calls = cloud.calls();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(
+            calls[0].metadata.get("max_tokens").map(String::as_str),
+            Some("7")
+        );
     }
 
     #[test]
@@ -6573,7 +7278,7 @@ mod tests {
             default_metrics(),
             Some(default_signal()),
             None,
-            false,
+            None,
             &mut on_token,
             &mut on_seam,
         )
@@ -6625,6 +7330,14 @@ mod tests {
         let local_result: SdkResult<InferenceResult> = Err(SdkError::AbortedForCloudFallback {
             reason: xybrid_core::abort::AbortReason::StressMemory,
         });
+        let tool_config = GenerationConfig {
+            tools: vec![xybrid_core::gateway::Tool::function(
+                "get_weather",
+                "Current weather for a city.",
+                serde_json::json!({"type": "object", "properties": {}}),
+            )],
+            ..Default::default()
+        };
 
         let result = dispatch_after_local(
             local_result,
@@ -6639,7 +7352,7 @@ mod tests {
             default_metrics(),
             Some(default_signal()),
             None,
-            true,
+            Some(&tool_config),
             &mut on_token,
             &mut on_seam,
         );
@@ -6704,7 +7417,7 @@ mod tests {
             default_metrics(),
             Some(default_signal()),
             None,
-            false,
+            None,
             &mut on_token,
             &mut on_seam,
         );
@@ -6774,7 +7487,7 @@ mod tests {
             default_metrics(),
             Some(default_signal()),
             None,
-            false,
+            None,
             &mut on_token,
             &mut on_seam,
         )
@@ -6823,7 +7536,7 @@ mod tests {
             default_metrics(),
             Some(default_signal()),
             Some(cancellation),
-            false,
+            None,
             &mut on_token,
             &mut on_seam,
         );
@@ -7493,7 +8206,7 @@ mod tests {
             default_metrics(),
             Some(default_signal()),
             None,
-            false,
+            None,
             &mut on_token,
             &mut on_seam,
         );
@@ -7552,7 +8265,7 @@ mod tests {
             default_metrics(),
             Some(default_signal()),
             None,
-            false,
+            None,
             &mut on_token,
             &mut on_seam,
         )
@@ -7590,7 +8303,7 @@ mod tests {
             default_metrics(),
             Some(default_signal()),
             None,
-            false,
+            None,
             &mut on_token,
             &mut on_seam,
         )
@@ -7628,7 +8341,7 @@ mod tests {
             default_metrics(),
             Some(default_signal()),
             None,
-            false,
+            None,
             &mut on_token,
             &mut on_seam,
         )
@@ -7668,7 +8381,7 @@ mod tests {
             default_metrics(),
             Some(default_signal()),
             None,
-            false,
+            None,
             &mut on_token,
             &mut on_seam,
         );
@@ -7714,7 +8427,7 @@ mod tests {
             default_metrics(),
             Some(default_signal()),
             None,
-            false,
+            None,
             &mut on_token,
             &mut on_seam,
         );
