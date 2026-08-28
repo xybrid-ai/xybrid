@@ -25,7 +25,9 @@ use crate::cloud::{
 use crate::gateway::ChatCompletionChunk;
 use crate::ir::{Envelope, EnvelopeKind};
 use crate::pipeline::IntegrationProvider;
-use crate::runtime_adapter::types::{PartialToken, StreamingCallback};
+use crate::runtime_adapter::types::{
+    parse_stop_sequences, PartialToken, StreamingCallback, STOP_SEQUENCES_METADATA_KEY,
+};
 use crate::runtime_adapter::{AdapterError, AdapterResult, RuntimeAdapter};
 use crate::tracing as trace;
 use serde_json::json;
@@ -188,6 +190,21 @@ impl CloudRuntimeAdapter {
         if let Some(max_str) = envelope.metadata.get("max_tokens") {
             if let Ok(max) = max_str.parse::<u32>() {
                 request = request.with_max_tokens(max);
+            }
+        }
+
+        // Top-p (nucleus) sampling
+        if let Some(top_p_str) = envelope.metadata.get("top_p") {
+            if let Ok(top_p) = top_p_str.parse::<f32>() {
+                request = request.with_top_p(top_p);
+            }
+        }
+
+        // Stop sequences
+        if let Some(stop_str) = envelope.metadata.get(STOP_SEQUENCES_METADATA_KEY) {
+            let stop = parse_stop_sequences(stop_str);
+            if !stop.is_empty() {
+                request = request.with_stop(stop);
             }
         }
 
@@ -676,6 +693,69 @@ mod tests {
 
         let result = adapter.execute(&input);
         assert!(matches!(result, Err(AdapterError::InvalidInput(_))));
+    }
+
+    /// The adapter reads every request setting off envelope metadata, so a key
+    /// it ignores is a caller value silently dropped. `top_p` and
+    /// `stop_sequences` were ignored even though `gateway_chat_body` already
+    /// serialises both.
+    #[test]
+    fn build_request_reads_top_p_and_stop_sequences_from_metadata() {
+        let adapter = CloudRuntimeAdapter::new();
+        let mut input = Envelope::new(EnvelopeKind::Text("hello".to_string()));
+        input
+            .metadata
+            .insert("top_p".to_string(), "0.72".to_string());
+        input.metadata.insert(
+            STOP_SEQUENCES_METADATA_KEY.to_string(),
+            r#"["STOP","END"]"#.to_string(),
+        );
+
+        let request = adapter.build_request("hello", &input);
+
+        assert!((request.top_p.unwrap() - 0.72).abs() < 1e-6);
+        assert_eq!(
+            request.stop.as_deref(),
+            Some(["STOP".to_string(), "END".to_string()].as_slice())
+        );
+    }
+
+    /// An empty value must not become `"stop": []` on the wire.
+    #[test]
+    fn build_request_omits_an_empty_stop_list() {
+        let adapter = CloudRuntimeAdapter::new();
+        let mut input = Envelope::new(EnvelopeKind::Text("hello".to_string()));
+        input
+            .metadata
+            .insert(STOP_SEQUENCES_METADATA_KEY.to_string(), String::new());
+
+        let request = adapter.build_request("hello", &input);
+
+        assert!(request.stop.is_none());
+    }
+
+    /// End to end through the body serialiser: metadata in, wire fields out.
+    #[test]
+    fn gateway_chat_body_carries_top_p_and_stop_from_metadata() {
+        let adapter = CloudRuntimeAdapter::new();
+        let config = CloudConfig::gateway();
+        let mut input = Envelope::new(EnvelopeKind::Text("hello".to_string()));
+        input
+            .metadata
+            .insert("model".to_string(), "lfm2.5-350m".to_string());
+        input
+            .metadata
+            .insert("top_p".to_string(), "0.72".to_string());
+        input.metadata.insert(
+            STOP_SEQUENCES_METADATA_KEY.to_string(),
+            r#"["STOP","END"]"#.to_string(),
+        );
+
+        let request = adapter.build_request("hello", &input);
+        let body = gateway_chat_body(&request, &config, false).expect("model is set");
+
+        assert!((body["top_p"].as_f64().unwrap() - 0.72).abs() < 1e-6);
+        assert_eq!(body["stop"], json!(["STOP", "END"]));
     }
 
     #[test]

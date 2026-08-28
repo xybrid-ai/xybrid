@@ -181,6 +181,12 @@ impl CompletionRequest {
         self
     }
 
+    /// Set top-p (nucleus) sampling.
+    pub fn with_top_p(mut self, top_p: f32) -> Self {
+        self.top_p = Some(top_p);
+        self
+    }
+
     /// Set stop sequences.
     pub fn with_stop(mut self, stop: Vec<String>) -> Self {
         self.stop = Some(stop);

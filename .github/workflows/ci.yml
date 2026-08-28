@@ -304,8 +304,15 @@ jobs:
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           key: ubuntu-clippy-llm
+      # `--all-targets` is what compiles the examples. Without it the
+      # llm-llamacpp examples (the tool-calling reference loops) are checked by
+      # nobody: the plain `clippy` job passes --all-targets but not the feature,
+      # so cargo skips them on `required-features`, and this job had the feature
+      # but not the flag. That gap is how examples rot into a "fix examples that
+      # do not compile" PR. Clippy stops at .rmeta, so there is no link step and
+      # none of the disk pressure that made the test job skip examples.
       - name: Clippy with llm-llamacpp
-        run: cargo clippy -p xybrid-core --features "ort-download,llm-llamacpp" -- -D warnings
+        run: cargo clippy -p xybrid-core --features "ort-download,llm-llamacpp" --all-targets -- -D warnings
 
   test-llm:
     name: test (llm-llamacpp, ubuntu-latest)

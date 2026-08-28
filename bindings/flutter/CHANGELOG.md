@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.7.0
+
+Streaming tool loops can now keep both live output and conversation history,
+and apps can release idle model memory without throwing away model handles.
+
+* Added: a terminal streaming token carries typed `toolCalls`,
+  `finishReason: "tool_calls"`, and `rawText`, so callers dispatch a tool without
+  parsing protocol text and retain the exact assistant turn needed for the
+  continuation (xybrid-ai/xybrid#542)
+* Added: `tool_results` continuations work through
+  `runStreamingWithContext`, preserving history and token-by-token output on the
+  second turn (xybrid-ai/xybrid#542)
+* Added: `Xybrid.releaseMemory`, `Xybrid.setAutoRelease`, and
+  `Xybrid.isAutoReleaseEnabled`. Explicit release skips busy models and an
+  evicted model reloads itself on its next use; automatic release is off by
+  default (xybrid-ai/xybrid#539)
+* Fixed: a terminal tool call is delivered exactly once. The native terminal
+  token and the completion event previously exposed the same call, which could
+  make a straightforward `hasToolCalls` loop dispatch every tool twice
+  (xybrid-ai/xybrid#542)
+* Fixed: cloud fallback preserves `maxTokens`, `temperature`, `topP`, and exact
+  `stopSequences` values instead of silently using gateway defaults or
+  corrupting whitespace- and comma-bearing stops (xybrid-ai/xybrid#545)
+* Changed: image-bearing tool continuations still fail closed, with an error
+  that explains image embeddings cannot be reconstructed from replayed text
+  (xybrid-ai/xybrid#542)
+
 ## 0.6.0
 
 Structured output, reasoning text, and tool-capability reporting reach the Dart

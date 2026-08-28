@@ -18,6 +18,45 @@ use crate::{
     ir::{Envelope, EnvelopeKind, ImageDimensions, ImageFormat, ImageSource},
     runtime_adapter::AdapterError,
 };
+
+/// Envelope-metadata key carrying stop sequences.
+///
+/// The metadata map is `String`-valued, so a list needs an encoding.
+/// [`encode_stop_sequences`] writes a JSON array and [`parse_stop_sequences`]
+/// reads one; both the cloud adapter and the local LLM strategy go through
+/// that pair, so one envelope yields the same stop list either side of the
+/// local/cloud seam.
+pub const STOP_SEQUENCES_METADATA_KEY: &str = "stop_sequences";
+
+/// Decode the [`STOP_SEQUENCES_METADATA_KEY`] metadata value.
+///
+/// A JSON array of strings is the canonical form and round-trips any sequence
+/// exactly — including the whitespace-only and comma-bearing values a
+/// delimiter-based encoding mangles (`"\n\n"` would trim away to nothing).
+///
+/// Anything else is read as the legacy comma-separated list, trimming each
+/// entry and dropping empties, so hand-written metadata like
+/// `stop_sequences = "<|im_end|>,<|im_start|>"` keeps working. That legacy form
+/// stays lossy by construction; write JSON for anything whitespace- or
+/// comma-bearing.
+pub fn parse_stop_sequences(value: &str) -> Vec<String> {
+    if let Ok(parsed) = serde_json::from_str::<Vec<String>>(value) {
+        return parsed;
+    }
+    value
+        .split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect()
+}
+
+/// Encode stop sequences for [`STOP_SEQUENCES_METADATA_KEY`] as a JSON array.
+///
+/// Lossless: [`parse_stop_sequences`] returns exactly what went in.
+pub fn encode_stop_sequences(stop_sequences: &[String]) -> String {
+    serde_json::to_string(stop_sequences).expect("a Vec<String> always serialises to JSON")
+}
+
 use serde::{Deserialize, Serialize};
 
 // =============================================================================
@@ -766,6 +805,49 @@ mod tests {
                 parameters: None,
             },
         }
+    }
+
+    /// Regression: the metadata bridge used a comma-delimited encoding, which
+    /// silently corrupted the most common stop sequences of all. `"\n\n"`
+    /// trimmed away to empty and was dropped entirely, so a cloud leg that
+    /// should have stopped at a blank line ran on to `max_tokens`; `"\nUser:"`
+    /// arrived as `"User:"`; and anything containing a comma was split in two.
+    /// The local leg kept the caller's exact values, so the two legs stopped
+    /// on different text.
+    #[test]
+    fn stop_sequences_round_trip_losslessly() {
+        let hostile = vec![
+            "\n\n".to_string(),
+            "\nUser:".to_string(),
+            "one, two".to_string(),
+            "  ".to_string(),
+            "<|im_end|>".to_string(),
+        ];
+
+        assert_eq!(
+            parse_stop_sequences(&encode_stop_sequences(&hostile)),
+            hostile
+        );
+    }
+
+    #[test]
+    fn stop_sequences_round_trip_an_empty_list() {
+        let empty: Vec<String> = Vec::new();
+        assert_eq!(parse_stop_sequences(&encode_stop_sequences(&empty)), empty);
+    }
+
+    /// Hand-written metadata predates the JSON encoding and must keep working.
+    #[test]
+    fn stop_sequences_still_read_the_legacy_comma_form() {
+        assert_eq!(
+            parse_stop_sequences("<|im_end|>,<|im_start|>"),
+            vec!["<|im_end|>".to_string(), "<|im_start|>".to_string()]
+        );
+        assert_eq!(
+            parse_stop_sequences(" STOP , END "),
+            vec!["STOP".to_string(), "END".to_string()]
+        );
+        assert!(parse_stop_sequences("").is_empty());
     }
 
     #[test]
