@@ -1,0 +1,31 @@
+bindings/python/xybrid/_bolt/__init__.py
+  s_f9421f29a06fce::t_7117f38813eea6 1668-1669,1756-1771,2216
+bindings/python/xybrid/_bolt/__init__.pyi
+  s_f9421f29a06fce::t_8c0397a1243472 302-306
+crates/xybrid-mlx/src/ffi.rs
+  s_df2139388dad3d::t_2ad1fc14c558ca 219-220
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "3d1c4f7f2ce8a7879cb2df6e18e9681bd646fbf4",
+  "prompts": {},
+  "sessions": {
+    "s_df2139388dad3d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0098e-a838-73f0-9a5f-eda4ad99197c",
+        "model": "unknown"
+      },
+      "human_author": "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
+    },
+    "s_f9421f29a06fce": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0098f-0356-7500-80b9-617ec94597b7",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
+    }
+  }
+}
