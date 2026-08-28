@@ -1,0 +1,386 @@
+bindings/apple/README.md
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 15,22
+bindings/flutter/example/macos/Flutter/GeneratedPluginRegistrant.swift
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 1-14
+bindings/python/xybrid/_bolt/__init__.pyi
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 130-131,490-492
+docs/content/docs/(integration)/sdks/android.zh.mdx
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 14,37
+  s_9cbb09e9a3a940::t_8379ef5d6e5fa9 38
+tools/README.md
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 9-15
+bindings/python/pyproject.toml
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 7
+bindings/unity/Runtime/Bolt/XybridStreamToken.cs
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 10-28,31,37-38,46-47,84-93,96,98,100-101
+  s_9cbb09e9a3a940::t_0ecd69298bfe82 94-95,97,99
+bindings/flutter/example/macos/Runner/Info.plist
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 1-32
+docs/content/docs/(integration)/sdks/android.mdx
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 14
+tools/scripts/natives-push.sh
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 70-74,78
+bindings/unity/Runtime/Api/StreamToken.cs
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 4-5,39-40,49-75,77-79,86-87
+docs/content/docs/guides/tool-calling.zh.mdx
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 24-30,116-127,131-190,258-318
+  s_9cbb09e9a3a940::t_1f9870fce75c6e 319
+bindings/flutter/example/android/.gitignore
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 1-14
+bindings/flutter/README.md
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 18,165-235
+  s_9cbb09e9a3a940::t_ce79c177b568e1 236
+crates/xybrid-core/tests/mobilenet_vision_parity.rs
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 58-60
+crates/xybrid-core/src/execution/postprocessing/tensor_ops.rs
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 7,15,110-162,363-368,370,412-547,662-915
+bindings/flutter/example/android/app/src/debug/AndroidManifest.xml
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 1-7
+bindings/flutter/.pubignore
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 38-44
+crates/llama-cpp-sys/natives-manifest.txt
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 1-35
+crates/xybrid-core/src/runtime_adapter/streaming_postprocess.rs
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 414-420,477-481,507-515,517-530,532-533,1204-1262
+crates/whisper-cpp-sys/build.rs
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 209-218,228-230,260
+crates/xybrid-core/tests/whispercpp_asr.rs
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 236-239
+docs/sdk/api-surface.yaml
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 5-6,54-69,377-379,497-502,710-735
+crates/xybrid-core/src/ir/envelope.rs
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 1321-1324
+bindings/flutter/example/android/app/build.gradle.kts
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 1-44
+bindings/web/package.json
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 3
+bindings/flutter/example/android/build.gradle.kts
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 1-24
+bindings/flutter/example/macos/Runner/Configs/Release.xcconfig
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 1-2
+bindings/flutter/example/macos/Runner.xcodeproj/project.pbxproj
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 1-801
+bindings/flutter/rust/Cargo.toml
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 3
+crates/whisper-cpp-sys/Cargo.toml
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 42
+bindings/flutter/lib/src/tools.dart
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 41-52
+crates/xybrid-ffi-facade/src/lib.rs
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 419-423,1228,1230-1246,1257-1262,2015-2042,2749-2805,2910-2911,2921-2922
+bindings/flutter/example/android/app/src/main/res/drawable-v21/launch_background.xml
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 1-12
+bindings/flutter/example/macos/Runner/Assets.xcassets/AppIcon.appiconset/Contents.json
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 1-68
+bindings/flutter/example/macos/Runner.xcworkspace/xcshareddata/IDEWorkspaceChecks.plist
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 1-8
+bindings/flutter/test/stream_token_test.dart
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 1-83
+bindings/unity/README.md
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 45,62
+crates/xybrid-core/src/tts/voice_embedding.rs
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 264-267
+bindings/flutter/example/macos/.gitignore
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 1-7
+docs/content/docs/(integration)/sdks/web.mdx
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 9
+tools/scripts/star-history.py
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 1-322
+bindings/flutter/example/README.md
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 1-11
+bindings/flutter/lib/src/llm.dart
+  s_9cbb09e9a3a940::t_4af207249c7ea1 7,38-39,48-67,76-77
+bindings/flutter/rust/src/api/envelope.rs
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 225-229
+bindings/flutter/rust/src/api/sdk_client.rs
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 116-142
+bindings/unity/package.json
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 3
+crates/xybrid-core/src/runtime_adapter/types.rs
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 14,21-59,80-81,83-100,112-113,129-144,825-866
+  s_9cbb09e9a3a940::t_f21b99bce5d9e3 867
+crates/xybrid-core/src/execution/postprocessing/mod.rs
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 9,62-65,89-108
+  s_9cbb09e9a3a940::t_ff8b6d890b2fa2 109-110
+docs/content/docs/(integration)/sdks/kotlin.zh.mdx
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 92-103
+tools/scripts/natives-manifest.sh
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 1-169
+crates/llama-cpp-sys/Cargo.toml
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 54-63
+crates/xybrid-core/src/runtime_adapter/tensor_utils.rs
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 309-311,313
+bindings/flutter/example/android/app/src/main/AndroidManifest.xml
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 1-45
+.github/workflows/ci-docs.yml
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 19,27
+bindings/flutter/lib/src/model_loader.dart
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 17,498-501,506-508,514,516-517,609-612,616-618,624,626-627,714-719,723-725,732-733,736-740,746,748-749
+bindings/flutter/example/macos/Runner/Configs/Warnings.xcconfig
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 1-13
+bindings/kotlin/src/main/kotlin/ai/xybrid/Xybrid.kt
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 435-440,504-514
+  s_9cbb09e9a3a940::t_deefbfea8a6d61 515
+bindings/flutter/example/lib/main.dart
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 1-61
+bindings/kotlin/src/test/kotlin/ai/xybrid/ToolCallConveniencesTest.kt
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 1-70
+bindings/flutter/example/android/app/src/main/res/drawable/launch_background.xml
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 1-12
+crates/xybrid-core/src/execution/executor.rs
+  s_9cbb09e9a3a940::t_5d490109e9717e 2021-2023,2025,2035,2087-2096,2226-2294,2458-2476,2599
+  s_9cbb09e9a3a940::t_11d760be819db1 60-61,63-64,781,801,1247-1256,1294,1337,1403,1529-1532,1549,1704-1710,1755,1798,1863,1923,1980-1993,2020,2600-2601,2603,2614,2668-2678,4014-4017,4020-4021,4023,4027-4028,4047-4263,4267-4269,4271-4282,4284-4301,4304-4309,4314-4319,4322-4335,4337-4342
+bindings/flutter/lib/src/envelope.dart
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 201-205
+crates/llama-cpp-sys/build.rs
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 37,550-578,588-590,662-698,939-1428
+  s_9cbb09e9a3a940::t_2a22b72604ec98 1429
+bindings/python/xybrid/_bolt/_native.c
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 191-196,302-304,1246-1275,7228-7284,7451-7453
+bindings/unity/Runtime/Api/Envelope.cs
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 199-203
+crates/xybrid-core/src/execution/preprocessing/image.rs
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 383,393,400-405,2259
+bindings/kotlin/src/main/kotlin/ai/xybrid/XybridBolt.kt
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 1383-1385,1388,1397-1398,1419-1420
+crates/xybrid-core/src/runtime_adapter/llama_cpp/mod.rs
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 1056-1194,1327-1332,1376-1379,1381-1382,1785-1790,1827-1830,1832-1833
+bindings/flutter/example/.metadata
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 1-30
+crates/xybrid-core/src/runtime_adapter/llm.rs
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 113-124,260-263,270-309,1097-1199
+  s_9cbb09e9a3a940::t_58b7a8f8d5dbd7 1200
+crates/xybrid-sdk/Cargo.toml
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 17,37,42
+docs/content/docs/(integration)/sdks/flutter.zh.mdx
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 14
+bindings/apple/Sources/Xybrid/Xybrid.swift
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 430-433,581-594
+docs/content/docs/(integration)/sdks/ios.zh.mdx
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 18,44-45,186-191
+docs/telemetry/registry.md
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 40
+tools/scripts/natives-verify-anon.sh
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 1-61
+bindings/react-native/package.json
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 3
+bindings/react-native/android/build.gradle
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 94
+bindings/flutter/example/android/app/src/profile/AndroidManifest.xml
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 1-7
+bindings/kotlin/build.gradle.kts
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 8
+bindings/flutter/example/macos/Runner/Configs/AppInfo.xcconfig
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 1-14
+bindings/flutter/example/macos/Flutter/Flutter-Debug.xcconfig
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 1-2
+crates/xybrid-whisper/tests/transcribe_smoke.rs
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 67-70
+bindings/apple/XybridFFI-Info.plist
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 10,12
+bindings/flutter/example/android/app/src/main/kotlin/com/example/example/MainActivity.kt
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 1-5
+bindings/flutter/example/macos/Runner/Release.entitlements
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 1-10
+examples/ios/XybridExample/ExtractionView.swift
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 294-295
+bindings/flutter/example/macos/RunnerTests/RunnerTests.swift
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 1-12
+.github/workflows/build-natives.yml
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 11-19,33-34,93-96,121-138,204-205,207,219-220,222,225-229,232-240,245-260,262-270,272-342,344-378,380-387
+docs/content/docs/guides/tool-calling.mdx
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 27-36,132-146,151-214,287-352
+  s_9cbb09e9a3a940::t_dc376f6e0c67b0 353
+.github/workflows/unity-editor.yml
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 32-33,46-47
+bindings/python/xybrid/_bolt/__init__.py
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 1111-1112,1121-1122,1143-1144,2163-2168,2178,2257-2259
+docs/content/docs/(integration)/sdks/flutter.mdx
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 14
+docs/content/docs/quickstart.mdx
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 15,57,88,122,194
+crates/xybrid-core/src/runtime_adapter/mod.rs
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 171-172
+.github/workflows/test-candle.yml
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 28-29,49-50
+bindings/flutter/example/macos/Runner/DebugProfile.entitlements
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 1-14
+.github/workflows/bazel.yml
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 49-50,80-82,85
+crates/xybrid-llama/Cargo.toml
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 24
+bindings/flutter/CHANGELOG.md
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 3-52
+bindings/flutter/example/android/gradle.properties
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 1-2
+docs/content/docs/(integration)/sdks/web.zh.mdx
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 9
+bindings/flutter/example/android/gradle/wrapper/gradle-wrapper.properties
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 1-5
+crates/xybrid-core/src/runtime_adapter/cloud/mod.rs
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 28-30,196-210,506-509,527-528,698-759
+  s_9cbb09e9a3a940::t_06a66398876743 760
+bindings/kotlin/README.md
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 15
+CHANGELOG.md
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 10-101,114-155,195,197-240
+crates/xybrid-sdk/src/model.rs
+  s_9cbb09e9a3a940::t_c4f0b11d42098a 11,26,46-47,64-65,67-80,541-546,568,579,614-617,898-917,919,923-925,931-991,1326-1369,1377-1378,1395,1675,1697,1714,1739,1758,1794,1827,1850,1877,1939-1995,2090-2094,2224,2230-2233,2293-2300,2312,2370,2695-2703,2708,2712-2717,2725-2726,2752,2906-2926,2981-2984,2986-3006,3012-3021,3023,3188,3198,3336,3387-3388,3442,3489-3490,3570-3571,3598,3600,3658,3665-3666,3777-3778,3803,3805,3935-3936,3958,3960,3998-4000,4152-4153,4173,4175,4207-4209,4443,4446-4452,4519,4564,4578,4602-4603,4616,4618,4642-4643,4670-4672,4748-4749,4786,4788,4861-4866,4868-4890,4893-4894,4921-4924,4929,4951-4953,5153-5508,5832-5892,5920,5929,5938,5963,5973,5987,6018,6027,6879-6880,7144,7153,7192,7201,7214,7223,7452,7471-7625,7794,7846-7852,8722,8819,8857,8897,8943
+  s_9cbb09e9a3a940::t_e853ccf5551a3b 7853
+  s_9cbb09e9a3a940::t_5ac115fcc6d027 7868,7933,8003,8052,8193,8202,8781
+bindings/flutter/example/macos/Runner.xcodeproj/xcshareddata/xcschemes/Runner.xcscheme
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 1-99
+bindings/flutter/example/macos/Flutter/Flutter-Release.xcconfig
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 1-2
+crates/xybrid-core/src/execution/strategies/llm.rs
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 191
+  s_9cbb09e9a3a940::t_cfbe5832f6a9e9 19,213-214
+.gitignore
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 81-87
+crates/xybrid-core/benches/raw_image_ingress.rs
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 30
+crates/xybrid-core/src/execution/tool_continuation.rs
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 6-17,31,59-96,121-125,138,158-163,177-207,211-216,224-226,233-234
+bindings/flutter/rust/src/frb_generated.rs
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 5047-5048,5050
+  s_9cbb09e9a3a940::t_1baccb2d74ca10 47,3142-3172,3267-3296,3360-3391,4230-4231,4238-4239,5001,5006,5011,5016,5021,5026,5031,5036,5041,5046,5049,5051-5061,5064,5685-5686,6487-6488
+crates/xybrid-sdk/tests/cloud_fallback_e2e.rs
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 98-99
+examples/ios/README.md
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 186-187,205-206
+README.ja-JP.md
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 35,95,97,100-108,111-112,140,157,175,189-201,207-209,224,290-292,296-299,303-325,329-332,334-335,382,384,392-395,400-408
+tools/scripts/api-contract-check.sh
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 128-133,238-242
+crates/xybrid-sdk/src/lib.rs
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 159,225-226,228,575-606
+  s_9cbb09e9a3a940::t_685d0da10f8230 607
+bindings/flutter/pubspec.yaml
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 3
+crates/xybrid-bolt/src/lib.rs
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 704,706-721,732-733,963-989,1672-1673,1680-1708
+bindings/apple/Tests/XybridTests/ModelLoaderTests.swift
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 60-120
+docs/content/docs/(integration)/sdks/ios.mdx
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 18
+bindings/apple/Sources/Xybrid/xybrid_bolt.swift
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 413,415-430,437-439,446-447,456-458,468-469
+bindings/flutter/example/macos/Runner/AppDelegate.swift
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 1-13
+docs/INSTALLATION.zh.md
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 83-126
+bindings/flutter/example/macos/Runner/Configs/Debug.xcconfig
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 1-2
+README.md
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 35,81,93,95,98-106,109-110,118,135,153,167-179,186,202,286-288,292-295,299-321,325-328,330-331,378,380,388-389,412-427,457-460
+crates/xybrid/Cargo.toml
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 17
+crates/xybrid-core/src/execution/template/steps.rs
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 768-792
+bindings/flutter/lib/src/xybrid.dart
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 188-215
+.github/workflows/star-history.yml
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 1-80
+tools/scripts/natives-pull.sh
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 14-17,46-48
+crates/xybrid-core/examples/neutts_decode_tokens.rs
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 66-69
+bindings/flutter/example/android/app/src/main/res/values/styles.xml
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 1-18
+bindings/flutter/example/macos/Runner.xcodeproj/project.xcworkspace/xcshareddata/IDEWorkspaceChecks.plist
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 1-8
+.github/workflows/test-whispercpp.yml
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 23-24,41-42
+bindings/flutter/example/macos/Runner/Base.lproj/MainMenu.xib
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 1-343
+Package.swift
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 40,45
+bindings/flutter/example/android/app/src/main/res/values-night/styles.xml
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 1-18
+bindings/flutter/example/macos/Podfile
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 1-42
+bindings/flutter/example/pubspec.yaml
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 1-91
+bindings/flutter/example/android/settings.gradle.kts
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 1-26
+bindings/flutter/rust/src/api/model.rs
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 629-630,632-669,724-733,1024,1282,1367
+bindings/unity/Runtime/Api/Model.cs
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 390-392
+Cargo.toml
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 23
+docs/INSTALLATION.md
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 144-199
+examples/ios/XybridExample/LiveVision.swift
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 360-361
+crates/xybrid-cli/src/commands/repl/agent_loop.rs
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 180-186,214
+crates/xybrid-whisper/Cargo.toml
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 23
+README.zh-CN.md
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 35,95,97,100-108,111-112,140,157,175,189-201,207-209,224,290-291,295-298,302-324,328-331,333-334,381,383,391-393,398-406
+AGENTS.md
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 84-117
+crates/xybrid-core/src/preprocessing/mel_spectrogram.rs
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 133-135,137
+bindings/flutter/example/macos/Runner/MainFlutterWindow.swift
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 1-15
+bindings/web/README.md
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 3
+bindings/flutter/example/.gitignore
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 1-45
+docs/content/docs/quickstart.zh.mdx
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 15,57,88,122,193
+crates/xybrid-core/src/cloud/completion.rs
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 184-189
+bindings/python/tests/test_sdk.py
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 131-181
+bindings/flutter/example/analysis_options.yaml
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 1-28
+crates/xybrid-core/examples/functiongemma_tools_streaming_context.rs
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 1-214
+tools/scripts/natives-fingerprint.sh
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 58,84-91,117
+bindings/python/xybrid/_sugar.py
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 200-213,217-236,335
+crates/xybrid-sdk/src/model_registry.rs
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 1-476
+.github/workflows/ci.yml
+  s_9cbb09e9a3a940::t_8b7e8da3853e6d 9,17,423-429,431
+Cargo.lock
+  s_9cbb09e9a3a940::t_21fcc5f05b1193 36,38,91,93,386,388,392,428,489-494,614,616,738,740,744,867,869,900,902,905,963,965,973,975,992,1102,1104,1167,1169,1176,1178,1338,1340,1344,1478,1530,1532,1713,1715,1800,1826,1828,1841,1843,1851,1853,1857,1859,1868,1870,1887,1889,1893,1898,1900,1904,1906,1910,1912,2315-2316,2387,2389,2552,2554,2566,2568,2579,2581,2593,2595,2599,2601,2603,2614,2616,2620,2622,2714,2716,2756,2785,2787,2869,2871,2980,2982,2995,2997,3016,3018,3176,3178,3186,3188,3223,3427,3429,3673,3684,3753,3755,3763,3765,3773,3775,3786,3788,3843,3845,3917,3919,3932,3934,4113,4121,4123,4135,4182,4269,4271,4380,4385,4387,4394,4396,4400,4417,4419,4565,4567,4627,4669,4680,4942,4944,5068,5070,5072,5088,5090,5094,5142,5144,5181,5183,5241,5272,5630,5632,5634,5651,5653,5655,5693,5695,5769,5771,5782,5784,5792,5794,5802,5804,5815,5817,5837,5839,6219,6221,6235,6249,6256,6288,6324,6359,6369,6378,6383-6386,6391,6400,6410,6438,6447,6456,6468,6547,6549,6556,6558,6594,6596,6605,6607,6616,6618,6622,6668,6670,6720,6722
+bindings/flutter/example/macos/Podfile.lock
+  s_9cbb09e9a3a940::t_a76028c2b95f15 1-35
+bindings/flutter/example/pubspec.lock
+  s_9cbb09e9a3a940::t_b1127c4a2bbbc6 1-425
+bindings/flutter/lib/src/rust/api/envelope.dart
+  s_9cbb09e9a3a940::t_cc0c28a0330b34 95-99
+bindings/flutter/lib/src/rust/api/model.dart
+  s_9cbb09e9a3a940::t_8f0903efdc9dfe 19,597-598,601-616,623-624,633-635,646-648
+bindings/flutter/lib/src/rust/api/sdk_client.dart
+  s_9cbb09e9a3a940::t_39e43d64352f0b 65-68,88-96,108-116
+bindings/flutter/lib/src/rust/frb_generated.dart
+  s_9cbb09e9a3a940::t_18b4ee65bf91e1 83,314-315,322-323,328-329,2406-2429,2437,2460,2485,2505-2527,2533,2557,2575-2598,2606,2630,2655,2679,2702,2726,3425-3426,3433-3434,4445-4446,4452-4454,5566-5567
+crates/xybrid-core/Cargo.toml
+  s_9cbb09e9a3a940::t_fa09ca4968b86a 28-29,32,75,118,122-123,214,275-279
+crates/xybrid-mlx/Cargo.toml
+  s_9cbb09e9a3a940::t_42c25547e5ea79 24
+crates/xybrid-core/src/runtime_adapter/mlx/sampler.rs
+  s_9cbb09e9a3a940::t_d78d920ba7a4b2 83,296
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "52988fcc00f6fecf9fe173745115e1709901195e",
+  "prompts": {},
+  "sessions": {
+    "s_9cbb09e9a3a940": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5f2eb5bd-d73d-496b-b7c7-96e31fabccee",
+        "model": "claude-fable-5"
+      },
+      "human_author": "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
+    }
+  }
+}
