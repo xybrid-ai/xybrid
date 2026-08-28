@@ -216,10 +216,8 @@ pub(crate) unsafe fn array_is_row_contiguous(arr: mlx_array) -> bool {
             return false;
         }
         // Size-0/1 axes impose no stride constraint.
-        if dim > 1 {
-            if *strides.add(axis) != expected {
-                return false;
-            }
+        if dim > 1 && *strides.add(axis) != expected {
+            return false;
         }
         expected = expected.saturating_mul(dim as usize);
     }
