@@ -29,6 +29,8 @@ on:
       - "tools/scripts/bazel-output.sh"
       - "tools/scripts/write-buildbuddy-rc.sh"
       - ".github/workflows/unity-editor.yml"
+      # Markdown inside any path above cannot affect this build.
+      - "!**.md"
   push:
     branches: [master]
     paths:
@@ -41,6 +43,8 @@ on:
       - "tools/scripts/bazel-output.sh"
       - "tools/scripts/write-buildbuddy-rc.sh"
       - ".github/workflows/unity-editor.yml"
+      # Markdown inside any path above cannot affect this build.
+      - "!**.md"
   workflow_dispatch:
 
 permissions:

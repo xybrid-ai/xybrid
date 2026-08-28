@@ -25,11 +25,11 @@ path = "src/lib.rs"
 #   `xybrid-llama-sys`  : raw FFI + cmake build (Phase 1)
 #   `xybrid-llama`   : safe RAII + typed errors + streaming trampoline (Phase 2)
 #   `xybrid-core`    : thin adapter glue (Phase 3 reduction)
-xybrid-llama-sys = { path = "../llama-cpp-sys", version = "0.5.0", optional = true }
-xybrid-llama = { path = "../xybrid-llama", version = "0.5.0", optional = true }
+xybrid-llama-sys = { path = "../llama-cpp-sys", version = "0.7.0", optional = true }
+xybrid-llama = { path = "../xybrid-llama", version = "0.7.0", optional = true }
 # Safe whisper.cpp wrappers. Gated behind `asr-whispercpp`, which also pulls
 # `llm-llamacpp` — that is where the shared ggml comes from.
-xybrid-whisper = { path = "../xybrid-whisper", version = "0.5.0", optional = true }
+xybrid-whisper = { path = "../xybrid-whisper", version = "0.7.0", optional = true }
 # Real Jinja engine for the llama.cpp chat-template fallback: when llama.cpp's
 # hardcoded non-Jinja matcher rejects a GGUF's embedded template (returns -1),
 # we render that template here instead. Gated with the deps below into
@@ -72,6 +72,7 @@ sysinfo = "0.32"
 # no-ops for invocation compatibility (CI --features flags, sdk presets).
 # For CoreML acceleration: ort-coreml feature (macOS/iOS only).
 ndarray = "0.17"  # Used by ort for tensor operations (must match ort's ndarray version)
+rand = "0.9"  # Seedable sampling for generic model logits
 base64 = "0.22"  # For BPE token decoding
 mel_spec = "0.2"  # For mel spectrogram computation (audio preprocessing)
 num-complex = "0.4"  # Required by mel_spec for Complex numbers
@@ -114,12 +115,12 @@ rayon = { version = "1.8", optional = true }  # Bounded mobile compute pool (can
 # MLX adapter dep (US-010+). `llm-mlx` uses the non-linking portion of
 # `xybrid-mlx` on every platform, while `llm-mlx-runtime` forwards
 # `xybrid-mlx/bindings` for Apple Silicon runtime execution.
-xybrid-mlx = { path = "../xybrid-mlx", version = "0.5.0", optional = true }
+xybrid-mlx = { path = "../xybrid-mlx", version = "0.7.0", optional = true }
 
 # minijinja (declared above with the llama.cpp deps) is also pulled in by
 # `llm-mlx` for the MLX adapter's chat template renderer (US-014) — the
-# HuggingFace-style template flavor that MLX-LM bundles ship.
-rand = { version = "0.8", default-features = false, features = ["std", "std_rng"], optional = true }
+# HuggingFace-style template flavor that MLX-LM bundles ship. The MLX
+# sampler's seeded RNG rides the workspace-wide `rand` pin declared above.
 
 [features]
 # `llm-llamacpp` is NOT enabled by default — it requires cmake + a C++
@@ -210,7 +211,7 @@ llm-llamacpp-vision = [
 # remains deliberately NOT forwarded here so the non-linking path (dispatch +
 # weight-key validation, no MLX linkage) can be tested without the xcframework.
 # Enable `llm-mlx-runtime` for the Apple Silicon macOS linked runtime.
-llm-mlx = ["dep:xybrid-mlx", "dep:safetensors", "dep:minijinja", "dep:minijinja-contrib", "dep:rand"]
+llm-mlx = ["dep:xybrid-mlx", "dep:safetensors", "dep:minijinja", "dep:minijinja-contrib"]
 
 # Full MLX runtime for Apple Silicon macOS — forwards `xybrid-mlx/bindings` so
 # the Qwen/Gemma/LFM architecture builders (US-011+) can actually allocate
@@ -269,6 +270,11 @@ required-features = ["llm-llamacpp"]
 
 [[example]]
 name = "functiongemma_tools"
+required-features = ["llm-llamacpp"]
+
+[[example]]
+name = "functiongemma_tools_streaming_context"
+# Real inference — needs llama.cpp linked.
 required-features = ["llm-llamacpp"]
 
 [[bench]]

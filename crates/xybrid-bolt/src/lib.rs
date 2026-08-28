@@ -701,7 +701,24 @@ pub struct XybridStreamToken {
     pub token_id: Option<i64>,
     pub index: u64,
     pub cumulative_text: String,
+    /// `"tool_calls"` when the turn ended on a parseable tool-call block.
     pub finish_reason: Option<String>,
+    /// Tool calls parsed from the completed turn — populated on the
+    /// **terminal** token only (the one carrying `finish_reason`).
+    ///
+    /// Tool-call blocks are suppressed from the emitted stream, so there is
+    /// nothing in the token text to parse: a streaming caller halts here,
+    /// runs the tools, then continues the turn by streaming a
+    /// [`tool_results_envelope`] through the same call. Empty on every
+    /// mid-stream token and on turns that emitted no call.
+    pub tool_calls: Vec<XybridToolCall>,
+    /// The completed turn's raw output text, tool-call block included — pass
+    /// it to [`tool_results_envelope`] as `prior_assistant_text`.
+    ///
+    /// Present only alongside a non-empty [`Self::tool_calls`]. Not the same
+    /// as `cumulative_text`, which reports the *emitted* text with the
+    /// protocol blocks suppressed — which is why this field exists at all.
+    pub raw_text: Option<String>,
 }
 
 impl From<facade::StreamToken> for XybridStreamToken {
@@ -712,6 +729,8 @@ impl From<facade::StreamToken> for XybridStreamToken {
             index: token.index,
             cumulative_text: token.cumulative_text,
             finish_reason: token.finish_reason,
+            tool_calls: token.tool_calls.into_iter().map(Into::into).collect(),
+            raw_text: token.raw_text,
         }
     }
 }
@@ -939,6 +958,33 @@ pub fn will_speculate_for_model(model_id: String) -> bool {
 #[export]
 pub fn version() -> String {
     facade::version()
+}
+
+/// Release every idle loaded model's memory; returns how many were released.
+///
+/// Call this from the platform's low-memory hook (`didReceiveMemoryWarning`
+/// on iOS, `onTrimMemory` on Android). Models with a run in flight are
+/// skipped, and a released model reloads itself on next use — no reload call,
+/// no new error to handle.
+#[export]
+pub fn release_memory() -> u32 {
+    facade::release_memory()
+}
+
+/// Enable or disable automatic model release for subsequent loads.
+///
+/// When enabled, loading a model under device memory pressure first releases
+/// least-recently-used idle models. Off by default; [`release_memory`] works
+/// either way.
+#[export]
+pub fn set_auto_release(enabled: bool) {
+    facade::set_auto_release(enabled);
+}
+
+/// Whether automatic model release is enabled process-wide.
+#[export]
+pub fn is_auto_release_enabled() -> bool {
+    facade::is_auto_release_enabled()
 }
 
 // ============================================================================
@@ -1623,12 +1669,43 @@ mod tests {
             index: 3,
             cumulative_text: "say hi".into(),
             finish_reason: None,
+            tool_calls: Vec::new(),
+            raw_text: None,
         }));
 
         assert_eq!(event.kind, XybridStreamEventKind::Token);
         let token = event.token.expect("token event should carry a token");
         assert_eq!(token.token, "hi");
         assert_eq!(token.index, 3);
+        assert!(token.tool_calls.is_empty());
+    }
+
+    #[test]
+    fn terminal_stream_token_carries_tool_calls_across_the_boundary() {
+        // Foreign callers dispatch on this instead of parsing token text —
+        // the call blocks never reach the stream.
+        let event = XybridStreamEvent::from(facade::StreamEvent::Token(facade::StreamToken {
+            token: String::new(),
+            token_id: None,
+            index: 9,
+            cumulative_text: "checking".into(),
+            finish_reason: Some("tool_calls".into()),
+            raw_text: Some("checking<|tool_call_start|>[x()]<|tool_call_end|>".into()),
+            tool_calls: vec![facade::ToolCall {
+                id: "call_0".into(),
+                name: "get_temperature".into(),
+                arguments_json: r#"{"room":"kitchen"}"#.into(),
+            }],
+        }));
+
+        let token = event.token.expect("token event should carry a token");
+        assert_eq!(token.finish_reason.as_deref(), Some("tool_calls"));
+        assert_eq!(token.tool_calls.len(), 1);
+        assert_eq!(token.tool_calls[0].name, "get_temperature");
+        assert!(
+            token.raw_text.is_some(),
+            "the replayable raw text must cross too"
+        );
     }
 
     #[test]

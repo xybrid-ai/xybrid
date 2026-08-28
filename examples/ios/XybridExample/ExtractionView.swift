@@ -291,7 +291,8 @@ struct ExtractionView: View {
                     generationConfig: config,
                     abortOn: [],
                     fallbackToCloud: false,
-                    maxGraceTokens: 0
+                    maxGraceTokens: 0,
+                    correlationId: nil
                 )
 
                 let envelope = XybridEnvelope(

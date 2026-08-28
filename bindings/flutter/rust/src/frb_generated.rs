@@ -44,7 +44,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.11.1";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 644445885;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 1063264492;
 
 // Section: executor
 
@@ -3139,6 +3139,37 @@ fn wire__crate__api__sdk_client__XybridSdkClient_init_telemetry_impl(
         },
     )
 }
+fn wire__crate__api__sdk_client__XybridSdkClient_is_auto_release_enabled_impl(
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) -> flutter_rust_bridge::for_generated::WireSyncRust2DartSse {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_sync::<flutter_rust_bridge::for_generated::SseCodec, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "XybridSdkClient_is_auto_release_enabled",
+            port: None,
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Sync,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            deserializer.end();
+            transform_result_sse::<_, ()>((move || {
+                let output_ok = Result::<_, ()>::Ok(
+                    crate::api::sdk_client::XybridSdkClient::is_auto_release_enabled(),
+                )?;
+                Ok(output_ok)
+            })())
+        },
+    )
+}
 fn wire__crate__api__sdk_client__XybridSdkClient_is_model_cached_impl(
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
     rust_vec_len_: i32,
@@ -3233,6 +3264,36 @@ fn wire__crate__api__sdk_client__XybridSdkClient_is_telemetry_initialized_impl(
         },
     )
 }
+fn wire__crate__api__sdk_client__XybridSdkClient_release_memory_impl(
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) -> flutter_rust_bridge::for_generated::WireSyncRust2DartSse {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_sync::<flutter_rust_bridge::for_generated::SseCodec, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "XybridSdkClient_release_memory",
+            port: None,
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Sync,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            deserializer.end();
+            transform_result_sse::<_, ()>((move || {
+                let output_ok =
+                    Result::<_, ()>::Ok(crate::api::sdk_client::XybridSdkClient::release_memory())?;
+                Ok(output_ok)
+            })())
+        },
+    )
+}
 fn wire__crate__api__sdk_client__XybridSdkClient_runtime_features_impl(
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
     rust_vec_len_: i32,
@@ -3290,6 +3351,38 @@ fn wire__crate__api__sdk_client__XybridSdkClient_set_api_key_impl(
             transform_result_sse::<_, ()>((move || {
                 let output_ok = Result::<_, ()>::Ok({
                     crate::api::sdk_client::XybridSdkClient::set_api_key(&api_api_key);
+                })?;
+                Ok(output_ok)
+            })())
+        },
+    )
+}
+fn wire__crate__api__sdk_client__XybridSdkClient_set_auto_release_impl(
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) -> flutter_rust_bridge::for_generated::WireSyncRust2DartSse {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_sync::<flutter_rust_bridge::for_generated::SseCodec, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "XybridSdkClient_set_auto_release",
+            port: None,
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Sync,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_enabled = <bool>::sse_decode(&mut deserializer);
+            deserializer.end();
+            transform_result_sse::<_, ()>((move || {
+                let output_ok = Result::<_, ()>::Ok({
+                    crate::api::sdk_client::XybridSdkClient::set_auto_release(api_enabled);
                 })?;
                 Ok(output_ok)
             })())
@@ -4134,12 +4227,16 @@ impl SseDecode for crate::api::model::FfiStreamToken {
         let mut var_index = <u32>::sse_decode(deserializer);
         let mut var_cumulativeText = <String>::sse_decode(deserializer);
         let mut var_finishReason = <Option<String>>::sse_decode(deserializer);
+        let mut var_toolCalls = <Vec<crate::api::model::FfiToolCall>>::sse_decode(deserializer);
+        let mut var_rawText = <Option<String>>::sse_decode(deserializer);
         return crate::api::model::FfiStreamToken {
             token: var_token,
             token_id: var_tokenId,
             index: var_index,
             cumulative_text: var_cumulativeText,
             finish_reason: var_finishReason,
+            tool_calls: var_toolCalls,
+            raw_text: var_rawText,
         };
     }
 }
@@ -4901,55 +4998,70 @@ fn pde_ffi_dispatcher_sync_impl(
             rust_vec_len,
             data_len,
         ),
-        71 => wire__crate__api__sdk_client__XybridSdkClient_is_model_cached_impl(
+        71 => wire__crate__api__sdk_client__XybridSdkClient_is_auto_release_enabled_impl(
             ptr,
             rust_vec_len,
             data_len,
         ),
-        72 => wire__crate__api__sdk_client__XybridSdkClient_is_speculative_cloud_enabled_impl(
+        72 => wire__crate__api__sdk_client__XybridSdkClient_is_model_cached_impl(
             ptr,
             rust_vec_len,
             data_len,
         ),
-        73 => wire__crate__api__sdk_client__XybridSdkClient_is_telemetry_initialized_impl(
+        73 => wire__crate__api__sdk_client__XybridSdkClient_is_speculative_cloud_enabled_impl(
             ptr,
             rust_vec_len,
             data_len,
         ),
-        74 => wire__crate__api__sdk_client__XybridSdkClient_runtime_features_impl(
+        74 => wire__crate__api__sdk_client__XybridSdkClient_is_telemetry_initialized_impl(
             ptr,
             rust_vec_len,
             data_len,
         ),
-        75 => wire__crate__api__sdk_client__XybridSdkClient_set_api_key_impl(
+        75 => wire__crate__api__sdk_client__XybridSdkClient_release_memory_impl(
             ptr,
             rust_vec_len,
             data_len,
         ),
-        76 => wire__crate__api__sdk_client__XybridSdkClient_set_gateway_url_impl(
+        76 => wire__crate__api__sdk_client__XybridSdkClient_runtime_features_impl(
             ptr,
             rust_vec_len,
             data_len,
         ),
-        77 => wire__crate__api__sdk_client__XybridSdkClient_set_platform_url_impl(
+        77 => wire__crate__api__sdk_client__XybridSdkClient_set_api_key_impl(
             ptr,
             rust_vec_len,
             data_len,
         ),
-        78 => wire__crate__api__sdk_client__XybridSdkClient_set_speculative_cloud_impl(
+        78 => wire__crate__api__sdk_client__XybridSdkClient_set_auto_release_impl(
             ptr,
             rust_vec_len,
             data_len,
         ),
-        79 => wire__crate__api__model__ffi_generation_config_creative_impl(
+        79 => wire__crate__api__sdk_client__XybridSdkClient_set_gateway_url_impl(
             ptr,
             rust_vec_len,
             data_len,
         ),
-        80 => {
+        80 => wire__crate__api__sdk_client__XybridSdkClient_set_platform_url_impl(
+            ptr,
+            rust_vec_len,
+            data_len,
+        ),
+        81 => wire__crate__api__sdk_client__XybridSdkClient_set_speculative_cloud_impl(
+            ptr,
+            rust_vec_len,
+            data_len,
+        ),
+        82 => wire__crate__api__model__ffi_generation_config_creative_impl(
+            ptr,
+            rust_vec_len,
+            data_len,
+        ),
+        83 => {
             wire__crate__api__model__ffi_generation_config_greedy_impl(ptr, rust_vec_len, data_len)
         }
-        81 => wire__crate__api__model__json_schema_to_gbnf_impl(ptr, rust_vec_len, data_len),
+        84 => wire__crate__api__model__json_schema_to_gbnf_impl(ptr, rust_vec_len, data_len),
         _ => unreachable!(),
     }
 }
@@ -5570,6 +5682,8 @@ impl flutter_rust_bridge::IntoDart for crate::api::model::FfiStreamToken {
             self.index.into_into_dart().into_dart(),
             self.cumulative_text.into_into_dart().into_dart(),
             self.finish_reason.into_into_dart().into_dart(),
+            self.tool_calls.into_into_dart().into_dart(),
+            self.raw_text.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -6370,6 +6484,8 @@ impl SseEncode for crate::api::model::FfiStreamToken {
         <u32>::sse_encode(self.index, serializer);
         <String>::sse_encode(self.cumulative_text, serializer);
         <Option<String>>::sse_encode(self.finish_reason, serializer);
+        <Vec<crate::api::model::FfiToolCall>>::sse_encode(self.tool_calls, serializer);
+        <Option<String>>::sse_encode(self.raw_text, serializer);
     }
 }
 

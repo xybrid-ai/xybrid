@@ -113,6 +113,33 @@ impl XybridSdkClient {
         facade::is_speculative_cloud_enabled()
     }
 
+    /// Release every idle loaded model's memory; returns how many were released.
+    ///
+    /// Wire this to the app's low-memory signal
+    /// (`WidgetsBindingObserver.didHaveMemoryPressure`). Models with a run in
+    /// flight are skipped, and a released model reloads itself the next time
+    /// it is used — Dart callers get no new error to handle.
+    #[frb(sync)]
+    pub fn release_memory() -> u32 {
+        facade::release_memory()
+    }
+
+    /// Enable or disable automatic model release for subsequent loads.
+    ///
+    /// When enabled, loading a model under device memory pressure first
+    /// releases least-recently-used idle models. Off by default;
+    /// [`Self::release_memory`] works either way.
+    #[frb(sync)]
+    pub fn set_auto_release(enabled: bool) {
+        facade::set_auto_release(enabled);
+    }
+
+    /// Whether automatic model release is enabled process-wide.
+    #[frb(sync)]
+    pub fn is_auto_release_enabled() -> bool {
+        facade::is_auto_release_enabled()
+    }
+
     #[frb(sync)]
     pub fn set_gateway_url(gateway_url: String) {
         facade::set_binding(FLUTTER_BINDING.to_string());

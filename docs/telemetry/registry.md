@@ -37,7 +37,7 @@ The command exits 0 in both cases — it is a status report, not an error.
 The header is a single line, semicolon-separated:
 
 ```
-X-Xybrid-Client: binding=flutter; sdk_version=0.5.0; core_version=0.5.0; platform=ios-arm64; backends=asr-whispercpp,llm-llamacpp,llm-llamacpp-vision,ort-coreml,ort-download,vision
+X-Xybrid-Client: binding=flutter; sdk_version=0.6.0; core_version=0.6.0; platform=ios-arm64; backends=asr-whispercpp,llm-llamacpp,llm-llamacpp-vision,ort-coreml,ort-download,vision
 ```
 
 | Field | Type | Description |

@@ -1108,6 +1108,8 @@ class XybridStreamToken:
     index: int
     cumulative_text: str
     finish_reason: str | None
+    tool_calls: list[XybridToolCall]
+    raw_text: str | None
 
     def _boltffi_wire(self) -> bytes:
         return b"".join((
@@ -1116,6 +1118,8 @@ class XybridStreamToken:
             _boltffi_wire_u64(self.index),
             _boltffi_wire_string(self.cumulative_text),
             _boltffi_wire_optional(self.finish_reason, lambda __boltffi_value_0: _boltffi_wire_string(__boltffi_value_0)),
+            _boltffi_wire_sequence(self.tool_calls, len(self.tool_calls), lambda __boltffi_value_0: __boltffi_value_0._boltffi_wire()),
+            _boltffi_wire_optional(self.raw_text, lambda __boltffi_value_0: _boltffi_wire_string(__boltffi_value_0)),
         ))
 
     @classmethod
@@ -1136,6 +1140,8 @@ class XybridStreamToken:
             index=reader.u64(),
             cumulative_text=reader.string(),
             finish_reason=reader.optional(lambda: reader.string()),
+            tool_calls=reader.sequence(lambda: XybridToolCall._boltffi_from_reader(reader)),
+            raw_text=reader.optional(lambda: reader.string()),
         )
 
 
@@ -2154,6 +2160,12 @@ def will_speculate_for_model(model_id: str) -> bool:
     return _native.will_speculate_for_model(model_id)
 def version() -> str:
     return _native.version()
+def release_memory() -> int:
+    return _native.release_memory()
+def set_auto_release(enabled: bool) -> None:
+    _native.set_auto_release(enabled)
+def is_auto_release_enabled() -> bool:
+    return _native.is_auto_release_enabled()
 def telemetry_default_endpoint() -> str:
     return _native.telemetry_default_endpoint()
 def telemetry_flush() -> None:
@@ -2163,7 +2175,7 @@ def telemetry_shutdown() -> None:
 
 MODULE_NAME = "xybrid_bolt"
 PACKAGE_NAME = "xybrid_bolt"
-PACKAGE_VERSION = "0.5.0"
+PACKAGE_VERSION = "0.7.0"
 
 __all__ = [
     "MODULE_NAME",
@@ -2242,6 +2254,9 @@ __all__ = [
     "is_speculative_cloud_enabled",
     "will_speculate_for_model",
     "version",
+    "release_memory",
+    "set_auto_release",
+    "is_auto_release_enabled",
     "telemetry_default_endpoint",
     "telemetry_flush",
     "telemetry_shutdown",

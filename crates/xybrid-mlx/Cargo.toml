@@ -21,7 +21,7 @@ default = []
 bindings = ["mlx-c-sys/bindings", "dep:metal"]
 
 [dependencies]
-mlx-c-sys = { path = "../mlx-c-sys", version = "0.5.0" }
+mlx-c-sys = { path = "../mlx-c-sys", version = "0.7.0" }
 thiserror = { workspace = true }
 tracing = "0.1"
 

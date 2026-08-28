@@ -416,8 +416,11 @@ impl Envelope {
     ///
     /// Only the immediately prior assistant turn is replayed: multi-hop
     /// chains work turn by turn, but earlier tool exchanges are not re-sent.
-    /// Continuation runs on the non-streaming text paths only — the
-    /// streaming and image-bearing paths reject these envelopes.
+    /// A continuation runs on every text path — batch, streaming, and both
+    /// conversation-context variants. Image-bearing conversations are the one
+    /// exception and are rejected: a continuation replays prior turns as a
+    /// composed text prompt, and image embeddings cannot be re-evaluated from
+    /// text.
     ///
     /// # Errors
     ///
@@ -1222,7 +1225,25 @@ pub struct StreamToken {
     pub token_id: Option<i64>,
     pub index: u64,
     pub cumulative_text: String,
+    /// `"tool_calls"` when the turn ended on a parseable tool-call block.
     pub finish_reason: Option<String>,
+    /// Tool calls parsed from the completed turn — populated on the
+    /// **terminal** token only (the one carrying `finish_reason`).
+    ///
+    /// A streaming caller halts here and dispatches these instead of parsing
+    /// raw text: the protocol blocks are suppressed from the emitted stream,
+    /// so the call text never reaches the token callback. Empty on every
+    /// mid-stream token and on turns that emitted no call. Feed the outcomes
+    /// back with [`Envelope::tool_results`] and stream the continuation
+    /// through the same call.
+    pub tool_calls: Vec<ToolCall>,
+    /// The completed turn's raw output text, tool-call block included — pass
+    /// it to [`Envelope::tool_results`] as `prior_assistant_text`.
+    ///
+    /// `Some` only alongside a non-empty [`Self::tool_calls`]. It is not the
+    /// same as `cumulative_text`, which reports the *emitted* text with the
+    /// protocol blocks suppressed.
+    pub raw_text: Option<String>,
 }
 
 impl StreamToken {
@@ -1233,6 +1254,12 @@ impl StreamToken {
             index: token.index as u64,
             cumulative_text: token.cumulative_text,
             finish_reason: token.finish_reason,
+            tool_calls: token
+                .tool_calls
+                .into_iter()
+                .map(ToolCall::from_sdk)
+                .collect(),
+            raw_text: token.raw_text,
         }
     }
 }
@@ -1985,6 +2012,34 @@ pub fn will_speculate_for_model(model_id: String) -> bool {
         .will_speculate()
 }
 
+/// Release every idle loaded model's memory, returning how many were released.
+///
+/// The host hint behind automatic model release: call it from
+/// `didReceiveMemoryWarning` (iOS), `onTrimMemory` (Android), or your own
+/// desktop logic. Models with a run in flight are skipped, and a released
+/// model reloads itself on its next use — the caller never has to reload
+/// anything or handle a new error.
+///
+/// Deliberately a plain call, not a callback registration: nothing is
+/// signalled back across the FFI boundary.
+pub fn release_memory() -> u32 {
+    sdk::release_memory() as u32
+}
+
+/// Enable or disable automatic model release for subsequent loads.
+///
+/// When enabled, loading a model while the device reports memory pressure
+/// first releases least-recently-used idle models. Off by default.
+/// [`release_memory`] works regardless of this setting.
+pub fn set_auto_release(enabled: bool) {
+    sdk::set_auto_release(enabled);
+}
+
+/// Whether automatic model release is enabled process-wide.
+pub fn is_auto_release_enabled() -> bool {
+    sdk::auto_release_policy().on_pressure
+}
+
 // ============================================================================
 // Telemetry (advanced config + lifecycle)
 // ============================================================================
@@ -2692,6 +2747,63 @@ mod tests {
     }
 
     #[test]
+    fn stream_token_carries_the_terminal_turns_tool_calls() {
+        // The core suppresses tool-call blocks from the emitted stream, so a
+        // streaming caller has nothing to re-parse — the typed calls have to
+        // survive the SDK → facade translation on the terminal token.
+        let token = StreamToken::from_sdk(xybrid_core::runtime_adapter::types::PartialToken {
+            token: String::new(),
+            token_id: None,
+            index: 7,
+            cumulative_text: "checking".into(),
+            finish_reason: Some("tool_calls".into()),
+            raw_text: Some(
+                "checking<|tool_call_start|>[get_temperature(room=\"kitchen\")]<|tool_call_end|>"
+                    .into(),
+            ),
+            tool_calls: vec![xybrid_core::gateway::ToolCall {
+                id: "call_0".into(),
+                tool_type: "function".into(),
+                function: xybrid_core::gateway::FunctionCall {
+                    name: "get_temperature".into(),
+                    arguments: r#"{"room":"kitchen"}"#.into(),
+                },
+            }],
+        });
+
+        assert_eq!(token.finish_reason.as_deref(), Some("tool_calls"));
+        assert_eq!(
+            token.tool_calls,
+            vec![ToolCall {
+                id: "call_0".into(),
+                name: "get_temperature".into(),
+                arguments_json: r#"{"room":"kitchen"}"#.into(),
+            }]
+        );
+        // The raw turn text is what closes the loop: `cumulative_text` has the
+        // protocol block suppressed, so only this can be replayed as
+        // `prior_assistant_text`.
+        assert!(
+            token
+                .raw_text
+                .as_deref()
+                .is_some_and(|raw| raw.contains("<|tool_call_start|>")),
+            "a terminal token with calls must carry the replayable raw text"
+        );
+    }
+
+    #[test]
+    fn a_mid_stream_token_carries_no_tool_calls() {
+        let token = StreamToken::from_sdk(xybrid_core::runtime_adapter::types::PartialToken::new(
+            "hel".into(),
+            0,
+            "hel".into(),
+        ));
+        assert!(token.tool_calls.is_empty());
+        assert!(token.raw_text.is_none());
+    }
+
+    #[test]
     fn tool_calls_are_parsed_off_the_response_envelope() {
         let mut metadata = HashMap::new();
         metadata.insert(
@@ -2795,6 +2907,8 @@ mod tests {
                     index: 0,
                     cumulative_text: "hel".into(),
                     finish_reason: None,
+                    tool_calls: Vec::new(),
+                    raw_text: None,
                 }))
                 .expect("test stream receiver should remain connected");
             sender
@@ -2804,6 +2918,8 @@ mod tests {
                     index: 1,
                     cumulative_text: "hello".into(),
                     finish_reason: Some("stop".into()),
+                    tool_calls: Vec::new(),
+                    raw_text: None,
                 }))
                 .expect("test stream receiver should remain connected");
             sender

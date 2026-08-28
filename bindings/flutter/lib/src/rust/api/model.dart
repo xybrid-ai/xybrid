@@ -16,7 +16,7 @@ import 'result.dart';
 import 'streaming.dart';
 part 'model.freezed.dart';
 
-// These functions are ignored because they are not marked as `pub`: `apply_backend_to_loader`, `apply_cloud_fallback_metadata`, `cloud_fallback_abort_event`, `from_sdk`, `into_facade`, `into_facade`, `is_debug_gateway_host`, `is_ipv6_link_local`, `is_ipv6_unique_local`, `is_v1_gateway_base`, `is_xybrid_gateway_host`, `non_empty`, `normalize_gateway_url`, `should_cancel_on_sink_close`, `stream_error_event`, `streaming_run_options`, `to_facade`, `to_facade`, `to_sdk_over`, `to_sdk_with_cancellation_over`, `to_sdk`, `validate_cloud_gateway_url`, `validated_cloud_gateway_url`
+// These functions are ignored because they are not marked as `pub`: `apply_backend_to_loader`, `apply_cloud_fallback_metadata`, `cloud_fallback_abort_event`, `from_sdk`, `from_sdk`, `into_facade`, `into_facade`, `is_debug_gateway_host`, `is_ipv6_link_local`, `is_ipv6_unique_local`, `is_v1_gateway_base`, `is_xybrid_gateway_host`, `non_empty`, `normalize_gateway_url`, `should_cancel_on_sink_close`, `stream_error_event`, `streaming_run_options`, `to_facade`, `to_facade`, `to_sdk_over`, `to_sdk_with_cancellation_over`, `to_sdk`, `validate_cloud_gateway_url`, `validated_cloud_gateway_url`
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `FlutterFallbackResourceProvider`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `current_snapshot`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `from`
 
@@ -594,8 +594,25 @@ class FfiStreamToken {
   /// Cumulative text generated so far
   final String cumulativeText;
 
-  /// Reason for stopping (if this is the final token)
+  /// Reason for stopping (if this is the final token). `"tool_calls"` when
+  /// the turn ended on a parseable tool-call block.
   final String? finishReason;
+
+  /// Tool calls the model emitted this turn — final token only.
+  ///
+  /// Tool-call blocks are suppressed from the streamed text, so there is
+  /// nothing in `token` to parse: halt here, run the tools, then continue
+  /// the turn by streaming a `FfiEnvelope::tool_results` envelope through
+  /// the same call. Empty on every other token.
+  final List<FfiToolCall> toolCalls;
+
+  /// The completed turn's raw output text, tool-call block included — pass
+  /// it to `FfiEnvelope::tool_results` as `prior_assistant_text`.
+  ///
+  /// Set only alongside a non-empty `tool_calls`. Deliberately not the same
+  /// as `cumulative_text`, which reports the *emitted* text with the
+  /// protocol blocks suppressed.
+  final String? rawText;
 
   const FfiStreamToken({
     required this.token,
@@ -603,6 +620,8 @@ class FfiStreamToken {
     required this.index,
     required this.cumulativeText,
     this.finishReason,
+    required this.toolCalls,
+    this.rawText,
   });
 
   @override
@@ -611,7 +630,9 @@ class FfiStreamToken {
       tokenId.hashCode ^
       index.hashCode ^
       cumulativeText.hashCode ^
-      finishReason.hashCode;
+      finishReason.hashCode ^
+      toolCalls.hashCode ^
+      rawText.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -622,7 +643,9 @@ class FfiStreamToken {
           tokenId == other.tokenId &&
           index == other.index &&
           cumulativeText == other.cumulativeText &&
-          finishReason == other.finishReason;
+          finishReason == other.finishReason &&
+          toolCalls == other.toolCalls &&
+          rawText == other.rawText;
 }
 
 /// One tool call the model emitted, from `FfiResult.toolCalls`.

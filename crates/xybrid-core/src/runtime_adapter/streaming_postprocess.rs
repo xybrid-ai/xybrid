@@ -411,6 +411,13 @@ impl StreamingTextFilter {
                 self.hit_stop_pattern = true;
                 if let Some(pos) = self.cumulative_text.find(pattern.as_str()) {
                     self.cumulative_text.truncate(pos);
+                    // The stop can complete at a position below text that was
+                    // already emitted (a partial prefix under-held in an
+                    // earlier chunk). Re-establish the boundary invariant
+                    // (`last_emitted_len <= cumulative_text.len()`) exactly
+                    // like the think-strip branch above, or
+                    // `cumulative_emitted()` slices out of bounds and panics.
+                    self.last_emitted_len = self.last_emitted_len.min(self.cumulative_text.len());
                 }
                 return None;
             }
@@ -467,7 +474,11 @@ impl StreamingTextFilter {
 
             self.cumulative_text
                 .replace_range(start_index..remove_end, "");
-            self.last_emitted_len = self.last_emitted_len.min(start_index);
+            // `last_emitted_len <= start_index` holds by construction here
+            // (`scan_start` begins at the emit boundary and only advances),
+            // so the removal can't strand the boundary past the end — and it
+            // must NOT advance to `start_index` either: text between the
+            // boundary and the removed block is still pending emission.
             if is_call_block {
                 self.saw_tool_call_block = true;
             }
@@ -493,16 +504,33 @@ impl StreamingTextFilter {
 /// Find the position where a potential partial-stop prefix begins at
 /// the tail of `text`, if any. Kept internal — callers use
 /// [`StreamingTextFilter`] instead.
+///
+/// Per pattern the LONGEST matching tail prefix wins, and across patterns the
+/// earliest hold position wins: holding less than the longest match emits
+/// text that a later chunk can complete into a stop pattern *behind* the
+/// emission boundary (the user sees text past the stop, and the completion
+/// truncates `cumulative_text` below `last_emitted_len`). Comparison is
+/// byte-wise so a multi-byte UTF-8 stop pattern can't slice mid-char; the
+/// returned hold is then rounded down to a char boundary (holding more is
+/// always safe, and callers slice `text` at this position).
 fn find_potential_stop_start(text: &str, patterns: &[String]) -> Option<usize> {
-    for pattern in patterns {
-        for prefix_len in 1..=pattern.len() {
-            let prefix = &pattern[..prefix_len];
-            if text.ends_with(prefix) {
-                return Some(text.len() - prefix_len);
+    let text_bytes = text.as_bytes();
+    patterns
+        .iter()
+        .filter_map(|pattern| {
+            let pattern = pattern.as_bytes();
+            (1..=pattern.len())
+                .rev()
+                .find(|&prefix_len| text_bytes.ends_with(&pattern[..prefix_len]))
+                .map(|prefix_len| text.len() - prefix_len)
+        })
+        .min()
+        .map(|mut start| {
+            while start > 0 && !text.is_char_boundary(start) {
+                start -= 1;
             }
-        }
-    }
-    None
+            start
+        })
 }
 
 fn find_next_tool_block(text: &str) -> Option<(usize, &'static str, &'static str, bool)> {
@@ -1172,5 +1200,64 @@ mod tests {
             );
             assert_eq!(text, tail, "broken-variant trim must leave {tail:?} intact");
         }
+    }
+
+    /// Regression: a multi-char stop pattern completing across chunks used to
+    /// (a) over-emit — only the SHORTEST matching tail prefix was held, so
+    /// `"x``"` with stop `"```"` emitted `"x`"` — and then (b) panic: the
+    /// completion truncated `cumulative_text` below `last_emitted_len` and
+    /// `cumulative_emitted()` sliced out of bounds.
+    #[test]
+    fn streaming_filter_stop_completing_across_chunks_holds_longest_prefix() {
+        let mut f = StreamingTextFilter::new(vec!["```".to_string()]);
+        // Longest-prefix hold: both trailing backticks are withheld.
+        assert_eq!(f.push("x``").as_deref(), Some("x"));
+        // Completing the stop truncates cleanly at the held boundary.
+        assert_eq!(f.push("`"), None);
+        assert!(f.is_stopped());
+        // Pre-fix this call panicked (byte index past the truncated text).
+        assert_eq!(f.cumulative_emitted(), "x");
+    }
+
+    /// Tool suppression can splice a stop sequence together behind the emit
+    /// boundary. The boundary must follow the resulting truncation.
+    #[test]
+    fn streaming_filter_clamps_emit_boundary_after_suppression_splices_stop() {
+        let (start, end, _) = TOOL_BLOCK_MARKERS[2];
+        let mut f = StreamingTextFilter::new(vec!["ab".to_string()]);
+        f = f.with_tool_call_suppression();
+
+        assert_eq!(f.push(&format!("a{start}")).as_deref(), Some("a"));
+        assert_eq!(f.push(&format!("payload{end}b")), None);
+        assert!(f.is_stopped());
+        assert_eq!(f.cumulative_emitted(), "");
+    }
+
+    /// Across patterns the EARLIEST hold position must win — holding for the
+    /// first pattern only can under-hold a longer match of another pattern.
+    #[test]
+    fn streaming_filter_multi_pattern_hold_takes_earliest() {
+        let mut f = StreamingTextFilter::new(vec!["b!".to_string(), "abc".to_string()]);
+        // Tail "ab": "b" is a 1-byte prefix of "b!" (hold at 1), but "ab" is
+        // a 2-byte prefix of "abc" (hold at 0) — the earlier hold must win,
+        // so nothing is emitted yet.
+        assert_eq!(f.push("ab"), None);
+        assert_eq!(f.push("c"), None); // completes "abc" at pos 0
+        assert!(f.is_stopped());
+        assert_eq!(f.cumulative_emitted(), "");
+    }
+
+    /// Multi-byte UTF-8 stop patterns must not panic: the old prefix loop
+    /// sliced the pattern at byte offsets (`&pattern[..1]` on `"→x"` panics
+    /// on a non-char boundary). Byte-wise comparison handles it.
+    #[test]
+    fn streaming_filter_multibyte_stop_pattern_does_not_panic() {
+        let mut f = StreamingTextFilter::new(vec!["→x".to_string()]);
+        assert_eq!(f.push("hello ").as_deref(), Some("hello "));
+        // Tail ends with the full first char of the pattern: held.
+        assert_eq!(f.push("→").as_deref(), None);
+        assert_eq!(f.push("x"), None); // completes the stop
+        assert!(f.is_stopped());
+        assert_eq!(f.cumulative_emitted(), "hello ");
     }
 }

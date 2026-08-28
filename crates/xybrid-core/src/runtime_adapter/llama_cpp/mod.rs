@@ -1053,6 +1053,145 @@ impl LlmBackend for LlamaCppBackend {
         })
     }
 
+    /// Streaming sibling of [`Self::generate_raw`] — the seam tool-result
+    /// continuations use.
+    ///
+    /// Stop handling stays raw (only `config.stop_sequences`, no chat-marker
+    /// merge) exactly like `generate_raw`; the continuation composer pushes
+    /// the turn markers it needs onto the config before calling. The emitted
+    /// stream still runs through `StreamingTextFilter`, because a
+    /// continuation IS a chat turn: it can deliberate in a reasoning block
+    /// and it can call another tool, and neither belongs in the caller's
+    /// visible text.
+    fn generate_raw_streaming(
+        &self,
+        prompt: &str,
+        config: &GenerationConfig,
+        on_token: crate::runtime_adapter::llm::StreamingCallback<'_>,
+    ) -> LlmResult<GenerationOutput> {
+        let mut on_token = on_token;
+
+        self.with_model_and_context(|model, context| {
+            let tokens = Self::tokenize_raw_prompt(model, prompt)?;
+            let prepared =
+                self.prepare_generation(model, context, tokens, config, PromptKind::Raw)?;
+
+            let stop_patterns = config.stop_sequences.clone();
+            let suppress_tools = !config.tools.is_empty();
+            // Deliberately NOT `new_reasoning_primed`. A continuation prompt
+            // appends a fresh, *unprimed* assistant turn after the replayed
+            // one (see `tool_call::compose_tool_continuation`), so the model
+            // self-opens `<think>` if it reasons — which this filter catches.
+            // Starting primed would instead swallow a plain answer whole.
+            //
+            // Residual, shared with the batch path: a model that saw `<think>`
+            // primed on the *prior* turn may open its reasoning markerless. The
+            // batch path's dangling-close handling recovers the final text, and
+            // so does `finish_continuation_output` here — but the streaming
+            // filter has no dangling-close rule, so that reasoning would flash
+            // in the token feed before the clean text lands. Same known v1
+            // limitation `run_tool_continuation` documents; the models tested
+            // self-open the tag.
+            let mut filter = StreamingTextFilter::new(stop_patterns.clone());
+            if suppress_tools {
+                filter = filter.with_tool_call_suppression();
+            }
+            let mut token_index = 0usize;
+
+            let stream_result = Self::run_streaming_generation(
+                context,
+                model,
+                &prepared,
+                config,
+                &stop_patterns,
+                |token_id, token_text, tel| {
+                    tel.record_chunk();
+                    emit_filtered_partial_token(
+                        &mut filter,
+                        token_id,
+                        token_text,
+                        &mut token_index,
+                        &mut on_token,
+                    )
+                },
+            );
+            let (output_tokens, stopped_by_callback, fields) = match stream_result {
+                Ok(result) => result,
+                Err(err) => {
+                    self.reset_kv_cache_after_failed_stream(context);
+                    return Err(err);
+                }
+            };
+
+            let ended_on_eog = output_tokens
+                .last()
+                .is_some_and(|&token| model.vocab_is_eog(token));
+            let mut text = model.detokenize(text_tokens_without_terminal_eog(
+                &output_tokens,
+                ended_on_eog,
+            ))?;
+            let stopped_in_text = truncate_at_first_stop(&mut text, &stop_patterns);
+            let trimmed_partial = trim_partial_stop_suffix(&mut text, &stop_patterns);
+            let truncated_by_budget = generation_truncated_by_budget(
+                filter.is_stopped() || stopped_in_text || trimmed_partial || stopped_by_callback,
+                ended_on_eog,
+                output_tokens.len(),
+                prepared.max_tokens,
+            );
+            // `primed = false` for the same reason the filter is unprimed.
+            let (clean, reasoning_content) =
+                strip_and_capture_thinking_tags_primed(&text, false, truncated_by_budget);
+            let text = clean.trim().to_string();
+
+            let parsed_tool_calls = if suppress_tools {
+                crate::runtime_adapter::tool_call::parse_tool_calls(&text)
+            } else {
+                Vec::new()
+            };
+            let emitted_tool_calls = !parsed_tool_calls.is_empty();
+            let finish_reason = if emitted_tool_calls {
+                "tool_calls".to_string()
+            } else if filter.is_stopped()
+                || stopped_in_text
+                || trimmed_partial
+                || stopped_by_callback
+                || ended_on_eog
+            {
+                "stop".to_string()
+            } else {
+                "length".to_string()
+            };
+
+            let tool_block_suppressed = suppress_tools && filter.saw_tool_call_block();
+            // No `should_emit_recovered_answer` here, unlike the chat paths:
+            // that recovery only fires for a *primed* stream that suppressed
+            // its whole output, and this path is never primed (see the filter
+            // construction above). An unprimed stream that emitted nothing has
+            // nothing to recover — the text was either a suppressed tool block
+            // (signalled by the terminal token) or empty after cleanup.
+
+            if token_index > 0 || tool_block_suppressed {
+                let final_cumulative = if tool_block_suppressed {
+                    filter.cumulative_emitted().to_string()
+                } else {
+                    text.clone()
+                };
+                let final_partial = PartialToken::new(String::new(), token_index, final_cumulative)
+                    .with_finish_reason(&finish_reason)
+                    .with_tool_calls(parsed_tool_calls, &text);
+                on_token(final_partial).map_err(AdapterError::from_streaming_callback_error)?;
+            }
+
+            Ok(output_from_fields(
+                text,
+                output_tokens.len(),
+                finish_reason,
+                reasoning_content,
+                fields,
+            ))
+        })
+    }
+
     fn render_chat_prompt(
         &self,
         messages: &[ChatMessage],
@@ -1185,8 +1324,12 @@ impl LlmBackend for LlamaCppBackend {
             // NOT used here: a complete-but-unparseable block suppresses
             // fine but is not a tool call.
             let saw_tool_call_block = filter.saw_tool_call_block();
-            let emitted_tool_calls = suppress_tools
-                && !crate::runtime_adapter::tool_call::parse_tool_calls(&text).is_empty();
+            let parsed_tool_calls = if suppress_tools {
+                crate::runtime_adapter::tool_call::parse_tool_calls(&text)
+            } else {
+                Vec::new()
+            };
+            let emitted_tool_calls = !parsed_tool_calls.is_empty();
             let finish_reason = if emitted_tool_calls {
                 "tool_calls".to_string()
             } else if filter.is_stopped()
@@ -1230,8 +1373,13 @@ impl LlmBackend for LlamaCppBackend {
                 } else {
                     text.clone()
                 };
+                // The terminal token is the streaming caller's typed
+                // handoff: the call blocks were suppressed from the emitted
+                // text on purpose, so parsed calls ride here rather than
+                // forcing the caller to re-parse what it never received.
                 let final_partial = PartialToken::new(String::new(), token_index, final_cumulative)
-                    .with_finish_reason(&finish_reason);
+                    .with_finish_reason(&finish_reason)
+                    .with_tool_calls(parsed_tool_calls, &text);
                 // Terminal errors propagate like every other callback error
                 // (the trait contract, and what mistral already does) — the
                 // typed conversion keeps a CloudFallbackAbort returned here
@@ -1634,8 +1782,12 @@ impl LlmBackend for LlamaCppBackend {
             // token's finish_reason must match what the executor's envelope
             // will report, and a complete-but-unparseable block is not a
             // tool call.
-            let emitted_tool_calls = suppress_tools
-                && !crate::runtime_adapter::tool_call::parse_tool_calls(&text).is_empty();
+            let parsed_tool_calls = if suppress_tools {
+                crate::runtime_adapter::tool_call::parse_tool_calls(&text)
+            } else {
+                Vec::new()
+            };
+            let emitted_tool_calls = !parsed_tool_calls.is_empty();
             let finish_reason = if emitted_tool_calls {
                 "tool_calls".to_string()
             } else if filter_stopped
@@ -1672,8 +1824,13 @@ impl LlmBackend for LlamaCppBackend {
                 } else {
                     text.clone()
                 };
+                // The terminal token is the streaming caller's typed
+                // handoff: the call blocks were suppressed from the emitted
+                // text on purpose, so parsed calls ride here rather than
+                // forcing the caller to re-parse what it never received.
                 let final_partial = PartialToken::new(String::new(), token_index, final_cumulative)
-                    .with_finish_reason(&finish_reason);
+                    .with_finish_reason(&finish_reason)
+                    .with_tool_calls(parsed_tool_calls, &text);
                 // Terminal errors propagate like every other callback error
                 // (the trait contract, and what mistral already does) — the
                 // typed conversion keeps a CloudFallbackAbort returned here

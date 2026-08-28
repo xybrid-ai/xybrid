@@ -66,14 +66,16 @@ done
 
 slice_dirs=(lib include)
 [ -d "$SLICE/lib64" ] && slice_dirs+=(lib64)
-tar -C "$SLICE" -czf "$SLICE/native.tar.gz" "${slice_dirs[@]}"
 
-# Push from INSIDE the slice dir so the layer reference is a RELATIVE path:
-# oras rejects absolute file paths (path-validation), and a bare
-# `native.tar.gz` title is exactly what natives-pull.sh expects from
+# Everything below runs from INSIDE the slice dir so both tar and oras see
+# RELATIVE paths. tar: on the windows runner $SLICE starts with `D:`, which
+# GNU tar's -f parses as a remote host ("Cannot connect to D:") — a relative
+# archive name sidesteps it. oras: rejects absolute file paths outright, and
+# a bare `native.tar.gz` title is exactly what natives-pull.sh expects from
 # `oras pull -o <dir>` (it writes <dir>/native.tar.gz).
 (
   cd "$SLICE"
+  tar -czf native.tar.gz "${slice_dirs[@]}"
   oras push "$PKG:$FP" \
     --artifact-type application/vnd.xybrid.natives.layer.v1+gzip \
     --annotation "org.opencontainers.image.source=https://github.com/xybrid-ai/xybrid" \

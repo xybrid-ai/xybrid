@@ -38,7 +38,18 @@
 /// Tool calling is llama.cpp-only today. Unsupported paths — a model with no
 /// embedded chat template, the mistralrs backend, the cloud fallback leg —
 /// reject a tool-bearing request rather than quietly generating without the
-/// tools. Continuation runs on the non-streaming text path only.
+/// tools.
+///
+/// A streaming chat screen keeps both history and streaming: run
+/// `runStreamingWithContext` with tools, halt on the token whose
+/// `hasToolCalls` is true, then feed the outcomes back through the same call
+/// with a [XybridEnvelope.toolResults] envelope. Tool-call blocks are
+/// suppressed from the streamed text, so nothing needs parsing — that token's
+/// `rawText` is the turn text to pass as `priorAssistantText`.
+///
+/// The one shape that stays closed is an image-bearing conversation: a
+/// continuation replays prior turns as a composed text prompt, and image
+/// embeddings cannot be re-evaluated from text.
 library;
 
 import 'rust/api/model.dart';

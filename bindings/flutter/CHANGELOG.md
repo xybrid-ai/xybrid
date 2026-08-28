@@ -1,5 +1,55 @@
 # Changelog
 
+## 0.7.0
+
+Streaming tool loops can now keep both live output and conversation history,
+and apps can release idle model memory without throwing away model handles.
+
+* Added: a terminal streaming token carries typed `toolCalls`,
+  `finishReason: "tool_calls"`, and `rawText`, so callers dispatch a tool without
+  parsing protocol text and retain the exact assistant turn needed for the
+  continuation (xybrid-ai/xybrid#542)
+* Added: `tool_results` continuations work through
+  `runStreamingWithContext`, preserving history and token-by-token output on the
+  second turn (xybrid-ai/xybrid#542)
+* Added: `Xybrid.releaseMemory`, `Xybrid.setAutoRelease`, and
+  `Xybrid.isAutoReleaseEnabled`. Explicit release skips busy models and an
+  evicted model reloads itself on its next use; automatic release is off by
+  default (xybrid-ai/xybrid#539)
+* Fixed: a terminal tool call is delivered exactly once. The native terminal
+  token and the completion event previously exposed the same call, which could
+  make a straightforward `hasToolCalls` loop dispatch every tool twice
+  (xybrid-ai/xybrid#542)
+* Fixed: cloud fallback preserves `maxTokens`, `temperature`, `topP`, and exact
+  `stopSequences` values instead of silently using gateway defaults or
+  corrupting whitespace- and comma-bearing stops (xybrid-ai/xybrid#545)
+* Changed: image-bearing tool continuations still fail closed, with an error
+  that explains image embeddings cannot be reconstructed from replayed text
+  (xybrid-ai/xybrid#542)
+
+## 0.6.0
+
+Structured output, reasoning text, and tool-capability reporting reach the Dart
+surface, and the package finally ships a runnable example app.
+
+* Added: `GenerationConfig.grammar` and `jsonSchemaToGbnf` — constrain
+  generation to a JSON Schema, with the greedy and creative presets taking an
+  optional grammar so the usual extraction shape is a single call. Both had
+  reached the generated layer and stopped at the hand-written wrapper
+  (xybrid-ai/xybrid#511)
+* Added: `XybridResult.reasoningContent`, what a thinking model emits separately
+  from its answer (xybrid-ai/xybrid#511)
+* Added: `XybridModel.supportsToolCalling`, the bundle's tool-calling metadata
+  flag as an advisory tri-state — `null` means the bundle says nothing
+  (xybrid-ai/xybrid#515)
+* Added: a runnable single-screen example app in `example/`, replacing the
+  `example.md` snippet file. The snippets themselves remain in the package
+  README (xybrid-ai/xybrid#525, xybrid-ai/xybrid#152)
+* Fixed: `flutter build macos` failed with 1287 duplicate `ggml_*` symbols — one
+  Rust staticlib carried two copies of ggml (xybrid-ai/xybrid#528)
+* Changed: the Dart unit tests under `test/` run in CI for the first time, so
+  wrapper-level regressions are caught before release (xybrid-ai/xybrid#511)
+
 ## 0.5.0
 
 Live streaming speech recognition, now on the whisper.cpp backend, plus the

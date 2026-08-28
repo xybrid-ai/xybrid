@@ -80,7 +80,7 @@ impl Sampler {
     /// reproducibility is not a concern.
     pub fn from_entropy() -> Self {
         Self {
-            rng: StdRng::from_entropy(),
+            rng: StdRng::from_os_rng(),
         }
     }
 
@@ -293,7 +293,7 @@ fn apply_top_p(probs: &mut [f32], top_p: f32) {
 /// Draw a single multinomial sample from a probability distribution. Assumes
 /// `probs` sums to 1.0 (caller renormalises).
 fn multinomial<R: Rng>(rng: &mut R, probs: &[f32]) -> usize {
-    let r: f32 = rng.gen_range(0.0..1.0);
+    let r: f32 = rng.random_range(0.0..1.0);
     let mut cum = 0.0f32;
     for (i, &p) in probs.iter().enumerate() {
         cum += p;
