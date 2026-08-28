@@ -232,6 +232,13 @@ abstract class XybridRustLibApiImplPlatform
   double dco_decode_box_autoadd_f_64(dynamic raw);
 
   @protected
+  FfiBackend dco_decode_box_autoadd_ffi_backend(dynamic raw);
+
+  @protected
+  FfiCloudFallbackAbort dco_decode_box_autoadd_ffi_cloud_fallback_abort(
+      dynamic raw);
+
+  @protected
   FfiGenerationConfig dco_decode_box_autoadd_ffi_generation_config(dynamic raw);
 
   @protected
@@ -266,6 +273,15 @@ abstract class XybridRustLibApiImplPlatform
 
   @protected
   double dco_decode_f_64(dynamic raw);
+
+  @protected
+  FfiBackend dco_decode_ffi_backend(dynamic raw);
+
+  @protected
+  FfiCloudFallbackAbort dco_decode_ffi_cloud_fallback_abort(dynamic raw);
+
+  @protected
+  FfiCloudFallbackReason dco_decode_ffi_cloud_fallback_reason(dynamic raw);
 
   @protected
   FfiDownloadState dco_decode_ffi_download_state(dynamic raw);
@@ -405,6 +421,9 @@ abstract class XybridRustLibApiImplPlatform
 
   @protected
   double? dco_decode_opt_box_autoadd_f_64(dynamic raw);
+
+  @protected
+  FfiBackend? dco_decode_opt_box_autoadd_ffi_backend(dynamic raw);
 
   @protected
   FfiGenerationConfig? dco_decode_opt_box_autoadd_ffi_generation_config(
@@ -618,6 +637,13 @@ abstract class XybridRustLibApiImplPlatform
   double sse_decode_box_autoadd_f_64(SseDeserializer deserializer);
 
   @protected
+  FfiBackend sse_decode_box_autoadd_ffi_backend(SseDeserializer deserializer);
+
+  @protected
+  FfiCloudFallbackAbort sse_decode_box_autoadd_ffi_cloud_fallback_abort(
+      SseDeserializer deserializer);
+
+  @protected
   FfiGenerationConfig sse_decode_box_autoadd_ffi_generation_config(
       SseDeserializer deserializer);
 
@@ -658,6 +684,17 @@ abstract class XybridRustLibApiImplPlatform
 
   @protected
   double sse_decode_f_64(SseDeserializer deserializer);
+
+  @protected
+  FfiBackend sse_decode_ffi_backend(SseDeserializer deserializer);
+
+  @protected
+  FfiCloudFallbackAbort sse_decode_ffi_cloud_fallback_abort(
+      SseDeserializer deserializer);
+
+  @protected
+  FfiCloudFallbackReason sse_decode_ffi_cloud_fallback_reason(
+      SseDeserializer deserializer);
 
   @protected
   FfiDownloadState sse_decode_ffi_download_state(SseDeserializer deserializer);
@@ -811,6 +848,10 @@ abstract class XybridRustLibApiImplPlatform
 
   @protected
   double? sse_decode_opt_box_autoadd_f_64(SseDeserializer deserializer);
+
+  @protected
+  FfiBackend? sse_decode_opt_box_autoadd_ffi_backend(
+      SseDeserializer deserializer);
 
   @protected
   FfiGenerationConfig? sse_decode_opt_box_autoadd_ffi_generation_config(
@@ -1028,6 +1069,14 @@ abstract class XybridRustLibApiImplPlatform
   void sse_encode_box_autoadd_f_64(double self, SseSerializer serializer);
 
   @protected
+  void sse_encode_box_autoadd_ffi_backend(
+      FfiBackend self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_box_autoadd_ffi_cloud_fallback_abort(
+      FfiCloudFallbackAbort self, SseSerializer serializer);
+
+  @protected
   void sse_encode_box_autoadd_ffi_generation_config(
       FfiGenerationConfig self, SseSerializer serializer);
 
@@ -1070,6 +1119,17 @@ abstract class XybridRustLibApiImplPlatform
 
   @protected
   void sse_encode_f_64(double self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_ffi_backend(FfiBackend self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_ffi_cloud_fallback_abort(
+      FfiCloudFallbackAbort self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_ffi_cloud_fallback_reason(
+      FfiCloudFallbackReason self, SseSerializer serializer);
 
   @protected
   void sse_encode_ffi_download_state(
@@ -1237,6 +1297,10 @@ abstract class XybridRustLibApiImplPlatform
 
   @protected
   void sse_encode_opt_box_autoadd_f_64(double? self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_opt_box_autoadd_ffi_backend(
+      FfiBackend? self, SseSerializer serializer);
 
   @protected
   void sse_encode_opt_box_autoadd_ffi_generation_config(

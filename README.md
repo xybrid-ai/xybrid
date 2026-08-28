@@ -391,6 +391,22 @@ data and the loop is your code. See the
 
 ---
 
+## Inference Backends
+
+Xybrid ships multiple inference runtimes and routes between them automatically based on model type, platform, and hardware:
+
+| Backend | Model Formats | Platforms | Acceleration |
+|---------|---------------|-----------|--------------|
+| **ONNX Runtime** | `.onnx` | All | CPU, CoreML (ANE), Metal |
+| **Candle** | `.safetensors` (Whisper) | All | CPU, Metal, CUDA |
+| **llama.cpp** | `.gguf` (LLM) | All | CPU (runtime SIMD), Metal, CUDA |
+| **mistral.rs** | `.gguf` (LLM) | Desktop, macOS, iOS | CPU, Metal, CUDA |
+| **MLX** | SafeTensors (Qwen, Gemma, BERT) | macOS, iOS | Metal (Apple Silicon only) |
+
+MLX is selected automatically on Apple Silicon when a model has an `mlx` variant in the registry. Otherwise, the runtime falls through to `llm-llamacpp`. You can also pin a backend explicitly — `xybrid run --model qwen3-4b --backend mlx` on the CLI, or `.with_backend(BackendChoice::Mlx)` / `load(backend: XybridBackend.mlx)` in the SDKs. See [`docs/backends/mlx.md`](docs/backends/mlx.md) for MLX runtime selection, xcframework setup, and troubleshooting.
+
+---
+
 ## Why Xybrid?
 
 - **Private / offline** — inference runs on-device and keeps working with no

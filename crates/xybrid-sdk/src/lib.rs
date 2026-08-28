@@ -197,6 +197,7 @@ pub use xybrid_core::execution::{VoiceConfig, VoiceInfo};
 pub use xybrid_core::runtime_adapter::types::{
     GenerationConfig, PartialToken, StreamingCallback, StreamingError,
 };
+pub use xybrid_core::runtime_adapter::BackendChoice;
 
 // Re-export JSON-Schema → GBNF conversion for constrained decoding, so SDK
 // consumers and binding crates can produce `GenerationConfig::grammar` values

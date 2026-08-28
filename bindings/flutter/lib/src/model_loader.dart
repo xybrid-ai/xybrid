@@ -28,6 +28,27 @@ class XybridException implements Exception {
   String toString() => 'XybridException: $message';
 }
 
+/// Local generation or embedding backend override for model loading.
+///
+/// [auto] leaves backend selection to the native SDK. Concrete values hard-pin
+/// the requested backend; unavailable explicit backends fail during load with
+/// the native selector message.
+enum XybridBackend {
+  auto,
+  mlx,
+  llamaCpp,
+  mistral;
+
+  FfiBackend toFfi() {
+    return switch (this) {
+      XybridBackend.auto => FfiBackend.auto,
+      XybridBackend.mlx => FfiBackend.mlx,
+      XybridBackend.llamaCpp => FfiBackend.llamaCpp,
+      XybridBackend.mistral => FfiBackend.mistral,
+    };
+  }
+}
+
 /// Cooperative cancel handle for an in-flight streaming run.
 ///
 /// Construct one, pass it into [XybridModel.runStreaming],
@@ -95,6 +116,33 @@ class CancellationToken {
       return false;
     }
   }
+}
+
+CloudFallbackReason _cloudFallbackReasonFromFfi(FfiCloudFallbackReason reason) {
+  return switch (reason) {
+    FfiCloudFallbackReason.userCancelled => CloudFallbackReason.userCancelled,
+    FfiCloudFallbackReason.stressThrottle => CloudFallbackReason.stressThrottle,
+    FfiCloudFallbackReason.stressMemory => CloudFallbackReason.stressMemory,
+    FfiCloudFallbackReason.stressThermal => CloudFallbackReason.stressThermal,
+    FfiCloudFallbackReason.stressCpuSustained =>
+      CloudFallbackReason.stressCpuSustained,
+    FfiCloudFallbackReason.budgetExceeded => CloudFallbackReason.budgetExceeded,
+  };
+}
+
+StreamToken _cloudFallbackAbortToken(
+  FfiCloudFallbackAbort abort, {
+  required bool isFinal,
+}) {
+  final reason = _cloudFallbackReasonFromFfi(abort.reason);
+  return StreamToken(
+    token: '',
+    index: 0,
+    cumulativeText: '',
+    isFinal: isFinal,
+    finishReason: isFinal ? 'cloud_fallback: ${reason.wireName}' : null,
+    cloudFallbackReason: reason,
+  );
 }
 
 /// Event emitted during model loading with progress tracking.
@@ -193,8 +241,10 @@ class XybridModelLoader {
   ///
   /// Downloads the model if loading from registry and not cached.
   /// Returns a ready-to-use [XybridModel] instance.
-  Future<XybridModel> load() async {
-    final ffiModel = await _inner.load();
+  Future<XybridModel> load({
+    XybridBackend backend = XybridBackend.auto,
+  }) async {
+    final ffiModel = await _inner.load(backend: backend.toFfi());
     return XybridModel._(ffiModel);
   }
 
@@ -222,8 +272,10 @@ class XybridModelLoader {
   ///   }
   /// }
   /// ```
-  Stream<LoadEvent> loadWithProgress() {
-    return _inner.loadWithProgress().map((ffiEvent) {
+  Stream<LoadEvent> loadWithProgress({
+    XybridBackend backend = XybridBackend.auto,
+  }) {
+    return _inner.loadWithProgress(backend: backend.toFfi()).map((ffiEvent) {
       return switch (ffiEvent) {
         FfiLoadEvent_Progress(:final field0) => LoadProgress(field0),
         FfiLoadEvent_Complete() => const LoadComplete(),
@@ -249,6 +301,13 @@ class XybridModel {
   final FfiModel inner;
 
   XybridModel._(this.inner);
+
+  /// Whether this model supports native token-by-token streaming.
+  ///
+  /// Returns `true` for token-streaming LLM models such as GGUF and
+  /// runtime-ready MLX SafeTensors models, and `false` for batch-only model
+  /// types or non-linking MLX skeleton builds.
+  bool supportsTokenStreaming() => inner.supportsTokenStreaming();
 
   /// Whether runs are currently answered by the cloud because the local
   /// weights are not ready yet. `false` for ordinary local models.
@@ -468,6 +527,11 @@ class XybridModel {
                 finishReason: 'error: $field0',
               );
             }
+          case FfiStreamEvent_CloudFallbackAbort(:final field0):
+            if (!emittedFinal) {
+              emittedFinal = true;
+              yield _cloudFallbackAbortToken(field0, isFinal: true);
+            }
         }
       }
     } catch (e) {
@@ -572,6 +636,10 @@ class XybridModel {
                 isFinal: true,
                 finishReason: 'error: $field0',
               );
+            }
+          case FfiStreamEvent_CloudFallbackAbort(:final field0):
+            if (!emittedFinal) {
+              yield _cloudFallbackAbortToken(field0, isFinal: false);
             }
         }
       }
@@ -688,6 +756,8 @@ class XybridModel {
               isFinal: true,
               finishReason: 'error: $field0',
             );
+          case FfiStreamEvent_CloudFallbackAbort(:final field0):
+            yield _cloudFallbackAbortToken(field0, isFinal: true);
         }
       }
     } catch (e) {

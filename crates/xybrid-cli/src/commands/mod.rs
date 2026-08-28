@@ -24,6 +24,7 @@ pub mod init;
 pub mod models;
 pub mod pack;
 pub mod pipeline;
+pub(crate) mod registry_format;
 pub mod repl;
 pub mod run;
 pub mod telemetry;

@@ -23,6 +23,7 @@ xybrid run --pipeline <name> --dry-run
 | `--input-text` | | 文本模型（LLM、TTS）的文本输入 |
 | `--input-audio` | | 音频模型（ASR）的音频文件路径 — 支持 WAV、MP3、OGG、FLAC |
 | `--target` | | 强制指定模型格式（`onnx`、`coreml`、`tflite`）；省略时自动检测 |
+| `--backend` | | 强制指定本地生成或 Embedding 后端（`auto`、`mlx`、`llamacpp`、`mistral`） |
 | `--dry-run` | | 模拟路由决策但不执行推理 |
 | `--policy` | | 加载附加策略 Bundle |
 | `--trace` | | 启用执行追踪，输出火焰图与 LLM 指标 |
@@ -35,6 +36,12 @@ xybrid run --pipeline <name> --dry-run
 3. 打印各阶段延迟与路由摘要
 
 在 dry-run 模式下，CLI 仅打印路由决策与模拟输出，不会调用适配器。
+
+对于来自 Registry 的本地 LLM 阶段，`--backend mlx` 会请求
+SafeTensors 变体，并要求 Apple Silicon 构建启用了可用的
+`llm-mlx-runtime` 功能。`--backend llamacpp` 会为 LLM 阶段请求 GGUF
+变体。Registry Embedding 阶段目前会拒绝显式的非 MLX 本地后端，因为本地
+selector 还没有暴露非 MLX 的 Embedding 运行时。
 
 ## 示例
 
@@ -73,6 +80,15 @@ xybrid run --pipeline hiiipe --dry-run
 ```bash
 xybrid run --pipeline hiiipe --policy ./policies/strict-privacy.yaml
 ```
+
+### 强制使用 MLX SafeTensors
+
+```bash
+xybrid run --model qwen3-4b --backend mlx --input-text "Summarize this."
+```
+
+当 Registry 模型同时发布 GGUF 和 MLX SafeTensors 变体，并且你希望走
+MLX 运行时而不是自动本地后端选择时，使用该选项。
 
 ## 示例输出
 

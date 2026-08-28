@@ -119,6 +119,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         EnvelopeKind::MultiPart(_) => {
             println!("📦 Multipart output (unexpected for MobileNetV2)");
         }
+        EnvelopeKind::TokenIds(ids) => {
+            println!(
+                "🔢 Token ID output (unexpected for MobileNetV2): {} ids",
+                ids.len()
+            );
+        }
     }
 
     println!();

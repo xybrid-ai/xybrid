@@ -35,6 +35,8 @@ llm-mistral = ["xybrid-sdk/llm-mistral"]
 llm-mistral-metal = ["xybrid-sdk/llm-mistral-metal"]
 llm-mistral-cuda = ["xybrid-sdk/llm-mistral-cuda"]
 llm-llamacpp = ["xybrid-sdk/llm-llamacpp"]
+llm-mlx = ["xybrid-sdk/llm-mlx"]
+llm-mlx-runtime = ["llm-mlx", "xybrid-sdk/llm-mlx-runtime"]
 llm-llamacpp-vision = ["llm-llamacpp", "xybrid-sdk/llm-llamacpp-vision"]
 
 # Speech recognition
@@ -54,13 +56,13 @@ asr-whispercpp = ["xybrid-sdk/asr-whispercpp"]
 # Keep it explicit rather than pushing it into the sdk presets, which would
 # grow every embedder's dependency tree for a CLI convenience.
 #
-# `llm-llamacpp` / `llm-mistral` are the only features this crate `#[cfg]`s on
+# `llm-llamacpp` / `llm-mistral` / `llm-mlx` are the only features this crate `#[cfg]`s on
 # itself; the rest exist to be forwarded. (The previous comment here claimed the
 # duplication was needed for local `#[cfg(feature = ...)]` checks — that was
 # stale: no `candle*` cfg has ever appeared in this crate's src/.)
 platform-android = ["xybrid-sdk/platform-android", "llm-llamacpp", "huggingface"]
-platform-ios = ["xybrid-sdk/platform-ios", "llm-llamacpp", "huggingface"]
-platform-macos = ["xybrid-sdk/platform-macos", "llm-llamacpp", "huggingface"]
+platform-ios = ["xybrid-sdk/platform-ios", "llm-llamacpp", "llm-mlx", "huggingface"]
+platform-macos = ["xybrid-sdk/platform-macos", "llm-llamacpp", "llm-mlx", "huggingface"]
 platform-desktop = ["xybrid-sdk/platform-desktop", "llm-llamacpp", "huggingface"]
 
 
@@ -92,4 +94,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 tracing-flame = "0.2"
 
 [dev-dependencies]
+httpmock = "0.7"
+safetensors = "0.4"
+tokenizers = { version = "0.22", default-features = false, features = ["onig"] }
 image = "0.25"

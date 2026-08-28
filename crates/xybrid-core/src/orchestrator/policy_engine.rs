@@ -162,6 +162,13 @@ impl DefaultPolicyEngine {
                             return true;
                         }
                     }
+                    EnvelopeKind::TokenIds(_) => {
+                        if value.eq_ignore_ascii_case("tokenids")
+                            || value.eq_ignore_ascii_case("tokens")
+                        {
+                            return true;
+                        }
+                    }
                 }
             }
         }

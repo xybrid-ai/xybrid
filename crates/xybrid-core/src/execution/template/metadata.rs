@@ -373,6 +373,22 @@ pub struct ModelMetadata {
     #[serde(default)]
     pub description: Option<String>,
 
+    /// Optional: Explicit local generation or embedding backend override.
+    ///
+    /// When set, the runtime selector (see
+    /// `crate::runtime_adapter::selector`) bypasses its default priority and
+    /// uses this backend for selector-backed LLM or embedding models. Accepted
+    /// values (case-insensitive, matched via
+    /// [`crate::runtime_adapter::selector::BackendChoice::parse`]): `auto`,
+    /// `mlx`, `llamacpp`, `mistral`.
+    ///
+    /// `None` (or the literal `"auto"`) means "let the selector decide".
+    ///
+    /// This field is ignored for models that do not use the backend selector.
+    /// Added in US-016.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub backend: Option<String>,
+
     /// Optional: Additional metadata
     #[serde(default)]
     pub metadata: HashMap<String, serde_json::Value>,
@@ -417,6 +433,7 @@ impl ModelMetadata {
             files: vec![model_file],
             vision_encoder: None,
             description: None,
+            backend: None,
             metadata: HashMap::new(),
             voices: None,
             max_chunk_chars: None,
@@ -446,6 +463,7 @@ impl ModelMetadata {
             files: vec![model_file],
             vision_encoder: None,
             description: None,
+            backend: None,
             metadata: HashMap::new(),
             voices: None,
             max_chunk_chars: None,
@@ -472,6 +490,7 @@ impl ModelMetadata {
             files,
             vision_encoder: None,
             description: None,
+            backend: None,
             metadata: HashMap::new(),
             voices: None,
             max_chunk_chars: None,
@@ -605,7 +624,8 @@ pub fn stage_kind_from_task(task: &str) -> Option<&'static str> {
         "image-classification" | "image-to-text" | "vision" | "vision-language" | "vlm" => {
             Some("vision")
         }
-        "embedding" | "sentence-embedding" => Some("embed"),
+        "embedding" | "text-embedding" | "text_embedding" | "sentence-embedding"
+        | "sentence_embedding" => Some("embed"),
         "audio-classification" | "vad" => Some("audio"),
         _ => None,
     }
@@ -625,15 +645,121 @@ pub fn normalize_llm_backend_hint(hint: &str) -> Option<&'static str> {
     match hint {
         "llamacpp" => Some("llamacpp"),
         "mistral" | "mistralrs" => Some("mistralrs"),
+        "mlx" => Some("mlx"),
         _ => None,
     }
+}
+
+/// Raw backend hint from top-level `backend` or the legacy
+/// `metadata.backend` map.
+///
+/// Empty strings are treated as absent. The literal `auto` is preserved so
+/// callers can distinguish "the bundle explicitly asked the selector to
+/// decide" from "the bundle pinned no backend".
+pub fn raw_llm_backend_hint(metadata: &ModelMetadata) -> Option<&str> {
+    if let Some(raw) = metadata.backend.as_deref() {
+        let hint = raw.trim();
+        return (!hint.is_empty()).then_some(hint);
+    }
+
+    metadata
+        .metadata
+        .get("backend")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|hint| !hint.is_empty())
+}
+
+/// Explicit backend hint after removing the `auto` sentinel.
+pub fn explicit_llm_backend_hint(metadata: &ModelMetadata) -> Option<&str> {
+    raw_llm_backend_hint(metadata).filter(|hint| !hint.eq_ignore_ascii_case("auto"))
+}
+
+/// True when SafeTensors metadata names an MLX LLM architecture that can route
+/// through `MlxLlmAdapter` when the backend is unset or `auto`.
+///
+/// BERT / nomic-BERT are intentionally excluded here: their adapter returns
+/// embeddings rather than generated text and routes through
+/// [`is_mlx_embedding_safetensors_metadata`].
+pub fn is_mlx_llm_safetensors_metadata(metadata: &ModelMetadata) -> bool {
+    let ExecutionTemplate::SafeTensors { architecture, .. } = &metadata.execution_template else {
+        return false;
+    };
+
+    if !architecture
+        .as_deref()
+        .is_some_and(is_mlx_llm_safetensors_architecture)
+    {
+        return false;
+    }
+
+    if let Some(hint) = explicit_llm_backend_hint(metadata) {
+        return hint.eq_ignore_ascii_case("mlx");
+    }
+
+    let raw_hint = raw_llm_backend_hint(metadata);
+    if raw_hint.is_some_and(|hint| !hint.eq_ignore_ascii_case("auto")) {
+        return false;
+    }
+
+    true
+}
+
+/// True when SafeTensors metadata names an MLX embedding architecture that can
+/// route through `MlxEmbeddingAdapter`.
+///
+/// Explicit `backend: mlx` pins the route for supported BERT-family
+/// architectures. With `backend: auto` or an omitted backend, the metadata must
+/// also declare an embedding-family task so generic Candle SafeTensors BERT
+/// models are not silently stolen by the MLX strategy.
+pub fn is_mlx_embedding_safetensors_metadata(metadata: &ModelMetadata) -> bool {
+    let ExecutionTemplate::SafeTensors { architecture, .. } = &metadata.execution_template else {
+        return false;
+    };
+
+    if !architecture
+        .as_deref()
+        .is_some_and(is_mlx_embedding_safetensors_architecture)
+    {
+        return false;
+    }
+
+    if let Some(hint) = explicit_llm_backend_hint(metadata) {
+        return hint.eq_ignore_ascii_case("mlx");
+    }
+
+    let raw_hint = raw_llm_backend_hint(metadata);
+    if raw_hint.is_some_and(|hint| !hint.eq_ignore_ascii_case("auto")) {
+        return false;
+    }
+
+    metadata
+        .metadata
+        .get("task")
+        .and_then(|v| v.as_str())
+        .and_then(stage_kind_from_task)
+        == Some("embed")
+}
+
+fn is_mlx_llm_safetensors_architecture(architecture: &str) -> bool {
+    matches!(
+        architecture.trim().to_ascii_lowercase().as_str(),
+        "qwen3" | "gemma4" | "lfm2" | "lfm" | "lfm3"
+    )
+}
+
+fn is_mlx_embedding_safetensors_architecture(architecture: &str) -> bool {
+    matches!(
+        architecture.trim().to_ascii_lowercase().as_str(),
+        "bert" | "nomic_bert"
+    )
 }
 
 /// Map a model's execution template (and optional `backend` hint from
 /// `ModelMetadata.metadata`) to the canonical backend label used by cost
 /// telemetry and the analytics ingest path. Values are aligned with the
 /// closed set documented for the `backend` field on `PlatformEvent`:
-/// `llamacpp` | `mistralrs` | `ort` | `candle` | `cloud`.
+/// `llamacpp` | `mistralrs` | `mlx` | `ort` | `candle` | `cloud`.
 ///
 /// Returns `None` when the runtime is not yet covered by that closed set
 /// (e.g. CoreML, TFLite, ModelGraph) — the contract is "additive, omit
@@ -666,14 +792,20 @@ pub fn backend_label_from_template(
             hint.and_then(normalize_llm_backend_hint).or(Some("candle"))
         }
         // GGUF: llama.cpp is the universal runtime in this checkout,
-        // so fall back to it when the hint is absent or unrecognised.
+        // so fall back to it when the hint is absent, unrecognised, or
+        // names a backend that cannot execute GGUF artifacts.
         // Unannotated bundles in the registry then surface `llamacpp`
         // on the dashboard instead of a blank column.
+        // An `mlx` hint on a GGUF/VLM bundle cannot be executed by MLX
+        // (MLX runs SafeTensors only) — the llama.cpp default runs it, so
+        // label what actually executes.
         ExecutionTemplate::Gguf { .. } => hint
             .and_then(normalize_llm_backend_hint)
+            .filter(|hint| *hint != "mlx")
             .or(Some("llamacpp")),
         ExecutionTemplate::VisionLanguage { .. } => hint
             .and_then(normalize_llm_backend_hint)
+            .filter(|hint| *hint != "mlx")
             .or(Some("llamacpp")),
         // The template fixes the runtime — there is no alternative whisper.cpp
         // engine to hint at — so this is reported unconditionally rather than
@@ -969,6 +1101,7 @@ mod tests {
             files: vec!["model.litertlm".to_string()],
             vision_encoder: None,
             description: None,
+            backend: None,
             metadata: HashMap::new(),
             voices: None,
             max_chunk_chars: None,
@@ -1064,8 +1197,8 @@ mod tests {
         assert_eq!(backend_label_from_template(&safe, None), Some("candle"));
         assert_eq!(
             backend_label_from_template(&safe, Some("mlx")),
-            Some("candle"),
-            "deferred mlx hints must not claim an unavailable runtime"
+            Some("mlx"),
+            "MLX SafeTensors hints must surface the runtime label"
         );
 
         // GGUF: llama.cpp is the universal runtime in this checkout
@@ -1120,9 +1253,7 @@ mod tests {
         assert_eq!(normalize_llm_backend_hint("mistral"), Some("mistralrs"));
         assert_eq!(normalize_llm_backend_hint("mistralrs"), Some("mistralrs"));
         assert_eq!(normalize_llm_backend_hint("llamacpp"), Some("llamacpp"));
-        // MLX is currently deferred, so callers must omit the runtime
-        // label rather than claim that an unavailable backend ran.
-        assert_eq!(normalize_llm_backend_hint("mlx"), None);
+        assert_eq!(normalize_llm_backend_hint("mlx"), Some("mlx"));
         // Unknown hints must return None so callers omit the field
         // rather than emit a guessed value.
         assert_eq!(normalize_llm_backend_hint("unknown"), None);
@@ -1171,6 +1302,7 @@ mod tests {
             files: Vec::new(),
             vision_encoder: None,
             description: None,
+            backend: None,
             metadata: HashMap::new(),
             voices: None,
             max_chunk_chars: None,
@@ -1207,6 +1339,7 @@ mod tests {
             files: Vec::new(),
             vision_encoder: None,
             description: None,
+            backend: None,
             metadata: HashMap::new(),
             voices: None,
             max_chunk_chars: None,
@@ -1250,6 +1383,7 @@ mod tests {
             files: Vec::new(),
             vision_encoder: None,
             description: None,
+            backend: None,
             metadata: HashMap::new(),
             voices: None,
             max_chunk_chars: None,
@@ -1300,5 +1434,88 @@ mod tests {
         let metadata: ModelMetadata = serde_json::from_str(json).unwrap();
         assert!(metadata.has_voices());
         assert_eq!(metadata.default_voice().unwrap().id, "voice_1");
+    }
+
+    // ========================================================================
+    // MLX SafeTensors routing classifier tests
+    // ========================================================================
+
+    fn create_mlx_safetensors_metadata() -> ModelMetadata {
+        ModelMetadata {
+            model_id: "qwen3.5-0.6b-mlx".to_string(),
+            version: "1.0".to_string(),
+            execution_template: ExecutionTemplate::SafeTensors {
+                model_file: "model.safetensors".to_string(),
+                architecture: Some("qwen3".to_string()),
+                config_file: Some("config.json".to_string()),
+                tokenizer_file: Some("tokenizer.json".to_string()),
+            },
+            preprocessing: vec![],
+            postprocessing: vec![],
+            files: vec![
+                "config.json".to_string(),
+                "tokenizer.json".to_string(),
+                "model.safetensors".to_string(),
+            ],
+            vision_encoder: None,
+            description: None,
+            backend: Some("mlx".to_string()),
+            metadata: HashMap::new(),
+            voices: None,
+            max_chunk_chars: None,
+            trim_trailing_samples: None,
+        }
+    }
+
+    #[test]
+    fn mlx_llm_classifier_accepts_explicit_mlx_backend() {
+        let metadata = create_mlx_safetensors_metadata();
+        assert!(is_mlx_llm_safetensors_metadata(&metadata));
+    }
+
+    #[test]
+    fn mlx_llm_classifier_accepts_auto_backend_for_qwen() {
+        let mut metadata = create_mlx_safetensors_metadata();
+        metadata.backend = Some("auto".to_string());
+        assert!(is_mlx_llm_safetensors_metadata(&metadata));
+    }
+
+    #[test]
+    fn mlx_llm_classifier_accepts_unset_backend_for_qwen() {
+        let mut metadata = create_mlx_safetensors_metadata();
+        metadata.backend = None;
+        assert!(is_mlx_llm_safetensors_metadata(&metadata));
+    }
+
+    #[test]
+    fn mlx_llm_classifier_rejects_other_explicit_backend() {
+        let mut metadata = create_mlx_safetensors_metadata();
+        metadata.backend = Some("llamacpp".to_string());
+        assert!(!is_mlx_llm_safetensors_metadata(&metadata));
+    }
+
+    #[test]
+    fn mlx_llm_classifier_rejects_bert_embedding_metadata() {
+        let mut metadata = create_mlx_safetensors_metadata();
+        metadata.backend = Some("auto".to_string());
+        metadata.execution_template = ExecutionTemplate::SafeTensors {
+            model_file: "model.safetensors".to_string(),
+            architecture: Some("bert".to_string()),
+            config_file: Some("config.json".to_string()),
+            tokenizer_file: Some("tokenizer.json".to_string()),
+        };
+        metadata
+            .metadata
+            .insert("task".to_string(), serde_json::json!("embedding"));
+
+        assert!(!is_mlx_llm_safetensors_metadata(&metadata));
+        assert!(is_mlx_embedding_safetensors_metadata(&metadata));
+    }
+
+    #[test]
+    fn mlx_llm_classifier_rejects_non_safetensors_template() {
+        let metadata = ModelMetadata::onnx("test-model", "1.0", "model.onnx");
+        assert!(!is_mlx_llm_safetensors_metadata(&metadata));
+        assert!(!is_mlx_embedding_safetensors_metadata(&metadata));
     }
 }

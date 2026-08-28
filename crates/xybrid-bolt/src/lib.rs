@@ -195,6 +195,12 @@ pub enum XybridEnvelopeKind {
     Embedding { values: Vec<f32> },
     Image { bytes: Vec<u8>, format: String },
     MultiPart { parts: Vec<XybridEnvelope> },
+    // Appended AFTER MultiPart: boltffi assigns wire tags by declaration
+    // order, and the shipped Swift/Kotlin/C# wrappers already decode
+    // image=3 / multiPart=4. Inserting mid-enum would shift those tags and
+    // break the envelope ABI for existing clients; new variants must always
+    // append. (Foreign wrappers gain TokenIds when they are regenerated.)
+    TokenIds { ids: Vec<i64> },
 }
 
 impl From<XybridEnvelopeKind> for facade::EnvelopeKind {
@@ -203,6 +209,7 @@ impl From<XybridEnvelopeKind> for facade::EnvelopeKind {
             XybridEnvelopeKind::Text { text } => facade::EnvelopeKind::Text { text },
             XybridEnvelopeKind::Audio { bytes } => facade::EnvelopeKind::Audio { bytes },
             XybridEnvelopeKind::Embedding { values } => facade::EnvelopeKind::Embedding { values },
+            XybridEnvelopeKind::TokenIds { ids } => facade::EnvelopeKind::TokenIds { ids },
             XybridEnvelopeKind::Image { bytes, format } => {
                 facade::EnvelopeKind::Image { bytes, format }
             }
@@ -219,6 +226,7 @@ impl From<facade::EnvelopeKind> for XybridEnvelopeKind {
             facade::EnvelopeKind::Text { text } => XybridEnvelopeKind::Text { text },
             facade::EnvelopeKind::Audio { bytes } => XybridEnvelopeKind::Audio { bytes },
             facade::EnvelopeKind::Embedding { values } => XybridEnvelopeKind::Embedding { values },
+            facade::EnvelopeKind::TokenIds { ids } => XybridEnvelopeKind::TokenIds { ids },
             facade::EnvelopeKind::Image { bytes, format } => {
                 XybridEnvelopeKind::Image { bytes, format }
             }

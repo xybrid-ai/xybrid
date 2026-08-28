@@ -126,6 +126,11 @@ classes:
         return: XybridModel
         notes: "Pins the load to the commit resolved from a branch, tag, or SHA. The Bolt languages expose this as a synchronous XybridModel constructor; call it off the UI thread."
         status: { dart: planned, kotlin: implemented, swift: implemented, csharp: implemented }
+      withBackend:
+        params: [{ name: backend, type: BackendChoice }]
+        return: XybridModelLoader
+        notes: "Pins local generation or embedding execution by stamping ModelMetadata.backend at load time. Omit the call for automatic selection. Dart exposes it as the optional backend: named argument on load()/loadWithProgress() (the literal name withBackend is Rust-only, so the source checker flags dart as a false positive). Kotlin/Swift exposure existed on the retired UniFFI loader and still needs re-plumbing through xybrid-ffi-facade/bolt."
+        status: { dart: implemented, kotlin: planned, swift: planned, csharp: planned }
       load:
         async: true
         return: XybridModel
@@ -247,6 +252,10 @@ classes:
           - { name: options, type: RunOptions }
         return: "Stream<StreamToken>"
         status: { rust: implemented, dart: planned, kotlin: planned, swift: planned, csharp: planned }
+      supportsTokenStreaming:
+        return: bool
+        notes: "Returns true for token-streaming LLM backends such as GGUF and runtime-available MLX SafeTensors; returns false for batch-only models and non-linking MLX builds."
+        status: { dart: implemented, kotlin: planned, swift: planned, csharp: implemented }
       benchmark:
         async: true
         status: { dart: implemented, kotlin: planned, swift: planned, csharp: planned }
@@ -624,6 +633,13 @@ classes:
       range:
         type: YuvColorRange
         status: { rust: implemented, dart: implemented, kotlin: planned, swift: planned, csharp: planned }
+
+  BackendChoice:
+    type: enum
+    section: "8. Supporting Types"
+    values: [mlx, llamacpp, mistral]
+    notes: "Use by omission for auto. Explicit values hard-require that backend for local generation or embedding models."
+    status: { dart: planned, kotlin: planned, swift: planned, csharp: planned }
 
   GenerationConfig:
     type: data

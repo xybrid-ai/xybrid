@@ -1671,6 +1671,8 @@ class XybridEnvelopeKind:
             return XybridEnvelopeKindImage._boltffi_from_reader_payload(reader)
         if tag == 4:
             return XybridEnvelopeKindMultiPart._boltffi_from_reader_payload(reader)
+        if tag == 5:
+            return XybridEnvelopeKindTokenIds._boltffi_from_reader_payload(reader)
         raise ValueError("invalid XybridEnvelopeKind tag")
 
 
@@ -1754,6 +1756,22 @@ class XybridEnvelopeKindMultiPart(XybridEnvelopeKind):
     def _boltffi_from_reader_payload(cls, reader: "_BoltFfiWireReader") -> "XybridEnvelopeKindMultiPart":
         return cls(
             parts=reader.sequence(lambda: XybridEnvelope._boltffi_from_reader(reader)),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class XybridEnvelopeKindTokenIds(XybridEnvelopeKind):
+    ids: list[int]
+
+    def _boltffi_wire(self) -> bytes:
+        return _boltffi_wire_u32(5) + b"".join((
+            _boltffi_wire_sequence(self.ids, len(self.ids), lambda __boltffi_value_0: _boltffi_wire_i64(__boltffi_value_0)),
+        ))
+
+    @classmethod
+    def _boltffi_from_reader_payload(cls, reader: "_BoltFfiWireReader") -> "XybridEnvelopeKindTokenIds":
+        return cls(
+            ids=reader.sequence(lambda: reader.i64()),
         )
 
 
@@ -2207,6 +2225,7 @@ __all__ = [
     "XybridEnvelopeKindEmbedding",
     "XybridEnvelopeKindImage",
     "XybridEnvelopeKindMultiPart",
+    "XybridEnvelopeKindTokenIds",
     "XybridMessageRole",
     "XybridAbortSignal",
     "XybridOutputType",

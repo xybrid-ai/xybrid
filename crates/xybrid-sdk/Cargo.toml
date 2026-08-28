@@ -88,10 +88,10 @@ platform-android = ["xybrid-core/ort-dynamic", "llm-llamacpp-vision", "asr-whisp
 
 # iOS: CoreML + Metal acceleration + llama.cpp
 # (`ort-coreml` is ONNX Runtime's CoreML execution provider — unrelated to Candle.)
-platform-ios = ["xybrid-core/ort-download", "xybrid-core/ort-coreml", "llm-llamacpp-vision", "asr-whispercpp"]
+platform-ios = ["xybrid-core/ort-download", "xybrid-core/ort-coreml", "llm-llamacpp-vision", "asr-whispercpp", "llm-mlx"]
 
 # macOS: CoreML + Metal + llama.cpp
-platform-macos = ["xybrid-core/ort-download", "xybrid-core/ort-coreml", "llm-llamacpp-vision", "asr-whispercpp"]
+platform-macos = ["xybrid-core/ort-download", "xybrid-core/ort-coreml", "llm-llamacpp-vision", "asr-whispercpp", "llm-mlx"]
 
 # Desktop (Linux/Windows): CPU with llama.cpp
 platform-desktop = ["xybrid-core/ort-download", "llm-llamacpp-vision", "asr-whispercpp"]
@@ -121,6 +121,8 @@ llm-llamacpp = ["xybrid-core/llm-llamacpp"]
 # tools/scripts/measure-binary-size.sh can build the with/without delta.
 asr-whispercpp = ["xybrid-core/asr-whispercpp"]
 llm-llamacpp-vision = ["llm-llamacpp", "xybrid-core/llm-llamacpp-vision"]
+llm-mlx = ["xybrid-core/llm-mlx"]
+llm-mlx-runtime = ["llm-mlx", "xybrid-core/llm-mlx-runtime"]
 
 # Dev-tools (test seams for demos and integration tests)
 dev-tools = ["xybrid-core/dev-tools"]
@@ -129,6 +131,8 @@ dev-tools = ["xybrid-core/dev-tools"]
 
 [dev-dependencies]
 httpmock = "0.7"
+safetensors = "0.4"
+tokenizers = { version = "0.22", default-features = false, features = ["onig"] }
 
 # Re-export the macro
 [package.metadata.docs.rs]

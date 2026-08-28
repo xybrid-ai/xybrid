@@ -16,9 +16,9 @@ import 'result.dart';
 import 'streaming.dart';
 part 'model.freezed.dart';
 
-// These functions are ignored because they are not marked as `pub`: `apply_cloud_fallback_metadata`, `from_sdk`, `from_sdk`, `into_facade`, `into_facade`, `is_debug_gateway_host`, `is_ipv6_link_local`, `is_ipv6_unique_local`, `is_v1_gateway_base`, `is_xybrid_gateway_host`, `non_empty`, `normalize_gateway_url`, `should_cancel_on_sink_close`, `streaming_run_options`, `to_facade`, `to_facade`, `to_sdk_over`, `to_sdk_with_cancellation_over`, `validate_cloud_gateway_url`, `validated_cloud_gateway_url`
+// These functions are ignored because they are not marked as `pub`: `apply_backend_to_loader`, `apply_cloud_fallback_metadata`, `cloud_fallback_abort_event`, `from_sdk`, `from_sdk`, `into_facade`, `into_facade`, `is_debug_gateway_host`, `is_ipv6_link_local`, `is_ipv6_unique_local`, `is_v1_gateway_base`, `is_xybrid_gateway_host`, `non_empty`, `normalize_gateway_url`, `should_cancel_on_sink_close`, `stream_error_event`, `streaming_run_options`, `to_facade`, `to_facade`, `to_sdk_over`, `to_sdk_with_cancellation_over`, `to_sdk`, `validate_cloud_gateway_url`, `validated_cloud_gateway_url`
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `FlutterFallbackResourceProvider`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `current_snapshot`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `current_snapshot`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `from`
 
 /// Convert a JSON Schema (as a JSON string) into a GBNF grammar for
 /// [`FfiGenerationConfig::grammar`].
@@ -211,6 +211,13 @@ abstract class FfiModel implements RustOpaqueInterface {
   /// - If the model does not support streaming, or the stream cannot start.
   Future<FfiStreamSession> stream({required FfiStreamingConfig config});
 
+  /// Check if this model supports true token-by-token streaming.
+  ///
+  /// Returns `true` for token-streaming LLM models (GGUF or runtime-ready
+  /// MLX SafeTensors), `false` for other model types or non-linking MLX
+  /// skeleton builds.
+  bool supportsTokenStreaming();
+
   /// Whether the model bundle declares local tool-calling support.
   ///
   /// Advisory tri-state: `null` means the bundle says nothing, so the app
@@ -272,7 +279,7 @@ abstract class FfiModelLoader implements RustOpaqueInterface {
           .crateApiModelFfiModelLoaderFromRegistrySpeculative(modelId: modelId);
 
   /// Load the model without progress updates.
-  Future<FfiModel> load();
+  Future<FfiModel> load({FfiBackend? backend});
 
   /// Load the model with download progress updates.
   ///
@@ -282,11 +289,63 @@ abstract class FfiModelLoader implements RustOpaqueInterface {
   /// - `Error(String)` if loading fails
   ///
   /// After receiving `Complete`, call `load()` to get the cached model instantly.
-  Stream<FfiLoadEvent> loadWithProgress();
+  Stream<FfiLoadEvent> loadWithProgress({FfiBackend? backend});
 
   /// Whether `load()` would actually speculate: enabled, an API key
   /// resolves, and the model is not already cached. Never hits the network.
   bool willSpeculate();
+}
+
+/// Local generation or embedding backend override for model loading.
+///
+/// `Auto` leaves backend selection to the Rust SDK (a no-op, not a reset —
+/// it does not clear an override applied earlier). Concrete values hard-pin
+/// the requested backend; unavailable explicit backends fail with the SDK's
+/// selector error message.
+enum FfiBackend {
+  /// Use the SDK's automatic backend selector.
+  auto,
+
+  /// Apple Silicon MLX SafeTensors backend.
+  mlx,
+
+  /// llama.cpp GGUF backend.
+  llamaCpp,
+
+  /// mistral.rs GGUF backend.
+  mistral,
+  ;
+}
+
+/// Structured marker emitted when local inference aborts for cloud fallback.
+class FfiCloudFallbackAbort {
+  final FfiCloudFallbackReason reason;
+
+  const FfiCloudFallbackAbort({
+    required this.reason,
+  });
+
+  @override
+  int get hashCode => reason.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FfiCloudFallbackAbort &&
+          runtimeType == other.runtimeType &&
+          reason == other.reason;
+}
+
+/// Typed reason for a local stream abort that should be surfaced as a
+/// cloud-fallback marker instead of a generic string error.
+enum FfiCloudFallbackReason {
+  userCancelled,
+  stressThrottle,
+  stressMemory,
+  stressThermal,
+  stressCpuSustained,
+  budgetExceeded,
+  ;
 }
 
 /// Lifecycle of the background download behind a speculative load.
@@ -513,6 +572,11 @@ sealed class FfiStreamEvent with _$FfiStreamEvent {
   const factory FfiStreamEvent.error(
     String field0,
   ) = FfiStreamEvent_Error;
+
+  /// Local inference aborted for cloud fallback with a typed reason
+  const factory FfiStreamEvent.cloudFallbackAbort(
+    FfiCloudFallbackAbort field0,
+  ) = FfiStreamEvent_CloudFallbackAbort;
 }
 
 /// Token received during streaming inference.

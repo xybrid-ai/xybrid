@@ -112,6 +112,16 @@ rayon = { version = "1.8", optional = true }  # Bounded mobile compute pool (can
 # `dep:mistralrs` wiring in the `llm-mistral*` features below.
 # mistralrs = { version = "0.8", optional = true }
 
+# MLX adapter dep (US-010+). `llm-mlx` uses the non-linking portion of
+# `xybrid-mlx` on every platform, while `llm-mlx-runtime` forwards
+# `xybrid-mlx/bindings` for Apple Silicon runtime execution.
+xybrid-mlx = { path = "../xybrid-mlx", version = "0.7.0", optional = true }
+
+# minijinja (declared above with the llama.cpp deps) is also pulled in by
+# `llm-mlx` for the MLX adapter's chat template renderer (US-014) — the
+# HuggingFace-style template flavor that MLX-LM bundles ship. The MLX
+# sampler's seeded RNG rides the workspace-wide `rand` pin declared above.
+
 [features]
 # `llm-llamacpp` is NOT enabled by default — it requires cmake + a C++
 # toolchain and clones ~180MB of llama.cpp source during build. Downstream
@@ -192,6 +202,25 @@ llm-llamacpp-vision = [
     "xybrid-llama/vision",
 ]
 
+# MLX backend metadata/dispatch path (cross-platform, no MLX linkage).
+# Gates runtime_adapter/mlx metadata, selector, tokenizer, and weight-validation paths.
+# Mutually compatible with llm-llamacpp; the runtime selector chooses between
+# them at load time (see runtime_adapter/selector.rs, US-016). `dep:safetensors`
+# (US-011+) is pulled in unconditionally alongside the adapter so arch builders
+# can read weight bundles without a second feature flip; `xybrid-mlx/bindings`
+# remains deliberately NOT forwarded here so the non-linking path (dispatch +
+# weight-key validation, no MLX linkage) can be tested without the xcframework.
+# Enable `llm-mlx-runtime` for the Apple Silicon macOS linked runtime.
+llm-mlx = ["dep:xybrid-mlx", "dep:safetensors", "dep:minijinja", "dep:minijinja-contrib"]
+
+# Full MLX runtime for Apple Silicon macOS — forwards `xybrid-mlx/bindings` so
+# the Qwen/Gemma/LFM architecture builders (US-011+) can actually allocate
+# `MlxArray`s and run the transformer forward pass. Requires
+# `vendor/mlx-apple/mlx.xcframework` to be present (downloaded when a pin is
+# available or source-built via `tools/scripts/build-local-mlx-xcframework.sh`)
+# and compile_error! guards unsupported targets.
+llm-mlx-runtime = ["llm-mlx", "xybrid-mlx/bindings"]
+
 # dev-tools — exposes test seams (e.g. resource-snapshot providers) for
 # downstream demos, integration tests, and benchmarks. Off by default.
 # Crates that depend on `xybrid-core` enable this when they need to inject
@@ -264,6 +293,20 @@ harness = false
 name = "raw_image_ingress"
 harness = false
 required-features = ["dev-tools"]
+
+[[bench]]
+name = "llm_backend_compare"
+harness = false
+
+# MLX SafeTensors embedding throughput benchmark.
+[[bench]]
+name = "mlx_embedding"
+harness = false
+
+# MLX streaming cancellation unwind latency benchmark.
+[[bench]]
+name = "mlx_cancellation_latency"
+harness = false
 
 # Platform-specific ureq dependencies
 # Non-Android: Use default ureq with TLS

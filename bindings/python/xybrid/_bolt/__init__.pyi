@@ -301,6 +301,11 @@ class XybridEnvelopeKindMultiPart(XybridEnvelopeKind):
     parts: list[XybridEnvelope]
 
 
+@dataclass(frozen=True, slots=True)
+class XybridEnvelopeKindTokenIds(XybridEnvelopeKind):
+    ids: list[int]
+
+
 
 
 class XybridMessageRole(IntEnum):

@@ -421,7 +421,9 @@ pub(crate) fn output_type_for_envelope(envelope: &Envelope) -> OutputType {
         EnvelopeKind::Text(_) => OutputType::Text,
         EnvelopeKind::Audio(_) => OutputType::Audio,
         EnvelopeKind::Embedding(_) => OutputType::Embedding,
-        EnvelopeKind::Image { .. } | EnvelopeKind::MultiPart(_) => OutputType::Unknown,
+        EnvelopeKind::Image { .. } | EnvelopeKind::MultiPart(_) | EnvelopeKind::TokenIds(_) => {
+            OutputType::Unknown
+        }
     }
 }
 

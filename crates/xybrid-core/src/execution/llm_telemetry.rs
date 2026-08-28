@@ -174,12 +174,9 @@ mod tests {
     // label that lands on the currently-open span when
     // `execute_with_context_impl` / `execute_streaming_with_context_impl` bypass
     // the outer `execute:<model_id>` span. They share state with the global
-    // span collector, so they serialise on the SAME process-wide mutex as every
-    // other test that touches that collector (`tracing::test_lock()`). Using a
-    // lock private to this module would let these tests run concurrently with
-    // the executor/image-preprocessing tracing tests and stomp each other's
-    // reset/measure window on the shared collector — `cargo test` parallelises
-    // within a binary.
+    // span collector, so a process-wide mutex serialises them — `cargo test`
+    // parallelises within a binary and these would otherwise stomp each other's
+    // reset/measure window.
 
     fn gguf_metadata(backend_hint: Option<&str>) -> ModelMetadata {
         let mut bundle_metadata = HashMap::new();
@@ -200,6 +197,7 @@ mod tests {
             files: Vec::new(),
             vision_encoder: None,
             description: None,
+            backend: None,
             metadata: bundle_metadata,
             voices: None,
             max_chunk_chars: None,
@@ -233,7 +231,7 @@ mod tests {
 
     #[test]
     fn unannotated_gguf_stamps_llamacpp_default() {
-        let _lock = tracing::test_lock();
+        let _lock = crate::tracing::test_lock();
         let captured = capture_span_metadata("execute:test", &gguf_metadata(None));
         assert_eq!(
             captured.get("backend").map(String::as_str),
@@ -244,7 +242,7 @@ mod tests {
 
     #[test]
     fn mistralrs_hint_wins_on_gguf() {
-        let _lock = tracing::test_lock();
+        let _lock = crate::tracing::test_lock();
         let captured = capture_span_metadata("execute:test", &gguf_metadata(Some("mistralrs")));
         assert_eq!(
             captured.get("backend").map(String::as_str),
@@ -254,7 +252,7 @@ mod tests {
 
     #[test]
     fn legacy_mistral_alias_normalises_to_mistralrs() {
-        let _lock = tracing::test_lock();
+        let _lock = crate::tracing::test_lock();
         let captured = capture_span_metadata("execute:test", &gguf_metadata(Some("mistral")));
         assert_eq!(
             captured.get("backend").map(String::as_str),
@@ -265,7 +263,7 @@ mod tests {
 
     #[test]
     fn quantization_stamped_from_gguf_filename() {
-        let _lock = tracing::test_lock();
+        let _lock = crate::tracing::test_lock();
         let mut metadata = gguf_metadata(None);
         metadata.execution_template = ExecutionTemplate::Gguf {
             model_file: "tinyllama-1.1b-chat-q4_k_m.gguf".into(),
@@ -367,7 +365,7 @@ mod tests {
 
     #[test]
     fn runtime_wire_label_overwrites_template_default() {
-        let _lock = tracing::test_lock();
+        let _lock = crate::tracing::test_lock();
         // Template default for unannotated GGUF is `llamacpp`, but
         // the runtime selected by cargo feature is mistral.rs. The
         // overwrite must flip the stamp to ground truth so the
@@ -382,7 +380,7 @@ mod tests {
 
     #[test]
     fn runtime_overwrite_preserves_template_default_when_label_absent() {
-        let _lock = tracing::test_lock();
+        let _lock = crate::tracing::test_lock();
         // Mock/test backends return None from wire_label so the
         // template-derived stamp survives — anything else would
         // erase ground truth that the template *did* carry.

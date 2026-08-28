@@ -618,6 +618,7 @@ mod tests {
             min_p: 0.02,
             top_k: 12,
             repetition_penalty: 1.25,
+            seed: None,
             stop_sequences: vec!["<end>".to_string()],
             grammar: Some("root ::= \"ok\"".to_string()),
             tools: vec![test_tool()],

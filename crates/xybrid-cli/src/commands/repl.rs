@@ -18,7 +18,8 @@ use xybrid_core::orchestrator::routing_engine::LocalAvailability;
 use xybrid_core::orchestrator::Orchestrator;
 use xybrid_core::pipeline::ExecutionTarget;
 use xybrid_core::pipeline_config::PipelineConfig;
-use xybrid_sdk::model::ModelLoader;
+use xybrid_core::runtime_adapter::{BackendChoice, SelectorCfg};
+use xybrid_sdk::model::{ModelLoader, XybridModel};
 use xybrid_sdk::registry_client::RegistryClient;
 
 use colored::Colorize;
@@ -29,6 +30,7 @@ use targeting::{
 };
 use warmup::warmup_models;
 
+use super::registry_format::registry_format_for_stage_backend;
 use super::utils::{maybe_warn_thinking_budget, thinking_budget_exhausted, THINKING_BUDGET_HINT};
 use crate::ui;
 
@@ -40,6 +42,7 @@ pub(crate) struct ReplArgs {
     pub huggingface: Option<String>,
     pub voice: Option<String>,
     pub target: Option<String>,
+    pub backend: Option<String>,
     pub stream: bool,
     pub show_reasoning: bool,
     pub max_tokens: Option<usize>,
@@ -60,6 +63,7 @@ pub(crate) fn handle_repl_command(args: ReplArgs) -> Result<()> {
         huggingface,
         voice,
         target,
+        backend: backend_override,
         stream,
         show_reasoning,
         max_tokens,
@@ -80,6 +84,11 @@ pub(crate) fn handle_repl_command(args: ReplArgs) -> Result<()> {
     let execution_target = parse_repl_target(target.as_deref())?;
     if let Some(target) = &execution_target {
         ui::kv("Target", target.as_str());
+    }
+    let backend_choice = parse_backend_override(backend_override.as_deref())?;
+    let canonical_backend = canonical_backend_override(backend_override.as_deref(), backend_choice);
+    if let Some(ref backend) = canonical_backend {
+        ui::kv("Backend", backend);
     }
     println!();
 
@@ -152,7 +161,8 @@ pub(crate) fn handle_repl_command(args: ReplArgs) -> Result<()> {
         vec![stage]
     } else if let Some(ref repo) = huggingface {
         let sp = ui::spinner(&format!("Loading from HuggingFace: {}...", repo));
-        let loader = ModelLoader::from_huggingface_parsed(repo);
+        let loader =
+            apply_backend_to_loader(ModelLoader::from_huggingface_parsed(repo), backend_choice);
         let _model = loader.load().context(format!(
             "Failed to load model from HuggingFace repo '{}'",
             repo
@@ -173,6 +183,7 @@ pub(crate) fn handle_repl_command(args: ReplArgs) -> Result<()> {
         let mut stage = StageDescriptor::new(_model.model_id());
         stage.bundle_path = Some(cache_dir.to_string_lossy().to_string());
         stage.target = execution_target.clone();
+        stage.backend = canonical_backend.clone();
         vec![stage]
     } else if let Some(ref gguf_path) = model_file {
         // --model-file: load a bare GGUF file with auto-generated metadata
@@ -214,6 +225,7 @@ pub(crate) fn handle_repl_command(args: ReplArgs) -> Result<()> {
         let mut stage = StageDescriptor::new(metadata.model_id.clone());
         stage.bundle_path = Some(parent_dir.to_string_lossy().to_string());
         stage.target = execution_target.clone();
+        stage.backend = canonical_backend.clone();
         vec![stage]
     } else {
         let client = RegistryClient::from_env().context("Failed to initialize registry client")?;
@@ -241,21 +253,21 @@ pub(crate) fn handle_repl_command(args: ReplArgs) -> Result<()> {
             &pipeline_config,
             &model_id,
             execution_target.as_ref(),
+            backend_override.as_deref(),
         )?
     };
 
     let mut conversation_context: Option<ConversationContext> = None;
     let mut loaded_model: Option<xybrid_sdk::model::XybridModel> = None;
 
-    if stages.len() == 1 && stage_is_locally_available(&stages[0]) {
-        let bundle_path = PathBuf::from(stages[0].bundle_path.as_ref().unwrap());
-        let model_result = if bundle_path.extension().is_some_and(|ext| ext == "xyb") {
-            ModelLoader::from_bundle(&bundle_path).and_then(|loader| loader.load())
-        } else {
-            ModelLoader::from_directory(&bundle_path).and_then(|loader| loader.load())
-        };
+    if let [stage] = stages.as_slice() {
+        let model_result = stage
+            .bundle_path
+            .as_ref()
+            .map(PathBuf::from)
+            .map(|bundle_path| load_stage_model(&bundle_path, stage));
 
-        if let Ok(model) = model_result {
+        if let Some(Ok(model)) = model_result {
             if model.is_llm() {
                 ui::ok("LLM detected — conversation context enabled");
                 let mut ctx = ConversationContext::new();
@@ -486,7 +498,7 @@ pub(crate) fn handle_repl_command(args: ReplArgs) -> Result<()> {
         let start = std::time::Instant::now();
 
         // Try streaming execution
-        #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+        #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp", feature = "llm-mlx"))]
         let use_streaming = {
             let can_stream = stages.len() == 1 && {
                 let locally_available = stage_is_locally_available(&stages[0]);
@@ -514,17 +526,17 @@ pub(crate) fn handle_repl_command(args: ReplArgs) -> Result<()> {
             can_stream
         };
 
-        #[cfg(not(any(feature = "llm-mistral", feature = "llm-llamacpp")))]
+        #[cfg(not(any(feature = "llm-mistral", feature = "llm-llamacpp", feature = "llm-mlx")))]
         let use_streaming = {
             if stream {
                 ui::warning("Streaming requested but LLM features not enabled");
-                ui::hint("Build with: --features llm-llamacpp (or llm-mistral)");
+                ui::hint("Build with: --features llm-llamacpp, llm-mistral, or llm-mlx");
             }
             false
         };
 
         if use_streaming {
-            #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+            #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp", feature = "llm-mlx"))]
             {
                 let did_stream = try_streaming_execution(
                     &stages,
@@ -564,14 +576,54 @@ pub(crate) fn handle_repl_command(args: ReplArgs) -> Result<()> {
 }
 
 fn print_streaming_status(stream: bool) {
-    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp", feature = "llm-mlx"))]
     if stream {
         ui::ok("Token streaming: enabled");
     }
-    #[cfg(not(any(feature = "llm-mistral", feature = "llm-llamacpp")))]
+    #[cfg(not(any(feature = "llm-mistral", feature = "llm-llamacpp", feature = "llm-mlx")))]
     if stream {
         ui::warning("Token streaming: not available (LLM features not compiled)");
     }
+}
+
+fn parse_backend_override(raw: Option<&str>) -> Result<Option<BackendChoice>> {
+    raw.map(BackendChoice::parse)
+        .transpose()
+        .map_err(|err| anyhow::anyhow!("Invalid backend override: {}", err))
+        .map(|parsed| parsed.flatten())
+}
+
+fn canonical_backend_override(raw: Option<&str>, parsed: Option<BackendChoice>) -> Option<String> {
+    raw.map(|_| parsed.map_or("auto", BackendChoice::as_str).to_string())
+}
+
+fn apply_backend_to_loader(loader: ModelLoader, backend: Option<BackendChoice>) -> ModelLoader {
+    if let Some(backend) = backend {
+        loader.with_backend(backend)
+    } else {
+        loader
+    }
+}
+
+fn apply_stage_backend_to_loader(
+    loader: ModelLoader,
+    stage: &StageDescriptor,
+) -> Result<ModelLoader> {
+    Ok(apply_backend_to_loader(
+        loader,
+        parse_backend_override(stage.backend.as_deref())?,
+    ))
+}
+
+fn load_stage_model(bundle_path: &PathBuf, stage: &StageDescriptor) -> Result<XybridModel> {
+    let loader = if bundle_path.extension().is_some_and(|ext| ext == "xyb") {
+        ModelLoader::from_bundle(bundle_path)?
+    } else {
+        ModelLoader::from_directory(bundle_path)?
+    };
+
+    let loader = apply_stage_backend_to_loader(loader, stage)?;
+    Ok(loader.load()?)
 }
 
 fn load_stages(
@@ -579,8 +631,10 @@ fn load_stages(
     pipeline_config: &Option<PipelineConfig>,
     model_id: &Option<String>,
     execution_target: Option<&ExecutionTarget>,
+    backend_override: Option<&str>,
 ) -> Result<Vec<StageDescriptor>> {
     let mut stages = Vec::new();
+    let selector_cfg = SelectorCfg::current();
 
     if let Some(ref config) = pipeline_config {
         let name = config.name.as_deref().unwrap_or("unnamed");
@@ -590,9 +644,15 @@ fn load_stages(
             let mut desc = StageDescriptor::new(&model_id);
             let configured_target = parse_stage_config_target(stage_config);
             desc.target = execution_target.cloned().or(configured_target);
+            let stage_backend = backend_override.or_else(|| stage_config.backend());
 
             if stage_config_allows_local_cache(stage_config, desc.target.as_ref()) {
-                ensure_model_cached(&mut desc, &model_id, client)?;
+                ensure_model_cached(&mut desc, &model_id, client, stage_backend, &selector_cfg)?;
+            }
+            if let Some(canonical) =
+                canonical_backend_override(stage_backend, parse_backend_override(stage_backend)?)
+            {
+                desc.backend = Some(canonical);
             }
             stages.push(desc);
         }
@@ -601,7 +661,12 @@ fn load_stages(
         let mut desc = StageDescriptor::new(model_id);
         desc.target = execution_target.cloned();
         if target_allows_local(desc.target.as_ref()) {
-            ensure_model_cached(&mut desc, model_id, client)?;
+            ensure_model_cached(&mut desc, model_id, client, backend_override, &selector_cfg)?;
+        }
+        if let Some(canonical) =
+            canonical_backend_override(backend_override, parse_backend_override(backend_override)?)
+        {
+            desc.backend = Some(canonical);
         }
         stages.push(desc);
     }
@@ -613,28 +678,48 @@ fn ensure_model_cached(
     desc: &mut StageDescriptor,
     model_id: &str,
     client: &RegistryClient,
+    backend_override: Option<&str>,
+    cfg: &SelectorCfg,
 ) -> Result<()> {
-    let resolved = client.resolve(model_id, None)?;
+    let format = registry_format_for_stage_backend(client, model_id, backend_override, cfg)?;
 
-    if !client.is_cached(model_id, None).unwrap_or(false) {
-        let pb = ui::download_bar(resolved.size_bytes, model_id);
-        let model_dir = client.fetch_extracted(model_id, None, |p| {
+    let offline_dir = if let Some(format) = format {
+        client.resolve_offline_with_format(model_id, format)
+    } else {
+        client.resolve_offline(model_id)
+    };
+
+    if let Some(model_dir) = offline_dir {
+        desc.bundle_path = Some(model_dir.to_string_lossy().to_string());
+        return Ok(());
+    }
+
+    let resolved = if let Some(format) = format {
+        client.resolve_with_format(model_id, None, format)
+    } else {
+        client.resolve(model_id, None)
+    }?;
+
+    let pb = ui::download_bar(resolved.size_bytes, model_id);
+    let model_dir = if let Some(format) = format {
+        client.fetch_extracted_with_format(model_id, None, format, |p| {
+            pb.set_position((p * resolved.size_bytes as f32) as u64);
+        })?
+    } else if resolved.passthrough {
+        client.fetch_extracted(model_id, None, |p| {
+            pb.set_position((p * resolved.size_bytes as f32) as u64);
+        })?
+    } else {
+        let xyb_path = client.fetch(model_id, None, |p| {
             pb.set_position((p * resolved.size_bytes as f32) as u64);
         })?;
-        pb.finish_and_clear();
-        ui::ok(&format!("{} downloaded", model_id));
-        desc.bundle_path = Some(model_dir.to_string_lossy().to_string());
-    } else if resolved.passthrough {
-        // Passthrough models: extraction dir is managed by fetch_extracted (idempotent)
-        let model_dir = client.fetch_extracted(model_id, None, |_| {})?;
-        desc.bundle_path = Some(model_dir.to_string_lossy().to_string());
-    } else {
-        // Standard .xyb bundle: extract from cache
         let cache = xybrid_sdk::cache::CacheManager::new()?;
-        let xyb_path = client.get_cache_path(&resolved);
-        let model_dir = cache.ensure_extracted(&xyb_path)?;
-        desc.bundle_path = Some(model_dir.to_string_lossy().to_string());
-    }
+        cache.ensure_extracted(&xyb_path)?
+    };
+
+    pb.finish_and_clear();
+    ui::ok(&format!("{} downloaded", model_id));
+    desc.bundle_path = Some(model_dir.to_string_lossy().to_string());
     Ok(())
 }
 
@@ -821,46 +906,52 @@ fn handle_special_command(
             println!("    {}       Run inference", ui::dim("<text>"));
             SpecialCommandResult::Continue
         }
-        "history" if conversation_context.is_some() => {
-            let ctx = conversation_context.as_ref().unwrap();
-            let history = ctx.history();
-            if history.is_empty() {
-                ui::hint("No conversation history yet.");
-            } else {
-                println!();
-                ui::hint(&format!(
-                    "Conversation history ({} messages):",
-                    history.len()
-                ));
-                println!("  {}", "─".repeat(50).truecolor(60, 60, 70));
-                for (i, envelope) in history.iter().enumerate() {
-                    let role = envelope.role().map(|r| r.as_str()).unwrap_or("unknown");
-                    let text = match &envelope.kind {
-                        EnvelopeKind::Text(t) => t.as_str(),
-                        _ => "[non-text]",
-                    };
-                    let display_text = if verbose == 0 && text.len() > 100 {
-                        format!("{}...", &text[..100])
-                    } else {
-                        text.to_string()
-                    };
-                    let role_colored = match role {
-                        "user" => role.to_uppercase().truecolor(120, 180, 255),
-                        "assistant" => role.to_uppercase().truecolor(180, 140, 255),
-                        "system" => role.to_uppercase().truecolor(120, 120, 130),
-                        _ => role.to_uppercase().normal(),
-                    };
-                    println!("  [{}] {} {}", i + 1, role_colored, display_text);
+        "history" => {
+            if let Some(ctx) = conversation_context.as_ref() {
+                let history = ctx.history();
+                if history.is_empty() {
+                    ui::hint("No conversation history yet.");
+                } else {
+                    println!();
+                    ui::hint(&format!(
+                        "Conversation history ({} messages):",
+                        history.len()
+                    ));
+                    println!("  {}", "─".repeat(50).truecolor(60, 60, 70));
+                    for (i, envelope) in history.iter().enumerate() {
+                        let role = envelope.role().map(|r| r.as_str()).unwrap_or("unknown");
+                        let text = match &envelope.kind {
+                            EnvelopeKind::Text(t) => t.as_str(),
+                            _ => "[non-text]",
+                        };
+                        let display_text = if verbose == 0 && text.len() > 100 {
+                            format!("{}...", &text[..100])
+                        } else {
+                            text.to_string()
+                        };
+                        let role_colored = match role {
+                            "user" => role.to_uppercase().truecolor(120, 180, 255),
+                            "assistant" => role.to_uppercase().truecolor(180, 140, 255),
+                            "system" => role.to_uppercase().truecolor(120, 120, 130),
+                            _ => role.to_uppercase().normal(),
+                        };
+                        println!("  [{}] {} {}", i + 1, role_colored, display_text);
+                    }
+                    println!("  {}", "─".repeat(50).truecolor(60, 60, 70));
                 }
-                println!("  {}", "─".repeat(50).truecolor(60, 60, 70));
+                SpecialCommandResult::Continue
+            } else {
+                SpecialCommandResult::NotSpecial
             }
-            SpecialCommandResult::Continue
         }
-        "clear" if conversation_context.is_some() => {
-            let ctx = conversation_context.as_mut().unwrap();
-            ctx.clear();
-            ui::ok("Conversation history cleared");
-            SpecialCommandResult::Continue
+        "clear" => {
+            if let Some(ctx) = conversation_context.as_mut() {
+                ctx.clear();
+                ui::ok("Conversation history cleared");
+                SpecialCommandResult::Continue
+            } else {
+                SpecialCommandResult::NotSpecial
+            }
         }
         "" => SpecialCommandResult::Continue,
         _ => SpecialCommandResult::NotSpecial,
@@ -1036,7 +1127,7 @@ fn image_format_hint(path: &Path) -> Result<&str> {
         .ok_or_else(|| anyhow::anyhow!("Image file has no extension: {}", path.display()))
 }
 
-#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp", feature = "llm-mlx"))]
 fn try_streaming_execution(
     stages: &[StageDescriptor],
     input: &Envelope,
@@ -1060,12 +1151,16 @@ fn try_streaming_execution(
                 verbose,
             );
         } else {
-            ui::warning("Streaming only supported for GGUF models, falling back to batch mode");
+            ui::warning(streaming_model_support_warning());
             return false;
         }
     }
 
-    let bundle_path = match stages[0].bundle_path.as_ref() {
+    let Some(stage) = stages.first() else {
+        ui::warning("Streaming conditions not met: no pipeline stage available");
+        return false;
+    };
+    let bundle_path = match stage.bundle_path.as_ref() {
         Some(path) => PathBuf::from(path),
         None => {
             ui::warning("No local bundle for stage, falling back to batch mode");
@@ -1074,11 +1169,7 @@ fn try_streaming_execution(
     };
 
     // Fall back to loading the model if not pre-loaded
-    let model_result = if bundle_path.extension().is_some_and(|ext| ext == "xyb") {
-        ModelLoader::from_bundle(&bundle_path).and_then(|loader| loader.load())
-    } else {
-        ModelLoader::from_directory(&bundle_path).and_then(|loader| loader.load())
-    };
+    let model_result = load_stage_model(&bundle_path, stage);
 
     match model_result {
         Ok(model) => {
@@ -1092,7 +1183,7 @@ fn try_streaming_execution(
                     verbose,
                 )
             } else {
-                ui::warning("Streaming only supported for GGUF models, falling back to batch mode");
+                ui::warning(streaming_model_support_warning());
                 false
             }
         }
@@ -1106,9 +1197,19 @@ fn try_streaming_execution(
     }
 }
 
-#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+#[cfg(any(
+    test,
+    feature = "llm-mistral",
+    feature = "llm-llamacpp",
+    feature = "llm-mlx"
+))]
+fn streaming_model_support_warning() -> &'static str {
+    "Streaming only supported for token-streaming LLM models (GGUF with a compiled GGUF backend or runtime-ready MLX SafeTensors), falling back to batch mode"
+}
+
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp", feature = "llm-mlx"))]
 fn execute_streaming(
-    model: &xybrid_sdk::model::XybridModel,
+    model: &XybridModel,
     input: &Envelope,
     conversation_context: &mut Option<ConversationContext>,
     max_tokens: Option<usize>,
@@ -1295,6 +1396,9 @@ fn execute_batch(
                     EnvelopeKind::MultiPart(parts) => {
                         ui::ok(&format!("Multi-part output: {} parts", parts.len()));
                     }
+                    EnvelopeKind::TokenIds(ids) => {
+                        ui::ok(&format!("Token IDs: {} tokens", ids.len()));
+                    }
                 }
             }
 
@@ -1423,6 +1527,7 @@ mod tests {
                 &None,
                 &Some("test-model".to_string()),
                 Some(&target),
+                None,
             )
             .unwrap();
 
@@ -1447,7 +1552,7 @@ stages:
         .unwrap();
         let client = RegistryClient::with_url("http://127.0.0.1:9").unwrap();
 
-        let stages = load_stages(&client, &Some(config), &None, None).unwrap();
+        let stages = load_stages(&client, &Some(config), &None, None, None).unwrap();
 
         assert_eq!(stages.len(), 1);
         assert_eq!(stages[0].target, None);
@@ -1465,5 +1570,51 @@ stages:
             .write_to(&mut encoded, image::ImageFormat::Png)
             .expect("test image encodes");
         encoded.into_inner()
+    }
+
+    #[test]
+    fn streaming_support_warning_mentions_mlx_safetensors() {
+        let warning = streaming_model_support_warning();
+
+        assert!(warning.contains("GGUF"), "{warning}");
+        assert!(warning.contains("MLX SafeTensors"), "{warning}");
+        assert!(warning.contains("runtime-ready"), "{warning}");
+    }
+
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp", feature = "llm-mlx"))]
+    #[test]
+    fn streaming_execution_without_stages_falls_back_to_batch() {
+        let mut conversation_context = None;
+        let loaded_model = None;
+        let input = Envelope::new(EnvelopeKind::Text("hello".into()));
+
+        assert!(!try_streaming_execution(
+            &[],
+            &input,
+            &mut conversation_context,
+            &loaded_model,
+            None,
+            std::time::Instant::now(),
+            0,
+        ));
+    }
+
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp", feature = "llm-mlx"))]
+    #[test]
+    fn streaming_execution_without_bundle_path_falls_back_to_batch() {
+        let mut conversation_context = None;
+        let loaded_model = None;
+        let input = Envelope::new(EnvelopeKind::Text("hello".into()));
+        let stage = StageDescriptor::new("qwen3");
+
+        assert!(!try_streaming_execution(
+            &[stage],
+            &input,
+            &mut conversation_context,
+            &loaded_model,
+            None,
+            std::time::Instant::now(),
+            0,
+        ));
     }
 }

@@ -14,16 +14,17 @@ mod voice;
 
 // Re-export metadata types + swim-lane grouping helpers
 pub use metadata::{
-    backend_label_from_template, normalize_llm_backend_hint, quantization_label_from_metadata,
-    span_kind_from_template, stage_kind_from_task, ExecutionMode, ExecutionTemplate,
-    GenerationParams, ModelMetadata, PipelineStage, RefinementSchedule,
+    backend_label_from_template, explicit_llm_backend_hint, is_mlx_embedding_safetensors_metadata,
+    is_mlx_llm_safetensors_metadata, normalize_llm_backend_hint, quantization_label_from_metadata,
+    raw_llm_backend_hint, span_kind_from_template, stage_kind_from_task, ExecutionMode,
+    ExecutionTemplate, GenerationParams, ModelMetadata, PipelineStage, RefinementSchedule,
 };
 pub use metadata::{VisionEncoderConfig, VisionPreprocessingPreset};
 
 // Re-export step types
 pub use steps::{
     ImageNormalizePreset, ImageResizeMode, ImageTensorLayout, InterpolationMethod, MelScaleType,
-    PhonemizerBackend, PostprocessingStep, PreprocessingStep, TokenizerType,
+    PhonemizerBackend, PostprocessingStep, PreprocessingStep, TokenizerBackend, TokenizerType,
 };
 
 // Re-export voice types

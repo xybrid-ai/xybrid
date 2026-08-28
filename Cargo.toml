@@ -10,6 +10,8 @@ members = [
     "crates/llama-cpp-sys",
     "crates/whisper-cpp-sys",
     "crates/xybrid-llama",
+    "crates/mlx-c-sys",
+    "crates/xybrid-mlx",
     "crates/xybrid-whisper",
     "bindings/flutter/rust",
     "macros",

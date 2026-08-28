@@ -159,6 +159,9 @@ impl CoreMLRuntimeAdapter {
             EnvelopeKind::MultiPart(_) => Envelope::new(EnvelopeKind::Text(
                 "coreml-multimodal-unsupported".to_string(),
             )),
+            EnvelopeKind::TokenIds(_) => {
+                Envelope::new(EnvelopeKind::Text("coreml-tokens output".to_string()))
+            }
         }
     }
 }

@@ -7,8 +7,8 @@ use xybrid_core::device::{ResourceSnapshot, ResourceSnapshotProvider};
 use xybrid_core::runtime_adapter::CloudRuntimeAdapter;
 use xybrid_ffi_facade as facade;
 use xybrid_sdk::{
-    AbortPolicy, AbortSignal, CancellationToken, GenerationConfig, ModelLoader, RunOptions,
-    XybridModel,
+    AbortPolicy, AbortSignal, BackendChoice, CancellationToken, GenerationConfig, ModelLoader,
+    RunOptions, SdkError, XybridModel,
 };
 
 use crate::frb_generated::StreamSink;
@@ -166,6 +166,43 @@ impl FfiGenerationConfig {
     /// that isn't valid JSON.
     pub(crate) fn to_sdk_over(&self, base: GenerationConfig) -> Result<GenerationConfig, String> {
         self.to_facade().apply_over(base).map_err(|e| e.to_string())
+    }
+}
+
+/// Local generation or embedding backend override for model loading.
+///
+/// `Auto` leaves backend selection to the Rust SDK (a no-op, not a reset —
+/// it does not clear an override applied earlier). Concrete values hard-pin
+/// the requested backend; unavailable explicit backends fail with the SDK's
+/// selector error message.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FfiBackend {
+    /// Use the SDK's automatic backend selector.
+    Auto,
+    /// Apple Silicon MLX SafeTensors backend.
+    Mlx,
+    /// llama.cpp GGUF backend.
+    LlamaCpp,
+    /// mistral.rs GGUF backend.
+    Mistral,
+}
+
+impl FfiBackend {
+    fn to_sdk(self) -> Option<BackendChoice> {
+        match self {
+            FfiBackend::Auto => None,
+            FfiBackend::Mlx => Some(BackendChoice::Mlx),
+            FfiBackend::LlamaCpp => Some(BackendChoice::LlamaCpp),
+            FfiBackend::Mistral => Some(BackendChoice::Mistral),
+        }
+    }
+}
+
+fn apply_backend_to_loader(loader: ModelLoader, backend: Option<FfiBackend>) -> ModelLoader {
+    if let Some(choice) = backend.and_then(FfiBackend::to_sdk) {
+        loader.with_backend(choice)
+    } else {
+        loader
     }
 }
 
@@ -519,6 +556,37 @@ pub enum FfiLoadEvent {
     Error(String),
 }
 
+/// Typed reason for a local stream abort that should be surfaced as a
+/// cloud-fallback marker instead of a generic string error.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FfiCloudFallbackReason {
+    UserCancelled,
+    StressThrottle,
+    StressMemory,
+    StressThermal,
+    StressCpuSustained,
+    BudgetExceeded,
+}
+
+impl From<xybrid_core::abort::AbortReason> for FfiCloudFallbackReason {
+    fn from(value: xybrid_core::abort::AbortReason) -> Self {
+        match value {
+            xybrid_core::abort::AbortReason::UserCancelled => Self::UserCancelled,
+            xybrid_core::abort::AbortReason::StressThrottle => Self::StressThrottle,
+            xybrid_core::abort::AbortReason::StressMemory => Self::StressMemory,
+            xybrid_core::abort::AbortReason::StressThermal => Self::StressThermal,
+            xybrid_core::abort::AbortReason::StressCpuSustained => Self::StressCpuSustained,
+            xybrid_core::abort::AbortReason::BudgetExceeded => Self::BudgetExceeded,
+        }
+    }
+}
+
+/// Structured marker emitted when local inference aborts for cloud fallback.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FfiCloudFallbackAbort {
+    pub reason: FfiCloudFallbackReason,
+}
+
 /// Event emitted during streaming inference.
 /// Follows the "everything is a stream" pattern from the SDK.
 #[derive(Clone)]
@@ -529,6 +597,8 @@ pub enum FfiStreamEvent {
     Complete(FfiResult),
     /// An error occurred
     Error(String),
+    /// Local inference aborted for cloud fallback with a typed reason
+    CloudFallbackAbort(FfiCloudFallbackAbort),
 }
 
 /// Event emitted during streaming TTS. Audio rides the stream as raw 16-bit LE
@@ -670,6 +740,19 @@ impl From<xybrid_sdk::StreamEvent> for FfiStreamEvent {
     }
 }
 
+fn cloud_fallback_abort_event(reason: xybrid_core::abort::AbortReason) -> FfiStreamEvent {
+    FfiStreamEvent::CloudFallbackAbort(FfiCloudFallbackAbort {
+        reason: reason.into(),
+    })
+}
+
+fn stream_error_event(error: SdkError) -> FfiStreamEvent {
+    match error {
+        SdkError::AbortedForCloudFallback { reason } => cloud_fallback_abort_event(reason),
+        other => FfiStreamEvent::Error(other.to_string()),
+    }
+}
+
 impl FfiModelLoader {
     #[frb(sync)]
     pub fn from_registry(model_id: String) -> FfiModelLoader {
@@ -720,8 +803,8 @@ impl FfiModelLoader {
     }
 
     /// Load the model without progress updates.
-    pub async fn load(&self) -> Result<FfiModel, String> {
-        self.0
+    pub async fn load(&self, backend: Option<FfiBackend>) -> Result<FfiModel, String> {
+        apply_backend_to_loader(self.0.clone(), backend)
             .load_async()
             .await
             .map(|m| FfiModel(Arc::new(m)))
@@ -736,8 +819,8 @@ impl FfiModelLoader {
     /// - `Error(String)` if loading fails
     ///
     /// After receiving `Complete`, call `load()` to get the cached model instantly.
-    pub fn load_with_progress(&self, sink: StreamSink<FfiLoadEvent>) {
-        let loader = self.0.clone();
+    pub fn load_with_progress(&self, backend: Option<FfiBackend>, sink: StreamSink<FfiLoadEvent>) {
+        let loader = apply_backend_to_loader(self.0.clone(), backend);
 
         // Run loading in a background thread to not block
         std::thread::spawn(move || {
@@ -1059,9 +1142,10 @@ impl FfiModel {
 
     /// Check if this model supports true token-by-token streaming.
     ///
-    /// Returns `true` for LLM models (GGUF), `false` for other model types.
+    /// Returns `true` for token-streaming LLM models (GGUF or runtime-ready
+    /// MLX SafeTensors), `false` for other model types or non-linking MLX
+    /// skeleton builds.
     #[frb(sync)]
-    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
     pub fn supports_token_streaming(&self) -> bool {
         self.0.supports_token_streaming()
     }
@@ -1221,7 +1305,7 @@ impl FfiModel {
                     let _ = sink.add(FfiStreamEvent::Complete(ffi_result));
                 }
                 Err(e) => {
-                    let _ = sink.add(FfiStreamEvent::Error(e.to_string()));
+                    let _ = sink.add(stream_error_event(e));
                 }
             }
         });
@@ -1296,7 +1380,9 @@ impl FfiModel {
                     }
                     Ok(())
                 };
-                let mut on_seam = |_seam: xybrid_sdk::model::SeamInfo| {};
+                let mut on_seam = |seam: xybrid_sdk::model::SeamInfo| {
+                    let _ = sink.add(cloud_fallback_abort_event(seam.reason));
+                };
 
                 model.run_streaming_with_fallback(
                     &env,
@@ -1314,7 +1400,7 @@ impl FfiModel {
                     let _ = sink.add(FfiStreamEvent::Complete(ffi_result));
                 }
                 Err(e) => {
-                    let _ = sink.add(FfiStreamEvent::Error(e.to_string()));
+                    let _ = sink.add(stream_error_event(e));
                 }
             }
         });
@@ -1379,6 +1465,23 @@ mod tests {
             max_grace_tokens: None,
             frame_session_id: None,
         }
+    }
+
+    #[test]
+    fn backend_override_maps_to_sdk_choice() {
+        assert_eq!(FfiBackend::Auto.to_sdk(), None);
+        assert_eq!(
+            FfiBackend::Mlx.to_sdk(),
+            Some(xybrid_sdk::BackendChoice::Mlx)
+        );
+        assert_eq!(
+            FfiBackend::LlamaCpp.to_sdk(),
+            Some(xybrid_sdk::BackendChoice::LlamaCpp)
+        );
+        assert_eq!(
+            FfiBackend::Mistral.to_sdk(),
+            Some(xybrid_sdk::BackendChoice::Mistral)
+        );
     }
 
     #[test]
@@ -1549,5 +1652,46 @@ mod tests {
     fn cloud_gateway_url_accepts_debug_localhost_gateway() {
         let url = validate_cloud_gateway_url("http://127.0.0.1:3001/v1").unwrap();
         assert_eq!(url, "http://127.0.0.1:3001/v1");
+    }
+
+    #[test]
+    fn sdk_cloud_fallback_abort_becomes_typed_ffi_stream_event() {
+        let event = stream_error_event(xybrid_sdk::SdkError::AbortedForCloudFallback {
+            reason: xybrid_core::abort::AbortReason::StressMemory,
+        });
+
+        match event {
+            FfiStreamEvent::CloudFallbackAbort(marker) => {
+                assert_eq!(marker.reason, FfiCloudFallbackReason::StressMemory);
+            }
+            _ => panic!("expected CloudFallbackAbort event"),
+        }
+    }
+
+    #[test]
+    fn cloud_fallback_seam_becomes_typed_ffi_stream_event() {
+        let event = cloud_fallback_abort_event(xybrid_core::abort::AbortReason::StressThermal);
+
+        match event {
+            FfiStreamEvent::CloudFallbackAbort(marker) => {
+                assert_eq!(marker.reason, FfiCloudFallbackReason::StressThermal);
+            }
+            _ => panic!("expected CloudFallbackAbort event"),
+        }
+    }
+
+    #[test]
+    fn sdk_regular_error_stays_string_ffi_stream_event() {
+        let event = stream_error_event(xybrid_sdk::SdkError::InferenceError {
+            message: "runtime failed".to_string(),
+            source: None,
+        });
+
+        match event {
+            FfiStreamEvent::Error(message) => {
+                assert_eq!(message, "Inference failed: runtime failed");
+            }
+            _ => panic!("expected Error event"),
+        }
     }
 }
