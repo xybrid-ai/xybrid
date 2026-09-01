@@ -976,6 +976,15 @@ namespace XybridBolt
         [DllImport(LibName, EntryPoint = "boltffi_init_class_xybrid_bolt_xybrid_model_from_registry_speculative")]
         internal static extern FfiBuf NativeXybridModelFromRegistrySpeculative([In] byte[] idBytes, nuint idLength, out ulong boltffiHandle);
 
+        [DllImport(LibName, EntryPoint = "boltffi_init_class_xybrid_bolt_xybrid_pipeline_from_bundle")]
+        internal static extern FfiBuf NativeXybridPipelineFromBundle([In] byte[] pathBytes, nuint pathLength, out ulong boltffiHandle);
+
+        [DllImport(LibName, EntryPoint = "boltffi_init_class_xybrid_bolt_xybrid_pipeline_from_file")]
+        internal static extern FfiBuf NativeXybridPipelineFromFile([In] byte[] pathBytes, nuint pathLength, out ulong boltffiHandle);
+
+        [DllImport(LibName, EntryPoint = "boltffi_init_class_xybrid_bolt_xybrid_pipeline_from_yaml")]
+        internal static extern FfiBuf NativeXybridPipelineFromYaml([In] byte[] yamlBytes, nuint yamlLength, out ulong boltffiHandle);
+
         [DllImport(LibName, EntryPoint = "boltffi_init_class_xybrid_bolt_xybrid_streaming_session_for_model")]
         internal static extern FfiBuf NativeXybridStreamingSessionForModel(ulong model, [In] byte[] configBytes, nuint configLength, out ulong boltffiHandle);
 
@@ -1139,6 +1148,18 @@ namespace XybridBolt
         [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_model_warmup")]
         internal static extern FfiBuf NativeXybridModelWarmup(ulong receiver);
 
+        [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_pipeline_name")]
+        internal static extern FfiBuf NativeXybridPipelineName(ulong receiver);
+
+        [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_pipeline_run")]
+        internal static extern FfiBuf NativeXybridPipelineRun(ulong receiver, [In] byte[] envelopeBytes, nuint envelopeLength, out FfiBuf boltffiResultBuffer);
+
+        [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_pipeline_stage_count")]
+        internal static extern uint NativeXybridPipelineStageCount(ulong receiver);
+
+        [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_pipeline_stage_names")]
+        internal static extern FfiBuf NativeXybridPipelineStageNames(ulong receiver);
+
         [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_streaming_session_cancel")]
         internal static extern FfiStatus NativeXybridStreamingSessionCancel(ulong receiver);
 
@@ -1190,6 +1211,9 @@ namespace XybridBolt
 
         [DllImport(LibName, EntryPoint = "boltffi_release_class_xybrid_bolt_xybrid_model")]
         internal static extern void NativeXybridModelRelease(ulong handle);
+
+        [DllImport(LibName, EntryPoint = "boltffi_release_class_xybrid_bolt_xybrid_pipeline")]
+        internal static extern void NativeXybridPipelineRelease(ulong handle);
 
         [DllImport(LibName, EntryPoint = "boltffi_release_class_xybrid_bolt_xybrid_streaming_session")]
         internal static extern void NativeXybridStreamingSessionRelease(ulong handle);

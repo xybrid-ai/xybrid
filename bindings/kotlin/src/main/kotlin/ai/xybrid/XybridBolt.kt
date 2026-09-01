@@ -959,6 +959,14 @@ private object Native {
     @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_model_run_stream_with_context(`receiver`: Long, envelope: java.nio.ByteBuffer, __boltffi_envelope_len: Int, context: Long, options: java.nio.ByteBuffer, __boltffi_options_len: Int, cancel: Long): Long
     @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_model_warmup(`receiver`: Long): Unit
     @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_model_unload(`receiver`: Long): Unit
+    @JvmStatic external fun boltffi_release_class_xybrid_bolt_xybrid_pipeline(handle: Long): Unit
+    @JvmStatic external fun boltffi_init_class_xybrid_bolt_xybrid_pipeline_from_yaml(yaml: java.nio.ByteBuffer, __boltffi_yaml_len: Int): Long
+    @JvmStatic external fun boltffi_init_class_xybrid_bolt_xybrid_pipeline_from_file(path: java.nio.ByteBuffer, __boltffi_path_len: Int): Long
+    @JvmStatic external fun boltffi_init_class_xybrid_bolt_xybrid_pipeline_from_bundle(path: java.nio.ByteBuffer, __boltffi_path_len: Int): Long
+    @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_pipeline_run(`receiver`: Long, envelope: java.nio.ByteBuffer, __boltffi_envelope_len: Int): ByteArray?
+    @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_pipeline_name(`receiver`: Long): ByteArray?
+    @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_pipeline_stage_names(`receiver`: Long): ByteArray?
+    @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_pipeline_stage_count(`receiver`: Long): Int
     @JvmStatic external fun boltffi_release_class_xybrid_bolt_xybrid_conversation_context(handle: Long): Unit
     @JvmStatic external fun boltffi_init_class_xybrid_bolt_xybrid_conversation_context_new(): Long
     @JvmStatic external fun boltffi_init_class_xybrid_bolt_xybrid_conversation_context_with_id(id: java.nio.ByteBuffer, __boltffi_id_len: Int): Long
@@ -3184,6 +3192,109 @@ class XybridModel internal constructor(internal val handle: Long) : AutoCloseabl
 
     fun unload() {
         try { Native.boltffi_method_class_xybrid_bolt_xybrid_model_unload(this.boltffiHandle()) } catch (__boltffi_error: BoltFfiErrorBufferException) { run { val __boltffi_error_reader = WireReader(__boltffi_error.bytes); throw XybridError.fromReader(__boltffi_error_reader) } }
+    }
+}
+
+class XybridPipeline internal constructor(internal val handle: Long) : AutoCloseable {
+    private val __boltffi_closed = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    override fun close() {
+        if (__boltffi_closed.compareAndSet(false, true)) {
+            Native.boltffi_release_class_xybrid_bolt_xybrid_pipeline(handle)
+        }
+    }
+
+    internal fun boltffiHandle(): Long {
+        check(!__boltffi_closed.get()) { "XybridPipeline is closed" }
+        return handle
+    }
+
+    /**
+     * Parse and load a pipeline from YAML content.
+     */
+    constructor(yaml: String) : this(fromYaml(yaml).handle)
+
+    companion object {
+        /**
+         * Parse and load a pipeline from YAML content.
+         */
+        fun fromYaml(yaml: String): XybridPipeline {
+            val __boltffi_yaml_wire = WireWriterPool.acquire(4 + Utf8Codec.maxBytes(yaml))
+            val __boltffi_yaml_writer = __boltffi_yaml_wire.writer
+            __boltffi_yaml_writer.writeString(yaml)
+            try {
+                return XybridPipeline(try { Native.boltffi_init_class_xybrid_bolt_xybrid_pipeline_from_yaml(__boltffi_yaml_wire.directBuffer(), __boltffi_yaml_wire.size()) } catch (__boltffi_error: BoltFfiErrorBufferException) { run { val __boltffi_error_reader = WireReader(__boltffi_error.bytes); throw XybridError.fromReader(__boltffi_error_reader) } })
+            } finally {
+                __boltffi_yaml_wire.close()
+            }
+        }
+        /**
+         * Read, parse, and load a pipeline from a YAML file.
+         */
+        fun fromFile(path: String): XybridPipeline {
+            val __boltffi_path_wire = WireWriterPool.acquire(4 + Utf8Codec.maxBytes(path))
+            val __boltffi_path_writer = __boltffi_path_wire.writer
+            __boltffi_path_writer.writeString(path)
+            try {
+                return XybridPipeline(try { Native.boltffi_init_class_xybrid_bolt_xybrid_pipeline_from_file(__boltffi_path_wire.directBuffer(), __boltffi_path_wire.size()) } catch (__boltffi_error: BoltFfiErrorBufferException) { run { val __boltffi_error_reader = WireReader(__boltffi_error.bytes); throw XybridError.fromReader(__boltffi_error_reader) } })
+            } finally {
+                __boltffi_path_wire.close()
+            }
+        }
+        /**
+         * Load a pipeline bundle.
+         */
+        fun fromBundle(path: String): XybridPipeline {
+            val __boltffi_path_wire = WireWriterPool.acquire(4 + Utf8Codec.maxBytes(path))
+            val __boltffi_path_writer = __boltffi_path_wire.writer
+            __boltffi_path_writer.writeString(path)
+            try {
+                return XybridPipeline(try { Native.boltffi_init_class_xybrid_bolt_xybrid_pipeline_from_bundle(__boltffi_path_wire.directBuffer(), __boltffi_path_wire.size()) } catch (__boltffi_error: BoltFfiErrorBufferException) { run { val __boltffi_error_reader = WireReader(__boltffi_error.bytes); throw XybridError.fromReader(__boltffi_error_reader) } })
+            } finally {
+                __boltffi_path_wire.close()
+            }
+        }
+    }
+
+    /**
+     * Execute the pipeline and return the final stage's output.
+     */
+    fun run(envelope: XybridEnvelope): XybridResult {
+        val __boltffi_envelope_wire = WireWriterPool.acquire(envelope.wireSize())
+        val __boltffi_envelope_writer = __boltffi_envelope_wire.writer
+        envelope.writeTo(__boltffi_envelope_writer)
+        try {
+            val __boltffi_result = try { Native.boltffi_method_class_xybrid_bolt_xybrid_pipeline_run(this.boltffiHandle(), __boltffi_envelope_wire.directBuffer(), __boltffi_envelope_wire.size()) } catch (__boltffi_error: BoltFfiErrorBufferException) { run { val __boltffi_error_reader = WireReader(__boltffi_error.bytes); throw XybridError.fromReader(__boltffi_error_reader) } } ?: throw IllegalStateException("null buffer returned")
+            val __boltffi_reader = WireReader(__boltffi_result)
+            return XybridResult.fromReader(__boltffi_reader)
+        } finally {
+            __boltffi_envelope_wire.close()
+        }
+    }
+
+    /**
+     * Pipeline name from the YAML definition, if present.
+     */
+    fun name(): String? {
+        val __boltffi_result = Native.boltffi_method_class_xybrid_bolt_xybrid_pipeline_name(this.boltffiHandle()) ?: throw IllegalStateException("null buffer returned")
+        val __boltffi_reader = WireReader(__boltffi_result)
+        return __boltffi_reader.readOptionalValue({ __boltffi_reader -> __boltffi_reader.readString() })
+    }
+
+    /**
+     * Stage identifiers in execution order.
+     */
+    fun stageNames(): List<String> {
+        val __boltffi_result = Native.boltffi_method_class_xybrid_bolt_xybrid_pipeline_stage_names(this.boltffiHandle()) ?: throw IllegalStateException("null buffer returned")
+        val __boltffi_reader = WireReader(__boltffi_result)
+        return __boltffi_reader.readSequence({ __boltffi_reader -> __boltffi_reader.readString() })
+    }
+
+    /**
+     * Number of stages in the pipeline.
+     */
+    fun stageCount(): UInt {
+        return Native.boltffi_method_class_xybrid_bolt_xybrid_pipeline_stage_count(this.boltffiHandle()).toUInt()
     }
 }
 

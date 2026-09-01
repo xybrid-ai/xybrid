@@ -257,17 +257,20 @@ final result = await pipeline.run(XybridEnvelope.audio(bytes: audioBytes, sample
 
 **Kotlin:**
 ```kotlin
-// Multi-model pipeline (MMP) support coming soon — use single model loading for now
+val pipeline = XybridPipeline.fromYamlAsync(yamlString)
+val result = pipeline.runAsync(inputEnvelope)
 ```
 
 **Swift:**
 ```swift
-// Multi-model pipeline (MMP) support coming soon — use single model loading for now
+let pipeline = try await XybridPipeline.fromYamlAsync(yamlString)
+let result = try await pipeline.runAsync(envelope: inputEnvelope)
 ```
 
 **Unity (C#):**
 ```csharp
-// Multi-model pipeline (MMP) support coming soon — use single model loading for now
+using var pipeline = Pipeline.FromYaml(yamlString);
+InferenceResult result = pipeline.Run(inputEnvelope);
 ```
 
 **Rust:**
@@ -383,7 +386,7 @@ See the [model metadata docs](docs/sdk/API_REFERENCE.md) for the full schema, or
 | Model Download & Caching | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Hardware Acceleration | Metal, ANE | CPU | Metal, ANE | CPU, opt-in Vulkan | CPU |
 
-**SDK MMP support:** Flutter ✅ · Rust ✅ · Kotlin 🔜 · Swift 🔜 · Unity 🔜
+**SDK MMP support:** Flutter ✅ · Rust ✅ · Kotlin ✅ · Swift ✅ · Unity ✅
 
 **Tool calling:** local models call functions you define — your tools are plain
 data and the loop is your code. See the

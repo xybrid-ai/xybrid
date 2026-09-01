@@ -803,6 +803,34 @@ class XybridModelDownloadProgressSubscription:
 
 
 
+class XybridPipeline:
+    _handle: int
+
+    def __init__(self) -> None: ...
+
+    @classmethod
+    def _from_handle(cls, handle: int) -> "XybridPipeline": ...
+    def __del__(self) -> None: ...
+    @classmethod
+    def from_yaml(cls, yaml: str) -> "XybridPipeline":
+        """Parse and load a pipeline from YAML content."""
+    @classmethod
+    def from_file(cls, path: str) -> "XybridPipeline":
+        """Read, parse, and load a pipeline from a YAML file."""
+    @classmethod
+    def from_bundle(cls, path: str) -> "XybridPipeline":
+        """Load a pipeline bundle."""
+    def run(self, envelope: XybridEnvelope) -> XybridResult:
+        """Execute the pipeline and return the final stage's output."""
+    def name(self) -> str | None:
+        """Pipeline name from the YAML definition, if present."""
+    def stage_names(self) -> list[str]:
+        """Stage identifiers in execution order."""
+    def stage_count(self) -> int:
+        """Number of stages in the pipeline."""
+
+
+
 class XybridConversationContext:
     _handle: int
 

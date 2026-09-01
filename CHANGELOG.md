@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Multi-stage pipelines now reach every native SDK.** Swift, Kotlin, and
+  Unity can construct pipelines from YAML, files, or bundles, inspect stage
+  identifiers, and execute them through the shared BoltFFI handle. Pipeline
+  results preserve final-stage provenance and per-stage latency metrics; Swift
+  and Kotlin include off-UI-thread async conveniences (#502).
+
 - **Live ASR on Swift, Kotlin and Unity.** Those SDKs could transcribe a
   finished buffer but had no live-capture surface at all — only Flutter did.
   `model.stream(config)` now opens a session: feed microphone PCM in, read
@@ -52,6 +58,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   file-count based (the Hub gives no sizes up front, so `total_bytes` is null),
   but `downloaded_bytes` is now exact.
 - **`fetch_extracted` resolves once**, not twice, for bundle models.
+- Pipeline stage latency IDs now use the YAML stage identifier rather than the
+  underlying model ID, and Flutter no longer misreports `cloud:<provider>` or
+  `server:<endpoint>` final stages as local execution (#502).
 
 ### Changed
 

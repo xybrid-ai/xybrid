@@ -4,7 +4,14 @@ use std::sync::Arc;
 use xybrid_sdk::{Pipeline, PipelineRef};
 
 use super::envelope::FfiEnvelope;
-use super::result::FfiResult;
+use super::result::{FfiExecutionTarget, FfiResult};
+
+fn final_execution_target(target: Option<&str>) -> FfiExecutionTarget {
+    match target {
+        Some("device" | "local") | None => FfiExecutionTarget::Local,
+        Some(_) => FfiExecutionTarget::Cloud,
+    }
+}
 
 /// FFI wrapper for a loaded Pipeline ready for execution.
 #[frb(opaque)]
@@ -82,15 +89,13 @@ impl FfiPipeline {
             // envelope carries no `execution_target` key on this path, since
             // pipeline stages do not go through `InferenceResult`.
             //
-            // `ResolvedTarget` stringifies as "local" / "cloud" /
-            // "fallback:<endpoint>" — the last being a xybrid-hosted server, so
-            // it is remote too and must not be reported as on-device.
-            execution_target: match result.stages.last().map(|stage| stage.target.as_str()) {
-                Some(target) if target == "cloud" || target.starts_with("fallback:") => {
-                    crate::api::result::FfiExecutionTarget::Cloud
-                }
-                _ => crate::api::result::FfiExecutionTarget::Local,
-            },
+            // The pipeline runner emits `device`, `cloud:<provider>`, or
+            // `server:<endpoint>`. Older fast paths used `local` and
+            // `fallback:<endpoint>`. Only the explicitly local spellings may
+            // be reported as on-device; unknown targets fail closed to cloud.
+            execution_target: final_execution_target(
+                result.stages.last().map(|stage| stage.target.as_str()),
+            ),
             metrics: crate::api::result::FfiInferenceMetrics::from_core(&metrics),
             // Pipelines don't offer tools, so a pipeline run never produces
             // tool calls.
@@ -114,5 +119,26 @@ impl FfiPipeline {
     #[frb(sync)]
     pub fn stage_count(&self) -> usize {
         self.0.stage_count()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn final_stage_provenance_recognizes_current_runner_targets() {
+        assert_eq!(
+            final_execution_target(Some("device")),
+            FfiExecutionTarget::Local
+        );
+        assert_eq!(
+            final_execution_target(Some("cloud:openai")),
+            FfiExecutionTarget::Cloud
+        );
+        assert_eq!(
+            final_execution_target(Some("server:https://example.test")),
+            FfiExecutionTarget::Cloud
+        );
     }
 }

@@ -453,6 +453,13 @@ def _boltffi_read_f45d365d172a914e(data: bytes):
 _native._register_wire_codec("read_f45d365d172a914e", _boltffi_read_f45d365d172a914e)
 
 
+def _boltffi_read_88fe13077020b58c(data: bytes):
+    return _boltffi_read_wire(data, lambda reader: reader.sequence(lambda: reader.string()))
+
+
+_native._register_wire_codec("read_88fe13077020b58c", _boltffi_read_88fe13077020b58c)
+
+
 def _boltffi_read_0d42d278c66eef7b(data: bytes):
     return _boltffi_read_wire(data, lambda reader: reader.sequence(lambda: XybridEnvelope._boltffi_from_reader(reader)))
 
@@ -529,6 +536,13 @@ def _boltffi_write_360ec15d925d8351(options) -> bytes:
 
 
 _native._register_wire_codec("write_360ec15d925d8351", _boltffi_write_360ec15d925d8351)
+
+
+def _boltffi_write_ab1ae15bdd9d5612(yaml) -> bytes:
+    return _boltffi_wire_string(yaml)
+
+
+_native._register_wire_codec("write_ab1ae15bdd9d5612", _boltffi_write_ab1ae15bdd9d5612)
 
 
 def _boltffi_write_45cfac4c89613282(api_key) -> bytes:
@@ -2639,6 +2653,59 @@ class XybridModelDownloadProgressSubscription:
 
 
 
+class XybridPipeline:
+    __slots__ = ("_handle",)
+
+
+    def __init__(self) -> None:
+        raise TypeError("XybridPipeline cannot be constructed directly")
+
+
+    @classmethod
+    def _from_handle(cls, handle: int) -> "XybridPipeline":
+        value = cls.__new__(cls)
+        value._handle = handle
+        return value
+
+    def __del__(self) -> None:
+        handle = getattr(self, "_handle", None)
+        if handle is not None:
+            self._handle = None
+            _native._boltffi_xybrid_pipeline_release(handle)
+
+    @classmethod
+    def from_yaml(cls, yaml: str) -> "XybridPipeline":
+        """Parse and load a pipeline from YAML content."""
+        return XybridPipeline._from_handle(_boltffi_call(_boltffi_read_09404a3c98b3f16c, lambda: _native._boltffi_xybrid_pipeline_from_yaml(yaml)))
+
+    @classmethod
+    def from_file(cls, path: str) -> "XybridPipeline":
+        """Read, parse, and load a pipeline from a YAML file."""
+        return XybridPipeline._from_handle(_boltffi_call(_boltffi_read_09404a3c98b3f16c, lambda: _native._boltffi_xybrid_pipeline_from_file(path)))
+
+    @classmethod
+    def from_bundle(cls, path: str) -> "XybridPipeline":
+        """Load a pipeline bundle."""
+        return XybridPipeline._from_handle(_boltffi_call(_boltffi_read_09404a3c98b3f16c, lambda: _native._boltffi_xybrid_pipeline_from_bundle(path)))
+
+    def run(self, envelope: XybridEnvelope) -> XybridResult:
+        """Execute the pipeline and return the final stage's output."""
+        return _boltffi_read_wire(_boltffi_call(_boltffi_read_09404a3c98b3f16c, lambda: _native._boltffi_xybrid_pipeline_run(self._handle, envelope._boltffi_wire())), lambda reader: XybridResult._boltffi_from_reader(reader))
+
+    def name(self) -> str | None:
+        """Pipeline name from the YAML definition, if present."""
+        return _boltffi_read_wire(_native._boltffi_xybrid_pipeline_name(self._handle), lambda reader: reader.optional(lambda: reader.string()))
+
+    def stage_names(self) -> list[str]:
+        """Stage identifiers in execution order."""
+        return _boltffi_read_wire(_native._boltffi_xybrid_pipeline_stage_names(self._handle), lambda reader: reader.sequence(lambda: reader.string()))
+
+    def stage_count(self) -> int:
+        """Number of stages in the pipeline."""
+        return _native._boltffi_xybrid_pipeline_stage_count(self._handle)
+
+
+
 class XybridConversationContext:
     __slots__ = ("_handle",)
 
@@ -3015,6 +3082,7 @@ __all__ = [
     "XybridCancellationToken",
     "XybridModel",
     "XybridModelDownloadProgressSubscription",
+    "XybridPipeline",
     "XybridConversationContext",
     "XybridTelemetryConfig",
     "XybridBundle",
