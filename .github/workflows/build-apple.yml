@@ -63,7 +63,9 @@ env:
 jobs:
   build-xcframework:
     name: Build XCFramework
-    runs-on: macos-14
+    # macos-26 (Xcode 26.6 default, iOS 26.5 simulator runtime) — the simulator
+    # test step below needs a bootable device, and macos-14 is on its way out.
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
@@ -156,6 +158,34 @@ jobs:
           xcodebuild build \
             -scheme Xybrid \
             -destination 'generic/platform=iOS Simulator' \
+            -skipPackagePluginValidation \
+            CODE_SIGNING_ALLOWED=NO
+
+      - name: Run Swift unit tests (iOS Simulator)
+        # The generic build above compiles + links the wrapper but cannot
+        # execute anything: `generic/platform=iOS Simulator` has no bootable
+        # device, so XybridTests never runs there. A concrete simulator
+        # destination compiles the test bundle and runs it on a booted device.
+        # Package.swift is already flipped to the locally built xcframework by
+        # the previous step, so this links the G4 simulator slice just built.
+        #
+        # iPhone 17 on iOS 26.5 is what the macos-26 image ships for the
+        # default Xcode (26.6); there is no "iPhone 16" simulator on that image
+        # (only iPhone 16e, and only under the iOS 26.2 runtime). DEVELOPER_DIR
+        # pins the Xcode whose bundled runtime the OS= below refers to. When
+        # the image rolls forward, bump both together (see
+        # actions/runner-images macos-26-Readme.md, "Installed Simulators").
+        #
+        # The timeout stops a simulator boot hang or a test deadlock from
+        # holding the runner for the job's full 6h default.
+        timeout-minutes: 10
+        env:
+          DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+        run: |
+          set -euo pipefail
+          xcodebuild test \
+            -scheme Xybrid \
+            -destination 'platform=iOS Simulator,name=iPhone 17,OS=26.5' \
             -skipPackagePluginValidation \
             CODE_SIGNING_ALLOWED=NO
 
