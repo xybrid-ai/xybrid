@@ -20,6 +20,8 @@ on:
       - 'vendor/whisper-cpp'
       - 'Cargo.lock'
       - '.github/workflows/test-whispercpp.yml'
+      # Markdown inside any path above cannot affect this build.
+      - "!**.md"
   pull_request:
     branches: [master]
     paths:
@@ -36,6 +38,8 @@ on:
       - 'vendor/whisper-cpp'
       - 'Cargo.lock'
       - '.github/workflows/test-whispercpp.yml'
+      # Markdown inside any path above cannot affect this build.
+      - "!**.md"
   workflow_dispatch:
 
 concurrency:

@@ -3,10 +3,18 @@
 //! One `run` is always one model turn. When an input envelope carries tool
 //! results (see [`Envelope::tool_results`]), the executor replays the prior
 //! assistant turn plus the results as a raw, protocol-faithful continuation
-//! prompt through the backend's `generate_raw` path. The helpers here are
-//! pure orchestration glue shared by the text path (`execute_llm`) and the
-//! text-only vision-language path; the protocol text itself (composition,
-//! parsing, turn markers) is owned by `runtime_adapter::tool_call`.
+//! prompt through the backend's `generate_raw` / `generate_raw_streaming`
+//! path. The helpers here are pure orchestration glue shared by every LLM
+//! path that can compose one — plain text, conversation context, streaming,
+//! streaming-with-context, and the text-only vision-language variants; the
+//! protocol text itself (composition, parsing, turn markers) is owned by
+//! `runtime_adapter::tool_call`.
+//!
+//! The one shape that stays closed is a conversation whose replayed turns
+//! contain images: `generate_raw` is a text-only surface, so those image
+//! embeddings cannot be re-evaluated from the composed prompt. That is a
+//! property of the replay mechanism, not an unfinished path — see
+//! [`text_messages_from_multimodal`].
 
 use crate::ir::Envelope;
 use crate::runtime_adapter::llm::GenerationOutput;
@@ -20,6 +28,7 @@ use crate::runtime_adapter::tool_call::{
 };
 use crate::runtime_adapter::{
     AdapterError, ChatMessage, GenerationConfig, LlmBackend, MultimodalChatMessage,
+    StreamingCallback,
 };
 
 use super::types::ExecutorResult;
@@ -47,6 +56,44 @@ pub(crate) fn run_tool_continuation(
     input: &Envelope,
     responses_json: &str,
 ) -> ExecutorResult<GenerationOutput> {
+    let (prompt, raw_config) =
+        compose_continuation_prompt(backend, messages, gen_config, input, responses_json)?;
+    let out = backend.generate_raw(&prompt, &raw_config)?;
+    Ok(finish_continuation_output(out))
+}
+
+/// Streaming sibling of [`run_tool_continuation`].
+///
+/// Composes the identical prompt and runs it through the backend's
+/// `generate_raw_streaming`, so a continuation turn emits tokens as it
+/// generates instead of arriving as one block. The emitted stream is already
+/// filtered (reasoning and tool-protocol blocks suppressed) by the backend's
+/// streaming filter; the returned output gets the same final cleanup as the
+/// batch path so envelope and stream agree.
+pub(crate) fn run_tool_continuation_streaming(
+    backend: &dyn LlmBackend,
+    messages: &[ChatMessage],
+    gen_config: &GenerationConfig,
+    input: &Envelope,
+    responses_json: &str,
+    on_token: StreamingCallback<'_>,
+) -> ExecutorResult<GenerationOutput> {
+    let (prompt, raw_config) =
+        compose_continuation_prompt(backend, messages, gen_config, input, responses_json)?;
+    let out = backend.generate_raw_streaming(&prompt, &raw_config, on_token)?;
+    Ok(finish_continuation_output(out))
+}
+
+/// Render the chat prefix, append the replayed assistant turn plus the tool
+/// responses in the model's own protocol, and return the composed raw prompt
+/// alongside the generation config to run it with.
+fn compose_continuation_prompt(
+    backend: &dyn LlmBackend,
+    messages: &[ChatMessage],
+    gen_config: &GenerationConfig,
+    input: &Envelope,
+    responses_json: &str,
+) -> ExecutorResult<(String, GenerationConfig)> {
     let prior_text = input
         .metadata
         .get(Envelope::TOOL_PRIOR_TEXT_METADATA_KEY)
@@ -71,7 +118,11 @@ pub(crate) fn run_tool_continuation(
             raw_config.stop_sequences.push((*stop).to_string());
         }
     }
-    let mut out = backend.generate_raw(&prompt, &raw_config)?;
+    Ok((prompt, raw_config))
+}
+
+/// Final cleanup shared by the batch and streaming continuation paths.
+fn finish_continuation_output(mut out: GenerationOutput) -> GenerationOutput {
     // The raw path keeps stop-marker text in the output (the chat path
     // truncates it). Cut it so the answer is clean and a further
     // continuation doesn't double the turn marker.
@@ -84,7 +135,7 @@ pub(crate) fn run_tool_continuation(
         out.text = clean;
         out.reasoning_content = reasoning.or(out.reasoning_content);
     }
-    Ok(out)
+    out
 }
 
 /// Flatten backend-neutral multimodal messages to plain text chat messages
@@ -104,8 +155,12 @@ pub(crate) fn text_messages_from_multimodal(
                     Some(text) => content.push_str(text),
                     None => {
                         return Err(AdapterError::InvalidInput(
-                            "tool-result continuation requires a text-only conversation; \
-                             image inputs cannot replay through the raw continuation path"
+                            "tool-result continuation requires a text-only conversation. \
+                             A continuation replays the prior turns as a composed text \
+                             prompt, and image embeddings cannot be re-evaluated from \
+                             text — so an image-bearing conversation cannot continue on \
+                             any path, streaming or not. Run the tool loop on a text-only \
+                             conversation, or describe the image in text first."
                                 .to_string(),
                         ))
                     }
@@ -119,33 +174,46 @@ pub(crate) fn text_messages_from_multimodal(
         .collect()
 }
 
-/// Reject tool-result continuation envelopes on paths that do not compose
-/// the raw continuation prompt. Without this guard those paths would treat
-/// the envelope as a fresh first turn — silently dropping the prior
-/// assistant turn and the tool results — and produce a plausible but wrong
-/// answer. v1 supports continuation on the non-streaming, **non-context**
-/// paths only (plain text, and text-only vision-language turns); streaming
-/// and conversation-context paths all reject.
-pub(crate) fn reject_tool_continuation_input(
-    input: &Envelope,
-    path: &str,
-) -> Result<(), AdapterError> {
-    if carries_tool_continuation(input) {
-        return Err(AdapterError::InvalidInput(format!(
-            "tool-result continuation envelopes are not supported on the {path} path; \
-             run the continuation turn through the non-streaming text path"
-        )));
-    }
-    Ok(())
+/// The tool-result payload carried by a continuation envelope, resolved once
+/// at the executor's entry point and threaded down to whichever
+/// message-based execution function ends up running the turn.
+///
+/// Those functions never see the envelope itself, so without this the
+/// continuation metadata would be silently dropped and the turn would run as
+/// a fresh question — a plausible but ungrounded answer.
+#[derive(Clone, Copy)]
+pub(crate) struct ToolContinuation<'a> {
+    /// The continuation envelope, for `tool_prior_text` and turn replay.
+    pub input: &'a Envelope,
+    /// Serialized tool responses (`Envelope::TOOL_RESPONSES_METADATA_KEY`).
+    pub responses_json: &'a str,
 }
 
-/// Like [`reject_tool_continuation_input`], but ignores the outer envelope's
-/// own metadata. For paths that intercept outer continuations themselves
-/// (the batch vision-language path routes them to
-/// `execute_vlm_tool_continuation`) yet must still refuse continuation
-/// metadata buried inside `MultiPart` parts — the multimodal conversion
-/// discards part metadata, so a nested continuation would silently lose its
-/// tool results.
+impl<'a> ToolContinuation<'a> {
+    /// Resolve the continuation payload from `input`, or `None` when the
+    /// envelope is an ordinary first-turn request.
+    ///
+    /// Only the envelope's own metadata is inspected. Continuation metadata
+    /// buried inside a `MultiPart` part is a different shape and is refused
+    /// by [`reject_nested_tool_continuation_parts`], because the multimodal
+    /// conversion discards part metadata.
+    pub fn from_input(input: &'a Envelope) -> Option<Self> {
+        input
+            .metadata
+            .get(Envelope::TOOL_RESPONSES_METADATA_KEY)
+            .map(|responses_json| Self {
+                input,
+                responses_json,
+            })
+    }
+}
+
+/// Refuse continuation metadata buried inside `MultiPart` parts.
+///
+/// Outer continuations are composed by every LLM path now; a *nested* one is
+/// not a supported envelope shape, and the multimodal conversion discards
+/// part metadata, so a nested continuation would silently lose its tool
+/// results. Fail loudly instead.
 pub(crate) fn reject_nested_tool_continuation_parts(
     input: &Envelope,
     path: &str,
@@ -153,17 +221,17 @@ pub(crate) fn reject_nested_tool_continuation_parts(
     if let crate::ir::EnvelopeKind::MultiPart(parts) = &input.kind {
         if parts.iter().any(carries_tool_continuation) {
             return Err(AdapterError::InvalidInput(format!(
-                "tool-result continuation envelopes are not supported on the {path} path; \
-                 run the continuation turn through the non-streaming text path"
+                "tool-result continuation metadata inside a MultiPart part is not a supported \
+                 envelope shape on the {path} path; build the turn with Envelope::tool_results \
+                 so the continuation rides the envelope itself"
             )));
         }
     }
     Ok(())
 }
 
-/// Continuation metadata can ride the envelope itself or any nested
-/// `MultiPart` part; flattening a nested part would silently drop its
-/// tool results, so the guard must see through the whole tree.
+/// Whether `input` (or any nested `MultiPart` part) carries continuation
+/// metadata.
 fn carries_tool_continuation(input: &Envelope) -> bool {
     if input
         .metadata

@@ -1380,10 +1380,12 @@ data class XybridStreamToken(
     val tokenId: Long?,
     val index: ULong,
     val cumulativeText: String,
-    val finishReason: String?
+    val finishReason: String?,
+    val toolCalls: List<XybridToolCall>,
+    val rawText: String?
 ) {
     internal fun wireSize(): Int {
-        return 4 + Utf8Codec.maxBytes(this.token) + 1 + (this.tokenId?.let { __boltffi_value_0 -> 8 } ?: 0) + 8 + 4 + Utf8Codec.maxBytes(this.cumulativeText) + 1 + (this.finishReason?.let { __boltffi_value_0 -> 4 + Utf8Codec.maxBytes(__boltffi_value_0) } ?: 0)
+        return 4 + Utf8Codec.maxBytes(this.token) + 1 + (this.tokenId?.let { __boltffi_value_0 -> 8 } ?: 0) + 8 + 4 + Utf8Codec.maxBytes(this.cumulativeText) + 1 + (this.finishReason?.let { __boltffi_value_0 -> 4 + Utf8Codec.maxBytes(__boltffi_value_0) } ?: 0) + 4 + this.toolCalls.sumOf { __boltffi_value_0 -> (__boltffi_value_0.wireSize()).toInt() } + 1 + (this.rawText?.let { __boltffi_value_0 -> 4 + Utf8Codec.maxBytes(__boltffi_value_0) } ?: 0)
     }
 
     internal fun writeTo(writer: WireWriter) {
@@ -1392,6 +1394,8 @@ data class XybridStreamToken(
         writer.writeU64(this.index)
         writer.writeString(this.cumulativeText)
         writer.writeOptionalValue(this.finishReason, { writer, __boltffi_value_0 -> writer.writeString(__boltffi_value_0) })
+        writer.writeSequence(this.toolCalls, this.toolCalls.size, { writer, __boltffi_value_0 -> __boltffi_value_0.writeTo(writer) })
+        writer.writeOptionalValue(this.rawText, { writer, __boltffi_value_0 -> writer.writeString(__boltffi_value_0) })
     }
 
     internal fun toByteArray(): ByteArray {
@@ -1412,6 +1416,8 @@ data class XybridStreamToken(
                 reader.readOptionalValue({ reader -> reader.readI64() }),
                 reader.readU64(),
                 reader.readString(),
+                reader.readOptionalValue({ reader -> reader.readString() }),
+                reader.readSequence({ reader -> XybridToolCall.fromReader(reader) }),
                 reader.readOptionalValue({ reader -> reader.readString() })
             )
         }

@@ -8,6 +8,7 @@
 
 use crate::cache::layout::CacheLayout;
 use crate::cache::CacheManager;
+use crate::model_registry::AutoReleasePolicy;
 use crate::registry_client::RegistryClient;
 use crate::result::{InferenceResult, OutputType};
 use crate::run_options::{
@@ -17,7 +18,7 @@ use crate::source::{detect_platform, ModelSource};
 use crate::stream::XybridStream;
 use std::path::{Component, Path, PathBuf};
 use std::pin::Pin;
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
 use std::time::{Duration, Instant};
 use tempfile::TempDir;
@@ -33,7 +34,10 @@ use xybrid_core::orchestrator::authority::{
 };
 use xybrid_core::orchestrator::routing_engine::LocalReliabilityHint;
 use xybrid_core::runtime_adapter::types::GenerationConfig;
-use xybrid_core::runtime_adapter::{CloudRuntimeAdapter, CloudStreaming, RuntimeAdapter};
+use xybrid_core::runtime_adapter::{
+    encode_stop_sequences, CloudRuntimeAdapter, CloudStreaming, RuntimeAdapter,
+    STOP_SEQUENCES_METADATA_KEY,
+};
 use xybrid_core::streaming::{StreamConfig as CoreStreamConfig, VadStreamConfig as CoreVadConfig};
 
 /// A token generated during streaming inference.
@@ -49,8 +53,23 @@ pub struct StreamToken {
     pub index: usize,
     /// All text generated so far (cumulative)
     pub cumulative_text: String,
-    /// Reason for stopping (only set on the final token)
+    /// Reason for stopping (only set on the final token). `"tool_calls"` when
+    /// the turn ended on a parseable tool-call block.
     pub finish_reason: Option<String>,
+    /// Tool calls parsed from the completed turn, on the **terminal** token
+    /// only (see [`xybrid_core::runtime_adapter::types::PartialToken::tool_calls`]).
+    ///
+    /// A streaming caller dispatches on this instead of parsing raw text:
+    /// tool-call blocks are suppressed from the emitted stream, so they never
+    /// reach the callback. Empty on mid-stream tokens and on turns that
+    /// emitted no call.
+    pub tool_calls: Vec<xybrid_core::gateway::ToolCall>,
+    /// The completed turn's raw output text, tool-call block included —
+    /// exactly what `Envelope::tool_results` wants as `prior_assistant_text`.
+    /// `Some` only alongside a non-empty [`Self::tool_calls`], because
+    /// `cumulative_text` reports the *emitted* text with protocol blocks
+    /// suppressed. This is what makes the streaming tool loop closable.
+    pub raw_text: Option<String>,
 }
 
 /// Events emitted during streaming inference.
@@ -496,6 +515,12 @@ fn local_reliability_hint_after_abort(
 /// would silently drop `GenerationConfig::tools`. On any other shape the
 /// original result is returned unchanged.
 ///
+/// `generation_config` is the caller's [`RunOptions::generation_config`]. It
+/// serves two purposes on the cloud leg: its `tools` gate the tool refusal
+/// below, and [`apply_generation_config_metadata`] copies its sampling knobs
+/// onto the cloud envelope so the gateway honours them instead of falling back
+/// to its own defaults.
+///
 /// `cancellation_token`, when set, makes the cloud retry leg honour
 /// caller-driven cancellation. The cloud leg cannot meaningfully react to
 /// resource pressure on the device, so only `UserCancelled` is consulted —
@@ -517,7 +542,7 @@ fn dispatch_after_local<F, S>(
     policy_metrics: xybrid_core::context::DeviceMetrics,
     signal_context: Option<SignalContext>,
     cancellation_token: Option<CancellationToken>,
-    tools_requested: bool,
+    generation_config: Option<&GenerationConfig>,
     on_token: &mut F,
     on_seam: &mut S,
 ) -> SdkResult<InferenceResult>
@@ -528,6 +553,7 @@ where
         + Send,
     S: FnMut(SeamInfo) + Send,
 {
+    let tools_requested = generation_config.is_some_and(|config| !config.tools.is_empty());
     match local_result {
         Ok(result) => Ok(result),
         Err(SdkError::AbortedForCloudFallback { reason }) => {
@@ -562,6 +588,10 @@ where
 
             // FR-6: reuse the original prompt; no partial-token reuse.
             let mut cloud_envelope = envelope.clone();
+            // The cloud adapter reads its request settings off metadata alone,
+            // so the caller's sampling config has to be projected onto the
+            // envelope here or the gateway silently answers with its defaults.
+            apply_generation_config_metadata(&mut cloud_envelope, generation_config);
             // Default the cloud-leg routing to the registry model when the caller
             // didn't pick an explicit hosted override: the platform gateway routes
             // an id it doesn't recognise as a hosted provider's model through to
@@ -842,19 +872,100 @@ impl StreamConfig {
     }
 }
 
+/// Lifecycle state of a loaded model's in-memory resources.
+///
+/// The distinction that matters is [`Evicted`](LoadState::Evicted) versus
+/// [`Unloaded`](LoadState::Unloaded): both have dropped the executor and freed
+/// the same memory, but only `Unloaded` was asked for by the app, so only
+/// `Unloaded` keeps erroring on use. An evicted model reloads itself.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LoadState {
+    /// Weights are in memory (or will be lazily materialized by the executor
+    /// on first execute, exactly as after a fresh load).
+    Loaded,
+    /// Automatically released to free memory. The next run reloads the model
+    /// from its cached directory transparently; callers see extra latency on
+    /// that one run and nothing else.
+    Evicted,
+    /// Released because the app called [`XybridModel::unload`]. Runs fail with
+    /// [`SdkError::NotLoaded`] until a new model is loaded.
+    Unloaded,
+}
+
 /// Internal handle holding the loaded model state.
-struct ModelHandle {
+pub(crate) struct ModelHandle {
     /// Template executor for running inference.
     ///
     /// Shared with streaming sessions created by `stream()` so they reuse
-    /// the loaded model instead of paying a fresh cold start.
+    /// the loaded model instead of paying a fresh cold start. That sharing is
+    /// why auto-release checks the `Arc`'s strong count before evicting — see
+    /// [`crate::model_registry::try_evict_handle`].
     executor: Arc<Mutex<TemplateExecutor>>,
     /// Model metadata
     metadata: ModelMetadata,
     /// Model directory path (permanent extraction in cache)
     model_dir: PathBuf,
-    /// Whether model is currently loaded
-    loaded: bool,
+    /// Where this model sits in the load/evict/unload lifecycle
+    pub(crate) state: LoadState,
+}
+
+impl ModelHandle {
+    /// Make this handle runnable, or explain why it isn't.
+    ///
+    /// An `Evicted` handle flips back to `Loaded` and falls through: its
+    /// executor was rebuilt with the model directory as base path, so the
+    /// executor's own lazy-load path materializes the adapter on the execute
+    /// that follows — the same code that runs on the first execute after a
+    /// fresh load.
+    ///
+    /// # Errors
+    /// [`SdkError::NotLoaded`] if the app unloaded this model.
+    fn ensure_runnable(&mut self) -> SdkResult<()> {
+        match self.state {
+            LoadState::Loaded => Ok(()),
+            LoadState::Evicted => {
+                log::info!(
+                    target: "xybrid_sdk",
+                    "Reloading auto-released model {}",
+                    self.metadata.model_id
+                );
+                self.state = LoadState::Loaded;
+                Ok(())
+            }
+            LoadState::Unloaded => Err(SdkError::NotLoaded),
+        }
+    }
+
+    /// Drop the in-memory execution resources but keep everything needed to
+    /// come back: metadata, the model directory, and an executor rooted at
+    /// that directory.
+    ///
+    /// The replacement executor is built exactly as [`ModelLoader::create_model_handle`]
+    /// builds it. `TemplateExecutor::default()` would *not* do — it has an
+    /// empty base path, and the reload would look for the weights in the
+    /// process working directory.
+    ///
+    /// Installs a *new* `Arc` rather than resetting the old one through its
+    /// mutex, matching [`XybridModel::unload`]. Resetting in place would pull
+    /// the loaded weights out from under any streaming session sharing this
+    /// executor; swapping the `Arc` cannot, because callers only reach this
+    /// through [`crate::model_registry::try_evict_handle`], which refuses to
+    /// evict a handle whose executor is still shared.
+    pub(crate) fn evict(&mut self) {
+        self.executor = Arc::new(Mutex::new(TemplateExecutor::with_base_path(
+            self.model_dir.to_str().unwrap_or("."),
+        )));
+        self.state = LoadState::Evicted;
+    }
+
+    /// Whether a streaming session still holds this handle's executor.
+    ///
+    /// `stream()` clones the executor `Arc` into the session, so a strong
+    /// count above one means live streaming work would keep the weights
+    /// resident no matter what this handle does.
+    pub(crate) fn executor_is_shared(&self) -> bool {
+        Arc::strong_count(&self.executor) > 1
+    }
 }
 
 /// Represents a model that can be loaded.
@@ -898,7 +1009,7 @@ const GGUF_PREFERENCE_ORDER: &[&str] = &[
 const VISION_PROJECTOR_PREFERENCE_ORDER: &[&str] =
     &["Q8_0", "Q6_K", "Q5_K_M", "Q4_K_M", "F16", "BF16"];
 
-fn is_gguf_companion(filename: &str) -> bool {
+pub(crate) fn is_gguf_companion(filename: &str) -> bool {
     let filename = filename.to_ascii_lowercase();
     filename.contains("mmproj") || filename.contains("drafter") || filename.contains("dspark")
 }
@@ -907,7 +1018,7 @@ fn is_gguf_vision_projector(filename: &str) -> bool {
     filename.to_ascii_lowercase().contains("mmproj")
 }
 
-fn select_vision_projector<'a>(gguf_files: &[&'a str]) -> Option<&'a str> {
+pub(crate) fn select_vision_projector<'a>(gguf_files: &[&'a str]) -> Option<&'a str> {
     for preference in VISION_PROJECTOR_PREFERENCE_ORDER {
         if let Some(projector) = gguf_files.iter().find(|filename| {
             is_gguf_vision_projector(filename) && filename.to_uppercase().contains(preference)
@@ -926,7 +1037,7 @@ fn select_vision_projector<'a>(gguf_files: &[&'a str]) -> Option<&'a str> {
 ///
 /// If `variant` is specified, finds a file containing that quantization string (case-insensitive).
 /// Otherwise, selects the file matching the highest-priority quantization from `GGUF_PREFERENCE_ORDER`.
-fn select_gguf_variant(gguf_files: &[&str], variant: Option<&str>) -> SdkResult<String> {
+pub(crate) fn select_gguf_variant(gguf_files: &[&str], variant: Option<&str>) -> SdkResult<String> {
     if let Some(v) = variant {
         let v_upper = v.to_uppercase();
         if let Some(found) = gguf_files
@@ -958,7 +1069,7 @@ fn select_gguf_variant(gguf_files: &[&str], variant: Option<&str>) -> SdkResult<
         .to_string())
 }
 
-fn select_huggingface_files_to_download<'a>(
+pub(crate) fn select_huggingface_files_to_download<'a>(
     repo: &str,
     all_filenames: &[&'a str],
     selected_gguf: Option<&str>,
@@ -1053,6 +1164,146 @@ fn huggingface_materialized_cache_dir(
     }
 }
 
+/// Fetch `filename -> blob hash` for every file of `repo` at `revision_sha`
+/// from the Hub's tree API — the LFS sha256 for large files, the git blob
+/// sha1 for the rest, matching how the shared hub cache names its blobs.
+///
+/// Best-effort: any failure returns `None` (with a debug log) and the caller
+/// downloads instead.
+#[cfg(feature = "huggingface")]
+fn fetch_huggingface_blob_ids(
+    repo: &str,
+    revision_sha: &str,
+) -> Option<std::collections::HashMap<String, String>> {
+    use std::io::Read;
+
+    let endpoint = std::env::var("HF_ENDPOINT")
+        .ok()
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "https://huggingface.co".to_string());
+    let url = format!(
+        "{}/api/models/{}/tree/{}?recursive=true",
+        endpoint.trim_end_matches('/'),
+        repo,
+        revision_sha
+    );
+    let mut request = ureq::get(&url);
+    if let Some(token) = huggingface_api_token() {
+        request = request.set("Authorization", &format!("Bearer {token}"));
+    }
+    let response = match request.call() {
+        Ok(response) => response,
+        Err(e) => {
+            log::debug!(
+                target: "xybrid_sdk",
+                "Failed to fetch file hashes for '{}'@{} ({}); skipping blob reuse",
+                repo, revision_sha, e
+            );
+            return None;
+        }
+    };
+    // Cap the read: a tree listing is small, and a huge response should not
+    // buffer unbounded.
+    let entries: Vec<serde_json::Value> =
+        match serde_json::from_reader(response.into_reader().take(8 * 1024 * 1024)) {
+            Ok(entries) => entries,
+            Err(e) => {
+                log::debug!(
+                    target: "xybrid_sdk",
+                    "Unparseable tree listing for '{}'@{} ({}); skipping blob reuse",
+                    repo, revision_sha, e
+                );
+                return None;
+            }
+        };
+    Some(blob_ids_from_tree_entries(&entries))
+}
+
+/// Extract `path -> blob hash` from Hub tree-API entries, preferring the LFS
+/// sha256 over the git blob sha1 (the shared cache names LFS blobs by
+/// sha256). Non-file entries are skipped.
+#[cfg(feature = "huggingface")]
+fn blob_ids_from_tree_entries(
+    entries: &[serde_json::Value],
+) -> std::collections::HashMap<String, String> {
+    entries
+        .iter()
+        .filter(|entry| entry.get("type").and_then(|t| t.as_str()) == Some("file"))
+        .filter_map(|entry| {
+            let path = entry.get("path").and_then(|p| p.as_str())?;
+            let oid = entry
+                .get("lfs")
+                .and_then(|lfs| lfs.get("oid"))
+                .and_then(|oid| oid.as_str())
+                .or_else(|| entry.get("oid").and_then(|oid| oid.as_str()))?;
+            Some((path.to_string(), oid.to_string()))
+        })
+        .collect()
+}
+
+/// Whether a Hub API failure warrants falling back to local caches: a
+/// transport-level failure (DNS, connection refused, timeout) or a
+/// server-side 5xx. Client errors (401/403/404 — bad repo, bad revision, bad
+/// auth) and malformed responses propagate instead, so a stale local copy
+/// never masks them.
+#[cfg(feature = "huggingface")]
+fn hub_error_is_connectivity(error: &hf_hub::api::sync::ApiError) -> bool {
+    match error {
+        // hf-hub's transport layer is ureq 3 (named here as `ureq3`; the
+        // SDK's own calls use ureq 2).
+        hf_hub::api::sync::ApiError::RequestError(request_error) => match request_error.as_ref() {
+            ureq3::Error::Io(_)
+            | ureq3::Error::Timeout(_)
+            | ureq3::Error::HostNotFound
+            | ureq3::Error::ConnectionFailed => true,
+            ureq3::Error::StatusCode(code) => *code >= 500,
+            _ => false,
+        },
+        _ => false,
+    }
+}
+
+/// The standard `HF_HUB_OFFLINE` switch: any value other than
+/// empty/`0`/`false` forces local-only loads, matching the rest of the
+/// Hugging Face ecosystem.
+#[cfg(feature = "huggingface")]
+fn huggingface_offline_mode() -> bool {
+    std::env::var("HF_HUB_OFFLINE").is_ok_and(|value| {
+        !value.is_empty() && value != "0" && !value.eq_ignore_ascii_case("false")
+    })
+}
+
+/// Resolve the Hub API token the way `hf auth login` stores it: `HF_TOKEN`,
+/// then the token file at `HF_TOKEN_PATH`, then
+/// `{HF_HOME:-~/.cache/huggingface}/token`.
+#[cfg(feature = "huggingface")]
+fn huggingface_api_token() -> Option<String> {
+    if let Ok(token) = std::env::var("HF_TOKEN") {
+        if !token.is_empty() {
+            return Some(token);
+        }
+    }
+    let token_path = std::env::var("HF_TOKEN_PATH")
+        .ok()
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| {
+            std::env::var("HF_HOME")
+                .ok()
+                .filter(|value| !value.is_empty())
+                .map(PathBuf::from)
+                .or_else(|| dirs::home_dir().map(|home| home.join(".cache").join("huggingface")))
+                .map(|hf_home| hf_home.join("token"))
+        })?;
+    let token = std::fs::read_to_string(token_path).ok()?;
+    let token = token.trim();
+    if token.is_empty() {
+        None
+    } else {
+        Some(token.to_string())
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ModelLoader {
     source: ModelSource,
@@ -1061,6 +1312,50 @@ pub struct ModelLoader {
     /// Per-load speculative-cloud override. `None` inherits the process-global
     /// default set via [`crate::set_speculative_cloud`].
     speculative_cloud: Option<bool>,
+    /// Per-load auto-release override. `None` inherits the process-global
+    /// default set via [`crate::set_auto_release`].
+    auto_release: Option<AutoReleasePolicy>,
+}
+
+/// Copy a caller's [`GenerationConfig`] onto a cloud-bound envelope's metadata.
+///
+/// Envelope metadata is the *only* channel
+/// [`CloudRuntimeAdapter`](xybrid_core::runtime_adapter::CloudRuntimeAdapter)
+/// reads request settings from, so a config that never lands here is silently
+/// dropped and the gateway answers with its own defaults. Every sampling knob
+/// the cloud request shape can express is forwarded: `max_tokens`,
+/// `temperature`, `top_p`, and `stop_sequences`. The rest of
+/// [`GenerationConfig`] (`top_k`, `min_p`, `repetition_penalty`, `grammar`,
+/// `tools`) has no OpenAI-compatible wire field and stays local-only.
+///
+/// **Precedence: existing metadata wins.** A caller who wrote `temperature`
+/// straight onto the envelope is addressing the cloud leg specifically, while
+/// `GenerationConfig` describes the run in general — so the config only fills
+/// keys the envelope left empty.
+fn apply_generation_config_metadata(cloud: &mut Envelope, config: Option<&GenerationConfig>) {
+    let Some(cfg) = config else {
+        return;
+    };
+    cloud
+        .metadata
+        .entry("max_tokens".to_string())
+        .or_insert_with(|| cfg.max_tokens.to_string());
+    cloud
+        .metadata
+        .entry("temperature".to_string())
+        .or_insert_with(|| cfg.temperature.to_string());
+    cloud
+        .metadata
+        .entry("top_p".to_string())
+        .or_insert_with(|| cfg.top_p.to_string());
+    // An empty list is not an instruction — writing the key would only add
+    // noise the adapter then has to special-case.
+    if !cfg.stop_sequences.is_empty() {
+        cloud
+            .metadata
+            .entry(STOP_SEQUENCES_METADATA_KEY.to_string())
+            .or_insert_with(|| encode_stop_sequences(&cfg.stop_sequences));
+    }
 }
 
 /// Build the cloud-bound envelope for serving a not-yet-local model from the
@@ -1068,7 +1363,8 @@ pub struct ModelLoader {
 /// (the CPU cluster that runs the edge model) — an id it doesn't recognise as a
 /// hosted provider's model falls through there. `provider` is a benign
 /// validation/trace label, never sent on the wire (the gateway routes on
-/// `model` alone). `backend`/`max_tokens`/`temperature` defer to caller values.
+/// `model` alone). `backend` and every key
+/// [`apply_generation_config_metadata`] writes defer to caller values.
 fn build_speculative_cloud_envelope(
     model_id: &str,
     envelope: &Envelope,
@@ -1085,16 +1381,7 @@ fn build_speculative_cloud_envelope(
         .metadata
         .entry("backend".to_string())
         .or_insert_with(|| "gateway".to_string());
-    if let Some(cfg) = config {
-        cloud
-            .metadata
-            .entry("max_tokens".to_string())
-            .or_insert_with(|| cfg.max_tokens.to_string());
-        cloud
-            .metadata
-            .entry("temperature".to_string())
-            .or_insert_with(|| cfg.temperature.to_string());
-    }
+    apply_generation_config_metadata(&mut cloud, config);
     cloud
 }
 
@@ -1373,6 +1660,7 @@ impl ModelLoader {
             model_id: Some(id.to_string()),
             version: None, // Version is resolved by registry API
             speculative_cloud: None,
+            auto_release: None,
         }
     }
 
@@ -1393,6 +1681,7 @@ impl ModelLoader {
             model_id: Some(id.to_string()),
             version: None,
             speculative_cloud: None,
+            auto_release: None,
         }
     }
 
@@ -1408,6 +1697,7 @@ impl ModelLoader {
             model_id: Some(model_id.to_string()),
             version: Some(version.to_string()),
             speculative_cloud: None,
+            auto_release: None,
         }
     }
 
@@ -1431,6 +1721,7 @@ impl ModelLoader {
             model_id: Some(model_id.to_string()),
             version: Some(version.to_string()),
             speculative_cloud: None,
+            auto_release: None,
         }
     }
 
@@ -1448,6 +1739,7 @@ impl ModelLoader {
             model_id: None,
             version: None,
             speculative_cloud: None,
+            auto_release: None,
         })
     }
 
@@ -1482,6 +1774,7 @@ impl ModelLoader {
             model_id: None,
             version: None,
             speculative_cloud: None,
+            auto_release: None,
         })
     }
 
@@ -1513,6 +1806,7 @@ impl ModelLoader {
             model_id: Some(repo.to_string()),
             version: None,
             speculative_cloud: None,
+            auto_release: None,
         }
     }
 
@@ -1534,6 +1828,7 @@ impl ModelLoader {
             source,
             version: Some(revision.to_string()),
             speculative_cloud: None,
+            auto_release: None,
         }
     }
 
@@ -1559,6 +1854,7 @@ impl ModelLoader {
             model_id: Some(repo),
             version: None,
             speculative_cloud: None,
+            auto_release: None,
         }
     }
 
@@ -1604,6 +1900,63 @@ impl ModelLoader {
     /// ([`crate::is_speculative_cloud_enabled`]).
     pub fn speculative_cloud_override(&self) -> Option<bool> {
         self.speculative_cloud
+    }
+
+    /// Let the SDK release idle models automatically to make room for this one.
+    ///
+    /// With this on, a load that starts while the device reports memory
+    /// pressure first releases least-recently-used models — the ones nothing
+    /// is running on — and each of those reloads itself the next time it is
+    /// used. Overrides the process-global default set via
+    /// [`crate::set_auto_release`]. Off unless you turn it on.
+    ///
+    /// Independent of [`crate::release_memory`], which always releases when
+    /// called: an explicit host call is its own consent.
+    ///
+    /// # Examples
+    /// ```
+    /// use xybrid_sdk::{AutoReleasePolicy, ModelLoader};
+    /// let loader = ModelLoader::from_registry("qwen2.5-0.5b-instruct")
+    ///     .with_auto_release(true);
+    /// assert_eq!(
+    ///     loader.auto_release_override(),
+    ///     Some(AutoReleasePolicy::enabled())
+    /// );
+    /// ```
+    pub fn with_auto_release(mut self, policy: impl Into<AutoReleasePolicy>) -> Self {
+        self.auto_release = Some(policy.into());
+        self
+    }
+
+    /// The per-load auto-release override, if one was set.
+    ///
+    /// `None` means this loader inherits the global default
+    /// ([`crate::auto_release_policy`]).
+    pub fn auto_release_override(&self) -> Option<AutoReleasePolicy> {
+        self.auto_release
+    }
+
+    /// Resolve the auto-release policy: the per-load override if set,
+    /// otherwise the process-global default.
+    fn auto_release_policy(&self) -> AutoReleasePolicy {
+        self.auto_release.unwrap_or_else(crate::auto_release_policy)
+    }
+
+    /// Free room for this load if the policy allows it and the device is under
+    /// memory pressure. No-op in the default (opt-out) configuration.
+    fn release_memory_for_load(&self) {
+        if !self.auto_release_policy().on_pressure {
+            return;
+        }
+        let released = crate::model_registry::evict_for_pressure_global();
+        if released > 0 {
+            log::info!(
+                target: "xybrid_sdk",
+                "Auto-released {} model(s) under memory pressure before loading {}",
+                released,
+                self.model_id.as_deref().unwrap_or("model")
+            );
+        }
     }
 
     /// Whether this load would serve from the cloud while the model downloads.
@@ -1690,6 +2043,11 @@ impl ModelLoader {
     where
         F: Fn(f32),
     {
+        // Before anything is downloaded or mapped: if this load opted into
+        // auto-release and the device is under memory pressure, free the
+        // least-recently-used models first.
+        self.release_memory_for_load();
+
         match &self.source {
             ModelSource::Registry { id, platform } => {
                 self.load_from_registry_api(id, platform.as_deref(), progress_callback)
@@ -1786,13 +2144,16 @@ impl ModelLoader {
         let default_generation_config = xybrid_core::execution::model_default_gen_config(&metadata);
         let placeholder = ModelHandle {
             // Lazy executor over the not-yet-populated extraction dir; never run
-            // while `loaded == false` (runs route to cloud).
+            // while the state is not `Loaded` (runs route to cloud).
             executor: Arc::new(Mutex::new(TemplateExecutor::with_base_path(
                 &model_dir.to_string_lossy(),
             ))),
             metadata,
             model_dir,
-            loaded: false,
+            // Not `Evicted`: nothing was ever released, so there is no cached
+            // directory to reload from. A cloud leg that fails before the
+            // download lands must surface `NotLoaded`, exactly as before.
+            state: LoadState::Unloaded,
         };
         let handle = Arc::new(RwLock::new(placeholder));
 
@@ -1851,6 +2212,14 @@ impl ModelLoader {
             log::error!("failed to spawn speculative download thread for '{id}': {err}");
         }
 
+        // Registered like any other load: the placeholder is not evictable
+        // (auto-release only touches `Loaded` handles), but the background
+        // thread replaces this same handle's contents in place, so the model
+        // becomes an eviction candidate the moment the download lands. Size is
+        // unknown until then, which only costs LRU tie-breaking precision.
+        let last_accessed = Arc::new(AtomicU64::new(crate::model_registry::now_ms()));
+        crate::model_registry::register(id, &handle, &last_accessed, None);
+
         XybridModel {
             handle,
             model_id: id.to_string(),
@@ -1862,6 +2231,7 @@ impl ModelLoader {
             default_generation_config,
             current_run: Arc::new(Mutex::new(None)),
             speculative: Some(download),
+            last_accessed,
         }
     }
 
@@ -1919,23 +2289,104 @@ impl ModelLoader {
         // Load from extracted directory (extraction is permanent in cache)
         let handle = Self::create_model_handle(&extract_dir)?;
 
-        let model_id = handle.metadata.model_id.clone();
-        let version = handle.metadata.version.clone();
-        let supports_streaming = Self::check_streaming_support(&handle.metadata);
-        let output_type = Self::infer_output_type(&handle.metadata);
-        let default_generation_config =
-            xybrid_core::execution::model_default_gen_config(&handle.metadata);
+        Ok(Self::publish_loaded_model(handle))
+    }
 
-        Ok(XybridModel {
-            handle: Arc::new(RwLock::new(handle)),
-            model_id,
-            version,
-            output_type,
-            supports_streaming,
-            default_generation_config,
-            current_run: Arc::new(Mutex::new(None)),
-            speculative: None,
-        })
+    /// Try to load `repo` entirely from the shared Hugging Face cache with
+    /// zero network I/O.
+    ///
+    /// `None` means no usable snapshot (absent repo, unresolvable revision,
+    /// or an incomplete selection) — the caller proceeds with its own flow.
+    /// `Some(result)` means a complete snapshot was found and the load was
+    /// attempted from it.
+    ///
+    /// Because the revision resolves through the shared cache's *local* refs
+    /// and file selection runs over the snapshot's own (possibly partial)
+    /// listing, neither freshness nor completeness against the remote repo
+    /// can be verified here. Callers must only use this where that is
+    /// acceptable: explicit offline mode (`HF_HUB_OFFLINE`), or a
+    /// connectivity fallback (with a warning) when the Hub API is
+    /// unreachable. The online path instead resolves through the Hub API and
+    /// reuses shared files per-file against the authoritative manifest.
+    #[cfg(feature = "huggingface")]
+    fn try_load_from_shared_snapshot<F>(
+        &self,
+        cache_layout: &CacheLayout,
+        repo: &str,
+        revision: Option<&str>,
+        variant: Option<&str>,
+        progress_callback: &F,
+    ) -> Option<SdkResult<XybridModel>>
+    where
+        F: Fn(f32),
+    {
+        let snapshot = crate::cache::hf_shared::find_shared_snapshot(repo, revision)?;
+        log::debug!(target: "xybrid_sdk", "Shared Hugging Face cache snapshot for '{}' at commit {}", repo, snapshot.commit);
+        let shared_files =
+            crate::cache::hf_shared::select_snapshot_files(&snapshot, repo, variant)?;
+        let result = (|| {
+            let cache_dir = huggingface_materialized_cache_dir(
+                cache_layout,
+                repo,
+                revision.map(|_| snapshot.commit.as_str()),
+                variant,
+            );
+            std::fs::create_dir_all(&cache_dir)?;
+            let shared_files: Vec<&str> = shared_files.iter().map(String::as_str).collect();
+            crate::cache::hf_shared::materialize_from_shared(&snapshot, &shared_files, &cache_dir)
+                .map_err(|e| {
+                    SdkError::cache_src(
+                        format!(
+                            "Failed to materialize '{}' from shared Hugging Face cache",
+                            repo
+                        ),
+                        e,
+                    )
+                })?;
+            progress_callback(1.0);
+
+            let metadata_path = cache_dir.join("model_metadata.json");
+            if !metadata_path.exists() {
+                log::info!(
+                    target: "xybrid_sdk",
+                    "No model_metadata.json in shared-cache snapshot of '{}', attempting auto-generation...",
+                    repo
+                );
+                match crate::metadata_gen::generate_metadata(&cache_dir, repo) {
+                    Ok((_metadata, _task_inference)) => {
+                        log::info!(
+                            target: "xybrid_sdk",
+                            "Auto-generated model_metadata.json for '{}'. \
+                             Review and adjust if inference results are unexpected.",
+                            repo
+                        );
+                    }
+                    Err(e) => {
+                        return Err(SdkError::MetadataNotFound(format!(
+                            "HuggingFace repo '{}' does not contain model_metadata.json and \
+                             auto-generation failed: {}. \
+                             Create one manually — see docs/sdk/MODEL_METADATA.md",
+                            repo, e
+                        )));
+                    }
+                }
+            }
+
+            let model = self.load_from_directory(&cache_dir)?;
+            if let Some(requested_revision) = revision {
+                cache_layout.record_huggingface_revision(
+                    repo,
+                    requested_revision,
+                    &snapshot.commit,
+                    variant,
+                )?;
+            } else {
+                cache_layout.record_huggingface_repo(repo)?;
+            }
+            log::info!(target: "xybrid_sdk", "Reusing model from local Hugging Face cache: {}", cache_dir.display());
+            Ok(model)
+        })();
+        Some(result)
     }
 
     /// Load a model from HuggingFace Hub.
@@ -1960,9 +2411,56 @@ impl ModelLoader {
         if revision.is_none() {
             let cache_dir = huggingface_materialized_cache_dir(&cache_layout, repo, None, variant);
             if cache_layout.is_huggingface_repo_materialized(repo, &cache_dir) {
-                log::info!(target: "xybrid_sdk", "Loading HuggingFace model from cache: {}", cache_dir.display());
-                return self.load_from_directory(&cache_dir);
+                let dangling = crate::cache::hf_shared::remove_dangling_files(&cache_dir);
+                if dangling == 0 {
+                    log::info!(target: "xybrid_sdk", "Loading HuggingFace model from cache: {}", cache_dir.display());
+                    return self.load_from_directory(&cache_dir);
+                }
+                log::warn!(
+                    target: "xybrid_sdk",
+                    "Cached copy of '{}' has {} dangling symlink(s) (source cache pruned?); removing it and re-materializing",
+                    repo, dangling
+                );
+                // Surviving entries may belong to an older commit than the
+                // one about to be materialized, and refilling around them
+                // would mix commits in one directory. This unpinned dir is
+                // not commit-keyed, so the only safe repair is rebuilding it
+                // from scratch at a single resolved commit.
+                if let Err(e) = std::fs::remove_dir_all(&cache_dir) {
+                    log::warn!(
+                        target: "xybrid_sdk",
+                        "Failed to remove corrupt cache dir {}: {}",
+                        cache_dir.display(),
+                        e
+                    );
+                }
             }
+        }
+
+        // Explicit offline mode (the standard HF_HUB_OFFLINE switch): load
+        // from the shared Hugging Face cache's local refs or fail — never
+        // touch the network. Outside the desktop allowlist
+        // (macOS/Linux/Windows) `find_shared_snapshot` always returns `None`,
+        // keeping mobile and other non-desktop behavior unchanged.
+        if huggingface_offline_mode() {
+            if let Some(result) = self.try_load_from_shared_snapshot(
+                &cache_layout,
+                repo,
+                revision,
+                variant,
+                &_progress_callback,
+            ) {
+                log::warn!(
+                    target: "xybrid_sdk",
+                    "HF_HUB_OFFLINE is set; loading '{}' from the shared Hugging Face cache — freshness and completeness cannot be verified offline",
+                    repo
+                );
+                return result;
+            }
+            return Err(SdkError::offline(format!(
+                "HF_HUB_OFFLINE is set and no usable local copy of '{}' exists in the shared Hugging Face cache",
+                repo
+            )));
         }
 
         log::info!(target: "xybrid_sdk", "Downloading model from HuggingFace: {}", repo);
@@ -2006,8 +2504,35 @@ impl ModelLoader {
                                     variant,
                                 )
                                 .unwrap_or(cache_dir);
-                            log::info!(target: "xybrid_sdk", "Loading offline HuggingFace revision from cache: {}", cache_dir.display());
-                            return self.load_from_directory(&cache_dir);
+                            if crate::cache::hf_shared::remove_dangling_files(&cache_dir) == 0 {
+                                log::info!(target: "xybrid_sdk", "Loading offline HuggingFace revision from cache: {}", cache_dir.display());
+                                return self.load_from_directory(&cache_dir);
+                            }
+                            log::warn!(
+                                target: "xybrid_sdk",
+                                "Offline cache for '{}'@{} has dangling symlinks (source cache pruned?); trying the shared Hugging Face cache",
+                                repo, requested_revision
+                            );
+                        }
+                    }
+                    // Connectivity fallback: resolve the revision through
+                    // the shared cache's local refs instead of the Hub API.
+                    // Client errors (bad repo, bad revision, bad auth)
+                    // propagate instead of being masked by a stale copy.
+                    if hub_error_is_connectivity(&error) {
+                        if let Some(result) = self.try_load_from_shared_snapshot(
+                            &cache_layout,
+                            repo,
+                            revision,
+                            variant,
+                            &_progress_callback,
+                        ) {
+                            log::warn!(
+                                target: "xybrid_sdk",
+                                "Hub API unreachable; falling back to the shared Hugging Face cache for '{}'@{} — a mutable revision may be stale",
+                                repo, requested_revision
+                            );
+                            return result;
                         }
                     }
                     return Err(SdkError::network_src(
@@ -2029,17 +2554,24 @@ impl ModelLoader {
                 variant,
             );
             if cache_layout.is_huggingface_revision_materialized(repo, &repo_info.sha, variant) {
-                cache_layout.record_huggingface_revision(
-                    repo,
-                    requested_revision,
-                    &repo_info.sha,
-                    variant,
-                )?;
-                let cache_dir = cache_layout
+                let materialized_dir = cache_layout
                     .materialized_huggingface_revision_dir(repo, &repo_info.sha, variant)
-                    .unwrap_or(cache_dir);
-                log::info!(target: "xybrid_sdk", "Loading HuggingFace model from cache: {}", cache_dir.display());
-                return self.load_from_directory(&cache_dir);
+                    .unwrap_or_else(|| cache_dir.clone());
+                if crate::cache::hf_shared::remove_dangling_files(&materialized_dir) == 0 {
+                    cache_layout.record_huggingface_revision(
+                        repo,
+                        requested_revision,
+                        &repo_info.sha,
+                        variant,
+                    )?;
+                    log::info!(target: "xybrid_sdk", "Loading HuggingFace model from cache: {}", materialized_dir.display());
+                    return self.load_from_directory(&materialized_dir);
+                }
+                log::info!(
+                    target: "xybrid_sdk",
+                    "Cached revision of '{}' had dangling symlink(s) (source cache pruned?); re-downloading",
+                    repo
+                );
             }
             let resolved_repo =
                 Repo::with_revision(repo.to_string(), RepoType::Model, repo_info.sha.clone());
@@ -2047,13 +2579,42 @@ impl ModelLoader {
         } else {
             let cache_dir = huggingface_materialized_cache_dir(&cache_layout, repo, None, variant);
             let repo_api = api.repo(Repo::new(repo.to_string(), RepoType::Model));
-            let repo_info = repo_api.info().map_err(|error| {
-                SdkError::network_src(
-                    format!("Failed to get HuggingFace repo info for '{}'", repo),
-                    error,
-                )
-            })?;
-            (cache_dir, repo_api, repo_info)
+            let repo_info = match repo_api.info() {
+                Ok(info) => info,
+                Err(error) => {
+                    // Connectivity fallback: resolve `main`/`master` through
+                    // the shared cache's local refs instead of the Hub API.
+                    // Client errors (bad repo, bad revision, bad auth)
+                    // propagate instead of being masked by a stale copy.
+                    if hub_error_is_connectivity(&error) {
+                        if let Some(result) = self.try_load_from_shared_snapshot(
+                            &cache_layout,
+                            repo,
+                            None,
+                            variant,
+                            &_progress_callback,
+                        ) {
+                            log::warn!(
+                                target: "xybrid_sdk",
+                                "Hub API unreachable; falling back to the shared Hugging Face cache for '{}' — the local ref may be stale",
+                                repo
+                            );
+                            return result;
+                        }
+                    }
+                    return Err(SdkError::network_src(
+                        format!("Failed to get HuggingFace repo info for '{}'", repo),
+                        error,
+                    ));
+                }
+            };
+            // Pin every subsequent file request to the commit `info()` just
+            // resolved — `Repo::new` stays on mutable `main`, which could
+            // move between `info()` and the downloads below and produce a
+            // directory mixing two commits.
+            let resolved_repo =
+                Repo::with_revision(repo.to_string(), RepoType::Model, repo_info.sha.clone());
+            (cache_dir, api.repo(resolved_repo), repo_info)
         };
 
         let metadata_path = cache_dir.join("model_metadata.json");
@@ -2111,25 +2672,24 @@ impl ModelLoader {
         // Create cache directory
         std::fs::create_dir_all(&cache_dir)?;
 
-        let total_files = files_to_download.len();
-        for (i, filename) in files_to_download.iter().enumerate() {
-            log::debug!(target: "xybrid_sdk", "Downloading [{}/{}]: {}", i + 1, total_files, filename);
+        // Shared Hugging Face cache snapshot at the exact commit the Hub API
+        // just resolved, if the user already has one (via `huggingface-cli
+        // download`, transformers, ...). Files it holds are reused below
+        // instead of downloaded; because resolution went through the Hub API,
+        // a stale local ref can never divert this.
+        let shared_snapshot =
+            crate::cache::hf_shared::find_shared_snapshot(repo, Some(&repo_info.sha));
 
+        let total_files = files_to_download.len();
+        let mut reused_files = 0usize;
+        // Lazily fetched `filename -> blob hash` map for content-addressed
+        // reuse; outer None = not fetched yet, inner None = fetch failed.
+        let mut remote_blob_ids: Option<Option<std::collections::HashMap<String, String>>> = None;
+        for (i, filename) in files_to_download.iter().enumerate() {
             // Report approximate progress
             _progress_callback((i as f32) / (total_files as f32));
 
-            // Download file (hf-hub caches internally)
-            let cached_path = repo_api.get(filename).map_err(|e| {
-                SdkError::network_src(
-                    format!("Failed to download '{}' from '{}'", filename, repo),
-                    e,
-                )
-            })?;
-
-            // Create target path in our cache directory
             let target_path = cache_dir.join(filename);
-
-            // Create parent directories if the file is in a subdirectory
             if let Some(parent) = target_path.parent() {
                 std::fs::create_dir_all(parent)?;
             }
@@ -2139,24 +2699,85 @@ impl ModelLoader {
                 continue;
             }
 
-            // Create symlink to hf-hub's cached file (avoids duplication)
-            #[cfg(unix)]
-            {
-                std::os::unix::fs::symlink(&cached_path, &target_path).map_err(|e| {
-                    SdkError::IoError(std::io::Error::other(format!(
-                        "Failed to symlink {} -> {}: {}",
-                        cached_path.display(),
-                        target_path.display(),
-                        e
-                    )))
-                })?;
+            // Reuse the file from the shared cache when the snapshot holds
+            // it; any failure here falls back to the download below instead
+            // of failing the load.
+            if let Some(snapshot) = &shared_snapshot {
+                let source_path = snapshot.dir.join(filename);
+                if source_path.is_file() {
+                    match crate::cache::hf_shared::link_or_copy(&source_path, &target_path) {
+                        Ok(()) => {
+                            log::debug!(target: "xybrid_sdk", "Reusing [{}/{}] from shared Hugging Face cache: {}", i + 1, total_files, filename);
+                            reused_files += 1;
+                            continue;
+                        }
+                        Err(e) => {
+                            log::debug!(
+                                target: "xybrid_sdk",
+                                "Failed to reuse '{}' from shared Hugging Face cache ({}); downloading instead",
+                                filename, e
+                            );
+                        }
+                    }
+                }
             }
 
-            // On Windows, copy the file instead
-            #[cfg(not(unix))]
-            {
-                std::fs::copy(&cached_path, &target_path)?;
+            // Content-addressed fallback: even without a snapshot at this
+            // commit, the shared cache may hold these exact bytes under
+            // `blobs/<hash>` — e.g. the commit moved but this file didn't.
+            // Expected hashes come from the Hub's tree API, fetched at most
+            // once per load and only when the repo has a local blob store;
+            // any failure here just downloads.
+            if remote_blob_ids.is_none() && crate::cache::hf_shared::shared_repo_has_blobs(repo) {
+                remote_blob_ids = Some(fetch_huggingface_blob_ids(repo, &repo_info.sha));
             }
+            if let Some(Some(blob_ids)) = &remote_blob_ids {
+                if let Some(source_path) = blob_ids
+                    .get(*filename)
+                    .and_then(|oid| crate::cache::hf_shared::shared_repo_blob_path(repo, oid))
+                {
+                    match crate::cache::hf_shared::link_or_copy(&source_path, &target_path) {
+                        Ok(()) => {
+                            log::debug!(target: "xybrid_sdk", "Reusing [{}/{}] from shared Hugging Face blob store: {}", i + 1, total_files, filename);
+                            reused_files += 1;
+                            continue;
+                        }
+                        Err(e) => {
+                            log::debug!(
+                                target: "xybrid_sdk",
+                                "Failed to reuse '{}' from shared Hugging Face blob store ({}); downloading instead",
+                                filename, e
+                            );
+                        }
+                    }
+                }
+            }
+
+            log::debug!(target: "xybrid_sdk", "Downloading [{}/{}]: {}", i + 1, total_files, filename);
+
+            // Download file (hf-hub caches internally), then materialize it
+            // (symlink on unix, copy elsewhere — avoids duplication)
+            let cached_path = repo_api.get(filename).map_err(|e| {
+                SdkError::network_src(
+                    format!("Failed to download '{}' from '{}'", filename, repo),
+                    e,
+                )
+            })?;
+            crate::cache::hf_shared::link_or_copy(&cached_path, &target_path).map_err(|e| {
+                SdkError::IoError(std::io::Error::other(format!(
+                    "Failed to materialize {} -> {}: {}",
+                    cached_path.display(),
+                    target_path.display(),
+                    e
+                )))
+            })?;
+        }
+        if reused_files > 0 {
+            log::info!(
+                target: "xybrid_sdk",
+                "Reused {}/{} files for '{}' from the shared Hugging Face cache",
+                reused_files, total_files, repo
+            );
         }
 
         // Report completion
@@ -2260,15 +2881,29 @@ impl ModelLoader {
     fn load_from_directory(&self, path: &PathBuf) -> SdkResult<XybridModel> {
         let handle = Self::create_model_handle(path)?;
 
+        Ok(Self::publish_loaded_model(handle))
+    }
+
+    /// Wrap a freshly built handle in an `XybridModel` and register it as a
+    /// live model, so the auto-release engine can see it as an LRU candidate.
+    ///
+    /// Every load path funnels through here — a model that skipped it would be
+    /// invisible to [`crate::release_memory`] and never evicted.
+    fn publish_loaded_model(handle: ModelHandle) -> XybridModel {
         let model_id = handle.metadata.model_id.clone();
         let version = handle.metadata.version.clone();
         let supports_streaming = Self::check_streaming_support(&handle.metadata);
         let output_type = Self::infer_output_type(&handle.metadata);
+        let approx_size_mb = declared_size_mb(&handle.metadata);
         let default_generation_config =
             xybrid_core::execution::model_default_gen_config(&handle.metadata);
 
-        Ok(XybridModel {
-            handle: Arc::new(RwLock::new(handle)),
+        let handle = Arc::new(RwLock::new(handle));
+        let last_accessed = Arc::new(AtomicU64::new(crate::model_registry::now_ms()));
+        crate::model_registry::register(&model_id, &handle, &last_accessed, approx_size_mb);
+
+        XybridModel {
+            handle,
             model_id,
             version,
             output_type,
@@ -2276,7 +2911,8 @@ impl ModelLoader {
             default_generation_config,
             current_run: Arc::new(Mutex::new(None)),
             speculative: None,
-        })
+            last_accessed,
+        }
     }
 
     fn create_model_handle(model_dir: &PathBuf) -> SdkResult<ModelHandle> {
@@ -2295,7 +2931,7 @@ impl ModelLoader {
             executor: Arc::new(Mutex::new(executor)),
             metadata,
             model_dir: model_dir.clone(),
-            loaded: true,
+            state: LoadState::Loaded,
         })
     }
 
@@ -2446,6 +3082,27 @@ pub struct XybridModel {
     /// [`Self::degrade_to_local`]); `Arc`-shared so every clone observes the
     /// same download.
     speculative: Option<Arc<SpeculativeDownload>>,
+    /// Milliseconds-since-epoch stamp of the last run/stream on this model,
+    /// shared with the entry the auto-release registry holds for it (and with
+    /// every clone, so use through any clone counts as use of the model).
+    /// Ordering is `Relaxed`: an LRU order that is a few microseconds stale
+    /// picks a slightly different victim, which is not a correctness question.
+    last_accessed: Arc<AtomicU64>,
+}
+
+/// Model size in MB if the bundle declares one, for LRU tie-breaking only.
+///
+/// Reads the optional `size_mb` / `size_bytes` keys from the bundle's free-form
+/// metadata map; absent or malformed values are simply `None`.
+fn declared_size_mb(metadata: &ModelMetadata) -> Option<u32> {
+    if let Some(mb) = metadata.metadata.get("size_mb").and_then(|v| v.as_u64()) {
+        return u32::try_from(mb).ok();
+    }
+    let bytes = metadata
+        .metadata
+        .get("size_bytes")
+        .and_then(|v| v.as_u64())?;
+    u32::try_from(bytes / (1024 * 1024)).ok()
 }
 
 struct WarmupEventFields {
@@ -2500,19 +3157,49 @@ impl XybridModel {
     }
 
     /// Check if the model is currently loaded.
+    ///
+    /// `false` for an auto-released model too, even though that one still runs
+    /// (it reloads itself). Use [`load_state`](Self::load_state) when the
+    /// difference matters.
     pub fn is_loaded(&self) -> bool {
-        self.handle.read().map(|h| h.loaded).unwrap_or(false)
+        self.load_state() == LoadState::Loaded
+    }
+
+    /// Where this model sits in the load / auto-release / unload lifecycle.
+    ///
+    /// [`LoadState::Evicted`] means the SDK freed the model's memory and will
+    /// reload it on the next run — no action needed from the caller.
+    pub fn load_state(&self) -> LoadState {
+        self.handle
+            .read()
+            .map(|h| h.state)
+            .unwrap_or(LoadState::Unloaded)
+    }
+
+    /// Stamp this model as used right now, for LRU victim selection.
+    ///
+    /// Called at the top of every run/stream entry point, before the handle
+    /// lock is taken: one relaxed atomic store, no contention with the
+    /// registry or with other models.
+    fn touch(&self) {
+        crate::model_registry::touch(&self.last_accessed);
     }
 
     /// Whether this run should be served speculatively from the cloud.
     ///
     /// `true` when this model was loaded under speculative cloud fallback *and*
-    /// the local handle isn't ready yet. Once the background download swaps in a
-    /// `loaded` handle this returns `false` and runs go local. Checked without
-    /// holding the handle write lock so the cloud round-trip never blocks a
-    /// concurrent local promotion.
+    /// the local weights have never become ready. Once the background download
+    /// swaps in a loaded handle this returns `false` and runs go local. Checked
+    /// without holding the handle write lock so the cloud round-trip never
+    /// blocks a concurrent local promotion.
+    ///
+    /// Tests `Unloaded` specifically rather than `!is_loaded()`. An *evicted*
+    /// speculative model has working local weights on disk and must reload
+    /// them, not fall back to the gateway: `!is_loaded()` is also true for
+    /// `Evicted`, which would silently turn a downloaded model into a
+    /// permanently cloud-served one the first time auto-release touched it.
     fn cloud_serve(&self) -> bool {
-        self.speculative.is_some() && !self.is_loaded()
+        self.speculative.is_some() && self.load_state() == LoadState::Unloaded
     }
 
     /// Whether runs are currently being answered by the cloud because the local
@@ -2677,7 +3364,7 @@ impl XybridModel {
     fn metadata_derived<T>(&self, derive: impl Fn(&ModelMetadata) -> T) -> Option<T> {
         self.speculative.as_ref()?;
         let handle = self.handle.read().ok()?;
-        handle.loaded.then(|| derive(&handle.metadata))
+        (handle.state == LoadState::Loaded).then(|| derive(&handle.metadata))
     }
 
     /// [`Self::metadata_derived`] without the wait: yields `None` rather than
@@ -2687,7 +3374,7 @@ impl XybridModel {
     fn metadata_derived_nonblocking<T>(&self, derive: impl Fn(&ModelMetadata) -> T) -> Option<T> {
         self.speculative.as_ref()?;
         let handle = self.handle.try_read().ok()?;
-        handle.loaded.then(|| derive(&handle.metadata))
+        (handle.state == LoadState::Loaded).then(|| derive(&handle.metadata))
     }
 
     /// Check if this is an LLM model (uses GGUF execution template).
@@ -2825,6 +3512,7 @@ impl XybridModel {
     pub fn warmup(&self) -> SdkResult<()> {
         use xybrid_core::ir::EnvelopeKind;
 
+        self.touch();
         log::info!(target: "xybrid_sdk", "Warming up model: {}", self.model_id);
         let is_llm = self.is_llm();
 
@@ -2875,10 +3563,8 @@ impl XybridModel {
             crate::telemetry::TelemetryPipelineContextGuard::install(None, Some(trace_id));
 
         let event_fields = {
-            let handle = self.handle.write().unwrap_or_else(|e| e.into_inner());
-            if !handle.loaded {
-                return Err(SdkError::NotLoaded);
-            }
+            let mut handle = self.handle.write().unwrap_or_else(|e| e.into_inner());
+            handle.ensure_runnable()?;
             let metadata = handle.metadata.clone();
             handle
                 .executor
@@ -2932,6 +3618,7 @@ impl XybridModel {
     /// # }
     /// ```
     pub async fn warmup_async(&self) -> SdkResult<()> {
+        self.touch();
         let handle = self.handle.clone();
         let model_id = self.model_id.clone();
         let output_type = self.output_type;
@@ -2978,10 +3665,8 @@ impl XybridModel {
             // path published nothing at all, so async warmups were
             // silent on the wire (visible only via logs).
             let event_fields = {
-                let guard = handle.write().unwrap_or_else(|e| e.into_inner());
-                if !guard.loaded {
-                    return Err(SdkError::NotLoaded);
-                }
+                let mut guard = handle.write().unwrap_or_else(|e| e.into_inner());
+                guard.ensure_runnable()?;
 
                 let metadata = guard.metadata.clone();
                 guard
@@ -3061,6 +3746,8 @@ impl XybridModel {
         config: Option<&GenerationConfig>,
     ) -> SdkResult<InferenceResult> {
         crate::telemetry::maybe_emit_dev_nudge();
+        self.touch();
+
         // Speculative cloud: serve from the gateway until the local handle is
         // ready (see `cloud_serve`).
         if self.cloud_serve() {
@@ -3087,11 +3774,9 @@ impl XybridModel {
             crate::telemetry::TelemetryPipelineContextGuard::install(None, Some(trace_id));
 
         // Recover from poisoned RwLock to prevent permanent lock errors
-        let handle = self.handle.write().unwrap_or_else(|e| e.into_inner());
+        let mut handle = self.handle.write().unwrap_or_else(|e| e.into_inner());
 
-        if !handle.loaded {
-            return Err(SdkError::NotLoaded);
-        }
+        handle.ensure_runnable()?;
 
         // Clone metadata to avoid borrow conflict with executor
         let metadata = handle.metadata.clone();
@@ -3152,16 +3837,15 @@ impl XybridModel {
         F: FnMut(Vec<u8>, u32) -> bool,
     {
         crate::telemetry::maybe_emit_dev_nudge();
+        self.touch();
         let start = Instant::now();
         let resource_guard = crate::telemetry::begin_resource_run();
         let trace_id = uuid::Uuid::new_v4();
         let _telemetry_ctx =
             crate::telemetry::TelemetryPipelineContextGuard::install(None, Some(trace_id));
 
-        let handle = self.handle.write().unwrap_or_else(|e| e.into_inner());
-        if !handle.loaded {
-            return Err(SdkError::NotLoaded);
-        }
+        let mut handle = self.handle.write().unwrap_or_else(|e| e.into_inner());
+        handle.ensure_runnable()?;
         let metadata = handle.metadata.clone();
 
         // Between-chunk cancellation: a chunk's ONNX forward can't be aborted
@@ -3272,6 +3956,8 @@ impl XybridModel {
         context: &ConversationContext,
         config: Option<&GenerationConfig>,
     ) -> SdkResult<InferenceResult> {
+        self.touch();
+
         // Speculative cloud: serve from the gateway until the local handle is
         // ready. The gateway leg is stateless — `context` is not replayed (the
         // reactive fallback behaves the same) — full history resumes once the
@@ -3296,11 +3982,9 @@ impl XybridModel {
             crate::telemetry::TelemetryPipelineContextGuard::install(None, Some(trace_id));
 
         // Recover from poisoned RwLock to prevent permanent lock errors
-        let handle = self.handle.write().unwrap_or_else(|e| e.into_inner());
+        let mut handle = self.handle.write().unwrap_or_else(|e| e.into_inner());
 
-        if !handle.loaded {
-            return Err(SdkError::NotLoaded);
-        }
+        handle.ensure_runnable()?;
 
         // Clone metadata to avoid borrow conflict with executor
         let metadata = handle.metadata.clone();
@@ -3433,6 +4117,8 @@ impl XybridModel {
     {
         use xybrid_core::runtime_adapter::types::PartialToken;
 
+        self.touch();
+
         // Speculative cloud: stream from the gateway until the local handle is
         // ready. The gateway leg is stateless (`context` not replayed, matching
         // the reactive fallback); full history resumes once local takes over.
@@ -3454,11 +4140,9 @@ impl XybridModel {
             crate::telemetry::TelemetryPipelineContextGuard::install(None, Some(trace_id));
 
         // Get write lock on handle
-        let handle = self.handle.write().unwrap_or_else(|e| e.into_inner());
+        let mut handle = self.handle.write().unwrap_or_else(|e| e.into_inner());
 
-        if !handle.loaded {
-            return Err(SdkError::NotLoaded);
-        }
+        handle.ensure_runnable()?;
 
         // Clone metadata to check execution template
         let metadata = handle.metadata.clone();
@@ -3497,6 +4181,9 @@ impl XybridModel {
                     index: 0,
                     cumulative_text: text.clone(),
                     finish_reason: Some("stop".to_string()),
+                    // Non-LLM template: tool calling is an LLM feature.
+                    tool_calls: Vec::new(),
+                    raw_text: None,
                 };
                 on_token(token).map_err(streaming_callback_error)?;
             }
@@ -3649,6 +4336,8 @@ impl XybridModel {
     {
         use xybrid_core::runtime_adapter::types::PartialToken;
 
+        self.touch();
+
         // Speculative cloud: stream from the gateway until the local handle is
         // ready (see `cloud_serve`).
         if self.cloud_serve() {
@@ -3668,11 +4357,9 @@ impl XybridModel {
             crate::telemetry::TelemetryPipelineContextGuard::install(None, Some(trace_id));
 
         // Get write lock on handle
-        let handle = self.handle.write().unwrap_or_else(|e| e.into_inner());
+        let mut handle = self.handle.write().unwrap_or_else(|e| e.into_inner());
 
-        if !handle.loaded {
-            return Err(SdkError::NotLoaded);
-        }
+        handle.ensure_runnable()?;
 
         // Clone metadata to check execution template
         let metadata = handle.metadata.clone();
@@ -3705,6 +4392,9 @@ impl XybridModel {
                     index: 0,
                     cumulative_text: text.clone(),
                     finish_reason: Some("stop".to_string()),
+                    // Non-LLM template: tool calling is an LLM feature.
+                    tool_calls: Vec::new(),
+                    raw_text: None,
                 };
                 on_token(token).map_err(streaming_callback_error)?;
             }
@@ -3941,9 +4631,16 @@ impl XybridModel {
     /// - `correlation_id` is taken from `options.correlation_id` if set,
     ///   otherwise generated via `uuid::Uuid::new_v4()`.
     /// - The `envelope` must carry cloud-side routing metadata (`provider`,
-    ///   `model`, `system_prompt`, `temperature`, …) for the retry leg. See
+    ///   `model`, `system_prompt`, …) for the retry leg. See
     ///   [`CloudRuntimeAdapter`](xybrid_core::runtime_adapter::CloudRuntimeAdapter)
     ///   for supported keys.
+    /// - `options.generation_config` reaches the cloud leg: `max_tokens`,
+    ///   `temperature`, `top_p`, and `stop_sequences` are copied onto the
+    ///   cloud envelope's metadata. Metadata already present on the envelope
+    ///   wins — it targets the cloud leg specifically, so it overrides the
+    ///   generic config. The remaining knobs (`top_k`, `min_p`,
+    ///   `repetition_penalty`, `grammar`) have no OpenAI-compatible wire field
+    ///   and stay local-only.
     /// - Requests with `GenerationConfig::tools` do not enter the cloud leg yet:
     ///   the gateway adapter does not forward tools, so the wrapper emits the
     ///   local abort seam and then fails closed before policy or cloud dispatch.
@@ -3996,10 +4693,6 @@ impl XybridModel {
         let local_resource_summary = local_resource_guard.finish();
         let policy_metrics = fallback_policy_metrics(options);
         let signal_context = Some(SignalContext::from_metrics(&policy_metrics));
-        let tools_requested = options
-            .generation_config
-            .as_ref()
-            .is_some_and(|config| !config.tools.is_empty());
 
         dispatch_after_local(
             local_result,
@@ -4014,7 +4707,7 @@ impl XybridModel {
             policy_metrics,
             signal_context,
             options.cancellation_token.clone(),
-            tools_requested,
+            options.generation_config.as_ref(),
             on_token,
             on_seam,
         )
@@ -4059,6 +4752,7 @@ impl XybridModel {
         use tokio::sync::mpsc;
         use xybrid_core::runtime_adapter::types::PartialToken;
 
+        self.touch();
         let (tx, rx) = mpsc::channel::<StreamEvent>(100);
         let handle = self.handle.clone();
         let model_id = self.model_id.clone();
@@ -4072,7 +4766,7 @@ impl XybridModel {
 
         // Spawn blocking task to run inference
         tokio::task::spawn(async move {
-            let result = tokio::task::spawn_blocking(move || {
+            let result = tokio::task::spawn_blocking(move || -> SdkResult<InferenceResult> {
                 let start = Instant::now();
 
                 // Per-call trace_id scope — see `run` for rationale. Lives
@@ -4096,6 +4790,8 @@ impl XybridModel {
                                 index: token.index,
                                 cumulative_text: token.cumulative_text.clone(),
                                 finish_reason: token.finish_reason.clone(),
+                                tool_calls: token.tool_calls.clone(),
+                                raw_text: token.raw_text.clone(),
                             }));
                             Ok(())
                         },
@@ -4108,11 +4804,9 @@ impl XybridModel {
                 }
 
                 // Get write lock on handle
-                let guard = handle.write().unwrap_or_else(|e| e.into_inner());
+                let mut guard = handle.write().unwrap_or_else(|e| e.into_inner());
 
-                if !guard.loaded {
-                    return Err(SdkError::NotLoaded);
-                }
+                guard.ensure_runnable()?;
 
                 let metadata = guard.metadata.clone();
                 let is_llm = ModelLoader::is_llm_template(&metadata);
@@ -4136,6 +4830,8 @@ impl XybridModel {
                                     index: token.index,
                                     cumulative_text: token.cumulative_text.clone(),
                                     finish_reason: token.finish_reason.clone(),
+                                    tool_calls: token.tool_calls.clone(),
+                                    raw_text: token.raw_text.clone(),
                                 };
                                 // Ignore send errors (receiver dropped)
                                 let _ =
@@ -4162,6 +4858,9 @@ impl XybridModel {
                             index: 0,
                             cumulative_text: text.clone(),
                             finish_reason: Some("stop".to_string()),
+                            // Non-LLM template: tool calling is an LLM feature.
+                            tool_calls: Vec::new(),
+                            raw_text: None,
                         };
                         let _ = tx.blocking_send(StreamEvent::Token(stream_token));
                     }
@@ -4246,6 +4945,8 @@ impl XybridModel {
         config: Option<&GenerationConfig>,
     ) -> SdkResult<InferenceResult> {
         crate::telemetry::maybe_emit_dev_nudge();
+        self.touch();
+
         // Speculative cloud: serve from the gateway (off the runtime via
         // spawn_blocking, like the local path) until the local handle is ready.
         if self.cloud_serve() {
@@ -4282,11 +4983,9 @@ impl XybridModel {
                 crate::telemetry::TelemetryPipelineContextGuard::install(None, Some(trace_id));
 
             // Recover from poisoned RwLock to prevent permanent lock errors
-            let guard = handle.write().unwrap_or_else(|e| e.into_inner());
+            let mut guard = handle.write().unwrap_or_else(|e| e.into_inner());
 
-            if !guard.loaded {
-                return Err(SdkError::NotLoaded);
-            }
+            guard.ensure_runnable()?;
 
             // Clone metadata to avoid borrow conflict with executor
             let metadata = guard.metadata.clone();
@@ -4362,12 +5061,39 @@ impl XybridModel {
             return Err(SdkError::StreamingNotSupported);
         }
 
-        // Recover from poisoned RwLock to prevent permanent lock errors
-        let handle = self.handle.read().unwrap_or_else(|e| e.into_inner());
+        // Stamped at stream *creation* only: the session runs on its own, so
+        // there is no later point to re-stamp from. That would leave a
+        // long-lived stream's parent looking idle to the LRU order, which is
+        // why eviction separately refuses any handle whose executor is still
+        // shared with a session (see `ModelHandle::executor_is_shared`).
+        self.touch();
 
-        if !handle.loaded {
-            return Err(SdkError::NotLoaded);
+        // The session below takes a reference to this model's executor and
+        // materializes the weights into it. So an evicted model has to be
+        // promoted back to `Loaded` *first*: if the handle stayed `Evicted`
+        // while its executor went resident, the model would be both loaded in
+        // memory and permanently unevictable, since auto-release only touches
+        // `Loaded` handles. That is a leak for the life of the process.
+        //
+        // Read first and only upgrade to a write lock on the evicted path, so
+        // the common case still cannot block behind an in-flight run. A
+        // user-unloaded model still can't stream — nothing guarantees its
+        // directory survives.
+        {
+            // Recover from poisoned RwLock to prevent permanent lock errors
+            let state = self.handle.read().unwrap_or_else(|e| e.into_inner()).state;
+            match state {
+                LoadState::Unloaded => return Err(SdkError::NotLoaded),
+                LoadState::Evicted => self
+                    .handle
+                    .write()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .ensure_runnable()?,
+                LoadState::Loaded => {}
+            }
         }
+
+        let handle = self.handle.read().unwrap_or_else(|e| e.into_inner());
 
         // Convert to core StreamConfig
         let core_config = CoreStreamConfig {
@@ -4395,12 +5121,15 @@ impl XybridModel {
 
     /// Unload the model from memory.
     ///
-    /// The model can be reloaded by creating a new ModelLoader.
+    /// The model can be reloaded by creating a new ModelLoader. This is the
+    /// explicit, permanent form: unlike an automatic release, an unloaded
+    /// model does *not* reload itself, and further runs fail with
+    /// [`SdkError::NotLoaded`].
     pub fn unload(&self) -> SdkResult<()> {
         // Recover from poisoned RwLock to prevent permanent lock errors
         let mut handle = self.handle.write().unwrap_or_else(|e| e.into_inner());
 
-        handle.loaded = false;
+        handle.state = LoadState::Unloaded;
         // Clear the session cache (drop executor and recreate empty)
         handle.executor = Arc::new(Mutex::new(TemplateExecutor::default()));
 
@@ -4422,6 +5151,9 @@ impl Clone for XybridModel {
             // through one mutex (see field docs).
             current_run: self.current_run.clone(),
             speculative: self.speculative.clone(),
+            // Shared too: a run on any clone must count as use of the model
+            // the registry knows about, not of this clone.
+            last_accessed: self.last_accessed.clone(),
         }
     }
 }
@@ -4429,6 +5161,38 @@ impl Clone for XybridModel {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(feature = "huggingface")]
+    #[test]
+    fn blob_ids_prefer_lfs_sha256_and_skip_non_files() {
+        let entries: Vec<serde_json::Value> = serde_json::from_str(
+            r#"[
+                {"type":"file","path":"model.gguf","oid":"1111111111111111111111111111111111111111",
+                 "lfs":{"oid":"7e6f72643caafc9a68256686638c4d7916f2cec76d1df478d4c3ddcd95a6aed4"}},
+                {"type":"file","path":"config.json","oid":"2222222222222222222222222222222222222222"},
+                {"type":"directory","path":"onnx","oid":"3333333333333333333333333333333333333333"},
+                {"type":"file","path":"broken"}
+            ]"#,
+        )
+        .unwrap();
+
+        let ids = blob_ids_from_tree_entries(&entries);
+        assert_eq!(
+            ids.get("model.gguf").map(String::as_str),
+            Some("7e6f72643caafc9a68256686638c4d7916f2cec76d1df478d4c3ddcd95a6aed4"),
+            "LFS files map to their sha256, not the git oid"
+        );
+        assert_eq!(
+            ids.get("config.json").map(String::as_str),
+            Some("2222222222222222222222222222222222222222"),
+            "non-LFS files map to their git blob sha1"
+        );
+        assert!(!ids.contains_key("onnx"), "directories are skipped");
+        assert!(
+            !ids.contains_key("broken"),
+            "entries without a hash are skipped"
+        );
+    }
 
     #[test]
     fn distinct_huggingface_commits_do_not_share_materialized_cache() {
@@ -4517,6 +5281,362 @@ mod tests {
     fn browser_only_model_files_are_not_essential() {
         assert!(!ModelLoader::is_essential_file("model.tflite"));
         assert!(!ModelLoader::is_essential_file("model.litertlm"));
+    }
+
+    // -- Auto-release state machine ----------------------------------------
+    //
+    // The contract these pin down: an auto-released model is *not* a broken
+    // model. It reports `is_loaded() == false`, it has genuinely dropped its
+    // executor, and it still runs — the next run reloads it. A user-unloaded
+    // model keeps the old semantics and keeps failing.
+
+    #[test]
+    fn eviction_keeps_what_a_reload_needs() {
+        let model = test_loaded_model(false);
+        let mut handle = model.handle.write().expect("fresh handle is unpoisoned");
+        let model_dir = handle.model_dir.clone();
+        let model_id = handle.metadata.model_id.clone();
+
+        handle.evict();
+
+        assert_eq!(handle.state, LoadState::Evicted);
+        assert_eq!(handle.model_dir, model_dir, "reload source must survive");
+        assert_eq!(handle.metadata.model_id, model_id, "metadata must survive");
+    }
+
+    #[test]
+    fn evicted_model_runs_again_without_the_caller_reloading_it() {
+        let model = test_loaded_model(false);
+        model.handle.write().expect("unpoisoned").evict();
+        assert_eq!(model.load_state(), LoadState::Evicted);
+        assert!(!model.is_loaded());
+
+        model
+            .handle
+            .write()
+            .expect("unpoisoned")
+            .ensure_runnable()
+            .expect("an evicted model is runnable — it reloads itself");
+
+        assert_eq!(model.load_state(), LoadState::Loaded);
+    }
+
+    #[test]
+    fn unloaded_model_still_reports_not_loaded() {
+        let model = test_loaded_model(false);
+        model.unload().expect("unload succeeds");
+        assert_eq!(model.load_state(), LoadState::Unloaded);
+
+        let err = model
+            .handle
+            .write()
+            .expect("unpoisoned")
+            .ensure_runnable()
+            .expect_err("an unloaded model must keep erroring");
+
+        assert!(matches!(err, SdkError::NotLoaded));
+        assert_eq!(
+            model.load_state(),
+            LoadState::Unloaded,
+            "a failed guard must not resurrect the model"
+        );
+    }
+
+    #[test]
+    fn unload_after_eviction_is_still_terminal() {
+        let model = test_loaded_model(false);
+        model.handle.write().expect("unpoisoned").evict();
+        model.unload().expect("unload succeeds");
+
+        assert_eq!(model.load_state(), LoadState::Unloaded);
+        assert!(matches!(
+            model.handle.write().expect("unpoisoned").ensure_runnable(),
+            Err(SdkError::NotLoaded)
+        ));
+    }
+
+    #[test]
+    fn running_an_evicted_model_gets_past_the_guard() {
+        let model = test_loaded_model(false);
+        model.handle.write().expect("unpoisoned").evict();
+
+        let envelope = Envelope {
+            kind: xybrid_core::ir::EnvelopeKind::Text("hello".to_string()),
+            metadata: std::collections::HashMap::new(),
+        };
+
+        // The reload itself can't succeed here — this fixture's `model.onnx`
+        // doesn't exist on disk — but the failure must come from *execution*,
+        // not from the not-loaded guard. That distinction is the whole
+        // difference between evicted and unloaded.
+        assert!(
+            !matches!(model.run(&envelope, None), Err(SdkError::NotLoaded)),
+            "evicted model was refused by the not-loaded guard"
+        );
+        assert_eq!(model.load_state(), LoadState::Loaded);
+    }
+
+    #[test]
+    fn clones_share_one_eviction_state() {
+        let model = test_loaded_model(false);
+        let clone = model.clone();
+        model.handle.write().expect("unpoisoned").evict();
+        assert_eq!(clone.load_state(), LoadState::Evicted);
+    }
+
+    #[test]
+    fn a_busy_model_is_skipped_rather_than_waited_on() {
+        use std::sync::mpsc;
+
+        let busy = test_loaded_model(false);
+        let handle = busy.handle.clone();
+        let (locked_tx, locked_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+
+        // Stand in for an in-flight run: the run paths hold this same write
+        // lock for the whole inference.
+        let worker = std::thread::spawn(move || {
+            let _guard = handle.write().expect("unpoisoned");
+            locked_tx.send(()).expect("receiver alive");
+            release_rx.recv().expect("sender alive");
+        });
+        locked_rx.recv().expect("worker locked the handle");
+
+        assert!(
+            !crate::model_registry::try_evict_handle(&busy.handle, "busy-model"),
+            "eviction must not touch a model with a run in flight"
+        );
+
+        release_tx.send(()).expect("worker alive");
+        worker.join().expect("worker finished cleanly");
+
+        // Only now is it safe to read the state: `load_state()` takes a
+        // *blocking* read lock, so asking while the worker still held the
+        // write lock would deadlock the test rather than fail it.
+        assert_eq!(
+            busy.load_state(),
+            LoadState::Loaded,
+            "the skipped eviction must have left the model untouched"
+        );
+
+        assert!(
+            crate::model_registry::try_evict_handle(&busy.handle, "busy-model"),
+            "the same model is evictable once the run finishes"
+        );
+        assert_eq!(busy.load_state(), LoadState::Evicted);
+    }
+
+    /// An evicted *speculative* model has real weights on disk. It must reload
+    /// them, not fall back to the gateway — otherwise the first auto-release
+    /// would quietly convert a downloaded model into a permanently
+    /// cloud-served one, and every later run would pay a network round trip.
+    #[test]
+    fn eviction_does_not_send_a_downloaded_speculative_model_back_to_cloud() {
+        let model = XybridModel {
+            speculative: Some(Arc::new(SpeculativeDownload::default())),
+            ..test_loaded_model(false)
+        };
+        // The download landed, so runs are local.
+        assert!(!model.cloud_serve(), "a loaded local handle serves locally");
+
+        model.handle.write().expect("unpoisoned").evict();
+
+        assert_eq!(model.load_state(), LoadState::Evicted);
+        assert!(
+            !model.cloud_serve(),
+            "an evicted speculative model must reload locally, not route to cloud"
+        );
+    }
+
+    /// A speculative model whose weights never arrived still serves from the
+    /// gateway — the fix above must not disable speculation itself.
+    #[test]
+    fn a_never_loaded_speculative_model_still_serves_from_cloud() {
+        let model = XybridModel {
+            speculative: Some(Arc::new(SpeculativeDownload::default())),
+            ..test_loaded_model(false)
+        };
+        model.handle.write().expect("unpoisoned").state = LoadState::Unloaded;
+
+        assert!(model.cloud_serve(), "weights never landed -> cloud serves");
+    }
+
+    /// Opening a stream hands the session this model's executor, which then
+    /// materializes the weights into it. If the handle stayed `Evicted` the
+    /// model would be resident *and* unevictable forever, since auto-release
+    /// only touches `Loaded` handles.
+    #[test]
+    fn streaming_an_evicted_model_promotes_it_back_to_loaded() {
+        let model = test_loaded_model(true);
+        model.handle.write().expect("unpoisoned").evict();
+        assert_eq!(model.load_state(), LoadState::Evicted);
+
+        // The session itself cannot start from this fixture (no real weights
+        // on disk), but the guard must already have promoted the handle, and
+        // must not have refused the stream outright.
+        assert!(
+            !matches!(
+                model.stream(StreamConfig::default()),
+                Err(SdkError::NotLoaded)
+            ),
+            "an evicted model may still open a stream"
+        );
+        assert_eq!(
+            model.load_state(),
+            LoadState::Loaded,
+            "a streamed model must be evictable again once the stream ends"
+        );
+    }
+
+    /// Only models that actually hold weights may count toward an eviction
+    /// budget. Counting an evicted, unloaded, or never-loaded handle spends
+    /// budget that frees nothing.
+    #[test]
+    fn only_resident_models_count_toward_the_eviction_budget() {
+        let loaded = test_loaded_model(false);
+        assert!(crate::model_registry::holds_weights(&loaded.handle));
+
+        let evicted = test_loaded_model(false);
+        evicted.handle.write().expect("unpoisoned").evict();
+        assert!(!crate::model_registry::holds_weights(&evicted.handle));
+
+        let unloaded = test_loaded_model(false);
+        unloaded.unload().expect("unload succeeds");
+        assert!(!crate::model_registry::holds_weights(&unloaded.handle));
+
+        // A model mid-run holds its own write lock. It is resident, so it
+        // counts; `try_evict_handle` skips it a moment later.
+        let busy = test_loaded_model(false);
+        let guard = busy.handle.write().expect("unpoisoned");
+        assert!(crate::model_registry::holds_weights(&busy.handle));
+        drop(guard);
+    }
+
+    /// `Warn` keeps the most-recently-used model and evicts the rest — but
+    /// only counting models that are actually resident. One loaded model
+    /// alongside an unloadable registry entry is still *one* loaded model, so
+    /// nothing may be evicted; the naive count would see two and take the
+    /// sole loaded one.
+    #[test]
+    fn warn_pressure_ignores_unloadable_registry_entries() {
+        use crate::model_registry::Candidate;
+        use xybrid_core::device::MemoryPressure;
+
+        // The resident model is the *stalest*, so a budget computed over the
+        // unfiltered list would spend its one slot on exactly this model.
+        let only_loaded = test_loaded_model(false);
+        let fresher_but_evicted = test_loaded_model(false);
+        fresher_but_evicted
+            .handle
+            .write()
+            .expect("unpoisoned")
+            .evict();
+
+        // Stalest first, exactly as `ranked_candidates` would order them.
+        let ranked = vec![
+            Candidate::for_test(&only_loaded.handle, "only-loaded", 1),
+            Candidate::for_test(&fresher_but_evicted.handle, "fresher-evicted", 2),
+        ];
+
+        let evicted = crate::model_registry::sweep(ranked, &ConstantPressure(MemoryPressure::Warn));
+
+        assert_eq!(evicted, 0, "one resident model under Warn is never evicted");
+        assert_eq!(
+            only_loaded.load_state(),
+            LoadState::Loaded,
+            "the sole loaded model must survive"
+        );
+    }
+
+    /// With two genuinely resident models, `Warn` does evict the stalest —
+    /// the guard above must not disable the policy outright.
+    #[test]
+    fn warn_pressure_still_evicts_the_stalest_of_two_resident_models() {
+        use crate::model_registry::Candidate;
+        use xybrid_core::device::MemoryPressure;
+
+        let stale = test_loaded_model(false);
+        let fresh = test_loaded_model(false);
+        let ranked = vec![
+            Candidate::for_test(&stale.handle, "stale", 1),
+            Candidate::for_test(&fresh.handle, "fresh", 2),
+        ];
+
+        let evicted = crate::model_registry::sweep(ranked, &ConstantPressure(MemoryPressure::Warn));
+
+        assert_eq!(evicted, 1);
+        assert_eq!(stale.load_state(), LoadState::Evicted);
+        assert_eq!(fresh.load_state(), LoadState::Loaded);
+    }
+
+    /// Fixed pressure reading, for sweeps that should not depend on the host.
+    #[derive(Debug)]
+    struct ConstantPressure(xybrid_core::device::MemoryPressure);
+
+    impl xybrid_core::device::ResourceSnapshotProvider for ConstantPressure {
+        fn current_snapshot(
+            &self,
+            _max_age: std::time::Duration,
+        ) -> xybrid_core::device::ResourceSnapshot {
+            xybrid_core::device::ResourceSnapshot {
+                memory_pressure: self.0,
+                ..Default::default()
+            }
+        }
+    }
+
+    #[test]
+    fn evicting_an_already_evicted_model_is_a_no_op() {
+        let model = test_loaded_model(false);
+        assert!(crate::model_registry::try_evict_handle(
+            &model.handle,
+            "test-model"
+        ));
+        assert!(
+            !crate::model_registry::try_evict_handle(&model.handle, "test-model"),
+            "an already-released model is not released twice"
+        );
+    }
+
+    #[test]
+    fn release_memory_sees_registered_models() {
+        let model = test_loaded_model(false);
+        crate::model_registry::register(&model.model_id, &model.handle, &model.last_accessed, None);
+
+        assert!(
+            crate::release_memory() >= 1,
+            "a registered idle model must be releasable"
+        );
+        assert_eq!(model.load_state(), LoadState::Evicted);
+    }
+
+    #[test]
+    fn auto_release_is_opt_in_per_load() {
+        let plain = ModelLoader::from_registry("test-model");
+        assert_eq!(plain.auto_release_override(), None);
+
+        let opted_in = ModelLoader::from_registry("test-model").with_auto_release(true);
+        assert_eq!(
+            opted_in.auto_release_override(),
+            Some(AutoReleasePolicy::enabled())
+        );
+    }
+
+    #[test]
+    fn declared_size_is_read_from_either_metadata_key() {
+        let mut metadata = ModelMetadata::onnx("sized", "1.0", "model.onnx");
+        assert_eq!(declared_size_mb(&metadata), None);
+
+        metadata
+            .metadata
+            .insert("size_mb".to_string(), serde_json::json!(512));
+        assert_eq!(declared_size_mb(&metadata), Some(512));
+
+        let mut by_bytes = ModelMetadata::onnx("sized", "1.0", "model.onnx");
+        by_bytes
+            .metadata
+            .insert("size_bytes".to_string(), serde_json::json!(4 * 1024 * 1024));
+        assert_eq!(declared_size_mb(&by_bytes), Some(4));
     }
 
     #[test]
@@ -4841,6 +5961,67 @@ mod tests {
         );
     }
 
+    /// Every sampling knob the cloud request shape can express must land in
+    /// metadata — `top_p` and `stop_sequences` used to be dropped on *every*
+    /// cloud path, so a caller's nucleus threshold and stop words never
+    /// reached the gateway.
+    #[test]
+    fn build_envelope_forwards_top_p_and_stop_sequences() {
+        let input = Envelope::new(xybrid_core::ir::EnvelopeKind::Text("hi".to_string()));
+        let config = GenerationConfig {
+            top_p: 0.72,
+            stop_sequences: vec!["STOP".to_string(), "END".to_string()],
+            ..Default::default()
+        };
+        let cloud = build_speculative_cloud_envelope("lfm2.5-350m", &input, Some(&config));
+        assert_eq!(
+            cloud.metadata.get("top_p").map(String::as_str),
+            Some("0.72")
+        );
+        assert_eq!(
+            cloud
+                .metadata
+                .get(STOP_SEQUENCES_METADATA_KEY)
+                .map(String::as_str),
+            Some(r#"["STOP","END"]"#)
+        );
+    }
+
+    /// An empty stop list is not an instruction — writing `[]` would be noise
+    /// the adapter then has to special-case.
+    #[test]
+    fn build_envelope_omits_empty_stop_sequences() {
+        let input = Envelope::new(xybrid_core::ir::EnvelopeKind::Text("hi".to_string()));
+        let config = GenerationConfig::default();
+        assert!(config.stop_sequences.is_empty(), "guard the premise");
+        let cloud = build_speculative_cloud_envelope("lfm2.5-350m", &input, Some(&config));
+        assert!(!cloud.metadata.contains_key(STOP_SEQUENCES_METADATA_KEY));
+    }
+
+    /// Metadata written straight onto the envelope targets the cloud leg
+    /// specifically, so it outranks the generic `GenerationConfig`.
+    #[test]
+    fn build_envelope_lets_caller_metadata_outrank_generation_config() {
+        let mut input = Envelope::new(xybrid_core::ir::EnvelopeKind::Text("hi".to_string()));
+        input
+            .metadata
+            .insert("max_tokens".to_string(), "7".to_string());
+        input
+            .metadata
+            .insert("top_p".to_string(), "0.1".to_string());
+        let config = GenerationConfig {
+            max_tokens: 999,
+            top_p: 0.95,
+            ..Default::default()
+        };
+        let cloud = build_speculative_cloud_envelope("lfm2.5-350m", &input, Some(&config));
+        assert_eq!(
+            cloud.metadata.get("max_tokens").map(String::as_str),
+            Some("7")
+        );
+        assert_eq!(cloud.metadata.get("top_p").map(String::as_str), Some("0.1"));
+    }
+
     #[test]
     fn build_envelope_does_not_clobber_caller_backend() {
         let mut input = Envelope::new(xybrid_core::ir::EnvelopeKind::Text("hi".to_string()));
@@ -4868,7 +6049,7 @@ mod tests {
                 executor: Arc::new(Mutex::new(TemplateExecutor::default())),
                 metadata: ModelMetadata::onnx("spec-model", "", ""),
                 model_dir: PathBuf::from("."),
-                loaded: false,
+                state: LoadState::Unloaded,
             })),
             model_id: "spec-model".to_string(),
             version: String::new(),
@@ -4877,6 +6058,7 @@ mod tests {
             default_generation_config: GenerationConfig::default(),
             current_run: Arc::new(Mutex::new(None)),
             speculative: Some(Arc::new(SpeculativeDownload::default())),
+            last_accessed: Arc::new(AtomicU64::new(crate::model_registry::now_ms())),
         };
         assert!(speculating.cloud_serve(), "not loaded -> cloud");
 
@@ -4885,7 +6067,7 @@ mod tests {
             .handle
             .write()
             .unwrap_or_else(|e| e.into_inner())
-            .loaded = true;
+            .state = LoadState::Loaded;
         assert!(
             !speculating.cloud_serve(),
             "loaded local handle -> no speculation"
@@ -4910,7 +6092,7 @@ mod tests {
                 executor: Arc::new(Mutex::new(TemplateExecutor::default())),
                 metadata: ModelMetadata::onnx("spec-model", "", ""),
                 model_dir: PathBuf::from("."),
-                loaded: false,
+                state: LoadState::Unloaded,
             })),
             model_id: "spec-model".to_string(),
             version: String::new(),
@@ -4920,6 +6102,7 @@ mod tests {
             default_generation_config: GenerationConfig::default(),
             current_run: Arc::new(Mutex::new(None)),
             speculative: Some(Arc::new(SpeculativeDownload::default())),
+            last_accessed: Arc::new(AtomicU64::new(crate::model_registry::now_ms())),
         };
 
         // Pre-swap: the optimistic cached values stand (the cloud leg streams
@@ -4933,7 +6116,7 @@ mod tests {
                 .write()
                 .unwrap_or_else(|e| e.into_inner());
             guard.metadata = real;
-            guard.loaded = true;
+            guard.state = LoadState::Loaded;
         }
 
         assert!(
@@ -4964,7 +6147,7 @@ mod tests {
                 executor: Arc::new(Mutex::new(TemplateExecutor::default())),
                 metadata: ModelMetadata::onnx("spec-model", "", ""),
                 model_dir: PathBuf::from("."),
-                loaded: false,
+                state: LoadState::Unloaded,
             })),
             model_id: "spec-model".to_string(),
             version: String::new(),
@@ -4973,6 +6156,7 @@ mod tests {
             default_generation_config: GenerationConfig::default(),
             current_run: Arc::new(Mutex::new(None)),
             speculative: Some(Arc::clone(&download)),
+            last_accessed: Arc::new(AtomicU64::new(crate::model_registry::now_ms())),
         };
 
         // Download already landed, so a token-less failure can retry locally.
@@ -5391,6 +6575,8 @@ mod tests {
                 index: 0,
                 cumulative_text: self.response_text.clone(),
                 finish_reason: Some("stop".to_string()),
+                tool_calls: Vec::new(),
+                raw_text: None,
             };
             on_token(token).map_err(|e| {
                 xybrid_core::runtime_adapter::AdapterError::InferenceFailed(format!("{}", e))
@@ -5490,7 +6676,7 @@ mod tests {
                 executor: Arc::new(Mutex::new(TemplateExecutor::default())),
                 metadata,
                 model_dir: PathBuf::from("."),
-                loaded: true,
+                state: LoadState::Loaded,
             })),
             model_id: "local-test-model".to_string(),
             version: "1.0".to_string(),
@@ -5499,6 +6685,7 @@ mod tests {
             default_generation_config,
             current_run: Arc::new(Mutex::new(None)),
             speculative: None,
+            last_accessed: Arc::new(AtomicU64::new(crate::model_registry::now_ms())),
         }
     }
 
@@ -5511,7 +6698,7 @@ mod tests {
                 executor: Arc::new(Mutex::new(TemplateExecutor::default())),
                 metadata,
                 model_dir: PathBuf::from("."),
-                loaded: true,
+                state: LoadState::Loaded,
             })),
             model_id,
             version,
@@ -5520,6 +6707,7 @@ mod tests {
             default_generation_config,
             current_run: Arc::new(Mutex::new(None)),
             speculative: None,
+            last_accessed: Arc::new(AtomicU64::new(crate::model_registry::now_ms())),
         }
     }
 
@@ -5748,7 +6936,7 @@ mod tests {
             default_metrics(),
             Some(default_signal()),
             None,
-            false,
+            None,
             &mut on_token,
             &mut on_seam,
         )
@@ -5765,6 +6953,161 @@ mod tests {
         let tokens = collected.lock().unwrap().clone();
         assert_eq!(tokens.len(), 1);
         assert_eq!(tokens[0], "hello from cloud");
+    }
+
+    /// Regression: the explicit-adapter fallback path used to hand
+    /// `dispatch_after_local` the untouched envelope, so a caller's
+    /// `GenerationConfig` never reached `CloudRuntimeAdapter` — which reads its
+    /// settings from metadata alone. The request still succeeded with
+    /// plausible-looking output generated under the gateway's defaults, so
+    /// nothing signalled that `max_tokens`/`temperature`/`top_p`/
+    /// `stop_sequences` had been dropped.
+    #[test]
+    fn dispatch_after_local_forwards_generation_config_to_the_cloud_envelope() {
+        let cloud = FakeCloudAdapter::new("hello from cloud");
+        let authority = FakeAuthority::allow();
+        let envelope = text_envelope("write me a haiku");
+        let mut on_token =
+            |_: xybrid_core::runtime_adapter::types::PartialToken| -> Result<(), Box<dyn std::error::Error + Send + Sync>> { Ok(()) };
+        let mut on_seam = |_s: SeamInfo| {};
+        let local_result: SdkResult<InferenceResult> = Err(SdkError::AbortedForCloudFallback {
+            reason: xybrid_core::abort::AbortReason::StressMemory,
+        });
+        let config = GenerationConfig {
+            max_tokens: 13,
+            temperature: 0.31,
+            top_p: 0.72,
+            stop_sequences: vec!["STOP".to_string(), "END".to_string()],
+            ..Default::default()
+        };
+
+        dispatch_after_local(
+            local_result,
+            &envelope,
+            &cloud,
+            "corr-genconfig".to_string(),
+            "test-model",
+            3,
+            100,
+            None,
+            &authority,
+            default_metrics(),
+            Some(default_signal()),
+            None,
+            Some(&config),
+            &mut on_token,
+            &mut on_seam,
+        )
+        .expect("retry should succeed");
+
+        let calls = cloud.calls();
+        assert_eq!(calls.len(), 1);
+        let sent = &calls[0].metadata;
+        assert_eq!(sent.get("max_tokens").map(String::as_str), Some("13"));
+        assert_eq!(sent.get("temperature").map(String::as_str), Some("0.31"));
+        assert_eq!(sent.get("top_p").map(String::as_str), Some("0.72"));
+        assert_eq!(
+            sent.get(STOP_SEQUENCES_METADATA_KEY).map(String::as_str),
+            Some(r#"["STOP","END"]"#)
+        );
+    }
+
+    /// No config means no invented settings: the fallback leg must not stamp
+    /// `GenerationConfig::default()` onto the envelope, which would pin
+    /// `temperature = 0.0` on callers who never asked for greedy decoding.
+    #[test]
+    fn dispatch_after_local_writes_no_sampling_metadata_without_a_config() {
+        let cloud = FakeCloudAdapter::new("hello from cloud");
+        let authority = FakeAuthority::allow();
+        let envelope = text_envelope("write me a haiku");
+        let mut on_token =
+            |_: xybrid_core::runtime_adapter::types::PartialToken| -> Result<(), Box<dyn std::error::Error + Send + Sync>> { Ok(()) };
+        let mut on_seam = |_s: SeamInfo| {};
+        let local_result: SdkResult<InferenceResult> = Err(SdkError::AbortedForCloudFallback {
+            reason: xybrid_core::abort::AbortReason::StressMemory,
+        });
+
+        dispatch_after_local(
+            local_result,
+            &envelope,
+            &cloud,
+            "corr-no-genconfig".to_string(),
+            "test-model",
+            3,
+            100,
+            None,
+            &authority,
+            default_metrics(),
+            Some(default_signal()),
+            None,
+            None,
+            &mut on_token,
+            &mut on_seam,
+        )
+        .expect("retry should succeed");
+
+        let calls = cloud.calls();
+        assert_eq!(calls.len(), 1);
+        let sent = &calls[0].metadata;
+        for key in [
+            "max_tokens",
+            "temperature",
+            "top_p",
+            STOP_SEQUENCES_METADATA_KEY,
+        ] {
+            assert!(
+                !sent.contains_key(key),
+                "unexpected `{key}` on the cloud envelope"
+            );
+        }
+    }
+
+    /// Cloud-targeted metadata already on the envelope outranks the generic
+    /// `GenerationConfig` on the fallback leg too, matching the speculative path.
+    #[test]
+    fn dispatch_after_local_lets_envelope_metadata_outrank_generation_config() {
+        let cloud = FakeCloudAdapter::new("hello from cloud");
+        let authority = FakeAuthority::allow();
+        let mut envelope = text_envelope("write me a haiku");
+        envelope
+            .metadata
+            .insert("max_tokens".to_string(), "7".to_string());
+        let mut on_token =
+            |_: xybrid_core::runtime_adapter::types::PartialToken| -> Result<(), Box<dyn std::error::Error + Send + Sync>> { Ok(()) };
+        let mut on_seam = |_s: SeamInfo| {};
+        let local_result: SdkResult<InferenceResult> = Err(SdkError::AbortedForCloudFallback {
+            reason: xybrid_core::abort::AbortReason::StressMemory,
+        });
+        let config = GenerationConfig {
+            max_tokens: 999,
+            ..Default::default()
+        };
+
+        dispatch_after_local(
+            local_result,
+            &envelope,
+            &cloud,
+            "corr-precedence".to_string(),
+            "test-model",
+            3,
+            100,
+            None,
+            &authority,
+            default_metrics(),
+            Some(default_signal()),
+            None,
+            Some(&config),
+            &mut on_token,
+            &mut on_seam,
+        )
+        .expect("retry should succeed");
+
+        let calls = cloud.calls();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(
+            calls[0].metadata.get("max_tokens").map(String::as_str),
+            Some("7")
+        );
     }
 
     #[test]
@@ -5935,7 +7278,7 @@ mod tests {
             default_metrics(),
             Some(default_signal()),
             None,
-            false,
+            None,
             &mut on_token,
             &mut on_seam,
         )
@@ -5987,6 +7330,14 @@ mod tests {
         let local_result: SdkResult<InferenceResult> = Err(SdkError::AbortedForCloudFallback {
             reason: xybrid_core::abort::AbortReason::StressMemory,
         });
+        let tool_config = GenerationConfig {
+            tools: vec![xybrid_core::gateway::Tool::function(
+                "get_weather",
+                "Current weather for a city.",
+                serde_json::json!({"type": "object", "properties": {}}),
+            )],
+            ..Default::default()
+        };
 
         let result = dispatch_after_local(
             local_result,
@@ -6001,7 +7352,7 @@ mod tests {
             default_metrics(),
             Some(default_signal()),
             None,
-            true,
+            Some(&tool_config),
             &mut on_token,
             &mut on_seam,
         );
@@ -6066,7 +7417,7 @@ mod tests {
             default_metrics(),
             Some(default_signal()),
             None,
-            false,
+            None,
             &mut on_token,
             &mut on_seam,
         );
@@ -6136,7 +7487,7 @@ mod tests {
             default_metrics(),
             Some(default_signal()),
             None,
-            false,
+            None,
             &mut on_token,
             &mut on_seam,
         )
@@ -6185,7 +7536,7 @@ mod tests {
             default_metrics(),
             Some(default_signal()),
             Some(cancellation),
-            false,
+            None,
             &mut on_token,
             &mut on_seam,
         );
@@ -6326,7 +7677,7 @@ mod tests {
                 executor: Arc::new(Mutex::new(executor)),
                 metadata,
                 model_dir: PathBuf::from("."),
-                loaded: true,
+                state: LoadState::Loaded,
             })),
             model_id: "local-test-model".to_string(),
             version: "1.0".to_string(),
@@ -6335,6 +7686,7 @@ mod tests {
             default_generation_config,
             current_run: Arc::new(Mutex::new(None)),
             speculative: None,
+            last_accessed: Arc::new(AtomicU64::new(crate::model_registry::now_ms())),
         }
     }
 
@@ -6854,7 +8206,7 @@ mod tests {
             default_metrics(),
             Some(default_signal()),
             None,
-            false,
+            None,
             &mut on_token,
             &mut on_seam,
         );
@@ -6913,7 +8265,7 @@ mod tests {
             default_metrics(),
             Some(default_signal()),
             None,
-            false,
+            None,
             &mut on_token,
             &mut on_seam,
         )
@@ -6951,7 +8303,7 @@ mod tests {
             default_metrics(),
             Some(default_signal()),
             None,
-            false,
+            None,
             &mut on_token,
             &mut on_seam,
         )
@@ -6989,7 +8341,7 @@ mod tests {
             default_metrics(),
             Some(default_signal()),
             None,
-            false,
+            None,
             &mut on_token,
             &mut on_seam,
         )
@@ -7029,7 +8381,7 @@ mod tests {
             default_metrics(),
             Some(default_signal()),
             None,
-            false,
+            None,
             &mut on_token,
             &mut on_seam,
         );
@@ -7075,7 +8427,7 @@ mod tests {
             default_metrics(),
             Some(default_signal()),
             None,
-            false,
+            None,
             &mut on_token,
             &mut on_seam,
         );

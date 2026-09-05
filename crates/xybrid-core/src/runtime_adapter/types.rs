@@ -11,13 +11,52 @@
 //! - `GenerationConfig` - Generation parameters for LLM inference
 //! - `LlmConfig` - Configuration for loading a local LLM
 
-use crate::gateway::Tool;
+use crate::gateway::{Tool, ToolCall};
 use crate::ir::MessageRole;
 use crate::{
     conversation::ConversationContext,
     ir::{Envelope, EnvelopeKind, ImageDimensions, ImageFormat, ImageSource},
     runtime_adapter::AdapterError,
 };
+
+/// Envelope-metadata key carrying stop sequences.
+///
+/// The metadata map is `String`-valued, so a list needs an encoding.
+/// [`encode_stop_sequences`] writes a JSON array and [`parse_stop_sequences`]
+/// reads one; both the cloud adapter and the local LLM strategy go through
+/// that pair, so one envelope yields the same stop list either side of the
+/// local/cloud seam.
+pub const STOP_SEQUENCES_METADATA_KEY: &str = "stop_sequences";
+
+/// Decode the [`STOP_SEQUENCES_METADATA_KEY`] metadata value.
+///
+/// A JSON array of strings is the canonical form and round-trips any sequence
+/// exactly — including the whitespace-only and comma-bearing values a
+/// delimiter-based encoding mangles (`"\n\n"` would trim away to nothing).
+///
+/// Anything else is read as the legacy comma-separated list, trimming each
+/// entry and dropping empties, so hand-written metadata like
+/// `stop_sequences = "<|im_end|>,<|im_start|>"` keeps working. That legacy form
+/// stays lossy by construction; write JSON for anything whitespace- or
+/// comma-bearing.
+pub fn parse_stop_sequences(value: &str) -> Vec<String> {
+    if let Ok(parsed) = serde_json::from_str::<Vec<String>>(value) {
+        return parsed;
+    }
+    value
+        .split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect()
+}
+
+/// Encode stop sequences for [`STOP_SEQUENCES_METADATA_KEY`] as a JSON array.
+///
+/// Lossless: [`parse_stop_sequences`] returns exactly what went in.
+pub fn encode_stop_sequences(stop_sequences: &[String]) -> String {
+    serde_json::to_string(stop_sequences).expect("a Vec<String> always serialises to JSON")
+}
+
 use serde::{Deserialize, Serialize};
 
 // =============================================================================
@@ -38,8 +77,27 @@ pub struct PartialToken {
     /// Cumulative text generated so far (all tokens concatenated)
     pub cumulative_text: String,
     /// Finish reason if this is the final token, None otherwise.
-    /// Values: "stop" (hit stop sequence/EOS), "length" (hit max_tokens)
+    /// Values: "stop" (hit stop sequence/EOS), "length" (hit max_tokens),
+    /// "tool_calls" (the turn ended on a parseable tool-call block).
     pub finish_reason: Option<String>,
+    /// Tool calls parsed from the completed turn. Only ever populated on the
+    /// **terminal** token (the one carrying `finish_reason`), and only for a
+    /// request that offered tools.
+    ///
+    /// A streaming caller dispatches on this instead of re-parsing the token
+    /// text: the protocol blocks are suppressed from the emitted stream, so
+    /// the raw call text never reaches the callback in the first place.
+    /// Empty on every mid-stream token and on turns that emitted no call.
+    pub tool_calls: Vec<ToolCall>,
+    /// The completed turn's raw output text, tool-call block included —
+    /// exactly what `Envelope::tool_results` wants as `prior_assistant_text`.
+    ///
+    /// `Some` only alongside a non-empty [`Self::tool_calls`], which is the
+    /// only situation it is useful in. It exists because `cumulative_text`
+    /// deliberately reports the *emitted* text (protocol blocks suppressed),
+    /// so without this a streaming caller would have no way to compose the
+    /// continuation turn.
+    pub raw_text: Option<String>,
 }
 
 impl PartialToken {
@@ -51,6 +109,8 @@ impl PartialToken {
             index,
             cumulative_text,
             finish_reason: None,
+            tool_calls: Vec::new(),
+            raw_text: None,
         }
     }
 
@@ -63,6 +123,22 @@ impl PartialToken {
     /// Mark this as the final token with the given finish reason.
     pub fn with_finish_reason(mut self, reason: impl Into<String>) -> Self {
         self.finish_reason = Some(reason.into());
+        self
+    }
+
+    /// Attach the tool calls parsed from the completed turn, plus the raw
+    /// turn text needed to compose the continuation. Terminal tokens only —
+    /// see [`PartialToken::tool_calls`] and [`PartialToken::raw_text`].
+    ///
+    /// A call-free turn is left untouched: `raw_text` is only meaningful next
+    /// to calls, and stamping it unconditionally would put the unsuppressed
+    /// protocol text on every terminal token for no consumer.
+    pub fn with_tool_calls(mut self, calls: Vec<ToolCall>, raw_text: &str) -> Self {
+        if calls.is_empty() {
+            return self;
+        }
+        self.tool_calls = calls;
+        self.raw_text = Some(raw_text.to_string());
         self
     }
 
@@ -729,6 +805,49 @@ mod tests {
                 parameters: None,
             },
         }
+    }
+
+    /// Regression: the metadata bridge used a comma-delimited encoding, which
+    /// silently corrupted the most common stop sequences of all. `"\n\n"`
+    /// trimmed away to empty and was dropped entirely, so a cloud leg that
+    /// should have stopped at a blank line ran on to `max_tokens`; `"\nUser:"`
+    /// arrived as `"User:"`; and anything containing a comma was split in two.
+    /// The local leg kept the caller's exact values, so the two legs stopped
+    /// on different text.
+    #[test]
+    fn stop_sequences_round_trip_losslessly() {
+        let hostile = vec![
+            "\n\n".to_string(),
+            "\nUser:".to_string(),
+            "one, two".to_string(),
+            "  ".to_string(),
+            "<|im_end|>".to_string(),
+        ];
+
+        assert_eq!(
+            parse_stop_sequences(&encode_stop_sequences(&hostile)),
+            hostile
+        );
+    }
+
+    #[test]
+    fn stop_sequences_round_trip_an_empty_list() {
+        let empty: Vec<String> = Vec::new();
+        assert_eq!(parse_stop_sequences(&encode_stop_sequences(&empty)), empty);
+    }
+
+    /// Hand-written metadata predates the JSON encoding and must keep working.
+    #[test]
+    fn stop_sequences_still_read_the_legacy_comma_form() {
+        assert_eq!(
+            parse_stop_sequences("<|im_end|>,<|im_start|>"),
+            vec!["<|im_end|>".to_string(), "<|im_start|>".to_string()]
+        );
+        assert_eq!(
+            parse_stop_sequences(" STOP , END "),
+            vec!["STOP".to_string(), "END".to_string()]
+        );
+        assert!(parse_stop_sequences("").is_empty());
     }
 
     #[test]

@@ -2,7 +2,8 @@
 # Machine-readable companion to API_REFERENCE.md
 #
 # This file is parsed by tools/scripts/api-contract-check.sh and the /sync-api command.
-# Status values: implemented, partial, stub, planned
+# Status values: implemented, partial, stub, planned, na (not applicable
+# to that language, as opposed to `planned` = intended but not built yet)
 #
 # IMPORTANT: When modifying SDK public APIs, update BOTH this file and API_REFERENCE.md.
 
@@ -48,6 +49,22 @@ classes:
         # cloud while its weights download.
         status: { dart: implemented, kotlin: planned, swift: planned, csharp: planned }
       isSpeculativeCloudEnabled:
+        return: bool
+        status: { dart: implemented, kotlin: planned, swift: planned, csharp: planned }
+      releaseMemory:
+        return: int
+        # Host-driven memory release: call from the platform's low-memory
+        # signal. Returns how many loaded models were released; each reloads
+        # itself transparently on its next run. Same reach as the other
+        # process-global settings — Dart exposes it on the entry-point class,
+        # the rest go through the generated bolt global.
+        status: { dart: implemented, kotlin: planned, swift: planned, csharp: planned }
+      setAutoRelease:
+        params: [{ name: enabled, type: bool }]
+        # Opt into releasing least-recently-used idle models when a load hits
+        # device memory pressure. Off by default.
+        status: { dart: implemented, kotlin: planned, swift: planned, csharp: planned }
+      isAutoReleaseEnabled:
         return: bool
         status: { dart: implemented, kotlin: planned, swift: planned, csharp: planned }
       model:
@@ -348,8 +365,9 @@ classes:
         status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
       toolResults:
         # The continuation turn after the model asked for tools. Only the
-        # immediately prior assistant turn is replayed, and continuation runs
-        # on the non-streaming text path only.
+        # immediately prior assistant turn is replayed. A continuation runs on
+        # every text path — batch, streaming, and both conversation-context
+        # variants; image-bearing conversations are rejected.
         params:
           - { name: userText, type: String }
           - { name: priorAssistantText, type: String }
@@ -467,6 +485,12 @@ classes:
         # tools. The raw tool-call block stays in `text`.
         status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
         since: "0.5.0"
+      hasToolCalls:
+        type: bool
+        # Convenience over `toolCalls.isEmpty`, so the branch a tool loop
+        # actually writes reads the same in every language.
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+        since: "0.7.0"
       audioAsWav:
         type: "Uint8List?"
         status: { dart: implemented, kotlin: planned, swift: planned, csharp: planned }
@@ -667,7 +691,32 @@ classes:
   StreamToken:
     type: data
     section: "8. Supporting Types"
-    status: { dart: implemented, kotlin: planned, swift: planned, csharp: implemented }
+    # Kotlin and Swift reach this through a `StreamToken` typealias over the
+    # generated bolt type, the same way ToolCall/GenerationConfig work there.
+    status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+    properties:
+      toolCalls:
+        type: "List<ToolCall>"
+        # Tool calls the model emitted, on the terminal token only. Tool-call
+        # blocks are suppressed from the streamed text, so a streaming caller
+        # dispatches these rather than parsing token text.
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+        since: "0.7.0"
+      rawText:
+        type: "String?"
+        # The completed turn's raw output text, tool-call block included —
+        # what the tool-results envelope needs as priorAssistantText. Set only
+        # alongside a non-empty toolCalls; NOT the same as cumulativeText,
+        # which is the emitted (block-suppressed) text.
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+        since: "0.7.0"
+      hasToolCalls:
+        type: bool
+        # Only ever true on the terminal token. Call blocks are suppressed
+        # from the streamed text, so this is what a streaming loop branches
+        # on rather than the token text.
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+        since: "0.7.0"
 
   # -------------------------------------------------------------------
   # 9. Configuration Types

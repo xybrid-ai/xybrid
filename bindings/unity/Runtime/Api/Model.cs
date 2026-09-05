@@ -387,7 +387,9 @@ namespace Xybrid
                 token.TokenId,
                 (uint)token.Index,
                 token.CumulativeText,
-                token.FinishReason);
+                token.FinishReason,
+                token.ToolCalls ?? System.Array.Empty<XybridBolt.XybridToolCall>(),
+                token.RawText);
 
         private static VoiceInfo MapVoice(XybridBolt.XybridVoiceInfo voice) =>
             new VoiceInfo(voice.Id, voice.Name, voice.Gender, voice.Language, voice.Style);

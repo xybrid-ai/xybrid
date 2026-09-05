@@ -196,8 +196,11 @@ namespace Xybrid
         /// the same tools as the original turn so the executor rebuilds an
         /// identical chat prefix.
         ///
-        /// Only the immediately prior assistant turn is replayed, and
-        /// continuation runs on the non-streaming text path only.
+        /// Only the immediately prior assistant turn is replayed. A
+        /// continuation runs on every text path — batch, streaming, and both
+        /// conversation-context variants. Image-bearing conversations are the
+        /// one exception and are rejected: image embeddings cannot be
+        /// re-evaluated from the composed text prompt.
         /// </remarks>
         /// <param name="userText">The original user message of the turn being continued.</param>
         /// <param name="priorAssistantText">

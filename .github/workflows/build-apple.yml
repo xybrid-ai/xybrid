@@ -63,7 +63,9 @@ env:
 jobs:
   build-xcframework:
     name: Build XCFramework
-    runs-on: macos-14
+    # macos-26 (Xcode 26.6 default, iOS 26.5 simulator runtime) — the simulator
+    # test step below needs a bootable device, and macos-14 is on its way out.
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
@@ -156,6 +158,24 @@ jobs:
           xcodebuild build \
             -scheme Xybrid \
             -destination 'generic/platform=iOS Simulator' \
+            -skipPackagePluginValidation \
+            CODE_SIGNING_ALLOWED=NO
+
+      - name: Run Swift unit tests (iOS Simulator)
+        # The generic build above can't execute tests (no bootable device);
+        # a concrete simulator runs XybridTests against the xcframework the
+        # previous step already flipped Package.swift to. iPhone 17 / iOS 26.5
+        # is the pair macos-26 ships with its default Xcode 26.6 (no iPhone 16
+        # on that image); bump DEVELOPER_DIR and OS= together when the image
+        # rolls forward. Timeout guards against a simulator/test hang.
+        timeout-minutes: 10
+        env:
+          DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+        run: |
+          set -euo pipefail
+          xcodebuild test \
+            -scheme Xybrid \
+            -destination 'platform=iOS Simulator,name=iPhone 17,OS=26.5' \
             -skipPackagePluginValidation \
             CODE_SIGNING_ALLOWED=NO
 

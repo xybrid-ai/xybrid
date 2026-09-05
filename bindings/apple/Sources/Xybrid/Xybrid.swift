@@ -276,6 +276,219 @@ public typealias Model = XybridModel
 // `boltffi generate`, unlike `xybrid_bolt.swift`).
 extension XybridModel: @unchecked Sendable {}
 
+/// A pull-paced asynchronous stream of generated tokens.
+///
+/// The iterator asks the native streaming session for exactly one event from
+/// each call to ``AsyncIterator/next()``. A slow consumer therefore stops
+/// pulling from the facade and preserves its bounded-channel backpressure
+/// instead of accumulating tokens in an unbounded Swift buffer.
+///
+/// The sequence is one-shot. Its first iterator owns the inference run;
+/// subsequent iterators finish immediately without starting another run.
+public struct XybridTokenStream: AsyncSequence, Sendable {
+    public typealias Element = XybridStreamToken
+
+    /// An iterator over one native streaming session.
+    public struct AsyncIterator: AsyncIteratorProtocol {
+        fileprivate var state: XybridTokenStreamState?
+
+        public mutating func next() async throws -> XybridStreamToken? {
+            guard let state else { return nil }
+            do {
+                let token = try await state.next()
+                if token == nil {
+                    self.state = nil
+                }
+                return token
+            } catch {
+                self.state = nil
+                throw error
+            }
+        }
+    }
+
+    // Copies share one source, so claiming an iterator transfers the only
+    // retained session state out of every copy of the sequence.
+    private let source: XybridTokenStreamSource
+
+    fileprivate init(
+        model: XybridModel,
+        envelope: XybridEnvelope,
+        options: XybridRunOptions?
+    ) {
+        self.init(
+            start: { try model.runStream(envelope: envelope, options: options) },
+            next: { try model.streamNext(streamId: $0) },
+            close: { model.streamClose(streamId: $0) }
+        )
+    }
+
+    // Closure injection keeps the pull and cancellation contract testable
+    // without loading a native model. This initializer remains module-internal.
+    init(
+        start: @escaping @Sendable () throws -> UInt64,
+        next: @escaping @Sendable (UInt64) throws -> XybridStreamEvent,
+        close: @escaping @Sendable (UInt64) -> Void
+    ) {
+        source = XybridTokenStreamSource(
+            state: XybridTokenStreamState(start: start, next: next, close: close)
+        )
+    }
+
+    public func makeAsyncIterator() -> AsyncIterator {
+        AsyncIterator(state: source.claimState())
+    }
+}
+
+private final class XybridTokenStreamSource: @unchecked Sendable {
+    private let lock = NSLock()
+    private var state: XybridTokenStreamState?
+
+    init(state: XybridTokenStreamState) {
+        self.state = state
+    }
+
+    func claimState() -> XybridTokenStreamState? {
+        lock.lock()
+        defer { lock.unlock() }
+        let claimedState = state
+        state = nil
+        return claimedState
+    }
+}
+
+private final class XybridTokenStreamState: @unchecked Sendable {
+    private let lock = NSLock()
+    private let startSession: @Sendable () throws -> UInt64
+    private let pullNext: @Sendable (UInt64) throws -> XybridStreamEvent
+    private let closeSessionHandle: @Sendable (UInt64) -> Void
+    private var streamId: UInt64?
+    private var finished = false
+
+    init(
+        start: @escaping @Sendable () throws -> UInt64,
+        next: @escaping @Sendable (UInt64) throws -> XybridStreamEvent,
+        close: @escaping @Sendable (UInt64) -> Void
+    ) {
+        startSession = start
+        pullNext = next
+        closeSessionHandle = close
+    }
+
+    deinit {
+        close()
+    }
+
+    func next() async throws -> XybridStreamToken? {
+        if Task.isCancelled {
+            close()
+            return nil
+        }
+
+        do {
+            let token = try await withTaskCancellationHandler {
+                try await Task.detached { try self.pullOne() }.value
+            } onCancel: {
+                self.close()
+            }
+            if Task.isCancelled {
+                close()
+                return nil
+            }
+            return token
+        } catch {
+            if Task.isCancelled {
+                close()
+                return nil
+            }
+            throw error
+        }
+    }
+
+    private func pullOne() throws -> XybridStreamToken? {
+        let id = try sessionId()
+        let event: XybridStreamEvent
+        do {
+            event = try pullNext(id)
+        } catch {
+            close()
+            throw error
+        }
+
+        switch event.kind {
+        case .token:
+            guard let token = event.token else {
+                close()
+                throw XybridError.inferenceError(
+                    message: "Native stream returned a token event without a token"
+                )
+            }
+            return token
+        case .complete:
+            close()
+            return nil
+        }
+    }
+
+    private func sessionId() throws -> UInt64 {
+        lock.lock()
+        if finished {
+            lock.unlock()
+            throw CancellationError()
+        }
+        if let streamId {
+            lock.unlock()
+            return streamId
+        }
+        lock.unlock()
+
+        let openedId: UInt64
+        do {
+            openedId = try startSession()
+        } catch {
+            close()
+            throw error
+        }
+        lock.lock()
+        if finished {
+            lock.unlock()
+            closeSessionHandle(openedId)
+            throw CancellationError()
+        }
+        if let existingId = streamId {
+            lock.unlock()
+            // Defensive only: AsyncIteratorProtocol requires serialized next
+            // calls, but do not leak a session if a caller violates it.
+            closeSessionHandle(openedId)
+            return existingId
+        }
+        streamId = openedId
+        lock.unlock()
+        return openedId
+    }
+
+    private func close() {
+        lock.lock()
+        guard !finished else {
+            lock.unlock()
+            return
+        }
+        finished = true
+        let id = streamId
+        streamId = nil
+        lock.unlock()
+
+        if let id {
+            // Native close may wait for the worker to leave inference. A task's
+            // cancellation handler (and iterator deinit) runs synchronously on
+            // its caller, which can be the UI thread. Retain the close closure,
+            // not this state, until cleanup finishes on a background executor.
+            let closeHandle = closeSessionHandle
+            Task.detached { closeHandle(id) }
+        }
+    }
+}
+
 public extension XybridModel {
     /// Run inference with the model's default options.
     ///
@@ -353,12 +566,6 @@ public extension XybridModel {
     /// pull-based session API (``runStream(envelope:options:)`` /
     /// ``streamNext(streamId:)`` / ``streamClose(streamId:)``).
     ///
-    /// Note: the producing task pulls as fast as generation runs and buffers
-    /// unconsumed tokens in the async sequence (unbounded), so the facade's
-    /// bounded-channel backpressure applies to the raw session pull API, not
-    /// to a slow consumer of this sequence. Buffering is bounded by
-    /// `max_tokens` in practice; a bounded policy here would drop tokens.
-    ///
     /// ```swift
     /// for try await token in model.streamTokens(envelope: env) {
     ///     print(token.token, terminator: "")
@@ -367,38 +574,8 @@ public extension XybridModel {
     func streamTokens(
         envelope: XybridEnvelope,
         options: XybridRunOptions? = nil
-    ) -> AsyncThrowingStream<XybridStreamToken, Error> {
-        AsyncThrowingStream { continuation in
-            let task = Task.detached {
-                var streamId: UInt64?
-                do {
-                    let id = try self.runStream(envelope: envelope, options: options)
-                    streamId = id
-                    while !Task.isCancelled {
-                        let event = try self.streamNext(streamId: id)
-                        switch event.kind {
-                        case .token:
-                            if let token = event.token {
-                                continuation.yield(token)
-                            }
-                        case .complete:
-                            self.streamClose(streamId: id)
-                            continuation.finish()
-                            return
-                        }
-                    }
-                    // Cancelled: close the session to abort the in-flight run.
-                    self.streamClose(streamId: id)
-                    continuation.finish()
-                } catch {
-                    // A failed streamNext has already closed the session
-                    // bolt-side; closing again is an idempotent map-remove.
-                    if let id = streamId { self.streamClose(streamId: id) }
-                    continuation.finish(throwing: error)
-                }
-            }
-            continuation.onTermination = { _ in task.cancel() }
-        }
+    ) -> XybridTokenStream {
+        XybridTokenStream(model: self, envelope: envelope, options: options)
     }
 }
 
@@ -426,6 +603,10 @@ public typealias ToolCall = XybridToolCall
 
 /// The outcome of running one tool, fed back with `Envelope.toolResults`.
 public typealias ToolResult = XybridToolResult
+
+/// One token emitted by a streaming run. The terminal token carries the
+/// turn's `toolCalls` and `rawText`.
+public typealias StreamToken = XybridStreamToken
 
 // MARK: - GenerationConfig ergonomics
 //
@@ -574,6 +755,20 @@ public extension XybridResult {
 
     /// The latency as a `TimeInterval` in seconds.
     var latency: TimeInterval { TimeInterval(latencyMs) / 1000.0 }
+
+    /// `true` if the model asked to call at least one tool this turn.
+    var hasToolCalls: Bool { !toolCalls.isEmpty }
+}
+
+// MARK: - XybridStreamToken ergonomics
+
+public extension XybridStreamToken {
+    /// `true` if this token carries tool calls to execute.
+    ///
+    /// Only ever true on the terminal token. Tool-call blocks are suppressed
+    /// from the streamed text, so this — not the token text — is what a
+    /// streaming loop branches on.
+    var hasToolCalls: Bool { !toolCalls.isEmpty }
 }
 
 // MARK: - XybridEnvelope compatibility factories

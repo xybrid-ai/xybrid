@@ -12,7 +12,7 @@ Add to your `build.gradle.kts`:
 
 ```gradle
 dependencies {
-    implementation("ai.xybrid:xybrid-kotlin:0.5.0")
+    implementation("ai.xybrid:xybrid-kotlin:0.6.0")
 }
 ```
 

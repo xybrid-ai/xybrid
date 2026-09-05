@@ -55,6 +55,7 @@ CC_VER=""
 NDK_REV=""
 SDK_VER=""   # Apple: xcrun SDK version + active clang banner (codegen ABI)
 CRT=""       # Windows: CRT flavor the -sys slice links (MD = dynamic)
+DEPLOY=""    # macOS host: MACOSX_DEPLOYMENT_TARGET (min OS the archives link on)
 case "$TARGET" in
   *android*)
     NDK="${ANDROID_NDK_HOME:-${ANDROID_NDK_ROOT:-}}"
@@ -80,6 +81,14 @@ case "$TARGET" in
     if [ -n "$sdk_v" ] || [ -n "$clang_v" ]; then
       SDK_VER="${sdk_v}/${clang_v}"
     fi
+    # macOS host slices are downloaded by developer laptops, so the publisher
+    # pins MACOSX_DEPLOYMENT_TARGET rather than inheriting the runner's. Fold
+    # it in so changing it publishes a NEW slice instead of shadowing the old
+    # one under the same tag. Darwin only: iOS slices are already published and
+    # their payload must stay byte-identical.
+    case "$TARGET" in
+      *apple-darwin*) DEPLOY="${MACOSX_DEPLOYMENT_TARGET:-}" ;;
+    esac
     ;;
   *windows-msvc*)
     # The publisher builds xybrid-llama-sys WITHOUT crt-static, so cc-rs + CMake
@@ -105,6 +114,7 @@ esac
 US=$'\x1f'
 SUFFIX=""
 [ -n "$SDK_VER" ] && SUFFIX="${US}sdk=${SDK_VER}"
+[ -n "$DEPLOY" ] && SUFFIX="${SUFFIX}${US}deploy=${DEPLOY}"
 [ -n "$CRT" ] && SUFFIX="${US}crt=${CRT}"
 PAYLOAD="v1${US}llama=${LLAMA_SHA}${US}wrapper_cpp=${WRAPPER_CPP}${US}wrapper_h=${WRAPPER_H}${US}build_rs=${BUILD_RS}${US}target=${TARGET}${US}features=${FEATURES}${US}profile=release${US}cmake=${CMAKE_VER}${US}cc=${CC_VER}${US}ndk=${NDK_REV}${SUFFIX}"
 printf '%s' "$PAYLOAD" | sha256

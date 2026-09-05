@@ -51,3 +51,13 @@ cmake = "0.1"
 # from `wrapper.h` via bindgen instead of the prior 26 hand-written
 # extern declarations. Pinned to the same major as `mlx-c-sys`.
 bindgen = "0.70"
+# Automatic prebuilt-natives download (see the "Prebuilt natives" section of
+# build.rs). Not optional: a build script cannot be feature-gated with
+# `cfg(feature = ...)`, and this crate is itself an optional dependency of
+# `xybrid-core`, so these are only ever compiled by a consumer who asked for
+# `llm-llamacpp` — exactly the audience the download serves. Versions match
+# what the workspace already resolves, so nothing new enters the lockfile.
+ureq = { version = "2.9", default-features = false, features = ["tls"] }
+sha2 = "0.10"
+tar = "0.4"
+flate2 = "1"
