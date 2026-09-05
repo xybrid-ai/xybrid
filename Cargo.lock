@@ -6348,6 +6348,7 @@ name = "xybrid-ffi-facade"
 version = "0.7.0"
 dependencies = [
  "serde_json",
+ "tempfile",
  "tokio",
  "xybrid-core",
  "xybrid-sdk",

@@ -21,3 +21,6 @@ xybrid-sdk = { workspace = true }
 xybrid-core = { path = "../xybrid-core", default-features = false }
 serde_json = { workspace = true }
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "sync"] }
+
+[dev-dependencies]
+tempfile = "3.10"

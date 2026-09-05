@@ -467,6 +467,27 @@ def _boltffi_read_c9e5fd91113e36a2(data: bytes):
 _native._register_wire_codec("read_c9e5fd91113e36a2", _boltffi_read_c9e5fd91113e36a2)
 
 
+def _boltffi_read_09b0b5e46f57944c(data: bytes):
+    return _boltffi_read_wire(data, lambda reader: XybridCacheStatus._boltffi_from_reader(reader))
+
+
+_native._register_wire_codec("read_09b0b5e46f57944c", _boltffi_read_09b0b5e46f57944c)
+
+
+def _boltffi_read_dd235587c7ad4324(data: bytes):
+    return _boltffi_read_wire(data, lambda reader: reader.sequence(lambda: XybridCacheEntry._boltffi_from_reader(reader)))
+
+
+_native._register_wire_codec("read_dd235587c7ad4324", _boltffi_read_dd235587c7ad4324)
+
+
+def _boltffi_read_f53a3ba3847b114d(data: bytes):
+    return _boltffi_read_wire(data, lambda reader: reader.sequence(lambda: reader.string()))
+
+
+_native._register_wire_codec("read_f53a3ba3847b114d", _boltffi_read_f53a3ba3847b114d)
+
+
 
 def _boltffi_write_c26bffea5b1b16cc(id) -> bytes:
     return _boltffi_wire_string(id)
@@ -622,6 +643,13 @@ def _boltffi_write_73b9be8d33badc3c(cache_dir) -> bytes:
 _native._register_wire_codec("write_73b9be8d33badc3c", _boltffi_write_73b9be8d33badc3c)
 
 
+def _boltffi_write_83cc917c5525e5c3(model_id) -> bytes:
+    return _boltffi_wire_string(model_id)
+
+
+_native._register_wire_codec("write_83cc917c5525e5c3", _boltffi_write_83cc917c5525e5c3)
+
+
 def _boltffi_write_a087f842b9a13bc6(binding) -> bytes:
     return _boltffi_wire_string(binding)
 
@@ -641,13 +669,6 @@ def _boltffi_write_b4a023e995953df2(url) -> bytes:
 
 
 _native._register_wire_codec("write_b4a023e995953df2", _boltffi_write_b4a023e995953df2)
-
-
-def _boltffi_write_83cc917c5525e5c3(model_id) -> bytes:
-    return _boltffi_wire_string(model_id)
-
-
-_native._register_wire_codec("write_83cc917c5525e5c3", _boltffi_write_83cc917c5525e5c3)
 
 
 
@@ -1221,6 +1242,87 @@ class XybridVoiceInfo:
 
 
 _native._register_xybrid_voice_info(XybridVoiceInfo)
+
+
+
+@dataclass(frozen=True, slots=True)
+class XybridCacheEntry:
+    model_id: str
+    location: XybridCacheEntryLocation
+    path: str
+    size_bytes: int
+
+    def _boltffi_wire(self) -> bytes:
+        return b"".join((
+            _boltffi_wire_string(self.model_id),
+            _boltffi_wire_i32(_boltffi_enum_value(self.location, XybridCacheEntryLocation, "XybridCacheEntryLocation")),
+            _boltffi_wire_string(self.path),
+            _boltffi_wire_u64(self.size_bytes),
+        ))
+
+    @classmethod
+    def _boltffi_from_wire(cls, data: bytes) -> "XybridCacheEntry":
+        reader = _BoltFfiWireReader(data)
+        try:
+            value = cls._boltffi_from_reader(reader)
+        except struct.error as error:
+            raise ValueError("truncated BoltFFI wire bytes") from error
+        reader.finish()
+        return value
+
+    @classmethod
+    def _boltffi_from_reader(cls, reader: "_BoltFfiWireReader") -> "XybridCacheEntry":
+        return cls(
+            model_id=reader.string(),
+            location=XybridCacheEntryLocation(reader.i32()),
+            path=reader.string(),
+            size_bytes=reader.u64(),
+        )
+
+
+_native._register_xybrid_cache_entry(XybridCacheEntry)
+
+
+
+@dataclass(frozen=True, slots=True)
+class XybridCacheStatus:
+    total_size_bytes: int
+    entry_count: int
+    model_count: int
+    extracted_model_count: int
+    cache_root: str
+
+    def _boltffi_wire(self) -> bytes:
+        return b"".join((
+            _boltffi_wire_u64(self.total_size_bytes),
+            _boltffi_wire_u32(self.entry_count),
+            _boltffi_wire_u32(self.model_count),
+            _boltffi_wire_u32(self.extracted_model_count),
+            _boltffi_wire_string(self.cache_root),
+        ))
+
+    @classmethod
+    def _boltffi_from_wire(cls, data: bytes) -> "XybridCacheStatus":
+        reader = _BoltFfiWireReader(data)
+        try:
+            value = cls._boltffi_from_reader(reader)
+        except struct.error as error:
+            raise ValueError("truncated BoltFFI wire bytes") from error
+        reader.finish()
+        return value
+
+    @classmethod
+    def _boltffi_from_reader(cls, reader: "_BoltFfiWireReader") -> "XybridCacheStatus":
+        return cls(
+            total_size_bytes=reader.u64(),
+            entry_count=reader.u32(),
+            model_count=reader.u32(),
+            extracted_model_count=reader.u32(),
+            cache_root=reader.string(),
+        )
+
+
+_native._register_xybrid_cache_status(XybridCacheStatus)
 
 
 
@@ -1816,6 +1918,16 @@ _native._register_xybrid_stream_event_kind(XybridStreamEventKind)
 
 
 
+class XybridCacheEntryLocation(IntEnum):
+    REGISTRY = 0
+    EXTRACTED = 1
+    HUGGING_FACE = 2
+    HUGGING_FACE_HUB = 3
+
+_native._register_xybrid_cache_entry_location(XybridCacheEntryLocation)
+
+
+
 class XybridThermalState(IntEnum):
     NORMAL = 0
     WARM = 1
@@ -2124,6 +2236,22 @@ def configure_runtime(api_key: str | None, gateway_url: str | None, ingest_url: 
     _native.configure_runtime(_boltffi_wire_optional(api_key, lambda __boltffi_value_0: _boltffi_wire_string(__boltffi_value_0)), _boltffi_wire_optional(gateway_url, lambda __boltffi_value_0: _boltffi_wire_string(__boltffi_value_0)), _boltffi_wire_optional(ingest_url, lambda __boltffi_value_0: _boltffi_wire_string(__boltffi_value_0)))
 def init_sdk_cache_dir(cache_dir: str) -> None:
     _native.init_sdk_cache_dir(cache_dir)
+def cache_status() -> XybridCacheStatus:
+    return _boltffi_call(_boltffi_read_fe83cddcf3822a1d, lambda: _native.cache_status())
+def cache_entries() -> list[XybridCacheEntry]:
+    return _boltffi_read_wire(_boltffi_call(_boltffi_read_fe83cddcf3822a1d, lambda: _native.cache_entries()), lambda reader: reader.sequence(lambda: XybridCacheEntry._boltffi_from_reader(reader)))
+def cache_is_model_cached(model_id: str) -> bool:
+    return _boltffi_call(_boltffi_read_fe83cddcf3822a1d, lambda: _native.cache_is_model_cached(model_id))
+def cache_model_path(model_id: str) -> str | None:
+    return _boltffi_read_wire(_boltffi_call(_boltffi_read_fe83cddcf3822a1d, lambda: _native.cache_model_path(model_id)), lambda reader: reader.optional(lambda: reader.string()))
+def cache_list_extracted_model_ids() -> list[str]:
+    return _boltffi_read_wire(_boltffi_call(_boltffi_read_fe83cddcf3822a1d, lambda: _native.cache_list_extracted_model_ids()), lambda reader: reader.sequence(lambda: reader.string()))
+def cache_clean_expired() -> int:
+    return _boltffi_call(_boltffi_read_fe83cddcf3822a1d, lambda: _native.cache_clean_expired())
+def cache_remove_model(model_id: str) -> int:
+    return _boltffi_call(_boltffi_read_fe83cddcf3822a1d, lambda: _native.cache_remove_model(model_id))
+def cache_clear() -> int:
+    return _boltffi_call(_boltffi_read_fe83cddcf3822a1d, lambda: _native.cache_clear())
 def set_binding(binding: str) -> None:
     _native.set_binding(binding)
 def set_api_key(api_key: str) -> None:
@@ -2177,6 +2305,8 @@ __all__ = [
     "XybridStreamToken",
     "XybridStreamEvent",
     "XybridVoiceInfo",
+    "XybridCacheEntry",
+    "XybridCacheStatus",
     "XybridError",
     "XybridErrorException",
     "XybridErrorModelNotFound",
@@ -2213,6 +2343,7 @@ __all__ = [
     "XybridExecutionTarget",
     "XybridDownloadState",
     "XybridStreamEventKind",
+    "XybridCacheEntryLocation",
     "XybridThermalState",
     "XybridModel",
     "XybridConversationContext",
@@ -2226,6 +2357,14 @@ __all__ = [
     "clear_battery_level",
     "configure_runtime",
     "init_sdk_cache_dir",
+    "cache_status",
+    "cache_entries",
+    "cache_is_model_cached",
+    "cache_model_path",
+    "cache_list_extracted_model_ids",
+    "cache_clean_expired",
+    "cache_remove_model",
+    "cache_clear",
     "set_binding",
     "set_api_key",
     "set_provider_api_key",

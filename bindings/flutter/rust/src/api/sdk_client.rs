@@ -6,6 +6,68 @@ use xybrid_sdk::ResourceTelemetryMode;
 
 use super::{ensure_native_logging, FLUTTER_BINDING};
 
+/// Logical storage area containing a cached model entry.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FfiCacheEntryLocation {
+    Registry,
+    Extracted,
+    HuggingFace,
+    HuggingFaceHub,
+}
+
+impl From<facade::CacheEntryLocation> for FfiCacheEntryLocation {
+    fn from(location: facade::CacheEntryLocation) -> Self {
+        match location {
+            facade::CacheEntryLocation::Registry => Self::Registry,
+            facade::CacheEntryLocation::Extracted => Self::Extracted,
+            facade::CacheEntryLocation::HuggingFace => Self::HuggingFace,
+            facade::CacheEntryLocation::HuggingFaceHub => Self::HuggingFaceHub,
+        }
+    }
+}
+
+/// One physical model entry occupying managed cache storage.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FfiCacheEntry {
+    pub model_id: String,
+    pub location: FfiCacheEntryLocation,
+    pub path: String,
+    pub size_bytes: u64,
+}
+
+impl From<facade::CacheEntry> for FfiCacheEntry {
+    fn from(entry: facade::CacheEntry) -> Self {
+        Self {
+            model_id: entry.model_id,
+            location: entry.location.into(),
+            path: entry.path,
+            size_bytes: entry.size_bytes,
+        }
+    }
+}
+
+/// Aggregate model-cache storage status.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FfiCacheStatus {
+    pub total_size_bytes: u64,
+    pub entry_count: u32,
+    pub model_count: u32,
+    pub extracted_model_count: u32,
+    pub cache_root: String,
+}
+
+impl From<facade::CacheStatus> for FfiCacheStatus {
+    fn from(status: facade::CacheStatus) -> Self {
+        Self {
+            total_size_bytes: status.total_size_bytes,
+            entry_count: status.entry_count,
+            model_count: status.model_count,
+            extracted_model_count: status.extracted_model_count,
+            cache_root: status.cache_root,
+        }
+    }
+}
+
 /// Process-wide once-guard for [`XybridSdkClient::init_telemetry`]. Set on
 /// the first successful entry. Re-entry — whether from a duplicate Dart
 /// caller, a second Dart isolate, or a Flutter hot-restart — observes
@@ -76,6 +138,56 @@ impl XybridSdkClient {
         ensure_native_logging();
         facade::set_binding(FLUTTER_BINDING.to_string());
         facade::init_sdk_cache_dir(cache_dir);
+    }
+
+    /// Returns aggregate storage usage across every managed model-cache area.
+    // Default FRB dispatch runs these filesystem operations on its worker pool.
+    // Do not mark them sync: large caches must not block the Dart UI isolate.
+    pub fn cache_status() -> Result<FfiCacheStatus, String> {
+        facade::cache_status()
+            .map(Into::into)
+            .map_err(|error| error.to_string())
+    }
+
+    /// Lists every physical model entry occupying managed cache storage.
+    pub fn cache_entries() -> Result<Vec<FfiCacheEntry>, String> {
+        facade::cache_entries()
+            .map(|entries| entries.into_iter().map(Into::into).collect())
+            .map_err(|error| error.to_string())
+    }
+
+    /// Returns whether a model occupies any managed model-cache entry.
+    pub fn has_cached_model_data(model_id: String) -> Result<bool, String> {
+        facade::cache_is_model_cached(model_id).map_err(|error| error.to_string())
+    }
+
+    /// Resolves the preferred local cache path for a model, if present.
+    pub fn cached_model_path(model_id: String) -> Result<Option<String>, String> {
+        facade::cache_model_path(model_id).map_err(|error| error.to_string())
+    }
+
+    /// Lists model IDs extracted, validated, and ready to run offline.
+    pub fn list_extracted_model_ids() -> Result<Vec<String>, String> {
+        facade::cache_list_extracted_model_ids().map_err(|error| error.to_string())
+    }
+
+    /// Reports an error until persistent cache retention is supported.
+    pub fn clean_expired_cache() -> Result<u32, String> {
+        facade::cache_clean_expired().map_err(|error| error.to_string())
+    }
+
+    /// Removes every managed cache entry for one model.
+    ///
+    /// Do not call concurrently with a load of the same model.
+    pub fn remove_cached_model(model_id: String) -> Result<u32, String> {
+        facade::cache_remove_model(model_id).map_err(|error| error.to_string())
+    }
+
+    /// Clears all managed model-cache storage.
+    ///
+    /// Do not call concurrently with any model load.
+    pub fn clear_model_cache() -> Result<u32, String> {
+        facade::cache_clear().map_err(|error| error.to_string())
     }
 
     #[frb(sync)]
@@ -250,6 +362,31 @@ impl XybridSdkClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cache_records_preserve_facade_storage_fields() {
+        let entry = FfiCacheEntry::from(facade::CacheEntry {
+            model_id: "owner/repo".into(),
+            location: facade::CacheEntryLocation::HuggingFaceHub,
+            path: "/cache/hf-hub/repo".into(),
+            size_bytes: 99,
+        });
+        let status = FfiCacheStatus::from(facade::CacheStatus {
+            total_size_bytes: 99,
+            entry_count: 1,
+            model_count: 1,
+            extracted_model_count: 0,
+            cache_root: "/cache".into(),
+        });
+
+        assert_eq!(entry.model_id, "owner/repo");
+        assert_eq!(entry.location, FfiCacheEntryLocation::HuggingFaceHub);
+        assert_eq!(entry.path, "/cache/hf-hub/repo");
+        assert_eq!(entry.size_bytes, 99);
+        assert_eq!(status.total_size_bytes, 99);
+        assert_eq!(status.entry_count, 1);
+        assert_eq!(status.cache_root, "/cache");
+    }
 
     #[test]
     fn flutter_init_registers_flutter_binding() {
