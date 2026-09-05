@@ -382,9 +382,9 @@ jobs:
           APK=bindings/kotlin/consumer-smoke/app/build/outputs/apk/debug/app-debug.apk
           unzip -l "$APK"
           for f in \
-            lib/arm64-v8a/libxybrid-bolt.so lib/arm64-v8a/libc++_shared.so lib/arm64-v8a/libonnxruntime.so \
-            lib/armeabi-v7a/libxybrid-bolt.so lib/armeabi-v7a/libc++_shared.so \
-            lib/x86_64/libxybrid-bolt.so lib/x86_64/libc++_shared.so lib/x86_64/libonnxruntime.so \
+            lib/arm64-v8a/libxybrid_bolt.so lib/arm64-v8a/libc++_shared.so lib/arm64-v8a/libonnxruntime.so \
+            lib/armeabi-v7a/libxybrid_bolt.so lib/armeabi-v7a/libc++_shared.so \
+            lib/x86_64/libxybrid_bolt.so lib/x86_64/libc++_shared.so lib/x86_64/libonnxruntime.so \
             classes.dex; do
             unzip -l "$APK" | grep -q " $f\$" || { echo "MISSING: $f"; exit 1; }
           done

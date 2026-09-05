@@ -37,8 +37,8 @@ _BOLTFFI_EXPANSION_FLAGS = [
 #   -llog                   -> android liblog (matches the relink's -llog)
 #   -z,max-page-size=16384  -> 16KB page alignment; must come after the NDK
 #                              toolchain's hardcoded 4096 (last -z wins with lld)
-# (Packaging note: Kotlin loads "xybrid-bolt" (hyphen); the AAR assembly renames
-# libxybrid_bolt.so -> libxybrid-bolt.so.)
+# The Kotlin AAR links its generated JNI layer against the staticlib target
+# below; this plain cdylib remains the direct C ABI artifact for other users.
 rust_shared_library(
     name = "xybrid_bolt_cdylib",
     srcs = glob(["src/**/*.rs"]),
@@ -113,6 +113,10 @@ cc_library(
 # staticlib — libxybrid_bolt.a (what `boltffi pack` relinks into the xcframework/aar)
 rust_static_library(
     name = "xybrid_bolt_staticlib",
+    # JNI glue references every public Bolt C symbol indirectly from C. Mark
+    # the archive always-link so Bazel mirrors boltffi's --whole-archive link
+    # and does not discard entry points before the generated wrappers use them.
+    alwayslink = True,
     srcs = glob(["src/**/*.rs"]),
     crate_name = "xybrid_bolt",
     edition = "2021",

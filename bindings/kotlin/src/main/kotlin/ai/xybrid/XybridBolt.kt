@@ -845,6 +845,9 @@ private object Native {
     @JvmStatic external fun boltffi_function_xybrid_bolt_is_speculative_cloud_enabled(): Boolean
     @JvmStatic external fun boltffi_function_xybrid_bolt_will_speculate_for_model(model_id: java.nio.ByteBuffer, __boltffi_model_id_len: Int): Boolean
     @JvmStatic external fun boltffi_function_xybrid_bolt_version(): ByteArray?
+    @JvmStatic external fun boltffi_function_xybrid_bolt_release_memory(): Int
+    @JvmStatic external fun boltffi_function_xybrid_bolt_set_auto_release(enabled: Boolean): Unit
+    @JvmStatic external fun boltffi_function_xybrid_bolt_is_auto_release_enabled(): Boolean
     @JvmStatic external fun boltffi_function_xybrid_bolt_telemetry_default_endpoint(): ByteArray?
     @JvmStatic external fun boltffi_function_xybrid_bolt_telemetry_flush(): Unit
     @JvmStatic external fun boltffi_function_xybrid_bolt_telemetry_shutdown(): Unit
@@ -2712,6 +2715,18 @@ fun version(): String {
     val __boltffi_result = Native.boltffi_function_xybrid_bolt_version() ?: throw IllegalStateException("null buffer returned")
     val __boltffi_reader = WireReader(__boltffi_result)
     return __boltffi_reader.readString()
+}
+
+fun releaseMemory(): UInt {
+    return Native.boltffi_function_xybrid_bolt_release_memory().toUInt()
+}
+
+fun setAutoRelease(enabled: Boolean) {
+    Native.boltffi_function_xybrid_bolt_set_auto_release(enabled)
+}
+
+fun isAutoReleaseEnabled(): Boolean {
+    return Native.boltffi_function_xybrid_bolt_is_auto_release_enabled()
 }
 
 fun telemetryDefaultEndpoint(): String {

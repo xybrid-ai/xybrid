@@ -206,15 +206,15 @@ Creating a source or loader is always cheap. Only `load()` and
 kotlin/
 ├── build.gradle.kts                     # Gradle build configuration
 ├── README.md                            # This file
-├── libs/                                # Native libraries (libxybrid-bolt.so built locally/CI, not committed)
+├── libs/                                # Native libraries (libxybrid_bolt.so built locally/CI, not committed)
 │   ├── armeabi-v7a/
-│   │   └── libxybrid-bolt.so
+│   │   └── libxybrid_bolt.so
 │   ├── arm64-v8a/
-│   │   ├── libxybrid-bolt.so
+│   │   ├── libxybrid_bolt.so
 │   │   ├── libonnxruntime.so            # ORT shared library (symlink → vendor/)
 │   │   └── libc++_shared.so             # C++ runtime (symlink → vendor/)
 │   └── x86_64/
-│       ├── libxybrid-bolt.so
+│       ├── libxybrid_bolt.so
 │       ├── libonnxruntime.so            # ORT shared library (symlink → vendor/)
 │       └── libc++_shared.so             # C++ runtime (symlink → vendor/)
 └── src/main/kotlin/ai/xybrid/
@@ -224,13 +224,13 @@ kotlin/
 
 ## Native Dependencies
 
-The SDK bundles ONNX Runtime (`libonnxruntime.so`) and the C++ shared library (`libc++_shared.so`) alongside `libxybrid-bolt.so`. These are included automatically in the AAR — no manual setup required.
+The SDK bundles ONNX Runtime (`libonnxruntime.so`) and the C++ shared library (`libc++_shared.so`) alongside `libxybrid_bolt.so`. These are included automatically in the AAR — no manual setup required.
 
-> **Note:** `libxybrid-bolt.so` is a build output and is **not** committed to the repository. The AAR published to Maven Central includes it (built in CI). For a **local** build, build the Bazel AAR and stage its jniLibs (see [Building Native Libraries](#building-native-libraries) below) so `libs/<abi>/` is populated before running `./gradlew`.
+> **Note:** `libxybrid_bolt.so` is a build output and is **not** committed to the repository. The AAR published to Maven Central includes it (built in CI). For a **local** build, build the Bazel AAR and stage its jniLibs (see [Building Native Libraries](#building-native-libraries) below) so `libs/<abi>/` is populated before running `./gradlew`.
 
 | Library | Purpose | Source |
 |---------|---------|--------|
-| `libxybrid-bolt.so` | Xybrid Rust SDK via BoltFFI | Built from `crates/xybrid-bolt/` |
+| `libxybrid_bolt.so` | Xybrid Rust SDK via BoltFFI | Built from `crates/xybrid-bolt/` |
 | `libonnxruntime.so` | ONNX Runtime inference engine | Vendored at `vendor/ort-android/` |
 | `libc++_shared.so` | C++ standard library runtime | Vendored at `vendor/ort-android/` |
 
@@ -242,18 +242,18 @@ The Kotlin bindings are generated from `crates/xybrid-bolt/` using [BoltFFI](htt
 - Single Rust source generates Swift, Kotlin, Java, C#, WASM, and a C header
 - Memory-safe wrappers with proper resource cleanup
 
-Regenerate `XybridBolt.kt` with the script, never by hand:
+Regenerate the Kotlin wrapper and its Bazel JNI inputs with the script, never
+by hand:
 
 ```bash
 python3 tools/scripts/gen_kotlin_bolt.py            # regenerate + write
 python3 tools/scripts/gen_kotlin_bolt.py --check    # fail on drift
 ```
 
-It runs `boltffi generate kotlin` and applies the one post-process the output
-needs: boltffi 0.29 emits each `XybridError` payload field verbatim, so the
-fourteen variants carrying a `message` collide with `Throwable.message` and the
-binding does not compile without an `override` modifier. A plain copy of the
-generator output silently reintroduces that break.
+It runs `boltffi generate kotlin`, commits the generated `jni_glue.c` and C
+header used by the AAR's Bazel link, and applies the Kotlin post-processes the
+output needs. The `--check` form compares all three outputs so JVM declarations
+cannot drift away from their native implementations.
 
 ## Building Native Libraries
 
@@ -309,24 +309,24 @@ After a successful build:
 ```
 bindings/kotlin/libs/
 ├── arm64-v8a/
-│   ├── libxybrid-bolt.so
+│   ├── libxybrid_bolt.so
 │   ├── libonnxruntime.so         # Bundled from vendor/ort-android/
 │   └── libc++_shared.so          # Bundled from vendor/ort-android/
 ├── armeabi-v7a/
-│   └── libxybrid-bolt.so
+│   └── libxybrid_bolt.so
 ├── x86_64/
-│   ├── libxybrid-bolt.so
+│   ├── libxybrid_bolt.so
 │   ├── libonnxruntime.so         # Bundled from vendor/ort-android/
 │   └── libc++_shared.so          # Bundled from vendor/ort-android/
 └── {version}/                    # Versioned copy
     ├── arm64-v8a/
-    │   ├── libxybrid-bolt.so
+    │   ├── libxybrid_bolt.so
     │   ├── libonnxruntime.so
     │   └── libc++_shared.so
     ├── armeabi-v7a/
-    │   └── libxybrid-bolt.so
+    │   └── libxybrid_bolt.so
     └── x86_64/
-        ├── libxybrid-bolt.so
+        ├── libxybrid_bolt.so
         ├── libonnxruntime.so
         └── libc++_shared.so
 ```
@@ -377,7 +377,7 @@ export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/26.1.10909125"
 **Cause**: Missing native library or corrupted .so file.
 
 **Fix**:
-1. Verify the .so file is valid: `file libs/arm64-v8a/libxybrid-bolt.so`
+1. Verify the .so file is valid: `file libs/arm64-v8a/libxybrid_bolt.so`
 2. Should show: `ELF 64-bit LSB shared object, ARM aarch64`
 3. Rebuild the Bazel AAR and restage its jniLibs (see Building Native Libraries above)
 

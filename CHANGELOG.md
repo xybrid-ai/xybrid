@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **The published Kotlin AAR now contains a callable JNI library.** Its native
+  filename matches `System.loadLibrary("xybrid_bolt")`, and the Bazel link
+  includes every generated `Java_ai_xybrid_Native_*` trampoline over the Bolt
+  C ABI. Android CI compares the final ELF exports with the generated JNI
+  source so a filename-only or C-ABI-only artifact cannot ship again (#530).
+
 ### Planned
 
 - **Multimodal KV-prefix reuse**: the per-frame prefill cost lever for live vision — **deferred** from 0.2.0, not yet implemented.

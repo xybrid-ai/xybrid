@@ -1,6 +1,6 @@
 // android-dlopen-probe — load a .so the way System.loadLibrary (dlopen,
 // RTLD_NOW) does, print the dlerror() and exit non-zero on failure. Used by
-// the build-android CI gate to prove the shipped libxybrid-bolt.so actually
+// the build-android CI gate to prove the shipped libxybrid_bolt.so actually
 // loads on a device/emulator — both as built and after an AGP-style strip.
 //
 // Why this exists: `llvm-readelf` reads the ELF via *section* headers, but the
@@ -10,7 +10,7 @@
 // strip-corrupted copy with "empty/missing DT_HASH/DT_GNU_HASH".)
 //
 // Usage on device:
-//   LD_LIBRARY_PATH=<dir> ./android-dlopen-probe <dir>/libxybrid-bolt.so
+//   LD_LIBRARY_PATH=<dir> ./android-dlopen-probe <dir>/libxybrid_bolt.so
 //
 // RTLD_NOW forces eager symbol resolution, so an unresolved C++ ABI symbol
 // (missing libc++_shared DT_NEEDED) fails here exactly as at app launch. The

@@ -4,7 +4,7 @@
 //
 // The bolt-generated Kotlin binding and its native artifacts come from the
 // published `ai.xybrid:xybrid-kotlin` AAR on Maven Central — it bundles
-// `libxybrid-bolt.so` + the ORT runtime alongside the `ai.xybrid.*`
+// `libxybrid_bolt.so` + the ORT runtime alongside the `ai.xybrid.*`
 // classes that `XybridModule.kt` calls into. No per-package native staging
 // is needed on Android; gradle resolves the AAR like any other dependency.
 
@@ -87,7 +87,7 @@ dependencies {
 
   // The bolt Kotlin SDK: provides the `ai.xybrid.*` classes XybridModule.kt
   // calls (Xybrid, XybridModel, Envelope, XybridError, …) and bundles
-  // `libxybrid-bolt.so` + the ORT runtime in the AAR. Bolt talks to the
+  // `libxybrid_bolt.so` + the ORT runtime in the AAR. Bolt talks to the
   // native layer over JNI directly, so there is no JNA dependency (unlike
   // the previous uniffi binding). Keep this version in lockstep with the
   // workspace SDK version (bindings/kotlin/build.gradle.kts `version`).

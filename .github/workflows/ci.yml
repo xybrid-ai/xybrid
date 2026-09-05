@@ -36,6 +36,7 @@ jobs:
       relevant: ${{ steps.filter.outputs.relevant }}
       unity_bolt: ${{ steps.filter.outputs.unity_bolt }}
       python_sdk: ${{ steps.filter.outputs.python_sdk }}
+      kotlin_jni: ${{ steps.filter.outputs.kotlin_jni }}
     steps:
       - name: Check changed paths
         id: filter
@@ -77,6 +78,28 @@ jobs:
           fi
           echo "python_sdk=$PYTHON_SDK" >> "$GITHUB_OUTPUT"
           echo "Python SDK changes: $PYTHON_SDK"
+          if printf '%s\n' "$FILES" | grep -qE '^(bindings/kotlin/|tools/scripts/gen_kotlin_bolt\.py$|crates/xybrid-bolt/|crates/xybrid-ffi-facade/|\.github/workflows/ci\.yml$)'; then
+            KOTLIN_JNI=true
+          else
+            KOTLIN_JNI=false
+          fi
+          echo "kotlin_jni=$KOTLIN_JNI" >> "$GITHUB_OUTPUT"
+
+  kotlin-jni-drift:
+    name: Kotlin and JNI generation drift
+    needs: tooling-changes
+    if: needs.tooling-changes.outputs.kotlin_jni == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Install the pinned boltffi CLI
+        run: cargo install boltffi_cli --version 0.29.3 --locked
+      - name: Compare committed Kotlin and JNI with fresh generation
+        run: python3 tools/scripts/gen_kotlin_bolt.py --check
 
   tooling-tests:
     name: Tooling tests (${{ matrix.platform }})
@@ -475,7 +498,7 @@ jobs:
     runs-on: ubuntu-latest
     # Inspect dependency results even when the tooling path gate skips its matrix.
     if: ${{ !cancelled() }}
-    needs: [tooling-changes, tooling-tests, unity-bolt-compile, python-sdk, fmt, clippy, check-no-default-features, check-platform-macos, check-platform-desktop, check-vision-platforms, check-llamacpp-vulkan, clippy-llm, test-llm, test, api-contract, web]
+    needs: [tooling-changes, tooling-tests, unity-bolt-compile, python-sdk, kotlin-jni-drift, fmt, clippy, check-no-default-features, check-platform-macos, check-platform-desktop, check-vision-platforms, check-llamacpp-vulkan, clippy-llm, test-llm, test, api-contract, web]
     steps:
       - name: Verify required job results
         env:
@@ -501,6 +524,11 @@ jobs:
                   .key == "python-sdk"
                   and .value.result == "skipped"
                   and $needs["tooling-changes"].outputs.python_sdk == "false"
+                )
+                or (
+                  .key == "kotlin-jni-drift"
+                  and .value.result == "skipped"
+                  and $needs["tooling-changes"].outputs.kotlin_jni == "false"
                 )
               )
           ' <<<"$NEEDS_JSON"

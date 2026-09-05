@@ -313,7 +313,7 @@ jobs:
         run: |
           SO_BASE_PATH="bindings/kotlin/libs"
           for abi in armeabi-v7a arm64-v8a x86_64; do
-            SO_PATH="$SO_BASE_PATH/$abi/libxybrid-bolt.so"
+            SO_PATH="$SO_BASE_PATH/$abi/libxybrid_bolt.so"
             if [ ! -f "$SO_PATH" ]; then
               echo "Error: .so file not found at $SO_PATH"
               exit 1

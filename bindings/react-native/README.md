@@ -31,7 +31,7 @@ The two platforms consume the bolt core differently:
   `//bindings/apple:XybridFFI` target the standalone Apple SDK ships from —
   see Local development below for the commands).
 - **Android** depends on the published `ai.xybrid:xybrid-kotlin` Maven AAR,
-  which bundles `libxybrid-bolt.so` + the ONNX Runtime alongside the
+  which bundles `libxybrid_bolt.so` + the ONNX Runtime alongside the
   `ai.xybrid.*` Kotlin classes. Nothing is staged per-package.
 
 No new Rust code — the bridge is purely a thin layer above the bolt bindings.

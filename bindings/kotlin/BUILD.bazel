@@ -9,13 +9,14 @@
 # transitions too.
 #
 # jni payload per ABI:
-#   libxybrid-bolt.so   — the one-link cdylib (renamed: rustc emits underscore,
-#                         Kotlin's System.loadLibrary("xybrid-bolt") wants hyphen)
+#   libxybrid_bolt.so   — the BoltFFI JNI glue linked with the Rust staticlib;
+#                         matches System.loadLibrary("xybrid_bolt") exactly
 #   libc++_shared.so    — from @androidndk's sysroot (version-matched to the
 #                         NDK that linked the .so; no vendored drift)
 #   libonnxruntime.so   — vendored, arm64-v8a + x86_64 only (armv7 ships no ORT,
 #                         matching today's AAR)
 load("@aspect_bazel_lib//lib:transitions.bzl", "platform_transition_filegroup")
+load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_import")
 load("@rules_kotlin//kotlin:core.bzl", "define_kt_toolchain")
 load("@rules_kotlin//kotlin:jvm.bzl", "kt_jvm_library")
 load("@rules_pkg//pkg:mappings.bzl", "pkg_files")
@@ -40,14 +41,51 @@ ANDROID_ABIS = [
     ("x86_64", "@rules_rs//rs/platforms:x86_64-linux-android", "x86_64-linux-android", "//:ort_android_x86_64"),
 ]
 
-# The NDK repo's clang dir is pinned to linux-x86_64 binaries by
-# XYBRID_NDK_HOST_TAG in the committed .bazelrc (RBE workers run them).
-NDK_SYSROOT = "@androidndk//toolchains/llvm/prebuilt/linux-x86_64/sysroot"
+cc_import(
+    name = "android_cxx_shared",
+    shared_library = select({
+        "@rules_rs//rs/platforms/config:aarch64-linux-android": "@androidndk//:libcxx_shared_aarch64-linux-android",
+        "@rules_rs//rs/platforms/config:armv7-linux-androideabi": "@androidndk//:libcxx_shared_arm-linux-androideabi",
+        "@rules_rs//rs/platforms/config:x86_64-linux-android": "@androidndk//:libcxx_shared_x86_64-linux-android",
+    }),
+)
+
+# BoltFFI's generated Kotlin declares JVM `external fun`s. The Rust staticlib
+# exports the underlying C ABI, while this generated C layer exports the
+# matching Java_* JNI entry points and translates JVM values to that ABI. This
+# mirrors `boltffi pack android`; packaging the Rust cdylib alone is not enough
+# for a JVM consumer.
+cc_binary(
+    name = "libxybrid_bolt.so",
+    srcs = [
+        "bazel/jni/jni_glue.c",
+        "bazel/jni/xybrid_bolt.h",
+    ],
+    additional_linker_inputs = ["bazel/jni/exports.map"],
+    deps = [
+        ":android_cxx_shared",
+        "//crates/xybrid-bolt:xybrid_bolt_staticlib",
+    ],
+    linkopts = [
+        "-Wl,--version-script,$(location bazel/jni/exports.map)",
+        "-Wl,--gc-sections",
+        "-Wl,-z,nodelete",
+        "-Wl,-z,max-page-size=16384",
+        "-Wl,-soname,libxybrid_bolt.so",
+        "-Wl,-s",
+        "-llog",
+        "-ldl",
+        "-lm",
+    ],
+    linkshared = True,
+    linkstatic = True,
+    target_compatible_with = ["@platforms//os:android"],
+)
 
 [
     platform_transition_filegroup(
         name = "bolt_so_" + abi,
-        srcs = ["//crates/xybrid-bolt:xybrid_bolt_cdylib"],
+        srcs = [":libxybrid_bolt.so"],
         target_platform = platform,
     )
     for abi, platform, _, _ in ANDROID_ABIS
@@ -58,7 +96,7 @@ NDK_SYSROOT = "@androidndk//toolchains/llvm/prebuilt/linux-x86_64/sysroot"
         name = "jni_bolt_" + abi,
         srcs = [":bolt_so_" + abi],
         prefix = "jni/" + abi,
-        renames = {":bolt_so_" + abi: "libxybrid-bolt.so"},
+        renames = {":bolt_so_" + abi: "libxybrid_bolt.so"},
     )
     for abi, _, _, _ in ANDROID_ABIS
 ]
@@ -66,7 +104,7 @@ NDK_SYSROOT = "@androidndk//toolchains/llvm/prebuilt/linux-x86_64/sysroot"
 [
     pkg_files(
         name = "jni_cxx_" + abi,
-        srcs = ["%s:libcxx_shared_%s" % (NDK_SYSROOT, tsn)],
+        srcs = ["@androidndk//:libcxx_shared_" + tsn],
         prefix = "jni/" + abi,
     )
     for abi, _, tsn, _ in ANDROID_ABIS
