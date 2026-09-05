@@ -26,6 +26,9 @@ permissions: read-all
 
 env:
   CARGO_TERM_COLOR: always
+  # Pinned Rust toolchain. Canonical value lives in rust-toolchain.toml;
+  # `tools/scripts/toolchain-sync.sh --check` fails CI if they drift.
+  RUST_VERSION: "1.98.0"
   RUST_BACKTRACE: 1
 
 jobs:
@@ -137,7 +140,7 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
         with:
-          toolchain: stable
+          toolchain: ${{ env.RUST_VERSION }}
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
@@ -163,9 +166,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      # Fails fast if a workflow's RUST_VERSION drifts from rust-toolchain.toml,
+      # or if any workflow reintroduces a floating `stable` channel. Cheap, and
+      # it runs before anything installs a toolchain.
+      - name: Check the Rust toolchain pin is in sync
+        run: ./tools/scripts/toolchain-sync.sh --check
       - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
         with:
-          toolchain: stable
+          toolchain: ${{ env.RUST_VERSION }}
           components: rustfmt
       - run: cargo fmt --all --check
 
@@ -176,7 +184,7 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
         with:
-          toolchain: stable
+          toolchain: ${{ env.RUST_VERSION }}
           components: clippy
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - run: cargo clippy --workspace --all-targets -- -D warnings
@@ -189,7 +197,7 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
         with:
-          toolchain: stable
+          toolchain: ${{ env.RUST_VERSION }}
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           key: ubuntu-latest-no-default
@@ -205,7 +213,7 @@ jobs:
           submodules: true
       - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
         with:
-          toolchain: stable
+          toolchain: ${{ env.RUST_VERSION }}
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           key: macos-platform-no-bin
@@ -222,7 +230,7 @@ jobs:
           submodules: true
       - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
         with:
-          toolchain: stable
+          toolchain: ${{ env.RUST_VERSION }}
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           key: ubuntu-platform-desktop
@@ -254,7 +262,7 @@ jobs:
           submodules: true
       - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
         with:
-          toolchain: stable
+          toolchain: ${{ env.RUST_VERSION }}
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           key: ${{ matrix.cache-key }}
@@ -280,7 +288,7 @@ jobs:
           submodules: true
       - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
         with:
-          toolchain: stable
+          toolchain: ${{ env.RUST_VERSION }}
       - uses: ./.github/actions/setup-vulkan-sdk
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
@@ -299,7 +307,7 @@ jobs:
           submodules: true
       - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
         with:
-          toolchain: stable
+          toolchain: ${{ env.RUST_VERSION }}
           components: clippy
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
@@ -323,7 +331,7 @@ jobs:
           submodules: true
       - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
         with:
-          toolchain: stable
+          toolchain: ${{ env.RUST_VERSION }}
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           key: ubuntu-test-llm
@@ -353,7 +361,7 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
         with:
-          toolchain: stable
+          toolchain: ${{ env.RUST_VERSION }}
 
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
