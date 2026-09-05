@@ -162,22 +162,12 @@ jobs:
             CODE_SIGNING_ALLOWED=NO
 
       - name: Run Swift unit tests (iOS Simulator)
-        # The generic build above compiles + links the wrapper but cannot
-        # execute anything: `generic/platform=iOS Simulator` has no bootable
-        # device, so XybridTests never runs there. A concrete simulator
-        # destination compiles the test bundle and runs it on a booted device.
-        # Package.swift is already flipped to the locally built xcframework by
-        # the previous step, so this links the G4 simulator slice just built.
-        #
-        # iPhone 17 on iOS 26.5 is what the macos-26 image ships for the
-        # default Xcode (26.6); there is no "iPhone 16" simulator on that image
-        # (only iPhone 16e, and only under the iOS 26.2 runtime). DEVELOPER_DIR
-        # pins the Xcode whose bundled runtime the OS= below refers to. When
-        # the image rolls forward, bump both together (see
-        # actions/runner-images macos-26-Readme.md, "Installed Simulators").
-        #
-        # The timeout stops a simulator boot hang or a test deadlock from
-        # holding the runner for the job's full 6h default.
+        # The generic build above can't execute tests (no bootable device);
+        # a concrete simulator runs XybridTests against the xcframework the
+        # previous step already flipped Package.swift to. iPhone 17 / iOS 26.5
+        # is the pair macos-26 ships with its default Xcode 26.6 (no iPhone 16
+        # on that image); bump DEVELOPER_DIR and OS= together when the image
+        # rolls forward. Timeout guards against a simulator/test hang.
         timeout-minutes: 10
         env:
           DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
