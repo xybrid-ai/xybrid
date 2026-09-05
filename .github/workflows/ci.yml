@@ -361,10 +361,21 @@ jobs:
 
       # Skip examples — they statically link llama.cpp + ort and exhaust
       # runner disk during link. `clippy --all-targets` already verifies
-      # examples compile (it stops at .rmeta, so no link step).
+      # examples compile (it stops at .rmeta, so no link step) — but compiling
+      # is all it does: an example's `#[cfg(test)]` module never runs here.
+      # Examples that carry unit tests are opted in one at a time below.
       # `--doc` can't be combined with other target flags, so it runs separately.
       - name: Run tests (lib, bins, integration)
         run: cargo test --workspace --features ort-download --lib --bins --tests
+
+      # `sentence_ranker` unit-tests its cosine-similarity and ranking helpers.
+      # Selecting the single example keeps the no-examples policy above intact:
+      # it needs no llm-llamacpp, and ort is load-dynamic on Linux, so the link
+      # step is one small binary — not every example against llama.cpp. Add
+      # another `--example <name>` here when an example gains tests that run
+      # without llm-llamacpp; examples that need it belong in test-llm.
+      - name: Run tests (examples with unit tests)
+        run: cargo test -p xybrid-core --features ort-download --example sentence_ranker
 
       - name: Run doc tests
         run: cargo test --workspace --features ort-download --doc
