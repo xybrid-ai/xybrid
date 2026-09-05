@@ -13,23 +13,19 @@ use std::process::Command;
 use tempfile::TempDir;
 use xybrid_sdk::run_pipeline;
 
-/// Test 2: xybrid_sdk::run_pipeline() executes successfully and returns 3 stage results
+/// Legacy model-only configs must not fabricate a successful cloud response.
+/// Successful execution is covered by pipeline_bindings_integration with a
+/// configured provider and real HTTP requests to a loopback mock gateway.
 #[test]
-fn test_sdk_pipeline_execution() -> Result<(), Box<dyn std::error::Error>> {
-    println!("🚀 Test 2: SDK pipeline execution");
-    println!("{}", "=".repeat(60));
-
-    // Create a test pipeline config
+fn test_sdk_pipeline_without_provider_is_rejected() -> Result<(), Box<dyn std::error::Error>> {
     let temp_dir = TempDir::new()?;
     let config_path = temp_dir.path().join("hiiipe_test.yml");
 
     let config_content = r#"
-name: "Test Hiiipe Pipeline"
+name: "Unconfigured cloud pipeline"
 
 stages:
-  - "whisper-tiny@1.2"
-  - "motivator-llm@5"
-  - "xtts-mini@0.6"
+  - "unconfigured-cloud-model"
 
 input:
   kind: "Text"
@@ -40,50 +36,16 @@ metrics:
   temperature: 25.0
 
 availability:
-  "whisper-tiny@1.2": true
-  "xtts-mini@0.6": true
-  "motivator-llm@5": false
+  "unconfigured-cloud-model": false
 "#;
 
     fs::write(&config_path, config_content)?;
-    println!("   Created test config: {}", config_path.display());
-
-    // Execute the pipeline
-    println!("   Executing pipeline...");
-    let result = run_pipeline(config_path.to_str().unwrap())?;
-
-    println!("   Pipeline name: {:?}", result.name);
-    println!("   Total latency: {}ms", result.total_latency_ms);
-    println!("   Final output: {}", result.final_output);
-    println!("   Stage count: {}", result.stages.len());
-
-    // Assertions
-    assert_eq!(
-        result.stages.len(),
-        3,
-        "Pipeline should return exactly 3 stage results"
-    );
-
-    // Verify each stage has valid data
-    for (i, stage) in result.stages.iter().enumerate() {
-        println!(
-            "   Stage {}: {} → {} ({}ms)",
-            i + 1,
-            stage.name,
-            stage.target,
-            stage.latency_ms
-        );
-        assert!(!stage.name.is_empty(), "Stage name should not be empty");
-        assert!(!stage.target.is_empty(), "Stage target should not be empty");
-    }
-
+    let error = run_pipeline(config_path.to_str().unwrap())
+        .expect_err("an unconfigured cloud stage must not silently return a mock answer");
     assert!(
-        !result.final_output.is_empty(),
-        "Final output should not be empty"
+        error.to_string().contains("Missing 'provider'"),
+        "unexpected configuration failure: {error}"
     );
-
-    println!("   ✅ SDK pipeline execution successful");
-    println!();
     Ok(())
 }
 

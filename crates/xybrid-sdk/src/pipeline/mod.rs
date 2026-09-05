@@ -590,8 +590,7 @@ impl Pipeline {
             .stages
             .iter()
             .map(|stage_config| {
-                let name = stage_config.model_id();
-                let mut desc = StageDescriptor::new(name);
+                let mut desc = StageDescriptor::new(stage_config.stage_id());
 
                 if let Some(target_str) = stage_config.target() {
                     desc.target = Self::parse_target(target_str);
@@ -1998,6 +1997,32 @@ id: asr
         )
         .unwrap();
         assert_eq!(stage.stage_id(), "asr");
+    }
+
+    #[test]
+    fn loaded_pipeline_keeps_stage_ids_distinct_from_model_ids() {
+        let yaml = r#"
+name: assistant
+stages:
+  - id: answer
+    model: gpt-4o-mini
+    target: cloud
+    provider: openai
+"#;
+        let pipeline = PipelineRef::from_yaml(yaml)
+            .expect("pipeline YAML should parse")
+            .load()
+            .expect("cloud stage should resolve without downloading a model");
+        let handle = pipeline
+            .handle
+            .read()
+            .expect("fresh pipeline handle should not be poisoned");
+
+        assert_eq!(handle.stage_descriptors[0].name, "answer");
+        assert_eq!(
+            handle.stage_descriptors[0].model.as_deref(),
+            Some("gpt-4o-mini")
+        );
     }
 
     // NOTE: Prior to Phase 0.4 we had a `llm_metrics_appear_in_per_stage_json`

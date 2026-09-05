@@ -2759,6 +2759,7 @@ dependencies = [
  "dirs",
  "env_logger",
  "filetime",
+ "httpmock",
  "log",
  "serde",
  "serde_json",
@@ -2767,6 +2768,7 @@ dependencies = [
  "tokio",
  "xybrid-core",
  "xybrid-sdk",
+ "xybrid_bolt",
 ]
 
 [[package]]

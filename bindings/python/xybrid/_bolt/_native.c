@@ -90,6 +90,22 @@ typedef FfiBuf_u8 (*boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model
 static boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_warmup_fn boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_warmup = NULL;
 typedef FfiBuf_u8 (*boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_unload_fn)(uint64_t);
 static boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_unload_fn boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_unload = NULL;
+typedef void (*boltffi_python_boltffi_release_class_xybrid_bolt_xybrid_pipeline_fn)(uint64_t);
+static boltffi_python_boltffi_release_class_xybrid_bolt_xybrid_pipeline_fn boltffi_python_boltffi_release_class_xybrid_bolt_xybrid_pipeline = NULL;
+typedef FfiBuf_u8 (*boltffi_python_boltffi_init_class_xybrid_bolt_xybrid_pipeline_from_yaml_fn)(const uint8_t *, uintptr_t, uint64_t *);
+static boltffi_python_boltffi_init_class_xybrid_bolt_xybrid_pipeline_from_yaml_fn boltffi_python_boltffi_init_class_xybrid_bolt_xybrid_pipeline_from_yaml = NULL;
+typedef FfiBuf_u8 (*boltffi_python_boltffi_init_class_xybrid_bolt_xybrid_pipeline_from_file_fn)(const uint8_t *, uintptr_t, uint64_t *);
+static boltffi_python_boltffi_init_class_xybrid_bolt_xybrid_pipeline_from_file_fn boltffi_python_boltffi_init_class_xybrid_bolt_xybrid_pipeline_from_file = NULL;
+typedef FfiBuf_u8 (*boltffi_python_boltffi_init_class_xybrid_bolt_xybrid_pipeline_from_bundle_fn)(const uint8_t *, uintptr_t, uint64_t *);
+static boltffi_python_boltffi_init_class_xybrid_bolt_xybrid_pipeline_from_bundle_fn boltffi_python_boltffi_init_class_xybrid_bolt_xybrid_pipeline_from_bundle = NULL;
+typedef FfiBuf_u8 (*boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_pipeline_run_fn)(uint64_t, const uint8_t *, uintptr_t, FfiBuf_u8 *);
+static boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_pipeline_run_fn boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_pipeline_run = NULL;
+typedef FfiBuf_u8 (*boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_pipeline_name_fn)(uint64_t);
+static boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_pipeline_name_fn boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_pipeline_name = NULL;
+typedef FfiBuf_u8 (*boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_pipeline_stage_names_fn)(uint64_t);
+static boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_pipeline_stage_names_fn boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_pipeline_stage_names = NULL;
+typedef uint32_t (*boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_pipeline_stage_count_fn)(uint64_t);
+static boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_pipeline_stage_count_fn boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_pipeline_stage_count = NULL;
 typedef void (*boltffi_python_boltffi_release_class_xybrid_bolt_xybrid_conversation_context_fn)(uint64_t);
 static boltffi_python_boltffi_release_class_xybrid_bolt_xybrid_conversation_context_fn boltffi_python_boltffi_release_class_xybrid_bolt_xybrid_conversation_context = NULL;
 typedef uint64_t (*boltffi_python_boltffi_init_class_xybrid_bolt_xybrid_conversation_context_new_fn)(void);
@@ -250,6 +266,14 @@ static void boltffi_python_clear_symbols(void) {
     boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_run_stream_with_context = NULL;
     boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_warmup = NULL;
     boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_unload = NULL;
+    boltffi_python_boltffi_release_class_xybrid_bolt_xybrid_pipeline = NULL;
+    boltffi_python_boltffi_init_class_xybrid_bolt_xybrid_pipeline_from_yaml = NULL;
+    boltffi_python_boltffi_init_class_xybrid_bolt_xybrid_pipeline_from_file = NULL;
+    boltffi_python_boltffi_init_class_xybrid_bolt_xybrid_pipeline_from_bundle = NULL;
+    boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_pipeline_run = NULL;
+    boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_pipeline_name = NULL;
+    boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_pipeline_stage_names = NULL;
+    boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_pipeline_stage_count = NULL;
     boltffi_python_boltffi_release_class_xybrid_bolt_xybrid_conversation_context = NULL;
     boltffi_python_boltffi_init_class_xybrid_bolt_xybrid_conversation_context_new = NULL;
     boltffi_python_boltffi_init_class_xybrid_bolt_xybrid_conversation_context_with_id = NULL;
@@ -751,6 +775,86 @@ static int boltffi_python_bind_symbols(void) {
     if (boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_unload == NULL) {
         boltffi_python_unload_library();
         PyErr_SetString(PyExc_ImportError, "failed to resolve native symbol " "boltffi_method_class_xybrid_bolt_xybrid_model_unload");
+        return 0;
+    }
+#ifdef _WIN32
+    boltffi_python_boltffi_release_class_xybrid_bolt_xybrid_pipeline = (boltffi_python_boltffi_release_class_xybrid_bolt_xybrid_pipeline_fn)GetProcAddress(boltffi_python_library_handle, "boltffi_release_class_xybrid_bolt_xybrid_pipeline");
+#else
+    boltffi_python_boltffi_release_class_xybrid_bolt_xybrid_pipeline = (boltffi_python_boltffi_release_class_xybrid_bolt_xybrid_pipeline_fn)dlsym(boltffi_python_library_handle, "boltffi_release_class_xybrid_bolt_xybrid_pipeline");
+#endif
+    if (boltffi_python_boltffi_release_class_xybrid_bolt_xybrid_pipeline == NULL) {
+        boltffi_python_unload_library();
+        PyErr_SetString(PyExc_ImportError, "failed to resolve native symbol " "boltffi_release_class_xybrid_bolt_xybrid_pipeline");
+        return 0;
+    }
+#ifdef _WIN32
+    boltffi_python_boltffi_init_class_xybrid_bolt_xybrid_pipeline_from_yaml = (boltffi_python_boltffi_init_class_xybrid_bolt_xybrid_pipeline_from_yaml_fn)GetProcAddress(boltffi_python_library_handle, "boltffi_init_class_xybrid_bolt_xybrid_pipeline_from_yaml");
+#else
+    boltffi_python_boltffi_init_class_xybrid_bolt_xybrid_pipeline_from_yaml = (boltffi_python_boltffi_init_class_xybrid_bolt_xybrid_pipeline_from_yaml_fn)dlsym(boltffi_python_library_handle, "boltffi_init_class_xybrid_bolt_xybrid_pipeline_from_yaml");
+#endif
+    if (boltffi_python_boltffi_init_class_xybrid_bolt_xybrid_pipeline_from_yaml == NULL) {
+        boltffi_python_unload_library();
+        PyErr_SetString(PyExc_ImportError, "failed to resolve native symbol " "boltffi_init_class_xybrid_bolt_xybrid_pipeline_from_yaml");
+        return 0;
+    }
+#ifdef _WIN32
+    boltffi_python_boltffi_init_class_xybrid_bolt_xybrid_pipeline_from_file = (boltffi_python_boltffi_init_class_xybrid_bolt_xybrid_pipeline_from_file_fn)GetProcAddress(boltffi_python_library_handle, "boltffi_init_class_xybrid_bolt_xybrid_pipeline_from_file");
+#else
+    boltffi_python_boltffi_init_class_xybrid_bolt_xybrid_pipeline_from_file = (boltffi_python_boltffi_init_class_xybrid_bolt_xybrid_pipeline_from_file_fn)dlsym(boltffi_python_library_handle, "boltffi_init_class_xybrid_bolt_xybrid_pipeline_from_file");
+#endif
+    if (boltffi_python_boltffi_init_class_xybrid_bolt_xybrid_pipeline_from_file == NULL) {
+        boltffi_python_unload_library();
+        PyErr_SetString(PyExc_ImportError, "failed to resolve native symbol " "boltffi_init_class_xybrid_bolt_xybrid_pipeline_from_file");
+        return 0;
+    }
+#ifdef _WIN32
+    boltffi_python_boltffi_init_class_xybrid_bolt_xybrid_pipeline_from_bundle = (boltffi_python_boltffi_init_class_xybrid_bolt_xybrid_pipeline_from_bundle_fn)GetProcAddress(boltffi_python_library_handle, "boltffi_init_class_xybrid_bolt_xybrid_pipeline_from_bundle");
+#else
+    boltffi_python_boltffi_init_class_xybrid_bolt_xybrid_pipeline_from_bundle = (boltffi_python_boltffi_init_class_xybrid_bolt_xybrid_pipeline_from_bundle_fn)dlsym(boltffi_python_library_handle, "boltffi_init_class_xybrid_bolt_xybrid_pipeline_from_bundle");
+#endif
+    if (boltffi_python_boltffi_init_class_xybrid_bolt_xybrid_pipeline_from_bundle == NULL) {
+        boltffi_python_unload_library();
+        PyErr_SetString(PyExc_ImportError, "failed to resolve native symbol " "boltffi_init_class_xybrid_bolt_xybrid_pipeline_from_bundle");
+        return 0;
+    }
+#ifdef _WIN32
+    boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_pipeline_run = (boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_pipeline_run_fn)GetProcAddress(boltffi_python_library_handle, "boltffi_method_class_xybrid_bolt_xybrid_pipeline_run");
+#else
+    boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_pipeline_run = (boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_pipeline_run_fn)dlsym(boltffi_python_library_handle, "boltffi_method_class_xybrid_bolt_xybrid_pipeline_run");
+#endif
+    if (boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_pipeline_run == NULL) {
+        boltffi_python_unload_library();
+        PyErr_SetString(PyExc_ImportError, "failed to resolve native symbol " "boltffi_method_class_xybrid_bolt_xybrid_pipeline_run");
+        return 0;
+    }
+#ifdef _WIN32
+    boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_pipeline_name = (boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_pipeline_name_fn)GetProcAddress(boltffi_python_library_handle, "boltffi_method_class_xybrid_bolt_xybrid_pipeline_name");
+#else
+    boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_pipeline_name = (boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_pipeline_name_fn)dlsym(boltffi_python_library_handle, "boltffi_method_class_xybrid_bolt_xybrid_pipeline_name");
+#endif
+    if (boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_pipeline_name == NULL) {
+        boltffi_python_unload_library();
+        PyErr_SetString(PyExc_ImportError, "failed to resolve native symbol " "boltffi_method_class_xybrid_bolt_xybrid_pipeline_name");
+        return 0;
+    }
+#ifdef _WIN32
+    boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_pipeline_stage_names = (boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_pipeline_stage_names_fn)GetProcAddress(boltffi_python_library_handle, "boltffi_method_class_xybrid_bolt_xybrid_pipeline_stage_names");
+#else
+    boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_pipeline_stage_names = (boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_pipeline_stage_names_fn)dlsym(boltffi_python_library_handle, "boltffi_method_class_xybrid_bolt_xybrid_pipeline_stage_names");
+#endif
+    if (boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_pipeline_stage_names == NULL) {
+        boltffi_python_unload_library();
+        PyErr_SetString(PyExc_ImportError, "failed to resolve native symbol " "boltffi_method_class_xybrid_bolt_xybrid_pipeline_stage_names");
+        return 0;
+    }
+#ifdef _WIN32
+    boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_pipeline_stage_count = (boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_pipeline_stage_count_fn)GetProcAddress(boltffi_python_library_handle, "boltffi_method_class_xybrid_bolt_xybrid_pipeline_stage_count");
+#else
+    boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_pipeline_stage_count = (boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_pipeline_stage_count_fn)dlsym(boltffi_python_library_handle, "boltffi_method_class_xybrid_bolt_xybrid_pipeline_stage_count");
+#endif
+    if (boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_pipeline_stage_count == NULL) {
+        boltffi_python_unload_library();
+        PyErr_SetString(PyExc_ImportError, "failed to resolve native symbol " "boltffi_method_class_xybrid_bolt_xybrid_pipeline_stage_count");
         return 0;
     }
 #ifdef _WIN32
@@ -1532,12 +1636,16 @@ static PyObject *boltffi_python_decode_read_e9a0b9fd71f8c9ff(const uint8_t *ptr,
     return boltffi_python_decode_wire_codec("read_e9a0b9fd71f8c9ff", ptr, len);
 }
 
-static PyObject *boltffi_python_decode_read_3cfe09c223256b1b(const uint8_t *ptr, uintptr_t len) {
-    return boltffi_python_decode_wire_codec("read_3cfe09c223256b1b", ptr, len);
-}
-
 static PyObject *boltffi_python_decode_read_9415281aa52df749(const uint8_t *ptr, uintptr_t len) {
     return boltffi_python_decode_wire_codec("read_9415281aa52df749", ptr, len);
+}
+
+static PyObject *boltffi_python_decode_read_f53a3ba3847b114d(const uint8_t *ptr, uintptr_t len) {
+    return boltffi_python_decode_wire_codec("read_f53a3ba3847b114d", ptr, len);
+}
+
+static PyObject *boltffi_python_decode_read_3cfe09c223256b1b(const uint8_t *ptr, uintptr_t len) {
+    return boltffi_python_decode_wire_codec("read_3cfe09c223256b1b", ptr, len);
 }
 
 static PyObject *boltffi_python_decode_read_c9e5fd91113e36a2(const uint8_t *ptr, uintptr_t len) {
@@ -1571,6 +1679,10 @@ static int boltffi_python_encode_write_62eeac930738df49(PyObject *value, PyObjec
 
 static int boltffi_python_encode_write_922e13039dd3c493(PyObject *value, PyObject **out_wire, const uint8_t **out_ptr, uintptr_t *out_len) {
     return boltffi_python_encode_wire_codec("write_922e13039dd3c493", value, out_wire, out_ptr, out_len);
+}
+
+static int boltffi_python_encode_write_ab1ae15bdd9d5612(PyObject *value, PyObject **out_wire, const uint8_t **out_ptr, uintptr_t *out_len) {
+    return boltffi_python_encode_wire_codec("write_ab1ae15bdd9d5612", value, out_wire, out_ptr, out_len);
 }
 
 static int boltffi_python_encode_write_45cfac4c89613282(PyObject *value, PyObject **out_wire, const uint8_t **out_ptr, uintptr_t *out_len) {
@@ -5934,6 +6046,228 @@ done:
     return result;
 }
 
+static PyObject *boltffi_python_callable_wrapper_boltffi_release_class_xybrid_bolt_xybrid_pipeline(PyObject *self, PyObject *const *args, Py_ssize_t nargs) {
+    uint64_t handle;
+    (void)self;
+    if (nargs != 1) {
+        PyErr_Format(PyExc_TypeError, "_boltffi_xybrid_pipeline_release() takes 1 positional argument but %zd were given", nargs);
+        return NULL;
+    }
+    if (boltffi_python_boltffi_release_class_xybrid_bolt_xybrid_pipeline == NULL) {
+        PyErr_SetString(PyExc_ImportError, "native library is not initialized");
+        return NULL;
+    }
+    if (!boltffi_python_parse_u64(args[0], &handle)) {
+        return NULL;
+    }
+    boltffi_python_boltffi_release_class_xybrid_bolt_xybrid_pipeline(handle);
+    Py_RETURN_NONE;
+}
+
+static PyObject *boltffi_python_callable_wrapper_boltffi_init_class_xybrid_bolt_xybrid_pipeline_from_yaml(PyObject *self, PyObject *const *args, Py_ssize_t nargs) {
+    PyObject *yaml_wire = NULL;
+    const uint8_t *yaml_ptr = NULL;
+    uintptr_t yaml_len = 0;
+    uint64_t return_success;
+    FfiBuf_u8 return_error = {0};
+    PyObject *error = NULL;
+    PyObject *result = NULL;
+    (void)self;
+    if (nargs != 1) {
+        PyErr_Format(PyExc_TypeError, "_boltffi_xybrid_pipeline_from_yaml() takes 1 positional arguments but %zd were given", nargs);
+        goto done;
+    }
+    if (boltffi_python_boltffi_init_class_xybrid_bolt_xybrid_pipeline_from_yaml == NULL) {
+        PyErr_SetString(PyExc_ImportError, "native library is not initialized");
+        goto done;
+    }
+    if (!boltffi_python_wire_string(args[0], &yaml_wire, &yaml_ptr, &yaml_len)) {
+        goto done;
+    }
+    return_error = boltffi_python_boltffi_init_class_xybrid_bolt_xybrid_pipeline_from_yaml(yaml_ptr, yaml_len, &return_success);
+    if (return_error.len != 0) {
+        error = boltffi_python_decode_owned_raw_wire(return_error);
+        if (error != NULL) {
+            PyErr_SetObject(PyExc_RuntimeError, error);
+        }
+        goto done;
+    }
+    result = boltffi_python_box_u64(return_success);
+done:
+    Py_XDECREF(yaml_wire);
+    Py_XDECREF(error);
+    return result;
+}
+
+static PyObject *boltffi_python_callable_wrapper_boltffi_init_class_xybrid_bolt_xybrid_pipeline_from_file(PyObject *self, PyObject *const *args, Py_ssize_t nargs) {
+    PyObject *path_wire = NULL;
+    const uint8_t *path_ptr = NULL;
+    uintptr_t path_len = 0;
+    uint64_t return_success;
+    FfiBuf_u8 return_error = {0};
+    PyObject *error = NULL;
+    PyObject *result = NULL;
+    (void)self;
+    if (nargs != 1) {
+        PyErr_Format(PyExc_TypeError, "_boltffi_xybrid_pipeline_from_file() takes 1 positional arguments but %zd were given", nargs);
+        goto done;
+    }
+    if (boltffi_python_boltffi_init_class_xybrid_bolt_xybrid_pipeline_from_file == NULL) {
+        PyErr_SetString(PyExc_ImportError, "native library is not initialized");
+        goto done;
+    }
+    if (!boltffi_python_wire_string(args[0], &path_wire, &path_ptr, &path_len)) {
+        goto done;
+    }
+    return_error = boltffi_python_boltffi_init_class_xybrid_bolt_xybrid_pipeline_from_file(path_ptr, path_len, &return_success);
+    if (return_error.len != 0) {
+        error = boltffi_python_decode_owned_raw_wire(return_error);
+        if (error != NULL) {
+            PyErr_SetObject(PyExc_RuntimeError, error);
+        }
+        goto done;
+    }
+    result = boltffi_python_box_u64(return_success);
+done:
+    Py_XDECREF(path_wire);
+    Py_XDECREF(error);
+    return result;
+}
+
+static PyObject *boltffi_python_callable_wrapper_boltffi_init_class_xybrid_bolt_xybrid_pipeline_from_bundle(PyObject *self, PyObject *const *args, Py_ssize_t nargs) {
+    PyObject *path_wire = NULL;
+    const uint8_t *path_ptr = NULL;
+    uintptr_t path_len = 0;
+    uint64_t return_success;
+    FfiBuf_u8 return_error = {0};
+    PyObject *error = NULL;
+    PyObject *result = NULL;
+    (void)self;
+    if (nargs != 1) {
+        PyErr_Format(PyExc_TypeError, "_boltffi_xybrid_pipeline_from_bundle() takes 1 positional arguments but %zd were given", nargs);
+        goto done;
+    }
+    if (boltffi_python_boltffi_init_class_xybrid_bolt_xybrid_pipeline_from_bundle == NULL) {
+        PyErr_SetString(PyExc_ImportError, "native library is not initialized");
+        goto done;
+    }
+    if (!boltffi_python_wire_string(args[0], &path_wire, &path_ptr, &path_len)) {
+        goto done;
+    }
+    return_error = boltffi_python_boltffi_init_class_xybrid_bolt_xybrid_pipeline_from_bundle(path_ptr, path_len, &return_success);
+    if (return_error.len != 0) {
+        error = boltffi_python_decode_owned_raw_wire(return_error);
+        if (error != NULL) {
+            PyErr_SetObject(PyExc_RuntimeError, error);
+        }
+        goto done;
+    }
+    result = boltffi_python_box_u64(return_success);
+done:
+    Py_XDECREF(path_wire);
+    Py_XDECREF(error);
+    return result;
+}
+
+static PyObject *boltffi_python_callable_wrapper_boltffi_method_class_xybrid_bolt_xybrid_pipeline_run(PyObject *self, PyObject *const *args, Py_ssize_t nargs) {
+    uint64_t receiver;
+    PyObject *envelope_wire = NULL;
+    const uint8_t *envelope_ptr = NULL;
+    uintptr_t envelope_len = 0;
+    FfiBuf_u8 return_success;
+    FfiBuf_u8 return_error = {0};
+    PyObject *error = NULL;
+    PyObject *result = NULL;
+    (void)self;
+    if (nargs != 2) {
+        PyErr_Format(PyExc_TypeError, "_boltffi_xybrid_pipeline_run() takes 2 positional arguments but %zd were given", nargs);
+        goto done;
+    }
+    if (boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_pipeline_run == NULL) {
+        PyErr_SetString(PyExc_ImportError, "native library is not initialized");
+        goto done;
+    }
+    if (!boltffi_python_parse_u64(args[0], &receiver)) {
+        goto done;
+    }
+    if (!boltffi_python_wire_raw(args[1], &envelope_wire, &envelope_ptr, &envelope_len)) {
+        goto done;
+    }
+    return_error = boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_pipeline_run(receiver, envelope_ptr, envelope_len, &return_success);
+    if (return_error.len != 0) {
+        error = boltffi_python_decode_owned_raw_wire(return_error);
+        if (error != NULL) {
+            PyErr_SetObject(PyExc_RuntimeError, error);
+        }
+        goto done;
+    }
+    result = boltffi_python_decode_owned_raw_wire(return_success);
+done:
+    Py_XDECREF(envelope_wire);
+    Py_XDECREF(error);
+    return result;
+}
+
+static PyObject *boltffi_python_callable_wrapper_boltffi_method_class_xybrid_bolt_xybrid_pipeline_name(PyObject *self, PyObject *const *args, Py_ssize_t nargs) {
+    uint64_t receiver;
+    PyObject *result = NULL;
+    (void)self;
+    if (nargs != 1) {
+        PyErr_Format(PyExc_TypeError, "_boltffi_xybrid_pipeline_name() takes 1 positional arguments but %zd were given", nargs);
+        goto done;
+    }
+    if (boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_pipeline_name == NULL) {
+        PyErr_SetString(PyExc_ImportError, "native library is not initialized");
+        goto done;
+    }
+    if (!boltffi_python_parse_u64(args[0], &receiver)) {
+        goto done;
+    }
+    result = boltffi_python_decode_owned_raw_wire(boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_pipeline_name(receiver));
+done:
+    return result;
+}
+
+static PyObject *boltffi_python_callable_wrapper_boltffi_method_class_xybrid_bolt_xybrid_pipeline_stage_names(PyObject *self, PyObject *const *args, Py_ssize_t nargs) {
+    uint64_t receiver;
+    PyObject *result = NULL;
+    (void)self;
+    if (nargs != 1) {
+        PyErr_Format(PyExc_TypeError, "_boltffi_xybrid_pipeline_stage_names() takes 1 positional arguments but %zd were given", nargs);
+        goto done;
+    }
+    if (boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_pipeline_stage_names == NULL) {
+        PyErr_SetString(PyExc_ImportError, "native library is not initialized");
+        goto done;
+    }
+    if (!boltffi_python_parse_u64(args[0], &receiver)) {
+        goto done;
+    }
+    result = boltffi_python_decode_owned_raw_wire(boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_pipeline_stage_names(receiver));
+done:
+    return result;
+}
+
+static PyObject *boltffi_python_callable_wrapper_boltffi_method_class_xybrid_bolt_xybrid_pipeline_stage_count(PyObject *self, PyObject *const *args, Py_ssize_t nargs) {
+    uint64_t receiver;
+    PyObject *result = NULL;
+    (void)self;
+    if (nargs != 1) {
+        PyErr_Format(PyExc_TypeError, "_boltffi_xybrid_pipeline_stage_count() takes 1 positional arguments but %zd were given", nargs);
+        goto done;
+    }
+    if (boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_pipeline_stage_count == NULL) {
+        PyErr_SetString(PyExc_ImportError, "native library is not initialized");
+        goto done;
+    }
+    if (!boltffi_python_parse_u64(args[0], &receiver)) {
+        goto done;
+    }
+    result = boltffi_python_box_u32(boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_pipeline_stage_count(receiver));
+done:
+    return result;
+}
+
 static PyObject *boltffi_python_callable_wrapper_boltffi_release_class_xybrid_bolt_xybrid_conversation_context(PyObject *self, PyObject *const *args, Py_ssize_t nargs) {
     uint64_t handle;
     (void)self;
@@ -7399,6 +7733,14 @@ static PyMethodDef boltffi_python_methods[] = {
     {"_boltffi_xybrid_model_run_stream_with_context", (PyCFunction)boltffi_python_callable_wrapper_boltffi_method_class_xybrid_bolt_xybrid_model_run_stream_with_context, METH_FASTCALL, NULL},
     {"_boltffi_xybrid_model_warmup", (PyCFunction)boltffi_python_callable_wrapper_boltffi_method_class_xybrid_bolt_xybrid_model_warmup, METH_FASTCALL, NULL},
     {"_boltffi_xybrid_model_unload", (PyCFunction)boltffi_python_callable_wrapper_boltffi_method_class_xybrid_bolt_xybrid_model_unload, METH_FASTCALL, NULL},
+    {"_boltffi_xybrid_pipeline_release", (PyCFunction)boltffi_python_callable_wrapper_boltffi_release_class_xybrid_bolt_xybrid_pipeline, METH_FASTCALL, NULL},
+    {"_boltffi_xybrid_pipeline_from_yaml", (PyCFunction)boltffi_python_callable_wrapper_boltffi_init_class_xybrid_bolt_xybrid_pipeline_from_yaml, METH_FASTCALL, NULL},
+    {"_boltffi_xybrid_pipeline_from_file", (PyCFunction)boltffi_python_callable_wrapper_boltffi_init_class_xybrid_bolt_xybrid_pipeline_from_file, METH_FASTCALL, NULL},
+    {"_boltffi_xybrid_pipeline_from_bundle", (PyCFunction)boltffi_python_callable_wrapper_boltffi_init_class_xybrid_bolt_xybrid_pipeline_from_bundle, METH_FASTCALL, NULL},
+    {"_boltffi_xybrid_pipeline_run", (PyCFunction)boltffi_python_callable_wrapper_boltffi_method_class_xybrid_bolt_xybrid_pipeline_run, METH_FASTCALL, NULL},
+    {"_boltffi_xybrid_pipeline_name", (PyCFunction)boltffi_python_callable_wrapper_boltffi_method_class_xybrid_bolt_xybrid_pipeline_name, METH_FASTCALL, NULL},
+    {"_boltffi_xybrid_pipeline_stage_names", (PyCFunction)boltffi_python_callable_wrapper_boltffi_method_class_xybrid_bolt_xybrid_pipeline_stage_names, METH_FASTCALL, NULL},
+    {"_boltffi_xybrid_pipeline_stage_count", (PyCFunction)boltffi_python_callable_wrapper_boltffi_method_class_xybrid_bolt_xybrid_pipeline_stage_count, METH_FASTCALL, NULL},
     {"_boltffi_xybrid_conversation_context_release", (PyCFunction)boltffi_python_callable_wrapper_boltffi_release_class_xybrid_bolt_xybrid_conversation_context, METH_FASTCALL, NULL},
     {"_boltffi_xybrid_conversation_context_new", (PyCFunction)boltffi_python_callable_wrapper_boltffi_init_class_xybrid_bolt_xybrid_conversation_context_new, METH_FASTCALL, NULL},
     {"_boltffi_xybrid_conversation_context_with_id", (PyCFunction)boltffi_python_callable_wrapper_boltffi_init_class_xybrid_bolt_xybrid_conversation_context_with_id, METH_FASTCALL, NULL},

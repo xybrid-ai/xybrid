@@ -39,5 +39,7 @@ dirs = "6.0"
 # note in crates/xybrid-core/Cargo.toml); this crate sits above both, so the
 # dependency direction stays one-way.
 xybrid-sdk = { path = "../crates/xybrid-sdk" }
+xybrid-bolt = { package = "xybrid_bolt", path = "../crates/xybrid-bolt" }
+httpmock = "0.7"
 tempfile = "3.8"
 filetime = "0.2"
