@@ -133,6 +133,10 @@ typedef int32_t ___XybridThermalState;
 #define XYBRID_THERMAL_STATE_WARM ((___XybridThermalState)1)
 #define XYBRID_THERMAL_STATE_HOT ((___XybridThermalState)2)
 #define XYBRID_THERMAL_STATE_CRITICAL ((___XybridThermalState)3)
+void boltffi_release_class_xybrid_bolt_xybrid_cancellation_token(uint64_t handle);
+uint64_t boltffi_init_class_xybrid_bolt_xybrid_cancellation_token_new(void);
+FfiStatus boltffi_method_class_xybrid_bolt_xybrid_cancellation_token_cancel(uint64_t receiver);
+bool boltffi_method_class_xybrid_bolt_xybrid_cancellation_token_is_cancelled(uint64_t receiver);
 void boltffi_release_class_xybrid_bolt_xybrid_model(uint64_t handle);
 FfiBuf_u8 boltffi_init_class_xybrid_bolt_xybrid_model_from_registry(const uint8_t *id_ptr, uintptr_t id_len, uint64_t *return_out);
 FfiBuf_u8 boltffi_init_class_xybrid_bolt_xybrid_model_from_registry_speculative(const uint8_t *id_ptr, uintptr_t id_len, uint64_t *return_out);
@@ -157,13 +161,13 @@ bool boltffi_method_class_xybrid_bolt_xybrid_model_has_voices(uint64_t receiver)
 FfiBuf_u8 boltffi_method_class_xybrid_bolt_xybrid_model_voices(uint64_t receiver);
 FfiBuf_u8 boltffi_method_class_xybrid_bolt_xybrid_model_default_voice(uint64_t receiver);
 FfiBuf_u8 boltffi_method_class_xybrid_bolt_xybrid_model_voice(uint64_t receiver, const uint8_t *voice_id_ptr, uintptr_t voice_id_len);
-FfiBuf_u8 boltffi_method_class_xybrid_bolt_xybrid_model_run(uint64_t receiver, const uint8_t *envelope_ptr, uintptr_t envelope_len, const uint8_t *options_ptr, uintptr_t options_len, FfiBuf_u8 *return_out);
-FfiBuf_u8 boltffi_method_class_xybrid_bolt_xybrid_model_run_stream(uint64_t receiver, const uint8_t *envelope_ptr, uintptr_t envelope_len, const uint8_t *options_ptr, uintptr_t options_len, uint64_t *return_out);
+FfiBuf_u8 boltffi_method_class_xybrid_bolt_xybrid_model_run(uint64_t receiver, const uint8_t *envelope_ptr, uintptr_t envelope_len, const uint8_t *options_ptr, uintptr_t options_len, uint64_t cancellation, FfiBuf_u8 *return_out);
+FfiBuf_u8 boltffi_method_class_xybrid_bolt_xybrid_model_run_stream(uint64_t receiver, const uint8_t *envelope_ptr, uintptr_t envelope_len, const uint8_t *options_ptr, uintptr_t options_len, uint64_t cancellation, uint64_t *return_out);
 FfiBuf_u8 boltffi_method_class_xybrid_bolt_xybrid_model_stream_next(uint64_t receiver, uint64_t stream_id, FfiBuf_u8 *return_out);
 FfiBuf_u8 boltffi_method_class_xybrid_bolt_xybrid_model_stream_result(uint64_t receiver, uint64_t stream_id, FfiBuf_u8 *return_out);
 FfiStatus boltffi_method_class_xybrid_bolt_xybrid_model_stream_close(uint64_t receiver, uint64_t stream_id);
-FfiBuf_u8 boltffi_method_class_xybrid_bolt_xybrid_model_run_with_context(uint64_t receiver, const uint8_t *envelope_ptr, uintptr_t envelope_len, uint64_t context, const uint8_t *options_ptr, uintptr_t options_len, FfiBuf_u8 *return_out);
-FfiBuf_u8 boltffi_method_class_xybrid_bolt_xybrid_model_run_stream_with_context(uint64_t receiver, const uint8_t *envelope_ptr, uintptr_t envelope_len, uint64_t context, const uint8_t *options_ptr, uintptr_t options_len, uint64_t *return_out);
+FfiBuf_u8 boltffi_method_class_xybrid_bolt_xybrid_model_run_with_context(uint64_t receiver, const uint8_t *envelope_ptr, uintptr_t envelope_len, uint64_t context, const uint8_t *options_ptr, uintptr_t options_len, uint64_t cancellation, FfiBuf_u8 *return_out);
+FfiBuf_u8 boltffi_method_class_xybrid_bolt_xybrid_model_run_stream_with_context(uint64_t receiver, const uint8_t *envelope_ptr, uintptr_t envelope_len, uint64_t context, const uint8_t *options_ptr, uintptr_t options_len, uint64_t cancellation, uint64_t *return_out);
 FfiBuf_u8 boltffi_method_class_xybrid_bolt_xybrid_model_warmup(uint64_t receiver);
 FfiBuf_u8 boltffi_method_class_xybrid_bolt_xybrid_model_unload(uint64_t receiver);
 void boltffi_release_class_xybrid_bolt_xybrid_conversation_context(uint64_t handle);
@@ -215,6 +219,9 @@ bool boltffi_function_xybrid_bolt_has_api_key(void);
 bool boltffi_function_xybrid_bolt_is_speculative_cloud_enabled(void);
 bool boltffi_function_xybrid_bolt_will_speculate_for_model(const uint8_t *model_id_ptr, uintptr_t model_id_len);
 FfiBuf_u8 boltffi_function_xybrid_bolt_version(void);
+uint32_t boltffi_function_xybrid_bolt_release_memory(void);
+FfiStatus boltffi_function_xybrid_bolt_set_auto_release(bool enabled);
+bool boltffi_function_xybrid_bolt_is_auto_release_enabled(void);
 FfiBuf_u8 boltffi_function_xybrid_bolt_telemetry_default_endpoint(void);
 void boltffi_function_xybrid_bolt_telemetry_flush(void);
 void boltffi_function_xybrid_bolt_telemetry_shutdown(void);

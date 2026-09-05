@@ -229,9 +229,10 @@ def test_model_accessors_are_properties(name: str) -> None:
     ["run", "run_stream", "run_with_context", "run_stream_with_context"],
 )
 def test_run_methods_default_their_options(name: str) -> None:
-    parameter = inspect.signature(getattr(xybrid.XybridModel, name)).parameters["options"]
+    parameters = inspect.signature(getattr(xybrid.XybridModel, name)).parameters
 
-    assert parameter.default is None
+    assert parameters["options"].default is None
+    assert parameters["cancellation"].default is None
 
 
 def test_model_supports_explicit_release() -> None:

@@ -1036,8 +1036,8 @@ classes:
     section: "8. Supporting Types"
     variants:
       UserCancelled:
-        notes: "User-initiated cancellation. Reachable from Dart (issue 10) via the CancellationToken handle passed to the streaming run methods: cancelling the token makes the run's AbortPolicy observe UserCancelled and halts generation at the next token boundary. The Dart AbortSignal enum itself does not expose a userCancelled value — cancellation is driven by the token, not by adding the signal to a Dart policy. Local streaming abort is cooperative and checked per-token before each emitted token."
-        status: { rust: implemented, dart: implemented, kotlin: planned, swift: planned, csharp: planned }
+        notes: "User-initiated cancellation. Reachable through the binding cancellation handles rather than by manually adding this signal to a foreign AbortPolicy: supplying a token automatically makes the run observe UserCancelled. Dart exposes the token on streaming methods; Swift Task cancellation, Kotlin coroutine/Flow cancellation, and Unity .NET CancellationToken interop signal the Bolt token for batch, context, and streaming runs. Cancellation is cooperative: checked before execution and at generated-token boundaries."
+        status: { rust: implemented, dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
       MemoryPressureWarn:
         status: { rust: implemented, dart: planned, kotlin: planned, swift: planned, csharp: planned }
       MemoryPressureCritical:
@@ -1050,12 +1050,12 @@ classes:
   CancellationToken:
     type: class
     section: "8. Supporting Types"
-    notes: "Cooperative cancel handle for an in-flight run. In Rust it is paired with a RunOptions via with_cancellation_token; in Dart the caller constructs a CancellationToken and passes it to the streaming run methods (runStreaming / runStreamingWithContext / runStreamingWithFallback) via the optional cancellationToken parameter. Local streaming abort is cooperative: the token's cancelled state is checked before every emitted token, so cancellation takes effect at the next token boundary, not mid-token, and the model write lock is released promptly. The Dart binding surface (cancel handle exposing cancel() / isCancelled, plus sink-close-as-cancel when the Dart stream is unsubscribed mid-run) was wired by issue 10. Issue 11 reuses the same token for preemptive cancel-and-replace: when runStreaming/runStreamingWithContext are called with preempt=true, the token is registered in the model's in-flight slot and a later preempting run cancels it (latest-frame-wins) before acquiring the write lock — so a stale run halts and releases the lock instead of blocking the new one."
+    notes: "Cooperative cancel handle for an in-flight run. Rust attaches it through RunOptions::with_cancellation_token. Dart passes it to streaming methods. Bolt's XybridCancellationToken reaches batch, context, and pull-stream runs; Swift Task cancellation, Kotlin coroutine/Flow cancellation, and Unity .NET CancellationToken interop signal it automatically. Cancellation is checked before execution and at generated-token boundaries, releases the model lock promptly, and closing a native pull stream waits for its worker to leave the native context. Issue 11 also reuses the Dart token for preemptive cancel-and-replace."
     methods:
       cancel:
         notes: "Request cooperative cancellation of the associated run. Takes effect at the next token boundary."
-        status: { rust: implemented, dart: implemented, kotlin: planned, swift: planned, csharp: planned }
+        status: { rust: implemented, dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
       is_cancelled:
-        notes: "Whether cancellation has been requested (Dart: isCancelled getter)."
+        notes: "Whether cancellation has been requested (foreign bindings use their idiomatic isCancelled/is_cancelled shape)."
         return: bool
-        status: { rust: implemented, dart: implemented, kotlin: planned, swift: planned, csharp: planned }
+        status: { rust: implemented, dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }

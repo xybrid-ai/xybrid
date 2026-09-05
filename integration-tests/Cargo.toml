@@ -20,7 +20,10 @@ asr-whispercpp = ["xybrid-core/asr-whispercpp"]
 llm-mistral = ["xybrid-core/llm-mistral"]              # mistral.rs (CPU)
 llm-mistral-metal = ["xybrid-core/llm-mistral-metal"]  # mistral.rs + Metal (macOS)
 llm-mistral-cuda = ["xybrid-core/llm-mistral-cuda"]    # mistral.rs + CUDA (NVIDIA)
-llm-llamacpp = ["xybrid-core/llm-llamacpp"]            # llama.cpp (links native backend)
+llm-llamacpp = [                                         # llama.cpp (links native backend)
+    "xybrid-core/llm-llamacpp",
+    "xybrid-bolt/llm-llamacpp",
+]
 
 [dependencies]
 xybrid-core = { path = "../crates/xybrid-core" }
@@ -39,5 +42,6 @@ dirs = "6.0"
 # note in crates/xybrid-core/Cargo.toml); this crate sits above both, so the
 # dependency direction stays one-way.
 xybrid-sdk = { path = "../crates/xybrid-sdk" }
+xybrid-bolt = { package = "xybrid_bolt", path = "../crates/xybrid-bolt" }
 tempfile = "3.8"
 filetime = "0.2"

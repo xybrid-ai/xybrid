@@ -1606,6 +1606,7 @@ fn cloud_serve_streaming<F>(
     config: Option<&GenerationConfig>,
     on_token: &mut F,
     emitted: &std::sync::atomic::AtomicU32,
+    delivery: RunDelivery,
 ) -> SdkResult<InferenceResult>
 where
     F: FnMut(
@@ -1624,7 +1625,7 @@ where
         .execute_streaming(&cloud_envelope, callback)
         .map_err(streaming_execution_error)?;
     let latency_ms = start.elapsed().as_millis() as u32;
-    publish_speculative_cloud_event(model_id, latency_ms, true);
+    publish_speculative_cloud_event(model_id, latency_ms, delivery == RunDelivery::Streaming);
     Ok(InferenceResult::new_cloud(output, model_id, latency_ms))
 }
 
@@ -3145,6 +3146,13 @@ fn publish_model_warmup_event(
     crate::telemetry::publish_with_resource_summary(event, resource_guard);
 }
 
+/// How results reach the caller, independently of the executor used underneath.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum RunDelivery {
+    Batch,
+    Streaming,
+}
+
 impl XybridModel {
     /// Get the model ID.
     pub fn model_id(&self) -> &str {
@@ -3273,6 +3281,7 @@ impl XybridModel {
         &self,
         envelope: &Envelope,
         config: Option<&GenerationConfig>,
+        delivery: RunDelivery,
         on_token: &mut F,
     ) -> Option<SdkResult<InferenceResult>>
     where
@@ -3282,7 +3291,14 @@ impl XybridModel {
             + Send,
     {
         let emitted = std::sync::atomic::AtomicU32::new(0);
-        match cloud_serve_streaming(&self.model_id, envelope, config, on_token, &emitted) {
+        match cloud_serve_streaming(
+            &self.model_id,
+            envelope,
+            config,
+            on_token,
+            &emitted,
+            delivery,
+        ) {
             Ok(result) => Some(Ok(result)),
             Err(err) => {
                 self.after_failed_cloud_leg(err, emitted.load(std::sync::atomic::Ordering::SeqCst))
@@ -3900,6 +3916,14 @@ impl XybridModel {
         envelope: &Envelope,
         options: &RunOptions,
     ) -> SdkResult<InferenceResult> {
+        // A cancellation token needs boundaries throughout generation, not
+        // only a pre-run check. Reuse the streaming executor internally for
+        // cancellable batch calls and discard its chunks; the caller still
+        // receives the same final InferenceResult shape. Non-streaming models
+        // continue through their single, indivisible executor call.
+        if options.cancellation_token.is_some() {
+            return self.run_cancellable(envelope, None, options, RunDelivery::Batch, |_| Ok(()));
+        }
         let mut abort_state = AbortState::new(options);
         abort_state
             .check_before_run()
@@ -4033,6 +4057,15 @@ impl XybridModel {
         context: &ConversationContext,
         options: &RunOptions,
     ) -> SdkResult<InferenceResult> {
+        if options.cancellation_token.is_some() {
+            return self.run_cancellable(
+                envelope,
+                Some(context),
+                options,
+                RunDelivery::Batch,
+                |_| Ok(()),
+            );
+        }
         let mut abort_state = AbortState::new(options);
         abort_state
             .check_before_run()
@@ -4094,7 +4127,14 @@ impl XybridModel {
             + Send,
     {
         // No live-capture tag on the bare context streaming path.
-        self.run_streaming_with_context_tagged(envelope, context, config, None, on_token)
+        self.run_streaming_with_context_tagged(
+            envelope,
+            context,
+            config,
+            None,
+            RunDelivery::Streaming,
+            on_token,
+        )
     }
 
     /// Internal context-streaming entry point that optionally stamps a
@@ -4107,6 +4147,7 @@ impl XybridModel {
         context: &ConversationContext,
         config: Option<&GenerationConfig>,
         live_tag: Option<&LiveModeTag>,
+        delivery: RunDelivery,
         mut on_token: F,
     ) -> SdkResult<InferenceResult>
     where
@@ -4123,7 +4164,9 @@ impl XybridModel {
         // ready. The gateway leg is stateless (`context` not replayed, matching
         // the reactive fallback); full history resumes once local takes over.
         if self.cloud_serve() {
-            if let Some(result) = self.cloud_leg_streaming(envelope, config, &mut on_token) {
+            if let Some(result) =
+                self.cloud_leg_streaming(envelope, config, delivery, &mut on_token)
+            {
                 return result;
             }
             // Cloud failed before emitting a token but the download landed —
@@ -4138,6 +4181,7 @@ impl XybridModel {
         let trace_id = uuid::Uuid::new_v4();
         let _telemetry_ctx =
             crate::telemetry::TelemetryPipelineContextGuard::install(None, Some(trace_id));
+        let resource_guard = crate::telemetry::begin_resource_run();
 
         // Get write lock on handle
         let mut handle = self.handle.write().unwrap_or_else(|e| e.into_inner());
@@ -4198,9 +4242,11 @@ impl XybridModel {
             "model_id": self.model_id,
             "version": self.version,
             "output_type": format!("{:?}", self.output_type),
-            "streaming": true,
             "context_messages": context.history().len(),
         });
+        if delivery == RunDelivery::Streaming {
+            data["streaming"] = true.into();
+        }
         stamp_live_mode_tag(&mut data, live_tag);
         let event = crate::telemetry::TelemetryEvent {
             event_type: "ModelComplete".to_string(),
@@ -4214,7 +4260,7 @@ impl XybridModel {
                 .map(|d| d.as_millis() as u64)
                 .unwrap_or(0),
         };
-        crate::telemetry::publish_telemetry_event(event);
+        crate::telemetry::publish_with_resource_summary(event, resource_guard);
 
         // `_telemetry_ctx` drops here, clearing pipeline context after
         // the publish — same ordering as before.
@@ -4228,7 +4274,7 @@ impl XybridModel {
         envelope: &Envelope,
         context: &ConversationContext,
         options: &RunOptions,
-        mut on_token: F,
+        on_token: F,
     ) -> SdkResult<InferenceResult>
     where
         F: FnMut(
@@ -4236,27 +4282,12 @@ impl XybridModel {
             ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>
             + Send,
     {
-        let mut abort_state = AbortState::new(options);
-        // Honour pre-run cancellation so a `token.cancel()` issued before
-        // invocation aborts immediately rather than running the full batch
-        // (or model load + prompt fill on streaming models) before the first
-        // token boundary checks the abort state.
-        let fallback_to_cloud = options.abort_policy.fallback_to_cloud;
-        abort_state
-            .check_before_run()
-            .map_err(|reason| streaming_pre_run_abort_error(reason, fallback_to_cloud))?;
-        let live_tag = options.live_mode_tag();
-        self.run_streaming_with_context_tagged(
+        self.run_cancellable(
             envelope,
-            context,
-            options.generation_config.as_ref(),
-            live_tag.as_ref(),
-            move |token| {
-                if let Err(reason) = abort_state.check_before_token() {
-                    return Err(reason.into_streaming_error(fallback_to_cloud));
-                }
-                on_token(token)
-            },
+            Some(context),
+            options,
+            RunDelivery::Streaming,
+            on_token,
         )
     }
 
@@ -4310,7 +4341,7 @@ impl XybridModel {
     {
         // No live-capture tag on the bare `run_streaming` path — telemetry is
         // byte-for-byte the pre-live-mode shape.
-        self.run_streaming_tagged(envelope, config, None, on_token)
+        self.run_streaming_tagged(envelope, config, None, RunDelivery::Streaming, on_token)
     }
 
     /// Internal streaming entry point that optionally stamps a live-capture
@@ -4326,6 +4357,7 @@ impl XybridModel {
         envelope: &Envelope,
         config: Option<&GenerationConfig>,
         live_tag: Option<&LiveModeTag>,
+        delivery: RunDelivery,
         mut on_token: F,
     ) -> SdkResult<InferenceResult>
     where
@@ -4341,7 +4373,9 @@ impl XybridModel {
         // Speculative cloud: stream from the gateway until the local handle is
         // ready (see `cloud_serve`).
         if self.cloud_serve() {
-            if let Some(result) = self.cloud_leg_streaming(envelope, config, &mut on_token) {
+            if let Some(result) =
+                self.cloud_leg_streaming(envelope, config, delivery, &mut on_token)
+            {
                 return result;
             }
             // Cloud failed before emitting a token but the download landed —
@@ -4355,6 +4389,7 @@ impl XybridModel {
         let trace_id = uuid::Uuid::new_v4();
         let _telemetry_ctx =
             crate::telemetry::TelemetryPipelineContextGuard::install(None, Some(trace_id));
+        let resource_guard = crate::telemetry::begin_resource_run();
 
         // Get write lock on handle
         let mut handle = self.handle.write().unwrap_or_else(|e| e.into_inner());
@@ -4409,8 +4444,10 @@ impl XybridModel {
             "model_id": self.model_id,
             "version": self.version,
             "output_type": format!("{:?}", self.output_type),
-            "streaming": true,
         });
+        if delivery == RunDelivery::Streaming {
+            data["streaming"] = true.into();
+        }
         stamp_live_mode_tag(&mut data, live_tag);
         let event = crate::telemetry::TelemetryEvent {
             event_type: "ModelComplete".to_string(),
@@ -4424,7 +4461,7 @@ impl XybridModel {
                 .map(|d| d.as_millis() as u64)
                 .unwrap_or(0),
         };
-        crate::telemetry::publish_telemetry_event(event);
+        crate::telemetry::publish_with_resource_summary(event, resource_guard);
 
         Ok(InferenceResult::new(output, &self.model_id, latency_ms))
     }
@@ -4434,6 +4471,26 @@ impl XybridModel {
         &self,
         envelope: &Envelope,
         options: &RunOptions,
+        on_token: F,
+    ) -> SdkResult<InferenceResult>
+    where
+        F: FnMut(
+                xybrid_core::runtime_adapter::types::PartialToken,
+            ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>
+            + Send,
+    {
+        self.run_cancellable(envelope, None, options, RunDelivery::Streaming, on_token)
+    }
+
+    // Batch cancellation uses token boundaries internally, but must keep the
+    // batch telemetry contract (including resource summaries). Delivery is a
+    // private execution detail, not another public run* entry point.
+    fn run_cancellable<F>(
+        &self,
+        envelope: &Envelope,
+        context: Option<&ConversationContext>,
+        options: &RunOptions,
+        delivery: RunDelivery,
         mut on_token: F,
     ) -> SdkResult<InferenceResult>
     where
@@ -4459,15 +4516,33 @@ impl XybridModel {
             .check_before_run()
             .map_err(|reason| streaming_pre_run_abort_error(reason, fallback_to_cloud))?;
         let live_tag = options.live_mode_tag();
-        self.run_streaming_tagged(
-            envelope,
-            options.generation_config.as_ref(),
-            live_tag.as_ref(),
-            move |token| {
+        let with_abort = move |token| {
+            if context.is_some() {
+                if let Err(reason) = abort_state.check_before_token() {
+                    return Err(reason.into_streaming_error(fallback_to_cloud));
+                }
+            } else {
                 check_abort_for_streaming(supports_streaming, &mut abort_state, fallback_to_cloud)?;
-                on_token(token)
-            },
-        )
+            }
+            on_token(token)
+        };
+        match context {
+            Some(context) => self.run_streaming_with_context_tagged(
+                envelope,
+                context,
+                options.generation_config.as_ref(),
+                live_tag.as_ref(),
+                delivery,
+                with_abort,
+            ),
+            None => self.run_streaming_tagged(
+                envelope,
+                options.generation_config.as_ref(),
+                live_tag.as_ref(),
+                delivery,
+                with_abort,
+            ),
+        }
     }
 
     /// Swap `token` into the preemptive cancel-and-replace slot and cancel the
@@ -4783,6 +4858,7 @@ impl XybridModel {
                     let cloud = model.cloud_leg_streaming(
                         &envelope,
                         config.as_ref(),
+                        RunDelivery::Streaming,
                         &mut |token: PartialToken| {
                             let _ = tx_token.blocking_send(StreamEvent::Token(StreamToken {
                                 token: token.token.clone(),

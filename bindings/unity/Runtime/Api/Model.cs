@@ -2,6 +2,8 @@
 // Wrapper for a loaded model ready for inference.
 
 using System;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace Xybrid
 {
@@ -40,7 +42,10 @@ namespace Xybrid
         /// <exception cref="ArgumentNullException">Thrown if envelope is null.</exception>
         /// <exception cref="ObjectDisposedException">Thrown if this model is disposed.</exception>
         /// <exception cref="XybridException">Thrown only on a catastrophic backend failure; ordinary inference failures (including a not-loaded model) set <see cref="InferenceResult.Success"/> to false instead.</exception>
-        public InferenceResult Run(Envelope envelope, GenerationConfig config = null)
+        public InferenceResult Run(
+            Envelope envelope,
+            GenerationConfig config = null,
+            CancellationToken cancellationToken = default)
         {
             ThrowIfDisposed();
             if (envelope == null)
@@ -48,7 +53,31 @@ namespace Xybrid
                 throw new ArgumentNullException(nameof(envelope));
             }
 
-            return Execute(() => _bolt.Run(envelope.Bolt, ToOptions(config)));
+            return ExecuteCancellable(
+                cancellationToken,
+                cancellation => _bolt.Run(envelope.Bolt, ToOptions(config), cancellation));
+        }
+
+        /// <summary>
+        /// Runs inference off the caller's thread and cooperatively stops the
+        /// native model when <paramref name="cancellationToken"/> is cancelled.
+        /// </summary>
+        public Task<InferenceResult> RunAsync(
+            Envelope envelope,
+            GenerationConfig config = null,
+            CancellationToken cancellationToken = default)
+        {
+            if (cancellationToken.IsCancellationRequested)
+            {
+                return Task.FromCanceled<InferenceResult>(cancellationToken);
+            }
+
+            return Task.Run(() =>
+            {
+                InferenceResult result = Run(envelope, config, cancellationToken);
+                cancellationToken.ThrowIfCancellationRequested();
+                return result;
+            }, CancellationToken.None);
         }
 
         /// <summary>
@@ -109,7 +138,11 @@ namespace Xybrid
         /// <exception cref="ArgumentNullException">Thrown if envelope or context is null.</exception>
         /// <exception cref="ObjectDisposedException">Thrown if this model is disposed.</exception>
         /// <exception cref="XybridException">Thrown only on a catastrophic backend failure; ordinary inference failures set <see cref="InferenceResult.Success"/> to false instead.</exception>
-        public InferenceResult Run(Envelope envelope, ConversationContext context, GenerationConfig config = null)
+        public InferenceResult Run(
+            Envelope envelope,
+            ConversationContext context,
+            GenerationConfig config = null,
+            CancellationToken cancellationToken = default)
         {
             ThrowIfDisposed();
             if (envelope == null)
@@ -121,7 +154,33 @@ namespace Xybrid
                 throw new ArgumentNullException(nameof(context));
             }
 
-            return Execute(() => _bolt.RunWithContext(envelope.Bolt, context.Bolt, ToOptions(config)));
+            return ExecuteCancellable(
+                cancellationToken,
+                cancellation => _bolt.RunWithContext(
+                    envelope.Bolt,
+                    context.Bolt,
+                    ToOptions(config),
+                    cancellation));
+        }
+
+        /// <summary>Runs context-aware inference off the caller's thread.</summary>
+        public Task<InferenceResult> RunAsync(
+            Envelope envelope,
+            ConversationContext context,
+            GenerationConfig config = null,
+            CancellationToken cancellationToken = default)
+        {
+            if (cancellationToken.IsCancellationRequested)
+            {
+                return Task.FromCanceled<InferenceResult>(cancellationToken);
+            }
+
+            return Task.Run(() =>
+            {
+                InferenceResult result = Run(envelope, context, config, cancellationToken);
+                cancellationToken.ThrowIfCancellationRequested();
+                return result;
+            }, CancellationToken.None);
         }
 
         /// <summary>
@@ -270,7 +329,11 @@ namespace Xybrid
         /// <exception cref="ArgumentNullException">Thrown if envelope or onToken is null.</exception>
         /// <exception cref="ObjectDisposedException">Thrown if this model is disposed.</exception>
         /// <exception cref="XybridException">Thrown only on a catastrophic backend failure; ordinary inference failures set <see cref="InferenceResult.Success"/> to false instead.</exception>
-        public InferenceResult RunStreaming(Envelope envelope, Action<StreamToken> onToken, GenerationConfig config = null)
+        public InferenceResult RunStreaming(
+            Envelope envelope,
+            Action<StreamToken> onToken,
+            GenerationConfig config = null,
+            CancellationToken cancellationToken = default)
         {
             ThrowIfDisposed();
             if (envelope == null)
@@ -282,7 +345,37 @@ namespace Xybrid
                 throw new ArgumentNullException(nameof(onToken));
             }
 
-            return Execute(() => _bolt.RunStreaming(envelope.Bolt, Forward(onToken), ToOptions(config)));
+            return ExecuteCancellable(
+                cancellationToken,
+                cancellation => _bolt.RunStreaming(
+                    envelope.Bolt,
+                    Forward(onToken),
+                    ToOptions(config),
+                    cancellation));
+        }
+
+        /// <summary>Runs streaming inference off the caller's thread.</summary>
+        public Task<InferenceResult> RunStreamingAsync(
+            Envelope envelope,
+            Action<StreamToken> onToken,
+            GenerationConfig config = null,
+            CancellationToken cancellationToken = default)
+        {
+            if (cancellationToken.IsCancellationRequested)
+            {
+                return Task.FromCanceled<InferenceResult>(cancellationToken);
+            }
+
+            return Task.Run(() =>
+            {
+                InferenceResult result = RunStreaming(
+                    envelope,
+                    onToken,
+                    config,
+                    cancellationToken);
+                cancellationToken.ThrowIfCancellationRequested();
+                return result;
+            }, CancellationToken.None);
         }
 
         /// <summary>
@@ -296,7 +389,12 @@ namespace Xybrid
         /// <exception cref="ArgumentNullException">Thrown if any argument is null.</exception>
         /// <exception cref="ObjectDisposedException">Thrown if this model is disposed.</exception>
         /// <exception cref="XybridException">Thrown only on a catastrophic backend failure; ordinary inference failures set <see cref="InferenceResult.Success"/> to false instead.</exception>
-        public InferenceResult RunStreaming(Envelope envelope, ConversationContext context, Action<StreamToken> onToken, GenerationConfig config = null)
+        public InferenceResult RunStreaming(
+            Envelope envelope,
+            ConversationContext context,
+            Action<StreamToken> onToken,
+            GenerationConfig config = null,
+            CancellationToken cancellationToken = default)
         {
             ThrowIfDisposed();
             if (envelope == null)
@@ -312,8 +410,14 @@ namespace Xybrid
                 throw new ArgumentNullException(nameof(onToken));
             }
 
-            return Execute(() => _bolt.RunStreamingWithContext(
-                envelope.Bolt, Forward(onToken), context.Bolt, ToOptions(config)));
+            return ExecuteCancellable(
+                cancellationToken,
+                cancellation => _bolt.RunStreamingWithContext(
+                    envelope.Bolt,
+                    Forward(onToken),
+                    context.Bolt,
+                    ToOptions(config),
+                    cancellation));
         }
 
         /// <summary>
@@ -364,6 +468,16 @@ namespace Xybrid
             {
                 throw BoltErrors.Translate(ex);
             }
+        }
+
+        private static InferenceResult ExecuteCancellable(
+            CancellationToken cancellationToken,
+            Func<XybridBolt.XybridCancellationToken, XybridBolt.XybridResult> run)
+        {
+            using var cancellation = new XybridBolt.XybridCancellationToken();
+            using CancellationTokenRegistration registration =
+                cancellationToken.Register(cancellation.Cancel);
+            return Execute(() => run(cancellation));
         }
 
         // Wrap the user callback so a throw doesn't abort streaming — the

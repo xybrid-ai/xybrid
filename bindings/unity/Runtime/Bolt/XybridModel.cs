@@ -458,11 +458,12 @@ namespace XybridBolt
         /// <summary>
         /// Run inference, optionally with [`XybridRunOptions`] (generation config,
         /// abort signals, cloud-fallback). Pass `None` for the model's defaults.
+        /// `cancellation` is one-shot and may be signalled from any thread.
         ///
         /// The hand-written wrappers add a one-arg `run(envelope)` convenience that
         /// forwards `None`, so simple call sites stay ergonomic.
         /// </summary>
-        public global::XybridBolt.XybridResult Run(global::XybridBolt.XybridEnvelope envelope, global::XybridBolt.XybridRunOptions? options)
+        public global::XybridBolt.XybridResult Run(global::XybridBolt.XybridEnvelope envelope, global::XybridBolt.XybridRunOptions? options, XybridCancellationToken cancellation)
         {
             ThrowIfDisposed();
             WireWriter envelopeWriter = new WireWriter();
@@ -483,7 +484,7 @@ namespace XybridBolt
                 }
             }
             byte[] optionsBytes = optionsWriter.ToArray();
-            FfiBuf boltffiErrorBuffer = NativeMethods.NativeXybridModelRun(this.Handle, envelopeBytes, (nuint)envelopeBytes.Length, optionsBytes, (nuint)optionsBytes.Length, out FfiBuf boltffiResultBuffer);
+            FfiBuf boltffiErrorBuffer = NativeMethods.NativeXybridModelRun(this.Handle, envelopeBytes, (nuint)envelopeBytes.Length, optionsBytes, (nuint)optionsBytes.Length, cancellation.Handle, out FfiBuf boltffiResultBuffer);
             if (boltffiErrorBuffer.ptr != 0)
             {
                 try
@@ -514,7 +515,7 @@ namespace XybridBolt
         /// The identifier remains valid until the final result is taken, an error
         /// is returned, or [`Self::stream_close`] is called.
         /// </summary>
-        public ulong RunStream(global::XybridBolt.XybridEnvelope envelope, global::XybridBolt.XybridRunOptions? options)
+        public ulong RunStream(global::XybridBolt.XybridEnvelope envelope, global::XybridBolt.XybridRunOptions? options, XybridCancellationToken cancellation)
         {
             ThrowIfDisposed();
             WireWriter envelopeWriter = new WireWriter();
@@ -535,7 +536,7 @@ namespace XybridBolt
                 }
             }
             byte[] optionsBytes = optionsWriter.ToArray();
-            FfiBuf boltffiErrorBuffer = NativeMethods.NativeXybridModelRunStream(this.Handle, envelopeBytes, (nuint)envelopeBytes.Length, optionsBytes, (nuint)optionsBytes.Length, out ulong boltffiResult);
+            FfiBuf boltffiErrorBuffer = NativeMethods.NativeXybridModelRunStream(this.Handle, envelopeBytes, (nuint)envelopeBytes.Length, optionsBytes, (nuint)optionsBytes.Length, cancellation.Handle, out ulong boltffiResult);
             if (boltffiErrorBuffer.ptr != 0)
             {
                 try
@@ -615,7 +616,12 @@ namespace XybridBolt
 
 
         /// <summary>
-        /// Forget a streaming session.
+        /// Cancel a streaming session and wait for its native worker to finish.
+        ///
+        /// Draining the bounded channel is required here: the producer may already
+        /// have queued tokens when cancellation is signalled. Returning while it
+        /// still owns the model context can race model/Metal teardown in foreign
+        /// callers that release the model immediately after closing the stream.
         /// </summary>
         public void StreamClose(ulong streamId)
         {
@@ -631,11 +637,9 @@ namespace XybridBolt
         /// <summary>
         /// Run inference seeded with a conversation `context` (multi-turn chat).
         ///
-        /// Only the generation config from `options` is applied — abort signals and
-        /// cloud fallback are not wired on the context path (matches the facade's
-        /// `run_with_context`).
+        /// The same run options and cancellation semantics as [`Self::run`] apply.
         /// </summary>
-        public global::XybridBolt.XybridResult RunWithContext(global::XybridBolt.XybridEnvelope envelope, XybridConversationContext context, global::XybridBolt.XybridRunOptions? options)
+        public global::XybridBolt.XybridResult RunWithContext(global::XybridBolt.XybridEnvelope envelope, XybridConversationContext context, global::XybridBolt.XybridRunOptions? options, XybridCancellationToken cancellation)
         {
             ThrowIfDisposed();
             WireWriter envelopeWriter = new WireWriter();
@@ -656,7 +660,7 @@ namespace XybridBolt
                 }
             }
             byte[] optionsBytes = optionsWriter.ToArray();
-            FfiBuf boltffiErrorBuffer = NativeMethods.NativeXybridModelRunWithContext(this.Handle, envelopeBytes, (nuint)envelopeBytes.Length, context.Handle, optionsBytes, (nuint)optionsBytes.Length, out FfiBuf boltffiResultBuffer);
+            FfiBuf boltffiErrorBuffer = NativeMethods.NativeXybridModelRunWithContext(this.Handle, envelopeBytes, (nuint)envelopeBytes.Length, context.Handle, optionsBytes, (nuint)optionsBytes.Length, cancellation.Handle, out FfiBuf boltffiResultBuffer);
             if (boltffiErrorBuffer.ptr != 0)
             {
                 try
@@ -686,7 +690,7 @@ namespace XybridBolt
         /// The pull protocol is identical to [`Self::run_stream`]
         /// (`stream_next` / `stream_result` / `stream_close`).
         /// </summary>
-        public ulong RunStreamWithContext(global::XybridBolt.XybridEnvelope envelope, XybridConversationContext context, global::XybridBolt.XybridRunOptions? options)
+        public ulong RunStreamWithContext(global::XybridBolt.XybridEnvelope envelope, XybridConversationContext context, global::XybridBolt.XybridRunOptions? options, XybridCancellationToken cancellation)
         {
             ThrowIfDisposed();
             WireWriter envelopeWriter = new WireWriter();
@@ -707,7 +711,7 @@ namespace XybridBolt
                 }
             }
             byte[] optionsBytes = optionsWriter.ToArray();
-            FfiBuf boltffiErrorBuffer = NativeMethods.NativeXybridModelRunStreamWithContext(this.Handle, envelopeBytes, (nuint)envelopeBytes.Length, context.Handle, optionsBytes, (nuint)optionsBytes.Length, out ulong boltffiResult);
+            FfiBuf boltffiErrorBuffer = NativeMethods.NativeXybridModelRunStreamWithContext(this.Handle, envelopeBytes, (nuint)envelopeBytes.Length, context.Handle, optionsBytes, (nuint)optionsBytes.Length, cancellation.Handle, out ulong boltffiResult);
             if (boltffiErrorBuffer.ptr != 0)
             {
                 try

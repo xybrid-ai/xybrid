@@ -24,6 +24,14 @@ typedef FfiStatus (*boltffi_python_boltffi_last_error_message_fn)(FfiString *);
 static boltffi_python_boltffi_last_error_message_fn boltffi_python_boltffi_last_error_message = NULL;
 typedef void (*boltffi_python_boltffi_clear_last_error_fn)(void);
 static boltffi_python_boltffi_clear_last_error_fn boltffi_python_boltffi_clear_last_error = NULL;
+typedef void (*boltffi_python_boltffi_release_class_xybrid_bolt_xybrid_cancellation_token_fn)(uint64_t);
+static boltffi_python_boltffi_release_class_xybrid_bolt_xybrid_cancellation_token_fn boltffi_python_boltffi_release_class_xybrid_bolt_xybrid_cancellation_token = NULL;
+typedef uint64_t (*boltffi_python_boltffi_init_class_xybrid_bolt_xybrid_cancellation_token_new_fn)(void);
+static boltffi_python_boltffi_init_class_xybrid_bolt_xybrid_cancellation_token_new_fn boltffi_python_boltffi_init_class_xybrid_bolt_xybrid_cancellation_token_new = NULL;
+typedef FfiStatus (*boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_cancellation_token_cancel_fn)(uint64_t);
+static boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_cancellation_token_cancel_fn boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_cancellation_token_cancel = NULL;
+typedef bool (*boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_cancellation_token_is_cancelled_fn)(uint64_t);
+static boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_cancellation_token_is_cancelled_fn boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_cancellation_token_is_cancelled = NULL;
 typedef void (*boltffi_python_boltffi_release_class_xybrid_bolt_xybrid_model_fn)(uint64_t);
 static boltffi_python_boltffi_release_class_xybrid_bolt_xybrid_model_fn boltffi_python_boltffi_release_class_xybrid_bolt_xybrid_model = NULL;
 typedef FfiBuf_u8 (*boltffi_python_boltffi_init_class_xybrid_bolt_xybrid_model_from_registry_fn)(const uint8_t *, uintptr_t, uint64_t *);
@@ -72,9 +80,9 @@ typedef FfiBuf_u8 (*boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model
 static boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_default_voice_fn boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_default_voice = NULL;
 typedef FfiBuf_u8 (*boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_voice_fn)(uint64_t, const uint8_t *, uintptr_t);
 static boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_voice_fn boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_voice = NULL;
-typedef FfiBuf_u8 (*boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_run_fn)(uint64_t, const uint8_t *, uintptr_t, const uint8_t *, uintptr_t, FfiBuf_u8 *);
+typedef FfiBuf_u8 (*boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_run_fn)(uint64_t, const uint8_t *, uintptr_t, const uint8_t *, uintptr_t, uint64_t, FfiBuf_u8 *);
 static boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_run_fn boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_run = NULL;
-typedef FfiBuf_u8 (*boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_run_stream_fn)(uint64_t, const uint8_t *, uintptr_t, const uint8_t *, uintptr_t, uint64_t *);
+typedef FfiBuf_u8 (*boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_run_stream_fn)(uint64_t, const uint8_t *, uintptr_t, const uint8_t *, uintptr_t, uint64_t, uint64_t *);
 static boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_run_stream_fn boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_run_stream = NULL;
 typedef FfiBuf_u8 (*boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_stream_next_fn)(uint64_t, uint64_t, FfiBuf_u8 *);
 static boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_stream_next_fn boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_stream_next = NULL;
@@ -82,9 +90,9 @@ typedef FfiBuf_u8 (*boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model
 static boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_stream_result_fn boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_stream_result = NULL;
 typedef FfiStatus (*boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_stream_close_fn)(uint64_t, uint64_t);
 static boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_stream_close_fn boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_stream_close = NULL;
-typedef FfiBuf_u8 (*boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_run_with_context_fn)(uint64_t, const uint8_t *, uintptr_t, uint64_t, const uint8_t *, uintptr_t, FfiBuf_u8 *);
+typedef FfiBuf_u8 (*boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_run_with_context_fn)(uint64_t, const uint8_t *, uintptr_t, uint64_t, const uint8_t *, uintptr_t, uint64_t, FfiBuf_u8 *);
 static boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_run_with_context_fn boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_run_with_context = NULL;
-typedef FfiBuf_u8 (*boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_run_stream_with_context_fn)(uint64_t, const uint8_t *, uintptr_t, uint64_t, const uint8_t *, uintptr_t, uint64_t *);
+typedef FfiBuf_u8 (*boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_run_stream_with_context_fn)(uint64_t, const uint8_t *, uintptr_t, uint64_t, const uint8_t *, uintptr_t, uint64_t, uint64_t *);
 static boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_run_stream_with_context_fn boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_run_stream_with_context = NULL;
 typedef FfiBuf_u8 (*boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_warmup_fn)(uint64_t);
 static boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_warmup_fn boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_warmup = NULL;
@@ -217,6 +225,10 @@ static void boltffi_python_clear_symbols(void) {
     boltffi_python_boltffi_buf_with_len = NULL;
     boltffi_python_boltffi_last_error_message = NULL;
     boltffi_python_boltffi_clear_last_error = NULL;
+    boltffi_python_boltffi_release_class_xybrid_bolt_xybrid_cancellation_token = NULL;
+    boltffi_python_boltffi_init_class_xybrid_bolt_xybrid_cancellation_token_new = NULL;
+    boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_cancellation_token_cancel = NULL;
+    boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_cancellation_token_is_cancelled = NULL;
     boltffi_python_boltffi_release_class_xybrid_bolt_xybrid_model = NULL;
     boltffi_python_boltffi_init_class_xybrid_bolt_xybrid_model_from_registry = NULL;
     boltffi_python_boltffi_init_class_xybrid_bolt_xybrid_model_from_registry_speculative = NULL;
@@ -421,6 +433,46 @@ static int boltffi_python_bind_symbols(void) {
     if (boltffi_python_boltffi_clear_last_error == NULL) {
         boltffi_python_unload_library();
         PyErr_SetString(PyExc_ImportError, "failed to resolve native symbol " "boltffi_clear_last_error");
+        return 0;
+    }
+#ifdef _WIN32
+    boltffi_python_boltffi_release_class_xybrid_bolt_xybrid_cancellation_token = (boltffi_python_boltffi_release_class_xybrid_bolt_xybrid_cancellation_token_fn)GetProcAddress(boltffi_python_library_handle, "boltffi_release_class_xybrid_bolt_xybrid_cancellation_token");
+#else
+    boltffi_python_boltffi_release_class_xybrid_bolt_xybrid_cancellation_token = (boltffi_python_boltffi_release_class_xybrid_bolt_xybrid_cancellation_token_fn)dlsym(boltffi_python_library_handle, "boltffi_release_class_xybrid_bolt_xybrid_cancellation_token");
+#endif
+    if (boltffi_python_boltffi_release_class_xybrid_bolt_xybrid_cancellation_token == NULL) {
+        boltffi_python_unload_library();
+        PyErr_SetString(PyExc_ImportError, "failed to resolve native symbol " "boltffi_release_class_xybrid_bolt_xybrid_cancellation_token");
+        return 0;
+    }
+#ifdef _WIN32
+    boltffi_python_boltffi_init_class_xybrid_bolt_xybrid_cancellation_token_new = (boltffi_python_boltffi_init_class_xybrid_bolt_xybrid_cancellation_token_new_fn)GetProcAddress(boltffi_python_library_handle, "boltffi_init_class_xybrid_bolt_xybrid_cancellation_token_new");
+#else
+    boltffi_python_boltffi_init_class_xybrid_bolt_xybrid_cancellation_token_new = (boltffi_python_boltffi_init_class_xybrid_bolt_xybrid_cancellation_token_new_fn)dlsym(boltffi_python_library_handle, "boltffi_init_class_xybrid_bolt_xybrid_cancellation_token_new");
+#endif
+    if (boltffi_python_boltffi_init_class_xybrid_bolt_xybrid_cancellation_token_new == NULL) {
+        boltffi_python_unload_library();
+        PyErr_SetString(PyExc_ImportError, "failed to resolve native symbol " "boltffi_init_class_xybrid_bolt_xybrid_cancellation_token_new");
+        return 0;
+    }
+#ifdef _WIN32
+    boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_cancellation_token_cancel = (boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_cancellation_token_cancel_fn)GetProcAddress(boltffi_python_library_handle, "boltffi_method_class_xybrid_bolt_xybrid_cancellation_token_cancel");
+#else
+    boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_cancellation_token_cancel = (boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_cancellation_token_cancel_fn)dlsym(boltffi_python_library_handle, "boltffi_method_class_xybrid_bolt_xybrid_cancellation_token_cancel");
+#endif
+    if (boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_cancellation_token_cancel == NULL) {
+        boltffi_python_unload_library();
+        PyErr_SetString(PyExc_ImportError, "failed to resolve native symbol " "boltffi_method_class_xybrid_bolt_xybrid_cancellation_token_cancel");
+        return 0;
+    }
+#ifdef _WIN32
+    boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_cancellation_token_is_cancelled = (boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_cancellation_token_is_cancelled_fn)GetProcAddress(boltffi_python_library_handle, "boltffi_method_class_xybrid_bolt_xybrid_cancellation_token_is_cancelled");
+#else
+    boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_cancellation_token_is_cancelled = (boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_cancellation_token_is_cancelled_fn)dlsym(boltffi_python_library_handle, "boltffi_method_class_xybrid_bolt_xybrid_cancellation_token_is_cancelled");
+#endif
+    if (boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_cancellation_token_is_cancelled == NULL) {
+        boltffi_python_unload_library();
+        PyErr_SetString(PyExc_ImportError, "failed to resolve native symbol " "boltffi_method_class_xybrid_bolt_xybrid_cancellation_token_is_cancelled");
         return 0;
     }
 #ifdef _WIN32
@@ -4979,6 +5031,82 @@ done:
 
 
 
+static PyObject *boltffi_python_callable_wrapper_boltffi_release_class_xybrid_bolt_xybrid_cancellation_token(PyObject *self, PyObject *const *args, Py_ssize_t nargs) {
+    uint64_t handle;
+    (void)self;
+    if (nargs != 1) {
+        PyErr_Format(PyExc_TypeError, "_boltffi_xybrid_cancellation_token_release() takes 1 positional argument but %zd were given", nargs);
+        return NULL;
+    }
+    if (boltffi_python_boltffi_release_class_xybrid_bolt_xybrid_cancellation_token == NULL) {
+        PyErr_SetString(PyExc_ImportError, "native library is not initialized");
+        return NULL;
+    }
+    if (!boltffi_python_parse_u64(args[0], &handle)) {
+        return NULL;
+    }
+    boltffi_python_boltffi_release_class_xybrid_bolt_xybrid_cancellation_token(handle);
+    Py_RETURN_NONE;
+}
+
+static PyObject *boltffi_python_callable_wrapper_boltffi_init_class_xybrid_bolt_xybrid_cancellation_token_new(PyObject *self, PyObject *const *args, Py_ssize_t nargs) {
+    PyObject *result = NULL;
+    (void)self;
+    if (nargs != 0) {
+        PyErr_Format(PyExc_TypeError, "_boltffi_xybrid_cancellation_token_new() takes 0 positional arguments but %zd were given", nargs);
+        goto done;
+    }
+    if (boltffi_python_boltffi_init_class_xybrid_bolt_xybrid_cancellation_token_new == NULL) {
+        PyErr_SetString(PyExc_ImportError, "native library is not initialized");
+        goto done;
+    }
+    result = boltffi_python_box_u64(boltffi_python_boltffi_init_class_xybrid_bolt_xybrid_cancellation_token_new());
+done:
+    return result;
+}
+
+static PyObject *boltffi_python_callable_wrapper_boltffi_method_class_xybrid_bolt_xybrid_cancellation_token_cancel(PyObject *self, PyObject *const *args, Py_ssize_t nargs) {
+    uint64_t receiver;
+    PyObject *result = NULL;
+    (void)self;
+    if (nargs != 1) {
+        PyErr_Format(PyExc_TypeError, "_boltffi_xybrid_cancellation_token_cancel() takes 1 positional arguments but %zd were given", nargs);
+        goto done;
+    }
+    if (boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_cancellation_token_cancel == NULL) {
+        PyErr_SetString(PyExc_ImportError, "native library is not initialized");
+        goto done;
+    }
+    if (!boltffi_python_parse_u64(args[0], &receiver)) {
+        goto done;
+    }
+    boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_cancellation_token_cancel(receiver);
+    Py_INCREF(Py_None);
+    result = Py_None;
+done:
+    return result;
+}
+
+static PyObject *boltffi_python_callable_wrapper_boltffi_method_class_xybrid_bolt_xybrid_cancellation_token_is_cancelled(PyObject *self, PyObject *const *args, Py_ssize_t nargs) {
+    uint64_t receiver;
+    PyObject *result = NULL;
+    (void)self;
+    if (nargs != 1) {
+        PyErr_Format(PyExc_TypeError, "_boltffi_xybrid_cancellation_token_is_cancelled() takes 1 positional arguments but %zd were given", nargs);
+        goto done;
+    }
+    if (boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_cancellation_token_is_cancelled == NULL) {
+        PyErr_SetString(PyExc_ImportError, "native library is not initialized");
+        goto done;
+    }
+    if (!boltffi_python_parse_u64(args[0], &receiver)) {
+        goto done;
+    }
+    result = boltffi_python_box_bool(boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_cancellation_token_is_cancelled(receiver));
+done:
+    return result;
+}
+
 static PyObject *boltffi_python_callable_wrapper_boltffi_release_class_xybrid_bolt_xybrid_model(PyObject *self, PyObject *const *args, Py_ssize_t nargs) {
     uint64_t handle;
     (void)self;
@@ -5588,13 +5716,14 @@ static PyObject *boltffi_python_callable_wrapper_boltffi_method_class_xybrid_bol
     PyObject *options_wire = NULL;
     const uint8_t *options_ptr = NULL;
     uintptr_t options_len = 0;
+    uint64_t cancellation;
     FfiBuf_u8 return_success;
     FfiBuf_u8 return_error = {0};
     PyObject *error = NULL;
     PyObject *result = NULL;
     (void)self;
-    if (nargs != 3) {
-        PyErr_Format(PyExc_TypeError, "_boltffi_xybrid_model_run() takes 3 positional arguments but %zd were given", nargs);
+    if (nargs != 4) {
+        PyErr_Format(PyExc_TypeError, "_boltffi_xybrid_model_run() takes 4 positional arguments but %zd were given", nargs);
         goto done;
     }
     if (boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_run == NULL) {
@@ -5610,7 +5739,10 @@ static PyObject *boltffi_python_callable_wrapper_boltffi_method_class_xybrid_bol
     if (!boltffi_python_wire_raw(args[2], &options_wire, &options_ptr, &options_len)) {
         goto done;
     }
-    return_error = boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_run(receiver, envelope_ptr, envelope_len, options_ptr, options_len, &return_success);
+    if (!boltffi_python_parse_u64(args[3], &cancellation)) {
+        goto done;
+    }
+    return_error = boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_run(receiver, envelope_ptr, envelope_len, options_ptr, options_len, cancellation, &return_success);
     if (return_error.len != 0) {
         error = boltffi_python_decode_owned_raw_wire(return_error);
         if (error != NULL) {
@@ -5634,13 +5766,14 @@ static PyObject *boltffi_python_callable_wrapper_boltffi_method_class_xybrid_bol
     PyObject *options_wire = NULL;
     const uint8_t *options_ptr = NULL;
     uintptr_t options_len = 0;
+    uint64_t cancellation;
     uint64_t return_success;
     FfiBuf_u8 return_error = {0};
     PyObject *error = NULL;
     PyObject *result = NULL;
     (void)self;
-    if (nargs != 3) {
-        PyErr_Format(PyExc_TypeError, "_boltffi_xybrid_model_run_stream() takes 3 positional arguments but %zd were given", nargs);
+    if (nargs != 4) {
+        PyErr_Format(PyExc_TypeError, "_boltffi_xybrid_model_run_stream() takes 4 positional arguments but %zd were given", nargs);
         goto done;
     }
     if (boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_run_stream == NULL) {
@@ -5656,7 +5789,10 @@ static PyObject *boltffi_python_callable_wrapper_boltffi_method_class_xybrid_bol
     if (!boltffi_python_wire_raw(args[2], &options_wire, &options_ptr, &options_len)) {
         goto done;
     }
-    return_error = boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_run_stream(receiver, envelope_ptr, envelope_len, options_ptr, options_len, &return_success);
+    if (!boltffi_python_parse_u64(args[3], &cancellation)) {
+        goto done;
+    }
+    return_error = boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_run_stream(receiver, envelope_ptr, envelope_len, options_ptr, options_len, cancellation, &return_success);
     if (return_error.len != 0) {
         error = boltffi_python_decode_owned_raw_wire(return_error);
         if (error != NULL) {
@@ -5779,13 +5915,14 @@ static PyObject *boltffi_python_callable_wrapper_boltffi_method_class_xybrid_bol
     PyObject *options_wire = NULL;
     const uint8_t *options_ptr = NULL;
     uintptr_t options_len = 0;
+    uint64_t cancellation;
     FfiBuf_u8 return_success;
     FfiBuf_u8 return_error = {0};
     PyObject *error = NULL;
     PyObject *result = NULL;
     (void)self;
-    if (nargs != 4) {
-        PyErr_Format(PyExc_TypeError, "_boltffi_xybrid_model_run_with_context() takes 4 positional arguments but %zd were given", nargs);
+    if (nargs != 5) {
+        PyErr_Format(PyExc_TypeError, "_boltffi_xybrid_model_run_with_context() takes 5 positional arguments but %zd were given", nargs);
         goto done;
     }
     if (boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_run_with_context == NULL) {
@@ -5804,7 +5941,10 @@ static PyObject *boltffi_python_callable_wrapper_boltffi_method_class_xybrid_bol
     if (!boltffi_python_wire_raw(args[3], &options_wire, &options_ptr, &options_len)) {
         goto done;
     }
-    return_error = boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_run_with_context(receiver, envelope_ptr, envelope_len, context, options_ptr, options_len, &return_success);
+    if (!boltffi_python_parse_u64(args[4], &cancellation)) {
+        goto done;
+    }
+    return_error = boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_run_with_context(receiver, envelope_ptr, envelope_len, context, options_ptr, options_len, cancellation, &return_success);
     if (return_error.len != 0) {
         error = boltffi_python_decode_owned_raw_wire(return_error);
         if (error != NULL) {
@@ -5829,13 +5969,14 @@ static PyObject *boltffi_python_callable_wrapper_boltffi_method_class_xybrid_bol
     PyObject *options_wire = NULL;
     const uint8_t *options_ptr = NULL;
     uintptr_t options_len = 0;
+    uint64_t cancellation;
     uint64_t return_success;
     FfiBuf_u8 return_error = {0};
     PyObject *error = NULL;
     PyObject *result = NULL;
     (void)self;
-    if (nargs != 4) {
-        PyErr_Format(PyExc_TypeError, "_boltffi_xybrid_model_run_stream_with_context() takes 4 positional arguments but %zd were given", nargs);
+    if (nargs != 5) {
+        PyErr_Format(PyExc_TypeError, "_boltffi_xybrid_model_run_stream_with_context() takes 5 positional arguments but %zd were given", nargs);
         goto done;
     }
     if (boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_run_stream_with_context == NULL) {
@@ -5854,7 +5995,10 @@ static PyObject *boltffi_python_callable_wrapper_boltffi_method_class_xybrid_bol
     if (!boltffi_python_wire_raw(args[3], &options_wire, &options_ptr, &options_len)) {
         goto done;
     }
-    return_error = boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_run_stream_with_context(receiver, envelope_ptr, envelope_len, context, options_ptr, options_len, &return_success);
+    if (!boltffi_python_parse_u64(args[4], &cancellation)) {
+        goto done;
+    }
+    return_error = boltffi_python_boltffi_method_class_xybrid_bolt_xybrid_model_run_stream_with_context(receiver, envelope_ptr, envelope_len, context, options_ptr, options_len, cancellation, &return_success);
     if (return_error.len != 0) {
         error = boltffi_python_decode_owned_raw_wire(return_error);
         if (error != NULL) {
@@ -7366,6 +7510,10 @@ static PyMethodDef boltffi_python_methods[] = {
     {"_register_xybrid_download_state", (PyCFunction)boltffi_python_wrapper_register_xybrid_download_state, METH_FASTCALL, NULL},
     {"_register_xybrid_stream_event_kind", (PyCFunction)boltffi_python_wrapper_register_xybrid_stream_event_kind, METH_FASTCALL, NULL},
     {"_register_xybrid_thermal_state", (PyCFunction)boltffi_python_wrapper_register_xybrid_thermal_state, METH_FASTCALL, NULL},
+    {"_boltffi_xybrid_cancellation_token_release", (PyCFunction)boltffi_python_callable_wrapper_boltffi_release_class_xybrid_bolt_xybrid_cancellation_token, METH_FASTCALL, NULL},
+    {"_boltffi_xybrid_cancellation_token_new", (PyCFunction)boltffi_python_callable_wrapper_boltffi_init_class_xybrid_bolt_xybrid_cancellation_token_new, METH_FASTCALL, NULL},
+    {"_boltffi_xybrid_cancellation_token_cancel", (PyCFunction)boltffi_python_callable_wrapper_boltffi_method_class_xybrid_bolt_xybrid_cancellation_token_cancel, METH_FASTCALL, NULL},
+    {"_boltffi_xybrid_cancellation_token_is_cancelled", (PyCFunction)boltffi_python_callable_wrapper_boltffi_method_class_xybrid_bolt_xybrid_cancellation_token_is_cancelled, METH_FASTCALL, NULL},
     {"_boltffi_xybrid_model_release", (PyCFunction)boltffi_python_callable_wrapper_boltffi_release_class_xybrid_bolt_xybrid_model, METH_FASTCALL, NULL},
     {"_boltffi_xybrid_model_from_registry", (PyCFunction)boltffi_python_callable_wrapper_boltffi_init_class_xybrid_bolt_xybrid_model_from_registry, METH_FASTCALL, NULL},
     {"_boltffi_xybrid_model_from_registry_speculative", (PyCFunction)boltffi_python_callable_wrapper_boltffi_init_class_xybrid_bolt_xybrid_model_from_registry_speculative, METH_FASTCALL, NULL},

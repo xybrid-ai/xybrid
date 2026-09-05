@@ -12,6 +12,8 @@
 // and Unity callers want to hand over an Action<XybridStreamToken> instead of
 // driving that loop themselves.
 
+#nullable enable
+
 using System;
 
 namespace XybridBolt
@@ -28,10 +30,12 @@ namespace XybridBolt
         public XybridResult RunStreaming(
             XybridEnvelope envelope,
             Action<XybridStreamToken> onToken,
-            XybridRunOptions? options = null)
+            XybridRunOptions? options = null,
+            XybridCancellationToken? cancellation = null)
         {
             if (onToken is null) throw new ArgumentNullException(nameof(onToken));
-            return DrainStream(RunStream(envelope, options), onToken);
+            return WithCancellation(cancellation, token =>
+                DrainStream(RunStream(envelope, options, token), onToken));
         }
 
         /// <summary>
@@ -45,10 +49,22 @@ namespace XybridBolt
             XybridEnvelope envelope,
             Action<XybridStreamToken> onToken,
             XybridConversationContext context,
-            XybridRunOptions? options = null)
+            XybridRunOptions? options = null,
+            XybridCancellationToken? cancellation = null)
         {
             if (onToken is null) throw new ArgumentNullException(nameof(onToken));
-            return DrainStream(RunStreamWithContext(envelope, context, options), onToken);
+            return WithCancellation(cancellation, token =>
+                DrainStream(RunStreamWithContext(envelope, context, options, token), onToken));
+        }
+
+        private static T WithCancellation<T>(
+            XybridCancellationToken? cancellation,
+            Func<XybridCancellationToken, T> run)
+        {
+            if (cancellation is not null) return run(cancellation);
+
+            using var owned = new XybridCancellationToken();
+            return run(owned);
         }
 
         /// <summary>
