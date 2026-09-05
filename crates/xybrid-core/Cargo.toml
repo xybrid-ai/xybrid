@@ -136,6 +136,21 @@ test-util = []
 ort-download = []  # no-op marker (was: ort/download-binaries + ort/tls-native)
 ort-dynamic = []   # no-op marker (was: ort/load-dynamic)
 ort-coreml = ["ort/coreml"]                                 # Apple Neural Engine acceleration
+# Native Core ML adapter. This coexists with `ort-coreml`, which is ONNX
+# Runtime's Core ML execution provider rather than the native model format.
+coreml = [
+    "objc2-core-ml/MLDictionaryFeatureProvider",
+    "objc2-core-ml/MLFeatureDescription",
+    "objc2-core-ml/MLFeatureProvider",
+    "objc2-core-ml/MLFeatureType",
+    "objc2-core-ml/MLFeatureValue",
+    "objc2-core-ml/MLModel",
+    "objc2-core-ml/MLModelConfiguration",
+    "objc2-core-ml/MLModelDescription",
+    "objc2-core-ml/MLModel_MLModelCompilation",
+    "objc2-core-ml/MLMultiArray",
+    "objc2-core-ml/MLMultiArrayConstraint",
+]
 
 # Candle (Pure Rust ML)
 candle = ["dep:candle-core", "dep:candle-nn", "dep:candle-transformers", "dep:safetensors", "dep:byteorder", "dep:num-traits", "dep:rayon"]
@@ -238,6 +253,11 @@ required-features = ["llm-llamacpp"]
 name = "lfm2_230m_tools_streaming"
 # Real inference — needs llama.cpp linked.
 required-features = ["llm-llamacpp"]
+
+[[example]]
+name = "coreml_linear"
+# Native Core ML inference on Apple platforms.
+required-features = ["coreml"]
 
 [[example]]
 name = "functiongemma_tools"

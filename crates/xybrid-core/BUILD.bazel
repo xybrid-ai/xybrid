@@ -56,6 +56,7 @@ rust_library(
         "xybrid-whisper",
     ] + select({
         "@rules_rs//rs/platforms/config:aarch64-apple-darwin": [
+            "coreml",
             "ort-coreml",
             # Flip 2: parity with the shipped platform-macos CLI (vision).
             "llm-llamacpp-vision",
@@ -63,11 +64,13 @@ rust_library(
         # Apple G1-G2 parity: platform-ios expands to the SAME core backend set
         # as platform-macos (candle-metal + coreml + vision), so mirror darwin.
         "@rules_rs//rs/platforms/config:aarch64-apple-ios": [
+            "coreml",
             "ort-coreml",
             "llm-llamacpp-vision",
         ],
         # iOS simulator (Apple G4a): identical backend set to the device slice.
         "@rules_rs//rs/platforms/config:aarch64-apple-ios-sim": [
+            "coreml",
             "ort-coreml",
             "llm-llamacpp-vision",
         ],
