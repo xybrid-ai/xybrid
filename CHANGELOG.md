@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Live ASR across every native binding.** Swift, Kotlin, Unity, and Flutter
+  now share one ordered, bounded-input worker over `XybridStream`: applications
+  feed mono 16 kHz PCM without running inference on the microphone callback,
+  pull distinct partial transcripts, flush an utterance, and reset without
+  reloading Whisper. Swift adds `AsyncThrowingStream`, Kotlin adds `Flow`, and
+  Unity adds cancellable task wrappers. A real-model integration test exercises
+  the shared FFI facade with the multilingual Whisper fixture (#503).
+
 ### Planned
 
 - **Multimodal KV-prefix reuse**: the per-frame prefill cost lever for live vision — **deferred** from 0.2.0, not yet implemented.

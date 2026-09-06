@@ -135,6 +135,69 @@ string output = model.RunText("Tell me about the ancient ruins.");
 string transcription = model.RunAudio(microphoneBytes, sampleRate: 16000);
 ```
 
+## Live microphone transcription
+
+Unity's `Microphone` API already yields float samples. Request a mono 16 kHz
+clip, copy newly written frames from its ring buffer, and feed them to a live
+session. `NextAsync` keeps inference and waiting off Unity's main thread.
+
+```csharp
+using System.Threading;
+using System.Threading.Tasks;
+using UnityEngine;
+using Xybrid;
+
+AsrStreamSession asr;
+AudioClip mic;
+int readPosition;
+CancellationTokenSource partialCancellation;
+
+async Task StartDictation(Model model)
+{
+    asr = model.LiveAsr(new AsrStreamConfig { Language = "en" });
+    mic = Microphone.Start(null, true, 1, 16000);
+    if (mic.frequency != 16000 || mic.channels != 1)
+        throw new System.InvalidOperationException(
+            "Resample the microphone clip to mono 16 kHz before feeding ASR");
+
+    partialCancellation = new CancellationTokenSource();
+    _ = PullPartials(partialCancellation.Token);
+}
+
+void Update()
+{
+    if (asr == null || mic == null) return;
+    int writePosition = Microphone.GetPosition(null);
+    int available = (writePosition - readPosition + mic.samples) % mic.samples;
+    if (available == 0) return;
+
+    var samples = new float[available];
+    mic.GetData(samples, readPosition);
+    readPosition = (readPosition + available) % mic.samples;
+    asr.Feed(samples); // queues; does not run Whisper on the main thread
+}
+
+async Task PullPartials(CancellationToken cancellationToken)
+{
+    while (await asr.NextAsync(cancellationToken) is AsrPartialResult partial)
+        Debug.Log($"Partial: {partial.Text}");
+}
+
+async Task StopDictation()
+{
+    Microphone.End(null);
+    var final = await asr.FlushAsync();
+    Debug.Log($"Final: {final.Text}");
+    partialCancellation.Cancel();
+    asr.Dispose();
+    asr = null;
+}
+```
+
+`FlushAsync` completes one utterance; `Reset` reuses the loaded model for the
+next one. Disposing or cancelling `NextAsync` stops the native worker and
+unblocks the outstanding pull.
+
 ---
 
 ## Result Handling

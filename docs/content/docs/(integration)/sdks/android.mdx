@@ -94,6 +94,65 @@ val result = model.run(envelope)
 println("Transcription: ${result.text}")
 ```
 
+## Live microphone transcription
+
+The live session accepts mono 16 kHz float PCM. Capture and collection run off
+the main thread; cancelling the partial `Flow` stops the native worker.
+
+```kotlin
+import android.media.*
+import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.collect
+
+val model = Xybrid.model("whisper-tiny-ggml").load()
+val asr = model.liveAsr(AsrStreamConfigs.default(language = "en"))
+
+val partialJob = launch {
+    asr.partials().collect { partial ->
+        transcriptView.text = partial.text
+    }
+}
+
+val minBytes = AudioRecord.getMinBufferSize(
+    16_000,
+    AudioFormat.CHANNEL_IN_MONO,
+    AudioFormat.ENCODING_PCM_FLOAT,
+)
+val recorder = AudioRecord.Builder()
+    .setAudioSource(MediaRecorder.AudioSource.VOICE_RECOGNITION)
+    .setAudioFormat(
+        AudioFormat.Builder()
+            .setSampleRate(16_000)
+            .setChannelMask(AudioFormat.CHANNEL_IN_MONO)
+            .setEncoding(AudioFormat.ENCODING_PCM_FLOAT)
+            .build()
+    )
+    .setBufferSizeInBytes(maxOf(minBytes, 320 * Float.SIZE_BYTES * 4))
+    .build()
+
+val captureJob = launch(Dispatchers.IO) {
+    val frame = FloatArray(320) // 20 ms
+    recorder.startRecording()
+    while (isActive) {
+        val read = recorder.read(frame, 0, frame.size, AudioRecord.READ_BLOCKING)
+        if (read > 0) asr.feed(frame.copyOf(read))
+    }
+}
+
+// When recording ends:
+captureJob.cancelAndJoin()
+recorder.stop()
+recorder.release()
+val final = asr.flushAsync()
+asr.stop()
+partialJob.join()
+println(final.text)
+```
+
+Call `resetAsync()` after `flushAsync()` to transcribe another utterance with
+the same loaded model. Always stop or cancel the partial collector when the
+session is no longer needed.
+
 ### Text (Text-to-Speech)
 
 ```kotlin

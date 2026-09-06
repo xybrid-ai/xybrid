@@ -787,6 +787,7 @@ private object Native {
     @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_model_voices(`receiver`: Long): ByteArray?
     @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_model_default_voice(`receiver`: Long): ByteArray?
     @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_model_voice(`receiver`: Long, voice_id: java.nio.ByteBuffer, __boltffi_voice_id_len: Int): ByteArray?
+    @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_model_stream(`receiver`: Long, config: java.nio.ByteBuffer, __boltffi_config_len: Int): Long
     @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_model_run(`receiver`: Long, envelope: java.nio.ByteBuffer, __boltffi_envelope_len: Int, options: java.nio.ByteBuffer, __boltffi_options_len: Int): ByteArray?
     @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_model_run_stream(`receiver`: Long, envelope: java.nio.ByteBuffer, __boltffi_envelope_len: Int, options: java.nio.ByteBuffer, __boltffi_options_len: Int): Long
     @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_model_stream_next(`receiver`: Long, stream_id: Long): ByteArray?
@@ -796,6 +797,12 @@ private object Native {
     @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_model_run_stream_with_context(`receiver`: Long, envelope: java.nio.ByteBuffer, __boltffi_envelope_len: Int, context: Long, options: java.nio.ByteBuffer, __boltffi_options_len: Int): Long
     @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_model_warmup(`receiver`: Long): Unit
     @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_model_unload(`receiver`: Long): Unit
+    @JvmStatic external fun boltffi_release_class_xybrid_bolt_xybrid_asr_stream_session(handle: Long): Unit
+    @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_asr_stream_session_feed(`receiver`: Long, samples: FloatArray): Unit
+    @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_asr_stream_session_next(`receiver`: Long): ByteArray?
+    @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_asr_stream_session_flush(`receiver`: Long): ByteArray?
+    @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_asr_stream_session_reset(`receiver`: Long): Unit
+    @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_asr_stream_session_stop(`receiver`: Long): Unit
     @JvmStatic external fun boltffi_release_class_xybrid_bolt_xybrid_conversation_context(handle: Long): Unit
     @JvmStatic external fun boltffi_init_class_xybrid_bolt_xybrid_conversation_context_new(): Long
     @JvmStatic external fun boltffi_init_class_xybrid_bolt_xybrid_conversation_context_with_id(id: java.nio.ByteBuffer, __boltffi_id_len: Int): Long
@@ -845,6 +852,9 @@ private object Native {
     @JvmStatic external fun boltffi_function_xybrid_bolt_is_speculative_cloud_enabled(): Boolean
     @JvmStatic external fun boltffi_function_xybrid_bolt_will_speculate_for_model(model_id: java.nio.ByteBuffer, __boltffi_model_id_len: Int): Boolean
     @JvmStatic external fun boltffi_function_xybrid_bolt_version(): ByteArray?
+    @JvmStatic external fun boltffi_function_xybrid_bolt_release_memory(): Int
+    @JvmStatic external fun boltffi_function_xybrid_bolt_set_auto_release(enabled: Boolean): Unit
+    @JvmStatic external fun boltffi_function_xybrid_bolt_is_auto_release_enabled(): Boolean
     @JvmStatic external fun boltffi_function_xybrid_bolt_telemetry_default_endpoint(): ByteArray?
     @JvmStatic external fun boltffi_function_xybrid_bolt_telemetry_flush(): Unit
     @JvmStatic external fun boltffi_function_xybrid_bolt_telemetry_shutdown(): Unit
@@ -1463,6 +1473,147 @@ data class XybridStreamEvent(
         }
 
         internal fun fromByteArray(bytes: ByteArray): XybridStreamEvent {
+            val reader = WireReader(bytes)
+            return fromReader(reader)
+        }
+    }
+}
+
+
+data class XybridAsrStreamConfig(
+    val sampleRate: UInt,
+    val enableVad: Boolean,
+    val vadThreshold: Float,
+    val vadModelDir: String?,
+    val language: String?,
+    val audioCtx: UInt?
+) {
+    internal fun wireSize(): Int {
+        return 4 + 1 + 4 + 1 + (this.vadModelDir?.let { __boltffi_value_0 -> 4 + Utf8Codec.maxBytes(__boltffi_value_0) } ?: 0) + 1 + (this.language?.let { __boltffi_value_0 -> 4 + Utf8Codec.maxBytes(__boltffi_value_0) } ?: 0) + 1 + (this.audioCtx?.let { __boltffi_value_0 -> 4 } ?: 0)
+    }
+
+    internal fun writeTo(writer: WireWriter) {
+        writer.writeU32(this.sampleRate)
+        writer.writeBool(this.enableVad)
+        writer.writeF32(this.vadThreshold)
+        writer.writeOptionalValue(this.vadModelDir, { writer, __boltffi_value_0 -> writer.writeString(__boltffi_value_0) })
+        writer.writeOptionalValue(this.language, { writer, __boltffi_value_0 -> writer.writeString(__boltffi_value_0) })
+        writer.writeOptionalValue(this.audioCtx, { writer, __boltffi_value_0 -> writer.writeU32(__boltffi_value_0) })
+    }
+
+    internal fun toByteArray(): ByteArray {
+        val buffer = WireWriterPool.acquire(wireSize())
+        val writer = buffer.writer
+        try {
+            writeTo(writer)
+            return buffer.bytes()
+        } finally {
+            buffer.close()
+        }
+    }
+
+    companion object {
+        internal fun fromReader(reader: WireReader): XybridAsrStreamConfig {
+            return XybridAsrStreamConfig(
+                reader.readU32(),
+                reader.readBool(),
+                reader.readF32(),
+                reader.readOptionalValue({ reader -> reader.readString() }),
+                reader.readOptionalValue({ reader -> reader.readString() }),
+                reader.readOptionalValue({ reader -> reader.readU32() })
+            )
+        }
+
+        internal fun fromByteArray(bytes: ByteArray): XybridAsrStreamConfig {
+            val reader = WireReader(bytes)
+            return fromReader(reader)
+        }
+    }
+}
+
+
+data class XybridAsrPartialResult(
+    val text: String,
+    val isStable: Boolean,
+    val chunkIndex: ULong,
+    val audioDurationMs: ULong
+) {
+    internal fun wireSize(): Int {
+        return 4 + Utf8Codec.maxBytes(this.text) + 1 + 8 + 8
+    }
+
+    internal fun writeTo(writer: WireWriter) {
+        writer.writeString(this.text)
+        writer.writeBool(this.isStable)
+        writer.writeU64(this.chunkIndex)
+        writer.writeU64(this.audioDurationMs)
+    }
+
+    internal fun toByteArray(): ByteArray {
+        val buffer = WireWriterPool.acquire(wireSize())
+        val writer = buffer.writer
+        try {
+            writeTo(writer)
+            return buffer.bytes()
+        } finally {
+            buffer.close()
+        }
+    }
+
+    companion object {
+        internal fun fromReader(reader: WireReader): XybridAsrPartialResult {
+            return XybridAsrPartialResult(
+                reader.readString(),
+                reader.readBool(),
+                reader.readU64(),
+                reader.readU64()
+            )
+        }
+
+        internal fun fromByteArray(bytes: ByteArray): XybridAsrPartialResult {
+            val reader = WireReader(bytes)
+            return fromReader(reader)
+        }
+    }
+}
+
+
+data class XybridAsrTranscriptionResult(
+    val text: String,
+    val durationMs: ULong,
+    val chunksProcessed: ULong
+) {
+    internal fun wireSize(): Int {
+        return 4 + Utf8Codec.maxBytes(this.text) + 8 + 8
+    }
+
+    internal fun writeTo(writer: WireWriter) {
+        writer.writeString(this.text)
+        writer.writeU64(this.durationMs)
+        writer.writeU64(this.chunksProcessed)
+    }
+
+    internal fun toByteArray(): ByteArray {
+        val buffer = WireWriterPool.acquire(wireSize())
+        val writer = buffer.writer
+        try {
+            writeTo(writer)
+            return buffer.bytes()
+        } finally {
+            buffer.close()
+        }
+    }
+
+    companion object {
+        internal fun fromReader(reader: WireReader): XybridAsrTranscriptionResult {
+            return XybridAsrTranscriptionResult(
+                reader.readString(),
+                reader.readU64(),
+                reader.readU64()
+            )
+        }
+
+        internal fun fromByteArray(bytes: ByteArray): XybridAsrTranscriptionResult {
             val reader = WireReader(bytes)
             return fromReader(reader)
         }
@@ -2202,6 +2353,17 @@ class XybridModel internal constructor(internal val handle: Long) : AutoCloseabl
         }
     }
 
+    fun stream(config: XybridAsrStreamConfig): XybridAsrStreamSession {
+        val __boltffi_config_wire = WireWriterPool.acquire(config.wireSize())
+        val __boltffi_config_writer = __boltffi_config_wire.writer
+        config.writeTo(__boltffi_config_writer)
+        try {
+            return XybridAsrStreamSession(try { Native.boltffi_method_class_xybrid_bolt_xybrid_model_stream(this.boltffiHandle(), __boltffi_config_wire.directBuffer(), __boltffi_config_wire.size()) } catch (__boltffi_error: BoltFfiErrorBufferException) { run { val __boltffi_error_reader = WireReader(__boltffi_error.bytes); throw XybridError.fromReader(__boltffi_error_reader) } })
+        } finally {
+            __boltffi_config_wire.close()
+        }
+    }
+
     fun run(envelope: XybridEnvelope, options: XybridRunOptions?): XybridResult {
         val __boltffi_envelope_wire = WireWriterPool.acquire(envelope.wireSize())
         val __boltffi_envelope_writer = __boltffi_envelope_wire.writer
@@ -2288,6 +2450,45 @@ class XybridModel internal constructor(internal val handle: Long) : AutoCloseabl
 
     fun unload() {
         try { Native.boltffi_method_class_xybrid_bolt_xybrid_model_unload(this.boltffiHandle()) } catch (__boltffi_error: BoltFfiErrorBufferException) { run { val __boltffi_error_reader = WireReader(__boltffi_error.bytes); throw XybridError.fromReader(__boltffi_error_reader) } }
+    }
+}
+
+class XybridAsrStreamSession internal constructor(internal val handle: Long) : AutoCloseable {
+    private val __boltffi_closed = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    override fun close() {
+        if (__boltffi_closed.compareAndSet(false, true)) {
+            Native.boltffi_release_class_xybrid_bolt_xybrid_asr_stream_session(handle)
+        }
+    }
+
+    internal fun boltffiHandle(): Long {
+        check(!__boltffi_closed.get()) { "XybridAsrStreamSession is closed" }
+        return handle
+    }
+
+    fun feed(samples: FloatArray) {
+        try { Native.boltffi_method_class_xybrid_bolt_xybrid_asr_stream_session_feed(this.boltffiHandle(), samples) } catch (__boltffi_error: BoltFfiErrorBufferException) { run { val __boltffi_error_reader = WireReader(__boltffi_error.bytes); throw XybridError.fromReader(__boltffi_error_reader) } }
+    }
+
+    fun next(): XybridAsrPartialResult? {
+        val __boltffi_result = try { Native.boltffi_method_class_xybrid_bolt_xybrid_asr_stream_session_next(this.boltffiHandle()) } catch (__boltffi_error: BoltFfiErrorBufferException) { run { val __boltffi_error_reader = WireReader(__boltffi_error.bytes); throw XybridError.fromReader(__boltffi_error_reader) } } ?: throw IllegalStateException("null buffer returned")
+        val __boltffi_reader = WireReader(__boltffi_result)
+        return __boltffi_reader.readOptionalValue({ __boltffi_reader -> XybridAsrPartialResult.fromReader(__boltffi_reader) })
+    }
+
+    fun flush(): XybridAsrTranscriptionResult {
+        val __boltffi_result = try { Native.boltffi_method_class_xybrid_bolt_xybrid_asr_stream_session_flush(this.boltffiHandle()) } catch (__boltffi_error: BoltFfiErrorBufferException) { run { val __boltffi_error_reader = WireReader(__boltffi_error.bytes); throw XybridError.fromReader(__boltffi_error_reader) } } ?: throw IllegalStateException("null buffer returned")
+        val __boltffi_reader = WireReader(__boltffi_result)
+        return XybridAsrTranscriptionResult.fromReader(__boltffi_reader)
+    }
+
+    fun reset() {
+        try { Native.boltffi_method_class_xybrid_bolt_xybrid_asr_stream_session_reset(this.boltffiHandle()) } catch (__boltffi_error: BoltFfiErrorBufferException) { run { val __boltffi_error_reader = WireReader(__boltffi_error.bytes); throw XybridError.fromReader(__boltffi_error_reader) } }
+    }
+
+    fun stop() {
+        try { Native.boltffi_method_class_xybrid_bolt_xybrid_asr_stream_session_stop(this.boltffiHandle()) } catch (__boltffi_error: BoltFfiErrorBufferException) { run { val __boltffi_error_reader = WireReader(__boltffi_error.bytes); throw XybridError.fromReader(__boltffi_error_reader) } }
     }
 }
 
@@ -2712,6 +2913,18 @@ fun version(): String {
     val __boltffi_result = Native.boltffi_function_xybrid_bolt_version() ?: throw IllegalStateException("null buffer returned")
     val __boltffi_reader = WireReader(__boltffi_result)
     return __boltffi_reader.readString()
+}
+
+fun releaseMemory(): UInt {
+    return Native.boltffi_function_xybrid_bolt_release_memory().toUInt()
+}
+
+fun setAutoRelease(enabled: Boolean) {
+    Native.boltffi_function_xybrid_bolt_set_auto_release(enabled)
+}
+
+fun isAutoReleaseEnabled(): Boolean {
+    return Native.boltffi_function_xybrid_bolt_is_auto_release_enabled()
 }
 
 fun telemetryDefaultEndpoint(): String {

@@ -182,6 +182,12 @@ classes:
           - { name: config, type: "GenerationConfig?", default: "null" }
         return: XybridResult
         status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+      liveAsr:
+        params:
+          - { name: config, type: AsrStreamConfig, default: default }
+        return: AsrStreamingSession
+        notes: "Live microphone transcription. Feed mono 16 kHz f32 PCM into an ordered worker, pull distinct cumulative partials, flush the current utterance, then reset to reuse the loaded model. Dart exposes the same capability as XybridStreamSession.fromModel(model)."
+        status: { rust: implemented, dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
       runWithOptions:
         async: true
         params:

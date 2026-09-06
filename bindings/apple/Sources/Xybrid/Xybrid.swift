@@ -275,6 +275,7 @@ public typealias Model = XybridModel
 // here in the hand-written wrapper (regen-safe — never overwritten by
 // `boltffi generate`, unlike `xybrid_bolt.swift`).
 extension XybridModel: @unchecked Sendable {}
+extension XybridAsrStreamSession: @unchecked Sendable {}
 
 /// A pull-paced asynchronous stream of generated tokens.
 ///
@@ -498,6 +499,13 @@ public extension XybridModel {
     func run(envelope: XybridEnvelope) throws -> XybridResult {
         try run(envelope: envelope, options: nil)
     }
+
+    /// Open a live microphone transcription session.
+    func liveASR(
+        config: XybridAsrStreamConfig = .make()
+    ) throws -> XybridAsrStreamSession {
+        try stream(config: config)
+    }
 }
 
 // MARK: - Async conveniences
@@ -579,6 +587,52 @@ public extension XybridModel {
     }
 }
 
+public extension XybridAsrStreamSession {
+    /// Queue microphone PCM without blocking the calling actor.
+    func feedAsync(samples: [Float]) async throws {
+        try await Task.detached { try self.feed(samples: samples) }.value
+    }
+
+    /// Drain queued audio and return the final transcript off the calling actor.
+    func flushAsync() async throws -> XybridAsrTranscriptionResult {
+        try await Task.detached { try self.flush() }.value
+    }
+
+    /// Reset transcript state without reloading the ASR model.
+    func resetAsync() async throws {
+        try await Task.detached { try self.reset() }.value
+    }
+
+    /// Pull rolling transcripts as a bounded async sequence.
+    ///
+    /// Partials are cumulative, so retaining the newest eight bounds a stalled
+    /// UI without losing the current transcript. Cancelling or abandoning the
+    /// sequence stops the native worker and unblocks its pending pull.
+    func partials() -> AsyncThrowingStream<XybridAsrPartialResult, Error> {
+        AsyncThrowingStream(bufferingPolicy: .bufferingNewest(8)) { continuation in
+            let task = Task.detached {
+                do {
+                    while !Task.isCancelled {
+                        guard let partial = try self.next() else {
+                            continuation.finish()
+                            return
+                        }
+                        continuation.yield(partial)
+                    }
+                    try? self.stop()
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+            continuation.onTermination = { _ in
+                try? self.stop()
+                task.cancel()
+            }
+        }
+    }
+}
+
 /// Input data for model inference.
 /// Use `.audio(pcmData:sampleRate:channels:)` or `.text(_:voice:speed:)`.
 public typealias Envelope = XybridEnvelope
@@ -607,6 +661,33 @@ public typealias ToolResult = XybridToolResult
 /// One token emitted by a streaming run. The terminal token carries the
 /// turn's `toolCalls` and `rawText`.
 public typealias StreamToken = XybridStreamToken
+
+/// Live ASR configuration and result types.
+public typealias AsrStreamConfig = XybridAsrStreamConfig
+public typealias AsrPartialResult = XybridAsrPartialResult
+public typealias AsrTranscriptionResult = XybridAsrTranscriptionResult
+public typealias AsrStreamSession = XybridAsrStreamSession
+
+public extension XybridAsrStreamConfig {
+    /// Build a live ASR configuration with mobile-safe defaults.
+    static func make(
+        sampleRate: UInt32 = 16_000,
+        enableVad: Bool = false,
+        vadThreshold: Float = 0.5,
+        vadModelDir: String? = nil,
+        language: String? = nil,
+        audioCtx: UInt32? = nil
+    ) -> Self {
+        Self(
+            sampleRate: sampleRate,
+            enableVad: enableVad,
+            vadThreshold: vadThreshold,
+            vadModelDir: vadModelDir,
+            language: language,
+            audioCtx: audioCtx
+        )
+    }
+}
 
 // MARK: - GenerationConfig ergonomics
 //

@@ -418,18 +418,18 @@ def _boltffi_read_49d0adb26a1528e6(data: bytes):
 _native._register_wire_codec("read_49d0adb26a1528e6", _boltffi_read_49d0adb26a1528e6)
 
 
-def _boltffi_read_bd1359a0ca4e78d7(data: bytes):
+def _boltffi_read_9cae1e3f304b779a(data: bytes):
     return _boltffi_read_wire(data, lambda reader: reader.sequence(lambda: XybridVoiceInfo._boltffi_from_reader(reader)))
 
 
-_native._register_wire_codec("read_bd1359a0ca4e78d7", _boltffi_read_bd1359a0ca4e78d7)
+_native._register_wire_codec("read_9cae1e3f304b779a", _boltffi_read_9cae1e3f304b779a)
 
 
-def _boltffi_read_74dbe00a1a77ad93(data: bytes):
+def _boltffi_read_544c04eb322290de(data: bytes):
     return _boltffi_read_wire(data, lambda reader: reader.optional(lambda: XybridVoiceInfo._boltffi_from_reader(reader)))
 
 
-_native._register_wire_codec("read_74dbe00a1a77ad93", _boltffi_read_74dbe00a1a77ad93)
+_native._register_wire_codec("read_544c04eb322290de", _boltffi_read_544c04eb322290de)
 
 
 def _boltffi_read_c9bb5dd3c2ec1b2a(data: bytes):
@@ -444,6 +444,20 @@ def _boltffi_read_e9a0b9fd71f8c9ff(data: bytes):
 
 
 _native._register_wire_codec("read_e9a0b9fd71f8c9ff", _boltffi_read_e9a0b9fd71f8c9ff)
+
+
+def _boltffi_read_94ebdbf117d677e0(data: bytes):
+    return _boltffi_read_wire(data, lambda reader: reader.optional(lambda: XybridAsrPartialResult._boltffi_from_reader(reader)))
+
+
+_native._register_wire_codec("read_94ebdbf117d677e0", _boltffi_read_94ebdbf117d677e0)
+
+
+def _boltffi_read_09b0b5e46f57944c(data: bytes):
+    return _boltffi_read_wire(data, lambda reader: XybridAsrTranscriptionResult._boltffi_from_reader(reader))
+
+
+_native._register_wire_codec("read_09b0b5e46f57944c", _boltffi_read_09b0b5e46f57944c)
 
 
 def _boltffi_read_3cfe09c223256b1b(data: bytes):
@@ -501,6 +515,13 @@ def _boltffi_write_8d84d7157f6e715c(voice_id) -> bytes:
 
 
 _native._register_wire_codec("write_8d84d7157f6e715c", _boltffi_write_8d84d7157f6e715c)
+
+
+def _boltffi_write_db377f0a6ddab213(config) -> bytes:
+    return config._boltffi_wire()
+
+
+_native._register_wire_codec("write_db377f0a6ddab213", _boltffi_write_db377f0a6ddab213)
 
 
 def _boltffi_write_62eeac930738df49(envelope) -> bytes:
@@ -1179,6 +1200,126 @@ class XybridStreamEvent:
 
 
 _native._register_xybrid_stream_event(XybridStreamEvent)
+
+
+
+@dataclass(frozen=True, slots=True)
+class XybridAsrStreamConfig:
+    sample_rate: int
+    enable_vad: bool
+    vad_threshold: float
+    vad_model_dir: str | None
+    language: str | None
+    audio_ctx: int | None
+
+    def _boltffi_wire(self) -> bytes:
+        return b"".join((
+            _boltffi_wire_u32(self.sample_rate),
+            _boltffi_wire_bool(self.enable_vad),
+            _boltffi_wire_f32(self.vad_threshold),
+            _boltffi_wire_optional(self.vad_model_dir, lambda __boltffi_value_0: _boltffi_wire_string(__boltffi_value_0)),
+            _boltffi_wire_optional(self.language, lambda __boltffi_value_0: _boltffi_wire_string(__boltffi_value_0)),
+            _boltffi_wire_optional(self.audio_ctx, lambda __boltffi_value_0: _boltffi_wire_u32(__boltffi_value_0)),
+        ))
+
+    @classmethod
+    def _boltffi_from_wire(cls, data: bytes) -> "XybridAsrStreamConfig":
+        reader = _BoltFfiWireReader(data)
+        try:
+            value = cls._boltffi_from_reader(reader)
+        except struct.error as error:
+            raise ValueError("truncated BoltFFI wire bytes") from error
+        reader.finish()
+        return value
+
+    @classmethod
+    def _boltffi_from_reader(cls, reader: "_BoltFfiWireReader") -> "XybridAsrStreamConfig":
+        return cls(
+            sample_rate=reader.u32(),
+            enable_vad=reader.bool(),
+            vad_threshold=reader.f32(),
+            vad_model_dir=reader.optional(lambda: reader.string()),
+            language=reader.optional(lambda: reader.string()),
+            audio_ctx=reader.optional(lambda: reader.u32()),
+        )
+
+
+_native._register_xybrid_asr_stream_config(XybridAsrStreamConfig)
+
+
+
+@dataclass(frozen=True, slots=True)
+class XybridAsrPartialResult:
+    text: str
+    is_stable: bool
+    chunk_index: int
+    audio_duration_ms: int
+
+    def _boltffi_wire(self) -> bytes:
+        return b"".join((
+            _boltffi_wire_string(self.text),
+            _boltffi_wire_bool(self.is_stable),
+            _boltffi_wire_u64(self.chunk_index),
+            _boltffi_wire_u64(self.audio_duration_ms),
+        ))
+
+    @classmethod
+    def _boltffi_from_wire(cls, data: bytes) -> "XybridAsrPartialResult":
+        reader = _BoltFfiWireReader(data)
+        try:
+            value = cls._boltffi_from_reader(reader)
+        except struct.error as error:
+            raise ValueError("truncated BoltFFI wire bytes") from error
+        reader.finish()
+        return value
+
+    @classmethod
+    def _boltffi_from_reader(cls, reader: "_BoltFfiWireReader") -> "XybridAsrPartialResult":
+        return cls(
+            text=reader.string(),
+            is_stable=reader.bool(),
+            chunk_index=reader.u64(),
+            audio_duration_ms=reader.u64(),
+        )
+
+
+_native._register_xybrid_asr_partial_result(XybridAsrPartialResult)
+
+
+
+@dataclass(frozen=True, slots=True)
+class XybridAsrTranscriptionResult:
+    text: str
+    duration_ms: int
+    chunks_processed: int
+
+    def _boltffi_wire(self) -> bytes:
+        return b"".join((
+            _boltffi_wire_string(self.text),
+            _boltffi_wire_u64(self.duration_ms),
+            _boltffi_wire_u64(self.chunks_processed),
+        ))
+
+    @classmethod
+    def _boltffi_from_wire(cls, data: bytes) -> "XybridAsrTranscriptionResult":
+        reader = _BoltFfiWireReader(data)
+        try:
+            value = cls._boltffi_from_reader(reader)
+        except struct.error as error:
+            raise ValueError("truncated BoltFFI wire bytes") from error
+        reader.finish()
+        return value
+
+    @classmethod
+    def _boltffi_from_reader(cls, reader: "_BoltFfiWireReader") -> "XybridAsrTranscriptionResult":
+        return cls(
+            text=reader.string(),
+            duration_ms=reader.u64(),
+            chunks_processed=reader.u64(),
+        )
+
+
+_native._register_xybrid_asr_transcription_result(XybridAsrTranscriptionResult)
 
 
 
@@ -1923,6 +2064,9 @@ class XybridModel:
     def voice(self, voice_id: str) -> XybridVoiceInfo | None:
         return _boltffi_read_wire(_native._boltffi_xybrid_model_voice(self._handle, voice_id), lambda reader: reader.optional(lambda: XybridVoiceInfo._boltffi_from_reader(reader)))
 
+    def stream(self, config: XybridAsrStreamConfig) -> XybridAsrStreamSession:
+        return XybridAsrStreamSession._from_handle(_boltffi_call(_boltffi_read_fe83cddcf3822a1d, lambda: _native._boltffi_xybrid_model_stream(self._handle, config._boltffi_wire())))
+
     def run(self, envelope: XybridEnvelope, options: XybridRunOptions | None) -> XybridResult:
         return _boltffi_read_wire(_boltffi_call(_boltffi_read_fe83cddcf3822a1d, lambda: _native._boltffi_xybrid_model_run(self._handle, envelope._boltffi_wire(), _boltffi_wire_optional(options, lambda __boltffi_value_0: __boltffi_value_0._boltffi_wire()))), lambda reader: XybridResult._boltffi_from_reader(reader))
 
@@ -1949,6 +2093,43 @@ class XybridModel:
 
     def unload(self) -> None:
         _boltffi_call(_boltffi_read_fe83cddcf3822a1d, lambda: _native._boltffi_xybrid_model_unload(self._handle))
+
+
+
+class XybridAsrStreamSession:
+    __slots__ = ("_handle",)
+
+
+    def __init__(self) -> None:
+        raise TypeError("XybridAsrStreamSession cannot be constructed directly")
+
+
+    @classmethod
+    def _from_handle(cls, handle: int) -> "XybridAsrStreamSession":
+        value = cls.__new__(cls)
+        value._handle = handle
+        return value
+
+    def __del__(self) -> None:
+        handle = getattr(self, "_handle", None)
+        if handle is not None:
+            self._handle = None
+            _native._boltffi_xybrid_asr_stream_session_release(handle)
+
+    def feed(self, samples: Sequence[float]) -> None:
+        _boltffi_call(_boltffi_read_fe83cddcf3822a1d, lambda: _native._boltffi_xybrid_asr_stream_session_feed(self._handle, samples))
+
+    def next(self) -> XybridAsrPartialResult | None:
+        return _boltffi_read_wire(_boltffi_call(_boltffi_read_fe83cddcf3822a1d, lambda: _native._boltffi_xybrid_asr_stream_session_next(self._handle)), lambda reader: reader.optional(lambda: XybridAsrPartialResult._boltffi_from_reader(reader)))
+
+    def flush(self) -> XybridAsrTranscriptionResult:
+        return _boltffi_call(_boltffi_read_fe83cddcf3822a1d, lambda: _native._boltffi_xybrid_asr_stream_session_flush(self._handle))
+
+    def reset(self) -> None:
+        _boltffi_call(_boltffi_read_fe83cddcf3822a1d, lambda: _native._boltffi_xybrid_asr_stream_session_reset(self._handle))
+
+    def stop(self) -> None:
+        _boltffi_call(_boltffi_read_fe83cddcf3822a1d, lambda: _native._boltffi_xybrid_asr_stream_session_stop(self._handle))
 
 
 
@@ -2176,6 +2357,9 @@ __all__ = [
     "XybridDownloadStatus",
     "XybridStreamToken",
     "XybridStreamEvent",
+    "XybridAsrStreamConfig",
+    "XybridAsrPartialResult",
+    "XybridAsrTranscriptionResult",
     "XybridVoiceInfo",
     "XybridError",
     "XybridErrorException",
@@ -2215,6 +2399,7 @@ __all__ = [
     "XybridStreamEventKind",
     "XybridThermalState",
     "XybridModel",
+    "XybridAsrStreamSession",
     "XybridConversationContext",
     "XybridTelemetryConfig",
     "XybridBundle",

@@ -241,6 +241,26 @@ namespace Xybrid
         }
 
         /// <summary>
+        /// Opens a live ASR session for mono 16 kHz microphone PCM.
+        /// </summary>
+        /// <param name="config">Optional VAD, language, and Whisper context settings.</param>
+        /// <returns>A pull-based session that emits rolling transcripts.</returns>
+        public AsrStreamSession LiveAsr(AsrStreamConfig config = null)
+        {
+            ThrowIfDisposed();
+            AsrStreamConfig resolved = config ?? new AsrStreamConfig();
+            try
+            {
+                return new AsrStreamSession(_bolt.Stream(resolved.ToBolt()));
+            }
+            catch (Exception ex) when (
+                ex is XybridBolt.XybridErrorException || ex is XybridBolt.BoltException)
+            {
+                throw BoltErrors.Translate(ex);
+            }
+        }
+
+        /// <summary>
         /// Gets whether the model bundle declares local tool-calling support.
         /// </summary>
         /// <remarks>

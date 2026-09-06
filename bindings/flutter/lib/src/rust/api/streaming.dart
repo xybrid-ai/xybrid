@@ -12,9 +12,8 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import 'package:freezed_annotation/freezed_annotation.dart' hide protected;
 part 'streaming.freezed.dart';
 
-// These functions are ignored because they are not marked as `pub`: `ensure_logging`, `error_chain`, `spawn`, `to_sdk`, `worker_gone`, `worker_loop`
-// These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `Command`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `fmt`, `fmt`, `fmt`, `from`
+// These functions are ignored because they are not marked as `pub`: `ensure_logging`, `new`, `to_facade`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `drop`, `fmt`, `fmt`, `fmt`, `from`
 
 // Rust type: RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner< FfiStreamSession>>
 abstract class FfiStreamSession implements RustOpaqueInterface {
@@ -27,15 +26,15 @@ abstract class FfiStreamSession implements RustOpaqueInterface {
   ///
   /// # Errors
   ///
-  /// If the session has been finalized (after [`flush`]) or otherwise torn
-  /// down, so the worker is no longer accepting audio.
+  /// If the input queue is full or the session has stopped accepting audio.
   ///
   /// [`flush`]: Self::flush
   void feed({required List<double> samples});
 
   /// Finalize: drain buffered audio and return the complete transcript.
   ///
-  /// After this the session is finalized; further [`feed`] calls error.
+  /// This finalizes one utterance. Call [`reset`](Self::reset) before feeding
+  /// the next one; the worker and loaded model remain available.
   ///
   /// # Errors
   ///
@@ -51,10 +50,11 @@ abstract class FfiStreamSession implements RustOpaqueInterface {
   /// If the reset fails in the core, or the worker is already gone.
   Future<void> reset();
 
-  /// Subscribe to partial transcripts. Call this once, before [`feed`].
+  /// Subscribe to partial transcripts. Call this once per session.
   ///
-  /// Partials are delivered on this sink as rolling-window chunks complete.
-  /// Audio fed before the subscription is processed will not be reported.
+  /// Partials are cumulative; a slow or absent reader receives the latest
+  /// value rather than an unbounded queue. Backend errors reach the Dart
+  /// stream. A second subscription returns an error.
   ///
   /// [`feed`]: Self::feed
   Stream<FfiPartialResult> subscribe();
