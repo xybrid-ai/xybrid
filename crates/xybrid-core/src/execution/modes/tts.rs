@@ -29,6 +29,7 @@ pub fn execute_tts_inference(
     phoneme_ids: &[i64],
     voice_embedding: Vec<f32>,
     speed: f32,
+    piper: PiperInferenceConfig,
 ) -> ExecutorResult<HashMap<String, ArrayD<f32>>> {
     let input_names = session.input_names();
     let input_shapes = session.input_shapes();
@@ -44,7 +45,7 @@ pub fn execute_tts_inference(
         let dtype = input_dtypes.get(i).and_then(|d| *d);
         let shape = input_shapes.get(i).map(|s| s.as_slice()).unwrap_or(&[]);
 
-        match classify_tts_input(dtype, shape) {
+        match classify_tts_input(input_name, dtype, shape) {
             TtsInputKind::Tokens => {
                 let arr =
                     Array2::<i64>::from_shape_vec((batch_size, seq_len), phoneme_ids.to_vec())
@@ -95,6 +96,37 @@ pub fn execute_tts_inference(
                     .into();
                 value_inputs.insert(input_name.clone(), val);
             }
+            TtsInputKind::InputLengths => {
+                let val: Value = Value::from_array(Array1::from_vec(vec![seq_len as i64]))
+                    .map_err(|e| {
+                        AdapterError::InvalidInput(format!(
+                            "Failed to create input length value: {e}"
+                        ))
+                    })?
+                    .into();
+                value_inputs.insert(input_name.clone(), val);
+            }
+            TtsInputKind::Scales => {
+                let scales = vec![piper.noise_scale, piper.length_scale / speed, piper.noise_w];
+                let val: Value = Value::from_array(Array1::from_vec(scales))
+                    .map_err(|e| {
+                        AdapterError::InvalidInput(format!(
+                            "Failed to create Piper scales value: {e}"
+                        ))
+                    })?
+                    .into();
+                value_inputs.insert(input_name.clone(), val);
+            }
+            TtsInputKind::SpeakerId => {
+                let val: Value = Value::from_array(Array1::from_vec(vec![piper.speaker_id]))
+                    .map_err(|e| {
+                        AdapterError::InvalidInput(format!(
+                            "Failed to create Piper speaker value: {e}"
+                        ))
+                    })?
+                    .into();
+                value_inputs.insert(input_name.clone(), val);
+            }
             TtsInputKind::Unknown => {
                 // Not classified — will trigger the mismatch error below
             }
@@ -121,7 +153,8 @@ pub fn execute_tts_inference(
 
         return Err(AdapterError::InvalidInput(format!(
             "TTS model has unexpected inputs. Expected patterns: \
-             int64 [1, N] (tokens), f32 [1, 256] (voice embedding), f32 [1] (speed). \
+             int64 [1, N] (tokens), Piper input_lengths/scales/sid, \
+             f32 [1, 256] (voice embedding), or f32 [1] (speed). \
              Found: [{}]",
             found.join(", ")
         )));
@@ -138,6 +171,9 @@ enum TtsInputKind {
     VoiceEmbedding,
     /// f32 [1] — speed multiplier
     Speed,
+    InputLengths,
+    Scales,
+    SpeakerId,
     /// Unrecognized input pattern
     Unknown,
 }
@@ -148,7 +184,14 @@ enum TtsInputKind {
 /// - int64 with 2D shape [1, N] (N fixed or dynamic) → Tokens
 /// - f32 with 2D shape [1, 256] → VoiceEmbedding
 /// - f32 with 1D shape [1] (or dynamic [N]) → Speed
-fn classify_tts_input(dtype: Option<TensorElementType>, shape: &[i64]) -> TtsInputKind {
+fn classify_tts_input(name: &str, dtype: Option<TensorElementType>, shape: &[i64]) -> TtsInputKind {
+    match (name, dtype) {
+        ("input", Some(TensorElementType::Int64)) => return TtsInputKind::Tokens,
+        ("input_lengths", Some(TensorElementType::Int64)) => return TtsInputKind::InputLengths,
+        ("scales", Some(TensorElementType::Float32)) => return TtsInputKind::Scales,
+        ("sid", Some(TensorElementType::Int64)) => return TtsInputKind::SpeakerId,
+        _ => {}
+    }
     match dtype {
         Some(TensorElementType::Int64) if shape.len() == 2 && (shape[0] == 1 || shape[0] == -1) => {
             return TtsInputKind::Tokens;
@@ -169,4 +212,90 @@ fn classify_tts_input(dtype: Option<TensorElementType>, shape: &[i64]) -> TtsInp
         _ => {}
     }
     TtsInputKind::Unknown
+}
+
+#[derive(Debug, Clone, Copy, serde::Deserialize)]
+pub struct PiperInferenceConfig {
+    #[serde(default = "default_noise_scale")]
+    pub noise_scale: f32,
+    #[serde(default = "default_length_scale")]
+    pub length_scale: f32,
+    #[serde(default = "default_noise_w")]
+    pub noise_w: f32,
+    #[serde(skip)]
+    pub speaker_id: i64,
+}
+
+impl Default for PiperInferenceConfig {
+    fn default() -> Self {
+        Self {
+            noise_scale: default_noise_scale(),
+            length_scale: default_length_scale(),
+            noise_w: default_noise_w(),
+            speaker_id: 0,
+        }
+    }
+}
+
+impl PiperInferenceConfig {
+    pub fn from_model_path(model_path: &std::path::Path) -> Self {
+        #[derive(serde::Deserialize)]
+        struct VoiceConfig {
+            #[serde(default)]
+            inference: PiperInferenceConfig,
+        }
+        let path = model_path.with_extension("onnx.json");
+        std::fs::read_to_string(path)
+            .ok()
+            .and_then(|value| serde_json::from_str::<VoiceConfig>(&value).ok())
+            .map(|config| config.inference)
+            .unwrap_or_default()
+    }
+}
+
+fn default_noise_scale() -> f32 {
+    0.667
+}
+fn default_length_scale() -> f32 {
+    1.0
+}
+fn default_noise_w() -> f32 {
+    0.8
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn classifies_piper_inputs_by_name() {
+        assert!(matches!(
+            classify_tts_input("input", Some(TensorElementType::Int64), &[1, -1]),
+            TtsInputKind::Tokens
+        ));
+        assert!(matches!(
+            classify_tts_input("input_lengths", Some(TensorElementType::Int64), &[1]),
+            TtsInputKind::InputLengths
+        ));
+        assert!(matches!(
+            classify_tts_input("scales", Some(TensorElementType::Float32), &[3]),
+            TtsInputKind::Scales
+        ));
+        assert!(matches!(
+            classify_tts_input("sid", Some(TensorElementType::Int64), &[1]),
+            TtsInputKind::SpeakerId
+        ));
+    }
+
+    #[test]
+    fn preserves_shape_fallback_for_embedding_tts() {
+        assert!(matches!(
+            classify_tts_input("style", Some(TensorElementType::Float32), &[1, 256]),
+            TtsInputKind::VoiceEmbedding
+        ));
+        assert!(matches!(
+            classify_tts_input("speed", Some(TensorElementType::Float32), &[1]),
+            TtsInputKind::Speed
+        ));
+    }
 }
