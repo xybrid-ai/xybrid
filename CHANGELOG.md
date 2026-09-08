@@ -7,17 +7,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Planned
+
+- **Multimodal KV-prefix reuse**: the per-frame prefill cost lever for live vision — **deferred** from 0.2.0, not yet implemented.
+
+---
+
+## [0.8.0] - 2026-09-08
+
+Desktop model loading can reuse weights already present in the shared Hugging
+Face cache, macOS gains a native Core ML runtime adapter, and the Kotlin AAR is
+callable on Android. Apple token streams also preserve producer
+backpressure and enforce one-shot consumption.
+
+There are no intentional breaking API changes in this release.
+
+### Added
+
+- **Reuse the shared Hugging Face cache on desktop.** Before downloading model
+  files, the SDK probes the standard Hub cache roots, resolves mutable
+  revisions authoritatively, and reuses matching snapshot files or
+  content-addressed blobs. Missing or unusable files fall back to the normal
+  download path, while dangling materialized symlinks heal automatically
+  (#536).
+- **Native Core ML execution on macOS.** The Core ML runtime adapter now loads
+  compiled models, maps tensor inputs and outputs, and releases per-load
+  compiled bundles with their model lifetime (#548).
+- **Sentence-transformer ranking example.** The `sentence_ranker` example
+  demonstrates embedding text with `all-MiniLM-L6-v2`, cosine scoring, and
+  ranked output, with its unit tests included in CI (#550, #559).
+
 ### Fixed
 
 - **The published Kotlin AAR now contains a callable JNI library.** Its native
   filename matches `System.loadLibrary("xybrid_bolt")`, and the Bazel link
   includes every generated `Java_ai_xybrid_Native_*` trampoline over the Bolt
   C ABI. Android CI compares the final ELF exports with the generated JNI
-  source so a filename-only or C-ABI-only artifact cannot ship again (#530).
-
-### Planned
-
-- **Multimodal KV-prefix reuse**: the per-frame prefill cost lever for live vision — **deferred** from 0.2.0, not yet implemented.
+  source and executes a real JNI round trip on an emulator, so a filename-only
+  or C-ABI-only artifact cannot ship again (#530, #555).
+- **Apple token streams preserve backpressure.** `streamTokens` no longer lets
+  the native producer outrun a slow consumer, stream cleanup stays off the
+  cancelling thread, and each stream can be consumed only once (#549).
 
 ---
 

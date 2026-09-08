@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.8.0
+
+No Dart API changes. Flutter desktop model loads can reuse compatible files
+from the standard Hugging Face cache, and the macOS native runtime gains Core
+ML execution support. Android native packaging also receives the release-wide
+JNI fix, while Apple token streams preserve producer backpressure.
+
+* Added: desktop Hugging Face loads reuse matching snapshots and
+  content-addressed blobs before downloading duplicate model files
+  (xybrid-ai/xybrid#536)
+* Added: native Core ML model execution on macOS (xybrid-ai/xybrid#548)
+* Fixed: Apple token streams preserve producer backpressure and clean up safely
+  when consumption is cancelled (xybrid-ai/xybrid#549)
+* Fixed: Android release artifacts carry the corrected callable JNI library;
+  this does not change the Dart API (xybrid-ai/xybrid#555)
+
 ## 0.7.0
 
 Streaming tool loops can now keep both live output and conversation history,
