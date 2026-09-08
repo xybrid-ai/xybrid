@@ -149,6 +149,25 @@ class XybridVoiceInfo:
 
 
 
+@dataclass(frozen=True, slots=True)
+class XybridCacheEntry:
+    model_id: str
+    location: XybridCacheEntryLocation
+    path: str
+    size_bytes: int
+
+
+
+@dataclass(frozen=True, slots=True)
+class XybridCacheStatus:
+    total_size_bytes: int
+    entry_count: int
+    model_count: int
+    extracted_model_count: int
+    cache_root: str
+
+
+
 
 class XybridError:
     pass
@@ -339,6 +358,13 @@ class XybridStreamEventKind(IntEnum):
     COMPLETE = 1
 
 
+class XybridCacheEntryLocation(IntEnum):
+    REGISTRY = 0
+    EXTRACTED = 1
+    HUGGING_FACE = 2
+    HUGGING_FACE_HUB = 3
+
+
 class XybridThermalState(IntEnum):
     NORMAL = 0
     WARM = 1
@@ -473,6 +499,14 @@ def set_battery_level(percent: int) -> None: ...
 def clear_battery_level() -> None: ...
 def configure_runtime(api_key: str | None, gateway_url: str | None, ingest_url: str | None) -> None: ...
 def init_sdk_cache_dir(cache_dir: str) -> None: ...
+def cache_status() -> XybridCacheStatus: ...
+def cache_entries() -> list[XybridCacheEntry]: ...
+def cache_is_model_cached(model_id: str) -> bool: ...
+def cache_model_path(model_id: str) -> str | None: ...
+def cache_list_extracted_model_ids() -> list[str]: ...
+def cache_clean_expired() -> int: ...
+def cache_remove_model(model_id: str) -> int: ...
+def cache_clear() -> int: ...
 def set_binding(binding: str) -> None: ...
 def set_api_key(api_key: str) -> None: ...
 def set_provider_api_key(provider: str, api_key: str) -> None: ...

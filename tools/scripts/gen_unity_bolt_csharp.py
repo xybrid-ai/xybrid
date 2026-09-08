@@ -95,7 +95,8 @@ RECORD_STRUCT_RE = re.compile(
 # XybridToolResult).
 # Bump this deliberately: the count is a tripwire for unreviewed boltffi output
 # drift, not a value to auto-sync.
-EXPECTED_RECORD_STRUCTS = 14
+# Fourteen existing wire records plus XybridCacheEntry and XybridCacheStatus.
+EXPECTED_RECORD_STRUCTS = 16
 
 
 # --- Transform (g): Unsafe.SizeOf<T>() -> Marshal.SizeOf<T>(). boltffi's wire
@@ -388,6 +389,11 @@ def _drift(condition: bool, message: str) -> None:
 
 def generate() -> dict[str, str]:
     """Run the generator, down-level for Unity, and return {filename: contents}."""
+    # boltffi writes into the language directory but does not remove files for
+    # types that disappeared since a previous run. Start clean so an ignored
+    # dist artifact cannot leak into the committed Unity package.
+    if RAW_DIR.exists():
+        shutil.rmtree(RAW_DIR)
     subprocess.run(["boltffi", "generate", "csharp"], cwd=BOLT_DIR, check=True)
 
     sources = sorted(RAW_DIR.glob("*.cs"))

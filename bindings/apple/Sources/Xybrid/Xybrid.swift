@@ -106,6 +106,54 @@ public enum Xybrid {
         return initialized
     }
 
+    /// Aggregate storage usage across all managed model-cache areas.
+    public static func modelCacheStatus() throws -> XybridCacheStatus {
+        try cacheStatus()
+    }
+
+    /// Physical entries across registry, extraction, and Hugging Face caches.
+    ///
+    /// A model can appear more than once when several managed copies exist.
+    public static func modelCacheEntries() throws -> [XybridCacheEntry] {
+        try cacheEntries()
+    }
+
+    /// Return whether `modelId` occupies any managed model-cache entry.
+    public static func hasCachedModelData(_ modelId: String) throws -> Bool {
+        try cacheIsModelCached(modelId: modelId)
+    }
+
+    /// Return a preferred local path for a model, or `nil` when absent.
+    ///
+    /// Presence does not necessarily mean the model is extracted and ready.
+    public static func cachedModelPath(_ modelId: String) throws -> String? {
+        try cacheModelPath(modelId: modelId)
+    }
+
+    /// List model IDs extracted, validated, and ready to run offline.
+    public static func extractedModelIds() throws -> [String] {
+        try cacheListExtractedModelIds()
+    }
+
+    /// Throws until persistent cache retention is supported. Use per-model eviction.
+    public static func cleanExpiredModelCache() throws -> UInt32 {
+        try cacheCleanExpired()
+    }
+
+    /// Remove every managed cache entry for one model.
+    ///
+    /// Do not call concurrently with a load of the same model.
+    public static func removeCachedModel(_ modelId: String) throws -> UInt32 {
+        try cacheRemoveModel(modelId: modelId)
+    }
+
+    /// Clear all managed model-cache storage.
+    ///
+    /// Do not call concurrently with any model load.
+    public static func clearModelCache() throws -> UInt32 {
+        try cacheClear()
+    }
+
     private static func registerPlatformObservers() {
         #if os(iOS)
         let device = UIDevice.current

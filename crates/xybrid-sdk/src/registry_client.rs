@@ -1185,7 +1185,7 @@ impl RegistryClient {
     /// Not safe to run concurrently with a load of the same model: it removes
     /// whole cache directories that an in-flight extraction may be writing to.
     pub fn clear_cache(&mut self, mask: &str) -> Result<u32, SdkError> {
-        self.cache.clear_model_roots(mask)
+        self.cache.clear_model(mask)
     }
 
     /// Clear the entire model cache.

@@ -127,6 +127,50 @@ object Xybrid {
     @JvmStatic
     fun model(source: ModelSource): ModelLoader = XybridModelLoader.from(source)
 
+    /** Aggregate storage usage across all managed model-cache areas. */
+    @JvmStatic
+    fun modelCacheStatus(): XybridCacheStatus = ai.xybrid.cacheStatus()
+
+    /**
+     * List physical entries across registry, extraction, and Hugging Face caches.
+     * A model can appear more than once when several managed copies exist.
+     */
+    @JvmStatic
+    fun modelCacheEntries(): List<XybridCacheEntry> = ai.xybrid.cacheEntries()
+
+    /** Return whether [modelId] occupies any managed model-cache entry. */
+    @JvmStatic
+    fun hasCachedModelData(modelId: String): Boolean = ai.xybrid.cacheIsModelCached(modelId)
+
+    /**
+     * Return a preferred local path for [modelId], or `null` when absent.
+     * Presence does not necessarily mean the model is extracted and ready.
+     */
+    @JvmStatic
+    fun cachedModelPath(modelId: String): String? = ai.xybrid.cacheModelPath(modelId)
+
+    /** List model IDs extracted, validated, and ready to run offline. */
+    @JvmStatic
+    fun extractedModelIds(): List<String> = ai.xybrid.cacheListExtractedModelIds()
+
+    /** Throws until persistent cache retention is supported. Use per-model eviction. */
+    @JvmStatic
+    fun cleanExpiredModelCache(): UInt = ai.xybrid.cacheCleanExpired()
+
+    /**
+     * Remove every managed cache entry for [modelId].
+     * Do not call concurrently with a load of the same model.
+     */
+    @JvmStatic
+    fun removeCachedModel(modelId: String): UInt = ai.xybrid.cacheRemoveModel(modelId)
+
+    /**
+     * Clear all managed model-cache storage.
+     * Do not call concurrently with any model load.
+     */
+    @JvmStatic
+    fun clearModelCache(): UInt = ai.xybrid.cacheClear()
+
     private fun registerPlatformObservers(appContext: Context) {
         val batteryReceiver = object : BroadcastReceiver() {
             override fun onReceive(received: Context, intent: Intent) {

@@ -577,6 +577,225 @@ namespace XybridBolt
             }
         }
 
+        /// <summary>
+        /// Returns aggregate storage usage across every managed model-cache location.
+        /// </summary>
+        public static global::XybridBolt.XybridCacheStatus CacheStatus()
+        {
+            FfiBuf boltffiErrorBuffer = NativeMethods.NativeCacheStatus(out FfiBuf boltffiResultBuffer);
+            if (boltffiErrorBuffer.ptr != 0)
+            {
+                try
+                {
+                    WireReader boltffiErrorReader = new WireReader(boltffiErrorBuffer);
+                    throw new global::XybridBolt.XybridErrorException(global::XybridBolt.XybridError.Decode(boltffiErrorReader));
+                }
+                finally
+                {
+                    NativeMethods.FreeBuf(boltffiErrorBuffer);
+                }
+            }
+            try
+            {
+                WireReader resultReader = new WireReader(boltffiResultBuffer);
+                return global::XybridBolt.XybridCacheStatus.Decode(resultReader);
+            }
+            finally
+            {
+                NativeMethods.FreeBuf(boltffiResultBuffer);
+            }
+        }
+
+        /// <summary>
+        /// Lists every physical model entry occupying managed cache storage.
+        /// </summary>
+        public static global::XybridBolt.XybridCacheEntry[] CacheEntries()
+        {
+            FfiBuf boltffiErrorBuffer = NativeMethods.NativeCacheEntries(out FfiBuf boltffiResultBuffer);
+            if (boltffiErrorBuffer.ptr != 0)
+            {
+                try
+                {
+                    WireReader boltffiErrorReader = new WireReader(boltffiErrorBuffer);
+                    throw new global::XybridBolt.XybridErrorException(global::XybridBolt.XybridError.Decode(boltffiErrorReader));
+                }
+                finally
+                {
+                    NativeMethods.FreeBuf(boltffiErrorBuffer);
+                }
+            }
+            try
+            {
+                WireReader resultReader = new WireReader(boltffiResultBuffer);
+                return resultReader.ReadArray(reader => global::XybridBolt.XybridCacheEntry.Decode(resultReader));
+            }
+            finally
+            {
+                NativeMethods.FreeBuf(boltffiResultBuffer);
+            }
+        }
+
+        /// <summary>
+        /// Returns whether a model occupies any managed cache entry.
+        /// </summary>
+        public static bool CacheIsModelCached(string modelId)
+        {
+            WireWriter modelIdWriter = new WireWriter();
+            {
+                modelIdWriter.WriteString(modelId);
+            }
+            byte[] modelIdBytes = modelIdWriter.ToArray();
+            FfiBuf boltffiErrorBuffer = NativeMethods.NativeCacheIsModelCached(modelIdBytes, (nuint)modelIdBytes.Length, out bool boltffiResult);
+            if (boltffiErrorBuffer.ptr != 0)
+            {
+                try
+                {
+                    WireReader boltffiErrorReader = new WireReader(boltffiErrorBuffer);
+                    throw new global::XybridBolt.XybridErrorException(global::XybridBolt.XybridError.Decode(boltffiErrorReader));
+                }
+                finally
+                {
+                    NativeMethods.FreeBuf(boltffiErrorBuffer);
+                }
+            }
+            return boltffiResult;
+        }
+
+        /// <summary>
+        /// Resolves the preferred local cache path for a model, if present.
+        /// </summary>
+        public static string? CacheModelPath(string modelId)
+        {
+            WireWriter modelIdWriter = new WireWriter();
+            {
+                modelIdWriter.WriteString(modelId);
+            }
+            byte[] modelIdBytes = modelIdWriter.ToArray();
+            FfiBuf boltffiErrorBuffer = NativeMethods.NativeCacheModelPath(modelIdBytes, (nuint)modelIdBytes.Length, out FfiBuf boltffiResultBuffer);
+            if (boltffiErrorBuffer.ptr != 0)
+            {
+                try
+                {
+                    WireReader boltffiErrorReader = new WireReader(boltffiErrorBuffer);
+                    throw new global::XybridBolt.XybridErrorException(global::XybridBolt.XybridError.Decode(boltffiErrorReader));
+                }
+                finally
+                {
+                    NativeMethods.FreeBuf(boltffiErrorBuffer);
+                }
+            }
+            try
+            {
+                WireReader resultReader = new WireReader(boltffiResultBuffer);
+                return resultReader.ReadU8() == 0 ? default(string?) : resultReader.ReadString();
+            }
+            finally
+            {
+                NativeMethods.FreeBuf(boltffiResultBuffer);
+            }
+        }
+
+        /// <summary>
+        /// Lists model IDs extracted, validated, and ready to run offline.
+        /// </summary>
+        public static string[] CacheListExtractedModelIds()
+        {
+            FfiBuf boltffiErrorBuffer = NativeMethods.NativeCacheListExtractedModelIds(out FfiBuf boltffiResultBuffer);
+            if (boltffiErrorBuffer.ptr != 0)
+            {
+                try
+                {
+                    WireReader boltffiErrorReader = new WireReader(boltffiErrorBuffer);
+                    throw new global::XybridBolt.XybridErrorException(global::XybridBolt.XybridError.Decode(boltffiErrorReader));
+                }
+                finally
+                {
+                    NativeMethods.FreeBuf(boltffiErrorBuffer);
+                }
+            }
+            try
+            {
+                WireReader resultReader = new WireReader(boltffiResultBuffer);
+                return resultReader.ReadArray(reader => resultReader.ReadString());
+            }
+            finally
+            {
+                NativeMethods.FreeBuf(boltffiResultBuffer);
+            }
+        }
+
+        /// <summary>
+        /// Removes expired cache entries and returns how many were deleted.
+        /// </summary>
+        public static uint CacheCleanExpired()
+        {
+            FfiBuf boltffiErrorBuffer = NativeMethods.NativeCacheCleanExpired(out uint boltffiResult);
+            if (boltffiErrorBuffer.ptr != 0)
+            {
+                try
+                {
+                    WireReader boltffiErrorReader = new WireReader(boltffiErrorBuffer);
+                    throw new global::XybridBolt.XybridErrorException(global::XybridBolt.XybridError.Decode(boltffiErrorReader));
+                }
+                finally
+                {
+                    NativeMethods.FreeBuf(boltffiErrorBuffer);
+                }
+            }
+            return boltffiResult;
+        }
+
+        /// <summary>
+        /// Removes every managed cache entry for one model.
+        ///
+        /// Do not call concurrently with a load of the same model.
+        /// </summary>
+        public static uint CacheRemoveModel(string modelId)
+        {
+            WireWriter modelIdWriter = new WireWriter();
+            {
+                modelIdWriter.WriteString(modelId);
+            }
+            byte[] modelIdBytes = modelIdWriter.ToArray();
+            FfiBuf boltffiErrorBuffer = NativeMethods.NativeCacheRemoveModel(modelIdBytes, (nuint)modelIdBytes.Length, out uint boltffiResult);
+            if (boltffiErrorBuffer.ptr != 0)
+            {
+                try
+                {
+                    WireReader boltffiErrorReader = new WireReader(boltffiErrorBuffer);
+                    throw new global::XybridBolt.XybridErrorException(global::XybridBolt.XybridError.Decode(boltffiErrorReader));
+                }
+                finally
+                {
+                    NativeMethods.FreeBuf(boltffiErrorBuffer);
+                }
+            }
+            return boltffiResult;
+        }
+
+        /// <summary>
+        /// Clears all managed model-cache storage.
+        ///
+        /// Do not call concurrently with any model load.
+        /// </summary>
+        public static uint CacheClear()
+        {
+            FfiBuf boltffiErrorBuffer = NativeMethods.NativeCacheClear(out uint boltffiResult);
+            if (boltffiErrorBuffer.ptr != 0)
+            {
+                try
+                {
+                    WireReader boltffiErrorReader = new WireReader(boltffiErrorBuffer);
+                    throw new global::XybridBolt.XybridErrorException(global::XybridBolt.XybridError.Decode(boltffiErrorReader));
+                }
+                finally
+                {
+                    NativeMethods.FreeBuf(boltffiErrorBuffer);
+                }
+            }
+            return boltffiResult;
+        }
+
         public static void SetBinding(string binding)
         {
             WireWriter bindingWriter = new WireWriter();
@@ -703,6 +922,39 @@ namespace XybridBolt
                 NativeMethods.FreeBuf(boltffiResultBuffer);
             }
         }
+
+        /// <summary>
+        /// Release every idle loaded model's memory; returns how many were released.
+        ///
+        /// Call this from the platform's low-memory hook (`didReceiveMemoryWarning`
+        /// on iOS, `onTrimMemory` on Android). Models with a run in flight are
+        /// skipped, and a released model reloads itself on next use — no reload call,
+        /// no new error to handle.
+        /// </summary>
+        public static uint ReleaseMemory()
+            => NativeMethods.NativeReleaseMemory();
+
+        /// <summary>
+        /// Enable or disable automatic model release for subsequent loads.
+        ///
+        /// When enabled, loading a model under device memory pressure first releases
+        /// least-recently-used idle models. Off by default; [`release_memory`] works
+        /// either way.
+        /// </summary>
+        public static void SetAutoRelease(bool enabled)
+        {
+            FfiStatus status = NativeMethods.NativeSetAutoRelease(enabled);
+            if (status.code != 0)
+            {
+                throw new global::System.InvalidOperationException($"BoltFFI call failed with status code {status.code}");
+            }
+        }
+
+        /// <summary>
+        /// Whether automatic model release is enabled process-wide.
+        /// </summary>
+        public static bool IsAutoReleaseEnabled()
+            => NativeMethods.NativeIsAutoReleaseEnabled();
 
         /// <summary>
         /// The SDK's default telemetry ingest endpoint (for display alongside a config).
@@ -942,6 +1194,30 @@ namespace XybridBolt
         [DllImport(LibName, EntryPoint = "boltffi_release_class_xybrid_bolt_xybrid_telemetry_config")]
         internal static extern void NativeXybridTelemetryConfigRelease(ulong handle);
 
+        [DllImport(LibName, EntryPoint = "boltffi_function_xybrid_bolt_cache_clean_expired")]
+        internal static extern FfiBuf NativeCacheCleanExpired(out uint boltffiResult);
+
+        [DllImport(LibName, EntryPoint = "boltffi_function_xybrid_bolt_cache_clear")]
+        internal static extern FfiBuf NativeCacheClear(out uint boltffiResult);
+
+        [DllImport(LibName, EntryPoint = "boltffi_function_xybrid_bolt_cache_entries")]
+        internal static extern FfiBuf NativeCacheEntries(out FfiBuf boltffiResultBuffer);
+
+        [DllImport(LibName, EntryPoint = "boltffi_function_xybrid_bolt_cache_is_model_cached")]
+        internal static extern FfiBuf NativeCacheIsModelCached([In] byte[] modelIdBytes, nuint modelIdLength, [MarshalAs(UnmanagedType.I1)] out bool boltffiResult);
+
+        [DllImport(LibName, EntryPoint = "boltffi_function_xybrid_bolt_cache_list_extracted_model_ids")]
+        internal static extern FfiBuf NativeCacheListExtractedModelIds(out FfiBuf boltffiResultBuffer);
+
+        [DllImport(LibName, EntryPoint = "boltffi_function_xybrid_bolt_cache_model_path")]
+        internal static extern FfiBuf NativeCacheModelPath([In] byte[] modelIdBytes, nuint modelIdLength, out FfiBuf boltffiResultBuffer);
+
+        [DllImport(LibName, EntryPoint = "boltffi_function_xybrid_bolt_cache_remove_model")]
+        internal static extern FfiBuf NativeCacheRemoveModel([In] byte[] modelIdBytes, nuint modelIdLength, out uint boltffiResult);
+
+        [DllImport(LibName, EntryPoint = "boltffi_function_xybrid_bolt_cache_status")]
+        internal static extern FfiBuf NativeCacheStatus(out FfiBuf boltffiResultBuffer);
+
         [DllImport(LibName, EntryPoint = "boltffi_function_xybrid_bolt_clear_battery_level")]
         internal static extern void NativeClearBatteryLevel();
 
@@ -964,6 +1240,10 @@ namespace XybridBolt
         [DllImport(LibName, EntryPoint = "boltffi_function_xybrid_bolt_init_sdk_cache_dir")]
         internal static extern FfiStatus NativeInitSdkCacheDir([In] byte[] cacheDirBytes, nuint cacheDirLength);
 
+        [DllImport(LibName, EntryPoint = "boltffi_function_xybrid_bolt_is_auto_release_enabled")]
+        [return: MarshalAs(UnmanagedType.I1)]
+        internal static extern bool NativeIsAutoReleaseEnabled();
+
         [DllImport(LibName, EntryPoint = "boltffi_function_xybrid_bolt_is_speculative_cloud_enabled")]
         [return: MarshalAs(UnmanagedType.I1)]
         internal static extern bool NativeIsSpeculativeCloudEnabled();
@@ -971,8 +1251,14 @@ namespace XybridBolt
         [DllImport(LibName, EntryPoint = "boltffi_function_xybrid_bolt_json_schema_to_gbnf")]
         internal static extern FfiBuf NativeJsonSchemaToGbnf([In] byte[] schemaJsonBytes, nuint schemaJsonLength, out FfiBuf boltffiResultBuffer);
 
+        [DllImport(LibName, EntryPoint = "boltffi_function_xybrid_bolt_release_memory")]
+        internal static extern uint NativeReleaseMemory();
+
         [DllImport(LibName, EntryPoint = "boltffi_function_xybrid_bolt_set_api_key")]
         internal static extern FfiStatus NativeSetApiKey([In] byte[] apiKeyBytes, nuint apiKeyLength);
+
+        [DllImport(LibName, EntryPoint = "boltffi_function_xybrid_bolt_set_auto_release")]
+        internal static extern FfiStatus NativeSetAutoRelease([MarshalAs(UnmanagedType.I1)] bool enabled);
 
         [DllImport(LibName, EntryPoint = "boltffi_function_xybrid_bolt_set_battery_level")]
         internal static extern FfiStatus NativeSetBatteryLevel(byte percent);

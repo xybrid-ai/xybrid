@@ -37,7 +37,7 @@
 //! [`FfiPipelineExecutionResult`]: xybrid_sdk::FfiPipelineExecutionResult
 //! [`FfiStageExecutionResult`]: xybrid_sdk::FfiStageExecutionResult
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::{self, Receiver, SyncSender};
 use std::sync::{Arc, Mutex};
 
@@ -1872,6 +1872,148 @@ impl XybridModel {
 }
 
 // ============================================================================
+// Model cache management
+// ============================================================================
+
+/// Logical storage area containing a cached model entry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CacheEntryLocation {
+    Registry,
+    Extracted,
+    HuggingFace,
+    HuggingFaceHub,
+}
+
+impl From<sdk::CacheEntryLocation> for CacheEntryLocation {
+    fn from(location: sdk::CacheEntryLocation) -> Self {
+        match location {
+            sdk::CacheEntryLocation::Registry => Self::Registry,
+            sdk::CacheEntryLocation::Extracted => Self::Extracted,
+            sdk::CacheEntryLocation::HuggingFace => Self::HuggingFace,
+            sdk::CacheEntryLocation::HuggingFaceHub => Self::HuggingFaceHub,
+        }
+    }
+}
+
+/// One model entry occupying managed cache storage.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CacheEntry {
+    pub model_id: String,
+    pub location: CacheEntryLocation,
+    pub path: String,
+    pub size_bytes: u64,
+}
+
+impl From<sdk::CacheEntryInfo> for CacheEntry {
+    fn from(entry: sdk::CacheEntryInfo) -> Self {
+        Self {
+            model_id: entry.model_id,
+            location: entry.location.into(),
+            path: entry.path.to_string_lossy().into_owned(),
+            size_bytes: entry.size_bytes,
+        }
+    }
+}
+
+/// Aggregate model-cache storage status.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CacheStatus {
+    pub total_size_bytes: u64,
+    /// Number of physical entries across all managed cache locations.
+    pub entry_count: u32,
+    /// Number of distinct model identifiers represented by those entries.
+    pub model_count: u32,
+    /// Number of models ready in the runtime extraction cache.
+    pub extracted_model_count: u32,
+    pub cache_root: String,
+}
+
+fn open_cache() -> Result<sdk::CacheManager> {
+    sdk::CacheManager::new().map_err(Error::from)
+}
+
+fn cache_entries_from(manager: &sdk::CacheManager) -> Result<Vec<CacheEntry>> {
+    manager
+        .cache_entries()
+        .map(|entries| entries.into_iter().map(Into::into).collect())
+        .map_err(Error::from)
+}
+
+fn cache_status_from(manager: &sdk::CacheManager) -> Result<CacheStatus> {
+    let entries = cache_entries_from(manager)?;
+    let model_count = entries
+        .iter()
+        .map(|entry| entry.model_id.as_str())
+        .collect::<HashSet<_>>()
+        .len();
+    let extracted_model_count = manager.list_extracted_model_ids().len();
+
+    Ok(CacheStatus {
+        total_size_bytes: entries.iter().map(|entry| entry.size_bytes).sum(),
+        entry_count: u32::try_from(entries.len()).unwrap_or(u32::MAX),
+        model_count: u32::try_from(model_count).unwrap_or(u32::MAX),
+        extracted_model_count: u32::try_from(extracted_model_count).unwrap_or(u32::MAX),
+        cache_root: manager.cache_root().to_string_lossy().into_owned(),
+    })
+}
+
+/// Returns aggregate storage usage across every managed model-cache location.
+pub fn cache_status() -> Result<CacheStatus> {
+    cache_status_from(&open_cache()?)
+}
+
+/// Lists every physical model entry occupying managed cache storage.
+pub fn cache_entries() -> Result<Vec<CacheEntry>> {
+    cache_entries_from(&open_cache()?)
+}
+
+/// Returns whether a model occupies any managed cache entry.
+pub fn cache_is_model_cached(model_id: String) -> Result<bool> {
+    open_cache()?
+        .is_model_cached(&model_id)
+        .map_err(Error::from)
+}
+
+/// Resolves the preferred local cache path for a model, if present.
+pub fn cache_model_path(model_id: String) -> Result<Option<String>> {
+    open_cache()?
+        .cached_model_path(&model_id)
+        .map(|path| path.map(|value| value.to_string_lossy().into_owned()))
+        .map_err(Error::from)
+}
+
+/// Lists model IDs that are extracted, validated, and ready to run offline.
+pub fn cache_list_extracted_model_ids() -> Result<Vec<String>> {
+    Ok(open_cache()?.list_extracted_model_ids())
+}
+
+/// Reserved for expired-entry cleanup once retention metadata is persisted.
+///
+/// # Errors
+/// Returns `ConfigError`: the SDK currently classifies all scanned entries as
+/// local and cannot identify expired downloads after a restart. Use explicit
+/// per-model eviction instead. This operation does not change the cache.
+pub fn cache_clean_expired() -> Result<u32> {
+    Err(Error::ConfigError {
+        message: "cache expiry is unavailable until retention metadata is persisted; use per-model eviction instead".into(),
+    })
+}
+
+/// Removes every managed cache entry for one model.
+///
+/// Do not call concurrently with a load of the same model.
+pub fn cache_remove_model(model_id: String) -> Result<u32> {
+    open_cache()?.clear_model(&model_id).map_err(Error::from)
+}
+
+/// Clears all managed model-cache storage.
+///
+/// Do not call concurrently with any model load.
+pub fn cache_clear() -> Result<u32> {
+    open_cache()?.clear().map_err(Error::from)
+}
+
+// ============================================================================
 // Process-global init
 // ============================================================================
 
@@ -2321,6 +2463,91 @@ impl BundleHandle {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cache_status_counts_physical_entries_and_distinct_models() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let cache_root = temp.path().join("cache");
+        let models = cache_root.join("models");
+        let registry_entry = models.join("model-a");
+        let extracted_entry = cache_root.join("extracted").join("model-a");
+        std::fs::create_dir_all(&registry_entry).unwrap();
+        std::fs::create_dir_all(&extracted_entry).unwrap();
+        std::fs::write(registry_entry.join("bundle.xyb"), b"abc").unwrap();
+        std::fs::write(extracted_entry.join("model.bin"), b"12345").unwrap();
+        let manager = sdk::CacheManager::with_dir(models).unwrap();
+
+        let status = cache_status_from(&manager).unwrap();
+
+        assert_eq!(status.total_size_bytes, 8);
+        assert_eq!(status.entry_count, 2);
+        assert_eq!(status.model_count, 1);
+        assert_eq!(status.extracted_model_count, 0);
+        assert_eq!(status.cache_root, cache_root.to_string_lossy());
+    }
+
+    #[test]
+    fn cache_ready_count_tracks_validation_not_physical_directories() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let root = temp.path().join("cache");
+        let extracted = root.join("extracted/ready");
+        std::fs::create_dir_all(&extracted).unwrap();
+        std::fs::write(
+            extracted.join("model_metadata.json"),
+            r#"{
+            "model_id":"ready", "version":"1.0",
+            "execution_template":{"type":"Onnx","model_file":"model.onnx"},
+            "preprocessing":[],"postprocessing":[],"files":["model.onnx"],"metadata":{}
+        }"#,
+        )
+        .unwrap();
+        let manager = sdk::CacheManager::with_dir(root.join("models")).unwrap();
+        assert_eq!(
+            cache_status_from(&manager).unwrap().extracted_model_count,
+            0
+        );
+
+        std::fs::write(extracted.join("model.onnx"), b"model").unwrap();
+        assert_eq!(manager.list_extracted_model_ids(), vec!["ready"]);
+        assert_eq!(
+            cache_status_from(&manager).unwrap().extracted_model_count,
+            1
+        );
+
+        std::fs::remove_file(extracted.join("model.onnx")).unwrap();
+        let status = cache_status_from(&manager).unwrap();
+        assert_eq!(status.extracted_model_count, 0);
+        assert_eq!(status.entry_count, 1);
+        assert!(status.total_size_bytes > 0);
+    }
+
+    #[test]
+    fn cache_expiry_reports_unavailable_instead_of_successful_noop() {
+        assert!(matches!(
+            cache_clean_expired(),
+            Err(Error::ConfigError { .. })
+        ));
+    }
+
+    #[test]
+    fn cache_entry_conversion_preserves_location_and_path() {
+        let entry = sdk::CacheEntryInfo {
+            model_id: "owner/repo".into(),
+            location: sdk::CacheEntryLocation::HuggingFace,
+            path: std::path::PathBuf::from("cache/hf/repo"),
+            size_bytes: 42,
+        };
+
+        assert_eq!(
+            CacheEntry::from(entry),
+            CacheEntry {
+                model_id: "owner/repo".into(),
+                location: CacheEntryLocation::HuggingFace,
+                path: "cache/hf/repo".into(),
+                size_bytes: 42,
+            }
+        );
+    }
 
     #[test]
     fn error_code_is_stable() {

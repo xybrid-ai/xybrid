@@ -141,22 +141,66 @@ xybrid cache clear
 
 ### Programmatic
 
+Every mobile and desktop binding exposes the same storage-management contract:
+
+- aggregate bytes plus physical-entry and distinct-model counts;
+- one entry per managed registry, extraction, direct Hugging Face, or Hub-cache location;
+- a preferred local path and a separate list of extracted, ready-to-run IDs;
+- targeted model deletion and full clearing.
+
+One model may have multiple physical entries. For example, its downloaded
+bundle and extracted runtime directory both consume storage and are reported
+separately. `hasCachedModelData` checks for any such entry; it does not promise
+that the model is already extracted. Deletion methods return the number of
+physical roots removed and must not run concurrently with model loading.
+
+```dart
+final status = await Xybrid.modelCacheStatus();
+for (final entry in await Xybrid.modelCacheEntries()) {
+  print('${entry.modelId}: ${entry.sizeBytes} bytes at ${entry.path}');
+}
+
+// Remove one model without disturbing the rest of the cache.
+final removed = await Xybrid.removeCachedModel('kokoro-82m');
+```
+
+The equivalent entry points are `Xybrid.modelCacheStatus()` on Kotlin and
+Swift, and `XybridClient.ModelCacheStatus()` in Unity C#. Python exports the
+generated snake-case functions directly (`cache_status`, `cache_entries`,
+`cache_remove_model`, and `cache_clear`).
+
+Flutter's new cache operations return Futures and run filesystem work off the
+UI isolate. Other bindings expose synchronous calls; use a worker for large
+cache scans or deletions.
+
+`cleanExpiredModelCache` currently reports an error without changing the cache.
+The SDK does not yet persist retention metadata and cannot safely distinguish
+expired downloads from local models after a restart. Use targeted eviction in
+the meantime; file age alone is not a reason to delete an offline model.
+
+For Rust callers, `CacheManager` exposes the underlying operations:
+
 ```rust
 use xybrid_sdk::CacheManager;
 
-let cache = CacheManager::new()?;
+let mut cache = CacheManager::new()?;
 
 // Check if a model is cached
 if cache.is_cached("kokoro-82m") {
     println!("Model path: {:?}", cache.get_cached_path("kokoro-82m"));
 }
 
-// Get cache statistics
+// Get legacy registry-bundle statistics
 let status = cache.status()?;
-println!("Models: {}, Size: {} MB", status.model_count, status.size_bytes / 1_000_000);
+println!("Models: {}, Size: {} MB", status.total_models, status.total_size_bytes / 1_000_000);
 
-// Remove expired cloud models
-cache.clean_expired()?;
+// Inspect every managed physical cache entry
+for entry in cache.cache_entries()? {
+    println!("{}: {} bytes", entry.model_id, entry.size_bytes);
+}
+
+// Remove one model across all managed cache locations
+cache.clear_model("kokoro-82m")?;
 
 // Clear everything
 cache.clear()?;

@@ -114,6 +114,80 @@ namespace Xybrid
             }
         }
 
+        /// <summary>Gets aggregate storage usage across all managed model-cache areas.</summary>
+        public static XybridBolt.XybridCacheStatus ModelCacheStatus()
+        {
+            return CacheCall(() => XybridBolt.XybridBolt.CacheStatus());
+        }
+
+        /// <summary>
+        /// Lists physical entries across registry, extraction, and Hugging Face caches.
+        /// A model can appear more than once when several managed copies exist.
+        /// </summary>
+        public static XybridBolt.XybridCacheEntry[] ModelCacheEntries()
+        {
+            return CacheCall(() => XybridBolt.XybridBolt.CacheEntries());
+        }
+
+        /// <summary>Returns whether a model occupies any managed cache entry.</summary>
+        public static bool HasCachedModelData(string modelId)
+        {
+            return CacheCall(() => XybridBolt.XybridBolt.CacheIsModelCached(modelId));
+        }
+
+        /// <summary>
+        /// Returns a preferred local path for a model, or null when absent.
+        /// Presence does not necessarily mean the model is extracted and ready.
+        /// </summary>
+        public static string CachedModelPath(string modelId)
+        {
+            return CacheCall(() => XybridBolt.XybridBolt.CacheModelPath(modelId));
+        }
+
+        /// <summary>Lists model IDs extracted, validated, and ready to run offline.</summary>
+        public static string[] ExtractedModelIds()
+        {
+            return CacheCall(() => XybridBolt.XybridBolt.CacheListExtractedModelIds());
+        }
+
+        /// <summary>Throws until persistent retention is supported. Use per-model eviction.</summary>
+        public static uint CleanExpiredModelCache()
+        {
+            return CacheCall(() => XybridBolt.XybridBolt.CacheCleanExpired());
+        }
+
+        /// <summary>
+        /// Removes every managed cache entry for one model. Do not call this while
+        /// the same model is loading.
+        /// </summary>
+        public static uint RemoveCachedModel(string modelId)
+        {
+            return CacheCall(() => XybridBolt.XybridBolt.CacheRemoveModel(modelId));
+        }
+
+        /// <summary>
+        /// Clears all managed model-cache storage. Do not call this while any model
+        /// is loading.
+        /// </summary>
+        public static uint ClearModelCache()
+        {
+            return CacheCall(() => XybridBolt.XybridBolt.CacheClear());
+        }
+
+        private static T CacheCall<T>(Func<T> call)
+        {
+            EnsureInitialized();
+            try
+            {
+                return call();
+            }
+            catch (Exception ex) when (
+                ex is XybridBolt.XybridErrorException || ex is XybridBolt.BoltException)
+            {
+                throw BoltErrors.Translate(ex);
+            }
+        }
+
         /// <summary>
         /// Convenience method to load a model from the registry.
         /// </summary>

@@ -82,7 +82,40 @@ classes:
       isModelCached:
         params: [{ name: modelId, type: String }]
         return: bool
+        notes: "Dart compatibility API: true only when a registry model is extracted and ready to load. Use hasCachedModelData for any managed cache presence."
         status: { dart: implemented, kotlin: planned, swift: planned, csharp: planned }
+      modelCacheStatus:
+        return: CacheStatus
+        notes: "All new cache operations return Futures on Dart; filesystem work runs on the FRB worker pool. Other bindings are synchronous."
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+      modelCacheEntries:
+        return: "List<CacheEntry>"
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+      hasCachedModelData:
+        params: [{ name: modelId, type: String }]
+        return: bool
+        notes: "True when any registry, extracted, direct Hugging Face, or owned Hub-cache entry exists; this does not imply runtime readiness."
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+      cachedModelPath:
+        params: [{ name: modelId, type: String }]
+        return: "String?"
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+      extractedModelIds:
+        return: "List<String>"
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+      cleanExpiredModelCache:
+        return: int
+        notes: "Reserved API: currently reports ConfigError without modifying storage because the SDK does not persist retention metadata. Use explicit per-model eviction."
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+      removeCachedModel:
+        params: [{ name: modelId, type: String }]
+        return: int
+        notes: "Returns the number of physical cache roots removed. Must not run concurrently with a load of the same model."
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+      clearModelCache:
+        return: int
+        notes: "Returns the number of physical cache roots removed. Must not run concurrently with model loading."
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
 
   # -------------------------------------------------------------------
   # 2. XybridModelLoader

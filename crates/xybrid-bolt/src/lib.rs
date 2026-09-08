@@ -787,6 +787,72 @@ impl From<facade::VoiceInfo> for XybridVoiceInfo {
 }
 
 // ============================================================================
+// Model cache management
+// ============================================================================
+
+#[data]
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum XybridCacheEntryLocation {
+    Registry,
+    Extracted,
+    HuggingFace,
+    HuggingFaceHub,
+}
+
+impl From<facade::CacheEntryLocation> for XybridCacheEntryLocation {
+    fn from(location: facade::CacheEntryLocation) -> Self {
+        match location {
+            facade::CacheEntryLocation::Registry => Self::Registry,
+            facade::CacheEntryLocation::Extracted => Self::Extracted,
+            facade::CacheEntryLocation::HuggingFace => Self::HuggingFace,
+            facade::CacheEntryLocation::HuggingFaceHub => Self::HuggingFaceHub,
+        }
+    }
+}
+
+#[data]
+#[derive(Clone)]
+pub struct XybridCacheEntry {
+    pub model_id: String,
+    pub location: XybridCacheEntryLocation,
+    pub path: String,
+    pub size_bytes: u64,
+}
+
+impl From<facade::CacheEntry> for XybridCacheEntry {
+    fn from(entry: facade::CacheEntry) -> Self {
+        Self {
+            model_id: entry.model_id,
+            location: entry.location.into(),
+            path: entry.path,
+            size_bytes: entry.size_bytes,
+        }
+    }
+}
+
+#[data]
+#[derive(Clone)]
+pub struct XybridCacheStatus {
+    pub total_size_bytes: u64,
+    pub entry_count: u32,
+    pub model_count: u32,
+    pub extracted_model_count: u32,
+    pub cache_root: String,
+}
+
+impl From<facade::CacheStatus> for XybridCacheStatus {
+    fn from(status: facade::CacheStatus) -> Self {
+        Self {
+            total_size_bytes: status.total_size_bytes,
+            entry_count: status.entry_count,
+            model_count: status.model_count,
+            extracted_model_count: status.extracted_model_count,
+            cache_root: status.cache_root,
+        }
+    }
+}
+
+// ============================================================================
 // Device / platform push API
 // ============================================================================
 
@@ -885,6 +951,62 @@ pub fn init_sdk_cache_dir(cache_dir: String) {
     // `examples/ios/XybridExample` call site that uniffi already exposes
     // under that label.
     facade::init_sdk_cache_dir(cache_dir);
+}
+
+/// Returns aggregate storage usage across every managed model-cache location.
+#[export]
+pub fn cache_status() -> Result<XybridCacheStatus, XybridError> {
+    facade::cache_status()
+        .map(Into::into)
+        .map_err(XybridError::from)
+}
+
+/// Lists every physical model entry occupying managed cache storage.
+#[export]
+pub fn cache_entries() -> Result<Vec<XybridCacheEntry>, XybridError> {
+    facade::cache_entries()
+        .map(|entries| entries.into_iter().map(Into::into).collect())
+        .map_err(XybridError::from)
+}
+
+/// Returns whether a model occupies any managed cache entry.
+#[export]
+pub fn cache_is_model_cached(model_id: String) -> Result<bool, XybridError> {
+    facade::cache_is_model_cached(model_id).map_err(XybridError::from)
+}
+
+/// Resolves the preferred local cache path for a model, if present.
+#[export]
+pub fn cache_model_path(model_id: String) -> Result<Option<String>, XybridError> {
+    facade::cache_model_path(model_id).map_err(XybridError::from)
+}
+
+/// Lists model IDs extracted, validated, and ready to run offline.
+#[export]
+pub fn cache_list_extracted_model_ids() -> Result<Vec<String>, XybridError> {
+    facade::cache_list_extracted_model_ids().map_err(XybridError::from)
+}
+
+/// Reports a configuration error until persistent cache retention is supported.
+#[export]
+pub fn cache_clean_expired() -> Result<u32, XybridError> {
+    facade::cache_clean_expired().map_err(XybridError::from)
+}
+
+/// Removes every managed cache entry for one model.
+///
+/// Do not call concurrently with a load of the same model.
+#[export]
+pub fn cache_remove_model(model_id: String) -> Result<u32, XybridError> {
+    facade::cache_remove_model(model_id).map_err(XybridError::from)
+}
+
+/// Clears all managed model-cache storage.
+///
+/// Do not call concurrently with any model load.
+#[export]
+pub fn cache_clear() -> Result<u32, XybridError> {
+    facade::cache_clear().map_err(XybridError::from)
 }
 
 #[export]
@@ -1603,6 +1725,33 @@ impl XybridBundle {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cache_records_cross_from_facade_without_losing_storage_semantics() {
+        let entry = XybridCacheEntry::from(facade::CacheEntry {
+            model_id: "owner/repo".into(),
+            location: facade::CacheEntryLocation::HuggingFace,
+            path: "/cache/hf/repo".into(),
+            size_bytes: 2048,
+        });
+        let status = XybridCacheStatus::from(facade::CacheStatus {
+            total_size_bytes: 2048,
+            entry_count: 1,
+            model_count: 1,
+            extracted_model_count: 0,
+            cache_root: "/cache".into(),
+        });
+
+        assert_eq!(entry.model_id, "owner/repo");
+        assert!(entry.location == XybridCacheEntryLocation::HuggingFace);
+        assert_eq!(entry.path, "/cache/hf/repo");
+        assert_eq!(entry.size_bytes, 2048);
+        assert_eq!(status.total_size_bytes, 2048);
+        assert_eq!(status.entry_count, 1);
+        assert_eq!(status.model_count, 1);
+        assert_eq!(status.extracted_model_count, 0);
+        assert_eq!(status.cache_root, "/cache");
+    }
 
     #[test]
     fn envelope_roundtrips_through_facade() {
