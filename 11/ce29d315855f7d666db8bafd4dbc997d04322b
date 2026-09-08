@@ -1,0 +1,69 @@
+bindings/flutter/pubspec.yaml
+  s_f01a26c94cc42f::t_ee331cffce07f7 3
+bindings/react-native/android/build.gradle
+  s_f01a26c94cc42f::t_ee331cffce07f7 94
+bindings/kotlin/build.gradle.kts
+  s_f01a26c94cc42f::t_ee331cffce07f7 8
+bindings/python/pyproject.toml
+  s_f01a26c94cc42f::t_ee331cffce07f7 7
+Package.swift
+  s_f01a26c94cc42f::t_ee331cffce07f7 40
+crates/xybrid-sdk/Cargo.toml
+  s_5a366d2aebc80b::t_9db969551dd7ef 17,41,46
+crates/whisper-cpp-sys/Cargo.toml
+  s_5a366d2aebc80b::t_9db969551dd7ef 42
+crates/xybrid/Cargo.toml
+  s_5a366d2aebc80b::t_9db969551dd7ef 17
+bindings/flutter/CHANGELOG.md
+  s_5a366d2aebc80b::t_988ab091436701 3-6,9-18
+  s_5a366d2aebc80b::t_be4f60e7cedcc1 7-8
+crates/xybrid-core/Cargo.toml
+  s_5a366d2aebc80b::t_9db969551dd7ef 28-29,32
+bindings/unity/package.json
+  s_f01a26c94cc42f::t_ee331cffce07f7 3
+crates/xybrid-llama/Cargo.toml
+  s_5a366d2aebc80b::t_9db969551dd7ef 24
+bindings/react-native/package.json
+  s_f01a26c94cc42f::t_ee331cffce07f7 3
+bindings/apple/XybridFFI-Info.plist
+  s_f01a26c94cc42f::t_ee331cffce07f7 10,12
+Cargo.toml
+  s_f01a26c94cc42f::t_ee331cffce07f7 21
+crates/xybrid-whisper/Cargo.toml
+  s_5a366d2aebc80b::t_9db969551dd7ef 23
+CHANGELOG.md
+  s_5a366d2aebc80b::t_988ab091436701 10-19,21-39,46-50
+  s_5a366d2aebc80b::t_be4f60e7cedcc1 20
+bindings/flutter/rust/Cargo.toml
+  s_f01a26c94cc42f::t_ee331cffce07f7 3
+Cargo.lock
+  s_5a366d2aebc80b::t_37008f5a1173a8 392,465,744,867,869,992,1221,1223,1231,1233,1240,1242,1344,1478,1661,1713,1715,1725,1727,1730,1800,1893,2290,2292,2316,2469,2471,2494,2515,2720,2722,2756,2785,2787,2869,2871,2980,2982,3140,3142,3210-3219,3222,3224,3676,3687,3756,3758,3766,3768,3776,3778,3789,3791,3888,3901,3926,3928,4403,4448,4543,4545,4630,4672,4683,4832,4834,4945,4947,5097,5204,5206,5275,5280,5282,5633,5635,5654,5656,5726,5728,5772,5774,5785,5787,5795,5797,5805,5807,5812,5818,5820,5840,5842,6238,6252,6259,6288,6358,6368,6377,6390,6399,6418,6426,6435,6444,6456,6610,6689,6691,6698,6700
+bindings/python/xybrid/_bolt/__init__.py
+  s_5a366d2aebc80b::t_54d54483e1ee92 2160
+bindings/web/package.json
+  s_5a366d2aebc80b::t_92d5f185bc5584 3
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "11ce29d315855f7d666db8bafd4dbc997d04322b",
+  "prompts": {},
+  "sessions": {
+    "s_5a366d2aebc80b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a08180-cf1d-7081-bf16-71eda54c5036",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
+    },
+    "s_f01a26c94cc42f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "01a08180-cf1d-7081-bf16-71eda54c5036",
+        "model": "unknown"
+      },
+      "human_author": "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
+    }
+  }
+}
