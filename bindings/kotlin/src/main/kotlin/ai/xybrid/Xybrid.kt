@@ -22,7 +22,10 @@ import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.withContext
@@ -319,6 +322,11 @@ typealias Model = XybridModel
  */
 fun XybridModel.run(envelope: XybridEnvelope): XybridResult = this.run(envelope, null)
 
+/** Open a live microphone transcription session with mobile-safe defaults. */
+fun XybridModel.liveAsr(
+    config: XybridAsrStreamConfig = AsrStreamConfigs.default(),
+): XybridAsrStreamSession = stream(config)
+
 // -- Async (suspend) conveniences --
 //
 // bolt's load/run are synchronous + blocking. These suspend wrappers restore the
@@ -413,6 +421,43 @@ fun XybridModel.streamTokens(
     }
 }.flowOn(Dispatchers.IO)
 
+/** Queue microphone PCM off the caller's thread. */
+suspend fun XybridAsrStreamSession.feedAsync(samples: FloatArray) =
+    withContext(Dispatchers.IO) { this@feedAsync.feed(samples) }
+
+/** Drain queued audio and return the final transcript off the caller's thread. */
+suspend fun XybridAsrStreamSession.flushAsync(): XybridAsrTranscriptionResult =
+    withContext(Dispatchers.IO) { this@flushAsync.flush() }
+
+/** Reset transcript state without reloading the ASR model. */
+suspend fun XybridAsrStreamSession.resetAsync() =
+    withContext(Dispatchers.IO) { this@resetAsync.reset() }
+
+/**
+ * Pull rolling live-ASR transcripts as a cold [Flow].
+ *
+ * The blocking native pull runs on [Dispatchers.IO]. Cancelling the collector
+ * immediately stops the native worker, which unblocks that pull without
+ * leaking a session thread.
+ */
+fun XybridAsrStreamSession.partials(): Flow<XybridAsrPartialResult> = callbackFlow {
+    val reader = launch(Dispatchers.IO) {
+        try {
+            while (true) {
+                val partial = next() ?: break
+                send(partial)
+            }
+            close()
+        } catch (error: Throwable) {
+            close(error)
+        }
+    }
+    awaitClose {
+        runCatching { stop() }
+        reader.cancel()
+    }
+}
+
 /** The result of a model inference operation. */
 typealias Result = XybridResult
 
@@ -437,6 +482,32 @@ typealias GenerationConfig = XybridGenerationConfig
  * turn's [XybridStreamToken.toolCalls] and [XybridStreamToken.rawText].
  */
 typealias StreamToken = XybridStreamToken
+
+/** Live ASR configuration and result types. */
+typealias AsrStreamConfig = XybridAsrStreamConfig
+typealias AsrPartialResult = XybridAsrPartialResult
+typealias AsrTranscriptionResult = XybridAsrTranscriptionResult
+typealias AsrStreamSession = XybridAsrStreamSession
+
+/** Factories for live ASR configuration. */
+object AsrStreamConfigs {
+    /** Build a live ASR config for mono 16 kHz PCM. */
+    @JvmStatic
+    fun default(
+        enableVad: Boolean = false,
+        vadThreshold: Float = 0.5f,
+        vadModelDir: String? = null,
+        language: String? = null,
+        audioCtx: UInt? = null,
+    ) = XybridAsrStreamConfig(
+        sampleRate = 16_000u,
+        enableVad = enableVad,
+        vadThreshold = vadThreshold,
+        vadModelDir = vadModelDir,
+        language = language,
+        audioCtx = audioCtx,
+    )
+}
 
 // -- GenerationConfig Presets --
 

@@ -55,8 +55,9 @@ class XybridStreamSession {
 
   /// Partial transcripts, delivered as rolling-window chunks complete.
   ///
-  /// Listen to this **before** calling [feed]; audio fed before the first
-  /// listener attaches is not reported. The stream is single-subscription.
+  /// The stream is single-subscription. Cumulative partials coalesce to the
+  /// latest value while no listener is ready. Backend failures are delivered
+  /// as stream errors, not mistaken for successful completion.
   Stream<FfiPartialResult> get partials => _partials ??= _inner.subscribe();
 
   /// Feed PCM f32 mono 16 kHz samples. Cheap and non-blocking — inference
@@ -68,7 +69,7 @@ class XybridStreamSession {
 
   /// Finalize the stream and return the complete transcript.
   ///
-  /// After this the session is finalized; further [feed] calls throw.
+  /// After this utterance is finalized, call [reset] before feeding again.
   Future<String> flush() => _inner.flush();
 
   /// Reset the session to transcribe fresh audio without reloading the model.

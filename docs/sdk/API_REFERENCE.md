@@ -445,6 +445,9 @@ class XybridModel {
     config: GenerationConfig? = null
   ): XybridResult
 
+  // Live ASR — feed mono 16 kHz f32 PCM and collect partials as a Flow.
+  fun liveAsr(config: AsrStreamConfig = AsrStreamConfigs.default()): AsrStreamSession
+
   // Lifecycle — `unload()` frees model memory (resets the executor, drops the
   // ORT / GGUF session). Sync on the model; `*Async` variants hop to Dispatchers.IO.
   fun warmup()
@@ -489,6 +492,7 @@ inference's model write lock.
 | `defaultGenerationConfig()` | — | ✅ | ✅ | ✅ |
 | `voice()` | — | ✅ | ✅ | ✅ |
 | `run()` | ✅ | ✅ | ✅ | ✅ |
+| Live ASR session | ✅ | ✅ | ✅ | ✅ |
 | `runWithOptions()` / `run_with_options()` | Rust ✅ | planned | planned | planned |
 | `runWithContext()` | ✅ | — | — | ✅ |
 | `runWithContextOptions()` / `run_with_context_options()` | Rust ✅ | planned | planned | planned |
@@ -518,6 +522,25 @@ where the bolt bindings must not carry a closure across the FFI boundary.
 `XybridResult.executionTarget` reports whether an answer that already ran came
 from the device or the cloud; cloud fallback keeps the model id identical on
 both legs, so it is the only way to tell them apart.
+
+### Live ASR session lifecycle
+
+Live ASR is distinct from LLM token streaming: it accepts raw microphone PCM
+and emits cumulative speech transcripts. Audio must be mono, 16 kHz `f32`.
+`feed` only queues audio; inference runs on the session worker. Consume partials
+through Dart's stream, Swift's `AsyncThrowingStream`, Kotlin's `Flow`, or
+Unity's `NextAsync`.
+
+Partials are cumulative and latest-value coalesced: if a UI falls behind, it
+receives the newest transcript rather than retaining an unbounded history of
+stale intermediate copies.
+
+`flush` drains queued audio and completes the current utterance. Call `reset`
+before feeding a new utterance; the loaded model is retained. Call `stop` (or
+cancel/dispose the platform wrapper) when the session is no longer needed.
+Input is bounded to ten seconds of conventional 20 ms microphone frames while
+the worker is busy, so an application that permanently outruns inference gets
+a typed error instead of unbounded memory growth.
 
 ---
 

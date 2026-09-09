@@ -497,6 +497,114 @@ public struct XybridStreamEvent: Hashable, Equatable, Sendable {
     }
 }
 
+/// Configuration for a live, rolling-window ASR session.
+public struct XybridAsrStreamConfig: Hashable, Equatable, Sendable {
+    /// PCM sample rate. Must currently be 16 kHz.
+    public var sampleRate: UInt32
+    public var enableVad: Bool
+    public var vadThreshold: Float
+    public var vadModelDir: String?
+    /// Optional language hint; `None` preserves the model bundle's behavior.
+    public var language: String?
+    /// Optional Whisper encoder context override in mel frames.
+    public var audioCtx: UInt32?
+
+    public init(
+        sampleRate: UInt32,
+        enableVad: Bool,
+        vadThreshold: Float,
+        vadModelDir: String?,
+        language: String?,
+        audioCtx: UInt32?
+    ) {
+        self.sampleRate = sampleRate
+        self.enableVad = enableVad
+        self.vadThreshold = vadThreshold
+        self.vadModelDir = vadModelDir
+        self.language = language
+        self.audioCtx = audioCtx
+    }
+
+    @inlinable static func decode(from reader: inout WireReader) -> XybridAsrStreamConfig {
+        XybridAsrStreamConfig(
+            sampleRate: reader.readU32(),
+            enableVad: reader.readBool(),
+            vadThreshold: reader.readF32(),
+            vadModelDir: reader.readOptional { reader in reader.readString() },
+            language: reader.readOptional { reader in reader.readString() },
+            audioCtx: reader.readOptional { reader in reader.readU32() }
+        )
+    }
+
+    @inlinable func encode(to writer: inout WireWriter) {
+        writer.writeU32(self.sampleRate)
+        writer.writeBool(self.enableVad)
+        writer.writeF32(self.vadThreshold)
+        writer.writeOptional(self.vadModelDir) { writer, boltffiValue0 in writer.writeString(boltffiValue0) }
+        writer.writeOptional(self.language) { writer, boltffiValue0 in writer.writeString(boltffiValue0) }
+        writer.writeOptional(self.audioCtx) { writer, boltffiValue0 in writer.writeU32(boltffiValue0) }
+    }
+}
+
+/// A rolling partial transcript from live microphone audio.
+public struct XybridAsrPartialResult: Hashable, Equatable, Sendable {
+    public var text: String
+    public var isStable: Bool
+    public var chunkIndex: UInt64
+    public var audioDurationMs: UInt64
+
+    public init(
+        text: String,
+        isStable: Bool,
+        chunkIndex: UInt64,
+        audioDurationMs: UInt64
+    ) {
+        self.text = text
+        self.isStable = isStable
+        self.chunkIndex = chunkIndex
+        self.audioDurationMs = audioDurationMs
+    }
+
+    @inlinable static func decode(from reader: inout WireReader) -> XybridAsrPartialResult {
+        XybridAsrPartialResult(
+            text: reader.readString(),
+            isStable: reader.readBool(),
+            chunkIndex: reader.readU64(),
+            audioDurationMs: reader.readU64()
+        )
+    }
+
+    @inlinable func encode(to writer: inout WireWriter) {
+        writer.writeString(self.text)
+        writer.writeBool(self.isStable)
+        writer.writeU64(self.chunkIndex)
+        writer.writeU64(self.audioDurationMs)
+    }
+}
+
+/// Final transcript returned when a live ASR session is flushed.
+public struct XybridAsrTranscriptionResult: Hashable, Equatable, Sendable {
+    public var text: String
+    public var durationMs: UInt64
+    public var chunksProcessed: UInt64
+
+    public init(text: String, durationMs: UInt64, chunksProcessed: UInt64) {
+        self.text = text
+        self.durationMs = durationMs
+        self.chunksProcessed = chunksProcessed
+    }
+
+    @inlinable static func decode(from reader: inout WireReader) -> XybridAsrTranscriptionResult {
+        XybridAsrTranscriptionResult(text: reader.readString(), durationMs: reader.readU64(), chunksProcessed: reader.readU64())
+    }
+
+    @inlinable func encode(to writer: inout WireWriter) {
+        writer.writeString(self.text)
+        writer.writeU64(self.durationMs)
+        writer.writeU64(self.chunksProcessed)
+    }
+}
+
 public struct XybridVoiceInfo: Hashable, Equatable, Sendable {
     public var id: String
     public var name: String
@@ -1080,6 +1188,25 @@ public final class XybridModel {
         }
     }
 
+    /// Open a live ASR session for mono 16 kHz PCM microphone audio.
+    public func stream(config: XybridAsrStreamConfig) throws -> XybridAsrStreamSession {
+        let boltffiConfigBytes = boltffiEncode { boltffiConfigWriter in config.encode(to: &boltffiConfigWriter) }
+        return try boltffiConfigBytes.withUnsafeBufferPointer { boltffiConfigBuffer in
+            var boltffiResult: UInt64 = UInt64()
+            let boltffiError = boltffi_method_class_xybrid_bolt_xybrid_model_stream(
+                self.handle,
+                boltffiConfigBuffer.baseAddress!,
+                UInt(boltffiConfigBuffer.count),
+                &boltffiResult
+            )
+            if boltffiError.ptr != nil || Int(boltffiError.len) != 0 {
+                defer { boltffi_free_buf(boltffiError) }
+                throw boltffiDecodeOwnedBuf(boltffiError.ptr, Int(boltffiError.len)) { boltffiErrorReader in XybridError.decode(from: &boltffiErrorReader) }
+            }
+            return XybridAsrStreamSession(handle: boltffiResult)
+        }
+    }
+
     /// Run inference, optionally with [`XybridRunOptions`] (generation config,
     /// abort signals, cloud-fallback). Pass `None` for the model's defaults.
     ///
@@ -1232,6 +1359,79 @@ public final class XybridModel {
 
     public func unload() throws {
         let boltffiError = boltffi_method_class_xybrid_bolt_xybrid_model_unload(self.handle)
+        if boltffiError.ptr != nil || Int(boltffiError.len) != 0 {
+            defer { boltffi_free_buf(boltffiError) }
+            throw boltffiDecodeOwnedBuf(boltffiError.ptr, Int(boltffiError.len)) { boltffiErrorReader in XybridError.decode(from: &boltffiErrorReader) }
+        }
+    }
+}
+
+public final class XybridAsrStreamSession {
+    @usableFromInline let handle: UInt64
+
+    @usableFromInline init(handle: UInt64) {
+        self.handle = handle
+    }
+
+    deinit {
+        boltffi_release_class_xybrid_bolt_xybrid_asr_stream_session(handle)
+    }
+
+    /// Queue mono 16 kHz PCM f32 samples.
+    public func feed(samples: [Float]) throws {
+        try samples.withUnsafeBufferPointer { boltffiSamplesBuffer in
+            let boltffiError = boltffi_method_class_xybrid_bolt_xybrid_asr_stream_session_feed(self.handle, boltffiSamplesBuffer.baseAddress, UInt(boltffiSamplesBuffer.count))
+            if boltffiError.ptr != nil || Int(boltffiError.len) != 0 {
+                defer { boltffi_free_buf(boltffiError) }
+                throw boltffiDecodeOwnedBuf(boltffiError.ptr, Int(boltffiError.len)) { boltffiErrorReader in XybridError.decode(from: &boltffiErrorReader) }
+            }
+        }
+    }
+
+    /// Block until the next distinct rolling transcript is available.
+    ///
+    /// Returns `None` once the session is closed. Flushing finalizes the
+    /// current utterance but keeps the session available for `reset` and
+    /// reuse. Platform wrappers expose this pull operation as
+    /// `AsyncThrowingStream` / `Flow` where appropriate.
+    public func next() throws -> XybridAsrPartialResult? {
+        var boltffiResult: FfiBuf_u8 = FfiBuf_u8()
+        let boltffiError = boltffi_method_class_xybrid_bolt_xybrid_asr_stream_session_next(self.handle, &boltffiResult)
+        if boltffiError.ptr != nil || Int(boltffiError.len) != 0 {
+            defer { boltffi_free_buf(boltffiError) }
+            throw boltffiDecodeOwnedBuf(boltffiError.ptr, Int(boltffiError.len)) { boltffiErrorReader in XybridError.decode(from: &boltffiErrorReader) }
+        }
+        defer { boltffi_free_buf(boltffiResult) }
+        return boltffiDecodeOwnedBuf(boltffiResult.ptr, Int(boltffiResult.len)) { boltffiReader in boltffiReader.readOptional { boltffiReader in XybridAsrPartialResult.decode(from: &boltffiReader) } }
+    }
+
+    /// Drain queued audio, finalize the session, and return the full transcript.
+    public func flush() throws -> XybridAsrTranscriptionResult {
+        var boltffiResult: FfiBuf_u8 = FfiBuf_u8()
+        let boltffiError = boltffi_method_class_xybrid_bolt_xybrid_asr_stream_session_flush(self.handle, &boltffiResult)
+        if boltffiError.ptr != nil || Int(boltffiError.len) != 0 {
+            defer { boltffi_free_buf(boltffiError) }
+            throw boltffiDecodeOwnedBuf(boltffiError.ptr, Int(boltffiError.len)) { boltffiErrorReader in XybridError.decode(from: &boltffiErrorReader) }
+        }
+        defer { boltffi_free_buf(boltffiResult) }
+        return boltffiDecodeOwnedBuf(boltffiResult.ptr, Int(boltffiResult.len)) { boltffiReader in XybridAsrTranscriptionResult.decode(from: &boltffiReader) }
+    }
+
+    /// Clear audio and transcript state without reloading the model.
+    public func reset() throws {
+        let boltffiError = boltffi_method_class_xybrid_bolt_xybrid_asr_stream_session_reset(self.handle)
+        if boltffiError.ptr != nil || Int(boltffiError.len) != 0 {
+            defer { boltffi_free_buf(boltffiError) }
+            throw boltffiDecodeOwnedBuf(boltffiError.ptr, Int(boltffiError.len)) { boltffiErrorReader in XybridError.decode(from: &boltffiErrorReader) }
+        }
+    }
+
+    /// Stop the worker and end the partial-result stream.
+    ///
+    /// Named `stop` because generated handles already reserve `close` for
+    /// releasing the foreign handle itself.
+    public func stop() throws {
+        let boltffiError = boltffi_method_class_xybrid_bolt_xybrid_asr_stream_session_stop(self.handle)
         if boltffiError.ptr != nil || Int(boltffiError.len) != 0 {
             defer { boltffi_free_buf(boltffiError) }
             throw boltffiDecodeOwnedBuf(boltffiError.ptr, Int(boltffiError.len)) { boltffiErrorReader in XybridError.decode(from: &boltffiErrorReader) }
@@ -1702,6 +1902,30 @@ public func version() -> String {
     let boltffiResult = boltffi_function_xybrid_bolt_version()
     defer { boltffi_free_buf(boltffiResult) }
     return boltffiDecodeOwnedBuf(boltffiResult.ptr, Int(boltffiResult.len)) { boltffiReader in boltffiReader.readString() }
+}
+
+/// Release every idle loaded model's memory; returns how many were released.
+///
+/// Call this from the platform's low-memory hook (`didReceiveMemoryWarning`
+/// on iOS, `onTrimMemory` on Android). Models with a run in flight are
+/// skipped, and a released model reloads itself on next use — no reload call,
+/// no new error to handle.
+public func releaseMemory() -> UInt32 {
+    return boltffi_function_xybrid_bolt_release_memory()
+}
+
+/// Enable or disable automatic model release for subsequent loads.
+///
+/// When enabled, loading a model under device memory pressure first releases
+/// least-recently-used idle models. Off by default; [`release_memory`] works
+/// either way.
+public func setAutoRelease(enabled: Bool) {
+    boltffi_function_xybrid_bolt_set_auto_release(enabled)
+}
+
+/// Whether automatic model release is enabled process-wide.
+public func isAutoReleaseEnabled() -> Bool {
+    return boltffi_function_xybrid_bolt_is_auto_release_enabled()
 }
 
 /// The SDK's default telemetry ingest endpoint (for display alongside a config).

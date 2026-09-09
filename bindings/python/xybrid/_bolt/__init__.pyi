@@ -140,6 +140,34 @@ class XybridStreamEvent:
 
 
 @dataclass(frozen=True, slots=True)
+class XybridAsrStreamConfig:
+    sample_rate: int
+    enable_vad: bool
+    vad_threshold: float
+    vad_model_dir: str | None
+    language: str | None
+    audio_ctx: int | None
+
+
+
+@dataclass(frozen=True, slots=True)
+class XybridAsrPartialResult:
+    text: str
+    is_stable: bool
+    chunk_index: int
+    audio_duration_ms: int
+
+
+
+@dataclass(frozen=True, slots=True)
+class XybridAsrTranscriptionResult:
+    text: str
+    duration_ms: int
+    chunks_processed: int
+
+
+
+@dataclass(frozen=True, slots=True)
 class XybridVoiceInfo:
     id: str
     name: str
@@ -385,6 +413,7 @@ class XybridModel:
     def voices(self) -> list[XybridVoiceInfo]: ...
     def default_voice(self) -> XybridVoiceInfo | None: ...
     def voice(self, voice_id: str) -> XybridVoiceInfo | None: ...
+    def stream(self, config: XybridAsrStreamConfig) -> XybridAsrStreamSession: ...
     def run(self, envelope: XybridEnvelope, options: XybridRunOptions | None) -> XybridResult: ...
     def run_stream(self, envelope: XybridEnvelope, options: XybridRunOptions | None) -> int: ...
     def stream_next(self, stream_id: int) -> XybridStreamEvent: ...
@@ -394,6 +423,22 @@ class XybridModel:
     def run_stream_with_context(self, envelope: XybridEnvelope, context: XybridConversationContext, options: XybridRunOptions | None) -> int: ...
     def warmup(self) -> None: ...
     def unload(self) -> None: ...
+
+
+
+class XybridAsrStreamSession:
+    _handle: int
+
+    def __init__(self) -> None: ...
+
+    @classmethod
+    def _from_handle(cls, handle: int) -> "XybridAsrStreamSession": ...
+    def __del__(self) -> None: ...
+    def feed(self, samples: Sequence[float]) -> None: ...
+    def next(self) -> XybridAsrPartialResult | None: ...
+    def flush(self) -> XybridAsrTranscriptionResult: ...
+    def reset(self) -> None: ...
+    def stop(self) -> None: ...
 
 
 

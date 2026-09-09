@@ -25,8 +25,6 @@
 //!
 //! # Out of scope (deferred to follow-up PRs)
 //!
-//! - **ASR streaming.** [`xybrid_sdk::stream::XybridStream`] is wrapped
-//!   separately in the same follow-up.
 //! - **Pipelines.** `xybrid-sdk` already exports POD-friendly
 //!   [`FfiPipelineExecutionResult`] / [`FfiStageExecutionResult`]; the
 //!   binding crates can re-export those directly. A dedicated facade for
@@ -38,8 +36,9 @@
 //! [`FfiStageExecutionResult`]: xybrid_sdk::FfiStageExecutionResult
 
 use std::collections::HashMap;
-use std::sync::mpsc::{self, Receiver, SyncSender};
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{self, Receiver, SyncSender, TrySendError};
+use std::sync::{Arc, Condvar, Mutex};
 
 use xybrid_sdk as sdk;
 
@@ -1300,6 +1299,420 @@ impl StreamingSession {
     }
 }
 
+// ============================================================================
+// Live ASR streaming
+// ============================================================================
+
+/// Sample rate required by live ASR sessions.
+pub const ASR_SAMPLE_RATE_HZ: u32 = 16_000;
+
+/// Configuration for a live, rolling-window ASR session.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AsrStreamConfig {
+    /// PCM sample rate. Live ASR currently accepts 16 kHz mono audio only.
+    pub sample_rate: u32,
+    /// Enable voice-activity-detection chunking.
+    pub enable_vad: bool,
+    /// VAD probability threshold in the inclusive range `0.0..=1.0`.
+    pub vad_threshold: f32,
+    /// Optional directory containing a custom VAD model.
+    pub vad_model_dir: Option<String>,
+    /// Optional language hint. `None` preserves the model bundle's behavior.
+    pub language: Option<String>,
+    /// Optional Whisper encoder context override in mel frames.
+    pub audio_ctx: Option<u32>,
+}
+
+impl Default for AsrStreamConfig {
+    fn default() -> Self {
+        let sdk = sdk::StreamConfig::default();
+        Self {
+            sample_rate: ASR_SAMPLE_RATE_HZ,
+            enable_vad: sdk.enable_vad,
+            vad_threshold: sdk.vad_threshold,
+            vad_model_dir: sdk.vad_model_dir,
+            language: sdk.language,
+            audio_ctx: sdk.audio_ctx,
+        }
+    }
+}
+
+impl AsrStreamConfig {
+    fn into_sdk(self) -> Result<sdk::StreamConfig> {
+        if self.sample_rate != ASR_SAMPLE_RATE_HZ {
+            return Err(Error::ConfigError {
+                message: format!(
+                    "live ASR sample_rate must be {ASR_SAMPLE_RATE_HZ} Hz, got {}",
+                    self.sample_rate
+                ),
+            });
+        }
+        if !self.vad_threshold.is_finite() || !(0.0..=1.0).contains(&self.vad_threshold) {
+            return Err(Error::ConfigError {
+                message: format!(
+                    "live ASR vad_threshold must be between 0.0 and 1.0, got {}",
+                    self.vad_threshold
+                ),
+            });
+        }
+        if self.vad_model_dir.is_some() && !self.enable_vad {
+            return Err(Error::ConfigError {
+                message: "live ASR vad_model_dir requires enable_vad = true".into(),
+            });
+        }
+
+        Ok(sdk::StreamConfig {
+            enable_vad: self.enable_vad,
+            vad_threshold: self.vad_threshold,
+            vad_model_dir: self.vad_model_dir,
+            language: self.language,
+            audio_ctx: self.audio_ctx,
+        })
+    }
+}
+
+/// A rolling partial transcript emitted by a live ASR session.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AsrPartialResult {
+    /// Best-effort transcript text so far.
+    pub text: String,
+    /// Whether this span is committed and will no longer change.
+    pub is_stable: bool,
+    /// Monotonic chunk sequence number.
+    pub chunk_index: u64,
+    /// Audio covered by this result, in milliseconds.
+    pub audio_duration_ms: u64,
+}
+
+impl From<sdk::PartialResult> for AsrPartialResult {
+    fn from(result: sdk::PartialResult) -> Self {
+        Self {
+            text: result.text,
+            is_stable: result.is_stable,
+            chunk_index: result.chunk_index,
+            audio_duration_ms: result.audio_duration_ms,
+        }
+    }
+}
+
+/// Final transcript returned when a live ASR session is flushed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AsrTranscriptionResult {
+    pub text: String,
+    pub duration_ms: u64,
+    pub chunks_processed: u64,
+}
+
+impl From<sdk::TranscriptionResult> for AsrTranscriptionResult {
+    fn from(result: sdk::TranscriptionResult) -> Self {
+        Self {
+            text: result.text,
+            duration_ms: result.duration_ms,
+            chunks_processed: result.chunks_processed,
+        }
+    }
+}
+
+trait AsrStreamDriver: Send + 'static {
+    fn warmup(&self) -> Result<()>;
+    fn feed(&self, samples: &[f32]) -> Result<Option<AsrPartialResult>>;
+    fn flush(&self) -> Result<AsrTranscriptionResult>;
+    fn reset(&self) -> Result<()>;
+}
+
+impl AsrStreamDriver for sdk::XybridStream {
+    fn warmup(&self) -> Result<()> {
+        sdk::XybridStream::warmup(self).map_err(Error::from)
+    }
+
+    fn feed(&self, samples: &[f32]) -> Result<Option<AsrPartialResult>> {
+        sdk::XybridStream::feed(self, samples)
+            .map(|partial| partial.map(AsrPartialResult::from))
+            .map_err(Error::from)
+    }
+
+    fn flush(&self) -> Result<AsrTranscriptionResult> {
+        sdk::XybridStream::flush(self)
+            .map(AsrTranscriptionResult::from)
+            .map_err(Error::from)
+    }
+
+    fn reset(&self) -> Result<()> {
+        sdk::XybridStream::reset(self).map_err(Error::from)
+    }
+}
+
+enum AsrCommand {
+    Feed(Vec<f32>),
+    Flush(SyncSender<Result<AsrTranscriptionResult>>),
+    Reset(SyncSender<Result<()>>),
+    Close,
+}
+
+#[derive(Default)]
+struct AsrPartialState {
+    pending: Option<Result<AsrPartialResult>>,
+    closed: bool,
+}
+
+/// Latest-value channel for cumulative ASR partials.
+///
+/// A slow or absent consumer never grows memory with progressively longer
+/// copies of the same transcript. Replacing an unread partial is lossless for
+/// the current text because the SDK's partials are cumulative.
+#[derive(Default)]
+struct AsrPartialSlot {
+    state: Mutex<AsrPartialState>,
+    ready: Condvar,
+}
+
+impl AsrPartialSlot {
+    fn publish(&self, result: Result<AsrPartialResult>) {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if !state.closed {
+            state.pending = Some(result);
+            self.ready.notify_one();
+        }
+    }
+
+    fn clear(&self) {
+        self.state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .pending = None;
+    }
+
+    fn close(&self) {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        state.closed = true;
+        self.ready.notify_all();
+    }
+
+    fn cancel(&self) {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        state.pending = None;
+        state.closed = true;
+        self.ready.notify_all();
+    }
+
+    fn recv(&self) -> Option<Result<AsrPartialResult>> {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        loop {
+            if let Some(result) = state.pending.take() {
+                return Some(result);
+            }
+            if state.closed {
+                return None;
+            }
+            state = self
+                .ready
+                .wait(state)
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+        }
+    }
+}
+
+/// Ten seconds of 20 ms microphone frames can queue while model warm-up runs.
+const ASR_COMMAND_CAPACITY: usize = 500;
+
+/// Pull-based bridge over the SDK's live ASR session.
+///
+/// One worker owns the SDK stream, preserving feed/reset/flush order and
+/// keeping inference off the foreign runtime's audio callback. [`feed`](Self::feed)
+/// enqueues PCM; callers drain rolling transcripts with [`next`](Self::next).
+pub struct AsrStreamingSession {
+    command_sender: SyncSender<AsrCommand>,
+    partial_slot: Arc<AsrPartialSlot>,
+    closed: Arc<AtomicBool>,
+}
+
+impl AsrStreamingSession {
+    /// Open a session from an already loaded SDK model.
+    ///
+    /// Binding crates that still own their SDK model directly use this entry
+    /// point; foreign callers always reach it through their model wrapper.
+    pub fn open(model: &sdk::XybridModel, config: AsrStreamConfig) -> Result<Arc<Self>> {
+        let stream = model.stream(config.into_sdk()?).map_err(Error::from)?;
+        Self::spawn(stream)
+    }
+
+    fn spawn(stream: impl AsrStreamDriver) -> Result<Arc<Self>> {
+        let (command_sender, command_receiver) = mpsc::sync_channel(ASR_COMMAND_CAPACITY);
+        let partial_slot = Arc::new(AsrPartialSlot::default());
+        let worker_partial_slot = Arc::clone(&partial_slot);
+        let closed = Arc::new(AtomicBool::new(false));
+        let worker_closed = Arc::clone(&closed);
+        std::thread::Builder::new()
+            .name("xybrid-asr".into())
+            .spawn(move || {
+                asr_worker_loop(
+                    stream,
+                    command_receiver,
+                    &worker_partial_slot,
+                    &worker_closed,
+                );
+                worker_closed.store(true, Ordering::Release);
+            })
+            .map_err(|error| Error::IoError {
+                message: format!("failed to spawn live ASR worker: {error}"),
+            })?;
+        Ok(Arc::new(Self {
+            command_sender,
+            partial_slot,
+            closed,
+        }))
+    }
+
+    /// Queue mono 16 kHz PCM samples without running inference on this thread.
+    ///
+    /// Returns an error rather than growing memory without bound if callers
+    /// submit more than ten seconds of conventional 20 ms frames while the
+    /// worker is still busy.
+    pub fn feed(&self, samples: Vec<f32>) -> Result<()> {
+        self.ensure_open()?;
+        match self.command_sender.try_send(AsrCommand::Feed(samples)) {
+            Ok(()) => Ok(()),
+            Err(TrySendError::Full(_)) => Err(Error::InferenceError {
+                message:
+                    "live ASR input queue is full; wait for the worker before feeding more audio"
+                        .into(),
+            }),
+            Err(TrySendError::Disconnected(_)) => Err(asr_session_closed()),
+        }
+    }
+
+    /// Block until the newest distinct partial transcript is ready.
+    ///
+    /// Partials are cumulative. If the consumer falls behind, unread values
+    /// are coalesced to the newest transcript instead of growing memory.
+    ///
+    /// Returns `None` after [`close`](Self::close), or when the worker
+    /// otherwise exits. Flushing finalizes the current utterance but keeps the
+    /// worker alive so callers can [`reset`](Self::reset) and reuse the loaded
+    /// model.
+    pub fn next(&self) -> Result<Option<AsrPartialResult>> {
+        match self.partial_slot.recv() {
+            Some(result) => result.map(Some),
+            None => Ok(None),
+        }
+    }
+
+    /// Drain pending audio and return the final transcript.
+    ///
+    /// Commands are processed in submission order. This call waits for every
+    /// previously queued audio frame, then finalizes the session.
+    pub fn flush(&self) -> Result<AsrTranscriptionResult> {
+        self.ensure_open()?;
+        let (reply_sender, reply_receiver) = mpsc::sync_channel(1);
+        self.command_sender
+            .send(AsrCommand::Flush(reply_sender))
+            .map_err(|_| asr_session_closed())?;
+        reply_receiver.recv().map_err(|_| asr_session_closed())?
+    }
+
+    /// Clear buffered audio and transcript state without reloading the model.
+    pub fn reset(&self) -> Result<()> {
+        self.ensure_open()?;
+        let (reply_sender, reply_receiver) = mpsc::sync_channel(1);
+        self.command_sender
+            .send(AsrCommand::Reset(reply_sender))
+            .map_err(|_| asr_session_closed())?;
+        reply_receiver.recv().map_err(|_| asr_session_closed())?
+    }
+
+    /// Stop the worker and close the partial-result stream without blocking.
+    ///
+    /// Waiting readers are released immediately and unread partials are
+    /// discarded. Pending audio is abandoned at the next inference boundary;
+    /// the worker retains its native resources until then. Repeated calls are
+    /// harmless.
+    pub fn close(&self) -> Result<()> {
+        self.partial_slot.cancel();
+        if self.closed.swap(true, Ordering::AcqRel) {
+            return Ok(());
+        }
+        match self.command_sender.try_send(AsrCommand::Close) {
+            Ok(()) | Err(TrySendError::Full(_)) | Err(TrySendError::Disconnected(_)) => Ok(()),
+        }
+    }
+
+    fn ensure_open(&self) -> Result<()> {
+        if self.closed.load(Ordering::Acquire) {
+            Err(asr_session_closed())
+        } else {
+            Ok(())
+        }
+    }
+}
+
+impl Drop for AsrStreamingSession {
+    fn drop(&mut self) {
+        let _ = self.close();
+    }
+}
+
+fn asr_session_closed() -> Error {
+    Error::InferenceError {
+        message: "live ASR session is no longer running; create a new session".into(),
+    }
+}
+
+fn asr_worker_loop(
+    stream: impl AsrStreamDriver,
+    command_receiver: Receiver<AsrCommand>,
+    partial_slot: &AsrPartialSlot,
+    closed: &AtomicBool,
+) {
+    // Warm-up is deliberately non-fatal. A real frame retries initialization
+    // and reports the full typed error through `next` if the backend is broken.
+    let _ = stream.warmup();
+    let mut last_emitted_chunk = None;
+
+    while let Ok(command) = command_receiver.recv() {
+        if closed.load(Ordering::Acquire) {
+            break;
+        }
+        match command {
+            AsrCommand::Feed(samples) => match stream.feed(&samples) {
+                Ok(Some(partial)) if last_emitted_chunk != Some(partial.chunk_index) => {
+                    last_emitted_chunk = Some(partial.chunk_index);
+                    partial_slot.publish(Ok(partial));
+                }
+                Ok(_) => {}
+                Err(error) => {
+                    partial_slot.publish(Err(error));
+                    break;
+                }
+            },
+            AsrCommand::Flush(reply_sender) => {
+                let _ = reply_sender.send(stream.flush());
+            }
+            AsrCommand::Reset(reply_sender) => {
+                let result = stream.reset();
+                if result.is_ok() {
+                    last_emitted_chunk = None;
+                    partial_slot.clear();
+                }
+                let _ = reply_sender.send(result);
+            }
+            AsrCommand::Close => break,
+        }
+    }
+    partial_slot.close();
+}
+
 impl InferenceResult {
     pub fn from_sdk(result: sdk::InferenceResult) -> Self {
         let output_type = OutputType::from_sdk(result.output_type());
@@ -1701,6 +2114,11 @@ impl XybridModel {
 
     pub fn voice(&self, voice_id: String) -> Option<VoiceInfo> {
         self.inner.voice(&voice_id).map(VoiceInfo::from_sdk)
+    }
+
+    /// Open a live ASR session that accepts mono 16 kHz PCM audio.
+    pub fn stream(&self, config: AsrStreamConfig) -> Result<Arc<AsrStreamingSession>> {
+        AsrStreamingSession::open(&self.inner, config)
     }
 
     // -- Inference ----------------------------------------------------------
@@ -2321,6 +2739,252 @@ impl BundleHandle {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::VecDeque;
+    use std::sync::Barrier;
+    use std::time::Duration;
+
+    #[test]
+    fn asr_stop_unblocks_pending_pull_before_warmup_finishes() {
+        let warmup_started = Arc::new(Barrier::new(2));
+        let release_warmup = Arc::new(Barrier::new(2));
+        let session = AsrStreamingSession::spawn(BlockingWarmupAsrStream {
+            warmup_started: Arc::clone(&warmup_started),
+            release_warmup: Arc::clone(&release_warmup),
+        })
+        .unwrap();
+        warmup_started.wait();
+        let reader = Arc::clone(&session);
+        let (tx, rx) = mpsc::sync_channel(1);
+        let task = std::thread::spawn(move || {
+            tx.send(reader.next()).unwrap();
+        });
+        session.close().unwrap();
+        let before_release = rx.recv_timeout(Duration::from_secs(2));
+        release_warmup.wait();
+        task.join().unwrap();
+        assert!(
+            matches!(before_release, Ok(Ok(None))),
+            "stop left next() blocked: {before_release:?}"
+        );
+    }
+
+    #[test]
+    fn asr_stop_discards_unread_partials_and_rejects_late_publication() {
+        let slot = AsrPartialSlot::default();
+        slot.publish(Ok(asr_partial(1, "before stop")));
+        slot.cancel();
+        slot.publish(Ok(asr_partial(2, "late inference result")));
+        assert!(slot.recv().is_none());
+        slot.cancel();
+        assert!(slot.recv().is_none());
+    }
+
+    #[test]
+    fn asr_worker_failure_is_delivered_before_end_of_stream() {
+        let session =
+            AsrStreamingSession::spawn(FakeAsrStream::new(vec![Err(Error::InferenceError {
+                message: "decoder failed".into(),
+            })]))
+            .unwrap();
+        session.feed(vec![0.0; 320]).unwrap();
+        assert!(
+            matches!(session.next(), Err(Error::InferenceError { message }) if message == "decoder failed")
+        );
+        assert_eq!(session.next().unwrap(), None);
+    }
+
+    struct FakeAsrStream {
+        feed_results: Mutex<VecDeque<Result<Option<AsrPartialResult>>>>,
+    }
+
+    impl FakeAsrStream {
+        fn new(feed_results: Vec<Result<Option<AsrPartialResult>>>) -> Self {
+            Self {
+                feed_results: Mutex::new(feed_results.into()),
+            }
+        }
+    }
+
+    impl AsrStreamDriver for FakeAsrStream {
+        fn warmup(&self) -> Result<()> {
+            Ok(())
+        }
+
+        fn feed(&self, _samples: &[f32]) -> Result<Option<AsrPartialResult>> {
+            self.feed_results
+                .lock()
+                .expect("fake ASR result queue should not be poisoned")
+                .pop_front()
+                .unwrap_or(Ok(None))
+        }
+
+        fn flush(&self) -> Result<AsrTranscriptionResult> {
+            Ok(AsrTranscriptionResult {
+                text: "hello world".into(),
+                duration_ms: 800,
+                chunks_processed: 2,
+            })
+        }
+
+        fn reset(&self) -> Result<()> {
+            Ok(())
+        }
+    }
+
+    struct BlockingWarmupAsrStream {
+        warmup_started: Arc<Barrier>,
+        release_warmup: Arc<Barrier>,
+    }
+
+    impl AsrStreamDriver for BlockingWarmupAsrStream {
+        fn warmup(&self) -> Result<()> {
+            self.warmup_started.wait();
+            self.release_warmup.wait();
+            Ok(())
+        }
+
+        fn feed(&self, _samples: &[f32]) -> Result<Option<AsrPartialResult>> {
+            Ok(None)
+        }
+
+        fn flush(&self) -> Result<AsrTranscriptionResult> {
+            Ok(AsrTranscriptionResult {
+                text: String::new(),
+                duration_ms: 0,
+                chunks_processed: 0,
+            })
+        }
+
+        fn reset(&self) -> Result<()> {
+            Ok(())
+        }
+    }
+
+    fn asr_partial(chunk_index: u64, text: &str) -> AsrPartialResult {
+        AsrPartialResult {
+            text: text.into(),
+            is_stable: false,
+            chunk_index,
+            audio_duration_ms: chunk_index * 400,
+        }
+    }
+
+    #[test]
+    fn asr_config_validates_audio_and_vad_contracts() {
+        let mut config = AsrStreamConfig::default();
+        assert_eq!(config.sample_rate, ASR_SAMPLE_RATE_HZ);
+        assert!(config.clone().into_sdk().is_ok());
+
+        config.sample_rate = 48_000;
+        assert!(matches!(
+            config.clone().into_sdk(),
+            Err(Error::ConfigError { .. })
+        ));
+
+        config.sample_rate = ASR_SAMPLE_RATE_HZ;
+        config.vad_threshold = f32::NAN;
+        assert!(matches!(
+            config.clone().into_sdk(),
+            Err(Error::ConfigError { .. })
+        ));
+
+        config.vad_threshold = 0.5;
+        config.vad_model_dir = Some("vad".into());
+        assert!(matches!(config.into_sdk(), Err(Error::ConfigError { .. })));
+    }
+
+    #[test]
+    fn asr_worker_preserves_order_deduplicates_and_resets_sequence() {
+        let session = AsrStreamingSession::spawn(FakeAsrStream::new(vec![
+            Ok(Some(asr_partial(1, "hello"))),
+            Ok(Some(asr_partial(1, "hello"))),
+            Ok(Some(asr_partial(2, "hello world"))),
+            Ok(Some(asr_partial(1, "fresh"))),
+        ]))
+        .expect("fake ASR worker should spawn");
+
+        session
+            .feed(vec![0.0; 320])
+            .expect("first frame should queue");
+        assert_eq!(
+            session.next().expect("first partial should arrive"),
+            Some(asr_partial(1, "hello"))
+        );
+        session
+            .feed(vec![0.0; 320])
+            .expect("duplicate frame should queue");
+        session
+            .feed(vec![0.0; 320])
+            .expect("second frame should queue");
+
+        assert_eq!(
+            session.next().expect("second partial should arrive"),
+            Some(asr_partial(2, "hello world"))
+        );
+
+        let final_result = session.flush().expect("flush should finalize in order");
+        assert_eq!(final_result.text, "hello world");
+        assert_eq!(final_result.chunks_processed, 2);
+
+        session
+            .reset()
+            .expect("reset after flush should preserve the loaded model");
+        session
+            .feed(vec![0.0; 320])
+            .expect("post-reset frame should queue");
+        assert_eq!(
+            session.next().expect("reset sequence should arrive"),
+            Some(asr_partial(1, "fresh"))
+        );
+
+        session.close().expect("close should stop the worker");
+        session.close().expect("close should be idempotent");
+        assert_eq!(
+            session
+                .next()
+                .expect("closed partial stream is not an error"),
+            None
+        );
+    }
+
+    #[test]
+    fn asr_close_does_not_wait_for_a_full_input_queue() {
+        let warmup_started = Arc::new(Barrier::new(2));
+        let release_warmup = Arc::new(Barrier::new(2));
+        let session = AsrStreamingSession::spawn(BlockingWarmupAsrStream {
+            warmup_started: Arc::clone(&warmup_started),
+            release_warmup: Arc::clone(&release_warmup),
+        })
+        .expect("blocking fake ASR worker should spawn");
+
+        warmup_started.wait();
+        for _ in 0..ASR_COMMAND_CAPACITY {
+            session
+                .feed(vec![0.0; 320])
+                .expect("frames should fill the bounded input queue");
+        }
+
+        let close_session = Arc::clone(&session);
+        let (closed_sender, closed_receiver) = mpsc::sync_channel(1);
+        let close_thread = std::thread::spawn(move || {
+            let result = close_session.close();
+            let _ = closed_sender.send(result);
+        });
+
+        let close_result = closed_receiver.recv_timeout(Duration::from_millis(100));
+        release_warmup.wait();
+        close_thread.join().expect("close caller should not panic");
+
+        close_result
+            .expect("close must not wait for room in the input queue")
+            .expect("close should succeed");
+        assert_eq!(
+            session
+                .next()
+                .expect("closed partial stream is not an error"),
+            None
+        );
+    }
 
     #[test]
     fn error_code_is_stable() {

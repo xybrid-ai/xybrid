@@ -1336,9 +1336,9 @@ impl FfiModel {
         &self,
         config: super::streaming::FfiStreamingConfig,
     ) -> Result<super::streaming::FfiStreamSession, String> {
-        let sdk_config = config.to_sdk()?;
-        let stream = self.0.stream(sdk_config).map_err(|e| e.to_string())?;
-        Ok(super::streaming::FfiStreamSession::spawn(stream))
+        let session = facade::AsrStreamingSession::open(&self.0, config.to_facade())
+            .map_err(|error| error.to_string())?;
+        Ok(super::streaming::FfiStreamSession::new(session))
     }
 
     /// Warm up the model by running a tiny inference so the first real call
