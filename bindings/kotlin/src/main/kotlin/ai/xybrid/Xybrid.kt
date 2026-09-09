@@ -309,6 +309,9 @@ typealias ModelLoader = XybridModelLoader
 /** A loaded model ready for inference. */
 typealias Model = XybridModel
 
+/** A loaded multi-stage inference pipeline. */
+typealias Pipeline = XybridPipeline
+
 /**
  * Run inference with the model's default options.
  *
@@ -318,6 +321,22 @@ typealias Model = XybridModel
  * generation config, abort signals, or cloud-fallback behaviour.
  */
 fun XybridModel.run(envelope: XybridEnvelope): XybridResult = this.run(envelope, null)
+
+/** Parse and load a pipeline off the caller's thread. */
+suspend fun XybridPipeline.Companion.fromYamlAsync(yaml: String): XybridPipeline =
+    withContext(Dispatchers.IO) { fromYaml(yaml) }
+
+/** Read, parse, and load a pipeline file off the caller's thread. */
+suspend fun XybridPipeline.Companion.fromFileAsync(path: String): XybridPipeline =
+    withContext(Dispatchers.IO) { fromFile(path) }
+
+/** Load a pipeline bundle off the caller's thread. */
+suspend fun XybridPipeline.Companion.fromBundleAsync(path: String): XybridPipeline =
+    withContext(Dispatchers.IO) { fromBundle(path) }
+
+/** Run every pipeline stage off the caller's thread. */
+suspend fun XybridPipeline.runAsync(envelope: XybridEnvelope): XybridResult =
+    withContext(Dispatchers.IO) { this@runAsync.run(envelope) }
 
 // -- Async (suspend) conveniences --
 //

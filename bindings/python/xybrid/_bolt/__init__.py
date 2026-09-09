@@ -446,18 +446,25 @@ def _boltffi_read_e9a0b9fd71f8c9ff(data: bytes):
 _native._register_wire_codec("read_e9a0b9fd71f8c9ff", _boltffi_read_e9a0b9fd71f8c9ff)
 
 
-def _boltffi_read_3cfe09c223256b1b(data: bytes):
-    return _boltffi_read_wire(data, lambda reader: reader.sequence(lambda: XybridEnvelope._boltffi_from_reader(reader)))
-
-
-_native._register_wire_codec("read_3cfe09c223256b1b", _boltffi_read_3cfe09c223256b1b)
-
-
 def _boltffi_read_9415281aa52df749(data: bytes):
     return _boltffi_read_wire(data, lambda reader: reader.optional(lambda: reader.string()))
 
 
 _native._register_wire_codec("read_9415281aa52df749", _boltffi_read_9415281aa52df749)
+
+
+def _boltffi_read_f53a3ba3847b114d(data: bytes):
+    return _boltffi_read_wire(data, lambda reader: reader.sequence(lambda: reader.string()))
+
+
+_native._register_wire_codec("read_f53a3ba3847b114d", _boltffi_read_f53a3ba3847b114d)
+
+
+def _boltffi_read_3cfe09c223256b1b(data: bytes):
+    return _boltffi_read_wire(data, lambda reader: reader.sequence(lambda: XybridEnvelope._boltffi_from_reader(reader)))
+
+
+_native._register_wire_codec("read_3cfe09c223256b1b", _boltffi_read_3cfe09c223256b1b)
 
 
 def _boltffi_read_c9e5fd91113e36a2(data: bytes):
@@ -515,6 +522,13 @@ def _boltffi_write_922e13039dd3c493(options) -> bytes:
 
 
 _native._register_wire_codec("write_922e13039dd3c493", _boltffi_write_922e13039dd3c493)
+
+
+def _boltffi_write_ab1ae15bdd9d5612(yaml) -> bytes:
+    return _boltffi_wire_string(yaml)
+
+
+_native._register_wire_codec("write_ab1ae15bdd9d5612", _boltffi_write_ab1ae15bdd9d5612)
 
 
 def _boltffi_write_45cfac4c89613282(api_key) -> bytes:
@@ -1952,6 +1966,52 @@ class XybridModel:
 
 
 
+class XybridPipeline:
+    __slots__ = ("_handle",)
+
+
+    def __init__(self) -> None:
+        raise TypeError("XybridPipeline cannot be constructed directly")
+
+
+    @classmethod
+    def _from_handle(cls, handle: int) -> "XybridPipeline":
+        value = cls.__new__(cls)
+        value._handle = handle
+        return value
+
+    def __del__(self) -> None:
+        handle = getattr(self, "_handle", None)
+        if handle is not None:
+            self._handle = None
+            _native._boltffi_xybrid_pipeline_release(handle)
+
+    @classmethod
+    def from_yaml(cls, yaml: str) -> "XybridPipeline":
+        return XybridPipeline._from_handle(_boltffi_call(_boltffi_read_fe83cddcf3822a1d, lambda: _native._boltffi_xybrid_pipeline_from_yaml(yaml)))
+
+    @classmethod
+    def from_file(cls, path: str) -> "XybridPipeline":
+        return XybridPipeline._from_handle(_boltffi_call(_boltffi_read_fe83cddcf3822a1d, lambda: _native._boltffi_xybrid_pipeline_from_file(path)))
+
+    @classmethod
+    def from_bundle(cls, path: str) -> "XybridPipeline":
+        return XybridPipeline._from_handle(_boltffi_call(_boltffi_read_fe83cddcf3822a1d, lambda: _native._boltffi_xybrid_pipeline_from_bundle(path)))
+
+    def run(self, envelope: XybridEnvelope) -> XybridResult:
+        return _boltffi_read_wire(_boltffi_call(_boltffi_read_fe83cddcf3822a1d, lambda: _native._boltffi_xybrid_pipeline_run(self._handle, envelope._boltffi_wire())), lambda reader: XybridResult._boltffi_from_reader(reader))
+
+    def name(self) -> str | None:
+        return _boltffi_read_wire(_native._boltffi_xybrid_pipeline_name(self._handle), lambda reader: reader.optional(lambda: reader.string()))
+
+    def stage_names(self) -> list[str]:
+        return _boltffi_read_wire(_native._boltffi_xybrid_pipeline_stage_names(self._handle), lambda reader: reader.sequence(lambda: reader.string()))
+
+    def stage_count(self) -> int:
+        return _native._boltffi_xybrid_pipeline_stage_count(self._handle)
+
+
+
 class XybridConversationContext:
     __slots__ = ("_handle",)
 
@@ -2215,6 +2275,7 @@ __all__ = [
     "XybridStreamEventKind",
     "XybridThermalState",
     "XybridModel",
+    "XybridPipeline",
     "XybridConversationContext",
     "XybridTelemetryConfig",
     "XybridBundle",

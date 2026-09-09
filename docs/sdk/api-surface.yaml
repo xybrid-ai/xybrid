@@ -291,27 +291,25 @@ classes:
   # -------------------------------------------------------------------
   XybridPipeline:
     type: class
-    section: "4. XybridPipelineRef / XybridPipeline"
+    section: "4. XybridPipeline"
     methods:
       fromYaml:
         static: true
         params: [{ name: yamlContent, type: String }]
-        status: { dart: implemented, kotlin: planned, swift: planned, csharp: planned }
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
       fromFile:
         static: true
         params: [{ name: path, type: String }]
-        status: { dart: implemented, kotlin: planned, swift: planned, csharp: planned }
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
       fromBundle:
         static: true
         params: [{ name: path, type: String }]
-        status: { dart: implemented, kotlin: planned, swift: planned, csharp: planned }
-      load:
-        async: true
-        status: { dart: implemented, kotlin: planned, swift: planned, csharp: planned }
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
       run:
         async: true
         params: [{ name: envelope, type: Envelope }]
-        status: { dart: implemented, kotlin: planned, swift: planned, csharp: planned }
+        notes: "Constructors collapse PipelineRef loading into one operation. Kotlin and Swift provide off-UI-thread async conveniences; Dart is async; C# exposes the blocking native call. Result metrics contain one latency per executed stage."
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
       runWithOptions:
         async: true
         params:
@@ -329,16 +327,16 @@ classes:
     properties:
       name:
         type: "String?"
-        status: { dart: implemented, kotlin: planned, swift: planned, csharp: planned }
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
       isReady:
         type: bool
-        status: { dart: implemented, kotlin: planned, swift: planned, csharp: planned }
+        status: { dart: planned, kotlin: planned, swift: planned, csharp: planned }
       stageCount:
         type: int
-        status: { dart: implemented, kotlin: planned, swift: planned, csharp: planned }
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
       stageNames:
         type: "List<String>"
-        status: { dart: implemented, kotlin: planned, swift: planned, csharp: planned }
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
 
   # -------------------------------------------------------------------
   # 5. Envelope

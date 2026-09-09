@@ -43,7 +43,6 @@
 //!   `run_stream_with_context`.
 //! - **Deferred to follow-up commits**:
 //!   - `XybridCancellationToken` as an `Arc<Self>` handle.
-//!   - Pipeline surface.
 //!
 //! This is now the sole native binding crate: `xybrid-uniffi` and the
 //! pre-bolt `xybrid-ffi` C ABI have both been removed, and every foreign SDK
@@ -984,7 +983,6 @@ pub fn is_auto_release_enabled() -> bool {
 // ============================================================================
 //
 // Scope: load / run / pull-stream / warmup / unload / voice accessors.
-// Cancellation and conversation context remain follow-up work.
 //
 // `ModelLoader` is intentionally **not** mirrored as a separate
 // `#[export]` type. BoltFFI's wire layer treats opaque types as handle
@@ -1350,6 +1348,62 @@ impl XybridModel {
     }
 }
 
+// ============================================================================
+// XybridPipeline handle
+// ============================================================================
+
+/// A loaded multi-stage inference pipeline.
+///
+/// Constructors parse and resolve the pipeline in one step; there is no
+/// separate `PipelineRef` handle on the foreign surface.
+pub struct XybridPipeline {
+    inner: std::sync::Arc<facade::Pipeline>,
+}
+
+#[export]
+impl XybridPipeline {
+    /// Parse and load a pipeline from YAML content.
+    pub fn from_yaml(yaml: String) -> Result<Self, XybridError> {
+        let inner = facade::Pipeline::from_yaml(yaml).map_err(XybridError::from)?;
+        Ok(Self { inner })
+    }
+
+    /// Read, parse, and load a pipeline from a YAML file.
+    pub fn from_file(path: String) -> Result<Self, XybridError> {
+        let inner = facade::Pipeline::from_file(path).map_err(XybridError::from)?;
+        Ok(Self { inner })
+    }
+
+    /// Load a pipeline bundle.
+    pub fn from_bundle(path: String) -> Result<Self, XybridError> {
+        let inner = facade::Pipeline::from_bundle(path).map_err(XybridError::from)?;
+        Ok(Self { inner })
+    }
+
+    /// Execute the pipeline and return the final stage's output.
+    pub fn run(&self, envelope: XybridEnvelope) -> Result<XybridResult, XybridError> {
+        self.inner
+            .run(envelope.into())
+            .map(Into::into)
+            .map_err(XybridError::from)
+    }
+
+    /// Pipeline name from the YAML definition, if present.
+    pub fn name(&self) -> Option<String> {
+        self.inner.name()
+    }
+
+    /// Stage identifiers in execution order.
+    pub fn stage_names(&self) -> Vec<String> {
+        self.inner.stage_names()
+    }
+
+    /// Number of stages in the pipeline.
+    pub fn stage_count(&self) -> u32 {
+        self.inner.stage_count()
+    }
+}
+
 /// Opaque handle for multi-turn conversation history.
 ///
 /// Build it up with [`push`](Self::push) / [`set_system`](Self::set_system),
@@ -1624,6 +1678,26 @@ mod tests {
             _ => panic!("expected text"),
         }
         assert_eq!(back.metadata.len(), 1);
+    }
+
+    #[test]
+    fn pipeline_handle_crosses_bolt_with_introspection() {
+        let pipeline = XybridPipeline::from_yaml(
+            r#"
+name: assistant
+stages:
+  - id: answer
+    model: gpt-4o-mini
+    target: cloud
+    provider: openai
+"#
+            .into(),
+        )
+        .expect("cloud-only pipeline should resolve without model downloads");
+
+        assert_eq!(pipeline.name().as_deref(), Some("assistant"));
+        assert_eq!(pipeline.stage_names(), vec!["answer"]);
+        assert_eq!(pipeline.stage_count(), 1);
     }
 
     #[test]
