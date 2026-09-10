@@ -962,10 +962,11 @@ mod tests {
         options.set("thinking", "disabled");
         options.set("gateway_url", "http://127.0.0.1:9/v1");
         options.set("api_key", "$DEEPSEEK_API_KEY");
+        // `with_provider` forces `target: cloud`; the hybrid shape sets Auto after it.
         let mut stage = StageDescriptor::new("llm")
             .with_model("functiongemma-270m-it")
-            .with_target(crate::pipeline::ExecutionTarget::Auto)
             .with_provider(crate::pipeline::IntegrationProvider::DeepSeek)
+            .with_target(crate::pipeline::ExecutionTarget::Auto)
             .with_options(options);
         stage.bundle_path = bundle_path.map(str::to_string);
         stage

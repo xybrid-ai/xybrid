@@ -5,13 +5,18 @@
 use anyhow::{Context, Result};
 use std::fs;
 use std::path::{Path, PathBuf};
-use xybrid_core::context::{DeviceMetrics, StageDescriptor};
+use xybrid_core::context::{DeviceMetrics, StageDescriptor, DEVICE_CLASS_SCHEMA_VERSION};
+use xybrid_core::device::ResourceMonitor;
 use xybrid_core::execution_template::ModelMetadata;
+use xybrid_core::executor::prepare_stage_input;
 use xybrid_core::ir::{Envelope, EnvelopeKind};
-use xybrid_core::orchestrator::policy_engine::PolicyEngine;
-use xybrid_core::orchestrator::routing_engine::{LocalAvailability, RoutingEngine};
-use xybrid_core::orchestrator::Orchestrator;
-use xybrid_core::pipeline_config::PipelineConfig;
+use xybrid_core::orchestrator::routing_engine::LocalAvailability;
+use xybrid_core::orchestrator::{
+    LocalAuthority, OrchestrationAuthority, Orchestrator, PolicyOutcome, PolicyRequest,
+    ResolvedTarget, StageContext, StageResolution,
+};
+use xybrid_core::pipeline::{ExecutionTarget, IntegrationProvider, StageOptions};
+use xybrid_core::pipeline_config::{PipelineConfig, StageConfig};
 use xybrid_core::target::{Platform, TargetResolver};
 use xybrid_core::template_executor::TemplateExecutor;
 use xybrid_sdk::registry_client::RegistryClient;
@@ -60,7 +65,7 @@ pub(crate) fn run_pipeline(
     print_pipeline_config(&stages, &input, &metrics, target);
 
     if dry_run {
-        return run_dry_run(&stages, &input, &metrics, &availability_fn);
+        return run_dry_run(&stages, &input, &metrics, &availability_fn, policy_path);
     }
 
     execute_pipeline(
@@ -76,6 +81,57 @@ pub(crate) fn run_pipeline(
     )
 }
 
+/// How a YAML stage maps onto the local and cloud legs.
+#[derive(Debug, Clone, PartialEq)]
+enum StageShape {
+    /// Local only. `target` is the declared target (`device` / `auto`) or
+    /// `None` when the YAML omitted it.
+    Device { target: Option<ExecutionTarget> },
+    /// Cloud only: `target: cloud`, or a provider with no target.
+    CloudOnly { provider: IntegrationProvider },
+    /// `target: auto` with a provider: a local bundle *and* a cloud leg; the
+    /// policy and the device state pick one per request.
+    Hybrid { provider: IntegrationProvider },
+}
+
+/// Classify a YAML stage, rejecting unknown targets/providers instead of
+/// silently mapping them onto something else.
+fn classify_stage(stage_config: &StageConfig) -> Result<StageShape> {
+    let stage_id = stage_config.stage_id();
+    let target = stage_config
+        .target()
+        .map(|raw| {
+            raw.parse::<ExecutionTarget>()
+                .map_err(|e| anyhow::anyhow!("stage '{}': {}", stage_id, e))
+        })
+        .transpose()?;
+    let provider = stage_config
+        .provider()
+        .map(|raw| {
+            raw.parse::<IntegrationProvider>()
+                .map_err(|e| anyhow::anyhow!("stage '{}': {}", stage_id, e))
+        })
+        .transpose()?;
+
+    match (target, provider) {
+        (Some(ExecutionTarget::Server), _) => Err(anyhow::anyhow!(
+            "stage '{}': target 'server' is not supported by `xybrid run`; use device, cloud, or auto",
+            stage_id
+        )),
+        (Some(ExecutionTarget::Cloud), Some(provider)) => Ok(StageShape::CloudOnly { provider }),
+        (Some(ExecutionTarget::Cloud), None) => Err(anyhow::anyhow!(
+            "stage '{}': target 'cloud' requires a 'provider' (e.g. openai, deepseek)",
+            stage_id
+        )),
+        (None, Some(provider)) => Ok(StageShape::CloudOnly { provider }),
+        (Some(ExecutionTarget::Auto), Some(provider)) => Ok(StageShape::Hybrid { provider }),
+        (Some(ExecutionTarget::Device), Some(_)) => Ok(StageShape::Device {
+            target: Some(ExecutionTarget::Device),
+        }),
+        (target, None) => Ok(StageShape::Device { target }),
+    }
+}
+
 fn resolve_pipeline_stages(
     config: &PipelineConfig,
     client: &RegistryClient,
@@ -84,12 +140,37 @@ fn resolve_pipeline_stages(
 
     for stage_config in &config.stages {
         let model_id = stage_config.model_id();
-        let mut desc = StageDescriptor::new(&model_id);
+        // The stage keeps its YAML id; the model id travels separately so a
+        // hybrid stage can name a local bundle and a cloud model.
+        let mut desc = StageDescriptor::new(stage_config.stage_id()).with_model(model_id.clone());
 
-        if stage_config.is_cloud_stage() {
-            configure_cloud_stage(&mut desc, stage_config, &model_id);
-        } else {
-            resolve_device_stage(&mut desc, &model_id, client)?;
+        match classify_stage(stage_config)? {
+            StageShape::CloudOnly { provider } => {
+                configure_cloud_stage(&mut desc, stage_config, provider);
+            }
+            StageShape::Hybrid { provider } => {
+                if let Err(e) = resolve_device_stage(&mut desc, &model_id, client) {
+                    ui::warning(&format!(
+                        "stage '{}': local model '{}' is unavailable ({:#}); only the cloud leg \
+                         can serve it, subject to policy",
+                        desc.name, model_id, e
+                    ));
+                }
+                desc.target = Some(ExecutionTarget::Auto);
+                desc.provider = Some(provider);
+                apply_stage_options(&mut desc, stage_config);
+            }
+            StageShape::Device { target } => {
+                if stage_config.provider().is_some() {
+                    ui::warning(&format!(
+                        "stage '{}': 'provider' is ignored for target 'device'",
+                        desc.name
+                    ));
+                }
+                resolve_device_stage(&mut desc, &model_id, client)?;
+                desc.target = target;
+                apply_stage_options(&mut desc, stage_config);
+            }
         }
 
         stages.push(desc);
@@ -100,28 +181,26 @@ fn resolve_pipeline_stages(
 
 fn configure_cloud_stage(
     desc: &mut StageDescriptor,
-    stage_config: &xybrid_core::pipeline_config::StageConfig,
-    model_id: &str,
+    stage_config: &StageConfig,
+    provider: IntegrationProvider,
 ) {
-    if let Some(provider) = stage_config.provider() {
-        desc.provider = Some(match provider {
-            "openai" => xybrid_core::pipeline::IntegrationProvider::OpenAI,
-            "anthropic" => xybrid_core::pipeline::IntegrationProvider::Anthropic,
-            "google" => xybrid_core::pipeline::IntegrationProvider::Google,
-            _ => xybrid_core::pipeline::IntegrationProvider::OpenAI,
-        });
-    }
-    desc.target = Some(xybrid_core::pipeline::ExecutionTarget::Cloud);
-    desc.model = Some(model_id.to_string());
+    desc.provider = Some(provider);
+    desc.target = Some(ExecutionTarget::Cloud);
+    apply_stage_options(desc, stage_config);
+}
 
+/// Copy the flat YAML options (system_prompt, max_tokens, cloud_model,
+/// gateway_url, ...) onto the descriptor for both legs.
+fn apply_stage_options(desc: &mut StageDescriptor, stage_config: &StageConfig) {
     let opts = stage_config.options();
-    if !opts.is_empty() {
-        let mut stage_opts = xybrid_core::pipeline::StageOptions::new();
-        for (key, value) in opts {
-            stage_opts.values.insert(key, value);
-        }
-        desc.options = Some(stage_opts);
+    if opts.is_empty() {
+        return;
     }
+    let mut stage_opts = StageOptions::new();
+    for (key, value) in opts {
+        stage_opts.values.insert(key, value);
+    }
+    desc.options = Some(stage_opts);
 }
 
 fn resolve_device_stage(
@@ -326,20 +405,97 @@ fn print_pipeline_config(
     println!();
 }
 
+fn read_policy_bundle(policy_file: &Path) -> Result<Vec<u8>> {
+    fs::read(policy_file)
+        .with_context(|| format!("Failed to read policy file: {}", policy_file.display()))
+}
+
+/// Decide one stage exactly the way execution would, without running it:
+/// shared options applied, then one authority call for policy and target.
+fn simulate_stage(
+    authority: &dyn OrchestrationAuthority,
+    stage: &StageDescriptor,
+    input: &Envelope,
+    metrics: &DeviceMetrics,
+    availability: LocalAvailability,
+) -> Result<StageResolution> {
+    let prepared = prepare_stage_input(stage, input)
+        .map_err(|e| anyhow::anyhow!("stage '{}': {}", stage.name, e))?;
+    let request = PolicyRequest {
+        stage_id: stage.name.clone(),
+        envelope: prepared.clone(),
+        metrics: metrics.clone(),
+    };
+    let context = StageContext {
+        stage_id: stage.name.clone(),
+        model_id: stage.model.clone().unwrap_or_else(|| stage.name.clone()),
+        input_kind: prepared.kind.clone(),
+        metrics: metrics.clone(),
+        resource_monitor: ResourceMonitor::global(),
+        explicit_target: stage.target.clone(),
+        local_availability: Some(availability),
+        device_class: Some(metrics.canonical_device_class()),
+        device_class_schema_version: Some(DEVICE_CLASS_SCHEMA_VERSION),
+    };
+    Ok(authority.resolve_stage(&request, &context).enforced())
+}
+
+fn route_label(target: &ResolvedTarget) -> String {
+    match target {
+        ResolvedTarget::Device => "local".to_string(),
+        ResolvedTarget::Cloud { .. } => "cloud".to_string(),
+        ResolvedTarget::Server { endpoint } => format!("fallback:{endpoint}"),
+    }
+}
+
+fn print_simulated_resolution(resolution: &StageResolution) {
+    let (status, reason) = match &resolution.policy.result {
+        PolicyOutcome::Allow => (
+            format!("{}", ui::success("ALLOWED")),
+            resolution.policy.reason.clone(),
+        ),
+        PolicyOutcome::Deny { reason } => (
+            format!("{}", ui::error("DENIED")),
+            format!("cloud forbidden, stays local: {reason}"),
+        ),
+        PolicyOutcome::Transform { transforms } => (
+            format!("{}", ui::warn("TRANSFORM REQUIRED")),
+            format!(
+                "cloud forbidden until transforms are implemented: {}",
+                transforms.join(",")
+            ),
+        ),
+    };
+    ui::kv("  Policy", &status);
+    ui::kv("  Reason", &reason);
+    let decision = &resolution.target.decision;
+    ui::kv(
+        "  Routing",
+        &format!("{} ({})", route_label(&decision.result), decision.reason),
+    );
+}
+
 fn run_dry_run(
     stages: &[StageDescriptor],
     input: &Envelope,
-    metrics: &xybrid_core::context::DeviceMetrics,
+    metrics: &DeviceMetrics,
     availability_fn: &dyn Fn(&str) -> LocalAvailability,
+    policy_path: Option<&PathBuf>,
 ) -> Result<()> {
     ui::section("Dry Run · Routing Simulation");
     println!();
 
-    let mut routing_engine = xybrid_core::orchestrator::routing_engine::DefaultRoutingEngine::new();
-    let policy_engine =
-        xybrid_core::orchestrator::policy_engine::DefaultPolicyEngine::with_default_policy();
-
-    let mut current_input = input.clone();
+    // Same decision path as a real run: one LocalAuthority, the same bundle.
+    let authority = LocalAuthority::new();
+    if let Some(policy_file) = policy_path {
+        ui::kv("Policy", &policy_file.display().to_string());
+        let policy_bytes = read_policy_bundle(policy_file)?;
+        authority
+            .load_policies(&policy_bytes)
+            .map_err(|e| anyhow::anyhow!("Failed to load policies: {}", e))?;
+        ui::ok("Policy bundle loaded");
+        println!();
+    }
 
     for (i, stage) in stages.iter().enumerate() {
         println!(
@@ -347,40 +503,39 @@ fn run_dry_run(
             ui::dim(&format!("Stage {}", i + 1)),
             ui::accent(display_stage_name(&stage.name))
         );
-
-        let policy_result = policy_engine.evaluate(&stage.name, &current_input, metrics);
-        let policy_status = if policy_result.allowed {
-            format!("{}", ui::success("ALLOWED"))
-        } else {
-            format!("{}", ui::error("DENIED"))
-        };
-        ui::kv("  Policy", &policy_status);
-        if let Some(ref reason) = policy_result.reason {
-            ui::kv("  Reason", reason);
+        if let Some(target) = &stage.target {
+            ui::kv("  Declared", &format!("target: {}", target));
+        }
+        if let Some(provider) = stage.provider {
+            ui::kv("  Provider", provider.as_str());
         }
 
-        let availability = availability_fn(&stage.name);
-        let routing_decision =
-            routing_engine.decide(&stage.name, metrics, &policy_result, &availability);
-        ui::kv(
-            "  Routing",
-            &format!("{} ({})", routing_decision.target, routing_decision.reason),
-        );
-
-        let new_kind = match &current_input.kind {
-            EnvelopeKind::Audio(_) => EnvelopeKind::Text("transcribed".to_string()),
-            EnvelopeKind::Text(t) => EnvelopeKind::Text(format!("{}-output", t)),
-            EnvelopeKind::Embedding(_) => EnvelopeKind::Text("result".to_string()),
-            EnvelopeKind::Image { .. } | EnvelopeKind::MultiPart(_) => {
-                EnvelopeKind::Text("vision-output".to_string())
-            }
-        };
-        current_input = Envelope::new(new_kind);
-        ui::kv("  Output", current_input.kind_str());
+        if i == 0 {
+            // The first stage sees the actual input and the current device
+            // snapshot; this is a prediction at that snapshot, not a promise.
+            let resolution = simulate_stage(
+                &authority,
+                stage,
+                input,
+                metrics,
+                availability_fn(&stage.name),
+            )?;
+            print_simulated_resolution(&resolution);
+        } else {
+            // Downstream input is whatever the previous stage produces; it
+            // does not exist without execution, so nothing is fabricated.
+            ui::kv("  Policy", &format!("{}", ui::dim("UNKNOWN")));
+            ui::kv("  Routing", &format!("{}", ui::dim("UNKNOWN")));
+            ui::kv("  Output", "upstream output unavailable without execution");
+        }
         println!();
     }
 
-    ui::ok("Dry run completed — no execution performed");
+    ui::hint(
+        "Dry run decides the first stage at the current device snapshot; later stages depend \
+         on upstream output and are not simulated.",
+    );
+    ui::ok("Dry run completed — no inference performed");
     println!();
     Ok(())
 }
@@ -400,14 +555,13 @@ fn execute_pipeline(
 
     if let Some(policy_file) = policy_path {
         ui::kv("Policy", &policy_file.display().to_string());
-        let policy_bytes = fs::read(policy_file)
-            .with_context(|| format!("Failed to read policy file: {}", policy_file.display()))?;
+        let policy_bytes = read_policy_bundle(policy_file)?;
 
         orchestrator
             .load_policies(policy_bytes)
             .map_err(|e| anyhow::anyhow!("Failed to load policies: {}", e))?;
 
-        ui::ok("Policy bundle loaded");
+        ui::ok("Policy bundle loaded — rules that deny cloud keep execution on this device");
         println!();
     }
 
@@ -451,6 +605,7 @@ fn print_pipeline_results(
         );
         ui::kv("  Routing", &result.routing_decision.target.to_string());
         ui::kv("  Reason", &result.routing_decision.reason);
+        ui::kv("  Backend", &result.adapter);
         ui::kv("  Time", &format!("{}ms", result.latency_ms));
         ui::kv("  Output", result.output.kind_str());
 
@@ -1407,6 +1562,7 @@ fn emit_pipeline_complete_event(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
 
     fn png_image(width: u32, height: u32) -> Vec<u8> {
         let image = image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(
@@ -1476,5 +1632,278 @@ mod tests {
         assert!(message.contains("Invalid image input"));
         assert!(message.contains("Image payload too large"));
         assert!(!message.contains("[0"));
+    }
+
+    // ── stage classification ────────────────────────────────────────────────
+
+    use std::time::Duration;
+    use xybrid_core::device::{MemoryPressure, ResourceSnapshot, ResourceSnapshotProvider};
+
+    fn first_stage(yaml: &str) -> StageConfig {
+        PipelineConfig::from_yaml(yaml)
+            .expect("yaml parses")
+            .stages
+            .into_iter()
+            .next()
+            .expect("one stage")
+    }
+
+    #[test]
+    fn classify_stage_deepseek_auto_is_hybrid() {
+        let stage = first_stage(
+            "stages:\n  - id: llm\n    model: functiongemma-270m-it\n    target: auto\n    provider: deepseek\n    cloud_model: deepseek-flash\n",
+        );
+        assert_eq!(
+            classify_stage(&stage).unwrap(),
+            StageShape::Hybrid {
+                provider: IntegrationProvider::DeepSeek
+            }
+        );
+    }
+
+    #[test]
+    fn classify_stage_provider_without_target_is_cloud_only() {
+        let stage = first_stage("stages:\n  - model: gpt-4o-mini\n    provider: openai\n");
+        assert_eq!(
+            classify_stage(&stage).unwrap(),
+            StageShape::CloudOnly {
+                provider: IntegrationProvider::OpenAI
+            }
+        );
+        let stage = first_stage(
+            "stages:\n  - model: deepseek-flash\n    target: cloud\n    provider: deepseek\n",
+        );
+        assert_eq!(
+            classify_stage(&stage).unwrap(),
+            StageShape::CloudOnly {
+                provider: IntegrationProvider::DeepSeek
+            }
+        );
+        // `integration` is an accepted alias for cloud.
+        let stage = first_stage(
+            "stages:\n  - model: gpt-4o-mini\n    target: integration\n    provider: openai\n",
+        );
+        assert!(matches!(
+            classify_stage(&stage).unwrap(),
+            StageShape::CloudOnly { .. }
+        ));
+    }
+
+    #[test]
+    fn classify_stage_device_propagates_target() {
+        let stage = first_stage("stages:\n  - qwen2.5-0.5b-instruct\n");
+        assert_eq!(
+            classify_stage(&stage).unwrap(),
+            StageShape::Device { target: None }
+        );
+        let stage = first_stage("stages:\n  - model: m\n    target: device\n");
+        assert_eq!(
+            classify_stage(&stage).unwrap(),
+            StageShape::Device {
+                target: Some(ExecutionTarget::Device)
+            }
+        );
+        let stage = first_stage("stages:\n  - model: m\n    target: auto\n");
+        assert_eq!(
+            classify_stage(&stage).unwrap(),
+            StageShape::Device {
+                target: Some(ExecutionTarget::Auto)
+            }
+        );
+        // A provider under target: device is ignored (local only).
+        let stage =
+            first_stage("stages:\n  - model: m\n    target: device\n    provider: deepseek\n");
+        assert_eq!(
+            classify_stage(&stage).unwrap(),
+            StageShape::Device {
+                target: Some(ExecutionTarget::Device)
+            }
+        );
+    }
+
+    #[test]
+    fn classify_stage_rejects_unknown_provider_server_target_and_provider_less_cloud() {
+        let cases = [
+            (
+                "stages:\n  - model: m\n    target: cloud\n    provider: nope\n",
+                "Unknown provider",
+            ),
+            (
+                "stages:\n  - model: m\n    target: server\n",
+                "target 'server' is not supported",
+            ),
+            (
+                "stages:\n  - model: m\n    target: cloud\n",
+                "requires a 'provider'",
+            ),
+            (
+                "stages:\n  - model: m\n    target: sideways\n",
+                "Unknown execution target",
+            ),
+        ];
+        for (yaml, expected) in cases {
+            let err = classify_stage(&first_stage(yaml)).expect_err(yaml);
+            let message = format!("{err:#}");
+            assert!(message.contains(expected), "{yaml}\n{message}");
+            assert!(message.contains("stage 'm'"), "{message}");
+        }
+    }
+
+    #[test]
+    fn apply_stage_options_copies_flat_yaml_options() {
+        let stage = first_stage(
+            "stages:\n  - id: llm\n    model: m\n    target: auto\n    provider: deepseek\n    cloud_model: deepseek-flash\n    system_prompt: Be terse.\n    max_tokens: 16\n    thinking: disabled\n",
+        );
+        let mut desc = StageDescriptor::new(stage.stage_id()).with_model(stage.model_id());
+        apply_stage_options(&mut desc, &stage);
+        let options = desc.options.expect("options copied");
+        assert_eq!(
+            options.get::<String>("cloud_model").as_deref(),
+            Some("deepseek-flash")
+        );
+        assert_eq!(
+            options.get::<String>("system_prompt").as_deref(),
+            Some("Be terse.")
+        );
+        assert_eq!(options.get::<u32>("max_tokens"), Some(16));
+        assert_eq!(
+            options.get::<String>("thinking").as_deref(),
+            Some("disabled")
+        );
+        assert_eq!(desc.name, "llm");
+        assert_eq!(desc.model.as_deref(), Some("m"));
+    }
+
+    // ── dry-run simulation under a fixed snapshot ───────────────────────────
+
+    #[derive(Debug)]
+    struct FixedDevice(ResourceSnapshot);
+
+    impl ResourceSnapshotProvider for FixedDevice {
+        fn current_snapshot(&self, _max_age: Duration) -> ResourceSnapshot {
+            self.0
+        }
+    }
+
+    fn quiet_authority() -> LocalAuthority {
+        LocalAuthority::new()
+            .with_resource_provider(Arc::new(FixedDevice(ResourceSnapshot::unknown())))
+    }
+
+    fn hybrid_descriptor() -> StageDescriptor {
+        let mut options = StageOptions::new();
+        options.set("cloud_model", "deepseek-flash");
+        // `with_provider` forces `target: cloud`; the hybrid shape sets Auto after it.
+        StageDescriptor::new("llm")
+            .with_model("functiongemma-270m-it")
+            .with_provider(IntegrationProvider::DeepSeek)
+            .with_target(ExecutionTarget::Auto)
+            .with_options(options)
+    }
+
+    fn text(s: &str) -> Envelope {
+        Envelope::new(EnvelopeKind::Text(s.to_string()))
+    }
+
+    #[test]
+    fn simulate_stage_follows_policy_under_a_fixed_snapshot() {
+        let metrics = DeviceMetrics::default();
+        let stage = hybrid_descriptor();
+
+        let authority = quiet_authority();
+        authority
+            .load_policies(b"deny_cloud_if:\n  - 'input.kind == \"text\"'\n")
+            .unwrap();
+        let denied = simulate_stage(
+            &authority,
+            &stage,
+            &text("hi"),
+            &metrics,
+            LocalAvailability::new(true),
+        )
+        .unwrap();
+        assert!(matches!(denied.policy.result, PolicyOutcome::Deny { .. }));
+        assert_eq!(denied.target.decision.result, ResolvedTarget::Device);
+        assert!(
+            denied.target.decision.reason.starts_with("policy_deny"),
+            "{}",
+            denied.target.decision.reason
+        );
+        assert_eq!(route_label(&denied.target.decision.result), "local");
+
+        let authority = quiet_authority();
+        authority
+            .load_policies(b"route_cloud_if:\n  - \"true\"\n")
+            .unwrap();
+        let preferred = simulate_stage(
+            &authority,
+            &stage,
+            &text("hi"),
+            &metrics,
+            LocalAvailability::new(true),
+        )
+        .unwrap();
+        assert!(matches!(
+            preferred.target.decision.result,
+            ResolvedTarget::Cloud { .. }
+        ));
+        assert!(
+            preferred
+                .target
+                .decision
+                .reason
+                .starts_with("policy_route_cloud"),
+            "{}",
+            preferred.target.decision.reason
+        );
+        assert_eq!(route_label(&preferred.target.decision.result), "cloud");
+
+        // No policy, quiet device: default local.
+        let plain = simulate_stage(
+            &quiet_authority(),
+            &stage,
+            &text("hi"),
+            &metrics,
+            LocalAvailability::new(true),
+        )
+        .unwrap();
+        assert_eq!(plain.policy.result, PolicyOutcome::Allow);
+        assert_eq!(plain.target.decision.result, ResolvedTarget::Device);
+        assert!(plain.target.decision.reason.contains("default_local"));
+
+        // No policy, stressed device: cloud.
+        let mut stressed = ResourceSnapshot::unknown();
+        stressed.memory_pressure = MemoryPressure::Critical;
+        let authority =
+            LocalAuthority::new().with_resource_provider(Arc::new(FixedDevice(stressed)));
+        let offloaded = simulate_stage(
+            &authority,
+            &stage,
+            &text("hi"),
+            &metrics,
+            LocalAvailability::new(true),
+        )
+        .unwrap();
+        assert!(matches!(
+            offloaded.target.decision.result,
+            ResolvedTarget::Cloud { .. }
+        ));
+        assert!(offloaded.target.decision.reason.contains("stress_memory"));
+    }
+
+    #[test]
+    fn simulate_stage_rejects_invalid_shared_options() {
+        let mut options = StageOptions::new();
+        options.set("max_tokens", 0);
+        let stage = StageDescriptor::new("llm").with_options(options);
+        let err = simulate_stage(
+            &quiet_authority(),
+            &stage,
+            &text("hi"),
+            &DeviceMetrics::default(),
+            LocalAvailability::new(true),
+        )
+        .expect_err("invalid option");
+        assert!(format!("{err:#}").contains("max_tokens"));
     }
 }
