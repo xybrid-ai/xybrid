@@ -67,4 +67,5 @@ pub use config::{
     has_xybrid_api_key, set_xybrid_api_key, set_xybrid_platform_url, xybrid_api_key,
     xybrid_platform_url, CloudBackend, CloudConfig,
 };
+pub use config::{platform_gateway_url, resolve_api_key_for, same_origin, url_origin};
 pub use error::CloudError;
