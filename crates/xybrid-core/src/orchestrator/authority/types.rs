@@ -362,6 +362,73 @@ impl Default for ExecutionOutcome {
     }
 }
 
+/// One stage decision: the policy outcome and the target it permits.
+///
+/// Produced by [`super::OrchestrationAuthority::resolve_stage`] from a single
+/// policy evaluation and a single resource snapshot, so the policy event, the
+/// routing event, and the dispatch target cannot disagree with each other.
+#[derive(Debug, Clone)]
+pub struct StageResolution {
+    /// The policy outcome for this input.
+    pub policy: AuthorityDecision<PolicyOutcome>,
+    /// The resolved target, already restricted by the policy outcome.
+    pub target: TargetResolution,
+}
+
+impl StageResolution {
+    /// Combine a policy decision and a target resolution, restricting the
+    /// target to the device whenever the policy forbids leaving it.
+    pub fn new(policy: AuthorityDecision<PolicyOutcome>, target: TargetResolution) -> Self {
+        Self { policy, target }.enforced()
+    }
+
+    /// True when the policy forbids inference leaving the device: the input
+    /// was denied, or it requires a transform that nothing can apply yet.
+    pub fn policy_requires_local(&self) -> bool {
+        !matches!(self.policy.result, PolicyOutcome::Allow)
+    }
+
+    /// Restrict the target to the device when the policy requires it.
+    ///
+    /// Idempotent. Returns `true` when a non-device target was overridden;
+    /// the previous target and reason are kept in the new reason so the
+    /// override stays explainable. Orchestrators call this immediately
+    /// before dispatch as defense in depth against custom authorities.
+    pub fn enforce(&mut self) -> bool {
+        if !self.policy_requires_local()
+            || matches!(self.target.decision.result, ResolvedTarget::Device)
+        {
+            return false;
+        }
+        let constraint = policy_local_constraint_reason(&self.policy.result)
+            .unwrap_or_else(|| "policy requires local execution".to_string());
+        let previous = std::mem::replace(&mut self.target.decision.result, ResolvedTarget::Device);
+        let previous_reason = std::mem::take(&mut self.target.decision.reason);
+        self.target.decision.reason =
+            format!("{constraint} (overrode {previous} decision: {previous_reason})");
+        true
+    }
+
+    /// [`Self::enforce`] by value.
+    pub fn enforced(mut self) -> Self {
+        self.enforce();
+        self
+    }
+}
+
+/// Routing-reason prefix for a policy outcome that forbids leaving the
+/// device, or `None` when the outcome permits cloud execution.
+pub fn policy_local_constraint_reason(outcome: &PolicyOutcome) -> Option<String> {
+    match outcome {
+        PolicyOutcome::Allow => None,
+        PolicyOutcome::Deny { reason } => Some(format!("policy_deny: {reason}")),
+        PolicyOutcome::Transform { transforms } => Some(format!(
+            "policy_transform_unsupported: {}",
+            transforms.join(",")
+        )),
+    }
+}
+
 /// Get current timestamp in milliseconds.
 pub fn now_ms() -> u64 {
     SystemTime::now()

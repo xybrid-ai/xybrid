@@ -16,9 +16,10 @@
 //!
 //! ## Runtime Flow
 //!
-//! 1. Receive input envelope
-//! 2. Evaluate policy
-//! 3. Decide route
+//! 1. Receive input envelope and apply the stage's shared generation options
+//! 2. Evaluate policy and decide the route in one authority call
+//!    (one policy evaluation, one resource snapshot; policy restricts the target)
+//! 3. Re-check the policy/target consistency at dispatch
 //! 4. Execute model (delegates to [`Executor`])
 //! 5. Emit telemetry
 //!
@@ -40,7 +41,7 @@ pub use authority::{
     AbortReason, AuthorityDecision, DecisionSource, ExecutionOutcome, LocalAuthority,
     ModelConstraints, ModelRequest, ModelSelection, ModelSource, OrchestrationAuthority,
     OutcomeCategory, PolicyOutcome, PolicyRequest, RemoteAuthority, ResolvedTarget, SignalContext,
-    StageContext, TargetResolution,
+    StageContext, StageResolution, TargetResolution,
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -51,15 +52,13 @@ use crate::context::{DeviceMetrics, StageDescriptor};
 use crate::control_sync::ControlSync;
 use crate::device::ResourceMonitor;
 use crate::event_bus::{EventBus, EventContext, OrchestratorEvent};
+use crate::executor::prepare_stage_input;
 use crate::executor::{Executor, ExecutorError};
 use crate::ir::Envelope;
 use crate::streaming::manager::{StreamManager, StreamManagerConfig as StreamConfig};
 use crate::telemetry::Telemetry;
 use crate::tracing as trace;
-use policy_engine::{DefaultPolicyEngine, PolicyEngine};
-use routing_engine::{
-    DefaultRoutingEngine, LocalAvailability, RouteTarget, RoutingDecision, RoutingEngine,
-};
+use routing_engine::{LocalAvailability, RouteTarget, RoutingDecision};
 use std::sync::Arc;
 use thiserror::Error;
 use tokio::task;
@@ -91,6 +90,10 @@ pub struct StageExecutionResult {
     pub output: Envelope,
     pub routing_decision: RoutingDecision,
     pub latency_ms: u32,
+    /// Adapter that actually served the stage (e.g. `template-executor`,
+    /// `cloud:deepseek:gateway`). The routing decision is what was chosen;
+    /// this is what ran.
+    pub adapter: String,
 }
 
 /// Execution mode for the orchestrator.
@@ -126,10 +129,6 @@ pub struct Orchestrator {
     /// The orchestration authority for routing and policy decisions.
     /// Default: LocalAuthority (offline, no phone-home).
     authority: Box<dyn OrchestrationAuthority>,
-    /// Policy engine for backward compatibility (load_policies, redact).
-    policy_engine: Box<dyn PolicyEngine>,
-    /// Routing engine for backward compatibility (record_feedback).
-    routing_engine: Box<dyn RoutingEngine>,
     executor: Executor,
     stream_manager: StreamManager,
     event_bus: EventBus,
@@ -177,8 +176,6 @@ impl Orchestrator {
     /// Creates a new orchestrator with custom components.
     pub fn with_all(
         authority: Box<dyn OrchestrationAuthority>,
-        policy_engine: Box<dyn PolicyEngine>,
-        routing_engine: Box<dyn RoutingEngine>,
         executor: Executor,
         stream_manager: StreamManager,
         event_bus: EventBus,
@@ -189,8 +186,6 @@ impl Orchestrator {
     ) -> Self {
         Self {
             authority,
-            policy_engine,
-            routing_engine,
             executor,
             stream_manager,
             event_bus,
@@ -226,32 +221,6 @@ impl Orchestrator {
         let resource_monitor = ResourceMonitor::global();
         Self {
             authority,
-            policy_engine: Box::new(DefaultPolicyEngine::with_default_policy()),
-            routing_engine: Box::new(DefaultRoutingEngine::new()),
-            executor: Executor::new(),
-            stream_manager: StreamManager::new(),
-            event_bus: EventBus::new(),
-            telemetry,
-            resource_monitor,
-            control_sync: None,
-            execution_mode: ExecutionMode::Batch,
-        }
-    }
-
-    /// Creates a new orchestrator with custom policy and routing engines.
-    ///
-    /// Note: This uses `LocalAuthority` internally. For custom authority,
-    /// use `with_authority()` instead.
-    pub fn with_engines(
-        policy_engine: Box<dyn PolicyEngine>,
-        routing_engine: Box<dyn RoutingEngine>,
-    ) -> Self {
-        let telemetry = Arc::new(Telemetry::new());
-        let resource_monitor = ResourceMonitor::global();
-        Self {
-            authority: Box::new(LocalAuthority::new()),
-            policy_engine,
-            routing_engine,
             executor: Executor::new(),
             stream_manager: StreamManager::new(),
             event_bus: EventBus::new(),
@@ -270,8 +239,6 @@ impl Orchestrator {
         let resource_monitor = ResourceMonitor::global();
         Self {
             authority: Box::new(LocalAuthority::new()),
-            policy_engine: Box::new(DefaultPolicyEngine::with_default_policy()),
-            routing_engine: Box::new(DefaultRoutingEngine::new()),
             executor: Executor::new(),
             stream_manager: StreamManager::with_config(config),
             event_bus: EventBus::new(),
@@ -311,15 +278,37 @@ impl Orchestrator {
         });
         self.telemetry.log_stage_start(&stage.name);
 
-        // Step 2: Evaluate policy via OrchestrationAuthority
+        // Step 2: Prepare the input once (shared generation options), then
+        // evaluate policy and resolve the target in ONE authority call so the
+        // policy event, the routing event and the dispatch target agree.
+        let prepared_input = prepare_stage_input(stage, input)
+            .map_err(|e| OrchestratorError::ExecutionFailed(e.to_string()))?;
         let policy_request = PolicyRequest {
             stage_id: stage.name.clone(),
-            envelope: input.clone(),
+            envelope: prepared_input.clone(),
             metrics: metrics.clone(),
         };
-        let policy_decision = self.authority.apply_policy(&policy_request);
+        let stage_context = StageContext {
+            stage_id: stage.name.clone(),
+            model_id: Self::effective_model_id(stage),
+            input_kind: prepared_input.kind.clone(),
+            metrics: metrics.clone(),
+            resource_monitor: self.resource_monitor.clone(),
+            explicit_target: stage.target.clone(),
+            local_availability: Some(availability.clone()),
+            device_class: Some(metrics.canonical_device_class()),
+            device_class_schema_version: Some(DEVICE_CLASS_SCHEMA_VERSION),
+        };
+        // Defense in depth: re-apply the policy restriction right before
+        // dispatch, even though the built-in authorities already did.
+        let StageResolution {
+            policy: policy_decision,
+            target: target_resolution,
+        } = self
+            .authority
+            .resolve_stage(&policy_request, &stage_context)
+            .enforced();
         let policy_allowed = policy_decision.result.is_allowed();
-        let needs_transform = matches!(&policy_decision.result, PolicyOutcome::Transform { .. });
 
         // Emit policy evaluation event
         self.event_bus.publish(OrchestratorEvent::PolicyEvaluated {
@@ -333,26 +322,6 @@ impl Orchestrator {
             policy_allowed,
             Some(&policy_decision.reason),
         );
-
-        // Apply redaction if transforms needed (use policy_engine for actual redaction)
-        let mut redacted_input = input.clone();
-        if needs_transform {
-            self.policy_engine.redact(&mut redacted_input);
-        }
-
-        // Step 3: Resolve target via OrchestrationAuthority
-        let stage_context = StageContext {
-            stage_id: stage.name.clone(),
-            model_id: Self::effective_model_id(stage),
-            input_kind: input.kind.clone(),
-            metrics: metrics.clone(),
-            resource_monitor: self.resource_monitor.clone(),
-            explicit_target: stage.target.clone(),
-            local_availability: Some(availability.clone()),
-            device_class: Some(metrics.canonical_device_class()),
-            device_class_schema_version: Some(DEVICE_CLASS_SCHEMA_VERSION),
-        };
-        let target_resolution = self.authority.resolve_target_with_feedback(&stage_context);
 
         // Convert ResolvedTarget to RoutingDecision for backward compatibility
         let routing_decision =
@@ -385,7 +354,9 @@ impl Orchestrator {
             .log_execution_start(&stage.name, &routing_decision.target.to_json_string());
 
         let target = routing_decision.target.to_json_string();
-        let execution_result = self.executor.execute_stage(stage, &redacted_input, &target);
+        let execution_result = self
+            .executor
+            .execute_prepared(stage, &prepared_input, &target);
 
         let (output, stage_metadata, success, error_msg) = match execution_result {
             Ok((out, meta)) => (out, meta, true, None),
@@ -453,10 +424,6 @@ impl Orchestrator {
         );
         self.authority.record_outcome(&outcome);
 
-        // Also record feedback for backward compatibility with routing engine
-        self.routing_engine
-            .record_feedback(&routing_decision, latency_ms);
-
         // Emit stage completion event and telemetry
         self.event_bus.publish(OrchestratorEvent::StageComplete {
             stage_name: stage.name.clone(),
@@ -476,6 +443,7 @@ impl Orchestrator {
             output,
             routing_decision,
             latency_ms,
+            adapter: stage_metadata.adapter,
         })
     }
 
@@ -557,15 +525,37 @@ impl Orchestrator {
         });
         self.telemetry.log_stage_start(&stage.name);
 
-        // Step 2: Evaluate policy via OrchestrationAuthority
+        // Step 2: Prepare the input once (shared generation options), then
+        // evaluate policy and resolve the target in ONE authority call so the
+        // policy event, the routing event and the dispatch target agree.
+        let prepared_input = prepare_stage_input(stage, input)
+            .map_err(|e| OrchestratorError::ExecutionFailed(e.to_string()))?;
         let policy_request = PolicyRequest {
             stage_id: stage.name.clone(),
-            envelope: input.clone(),
+            envelope: prepared_input.clone(),
             metrics: metrics.clone(),
         };
-        let policy_decision = self.authority.apply_policy(&policy_request);
+        let stage_context = StageContext {
+            stage_id: stage.name.clone(),
+            model_id: Self::effective_model_id(stage),
+            input_kind: prepared_input.kind.clone(),
+            metrics: metrics.clone(),
+            resource_monitor: self.resource_monitor.clone(),
+            explicit_target: stage.target.clone(),
+            local_availability: Some(availability.clone()),
+            device_class: Some(metrics.canonical_device_class()),
+            device_class_schema_version: Some(DEVICE_CLASS_SCHEMA_VERSION),
+        };
+        // Defense in depth: re-apply the policy restriction right before
+        // dispatch, even though the built-in authorities already did.
+        let StageResolution {
+            policy: policy_decision,
+            target: target_resolution,
+        } = self
+            .authority
+            .resolve_stage(&policy_request, &stage_context)
+            .enforced();
         let policy_allowed = policy_decision.result.is_allowed();
-        let needs_transform = matches!(&policy_decision.result, PolicyOutcome::Transform { .. });
 
         // Emit policy evaluation event
         self.event_bus.publish(OrchestratorEvent::PolicyEvaluated {
@@ -579,26 +569,6 @@ impl Orchestrator {
             policy_allowed,
             Some(&policy_decision.reason),
         );
-
-        // Apply redaction if transforms needed (use policy_engine for actual redaction)
-        let mut redacted_input = input.clone();
-        if needs_transform {
-            self.policy_engine.redact(&mut redacted_input);
-        }
-
-        // Step 3: Resolve target via OrchestrationAuthority
-        let stage_context = StageContext {
-            stage_id: stage.name.clone(),
-            model_id: Self::effective_model_id(stage),
-            input_kind: input.kind.clone(),
-            metrics: metrics.clone(),
-            resource_monitor: self.resource_monitor.clone(),
-            explicit_target: stage.target.clone(),
-            local_availability: Some(availability.clone()),
-            device_class: Some(metrics.canonical_device_class()),
-            device_class_schema_version: Some(DEVICE_CLASS_SCHEMA_VERSION),
-        };
-        let target_resolution = self.authority.resolve_target_with_feedback(&stage_context);
 
         // Convert ResolvedTarget to RoutingDecision for backward compatibility
         let routing_decision =
@@ -623,7 +593,7 @@ impl Orchestrator {
 
         // Execute model in blocking thread pool (adapter execution may be CPU-bound)
         let stage_clone = stage.clone();
-        let redacted_input_clone = redacted_input.clone();
+        let prepared_input_clone = prepared_input.clone();
         let target = routing_decision.target.to_json_string();
 
         self.event_bus.publish(OrchestratorEvent::ExecutionStarted {
@@ -636,7 +606,7 @@ impl Orchestrator {
 
         let mut executor_clone = self.executor.clone();
         let execution_result = task::spawn_blocking(move || {
-            executor_clone.execute_stage(&stage_clone, &redacted_input_clone, &target)
+            executor_clone.execute_prepared(&stage_clone, &prepared_input_clone, &target)
         })
         .await
         .map_err(|e| OrchestratorError::ExecutionFailed(format!("Task join error: {}", e)))?;
@@ -706,10 +676,6 @@ impl Orchestrator {
         );
         self.authority.record_outcome(&outcome);
 
-        // Also record feedback for backward compatibility with routing engine
-        self.routing_engine
-            .record_feedback(&routing_decision, latency_ms);
-
         // Emit stage completion event
         self.event_bus.publish(OrchestratorEvent::StageComplete {
             stage_name: stage.name.clone(),
@@ -729,6 +695,7 @@ impl Orchestrator {
             output,
             routing_decision,
             latency_ms,
+            adapter: stage_metadata.adapter,
         })
     }
 
@@ -848,10 +815,13 @@ impl Orchestrator {
         self.stream_manager.pop_output_chunk()
     }
 
-    /// Load policies into the policy engine.
+    /// Load (replace) the policy bundle used for every subsequent stage decision.
+    ///
+    /// The bundle is validated and compiled before it replaces the active one;
+    /// on error the previous policy stays in effect.
     pub fn load_policies(&mut self, bundle_bytes: Vec<u8>) -> OrchestratorResult<()> {
-        self.policy_engine
-            .load_policies(bundle_bytes)
+        self.authority
+            .load_policies(&bundle_bytes)
             .map_err(OrchestratorError::PolicyEvaluationFailed)
     }
 
@@ -1105,7 +1075,9 @@ mod tests {
             metrics: DeviceMetrics::default(),
             resource_monitor: ResourceMonitor::global(),
             explicit_target: None,
-            local_availability: None,
+            // Hysteresis only matters when a local leg exists; without one
+            // the decision is settled earlier as model_unavailable.
+            local_availability: Some(LocalAvailability::new(true)),
             device_class: None,
             device_class_schema_version: None,
         }
@@ -1395,5 +1367,282 @@ mod tests {
         assert_eq!(outcome.category, None);
         drop(recorded);
         assert_no_hysteresis(&authority, "hard-fail-model");
+    }
+
+    // ── Phase 3: policy is a dispatch invariant ─────────────────────────────
+
+    const DENY_TEXT_POLICY: &[u8] = b"deny_cloud_if:\n  - 'input.kind == \"text\"'\n";
+
+    /// A stage that declares `target: cloud` with a DeepSeek provider and no
+    /// local bundle — the shape a policy denial must refuse to run on cloud.
+    fn explicit_cloud_stage() -> StageDescriptor {
+        StageDescriptor::new("llm")
+            .with_model("functiongemma-270m-it")
+            .with_target(crate::pipeline::ExecutionTarget::Cloud)
+            .with_provider(crate::pipeline::IntegrationProvider::DeepSeek)
+    }
+
+    /// Quiet fixed device plus a capturing "cloud" mock, returned so tests can
+    /// assert on how many cloud calls actually happened.
+    fn orchestrator_with_capturing_cloud() -> (Orchestrator, Arc<MockRuntimeAdapter>) {
+        let mut orchestrator =
+            Orchestrator::with_authority(Box::new(LocalAuthority::new().with_resource_provider(
+                Arc::new(FixedResourceProvider::new(ResourceSnapshot::unknown())),
+            )));
+        let mut cloud = MockRuntimeAdapter::with_text_output("cloud output").with_name("cloud");
+        cloud.load_model("/mock/cloud").unwrap();
+        let cloud = Arc::new(cloud);
+        orchestrator.executor_mut().register_adapter(cloud.clone());
+        (orchestrator, cloud)
+    }
+
+    fn routing_events(subscription: &crate::event_bus::Subscription) -> Vec<(String, String)> {
+        let mut routed = Vec::new();
+        while let Ok(event) = subscription.try_recv() {
+            if let OrchestratorEvent::RoutingDecided { target, reason, .. } = event {
+                routed.push((target, reason));
+            }
+        }
+        routed
+    }
+
+    fn policy_events(subscription: &crate::event_bus::Subscription) -> Vec<(bool, Option<String>)> {
+        let mut evaluated = Vec::new();
+        while let Ok(event) = subscription.try_recv() {
+            if let OrchestratorEvent::PolicyEvaluated {
+                allowed, reason, ..
+            } = event
+            {
+                evaluated.push((allowed, reason));
+            }
+        }
+        evaluated
+    }
+
+    #[test]
+    fn load_policies_on_default_orchestrator_reaches_authority() {
+        // Regression: `Orchestrator::load_policies` used to write into a dead
+        // engine while decisions came from the authority's own empty one.
+        let mut orchestrator = Orchestrator::new();
+        let mut local = MockRuntimeAdapter::with_text_output("local output").with_name("onnx");
+        local.load_model("/mock/model.onnx").unwrap();
+        orchestrator
+            .executor_mut()
+            .register_adapter(Arc::new(local));
+        orchestrator
+            .load_policies(DENY_TEXT_POLICY.to_vec())
+            .expect("policy loads");
+        let subscription = orchestrator.event_bus().subscribe();
+
+        // Text input, no local model: without the policy this routes to cloud
+        // (model_unavailable). The policy must force it local instead.
+        let result = orchestrator
+            .execute_stage(
+                &StageDescriptor::new("probe"),
+                &text_envelope("hello"),
+                &DeviceMetrics::default(),
+                &LocalAvailability::new(false),
+            )
+            .expect("local mock serves the stage");
+
+        assert_eq!(result.routing_decision.target.as_str(), "local");
+        assert!(
+            result.routing_decision.reason.contains("policy_deny"),
+            "{}",
+            result.routing_decision.reason
+        );
+        assert_eq!(result.adapter, "onnx");
+        let routed = routing_events(&subscription);
+        assert_eq!(routed.len(), 1);
+        assert_eq!(routed[0].0, "local");
+    }
+
+    #[test]
+    fn policy_deny_overrides_explicit_cloud_stage_in_sync_dispatch() {
+        let (mut orchestrator, cloud) = orchestrator_with_capturing_cloud();
+        orchestrator
+            .load_policies(DENY_TEXT_POLICY.to_vec())
+            .expect("policy loads");
+        let subscription = orchestrator.event_bus().subscribe();
+
+        let err = orchestrator
+            .execute_stage(
+                &explicit_cloud_stage(),
+                &text_envelope("hello"),
+                &DeviceMetrics::default(),
+                &LocalAvailability::new(true),
+            )
+            .expect_err("no local bundle: must fail locally, never run on cloud");
+
+        assert!(err.to_string().contains("no local bundle"), "{err}");
+        assert_eq!(cloud.call_count(), 0, "cloud must not be contacted");
+        let routed = routing_events(&subscription);
+        assert_eq!(routed.len(), 1);
+        assert_eq!(routed[0].0, "local");
+        assert!(routed[0].1.contains("policy_deny"), "{}", routed[0].1);
+    }
+
+    #[test]
+    fn policy_deny_overrides_explicit_cloud_stage_in_async_dispatch() {
+        let (mut orchestrator, cloud) = orchestrator_with_capturing_cloud();
+        orchestrator
+            .load_policies(DENY_TEXT_POLICY.to_vec())
+            .expect("policy loads");
+        let subscription = orchestrator.event_bus().subscribe();
+
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let err = runtime
+            .block_on(orchestrator.execute_stage_async(
+                &explicit_cloud_stage(),
+                &text_envelope("hello"),
+                &DeviceMetrics::default(),
+                &LocalAvailability::new(true),
+            ))
+            .expect_err("no local bundle: must fail locally, never run on cloud");
+
+        assert!(err.to_string().contains("no local bundle"), "{err}");
+        assert_eq!(cloud.call_count(), 0, "cloud must not be contacted");
+        let routed = routing_events(&subscription);
+        assert_eq!(routed.len(), 1);
+        assert_eq!(routed[0].0, "local");
+        assert!(routed[0].1.contains("policy_deny"), "{}", routed[0].1);
+    }
+
+    #[test]
+    fn allowed_explicit_cloud_stage_runs_on_cloud_exactly_once() {
+        let (mut orchestrator, cloud) = orchestrator_with_capturing_cloud();
+        let subscription = orchestrator.event_bus().subscribe();
+
+        let result = orchestrator
+            .execute_stage(
+                &explicit_cloud_stage(),
+                &text_envelope("hello"),
+                &DeviceMetrics::default(),
+                &LocalAvailability::new(true),
+            )
+            .expect("cloud mock serves the stage");
+
+        assert_eq!(result.routing_decision.target.as_str(), "cloud");
+        assert_eq!(result.adapter, "cloud:deepseek:gateway");
+        assert_eq!(cloud.call_count(), 1);
+        let sent = cloud.captured_inputs();
+        assert_eq!(
+            sent[0].metadata.get("model").map(String::as_str),
+            Some("functiongemma-270m-it")
+        );
+        let evaluated = policy_events(&subscription);
+        assert_eq!(evaluated.len(), 1);
+        assert!(evaluated[0].0, "policy event must say allowed");
+    }
+
+    #[test]
+    fn contradictory_custom_authority_is_normalized_at_dispatch() {
+        // A custom authority that says "deny" but hands back a cloud target —
+        // and overrides `resolve_stage` without enforcing — must not cause
+        // cloud inference.
+        struct ContradictoryAuthority;
+
+        impl OrchestrationAuthority for ContradictoryAuthority {
+            fn apply_policy(&self, _request: &PolicyRequest) -> AuthorityDecision<PolicyOutcome> {
+                AuthorityDecision::local(
+                    PolicyOutcome::Deny {
+                        reason: "contradictory deny".to_string(),
+                    },
+                    "contradictory deny",
+                )
+            }
+
+            fn resolve_target(&self, _context: &StageContext) -> AuthorityDecision<ResolvedTarget> {
+                AuthorityDecision::local(
+                    ResolvedTarget::Cloud {
+                        provider: "xybrid".to_string(),
+                    },
+                    "contradictory cloud",
+                )
+            }
+
+            fn resolve_stage(
+                &self,
+                request: &PolicyRequest,
+                context: &StageContext,
+            ) -> StageResolution {
+                // Deliberately bypass `StageResolution::new` (which enforces).
+                StageResolution {
+                    policy: self.apply_policy(request),
+                    target: TargetResolution::new(
+                        self.resolve_target(context),
+                        context.model_id.clone(),
+                        None,
+                    ),
+                }
+            }
+
+            fn select_model(&self, request: &ModelRequest) -> AuthorityDecision<ModelSelection> {
+                AuthorityDecision::local(
+                    ModelSelection {
+                        model_id: request.model_id.clone(),
+                        variant: None,
+                        source: ModelSource::Cloud {
+                            provider: "xybrid".to_string(),
+                        },
+                    },
+                    "n/a",
+                )
+            }
+
+            fn name(&self) -> &str {
+                "contradictory"
+            }
+        }
+
+        let mut orchestrator = Orchestrator::with_authority(Box::new(ContradictoryAuthority));
+        let mut cloud = MockRuntimeAdapter::with_text_output("cloud output").with_name("cloud");
+        cloud.load_model("/mock/cloud").unwrap();
+        let cloud = Arc::new(cloud);
+        orchestrator.executor_mut().register_adapter(cloud.clone());
+        let subscription = orchestrator.event_bus().subscribe();
+
+        let err = orchestrator
+            .execute_stage(
+                &explicit_cloud_stage(),
+                &text_envelope("hello"),
+                &DeviceMetrics::default(),
+                &LocalAvailability::new(true),
+            )
+            .expect_err("denied stage without a bundle fails locally");
+
+        assert!(err.to_string().contains("no local bundle"), "{err}");
+        assert_eq!(cloud.call_count(), 0);
+        let routed = routing_events(&subscription);
+        assert_eq!(routed[0].0, "local");
+        assert!(routed[0].1.contains("policy_deny"), "{}", routed[0].1);
+        assert!(routed[0].1.contains("overrode"), "{}", routed[0].1);
+    }
+
+    #[test]
+    fn invalid_policy_reload_is_rejected_and_previous_policy_holds() {
+        let (mut orchestrator, cloud) = orchestrator_with_capturing_cloud();
+        orchestrator
+            .load_policies(DENY_TEXT_POLICY.to_vec())
+            .expect("policy loads");
+
+        let err = orchestrator
+            .load_policies(b"deny_cloud_if:\n  - 'metrics.network_rtt > 1'\n".to_vec())
+            .expect_err("unknown operand is rejected");
+        assert!(
+            matches!(err, OrchestratorError::PolicyEvaluationFailed(ref msg) if msg.contains("unknown operand")),
+            "{err:?}"
+        );
+
+        let err = orchestrator
+            .execute_stage(
+                &explicit_cloud_stage(),
+                &text_envelope("hello"),
+                &DeviceMetrics::default(),
+                &LocalAvailability::new(true),
+            )
+            .expect_err("still denied");
+        assert!(err.to_string().contains("no local bundle"), "{err}");
+        assert_eq!(cloud.call_count(), 0);
     }
 }

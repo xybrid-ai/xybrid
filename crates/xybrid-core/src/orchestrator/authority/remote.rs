@@ -9,6 +9,16 @@
 //! short TTL cache. Policy and model-selection endpoints still fall back to
 //! `LocalAuthority` until the platform exposes those APIs.
 //!
+//! ## Policy comes first
+//!
+//! Remote advice is consulted only for decisions the local policy, an
+//! explicit pipeline target, local availability, or a policy cloud preference
+//! did not already settle. A denied input never triggers an advice request
+//! and never reaches cloud, whatever the cache holds; remote advice that is
+//! not feasible (a device target when no local model exists) is ignored.
+//! Every decision takes one resource snapshot and evaluates the policy once,
+//! shared with the local fallback.
+//!
 //! ## Future Capabilities
 //!
 //! - **Fleet-wide learning**: Decisions informed by similar devices' experiences
@@ -22,10 +32,13 @@
 //! fall back to `LocalAuthority` with `DecisionSource::Default`. This ensures
 //! xybrid always works, even without connectivity.
 
-use super::local::LocalAuthority;
+use super::local::{LocalAuthority, PreparedStage};
 use super::types::*;
 use super::OrchestrationAuthority;
 use crate::context::DeviceMetrics;
+use crate::ir::Envelope;
+use crate::orchestrator::routing_engine::LocalAvailability;
+use crate::pipeline::ExecutionTarget;
 use serde::Deserialize;
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Mutex, MutexGuard};
@@ -344,9 +357,86 @@ impl RemoteAuthority {
         let now = now_ms();
         self.target_cache_guard().get_fresh(&key, now)
     }
+
+    /// Remote advice may only decide what the local policy, an explicit
+    /// target, local availability, and a policy cloud preference left open.
+    fn advice_applicable(
+        context: &StageContext,
+        prepared: &PreparedStage,
+        availability: &LocalAvailability,
+    ) -> bool {
+        !prepared.policy.requires_local()
+            && matches!(context.explicit_target, None | Some(ExecutionTarget::Auto))
+            && availability.local_model_exists
+            && !prepared.policy.prefers_cloud()
+    }
+
+    /// Advice that names a target the device cannot honour is discarded.
+    fn advice_is_feasible(
+        decision: &AuthorityDecision<ResolvedTarget>,
+        availability: &LocalAvailability,
+    ) -> bool {
+        match decision.result {
+            ResolvedTarget::Device => availability.local_model_exists,
+            ResolvedTarget::Cloud { .. } | ResolvedTarget::Server { .. } => true,
+        }
+    }
+
+    /// Resolve a target from an already-prepared decision, consulting cached
+    /// or fresh remote advice only when it is applicable.
+    fn resolve_prepared(
+        &self,
+        context: &StageContext,
+        prepared: PreparedStage,
+    ) -> TargetResolution {
+        let availability = context.local_availability.clone().unwrap_or_else(|| {
+            LocalAvailability::new(self.fallback.check_model_exists(&context.model_id))
+        });
+
+        if !Self::advice_applicable(context, &prepared, &availability) {
+            // Settled locally: denied/transform inputs, explicit targets,
+            // missing local models and policy preferences never ask the
+            // backend. The fallback's own precedence produces the reason.
+            return self.fallback.resolve_prepared(context, prepared);
+        }
+
+        let live_context = StageContext {
+            metrics: prepared.metrics.clone(),
+            local_availability: Some(availability.clone()),
+            ..context.clone()
+        };
+        let signal = prepared.signal;
+        let hint = self.fallback.reliability_hint(&context.model_id, signal);
+
+        let advice = self
+            .cached_target_advice(&live_context, &prepared.metrics)
+            .or_else(|| self.fetch_target_advice(&live_context, &prepared.metrics))
+            .filter(|decision| Self::advice_is_feasible(decision, &availability));
+        if let Some(decision) = advice {
+            return TargetResolution::new(decision, context.model_id.clone(), Some(signal))
+                .with_reliability_hint(hint);
+        }
+
+        // Remote unavailable or unusable: resolve locally with the same
+        // prepared metrics and policy result — never re-evaluate or re-sample.
+        let mut resolution = self.fallback.resolve_prepared(&live_context, prepared);
+        resolution.decision.source = DecisionSource::Default;
+        resolution.decision.reason = format!(
+            "Fallback to local (remote unavailable): {}",
+            resolution.decision.reason
+        );
+        resolution
+    }
 }
 
 impl OrchestrationAuthority for RemoteAuthority {
+    fn load_policies(&self, bundle: &[u8]) -> Result<(), String> {
+        // Load first; only a successful load invalidates the advice cache.
+        self.fallback.load_policies(bundle)?;
+        self.target_cache_guard().clear();
+        Ok(())
+    }
+
     fn apply_policy(&self, request: &PolicyRequest) -> AuthorityDecision<PolicyOutcome> {
         // TODO: Call backend endpoint
         // POST /v1/authority/policy
@@ -368,38 +458,31 @@ impl OrchestrationAuthority for RemoteAuthority {
     }
 
     fn resolve_target_with_feedback(&self, context: &StageContext) -> TargetResolution {
-        // Mirror LocalAuthority's live overlay so the SignalContext attached
-        // to a TargetResolution reflects the same real-time resource state
-        // the routing decision is implicitly conditioned on. Without this
-        // overlay, ExecutionOutcome.signal_context is bucketed under stale
-        // pre-run device metrics, and the embedded LocalAuthority's
-        // reliability history grows under buckets that no live request ever
-        // queries — silently disabling the history-bias circuit breaker.
-        let snapshot = context
-            .resource_monitor
-            .current_snapshot(Duration::from_millis(500));
-        let live_metrics = context.metrics.with_live_snapshot(snapshot);
-        let signal = Some(SignalContext::from_metrics(&live_metrics));
-        let live_context = StageContext {
-            metrics: live_metrics.clone(),
-            ..context.clone()
-        };
-
-        if let Some(decision) = self.cached_target_advice(&live_context, &live_metrics) {
-            return TargetResolution::new(decision, context.model_id.clone(), signal);
-        }
-
-        if let Some(decision) = self.fetch_target_advice(&live_context, &live_metrics) {
-            return TargetResolution::new(decision, context.model_id.clone(), signal);
-        }
-
-        let mut resolution = self.fallback.resolve_target_with_feedback(&live_context);
-        resolution.decision.source = DecisionSource::Default;
-        resolution.decision.reason = format!(
-            "Fallback to local (remote unavailable): {}",
-            resolution.decision.reason
+        let envelope = Envelope::new(context.input_kind.clone());
+        let prepared = self.fallback.prepare_stage(
+            &context.stage_id,
+            &envelope,
+            &context.metrics,
+            &context.resource_monitor,
         );
-        resolution
+        self.resolve_prepared(context, prepared)
+    }
+
+    fn resolve_stage(&self, request: &PolicyRequest, context: &StageContext) -> StageResolution {
+        let prepared = self.fallback.prepare_stage(
+            &request.stage_id,
+            &request.envelope,
+            &context.metrics,
+            &context.resource_monitor,
+        );
+        let mut policy = LocalAuthority::policy_decision(&prepared.policy);
+        policy.source = DecisionSource::Default;
+        policy.reason = format!(
+            "Fallback to local (remote not implemented): {}",
+            policy.reason
+        );
+        let target = self.resolve_prepared(context, prepared);
+        StageResolution::new(policy, target)
     }
 
     fn select_model(&self, request: &ModelRequest) -> AuthorityDecision<ModelSelection> {
@@ -441,7 +524,6 @@ mod tests {
     use crate::context::DeviceMetrics;
     use crate::device::ResourceMonitor;
     use crate::ir::{Envelope, EnvelopeKind};
-    use crate::orchestrator::routing_engine::LocalAvailability;
     use std::io::{Read, Write};
     use std::net::TcpListener;
     use std::sync::mpsc;
@@ -463,10 +545,21 @@ mod tests {
             metrics: default_metrics(),
             resource_monitor: ResourceMonitor::global(),
             explicit_target: None,
-            local_availability: None,
+            // Remote advice is only consulted when a local leg exists; a
+            // missing model is settled locally (model_unavailable) first.
+            local_availability: Some(LocalAvailability::new(true)),
             device_class: None,
             device_class_schema_version: None,
         }
+    }
+
+    /// A loopback URL nothing listens on, so the advice request fails fast
+    /// (connection refused) instead of reaching a real host.
+    fn unreachable_endpoint() -> String {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind probe port");
+        let addr = listener.local_addr().expect("probe addr");
+        drop(listener);
+        format!("http://{}", addr)
     }
 
     fn context_with_device_class(endpoint_stage: &str, device_class: &str) -> StageContext {
@@ -552,7 +645,7 @@ mod tests {
 
     #[test]
     fn test_remote_authority_target_resolution_fallback() {
-        let authority = RemoteAuthority::new("https://api.xybrid.dev");
+        let authority = RemoteAuthority::new(&unreachable_endpoint());
         let context = default_context("test");
 
         let decision = authority.resolve_target(&context);
@@ -860,5 +953,212 @@ mod tests {
 
         // Should not panic
         authority.record_outcome(&outcome);
+    }
+
+    // ── Phase 3: policy before advice ───────────────────────────────────────
+
+    const DENY_TEXT_POLICY: &[u8] = b"deny_cloud_if:\n  - 'input.kind == \"text\"'\n";
+
+    fn assert_no_request(rx: &mpsc::Receiver<String>) {
+        assert!(
+            rx.recv_timeout(Duration::from_millis(200)).is_err(),
+            "no advice request must reach the backend"
+        );
+    }
+
+    #[test]
+    fn remote_load_policies_forwards_to_fallback_and_clears_cache() {
+        let endpoint = spawn_advice_server(
+            r#"{"target":"cloud","provider":"openai","reason":"fleet prefers cloud","confidence":0.9,"ttl_ms":30000}"#,
+            1,
+        );
+        let authority = RemoteAuthority::new(&endpoint);
+        let context = default_context("reload");
+
+        let primed = authority.resolve_target(&context);
+        assert_eq!(primed.source, DecisionSource::Remote);
+        assert!(!authority.target_cache_guard().entries.is_empty());
+
+        authority
+            .load_policies(DENY_TEXT_POLICY)
+            .expect("deny policy loads through the remote authority");
+        assert!(authority.target_cache_guard().entries.is_empty());
+
+        let denied = authority.resolve_target(&context);
+        assert_eq!(denied.result, ResolvedTarget::Device);
+        assert!(
+            denied.reason.starts_with("policy_deny"),
+            "{}",
+            denied.reason
+        );
+    }
+
+    #[test]
+    fn remote_load_policies_failure_changes_nothing() {
+        let endpoint = spawn_advice_server(
+            r#"{"target":"cloud","provider":"openai","reason":"fleet","confidence":0.9,"ttl_ms":30000}"#,
+            1,
+        );
+        let authority = RemoteAuthority::new(&endpoint);
+        let context = default_context("bad-reload");
+        let _ = authority.resolve_target(&context);
+
+        let err = authority
+            .load_policies(b"deny_cloud_if:\n  - 'metrics.network_rtt > 1'\n")
+            .expect_err("invalid bundle is rejected");
+        assert!(err.contains("unknown operand"), "{err}");
+
+        // Cache untouched: the next resolution is served from it.
+        let cached = authority.resolve_target(&context);
+        assert_eq!(cached.source, DecisionSource::Cached);
+    }
+
+    #[test]
+    fn denied_input_makes_no_advice_request_and_ignores_cached_cloud_advice() {
+        // Prime the cache with cloud advice under an allow-all policy.
+        let (endpoint, first_rx) = spawn_header_capture_advice_server(
+            r#"{"target":"cloud","provider":"xybrid","reason":"fleet prefers cloud","confidence":0.9,"ttl_ms":60000}"#,
+        );
+        let authority = RemoteAuthority::new(&endpoint);
+        let context = default_context("denied");
+        let primed = authority.resolve_target(&context);
+        assert_eq!(primed.source, DecisionSource::Remote);
+        first_rx.recv().expect("priming request reached the server");
+
+        // Manually re-insert cloud advice so a stale cache entry survives the
+        // reload (load_policies clears it; the invariant must not depend on
+        // that clear alone).
+        authority
+            .fallback
+            .load_policies(DENY_TEXT_POLICY)
+            .expect("deny loads");
+        let key = RemoteAuthority::target_cache_key(&context, &context.metrics);
+        authority.target_cache_guard().insert(
+            key,
+            CachedTargetAdvice {
+                decision: AuthorityDecision::new(
+                    ResolvedTarget::Cloud {
+                        provider: "xybrid".to_string(),
+                    },
+                    "stale cached cloud advice",
+                    DecisionSource::Remote,
+                    0.9,
+                ),
+                expires_at_ms: u64::MAX,
+            },
+            now_ms(),
+        );
+
+        let resolution = authority.resolve_stage(
+            &PolicyRequest {
+                stage_id: "denied".to_string(),
+                envelope: text_envelope("hello"),
+                metrics: default_metrics(),
+            },
+            &context,
+        );
+
+        assert!(matches!(
+            resolution.policy.result,
+            PolicyOutcome::Deny { .. }
+        ));
+        assert_eq!(resolution.target.decision.result, ResolvedTarget::Device);
+        assert!(
+            resolution.target.decision.reason.starts_with("policy_deny"),
+            "{}",
+            resolution.target.decision.reason
+        );
+        assert_ne!(resolution.target.decision.source, DecisionSource::Cached);
+        assert_ne!(resolution.target.decision.source, DecisionSource::Remote);
+    }
+
+    #[test]
+    fn denied_input_never_contacts_the_backend() {
+        let (endpoint, rx) = spawn_header_capture_advice_server(
+            r#"{"target":"cloud","provider":"xybrid","reason":"x","confidence":0.9,"ttl_ms":0}"#,
+        );
+        let authority = RemoteAuthority::new(&endpoint);
+        authority
+            .load_policies(DENY_TEXT_POLICY)
+            .expect("deny loads");
+
+        let decision = authority.resolve_target(&default_context("never"));
+
+        assert_eq!(decision.result, ResolvedTarget::Device);
+        assert_no_request(&rx);
+    }
+
+    #[test]
+    fn explicit_target_missing_model_and_policy_preference_are_settled_without_advice() {
+        let (endpoint, rx) = spawn_header_capture_advice_server(
+            r#"{"target":"cloud","provider":"xybrid","reason":"x","confidence":0.9,"ttl_ms":0}"#,
+        );
+        let authority = RemoteAuthority::new(&endpoint);
+
+        let mut explicit = default_context("explicit");
+        explicit.explicit_target = Some(crate::pipeline::ExecutionTarget::Device);
+        let decision = authority.resolve_target(&explicit);
+        assert_eq!(decision.result, ResolvedTarget::Device);
+        assert_eq!(decision.source, DecisionSource::Local);
+
+        let mut missing = default_context("missing");
+        missing.local_availability = Some(LocalAvailability::new(false));
+        let decision = authority.resolve_target(&missing);
+        assert!(matches!(decision.result, ResolvedTarget::Cloud { .. }));
+        assert!(
+            decision.reason.starts_with("model_unavailable"),
+            "{}",
+            decision.reason
+        );
+        assert_eq!(decision.source, DecisionSource::Local);
+
+        authority
+            .load_policies(b"route_cloud_if:\n  - \"true\"\n")
+            .expect("route_cloud loads");
+        let decision = authority.resolve_target(&default_context("prefer"));
+        assert!(matches!(decision.result, ResolvedTarget::Cloud { .. }));
+        assert!(
+            decision.reason.starts_with("policy_route_cloud"),
+            "{}",
+            decision.reason
+        );
+
+        assert_no_request(&rx);
+    }
+
+    #[test]
+    fn infeasible_device_advice_is_not_usable() {
+        let device_advice = AuthorityDecision::new(
+            ResolvedTarget::Device,
+            "fleet says device",
+            DecisionSource::Remote,
+            0.9,
+        );
+        assert!(RemoteAuthority::advice_is_feasible(
+            &device_advice,
+            &LocalAvailability::new(true)
+        ));
+        assert!(!RemoteAuthority::advice_is_feasible(
+            &device_advice,
+            &LocalAvailability::new(false)
+        ));
+    }
+
+    #[test]
+    fn remote_fallback_resolution_carries_prepared_signal() {
+        let authority = RemoteAuthority::new(&unreachable_endpoint());
+        let resolution = authority.resolve_stage(
+            &PolicyRequest {
+                stage_id: "fallback".to_string(),
+                envelope: text_envelope("hello"),
+                metrics: default_metrics(),
+            },
+            &default_context("fallback"),
+        );
+
+        assert_eq!(resolution.policy.result, PolicyOutcome::Allow);
+        assert_eq!(resolution.target.decision.source, DecisionSource::Default);
+        assert!(resolution.target.decision.reason.contains("Fallback"));
+        assert!(resolution.target.signal_context.is_some());
     }
 }

@@ -24,8 +24,6 @@ use crate::control_sync::{
 use crate::device::ResourceMonitor;
 use crate::event_bus::{EventBus, OrchestratorEvent};
 use crate::executor::Executor;
-use crate::orchestrator::policy_engine::DefaultPolicyEngine;
-use crate::orchestrator::routing_engine::DefaultRoutingEngine;
 use crate::orchestrator::{
     ExecutionMode, LocalAuthority, OrchestrationAuthority, Orchestrator, OrchestratorError,
 };
@@ -77,8 +75,7 @@ impl Orchestrator {
     /// Bootstrap a new orchestrator instance with registered adapters and telemetry.
     ///
     /// This function initializes all orchestrator components:
-    /// - Policy engine with default policies
-    /// - Routing engine
+    /// - Local orchestration authority (owns the policy engine and routing ladder)
     /// - Executor with registered runtime adapters
     /// - Event bus with subscription enabled
     /// - Telemetry for logging
@@ -125,20 +122,6 @@ impl Orchestrator {
         // Initialize telemetry
         let telemetry = Arc::new(Telemetry::new());
         telemetry.log_bootstrap_start();
-
-        // Initialize policy engine
-        let policy_engine = Box::new(DefaultPolicyEngine::with_default_policy());
-        event_bus.publish(OrchestratorEvent::ComponentInitialized {
-            component: "policy_engine".to_string(),
-            context: Default::default(),
-        });
-
-        // Initialize routing engine
-        let routing_engine = Box::new(DefaultRoutingEngine::new());
-        event_bus.publish(OrchestratorEvent::ComponentInitialized {
-            component: "routing_engine".to_string(),
-            context: Default::default(),
-        });
 
         // Initialize executor
         // Note: Model downloading is handled by the SDK's RegistryClient.
@@ -296,8 +279,6 @@ impl Orchestrator {
         // Create orchestrator instance
         let orchestrator = Orchestrator::with_all(
             authority,
-            policy_engine,
-            routing_engine,
             executor,
             stream_manager,
             event_bus,
