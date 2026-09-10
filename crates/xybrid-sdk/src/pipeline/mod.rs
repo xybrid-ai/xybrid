@@ -409,15 +409,11 @@ fn resolve_streaming_fast_path_route(
     envelope: &Envelope,
     metrics: &DeviceMetrics,
 ) -> StreamingFastPathRoute {
-    let policy_decision = authority.apply_policy(&PolicyRequest {
+    let request = PolicyRequest {
         stage_id: stage.name.clone(),
         envelope: envelope.clone(),
         metrics: metrics.clone(),
-    });
-    let policy_allowed = policy_decision.result.is_allowed();
-    let policy_transform = matches!(policy_decision.result, PolicyOutcome::Transform { .. });
-    let policy_reason = Some(policy_decision.reason.clone());
-
+    };
     let context = StageContext {
         stage_id: stage.name.clone(),
         model_id: model_id.to_string(),
@@ -429,15 +425,21 @@ fn resolve_streaming_fast_path_route(
         device_class: Some(metrics.canonical_device_class()),
         device_class_schema_version: Some(DEVICE_CLASS_SCHEMA_VERSION),
     };
-    let resolution = authority.resolve_target_with_feedback(&context);
-    let target = match &resolution.decision.result {
+    // One decision, one resource snapshot: the policy event and the target
+    // cannot disagree, and the target is restricted if the policy requires it.
+    let resolution = authority.resolve_stage(&request, &context).enforced();
+    let policy_allowed = resolution.policy.result.is_allowed();
+    let policy_transform = matches!(resolution.policy.result, PolicyOutcome::Transform { .. });
+    let policy_reason = Some(resolution.policy.reason.clone());
+
+    let target = match &resolution.target.decision.result {
         ResolvedTarget::Device => "local".to_string(),
         ResolvedTarget::Cloud { .. } => "cloud".to_string(),
         ResolvedTarget::Server { endpoint } => format!("fallback:{endpoint}"),
     };
-    let hint = resolution.local_reliability_hint.unwrap_or_default();
+    let hint = resolution.target.local_reliability_hint.unwrap_or_default();
     let can_stream_locally = policy_allowed
-        && matches!(resolution.decision.result, ResolvedTarget::Device)
+        && matches!(resolution.target.decision.result, ResolvedTarget::Device)
         && stage.is_locally_runnable()
         && !policy_transform;
 
@@ -447,9 +449,9 @@ fn resolve_streaming_fast_path_route(
         target,
         reason: format!(
             "[{}] {} (confidence: {:.0}%)",
-            resolution.decision.source,
-            resolution.decision.reason,
-            resolution.decision.confidence * 100.0
+            resolution.target.decision.source,
+            resolution.target.decision.reason,
+            resolution.target.decision.confidence * 100.0
         ),
         recent_abort_rate: hint.recent_abort_rate,
         sample_size: hint.sample_size,

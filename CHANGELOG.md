@@ -71,6 +71,9 @@ the same time, and a policy bundle decides which leg serves each request.
 - `Orchestrator::with_engines` removed; `Orchestrator::with_all` no longer
   takes policy/routing engines; `PolicyRule.action` is a `PolicyAction`;
   `PolicyResult` gains `route`; `CompletionRequest` gains `thinking`.
+- The SDK streaming fast path makes one `resolve_stage` decision (one policy
+  evaluation, one resource snapshot) instead of separate policy and target
+  calls.
 
 ### Fixed
 
@@ -85,6 +88,12 @@ the same time, and a policy bundle decides which leg serves each request.
 - `input.kind == "<v>"` matched a text payload equal to the literal.
 - Shared YAML generation options only reached the cloud leg; the local
   template executor now receives them too.
+- `backend: direct` with `anthropic` ignored the stage's `api_key` and
+  `gateway_url`; both now reach the native client. Google and ElevenLabs,
+  which have no native direct client, are rejected when the bundle loads
+  instead of failing at request time.
+- An HTTP 200 with no answer text (empty `content`, no choices) is a
+  non-retryable parse error instead of a silent empty success.
 
 ### Planned
 

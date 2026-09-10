@@ -117,7 +117,10 @@ impl CloudRuntimeAdapter {
     ///   DeepSeek, OpenRouter, Custom): the same transport pointed at the
     ///   provider's documented base URL (`gateway_url` may override; Custom
     ///   requires it).
-    /// - `backend: direct` with any other provider: the native direct client.
+    /// - `backend: direct` with Anthropic: the native direct client, using
+    ///   the provider's documented base URL (a stage `gateway_url` overrides)
+    ///   and its explicit `api_key` when set, then `$ANTHROPIC_API_KEY`.
+    ///   Google and ElevenLabs have no native client and are rejected here.
     ///
     /// Credentials are scoped to the destination: an explicit `api_key` always
     /// wins; otherwise the provider's own `$<PROVIDER>_API_KEY` is selected
@@ -129,8 +132,9 @@ impl CloudRuntimeAdapter {
     /// # Errors
     ///
     /// [`AdapterError::InvalidInput`] for an unknown `backend`, a malformed or
-    /// non-HTTP URL, `custom` + `direct` without a `gateway_url`, or a known
-    /// provider origin without a usable key.
+    /// non-HTTP URL, `custom` + `direct` without a `gateway_url`, a provider
+    /// with no native direct client, or a known provider origin without a
+    /// usable key.
     fn build_config(
         &self,
         envelope: &Envelope,
@@ -183,12 +187,24 @@ impl CloudRuntimeAdapter {
                 };
             }
             Some("direct") => {
-                // Native direct client (Anthropic, Google, ElevenLabs): unchanged.
+                // Native direct client. Only the providers LlmClient can
+                // actually serve; OpenAI-compatible providers were handled
+                // above and ride the gateway transport.
+                if !native_direct_supported(provider) {
+                    return Err(AdapterError::InvalidInput(format!(
+                        "provider '{}' with backend 'direct' is not supported: the native \
+                         direct client serves anthropic only. Use backend 'gateway' with an \
+                         explicit gateway_url, or an OpenAI-compatible provider (openai, \
+                         deepseek, openrouter, custom)",
+                        provider
+                    )));
+                }
                 config.backend = CloudBackend::Direct;
                 config.direct_provider = Some(provider.as_str().to_string());
-                if let Some(url) = explicit_url {
-                    config.gateway_url = url;
-                }
+                config.direct_base_url = match explicit_url {
+                    Some(url) => Some(normalize_gateway_url(&url)?),
+                    None => None,
+                };
                 config.api_key = explicit_key;
                 return Ok(config);
             }
@@ -386,6 +402,14 @@ fn openai_compatible(provider: IntegrationProvider) -> bool {
             | IntegrationProvider::OpenRouter
             | IntegrationProvider::Custom
     )
+}
+
+/// Providers the native direct client (`LlmClient`) can serve.
+///
+/// OpenAI and the OpenAI-compatible providers never reach this check: they
+/// ride the gateway transport.
+fn native_direct_supported(provider: IntegrationProvider) -> bool {
+    matches!(provider, IntegrationProvider::Anthropic)
 }
 
 const KNOWN_PROVIDERS: [IntegrationProvider; 6] = [
@@ -1349,6 +1373,45 @@ mod tests {
             .expect("anthropic direct");
         assert_eq!(config.backend, CloudBackend::Direct);
         assert_eq!(config.direct_provider.as_deref(), Some("anthropic"));
+        // No explicit URL/key: provider default URL and env-var fallback.
+        assert_eq!(config.direct_base_url, None);
+        assert_eq!(config.api_key, None);
+
+        // Explicit URL and key are stored (normalized) for the native client.
+        let config = adapter
+            .build_config(
+                &text_with(&[
+                    ("provider", "anthropic"),
+                    ("backend", "direct"),
+                    ("gateway_url", "http://127.0.0.1:8080/v1/"),
+                    ("api_key", "$ANTHROPIC_API_KEY"),
+                ]),
+                IntegrationProvider::Anthropic,
+            )
+            .expect("anthropic direct with overrides");
+        assert_eq!(
+            config.direct_base_url.as_deref(),
+            Some("http://127.0.0.1:8080/v1")
+        );
+        assert_eq!(config.api_key.as_deref(), Some("$ANTHROPIC_API_KEY"));
+    }
+
+    #[test]
+    fn direct_native_providers_without_a_client_are_rejected() {
+        let adapter = CloudRuntimeAdapter::new();
+
+        for provider in [IntegrationProvider::Google, IntegrationProvider::ElevenLabs] {
+            let err = adapter
+                .build_config(
+                    &text_with(&[("provider", provider.as_str()), ("backend", "direct")]),
+                    provider,
+                )
+                .expect_err("no native client for this provider");
+            assert!(matches!(err, AdapterError::InvalidInput(_)), "{err:?}");
+            let message = err.to_string();
+            assert!(message.contains(provider.as_str()), "{message}");
+            assert!(message.contains("anthropic"), "{message}");
+        }
     }
 
     #[test]

@@ -48,12 +48,14 @@ stages:
 
 `backend: direct` with an OpenAI-compatible provider (`openai`, `deepseek`,
 `openrouter`, `custom`) sends the request straight to that provider's API;
-an explicit `gateway_url` / `api_key` pair overrides the defaults. Credentials
-are scoped to the destination: the Xybrid platform key goes only to the
-configured platform gateway, a provider's key only to that provider's origin,
-and any other endpoint is anonymous unless `api_key` is set. A denied stage
-whose local model is missing fails on the device — it never falls through to
-the cloud.
+an explicit `gateway_url` / `api_key` pair overrides the defaults. `anthropic`
+uses the native direct client with the same `gateway_url` / `api_key` handling;
+`google` and `elevenlabs` have no direct client and are rejected at load.
+Credentials are scoped to the destination: the Xybrid platform key goes only
+to the configured platform gateway, a provider's key only to that provider's
+origin, and any other endpoint is anonymous unless `api_key` is set. A denied
+stage whose local model is missing fails on the device — it never falls
+through to the cloud.
 
 ## How `auto` decides
 

@@ -469,10 +469,14 @@ fn compile_expression(expression: &str) -> Result<Expr, String> {
             normalized = "audio".to_string();
         }
         if !allowed.contains(&normalized.as_str()) {
-            return Err(format!(
-                "'{raw}' is not a valid value for '{}' (expected one of: {})",
-                lhs.as_str(),
+            let expected = if lhs == Lhs::InputKind {
+                format!("{} (legacy alias: audioraw)", allowed.join(", "))
+            } else {
                 allowed.join(", ")
+            };
+            return Err(format!(
+                "'{raw}' is not a valid value for '{}' (expected one of: {expected})",
+                lhs.as_str(),
             ));
         }
         Rhs::Str(normalized)
@@ -968,6 +972,7 @@ mod tests {
         let err = load_error("deny_cloud_if:\n  - 'input.kind == \"SensitiveData\"'\n");
         assert!(err.contains("SensitiveData"), "{err}");
         assert!(err.contains("deny_cloud_if_0"), "{err}");
+        assert!(err.contains("legacy alias: audioraw"), "{err}");
     }
 
     // ── input.text / input.text_len ─────────────────────────────────────────

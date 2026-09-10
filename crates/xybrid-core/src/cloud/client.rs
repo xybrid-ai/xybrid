@@ -265,12 +265,14 @@ impl Cloud {
                 CloudError::ConfigError("Direct provider not configured".to_string())
             })?;
 
-        // Use cloud_llm for direct API calls
-        let llm_provider: crate::pipeline::IntegrationProvider = provider
-            .parse()
-            .map_err(|e: String| CloudError::ConfigError(e))?;
-
-        let client = crate::cloud_llm::LlmClient::new(llm_provider)?;
+        // Use cloud_llm for direct API calls. The explicit `api_key` (literal
+        // or `$VAR`) and `direct_base_url` reach the native client; absent
+        // values fall back to the provider's own environment variable and
+        // documented base URL.
+        let client = crate::cloud_llm::LlmClient::with_config(direct_provider_config(
+            provider,
+            &self.config,
+        )?)?;
         let llm_request: crate::cloud_llm::LlmRequest = request.into();
         let response = client.complete(llm_request)?;
 
@@ -290,6 +292,28 @@ impl Default for Cloud {
     fn default() -> Self {
         Self::new().expect("Failed to create default Cloud client")
     }
+}
+
+/// Build the native-client [`crate::pipeline::ProviderConfig`] for a
+/// `backend: direct` call.
+///
+/// Threads the stage's explicit `api_key` (literal or `$VAR` reference, kept
+/// as a reference so the client resolves it at request time) and
+/// `direct_base_url` into the native client. When either is absent the
+/// provider's own environment variable and documented base URL apply, as
+/// before.
+fn direct_provider_config(
+    provider: &str,
+    config: &CloudConfig,
+) -> Result<crate::pipeline::ProviderConfig, CloudError> {
+    let llm_provider: crate::pipeline::IntegrationProvider = provider
+        .parse()
+        .map_err(|e: String| CloudError::ConfigError(e))?;
+    let mut provider_config = crate::pipeline::ProviderConfig::new(llm_provider);
+    provider_config.base_url = config.direct_base_url.clone();
+    provider_config.api_key = config.api_key.clone();
+    provider_config.timeout_ms = config.timeout_ms;
+    Ok(provider_config)
 }
 
 /// Extract `choices[0].message.content` from an OpenAI-shaped 200 response.
@@ -453,6 +477,64 @@ mod tests {
         let cloud = Cloud::direct("openai");
         assert!(cloud.is_ok());
         std::env::remove_var("OPENAI_API_KEY");
+    }
+
+    #[test]
+    fn direct_provider_config_threads_explicit_key_url_and_timeout() {
+        use crate::cloud::config::CloudBackend;
+
+        let config = CloudConfig {
+            backend: CloudBackend::Direct,
+            direct_provider: Some("anthropic".to_string()),
+            direct_base_url: Some("http://127.0.0.1:8080/v1".to_string()),
+            api_key: Some("sk-ant-explicit".to_string()),
+            timeout_ms: 1234,
+            ..Default::default()
+        };
+
+        let provider_config = direct_provider_config("anthropic", &config).expect("valid provider");
+
+        assert_eq!(
+            provider_config.base_url.as_deref(),
+            Some("http://127.0.0.1:8080/v1")
+        );
+        assert_eq!(provider_config.api_key.as_deref(), Some("sk-ant-explicit"));
+        assert_eq!(provider_config.timeout_ms, 1234);
+        // The explicit key is what the client resolves, whatever the origin.
+        assert_eq!(
+            provider_config.resolve_api_key().as_deref(),
+            Some("sk-ant-explicit")
+        );
+    }
+
+    #[test]
+    fn direct_provider_config_keeps_env_reference_and_provider_defaults() {
+        let config = CloudConfig {
+            api_key: Some("$ANTHROPIC_API_KEY".to_string()),
+            ..CloudConfig::direct("anthropic")
+        };
+
+        let provider_config = direct_provider_config("anthropic", &config).expect("valid provider");
+
+        assert!(
+            provider_config.base_url.is_none(),
+            "None must fall back to the provider's documented base URL"
+        );
+        assert_eq!(
+            provider_config.effective_base_url(),
+            "https://api.anthropic.com/v1"
+        );
+        assert_eq!(
+            provider_config.api_key.as_deref(),
+            Some("$ANTHROPIC_API_KEY")
+        );
+    }
+
+    #[test]
+    fn direct_provider_config_rejects_unknown_provider() {
+        let config = CloudConfig::direct("nope");
+        let err = direct_provider_config("nope", &config).expect_err("unknown provider");
+        assert!(matches!(err, CloudError::ConfigError(_)), "{err:?}");
     }
 
     #[test]

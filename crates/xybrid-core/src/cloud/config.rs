@@ -124,6 +124,15 @@ pub struct CloudConfig {
     /// Direct provider (for Direct backend - development only).
     #[serde(default)]
     pub direct_provider: Option<String>,
+
+    /// Base URL for the native direct client (`backend: direct`).
+    ///
+    /// `None` uses the provider's documented default. The cloud adapter sets
+    /// this from a stage's explicit `gateway_url`; unlike `gateway_url` it is
+    /// never defaulted to the platform gateway, so a native direct call
+    /// cannot accidentally target the Xybrid platform.
+    #[serde(default)]
+    pub direct_base_url: Option<String>,
 }
 
 /// The configured Xybrid platform gateway URL (base + `/v1`).
@@ -231,6 +240,7 @@ impl Default for CloudConfig {
             timeout_ms: default_timeout_ms(),
             debug: false,
             direct_provider: None,
+            direct_base_url: None,
         }
     }
 }

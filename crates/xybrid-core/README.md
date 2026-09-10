@@ -31,27 +31,23 @@ The main entry point that coordinates pipeline execution.
 ```rust
 use xybrid_core::orchestrator::Orchestrator;
 use xybrid_core::context::{Envelope, EnvelopeKind, DeviceMetrics, StageDescriptor};
-use xybrid_core::routing_engine::LocalAvailability;
+use xybrid_core::orchestrator::routing_engine::LocalAvailability;
 
 // Create a new orchestrator
 let mut orchestrator = Orchestrator::new();
 
 // Execute a single stage
-let stage = StageDescriptor { name: "asr".to_string() };
+let stage = StageDescriptor::new("asr");
 let input = Envelope::new(EnvelopeKind::Audio(vec![0u8; 1600]));
-let metrics = DeviceMetrics {
-    network_rtt: 100,
-    battery: 80,
-    temperature: 25.0,
-};
+let metrics = DeviceMetrics::default();
 let availability = LocalAvailability::new(true);
 
 let result = orchestrator.execute_stage(&stage, &input, &metrics, &availability)?;
 
 // Execute a multi-stage pipeline
 let stages = vec![
-    StageDescriptor { name: "asr".to_string() },
-    StageDescriptor { name: "tts".to_string() },
+    StageDescriptor::new("asr"),
+    StageDescriptor::new("tts"),
 ];
 let results = orchestrator.execute_pipeline(&stages, &input, &metrics, &|s| {
     LocalAvailability::new(s == "asr") // ASR available locally, TTS in cloud
