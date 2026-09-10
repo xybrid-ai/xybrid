@@ -213,35 +213,88 @@ impl Executor {
         input: &Envelope,
         target: &str,
     ) -> ExecutorResult<(Envelope, StageMetadata)> {
+        let prepared = prepare_stage_input(stage, input)?;
+        self.execute_prepared(stage, &prepared, target)
+    }
+
+    /// Executes a stage whose input has already been through
+    /// [`prepare_stage_input`].
+    ///
+    /// The orchestrator prepares once, evaluates policy against the prepared
+    /// envelope, and then calls this so the merge is not repeated. Dispatch
+    /// is driven by `target` alone — the routing decision is authoritative.
+    /// A stage carrying a `provider` is *not* automatically a cloud stage:
+    /// when it is routed `local` it must have a usable local bundle, and it
+    /// never falls through to a different model or to cloud.
+    pub fn execute_prepared(
+        &mut self,
+        stage: &StageDescriptor,
+        input: &Envelope,
+        target: &str,
+    ) -> ExecutorResult<(Envelope, StageMetadata)> {
         let start_time = Instant::now();
-
-        // Check if this is a cloud stage (third-party API like OpenAI/Anthropic)
-        if stage.is_cloud() {
-            return self.execute_cloud(stage, input, start_time);
+        match target {
+            "cloud" => {
+                if stage.provider.is_some() {
+                    return self.execute_cloud(stage, input, start_time);
+                }
+                self.execute_registered_cloud_adapter(stage, input, target, start_time)
+            }
+            "local" | "edge" => self.execute_local(stage, input, target, start_time),
+            other => Err(ExecutorError::InvalidTarget(format!(
+                "Unknown target: {}",
+                other
+            ))),
         }
+    }
 
-        // Select adapter based on target
-        let adapter_name = self.select_adapter(target)?;
+    /// Provider-free stage routed to cloud: only an explicitly registered
+    /// cloud adapter may serve it. This never falls back to a local adapter.
+    fn execute_registered_cloud_adapter(
+        &self,
+        stage: &StageDescriptor,
+        input: &Envelope,
+        target: &str,
+        start_time: Instant,
+    ) -> ExecutorResult<(Envelope, StageMetadata)> {
+        let adapter_name = self
+            .default_cloud_adapter
+            .clone()
+            .filter(|name| self.adapters.contains_key(name))
+            .ok_or_else(|| {
+                ExecutorError::AdapterNotFound(format!(
+                    "stage '{}' was routed to cloud but has no provider and no cloud adapter \
+                     is registered",
+                    stage.name
+                ))
+            })?;
+        let adapter = self
+            .get_adapter(&adapter_name)
+            .ok_or_else(|| ExecutorError::AdapterNotFound(adapter_name.clone()))?;
 
-        // For cloud adapter, skip model loading (legacy path - prefer integration)
-        if adapter_name == "cloud" {
-            let adapter = self
-                .get_adapter(&adapter_name)
-                .ok_or_else(|| ExecutorError::AdapterNotFound(adapter_name.clone()))?;
+        let output = adapter
+            .execute(input)
+            .map_err(ExecutorError::AdapterError)?;
 
-            let output = adapter
-                .execute(input)
-                .map_err(ExecutorError::AdapterError)?;
+        let latency_ms = start_time.elapsed().as_millis();
+        let metadata = StageMetadata {
+            adapter: adapter_name,
+            target: target.to_string(),
+            latency_ms,
+        };
+        Ok((output, metadata))
+    }
 
-            let latency_ms = start_time.elapsed().as_millis();
-            let metadata = StageMetadata {
-                adapter: adapter_name,
-                target: target.to_string(),
-                latency_ms,
-            };
-            return Ok((output, metadata));
-        }
-
+    /// Local execution: an extracted model directory drives the
+    /// [`TemplateExecutor`]; provider-free stages without a bundle may fall
+    /// back to a pre-loaded raw adapter.
+    fn execute_local(
+        &mut self,
+        stage: &StageDescriptor,
+        input: &Envelope,
+        target: &str,
+        start_time: Instant,
+    ) -> ExecutorResult<(Envelope, StageMetadata)> {
         // Try bundle_path for metadata-driven execution
         // IMPORTANT: Core only accepts directories, not .xyb files.
         // Bundle extraction must be done by SDK's CacheManager.ensure_extracted() before calling Core.
@@ -351,12 +404,32 @@ impl Executor {
                     bundle_path
                 );
             }
+
+            // A hybrid stage (local bundle + cloud provider) must not fall
+            // through to an unrelated adapter when its bundle is unusable —
+            // that would silently run a different model.
+            if stage.provider.is_some() {
+                return Err(ExecutorError::ExecutionFailed(format!(
+                    "stage '{}' was routed local but its bundle at '{}' is not an extracted \
+                     model directory (missing model_metadata.json); not falling back to \
+                     another model or to cloud",
+                    stage.name,
+                    bundle_path.display()
+                )));
+            }
         } else {
             debug!(
                 target: "xybrid_core",
                 "Stage '{}' has no bundle_path set",
                 stage.name
             );
+            if stage.provider.is_some() {
+                return Err(ExecutorError::ExecutionFailed(format!(
+                    "stage '{}' was routed local but has no local bundle (cloud leg denied by \
+                     policy?)",
+                    stage.name
+                )));
+            }
         }
 
         // Raw adapter fallback for externally-preloaded adapters (test
@@ -366,6 +439,7 @@ impl Executor {
         // envelope. If the adapter isn't pre-loaded the real
         // `ModelNotLoaded` error propagates — the user must call
         // `Pipeline::load_models()` first (or pre-load the adapter).
+        let adapter_name = self.select_local_adapter()?;
         debug!(
             target: "xybrid_core",
             "Stage '{}' has no bundle_path; falling back to raw adapter '{}' (adapter must be pre-loaded)",
@@ -455,12 +529,14 @@ impl Executor {
     /// a remote cloud provider rather than locally on-device.
     ///
     /// Delegates to [`CloudRuntimeAdapter`] after enriching the envelope with
-    /// stage configuration metadata.
+    /// the stage's *transport* configuration. Shared generation options
+    /// (`system_prompt`, `temperature`, `max_tokens`, `top_p`) were already
+    /// applied by [`prepare_stage_input`] and are not overwritten here.
     ///
     /// # Arguments
     ///
     /// * `stage` - Stage descriptor with provider info
-    /// * `input` - Input envelope (expects Text)
+    /// * `input` - Prepared input envelope (expects Text)
     /// * `start_time` - Timer for latency measurement
     ///
     /// # Returns
@@ -477,43 +553,40 @@ impl Executor {
             ExecutorError::ProviderNotConfigured("Integration stage requires provider".to_string())
         })?;
 
+        // The model sent to the provider. A hybrid stage names its local
+        // bundle in `model` and its cloud model in the `cloud_model` option.
+        let effective_model = stage
+            .options
+            .as_ref()
+            .and_then(|options| options.get::<String>("cloud_model"))
+            .or_else(|| stage.model.clone());
+
         // Start tracing span for cloud execution
-        let model_name = stage.model.clone().unwrap_or_else(|| "unknown".to_string());
+        let model_name = effective_model
+            .clone()
+            .unwrap_or_else(|| "unknown".to_string());
         let _exec_span = trace::SpanGuard::new(format!("execute:{}", model_name));
         trace::add_metadata("provider", provider.as_str());
         trace::add_metadata("target", "cloud");
-        if let Some(ref model) = stage.model {
+        if let Some(ref model) = effective_model {
             trace::add_metadata("model", model);
         }
 
-        // Enrich envelope with stage configuration for CloudRuntimeAdapter
+        // Enrich envelope with transport configuration for CloudRuntimeAdapter
         let mut enriched_input = input.clone();
         enriched_input
             .metadata
             .insert("provider".to_string(), provider.as_str().to_string());
 
-        if let Some(ref model) = stage.model {
-            enriched_input
-                .metadata
-                .insert("model".to_string(), model.clone());
+        if let Some(model) = effective_model {
+            enriched_input.metadata.insert("model".to_string(), model);
         }
 
-        // Apply stage options to metadata
         if let Some(ref options) = stage.options {
-            if let Some(backend) = options.get::<String>("backend") {
-                enriched_input
-                    .metadata
-                    .insert("backend".to_string(), backend);
-            }
-            if let Some(gateway_url) = options.get::<String>("gateway_url") {
-                enriched_input
-                    .metadata
-                    .insert("gateway_url".to_string(), gateway_url);
-            }
-            if let Some(api_key) = options.get::<String>("api_key") {
-                enriched_input
-                    .metadata
-                    .insert("api_key".to_string(), api_key);
+            for key in ["backend", "gateway_url", "api_key"] {
+                if let Some(value) = options.get::<String>(key) {
+                    enriched_input.metadata.insert(key.to_string(), value);
+                }
             }
             if let Some(timeout) = options.timeout_ms() {
                 enriched_input
@@ -525,20 +598,21 @@ impl Executor {
                     .metadata
                     .insert("debug".to_string(), debug.to_string());
             }
-            if let Some(system) = options.system_prompt() {
-                enriched_input
-                    .metadata
-                    .insert("system_prompt".to_string(), system);
-            }
-            if let Some(temp) = options.temperature() {
-                enriched_input
-                    .metadata
-                    .insert("temperature".to_string(), temp.to_string());
-            }
-            if let Some(max) = options.max_tokens() {
-                enriched_input
-                    .metadata
-                    .insert("max_tokens".to_string(), max.to_string());
+            // Provider-specific request capability; the adapter validates
+            // the value and the provider it is used with.
+            match options.values.get("thinking") {
+                None => {}
+                Some(serde_json::Value::String(mode)) => {
+                    enriched_input
+                        .metadata
+                        .insert("thinking".to_string(), mode.clone());
+                }
+                Some(other) => {
+                    return Err(ExecutorError::Other(format!(
+                        "stage '{}': option 'thinking' must be a string (enabled|disabled), got {}",
+                        stage.name, other
+                    )));
+                }
             }
         }
 
@@ -573,69 +647,33 @@ impl Executor {
         Ok((output, metadata))
     }
 
-    /// Selects an adapter name based on the target.
+    /// Selects the adapter for local execution when no bundle drives a
+    /// [`TemplateExecutor`].
     ///
-    /// # Arguments
-    ///
-    /// * `target` - Target string ("local", "edge", "cloud")
-    ///
-    /// # Returns
-    ///
-    /// Adapter name to use
-    fn select_adapter(&self, target: &str) -> ExecutorResult<String> {
-        match target {
-            "local" => {
-                // Prefer ONNX for local execution
-                if let Some(name) = &self.default_local_adapter {
-                    if self.adapters.contains_key(name) {
-                        return Ok(name.clone());
-                    }
-                }
-                // Fallback to first available adapter
-                self.adapters
-                    .keys()
-                    .next()
-                    .ok_or_else(|| {
-                        ExecutorError::AdapterNotFound("No adapters registered".to_string())
-                    })
-                    .cloned()
+    /// Prefers the default local adapter (`onnx`); otherwise the
+    /// alphabetically first registered adapter that is not the cloud adapter,
+    /// so the choice is deterministic and a cloud adapter never serves a
+    /// local route.
+    fn select_local_adapter(&self) -> ExecutorResult<String> {
+        if let Some(name) = &self.default_local_adapter {
+            if self.adapters.contains_key(name) {
+                return Ok(name.clone());
             }
-            "cloud" => {
-                // Prefer cloud adapter if available
-                if let Some(name) = &self.default_cloud_adapter {
-                    if self.adapters.contains_key(name) {
-                        return Ok(name.clone());
-                    }
-                }
-                // Fallback to first available adapter
-                self.adapters
-                    .keys()
-                    .next()
-                    .ok_or_else(|| {
-                        ExecutorError::AdapterNotFound("No adapters registered".to_string())
-                    })
-                    .cloned()
-            }
-            "edge" => {
-                // Edge is similar to local, prefer ONNX
-                if let Some(name) = &self.default_local_adapter {
-                    if self.adapters.contains_key(name) {
-                        return Ok(name.clone());
-                    }
-                }
-                self.adapters
-                    .keys()
-                    .next()
-                    .ok_or_else(|| {
-                        ExecutorError::AdapterNotFound("No adapters registered".to_string())
-                    })
-                    .cloned()
-            }
-            _ => Err(ExecutorError::InvalidTarget(format!(
-                "Unknown target: {}",
-                target
-            ))),
         }
+        let mut candidates: Vec<&String> = self
+            .adapters
+            .keys()
+            .filter(|name| {
+                name.as_str() != "cloud" && Some(*name) != self.default_cloud_adapter.as_ref()
+            })
+            .collect();
+        candidates.sort();
+        candidates
+            .first()
+            .map(|name| (*name).clone())
+            .ok_or_else(|| {
+                ExecutorError::AdapterNotFound("No local adapters registered".to_string())
+            })
     }
 
     /// Lists all registered adapter names.
@@ -645,6 +683,64 @@ impl Executor {
     /// Vector of adapter names
     pub fn list_adapters(&self) -> Vec<String> {
         self.adapters.keys().cloned().collect()
+    }
+}
+
+/// Generation options a stage may declare in pipeline YAML that apply to
+/// *both* legs of a hybrid stage, and the string form the backends parse
+/// from envelope metadata.
+const SHARED_GENERATION_OPTIONS: [&str; 4] =
+    ["system_prompt", "temperature", "max_tokens", "top_p"];
+
+/// Apply a stage's shared generation options to the input envelope.
+///
+/// Precedence, highest first: metadata already on the input (caller or CLI
+/// overrides), then the stage's YAML options, then the model template's own
+/// defaults (left to the backend). Unrelated metadata and the payload are
+/// preserved. A recognised option with an invalid value is an error, never
+/// silently dropped. Both the local [`TemplateExecutor`] and the cloud
+/// adapter read the resulting metadata keys, so a hybrid stage generates
+/// with the same settings on either leg.
+pub fn prepare_stage_input(stage: &StageDescriptor, input: &Envelope) -> ExecutorResult<Envelope> {
+    let Some(options) = stage.options.as_ref() else {
+        return Ok(input.clone());
+    };
+    let mut prepared = input.clone();
+    for key in SHARED_GENERATION_OPTIONS {
+        let Some(value) = options.values.get(key) else {
+            continue;
+        };
+        let rendered = render_generation_option(&stage.name, key, value)?;
+        prepared.metadata.entry(key.to_string()).or_insert(rendered);
+    }
+    Ok(prepared)
+}
+
+fn render_generation_option(
+    stage: &str,
+    key: &str,
+    value: &serde_json::Value,
+) -> ExecutorResult<String> {
+    use serde_json::Value;
+    let invalid = |expected: &str| {
+        ExecutorError::Other(format!(
+            "stage '{stage}': option '{key}' must be {expected}, got {value}"
+        ))
+    };
+    match key {
+        "system_prompt" => match value {
+            Value::String(text) => Ok(text.clone()),
+            _ => Err(invalid("a string")),
+        },
+        "temperature" | "top_p" => match value.as_f64() {
+            Some(number) if number.is_finite() && number >= 0.0 => Ok(number.to_string()),
+            _ => Err(invalid("a non-negative number")),
+        },
+        "max_tokens" => match value.as_u64() {
+            Some(count) if count > 0 => Ok(count.to_string()),
+            _ => Err(invalid("a positive integer")),
+        },
+        other => Err(invalid(&format!("a known option (internal: '{other}')"))),
     }
 }
 
@@ -774,8 +870,9 @@ mod tests {
     fn test_execute_stage_cloud_target() -> ExecutorResult<()> {
         let mut executor = Executor::new();
 
-        // Create and register mock adapter
-        let mut adapter = MockRuntimeAdapter::with_text_output("cloud response");
+        // A provider-free cloud route is served only by an adapter registered
+        // under the "cloud" name.
+        let mut adapter = MockRuntimeAdapter::with_text_output("cloud response").with_name("cloud");
         adapter.load_model("/mock/model.onnx")?;
         executor.register_adapter(Arc::new(adapter));
 
@@ -784,10 +881,316 @@ mod tests {
 
         let (_output, metadata) = executor.execute_stage(&stage, &input, "cloud")?;
 
-        // Cloud target still routes through the adapter (no provider set = not integration)
         assert_eq!(metadata.target, "cloud");
+        assert_eq!(metadata.adapter, "cloud");
 
         Ok(())
+    }
+
+    #[test]
+    fn cloud_target_without_provider_requires_registered_cloud_adapter() {
+        // Only a local adapter is registered: a provider-free cloud route must
+        // error rather than quietly run on the local adapter.
+        let mut executor = Executor::new();
+        let mut local = MockRuntimeAdapter::with_text_output("local").with_name("onnx");
+        local.load_model("/mock/model.onnx").unwrap();
+        let local = Arc::new(local);
+        executor.register_adapter(local.clone());
+
+        let stage = StageDescriptor::new("motivator");
+        let input = Envelope::new(EnvelopeKind::Text("Hello".to_string()));
+
+        let result = executor.execute_stage(&stage, &input, "cloud");
+
+        assert!(
+            matches!(result, Err(ExecutorError::AdapterNotFound(_))),
+            "got {result:?}"
+        );
+        assert_eq!(
+            local.call_count(),
+            0,
+            "local adapter must not serve a cloud route"
+        );
+    }
+
+    #[test]
+    fn local_selection_never_picks_the_cloud_adapter() {
+        let mut executor = Executor::new();
+        let mut cloud = MockRuntimeAdapter::with_text_output("cloud").with_name("cloud");
+        cloud.load_model("/mock/cloud").unwrap();
+        let cloud = Arc::new(cloud);
+        executor.register_adapter(cloud.clone());
+
+        let stage = StageDescriptor::new("asr");
+        let input = Envelope::new(EnvelopeKind::Audio(vec![0u8; 16]));
+
+        let result = executor.execute_stage(&stage, &input, "local");
+
+        assert!(
+            matches!(result, Err(ExecutorError::AdapterNotFound(_))),
+            "got {result:?}"
+        );
+        assert_eq!(cloud.call_count(), 0);
+    }
+
+    #[test]
+    fn local_fallback_adapter_selection_is_deterministic() {
+        // No "onnx" adapter: the alphabetically-first non-cloud adapter wins,
+        // regardless of HashMap iteration order.
+        let mut executor = Executor::new();
+        for name in ["zeta", "alpha", "cloud", "mid"] {
+            let mut adapter = MockRuntimeAdapter::with_text_output(name).with_name(name);
+            adapter.load_model("/mock/model").unwrap();
+            executor.register_adapter(Arc::new(adapter));
+        }
+
+        assert_eq!(executor.select_local_adapter().unwrap(), "alpha");
+
+        let stage = StageDescriptor::new("asr");
+        let input = Envelope::new(EnvelopeKind::Audio(vec![0u8; 16]));
+        let (output, metadata) = executor.execute_stage(&stage, &input, "local").unwrap();
+        assert_eq!(metadata.adapter, "alpha");
+        assert_eq!(output.as_text(), Some("alpha"));
+    }
+
+    fn hybrid_stage(bundle_path: Option<&str>) -> StageDescriptor {
+        let mut options = crate::pipeline::StageOptions::new();
+        options.set("cloud_model", "deepseek-flash");
+        options.set("system_prompt", "Be terse.");
+        options.set("temperature", 0.0);
+        options.set("max_tokens", 16);
+        options.set("thinking", "disabled");
+        options.set("gateway_url", "http://127.0.0.1:9/v1");
+        options.set("api_key", "$DEEPSEEK_API_KEY");
+        let mut stage = StageDescriptor::new("llm")
+            .with_model("functiongemma-270m-it")
+            .with_target(crate::pipeline::ExecutionTarget::Auto)
+            .with_provider(crate::pipeline::IntegrationProvider::DeepSeek)
+            .with_options(options);
+        stage.bundle_path = bundle_path.map(str::to_string);
+        stage
+    }
+
+    #[test]
+    fn cloud_target_with_provider_uses_cloud_adapter_and_cloud_model() {
+        let mut executor = Executor::new();
+        let mut cloud =
+            MockRuntimeAdapter::with_text_output("FAKE_DEEPSEEK_REPLY").with_name("cloud");
+        cloud.load_model("/mock/cloud").unwrap();
+        let cloud = Arc::new(cloud);
+        executor.register_adapter(cloud.clone());
+        let mut local = MockRuntimeAdapter::with_text_output("local").with_name("onnx");
+        local.load_model("/mock/model.onnx").unwrap();
+        let local = Arc::new(local);
+        executor.register_adapter(local.clone());
+
+        let stage = hybrid_stage(None);
+        let input = Envelope::new(EnvelopeKind::Text("Hello".to_string()));
+
+        let (output, metadata) = executor.execute_stage(&stage, &input, "cloud").unwrap();
+
+        assert_eq!(output.as_text(), Some("FAKE_DEEPSEEK_REPLY"));
+        assert_eq!(metadata.adapter, "cloud:deepseek:gateway");
+        assert_eq!(metadata.target, "cloud");
+        assert_eq!(local.call_count(), 0);
+
+        let sent = cloud.captured_inputs();
+        assert_eq!(sent.len(), 1);
+        let meta = &sent[0].metadata;
+        // Effective cloud model, not the local bundle id.
+        assert_eq!(
+            meta.get("model").map(String::as_str),
+            Some("deepseek-flash")
+        );
+        assert_eq!(meta.get("provider").map(String::as_str), Some("deepseek"));
+        assert_eq!(meta.get("thinking").map(String::as_str), Some("disabled"));
+        assert_eq!(
+            meta.get("gateway_url").map(String::as_str),
+            Some("http://127.0.0.1:9/v1")
+        );
+        assert_eq!(
+            meta.get("api_key").map(String::as_str),
+            Some("$DEEPSEEK_API_KEY")
+        );
+        // Shared generation options arrive via prepare_stage_input.
+        assert_eq!(
+            meta.get("system_prompt").map(String::as_str),
+            Some("Be terse.")
+        );
+        assert_eq!(meta.get("temperature").map(String::as_str), Some("0"));
+        assert_eq!(meta.get("max_tokens").map(String::as_str), Some("16"));
+    }
+
+    #[test]
+    fn local_target_with_provider_but_no_bundle_errors_without_calling_adapters() {
+        let mut executor = Executor::new();
+        let mut local = MockRuntimeAdapter::with_text_output("local").with_name("onnx");
+        local.load_model("/mock/model.onnx").unwrap();
+        let local = Arc::new(local);
+        executor.register_adapter(local.clone());
+        let mut cloud = MockRuntimeAdapter::with_text_output("cloud").with_name("cloud");
+        cloud.load_model("/mock/cloud").unwrap();
+        let cloud = Arc::new(cloud);
+        executor.register_adapter(cloud.clone());
+
+        let stage = hybrid_stage(None);
+        let input = Envelope::new(EnvelopeKind::Text("Hello".to_string()));
+
+        let err = executor
+            .execute_stage(&stage, &input, "local")
+            .expect_err("hybrid stage without a bundle cannot run locally");
+
+        assert!(
+            matches!(err, ExecutorError::ExecutionFailed(_)),
+            "got {err:?}"
+        );
+        let msg = err.to_string();
+        assert!(
+            msg.contains("routed local but has no local bundle"),
+            "{msg}"
+        );
+        assert!(msg.contains("llm"), "{msg}");
+        assert_eq!(
+            local.call_count(),
+            0,
+            "raw adapter must not substitute for the bundle"
+        );
+        assert_eq!(cloud.call_count(), 0, "cloud must not be retried");
+    }
+
+    #[test]
+    fn local_target_with_provider_and_invalid_bundle_errors() {
+        let mut executor = Executor::new();
+        let mut local = MockRuntimeAdapter::with_text_output("local").with_name("onnx");
+        local.load_model("/mock/model.onnx").unwrap();
+        let local = Arc::new(local);
+        executor.register_adapter(local.clone());
+
+        // An existing directory with no model_metadata.json is not a bundle.
+        let empty_dir = tempfile::tempdir().unwrap();
+        let stage = hybrid_stage(Some(empty_dir.path().to_str().unwrap()));
+        let input = Envelope::new(EnvelopeKind::Text("Hello".to_string()));
+
+        let err = executor
+            .execute_stage(&stage, &input, "local")
+            .expect_err("invalid hybrid bundle must not fall through");
+        assert!(
+            matches!(err, ExecutorError::ExecutionFailed(_)),
+            "got {err:?}"
+        );
+        assert!(
+            err.to_string().contains("missing model_metadata.json"),
+            "{err}"
+        );
+        assert_eq!(local.call_count(), 0);
+
+        // A missing directory is rejected the same way.
+        let stage = hybrid_stage(Some("/definitely/not/here"));
+        let err = executor
+            .execute_stage(&stage, &input, "local")
+            .expect_err("missing hybrid bundle must not fall through");
+        assert!(
+            matches!(err, ExecutorError::ExecutionFailed(_)),
+            "got {err:?}"
+        );
+        assert_eq!(local.call_count(), 0);
+    }
+
+    #[test]
+    fn prepare_stage_input_applies_stage_options_when_input_is_silent() {
+        let stage = hybrid_stage(None);
+        let input = Envelope::new(EnvelopeKind::Text("Hello".to_string()));
+
+        let prepared = prepare_stage_input(&stage, &input).unwrap();
+
+        assert_eq!(prepared.as_text(), Some("Hello"));
+        assert_eq!(
+            prepared.metadata.get("system_prompt").map(String::as_str),
+            Some("Be terse.")
+        );
+        assert_eq!(
+            prepared.metadata.get("temperature").map(String::as_str),
+            Some("0")
+        );
+        assert_eq!(
+            prepared.metadata.get("max_tokens").map(String::as_str),
+            Some("16")
+        );
+        // Transport keys are NOT shared generation options.
+        assert!(!prepared.metadata.contains_key("gateway_url"));
+        assert!(!prepared.metadata.contains_key("cloud_model"));
+        assert!(!prepared.metadata.contains_key("thinking"));
+        // The prepared values are what the local LLM strategy parses.
+        let params = crate::execution::strategies::LlmGenerationParams::from_envelope_metadata(
+            &prepared.metadata,
+        );
+        assert_eq!(params.max_tokens, 16);
+        assert_eq!(params.temperature, 0.0);
+        assert_eq!(params.system_prompt.as_deref(), Some("Be terse."));
+    }
+
+    #[test]
+    fn prepare_stage_input_keeps_explicit_input_metadata() {
+        let stage = hybrid_stage(None);
+        let mut input = Envelope::new(EnvelopeKind::Text("Hello".to_string()));
+        input
+            .metadata
+            .insert("max_tokens".to_string(), "512".to_string());
+        input
+            .metadata
+            .insert("unrelated".to_string(), "kept".to_string());
+
+        let prepared = prepare_stage_input(&stage, &input).unwrap();
+
+        // Caller/CLI override wins over YAML.
+        assert_eq!(
+            prepared.metadata.get("max_tokens").map(String::as_str),
+            Some("512")
+        );
+        // YAML still fills the keys the caller left unset.
+        assert_eq!(
+            prepared.metadata.get("temperature").map(String::as_str),
+            Some("0")
+        );
+        assert_eq!(
+            prepared.metadata.get("unrelated").map(String::as_str),
+            Some("kept")
+        );
+
+        // No options at all: the input is returned untouched.
+        let bare = StageDescriptor::new("bare");
+        let untouched = prepare_stage_input(&bare, &input).unwrap();
+        assert_eq!(untouched.metadata, input.metadata);
+    }
+
+    #[test]
+    fn prepare_stage_input_rejects_invalid_options() {
+        let cases: [(&str, serde_json::Value, &str); 6] = [
+            (
+                "temperature",
+                serde_json::json!("hot"),
+                "non-negative number",
+            ),
+            (
+                "temperature",
+                serde_json::json!(-0.5),
+                "non-negative number",
+            ),
+            ("top_p", serde_json::json!(true), "non-negative number"),
+            ("max_tokens", serde_json::json!(0), "positive integer"),
+            ("max_tokens", serde_json::json!(1.5), "positive integer"),
+            ("system_prompt", serde_json::json!(42), "a string"),
+        ];
+        let input = Envelope::new(EnvelopeKind::Text("Hello".to_string()));
+        for (key, value, expected) in cases {
+            let mut options = crate::pipeline::StageOptions::new();
+            options.values.insert(key.to_string(), value.clone());
+            let stage = StageDescriptor::new("llm").with_options(options);
+            let err = prepare_stage_input(&stage, &input)
+                .expect_err(&format!("{key}={value} must be rejected"));
+            let msg = err.to_string();
+            assert!(msg.contains(key) && msg.contains(expected), "{msg}");
+        }
     }
 
     #[test]
@@ -822,22 +1225,20 @@ mod tests {
     }
 
     #[test]
-    fn test_select_adapter() {
+    fn test_select_local_adapter_prefers_onnx() {
         let mut executor = Executor::new();
-        let adapter = Arc::new(OnnxRuntimeAdapter::new());
-        executor.register_adapter(adapter);
+        executor.register_adapter(Arc::new(OnnxRuntimeAdapter::new()));
+        let mut other = MockRuntimeAdapter::with_text_output("x").with_name("aaa");
+        other.load_model("/mock").unwrap();
+        executor.register_adapter(Arc::new(other));
 
-        // Test local target
-        let adapter_name = executor.select_adapter("local").unwrap();
-        assert_eq!(adapter_name, "onnx");
+        assert_eq!(executor.select_local_adapter().unwrap(), "onnx");
 
-        // Test cloud target
-        let adapter_name = executor.select_adapter("cloud").unwrap();
-        assert_eq!(adapter_name, "onnx");
-
-        // Test invalid target
-        let result = executor.select_adapter("invalid");
-        assert!(matches!(result, Err(ExecutorError::InvalidTarget(_))));
+        let empty = Executor::new();
+        assert!(matches!(
+            empty.select_local_adapter(),
+            Err(ExecutorError::AdapterNotFound(_))
+        ));
     }
 
     // ============================================================================

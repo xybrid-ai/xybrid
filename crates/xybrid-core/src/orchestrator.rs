@@ -1058,12 +1058,22 @@ mod tests {
             )),
         };
 
-        // Register a mock adapter that returns text output
-        let mut adapter = MockRuntimeAdapter::with_text_output("mock output");
-        adapter.load_model("/mock/model.onnx").unwrap();
+        // Register named mock adapters for both legs. The executor keys its
+        // default local/cloud adapters on "onnx"/"cloud" and never serves a
+        // local route from the cloud adapter (or vice versa), so both must
+        // be present for pipelines that mix local and cloud-routed stages.
+        let mut local_adapter =
+            MockRuntimeAdapter::with_text_output("mock output").with_name("onnx");
+        local_adapter.load_model("/mock/model.onnx").unwrap();
         orchestrator
             .executor_mut()
-            .register_adapter(Arc::new(adapter));
+            .register_adapter(Arc::new(local_adapter));
+        let mut cloud_adapter =
+            MockRuntimeAdapter::with_text_output("mock cloud output").with_name("cloud");
+        cloud_adapter.load_model("/mock/cloud").unwrap();
+        orchestrator
+            .executor_mut()
+            .register_adapter(Arc::new(cloud_adapter));
 
         orchestrator
     }
