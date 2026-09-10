@@ -320,10 +320,11 @@ impl InferenceResult {
     ///
     /// Present when the request offered tools (`GenerationConfig::with_tools`)
     /// and the model emitted at least one well-formed tool-call block
-    /// (LFM2-style `<|tool_call_start|>...` or gemma-4-style
-    /// `<|tool_call>call:...`). The raw blocks stay in [`text`](Self::text)
-    /// untouched. Returns an empty vec when the metadata is absent or
-    /// unparseable — malformed model output is never an error.
+    /// (LFM2-style `<|tool_call_start|>...`, gemma-4-style
+    /// `<|tool_call>call:...`, or FunctionGemma-style
+    /// `<start_function_call>call:...`). The raw blocks stay in
+    /// [`text`](Self::text) untouched. Returns an empty vec when the metadata
+    /// is absent or unparseable — malformed model output is never an error.
     pub fn tool_calls(&self) -> Vec<ToolCall> {
         self.envelope
             .metadata

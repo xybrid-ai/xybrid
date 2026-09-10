@@ -88,12 +88,18 @@ SDK 提供与完整限定名对应的短别名：
 |-------|-----------|
 | `ModelLoader` | `XybridModelLoader` |
 | `Model` | `XybridModel` |
-| `Envelope` | `XybridEnvelope` |
 | `Result` | `XybridResult` |
-| `XybridError` | `XybridException` |
+| `VoiceInfo` | `XybridVoiceInfo` |
+| `GenerationConfig` | `XybridGenerationConfig` |
+| `XybridException` | `XybridError` |
 
-`Xybrid.model(id)` 是注册表模型的简写。本地来源使用
-`ModelSource.bundle(...)` 或 `ModelSource.directory(...)`。这些调用只返回
-未加载的 `ModelLoader`；调用 `load()` 才会执行解析、下载和加载。
+`Envelope` 不是别名——它是带工厂方法的 `object`
+（`Envelope.text(...)`、`Envelope.image(...)`、`Envelope.userMessage(...)`），返回 `XybridEnvelope`。
+
+`Xybrid.model(id)` 是注册表模型的简写，也可以传入类型化的
+`ModelSource.bundle(...)`、`ModelSource.directory(...)` 或
+`ModelSource.huggingFace(...)`。这些调用只返回未加载的 `ModelLoader`；
+调用挂起函数 `load()` 才会执行加载。Java 调用方或已在工作线程上的调用方
+可以使用显式阻塞的 `loadBlocking()`。
 
 完整 API 参考请见 [Android SDK 指南](/zh/docs/sdks/android)。

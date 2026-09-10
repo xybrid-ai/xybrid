@@ -13,6 +13,7 @@ android {
         targetSdk = 34
         versionCode = 1
         versionName = "0.0.0"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     compileOptions {
@@ -30,4 +31,7 @@ dependencies {
     // The AAR's transitive runtime dep. A Maven consumer gets this from the
     // POM; a local-file AAR carries no metadata, so declare it explicitly.
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.3")
+    // Match the binding's existing Android test framework/version.
+    androidTestImplementation("androidx.test.ext:junit:1.1.5")
+    androidTestImplementation("androidx.test:runner:1.5.2")
 }

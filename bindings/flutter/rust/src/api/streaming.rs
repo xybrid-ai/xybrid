@@ -94,6 +94,8 @@ pub struct FfiStreamingConfig {
     pub vad: FfiVadMode,
     /// Optional language hint (e.g. `"en"`); `None` uses the model default.
     pub language: Option<String>,
+    /// Optional Whisper encoder context in mel frames; `None` uses the model default.
+    pub audio_ctx: Option<u32>,
 }
 
 impl FfiStreamingConfig {
@@ -117,6 +119,7 @@ impl FfiStreamingConfig {
             enable_vad,
             vad_model_dir,
             language: self.language.clone(),
+            audio_ctx: self.audio_ctx,
             ..StreamConfig::default()
         })
     }

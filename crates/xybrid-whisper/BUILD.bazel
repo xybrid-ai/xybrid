@@ -6,8 +6,9 @@ rust_library(
     name = "xybrid_whisper",
     srcs = glob(["src/**/*.rs"]),
     # Plain list, no select: unlike llama's `vision`, this crate has no
-    # per-platform feature delta — whisper.cpp's CPU path is the only one we
-    # build, on every target.
+    # per-platform Rust feature delta. The wrapper requests the Metal backend
+    # via a target cfg on Apple-silicon macOS; //:whisper already selects the
+    # matching ggml implementation through the top-level build config.
     crate_features = ["bindings"],
     edition = "2021",
     deps = [

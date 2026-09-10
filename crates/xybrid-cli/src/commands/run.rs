@@ -985,13 +985,13 @@ pub(crate) fn run_huggingface(
     println!();
 
     let cache_repo = xybrid_sdk::ModelSource::parse_huggingface(repo);
-    let sanitized = cache_repo.model_id().unwrap_or(repo).replace('/', "--");
-    let cache_dir = dirs::home_dir()
-        .ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))?
-        .join(".xybrid")
-        .join("cache")
-        .join("hf")
-        .join(&sanitized);
+    let repo_id = cache_repo.model_id().unwrap_or(repo);
+    let cache_dir = xybrid_sdk::CacheManager::new()
+        .context("Failed to open the model cache")?
+        .huggingface_cache_dir(repo_id)
+        .ok_or_else(|| {
+            anyhow::anyhow!("HuggingFace model '{repo_id}' has no materialized cache directory")
+        })?;
 
     let (metadata, input) = prepare_bundle_execution(
         &cache_dir,

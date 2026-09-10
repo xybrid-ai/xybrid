@@ -347,18 +347,18 @@ final class LiveVisionViewModel: ObservableObject {
             let image = try XybridEnvelope.image(frame.jpegData, format: "jpeg")
             let envelope = try XybridEnvelope.userMessage(prompt, images: [image])
             let options = XybridRunOptions(
-                generationConfig: XybridGenerationConfig(
+                generationConfig: .make(
                     maxTokens: 96,
                     temperature: 0.0,
                     topP: 0.9,
                     minP: 0.05,
                     topK: 40,
-                    repetitionPenalty: 1.05,
-                    stopSequences: []
+                    repetitionPenalty: 1.05
                 ),
                 abortOn: [],
                 fallbackToCloud: false,
-                maxGraceTokens: 0
+                maxGraceTokens: 0,
+                correlationId: nil
             )
             // bolt's `run` is synchronous + blocking; execute it OFF the main
             // actor so the camera feed and UI stay responsive (the realtime gate

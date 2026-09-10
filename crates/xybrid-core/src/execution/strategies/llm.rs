@@ -15,6 +15,7 @@ use crate::execution::types::ExecutorResult;
 use crate::gateway::Tool;
 use crate::runtime_adapter::AdapterError;
 use crate::runtime_adapter::MultimodalChatMessage;
+use crate::runtime_adapter::{parse_stop_sequences, STOP_SEQUENCES_METADATA_KEY};
 
 // ============================================================================
 // LLM Inference Trait (for mockability)
@@ -183,7 +184,7 @@ impl LlmGenerationParams {
     /// - `top_p`: Nucleus sampling threshold
     /// - `top_k`: Top-k sampling
     /// - `system_prompt`: System prompt text
-    /// - `stop_sequences`: Comma-separated list of stop sequences
+    /// - `stop_sequences`: Stop sequences — see [`parse_stop_sequences`]
     /// - `model_id`: Used to auto-detect stop sequences if not explicitly provided
     pub fn from_envelope_metadata(metadata: &std::collections::HashMap<String, String>) -> Self {
         let mut params = Self::default();
@@ -204,13 +205,8 @@ impl LlmGenerationParams {
             params.system_prompt = Some(val.clone());
         }
 
-        // Parse stop sequences from comma-separated string
-        if let Some(val) = metadata.get("stop_sequences") {
-            params.stop_sequences = val
-                .split(',')
-                .map(|s| s.trim().to_string())
-                .filter(|s| !s.is_empty())
-                .collect();
+        if let Some(val) = metadata.get(STOP_SEQUENCES_METADATA_KEY) {
+            params.stop_sequences = parse_stop_sequences(val);
         }
 
         params

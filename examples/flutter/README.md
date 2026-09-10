@@ -110,7 +110,7 @@ try {
 
 ```dart
 try {
-  final loader = XybridModelLoader.fromRegistry(modelId: 'whisper-tiny');
+  final loader = XybridModelLoader.fromRegistry(modelId: 'whisper-tiny-ggml');
   final model = await loader.load();
   print('Loaded: ${model.modelId}');
 } catch (e) {
@@ -163,7 +163,7 @@ print('Transcription: ${result.text}');
 const yaml = '''
 name: voice-assistant
 stages:
-  - model: whisper-tiny
+  - model: whisper-tiny-ggml
   - model: llama-3-8b
   - model: kokoro-82m
 ''';

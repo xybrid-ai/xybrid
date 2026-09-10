@@ -3,8 +3,6 @@
 // </auto-generated>
 #nullable enable
 
-using System;
-
 namespace XybridBolt
 {
     public enum XybridThermalState : int
@@ -13,30 +11,5 @@ namespace XybridBolt
         Warm = 1,
         Hot = 2,
         Critical = 3
-    }
-
-    internal static class XybridThermalStateWire
-    {
-        internal const int WireEncodedSize = 4;
-
-        internal static XybridThermalState Decode(WireReader reader) =>
-            reader.ReadI32() switch
-            {
-                0 => XybridThermalState.Normal,
-                1 => XybridThermalState.Warm,
-                2 => XybridThermalState.Hot,
-                3 => XybridThermalState.Critical,
-                int tag => throw new InvalidOperationException($"Unknown XybridThermalState wire tag: {tag}"),
-            };
-
-        internal static void WireEncodeTo(this XybridThermalState value, WireWriter wire) =>
-            wire.WriteI32(value switch
-            {
-                XybridThermalState.Normal => 0,
-                XybridThermalState.Warm => 1,
-                XybridThermalState.Hot => 2,
-                XybridThermalState.Critical => 3,
-                _ => throw new InvalidOperationException($"Unknown XybridThermalState variant: {value}"),
-            });
     }
 }

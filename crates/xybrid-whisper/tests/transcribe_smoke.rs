@@ -64,8 +64,10 @@ fn read_wav_16k_mono(path: &Path) -> Vec<f32> {
     assert_eq!(bits, 16, "fixture must be 16-bit");
 
     bytes[44..]
-        .chunks_exact(2)
-        .map(|c| f32::from(i16::from_le_bytes([c[0], c[1]])) / 32_768.0)
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|c| f32::from(i16::from_le_bytes(*c)) / 32_768.0)
         .collect()
 }
 

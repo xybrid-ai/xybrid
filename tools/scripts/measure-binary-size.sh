@@ -30,7 +30,7 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-PKG="xybrid-bolt"
+PKG="xybrid_bolt"
 LIB="libxybrid_bolt"   # crate lib name (xybrid-bolt -> underscored)
 # cdylib extension is .dylib on macOS, .so on Linux.
 SO_EXT="so"; [ "$(uname)" = "Darwin" ] && SO_EXT="dylib"

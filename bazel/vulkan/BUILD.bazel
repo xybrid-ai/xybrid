@@ -1,0 +1,21 @@
+# The Vulkan loader, as far as the LINKER is concerned — see vulkan_stub.c for
+# why the exec machine's real libvulkan.so cannot play that role under a
+# hermetic toolchain, and why binding to the real one at runtime still works.
+#
+# Used by //:llama_vulkan (as cmake's Vulkan_LIBRARY, which
+# `find_package(Vulkan REQUIRED)` insists on and llama.cpp's throwaway tool
+# executables actually link) and by //crates/llama-cpp-sys:wrapper_cc (which
+# carries it into the final Rust link).
+load("@rules_cc//cc:defs.bzl", "cc_binary")
+
+cc_binary(
+    name = "libvulkan.so",
+    srcs = ["vulkan_stub.c"],
+    # The SONAME is the entire mechanism: it is what lands in the produced
+    # binary's DT_NEEDED, so the dynamic loader resolves these symbols against
+    # whatever real libvulkan.so.1 the machine has. Without it the linker would
+    # record this build path instead.
+    linkopts = ["-Wl,-soname,libvulkan.so.1"],
+    linkshared = True,
+    visibility = ["//visibility:public"],
+)

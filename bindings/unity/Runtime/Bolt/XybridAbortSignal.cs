@@ -3,8 +3,6 @@
 // </auto-generated>
 #nullable enable
 
-using System;
-
 namespace XybridBolt
 {
     public enum XybridAbortSignal : int
@@ -13,30 +11,5 @@ namespace XybridBolt
         MemoryPressureCritical = 1,
         ThermalHot = 2,
         ThermalCritical = 3
-    }
-
-    internal static class XybridAbortSignalWire
-    {
-        internal const int WireEncodedSize = 4;
-
-        internal static XybridAbortSignal Decode(WireReader reader) =>
-            reader.ReadI32() switch
-            {
-                0 => XybridAbortSignal.MemoryPressureWarn,
-                1 => XybridAbortSignal.MemoryPressureCritical,
-                2 => XybridAbortSignal.ThermalHot,
-                3 => XybridAbortSignal.ThermalCritical,
-                int tag => throw new InvalidOperationException($"Unknown XybridAbortSignal wire tag: {tag}"),
-            };
-
-        internal static void WireEncodeTo(this XybridAbortSignal value, WireWriter wire) =>
-            wire.WriteI32(value switch
-            {
-                XybridAbortSignal.MemoryPressureWarn => 0,
-                XybridAbortSignal.MemoryPressureCritical => 1,
-                XybridAbortSignal.ThermalHot => 2,
-                XybridAbortSignal.ThermalCritical => 3,
-                _ => throw new InvalidOperationException($"Unknown XybridAbortSignal variant: {value}"),
-            });
     }
 }

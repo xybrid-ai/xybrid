@@ -1,5 +1,101 @@
 # Changelog
 
+## 0.8.0
+
+No Dart API changes. Flutter desktop model loads can reuse compatible files
+from the standard Hugging Face cache, and the macOS native runtime gains Core
+ML execution support. Android native packaging also receives the release-wide
+JNI fix, while Apple token streams preserve producer backpressure.
+
+* Added: desktop Hugging Face loads reuse matching snapshots and
+  content-addressed blobs before downloading duplicate model files
+  (xybrid-ai/xybrid#536)
+* Added: native Core ML model execution on macOS (xybrid-ai/xybrid#548)
+* Fixed: Apple token streams preserve producer backpressure and clean up safely
+  when consumption is cancelled (xybrid-ai/xybrid#549)
+* Fixed: Android release artifacts carry the corrected callable JNI library;
+  this does not change the Dart API (xybrid-ai/xybrid#555)
+
+## 0.7.0
+
+Streaming tool loops can now keep both live output and conversation history,
+and apps can release idle model memory without throwing away model handles.
+
+* Added: a terminal streaming token carries typed `toolCalls`,
+  `finishReason: "tool_calls"`, and `rawText`, so callers dispatch a tool without
+  parsing protocol text and retain the exact assistant turn needed for the
+  continuation (xybrid-ai/xybrid#542)
+* Added: `tool_results` continuations work through
+  `runStreamingWithContext`, preserving history and token-by-token output on the
+  second turn (xybrid-ai/xybrid#542)
+* Added: `Xybrid.releaseMemory`, `Xybrid.setAutoRelease`, and
+  `Xybrid.isAutoReleaseEnabled`. Explicit release skips busy models and an
+  evicted model reloads itself on its next use; automatic release is off by
+  default (xybrid-ai/xybrid#539)
+* Fixed: a terminal tool call is delivered exactly once. The native terminal
+  token and the completion event previously exposed the same call, which could
+  make a straightforward `hasToolCalls` loop dispatch every tool twice
+  (xybrid-ai/xybrid#542)
+* Fixed: cloud fallback preserves `maxTokens`, `temperature`, `topP`, and exact
+  `stopSequences` values instead of silently using gateway defaults or
+  corrupting whitespace- and comma-bearing stops (xybrid-ai/xybrid#545)
+* Changed: image-bearing tool continuations still fail closed, with an error
+  that explains image embeddings cannot be reconstructed from replayed text
+  (xybrid-ai/xybrid#542)
+
+## 0.6.0
+
+Structured output, reasoning text, and tool-capability reporting reach the Dart
+surface, and the package finally ships a runnable example app.
+
+* Added: `GenerationConfig.grammar` and `jsonSchemaToGbnf` — constrain
+  generation to a JSON Schema, with the greedy and creative presets taking an
+  optional grammar so the usual extraction shape is a single call. Both had
+  reached the generated layer and stopped at the hand-written wrapper
+  (xybrid-ai/xybrid#511)
+* Added: `XybridResult.reasoningContent`, what a thinking model emits separately
+  from its answer (xybrid-ai/xybrid#511)
+* Added: `XybridModel.supportsToolCalling`, the bundle's tool-calling metadata
+  flag as an advisory tri-state — `null` means the bundle says nothing
+  (xybrid-ai/xybrid#515)
+* Added: a runnable single-screen example app in `example/`, replacing the
+  `example.md` snippet file. The snippets themselves remain in the package
+  README (xybrid-ai/xybrid#525, xybrid-ai/xybrid#152)
+* Fixed: `flutter build macos` failed with 1287 duplicate `ggml_*` symbols — one
+  Rust staticlib carried two copies of ggml (xybrid-ai/xybrid#528)
+* Changed: the Dart unit tests under `test/` run in CI for the first time, so
+  wrapper-level regressions are caught before release (xybrid-ai/xybrid#511)
+
+## 0.5.0
+
+Live streaming speech recognition, now on the whisper.cpp backend, plus the
+speculative-cloud surface.
+
+* Added: live streaming ASR — `XybridStreamSession` with a rolling window over
+  fed audio, partial and final transcript events, and a demo screen in the
+  example app (xybrid-ai/xybrid#453)
+* Added: `XybridStreamSession.fromModel(..., audioCtx:)`, an optional Whisper
+  encoder-context override in mel frames. `null` keeps the model bundle's
+  default (xybrid-ai/xybrid#481)
+* Added: speculative cloud fallback and download visibility —
+  `fromRegistrySpeculative`, `willSpeculate`, `isCloudServing`,
+  `downloadStatus`, `downloadProgress` (a push `StreamSink` of load events),
+  `setPlatformUrl`, and `setSpeculativeCloud`. Results carry
+  `executionTarget`, so a device answer is distinguishable from a gateway one;
+  a pipeline reports its final stage's target (xybrid-ai/xybrid#459)
+* Changed: ASR runs on whisper.cpp rather than Candle — 3.6x faster to a first
+  partial on a Pixel 8, and the first partial itself arrives ~3.5 s sooner
+  thanks to warm-up windowing. **The registry id `whisper-tiny` no longer
+  loads**; use `whisper-tiny-ggml` (xybrid-ai/xybrid#462, xybrid-ai/xybrid#465,
+  xybrid-ai/xybrid#476, xybrid-ai/xybrid#458)
+* Changed: transcripts no longer contain bracketed non-speech annotations such
+  as `[BLANK_AUDIO]`, audio longer than 30 seconds no longer repeats text past
+  its end, and unsupported `prompt` metadata now returns an input error instead
+  of being ignored (xybrid-ai/xybrid#484)
+* Fixed: building the example for Android from source failed in
+  `xybrid-whisper-sys` with `'stdio.h' file not found`; bindgen now gets the
+  NDK sysroot (xybrid-ai/xybrid#468)
+
 ## 0.4.1
 
 No Dart API changes. Fixes to the iOS build and to diagnostics on both mobile

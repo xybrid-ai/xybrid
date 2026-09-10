@@ -81,7 +81,40 @@ After editing `bindings/flutter/rust`, regenerate the Dart glue with
 `flutter_rust_bridge` in `bindings/flutter/rust/Cargo.toml`); `flutter run` then
 rebuilds the native lib via cargokit.
 
-Note: `tools/README.md` still documents the pre-Bazel xtask matrix and is stale.
+
+### Prebuilt llama.cpp natives (the cargo fast path)
+
+`crates/llama-cpp-sys/build.rs` does not always run cmake. It resolves the
+llama.cpp static archives in this order, falling through on any miss:
+
+1. `XYBRID_NATIVES_PREBUILT_DIR/<target>` — a slice staged by the caller. Our
+   CI jobs pull with `tools/scripts/natives-pull.sh` and point at it.
+2. A slice named in `crates/llama-cpp-sys/natives-manifest.txt`, downloaded
+   over plain HTTPS from `ghcr.io/xybrid-ai/llama-natives` and SHA-256
+   verified. Needs no oras, no env var, no cmake — this is what makes an
+   **external** `cargo build --features llm-llamacpp` cheap.
+3. The cmake source build.
+
+The manifest is GENERATED — `.github/workflows/build-natives.yml` publishes the
+slices, then its `publish-manifest` job regenerates the file via
+`tools/scripts/natives-manifest.sh` and opens a PR. Never hand-edit it.
+
+Two traps:
+
+- **The manifest goes stale on purpose.** It pins plain hashes of
+  `wrapper.cpp`, `wrapper.h`, `build.rs`, and the llama.cpp commit. Touch any
+  of them and every row is ignored until CI republishes — that is the guard
+  that stops a local edit from linking archives that predate it. A dropped
+  fast path after editing `build.rs` is expected, not a bug.
+- **Anonymous reachability is not covered by our own CI.** Every job here
+  `oras login`s first, so a private package looks healthy internally and 401s
+  for everyone outside. `tools/scripts/natives-verify-anon.sh` is the check
+  that catches it; it runs credential-free at the end of `build-natives`.
+
+The publisher fingerprint (`natives-fingerprint.sh`) folds in the LOCAL
+cmake/cc/NDK versions. That is right for publisher/consumer cache parity and
+wrong for distribution, which is why the download path selects by target +
+feature set + ABI attributes from the manifest instead of recomputing it.
 
 ### Releases
 
@@ -153,13 +186,19 @@ Cargo workspace, `resolver = "2"`, edition 2021, MSRV not pinned. Members:
 the FFI binding crates now route their SDK→foreign-language translation
 through `xybrid-ffi-facade` rather than each re-translating SDK types.
 
-The Python SDK (`bindings/python`, pure Python — not a workspace member)
-consumes `xybrid-bolt`'s cdylib via a hand-ported ctypes wire layer
-(`bindings/python/xybrid/_bolt.py`) pinned to the boltffi 0.25.3 ABI: the
-pinned boltffi's experimental Python generator cannot express handles or
-fallible functions. Refresh the native lib with
-`tools/scripts/build-python-bolt.sh`; see the `[targets.python]` note in
-`crates/xybrid-bolt/boltffi.toml` for the boltffi >= 0.26 migration plan.
+The Python SDK (`bindings/python`, not a workspace member) runs on boltffi's
+**generated** bindings as of 0.29: `xybrid/_bolt/` is generator output
+(`tools/scripts/gen_python_bolt.py`, byte-compared in CI via `--check`), and it
+imports a compiled CPython bridge that dlopens the `xybrid-bolt` cdylib. Both
+binaries are staged by `tools/scripts/build-python-bolt.sh` and are **build
+outputs, never committed** — so wheels are per-interpreter (`cp3XX`) and the
+SDK requires Python >= 3.10.
+
+Because the generated package is byte-compared, it carries no hand-written
+code. The Pythonic surface (envelope factories, `result.text`, model
+properties, typed exceptions) is attached to the generated classes at import by
+`xybrid/_sugar.py` and `xybrid/_errors.py`, guarded by `tests/test_sdk.py`. Add
+SDK ergonomics there, never in `xybrid/_bolt/`.
 
 **Dependency direction (do not reverse):**
 

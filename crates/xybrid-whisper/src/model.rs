@@ -17,6 +17,24 @@ use crate::segment::Segment;
 /// only padding, and decoding padding fabricates text.
 const MIN_SAMPLES: usize = 400;
 
+/// Samples in Whisper's full 30-second encoder window.
+const FULL_WINDOW_SAMPLES: usize = SAMPLE_RATE as usize * 30;
+
+/// Whether new contexts request GPU offload on this target.
+///
+/// Metal was 2.7–7.8x faster in end-to-end ASR benchmarks on an M1 Pro, with
+/// no word-level regressions in the release cases. Other targets remain on the
+/// CPU path until they are measured independently.
+const DEFAULT_USE_GPU: bool = cfg!(all(target_os = "macos", target_arch = "aarch64"));
+
+fn default_context_params() -> sys::whisper_context_params {
+    // SAFETY: `whisper_context_default_params` is a pure value constructor
+    // with no preconditions.
+    let mut params = unsafe { sys::whisper_context_default_params() };
+    params.use_gpu = DEFAULT_USE_GPU;
+    params
+}
+
 /// An owning handle to a whisper.cpp context.
 ///
 /// Dropping frees the native context. Transcription takes `&mut self` because
@@ -25,6 +43,7 @@ const MIN_SAMPLES: usize = 400;
 pub struct WhisperModel {
     ctx: NonNull<sys::whisper_context>,
     multilingual: bool,
+    last_detected_language: Option<String>,
 }
 
 // SAFETY: a `whisper_context` owns only heap allocations reachable through the
@@ -53,12 +72,7 @@ impl WhisperModel {
         let c_path = CString::new(path_str)
             .map_err(|_| WhisperError::InvalidInput("model path contains a null byte".into()))?;
 
-        // SAFETY: `whisper_context_default_params` is a pure value constructor
-        // with no preconditions.
-        let mut cparams = unsafe { sys::whisper_context_default_params() };
-        // GPU offload is a per-platform decision xybrid-core makes; the wrapper
-        // stays on the CPU path that every target supports.
-        cparams.use_gpu = false;
+        let cparams = default_context_params();
 
         // SAFETY: `c_path` is a valid null-terminated string that outlives the
         // call, and `cparams` is a by-value POD struct. A null return is the
@@ -71,7 +85,11 @@ impl WhisperModel {
         // SAFETY: `ctx` was just checked non-null and is a live context.
         let multilingual = unsafe { sys::whisper_is_multilingual(ctx.as_ptr()) } != 0;
 
-        Ok(Self { ctx, multilingual })
+        Ok(Self {
+            ctx,
+            multilingual,
+            last_detected_language: None,
+        })
     }
 
     /// Whether this model's vocabulary carries language tokens beyond English.
@@ -80,10 +98,22 @@ impl WhisperModel {
         self.multilingual
     }
 
+    /// Return the language auto-detected by the most recent successful transcription.
+    ///
+    /// Returns `None` before the first transcription, when the caller supplied
+    /// an explicit language, or when whisper.cpp did not report a valid
+    /// language code.
+    #[must_use]
+    pub fn detected_language(&self) -> Option<&str> {
+        self.last_detected_language.as_deref()
+    }
+
     /// Transcribe 16 kHz mono PCM in `[-1.0, 1.0]`.
     ///
     /// Returns one [`Segment`] per text span whisper emitted. Callers wanting
-    /// the plain string can [`Segment::join`] them.
+    /// the plain string can [`Segment::join`] them. When `params.language` is
+    /// absent, [`WhisperModel::detected_language`] exposes the selected code
+    /// after this call succeeds.
     ///
     /// # Errors
     ///
@@ -101,6 +131,10 @@ impl WhisperModel {
         pcm: &[f32],
         params: &TranscribeParams,
     ) -> WhisperResult<Vec<Segment>> {
+        // A failed or explicitly-languaged request must not expose a stale
+        // auto-detection from an earlier transcription.
+        self.last_detected_language = None;
+
         if pcm.len() < MIN_SAMPLES {
             return Err(WhisperError::AudioTooShort {
                 samples: pcm.len(),
@@ -119,13 +153,26 @@ impl WhisperModel {
 
         wparams.n_threads = i32::try_from(params.n_threads).unwrap_or(i32::MAX).max(1);
         wparams.audio_ctx = i32::try_from(params.normalized_audio_ctx()).unwrap_or(i32::MAX);
-        wparams.no_timestamps = !params.timestamps;
+        // Timestamp tokens let whisper.cpp advance to the true end of speech
+        // inside each 30 s window. They are optional for one-window live
+        // partials, but required for longer input: without them, the final
+        // short window is padded to 30 s and tiny can fill that padding with a
+        // long repetition loop. Segment spans remain an internal part of our
+        // return type either way, so enabling them here does not change the IO
+        // shape.
+        wparams.no_timestamps = !params.timestamps && pcm.len() <= FULL_WINDOW_SAMPLES;
         wparams.no_context = !params.use_context;
         wparams.translate = params.task == Task::Translate;
         wparams.print_progress = false;
         wparams.print_realtime = false;
         wparams.print_special = false;
         wparams.print_timestamps = false;
+        // Keep Whisper's non-speech vocabulary out of user-facing text. The
+        // upstream default is false, which lets bracketed annotations such as
+        // "[BLANK_AUDIO]" and "[Speaking in French]" surface as transcripts.
+        // Candle applies the equivalent suppress-token mask, so enabling
+        // whisper.cpp's built-in mask preserves that behavior across backends.
+        wparams.suppress_nst = true;
         // Disable temperature fallback. A fallback re-runs the whole window at
         // a higher temperature, which on a live path turns one slow window into
         // several — the measured 2.7 s outlier behind an otherwise 0.7 s
@@ -150,7 +197,35 @@ impl WhisperModel {
             return Err(WhisperError::InferenceFailed { code });
         }
 
-        self.collect_segments()
+        let segments = self.collect_segments()?;
+        if params.language.is_none() {
+            self.last_detected_language = self.read_detected_language();
+        }
+        Ok(segments)
+    }
+
+    /// Read the language selected by the preceding auto-detecting inference.
+    fn read_detected_language(&self) -> Option<String> {
+        // SAFETY: `self.ctx` is live and `whisper_full_lang_id` only reads the
+        // state populated by the preceding successful `whisper_full` call.
+        let id = unsafe { sys::whisper_full_lang_id(self.ctx.as_ptr()) };
+        if id < 0 {
+            return None;
+        }
+
+        // SAFETY: `whisper_lang_str` returns either null or a pointer to a
+        // process-lifetime, null-terminated language-code string owned by
+        // whisper.cpp. We check for null before reading and copy the result.
+        let language_ptr = unsafe { sys::whisper_lang_str(id) };
+        if language_ptr.is_null() {
+            return None;
+        }
+        // SAFETY: checked non-null above; whisper.cpp guarantees null
+        // termination for its static language-code strings.
+        unsafe { CStr::from_ptr(language_ptr) }
+            .to_str()
+            .ok()
+            .map(str::to_owned)
     }
 
     /// Map a caller-supplied language code to a C string whisper accepts,
@@ -244,7 +319,25 @@ impl std::fmt::Debug for WhisperModel {
         // leaks address-space layout into logs.
         f.debug_struct("WhisperModel")
             .field("multilingual", &self.multilingual)
+            .field("last_detected_language", &self.last_detected_language)
             .field("sample_rate", &SAMPLE_RATE)
             .finish()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::default_context_params;
+
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    #[test]
+    fn apple_silicon_macos_requests_gpu_by_default() {
+        assert!(default_context_params().use_gpu);
+    }
+
+    #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
+    #[test]
+    fn other_targets_keep_gpu_disabled_by_default() {
+        assert!(!default_context_params().use_gpu);
     }
 }

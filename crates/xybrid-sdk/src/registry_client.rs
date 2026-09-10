@@ -1461,6 +1461,7 @@ impl CacheStats {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cache::layout::CacheLayout;
     use chrono::TimeZone;
 
     fn create_vlm_bundle(temp_dir: &tempfile::TempDir, model_id: &str) -> PathBuf {
@@ -1831,7 +1832,10 @@ mod tests {
         let registry_model_dir = models_dir.join("registry-model");
         let extracted_model_dir = cache_root.join("extracted").join("runtime-model");
         let hf_model_dir = cache_root.join("hf").join("owner--repo");
-        let hf_hub_model_dir = cache_root.join("hf-hub").join("models--owner--repo");
+        let layout = CacheLayout::from_registry_root(models_dir.clone());
+        let hf_hub_model_dir = layout
+            .prepare_huggingface_hub_repo_root("owner/repo")
+            .unwrap();
         std::fs::create_dir_all(&registry_model_dir).unwrap();
         std::fs::create_dir_all(&extracted_model_dir).unwrap();
         std::fs::create_dir_all(&hf_model_dir).unwrap();
@@ -1854,7 +1858,7 @@ mod tests {
         assert!(labels.contains(&("registry-model", "models")));
         assert!(labels.contains(&("runtime-model", "extracted")));
         assert!(labels.contains(&("owner--repo", "hf")));
-        assert!(labels.contains(&("models--owner--repo", "hf-hub")));
+        assert!(labels.contains(&("owner/repo", "hf-hub")));
 
         let stats = client.cache_stats().unwrap();
         assert_eq!(stats.model_count, 4);
@@ -1869,7 +1873,10 @@ mod tests {
         let extracted_model_dir = custom_cache.join("extracted").join("runtime-model");
         let legacy_extracted_model_dir = temp_dir.path().join("extracted").join("legacy-model");
         let hf_model_dir = custom_cache.join("hf").join("owner--repo");
-        let hf_hub_model_dir = custom_cache.join("hf-hub").join("models--owner--repo");
+        let layout = CacheLayout::from_registry_root(custom_cache.clone());
+        let hf_hub_model_dir = layout
+            .prepare_huggingface_hub_repo_root("owner/repo")
+            .unwrap();
         std::fs::create_dir_all(&registry_model_dir).unwrap();
         std::fs::create_dir_all(&extracted_model_dir).unwrap();
         std::fs::create_dir_all(&legacy_extracted_model_dir).unwrap();
@@ -1895,7 +1902,7 @@ mod tests {
         assert!(labels.contains(&("runtime-model", "extracted")));
         assert!(labels.contains(&("legacy-model", "extracted")));
         assert!(labels.contains(&("owner--repo", "hf")));
-        assert!(labels.contains(&("models--owner--repo", "hf-hub")));
+        assert!(labels.contains(&("owner/repo", "hf-hub")));
         assert!(!labels.contains(&("extracted", "models")));
         assert!(!labels.contains(&("hf", "models")));
         assert!(!labels.contains(&("hf-hub", "models")));

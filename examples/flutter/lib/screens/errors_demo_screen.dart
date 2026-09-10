@@ -59,7 +59,7 @@ class _ErrorHandlingScreenState extends State<ErrorHandlingScreen> {
       operationName: 'Empty Input Validation',
       operation: () async {
         // First load a valid model (or fail trying)
-        final loader = XybridModelLoader.fromRegistry('whisper-tiny');
+        final loader = XybridModelLoader.fromRegistry('whisper-tiny-ggml');
         final model = await loader.load();
         // Then run with problematic input - empty audio bytes
         final envelope = XybridEnvelope.audio(

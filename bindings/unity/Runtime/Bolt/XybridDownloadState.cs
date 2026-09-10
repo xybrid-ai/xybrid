@@ -3,8 +3,6 @@
 // </auto-generated>
 #nullable enable
 
-using System;
-
 namespace XybridBolt
 {
     /// <summary>
@@ -18,28 +16,5 @@ namespace XybridBolt
         /// Download failed; the cloud keeps serving and `isLoaded` never flips.
         /// </summary>
         Failed = 2
-    }
-
-    internal static class XybridDownloadStateWire
-    {
-        internal const int WireEncodedSize = 4;
-
-        internal static XybridDownloadState Decode(WireReader reader) =>
-            reader.ReadI32() switch
-            {
-                0 => XybridDownloadState.Downloading,
-                1 => XybridDownloadState.Ready,
-                2 => XybridDownloadState.Failed,
-                int tag => throw new InvalidOperationException($"Unknown XybridDownloadState wire tag: {tag}"),
-            };
-
-        internal static void WireEncodeTo(this XybridDownloadState value, WireWriter wire) =>
-            wire.WriteI32(value switch
-            {
-                XybridDownloadState.Downloading => 0,
-                XybridDownloadState.Ready => 1,
-                XybridDownloadState.Failed => 2,
-                _ => throw new InvalidOperationException($"Unknown XybridDownloadState variant: {value}"),
-            });
     }
 }

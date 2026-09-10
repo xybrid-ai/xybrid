@@ -1,3 +1,21 @@
+diff --color -ru a/BUILD.ndk_root.tpl b/BUILD.ndk_root.tpl
+--- a/BUILD.ndk_root.tpl	2026-07-08 11:15:00
++++ b/BUILD.ndk_root.tpl	2026-07-08 11:15:00
+@@ -11,6 +11,14 @@
+     actual = "//{clang_directory}:cc_toolchain_suite",
+ )
+
++# Host-independent aliases for consumers that need to link or package the
++# matching libc++_shared runtime. `{clang_directory}` differs between local
++# macOS builds and Linux RBE, so callers must not embed it in their labels.
++[alias(
++    name = "libcxx_shared_%s" % target_system_name,
++    actual = "//{clang_directory}/sysroot:libcxx_shared_%s" % target_system_name,
++) for target_system_name in TARGET_SYSTEM_NAMES]
++
+ # Loop over TARGET_SYSTEM_NAMES and define all toolchain targets.
+ [toolchain(
+     name = "toolchain_%s" % target_system_name,
 diff --color -ru a/BUILD.ndk_sysroot.tpl b/BUILD.ndk_sysroot.tpl
 --- a/BUILD.ndk_sysroot.tpl	2026-07-08 11:15:00
 +++ b/BUILD.ndk_sysroot.tpl	2026-07-08 11:15:00

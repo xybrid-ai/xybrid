@@ -177,10 +177,13 @@ pub(crate) fn run_query(
     }
 
     if stream {
-        // Cue the stream→batch transition: continuation answers arrive
-        // whole (streaming rejects them), and a well-behaved model calls
-        // its tool almost immediately, so often nothing streamed at all —
-        // without a cue the drop to silence reads as a hang.
+        // Cue the stream→batch transition. Continuations can stream, but the
+        // REPL runs them batched on purpose: the agent loop interleaves tool
+        // output, duplicate-call detection, and a forced synthesis turn, and
+        // partial text between those would read as interleaved noise. A
+        // well-behaved model also calls its tool almost immediately, so often
+        // nothing streamed at all — without a cue the drop to silence reads
+        // as a hang.
         if first_turn.already_printed {
             println!();
         }
@@ -208,7 +211,7 @@ pub(crate) fn run_query(
     // thinking model's tool turn — show it next to the calls it produced.
     print_turn_reasoning(show_reasoning, first_turn.reasoning_content.as_deref());
 
-    // ── Tool continuation turns (non-context, non-streaming) ────────────────
+    // ── Tool continuation turns (batched by choice — see the cue above) ────
     let mut findings: Vec<String> = Vec::new();
     let mut seen_calls: HashSet<String> = HashSet::new();
     let mut prior_text = first_turn.text;

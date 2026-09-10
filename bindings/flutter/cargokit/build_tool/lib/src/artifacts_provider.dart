@@ -267,6 +267,19 @@ class ArtifactProvider {
         } else {
           rethrow;
         }
+      } on ClientException catch (e) {
+        // The release host sometimes drops the connection mid-response
+        // ("Connection closed before full header was received"). That is a
+        // transport hiccup, not a verdict on whether the artifact exists,
+        // so retry instead of failing the build on it.
+        if (attempt++ < maxAttempts) {
+          _log.severe(
+              'Failed to download $url: $e, attempt $attempt of $maxAttempts, will retry...');
+          await Future.delayed(Duration(seconds: 1));
+          continue;
+        } else {
+          rethrow;
+        }
       }
     }
   }

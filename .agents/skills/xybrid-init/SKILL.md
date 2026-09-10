@@ -62,7 +62,8 @@ Use the model card description, file extensions, and config to determine the mod
 
 **File-based detection:**
 - `.gguf` file → **LLM** (Gguf template)
-- `.safetensors` + whisper/candle architecture → **ASR** (SafeTensors template)
+- GGML Whisper weights (`ggml-*.bin`, or a `.bin` whose model card says whisper.cpp / GGML) → **ASR** (GgmlWhisper template) — the default ASR path
+- `.safetensors` + whisper architecture → **ASR** (SafeTensors template, Candle runtime) — opt-in only, needs `--features candle`; prefer the GGML bundle above
 - `.onnx` file → continue to task detection below
 - `.mlmodel` / `.mlpackage` → **CoreML** template
 - `.tflite` → **TfLite** template
@@ -104,7 +105,15 @@ Choose ONE:
 // ONNX model
 { "type": "Onnx", "model_file": "model.onnx" }
 
-// SafeTensors (Candle runtime — currently only Whisper)
+// GGML Whisper (whisper.cpp — the default ASR path, feature `asr-whispercpp`)
+// `language`: omit or null to auto-detect. `audio_ctx`: 0 = no encoder
+// truncation (the safe default — truncating is the biggest streaming speed
+// lever but too much of it makes the decoder loop, so opt in per model after
+// a quality check). `translate`: true translates to English instead of
+// transcribing in the source language.
+{ "type": "GgmlWhisper", "model_file": "model.bin", "language": "en", "audio_ctx": 0, "translate": false }
+
+// SafeTensors (Candle runtime — Whisper only; opt-in `candle` feature, in no platform preset)
 { "type": "SafeTensors", "model_file": "model.safetensors", "architecture": "whisper", "config_file": "config.json", "tokenizer_file": "tokenizer.json" }
 
 // GGUF (local LLMs via llama.cpp)

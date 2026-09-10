@@ -25,6 +25,28 @@ config_setting(
     visibility = ["//visibility:public"],
 )
 
+# The desktop-Linux GPU lane toggle — the Bazel half of the Vulkan chapter
+# (#307 turned GGML_VULKAN on for CARGO builds via XYBRID_LLAMA_CPP_VULKAN;
+# the shipped Linux CLI comes from Bazel, which never reads that env var).
+# Same shape as --//:metal above: identical Rust features on both lanes, the
+# flag flips only llama.cpp's GGML_VULKAN, and the flipped compile lives in a
+# separate target (//:llama_vulkan) that must run on a machine carrying the
+# Vulkan SDK (see build:linux-vulkan).
+#
+# --//:metal=true --//:vulkan=true together is meaningless (darwin vs linux)
+# and Bazel reports it as an ambiguous select match naming both settings, which
+# is a clear enough failure to not be worth a config_setting_group guard.
+bool_flag(
+    name = "vulkan",
+    build_setting_default = False,
+)
+
+config_setting(
+    name = "vulkan_enabled",
+    flag_values = {":vulkan": "true"},
+    visibility = ["//visibility:public"],
+)
+
 # Host platform for Linux hosts (CI runners): rules_rs' experimental toolchains
 # need an explicit host platform carrying a libc constraint on Linux. Activated
 # by `common:linux` in .bazelrc (auto-applied via --enable_platform_specific_config).
@@ -112,6 +134,87 @@ _LLAMA_LIBS = [
 _METAL_CMAKE_FLAGS = {
     "GGML_METAL": "ON",
     "GGML_ACCELERATE": "ON",
+}
+
+# ggml's Vulkan backend, used by the Linux GPU lane (//:llama_vulkan).
+#
+# The three Vulkan_* pins matter as much as GGML_VULKAN itself. ggml's
+# ggml-vulkan/CMakeLists.txt opens with
+# `find_package(Vulkan COMPONENTS glslc REQUIRED)`, and under the hermetic
+# toolchain CMAKE_SYSROOT points at hermetic-llvm's sysroot — so FindVulkan's
+# find_path/find_library would search that sysroot and miss the SDK payload the
+# exec machine has under /usr. A pre-set cache variable short-circuits find_*
+# entirely, and cache_entries is exactly `-D<var>=<value>`, so pinning the three
+# results FindVulkan would otherwise compute makes discovery a non-issue.
+#
+# INCLUDE DIR: deliberately NOT /usr/include, even though that is where
+# `apt-get install libvulkan-dev` puts vulkan/ (and where FindVulkan would land).
+# cmake turns Vulkan_INCLUDE_DIRS into a `-I` on ggml-vulkan's TUs, and a `-I`
+# is searched BEFORE the toolchain's sysroot — so /usr/include would shadow
+# hermetic-llvm's libc headers for those files. Compiling against the runner's
+# glibc 2.39 headers while linking hermetic glibc 2.28 is how you get symbols
+# like `__isoc23_sscanf` (a 2.38+ header redirect) into the binary and the
+# glibc floor silently rises. The Vulkan CI job instead stages a directory
+# holding ONLY the vulkan trees, and the smoke asserts the floor.
+_VULKAN_INCLUDE_DIR = "/opt/xybrid-vulkan-include"
+
+# THE LOADER is NOT taken from the exec machine, for two independent reasons
+# (both learned the hard way in CI):
+#
+#   1. Its libvulkan.so is built against ITS glibc, so resolving it against
+#      hermetic-llvm's 2.28 sysroot leaves the loader's own imports undefined —
+#      `ld.lld: error: undefined reference: __isoc23_sscanf@GLIBC_2.38`.
+#   2. A host path is not an action input, so it is simply absent when the
+#      final Rust link runs on a remote worker.
+#
+# //bazel/vulkan:libvulkan.so is a link-time stub built by our own toolchain,
+# carrying the real SONAME so the binary still binds to the machine's real
+# loader at runtime. See bazel/vulkan/vulkan_stub.c for the full reasoning.
+# `data` + `$(execpath)` is the same shape the linux/windows arms already use
+# for the static C++ runtime archives.
+_VULKAN_LIBRARY = "$$EXT_BUILD_ROOT/$(execpath //bazel/vulkan:libvulkan.so)"
+
+_VULKAN_CMAKE_FLAGS = {
+    "GGML_VULKAN": "ON",
+    "Vulkan_INCLUDE_DIR": _VULKAN_INCLUDE_DIR,
+    "Vulkan_LIBRARY": _VULKAN_LIBRARY,
+    # glslc is executed, never linked or included, so it has neither hazard and
+    # comes straight from the exec machine.
+    "Vulkan_GLSLC_EXECUTABLE": "/usr/bin/glslc",
+}
+
+# The static C++ runtime archives the linux and windows-gnu lanes hand to cmake
+# (see CMAKE_CXX_STANDARD_LIBRARIES below). cfg=target — the same labels resolve
+# per-platform — unlike build_data's exec-config host tools.
+_STATIC_CXX_RUNTIME_LIBS = [
+    "@llvm//runtimes/libcxx:libcxx.static",
+    "@llvm//runtimes/libcxx:libcxxabi.static",
+    "@llvm//runtimes/libunwind:libunwind.static",
+]
+
+# Desktop-linux config, shared by the CPU lane (//:llama's linux arm) and the
+# GPU lane (//:llama_vulkan).
+#
+# VISION (Flip 1): TOOLS+COMMON=ON unlock tools/ -> libmtmd, mirroring the
+# android arms — the shipped cargo CLI is built with platform-desktop =
+# vision+huggingface, so the Bazel artifact must match. The tool EXECUTABLES
+# need a C++ runtime: the hermetic toolchain links C++ via staged inputs
+# (-nostdlib++), which rfcc's cmake doesn't replicate — hand the static
+# libc++/abi/unwind archives to the exe links via CMAKE_CXX_STANDARD_LIBRARIES
+# (lands AFTER objects, unlike EXE_LINKER_FLAGS). The tools themselves are
+# discarded; only the static libs ship. GGML_LLAMAFILE stays default-ON
+# (android-only off).
+#
+# PIC so these static libs also link into a -shared consumer (the Flutter
+# cdylib, //bindings/flutter/rust): stb_image's __thread globals otherwise emit
+# R_X86_64_TPOFF32, illegal in a shared lib. Harmless for the CLI exe
+# (macOS/arm64 is PIC by default, Android via the NDK, so only the linux GNU arm
+# needs this explicitly).
+_LINUX_LLAMA = _LLAMA_CACHE_ENTRIES | {
+    "LLAMA_BUILD_TOOLS": "ON",
+    "LLAMA_BUILD_COMMON": "ON",
+    "CMAKE_CXX_STANDARD_LIBRARIES": "$$EXT_BUILD_ROOT/$(execpath @llvm//runtimes/libcxx:libcxx.static) $$EXT_BUILD_ROOT/$(execpath @llvm//runtimes/libcxx:libcxxabi.static) $$EXT_BUILD_ROOT/$(execpath @llvm//runtimes/libunwind:libunwind.static)",
+    "CMAKE_POSITION_INDEPENDENT_CODE": "ON",
 }
 
 _DARWIN_LLAMA = _LLAMA_CACHE_ENTRIES | {
@@ -233,26 +336,11 @@ cmake(
         # _GNU_SOURCE instead of _DARWIN_C_SOURCE (u_int/u_char vanish from the
         # SDK headers). Metal stays OFF (base entries): CPU-only is the lane
         # that can leave the Mac; Metal needs Xcode.
-        # Desktop-linux VISION (Flip 1): TOOLS+COMMON=ON unlock tools/ -> libmtmd,
-        # mirroring the android arms — the shipped cargo CLI is built with
-        # platform-desktop = vision+huggingface, so the Bazel artifact must match.
-        # The tool EXECUTABLES need a C++ runtime: the hermetic toolchain links
-        # C++ via staged inputs (-nostdlib++), which rfcc's cmake doesn't
-        # replicate — hand the static libc++/abi/unwind archives to the exe
-        # links via CMAKE_CXX_STANDARD_LIBRARIES (lands AFTER objects, unlike
-        # EXE_LINKER_FLAGS). The tools themselves are discarded; only the
-        # static libs ship. GGML_LLAMAFILE stays default-ON (android-only off).
-        "@rules_rs//rs/platforms/config:x86_64-unknown-linux-gnu": _LLAMA_CACHE_ENTRIES | {
-            "LLAMA_BUILD_TOOLS": "ON",
-            "LLAMA_BUILD_COMMON": "ON",
-            "CMAKE_CXX_STANDARD_LIBRARIES": "$$EXT_BUILD_ROOT/$(execpath @llvm//runtimes/libcxx:libcxx.static) $$EXT_BUILD_ROOT/$(execpath @llvm//runtimes/libcxx:libcxxabi.static) $$EXT_BUILD_ROOT/$(execpath @llvm//runtimes/libunwind:libunwind.static)",
-            # PIC so these static libs also link into a -shared consumer (the
-            # Flutter cdylib, //bindings/flutter/rust): stb_image's __thread
-            # globals otherwise emit R_X86_64_TPOFF32, illegal in a shared lib.
-            # Harmless for the CLI exe (macOS/arm64 is PIC by default, Android via
-            # the NDK, so only the linux GNU arm needs this explicitly).
-            "CMAKE_POSITION_INDEPENDENT_CODE": "ON",
-        },
+        # Desktop-linux CPU lane — see _LINUX_LLAMA above for what it carries
+        # (vision, the static C++ runtime for the throwaway tool exes, PIC).
+        # The GPU lane is the same dict plus _VULKAN_CMAKE_FLAGS, in the
+        # separate //:llama_vulkan target below.
+        "@rules_rs//rs/platforms/config:x86_64-unknown-linux-gnu": _LINUX_LLAMA,
         # darwin CPU lane (RBE): _DARWIN_LLAMA + the SDK's -lc++ for the tool
         # exes (resolves against the sysroot's libc++.tbd stubs; the tools are
         # discarded). NOT the hermetic static libcxx: compiling hermetic-llvm's
@@ -304,16 +392,8 @@ cmake(
     # deliberately absent: darwin-target libcxx-from-source is broken (see the
     # darwin arm comment) — both darwin lanes use the SDK's -lc++.
     data = select({
-        "@rules_rs//rs/platforms/config:x86_64-unknown-linux-gnu": [
-            "@llvm//runtimes/libcxx:libcxx.static",
-            "@llvm//runtimes/libcxx:libcxxabi.static",
-            "@llvm//runtimes/libunwind:libunwind.static",
-        ],
-        "@rules_rs//rs/platforms/config:x86_64-pc-windows-gnu": [
-            "@llvm//runtimes/libcxx:libcxx.static",
-            "@llvm//runtimes/libcxx:libcxxabi.static",
-            "@llvm//runtimes/libunwind:libunwind.static",
-        ],
+        "@rules_rs//rs/platforms/config:x86_64-unknown-linux-gnu": _STATIC_CXX_RUNTIME_LIBS,
+        "@rules_rs//rs/platforms/config:x86_64-pc-windows-gnu": _STATIC_CXX_RUNTIME_LIBS,
         "//conditions:default": [],
     }),
     lib_source = ":llama_src",
@@ -423,6 +503,58 @@ cmake(
     visibility = ["//visibility:public"],
 )
 
+# The desktop-Linux GPU lane: llama with ggml's Vulkan backend. A SEPARATE
+# target for the same two reasons //:llama_metal is separate — //:llama keeps
+# byte-stable action keys on every existing lane, and this one can be pinned
+# LOCAL while the rest of the graph still executes on RBE.
+#
+# WHY LOCAL. The RBE exec image is bare `ubuntu:22.04` (hermetic-llvm's
+# rbe.bzl exec_properties), which carries no glslc, no Vulkan headers and no
+# host compiler. ggml's Vulkan build needs all three on the EXEC machine:
+#
+#   1. `find_package(Vulkan COMPONENTS glslc REQUIRED)` — headers + loader +
+#      the glslc binary (pinned via _VULKAN_CMAKE_FLAGS rather than searched).
+#   2. `vulkan-shaders-gen`, a nested CMake ExternalProject built for the HOST
+#      and then run to compile the .comp shaders. Under rfcc CMAKE_SYSTEM_NAME
+#      is toolchain-set, so cmake takes its CMAKE_CROSSCOMPILING branch and
+#      `detect_host_compiler()` looks for gcc/clang on PATH.
+#
+# So the exec machine is the GitHub runner with .github/actions/setup-vulkan-sdk
+# applied (apt: glslc + libvulkan-dev), not an RBE worker. `no-remote-exec`
+# pins the spawn; unlike //:llama_metal no exec_compatible_with is needed —
+# both the runner and the RBE exec platform are linux/x86_64, so the tools
+# resolved for either platform run here.
+#
+# Not hermetic, by the same reasoning as //:llama_metal's Xcode dependency: a
+# hermetic lane would have to ship glslc (no shaderc/glslang module exists in
+# the BCR today), the Vulkan headers and a host cc as action inputs. Worth
+# doing only if this needs to build on RBE.
+cmake(
+    name = "llama_vulkan",
+    # rfcc sanitizes PATH; /usr/bin is where the apt payload's glslc and the
+    # runner's gcc (for vulkan-shaders-gen) live.
+    env = {"PATH": "/usr/local/bin:/usr/bin:/bin"},
+    cache_entries = _LINUX_LLAMA | _VULKAN_CMAKE_FLAGS,
+    # The C++ runtime archives the linux arm needs, plus the loader stub that
+    # _VULKAN_CMAKE_FLAGS references by $(execpath).
+    data = _STATIC_CXX_RUNTIME_LIBS + ["//bazel/vulkan:libvulkan.so"],
+    lib_source = ":llama_src",
+    out_static_libs = [
+        "libmtmd.a",
+        # ggml's Vulkan backend is its own archive (ggml_add_backend_library),
+        # linked alongside the rest exactly like cargo does it (build.rs:725).
+        "libggml-vulkan.a",
+    ] + _LLAMA_LIBS,
+    # "manual" for the same reason as //:llama_metal: keep `bazel build //...`
+    # on a machine with no Vulkan SDK from analyzing/building this. Explicit
+    # requests and the transitive path (llama-cpp-sys' --//:vulkan select) work.
+    tags = [
+        "manual",
+        "no-remote-exec",
+    ],
+    visibility = ["//visibility:public"],
+)
+
 # whisper.cpp, built on the ggml //:llama already produced.
 #
 # A plain cc_library, NOT a second rules_foreign_cc cmake() target. Two reasons,
@@ -443,10 +575,10 @@ cmake(
 # `src/parakeet.cpp` is deliberately not compiled: a second architecture behind
 # its own header, worth nothing until there is a Parakeet model story.
 #
-# The `//:metal_enabled` select mirrors //crates/llama-cpp-sys:wrapper_cc — on
-# that lane ggml comes from //:llama_metal instead, and linking whisper against
-# the CPU llama there would reintroduce the duplicate this target exists to
-# avoid.
+# The GPU-lane selects mirror //crates/llama-cpp-sys:wrapper_cc — on those lanes
+# ggml comes from //:llama_metal / //:llama_vulkan instead, and linking whisper
+# against the CPU llama there would reintroduce the duplicate this target exists
+# to avoid.
 cc_library(
     name = "whisper",
     srcs = ["vendor/whisper-cpp/src/whisper.cpp"],
@@ -484,6 +616,7 @@ cc_library(
     ],
     deps = select({
         "//:metal_enabled": ["//:llama_metal"],
+        "//:vulkan_enabled": ["//:llama_vulkan"],
         "//conditions:default": ["//:llama"],
     }),
     visibility = ["//visibility:public"],

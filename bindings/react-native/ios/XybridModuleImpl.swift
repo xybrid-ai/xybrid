@@ -554,7 +554,10 @@ public final class XybridModuleImpl: NSObject {
       topK: uint32OrNil("topK"),
       repetitionPenalty: (dict["repetitionPenalty"] as? NSNumber)?.floatValue,
       stopSequences: dict["stopSequences"] as? [String] ?? [],
-      grammar: dict["grammar"] as? String
+      grammar: dict["grammar"] as? String,
+      // Tool calling is not part of the React Native surface yet; an empty
+      // list keeps the pre-tool-calling behavior.
+      tools: []
     )
   }
 

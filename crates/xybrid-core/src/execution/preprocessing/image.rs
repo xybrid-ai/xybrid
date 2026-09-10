@@ -380,7 +380,7 @@ fn rgb_bytes_to_tensor(
 
     match (channels, layout) {
         (1, _) => {
-            for (dst, pixel) in output.iter_mut().zip(rgb.chunks_exact(3)) {
+            for (dst, pixel) in output.iter_mut().zip(rgb.as_chunks::<3>().0) {
                 let red = pixel[0] as f32 * scale;
                 let green = pixel[1] as f32 * scale;
                 let blue = pixel[2] as f32 * scale;
@@ -390,14 +390,19 @@ fn rgb_bytes_to_tensor(
         (3, ImageTensorLayout::Nchw) => {
             let (red_plane, remaining) = output.split_at_mut(pixel_count);
             let (green_plane, blue_plane) = remaining.split_at_mut(pixel_count);
-            for (index, pixel) in rgb.chunks_exact(3).enumerate() {
+            for (index, pixel) in rgb.as_chunks::<3>().0.iter().enumerate() {
                 red_plane[index] = pixel[0] as f32 * scale;
                 green_plane[index] = pixel[1] as f32 * scale;
                 blue_plane[index] = pixel[2] as f32 * scale;
             }
         }
         (3, ImageTensorLayout::Nhwc) => {
-            for (dst, pixel) in output.chunks_exact_mut(3).zip(rgb.chunks_exact(3)) {
+            for (dst, pixel) in output
+                .as_chunks_mut::<3>()
+                .0
+                .iter_mut()
+                .zip(rgb.as_chunks::<3>().0)
+            {
                 for channel in 0..3 {
                     dst[channel] = pixel[channel] as f32 * scale;
                 }
@@ -2251,7 +2256,7 @@ mod tests {
 
         assert_eq!(rgb.len(), 2 * 2 * 3);
         // Every pixel shares the single chroma sample.
-        for pixel in rgb.chunks_exact(3) {
+        for pixel in rgb.as_chunks::<3>().0 {
             assert!(
                 pixel[0].abs_diff(229) <= 2,
                 "R expected ~229, got {}",

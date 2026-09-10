@@ -92,6 +92,9 @@ impl FfiPipeline {
                 _ => crate::api::result::FfiExecutionTarget::Local,
             },
             metrics: crate::api::result::FfiInferenceMetrics::from_core(&metrics),
+            // Pipelines don't offer tools, so a pipeline run never produces
+            // tool calls.
+            tool_calls: Vec::new(),
         })
     }
 

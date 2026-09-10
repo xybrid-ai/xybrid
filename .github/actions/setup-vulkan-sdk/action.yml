@@ -1,0 +1,17 @@
+name: Setup Vulkan SDK
+description: Install Vulkan headers, loader, glslc, and expose VULKAN_SDK for llama.cpp Vulkan builds.
+
+runs:
+  using: composite
+  steps:
+    - name: Install Linux Vulkan prerequisites
+      if: runner.os == 'Linux'
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y glslc libvulkan-dev
+
+    - name: Install Vulkan SDK
+      uses: jakoch/install-vulkan-sdk-action@v1
+      with:
+        vulkan_version: latest

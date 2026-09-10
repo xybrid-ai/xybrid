@@ -95,6 +95,8 @@ impl CloudStreaming for RecordingCloud {
             index: 0,
             cumulative_text: self.response.clone(),
             finish_reason: Some("stop".to_string()),
+            tool_calls: Vec::new(),
+            raw_text: None,
         };
         on_token(token).map_err(|e| AdapterError::InferenceFailed(format!("{}", e)))?;
         self.tokens_emitted.fetch_add(1, Ordering::SeqCst);

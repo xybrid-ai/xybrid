@@ -3,28 +3,20 @@
 // </auto-generated>
 #nullable enable
 
-using System;
-using System.Threading;
-using System.Text;
-
 namespace XybridBolt
 {
-    /// <summary>
-    /// An opened `.xyb` model bundle.
-    ///
-    /// Create with [`open`](Self::open); read the manifest/metadata, enumerate
-    /// files, and [`extract`](Self::extract). Wraps the facade's immutable
-    /// `BundleHandle`.
-    /// </summary>
-    public sealed class XybridBundle : IDisposable
+    public sealed class XybridBundle : global::System.IDisposable
     {
-        private IntPtr _handle;
+        private long handle;
 
-        // Private handle-adopting ctor; used only by chained `: this(...)` and the static factories below.
-        private XybridBundle(IntPtr handle)
+        internal ulong Handle => unchecked((ulong)(ulong)global::System.Threading.Interlocked.Read(ref handle));
+
+        internal XybridBundle(ulong handle)
         {
-            _handle = handle;
+            if (handle == 0) throw new global::System.ArgumentException("handle must not be zero", nameof(handle));
+            this.handle = unchecked((long)(ulong)handle);
         }
+
 
         /// <summary>
         /// Open and parse a `.xyb` bundle (decompress zstd, parse tar, validate the
@@ -32,11 +24,27 @@ namespace XybridBolt
         /// </summary>
         public static XybridBundle Open(string path)
         {
-            byte[] _pathBytes = Encoding.UTF8.GetBytes(path);
-            IntPtr _handle = NativeMethods.XybridBundleOpen(_pathBytes, (UIntPtr)_pathBytes.Length);
-            if (_handle == IntPtr.Zero) throw new BoltException(NativeMethods.TakeLastErrorMessage("Factory constructor failed"));
-            return new XybridBundle(_handle);
+            WireWriter pathWriter = new WireWriter();
+            {
+                pathWriter.WriteString(path);
+            }
+            byte[] pathBytes = pathWriter.ToArray();
+            FfiBuf boltffiErrorBuffer = NativeMethods.NativeXybridBundleOpen(pathBytes, (nuint)pathBytes.Length, out ulong boltffiHandle);
+            if (boltffiErrorBuffer.ptr != 0)
+            {
+                try
+                {
+                    WireReader boltffiErrorReader = new WireReader(boltffiErrorBuffer);
+                    throw new global::XybridBolt.XybridErrorException(global::XybridBolt.XybridError.Decode(boltffiErrorReader));
+                }
+                finally
+                {
+                    NativeMethods.FreeBuf(boltffiErrorBuffer);
+                }
+            }
+            return boltffiHandle == 0 ? throw new global::System.InvalidOperationException("BoltFFI returned a null XybridBundle handle") : new XybridBundle(boltffiHandle);
         }
+
 
         /// <summary>
         /// The model identifier from the manifest.
@@ -44,16 +52,18 @@ namespace XybridBolt
         public string ModelId()
         {
             ThrowIfDisposed();
-            FfiBuf _buf = NativeMethods.XybridBundleModelId(_handle);
+            FfiBuf boltffiResultBuffer = NativeMethods.NativeXybridBundleModelId(this.Handle);
             try
             {
-                return new WireReader(_buf).ReadString();
+                WireReader resultReader = new WireReader(boltffiResultBuffer);
+                return resultReader.ReadString();
             }
             finally
             {
-                NativeMethods.FreeBuf(_buf);
+                NativeMethods.FreeBuf(boltffiResultBuffer);
             }
         }
+
 
         /// <summary>
         /// The version string from the manifest.
@@ -61,16 +71,18 @@ namespace XybridBolt
         public string Version()
         {
             ThrowIfDisposed();
-            FfiBuf _buf = NativeMethods.XybridBundleVersion(_handle);
+            FfiBuf boltffiResultBuffer = NativeMethods.NativeXybridBundleVersion(this.Handle);
             try
             {
-                return new WireReader(_buf).ReadString();
+                WireReader resultReader = new WireReader(boltffiResultBuffer);
+                return resultReader.ReadString();
             }
             finally
             {
-                NativeMethods.FreeBuf(_buf);
+                NativeMethods.FreeBuf(boltffiResultBuffer);
             }
         }
+
 
         /// <summary>
         /// The target platform from the manifest.
@@ -78,16 +90,18 @@ namespace XybridBolt
         public string Target()
         {
             ThrowIfDisposed();
-            FfiBuf _buf = NativeMethods.XybridBundleTarget(_handle);
+            FfiBuf boltffiResultBuffer = NativeMethods.NativeXybridBundleTarget(this.Handle);
             try
             {
-                return new WireReader(_buf).ReadString();
+                WireReader resultReader = new WireReader(boltffiResultBuffer);
+                return resultReader.ReadString();
             }
             finally
             {
-                NativeMethods.FreeBuf(_buf);
+                NativeMethods.FreeBuf(boltffiResultBuffer);
             }
         }
+
 
         /// <summary>
         /// The SHA-256 hash from the manifest.
@@ -95,16 +109,18 @@ namespace XybridBolt
         public string Hash()
         {
             ThrowIfDisposed();
-            FfiBuf _buf = NativeMethods.XybridBundleHash(_handle);
+            FfiBuf boltffiResultBuffer = NativeMethods.NativeXybridBundleHash(this.Handle);
             try
             {
-                return new WireReader(_buf).ReadString();
+                WireReader resultReader = new WireReader(boltffiResultBuffer);
+                return resultReader.ReadString();
             }
             finally
             {
-                NativeMethods.FreeBuf(_buf);
+                NativeMethods.FreeBuf(boltffiResultBuffer);
             }
         }
+
 
         /// <summary>
         /// Whether the bundle carries a `model_metadata.json`.
@@ -112,8 +128,9 @@ namespace XybridBolt
         public bool HasMetadata()
         {
             ThrowIfDisposed();
-            return NativeMethods.XybridBundleHasMetadata(_handle);
+            return NativeMethods.NativeXybridBundleHasMetadata(this.Handle);
         }
+
 
         /// <summary>
         /// Number of files in the bundle (excludes `manifest.json`).
@@ -121,8 +138,9 @@ namespace XybridBolt
         public uint FileCount()
         {
             ThrowIfDisposed();
-            return NativeMethods.XybridBundleFileCount(_handle);
+            return NativeMethods.NativeXybridBundleFileCount(this.Handle);
         }
+
 
         /// <summary>
         /// The file name at `index`, or `None` if out of bounds.
@@ -130,17 +148,18 @@ namespace XybridBolt
         public string? FileName(uint index)
         {
             ThrowIfDisposed();
-            FfiBuf _buf = NativeMethods.XybridBundleFileName(_handle, index);
+            FfiBuf boltffiResultBuffer = NativeMethods.NativeXybridBundleFileName(this.Handle, index);
             try
             {
-                var reader = new WireReader(_buf);
-                return reader.ReadU8() == 0 ? (string?)null : reader.ReadString();
+                WireReader resultReader = new WireReader(boltffiResultBuffer);
+                return resultReader.ReadU8() == 0 ? default(string?) : resultReader.ReadString();
             }
             finally
             {
-                NativeMethods.FreeBuf(_buf);
+                NativeMethods.FreeBuf(boltffiResultBuffer);
             }
         }
+
 
         /// <summary>
         /// The full bundle manifest serialized as JSON.
@@ -148,18 +167,30 @@ namespace XybridBolt
         public string ManifestJson()
         {
             ThrowIfDisposed();
-            FfiBuf _buf = NativeMethods.XybridBundleManifestJson(_handle);
+            FfiBuf boltffiErrorBuffer = NativeMethods.NativeXybridBundleManifestJson(this.Handle, out FfiBuf boltffiResultBuffer);
+            if (boltffiErrorBuffer.ptr != 0)
+            {
+                try
+                {
+                    WireReader boltffiErrorReader = new WireReader(boltffiErrorBuffer);
+                    throw new global::XybridBolt.XybridErrorException(global::XybridBolt.XybridError.Decode(boltffiErrorReader));
+                }
+                finally
+                {
+                    NativeMethods.FreeBuf(boltffiErrorBuffer);
+                }
+            }
             try
             {
-                var reader = new WireReader(_buf);
-                if (reader.ReadU8() != 0) throw new XybridErrorException(XybridError.Decode(reader));
-                return reader.ReadString();
+                WireReader resultReader = new WireReader(boltffiResultBuffer);
+                return resultReader.ReadString();
             }
             finally
             {
-                NativeMethods.FreeBuf(_buf);
+                NativeMethods.FreeBuf(boltffiResultBuffer);
             }
         }
+
 
         /// <summary>
         /// The `model_metadata.json` contents, or `None` if the bundle has none.
@@ -167,18 +198,30 @@ namespace XybridBolt
         public string? MetadataJson()
         {
             ThrowIfDisposed();
-            FfiBuf _buf = NativeMethods.XybridBundleMetadataJson(_handle);
+            FfiBuf boltffiErrorBuffer = NativeMethods.NativeXybridBundleMetadataJson(this.Handle, out FfiBuf boltffiResultBuffer);
+            if (boltffiErrorBuffer.ptr != 0)
+            {
+                try
+                {
+                    WireReader boltffiErrorReader = new WireReader(boltffiErrorBuffer);
+                    throw new global::XybridBolt.XybridErrorException(global::XybridBolt.XybridError.Decode(boltffiErrorReader));
+                }
+                finally
+                {
+                    NativeMethods.FreeBuf(boltffiErrorBuffer);
+                }
+            }
             try
             {
-                var reader = new WireReader(_buf);
-                if (reader.ReadU8() != 0) throw new XybridErrorException(XybridError.Decode(reader));
-                return reader.ReadU8() == 0 ? (string?)null : reader.ReadString();
+                WireReader resultReader = new WireReader(boltffiResultBuffer);
+                return resultReader.ReadU8() == 0 ? default(string?) : resultReader.ReadString();
             }
             finally
             {
-                NativeMethods.FreeBuf(_buf);
+                NativeMethods.FreeBuf(boltffiResultBuffer);
             }
         }
+
 
         /// <summary>
         /// Extract every bundle file to `output_dir` (created if absent).
@@ -186,37 +229,47 @@ namespace XybridBolt
         public void Extract(string outputDir)
         {
             ThrowIfDisposed();
-            byte[] _outputDirBytes = Encoding.UTF8.GetBytes(outputDir);
-            FfiBuf _buf = NativeMethods.XybridBundleExtract(_handle, _outputDirBytes, (UIntPtr)_outputDirBytes.Length);
-            try
+            WireWriter outputDirWriter = new WireWriter();
             {
-                var reader = new WireReader(_buf);
-                if (reader.ReadU8() != 0) throw new XybridErrorException(XybridError.Decode(reader));
+                outputDirWriter.WriteString(outputDir);
             }
-            finally
+            byte[] outputDirBytes = outputDirWriter.ToArray();
+            FfiBuf boltffiErrorBuffer = NativeMethods.NativeXybridBundleExtract(this.Handle, outputDirBytes, (nuint)outputDirBytes.Length);
+            if (boltffiErrorBuffer.ptr != 0)
             {
-                NativeMethods.FreeBuf(_buf);
+                try
+                {
+                    WireReader boltffiErrorReader = new WireReader(boltffiErrorBuffer);
+                    throw new global::XybridBolt.XybridErrorException(global::XybridBolt.XybridError.Decode(boltffiErrorReader));
+                }
+                finally
+                {
+                    NativeMethods.FreeBuf(boltffiErrorBuffer);
+                }
             }
         }
 
-        internal IntPtr RawHandle => _handle;
+
+        private ulong TakeHandle() => unchecked((ulong)(ulong)global::System.Threading.Interlocked.Exchange(ref handle, 0));
 
         private void ThrowIfDisposed()
         {
-            if (_handle == IntPtr.Zero) throw new ObjectDisposedException(nameof(XybridBundle));
+            if (global::System.Threading.Interlocked.Read(ref handle) == 0)
+                throw new global::System.ObjectDisposedException(nameof(XybridBundle));
         }
+
+        private void Release()
+        {
+            ulong released = unchecked((ulong)(ulong)global::System.Threading.Interlocked.Exchange(ref handle, 0));
+            if (released != 0) NativeMethods.NativeXybridBundleRelease(released);
+        }
+
+        ~XybridBundle() => Release();
 
         public void Dispose()
         {
-            IntPtr handle = Interlocked.Exchange(ref _handle, IntPtr.Zero);
-            if (handle == IntPtr.Zero) return;
-            NativeMethods.XybridBundleFree(handle);
-            GC.SuppressFinalize(this);
-        }
-
-        ~XybridBundle()
-        {
-            Dispose();
+            Release();
+            global::System.GC.SuppressFinalize(this);
         }
     }
 }

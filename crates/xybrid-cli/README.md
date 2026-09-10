@@ -35,7 +35,7 @@ xybrid models list
 xybrid run --model kokoro-82m --input-text "Hello world" --output hello.wav
 
 # Speech-to-text
-xybrid run --model whisper-tiny --input-audio recording.wav
+xybrid run --model whisper-tiny-ggml --input-audio recording.wav
 
 # Chat with an LLM (interactive)
 xybrid repl --model smollm2-360m --stream

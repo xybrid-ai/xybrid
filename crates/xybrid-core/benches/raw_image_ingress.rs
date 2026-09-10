@@ -27,7 +27,7 @@ fn nv12_1920x1080_frame() -> Envelope {
     let uv_bytes = y_bytes / 2;
 
     let mut pixels = vec![128_u8; y_bytes + uv_bytes];
-    for uv in pixels[y_bytes..].chunks_exact_mut(2) {
+    for uv in pixels[y_bytes..].as_chunks_mut::<2>().0 {
         uv[0] = 128;
         uv[1] = 128;
     }

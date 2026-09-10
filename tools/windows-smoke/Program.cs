@@ -22,7 +22,7 @@ internal static class Smoke
         public UIntPtr align;
     }
 
-    [DllImport(Lib, EntryPoint = "boltffi_version")]
+    [DllImport(Lib, EntryPoint = "boltffi_function_xybrid_bolt_version")]
     private static extern FfiBuf Version();
 
     [DllImport(Lib, EntryPoint = "boltffi_free_buf")]
@@ -42,7 +42,7 @@ internal static class Smoke
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"smoke: FAILED calling boltffi_version: {ex}");
+            Console.Error.WriteLine($"smoke: FAILED calling the version export: {ex}");
             return 1;
         }
 
@@ -52,7 +52,7 @@ internal static class Smoke
         {
             if (buf.ptr == IntPtr.Zero || total < 4)
             {
-                Console.Error.WriteLine($"smoke: boltffi_version returned an undersized buffer (len={total})");
+                Console.Error.WriteLine($"smoke: the version export returned an undersized buffer (len={total})");
                 return 1;
             }
             // boltffi FfiBuf is wire-encoded (not a raw C string). Mirror
@@ -74,11 +74,11 @@ internal static class Smoke
 
         if (version.Length == 0)
         {
-            Console.Error.WriteLine("smoke: boltffi_version decoded to an empty string");
+            Console.Error.WriteLine("smoke: the version export decoded to an empty string");
             return 1;
         }
 
-        Console.WriteLine($"smoke: boltffi_version -> \"{version}\"");
+        Console.WriteLine($"smoke: version -> \"{version}\"");
         Console.WriteLine("windows managed C# bolt smoke: OK");
         return 0;
     }

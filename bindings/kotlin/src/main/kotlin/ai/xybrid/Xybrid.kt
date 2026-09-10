@@ -432,6 +432,12 @@ typealias VoiceInfo = XybridVoiceInfo
 /** LLM generation parameters (temperature, top-p, max tokens, etc.). */
 typealias GenerationConfig = XybridGenerationConfig
 
+/**
+ * One token emitted by a streaming run. The terminal token carries the
+ * turn's [XybridStreamToken.toolCalls] and [XybridStreamToken.rawText].
+ */
+typealias StreamToken = XybridStreamToken
+
 // -- GenerationConfig Presets --
 
 /** Preset factory methods for [GenerationConfig]. */
@@ -446,6 +452,8 @@ object GenerationConfigs {
         topK = 0u,
         repetitionPenalty = null,
         stopSequences = emptyList(),
+        grammar = null,
+        tools = emptyList(),
     )
 
     /** Creative generation preset (higher temperature). */
@@ -458,6 +466,8 @@ object GenerationConfigs {
         topK = 50u,
         repetitionPenalty = null,
         stopSequences = emptyList(),
+        grammar = null,
+        tools = emptyList(),
     )
 }
 
@@ -480,17 +490,6 @@ val XybridResult.isFailure: Boolean get() = outputType == XybridOutputType.UNKNO
 val XybridResult.text: String?
     get() = (envelope.kind as? XybridEnvelopeKind.Text)?.text
 
-/**
- * The model's chain-of-thought / reasoning text (LLM `<think>` blocks),
- * surfaced separately from [text], which always excludes it. `null` when the
- * model emitted no reasoning or the backend doesn't surface one.
- *
- * Carried on the envelope's `reasoning_content` metadata rather than the
- * payload `kind`, so it reads from `metadata` rather than the enum.
- */
-val XybridResult.reasoningContent: String?
-    get() = envelope.metadata.firstOrNull { it.key == "reasoning_content" }?.value
-
 /** Audio bytes, if the result is `.Audio`. `null` otherwise. */
 val XybridResult.audioBytes: ByteArray?
     get() = (envelope.kind as? XybridEnvelopeKind.Audio)?.bytes
@@ -501,6 +500,18 @@ val XybridResult.embedding: FloatArray?
 
 /** The latency in seconds as a Double. */
 val XybridResult.latencySeconds: Double get() = latencyMs.toDouble() / 1000.0
+
+/** `true` if the model asked to call at least one tool this turn. */
+val XybridResult.hasToolCalls: Boolean get() = toolCalls.isNotEmpty()
+
+/**
+ * `true` if this token carries tool calls to execute.
+ *
+ * Only ever true on the terminal token. Tool-call blocks are suppressed from
+ * the streamed text, so this — not the token text — is what a streaming loop
+ * branches on.
+ */
+val XybridStreamToken.hasToolCalls: Boolean get() = toolCalls.isNotEmpty()
 
 // -- XybridEnvelope Factory Methods --
 //
@@ -557,6 +568,29 @@ object Envelope {
     @JvmStatic
     fun embedding(data: FloatArray): XybridEnvelope =
         XybridEnvelope(kind = XybridEnvelopeKind.Embedding(data), metadata = emptyList())
+
+    /**
+     * Creates the continuation envelope for the turn after the model asked for
+     * tools.
+     *
+     * One `run` is one model turn, so the tool loop lives in your code: run a
+     * request carrying tools, execute every [XybridResult.toolCalls] entry,
+     * then run this envelope to feed the outcomes back. Run the continuation
+     * with the same tools as the original turn so the executor rebuilds an
+     * identical chat prefix.
+     *
+     * @param userText The original user message of the turn being continued.
+     * @param priorAssistantText That turn's raw output text, tool-call block
+     *   included — i.e. [XybridResult.text] verbatim.
+     * @param results Tool outcomes, in call order.
+     * @throws XybridError.ConfigError if a result's content is not valid JSON.
+     */
+    @JvmStatic
+    fun toolResults(
+        userText: String,
+        priorAssistantText: String,
+        results: List<XybridToolResult>,
+    ): XybridEnvelope = toolResultsEnvelope(userText, priorAssistantText, results)
 
     /**
      * Creates an encoded image envelope for vision-language models. The format

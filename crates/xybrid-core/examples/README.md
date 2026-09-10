@@ -49,7 +49,8 @@ cargo run --example tts_kokoro_misaki -p xybrid-core
 | Example | Model | Description |
 |---------|-------|-------------|
 | `sentence_embedding` | all-minilm | Generate sentence embeddings |
-| `sentence_similarity` | distilbert | Compare semantic similarity |
+| `sentence_similarity` | all-minilm | Compare semantic similarity |
+| `sentence_ranker` | all-minilm | Rank a candidate corpus against a semantic query |
 
 ### Image Classification
 

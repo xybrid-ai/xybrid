@@ -31,7 +31,6 @@ import ai.xybrid.embedding
 import ai.xybrid.initSdkCacheDir
 import ai.xybrid.isSpeculativeCloudEnabled
 import ai.xybrid.jsonSchemaToGbnf
-import ai.xybrid.reasoningContent
 import ai.xybrid.setBatteryLevel
 import ai.xybrid.setBinding
 import ai.xybrid.setThermalState
@@ -584,6 +583,9 @@ class XybridModule(reactContext: ReactApplicationContext) :
       repetitionPenalty = floatOrNull("repetitionPenalty"),
       stopSequences = stops,
       grammar = if (map.hasKey("grammar") && !map.isNull("grammar")) map.getString("grammar") else null,
+      // Tool calling is not part of the React Native surface yet; an empty
+      // list keeps the pre-tool-calling behavior.
+      tools = emptyList(),
     )
   }
 

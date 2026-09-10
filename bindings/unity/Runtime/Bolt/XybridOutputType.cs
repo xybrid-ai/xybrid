@@ -3,8 +3,6 @@
 // </auto-generated>
 #nullable enable
 
-using System;
-
 namespace XybridBolt
 {
     public enum XybridOutputType : int
@@ -13,30 +11,5 @@ namespace XybridBolt
         Audio = 1,
         Embedding = 2,
         Unknown = 3
-    }
-
-    internal static class XybridOutputTypeWire
-    {
-        internal const int WireEncodedSize = 4;
-
-        internal static XybridOutputType Decode(WireReader reader) =>
-            reader.ReadI32() switch
-            {
-                0 => XybridOutputType.Text,
-                1 => XybridOutputType.Audio,
-                2 => XybridOutputType.Embedding,
-                3 => XybridOutputType.Unknown,
-                int tag => throw new InvalidOperationException($"Unknown XybridOutputType wire tag: {tag}"),
-            };
-
-        internal static void WireEncodeTo(this XybridOutputType value, WireWriter wire) =>
-            wire.WriteI32(value switch
-            {
-                XybridOutputType.Text => 0,
-                XybridOutputType.Audio => 1,
-                XybridOutputType.Embedding => 2,
-                XybridOutputType.Unknown => 3,
-                _ => throw new InvalidOperationException($"Unknown XybridOutputType variant: {value}"),
-            });
     }
 }

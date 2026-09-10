@@ -185,6 +185,34 @@ class Xybrid {
   static bool get isSpeculativeCloudEnabled =>
       XybridSdkClient.isSpeculativeCloudEnabled();
 
+  /// Release every idle loaded model's memory; returns how many were released.
+  ///
+  /// Wire this to the app's low-memory signal, e.g. from a
+  /// [WidgetsBindingObserver]:
+  ///
+  /// ```dart
+  /// @override
+  /// void didHaveMemoryPressure() => Xybrid.releaseMemory();
+  /// ```
+  ///
+  /// Models with a run in flight are skipped, and a released model reloads
+  /// itself the next time it is used — there is no new error to handle and
+  /// nothing to reload by hand.
+  static int releaseMemory() => XybridSdkClient.releaseMemory();
+
+  /// Enable or disable automatic model release for subsequent loads.
+  ///
+  /// When enabled, loading a model while the device reports memory pressure
+  /// first releases least-recently-used idle models. Off by default;
+  /// [releaseMemory] works either way.
+  static void setAutoRelease(bool enabled) {
+    XybridSdkClient.setAutoRelease(enabled: enabled);
+  }
+
+  /// Whether automatic model release is enabled process-wide.
+  static bool get isAutoReleaseEnabled =>
+      XybridSdkClient.isAutoReleaseEnabled();
+
   static void applyDebugMemoryPressure() {
     XybridDevice.applyDebugMemoryPressure();
   }

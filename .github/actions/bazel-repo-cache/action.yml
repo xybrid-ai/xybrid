@@ -1,0 +1,94 @@
+name: Cache the pinned macOS SDK download
+description: >
+  Persist the one Bazel repository fetch whose upstream is broken — hermetic-llvm's
+  macOS SDK package — so jobs stop depending on hosts that refuse to serve it.
+
+# WHY THIS EXISTS. hermetic-llvm pins the macOS SDK to a swcdn.apple.com URL plus
+# one web.archive.org mirror. Apple's URL now returns 403 permanently (verified
+# off-CI, and unchanged through hermetic-llvm 0.8.17), leaving the Wayback mirror,
+# which throttles Actions IP ranges — on 2026-08-11 both refused in the same run
+# and the Apple job died in analysis having built nothing.
+#
+# Repository fetches are client-side, so neither remote execution nor the
+# BuildBuddy action cache helps. @macos_sdk is reached even by jobs targeting
+# neither macOS nor iOS, because @llvm//toolchain/args/macos:macos_sdk_sysroot is
+# analyzed regardless of target platform — which is why a Linux lane can fail on
+# an Apple download.
+#
+# WHY ONE FILE AND NOT THE WHOLE REPOSITORY CACHE. Caching every fetch works, and
+# costs 1.6 GB per lane; this repository already sits at 9.9 GB of GitHub's 10 GB
+# cache limit, so entries that size evict everyone else's caches and then get
+# evicted themselves. `path` therefore points at a single content-addressed entry
+# inside Bazel's repository cache: ~58 MB, shared by every lane through one key,
+# and the only fetch whose hosts are actually unreliable.
+#
+# Bazel verifies the sha256 from hermetic-llvm's own pin, so a restored (or
+# mirrored) file cannot substitute different content — a cache hit is exactly the
+# archive the pin demands, or the build fails.
+
+inputs:
+  macos-sdk-sha256:
+    description: >
+      sha256 of hermetic-llvm's pinned macOS SDK package, which is both the cache
+      key and its location inside Bazel's repository cache. Update on a
+      hermetic-llvm bump that moves the pin — a stale value only costs a miss,
+      never a wrong artifact.
+    required: false
+    default: edc7ce9b8f09e0c7a39aaa714f941b4c2597f333ec1ffe59a14d67eb36cdb7e7
+  macos-sdk-mirror:
+    description: >
+      Optional replacement download location for that package, as host+path with no
+      scheme (Bazel adds https). Empty by default, which changes nothing. Callers
+      pass the MACOS_SDK_MIRROR repository variable, so a mirror is turned on by
+      setting that one variable. (No expression syntax in this description: an
+      action manifest is evaluated as a template, and `vars` is not a context there.)
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    # Scoped to the single content-addressed entry, which is also what gets saved
+    # at post — so a lane that fetches the SDK once publishes it for the rest.
+    # NOTE ON SCOPE: Actions caches are branch-scoped for reads. An entry saved on
+    # a pull request serves that PR only; the entry that protects everything is the
+    # one a master run saves.
+    - name: Restore the pinned macOS SDK
+      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      with:
+        path: ~/.cache/bazel-repo/content_addressable/sha256/${{ inputs.macos-sdk-sha256 }}
+        key: macos-sdk-${{ inputs.macos-sdk-sha256 }}
+
+    # .bazelrc try-imports this gitignored file, so one line here applies to every
+    # bazelisk invocation in the job — no per-command flag to forget.
+    - name: Point Bazel at the repository cache
+      shell: bash
+      run: |
+        mkdir -p .context
+        echo "common --repository_cache=$HOME/.cache/bazel-repo" >> .context/local.bazelrc
+        entry="$HOME/.cache/bazel-repo/content_addressable/sha256/${{ inputs.macos-sdk-sha256 }}/file"
+        if [ -f "$entry" ]; then
+          echo "macOS SDK served from cache ($(du -h "$entry" | cut -f1)) — no download needed."
+        else
+          echo "macOS SDK not cached; this job has to fetch it (see the action's notes)."
+        fi
+
+    # The cold-cache hole, and the switch that closes it. Nothing is hardcoded to
+    # a default mirror on purpose: the package is Apple's, and where it may be
+    # republished is the repository owner's licensing call, not a CI detail.
+    - name: Configure the macOS SDK mirror
+      if: inputs.macos-sdk-mirror != ''
+      shell: bash
+      # Via env, not interpolated into the script: an input reaching a shell
+      # command directly is the standard Actions injection shape, even when the
+      # value comes from a repository variable an admin set.
+      env:
+        MIRROR: ${{ inputs.macos-sdk-mirror }}
+      run: |
+        cfg="$PWD/.context/downloader.cfg"
+        # Match the pinned package by name, whatever build-id path Apple used.
+        printf 'rewrite swcdn\\.apple\\.com/.*/CLTools_macOSNMOS_SDK\\.pkg %s\n' \
+          "$MIRROR" > "$cfg"
+        echo "common --downloader_config=$cfg" >> .context/local.bazelrc
+        echo "macOS SDK downloads rewritten to: $MIRROR"
+        cat "$cfg"

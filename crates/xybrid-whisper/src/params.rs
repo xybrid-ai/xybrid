@@ -54,8 +54,10 @@ pub struct TranscribeParams {
     /// the rest of the runtime uses rather than the core count — whisper is
     /// memory-bandwidth-bound, and oversubscription measurably slows it down.
     pub n_threads: u32,
-    /// Emit per-segment timestamps. Off for live partials, on for final
-    /// transcripts that need alignment.
+    /// Request timestamp-token decoding. Off for one-window live partials, on
+    /// for final transcripts that need alignment. Inputs longer than Whisper's
+    /// 30-second encoder window enable timestamp tokens internally so the
+    /// decoder can stop at the real end of a padded final window.
     pub timestamps: bool,
     /// Condition each window on the previous window's text. Improves coherence
     /// on continuous speech but can propagate an early mistake through the rest

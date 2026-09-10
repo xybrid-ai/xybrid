@@ -115,14 +115,22 @@ class FfiStreamingConfig {
   /// Optional language hint (e.g. `"en"`); `None` uses the model default.
   final String? language;
 
+  /// Optional Whisper encoder context in mel frames; `None` uses the model default.
+  final int? audioCtx;
+
   const FfiStreamingConfig({
     required this.sampleRate,
     required this.vad,
     this.language,
+    this.audioCtx,
   });
 
   @override
-  int get hashCode => sampleRate.hashCode ^ vad.hashCode ^ language.hashCode;
+  int get hashCode =>
+      sampleRate.hashCode ^
+      vad.hashCode ^
+      language.hashCode ^
+      audioCtx.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -131,7 +139,8 @@ class FfiStreamingConfig {
           runtimeType == other.runtimeType &&
           sampleRate == other.sampleRate &&
           vad == other.vad &&
-          language == other.language;
+          language == other.language &&
+          audioCtx == other.audioCtx;
 }
 
 @freezed

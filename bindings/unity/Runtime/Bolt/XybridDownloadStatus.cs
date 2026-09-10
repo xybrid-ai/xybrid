@@ -3,7 +3,7 @@
 // </auto-generated>
 #nullable enable
 
-using System;
+using System.Runtime.InteropServices;
 
 namespace XybridBolt
 {
@@ -19,18 +19,19 @@ namespace XybridBolt
 
         internal static XybridDownloadStatus Decode(WireReader reader) =>
             new XybridDownloadStatus(
-                XybridDownloadStateWire.Decode(reader),
+                (XybridDownloadState)reader.ReadI32(),
                 reader.ReadF32()
             );
 
-        internal int WireEncodedSize() =>
-            4 +
-            4;
-
-        internal void WireEncodeTo(WireWriter wire)
+        internal void Encode(WireWriter writer)
         {
-            this.State.WireEncodeTo(wire);
-            wire.WriteF32(this.Progress);
+            {
+                writer.WriteI32((int)this.State);
+            }
+            {
+                writer.WriteF32(this.Progress);
+            }
         }
+
     }
 }
