@@ -146,17 +146,28 @@ pub trait RoutingEngine {
 /// Default implementation of RoutingEngine using heuristic-based routing.
 ///
 /// The ladder is *evidence-only cloud, default-local*: we route to cloud only
-/// when (a) policy forbids local, (b) the local model isn't available, or (c)
-/// a current observation of device stress (memory, sustained CPU, throttle)
-/// argues that local will fail. Anything else stays local.
+/// when (a) the local model isn't available, (b) the policy prefers cloud, or
+/// (c) a current observation of device stress (memory, sustained CPU,
+/// throttle) argues that local will fail. Anything else stays local. A policy
+/// that forbids cloud wins over everything, including model absence — a
+/// stage with no usable local leg then fails locally rather than leaking to
+/// cloud.
 ///
 /// Order, first match wins:
-/// 1. `policy.allowed == false` → Local
-/// 2. `!availability.local_model_exists` → Cloud
-/// 3. `capabilities.should_throttle()` (battery low or thermal Hot/Critical) → Cloud
-/// 4. `resource.memory_pressure == Critical` → Cloud
-/// 5. Sustained CPU ≥ 95 % for N samples → Cloud
-/// 6. Default → Local
+/// 1. `policy.allowed == false` → Local (`policy_deny`)
+/// 2. `!policy.transforms_applied.is_empty()` → Local
+///    (`policy_transform_unsupported`; redaction is not implemented, so a
+///    required transform means the input must not leave the device)
+/// 3. `!availability.local_model_exists` → Cloud (`model_unavailable`)
+/// 4. `policy.prefers_cloud()` → Cloud (`policy_route_cloud`)
+/// 5. `capabilities.should_throttle()` (battery low or thermal Hot/Critical) → Cloud
+/// 6. `resource.memory_pressure == Critical` → Cloud
+/// 7. Sustained CPU ≥ 95 % for N samples → Cloud
+/// 8. Default → Local
+///
+/// This ladder is defense in depth: the orchestration authority applies the
+/// same policy restrictions before any of its own early returns (explicit
+/// targets, hysteresis, history, remote advice).
 pub struct DefaultRoutingEngine {
     cpu_sustain_samples: usize,
     cpu_sustain_threshold_pct: f32,
@@ -259,7 +270,20 @@ impl RoutingEngine for DefaultRoutingEngine {
             return decision;
         }
 
-        // Step 2: if the local model is absent, cloud is the only usable target.
+        // Step 2: a required transform also keeps execution local. Redaction
+        // is not implemented, so "needs redacting before leaving the device"
+        // must fail closed rather than send the raw input to cloud.
+        if !policy.transforms_applied.is_empty() {
+            let reason = format!(
+                "policy_transform_unsupported: {}",
+                policy.transforms_applied.join(",")
+            );
+            let decision = Self::decision(stage, RouteTarget::Local, reason, timestamp_ms);
+            self.log_decision(&decision);
+            return decision;
+        }
+
+        // Step 3: if the local model is absent, cloud is the only usable target.
         if !availability.local_model_exists {
             let decision = Self::decision(
                 stage,
@@ -271,7 +295,22 @@ impl RoutingEngine for DefaultRoutingEngine {
             return decision;
         }
 
-        // Step 3: route stressed devices to cloud when policy allows it.
+        // Step 4: the policy asked for cloud and the local leg exists, so the
+        // preference is honoured ahead of any device-stress heuristics.
+        if policy.prefers_cloud() {
+            let reason = format!(
+                "policy_route_cloud: {}",
+                policy
+                    .reason
+                    .as_deref()
+                    .unwrap_or("policy prefers cloud execution")
+            );
+            let decision = Self::decision(stage, RouteTarget::Cloud, reason, timestamp_ms);
+            self.log_decision(&decision);
+            return decision;
+        }
+
+        // Step 5+: route stressed devices to cloud when policy allows it.
         if metrics.capabilities.should_throttle() {
             let reason = format!(
                 "stress_throttle: battery {}%, thermal {:?}",
@@ -355,6 +394,139 @@ mod tests {
         assert_eq!(decision.target, RouteTarget::Local);
         assert!(decision.reason.contains("policy_deny"));
         assert_eq!(decision.stage, "test_stage");
+    }
+
+    fn stressed_metrics() -> DeviceMetrics {
+        metrics_with_live_state(10, ThermalState::Hot, MemoryPressure::Critical, Some(99.0))
+    }
+
+    fn transform_policy() -> PolicyResult {
+        let mut policy = PolicyResult::allow(Some("needs scrubbing".to_string()));
+        policy.transforms_applied.push("scrub".to_string());
+        policy
+    }
+
+    #[test]
+    fn policy_deny_beats_missing_model_and_stress() {
+        let mut engine = DefaultRoutingEngine::new();
+        let policy = PolicyResult::deny("no cloud".to_string());
+        let availability = LocalAvailability::new(false);
+
+        // Two samples so the sustained-CPU rule would also have fired.
+        let _ = engine.decide("s", &stressed_metrics(), &policy, &availability);
+        let decision = engine.decide("s", &stressed_metrics(), &policy, &availability);
+
+        assert_eq!(decision.target, RouteTarget::Local);
+        assert!(
+            decision.reason.starts_with("policy_deny"),
+            "{}",
+            decision.reason
+        );
+    }
+
+    #[test]
+    fn policy_transform_routes_local() {
+        let mut engine = DefaultRoutingEngine::new();
+        let availability = LocalAvailability::new(true);
+
+        let decision = engine.decide(
+            "s",
+            &DeviceMetrics::default(),
+            &transform_policy(),
+            &availability,
+        );
+
+        assert_eq!(decision.target, RouteTarget::Local);
+        assert!(
+            decision.reason.starts_with("policy_transform_unsupported"),
+            "{}",
+            decision.reason
+        );
+        assert!(decision.reason.contains("scrub"));
+    }
+
+    #[test]
+    fn policy_transform_beats_missing_model_and_stress() {
+        let mut engine = DefaultRoutingEngine::new();
+        let availability = LocalAvailability::new(false);
+
+        let _ = engine.decide("s", &stressed_metrics(), &transform_policy(), &availability);
+        let decision = engine.decide("s", &stressed_metrics(), &transform_policy(), &availability);
+
+        assert_eq!(decision.target, RouteTarget::Local);
+        assert!(
+            decision.reason.starts_with("policy_transform_unsupported"),
+            "{}",
+            decision.reason
+        );
+    }
+
+    #[test]
+    fn policy_route_cloud_routes_cloud_when_model_available() {
+        let mut engine = DefaultRoutingEngine::new();
+        let policy = PolicyResult::prefer_cloud("rule 'offload' prefers cloud".to_string());
+        let availability = LocalAvailability::new(true);
+        let metrics =
+            metrics_with_live_state(80, ThermalState::Normal, MemoryPressure::Normal, Some(20.0));
+
+        let decision = engine.decide("s", &metrics, &policy, &availability);
+
+        assert_eq!(decision.target, RouteTarget::Cloud);
+        assert!(
+            decision.reason.starts_with("policy_route_cloud"),
+            "{}",
+            decision.reason
+        );
+        assert!(decision.reason.contains("offload"));
+    }
+
+    #[test]
+    fn model_unavailable_reason_wins_over_policy_route_cloud() {
+        let mut engine = DefaultRoutingEngine::new();
+        let policy = PolicyResult::prefer_cloud("prefers cloud".to_string());
+        let availability = LocalAvailability::new(false);
+
+        let decision = engine.decide("s", &DeviceMetrics::default(), &policy, &availability);
+
+        assert_eq!(decision.target, RouteTarget::Cloud);
+        assert!(
+            decision.reason.starts_with("model_unavailable"),
+            "{}",
+            decision.reason
+        );
+    }
+
+    #[test]
+    fn policy_route_cloud_is_reported_ahead_of_stress() {
+        let mut engine = DefaultRoutingEngine::new();
+        let policy = PolicyResult::prefer_cloud("prefers cloud".to_string());
+        let availability = LocalAvailability::new(true);
+
+        let decision = engine.decide("s", &stressed_metrics(), &policy, &availability);
+
+        assert_eq!(decision.target, RouteTarget::Cloud);
+        assert!(
+            decision.reason.starts_with("policy_route_cloud"),
+            "{}",
+            decision.reason
+        );
+    }
+
+    #[test]
+    fn unknown_readings_alone_route_local() {
+        let mut engine = DefaultRoutingEngine::new();
+        let policy = PolicyResult::allow(Some("policy passed".to_string()));
+        let availability = LocalAvailability::new(true);
+        let metrics = DeviceMetrics::default().with_live_snapshot(ResourceSnapshot::unknown());
+
+        let decision = engine.decide("s", &metrics, &policy, &availability);
+
+        assert_eq!(decision.target, RouteTarget::Local);
+        assert!(
+            decision.reason.contains("default_local"),
+            "{}",
+            decision.reason
+        );
     }
 
     #[test]
