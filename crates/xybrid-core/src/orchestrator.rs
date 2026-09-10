@@ -1005,6 +1005,18 @@ mod tests {
             self.inner.record_outcome(outcome);
         }
 
+        fn load_policies(&self, bundle: &[u8]) -> Result<(), String> {
+            self.inner.load_policies(bundle)
+        }
+
+        fn resolve_stage(
+            &self,
+            request: &PolicyRequest,
+            context: &StageContext,
+        ) -> StageResolution {
+            self.inner.resolve_stage(request, context)
+        }
+
         fn name(&self) -> &str {
             "recording"
         }
@@ -1107,6 +1119,13 @@ mod tests {
     #[test]
     fn test_execute_single_stage() {
         let mut orchestrator = Orchestrator::new();
+        // Bootstrap registers the real cloud adapter; a provider-free cloud
+        // route needs an explicitly registered "cloud" adapter to serve it.
+        let mut cloud = MockRuntimeAdapter::with_text_output("cloud output").with_name("cloud");
+        cloud.load_model("/mock/cloud").unwrap();
+        orchestrator
+            .executor_mut()
+            .register_adapter(Arc::new(cloud));
         let stage = StageDescriptor::new("test_stage");
         let input = text_envelope("Text");
         let metrics = DeviceMetrics::default();
@@ -1164,6 +1183,11 @@ mod tests {
         // actually exists locally. Since there's no actual model for "test_stage",
         // it routes to cloud for execution.
         let mut orchestrator = Orchestrator::new();
+        let mut cloud = MockRuntimeAdapter::with_text_output("cloud output").with_name("cloud");
+        cloud.load_model("/mock/cloud").unwrap();
+        orchestrator
+            .executor_mut()
+            .register_adapter(Arc::new(cloud));
         let stage = StageDescriptor::new("test_stage");
         let input = audio_envelope(&[9, 9, 9, 9]);
         let metrics = DeviceMetrics::default();
@@ -1643,6 +1667,320 @@ mod tests {
             )
             .expect_err("still denied");
         assert!(err.to_string().contains("no local bundle"), "{err}");
+        assert_eq!(cloud.call_count(), 0);
+    }
+
+    // ── Phase 8: enforcement matrix with real call counts ───────────────────
+
+    fn stressed_snapshot() -> ResourceSnapshot {
+        let mut snapshot = ResourceSnapshot::unknown();
+        snapshot.memory_pressure = crate::device::MemoryPressure::Critical;
+        snapshot
+    }
+
+    /// A hybrid stage: local model id + DeepSeek cloud leg, `target: auto`.
+    /// No bundle is attached, so a *local* route fails at the executor — the
+    /// intended boundary for a denied input that has no usable local leg.
+    fn hybrid_auto_stage() -> StageDescriptor {
+        let mut options = crate::pipeline::StageOptions::new();
+        options.set("cloud_model", "deepseek-flash");
+        StageDescriptor::new("llm")
+            .with_model("functiongemma-270m-it")
+            .with_provider(crate::pipeline::IntegrationProvider::DeepSeek)
+            .with_target(crate::pipeline::ExecutionTarget::Auto)
+            .with_options(options)
+    }
+
+    /// Orchestrator around a shared `LocalAuthority` (so tests can prime
+    /// hysteresis/history and reload policies through the same instance) with
+    /// a capturing cloud mock and a loaded local mock.
+    fn matrix_orchestrator(
+        snapshot: ResourceSnapshot,
+    ) -> (
+        Orchestrator,
+        Arc<LocalAuthority>,
+        Arc<MockRuntimeAdapter>,
+        Arc<MockRuntimeAdapter>,
+    ) {
+        let inner = Arc::new(
+            LocalAuthority::new()
+                .with_resource_provider(Arc::new(FixedResourceProvider::new(snapshot)))
+                .with_history_bias_k(3),
+        );
+        let mut orchestrator = Orchestrator::with_authority(Box::new(RecordingAuthority::new(
+            inner.clone(),
+            Arc::new(Mutex::new(Vec::new())),
+        )));
+        let mut cloud = MockRuntimeAdapter::with_text_output("cloud output").with_name("cloud");
+        cloud.load_model("/mock/cloud").unwrap();
+        let cloud = Arc::new(cloud);
+        orchestrator.executor_mut().register_adapter(cloud.clone());
+        let mut local = MockRuntimeAdapter::with_text_output("local output").with_name("onnx");
+        local.load_model("/mock/model.onnx").unwrap();
+        let local = Arc::new(local);
+        orchestrator.executor_mut().register_adapter(local.clone());
+        (orchestrator, inner, cloud, local)
+    }
+
+    fn prime_local_failures(authority: &LocalAuthority, model_id: &str) {
+        authority.record_abort_for_hysteresis_default_ttl(model_id, AbortReason::StressMemory);
+        for idx in 0..3 {
+            authority.record_outcome(&ExecutionOutcome {
+                stage_id: "llm".to_string(),
+                target: ResolvedTarget::Device,
+                latency_ms: 10,
+                success: false,
+                error: Some(format!("failure-{idx}")),
+                category: Some(OutcomeCategory::HardFail {
+                    reason: "local_failed".to_string(),
+                }),
+                model_id: Some(model_id.to_string()),
+                signal_context: Some(SignalContext::from_metrics(
+                    &DeviceMetrics::default().with_live_snapshot(stressed_snapshot()),
+                )),
+            });
+        }
+    }
+
+    #[test]
+    fn deny_beats_hysteresis_history_stress_and_missing_model_with_zero_cloud_calls() {
+        for (policy, expected_prefix) in [
+            (DENY_TEXT_POLICY.to_vec(), "policy_deny"),
+            (
+                b"rules:\n  - id: scrub\n    expression: 'input.kind == \"text\"'\n    action: redact\n"
+                    .to_vec(),
+                "policy_transform_unsupported",
+            ),
+        ] {
+            let (mut orchestrator, inner, cloud, local) = matrix_orchestrator(stressed_snapshot());
+            orchestrator.load_policies(policy).expect("policy loads");
+            prime_local_failures(&inner, "functiongemma-270m-it");
+            let subscription = orchestrator.event_bus().subscribe();
+
+            for available in [true, false] {
+                let err = orchestrator
+                    .execute_stage(
+                        &hybrid_auto_stage(),
+                        &text_envelope("hello"),
+                        &DeviceMetrics::default(),
+                        &LocalAvailability::new(available),
+                    )
+                    .expect_err("no local bundle: the denied stage must fail locally");
+                assert!(err.to_string().contains("no local bundle"), "{err}");
+            }
+
+            assert_eq!(cloud.call_count(), 0, "{expected_prefix}: cloud must never be called");
+            assert_eq!(local.call_count(), 0, "a raw adapter must not stand in for the bundle");
+            let routed = routing_events(&subscription);
+            assert_eq!(routed.len(), 2);
+            for (target, reason) in routed {
+                assert_eq!(target, "local");
+                assert!(reason.contains(expected_prefix), "{reason}");
+                assert!(!reason.contains("hysteresis") && !reason.contains("history_bias"));
+            }
+        }
+    }
+
+    #[test]
+    fn route_cloud_with_available_local_runs_cloud_exactly_once() {
+        let (mut orchestrator, _inner, cloud, local) =
+            matrix_orchestrator(ResourceSnapshot::unknown());
+        orchestrator
+            .load_policies(b"route_cloud_if:\n  - \"true\"\n".to_vec())
+            .expect("policy loads");
+
+        let result = orchestrator
+            .execute_stage(
+                &hybrid_auto_stage(),
+                &text_envelope("hello"),
+                &DeviceMetrics::default(),
+                &LocalAvailability::new(true),
+            )
+            .expect("cloud mock serves the stage");
+
+        assert_eq!(result.routing_decision.target.as_str(), "cloud");
+        assert!(
+            result
+                .routing_decision
+                .reason
+                .contains("policy_route_cloud"),
+            "{}",
+            result.routing_decision.reason
+        );
+        assert_eq!(result.adapter, "cloud:deepseek:gateway");
+        assert_eq!(cloud.call_count(), 1);
+        assert_eq!(local.call_count(), 0);
+        assert_eq!(
+            cloud.captured_inputs()[0]
+                .metadata
+                .get("model")
+                .map(String::as_str),
+            Some("deepseek-flash")
+        );
+    }
+
+    #[test]
+    fn route_cloud_with_explicit_device_target_stays_local() {
+        let (mut orchestrator, _inner, cloud, _local) =
+            matrix_orchestrator(ResourceSnapshot::unknown());
+        orchestrator
+            .load_policies(b"route_cloud_if:\n  - \"true\"\n".to_vec())
+            .expect("policy loads");
+        let subscription = orchestrator.event_bus().subscribe();
+        let mut stage = hybrid_auto_stage();
+        stage.target = Some(crate::pipeline::ExecutionTarget::Device);
+
+        let err = orchestrator
+            .execute_stage(
+                &stage,
+                &text_envelope("hello"),
+                &DeviceMetrics::default(),
+                &LocalAvailability::new(true),
+            )
+            .expect_err("explicit device without a bundle fails locally");
+
+        assert!(err.to_string().contains("no local bundle"), "{err}");
+        assert_eq!(cloud.call_count(), 0);
+        let routed = routing_events(&subscription);
+        assert_eq!(routed[0].0, "local");
+        assert!(routed[0].1.contains("Explicit"), "{}", routed[0].1);
+    }
+
+    #[test]
+    fn no_policy_quiet_device_defaults_local_and_stressed_device_offloads() {
+        let (mut orchestrator, _inner, cloud, _local) =
+            matrix_orchestrator(ResourceSnapshot::unknown());
+        // No bundle, so the default-local route fails at the executor — but the
+        // decision itself is what this test pins.
+        let subscription = orchestrator.event_bus().subscribe();
+        let _ = orchestrator.execute_stage(
+            &hybrid_auto_stage(),
+            &text_envelope("hello"),
+            &DeviceMetrics::default(),
+            &LocalAvailability::new(true),
+        );
+        let routed = routing_events(&subscription);
+        assert_eq!(routed[0].0, "local");
+        assert!(routed[0].1.contains("default_local"), "{}", routed[0].1);
+        assert_eq!(cloud.call_count(), 0);
+
+        let (mut orchestrator, _inner, cloud, _local) = matrix_orchestrator(stressed_snapshot());
+        let result = orchestrator
+            .execute_stage(
+                &hybrid_auto_stage(),
+                &text_envelope("hello"),
+                &DeviceMetrics::default(),
+                &LocalAvailability::new(true),
+            )
+            .expect("stressed device offloads to the cloud mock");
+        assert_eq!(result.routing_decision.target.as_str(), "cloud");
+        assert!(result.routing_decision.reason.contains("stress_memory"));
+        assert_eq!(cloud.call_count(), 1);
+    }
+
+    #[test]
+    fn policy_reload_switches_routing_between_calls() {
+        let (mut orchestrator, _inner, cloud, _local) =
+            matrix_orchestrator(ResourceSnapshot::unknown());
+        let subscription = orchestrator.event_bus().subscribe();
+
+        orchestrator
+            .load_policies(DENY_TEXT_POLICY.to_vec())
+            .expect("deny loads");
+        let _ = orchestrator.execute_stage(
+            &hybrid_auto_stage(),
+            &text_envelope("hello"),
+            &DeviceMetrics::default(),
+            &LocalAvailability::new(true),
+        );
+        assert_eq!(cloud.call_count(), 0);
+
+        orchestrator
+            .load_policies(b"route_cloud_if:\n  - \"true\"\n".to_vec())
+            .expect("route_cloud loads");
+        let result = orchestrator
+            .execute_stage(
+                &hybrid_auto_stage(),
+                &text_envelope("hello"),
+                &DeviceMetrics::default(),
+                &LocalAvailability::new(true),
+            )
+            .expect("cloud serves after reload");
+        assert_eq!(result.routing_decision.target.as_str(), "cloud");
+        assert_eq!(cloud.call_count(), 1);
+
+        let routed = routing_events(&subscription);
+        assert_eq!(routed.len(), 2);
+        assert_eq!(routed[0].0, "local");
+        assert_eq!(routed[1].0, "cloud");
+    }
+
+    /// Alternates snapshots per read. With one snapshot per decision the
+    /// policy and the routing ladder always see the same device state.
+    #[derive(Debug)]
+    struct AlternatingProvider {
+        reads: std::sync::atomic::AtomicUsize,
+    }
+
+    impl crate::device::ResourceSnapshotProvider for AlternatingProvider {
+        fn current_snapshot(&self, _max_age: std::time::Duration) -> ResourceSnapshot {
+            let n = self.reads.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            if n.is_multiple_of(2) {
+                ResourceSnapshot::unknown()
+            } else {
+                stressed_snapshot()
+            }
+        }
+    }
+
+    #[test]
+    fn policy_and_routing_see_the_same_snapshot_when_the_device_changes() {
+        let provider = Arc::new(AlternatingProvider {
+            reads: std::sync::atomic::AtomicUsize::new(0),
+        });
+        let mut orchestrator = Orchestrator::with_authority(Box::new(
+            LocalAuthority::new().with_resource_provider(provider.clone()),
+        ));
+        let mut cloud = MockRuntimeAdapter::with_text_output("cloud output").with_name("cloud");
+        cloud.load_model("/mock/cloud").unwrap();
+        let cloud = Arc::new(cloud);
+        orchestrator.executor_mut().register_adapter(cloud.clone());
+        // Deny cloud whenever memory is critical: the same condition that
+        // would make the stress ladder *prefer* cloud.
+        orchestrator
+            .load_policies(
+                b"deny_cloud_if:\n  - 'metrics.memory_pressure == \"critical\"'\n".to_vec(),
+            )
+            .expect("policy loads");
+        let subscription = orchestrator.event_bus().subscribe();
+
+        for _ in 0..4 {
+            let _ = orchestrator.execute_stage(
+                &hybrid_auto_stage(),
+                &text_envelope("hello"),
+                &DeviceMetrics::default(),
+                &LocalAvailability::new(true),
+            );
+        }
+
+        // Every decision consumed exactly one snapshot ...
+        assert_eq!(
+            provider.reads.load(std::sync::atomic::Ordering::SeqCst),
+            4,
+            "one snapshot per stage decision"
+        );
+        // ... and no decision was split across two states: a critical read is
+        // a denial (local), a quiet read is default local; cloud never wins.
+        let routed = routing_events(&subscription);
+        assert_eq!(routed.len(), 4);
+        for (i, (target, reason)) in routed.iter().enumerate() {
+            assert_eq!(target, "local", "decision {i}: {reason}");
+            if i % 2 == 1 {
+                assert!(reason.contains("policy_deny"), "decision {i}: {reason}");
+            } else {
+                assert!(reason.contains("default_local"), "decision {i}: {reason}");
+            }
+        }
         assert_eq!(cloud.call_count(), 0);
     }
 }

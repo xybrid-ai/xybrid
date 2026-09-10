@@ -1161,4 +1161,60 @@ mod tests {
         assert!(resolution.target.decision.reason.contains("Fallback"));
         assert!(resolution.target.signal_context.is_some());
     }
+
+    /// Advice server that waits `delay` before answering, so a request can be
+    /// observed "in flight".
+    fn spawn_slow_advice_server(body: &'static str, delay: Duration) -> String {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind slow advice server");
+        let addr = listener.local_addr().expect("local addr");
+        thread::spawn(move || {
+            let Ok((mut stream, _)) = listener.accept() else {
+                return;
+            };
+            let mut buf = [0_u8; 2048];
+            let _ = stream.read(&mut buf);
+            thread::sleep(delay);
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            let _ = stream.write_all(response.as_bytes());
+        });
+        format!("http://{}", addr)
+    }
+
+    #[test]
+    fn policy_reload_is_not_blocked_by_an_in_flight_advice_request() {
+        let endpoint = spawn_slow_advice_server(
+            r#"{"target":"cloud","provider":"xybrid","reason":"slow","confidence":0.9,"ttl_ms":0}"#,
+            Duration::from_millis(400),
+        );
+        let authority = std::sync::Arc::new(RemoteAuthority::new(&endpoint));
+
+        let in_flight = {
+            let authority = authority.clone();
+            thread::spawn(move || authority.resolve_target(&default_context("slow")))
+        };
+        // Give the request time to be sent and to start waiting on the server.
+        thread::sleep(Duration::from_millis(100));
+
+        let started = std::time::Instant::now();
+        authority
+            .load_policies(DENY_TEXT_POLICY)
+            .expect("reload succeeds while a fetch is in flight");
+        assert!(
+            started.elapsed() < Duration::from_millis(200),
+            "load_policies waited on the HTTP round-trip: {:?}",
+            started.elapsed()
+        );
+
+        // The in-flight decision finished on the policy it evaluated (allow →
+        // remote advice), and the next decision uses the new one.
+        let earlier = in_flight.join().expect("in-flight resolution completes");
+        assert_eq!(earlier.source, DecisionSource::Remote);
+        let later = authority.resolve_target(&default_context("slow"));
+        assert_eq!(later.result, ResolvedTarget::Device);
+        assert!(later.reason.starts_with("policy_deny"), "{}", later.reason);
+    }
 }
