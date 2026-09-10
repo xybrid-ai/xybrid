@@ -7,6 +7,85 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Policy-routed hybrid inference: a pipeline stage can now carry a local GGUF
+model and an OpenAI-compatible cloud leg (DeepSeek, OpenAI, OpenRouter) at
+the same time, and a policy bundle decides which leg serves each request.
+
+### Added
+
+- **Policy DSL and cloud preference.** Bundles are compiled at load time and
+  support `input.kind`, `input.text` (`contains` / `matches` / `==` / `!=`),
+  `input.text_len`, `metrics.battery_level`, `metrics.cpu_pct`,
+  `metrics.memory_pressure`, `metrics.thermal_state` and bare `true` / `false`;
+  actions are `allow`, `deny`, `route_cloud` (alias `prefer_cloud`) and
+  `redact`, plus `deny_cloud_if` / `route_cloud_if` shorthand lists. Invalid
+  rules are rejected at load and a failed reload keeps the previous bundle.
+- **Hybrid stages in `xybrid run`.** `target: auto` with a `provider` resolves
+  the local bundle *and* keeps the cloud leg; `cloud_model` names the model
+  sent to the provider; shared `system_prompt` / `temperature` / `max_tokens`
+  / `top_p` apply to both legs with the same precedence (input metadata, then
+  YAML, then template defaults). Unknown targets or providers are errors.
+- **OpenAI-compatible direct providers and DeepSeek thinking mode.**
+  `backend: direct` for OpenAI, DeepSeek, OpenRouter and Custom uses the
+  gateway transport at the provider's documented base URL with
+  `$<PROVIDER>_API_KEY`; `thinking: enabled|disabled` is a typed request
+  option serialized as DeepSeek's `"thinking": {"type": ...}`. Batch and SSE
+  share one request-body builder.
+- **`Backend` in CLI results** (`template-executor` vs
+  `cloud:<provider>:gateway`) and `StageExecutionResult.adapter`, so a routing
+  label can be checked against what actually ran.
+- `OrchestrationAuthority::resolve_stage` and `load_policies`,
+  `StageResolution`, `PolicyAction`, `PolicyRoute`, `ThinkingMode`,
+  `CompletionRequest::with_thinking`, `MockRuntimeAdapter::with_name` /
+  `captured_inputs`.
+- Example pipeline `crates/xybrid-cli/examples/hybrid-deepseek.yaml` with
+  policies under `crates/xybrid-cli/examples/policies/`, and the
+  `test-policy-routing` workflow that drives the real binary through a policy
+  with a real local model and a local fake DeepSeek endpoint.
+
+### Changed
+
+- **Policy is a dispatch invariant.** Every stage decision evaluates the
+  policy once against the actual input and one device snapshot; a denial (or
+  a required transform) restricts the target to the device ahead of explicit
+  `cloud` / `server` targets, model availability, hysteresis, reliability
+  history, device stress and remote advice, and is re-applied immediately
+  before dispatch. A denied stage with no usable local leg fails locally
+  instead of running on cloud. `RemoteAuthority` consults advice only for
+  decisions the policy, an explicit target, availability or a policy
+  preference did not already settle, and never for a denied input.
+- **Credentials are scoped to the destination.** An explicit `api_key`
+  (literal or `$ENV`) always wins and never falls through; the Xybrid platform
+  key is sent only to the configured platform gateway origin (exact
+  scheme/host/port); a provider key only to that provider's origin; any other
+  endpoint — including a self-hosted gateway reached via `gateway_url` — is
+  anonymous unless `api_key` is set. Point the platform at such a gateway with
+  `XYBRID_GATEWAY_URL` / `set_platform_url` to keep the platform key flowing.
+- **The executor dispatches on the routing target**, not on the presence of a
+  provider. A hybrid stage routed local whose bundle is missing or invalid
+  errors instead of falling back to another adapter or to cloud; local
+  fallback never selects the cloud adapter and vice versa.
+- `--dry-run` decides the first stage through the same authority (and honours
+  `--policy`) at the current device snapshot; later stages print UNKNOWN
+  instead of fabricated outputs.
+- `Orchestrator::with_engines` removed; `Orchestrator::with_all` no longer
+  takes policy/routing engines; `PolicyRule.action` is a `PolicyAction`;
+  `PolicyResult` gains `route`; `CompletionRequest` gains `thinking`.
+
+### Fixed
+
+- `Orchestrator::load_policies` (and therefore `xybrid run --policy`) wrote
+  into an engine nothing consulted, so policies never affected routing.
+- The CLI mapped any provider other than openai/anthropic/google to OpenAI, so
+  `provider: deepseek` silently called the wrong API.
+- `Orchestrator::new()` / the SDK `Pipeline` served cloud stages from a fake
+  adapter that slept 50 ms and returned `cloud-output-<text>`; the real
+  OpenAI-compatible adapter is registered now, and a provider-less cloud stage
+  fails honestly.
+- `input.kind == "<v>"` matched a text payload equal to the literal.
+- Shared YAML generation options only reached the cloud leg; the local
+  template executor now receives them too.
+
 ### Planned
 
 - **Multimodal KV-prefix reuse**: the per-frame prefill cost lever for live vision — **deferred** from 0.2.0, not yet implemented.

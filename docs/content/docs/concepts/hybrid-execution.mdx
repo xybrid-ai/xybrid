@@ -25,6 +25,36 @@ stages:
     provider: openai
 ```
 
+### Hybrid stages
+
+A stage with `target: auto` **and** a `provider` has two legs: the local model
+named by `model`, and the provider's model named by `cloud_model` (defaults to
+`model`). The policy and the device state pick one leg per request. Shared
+options (`system_prompt`, `temperature`, `max_tokens`, `top_p`) apply to
+whichever leg runs.
+
+```yaml
+stages:
+  - id: llm
+    model: functiongemma-270m-it      # local leg
+    target: auto
+    provider: deepseek                # cloud leg
+    cloud_model: deepseek-flash
+    backend: direct                   # OpenAI-compatible call to api.deepseek.com with $DEEPSEEK_API_KEY
+    thinking: disabled                # DeepSeek only: answer tokens, no hidden reasoning
+    system_prompt: "You are a concise assistant."
+    max_tokens: 128
+```
+
+`backend: direct` with an OpenAI-compatible provider (`openai`, `deepseek`,
+`openrouter`, `custom`) sends the request straight to that provider's API;
+an explicit `gateway_url` / `api_key` pair overrides the defaults. Credentials
+are scoped to the destination: the Xybrid platform key goes only to the
+configured platform gateway, a provider's key only to that provider's origin,
+and any other endpoint is anonymous unless `api_key` is set. A denied stage
+whose local model is missing fails on the device — it never falls through to
+the cloud.
+
 ## How `auto` decides
 
 For `auto` stages the orchestrator weighs:
@@ -32,7 +62,7 @@ For `auto` stages the orchestrator weighs:
 - **Model availability** — is the model cached locally, or available in the registry for this platform?
 - **Device capabilities** — CPU features, memory, and accelerators
 - **Host signals** — battery level and thermal state reported by the platform
-- **Policies** — user-defined rules that allow or deny routes
+- **Policies** — user-defined rules that forbid the cloud leg or prefer it (see [Policies](#policies))
 
 Preview decisions without executing:
 
@@ -73,30 +103,74 @@ An explicit `api_key` field also accepts an environment reference (`$OPENAI_API_
 
 ## Policies
 
-Policies are YAML rule sets that constrain routing. Rules are evaluated in order; the first match wins:
+A policy is a YAML (or JSON) rule set passed with `--policy`. It is evaluated
+once per stage, against the actual input and one live device snapshot, and it
+**constrains** routing rather than advising it: a denial keeps the stage on the
+device even when the YAML says `target: cloud`, when the local model is missing
+(the stage then fails locally instead of leaking to the cloud), and when device
+stress would otherwise offload it.
+
+Rules are evaluated in order; the first match wins.
+
+| Action | Effect |
+|--------|--------|
+| `deny` | Cloud is forbidden; the stage must run on the device. |
+| `route_cloud` (alias `prefer_cloud`) | Prefer the cloud leg when it is permitted and the local model exists. |
+| `redact` | The input would need a transform before leaving the device. Transforms are not implemented yet, so this also forces the device. |
+| `allow` | Stop evaluating and route normally. |
 
 ```yaml
 # policy.yaml
 version: "1.0.0"
 rules:
-  - id: "keep_audio_on_device"
-    expression: "input.kind == \"AudioRaw\""
-    action: "deny"          # deny this route for raw audio input
+  - id: keep_audio_on_device
+    expression: 'input.kind == "audio"'
+    action: deny
+  - id: keep_secrets_on_device
+    expression: 'input.text matches "(?i)confidential|ssn|password"'
+    action: deny
+  - id: offload_when_hot
+    expression: 'metrics.thermal_state == "hot"'
+    action: route_cloud
 
-  - id: "avoid_slow_networks"
-    expression: "metrics.network_rtt > 300"
-    action: "deny"          # don't go to cloud on a slow network
-
-  - id: "allow_all"
-    expression: "true"
-    action: "allow"
+# Shorthand lists are appended after `rules`, denials first:
+deny_cloud_if:
+  - "input.text_len > 4000"
+route_cloud_if:
+  - "metrics.battery_level < 25"
 ```
+
+Expressions are `<operand> <operator> <value>`, or a bare `true` / `false`:
+
+| Operand | Operators | Value |
+|---------|-----------|-------|
+| `input.kind` | `==` `!=` | `"audio"` `"text"` `"embedding"` `"image"` `"multipart"` |
+| `input.text` | `contains` `matches` `==` `!=` | quoted literal (`matches` takes a regex) |
+| `input.text_len` | `==` `!=` `<` `<=` `>` `>=` | number of characters |
+| `metrics.battery_level`, `metrics.cpu_pct` | `==` `!=` `<` `<=` `>` `>=` | number, 0–100 |
+| `metrics.memory_pressure` | `==` `!=` | `"unknown"` `"normal"` `"warn"` `"critical"` |
+| `metrics.thermal_state` | `==` `!=` | `"normal"` `"warm"` `"hot"` `"critical"` |
+
+Text rules inspect only the input text — never system prompts or metadata —
+and never match non-text input. Anything outside this table is rejected when
+the bundle is loaded, so a typo cannot silently disable a rule.
 
 ```bash
-xybrid run --config pipeline.yaml --input-audio q.wav --policy policy.yaml
+xybrid run --config pipeline.yaml --input-text "..." --policy policy.yaml
 ```
 
-Expressions can reference the input envelope (`input.kind`) and live device metrics (`metrics.network_rtt`).
+The results show the decision and what actually ran:
+
+```
+  Routing          cloud
+  Reason           [local] policy_route_cloud: policy rule 'offload_when_hot' prefers cloud: ... (confidence: 90%)
+  Backend          cloud:deepseek:gateway
+```
+
+`--dry-run --policy policy.yaml` decides the first stage the same way, at the
+current device snapshot, without running inference; later stages depend on
+upstream output and are reported as unknown. Ready-made bundles live in
+`crates/xybrid-cli/examples/policies/` next to `hybrid-deepseek.yaml`.
 
 ## Fallback
 

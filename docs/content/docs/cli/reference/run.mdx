@@ -24,7 +24,7 @@ xybrid run --pipeline <name> --dry-run
 | `--input-audio` | | Path to an audio file for audio-based models (ASR) — WAV, MP3, OGG, or FLAC |
 | `--target` | | Force model format (`onnx`, `coreml`, `tflite`); auto-detected if omitted |
 | `--dry-run` | | Simulate routing without execution |
-| `--policy` | | Load an additional policy bundle |
+| `--policy` | | Load a policy bundle (YAML/JSON) that constrains routing — see [Hybrid Execution › Policies](/docs/concepts/hybrid-execution#policies) |
 | `--trace` | | Enable execution tracing with flame graph + LLM metrics output |
 | `--trace-export` | | Export the trace to a JSON file (Chrome trace format) |
 
@@ -34,7 +34,7 @@ xybrid run --pipeline <name> --dry-run
 2. Runs policy → routing → execution loop
 3. Prints stage latency and routing summaries
 
-In dry-run mode, the CLI prints routing decisions and simulated outputs without invoking adapters.
+In dry-run mode the CLI decides the first stage (policy and route) exactly as a real run would, at the current device snapshot, without running inference. Later stages are reported as unknown: their input is the previous stage's output, which does not exist without execution.
 
 ## Examples
 
@@ -60,36 +60,46 @@ Looks for `hiiipe.yml` or `hiiipe.yaml` in:
 xybrid run --pipeline hiiipe --dry-run
 ```
 
-Output shows routing decisions without actual execution:
+Output shows the first-stage decision without running inference:
 
 ```
-▶️ Stage: whisper-tiny@1.2 → would route to: local
-▶️ Stage: gpt-4o-mini → would route to: integration
-▶️ Stage: kokoro-82m@0.1 → would route to: local
+  Stage 1 llm
+  Declared         target: auto
+  Provider         deepseek
+  Policy           ALLOWED
+  Reason           all policy checks passed
+  Routing          local (default_local)
+
+  Stage 2 tts
+  Policy           UNKNOWN
+  Routing          UNKNOWN
+  Output           upstream output unavailable without execution
 ```
 
-### With custom policy
+### With a policy
 
 ```bash
-xybrid run --pipeline hiiipe --policy ./policies/strict-privacy.yaml
+DEEPSEEK_API_KEY=sk-... xybrid run \
+  -c crates/xybrid-cli/examples/hybrid-deepseek.yaml \
+  --policy crates/xybrid-cli/examples/policies/prefer-cloud.yaml \
+  --input-text "Summarise the plot of Dune in two sentences." -v
 ```
+
+Swap in `policies/local-only.yaml` to keep the same prompt on the device, or
+`policies/privacy.yaml` to route by content. `-v` also prints the raw
+`routing_decision` JSON line.
 
 ## Sample Output
 
 ```
-▶️ Stage: whisper-tiny@1.2 → local
-🎯 Routing: local (fast path)
-⚙️ Execution complete (52ms)
+  Stage 1 llm
+  Routing          cloud
+  Reason           [local] policy_route_cloud: policy rule 'route_cloud_if_0' prefers cloud: true (confidence: 90%)
+  Backend          cloud:deepseek:gateway
+  Time             842ms
+  Output           Text
 
-▶️ Stage: gpt-4o-mini → integration
-🎯 Routing: integration (OpenAI)
-⚙️ Execution complete (340ms)
-
-▶️ Stage: kokoro-82m@0.1 → local
-🎯 Routing: local (fast path)
-⚙️ Execution complete (89ms)
-
-🎉 Pipeline complete (total 481ms)
+    Dune follows Paul Atreides ...
 ```
 
 ## Pipeline Format

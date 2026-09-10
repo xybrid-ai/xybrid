@@ -25,6 +25,32 @@ stages:
     provider: openai
 ```
 
+### 混合阶段
+
+同时声明 `target: auto` **和** `provider` 的阶段拥有两条分支：`model` 指定的本地模型，
+以及 `cloud_model`（默认与 `model` 相同）指定的云端模型。策略与设备状态为每次请求
+选择其中一条。共享选项（`system_prompt`、`temperature`、`max_tokens`、`top_p`）对
+实际运行的分支都生效。
+
+```yaml
+stages:
+  - id: llm
+    model: functiongemma-270m-it      # 本地分支
+    target: auto
+    provider: deepseek                # 云端分支
+    cloud_model: deepseek-flash
+    backend: direct                   # 直接以 OpenAI 兼容协议调用 api.deepseek.com，使用 $DEEPSEEK_API_KEY
+    thinking: disabled                # 仅 DeepSeek：只返回回答，不产生隐藏推理 token
+    system_prompt: "You are a concise assistant."
+    max_tokens: 128
+```
+
+对 OpenAI 兼容的提供方（`openai`、`deepseek`、`openrouter`、`custom`）使用
+`backend: direct` 会把请求直接发往该提供方的 API；显式的 `gateway_url` / `api_key`
+可以覆盖默认值。凭据按目标作用域解析：Xybrid 平台密钥只发往已配置的平台网关，
+提供方密钥只发往该提供方自己的源，其他端点除非设置了 `api_key`，否则匿名访问。
+被策略拒绝且本地模型缺失的阶段会在设备上失败，绝不会回落到云端。
+
 ## `auto` 如何决策
 
 对于 `auto` 阶段，编排器会综合权衡：
@@ -32,7 +58,7 @@ stages:
 - **模型可用性** — 模型是否已缓存到本地，或注册表中是否有适合当前平台的版本？
 - **设备能力** — CPU 特性、内存与加速器
 - **宿主信号** — 平台上报的电池电量与散热状态
-- **策略** — 用户定义的允许/拒绝路由规则
+- **策略** — 用户定义的规则，禁止或优先使用云端分支（见[策略](#策略)）
 
 预览路由决策而不实际执行：
 
@@ -73,30 +99,70 @@ await Xybrid.init(gatewayUrl: 'https://my-gateway.example.com');
 
 ## 策略
 
-策略是约束路由的 YAML 规则集。规则按顺序求值，首条匹配生效：
+策略是通过 `--policy` 传入的 YAML（或 JSON）规则集。它在每个阶段对真实输入和一次
+实时设备快照求值一次，并且**约束**路由而非仅仅建议：即使 YAML 写了 `target: cloud`、
+即使本地模型缺失（此时阶段在本地失败而不是泄露到云端）、即使设备压力本会触发卸载，
+一条拒绝规则都会把阶段留在设备上。
+
+规则按顺序求值，首条匹配生效。
+
+| 动作 | 效果 |
+|------|------|
+| `deny` | 禁止云端；阶段必须在设备上运行。 |
+| `route_cloud`（别名 `prefer_cloud`） | 在允许且本地模型存在时优先使用云端分支。 |
+| `redact` | 输入需要先脱敏才能离开设备。脱敏尚未实现，因此同样强制设备执行。 |
+| `allow` | 停止求值，按正常方式路由。 |
 
 ```yaml
 # policy.yaml
 version: "1.0.0"
 rules:
-  - id: "keep_audio_on_device"
-    expression: "input.kind == \"AudioRaw\""
-    action: "deny"          # 原始音频输入拒绝走该路由
+  - id: keep_audio_on_device
+    expression: 'input.kind == "audio"'
+    action: deny
+  - id: keep_secrets_on_device
+    expression: 'input.text matches "(?i)confidential|ssn|password"'
+    action: deny
+  - id: offload_when_hot
+    expression: 'metrics.thermal_state == "hot"'
+    action: route_cloud
 
-  - id: "avoid_slow_networks"
-    expression: "metrics.network_rtt > 300"
-    action: "deny"          # 网络慢时不走云端
-
-  - id: "allow_all"
-    expression: "true"
-    action: "allow"
+# 简写列表追加在 `rules` 之后，先拒绝规则：
+deny_cloud_if:
+  - "input.text_len > 4000"
+route_cloud_if:
+  - "metrics.battery_level < 25"
 ```
+
+表达式形如 `<操作数> <运算符> <值>`，或单独的 `true` / `false`：
+
+| 操作数 | 运算符 | 值 |
+|--------|--------|----|
+| `input.kind` | `==` `!=` | `"audio"` `"text"` `"embedding"` `"image"` `"multipart"` |
+| `input.text` | `contains` `matches` `==` `!=` | 带引号的字面量（`matches` 接受正则） |
+| `input.text_len` | `==` `!=` `<` `<=` `>` `>=` | 字符数 |
+| `metrics.battery_level`、`metrics.cpu_pct` | `==` `!=` `<` `<=` `>` `>=` | 0–100 的数字 |
+| `metrics.memory_pressure` | `==` `!=` | `"unknown"` `"normal"` `"warn"` `"critical"` |
+| `metrics.thermal_state` | `==` `!=` | `"normal"` `"warm"` `"hot"` `"critical"` |
+
+文本规则只检查输入文本——不包括系统提示词或元数据——且对非文本输入永不匹配。
+表格之外的任何写法都会在加载 Bundle 时被拒绝，拼写错误不会悄悄让规则失效。
 
 ```bash
-xybrid run --config pipeline.yaml --input-audio q.wav --policy policy.yaml
+xybrid run --config pipeline.yaml --input-text "..." --policy policy.yaml
 ```
 
-表达式可以引用输入 Envelope（`input.kind`）和实时设备指标（`metrics.network_rtt`）。
+结果会同时显示决策和实际运行的后端：
+
+```
+  Routing          cloud
+  Reason           [local] policy_route_cloud: policy rule 'offload_when_hot' prefers cloud: ... (confidence: 90%)
+  Backend          cloud:deepseek:gateway
+```
+
+`--dry-run --policy policy.yaml` 以同样方式在当前设备快照下决策第一个阶段而不执行推理；
+后续阶段依赖上游输出，因此标记为未知。现成的策略文件位于
+`crates/xybrid-cli/examples/policies/`，与 `hybrid-deepseek.yaml` 放在一起。
 
 ## 回退
 

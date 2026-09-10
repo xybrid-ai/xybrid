@@ -24,7 +24,7 @@ xybrid run --pipeline <name> --dry-run
 | `--input-audio` | | 音频模型（ASR）的音频文件路径 — 支持 WAV、MP3、OGG、FLAC |
 | `--target` | | 强制指定模型格式（`onnx`、`coreml`、`tflite`）；省略时自动检测 |
 | `--dry-run` | | 模拟路由决策但不执行推理 |
-| `--policy` | | 加载附加策略 Bundle |
+| `--policy` | | 加载约束路由的策略 Bundle（YAML/JSON）— 见 [混合执行 › 策略](/docs/concepts/hybrid-execution#策略) |
 | `--trace` | | 启用执行追踪，输出火焰图与 LLM 指标 |
 | `--trace-export` | | 将追踪导出为 JSON 文件（Chrome trace 格式） |
 
@@ -34,7 +34,7 @@ xybrid run --pipeline <name> --dry-run
 2. 执行策略 → 路由 → 推理的循环
 3. 打印各阶段延迟与路由摘要
 
-在 dry-run 模式下，CLI 仅打印路由决策与模拟输出，不会调用适配器。
+在 dry-run 模式下，CLI 会像真实运行一样在当前设备快照下决策第一个阶段（策略与路由），但不执行推理。后续阶段标记为未知：它们的输入是上一阶段的输出，在未执行时并不存在。
 
 ## 示例
 
@@ -60,36 +60,45 @@ xybrid run --pipeline hiiipe
 xybrid run --pipeline hiiipe --dry-run
 ```
 
-输出显示路由决策，不执行实际推理：
+输出显示第一个阶段的决策，不执行推理：
 
 ```
-▶️ Stage: whisper-tiny@1.2 → would route to: local
-▶️ Stage: gpt-4o-mini → would route to: integration
-▶️ Stage: kokoro-82m@0.1 → would route to: local
+  Stage 1 llm
+  Declared         target: auto
+  Provider         deepseek
+  Policy           ALLOWED
+  Reason           all policy checks passed
+  Routing          local (default_local)
+
+  Stage 2 tts
+  Policy           UNKNOWN
+  Routing          UNKNOWN
+  Output           upstream output unavailable without execution
 ```
 
-### 使用自定义策略
+### 使用策略
 
 ```bash
-xybrid run --pipeline hiiipe --policy ./policies/strict-privacy.yaml
+DEEPSEEK_API_KEY=sk-... xybrid run \
+  -c crates/xybrid-cli/examples/hybrid-deepseek.yaml \
+  --policy crates/xybrid-cli/examples/policies/prefer-cloud.yaml \
+  --input-text "Summarise the plot of Dune in two sentences." -v
 ```
+
+换成 `policies/local-only.yaml` 可让同一提示词留在设备上，换成 `policies/privacy.yaml`
+则按内容路由。`-v` 还会打印原始的 `routing_decision` JSON 行。
 
 ## 示例输出
 
 ```
-▶️ Stage: whisper-tiny@1.2 → local
-🎯 Routing: local (fast path)
-⚙️ Execution complete (52ms)
+  Stage 1 llm
+  Routing          cloud
+  Reason           [local] policy_route_cloud: policy rule 'route_cloud_if_0' prefers cloud: true (confidence: 90%)
+  Backend          cloud:deepseek:gateway
+  Time             842ms
+  Output           Text
 
-▶️ Stage: gpt-4o-mini → integration
-🎯 Routing: integration (OpenAI)
-⚙️ Execution complete (340ms)
-
-▶️ Stage: kokoro-82m@0.1 → local
-🎯 Routing: local (fast path)
-⚙️ Execution complete (89ms)
-
-🎉 Pipeline complete (total 481ms)
+    Dune follows Paul Atreides ...
 ```
 
 ## 流水线格式

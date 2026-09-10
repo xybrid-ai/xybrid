@@ -1,13 +1,15 @@
-# Example Policy Bundle
+# Example policy bundle.
+# Rules are evaluated in order; the first match wins.
+# Actions: deny (cloud forbidden, stay local), route_cloud (prefer the cloud
+# leg when permitted), allow (stop evaluating, route normally).
 version: "1.0.0"
 rules:
-  - id: "audio_rule"
-    expression: "input.kind == \"AudioRaw\""
-    action: "deny"
-  - id: "high_rtt_rule"
-    expression: "metrics.network_rtt > 300"
-    action: "deny"
-  - id: "allow_all"
+  - id: keep_audio_on_device
+    expression: 'input.kind == "audio"'
+    action: deny
+  - id: offload_when_hot
+    expression: 'metrics.thermal_state == "hot"'
+    action: route_cloud
+  - id: default_allow
     expression: "true"
-    action: "allow"
-
+    action: allow

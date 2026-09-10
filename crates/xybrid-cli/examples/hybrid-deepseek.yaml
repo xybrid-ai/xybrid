@@ -1,0 +1,26 @@
+# One LLM stage with two legs: a local GGUF model and DeepSeek's API.
+# The policy passed with --policy (and the device state) decide which leg
+# serves each prompt. Export DEEPSEEK_API_KEY, then:
+#
+#   cargo run -p xybrid-cli --features llm-llamacpp -- run \
+#     -c crates/xybrid-cli/examples/hybrid-deepseek.yaml \
+#     --policy crates/xybrid-cli/examples/policies/prefer-cloud.yaml \
+#     --input-text "Summarise the plot of Dune in two sentences." -v
+#
+# Swap the policy for policies/local-only.yaml to keep the same prompt on
+# the device, or policies/privacy.yaml to route by content.
+name: hybrid-deepseek
+stages:
+  - id: llm
+    model: functiongemma-270m-it      # local leg (cache/registry id)
+    target: auto                      # hybrid: policy + device state pick the leg
+    provider: deepseek                # cloud leg
+    cloud_model: deepseek-flash       # model sent to the provider (defaults to `model`)
+    backend: direct                   # OpenAI-compatible call to https://api.deepseek.com/v1 with $DEEPSEEK_API_KEY
+    thinking: disabled                # DeepSeek: answer only; thinking is on by default and would eat max_tokens
+    # Explicit endpoint override — then select its credential explicitly too:
+    # gateway_url: "https://api.deepseek.com/v1"
+    # api_key: "$DEEPSEEK_API_KEY"
+    system_prompt: "You are a concise assistant."
+    max_tokens: 128
+    temperature: 0

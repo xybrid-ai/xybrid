@@ -1,0 +1,9 @@
+# Sensitive content never leaves the device. Everything else routes normally.
+version: "1.0.0"
+rules:
+  - id: keep_secrets_on_device
+    expression: 'input.text matches "(?i)confidential|ssn|password"'
+    action: deny
+  - id: keep_audio_on_device
+    expression: 'input.kind == "audio"'
+    action: deny
