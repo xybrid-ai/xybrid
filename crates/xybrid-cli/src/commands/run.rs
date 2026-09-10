@@ -488,7 +488,7 @@ fn run_dry_run(
     // Same decision path as a real run: one LocalAuthority, the same bundle.
     let authority = LocalAuthority::new();
     if let Some(policy_file) = policy_path {
-        ui::kv("Policy", &policy_file.display().to_string());
+        ui::kv("Policy file", &policy_file.display().to_string());
         let policy_bytes = read_policy_bundle(policy_file)?;
         authority
             .load_policies(&policy_bytes)
@@ -554,7 +554,7 @@ fn execute_pipeline(
     let mut orchestrator = Orchestrator::new();
 
     if let Some(policy_file) = policy_path {
-        ui::kv("Policy", &policy_file.display().to_string());
+        ui::kv("Policy file", &policy_file.display().to_string());
         let policy_bytes = read_policy_bundle(policy_file)?;
 
         orchestrator

@@ -22,7 +22,7 @@
 //!    `http://localhost:3001/v1`, which is the local-dev port the Xybrid
 //!    gateway listens on. The gateway dispatches to whichever upstream
 //!    provider it has credentials for (e.g. DeepSeek, OpenAI, Anthropic);
-//!    the demo sends `model = "deepseek-chat"` to match a gateway
+//!    the demo sends `model = "deepseek-flash"` to match a gateway
 //!    configured with `DEEPSEEK_API_KEY`. Pick a different `model` (and
 //!    matching `provider` metadata) below if your gateway exposes
 //!    different upstream keys.
@@ -34,15 +34,21 @@
 //!    export XYBRID_API_KEY=sk_live_…
 //!    ```
 //!
-//!    To override the gateway URL (staging / production / your own
-//!    OpenAI-compatible endpoint):
+//!    Credentials are scoped to the destination: the Xybrid key is sent
+//!    automatically only to the *configured platform gateway* origin. To
+//!    point the demo at a staging / self-hosted gateway and keep the key
+//!    flowing, configure the platform gateway itself rather than just the
+//!    adapter URL:
 //!
 //!    ```bash
-//!    export XYBRID_CLOUD_URL=https://your-gateway.example.com/v1
+//!    export XYBRID_GATEWAY_URL=https://your-gateway.example.com/v1
 //!    ```
 //!
-//!    The cloud client appends `/chat/completions`, so `XYBRID_CLOUD_URL`
-//!    must end at the API version prefix (`…/v1`), not the bare host.
+//!    `XYBRID_CLOUD_URL` still overrides the adapter's URL alone; a URL
+//!    that is not the platform origin is then called anonymously unless you
+//!    add an `api_key` entry to the envelope metadata. The cloud client
+//!    appends `/chat/completions`, so either URL must end at the API version
+//!    prefix (`…/v1`), not the bare host.
 //!
 //! # Run
 //!
@@ -179,7 +185,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     //    The local leg ignores the cloud-only keys.
     let mut envelope = Envelope::new(EnvelopeKind::Text(PROMPT.to_string()));
     // The local platform backend resolves the upstream provider from the
-    //    `model` name (`deepseek-chat` → DeepSeek), so the `provider` field is
+    //    `model` name (`deepseek-flash` → DeepSeek), so the `provider` field is
     //    SDK-side bookkeeping only and never crosses the wire to the gateway.
     //    Match it to the model so traces stay honest.
     envelope
@@ -187,7 +193,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .insert("provider".to_string(), "deepseek".to_string());
     envelope
         .metadata
-        .insert("model".to_string(), "deepseek-chat".to_string());
+        .insert("model".to_string(), "deepseek-flash".to_string());
     envelope
         .metadata
         .insert("max_tokens".to_string(), "200".to_string());
