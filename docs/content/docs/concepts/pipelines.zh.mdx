@@ -64,8 +64,12 @@ stages:
 | `id` | 阶段标识符（默认为模型 ID） |
 | `model` | 注册表中的模型 ID，云端阶段则为提供商的模型名 |
 | `version` | 模型版本（如 `"1.0"`） |
-| `target` | 运行位置：`device`、`cloud` 或 `auto`（默认）— 参见[混合执行](/docs/concepts/hybrid-execution) |
-| `provider` | 云端阶段的提供商：`openai`、`anthropic`、`google`、`deepseek`、`elevenlabs`、`openrouter`、`custom` |
+| `target` | 运行位置：`device`、`cloud` 或 `auto`（默认）— 参见[混合执行](/docs/concepts/hybrid-execution)。`auto` **同时**声明 `provider` 即为混合阶段：本地模型加一条云端分支，由策略与设备状态按请求选择 |
+| `provider` | 云端或混合阶段的提供商：`openai`、`anthropic`、`google`、`deepseek`、`elevenlabs`、`openrouter`、`custom` |
+| `cloud_model` | 混合阶段云端分支发送给提供商的模型名（默认与 `model` 相同） |
+| `backend` | `gateway`（默认）或 `direct`；对 OpenAI 兼容提供商使用 `direct` 会以 `$<PROVIDER>_API_KEY` 直接调用其 API |
+| `gateway_url`、`api_key` | 云端分支的显式端点与凭据（`api_key` 接受 `$ENV_VAR`）；凭据绝不会跨源继承 |
+| `thinking` | 仅 DeepSeek：`enabled` 或 `disabled`（DeepSeek 默认开启推理；`disabled` 把 `max_tokens` 留给回答） |
 | `execution_provider` | ONNX Runtime 覆盖：`cpu`、`coreml`、`coreml-ane`、`coreml-gpu`（不设置则自动选择） |
 | *（其他任意键）* | 作为阶段选项传递 — 常用：`system_prompt`、`max_tokens`、`temperature` |
 

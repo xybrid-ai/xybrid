@@ -63,26 +63,32 @@ let results = orchestrator.execute_pipeline(&stages, &input, &metrics, &|s| {
 Evaluates policies to determine if requests are allowed and what constraints apply.
 
 ```rust
-use xybrid_core::policy_engine::{PolicyEngine, DefaultPolicyEngine};
+use xybrid_core::orchestrator::policy_engine::{DefaultPolicyEngine, PolicyEngine};
 
 let mut engine = DefaultPolicyEngine::new();
 
-// Load policies from YAML or JSON
+// Load policies from YAML or JSON. Rules are compiled at load time; an
+// unsupported operand, operator, literal or action is rejected here.
 let policy_yaml = r#"
-version: "0.1.0"
+version: "1.0.0"
 rules:
-  - id: "audio_rule"
-    expression: "input.kind == \"AudioRaw\""
-    action: "deny"
-signature: "test-signature"
+  - id: keep_audio_on_device
+    expression: 'input.kind == "audio"'
+    action: deny
+  - id: offload_when_hot
+    expression: 'metrics.thermal_state == "hot"'
+    action: route_cloud
 "#;
 
 engine.load_policies(policy_yaml.as_bytes().to_vec())?;
 
-// Evaluate policy for a request
+// Evaluate policy for a request: `deny` forbids cloud (the stage stays on
+// the device), `route_cloud` prefers the cloud leg when it is permitted.
 let result = engine.evaluate("asr", &input, &metrics);
-if !result.allowed {
-    println!("Request denied: {:?}", result.reason);
+if result.requires_local() {
+    println!("Cloud forbidden: {:?}", result.reason);
+} else if result.prefers_cloud() {
+    println!("Cloud preferred: {:?}", result.reason);
 }
 ```
 
@@ -91,7 +97,9 @@ if !result.allowed {
 Makes intelligent routing decisions based on device metrics, policy results, and model availability.
 
 ```rust
-use xybrid_core::routing_engine::{RoutingEngine, DefaultRoutingEngine, LocalAvailability};
+use xybrid_core::orchestrator::routing_engine::{
+    DefaultRoutingEngine, LocalAvailability, RouteTarget, RoutingEngine,
+};
 
 let mut routing_engine = DefaultRoutingEngine::new();
 
