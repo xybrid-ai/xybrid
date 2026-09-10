@@ -19,8 +19,8 @@
 //! ```
 
 use crate::cloud::{
-    parse_gateway_usage, Cloud, CloudBackend, CloudConfig, CompletionRequest, CompletionResponse,
-    Role, Usage,
+    openai_chat_body, parse_gateway_usage, Cloud, CloudBackend, CloudConfig, CompletionRequest,
+    CompletionResponse, MissingModel, ThinkingMode, Usage,
 };
 use crate::gateway::ChatCompletionChunk;
 use crate::ir::{Envelope, EnvelopeKind};
@@ -30,7 +30,6 @@ use crate::runtime_adapter::types::{
 };
 use crate::runtime_adapter::{AdapterError, AdapterResult, RuntimeAdapter};
 use crate::tracing as trace;
-use serde_json::json;
 use std::io::{BufRead, BufReader};
 use std::time::{Duration, Instant};
 
@@ -166,7 +165,18 @@ impl CloudRuntimeAdapter {
     }
 
     /// Builds CompletionRequest from envelope metadata.
-    fn build_request(&self, input_text: &str, envelope: &Envelope) -> CompletionRequest {
+    ///
+    /// # Errors
+    ///
+    /// [`AdapterError::InvalidInput`] when `thinking` metadata is present for a
+    /// provider other than DeepSeek, or holds anything but `enabled` /
+    /// `disabled` (case-insensitive).
+    fn build_request(
+        &self,
+        input_text: &str,
+        envelope: &Envelope,
+        provider: IntegrationProvider,
+    ) -> AdapterResult<CompletionRequest> {
         let mut request = CompletionRequest::new(input_text);
 
         // Model
@@ -208,7 +218,21 @@ impl CloudRuntimeAdapter {
             }
         }
 
-        request
+        // Thinking mode: a DeepSeek request capability (`"thinking": {"type":
+        // ...}`), not a generic OpenAI field. Rejecting it for other providers
+        // keeps a stage option from being silently dropped on the floor.
+        if let Some(raw) = envelope.metadata.get("thinking") {
+            if provider != IntegrationProvider::DeepSeek {
+                return Err(AdapterError::InvalidInput(format!(
+                    "'thinking' is only supported for provider 'deepseek', not '{}'",
+                    provider
+                )));
+            }
+            let mode: ThinkingMode = raw.parse().map_err(AdapterError::InvalidInput)?;
+            request = request.with_thinking(mode);
+        }
+
+        Ok(request)
     }
 }
 
@@ -273,7 +297,7 @@ impl RuntimeAdapter for CloudRuntimeAdapter {
         };
 
         // Build and execute request
-        let request = self.build_request(&input_text, input);
+        let request = self.build_request(&input_text, input, provider)?;
 
         let response = {
             let _llm_span = trace::SpanGuard::new("llm_inference");
@@ -350,7 +374,7 @@ impl CloudStreaming for CloudRuntimeAdapter {
             }
         };
 
-        let request = self.build_request(&input_text, input);
+        let request = self.build_request(&input_text, input, provider)?;
 
         let response = {
             let _llm_span = trace::SpanGuard::new("llm_inference");
@@ -552,70 +576,26 @@ fn stream_with_gateway_sse(
     })
 }
 
-/// Build the OpenAI-compatible chat body for the gateway.
+/// Build the SSE variant of the OpenAI-compatible chat body.
 ///
-/// # Errors
-///
-/// Returns [`AdapterError::InvalidInput`] when neither the request nor the
-/// config names a model. This used to fall back to `"gpt-4o-mini"`, which the
-/// gateway routes to OpenAI — so a caller that simply forgot the model silently
-/// billed a third-party provider instead of running the model it asked for.
-/// That exact default is what made a missing `model` look like a gateway 502
-/// rather than a client bug.
+/// Thin wrapper over the shared [`openai_chat_body`] builder (also used by the
+/// batch transport) that forces `stream: true` and maps a missing model to
+/// [`AdapterError::InvalidInput`]. This used to fall back to `"gpt-4o-mini"`,
+/// which the gateway routes to OpenAI — so a caller that simply forgot the
+/// model silently billed a third-party provider instead of running the model it
+/// asked for.
 fn gateway_chat_body(
     request: &CompletionRequest,
     config: &CloudConfig,
     force_stream: bool,
 ) -> AdapterResult<serde_json::Value> {
-    let messages: Vec<serde_json::Value> = request
-        .to_messages()
-        .into_iter()
-        .map(|m| {
-            json!({
-                "role": match m.role {
-                    Role::System => "system",
-                    Role::User => "user",
-                    Role::Assistant => "assistant",
-                },
-                "content": m.content,
-            })
-        })
-        .collect();
-
-    let model = request
-        .model
-        .clone()
-        .or_else(|| config.default_model.clone())
-        .ok_or_else(|| {
-            AdapterError::InvalidInput(
-                "no model specified for the cloud request: set it on the envelope's `model` \
-                 metadata or via CloudConfig::default_model"
-                    .to_string(),
-            )
-        })?;
-
-    let mut body = json!({
-        "model": model,
-        "messages": messages,
-    });
-
-    if let Some(max_tokens) = request.max_tokens {
-        body["max_tokens"] = json!(max_tokens);
-    }
-    if let Some(temperature) = request.temperature {
-        body["temperature"] = json!(temperature);
-    }
-    if let Some(top_p) = request.top_p {
-        body["top_p"] = json!(top_p);
-    }
-    if let Some(stop) = request.stop.as_ref() {
-        body["stop"] = json!(stop);
-    }
-    if force_stream || request.stream {
-        body["stream"] = json!(true);
-    }
-
-    Ok(body)
+    openai_chat_body(request, config, force_stream || request.stream).map_err(|MissingModel| {
+        AdapterError::InvalidInput(
+            "no model specified for the cloud request: set it on the envelope's `model` \
+             metadata or via CloudConfig::default_model"
+                .to_string(),
+        )
+    })
 }
 
 fn gateway_stream_error(error: ureq::Error, timeout_ms: u32) -> AdapterError {
@@ -649,6 +629,7 @@ fn stream_usage_from_json(data: &str) -> Option<Usage> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
     use std::io::{Read, Write};
     use std::net::TcpListener;
     use std::sync::mpsc;
@@ -711,7 +692,9 @@ mod tests {
             r#"["STOP","END"]"#.to_string(),
         );
 
-        let request = adapter.build_request("hello", &input);
+        let request = adapter
+            .build_request("hello", &input, IntegrationProvider::OpenAI)
+            .unwrap();
 
         assert!((request.top_p.unwrap() - 0.72).abs() < 1e-6);
         assert_eq!(
@@ -729,9 +712,61 @@ mod tests {
             .metadata
             .insert(STOP_SEQUENCES_METADATA_KEY.to_string(), String::new());
 
-        let request = adapter.build_request("hello", &input);
+        let request = adapter
+            .build_request("hello", &input, IntegrationProvider::OpenAI)
+            .unwrap();
 
         assert!(request.stop.is_none());
+    }
+
+    #[test]
+    fn build_request_parses_thinking_for_deepseek_only() {
+        let adapter = CloudRuntimeAdapter::new();
+        let mut input = Envelope::new(EnvelopeKind::Text("hello".to_string()));
+        input
+            .metadata
+            .insert("thinking".to_string(), "Disabled".to_string());
+
+        let request = adapter
+            .build_request("hello", &input, IntegrationProvider::DeepSeek)
+            .unwrap();
+        assert_eq!(request.thinking, Some(ThinkingMode::Disabled));
+
+        input
+            .metadata
+            .insert("thinking".to_string(), "enabled".to_string());
+        let request = adapter
+            .build_request("hello", &input, IntegrationProvider::DeepSeek)
+            .unwrap();
+        assert_eq!(request.thinking, Some(ThinkingMode::Enabled));
+
+        // Other providers reject the option instead of dropping it.
+        let err = adapter
+            .build_request("hello", &input, IntegrationProvider::OpenAI)
+            .expect_err("thinking is DeepSeek-only");
+        assert!(
+            matches!(err, AdapterError::InvalidInput(ref m) if m.contains("deepseek") && m.contains("openai")),
+            "unexpected error: {err:?}"
+        );
+
+        // Unknown values are rejected.
+        input
+            .metadata
+            .insert("thinking".to_string(), "maybe".to_string());
+        let err = adapter
+            .build_request("hello", &input, IntegrationProvider::DeepSeek)
+            .expect_err("invalid thinking value");
+        assert!(
+            matches!(err, AdapterError::InvalidInput(ref m) if m.contains("maybe")),
+            "unexpected error: {err:?}"
+        );
+
+        // Absent metadata leaves the field unset (provider default applies).
+        input.metadata.remove("thinking");
+        let request = adapter
+            .build_request("hello", &input, IntegrationProvider::DeepSeek)
+            .unwrap();
+        assert_eq!(request.thinking, None);
     }
 
     /// End to end through the body serialiser: metadata in, wire fields out.
@@ -751,11 +786,47 @@ mod tests {
             r#"["STOP","END"]"#.to_string(),
         );
 
-        let request = adapter.build_request("hello", &input);
+        let request = adapter
+            .build_request("hello", &input, IntegrationProvider::OpenAI)
+            .unwrap();
         let body = gateway_chat_body(&request, &config, false).expect("model is set");
 
         assert!((body["top_p"].as_f64().unwrap() - 0.72).abs() < 1e-6);
         assert_eq!(body["stop"], json!(["STOP", "END"]));
+    }
+
+    /// Batch and SSE share one body builder: the only difference on the wire
+    /// is `stream`, and `thinking` plus every generation option ride both.
+    #[test]
+    fn batch_and_sse_bodies_match_except_stream() {
+        let config = CloudConfig::gateway();
+        let request = CompletionRequest::new("hello")
+            .with_model("deepseek-flash")
+            .with_system("You are terse.")
+            .with_temperature(0.0)
+            .with_max_tokens(16)
+            .with_top_p(0.9)
+            .with_stop(vec!["END".to_string()])
+            .with_thinking(ThinkingMode::Disabled);
+
+        let batch = openai_chat_body(&request, &config, request.stream).expect("model is set");
+        let mut sse = gateway_chat_body(&request, &config, true).expect("model is set");
+
+        assert!(batch.get("stream").is_none());
+        assert_eq!(sse["stream"], true);
+        sse.as_object_mut().unwrap().remove("stream");
+        assert_eq!(batch, sse);
+
+        assert_eq!(batch["model"], "deepseek-flash");
+        assert_eq!(batch["thinking"], json!({ "type": "disabled" }));
+        assert_eq!(batch["messages"][0]["role"], "system");
+        assert_eq!(batch["messages"][0]["content"], "You are terse.");
+        assert_eq!(batch["messages"][1]["role"], "user");
+        assert_eq!(batch["messages"][1]["content"], "hello");
+        assert_eq!(batch["max_tokens"], 16);
+        assert_eq!(batch["temperature"], 0.0);
+        assert!((batch["top_p"].as_f64().unwrap() - 0.9).abs() < 1e-6);
+        assert_eq!(batch["stop"], json!(["END"]));
     }
 
     #[test]

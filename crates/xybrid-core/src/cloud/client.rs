@@ -1,6 +1,6 @@
 //! Cloud client implementation.
 
-use super::completion::{CompletionRequest, CompletionResponse};
+use super::completion::{CompletionRequest, CompletionResponse, Role};
 use super::config::{CloudBackend, CloudConfig};
 use super::error::CloudError;
 use crate::http::{with_retry, CircuitBreaker, CircuitConfig, RetryPolicy, RetryResult};
@@ -150,61 +150,22 @@ impl Cloud {
         Ok(response.text)
     }
 
-    /// Complete through Xybrid Gateway.
+    /// Complete through an OpenAI-compatible `/chat/completions` endpoint
+    /// (the Xybrid gateway or a provider reached over the same transport).
     fn call_gateway(&self, request: CompletionRequest) -> Result<CompletionResponse, CloudError> {
         let api_key = self.config.resolve_api_key();
-
-        // Build OpenAI-compatible request body
-        let messages = request.to_messages();
-        let openai_messages: Vec<serde_json::Value> = messages
-            .iter()
-            .map(|m| {
-                json!({
-                    "role": match m.role {
-                        super::completion::Role::System => "system",
-                        super::completion::Role::User => "user",
-                        super::completion::Role::Assistant => "assistant",
-                    },
-                    "content": &m.content
-                })
-            })
-            .collect();
 
         // No silent default: falling back to a hosted model here would route a
         // caller who merely forgot to set `model` to OpenAI, quietly billing a
         // third-party provider instead of running the model they asked for.
-        let model = request
-            .model
-            .clone()
-            .or_else(|| self.config.default_model.clone())
-            .ok_or_else(|| {
+        let body =
+            openai_chat_body(&request, &self.config, request.stream).map_err(|MissingModel| {
                 CloudError::GatewayError(
                     "no model specified for the gateway request: set CompletionRequest::model or \
                      CloudConfig::default_model"
                         .to_string(),
                 )
             })?;
-
-        let mut body = json!({
-            "model": model,
-            "messages": openai_messages,
-        });
-
-        if let Some(max_tokens) = request.max_tokens {
-            body["max_tokens"] = json!(max_tokens);
-        }
-        if let Some(temperature) = request.temperature {
-            body["temperature"] = json!(temperature);
-        }
-        if let Some(top_p) = request.top_p {
-            body["top_p"] = json!(top_p);
-        }
-        if let Some(ref stop) = request.stop {
-            body["stop"] = json!(stop);
-        }
-        if request.stream {
-            body["stream"] = json!(true);
-        }
 
         let url = format!("{}/chat/completions", self.config.gateway_url);
 
@@ -241,16 +202,13 @@ impl Cloud {
                 }
 
                 // Parse OpenAI-format response
-                let text = json_resp["choices"][0]["message"]["content"]
-                    .as_str()
-                    .unwrap_or("")
-                    .to_string();
-
                 let model = json_resp["model"].as_str().unwrap_or("unknown").to_string();
 
                 let finish_reason = json_resp["choices"][0]["finish_reason"]
                     .as_str()
                     .map(|s| s.to_string());
+
+                let text = assistant_content(&json_resp, finish_reason.as_deref())?;
 
                 let usage = json_resp.get("usage").map(parse_gateway_usage);
 
@@ -332,6 +290,101 @@ impl Default for Cloud {
     fn default() -> Self {
         Self::new().expect("Failed to create default Cloud client")
     }
+}
+
+/// Extract `choices[0].message.content` from an OpenAI-shaped 200 response.
+///
+/// An HTTP 200 is not an answer. A body with no choices, a non-string
+/// content, or an empty string (typically `finish_reason: length` after hidden
+/// reasoning consumed the whole output budget) is reported as
+/// [`CloudError::ParseError`] — non-retryable, so the caller sees the failure
+/// instead of an empty "success".
+fn assistant_content(
+    response: &serde_json::Value,
+    finish_reason: Option<&str>,
+) -> Result<String, CloudError> {
+    match response["choices"][0]["message"]["content"].as_str() {
+        Some(content) if !content.is_empty() => Ok(content.to_string()),
+        Some(_) => Err(CloudError::ParseError(format!(
+            "completion returned empty content (finish_reason: {}); the output budget may have \
+             been exhausted before an answer was produced",
+            finish_reason.unwrap_or("none")
+        ))),
+        None => Err(CloudError::ParseError(
+            "response has no choices[0].message.content string".to_string(),
+        )),
+    }
+}
+
+/// The request names no model and the config has no `default_model`.
+///
+/// Returned by [`openai_chat_body`] so each transport can map it to its own
+/// error type and message.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct MissingModel;
+
+/// Build the OpenAI-compatible `/chat/completions` request body.
+///
+/// The single body builder shared by the batch transport
+/// (`Cloud::call_gateway`) and the SSE transport
+/// (`CloudRuntimeAdapter::execute_streaming`), so the two wire bodies are
+/// identical except for `stream`. Carries `model`, `messages`, `max_tokens`,
+/// `temperature`, `top_p`, `stop`, `stream` (only when `true`), and DeepSeek's
+/// `"thinking": {"type": ...}` when [`CompletionRequest::thinking`] is set.
+///
+/// The model is `request.model`, then `config.default_model`; with neither,
+/// [`MissingModel`] is returned rather than guessing a hosted default.
+pub(crate) fn openai_chat_body(
+    request: &CompletionRequest,
+    config: &CloudConfig,
+    stream: bool,
+) -> Result<serde_json::Value, MissingModel> {
+    let model = request
+        .model
+        .clone()
+        .or_else(|| config.default_model.clone())
+        .ok_or(MissingModel)?;
+
+    let messages: Vec<serde_json::Value> = request
+        .to_messages()
+        .into_iter()
+        .map(|m| {
+            json!({
+                "role": match m.role {
+                    Role::System => "system",
+                    Role::User => "user",
+                    Role::Assistant => "assistant",
+                },
+                "content": m.content,
+            })
+        })
+        .collect();
+
+    let mut body = json!({
+        "model": model,
+        "messages": messages,
+    });
+
+    if let Some(max_tokens) = request.max_tokens {
+        body["max_tokens"] = json!(max_tokens);
+    }
+    if let Some(temperature) = request.temperature {
+        body["temperature"] = json!(temperature);
+    }
+    if let Some(top_p) = request.top_p {
+        body["top_p"] = json!(top_p);
+    }
+    if let Some(stop) = request.stop.as_ref() {
+        body["stop"] = json!(stop);
+    }
+    if stream {
+        body["stream"] = json!(true);
+    }
+    if let Some(thinking) = request.thinking {
+        body["thinking"] = json!({ "type": thinking.as_str() });
+    }
+
+    Ok(body)
 }
 
 /// Parse a raw gateway `usage` JSON value into canonical `Usage`.
@@ -459,6 +512,93 @@ mod tests {
         let usage = parse_gateway_usage(&blob);
         assert_eq!(usage.cache_read_input_tokens, None);
         assert_eq!(usage.cache_creation_input_tokens, None);
+    }
+
+    #[test]
+    fn openai_chat_body_serializes_thinking_as_typed_object() {
+        use super::super::completion::ThinkingMode;
+
+        let config = CloudConfig::gateway();
+        let request = CompletionRequest::new("hello")
+            .with_model("deepseek-flash")
+            .with_thinking(ThinkingMode::Disabled);
+
+        let body = openai_chat_body(&request, &config, false).expect("model is set");
+
+        assert_eq!(body["thinking"], json!({ "type": "disabled" }));
+        assert!(body.get("stream").is_none(), "stream is omitted when false");
+
+        let plain = CompletionRequest::new("hello").with_model("deepseek-flash");
+        let body = openai_chat_body(&plain, &config, false).expect("model is set");
+        assert!(body.get("thinking").is_none(), "unset thinking is omitted");
+    }
+
+    #[test]
+    fn openai_chat_body_reports_missing_model() {
+        let config = CloudConfig::gateway();
+        assert!(config.default_model.is_none(), "guard the premise");
+
+        assert_eq!(
+            openai_chat_body(&CompletionRequest::new("hello"), &config, false),
+            Err(MissingModel)
+        );
+
+        let with_default = CloudConfig::gateway().with_default_model("lfm2.5-350m");
+        let body = openai_chat_body(&CompletionRequest::new("hello"), &with_default, true)
+            .expect("config supplies the model");
+        assert_eq!(body["model"], "lfm2.5-350m");
+        assert_eq!(body["stream"], true);
+    }
+
+    #[test]
+    fn assistant_content_rejects_missing_and_empty_answers() {
+        let ok = json!({"choices":[{"message":{"content":"hi"},"finish_reason":"stop"}]});
+        assert_eq!(assistant_content(&ok, Some("stop")).unwrap(), "hi");
+
+        let no_choices = json!({"choices":[]});
+        assert!(matches!(
+            assistant_content(&no_choices, None),
+            Err(CloudError::ParseError(_))
+        ));
+
+        let empty = json!({"choices":[{"message":{"content":""},"finish_reason":"length"}]});
+        match assistant_content(&empty, Some("length")) {
+            Err(CloudError::ParseError(msg)) => {
+                assert!(msg.contains("empty content"), "got {msg}");
+                assert!(msg.contains("length"), "got {msg}");
+            }
+            other => panic!("expected ParseError, got {other:?}"),
+        }
+
+        let non_string = json!({"choices":[{"message":{"content":null}}]});
+        assert!(matches!(
+            assistant_content(&non_string, None),
+            Err(CloudError::ParseError(_))
+        ));
+    }
+
+    /// 401 is permanent; 429 is retryable with the server's `Retry-After`.
+    /// The retry loop itself sleeps for the policy delay, so classification is
+    /// what keeps a rate-limited request bounded, not wall-clock assertions.
+    #[test]
+    fn status_errors_classify_for_retry() {
+        use crate::http::RetryableError;
+
+        let unauthorized = CloudError::ApiError {
+            status: 401,
+            message: "bad key".to_string(),
+        };
+        assert!(!unauthorized.is_retryable());
+        assert_eq!(unauthorized.retry_after(), None);
+
+        let limited = CloudError::RateLimited {
+            retry_after_secs: 7,
+        };
+        assert!(limited.is_retryable());
+        assert_eq!(limited.retry_after(), Some(Duration::from_secs(7)));
+
+        let empty_answer = CloudError::ParseError("empty".to_string());
+        assert!(!empty_answer.is_retryable());
     }
 
     #[test]
