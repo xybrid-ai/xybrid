@@ -31,7 +31,7 @@ use crate::orchestrator::{
 use crate::runtime_adapter::CoreMLRuntimeAdapter;
 #[cfg(target_os = "android")]
 use crate::runtime_adapter::ONNXMobileRuntimeAdapter;
-use crate::runtime_adapter::{OnnxRuntimeAdapter, RuntimeAdapter};
+use crate::runtime_adapter::{CloudRuntimeAdapter, OnnxRuntimeAdapter, RuntimeAdapter};
 use crate::streaming::manager::StreamManager;
 use crate::telemetry::{Severity, Telemetry};
 use serde_json::json;
@@ -202,7 +202,8 @@ impl Orchestrator {
             }
         }
 
-        // Register cloud adapter (mock for now)
+        // Register the real OpenAI-compatible cloud adapter. Stages routed to
+        // cloud without a provider fail honestly instead of returning fake text.
         if adapter_config.cloud {
             let adapter = Arc::new(CloudRuntimeAdapter::new());
             executor.register_adapter(adapter);
@@ -328,60 +329,6 @@ fn load_config(path: &Path) -> Result<Option<BootstrapConfig>, OrchestratorError
     Ok(Some(config))
 }
 
-/// Cloud runtime adapter (mock implementation).
-///
-/// This adapter simulates cloud inference execution by adding network latency
-/// and returning mock outputs. Future implementations will integrate with
-/// actual cloud inference services (gRPC, REST APIs, etc.).
-struct CloudRuntimeAdapter {
-    // Future: cloud endpoint configuration, auth tokens, etc.
-}
-
-impl CloudRuntimeAdapter {
-    fn new() -> Self {
-        Self {}
-    }
-}
-
-impl RuntimeAdapter for CloudRuntimeAdapter {
-    fn name(&self) -> &str {
-        "cloud"
-    }
-
-    fn supported_formats(&self) -> Vec<&'static str> {
-        vec!["onnx", "tensorflow", "pytorch"]
-    }
-
-    fn load_model(&mut self, _path: &str) -> crate::runtime_adapter::AdapterResult<()> {
-        // Cloud models are loaded remotely, not from local files
-        Ok(())
-    }
-
-    fn execute(
-        &self,
-        input: &crate::ir::Envelope,
-    ) -> crate::runtime_adapter::AdapterResult<crate::ir::Envelope> {
-        // Simulate cloud execution with network latency
-        use crate::ir::EnvelopeKind;
-        use std::thread;
-
-        // Simulate network delay
-        thread::sleep(std::time::Duration::from_millis(50));
-
-        // Mock cloud inference
-        let output = match &input.kind {
-            EnvelopeKind::Audio(_) => EnvelopeKind::Text("cloud-output-transcribed".to_string()),
-            EnvelopeKind::Text(t) => EnvelopeKind::Text(format!("cloud-output-{}", t)),
-            EnvelopeKind::Embedding(_) => EnvelopeKind::Text("cloud-output".to_string()),
-            EnvelopeKind::Image { .. } | EnvelopeKind::MultiPart(_) => {
-                EnvelopeKind::Text("cloud-output-vision-unsupported".to_string())
-            }
-        };
-
-        Ok(crate::ir::Envelope::new(output))
-    }
-}
-
 /// Mock runtime adapter for testing.
 ///
 /// This adapter always returns mock outputs without any real inference.
@@ -445,6 +392,21 @@ mod tests {
             .executor
             .list_adapters()
             .contains(&"onnx".to_string()));
+
+        // The registered cloud adapter is the real one: it declares no file
+        // formats, and a provider-free envelope is rejected before any HTTP
+        // instead of yielding synthetic output.
+        let cloud = orchestrator
+            .executor
+            .get_adapter("cloud")
+            .expect("cloud adapter registered by default");
+        assert!(cloud.supported_formats().is_empty());
+        let err = cloud
+            .execute(&crate::ir::Envelope::new(crate::ir::EnvelopeKind::Text(
+                "hello".to_string(),
+            )))
+            .expect_err("real cloud adapter requires a provider");
+        assert!(err.to_string().contains("provider"), "{err}");
     }
 
     #[test]

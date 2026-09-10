@@ -1,436 +1,392 @@
 //! Integration tests for the HIIIPE pipeline.
 //!
-//! These tests simulate the full Hiiipe demo workflow:
-//! Mic Input (AudioRaw) → Local ASR (wav2vec2@1.0) → Cloud Motivator (motivator-llm@5) → Local TTS (xtts-mini@0.6)
+//! These tests simulate the Hiiipe demo workflow:
+//! Mic Input (audio) → Local ASR → Cloud Motivator → Local TTS
 //!
-//! The tests verify:
-//! - Policy enforcement (no raw audio off-device)
-//! - Dynamic routing (local vs cloud)
-//! - Telemetry emission
-//! - End-to-end pipeline execution
-//!
-//! NOTE: These tests are currently ignored due to routing assertion mismatches
-//! ("cloud" vs "local") that need investigation. See CI run 21957103431.
+//! They drive the public `Orchestrator` with named mock adapters for both legs
+//! and a fixed, quiet device snapshot, so every assertion is about routing and
+//! policy — not about the machine the test happens to run on and not about any
+//! network. The tests verify:
+//! - Policy enforcement (raw audio never leaves the device)
+//! - Dynamic routing (local vs cloud) and the adapter that actually ran
+//! - Event emission
+//! - End-to-end pipeline execution, including the default bootstrapped
+//!   orchestrator honouring `load_policies`
 
+use std::sync::Arc;
+use std::time::Duration;
 use xybrid_core::context::{DeviceMetrics, Envelope, EnvelopeKind, StageDescriptor};
+use xybrid_core::device::{ResourceSnapshot, ResourceSnapshotProvider};
 use xybrid_core::event_bus::OrchestratorEvent;
 use xybrid_core::orchestrator::routing_engine::LocalAvailability;
-use xybrid_core::orchestrator::{ExecutionMode, Orchestrator};
+use xybrid_core::orchestrator::{ExecutionMode, LocalAuthority, Orchestrator};
+use xybrid_core::runtime_adapter::RuntimeAdapter;
+use xybrid_core::testing::mocks::MockRuntimeAdapter;
+
+/// Raw audio must stay on the device.
+const AUDIO_STAYS_LOCAL_POLICY: &[u8] = b"deny_cloud_if:\n  - 'input.kind == \"audio\"'\n";
+
+/// A device with no observed stress, so the default-local rule applies.
+#[derive(Debug)]
+struct QuietDevice;
+
+impl ResourceSnapshotProvider for QuietDevice {
+    fn current_snapshot(&self, _max_age: Duration) -> ResourceSnapshot {
+        ResourceSnapshot::unknown()
+    }
+}
 
 fn audio_envelope() -> Envelope {
     Envelope::new(EnvelopeKind::Audio(vec![0u8; 1600]))
 }
 
-fn assert_text_contains(envelope: &Envelope, needle: &str) {
-    match &envelope.kind {
-        EnvelopeKind::Text(text) => {
-            assert!(
-                text.contains(needle),
-                "expected text envelope to contain '{}', got '{}'",
-                needle,
-                text
-            );
-        }
-        other => panic!("expected text envelope, got {:?}", other),
+fn text_of(envelope: &Envelope) -> &str {
+    envelope
+        .as_text()
+        .unwrap_or_else(|| panic!("expected text envelope, got {:?}", envelope.kind))
+}
+
+fn loaded_mock(name: &str, output: &str) -> Arc<MockRuntimeAdapter> {
+    let mut adapter = MockRuntimeAdapter::with_text_output(output).with_name(name);
+    adapter.load_model("/mock/model").unwrap();
+    Arc::new(adapter)
+}
+
+struct Harness {
+    orchestrator: Orchestrator,
+    local: Arc<MockRuntimeAdapter>,
+    cloud: Arc<MockRuntimeAdapter>,
+}
+
+/// Orchestrator on a quiet device with the audio-stays-local policy loaded and
+/// one named mock adapter per leg.
+fn hiiipe_harness() -> Harness {
+    let authority = LocalAuthority::new().with_resource_provider(Arc::new(QuietDevice));
+    let mut orchestrator = Orchestrator::with_authority(Box::new(authority));
+    orchestrator
+        .load_policies(AUDIO_STAYS_LOCAL_POLICY.to_vec())
+        .expect("policy loads");
+    let local = loaded_mock("onnx", "local output");
+    let cloud = loaded_mock("cloud", "cloud output");
+    orchestrator.executor_mut().register_adapter(local.clone());
+    orchestrator.executor_mut().register_adapter(cloud.clone());
+    Harness {
+        orchestrator,
+        local,
+        cloud,
     }
 }
 
-/// Test the complete Hiiipe pipeline with batch execution.
+fn hiiipe_stages() -> Vec<StageDescriptor> {
+    vec![
+        StageDescriptor::new("asr"),
+        StageDescriptor::new("motivator"),
+        StageDescriptor::new("tts"),
+    ]
+}
+
+/// ASR and TTS are cached locally; the motivator LLM exists only in the cloud.
+fn hiiipe_availability(stage: &str) -> LocalAvailability {
+    LocalAvailability::new(matches!(stage, "asr" | "tts"))
+}
+
 #[test]
-#[ignore = "routing assertions need investigation"]
 fn test_hiiipe_pipeline() {
-    // Setup: Create orchestrator with default components
-    let mut orchestrator = Orchestrator::new();
+    let Harness {
+        mut orchestrator,
+        local,
+        cloud,
+    } = hiiipe_harness();
 
-    // Define the Hiiipe pipeline stages
-    let stages = vec![
-        StageDescriptor::new("asr"),       // whisper-tiny@1.2 (local)
-        StageDescriptor::new("motivator"), // motivator-llm@5 (cloud)
-        StageDescriptor::new("tts"),       // xtts-mini@0.6 (local)
-    ];
-
-    // Simulate mic input (raw audio)
-    let mic_input = audio_envelope();
-
-    // Simulate device metrics (good conditions for cloud routing)
-    let metrics = DeviceMetrics {
-        ..DeviceMetrics::default()
-    };
-
-    // Define model availability function
-    // ASR and TTS available locally, Motivator only in cloud
-    let availability_fn = |stage: &str| -> LocalAvailability {
-        match stage {
-            "asr" => LocalAvailability::new(true), // whisper-tiny available locally
-            "tts" => LocalAvailability::new(true), // xtts-mini available locally
-            "motivator" => LocalAvailability::new(false), // motivator-llm only in cloud
-            _ => LocalAvailability::new(false),
-        }
-    };
-
-    // Execute the pipeline
     let results = orchestrator
-        .execute_pipeline(&stages, &mic_input, &metrics, &availability_fn)
-        .expect("Pipeline execution should succeed");
-
-    // Verify we got results for all three stages
-    assert_eq!(results.len(), 3, "Should have results for all 3 stages");
-
-    // Verify ASR stage (stage 0)
-    let asr_result = &results[0];
-    assert_eq!(asr_result.stage, "asr");
-    // ASR should route to local (policy denies AudioRaw for cloud)
-    assert_eq!(asr_result.routing_decision.target.as_str(), "local");
-    assert_text_contains(&asr_result.output, "asr");
-    // Latency is tracked (u32, always >= 0)
-
-    // Verify Motivator stage (stage 1)
-    let motivator_result = &results[1];
-    assert_eq!(motivator_result.stage, "motivator");
-    // Motivator should route to cloud (not available locally, policy allows)
-    assert_eq!(motivator_result.routing_decision.target.as_str(), "cloud");
-    assert_text_contains(&motivator_result.output, "motivator");
-    // Latency is tracked (u32, always >= 0)
-
-    // Verify TTS stage (stage 2)
-    let tts_result = &results[2];
-    assert_eq!(tts_result.stage, "tts");
-    // TTS may route to cloud or local depending on conditions
-    // When available locally and conditions are good, routing engine may choose cloud
-    assert!(
-        tts_result.routing_decision.target.as_str() == "local"
-            || tts_result.routing_decision.target.as_str() == "cloud"
-    );
-    assert_text_contains(&tts_result.output, "tts");
-    // Latency is tracked (u32, always >= 0)
-
-    // Verify the output chain: ASR output becomes Motivator input
-    assert_text_contains(&asr_result.output, "asr_output");
-    assert_text_contains(&motivator_result.output, "motivator_output");
-
-    // Verify the output chain: Motivator output becomes TTS input
-    assert_text_contains(&tts_result.output, "tts_output");
-}
-
-/// Test that policy correctly denies raw audio for cloud execution.
-#[test]
-#[ignore = "routing assertions need investigation"]
-fn test_hiiipe_policy_enforcement() {
-    let mut orchestrator = Orchestrator::new();
-
-    let stage = StageDescriptor::new("asr");
-
-    // AudioRaw should trigger policy denial for cloud
-    let audio_input = audio_envelope();
-
-    let metrics = DeviceMetrics {
-        ..DeviceMetrics::default()
-    };
-
-    let availability = LocalAvailability::new(true);
-
-    let result = orchestrator
-        .execute_stage(&stage, &audio_input, &metrics, &availability)
-        .expect("Stage execution should succeed");
-
-    // Policy should deny cloud execution, forcing local routing
-    assert_eq!(result.routing_decision.target.as_str(), "local");
-    assert!(
-        result.routing_decision.reason.contains("policy_deny")
-            || result.routing_decision.reason.contains("AudioRaw")
-    );
-}
-
-/// Test Hiiipe pipeline with event bus subscription.
-#[test]
-#[ignore = "routing assertions need investigation"]
-fn test_hiiipe_pipeline_with_events() {
-    let mut orchestrator = Orchestrator::new();
-
-    // Subscribe to events to verify event emission
-    let event_bus = orchestrator.event_bus();
-    let subscription = event_bus.subscribe();
-
-    let stages = vec![
-        StageDescriptor::new("asr"),
-        StageDescriptor::new("motivator"),
-        StageDescriptor::new("tts"),
-    ];
-
-    let mic_input = audio_envelope();
-
-    let metrics = DeviceMetrics {
-        ..DeviceMetrics::default()
-    };
-
-    let availability_fn = |stage: &str| -> LocalAvailability {
-        match stage {
-            "asr" | "tts" => LocalAvailability::new(true),
-            _ => LocalAvailability::new(false),
-        }
-    };
-
-    // Execute pipeline
-    let results = orchestrator
-        .execute_pipeline(&stages, &mic_input, &metrics, &availability_fn)
-        .expect("Pipeline execution should succeed");
+        .execute_pipeline(
+            &hiiipe_stages(),
+            &audio_envelope(),
+            &DeviceMetrics::default(),
+            &hiiipe_availability,
+        )
+        .expect("pipeline executes");
 
     assert_eq!(results.len(), 3);
 
-    // Collect events (non-blocking)
-    let mut events_received = 0;
-    while let Ok(event) = subscription.try_recv() {
-        events_received += 1;
-        // Verify event types
-        match event {
-            OrchestratorEvent::StageStart { .. } => {}
-            OrchestratorEvent::StageComplete { .. } => {}
-            OrchestratorEvent::PolicyEvaluated { .. } => {}
-            OrchestratorEvent::RoutingDecided { .. } => {}
-            OrchestratorEvent::ExecutionStarted { .. } => {}
-            OrchestratorEvent::ExecutionCompleted { .. } => {}
-            OrchestratorEvent::PipelineStart { .. } => {}
-            OrchestratorEvent::PipelineComplete { .. } => {}
-            _ => {}
-        }
-    }
-
-    // Should have received multiple events (at least pipeline start/complete + stage events)
-    assert!(
-        events_received >= 2,
-        "Should receive pipeline and stage events"
-    );
-}
-
-/// Test Hiiipe pipeline with different network conditions.
-#[test]
-#[ignore = "routing assertions need investigation"]
-fn test_hiiipe_pipeline_high_latency() {
-    let mut orchestrator = Orchestrator::new();
-
-    let stages = vec![
-        StageDescriptor::new("asr"),
-        StageDescriptor::new("motivator"),
-        StageDescriptor::new("tts"),
-    ];
-
-    let mic_input = audio_envelope();
-
-    // High network latency should force local routing for motivator
-    let metrics = DeviceMetrics {
-        ..DeviceMetrics::default()
-    };
-
-    let availability_fn = |stage: &str| -> LocalAvailability {
-        match stage {
-            "asr" | "tts" => LocalAvailability::new(true),
-            "motivator" => LocalAvailability::new(true), // Also available locally as fallback
-            _ => LocalAvailability::new(false),
-        }
-    };
-
-    let results = orchestrator
-        .execute_pipeline(&stages, &mic_input, &metrics, &availability_fn)
-        .expect("Pipeline execution should succeed");
-
-    assert_eq!(results.len(), 3);
-
-    // With high latency, motivator might route locally if available
-    // But policy might still deny if AudioRaw data is being sent
-    // For this test, ASR should definitely route locally (policy deny)
-    assert_eq!(results[0].routing_decision.target.as_str(), "local");
-
-    // Motivator should route locally due to high latency (if available)
-    // or cloud if forced (depending on policy)
-    let motivator_target = results[1].routing_decision.target.as_str();
-    assert!(motivator_target == "local" || motivator_target == "cloud");
-
-    // TTS may route locally or cloud depending on conditions
-    assert!(
-        results[2].routing_decision.target.as_str() == "local"
-            || results[2].routing_decision.target.as_str() == "cloud"
-    );
-}
-
-/// Test streaming execution mode for Hiiipe pipeline.
-#[test]
-#[ignore = "routing assertions need investigation"]
-fn test_hiiipe_pipeline_streaming() {
-    use xybrid_core::streaming::StreamManagerConfig;
-
-    // Create orchestrator in streaming mode
-    let config = StreamManagerConfig::default();
-    let mut orchestrator = Orchestrator::with_streaming(config);
-
-    assert_eq!(*orchestrator.execution_mode(), ExecutionMode::Streaming);
-
-    let stage = StageDescriptor::new("asr");
-
-    let metrics = DeviceMetrics {
-        ..DeviceMetrics::default()
-    };
-
-    let availability = LocalAvailability::new(true);
-
-    // Push streaming chunks
-    let chunk1 = Envelope::new(EnvelopeKind::Audio(vec![0u8; 4]));
-    let chunk2 = Envelope::new(EnvelopeKind::Audio(vec![1u8; 4]));
-
-    orchestrator.push_stream_chunk(chunk1, false).unwrap();
-    orchestrator.push_stream_chunk(chunk2, true).unwrap(); // Last chunk
-
-    // Process first chunk
-    let result1 = orchestrator
-        .execute_streaming_stage(&stage, &metrics, &availability)
-        .expect("Streaming stage execution should succeed");
-
-    assert!(result1.is_some());
-    let exec_result1 = result1.unwrap();
-    assert_eq!(exec_result1.stage, "asr");
-    assert_text_contains(&exec_result1.output, "asr_output");
-
-    // Check output buffer
-    let output_chunk = orchestrator.pop_stream_output();
-    assert!(output_chunk.is_some());
-    let chunk = output_chunk.unwrap();
-    assert_text_contains(&chunk.data, "asr_output");
-    assert!(!chunk.is_last); // First chunk
-
-    // Process second chunk (last)
-    let result2 = orchestrator
-        .execute_streaming_stage(&stage, &metrics, &availability)
-        .expect("Streaming stage execution should succeed");
-
-    assert!(result2.is_some());
-    let exec_result2 = result2.unwrap();
-    assert_eq!(exec_result2.stage, "asr");
-
-    let output_chunk2 = orchestrator.pop_stream_output();
-    assert!(output_chunk2.is_some());
-    let chunk2 = output_chunk2.unwrap();
-    assert!(chunk2.is_last); // Last chunk
-}
-
-/// Test complete Hiiipe pipeline with realistic model availability.
-#[test]
-#[ignore = "routing assertions need investigation"]
-fn test_hiiipe_complete_workflow() {
-    let mut orchestrator = Orchestrator::new();
-
-    // Simulate the complete Hiiipe demo workflow
-    let stages = vec![
-        StageDescriptor::new("wav2vec2@1.0"),    // ASR model
-        StageDescriptor::new("motivator-llm@5"), // Motivator model
-        StageDescriptor::new("xtts-mini@0.6"),   // TTS model
-    ];
-
-    // Mic input (raw audio)
-    let mic_input = audio_envelope();
-
-    // Good device conditions
-    let metrics = DeviceMetrics {
-        ..DeviceMetrics::default()
-    };
-
-    // Model availability matching the demo
-    let availability_fn = |stage: &str| -> LocalAvailability {
-        match stage {
-            "wav2vec2@1.0" => LocalAvailability::new(true), // ASR available locally
-            "xtts-mini@0.6" => LocalAvailability::new(true), // TTS available locally
-            "motivator-llm@5" => LocalAvailability::new(false), // Motivator only in cloud
-            _ => LocalAvailability::new(false),
-        }
-    };
-
-    // Execute the complete workflow
-    let results = orchestrator
-        .execute_pipeline(&stages, &mic_input, &metrics, &availability_fn)
-        .expect("Complete workflow should succeed");
-
-    // Verify all stages executed
-    assert_eq!(results.len(), 3);
-
-    // Stage 1: ASR (wav2vec2) - should route locally
+    // ASR: raw audio in, policy forbids cloud → local.
     let asr = &results[0];
-    assert_eq!(asr.stage, "wav2vec2@1.0");
+    assert_eq!(asr.stage, "asr");
     assert_eq!(asr.routing_decision.target.as_str(), "local");
     assert!(
-        asr.routing_decision.reason.contains("policy_deny")
-            || asr.routing_decision.reason.contains("AudioRaw")
+        asr.routing_decision.reason.contains("policy_deny"),
+        "{}",
+        asr.routing_decision.reason
     );
+    assert_eq!(asr.adapter, "onnx");
+    assert_eq!(text_of(&asr.output), "local output");
 
-    // Stage 2: Motivator (llm) - should route to cloud
+    // Motivator: text in, no local model → cloud.
     let motivator = &results[1];
-    assert_eq!(motivator.stage, "motivator-llm@5");
+    assert_eq!(motivator.stage, "motivator");
     assert_eq!(motivator.routing_decision.target.as_str(), "cloud");
     assert!(
         motivator
             .routing_decision
             .reason
-            .contains("optimal_conditions")
-            || motivator
-                .routing_decision
-                .reason
-                .contains("model_unavailable")
+            .contains("model_unavailable"),
+        "{}",
+        motivator.routing_decision.reason
     );
+    assert_eq!(motivator.adapter, "cloud");
+    assert_eq!(text_of(&motivator.output), "cloud output");
 
-    // Stage 3: TTS (xtts-mini) - may route locally or cloud depending on conditions
+    // TTS: text in, local model, quiet device → default local.
     let tts = &results[2];
-    assert_eq!(tts.stage, "xtts-mini@0.6");
-    // With good network conditions, routing engine may choose cloud even if local available
-    // This is valid behavior - the routing engine optimizes for conditions
+    assert_eq!(tts.stage, "tts");
+    assert_eq!(tts.routing_decision.target.as_str(), "local");
     assert!(
-        tts.routing_decision.target.as_str() == "local"
-            || tts.routing_decision.target.as_str() == "cloud"
+        tts.routing_decision.reason.contains("default_local"),
+        "{}",
+        tts.routing_decision.reason
     );
+    assert_eq!(tts.adapter, "onnx");
 
-    // Verify latency tracking (latency_ms is u32, always non-negative)
-    for result in &results {
-        assert!(
-            result.latency_ms < 10000,
-            "Latency should be reasonable (< 10s)"
-        );
-    }
-
-    // Verify output transformation chain
-    assert_text_contains(&asr.output, "wav2vec2");
-    assert_text_contains(&motivator.output, "motivator-llm");
-    assert_text_contains(&tts.output, "xtts-mini");
+    assert_eq!(local.call_count(), 2);
+    assert_eq!(cloud.call_count(), 1);
 }
 
-/// Test that pipeline handles policy changes correctly.
 #[test]
-#[ignore = "routing assertions need investigation"]
-fn test_hiiipe_with_policy_loading() {
-    let mut orchestrator = Orchestrator::new();
+fn test_hiiipe_policy_enforcement() {
+    let Harness {
+        mut orchestrator,
+        local,
+        cloud,
+    } = hiiipe_harness();
 
-    // Load a custom policy
-    let policy_yaml = r#"
-version: "0.1.0"
-deny_cloud_if:
-  - input.kind == "AudioRaw"
-  - metrics.network_rtt > 300
-signature: "test_policy"
-"#;
+    // Even when the ASR model is NOT available locally, raw audio must not go
+    // to the cloud: the stage is routed local and served by the local adapter
+    // (a stage with a provider and no bundle would fail locally instead).
+    for available in [true, false] {
+        let result = orchestrator
+            .execute_stage(
+                &StageDescriptor::new("asr"),
+                &audio_envelope(),
+                &DeviceMetrics::default(),
+                &LocalAvailability::new(available),
+            )
+            .expect("stage executes locally");
 
-    orchestrator
-        .load_policies(policy_yaml.as_bytes().to_vec())
-        .expect("Policy loading should succeed");
+        assert_eq!(result.routing_decision.target.as_str(), "local");
+        assert!(
+            result.routing_decision.reason.contains("policy_deny"),
+            "{}",
+            result.routing_decision.reason
+        );
+        assert_eq!(result.adapter, "onnx");
+    }
+    assert_eq!(local.call_count(), 2);
+    assert_eq!(
+        cloud.call_count(),
+        0,
+        "raw audio must never reach the cloud adapter"
+    );
+}
+
+#[test]
+fn test_hiiipe_pipeline_with_events() {
+    let Harness {
+        mut orchestrator, ..
+    } = hiiipe_harness();
+    let subscription = orchestrator.event_bus().subscribe();
+
+    let results = orchestrator
+        .execute_pipeline(
+            &hiiipe_stages(),
+            &audio_envelope(),
+            &DeviceMetrics::default(),
+            &hiiipe_availability,
+        )
+        .expect("pipeline executes");
+    assert_eq!(results.len(), 3);
+
+    let mut policy_events = Vec::new();
+    let mut routing_events = Vec::new();
+    let mut pipeline_start = 0;
+    let mut pipeline_complete = 0;
+    while let Ok(event) = subscription.try_recv() {
+        match event {
+            OrchestratorEvent::PolicyEvaluated {
+                stage_name,
+                allowed,
+                ..
+            } => policy_events.push((stage_name, allowed)),
+            OrchestratorEvent::RoutingDecided {
+                stage_name, target, ..
+            } => routing_events.push((stage_name, target)),
+            OrchestratorEvent::PipelineStart { .. } => pipeline_start += 1,
+            OrchestratorEvent::PipelineComplete { .. } => pipeline_complete += 1,
+            _ => {}
+        }
+    }
+
+    assert_eq!(pipeline_start, 1);
+    assert_eq!(pipeline_complete, 1);
+    assert_eq!(
+        policy_events,
+        vec![
+            ("asr".to_string(), false),
+            ("motivator".to_string(), true),
+            ("tts".to_string(), true),
+        ]
+    );
+    assert_eq!(
+        routing_events,
+        vec![
+            ("asr".to_string(), "local".to_string()),
+            ("motivator".to_string(), "cloud".to_string()),
+            ("tts".to_string(), "local".to_string()),
+        ]
+    );
+}
+
+#[test]
+fn test_hiiipe_pipeline_streaming() {
+    let Harness {
+        mut orchestrator,
+        local,
+        cloud,
+    } = hiiipe_harness();
+    orchestrator.set_execution_mode(ExecutionMode::Streaming);
+    assert_eq!(*orchestrator.execution_mode(), ExecutionMode::Streaming);
 
     let stage = StageDescriptor::new("asr");
-
-    let audio_input = audio_envelope();
-
-    let metrics = DeviceMetrics {
-        ..DeviceMetrics::default()
-    };
-
+    let metrics = DeviceMetrics::default();
     let availability = LocalAvailability::new(true);
 
-    let result = orchestrator
-        .execute_stage(&stage, &audio_input, &metrics, &availability)
-        .expect("Stage execution should succeed");
+    orchestrator
+        .push_stream_chunk(Envelope::new(EnvelopeKind::Audio(vec![0u8; 4])), false)
+        .unwrap();
+    orchestrator
+        .push_stream_chunk(Envelope::new(EnvelopeKind::Audio(vec![1u8; 4])), true)
+        .unwrap();
 
-    // Loaded policy should still deny AudioRaw for cloud
-    assert_eq!(result.routing_decision.target.as_str(), "local");
+    let first = orchestrator
+        .execute_streaming_stage(&stage, &metrics, &availability)
+        .expect("first chunk executes")
+        .expect("a chunk was queued");
+    assert_eq!(first.stage, "asr");
+    assert_eq!(first.routing_decision.target.as_str(), "local");
+    assert_eq!(text_of(&first.output), "local output");
+    let chunk = orchestrator
+        .pop_stream_output()
+        .expect("first output chunk");
+    assert!(!chunk.is_last);
+
+    let second = orchestrator
+        .execute_streaming_stage(&stage, &metrics, &availability)
+        .expect("second chunk executes")
+        .expect("a chunk was queued");
+    assert_eq!(second.routing_decision.target.as_str(), "local");
+    let chunk = orchestrator
+        .pop_stream_output()
+        .expect("second output chunk");
+    assert!(chunk.is_last);
+
+    assert_eq!(local.call_count(), 2);
+    assert_eq!(cloud.call_count(), 0);
+}
+
+#[test]
+fn test_hiiipe_complete_workflow() {
+    let Harness {
+        mut orchestrator, ..
+    } = hiiipe_harness();
+
+    let stages = vec![
+        StageDescriptor::new("wav2vec2@1.0"),
+        StageDescriptor::new("motivator-llm@5"),
+        StageDescriptor::new("xtts-mini@0.6"),
+    ];
+    let availability = |stage: &str| -> LocalAvailability {
+        LocalAvailability::new(matches!(stage, "wav2vec2@1.0" | "xtts-mini@0.6"))
+    };
+
+    let results = orchestrator
+        .execute_pipeline(
+            &stages,
+            &audio_envelope(),
+            &DeviceMetrics::default(),
+            &availability,
+        )
+        .expect("complete workflow executes");
+
+    let targets: Vec<&str> = results
+        .iter()
+        .map(|r| r.routing_decision.target.as_str())
+        .collect();
+    assert_eq!(targets, vec!["local", "cloud", "local"]);
+    let adapters: Vec<&str> = results.iter().map(|r| r.adapter.as_str()).collect();
+    assert_eq!(adapters, vec!["onnx", "cloud", "onnx"]);
+    for result in &results {
+        assert!(result.latency_ms < 10_000, "latency should be reasonable");
+    }
+}
+
+/// The default bootstrapped orchestrator must honour `load_policies` — this
+/// used to be silently ignored because the bundle went to an engine nothing
+/// consulted.
+#[test]
+fn test_hiiipe_with_policy_loading() {
+    let mut orchestrator = Orchestrator::new();
+    // Replace the bootstrapped adapters with loaded mocks under the same names.
+    let local = loaded_mock("onnx", "local output");
+    let cloud = loaded_mock("cloud", "cloud output");
+    orchestrator.executor_mut().register_adapter(local.clone());
+    orchestrator.executor_mut().register_adapter(cloud.clone());
+
+    // Legacy label still accepted as an alias for `audio`.
+    orchestrator
+        .load_policies(b"version: \"0.1.0\"\ndeny_cloud_if:\n  - 'input.kind == \"AudioRaw\"'\nsignature: \"test_policy\"\n".to_vec())
+        .expect("policy loads");
+
+    // Audio with no local model would route to cloud without the policy.
+    let denied = orchestrator
+        .execute_stage(
+            &StageDescriptor::new("asr"),
+            &audio_envelope(),
+            &DeviceMetrics::default(),
+            &LocalAvailability::new(false),
+        )
+        .expect("local mock serves the stage");
+    assert_eq!(denied.routing_decision.target.as_str(), "local");
+    assert!(
+        denied.routing_decision.reason.contains("policy_deny"),
+        "{}",
+        denied.routing_decision.reason
+    );
+    assert_eq!(cloud.call_count(), 0);
+
+    // Text is not covered by the policy: no local model → cloud.
+    let allowed = orchestrator
+        .execute_stage(
+            &StageDescriptor::new("motivator"),
+            &Envelope::new(EnvelopeKind::Text("hello".to_string())),
+            &DeviceMetrics::default(),
+            &LocalAvailability::new(false),
+        )
+        .expect("cloud mock serves the stage");
+    assert_eq!(allowed.routing_decision.target.as_str(), "cloud");
+    assert_eq!(cloud.call_count(), 1);
+
+    // An invalid reload is rejected and the audio denial still holds.
+    let err = orchestrator
+        .load_policies(b"deny_cloud_if:\n  - 'metrics.network_rtt > 300'\n".to_vec())
+        .expect_err("unknown operand is rejected");
+    assert!(err.to_string().contains("unknown operand"), "{err}");
+    let still_denied = orchestrator
+        .execute_stage(
+            &StageDescriptor::new("asr"),
+            &audio_envelope(),
+            &DeviceMetrics::default(),
+            &LocalAvailability::new(false),
+        )
+        .expect("local mock serves the stage");
+    assert_eq!(still_denied.routing_decision.target.as_str(), "local");
+    assert_eq!(cloud.call_count(), 1);
 }
