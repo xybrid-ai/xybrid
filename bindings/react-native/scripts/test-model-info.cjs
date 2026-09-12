@@ -34,7 +34,9 @@ try {
   process.stdout.write(compile.stdout ?? '');
   process.stderr.write(compile.stderr ?? '');
   if (compile.error) throw compile.error;
-  if (compile.status !== 0) process.exit(compile.status ?? 1);
+  if (compile.status !== 0) {
+    throw new Error(`Model-info test compilation failed (exit ${compile.status})`);
+  }
 
   const reactNativeStub = join(stubModules, 'react-native');
   mkdirSync(reactNativeStub, { recursive: true });
@@ -60,7 +62,7 @@ try {
   process.stdout.write(test.stdout ?? '');
   process.stderr.write(test.stderr ?? '');
   if (test.error) throw test.error;
-  process.exit(test.status ?? 1);
+  process.exitCode = test.status ?? 1;
 } finally {
   rmSync(outputDir, { recursive: true, force: true });
 }
