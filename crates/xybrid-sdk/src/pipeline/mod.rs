@@ -389,6 +389,23 @@ fn stage_descriptor_with_bundle_path(
     stage_descriptor
 }
 
+/// Apply the stage's shared generation options to the streaming input.
+///
+/// The streaming fast path bypasses [`Orchestrator::execute_pipeline`], which
+/// is where the batch path runs [`xybrid_core::executor::prepare_stage_input`].
+/// Without this call, YAML `system_prompt` / `temperature` / `max_tokens` /
+/// `top_p` would be ignored by streaming and invalid values would skip
+/// validation entirely. Input metadata still wins over the YAML options, and
+/// errors surface before any generation or token callback begins.
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+fn prepare_streaming_fast_path_input(
+    stage: &StageDescriptor,
+    envelope: &Envelope,
+) -> PipelineResult<Envelope> {
+    xybrid_core::executor::prepare_stage_input(stage, envelope)
+        .map_err(|e| SdkError::pipeline(format!("stage '{}': {}", stage.name, e)))
+}
+
 #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
 #[derive(Debug, Clone)]
 struct StreamingFastPathRoute {
@@ -1505,6 +1522,11 @@ impl Xybrid {
                         xybrid_core::execution::ExecutionTemplate::Gguf { .. }
                     ) {
                         let model_id = metadata.model_id.clone();
+                        // The fast path bypasses the orchestrator, so it must
+                        // run the same shared generation-option merge (and
+                        // validation) the batch path does.
+                        let prepared =
+                            prepare_streaming_fast_path_input(&stage_descriptor, envelope)?;
                         let metrics = pipeline_metrics(options);
                         let authority = LocalAuthority::with_cache_provider(Arc::new(
                             StreamingFastPathCacheProvider::new(
@@ -1516,7 +1538,7 @@ impl Xybrid {
                             &authority,
                             &stage_descriptor,
                             &model_id,
-                            envelope,
+                            &prepared,
                             &metrics,
                         );
 
@@ -1550,7 +1572,7 @@ impl Xybrid {
 
                         let start_time = std::time::Instant::now();
                         let output = executor
-                            .execute_streaming(&metadata, envelope, on_token, None)
+                            .execute_streaming(&metadata, &prepared, on_token, None)
                             .map_err(|e| {
                                 SdkError::inference_src("LLM streaming execution failed", e)
                             })?;
@@ -2111,5 +2133,93 @@ id: asr
         let input = Envelope::new(EnvelopeKind::Text("hi".to_string()));
         let err = xybrid_core::executor::prepare_stage_input(&stage, &input).unwrap_err();
         assert!(err.to_string().contains("a string"), "{err}");
+    }
+
+    /// Build the same stage shape the streaming fast path uses from YAML.
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    fn streaming_stage(yaml: &str) -> StageDescriptor {
+        let ref_ = PipelineRef::from_yaml(yaml).unwrap();
+        let stage_config = &ref_.config.stages[0];
+        StageDescriptor::new(stage_config.stage_id())
+            .with_options(Pipeline::convert_options(&stage_config.options()))
+    }
+
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[test]
+    fn streaming_fast_path_input_gets_the_same_options_as_batch() {
+        let stage = streaming_stage(
+            r#"
+stages:
+  - id: llm
+    model: streaming-options-model
+    max_tokens: 16
+    temperature: 0
+    top_p: 0.9
+    system_prompt: "Be terse."
+"#,
+        );
+
+        let prepared = prepare_streaming_fast_path_input(
+            &stage,
+            &Envelope::new(EnvelopeKind::Text("hi".to_string())),
+        )
+        .expect("valid options");
+
+        assert_eq!(
+            prepared.metadata.get("max_tokens").map(String::as_str),
+            Some("16")
+        );
+        assert_eq!(
+            prepared.metadata.get("temperature").map(String::as_str),
+            Some("0")
+        );
+        assert_eq!(
+            prepared.metadata.get("top_p").map(String::as_str),
+            Some("0.9")
+        );
+        assert_eq!(
+            prepared.metadata.get("system_prompt").map(String::as_str),
+            Some("Be terse.")
+        );
+    }
+
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[test]
+    fn streaming_fast_path_input_keeps_overrides_and_rejects_invalid_options() {
+        let stage = streaming_stage(
+            r#"
+stages:
+  - id: llm
+    model: streaming-options-model
+    max_tokens: 16
+"#,
+        );
+        let mut input = Envelope::new(EnvelopeKind::Text("hi".to_string()));
+        input
+            .metadata
+            .insert("max_tokens".to_string(), "1".to_string());
+
+        let prepared = prepare_streaming_fast_path_input(&stage, &input).unwrap();
+        assert_eq!(
+            prepared.metadata.get("max_tokens").map(String::as_str),
+            Some("1")
+        );
+
+        let invalid = streaming_stage(
+            r#"
+stages:
+  - id: llm
+    model: streaming-options-model
+    max_tokens: 0
+"#,
+        );
+        let err = prepare_streaming_fast_path_input(
+            &invalid,
+            &Envelope::new(EnvelopeKind::Text("hi".to_string())),
+        )
+        .expect_err("invalid max_tokens must fail before generation");
+        let message = err.to_string();
+        assert!(message.contains("stage 'llm'"), "{message}");
+        assert!(message.contains("positive integer"), "{message}");
     }
 }

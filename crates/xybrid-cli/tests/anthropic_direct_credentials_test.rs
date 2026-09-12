@@ -10,7 +10,8 @@
 //!   (and only that key), answered from a fake Anthropic response.
 //!
 //! Both cases are cloud-only stages, so this needs no model and runs in
-//! ordinary CI.
+//! ordinary CI. The captured-request assertions verify what reached this
+//! loopback endpoint, not process-wide network isolation.
 #![cfg(unix)]
 
 use std::io::{Read, Write};

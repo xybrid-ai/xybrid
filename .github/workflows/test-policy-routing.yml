@@ -96,5 +96,32 @@ jobs:
         env:
           XYBRID_REQUIRE_MODELS: 1
         run: |
-          cargo test -p xybrid-cli --features llm-llamacpp --test policy_routing_cli_test -- --list
+          # Enumerate and assert the required tests: printing `--list` alone
+          # would still pass if every test were compiled out (cargo test exits
+          # 0 on an empty set).
+          LIST="$(cargo test -p xybrid-cli --features llm-llamacpp --test policy_routing_cli_test -- --list)"
+          printf '%s\n' "$LIST"
+          for test in \
+            local_only_policy_runs_the_gguf_model \
+            prefer_cloud_policy_calls_the_fake_deepseek_endpoint \
+            dry_run_loads_policy_without_inference \
+            cold_cache_hybrid_downloads_extracts_and_then_runs_offline; do
+            printf '%s\n' "$LIST" | grep -qE "^${test}: test$" \
+              || { echo "missing required test: ${test}" >&2; exit 1; }
+          done
           cargo test -p xybrid-cli --features llm-llamacpp --test policy_routing_cli_test -- --nocapture
+
+      - name: SDK streaming fast path (real GGUF fixture)
+        env:
+          XYBRID_REQUIRE_MODELS: 1
+        run: |
+          LIST="$(cargo test -p xybrid-sdk --features llm-llamacpp --test streaming_fast_path -- --list)"
+          printf '%s\n' "$LIST"
+          for test in \
+            yaml_max_tokens_caps_streaming_generation \
+            envelope_metadata_overrides_yaml_in_streaming \
+            invalid_yaml_option_fails_before_any_token; do
+            printf '%s\n' "$LIST" | grep -qE "^${test}: test$" \
+              || { echo "missing required test: ${test}" >&2; exit 1; }
+          done
+          cargo test -p xybrid-sdk --features llm-llamacpp --test streaming_fast_path -- --nocapture

@@ -11,6 +11,9 @@
 //! No test here asserts what a *policy-free* run chooses: live device stress
 //! can legitimately pick the cloud leg. Those cases are pinned under fixed
 //! snapshots in the core and CLI unit tests.
+//!
+//! The request logs below verify what reached these loopback endpoints; they
+//! are not a claim of process-wide network isolation.
 #![cfg(all(feature = "llm-llamacpp", unix))]
 
 use std::io::{Read, Write};
