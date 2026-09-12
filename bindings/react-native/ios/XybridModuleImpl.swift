@@ -151,6 +151,16 @@ public final class XybridModuleImpl: NSObject {
     runAsyncVoid(handle: handle, resolve: resolve, reject: reject) { try $0.unload() }
   }
 
+  @objc public func modelInfo(_ handle: String,
+                              resolve: @escaping RCTPromiseResolveBlock,
+                              reject: @escaping RCTPromiseRejectBlock) {
+    guard let model = lookup(handle) else {
+      reject("xybrid_handle", "Unknown model handle: \(handle)", nil)
+      return
+    }
+    resolve(encodeModelInfo(model))
+  }
+
   // -- Inference --
 
   @objc public func run(_ handle: String,
@@ -620,6 +630,25 @@ public final class XybridModuleImpl: NSObject {
     if let l = v.language { out["language"] = l }
     if let s = v.style { out["style"] = s }
     return out
+  }
+
+  private func encodeModelInfo(_ model: XybridModel) -> [String: Any] {
+    let outputType: String
+    switch model.outputType() {
+    case .text: outputType = "text"
+    case .audio: outputType = "audio"
+    case .embedding: outputType = "embedding"
+    case .unknown: outputType = "unknown"
+    }
+    return [
+      "modelId": model.modelId(),
+      "version": model.version(),
+      "outputType": outputType,
+      "isLoaded": model.isLoaded(),
+      "supportsStreaming": model.supportsStreaming(),
+      "supportsTokenStreaming": model.supportsTokenStreaming(),
+      "isLlm": model.isLlm(),
+    ]
   }
 
   private func rejectXybrid(_ error: XybridError, _ reject: RCTPromiseRejectBlock) {

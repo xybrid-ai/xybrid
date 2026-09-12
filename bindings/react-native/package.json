@@ -21,6 +21,7 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "build": "tsc -p tsconfig.build.json",
+    "test:model-info": "node scripts/test-model-info.cjs",
     "clean": "rm -rf lib"
   },
   "keywords": [
