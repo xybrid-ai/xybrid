@@ -1,0 +1,4 @@
+# Prefer the cloud leg whenever the local model exists and nothing forbids it.
+version: "1.0.0"
+route_cloud_if:
+  - "true"

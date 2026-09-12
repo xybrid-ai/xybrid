@@ -1,0 +1,127 @@
+name: Test policy routing
+
+# Drives the real `xybrid` binary through a policy-routed hybrid stage: the
+# local leg is a real GGUF model (FunctionGemma 270M), the cloud leg is a
+# local fake DeepSeek endpoint. Compile-only lanes cannot prove that a policy
+# actually keeps a prompt on the device or actually sends it to the provider
+# with the right model, credential and options — this one does.
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'crates/xybrid-core/**'
+      - 'crates/xybrid-cli/**'
+      - 'crates/xybrid-sdk/**'
+      - 'crates/llama-cpp-sys/**'
+      - 'crates/xybrid-llama/**'
+      - 'integration-tests/**'
+      - 'vendor/llama-cpp/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.cargo/**'
+      - '.github/workflows/test-policy-routing.yml'
+      # Markdown inside any path above cannot affect this build.
+      - "!**.md"
+  pull_request:
+    branches: [master]
+    paths:
+      - 'crates/xybrid-core/**'
+      - 'crates/xybrid-cli/**'
+      - 'crates/xybrid-sdk/**'
+      - 'crates/llama-cpp-sys/**'
+      - 'crates/xybrid-llama/**'
+      - 'integration-tests/**'
+      - 'vendor/llama-cpp/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.cargo/**'
+      - '.github/workflows/test-policy-routing.yml'
+      # Markdown inside any path above cannot affect this build.
+      - "!**.md"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions: read-all
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  test-policy-routing:
+    name: Test policy routing (real local model, fake DeepSeek)
+    runs-on: macos-14
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          key: policy-routing-integration
+
+      - name: Ensure download tooling (jq, zstd)
+        run: |
+          for tool in jq zstd; do
+            command -v "$tool" >/dev/null || brew install "$tool"
+          done
+
+      # The checksum pins the exact Q8_0 weights the test is calibrated
+      # against (integration-tests/fixtures/models/models.json); a mutable
+      # artifact cannot silently redefine the test.
+      - name: Cache functiongemma-270m-it
+        id: cache-functiongemma
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: integration-tests/fixtures/models/functiongemma-270m-it
+          key: functiongemma-270m-it-${{ runner.os }}-83940d4dd9676710856f43523bed096164a595a96f6b34771610a03937de5270
+
+      - name: Download functiongemma-270m-it
+        if: steps.cache-functiongemma.outputs.cache-hit != 'true'
+        run: ./integration-tests/download.sh functiongemma-270m-it
+
+      - name: Verify weights (cache hit or miss)
+        run: |
+          echo '83940d4dd9676710856f43523bed096164a595a96f6b34771610a03937de5270  integration-tests/fixtures/models/functiongemma-270m-it/functiongemma-270m-it-q8_0.gguf' \
+            | shasum -a 256 -c -
+
+      - name: CLI routing helpers (unit)
+        run: cargo test -p xybrid-cli --bin xybrid commands::run
+
+      - name: Policy routing end to end
+        env:
+          XYBRID_REQUIRE_MODELS: 1
+        run: |
+          # Enumerate and assert the required tests: printing `--list` alone
+          # would still pass if every test were compiled out (cargo test exits
+          # 0 on an empty set).
+          LIST="$(cargo test -p xybrid-cli --features llm-llamacpp --test policy_routing_cli_test -- --list)"
+          printf '%s\n' "$LIST"
+          for test in \
+            local_only_policy_runs_the_gguf_model \
+            prefer_cloud_policy_calls_the_fake_deepseek_endpoint \
+            dry_run_loads_policy_without_inference \
+            cold_cache_hybrid_downloads_extracts_and_then_runs_offline; do
+            printf '%s\n' "$LIST" | grep -qE "^${test}: test$" \
+              || { echo "missing required test: ${test}" >&2; exit 1; }
+          done
+          cargo test -p xybrid-cli --features llm-llamacpp --test policy_routing_cli_test -- --nocapture
+
+      - name: SDK streaming fast path (real GGUF fixture)
+        env:
+          XYBRID_REQUIRE_MODELS: 1
+        run: |
+          LIST="$(cargo test -p xybrid-sdk --features llm-llamacpp --test streaming_fast_path -- --list)"
+          printf '%s\n' "$LIST"
+          for test in \
+            yaml_max_tokens_caps_streaming_generation \
+            envelope_metadata_overrides_yaml_in_streaming \
+            invalid_yaml_option_fails_before_any_token; do
+            printf '%s\n' "$LIST" | grep -qE "^${test}: test$" \
+              || { echo "missing required test: ${test}" >&2; exit 1; }
+          done
+          cargo test -p xybrid-sdk --features llm-llamacpp --test streaming_fast_path -- --nocapture

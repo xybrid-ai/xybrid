@@ -60,11 +60,12 @@ mod completion;
 mod config;
 mod error;
 
-pub(crate) use client::parse_gateway_usage;
 pub use client::Cloud;
-pub use completion::{CompletionRequest, CompletionResponse, Message, Role, Usage};
+pub(crate) use client::{openai_chat_body, parse_gateway_usage, MissingModel};
+pub use completion::{CompletionRequest, CompletionResponse, Message, Role, ThinkingMode, Usage};
 pub use config::{
     has_xybrid_api_key, set_xybrid_api_key, set_xybrid_platform_url, xybrid_api_key,
     xybrid_platform_url, CloudBackend, CloudConfig,
 };
+pub use config::{platform_gateway_url, resolve_api_key_for, same_origin, url_origin};
 pub use error::CloudError;

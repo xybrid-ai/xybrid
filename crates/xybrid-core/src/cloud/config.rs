@@ -124,6 +124,80 @@ pub struct CloudConfig {
     /// Direct provider (for Direct backend - development only).
     #[serde(default)]
     pub direct_provider: Option<String>,
+
+    /// Base URL for the native direct client (`backend: direct`).
+    ///
+    /// `None` uses the provider's documented default. The cloud adapter sets
+    /// this from a stage's explicit `gateway_url`; unlike `gateway_url` it is
+    /// never defaulted to the platform gateway, so a native direct call
+    /// cannot accidentally target the Xybrid platform.
+    #[serde(default)]
+    pub direct_base_url: Option<String>,
+}
+
+/// The configured Xybrid platform gateway URL (base + `/v1`).
+///
+/// Resolution order: `XYBRID_GATEWAY_URL`, the in-memory platform URL set via
+/// [`set_xybrid_platform_url`] + `/v1`, `XYBRID_PLATFORM_URL` + `/v1`, then
+/// the production default. This is also the only origin that may receive the
+/// Xybrid platform API key automatically — see [`CloudConfig::resolve_api_key`].
+pub fn platform_gateway_url() -> String {
+    default_gateway_url()
+}
+
+/// Scheme, lowercase host and effective port of an `http(s)` URL, for
+/// comparing destinations. `None` for anything unparsable or non-HTTP.
+///
+/// Comparing origins (never substrings or suffixes) is what stops
+/// `api.xybrid.dev.evil.example` or a different port from looking like the
+/// platform gateway.
+pub fn url_origin(url: &str) -> Option<String> {
+    let parsed = url::Url::parse(url).ok()?;
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return None;
+    }
+    let host = parsed.host_str()?.to_ascii_lowercase();
+    let port = parsed.port_or_known_default()?;
+    Some(format!("{}://{}:{}", parsed.scheme(), host, port))
+}
+
+/// True when both URLs parse to the same `http(s)` origin.
+pub fn same_origin(a: &str, b: &str) -> bool {
+    matches!((url_origin(a), url_origin(b)), (Some(x), Some(y)) if x == y)
+}
+
+/// Pure credential resolution for one destination.
+///
+/// Precedence:
+/// 1. An explicit key wins. A literal is used as-is; a `$VAR` reference reads
+///    `VAR` through `env` and, if it is unset or empty, yields `None` — it
+///    never falls through to another credential.
+/// 2. With no explicit key, the Xybrid platform key (`programmatic_platform_key`,
+///    then `XYBRID_API_KEY` from `env`) is used **only** when `destination_url`
+///    has the same origin as `platform_gateway_url`.
+/// 3. Any other destination gets no automatic credential.
+///
+/// `env` is injected so tests never touch process environment.
+pub fn resolve_api_key_for(
+    explicit: Option<&str>,
+    destination_url: &str,
+    platform_gateway_url: &str,
+    programmatic_platform_key: Option<String>,
+    env: impl Fn(&str) -> Option<String>,
+) -> Option<String> {
+    fn non_empty(value: Option<String>) -> Option<String> {
+        value.filter(|v| !v.trim().is_empty())
+    }
+    if let Some(key) = explicit {
+        if let Some(var) = key.strip_prefix('$') {
+            return non_empty(env(var));
+        }
+        return non_empty(Some(key.to_string()));
+    }
+    if same_origin(destination_url, platform_gateway_url) {
+        return non_empty(programmatic_platform_key).or_else(|| non_empty(env("XYBRID_API_KEY")));
+    }
+    None
 }
 
 fn default_gateway_url() -> String {
@@ -166,6 +240,7 @@ impl Default for CloudConfig {
             timeout_ms: default_timeout_ms(),
             debug: false,
             direct_provider: None,
+            direct_base_url: None,
         }
     }
 }
@@ -218,20 +293,23 @@ impl CloudConfig {
         self
     }
 
-    /// Resolve the API key from environment or config.
+    /// Resolve the API key for this config's destination.
+    ///
+    /// An explicit `api_key` (literal or `$ENV_VAR` reference) always wins and
+    /// never falls through. Without one, the Xybrid platform key — the
+    /// programmatic key set via the SDK first, then the ambient
+    /// `XYBRID_API_KEY` — is supplied only when `gateway_url` has the same
+    /// origin as the configured platform gateway. A provider endpoint or a
+    /// custom/loopback gateway never inherits the platform credential. See
+    /// [`resolve_api_key_for`].
     pub fn resolve_api_key(&self) -> Option<String> {
-        if let Some(ref key) = self.api_key {
-            if let Some(env_var) = key.strip_prefix('$') {
-                return std::env::var(env_var).ok();
-            }
-            return Some(key.clone());
-        }
-
-        // Programmatic key (set via the SDK, held in memory — not the
-        // environment) takes precedence over the ambient `XYBRID_API_KEY` env
-        // var, which remains the fallback for externally-configured keys
-        // (CLI `--env`, Flutter `--dart-define`, iOS `ProcessInfo`).
-        xybrid_api_key().or_else(|| std::env::var("XYBRID_API_KEY").ok())
+        resolve_api_key_for(
+            self.api_key.as_deref(),
+            &self.gateway_url,
+            &default_gateway_url(),
+            xybrid_api_key(),
+            |var| std::env::var(var).ok(),
+        )
     }
 }
 
@@ -346,5 +424,169 @@ mod tests {
         set_xybrid_platform_url(Some("https://staging.example.com".to_string()));
         std::env::set_var("XYBRID_GATEWAY_URL", "https://explicit.example.com/v1");
         assert_eq!(default_gateway_url(), "https://explicit.example.com/v1");
+    }
+
+    // ── destination-scoped credentials ──────────────────────────────────────
+
+    const PLATFORM: &str = "https://api.xybrid.dev/v1";
+
+    fn env_with<'a>(pairs: &'a [(&'a str, &'a str)]) -> impl Fn(&str) -> Option<String> + 'a {
+        move |var| {
+            pairs
+                .iter()
+                .find(|(name, _)| *name == var)
+                .map(|(_, value)| value.to_string())
+        }
+    }
+
+    #[test]
+    fn url_origin_normalizes_host_and_default_port() {
+        assert_eq!(
+            url_origin("https://API.xybrid.dev/v1/chat").as_deref(),
+            Some("https://api.xybrid.dev:443")
+        );
+        assert_eq!(
+            url_origin("http://127.0.0.1:3001/v1").as_deref(),
+            Some("http://127.0.0.1:3001")
+        );
+        assert_eq!(url_origin("ftp://api.xybrid.dev").as_deref(), None);
+        assert_eq!(url_origin("not a url").as_deref(), None);
+        assert!(same_origin(PLATFORM, "https://api.xybrid.dev/"));
+        assert!(same_origin(PLATFORM, "https://api.xybrid.dev:443/v1/"));
+        assert!(!same_origin(PLATFORM, "https://api.xybrid.dev:8443/v1"));
+        assert!(!same_origin(PLATFORM, "http://api.xybrid.dev/v1"));
+        assert!(!same_origin(
+            PLATFORM,
+            "https://api.xybrid.dev.evil.example/v1"
+        ));
+        assert!(!same_origin(
+            PLATFORM,
+            "https://evil.example/api.xybrid.dev/v1"
+        ));
+    }
+
+    #[test]
+    fn explicit_literal_key_wins_for_any_destination() {
+        let key = resolve_api_key_for(
+            Some("literal-key"),
+            "https://api.deepseek.com/v1",
+            PLATFORM,
+            Some("platform-key".to_string()),
+            env_with(&[("XYBRID_API_KEY", "env-platform-key")]),
+        );
+        assert_eq!(key.as_deref(), Some("literal-key"));
+    }
+
+    #[test]
+    fn explicit_env_reference_reads_that_variable_only() {
+        let env = env_with(&[
+            ("DEEPSEEK_API_KEY", "ds-key"),
+            ("XYBRID_API_KEY", "env-platform-key"),
+        ]);
+        let key = resolve_api_key_for(
+            Some("$DEEPSEEK_API_KEY"),
+            "https://api.deepseek.com/v1",
+            PLATFORM,
+            Some("platform-key".to_string()),
+            &env,
+        );
+        assert_eq!(key.as_deref(), Some("ds-key"));
+
+        // Unset or empty reference: no fall-through to any other credential,
+        // not even at the platform origin.
+        for destination in ["https://api.deepseek.com/v1", PLATFORM] {
+            assert_eq!(
+                resolve_api_key_for(
+                    Some("$MISSING_KEY"),
+                    destination,
+                    PLATFORM,
+                    Some("platform-key".to_string()),
+                    &env,
+                ),
+                None
+            );
+            assert_eq!(
+                resolve_api_key_for(
+                    Some("$EMPTY_KEY"),
+                    destination,
+                    PLATFORM,
+                    Some("platform-key".to_string()),
+                    env_with(&[("EMPTY_KEY", "   ")]),
+                ),
+                None
+            );
+        }
+    }
+
+    #[test]
+    fn platform_key_is_automatic_only_for_the_platform_origin() {
+        let env = env_with(&[("XYBRID_API_KEY", "env-platform-key")]);
+
+        // Programmatic key first, then the ambient env var.
+        assert_eq!(
+            resolve_api_key_for(
+                None,
+                PLATFORM,
+                PLATFORM,
+                Some("platform-key".to_string()),
+                &env
+            )
+            .as_deref(),
+            Some("platform-key")
+        );
+        assert_eq!(
+            resolve_api_key_for(None, "https://api.xybrid.dev/v1/", PLATFORM, None, &env)
+                .as_deref(),
+            Some("env-platform-key")
+        );
+        // A reconfigured platform origin (staging, self-hosted) still gets it.
+        assert_eq!(
+            resolve_api_key_for(
+                None,
+                "http://localhost:3000/v1",
+                "http://localhost:3000/v1",
+                None,
+                &env
+            )
+            .as_deref(),
+            Some("env-platform-key")
+        );
+
+        // Provider, custom, loopback and lookalike origins never do.
+        for destination in [
+            "https://api.deepseek.com/v1",
+            "https://api.openai.com/v1",
+            "http://127.0.0.1:3001/v1",
+            "https://api.xybrid.dev.evil.example/v1",
+            "https://api.xybrid.dev:8443/v1",
+            "http://api.xybrid.dev/v1",
+        ] {
+            assert_eq!(
+                resolve_api_key_for(
+                    None,
+                    destination,
+                    PLATFORM,
+                    Some("platform-key".to_string()),
+                    &env
+                ),
+                None,
+                "{destination} must not receive the platform key"
+            );
+        }
+    }
+
+    #[test]
+    fn config_resolve_api_key_uses_its_gateway_url_as_destination() {
+        // Explicit literal on any destination.
+        let config = CloudConfig::gateway()
+            .with_gateway_url("https://api.deepseek.com/v1")
+            .with_api_key("ds-literal");
+        assert_eq!(config.resolve_api_key().as_deref(), Some("ds-literal"));
+
+        // Explicit reference to a variable that is certainly unset.
+        let config = CloudConfig::gateway()
+            .with_gateway_url("https://api.deepseek.com/v1")
+            .with_api_key("$XYBRID_TEST_SURELY_UNSET_KEY_7f3a");
+        assert_eq!(config.resolve_api_key(), None);
     }
 }

@@ -1,0 +1,26 @@
+# Primary hybrid example: a local GGUF model and Xybrid Platform cloud inference.
+# Export XYBRID_API_KEY, then run from the repository root:
+#
+#   cargo run -p xybrid-cli --features llm-llamacpp -- run \
+#     -c crates/xybrid-cli/examples/hybrid-platform.yaml \
+#     --policy crates/xybrid-cli/examples/policies/prefer-cloud.yaml \
+#     --input-text "Summarise the plot of Dune in two sentences." -v
+#
+# The cloud request goes to https://api.xybrid.dev/v1 using the Xybrid key.
+# Provider credentials are configured on the platform, not on this device.
+# Use --platform-url <base-url> for a staging or self-hosted platform.
+# Swap in policies/local-only.yaml to forbid cloud inference, or
+# policies/privacy.yaml to route by content. A cold cache may download the
+# local model before inference; subsequent runs reuse the extracted model.
+# For direct-provider testing, see hybrid-deepseek.yaml.
+name: hybrid-platform
+stages:
+  - id: llm
+    model: functiongemma-270m-it     # local leg (cache/registry id)
+    target: auto                     # policy + device state choose the leg
+    provider: openai                 # upstream provider behind Xybrid Platform
+    cloud_model: gpt-4o-mini         # recognized by the platform model router
+    backend: gateway                # Xybrid Platform; resolves XYBRID_API_KEY
+    system_prompt: "You are a concise assistant."
+    max_tokens: 128
+    temperature: 0

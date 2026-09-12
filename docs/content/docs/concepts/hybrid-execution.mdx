@@ -25,6 +25,37 @@ stages:
     provider: openai
 ```
 
+### Hybrid stages
+
+A stage with `target: auto` **and** a `provider` has two legs: the local model
+named by `model`, and the provider's model named by `cloud_model` (defaults to
+`model`). The policy and the device state pick one leg per request. Shared
+options (`system_prompt`, `temperature`, `max_tokens`, `top_p`) apply to
+whichever leg runs.
+
+Hybrid stages are currently supported by `xybrid run`. The Flutter and Rust SDK pipeline APIs treat `target: auto` with a `provider` as cloud-only and do not load the local model.
+
+The primary example uses Xybrid Platform for the cloud leg. The device needs
+only `XYBRID_API_KEY`; the platform holds the upstream provider credentials.
+
+```yaml
+stages:
+  - id: llm
+    model: functiongemma-270m-it      # local leg
+    target: auto
+    provider: openai                  # upstream provider behind Xybrid Platform
+    cloud_model: gpt-4o-mini
+    backend: gateway                  # Xybrid Platform, authenticated with XYBRID_API_KEY
+    system_prompt: "You are a concise assistant."
+    max_tokens: 128
+```
+
+This is `crates/xybrid-cli/examples/hybrid-platform.yaml`. Its cloud model must
+be supported by the platform, with the corresponding provider configured there.
+A policy denial also forbids sending inference to Xybrid Platform. If the
+local model is unusable, the stage fails locally. An uncached local model may
+still need to be downloaded before inference.
+
 ## How `auto` decides
 
 For `auto` stages the orchestrator weighs:
@@ -32,7 +63,7 @@ For `auto` stages the orchestrator weighs:
 - **Model availability** — is the model cached locally, or available in the registry for this platform?
 - **Device capabilities** — CPU features, memory, and accelerators
 - **Host signals** — battery level and thermal state reported by the platform
-- **Policies** — user-defined rules that allow or deny routes
+- **Policies** — user-defined rules that forbid the cloud leg or prefer it (see [Policies](#policies))
 
 Preview decisions without executing:
 
@@ -44,20 +75,38 @@ To force a route, set `target: device` or `target: cloud` on the stage in the pi
 
 ## Cloud execution
 
-Cloud stages stream responses over OpenAI-compatible SSE. There are two ways to reach a provider:
+Cloud stages use OpenAI-compatible chat requests; supported providers also offer SSE streaming. There are two ways to reach a provider:
 
 ### Through the Xybrid gateway (default)
 
-By default cloud stages route through the Xybrid gateway at `https://api.xybrid.dev/v1`. The gateway holds provider credentials for you, so devices never embed provider API keys.
+With `backend: gateway` (the default), cloud stages send requests to Xybrid
+Platform at `https://api.xybrid.dev/v1`. The platform authenticates your Xybrid
+key and calls the upstream using its own configured provider credentials.
 
-```dart
-// Use a custom or self-hosted gateway
-await Xybrid.init(gatewayUrl: 'https://my-gateway.example.com');
+```bash
+export XYBRID_API_KEY="<your-xybrid-api-key>"
+xybrid run -c crates/xybrid-cli/examples/hybrid-platform.yaml \
+  --policy crates/xybrid-cli/examples/policies/prefer-cloud.yaml \
+  --input-text "Summarise the plot of Dune in two sentences."
 ```
 
-### Directly to a provider
+For a staging or self-hosted platform, pass `--platform-url <base-url>` or set
+`XYBRID_PLATFORM_URL`; the CLI appends `/v1` for chat requests. The Xybrid key
+is scoped to the configured platform origin.
 
-Stages with a `provider` can call the provider API directly. API keys are resolved from environment variables:
+### Direct provider testing
+
+Use `crates/xybrid-cli/examples/hybrid-deepseek.yaml` to test a direct provider
+connection. It selects `backend: direct`, `provider: deepseek`,
+`cloud_model: deepseek-flash`, and `thinking: disabled`, and authenticates with
+`DEEPSEEK_API_KEY`. Running that example makes a real provider request when
+cloud is selected. Automated policy-routing tests use a loopback fake DeepSeek
+endpoint and dummy credentials.
+
+`backend: direct` with `openai`, `deepseek`, `openrouter`, or `custom` uses the
+provider's OpenAI-compatible API. `custom` requires an explicit `gateway_url`.
+Anthropic uses its native direct client; Google and ElevenLabs have no native
+direct client. Direct-provider keys are resolved from environment variables:
 
 | Provider | Environment variable |
 |----------|----------------------|
@@ -71,36 +120,88 @@ Stages with a `provider` can call the provider API directly. API keys are resolv
 
 An explicit `api_key` field also accepts an environment reference (`$OPENAI_API_KEY`) — avoid hardcoding raw keys in pipeline files.
 
+Automatic provider credentials are scoped to that provider's origin. A custom
+OpenAI-compatible endpoint receives no automatic credential; a native Anthropic
+call to a custom endpoint requires an explicit `api_key`.
+
 ## Policies
 
-Policies are YAML rule sets that constrain routing. Rules are evaluated in order; the first match wins:
+A policy is a YAML (or JSON) rule set passed with `--policy`. It is evaluated
+once per stage, against the actual input and one live device snapshot, and it
+**constrains** routing rather than advising it: a denial keeps the stage on the
+device even when the YAML says `target: cloud`, when the local model is missing
+(the stage then fails locally instead of leaking to the cloud), and when device
+stress would otherwise offload it.
+
+Rules are evaluated in order; the first match wins.
+
+| Action | Effect |
+|--------|--------|
+| `deny` | Cloud is forbidden; the stage must run on the device. |
+| `route_cloud` (alias `prefer_cloud`) | Prefer the cloud leg when it is permitted and the local model exists. |
+| `redact` | The input would need a transform before leaving the device. Transforms are not implemented yet, so this also forces the device. |
+| `allow` | Stop evaluating and route normally. |
 
 ```yaml
 # policy.yaml
 version: "1.0.0"
 rules:
-  - id: "keep_audio_on_device"
-    expression: "input.kind == \"AudioRaw\""
-    action: "deny"          # deny this route for raw audio input
+  - id: keep_audio_on_device
+    expression: 'input.kind == "audio"'
+    action: deny
+  - id: keep_secrets_on_device
+    expression: 'input.text matches "(?i)confidential|ssn|password"'
+    action: deny
+  - id: offload_when_hot
+    expression: 'metrics.thermal_state == "hot"'
+    action: route_cloud
 
-  - id: "avoid_slow_networks"
-    expression: "metrics.network_rtt > 300"
-    action: "deny"          # don't go to cloud on a slow network
-
-  - id: "allow_all"
-    expression: "true"
-    action: "allow"
+# Shorthand lists are appended after `rules`, denials first:
+deny_cloud_if:
+  - "input.text_len > 4000"
+route_cloud_if:
+  - "metrics.battery_level < 25"
 ```
+
+Expressions are `<operand> <operator> <value>`, or a bare `true` / `false`:
+
+| Operand | Operators | Value |
+|---------|-----------|-------|
+| `input.kind` | `==` `!=` | `"audio"` `"text"` `"embedding"` `"image"` `"multipart"` |
+| `input.text` | `contains` `matches` `==` `!=` | quoted literal (`matches` takes a regex) |
+| `input.text_len` | `==` `!=` `<` `<=` `>` `>=` | number of characters |
+| `metrics.battery_level`, `metrics.cpu_pct` | `==` `!=` `<` `<=` `>` `>=` | number, 0–100 |
+| `metrics.memory_pressure` | `==` `!=` | `"unknown"` `"normal"` `"warn"` `"critical"` |
+| `metrics.thermal_state` | `==` `!=` | `"normal"` `"warm"` `"hot"` `"critical"` |
+
+Text rules inspect only the input text — never system prompts or metadata —
+and never match non-text input. Anything outside this table is rejected when
+the bundle is loaded, so a typo cannot silently disable a rule.
 
 ```bash
-xybrid run --config pipeline.yaml --input-audio q.wav --policy policy.yaml
+xybrid run --config pipeline.yaml --input-text "..." --policy policy.yaml
 ```
 
-Expressions can reference the input envelope (`input.kind`) and live device metrics (`metrics.network_rtt`).
+The results show the decision and what actually ran:
+
+```
+  Routing          cloud
+  Reason           [local] policy_route_cloud: policy rule 'offload_when_hot' prefers cloud: ... (confidence: 90%)
+  Backend          cloud:openai:gateway
+```
+
+`--dry-run --policy policy.yaml` decides the first stage the same way, at the
+current device snapshot, without running inference; later stages depend on
+upstream output and are reported as unknown. Ready-made bundles live in
+`crates/xybrid-cli/examples/policies/` next to the primary `hybrid-platform.yaml`
+and the direct-provider `hybrid-deepseek.yaml` example.
 
 ## Fallback
 
-When a preferred route fails — a model fails to load, or the network drops mid-stream — the orchestrator can fall back to the other target. In the Flutter SDK, `runStreamingWithFallback` exposes this directly for LLM streaming.
+The CLI selects a route before executing each stage. SDK streaming fallback
+can restart in the cloud after a configured resource-driven local abort, when
+policy permits it. In the Flutter SDK, `runStreamingWithFallback` exposes this
+behavior for LLM streaming.
 
 Every routing decision is recorded in telemetry; inspect them with [`xybrid trace`](/docs/cli/reference/trace).
 

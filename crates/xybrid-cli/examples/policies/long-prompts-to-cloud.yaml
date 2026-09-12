@@ -1,0 +1,4 @@
+# Long prompts go to the cloud leg; short ones stay local.
+version: "1.0.0"
+route_cloud_if:
+  - "input.text_len > 800"

@@ -389,6 +389,23 @@ fn stage_descriptor_with_bundle_path(
     stage_descriptor
 }
 
+/// Apply the stage's shared generation options to the streaming input.
+///
+/// The streaming fast path bypasses [`Orchestrator::execute_pipeline`], which
+/// is where the batch path runs [`xybrid_core::executor::prepare_stage_input`].
+/// Without this call, YAML `system_prompt` / `temperature` / `max_tokens` /
+/// `top_p` would be ignored by streaming and invalid values would skip
+/// validation entirely. Input metadata still wins over the YAML options, and
+/// errors surface before any generation or token callback begins.
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+fn prepare_streaming_fast_path_input(
+    stage: &StageDescriptor,
+    envelope: &Envelope,
+) -> PipelineResult<Envelope> {
+    xybrid_core::executor::prepare_stage_input(stage, envelope)
+        .map_err(|e| SdkError::pipeline(format!("stage '{}': {}", stage.name, e)))
+}
+
 #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
 #[derive(Debug, Clone)]
 struct StreamingFastPathRoute {
@@ -409,15 +426,11 @@ fn resolve_streaming_fast_path_route(
     envelope: &Envelope,
     metrics: &DeviceMetrics,
 ) -> StreamingFastPathRoute {
-    let policy_decision = authority.apply_policy(&PolicyRequest {
+    let request = PolicyRequest {
         stage_id: stage.name.clone(),
         envelope: envelope.clone(),
         metrics: metrics.clone(),
-    });
-    let policy_allowed = policy_decision.result.is_allowed();
-    let policy_transform = matches!(policy_decision.result, PolicyOutcome::Transform { .. });
-    let policy_reason = Some(policy_decision.reason.clone());
-
+    };
     let context = StageContext {
         stage_id: stage.name.clone(),
         model_id: model_id.to_string(),
@@ -429,15 +442,21 @@ fn resolve_streaming_fast_path_route(
         device_class: Some(metrics.canonical_device_class()),
         device_class_schema_version: Some(DEVICE_CLASS_SCHEMA_VERSION),
     };
-    let resolution = authority.resolve_target_with_feedback(&context);
-    let target = match &resolution.decision.result {
+    // One decision, one resource snapshot: the policy event and the target
+    // cannot disagree, and the target is restricted if the policy requires it.
+    let resolution = authority.resolve_stage(&request, &context).enforced();
+    let policy_allowed = resolution.policy.result.is_allowed();
+    let policy_transform = matches!(resolution.policy.result, PolicyOutcome::Transform { .. });
+    let policy_reason = Some(resolution.policy.reason.clone());
+
+    let target = match &resolution.target.decision.result {
         ResolvedTarget::Device => "local".to_string(),
         ResolvedTarget::Cloud { .. } => "cloud".to_string(),
         ResolvedTarget::Server { endpoint } => format!("fallback:{endpoint}"),
     };
-    let hint = resolution.local_reliability_hint.unwrap_or_default();
+    let hint = resolution.target.local_reliability_hint.unwrap_or_default();
     let can_stream_locally = policy_allowed
-        && matches!(resolution.decision.result, ResolvedTarget::Device)
+        && matches!(resolution.target.decision.result, ResolvedTarget::Device)
         && stage.is_locally_runnable()
         && !policy_transform;
 
@@ -447,9 +466,9 @@ fn resolve_streaming_fast_path_route(
         target,
         reason: format!(
             "[{}] {} (confidence: {:.0}%)",
-            resolution.decision.source,
-            resolution.decision.reason,
-            resolution.decision.confidence * 100.0
+            resolution.target.decision.source,
+            resolution.target.decision.reason,
+            resolution.target.decision.confidence * 100.0
         ),
         recent_abort_rate: hint.recent_abort_rate,
         sample_size: hint.sample_size,
@@ -680,27 +699,17 @@ impl Pipeline {
         }
     }
 
+    /// Build [`StageOptions`] from parsed YAML options without a numeric
+    /// round-trip.
+    ///
+    /// Values are copied verbatim: YAML integers stay integers, floats stay
+    /// floats, and malformed values are preserved so the owning validator
+    /// ([`xybrid_core::executor::prepare_stage_input`]) rejects them with a
+    /// useful error instead of silently dropping them.
     fn convert_options(options: &HashMap<String, serde_json::Value>) -> StageOptions {
-        let mut stage_options = StageOptions::new();
-        for (key, value) in options {
-            match value {
-                serde_json::Value::Number(n) => {
-                    if let Some(f) = n.as_f64() {
-                        stage_options.set(key, f);
-                    } else if let Some(i) = n.as_u64() {
-                        stage_options.set(key, i as u32);
-                    }
-                }
-                serde_json::Value::String(s) => {
-                    stage_options.set(key, s.clone());
-                }
-                serde_json::Value::Bool(b) => {
-                    stage_options.set(key, *b);
-                }
-                _ => {}
-            }
+        StageOptions {
+            values: options.clone(),
         }
-        stage_options
     }
 
     /// Resolve stage information from the registry.
@@ -1513,6 +1522,11 @@ impl Xybrid {
                         xybrid_core::execution::ExecutionTemplate::Gguf { .. }
                     ) {
                         let model_id = metadata.model_id.clone();
+                        // The fast path bypasses the orchestrator, so it must
+                        // run the same shared generation-option merge (and
+                        // validation) the batch path does.
+                        let prepared =
+                            prepare_streaming_fast_path_input(&stage_descriptor, envelope)?;
                         let metrics = pipeline_metrics(options);
                         let authority = LocalAuthority::with_cache_provider(Arc::new(
                             StreamingFastPathCacheProvider::new(
@@ -1524,7 +1538,7 @@ impl Xybrid {
                             &authority,
                             &stage_descriptor,
                             &model_id,
-                            envelope,
+                            &prepared,
                             &metrics,
                         );
 
@@ -1558,7 +1572,7 @@ impl Xybrid {
 
                         let start_time = std::time::Instant::now();
                         let output = executor
-                            .execute_streaming(&metadata, envelope, on_token, None)
+                            .execute_streaming(&metadata, &prepared, on_token, None)
                             .map_err(|e| {
                                 SdkError::inference_src("LLM streaming execution failed", e)
                             })?;
@@ -2007,4 +2021,205 @@ id: asr
     // LLM metrics now ride on `PlatformEvent.stages[].spans[].metadata`
     // via `xybrid_core::tracing::add_metadata`, which is covered by the
     // consuming platform's own span-extraction tests.
+
+    /// Parsed-YAML options for the numeric-type regression tests.
+    fn numeric_option_map() -> HashMap<String, serde_json::Value> {
+        [
+            ("max_tokens", serde_json::json!(16)),
+            ("temperature", serde_json::json!(0)),
+            ("top_p", serde_json::json!(0.9)),
+            ("system_prompt", serde_json::json!("Be terse.")),
+            ("debug", serde_json::json!(true)),
+            ("timeout_ms", serde_json::json!(1234)),
+        ]
+        .into_iter()
+        .map(|(key, value)| (key.to_string(), value))
+        .collect()
+    }
+
+    #[test]
+    fn convert_options_preserves_yaml_numeric_types() {
+        let converted = Pipeline::convert_options(&numeric_option_map());
+
+        assert!(
+            converted.values["max_tokens"].is_u64(),
+            "integer must not become a float: {:?}",
+            converted.values["max_tokens"]
+        );
+        assert_eq!(converted.values["max_tokens"].as_u64(), Some(16));
+        assert!(converted.values["temperature"].is_u64());
+        assert_eq!(converted.values["top_p"].as_f64(), Some(0.9));
+        assert_eq!(converted.values["timeout_ms"].as_u64(), Some(1234));
+        assert_eq!(
+            converted.values["system_prompt"].as_str(),
+            Some("Be terse.")
+        );
+        assert_eq!(converted.values["debug"].as_bool(), Some(true));
+    }
+
+    #[test]
+    fn converted_integer_options_reach_prepare_stage_input() {
+        let stage = StageDescriptor::new("llm")
+            .with_options(Pipeline::convert_options(&numeric_option_map()));
+        let input = Envelope::new(EnvelopeKind::Text("hi".to_string()));
+
+        let prepared = xybrid_core::executor::prepare_stage_input(&stage, &input)
+            .expect("integer options are valid");
+
+        assert_eq!(
+            prepared.metadata.get("max_tokens").map(String::as_str),
+            Some("16")
+        );
+        assert_eq!(
+            prepared.metadata.get("temperature").map(String::as_str),
+            Some("0")
+        );
+        assert_eq!(
+            prepared.metadata.get("top_p").map(String::as_str),
+            Some("0.9")
+        );
+        assert_eq!(
+            prepared.metadata.get("system_prompt").map(String::as_str),
+            Some("Be terse.")
+        );
+    }
+
+    #[test]
+    fn input_metadata_overrides_converted_yaml_options() {
+        let stage = StageDescriptor::new("llm")
+            .with_options(Pipeline::convert_options(&numeric_option_map()));
+        let mut input = Envelope::new(EnvelopeKind::Text("hi".to_string()));
+        input
+            .metadata
+            .insert("max_tokens".to_string(), "7".to_string());
+
+        let prepared = xybrid_core::executor::prepare_stage_input(&stage, &input).unwrap();
+
+        assert_eq!(
+            prepared.metadata.get("max_tokens").map(String::as_str),
+            Some("7")
+        );
+    }
+
+    #[test]
+    fn converted_malformed_options_are_preserved_and_rejected() {
+        for value in [
+            serde_json::json!(0),
+            serde_json::json!(-1),
+            serde_json::json!(1.5),
+            serde_json::json!("16"),
+        ] {
+            let options: HashMap<String, serde_json::Value> =
+                [("max_tokens".to_string(), value.clone())]
+                    .into_iter()
+                    .collect();
+            let stage =
+                StageDescriptor::new("llm").with_options(Pipeline::convert_options(&options));
+            let input = Envelope::new(EnvelopeKind::Text("hi".to_string()));
+
+            let err = xybrid_core::executor::prepare_stage_input(&stage, &input)
+                .expect_err("malformed token limit must fail");
+            assert!(
+                err.to_string().contains("positive integer"),
+                "{value}: {err}"
+            );
+        }
+
+        let options: HashMap<String, serde_json::Value> =
+            [("system_prompt".to_string(), serde_json::json!(3))]
+                .into_iter()
+                .collect();
+        let stage = StageDescriptor::new("llm").with_options(Pipeline::convert_options(&options));
+        let input = Envelope::new(EnvelopeKind::Text("hi".to_string()));
+        let err = xybrid_core::executor::prepare_stage_input(&stage, &input).unwrap_err();
+        assert!(err.to_string().contains("a string"), "{err}");
+    }
+
+    /// Build the same stage shape the streaming fast path uses from YAML.
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    fn streaming_stage(yaml: &str) -> StageDescriptor {
+        let ref_ = PipelineRef::from_yaml(yaml).unwrap();
+        let stage_config = &ref_.config.stages[0];
+        StageDescriptor::new(stage_config.stage_id())
+            .with_options(Pipeline::convert_options(&stage_config.options()))
+    }
+
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[test]
+    fn streaming_fast_path_input_gets_the_same_options_as_batch() {
+        let stage = streaming_stage(
+            r#"
+stages:
+  - id: llm
+    model: streaming-options-model
+    max_tokens: 16
+    temperature: 0
+    top_p: 0.9
+    system_prompt: "Be terse."
+"#,
+        );
+
+        let prepared = prepare_streaming_fast_path_input(
+            &stage,
+            &Envelope::new(EnvelopeKind::Text("hi".to_string())),
+        )
+        .expect("valid options");
+
+        assert_eq!(
+            prepared.metadata.get("max_tokens").map(String::as_str),
+            Some("16")
+        );
+        assert_eq!(
+            prepared.metadata.get("temperature").map(String::as_str),
+            Some("0")
+        );
+        assert_eq!(
+            prepared.metadata.get("top_p").map(String::as_str),
+            Some("0.9")
+        );
+        assert_eq!(
+            prepared.metadata.get("system_prompt").map(String::as_str),
+            Some("Be terse.")
+        );
+    }
+
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[test]
+    fn streaming_fast_path_input_keeps_overrides_and_rejects_invalid_options() {
+        let stage = streaming_stage(
+            r#"
+stages:
+  - id: llm
+    model: streaming-options-model
+    max_tokens: 16
+"#,
+        );
+        let mut input = Envelope::new(EnvelopeKind::Text("hi".to_string()));
+        input
+            .metadata
+            .insert("max_tokens".to_string(), "1".to_string());
+
+        let prepared = prepare_streaming_fast_path_input(&stage, &input).unwrap();
+        assert_eq!(
+            prepared.metadata.get("max_tokens").map(String::as_str),
+            Some("1")
+        );
+
+        let invalid = streaming_stage(
+            r#"
+stages:
+  - id: llm
+    model: streaming-options-model
+    max_tokens: 0
+"#,
+        );
+        let err = prepare_streaming_fast_path_input(
+            &invalid,
+            &Envelope::new(EnvelopeKind::Text("hi".to_string())),
+        )
+        .expect_err("invalid max_tokens must fail before generation");
+        let message = err.to_string();
+        assert!(message.contains("stage 'llm'"), "{message}");
+        assert!(message.contains("positive integer"), "{message}");
+    }
 }

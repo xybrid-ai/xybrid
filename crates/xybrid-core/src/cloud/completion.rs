@@ -97,6 +97,59 @@ pub struct Usage {
     pub cache_creation_input_tokens: Option<u32>,
 }
 
+/// Whether a reasoning-capable model may think before it answers.
+///
+/// DeepSeek enables thinking by default and returns the reasoning in a separate
+/// `reasoning_content` field; hidden reasoning still consumes the output token
+/// budget, so a small `max_tokens` can be exhausted before any answer appears.
+/// [`ThinkingMode::Disabled`] requests answer-only generation.
+///
+/// On the OpenAI-compatible wire the mode is serialized as
+/// `"thinking": {"type": "enabled" | "disabled"}`. A `None` on
+/// [`CompletionRequest::thinking`] omits the field so the provider default
+/// applies.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ThinkingMode {
+    /// The model may emit hidden reasoning before its answer.
+    Enabled,
+    /// Answer-only generation; no reasoning budget is spent.
+    Disabled,
+}
+
+impl ThinkingMode {
+    /// Wire value: `"enabled"` or `"disabled"`.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ThinkingMode::Enabled => "enabled",
+            ThinkingMode::Disabled => "disabled",
+        }
+    }
+}
+
+impl std::fmt::Display for ThinkingMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl std::str::FromStr for ThinkingMode {
+    type Err = String;
+
+    /// Parse `enabled` / `disabled`, case-insensitively and ignoring
+    /// surrounding whitespace. Any other value is an error.
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "enabled" => Ok(ThinkingMode::Enabled),
+            "disabled" => Ok(ThinkingMode::Disabled),
+            _ => Err(format!(
+                "invalid thinking mode '{}': expected 'enabled' or 'disabled'",
+                s.trim()
+            )),
+        }
+    }
+}
+
 /// Request for cloud completion.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CompletionRequest {
@@ -138,6 +191,14 @@ pub struct CompletionRequest {
     /// Stream the response (token-by-token).
     #[serde(default)]
     pub stream: bool,
+
+    /// Thinking mode for reasoning-capable providers (DeepSeek).
+    ///
+    /// `None` omits the field from the request body so the provider default
+    /// applies. Honored by the OpenAI-compatible transport; the native direct
+    /// clients in `cloud_llm` have no equivalent and ignore it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thinking: Option<ThinkingMode>,
 }
 
 impl CompletionRequest {
@@ -196,6 +257,12 @@ impl CompletionRequest {
     /// Enable streaming.
     pub fn with_stream(mut self, stream: bool) -> Self {
         self.stream = stream;
+        self
+    }
+
+    /// Set the thinking mode (DeepSeek `"thinking": {"type": ...}`).
+    pub fn with_thinking(mut self, mode: ThinkingMode) -> Self {
+        self.thinking = Some(mode);
         self
     }
 
@@ -332,6 +399,9 @@ impl From<CompletionRequest> for crate::cloud_llm::LlmRequest {
         if let Some(stop) = req.stop {
             llm_req = llm_req.with_stop(stop);
         }
+        // `thinking` has no `LlmRequest` equivalent: the native direct clients
+        // are not reasoning-mode aware, and the adapter only accepts the option
+        // for DeepSeek, which rides the OpenAI-compatible transport instead.
 
         llm_req
     }
@@ -378,5 +448,44 @@ mod tests {
 
         resp.finish_reason = Some("length".into());
         assert!(resp.truncated());
+    }
+
+    #[test]
+    fn thinking_defaults_to_none_and_is_omitted_from_json() {
+        let req = CompletionRequest::new("Hello");
+        assert_eq!(req.thinking, None);
+
+        let json = serde_json::to_value(&req).unwrap();
+        assert!(json.get("thinking").is_none(), "got {json}");
+    }
+
+    #[test]
+    fn with_thinking_sets_the_mode() {
+        let req = CompletionRequest::new("Hello").with_thinking(ThinkingMode::Disabled);
+        assert_eq!(req.thinking, Some(ThinkingMode::Disabled));
+        assert_eq!(ThinkingMode::Disabled.as_str(), "disabled");
+        assert_eq!(ThinkingMode::Enabled.to_string(), "enabled");
+    }
+
+    #[test]
+    fn thinking_mode_parses_case_insensitively_and_rejects_other_values() {
+        assert_eq!(
+            "disabled".parse::<ThinkingMode>(),
+            Ok(ThinkingMode::Disabled)
+        );
+        assert_eq!(
+            " Enabled ".parse::<ThinkingMode>(),
+            Ok(ThinkingMode::Enabled)
+        );
+        assert_eq!(
+            "DISABLED".parse::<ThinkingMode>(),
+            Ok(ThinkingMode::Disabled)
+        );
+
+        let err = "maybe".parse::<ThinkingMode>().unwrap_err();
+        assert!(err.contains("maybe"), "got {err}");
+        assert!(err.contains("'enabled' or 'disabled'"), "got {err}");
+        assert!("".parse::<ThinkingMode>().is_err());
+        assert!("true".parse::<ThinkingMode>().is_err());
     }
 }

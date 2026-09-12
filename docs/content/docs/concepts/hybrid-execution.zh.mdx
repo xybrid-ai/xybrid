@@ -25,6 +25,34 @@ stages:
     provider: openai
 ```
 
+### 混合阶段
+
+同时声明 `target: auto` **和** `provider` 的阶段拥有两条分支：`model` 指定的本地模型，
+以及 `cloud_model`（默认与 `model` 相同）指定的云端模型。策略与设备状态为每次请求
+选择其中一条。共享选项（`system_prompt`、`temperature`、`max_tokens`、`top_p`）对
+实际运行的分支都生效。
+
+混合阶段目前由 `xybrid run` 支持。Flutter 与 Rust SDK 的流水线 API 会把 `target: auto` 搭配 `provider` 视为纯云端阶段，不会加载本地模型。
+
+主示例通过 Xybrid Platform 执行云端分支。设备端只需要 `XYBRID_API_KEY`，
+上游提供商的凭据由平台保管。
+
+```yaml
+stages:
+  - id: llm
+    model: functiongemma-270m-it      # 本地分支
+    target: auto
+    provider: openai                  # Xybrid Platform 后面的上游提供商
+    cloud_model: gpt-4o-mini
+    backend: gateway                  # 通过 XYBRID_API_KEY 访问 Xybrid Platform
+    system_prompt: "You are a concise assistant."
+    max_tokens: 128
+```
+
+该示例位于 `crates/xybrid-cli/examples/hybrid-platform.yaml`。云端模型必须受平台支持，
+且平台需要配置对应的提供商。策略拒绝云端时，也禁止向 Xybrid Platform 发送推理请求。
+如果本地模型不可用，阶段会在本地失败。尚未缓存的本地模型仍可能需要在推理前下载。
+
 ## `auto` 如何决策
 
 对于 `auto` 阶段，编排器会综合权衡：
@@ -32,7 +60,7 @@ stages:
 - **模型可用性** — 模型是否已缓存到本地，或注册表中是否有适合当前平台的版本？
 - **设备能力** — CPU 特性、内存与加速器
 - **宿主信号** — 平台上报的电池电量与散热状态
-- **策略** — 用户定义的允许/拒绝路由规则
+- **策略** — 用户定义的规则，禁止或优先使用云端分支（见[策略](#策略)）
 
 预览路由决策而不实际执行：
 
@@ -44,20 +72,34 @@ xybrid run --config pipeline.yaml --input-audio q.wav --dry-run
 
 ## 云端执行
 
-云端阶段通过 OpenAI 兼容的 SSE 流式返回响应。访问提供商有两种方式：
+云端阶段使用 OpenAI 兼容的聊天请求；受支持的提供商也提供 SSE 流式响应。访问提供商有两种方式：
 
 ### 通过 Xybrid 网关（默认）
 
-默认情况下，云端阶段通过 Xybrid 网关（`https://api.xybrid.dev/v1`）路由。网关代为保管提供商凭证，设备端无需内嵌任何提供商 API Key。
+使用 `backend: gateway`（默认值）时，云端阶段向 Xybrid Platform 的
+`https://api.xybrid.dev/v1` 发送请求。平台验证 Xybrid 密钥，并使用平台配置的提供商凭据
+调用上游。
 
-```dart
-// 使用自定义或自托管网关
-await Xybrid.init(gatewayUrl: 'https://my-gateway.example.com');
+```bash
+export XYBRID_API_KEY="<your-xybrid-api-key>"
+xybrid run -c crates/xybrid-cli/examples/hybrid-platform.yaml \
+  --policy crates/xybrid-cli/examples/policies/prefer-cloud.yaml \
+  --input-text "Summarise the plot of Dune in two sentences."
 ```
 
-### 直连提供商
+对于预发布或自托管平台，可传入 `--platform-url <base-url>` 或设置
+`XYBRID_PLATFORM_URL`；CLI 会为聊天请求追加 `/v1`。Xybrid 密钥仅发送到所配置的平台源。
 
-带有 `provider` 的阶段可以直接调用提供商 API。API Key 从环境变量解析：
+### 直连提供商测试
+
+使用 `crates/xybrid-cli/examples/hybrid-deepseek.yaml` 测试提供商直连。
+它设置 `backend: direct`、`provider: deepseek`、`cloud_model: deepseek-flash`
+和 `thinking: disabled`，通过 `DEEPSEEK_API_KEY` 认证。运行该示例并选择云端时会发出
+真实的提供商请求。自动化策略路由测试使用回环地址上的模拟 DeepSeek 端点和测试凭据。
+
+对 `openai`、`deepseek`、`openrouter` 或 `custom` 使用 `backend: direct` 会调用提供商的
+OpenAI 兼容 API。`custom` 必须显式设置 `gateway_url`。Anthropic 使用原生直连客户端；
+Google 和 ElevenLabs 没有原生直连客户端。直连凭据从环境变量解析：
 
 | 提供商 | 环境变量 |
 |--------|----------|
@@ -71,36 +113,82 @@ await Xybrid.init(gatewayUrl: 'https://my-gateway.example.com');
 
 显式的 `api_key` 字段也接受环境变量引用（`$OPENAI_API_KEY`）— 避免在流水线文件中硬编码明文密钥。
 
+自动解析的提供商凭据只发送到该提供商自己的源。自定义 OpenAI 兼容端点不会自动获得凭据；
+Anthropic 原生客户端访问自定义端点时必须显式设置 `api_key`。
+
 ## 策略
 
-策略是约束路由的 YAML 规则集。规则按顺序求值，首条匹配生效：
+策略是通过 `--policy` 传入的 YAML（或 JSON）规则集。它在每个阶段对真实输入和一次
+实时设备快照求值一次，并且**约束**路由而非仅仅建议：即使 YAML 写了 `target: cloud`、
+即使本地模型缺失（此时阶段在本地失败而不是泄露到云端）、即使设备压力本会触发卸载，
+一条拒绝规则都会把阶段留在设备上。
+
+规则按顺序求值，首条匹配生效。
+
+| 动作 | 效果 |
+|------|------|
+| `deny` | 禁止云端；阶段必须在设备上运行。 |
+| `route_cloud`（别名 `prefer_cloud`） | 在允许且本地模型存在时优先使用云端分支。 |
+| `redact` | 输入需要先脱敏才能离开设备。脱敏尚未实现，因此同样强制设备执行。 |
+| `allow` | 停止求值，按正常方式路由。 |
 
 ```yaml
 # policy.yaml
 version: "1.0.0"
 rules:
-  - id: "keep_audio_on_device"
-    expression: "input.kind == \"AudioRaw\""
-    action: "deny"          # 原始音频输入拒绝走该路由
+  - id: keep_audio_on_device
+    expression: 'input.kind == "audio"'
+    action: deny
+  - id: keep_secrets_on_device
+    expression: 'input.text matches "(?i)confidential|ssn|password"'
+    action: deny
+  - id: offload_when_hot
+    expression: 'metrics.thermal_state == "hot"'
+    action: route_cloud
 
-  - id: "avoid_slow_networks"
-    expression: "metrics.network_rtt > 300"
-    action: "deny"          # 网络慢时不走云端
-
-  - id: "allow_all"
-    expression: "true"
-    action: "allow"
+# 简写列表追加在 `rules` 之后，先拒绝规则：
+deny_cloud_if:
+  - "input.text_len > 4000"
+route_cloud_if:
+  - "metrics.battery_level < 25"
 ```
+
+表达式形如 `<操作数> <运算符> <值>`，或单独的 `true` / `false`：
+
+| 操作数 | 运算符 | 值 |
+|--------|--------|----|
+| `input.kind` | `==` `!=` | `"audio"` `"text"` `"embedding"` `"image"` `"multipart"` |
+| `input.text` | `contains` `matches` `==` `!=` | 带引号的字面量（`matches` 接受正则） |
+| `input.text_len` | `==` `!=` `<` `<=` `>` `>=` | 字符数 |
+| `metrics.battery_level`、`metrics.cpu_pct` | `==` `!=` `<` `<=` `>` `>=` | 0–100 的数字 |
+| `metrics.memory_pressure` | `==` `!=` | `"unknown"` `"normal"` `"warn"` `"critical"` |
+| `metrics.thermal_state` | `==` `!=` | `"normal"` `"warm"` `"hot"` `"critical"` |
+
+文本规则只检查输入文本——不包括系统提示词或元数据——且对非文本输入永不匹配。
+表格之外的任何写法都会在加载 Bundle 时被拒绝，拼写错误不会悄悄让规则失效。
 
 ```bash
-xybrid run --config pipeline.yaml --input-audio q.wav --policy policy.yaml
+xybrid run --config pipeline.yaml --input-text "..." --policy policy.yaml
 ```
 
-表达式可以引用输入 Envelope（`input.kind`）和实时设备指标（`metrics.network_rtt`）。
+结果会同时显示决策和实际运行的后端：
+
+```
+  Routing          cloud
+  Reason           [local] policy_route_cloud: policy rule 'offload_when_hot' prefers cloud: ... (confidence: 90%)
+  Backend          cloud:openai:gateway
+```
+
+`--dry-run --policy policy.yaml` 以同样方式在当前设备快照下决策第一个阶段而不执行推理；
+后续阶段依赖上游输出，因此标记为未知。现成的策略文件位于
+`crates/xybrid-cli/examples/policies/`，与主示例 `hybrid-platform.yaml` 和直连提供商示例
+`hybrid-deepseek.yaml` 放在一起。
 
 ## 回退
 
-当首选路由失败时 — 模型加载失败，或流式过程中断网 — 编排器可以回退到另一个目标。在 Flutter SDK 中，`runStreamingWithFallback` 为 LLM 流式输出直接暴露了这一能力。
+CLI 在执行每个阶段之前选择路由。SDK 流式回退可以在已配置的资源信号导致本地执行中止后，
+在策略允许的情况下于云端重新开始。在 Flutter SDK 中，`runStreamingWithFallback`
+为 LLM 流式输出提供这一行为。
 
 每个路由决策都会记录到遥测中；使用 [`xybrid trace`](/docs/cli/reference/trace) 查看。
 
