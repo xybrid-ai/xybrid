@@ -9,8 +9,9 @@ to JavaScript through a TurboModule.
 **Pre-release.** At 1:1 parity with the Apple and Kotlin SDKs: loader →
 `run()` with full `RunOptions` (sampling config plus cloud fallback /
 abort-on-stress / correlation ID), `warmup`/`unload`, `GenerationConfigs`
-presets, voice introspection, platform-state push, and **token streaming** via
-`model.runStreaming()` (pull-based, aborts on break/completion).
+presets, model and voice introspection, platform-state push, and **token
+streaming** via `model.runStreaming()` (pull-based, aborts on
+break/completion).
 
 ## Architecture
 
@@ -45,6 +46,7 @@ bindings/react-native/
 ├── src/
 │   ├── index.ts             # Public TS facade (Xybrid, ModelLoader, Model)
 │   ├── NativeXybrid.ts      # TurboModule spec (codegen input)
+│   ├── model-info.ts        # Native model-info validation
 │   ├── presets.ts           # GenerationConfigs.greedy() / .creative()
 │   └── types.ts
 ├── ios/
@@ -92,6 +94,27 @@ await model.release();
 > The JS `ModelLoader.fromRegistry(id).load()` facade is preserved for API
 > stability even though the native bolt layer collapsed the loader into the
 > `XybridModel` factories — `index.ts` maps the old shape onto the new calls.
+
+### Model identity and capabilities
+
+`model.info()` reads one consistent snapshot from the same canonical Bolt
+accessors used by the Apple and Kotlin bindings:
+
+```ts
+const model = await ModelLoader.fromRegistry('whisper-tiny-ggml').load();
+const info = await model.info();
+
+console.log(info.modelId);                // canonical model ID
+console.log(info.outputType);              // text | audio | embedding | unknown
+console.log(info.supportsStreaming);
+console.log(info.supportsTokenStreaming);
+```
+
+`model.nativeHandle` is the opaque React Native resource handle. It exists for
+resource ownership and is deliberately separate from `info.modelId`.
+`model.id` remains as a deprecated alias for compatibility. Metadata is read
+fresh on every call, so `isLoaded` reflects lifecycle changes such as
+`unload()`.
 
 ### Run options, warmup/unload, presets
 

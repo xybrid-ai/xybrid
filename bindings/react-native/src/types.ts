@@ -4,7 +4,23 @@
 // records. Binary payloads (audio bytes) ride as base64-encoded strings until
 // the JSI variant lands — see README.md for the migration path.
 
+/** Opaque native resource handle. This is not the model's registry ID. */
 export type ModelHandle = string;
+
+/** Output shape reported by the canonical Bolt model metadata. */
+export type OutputType = 'text' | 'audio' | 'embedding' | 'unknown';
+
+/** Complete, point-in-time metadata snapshot for a native model handle. */
+export interface ModelInfo {
+  /** Canonical model ID from the loaded model metadata. */
+  modelId: string;
+  version: string;
+  outputType: OutputType;
+  isLoaded: boolean;
+  supportsStreaming: boolean;
+  supportsTokenStreaming: boolean;
+  isLlm: boolean;
+}
 
 export type ThermalState = 'normal' | 'warm' | 'hot' | 'critical';
 

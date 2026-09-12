@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **React Native model metadata.** `model.info()` now returns the canonical
+  model ID, version, output type, loaded state, and streaming/LLM capabilities
+  on both native platforms. The public API distinguishes that model ID from
+  the opaque `model.nativeHandle` used for resource ownership (#444).
+
 ### Planned
 
 - **Multimodal KV-prefix reuse**: the per-frame prefill cost lever for live vision — **deferred** from 0.2.0, not yet implemented.

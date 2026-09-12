@@ -186,6 +186,10 @@ jobs:
         working-directory: bindings/react-native
         run: npm run typecheck
 
+      - name: Test model-info contract
+        working-directory: bindings/react-native
+        run: npm run test:model-info
+
       - name: Build TS
         working-directory: bindings/react-native
         run: npm run build

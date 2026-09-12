@@ -1,10 +1,12 @@
 import NativeXybrid from './NativeXybrid';
+import { decodeModelInfo } from './model-info';
 import type {
   DownloadStatus,
   Envelope,
   GenerationConfig,
   InferenceResult,
   ModelHandle,
+  ModelInfo,
   RunOptions,
   StreamEvent,
   StreamToken,
@@ -23,6 +25,8 @@ export type {
   GenerationConfig,
   InferenceResult,
   ModelHandle,
+  ModelInfo,
+  OutputType,
   RunOptions,
   StreamEvent,
   StreamToken,
@@ -211,8 +215,26 @@ export class ModelLoader {
 export class Model {
   constructor(private readonly handle: ModelHandle) {}
 
+  /**
+   * Opaque React Native ownership handle. This is not the model's registry ID;
+   * use {@link info} to read canonical model metadata.
+   */
+  get nativeHandle(): ModelHandle {
+    return this.handle;
+  }
+
+  /** @deprecated Use {@link nativeHandle}; this value is not a model ID. */
   get id(): ModelHandle {
     return this.handle;
+  }
+
+  /**
+   * Read a complete, point-in-time metadata snapshot from the native model.
+   * The values come directly from Bolt and are refreshed on every call.
+   * Unknown or released handles reject with `xybrid_handle`.
+   */
+  async info(): Promise<ModelInfo> {
+    return decodeModelInfo(await NativeXybrid.modelInfo(this.handle));
   }
 
   /**

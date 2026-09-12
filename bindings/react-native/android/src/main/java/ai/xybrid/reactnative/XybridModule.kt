@@ -18,6 +18,7 @@ import ai.xybrid.XybridError
 import ai.xybrid.XybridExecutionTarget
 import ai.xybrid.XybridGenerationConfig
 import ai.xybrid.XybridModel
+import ai.xybrid.XybridOutputType
 import ai.xybrid.XybridResult
 import ai.xybrid.XybridRunOptions
 import ai.xybrid.XybridStreamEventKind
@@ -165,6 +166,16 @@ class XybridModule(reactContext: ReactApplicationContext) :
   @ReactMethod
   fun unload(handle: String, promise: Promise) {
     runVoid(handle, promise) { it.unload() }
+  }
+
+  @ReactMethod
+  fun modelInfo(handle: String, promise: Promise) {
+    val model = models[handle]
+    if (model == null) {
+      promise.reject("xybrid_handle", "Unknown model handle: $handle")
+      return
+    }
+    promise.resolve(encodeModelInfo(model))
   }
 
   // -- Inference --
@@ -658,6 +669,26 @@ class XybridModule(reactContext: ReactApplicationContext) :
     v.gender?.let { out.putString("gender", it) }
     v.language?.let { out.putString("language", it) }
     v.style?.let { out.putString("style", it) }
+    return out
+  }
+
+  private fun encodeModelInfo(model: XybridModel): WritableMap {
+    val out = Arguments.createMap()
+    out.putString("modelId", model.modelId())
+    out.putString("version", model.version())
+    out.putString(
+      "outputType",
+      when (model.outputType()) {
+        XybridOutputType.TEXT -> "text"
+        XybridOutputType.AUDIO -> "audio"
+        XybridOutputType.EMBEDDING -> "embedding"
+        XybridOutputType.UNKNOWN -> "unknown"
+      },
+    )
+    out.putBoolean("isLoaded", model.isLoaded())
+    out.putBoolean("supportsStreaming", model.supportsStreaming())
+    out.putBoolean("supportsTokenStreaming", model.supportsTokenStreaming())
+    out.putBoolean("isLlm", model.isLlm())
     return out
   }
 

@@ -37,6 +37,9 @@ export interface Spec extends TurboModule {
   // Apple/Kotlin/Flutter `warmup`/`unload` surface.
   warmup(handle: string): Promise<void>;
   unload(handle: string): Promise<void>;
+  // Complete point-in-time snapshot from the canonical Bolt accessors. The
+  // opaque handle remains an ownership token and is not included as metadata.
+  modelInfo(handle: string): Promise<Object>;
 
   // -- Speculative cloud --
   // `isCloudServing` predicts the next run; `InferenceResult.executionTarget`
