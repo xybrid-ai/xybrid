@@ -38,8 +38,10 @@ the same time, and a policy bundle decides which leg serves each request.
   `StageResolution`, `PolicyAction`, `PolicyRoute`, `ThinkingMode`,
   `CompletionRequest::with_thinking`, `MockRuntimeAdapter::with_name` /
   `captured_inputs`.
-- Example pipeline `crates/xybrid-cli/examples/hybrid-deepseek.yaml` with
-  policies under `crates/xybrid-cli/examples/policies/`, and the
+- Primary example `crates/xybrid-cli/examples/hybrid-platform.yaml` uses a
+  Xybrid API key and platform-held provider credentials. The separate
+  `hybrid-deepseek.yaml` example supports direct-provider testing. Both use
+  policies under `crates/xybrid-cli/examples/policies/`, alongside the
   `test-policy-routing` workflow that drives the real binary through a policy
   with a real local model and a local fake DeepSeek endpoint.
 

@@ -65,7 +65,7 @@ xybrid run --pipeline hiiipe --dry-run
 ```
   Stage 1 llm
   Declared         target: auto
-  Provider         deepseek
+  Provider         openai
   Policy           ALLOWED
   Reason           all policy checks passed
   Routing          local (default_local)
@@ -76,11 +76,14 @@ xybrid run --pipeline hiiipe --dry-run
   Output           upstream output unavailable without execution
 ```
 
-### 使用策略
+### 使用策略与 Xybrid Platform
+
+主混合示例在设备端运行本地模型，并通过 Xybrid Platform 执行云端推理。
+设备端只需要 Xybrid API 密钥，上游提供商凭据配置在平台上。
 
 ```bash
-DEEPSEEK_API_KEY=sk-... xybrid run \
-  -c crates/xybrid-cli/examples/hybrid-deepseek.yaml \
+XYBRID_API_KEY="<your-xybrid-api-key>" xybrid run \
+  -c crates/xybrid-cli/examples/hybrid-platform.yaml \
   --policy crates/xybrid-cli/examples/policies/prefer-cloud.yaml \
   --input-text "Summarise the plot of Dune in two sentences." -v
 ```
@@ -88,13 +91,22 @@ DEEPSEEK_API_KEY=sk-... xybrid run \
 换成 `policies/local-only.yaml` 可让同一提示词留在设备上，换成 `policies/privacy.yaml`
 则按内容路由。`-v` 还会打印原始的 `routing_decision` JSON 行。
 
+使用 `--platform-url <base-url>` 可连接预发布或自托管平台。示例使用 `gpt-4o-mini`，
+平台需要配置其上游提供商。
+
+### 直连提供商测试
+
+`crates/xybrid-cli/examples/hybrid-deepseek.yaml` 使用 `backend: direct` 和
+`DEEPSEEK_API_KEY` 直接调用 DeepSeek，可用于手动检查提供商连接。
+自动化策略路由测试使用回环地址上的模拟 DeepSeek 端点和测试凭据。
+
 ## 示例输出
 
 ```
   Stage 1 llm
   Routing          cloud
   Reason           [local] policy_route_cloud: policy rule 'route_cloud_if_0' prefers cloud: true (confidence: 90%)
-  Backend          cloud:deepseek:gateway
+  Backend          cloud:openai:gateway
   Time             842ms
   Output           Text
 

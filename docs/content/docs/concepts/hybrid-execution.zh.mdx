@@ -34,24 +34,24 @@ stages:
 
 混合阶段目前由 `xybrid run` 支持。Flutter 与 Rust SDK 的流水线 API 会把 `target: auto` 搭配 `provider` 视为纯云端阶段，不会加载本地模型。
 
+主示例通过 Xybrid Platform 执行云端分支。设备端只需要 `XYBRID_API_KEY`，
+上游提供商的凭据由平台保管。
+
 ```yaml
 stages:
   - id: llm
     model: functiongemma-270m-it      # 本地分支
     target: auto
-    provider: deepseek                # 云端分支
-    cloud_model: deepseek-flash
-    backend: direct                   # 直接以 OpenAI 兼容协议调用 api.deepseek.com，使用 $DEEPSEEK_API_KEY
-    thinking: disabled                # 仅 DeepSeek：只返回回答，不产生隐藏推理 token
+    provider: openai                  # Xybrid Platform 后面的上游提供商
+    cloud_model: gpt-4o-mini
+    backend: gateway                  # 通过 XYBRID_API_KEY 访问 Xybrid Platform
     system_prompt: "You are a concise assistant."
     max_tokens: 128
 ```
 
-对 OpenAI 兼容的提供方（`openai`、`deepseek`、`openrouter`、`custom`）使用
-`backend: direct` 会把请求直接发往该提供方的 API；显式的 `gateway_url` / `api_key`
-可以覆盖默认值。凭据按目标作用域解析：Xybrid 平台密钥只发往已配置的平台网关，
-提供方密钥只发往该提供方自己的源，其他端点除非设置了 `api_key`，否则匿名访问。
-被策略拒绝且本地模型缺失的阶段会在设备上失败，绝不会回落到云端。
+该示例位于 `crates/xybrid-cli/examples/hybrid-platform.yaml`。云端模型必须受平台支持，
+且平台需要配置对应的提供商。策略拒绝云端时，也禁止向 Xybrid Platform 发送推理请求。
+如果本地模型不可用，阶段会在本地失败。尚未缓存的本地模型仍可能需要在推理前下载。
 
 ## `auto` 如何决策
 
@@ -72,20 +72,34 @@ xybrid run --config pipeline.yaml --input-audio q.wav --dry-run
 
 ## 云端执行
 
-云端阶段通过 OpenAI 兼容的 SSE 流式返回响应。访问提供商有两种方式：
+云端阶段使用 OpenAI 兼容的聊天请求；受支持的提供商也提供 SSE 流式响应。访问提供商有两种方式：
 
 ### 通过 Xybrid 网关（默认）
 
-默认情况下，云端阶段通过 Xybrid 网关（`https://api.xybrid.dev/v1`）路由。网关代为保管提供商凭证，设备端无需内嵌任何提供商 API Key。
+使用 `backend: gateway`（默认值）时，云端阶段向 Xybrid Platform 的
+`https://api.xybrid.dev/v1` 发送请求。平台验证 Xybrid 密钥，并使用平台配置的提供商凭据
+调用上游。
 
-```dart
-// 使用自定义或自托管网关
-await Xybrid.init(gatewayUrl: 'https://my-gateway.example.com');
+```bash
+export XYBRID_API_KEY="<your-xybrid-api-key>"
+xybrid run -c crates/xybrid-cli/examples/hybrid-platform.yaml \
+  --policy crates/xybrid-cli/examples/policies/prefer-cloud.yaml \
+  --input-text "Summarise the plot of Dune in two sentences."
 ```
 
-### 直连提供商
+对于预发布或自托管平台，可传入 `--platform-url <base-url>` 或设置
+`XYBRID_PLATFORM_URL`；CLI 会为聊天请求追加 `/v1`。Xybrid 密钥仅发送到所配置的平台源。
 
-带有 `provider` 的阶段可以直接调用提供商 API。API Key 从环境变量解析：
+### 直连提供商测试
+
+使用 `crates/xybrid-cli/examples/hybrid-deepseek.yaml` 测试提供商直连。
+它设置 `backend: direct`、`provider: deepseek`、`cloud_model: deepseek-flash`
+和 `thinking: disabled`，通过 `DEEPSEEK_API_KEY` 认证。运行该示例并选择云端时会发出
+真实的提供商请求。自动化策略路由测试使用回环地址上的模拟 DeepSeek 端点和测试凭据。
+
+对 `openai`、`deepseek`、`openrouter` 或 `custom` 使用 `backend: direct` 会调用提供商的
+OpenAI 兼容 API。`custom` 必须显式设置 `gateway_url`。Anthropic 使用原生直连客户端；
+Google 和 ElevenLabs 没有原生直连客户端。直连凭据从环境变量解析：
 
 | 提供商 | 环境变量 |
 |--------|----------|
@@ -98,6 +112,9 @@ await Xybrid.init(gatewayUrl: 'https://my-gateway.example.com');
 | `custom` | `CUSTOM_API_KEY` |
 
 显式的 `api_key` 字段也接受环境变量引用（`$OPENAI_API_KEY`）— 避免在流水线文件中硬编码明文密钥。
+
+自动解析的提供商凭据只发送到该提供商自己的源。自定义 OpenAI 兼容端点不会自动获得凭据；
+Anthropic 原生客户端访问自定义端点时必须显式设置 `api_key`。
 
 ## 策略
 
@@ -159,16 +176,19 @@ xybrid run --config pipeline.yaml --input-text "..." --policy policy.yaml
 ```
   Routing          cloud
   Reason           [local] policy_route_cloud: policy rule 'offload_when_hot' prefers cloud: ... (confidence: 90%)
-  Backend          cloud:deepseek:gateway
+  Backend          cloud:openai:gateway
 ```
 
 `--dry-run --policy policy.yaml` 以同样方式在当前设备快照下决策第一个阶段而不执行推理；
 后续阶段依赖上游输出，因此标记为未知。现成的策略文件位于
-`crates/xybrid-cli/examples/policies/`，与 `hybrid-deepseek.yaml` 放在一起。
+`crates/xybrid-cli/examples/policies/`，与主示例 `hybrid-platform.yaml` 和直连提供商示例
+`hybrid-deepseek.yaml` 放在一起。
 
 ## 回退
 
-当首选路由失败时 — 模型加载失败，或流式过程中断网 — 编排器可以回退到另一个目标。在 Flutter SDK 中，`runStreamingWithFallback` 为 LLM 流式输出直接暴露了这一能力。
+CLI 在执行每个阶段之前选择路由。SDK 流式回退可以在已配置的资源信号导致本地执行中止后，
+在策略允许的情况下于云端重新开始。在 Flutter SDK 中，`runStreamingWithFallback`
+为 LLM 流式输出提供这一行为。
 
 每个路由决策都会记录到遥测中；使用 [`xybrid trace`](/docs/cli/reference/trace) 查看。
 

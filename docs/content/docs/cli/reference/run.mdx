@@ -65,7 +65,7 @@ Output shows the first-stage decision without running inference:
 ```
   Stage 1 llm
   Declared         target: auto
-  Provider         deepseek
+  Provider         openai
   Policy           ALLOWED
   Reason           all policy checks passed
   Routing          local (default_local)
@@ -76,11 +76,15 @@ Output shows the first-stage decision without running inference:
   Output           upstream output unavailable without execution
 ```
 
-### With a policy
+### With a policy and Xybrid Platform
+
+The primary hybrid example keeps the local model on the device and uses
+Xybrid Platform for cloud inference. Only the Xybrid API key belongs on the
+device; the upstream provider credentials are configured on the platform.
 
 ```bash
-DEEPSEEK_API_KEY=sk-... xybrid run \
-  -c crates/xybrid-cli/examples/hybrid-deepseek.yaml \
+XYBRID_API_KEY="<your-xybrid-api-key>" xybrid run \
+  -c crates/xybrid-cli/examples/hybrid-platform.yaml \
   --policy crates/xybrid-cli/examples/policies/prefer-cloud.yaml \
   --input-text "Summarise the plot of Dune in two sentences." -v
 ```
@@ -89,13 +93,23 @@ Swap in `policies/local-only.yaml` to keep the same prompt on the device, or
 `policies/privacy.yaml` to route by content. `-v` also prints the raw
 `routing_decision` JSON line.
 
+Use `--platform-url <base-url>` for a staging or self-hosted platform. The
+example uses `gpt-4o-mini`, which the platform must have configured upstream.
+
+### Direct provider testing
+
+`crates/xybrid-cli/examples/hybrid-deepseek.yaml` uses `backend: direct` and
+`DEEPSEEK_API_KEY` for direct DeepSeek calls. Keep it for manual provider checks;
+automated policy-routing tests use a loopback fake DeepSeek endpoint with dummy
+credentials.
+
 ## Sample Output
 
 ```
   Stage 1 llm
   Routing          cloud
   Reason           [local] policy_route_cloud: policy rule 'route_cloud_if_0' prefers cloud: true (confidence: 90%)
-  Backend          cloud:deepseek:gateway
+  Backend          cloud:openai:gateway
   Time             842ms
   Output           Text
 

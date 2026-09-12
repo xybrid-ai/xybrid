@@ -1,4 +1,7 @@
-# One LLM stage with two legs: a local GGUF model and DeepSeek's API.
+# Direct-provider example for testing: a local GGUF model and DeepSeek's API.
+# For the primary Xybrid Platform integration, use hybrid-platform.yaml.
+# This example calls DeepSeek directly with your provider key. Automated
+# policy-routing tests use a loopback fake DeepSeek endpoint instead.
 # The policy passed with --policy (and the device state) decide which leg
 # serves each prompt. Export DEEPSEEK_API_KEY, then:
 #
