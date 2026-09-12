@@ -32,6 +32,8 @@ stages:
 选择其中一条。共享选项（`system_prompt`、`temperature`、`max_tokens`、`top_p`）对
 实际运行的分支都生效。
 
+混合阶段目前由 `xybrid run` 支持。Flutter 与 Rust SDK 的流水线 API 会把 `target: auto` 搭配 `provider` 视为纯云端阶段，不会加载本地模型。
+
 ```yaml
 stages:
   - id: llm

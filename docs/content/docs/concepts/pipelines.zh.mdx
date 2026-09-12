@@ -73,6 +73,10 @@ stages:
 | `execution_provider` | ONNX Runtime 覆盖：`cpu`、`coreml`、`coreml-ane`、`coreml-gpu`（不设置则自动选择） |
 | *（其他任意键）* | 作为阶段选项传递 — 常用：`system_prompt`、`max_tokens`、`temperature` |
 
+<Callout type="info">
+混合阶段（`target: auto` 搭配 `provider`）目前由 `xybrid run` 支持。Flutter 与 Rust SDK 的流水线 API 会把该组合视为纯云端阶段，不会加载其本地模型。
+</Callout>
+
 ## 混合设备端与云端阶段
 
 流水线可以为每个阶段独立选择路由 — 音频留在设备端以保证隐私和延迟，需要更大模型时切到云端：

@@ -73,6 +73,10 @@ stages:
 | `execution_provider` | ONNX Runtime override: `cpu`, `coreml`, `coreml-ane`, `coreml-gpu` (auto-selected if unset) |
 | *(any other key)* | Passed to the stage as an option — `system_prompt`, `max_tokens`, `temperature`, `top_p` apply to both legs of a hybrid stage |
 
+<Callout type="info">
+Hybrid stages (`target: auto` with a `provider`) are currently supported by `xybrid run`. The Flutter and Rust SDK pipeline APIs treat this combination as cloud-only and do not load its local model.
+</Callout>
+
 ## Mixing device and cloud stages
 
 A pipeline can route each stage independently — keep audio on-device for privacy and latency, and burst to the cloud for a bigger model:

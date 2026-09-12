@@ -33,6 +33,8 @@ named by `model`, and the provider's model named by `cloud_model` (defaults to
 options (`system_prompt`, `temperature`, `max_tokens`, `top_p`) apply to
 whichever leg runs.
 
+Hybrid stages are currently supported by `xybrid run`. The Flutter and Rust SDK pipeline APIs treat `target: auto` with a `provider` as cloud-only and do not load the local model.
+
 ```yaml
 stages:
   - id: llm
