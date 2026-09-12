@@ -118,16 +118,22 @@ impl CloudRuntimeAdapter {
     ///   provider's documented base URL (`gateway_url` may override; Custom
     ///   requires it).
     /// - `backend: direct` with Anthropic: the native direct client, using
-    ///   the provider's documented base URL (a stage `gateway_url` overrides)
-    ///   and its explicit `api_key` when set, then `$ANTHROPIC_API_KEY`.
-    ///   Google and ElevenLabs have no native client and are rejected here.
+    ///   the provider's documented base URL (a stage `gateway_url` overrides).
+    ///   Credentials are destination-scoped in the native client: an explicit
+    ///   `api_key` always wins; without one, `$ANTHROPIC_API_KEY` is used only
+    ///   when the effective base URL is Anthropic's own origin. A custom
+    ///   destination requires an explicit key — the native-client construction
+    ///   in `cloud::client` fails before any HTTP rather than attaching the
+    ///   ambient provider key to an unrelated endpoint. Google and ElevenLabs
+    ///   have no native client and are rejected here.
     ///
-    /// Credentials are scoped to the destination: an explicit `api_key` always
-    /// wins; otherwise the provider's own `$<PROVIDER>_API_KEY` is selected
-    /// when the destination is that provider's origin; the Xybrid platform key
-    /// is supplied only for the configured platform gateway origin (see
-    /// [`CloudConfig::resolve_api_key`]); anything else is anonymous. A known
-    /// provider origin with no resolvable key fails here, before any HTTP.
+    /// Gateway credentials are scoped the same way: an explicit `api_key`
+    /// always wins; otherwise the provider's own `$<PROVIDER>_API_KEY` is
+    /// selected when the destination is that provider's origin; the Xybrid
+    /// platform key is supplied only for the configured platform gateway
+    /// origin (see [`CloudConfig::resolve_api_key`]); anything else is
+    /// anonymous. A known provider origin with no resolvable key fails here,
+    /// before any HTTP.
     ///
     /// # Errors
     ///

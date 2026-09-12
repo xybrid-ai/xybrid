@@ -1,7 +1,7 @@
 //! Cloud client implementation.
 
 use super::completion::{CompletionRequest, CompletionResponse, Role};
-use super::config::{CloudBackend, CloudConfig};
+use super::config::{same_origin, CloudBackend, CloudConfig};
 use super::error::CloudError;
 use crate::http::{with_retry, CircuitBreaker, CircuitConfig, RetryPolicy, RetryResult};
 use serde_json::json;
@@ -297,23 +297,109 @@ impl Default for Cloud {
 /// Build the native-client [`crate::pipeline::ProviderConfig`] for a
 /// `backend: direct` call.
 ///
-/// Threads the stage's explicit `api_key` (literal or `$VAR` reference, kept
-/// as a reference so the client resolves it at request time) and
-/// `direct_base_url` into the native client. When either is absent the
-/// provider's own environment variable and documented base URL apply, as
-/// before.
+/// Threads the stage's explicit `api_key` (literal or `$VAR` reference) and
+/// `direct_base_url` into the native client. Credential selection is
+/// destination-scoped: an explicit key always wins; without one, the
+/// provider's own environment variable is used only when the effective
+/// destination is the provider's documented origin. A custom (loopback,
+/// staging, lookalike) destination requires an explicit key and fails here —
+/// before any HTTP — so the native client can never attach an ambient
+/// provider credential to an unrelated endpoint.
 fn direct_provider_config(
     provider: &str,
     config: &CloudConfig,
 ) -> Result<crate::pipeline::ProviderConfig, CloudError> {
+    direct_provider_config_with_env(provider, config, |var| std::env::var(var).ok())
+}
+
+/// [`direct_provider_config`] with an injected environment lookup, so the
+/// credential matrix is testable without touching process environment.
+fn direct_provider_config_with_env(
+    provider: &str,
+    config: &CloudConfig,
+    env: impl Fn(&str) -> Option<String>,
+) -> Result<crate::pipeline::ProviderConfig, CloudError> {
     let llm_provider: crate::pipeline::IntegrationProvider = provider
         .parse()
         .map_err(|e: String| CloudError::ConfigError(e))?;
+    let destination = config
+        .direct_base_url
+        .as_deref()
+        .unwrap_or_else(|| llm_provider.default_base_url());
+    let api_key =
+        resolve_direct_api_key(llm_provider, config.api_key.as_deref(), destination, env)?;
+
     let mut provider_config = crate::pipeline::ProviderConfig::new(llm_provider);
     provider_config.base_url = config.direct_base_url.clone();
-    provider_config.api_key = config.api_key.clone();
     provider_config.timeout_ms = config.timeout_ms;
+    // Always concrete: `ProviderConfig::resolve_api_key` falls back to the
+    // provider's environment variable when this is `None`, which would
+    // re-open the ambient credential path the destination check just closed.
+    provider_config.api_key = Some(api_key);
     Ok(provider_config)
+}
+
+/// Destination-scoped credential for a `backend: direct` native call.
+///
+/// Rules, in order:
+/// 1. An explicit key wins. A literal is used as-is; a `$VAR` reference reads
+///    only that variable.
+/// 2. An empty explicit key, or a reference that resolves to nothing, is an
+///    error — never a fall-through to another credential.
+/// 3. With no explicit key, the provider's own environment variable is used
+///    only when `destination` has the provider's documented origin.
+/// 4. Any other destination demands an explicit key; the Xybrid platform key
+///    (`XYBRID_API_KEY`) is never substituted for a provider key.
+///
+/// Errors name the configuration problem, never a secret value.
+fn resolve_direct_api_key(
+    provider: crate::pipeline::IntegrationProvider,
+    explicit: Option<&str>,
+    destination: &str,
+    env: impl Fn(&str) -> Option<String>,
+) -> Result<String, CloudError> {
+    fn non_empty(value: Option<String>) -> Option<String> {
+        value.filter(|v| !v.trim().is_empty())
+    }
+
+    if let Some(key) = explicit {
+        if key.trim().is_empty() {
+            return Err(CloudError::ConfigError(format!(
+                "backend 'direct' for {}: 'api_key' is empty; set a literal key or a '${}' \
+                 reference",
+                provider,
+                provider.api_key_env_var()
+            )));
+        }
+        if let Some(var) = key.strip_prefix('$') {
+            return non_empty(env(var)).ok_or_else(|| {
+                CloudError::ConfigError(format!(
+                    "backend 'direct' for {}: 'api_key' references ${}, which is unset or \
+                     empty; refusing to fall back to another credential",
+                    provider, var
+                ))
+            });
+        }
+        return Ok(key.to_string());
+    }
+
+    if same_origin(destination, provider.default_base_url()) {
+        return non_empty(env(provider.api_key_env_var())).ok_or_else(|| {
+            CloudError::ConfigError(format!(
+                "no API key for {}: set {} or the stage's 'api_key'",
+                provider,
+                provider.api_key_env_var()
+            ))
+        });
+    }
+
+    Err(CloudError::ConfigError(format!(
+        "backend 'direct' for {} at a custom destination ('{}') requires an explicit \
+         'api_key'; refusing to send {} to a different origin",
+        provider,
+        destination,
+        provider.api_key_env_var()
+    )))
 }
 
 /// Extract `choices[0].message.content` from an OpenAI-shaped 200 response.
@@ -479,10 +565,252 @@ mod tests {
         std::env::remove_var("OPENAI_API_KEY");
     }
 
+    /// Environment lookup backed by a literal list, so credential selection
+    /// is tested without touching process environment.
+    fn env_with<'a>(pairs: &'a [(&'a str, &'a str)]) -> impl Fn(&str) -> Option<String> + 'a {
+        move |var| {
+            pairs
+                .iter()
+                .find(|(name, _)| *name == var)
+                .map(|(_, value)| value.to_string())
+        }
+    }
+
+    /// Minimal loopback Anthropic `/messages` responder that records every
+    /// request verbatim, for exercising the public `Cloud` entry point.
+    struct FakeAnthropic {
+        base_url: String,
+        requests: Arc<std::sync::Mutex<Vec<String>>>,
+        stop: Arc<std::sync::atomic::AtomicBool>,
+        thread: Option<std::thread::JoinHandle<()>>,
+    }
+
+    impl FakeAnthropic {
+        fn start() -> Self {
+            use std::io::ErrorKind;
+            use std::net::TcpListener;
+
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            listener.set_nonblocking(true).unwrap();
+            let addr = listener.local_addr().unwrap();
+            let requests = Arc::new(std::sync::Mutex::new(Vec::new()));
+            let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let thread = {
+                let requests = requests.clone();
+                let stop = stop.clone();
+                std::thread::spawn(move || {
+                    while !stop.load(std::sync::atomic::Ordering::SeqCst) {
+                        match listener.accept() {
+                            Ok((stream, _)) => Self::serve(stream, &requests),
+                            Err(e) if e.kind() == ErrorKind::WouldBlock => {
+                                std::thread::sleep(Duration::from_millis(10));
+                            }
+                            Err(_) => break,
+                        }
+                    }
+                })
+            };
+            Self {
+                base_url: format!("http://{addr}"),
+                requests,
+                stop,
+                thread: Some(thread),
+            }
+        }
+
+        fn serve(mut stream: std::net::TcpStream, requests: &Arc<std::sync::Mutex<Vec<String>>>) {
+            use std::io::{Read, Write};
+
+            stream.set_nonblocking(false).unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(10)))
+                .unwrap();
+            let mut request = Vec::new();
+            let mut buf = [0u8; 4096];
+            loop {
+                let read = match stream.read(&mut buf) {
+                    Ok(0) | Err(_) => break,
+                    Ok(n) => n,
+                };
+                request.extend_from_slice(&buf[..read]);
+                if let Some(header_end) = request
+                    .windows(4)
+                    .position(|w| w == b"\r\n\r\n")
+                    .map(|pos| pos + 4)
+                {
+                    let headers = String::from_utf8_lossy(&request[..header_end]).into_owned();
+                    let content_length = headers
+                        .lines()
+                        .find_map(|line| {
+                            let (name, value) = line.split_once(':')?;
+                            name.eq_ignore_ascii_case("content-length")
+                                .then(|| value.trim().parse::<usize>().ok())
+                                .flatten()
+                        })
+                        .unwrap_or(0);
+                    while request.len() < header_end + content_length {
+                        match stream.read(&mut buf) {
+                            Ok(0) | Err(_) => break,
+                            Ok(n) => request.extend_from_slice(&buf[..n]),
+                        }
+                    }
+                    break;
+                }
+            }
+            requests
+                .lock()
+                .unwrap()
+                .push(String::from_utf8_lossy(&request).into_owned());
+
+            let body = r#"{"id":"msg_1","type":"message","role":"assistant","model":"claude-3-5-sonnet-20241022","content":[{"type":"text","text":"FAKE_ANTHROPIC_REPLY"}],"stop_reason":"end_turn","usage":{"input_tokens":3,"output_tokens":2}}"#;
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            let _ = stream.write_all(response.as_bytes());
+        }
+
+        fn requests(&self) -> Vec<String> {
+            self.requests.lock().unwrap().clone()
+        }
+    }
+
+    impl Drop for FakeAnthropic {
+        fn drop(&mut self) {
+            self.stop.store(true, std::sync::atomic::Ordering::SeqCst);
+            if let Some(thread) = self.thread.take() {
+                let _ = thread.join();
+            }
+        }
+    }
+
+    #[test]
+    fn direct_credential_explicit_literal_wins_for_any_destination() {
+        let env = env_with(&[
+            ("ANTHROPIC_API_KEY", "env-anthropic"),
+            ("XYBRID_API_KEY", "env-platform"),
+        ]);
+
+        for destination in ["https://api.anthropic.com/v1", "http://127.0.0.1:8080/v1"] {
+            let key = resolve_direct_api_key(
+                crate::pipeline::IntegrationProvider::Anthropic,
+                Some("literal-key"),
+                destination,
+                &env,
+            )
+            .expect("literal key wins");
+            assert_eq!(key, "literal-key");
+        }
+    }
+
+    #[test]
+    fn direct_credential_env_reference_reads_only_that_variable() {
+        let env = env_with(&[
+            ("ANTHROPIC_API_KEY", "env-anthropic"),
+            ("MY_KEY", "my-key"),
+            ("EMPTY_KEY", "   "),
+            ("XYBRID_API_KEY", "env-platform"),
+        ]);
+
+        let key = resolve_direct_api_key(
+            crate::pipeline::IntegrationProvider::Anthropic,
+            Some("$MY_KEY"),
+            "https://api.anthropic.com/v1",
+            &env,
+        )
+        .expect("reference resolves");
+        assert_eq!(key, "my-key");
+
+        for destination in ["https://api.anthropic.com/v1", "http://127.0.0.1:8080/v1"] {
+            for reference in ["$MISSING_KEY", "$EMPTY_KEY"] {
+                let err = resolve_direct_api_key(
+                    crate::pipeline::IntegrationProvider::Anthropic,
+                    Some(reference),
+                    destination,
+                    &env,
+                )
+                .expect_err("unresolved reference must fail");
+                assert!(matches!(err, CloudError::ConfigError(_)), "{err:?}");
+                assert!(err.to_string().contains("unset or empty"), "{err}");
+            }
+
+            let err = resolve_direct_api_key(
+                crate::pipeline::IntegrationProvider::Anthropic,
+                Some("   "),
+                destination,
+                &env,
+            )
+            .expect_err("whitespace literal is empty");
+            assert!(err.to_string().contains("is empty"), "{err}");
+        }
+    }
+
+    #[test]
+    fn direct_credential_provider_env_only_at_provider_origin() {
+        let env = env_with(&[
+            ("ANTHROPIC_API_KEY", "env-anthropic"),
+            ("XYBRID_API_KEY", "env-platform"),
+        ]);
+
+        for destination in [
+            "https://api.anthropic.com/v1",
+            "https://api.anthropic.com:443/v1/",
+        ] {
+            let key = resolve_direct_api_key(
+                crate::pipeline::IntegrationProvider::Anthropic,
+                None,
+                destination,
+                &env,
+            )
+            .expect("provider origin may use the provider env var");
+            assert_eq!(key, "env-anthropic");
+        }
+
+        // Custom, loopback, different port, downgraded scheme, and lookalike
+        // hosts must all demand an explicit key and must never receive the
+        // platform key or the provider env var.
+        for destination in [
+            "http://127.0.0.1:8080/v1",
+            "http://api.anthropic.com/v1",
+            "https://api.anthropic.com:8443/v1",
+            "https://api.anthropic.com.evil.example/v1",
+            "https://evil.example/api.anthropic.com/v1",
+        ] {
+            let err = resolve_direct_api_key(
+                crate::pipeline::IntegrationProvider::Anthropic,
+                None,
+                destination,
+                &env,
+            )
+            .expect_err("custom destination must require an explicit key");
+            assert!(matches!(err, CloudError::ConfigError(_)), "{err:?}");
+            let message = err.to_string();
+            assert!(
+                message.contains("explicit 'api_key'"),
+                "{destination}: {message}"
+            );
+            assert!(!message.contains("env-anthropic"), "{message}");
+            assert!(!message.contains("env-platform"), "{message}");
+        }
+
+        // The provider origin with no provider env var fails instead of
+        // reaching for the platform key.
+        let platform_only = env_with(&[("XYBRID_API_KEY", "env-platform")]);
+        let err = resolve_direct_api_key(
+            crate::pipeline::IntegrationProvider::Anthropic,
+            None,
+            "https://api.anthropic.com/v1",
+            &platform_only,
+        )
+        .expect_err("missing provider key");
+        let message = err.to_string();
+        assert!(message.contains("ANTHROPIC_API_KEY"), "{message}");
+        assert!(!message.contains("XYBRID"), "{message}");
+    }
+
     #[test]
     fn direct_provider_config_threads_explicit_key_url_and_timeout() {
-        use crate::cloud::config::CloudBackend;
-
         let config = CloudConfig {
             backend: CloudBackend::Direct,
             direct_provider: Some("anthropic".to_string()),
@@ -492,7 +820,9 @@ mod tests {
             ..Default::default()
         };
 
-        let provider_config = direct_provider_config("anthropic", &config).expect("valid provider");
+        let env = env_with(&[("ANTHROPIC_API_KEY", "env-anthropic")]);
+        let provider_config =
+            direct_provider_config_with_env("anthropic", &config, &env).expect("valid provider");
 
         assert_eq!(
             provider_config.base_url.as_deref(),
@@ -508,13 +838,12 @@ mod tests {
     }
 
     #[test]
-    fn direct_provider_config_keeps_env_reference_and_provider_defaults() {
-        let config = CloudConfig {
-            api_key: Some("$ANTHROPIC_API_KEY".to_string()),
-            ..CloudConfig::direct("anthropic")
-        };
+    fn direct_provider_config_resolves_provider_env_at_its_own_origin() {
+        let config = CloudConfig::direct("anthropic");
+        let env = env_with(&[("ANTHROPIC_API_KEY", "sk-ant-env")]);
 
-        let provider_config = direct_provider_config("anthropic", &config).expect("valid provider");
+        let provider_config =
+            direct_provider_config_with_env("anthropic", &config, &env).expect("valid provider");
 
         assert!(
             provider_config.base_url.is_none(),
@@ -524,9 +853,77 @@ mod tests {
             provider_config.effective_base_url(),
             "https://api.anthropic.com/v1"
         );
-        assert_eq!(
-            provider_config.api_key.as_deref(),
-            Some("$ANTHROPIC_API_KEY")
+        // Resolved eagerly to a literal; the native client must not re-read
+        // the environment at request time.
+        assert_eq!(provider_config.api_key.as_deref(), Some("sk-ant-env"));
+    }
+
+    #[test]
+    fn direct_provider_config_rejects_custom_destination_without_explicit_key() {
+        let config = CloudConfig {
+            backend: CloudBackend::Direct,
+            direct_provider: Some("anthropic".to_string()),
+            direct_base_url: Some("http://127.0.0.1:9/v1".to_string()),
+            ..Default::default()
+        };
+        let env = env_with(&[("ANTHROPIC_API_KEY", "env-anthropic")]);
+
+        let err = direct_provider_config_with_env("anthropic", &config, &env)
+            .expect_err("custom destination without an explicit key");
+
+        assert!(matches!(err, CloudError::ConfigError(_)), "{err:?}");
+        assert!(err.to_string().contains("custom destination"), "{err}");
+    }
+
+    #[test]
+    fn direct_cloud_refuses_custom_origin_without_explicit_key_and_makes_no_request() {
+        let server = FakeAnthropic::start();
+        let config = CloudConfig {
+            backend: CloudBackend::Direct,
+            direct_provider: Some("anthropic".to_string()),
+            direct_base_url: Some(format!("{}/v1", server.base_url)),
+            ..Default::default()
+        };
+
+        let cloud = Cloud::with_config(config).expect("client construction");
+        let err = cloud
+            .complete(CompletionRequest::new("hello"))
+            .expect_err("custom destination without a key must fail");
+
+        assert!(matches!(err, CloudError::ConfigError(_)), "{err:?}");
+        assert!(
+            server.requests().is_empty(),
+            "no HTTP before the configuration error: {:?}",
+            server.requests()
+        );
+    }
+
+    #[test]
+    fn direct_cloud_sends_only_the_explicit_key_to_a_custom_origin() {
+        let server = FakeAnthropic::start();
+        let config = CloudConfig {
+            backend: CloudBackend::Direct,
+            direct_provider: Some("anthropic".to_string()),
+            direct_base_url: Some(server.base_url.clone()),
+            api_key: Some("sk-ant-explicit".to_string()),
+            ..Default::default()
+        };
+
+        let cloud = Cloud::with_config(config).expect("client construction");
+        let response = cloud
+            .complete(CompletionRequest::new("hello").with_max_tokens(16))
+            .expect("explicit key request");
+
+        assert_eq!(response.text, "FAKE_ANTHROPIC_REPLY");
+        let requests = server.requests();
+        assert_eq!(requests.len(), 1, "{requests:?}");
+        let request = &requests[0];
+        assert!(request.starts_with("POST /messages "), "{request}");
+        assert!(
+            request
+                .to_ascii_lowercase()
+                .contains("x-api-key: sk-ant-explicit"),
+            "{request}"
         );
     }
 
