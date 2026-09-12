@@ -588,6 +588,7 @@ public final class XybridModuleImpl: NSObject {
     var out: [String: Any] = [
       "success": r.success,
       "latencyMs": r.latencyMs,
+      "metrics": encodeInferenceMetrics(r.metrics),
       "executionTarget": r.executionTarget == .cloud ? "cloud" : "local",
     ]
     if let text = r.text { out["text"] = text }

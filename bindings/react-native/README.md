@@ -86,6 +86,7 @@ await Xybrid.initialize();
 const model = await ModelLoader.fromRegistry('whisper-tiny-ggml').load();
 const result = await model.run({ kind: 'audio', bytesBase64, sampleRate: 16000, channels: 1 });
 console.log(result.text);
+console.log(result.metrics.totalMs, result.metrics.stageLatenciesMs);
 await model.release();
 ```
 
@@ -167,8 +168,11 @@ for await (const token of model.runStreaming(
 }
 ```
 
-The final `InferenceResult` (latency, metrics) is the generator's return value;
-non-LLM models emit a single token carrying the full result, then complete.
+The final `InferenceResult` is the generator's return value and carries the
+same `metrics` object as `run()`: total latency, ordered per-stage latencies,
+and optional LLM measurements such as time-to-first-token, token counts, and
+throughput. LLM-only fields stay absent when a model or backend does not report
+them. Non-LLM models emit a single token carrying the full result, then complete.
 Errors raised mid-stream throw from the loop with the same typed `xybrid_*`
 codes as `run()`.
 
