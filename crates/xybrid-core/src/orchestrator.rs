@@ -270,19 +270,23 @@ impl Orchestrator {
     ) -> OrchestratorResult<StageExecutionResult> {
         let _start_time = std::time::Instant::now();
 
-        // Step 1: Receive input envelope
+        // Step 1: Prepare the input once (shared generation options), then
+        // evaluate policy and resolve the target in ONE authority call so the
+        // policy event, the routing event and the dispatch target agree.
+        //
+        // Preparation runs before `StageStart`: a validation failure must not
+        // publish a stage start that never gets a terminal event, and
+        // `ExecutionFailed` carries a routed target that does not exist yet.
+        let prepared_input = prepare_stage_input(stage, input)
+            .map_err(|e| OrchestratorError::ExecutionFailed(e.to_string()))?;
+
+        // Step 2: Receive input envelope
         // Emit stage start event
         self.event_bus.publish(OrchestratorEvent::StageStart {
             stage_name: stage.name.clone(),
             context: Self::event_context_for_stage(stage),
         });
         self.telemetry.log_stage_start(&stage.name);
-
-        // Step 2: Prepare the input once (shared generation options), then
-        // evaluate policy and resolve the target in ONE authority call so the
-        // policy event, the routing event and the dispatch target agree.
-        let prepared_input = prepare_stage_input(stage, input)
-            .map_err(|e| OrchestratorError::ExecutionFailed(e.to_string()))?;
         let policy_request = PolicyRequest {
             stage_id: stage.name.clone(),
             envelope: prepared_input.clone(),
@@ -518,18 +522,18 @@ impl Orchestrator {
         metrics: &DeviceMetrics,
         availability: &LocalAvailability,
     ) -> OrchestratorResult<StageExecutionResult> {
+        // Prepare before `StageStart` (consistent with sync execute_stage): a
+        // validation failure must not leave a start event without a terminal
+        // counterpart, and no target exists yet to attach to `ExecutionFailed`.
+        let prepared_input = prepare_stage_input(stage, input)
+            .map_err(|e| OrchestratorError::ExecutionFailed(e.to_string()))?;
+
         // Emit stage start event (consistent with sync execute_stage)
         self.event_bus.publish(OrchestratorEvent::StageStart {
             stage_name: stage.name.clone(),
             context: Self::event_context_for_stage(stage),
         });
         self.telemetry.log_stage_start(&stage.name);
-
-        // Step 2: Prepare the input once (shared generation options), then
-        // evaluate policy and resolve the target in ONE authority call so the
-        // policy event, the routing event and the dispatch target agree.
-        let prepared_input = prepare_stage_input(stage, input)
-            .map_err(|e| OrchestratorError::ExecutionFailed(e.to_string()))?;
         let policy_request = PolicyRequest {
             stage_id: stage.name.clone(),
             envelope: prepared_input.clone(),
@@ -1275,6 +1279,64 @@ mod tests {
         let orchestrator = Orchestrator::new();
         let _bus = orchestrator.event_bus();
         // Just verify we can access the event bus
+    }
+
+    /// A stage whose declared options fail `prepare_stage_input`.
+    fn invalid_generation_options_stage() -> StageDescriptor {
+        let mut options = crate::pipeline::StageOptions::new();
+        options.set("max_tokens", 0_u32);
+        StageDescriptor::new("llm")
+            .with_model("functiongemma-270m-it")
+            .with_target(ExecutionTarget::Device)
+            .with_options(options)
+    }
+
+    #[test]
+    fn prepare_failure_publishes_no_stage_start_sync() {
+        let mut orchestrator = Orchestrator::new();
+        let subscription = orchestrator.event_bus().subscribe();
+        let stage = invalid_generation_options_stage();
+        let input = text_envelope("hello");
+        let availability = LocalAvailability::new(true);
+
+        let result =
+            orchestrator.execute_stage(&stage, &input, &local_routing_metrics(), &availability);
+
+        assert!(matches!(result, Err(OrchestratorError::ExecutionFailed(_))));
+        assert!(
+            matches!(
+                subscription.try_recv(),
+                Err(std::sync::mpsc::TryRecvError::Empty)
+            ),
+            "a stage that never starts must not publish StageStart (or any other event)"
+        );
+    }
+
+    #[test]
+    fn prepare_failure_publishes_no_stage_start_async() {
+        tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap()
+            .block_on(async {
+                let mut orchestrator = Orchestrator::new();
+                let subscription = orchestrator.event_bus().subscribe();
+                let stage = invalid_generation_options_stage();
+                let input = text_envelope("hello");
+                let availability = LocalAvailability::new(true);
+
+                let result = orchestrator
+                    .execute_stage_async(&stage, &input, &local_routing_metrics(), &availability)
+                    .await;
+
+                assert!(matches!(result, Err(OrchestratorError::ExecutionFailed(_))));
+                assert!(
+                    matches!(
+                        subscription.try_recv(),
+                        Err(std::sync::mpsc::TryRecvError::Empty)
+                    ),
+                    "async prep failure must not publish StageStart (or any other event)"
+                );
+            });
     }
 
     #[test]
