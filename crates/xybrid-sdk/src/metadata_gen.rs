@@ -15,7 +15,11 @@ use std::collections::HashMap;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
 use xybrid_core::execution::{
-    template::GenerationParams, ExecutionTemplate, ModelMetadata, VisionEncoderConfig,
+    template::{
+        GenerationParams, PhonemeIdStyle, VoiceConfig, VoiceFormat, VoiceInfo,
+        VoiceSelectionStrategy,
+    },
+    ExecutionTemplate, ModelMetadata, PreprocessingStep, VisionEncoderConfig,
     VisionPreprocessingPreset,
 };
 
@@ -56,7 +60,19 @@ pub fn inspect_and_generate(
     let model_card = parse_hf_model_card(&dir.join("README.md"));
 
     // 2. Scan for model files
-    let model_files = detect_model_files(dir);
+    let mut model_files = detect_model_files(dir);
+    if model_files.is_empty() {
+        model_files = detect_model_files(&dir.join("voices"))
+            .into_iter()
+            .map(|mut file| {
+                file.filename = Path::new("voices")
+                    .join(file.filename)
+                    .to_string_lossy()
+                    .into_owned();
+                file
+            })
+            .collect();
+    }
 
     if model_files.is_empty() {
         return Err(SdkError::load(format!(
@@ -99,7 +115,23 @@ pub fn inspect_and_generate(
     };
 
     // 7. List all non-hidden files in directory (excluding README.md, model_metadata.json)
-    let all_files = list_model_files(dir);
+    let mut all_files = list_model_files(dir);
+    if model_files
+        .iter()
+        .any(|file| Path::new(&file.filename).parent() == Some(Path::new("voices")))
+    {
+        all_files.extend(
+            list_model_files(&dir.join("voices"))
+                .into_iter()
+                .map(|file| {
+                    Path::new("voices")
+                        .join(file)
+                        .to_string_lossy()
+                        .into_owned()
+                }),
+        );
+        all_files.sort();
+    }
 
     // 8. Build metadata from collected info
     let metadata = build_metadata(
@@ -1283,6 +1315,7 @@ fn build_onnx_metadata(
                     add_padding: true,
                     normalize_text: false,
                     silence_tokens: None,
+                    id_style: Default::default(),
                 });
                 postprocessing.push(PostprocessingStep::TTSAudioEncode {
                     sample_rate: 24000,
@@ -1396,6 +1429,9 @@ fn build_onnx_metadata(
         .and_then(|c| c.model_name.clone())
         .unwrap_or_else(|| format!("{} (auto-generated)", model_id));
 
+    let voices = task_inference
+        .and_then(|inference| piper_voice_config(primary, all_files, &inference.preprocessing));
+
     ModelMetadata {
         model_id: model_id.to_string(),
         version: "1.0".to_string(),
@@ -1408,10 +1444,90 @@ fn build_onnx_metadata(
         vision_encoder: None,
         description: Some(description),
         metadata: metadata_map,
-        voices: None,
+        voices,
         max_chunk_chars: None,
         trim_trailing_samples: None,
     }
+}
+
+fn piper_voice_config(
+    primary: &ModelFileInfo,
+    all_files: &[String],
+    preprocessing: &[PreprocessingStep],
+) -> Option<VoiceConfig> {
+    if !preprocessing.iter().any(|step| {
+        matches!(
+            step,
+            PreprocessingStep::Phonemize {
+                id_style: PhonemeIdStyle::Piper,
+                ..
+            }
+        )
+    }) {
+        return None;
+    }
+
+    let primary_path = Path::new(&primary.filename);
+    let parent = primary_path.parent().unwrap_or_else(|| Path::new(""));
+    let default = primary_path.file_stem()?.to_str()?.to_string();
+    let mut ids: Vec<String> = all_files
+        .iter()
+        .map(Path::new)
+        .filter(|path| path.parent().unwrap_or_else(|| Path::new("")) == parent)
+        .filter(|path| path.extension().and_then(|value| value.to_str()) == Some("onnx"))
+        .filter_map(|path| path.file_stem()?.to_str().map(str::to_string))
+        .collect();
+    if ids.is_empty() {
+        ids.push(default.clone());
+    }
+    ids.sort();
+    ids.dedup();
+
+    let catalog = ids
+        .into_iter()
+        .map(|id| {
+            let short_name = id
+                .strip_prefix("en_US-")
+                .unwrap_or(&id)
+                .strip_suffix("-medium")
+                .unwrap_or(&id);
+            let name = short_name
+                .split(['-', '_'])
+                .filter(|part| !part.is_empty())
+                .map(|part| {
+                    let mut chars = part.chars();
+                    chars
+                        .next()
+                        .map(|first| first.to_uppercase().chain(chars).collect::<String>())
+                        .unwrap_or_default()
+                })
+                .collect::<Vec<_>>()
+                .join(" ");
+            VoiceInfo {
+                id,
+                name,
+                gender: None,
+                language: Some("en-US".to_string()),
+                style: Some("medium".to_string()),
+                index: None,
+                preview_url: None,
+            }
+        })
+        .collect();
+
+    Some(VoiceConfig {
+        format: VoiceFormat::PerModel {
+            voice_dir: if parent.as_os_str().is_empty() {
+                ".".to_string()
+            } else {
+                parent.to_string_lossy().into_owned()
+            },
+            pattern: "{voice_id}.onnx".to_string(),
+        },
+        default,
+        catalog,
+        selection_strategy: VoiceSelectionStrategy::default(),
+    })
 }
 
 fn build_safetensors_metadata(
@@ -1527,7 +1643,7 @@ pub(crate) fn infer_task_from_tensors(
     files: &SupportingFileInfo,
     hf_card: Option<&HfModelCard>,
 ) -> TaskInference {
-    use xybrid_core::execution::template::TokenizerType;
+    use xybrid_core::execution::template::{PhonemeIdStyle, PhonemizerBackend, TokenizerType};
     use xybrid_core::execution::{PostprocessingStep, PreprocessingStep};
 
     // Helper: choose tokenizer file
@@ -1587,9 +1703,35 @@ pub(crate) fn infer_task_from_tensors(
     let has_tokens = input_names.contains(&"tokens");
     let has_style = input_names.contains(&"style");
     let has_speed = input_names.contains(&"speed");
+    let is_piper = input_names.contains(&"input")
+        && input_names.contains(&"input_lengths")
+        && input_names.contains(&"scales");
     let has_pixel_values = input_names.contains(&"pixel_values");
     let has_input_features =
         input_names.contains(&"input_features") || input_names.contains(&"input_values");
+
+    if is_piper {
+        return TaskInference {
+            task: "text-to-speech".to_string(),
+            preprocessing: vec![PreprocessingStep::Phonemize {
+                tokens_file: "tokens.txt".to_string(),
+                dict_file: None,
+                backend: PhonemizerBackend::EspeakNG,
+                language: Some("en".to_string()),
+                add_padding: false,
+                normalize_text: false,
+                silence_tokens: None,
+                id_style: PhonemeIdStyle::Piper,
+            }],
+            postprocessing: vec![PostprocessingStep::TTSAudioEncode {
+                sample_rate: 22050,
+                apply_postprocessing: false,
+                trim_trailing_silence: false,
+            }],
+            confidence: Confidence::High,
+            alternatives: Vec::new(),
+        };
+    }
 
     // TTS pattern: tokens + style + speed
     if has_tokens && has_style && has_speed {
@@ -1603,6 +1745,7 @@ pub(crate) fn infer_task_from_tensors(
                 add_padding: true,
                 normalize_text: false,
                 silence_tokens: None,
+                id_style: Default::default(),
             }],
             postprocessing: vec![PostprocessingStep::TTSAudioEncode {
                 sample_rate: 24000,
@@ -1716,6 +1859,7 @@ fn infer_from_pipeline_tag(
                 add_padding: true,
                 normalize_text: false,
                 silence_tokens: None,
+                id_style: Default::default(),
             }],
             postprocessing: vec![PostprocessingStep::TTSAudioEncode {
                 sample_rate: 24000,
@@ -1932,6 +2076,7 @@ fn infer_from_output_shapes(
                         add_padding: true,
                         normalize_text: false,
                         silence_tokens: None,
+                        id_style: Default::default(),
                     }],
                     postprocessing: vec![PostprocessingStep::TTSAudioEncode {
                         sample_rate: 24000,
@@ -2769,6 +2914,73 @@ mod tests {
         assert!(matches!(
             result.postprocessing[0],
             xybrid_core::execution::PostprocessingStep::TTSAudioEncode { .. }
+        ));
+    }
+
+    #[test]
+    fn test_infer_piper_inputs() {
+        let onnx = OnnxInfo {
+            inputs: vec![
+                TensorInfo {
+                    name: "input".into(),
+                    shape: vec![1, -1],
+                    dtype: "Int64".into(),
+                },
+                TensorInfo {
+                    name: "input_lengths".into(),
+                    shape: vec![1],
+                    dtype: "Int64".into(),
+                },
+                TensorInfo {
+                    name: "scales".into(),
+                    shape: vec![3],
+                    dtype: "Float32".into(),
+                },
+            ],
+            outputs: vec![TensorInfo {
+                name: "output".into(),
+                shape: vec![1, 1, -1],
+                dtype: "Float32".into(),
+            }],
+        };
+        let result = infer_task_from_tensors(&onnx, &SupportingFileInfo::default(), None);
+        assert_eq!(result.task, "text-to-speech");
+        assert!(matches!(
+            result.preprocessing[0],
+            xybrid_core::execution::PreprocessingStep::Phonemize {
+                backend: xybrid_core::execution::template::PhonemizerBackend::EspeakNG,
+                id_style: xybrid_core::execution::template::PhonemeIdStyle::Piper,
+                ..
+            }
+        ));
+        assert!(matches!(
+            result.postprocessing[0],
+            xybrid_core::execution::PostprocessingStep::TTSAudioEncode {
+                sample_rate: 22_050,
+                ..
+            }
+        ));
+
+        let primary = ModelFileInfo {
+            filename: "voices/en_US-kristin-medium.onnx".to_string(),
+            format: ModelFormat::Onnx,
+            size_bytes: 1,
+        };
+        let files = vec![
+            "tokens.txt".to_string(),
+            "voices/en_US-bryce-medium.onnx".to_string(),
+            "voices/en_US-kristin-medium.onnx".to_string(),
+        ];
+        let voices =
+            piper_voice_config(&primary, &files, &result.preprocessing).expect("Piper voices");
+        assert_eq!(voices.default, "en_US-kristin-medium");
+        assert_eq!(voices.catalog.len(), 2);
+        assert!(matches!(
+            voices.format,
+            VoiceFormat::PerModel {
+                ref voice_dir,
+                ref pattern
+            } if voice_dir == "voices" && pattern == "{voice_id}.onnx"
         ));
     }
 

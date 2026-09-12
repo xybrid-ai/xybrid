@@ -434,6 +434,43 @@
           ]
         },
         {
+          "description": "GGML-format Whisper speech recognition, executed by whisper.cpp on the\nsame ggml the local LLM backend already links.\n\nDistinct from [`ExecutionTemplate::SafeTensors`] with\n`architecture: \"whisper\"`, which routes to the pure-Rust Candle\nimplementation. Both transcribe; they differ in weight format (GGML\nquantized vs F32 safetensors) and therefore in cost, which is the whole\nreason this variant exists.",
+          "type": "object",
+          "properties": {
+            "audio_ctx": {
+              "description": "Encoder context in mel frames, where 1500 covers the full 30 s\nwindow. `0` (the default) means no truncation.\n\nTruncating is the largest single speed lever for live streaming,\nbut truncating too far makes the decoder emit repetition loops.\nMeasured on a Pixel 8 with `tiny.en` Q5_1: 500 is safe for a 5 s\nwindow and 2.8x faster than full context; 250 degenerates. So a\nmodel opts in here after its own quality check rather than\ninheriting a fast-but-fragile default.",
+              "type": "integer",
+              "format": "uint32",
+              "default": 0,
+              "minimum": 0
+            },
+            "language": {
+              "description": "Language code to force (e.g. `\"en\"`). Absent means auto-detect.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "model_file": {
+              "description": "Path to the GGML model file (relative to bundle root), e.g.\n`ggml-base.en-q5_1.bin`.",
+              "type": "string"
+            },
+            "translate": {
+              "description": "Translate into English instead of transcribing in the source\nlanguage.",
+              "type": "boolean",
+              "default": false
+            },
+            "type": {
+              "type": "string",
+              "const": "GgmlWhisper"
+            }
+          },
+          "required": [
+            "type",
+            "model_file"
+          ]
+        },
+        {
           "description": "Vision-language model execution for image+text LLM inputs.",
           "type": "object",
           "properties": {
@@ -638,6 +675,21 @@
           "description": "HTK mel scale (used by older implementations, mel-spec library).\n\nFormula: `mel = 2595 * log10(1 + freq / 700)`",
           "type": "string",
           "const": "htk"
+        }
+      ]
+    },
+    "PhonemeIdStyle": {
+      "description": "How phonemes are framed as model input IDs.",
+      "oneOf": [
+        {
+          "description": "Map each phoneme directly, with optional outer padding.",
+          "type": "string",
+          "const": "standard"
+        },
+        {
+          "description": "Piper framing: BOS, pad, each phoneme followed by pad, then EOS.",
+          "type": "string",
+          "const": "piper"
         }
       ]
     },
@@ -1448,6 +1500,11 @@
                 "null"
               ],
               "default": null
+            },
+            "id_style": {
+              "description": "Token framing used after phonemization.",
+              "$ref": "#/$defs/PhonemeIdStyle",
+              "default": "standard"
             },
             "language": {
               "description": "Language code for espeak-ng (e.g., \"en-us\", \"en-gb\")\nOnly used when backend is EspeakNG",

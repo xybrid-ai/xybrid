@@ -23,7 +23,7 @@ pub use metadata::{VisionEncoderConfig, VisionPreprocessingPreset};
 // Re-export step types
 pub use steps::{
     ImageNormalizePreset, ImageResizeMode, ImageTensorLayout, InterpolationMethod, MelScaleType,
-    PhonemizerBackend, PostprocessingStep, PreprocessingStep, TokenizerType,
+    PhonemeIdStyle, PhonemizerBackend, PostprocessingStep, PreprocessingStep, TokenizerType,
 };
 
 // Re-export voice types
