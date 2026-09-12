@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Native cancellation on Swift, Kotlin, and Unity.** BoltFFI now exposes a
+  one-shot `XybridCancellationToken` on batch, context, and pull-stream runs.
+  Swift `Task` cancellation, Kotlin coroutine/`Flow` cancellation, and .NET
+  `CancellationToken` all signal the same Rust token, so cancelling UI work
+  stops local generation at its next cooperative boundary instead of merely
+  hiding its result (#501).
+
+### Fixed
+
+- Short llama.cpp streams no longer misclassify callback cancellation as a
+  native generation failure. The C return value for a callback stop is the
+  negated token count, so cancellation after one to four tokens collided with
+  hard errors `-1` through `-4`; the preserved callback error now takes
+  precedence. Closing a Bolt pull stream also drains its worker before model
+  teardown, preventing a race with an in-flight Metal context (#501).
+
 ### Planned
 
 - **Multimodal KV-prefix reuse**: the per-frame prefill cost lever for live vision — **deferred** from 0.2.0, not yet implemented.

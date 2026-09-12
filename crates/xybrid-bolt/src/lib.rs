@@ -41,9 +41,7 @@
 //! - **`XybridConversationContext`**: opaque handle (new / with_id / push /
 //!   set_system / clear / id) feeding `run_with_context` and
 //!   `run_stream_with_context`.
-//! - **Deferred to follow-up commits**:
-//!   - `XybridCancellationToken` as an `Arc<Self>` handle.
-//!   - Pipeline surface.
+//! - **Deferred to follow-up commits**: pipeline surface.
 //!
 //! This is now the sole native binding crate: `xybrid-uniffi` and the
 //! pre-bolt `xybrid-ffi` C ABI have both been removed, and every foreign SDK
@@ -984,7 +982,6 @@ pub fn is_auto_release_enabled() -> bool {
 // ============================================================================
 //
 // Scope: load / run / pull-stream / warmup / unload / voice accessors.
-// Cancellation and conversation context remain follow-up work.
 //
 // `ModelLoader` is intentionally **not** mirrored as a separate
 // `#[export]` type. BoltFFI's wire layer treats opaque types as handle
@@ -996,6 +993,42 @@ pub fn is_auto_release_enabled() -> bool {
 // `XybridModelLoader.fromRegistry().load()` — fewer concepts, same
 // capability) and matches the facade's existing handle convention.
 
+/// Cooperative, one-shot cancellation handle for an in-flight inference.
+///
+/// Create one token per run. Calling [`Self::cancel`] from any thread makes
+/// the Rust execution path stop at its next cancellation boundary. Clones are
+/// intentionally not exposed: BoltFFI owns this handle while the facade's
+/// inner `Arc` is shared with the worker.
+pub struct XybridCancellationToken {
+    inner: std::sync::Arc<facade::CancellationToken>,
+}
+
+impl Default for XybridCancellationToken {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[export]
+impl XybridCancellationToken {
+    /// Create a fresh, non-cancelled token.
+    pub fn new() -> Self {
+        Self {
+            inner: facade::CancellationToken::new(),
+        }
+    }
+
+    /// Request cooperative cancellation. Idempotent and thread-safe.
+    pub fn cancel(&self) {
+        self.inner.cancel();
+    }
+
+    /// Whether cancellation has been requested.
+    pub fn is_cancelled(&self) -> bool {
+        self.inner.is_cancelled()
+    }
+}
+
 pub struct XybridModel {
     inner: std::sync::Arc<facade::XybridModel>,
     streams: std::sync::Mutex<std::collections::HashMap<u64, std::sync::Arc<StreamEntry>>>,
@@ -1005,6 +1038,7 @@ pub struct XybridModel {
 struct StreamEntry {
     session: std::sync::Arc<facade::StreamingSession>,
     result: std::sync::Mutex<Option<facade::InferenceResult>>,
+    cancellation: std::sync::Arc<facade::CancellationToken>,
 }
 
 impl XybridModel {
@@ -1168,6 +1202,7 @@ impl XybridModel {
 
     /// Run inference, optionally with [`XybridRunOptions`] (generation config,
     /// abort signals, cloud-fallback). Pass `None` for the model's defaults.
+    /// `cancellation` is one-shot and may be signalled from any thread.
     ///
     /// The hand-written wrappers add a one-arg `run(envelope)` convenience that
     /// forwards `None`, so simple call sites stay ergonomic.
@@ -1175,12 +1210,19 @@ impl XybridModel {
         &self,
         envelope: XybridEnvelope,
         options: Option<XybridRunOptions>,
+        cancellation: &XybridCancellationToken,
     ) -> Result<XybridResult, XybridError> {
         let result = match options {
-            Some(opts) => self
-                .inner
-                .run_with_options(envelope.into(), opts.into(), None),
-            None => self.inner.run(envelope.into()),
+            Some(opts) => self.inner.run_with_options(
+                envelope.into(),
+                opts.into(),
+                Some(std::sync::Arc::clone(&cancellation.inner)),
+            ),
+            None => self.inner.run_with_options(
+                envelope.into(),
+                facade::RunOptions::default(),
+                Some(std::sync::Arc::clone(&cancellation.inner)),
+            ),
         }
         .map_err(XybridError::from)?;
         Ok(result.into())
@@ -1194,13 +1236,15 @@ impl XybridModel {
         &self,
         envelope: XybridEnvelope,
         options: Option<XybridRunOptions>,
+        cancellation: &XybridCancellationToken,
     ) -> Result<u64, XybridError> {
+        let cancellation = std::sync::Arc::clone(&cancellation.inner);
         let session = self
             .inner
             .run_stream(
                 envelope.into(),
                 options.map(Into::into).unwrap_or_default(),
-                None,
+                Some(std::sync::Arc::clone(&cancellation)),
             )
             .map_err(XybridError::from)?;
         let stream_id = self
@@ -1214,6 +1258,7 @@ impl XybridModel {
                 std::sync::Arc::new(StreamEntry {
                     session,
                     result: std::sync::Mutex::new(None),
+                    cancellation,
                 }),
             );
         Ok(stream_id)
@@ -1278,31 +1323,43 @@ impl XybridModel {
         Ok(result.into())
     }
 
-    /// Forget a streaming session.
+    /// Cancel a streaming session and wait for its native worker to finish.
+    ///
+    /// Draining the bounded channel is required here: the producer may already
+    /// have queued tokens when cancellation is signalled. Returning while it
+    /// still owns the model context can race model/Metal teardown in foreign
+    /// callers that release the model immediately after closing the stream.
     pub fn stream_close(&self, stream_id: u64) {
-        self.streams
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .remove(&stream_id);
+        let entry = {
+            self.streams
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .remove(&stream_id)
+        };
+        if let Some(entry) = entry {
+            entry.cancellation.cancel();
+            while entry.session.next().is_some() {}
+        }
     }
 
     /// Run inference seeded with a conversation `context` (multi-turn chat).
     ///
-    /// Only the generation config from `options` is applied — abort signals and
-    /// cloud fallback are not wired on the context path (matches the facade's
-    /// `run_with_context`).
+    /// The same run options and cancellation semantics as [`Self::run`] apply.
     pub fn run_with_context(
         &self,
         envelope: XybridEnvelope,
         context: &XybridConversationContext,
         options: Option<XybridRunOptions>,
+        cancellation: &XybridCancellationToken,
     ) -> Result<XybridResult, XybridError> {
-        let generation_config = options
-            .and_then(|opts| opts.generation_config)
-            .map(Into::into);
         let result = self
             .inner
-            .run_with_context(envelope.into(), context.inner.clone(), generation_config)
+            .run_with_context_options(
+                envelope.into(),
+                context.inner.clone(),
+                options.map(Into::into).unwrap_or_default(),
+                Some(std::sync::Arc::clone(&cancellation.inner)),
+            )
             .map_err(XybridError::from)?;
         Ok(result.into())
     }
@@ -1315,14 +1372,16 @@ impl XybridModel {
         envelope: XybridEnvelope,
         context: &XybridConversationContext,
         options: Option<XybridRunOptions>,
+        cancellation: &XybridCancellationToken,
     ) -> Result<u64, XybridError> {
+        let cancellation = std::sync::Arc::clone(&cancellation.inner);
         let session = self
             .inner
             .run_stream_with_context(
                 envelope.into(),
                 context.inner.clone(),
                 options.map(Into::into).unwrap_or_default(),
-                None,
+                Some(std::sync::Arc::clone(&cancellation)),
             )
             .map_err(XybridError::from)?;
         let stream_id = self
@@ -1336,6 +1395,7 @@ impl XybridModel {
                 std::sync::Arc::new(StreamEntry {
                     session,
                     result: std::sync::Mutex::new(None),
+                    cancellation,
                 }),
             );
         Ok(stream_id)
@@ -1633,6 +1693,17 @@ mod tests {
         // foreign-language consumer's switch-on-code logic from drift.
         let f: facade::Error = e.clone().into();
         assert_eq!(e.code(), f.code());
+    }
+
+    #[test]
+    fn cancellation_token_is_one_shot_and_idempotent() {
+        let token = XybridCancellationToken::new();
+        assert!(!token.is_cancelled());
+
+        token.cancel();
+        token.cancel();
+
+        assert!(token.is_cancelled());
     }
 
     #[test]

@@ -169,6 +169,7 @@ impl RunOptions {
     }
 
     pub fn with_cancellation_token(mut self, token: CancellationToken) -> Self {
+        self.abort_policy = self.abort_policy.stop_on(AbortSignal::UserCancelled);
         self.cancellation_token = Some(token);
         self
     }
@@ -544,6 +545,13 @@ mod tests {
         assert!(clone.same_token(&token));
         // An independently-constructed token is a different logical token.
         assert!(!token.same_token(&other));
+    }
+
+    #[test]
+    fn attaching_cancellation_token_enables_user_cancel_signal() {
+        let options = RunOptions::new().with_cancellation_token(CancellationToken::new());
+
+        assert!(options.abort_policy.observes(AbortSignal::UserCancelled));
     }
 
     #[test]

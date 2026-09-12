@@ -763,6 +763,10 @@ private object Native {
             else -> emptyList()
         }
     }
+    @JvmStatic external fun boltffi_release_class_xybrid_bolt_xybrid_cancellation_token(handle: Long): Unit
+    @JvmStatic external fun boltffi_init_class_xybrid_bolt_xybrid_cancellation_token_new(): Long
+    @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_cancellation_token_cancel(`receiver`: Long): Unit
+    @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_cancellation_token_is_cancelled(`receiver`: Long): Boolean
     @JvmStatic external fun boltffi_release_class_xybrid_bolt_xybrid_model(handle: Long): Unit
     @JvmStatic external fun boltffi_init_class_xybrid_bolt_xybrid_model_from_registry(id: java.nio.ByteBuffer, __boltffi_id_len: Int): Long
     @JvmStatic external fun boltffi_init_class_xybrid_bolt_xybrid_model_from_registry_speculative(id: java.nio.ByteBuffer, __boltffi_id_len: Int): Long
@@ -787,13 +791,13 @@ private object Native {
     @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_model_voices(`receiver`: Long): ByteArray?
     @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_model_default_voice(`receiver`: Long): ByteArray?
     @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_model_voice(`receiver`: Long, voice_id: java.nio.ByteBuffer, __boltffi_voice_id_len: Int): ByteArray?
-    @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_model_run(`receiver`: Long, envelope: java.nio.ByteBuffer, __boltffi_envelope_len: Int, options: java.nio.ByteBuffer, __boltffi_options_len: Int): ByteArray?
-    @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_model_run_stream(`receiver`: Long, envelope: java.nio.ByteBuffer, __boltffi_envelope_len: Int, options: java.nio.ByteBuffer, __boltffi_options_len: Int): Long
+    @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_model_run(`receiver`: Long, envelope: java.nio.ByteBuffer, __boltffi_envelope_len: Int, options: java.nio.ByteBuffer, __boltffi_options_len: Int, cancellation: Long): ByteArray?
+    @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_model_run_stream(`receiver`: Long, envelope: java.nio.ByteBuffer, __boltffi_envelope_len: Int, options: java.nio.ByteBuffer, __boltffi_options_len: Int, cancellation: Long): Long
     @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_model_stream_next(`receiver`: Long, stream_id: Long): ByteArray?
     @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_model_stream_result(`receiver`: Long, stream_id: Long): ByteArray?
     @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_model_stream_close(`receiver`: Long, stream_id: Long): Unit
-    @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_model_run_with_context(`receiver`: Long, envelope: java.nio.ByteBuffer, __boltffi_envelope_len: Int, context: Long, options: java.nio.ByteBuffer, __boltffi_options_len: Int): ByteArray?
-    @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_model_run_stream_with_context(`receiver`: Long, envelope: java.nio.ByteBuffer, __boltffi_envelope_len: Int, context: Long, options: java.nio.ByteBuffer, __boltffi_options_len: Int): Long
+    @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_model_run_with_context(`receiver`: Long, envelope: java.nio.ByteBuffer, __boltffi_envelope_len: Int, context: Long, options: java.nio.ByteBuffer, __boltffi_options_len: Int, cancellation: Long): ByteArray?
+    @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_model_run_stream_with_context(`receiver`: Long, envelope: java.nio.ByteBuffer, __boltffi_envelope_len: Int, context: Long, options: java.nio.ByteBuffer, __boltffi_options_len: Int, cancellation: Long): Long
     @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_model_warmup(`receiver`: Long): Unit
     @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_model_unload(`receiver`: Long): Unit
     @JvmStatic external fun boltffi_release_class_xybrid_bolt_xybrid_conversation_context(handle: Long): Unit
@@ -2021,6 +2025,37 @@ enum class XybridThermalState(val value: Int) {
     }
 }
 
+class XybridCancellationToken internal constructor(internal val handle: Long) : AutoCloseable {
+    private val __boltffi_closed = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    override fun close() {
+        if (__boltffi_closed.compareAndSet(false, true)) {
+            Native.boltffi_release_class_xybrid_bolt_xybrid_cancellation_token(handle)
+        }
+    }
+
+    internal fun boltffiHandle(): Long {
+        check(!__boltffi_closed.get()) { "XybridCancellationToken is closed" }
+        return handle
+    }
+
+    constructor() : this(new().handle)
+
+    companion object {
+        fun new(): XybridCancellationToken {
+            return XybridCancellationToken(Native.boltffi_init_class_xybrid_bolt_xybrid_cancellation_token_new())
+        }
+    }
+
+    fun cancel() {
+        Native.boltffi_method_class_xybrid_bolt_xybrid_cancellation_token_cancel(this.boltffiHandle())
+    }
+
+    fun isCancelled(): Boolean {
+        return Native.boltffi_method_class_xybrid_bolt_xybrid_cancellation_token_is_cancelled(this.boltffiHandle())
+    }
+}
+
 class XybridModel internal constructor(internal val handle: Long) : AutoCloseable {
     private val __boltffi_closed = java.util.concurrent.atomic.AtomicBoolean(false)
 
@@ -2205,7 +2240,7 @@ class XybridModel internal constructor(internal val handle: Long) : AutoCloseabl
         }
     }
 
-    fun run(envelope: XybridEnvelope, options: XybridRunOptions?): XybridResult {
+    fun run(envelope: XybridEnvelope, options: XybridRunOptions?, cancellation: XybridCancellationToken): XybridResult {
         val __boltffi_envelope_wire = WireWriterPool.acquire(envelope.wireSize())
         val __boltffi_envelope_writer = __boltffi_envelope_wire.writer
         envelope.writeTo(__boltffi_envelope_writer)
@@ -2213,7 +2248,7 @@ class XybridModel internal constructor(internal val handle: Long) : AutoCloseabl
         val __boltffi_options_writer = __boltffi_options_wire.writer
         __boltffi_options_writer.writeOptionalValue(options, { __boltffi_options_writer, __boltffi_value_0 -> __boltffi_value_0.writeTo(__boltffi_options_writer) })
         try {
-            val __boltffi_result = try { Native.boltffi_method_class_xybrid_bolt_xybrid_model_run(this.boltffiHandle(), __boltffi_envelope_wire.directBuffer(), __boltffi_envelope_wire.size(), __boltffi_options_wire.directBuffer(), __boltffi_options_wire.size()) } catch (__boltffi_error: BoltFfiErrorBufferException) { run { val __boltffi_error_reader = WireReader(__boltffi_error.bytes); throw XybridError.fromReader(__boltffi_error_reader) } } ?: throw IllegalStateException("null buffer returned")
+            val __boltffi_result = try { Native.boltffi_method_class_xybrid_bolt_xybrid_model_run(this.boltffiHandle(), __boltffi_envelope_wire.directBuffer(), __boltffi_envelope_wire.size(), __boltffi_options_wire.directBuffer(), __boltffi_options_wire.size(), cancellation.boltffiHandle()) } catch (__boltffi_error: BoltFfiErrorBufferException) { run { val __boltffi_error_reader = WireReader(__boltffi_error.bytes); throw XybridError.fromReader(__boltffi_error_reader) } } ?: throw IllegalStateException("null buffer returned")
             val __boltffi_reader = WireReader(__boltffi_result)
             return XybridResult.fromReader(__boltffi_reader)
         } finally {
@@ -2222,7 +2257,7 @@ class XybridModel internal constructor(internal val handle: Long) : AutoCloseabl
         }
     }
 
-    fun runStream(envelope: XybridEnvelope, options: XybridRunOptions?): ULong {
+    fun runStream(envelope: XybridEnvelope, options: XybridRunOptions?, cancellation: XybridCancellationToken): ULong {
         val __boltffi_envelope_wire = WireWriterPool.acquire(envelope.wireSize())
         val __boltffi_envelope_writer = __boltffi_envelope_wire.writer
         envelope.writeTo(__boltffi_envelope_writer)
@@ -2230,7 +2265,7 @@ class XybridModel internal constructor(internal val handle: Long) : AutoCloseabl
         val __boltffi_options_writer = __boltffi_options_wire.writer
         __boltffi_options_writer.writeOptionalValue(options, { __boltffi_options_writer, __boltffi_value_0 -> __boltffi_value_0.writeTo(__boltffi_options_writer) })
         try {
-            return try { Native.boltffi_method_class_xybrid_bolt_xybrid_model_run_stream(this.boltffiHandle(), __boltffi_envelope_wire.directBuffer(), __boltffi_envelope_wire.size(), __boltffi_options_wire.directBuffer(), __boltffi_options_wire.size()) } catch (__boltffi_error: BoltFfiErrorBufferException) { run { val __boltffi_error_reader = WireReader(__boltffi_error.bytes); throw XybridError.fromReader(__boltffi_error_reader) } }.toULong()
+            return try { Native.boltffi_method_class_xybrid_bolt_xybrid_model_run_stream(this.boltffiHandle(), __boltffi_envelope_wire.directBuffer(), __boltffi_envelope_wire.size(), __boltffi_options_wire.directBuffer(), __boltffi_options_wire.size(), cancellation.boltffiHandle()) } catch (__boltffi_error: BoltFfiErrorBufferException) { run { val __boltffi_error_reader = WireReader(__boltffi_error.bytes); throw XybridError.fromReader(__boltffi_error_reader) } }.toULong()
         } finally {
             __boltffi_envelope_wire.close()
             __boltffi_options_wire.close()
@@ -2253,7 +2288,7 @@ class XybridModel internal constructor(internal val handle: Long) : AutoCloseabl
         Native.boltffi_method_class_xybrid_bolt_xybrid_model_stream_close(this.boltffiHandle(), streamId.toLong())
     }
 
-    fun runWithContext(envelope: XybridEnvelope, context: XybridConversationContext, options: XybridRunOptions?): XybridResult {
+    fun runWithContext(envelope: XybridEnvelope, context: XybridConversationContext, options: XybridRunOptions?, cancellation: XybridCancellationToken): XybridResult {
         val __boltffi_envelope_wire = WireWriterPool.acquire(envelope.wireSize())
         val __boltffi_envelope_writer = __boltffi_envelope_wire.writer
         envelope.writeTo(__boltffi_envelope_writer)
@@ -2261,7 +2296,7 @@ class XybridModel internal constructor(internal val handle: Long) : AutoCloseabl
         val __boltffi_options_writer = __boltffi_options_wire.writer
         __boltffi_options_writer.writeOptionalValue(options, { __boltffi_options_writer, __boltffi_value_0 -> __boltffi_value_0.writeTo(__boltffi_options_writer) })
         try {
-            val __boltffi_result = try { Native.boltffi_method_class_xybrid_bolt_xybrid_model_run_with_context(this.boltffiHandle(), __boltffi_envelope_wire.directBuffer(), __boltffi_envelope_wire.size(), context.boltffiHandle(), __boltffi_options_wire.directBuffer(), __boltffi_options_wire.size()) } catch (__boltffi_error: BoltFfiErrorBufferException) { run { val __boltffi_error_reader = WireReader(__boltffi_error.bytes); throw XybridError.fromReader(__boltffi_error_reader) } } ?: throw IllegalStateException("null buffer returned")
+            val __boltffi_result = try { Native.boltffi_method_class_xybrid_bolt_xybrid_model_run_with_context(this.boltffiHandle(), __boltffi_envelope_wire.directBuffer(), __boltffi_envelope_wire.size(), context.boltffiHandle(), __boltffi_options_wire.directBuffer(), __boltffi_options_wire.size(), cancellation.boltffiHandle()) } catch (__boltffi_error: BoltFfiErrorBufferException) { run { val __boltffi_error_reader = WireReader(__boltffi_error.bytes); throw XybridError.fromReader(__boltffi_error_reader) } } ?: throw IllegalStateException("null buffer returned")
             val __boltffi_reader = WireReader(__boltffi_result)
             return XybridResult.fromReader(__boltffi_reader)
         } finally {
@@ -2270,7 +2305,7 @@ class XybridModel internal constructor(internal val handle: Long) : AutoCloseabl
         }
     }
 
-    fun runStreamWithContext(envelope: XybridEnvelope, context: XybridConversationContext, options: XybridRunOptions?): ULong {
+    fun runStreamWithContext(envelope: XybridEnvelope, context: XybridConversationContext, options: XybridRunOptions?, cancellation: XybridCancellationToken): ULong {
         val __boltffi_envelope_wire = WireWriterPool.acquire(envelope.wireSize())
         val __boltffi_envelope_writer = __boltffi_envelope_wire.writer
         envelope.writeTo(__boltffi_envelope_writer)
@@ -2278,7 +2313,7 @@ class XybridModel internal constructor(internal val handle: Long) : AutoCloseabl
         val __boltffi_options_writer = __boltffi_options_wire.writer
         __boltffi_options_writer.writeOptionalValue(options, { __boltffi_options_writer, __boltffi_value_0 -> __boltffi_value_0.writeTo(__boltffi_options_writer) })
         try {
-            return try { Native.boltffi_method_class_xybrid_bolt_xybrid_model_run_stream_with_context(this.boltffiHandle(), __boltffi_envelope_wire.directBuffer(), __boltffi_envelope_wire.size(), context.boltffiHandle(), __boltffi_options_wire.directBuffer(), __boltffi_options_wire.size()) } catch (__boltffi_error: BoltFfiErrorBufferException) { run { val __boltffi_error_reader = WireReader(__boltffi_error.bytes); throw XybridError.fromReader(__boltffi_error_reader) } }.toULong()
+            return try { Native.boltffi_method_class_xybrid_bolt_xybrid_model_run_stream_with_context(this.boltffiHandle(), __boltffi_envelope_wire.directBuffer(), __boltffi_envelope_wire.size(), context.boltffiHandle(), __boltffi_options_wire.directBuffer(), __boltffi_options_wire.size(), cancellation.boltffiHandle()) } catch (__boltffi_error: BoltFfiErrorBufferException) { run { val __boltffi_error_reader = WireReader(__boltffi_error.bytes); throw XybridError.fromReader(__boltffi_error_reader) } }.toULong()
         } finally {
             __boltffi_envelope_wire.close()
             __boltffi_options_wire.close()

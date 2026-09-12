@@ -135,6 +135,37 @@ string output = model.RunText("Tell me about the ancient ruins.");
 string transcription = model.RunAudio(microphoneBytes, sampleRate: 16000);
 ```
 
+## Cancellation
+
+The batch, context, and streaming APIs accept the standard .NET
+`CancellationToken`. Cancelling it signals the Rust generation loop and the
+returned task completes as cancelled once the native run reaches its next
+cooperative boundary.
+
+```csharp
+using System.Threading;
+using System.Threading.Tasks;
+using Xybrid;
+
+using var stop = new CancellationTokenSource();
+
+Task<InferenceResult> pending = model.RunAsync(
+    Envelope.Text("Write a long story"),
+    cancellationToken: stop.Token);
+
+// For example, from a UI Stop action:
+stop.Cancel();
+
+try
+{
+    using var result = await pending;
+}
+catch (OperationCanceledException)
+{
+    // Expected: native inference was cooperatively stopped.
+}
+```
+
 ---
 
 ## Result Handling

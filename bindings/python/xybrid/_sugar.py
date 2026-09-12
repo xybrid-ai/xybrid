@@ -278,25 +278,67 @@ def _install_model_accessors() -> None:
     run_with_context = model.__dict__["run_with_context"]
     run_stream_with_context = model.__dict__["run_stream_with_context"]
 
-    def _run(self: Any, envelope: Any, options: Any = None) -> Any:
+    def _run(
+        self: Any,
+        envelope: Any,
+        options: Any = None,
+        cancellation: Any = None,
+    ) -> Any:
         """Run one inference and return its result."""
 
-        return run(self, envelope, options)
+        token = (
+            cancellation
+            if cancellation is not None
+            else _bolt.XybridCancellationToken()
+        )
+        return run(self, envelope, options, token)
 
-    def _run_stream(self: Any, envelope: Any, options: Any = None) -> int:
+    def _run_stream(
+        self: Any,
+        envelope: Any,
+        options: Any = None,
+        cancellation: Any = None,
+    ) -> int:
         """Start a streaming run and return its stream id."""
 
-        return run_stream(self, envelope, options)
+        token = (
+            cancellation
+            if cancellation is not None
+            else _bolt.XybridCancellationToken()
+        )
+        return run_stream(self, envelope, options, token)
 
-    def _run_with_context(self: Any, envelope: Any, context: Any, options: Any = None) -> Any:
+    def _run_with_context(
+        self: Any,
+        envelope: Any,
+        context: Any,
+        options: Any = None,
+        cancellation: Any = None,
+    ) -> Any:
         """Run one inference against a conversation context."""
 
-        return run_with_context(self, envelope, context, options)
+        token = (
+            cancellation
+            if cancellation is not None
+            else _bolt.XybridCancellationToken()
+        )
+        return run_with_context(self, envelope, context, options, token)
 
-    def _run_stream_with_context(self: Any, envelope: Any, context: Any, options: Any = None) -> int:
+    def _run_stream_with_context(
+        self: Any,
+        envelope: Any,
+        context: Any,
+        options: Any = None,
+        cancellation: Any = None,
+    ) -> int:
         """Start a streaming run against a conversation context."""
 
-        return run_stream_with_context(self, envelope, context, options)
+        token = (
+            cancellation
+            if cancellation is not None
+            else _bolt.XybridCancellationToken()
+        )
+        return run_stream_with_context(self, envelope, context, options, token)
 
     def close(self: Any) -> None:
         """Release the native handle now instead of at garbage collection.

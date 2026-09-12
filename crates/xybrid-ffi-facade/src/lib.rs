@@ -1026,6 +1026,13 @@ impl RunOptions {
         for sig in &self.abort_on {
             policy = policy.stop_on(sig.to_sdk());
         }
+        if cancel.is_some() {
+            // Cancellation is an explicit handle at the FFI boundary rather
+            // than an `AbortSignal` enum value. Supplying that handle must
+            // therefore opt the SDK policy into observing UserCancelled too;
+            // otherwise the attached token is present but silently ignored.
+            policy = policy.stop_on(sdk::AbortSignal::UserCancelled);
+        }
 
         let mut opts = sdk::RunOptions::new().with_abort_policy(policy);
         if let Some(gc) = &self.generation_config {
@@ -1750,6 +1757,30 @@ impl XybridModel {
         let result = self
             .inner
             .run_with_context(&env, &ctx, gc.as_ref())
+            .map_err(Error::from)?;
+        Ok(InferenceResult::from_sdk(result))
+    }
+
+    /// Run context-aware inference with the full per-run option set and an
+    /// optional cooperative cancellation handle.
+    ///
+    /// This is the context counterpart of [`Self::run_with_options`]. The
+    /// simpler [`Self::run_with_context`] remains for callers that only need a
+    /// generation-config override.
+    pub fn run_with_context_options(
+        &self,
+        envelope: Envelope,
+        context: Arc<ConversationContextHandle>,
+        options: RunOptions,
+        cancel: Option<Arc<CancellationToken>>,
+    ) -> Result<InferenceResult> {
+        let env = envelope.into_sdk()?;
+        let ctx = context.snapshot();
+        let opts =
+            options.to_sdk_over(cancel.as_deref(), self.inner.default_generation_config())?;
+        let result = self
+            .inner
+            .run_with_context_options(&env, &ctx, &opts)
             .map_err(Error::from)?;
         Ok(InferenceResult::from_sdk(result))
     }
@@ -2640,6 +2671,9 @@ mod tests {
         assert!(sdk_opts
             .abort_policy
             .observes(sdk::AbortSignal::ThermalCritical));
+        assert!(sdk_opts
+            .abort_policy
+            .observes(sdk::AbortSignal::UserCancelled));
         assert_eq!(sdk_opts.correlation_id.as_deref(), Some("trace-1"));
         assert!(sdk_opts.cancellation_token.is_some());
     }

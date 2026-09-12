@@ -1269,20 +1269,20 @@ let result = model.run_streaming_with_options(&envelope, &options, |token| {
 layers and platform routing can restart on cloud where supported; local Rust
 streaming abort is cooperative and checked before every emitted token.
 
-**User cancellation (Dart binding surface — implemented, issue 10).** A caller
-can abort an in-flight local streaming run via a `CancellationToken` cancel
-handle. In Rust the token is paired with `RunOptions`
-(`with_cancellation_token`); in Dart the caller constructs a
-`CancellationToken` and passes it to the streaming run methods
-(`runStreaming` / `runStreamingWithContext` / `runStreamingWithFallback`) via
-the optional `cancellationToken` parameter. Cancellation is **cooperative**:
-the token's cancelled state is checked before every emitted token, so it takes
-effect at the next token boundary, not mid-token, and surfaces as the
-`AbortSignal::UserCancelled` policy signal. When the token is cancelled — or
-the Dart stream is unsubscribed mid-run (sink-close-as-cancel) — Rust halts
-generation at the next token and **releases the model write lock promptly**, so
-a follow-up run can start. The Dart cancel handle exposes `cancel()` and an
-`isCancelled` getter.
+**User cancellation (implemented across native bindings).** A caller can abort
+an in-flight local run through a cooperative cancellation handle. Rust pairs
+`CancellationToken` with `RunOptions`; Dart passes it to its streaming methods;
+and Bolt exposes `XybridCancellationToken` on batch, context, and pull-stream
+runs. The hand-written platform layers connect that primitive to Swift `Task`
+cancellation, Kotlin coroutine/`Flow` cancellation, and .NET
+`CancellationToken`. Supplying a token automatically makes the run observe
+`AbortSignal::UserCancelled`.
+
+Cancellation is checked before execution and at each generated-token boundary.
+It cannot interrupt a single indivisible ONNX forward, but it does stop a long
+LLM generation and release the model lock promptly. Closing a native pull
+stream both signals cancellation and waits for its worker to leave the native
+context, so immediately releasing the model is safe.
 
 ```dart
 final cancel = CancellationToken();
@@ -1294,6 +1294,22 @@ final sub = stream.listen((token) { /* ... */ });
 // Later, to stop Rust generation (not just unsubscribe):
 cancel.cancel();
 await sub.cancel();
+```
+
+```swift
+let task = Task { try await model.runAsync(envelope: envelope) }
+task.cancel() // signals the native token
+```
+
+```kotlin
+val job = launch { model.streamTokens(envelope).collect(::render) }
+job.cancel() // Flow cleanup cancels and closes the native stream
+```
+
+```csharp
+using var stop = new CancellationTokenSource();
+Task<InferenceResult> run = model.RunAsync(envelope, cancellationToken: stop.Token);
+stop.Cancel();
 ```
 
 **Preemptive cancel-and-replace (implemented, issue 11).** A continuous
@@ -1406,8 +1422,8 @@ stream stays low-cardinality.
 | `RunOptions.frameSessionId` / `liveMode` | ✅ | 📋 | 📋 | 📋 |
 | `AbortPolicy` | ✅ | planned | planned | planned |
 | `AbortSignal` | ✅ | planned | planned | planned |
-| `AbortSignal.userCancelled` (Dart surface via CancellationToken) | ✅ | 📋 | 📋 | 📋 |
-| `CancellationToken` | ✅ | planned | planned | planned |
+| `AbortSignal.userCancelled` (binding surface via cancellation handle) | ✅ | ✅ | ✅ | ✅ |
+| `CancellationToken` | ✅ | ✅ | ✅ | ✅ |
 | `StreamToken` | ✅ | — | — | ✅ |
 
 ---
