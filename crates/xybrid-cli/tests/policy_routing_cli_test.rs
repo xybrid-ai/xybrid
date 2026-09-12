@@ -201,6 +201,202 @@ impl Drop for FakeDeepSeek {
     }
 }
 
+/// Loopback registry that serves a passthrough resolve response and the real
+/// GGUF bytes, so the cold-cache download/extraction path can be exercised
+/// end to end without touching the network. Once `reject_unexpected_requests`
+/// is set, every further request is answered with 503 (and still recorded).
+struct FakeRegistry {
+    url: String,
+    requests: Arc<Mutex<Vec<String>>>,
+    stop: Arc<AtomicBool>,
+    reject: Arc<AtomicBool>,
+    thread: Option<JoinHandle<()>>,
+}
+
+impl FakeRegistry {
+    fn start(model_id: &str, fixture_dir: &Path) -> Self {
+        let metadata: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(fixture_dir.join("model_metadata.json")).unwrap(),
+        )
+        .unwrap();
+        let model_file_name = metadata["files"]
+            .as_array()
+            .expect("metadata.files")
+            .iter()
+            .filter_map(|file| file.as_str())
+            .find(|name| name.ends_with(".gguf"))
+            .expect("fixture declares a GGUF")
+            .to_string();
+        let model_file = fixture_dir.join(&model_file_name);
+
+        let sha256 = {
+            use sha2::{Digest, Sha256};
+            let mut file = std::fs::File::open(&model_file).unwrap();
+            let mut hasher = Sha256::new();
+            let mut buf = [0u8; 64 * 1024];
+            loop {
+                let read = file.read(&mut buf).unwrap();
+                if read == 0 {
+                    break;
+                }
+                hasher.update(&buf[..read]);
+            }
+            format!("{:x}", hasher.finalize())
+        };
+        let size_bytes = std::fs::metadata(&model_file).unwrap().len();
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let addr = listener.local_addr().unwrap();
+        let base = format!("http://{addr}");
+        let resolve_body = serde_json::json!({
+            "mask": model_id,
+            "platform": "e2e",
+            "resolved": {
+                "hf_repo": "ggml-org/functiongemma-270m-it-GGUF",
+                "file": model_file_name,
+                "download_url": format!("{base}/files/{model_file_name}"),
+                "format": "gguf",
+                "quantization": "Q8_0",
+                "size_bytes": size_bytes,
+                "sha256": sha256,
+                "passthrough": true,
+                "model_metadata": metadata,
+            }
+        });
+
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let stop = Arc::new(AtomicBool::new(false));
+        let reject = Arc::new(AtomicBool::new(false));
+        let thread = {
+            let requests = requests.clone();
+            let stop = stop.clone();
+            let reject = reject.clone();
+            let resolve_body = resolve_body.clone();
+            let model_file = model_file.clone();
+            thread::spawn(move || {
+                while !stop.load(Ordering::SeqCst) {
+                    match listener.accept() {
+                        Ok((stream, _)) => {
+                            Self::serve(stream, &requests, &reject, &resolve_body, &model_file)
+                        }
+                        Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                            thread::sleep(Duration::from_millis(10));
+                        }
+                        Err(_) => break,
+                    }
+                }
+            })
+        };
+
+        Self {
+            url: base,
+            requests,
+            stop,
+            reject,
+            thread: Some(thread),
+        }
+    }
+
+    fn serve(
+        mut stream: TcpStream,
+        requests: &Arc<Mutex<Vec<String>>>,
+        reject: &Arc<AtomicBool>,
+        resolve_body: &serde_json::Value,
+        model_file: &Path,
+    ) {
+        stream.set_nonblocking(false).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(30)))
+            .unwrap();
+        let mut request = Vec::new();
+        let mut buf = [0u8; 8192];
+        while request.windows(4).position(|w| w == b"\r\n\r\n").is_none() {
+            match stream.read(&mut buf) {
+                Ok(0) | Err(_) => break,
+                Ok(n) => request.extend_from_slice(&buf[..n]),
+            }
+        }
+        let request_text = String::from_utf8_lossy(&request).into_owned();
+        let path = request_text
+            .lines()
+            .next()
+            .and_then(|line| line.split_whitespace().nth(1))
+            .unwrap_or("/")
+            .to_string();
+        requests.lock().unwrap().push(request_text);
+
+        if reject.load(Ordering::SeqCst) {
+            let _ = write_http_response(&mut stream, 503, "text/plain", b"unexpected request");
+            return;
+        }
+
+        if path.contains("/v1/models/") && path.contains("/resolve") {
+            let body = serde_json::to_vec(resolve_body).unwrap();
+            let _ = write_http_response(&mut stream, 200, "application/json", &body);
+            return;
+        }
+
+        if let Some(name) = path.strip_prefix("/files/") {
+            let expected = model_file
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("");
+            if name == expected {
+                match std::fs::File::open(model_file) {
+                    Ok(mut file) => {
+                        let size = file.metadata().map(|m| m.len()).unwrap_or(0);
+                        let header = format!(
+                            "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: {size}\r\nConnection: close\r\n\r\n"
+                        );
+                        if stream.write_all(header.as_bytes()).is_ok() {
+                            let _ = std::io::copy(&mut file, &mut stream);
+                        }
+                    }
+                    Err(_) => {
+                        let _ = write_http_response(&mut stream, 404, "text/plain", b"missing");
+                    }
+                }
+                return;
+            }
+        }
+
+        let _ = write_http_response(&mut stream, 404, "text/plain", b"not found");
+    }
+
+    fn requests(&self) -> Vec<String> {
+        self.requests.lock().unwrap().clone()
+    }
+
+    fn reject_unexpected_requests(&self) {
+        self.reject.store(true, Ordering::SeqCst);
+    }
+}
+
+impl Drop for FakeRegistry {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::SeqCst);
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
+}
+
+fn write_http_response(
+    stream: &mut TcpStream,
+    status: u16,
+    content_type: &str,
+    body: &[u8],
+) -> std::io::Result<()> {
+    let reason = if status == 200 { "OK" } else { "Error" };
+    let header = format!(
+        "HTTP/1.1 {status} {reason}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        body.len()
+    );
+    stream.write_all(header.as_bytes())?;
+    stream.write_all(body)
+}
+
 struct Run {
     status: std::process::ExitStatus,
     stdout: String,
@@ -208,7 +404,15 @@ struct Run {
 }
 
 fn run_cli(home: &Path, args: &[&str]) -> Run {
-    let mut child = Command::new(xybrid_bin())
+    run_cli_with_env(home, args, &[])
+}
+
+/// Spawn `xybrid run` with an isolated child environment. `env_overrides` are
+/// applied after the removals, so an explicit loopback registry URL wins over
+/// the "never leak the developer's env" cleanup.
+fn run_cli_with_env(home: &Path, args: &[&str], env_overrides: &[(&str, &str)]) -> Run {
+    let mut command = Command::new(xybrid_bin());
+    command
         .current_dir(workspace_root())
         .env("HOME", home)
         .env("DEEPSEEK_API_KEY", DUMMY_DEEPSEEK_KEY)
@@ -223,7 +427,12 @@ fn run_cli(home: &Path, args: &[&str]) -> Run {
         .env_remove("HTTPS_PROXY")
         .env_remove("http_proxy")
         .env_remove("https_proxy")
-        .env_remove("ALL_PROXY")
+        .env_remove("ALL_PROXY");
+    for (key, value) in env_overrides {
+        command.env(key, value);
+    }
+
+    let mut child = command
         .arg("run")
         .args(args)
         .stdout(Stdio::piped())
@@ -560,4 +769,148 @@ fn dry_run_loads_policy_without_inference() {
         env.fake.requests()
     );
     assert!(!denied.stdout.contains(FAKE_REPLY) && !preferred.stdout.contains(FAKE_REPLY));
+}
+
+/// Cold cache: the hybrid local leg must download, extract (metadata included),
+/// and run locally; the next run must reuse the extracted copy without
+/// touching the registry.
+#[test]
+fn cold_cache_hybrid_downloads_extracts_and_then_runs_offline() {
+    let model_id = model_id();
+    let Some(fixture_dir) = fixture_dir_or_skip(&model_id) else {
+        return;
+    };
+
+    let temp = tempfile::tempdir().unwrap();
+    let home = temp.path().join("home");
+    std::fs::create_dir_all(&home).unwrap();
+
+    let registry = FakeRegistry::start(&model_id, &fixture_dir);
+    let fake = FakeDeepSeek::start();
+
+    let stage = format!(
+        r#"  - id: llm
+    model: {model_id}
+    target: auto
+    provider: deepseek
+    cloud_model: deepseek-flash
+    gateway_url: "{url}"
+    api_key: "$DEEPSEEK_API_KEY"
+    thinking: disabled
+    system_prompt: "{SYSTEM_PROMPT}"
+    temperature: 0
+    max_tokens: 16
+"#,
+        url = fake.url
+    );
+    let pipeline = temp.path().join("hybrid-cold.yaml");
+    std::fs::write(
+        &pipeline,
+        format!("name: policy-e2e-cold\nstages:\n{stage}"),
+    )
+    .unwrap();
+    let local_only = temp.path().join("local-only.yaml");
+    std::fs::write(
+        &local_only,
+        "version: \"1.0.0\"\ndeny_cloud_if:\n  - \"true\"\n",
+    )
+    .unwrap();
+
+    let args = [
+        "-c",
+        pipeline.to_str().unwrap(),
+        "--input-text",
+        PROMPT,
+        "--policy",
+        local_only.to_str().unwrap(),
+    ];
+    let registry_env = [("XYBRID_REGISTRY_URL", registry.url.as_str())];
+
+    // First run: cold cache -> registry resolve + passthrough download.
+    let run = run_cli_with_env(&home, &args, &registry_env);
+    assert_success(&run);
+    assert_eq!(
+        kv_value(&run.stdout, "Routing").as_deref(),
+        Some("local"),
+        "{}",
+        run.stdout
+    );
+    assert_eq!(
+        kv_value(&run.stdout, "Backend").as_deref(),
+        Some("template-executor"),
+        "{}",
+        run.stdout
+    );
+
+    let extracted = home
+        .join(".xybrid")
+        .join("cache")
+        .join("extracted")
+        .join(&model_id);
+    assert!(
+        extracted.join("model_metadata.json").is_file(),
+        "extraction must materialize model_metadata.json: {}",
+        extracted.display()
+    );
+    let metadata: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(extracted.join("model_metadata.json")).unwrap(),
+    )
+    .unwrap();
+    for file in metadata["files"].as_array().expect("metadata.files") {
+        let name = file.as_str().unwrap();
+        assert!(
+            extracted.join(name).is_file(),
+            "extraction must materialize {name}"
+        );
+    }
+
+    let first_requests = registry.requests();
+    assert!(
+        first_requests
+            .iter()
+            .any(|request| request.contains("/v1/models/")),
+        "cold run must resolve through the registry: {first_requests:?}"
+    );
+    assert!(
+        first_requests
+            .iter()
+            .any(|request| request.contains("/files/")),
+        "cold run must download the model file: {first_requests:?}"
+    );
+    assert!(
+        fake.requests().is_empty(),
+        "local-only policy must make no cloud request: {:?}",
+        fake.requests()
+    );
+
+    // Second run: the extracted copy is reused; the registry rejects
+    // everything from here on, so any request is a failure.
+    registry.reject_unexpected_requests();
+    let request_count = registry.requests().len();
+
+    let offline = run_cli_with_env(&home, &args, &registry_env);
+    assert_success(&offline);
+    assert_eq!(
+        kv_value(&offline.stdout, "Routing").as_deref(),
+        Some("local"),
+        "{}",
+        offline.stdout
+    );
+    assert_eq!(
+        kv_value(&offline.stdout, "Backend").as_deref(),
+        Some("template-executor"),
+        "{}",
+        offline.stdout
+    );
+    assert_eq!(
+        registry.requests().len(),
+        request_count,
+        "a warm extracted cache must not call the registry again: {:?}",
+        registry.requests()
+    );
+    assert!(
+        fake.requests().is_empty(),
+        "offline run must still make no cloud request: {:?}",
+        fake.requests()
+    );
 }

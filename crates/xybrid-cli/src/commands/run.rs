@@ -217,10 +217,18 @@ fn resolve_device_stage(
         return Ok(());
     }
 
-    // Not cached locally — must fetch from the registry.
+    // Not cached locally — fetch and materialize the extracted bundle.
     download_model(desc, model_id, client)
 }
 
+/// Download and extract a model, setting `desc.bundle_path` only once the
+/// runtime-ready extraction directory exists.
+///
+/// `fetch_extracted` is the SDK entry point that turns a `.xyb` bundle into an
+/// extraction directory and, for passthrough variants (e.g. raw GGUF files),
+/// writes `model_metadata.json` alongside the model file. Plain `fetch`
+/// returns the downloaded bundle *file*, which the local executor cannot load,
+/// so a cold-cache hybrid stage must not stop there.
 fn download_model(
     desc: &mut StageDescriptor,
     model_id: &str,
@@ -230,13 +238,13 @@ fn download_model(
         Ok(resolved) => {
             let pb = ui::download_bar(resolved.size_bytes, model_id);
 
-            match client.fetch(model_id, None, |progress| {
+            match client.fetch_extracted(model_id, None, |progress| {
                 let bytes_done = (progress * resolved.size_bytes as f32) as u64;
                 pb.set_position(bytes_done);
             }) {
                 Ok(bundle_path) => {
                     pb.finish_and_clear();
-                    ui::ok(&format!("{} downloaded", model_id));
+                    ui::ok(&format!("{} downloaded and extracted", model_id));
                     desc.bundle_path = Some(bundle_path.to_string_lossy().to_string());
                 }
                 Err(e) => {
