@@ -10,7 +10,7 @@ export type ModelHandle = string;
 /** Output shape reported by the canonical Bolt model metadata. */
 export type OutputType = 'text' | 'audio' | 'embedding' | 'unknown';
 
-/** Complete, point-in-time metadata snapshot for a native model handle. */
+/** Identity and capabilities read from a native model handle. */
 export interface ModelInfo {
   /** Canonical model ID from the loaded model metadata. */
   modelId: string;

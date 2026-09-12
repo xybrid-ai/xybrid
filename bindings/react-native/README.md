@@ -97,7 +97,7 @@ await model.release();
 
 ### Model identity and capabilities
 
-`model.info()` reads one consistent snapshot from the same canonical Bolt
+`model.info()` reads the metadata fields in one bridge call from the canonical Bolt
 accessors used by the Apple and Kotlin bindings:
 
 ```ts

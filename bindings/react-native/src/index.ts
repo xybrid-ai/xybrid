@@ -229,7 +229,7 @@ export class Model {
   }
 
   /**
-   * Read a complete, point-in-time metadata snapshot from the native model.
+   * Read the native model's identity and capabilities in one bridge call.
    * The values come directly from Bolt and are refreshed on every call.
    * Unknown or released handles reject with `xybrid_handle`.
    */
