@@ -17,7 +17,6 @@ import ai.xybrid.XybridDownloadStatus
 import ai.xybrid.XybridError
 import ai.xybrid.XybridExecutionTarget
 import ai.xybrid.XybridGenerationConfig
-import ai.xybrid.XybridInferenceMetrics
 import ai.xybrid.XybridModel
 import ai.xybrid.XybridResult
 import ai.xybrid.XybridRunOptions
@@ -602,7 +601,7 @@ class XybridModule(reactContext: ReactApplicationContext) :
     val out = Arguments.createMap()
     out.putBoolean("success", r.success)
     out.putInt("latencyMs", r.latencyMs.toInt())
-    out.putMap("metrics", encodeMetrics(r.metrics))
+    out.putMap("metrics", encodeInferenceMetrics(r.metrics))
     out.putString(
       "executionTarget",
       if (r.executionTarget == XybridExecutionTarget.CLOUD) "cloud" else "local",
@@ -615,25 +614,6 @@ class XybridModule(reactContext: ReactApplicationContext) :
       it.forEach { f -> arr.pushDouble(f.toDouble()) }
       out.putArray("embedding", arr)
     }
-    return out
-  }
-
-  private fun encodeMetrics(m: XybridInferenceMetrics): WritableMap {
-    val out = Arguments.createMap()
-    out.putDouble("totalMs", m.totalMs.toDouble())
-    m.ttftMs?.let { out.putDouble("ttftMs", it.toDouble()) }
-    m.tokensPerSecond?.let { out.putDouble("tokensPerSecond", it.toDouble()) }
-    m.prefillTps?.let { out.putDouble("prefillTps", it.toDouble()) }
-    m.decodeTps?.let { out.putDouble("decodeTps", it.toDouble()) }
-    m.tokensOut?.let { out.putDouble("tokensOut", it.toDouble()) }
-    val stages = Arguments.createArray()
-    m.stageLatenciesMs.forEach { stage ->
-      val encoded = Arguments.createMap()
-      encoded.putString("stageId", stage.stageId)
-      encoded.putDouble("latencyMs", stage.latencyMs.toDouble())
-      stages.pushMap(encoded)
-    }
-    out.putArray("stageLatenciesMs", stages)
     return out
   }
 
