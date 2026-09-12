@@ -682,27 +682,17 @@ impl Pipeline {
         }
     }
 
+    /// Build [`StageOptions`] from parsed YAML options without a numeric
+    /// round-trip.
+    ///
+    /// Values are copied verbatim: YAML integers stay integers, floats stay
+    /// floats, and malformed values are preserved so the owning validator
+    /// ([`xybrid_core::executor::prepare_stage_input`]) rejects them with a
+    /// useful error instead of silently dropping them.
     fn convert_options(options: &HashMap<String, serde_json::Value>) -> StageOptions {
-        let mut stage_options = StageOptions::new();
-        for (key, value) in options {
-            match value {
-                serde_json::Value::Number(n) => {
-                    if let Some(f) = n.as_f64() {
-                        stage_options.set(key, f);
-                    } else if let Some(i) = n.as_u64() {
-                        stage_options.set(key, i as u32);
-                    }
-                }
-                serde_json::Value::String(s) => {
-                    stage_options.set(key, s.clone());
-                }
-                serde_json::Value::Bool(b) => {
-                    stage_options.set(key, *b);
-                }
-                _ => {}
-            }
+        StageOptions {
+            values: options.clone(),
         }
-        stage_options
     }
 
     /// Resolve stage information from the registry.
@@ -2009,4 +1999,117 @@ id: asr
     // LLM metrics now ride on `PlatformEvent.stages[].spans[].metadata`
     // via `xybrid_core::tracing::add_metadata`, which is covered by the
     // consuming platform's own span-extraction tests.
+
+    /// Parsed-YAML options for the numeric-type regression tests.
+    fn numeric_option_map() -> HashMap<String, serde_json::Value> {
+        [
+            ("max_tokens", serde_json::json!(16)),
+            ("temperature", serde_json::json!(0)),
+            ("top_p", serde_json::json!(0.9)),
+            ("system_prompt", serde_json::json!("Be terse.")),
+            ("debug", serde_json::json!(true)),
+            ("timeout_ms", serde_json::json!(1234)),
+        ]
+        .into_iter()
+        .map(|(key, value)| (key.to_string(), value))
+        .collect()
+    }
+
+    #[test]
+    fn convert_options_preserves_yaml_numeric_types() {
+        let converted = Pipeline::convert_options(&numeric_option_map());
+
+        assert!(
+            converted.values["max_tokens"].is_u64(),
+            "integer must not become a float: {:?}",
+            converted.values["max_tokens"]
+        );
+        assert_eq!(converted.values["max_tokens"].as_u64(), Some(16));
+        assert!(converted.values["temperature"].is_u64());
+        assert_eq!(converted.values["top_p"].as_f64(), Some(0.9));
+        assert_eq!(converted.values["timeout_ms"].as_u64(), Some(1234));
+        assert_eq!(
+            converted.values["system_prompt"].as_str(),
+            Some("Be terse.")
+        );
+        assert_eq!(converted.values["debug"].as_bool(), Some(true));
+    }
+
+    #[test]
+    fn converted_integer_options_reach_prepare_stage_input() {
+        let stage = StageDescriptor::new("llm")
+            .with_options(Pipeline::convert_options(&numeric_option_map()));
+        let input = Envelope::new(EnvelopeKind::Text("hi".to_string()));
+
+        let prepared = xybrid_core::executor::prepare_stage_input(&stage, &input)
+            .expect("integer options are valid");
+
+        assert_eq!(
+            prepared.metadata.get("max_tokens").map(String::as_str),
+            Some("16")
+        );
+        assert_eq!(
+            prepared.metadata.get("temperature").map(String::as_str),
+            Some("0")
+        );
+        assert_eq!(
+            prepared.metadata.get("top_p").map(String::as_str),
+            Some("0.9")
+        );
+        assert_eq!(
+            prepared.metadata.get("system_prompt").map(String::as_str),
+            Some("Be terse.")
+        );
+    }
+
+    #[test]
+    fn input_metadata_overrides_converted_yaml_options() {
+        let stage = StageDescriptor::new("llm")
+            .with_options(Pipeline::convert_options(&numeric_option_map()));
+        let mut input = Envelope::new(EnvelopeKind::Text("hi".to_string()));
+        input
+            .metadata
+            .insert("max_tokens".to_string(), "7".to_string());
+
+        let prepared = xybrid_core::executor::prepare_stage_input(&stage, &input).unwrap();
+
+        assert_eq!(
+            prepared.metadata.get("max_tokens").map(String::as_str),
+            Some("7")
+        );
+    }
+
+    #[test]
+    fn converted_malformed_options_are_preserved_and_rejected() {
+        for value in [
+            serde_json::json!(0),
+            serde_json::json!(-1),
+            serde_json::json!(1.5),
+            serde_json::json!("16"),
+        ] {
+            let options: HashMap<String, serde_json::Value> =
+                [("max_tokens".to_string(), value.clone())]
+                    .into_iter()
+                    .collect();
+            let stage =
+                StageDescriptor::new("llm").with_options(Pipeline::convert_options(&options));
+            let input = Envelope::new(EnvelopeKind::Text("hi".to_string()));
+
+            let err = xybrid_core::executor::prepare_stage_input(&stage, &input)
+                .expect_err("malformed token limit must fail");
+            assert!(
+                err.to_string().contains("positive integer"),
+                "{value}: {err}"
+            );
+        }
+
+        let options: HashMap<String, serde_json::Value> =
+            [("system_prompt".to_string(), serde_json::json!(3))]
+                .into_iter()
+                .collect();
+        let stage = StageDescriptor::new("llm").with_options(Pipeline::convert_options(&options));
+        let input = Envelope::new(EnvelopeKind::Text("hi".to_string()));
+        let err = xybrid_core::executor::prepare_stage_input(&stage, &input).unwrap_err();
+        assert!(err.to_string().contains("a string"), "{err}");
+    }
 }
