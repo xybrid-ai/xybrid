@@ -15,6 +15,9 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  # Pinned Rust toolchain. Canonical value lives in rust-toolchain.toml;
+  # `tools/scripts/toolchain-sync.sh --check` fails CI if they drift.
+  RUST_VERSION: "1.98.0"
   RUST_BACKTRACE: 1
   NDK_VERSION: "26.1.10909125"
   FLUTTER_VERSION: "3.35.7"
@@ -40,7 +43,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
         with:
-          toolchain: stable
+          toolchain: ${{ env.RUST_VERSION }}
           targets: >-
             aarch64-apple-darwin,
             aarch64-apple-ios,
@@ -97,7 +100,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
         with:
-          toolchain: stable
+          toolchain: ${{ env.RUST_VERSION }}
           targets: >-
             x86_64-unknown-linux-gnu,
             aarch64-linux-android,
@@ -166,7 +169,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
         with:
-          toolchain: stable
+          toolchain: ${{ env.RUST_VERSION }}
           targets: x86_64-pc-windows-msvc
 
       - name: Setup sccache
@@ -241,7 +244,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
         with:
-          toolchain: stable
+          toolchain: ${{ env.RUST_VERSION }}
           # All four ABIs the bolt config builds (the AAR ships the first
           # three; i686/x86 is built but not packaged).
           targets: >-

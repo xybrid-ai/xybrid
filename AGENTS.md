@@ -39,6 +39,35 @@ Crate-wide lint opt-outs go in `lib.rs` at the crate root (see e.g.
 `crates/xybrid-core/src/lib.rs`). Don't sprinkle `#[allow(...)]` at call sites —
 push it to crate level or fix the lint. Never bypass hooks (`--no-verify`).
 
+### Toolchain — pinned, don't float it
+
+`rust-toolchain.toml` at the repo root is canonical. rustup honours it for every
+cargo invocation inside the repo, so your `cargo`/`clippy` match CI's exactly
+even if your `rustup default` is something else.
+
+This exists because CI used to resolve `stable` at job time. On 2026-08-18 Rust
+1.98.0 shipped `clippy::chunks_exact_to_as_chunks`, and master plus every open
+PR went red under `-D warnings` without anyone touching the code (#522). A pin
+turns that into a deliberate, reviewable commit.
+
+GitHub Actions cannot read `rust-toolchain.toml`, so each workflow carries a
+`RUST_VERSION` env pin fed to `dtolnay/rust-toolchain`. Keep them in sync:
+
+```bash
+tools/scripts/toolchain-sync.sh --check    # CI gate (runs in the `fmt` job)
+tools/scripts/toolchain-sync.sh --write    # rewrite workflows from the toml
+```
+
+The check also fails if a workflow installs Rust without declaring the pin, or
+reintroduces a floating `stable` / `beta` / `nightly` channel.
+
+**To bump:** edit `channel` in `rust-toolchain.toml`, run
+`toolchain-sync.sh --write`, and fix any new lints **in the same PR** — that PR
+is the whole point, since it makes the blast radius visible before it lands.
+
+Bazel is unaffected: it carries its own hermetic Rust toolchain, pinned
+separately in `MODULE.bazel`.
+
 ### Building native bindings / cross-compiled artifacts
 
 **Native artifacts are built by Bazel**, not `xtask`. Bazel brings its own
@@ -168,7 +197,8 @@ new SDK entry points should consider whether they extend into it too.
 
 ## Workspace layout
 
-Cargo workspace, `resolver = "2"`, edition 2021, MSRV not pinned. Members:
+Cargo workspace, `resolver = "2"`, edition 2021. Build toolchain pinned in
+`rust-toolchain.toml`; no MSRV declared. Members:
 
 | Crate                          | Role                                                       | Layer    |
 |--------------------------------|------------------------------------------------------------|----------|
@@ -420,8 +450,10 @@ These are genuinely ambiguous in the current code — flag them to a maintainer
 rather than picking arbitrarily:
 
 1. **MSRV.** No `rust-version` is pinned in any `Cargo.toml`. Should the
-   workspace pin one (e.g. matching what CI's `dtolnay/rust-toolchain@stable`
-   resolves to today)?
+   workspace declare one for published crates? (The *build* toolchain is now
+   pinned in `rust-toolchain.toml` — see § Toolchain — but that is a different
+   thing: it says what we compile with, not what a consumer needs.) Picking an
+   MSRV means measuring it (`cargo-msrv`) and committing to supporting it.
 2. **Async test style.** `runtime.block_on` (current) vs `#[tokio::test]`
    (rust-skills `test-tokio-async`) — both work; no canonical choice yet.
 3. **Workspace-level lints.** Only `bindings/flutter/rust` has a `[lints]`
