@@ -186,6 +186,10 @@ jobs:
         working-directory: bindings/react-native
         run: npm run typecheck
 
+      - name: Test result contracts
+        working-directory: bindings/react-native
+        run: npm test
+
       - name: Build TS
         working-directory: bindings/react-native
         run: npm run build
@@ -232,6 +236,13 @@ jobs:
             --allow-warnings \
             --quick \
             --verbose
+
+      - name: Test Swift metrics conversion
+        working-directory: bindings/react-native
+        run: |
+          swiftc ios/XybridMetricsEncoder.swift tests/swift/main.swift \
+            -o /tmp/xybrid-rn-metrics-test
+          /tmp/xybrid-rn-metrics-test
 
   # The real end-to-end gate: build the Expo example app for Android from
   # working-tree source. This compiles the bolt .so, publishes the kotlin

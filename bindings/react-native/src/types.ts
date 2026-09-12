@@ -76,6 +76,33 @@ export interface RunOptions {
   correlationId?: string;
 }
 
+/** Latency reported for one stage of the inference pipeline. */
+export interface StageLatency {
+  stageId: string;
+  latencyMs: number;
+}
+
+/**
+ * Measurements captured by the native inference runtime. LLM-specific values
+ * are absent when a model or backend does not report them.
+ */
+export interface InferenceMetrics {
+  /** Total wall-clock inference time in milliseconds. */
+  totalMs: number;
+  /** Time to first generated token in milliseconds. */
+  ttftMs?: number;
+  /** Overall generated-token throughput. */
+  tokensPerSecond?: number;
+  /** Prompt-processing throughput. */
+  prefillTps?: number;
+  /** Generated-token decode throughput. */
+  decodeTps?: number;
+  /** Number of generated tokens. */
+  tokensOut?: number;
+  /** Per-stage measurements in native execution order. */
+  stageLatenciesMs: StageLatency[];
+}
+
 export interface InferenceResult {
   success: boolean;
   text?: string;
@@ -89,6 +116,8 @@ export interface InferenceResult {
   audioBytesBase64?: string;
   embedding?: number[];
   latencyMs: number;
+  /** Detailed native measurements for this inference. */
+  metrics: InferenceMetrics;
   /**
    * Where this answer actually came from. Cloud fallback keeps the model id
    * identical on both legs by design, so this is the only way to tell a

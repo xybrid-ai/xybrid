@@ -601,6 +601,7 @@ class XybridModule(reactContext: ReactApplicationContext) :
     val out = Arguments.createMap()
     out.putBoolean("success", r.success)
     out.putInt("latencyMs", r.latencyMs.toInt())
+    out.putMap("metrics", encodeInferenceMetrics(r.metrics))
     out.putString(
       "executionTarget",
       if (r.executionTarget == XybridExecutionTarget.CLOUD) "cloud" else "local",

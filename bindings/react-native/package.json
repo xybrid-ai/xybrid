@@ -20,6 +20,8 @@
   ],
   "scripts": {
     "typecheck": "tsc --noEmit",
+    "test": "tsc --noEmit --strict --skipLibCheck --moduleResolution node --target ES2020 tests/metrics-types.test.ts && node --test tests/metrics-encoders.test.mjs",
+    "test:swift-metrics": "swiftc ios/XybridMetricsEncoder.swift tests/swift/main.swift -o /tmp/xybrid-rn-metrics-test && /tmp/xybrid-rn-metrics-test",
     "build": "tsc -p tsconfig.build.json",
     "clean": "rm -rf lib"
   },
