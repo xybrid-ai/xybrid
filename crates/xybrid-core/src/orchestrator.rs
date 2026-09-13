@@ -1124,7 +1124,7 @@ mod tests {
 
     #[test]
     fn test_execute_single_stage() {
-        let mut orchestrator = Orchestrator::new();
+        let mut orchestrator = orchestrator_with_mock_adapter(ExecutionMode::Batch);
         let stage = StageDescriptor::new("test_stage");
         let input = text_envelope("Text");
         let metrics = DeviceMetrics::default();
@@ -1181,7 +1181,7 @@ mod tests {
         // With the new authority-based routing, LocalAuthority checks if the model
         // actually exists locally. Since there's no actual model for "test_stage",
         // it routes to cloud for execution.
-        let mut orchestrator = Orchestrator::new();
+        let mut orchestrator = orchestrator_with_mock_adapter(ExecutionMode::Batch);
         let stage = StageDescriptor::new("test_stage");
         let input = audio_envelope(&[9, 9, 9, 9]);
         let metrics = DeviceMetrics::default();

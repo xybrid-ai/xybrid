@@ -27,15 +27,9 @@
 //!
 //! - **ASR streaming.** [`xybrid_sdk::stream::XybridStream`] is wrapped
 //!   separately in the same follow-up.
-//! - **Pipelines.** `xybrid-sdk` already exports POD-friendly
-//!   [`FfiPipelineExecutionResult`] / [`FfiStageExecutionResult`]; the
-//!   binding crates can re-export those directly. A dedicated facade for
-//!   pipelines is a separate concern.
 //!
 //! [`xybrid-bolt`]: https://docs.rs/xybrid-bolt
 //! [`xybrid-ffi`]: https://docs.rs/xybrid-ffi
-//! [`FfiPipelineExecutionResult`]: xybrid_sdk::FfiPipelineExecutionResult
-//! [`FfiStageExecutionResult`]: xybrid_sdk::FfiStageExecutionResult
 
 use std::collections::HashMap;
 use std::sync::mpsc::{self, Receiver, SyncSender};
@@ -1324,6 +1318,40 @@ impl InferenceResult {
         }
     }
 
+    /// Convert a pipeline result into the same result shape used by models.
+    ///
+    /// A pipeline can cross execution targets, so provenance describes the
+    /// final stage that produced the output. Metrics combine final-envelope
+    /// inference metadata with one latency entry per executed stage.
+    fn from_pipeline(result: sdk::PipelineExecutionResult, model_id: String) -> Self {
+        let mut metrics =
+            sdk::InferenceMetrics::from_metadata(&result.output.metadata, result.total_latency_ms);
+        metrics.stage_latencies_ms = result
+            .stages
+            .iter()
+            .map(|stage| sdk::StageLatency {
+                stage_id: stage.name.clone(),
+                latency_ms: stage.latency_ms,
+            })
+            .collect();
+
+        let execution_target = result
+            .stages
+            .last()
+            .map(|stage| ExecutionTarget::from_pipeline_target(&stage.target))
+            .unwrap_or(ExecutionTarget::Local);
+
+        Self {
+            envelope: Envelope::from_sdk(result.output),
+            output_type: OutputType::from_sdk(result.output_type),
+            model_id,
+            latency_ms: result.total_latency_ms,
+            execution_target,
+            metrics: InferenceMetrics::from_sdk(&metrics),
+            tool_calls: Vec::new(),
+        }
+    }
+
     /// Convenience: text payload, if the result is `OutputType::Text`.
     pub fn text(&self) -> Option<&str> {
         match &self.envelope.kind {
@@ -1363,6 +1391,84 @@ impl InferenceResult {
             EnvelopeKind::Embedding { values } => Some(values.as_slice()),
             _ => None,
         }
+    }
+}
+
+impl ExecutionTarget {
+    /// Map the pipeline runner's textual target to coarse result provenance.
+    ///
+    /// The runner currently emits `device`, `cloud:<provider>`, or
+    /// `server:<endpoint>`. Older fast paths used `local` and `fallback:`, so
+    /// accept those spellings too. Unknown non-local targets are treated as
+    /// cloud to avoid falsely claiming that remote work happened on-device.
+    fn from_pipeline_target(target: &str) -> Self {
+        match target {
+            "device" | "local" => Self::Local,
+            _ => Self::Cloud,
+        }
+    }
+}
+
+// ============================================================================
+// Pipeline handle
+// ============================================================================
+
+/// FFI-friendly handle around a loaded multi-stage pipeline.
+///
+/// Construction intentionally collapses the SDK's `PipelineRef -> Pipeline`
+/// sequence into one fallible operation. Foreign callers receive one opaque
+/// handle with constructors, introspection, and execution methods.
+pub struct Pipeline {
+    inner: sdk::Pipeline,
+}
+
+impl Pipeline {
+    /// Parse and load a pipeline from YAML content.
+    pub fn from_yaml(yaml: String) -> Result<Arc<Self>> {
+        let pipeline = sdk::PipelineRef::from_yaml(&yaml)?.load()?;
+        Ok(Arc::new(Self { inner: pipeline }))
+    }
+
+    /// Read, parse, and load a pipeline from a YAML file.
+    pub fn from_file(path: String) -> Result<Arc<Self>> {
+        let pipeline = sdk::PipelineRef::from_file(path)?.load()?;
+        Ok(Arc::new(Self { inner: pipeline }))
+    }
+
+    /// Load a pipeline bundle.
+    ///
+    /// Pipeline bundles are YAML files today. Keeping a distinct constructor
+    /// preserves the foreign API when richer bundle formats are introduced.
+    pub fn from_bundle(path: String) -> Result<Arc<Self>> {
+        Self::from_file(path)
+    }
+
+    /// Execute every stage and return the final output.
+    pub fn run(&self, envelope: Envelope) -> Result<InferenceResult> {
+        let envelope = envelope.into_sdk()?;
+        let model_id = self
+            .inner
+            .stages()
+            .last()
+            .and_then(|stage| stage.model_id.clone())
+            .unwrap_or_default();
+        let result = self.inner.run(&envelope)?;
+        Ok(InferenceResult::from_pipeline(result, model_id))
+    }
+
+    /// Pipeline name from the YAML definition, if present.
+    pub fn name(&self) -> Option<String> {
+        self.inner.name().map(str::to_string)
+    }
+
+    /// Stage identifiers in execution order.
+    pub fn stage_names(&self) -> Vec<String> {
+        self.inner.stage_names()
+    }
+
+    /// Number of stages in the pipeline.
+    pub fn stage_count(&self) -> u32 {
+        u32::try_from(self.inner.stage_count()).unwrap_or(u32::MAX)
     }
 }
 
@@ -2351,6 +2457,99 @@ mod tests {
         }
         .is_retryable());
         assert!(!Error::NotLoaded.is_retryable());
+    }
+
+    #[test]
+    fn pipeline_construction_collapses_ref_and_exposes_stage_ids() {
+        let pipeline = Pipeline::from_yaml(
+            r#"
+name: assistant
+stages:
+  - id: answer
+    model: gpt-4o-mini
+    target: cloud
+    provider: openai
+"#
+            .into(),
+        )
+        .expect("cloud-only pipeline should resolve without model downloads");
+
+        assert_eq!(pipeline.name().as_deref(), Some("assistant"));
+        assert_eq!(pipeline.stage_names(), vec!["answer"]);
+        assert_eq!(pipeline.stage_count(), 1);
+    }
+
+    #[test]
+    fn pipeline_result_preserves_stage_metrics_and_final_provenance() {
+        let mut metadata = HashMap::new();
+        metadata.insert("ttft_ms".into(), "12".into());
+        metadata.insert("reasoning_content".into(), "working".into());
+        let sdk_result = sdk::PipelineExecutionResult {
+            name: Some("assistant".into()),
+            stages: vec![
+                sdk::PipelineStageTiming {
+                    name: "asr".into(),
+                    latency_ms: 40,
+                    target: "device".into(),
+                    reason: "cached".into(),
+                },
+                sdk::PipelineStageTiming {
+                    name: "answer".into(),
+                    latency_ms: 60,
+                    target: "cloud:openai".into(),
+                    reason: "explicit".into(),
+                },
+            ],
+            total_latency_ms: 105,
+            output_type: sdk::OutputType::Text,
+            output: sdk::ir::Envelope::with_metadata(
+                sdk::ir::EnvelopeKind::Text("hello".into()),
+                metadata,
+            ),
+        };
+
+        let result = InferenceResult::from_pipeline(sdk_result, "gpt-4o-mini".into());
+
+        assert_eq!(result.text(), Some("hello"));
+        assert_eq!(result.reasoning_content(), Some("working"));
+        assert_eq!(result.model_id, "gpt-4o-mini");
+        assert_eq!(result.execution_target, ExecutionTarget::Cloud);
+        assert_eq!(result.metrics.total_ms, 105);
+        assert_eq!(result.metrics.ttft_ms, Some(12));
+        assert_eq!(
+            result.metrics.stage_latencies_ms,
+            vec![
+                StageLatency {
+                    stage_id: "asr".into(),
+                    latency_ms: 40,
+                },
+                StageLatency {
+                    stage_id: "answer".into(),
+                    latency_ms: 60,
+                },
+            ]
+        );
+        assert!(result.tool_calls.is_empty());
+    }
+
+    #[test]
+    fn pipeline_target_mapping_never_reports_remote_work_as_local() {
+        assert_eq!(
+            ExecutionTarget::from_pipeline_target("device"),
+            ExecutionTarget::Local
+        );
+        assert_eq!(
+            ExecutionTarget::from_pipeline_target("local"),
+            ExecutionTarget::Local
+        );
+        assert_eq!(
+            ExecutionTarget::from_pipeline_target("server:https://example.test"),
+            ExecutionTarget::Cloud
+        );
+        assert_eq!(
+            ExecutionTarget::from_pipeline_target("unexpected-remote-target"),
+            ExecutionTarget::Cloud
+        );
     }
 
     #[test]

@@ -521,7 +521,7 @@ both legs, so it is the only way to tell them apart.
 
 ---
 
-## 4. XybridPipelineRef / XybridPipeline
+## 4. XybridPipeline
 
 Multi-stage inference pipelines.
 
@@ -536,12 +536,8 @@ class XybridPipeline {
 
   // Properties
   String? get name;
-  bool get isReady;
   BigInt get stageCount;
   List<String> get stageNames;
-
-  // Load models
-  Future<void> load();
 
   // Execution
   Future<XybridResult> run({required Envelope envelope});
@@ -551,25 +547,51 @@ class XybridPipeline {
 ### Kotlin
 
 ```kotlin
-class XybridPipelineRef {
+class XybridPipeline {
   companion object {
-    fun fromYaml(yamlContent: String): XybridPipelineRef
-    fun fromFile(path: String): XybridPipelineRef
+    fun fromYaml(yaml: String): XybridPipeline
+    fun fromFile(path: String): XybridPipeline
+    fun fromBundle(path: String): XybridPipeline
+
+    suspend fun fromYamlAsync(yaml: String): XybridPipeline
+    suspend fun fromFileAsync(path: String): XybridPipeline
+    suspend fun fromBundleAsync(path: String): XybridPipeline
   }
 
-  val name: String?
-  val stageIds: List<String>
-
-  suspend fun load(): XybridPipeline
+  fun name(): String?
+  fun stageCount(): UInt
+  fun stageNames(): List<String>
+  fun run(envelope: XybridEnvelope): XybridResult
+  suspend fun runAsync(envelope: XybridEnvelope): XybridResult
 }
+```
 
-class XybridPipeline {
-  val name: String?
-  val isReady: Boolean
-  val stageCount: Long
-  val stageNames: List<String>
+### Swift
 
-  suspend fun run(envelope: Envelope): PipelineResult
+```swift
+let pipeline = try await XybridPipeline.fromYamlAsync(yaml)
+print(pipeline.name() ?? "unnamed")
+print(pipeline.stageNames())
+
+let result = try await pipeline.runAsync(envelope: input)
+for stage in result.metrics.stageLatenciesMs {
+    print("\(stage.stageId): \(stage.latencyMs) ms")
+}
+```
+
+The generated handle also provides blocking `init(fromYaml:)`,
+`init(fromFile:)`, `init(fromBundle:)`, and `run(envelope:)` calls.
+
+### C# (Unity)
+
+```csharp
+using var pipeline = Pipeline.FromYaml(yaml);
+Debug.Log($"{pipeline.Name}: {pipeline.StageCount} stages");
+
+InferenceResult result = pipeline.Run(input);
+foreach (StageLatency stage in result.Metrics.StageLatenciesMs)
+{
+    Debug.Log($"{stage.StageId}: {stage.LatencyMs} ms");
 }
 ```
 
@@ -610,20 +632,21 @@ impl Xybrid {
 
 | Method | Dart | Kotlin | Swift | C# |
 |--------|------|--------|-------|----|
-| `fromYaml()` | ✅ | — | — | — |
-| `fromFile()` | ✅ | — | — | — |
-| `fromBundle()` | ✅ | — | — | — |
-| `name` | ✅ | — | — | — |
-| `isReady` | ✅ | — | — | — |
-| `stageCount` | ✅ | — | — | — |
-| `stageNames` | ✅ | — | — | — |
-| `load()` | ✅ | — | — | — |
-| `run()` | ✅ | — | — | — |
+| `fromYaml()` | ✅ | ✅ | ✅ | ✅ |
+| `fromFile()` | ✅ | ✅ | ✅ | ✅ |
+| `fromBundle()` | ✅ | ✅ | ✅ | ✅ |
+| `name` | ✅ | ✅ | ✅ | ✅ |
+| `stageCount` | ✅ | ✅ | ✅ | ✅ |
+| `stageNames` | ✅ | ✅ | ✅ | ✅ |
+| `run()` | ✅ | ✅ | ✅ | ✅ |
 | `runWithOptions()` / `run_with_options()` | Rust ✅ | planned | planned | planned |
 | `runPipelineStreamingWithOptions()` / `run_pipeline_streaming_with_options()` | Rust ✅ | planned | planned | planned |
 
-> **Note**: The Dart SDK currently uses a single `XybridPipeline` class (no separate `PipelineRef`).
-> The Kotlin spec shows the two-step `PipelineRef` → `Pipeline` pattern which is the target design.
+All foreign SDKs intentionally expose one pipeline handle. Their constructors
+collapse Rust's `PipelineRef` parse/resolve step, avoiding a second opaque FFI
+handle that exists only to return the first one. A run reports the final stage's
+execution target and carries every executed stage's latency in
+`result.metrics.stageLatenciesMs`.
 
 ---
 

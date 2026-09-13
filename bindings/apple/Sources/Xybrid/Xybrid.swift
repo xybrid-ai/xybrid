@@ -267,14 +267,18 @@ public extension Xybrid {
 /// Call `run(envelope:)` to execute inference on input data.
 public typealias Model = XybridModel
 
-// The bolt handle wraps a thread-safe, `Arc`-backed Rust model (the facade's
-// types are `Send + Sync`), so the handle is safe to move across threads and
+/// A loaded multi-stage inference pipeline.
+public typealias Pipeline = XybridPipeline
+
+// The bolt handles wrap thread-safe, `Arc`-backed Rust values (the facade's
+// types are `Send + Sync`), so they are safe to move across threads and
 // actors — e.g. loading or running on a `Task.detached` background executor,
 // which is the recommended pattern since bolt's `load`/`run` are blocking.
 // boltffi does not emit `Sendable` on generated handle types yet, so declare it
 // here in the hand-written wrapper (regen-safe — never overwritten by
 // `boltffi generate`, unlike `xybrid_bolt.swift`).
 extension XybridModel: @unchecked Sendable {}
+extension XybridPipeline: @unchecked Sendable {}
 
 /// A pull-paced asynchronous stream of generated tokens.
 ///
@@ -497,6 +501,28 @@ public extension XybridModel {
     /// generation config, abort signals, or cloud-fallback behaviour.
     func run(envelope: XybridEnvelope) throws -> XybridResult {
         try run(envelope: envelope, options: nil)
+    }
+}
+
+public extension XybridPipeline {
+    /// Parse and load a pipeline without blocking the caller.
+    static func fromYamlAsync(_ yaml: String) async throws -> XybridPipeline {
+        try await Task.detached { try XybridPipeline(fromYaml: yaml) }.value
+    }
+
+    /// Read, parse, and load a pipeline file without blocking the caller.
+    static func fromFileAsync(_ url: URL) async throws -> XybridPipeline {
+        try await Task.detached { try XybridPipeline(fromFile: url.path) }.value
+    }
+
+    /// Load a pipeline bundle without blocking the caller.
+    static func fromBundleAsync(_ url: URL) async throws -> XybridPipeline {
+        try await Task.detached { try XybridPipeline(fromBundle: url.path) }.value
+    }
+
+    /// Run every stage without blocking the calling thread or actor.
+    func runAsync(envelope: XybridEnvelope) async throws -> XybridResult {
+        try await Task.detached { try self.run(envelope: envelope) }.value
     }
 }
 
