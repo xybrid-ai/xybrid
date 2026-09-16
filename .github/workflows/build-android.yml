@@ -94,6 +94,8 @@ jobs:
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+        with:
+          packages: platform-tools
 
       - name: Install NDK
         if: steps.cache-ndk.outputs.cache-hit != 'true'
@@ -263,6 +265,8 @@ jobs:
       # compileSdk=34 platform on first build (same as release-publish.yml).
       - name: Setup Android SDK
         uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+        with:
+          packages: platform-tools
 
       # compile* type-checks Xybrid.kt + XybridBolt.kt (both variants, so an
       # enum-shape break that only trips one buildType is still caught);
