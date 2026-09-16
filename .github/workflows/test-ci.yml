@@ -127,6 +127,10 @@ jobs:
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+        with:
+          # Google removed the legacy `tools` SDK package, so the action's default
+          # package set now fails. Anything else needed is installed below or by Gradle.
+          packages: platform-tools
 
       - name: Install Android NDK
         run: |
@@ -268,6 +272,10 @@ jobs:
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+        with:
+          # Google removed the legacy `tools` SDK package, so the action's default
+          # package set now fails. Anything else needed is installed below or by Gradle.
+          packages: platform-tools
 
       - name: Install NDK
         run: |
