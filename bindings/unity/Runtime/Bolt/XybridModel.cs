@@ -456,6 +456,34 @@ namespace XybridBolt
 
 
         /// <summary>
+        /// Open a live ASR session for mono 16 kHz PCM microphone audio.
+        /// </summary>
+        public XybridAsrStreamSession Stream(global::XybridBolt.XybridAsrStreamConfig config)
+        {
+            ThrowIfDisposed();
+            WireWriter configWriter = new WireWriter();
+            {
+                config.Encode(configWriter);
+            }
+            byte[] configBytes = configWriter.ToArray();
+            FfiBuf boltffiErrorBuffer = NativeMethods.NativeXybridModelStream(this.Handle, configBytes, (nuint)configBytes.Length, out ulong boltffiHandle);
+            if (boltffiErrorBuffer.ptr != 0)
+            {
+                try
+                {
+                    WireReader boltffiErrorReader = new WireReader(boltffiErrorBuffer);
+                    throw new global::XybridBolt.XybridErrorException(global::XybridBolt.XybridError.Decode(boltffiErrorReader));
+                }
+                finally
+                {
+                    NativeMethods.FreeBuf(boltffiErrorBuffer);
+                }
+            }
+            return boltffiHandle == 0 ? throw new global::System.InvalidOperationException("BoltFFI returned a null XybridAsrStreamSession handle") : new XybridAsrStreamSession(boltffiHandle);
+        }
+
+
+        /// <summary>
         /// Run inference, optionally with [`XybridRunOptions`] (generation config,
         /// abort signals, cloud-fallback). Pass `None` for the model's defaults.
         ///

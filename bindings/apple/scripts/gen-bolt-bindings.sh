@@ -71,7 +71,21 @@ replacement = '''    @inlinable static func decode(from reader: inout WireReader
 '''
 if source.count(decoder) != 1:
     raise SystemExit("error: expected one generated XybridResult decoder")
-destination_path.write_text(source.replace(decoder, replacement))
+source = source.replace(decoder, replacement)
+
+# boltffi 0.29.3 omits `try` when a fallible method encodes `[Float]` through
+# `withUnsafeBufferPointer`, making the generated Swift fail typecheck. Keep
+# this narrow and counted so a generator fix or a second affected method trips
+# the guard instead of silently rewriting an unexpected call site.
+fallible_float_buffer = "        _ = samples.withUnsafeBufferPointer { boltffiSamplesBuffer in\n"
+if source.count(fallible_float_buffer) != 1:
+    raise SystemExit("error: expected one fallible Swift Float buffer call")
+source = source.replace(
+    fallible_float_buffer,
+    "        try samples.withUnsafeBufferPointer { boltffiSamplesBuffer in\n",
+)
+
+destination_path.write_text(source)
 PY
 cp "$header_src" "$repo_root/bindings/apple/include/xybrid-bolt.h"
 

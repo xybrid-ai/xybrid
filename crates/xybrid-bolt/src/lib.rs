@@ -41,6 +41,8 @@
 //! - **`XybridConversationContext`**: opaque handle (new / with_id / push /
 //!   set_system / clear / id) feeding `run_with_context` and
 //!   `run_stream_with_context`.
+//! - **Live ASR**: `XybridAsrStreamSession` feeds PCM into the shared worker
+//!   and exposes rolling transcripts through a pull-based `next` call.
 //! - **Deferred to follow-up commits**:
 //!   - `XybridCancellationToken` as an `Arc<Self>` handle.
 //!   - Pipeline surface.
@@ -761,6 +763,78 @@ impl From<facade::StreamEvent> for XybridStreamEvent {
 }
 
 // ============================================================================
+// Live ASR streaming
+// ============================================================================
+
+/// Configuration for a live, rolling-window ASR session.
+#[data]
+#[derive(Clone)]
+pub struct XybridAsrStreamConfig {
+    /// PCM sample rate. Must currently be 16 kHz.
+    pub sample_rate: u32,
+    pub enable_vad: bool,
+    pub vad_threshold: f32,
+    pub vad_model_dir: Option<String>,
+    /// Optional language hint; `None` preserves the model bundle's behavior.
+    pub language: Option<String>,
+    /// Optional Whisper encoder context override in mel frames.
+    pub audio_ctx: Option<u32>,
+}
+
+impl From<XybridAsrStreamConfig> for facade::AsrStreamConfig {
+    fn from(config: XybridAsrStreamConfig) -> Self {
+        Self {
+            sample_rate: config.sample_rate,
+            enable_vad: config.enable_vad,
+            vad_threshold: config.vad_threshold,
+            vad_model_dir: config.vad_model_dir,
+            language: config.language,
+            audio_ctx: config.audio_ctx,
+        }
+    }
+}
+
+/// A rolling partial transcript from live microphone audio.
+#[data]
+#[derive(Clone)]
+pub struct XybridAsrPartialResult {
+    pub text: String,
+    pub is_stable: bool,
+    pub chunk_index: u64,
+    pub audio_duration_ms: u64,
+}
+
+impl From<facade::AsrPartialResult> for XybridAsrPartialResult {
+    fn from(result: facade::AsrPartialResult) -> Self {
+        Self {
+            text: result.text,
+            is_stable: result.is_stable,
+            chunk_index: result.chunk_index,
+            audio_duration_ms: result.audio_duration_ms,
+        }
+    }
+}
+
+/// Final transcript returned when a live ASR session is flushed.
+#[data]
+#[derive(Clone)]
+pub struct XybridAsrTranscriptionResult {
+    pub text: String,
+    pub duration_ms: u64,
+    pub chunks_processed: u64,
+}
+
+impl From<facade::AsrTranscriptionResult> for XybridAsrTranscriptionResult {
+    fn from(result: facade::AsrTranscriptionResult) -> Self {
+        Self {
+            text: result.text,
+            duration_ms: result.duration_ms,
+            chunks_processed: result.chunks_processed,
+        }
+    }
+}
+
+// ============================================================================
 // Voice info
 // ============================================================================
 
@@ -1166,6 +1240,18 @@ impl XybridModel {
         self.inner.voice(voice_id).map(XybridVoiceInfo::from)
     }
 
+    /// Open a live ASR session for mono 16 kHz PCM microphone audio.
+    pub fn stream(
+        &self,
+        config: XybridAsrStreamConfig,
+    ) -> Result<XybridAsrStreamSession, XybridError> {
+        let inner = self
+            .inner
+            .stream(config.into())
+            .map_err(XybridError::from)?;
+        Ok(XybridAsrStreamSession { inner })
+    }
+
     /// Run inference, optionally with [`XybridRunOptions`] (generation config,
     /// abort signals, cloud-fallback). Pass `None` for the model's defaults.
     ///
@@ -1347,6 +1433,58 @@ impl XybridModel {
 
     pub fn unload(&self) -> Result<(), XybridError> {
         self.inner.unload().map_err(XybridError::from)
+    }
+}
+
+/// Opaque live ASR session.
+///
+/// Feed microphone PCM with [`feed`](Self::feed), pull rolling transcripts
+/// with [`next`](Self::next), then call [`flush`](Self::flush) for the final
+/// transcript. The shared facade worker keeps inference off the caller's audio
+/// callback and preserves frame order.
+pub struct XybridAsrStreamSession {
+    inner: std::sync::Arc<facade::AsrStreamingSession>,
+}
+
+#[export]
+impl XybridAsrStreamSession {
+    /// Queue mono 16 kHz PCM f32 samples.
+    pub fn feed(&self, samples: Vec<f32>) -> Result<(), XybridError> {
+        self.inner.feed(samples).map_err(XybridError::from)
+    }
+
+    /// Block until the next distinct rolling transcript is available.
+    ///
+    /// Returns `None` once the session is closed. Flushing finalizes the
+    /// current utterance but keeps the session available for `reset` and
+    /// reuse. Platform wrappers expose this pull operation as
+    /// `AsyncThrowingStream` / `Flow` where appropriate.
+    pub fn next(&self) -> Result<Option<XybridAsrPartialResult>, XybridError> {
+        self.inner
+            .next()
+            .map(|partial| partial.map(Into::into))
+            .map_err(XybridError::from)
+    }
+
+    /// Drain queued audio, finalize the session, and return the full transcript.
+    pub fn flush(&self) -> Result<XybridAsrTranscriptionResult, XybridError> {
+        self.inner
+            .flush()
+            .map(Into::into)
+            .map_err(XybridError::from)
+    }
+
+    /// Clear audio and transcript state without reloading the model.
+    pub fn reset(&self) -> Result<(), XybridError> {
+        self.inner.reset().map_err(XybridError::from)
+    }
+
+    /// Stop the worker and end the partial-result stream.
+    ///
+    /// Named `stop` because generated handles already reserve `close` for
+    /// releasing the foreign handle itself.
+    pub fn stop(&self) -> Result<(), XybridError> {
+        self.inner.close().map_err(XybridError::from)
     }
 }
 
@@ -1670,6 +1808,45 @@ mod tests {
         assert_eq!(token.token, "hi");
         assert_eq!(token.index, 3);
         assert!(token.tool_calls.is_empty());
+    }
+
+    #[test]
+    fn live_asr_config_and_results_cross_the_wire_without_loss() {
+        let config = XybridAsrStreamConfig {
+            sample_rate: 16_000,
+            enable_vad: true,
+            vad_threshold: 0.65,
+            vad_model_dir: Some("vad".into()),
+            language: Some("pt".into()),
+            audio_ctx: Some(500),
+        };
+        let facade_config: facade::AsrStreamConfig = config.into();
+        assert_eq!(facade_config.sample_rate, 16_000);
+        assert!(facade_config.enable_vad);
+        assert_eq!(facade_config.vad_threshold, 0.65);
+        assert_eq!(facade_config.vad_model_dir.as_deref(), Some("vad"));
+        assert_eq!(facade_config.language.as_deref(), Some("pt"));
+        assert_eq!(facade_config.audio_ctx, Some(500));
+
+        let partial = XybridAsrPartialResult::from(facade::AsrPartialResult {
+            text: "olá".into(),
+            is_stable: true,
+            chunk_index: 7,
+            audio_duration_ms: 2_800,
+        });
+        assert_eq!(partial.text, "olá");
+        assert!(partial.is_stable);
+        assert_eq!(partial.chunk_index, 7);
+        assert_eq!(partial.audio_duration_ms, 2_800);
+
+        let final_result = XybridAsrTranscriptionResult::from(facade::AsrTranscriptionResult {
+            text: "olá mundo".into(),
+            duration_ms: 3_200,
+            chunks_processed: 8,
+        });
+        assert_eq!(final_result.text, "olá mundo");
+        assert_eq!(final_result.duration_ms, 3_200);
+        assert_eq!(final_result.chunks_processed, 8);
     }
 
     #[test]

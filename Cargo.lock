@@ -2766,6 +2766,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "xybrid-core",
+ "xybrid-ffi-facade",
  "xybrid-sdk",
 ]
 

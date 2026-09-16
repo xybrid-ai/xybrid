@@ -2703,7 +2703,7 @@ fn wire__crate__api__streaming__FfiStreamSession_subscribe_impl(
             >>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| {
-                transform_result_sse::<_, ()>((move || {
+                transform_result_sse::<_, String>((move || {
                     let mut api_that_guard = None;
                     let decode_indices_ =
                         flutter_rust_bridge::for_generated::lockable_compute_decode_order(vec![
@@ -2718,12 +2718,10 @@ fn wire__crate__api__streaming__FfiStreamSession_subscribe_impl(
                         }
                     }
                     let api_that_guard = api_that_guard.unwrap();
-                    let output_ok = Result::<_, ()>::Ok({
-                        crate::api::streaming::FfiStreamSession::subscribe(
-                            &*api_that_guard,
-                            api_sink,
-                        );
-                    })?;
+                    let output_ok = crate::api::streaming::FfiStreamSession::subscribe(
+                        &*api_that_guard,
+                        api_sink,
+                    )?;
                     Ok(output_ok)
                 })())
             }

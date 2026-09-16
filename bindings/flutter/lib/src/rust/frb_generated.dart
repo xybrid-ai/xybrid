@@ -2088,7 +2088,7 @@ class XybridRustLibApiImpl extends XybridRustLibApiImplPlatform
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
-        decodeErrorData: null,
+        decodeErrorData: sse_decode_String,
       ),
       constMeta: kCrateApiStreamingFfiStreamSessionSubscribeConstMeta,
       argValues: [that, sink],
@@ -6352,8 +6352,7 @@ class FfiStreamSessionImpl extends RustOpaque implements FfiStreamSession {
   ///
   /// # Errors
   ///
-  /// If the session has been finalized (after [`flush`]) or otherwise torn
-  /// down, so the worker is no longer accepting audio.
+  /// If the input queue is full or the session has stopped accepting audio.
   ///
   /// [`flush`]: Self::flush
   void feed({required List<double> samples}) => XybridRustLib.instance.api
@@ -6361,7 +6360,8 @@ class FfiStreamSessionImpl extends RustOpaque implements FfiStreamSession {
 
   /// Finalize: drain buffered audio and return the complete transcript.
   ///
-  /// After this the session is finalized; further [`feed`] calls error.
+  /// This finalizes one utterance. Call [`reset`](Self::reset) before feeding
+  /// the next one; the worker and loaded model remain available.
   ///
   /// # Errors
   ///
@@ -6383,10 +6383,11 @@ class FfiStreamSessionImpl extends RustOpaque implements FfiStreamSession {
         that: this,
       );
 
-  /// Subscribe to partial transcripts. Call this once, before [`feed`].
+  /// Subscribe to partial transcripts. Call this once per session.
   ///
-  /// Partials are delivered on this sink as rolling-window chunks complete.
-  /// Audio fed before the subscription is processed will not be reported.
+  /// Partials are cumulative; a slow or absent reader receives the latest
+  /// value rather than an unbounded queue. Backend errors reach the Dart
+  /// stream. A second subscription returns an error.
   ///
   /// [`feed`]: Self::feed
   Stream<FfiPartialResult> subscribe() =>
