@@ -496,9 +496,10 @@ pub fn set_api_key(api_key: &str) {
 /// Mirrors [`set_api_key`]: the value is stored in a process-memory cell rather
 /// than the environment, so it is safe to call after telemetry threads have
 /// started (a concurrent `setenv`/`getenv` is UB). Consulted by the gateway
-/// ahead of the `XYBRID_PLATFORM_URL` env var; `XYBRID_GATEWAY_URL` (explicit,
-/// `/v1`-suffixed) still takes precedence. Pass a bare base URL — the `/v1`
-/// suffix is applied internally.
+/// ahead of the `XYBRID_PLATFORM_URL` env var; a full gateway URL set via
+/// [`set_gateway_url`] or `XYBRID_GATEWAY_URL` (explicit, `/v1`-suffixed)
+/// still takes precedence. Pass a bare base URL — the `/v1` suffix is applied
+/// internally.
 pub fn set_platform_url(url: &str) {
     xybrid_core::cloud::set_xybrid_platform_url(Some(url.to_string()));
 }
@@ -701,8 +702,10 @@ impl XybridInit {
         self
     }
 
-    /// Override the LLM gateway URL. Defaults to the production gateway
-    /// or to `XYBRID_GATEWAY_URL` / `XYBRID_PLATFORM_URL` if set.
+    /// Override the LLM gateway URL for SDK LLM clients and for pipeline
+    /// stages routed to the cloud. Pass the full URL including `/v1`.
+    /// Defaults to the production gateway or to `XYBRID_GATEWAY_URL` /
+    /// `XYBRID_PLATFORM_URL` if set.
     pub fn gateway_url(mut self, url: impl Into<String>) -> Self {
         self.gateway_url = Some(url.into());
         self

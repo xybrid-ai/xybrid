@@ -62,7 +62,8 @@ the same time, and a policy bundle decides which leg serves each request.
   scheme/host/port); a provider key only to that provider's origin; any other
   endpoint — including a self-hosted gateway reached via `gateway_url` — is
   anonymous unless `api_key` is set. Point the platform at such a gateway with
-  `XYBRID_GATEWAY_URL` / `set_platform_url` to keep the platform key flowing.
+  `init().gateway_url(..)` / `set_gateway_url`, `XYBRID_GATEWAY_URL` or
+  `set_platform_url` to keep the platform key flowing.
 - **The executor dispatches on the routing target**, not on the presence of a
   provider. A hybrid stage routed local whose bundle is missing or invalid
   errors instead of falling back to another adapter or to cloud; local
@@ -87,6 +88,14 @@ the same time, and a policy bundle decides which leg serves each request.
   adapter that slept 50 ms and returned `cloud-output-<text>`; the real
   OpenAI-compatible adapter is registered now, and a provider-less cloud stage
   fails honestly.
+- `xybrid_sdk::init().gateway_url(..)` / `set_gateway_url` (and Flutter's
+  `Xybrid.setGatewayUrl`) wrote an SDK-local cell that no pipeline read, so an
+  SDK pipeline cloud stage without a stage-level `gateway_url` was sent to the
+  ambient/production gateway — with the Xybrid bearer key — instead of the
+  configured one. The setting now lives in the core cell
+  (`xybrid_core::cloud::set_xybrid_gateway_url`), consulted ahead of
+  `XYBRID_GATEWAY_URL`, and a loopback regression test asserts the receiving
+  endpoint.
 - `input.kind == "<v>"` matched a text payload equal to the literal.
 - Shared YAML generation options only reached the cloud leg; the local
   template executor now receives them too.

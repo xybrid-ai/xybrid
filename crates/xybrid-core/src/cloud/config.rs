@@ -63,6 +63,38 @@ pub fn xybrid_platform_url() -> Option<String> {
         .clone()
 }
 
+/// Programmatically-set Xybrid gateway URL (base + `/v1`), held in process
+/// memory.
+///
+/// Set via [`set_xybrid_gateway_url`] — `xybrid_sdk::set_gateway_url` and
+/// `xybrid_sdk::init().gateway_url(..)` route here. This is the in-memory
+/// counterpart of the `XYBRID_GATEWAY_URL` env var and is consulted first by
+/// [`default_gateway_url`], so the cloud adapter the orchestrator registers
+/// dispatches SDK pipeline stages to the gateway the host configured rather
+/// than to the ambient or production one.
+static XYBRID_GATEWAY_URL: RwLock<Option<String>> = RwLock::new(None);
+
+/// Store (or clear, with `None`) the in-memory Xybrid gateway URL.
+///
+/// Expects the full gateway URL including the `/v1` suffix (it is used
+/// verbatim, exactly like `XYBRID_GATEWAY_URL`). Blank values clear the cell
+/// so an empty setting can never produce an empty destination.
+pub fn set_xybrid_gateway_url(url: Option<String>) {
+    let url = url.map(|u| u.trim().to_string()).filter(|u| !u.is_empty());
+    let mut guard = XYBRID_GATEWAY_URL
+        .write()
+        .unwrap_or_else(|e| e.into_inner());
+    *guard = url;
+}
+
+/// Read the in-memory Xybrid gateway URL, if one has been set.
+pub fn xybrid_gateway_url() -> Option<String> {
+    XYBRID_GATEWAY_URL
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone()
+}
+
 /// Report whether an in-memory Xybrid gateway API key has been set.
 ///
 /// Cheaper than [`xybrid_api_key`] for presence checks — it never clones the
@@ -137,10 +169,12 @@ pub struct CloudConfig {
 
 /// The configured Xybrid platform gateway URL (base + `/v1`).
 ///
-/// Resolution order: `XYBRID_GATEWAY_URL`, the in-memory platform URL set via
-/// [`set_xybrid_platform_url`] + `/v1`, `XYBRID_PLATFORM_URL` + `/v1`, then
-/// the production default. This is also the only origin that may receive the
-/// Xybrid platform API key automatically — see [`CloudConfig::resolve_api_key`].
+/// Resolution order: the in-memory gateway URL set via
+/// [`set_xybrid_gateway_url`], `XYBRID_GATEWAY_URL`, the in-memory platform
+/// URL set via [`set_xybrid_platform_url`] + `/v1`, `XYBRID_PLATFORM_URL` +
+/// `/v1`, then the production default. This is also the only origin that may
+/// receive the Xybrid platform API key automatically — see
+/// [`CloudConfig::resolve_api_key`].
 pub fn platform_gateway_url() -> String {
     default_gateway_url()
 }
@@ -202,13 +236,21 @@ pub fn resolve_api_key_for(
 
 fn default_gateway_url() -> String {
     // Priority:
-    // 1. XYBRID_GATEWAY_URL env var (explicit override, should include /v1)
-    // 2. In-memory platform URL (set via set_xybrid_platform_url) + /v1 suffix
-    // 3. XYBRID_PLATFORM_URL env var + /v1 suffix (shared with telemetry)
-    // 4. Default production URL (api.xybrid.dev/v1)
+    // 1. In-memory gateway URL (set via set_xybrid_gateway_url; full /v1 URL)
+    // 2. XYBRID_GATEWAY_URL env var (explicit override, should include /v1)
+    // 3. In-memory platform URL (set via set_xybrid_platform_url) + /v1 suffix
+    // 4. XYBRID_PLATFORM_URL env var + /v1 suffix (shared with telemetry)
+    // 5. Default production URL (api.xybrid.dev/v1)
     //
     // Note: The /v1 prefix is required for OpenAI-compatible API endpoints.
     // The client appends /chat/completions, so the full path becomes /v1/chat/completions.
+    //
+    // The programmatic gateway URL is XYBRID_GATEWAY_URL's in-memory
+    // counterpart and wins over it: a host that configured its gateway through
+    // the SDK must never have a stage dispatched to the ambient one instead.
+    if let Some(url) = xybrid_gateway_url() {
+        return url;
+    }
     if let Ok(url) = std::env::var("XYBRID_GATEWAY_URL") {
         return url;
     }
@@ -402,6 +444,7 @@ mod tests {
         struct ResetOnDrop;
         impl Drop for ResetOnDrop {
             fn drop(&mut self) {
+                set_xybrid_gateway_url(None);
                 set_xybrid_platform_url(None);
                 std::env::remove_var("XYBRID_GATEWAY_URL");
                 std::env::remove_var("XYBRID_PLATFORM_URL");
@@ -424,6 +467,42 @@ mod tests {
         set_xybrid_platform_url(Some("https://staging.example.com".to_string()));
         std::env::set_var("XYBRID_GATEWAY_URL", "https://explicit.example.com/v1");
         assert_eq!(default_gateway_url(), "https://explicit.example.com/v1");
+
+        // The in-memory gateway URL (a full /v1 URL, the programmatic twin of
+        // XYBRID_GATEWAY_URL) wins over every other source, env var included.
+        set_xybrid_gateway_url(Some("https://configured.example.com/v1".to_string()));
+        assert_eq!(default_gateway_url(), "https://configured.example.com/v1");
+
+        // A blank value clears the cell instead of yielding an empty URL.
+        set_xybrid_gateway_url(Some("   ".to_string()));
+        assert_eq!(default_gateway_url(), "https://explicit.example.com/v1");
+    }
+
+    /// The platform credential follows the programmatic gateway: a
+    /// `CloudConfig::default()` built after `set_xybrid_gateway_url` targets
+    /// that gateway and resolves the in-memory platform key for it, while any
+    /// other destination still gets no automatic credential.
+    #[test]
+    fn programmatic_gateway_url_receives_platform_key() {
+        let _guard = TEST_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        struct ResetOnDrop;
+        impl Drop for ResetOnDrop {
+            fn drop(&mut self) {
+                set_xybrid_gateway_url(None);
+                set_xybrid_api_key(None);
+            }
+        }
+        let _reset = ResetOnDrop;
+
+        set_xybrid_gateway_url(Some("http://127.0.0.1:4242/v1".to_string()));
+        set_xybrid_api_key(Some("mem-key".to_string()));
+
+        let config = CloudConfig::default();
+        assert_eq!(config.gateway_url, "http://127.0.0.1:4242/v1");
+        assert_eq!(config.resolve_api_key(), Some("mem-key".to_string()));
+
+        let elsewhere = CloudConfig::default().with_gateway_url("http://127.0.0.1:4343/v1");
+        assert_eq!(elsewhere.resolve_api_key(), None);
     }
 
     // ── destination-scoped credentials ──────────────────────────────────────
