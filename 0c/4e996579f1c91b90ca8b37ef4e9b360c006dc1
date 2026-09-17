@@ -1,0 +1,25 @@
+.bazelrc
+  s_4e2833172472d6::t_97492533d23bcc 118-124,127-128
+  s_4e2833172472d6::t_44f64c36c92f71 125-126
+CHANGELOG.md
+  s_4e2833172472d6::t_a78fd15d693f94 50-54
+.github/workflows/release-prep.yml
+  s_4e2833172472d6::t_97492533d23bcc 303,305-306,624,626-628
+  s_4e2833172472d6::t_1c995e3f67a092 736,740
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "0c4e996579f1c91b90ca8b37ef4e9b360c006dc1",
+  "prompts": {},
+  "sessions": {
+    "s_4e2833172472d6": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c9a4cec0-a6a7-40d9-8722-c99eddc4dc6d",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
+    }
+  }
+}
