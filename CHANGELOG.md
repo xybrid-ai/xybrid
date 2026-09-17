@@ -47,6 +47,11 @@ the same time, and a policy bundle decides which leg serves each request.
 
 ### Changed
 
+- **Smaller Flutter precompiled natives.** The `release/v*` precompile lane now
+  builds the Flutter staticlib/cdylib with fat LTO (`--config=flutter-precompile`).
+  Measured on the darwin staticlib: macOS 175 MB -> 112 MB, iOS 181 MB -> 119 MB;
+  the Rust objects shrink 79 MB -> 25 MB, the remainder is the bundled ONNX Runtime.
+  Cuts the first-build download and `-force_load` link for pub.dev consumers.
 - **Policy is a dispatch invariant.** Every stage decision evaluates the
   policy once against the actual input and one device snapshot; a denial (or
   a required transform) restricts the target to the device ahead of explicit
