@@ -1,0 +1,29 @@
+bindings/flutter/cargokit/build_tool/lib/src/shared_artifact_cache.dart
+  s_4e2833172472d6::t_f996d3a687d265 1-208
+bindings/flutter/cargokit/build_tool/lib/src/artifacts_provider.dart
+  s_4e2833172472d6::t_03b670a676acc7 18,213-217,228,236-259,276-280,282,380,405-415
+bindings/flutter/README.md
+  s_4e2833172472d6::t_6756ba1e77b322 334-343,354-355
+.github/workflows/build-flutter.yml
+  s_4e2833172472d6::t_6756ba1e77b322 89-91
+bindings/flutter/cargokit/build_tool/test/shared_artifact_cache_test.dart
+  s_4e2833172472d6::t_f996d3a687d265 1-203
+CHANGELOG.md
+  s_4e2833172472d6::t_6756ba1e77b322 50-57
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "a65a7d0fc5aaae464e27487ed0bda28a9615a8cf",
+  "prompts": {},
+  "sessions": {
+    "s_4e2833172472d6": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c9a4cec0-a6a7-40d9-8722-c99eddc4dc6d",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
+    }
+  }
+}
