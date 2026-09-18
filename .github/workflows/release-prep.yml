@@ -667,6 +667,8 @@ jobs:
         env:
           PRIVATE_KEY: ${{ secrets.CARGOKIT_PRIVATE_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Only i686 reaches Cargo; the other targets use the Bazel prebuilts.
+          CARGO_PROFILE_RELEASE_LTO: fat
         run: |
           dart run bin/build_tool.dart precompile-binaries \
             --repository ${{ github.repository }} \
