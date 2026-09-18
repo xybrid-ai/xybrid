@@ -331,9 +331,16 @@ and cannot be built from source, because its Rust crate lives in the xybrid
 monorepo workspace.
 
 The first build of an app downloads that binary: tens of MB per Android ABI,
-and over 100 MB for iOS and macOS, where it is a static library. It is stored
-under the app's `build/` directory, so it is fetched again after
-`flutter clean`. A slow first build is this download, not a Rust compile.
+and over 100 MB for iOS and macOS, where it is a static library. A slow first
+build is this download, not a Rust compile.
+
+The download is kept in a shared cache at `~/.xybrid/cache/precompiled/`, so
+`flutter clean` and other projects on the same machine reuse it instead of
+downloading again. Every reuse re-verifies the binary's signature against the
+key pinned in this package, and entries unused for 90 days are removed. Set
+`XYBRID_PRECOMPILED_CACHE_DIR` to move the cache — for example into a directory
+your CI persists between runs — or to an empty value to turn it off.
+
 Flutter hides native build-step output unless you pass `-v`; with it (or in
 the Xcode / Android Studio build log) cargokit reports what it is doing:
 
@@ -344,7 +351,8 @@ INFO: Downloaded aarch64-apple-ios_libxybrid_flutter_ffi.a: 180.6 MB in 42s (4.3
 INFO: Using precompiled xybrid_flutter for aarch64-apple-ios (downloaded)
 ```
 
-Later builds print `(cached)` instead. A line starting
+Later builds print `(cached)`; after `flutter clean`, or in another project,
+`(shared cache)`. A line starting
 `Building xybrid_flutter for` means a source build, which only happens inside
 the monorepo.
 

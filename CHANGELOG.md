@@ -47,6 +47,14 @@ the same time, and a policy bundle decides which leg serves each request.
 
 ### Changed
 
+- **Flutter: precompiled binaries are cached per machine, not per app.** cargokit
+  keeps verified downloads in `~/.xybrid/cache/precompiled/<crate-hash>/`, so
+  `flutter clean` and new projects copy the native library locally instead of
+  downloading it again. Each reuse re-verifies the ed25519 signature against the
+  package's pinned key; a corrupted or swapped entry is deleted and re-downloaded.
+  Entries unused for 90 days are pruned. `XYBRID_PRECOMPILED_CACHE_DIR` relocates
+  the cache (e.g. a CI-persisted path) or, set empty, disables it. Downloads into
+  the app's build directory are now written atomically.
 - **Flutter: precompiled-binary downloads are visible in the build log.**
   cargokit now logs at INFO which native library it downloads, its size, and
   the source URL, then progress every 10 s and a size/time/throughput summary;

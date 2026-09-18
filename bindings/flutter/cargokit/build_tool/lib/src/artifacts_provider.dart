@@ -15,6 +15,7 @@ import 'download_progress.dart';
 import 'options.dart';
 import 'precompile_binaries.dart';
 import 'rustup.dart';
+import 'shared_artifact_cache.dart';
 import 'target.dart';
 
 class Artifact {
@@ -209,6 +210,11 @@ class ArtifactProvider {
         path.join(environment.targetTempDir, 'precompiled', crateHash);
     Directory(downloadedArtifactsDir).createSync(recursive: true);
 
+    // xybrid addition: the directory above lives under the app's build output,
+    // so `flutter clean` and every new project start from nothing. The shared
+    // cache sits behind it and turns those into a local, re-verified copy.
+    final sharedCache = SharedArtifactCache.fromEnvironment();
+
     final res = <Target, List<Artifact>>{};
 
     for (final target in targets) {
@@ -219,20 +225,38 @@ class ArtifactProvider {
       );
       final artifactsForTarget = <Artifact>[];
       var downloadedNow = false;
+      var restoredFromSharedCache = false;
 
       for (final artifact in requiredArtifacts) {
         final fileName = PrecompileBinaries.fileName(target, artifact);
         final downloadedPath = path.join(downloadedArtifactsDir, fileName);
         if (!File(downloadedPath).existsSync()) {
-          downloadedNow = true;
           final signatureFileName =
               PrecompileBinaries.signatureFileName(target, artifact);
-          await _tryDownloadArtifacts(
-            crateHash: crateHash,
-            fileName: fileName,
-            signatureFileName: signatureFileName,
-            finalPath: downloadedPath,
-          );
+          final restored = sharedCache != null &&
+              sharedCache.restore(
+                crateHash: crateHash,
+                fileName: fileName,
+                signatureFileName: signatureFileName,
+                publicKey:
+                    environment.crateOptions.precompiledBinaries!.publicKey,
+                destinationPath: downloadedPath,
+              );
+          if (restored) {
+            restoredFromSharedCache = true;
+            final size = formatByteSize(File(downloadedPath).lengthSync());
+            _log.info('Reusing $fileName ($size) from the shared cache '
+                '${sharedCache.rootDir} (signature verified)');
+          } else {
+            downloadedNow = true;
+            await _tryDownloadArtifacts(
+              crateHash: crateHash,
+              fileName: fileName,
+              signatureFileName: signatureFileName,
+              finalPath: downloadedPath,
+              sharedCache: sharedCache,
+            );
+          }
         }
         if (File(downloadedPath).existsSync()) {
           artifactsForTarget.add(Artifact(
@@ -249,8 +273,13 @@ class ArtifactProvider {
         // INFO on purpose (xybrid): without this line a consumer's build log
         // never says whether the native library was downloaded, reused from
         // an earlier build, or compiled.
+        final source = downloadedNow
+            ? 'downloaded'
+            : restoredFromSharedCache
+                ? 'shared cache'
+                : 'cached';
         _log.info('Using precompiled ${environment.crateInfo.packageName} '
-            'for $target (${downloadedNow ? 'downloaded' : 'cached'})');
+            'for $target ($source)');
         res[target] = artifactsForTarget;
       }
     }
@@ -348,6 +377,7 @@ class ArtifactProvider {
     required String fileName,
     required String signatureFileName,
     required String finalPath,
+    required SharedArtifactCache? sharedCache,
   }) async {
     final precompiledBinaries = environment.crateOptions.precompiledBinaries!;
     final prefix = precompiledBinaries.uriPrefix;
@@ -372,7 +402,17 @@ class ArtifactProvider {
     }
     if (verify(
         precompiledBinaries.publicKey, res.bodyBytes, signature.bodyBytes)) {
-      File(finalPath).writeAsBytesSync(res.bodyBytes);
+      writeFileAtomically(finalPath, res.bodyBytes);
+      if (sharedCache != null) {
+        sharedCache.store(
+          crateHash: crateHash,
+          fileName: fileName,
+          bytes: res.bodyBytes,
+          signatureFileName: signatureFileName,
+          signatureBytes: signature.bodyBytes,
+        );
+        sharedCache.pruneStale(keepHash: crateHash);
+      }
     } else {
       _log.shout('Signature verification failed! Ignoring binary.');
     }

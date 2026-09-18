@@ -86,7 +86,9 @@ jobs:
         working-directory: bindings/flutter/cargokit/build_tool
         run: |
           dart pub get
-          dart run test/download_progress_test.dart
+          for test_file in test/*_test.dart; do
+            dart run "$test_file"
+          done
 
   # Linux-only on push/PR. macOS + Windows Flutter binaries are built and
   # validated in release-prep.yml (precompile-flutter-* jobs) at release time.
