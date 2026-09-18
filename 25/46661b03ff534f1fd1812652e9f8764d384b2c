@@ -1,0 +1,33 @@
+bindings/flutter/cargokit/build_tool/lib/src/shared_artifact_cache.dart
+  s_4e2833172472d6::t_7605ffb23ddc90 47-60,137
+bindings/flutter/cargokit/build_tool/test/artifacts_provider_test.dart
+  s_4e2833172472d6::t_c2549f2dd0f87d 148-152
+  s_4e2833172472d6::t_fbc4bb9a185455 143-147
+bindings/flutter/cargokit/build_tool/lib/src/precompile_binaries.dart
+  s_4e2833172472d6::t_7605ffb23ddc90 10,26-66,126-161,258-259,269-278,283-299,303-335,344-345,347-348,375-403
+  s_4e2833172472d6::t_ac3b6b8ec6623a 404
+bindings/flutter/cargokit/build_tool/test/shared_artifact_cache_test.dart
+  s_4e2833172472d6::t_c2549f2dd0f87d 50-68
+bindings/flutter/cargokit/build_tool/test/precompile_binaries_test.dart
+  s_4e2833172472d6::t_c2549f2dd0f87d 37-111
+bindings/flutter/cargokit/build_tool/lib/src/artifacts_provider.dart
+  s_4e2833172472d6::t_7605ffb23ddc90 460
+CHANGELOG.md
+  s_4e2833172472d6::t_b9b01ebf67a21a 57-60
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "2546661b03ff534f1fd1812652e9f8764d384b2c",
+  "prompts": {},
+  "sessions": {
+    "s_4e2833172472d6": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c9a4cec0-a6a7-40d9-8722-c99eddc4dc6d",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
+    }
+  }
+}
