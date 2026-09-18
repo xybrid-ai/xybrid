@@ -330,6 +330,24 @@ installed does not change anything — the published package is precompiled-only
 and cannot be built from source, because its Rust crate lives in the xybrid
 monorepo workspace.
 
+The first build of an app downloads that binary: tens of MB per Android ABI,
+and over 100 MB for iOS and macOS, where it is a static library. It is stored
+under the app's `build/` directory, so it is fetched again after
+`flutter clean`. A slow first build is this download, not a Rust compile.
+Flutter hides native build-step output unless you pass `-v`; with it (or in
+the Xcode / Android Studio build log) cargokit reports what it is doing:
+
+```
+INFO: Downloading precompiled aarch64-apple-ios_libxybrid_flutter_ffi.a (180.6 MB) from https://github.com/…
+INFO: aarch64-apple-ios_libxybrid_flutter_ffi.a: 72.4 MB of 180.6 MB (40%)
+INFO: Downloaded aarch64-apple-ios_libxybrid_flutter_ffi.a: 180.6 MB in 42s (4.3 MB/s)
+INFO: Using precompiled xybrid_flutter for aarch64-apple-ios (downloaded)
+```
+
+Later builds print `(cached)` instead. A line starting
+`Building xybrid_flutter for` means a source build, which only happens inside
+the monorepo.
+
 Building from source is for monorepo development, where the workspace root and
 the `xybrid-*` crates are present. There it is the default whenever a Rust
 toolchain is installed, because cargokit's crate hash only covers

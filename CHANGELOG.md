@@ -47,6 +47,12 @@ the same time, and a policy bundle decides which leg serves each request.
 
 ### Changed
 
+- **Flutter: precompiled-binary downloads are visible in the build log.**
+  cargokit now logs at INFO which native library it downloads, its size, and
+  the source URL, then progress every 10 s and a size/time/throughput summary;
+  each target also reports whether its binary was downloaded or reused from
+  cache. Previously all of this was FINE-level, so a first build that fetched a
+  ~180 MB static library was silent for minutes and read as a Rust compile.
 - **Smaller Flutter precompiled natives.** The `release/v*` precompile lane now
   builds the Flutter staticlib/cdylib with fat LTO (`--config=flutter-precompile`).
   Measured on the darwin staticlib: macOS 175 MB -> 112 MB, iOS 181 MB -> 119 MB;

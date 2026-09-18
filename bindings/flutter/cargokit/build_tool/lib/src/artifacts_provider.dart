@@ -2,6 +2,7 @@
 /// Details: https://fzyzcjy.github.io/flutter_rust_bridge/manual/integrate/builtin
 
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:ed25519_edwards/ed25519_edwards.dart';
 import 'package:http/http.dart';
@@ -10,6 +11,7 @@ import 'package:path/path.dart' as path;
 
 import 'builder.dart';
 import 'crate_hash.dart';
+import 'download_progress.dart';
 import 'options.dart';
 import 'precompile_binaries.dart';
 import 'rustup.dart';
@@ -216,11 +218,13 @@ class ArtifactProvider {
         remote: true,
       );
       final artifactsForTarget = <Artifact>[];
+      var downloadedNow = false;
 
       for (final artifact in requiredArtifacts) {
         final fileName = PrecompileBinaries.fileName(target, artifact);
         final downloadedPath = path.join(downloadedArtifactsDir, fileName);
         if (!File(downloadedPath).existsSync()) {
+          downloadedNow = true;
           final signatureFileName =
               PrecompileBinaries.signatureFileName(target, artifact);
           await _tryDownloadArtifacts(
@@ -242,7 +246,11 @@ class ArtifactProvider {
 
       // Only provide complete set of artifacts.
       if (artifactsForTarget.length == requiredArtifacts.length) {
-        _log.fine('Found precompiled artifacts for $target');
+        // INFO on purpose (xybrid): without this line a consumer's build log
+        // never says whether the native library was downloaded, reused from
+        // an earlier build, or compiled.
+        _log.info('Using precompiled ${environment.crateInfo.packageName} '
+            'for $target (${downloadedNow ? 'downloaded' : 'cached'})');
         res[target] = artifactsForTarget;
       }
     }
@@ -250,18 +258,69 @@ class ArtifactProvider {
     return res;
   }
 
-  static Future<Response> _get(Uri url, {Map<String, String>? headers}) async {
-    int attempt = 0;
+  static Future<Response> _get(Uri url, {Map<String, String>? headers}) {
+    return _withRetry(url, () => get(url, headers: headers));
+  }
+
+  /// Streams [url] so its size can be announced before the body arrives and
+  /// progress reported while it does (xybrid addition).
+  ///
+  /// A precompiled static library can exceed 100 MB. Upstream fetched it with
+  /// a buffered `get` and logged at FINE, so the build step sat silent for
+  /// minutes and read as "the Rust engine is compiling". A non-200 response
+  /// comes back with an empty body and is logged by the caller.
+  static Future<({int statusCode, Uint8List bodyBytes})> _download(
+    Uri url, {
+    required String label,
+  }) {
+    return _withRetry(url, () async {
+      final client = Client();
+      try {
+        final response = await client.send(Request('GET', url));
+        if (response.statusCode != 200) {
+          await response.stream.drain<void>();
+          return (statusCode: response.statusCode, bodyBytes: Uint8List(0));
+        }
+
+        final total = response.contentLength;
+        final size = total == null ? 'size unknown' : formatByteSize(total);
+        _log.info('Downloading precompiled $label ($size) from $url');
+
+        final progress = DownloadProgress(label: label, totalBytes: total);
+        final stopwatch = Stopwatch()..start();
+        final body = BytesBuilder(copy: false);
+        await for (final chunk in response.stream) {
+          body.add(chunk);
+          final line = progress.add(chunk.length, stopwatch.elapsed);
+          if (line != null) {
+            _log.info(line);
+          }
+        }
+        _log.info(progress.summary(stopwatch.elapsed));
+        return (statusCode: response.statusCode, bodyBytes: body.takeBytes());
+      } finally {
+        client.close();
+      }
+    });
+  }
+
+  /// Runs [attempt], retrying the transport failures the release host is
+  /// known to produce. A retried download starts over from the first byte.
+  static Future<T> _withRetry<T>(
+    Uri url,
+    Future<T> Function() attempt,
+  ) async {
+    int attempts = 0;
     const maxAttempts = 10;
     while (true) {
       try {
-        return await get(url, headers: headers);
+        return await attempt();
       } on SocketException catch (e) {
         // Try to detect reset by peer error and retry.
-        if (attempt++ < maxAttempts &&
+        if (attempts++ < maxAttempts &&
             (e.osError?.errorCode == 54 || e.osError?.errorCode == 10054)) {
           _log.severe(
-              'Failed to download $url: $e, attempt $attempt of $maxAttempts, will retry...');
+              'Failed to download $url: $e, attempt $attempts of $maxAttempts, will retry...');
           await Future.delayed(Duration(seconds: 1));
           continue;
         } else {
@@ -272,9 +331,9 @@ class ArtifactProvider {
         // ("Connection closed before full header was received"). That is a
         // transport hiccup, not a verdict on whether the artifact exists,
         // so retry instead of failing the build on it.
-        if (attempt++ < maxAttempts) {
+        if (attempts++ < maxAttempts) {
           _log.severe(
-              'Failed to download $url: $e, attempt $attempt of $maxAttempts, will retry...');
+              'Failed to download $url: $e, attempt $attempts of $maxAttempts, will retry...');
           await Future.delayed(Duration(seconds: 1));
           continue;
         } else {
@@ -306,8 +365,7 @@ class ArtifactProvider {
           'Failed to download signature $signatureUrl: status ${signature.statusCode}');
       return;
     }
-    _log.fine('Downloading binary from $url');
-    final res = await _get(url);
+    final res = await _download(url, label: fileName);
     if (res.statusCode != 200) {
       _log.severe('Failed to download binary $url: status ${res.statusCode}');
       return;
