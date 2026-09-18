@@ -1,0 +1,22 @@
+bindings/flutter/cargokit/build_tool/test/verify_binaries_test.dart
+  s_3206bff88ed087::t_3f1c73c5b76bdc 1-87
+bindings/flutter/cargokit/build_tool/lib/src/verify_binaries.dart
+  s_3206bff88ed087::t_ede923b029d427 5,20-63,129-149,152-155,158-161
+  s_3206bff88ed087::t_52fca6f7d81eac 17
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "bf1ec6edf29b8d3c2cb9a12b96549060d5ff1aac",
+  "prompts": {},
+  "sessions": {
+    "s_3206bff88ed087": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0b688-fb53-7a93-a16f-7c6d00e2563f",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
+    }
+  }
+}
