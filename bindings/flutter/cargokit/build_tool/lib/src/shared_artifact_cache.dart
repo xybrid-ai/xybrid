@@ -70,19 +70,30 @@ class SharedArtifactCache {
   ///
   /// Defaults to `~/.xybrid/cache/precompiled`, next to the SDK's model cache
   /// and the iOS ONNX Runtime cache.
-  static SharedArtifactCache? fromEnvironment(
-      [Map<String, String>? environment]) {
+  ///
+  /// The home directory is read the way `rustup.dart` reads it: `USERPROFILE`
+  /// on Windows, `HOME` everywhere else. On Windows `HOME` is only set by Git
+  /// Bash / MSYS, as a POSIX-style path (`/c/Users/name`) that `dart:io` would
+  /// resolve against the current drive's root — a cache in the wrong place
+  /// that builds started from cmd or PowerShell would never find.
+  static SharedArtifactCache? fromEnvironment({
+    Map<String, String>? environment,
+    bool? isWindows,
+  }) {
     final env = environment ?? Platform.environment;
     final override = env[overrideVariable];
     if (override != null) {
       return override.trim().isEmpty ? null : SharedArtifactCache(override);
     }
-    final home = env['HOME'] ?? env['USERPROFILE'];
+    final windows = isWindows ?? Platform.isWindows;
+    final home = env[windows ? 'USERPROFILE' : 'HOME'];
     if (home == null || home.isEmpty) {
       return null;
     }
+    final context =
+        path.Context(style: windows ? path.Style.windows : path.Style.posix);
     return SharedArtifactCache(
-        path.join(home, '.xybrid', 'cache', 'precompiled'));
+        context.join(home, '.xybrid', 'cache', 'precompiled'));
   }
 
   /// Copies the cached [fileName] to [destinationPath] if it is present and its

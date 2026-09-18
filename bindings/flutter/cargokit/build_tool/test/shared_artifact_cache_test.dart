@@ -49,36 +49,64 @@ void main() {
 
   group('fromEnvironment', () {
     test('defaults to ~/.xybrid/cache/precompiled', () {
-      final resolved = SharedArtifactCache.fromEnvironment({'HOME': '/home/u'});
+      final resolved = SharedArtifactCache.fromEnvironment(
+          environment: {'HOME': '/home/u'}, isWindows: false);
 
-      expect(resolved!.rootDir,
-          path.join('/home/u', '.xybrid', 'cache', 'precompiled'));
+      expect(resolved!.rootDir, '/home/u/.xybrid/cache/precompiled');
     });
 
-    test('falls back to USERPROFILE on Windows', () {
-      final resolved =
-          SharedArtifactCache.fromEnvironment({'USERPROFILE': r'C:\Users\u'});
+    test('uses USERPROFILE on Windows', () {
+      final resolved = SharedArtifactCache.fromEnvironment(
+          environment: {'USERPROFILE': r'C:\Users\u'}, isWindows: true);
 
-      expect(resolved!.rootDir, startsWith(r'C:\Users\u'));
+      expect(resolved!.rootDir, r'C:\Users\u\.xybrid\cache\precompiled');
+    });
+
+    test('ignores the POSIX-style HOME that Git Bash sets on Windows', () {
+      final resolved = SharedArtifactCache.fromEnvironment(
+        environment: {'HOME': '/c/Users/u', 'USERPROFILE': r'C:\Users\u'},
+        isWindows: true,
+      );
+
+      expect(resolved!.rootDir, r'C:\Users\u\.xybrid\cache\precompiled');
+    });
+
+    test('is disabled on Windows when only a POSIX-style HOME exists', () {
+      expect(
+          SharedArtifactCache.fromEnvironment(
+              environment: {'HOME': '/c/Users/u'}, isWindows: true),
+          isNull);
+    });
+
+    test('ignores USERPROFILE off Windows', () {
+      final resolved = SharedArtifactCache.fromEnvironment(
+        environment: {'HOME': '/home/u', 'USERPROFILE': r'C:\Users\u'},
+        isWindows: false,
+      );
+
+      expect(resolved!.rootDir, '/home/u/.xybrid/cache/precompiled');
     });
 
     test('honours the override variable', () {
-      final resolved = SharedArtifactCache.fromEnvironment({
+      final resolved = SharedArtifactCache.fromEnvironment(environment: {
         'HOME': '/home/u',
         SharedArtifactCache.overrideVariable: '/ci/cache',
-      });
+      }, isWindows: false);
 
       expect(resolved!.rootDir, '/ci/cache');
     });
 
     test('is disabled by an empty override or a missing home', () {
       expect(
-          SharedArtifactCache.fromEnvironment({
+          SharedArtifactCache.fromEnvironment(environment: {
             'HOME': '/home/u',
             SharedArtifactCache.overrideVariable: '',
-          }),
+          }, isWindows: false),
           isNull);
-      expect(SharedArtifactCache.fromEnvironment({}), isNull);
+      expect(
+          SharedArtifactCache.fromEnvironment(
+              environment: {}, isWindows: false),
+          isNull);
     });
   });
 
