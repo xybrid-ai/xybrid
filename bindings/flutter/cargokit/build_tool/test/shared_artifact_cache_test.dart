@@ -47,6 +47,25 @@ void main() {
         destinationPath: destination,
       );
 
+  group('signatureVerifies', () {
+    test('accepts a valid signature and rejects a wrong one', () {
+      expect(signatureVerifies(keys.publicKey, payload, signature), isTrue);
+      expect(signatureVerifies(generateKey().publicKey, payload, signature),
+          isFalse);
+    });
+
+    test('answers false, never throws, for malformed signatures', () {
+      for (final malformed in [
+        Uint8List(0),
+        Uint8List(3),
+        Uint8List(64),
+        Uint8List(200),
+      ]) {
+        expect(signatureVerifies(keys.publicKey, payload, malformed), isFalse);
+      }
+    });
+  });
+
   group('fromEnvironment', () {
     test('defaults to ~/.xybrid/cache/precompiled', () {
       final resolved = SharedArtifactCache.fromEnvironment(

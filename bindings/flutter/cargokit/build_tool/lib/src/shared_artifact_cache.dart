@@ -44,6 +44,20 @@ void writeFileAtomically(String finalPath, List<int> bytes) {
   }
 }
 
+/// Whether [signature] is a valid ed25519 signature of [bytes] under [key].
+///
+/// Never throws. `ed25519_edwards` answers `false` for a signature of the
+/// wrong length today, but "a bad signature means try the next source" is a
+/// property callers rely on to keep a build going, so it must not hinge on how
+/// one library version treats malformed input.
+bool signatureVerifies(PublicKey key, Uint8List bytes, Uint8List signature) {
+  try {
+    return verify(key, bytes, signature);
+  } catch (_) {
+    return false;
+  }
+}
+
 class SharedArtifactCache {
   SharedArtifactCache(this.rootDir);
 
@@ -120,7 +134,7 @@ class SharedArtifactCache {
         return false;
       }
       final bytes = entry.readAsBytesSync();
-      if (!_verifies(publicKey, bytes, signature.readAsBytesSync())) {
+      if (!signatureVerifies(publicKey, bytes, signature.readAsBytesSync())) {
         _log.warning('Shared cache entry ${entry.path} failed signature '
             'verification; deleting it and downloading a fresh copy.');
         _deleteQuietly(entry);
@@ -207,15 +221,6 @@ class SharedArtifactCache {
       marker.setLastModifiedSync(DateTime.now());
     } on FileSystemException catch (e) {
       _log.fine('Could not update ${marker.path}: $e');
-    }
-  }
-
-  static bool _verifies(PublicKey key, Uint8List bytes, Uint8List signature) {
-    try {
-      return verify(key, bytes, signature);
-    } catch (_) {
-      // A malformed signature file (wrong length) makes `verify` throw.
-      return false;
     }
   }
 

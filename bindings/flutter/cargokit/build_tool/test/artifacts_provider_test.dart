@@ -145,6 +145,16 @@ void main() {
     expect(sharedEntries(), {rawName, rawSig});
   });
 
+  test('falls back when the compressed signature is malformed', () async {
+    publish(rawName, payload);
+    published[gzName] = compressArtifact(payload);
+    published[gzSig] = [1, 2, 3];
+
+    expect(await fetch(), payload);
+    expect(requests, [gzSig, gzName, rawSig, rawName]);
+    expect(sharedEntries(), {rawName, rawSig});
+  });
+
   test('falls back when a signed compressed asset is not valid gzip', () async {
     publish(rawName, payload);
     publish(gzName, [0, 1, 2, 3, 4, 5, 6, 7]);

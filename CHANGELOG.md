@@ -54,7 +54,10 @@ the same time, and a policy bundle decides which leg serves each request.
   releases) or fails verification. Measured: iOS static library 119.2 MB -> 33.6 MB,
   Android arm64 26.9 MB -> 9.5 MB; verify + unpack costs 0.6 s. The shared cache stores
   the compressed form, so it shrinks by the same factor. `verify-binaries` also checks
-  that each compressed asset decodes to its uncompressed twin.
+  that each compressed asset decodes to its uncompressed twin. A publisher re-run over a
+  partial release derives the missing assets from the already-published, signature-
+  verified binary instead of this run's rebuild, deletes unusable orphans (a binary
+  without its signature), and never signs bytes it cannot verify.
 - **Flutter: precompiled binaries are cached per machine, not per app.** cargokit
   keeps verified downloads in `~/.xybrid/cache/precompiled/<crate-hash>/`, so
   `flutter clean` and new projects copy the native library locally instead of

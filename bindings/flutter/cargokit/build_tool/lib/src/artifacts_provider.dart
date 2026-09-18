@@ -4,7 +4,6 @@
 import 'dart:io';
 import 'dart:typed_data';
 
-import 'package:ed25519_edwards/ed25519_edwards.dart';
 import 'package:http/http.dart';
 import 'package:logging/logging.dart';
 import 'package:path/path.dart' as path;
@@ -458,7 +457,7 @@ class ArtifactProvider {
       _log.severe('Failed to download binary $url: status ${res.statusCode}');
       return false;
     }
-    if (!verify(
+    if (!signatureVerifies(
         precompiledBinaries.publicKey, res.bodyBytes, signature.bodyBytes)) {
       _log.shout('Signature verification failed! Ignoring $fileName.');
       return false;
