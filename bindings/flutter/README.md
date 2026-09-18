@@ -330,9 +330,10 @@ installed does not change anything — the published package is precompiled-only
 and cannot be built from source, because its Rust crate lives in the xybrid
 monorepo workspace.
 
-The first build of an app downloads that binary: tens of MB per Android ABI,
-and over 100 MB for iOS and macOS, where it is a static library. A slow first
-build is this download, not a Rust compile.
+The first build of an app downloads that binary, gzip-compressed: roughly
+10 MB per Android ABI and 30–50 MB for iOS and macOS, where it is a static
+library of over 100 MB once unpacked. A slow first build is this download, not
+a Rust compile.
 
 The download is kept in a shared cache at `~/.xybrid/cache/precompiled/`, so
 `flutter clean` and other projects on the same machine reuse it instead of
@@ -345,9 +346,10 @@ Flutter hides native build-step output unless you pass `-v`; with it (or in
 the Xcode / Android Studio build log) cargokit reports what it is doing:
 
 ```
-INFO: Downloading precompiled aarch64-apple-ios_libxybrid_flutter_ffi.a (180.6 MB) from https://github.com/…
-INFO: aarch64-apple-ios_libxybrid_flutter_ffi.a: 72.4 MB of 180.6 MB (40%)
-INFO: Downloaded aarch64-apple-ios_libxybrid_flutter_ffi.a: 180.6 MB in 42s (4.3 MB/s)
+INFO: Downloading precompiled aarch64-apple-ios_libxybrid_flutter_ffi.a.gz (33.6 MB) from https://github.com/…
+INFO: aarch64-apple-ios_libxybrid_flutter_ffi.a.gz: 14.2 MB of 33.6 MB (42%)
+INFO: Downloaded aarch64-apple-ios_libxybrid_flutter_ffi.a.gz: 33.6 MB in 21s (1.6 MB/s)
+INFO: Unpacked aarch64-apple-ios_libxybrid_flutter_ffi.a.gz to 119.2 MB
 INFO: Using precompiled xybrid_flutter for aarch64-apple-ios (downloaded)
 ```
 

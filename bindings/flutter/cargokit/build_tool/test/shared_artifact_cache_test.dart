@@ -148,6 +148,40 @@ void main() {
       expect(restorePayload(), isFalse);
     });
 
+    test('decodes verified bytes on the way out', () {
+      storePayload();
+
+      final restored = cache.restore(
+        crateHash: hash,
+        fileName: fileName,
+        signatureFileName: signatureFileName,
+        publicKey: keys.publicKey,
+        destinationPath: destination,
+        decode: (bytes) => bytes.reversed.toList(),
+      );
+
+      expect(restored, isTrue);
+      expect(File(destination).readAsBytesSync(), payload.reversed.toList());
+    });
+
+    test('deletes a verified entry that cannot be decoded', () {
+      storePayload();
+
+      final restored = cache.restore(
+        crateHash: hash,
+        fileName: fileName,
+        signatureFileName: signatureFileName,
+        publicKey: keys.publicKey,
+        destinationPath: destination,
+        decode: (_) => throw const FormatException('not gzip'),
+      );
+
+      expect(restored, isFalse);
+      expect(File(destination).existsSync(), isFalse);
+      expect(
+          File(path.join(cache.rootDir, hash, fileName)).existsSync(), isFalse);
+    });
+
     test('misses when the signature file is absent', () {
       storePayload();
       File(path.join(cache.rootDir, hash, signatureFileName)).deleteSync();

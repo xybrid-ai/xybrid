@@ -9,6 +9,7 @@ import 'package:http/http.dart';
 import 'package:logging/logging.dart';
 import 'package:path/path.dart' as path;
 
+import 'artifact_compression.dart';
 import 'builder.dart';
 import 'crate_hash.dart';
 import 'download_progress.dart';
@@ -47,11 +48,34 @@ class Artifact {
 
 final _log = Logger('artifacts_provider');
 
+/// One published form of an artifact: as-is, or gzip-compressed (xybrid).
+class _RemoteForm {
+  const _RemoteForm({
+    required this.fileName,
+    required this.signatureFileName,
+    this.decode,
+  });
+
+  final String fileName;
+
+  /// Signs exactly the bytes served as [fileName].
+  final String signatureFileName;
+
+  /// Turns the verified download into the artifact; `null` when served as-is.
+  final Uint8List Function(List<int> verifiedBytes)? decode;
+}
+
 class ArtifactProvider {
   ArtifactProvider({
     required this.environment,
     required this.userOptions,
-  });
+    SharedArtifactCache? Function()? resolveSharedCache,
+  }) : _resolveSharedCache =
+            resolveSharedCache ?? SharedArtifactCache.fromEnvironment;
+
+  /// Where the user-level cache lives. A seam for tests, which must not read
+  /// or write the real `~/.xybrid`.
+  final SharedArtifactCache? Function() _resolveSharedCache;
 
   final BuildEnvironment environment;
   final CargokitUserOptions userOptions;
@@ -213,7 +237,7 @@ class ArtifactProvider {
     // xybrid addition: the directory above lives under the app's build output,
     // so `flutter clean` and every new project start from nothing. The shared
     // cache sits behind it and turns those into a local, re-verified copy.
-    final sharedCache = SharedArtifactCache.fromEnvironment();
+    final sharedCache = _resolveSharedCache();
 
     final res = <Target, List<Artifact>>{};
 
@@ -231,17 +255,34 @@ class ArtifactProvider {
         final fileName = PrecompileBinaries.fileName(target, artifact);
         final downloadedPath = path.join(downloadedArtifactsDir, fileName);
         if (!File(downloadedPath).existsSync()) {
-          final signatureFileName =
-              PrecompileBinaries.signatureFileName(target, artifact);
+          // Preference order (xybrid): the compressed form is a third of the
+          // download. The uncompressed form stays as the fallback — it is all
+          // that releases from before compressed assets have, and it covers a
+          // compressed asset that is missing or fails verification.
+          final forms = [
+            _RemoteForm(
+              fileName: PrecompileBinaries.compressedFileName(target, artifact),
+              signatureFileName: PrecompileBinaries.compressedSignatureFileName(
+                  target, artifact),
+              decode: decompressArtifact,
+            ),
+            _RemoteForm(
+              fileName: fileName,
+              signatureFileName:
+                  PrecompileBinaries.signatureFileName(target, artifact),
+            ),
+          ];
+
           final restored = sharedCache != null &&
-              sharedCache.restore(
-                crateHash: crateHash,
-                fileName: fileName,
-                signatureFileName: signatureFileName,
-                publicKey:
-                    environment.crateOptions.precompiledBinaries!.publicKey,
-                destinationPath: downloadedPath,
-              );
+              forms.any((form) => sharedCache.restore(
+                    crateHash: crateHash,
+                    fileName: form.fileName,
+                    signatureFileName: form.signatureFileName,
+                    publicKey:
+                        environment.crateOptions.precompiledBinaries!.publicKey,
+                    destinationPath: downloadedPath,
+                    decode: form.decode,
+                  ));
           if (restored) {
             restoredFromSharedCache = true;
             final size = formatByteSize(File(downloadedPath).lengthSync());
@@ -249,13 +290,18 @@ class ArtifactProvider {
                 '${sharedCache.rootDir} (signature verified)');
           } else {
             downloadedNow = true;
-            await _tryDownloadArtifacts(
-              crateHash: crateHash,
-              fileName: fileName,
-              signatureFileName: signatureFileName,
-              finalPath: downloadedPath,
-              sharedCache: sharedCache,
-            );
+            for (final form in forms) {
+              final downloaded = await _tryDownloadArtifact(
+                crateHash: crateHash,
+                form: form,
+                hasFallback: !identical(form, forms.last),
+                finalPath: downloadedPath,
+                sharedCache: sharedCache,
+              );
+              if (downloaded) {
+                break;
+              }
+            }
           }
         }
         if (File(downloadedPath).existsSync()) {
@@ -372,50 +418,81 @@ class ArtifactProvider {
     }
   }
 
-  Future<void> _tryDownloadArtifacts({
+  /// Downloads one published [form] of an artifact into [finalPath].
+  ///
+  /// Returns whether the artifact is now in place. Every failure is logged and
+  /// reported as `false` so the caller can move on to the next form.
+  /// [hasFallback] only tunes the wording: a release from before compressed
+  /// assets existed answers 404 for them, which is not worth a warning.
+  Future<bool> _tryDownloadArtifact({
     required String crateHash,
-    required String fileName,
-    required String signatureFileName,
+    required _RemoteForm form,
+    required bool hasFallback,
     required String finalPath,
     required SharedArtifactCache? sharedCache,
   }) async {
     final precompiledBinaries = environment.crateOptions.precompiledBinaries!;
     final prefix = precompiledBinaries.uriPrefix;
+    final fileName = form.fileName;
     final url = Uri.parse('$prefix$crateHash/$fileName');
-    final signatureUrl = Uri.parse('$prefix$crateHash/$signatureFileName');
+    final signatureUrl =
+        Uri.parse('$prefix$crateHash/${form.signatureFileName}');
     _log.fine('Downloading signature from $signatureUrl');
     final signature = await _get(signatureUrl);
     if (signature.statusCode == 404) {
-      _log.warning(
-          'Precompiled binaries not available for crate hash $crateHash ($fileName)');
-      return;
+      if (hasFallback) {
+        _log.fine('$fileName is not published for crate hash $crateHash');
+      } else {
+        _log.warning(
+            'Precompiled binaries not available for crate hash $crateHash ($fileName)');
+      }
+      return false;
     }
     if (signature.statusCode != 200) {
       _log.severe(
           'Failed to download signature $signatureUrl: status ${signature.statusCode}');
-      return;
+      return false;
     }
     final res = await _download(url, label: fileName);
     if (res.statusCode != 200) {
       _log.severe('Failed to download binary $url: status ${res.statusCode}');
-      return;
+      return false;
     }
-    if (verify(
+    if (!verify(
         precompiledBinaries.publicKey, res.bodyBytes, signature.bodyBytes)) {
-      writeFileAtomically(finalPath, res.bodyBytes);
-      if (sharedCache != null) {
-        sharedCache.store(
-          crateHash: crateHash,
-          fileName: fileName,
-          bytes: res.bodyBytes,
-          signatureFileName: signatureFileName,
-          signatureBytes: signature.bodyBytes,
-        );
-        sharedCache.pruneStale(keepHash: crateHash);
-      }
-    } else {
-      _log.shout('Signature verification failed! Ignoring binary.');
+      _log.shout('Signature verification failed! Ignoring $fileName.');
+      return false;
     }
+
+    // Only verified bytes reach the decompressor.
+    final decode = form.decode;
+    final Uint8List artifactBytes;
+    try {
+      artifactBytes = decode == null ? res.bodyBytes : decode(res.bodyBytes);
+    } on FormatException catch (e) {
+      _log.warning('Could not decompress $fileName: $e');
+      return false;
+    }
+    writeFileAtomically(finalPath, artifactBytes);
+    if (decode != null) {
+      _log.info(
+          'Unpacked $fileName to ${formatByteSize(artifactBytes.length)}');
+    }
+
+    // The shared cache keeps the form that was downloaded, with the signature
+    // that covers it — for the compressed form that is also a third of the
+    // disk space.
+    if (sharedCache != null) {
+      sharedCache.store(
+        crateHash: crateHash,
+        fileName: fileName,
+        bytes: res.bodyBytes,
+        signatureFileName: form.signatureFileName,
+        signatureBytes: signature.bodyBytes,
+      );
+      sharedCache.pruneStale(keepHash: crateHash);
+    }
+    return true;
   }
 }
 

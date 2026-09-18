@@ -3,9 +3,11 @@
 
 import 'dart:io';
 
+import 'package:collection/collection.dart';
 import 'package:ed25519_edwards/ed25519_edwards.dart';
 import 'package:http/http.dart';
 
+import 'artifact_compression.dart';
 import 'artifacts_provider.dart';
 import 'cargo.dart';
 import 'crate_hash.dart';
@@ -72,6 +74,29 @@ class VerifyBinaries {
               signature.bodyBytes)) {
             stdout.writeln('INVALID SIGNATURE');
             ok = false;
+          }
+
+          // xybrid addition: the gzip form consumers prefer. Absent on
+          // releases from before compressed assets, which is not an error.
+          final compressedName =
+              PrecompileBinaries.compressedFileName(target, artifact);
+          final compressedSignature = await get(Uri.parse(
+              '$prefix$crateHash/${PrecompileBinaries.compressedSignatureFileName(target, artifact)}'));
+          if (compressedSignature.statusCode == 200) {
+            final compressed =
+                await get(Uri.parse('$prefix$crateHash/$compressedName'));
+            if (compressed.statusCode != 200) {
+              stdout.writeln('MISSING $compressedName');
+              ok = false;
+            } else if (!verify(precompiledBinaries.publicKey,
+                compressed.bodyBytes, compressedSignature.bodyBytes)) {
+              stdout.writeln('INVALID SIGNATURE $compressedName');
+              ok = false;
+            } else if (!const ListEquality<int>().equals(
+                decompressArtifact(compressed.bodyBytes), asset.bodyBytes)) {
+              stdout.writeln('MISMATCH $compressedName');
+              ok = false;
+            }
           }
         }
 
