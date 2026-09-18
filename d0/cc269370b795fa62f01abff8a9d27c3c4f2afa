@@ -1,0 +1,19 @@
+.github/workflows/release-prep.yml
+  s_0557ae04cccac3::t_b939a7765ca26d 670-671
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "d0cc269370b795fa62f01abff8a9d27c3c4f2afa",
+  "prompts": {},
+  "sessions": {
+    "s_0557ae04cccac3": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0b184-da62-7dd0-b749-488001c6c9a7",
+        "model": "unknown"
+      },
+      "human_author": "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
+    }
+  }
+}
