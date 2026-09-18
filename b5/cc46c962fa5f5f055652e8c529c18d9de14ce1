@@ -1,0 +1,21 @@
+bindings/flutter/cargokit/build_tool/lib/src/shared_artifact_cache.dart
+  s_4e2833172472d6::t_f9008d58394c0e 73-82,88-89,93-94,96
+bindings/flutter/cargokit/build_tool/test/shared_artifact_cache_test.dart
+  s_4e2833172472d6::t_728c565859035f 52-53,55,58-60,62-87,91,94,101,104-108
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "b5cc46c962fa5f5f055652e8c529c18d9de14ce1",
+  "prompts": {},
+  "sessions": {
+    "s_4e2833172472d6": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c9a4cec0-a6a7-40d9-8722-c99eddc4dc6d",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
+    }
+  }
+}
