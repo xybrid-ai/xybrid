@@ -94,8 +94,11 @@ jobs:
         with:
           macos-sdk-mirror: ${{ vars.MACOS_SDK_MIRROR }}
 
+      # Same --config=rust-lto as release-prep.yml: the steps below compile
+      # the Swift wrapper and run its unit tests against this archive, so they
+      # must exercise the LTO'd build that ships, not a differently-linked one.
       - name: Build XCFramework (Bazel)
-        run: bazelisk build --config=ios //bindings/apple:XybridFFI
+        run: bazelisk build --config=ios --config=rust-lto //bindings/apple:XybridFFI
 
       - name: Stage XCFramework
         # Unzip the Bazel output to the path Package.swift's local-natives mode +

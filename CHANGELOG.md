@@ -47,6 +47,13 @@ the same time, and a policy bundle decides which leg serves each request.
 
 ### Changed
 
+- **Apple: smaller `XybridFFI.xcframework`.** The Swift package's binary target is now
+  built with fat LTO (`--config=rust-lto`, shared with the Flutter precompile lane), so
+  each slice carries only the Rust code reachable from the exported FFI functions.
+  Measured: release zip 99.9 MB -> 63.6 MB; device slice 176 MB -> 117 MB, simulator
+  slice 171 MB -> 111 MB. All 91 functions declared in `xybrid-bolt.h` remain exported.
+  PR CI builds the XCFramework with the same config, so the Swift wrapper is compiled
+  and unit-tested against exactly what ships.
 - **Flutter: precompiled binaries are downloaded gzip-compressed.** The release lane
   publishes every native library as-is and as `<asset>.gz`, each with its own ed25519
   signature; cargokit prefers the compressed form, verifies it *before* decompressing,

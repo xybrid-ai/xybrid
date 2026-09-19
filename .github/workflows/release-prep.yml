@@ -221,8 +221,12 @@ jobs:
         with:
           macos-sdk-mirror: ${{ vars.MACOS_SDK_MIRROR }}
 
+      # --config=rust-lto: fat LTO, so each slice carries only the Rust code
+      # reachable from the exported FFI symbols (see .bazelrc). build-apple.yml
+      # builds with the same config on every PR, so the Swift wrapper is
+      # compiled and unit-tested against exactly what ships here.
       - name: Build XCFramework (Bazel)
-        run: bazelisk build --config=ios //bindings/apple:XybridFFI
+        run: bazelisk build --config=ios --config=rust-lto //bindings/apple:XybridFFI
 
       - name: Prepare XCFramework artifact
         shell: bash
