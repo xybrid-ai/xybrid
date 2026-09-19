@@ -94,6 +94,13 @@ RCT_REMAP_METHOD(unload,
   [_impl unload:handle resolve:resolve reject:reject];
 }
 
+RCT_REMAP_METHOD(modelInfo,
+                 modelInfo:(NSString *)handle
+                 resolver:(RCTPromiseResolveBlock)resolve
+                 rejecter:(RCTPromiseRejectBlock)reject) {
+  [_impl modelInfo:handle resolve:resolve reject:reject];
+}
+
 #pragma mark - Inference
 
 RCT_REMAP_METHOD(run,
