@@ -1,0 +1,29 @@
+bindings/flutter/README.md
+  s_4e2833172472d6::t_03fdea872a6f8e 323
+bindings/flutter/cargokit/build_tool/test/source_build_possible_test.dart
+  s_4e2833172472d6::t_3e812b442f9a30 1-86
+bindings/flutter/cargokit/build_pod.sh
+  s_4e2833172472d6::t_9e2d88ee0f7064 63-70,77,79-87
+bindings/flutter/cargokit/source_build_possible.sh
+  s_4e2833172472d6::t_9e2d88ee0f7064 1-54
+bindings/flutter/ios/xybrid_flutter.podspec
+  s_4e2833172472d6::t_03fdea872a6f8e 25-28,30
+CHANGELOG.md
+  s_4e2833172472d6::t_03fdea872a6f8e 120-127
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "59892a82c2131d87e614b73ab7b5e88b00ab2edb",
+  "prompts": {},
+  "sessions": {
+    "s_4e2833172472d6": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c9a4cec0-a6a7-40d9-8722-c99eddc4dc6d",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
+    }
+  }
+}
