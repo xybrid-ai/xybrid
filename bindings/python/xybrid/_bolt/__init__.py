@@ -1827,6 +1827,36 @@ _native._register_xybrid_thermal_state(XybridThermalState)
 
 
 
+class XybridCancellationToken:
+    __slots__ = ("_handle",)
+
+
+
+    def __init__(self) -> None:
+        self._handle = _native._boltffi_xybrid_cancellation_token_new()
+
+
+
+    @classmethod
+    def _from_handle(cls, handle: int) -> "XybridCancellationToken":
+        value = cls.__new__(cls)
+        value._handle = handle
+        return value
+
+    def __del__(self) -> None:
+        handle = getattr(self, "_handle", None)
+        if handle is not None:
+            self._handle = None
+            _native._boltffi_xybrid_cancellation_token_release(handle)
+
+    def cancel(self) -> None:
+        _native._boltffi_xybrid_cancellation_token_cancel(self._handle)
+
+    def is_cancelled(self) -> bool:
+        return _native._boltffi_xybrid_cancellation_token_is_cancelled(self._handle)
+
+
+
 class XybridModel:
     __slots__ = ("_handle",)
 
@@ -1923,11 +1953,11 @@ class XybridModel:
     def voice(self, voice_id: str) -> XybridVoiceInfo | None:
         return _boltffi_read_wire(_native._boltffi_xybrid_model_voice(self._handle, voice_id), lambda reader: reader.optional(lambda: XybridVoiceInfo._boltffi_from_reader(reader)))
 
-    def run(self, envelope: XybridEnvelope, options: XybridRunOptions | None) -> XybridResult:
-        return _boltffi_read_wire(_boltffi_call(_boltffi_read_fe83cddcf3822a1d, lambda: _native._boltffi_xybrid_model_run(self._handle, envelope._boltffi_wire(), _boltffi_wire_optional(options, lambda __boltffi_value_0: __boltffi_value_0._boltffi_wire()))), lambda reader: XybridResult._boltffi_from_reader(reader))
+    def run(self, envelope: XybridEnvelope, options: XybridRunOptions | None, cancellation: XybridCancellationToken) -> XybridResult:
+        return _boltffi_read_wire(_boltffi_call(_boltffi_read_fe83cddcf3822a1d, lambda: _native._boltffi_xybrid_model_run(self._handle, envelope._boltffi_wire(), _boltffi_wire_optional(options, lambda __boltffi_value_0: __boltffi_value_0._boltffi_wire()), cancellation._handle)), lambda reader: XybridResult._boltffi_from_reader(reader))
 
-    def run_stream(self, envelope: XybridEnvelope, options: XybridRunOptions | None) -> int:
-        return _boltffi_call(_boltffi_read_fe83cddcf3822a1d, lambda: _native._boltffi_xybrid_model_run_stream(self._handle, envelope._boltffi_wire(), _boltffi_wire_optional(options, lambda __boltffi_value_0: __boltffi_value_0._boltffi_wire())))
+    def run_stream(self, envelope: XybridEnvelope, options: XybridRunOptions | None, cancellation: XybridCancellationToken) -> int:
+        return _boltffi_call(_boltffi_read_fe83cddcf3822a1d, lambda: _native._boltffi_xybrid_model_run_stream(self._handle, envelope._boltffi_wire(), _boltffi_wire_optional(options, lambda __boltffi_value_0: __boltffi_value_0._boltffi_wire()), cancellation._handle))
 
     def stream_next(self, stream_id: int) -> XybridStreamEvent:
         return _boltffi_read_wire(_boltffi_call(_boltffi_read_fe83cddcf3822a1d, lambda: _native._boltffi_xybrid_model_stream_next(self._handle, stream_id)), lambda reader: XybridStreamEvent._boltffi_from_reader(reader))
@@ -1938,11 +1968,11 @@ class XybridModel:
     def stream_close(self, stream_id: int) -> None:
         _native._boltffi_xybrid_model_stream_close(self._handle, stream_id)
 
-    def run_with_context(self, envelope: XybridEnvelope, context: XybridConversationContext, options: XybridRunOptions | None) -> XybridResult:
-        return _boltffi_read_wire(_boltffi_call(_boltffi_read_fe83cddcf3822a1d, lambda: _native._boltffi_xybrid_model_run_with_context(self._handle, envelope._boltffi_wire(), context._handle, _boltffi_wire_optional(options, lambda __boltffi_value_0: __boltffi_value_0._boltffi_wire()))), lambda reader: XybridResult._boltffi_from_reader(reader))
+    def run_with_context(self, envelope: XybridEnvelope, context: XybridConversationContext, options: XybridRunOptions | None, cancellation: XybridCancellationToken) -> XybridResult:
+        return _boltffi_read_wire(_boltffi_call(_boltffi_read_fe83cddcf3822a1d, lambda: _native._boltffi_xybrid_model_run_with_context(self._handle, envelope._boltffi_wire(), context._handle, _boltffi_wire_optional(options, lambda __boltffi_value_0: __boltffi_value_0._boltffi_wire()), cancellation._handle)), lambda reader: XybridResult._boltffi_from_reader(reader))
 
-    def run_stream_with_context(self, envelope: XybridEnvelope, context: XybridConversationContext, options: XybridRunOptions | None) -> int:
-        return _boltffi_call(_boltffi_read_fe83cddcf3822a1d, lambda: _native._boltffi_xybrid_model_run_stream_with_context(self._handle, envelope._boltffi_wire(), context._handle, _boltffi_wire_optional(options, lambda __boltffi_value_0: __boltffi_value_0._boltffi_wire())))
+    def run_stream_with_context(self, envelope: XybridEnvelope, context: XybridConversationContext, options: XybridRunOptions | None, cancellation: XybridCancellationToken) -> int:
+        return _boltffi_call(_boltffi_read_fe83cddcf3822a1d, lambda: _native._boltffi_xybrid_model_run_stream_with_context(self._handle, envelope._boltffi_wire(), context._handle, _boltffi_wire_optional(options, lambda __boltffi_value_0: __boltffi_value_0._boltffi_wire()), cancellation._handle))
 
     def warmup(self) -> None:
         _boltffi_call(_boltffi_read_fe83cddcf3822a1d, lambda: _native._boltffi_xybrid_model_warmup(self._handle))
@@ -2214,6 +2244,7 @@ __all__ = [
     "XybridDownloadState",
     "XybridStreamEventKind",
     "XybridThermalState",
+    "XybridCancellationToken",
     "XybridModel",
     "XybridConversationContext",
     "XybridTelemetryConfig",

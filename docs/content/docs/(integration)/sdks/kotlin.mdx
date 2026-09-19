@@ -54,6 +54,25 @@ class InferenceRepository {
 }
 ```
 
+Cancelling the coroutine also cancels native inference; it does not merely
+discard the eventual result. `streamTokens` is a cold `Flow`, and cancelling
+collection signals the native token immediately while its IO reader closes the
+pull stream after the worker leaves the model context.
+
+```kotlin
+val job = scope.launch {
+    model.streamTokens(Envelope.text("Write a long story"))
+        .collect { token -> render(token.token) }
+}
+
+// For example, from a Stop button:
+job.cancel()
+```
+
+When cancellation ownership must outlive one coroutine, pass an explicit
+`CancellationToken` to `runAsync` or `streamTokens` and call `cancel()` from
+any thread.
+
 ## Jetpack Compose Integration
 
 ```kotlin

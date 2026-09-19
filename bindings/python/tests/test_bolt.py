@@ -41,6 +41,7 @@ def test_native_bridge_loads_and_reports_a_version() -> None:
         "will_speculate_for_model",
         # Handle + record types re-exported as the public API.
         "XybridModel",
+        "XybridCancellationToken",
         "XybridEnvelope",
         "XybridGenerationConfig",
         "XybridResult",
@@ -65,6 +66,15 @@ def test_speculative_cloud_toggle_round_trips() -> None:
         assert bolt.is_speculative_cloud_enabled() is False
     finally:
         bolt.set_speculative_cloud(previous)
+
+
+def test_cancellation_token_round_trips_through_native_handle() -> None:
+    token = bolt.XybridCancellationToken()
+
+    assert token.is_cancelled() is False
+    token.cancel()
+    token.cancel()
+    assert token.is_cancelled() is True
 
 
 def test_will_speculate_is_false_without_an_api_key() -> None:

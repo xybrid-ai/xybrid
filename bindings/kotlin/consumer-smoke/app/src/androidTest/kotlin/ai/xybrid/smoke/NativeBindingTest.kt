@@ -4,6 +4,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import ai.xybrid.Envelope
 import ai.xybrid.Xybrid
+import ai.xybrid.XybridCancellationToken
 import ai.xybrid.XybridConversationContext
 import ai.xybrid.version
 import org.junit.Assert.*
@@ -18,6 +19,14 @@ class NativeBindingTest {
         Xybrid.init(InstrumentationRegistry.getInstrumentation().targetContext)
         assertTrue(Xybrid.isInitialized)
         assertTrue(version().isNotBlank())
+
+        XybridCancellationToken().use { token ->
+            assertFalse(token.isCancelled())
+            token.cancel()
+            assertTrue(token.isCancelled())
+            token.cancel()
+            assertTrue(token.isCancelled())
+        }
 
         XybridConversationContext.withId("jni-smoke").use { context ->
             assertEquals("jni-smoke", context.id())

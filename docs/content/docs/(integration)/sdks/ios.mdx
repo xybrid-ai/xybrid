@@ -144,6 +144,34 @@ if result.success {
 }
 ```
 
+## Cancellation
+
+`runAsync` and `streamTokens` participate in Swift structured cancellation.
+Cancelling the consuming `Task` signals the Rust run immediately; generation
+stops at its next token boundary and releases the model for the next request.
+
+```swift
+let task = Task {
+    try await model.runAsync(envelope: Envelope.text("Write a long story"))
+}
+
+// For example, from a Stop button:
+task.cancel()
+```
+
+For a stop control that lives outside the task, create a
+`CancellationToken`, pass it as `cancellationToken`, and call `cancel()` from
+any thread. The same handle works with `streamTokens`.
+
+```swift
+let stop = CancellationToken()
+let result = try await model.runAsync(
+    envelope: envelope,
+    cancellationToken: stop
+)
+stop.cancel()
+```
+
 ### XybridResult Properties
 
 | Property | Type | Description |

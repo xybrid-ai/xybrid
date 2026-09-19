@@ -20,11 +20,13 @@ import android.os.Build
 import android.os.PowerManager
 import java.io.File
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.flow
-import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 
 // -- SDK Initialization --
@@ -319,6 +321,40 @@ typealias Model = XybridModel
  */
 fun XybridModel.run(envelope: XybridEnvelope): XybridResult = this.run(envelope, null)
 
+/** Run inference with an automatically managed native cancellation handle. */
+fun XybridModel.run(
+    envelope: XybridEnvelope,
+    options: XybridRunOptions?,
+): XybridResult = XybridCancellationToken.new().use { cancellation ->
+    this.run(envelope, options, cancellation)
+}
+
+/** Start a pull stream; closing its stream id cancels the native worker. */
+fun XybridModel.runStream(
+    envelope: XybridEnvelope,
+    options: XybridRunOptions?,
+): ULong = XybridCancellationToken.new().use { cancellation ->
+    this.runStream(envelope, options, cancellation)
+}
+
+/** Context-aware compatibility overload with automatic cancellation state. */
+fun XybridModel.runWithContext(
+    envelope: XybridEnvelope,
+    context: XybridConversationContext,
+    options: XybridRunOptions?,
+): XybridResult = XybridCancellationToken.new().use { cancellation ->
+    this.runWithContext(envelope, context, options, cancellation)
+}
+
+/** Context-aware pull-stream compatibility overload. */
+fun XybridModel.runStreamWithContext(
+    envelope: XybridEnvelope,
+    context: XybridConversationContext,
+    options: XybridRunOptions?,
+): ULong = XybridCancellationToken.new().use { cancellation ->
+    this.runStreamWithContext(envelope, context, options, cancellation)
+}
+
 // -- Async (suspend) conveniences --
 //
 // bolt's load/run are synchronous + blocking. These suspend wrappers restore the
@@ -363,11 +399,40 @@ suspend fun XybridModel.Companion.fromBundleAsync(path: String): XybridModel =
 suspend fun XybridModel.Companion.fromHuggingfaceAsync(repo: String): XybridModel =
     Xybrid.model(ModelSource.huggingFace(repo)).load()
 
-/** Run inference off the caller's thread (on [Dispatchers.IO]). */
+/**
+ * Run inference off the caller's thread (on [Dispatchers.IO]).
+ * A caller-supplied token remains caller-owned; do not close it while in use.
+ */
 suspend fun XybridModel.runAsync(
     envelope: XybridEnvelope,
     options: XybridRunOptions? = null,
-): XybridResult = withContext(Dispatchers.IO) { this@runAsync.run(envelope, options) }
+    cancellationToken: XybridCancellationToken? = null,
+): XybridResult = suspendCancellableCoroutine { continuation ->
+    val cancellation = cancellationToken ?: XybridCancellationToken.new()
+    val ownsCancellation = cancellationToken == null
+    val lease = CancellationLease(
+        cancelNative = { cancellation.cancel() },
+        releaseNative = { if (ownsCancellation) cancellation.close() },
+    )
+
+    continuation.invokeOnCancellation { lease.cancel() }
+
+    try {
+        Dispatchers.IO.dispatch(continuation.context, Runnable {
+            try {
+                val result = this@runAsync.run(envelope, options, cancellation)
+                continuation.resumeWith(kotlin.Result.success(result))
+            } catch (error: Throwable) {
+                continuation.resumeWith(kotlin.Result.failure(error))
+            } finally {
+                lease.finish()
+            }
+        })
+    } catch (error: Throwable) {
+        lease.finish()
+        continuation.resumeWith(kotlin.Result.failure(error))
+    }
+}
 
 /** Warm up the model off the caller's thread (on [Dispatchers.IO]). */
 suspend fun XybridModel.warmupAsync() = withContext(Dispatchers.IO) { this@warmupAsync.warmup() }
@@ -385,33 +450,64 @@ suspend fun XybridModel.unloadAsync() = withContext(Dispatchers.IO) { this@unloa
  * running to `max_tokens`. Ergonomic wrapper over the pull-based session API
  * ([XybridModel.runStream] / [XybridModel.streamNext] /
  * [XybridModel.streamClose]).
+ * A caller-supplied cancellation token remains caller-owned; keep it open
+ * until collection has finished.
  *
  * ```kotlin
  * model.streamTokens(envelope).collect { token -> print(token.token) }
  * ```
  */
+@OptIn(ExperimentalCoroutinesApi::class)
 fun XybridModel.streamTokens(
     envelope: XybridEnvelope,
     options: XybridRunOptions? = null,
-): Flow<XybridStreamToken> = flow {
-    val streamId = runStream(envelope, options)
-    try {
-        while (true) {
-            // Cooperative cancellation: collecting coroutine cancelled -> throws
-            // here at the next token boundary, the finally closes the session.
-            currentCoroutineContext().ensureActive()
-            val event = streamNext(streamId)
-            when (event.kind) {
-                XybridStreamEventKind.TOKEN -> event.token?.let { emit(it) }
-                XybridStreamEventKind.COMPLETE -> break
-            }
-        }
-    } finally {
-        // Idempotent (the session may already be gone after an error), and
-        // aborts an in-flight run when collection stops early.
-        streamClose(streamId)
+    cancellationToken: XybridCancellationToken? = null,
+): Flow<XybridStreamToken> = callbackFlow {
+    val cancellation = cancellationToken ?: XybridCancellationToken.new()
+    val ownsCancellation = cancellationToken == null
+    val lease = CancellationLease(
+        cancelNative = { cancellation.cancel() },
+        releaseNative = { if (ownsCancellation) cancellation.close() },
+    )
+    val streamId = try {
+        runStream(envelope, options, cancellation)
+    } catch (error: Throwable) {
+        lease.finish()
+        close(error)
+        return@callbackFlow
     }
-}.flowOn(Dispatchers.IO)
+
+    // Enter the try/finally even if collection is cancelled before IO dispatch;
+    // otherwise the already-created native session would never be closed.
+    val reader = launch(Dispatchers.IO, start = CoroutineStart.ATOMIC) {
+        try {
+            while (true) {
+                val event = streamNext(streamId)
+                when (event.kind) {
+                    XybridStreamEventKind.TOKEN -> {
+                        val token = event.token
+                        if (token != null) send(token)
+                    }
+                    XybridStreamEventKind.COMPLETE -> break
+                }
+            }
+        } catch (error: Throwable) {
+            close(error)
+        } finally {
+            streamClose(streamId)
+            close()
+        }
+    }
+
+    awaitClose {
+        try {
+            lease.cancel()
+        } finally {
+            reader.cancel()
+            lease.finish()
+        }
+    }
+}
 
 /** The result of a model inference operation. */
 typealias Result = XybridResult
@@ -437,6 +533,9 @@ typealias GenerationConfig = XybridGenerationConfig
  * turn's [XybridStreamToken.toolCalls] and [XybridStreamToken.rawText].
  */
 typealias StreamToken = XybridStreamToken
+
+/** Cooperative one-shot cancellation handle for a model run. */
+typealias CancellationToken = XybridCancellationToken
 
 // -- GenerationConfig Presets --
 

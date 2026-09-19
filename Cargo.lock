@@ -2767,6 +2767,7 @@ dependencies = [
  "tokio",
  "xybrid-core",
  "xybrid-sdk",
+ "xybrid_bolt",
 ]
 
 [[package]]

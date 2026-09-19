@@ -31,6 +31,8 @@ import ai.xybrid.embedding
 import ai.xybrid.initSdkCacheDir
 import ai.xybrid.isSpeculativeCloudEnabled
 import ai.xybrid.jsonSchemaToGbnf
+import ai.xybrid.run
+import ai.xybrid.runStream
 import ai.xybrid.setBatteryLevel
 import ai.xybrid.setBinding
 import ai.xybrid.setThermalState

@@ -847,6 +847,33 @@ public enum XybridThermalState: Int32, Hashable, Sendable, CaseIterable {
     }
 }
 
+public final class XybridCancellationToken {
+    @usableFromInline let handle: UInt64
+
+    @usableFromInline init(handle: UInt64) {
+        self.handle = handle
+    }
+
+    deinit {
+        boltffi_release_class_xybrid_bolt_xybrid_cancellation_token(handle)
+    }
+
+    /// Create a fresh, non-cancelled token.
+    public init() {
+        self.handle = boltffi_init_class_xybrid_bolt_xybrid_cancellation_token_new()
+    }
+
+    /// Request cooperative cancellation. Idempotent and thread-safe.
+    public func cancel() {
+        boltffi_method_class_xybrid_bolt_xybrid_cancellation_token_cancel(self.handle)
+    }
+
+    /// Whether cancellation has been requested.
+    public func isCancelled() -> Bool {
+        return boltffi_method_class_xybrid_bolt_xybrid_cancellation_token_is_cancelled(self.handle)
+    }
+}
+
 public final class XybridModel {
     @usableFromInline let handle: UInt64
 
@@ -1082,10 +1109,11 @@ public final class XybridModel {
 
     /// Run inference, optionally with [`XybridRunOptions`] (generation config,
     /// abort signals, cloud-fallback). Pass `None` for the model's defaults.
+    /// `cancellation` is one-shot and may be signalled from any thread.
     ///
     /// The hand-written wrappers add a one-arg `run(envelope)` convenience that
     /// forwards `None`, so simple call sites stay ergonomic.
-    public func run(envelope: XybridEnvelope, options: XybridRunOptions?) throws -> XybridResult {
+    public func run(envelope: XybridEnvelope, options: XybridRunOptions?, cancellation: XybridCancellationToken) throws -> XybridResult {
         let boltffiEnvelopeBytes = boltffiEncode { boltffiEnvelopeWriter in envelope.encode(to: &boltffiEnvelopeWriter) }
         return try boltffiEnvelopeBytes.withUnsafeBufferPointer { boltffiEnvelopeBuffer in
             let boltffiOptionsBytes = boltffiEncode { boltffiOptionsWriter in boltffiOptionsWriter.writeOptional(options) { boltffiOptionsWriter, boltffiValue0 in boltffiValue0.encode(to: &boltffiOptionsWriter) } }
@@ -1097,6 +1125,7 @@ public final class XybridModel {
                     UInt(boltffiEnvelopeBuffer.count),
                     boltffiOptionsBuffer.baseAddress!,
                     UInt(boltffiOptionsBuffer.count),
+                    cancellation.handle,
                     &boltffiResult
                 )
                 if boltffiError.ptr != nil || Int(boltffiError.len) != 0 {
@@ -1113,7 +1142,7 @@ public final class XybridModel {
     ///
     /// The identifier remains valid until the final result is taken, an error
     /// is returned, or [`Self::stream_close`] is called.
-    public func runStream(envelope: XybridEnvelope, options: XybridRunOptions?) throws -> UInt64 {
+    public func runStream(envelope: XybridEnvelope, options: XybridRunOptions?, cancellation: XybridCancellationToken) throws -> UInt64 {
         let boltffiEnvelopeBytes = boltffiEncode { boltffiEnvelopeWriter in envelope.encode(to: &boltffiEnvelopeWriter) }
         return try boltffiEnvelopeBytes.withUnsafeBufferPointer { boltffiEnvelopeBuffer in
             let boltffiOptionsBytes = boltffiEncode { boltffiOptionsWriter in boltffiOptionsWriter.writeOptional(options) { boltffiOptionsWriter, boltffiValue0 in boltffiValue0.encode(to: &boltffiOptionsWriter) } }
@@ -1125,6 +1154,7 @@ public final class XybridModel {
                     UInt(boltffiEnvelopeBuffer.count),
                     boltffiOptionsBuffer.baseAddress!,
                     UInt(boltffiOptionsBuffer.count),
+                    cancellation.handle,
                     &boltffiResult
                 )
                 if boltffiError.ptr != nil || Int(boltffiError.len) != 0 {
@@ -1160,17 +1190,25 @@ public final class XybridModel {
         return boltffiDecodeOwnedBuf(boltffiResult.ptr, Int(boltffiResult.len)) { boltffiReader in XybridResult.decode(from: &boltffiReader) }
     }
 
-    /// Forget a streaming session.
+    /// Cancel a streaming session and wait for its native worker to finish.
+    ///
+    /// Draining the bounded channel is required here: the producer may already
+    /// have queued tokens when cancellation is signalled. Returning while it
+    /// still owns the model context can race model/Metal teardown in foreign
+    /// callers that release the model immediately after closing the stream.
     public func streamClose(streamId: UInt64) {
         boltffi_method_class_xybrid_bolt_xybrid_model_stream_close(self.handle, streamId)
     }
 
     /// Run inference seeded with a conversation `context` (multi-turn chat).
     ///
-    /// Only the generation config from `options` is applied — abort signals and
-    /// cloud fallback are not wired on the context path (matches the facade's
-    /// `run_with_context`).
-    public func runWithContext(envelope: XybridEnvelope, context: XybridConversationContext, options: XybridRunOptions?) throws -> XybridResult {
+    /// The same run options and cancellation semantics as [`Self::run`] apply.
+    public func runWithContext(
+        envelope: XybridEnvelope,
+        context: XybridConversationContext,
+        options: XybridRunOptions?,
+        cancellation: XybridCancellationToken
+    ) throws -> XybridResult {
         let boltffiEnvelopeBytes = boltffiEncode { boltffiEnvelopeWriter in envelope.encode(to: &boltffiEnvelopeWriter) }
         return try boltffiEnvelopeBytes.withUnsafeBufferPointer { boltffiEnvelopeBuffer in
             let boltffiOptionsBytes = boltffiEncode { boltffiOptionsWriter in boltffiOptionsWriter.writeOptional(options) { boltffiOptionsWriter, boltffiValue0 in boltffiValue0.encode(to: &boltffiOptionsWriter) } }
@@ -1183,6 +1221,7 @@ public final class XybridModel {
                     context.handle,
                     boltffiOptionsBuffer.baseAddress!,
                     UInt(boltffiOptionsBuffer.count),
+                    cancellation.handle,
                     &boltffiResult
                 )
                 if boltffiError.ptr != nil || Int(boltffiError.len) != 0 {
@@ -1198,7 +1237,12 @@ public final class XybridModel {
     /// Start context-aware token streaming; returns a model-scoped session id.
     /// The pull protocol is identical to [`Self::run_stream`]
     /// (`stream_next` / `stream_result` / `stream_close`).
-    public func runStreamWithContext(envelope: XybridEnvelope, context: XybridConversationContext, options: XybridRunOptions?) throws -> UInt64 {
+    public func runStreamWithContext(
+        envelope: XybridEnvelope,
+        context: XybridConversationContext,
+        options: XybridRunOptions?,
+        cancellation: XybridCancellationToken
+    ) throws -> UInt64 {
         let boltffiEnvelopeBytes = boltffiEncode { boltffiEnvelopeWriter in envelope.encode(to: &boltffiEnvelopeWriter) }
         return try boltffiEnvelopeBytes.withUnsafeBufferPointer { boltffiEnvelopeBuffer in
             let boltffiOptionsBytes = boltffiEncode { boltffiOptionsWriter in boltffiOptionsWriter.writeOptional(options) { boltffiOptionsWriter, boltffiValue0 in boltffiValue0.encode(to: &boltffiOptionsWriter) } }
@@ -1211,6 +1255,7 @@ public final class XybridModel {
                     context.handle,
                     boltffiOptionsBuffer.baseAddress!,
                     UInt(boltffiOptionsBuffer.count),
+                    cancellation.handle,
                     &boltffiResult
                 )
                 if boltffiError.ptr != nil || Int(boltffiError.len) != 0 {
@@ -1702,6 +1747,30 @@ public func version() -> String {
     let boltffiResult = boltffi_function_xybrid_bolt_version()
     defer { boltffi_free_buf(boltffiResult) }
     return boltffiDecodeOwnedBuf(boltffiResult.ptr, Int(boltffiResult.len)) { boltffiReader in boltffiReader.readString() }
+}
+
+/// Release every idle loaded model's memory; returns how many were released.
+///
+/// Call this from the platform's low-memory hook (`didReceiveMemoryWarning`
+/// on iOS, `onTrimMemory` on Android). Models with a run in flight are
+/// skipped, and a released model reloads itself on next use — no reload call,
+/// no new error to handle.
+public func releaseMemory() -> UInt32 {
+    return boltffi_function_xybrid_bolt_release_memory()
+}
+
+/// Enable or disable automatic model release for subsequent loads.
+///
+/// When enabled, loading a model under device memory pressure first releases
+/// least-recently-used idle models. Off by default; [`release_memory`] works
+/// either way.
+public func setAutoRelease(enabled: Bool) {
+    boltffi_function_xybrid_bolt_set_auto_release(enabled)
+}
+
+/// Whether automatic model release is enabled process-wide.
+public func isAutoReleaseEnabled() -> Bool {
+    return boltffi_function_xybrid_bolt_is_auto_release_enabled()
 }
 
 /// The SDK's default telemetry ingest endpoint (for display alongside a config).

@@ -10,6 +10,7 @@
 
 use std::error::Error as StdError;
 use std::ffi::{c_void, CStr, CString};
+use std::ops::RangeInclusive;
 use std::os::raw::{c_char, c_int};
 use std::ptr;
 use std::time::SystemTime;
@@ -136,6 +137,29 @@ fn decode_hard_error(code: i32, n_past_in: usize) -> LlamaError {
         code,
         n_past_in,
         detail: detail.to_string(),
+    }
+}
+
+fn classify_streaming_result(
+    result: i32,
+    n_past: usize,
+    callback_error: Option<Box<dyn StdError + Send + Sync>>,
+    hard_error_codes: RangeInclusive<i32>,
+    decode_hard: fn(i32, usize) -> LlamaError,
+) -> LlamaResult<(usize, bool)> {
+    // The native ABI encodes callback stop as `-n_generated`, which overlaps
+    // the hard-error range for short streams. The Rust-side error slot is the
+    // only unambiguous discriminator and must therefore be checked first.
+    if let Some(err) = callback_error {
+        return Err(LlamaError::StreamingCallbackAborted(err));
+    }
+    if hard_error_codes.contains(&result) {
+        return Err(decode_hard(result, n_past));
+    }
+    if result < 0 {
+        Ok(((-result) as usize, true))
+    } else {
+        Ok((result as usize, false))
     }
 }
 
@@ -340,21 +364,13 @@ where
         )
     };
 
-    // Hard error codes first — these are never callback-stop.
-    if (-4..=-1).contains(&result) {
-        return Err(decode_hard_error(result, n_past_in));
-    }
-
-    // Callback error wins over the silent "stopped by callback" path.
-    if let Some(err) = streaming_ctx.error.take() {
-        return Err(LlamaError::StreamingCallbackAborted(err));
-    }
-
-    let (n_generated, stopped_by_callback) = if result < 0 {
-        ((-result) as usize, true)
-    } else {
-        (result as usize, false)
-    };
+    let (n_generated, stopped_by_callback) = classify_streaming_result(
+        result,
+        n_past_in,
+        streaming_ctx.error.take(),
+        -4..=-1,
+        decode_hard_error,
+    )?;
 
     output_tokens.truncate(n_generated);
     Ok((output_tokens, stopped_by_callback))
@@ -433,19 +449,13 @@ where
         )
     };
 
-    if (-5..=-1).contains(&result) {
-        return Err(decode_current_logits_error(result, n_past));
-    }
-
-    if let Some(err) = streaming_ctx.error.take() {
-        return Err(LlamaError::StreamingCallbackAborted(err));
-    }
-
-    let (n_generated, stopped_by_callback) = if result < 0 {
-        ((-result) as usize, true)
-    } else {
-        (result as usize, false)
-    };
+    let (n_generated, stopped_by_callback) = classify_streaming_result(
+        result,
+        n_past,
+        streaming_ctx.error.take(),
+        -5..=-1,
+        decode_current_logits_error,
+    )?;
 
     output_tokens.truncate(n_generated);
     Ok((output_tokens, stopped_by_callback))
@@ -576,8 +586,8 @@ fn prompt_from_template_bytes(buf: &[u8], len: usize) -> LlamaResult<String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        chat_template_render_failed, prompt_from_template_bytes, streaming_trampoline, LlamaError,
-        StreamingContext,
+        chat_template_render_failed, classify_streaming_result, decode_hard_error,
+        prompt_from_template_bytes, streaming_trampoline, LlamaError, StreamingContext,
     };
     use std::error::Error;
     use std::ffi::CString;
@@ -656,6 +666,25 @@ mod tests {
             .downcast_ref::<MarkerError>()
             .expect("typed marker must survive the trampoline boundary");
         assert_eq!(downcast.0, "marker preserved through trampoline");
+    }
+
+    #[test]
+    fn callback_error_wins_when_short_stream_count_matches_hard_error_code() {
+        let error = classify_streaming_result(
+            -2,
+            0,
+            Some(Box::new(MarkerError("cancelled after two tokens"))),
+            -4..=-1,
+            decode_hard_error,
+        )
+        .expect_err("the captured callback error must remain authoritative");
+
+        match error {
+            LlamaError::StreamingCallbackAborted(source) => {
+                assert_eq!(source.to_string(), "cancelled after two tokens");
+            }
+            other => panic!("expected callback abort, got {other:?}"),
+        }
     }
 
     #[test]
