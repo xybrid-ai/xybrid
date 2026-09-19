@@ -117,6 +117,14 @@ the same time, and a policy bundle decides which leg serves each request.
 
 ### Fixed
 
+- **Flutter iOS: builds from pub.dev no longer download an unused ONNX Runtime, and no
+  longer need `xz`.** The precompiled library already contains ONNX Runtime and nothing in
+  the podspec links a separate copy, yet every iOS build fetched a ~17 MB xcframework
+  (plus a ~9 MB simulator slice, 154 MB on disk) into `~/.xybrid/cache/ort-ios/`. The
+  simulator path also aborted with "xz is required" on any Mac without Homebrew `xz`,
+  which macOS does not ship. `build_pod.sh` now resolves ONNX Runtime only where a source
+  build is possible (the monorepo), decided by `source_build_possible.sh`, the shell twin
+  of cargokit's existing rule.
 - `Orchestrator::load_policies` (and therefore `xybrid run --policy`) wrote
   into an engine nothing consulted, so policies never affected routing.
 - The CLI mapped any provider other than openai/anthropic/google to OpenAI, so

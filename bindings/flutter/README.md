@@ -320,7 +320,7 @@ await for (final token in model.runStreamingWithContext(envelope, context)) {
 Native ML runtimes are resolved automatically at build time:
 
 - **Android**: ONNX Runtime pulled from Maven Central (`com.microsoft.onnxruntime:onnxruntime-android`)
-- **iOS**: ONNX Runtime xcframework downloaded from HuggingFace and cached at `~/.xybrid/cache/ort-ios/`
+- **iOS**: ONNX Runtime is part of the precompiled library, so nothing extra is downloaded or installed. (Monorepo source builds fetch an ONNX Runtime xcframework from HuggingFace into `~/.xybrid/cache/ort-ios/`; simulator source builds also need `xz`.)
 - **macOS/Linux/Windows**: ONNX Runtime downloaded by the `ort` Rust crate at compile time
 
 The Rust library itself ships as a precompiled, signature-verified binary for
