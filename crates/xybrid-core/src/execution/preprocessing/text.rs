@@ -5,8 +5,9 @@
 //! - `phonemize_step`: Convert text to phonemes for TTS models
 
 use super::super::types::{ExecutorResult, PreprocessedData};
-use crate::execution::template::{PhonemizerBackend, TokenizerType};
+use crate::execution::template::{PhonemeIdStyle, PhonemizerBackend, TokenizerType};
 use crate::runtime_adapter::AdapterError;
+use unicode_normalization::UnicodeNormalization;
 
 /// Tokenize text input for NLP models.
 ///
@@ -107,6 +108,7 @@ pub fn phonemize_step(
     add_padding: bool,
     normalize_text: bool,
     silence_tokens: u8,
+    id_style: PhonemeIdStyle,
 ) -> ExecutorResult<PreprocessedData> {
     use crate::phonemizer::load_tokens_map;
 
@@ -143,10 +145,34 @@ pub fn phonemize_step(
     let backend_impl = backend.create(base_path, dict_path, language);
     let phonemes = backend_impl.phonemize(&processed_text, &tokens_map)?;
 
-    // Convert phonemes to token IDs
-    let mut ids: Vec<i64> = Vec::new();
+    let ids = phoneme_ids(
+        &phonemes,
+        &tokens_map,
+        add_padding,
+        silence_tokens,
+        id_style,
+    );
 
-    if add_padding {
+    // Return as PhonemeIds for use by TTS models
+    Ok(PreprocessedData::PhonemeIds {
+        ids,
+        phonemes,
+        original_text: text,
+    })
+}
+
+fn phoneme_ids(
+    phonemes: &str,
+    tokens_map: &std::collections::HashMap<char, i64>,
+    add_padding: bool,
+    silence_tokens: u8,
+    id_style: PhonemeIdStyle,
+) -> Vec<i64> {
+    let mut ids = Vec::new();
+
+    if matches!(id_style, PhonemeIdStyle::Piper) {
+        ids.extend([1, 0]);
+    } else if add_padding {
         ids.push(0); // Start padding token
     }
 
@@ -158,28 +184,36 @@ pub fn phonemize_step(
         ));
     }
 
-    for c in phonemes.chars() {
+    let characters: Vec<char> = if matches!(id_style, PhonemeIdStyle::Piper) {
+        phonemes.nfd().collect()
+    } else {
+        phonemes.chars().collect()
+    };
+    for c in characters {
         if let Some(&id) = tokens_map.get(&c) {
             ids.push(id);
+            if matches!(id_style, PhonemeIdStyle::Piper) {
+                ids.push(0);
+            }
         } else if c == ' ' {
             // Space character - check if it has a mapping
             if let Some(&id) = tokens_map.get(&' ') {
                 ids.push(id);
+                if matches!(id_style, PhonemeIdStyle::Piper) {
+                    ids.push(0);
+                }
             }
         }
         // Skip unknown characters silently
     }
 
-    if add_padding {
+    if matches!(id_style, PhonemeIdStyle::Piper) {
+        ids.push(2);
+    } else if add_padding {
         ids.push(0); // End padding token
     }
 
-    // Return as PhonemeIds for use by TTS models
-    Ok(PreprocessedData::PhonemeIds {
-        ids,
-        phonemes,
-        original_text: text,
-    })
+    ids
 }
 
 /// Normalize text for TTS processing.
@@ -788,6 +822,7 @@ mod tests {
             true, // add_padding
             true, // normalize_text
             0,    // silence_tokens
+            PhonemeIdStyle::Standard,
         )
         .unwrap();
 
@@ -958,6 +993,15 @@ mod tests {
         assert!(normalize_text_for_tts("100 percent").contains("one hundred"));
     }
 
+    #[test]
+    fn piper_id_style_adds_bos_pad_interleaving_and_eos() {
+        let tokens = std::collections::HashMap::from([('a', 10), ('b', 11)]);
+        assert_eq!(
+            phoneme_ids("ab", &tokens, false, 0, PhonemeIdStyle::Piper),
+            vec![1, 0, 10, 0, 11, 0, 2]
+        );
+    }
+
     /// Helper: run phonemize_step with a specific backend and normalize_text flag.
     /// Returns (phonemes, ids) if fixtures are available, None otherwise.
     fn run_phonemize_step_with_backend(
@@ -988,6 +1032,7 @@ mod tests {
             true,
             normalize_text,
             0, // silence_tokens
+            PhonemeIdStyle::Standard,
         )
         .unwrap();
 

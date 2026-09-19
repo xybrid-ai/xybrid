@@ -61,6 +61,9 @@ pub(crate) fn handle_init_command(dir: &str, flags: InitFlags) -> Result<()> {
         println!();
     }
 
+    #[cfg(not(feature = "onnx-inspect"))]
+    warn_if_onnx_without_inspection(&dir_path);
+
     // Run inspection and generation
     let result = metadata_gen::inspect_and_generate(
         &dir_path,
@@ -175,6 +178,24 @@ pub(crate) fn handle_init_command(dir: &str, flags: InitFlags) -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Warn when this build cannot inspect ONNX graphs but the directory holds
+/// `.onnx` models, so degraded task detection is visible instead of silent
+/// (without `onnx-inspect`, detection falls back to filename heuristics and
+/// often emits `task: "unknown"` with empty preprocessing).
+#[cfg(not(feature = "onnx-inspect"))]
+fn warn_if_onnx_without_inspection(dir: &Path) {
+    let has_onnx = metadata_gen::list_model_files_pub(dir)
+        .iter()
+        .any(|f| f.ends_with(".onnx"));
+    if has_onnx {
+        eprintln!(
+            "{} this build lacks ONNX graph inspection; task detection is degraded. \
+             Rebuild with `--features onnx-inspect`.",
+            "warning:".yellow().bold()
+        );
+    }
 }
 
 /// Print a human-readable summary of the generated metadata.

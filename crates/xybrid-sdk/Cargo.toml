@@ -54,6 +54,7 @@ default = []
 # never reference `xybrid_core::testing`. Forwards to `xybrid-core/test-util`
 # so the gate stays consistent if core later moves `testing` behind it.
 test-util = ["xybrid-core/test-util"]
+espeak = ["xybrid-core/espeak"]
 
 # HuggingFace Hub integration (download models directly from HF repos)
 huggingface = ["dep:hf-hub", "dep:ureq3"]

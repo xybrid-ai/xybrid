@@ -217,7 +217,8 @@ Converts text to phoneme token IDs for TTS models.
   "language": null,
   "add_padding": true,
   "normalize_text": false,
-  "silence_tokens": null
+  "silence_tokens": null,
+  "id_style": "standard"
 }
 ```
 
@@ -230,6 +231,7 @@ Converts text to phoneme token IDs for TTS models.
 | `add_padding` | boolean | `true` | Add padding tokens at start/end |
 | `normalize_text` | boolean | `false` | Apply text cleanup before phonemization |
 | `silence_tokens` | integer | `null` | Silence tokens to prepend (smooths plosives) |
+| `id_style` | string | `"standard"` | `"piper"` adds BOS 1, pad 0 interleaving, and EOS 2 |
 
 **Phonemizer backends**:
 
@@ -237,8 +239,15 @@ Converts text to phoneme token IDs for TTS models.
 |---------|-------------|-------|
 | `MisakiDictionary` | None (pure Rust) | **Recommended.** Bundled dictionaries + rule-based G2P fallback |
 | `CmuDictionary` | None (pure Rust) | Legacy ARPABET-based, English only |
-| `EspeakNG` | `espeak-ng` system install | Multi-language support |
+| `EspeakNG` | `espeak-ng` binary on `PATH` | Multi-language; desktop/server only (see below) |
 | `OpenPhonemizer` | ONNX model (~59MB) | Dictionary + neural G2P fallback |
+
+`EspeakNG` shells out to the `espeak-ng` executable at inference time — it is
+not linked or bundled. That makes it desktop/server-only: iOS and Android
+cannot spawn system binaries, so models that declare this backend (Piper
+voices, for example) do not run on mobile. There is no load-time check; a
+missing binary surfaces as an inference error with install instructions
+(`brew install espeak-ng` on macOS, `apt-get install espeak-ng` on Linux).
 
 **Input**: `Envelope::Text(string)` → **Output**: Token IDs (i64)
 
@@ -463,6 +472,14 @@ TTS models can include a `voices` section to define available voices.
 | `embedded` | All voices in a single binary file | Kokoro, KittenTTS |
 | `per_model` | Each voice is a separate model file | Piper |
 | `cloning` | Voice cloning from reference audio | (future) |
+
+For `per_model`, set `voice_dir` and a `pattern` containing `{voice_id}`.
+The selected catalog ID is substituted into that pattern and its ONNX session
+is loaded through the bounded `XYBRID_TTS_VOICE_SESSIONS` cache (default 4).
+
+Piper VITS graphs use the named inputs `input`, `input_lengths`, and `scales`,
+plus optional `sid`. `scales` is `[noise_scale, length_scale / speed, noise_w]`;
+the three defaults are read from the selected voice's adjacent `.onnx.json`.
 
 ### Voice Loaders (for `embedded` format)
 

@@ -127,6 +127,7 @@ schema = ["dep:schemars"]
 # consumers can depend on `xybrid-core/test-util` now and stay correct once
 # the `testing` module is gated behind this feature (audit 4a).
 test-util = []
+espeak = []
 
 # ONNX Runtime — the static-vs-dynamic mode is decided per-target by the
 # [target.'cfg(...)'] ort dependency sections, NOT by these features. The two

@@ -44,7 +44,7 @@ impl EspeakBackend {
     /// The CLI emits one line per sentence; we want a single flat IPA string.
     fn run_espeak(&self, text: &str) -> ExecutorResult<String> {
         let output = Command::new("espeak-ng")
-            .args(["--ipa", "-q", "-v", &self.language])
+            .args(["--ipa=3", "-q", "-v", &self.language])
             .arg(text)
             .output()
             .map_err(|e| {
@@ -69,7 +69,7 @@ impl EspeakBackend {
 
 impl PhonemizerBackend for EspeakBackend {
     fn phonemize(&self, text: &str, tokens_map: &HashMap<char, i64>) -> ExecutorResult<String> {
-        let phonemes = self.run_espeak(text)?;
+        let phonemes = self.phonemize_raw(text)?;
 
         // Filter to only characters in vocabulary
         let filtered: String = phonemes
