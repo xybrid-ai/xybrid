@@ -1,0 +1,25 @@
+.bazelrc
+  s_4e2833172472d6::t_14e1732711886a 118-135
+.github/workflows/build-apple.yml
+  s_4e2833172472d6::t_ad098ea6d3c558 97-99,101
+.github/workflows/release-prep.yml
+  s_4e2833172472d6::t_f39db46afa3367 224-227,229
+CHANGELOG.md
+  s_4e2833172472d6::t_975bd030470af8 50-56
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "bc5aefd25bd40a6cdf1dc47b9efda886b92fe812",
+  "prompts": {},
+  "sessions": {
+    "s_4e2833172472d6": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c9a4cec0-a6a7-40d9-8722-c99eddc4dc6d",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
+    }
+  }
+}
