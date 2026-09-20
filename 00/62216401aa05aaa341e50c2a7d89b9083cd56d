@@ -1,0 +1,59 @@
+CHANGELOG.md
+  s_b97a666a5fd123::t_7784d4b049ced6 10-26
+Cargo.lock
+  s_b97a666a5fd123::t_6c6973c29c9284 392,521,575,577,738,740,744,867,869,888,890,963,965,973,975,985,987,992,997,999,1080,1082,1176,1178,1344,1401,1444,1465,1478,1713,1715,1800,1893,2316,2747,2756,2980,2982,3034,3036,3150,3165,3531,3569,3582,3596,3637,3676,3687,3897,4104,4106,4124,4126,4309,4361,4377,4379,4402,4529,4531,4533,4542,4544,4629,4671,4682,4831,4833,4944,4946,4973-4983,4990,5004,5107,5214,5216,5276,5324,5326,5364,5551,5553,5634,5636,5655,5657,5697,5699,5813,6239,6253,6260,6266,6289,6359,6369,6378,6391,6400,6419,6427,6436,6445,6457,6497,6510,6515,6517,6521-6522,6536,6538,6545,6547,6565,6567,6571-6572,6611,6657,6659
+Cargo.toml
+  s_b97a666a5fd123::t_ac4eb4508fa746 21
+Package.swift
+  s_b97a666a5fd123::t_ed43b22d40916a 40
+bindings/apple/XybridFFI-Info.plist
+  s_b97a666a5fd123::t_cd1108d5a3aac5 10,12
+bindings/flutter/CHANGELOG.md
+  s_b97a666a5fd123::t_353033ae2f5241 3-28
+bindings/flutter/pubspec.yaml
+  s_b97a666a5fd123::t_27ba8c9a868f18 3
+bindings/flutter/rust/Cargo.toml
+  s_b97a666a5fd123::t_6da941925c4838 3
+bindings/kotlin/build.gradle.kts
+  s_b97a666a5fd123::t_111ef9ffa043aa 8
+bindings/python/pyproject.toml
+  s_b97a666a5fd123::t_2d8c5ef4a3e908 7
+bindings/python/xybrid/_bolt/__init__.py
+  s_b97a666a5fd123::t_b7c7d8e1d4db1e 2160
+bindings/react-native/android/build.gradle
+  s_b97a666a5fd123::t_b3c187c5c0ecea 94
+bindings/react-native/package.json
+  s_b97a666a5fd123::t_447d710cd748ba 3
+bindings/unity/package.json
+  s_b97a666a5fd123::t_2435a1e221058a 3
+bindings/web/package.json
+  s_b97a666a5fd123::t_2d202306be3972 3
+crates/whisper-cpp-sys/Cargo.toml
+  s_b97a666a5fd123::t_75da8e066348da 42
+crates/xybrid-core/Cargo.toml
+  s_b97a666a5fd123::t_ef013fe6869b34 28-29,32
+crates/xybrid-llama/Cargo.toml
+  s_b97a666a5fd123::t_b4e08acb1dd27f 24
+crates/xybrid-sdk/Cargo.toml
+  s_b97a666a5fd123::t_1cb585a78241e8 17,41,46
+crates/xybrid-whisper/Cargo.toml
+  s_b97a666a5fd123::t_5144c14befad79 23
+crates/xybrid/Cargo.toml
+  s_b97a666a5fd123::t_998f84369b04d1 17
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "0062216401aa05aaa341e50c2a7d89b9083cd56d",
+  "prompts": {},
+  "sessions": {
+    "s_b97a666a5fd123": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9a89b8cd-3329-45c6-ba22-d2949bcc40e5",
+        "model": "claude-opus-5"
+      },
+      "human_author": "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
+    }
+  }
+}
