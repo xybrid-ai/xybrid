@@ -13,7 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [0.9.0] - 2026-09-19
+## [0.9.0] - 2026-09-20
 
 Policy-routed hybrid inference lands: a pipeline stage can carry a local GGUF
 model and an OpenAI-compatible cloud leg at the same time, and a compiled policy
@@ -22,8 +22,8 @@ substantially smaller and, for the first time, visible in the build log.
 
 This release changes a few Rust orchestration signatures (`Orchestrator::with_engines`
 is removed, `Orchestrator::with_all` no longer takes policy/routing engines, and
-`PolicyRule.action` is now a `PolicyAction`). Nothing changes for the Flutter, Swift,
-Kotlin, Unity, React Native or Python surfaces.
+`PolicyRule.action` is now a `PolicyAction`). The Swift, Kotlin and Unity SDKs gain
+model-release controls; Flutter, React Native and Python are unchanged.
 
 ### Added
 
@@ -58,6 +58,12 @@ Kotlin, Unity, React Native or Python surfaces.
   policies under `crates/xybrid-cli/examples/policies/`, alongside the
   `test-policy-routing` workflow that drives the real binary through a policy
   with a real local model and a local fake DeepSeek endpoint.
+- **Model-release controls on Swift, Kotlin and Unity.** `releaseMemory()`,
+  `setAutoRelease(_:)` and `isAutoReleaseEnabled` (Kotlin: `@JvmStatic` members on
+  `object Xybrid`, `releaseMemory` returning `Int` so the Java name is not mangled;
+  Unity: `ReleaseMemory()`, `SetAutoRelease(bool)`, `IsAutoReleaseEnabled` on
+  `XybridClient`). These were exported by `xybrid-bolt` and reachable from Flutter,
+  but missing from every other hand-written wrapper.
 
 ### Changed
 
@@ -128,6 +134,16 @@ Kotlin, Unity, React Native or Python surfaces.
 - The SDK streaming fast path makes one `resolve_stage` decision (one policy
   evaluation, one resource snapshot) instead of separate policy and target
   calls.
+- **BoltFFI 0.29.3 -> 0.30.1**, with `--deny-skipped` wired into all four binding
+  generators so a dropped declaration fails the build instead of shipping a quietly
+  smaller surface. The Kotlin bindings gain KDoc (0.30 pipes Rust doc comments into
+  generated output) and the Python wire layer is reshaped, so its pure-Python half and
+  compiled bridge move together.
+- **Apple binding generation now has a drift gate.** `gen-bolt-bindings.sh --check`
+  regenerates into a staging directory and fails on any disagreement with the crate;
+  an `apple-bolt-drift` CI job runs it. Kotlin, Python and Unity already had one, so a
+  regenerated Swift binding or C header could previously disagree with the crate and
+  nothing would fail.
 
 ### Fixed
 
@@ -164,6 +180,13 @@ Kotlin, Unity, React Native or Python surfaces.
   instead of failing at request time.
 - An HTTP 200 with no answer text (empty `content`, no choices) is a
   non-retryable parse error instead of a silent empty success.
+- BoltFFI 0.29.3 silently dropped `release_memory`, `set_auto_release` and
+  `is_auto_release_enabled` from the Swift and C# surfaces and from the C header,
+  while emitting them correctly for Kotlin. 0.30.1 emits all three.
+- The pinned `boltffi_cli` in `test-ci.yml` had drifted to 0.25.3 against a 0.29.3
+  runtime — exactly the skew its own comment warns about. The rust-cache key now
+  carries the CLI version, because `which boltffi ||` short-circuits on a cached
+  binary and would otherwise keep serving the old CLI after a bump.
 
 ---
 
