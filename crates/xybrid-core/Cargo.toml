@@ -96,7 +96,7 @@ regex = "1.10"  # For text normalization patterns
 
 # Candle - Pure Rust ML framework (optional, for Whisper ASR)
 # Enable with: cargo build --features candle
-candle-core = { version = "0.8", optional = true }
+candle-core = { version = "0.11", optional = true }
 candle-nn = { version = "0.8", optional = true }
 candle-transformers = { version = "0.8", optional = true }
 safetensors = { version = "0.4", optional = true }
