@@ -7,9 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Policy-routed hybrid inference: a pipeline stage can now carry a local GGUF
-model and an OpenAI-compatible cloud leg (DeepSeek, OpenAI, OpenRouter) at
-the same time, and a policy bundle decides which leg serves each request.
+### Planned
+
+- **Multimodal KV-prefix reuse**: the per-frame prefill cost lever for live vision — **deferred** from 0.2.0, not yet implemented.
+
+---
+
+## [0.9.0] - 2026-09-19
+
+Policy-routed hybrid inference lands: a pipeline stage can carry a local GGUF
+model and an OpenAI-compatible cloud leg at the same time, and a compiled policy
+bundle decides which leg serves each request. Binding downloads also get
+substantially smaller and, for the first time, visible in the build log.
+
+This release changes a few Rust orchestration signatures (`Orchestrator::with_engines`
+is removed, `Orchestrator::with_all` no longer takes policy/routing engines, and
+`PolicyRule.action` is now a `PolicyAction`). Nothing changes for the Flutter, Swift,
+Kotlin, Unity, React Native or Python surfaces.
 
 ### Added
 
@@ -150,10 +164,6 @@ the same time, and a policy bundle decides which leg serves each request.
   instead of failing at request time.
 - An HTTP 200 with no answer text (empty `content`, no choices) is a
   non-retryable parse error instead of a silent empty success.
-
-### Planned
-
-- **Multimodal KV-prefix reuse**: the per-frame prefill cost lever for live vision — **deferred** from 0.2.0, not yet implemented.
 
 ---
 

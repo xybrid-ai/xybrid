@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.9.0
+
+No Dart API changes. This release is about the first build: the precompiled
+native library is smaller, downloaded compressed, cached per machine instead of
+per app, and its download is finally visible in the build log. iOS builds no
+longer fetch an ONNX Runtime copy they never link.
+
+* Changed: the precompiled native libraries are built with fat LTO, so each one
+  carries only the code reachable from the exported FFI functions — the iOS
+  static library drops from 181 MB to 119 MB (xybrid-ai/xybrid#570)
+* Changed: precompiled binaries are published and downloaded gzip-compressed,
+  each with its own ed25519 signature, verified before decompressing and with a
+  fallback to the uncompressed asset — the iOS download drops from 119 MB to
+  34 MB (xybrid-ai/xybrid#573)
+* Changed: verified downloads are cached in `~/.xybrid/cache/precompiled/`, so
+  `flutter clean` and new projects reuse the native library instead of
+  downloading it again; `XYBRID_PRECOMPILED_CACHE_DIR` relocates or disables the
+  cache (xybrid-ai/xybrid#572)
+* Changed: cargokit logs the native download at INFO — target, size, source URL,
+  progress, and whether each target was downloaded or reused from cache.
+  Previously silent for minutes, which read as a Rust compile
+  (xybrid-ai/xybrid#571)
+* Fixed: iOS builds from pub.dev no longer download an unused ~17 MB ONNX
+  Runtime xcframework, and simulator builds no longer fail with "xz is required"
+  on a Mac without Homebrew `xz` (xybrid-ai/xybrid#575)
+
 ## 0.8.0
 
 No Dart API changes. Flutter desktop model loads can reuse compatible files
