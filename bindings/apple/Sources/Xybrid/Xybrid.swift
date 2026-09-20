@@ -17,6 +17,16 @@ import UIKit
 
 // MARK: - SDK Initialization
 
+// The generated free functions below share their names with the `Xybrid`
+// members that forward to them, and inside an enum body an unqualified call
+// resolves to the static member first — i.e. to itself. The module name can't
+// disambiguate either, because this module is also called `Xybrid`. Binding
+// them here, at file scope, where the enum's members are not in scope, is the
+// one place the global is reachable by name.
+private let boltReleaseMemory = releaseMemory
+private let boltSetAutoRelease = setAutoRelease
+private let boltIsAutoReleaseEnabled = isAutoReleaseEnabled
+
 /// Main entry point for the Xybrid SDK on iOS/macOS.
 ///
 /// Call `Xybrid.initialize()` once before using any other Xybrid functionality.
@@ -104,6 +114,39 @@ public enum Xybrid {
         initLock.lock()
         defer { initLock.unlock() }
         return initialized
+    }
+
+    /// Releases every idle loaded model's memory; returns how many were released.
+    ///
+    /// Wire this to the platform's low-memory signal:
+    ///
+    /// ```swift
+    /// override func didReceiveMemoryWarning() {
+    ///     super.didReceiveMemoryWarning()
+    ///     Xybrid.releaseMemory()
+    /// }
+    /// ```
+    ///
+    /// Models with a run in flight are skipped, and a released model reloads
+    /// itself the next time it is used — there is no new error to handle and
+    /// nothing to reload by hand.
+    @discardableResult
+    public static func releaseMemory() -> UInt32 {
+        boltReleaseMemory()
+    }
+
+    /// Enables or disables automatic model release for subsequent loads.
+    ///
+    /// When enabled, loading a model while the device reports memory pressure
+    /// first releases least-recently-used idle models. Off by default;
+    /// `releaseMemory()` works either way.
+    public static func setAutoRelease(_ enabled: Bool) {
+        boltSetAutoRelease(enabled)
+    }
+
+    /// Whether automatic model release is enabled process-wide.
+    public static var isAutoReleaseEnabled: Bool {
+        boltIsAutoReleaseEnabled()
     }
 
     private static func registerPlatformObservers() {

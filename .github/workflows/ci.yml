@@ -37,6 +37,7 @@ jobs:
       unity_bolt: ${{ steps.filter.outputs.unity_bolt }}
       python_sdk: ${{ steps.filter.outputs.python_sdk }}
       kotlin_jni: ${{ steps.filter.outputs.kotlin_jni }}
+      apple_bolt: ${{ steps.filter.outputs.apple_bolt }}
     steps:
       - name: Check changed paths
         id: filter
@@ -64,7 +65,10 @@ jobs:
           fi
           echo "relevant=$RELEVANT" >> "$GITHUB_OUTPUT"
           echo "Tooling-relevant changes: $RELEVANT"
-          if printf '%s\n' "$FILES" | grep -qE '^(bindings/unity/Runtime/Bolt/|bindings/unity/Runtime/BoltSupplement/|tools/unity-bolt-compile-check/|tools/scripts/gen_unity_bolt_csharp\.py$|crates/xybrid-bolt/boltffi\.toml$|\.github/workflows/ci\.yml$)'; then
+          # Runtime/Api is in the list because the compile gate compiles it
+          # (UnityBoltCompileCheck.csproj globs Bolt/, BoltSupplement/ AND Api/),
+          # so a hand-written wrapper edit must run the same netstandard2.1 check.
+          if printf '%s\n' "$FILES" | grep -qE '^(bindings/unity/Runtime/Bolt/|bindings/unity/Runtime/BoltSupplement/|bindings/unity/Runtime/Api/|tools/unity-bolt-compile-check/|tools/scripts/gen_unity_bolt_csharp\.py$|crates/xybrid-bolt/boltffi\.toml$|\.github/workflows/ci\.yml$)'; then
             UNITY_BOLT=true
           else
             UNITY_BOLT=false
@@ -84,6 +88,14 @@ jobs:
             KOTLIN_JNI=false
           fi
           echo "kotlin_jni=$KOTLIN_JNI" >> "$GITHUB_OUTPUT"
+          echo "Kotlin and JNI changes: $KOTLIN_JNI"
+          if printf '%s\n' "$FILES" | grep -qE '^(bindings/apple/|crates/xybrid-bolt/|crates/xybrid-ffi-facade/|\.github/workflows/ci\.yml$)'; then
+            APPLE_BOLT=true
+          else
+            APPLE_BOLT=false
+          fi
+          echo "apple_bolt=$APPLE_BOLT" >> "$GITHUB_OUTPUT"
+          echo "Apple bolt binding changes: $APPLE_BOLT"
 
   kotlin-jni-drift:
     name: Kotlin and JNI generation drift
@@ -100,6 +112,27 @@ jobs:
         run: cargo install boltffi_cli --version 0.30.1 --locked
       - name: Compare committed Kotlin and JNI with fresh generation
         run: python3 tools/scripts/gen_kotlin_bolt.py --check
+
+  # The committed Swift bindings and the C header the xcframework ships are
+  # generator output, like Kotlin/Python/Unity — but until now they had no
+  # drift gate, so a regeneration could silently disagree with the crate.
+  # Generation is host-agnostic (boltffi + a cargo metadata build), so this
+  # runs on Linux; the Swift *compile* stays on macOS in build-apple.yml.
+  apple-bolt-drift:
+    name: Swift and C header generation drift
+    needs: tooling-changes
+    if: needs.tooling-changes.outputs.apple_bolt == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Install the pinned boltffi CLI
+        run: cargo install boltffi_cli --version 0.30.1 --locked
+      - name: Compare committed Swift and C header with fresh generation
+        run: bindings/apple/scripts/gen-bolt-bindings.sh --check
 
   tooling-tests:
     name: Tooling tests (${{ matrix.platform }})
@@ -502,7 +535,7 @@ jobs:
     runs-on: ubuntu-latest
     # Inspect dependency results even when the tooling path gate skips its matrix.
     if: ${{ !cancelled() }}
-    needs: [tooling-changes, tooling-tests, unity-bolt-compile, python-sdk, kotlin-jni-drift, fmt, clippy, check-no-default-features, check-platform-macos, check-platform-desktop, check-vision-platforms, check-llamacpp-vulkan, clippy-llm, test-llm, test, api-contract, web]
+    needs: [tooling-changes, tooling-tests, unity-bolt-compile, python-sdk, kotlin-jni-drift, apple-bolt-drift, fmt, clippy, check-no-default-features, check-platform-macos, check-platform-desktop, check-vision-platforms, check-llamacpp-vulkan, clippy-llm, test-llm, test, api-contract, web]
     steps:
       - name: Verify required job results
         env:
@@ -533,6 +566,11 @@ jobs:
                   .key == "kotlin-jni-drift"
                   and .value.result == "skipped"
                   and $needs["tooling-changes"].outputs.kotlin_jni == "false"
+                )
+                or (
+                  .key == "apple-bolt-drift"
+                  and .value.result == "skipped"
+                  and $needs["tooling-changes"].outputs.apple_bolt == "false"
                 )
               )
           ' <<<"$NEEDS_JSON"

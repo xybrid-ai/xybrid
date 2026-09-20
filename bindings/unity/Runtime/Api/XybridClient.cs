@@ -37,6 +37,33 @@ namespace Xybrid
         public static string Version => XybridBolt.XybridBolt.Version();
 
         /// <summary>
+        /// Releases every idle loaded model's memory; returns how many were released.
+        /// </summary>
+        /// <remarks>
+        /// Wire this to the platform's low-memory signal, e.g. from
+        /// <c>Application.lowMemory</c>. Models with a run in flight are skipped,
+        /// and a released model reloads itself the next time it is used &#x2014; there
+        /// is no new error to handle and nothing to reload by hand.
+        /// </remarks>
+        public static uint ReleaseMemory() => XybridBolt.XybridBolt.ReleaseMemory();
+
+        /// <summary>
+        /// Enables or disables automatic model release for subsequent loads.
+        /// </summary>
+        /// <remarks>
+        /// When enabled, loading a model while the device reports memory pressure
+        /// first releases least-recently-used idle models. Off by default;
+        /// <see cref="ReleaseMemory"/> works either way.
+        /// </remarks>
+        public static void SetAutoRelease(bool enabled) =>
+            XybridBolt.XybridBolt.SetAutoRelease(enabled);
+
+        /// <summary>
+        /// Gets whether automatic model release is enabled process-wide.
+        /// </summary>
+        public static bool IsAutoReleaseEnabled => XybridBolt.XybridBolt.IsAutoReleaseEnabled();
+
+        /// <summary>
         /// Initializes the Xybrid SDK.
         /// </summary>
         /// <param name="apiKey">

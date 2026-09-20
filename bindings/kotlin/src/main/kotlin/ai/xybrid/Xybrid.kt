@@ -127,6 +127,43 @@ object Xybrid {
     @JvmStatic
     fun model(source: ModelSource): ModelLoader = XybridModelLoader.from(source)
 
+    /**
+     * Release every idle loaded model's memory; returns how many were released.
+     *
+     * Wire this to the platform's low-memory signal:
+     *
+     * ```kotlin
+     * override fun onTrimMemory(level: Int) {
+     *     super.onTrimMemory(level)
+     *     Xybrid.releaseMemory()
+     * }
+     * ```
+     *
+     * Models with a run in flight are skipped, and a released model reloads
+     * itself the next time it is used — there is no new error to handle and
+     * nothing to reload by hand.
+     *
+     * The generated binding returns `UInt`; this returns `Int` so the
+     * `@JvmStatic` name is not mangled for Java callers. A released-model
+     * count cannot realistically exceed `Int.MAX_VALUE`.
+     */
+    @JvmStatic
+    fun releaseMemory(): Int = ai.xybrid.releaseMemory().toInt()
+
+    /**
+     * Enable or disable automatic model release for subsequent loads.
+     *
+     * When enabled, loading a model while the device reports memory pressure
+     * first releases least-recently-used idle models. Off by default;
+     * [releaseMemory] works either way.
+     */
+    @JvmStatic
+    fun setAutoRelease(enabled: Boolean) = ai.xybrid.setAutoRelease(enabled)
+
+    /** Whether automatic model release is enabled process-wide. */
+    @JvmStatic
+    val isAutoReleaseEnabled: Boolean get() = ai.xybrid.isAutoReleaseEnabled()
+
     private fun registerPlatformObservers(appContext: Context) {
         val batteryReceiver = object : BroadcastReceiver() {
             override fun onReceive(received: Context, intent: Intent) {

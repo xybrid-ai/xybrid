@@ -7,7 +7,36 @@
 # The Swift source receives one compatibility transform: XybridResult's
 # append-only reasoning field defaults to nil and decodes results from the
 # merged tool-calling wire shape, which does not emit that trailing field.
+#
+# Sibling of tools/scripts/gen_kotlin_bolt.py, gen_python_bolt.py and
+# gen_unity_bolt_csharp.py, and like them it has a --check mode so CI can fail
+# on drift instead of discovering it when a human next regenerates.
+#
+# Usage:
+#   bindings/apple/scripts/gen-bolt-bindings.sh            # regenerate + write
+#   bindings/apple/scripts/gen-bolt-bindings.sh --check    # fail on drift
 set -euo pipefail
+
+PINNED_BOLTFFI="0.30.1"
+
+check=0
+case "${1:-}" in
+    --check) check=1 ;;
+    "") ;;
+    *) echo "usage: $0 [--check]" >&2; exit 2 ;;
+esac
+
+if ! command -v boltffi >/dev/null 2>&1; then
+    echo "error: \`boltffi\` CLI not found. Install the pinned version:" >&2
+    echo "  cargo install boltffi_cli --version $PINNED_BOLTFFI --locked" >&2
+    exit 1
+fi
+boltffi_version="$(boltffi --version)"
+case "$boltffi_version" in
+    *"$PINNED_BOLTFFI"*) ;;
+    *) echo "warning: expected boltffi $PINNED_BOLTFFI, got '$boltffi_version'." \
+            "Generated output may differ from the committed sources." >&2 ;;
+esac
 
 repo_root="$(git -C "$(cd "$(dirname "$0")" && pwd)" rev-parse --show-toplevel)"
 bolt_dir="$repo_root/crates/xybrid-bolt"
@@ -18,7 +47,14 @@ swift_src="$bolt_dir/dist/apple/Sources/XybridBoltBoltFFI.swift"
 header_src="$bolt_dir/dist/apple/Sources/boltffi.h"
 
 swift_dest="$repo_root/bindings/apple/Sources/Xybrid/xybrid_bolt.swift"
-python3 - "$swift_src" "$swift_dest" <<'PY'
+header_dest="$repo_root/bindings/apple/include/xybrid-bolt.h"
+
+# Post-process into a staging dir so --check compares without touching the tree.
+stage_dir="$(mktemp -d)"
+trap 'rm -rf "$stage_dir"' EXIT
+swift_staged="$stage_dir/xybrid_bolt.swift"
+
+python3 - "$swift_src" "$swift_staged" <<'PY'
 import sys
 from pathlib import Path
 
@@ -73,7 +109,27 @@ if source.count(decoder) != 1:
     raise SystemExit("error: expected one generated XybridResult decoder")
 destination_path.write_text(source.replace(decoder, replacement))
 PY
-cp "$header_src" "$repo_root/bindings/apple/include/xybrid-bolt.h"
+
+if [ "$check" -eq 1 ]; then
+    stale=""
+    cmp -s "$swift_staged" "$swift_dest" ||
+        stale="$stale  - bindings/apple/Sources/Xybrid/xybrid_bolt.swift"$'\n'
+    cmp -s "$header_src" "$header_dest" ||
+        stale="$stale  - bindings/apple/include/xybrid-bolt.h"$'\n'
+    if [ -n "$stale" ]; then
+        {
+            echo "error: generated Apple bindings are out of date:"
+            printf '%s' "$stale"
+            echo "Run: bindings/apple/scripts/gen-bolt-bindings.sh"
+        } >&2
+        exit 1
+    fi
+    echo "Apple bolt bindings are up to date"
+    exit 0
+fi
+
+cp "$swift_staged" "$swift_dest"
+cp "$header_src" "$header_dest"
 
 echo "regenerated: bindings/apple/Sources/Xybrid/xybrid_bolt.swift"
 echo "regenerated: bindings/apple/include/xybrid-bolt.h"
