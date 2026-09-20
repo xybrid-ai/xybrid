@@ -48,7 +48,7 @@ DEST_FILE = REPO_ROOT / "bindings" / "kotlin" / "src" / "main" / "kotlin" / "ai"
 RAW_JNI_DIR = BOLT_DIR / "dist" / "android" / "kotlin" / "jni"
 DEST_JNI_DIR = REPO_ROOT / "bindings" / "kotlin" / "bazel" / "jni"
 NATIVE_FILES = ("jni_glue.c", "xybrid_bolt.h")
-PINNED_BOLTFFI = "0.29.3"
+PINNED_BOLTFFI = "0.30.1"
 
 # `data class Foo(<params>) : XybridError() {` — payload lists carry no nested
 # parentheses, so stopping at the first `)` is exact.
@@ -148,7 +148,7 @@ def _add_result_wire_compatibility(source: str) -> str:
 
 
 def render() -> tuple[str, dict[str, bytes]]:
-    subprocess.run(["boltffi", "generate", "kotlin"], cwd=BOLT_DIR, check=True)
+    subprocess.run(["boltffi", "generate", "kotlin", "--deny-skipped"], cwd=BOLT_DIR, check=True)
     if not RAW_FILE.is_file():
         sys.exit(f"error: boltffi produced no Kotlin source at {RAW_FILE}")
 

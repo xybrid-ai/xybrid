@@ -1704,6 +1704,30 @@ public func version() -> String {
     return boltffiDecodeOwnedBuf(boltffiResult.ptr, Int(boltffiResult.len)) { boltffiReader in boltffiReader.readString() }
 }
 
+/// Release every idle loaded model's memory; returns how many were released.
+///
+/// Call this from the platform's low-memory hook (`didReceiveMemoryWarning`
+/// on iOS, `onTrimMemory` on Android). Models with a run in flight are
+/// skipped, and a released model reloads itself on next use — no reload call,
+/// no new error to handle.
+public func releaseMemory() -> UInt32 {
+    return boltffi_function_xybrid_bolt_release_memory()
+}
+
+/// Enable or disable automatic model release for subsequent loads.
+///
+/// When enabled, loading a model under device memory pressure first releases
+/// least-recently-used idle models. Off by default; [`release_memory`] works
+/// either way.
+public func setAutoRelease(enabled: Bool) {
+    boltffi_function_xybrid_bolt_set_auto_release(enabled)
+}
+
+/// Whether automatic model release is enabled process-wide.
+public func isAutoReleaseEnabled() -> Bool {
+    return boltffi_function_xybrid_bolt_is_auto_release_enabled()
+}
+
 /// The SDK's default telemetry ingest endpoint (for display alongside a config).
 public func telemetryDefaultEndpoint() -> String {
     let boltffiResult = boltffi_function_xybrid_bolt_telemetry_default_endpoint()

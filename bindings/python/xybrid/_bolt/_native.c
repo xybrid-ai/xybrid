@@ -1500,48 +1500,48 @@ static int boltffi_python_encode_wire_codec(const char *key, PyObject *value, Py
 }
 
 
-static PyObject *boltffi_python_decode_read_fe83cddcf3822a1d(const uint8_t *ptr, uintptr_t len) {
-    return boltffi_python_decode_wire_codec("read_fe83cddcf3822a1d", ptr, len);
+static PyObject *boltffi_python_decode_read_09404a3c98b3f16c(const uint8_t *ptr, uintptr_t len) {
+    return boltffi_python_decode_wire_codec("read_09404a3c98b3f16c", ptr, len);
 }
 
 static PyObject *boltffi_python_decode_read_89cd31291d2aefa4(const uint8_t *ptr, uintptr_t len) {
     return boltffi_python_decode_wire_codec("read_89cd31291d2aefa4", ptr, len);
 }
 
-static PyObject *boltffi_python_decode_read_29c0b1cb6cb65e99(const uint8_t *ptr, uintptr_t len) {
-    return boltffi_python_decode_wire_codec("read_29c0b1cb6cb65e99", ptr, len);
+static PyObject *boltffi_python_decode_read_347d2e2b11e825e8(const uint8_t *ptr, uintptr_t len) {
+    return boltffi_python_decode_wire_codec("read_347d2e2b11e825e8", ptr, len);
 }
 
-static PyObject *boltffi_python_decode_read_49d0adb26a1528e6(const uint8_t *ptr, uintptr_t len) {
-    return boltffi_python_decode_wire_codec("read_49d0adb26a1528e6", ptr, len);
+static PyObject *boltffi_python_decode_read_94828222bbb26957(const uint8_t *ptr, uintptr_t len) {
+    return boltffi_python_decode_wire_codec("read_94828222bbb26957", ptr, len);
 }
 
-static PyObject *boltffi_python_decode_read_bd1359a0ca4e78d7(const uint8_t *ptr, uintptr_t len) {
-    return boltffi_python_decode_wire_codec("read_bd1359a0ca4e78d7", ptr, len);
+static PyObject *boltffi_python_decode_read_8d5822576d97fd37(const uint8_t *ptr, uintptr_t len) {
+    return boltffi_python_decode_wire_codec("read_8d5822576d97fd37", ptr, len);
 }
 
-static PyObject *boltffi_python_decode_read_74dbe00a1a77ad93(const uint8_t *ptr, uintptr_t len) {
-    return boltffi_python_decode_wire_codec("read_74dbe00a1a77ad93", ptr, len);
+static PyObject *boltffi_python_decode_read_5110818ecd16fc91(const uint8_t *ptr, uintptr_t len) {
+    return boltffi_python_decode_wire_codec("read_5110818ecd16fc91", ptr, len);
 }
 
-static PyObject *boltffi_python_decode_read_c9bb5dd3c2ec1b2a(const uint8_t *ptr, uintptr_t len) {
-    return boltffi_python_decode_wire_codec("read_c9bb5dd3c2ec1b2a", ptr, len);
+static PyObject *boltffi_python_decode_read_146d324414895b9b(const uint8_t *ptr, uintptr_t len) {
+    return boltffi_python_decode_wire_codec("read_146d324414895b9b", ptr, len);
 }
 
-static PyObject *boltffi_python_decode_read_e9a0b9fd71f8c9ff(const uint8_t *ptr, uintptr_t len) {
-    return boltffi_python_decode_wire_codec("read_e9a0b9fd71f8c9ff", ptr, len);
+static PyObject *boltffi_python_decode_read_f45d365d172a914e(const uint8_t *ptr, uintptr_t len) {
+    return boltffi_python_decode_wire_codec("read_f45d365d172a914e", ptr, len);
 }
 
-static PyObject *boltffi_python_decode_read_3cfe09c223256b1b(const uint8_t *ptr, uintptr_t len) {
-    return boltffi_python_decode_wire_codec("read_3cfe09c223256b1b", ptr, len);
+static PyObject *boltffi_python_decode_read_0d42d278c66eef7b(const uint8_t *ptr, uintptr_t len) {
+    return boltffi_python_decode_wire_codec("read_0d42d278c66eef7b", ptr, len);
 }
 
-static PyObject *boltffi_python_decode_read_9415281aa52df749(const uint8_t *ptr, uintptr_t len) {
-    return boltffi_python_decode_wire_codec("read_9415281aa52df749", ptr, len);
+static PyObject *boltffi_python_decode_read_4319db60c88eabca(const uint8_t *ptr, uintptr_t len) {
+    return boltffi_python_decode_wire_codec("read_4319db60c88eabca", ptr, len);
 }
 
-static PyObject *boltffi_python_decode_read_c9e5fd91113e36a2(const uint8_t *ptr, uintptr_t len) {
-    return boltffi_python_decode_wire_codec("read_c9e5fd91113e36a2", ptr, len);
+static PyObject *boltffi_python_decode_read_1497d20162db7713(const uint8_t *ptr, uintptr_t len) {
+    return boltffi_python_decode_wire_codec("read_1497d20162db7713", ptr, len);
 }
 
 
@@ -1565,12 +1565,12 @@ static int boltffi_python_encode_write_8d84d7157f6e715c(PyObject *value, PyObjec
     return boltffi_python_encode_wire_codec("write_8d84d7157f6e715c", value, out_wire, out_ptr, out_len);
 }
 
-static int boltffi_python_encode_write_62eeac930738df49(PyObject *value, PyObject **out_wire, const uint8_t **out_ptr, uintptr_t *out_len) {
-    return boltffi_python_encode_wire_codec("write_62eeac930738df49", value, out_wire, out_ptr, out_len);
+static int boltffi_python_encode_write_183cd822b59b9ed8(PyObject *value, PyObject **out_wire, const uint8_t **out_ptr, uintptr_t *out_len) {
+    return boltffi_python_encode_wire_codec("write_183cd822b59b9ed8", value, out_wire, out_ptr, out_len);
 }
 
-static int boltffi_python_encode_write_922e13039dd3c493(PyObject *value, PyObject **out_wire, const uint8_t **out_ptr, uintptr_t *out_len) {
-    return boltffi_python_encode_wire_codec("write_922e13039dd3c493", value, out_wire, out_ptr, out_len);
+static int boltffi_python_encode_write_360ec15d925d8351(PyObject *value, PyObject **out_wire, const uint8_t **out_ptr, uintptr_t *out_len) {
+    return boltffi_python_encode_wire_codec("write_360ec15d925d8351", value, out_wire, out_ptr, out_len);
 }
 
 static int boltffi_python_encode_write_45cfac4c89613282(PyObject *value, PyObject **out_wire, const uint8_t **out_ptr, uintptr_t *out_len) {
@@ -1609,24 +1609,24 @@ static int boltffi_python_encode_write_544f2725dda888e0(PyObject *value, PyObjec
     return boltffi_python_encode_wire_codec("write_544f2725dda888e0", value, out_wire, out_ptr, out_len);
 }
 
-static int boltffi_python_encode_write_d82fa724b184c72a(PyObject *value, PyObject **out_wire, const uint8_t **out_ptr, uintptr_t *out_len) {
-    return boltffi_python_encode_wire_codec("write_d82fa724b184c72a", value, out_wire, out_ptr, out_len);
+static int boltffi_python_encode_write_27d48eea4b9a1762(PyObject *value, PyObject **out_wire, const uint8_t **out_ptr, uintptr_t *out_len) {
+    return boltffi_python_encode_wire_codec("write_27d48eea4b9a1762", value, out_wire, out_ptr, out_len);
 }
 
 static int boltffi_python_encode_write_cd5b56c1c6bfc6e0(PyObject *value, PyObject **out_wire, const uint8_t **out_ptr, uintptr_t *out_len) {
     return boltffi_python_encode_wire_codec("write_cd5b56c1c6bfc6e0", value, out_wire, out_ptr, out_len);
 }
 
-static int boltffi_python_encode_write_a4eb0446f96b83ef(PyObject *value, PyObject **out_wire, const uint8_t **out_ptr, uintptr_t *out_len) {
-    return boltffi_python_encode_wire_codec("write_a4eb0446f96b83ef", value, out_wire, out_ptr, out_len);
+static int boltffi_python_encode_write_17f7606cd077d76c(PyObject *value, PyObject **out_wire, const uint8_t **out_ptr, uintptr_t *out_len) {
+    return boltffi_python_encode_wire_codec("write_17f7606cd077d76c", value, out_wire, out_ptr, out_len);
 }
 
-static int boltffi_python_encode_write_5eb4d1ef4dc0ea3f(PyObject *value, PyObject **out_wire, const uint8_t **out_ptr, uintptr_t *out_len) {
-    return boltffi_python_encode_wire_codec("write_5eb4d1ef4dc0ea3f", value, out_wire, out_ptr, out_len);
+static int boltffi_python_encode_write_d1c12e1524cd3dbc(PyObject *value, PyObject **out_wire, const uint8_t **out_ptr, uintptr_t *out_len) {
+    return boltffi_python_encode_wire_codec("write_d1c12e1524cd3dbc", value, out_wire, out_ptr, out_len);
 }
 
-static int boltffi_python_encode_write_a67118e385bc3069(PyObject *value, PyObject **out_wire, const uint8_t **out_ptr, uintptr_t *out_len) {
-    return boltffi_python_encode_wire_codec("write_a67118e385bc3069", value, out_wire, out_ptr, out_len);
+static int boltffi_python_encode_write_5575cc29a91ce4ea(PyObject *value, PyObject **out_wire, const uint8_t **out_ptr, uintptr_t *out_len) {
+    return boltffi_python_encode_wire_codec("write_5575cc29a91ce4ea", value, out_wire, out_ptr, out_len);
 }
 
 static int boltffi_python_encode_write_73b9be8d33badc3c(PyObject *value, PyObject **out_wire, const uint8_t **out_ptr, uintptr_t *out_len) {

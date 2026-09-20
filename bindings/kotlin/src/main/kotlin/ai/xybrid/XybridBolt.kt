@@ -854,6 +854,12 @@ private object Native {
 }
 
 
+/**
+ * Single metadata key/value entry. BoltFFI doesn't auto-derive
+ * `WireEncode` for `HashMap<String, String>`, so we expose metadata as
+ * `Vec<XybridMetadataEntry>`. The conversion back to `HashMap` happens
+ * at the facade boundary inside [`XybridEnvelope::into`].
+ */
 data class XybridMetadataEntry(
     val key: String,
     val value: String
@@ -934,6 +940,12 @@ data class XybridEnvelope(
 }
 
 
+/**
+ * A tool (function) the model may ask to call.
+ *
+ * `parameters_json` is the JSON Schema for the arguments, carried as a JSON
+ * string because no binding generator can describe an arbitrary JSON tree.
+ */
 data class XybridToolDefinition(
     val name: String,
     val description: String,
@@ -977,6 +989,9 @@ data class XybridToolDefinition(
 }
 
 
+/**
+ * One tool call the model emitted, from [`XybridResult::tool_calls`].
+ */
 data class XybridToolCall(
     val id: String,
     val name: String,
@@ -1020,9 +1035,18 @@ data class XybridToolCall(
 }
 
 
+/**
+ * The outcome of running one tool, fed back with [`tool_results_envelope`].
+ */
 data class XybridToolResult(
+    /**
+     * The [`XybridToolCall::id`] this answers.
+     */
     val callId: String,
     val name: String,
+    /**
+     * The tool's output as a JSON string.
+     */
     val contentJson: String
 ) {
     internal fun wireSize(): Int {
@@ -1071,7 +1095,22 @@ data class XybridGenerationConfig(
     val topK: UInt?,
     val repetitionPenalty: Float?,
     val stopSequences: List<String>,
+    /**
+     * Optional GBNF grammar constraining generation to structured output
+     * (local llama backend only). Produce one from a JSON Schema with
+     * [`json_schema_to_gbnf`], or pass raw GBNF. Appended last: `#[data]`
+     * PODs serialize by field order across the FFI boundary.
+     */
     val grammar: String?,
+    /**
+     * Tools the model may call this turn. Empty means no tool calling —
+     * existing behavior, unchanged. Appended after `grammar` for the same
+     * field-order reason.
+     *
+     * Tool calling is llama.cpp-only today; unsupported paths (no embedded
+     * chat template, the mistralrs backend, the cloud fallback leg) reject
+     * tool-bearing requests rather than quietly generating without them.
+     */
     val tools: List<XybridToolDefinition>
 ) {
     internal fun wireSize(): Int {
@@ -1268,14 +1307,32 @@ data class XybridInferenceMetrics(
 }
 
 
+/**
+ * Inference output. Named `XybridResult` (not `XybridInferenceResult`)
+ * to match the existing uniffi-generated Kotlin/Swift name — the iOS
+ * example references `XybridResult` directly.
+ */
 data class XybridResult(
     val envelope: XybridEnvelope,
     val outputType: XybridOutputType,
     val modelId: String,
     val latencyMs: UInt,
+    /**
+     * Where the answer actually came from. Cloud fallback keeps `model_id`
+     * identical on both legs, so this is the only way to tell them apart.
+     */
     val executionTarget: XybridExecutionTarget,
     val metrics: XybridInferenceMetrics,
+    /**
+     * Tool calls the model emitted this turn. Empty unless the request
+     * offered tools via [`XybridGenerationConfig::tools`].
+     * `#[data]` PODs serialize by field order across the FFI boundary.
+     */
     val toolCalls: List<XybridToolCall>,
+    /**
+     * Model reasoning emitted separately from the final answer text.
+     * Appended last because `#[data]` fields serialize in declaration order.
+     */
     val reasoningContent: String? = null
 ) {
     internal fun wireSize(): Int {
@@ -1338,8 +1395,14 @@ data class XybridResult(
 }
 
 
+/**
+ * Download progress + state in one consistent read.
+ */
 data class XybridDownloadStatus(
     val state: XybridDownloadState,
+    /**
+     * 0.0..=1.0.
+     */
     val progress: Float
 ) {
     internal fun wireSize(): Int {
@@ -1383,8 +1446,29 @@ data class XybridStreamToken(
     val tokenId: Long?,
     val index: ULong,
     val cumulativeText: String,
+    /**
+     * `"tool_calls"` when the turn ended on a parseable tool-call block.
+     */
     val finishReason: String?,
+    /**
+     * Tool calls parsed from the completed turn — populated on the
+     * **terminal** token only (the one carrying `finish_reason`).
+     *
+     * Tool-call blocks are suppressed from the emitted stream, so there is
+     * nothing in the token text to parse: a streaming caller halts here,
+     * runs the tools, then continues the turn by streaming a
+     * [`tool_results_envelope`] through the same call. Empty on every
+     * mid-stream token and on turns that emitted no call.
+     */
     val toolCalls: List<XybridToolCall>,
+    /**
+     * The completed turn's raw output text, tool-call block included — pass
+     * it to [`tool_results_envelope`] as `prior_assistant_text`.
+     *
+     * Present only alongside a non-empty [`Self::tool_calls`]. Not the same
+     * as `cumulative_text`, which reports the *emitted* text with the
+     * protocol blocks suppressed — which is why this field exists at all.
+     */
     val rawText: String?
 ) {
     internal fun wireSize(): Int {
@@ -1433,6 +1517,16 @@ data class XybridStreamToken(
 }
 
 
+/**
+ * One pull from a streaming inference session.
+ *
+ * This is a flat record instead of a data-carrying enum because the pinned
+ * C# generator cannot lower that enum shape reliably. `kind` selects the one
+ * populated payload: `token` for `Token`, none for `Complete`. A `Complete`
+ * event is followed by [`XybridModel::stream_result`] to retrieve the final
+ * result. Inference failures are returned as typed [`XybridError`] values by
+ * [`XybridModel::stream_next`].
+ */
 data class XybridStreamEvent(
     val kind: XybridStreamEventKind,
     val token: XybridStreamToken?
@@ -1522,6 +1616,23 @@ data class XybridVoiceInfo(
 }
 
 
+/**
+ * Errors surfaced across the FFI boundary. Variants mirror
+ * [`facade::Error`] — the facade owns the SDK→FFI translation; this enum
+ * only re-decorates it for the BoltFFI generator (proc macros must live
+ * on the type definition).
+ *
+ * Named `XybridError` (not `Error`) so the emitted Swift type doesn't
+ * shadow / collide with Swift's stdlib `Error` protocol, and so the
+ * Kotlin sealed-hierarchy name matches the existing uniffi consumer
+ * expectations.
+ *
+ * **Variant order is part of the wire contract.** BoltFFI encodes `#[error]`
+ * (and `#[data]`) enums by ordinal tag, so reordering or inserting a variant
+ * renumbers every variant after it and breaks already-built foreign clients.
+ * Only ever append at the tail, and keep this order in lockstep with
+ * [`facade::Error`] and its `code()` table.
+ */
 sealed class XybridError : Exception() {
     internal abstract fun wireSize(): Int
 
@@ -1975,6 +2086,9 @@ enum class XybridOutputType(val value: Int) {
 }
 
 
+/**
+ * Where a result was produced — observed fact, not a routing preference.
+ */
 enum class XybridExecutionTarget(val value: Int) {
     LOCAL(0),
     CLOUD(1);
@@ -1986,9 +2100,15 @@ enum class XybridExecutionTarget(val value: Int) {
 }
 
 
+/**
+ * Lifecycle of the background download behind a speculative load.
+ */
 enum class XybridDownloadState(val value: Int) {
     DOWNLOADING(0),
     READY(1),
+    /**
+     * Download failed; the cloud keeps serving and `isLoaded` never flips.
+     */
     FAILED(2);
 
     companion object {
@@ -2035,11 +2155,20 @@ class XybridModel internal constructor(internal val handle: Long) : AutoCloseabl
         return handle
     }
 
+    /**
+     * Load from the xybrid registry. Recommended path.
+     */
     constructor(id: String) : this(fromRegistry(id).handle)
 
+    /**
+     * Resolve and load a HuggingFace repository pinned to a revision.
+     */
     constructor(repo: String, revision: String) : this(fromHuggingfaceWithRevision(repo, revision).handle)
 
     companion object {
+        /**
+         * Load from the xybrid registry. Recommended path.
+         */
         fun fromRegistry(id: String): XybridModel {
             val __boltffi_id_wire = WireWriterPool.acquire(4 + Utf8Codec.maxBytes(id))
             val __boltffi_id_writer = __boltffi_id_wire.writer
@@ -2050,6 +2179,15 @@ class XybridModel internal constructor(internal val handle: Long) : AutoCloseabl
                 __boltffi_id_wire.close()
             }
         }
+        /**
+         * Load from the registry, serving from the cloud gateway while the weights
+         * download in the background.
+         *
+         * Returns almost immediately instead of blocking on the download. Requires
+         * a resolvable API key and an uncached model; otherwise it behaves exactly
+         * like `from_registry`. Poll `download_status` for progress and
+         * `is_cloud_serving` to know which leg is answering. LLM/chat models only.
+         */
         fun fromRegistrySpeculative(id: String): XybridModel {
             val __boltffi_id_wire = WireWriterPool.acquire(4 + Utf8Codec.maxBytes(id))
             val __boltffi_id_writer = __boltffi_id_wire.writer
@@ -2060,6 +2198,9 @@ class XybridModel internal constructor(internal val handle: Long) : AutoCloseabl
                 __boltffi_id_wire.close()
             }
         }
+        /**
+         * Load from a local model directory (must contain `model_metadata.json`).
+         */
         fun fromDirectory(path: String): XybridModel {
             val __boltffi_path_wire = WireWriterPool.acquire(4 + Utf8Codec.maxBytes(path))
             val __boltffi_path_writer = __boltffi_path_wire.writer
@@ -2070,6 +2211,9 @@ class XybridModel internal constructor(internal val handle: Long) : AutoCloseabl
                 __boltffi_path_wire.close()
             }
         }
+        /**
+         * Load from a local `.xyb` bundle.
+         */
         fun fromBundle(path: String): XybridModel {
             val __boltffi_path_wire = WireWriterPool.acquire(4 + Utf8Codec.maxBytes(path))
             val __boltffi_path_writer = __boltffi_path_wire.writer
@@ -2080,6 +2224,9 @@ class XybridModel internal constructor(internal val handle: Long) : AutoCloseabl
                 __boltffi_path_wire.close()
             }
         }
+        /**
+         * Resolve and load from a HuggingFace repo (`org/repo` or `org/repo:variant`).
+         */
         fun fromHuggingface(repo: String): XybridModel {
             val __boltffi_repo_wire = WireWriterPool.acquire(4 + Utf8Codec.maxBytes(repo))
             val __boltffi_repo_writer = __boltffi_repo_wire.writer
@@ -2090,6 +2237,9 @@ class XybridModel internal constructor(internal val handle: Long) : AutoCloseabl
                 __boltffi_repo_wire.close()
             }
         }
+        /**
+         * Resolve and load a HuggingFace repository pinned to a revision.
+         */
         fun fromHuggingfaceWithRevision(repo: String, revision: String): XybridModel {
             val __boltffi_repo_wire = WireWriterPool.acquire(4 + Utf8Codec.maxBytes(repo))
             val __boltffi_repo_writer = __boltffi_repo_wire.writer
@@ -2104,6 +2254,10 @@ class XybridModel internal constructor(internal val handle: Long) : AutoCloseabl
                 __boltffi_revision_wire.close()
             }
         }
+        /**
+         * Load from a raw GGUF file, auto-generating `model_metadata.json` from the
+         * GGUF header (written next to the file if absent).
+         */
         fun fromModelFile(path: String): XybridModel {
             val __boltffi_path_wire = WireWriterPool.acquire(4 + Utf8Codec.maxBytes(path))
             val __boltffi_path_writer = __boltffi_path_wire.writer
@@ -2136,16 +2290,30 @@ class XybridModel internal constructor(internal val handle: Long) : AutoCloseabl
         return Native.boltffi_method_class_xybrid_bolt_xybrid_model_is_loaded(this.boltffiHandle())
     }
 
+    /**
+     * Whether runs are currently answered by the cloud because the local
+     * weights are not ready yet. `false` for ordinary local models.
+     */
     fun isCloudServing(): Boolean {
         return Native.boltffi_method_class_xybrid_bolt_xybrid_model_is_cloud_serving(this.boltffiHandle())
     }
 
+    /**
+     * Download progress + state in one read — poll this to drive a progress
+     * bar. Reports `Ready` at 1.0 for an ordinary local model, so hosts need
+     * no special case.
+     */
     fun downloadStatus(): XybridDownloadStatus {
         val __boltffi_result = Native.boltffi_method_class_xybrid_bolt_xybrid_model_download_status(this.boltffiHandle()) ?: throw IllegalStateException("null buffer returned")
         val __boltffi_reader = WireReader(__boltffi_result)
         return XybridDownloadStatus.fromReader(__boltffi_reader)
     }
 
+    /**
+     * Block until the download finishes or `timeout_ms` elapses, then report
+     * the status. Call it off the UI thread (the same place `from_registry` is
+     * already called). `timeout_ms = 0` makes it a non-blocking read.
+     */
     fun awaitDownload(timeoutMs: ULong): XybridDownloadStatus {
         val __boltffi_result = Native.boltffi_method_class_xybrid_bolt_xybrid_model_await_download(this.boltffiHandle(), timeoutMs.toLong()) ?: throw IllegalStateException("null buffer returned")
         val __boltffi_reader = WireReader(__boltffi_result)
@@ -2156,10 +2324,16 @@ class XybridModel internal constructor(internal val handle: Long) : AutoCloseabl
         return Native.boltffi_method_class_xybrid_bolt_xybrid_model_supports_streaming(this.boltffiHandle())
     }
 
+    /**
+     * Whether this model emits true token-by-token output.
+     */
     fun supportsTokenStreaming(): Boolean {
         return Native.boltffi_method_class_xybrid_bolt_xybrid_model_supports_token_streaming(this.boltffiHandle())
     }
 
+    /**
+     * Return the model's resolved generation defaults.
+     */
     fun defaultGenerationConfig(): XybridGenerationConfig {
         val __boltffi_result = Native.boltffi_method_class_xybrid_bolt_xybrid_model_default_generation_config(this.boltffiHandle()) ?: throw IllegalStateException("null buffer returned")
         val __boltffi_reader = WireReader(__boltffi_result)
@@ -2170,6 +2344,14 @@ class XybridModel internal constructor(internal val handle: Long) : AutoCloseabl
         return Native.boltffi_method_class_xybrid_bolt_xybrid_model_is_llm(this.boltffiHandle())
     }
 
+    /**
+     * Whether the model bundle declares local tool-calling support.
+     *
+     * Advisory tri-state: `null` means the bundle says nothing, so the host
+     * cannot tell. Gate tool UI on it; enforcement stays at run time — a
+     * tools-bearing request against a model whose chat template has no tool
+     * support fails as invalid input regardless of what this reports.
+     */
     fun supportsToolCalling(): Boolean? {
         val __boltffi_result = Native.boltffi_method_class_xybrid_bolt_xybrid_model_supports_tool_calling(this.boltffiHandle()) ?: throw IllegalStateException("null buffer returned")
         val __boltffi_reader = WireReader(__boltffi_result)
@@ -2205,6 +2387,13 @@ class XybridModel internal constructor(internal val handle: Long) : AutoCloseabl
         }
     }
 
+    /**
+     * Run inference, optionally with [`XybridRunOptions`] (generation config,
+     * abort signals, cloud-fallback). Pass `None` for the model's defaults.
+     *
+     * The hand-written wrappers add a one-arg `run(envelope)` convenience that
+     * forwards `None`, so simple call sites stay ergonomic.
+     */
     fun run(envelope: XybridEnvelope, options: XybridRunOptions?): XybridResult {
         val __boltffi_envelope_wire = WireWriterPool.acquire(envelope.wireSize())
         val __boltffi_envelope_writer = __boltffi_envelope_wire.writer
@@ -2222,6 +2411,12 @@ class XybridModel internal constructor(internal val handle: Long) : AutoCloseabl
         }
     }
 
+    /**
+     * Start token streaming and return a model-scoped session identifier.
+     *
+     * The identifier remains valid until the final result is taken, an error
+     * is returned, or [`Self::stream_close`] is called.
+     */
     fun runStream(envelope: XybridEnvelope, options: XybridRunOptions?): ULong {
         val __boltffi_envelope_wire = WireWriterPool.acquire(envelope.wireSize())
         val __boltffi_envelope_writer = __boltffi_envelope_wire.writer
@@ -2237,22 +2432,38 @@ class XybridModel internal constructor(internal val handle: Long) : AutoCloseabl
         }
     }
 
+    /**
+     * Block until the next item for `stream_id` is ready.
+     */
     fun streamNext(streamId: ULong): XybridStreamEvent {
         val __boltffi_result = try { Native.boltffi_method_class_xybrid_bolt_xybrid_model_stream_next(this.boltffiHandle(), streamId.toLong()) } catch (__boltffi_error: BoltFfiErrorBufferException) { run { val __boltffi_error_reader = WireReader(__boltffi_error.bytes); throw XybridError.fromReader(__boltffi_error_reader) } } ?: throw IllegalStateException("null buffer returned")
         val __boltffi_reader = WireReader(__boltffi_result)
         return XybridStreamEvent.fromReader(__boltffi_reader)
     }
 
+    /**
+     * Take the final result after receiving a `Complete` event.
+     */
     fun streamResult(streamId: ULong): XybridResult {
         val __boltffi_result = try { Native.boltffi_method_class_xybrid_bolt_xybrid_model_stream_result(this.boltffiHandle(), streamId.toLong()) } catch (__boltffi_error: BoltFfiErrorBufferException) { run { val __boltffi_error_reader = WireReader(__boltffi_error.bytes); throw XybridError.fromReader(__boltffi_error_reader) } } ?: throw IllegalStateException("null buffer returned")
         val __boltffi_reader = WireReader(__boltffi_result)
         return XybridResult.fromReader(__boltffi_reader)
     }
 
+    /**
+     * Forget a streaming session.
+     */
     fun streamClose(streamId: ULong) {
         Native.boltffi_method_class_xybrid_bolt_xybrid_model_stream_close(this.boltffiHandle(), streamId.toLong())
     }
 
+    /**
+     * Run inference seeded with a conversation `context` (multi-turn chat).
+     *
+     * Only the generation config from `options` is applied — abort signals and
+     * cloud fallback are not wired on the context path (matches the facade's
+     * `run_with_context`).
+     */
     fun runWithContext(envelope: XybridEnvelope, context: XybridConversationContext, options: XybridRunOptions?): XybridResult {
         val __boltffi_envelope_wire = WireWriterPool.acquire(envelope.wireSize())
         val __boltffi_envelope_writer = __boltffi_envelope_wire.writer
@@ -2270,6 +2481,11 @@ class XybridModel internal constructor(internal val handle: Long) : AutoCloseabl
         }
     }
 
+    /**
+     * Start context-aware token streaming; returns a model-scoped session id.
+     * The pull protocol is identical to [`Self::run_stream`]
+     * (`stream_next` / `stream_result` / `stream_close`).
+     */
     fun runStreamWithContext(envelope: XybridEnvelope, context: XybridConversationContext, options: XybridRunOptions?): ULong {
         val __boltffi_envelope_wire = WireWriterPool.acquire(envelope.wireSize())
         val __boltffi_envelope_writer = __boltffi_envelope_wire.writer
@@ -2308,14 +2524,28 @@ class XybridConversationContext internal constructor(internal val handle: Long) 
         return handle
     }
 
+    /**
+     * Create an empty conversation context (fresh id).
+     */
     constructor() : this(new().handle)
 
+    /**
+     * Create a context with a caller-supplied id (for telemetry correlation
+     * across turns).
+     */
     constructor(id: String) : this(withId(id).handle)
 
     companion object {
+        /**
+         * Create an empty conversation context (fresh id).
+         */
         fun new(): XybridConversationContext {
             return XybridConversationContext(Native.boltffi_init_class_xybrid_bolt_xybrid_conversation_context_new())
         }
+        /**
+         * Create a context with a caller-supplied id (for telemetry correlation
+         * across turns).
+         */
         fun withId(id: String): XybridConversationContext {
             val __boltffi_id_wire = WireWriterPool.acquire(4 + Utf8Codec.maxBytes(id))
             val __boltffi_id_writer = __boltffi_id_wire.writer
@@ -2328,6 +2558,9 @@ class XybridConversationContext internal constructor(internal val handle: Long) 
         }
     }
 
+    /**
+     * Append a turn — typically a user or assistant message envelope.
+     */
     fun push(envelope: XybridEnvelope) {
         val __boltffi_envelope_wire = WireWriterPool.acquire(envelope.wireSize())
         val __boltffi_envelope_writer = __boltffi_envelope_wire.writer
@@ -2339,6 +2572,9 @@ class XybridConversationContext internal constructor(internal val handle: Long) 
         }
     }
 
+    /**
+     * Set the persistent system-prompt envelope (survives [`clear`](Self::clear)).
+     */
     fun setSystem(envelope: XybridEnvelope) {
         val __boltffi_envelope_wire = WireWriterPool.acquire(envelope.wireSize())
         val __boltffi_envelope_writer = __boltffi_envelope_wire.writer
@@ -2350,30 +2586,48 @@ class XybridConversationContext internal constructor(internal val handle: Long) 
         }
     }
 
+    /**
+     * Drop the history; the system envelope (if any) is preserved.
+     */
     fun clear() {
         Native.boltffi_method_class_xybrid_bolt_xybrid_conversation_context_clear(this.boltffiHandle())
     }
 
+    /**
+     * The context id.
+     */
     fun id(): String {
         val __boltffi_result = Native.boltffi_method_class_xybrid_bolt_xybrid_conversation_context_id(this.boltffiHandle()) ?: throw IllegalStateException("null buffer returned")
         val __boltffi_reader = WireReader(__boltffi_result)
         return __boltffi_reader.readString()
     }
 
+    /**
+     * Number of history turns (excludes the system envelope).
+     */
     fun historyLen(): UInt {
         return Native.boltffi_method_class_xybrid_bolt_xybrid_conversation_context_history_len(this.boltffiHandle()).toUInt()
     }
 
+    /**
+     * Return history turns, excluding the persistent system envelope.
+     */
     fun history(): List<XybridEnvelope> {
         val __boltffi_result = Native.boltffi_method_class_xybrid_bolt_xybrid_conversation_context_history(this.boltffiHandle()) ?: throw IllegalStateException("null buffer returned")
         val __boltffi_reader = WireReader(__boltffi_result)
         return __boltffi_reader.readSequence({ __boltffi_reader -> XybridEnvelope.fromReader(__boltffi_reader) })
     }
 
+    /**
+     * Whether a persistent system-prompt envelope is set.
+     */
     fun hasSystem(): Boolean {
         return Native.boltffi_method_class_xybrid_bolt_xybrid_conversation_context_has_system(this.boltffiHandle())
     }
 
+    /**
+     * Set the max history length before FIFO pruning.
+     */
     fun setMaxHistoryLen(len: UInt) {
         Native.boltffi_method_class_xybrid_bolt_xybrid_conversation_context_set_max_history_len(this.boltffiHandle(), len.toInt())
     }
@@ -2393,9 +2647,15 @@ class XybridTelemetryConfig internal constructor(internal val handle: Long) : Au
         return handle
     }
 
+    /**
+     * A new config bound to the default ingest endpoint and the given API key.
+     */
     constructor(apiKey: String) : this(new(apiKey).handle)
 
     companion object {
+        /**
+         * A new config bound to the default ingest endpoint and the given API key.
+         */
         fun new(apiKey: String): XybridTelemetryConfig {
             val __boltffi_apiKey_wire = WireWriterPool.acquire(4 + Utf8Codec.maxBytes(apiKey))
             val __boltffi_apiKey_writer = __boltffi_apiKey_wire.writer
@@ -2408,6 +2668,9 @@ class XybridTelemetryConfig internal constructor(internal val handle: Long) : Au
         }
     }
 
+    /**
+     * Override the ingest endpoint (self-hosted collector / non-prod).
+     */
     fun setEndpoint(endpoint: String) {
         val __boltffi_endpoint_wire = WireWriterPool.acquire(4 + Utf8Codec.maxBytes(endpoint))
         val __boltffi_endpoint_writer = __boltffi_endpoint_wire.writer
@@ -2419,6 +2682,9 @@ class XybridTelemetryConfig internal constructor(internal val handle: Long) : Au
         }
     }
 
+    /**
+     * Set the app version reported with every event.
+     */
     fun setAppVersion(version: String) {
         val __boltffi_version_wire = WireWriterPool.acquire(4 + Utf8Codec.maxBytes(version))
         val __boltffi_version_writer = __boltffi_version_wire.writer
@@ -2430,6 +2696,9 @@ class XybridTelemetryConfig internal constructor(internal val handle: Long) : Au
         }
     }
 
+    /**
+     * Set the human-friendly device label reported with every event.
+     */
     fun setDeviceLabel(label: String) {
         val __boltffi_label_wire = WireWriterPool.acquire(4 + Utf8Codec.maxBytes(label))
         val __boltffi_label_writer = __boltffi_label_wire.writer
@@ -2441,6 +2710,9 @@ class XybridTelemetryConfig internal constructor(internal val handle: Long) : Au
         }
     }
 
+    /**
+     * Attach an app-provided device attribute (stored under `device.custom`).
+     */
     fun setDeviceAttribute(key: String, value: String) {
         val __boltffi_key_wire = WireWriterPool.acquire(4 + Utf8Codec.maxBytes(key))
         val __boltffi_key_writer = __boltffi_key_wire.writer
@@ -2456,14 +2728,33 @@ class XybridTelemetryConfig internal constructor(internal val handle: Long) : Au
         }
     }
 
+    /**
+     * Set the number of events buffered before a flush.
+     */
     fun setBatchSize(batchSize: UInt) {
         Native.boltffi_method_class_xybrid_bolt_xybrid_telemetry_config_set_batch_size(this.boltffiHandle(), batchSize.toInt())
     }
 
+    /**
+     * Set the background flush interval, in seconds.
+     */
     fun setFlushIntervalSecs(secs: UInt) {
         Native.boltffi_method_class_xybrid_bolt_xybrid_telemetry_config_set_flush_interval_secs(this.boltffiHandle(), secs.toInt())
     }
 
+    /**
+     * Start the process-global telemetry exporter from this config.
+     *
+     * Consumes the config: subsequent setters no-op and a second `init` on the
+     * same handle errors. Modeled as a method (not a free `telemetry_init`)
+     * because boltffi 0.25.3 drops free functions that take a handle
+     * parameter, but lowers a handle self-method fine (same reason the
+     * generated `run` lives on `XybridModel`).
+     *
+     * # Errors
+     * Errors if this config was already consumed, or if telemetry is already
+     * initialized without an intervening [`telemetry_shutdown`].
+     */
     fun `init`() {
         try { Native.boltffi_method_class_xybrid_bolt_xybrid_telemetry_config_init(this.boltffiHandle()) } catch (__boltffi_error: BoltFfiErrorBufferException) { run { val __boltffi_error_reader = WireReader(__boltffi_error.bytes); throw XybridError.fromReader(__boltffi_error_reader) } }
     }
@@ -2483,9 +2774,17 @@ class XybridBundle internal constructor(internal val handle: Long) : AutoCloseab
         return handle
     }
 
+    /**
+     * Open and parse a `.xyb` bundle (decompress zstd, parse tar, validate the
+     * manifest).
+     */
     constructor(path: String) : this(`open`(path).handle)
 
     companion object {
+        /**
+         * Open and parse a `.xyb` bundle (decompress zstd, parse tar, validate the
+         * manifest).
+         */
         fun `open`(path: String): XybridBundle {
             val __boltffi_path_wire = WireWriterPool.acquire(4 + Utf8Codec.maxBytes(path))
             val __boltffi_path_writer = __boltffi_path_wire.writer
@@ -2498,56 +2797,86 @@ class XybridBundle internal constructor(internal val handle: Long) : AutoCloseab
         }
     }
 
+    /**
+     * The model identifier from the manifest.
+     */
     fun modelId(): String {
         val __boltffi_result = Native.boltffi_method_class_xybrid_bolt_xybrid_bundle_model_id(this.boltffiHandle()) ?: throw IllegalStateException("null buffer returned")
         val __boltffi_reader = WireReader(__boltffi_result)
         return __boltffi_reader.readString()
     }
 
+    /**
+     * The version string from the manifest.
+     */
     fun version(): String {
         val __boltffi_result = Native.boltffi_method_class_xybrid_bolt_xybrid_bundle_version(this.boltffiHandle()) ?: throw IllegalStateException("null buffer returned")
         val __boltffi_reader = WireReader(__boltffi_result)
         return __boltffi_reader.readString()
     }
 
+    /**
+     * The target platform from the manifest.
+     */
     fun target(): String {
         val __boltffi_result = Native.boltffi_method_class_xybrid_bolt_xybrid_bundle_target(this.boltffiHandle()) ?: throw IllegalStateException("null buffer returned")
         val __boltffi_reader = WireReader(__boltffi_result)
         return __boltffi_reader.readString()
     }
 
+    /**
+     * The SHA-256 hash from the manifest.
+     */
     fun hash(): String {
         val __boltffi_result = Native.boltffi_method_class_xybrid_bolt_xybrid_bundle_hash(this.boltffiHandle()) ?: throw IllegalStateException("null buffer returned")
         val __boltffi_reader = WireReader(__boltffi_result)
         return __boltffi_reader.readString()
     }
 
+    /**
+     * Whether the bundle carries a `model_metadata.json`.
+     */
     fun hasMetadata(): Boolean {
         return Native.boltffi_method_class_xybrid_bolt_xybrid_bundle_has_metadata(this.boltffiHandle())
     }
 
+    /**
+     * Number of files in the bundle (excludes `manifest.json`).
+     */
     fun fileCount(): UInt {
         return Native.boltffi_method_class_xybrid_bolt_xybrid_bundle_file_count(this.boltffiHandle()).toUInt()
     }
 
+    /**
+     * The file name at `index`, or `None` if out of bounds.
+     */
     fun fileName(index: UInt): String? {
         val __boltffi_result = Native.boltffi_method_class_xybrid_bolt_xybrid_bundle_file_name(this.boltffiHandle(), index.toInt()) ?: throw IllegalStateException("null buffer returned")
         val __boltffi_reader = WireReader(__boltffi_result)
         return __boltffi_reader.readOptionalValue({ __boltffi_reader -> __boltffi_reader.readString() })
     }
 
+    /**
+     * The full bundle manifest serialized as JSON.
+     */
     fun manifestJson(): String {
         val __boltffi_result = try { Native.boltffi_method_class_xybrid_bolt_xybrid_bundle_manifest_json(this.boltffiHandle()) } catch (__boltffi_error: BoltFfiErrorBufferException) { run { val __boltffi_error_reader = WireReader(__boltffi_error.bytes); throw XybridError.fromReader(__boltffi_error_reader) } } ?: throw IllegalStateException("null buffer returned")
         val __boltffi_reader = WireReader(__boltffi_result)
         return __boltffi_reader.readString()
     }
 
+    /**
+     * The `model_metadata.json` contents, or `None` if the bundle has none.
+     */
     fun metadataJson(): String? {
         val __boltffi_result = try { Native.boltffi_method_class_xybrid_bolt_xybrid_bundle_metadata_json(this.boltffiHandle()) } catch (__boltffi_error: BoltFfiErrorBufferException) { run { val __boltffi_error_reader = WireReader(__boltffi_error.bytes); throw XybridError.fromReader(__boltffi_error_reader) } } ?: throw IllegalStateException("null buffer returned")
         val __boltffi_reader = WireReader(__boltffi_result)
         return __boltffi_reader.readOptionalValue({ __boltffi_reader -> __boltffi_reader.readString() })
     }
 
+    /**
+     * Extract every bundle file to `output_dir` (created if absent).
+     */
     fun extract(outputDir: String) {
         val __boltffi_outputDir_wire = WireWriterPool.acquire(4 + Utf8Codec.maxBytes(outputDir))
         val __boltffi_outputDir_writer = __boltffi_outputDir_wire.writer
@@ -2560,6 +2889,19 @@ class XybridBundle internal constructor(internal val handle: Long) : AutoCloseab
     }
 }
 
+/**
+ * Build the continuation envelope for the turn after the model asked for
+ * tools.
+ *
+ * One `run` is one model turn, so the loop lives in your code: run a
+ * tools-bearing request, execute every [`XybridToolCall`] it returns, then
+ * run this envelope to feed the outcomes back. Pass the same tools on the
+ * continuation's [`XybridGenerationConfig`] as on the original turn.
+ *
+ * A free function rather than a constructor because `XybridEnvelope` is a
+ * `#[data]` record, not a handle type — records carry no methods across the
+ * generated bindings.
+ */
 fun toolResultsEnvelope(userText: String, priorAssistantText: String, results: List<XybridToolResult>): XybridEnvelope {
     val __boltffi_userText_wire = WireWriterPool.acquire(4 + Utf8Codec.maxBytes(userText))
     val __boltffi_userText_writer = __boltffi_userText_wire.writer
@@ -2581,6 +2923,11 @@ fun toolResultsEnvelope(userText: String, priorAssistantText: String, results: L
     }
 }
 
+/**
+ * Convert a JSON Schema (as a JSON string) into a GBNF grammar for
+ * [`XybridGenerationConfig::grammar`]. Fails on invalid JSON or schema
+ * constructs outside the supported subset.
+ */
 fun jsonSchemaToGbnf(schemaJson: String): String {
     val __boltffi_schemaJson_wire = WireWriterPool.acquire(4 + Utf8Codec.maxBytes(schemaJson))
     val __boltffi_schemaJson_writer = __boltffi_schemaJson_wire.writer
@@ -2610,6 +2957,13 @@ fun clearBatteryLevel() {
     Native.boltffi_function_xybrid_bolt_clear_battery_level()
 }
 
+/**
+ * One-stop SDK initialization: API key + gateway/ingest URL overrides in
+ * one call. Delegates to [`facade::configure_runtime`]; blank strings are
+ * treated as absent. This is the canonical init the Swift
+ * `Xybrid.initialize(apiKey:gatewayUrl:ingestUrl:)` and Kotlin
+ * `Xybrid.init(context, apiKey, gatewayUrl, ingestUrl)` wrappers call.
+ */
 fun configureRuntime(apiKey: String?, gatewayUrl: String?, ingestUrl: String?) {
     val __boltffi_apiKey_wire = WireWriterPool.acquire(1 + (apiKey?.let { __boltffi_value_0 -> 4 + Utf8Codec.maxBytes(__boltffi_value_0) } ?: 0))
     val __boltffi_apiKey_writer = __boltffi_apiKey_wire.writer
@@ -2677,6 +3031,10 @@ fun setProviderApiKey(provider: String, apiKey: String) {
     }
 }
 
+/**
+ * Point the cloud gateway at a platform base URL (staging, self-hosted).
+ * Pass a bare base URL — the `/v1` suffix is applied internally.
+ */
 fun setPlatformUrl(url: String) {
     val __boltffi_url_wire = WireWriterPool.acquire(4 + Utf8Codec.maxBytes(url))
     val __boltffi_url_writer = __boltffi_url_wire.writer
@@ -2688,18 +3046,38 @@ fun setPlatformUrl(url: String) {
     }
 }
 
+/**
+ * Enable speculative cloud fallback globally: a registry model that isn't
+ * downloaded yet is served from the gateway while the weights download.
+ *
+ * LLM/chat only — prefer `XybridModel.fromRegistrySpeculative` when the app
+ * also loads ASR/TTS models, which cannot be served this way.
+ */
 fun setSpeculativeCloud(enabled: Boolean) {
     Native.boltffi_function_xybrid_bolt_set_speculative_cloud(enabled)
 }
 
+/**
+ * Whether a Xybrid gateway API key is resolvable (in-memory or env).
+ */
 fun hasApiKey(): Boolean {
     return Native.boltffi_function_xybrid_bolt_has_api_key()
 }
 
+/**
+ * Whether the global speculative-cloud default is on.
+ */
 fun isSpeculativeCloudEnabled(): Boolean {
     return Native.boltffi_function_xybrid_bolt_is_speculative_cloud_enabled()
 }
 
+/**
+ * Whether `XybridModel::from_registry_speculative(model_id)` would actually
+ * speculate: an API key resolves and the model is not already cached.
+ *
+ * Lets the hand-written Swift/Kotlin loader facades answer "will this
+ * speculate?" before loading. Never touches the network.
+ */
 fun willSpeculateForModel(modelId: String): Boolean {
     val __boltffi_modelId_wire = WireWriterPool.acquire(4 + Utf8Codec.maxBytes(modelId))
     val __boltffi_modelId_writer = __boltffi_modelId_wire.writer
@@ -2711,34 +3089,64 @@ fun willSpeculateForModel(modelId: String): Boolean {
     }
 }
 
+/**
+ * The SDK version string (tracks `CARGO_PKG_VERSION`).
+ */
 fun version(): String {
     val __boltffi_result = Native.boltffi_function_xybrid_bolt_version() ?: throw IllegalStateException("null buffer returned")
     val __boltffi_reader = WireReader(__boltffi_result)
     return __boltffi_reader.readString()
 }
 
+/**
+ * Release every idle loaded model's memory; returns how many were released.
+ *
+ * Call this from the platform's low-memory hook (`didReceiveMemoryWarning`
+ * on iOS, `onTrimMemory` on Android). Models with a run in flight are
+ * skipped, and a released model reloads itself on next use — no reload call,
+ * no new error to handle.
+ */
 fun releaseMemory(): UInt {
     return Native.boltffi_function_xybrid_bolt_release_memory().toUInt()
 }
 
+/**
+ * Enable or disable automatic model release for subsequent loads.
+ *
+ * When enabled, loading a model under device memory pressure first releases
+ * least-recently-used idle models. Off by default; [`release_memory`] works
+ * either way.
+ */
 fun setAutoRelease(enabled: Boolean) {
     Native.boltffi_function_xybrid_bolt_set_auto_release(enabled)
 }
 
+/**
+ * Whether automatic model release is enabled process-wide.
+ */
 fun isAutoReleaseEnabled(): Boolean {
     return Native.boltffi_function_xybrid_bolt_is_auto_release_enabled()
 }
 
+/**
+ * The SDK's default telemetry ingest endpoint (for display alongside a config).
+ */
 fun telemetryDefaultEndpoint(): String {
     val __boltffi_result = Native.boltffi_function_xybrid_bolt_telemetry_default_endpoint() ?: throw IllegalStateException("null buffer returned")
     val __boltffi_reader = WireReader(__boltffi_result)
     return __boltffi_reader.readString()
 }
 
+/**
+ * Flush pending telemetry events. Safe before init / after shutdown.
+ */
 fun telemetryFlush() {
     Native.boltffi_function_xybrid_bolt_telemetry_flush()
 }
 
+/**
+ * Shut down the telemetry exporter. Idempotent.
+ */
 fun telemetryShutdown() {
     Native.boltffi_function_xybrid_bolt_telemetry_shutdown()
 }

@@ -12,7 +12,7 @@ set -euo pipefail
 repo_root="$(git -C "$(cd "$(dirname "$0")" && pwd)" rev-parse --show-toplevel)"
 bolt_dir="$repo_root/crates/xybrid-bolt"
 
-(cd "$bolt_dir" && boltffi generate swift -q)
+(cd "$bolt_dir" && boltffi generate swift --deny-skipped -q)
 
 swift_src="$bolt_dir/dist/apple/Sources/XybridBoltBoltFFI.swift"
 header_src="$bolt_dir/dist/apple/Sources/boltffi.h"

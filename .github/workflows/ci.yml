@@ -97,7 +97,7 @@ jobs:
           toolchain: stable
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - name: Install the pinned boltffi CLI
-        run: cargo install boltffi_cli --version 0.29.3 --locked
+        run: cargo install boltffi_cli --version 0.30.1 --locked
       - name: Compare committed Kotlin and JNI with fresh generation
         run: python3 tools/scripts/gen_kotlin_bolt.py --check
 
@@ -167,7 +167,7 @@ jobs:
           # Floor of the SDK: boltffi's generated package needs >= 3.10.
           python-version: '3.12'
       - name: Install the pinned boltffi CLI
-        run: cargo install boltffi_cli --version 0.29.3 --locked
+        run: cargo install boltffi_cli --version 0.30.1 --locked
       - name: Check the committed bindings match the crate
         run: python3 tools/scripts/gen_python_bolt.py --check
       - name: Build and stage the native artifacts

@@ -705,6 +705,39 @@ namespace XybridBolt
         }
 
         /// <summary>
+        /// Release every idle loaded model's memory; returns how many were released.
+        ///
+        /// Call this from the platform's low-memory hook (`didReceiveMemoryWarning`
+        /// on iOS, `onTrimMemory` on Android). Models with a run in flight are
+        /// skipped, and a released model reloads itself on next use — no reload call,
+        /// no new error to handle.
+        /// </summary>
+        public static uint ReleaseMemory()
+            => NativeMethods.NativeReleaseMemory();
+
+        /// <summary>
+        /// Enable or disable automatic model release for subsequent loads.
+        ///
+        /// When enabled, loading a model under device memory pressure first releases
+        /// least-recently-used idle models. Off by default; [`release_memory`] works
+        /// either way.
+        /// </summary>
+        public static void SetAutoRelease(bool enabled)
+        {
+            FfiStatus status = NativeMethods.NativeSetAutoRelease(enabled);
+            if (status.code != 0)
+            {
+                throw new global::System.InvalidOperationException($"BoltFFI call failed with status code {status.code}");
+            }
+        }
+
+        /// <summary>
+        /// Whether automatic model release is enabled process-wide.
+        /// </summary>
+        public static bool IsAutoReleaseEnabled()
+            => NativeMethods.NativeIsAutoReleaseEnabled();
+
+        /// <summary>
         /// The SDK's default telemetry ingest endpoint (for display alongside a config).
         /// </summary>
         public static string TelemetryDefaultEndpoint()
@@ -964,6 +997,10 @@ namespace XybridBolt
         [DllImport(LibName, EntryPoint = "boltffi_function_xybrid_bolt_init_sdk_cache_dir")]
         internal static extern FfiStatus NativeInitSdkCacheDir([In] byte[] cacheDirBytes, nuint cacheDirLength);
 
+        [DllImport(LibName, EntryPoint = "boltffi_function_xybrid_bolt_is_auto_release_enabled")]
+        [return: MarshalAs(UnmanagedType.I1)]
+        internal static extern bool NativeIsAutoReleaseEnabled();
+
         [DllImport(LibName, EntryPoint = "boltffi_function_xybrid_bolt_is_speculative_cloud_enabled")]
         [return: MarshalAs(UnmanagedType.I1)]
         internal static extern bool NativeIsSpeculativeCloudEnabled();
@@ -971,8 +1008,14 @@ namespace XybridBolt
         [DllImport(LibName, EntryPoint = "boltffi_function_xybrid_bolt_json_schema_to_gbnf")]
         internal static extern FfiBuf NativeJsonSchemaToGbnf([In] byte[] schemaJsonBytes, nuint schemaJsonLength, out FfiBuf boltffiResultBuffer);
 
+        [DllImport(LibName, EntryPoint = "boltffi_function_xybrid_bolt_release_memory")]
+        internal static extern uint NativeReleaseMemory();
+
         [DllImport(LibName, EntryPoint = "boltffi_function_xybrid_bolt_set_api_key")]
         internal static extern FfiStatus NativeSetApiKey([In] byte[] apiKeyBytes, nuint apiKeyLength);
+
+        [DllImport(LibName, EntryPoint = "boltffi_function_xybrid_bolt_set_auto_release")]
+        internal static extern FfiStatus NativeSetAutoRelease([MarshalAs(UnmanagedType.I1)] bool enabled);
 
         [DllImport(LibName, EntryPoint = "boltffi_function_xybrid_bolt_set_battery_level")]
         internal static extern FfiStatus NativeSetBatteryLevel(byte percent);
