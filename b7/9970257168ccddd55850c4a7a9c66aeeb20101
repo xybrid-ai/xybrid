@@ -1,0 +1,19 @@
+CHANGELOG.md
+  s_b97a666a5fd123::t_6990aeca762dfb 16,25-26,61-66,137-146,183-189
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "b79970257168ccddd55850c4a7a9c66aeeb20101",
+  "prompts": {},
+  "sessions": {
+    "s_b97a666a5fd123": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9a89b8cd-3329-45c6-ba22-d2949bcc40e5",
+        "model": "claude-opus-5"
+      },
+      "human_author": "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
+    }
+  }
+}
