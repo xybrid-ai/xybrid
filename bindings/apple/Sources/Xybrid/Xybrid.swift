@@ -26,6 +26,10 @@ import UIKit
 private let boltReleaseMemory = releaseMemory
 private let boltSetAutoRelease = setAutoRelease
 private let boltIsAutoReleaseEnabled = isAutoReleaseEnabled
+private let boltSetSpeculativeCloud = setSpeculativeCloud
+private let boltIsSpeculativeCloudEnabled = isSpeculativeCloudEnabled
+private let boltHasApiKey = hasApiKey
+private let boltSetProviderApiKey = setProviderApiKey
 
 /// Main entry point for the Xybrid SDK on iOS/macOS.
 ///
@@ -147,6 +151,39 @@ public enum Xybrid {
     /// Whether automatic model release is enabled process-wide.
     public static var isAutoReleaseEnabled: Bool {
         boltIsAutoReleaseEnabled()
+    }
+
+    /// Enables or disables speculative cloud serving for subsequent loads.
+    ///
+    /// When enabled, `ModelLoader.fromRegistrySpeculative(_:)` answers from the
+    /// cloud gateway while the model's weights download in the background,
+    /// instead of blocking on the download. Off by default, and it only takes
+    /// effect when an API key resolves — use
+    /// ``ModelLoader/willSpeculate`` to check a specific model up front.
+    public static func setSpeculativeCloud(_ enabled: Bool) {
+        boltSetSpeculativeCloud(enabled)
+    }
+
+    /// Whether the global speculative-cloud default is on.
+    public static var isSpeculativeCloudEnabled: Bool {
+        boltIsSpeculativeCloudEnabled()
+    }
+
+    /// Whether a Xybrid gateway API key is resolvable, from either
+    /// `initialize(apiKey:)` or the environment.
+    ///
+    /// Inference runs on-device without one; this reports whether the optional
+    /// platform features (cloud routing, telemetry) can engage.
+    public static var hasApiKey: Bool {
+        boltHasApiKey()
+    }
+
+    /// Sets the API key for a specific cloud provider.
+    ///
+    /// Separate from `initialize(apiKey:)`, which sets the Xybrid platform key.
+    /// Use this when routing to a provider the gateway forwards to.
+    public static func setProviderApiKey(provider: String, apiKey: String) {
+        boltSetProviderApiKey(provider, apiKey)
     }
 
     private static func registerPlatformObservers() {

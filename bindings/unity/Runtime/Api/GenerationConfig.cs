@@ -35,6 +35,7 @@ namespace Xybrid
         private float? _minP;
         private uint? _topK;
         private float? _repetitionPenalty;
+        private string _grammar;
         private readonly List<string> _stopSequences = new List<string>();
         private readonly List<XybridBolt.XybridToolDefinition> _tools =
             new List<XybridBolt.XybridToolDefinition>();
@@ -140,6 +141,21 @@ namespace Xybrid
         }
 
         /// <summary>
+        /// Constrain decoding to a GBNF grammar.
+        /// </summary>
+        /// <remarks>
+        /// Build one from a JSON Schema with
+        /// <see cref="XybridClient.JsonSchemaToGbnf"/>, or pass raw GBNF.
+        /// llama.cpp-only &#x2014; other backends ignore it.
+        /// </remarks>
+        /// <param name="grammar">The GBNF grammar, or null to clear it.</param>
+        public void SetGrammar(string grammar)
+        {
+            ThrowIfDisposed();
+            _grammar = grammar;
+        }
+
+        /// <summary>
         /// Add a stop sequence. Can be called multiple times.
         /// </summary>
         /// <param name="stop">The stop sequence string.</param>
@@ -184,8 +200,7 @@ namespace Xybrid
 
         /// <summary>
         /// Snapshot the current values as the bolt wire type consumed by
-        /// <see cref="Model"/>. Grammar-constrained decoding is not exposed by
-        /// the Unity API, so it is always null.
+        /// <see cref="Model"/>.
         /// </summary>
         internal XybridBolt.XybridGenerationConfig ToBolt()
         {
@@ -198,7 +213,7 @@ namespace Xybrid
                 _topK,
                 _repetitionPenalty,
                 _stopSequences.ToArray(),
-                null,
+                _grammar,
                 _tools.ToArray());
         }
 

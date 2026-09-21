@@ -64,6 +64,73 @@ namespace Xybrid
         public static bool IsAutoReleaseEnabled => XybridBolt.XybridBolt.IsAutoReleaseEnabled();
 
         /// <summary>
+        /// Enables or disables speculative cloud serving for subsequent loads.
+        /// </summary>
+        /// <remarks>
+        /// When enabled, <see cref="ModelLoader.FromRegistrySpeculative"/> answers
+        /// from the cloud gateway while the model's weights download in the
+        /// background, instead of blocking on the download. Off by default, and it
+        /// only takes effect when an API key resolves &#x2014;
+        /// <see cref="ModelLoader.WillSpeculate"/> reports that for a specific
+        /// model up front.
+        /// </remarks>
+        public static void SetSpeculativeCloud(bool enabled) =>
+            XybridBolt.XybridBolt.SetSpeculativeCloud(enabled);
+
+        /// <summary>
+        /// Gets whether the global speculative-cloud default is on.
+        /// </summary>
+        public static bool IsSpeculativeCloudEnabled =>
+            XybridBolt.XybridBolt.IsSpeculativeCloudEnabled();
+
+        /// <summary>
+        /// Gets whether a Xybrid gateway API key is resolvable, from either
+        /// <see cref="Initialize"/> or the environment.
+        /// </summary>
+        /// <remarks>
+        /// Inference runs on-device without one; this reports whether the optional
+        /// platform features (cloud routing, telemetry) can engage.
+        /// </remarks>
+        public static bool HasApiKey => XybridBolt.XybridBolt.HasApiKey();
+
+        /// <summary>
+        /// Sets the API key for a specific cloud provider.
+        /// </summary>
+        /// <remarks>
+        /// Separate from <see cref="Initialize"/>'s <c>apiKey</c>, which sets the
+        /// Xybrid platform key. Use this when routing to a provider the gateway
+        /// forwards to.
+        /// </remarks>
+        public static void SetProviderApiKey(string provider, string apiKey) =>
+            XybridBolt.XybridBolt.SetProviderApiKey(provider, apiKey);
+
+        /// <summary>
+        /// Converts a JSON Schema into a GBNF grammar for
+        /// <see cref="GenerationConfig.SetGrammar"/>.
+        /// </summary>
+        /// <remarks>
+        /// C# has no top-level functions, so this lives here rather than being a
+        /// free function the way Swift, Kotlin and Dart expose it.
+        /// Grammar is llama.cpp-only &#x2014; other backends ignore it.
+        /// </remarks>
+        /// <param name="schemaJson">The JSON Schema, as a JSON string.</param>
+        /// <exception cref="XybridException">
+        /// Thrown on invalid JSON, or schema constructs outside the supported subset.
+        /// </exception>
+        public static string JsonSchemaToGbnf(string schemaJson)
+        {
+            try
+            {
+                return XybridBolt.XybridBolt.JsonSchemaToGbnf(schemaJson);
+            }
+            catch (Exception ex) when (
+                ex is XybridBolt.XybridErrorException || ex is XybridBolt.BoltException)
+            {
+                throw BoltErrors.Translate(ex);
+            }
+        }
+
+        /// <summary>
         /// Initializes the Xybrid SDK.
         /// </summary>
         /// <param name="apiKey">

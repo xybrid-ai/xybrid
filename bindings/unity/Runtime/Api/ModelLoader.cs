@@ -22,6 +22,7 @@ namespace Xybrid
             Directory,
             HuggingFace,
             ModelFile,
+            RegistrySpeculative,
         }
 
         private readonly Source _source;
@@ -112,6 +113,40 @@ namespace Xybrid
         }
 
         /// <summary>
+        /// Creates a loader that serves from the cloud gateway while the model's
+        /// weights download in the background, instead of blocking on the download.
+        /// </summary>
+        /// <remarks>
+        /// Requires <see cref="XybridClient.SetSpeculativeCloud"/> to be enabled and
+        /// an API key to resolve; otherwise this behaves exactly like
+        /// <see cref="FromRegistry"/>. <see cref="WillSpeculate"/> reports which of
+        /// the two you will get, without performing any network or disk work.
+        /// LLM/chat models only.
+        /// </remarks>
+        /// <param name="modelId">The model ID.</param>
+        /// <exception cref="ArgumentNullException">Thrown if modelId is null.</exception>
+        public static ModelLoader FromRegistrySpeculative(string modelId)
+        {
+            if (modelId == null)
+            {
+                throw new ArgumentNullException(nameof(modelId));
+            }
+            return new ModelLoader(Source.RegistrySpeculative, modelId);
+        }
+
+        /// <summary>
+        /// Gets whether <see cref="Load"/> will actually speculate: the global
+        /// toggle is on, an API key resolves, and the model is not already cached.
+        /// </summary>
+        /// <remarks>
+        /// Always false for every source but
+        /// <see cref="FromRegistrySpeculative"/>. Performs no network or disk work.
+        /// </remarks>
+        public bool WillSpeculate =>
+            _source == Source.RegistrySpeculative &&
+            XybridBolt.XybridBolt.WillSpeculateForModel(_value);
+
+        /// <summary>
         /// Loads the model and prepares it for inference.
         /// </summary>
         /// <returns>A loaded <see cref="Model"/> ready for inference.</returns>
@@ -141,6 +176,9 @@ namespace Xybrid
                         break;
                     case Source.ModelFile:
                         bolt = XybridBolt.XybridModel.FromModelFile(_value);
+                        break;
+                    case Source.RegistrySpeculative:
+                        bolt = XybridBolt.XybridModel.FromRegistrySpeculative(_value);
                         break;
                     default:
                         throw new InvalidOperationException("Unknown model source.");
