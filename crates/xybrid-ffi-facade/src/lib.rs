@@ -1027,6 +1027,16 @@ impl RunOptions {
             policy = policy.stop_on(sig.to_sdk());
         }
 
+        // Supplying a handle IS the opt-in. `AbortState::detect_user_cancelled`
+        // only honours a cancelled token when the policy observes
+        // `UserCancelled`, and the FFI `AbortSignal` wire enum deliberately
+        // omits that variant — it is not a device-pressure signal a host polls,
+        // it is implied by handing over a stop button. Without this the token
+        // latches `is_cancelled()` and inference ignores it.
+        if cancel.is_some() {
+            policy = policy.stop_on(sdk::AbortSignal::UserCancelled);
+        }
+
         let mut opts = sdk::RunOptions::new().with_abort_policy(policy);
         if let Some(gc) = &self.generation_config {
             opts = opts.with_generation_config(gc.apply_over(generation_base)?);
@@ -2347,6 +2357,39 @@ impl BundleHandle {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn bare_run_options() -> RunOptions {
+        RunOptions {
+            generation_config: None,
+            abort_on: Vec::new(),
+            fallback_to_cloud: false,
+            max_grace_tokens: 0,
+            correlation_id: None,
+        }
+    }
+
+    #[test]
+    fn a_cancel_handle_opts_the_policy_into_user_cancelled() {
+        // Without this the token latches `is_cancelled()` and inference
+        // ignores it: `AbortState::detect_user_cancelled` only fires when the
+        // policy observes `UserCancelled`, and the FFI `AbortSignal` wire enum
+        // has no such variant for hosts to set.
+        let token = CancellationToken::new();
+        let opts = bare_run_options()
+            .to_sdk_over(Some(&token), sdk::GenerationConfig::default())
+            .expect("options convert");
+
+        assert!(opts.abort_policy.observes(sdk::AbortSignal::UserCancelled));
+    }
+
+    #[test]
+    fn no_cancel_handle_leaves_user_cancelled_unobserved() {
+        let opts = bare_run_options()
+            .to_sdk_over(None, sdk::GenerationConfig::default())
+            .expect("options convert");
+
+        assert!(!opts.abort_policy.observes(sdk::AbortSignal::UserCancelled));
+    }
 
     #[test]
     fn error_code_is_stable() {

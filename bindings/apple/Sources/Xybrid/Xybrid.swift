@@ -600,12 +600,27 @@ public extension XybridModel {
     }
 
     /// Context-aware run that cannot be cancelled. See `run(envelope:options:)`.
-    func run(
+    func runWithContext(
         envelope: XybridEnvelope,
         context: XybridConversationContext,
         options: XybridRunOptions?
     ) throws -> XybridResult {
         try runWithContext(
+            envelope: envelope,
+            context: context,
+            options: options,
+            cancel: XybridCancellationToken()
+        )
+    }
+
+    /// Start a context-aware pull stream that cannot be cancelled.
+    /// See `run(envelope:options:)`.
+    func runStreamWithContext(
+        envelope: XybridEnvelope,
+        context: XybridConversationContext,
+        options: XybridRunOptions?
+    ) throws -> UInt64 {
+        try runStreamWithContext(
             envelope: envelope,
             context: context,
             options: options,
@@ -659,9 +674,15 @@ public extension XybridModel {
     /// Run inference without blocking the calling thread or actor.
     ///
     /// Honours Swift's structured concurrency: cancelling the surrounding
-    /// `Task` stops generation at the next token boundary. The run then
-    /// returns or throws whatever the backend reports for a cancelled run —
-    /// it does not surface `CancellationError`.
+    /// `Task` signals the native stop button. The run then returns or throws
+    /// whatever the backend reports for a cancelled run — it does not surface
+    /// `CancellationError`.
+    ///
+    /// Cancellation is checked at token boundaries **while streaming**. A batch
+    /// run is only cancellable before generation starts: once the backend is
+    /// producing, `run_with_options` has no token-aware path to stop it, so the
+    /// call finishes normally. Use the streaming surface when a mid-flight stop
+    /// button matters.
     func runAsync(
         envelope: XybridEnvelope,
         options: XybridRunOptions? = nil

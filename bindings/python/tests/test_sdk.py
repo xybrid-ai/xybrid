@@ -234,6 +234,49 @@ def test_run_methods_default_their_options(name: str) -> None:
     assert parameter.default is None
 
 
+@pytest.mark.parametrize(
+    ("name", "args"),
+    [
+        ("run", ("envelope",)),
+        ("run_stream", ("envelope",)),
+        ("run_with_context", ("envelope", "context")),
+        ("run_stream_with_context", ("envelope", "context")),
+    ],
+)
+def test_run_methods_forward_every_required_generated_argument(
+    name: str, args: tuple[str, ...]
+) -> None:
+    """The sugar must supply every argument the generated method requires.
+
+    The generated run methods gained a required `cancel` handle -- BoltFFI
+    cannot express an optional handle parameter -- and the sugar kept
+    forwarding the old argument list, so every public call raised TypeError
+    before reaching native code. Nothing caught it: the rest of this suite
+    exercises factories and codecs, never a call through to the wire.
+
+    Calling with an unbacked model reaches the native layer and fails on the
+    missing handle. An arity mismatch would fail earlier, with TypeError.
+    """
+
+    model = xybrid.XybridModel.__new__(xybrid.XybridModel)
+    supplied = {
+        "envelope": xybrid.XybridEnvelope.text("hi"),
+        "context": xybrid.XybridConversationContext(),
+    }
+
+    with pytest.raises(AttributeError, match="_handle"):
+        getattr(model, name)(*(supplied[arg] for arg in args))
+
+
+def test_run_methods_accept_an_explicit_cancellation_token() -> None:
+    """`cancel` is keyword-only, so the positional shape is unchanged."""
+
+    parameter = inspect.signature(xybrid.XybridModel.run).parameters["cancel"]
+
+    assert parameter.kind is inspect.Parameter.KEYWORD_ONLY
+    assert parameter.default is None
+
+
 def test_model_supports_explicit_release() -> None:
     assert callable(xybrid.XybridModel.close)
     assert hasattr(xybrid.XybridModel, "__enter__")

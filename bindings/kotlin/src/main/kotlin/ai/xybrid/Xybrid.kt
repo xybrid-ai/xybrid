@@ -20,7 +20,9 @@ import android.os.Build
 import android.os.PowerManager
 import java.io.File
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
@@ -411,12 +413,26 @@ fun XybridModel.run(
 ): XybridResult = XybridCancellationToken().use { this.run(envelope, options, it) }
 
 /** Context-aware run that cannot be cancelled. See [run]. */
-fun XybridModel.run(
+fun XybridModel.runWithContext(
     envelope: XybridEnvelope,
     context: XybridConversationContext,
     options: XybridRunOptions?,
 ): XybridResult = XybridCancellationToken().use {
     this.runWithContext(envelope, context, options, it)
+}
+
+/**
+ * Start a context-aware pull stream that cannot be cancelled. See [run].
+ *
+ * Prefer [streamTokens], which wires collector cancellation to the native stop
+ * button.
+ */
+fun XybridModel.runStreamWithContext(
+    envelope: XybridEnvelope,
+    context: XybridConversationContext,
+    options: XybridRunOptions?,
+): ULong = XybridCancellationToken().use {
+    this.runStreamWithContext(envelope, context, options, it)
 }
 
 /**
@@ -479,22 +495,33 @@ suspend fun XybridModel.Companion.fromHuggingfaceAsync(repo: String): XybridMode
 /**
  * Run inference off the caller's thread (on [Dispatchers.IO]).
  *
- * Cancelling the calling coroutine stops generation at the next token
- * boundary. `withContext` alone cannot do that — the run is a blocking native
- * call, so cancellation has to be forwarded to the native stop button, which
- * is what the completion handler below does.
+ * Cancelling the calling coroutine signals the native stop button. `withContext`
+ * alone cannot do that — the run is a blocking native call, so cancellation has
+ * to be forwarded, which is what the `await()` catch below does.
+ *
+ * Cancellation is checked at token boundaries **while streaming**. A batch run
+ * is only cancellable before generation starts: once the backend is producing,
+ * there is no token-aware batch path to stop it, so the call finishes normally.
+ * Use [streamTokens] when a mid-flight stop button matters.
  */
 suspend fun XybridModel.runAsync(
     envelope: XybridEnvelope,
     options: XybridRunOptions? = null,
-): XybridResult = XybridCancellationToken().use { cancel ->
-    val handle = currentCoroutineContext()[Job]?.invokeOnCompletion { cause ->
-        if (cause != null) cancel.cancel()
-    }
+): XybridResult = coroutineScope {
+    val cancel = XybridCancellationToken()
+    val work = async(Dispatchers.IO) { this@runAsync.run(envelope, options, cancel) }
+    // Release the handle only once the blocking call has actually returned;
+    // closing it while the worker still holds it would free it mid-run.
+    work.invokeOnCompletion { cancel.close() }
     try {
-        withContext(Dispatchers.IO) { this@runAsync.run(envelope, options, cancel) }
-    } finally {
-        handle?.dispose()
+        work.await()
+    } catch (e: CancellationException) {
+        // `await()` is cancellable, so this runs the moment the caller
+        // cancels. A Job completion handler would not: the job cannot
+        // complete until the non-cooperative native call returns, by which
+        // point there is nothing left to stop.
+        cancel.cancel()
+        throw e
     }
 }
 
@@ -524,11 +551,6 @@ fun XybridModel.streamTokens(
     options: XybridRunOptions? = null,
 ): Flow<XybridStreamToken> = flow {
     XybridCancellationToken().use { cancel ->
-        // Forwards collector cancellation to the native run, so generation
-        // stops at the next token instead of running on until streamClose.
-        val completion = currentCoroutineContext()[Job]?.invokeOnCompletion { cause ->
-            if (cause != null) cancel.cancel()
-        }
         val streamId = runStream(envelope, options, cancel)
         try {
             while (true) {
@@ -542,7 +564,11 @@ fun XybridModel.streamTokens(
                 }
             }
         } finally {
-            completion?.dispose()
+            // Reached promptly: `ensureActive()` throws at the next token
+            // boundary when the collector is cancelled. Signalling before
+            // `streamClose` stops generation rather than only tearing down
+            // the session.
+            cancel.cancel()
             // Idempotent (the session may already be gone after an error), and
             // aborts an in-flight run when collection stops early.
             streamClose(streamId)

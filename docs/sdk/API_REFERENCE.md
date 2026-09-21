@@ -1341,6 +1341,13 @@ cancellation primitive to it.
 | Kotlin | cancelling the coroutine around `runAsync` / `streamTokens`, or passing a token to the generated `run` |
 | C# (Unity) | passing a `System.Threading.CancellationToken` to `Run` / `RunStreaming` |
 
+> **Streaming stops mid-flight; batch does not.** Token checks happen at token
+> boundaries, which only the streaming path has. A batch run honours a token
+> that is already cancelled when it starts (`check_before_run`), but once the
+> backend is generating, `run_with_options` has no token-aware path to stop it
+> and the call finishes normally. Reach for the streaming surface when a
+> mid-flight stop button matters.
+
 ```swift
 // Swift — structured concurrency drives the native stop button
 let task = Task { try await model.runAsync(envelope: .text("Tell me a long story")) }
