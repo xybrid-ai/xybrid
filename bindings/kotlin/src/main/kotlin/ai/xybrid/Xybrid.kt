@@ -507,21 +507,31 @@ suspend fun XybridModel.Companion.fromHuggingfaceAsync(repo: String): XybridMode
 suspend fun XybridModel.runAsync(
     envelope: XybridEnvelope,
     options: XybridRunOptions? = null,
-): XybridResult = coroutineScope {
+): XybridResult {
     val cancel = XybridCancellationToken()
-    val work = async(Dispatchers.IO) { this@runAsync.run(envelope, options, cancel) }
-    // Release the handle only once the blocking call has actually returned;
-    // closing it while the worker still holds it would free it mid-run.
-    work.invokeOnCompletion { cancel.close() }
     try {
-        work.await()
-    } catch (e: CancellationException) {
-        // `await()` is cancellable, so this runs the moment the caller
-        // cancels. A Job completion handler would not: the job cannot
-        // complete until the non-cooperative native call returns, by which
-        // point there is nothing left to stop.
-        cancel.cancel()
-        throw e
+        return coroutineScope {
+            val work = async(Dispatchers.IO) { this@runAsync.run(envelope, options, cancel) }
+            try {
+                work.await()
+            } catch (e: CancellationException) {
+                // `await()` is cancellable, so this runs the moment the caller
+                // cancels. A Job completion handler would not: the job cannot
+                // complete until the non-cooperative native call returns, by
+                // which point there is nothing left to stop.
+                cancel.cancel()
+                throw e
+            }
+        }
+    } finally {
+        // `coroutineScope` joins its children before unwinding — including on
+        // cancellation — so the worker is provably done with the handle here.
+        // Closing from the worker's completion handler instead would race the
+        // `cancel()` above: a run that finished in that window would close the
+        // token first, and signalling a closed handle throws
+        // IllegalStateException, replacing the CancellationException the
+        // caller expects.
+        cancel.close()
     }
 }
 
