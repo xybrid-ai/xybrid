@@ -12,6 +12,7 @@ package ai.xybrid.reactnative
 import ai.xybrid.Envelope
 import ai.xybrid.Xybrid
 import ai.xybrid.XybridAbortSignal
+import ai.xybrid.XybridCancellationToken
 import ai.xybrid.XybridEnvelope
 import ai.xybrid.XybridDownloadStatus
 import ai.xybrid.XybridError
@@ -74,7 +75,7 @@ class XybridModule(reactContext: ReactApplicationContext) :
     scope.cancel()
     // Close streaming sessions before their models: streamClose needs the
     // still-alive model handle, and closing it unwinds the generation thread.
-    streams.values.forEach { it.model.streamClose(it.streamId) }
+    streams.values.forEach { it.dispose() }
     streams.clear()
     models.values.forEach { it.close() }
     models.clear()
@@ -147,7 +148,7 @@ class XybridModule(reactContext: ReactApplicationContext) :
     while (iter.hasNext()) {
       val entry = iter.next()
       if (entry.value.modelHandle == handle) {
-        entry.value.model.streamClose(entry.value.streamId)
+        entry.value.dispose()
         iter.remove()
       }
     }
@@ -186,7 +187,7 @@ class XybridModule(reactContext: ReactApplicationContext) :
 
     scope.launch {
       try {
-        val result = model.run(env, opts)
+        val result = XybridCancellationToken().use { model.run(env, opts, it) }
         promise.resolve(encodeResult(result))
       } catch (e: XybridError) {
         rejectXybrid(promise, e)
@@ -218,9 +219,16 @@ class XybridModule(reactContext: ReactApplicationContext) :
 
     scope.launch {
       try {
-        val streamId = model.runStream(env, opts)
+        val cancel = XybridCancellationToken()
+        val streamId =
+          try {
+            model.runStream(env, opts, cancel)
+          } catch (t: Throwable) {
+            cancel.close()
+            throw t
+          }
         val id = UUID.randomUUID().toString()
-        streams[id] = StreamEntry(model, streamId, handle)
+        streams[id] = StreamEntry(model, streamId, handle, cancel)
         promise.resolve(id)
       } catch (e: XybridError) {
         rejectXybrid(promise, e)
@@ -252,7 +260,7 @@ class XybridModule(reactContext: ReactApplicationContext) :
             // `streamResult` also closes the bolt-side session; drop our
             // bookkeeping entry so later calls resolve null (exhausted).
             val result = entry.model.streamResult(entry.streamId)
-            streams.remove(streamHandle)
+            streams.remove(streamHandle)?.dispose()
             val out = Arguments.createMap()
             out.putString("kind", "complete")
             out.putMap("result", encodeResult(result))
@@ -262,11 +270,11 @@ class XybridModule(reactContext: ReactApplicationContext) :
       } catch (e: XybridError) {
         // A failed streamNext already closed the session bolt-side; mirror
         // that here, then reject with the same typed codes as `run`.
-        streams.remove(streamHandle)
+        streams.remove(streamHandle)?.dispose()
         rejectXybrid(promise, e)
       } catch (t: Throwable) {
         if (t is CancellationException) throw t
-        streams.remove(streamHandle)
+        streams.remove(streamHandle)?.dispose()
         promise.reject("xybrid", t.message, t)
       }
     }
@@ -277,7 +285,7 @@ class XybridModule(reactContext: ReactApplicationContext) :
     // Closing the bolt session aborts the underlying generation run (its
     // receiver drops, unwinding the backend). Idempotent if the session
     // already finished or errored.
-    streams.remove(streamHandle)?.let { it.model.streamClose(it.streamId) }
+    streams.remove(streamHandle)?.dispose()
     promise.resolve(null)
   }
 
@@ -698,10 +706,25 @@ class XybridModule(reactContext: ReactApplicationContext) :
   // released when the last in-flight `streamNext` returns — so the
   // use-after-free/deferred-close machinery the old stream *handle* needed
   // does not apply here. Abort still takes effect at the next token boundary.
+  /**
+   * Release a stream session and its stop button together.
+   *
+   * `streamClose` is idempotent, so this is safe on paths where the session
+   * already finished or errored. Closing the session first means nothing can
+   * signal the token after its handle is freed.
+   */
+  private fun StreamEntry.dispose() {
+    model.streamClose(streamId)
+    cancel.close()
+  }
+
   private data class StreamEntry(
     val model: XybridModel,
     val streamId: ULong,
     val modelHandle: String,
+    // Owned by the session: cancelled and released wherever the session is
+    // closed, so stopping a stream also stops native generation.
+    val cancel: XybridCancellationToken,
   )
 
   companion object {

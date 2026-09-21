@@ -419,6 +419,19 @@ fun XybridModel.run(
     this.runWithContext(envelope, context, options, it)
 }
 
+/**
+ * Start a pull-based stream that cannot be cancelled. See [run].
+ *
+ * Prefer [streamTokens], which wires collector cancellation to the native stop
+ * button; this exists for callers driving `streamNext` / `streamClose`
+ * themselves. The token is released as soon as this returns, so the stream runs
+ * to completion or until `streamClose`.
+ */
+fun XybridModel.runStream(
+    envelope: XybridEnvelope,
+    options: XybridRunOptions?,
+): ULong = XybridCancellationToken().use { this.runStream(envelope, options, it) }
+
 // -- Async (suspend) conveniences --
 //
 // bolt's load/run are synchronous + blocking. These suspend wrappers restore the
