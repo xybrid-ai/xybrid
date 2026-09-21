@@ -25,13 +25,28 @@ namespace XybridBolt
         /// <exception cref="ArgumentNullException">If <paramref name="onToken"/> is null.</exception>
         /// <exception cref="XybridErrorException">If the model returns a typed error.</exception>
         /// <exception cref="ObjectDisposedException">If the model has been disposed.</exception>
+        /// <param name="cancel">
+        /// Stop button for this stream. Omit it and one is manufactured for the
+        /// call, because the generated <c>RunStream</c> requires a token.
+        /// </param>
         public XybridResult RunStreaming(
             XybridEnvelope envelope,
             Action<XybridStreamToken> onToken,
-            XybridRunOptions? options = null)
+            XybridRunOptions? options = null,
+            XybridCancellationToken? cancel = null)
         {
             if (onToken is null) throw new ArgumentNullException(nameof(onToken));
-            return DrainStream(RunStream(envelope, options), onToken);
+            XybridCancellationToken token = cancel ?? new XybridCancellationToken();
+            try
+            {
+                return DrainStream(RunStream(envelope, options, token), onToken);
+            }
+            finally
+            {
+                // Only dispose what this call created; a caller-supplied token
+                // stays alive for whatever else it is wired to.
+                if (cancel is null) token.Dispose();
+            }
         }
 
         /// <summary>
@@ -41,14 +56,27 @@ namespace XybridBolt
         /// <exception cref="ArgumentNullException">If <paramref name="onToken"/> is null.</exception>
         /// <exception cref="XybridErrorException">If the model returns a typed error.</exception>
         /// <exception cref="ObjectDisposedException">If the model has been disposed.</exception>
+        /// <param name="cancel">
+        /// Stop button for this stream. Omit it and one is manufactured for the
+        /// call, because the generated <c>RunStreamWithContext</c> requires a token.
+        /// </param>
         public XybridResult RunStreamingWithContext(
             XybridEnvelope envelope,
             Action<XybridStreamToken> onToken,
             XybridConversationContext context,
-            XybridRunOptions? options = null)
+            XybridRunOptions? options = null,
+            XybridCancellationToken? cancel = null)
         {
             if (onToken is null) throw new ArgumentNullException(nameof(onToken));
-            return DrainStream(RunStreamWithContext(envelope, context, options), onToken);
+            XybridCancellationToken token = cancel ?? new XybridCancellationToken();
+            try
+            {
+                return DrainStream(RunStreamWithContext(envelope, context, options, token), onToken);
+            }
+            finally
+            {
+                if (cancel is null) token.Dispose();
+            }
         }
 
         /// <summary>

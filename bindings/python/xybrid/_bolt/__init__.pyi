@@ -434,6 +434,24 @@ class XybridThermalState(IntEnum):
 
 
 
+class XybridCancellationToken:
+    _handle: int
+
+
+    def __init__(self) -> None:
+        """Create a fresh, un-cancelled token."""
+
+
+    @classmethod
+    def _from_handle(cls, handle: int) -> "XybridCancellationToken": ...
+    def __del__(self) -> None: ...
+    def cancel(self) -> None:
+        """Request cancellation. Idempotent, and safe to call from any thread."""
+    def is_cancelled(self) -> bool:
+        """Whether [`Self::cancel`] has been called on this token."""
+
+
+
 class XybridModel:
     _handle: int
 
@@ -508,18 +526,22 @@ class XybridModel:
     def voices(self) -> list[XybridVoiceInfo]: ...
     def default_voice(self) -> XybridVoiceInfo | None: ...
     def voice(self, voice_id: str) -> XybridVoiceInfo | None: ...
-    def run(self, envelope: XybridEnvelope, options: XybridRunOptions | None) -> XybridResult:
+    def run(self, envelope: XybridEnvelope, options: XybridRunOptions | None, cancel: XybridCancellationToken) -> XybridResult:
         """Run inference, optionally with [`XybridRunOptions`] (generation config,
         abort signals, cloud-fallback). Pass `None` for the model's defaults.
 
         The hand-written wrappers add a one-arg `run(envelope)` convenience that
         forwards `None`, so simple call sites stay ergonomic.
+        Pass a [`XybridCancellationToken`] to keep a stop button on the run;
+        `None` means the run cannot be cancelled.
         """
-    def run_stream(self, envelope: XybridEnvelope, options: XybridRunOptions | None) -> int:
+    def run_stream(self, envelope: XybridEnvelope, options: XybridRunOptions | None, cancel: XybridCancellationToken) -> int:
         """Start token streaming and return a model-scoped session identifier.
 
         The identifier remains valid until the final result is taken, an error
         is returned, or [`Self::stream_close`] is called.
+        Pass a [`XybridCancellationToken`] to keep a stop button on the run;
+        `None` means the run cannot be cancelled.
         """
     def stream_next(self, stream_id: int) -> XybridStreamEvent:
         """Block until the next item for `stream_id` is ready."""
@@ -527,17 +549,24 @@ class XybridModel:
         """Take the final result after receiving a `Complete` event."""
     def stream_close(self, stream_id: int) -> None:
         """Forget a streaming session."""
-    def run_with_context(self, envelope: XybridEnvelope, context: XybridConversationContext, options: XybridRunOptions | None) -> XybridResult:
+    def run_with_context(self, envelope: XybridEnvelope, context: XybridConversationContext, options: XybridRunOptions | None, cancel: XybridCancellationToken) -> XybridResult:
         """Run inference seeded with a conversation `context` (multi-turn chat).
 
         Only the generation config from `options` is applied — abort signals and
         cloud fallback are not wired on the context path (matches the facade's
         `run_with_context`).
+        Pass a [`XybridCancellationToken`] to keep a stop button on the run;
+        `None` means the run cannot be cancelled.
+
+        Routes through the facade's options path, so abort signals and cloud
+        fallback on `options` are honoured rather than dropped.
         """
-    def run_stream_with_context(self, envelope: XybridEnvelope, context: XybridConversationContext, options: XybridRunOptions | None) -> int:
+    def run_stream_with_context(self, envelope: XybridEnvelope, context: XybridConversationContext, options: XybridRunOptions | None, cancel: XybridCancellationToken) -> int:
         """Start context-aware token streaming; returns a model-scoped session id.
         The pull protocol is identical to [`Self::run_stream`]
         (`stream_next` / `stream_result` / `stream_close`).
+        Pass a [`XybridCancellationToken`] to keep a stop button on the run;
+        `None` means the run cannot be cancelled.
         """
     def warmup(self) -> None: ...
     def unload(self) -> None: ...

@@ -1754,6 +1754,32 @@ impl XybridModel {
         Ok(InferenceResult::from_sdk(result))
     }
 
+    /// Run inference with conversation history, explicit [`RunOptions`] and an
+    /// optional cancellation handle.
+    ///
+    /// The options counterpart of [`Self::run_with_context`], mirroring
+    /// [`Self::run_with_options`]. Prefer this when the caller has anything
+    /// beyond a generation config to say — the plain `run_with_context` reads
+    /// only the generation config, so abort signals and cloud fallback would
+    /// otherwise be silently dropped.
+    pub fn run_with_context_options(
+        &self,
+        envelope: Envelope,
+        context: Arc<ConversationContextHandle>,
+        options: RunOptions,
+        cancel: Option<Arc<CancellationToken>>,
+    ) -> Result<InferenceResult> {
+        let env = envelope.into_sdk()?;
+        let ctx = context.snapshot();
+        let opts =
+            options.to_sdk_over(cancel.as_deref(), self.inner.default_generation_config())?;
+        let result = self
+            .inner
+            .run_with_context_options(&env, &ctx, &opts)
+            .map_err(Error::from)?;
+        Ok(InferenceResult::from_sdk(result))
+    }
+
     /// Async inference. The SDK offloads to `spawn_blocking` internally.
     pub async fn run_async(&self, envelope: Envelope) -> Result<InferenceResult> {
         let env = envelope.into_sdk()?;

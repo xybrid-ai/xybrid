@@ -20,6 +20,7 @@ import android.os.Build
 import android.os.PowerManager
 import java.io.File
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
@@ -396,6 +397,28 @@ typealias Model = XybridModel
  */
 fun XybridModel.run(envelope: XybridEnvelope): XybridResult = this.run(envelope, null)
 
+/**
+ * Run inference that cannot be cancelled.
+ *
+ * The generated [XybridModel.run] takes the stop button as a *required*
+ * argument — BoltFFI cannot express an optional handle parameter — so this
+ * overload manufactures a token that is never signalled. Use [runAsync], or the
+ * three-argument generated form, when you want to stop a run.
+ */
+fun XybridModel.run(
+    envelope: XybridEnvelope,
+    options: XybridRunOptions?,
+): XybridResult = XybridCancellationToken().use { this.run(envelope, options, it) }
+
+/** Context-aware run that cannot be cancelled. See [run]. */
+fun XybridModel.run(
+    envelope: XybridEnvelope,
+    context: XybridConversationContext,
+    options: XybridRunOptions?,
+): XybridResult = XybridCancellationToken().use {
+    this.runWithContext(envelope, context, options, it)
+}
+
 // -- Async (suspend) conveniences --
 //
 // bolt's load/run are synchronous + blocking. These suspend wrappers restore the
@@ -440,11 +463,27 @@ suspend fun XybridModel.Companion.fromBundleAsync(path: String): XybridModel =
 suspend fun XybridModel.Companion.fromHuggingfaceAsync(repo: String): XybridModel =
     Xybrid.model(ModelSource.huggingFace(repo)).load()
 
-/** Run inference off the caller's thread (on [Dispatchers.IO]). */
+/**
+ * Run inference off the caller's thread (on [Dispatchers.IO]).
+ *
+ * Cancelling the calling coroutine stops generation at the next token
+ * boundary. `withContext` alone cannot do that — the run is a blocking native
+ * call, so cancellation has to be forwarded to the native stop button, which
+ * is what the completion handler below does.
+ */
 suspend fun XybridModel.runAsync(
     envelope: XybridEnvelope,
     options: XybridRunOptions? = null,
-): XybridResult = withContext(Dispatchers.IO) { this@runAsync.run(envelope, options) }
+): XybridResult = XybridCancellationToken().use { cancel ->
+    val handle = currentCoroutineContext()[Job]?.invokeOnCompletion { cause ->
+        if (cause != null) cancel.cancel()
+    }
+    try {
+        withContext(Dispatchers.IO) { this@runAsync.run(envelope, options, cancel) }
+    } finally {
+        handle?.dispose()
+    }
+}
 
 /** Warm up the model off the caller's thread (on [Dispatchers.IO]). */
 suspend fun XybridModel.warmupAsync() = withContext(Dispatchers.IO) { this@warmupAsync.warmup() }
@@ -471,22 +510,30 @@ fun XybridModel.streamTokens(
     envelope: XybridEnvelope,
     options: XybridRunOptions? = null,
 ): Flow<XybridStreamToken> = flow {
-    val streamId = runStream(envelope, options)
-    try {
-        while (true) {
-            // Cooperative cancellation: collecting coroutine cancelled -> throws
-            // here at the next token boundary, the finally closes the session.
-            currentCoroutineContext().ensureActive()
-            val event = streamNext(streamId)
-            when (event.kind) {
-                XybridStreamEventKind.TOKEN -> event.token?.let { emit(it) }
-                XybridStreamEventKind.COMPLETE -> break
-            }
+    XybridCancellationToken().use { cancel ->
+        // Forwards collector cancellation to the native run, so generation
+        // stops at the next token instead of running on until streamClose.
+        val completion = currentCoroutineContext()[Job]?.invokeOnCompletion { cause ->
+            if (cause != null) cancel.cancel()
         }
-    } finally {
-        // Idempotent (the session may already be gone after an error), and
-        // aborts an in-flight run when collection stops early.
-        streamClose(streamId)
+        val streamId = runStream(envelope, options, cancel)
+        try {
+            while (true) {
+                // Cooperative cancellation: collecting coroutine cancelled -> throws
+                // here at the next token boundary, the finally closes the session.
+                currentCoroutineContext().ensureActive()
+                val event = streamNext(streamId)
+                when (event.kind) {
+                    XybridStreamEventKind.TOKEN -> event.token?.let { emit(it) }
+                    XybridStreamEventKind.COMPLETE -> break
+                }
+            }
+        } finally {
+            completion?.dispose()
+            // Idempotent (the session may already be gone after an error), and
+            // aborts an in-flight run when collection stops early.
+            streamClose(streamId)
+        }
     }
 }.flowOn(Dispatchers.IO)
 

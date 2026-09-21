@@ -1299,7 +1299,7 @@ let result = model.run_streaming_with_options(&envelope, &options, |token| {
 layers and platform routing can restart on cloud where supported; local Rust
 streaming abort is cooperative and checked before every emitted token.
 
-**User cancellation (Dart binding surface — implemented, issue 10).** A caller
+**User cancellation (all bindings).** A caller
 can abort an in-flight local streaming run via a `CancellationToken` cancel
 handle. In Rust the token is paired with `RunOptions`
 (`with_cancellation_token`); in Dart the caller constructs a
@@ -1324,6 +1324,40 @@ final sub = stream.listen((token) { /* ... */ });
 // Later, to stop Rust generation (not just unsubscribe):
 cancel.cancel();
 await sub.cancel();
+```
+
+**The bolt bindings (Kotlin, Swift, C#).** The token reaches them as a
+`XybridCancellationToken` handle with `cancel()` and `isCancelled()`, and it is
+a **required** argument on every generated run entry point — BoltFFI cannot
+express an optional handle parameter, so there is no way to say "no token" at
+that layer. The hand-written wrappers hide this: they manufacture a throwaway
+token for callers who do not supply one, and they bridge the host's own
+cancellation primitive to it.
+
+| Binding | Cancel a run by |
+|---------|-----------------|
+| Dart | passing a `CancellationToken`, or unsubscribing the stream |
+| Swift | cancelling the `Task` around `runAsync`, or passing a token to `run(envelope:options:cancel:)` |
+| Kotlin | cancelling the coroutine around `runAsync` / `streamTokens`, or passing a token to the generated `run` |
+| C# (Unity) | passing a `System.Threading.CancellationToken` to `Run` / `RunStreaming` |
+
+```swift
+// Swift — structured concurrency drives the native stop button
+let task = Task { try await model.runAsync(envelope: .text("Tell me a long story")) }
+task.cancel()   // generation stops at the next token
+```
+
+```kotlin
+// Kotlin — cancelling the collector stops native generation, not just collection
+val job = scope.launch { model.streamTokens(envelope).collect { render(it) } }
+job.cancel()
+```
+
+```csharp
+// C# / Unity
+using var cts = new CancellationTokenSource();
+var result = model.Run(Envelope.Text("Tell me a long story"), cancellationToken: cts.Token);
+cts.Cancel();
 ```
 
 **Preemptive cancel-and-replace (implemented, issue 11).** A continuous

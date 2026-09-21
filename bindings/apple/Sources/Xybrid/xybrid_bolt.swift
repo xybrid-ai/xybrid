@@ -847,6 +847,33 @@ public enum XybridThermalState: Int32, Hashable, Sendable, CaseIterable {
     }
 }
 
+public final class XybridCancellationToken {
+    @usableFromInline let handle: UInt64
+
+    @usableFromInline init(handle: UInt64) {
+        self.handle = handle
+    }
+
+    deinit {
+        boltffi_release_class_xybrid_bolt_xybrid_cancellation_token(handle)
+    }
+
+    /// Create a fresh, un-cancelled token.
+    public init() {
+        self.handle = boltffi_init_class_xybrid_bolt_xybrid_cancellation_token_new()
+    }
+
+    /// Request cancellation. Idempotent, and safe to call from any thread.
+    public func cancel() {
+        boltffi_method_class_xybrid_bolt_xybrid_cancellation_token_cancel(self.handle)
+    }
+
+    /// Whether [`Self::cancel`] has been called on this token.
+    public func isCancelled() -> Bool {
+        return boltffi_method_class_xybrid_bolt_xybrid_cancellation_token_is_cancelled(self.handle)
+    }
+}
+
 public final class XybridModel {
     @usableFromInline let handle: UInt64
 
@@ -1085,7 +1112,9 @@ public final class XybridModel {
     ///
     /// The hand-written wrappers add a one-arg `run(envelope)` convenience that
     /// forwards `None`, so simple call sites stay ergonomic.
-    public func run(envelope: XybridEnvelope, options: XybridRunOptions?) throws -> XybridResult {
+    /// Pass a [`XybridCancellationToken`] to keep a stop button on the run;
+    /// `None` means the run cannot be cancelled.
+    public func run(envelope: XybridEnvelope, options: XybridRunOptions?, cancel: XybridCancellationToken) throws -> XybridResult {
         let boltffiEnvelopeBytes = boltffiEncode { boltffiEnvelopeWriter in envelope.encode(to: &boltffiEnvelopeWriter) }
         return try boltffiEnvelopeBytes.withUnsafeBufferPointer { boltffiEnvelopeBuffer in
             let boltffiOptionsBytes = boltffiEncode { boltffiOptionsWriter in boltffiOptionsWriter.writeOptional(options) { boltffiOptionsWriter, boltffiValue0 in boltffiValue0.encode(to: &boltffiOptionsWriter) } }
@@ -1097,6 +1126,7 @@ public final class XybridModel {
                     UInt(boltffiEnvelopeBuffer.count),
                     boltffiOptionsBuffer.baseAddress!,
                     UInt(boltffiOptionsBuffer.count),
+                    cancel.handle,
                     &boltffiResult
                 )
                 if boltffiError.ptr != nil || Int(boltffiError.len) != 0 {
@@ -1113,7 +1143,9 @@ public final class XybridModel {
     ///
     /// The identifier remains valid until the final result is taken, an error
     /// is returned, or [`Self::stream_close`] is called.
-    public func runStream(envelope: XybridEnvelope, options: XybridRunOptions?) throws -> UInt64 {
+    /// Pass a [`XybridCancellationToken`] to keep a stop button on the run;
+    /// `None` means the run cannot be cancelled.
+    public func runStream(envelope: XybridEnvelope, options: XybridRunOptions?, cancel: XybridCancellationToken) throws -> UInt64 {
         let boltffiEnvelopeBytes = boltffiEncode { boltffiEnvelopeWriter in envelope.encode(to: &boltffiEnvelopeWriter) }
         return try boltffiEnvelopeBytes.withUnsafeBufferPointer { boltffiEnvelopeBuffer in
             let boltffiOptionsBytes = boltffiEncode { boltffiOptionsWriter in boltffiOptionsWriter.writeOptional(options) { boltffiOptionsWriter, boltffiValue0 in boltffiValue0.encode(to: &boltffiOptionsWriter) } }
@@ -1125,6 +1157,7 @@ public final class XybridModel {
                     UInt(boltffiEnvelopeBuffer.count),
                     boltffiOptionsBuffer.baseAddress!,
                     UInt(boltffiOptionsBuffer.count),
+                    cancel.handle,
                     &boltffiResult
                 )
                 if boltffiError.ptr != nil || Int(boltffiError.len) != 0 {
@@ -1170,7 +1203,17 @@ public final class XybridModel {
     /// Only the generation config from `options` is applied — abort signals and
     /// cloud fallback are not wired on the context path (matches the facade's
     /// `run_with_context`).
-    public func runWithContext(envelope: XybridEnvelope, context: XybridConversationContext, options: XybridRunOptions?) throws -> XybridResult {
+    /// Pass a [`XybridCancellationToken`] to keep a stop button on the run;
+    /// `None` means the run cannot be cancelled.
+    ///
+    /// Routes through the facade's options path, so abort signals and cloud
+    /// fallback on `options` are honoured rather than dropped.
+    public func runWithContext(
+        envelope: XybridEnvelope,
+        context: XybridConversationContext,
+        options: XybridRunOptions?,
+        cancel: XybridCancellationToken
+    ) throws -> XybridResult {
         let boltffiEnvelopeBytes = boltffiEncode { boltffiEnvelopeWriter in envelope.encode(to: &boltffiEnvelopeWriter) }
         return try boltffiEnvelopeBytes.withUnsafeBufferPointer { boltffiEnvelopeBuffer in
             let boltffiOptionsBytes = boltffiEncode { boltffiOptionsWriter in boltffiOptionsWriter.writeOptional(options) { boltffiOptionsWriter, boltffiValue0 in boltffiValue0.encode(to: &boltffiOptionsWriter) } }
@@ -1183,6 +1226,7 @@ public final class XybridModel {
                     context.handle,
                     boltffiOptionsBuffer.baseAddress!,
                     UInt(boltffiOptionsBuffer.count),
+                    cancel.handle,
                     &boltffiResult
                 )
                 if boltffiError.ptr != nil || Int(boltffiError.len) != 0 {
@@ -1198,7 +1242,14 @@ public final class XybridModel {
     /// Start context-aware token streaming; returns a model-scoped session id.
     /// The pull protocol is identical to [`Self::run_stream`]
     /// (`stream_next` / `stream_result` / `stream_close`).
-    public func runStreamWithContext(envelope: XybridEnvelope, context: XybridConversationContext, options: XybridRunOptions?) throws -> UInt64 {
+    /// Pass a [`XybridCancellationToken`] to keep a stop button on the run;
+    /// `None` means the run cannot be cancelled.
+    public func runStreamWithContext(
+        envelope: XybridEnvelope,
+        context: XybridConversationContext,
+        options: XybridRunOptions?,
+        cancel: XybridCancellationToken
+    ) throws -> UInt64 {
         let boltffiEnvelopeBytes = boltffiEncode { boltffiEnvelopeWriter in envelope.encode(to: &boltffiEnvelopeWriter) }
         return try boltffiEnvelopeBytes.withUnsafeBufferPointer { boltffiEnvelopeBuffer in
             let boltffiOptionsBytes = boltffiEncode { boltffiOptionsWriter in boltffiOptionsWriter.writeOptional(options) { boltffiOptionsWriter, boltffiValue0 in boltffiValue0.encode(to: &boltffiOptionsWriter) } }
@@ -1211,6 +1262,7 @@ public final class XybridModel {
                     context.handle,
                     boltffiOptionsBuffer.baseAddress!,
                     UInt(boltffiOptionsBuffer.count),
+                    cancel.handle,
                     &boltffiResult
                 )
                 if boltffiError.ptr != nil || Int(boltffiError.len) != 0 {

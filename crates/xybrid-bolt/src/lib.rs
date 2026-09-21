@@ -41,8 +41,9 @@
 //! - **`XybridConversationContext`**: opaque handle (new / with_id / push /
 //!   set_system / clear / id) feeding `run_with_context` and
 //!   `run_stream_with_context`.
+//! - **`XybridCancellationToken`**: opaque handle (new / cancel /
+//!   is_cancelled) accepted by every `run*` entry point as the stop button.
 //! - **Deferred to follow-up commits**:
-//!   - `XybridCancellationToken` as an `Arc<Self>` handle.
 //!   - Pipeline surface.
 //!
 //! This is now the sole native binding crate: `xybrid-uniffi` and the
@@ -980,11 +981,51 @@ pub fn is_auto_release_enabled() -> bool {
 }
 
 // ============================================================================
+// Cancellation
+// ============================================================================
+
+/// A stop button for an in-flight run.
+///
+/// Create one, hand it to `run` / `run_stream` (or the context variants), and
+/// call [`Self::cancel`] from anywhere — another thread, a UI action — to stop
+/// generation at the next token boundary. Cancelling after a run has finished
+/// is a no-op, and one token may be shared by several runs.
+///
+/// Cancellation is a separate handle rather than a field on
+/// [`XybridRunOptions`] because the options are a plain data record that
+/// crosses the wire by value; a stop button has to stay shared with the
+/// caller after the run starts.
+pub struct XybridCancellationToken {
+    inner: std::sync::Arc<facade::CancellationToken>,
+}
+
+#[export]
+impl XybridCancellationToken {
+    /// Create a fresh, un-cancelled token.
+    #[allow(clippy::new_without_default)]
+    pub fn new() -> Self {
+        Self {
+            inner: facade::CancellationToken::new(),
+        }
+    }
+
+    /// Request cancellation. Idempotent, and safe to call from any thread.
+    pub fn cancel(&self) {
+        self.inner.cancel();
+    }
+
+    /// Whether [`Self::cancel`] has been called on this token.
+    pub fn is_cancelled(&self) -> bool {
+        self.inner.is_cancelled()
+    }
+}
+
+// ============================================================================
 // XybridModel handle
 // ============================================================================
 //
-// Scope: load / run / pull-stream / warmup / unload / voice accessors.
-// Cancellation and conversation context remain follow-up work.
+// Scope: load / run / pull-stream / warmup / unload / voice accessors /
+// conversation context / cancellation.
 //
 // `ModelLoader` is intentionally **not** mirrored as a separate
 // `#[export]` type. BoltFFI's wire layer treats opaque types as handle
@@ -1171,18 +1212,22 @@ impl XybridModel {
     ///
     /// The hand-written wrappers add a one-arg `run(envelope)` convenience that
     /// forwards `None`, so simple call sites stay ergonomic.
+    /// Pass a [`XybridCancellationToken`] to keep a stop button on the run;
+    /// `None` means the run cannot be cancelled.
     pub fn run(
         &self,
         envelope: XybridEnvelope,
         options: Option<XybridRunOptions>,
+        cancel: &XybridCancellationToken,
     ) -> Result<XybridResult, XybridError> {
-        let result = match options {
-            Some(opts) => self
-                .inner
-                .run_with_options(envelope.into(), opts.into(), None),
-            None => self.inner.run(envelope.into()),
-        }
-        .map_err(XybridError::from)?;
+        let result = self
+            .inner
+            .run_with_options(
+                envelope.into(),
+                options.map(Into::into).unwrap_or_default(),
+                Some(cancel.inner.clone()),
+            )
+            .map_err(XybridError::from)?;
         Ok(result.into())
     }
 
@@ -1190,17 +1235,20 @@ impl XybridModel {
     ///
     /// The identifier remains valid until the final result is taken, an error
     /// is returned, or [`Self::stream_close`] is called.
+    /// Pass a [`XybridCancellationToken`] to keep a stop button on the run;
+    /// `None` means the run cannot be cancelled.
     pub fn run_stream(
         &self,
         envelope: XybridEnvelope,
         options: Option<XybridRunOptions>,
+        cancel: &XybridCancellationToken,
     ) -> Result<u64, XybridError> {
         let session = self
             .inner
             .run_stream(
                 envelope.into(),
                 options.map(Into::into).unwrap_or_default(),
-                None,
+                Some(cancel.inner.clone()),
             )
             .map_err(XybridError::from)?;
         let stream_id = self
@@ -1291,18 +1339,26 @@ impl XybridModel {
     /// Only the generation config from `options` is applied — abort signals and
     /// cloud fallback are not wired on the context path (matches the facade's
     /// `run_with_context`).
+    /// Pass a [`XybridCancellationToken`] to keep a stop button on the run;
+    /// `None` means the run cannot be cancelled.
+    ///
+    /// Routes through the facade's options path, so abort signals and cloud
+    /// fallback on `options` are honoured rather than dropped.
     pub fn run_with_context(
         &self,
         envelope: XybridEnvelope,
         context: &XybridConversationContext,
         options: Option<XybridRunOptions>,
+        cancel: &XybridCancellationToken,
     ) -> Result<XybridResult, XybridError> {
-        let generation_config = options
-            .and_then(|opts| opts.generation_config)
-            .map(Into::into);
         let result = self
             .inner
-            .run_with_context(envelope.into(), context.inner.clone(), generation_config)
+            .run_with_context_options(
+                envelope.into(),
+                context.inner.clone(),
+                options.map(Into::into).unwrap_or_default(),
+                Some(cancel.inner.clone()),
+            )
             .map_err(XybridError::from)?;
         Ok(result.into())
     }
@@ -1310,11 +1366,14 @@ impl XybridModel {
     /// Start context-aware token streaming; returns a model-scoped session id.
     /// The pull protocol is identical to [`Self::run_stream`]
     /// (`stream_next` / `stream_result` / `stream_close`).
+    /// Pass a [`XybridCancellationToken`] to keep a stop button on the run;
+    /// `None` means the run cannot be cancelled.
     pub fn run_stream_with_context(
         &self,
         envelope: XybridEnvelope,
         context: &XybridConversationContext,
         options: Option<XybridRunOptions>,
+        cancel: &XybridCancellationToken,
     ) -> Result<u64, XybridError> {
         let session = self
             .inner
@@ -1322,7 +1381,7 @@ impl XybridModel {
                 envelope.into(),
                 context.inner.clone(),
                 options.map(Into::into).unwrap_or_default(),
-                None,
+                Some(cancel.inner.clone()),
             )
             .map_err(XybridError::from)?;
         let stream_id = self
@@ -1603,6 +1662,33 @@ impl XybridBundle {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cancellation_token_starts_uncancelled_and_latches() {
+        let token = XybridCancellationToken::new();
+        assert!(!token.is_cancelled());
+
+        token.cancel();
+        assert!(token.is_cancelled());
+
+        // Idempotent: a second cancel must not clear the flag.
+        token.cancel();
+        assert!(token.is_cancelled());
+    }
+
+    #[test]
+    fn cancellation_token_shares_one_flag_across_clones() {
+        // Two bolt tokens built from the same facade handle observe each
+        // other, which is what lets a UI thread stop a run on a worker.
+        let token = XybridCancellationToken::new();
+        let shared = XybridCancellationToken {
+            inner: token.inner.clone(),
+        };
+
+        assert!(!shared.is_cancelled());
+        token.cancel();
+        assert!(shared.is_cancelled());
+    }
 
     #[test]
     fn envelope_roundtrips_through_facade() {

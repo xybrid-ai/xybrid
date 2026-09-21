@@ -1914,6 +1914,39 @@ _native._register_xybrid_voice_info(XybridVoiceInfo)
 
 
 
+class XybridCancellationToken:
+    __slots__ = ("_handle",)
+
+
+
+    def __init__(self) -> None:
+        """Create a fresh, un-cancelled token."""
+        self._handle = _native._boltffi_xybrid_cancellation_token_new()
+
+
+
+    @classmethod
+    def _from_handle(cls, handle: int) -> "XybridCancellationToken":
+        value = cls.__new__(cls)
+        value._handle = handle
+        return value
+
+    def __del__(self) -> None:
+        handle = getattr(self, "_handle", None)
+        if handle is not None:
+            self._handle = None
+            _native._boltffi_xybrid_cancellation_token_release(handle)
+
+    def cancel(self) -> None:
+        """Request cancellation. Idempotent, and safe to call from any thread."""
+        _native._boltffi_xybrid_cancellation_token_cancel(self._handle)
+
+    def is_cancelled(self) -> bool:
+        """Whether [`Self::cancel`] has been called on this token."""
+        return _native._boltffi_xybrid_cancellation_token_is_cancelled(self._handle)
+
+
+
 class XybridModel:
     __slots__ = ("_handle",)
 
@@ -2046,22 +2079,26 @@ class XybridModel:
     def voice(self, voice_id: str) -> XybridVoiceInfo | None:
         return _boltffi_read_wire(_native._boltffi_xybrid_model_voice(self._handle, voice_id), lambda reader: reader.optional(lambda: XybridVoiceInfo._boltffi_from_reader(reader)))
 
-    def run(self, envelope: XybridEnvelope, options: XybridRunOptions | None) -> XybridResult:
+    def run(self, envelope: XybridEnvelope, options: XybridRunOptions | None, cancel: XybridCancellationToken) -> XybridResult:
         """Run inference, optionally with [`XybridRunOptions`] (generation config,
         abort signals, cloud-fallback). Pass `None` for the model's defaults.
 
         The hand-written wrappers add a one-arg `run(envelope)` convenience that
         forwards `None`, so simple call sites stay ergonomic.
+        Pass a [`XybridCancellationToken`] to keep a stop button on the run;
+        `None` means the run cannot be cancelled.
         """
-        return _boltffi_read_wire(_boltffi_call(_boltffi_read_09404a3c98b3f16c, lambda: _native._boltffi_xybrid_model_run(self._handle, envelope._boltffi_wire(), _boltffi_wire_optional(options, lambda __boltffi_value_0: __boltffi_value_0._boltffi_wire()))), lambda reader: XybridResult._boltffi_from_reader(reader))
+        return _boltffi_read_wire(_boltffi_call(_boltffi_read_09404a3c98b3f16c, lambda: _native._boltffi_xybrid_model_run(self._handle, envelope._boltffi_wire(), _boltffi_wire_optional(options, lambda __boltffi_value_0: __boltffi_value_0._boltffi_wire()), cancel._handle)), lambda reader: XybridResult._boltffi_from_reader(reader))
 
-    def run_stream(self, envelope: XybridEnvelope, options: XybridRunOptions | None) -> int:
+    def run_stream(self, envelope: XybridEnvelope, options: XybridRunOptions | None, cancel: XybridCancellationToken) -> int:
         """Start token streaming and return a model-scoped session identifier.
 
         The identifier remains valid until the final result is taken, an error
         is returned, or [`Self::stream_close`] is called.
+        Pass a [`XybridCancellationToken`] to keep a stop button on the run;
+        `None` means the run cannot be cancelled.
         """
-        return _boltffi_call(_boltffi_read_09404a3c98b3f16c, lambda: _native._boltffi_xybrid_model_run_stream(self._handle, envelope._boltffi_wire(), _boltffi_wire_optional(options, lambda __boltffi_value_0: __boltffi_value_0._boltffi_wire())))
+        return _boltffi_call(_boltffi_read_09404a3c98b3f16c, lambda: _native._boltffi_xybrid_model_run_stream(self._handle, envelope._boltffi_wire(), _boltffi_wire_optional(options, lambda __boltffi_value_0: __boltffi_value_0._boltffi_wire()), cancel._handle))
 
     def stream_next(self, stream_id: int) -> XybridStreamEvent:
         """Block until the next item for `stream_id` is ready."""
@@ -2075,21 +2112,28 @@ class XybridModel:
         """Forget a streaming session."""
         _native._boltffi_xybrid_model_stream_close(self._handle, stream_id)
 
-    def run_with_context(self, envelope: XybridEnvelope, context: XybridConversationContext, options: XybridRunOptions | None) -> XybridResult:
+    def run_with_context(self, envelope: XybridEnvelope, context: XybridConversationContext, options: XybridRunOptions | None, cancel: XybridCancellationToken) -> XybridResult:
         """Run inference seeded with a conversation `context` (multi-turn chat).
 
         Only the generation config from `options` is applied — abort signals and
         cloud fallback are not wired on the context path (matches the facade's
         `run_with_context`).
-        """
-        return _boltffi_read_wire(_boltffi_call(_boltffi_read_09404a3c98b3f16c, lambda: _native._boltffi_xybrid_model_run_with_context(self._handle, envelope._boltffi_wire(), context._handle, _boltffi_wire_optional(options, lambda __boltffi_value_0: __boltffi_value_0._boltffi_wire()))), lambda reader: XybridResult._boltffi_from_reader(reader))
+        Pass a [`XybridCancellationToken`] to keep a stop button on the run;
+        `None` means the run cannot be cancelled.
 
-    def run_stream_with_context(self, envelope: XybridEnvelope, context: XybridConversationContext, options: XybridRunOptions | None) -> int:
+        Routes through the facade's options path, so abort signals and cloud
+        fallback on `options` are honoured rather than dropped.
+        """
+        return _boltffi_read_wire(_boltffi_call(_boltffi_read_09404a3c98b3f16c, lambda: _native._boltffi_xybrid_model_run_with_context(self._handle, envelope._boltffi_wire(), context._handle, _boltffi_wire_optional(options, lambda __boltffi_value_0: __boltffi_value_0._boltffi_wire()), cancel._handle)), lambda reader: XybridResult._boltffi_from_reader(reader))
+
+    def run_stream_with_context(self, envelope: XybridEnvelope, context: XybridConversationContext, options: XybridRunOptions | None, cancel: XybridCancellationToken) -> int:
         """Start context-aware token streaming; returns a model-scoped session id.
         The pull protocol is identical to [`Self::run_stream`]
         (`stream_next` / `stream_result` / `stream_close`).
+        Pass a [`XybridCancellationToken`] to keep a stop button on the run;
+        `None` means the run cannot be cancelled.
         """
-        return _boltffi_call(_boltffi_read_09404a3c98b3f16c, lambda: _native._boltffi_xybrid_model_run_stream_with_context(self._handle, envelope._boltffi_wire(), context._handle, _boltffi_wire_optional(options, lambda __boltffi_value_0: __boltffi_value_0._boltffi_wire())))
+        return _boltffi_call(_boltffi_read_09404a3c98b3f16c, lambda: _native._boltffi_xybrid_model_run_stream_with_context(self._handle, envelope._boltffi_wire(), context._handle, _boltffi_wire_optional(options, lambda __boltffi_value_0: __boltffi_value_0._boltffi_wire()), cancel._handle))
 
     def warmup(self) -> None:
         _boltffi_call(_boltffi_read_09404a3c98b3f16c, lambda: _native._boltffi_xybrid_model_warmup(self._handle))
@@ -2462,6 +2506,7 @@ __all__ = [
     "XybridDownloadState",
     "XybridStreamEventKind",
     "XybridThermalState",
+    "XybridCancellationToken",
     "XybridModel",
     "XybridConversationContext",
     "XybridTelemetryConfig",

@@ -775,6 +775,9 @@ namespace XybridBolt
         [DllImport(LibName, EntryPoint = "boltffi_init_class_xybrid_bolt_xybrid_bundle_open")]
         internal static extern FfiBuf NativeXybridBundleOpen([In] byte[] pathBytes, nuint pathLength, out ulong boltffiHandle);
 
+        [DllImport(LibName, EntryPoint = "boltffi_init_class_xybrid_bolt_xybrid_cancellation_token_new")]
+        internal static extern ulong NativeXybridCancellationTokenNew();
+
         [DllImport(LibName, EntryPoint = "boltffi_init_class_xybrid_bolt_xybrid_conversation_context_new")]
         internal static extern ulong NativeXybridConversationContextNew();
 
@@ -836,6 +839,13 @@ namespace XybridBolt
         [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_bundle_version")]
         internal static extern FfiBuf NativeXybridBundleVersion(ulong receiver);
 
+        [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_cancellation_token_cancel")]
+        internal static extern FfiStatus NativeXybridCancellationTokenCancel(ulong receiver);
+
+        [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_cancellation_token_is_cancelled")]
+        [return: MarshalAs(UnmanagedType.I1)]
+        internal static extern bool NativeXybridCancellationTokenIsCancelled(ulong receiver);
+
         [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_conversation_context_clear")]
         internal static extern FfiStatus NativeXybridConversationContextClear(ulong receiver);
 
@@ -896,16 +906,16 @@ namespace XybridBolt
         internal static extern global::XybridBolt.XybridOutputType NativeXybridModelOutputType(ulong receiver);
 
         [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_model_run")]
-        internal static extern FfiBuf NativeXybridModelRun(ulong receiver, [In] byte[] envelopeBytes, nuint envelopeLength, [In] byte[] optionsBytes, nuint optionsLength, out FfiBuf boltffiResultBuffer);
+        internal static extern FfiBuf NativeXybridModelRun(ulong receiver, [In] byte[] envelopeBytes, nuint envelopeLength, [In] byte[] optionsBytes, nuint optionsLength, ulong cancel, out FfiBuf boltffiResultBuffer);
 
         [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_model_run_stream")]
-        internal static extern FfiBuf NativeXybridModelRunStream(ulong receiver, [In] byte[] envelopeBytes, nuint envelopeLength, [In] byte[] optionsBytes, nuint optionsLength, out ulong boltffiResult);
+        internal static extern FfiBuf NativeXybridModelRunStream(ulong receiver, [In] byte[] envelopeBytes, nuint envelopeLength, [In] byte[] optionsBytes, nuint optionsLength, ulong cancel, out ulong boltffiResult);
 
         [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_model_run_stream_with_context")]
-        internal static extern FfiBuf NativeXybridModelRunStreamWithContext(ulong receiver, [In] byte[] envelopeBytes, nuint envelopeLength, ulong context, [In] byte[] optionsBytes, nuint optionsLength, out ulong boltffiResult);
+        internal static extern FfiBuf NativeXybridModelRunStreamWithContext(ulong receiver, [In] byte[] envelopeBytes, nuint envelopeLength, ulong context, [In] byte[] optionsBytes, nuint optionsLength, ulong cancel, out ulong boltffiResult);
 
         [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_model_run_with_context")]
-        internal static extern FfiBuf NativeXybridModelRunWithContext(ulong receiver, [In] byte[] envelopeBytes, nuint envelopeLength, ulong context, [In] byte[] optionsBytes, nuint optionsLength, out FfiBuf boltffiResultBuffer);
+        internal static extern FfiBuf NativeXybridModelRunWithContext(ulong receiver, [In] byte[] envelopeBytes, nuint envelopeLength, ulong context, [In] byte[] optionsBytes, nuint optionsLength, ulong cancel, out FfiBuf boltffiResultBuffer);
 
         [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_model_stream_close")]
         internal static extern FfiStatus NativeXybridModelStreamClose(ulong receiver, ulong streamId);
@@ -965,6 +975,9 @@ namespace XybridBolt
 
         [DllImport(LibName, EntryPoint = "boltffi_release_class_xybrid_bolt_xybrid_bundle")]
         internal static extern void NativeXybridBundleRelease(ulong handle);
+
+        [DllImport(LibName, EntryPoint = "boltffi_release_class_xybrid_bolt_xybrid_cancellation_token")]
+        internal static extern void NativeXybridCancellationTokenRelease(ulong handle);
 
         [DllImport(LibName, EntryPoint = "boltffi_release_class_xybrid_bolt_xybrid_conversation_context")]
         internal static extern void NativeXybridConversationContextRelease(ulong handle);
