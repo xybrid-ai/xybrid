@@ -67,12 +67,12 @@ namespace Xybrid
         /// Enables or disables speculative cloud serving for subsequent loads.
         /// </summary>
         /// <remarks>
-        /// When enabled, <see cref="ModelLoader.FromRegistrySpeculative"/> answers
-        /// from the cloud gateway while the model's weights download in the
-        /// background, instead of blocking on the download. Off by default, and it
-        /// only takes effect when an API key resolves &#x2014;
-        /// <see cref="ModelLoader.WillSpeculate"/> reports that for a specific
-        /// model up front.
+        /// This is the process-wide <em>default</em>: it applies to registry loads
+        /// that do not opt in per-load. <see cref="ModelLoader.FromRegistrySpeculative"/>
+        /// opts in explicitly and is unaffected by this toggle. Off by default.
+        /// Either way, speculation also needs a resolvable API key and a model that
+        /// is not already cached &#x2014; <see cref="ModelLoader.WillSpeculate"/>
+        /// reports the combined answer for a specific loader.
         /// </remarks>
         public static void SetSpeculativeCloud(bool enabled) =>
             XybridBolt.XybridBolt.SetSpeculativeCloud(enabled);
@@ -145,13 +145,21 @@ namespace Xybrid
         /// Optional override for the telemetry ingest URL (for a self-hosted
         /// dashboard). Ignored when <paramref name="apiKey"/> is null or blank.
         /// </param>
+        /// <param name="gatewayUrl">
+        /// Optional override for the LLM gateway URL. Declared last so existing
+        /// positional <c>Initialize(apiKey, ingestUrl)</c> call sites keep compiling;
+        /// Swift and Kotlin order it before <paramref name="ingestUrl"/>.
+        /// </param>
         /// <remarks>
         /// This method should be called once at application startup, before using
         /// any other SDK features. It is safe to call multiple times - subsequent
         /// calls are no-ops, so configuration is applied on the first call only.
         /// </remarks>
         /// <exception cref="XybridException">Thrown if initialization fails.</exception>
-        public static void Initialize(string apiKey = null, string ingestUrl = null)
+        public static void Initialize(
+            string apiKey = null,
+            string ingestUrl = null,
+            string gatewayUrl = null)
         {
             lock (_lock)
             {
@@ -166,31 +174,32 @@ namespace Xybrid
                 // longer a second C-ABI binding state to keep in sync.
                 XybridBolt.XybridBolt.SetBinding("unity");
 
+                // One call configures the whole runtime, exactly as the Swift
+                // `Xybrid.initialize(apiKey:gatewayUrl:ingestUrl:)` and Kotlin
+                // `Xybrid.init(context, apiKey, …)` wrappers do. Unity used to
+                // build a TelemetryConfig here instead, which started the
+                // exporter but never registered the key with the runtime — so
+                // `HasApiKey` stayed false and cloud routing (including
+                // ModelLoader.FromRegistrySpeculative) silently fell back to the
+                // local path unless XYBRID_API_KEY happened to be set in the
+                // environment. ConfigureRuntime gates both, from one key.
+                //
+                // A non-blank apiKey makes ConfigureRuntime start the telemetry
+                // exporter, so do NOT also call InitializeTelemetry here: the
+                // two paths are mutually exclusive and the second would throw.
+                XybridBolt.XybridBolt.ConfigureRuntime(apiKey, gatewayUrl, ingestUrl);
+
                 _initialized = true;
 
-                // Fold telemetry into init: a non-blank API key starts the
-                // exporter, mirroring the Swift initialize(apiKey:) / Kotlin
-                // init(apiKey =) surfaces. The standalone
-                // InitializeTelemetry(TelemetryConfig) path remains available for
-                // advanced configuration (batch size, device attributes, flush
-                // interval). TelemetryConfig defaults the endpoint to the
-                // production ingest URL, so apiKey alone is enough.
-                //
                 // Kept inside the lock so a concurrent caller that observes
                 // _initialized == true (and returns) is guaranteed the exporter
-                // is already running — and so the _telemetryInitialized read
-                // here has the same visibility as InitializeTelemetry's write.
-                // C# locks are reentrant, so InitializeTelemetry re-taking _lock
-                // is safe.
-                if (!string.IsNullOrWhiteSpace(apiKey) && !_telemetryInitialized)
+                // is already running. Recording it here keeps FlushTelemetry and
+                // ShutdownTelemetry working after the apiKey-only init path, and
+                // makes a later InitializeTelemetry(config) fail loudly rather
+                // than double-starting the exporter.
+                if (!string.IsNullOrWhiteSpace(apiKey))
                 {
-                    var config = new TelemetryConfig(apiKey);
-                    if (!string.IsNullOrWhiteSpace(ingestUrl))
-                    {
-                        config.WithEndpoint(ingestUrl);
-                    }
-
-                    InitializeTelemetry(config);
+                    _telemetryInitialized = true;
                 }
             }
         }

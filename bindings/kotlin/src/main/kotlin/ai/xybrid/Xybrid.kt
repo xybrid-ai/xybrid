@@ -165,13 +165,17 @@ object Xybrid {
     val isAutoReleaseEnabled: Boolean get() = ai.xybrid.isAutoReleaseEnabled()
 
     /**
-     * Enable or disable speculative cloud serving for subsequent loads.
+     * Set the process-wide default for speculative cloud serving.
      *
-     * When enabled, [XybridModelLoader.fromRegistrySpeculative] answers from
-     * the cloud gateway while the model's weights download in the background,
-     * instead of blocking on the download. Off by default, and it only takes
-     * effect when an API key resolves — [XybridModelLoader.willSpeculate]
-     * reports that for a specific model up front.
+     * Speculation answers from the cloud gateway while a registry model's
+     * weights download in the background, instead of blocking on the download.
+     *
+     * This is the *default* for loads that do not opt in per-load;
+     * [XybridModelLoader.fromRegistrySpeculative] opts in explicitly and is
+     * unaffected by this toggle. Off by default. Either way, speculation also
+     * needs a resolvable API key and a model that is not already cached —
+     * [XybridModelLoader.willSpeculate] reports the combined answer for a
+     * specific loader.
      */
     @JvmStatic
     fun setSpeculativeCloud(enabled: Boolean) = ai.xybrid.setSpeculativeCloud(enabled)

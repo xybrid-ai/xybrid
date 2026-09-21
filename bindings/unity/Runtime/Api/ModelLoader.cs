@@ -117,10 +117,11 @@ namespace Xybrid
         /// weights download in the background, instead of blocking on the download.
         /// </summary>
         /// <remarks>
-        /// Requires <see cref="XybridClient.SetSpeculativeCloud"/> to be enabled and
-        /// an API key to resolve; otherwise this behaves exactly like
-        /// <see cref="FromRegistry"/>. <see cref="WillSpeculate"/> reports which of
-        /// the two you will get, without performing any network or disk work.
+        /// Opts this load into speculation explicitly, so it does not depend on
+        /// <see cref="XybridClient.SetSpeculativeCloud"/>. It still requires a
+        /// resolvable API key and a model that is not already cached; otherwise it
+        /// behaves exactly like <see cref="FromRegistry"/>.
+        /// <see cref="WillSpeculate"/> reports which of the two you will get.
         /// LLM/chat models only.
         /// </remarks>
         /// <param name="modelId">The model ID.</param>
@@ -135,12 +136,15 @@ namespace Xybrid
         }
 
         /// <summary>
-        /// Gets whether <see cref="Load"/> will actually speculate: the global
-        /// toggle is on, an API key resolves, and the model is not already cached.
+        /// Gets whether <see cref="Load"/> will actually speculate: speculation is
+        /// in effect for this loader, an API key resolves, and the model is not
+        /// already cached.
         /// </summary>
         /// <remarks>
         /// Always false for every source but
-        /// <see cref="FromRegistrySpeculative"/>. Performs no network or disk work.
+        /// <see cref="FromRegistrySpeculative"/>, which turns speculation on for
+        /// itself regardless of <see cref="XybridClient.SetSpeculativeCloud"/>.
+        /// Reads the local cache to answer; never hits the network.
         /// </remarks>
         public bool WillSpeculate =>
             _source == Source.RegistrySpeculative &&

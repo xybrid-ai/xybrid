@@ -133,6 +133,21 @@ extension Xybrid {
 | `model()` | ✅ | ✅ | ✅ | ✅ |
 | `pipeline()` | ✅ | — | — | — |
 | `isModelCached()` | ✅ | — | — | — |
+| `releaseMemory()` | ✅ | ✅ | ✅ | ✅ |
+| `setAutoRelease()` | ✅ | ✅ | ✅ | ✅ |
+| `isAutoReleaseEnabled` | ✅ | ✅ | ✅ | ✅ |
+| `setSpeculativeCloud()` | ✅ | ✅ | ✅ | ✅ |
+| `isSpeculativeCloudEnabled` | ✅ | ✅ | ✅ | ✅ |
+| `hasApiKey` | — | ✅ | ✅ | ✅ |
+| `setProviderApiKey()` | — | ✅ | ✅ | ✅ |
+| `jsonSchemaToGbnf()` | ✅ | ✅ | ✅ | ✅ |
+
+`jsonSchemaToGbnf()` is a top-level function in Dart, Kotlin and Swift. C# has
+no top-level functions, so Unity exposes it as `XybridClient.JsonSchemaToGbnf`.
+
+Unity's `Initialize()` declares `gatewayUrl` **last**, after `ingestUrl`, so its
+pre-existing positional call sites keep compiling; the other bindings order it
+before `ingestUrl`.
 
 ---
 
@@ -336,15 +351,17 @@ var result = model.Run(Envelope.Text("Hello!"));
 | `fromHuggingfaceWithRevision()` | — | ✅ | ✅ | ✅ |
 | `load()` | ✅ | ✅ | ✅ | ✅ |
 | `loadWithProgress()` | ✅ | — | — | — |
-| `fromRegistrySpeculative()` | ✅ | ✅ | ✅ | — |
-| `willSpeculate` | ✅ | ✅ | ✅ | — |
+| `fromRegistrySpeculative()` | ✅ | ✅ | ✅ | ✅ |
+| `willSpeculate` | ✅ | ✅ | ✅ | ✅ |
 
 `fromRegistrySpeculative()` answers from the cloud gateway while the registry
 weights download in the background, then switches to on-device by itself. It
 needs an API key and an uncached model — otherwise it behaves exactly like
 `fromRegistry()`, which `willSpeculate` reports up front. LLM/chat models only.
-Unity has no loader facade; it calls the generated
-`XybridModel.FromRegistrySpeculative(id)` constructor directly.
+
+It sets the per-load override itself, so it does **not** depend on
+`setSpeculativeCloud()` — that toggle is the default for loads which do not opt
+in per-load.
 
 ---
 
@@ -1219,6 +1236,19 @@ data class GenerationConfig(
 GenerationConfigs.greedy()    // temperature=0, topP=1, topK=0
 GenerationConfigs.creative()  // temperature=0.9, topP=0.95, topK=50
 ```
+
+#### Structured output (`grammar`)
+
+`grammar` constrains decoding to a GBNF grammar. Build one from a JSON Schema
+with `jsonSchemaToGbnf()`, or pass raw GBNF. llama.cpp-only — other backends
+ignore it.
+
+| Binding | Surface |
+|---------|---------|
+| Dart | `GenerationConfig.grammar` |
+| Kotlin | `XybridGenerationConfig.grammar` |
+| Swift | `XybridGenerationConfig.make(grammar:)` |
+| C# (Unity) | `GenerationConfig.SetGrammar()` |
 
 #### Usage
 

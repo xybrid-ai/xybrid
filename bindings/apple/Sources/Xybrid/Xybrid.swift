@@ -153,13 +153,17 @@ public enum Xybrid {
         boltIsAutoReleaseEnabled()
     }
 
-    /// Enables or disables speculative cloud serving for subsequent loads.
+    /// Sets the process-wide default for speculative cloud serving.
     ///
-    /// When enabled, `ModelLoader.fromRegistrySpeculative(_:)` answers from the
-    /// cloud gateway while the model's weights download in the background,
-    /// instead of blocking on the download. Off by default, and it only takes
-    /// effect when an API key resolves — use
-    /// ``ModelLoader/willSpeculate`` to check a specific model up front.
+    /// Speculation answers from the cloud gateway while a registry model's
+    /// weights download in the background, instead of blocking on the download.
+    ///
+    /// This is the *default* for loads that do not opt in per-load;
+    /// ``ModelLoader/fromRegistrySpeculative(_:)`` opts in explicitly and is
+    /// unaffected by this toggle. Off by default. Either way, speculation also
+    /// needs a resolvable API key and a model that is not already cached —
+    /// ``ModelLoader/willSpeculate`` reports the combined answer for a
+    /// specific loader.
     public static func setSpeculativeCloud(_ enabled: Bool) {
         boltSetSpeculativeCloud(enabled)
     }

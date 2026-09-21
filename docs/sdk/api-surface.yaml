@@ -28,8 +28,10 @@ classes:
         # apiKey-bundled init shipped across all four bindings: Dart
         # Xybrid.init, Kotlin Xybrid.init(context, …), Swift
         # Xybrid.initialize(apiKey:), Unity XybridClient.Initialize(apiKey:).
-        # Param coverage varies by binding (e.g. Unity omits gatewayUrl;
-        # resourceTelemetry is Dart/Rust only) — the apiKey path is universal.
+        # Param coverage varies by binding (resourceTelemetry is Dart/Rust
+        # only) — the apiKey path is universal. Unity declares gatewayUrl last,
+        # after ingestUrl, so its pre-existing positional call sites keep
+        # compiling; the other bindings order it before ingestUrl.
         status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
       setApiKey:
         params: [{ name: apiKey, type: String }]
@@ -45,28 +47,56 @@ classes:
         status: { dart: implemented, kotlin: planned, swift: planned, csharp: planned }
       setSpeculativeCloud:
         params: [{ name: enabled, type: bool }]
-        # Global default for serving an undownloaded registry model from the
-        # cloud while its weights download.
-        status: { dart: implemented, kotlin: planned, swift: planned, csharp: planned }
+        # Process-wide DEFAULT for serving an undownloaded registry model from
+        # the cloud while its weights download. It applies only to loads that
+        # do not opt in per-load: fromRegistrySpeculative sets the per-load
+        # override itself and is unaffected by this toggle.
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+        since: "0.8.0"
       isSpeculativeCloudEnabled:
         return: bool
-        status: { dart: implemented, kotlin: planned, swift: planned, csharp: planned }
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+        since: "0.8.0"
       releaseMemory:
         return: int
         # Host-driven memory release: call from the platform's low-memory
         # signal. Returns how many loaded models were released; each reloads
-        # itself transparently on its next run. Same reach as the other
-        # process-global settings — Dart exposes it on the entry-point class,
-        # the rest go through the generated bolt global.
-        status: { dart: implemented, kotlin: planned, swift: planned, csharp: planned }
+        # itself transparently on its next run.
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+        since: "0.8.0"
       setAutoRelease:
         params: [{ name: enabled, type: bool }]
         # Opt into releasing least-recently-used idle models when a load hits
         # device memory pressure. Off by default.
-        status: { dart: implemented, kotlin: planned, swift: planned, csharp: planned }
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+        since: "0.8.0"
       isAutoReleaseEnabled:
         return: bool
-        status: { dart: implemented, kotlin: planned, swift: planned, csharp: planned }
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+        since: "0.8.0"
+      hasApiKey:
+        return: bool
+        # Whether a Xybrid gateway key resolves, from init or the environment.
+        # Gates cloud routing and telemetry; on-device inference needs none.
+        # Dart reaches the bolt global directly and has no facade member.
+        status: { dart: planned, kotlin: implemented, swift: implemented, csharp: implemented }
+        since: "0.8.0"
+      setProviderApiKey:
+        params:
+          - { name: provider, type: String }
+          - { name: apiKey, type: String }
+        # Per-provider key for gateway forwarding. Distinct from the Xybrid
+        # platform key that init/setApiKey configures.
+        status: { dart: planned, kotlin: implemented, swift: implemented, csharp: implemented }
+        since: "0.8.0"
+      jsonSchemaToGbnf:
+        params: [{ name: schemaJson, type: String }]
+        return: String
+        # JSON Schema -> GBNF for GenerationConfig.grammar. Dart, Kotlin and
+        # Swift expose it as a top-level function rather than a member; C# has
+        # no top-level functions, so Unity puts it on XybridClient.
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+        since: "0.8.0"
       model:
         params:
           - { name: source, type: ModelSource }
@@ -138,14 +168,15 @@ classes:
         params: [{ name: modelId, type: String }]
         return: XybridModelLoader
         # Serves from the cloud gateway while the weights download, instead of
-        # blocking on the download. C# consumes the generated bolt constructor
-        # (XybridModel.FromRegistrySpeculative) — no loader facade there.
-        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: planned }
+        # blocking on the download. Sets the per-load override itself, so it
+        # does not depend on Xybrid.setSpeculativeCloud.
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
       willSpeculate:
         return: bool
-        # Whether load() would actually speculate: enabled, an API key
-        # resolves, and the model is not already cached. Never hits the network.
-        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: planned }
+        # Whether load() would actually speculate: speculation is in effect for
+        # this loader, an API key resolves, and the model is not already
+        # cached. Reads the local cache; never hits the network.
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
 
   # -------------------------------------------------------------------
   # 3. XybridModel
@@ -651,6 +682,13 @@ classes:
       stopSequences:
         type: "List<String>?"
         status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+      grammar:
+        type: "String?"
+        # GBNF grammar constraining decoding. Build one from a JSON Schema with
+        # jsonSchemaToGbnf, or pass raw GBNF. llama.cpp-only; other backends
+        # ignore it.
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+        since: "0.8.0"
       tools:
         type: "List<ToolDefinition>?"
         # Tools the model may call this turn. Empty/null = no tool calling.
