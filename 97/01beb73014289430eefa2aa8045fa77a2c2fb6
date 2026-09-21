@@ -1,0 +1,72 @@
+bindings/unity/Runtime/Api/Model.cs
+  s_aa39bae9368d33::t_9cee5f703c8f9f 50,130-131,147,303-305,321,342-345,365
+  s_aa39bae9368d33::t_0ae98f6ca50e7d 5,44-49,51-52,60-63,124-129,132-133,145-146,148-149,298-302,306-307,319-320,322-323,337-341,346-347,363-364,366-367
+crates/xybrid-bolt/src/lib.rs
+  s_aa39bae9368d33::t_522989e51e7adf 983-1022,1027-1028,1684,1686
+  s_aa39bae9368d33::t_def5e4e32e40f6 1221,1223-1230,1238-1239,1244,1251,1342-1346,1352,1356-1361,1369-1370,1376,1384
+  s_aa39bae9368d33::t_d62d81ea60ab00 44-45,1215-1216,1666-1683,1685,1687-1692
+bindings/apple/Sources/Xybrid/Xybrid.swift
+  s_aa39bae9368d33::t_6aae38f756961f 404-410,591-620,660-664,669-678
+bindings/apple/Sources/Xybrid/xybrid_bolt.swift
+  s_aa39bae9368d33::t_50383cb13332ab 850-876,1115-1117,1129,1146-1148,1160,1206-1216,1229,1245-1252,1265
+bindings/apple/include/xybrid-bolt.h
+  s_aa39bae9368d33::t_19a2d168a26c6e 136-139,164-165,169-170
+bindings/kotlin/bazel/jni/jni_glue.c
+  s_aa39bae9368d33::t_fa54fe9718c433 161-200,520,534,546,560,615,629,641,655
+bindings/kotlin/bazel/jni/xybrid_bolt.h
+  s_aa39bae9368d33::t_d101ceaebd57e2 136-139,164-165,169-170
+bindings/kotlin/src/main/kotlin/ai/xybrid/Xybrid.kt
+  s_aa39bae9368d33::t_84329abc792568 23,400-421,466-473,477-486,513-529,531-535
+bindings/kotlin/src/main/kotlin/ai/xybrid/XybridBolt.kt
+  s_aa39bae9368d33::t_ede6e3ec9b3b78 766-769,794-795,799-800,2148-2190,2443-2444,2446,2454,2468-2469,2471,2479,2517-2521,2523,2531,2544-2545,2547,2555
+bindings/python/xybrid/_bolt/__init__.py
+  s_aa39bae9368d33::t_281daf9d3a8549 1917-1949,2082,2088-2089,2091,2093,2098-2099,2101,2115,2121-2125,2127,2129,2133-2134,2136,2509
+bindings/python/xybrid/_bolt/__init__.pyi
+  s_aa39bae9368d33::t_475bf5c64b33ea 437-454,529,535-536,538,543-544,552,558-562,564,568-569
+bindings/python/xybrid/_bolt/_native.c
+  s_aa39bae9368d33::t_abf1ce4a45cd60 27-34,83,85,93,95,228-231,438-477,5034-5109,5719,5725-5726,5742-5745,5769,5775-5776,5792-5795,5918,5924-5925,5944-5947,5972,5978-5979,5998-6001,7513-7516
+bindings/unity/Runtime/Api/BoltCancellation.cs
+  s_fe0edce96e8462::t_9dda3e4a9a2001 1-85
+bindings/unity/Runtime/Api/BoltCancellation.cs.meta
+  s_aa39bae9368d33::t_b3bc89ca10d463 1-2
+bindings/unity/Runtime/Bolt/XybridBolt.cs
+  s_aa39bae9368d33::t_a5d451640ea964 778-780,842-848,909,912,915,918,979-981
+bindings/unity/Runtime/Bolt/XybridCancellationToken.cs
+  s_aa39bae9368d33::t_1b60d6ae41f9fd 1-80
+bindings/unity/Runtime/Bolt/XybridCancellationToken.cs.meta
+  s_aa39bae9368d33::t_860b0224dbe959 1-2
+bindings/unity/Runtime/Bolt/XybridModel.cs
+  s_aa39bae9368d33::t_6a56a7ab3cbf36 464-465,467,488,518-519,521,542,641-645,647,668,697-698,700,721
+bindings/unity/Runtime/BoltSupplement/XybridInference.cs
+  s_aa39bae9368d33::t_2d8e17630baa84 28-31,35-36,39-49,59-62,67-68,71-79
+crates/xybrid-ffi-facade/src/lib.rs
+  s_aa39bae9368d33::t_9eb5cfaec185ca 1757-1782
+docs/sdk/API_REFERENCE.md
+  s_aa39bae9368d33::t_e515129c0b744e 1302,1329-1362
+docs/sdk/api-surface.yaml
+  s_aa39bae9368d33::t_feb5617f5390ba 1091,1095-1096,1098,1100-1101
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "9701beb73014289430eefa2aa8045fa77a2c2fb6",
+  "prompts": {},
+  "sessions": {
+    "s_aa39bae9368d33": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0c1d03ef-59f1-4140-8a99-77436a8b5474",
+        "model": "claude-opus-5"
+      },
+      "human_author": "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
+    },
+    "s_fe0edce96e8462": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1a64a6b3-1c61-4cb8-a6cf-e11e5da6911a",
+        "model": "claude-opus-5"
+      },
+      "human_author": "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
+    }
+  }
+}
