@@ -157,6 +157,11 @@ pub struct ProgressReporter<'a> {
     reported_bytes: AtomicU64,
     /// Fallback progress in basis points, used when `total_bytes` is unknown.
     fraction_bp: AtomicU32,
+    /// How many artifacts this download will fetch, for the coarse
+    /// completed-files fallback. `0` means even that is unknown.
+    artifact_count: u32,
+    /// Artifacts finished so far, feeding the coarse fallback.
+    completed_files: AtomicU32,
     cancel: Arc<AtomicBool>,
     last_emit: Mutex<Option<Instant>>,
     /// Borrowed rather than boxed so callers can pass a closure that captures
@@ -179,6 +184,7 @@ impl<'a> ProgressReporter<'a> {
     /// as unknown — the registry reports `0` for entries with no declared size.
     pub(crate) fn new(
         total_bytes: Option<u64>,
+        artifact_count: usize,
         cancel: Arc<AtomicBool>,
         sink: &'a dyn Fn(DownloadStatus),
     ) -> Self {
@@ -187,6 +193,8 @@ impl<'a> ProgressReporter<'a> {
             completed_bytes: AtomicU64::new(0),
             reported_bytes: AtomicU64::new(0),
             fraction_bp: AtomicU32::new(0),
+            artifact_count: artifact_count.try_into().unwrap_or(u32::MAX),
+            completed_files: AtomicU32::new(0),
             cancel,
             last_emit: Mutex::new(None),
             sink,
@@ -223,7 +231,21 @@ impl<'a> ProgressReporter<'a> {
             .fetch_add(file_bytes, Ordering::Relaxed)
             + file_bytes;
         self.reported_bytes.fetch_max(total, Ordering::Relaxed);
+        // Keep the coarse signal advancing too. It is ignored while a byte
+        // total is known, but when one artifact declares no size there is no
+        // usable byte total at all — without this the bar would sit at zero
+        // for the whole download even as `downloaded_bytes` climbed.
+        self.advance_completed_files();
         self.emit(true);
+    }
+
+    /// Move the coarse completed-files fraction on by one artifact.
+    fn advance_completed_files(&self) {
+        if self.artifact_count == 0 {
+            return;
+        }
+        let completed = self.completed_files.fetch_add(1, Ordering::Relaxed) + 1;
+        self.set_fraction(completed as f32 / self.artifact_count as f32);
     }
 
     /// Set progress directly, for sources that expose no byte totals (Hugging
@@ -599,7 +621,20 @@ mod tests {
     }
 
     fn reporter_over<'a>(total: Option<u64>, sink: &'a Recorder) -> ProgressReporter<'a> {
-        ProgressReporter::new(total, Arc::new(AtomicBool::new(false)), sink.as_ref())
+        reporter_over_files(total, 0, sink)
+    }
+
+    fn reporter_over_files<'a>(
+        total: Option<u64>,
+        artifact_count: usize,
+        sink: &'a Recorder,
+    ) -> ProgressReporter<'a> {
+        ProgressReporter::new(
+            total,
+            artifact_count,
+            Arc::new(AtomicBool::new(false)),
+            sink.as_ref(),
+        )
     }
 
     #[test]
@@ -662,6 +697,34 @@ mod tests {
     }
 
     #[test]
+    fn an_undeclared_artifact_size_falls_back_to_a_file_count_bar() {
+        // A vision model whose projector omits a size has no usable byte
+        // total, but it must still get a moving bar rather than a flat zero
+        // until the terminal frame.
+        let (sink, seen) = recording_reporter();
+        let reporter = reporter_over_files(None, 2, &sink);
+
+        reporter.finish_file(1_000);
+        let after_first = *seen.lock().unwrap().last().unwrap();
+        assert!(
+            (after_first.progress - 0.5).abs() < 1e-3,
+            "expected a half-way file-count bar, got {}",
+            after_first.progress
+        );
+        assert_eq!(after_first.downloaded_bytes, 1_000);
+        assert_eq!(after_first.total_bytes, None);
+
+        reporter.finish_file(500);
+        let after_second = *seen.lock().unwrap().last().unwrap();
+        assert!(
+            after_second.progress < 1.0,
+            "in-flight progress must stay below 1.0, got {}",
+            after_second.progress
+        );
+        assert_eq!(after_second.downloaded_bytes, 1_500);
+    }
+
+    #[test]
     fn byte_totals_outrank_the_coarse_fraction() {
         let (sink, seen) = recording_reporter();
         let reporter = reporter_over(Some(1_000), &sink);
@@ -687,7 +750,7 @@ mod tests {
     fn cancel_flag_is_observed_by_the_reporter() {
         let cancel = Arc::new(AtomicBool::new(false));
         let sink: Recorder = Box::new(|_| {});
-        let reporter = ProgressReporter::new(None, Arc::clone(&cancel), sink.as_ref());
+        let reporter = ProgressReporter::new(None, 0, Arc::clone(&cancel), sink.as_ref());
         assert!(!reporter.is_cancelled());
         cancel.store(true, Ordering::Relaxed);
         assert!(reporter.is_cancelled());

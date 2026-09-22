@@ -2762,6 +2762,7 @@ impl ModelLoader {
         let hf_cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let hf_progress = crate::download::ProgressReporter::new(
             None,
+            total_files,
             hf_cancel,
             &_progress_callback as &dyn Fn(DownloadStatus),
         );

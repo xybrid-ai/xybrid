@@ -718,6 +718,7 @@ impl RegistryClient {
         let resolved = self.resolve(mask, platform)?;
         let reporter = ProgressReporter::new(
             Some(total_declared_bytes(&resolved)),
+            1 + resolved.artifacts.len(),
             cancel,
             &progress_callback,
         );
@@ -953,6 +954,7 @@ impl RegistryClient {
         let resolved = self.resolve(mask, platform)?;
         let reporter = ProgressReporter::new(
             Some(total_declared_bytes(&resolved)),
+            1 + resolved.artifacts.len(),
             cancel,
             &progress_callback,
         );
@@ -1753,7 +1755,7 @@ mod tests {
         // arriving during it must not sit unobserved for the whole interval.
         let cancel = Arc::new(AtomicBool::new(true));
         let sink = |_: DownloadStatus| {};
-        let reporter = ProgressReporter::new(None, cancel, &sink);
+        let reporter = ProgressReporter::new(None, 1, cancel, &sink);
 
         let started = Instant::now();
         assert!(!RegistryClient::sleep_unless_cancelled(
