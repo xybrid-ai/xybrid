@@ -700,6 +700,7 @@ class XybridModule(reactContext: ReactApplicationContext) :
       is XybridError.MissingArtifact -> "xybrid_missing_artifact"
       is XybridError.UnsupportedModelCapability -> "xybrid_unsupported_model_capability"
       is XybridError.UnsupportedBackendCapability -> "xybrid_unsupported_backend_capability"
+      is XybridError.Cancelled -> "xybrid_cancelled"
     }
     promise.reject(code, e.message ?: "Xybrid error", e)
   }

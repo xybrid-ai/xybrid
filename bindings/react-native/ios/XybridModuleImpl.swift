@@ -653,6 +653,13 @@ public final class XybridModuleImpl: NSObject {
     case .circuitOpen: code = "xybrid_circuit_open"
     case .rateLimited: code = "xybrid_rate_limited"
     case .timeout: code = "xybrid_timeout"
+    // The four below predate this file's last update — the switch is
+    // exhaustive over a shared enum, so it could not compile without them.
+    case .missingArtifact: code = "xybrid_missing_artifact"
+    case .unsupportedModelCapability: code = "xybrid_unsupported_model_capability"
+    case .unsupportedBackendCapability: code = "xybrid_unsupported_backend_capability"
+    case .invalidImage: code = "xybrid_invalid_image"
+    case .cancelled: code = "xybrid_cancelled"
     }
     reject(code, error.errorDescription ?? "Xybrid error", error)
   }

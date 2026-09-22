@@ -1115,6 +1115,8 @@ extension XybridError: LocalizedError {
             return "Unsupported backend capability: \(message)"
         case .invalidImage(let message):
             return "Invalid image: \(message)"
+        case .cancelled(let message):
+            return "Cancelled: \(message)"
         }
     }
 }
