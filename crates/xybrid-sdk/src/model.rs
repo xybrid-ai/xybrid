@@ -1522,13 +1522,18 @@ impl SpeculativeDownload {
     }
 
     fn notify(&self, status: DownloadStatus) {
-        for observer in self
-            .observers
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .iter()
-        {
+        let mut observers = self.observers.lock().unwrap_or_else(|e| e.into_inner());
+        for observer in observers.iter() {
             observer(status);
+        }
+        if status.state != DownloadState::Downloading {
+            // Terminal: nothing further will be emitted, so release the host
+            // closures here rather than holding them for the model's lifetime.
+            // Done under the same lock `watch` registers through, so an
+            // observer arriving concurrently either lands before this and
+            // receives the frame, or lands after and reads the terminal
+            // status itself.
+            observers.clear();
         }
     }
 
@@ -1566,26 +1571,24 @@ impl SpeculativeDownload {
         *guard = Some(installed_local);
         drop(guard);
         self.finished.notify_all();
-        // Push the terminal frame, then drop the observers: nothing further
-        // will be emitted, and holding them would keep host closures alive for
-        // the model's whole lifetime.
+        // Pushes the terminal frame and drops the observers, both under the
+        // observer lock (see `notify`).
         self.notify(self.status());
-        self.observers
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .clear();
     }
 
     /// Register an observer for pushed progress updates, delivering the
     /// current snapshot first so a late subscriber still gets a frame.
     fn watch(&self, observer: crate::download::DownloadObserver) {
+        // Lock before reading the status: `notify` delivers the terminal frame
+        // and clears the list under this same lock, so reading first would
+        // leave a window where a download finishing right now publishes to an
+        // empty list and then drops this observer unnotified — leaving the
+        // host's stream open forever.
+        let mut observers = self.observers.lock().unwrap_or_else(|e| e.into_inner());
         let snapshot = self.status();
         observer(snapshot);
         if snapshot.state == DownloadState::Downloading {
-            self.observers
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .push(observer);
+            observers.push(observer);
         }
     }
 
@@ -6367,6 +6370,40 @@ mod tests {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .is_empty());
+    }
+
+    /// Same lock-ordering contract as [`crate::download::ModelDownload::watch`]:
+    /// the observer lock must be held across the status read, because `notify`
+    /// delivers the terminal frame and clears the list under it. Reading first
+    /// would let a download finishing in that window publish to an empty list
+    /// and drop the observer that arrives a moment later, leaving the host's
+    /// stream open forever.
+    #[test]
+    fn speculative_watch_holds_the_observer_lock_across_its_status_read() {
+        let download = Arc::new(SpeculativeDownload::default());
+        let guard = download.observers.lock().unwrap_or_else(|e| e.into_inner());
+
+        let subscriber = Arc::clone(&download);
+        let delivered = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let flag = Arc::clone(&delivered);
+        let watching = std::thread::spawn(move || {
+            subscriber.watch(Box::new(move |_| {
+                flag.store(true, std::sync::atomic::Ordering::Relaxed)
+            }));
+        });
+
+        std::thread::sleep(Duration::from_millis(50));
+        assert!(
+            !delivered.load(std::sync::atomic::Ordering::Relaxed),
+            "watch delivered a frame without holding the observer lock"
+        );
+
+        drop(guard);
+        watching.join().expect("watching thread panicked");
+        assert!(
+            delivered.load(std::sync::atomic::Ordering::Relaxed),
+            "watch never delivered its first frame"
+        );
     }
 
     /// `await_download` must return on timeout rather than parking the caller

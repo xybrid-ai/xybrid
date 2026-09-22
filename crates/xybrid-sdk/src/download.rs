@@ -116,12 +116,19 @@ impl Default for DownloadStatus {
 }
 
 impl DownloadStatus {
-    /// A finished download: 1.0, with `downloaded_bytes` settled on the total.
+    /// A finished download: 1.0, with `downloaded_bytes` settled on whichever
+    /// of the measured and declared counts is larger.
+    ///
+    /// Taking the larger covers both ways the two can disagree: a throttled
+    /// final update may have been dropped, leaving the measured count short of
+    /// the declared total; and a stale registry size may be smaller than what
+    /// actually landed, in which case settling on the declared total would
+    /// rewind the bar at the very last frame.
     pub(crate) fn ready(downloaded_bytes: u64, total_bytes: Option<u64>) -> Self {
         Self {
             state: DownloadState::Ready,
             progress: 1.0,
-            downloaded_bytes: total_bytes.unwrap_or(downloaded_bytes),
+            downloaded_bytes: downloaded_bytes.max(total_bytes.unwrap_or(0)),
             total_bytes,
         }
     }
@@ -483,15 +490,20 @@ impl ModelDownload {
     where
         F: Fn(DownloadStatus) + Send + Sync + 'static,
     {
+        let observer: DownloadObserver = Box::new(observer);
+        // The observer lock is taken *before* the status is read, and
+        // [`Self::publish`] delivers its terminal frame and clears the list
+        // under that same lock. Reading the status first would leave a window
+        // where a download finishing right now publishes to an empty list and
+        // clears it, after which this registration is never notified again —
+        // the host's stream would then stay open forever.
+        let mut observers = self.observers.lock().unwrap_or_else(|e| e.into_inner());
         let snapshot = self.status();
         observer(snapshot);
         // A download that already finished gets no further updates, so keeping
         // the observer would leak it for the handle's lifetime.
         if snapshot.state == DownloadState::Downloading {
-            self.observers
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .push(Box::new(observer));
+            observers.push(observer);
         }
     }
 
@@ -540,13 +552,18 @@ impl ModelDownload {
             *revision += 1;
         }
         self.cell.changed.notify_all();
-        for observer in self
-            .observers
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .iter()
-        {
+        let mut observers = self.observers.lock().unwrap_or_else(|e| e.into_inner());
+        for observer in observers.iter() {
             observer(status);
+        }
+        if status.state != DownloadState::Downloading {
+            // Terminal: nothing further will be emitted, so release the host
+            // closures here rather than holding them for the handle's
+            // lifetime. Done under the same lock `watch` registers through, so
+            // an observer arriving concurrently either lands before this and
+            // receives the frame, or lands after and reads the terminal status
+            // itself.
+            observers.clear();
         }
     }
 
@@ -560,13 +577,6 @@ impl ModelDownload {
             other => DownloadStatus::terminal(other, &last),
         };
         self.publish(terminal);
-        // `publish` short-circuits on an already-terminal state, so the
-        // observers are drained here rather than there: nothing more will be
-        // emitted, and holding them would keep host closures alive.
-        self.observers
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .clear();
     }
 }
 
@@ -712,6 +722,103 @@ mod tests {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .is_empty());
+    }
+
+    /// A handle parked in `Downloading`, so a test can drive the terminal
+    /// transition by hand rather than through a real registry fetch.
+    fn pending_download() -> ModelDownload {
+        ModelDownload {
+            cell: Arc::new(DownloadCell {
+                status: Mutex::new(DownloadStatus::default()),
+                revision: Mutex::new(0),
+                changed: Condvar::new(),
+                error: Mutex::new(None),
+            }),
+            cancel: Arc::new(AtomicBool::new(false)),
+            observers: Arc::new(Mutex::new(Vec::new())),
+        }
+    }
+
+    #[test]
+    fn watch_holds_the_observer_lock_across_its_status_read() {
+        // This ordering is the whole fix for a dropped terminal frame.
+        // `publish` delivers the terminal status and clears the list under the
+        // observer lock, so `watch` must hold that lock before it reads the
+        // status. Reading first leaves a window where a download finishing
+        // right now publishes to an empty list and clears it, after which the
+        // observer registered a moment later is never notified — the host's
+        // `for await` / `collect` loop then never closes and the `load()`
+        // after it never runs.
+        //
+        // Asserted by holding the lock and proving `watch` cannot deliver its
+        // first frame until it is released.
+        let download = Arc::new(pending_download());
+        let guard = download.observers.lock().unwrap_or_else(|e| e.into_inner());
+
+        let subscriber = Arc::clone(&download);
+        let delivered = Arc::new(AtomicBool::new(false));
+        let flag = Arc::clone(&delivered);
+        let watching = std::thread::spawn(move || {
+            subscriber.watch(move |_| flag.store(true, Ordering::Relaxed));
+        });
+
+        std::thread::sleep(Duration::from_millis(50));
+        assert!(
+            !delivered.load(Ordering::Relaxed),
+            "watch delivered a frame without holding the observer lock"
+        );
+
+        drop(guard);
+        watching.join().expect("watching thread panicked");
+        assert!(
+            delivered.load(Ordering::Relaxed),
+            "watch never delivered its first frame"
+        );
+    }
+
+    #[test]
+    fn publish_delivers_the_terminal_frame_then_drops_the_observers() {
+        let download = pending_download();
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let sink = Arc::clone(&seen);
+        download.watch(move |status| {
+            sink.lock().unwrap_or_else(|e| e.into_inner()).push(status);
+        });
+
+        download.publish_terminal(DownloadState::Ready, None);
+
+        let frames = seen.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        assert_eq!(frames.len(), 2, "expected a first frame and a terminal one");
+        assert_eq!(frames[0].state, DownloadState::Downloading);
+        assert_eq!(frames[1].state, DownloadState::Ready);
+        assert!(
+            download
+                .observers
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .is_empty(),
+            "host closures retained past the terminal frame"
+        );
+    }
+
+    #[test]
+    fn terminal_frame_never_rewinds_the_measured_byte_count() {
+        // A stale registry size under-declares what actually landed. Settling
+        // the terminal frame on the declared total would walk the bar
+        // backwards at the very last update.
+        let overshot = DownloadStatus::ready(120, Some(100));
+        assert_eq!(overshot.downloaded_bytes, 120);
+        assert_eq!(overshot.total_bytes, Some(100));
+        assert_eq!(overshot.progress, 1.0);
+
+        // The other direction still settles on the total: the last in-flight
+        // update may have been dropped by the throttle.
+        let throttled = DownloadStatus::ready(90, Some(100));
+        assert_eq!(throttled.downloaded_bytes, 100);
+
+        // No declared total: report exactly what was measured.
+        let unknown = DownloadStatus::ready(64, None);
+        assert_eq!(unknown.downloaded_bytes, 64);
     }
 
     #[test]

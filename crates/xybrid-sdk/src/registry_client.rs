@@ -55,6 +55,9 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use xybrid_core::http::{CircuitBreaker, CircuitConfig, RetryPolicy};
 
+/// How often a retry backoff wakes to check for cancellation.
+const CANCEL_POLL_INTERVAL: Duration = Duration::from_millis(100);
+
 pub const DEFAULT_REGISTRY_URL: &str = "https://registry.xybrid.dev";
 pub const FALLBACK_REGISTRY_URL: &str = "https://r2.xybrid.dev";
 
@@ -117,6 +120,20 @@ fn build_client_header_with_optout(binding: &str, opted_out: bool) -> Option<Str
 /// of restarting the bar. Entries with no declared size contribute `0`, and a
 /// total of `0` is treated as "unknown" by [`ProgressReporter`].
 fn total_declared_bytes(resolved: &ResolvedVariant) -> u64 {
+    // One undeclared size poisons the whole aggregate: the missing artifact's
+    // bytes would push the running count past the "total", pin progress at the
+    // in-flight ceiling for the rest of the download, and let the terminal
+    // frame report fewer bytes than the bar already showed. Reporting the
+    // total as unknown instead downgrades progress to the coarse signal and
+    // keeps the byte count exact, which is the honest trade.
+    if resolved.size_bytes == 0
+        || resolved
+            .artifacts
+            .iter()
+            .any(|artifact| artifact.size_bytes == 0)
+    {
+        return 0;
+    }
     resolved
         .artifacts
         .iter()
@@ -705,6 +722,14 @@ impl RegistryClient {
             &progress_callback,
         );
         let path = self.fetch_bundle(mask, &resolved, &reporter)?;
+        // Hash verification and extraction run after the last byte, with no
+        // chunk loop to check the flag — so re-check here rather than
+        // announcing `Ready` for a download the caller already stopped. The
+        // bytes stay cached: they are complete and verified, so discarding
+        // them would only cost the next attempt.
+        if reporter.is_cancelled() {
+            return Err(ProgressReporter::cancelled_error());
+        }
         reporter.finish();
         Ok(path)
     }
@@ -940,6 +965,11 @@ impl RegistryClient {
             let xyb_path = self.fetch_bundle(mask, &resolved, &reporter)?;
             self.cache.ensure_extracted(&xyb_path)
         }?;
+        // Same reasoning as `fetch_cancellable`: the tail past the last byte
+        // has no chunk loop, so a cancel landing there must not report `Ready`.
+        if reporter.is_cancelled() {
+            return Err(ProgressReporter::cancelled_error());
+        }
         reporter.finish();
         Ok(extract_dir)
     }
@@ -1185,8 +1215,12 @@ impl RegistryClient {
                 download_policy.delay_for_attempt(attempt)
             };
 
-            if !delay.is_zero() {
-                std::thread::sleep(delay);
+            // Sliced rather than one sleep: a server-supplied `Retry-After`
+            // can run to tens of seconds, and a cancel arriving during it
+            // would otherwise sit unobserved for that whole interval while the
+            // download still reported `Downloading`.
+            if !Self::sleep_unless_cancelled(delay, reporter) {
+                return Err(ProgressReporter::cancelled_error());
             }
 
             match self.try_download(url, dest, reporter) {
@@ -1208,6 +1242,22 @@ impl RegistryClient {
 
         Err(last_error
             .unwrap_or_else(|| SdkError::network("Download failed after all retry attempts")))
+    }
+
+    /// Sleep for `delay`, waking every [`CANCEL_POLL_INTERVAL`] to check the
+    /// cancellation flag. Returns `false` if the wait was cut short by a
+    /// cancel.
+    fn sleep_unless_cancelled(delay: Duration, reporter: &ProgressReporter<'_>) -> bool {
+        let mut remaining = delay;
+        while !remaining.is_zero() {
+            if reporter.is_cancelled() {
+                return false;
+            }
+            let slice = remaining.min(CANCEL_POLL_INTERVAL);
+            std::thread::sleep(slice);
+            remaining -= slice;
+        }
+        !reporter.is_cancelled()
     }
 
     /// Attempt a single download.
@@ -1652,6 +1702,69 @@ mod tests {
             "other"
         );
         assert_eq!(classify_download_source(""), "other");
+    }
+
+    /// Build a resolved variant with the given main + companion sizes.
+    fn variant_with_sizes(main: u64, companions: &[u64]) -> ResolvedVariant {
+        let artifacts: Vec<serde_json::Value> = companions
+            .iter()
+            .enumerate()
+            .map(|(index, size)| {
+                serde_json::json!({
+                    "file": format!("companion-{index}.gguf"),
+                    "download_url": format!("https://example.com/companion-{index}.gguf"),
+                    "size_bytes": size,
+                    "sha256": ""
+                })
+            })
+            .collect();
+        serde_json::from_value(serde_json::json!({
+            "hf_repo": "xybrid-ai/sized",
+            "file": "model.gguf",
+            "download_url": "https://example.com/model.gguf",
+            "format": "gguf",
+            "quantization": "q4_k_m",
+            "size_bytes": main,
+            "sha256": "",
+            "passthrough": true,
+            "artifacts": artifacts,
+        }))
+        .expect("test variant should deserialize")
+    }
+
+    #[test]
+    fn declared_total_is_unknown_unless_every_artifact_publishes_a_size() {
+        assert_eq!(total_declared_bytes(&variant_with_sizes(10, &[5, 2])), 17);
+        assert_eq!(total_declared_bytes(&variant_with_sizes(10, &[])), 10);
+
+        // A companion with no declared size would otherwise let the running
+        // count overshoot the "total": the bar would saturate at the in-flight
+        // ceiling and the terminal frame could report fewer bytes than the
+        // caller already saw. `0` means unknown, which downgrades progress to
+        // the coarse signal but keeps the byte count exact.
+        assert_eq!(total_declared_bytes(&variant_with_sizes(10, &[0])), 0);
+        assert_eq!(total_declared_bytes(&variant_with_sizes(10, &[5, 0])), 0);
+        assert_eq!(total_declared_bytes(&variant_with_sizes(0, &[5])), 0);
+    }
+
+    #[test]
+    fn retry_backoff_gives_up_promptly_when_cancelled() {
+        // A server-supplied `Retry-After` can run to tens of seconds; a cancel
+        // arriving during it must not sit unobserved for the whole interval.
+        let cancel = Arc::new(AtomicBool::new(true));
+        let sink = |_: DownloadStatus| {};
+        let reporter = ProgressReporter::new(None, cancel, &sink);
+
+        let started = Instant::now();
+        assert!(!RegistryClient::sleep_unless_cancelled(
+            Duration::from_secs(30),
+            &reporter
+        ));
+        assert!(
+            started.elapsed() < Duration::from_secs(1),
+            "cancelled backoff waited {:?}",
+            started.elapsed()
+        );
     }
 
     #[test]

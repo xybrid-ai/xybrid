@@ -353,7 +353,7 @@ public struct ModelLoader: Sendable {
     /// directory, or Hugging Face repo — where ``load()`` is the whole story.
     /// Cancelling the task consuming `progress()` unsubscribes from updates;
     /// call ``XybridDownload/cancel()`` to stop the transfer itself.
-    func download() -> XybridDownload? {
+    public func download() -> XybridDownload? {
         switch source {
         case .registry(let id), .registrySpeculative(let id):
             return XybridDownload(fromRegistry: id)
