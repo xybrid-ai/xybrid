@@ -1,0 +1,25 @@
+bindings/apple/Sources/Xybrid/Xybrid.swift
+  s_3e08cb1cab26f9::t_fe1d3022feff8e 334-363
+bindings/unity/Runtime/Api/ModelLoader.cs
+  s_3e08cb1cab26f9::t_ab9469c792c1d1 154-195
+  s_3e08cb1cab26f9::t_b97cac30417bb0 153
+bindings/kotlin/src/main/kotlin/ai/xybrid/Xybrid.kt
+  s_3e08cb1cab26f9::t_3e78a75593dc0e 330-357
+  s_3e08cb1cab26f9::t_91c980b46ac5d5 329
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "bc54384d87593a83d23ff3f4e5a7c139872958e9",
+  "prompts": {},
+  "sessions": {
+    "s_3e08cb1cab26f9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "27dd828b-8bde-449e-92e0-3fce2b3a673b",
+        "model": "claude-opus-5"
+      },
+      "human_author": "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
+    }
+  }
+}
