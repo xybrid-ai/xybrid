@@ -8,6 +8,11 @@ post-process it needs was invisible and got lost on every regeneration.
 
 The post-processes:
 
+  boltffi's async/stream runtime resumes continuations with a bare
+  `Result.success(...)`. The hand-written wrapper declares
+  `typealias Result = XybridResult` in the same package, which shadows
+  `kotlin.Result` and breaks the compile; the call is qualified here.
+
   boltffi 0.29 emits each `XybridError` variant as a data class holding its
   payload, and `XybridError` extends `Exception`. For the fourteen variants
   whose payload field is `message`, that collides with `Throwable.message`:
@@ -147,6 +152,26 @@ def _add_result_wire_compatibility(source: str) -> str:
     return source.replace(decoder_target, decoder_replacement, 1)
 
 
+def _qualify_kotlin_result(source: str) -> str:
+    """Fully qualify `kotlin.Result` in the generated async/stream runtime.
+
+    The hand-written wrapper declares `typealias Result = XybridResult` in the
+    same `ai.xybrid` package, which shadows `kotlin.Result` for every file in
+    it. boltffi's async runtime resumes a continuation with a bare
+    `Result.success(...)`, so the binding stops compiling:
+
+        e: Expression 'success' cannot be invoked as a function.
+
+    Qualifying the call is the narrow fix; renaming the public typealias would
+    break every Kotlin consumer.
+    """
+
+    target = "continuation.resumeWith(Result.success("
+    if source.count(target) != 1:
+        sys.exit("error: expected one generated `Result.success(` continuation resume")
+    return source.replace(target, "continuation.resumeWith(kotlin.Result.success(", 1)
+
+
 def render() -> tuple[str, dict[str, bytes]]:
     subprocess.run(["boltffi", "generate", "kotlin", "--deny-skipped"], cwd=BOLT_DIR, check=True)
     if not RAW_FILE.is_file():
@@ -168,6 +193,7 @@ def render() -> tuple[str, dict[str, bytes]]:
         "    val reasoningContent: String? = null\n) {",
     )
     source = _add_result_wire_compatibility(source)
+    source = _qualify_kotlin_result(source)
     if overrides == 0:
         # Either boltffi fixed this upstream or the error shape moved. Both
         # want a human to re-read the transform before it silently no-ops.

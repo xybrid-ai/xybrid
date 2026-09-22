@@ -391,6 +391,11 @@ def test_xybrid_error_is_catchable_and_wraps_the_generated_payload() -> None:
         (xybrid.Timeout, bolt.XybridErrorTimeout(timeout_ms=500), "timed out after 500ms"),
         (xybrid.DirectoryNotFound, bolt.XybridErrorDirectoryNotFound(path="/tmp/x"), "directory not found: /tmp/x"),
         (xybrid.AbortedForCloudFallback, bolt.XybridErrorAbortedForCloudFallback(reason="thermal"), "thermal"),
+        (
+            xybrid.Cancelled,
+            bolt.XybridErrorCancelled(message="download cancelled by caller"),
+            "download cancelled by caller",
+        ),
     ],
 )
 def test_native_errors_raise_the_typed_exception(exception_type: type, payload: object, message: str) -> None:

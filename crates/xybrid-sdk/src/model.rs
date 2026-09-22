@@ -2386,7 +2386,7 @@ impl ModelLoader {
         progress_callback: &F,
     ) -> Option<SdkResult<XybridModel>>
     where
-        F: Fn(f32),
+        F: Fn(DownloadStatus),
     {
         let snapshot = crate::cache::hf_shared::find_shared_snapshot(repo, revision)?;
         log::debug!(target: "xybrid_sdk", "Shared Hugging Face cache snapshot for '{}' at commit {}", repo, snapshot.commit);
@@ -2411,7 +2411,11 @@ impl ModelLoader {
                         e,
                     )
                 })?;
-            progress_callback(1.0);
+            // Nothing crossed the network — the files were hardlinked or
+            // copied out of the shared cache — so the byte count is honestly
+            // zero and the total unknown. The terminal `Ready` still fires so
+            // a host driving a bar sees it complete.
+            progress_callback(DownloadStatus::ready(0, None));
 
             let metadata_path = cache_dir.join("model_metadata.json");
             if !metadata_path.exists() {

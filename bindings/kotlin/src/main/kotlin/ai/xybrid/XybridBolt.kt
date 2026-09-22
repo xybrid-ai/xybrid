@@ -650,7 +650,7 @@ private val boltffiCallbackScope =
 private object BoltFfiAsync {
     fun resume(handle: Long, pollResult: Byte) {
         val continuation = boltffiContinuationMap.remove(handle) ?: return
-        continuation.resumeWith(Result.success(pollResult))
+        continuation.resumeWith(kotlin.Result.success(pollResult))
     }
 }
 

@@ -885,4 +885,5 @@ val XybridError.displayMessage: String
         is XybridError.UnsupportedModelCapability -> message
         is XybridError.UnsupportedBackendCapability -> message
         is XybridError.InvalidImage -> message
+        is XybridError.Cancelled -> message
     }
