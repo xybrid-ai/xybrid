@@ -283,6 +283,53 @@ def test_model_supports_explicit_release() -> None:
     assert hasattr(xybrid.XybridModel, "__exit__")
 
 
+@pytest.mark.parametrize(
+    "subscription",
+    [bolt.XybridDownloadProgressSubscription, bolt.XybridModelDownloadProgressSubscription],
+)
+def test_download_progress_subscriptions_are_iterable(subscription: type) -> None:
+    """The sugar turns boltffi's wait/pop_batch pair into a plain iterable.
+
+    Without it every caller writes the same drain loop, and a generator rename
+    would silently drop the documented `for status in download.progress()`.
+    """
+
+    assert hasattr(subscription, "__iter__")
+    assert callable(subscription.__iter__)
+
+
+def test_download_progress_iteration_drains_before_stopping() -> None:
+    """The terminal status is pushed just before the stream closes.
+
+    A loop that stopped on `unsubscribed` without popping first would drop the
+    `Ready` frame -- exactly the event a progress bar is waiting for.
+    """
+
+    emitted = [
+        xybrid.XybridDownloadStatus(
+            state=xybrid.XybridDownloadState.READY,
+            progress=1.0,
+            downloaded_bytes=2048,
+            total_bytes=2048,
+        )
+    ]
+
+    class ClosedWithPendingItems:
+        """Reports `unsubscribed` while a batch is still buffered."""
+
+        __iter__ = bolt.XybridDownloadProgressSubscription.__iter__
+
+        def wait(self, timeout_milliseconds: int) -> int:
+            return -1
+
+        def pop_batch(self, max_count: int = 16) -> list:
+            return [emitted.pop(0)] if emitted else []
+
+    assert [status.state for status in ClosedWithPendingItems()] == [
+        xybrid.XybridDownloadState.READY
+    ]
+
+
 def test_generation_configs_presets_match_kotlin_values() -> None:
     greedy = xybrid.GenerationConfigs.greedy()
     creative = xybrid.GenerationConfigs.creative()

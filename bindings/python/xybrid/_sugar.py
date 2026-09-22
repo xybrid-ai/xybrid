@@ -343,6 +343,38 @@ def _install_model_accessors() -> None:
     model.__exit__ = __exit__
 
 
+def _install_download_iteration() -> None:
+    """Make the generated progress subscriptions plain Python iterables.
+
+    BoltFFI's Python target emits a `wait`/`pop_batch` pair rather than a
+    language-native stream, so iterating one by hand means writing the same
+    drain loop at every call site. `__iter__` does it once.
+    """
+
+    # `wait` mirrors boltffi's `WaitResult`: 1 events available, 0 timeout,
+    # -1 unsubscribed (the download reached a terminal state).
+    unsubscribed = -1
+    wait_slice_ms = 250
+
+    def __iter__(self: Any) -> Any:
+        while True:
+            outcome = self.wait(wait_slice_ms)
+            # Drain whatever landed before deciding to stop: the terminal
+            # status is pushed just before the stream closes, so bailing on
+            # `unsubscribed` without popping would swallow it.
+            batch = self.pop_batch()
+            for status in batch:
+                yield status
+            if outcome == unsubscribed and not batch:
+                return
+
+    for subscription in (
+        _bolt.XybridDownloadProgressSubscription,
+        _bolt.XybridModelDownloadProgressSubscription,
+    ):
+        subscription.__iter__ = __iter__
+
+
 def install() -> None:
     """Attach the SDK conveniences to the generated classes. Idempotent."""
 
@@ -354,4 +386,5 @@ def install() -> None:
     _install_stream_token_accessors()
     _install_voice_accessors()
     _install_model_accessors()
+    _install_download_iteration()
     _bolt._xybrid_sugar_installed = True
