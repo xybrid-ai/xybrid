@@ -1,0 +1,25 @@
+bindings/react-native/ios/XybridModuleImpl.swift
+  s_3e08cb1cab26f9::t_70bdc8e6c6c6e7 656-662
+bindings/react-native/android/src/main/java/ai/xybrid/reactnative/XybridModule.kt
+  s_3e08cb1cab26f9::t_70bdc8e6c6c6e7 703
+bindings/apple/Sources/Xybrid/Xybrid.swift
+  s_3e08cb1cab26f9::t_70bdc8e6c6c6e7 1118-1119
+bindings/unity/Runtime/Api/XybridException.cs
+  s_3e08cb1cab26f9::t_70bdc8e6c6c6e7 136
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "333e57b33bf12db183168e38e29d6062c637ef0e",
+  "prompts": {},
+  "sessions": {
+    "s_3e08cb1cab26f9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "27dd828b-8bde-449e-92e0-3fce2b3a673b",
+        "model": "claude-opus-5"
+      },
+      "human_author": "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
+    }
+  }
+}
