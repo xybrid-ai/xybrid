@@ -1,0 +1,173 @@
+crates/xybrid-cli/src/commands/fetch.rs
+  s_3e08cb1cab26f9::t_14d6ac24a19557 39-40,205,246-247
+crates/xybrid-sdk/src/pipeline/mod.rs
+  s_3e08cb1cab26f9::t_06b517d053da4d 974-978,981-983
+bindings/apple/include/xybrid-bolt.h
+  s_3e08cb1cab26f9::t_47fd7c8953b4c9 101,129,138-144,237-248
+bindings/react-native/ios/XybridModuleImpl.swift
+  s_3e08cb1cab26f9::t_6024b28a2848d9 583,585-593
+docs/content/docs/(integration)/sdks/flutter.mdx
+  s_3e08cb1cab26f9::t_961106366f2d28 102-103,112-117,162
+bindings/kotlin/bazel/jni/jni_glue.c
+  s_3e08cb1cab26f9::t_4a60d6752e77c0 1885-1887
+  s_3e08cb1cab26f9::t_47fd7c8953b4c9 4,13-193,343-462,1780-1884
+crates/xybrid-bolt/src/lib.rs
+  s_3e08cb1cab26f9::t_e04a6ffc97db4f 17-22,52-54
+  s_3e08cb1cab26f9::t_448d380cb91072 684,1058,1060-1063,1067,1081,1086
+  s_3e08cb1cab26f9::t_da60e1c32dd253 1057,1059,1064-1066,1068-1080,1082-1085,1087-1154,1334-1354
+  s_3e08cb1cab26f9::t_5275208f13c1ab 149,199,237,685,687,691-692,694-695,698-706,708,713-716,725,730-731
+  s_3e08cb1cab26f9::t_42c479726bd7f2 87-107,110-148,150-152
+  s_3e08cb1cab26f9::t_c3ef9278d0882c 1355
+bindings/unity/Runtime/Bolt/XybridBolt.cs
+  s_3e08cb1cab26f9::t_697cedb188e3d9 390-473,853-878,897-902,990-1002,1114-1116,1138-1166
+  s_3e08cb1cab26f9::t_4a60d6752e77c0 1167
+bindings/flutter/lib/src/rust/frb_generated.web.dart
+  s_3e08cb1cab26f9::t_3827e303c6862f 234-236,264-266,431-433,629-632,666-668,849-851,1049-1052,1088-1090,1286-1287
+  s_3e08cb1cab26f9::t_af815f1d3f03f5 1288
+crates/xybrid-sdk/src/registry_client.rs
+  s_3e08cb1cab26f9::t_dd89e06f9a61f0 2083-2087
+  s_3e08cb1cab26f9::t_13ee7112914440 112-126,788,1092,1192
+  s_3e08cb1cab26f9::t_22a6d5a8673790 1816-1915,1920-2013
+  s_3e08cb1cab26f9::t_153552a5846e6e 667-669,677-699,702-720
+  s_3e08cb1cab26f9::t_590e2cd8d52e69 31-32,39,53
+  s_3e08cb1cab26f9::t_72e88612aa1c9e 1916-1919
+  s_3e08cb1cab26f9::t_b6393164f1e232 799
+  s_3e08cb1cab26f9::t_d52ad95bd85369 850-854,866-872,887-910,921-923,929-933,935,937,940,942-944,952,956-957,1008,1022,1070,1077,1079,1098
+  s_3e08cb1cab26f9::t_20d03350f3cb61 1169,1173-1174,1195-1196,1200-1202,1214,1218-1222,1255-1265
+crates/xybrid-sdk/src/model.rs
+  s_3e08cb1cab26f9::t_ab1064c40a0bc0 6289-6300,6306,6308,6312-6313,6315-6318,6329,6334,6342-6366
+  s_3e08cb1cab26f9::t_a152e83a7b0eec 2473,2752-2760,2767,2851-2857,2868,2923
+  s_3e08cb1cab26f9::t_6103136f36b2c0 1475-1481,1496-1509,1515-1517,1519-1532
+  s_3e08cb1cab26f9::t_3707b95c476072 292-294
+  s_3e08cb1cab26f9::t_fe9044257b95ef 200-205
+  s_3e08cb1cab26f9::t_72693b9c858e29 11
+  s_3e08cb1cab26f9::t_06b517d053da4d 22
+  s_3e08cb1cab26f9::t_e924351db96f3d 1569-1580,1582-1589
+  s_3e08cb1cab26f9::t_ff99415f810383 1014-1015,1471,1485-1492,2052-2059,2066-2071,2079,2164,2243-2245,3308
+  s_3e08cb1cab26f9::t_4223ee7bd3d9d9 2111-2142,3309-3327
+  s_3e08cb1cab26f9::t_1387d44f87cb28 1482,1581
+  s_3e08cb1cab26f9::t_5361122493edeb 251-252
+  s_3e08cb1cab26f9::t_5bb240e173a650 44-49
+  s_3e08cb1cab26f9::t_a59ad6effdb51d 6367
+bindings/flutter/lib/src/model_loader.dart
+  s_3e08cb1cab26f9::t_173b064664745a 105-109,114-126,220-221,232-233,245-249,317-321
+bindings/react-native/android/src/main/java/ai/xybrid/reactnative/XybridModule.kt
+  s_3e08cb1cab26f9::t_6024b28a2848d9 638,642-646
+crates/xybrid-sdk/src/lib.rs
+  s_3e08cb1cab26f9::t_ffd80a9faf4eed 156,226-227
+  s_3e08cb1cab26f9::t_42c479726bd7f2 219
+bindings/kotlin/src/main/kotlin/ai/xybrid/XybridBolt.kt
+  s_3e08cb1cab26f9::t_47fd7c8953b4c9 5-7,629-770,911-917,1010-1025,1571-1579,1586-1594,1597,1603-1604,1622-1624,2103-2117,2145,2312-2313,2319-2320,2322-2326,2358-2452,3255-3328
+  s_3e08cb1cab26f9::t_4a60d6752e77c0 3329-3330
+bindings/unity/Runtime/Bolt/XybridDownload.cs
+  s_3e08cb1cab26f9::t_697cedb188e3d9 1-146
+bindings/flutter/rust/src/frb_generated.rs
+  s_3e08cb1cab26f9::t_3827e303c6862f 3830,3841-3842,3846-3847,3940-3941,4557-4567,5125,5147-5148,6037,6052-6053,6119,6632-6640
+  s_3e08cb1cab26f9::t_7f3721358cac22 6641
+bindings/python/xybrid/_bolt/__init__.pyi
+  s_3e08cb1cab26f9::t_697cedb188e3d9 159-168,172-175,365-370,437-439,443,459-514,651-669
+crates/xybrid-cli/src/commands/bundle.rs
+  s_3e08cb1cab26f9::t_14d6ac24a19557 13-25,93-94,138-139
+bindings/unity/Runtime/Bolt/XybridDownloadStatus.cs
+  s_3e08cb1cab26f9::t_4a60d6752e77c0 61
+  s_3e08cb1cab26f9::t_697cedb188e3d9 11-19,22-23,26,29-30,35-37,48-60
+crates/xybrid-cli/src/commands/models.rs
+  s_3e08cb1cab26f9::t_4a60d6752e77c0 217-218
+crates/xybrid-sdk/src/download.rs
+  s_3e08cb1cab26f9::t_2ba8780b5ccfd3 1-105,118-143,145-154,159-160,162-169,171-172,178-184,186-213,218-280,285-307,309-349,351,353,355-577,583-584,587,589-590,595-598,601-613,616-629,632-643,646-655,658-665,668-678,681-732
+  s_3e08cb1cab26f9::t_09b7e21ea819c5 144,155-158,161,170,173-177,185
+  s_3e08cb1cab26f9::t_616654b382b4d0 578-581,585-586,588,592-594,600,615,631,645,657,667,679-680
+  s_3e08cb1cab26f9::t_e13400339de350 106-117
+  s_3e08cb1cab26f9::t_84be6cf58ae8cf 350,352,354
+  s_3e08cb1cab26f9::t_42c479726bd7f2 214-217,591
+  s_3e08cb1cab26f9::t_1387d44f87cb28 281-284,308
+  s_3e08cb1cab26f9::t_2a341b25efc2e9 582,599,614,630,644,656,666
+bindings/flutter/lib/src/rust/frb_generated.io.dart
+  s_3e08cb1cab26f9::t_3827e303c6862f 232-234,262-264,429-431,627-630,664-666,847-849,1047-1050,1086-1088,1284-1285
+  s_3e08cb1cab26f9::t_e66444e823e376 1286
+bindings/flutter/lib/src/rust/api/model.dart
+  s_3e08cb1cab26f9::t_3827e303c6862f 280-281,293,295-296,299,302-304,306-308,312-319,326-331,335-336,340-344,352-354,448-449,451
+bindings/unity/Runtime/Bolt/XybridDownloadState.cs
+  s_3e08cb1cab26f9::t_697cedb188e3d9 9-10,17-18,20-24
+bindings/flutter/rust/src/api/model.rs
+  s_3e08cb1cab26f9::t_0391b3d194e9c8 514-516,603,606-607,609,611-613,615-616,619-626,632-635,644,649-650,752-753,763-764
+  s_3e08cb1cab26f9::t_74c4e6a6e6dfd4 828,835,840,851-856
+  s_3e08cb1cab26f9::t_9efaab511f9ea1 857-859
+bindings/unity/Runtime/Bolt/XybridError.cs
+  s_3e08cb1cab26f9::t_4a60d6752e77c0 291
+  s_3e08cb1cab26f9::t_697cedb188e3d9 52,230-237,287-290
+docs/sdk/API_REFERENCE.md
+  s_3e08cb1cab26f9::t_0b0d81068e44e3 354,369-446,603,607-618
+bindings/python/xybrid/_bolt/_native.c
+  s_3e08cb1cab26f9::t_697cedb188e3d9 27-40,225-248,266-272,365-376,495-564,1485-1604,1802-1809,1851-1854,2497-2523,4923-4924,4927-4928,4930,4933-4934,4938,4991-4993,5030-5035,5323-5475,7927-8105,8107-8108,8110-8130,8133-8149,8151-8167,8197-8203,8273-8282
+  s_3e08cb1cab26f9::t_4a60d6752e77c0 8106,8109,8131-8132,8150,8168
+docs/sdk/api-surface.yaml
+  s_3e08cb1cab26f9::t_e7bb8cc5ea9e65 165-166,168-174,351-352,361-367
+  s_3e08cb1cab26f9::t_97bd98427ed76e 190-228
+CHANGELOG.md
+  s_3e08cb1cab26f9::t_08b97591bff83b 10-59
+bindings/apple/Sources/Xybrid/xybrid_bolt.swift
+  s_3e08cb1cab26f9::t_4a60d6752e77c0 2542-2543
+  s_3e08cb1cab26f9::t_47fd7c8953b4c9 387-395,400-403,405-410,413-414,418-423,429-430,604-605,654-655,727-729,839-840,844-845,847-848,887-953,1904-2152,2527-2541
+bindings/flutter/CHANGELOG.md
+  s_3e08cb1cab26f9::t_0abc9472f39766 3-16
+crates/xybrid-ffi-facade/src/lib.rs
+  s_3e08cb1cab26f9::t_98d8b23ec528e5 1630-1717,1777-1790
+  s_3e08cb1cab26f9::t_5c1fa51c706edb 43
+  s_3e08cb1cab26f9::t_23f16aee310e82 127-130,162,216,276,1194-1195,1201-1202,1205-1209,1215-1218,1227,1232-1233
+  s_3e08cb1cab26f9::t_bd919fc7ce2eca 1791
+docs/content/docs/(integration)/sdks/flutter.zh.mdx
+  s_3e08cb1cab26f9::t_a3a70c23cbf953 100-101,110-114,159
+bindings/kotlin/bazel/jni/xybrid_bolt.h
+  s_3e08cb1cab26f9::t_47fd7c8953b4c9 101,129,138-144,237-248
+bindings/python/xybrid/_bolt/__init__.py
+  s_3e08cb1cab26f9::t_697cedb188e3d9 393-406,478-484,737-738,1086-1102,1272-1274,1278,1763-1772,1776-1779,1785-1786,1804-1805,1963-2070,2298-2345,2698,2712-2713,2716
+tools/scripts/api-contract-check.sh
+  s_3e08cb1cab26f9::t_d8fb1d53e2af9a 244-250,252
+bindings/unity/Runtime/Bolt/XybridDownload.cs.meta
+  s_3e08cb1cab26f9::t_697cedb188e3d9 1-2
+bindings/flutter/lib/src/rust/frb_generated.dart
+  s_3e08cb1cab26f9::t_3827e303c6862f 3063-3068,3124-3129,3158-3159,3163-3164,3232,3654-3659,4022-4028,4089-4094,4126-4132,4214-4215,4750-4760,5188-5194,5257-5262,5294-5295,5351,5795-5804,6332-6333
+bindings/flutter/lib/src/rust/api/model.freezed.dart
+  s_3e08cb1cab26f9::t_3827e303c6862f 21,28,35,93,115,126,156,166,176,223,227,279,289,299,419,429,439
+crates/xybrid-cli/src/ui.rs
+  s_3e08cb1cab26f9::t_15b01e452ebffe 365-379
+bindings/react-native/src/types.ts
+  s_3e08cb1cab26f9::t_878b425ead6fc4 132,135,138-140,142-144,146-152,157-164
+bindings/react-native/src/NativeXybrid.ts
+  s_3e08cb1cab26f9::t_878b425ead6fc4 45-46
+crates/xybrid-cli/src/commands/repl.rs
+  s_3e08cb1cab26f9::t_4a60d6752e77c0 621-622
+crates/xybrid-cli/src/commands/run.rs
+  s_3e08cb1cab26f9::t_4a60d6752e77c0 241-242,915-916,1296-1297
+bindings/flutter/README.md
+  s_3e08cb1cab26f9::t_5bd1e85d3fa407 91-93,102-105
+docs/content/docs/(integration)/sdks/android.mdx
+  s_3e08cb1cab26f9::t_1fa971afba09dc 81-106
+docs/content/docs/(integration)/sdks/android.zh.mdx
+  s_3e08cb1cab26f9::t_75379bfc72ae01 70-92
+docs/content/docs/(integration)/sdks/ios.mdx
+  s_3e08cb1cab26f9::t_2e493f880badd8 88-115
+docs/content/docs/(integration)/sdks/ios.zh.mdx
+  s_3e08cb1cab26f9::t_58fbe410f265f1 79-103
+docs/content/docs/(integration)/sdks/unity.mdx
+  s_3e08cb1cab26f9::t_a27d6c42ef3fef 92-121
+docs/content/docs/(integration)/sdks/unity.zh.mdx
+  s_3e08cb1cab26f9::t_a6b50686939685 92-118
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "22283366dd43b778ab5509538315fb75bf26eb3a",
+  "prompts": {},
+  "sessions": {
+    "s_3e08cb1cab26f9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "27dd828b-8bde-449e-92e0-3fce2b3a673b",
+        "model": "claude-opus-5"
+      },
+      "human_author": "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
+    }
+  }
+}
