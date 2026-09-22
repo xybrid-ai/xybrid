@@ -327,6 +327,35 @@ class XybridModelLoader private constructor(
     }
 
     /**
+     * Start downloading this model's weights in the background, without
+     * loading them.
+     *
+     * This is how you get a progress bar: [load] blocks, so there is no object
+     * to poll while it runs — this is that object. The download fills the SDK
+     * cache, so the [load] afterwards returns immediately.
+     *
+     * ```kotlin
+     * val loader = Xybrid.model("qwen3-0.6b")
+     * val download = loader.download()!!
+     * download.progress().collect { status ->
+     *     bar.progress = (status.progress * 100).toInt()
+     *     label.text = "${status.downloadedBytes} / ${status.totalBytes ?: 0}"
+     * }
+     * val model = loader.load()
+     * ```
+     *
+     * Returns `null` for a source with nothing to fetch — a local bundle,
+     * directory, or Hugging Face repo — where [load] is the whole story.
+     * Cancelling the collecting scope unsubscribes from updates; call
+     * [XybridDownload.cancel] to stop the transfer itself.
+     */
+    fun download(): XybridDownload? = when (val current = source) {
+        is ModelSource.Registry -> XybridDownload(current.id)
+        is ModelSource.RegistrySpeculative -> XybridDownload(current.id)
+        is ModelSource.Bundle, is ModelSource.Directory, is ModelSource.HuggingFace -> null
+    }
+
+    /**
      * Whether [load] would actually speculate: speculation is possible for this
      * source, an API key resolves, and the model is not already cached.
      *

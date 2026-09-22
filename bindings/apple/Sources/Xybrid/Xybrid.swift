@@ -331,6 +331,36 @@ public struct ModelLoader: Sendable {
             return try XybridModel(fromRegistrySpeculative: id)
         }
     }
+
+    /// Start downloading this model's weights in the background, without
+    /// loading them.
+    ///
+    /// This is how you get a progress bar: ``load()`` blocks, so there is no
+    /// object to poll while it runs — this is that object. The download fills
+    /// the SDK cache, so the ``load()`` afterwards returns immediately.
+    ///
+    /// ```swift
+    /// let loader = Xybrid.model("qwen3-0.6b")
+    /// let download = loader.download()
+    /// for await status in download.progress() {
+    ///     bar.progress = Float(status.progress)
+    ///     label.text = "\(status.downloadedBytes) / \(status.totalBytes ?? 0)"
+    /// }
+    /// let model = try await loader.load()
+    /// ```
+    ///
+    /// Returns `nil` for a source with nothing to fetch — a local bundle,
+    /// directory, or Hugging Face repo — where ``load()`` is the whole story.
+    /// Cancelling the task consuming `progress()` unsubscribes from updates;
+    /// call ``XybridDownload/cancel()`` to stop the transfer itself.
+    func download() -> XybridDownload? {
+        switch source {
+        case .registry(let id), .registrySpeculative(let id):
+            return XybridDownload(fromRegistry: id)
+        case .bundle, .directory, .huggingFace:
+            return nil
+        }
+    }
 }
 
 public extension Xybrid {

@@ -151,6 +151,49 @@ namespace Xybrid
             XybridBolt.XybridBolt.WillSpeculateForModel(_value);
 
         /// <summary>
+        /// Starts downloading the model's weights in the background, without
+        /// loading them.
+        /// </summary>
+        /// <remarks>
+        /// This is how you drive a progress bar: <see cref="Load"/> blocks, so
+        /// there is no object to poll while it runs — this is that object. The
+        /// download fills the SDK cache, so the <see cref="Load"/> afterwards
+        /// returns immediately.
+        /// <code>
+        /// using var download = ModelLoader.FromRegistry("qwen3-0.6b").StartDownload();
+        /// while (!download.IsFinished())
+        /// {
+        ///     var status = download.Status();
+        ///     slider.value = status.Progress;
+        ///     yield return null;
+        /// }
+        /// </code>
+        /// <see cref="XybridBolt.XybridDownload.Status"/> never blocks, so it is
+        /// safe to read once per frame from a coroutine; await
+        /// <c>download.Progress(token)</c> for pushed updates instead. Cancelling
+        /// that token only unsubscribes — call
+        /// <see cref="XybridBolt.XybridDownload.Cancel"/> to stop the transfer.
+        /// </remarks>
+        /// <returns>
+        /// A download handle, or <c>null</c> for a source with nothing to fetch
+        /// (a local bundle, directory, model file, or Hugging Face repo).
+        /// </returns>
+        /// <exception cref="ObjectDisposedException">Thrown if this loader is disposed.</exception>
+        public XybridBolt.XybridDownload StartDownload()
+        {
+            ThrowIfDisposed();
+
+            switch (_source)
+            {
+                case Source.Registry:
+                case Source.RegistrySpeculative:
+                    return XybridBolt.XybridDownload.FromRegistry(_value);
+                default:
+                    return null;
+            }
+        }
+
+        /// <summary>
         /// Loads the model and prepares it for inference.
         /// </summary>
         /// <returns>A loaded <see cref="Model"/> ready for inference.</returns>
