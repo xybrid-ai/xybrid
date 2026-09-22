@@ -36,9 +36,8 @@ pub(crate) fn handle_fetch_command(model_id: &str, platform: Option<&str>) -> Re
 
     let pb = ui::download_bar(resolved.size_bytes, model_id);
 
-    let model_path = fetch_resolved_model(&client, model_id, platform, &resolved, |progress| {
-        let bytes_done = (progress * resolved.size_bytes as f32) as u64;
-        pb.set_position(bytes_done);
+    let model_path = fetch_resolved_model(&client, model_id, platform, &resolved, |status| {
+        ui::apply_download_status(&pb, &status);
     })
     .context(format!("Failed to fetch model '{}'", model_id))?;
 
@@ -203,7 +202,7 @@ fn fetch_resolved_model<F>(
     progress_callback: F,
 ) -> Result<std::path::PathBuf>
 where
-    F: Fn(f32),
+    F: Fn(xybrid_sdk::DownloadStatus),
 {
     if uses_extracted_model_path(resolved) {
         client
@@ -244,9 +243,8 @@ fn fetch_models(
 
                 let pb = ui::download_bar(resolved.size_bytes, model_id);
 
-                match fetch_resolved_model(client, model_id, platform, &resolved, |progress| {
-                    let bytes_done = (progress * resolved.size_bytes as f32) as u64;
-                    pb.set_position(bytes_done);
+                match fetch_resolved_model(client, model_id, platform, &resolved, |status| {
+                    ui::apply_download_status(&pb, &status);
                 }) {
                     Ok(_) => {
                         pb.finish_and_clear();

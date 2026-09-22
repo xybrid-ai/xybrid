@@ -390,6 +390,20 @@ def _boltffi_read_wire(data: bytes, decode):
 
 
 
+def _boltffi_read_347d2e2b11e825e8(data: bytes):
+    return _boltffi_read_wire(data, lambda reader: XybridDownloadStatus._boltffi_from_reader(reader))
+
+
+_native._register_wire_codec("read_347d2e2b11e825e8", _boltffi_read_347d2e2b11e825e8)
+
+
+def _boltffi_read_4319db60c88eabca(data: bytes):
+    return _boltffi_read_wire(data, lambda reader: reader.optional(lambda: reader.string()))
+
+
+_native._register_wire_codec("read_4319db60c88eabca", _boltffi_read_4319db60c88eabca)
+
+
 def _boltffi_read_09404a3c98b3f16c(data: bytes):
     return _boltffi_read_wire(data, lambda reader: XybridError._boltffi_from_reader(reader))
 
@@ -402,13 +416,6 @@ def _boltffi_read_89cd31291d2aefa4(data: bytes):
 
 
 _native._register_wire_codec("read_89cd31291d2aefa4", _boltffi_read_89cd31291d2aefa4)
-
-
-def _boltffi_read_347d2e2b11e825e8(data: bytes):
-    return _boltffi_read_wire(data, lambda reader: XybridDownloadStatus._boltffi_from_reader(reader))
-
-
-_native._register_wire_codec("read_347d2e2b11e825e8", _boltffi_read_347d2e2b11e825e8)
 
 
 def _boltffi_read_94828222bbb26957(data: bytes):
@@ -453,13 +460,6 @@ def _boltffi_read_0d42d278c66eef7b(data: bytes):
 _native._register_wire_codec("read_0d42d278c66eef7b", _boltffi_read_0d42d278c66eef7b)
 
 
-def _boltffi_read_4319db60c88eabca(data: bytes):
-    return _boltffi_read_wire(data, lambda reader: reader.optional(lambda: reader.string()))
-
-
-_native._register_wire_codec("read_4319db60c88eabca", _boltffi_read_4319db60c88eabca)
-
-
 def _boltffi_read_1497d20162db7713(data: bytes):
     return _boltffi_read_wire(data, lambda reader: XybridEnvelope._boltffi_from_reader(reader))
 
@@ -473,6 +473,13 @@ def _boltffi_write_c26bffea5b1b16cc(id) -> bytes:
 
 
 _native._register_wire_codec("write_c26bffea5b1b16cc", _boltffi_write_c26bffea5b1b16cc)
+
+
+def _boltffi_write_cfe97cd6dcce32b6(platform) -> bytes:
+    return _boltffi_wire_string(platform)
+
+
+_native._register_wire_codec("write_cfe97cd6dcce32b6", _boltffi_write_cfe97cd6dcce32b6)
 
 
 def _boltffi_write_766cdeb069dd2b0a(path) -> bytes:
@@ -727,6 +734,8 @@ class XybridError:
             return XybridErrorUnsupportedBackendCapability._boltffi_from_reader_payload(reader)
         if tag == 21:
             return XybridErrorInvalidImage._boltffi_from_reader_payload(reader)
+        if tag == 22:
+            return XybridErrorCancelled._boltffi_from_reader_payload(reader)
         raise ValueError("invalid XybridError tag")
 
 
@@ -1074,6 +1083,23 @@ class XybridErrorInvalidImage(XybridError):
         )
 
 
+@dataclass(frozen=True, slots=True)
+class XybridErrorCancelled(XybridError):
+    """The host called `cancel` — today, on a model download."""
+    message: str
+
+    def _boltffi_wire(self) -> bytes:
+        return _boltffi_wire_u32(22) + b"".join((
+            _boltffi_wire_string(self.message),
+        ))
+
+    @classmethod
+    def _boltffi_from_reader_payload(cls, reader: "_BoltFfiWireReader") -> "XybridErrorCancelled":
+        return cls(
+            message=reader.string(),
+        )
+
+
 
 _native._register_xybrid_error(XybridError)
 
@@ -1243,10 +1269,13 @@ _native._register_xybrid_execution_target(XybridExecutionTarget)
 
 
 class XybridDownloadState(IntEnum):
-    """Lifecycle of the background download behind a speculative load."""
+    """Lifecycle of a model download — a standalone [`XybridDownload`] or
+    the background download behind a speculative load.
+    """
     DOWNLOADING = 0
     READY = 1
     FAILED = 2
+    CANCELLED = 3
 
 _native._register_xybrid_download_state(XybridDownloadState)
 
@@ -1731,15 +1760,30 @@ _native._register_xybrid_result(XybridResult)
 
 @dataclass(frozen=True, slots=True)
 class XybridDownloadStatus:
-    """Download progress + state in one consistent read."""
+    """Download progress, bytes and state in one consistent read.
+
+    `progress` is aggregated across every artifact the model needs (weights
+    plus companions such as a vision projector), never moves backwards, and
+    reaches 1.0 only alongside `Ready`. `totalBytes` is null when the source
+    declares no size — a Hugging Face repo, or a registry entry without one —
+    in which case `downloadedBytes` is still exact and `progress` is coarser.
+
+    Derives `Copy` because it is carried as a stream item.
+    """
     state: XybridDownloadState
     progress: float
     """0.0..=1.0."""
+    downloaded_bytes: int
+    """Bytes written so far, across every artifact."""
+    total_bytes: int | None
+    """Declared total across every artifact, or null when unknown."""
 
     def _boltffi_wire(self) -> bytes:
         return b"".join((
             _boltffi_wire_i32(_boltffi_enum_value(self.state, XybridDownloadState, "XybridDownloadState")),
             _boltffi_wire_f32(self.progress),
+            _boltffi_wire_u64(self.downloaded_bytes),
+            _boltffi_wire_optional(self.total_bytes, lambda __boltffi_value_0: _boltffi_wire_u64(__boltffi_value_0)),
         ))
 
     @classmethod
@@ -1757,6 +1801,8 @@ class XybridDownloadStatus:
         return cls(
             state=XybridDownloadState(reader.i32()),
             progress=reader.f32(),
+            downloaded_bytes=reader.u64(),
+            total_bytes=reader.optional(lambda: reader.u64()),
         )
 
 
@@ -1911,6 +1957,114 @@ class XybridVoiceInfo:
 
 _native._register_xybrid_voice_info(XybridVoiceInfo)
 
+
+
+
+class XybridDownload:
+    __slots__ = ("_handle",)
+
+
+    def __init__(self) -> None:
+        raise TypeError("XybridDownload cannot be constructed directly")
+
+
+    @classmethod
+    def _from_handle(cls, handle: int) -> "XybridDownload":
+        value = cls.__new__(cls)
+        value._handle = handle
+        return value
+
+    def __del__(self) -> None:
+        handle = getattr(self, "_handle", None)
+        if handle is not None:
+            self._handle = None
+            _native._boltffi_xybrid_download_release(handle)
+
+    @classmethod
+    def from_registry(cls, id: str) -> "XybridDownload":
+        """Start downloading a registry model. Returns immediately."""
+        return XybridDownload._from_handle(_native._boltffi_xybrid_download_from_registry(id))
+
+    @classmethod
+    def from_registry_with_platform(cls, id: str, platform: str) -> "XybridDownload":
+        """Start downloading a registry model resolved for a specific platform."""
+        return XybridDownload._from_handle(_native._boltffi_xybrid_download_from_registry_with_platform(id, platform))
+
+    def status(self) -> XybridDownloadStatus:
+        """Current snapshot. Never blocks — safe from a UI thread or a per-frame
+        render loop.
+        """
+        return _boltffi_read_wire(_native._boltffi_xybrid_download_status(self._handle), lambda reader: XybridDownloadStatus._boltffi_from_reader(reader))
+
+    def is_finished(self) -> bool:
+        """Whether the download reached a terminal state."""
+        return _native._boltffi_xybrid_download_is_finished(self._handle)
+
+    def error(self) -> str | None:
+        """The failure message once the download ended in `Failed` or
+        `Cancelled`; null otherwise. The stream carries the terminal *state*,
+        this carries the reason.
+        """
+        return _boltffi_read_wire(_native._boltffi_xybrid_download_error(self._handle), lambda reader: reader.optional(lambda: reader.string()))
+
+    def cancel(self) -> None:
+        """Ask the download to stop. Takes effect within one chunk read, discards
+        the partial file, and moves the status to `Cancelled`. Idempotent, and
+        a no-op once the download is terminal.
+        """
+        _native._boltffi_xybrid_download_cancel(self._handle)
+
+    def progress(self) -> "XybridDownloadProgressSubscription":
+        """Pushed progress updates, closing once the download is terminal.
+
+        Generated as an `AsyncStream` in Swift, a `Flow` in Kotlin, an
+        `IAsyncEnumerable` in C# and a subscription object in Python.
+        Cancelling the consuming task / scope / token unsubscribes; it does
+        **not** cancel the download itself — call [`Self::cancel`] for that.
+
+        The current snapshot is delivered first, so subscribing late still
+        yields a frame, and a download that already finished closes at once
+        instead of hanging.
+        """
+        return XybridDownloadProgressSubscription._from_handle(_native.progress(self._handle))
+
+
+class XybridDownloadProgressSubscription:
+    __slots__ = ("_handle",)
+
+    def __init__(self) -> None:
+        raise TypeError("XybridDownloadProgressSubscription cannot be constructed directly")
+
+    @classmethod
+    def _from_handle(cls, handle: int) -> "XybridDownloadProgressSubscription":
+        value = cls.__new__(cls)
+        value._handle = handle
+        return value
+
+    def __del__(self) -> None:
+        handle = getattr(self, "_handle", None)
+        if handle is not None:
+            self._handle = None
+            _native.progress_free(handle)
+
+    def pop_batch(self, max_count: int = 16) -> list[XybridDownloadStatus]:
+        data = _native.progress_pop_batch(self._require_handle(), max_count)
+        return _boltffi_read_wire(data, lambda reader: reader.sequence(lambda: XybridDownloadStatus._boltffi_from_reader(reader))) if data else []
+
+    def wait(self, timeout_milliseconds: int) -> int:
+        return _native.progress_wait(self._require_handle(), timeout_milliseconds)
+
+    def unsubscribe(self) -> None:
+        handle = self._require_handle()
+        self._handle = None
+        _native.progress_unsubscribe(handle)
+        _native.progress_free(handle)
+
+    def _require_handle(self) -> int:
+        handle = self._handle
+        if handle is None:
+            raise RuntimeError("stream subscription is closed")
+        return handle
 
 
 
@@ -2140,6 +2294,54 @@ class XybridModel:
 
     def unload(self) -> None:
         _boltffi_call(_boltffi_read_09404a3c98b3f16c, lambda: _native._boltffi_xybrid_model_unload(self._handle))
+
+    def download_progress(self) -> "XybridModelDownloadProgressSubscription":
+        """Pushed download updates for a speculatively-loaded model — the stream
+        counterpart of [`Self::await_download`], and what issue #504 asks for.
+
+        Emits the current snapshot first, then every update, then closes on
+        the terminal state. An ordinary local model is already `Ready`, so its
+        stream yields one frame and ends.
+        """
+        return XybridModelDownloadProgressSubscription._from_handle(_native.download_progress(self._handle))
+
+
+class XybridModelDownloadProgressSubscription:
+    __slots__ = ("_handle",)
+
+    def __init__(self) -> None:
+        raise TypeError("XybridModelDownloadProgressSubscription cannot be constructed directly")
+
+    @classmethod
+    def _from_handle(cls, handle: int) -> "XybridModelDownloadProgressSubscription":
+        value = cls.__new__(cls)
+        value._handle = handle
+        return value
+
+    def __del__(self) -> None:
+        handle = getattr(self, "_handle", None)
+        if handle is not None:
+            self._handle = None
+            _native.download_progress_free(handle)
+
+    def pop_batch(self, max_count: int = 16) -> list[XybridDownloadStatus]:
+        data = _native.download_progress_pop_batch(self._require_handle(), max_count)
+        return _boltffi_read_wire(data, lambda reader: reader.sequence(lambda: XybridDownloadStatus._boltffi_from_reader(reader))) if data else []
+
+    def wait(self, timeout_milliseconds: int) -> int:
+        return _native.download_progress_wait(self._require_handle(), timeout_milliseconds)
+
+    def unsubscribe(self) -> None:
+        handle = self._require_handle()
+        self._handle = None
+        _native.download_progress_unsubscribe(handle)
+        _native.download_progress_free(handle)
+
+    def _require_handle(self) -> int:
+        handle = self._handle
+        if handle is None:
+            raise RuntimeError("stream subscription is closed")
+        return handle
 
 
 
@@ -2493,6 +2695,7 @@ __all__ = [
     "XybridErrorUnsupportedModelCapability",
     "XybridErrorUnsupportedBackendCapability",
     "XybridErrorInvalidImage",
+    "XybridErrorCancelled",
     "XybridEnvelopeKind",
     "XybridEnvelopeKindText",
     "XybridEnvelopeKindAudio",
@@ -2506,8 +2709,11 @@ __all__ = [
     "XybridDownloadState",
     "XybridStreamEventKind",
     "XybridThermalState",
+    "XybridDownload",
+    "XybridDownloadProgressSubscription",
     "XybridCancellationToken",
     "XybridModel",
+    "XybridModelDownloadProgressSubscription",
     "XybridConversationContext",
     "XybridTelemetryConfig",
     "XybridBundle",

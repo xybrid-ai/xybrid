@@ -40,6 +40,7 @@
 use std::collections::HashMap;
 use std::sync::mpsc::{self, Receiver, SyncSender};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use xybrid_sdk as sdk;
 
@@ -123,6 +124,10 @@ pub enum Error {
     InvalidImage {
         message: String,
     },
+    /// The caller stopped the operation — today, a cancelled model download.
+    Cancelled {
+        message: String,
+    },
 }
 
 impl Error {
@@ -154,6 +159,7 @@ impl Error {
             Error::UnsupportedModelCapability { .. } => 20,
             Error::UnsupportedBackendCapability { .. } => 21,
             Error::InvalidImage { .. } => 22,
+            Error::Cancelled { .. } => 23,
         }
     }
 
@@ -207,6 +213,7 @@ impl std::fmt::Display for Error {
                 write!(f, "Unsupported backend capability: {message}")
             }
             Error::InvalidImage { message } => write!(f, "Invalid image input: {message}"),
+            Error::Cancelled { message } => write!(f, "Cancelled: {message}"),
         }
     }
 }
@@ -266,6 +273,7 @@ impl From<sdk::SdkError> for Error {
                 Error::RateLimited { retry_after_secs }
             }
             sdk::SdkError::Timeout { timeout_ms } => Error::Timeout { timeout_ms },
+            sdk::SdkError::Cancelled { message } => Error::Cancelled { message },
             // Capability / artifact errors (vision-era). First-class typed
             // variants so foreign consumers can branch on them; the structured
             // SDK fields are flattened into the diagnostic message.
@@ -1183,20 +1191,31 @@ impl ExecutionTarget {
     }
 }
 
-/// Lifecycle of the background download behind a speculative load.
+/// Lifecycle of a model download — either a standalone [`ModelDownload`] or
+/// the background download behind a speculative load.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DownloadState {
     Downloading,
     Ready,
     Failed,
+    /// The host called `cancel`.
+    Cancelled,
 }
 
-/// One consistent read of download progress + state.
+/// One consistent read of download progress, bytes and state.
+///
+/// `progress` is aggregated across every artifact the model needs, never
+/// moves backwards, and reaches 1.0 only alongside [`DownloadState::Ready`].
+/// `total_bytes` is `None` when the source declares no size.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct DownloadStatus {
     pub state: DownloadState,
     /// 0.0..=1.0.
     pub progress: f32,
+    /// Bytes written so far, across every artifact.
+    pub downloaded_bytes: u64,
+    /// Declared total across every artifact, or `None` when unknown.
+    pub total_bytes: Option<u64>,
 }
 
 impl DownloadStatus {
@@ -1205,10 +1224,13 @@ impl DownloadStatus {
             sdk::DownloadState::Downloading => DownloadState::Downloading,
             sdk::DownloadState::Ready => DownloadState::Ready,
             sdk::DownloadState::Failed => DownloadState::Failed,
+            sdk::DownloadState::Cancelled => DownloadState::Cancelled,
         };
         Self {
             state,
             progress: status.progress,
+            downloaded_bytes: status.downloaded_bytes,
+            total_bytes: status.total_bytes,
         }
     }
 }
@@ -1605,6 +1627,94 @@ impl ModelLoader {
         let model = self.inner.load_async().await.map_err(Error::from)?;
         Ok(Arc::new(XybridModel { inner: model }))
     }
+
+    /// Start the download in the background and return a handle to watch.
+    ///
+    /// This is what gives a blocking host a progress bar: `load` has no
+    /// object to poll while it runs, this does. The download fills the normal
+    /// SDK cache, so the later `load` hits it and returns at once. Returns
+    /// immediately; a source with nothing to fetch comes back `Ready`.
+    pub fn start_download(&self) -> Arc<ModelDownload> {
+        Arc::new(ModelDownload {
+            inner: self.inner.start_download(),
+        })
+    }
+}
+
+/// FFI-friendly handle over a background model download.
+///
+/// Three ways to read it, all fed by the same aggregated source:
+/// [`Self::status`] for a snapshot, [`Self::next_status`] to block until it
+/// changes, and [`Self::watch`] for pushed updates. `watch` takes a Rust
+/// closure that never crosses the FFI boundary — binding crates use it to
+/// feed their own transport (a BoltFFI stream, a flutter_rust_bridge sink).
+pub struct ModelDownload {
+    inner: Arc<sdk::ModelDownload>,
+}
+
+impl ModelDownload {
+    /// Start downloading a registry model without loading it.
+    pub fn from_registry(id: String) -> Arc<Self> {
+        Arc::new(Self {
+            inner: sdk::ModelLoader::from_registry(&id).start_download(),
+        })
+    }
+
+    /// Registry download forced to a specific platform string.
+    pub fn from_registry_with_platform(id: String, platform: String) -> Arc<Self> {
+        Arc::new(Self {
+            inner: sdk::ModelLoader::from_registry_with_platform(&id, &platform).start_download(),
+        })
+    }
+
+    /// Current snapshot. Never blocks — safe from a UI thread or a render loop.
+    pub fn status(&self) -> DownloadStatus {
+        DownloadStatus::from_sdk(self.inner.status())
+    }
+
+    /// Whether the download reached a terminal state.
+    pub fn is_finished(&self) -> bool {
+        self.inner.is_finished()
+    }
+
+    /// The failure message once the download ended in `Failed` or `Cancelled`.
+    pub fn error(&self) -> Option<String> {
+        self.inner.error()
+    }
+
+    /// Block until the status changes, `timeout_ms` elapses, or the download
+    /// finishes, then report the snapshot.
+    ///
+    /// Terminal states return immediately, so a host loop driven by this
+    /// cannot hang. Call it off the UI thread. A `timeout_ms` of 0 makes it a
+    /// non-blocking read, identical to [`Self::status`].
+    pub fn next_status(&self, timeout_ms: u64) -> DownloadStatus {
+        DownloadStatus::from_sdk(
+            self.inner
+                .next_status_snapshot(Duration::from_millis(timeout_ms)),
+        )
+    }
+
+    /// Block until the download reaches a terminal state or `timeout_ms`
+    /// elapses.
+    pub fn wait(&self, timeout_ms: u64) -> DownloadStatus {
+        DownloadStatus::from_sdk(self.inner.wait(Duration::from_millis(timeout_ms)))
+    }
+
+    /// Ask the download to stop. Idempotent; a no-op once terminal.
+    pub fn cancel(&self) {
+        self.inner.cancel();
+    }
+
+    /// Register a Rust-side observer for pushed updates. The current snapshot
+    /// arrives synchronously, so a late subscriber still gets a first frame.
+    pub fn watch<F>(&self, observer: F)
+    where
+        F: Fn(DownloadStatus) + Send + Sync + 'static,
+    {
+        self.inner
+            .watch(move |status| observer(DownloadStatus::from_sdk(status)));
+    }
 }
 
 /// FFI-friendly handle around a loaded [`sdk::XybridModel`].
@@ -1662,6 +1772,21 @@ impl XybridModel {
     /// [`Self::download_status`].
     pub fn await_download(&self, timeout_ms: u64) -> DownloadStatus {
         DownloadStatus::from_sdk(self.inner.await_download(timeout_ms))
+    }
+
+    /// Register a Rust-side observer for pushed download updates on a
+    /// speculatively-loaded model — the push counterpart of
+    /// [`Self::await_download`].
+    ///
+    /// The current snapshot arrives synchronously and the observer is dropped
+    /// once the download is terminal. The closure never crosses the FFI
+    /// boundary; binding crates forward it into their own transport.
+    pub fn watch_download<F>(&self, observer: F)
+    where
+        F: Fn(DownloadStatus) + Send + Sync + 'static,
+    {
+        self.inner
+            .watch_download(move |status| observer(DownloadStatus::from_sdk(status)));
     }
 
     pub fn supports_streaming(&self) -> bool {

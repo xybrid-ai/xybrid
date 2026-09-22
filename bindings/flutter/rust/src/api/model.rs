@@ -511,8 +511,9 @@ fn is_ipv6_unique_local(ip: std::net::Ipv6Addr) -> bool {
 /// Event emitted during model loading with progress.
 #[derive(Clone)]
 pub enum FfiLoadEvent {
-    /// Download progress update (0.0 to 1.0)
-    Progress(f64),
+    /// Download progress: fraction, bytes transferred, and the declared total
+    /// when the source has one.
+    Progress(FfiDownloadStatus),
     /// Model loaded successfully - contains the model handle ID
     Complete,
     /// An error occurred during loading
@@ -599,25 +600,39 @@ impl FfiStreamToken {
     }
 }
 
-/// Lifecycle of the background download behind a speculative load.
+/// Lifecycle of a model download.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FfiDownloadState {
-    /// Weights still downloading; runs are served from the cloud.
+    /// Bytes still in flight. For a speculative load, runs are served from
+    /// the cloud meanwhile.
     Downloading,
-    /// Local handle installed; runs are on-device.
+    /// Every artifact landed and the model is usable.
     Ready,
-    /// Download failed — the cloud keeps serving and the model never becomes
-    /// local. Surfacing this is the only way the UI can stop waiting.
+    /// Download failed — for a speculative load the cloud keeps serving and
+    /// the model never becomes local. Surfacing this is the only way the UI
+    /// can stop waiting.
     Failed,
+    /// The download was cancelled by the caller.
+    Cancelled,
 }
 
-/// Download progress + state in one consistent read, so a polling UI cannot
-/// observe a torn pair (for example `Ready` with a stale 0.34 progress).
+/// Download progress, bytes and state in one consistent read, so a polling UI
+/// cannot observe a torn pair (for example `Ready` with a stale 0.34
+/// progress).
+///
+/// `progress` is aggregated across every artifact the model needs (weights
+/// plus companions such as a vision projector), never moves backwards, and
+/// reaches 1.0 only alongside `Ready`. `totalBytes` is null when the source
+/// declares no size, in which case `downloadedBytes` is still exact.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct FfiDownloadStatus {
     pub state: FfiDownloadState,
     /// 0.0 to 1.0.
     pub progress: f64,
+    /// Bytes written so far, across every artifact.
+    pub downloaded_bytes: u64,
+    /// Declared total across every artifact, or null when unknown.
+    pub total_bytes: Option<u64>,
 }
 
 impl FfiDownloadStatus {
@@ -626,10 +641,13 @@ impl FfiDownloadStatus {
             xybrid_sdk::DownloadState::Downloading => FfiDownloadState::Downloading,
             xybrid_sdk::DownloadState::Ready => FfiDownloadState::Ready,
             xybrid_sdk::DownloadState::Failed => FfiDownloadState::Failed,
+            xybrid_sdk::DownloadState::Cancelled => FfiDownloadState::Cancelled,
         };
         Self {
             state,
             progress: status.progress as f64,
+            downloaded_bytes: status.downloaded_bytes,
+            total_bytes: status.total_bytes,
         }
     }
 }
@@ -731,7 +749,8 @@ impl FfiModelLoader {
     /// Load the model with download progress updates.
     ///
     /// Streams FfiLoadEvent during download:
-    /// - `Progress(f64)` for download progress (0.0 to 1.0)
+    /// - `Progress(FfiDownloadStatus)` with the fraction, bytes transferred
+    ///   and the declared total when the source has one
     /// - `Complete` when the model is ready
     /// - `Error(String)` if loading fails
     ///
@@ -741,9 +760,8 @@ impl FfiModelLoader {
 
         // Run loading in a background thread to not block
         std::thread::spawn(move || {
-            let result = loader.load_with_progress(|progress| {
-                // Send progress as f64 (0.0 to 1.0)
-                let _ = sink.add(FfiLoadEvent::Progress(progress as f64));
+            let result = loader.load_with_progress(|status| {
+                let _ = sink.add(FfiLoadEvent::Progress(FfiDownloadStatus::from_sdk(status)));
             });
 
             match result {
@@ -807,21 +825,19 @@ impl FfiModel {
                 // Bounded wait: wakes as soon as the download finishes, but
                 // still ticks often enough to animate a progress bar.
                 let status = model.await_download(250);
+                let ffi_status = FfiDownloadStatus::from_sdk(status);
                 match status.state {
                     xybrid_sdk::DownloadState::Downloading => {
                         // A closed sink means Dart cancelled the subscription.
                         // Stop here instead of waking every 250ms — and holding
                         // the model alive — until a download that may never
                         // finish does.
-                        if sink
-                            .add(FfiLoadEvent::Progress(status.progress as f64))
-                            .is_err()
-                        {
+                        if sink.add(FfiLoadEvent::Progress(ffi_status)).is_err() {
                             break;
                         }
                     }
                     xybrid_sdk::DownloadState::Ready => {
-                        let _ = sink.add(FfiLoadEvent::Progress(1.0));
+                        let _ = sink.add(FfiLoadEvent::Progress(ffi_status));
                         let _ = sink.add(FfiLoadEvent::Complete);
                         break;
                     }
@@ -829,6 +845,15 @@ impl FfiModel {
                         let _ = sink.add(FfiLoadEvent::Error(
                             "speculative model download failed; still serving from cloud"
                                 .to_string(),
+                        ));
+                        break;
+                    }
+                    xybrid_sdk::DownloadState::Cancelled => {
+                        // Not reachable today — nothing cancels a speculative
+                        // download — but the state exists, so report it rather
+                        // than leaving the stream hanging if that changes.
+                        let _ = sink.add(FfiLoadEvent::Error(
+                            "model download cancelled; still serving from cloud".to_string(),
                         ));
                         break;
                     }

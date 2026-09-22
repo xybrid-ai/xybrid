@@ -97,8 +97,8 @@ final loader = XybridModelLoader.fromRegistry('kokoro-82m');
 
 await for (final event in loader.loadWithProgress()) {
   switch (event) {
-    case LoadProgress(:final percentage):
-      print('Loading: $percentage%');
+    case LoadProgress(:final percentage, :final downloadedBytes, :final totalBytes):
+      print('Loading: $percentage% ($downloadedBytes / ${totalBytes ?? '?'} bytes)');
     case LoadComplete():
       print('Model ready!');
     case LoadError(:final message):
@@ -106,6 +106,11 @@ await for (final event in loader.loadWithProgress()) {
   }
 }
 ```
+
+`progress` 覆盖模型所需的全部文件（权重以及视觉投影器等附属文件），并且只增不减，
+因此进度条既不会逐个文件重新开始，也不会在下载重试时回退。当来源未公布大小时
+（例如 Hugging Face 仓库），`totalBytes` 为 `null`；无论哪种情况 `downloadedBytes`
+都是准确值，可用于显示已下载体积、速度和剩余时间。
 
 ---
 
@@ -151,7 +156,7 @@ class XybridModelLoader {
 
 | 事件 | 属性 | 说明 |
 |-------|-----------|-------------|
-| `LoadProgress` | `progress`（0.0–1.0）、`percentage`（0–100） | 下载/加载进度 |
+| `LoadProgress` | `progress`（0.0–1.0）、`percentage`（0–100）、`downloadedBytes`、`totalBytes`（可空） | 下载/加载进度 |
 | `LoadComplete` | — | 模型已就绪 |
 | `LoadError` | `message` | 加载失败 |
 

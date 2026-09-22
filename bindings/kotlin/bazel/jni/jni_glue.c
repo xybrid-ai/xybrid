@@ -1,6 +1,7 @@
 #include <jni.h>
 #include <stdint.h>
 #include <stdbool.h>
+#include <stdio.h>
 #include <limits.h>
 #include <string.h>
 #include <stdlib.h>
@@ -9,6 +10,187 @@
 #endif
 
 #include "xybrid_bolt.h"
+static JavaVM *boltffi_jni_vm = NULL;
+static jclass boltffi_jni_native_class = NULL;
+
+#define BOLTFFI_JNI_LOCAL_FRAME_CAPACITY 64
+static jint boltffi_jni_attach_current_thread(JavaVM *vm, JNIEnv **env) {
+#if defined(__ANDROID__)
+    return (*vm)->AttachCurrentThread(vm, env, NULL);
+#else
+    return (*vm)->AttachCurrentThread(vm, (void **)env, NULL);
+#endif
+}
+#if defined(__ANDROID__)
+static pthread_key_t boltffi_jni_env_key;
+static pthread_once_t boltffi_jni_env_key_once = PTHREAD_ONCE_INIT;
+static int boltffi_jni_env_key_status = 0;
+static char boltffi_jni_tls_attached_marker;
+
+static void boltffi_jni_android_env_destructor(void *value) {
+    if (value != NULL && boltffi_jni_vm != NULL) {
+        (*boltffi_jni_vm)->DetachCurrentThread(boltffi_jni_vm);
+    }
+}
+
+static void boltffi_jni_android_env_key_init(void) {
+    boltffi_jni_env_key_status =
+        pthread_key_create(&boltffi_jni_env_key, boltffi_jni_android_env_destructor);
+}
+
+static jint boltffi_jni_android_attach_cached(JavaVM *vm, JNIEnv **env, int *attached) {
+    *attached = 0;
+
+    if (pthread_once(&boltffi_jni_env_key_once, boltffi_jni_android_env_key_init) != 0 ||
+        boltffi_jni_env_key_status != 0) {
+        jint result = boltffi_jni_attach_current_thread(vm, env);
+        if (result == JNI_OK) {
+            *attached = 1;
+        }
+        return result;
+    }
+
+    jint result = (*vm)->AttachCurrentThreadAsDaemon(vm, env, NULL);
+    if (result != JNI_OK) {
+        return result;
+    }
+
+    if (pthread_setspecific(boltffi_jni_env_key, &boltffi_jni_tls_attached_marker) != 0) {
+        (*vm)->DetachCurrentThread(vm);
+        *env = NULL;
+        return JNI_ERR;
+    }
+
+    return JNI_OK;
+}
+#endif
+
+static inline bool boltffi_jni_clear_exception(JNIEnv *env) {
+    if (!(*env)->ExceptionCheck(env)) {
+        return false;
+    }
+    (*env)->ExceptionClear(env);
+    return true;
+}
+
+static void boltffi_jni_describe_load_exception(JNIEnv *env) {
+    if ((*env)->ExceptionCheck(env)) {
+        (*env)->ExceptionDescribe(env);
+        (*env)->ExceptionClear(env);
+    }
+}
+
+static bool boltffi_jni_report_class_load_failure(JNIEnv *env, const char *message, const char *diagnostic_class_name) {
+    fprintf(stderr, "BoltFFI JNI_OnLoad failed: %s '%s'\n", message, diagnostic_class_name);
+    boltffi_jni_describe_load_exception(env);
+    return false;
+}
+
+static bool boltffi_jni_report_static_method_load_failure(JNIEnv *env, const char *diagnostic_class_name, const char *diagnostic_method_name, const char *diagnostic_signature) {
+    fprintf(stderr, "BoltFFI JNI_OnLoad failed: could not resolve static method %s.%s%s\n", diagnostic_class_name, diagnostic_method_name, diagnostic_signature);
+    boltffi_jni_describe_load_exception(env);
+    return false;
+}
+
+static bool boltffi_jni_lookup_global_class_with_diagnostic(JNIEnv *env, const char *lookup_class_name, const char *diagnostic_class_name, jclass *out_class) {
+    *out_class = NULL;
+    jclass local_class = (*env)->FindClass(env, lookup_class_name);
+    if (local_class == NULL) {
+        return boltffi_jni_report_class_load_failure(env, "could not find JVM class", diagnostic_class_name);
+    }
+    jclass global_class = (*env)->NewGlobalRef(env, local_class);
+    (*env)->DeleteLocalRef(env, local_class);
+    if (global_class == NULL) {
+        return boltffi_jni_report_class_load_failure(env, "could not create global reference for JVM class", diagnostic_class_name);
+    }
+    *out_class = global_class;
+    return true;
+}
+
+static bool boltffi_jni_lookup_static_method_with_diagnostic(JNIEnv *env, jclass cls, const char *diagnostic_class_name, const char *lookup_method_name, const char *diagnostic_method_name, const char *lookup_signature, const char *diagnostic_signature, jmethodID *out_method) {
+    *out_method = (*env)->GetStaticMethodID(env, cls, lookup_method_name, lookup_signature);
+    if (*out_method == NULL) {
+        return boltffi_jni_report_static_method_load_failure(env, diagnostic_class_name, diagnostic_method_name, diagnostic_signature);
+    }
+    return true;
+}
+
+static inline bool boltffi_jni_enter(JNIEnv **env, int *attached) {
+    if (boltffi_jni_vm == NULL) {
+        return false;
+    }
+    *env = NULL;
+    *attached = 0;
+    jint env_status = (*boltffi_jni_vm)->GetEnv(boltffi_jni_vm, (void **)env, JNI_VERSION_1_6);
+    if (env_status == JNI_EDETACHED) {
+#if defined(__ANDROID__)
+        if (boltffi_jni_android_attach_cached(boltffi_jni_vm, env, attached) != JNI_OK) {
+            return false;
+        }
+#else
+        if (boltffi_jni_attach_current_thread(boltffi_jni_vm, env) != JNI_OK) {
+            return false;
+        }
+        *attached = 1;
+#endif
+    } else if (env_status != JNI_OK) {
+        return false;
+    }
+
+#if defined(__ANDROID__)
+    JNIEnv *callback_env = *env;
+    if ((*callback_env)->PushLocalFrame(callback_env, BOLTFFI_JNI_LOCAL_FRAME_CAPACITY) != JNI_OK) {
+        boltffi_jni_clear_exception(callback_env);
+        if (*attached) {
+            (*boltffi_jni_vm)->DetachCurrentThread(boltffi_jni_vm);
+            *attached = 0;
+        }
+        return false;
+    }
+#endif
+
+    return true;
+}
+
+static inline void boltffi_jni_exit(JNIEnv *env, int attached) {
+#if defined(__ANDROID__)
+    if (env != NULL) {
+        (*env)->PopLocalFrame(env, NULL);
+        boltffi_jni_clear_exception(env);
+    }
+#else
+    (void)env;
+#endif
+    if (attached) {
+        (*boltffi_jni_vm)->DetachCurrentThread(boltffi_jni_vm);
+    }
+}
+
+static jmethodID boltffi_jni_continuation_method = NULL;
+
+static bool boltffi_jni_continuation_load(JNIEnv *env) {
+    return boltffi_jni_lookup_static_method_with_diagnostic(env, boltffi_jni_native_class, "ai/xybrid/Native", "boltffiFutureContinuationCallback", "boltffiFutureContinuationCallback", "(JB)V", "(JB)V", &boltffi_jni_continuation_method);
+}
+
+static void boltffi_jni_continuation_unload(JNIEnv *env) {
+    (void)env;
+    boltffi_jni_continuation_method = NULL;
+}
+
+static void boltffi_jni_continuation_callback(uint64_t handle, int8_t poll_result) {
+    if (boltffi_jni_vm == NULL || boltffi_jni_native_class == NULL || boltffi_jni_continuation_method == NULL) {
+        return;
+    }
+    JNIEnv *env = NULL;
+    int attached = 0;
+    if (!boltffi_jni_enter(&env, &attached)) {
+        return;
+    }
+    (*env)->CallStaticVoidMethod(env, boltffi_jni_native_class, boltffi_jni_continuation_method, (jlong)handle, (jbyte)poll_result);
+    boltffi_jni_clear_exception(env);
+    boltffi_jni_exit(env, attached);
+}
+
 static void boltffi_jni_throw_runtime(JNIEnv *env, const char *message) {
     jclass exception_class = (*env)->FindClass(env, "java/lang/RuntimeException");
     if (exception_class == NULL) {
@@ -156,6 +338,126 @@ static bool boltffi_jni_direct_buffer_address(JNIEnv *env, jobject buffer, jlong
         return false;
     }
     return true;
+}
+
+JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *vm, void *reserved) {
+    (void)reserved;
+    JNIEnv *env = NULL;
+    jint env_result = (*vm)->GetEnv(vm, (void **)&env, JNI_VERSION_1_6);
+    if (env_result != JNI_OK) {
+        fprintf(stderr, "BoltFFI JNI_OnLoad failed: GetEnv(JNI_VERSION_1_6) returned %d\n", (int)env_result);
+        return JNI_ERR;
+    }
+    if (!boltffi_jni_lookup_global_class_with_diagnostic(env, "ai/xybrid/Native", "ai/xybrid/Native", &boltffi_jni_native_class)) {
+        return JNI_ERR;
+    }
+    if (!boltffi_jni_continuation_load(env)) {
+        (*env)->DeleteGlobalRef(env, boltffi_jni_native_class);
+        boltffi_jni_native_class = NULL;
+        return JNI_ERR;
+    }
+    boltffi_jni_vm = vm;
+    return JNI_VERSION_1_6;
+}
+
+JNIEXPORT void JNICALL JNI_OnUnload(JavaVM *vm, void *reserved) {
+    (void)reserved;
+    JNIEnv *env = NULL;
+    if ((*vm)->GetEnv(vm, (void **)&env, JNI_VERSION_1_6) == JNI_OK) {
+        boltffi_jni_continuation_unload(env);
+        if (boltffi_jni_native_class != NULL) {
+            (*env)->DeleteGlobalRef(env, boltffi_jni_native_class);
+        }
+    }
+    boltffi_jni_vm = NULL;
+    boltffi_jni_native_class = NULL;
+}
+
+JNIEXPORT void JNICALL Java_ai_xybrid_Native_boltffi_1release_1class_1xybrid_1bolt_1xybrid_1download(JNIEnv *env, jclass cls, jlong handle) {
+    (void)cls;
+
+    (void)env;
+    boltffi_release_class_xybrid_bolt_xybrid_download(handle);
+
+    return;
+}
+
+JNIEXPORT jlong JNICALL Java_ai_xybrid_Native_boltffi_1init_1class_1xybrid_1bolt_1xybrid_1download_1from_1registry(JNIEnv *env, jclass cls, jobject id, jint __boltffi_id_len) {
+    (void)cls;
+
+    void *__boltffi_id_ptr = NULL;
+
+    if (!boltffi_jni_direct_buffer_address(env, id, (jlong)__boltffi_id_len, &__boltffi_id_ptr)) {
+        goto __boltffi_error;
+    }
+
+    (void)env;
+    uint64_t __boltffi_result = boltffi_init_class_xybrid_bolt_xybrid_download_from_registry((const uint8_t *)__boltffi_id_ptr, (uintptr_t)__boltffi_id_len);
+
+    return (jlong)__boltffi_result;
+__boltffi_error:
+    return 0;
+}
+
+JNIEXPORT jlong JNICALL Java_ai_xybrid_Native_boltffi_1init_1class_1xybrid_1bolt_1xybrid_1download_1from_1registry_1with_1platform(JNIEnv *env, jclass cls, jobject id, jint __boltffi_id_len, jobject platform, jint __boltffi_platform_len) {
+    (void)cls;
+
+    void *__boltffi_id_ptr = NULL;
+    void *__boltffi_platform_ptr = NULL;
+
+    if (!boltffi_jni_direct_buffer_address(env, id, (jlong)__boltffi_id_len, &__boltffi_id_ptr)) {
+        goto __boltffi_error;
+    }
+    if (!boltffi_jni_direct_buffer_address(env, platform, (jlong)__boltffi_platform_len, &__boltffi_platform_ptr)) {
+        goto __boltffi_error;
+    }
+
+    (void)env;
+    uint64_t __boltffi_result = boltffi_init_class_xybrid_bolt_xybrid_download_from_registry_with_platform((const uint8_t *)__boltffi_id_ptr, (uintptr_t)__boltffi_id_len, (const uint8_t *)__boltffi_platform_ptr, (uintptr_t)__boltffi_platform_len);
+
+    return (jlong)__boltffi_result;
+__boltffi_error:
+    return 0;
+}
+
+JNIEXPORT jbyteArray JNICALL Java_ai_xybrid_Native_boltffi_1method_1class_1xybrid_1bolt_1xybrid_1download_1status(JNIEnv *env, jclass cls, jlong receiver) {
+    (void)cls;
+
+    (void)env;
+    FfiBuf_u8 __boltffi_result = boltffi_method_class_xybrid_bolt_xybrid_download_status(receiver);
+
+    return boltffi_jni_buffer_to_byte_array(env, __boltffi_result);
+}
+
+JNIEXPORT jboolean JNICALL Java_ai_xybrid_Native_boltffi_1method_1class_1xybrid_1bolt_1xybrid_1download_1is_1finished(JNIEnv *env, jclass cls, jlong receiver) {
+    (void)cls;
+
+    (void)env;
+    bool __boltffi_result = boltffi_method_class_xybrid_bolt_xybrid_download_is_finished(receiver);
+
+    return (jboolean)__boltffi_result;
+}
+
+JNIEXPORT jbyteArray JNICALL Java_ai_xybrid_Native_boltffi_1method_1class_1xybrid_1bolt_1xybrid_1download_1error(JNIEnv *env, jclass cls, jlong receiver) {
+    (void)cls;
+
+    (void)env;
+    FfiBuf_u8 __boltffi_result = boltffi_method_class_xybrid_bolt_xybrid_download_error(receiver);
+
+    return boltffi_jni_buffer_to_byte_array(env, __boltffi_result);
+}
+
+JNIEXPORT void JNICALL Java_ai_xybrid_Native_boltffi_1method_1class_1xybrid_1bolt_1xybrid_1download_1cancel(JNIEnv *env, jclass cls, jlong receiver) {
+    (void)cls;
+
+    FfiStatus __boltffi_status = boltffi_method_class_xybrid_bolt_xybrid_download_cancel(receiver);
+
+    if (__boltffi_status.code != 0) {
+        boltffi_jni_throw_status(env, __boltffi_status);
+        return;
+    }
+
+    return;
 }
 
 JNIEXPORT void JNICALL Java_ai_xybrid_Native_boltffi_1release_1class_1xybrid_1bolt_1xybrid_1cancellation_1token(JNIEnv *env, jclass cls, jlong handle) {
@@ -1472,6 +1774,114 @@ JNIEXPORT void JNICALL Java_ai_xybrid_Native_boltffi_1function_1xybrid_1bolt_1te
 
     (void)env;
     boltffi_function_xybrid_bolt_telemetry_shutdown();
+
+    return;
+}
+
+JNIEXPORT jlong JNICALL Java_ai_xybrid_Native_boltffi_1stream_1xybrid_1bolt_1xybrid_1download_1progress_1subscribe(JNIEnv *env, jclass cls, jlong receiver) {
+    (void)cls;
+
+    (void)env;
+    uint64_t __boltffi_result = boltffi_stream_xybrid_bolt_xybrid_download_progress_subscribe(receiver);
+
+    return (jlong)__boltffi_result;
+}
+
+JNIEXPORT jbyteArray JNICALL Java_ai_xybrid_Native_boltffi_1stream_1xybrid_1bolt_1xybrid_1download_1progress_1pop_1batch(JNIEnv *env, jclass cls, jlong subscription, jlong max_count) {
+    (void)cls;
+
+    (void)env;
+    FfiBuf_u8 __boltffi_result = boltffi_stream_xybrid_bolt_xybrid_download_progress_pop_batch(subscription, max_count);
+
+    return boltffi_jni_buffer_to_byte_array(env, __boltffi_result);
+}
+
+JNIEXPORT jint JNICALL Java_ai_xybrid_Native_boltffi_1stream_1xybrid_1bolt_1xybrid_1download_1progress_1wait(JNIEnv *env, jclass cls, jlong subscription, jint timeout_milliseconds) {
+    (void)cls;
+
+    (void)env;
+    WaitResult __boltffi_result = boltffi_stream_xybrid_bolt_xybrid_download_progress_wait(subscription, timeout_milliseconds);
+
+    return (jint)__boltffi_result;
+}
+
+JNIEXPORT void JNICALL Java_ai_xybrid_Native_boltffi_1stream_1xybrid_1bolt_1xybrid_1download_1progress_1poll(JNIEnv *env, jclass cls, jlong subscription, jlong callback_data) {
+    (void)cls;
+
+    (void)env;
+    boltffi_stream_xybrid_bolt_xybrid_download_progress_poll(subscription, callback_data, boltffi_jni_continuation_callback);
+
+    return;
+}
+
+JNIEXPORT void JNICALL Java_ai_xybrid_Native_boltffi_1stream_1xybrid_1bolt_1xybrid_1download_1progress_1unsubscribe(JNIEnv *env, jclass cls, jlong subscription) {
+    (void)cls;
+
+    (void)env;
+    boltffi_stream_xybrid_bolt_xybrid_download_progress_unsubscribe(subscription);
+
+    return;
+}
+
+JNIEXPORT void JNICALL Java_ai_xybrid_Native_boltffi_1stream_1xybrid_1bolt_1xybrid_1download_1progress_1free(JNIEnv *env, jclass cls, jlong subscription) {
+    (void)cls;
+
+    (void)env;
+    boltffi_stream_xybrid_bolt_xybrid_download_progress_free(subscription);
+
+    return;
+}
+
+JNIEXPORT jlong JNICALL Java_ai_xybrid_Native_boltffi_1stream_1xybrid_1bolt_1xybrid_1model_1download_1progress_1subscribe(JNIEnv *env, jclass cls, jlong receiver) {
+    (void)cls;
+
+    (void)env;
+    uint64_t __boltffi_result = boltffi_stream_xybrid_bolt_xybrid_model_download_progress_subscribe(receiver);
+
+    return (jlong)__boltffi_result;
+}
+
+JNIEXPORT jbyteArray JNICALL Java_ai_xybrid_Native_boltffi_1stream_1xybrid_1bolt_1xybrid_1model_1download_1progress_1pop_1batch(JNIEnv *env, jclass cls, jlong subscription, jlong max_count) {
+    (void)cls;
+
+    (void)env;
+    FfiBuf_u8 __boltffi_result = boltffi_stream_xybrid_bolt_xybrid_model_download_progress_pop_batch(subscription, max_count);
+
+    return boltffi_jni_buffer_to_byte_array(env, __boltffi_result);
+}
+
+JNIEXPORT jint JNICALL Java_ai_xybrid_Native_boltffi_1stream_1xybrid_1bolt_1xybrid_1model_1download_1progress_1wait(JNIEnv *env, jclass cls, jlong subscription, jint timeout_milliseconds) {
+    (void)cls;
+
+    (void)env;
+    WaitResult __boltffi_result = boltffi_stream_xybrid_bolt_xybrid_model_download_progress_wait(subscription, timeout_milliseconds);
+
+    return (jint)__boltffi_result;
+}
+
+JNIEXPORT void JNICALL Java_ai_xybrid_Native_boltffi_1stream_1xybrid_1bolt_1xybrid_1model_1download_1progress_1poll(JNIEnv *env, jclass cls, jlong subscription, jlong callback_data) {
+    (void)cls;
+
+    (void)env;
+    boltffi_stream_xybrid_bolt_xybrid_model_download_progress_poll(subscription, callback_data, boltffi_jni_continuation_callback);
+
+    return;
+}
+
+JNIEXPORT void JNICALL Java_ai_xybrid_Native_boltffi_1stream_1xybrid_1bolt_1xybrid_1model_1download_1progress_1unsubscribe(JNIEnv *env, jclass cls, jlong subscription) {
+    (void)cls;
+
+    (void)env;
+    boltffi_stream_xybrid_bolt_xybrid_model_download_progress_unsubscribe(subscription);
+
+    return;
+}
+
+JNIEXPORT void JNICALL Java_ai_xybrid_Native_boltffi_1stream_1xybrid_1bolt_1xybrid_1model_1download_1progress_1free(JNIEnv *env, jclass cls, jlong subscription) {
+    (void)cls;
+
+    (void)env;
+    boltffi_stream_xybrid_bolt_xybrid_model_download_progress_free(subscription);
 
     return;
 }

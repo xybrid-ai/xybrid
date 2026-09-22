@@ -89,6 +89,36 @@ var model = XybridClient.LoadModelFromBundle("path/to/model.xyb");
 
 ---
 
+## Download Progress
+
+`load()` blocks until the weights are on disk, so it has no progress to report
+while it runs. Start the download separately and watch it:
+
+```csharp
+using var download = ModelLoader.FromRegistry("qwen3-0.6b").StartDownload();
+while (!download.IsFinished())
+{
+    // Status() never blocks, so it is safe once per frame.
+    slider.value = download.Status().Progress;
+    yield return null;
+}
+
+using var loader = ModelLoader.FromRegistry("qwen3-0.6b");
+var model = loader.Load();   // cached: returns at once
+```
+
+`progress` spans every file the model needs — weights plus companions such as a
+vision projector — and never moves backwards, so the bar neither restarts per
+file nor rewinds when a download retries. `totalBytes` is null when the source
+publishes no size (a Hugging Face repo); `downloadedBytes` is exact either way,
+which is what you need for megabytes, speed and time remaining.
+
+Cancelling the consuming task only unsubscribes from updates. Call `cancel()`
+to stop the transfer itself — it takes effect within one chunk read and
+discards the partial file.
+
+---
+
 ## Input Envelopes
 
 ### Text

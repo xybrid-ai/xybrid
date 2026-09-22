@@ -580,8 +580,17 @@ public final class XybridModuleImpl: NSObject {
     case .downloading: state = "downloading"
     case .ready: state = "ready"
     case .failed: state = "failed"
+    case .cancelled: state = "cancelled"
     }
-    return ["state": state, "progress": s.progress]
+    var out: [String: Any] = [
+      "state": state,
+      "progress": s.progress,
+      "downloadedBytes": s.downloadedBytes,
+    ]
+    // Absent rather than 0 when the source declares no size, so JS can tell
+    // "unknown total" from "zero-byte model".
+    if let total = s.totalBytes { out["totalBytes"] = total }
+    return out
   }
 
   private func encodeResult(_ r: XybridResult) -> [String: Any] {

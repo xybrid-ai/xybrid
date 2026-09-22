@@ -7,6 +7,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Download progress with bytes, on every surface.** `DownloadStatus` now
+  carries `downloaded_bytes` and `total_bytes` alongside the fraction, so apps
+  can render megabytes, speed and time remaining instead of a bare percentage.
+  The fraction is aggregated across *all* of a model's artifacts, never moves
+  backwards, and reaches 1.0 only once the model is actually ready.
+- **A download handle, separate from loading.** `ModelLoader::start_download()`
+  (Rust), `XybridDownload` (Swift / Kotlin / C# / Python) and
+  `ModelLoader.download()` / `StartDownload()` start the transfer in the
+  background and hand back something to watch — which the blocking `load` call
+  never gave the native bindings. The later `load` hits the cache and returns
+  at once.
+- **Pushed progress streams on the native bindings.** Built on BoltFFI 0.30's
+  stream primitive, so `download.progress()` is an `AsyncStream` in Swift, a
+  `Flow` in Kotlin, an `IAsyncEnumerable` in C# and an iterable in Python.
+  `XybridModel.download_progress()` is the same stream for a speculative load
+  (issue #504). Flutter keeps `loadWithProgress()` / `downloadProgress()`,
+  whose events gain the new byte fields.
+- **Cancellable downloads.** `cancel()` stops a transfer within one chunk read
+  and discards the partial file; the status moves to a new `Cancelled` state.
+
+### Fixed
+
+- **Multi-file models no longer reset the progress bar.** A vision model plus
+  its projector ran 0→1 once per file; progress is now scaled against the
+  summed size of every artifact, so finishing the first file reads its real
+  share. The speculative path no longer parks at 99.99% from the second file on.
+- **A retry no longer rewinds the bar.** The partial file is still discarded,
+  but the reported byte count is a high-water mark, so the bar stalls through
+  the re-transfer instead of snapping back to 0.
+- **Progress updates are throttled** to roughly ten a second instead of one per
+  8 KiB chunk (~130,000 events per GB previously pushed across the FFI boundary).
+- **Hugging Face downloads report real bytes.** Progress there remains
+  file-count based (the Hub gives no sizes up front, so `total_bytes` is null),
+  but `downloaded_bytes` is now exact.
+- **`fetch_extracted` resolves once**, not twice, for bundle models.
+
+### Changed
+
+- **Breaking (Rust):** `ModelLoader::load_with_progress`,
+  `RegistryClient::fetch` and `RegistryClient::fetch_extracted` take a
+  `Fn(DownloadStatus)` callback instead of `Fn(f32)`. Read `status.progress`
+  for the old value.
+- **Breaking (bindings):** `DownloadState` gained a `Cancelled` variant, which
+  affects exhaustive `switch` / `when` statements over it.
+- `xybrid fetch`, `run`, `bundle` and the REPL drive their progress bars from
+  the reported byte counts rather than back-computing them from the fraction,
+  so a multi-file model's bar is correctly sized.
+
 ### Planned
 
 - **Multimodal KV-prefix reuse**: the per-frame prefill cost lever for live vision — **deferred** from 0.2.0, not yet implemented.

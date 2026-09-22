@@ -384,24 +384,50 @@ public struct XybridResult: Hashable, Equatable, Sendable {
     }
 }
 
-/// Download progress + state in one consistent read.
+/// Download progress, bytes and state in one consistent read.
+///
+/// `progress` is aggregated across every artifact the model needs (weights
+/// plus companions such as a vision projector), never moves backwards, and
+/// reaches 1.0 only alongside `Ready`. `totalBytes` is null when the source
+/// declares no size — a Hugging Face repo, or a registry entry without one —
+/// in which case `downloadedBytes` is still exact and `progress` is coarser.
+///
+/// Derives `Copy` because it is carried as a stream item.
 public struct XybridDownloadStatus: Hashable, Equatable, Sendable {
     public var state: XybridDownloadState
     /// 0.0..=1.0.
     public var progress: Float
+    /// Bytes written so far, across every artifact.
+    public var downloadedBytes: UInt64
+    /// Declared total across every artifact, or null when unknown.
+    public var totalBytes: UInt64?
 
-    public init(state: XybridDownloadState, progress: Float) {
+    public init(
+        state: XybridDownloadState,
+        progress: Float,
+        downloadedBytes: UInt64,
+        totalBytes: UInt64?
+    ) {
         self.state = state
         self.progress = progress
+        self.downloadedBytes = downloadedBytes
+        self.totalBytes = totalBytes
     }
 
     @inlinable static func decode(from reader: inout WireReader) -> XybridDownloadStatus {
-        XybridDownloadStatus(state: XybridDownloadState(rawValue: reader.readI32())!, progress: reader.readF32())
+        XybridDownloadStatus(
+            state: XybridDownloadState(rawValue: reader.readI32())!,
+            progress: reader.readF32(),
+            downloadedBytes: reader.readU64(),
+            totalBytes: reader.readOptional { reader in reader.readU64() }
+        )
     }
 
     @inlinable func encode(to writer: inout WireWriter) {
         writer.writeI32(self.state.rawValue)
         writer.writeF32(self.progress)
+        writer.writeU64(self.downloadedBytes)
+        writer.writeOptional(self.totalBytes) { writer, boltffiValue0 in writer.writeU64(boltffiValue0) }
     }
 }
 
@@ -575,6 +601,8 @@ public enum XybridError: Hashable, Equatable, Sendable, Error {
     case unsupportedModelCapability(message: String)
     case unsupportedBackendCapability(message: String)
     case invalidImage(message: String)
+    /// The host called `cancel` — today, on a model download.
+    case cancelled(message: String)
 
     @inlinable static func decode(from reader: inout WireReader) -> XybridError {
         let tag = reader.readU32()
@@ -623,6 +651,8 @@ public enum XybridError: Hashable, Equatable, Sendable, Error {
             return .unsupportedBackendCapability(message: reader.readString())
         case 21:
             return .invalidImage(message: reader.readString())
+        case 22:
+            return .cancelled(message: reader.readString())
         default:
             fatalError("Invalid XybridError tag: \(tag)")
         }
@@ -693,6 +723,9 @@ public enum XybridError: Hashable, Equatable, Sendable, Error {
             writer.writeString(message)
         case let .invalidImage(message):
             writer.writeU32(21)
+            writer.writeString(message)
+        case let .cancelled(message):
+            writer.writeU32(22)
             writer.writeString(message)
         }
     }
@@ -803,12 +836,16 @@ public enum XybridExecutionTarget: Int32, Hashable, Sendable, CaseIterable {
     }
 }
 
-/// Lifecycle of the background download behind a speculative load.
+/// Lifecycle of a model download — a standalone [`XybridDownload`] or
+/// the background download behind a speculative load.
 public enum XybridDownloadState: Int32, Hashable, Sendable, CaseIterable {
     case downloading = 0
     case ready = 1
-    /// Download failed; the cloud keeps serving and `isLoaded` never flips.
+    /// Download failed; for a speculative load the cloud keeps serving and
+    /// `isLoaded` never flips.
     case failed = 2
+    /// The host called `cancel`.
+    case cancelled = 3
 
     @usableFromInline init(fromC c: Int32) {
         self = XybridDownloadState(rawValue: c)!
@@ -844,6 +881,73 @@ public enum XybridThermalState: Int32, Hashable, Sendable, CaseIterable {
 
     @usableFromInline var cValue: Int32 {
         rawValue
+    }
+}
+
+public final class XybridDownload {
+    @usableFromInline let handle: UInt64
+
+    @usableFromInline init(handle: UInt64) {
+        self.handle = handle
+    }
+
+    deinit {
+        boltffi_release_class_xybrid_bolt_xybrid_download(handle)
+    }
+
+    /// Start downloading a registry model. Returns immediately.
+    public init(fromRegistry id: String) {
+        let boltffiIdBytes = boltffiEncode { boltffiIdWriter in boltffiIdWriter.writeString(id) }
+        let boltffiHandle = boltffiIdBytes.withUnsafeBufferPointer { boltffiIdBuffer in
+            return boltffi_init_class_xybrid_bolt_xybrid_download_from_registry(boltffiIdBuffer.baseAddress!, UInt(boltffiIdBuffer.count))
+        }
+        self.handle = boltffiHandle
+    }
+
+    /// Start downloading a registry model resolved for a specific platform.
+    public init(fromRegistryWithPlatform id: String, platform: String) {
+        let boltffiIdBytes = boltffiEncode { boltffiIdWriter in boltffiIdWriter.writeString(id) }
+        let boltffiHandle = boltffiIdBytes.withUnsafeBufferPointer { boltffiIdBuffer in
+            let boltffiPlatformBytes = boltffiEncode { boltffiPlatformWriter in boltffiPlatformWriter.writeString(platform) }
+            return boltffiPlatformBytes.withUnsafeBufferPointer { boltffiPlatformBuffer in
+                return boltffi_init_class_xybrid_bolt_xybrid_download_from_registry_with_platform(
+                    boltffiIdBuffer.baseAddress!,
+                    UInt(boltffiIdBuffer.count),
+                    boltffiPlatformBuffer.baseAddress!,
+                    UInt(boltffiPlatformBuffer.count)
+                )
+            }
+        }
+        self.handle = boltffiHandle
+    }
+
+    /// Current snapshot. Never blocks — safe from a UI thread or a per-frame
+    /// render loop.
+    public func status() -> XybridDownloadStatus {
+        let boltffiResult = boltffi_method_class_xybrid_bolt_xybrid_download_status(self.handle)
+        defer { boltffi_free_buf(boltffiResult) }
+        return boltffiDecodeOwnedBuf(boltffiResult.ptr, Int(boltffiResult.len)) { boltffiReader in XybridDownloadStatus.decode(from: &boltffiReader) }
+    }
+
+    /// Whether the download reached a terminal state.
+    public func isFinished() -> Bool {
+        return boltffi_method_class_xybrid_bolt_xybrid_download_is_finished(self.handle)
+    }
+
+    /// The failure message once the download ended in `Failed` or
+    /// `Cancelled`; null otherwise. The stream carries the terminal *state*,
+    /// this carries the reason.
+    public func error() -> String? {
+        let boltffiResult = boltffi_method_class_xybrid_bolt_xybrid_download_error(self.handle)
+        defer { boltffi_free_buf(boltffiResult) }
+        return boltffiDecodeOwnedBuf(boltffiResult.ptr, Int(boltffiResult.len)) { boltffiReader in boltffiReader.readOptional { boltffiReader in boltffiReader.readString() } }
+    }
+
+    /// Ask the download to stop. Takes effect within one chunk read, discards
+    /// the partial file, and moves the status to `Cancelled`. Idempotent, and
+    /// a no-op once the download is terminal.
+    public func cancel() {
+        boltffi_method_class_xybrid_bolt_xybrid_download_cancel(self.handle)
     }
 }
 
@@ -1797,6 +1901,255 @@ public func telemetryShutdown() {
     boltffi_function_xybrid_bolt_telemetry_shutdown()
 }
 
+
+extension XybridDownload {
+    /// Pushed progress updates, closing once the download is terminal.
+    ///
+    /// Generated as an `AsyncStream` in Swift, a `Flow` in Kotlin, an
+    /// `IAsyncEnumerable` in C# and a subscription object in Python.
+    /// Cancelling the consuming task / scope / token unsubscribes; it does
+    /// **not** cancel the download itself — call [`Self::cancel`] for that.
+    ///
+    /// The current snapshot is delivered first, so subscribing late still
+    /// yields a frame, and a download that already finished closes at once
+    /// instead of hanging.
+    public func progress() -> _Concurrency.AsyncStream<XybridDownloadStatus> {
+        _Concurrency.AsyncStream<XybridDownloadStatus>(bufferingPolicy: .unbounded) { continuation in
+            let boltffiSubscription = boltffi_stream_xybrid_bolt_xybrid_download_progress_subscribe(self.handle)
+            guard boltffiSubscription != 0 else {
+                continuation.finish()
+                return
+            }
+            let context = BoltFFIStreamContext<XybridDownloadStatus>(
+                subscription: boltffiSubscription,
+                batchSize: 16,
+                readBatch: { subscription, batchSize in
+                    return boltffiReadWireStreamBatch(
+                        subscription: subscription,
+                        batchSize: batchSize,
+                        popBatch: boltffi_stream_xybrid_bolt_xybrid_download_progress_pop_batch,
+                        freeBuf: boltffi_free_buf
+                    ) { reader in
+                        let boltffiStreamCount = Int(reader.readU32())
+                        var boltffiStreamBatch = [XybridDownloadStatus]()
+                        boltffiStreamBatch.reserveCapacity(boltffiStreamCount)
+                        for _ in 0..<boltffiStreamCount {
+                            boltffiStreamBatch.append(XybridDownloadStatus.decode(from: &reader))
+                        }
+                        return boltffiStreamBatch
+                    }
+                },
+                poll: boltffi_stream_xybrid_bolt_xybrid_download_progress_poll,
+                unsubscribe: boltffi_stream_xybrid_bolt_xybrid_download_progress_unsubscribe,
+                free: boltffi_stream_xybrid_bolt_xybrid_download_progress_free,
+                atomicCompareExchange: boltffi_atomic_u8_cas,
+                yieldItem: { item in _ = continuation.yield(item) },
+                finish: { continuation.finish() }
+            )
+            continuation.onTermination = { @Sendable _ in context.requestTermination() }
+            context.start()
+        }
+    }
+}
+
+
+extension XybridModel {
+    /// Pushed download updates for a speculatively-loaded model — the stream
+    /// counterpart of [`Self::await_download`], and what issue #504 asks for.
+    ///
+    /// Emits the current snapshot first, then every update, then closes on
+    /// the terminal state. An ordinary local model is already `Ready`, so its
+    /// stream yields one frame and ends.
+    public func downloadProgress() -> _Concurrency.AsyncStream<XybridDownloadStatus> {
+        _Concurrency.AsyncStream<XybridDownloadStatus>(bufferingPolicy: .unbounded) { continuation in
+            let boltffiSubscription = boltffi_stream_xybrid_bolt_xybrid_model_download_progress_subscribe(self.handle)
+            guard boltffiSubscription != 0 else {
+                continuation.finish()
+                return
+            }
+            let context = BoltFFIStreamContext<XybridDownloadStatus>(
+                subscription: boltffiSubscription,
+                batchSize: 16,
+                readBatch: { subscription, batchSize in
+                    return boltffiReadWireStreamBatch(
+                        subscription: subscription,
+                        batchSize: batchSize,
+                        popBatch: boltffi_stream_xybrid_bolt_xybrid_model_download_progress_pop_batch,
+                        freeBuf: boltffi_free_buf
+                    ) { reader in
+                        let boltffiStreamCount = Int(reader.readU32())
+                        var boltffiStreamBatch = [XybridDownloadStatus]()
+                        boltffiStreamBatch.reserveCapacity(boltffiStreamCount)
+                        for _ in 0..<boltffiStreamCount {
+                            boltffiStreamBatch.append(XybridDownloadStatus.decode(from: &reader))
+                        }
+                        return boltffiStreamBatch
+                    }
+                },
+                poll: boltffi_stream_xybrid_bolt_xybrid_model_download_progress_poll,
+                unsubscribe: boltffi_stream_xybrid_bolt_xybrid_model_download_progress_unsubscribe,
+                free: boltffi_stream_xybrid_bolt_xybrid_model_download_progress_free,
+                atomicCompareExchange: boltffi_atomic_u8_cas,
+                yieldItem: { item in _ = continuation.yield(item) },
+                finish: { continuation.finish() }
+            )
+            continuation.onTermination = { @Sendable _ in context.requestTermination() }
+            context.start()
+        }
+    }
+}
+
+private enum BoltFFIStreamPollResult: Int8 {
+    case ready = 0
+    case closed = 1
+}
+
+@inline(__always)
+private func boltffiReadDirectStreamBatch<Element, Item>(
+    subscription: UInt64,
+    batchSize: UInt,
+    popBatch: (UInt64, UnsafeMutablePointer<Element>?, UInt) -> UInt,
+    mapItems: (UnsafeBufferPointer<Element>) -> [Item]
+) -> [Item] {
+    if batchSize == 0 {
+        return []
+    }
+    let items = UnsafeMutablePointer<Element>.allocate(capacity: Int(batchSize))
+    defer { items.deallocate() }
+    let count = popBatch(subscription, items, batchSize)
+    if count == 0 {
+        return []
+    }
+    return mapItems(UnsafeBufferPointer(start: items, count: Int(count)))
+}
+
+private class BoltFFIStreamPollContext: @unchecked Sendable {
+    func handlePoll(_ result: Int8) {
+        preconditionFailure("invalid BoltFFI stream poll context")
+    }
+}
+
+private let boltffiStreamPollCallback: @convention(c) (UInt64, Int8) -> Void = { data, result in
+    Unmanaged<BoltFFIStreamPollContext>.fromOpaque(UnsafeRawPointer(bitPattern: UInt(data))!).takeRetainedValue().handlePoll(result)
+}
+
+private final class BoltFFIStreamContext<Item>: BoltFFIStreamPollContext, @unchecked Sendable {
+    private let subscription: UInt64
+    private let batchSize: UInt
+    private let readBatch: (UInt64, UInt) -> [Item]
+    private let poll: (UInt64, UInt64, StreamContinuationCallback?) -> Void
+    private let unsubscribe: (UInt64) -> Void
+    private let free: (UInt64) -> Void
+    private let atomicCompareExchange: (UnsafeMutablePointer<UInt8>?, UInt8, UInt8) -> Bool
+    private let yieldItem: (Item) -> Void
+    private let finish: () -> Void
+    private var lifecycle = UInt8(0)
+    private var processing = UInt8(0)
+
+    init(
+        subscription: UInt64,
+        batchSize: UInt,
+        readBatch: @escaping (UInt64, UInt) -> [Item],
+        poll: @escaping (UInt64, UInt64, StreamContinuationCallback?) -> Void,
+        unsubscribe: @escaping (UInt64) -> Void,
+        free: @escaping (UInt64) -> Void,
+        atomicCompareExchange: @escaping (UnsafeMutablePointer<UInt8>?, UInt8, UInt8) -> Bool,
+        yieldItem: @escaping (Item) -> Void,
+        finish: @escaping () -> Void
+    ) {
+        self.subscription = subscription
+        self.batchSize = batchSize
+        self.readBatch = readBatch
+        self.poll = poll
+        self.unsubscribe = unsubscribe
+        self.free = free
+        self.atomicCompareExchange = atomicCompareExchange
+        self.yieldItem = yieldItem
+        self.finish = finish
+    }
+
+    func start() {
+        registerPoll()
+    }
+
+    func requestTermination() {
+        let started = withUnsafeMutablePointer(to: &lifecycle) {
+            atomicCompareExchange($0, 0, 1)
+        }
+        if started {
+            unsubscribe(subscription)
+            _ = withUnsafeMutablePointer(to: &lifecycle) {
+                atomicCompareExchange($0, 1, 2)
+            }
+        }
+        finalizeIfIdle()
+    }
+
+    private func registerPoll() {
+        guard withUnsafeMutablePointer(to: &lifecycle, { atomicCompareExchange($0, 0, 0) }) else {
+            finalizeIfIdle()
+            return
+        }
+        let data = UInt64(UInt(bitPattern: Unmanaged.passRetained(self).toOpaque()))
+        poll(subscription, data, boltffiStreamPollCallback)
+    }
+
+    override func handlePoll(_ result: Int8) {
+        guard withUnsafeMutablePointer(to: &processing, { atomicCompareExchange($0, 0, 1) }) else {
+            finalizeIfIdle()
+            return
+        }
+        let reschedule = processPoll(result)
+        _ = withUnsafeMutablePointer(to: &processing) { atomicCompareExchange($0, 1, 0) }
+        finalizeIfIdle()
+        if reschedule {
+            schedulePoll()
+        }
+    }
+
+    private func processPoll(_ result: Int8) -> Bool {
+        guard withUnsafeMutablePointer(to: &lifecycle, { atomicCompareExchange($0, 0, 0) }) else {
+            return false
+        }
+        drain()
+        if result == BoltFFIStreamPollResult.closed.rawValue {
+            requestTermination()
+            return false
+        }
+        return withUnsafeMutablePointer(to: &lifecycle) { atomicCompareExchange($0, 0, 0) }
+    }
+
+    private func drain() {
+        while true {
+            let items = readBatch(subscription, batchSize)
+            if items.isEmpty {
+                return
+            }
+            for item in items {
+                yieldItem(item)
+            }
+        }
+    }
+
+    private func schedulePoll() {
+        _Concurrency.Task { [self] in
+            await _Concurrency.Task.yield()
+            registerPoll()
+        }
+    }
+
+    private func finalizeIfIdle() {
+        guard withUnsafeMutablePointer(to: &processing, { atomicCompareExchange($0, 0, 0) }) else {
+            return
+        }
+        guard withUnsafeMutablePointer(to: &lifecycle, { atomicCompareExchange($0, 2, 3) }) else {
+            return
+        }
+        free(subscription)
+        finish()
+    }
+}
+
 @usableFromInline struct WireReader {
     @usableFromInline let data: Data
     @usableFromInline var position: Int
@@ -2169,5 +2522,22 @@ func boltffiEncodeUnexpectedCallbackError(_ error: Error) -> [UInt8] {
     writer.writeU8(boltffiUnexpectedCallbackErrorVersion)
     writer.writeString(String(describing: error))
     return [UInt8](writer.finalize())
+}
+
+@inline(__always)
+private func boltffiReadWireStreamBatch<Item>(
+    subscription: UInt64,
+    batchSize: UInt,
+    popBatch: (UInt64, UInt) -> FfiBuf_u8,
+    freeBuf: (FfiBuf_u8) -> Void,
+    decodeItems: (inout WireReader) -> [Item]
+) -> [Item] {
+    let buffer = popBatch(subscription, batchSize)
+    defer { freeBuf(buffer) }
+    guard buffer.len > 0, let pointer = buffer.ptr else {
+        return []
+    }
+    var reader = WireReader(ptr: pointer, len: Int(buffer.len))
+    return decodeItems(&reader)
 }
 

@@ -971,13 +971,16 @@ impl Pipeline {
             match decision.result {
                 ResolvedTarget::Device => {
                     // Authority says run locally - proceed with download
-                    let progress_for_model = |download_progress: f32| {
-                        let bytes_downloaded = (download_progress * total_bytes as f32) as u64;
+                    // Byte counts now come from the download itself rather
+                    // than being back-computed from a fraction; `total_bytes`
+                    // (the registry listing's figure) is the fallback for
+                    // sources that declare no size.
+                    let progress_for_model = |status: crate::DownloadStatus| {
                         progress_callback(DownloadProgress {
                             model_id: model_id.clone(),
-                            percent: (download_progress * 100.0) as u32,
-                            bytes_downloaded,
-                            bytes_total: total_bytes,
+                            percent: (status.progress * 100.0) as u32,
+                            bytes_downloaded: status.downloaded_bytes,
+                            bytes_total: status.total_bytes.unwrap_or(total_bytes),
                             stage_index: stage_idx,
                             total_stages,
                         });

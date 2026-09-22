@@ -156,10 +156,23 @@ class XybridResult:
 
 @dataclass(frozen=True, slots=True)
 class XybridDownloadStatus:
-    """Download progress + state in one consistent read."""
+    """Download progress, bytes and state in one consistent read.
+
+    `progress` is aggregated across every artifact the model needs (weights
+    plus companions such as a vision projector), never moves backwards, and
+    reaches 1.0 only alongside `Ready`. `totalBytes` is null when the source
+    declares no size — a Hugging Face repo, or a registry entry without one —
+    in which case `downloadedBytes` is still exact and `progress` is coarser.
+
+    Derives `Copy` because it is carried as a stream item.
+    """
     state: XybridDownloadState
     progress: float
     """0.0..=1.0."""
+    downloaded_bytes: int
+    """Bytes written so far, across every artifact."""
+    total_bytes: int | None
+    """Declared total across every artifact, or null when unknown."""
 
 
 
@@ -349,6 +362,12 @@ class XybridErrorInvalidImage(XybridError):
     message: str
 
 
+@dataclass(frozen=True, slots=True)
+class XybridErrorCancelled(XybridError):
+    """The host called `cancel` — today, on a model download."""
+    message: str
+
+
 
 class XybridErrorException(RuntimeError):
     error: XybridError
@@ -415,10 +434,13 @@ class XybridExecutionTarget(IntEnum):
 
 
 class XybridDownloadState(IntEnum):
-    """Lifecycle of the background download behind a speculative load."""
+    """Lifecycle of a model download — a standalone [`XybridDownload`] or
+    the background download behind a speculative load.
+    """
     DOWNLOADING = 0
     READY = 1
     FAILED = 2
+    CANCELLED = 3
 
 
 class XybridStreamEventKind(IntEnum):
@@ -431,6 +453,62 @@ class XybridThermalState(IntEnum):
     WARM = 1
     HOT = 2
     CRITICAL = 3
+
+
+
+class XybridDownload:
+    _handle: int
+
+    def __init__(self) -> None: ...
+
+    @classmethod
+    def _from_handle(cls, handle: int) -> "XybridDownload": ...
+    def __del__(self) -> None: ...
+    @classmethod
+    def from_registry(cls, id: str) -> "XybridDownload":
+        """Start downloading a registry model. Returns immediately."""
+    @classmethod
+    def from_registry_with_platform(cls, id: str, platform: str) -> "XybridDownload":
+        """Start downloading a registry model resolved for a specific platform."""
+    def status(self) -> XybridDownloadStatus:
+        """Current snapshot. Never blocks — safe from a UI thread or a per-frame
+        render loop.
+        """
+    def is_finished(self) -> bool:
+        """Whether the download reached a terminal state."""
+    def error(self) -> str | None:
+        """The failure message once the download ended in `Failed` or
+        `Cancelled`; null otherwise. The stream carries the terminal *state*,
+        this carries the reason.
+        """
+    def cancel(self) -> None:
+        """Ask the download to stop. Takes effect within one chunk read, discards
+        the partial file, and moves the status to `Cancelled`. Idempotent, and
+        a no-op once the download is terminal.
+        """
+    def progress(self) -> "XybridDownloadProgressSubscription":
+        """Pushed progress updates, closing once the download is terminal.
+
+        Generated as an `AsyncStream` in Swift, a `Flow` in Kotlin, an
+        `IAsyncEnumerable` in C# and a subscription object in Python.
+        Cancelling the consuming task / scope / token unsubscribes; it does
+        **not** cancel the download itself — call [`Self::cancel`] for that.
+
+        The current snapshot is delivered first, so subscribing late still
+        yields a frame, and a download that already finished closes at once
+        instead of hanging.
+        """
+
+
+class XybridDownloadProgressSubscription:
+    _handle: int | None
+    def __init__(self) -> None: ...
+    @classmethod
+    def _from_handle(cls, handle: int) -> "XybridDownloadProgressSubscription": ...
+    def __del__(self) -> None: ...
+    def pop_batch(self, max_count: int = 16) -> list[XybridDownloadStatus]: ...
+    def wait(self, timeout_milliseconds: int) -> int: ...
+    def unsubscribe(self) -> None: ...
 
 
 
@@ -570,6 +648,25 @@ class XybridModel:
         """
     def warmup(self) -> None: ...
     def unload(self) -> None: ...
+    def download_progress(self) -> "XybridModelDownloadProgressSubscription":
+        """Pushed download updates for a speculatively-loaded model — the stream
+        counterpart of [`Self::await_download`], and what issue #504 asks for.
+
+        Emits the current snapshot first, then every update, then closes on
+        the terminal state. An ordinary local model is already `Ready`, so its
+        stream yields one frame and ends.
+        """
+
+
+class XybridModelDownloadProgressSubscription:
+    _handle: int | None
+    def __init__(self) -> None: ...
+    @classmethod
+    def _from_handle(cls, handle: int) -> "XybridModelDownloadProgressSubscription": ...
+    def __del__(self) -> None: ...
+    def pop_batch(self, max_count: int = 16) -> list[XybridDownloadStatus]: ...
+    def wait(self, timeout_milliseconds: int) -> int: ...
+    def unsubscribe(self) -> None: ...
 
 
 

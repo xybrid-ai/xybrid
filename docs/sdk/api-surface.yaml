@@ -162,7 +162,16 @@ classes:
         status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
       loadWithProgress:
         return: "Stream<LoadEvent>"
+        # Dart-only. The bolt languages get the same capability through the
+        # separate XybridDownload handle, because their load call blocks.
         status: { dart: implemented, kotlin: planned, swift: planned, csharp: planned }
+      download:
+        # Starts the download in the background without loading, so a blocking
+        # host has something to watch. Returns null for a source with nothing
+        # to fetch (bundle, directory, Hugging Face repo). Named StartDownload
+        # in C#.
+        return: "XybridDownload?"
+        status: { rust: implemented, dart: planned, kotlin: implemented, swift: implemented, csharp: implemented }
       fromRegistrySpeculative:
         static: true
         params: [{ name: modelId, type: String }]
@@ -177,6 +186,45 @@ classes:
         # this loader, an API key resolves, and the model is not already
         # cached. Reads the local cache; never hits the network.
         status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+
+  # -------------------------------------------------------------------
+  # 2b. XybridDownload
+  # -------------------------------------------------------------------
+  # A model download running in the background, decoupled from loading it.
+  # Exists because every bolt binding's load call blocks: there is no object to
+  # poll while the weights come down. The download fills the normal SDK cache,
+  # so the load afterwards returns at once. Dart drives the same capability
+  # through XybridModelLoader.loadWithProgress().
+  XybridDownload:
+    type: class
+    section: "2b. XybridDownload"
+    methods:
+      fromRegistry:
+        static: true
+        params: [{ name: modelId, type: String }]
+        return: XybridDownload
+        status: { rust: implemented, dart: planned, kotlin: implemented, swift: implemented, csharp: implemented }
+      status:
+        return: DownloadStatus
+        # Never blocks; safe from a UI thread or a per-frame render loop.
+        status: { rust: implemented, dart: planned, kotlin: implemented, swift: implemented, csharp: implemented }
+      progress:
+        return: "Stream<DownloadStatus>"
+        # AsyncStream (Swift) / Flow (Kotlin) / IAsyncEnumerable (C#) /
+        # iterable subscription (Python). Emits the current snapshot first,
+        # then closes on the terminal state.
+        status: { rust: implemented, dart: planned, kotlin: implemented, swift: implemented, csharp: implemented }
+      isFinished:
+        return: bool
+        status: { rust: implemented, dart: planned, kotlin: implemented, swift: implemented, csharp: implemented }
+      error:
+        return: "String?"
+        # The failure reason once the download ended in failed or cancelled.
+        status: { rust: implemented, dart: planned, kotlin: implemented, swift: implemented, csharp: implemented }
+      cancel:
+        # Stops the transfer within one chunk read and discards the partial
+        # file. Idempotent, and a no-op once terminal.
+        status: { rust: implemented, dart: planned, kotlin: implemented, swift: implemented, csharp: implemented }
 
   # -------------------------------------------------------------------
   # 3. XybridModel
@@ -300,7 +348,8 @@ classes:
         status: { rust: implemented, dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
       downloadStatus:
         return: DownloadStatus
-        # Download state + progress in one consistent read; poll to drive a bar.
+        # Download state, progress and byte counts in one consistent read; poll
+        # to drive a bar, or subscribe with downloadProgress().
         status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
       awaitDownload:
         params: [{ name: timeoutMs, type: int }]
@@ -309,10 +358,13 @@ classes:
         # the pushed downloadProgress() stream instead.
         status: { dart: planned, kotlin: implemented, swift: implemented, csharp: implemented }
       downloadProgress:
-        return: "Stream<LoadEvent>"
-        # Dart-only: flutter_rust_bridge stream sinks are safe, whereas the bolt
-        # bindings must not carry a closure across the FFI boundary.
-        status: { dart: implemented, kotlin: planned, swift: planned, csharp: planned }
+        return: "Stream<DownloadStatus>"
+        # Pushed progress for a speculative load. Dart rides a
+        # flutter_rust_bridge stream sink; the bolt bindings ride BoltFFI's
+        # stream primitive, which carries items Rust -> host only (no closure
+        # crosses the boundary): AsyncStream in Swift, Flow in Kotlin,
+        # IAsyncEnumerable in C#.
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
       executionProviderInfo:
         return: ExecutionProviderInfo
         status: { dart: planned, kotlin: planned, swift: planned, csharp: planned }

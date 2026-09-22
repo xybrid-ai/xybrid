@@ -8,6 +8,7 @@
 
 use crate::cache::layout::CacheLayout;
 use crate::cache::CacheManager;
+use crate::download::{ModelDownload, MAX_IN_FLIGHT_PROGRESS_BP};
 use crate::model_registry::AutoReleasePolicy;
 use crate::registry_client::RegistryClient;
 use crate::result::{InferenceResult, OutputType};
@@ -18,7 +19,7 @@ use crate::source::{detect_platform, ModelSource};
 use crate::stream::XybridStream;
 use std::path::{Component, Path, PathBuf};
 use std::pin::Pin;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
 use std::time::{Duration, Instant};
 use tempfile::TempDir;
@@ -39,6 +40,12 @@ use xybrid_core::runtime_adapter::{
     STOP_SEQUENCES_METADATA_KEY,
 };
 use xybrid_core::streaming::{StreamConfig as CoreStreamConfig, VadStreamConfig as CoreVadConfig};
+
+/// Re-exported from [`crate::download`], where the download surface now
+/// lives, so long-standing `xybrid_sdk::model::DownloadStatus` paths keep
+/// resolving.
+#[doc(inline)]
+pub use crate::download::{DownloadState, DownloadStatus};
 
 /// A token generated during streaming inference.
 ///
@@ -190,6 +197,12 @@ pub enum SdkError {
     RateLimited { retry_after_secs: u64 },
     #[error("Request timeout after {timeout_ms}ms")]
     Timeout { timeout_ms: u64 },
+    /// The caller asked for the operation to stop — currently only
+    /// [`ModelDownload::cancel`](crate::download::ModelDownload::cancel).
+    /// Deliberately **not** retryable: retrying would undo the cancellation
+    /// the caller just asked for.
+    #[error("Cancelled: {message}")]
+    Cancelled { message: String },
 }
 
 /// Generates the `message`-only and `_src` (cause-chaining) constructors for
@@ -235,7 +248,8 @@ impl SdkError {
     /// Transient failures (`NetworkError`, `RateLimited`, `Timeout`,
     /// `Offline`) are retryable; everything else — including
     /// `CircuitOpen`, `ConfigError`, `ModelNotFound`, `LoadError`,
-    /// `InferenceError`, and `AbortedForCloudFallback` — is not. `Offline`
+    /// `InferenceError`, `Cancelled`, and `AbortedForCloudFallback` — is
+    /// not. `Offline`
     /// is retryable only across *different* registry URLs (a fallback
     /// registry may be reachable when the primary isn't); within a single
     /// URL the retry loop short-circuits (see `registry_client`).
@@ -275,6 +289,9 @@ impl SdkError {
             SdkError::CacheError { .. } => false,
             SdkError::PipelineError { .. } => false,
             SdkError::CircuitOpen(_) => false, // Don't retry when circuit is open
+            // Retrying a cancelled download would resume exactly what the
+            // caller just stopped.
+            SdkError::Cancelled { .. } => false,
         }
     }
 
@@ -994,8 +1011,8 @@ impl ModelHandle {
 /// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
 /// # use xybrid_sdk::ModelLoader;
 /// let loader = ModelLoader::from_registry("kokoro-82m");
-/// let model = loader.load_with_progress(|progress| {
-///     println!("Download: {:.1}%", progress * 100.0);
+/// let model = loader.load_with_progress(|status| {
+///     println!("Download: {:.1}%", status.progress * 100.0);
 /// })?;
 /// # Ok(())
 /// # }
@@ -1443,13 +1460,6 @@ fn publish_speculative_cloud_event(model_id: &str, latency_ms: u32, streaming: b
     crate::telemetry::publish_telemetry_event(event);
 }
 
-/// Ceiling for in-flight download progress, in basis points (99.99%).
-///
-/// `fetch_extracted` restarts at 0 for every artifact, so hitting 1.0 on the
-/// first one would announce a finished download while later artifacts are
-/// still transferring. 1.0 is reserved for [`DownloadState::Ready`].
-const MAX_IN_FLIGHT_PROGRESS_BP: u32 = 9_999;
-
 /// Completion signal for the background download started by
 /// [`ModelLoader::load_speculative`].
 ///
@@ -1458,74 +1468,68 @@ const MAX_IN_FLIGHT_PROGRESS_BP: u32 = 9_999;
 /// error for a model the caller only ever asked to run. `outcome` is `None`
 /// while the download is in flight, `Some(true)` once the real local handle is
 /// installed, and `Some(false)` if the download failed (cloud keeps serving).
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub(crate) struct SpeculativeDownload {
     outcome: Mutex<Option<bool>>,
     finished: std::sync::Condvar,
-    /// Download completion in basis points (0..=10_000). `f32` has no atomic,
-    /// and a lock here would sit on the download's hot path.
-    progress_bp: std::sync::atomic::AtomicU32,
+    /// Last status the registry client reported. Already aggregated across
+    /// artifacts, monotonic and throttled by [`ProgressReporter`]; this only
+    /// has to store it.
+    progress: Mutex<DownloadStatus>,
+    /// Observers fed by [`XybridModel::watch_download`], so a host can be
+    /// pushed updates instead of polling. Rust-side only — the closure never
+    /// crosses an FFI boundary.
+    observers: Mutex<Vec<crate::download::DownloadObserver>>,
 }
 
-/// Lifecycle of the background download behind a speculative model.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DownloadState {
-    /// Weights still downloading; runs are served from the cloud.
-    Downloading,
-    /// Local handle installed; runs are on-device.
-    Ready,
-    /// Download failed — the cloud keeps serving, and `is_loaded()` will never
-    /// flip. Surfacing this is the only way a host can stop waiting.
-    Failed,
-}
-
-/// One consistent read of a speculative download's progress and state.
-///
-/// Taken as a snapshot so a polling host cannot observe a torn pair (for
-/// example `Ready` alongside a stale 0.34 progress).
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct DownloadStatus {
-    pub state: DownloadState,
-    /// 0.0..=1.0.
-    pub progress: f32,
+impl std::fmt::Debug for SpeculativeDownload {
+    /// Hand-written because the observer closures have no `Debug`; the status
+    /// is the only part worth printing anyway.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SpeculativeDownload")
+            .field("status", &self.status())
+            .finish_non_exhaustive()
+    }
 }
 
 impl SpeculativeDownload {
-    /// Record download progress (0.0..=1.0) from the fetch callback.
-    ///
-    /// `fetch_extracted` reports 0→1 *per artifact* — the main file, then each
-    /// extra (a VLM's projector, for example) — and never says how many are
-    /// coming. Two consequences are handled here:
-    ///
-    /// - monotonic (`fetch_max`), so a bar cannot snap backwards when the next
-    ///   artifact restarts at 0;
-    /// - capped just below 1.0, so finishing the *first* artifact cannot claim
-    ///   the whole download is done. Only the terminal `Ready` state reports
-    ///   1.0 (see [`Self::status`]).
-    ///
-    /// The result under-reports mid-download rather than lying about being
-    /// finished. True aggregation would need an artifact count the registry
-    /// client does not expose.
-    fn set_progress(&self, fraction: f32) {
-        let bp = (fraction.clamp(0.0, 1.0) * 10_000.0) as u32;
-        self.progress_bp
-            .fetch_max(bp.min(MAX_IN_FLIGHT_PROGRESS_BP), Ordering::Relaxed);
+    /// Record a status reported by the registry client's download.
+    fn set_progress(&self, status: DownloadStatus) {
+        // `ProgressReporter` emits the terminal `Ready` the moment the bytes
+        // are verified, but this download is only really done once the local
+        // handle is installed — which `finish` signals. Hold it just below.
+        let status = DownloadStatus {
+            state: DownloadState::Downloading,
+            progress: status
+                .progress
+                .min(MAX_IN_FLIGHT_PROGRESS_BP as f32 / 10_000.0),
+            ..status
+        };
+        *self.progress.lock().unwrap_or_else(|e| e.into_inner()) = status;
+        self.notify(status);
     }
 
     /// Snapshot progress + state together.
     fn status(&self) -> DownloadStatus {
         let outcome = *self.outcome.lock().unwrap_or_else(|e| e.into_inner());
-        let state = match outcome {
-            None => DownloadState::Downloading,
-            Some(true) => DownloadState::Ready,
-            Some(false) => DownloadState::Failed,
-        };
-        let progress = match state {
+        let progress = *self.progress.lock().unwrap_or_else(|e| e.into_inner());
+        match outcome {
+            None => progress,
             // A finished download is 1.0 even if the last callback never fired.
-            DownloadState::Ready => 1.0,
-            _ => self.progress_bp.load(Ordering::Relaxed) as f32 / 10_000.0,
-        };
-        DownloadStatus { state, progress }
+            Some(true) => DownloadStatus::ready(progress.downloaded_bytes, progress.total_bytes),
+            Some(false) => DownloadStatus::terminal(DownloadState::Failed, &progress),
+        }
+    }
+
+    fn notify(&self, status: DownloadStatus) {
+        for observer in self
+            .observers
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .iter()
+        {
+            observer(status);
+        }
     }
 
     /// Block until the download reaches a terminal state or `timeout` elapses.
@@ -1562,6 +1566,27 @@ impl SpeculativeDownload {
         *guard = Some(installed_local);
         drop(guard);
         self.finished.notify_all();
+        // Push the terminal frame, then drop the observers: nothing further
+        // will be emitted, and holding them would keep host closures alive for
+        // the model's whole lifetime.
+        self.notify(self.status());
+        self.observers
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clear();
+    }
+
+    /// Register an observer for pushed progress updates, delivering the
+    /// current snapshot first so a late subscriber still gets a frame.
+    fn watch(&self, observer: crate::download::DownloadObserver) {
+        let snapshot = self.status();
+        observer(snapshot);
+        if snapshot.state == DownloadState::Downloading {
+            self.observers
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .push(observer);
+        }
     }
 
     /// Block until the background download finishes; `true` if it installed a
@@ -2024,16 +2049,26 @@ impl ModelLoader {
 
     /// Load the model with a progress callback.
     ///
-    /// The callback receives progress as a float from 0.0 to 1.0.
-    /// Only applies to registry-based loading (downloads from HuggingFace).
+    /// The callback receives a [`DownloadStatus`]: state, a 0.0–1.0 fraction
+    /// aggregated across every artifact the model needs, bytes transferred,
+    /// and the declared total when the source has one. Updates arrive roughly
+    /// ten times a second, never move backwards, and reach 1.0 only alongside
+    /// [`DownloadState::Ready`].
+    ///
+    /// Only registry and Hugging Face sources download anything; local
+    /// bundles and directories report `Ready` and nothing else.
     ///
     /// # Example
     /// ```no_run
     /// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
     /// # use xybrid_sdk::ModelLoader;
     /// # let loader: ModelLoader = unimplemented!();
-    /// let model = loader.load_with_progress(|progress| {
-    ///     println!("Download: {:.1}%", progress * 100.0);
+    /// let model = loader.load_with_progress(|status| {
+    ///     println!(
+    ///         "Download: {:.1}% ({} bytes)",
+    ///         status.progress * 100.0,
+    ///         status.downloaded_bytes
+    ///     );
     /// })?;
     /// # Ok(())
     /// # }
@@ -2041,7 +2076,7 @@ impl ModelLoader {
     #[allow(deprecated)]
     pub fn load_with_progress<F>(&self, progress_callback: F) -> SdkResult<XybridModel>
     where
-        F: Fn(f32),
+        F: Fn(DownloadStatus),
     {
         // Before anything is downloaded or mapped: if this load opted into
         // auto-release and the device is under memory pressure, free the
@@ -2073,6 +2108,38 @@ impl ModelLoader {
         }
     }
 
+    /// Start downloading this model's weights in the background and return a
+    /// handle to watch.
+    ///
+    /// Separating the download from the load is what gives blocking hosts a
+    /// progress bar: `load()` has no object to poll while it runs, this does.
+    /// The download populates the normal SDK cache, so the later `load()` (or
+    /// `load_async()`) hits it and returns without touching the network.
+    ///
+    /// Returns immediately. Sources with nothing to fetch — a local directory
+    /// or bundle — come back already [`DownloadState::Ready`].
+    ///
+    /// # Example
+    /// ```no_run
+    /// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+    /// # use std::time::Duration;
+    /// # use xybrid_sdk::{DownloadState, ModelLoader};
+    /// let loader = ModelLoader::from_registry("qwen3-0.6b");
+    /// let download = loader.start_download();
+    /// while download.next_status(Duration::from_millis(250))?.state
+    ///     == DownloadState::Downloading
+    /// {
+    ///     let status = download.status();
+    ///     println!("{} / {:?}", status.downloaded_bytes, status.total_bytes);
+    /// }
+    /// let model = loader.load()?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn start_download(&self) -> Arc<ModelDownload> {
+        ModelDownload::spawn(self.source.clone())
+    }
+
     /// Load the model asynchronously.
     pub async fn load_async(&self) -> SdkResult<XybridModel> {
         // For now, wrap the sync version. Real async would use tokio::fs and async HTTP.
@@ -2094,7 +2161,7 @@ impl ModelLoader {
         progress_callback: F,
     ) -> SdkResult<XybridModel>
     where
-        F: Fn(f32),
+        F: Fn(DownloadStatus),
     {
         // Speculative cloud: when enabled, a key is set, and the model isn't
         // cached yet, serve from cloud while the weights download in the
@@ -2173,8 +2240,9 @@ impl ModelLoader {
                         &id_owned,
                         platform_owned.as_deref(),
                         // Feed the poll-able progress cell; hosts read it via
-                        // `XybridModel::download_status`.
-                        |fraction| bg_download.set_progress(fraction),
+                        // `XybridModel::download_status` or subscribe with
+                        // `XybridModel::watch_download`.
+                        |status| bg_download.set_progress(status),
                     )?;
                     Self::create_model_handle(&dir)
                 });
@@ -2402,7 +2470,7 @@ impl ModelLoader {
         _progress_callback: F,
     ) -> SdkResult<XybridModel>
     where
-        F: Fn(f32),
+        F: Fn(DownloadStatus),
     {
         use hf_hub::{api::sync::ApiBuilder, Repo, RepoType};
 
@@ -2681,13 +2749,22 @@ impl ModelLoader {
             crate::cache::hf_shared::find_shared_snapshot(repo, Some(&repo_info.sha));
 
         let total_files = files_to_download.len();
+        // The Hub API gives no per-file sizes here, so `total_bytes` stays
+        // `None` and the fraction is coarse (completed files over total).
+        // `downloaded_bytes` is still real: each file is stat'd once it lands.
+        let hf_cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let hf_progress = crate::download::ProgressReporter::new(
+            None,
+            hf_cancel,
+            &_progress_callback as &dyn Fn(DownloadStatus),
+        );
         let mut reused_files = 0usize;
         // Lazily fetched `filename -> blob hash` map for content-addressed
         // reuse; outer None = not fetched yet, inner None = fetch failed.
         let mut remote_blob_ids: Option<Option<std::collections::HashMap<String, String>>> = None;
         for (i, filename) in files_to_download.iter().enumerate() {
             // Report approximate progress
-            _progress_callback((i as f32) / (total_files as f32));
+            hf_progress.set_fraction((i as f32) / (total_files as f32));
 
             let target_path = cache_dir.join(filename);
             if let Some(parent) = target_path.parent() {
@@ -2771,6 +2848,13 @@ impl ModelLoader {
                     e
                 )))
             })?;
+            // Real bytes, even though the fraction cannot be: `hf-hub` reports
+            // nothing mid-transfer, so the size is read off the landed file.
+            hf_progress.finish_file(
+                std::fs::metadata(&target_path)
+                    .map(|meta| meta.len())
+                    .unwrap_or(0),
+            );
         }
         if reused_files > 0 {
             log::info!(
@@ -2781,7 +2865,7 @@ impl ModelLoader {
         }
 
         // Report completion
-        _progress_callback(1.0);
+        hf_progress.finish();
 
         // Auto-generate model_metadata.json if not provided by the repo
         if !metadata_path.exists() {
@@ -2836,7 +2920,7 @@ impl ModelLoader {
         _progress_callback: F,
     ) -> SdkResult<XybridModel>
     where
-        F: Fn(f32),
+        F: Fn(DownloadStatus),
     {
         Err(SdkError::ConfigError(
             "HuggingFace loading requires the 'huggingface' feature flag. \
@@ -3221,10 +3305,26 @@ impl XybridModel {
     pub fn download_status(&self) -> DownloadStatus {
         match self.speculative.as_ref() {
             Some(download) => download.status(),
-            None => DownloadStatus {
-                state: DownloadState::Ready,
-                progress: 1.0,
-            },
+            None => DownloadStatus::ready(0, None),
+        }
+    }
+
+    /// Subscribe to pushed download updates for a speculatively-loaded model.
+    ///
+    /// The current snapshot arrives synchronously, so a late subscriber is
+    /// never left without a first frame, and the observer is dropped once the
+    /// download reaches a terminal state. Rust-side only: the closure never
+    /// crosses an FFI boundary — bindings forward it into their own transport.
+    ///
+    /// A no-op beyond the first frame for an ordinary local model, which is
+    /// already `Ready`.
+    pub fn watch_download<F>(&self, observer: F)
+    where
+        F: Fn(DownloadStatus) + Send + Sync + 'static,
+    {
+        match self.speculative.as_ref() {
+            Some(download) => download.watch(Box::new(observer)),
+            None => observer(self.download_status()),
         }
     }
 
@@ -6186,23 +6286,36 @@ mod tests {
         assert!(!download.wait_for_local());
     }
 
-    /// Hosts poll `download_status` to drive a progress bar, so progress and
-    /// state must move together and never report a torn pair.
+    /// Build the status a registry download would report mid-transfer.
+    fn downloading(progress: f32, downloaded_bytes: u64, total_bytes: u64) -> DownloadStatus {
+        DownloadStatus {
+            state: DownloadState::Downloading,
+            progress,
+            downloaded_bytes,
+            total_bytes: Some(total_bytes),
+        }
+    }
+
+    /// Hosts poll `download_status` to drive a progress bar, so progress,
+    /// bytes and state must move together and never report a torn pair.
     #[test]
     fn download_status_tracks_progress_then_terminal_state() {
         let download = SpeculativeDownload::default();
         assert_eq!(download.status().state, DownloadState::Downloading);
         assert_eq!(download.status().progress, 0.0);
+        assert_eq!(download.status().downloaded_bytes, 0);
 
-        download.set_progress(0.42);
+        download.set_progress(downloading(0.42, 420, 1_000));
         let mid = download.status();
         assert_eq!(mid.state, DownloadState::Downloading);
         assert!((mid.progress - 0.42).abs() < 1e-3, "got {}", mid.progress);
+        assert_eq!(mid.downloaded_bytes, 420);
+        assert_eq!(mid.total_bytes, Some(1_000));
 
-        // Out-of-range input from a backend is clamped, not wrapped — and a
-        // still-running download never claims 1.0, because `fetch_extracted`
-        // reports 1.0 per artifact and more may follow.
-        download.set_progress(1.7);
+        // The registry client emits `Ready` at 1.0 the moment the bytes are
+        // verified, but this download is only done once the local handle is
+        // installed. Until `finish`, the reported bar stays below 1.0.
+        download.set_progress(DownloadStatus::ready(1_000, Some(1_000)));
         let capped = download.status();
         assert_eq!(capped.state, DownloadState::Downloading);
         assert!(
@@ -6211,22 +6324,45 @@ mod tests {
             capped.progress
         );
 
-        // Monotonic: a later artifact restarting at 0 cannot rewind the bar.
-        download.set_progress(0.0);
-        assert_eq!(download.status().progress, capped.progress);
-
         // A finished download reads 1.0 even if the last callback never fired.
         let ready = SpeculativeDownload::default();
-        ready.set_progress(0.9);
+        ready.set_progress(downloading(0.9, 900, 1_000));
         ready.finish(true);
         let done = ready.status();
         assert_eq!(done.state, DownloadState::Ready);
         assert_eq!(done.progress, 1.0);
+        assert_eq!(done.downloaded_bytes, 1_000);
 
         // Failure is visible: the host must be able to stop waiting.
         let failed = SpeculativeDownload::default();
         failed.finish(false);
         assert_eq!(failed.status().state, DownloadState::Failed);
+    }
+
+    /// A host that subscribes instead of polling must get a frame right away
+    /// (it may have subscribed late) and a terminal frame at the end.
+    #[test]
+    fn watch_download_pushes_first_and_terminal_frames() {
+        let download = SpeculativeDownload::default();
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let sink = Arc::clone(&seen);
+        download.watch(Box::new(move |status| {
+            sink.lock().unwrap_or_else(|e| e.into_inner()).push(status);
+        }));
+        assert_eq!(seen.lock().unwrap().len(), 1, "no frame on subscribe");
+
+        download.set_progress(downloading(0.5, 500, 1_000));
+        download.finish(true);
+
+        let frames = seen.lock().unwrap().clone();
+        assert_eq!(frames.len(), 3);
+        assert_eq!(frames.last().unwrap().state, DownloadState::Ready);
+        // Dropped after the terminal frame, so host closures are not retained.
+        assert!(download
+            .observers
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .is_empty());
     }
 
     /// `await_download` must return on timeout rather than parking the caller

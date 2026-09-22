@@ -153,6 +153,7 @@ use xybrid_core::orchestrator::{Orchestrator, StageExecutionResult};
 pub mod benchmark;
 pub mod cache;
 pub mod device;
+pub mod download;
 pub mod llm;
 pub mod metadata_gen;
 pub mod model;
@@ -215,14 +216,15 @@ pub use xybrid_core::execution::template as execution_template;
 pub use benchmark::{compare_benchmarks, BenchmarkResult, ExecutionProviderInfo};
 pub use cache::{CacheManager, CacheStatus, SdkCacheProvider};
 pub use device::{device_id, Device};
+pub use download::{DownloadState, DownloadStatus, ModelDownload};
 pub use llm::{
     default_gateway_url, set_gateway_url, ChatMessage, CompletionRequest, CompletionResponse,
     LlmBackend, LlmClientConfig, MessageRole, TokenUsage,
 };
 pub use model::SdkError;
 pub use model::{
-    DownloadState, DownloadStatus, LoadState, ModelLoader, SdkResult, SeamInfo, StreamConfig,
-    StreamEvent, StreamToken, XybridModel,
+    LoadState, ModelLoader, SdkResult, SeamInfo, StreamConfig, StreamEvent, StreamToken,
+    XybridModel,
 };
 pub use model_registry::{release_memory, AutoReleasePolicy};
 pub use platform::current_platform;

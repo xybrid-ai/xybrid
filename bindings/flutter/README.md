@@ -88,8 +88,9 @@ final loader = XybridModelLoader.fromRegistry('kokoro-82m');
 
 await for (final event in loader.loadWithProgress()) {
   switch (event) {
-    case LoadProgress(:final progress):
-      print('Downloading: ${(progress * 100).toInt()}%');
+    case LoadProgress(:final progress, :final downloadedBytes, :final totalBytes):
+      print('Downloading: ${(progress * 100).toInt()}% '
+          '($downloadedBytes / ${totalBytes ?? '?'} bytes)');
     case LoadComplete():
       print('Model ready!');
     case LoadError(:final message):
@@ -97,6 +98,10 @@ await for (final event in loader.loadWithProgress()) {
   }
 }
 ```
+
+`progress` spans every file the model needs and never moves backwards.
+`totalBytes` is `null` when the source publishes no size; `downloadedBytes` is
+exact either way, so megabytes, speed and time remaining are all derivable.
 
 ### Input Envelopes
 

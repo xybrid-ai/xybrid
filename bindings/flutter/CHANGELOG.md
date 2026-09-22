@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+* Added: `LoadProgress` now carries `downloadedBytes` and `totalBytes` alongside
+  `progress`, so a UI can show megabytes, speed and time remaining instead of a
+  bare percentage. `totalBytes` is null when the source publishes no size.
+  Existing `case LoadProgress(:final progress)` call sites are unaffected.
+* Fixed: the bar no longer resets for each file of a multi-file model (a vision
+  model plus its projector), and no longer rewinds when a download retries.
+  `progress` is now scaled against the summed size of every artifact.
+* Fixed: progress events are throttled to roughly ten a second instead of one
+  per 8 KiB chunk, which previously pushed ~130,000 events per GB across the
+  FFI boundary.
+* Added: `FfiDownloadState.cancelled`, for downloads stopped by the caller.
+
 ## 0.9.0
 
 No Dart API changes. This release is about the first build: the precompiled

@@ -85,6 +85,34 @@ Use `loadSync()` only from an existing worker thread.
 
 ---
 
+## Download Progress
+
+`load()` blocks until the weights are on disk, so it has no progress to report
+while it runs. Start the download separately and watch it:
+
+```swift
+let loader = Xybrid.model("qwen3-0.6b")
+if let download = loader.download() {
+    for await status in download.progress() {
+        bar.progress = Float(status.progress)
+        label.text = "\(status.downloadedBytes) / \(status.totalBytes ?? 0)"
+    }
+}
+let model = try await loader.load()   // cached: returns at once
+```
+
+`progress` spans every file the model needs — weights plus companions such as a
+vision projector — and never moves backwards, so the bar neither restarts per
+file nor rewinds when a download retries. `totalBytes` is null when the source
+publishes no size (a Hugging Face repo); `downloadedBytes` is exact either way,
+which is what you need for megabytes, speed and time remaining.
+
+Cancelling the consuming task only unsubscribes from updates. Call `cancel()`
+to stop the transfer itself — it takes effect within one chunk read and
+discards the partial file.
+
+---
+
 ## Input Envelopes
 
 ### Audio (Speech Recognition)

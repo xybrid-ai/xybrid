@@ -129,22 +129,39 @@ export interface InferenceResult {
 /** Where a result was produced — observed fact, not a routing preference. */
 export type ExecutionTarget = 'local' | 'cloud';
 
-/** Lifecycle of the background download behind a speculative load. */
+/** Lifecycle of a model download. */
 export type DownloadState =
   | 'downloading'
-  /** Local handle installed; runs are on-device. */
+  /** Every artifact landed; the model is usable on-device. */
   | 'ready'
   /**
-   * Download failed. The cloud keeps serving and the model never becomes
-   * local — surfacing this is the only way the UI can stop waiting.
+   * Download failed. For a speculative load the cloud keeps serving and the
+   * model never becomes local — surfacing this is the only way the UI can
+   * stop waiting.
    */
-  | 'failed';
+  | 'failed'
+  /** The download was cancelled by the caller. */
+  | 'cancelled';
 
-/** Download progress and state in one consistent read. */
+/**
+ * Download progress, bytes and state in one consistent read.
+ *
+ * `progress` is aggregated across every artifact the model needs (weights
+ * plus companions such as a vision projector), never moves backwards, and
+ * reaches 1.0 only alongside `ready`.
+ */
 export interface DownloadStatus {
   state: DownloadState;
   /** 0.0 to 1.0. */
   progress: number;
+  /** Bytes written so far, across every artifact. */
+  downloadedBytes: number;
+  /**
+   * Declared total across every artifact, or absent when the source publishes
+   * no size (a Hugging Face repo, or a registry entry without one).
+   * `downloadedBytes` is exact either way.
+   */
+  totalBytes?: number;
 }
 
 /** One token produced during streaming inference. */

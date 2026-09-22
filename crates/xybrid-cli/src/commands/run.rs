@@ -238,9 +238,8 @@ fn download_model(
         Ok(resolved) => {
             let pb = ui::download_bar(resolved.size_bytes, model_id);
 
-            match client.fetch_extracted(model_id, None, |progress| {
-                let bytes_done = (progress * resolved.size_bytes as f32) as u64;
-                pb.set_position(bytes_done);
+            match client.fetch_extracted(model_id, None, |status| {
+                ui::apply_download_status(&pb, &status);
             }) {
                 Ok(bundle_path) => {
                     pb.finish_and_clear();
@@ -913,9 +912,8 @@ pub(crate) fn run_model(
             // Passthrough models (e.g., GGUF): download raw file + write metadata directly
             let pb = ui::download_bar(resolved.size_bytes, model_id);
             let dir = client
-                .fetch_extracted(model_id, platform, |progress| {
-                    let bytes_done = (progress * resolved.size_bytes as f32) as u64;
-                    pb.set_position(bytes_done);
+                .fetch_extracted(model_id, platform, |status| {
+                    ui::apply_download_status(&pb, &status);
                 })
                 .context(format!(
                     "Failed to fetch passthrough model '{}' from registry",
@@ -1295,9 +1293,8 @@ fn fetch_or_cache(
         let pb = ui::download_bar(resolved.size_bytes, model_id);
 
         let path = client
-            .fetch(model_id, platform, |progress| {
-                let bytes_done = (progress * resolved.size_bytes as f32) as u64;
-                pb.set_position(bytes_done);
+            .fetch(model_id, platform, |status| {
+                ui::apply_download_status(&pb, &status);
             })
             .context(format!(
                 "Failed to fetch model '{}' from registry",

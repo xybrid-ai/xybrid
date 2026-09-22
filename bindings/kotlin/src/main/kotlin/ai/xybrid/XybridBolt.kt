@@ -2,6 +2,9 @@
 
 package ai.xybrid
 
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.channels.awaitClose
+
 private object Utf8Codec {
     fun maxBytes(value: String): Int = value.length * 3
 }
@@ -623,6 +626,148 @@ private inline fun <K, V> Map<K, V>.wireSize(
     valueSize: (V) -> Int,
 ): Int = 4 + entries.sumOf { entry -> keySize(entry.key) + valueSize(entry.value) }
 
+private const val BOLTFFI_FUTURE_POLL_READY: Byte = 0
+
+private class BoltFfiHandleMap<T> {
+    private val next = java.util.concurrent.atomic.AtomicLong(1)
+    private val values = java.util.concurrent.ConcurrentHashMap<Long, T>()
+
+    fun insert(value: T): Long {
+        val handle = next.getAndIncrement()
+        values[handle] = value
+        return handle
+    }
+
+    fun remove(handle: Long): T? = values.remove(handle)
+}
+
+private val boltffiContinuationMap =
+    BoltFfiHandleMap<kotlinx.coroutines.CancellableContinuation<Byte>>()
+
+private val boltffiCallbackScope =
+    kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Default + kotlinx.coroutines.SupervisorJob())
+
+private object BoltFfiAsync {
+    fun resume(handle: Long, pollResult: Byte) {
+        val continuation = boltffiContinuationMap.remove(handle) ?: return
+        continuation.resumeWith(Result.success(pollResult))
+    }
+}
+
+internal fun boltffiLaunchCallback(block: suspend () -> Unit) {
+    boltffiCallbackScope.launch {
+        block()
+    }
+}
+
+internal suspend fun <T> boltffiCallAsync(
+    createFuture: () -> Long,
+    poll: (Long, Long) -> Unit,
+    complete: (Long) -> T,
+    free: (Long) -> Unit,
+    cancel: (Long) -> Unit,
+): T {
+    val rustFuture = createFuture()
+    try {
+        var pollResult: Byte
+        do {
+            pollResult = kotlinx.coroutines.suspendCancellableCoroutine { continuation ->
+                val continuationHandle = boltffiContinuationMap.insert(continuation)
+                continuation.invokeOnCancellation {
+                    if (boltffiContinuationMap.remove(continuationHandle) != null) {
+                        cancel(rustFuture)
+                    }
+                }
+                poll(rustFuture, continuationHandle)
+            }
+        } while (pollResult != BOLTFFI_FUTURE_POLL_READY)
+        return complete(rustFuture)
+    } finally {
+        free(rustFuture)
+    }
+}
+
+private const val BOLTFFI_STREAM_POLL_CLOSED: Byte = 1
+
+internal class BoltFfiStreamContext(
+    private val scope: kotlinx.coroutines.CoroutineScope,
+    private val subscription: Long,
+    private val batchSize: Long,
+    private val popBatch: (Long, Long) -> ByteArray?,
+    private val poll: (Long, Long) -> Unit,
+    private val unsubscribe: (Long) -> Unit,
+    private val free: (Long) -> Unit,
+    private val processItems: suspend (ByteArray) -> Unit,
+    private val finish: () -> Unit
+) {
+    private val lifecycle = java.util.concurrent.atomic.AtomicInteger(0)
+    private val processing = java.util.concurrent.atomic.AtomicInteger(0)
+
+    fun start() {
+        registerPoll()
+    }
+
+    fun requestTermination() {
+        if (lifecycle.compareAndSet(0, 1)) {
+            unsubscribe(subscription)
+            lifecycle.compareAndSet(1, 2)
+        }
+        finalizeIfIdle()
+    }
+
+    private fun registerPoll() {
+        if (!lifecycle.compareAndSet(0, 0)) {
+            finalizeIfIdle()
+            return
+        }
+        scope.launch {
+            val pollResult = kotlinx.coroutines.suspendCancellableCoroutine { continuation ->
+                poll(subscription, boltffiContinuationMap.insert(continuation))
+            }
+            handlePoll(pollResult)
+        }
+    }
+
+    private suspend fun handlePoll(pollResult: Byte) {
+        val closed = pollResult == BOLTFFI_STREAM_POLL_CLOSED
+        if (!processing.compareAndSet(0, 1)) {
+            finalizeIfIdle()
+            return
+        }
+        try {
+            if (lifecycle.compareAndSet(0, 0)) {
+                drain()
+            }
+        } finally {
+            processing.compareAndSet(1, 0)
+            finalizeIfIdle()
+        }
+        if (closed) {
+            requestTermination()
+            return
+        }
+        if (lifecycle.compareAndSet(0, 0)) {
+            registerPoll()
+        }
+    }
+
+    private suspend fun drain() {
+        while (true) {
+            val bytes = popBatch(subscription, batchSize)
+                ?: throw IllegalStateException("BoltFFI stream pop_batch returned null")
+            if (bytes.isEmpty()) return
+            processItems(bytes)
+        }
+    }
+
+    private fun finalizeIfIdle() {
+        if (!processing.compareAndSet(0, 0)) return
+        if (!lifecycle.compareAndSet(2, 3)) return
+        free(subscription)
+        finish()
+    }
+}
+
 @Suppress("FunctionName")
 private object Native {
     init {
@@ -763,6 +908,13 @@ private object Native {
             else -> emptyList()
         }
     }
+    @JvmStatic external fun boltffi_release_class_xybrid_bolt_xybrid_download(handle: Long): Unit
+    @JvmStatic external fun boltffi_init_class_xybrid_bolt_xybrid_download_from_registry(id: java.nio.ByteBuffer, __boltffi_id_len: Int): Long
+    @JvmStatic external fun boltffi_init_class_xybrid_bolt_xybrid_download_from_registry_with_platform(id: java.nio.ByteBuffer, __boltffi_id_len: Int, platform: java.nio.ByteBuffer, __boltffi_platform_len: Int): Long
+    @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_download_status(`receiver`: Long): ByteArray?
+    @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_download_is_finished(`receiver`: Long): Boolean
+    @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_download_error(`receiver`: Long): ByteArray?
+    @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_download_cancel(`receiver`: Long): Unit
     @JvmStatic external fun boltffi_release_class_xybrid_bolt_xybrid_cancellation_token(handle: Long): Unit
     @JvmStatic external fun boltffi_init_class_xybrid_bolt_xybrid_cancellation_token_new(): Long
     @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_cancellation_token_cancel(`receiver`: Long): Unit
@@ -855,6 +1007,22 @@ private object Native {
     @JvmStatic external fun boltffi_function_xybrid_bolt_telemetry_default_endpoint(): ByteArray?
     @JvmStatic external fun boltffi_function_xybrid_bolt_telemetry_flush(): Unit
     @JvmStatic external fun boltffi_function_xybrid_bolt_telemetry_shutdown(): Unit
+    @JvmStatic external fun boltffi_stream_xybrid_bolt_xybrid_download_progress_subscribe(`receiver`: Long): Long
+    @JvmStatic external fun boltffi_stream_xybrid_bolt_xybrid_download_progress_pop_batch(subscription: Long, max_count: Long): ByteArray?
+    @JvmStatic external fun boltffi_stream_xybrid_bolt_xybrid_download_progress_wait(subscription: Long, timeout_milliseconds: Int): Int
+    @JvmStatic external fun boltffi_stream_xybrid_bolt_xybrid_download_progress_poll(subscription: Long, callback_data: Long): Unit
+    @JvmStatic external fun boltffi_stream_xybrid_bolt_xybrid_download_progress_unsubscribe(subscription: Long): Unit
+    @JvmStatic external fun boltffi_stream_xybrid_bolt_xybrid_download_progress_free(subscription: Long): Unit
+    @JvmStatic external fun boltffi_stream_xybrid_bolt_xybrid_model_download_progress_subscribe(`receiver`: Long): Long
+    @JvmStatic external fun boltffi_stream_xybrid_bolt_xybrid_model_download_progress_pop_batch(subscription: Long, max_count: Long): ByteArray?
+    @JvmStatic external fun boltffi_stream_xybrid_bolt_xybrid_model_download_progress_wait(subscription: Long, timeout_milliseconds: Int): Int
+    @JvmStatic external fun boltffi_stream_xybrid_bolt_xybrid_model_download_progress_poll(subscription: Long, callback_data: Long): Unit
+    @JvmStatic external fun boltffi_stream_xybrid_bolt_xybrid_model_download_progress_unsubscribe(subscription: Long): Unit
+    @JvmStatic external fun boltffi_stream_xybrid_bolt_xybrid_model_download_progress_free(subscription: Long): Unit
+
+    @JvmStatic fun boltffiFutureContinuationCallback(handle: Long, pollResult: Byte) {
+        BoltFfiAsync.resume(handle, pollResult)
+    }
 }
 
 
@@ -1400,22 +1568,40 @@ data class XybridResult(
 
 
 /**
- * Download progress + state in one consistent read.
+ * Download progress, bytes and state in one consistent read.
+ *
+ * `progress` is aggregated across every artifact the model needs (weights
+ * plus companions such as a vision projector), never moves backwards, and
+ * reaches 1.0 only alongside `Ready`. `totalBytes` is null when the source
+ * declares no size — a Hugging Face repo, or a registry entry without one —
+ * in which case `downloadedBytes` is still exact and `progress` is coarser.
+ *
+ * Derives `Copy` because it is carried as a stream item.
  */
 data class XybridDownloadStatus(
     val state: XybridDownloadState,
     /**
      * 0.0..=1.0.
      */
-    val progress: Float
+    val progress: Float,
+    /**
+     * Bytes written so far, across every artifact.
+     */
+    val downloadedBytes: ULong,
+    /**
+     * Declared total across every artifact, or null when unknown.
+     */
+    val totalBytes: ULong?
 ) {
     internal fun wireSize(): Int {
-        return 4 + 4
+        return 4 + 4 + 8 + 1 + (this.totalBytes?.let { __boltffi_value_0 -> 8 } ?: 0)
     }
 
     internal fun writeTo(writer: WireWriter) {
         writer.writeI32(this.state.value)
         writer.writeF32(this.progress)
+        writer.writeU64(this.downloadedBytes)
+        writer.writeOptionalValue(this.totalBytes, { writer, __boltffi_value_0 -> writer.writeU64(__boltffi_value_0) })
     }
 
     internal fun toByteArray(): ByteArray {
@@ -1433,7 +1619,9 @@ data class XybridDownloadStatus(
         internal fun fromReader(reader: WireReader): XybridDownloadStatus {
             return XybridDownloadStatus(
                 XybridDownloadState.fromValue(reader.readI32()),
-                reader.readF32()
+                reader.readF32(),
+                reader.readU64(),
+                reader.readOptionalValue({ reader -> reader.readU64() })
             )
         }
 
@@ -1912,6 +2100,21 @@ sealed class XybridError : Exception() {
             writer.writeString(this.message)
         }
     }
+    /**
+     * The host called `cancel` — today, on a model download.
+     */
+    data class Cancelled(
+        override val message: String
+    ) : XybridError() {
+        internal override fun wireSize(): Int {
+            return 4 + 4 + Utf8Codec.maxBytes(this.message)
+        }
+
+        internal override fun writeTo(writer: WireWriter) {
+            writer.writeU32(22.toUInt())
+            writer.writeString(this.message)
+        }
+    }
 
     companion object {
         internal fun fromReader(reader: WireReader): XybridError {
@@ -1939,6 +2142,7 @@ sealed class XybridError : Exception() {
                 19.toUInt() -> UnsupportedModelCapability(reader.readString())
                 20.toUInt() -> UnsupportedBackendCapability(reader.readString())
                 21.toUInt() -> InvalidImage(reader.readString())
+                22.toUInt() -> Cancelled(reader.readString())
                 else -> throw IllegalArgumentException("unknown XybridError tag: $tag")
             }
         }
@@ -2105,15 +2309,21 @@ enum class XybridExecutionTarget(val value: Int) {
 
 
 /**
- * Lifecycle of the background download behind a speculative load.
+ * Lifecycle of a model download — a standalone [`XybridDownload`] or
+ * the background download behind a speculative load.
  */
 enum class XybridDownloadState(val value: Int) {
     DOWNLOADING(0),
     READY(1),
     /**
-     * Download failed; the cloud keeps serving and `isLoaded` never flips.
+     * Download failed; for a speculative load the cloud keeps serving and
+     * `isLoaded` never flips.
      */
-    FAILED(2);
+    FAILED(2),
+    /**
+     * The host called `cancel`.
+     */
+    CANCELLED(3);
 
     companion object {
         fun fromValue(value: Int): XybridDownloadState =
@@ -2142,6 +2352,101 @@ enum class XybridThermalState(val value: Int) {
     companion object {
         fun fromValue(value: Int): XybridThermalState =
             entries.first { it.value == value }
+    }
+}
+
+class XybridDownload internal constructor(internal val handle: Long) : AutoCloseable {
+    private val __boltffi_closed = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    override fun close() {
+        if (__boltffi_closed.compareAndSet(false, true)) {
+            Native.boltffi_release_class_xybrid_bolt_xybrid_download(handle)
+        }
+    }
+
+    internal fun boltffiHandle(): Long {
+        check(!__boltffi_closed.get()) { "XybridDownload is closed" }
+        return handle
+    }
+
+    /**
+     * Start downloading a registry model. Returns immediately.
+     */
+    constructor(id: String) : this(fromRegistry(id).handle)
+
+    /**
+     * Start downloading a registry model resolved for a specific platform.
+     */
+    constructor(id: String, platform: String) : this(fromRegistryWithPlatform(id, platform).handle)
+
+    companion object {
+        /**
+         * Start downloading a registry model. Returns immediately.
+         */
+        fun fromRegistry(id: String): XybridDownload {
+            val __boltffi_id_wire = WireWriterPool.acquire(4 + Utf8Codec.maxBytes(id))
+            val __boltffi_id_writer = __boltffi_id_wire.writer
+            __boltffi_id_writer.writeString(id)
+            try {
+                return XybridDownload(Native.boltffi_init_class_xybrid_bolt_xybrid_download_from_registry(__boltffi_id_wire.directBuffer(), __boltffi_id_wire.size()))
+            } finally {
+                __boltffi_id_wire.close()
+            }
+        }
+        /**
+         * Start downloading a registry model resolved for a specific platform.
+         */
+        fun fromRegistryWithPlatform(id: String, platform: String): XybridDownload {
+            val __boltffi_id_wire = WireWriterPool.acquire(4 + Utf8Codec.maxBytes(id))
+            val __boltffi_id_writer = __boltffi_id_wire.writer
+            __boltffi_id_writer.writeString(id)
+            val __boltffi_platform_wire = WireWriterPool.acquire(4 + Utf8Codec.maxBytes(platform))
+            val __boltffi_platform_writer = __boltffi_platform_wire.writer
+            __boltffi_platform_writer.writeString(platform)
+            try {
+                return XybridDownload(Native.boltffi_init_class_xybrid_bolt_xybrid_download_from_registry_with_platform(__boltffi_id_wire.directBuffer(), __boltffi_id_wire.size(), __boltffi_platform_wire.directBuffer(), __boltffi_platform_wire.size()))
+            } finally {
+                __boltffi_id_wire.close()
+                __boltffi_platform_wire.close()
+            }
+        }
+    }
+
+    /**
+     * Current snapshot. Never blocks — safe from a UI thread or a per-frame
+     * render loop.
+     */
+    fun status(): XybridDownloadStatus {
+        val __boltffi_result = Native.boltffi_method_class_xybrid_bolt_xybrid_download_status(this.boltffiHandle()) ?: throw IllegalStateException("null buffer returned")
+        val __boltffi_reader = WireReader(__boltffi_result)
+        return XybridDownloadStatus.fromReader(__boltffi_reader)
+    }
+
+    /**
+     * Whether the download reached a terminal state.
+     */
+    fun isFinished(): Boolean {
+        return Native.boltffi_method_class_xybrid_bolt_xybrid_download_is_finished(this.boltffiHandle())
+    }
+
+    /**
+     * The failure message once the download ended in `Failed` or
+     * `Cancelled`; null otherwise. The stream carries the terminal *state*,
+     * this carries the reason.
+     */
+    fun error(): String? {
+        val __boltffi_result = Native.boltffi_method_class_xybrid_bolt_xybrid_download_error(this.boltffiHandle()) ?: throw IllegalStateException("null buffer returned")
+        val __boltffi_reader = WireReader(__boltffi_result)
+        return __boltffi_reader.readOptionalValue({ __boltffi_reader -> __boltffi_reader.readString() })
+    }
+
+    /**
+     * Ask the download to stop. Takes effect within one chunk read, discards
+     * the partial file, and moves the status to `Cancelled`. Idempotent, and
+     * a no-op once the download is terminal.
+     */
+    fun cancel() {
+        Native.boltffi_method_class_xybrid_bolt_xybrid_download_cancel(this.boltffiHandle())
     }
 }
 
@@ -2945,6 +3250,82 @@ class XybridBundle internal constructor(internal val handle: Long) : AutoCloseab
             __boltffi_outputDir_wire.close()
         }
     }
+}
+
+/**
+ * Pushed progress updates, closing once the download is terminal.
+ *
+ * Generated as an `AsyncStream` in Swift, a `Flow` in Kotlin, an
+ * `IAsyncEnumerable` in C# and a subscription object in Python.
+ * Cancelling the consuming task / scope / token unsubscribes; it does
+ * **not** cancel the download itself — call [`Self::cancel`] for that.
+ *
+ * The current snapshot is delivered first, so subscribing late still
+ * yields a frame, and a download that already finished closes at once
+ * instead of hanging.
+ */
+fun XybridDownload.progress(): kotlinx.coroutines.flow.Flow<XybridDownloadStatus> = kotlinx.coroutines.flow.callbackFlow {
+    val subscription = Native.boltffi_stream_xybrid_bolt_xybrid_download_progress_subscribe(boltffiHandle())
+    if (subscription == 0L) {
+        close()
+        return@callbackFlow
+    }
+    val context = BoltFfiStreamContext(
+        scope = this,
+        subscription = subscription,
+        batchSize = 16L,
+        popBatch = Native::boltffi_stream_xybrid_bolt_xybrid_download_progress_pop_batch,
+        poll = Native::boltffi_stream_xybrid_bolt_xybrid_download_progress_poll,
+        unsubscribe = Native::boltffi_stream_xybrid_bolt_xybrid_download_progress_unsubscribe,
+        free = Native::boltffi_stream_xybrid_bolt_xybrid_download_progress_free,
+        processItems = { bytes ->
+            val reader = WireReader(bytes)
+            val count = reader.readU32().toInt()
+            val items = List(count) { XybridDownloadStatus.fromReader(reader) }
+            items.forEach { item ->
+                send(item)
+            }
+        },
+        finish = { close() }
+    )
+    context.start()
+    awaitClose { context.requestTermination() }
+}
+
+/**
+ * Pushed download updates for a speculatively-loaded model — the stream
+ * counterpart of [`Self::await_download`], and what issue #504 asks for.
+ *
+ * Emits the current snapshot first, then every update, then closes on
+ * the terminal state. An ordinary local model is already `Ready`, so its
+ * stream yields one frame and ends.
+ */
+fun XybridModel.downloadProgress(): kotlinx.coroutines.flow.Flow<XybridDownloadStatus> = kotlinx.coroutines.flow.callbackFlow {
+    val subscription = Native.boltffi_stream_xybrid_bolt_xybrid_model_download_progress_subscribe(boltffiHandle())
+    if (subscription == 0L) {
+        close()
+        return@callbackFlow
+    }
+    val context = BoltFfiStreamContext(
+        scope = this,
+        subscription = subscription,
+        batchSize = 16L,
+        popBatch = Native::boltffi_stream_xybrid_bolt_xybrid_model_download_progress_pop_batch,
+        poll = Native::boltffi_stream_xybrid_bolt_xybrid_model_download_progress_poll,
+        unsubscribe = Native::boltffi_stream_xybrid_bolt_xybrid_model_download_progress_unsubscribe,
+        free = Native::boltffi_stream_xybrid_bolt_xybrid_model_download_progress_free,
+        processItems = { bytes ->
+            val reader = WireReader(bytes)
+            val count = reader.readU32().toInt()
+            val items = List(count) { XybridDownloadStatus.fromReader(reader) }
+            items.forEach { item ->
+                send(item)
+            }
+        },
+        finish = { close() }
+    )
+    context.start()
+    awaitClose { context.requestTermination() }
 }
 
 /**

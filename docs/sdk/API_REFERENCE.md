@@ -351,6 +351,7 @@ var result = model.Run(Envelope.Text("Hello!"));
 | `fromHuggingfaceWithRevision()` | — | ✅ | ✅ | ✅ |
 | `load()` | ✅ | ✅ | ✅ | ✅ |
 | `loadWithProgress()` | ✅ | — | — | — |
+| `download()` / `StartDownload()` | — | ✅ | ✅ | ✅ |
 | `fromRegistrySpeculative()` | ✅ | ✅ | ✅ | ✅ |
 | `willSpeculate` | ✅ | ✅ | ✅ | ✅ |
 
@@ -362,6 +363,84 @@ needs an API key and an uncached model — otherwise it behaves exactly like
 It sets the per-load override itself, so it does **not** depend on
 `setSpeculativeCloud()` — that toggle is the default for loads which do not opt
 in per-load.
+
+---
+
+## 2b. XybridDownload
+
+A model download running in the background, decoupled from loading it.
+
+`load()` blocks on the Bolt bindings, so while it runs there is no object to
+poll — which is why those SDKs had no progress bar at all on an ordinary
+registry load. A download handle is that object. It fills the normal SDK cache,
+so the `load()` afterwards returns immediately.
+
+Dart reaches the same capability through
+[`loadWithProgress()`](#2-xybridmodelloader), whose events carry the same
+fields.
+
+### Swift
+
+```swift
+let loader = Xybrid.model("qwen3-0.6b")
+guard let download = loader.download() else { return }
+for await status in download.progress() {
+    bar.progress = Float(status.progress)
+    label.text = "\(status.downloadedBytes) / \(status.totalBytes ?? 0)"
+}
+let model = try await loader.load()   // cached: returns at once
+```
+
+### Kotlin
+
+```kotlin
+val loader = Xybrid.model("qwen3-0.6b")
+loader.download()?.progress()?.collect { status ->
+    bar.progress = (status.progress * 100).toInt()
+}
+val model = loader.load()
+```
+
+### C#
+
+```csharp
+using var download = ModelLoader.FromRegistry("qwen3-0.6b").StartDownload();
+while (!download.IsFinished())
+{
+    slider.value = download.Status().Progress;   // never blocks
+    yield return null;
+}
+```
+
+### Python
+
+```python
+download = xybrid.XybridDownload.from_registry("qwen3-0.6b")
+for status in download.progress():
+    print(status.downloaded_bytes, status.total_bytes, status.progress)
+```
+
+### Implementation Status
+
+| Method | Dart | Kotlin | Swift | C# |
+|--------|------|--------|-------|----|
+| `fromRegistry()` | — | ✅ | ✅ | ✅ |
+| `status()` | — | ✅ | ✅ | ✅ |
+| `progress()` | — | ✅ | ✅ | ✅ |
+| `isFinished()` | — | ✅ | ✅ | ✅ |
+| `error()` | — | ✅ | ✅ | ✅ |
+| `cancel()` | — | ✅ | ✅ | ✅ |
+
+`progress()` is generated from one BoltFFI stream declaration, so it arrives as
+an `AsyncStream` in Swift, a `Flow` in Kotlin, an `IAsyncEnumerable` in C# and
+an iterable subscription in Python. It emits the current snapshot first (a late
+subscriber still gets a frame), then closes on the terminal state. Cancelling
+the consuming task / scope / token only unsubscribes — call `cancel()` to stop
+the transfer itself, which takes effect within one chunk read and discards the
+partial file.
+
+`status()` never blocks, so it is safe to read once per frame from a Unity
+coroutine or a UI thread.
 
 ---
 
@@ -521,16 +600,22 @@ inference's model write lock.
 | `isCloudServing()` | ✅ | ✅ | ✅ | ✅ |
 | `downloadStatus()` | ✅ | ✅ | ✅ | ✅ |
 | `awaitDownload()` | — | ✅ | ✅ | ✅ |
-| `downloadProgress()` | ✅ | — | — | — |
+| `downloadProgress()` | ✅ | ✅ | ✅ | ✅ |
 | `executionProviderInfo()` | — | — | — | — |
 
 While a speculative load is still downloading, `isCloudServing()` is true and
-`downloadStatus()` returns the state (`downloading` / `ready` / `failed`) with
-progress in `0.0..=1.0`; `1.0` is reserved for `ready`, since the underlying
-fetch reports progress per artifact. `awaitDownload(timeoutMs)` blocks until the
-download settles — call it off the UI thread. Dart instead exposes a pushed
-`downloadProgress()` stream, because flutter_rust_bridge stream sinks are safe
-where the bolt bindings must not carry a closure across the FFI boundary.
+`downloadStatus()` returns a consistent read of the state (`downloading` /
+`ready` / `failed` / `cancelled`), a `0.0..=1.0` fraction, `downloadedBytes`
+and `totalBytes`. The fraction is aggregated across every artifact the model
+needs and never moves backwards; `1.0` is reserved for `ready`, because
+checksum verification and extraction still run after the last byte lands.
+`totalBytes` is null when the source publishes no size (a Hugging Face repo, or
+a registry entry without one) — `downloadedBytes` is exact either way.
+
+`awaitDownload(timeoutMs)` blocks until the download settles — call it off the
+UI thread. `downloadProgress()` is the pushed form on every SDK: a
+flutter_rust_bridge stream sink on Dart, and a BoltFFI stream elsewhere, which
+carries items Rust → host only so no closure crosses the FFI boundary.
 
 `XybridResult.executionTarget` reports whether an answer that already ran came
 from the device or the cloud; cloud fallback keeps the model id identical on

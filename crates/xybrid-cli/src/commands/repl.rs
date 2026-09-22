@@ -618,8 +618,8 @@ fn ensure_model_cached(
 
     if !client.is_cached(model_id, None).unwrap_or(false) {
         let pb = ui::download_bar(resolved.size_bytes, model_id);
-        let model_dir = client.fetch_extracted(model_id, None, |p| {
-            pb.set_position((p * resolved.size_bytes as f32) as u64);
+        let model_dir = client.fetch_extracted(model_id, None, |status| {
+            ui::apply_download_status(&pb, &status);
         })?;
         pb.finish_and_clear();
         ui::ok(&format!("{} downloaded", model_id));

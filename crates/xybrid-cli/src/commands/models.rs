@@ -214,9 +214,8 @@ fn handle_voices_command(client: &RegistryClient, model_id: &str) -> Result<()> 
     } else {
         let pb = ui::download_bar(resolved.size_bytes, "Downloading voice catalog...");
 
-        let path = client.fetch(model_id, None, |progress| {
-            let bytes_done = (progress * resolved.size_bytes as f32) as u64;
-            pb.set_position(bytes_done);
+        let path = client.fetch(model_id, None, |status| {
+            ui::apply_download_status(&pb, &status);
         })?;
 
         pb.finish_and_clear();

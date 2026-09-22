@@ -49,6 +49,7 @@ namespace XybridBolt
                 19 => new UnsupportedModelCapability(reader.ReadString()),
                 20 => new UnsupportedBackendCapability(reader.ReadString()),
                 21 => new InvalidImage(reader.ReadString()),
+                22 => new Cancelled(reader.ReadString()),
                 uint tag => throw new global::System.InvalidOperationException($"Invalid XybridError tag: {tag}"),
             };
 
@@ -226,6 +227,14 @@ namespace XybridBolt
                     }
                     break;
                 }
+                case Cancelled value:
+                {
+                    writer.WriteU32(22);
+                    {
+                        writer.WriteString(value.Message);
+                    }
+                    break;
+                }
                 default:
                     throw new global::System.InvalidOperationException("Unknown XybridError variant");
             }
@@ -274,6 +283,11 @@ namespace XybridBolt
         public sealed record UnsupportedBackendCapability(string Message) : XybridError;
 
         public sealed record InvalidImage(string Message) : XybridError;
+
+        /// <summary>
+        /// The host called `cancel` — today, on a model download.
+        /// </summary>
+        public sealed record Cancelled(string Message) : XybridError;
 
     }
 
