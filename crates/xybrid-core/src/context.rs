@@ -123,6 +123,13 @@ pub struct StageDescriptor {
     pub model: Option<String>,
     /// Stage-specific options (temperature, max_tokens, system_prompt, etc.).
     pub options: Option<StageOptions>,
+    /// Local generation or embedding backend override for metadata-driven execution.
+    ///
+    /// Accepted values are `auto`, `mlx`, `llamacpp`, and `mistral`.
+    /// The executor applies this to the in-memory `ModelMetadata.backend`
+    /// before invoking `TemplateExecutor`; cached metadata files are not
+    /// mutated.
+    pub backend: Option<String>,
 }
 
 impl StageDescriptor {
@@ -135,6 +142,7 @@ impl StageDescriptor {
             provider: None,
             model: None,
             options: None,
+            backend: None,
         }
     }
 
@@ -177,6 +185,12 @@ impl StageDescriptor {
             .map(ExecutionTarget::allows_local)
             .unwrap_or(true);
         self.bundle_path.is_some() && allows_local
+    }
+
+    /// Set the local generation or embedding backend override.
+    pub fn with_backend(mut self, backend: impl Into<String>) -> Self {
+        self.backend = Some(backend.into());
+        self
     }
 
     /// Check if this stage is a cloud stage (uses third-party cloud API).

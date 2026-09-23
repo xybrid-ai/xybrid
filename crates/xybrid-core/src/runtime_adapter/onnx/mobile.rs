@@ -200,6 +200,7 @@ impl ONNXMobileRuntimeAdapter {
                 EnvelopeKind::Image { .. } | EnvelopeKind::MultiPart(_) => {
                     "onnx-mobile-throttled-vision-unsupported".to_string()
                 }
+                EnvelopeKind::TokenIds(_) => "onnx-mobile-throttled-tokens output".to_string(),
             }
         } else {
             // Normal execution: full performance
@@ -210,6 +211,7 @@ impl ONNXMobileRuntimeAdapter {
                 EnvelopeKind::Image { .. } | EnvelopeKind::MultiPart(_) => {
                     "onnx-mobile-vision-unsupported".to_string()
                 }
+                EnvelopeKind::TokenIds(_) => "onnx-mobile-tokens output".to_string(),
             }
         };
 

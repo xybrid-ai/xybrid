@@ -123,6 +123,17 @@ extension Xybrid {
 }
 ```
 
+### Rust
+
+```rust
+pub struct Xybrid;
+
+impl Xybrid {
+    pub fn model(id: &str) -> ModelLoader;
+    pub fn pipeline(yaml: &str) -> PipelineResult<PipelineRef>;
+}
+```
+
 ### Implementation Status
 
 | Method | Dart | Kotlin | Swift | C# |
@@ -247,6 +258,21 @@ public class ModelLoader
 }
 ```
 
+### Rust
+
+```rust
+pub struct ModelLoader;
+
+impl ModelLoader {
+    pub fn from_registry(model_id: &str) -> Self;
+    pub fn from_bundle(path: impl Into<PathBuf>) -> SdkResult<Self>;
+    pub fn from_directory(path: impl Into<PathBuf>) -> SdkResult<Self>;
+    pub fn from_huggingface(repo: &str) -> Self;
+    pub fn with_backend(self, backend: BackendChoice) -> Self;
+    pub fn load(&self) -> SdkResult<XybridModel>;
+}
+```
+
 ### `fromDirectory()`
 
 Loads a model from a local directory containing a `model_metadata.json` and its referenced model files. Use this for models not in the xybrid registry — for example, custom-trained models, models downloaded from HuggingFace, or models bundled directly with your app.
@@ -340,6 +366,23 @@ using var model = loader.Load();
 var result = model.Run(Envelope.Text("Hello!"));
 ```
 
+### `withBackend()` / `with_backend()`
+
+Pins local generation or embedding execution to a specific backend by setting
+`ModelMetadata.backend` when the loader materializes a model. Omit this call for
+automatic selection.
+This is a hard requirement: asking for `mlx` on a bundle that does not contain
+MLX-compatible SafeTensors metadata will fail during load or execution rather
+than silently falling back.
+
+```rust
+use xybrid_sdk::{BackendChoice, Xybrid};
+
+let model = Xybrid::model("qwen3.5-0.8b")
+    .with_backend(BackendChoice::Mlx)
+    .load()?;
+```
+
 ### Implementation Status
 
 | Method | Dart | Kotlin | Swift | C# |
@@ -354,6 +397,7 @@ var result = model.Run(Envelope.Text("Hello!"));
 | `download()` / `StartDownload()` | — | ✅ | ✅ | ✅ |
 | `fromRegistrySpeculative()` | ✅ | ✅ | ✅ | ✅ |
 | `willSpeculate` | ✅ | ✅ | ✅ | ✅ |
+| `withBackend()` (Dart: `backend:` on `load()`) | ✅ | — | — | — |
 
 `fromRegistrySpeculative()` answers from the cloud gateway while the registry
 weights download in the background, then switches to on-device by itself. It
@@ -599,6 +643,10 @@ class XybridModel {
     required ConversationContext context,
     GenerationConfig? config,
   });
+  /// True for token-streaming LLMs: GGUF when a GGUF backend is compiled,
+  /// and MLX SafeTensors only when the Apple Silicon macOS MLX runtime is
+  /// available. Non-linking MLX builds return false.
+  bool supportsTokenStreaming();
 
   // Streaming TTS (audio chunk-by-chunk)
   // Emits each sentence-chunk's raw PCM (+ sample rate) as it is synthesized,
@@ -678,6 +726,10 @@ impl XybridModel {
         options: &RunOptions,
         on_token: F,
     ) -> SdkResult<InferenceResult>;
+
+    // Same capability gate as Dart: GGUF requires a compiled GGUF backend;
+    // MLX SafeTensors requires the Apple Silicon macOS MLX runtime.
+    pub fn supports_token_streaming(&self) -> bool;
 }
 ```
 
@@ -1392,6 +1444,18 @@ data class YuvColorInfo(
 )
 ```
 
+### BackendChoice
+
+Explicit local generation or embedding backend override. Omit the override for automatic selection.
+
+```rust
+pub enum BackendChoice {
+    Mlx,
+    LlamaCpp,
+    Mistral,
+}
+```
+
 ### GenerationConfig (LLM Generation Parameters)
 
 Optional configuration for controlling LLM text generation. All fields are nullable —
@@ -1666,6 +1730,7 @@ stream stays low-cardinality.
 |------|------|--------|-------|----|
 | `ConversationContext` | ✅ | ✅ | ✅ | ✅ |
 | `MessageRole` | ✅ | — | — | ✅ |
+| `BackendChoice` (Dart: `XybridBackend`) | ✅ | — | — | — |
 | `GenerationConfig` | ✅ | ✅ | ✅ | ✅ |
 | `PixelFormat` | ✅ | 📋 | 📋 | 📋 |
 | `ImagePlane` | ✅ | 📋 | 📋 | 📋 |

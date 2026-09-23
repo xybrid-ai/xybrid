@@ -1,12 +1,13 @@
-//! LLM inference infrastructure for GGUF models.
+//! LLM inference infrastructure for GGUF and MLX SafeTensors models.
 //!
-//! Provides the building blocks consumed by [`CodecTtsStrategy`](super::CodecTtsStrategy):
+//! Provides the building blocks consumed by [`CodecTtsStrategy`](super::CodecTtsStrategy)
+//! and the executor's inline LLM paths:
 //! - The [`LlmInference`] backend abstraction (mockable for tests)
 //! - [`LlmModelConfig`] and [`LlmGenerationParams`] (incl. stop-sequence handling)
 //! - The default [`DefaultLlmInference`] backend (feature-gated) plus a no-op stub
 //!
-//! The real backend is feature-gated and requires either `llm-mistral` or
-//! `llm-llamacpp`; without them a no-op stub keeps the module compiling.
+//! The real backend is feature-gated and requires `llm-mistral`, `llm-llamacpp`,
+//! or `llm-mlx`; without them a no-op stub keeps the module compiling.
 
 #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
 use log::debug;
@@ -91,6 +92,8 @@ pub struct LlmGenerationParams {
     pub system_prompt: Option<String>,
     /// Stop sequences - generation stops when any of these are encountered
     pub stop_sequences: Vec<String>,
+    /// Optional deterministic sampling seed. Honored by MLX today.
+    pub seed: Option<u64>,
     /// Tools (functions) offered to the model, mirrored into the rebuilt
     /// `GenerationConfig`. Passive mirror only: the executor path is the
     /// tool-calling surface (it parses emitted calls back out); this
@@ -109,6 +112,7 @@ impl Default for LlmGenerationParams {
             repetition_penalty: 1.1,
             system_prompt: None,
             stop_sequences: Vec::new(),
+            seed: None,
             tools: Vec::new(),
         }
     }
@@ -185,6 +189,7 @@ impl LlmGenerationParams {
     /// - `top_k`: Top-k sampling
     /// - `system_prompt`: System prompt text
     /// - `stop_sequences`: Stop sequences — see [`parse_stop_sequences`]
+    /// - `seed`: Deterministic sampling seed (MLX only today)
     /// - `model_id`: Used to auto-detect stop sequences if not explicitly provided
     pub fn from_envelope_metadata(metadata: &std::collections::HashMap<String, String>) -> Self {
         let mut params = Self::default();
@@ -207,6 +212,10 @@ impl LlmGenerationParams {
 
         if let Some(val) = metadata.get(STOP_SEQUENCES_METADATA_KEY) {
             params.stop_sequences = parse_stop_sequences(val);
+        }
+
+        if let Some(val) = metadata.get("seed").and_then(|s| s.parse().ok()) {
+            params.seed = Some(val);
         }
 
         params
@@ -370,6 +379,7 @@ impl LlmInference for DefaultLlmInference {
             top_k: params.top_k,
             repetition_penalty: params.repetition_penalty,
             stop_sequences: params.stop_sequences.clone(),
+            seed: params.seed,
             tools: params.tools.clone(),
             ..Default::default()
         };
@@ -402,6 +412,7 @@ impl LlmInference for DefaultLlmInference {
             top_k: params.top_k,
             repetition_penalty: params.repetition_penalty,
             stop_sequences: params.stop_sequences.clone(),
+            seed: params.seed,
             tools: params.tools.clone(),
             ..Default::default()
         };
@@ -440,6 +451,7 @@ impl LlmInference for DefaultLlmInference {
             top_k: params.top_k,
             repetition_penalty: params.repetition_penalty,
             stop_sequences: params.stop_sequences.clone(),
+            seed: params.seed,
             tools: params.tools.clone(),
             ..Default::default()
         };

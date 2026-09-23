@@ -829,6 +829,7 @@ public enum XybridEnvelopeKind: Hashable, Equatable, Sendable {
     case embedding(values: [Float])
     case image(bytes: Data, format: String)
     case multiPart(parts: [XybridEnvelope])
+    case tokenIds(ids: [Int64])
 
     @inlinable static func decode(from reader: inout WireReader) -> XybridEnvelopeKind {
         let tag = reader.readU32()
@@ -843,6 +844,8 @@ public enum XybridEnvelopeKind: Hashable, Equatable, Sendable {
             return .image(bytes: reader.readBytes(), format: reader.readString())
         case 4:
             return .multiPart(parts: reader.readArray { reader in XybridEnvelope.decode(from: &reader) })
+        case 5:
+            return .tokenIds(ids: reader.readArray { reader in reader.readI64() })
         default:
             fatalError("Invalid XybridEnvelopeKind tag: \(tag)")
         }
@@ -866,6 +869,9 @@ public enum XybridEnvelopeKind: Hashable, Equatable, Sendable {
         case let .multiPart(parts):
             writer.writeU32(4)
             writer.writeArray(parts) { writer, boltffiValue0 in boltffiValue0.encode(to: &writer) }
+        case let .tokenIds(ids):
+            writer.writeU32(5)
+            writer.writeArray(ids) { writer, boltffiValue0 in writer.writeI64(boltffiValue0) }
         }
     }
 }

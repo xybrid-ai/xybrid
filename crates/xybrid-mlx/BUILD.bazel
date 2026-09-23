@@ -1,0 +1,29 @@
+# xybrid-mlx — safe Rust wrappers over mlx-c-sys.
+#
+# Bazel builds the NON-LINKING tier only: without the `bindings` cargo feature
+# both this crate and mlx-c-sys compile to empty shells on every target, which
+# is exactly what the workspace graph needs (xybrid-core's optional `llm-mlx`
+# feature is not enabled in any Bazel slice today). The linked runtime stays a
+# cargo-only concern on Apple Silicon macOS (CI job: check (llm-mlx-runtime,
+# macos-14)); the `metal` dep is bindings-gated and therefore absent here.
+load("@rules_rs//rs:rust_library.bzl", "rust_library")
+
+rust_library(
+    name = "xybrid_mlx",
+    srcs = glob(["src/**/*.rs"]),
+    edition = "2021",
+    deps = [
+        "//crates/mlx-c-sys:mlx_c_sys",
+        "@crates//:thiserror",
+        "@crates//:tracing",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+# Dir-basename alias so `//crates/xybrid-mlx` (the label all_crate_deps()
+# emits for xybrid-core) resolves to the target above.
+alias(
+    name = "xybrid-mlx",
+    actual = ":xybrid_mlx",
+    visibility = ["//visibility:public"],
+)

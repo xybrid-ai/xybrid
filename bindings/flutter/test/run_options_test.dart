@@ -59,4 +59,33 @@ void main() {
     expect(options.toFfi().maxGraceTokens, 3);
     expect(options.toFfi().fallbackToCloud, isTrue);
   });
+
+  test('stream token exposes typed cloud fallback abort reason', () {
+    final token = StreamToken(
+      token: '',
+      index: 0,
+      cumulativeText: '',
+      isFinal: true,
+      finishReason: 'cloud_fallback: stress_memory',
+      cloudFallbackReason: CloudFallbackReason.stressMemory,
+    );
+
+    expect(token.isCloudFallbackAbort, isTrue);
+    expect(token.isError, isFalse);
+    expect(token.cloudFallbackReason?.wireName, 'stress_memory');
+  });
+
+  test('cloud fallback seam token can be non-terminal during retry', () {
+    final token = StreamToken(
+      token: '',
+      index: 0,
+      cumulativeText: '',
+      isFinal: false,
+      cloudFallbackReason: CloudFallbackReason.stressThrottle,
+    );
+
+    expect(token.isCloudFallbackAbort, isTrue);
+    expect(token.isFinal, isFalse);
+    expect(token.finishReason, isNull);
+  });
 }

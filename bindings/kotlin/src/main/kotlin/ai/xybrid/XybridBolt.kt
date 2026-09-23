@@ -2381,6 +2381,18 @@ sealed class XybridEnvelopeKind {
             writer.writeSequence(this.parts, this.parts.size, { writer, __boltffi_value_0 -> __boltffi_value_0.writeTo(writer) })
         }
     }
+    data class TokenIds(
+        val ids: LongArray
+    ) : XybridEnvelopeKind() {
+        internal override fun wireSize(): Int {
+            return 4 + 4 + this.ids.size * 8
+        }
+
+        internal override fun writeTo(writer: WireWriter) {
+            writer.writeU32(5.toUInt())
+            writer.writeLongArray(this.ids)
+        }
+    }
 
     companion object {
         internal fun fromReader(reader: WireReader): XybridEnvelopeKind {
@@ -2391,6 +2403,7 @@ sealed class XybridEnvelopeKind {
                 2.toUInt() -> Embedding(reader.readFloatArray())
                 3.toUInt() -> Image(reader.readBytes(), reader.readString())
                 4.toUInt() -> MultiPart(reader.readSequence({ reader -> ai.xybrid.XybridEnvelope.fromReader(reader) }))
+                5.toUInt() -> TokenIds(reader.readLongArray())
                 else -> throw IllegalArgumentException("unknown XybridEnvelopeKind tag: $tag")
             }
         }
