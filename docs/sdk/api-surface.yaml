@@ -227,6 +227,51 @@ classes:
         status: { rust: implemented, dart: planned, kotlin: implemented, swift: implemented, csharp: implemented }
 
   # -------------------------------------------------------------------
+  # 2c. XybridStreamingSession
+  # -------------------------------------------------------------------
+  # Live-capture ASR: feed microphone PCM in, read partial transcripts out.
+  # Distinct from one-shot transcription of a finished buffer (XybridModel.run).
+  # Flutter reaches the same capability through its own FfiStreamSession.
+  XybridStreamingSession:
+    type: class
+    section: "2c. XybridStreamingSession"
+    methods:
+      stream:
+        # Opened from a loaded model: `model.stream(config)` on Swift/Kotlin,
+        # `model.Stream(config)` on Unity. Spelled `XybridStreamingSession
+        # .forModel(model, config)` on the generated surface, because BoltFFI
+        # only lets an impl block return its own opaque type.
+        params: [{ name: config, type: XybridStreamingConfig }]
+        return: XybridStreamingSession
+        status: { rust: implemented, dart: na, kotlin: implemented, swift: implemented, csharp: implemented }
+      feed:
+        params: [{ name: samples, type: "float[]" }]
+        # PCM f32 mono 16 kHz. Hands the buffer to the session worker and
+        # returns; transcription never runs on the caller's thread.
+        status: { rust: implemented, dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+      partials:
+        return: "Stream<XybridPartialResult>"
+        # AsyncStream (Swift) / Flow (Kotlin) / IAsyncEnumerable (C#) /
+        # iterable subscription (Python). A partial produced before
+        # subscribing is delivered immediately, and the stream closes when the
+        # session ends. Dart uses FfiStreamSession.subscribe instead.
+        status: { rust: implemented, dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+      flush:
+        return: String
+        # Drains buffered audio and returns the full transcript; ends the session.
+        status: { rust: implemented, dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+      reset:
+        # Start a fresh utterance without reloading the model.
+        status: { rust: implemented, dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+      cancel:
+        # Stop and discard buffered audio. Named `cancel`, not `close`:
+        # BoltFFI already generates a `close()` on every handle for disposal.
+        status: { rust: implemented, dart: na, kotlin: implemented, swift: implemented, csharp: implemented }
+      isRunning:
+        return: bool
+        status: { rust: implemented, dart: na, kotlin: implemented, swift: implemented, csharp: implemented }
+
+  # -------------------------------------------------------------------
   # 3. XybridModel
   # -------------------------------------------------------------------
   XybridModel:
@@ -374,27 +419,27 @@ classes:
   # -------------------------------------------------------------------
   XybridPipeline:
     type: class
-    section: "4. XybridPipelineRef / XybridPipeline"
+    section: "4. XybridPipeline"
     methods:
       fromYaml:
         static: true
         params: [{ name: yamlContent, type: String }]
-        status: { dart: implemented, kotlin: planned, swift: planned, csharp: planned }
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
       fromFile:
         static: true
         params: [{ name: path, type: String }]
-        status: { dart: implemented, kotlin: planned, swift: planned, csharp: planned }
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
       fromBundle:
         static: true
         params: [{ name: path, type: String }]
-        status: { dart: implemented, kotlin: planned, swift: planned, csharp: planned }
-      load:
-        async: true
-        status: { dart: implemented, kotlin: planned, swift: planned, csharp: planned }
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
       run:
         async: true
-        params: [{ name: envelope, type: Envelope }]
-        status: { dart: implemented, kotlin: planned, swift: planned, csharp: planned }
+        params:
+          - { name: envelope, type: Envelope }
+          - { name: options, type: "RunOptions?", default: "null" }
+        notes: "Constructors collapse PipelineRef loading into one operation. Kotlin and Swift provide off-UI-thread async conveniences; Dart is async; C# exposes the blocking native call and takes no options. Kotlin, Swift and C# return a PipelineResult carrying every stage's output; Dart returns the final stage as an XybridResult. Of RunOptions only correlationId applies; generationConfig or abortOn fail with ConfigError."
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
       runWithOptions:
         async: true
         params:
@@ -412,16 +457,16 @@ classes:
     properties:
       name:
         type: "String?"
-        status: { dart: implemented, kotlin: planned, swift: planned, csharp: planned }
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
       isReady:
         type: bool
-        status: { dart: implemented, kotlin: planned, swift: planned, csharp: planned }
+        status: { dart: planned, kotlin: planned, swift: planned, csharp: planned }
       stageCount:
         type: int
-        status: { dart: implemented, kotlin: planned, swift: planned, csharp: planned }
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
       stageNames:
         type: "List<String>"
-        status: { dart: implemented, kotlin: planned, swift: planned, csharp: planned }
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
 
   # -------------------------------------------------------------------
   # 5. Envelope
@@ -625,6 +670,62 @@ classes:
       latencyMs:
         type: int
         status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+
+  PipelineResult:
+    type: data
+    section: "4. XybridPipeline"
+    # Every stage's output, not only the final one: an ASR -> LLM -> TTS run
+    # exposes the transcript and the reply alongside the audio.
+    dart_name: XybridPipelineResult
+    kotlin_name: XybridPipelineResult
+    swift_name: XybridPipelineResult
+    csharp_name: PipelineResult
+    properties:
+      outputType:
+        type: OutputType
+        status: { dart: planned, kotlin: implemented, swift: implemented, csharp: implemented }
+      latencyMs:
+        type: int
+        status: { dart: planned, kotlin: implemented, swift: implemented, csharp: implemented }
+      stages:
+        type: "List<StageResult>"
+        status: { dart: planned, kotlin: implemented, swift: implemented, csharp: implemented }
+      text:
+        type: "String?"
+        status: { dart: planned, kotlin: implemented, swift: implemented, csharp: implemented }
+      audioBytes:
+        type: "Uint8List?"
+        status: { dart: planned, kotlin: implemented, swift: implemented, csharp: implemented }
+
+  StageResult:
+    type: data
+    section: "4. XybridPipeline"
+    dart_name: XybridStageResult
+    kotlin_name: XybridStageResult
+    swift_name: XybridStageResult
+    csharp_name: StageResult
+    properties:
+      stageId:
+        type: String
+        status: { dart: planned, kotlin: implemented, swift: implemented, csharp: implemented }
+      outputType:
+        type: OutputType
+        status: { dart: planned, kotlin: implemented, swift: implemented, csharp: implemented }
+      latencyMs:
+        type: int
+        status: { dart: planned, kotlin: implemented, swift: implemented, csharp: implemented }
+      executionTarget:
+        type: ExecutionTarget
+        status: { dart: planned, kotlin: implemented, swift: implemented, csharp: implemented }
+      metrics:
+        type: InferenceMetrics
+        status: { dart: planned, kotlin: implemented, swift: implemented, csharp: implemented }
+      text:
+        type: "String?"
+        status: { dart: planned, kotlin: implemented, swift: implemented, csharp: implemented }
+      audioBytes:
+        type: "Uint8List?"
+        status: { dart: planned, kotlin: implemented, swift: implemented, csharp: implemented }
 
   # -------------------------------------------------------------------
   # 8. Supporting Types

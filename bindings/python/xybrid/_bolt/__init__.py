@@ -425,18 +425,18 @@ def _boltffi_read_94828222bbb26957(data: bytes):
 _native._register_wire_codec("read_94828222bbb26957", _boltffi_read_94828222bbb26957)
 
 
-def _boltffi_read_8d5822576d97fd37(data: bytes):
+def _boltffi_read_4d62ca46c12c8415(data: bytes):
     return _boltffi_read_wire(data, lambda reader: reader.sequence(lambda: XybridVoiceInfo._boltffi_from_reader(reader)))
 
 
-_native._register_wire_codec("read_8d5822576d97fd37", _boltffi_read_8d5822576d97fd37)
+_native._register_wire_codec("read_4d62ca46c12c8415", _boltffi_read_4d62ca46c12c8415)
 
 
-def _boltffi_read_5110818ecd16fc91(data: bytes):
+def _boltffi_read_9105d99f798275b3(data: bytes):
     return _boltffi_read_wire(data, lambda reader: reader.optional(lambda: XybridVoiceInfo._boltffi_from_reader(reader)))
 
 
-_native._register_wire_codec("read_5110818ecd16fc91", _boltffi_read_5110818ecd16fc91)
+_native._register_wire_codec("read_9105d99f798275b3", _boltffi_read_9105d99f798275b3)
 
 
 def _boltffi_read_146d324414895b9b(data: bytes):
@@ -446,11 +446,25 @@ def _boltffi_read_146d324414895b9b(data: bytes):
 _native._register_wire_codec("read_146d324414895b9b", _boltffi_read_146d324414895b9b)
 
 
-def _boltffi_read_f45d365d172a914e(data: bytes):
+def _boltffi_read_b467de4c6abf182c(data: bytes):
     return _boltffi_read_wire(data, lambda reader: XybridStreamEvent._boltffi_from_reader(reader))
 
 
+_native._register_wire_codec("read_b467de4c6abf182c", _boltffi_read_b467de4c6abf182c)
+
+
+def _boltffi_read_f45d365d172a914e(data: bytes):
+    return _boltffi_read_wire(data, lambda reader: XybridPipelineResult._boltffi_from_reader(reader))
+
+
 _native._register_wire_codec("read_f45d365d172a914e", _boltffi_read_f45d365d172a914e)
+
+
+def _boltffi_read_88fe13077020b58c(data: bytes):
+    return _boltffi_read_wire(data, lambda reader: reader.sequence(lambda: reader.string()))
+
+
+_native._register_wire_codec("read_88fe13077020b58c", _boltffi_read_88fe13077020b58c)
 
 
 def _boltffi_read_0d42d278c66eef7b(data: bytes):
@@ -480,6 +494,13 @@ def _boltffi_write_cfe97cd6dcce32b6(platform) -> bytes:
 
 
 _native._register_wire_codec("write_cfe97cd6dcce32b6", _boltffi_write_cfe97cd6dcce32b6)
+
+
+def _boltffi_write_afeb278be053ce0f(config) -> bytes:
+    return config._boltffi_wire()
+
+
+_native._register_wire_codec("write_afeb278be053ce0f", _boltffi_write_afeb278be053ce0f)
 
 
 def _boltffi_write_766cdeb069dd2b0a(path) -> bytes:
@@ -522,6 +543,13 @@ def _boltffi_write_360ec15d925d8351(options) -> bytes:
 
 
 _native._register_wire_codec("write_360ec15d925d8351", _boltffi_write_360ec15d925d8351)
+
+
+def _boltffi_write_ab1ae15bdd9d5612(yaml) -> bytes:
+    return _boltffi_wire_string(yaml)
+
+
+_native._register_wire_codec("write_ab1ae15bdd9d5612", _boltffi_write_ab1ae15bdd9d5612)
 
 
 def _boltffi_write_45cfac4c89613282(api_key) -> bytes:
@@ -1299,6 +1327,73 @@ _native._register_xybrid_thermal_state(XybridThermalState)
 
 
 
+class XybridVadMode:
+    """How voice-activity detection (VAD) chunking is resolved for a session.
+
+    There is deliberately no "on, with the default model" variant: nothing
+    ships a bundled Silero model, and the core handles VAD-enabled-without-a-
+    directory by warning and silently falling back to fixed-window chunking.
+    Enabling VAD therefore requires naming a directory.
+    """
+    __slots__ = ()
+
+    @classmethod
+    def _boltffi_from_wire(cls, data: bytes) -> "XybridVadMode":
+        reader = _BoltFfiWireReader(data)
+        try:
+            value = cls._boltffi_from_reader(reader)
+        except struct.error as error:
+            raise ValueError("truncated BoltFFI wire bytes") from error
+        reader.finish()
+        return value
+
+    @classmethod
+    def _boltffi_from_reader(cls, reader: "_BoltFfiWireReader") -> "XybridVadMode":
+        tag = reader.u32()
+        if tag == 0:
+            return XybridVadModeOff._boltffi_from_reader_payload(reader)
+        if tag == 1:
+            return XybridVadModeEnabled._boltffi_from_reader_payload(reader)
+        raise ValueError("invalid XybridVadMode tag")
+
+
+@dataclass(frozen=True, slots=True)
+class XybridVadModeOff(XybridVadMode):
+    """Fixed time-window chunking; no voice-activity detection."""
+    pass
+
+    def _boltffi_wire(self) -> bytes:
+        return _boltffi_wire_u32(0)
+
+    @classmethod
+    def _boltffi_from_reader_payload(cls, reader: "_BoltFfiWireReader") -> "XybridVadModeOff":
+        return cls()
+
+
+@dataclass(frozen=True, slots=True)
+class XybridVadModeEnabled(XybridVadMode):
+    """VAD on, using the Silero model in this directory, which must contain a
+    `model.onnx`.
+    """
+    model_dir: str
+
+    def _boltffi_wire(self) -> bytes:
+        return _boltffi_wire_u32(1) + b"".join((
+            _boltffi_wire_string(self.model_dir),
+        ))
+
+    @classmethod
+    def _boltffi_from_reader_payload(cls, reader: "_BoltFfiWireReader") -> "XybridVadModeEnabled":
+        return cls(
+            model_dir=reader.string(),
+        )
+
+
+
+_native._register_xybrid_vad_mode(XybridVadMode)
+
+
+
 
 @dataclass(frozen=True, slots=True)
 class XybridMetadataEntry:
@@ -1811,6 +1906,112 @@ _native._register_xybrid_download_status(XybridDownloadStatus)
 
 
 @dataclass(frozen=True, slots=True)
+class XybridStageResult:
+    """What one stage of a pipeline run produced."""
+    stage_id: str
+    """Stage identifier from the pipeline YAML (`id:`), or the model ID when
+    the stage declares none. Matches [`XybridPipeline::stage_names`].
+    """
+    envelope: XybridEnvelope
+    """This stage's output, which is also the next stage's input — the
+    transcript of an ASR stage, the reply of an LLM stage.
+    """
+    output_type: XybridOutputType
+    latency_ms: int
+    execution_target: XybridExecutionTarget
+    """Where this stage ran. Stages of one pipeline can run in different
+    places.
+    """
+    metrics: XybridInferenceMetrics
+    """Generation figures (TTFT, tokens per second) when this stage is a
+    language model; `total_ms` is the stage latency.
+    """
+
+    def _boltffi_wire(self) -> bytes:
+        return b"".join((
+            _boltffi_wire_string(self.stage_id),
+            self.envelope._boltffi_wire(),
+            _boltffi_wire_i32(_boltffi_enum_value(self.output_type, XybridOutputType, "XybridOutputType")),
+            _boltffi_wire_u32(self.latency_ms),
+            _boltffi_wire_i32(_boltffi_enum_value(self.execution_target, XybridExecutionTarget, "XybridExecutionTarget")),
+            self.metrics._boltffi_wire(),
+        ))
+
+    @classmethod
+    def _boltffi_from_wire(cls, data: bytes) -> "XybridStageResult":
+        reader = _BoltFfiWireReader(data)
+        try:
+            value = cls._boltffi_from_reader(reader)
+        except struct.error as error:
+            raise ValueError("truncated BoltFFI wire bytes") from error
+        reader.finish()
+        return value
+
+    @classmethod
+    def _boltffi_from_reader(cls, reader: "_BoltFfiWireReader") -> "XybridStageResult":
+        return cls(
+            stage_id=reader.string(),
+            envelope=XybridEnvelope._boltffi_from_reader(reader),
+            output_type=XybridOutputType(reader.i32()),
+            latency_ms=reader.u32(),
+            execution_target=XybridExecutionTarget(reader.i32()),
+            metrics=XybridInferenceMetrics._boltffi_from_reader(reader),
+        )
+
+
+_native._register_xybrid_stage_result(XybridStageResult)
+
+
+
+@dataclass(frozen=True, slots=True)
+class XybridPipelineResult:
+    """Result of [`XybridPipeline::run`]: the final output plus every stage's own
+    output, so a voice pipeline can show the transcript and the reply as well
+    as play the audio.
+    """
+    envelope: XybridEnvelope
+    """The final stage's output — the same envelope as the last entry of
+    `stages`.
+    """
+    output_type: XybridOutputType
+    latency_ms: int
+    """Wall-clock time of the whole run."""
+    stages: list[XybridStageResult]
+    """Every executed stage, in order."""
+
+    def _boltffi_wire(self) -> bytes:
+        return b"".join((
+            self.envelope._boltffi_wire(),
+            _boltffi_wire_i32(_boltffi_enum_value(self.output_type, XybridOutputType, "XybridOutputType")),
+            _boltffi_wire_u32(self.latency_ms),
+            _boltffi_wire_sequence(self.stages, len(self.stages), lambda __boltffi_value_0: __boltffi_value_0._boltffi_wire()),
+        ))
+
+    @classmethod
+    def _boltffi_from_wire(cls, data: bytes) -> "XybridPipelineResult":
+        reader = _BoltFfiWireReader(data)
+        try:
+            value = cls._boltffi_from_reader(reader)
+        except struct.error as error:
+            raise ValueError("truncated BoltFFI wire bytes") from error
+        reader.finish()
+        return value
+
+    @classmethod
+    def _boltffi_from_reader(cls, reader: "_BoltFfiWireReader") -> "XybridPipelineResult":
+        return cls(
+            envelope=XybridEnvelope._boltffi_from_reader(reader),
+            output_type=XybridOutputType(reader.i32()),
+            latency_ms=reader.u32(),
+            stages=reader.sequence(lambda: XybridStageResult._boltffi_from_reader(reader)),
+        )
+
+
+_native._register_xybrid_pipeline_result(XybridPipelineResult)
+
+
+
+@dataclass(frozen=True, slots=True)
 class XybridStreamToken:
     token: str
     token_id: int | None
@@ -1959,6 +2160,107 @@ _native._register_xybrid_voice_info(XybridVoiceInfo)
 
 
 
+@dataclass(frozen=True, slots=True)
+class XybridStreamingConfig:
+    """Configuration for a live ASR session.
+
+    The model is not named here — it comes from the loaded `XybridModel` the
+    session is opened on. This only configures *how* the audio is chunked.
+    """
+    sample_rate: int
+    """Sample rate of the audio you will feed. Must be 16000; the ASR
+    backends are fixed there, so anything else is rejected rather than
+    silently resampled.
+    """
+    vad: XybridVadMode
+    """Voice-activity-detection mode."""
+    vad_threshold: float
+    """VAD sensitivity, 0.0–1.0. Ignored when `vad` is `Off`."""
+    language: str | None
+    """Language hint (e.g. `"en"`); null uses the model default."""
+    audio_ctx: int | None
+    """Whisper encoder context in mel frames; null uses the model default."""
+
+    def _boltffi_wire(self) -> bytes:
+        return b"".join((
+            _boltffi_wire_u32(self.sample_rate),
+            self.vad._boltffi_wire(),
+            _boltffi_wire_f32(self.vad_threshold),
+            _boltffi_wire_optional(self.language, lambda __boltffi_value_0: _boltffi_wire_string(__boltffi_value_0)),
+            _boltffi_wire_optional(self.audio_ctx, lambda __boltffi_value_0: _boltffi_wire_u32(__boltffi_value_0)),
+        ))
+
+    @classmethod
+    def _boltffi_from_wire(cls, data: bytes) -> "XybridStreamingConfig":
+        reader = _BoltFfiWireReader(data)
+        try:
+            value = cls._boltffi_from_reader(reader)
+        except struct.error as error:
+            raise ValueError("truncated BoltFFI wire bytes") from error
+        reader.finish()
+        return value
+
+    @classmethod
+    def _boltffi_from_reader(cls, reader: "_BoltFfiWireReader") -> "XybridStreamingConfig":
+        return cls(
+            sample_rate=reader.u32(),
+            vad=XybridVadMode._boltffi_from_reader(reader),
+            vad_threshold=reader.f32(),
+            language=reader.optional(lambda: reader.string()),
+            audio_ctx=reader.optional(lambda: reader.u32()),
+        )
+
+
+_native._register_xybrid_streaming_config(XybridStreamingConfig)
+
+
+
+@dataclass(frozen=True, slots=True)
+class XybridPartialResult:
+    """A partial transcript emitted while audio is streaming."""
+    text: str
+    """Best-effort transcript so far. Cumulative, not a delta — render it in
+    place of the previous partial rather than appending.
+    """
+    is_stable: bool
+    """`true` once this span is committed and will not change."""
+    chunk_sequence: int
+    """Monotonic chunk sequence number this result corresponds to."""
+    audio_duration_ms: int
+    """Audio covered so far, in milliseconds."""
+
+    def _boltffi_wire(self) -> bytes:
+        return b"".join((
+            _boltffi_wire_string(self.text),
+            _boltffi_wire_bool(self.is_stable),
+            _boltffi_wire_u64(self.chunk_sequence),
+            _boltffi_wire_u64(self.audio_duration_ms),
+        ))
+
+    @classmethod
+    def _boltffi_from_wire(cls, data: bytes) -> "XybridPartialResult":
+        reader = _BoltFfiWireReader(data)
+        try:
+            value = cls._boltffi_from_reader(reader)
+        except struct.error as error:
+            raise ValueError("truncated BoltFFI wire bytes") from error
+        reader.finish()
+        return value
+
+    @classmethod
+    def _boltffi_from_reader(cls, reader: "_BoltFfiWireReader") -> "XybridPartialResult":
+        return cls(
+            text=reader.string(),
+            is_stable=reader.bool(),
+            chunk_sequence=reader.u64(),
+            audio_duration_ms=reader.u64(),
+        )
+
+
+_native._register_xybrid_partial_result(XybridPartialResult)
+
+
+
 
 class XybridDownload:
     __slots__ = ("_handle",)
@@ -2059,6 +2361,125 @@ class XybridDownloadProgressSubscription:
         self._handle = None
         _native.progress_unsubscribe(handle)
         _native.progress_free(handle)
+
+    def _require_handle(self) -> int:
+        handle = self._handle
+        if handle is None:
+            raise RuntimeError("stream subscription is closed")
+        return handle
+
+
+
+class XybridStreamingSession:
+    __slots__ = ("_handle",)
+
+
+    def __init__(self) -> None:
+        raise TypeError("XybridStreamingSession cannot be constructed directly")
+
+
+    @classmethod
+    def _from_handle(cls, handle: int) -> "XybridStreamingSession":
+        value = cls.__new__(cls)
+        value._handle = handle
+        return value
+
+    def __del__(self) -> None:
+        handle = getattr(self, "_handle", None)
+        if handle is not None:
+            self._handle = None
+            _native._boltffi_xybrid_streaming_session_release(handle)
+
+    @classmethod
+    def for_model(cls, model: XybridModel, config: XybridStreamingConfig) -> "XybridStreamingSession":
+        """Open a session on an already-loaded ASR model.
+
+        Starts a worker thread and warms the weights, so the first spoken
+        words do not pay the cold-start cost. Returns an error for a model
+        that does not support streaming, or a sample rate other than 16000.
+        """
+        return XybridStreamingSession._from_handle(_boltffi_call(_boltffi_read_09404a3c98b3f16c, lambda: _native._boltffi_xybrid_streaming_session_for_model(model._handle, config._boltffi_wire())))
+
+    def feed(self, samples: Sequence[float]) -> None:
+        """Feed PCM f32 mono 16 kHz samples.
+
+        Hands the buffer to the worker and returns; transcription happens
+        there, never on the caller's thread. Blocks only when the queue is
+        full, which back-pressures a producer feeding faster than the model
+        can keep up.
+        """
+        _boltffi_call(_boltffi_read_09404a3c98b3f16c, lambda: _native._boltffi_xybrid_streaming_session_feed(self._handle, samples))
+
+    def flush(self) -> str:
+        """Finalize: drain buffered audio and return the complete transcript.
+
+        The session is over afterwards — `feed` fails and the partial stream
+        closes. Blocks until the last chunk is transcribed, so call it off the
+        UI thread.
+        """
+        return _boltffi_call(_boltffi_read_09404a3c98b3f16c, lambda: _native._boltffi_xybrid_streaming_session_flush(self._handle))
+
+    def reset(self) -> None:
+        """Reset to transcribe fresh audio without reloading the model."""
+        _boltffi_call(_boltffi_read_09404a3c98b3f16c, lambda: _native._boltffi_xybrid_streaming_session_reset(self._handle))
+
+    def cancel(self) -> None:
+        """Stop the session and release the model, discarding buffered audio.
+
+        Idempotent. Use [`Self::flush`] when you want the transcript — this is
+        the "user walked away" path. Named `cancel` rather than `close`
+        because BoltFFI already gives every handle a generated `close()` for
+        the host's disposal idiom.
+        """
+        _native._boltffi_xybrid_streaming_session_cancel(self._handle)
+
+    def is_running(self) -> bool:
+        """Whether the session is still accepting audio."""
+        return _native._boltffi_xybrid_streaming_session_is_running(self._handle)
+
+    def partials(self) -> "XybridStreamingSessionPartialsSubscription":
+        """Pushed partial transcripts, closing once the session ends.
+
+        Generated as an `AsyncStream` in Swift, a `Flow` in Kotlin, an
+        `IAsyncEnumerable` in C# and an iterable subscription in Python.
+
+        A partial produced before subscribing is delivered immediately, so
+        audio fed before the stream is attached is never silently lost, and
+        subscribing to a finished session closes at once instead of hanging.
+        """
+        return XybridStreamingSessionPartialsSubscription._from_handle(_native.partials(self._handle))
+
+
+class XybridStreamingSessionPartialsSubscription:
+    __slots__ = ("_handle",)
+
+    def __init__(self) -> None:
+        raise TypeError("XybridStreamingSessionPartialsSubscription cannot be constructed directly")
+
+    @classmethod
+    def _from_handle(cls, handle: int) -> "XybridStreamingSessionPartialsSubscription":
+        value = cls.__new__(cls)
+        value._handle = handle
+        return value
+
+    def __del__(self) -> None:
+        handle = getattr(self, "_handle", None)
+        if handle is not None:
+            self._handle = None
+            _native.partials_free(handle)
+
+    def pop_batch(self, max_count: int = 16) -> list[XybridPartialResult]:
+        data = _native.partials_pop_batch(self._require_handle(), max_count)
+        return _boltffi_read_wire(data, lambda reader: reader.sequence(lambda: XybridPartialResult._boltffi_from_reader(reader))) if data else []
+
+    def wait(self, timeout_milliseconds: int) -> int:
+        return _native.partials_wait(self._require_handle(), timeout_milliseconds)
+
+    def unsubscribe(self) -> None:
+        handle = self._require_handle()
+        self._handle = None
+        _native.partials_unsubscribe(handle)
+        _native.partials_free(handle)
 
     def _require_handle(self) -> int:
         handle = self._handle
@@ -2342,6 +2763,65 @@ class XybridModelDownloadProgressSubscription:
         if handle is None:
             raise RuntimeError("stream subscription is closed")
         return handle
+
+
+
+class XybridPipeline:
+    __slots__ = ("_handle",)
+
+
+    def __init__(self) -> None:
+        raise TypeError("XybridPipeline cannot be constructed directly")
+
+
+    @classmethod
+    def _from_handle(cls, handle: int) -> "XybridPipeline":
+        value = cls.__new__(cls)
+        value._handle = handle
+        return value
+
+    def __del__(self) -> None:
+        handle = getattr(self, "_handle", None)
+        if handle is not None:
+            self._handle = None
+            _native._boltffi_xybrid_pipeline_release(handle)
+
+    @classmethod
+    def from_yaml(cls, yaml: str) -> "XybridPipeline":
+        """Parse and load a pipeline from YAML content."""
+        return XybridPipeline._from_handle(_boltffi_call(_boltffi_read_09404a3c98b3f16c, lambda: _native._boltffi_xybrid_pipeline_from_yaml(yaml)))
+
+    @classmethod
+    def from_file(cls, path: str) -> "XybridPipeline":
+        """Read, parse, and load a pipeline from a YAML file."""
+        return XybridPipeline._from_handle(_boltffi_call(_boltffi_read_09404a3c98b3f16c, lambda: _native._boltffi_xybrid_pipeline_from_file(path)))
+
+    @classmethod
+    def from_bundle(cls, path: str) -> "XybridPipeline":
+        """Load a pipeline bundle."""
+        return XybridPipeline._from_handle(_boltffi_call(_boltffi_read_09404a3c98b3f16c, lambda: _native._boltffi_xybrid_pipeline_from_bundle(path)))
+
+    def run(self, envelope: XybridEnvelope, options: XybridRunOptions | None) -> XybridPipelineResult:
+        """Execute every stage, downloading any missing models first, and return
+        each stage's output alongside the final one.
+
+        Of `options`, only `correlation_id` applies to a pipeline run. Setting
+        `generation_config` or `abort_on` fails with `ConfigError` rather than
+        being ignored; per-stage generation settings belong in the YAML.
+        """
+        return _boltffi_read_wire(_boltffi_call(_boltffi_read_09404a3c98b3f16c, lambda: _native._boltffi_xybrid_pipeline_run(self._handle, envelope._boltffi_wire(), _boltffi_wire_optional(options, lambda __boltffi_value_0: __boltffi_value_0._boltffi_wire()))), lambda reader: XybridPipelineResult._boltffi_from_reader(reader))
+
+    def name(self) -> str | None:
+        """Pipeline name from the YAML definition, if present."""
+        return _boltffi_read_wire(_native._boltffi_xybrid_pipeline_name(self._handle), lambda reader: reader.optional(lambda: reader.string()))
+
+    def stage_names(self) -> list[str]:
+        """Stage identifiers in execution order."""
+        return _boltffi_read_wire(_native._boltffi_xybrid_pipeline_stage_names(self._handle), lambda reader: reader.sequence(lambda: reader.string()))
+
+    def stage_count(self) -> int:
+        """Number of stages in the pipeline."""
+        return _native._boltffi_xybrid_pipeline_stage_count(self._handle)
 
 
 
@@ -2668,9 +3148,13 @@ __all__ = [
     "XybridInferenceMetrics",
     "XybridResult",
     "XybridDownloadStatus",
+    "XybridStageResult",
+    "XybridPipelineResult",
     "XybridStreamToken",
     "XybridStreamEvent",
     "XybridVoiceInfo",
+    "XybridStreamingConfig",
+    "XybridPartialResult",
     "XybridError",
     "XybridErrorException",
     "XybridErrorModelNotFound",
@@ -2709,11 +3193,17 @@ __all__ = [
     "XybridDownloadState",
     "XybridStreamEventKind",
     "XybridThermalState",
+    "XybridVadMode",
+    "XybridVadModeOff",
+    "XybridVadModeEnabled",
     "XybridDownload",
     "XybridDownloadProgressSubscription",
+    "XybridStreamingSession",
+    "XybridStreamingSessionPartialsSubscription",
     "XybridCancellationToken",
     "XybridModel",
     "XybridModelDownloadProgressSubscription",
+    "XybridPipeline",
     "XybridConversationContext",
     "XybridTelemetryConfig",
     "XybridBundle",

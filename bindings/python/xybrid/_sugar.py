@@ -10,9 +10,10 @@ attaches them to the generated classes when ``xybrid`` is imported.
 Patching rather than subclassing is deliberate: the compiled bridge
 instantiates the generated classes directly (``_native._register_xybrid_result``
 and friends), so instances handed back from a native call would never be of a
-subclass. Model getters become properties, and the four ``run*`` methods gain
-defaults for options and a keyword-only cancellation token. Other additions
-use new names on the generated classes.
+subclass. Model getters become properties, and the four model ``run*`` methods
+gain defaults for options and a keyword-only cancellation token.
+``XybridPipeline.run`` also gains a default for options. Other additions use
+new names on the generated classes.
 
 Regeneration safety: ``tests/test_sdk.py`` asserts each patched member is
 present, so a generator change that renames or removes one fails the suite
@@ -165,19 +166,25 @@ def _install_result_accessors() -> None:
 
     # Payload presence follows the envelope kind, not output_type — matching
     # the Swift and Kotlin accessors.
-    def text(self: _bolt.XybridResult) -> str | None:
+    def text(
+        self: _bolt.XybridResult | _bolt.XybridPipelineResult | _bolt.XybridStageResult,
+    ) -> str | None:
         """Text payload, or ``None`` when the result is not text."""
 
         kind = self.envelope.kind
         return kind.text if isinstance(kind, _bolt.XybridEnvelopeKindText) else None
 
-    def audio_bytes(self: _bolt.XybridResult) -> bytes | None:
+    def audio_bytes(
+        self: _bolt.XybridResult | _bolt.XybridPipelineResult | _bolt.XybridStageResult,
+    ) -> bytes | None:
         """Audio payload, or ``None`` when the result is not audio."""
 
         kind = self.envelope.kind
         return kind.bytes if isinstance(kind, _bolt.XybridEnvelopeKindAudio) else None
 
-    def embedding(self: _bolt.XybridResult) -> list[float] | None:
+    def embedding(
+        self: _bolt.XybridResult | _bolt.XybridPipelineResult | _bolt.XybridStageResult,
+    ) -> list[float] | None:
         """Embedding vector, or ``None`` when the result is not an embedding."""
 
         kind = self.envelope.kind
@@ -193,7 +200,9 @@ def _install_result_accessors() -> None:
 
         return self.output_type == _bolt.XybridOutputType.UNKNOWN
 
-    def latency_seconds(self: _bolt.XybridResult) -> float:
+    def latency_seconds(
+        self: _bolt.XybridResult | _bolt.XybridPipelineResult | _bolt.XybridStageResult,
+    ) -> float:
         """Latency in seconds."""
 
         return self.latency_ms / 1000.0
@@ -213,6 +222,38 @@ def _install_result_accessors() -> None:
         has_tool_calls,
     ):
         setattr(result, accessor.__name__, property(accessor, doc=accessor.__doc__))
+
+    # A pipeline result and each of its stages carry the same envelope, so the
+    # payload accessors apply to the whole run and to every stage.
+    for owner in (_bolt.XybridPipelineResult, _bolt.XybridStageResult):
+        for accessor in (text, audio_bytes, embedding, latency_seconds):
+            setattr(owner, accessor.__name__, property(accessor, doc=accessor.__doc__))
+
+
+def _install_pipeline_accessors() -> None:
+    pipeline = _bolt.XybridPipeline
+    run = pipeline.run
+
+    def _run(
+        self: _bolt.XybridPipeline,
+        envelope: _bolt.XybridEnvelope,
+        options: _bolt.XybridRunOptions | None = None,
+    ) -> _bolt.XybridPipelineResult:
+        """Run every stage and return each stage's output alongside the final one.
+
+        Of ``options``, only ``correlation_id`` applies to a pipeline run;
+        setting ``generation_config`` or ``abort_on`` raises ``ConfigError``.
+        """
+
+        return run(self, envelope, options)
+
+    def stage(self: _bolt.XybridPipelineResult, stage_id: str) -> _bolt.XybridStageResult | None:
+        """The stage with this identifier (the YAML ``id:``), or ``None``."""
+
+        return next((s for s in self.stages if s.stage_id == stage_id), None)
+
+    pipeline.run = _run
+    _bolt.XybridPipelineResult.stage = stage
 
 
 def _install_stream_token_accessors() -> None:
@@ -416,5 +457,6 @@ def install() -> None:
     _install_stream_token_accessors()
     _install_voice_accessors()
     _install_model_accessors()
+    _install_pipeline_accessors()
     _install_download_iteration()
     _bolt._xybrid_sugar_installed = True

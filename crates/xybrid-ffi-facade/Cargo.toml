@@ -21,3 +21,7 @@ xybrid-sdk = { workspace = true }
 xybrid-core = { path = "../xybrid-core", default-features = false }
 serde_json = { workspace = true }
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "sync"] }
+# The live ASR worker swallows a failed warm-up and per-chunk feed errors so a
+# transient glitch cannot kill the session; without a log line those failures
+# would be completely invisible.
+log = "0.4"

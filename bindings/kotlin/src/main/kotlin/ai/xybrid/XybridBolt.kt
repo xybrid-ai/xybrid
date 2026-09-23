@@ -915,6 +915,13 @@ private object Native {
     @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_download_is_finished(`receiver`: Long): Boolean
     @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_download_error(`receiver`: Long): ByteArray?
     @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_download_cancel(`receiver`: Long): Unit
+    @JvmStatic external fun boltffi_release_class_xybrid_bolt_xybrid_streaming_session(handle: Long): Unit
+    @JvmStatic external fun boltffi_init_class_xybrid_bolt_xybrid_streaming_session_for_model(model: Long, config: java.nio.ByteBuffer, __boltffi_config_len: Int): Long
+    @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_streaming_session_feed(`receiver`: Long, samples: FloatArray): Unit
+    @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_streaming_session_flush(`receiver`: Long): ByteArray?
+    @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_streaming_session_reset(`receiver`: Long): Unit
+    @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_streaming_session_cancel(`receiver`: Long): Unit
+    @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_streaming_session_is_running(`receiver`: Long): Boolean
     @JvmStatic external fun boltffi_release_class_xybrid_bolt_xybrid_cancellation_token(handle: Long): Unit
     @JvmStatic external fun boltffi_init_class_xybrid_bolt_xybrid_cancellation_token_new(): Long
     @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_cancellation_token_cancel(`receiver`: Long): Unit
@@ -952,6 +959,14 @@ private object Native {
     @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_model_run_stream_with_context(`receiver`: Long, envelope: java.nio.ByteBuffer, __boltffi_envelope_len: Int, context: Long, options: java.nio.ByteBuffer, __boltffi_options_len: Int, cancel: Long): Long
     @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_model_warmup(`receiver`: Long): Unit
     @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_model_unload(`receiver`: Long): Unit
+    @JvmStatic external fun boltffi_release_class_xybrid_bolt_xybrid_pipeline(handle: Long): Unit
+    @JvmStatic external fun boltffi_init_class_xybrid_bolt_xybrid_pipeline_from_yaml(yaml: java.nio.ByteBuffer, __boltffi_yaml_len: Int): Long
+    @JvmStatic external fun boltffi_init_class_xybrid_bolt_xybrid_pipeline_from_file(path: java.nio.ByteBuffer, __boltffi_path_len: Int): Long
+    @JvmStatic external fun boltffi_init_class_xybrid_bolt_xybrid_pipeline_from_bundle(path: java.nio.ByteBuffer, __boltffi_path_len: Int): Long
+    @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_pipeline_run(`receiver`: Long, envelope: java.nio.ByteBuffer, __boltffi_envelope_len: Int, options: java.nio.ByteBuffer, __boltffi_options_len: Int): ByteArray?
+    @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_pipeline_name(`receiver`: Long): ByteArray?
+    @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_pipeline_stage_names(`receiver`: Long): ByteArray?
+    @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_pipeline_stage_count(`receiver`: Long): Int
     @JvmStatic external fun boltffi_release_class_xybrid_bolt_xybrid_conversation_context(handle: Long): Unit
     @JvmStatic external fun boltffi_init_class_xybrid_bolt_xybrid_conversation_context_new(): Long
     @JvmStatic external fun boltffi_init_class_xybrid_bolt_xybrid_conversation_context_with_id(id: java.nio.ByteBuffer, __boltffi_id_len: Int): Long
@@ -1013,6 +1028,12 @@ private object Native {
     @JvmStatic external fun boltffi_stream_xybrid_bolt_xybrid_download_progress_poll(subscription: Long, callback_data: Long): Unit
     @JvmStatic external fun boltffi_stream_xybrid_bolt_xybrid_download_progress_unsubscribe(subscription: Long): Unit
     @JvmStatic external fun boltffi_stream_xybrid_bolt_xybrid_download_progress_free(subscription: Long): Unit
+    @JvmStatic external fun boltffi_stream_xybrid_bolt_xybrid_streaming_session_partials_subscribe(`receiver`: Long): Long
+    @JvmStatic external fun boltffi_stream_xybrid_bolt_xybrid_streaming_session_partials_pop_batch(subscription: Long, max_count: Long): ByteArray?
+    @JvmStatic external fun boltffi_stream_xybrid_bolt_xybrid_streaming_session_partials_wait(subscription: Long, timeout_milliseconds: Int): Int
+    @JvmStatic external fun boltffi_stream_xybrid_bolt_xybrid_streaming_session_partials_poll(subscription: Long, callback_data: Long): Unit
+    @JvmStatic external fun boltffi_stream_xybrid_bolt_xybrid_streaming_session_partials_unsubscribe(subscription: Long): Unit
+    @JvmStatic external fun boltffi_stream_xybrid_bolt_xybrid_streaming_session_partials_free(subscription: Long): Unit
     @JvmStatic external fun boltffi_stream_xybrid_bolt_xybrid_model_download_progress_subscribe(`receiver`: Long): Long
     @JvmStatic external fun boltffi_stream_xybrid_bolt_xybrid_model_download_progress_pop_batch(subscription: Long, max_count: Long): ByteArray?
     @JvmStatic external fun boltffi_stream_xybrid_bolt_xybrid_model_download_progress_wait(subscription: Long, timeout_milliseconds: Int): Int
@@ -1633,6 +1654,138 @@ data class XybridDownloadStatus(
 }
 
 
+/**
+ * What one stage of a pipeline run produced.
+ */
+data class XybridStageResult(
+    /**
+     * Stage identifier from the pipeline YAML (`id:`), or the model ID when
+     * the stage declares none. Matches [`XybridPipeline::stage_names`].
+     */
+    val stageId: String,
+    /**
+     * This stage's output, which is also the next stage's input — the
+     * transcript of an ASR stage, the reply of an LLM stage.
+     */
+    val envelope: XybridEnvelope,
+    val outputType: XybridOutputType,
+    val latencyMs: UInt,
+    /**
+     * Where this stage ran. Stages of one pipeline can run in different
+     * places.
+     */
+    val executionTarget: XybridExecutionTarget,
+    /**
+     * Generation figures (TTFT, tokens per second) when this stage is a
+     * language model; `total_ms` is the stage latency.
+     */
+    val metrics: XybridInferenceMetrics
+) {
+    internal fun wireSize(): Int {
+        return 4 + Utf8Codec.maxBytes(this.stageId) + this.envelope.wireSize() + 4 + 4 + 4 + this.metrics.wireSize()
+    }
+
+    internal fun writeTo(writer: WireWriter) {
+        writer.writeString(this.stageId)
+        this.envelope.writeTo(writer)
+        writer.writeI32(this.outputType.value)
+        writer.writeU32(this.latencyMs)
+        writer.writeI32(this.executionTarget.value)
+        this.metrics.writeTo(writer)
+    }
+
+    internal fun toByteArray(): ByteArray {
+        val buffer = WireWriterPool.acquire(wireSize())
+        val writer = buffer.writer
+        try {
+            writeTo(writer)
+            return buffer.bytes()
+        } finally {
+            buffer.close()
+        }
+    }
+
+    companion object {
+        internal fun fromReader(reader: WireReader): XybridStageResult {
+            return XybridStageResult(
+                reader.readString(),
+                XybridEnvelope.fromReader(reader),
+                XybridOutputType.fromValue(reader.readI32()),
+                reader.readU32(),
+                XybridExecutionTarget.fromValue(reader.readI32()),
+                XybridInferenceMetrics.fromReader(reader)
+            )
+        }
+
+        internal fun fromByteArray(bytes: ByteArray): XybridStageResult {
+            val reader = WireReader(bytes)
+            return fromReader(reader)
+        }
+    }
+}
+
+
+/**
+ * Result of [`XybridPipeline::run`]: the final output plus every stage's own
+ * output, so a voice pipeline can show the transcript and the reply as well
+ * as play the audio.
+ */
+data class XybridPipelineResult(
+    /**
+     * The final stage's output — the same envelope as the last entry of
+     * `stages`.
+     */
+    val envelope: XybridEnvelope,
+    val outputType: XybridOutputType,
+    /**
+     * Wall-clock time of the whole run.
+     */
+    val latencyMs: UInt,
+    /**
+     * Every executed stage, in order.
+     */
+    val stages: List<XybridStageResult>
+) {
+    internal fun wireSize(): Int {
+        return this.envelope.wireSize() + 4 + 4 + 4 + this.stages.sumOf { __boltffi_value_0 -> (__boltffi_value_0.wireSize()).toInt() }
+    }
+
+    internal fun writeTo(writer: WireWriter) {
+        this.envelope.writeTo(writer)
+        writer.writeI32(this.outputType.value)
+        writer.writeU32(this.latencyMs)
+        writer.writeSequence(this.stages, this.stages.size, { writer, __boltffi_value_0 -> __boltffi_value_0.writeTo(writer) })
+    }
+
+    internal fun toByteArray(): ByteArray {
+        val buffer = WireWriterPool.acquire(wireSize())
+        val writer = buffer.writer
+        try {
+            writeTo(writer)
+            return buffer.bytes()
+        } finally {
+            buffer.close()
+        }
+    }
+
+    companion object {
+        internal fun fromReader(reader: WireReader): XybridPipelineResult {
+            return XybridPipelineResult(
+                XybridEnvelope.fromReader(reader),
+                XybridOutputType.fromValue(reader.readI32()),
+                reader.readU32(),
+                reader.readSequence({ reader -> XybridStageResult.fromReader(reader) })
+            )
+        }
+
+        internal fun fromByteArray(bytes: ByteArray): XybridPipelineResult {
+            val reader = WireReader(bytes)
+            return fromReader(reader)
+        }
+    }
+}
+
+
 data class XybridStreamToken(
     val token: String,
     val tokenId: Long?,
@@ -1801,6 +1954,140 @@ data class XybridVoiceInfo(
         }
 
         internal fun fromByteArray(bytes: ByteArray): XybridVoiceInfo {
+            val reader = WireReader(bytes)
+            return fromReader(reader)
+        }
+    }
+}
+
+
+/**
+ * Configuration for a live ASR session.
+ *
+ * The model is not named here — it comes from the loaded `XybridModel` the
+ * session is opened on. This only configures *how* the audio is chunked.
+ */
+data class XybridStreamingConfig(
+    /**
+     * Sample rate of the audio you will feed. Must be 16000; the ASR
+     * backends are fixed there, so anything else is rejected rather than
+     * silently resampled.
+     */
+    val sampleRate: UInt,
+    /**
+     * Voice-activity-detection mode.
+     */
+    val vad: XybridVadMode,
+    /**
+     * VAD sensitivity, 0.0–1.0. Ignored when `vad` is `Off`.
+     */
+    val vadThreshold: Float,
+    /**
+     * Language hint (e.g. `"en"`); null uses the model default.
+     */
+    val language: String?,
+    /**
+     * Whisper encoder context in mel frames; null uses the model default.
+     */
+    val audioCtx: UInt?
+) {
+    internal fun wireSize(): Int {
+        return 4 + this.vad.wireSize() + 4 + 1 + (this.language?.let { __boltffi_value_0 -> 4 + Utf8Codec.maxBytes(__boltffi_value_0) } ?: 0) + 1 + (this.audioCtx?.let { __boltffi_value_0 -> 4 } ?: 0)
+    }
+
+    internal fun writeTo(writer: WireWriter) {
+        writer.writeU32(this.sampleRate)
+        this.vad.writeTo(writer)
+        writer.writeF32(this.vadThreshold)
+        writer.writeOptionalValue(this.language, { writer, __boltffi_value_0 -> writer.writeString(__boltffi_value_0) })
+        writer.writeOptionalValue(this.audioCtx, { writer, __boltffi_value_0 -> writer.writeU32(__boltffi_value_0) })
+    }
+
+    internal fun toByteArray(): ByteArray {
+        val buffer = WireWriterPool.acquire(wireSize())
+        val writer = buffer.writer
+        try {
+            writeTo(writer)
+            return buffer.bytes()
+        } finally {
+            buffer.close()
+        }
+    }
+
+    companion object {
+        internal fun fromReader(reader: WireReader): XybridStreamingConfig {
+            return XybridStreamingConfig(
+                reader.readU32(),
+                XybridVadMode.fromReader(reader),
+                reader.readF32(),
+                reader.readOptionalValue({ reader -> reader.readString() }),
+                reader.readOptionalValue({ reader -> reader.readU32() })
+            )
+        }
+
+        internal fun fromByteArray(bytes: ByteArray): XybridStreamingConfig {
+            val reader = WireReader(bytes)
+            return fromReader(reader)
+        }
+    }
+}
+
+
+/**
+ * A partial transcript emitted while audio is streaming.
+ */
+data class XybridPartialResult(
+    /**
+     * Best-effort transcript so far. Cumulative, not a delta — render it in
+     * place of the previous partial rather than appending.
+     */
+    val text: String,
+    /**
+     * `true` once this span is committed and will not change.
+     */
+    val isStable: Boolean,
+    /**
+     * Monotonic chunk sequence number this result corresponds to.
+     */
+    val chunkSequence: ULong,
+    /**
+     * Audio covered so far, in milliseconds.
+     */
+    val audioDurationMs: ULong
+) {
+    internal fun wireSize(): Int {
+        return 4 + Utf8Codec.maxBytes(this.text) + 1 + 8 + 8
+    }
+
+    internal fun writeTo(writer: WireWriter) {
+        writer.writeString(this.text)
+        writer.writeBool(this.isStable)
+        writer.writeU64(this.chunkSequence)
+        writer.writeU64(this.audioDurationMs)
+    }
+
+    internal fun toByteArray(): ByteArray {
+        val buffer = WireWriterPool.acquire(wireSize())
+        val writer = buffer.writer
+        try {
+            writeTo(writer)
+            return buffer.bytes()
+        } finally {
+            buffer.close()
+        }
+    }
+
+    companion object {
+        internal fun fromReader(reader: WireReader): XybridPartialResult {
+            return XybridPartialResult(
+                reader.readString(),
+                reader.readBool(),
+                reader.readU64(),
+                reader.readU64()
+            )
+        }
+
+        internal fun fromByteArray(bytes: ByteArray): XybridPartialResult {
             val reader = WireReader(bytes)
             return fromReader(reader)
         }
@@ -2355,6 +2642,78 @@ enum class XybridThermalState(val value: Int) {
     }
 }
 
+
+/**
+ * How voice-activity detection (VAD) chunking is resolved for a session.
+ *
+ * There is deliberately no "on, with the default model" variant: nothing
+ * ships a bundled Silero model, and the core handles VAD-enabled-without-a-
+ * directory by warning and silently falling back to fixed-window chunking.
+ * Enabling VAD therefore requires naming a directory.
+ */
+sealed class XybridVadMode {
+    internal abstract fun wireSize(): Int
+
+    internal abstract fun writeTo(writer: WireWriter)
+
+    internal fun toByteArray(): ByteArray {
+        val buffer = WireWriterPool.acquire(wireSize())
+        val writer = buffer.writer
+        try {
+            writeTo(writer)
+            return buffer.bytes()
+        } finally {
+            buffer.close()
+        }
+    }
+
+
+    /**
+     * Fixed time-window chunking; no voice-activity detection.
+     */
+    object Off : XybridVadMode() {
+        internal override fun wireSize(): Int {
+            return 4
+        }
+
+        internal override fun writeTo(writer: WireWriter) {
+            writer.writeU32(0.toUInt())
+        }
+    }
+    /**
+     * VAD on, using the Silero model in this directory, which must contain a
+     * `model.onnx`.
+     */
+    data class Enabled(
+        val modelDir: String
+    ) : XybridVadMode() {
+        internal override fun wireSize(): Int {
+            return 4 + 4 + Utf8Codec.maxBytes(this.modelDir)
+        }
+
+        internal override fun writeTo(writer: WireWriter) {
+            writer.writeU32(1.toUInt())
+            writer.writeString(this.modelDir)
+        }
+    }
+
+    companion object {
+        internal fun fromReader(reader: WireReader): XybridVadMode {
+            val tag = reader.readU32()
+            return when (tag) {
+                0.toUInt() -> Off
+                1.toUInt() -> Enabled(reader.readString())
+                else -> throw IllegalArgumentException("unknown XybridVadMode tag: $tag")
+            }
+        }
+
+        internal fun fromByteArray(bytes: ByteArray): XybridVadMode {
+            val reader = WireReader(bytes)
+            return fromReader(reader)
+        }
+    }
+}
+
 class XybridDownload internal constructor(internal val handle: Long) : AutoCloseable {
     private val __boltffi_closed = java.util.concurrent.atomic.AtomicBoolean(false)
 
@@ -2447,6 +2806,101 @@ class XybridDownload internal constructor(internal val handle: Long) : AutoClose
      */
     fun cancel() {
         Native.boltffi_method_class_xybrid_bolt_xybrid_download_cancel(this.boltffiHandle())
+    }
+}
+
+class XybridStreamingSession internal constructor(internal val handle: Long) : AutoCloseable {
+    private val __boltffi_closed = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    override fun close() {
+        if (__boltffi_closed.compareAndSet(false, true)) {
+            Native.boltffi_release_class_xybrid_bolt_xybrid_streaming_session(handle)
+        }
+    }
+
+    internal fun boltffiHandle(): Long {
+        check(!__boltffi_closed.get()) { "XybridStreamingSession is closed" }
+        return handle
+    }
+
+    /**
+     * Open a session on an already-loaded ASR model.
+     *
+     * Starts a worker thread and warms the weights, so the first spoken
+     * words do not pay the cold-start cost. Returns an error for a model
+     * that does not support streaming, or a sample rate other than 16000.
+     */
+    constructor(model: XybridModel, config: XybridStreamingConfig) : this(forModel(model, config).handle)
+
+    companion object {
+        /**
+         * Open a session on an already-loaded ASR model.
+         *
+         * Starts a worker thread and warms the weights, so the first spoken
+         * words do not pay the cold-start cost. Returns an error for a model
+         * that does not support streaming, or a sample rate other than 16000.
+         */
+        fun forModel(model: XybridModel, config: XybridStreamingConfig): XybridStreamingSession {
+            val __boltffi_config_wire = WireWriterPool.acquire(config.wireSize())
+            val __boltffi_config_writer = __boltffi_config_wire.writer
+            config.writeTo(__boltffi_config_writer)
+            try {
+                return XybridStreamingSession(try { Native.boltffi_init_class_xybrid_bolt_xybrid_streaming_session_for_model(model.boltffiHandle(), __boltffi_config_wire.directBuffer(), __boltffi_config_wire.size()) } catch (__boltffi_error: BoltFfiErrorBufferException) { run { val __boltffi_error_reader = WireReader(__boltffi_error.bytes); throw XybridError.fromReader(__boltffi_error_reader) } })
+            } finally {
+                __boltffi_config_wire.close()
+            }
+        }
+    }
+
+    /**
+     * Feed PCM f32 mono 16 kHz samples.
+     *
+     * Hands the buffer to the worker and returns; transcription happens
+     * there, never on the caller's thread. Blocks only when the queue is
+     * full, which back-pressures a producer feeding faster than the model
+     * can keep up.
+     */
+    fun feed(samples: FloatArray) {
+        try { Native.boltffi_method_class_xybrid_bolt_xybrid_streaming_session_feed(this.boltffiHandle(), samples) } catch (__boltffi_error: BoltFfiErrorBufferException) { run { val __boltffi_error_reader = WireReader(__boltffi_error.bytes); throw XybridError.fromReader(__boltffi_error_reader) } }
+    }
+
+    /**
+     * Finalize: drain buffered audio and return the complete transcript.
+     *
+     * The session is over afterwards — `feed` fails and the partial stream
+     * closes. Blocks until the last chunk is transcribed, so call it off the
+     * UI thread.
+     */
+    fun flush(): String {
+        val __boltffi_result = try { Native.boltffi_method_class_xybrid_bolt_xybrid_streaming_session_flush(this.boltffiHandle()) } catch (__boltffi_error: BoltFfiErrorBufferException) { run { val __boltffi_error_reader = WireReader(__boltffi_error.bytes); throw XybridError.fromReader(__boltffi_error_reader) } } ?: throw IllegalStateException("null buffer returned")
+        val __boltffi_reader = WireReader(__boltffi_result)
+        return __boltffi_reader.readString()
+    }
+
+    /**
+     * Reset to transcribe fresh audio without reloading the model.
+     */
+    fun reset() {
+        try { Native.boltffi_method_class_xybrid_bolt_xybrid_streaming_session_reset(this.boltffiHandle()) } catch (__boltffi_error: BoltFfiErrorBufferException) { run { val __boltffi_error_reader = WireReader(__boltffi_error.bytes); throw XybridError.fromReader(__boltffi_error_reader) } }
+    }
+
+    /**
+     * Stop the session and release the model, discarding buffered audio.
+     *
+     * Idempotent. Use [`Self::flush`] when you want the transcript — this is
+     * the "user walked away" path. Named `cancel` rather than `close`
+     * because BoltFFI already gives every handle a generated `close()` for
+     * the host's disposal idiom.
+     */
+    fun cancel() {
+        Native.boltffi_method_class_xybrid_bolt_xybrid_streaming_session_cancel(this.boltffiHandle())
+    }
+
+    /**
+     * Whether the session is still accepting audio.
+     */
+    fun isRunning(): Boolean {
+        return Native.boltffi_method_class_xybrid_bolt_xybrid_streaming_session_is_running(this.boltffiHandle())
     }
 }
 
@@ -2873,6 +3327,118 @@ class XybridModel internal constructor(internal val handle: Long) : AutoCloseabl
     }
 }
 
+class XybridPipeline internal constructor(internal val handle: Long) : AutoCloseable {
+    private val __boltffi_closed = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    override fun close() {
+        if (__boltffi_closed.compareAndSet(false, true)) {
+            Native.boltffi_release_class_xybrid_bolt_xybrid_pipeline(handle)
+        }
+    }
+
+    internal fun boltffiHandle(): Long {
+        check(!__boltffi_closed.get()) { "XybridPipeline is closed" }
+        return handle
+    }
+
+    /**
+     * Parse and load a pipeline from YAML content.
+     */
+    constructor(yaml: String) : this(fromYaml(yaml).handle)
+
+    companion object {
+        /**
+         * Parse and load a pipeline from YAML content.
+         */
+        fun fromYaml(yaml: String): XybridPipeline {
+            val __boltffi_yaml_wire = WireWriterPool.acquire(4 + Utf8Codec.maxBytes(yaml))
+            val __boltffi_yaml_writer = __boltffi_yaml_wire.writer
+            __boltffi_yaml_writer.writeString(yaml)
+            try {
+                return XybridPipeline(try { Native.boltffi_init_class_xybrid_bolt_xybrid_pipeline_from_yaml(__boltffi_yaml_wire.directBuffer(), __boltffi_yaml_wire.size()) } catch (__boltffi_error: BoltFfiErrorBufferException) { run { val __boltffi_error_reader = WireReader(__boltffi_error.bytes); throw XybridError.fromReader(__boltffi_error_reader) } })
+            } finally {
+                __boltffi_yaml_wire.close()
+            }
+        }
+        /**
+         * Read, parse, and load a pipeline from a YAML file.
+         */
+        fun fromFile(path: String): XybridPipeline {
+            val __boltffi_path_wire = WireWriterPool.acquire(4 + Utf8Codec.maxBytes(path))
+            val __boltffi_path_writer = __boltffi_path_wire.writer
+            __boltffi_path_writer.writeString(path)
+            try {
+                return XybridPipeline(try { Native.boltffi_init_class_xybrid_bolt_xybrid_pipeline_from_file(__boltffi_path_wire.directBuffer(), __boltffi_path_wire.size()) } catch (__boltffi_error: BoltFfiErrorBufferException) { run { val __boltffi_error_reader = WireReader(__boltffi_error.bytes); throw XybridError.fromReader(__boltffi_error_reader) } })
+            } finally {
+                __boltffi_path_wire.close()
+            }
+        }
+        /**
+         * Load a pipeline bundle.
+         */
+        fun fromBundle(path: String): XybridPipeline {
+            val __boltffi_path_wire = WireWriterPool.acquire(4 + Utf8Codec.maxBytes(path))
+            val __boltffi_path_writer = __boltffi_path_wire.writer
+            __boltffi_path_writer.writeString(path)
+            try {
+                return XybridPipeline(try { Native.boltffi_init_class_xybrid_bolt_xybrid_pipeline_from_bundle(__boltffi_path_wire.directBuffer(), __boltffi_path_wire.size()) } catch (__boltffi_error: BoltFfiErrorBufferException) { run { val __boltffi_error_reader = WireReader(__boltffi_error.bytes); throw XybridError.fromReader(__boltffi_error_reader) } })
+            } finally {
+                __boltffi_path_wire.close()
+            }
+        }
+    }
+
+    /**
+     * Execute every stage, downloading any missing models first, and return
+     * each stage's output alongside the final one.
+     *
+     * Of `options`, only `correlation_id` applies to a pipeline run. Setting
+     * `generation_config` or `abort_on` fails with `ConfigError` rather than
+     * being ignored; per-stage generation settings belong in the YAML.
+     */
+    fun run(envelope: XybridEnvelope, options: XybridRunOptions?): XybridPipelineResult {
+        val __boltffi_envelope_wire = WireWriterPool.acquire(envelope.wireSize())
+        val __boltffi_envelope_writer = __boltffi_envelope_wire.writer
+        envelope.writeTo(__boltffi_envelope_writer)
+        val __boltffi_options_wire = WireWriterPool.acquire(1 + (options?.let { __boltffi_value_0 -> __boltffi_value_0.wireSize() } ?: 0))
+        val __boltffi_options_writer = __boltffi_options_wire.writer
+        __boltffi_options_writer.writeOptionalValue(options, { __boltffi_options_writer, __boltffi_value_0 -> __boltffi_value_0.writeTo(__boltffi_options_writer) })
+        try {
+            val __boltffi_result = try { Native.boltffi_method_class_xybrid_bolt_xybrid_pipeline_run(this.boltffiHandle(), __boltffi_envelope_wire.directBuffer(), __boltffi_envelope_wire.size(), __boltffi_options_wire.directBuffer(), __boltffi_options_wire.size()) } catch (__boltffi_error: BoltFfiErrorBufferException) { run { val __boltffi_error_reader = WireReader(__boltffi_error.bytes); throw XybridError.fromReader(__boltffi_error_reader) } } ?: throw IllegalStateException("null buffer returned")
+            val __boltffi_reader = WireReader(__boltffi_result)
+            return XybridPipelineResult.fromReader(__boltffi_reader)
+        } finally {
+            __boltffi_envelope_wire.close()
+            __boltffi_options_wire.close()
+        }
+    }
+
+    /**
+     * Pipeline name from the YAML definition, if present.
+     */
+    fun name(): String? {
+        val __boltffi_result = Native.boltffi_method_class_xybrid_bolt_xybrid_pipeline_name(this.boltffiHandle()) ?: throw IllegalStateException("null buffer returned")
+        val __boltffi_reader = WireReader(__boltffi_result)
+        return __boltffi_reader.readOptionalValue({ __boltffi_reader -> __boltffi_reader.readString() })
+    }
+
+    /**
+     * Stage identifiers in execution order.
+     */
+    fun stageNames(): List<String> {
+        val __boltffi_result = Native.boltffi_method_class_xybrid_bolt_xybrid_pipeline_stage_names(this.boltffiHandle()) ?: throw IllegalStateException("null buffer returned")
+        val __boltffi_reader = WireReader(__boltffi_result)
+        return __boltffi_reader.readSequence({ __boltffi_reader -> __boltffi_reader.readString() })
+    }
+
+    /**
+     * Number of stages in the pipeline.
+     */
+    fun stageCount(): UInt {
+        return Native.boltffi_method_class_xybrid_bolt_xybrid_pipeline_stage_count(this.boltffiHandle()).toUInt()
+    }
+}
+
 class XybridConversationContext internal constructor(internal val handle: Long) : AutoCloseable {
     private val __boltffi_closed = java.util.concurrent.atomic.AtomicBoolean(false)
 
@@ -3282,6 +3848,44 @@ fun XybridDownload.progress(): kotlinx.coroutines.flow.Flow<XybridDownloadStatus
             val reader = WireReader(bytes)
             val count = reader.readU32().toInt()
             val items = List(count) { XybridDownloadStatus.fromReader(reader) }
+            items.forEach { item ->
+                send(item)
+            }
+        },
+        finish = { close() }
+    )
+    context.start()
+    awaitClose { context.requestTermination() }
+}
+
+/**
+ * Pushed partial transcripts, closing once the session ends.
+ *
+ * Generated as an `AsyncStream` in Swift, a `Flow` in Kotlin, an
+ * `IAsyncEnumerable` in C# and an iterable subscription in Python.
+ *
+ * A partial produced before subscribing is delivered immediately, so
+ * audio fed before the stream is attached is never silently lost, and
+ * subscribing to a finished session closes at once instead of hanging.
+ */
+fun XybridStreamingSession.partials(): kotlinx.coroutines.flow.Flow<XybridPartialResult> = kotlinx.coroutines.flow.callbackFlow {
+    val subscription = Native.boltffi_stream_xybrid_bolt_xybrid_streaming_session_partials_subscribe(boltffiHandle())
+    if (subscription == 0L) {
+        close()
+        return@callbackFlow
+    }
+    val context = BoltFfiStreamContext(
+        scope = this,
+        subscription = subscription,
+        batchSize = 16L,
+        popBatch = Native::boltffi_stream_xybrid_bolt_xybrid_streaming_session_partials_pop_batch,
+        poll = Native::boltffi_stream_xybrid_bolt_xybrid_streaming_session_partials_poll,
+        unsubscribe = Native::boltffi_stream_xybrid_bolt_xybrid_streaming_session_partials_unsubscribe,
+        free = Native::boltffi_stream_xybrid_bolt_xybrid_streaming_session_partials_free,
+        processItems = { bytes ->
+            val reader = WireReader(bytes)
+            val count = reader.readU32().toInt()
+            val items = List(count) { XybridPartialResult.fromReader(reader) }
             items.forEach { item ->
                 send(item)
             }

@@ -477,6 +477,56 @@ namespace Xybrid
             return result.AudioBytes;
         }
 
+        /// <summary>
+        /// Opens a live ASR session: feed microphone PCM in, read partial
+        /// transcripts out.
+        /// </summary>
+        /// <remarks>
+        /// This is the live-capture surface. <see cref="Run"/> transcribes a
+        /// finished buffer; this transcribes speech as it arrives, which is what
+        /// dictation and live captioning need.
+        /// <para>
+        /// Audio must be PCM <b>float, mono, 16 kHz</b> — converting from Unity's
+        /// <c>AudioClip</c> or microphone format is the caller's job.
+        /// </para>
+        /// <code>
+        /// using var session = model.Stream();
+        /// // drive the UI from the partial stream
+        /// await foreach (var partial in session.Partials(token))
+        /// {
+        ///     label.text = partial.Text;
+        /// }
+        /// </code>
+        /// </remarks>
+        /// <param name="config">
+        /// Chunking options. Pass null for fixed-window chunking at 16 kHz with
+        /// the model's own language; use
+        /// <see cref="StreamingConfigs.VoiceActivity"/> to chunk on speech
+        /// boundaries instead.
+        /// </param>
+        /// <returns>A session; dispose it to stop transcribing.</returns>
+        /// <exception cref="ObjectDisposedException">Thrown if this model is disposed.</exception>
+        /// <exception cref="XybridException">
+        /// Thrown if this is not an ASR model, or the sample rate is not 16 kHz.
+        /// </exception>
+        public XybridBolt.XybridStreamingSession Stream(
+            XybridBolt.XybridStreamingConfig? config = null)
+        {
+            ThrowIfDisposed();
+
+            try
+            {
+                return XybridBolt.XybridStreamingSession.ForModel(
+                    _bolt,
+                    config ?? StreamingConfigs.Default);
+            }
+            catch (Exception ex) when (
+                ex is XybridBolt.XybridErrorException || ex is XybridBolt.BoltException)
+            {
+                throw BoltErrors.Translate(ex);
+            }
+        }
+
         private void ThrowIfDisposed()
         {
             if (_disposed)

@@ -160,6 +160,12 @@ _SDK_INTEGRATION_TESTS = {
     # needs the fixture filegroup declared as data (see _SDK_TEST_DATA below).
     "from_directory_test": [":xybrid-sdk"],
     "macro_test": [":xybrid-sdk"],
+    # Two cloud stages against a loopback httpmock gateway; no network.
+    "pipeline_stage_outputs": [
+        ":xybrid-sdk",
+        "@crates//:httpmock",
+        "@crates//:serde_json",
+    ],
     "metadata_gen_test": [
         ":xybrid-sdk",
         "//crates/xybrid-core:xybrid-core",

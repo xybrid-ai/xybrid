@@ -52,8 +52,9 @@
 //! - **`XybridDownload`**: opaque handle over a background model download,
 //!   decoupled from loading so a blocking host has something to poll while the
 //!   weights come down (status / progress stream / cancel / error).
-//! - **Deferred to follow-up commits**:
-//!   - Pipeline surface.
+//! - **`XybridPipeline`**: opaque handle over a multi-stage pipeline
+//!   (from_yaml / from_file / from_bundle / run / stage introspection). `run`
+//!   returns every stage's output, not only the final one.
 //!
 //! This is now the sole native binding crate: `xybrid-uniffi` and the
 //! pre-bolt `xybrid-ffi` C ABI have both been removed, and every foreign SDK
@@ -750,6 +751,66 @@ impl From<facade::InferenceResult> for XybridResult {
     }
 }
 
+/// What one stage of a pipeline run produced.
+#[data]
+#[derive(Clone)]
+pub struct XybridStageResult {
+    /// Stage identifier from the pipeline YAML (`id:`), or the model ID when
+    /// the stage declares none. Matches [`XybridPipeline::stage_names`].
+    pub stage_id: String,
+    /// This stage's output, which is also the next stage's input — the
+    /// transcript of an ASR stage, the reply of an LLM stage.
+    pub envelope: XybridEnvelope,
+    pub output_type: XybridOutputType,
+    pub latency_ms: u32,
+    /// Where this stage ran. Stages of one pipeline can run in different
+    /// places.
+    pub execution_target: XybridExecutionTarget,
+    /// Generation figures (TTFT, tokens per second) when this stage is a
+    /// language model; `total_ms` is the stage latency.
+    pub metrics: XybridInferenceMetrics,
+}
+
+impl From<facade::StageResult> for XybridStageResult {
+    fn from(s: facade::StageResult) -> Self {
+        Self {
+            stage_id: s.stage_id,
+            envelope: s.envelope.into(),
+            output_type: s.output_type.into(),
+            latency_ms: s.latency_ms,
+            execution_target: s.execution_target.into(),
+            metrics: XybridInferenceMetrics::from(&s.metrics),
+        }
+    }
+}
+
+/// Result of [`XybridPipeline::run`]: the final output plus every stage's own
+/// output, so a voice pipeline can show the transcript and the reply as well
+/// as play the audio.
+#[data]
+#[derive(Clone)]
+pub struct XybridPipelineResult {
+    /// The final stage's output — the same envelope as the last entry of
+    /// `stages`.
+    pub envelope: XybridEnvelope,
+    pub output_type: XybridOutputType,
+    /// Wall-clock time of the whole run.
+    pub latency_ms: u32,
+    /// Every executed stage, in order.
+    pub stages: Vec<XybridStageResult>,
+}
+
+impl From<facade::PipelineResult> for XybridPipelineResult {
+    fn from(r: facade::PipelineResult) -> Self {
+        Self {
+            envelope: r.envelope.into(),
+            output_type: r.output_type.into(),
+            latency_ms: r.latency_ms,
+            stages: r.stages.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
 // ============================================================================
 // Pull-based token streaming
 // ============================================================================
@@ -1149,6 +1210,199 @@ impl XybridDownload {
     /// a no-op once the download is terminal.
     pub fn cancel(&self) {
         self.inner.cancel();
+    }
+}
+
+// ============================================================================
+// Live ASR session
+// ============================================================================
+//
+// Named `XybridStreamingSession`, and opened through its own constructor
+// rather than `XybridModel::stream`, because BoltFFI treats opaque types as
+// handle IDs that only the `impl` block they are defined on can return —
+// the same constraint that keeps `ModelLoader` out of this crate.
+
+/// How voice-activity detection (VAD) chunking is resolved for a session.
+///
+/// There is deliberately no "on, with the default model" variant: nothing
+/// ships a bundled Silero model, and the core handles VAD-enabled-without-a-
+/// directory by warning and silently falling back to fixed-window chunking.
+/// Enabling VAD therefore requires naming a directory.
+#[data]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum XybridVadMode {
+    /// Fixed time-window chunking; no voice-activity detection.
+    Off,
+    /// VAD on, using the Silero model in this directory, which must contain a
+    /// `model.onnx`.
+    Enabled { model_dir: String },
+}
+
+impl From<XybridVadMode> for facade::VadMode {
+    fn from(mode: XybridVadMode) -> Self {
+        match mode {
+            XybridVadMode::Off => facade::VadMode::Off,
+            XybridVadMode::Enabled { model_dir } => facade::VadMode::Enabled { model_dir },
+        }
+    }
+}
+
+/// Configuration for a live ASR session.
+///
+/// The model is not named here — it comes from the loaded `XybridModel` the
+/// session is opened on. This only configures *how* the audio is chunked.
+#[data]
+#[derive(Clone, Debug)]
+pub struct XybridStreamingConfig {
+    /// Sample rate of the audio you will feed. Must be 16000; the ASR
+    /// backends are fixed there, so anything else is rejected rather than
+    /// silently resampled.
+    pub sample_rate: u32,
+    /// Voice-activity-detection mode.
+    pub vad: XybridVadMode,
+    /// VAD sensitivity, 0.0–1.0. Ignored when `vad` is `Off`.
+    pub vad_threshold: f32,
+    /// Language hint (e.g. `"en"`); null uses the model default.
+    pub language: Option<String>,
+    /// Whisper encoder context in mel frames; null uses the model default.
+    pub audio_ctx: Option<u32>,
+}
+
+impl From<XybridStreamingConfig> for facade::StreamingConfig {
+    fn from(config: XybridStreamingConfig) -> Self {
+        Self {
+            sample_rate: config.sample_rate,
+            vad: config.vad.into(),
+            vad_threshold: config.vad_threshold,
+            language: config.language,
+            audio_ctx: config.audio_ctx,
+        }
+    }
+}
+
+/// A partial transcript emitted while audio is streaming.
+#[data]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct XybridPartialResult {
+    /// Best-effort transcript so far. Cumulative, not a delta — render it in
+    /// place of the previous partial rather than appending.
+    pub text: String,
+    /// `true` once this span is committed and will not change.
+    pub is_stable: bool,
+    /// Monotonic chunk sequence number this result corresponds to.
+    pub chunk_sequence: u64,
+    /// Audio covered so far, in milliseconds.
+    pub audio_duration_ms: u64,
+}
+
+impl From<facade::PartialResult> for XybridPartialResult {
+    fn from(p: facade::PartialResult) -> Self {
+        Self {
+            text: p.text,
+            is_stable: p.is_stable,
+            chunk_sequence: p.chunk_sequence,
+            audio_duration_ms: p.audio_duration_ms,
+        }
+    }
+}
+
+/// Ring-buffer depth for a partial-transcript stream.
+///
+/// Partials arrive at rolling-window rate (a few per second at most) and each
+/// one supersedes the last, so a host this far behind can afford to drop
+/// frames rather than back-pressure the transcriber.
+const PARTIAL_STREAM_CAPACITY: usize = 64;
+
+/// A live ASR session: feed microphone PCM in, read partial transcripts out.
+///
+/// This is the live-capture surface. `XybridModel::run` transcribes a
+/// finished buffer; this transcribes audio as it arrives, which is what
+/// dictation and captioning need.
+///
+/// Audio must be PCM **f32, mono, 16 kHz**. Converting from the platform's
+/// microphone format is the caller's job.
+pub struct XybridStreamingSession {
+    inner: std::sync::Arc<facade::AsrSession>,
+}
+
+#[export]
+impl XybridStreamingSession {
+    /// Open a session on an already-loaded ASR model.
+    ///
+    /// Starts a worker thread and warms the weights, so the first spoken
+    /// words do not pay the cold-start cost. Returns an error for a model
+    /// that does not support streaming, or a sample rate other than 16000.
+    pub fn for_model(
+        model: &XybridModel,
+        config: XybridStreamingConfig,
+    ) -> Result<Self, XybridError> {
+        let inner = model
+            .inner
+            .stream(config.into())
+            .map_err(XybridError::from)?;
+        Ok(Self { inner })
+    }
+
+    /// Feed PCM f32 mono 16 kHz samples.
+    ///
+    /// Hands the buffer to the worker and returns; transcription happens
+    /// there, never on the caller's thread. Blocks only when the queue is
+    /// full, which back-pressures a producer feeding faster than the model
+    /// can keep up.
+    pub fn feed(&self, samples: Vec<f32>) -> Result<(), XybridError> {
+        self.inner.feed(samples).map_err(XybridError::from)
+    }
+
+    /// Pushed partial transcripts, closing once the session ends.
+    ///
+    /// Generated as an `AsyncStream` in Swift, a `Flow` in Kotlin, an
+    /// `IAsyncEnumerable` in C# and an iterable subscription in Python.
+    ///
+    /// A partial produced before subscribing is delivered immediately, so
+    /// audio fed before the stream is attached is never silently lost, and
+    /// subscribing to a finished session closes at once instead of hanging.
+    #[ffi_stream(item = XybridPartialResult)]
+    pub fn partials(&self) -> std::sync::Arc<EventSubscription<XybridPartialResult>> {
+        let subscription = std::sync::Arc::new(EventSubscription::<XybridPartialResult>::new(
+            PARTIAL_STREAM_CAPACITY,
+        ));
+        let producer = std::sync::Arc::clone(&subscription);
+        self.inner.watch(move |event| match event {
+            facade::AsrEvent::Partial(partial) => {
+                producer.push_event(partial.into());
+            }
+            facade::AsrEvent::Finished => producer.unsubscribe(),
+        });
+        subscription
+    }
+
+    /// Finalize: drain buffered audio and return the complete transcript.
+    ///
+    /// The session is over afterwards — `feed` fails and the partial stream
+    /// closes. Blocks until the last chunk is transcribed, so call it off the
+    /// UI thread.
+    pub fn flush(&self) -> Result<String, XybridError> {
+        self.inner.flush().map_err(XybridError::from)
+    }
+
+    /// Reset to transcribe fresh audio without reloading the model.
+    pub fn reset(&self) -> Result<(), XybridError> {
+        self.inner.reset().map_err(XybridError::from)
+    }
+
+    /// Stop the session and release the model, discarding buffered audio.
+    ///
+    /// Idempotent. Use [`Self::flush`] when you want the transcript — this is
+    /// the "user walked away" path. Named `cancel` rather than `close`
+    /// because BoltFFI already gives every handle a generated `close()` for
+    /// the host's disposal idiom.
+    pub fn cancel(&self) {
+        self.inner.cancel();
+    }
+
+    /// Whether the session is still accepting audio.
+    pub fn is_running(&self) -> bool {
+        self.inner.is_running()
     }
 }
 
@@ -1603,6 +1857,71 @@ impl XybridModel {
     }
 }
 
+// ============================================================================
+// XybridPipeline handle
+// ============================================================================
+
+/// A loaded multi-stage inference pipeline.
+///
+/// Constructors parse and resolve the pipeline in one step; there is no
+/// separate `PipelineRef` handle on the foreign surface.
+pub struct XybridPipeline {
+    inner: std::sync::Arc<facade::Pipeline>,
+}
+
+#[export]
+impl XybridPipeline {
+    /// Parse and load a pipeline from YAML content.
+    pub fn from_yaml(yaml: String) -> Result<Self, XybridError> {
+        let inner = facade::Pipeline::from_yaml(yaml).map_err(XybridError::from)?;
+        Ok(Self { inner })
+    }
+
+    /// Read, parse, and load a pipeline from a YAML file.
+    pub fn from_file(path: String) -> Result<Self, XybridError> {
+        let inner = facade::Pipeline::from_file(path).map_err(XybridError::from)?;
+        Ok(Self { inner })
+    }
+
+    /// Load a pipeline bundle.
+    pub fn from_bundle(path: String) -> Result<Self, XybridError> {
+        let inner = facade::Pipeline::from_bundle(path).map_err(XybridError::from)?;
+        Ok(Self { inner })
+    }
+
+    /// Execute every stage, downloading any missing models first, and return
+    /// each stage's output alongside the final one.
+    ///
+    /// Of `options`, only `correlation_id` applies to a pipeline run. Setting
+    /// `generation_config` or `abort_on` fails with `ConfigError` rather than
+    /// being ignored; per-stage generation settings belong in the YAML.
+    pub fn run(
+        &self,
+        envelope: XybridEnvelope,
+        options: Option<XybridRunOptions>,
+    ) -> Result<XybridPipelineResult, XybridError> {
+        self.inner
+            .run(envelope.into(), options.map(Into::into).unwrap_or_default())
+            .map(Into::into)
+            .map_err(XybridError::from)
+    }
+
+    /// Pipeline name from the YAML definition, if present.
+    pub fn name(&self) -> Option<String> {
+        self.inner.name()
+    }
+
+    /// Stage identifiers in execution order.
+    pub fn stage_names(&self) -> Vec<String> {
+        self.inner.stage_names()
+    }
+
+    /// Number of stages in the pipeline.
+    pub fn stage_count(&self) -> u32 {
+        self.inner.stage_count()
+    }
+}
+
 /// Opaque handle for multi-turn conversation history.
 ///
 /// Build it up with [`push`](Self::push) / [`set_system`](Self::set_system),
@@ -1904,6 +2223,104 @@ mod tests {
             _ => panic!("expected text"),
         }
         assert_eq!(back.metadata.len(), 1);
+    }
+
+    #[test]
+    fn pipeline_handle_crosses_bolt_with_introspection() {
+        let pipeline = XybridPipeline::from_yaml(
+            r#"
+name: assistant
+stages:
+  - id: answer
+    model: gpt-4o-mini
+    target: cloud
+    provider: openai
+"#
+            .into(),
+        )
+        .expect("cloud-only pipeline should resolve without model downloads");
+
+        assert_eq!(pipeline.name().as_deref(), Some("assistant"));
+        assert_eq!(pipeline.stage_names(), vec!["answer"]);
+        assert_eq!(pipeline.stage_count(), 1);
+    }
+
+    #[test]
+    fn pipeline_run_rejects_options_it_cannot_honour() {
+        let pipeline = XybridPipeline::from_yaml(
+            "stages:\n  - id: answer\n    model: gpt-4o-mini\n    provider: openai\n".into(),
+        )
+        .expect("cloud-only pipeline should resolve without model downloads");
+        let options = XybridRunOptions {
+            generation_config: Some(XybridGenerationConfig {
+                max_tokens: Some(8),
+                temperature: None,
+                top_p: None,
+                min_p: None,
+                top_k: None,
+                repetition_penalty: None,
+                stop_sequences: Vec::new(),
+                grammar: None,
+                tools: Vec::new(),
+            }),
+            abort_on: Vec::new(),
+            fallback_to_cloud: false,
+            max_grace_tokens: 0,
+            correlation_id: None,
+        };
+
+        let envelope = XybridEnvelope {
+            kind: XybridEnvelopeKind::Text { text: "hi".into() },
+            metadata: Vec::new(),
+        };
+
+        let result = pipeline.run(envelope, Some(options));
+
+        assert!(
+            matches!(result, Err(XybridError::ConfigError { .. })),
+            "a pipeline run must not silently drop generation_config"
+        );
+    }
+
+    #[test]
+    fn pipeline_result_crosses_bolt_with_every_stage() {
+        let stage = |id: &str, kind: facade::EnvelopeKind| facade::StageResult {
+            stage_id: id.into(),
+            envelope: facade::Envelope {
+                kind,
+                metadata: std::collections::HashMap::new(),
+            },
+            output_type: facade::OutputType::Text,
+            latency_ms: 10,
+            execution_target: facade::ExecutionTarget::Local,
+            metrics: facade::InferenceMetrics::default(),
+        };
+        let asr = stage(
+            "asr",
+            facade::EnvelopeKind::Text {
+                text: "hello".into(),
+            },
+        );
+        let llm = stage(
+            "llm",
+            facade::EnvelopeKind::Text {
+                text: "hi there".into(),
+            },
+        );
+        let result = XybridPipelineResult::from(facade::PipelineResult {
+            envelope: llm.envelope.clone(),
+            output_type: facade::OutputType::Text,
+            latency_ms: 20,
+            stages: vec![asr, llm],
+        });
+
+        let ids: Vec<&str> = result.stages.iter().map(|s| s.stage_id.as_str()).collect();
+        assert_eq!(ids, ["asr", "llm"]);
+        assert!(matches!(
+            &result.stages[0].envelope.kind,
+            XybridEnvelopeKind::Text { text } if text == "hello"
+        ));
+        assert_eq!(result.latency_ms, 20);
     }
 
     #[test]

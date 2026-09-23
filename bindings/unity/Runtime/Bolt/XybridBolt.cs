@@ -471,6 +471,48 @@ namespace XybridBolt
             }
         }
     }
+    internal static class XybridStreamingSessionPartialsStreamRuntime
+    {
+        internal static async global::System.Collections.Generic.IAsyncEnumerable<XybridPartialResult> ReadAll(ulong receiver, [global::System.Runtime.CompilerServices.EnumeratorCancellation] global::System.Threading.CancellationToken cancellationToken = default)
+        {
+            ulong subscription = NativeMethods.NativeXybridStreamingSessionPartialsSubscribe(receiver);
+            if (subscription == 0) yield break;
+            try
+            {
+                while (true)
+                {
+                    XybridPartialResult[] items = ReadBatch(subscription, 16);
+                    foreach (XybridPartialResult item in items) yield return item;
+                    if (items.Length != 0) continue;
+                    int wait = await global::System.Threading.Tasks.Task.Run(() => NativeMethods.NativeXybridStreamingSessionPartialsWait(subscription, 100), cancellationToken).ConfigureAwait(false);
+                    if (wait < 0) yield break;
+                }
+            }
+            finally
+            {
+                NativeMethods.NativeXybridStreamingSessionPartialsUnsubscribe(subscription);
+                NativeMethods.NativeXybridStreamingSessionPartialsFree(subscription);
+            }
+        }
+
+        internal static XybridPartialResult[] ReadBatch(ulong subscription, nuint maxCount)
+        {
+            FfiBuf buffer = NativeMethods.NativeXybridStreamingSessionPartialsPopBatch(subscription, maxCount);
+            try
+            {
+                if (buffer.ptr == 0 || buffer.len == 0) return global::System.Array.Empty<XybridPartialResult>();
+                WireReader boltffiReader = new WireReader(buffer);
+                int count = checked((int)boltffiReader.ReadU32());
+                XybridPartialResult[] items = new XybridPartialResult[count];
+                for (int index = 0; index < count; index++) items[index] = XybridPartialResult.Decode(boltffiReader);
+                return items;
+            }
+            finally
+            {
+                NativeMethods.FreeBuf(buffer);
+            }
+        }
+    }
 
     public static class XybridBolt
     {
@@ -866,6 +908,19 @@ namespace XybridBolt
             => XybridDownloadProgressStreamRuntime.ReadAll(self.Handle, cancellationToken);
 
         /// <summary>
+        /// Pushed partial transcripts, closing once the session ends.
+        ///
+        /// Generated as an `AsyncStream` in Swift, a `Flow` in Kotlin, an
+        /// `IAsyncEnumerable` in C# and an iterable subscription in Python.
+        ///
+        /// A partial produced before subscribing is delivered immediately, so
+        /// audio fed before the stream is attached is never silently lost, and
+        /// subscribing to a finished session closes at once instead of hanging.
+        /// </summary>
+        public static global::System.Collections.Generic.IAsyncEnumerable<XybridPartialResult> Partials(this XybridStreamingSession self, global::System.Threading.CancellationToken cancellationToken = default)
+            => XybridStreamingSessionPartialsStreamRuntime.ReadAll(self.Handle, cancellationToken);
+
+        /// <summary>
         /// Pushed download updates for a speculatively-loaded model — the stream
         /// counterpart of [`Self::await_download`], and what issue #504 asks for.
         ///
@@ -920,6 +975,18 @@ namespace XybridBolt
 
         [DllImport(LibName, EntryPoint = "boltffi_init_class_xybrid_bolt_xybrid_model_from_registry_speculative")]
         internal static extern FfiBuf NativeXybridModelFromRegistrySpeculative([In] byte[] idBytes, nuint idLength, out ulong boltffiHandle);
+
+        [DllImport(LibName, EntryPoint = "boltffi_init_class_xybrid_bolt_xybrid_pipeline_from_bundle")]
+        internal static extern FfiBuf NativeXybridPipelineFromBundle([In] byte[] pathBytes, nuint pathLength, out ulong boltffiHandle);
+
+        [DllImport(LibName, EntryPoint = "boltffi_init_class_xybrid_bolt_xybrid_pipeline_from_file")]
+        internal static extern FfiBuf NativeXybridPipelineFromFile([In] byte[] pathBytes, nuint pathLength, out ulong boltffiHandle);
+
+        [DllImport(LibName, EntryPoint = "boltffi_init_class_xybrid_bolt_xybrid_pipeline_from_yaml")]
+        internal static extern FfiBuf NativeXybridPipelineFromYaml([In] byte[] yamlBytes, nuint yamlLength, out ulong boltffiHandle);
+
+        [DllImport(LibName, EntryPoint = "boltffi_init_class_xybrid_bolt_xybrid_streaming_session_for_model")]
+        internal static extern FfiBuf NativeXybridStreamingSessionForModel(ulong model, [In] byte[] configBytes, nuint configLength, out ulong boltffiHandle);
 
         [DllImport(LibName, EntryPoint = "boltffi_init_class_xybrid_bolt_xybrid_telemetry_config_new")]
         internal static extern ulong NativeXybridTelemetryConfigNew([In] byte[] apiKeyBytes, nuint apiKeyLength);
@@ -1081,6 +1148,34 @@ namespace XybridBolt
         [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_model_warmup")]
         internal static extern FfiBuf NativeXybridModelWarmup(ulong receiver);
 
+        [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_pipeline_name")]
+        internal static extern FfiBuf NativeXybridPipelineName(ulong receiver);
+
+        [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_pipeline_run")]
+        internal static extern FfiBuf NativeXybridPipelineRun(ulong receiver, [In] byte[] envelopeBytes, nuint envelopeLength, [In] byte[] optionsBytes, nuint optionsLength, out FfiBuf boltffiResultBuffer);
+
+        [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_pipeline_stage_count")]
+        internal static extern uint NativeXybridPipelineStageCount(ulong receiver);
+
+        [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_pipeline_stage_names")]
+        internal static extern FfiBuf NativeXybridPipelineStageNames(ulong receiver);
+
+        [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_streaming_session_cancel")]
+        internal static extern FfiStatus NativeXybridStreamingSessionCancel(ulong receiver);
+
+        [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_streaming_session_feed")]
+        internal static extern FfiBuf NativeXybridStreamingSessionFeed(ulong receiver, [In] float[] samples, nuint samplesLength);
+
+        [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_streaming_session_flush")]
+        internal static extern FfiBuf NativeXybridStreamingSessionFlush(ulong receiver, out FfiBuf boltffiResultBuffer);
+
+        [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_streaming_session_is_running")]
+        [return: MarshalAs(UnmanagedType.I1)]
+        internal static extern bool NativeXybridStreamingSessionIsRunning(ulong receiver);
+
+        [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_streaming_session_reset")]
+        internal static extern FfiBuf NativeXybridStreamingSessionReset(ulong receiver);
+
         [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_telemetry_config_init")]
         internal static extern FfiBuf NativeXybridTelemetryConfigInit(ulong receiver);
 
@@ -1116,6 +1211,12 @@ namespace XybridBolt
 
         [DllImport(LibName, EntryPoint = "boltffi_release_class_xybrid_bolt_xybrid_model")]
         internal static extern void NativeXybridModelRelease(ulong handle);
+
+        [DllImport(LibName, EntryPoint = "boltffi_release_class_xybrid_bolt_xybrid_pipeline")]
+        internal static extern void NativeXybridPipelineRelease(ulong handle);
+
+        [DllImport(LibName, EntryPoint = "boltffi_release_class_xybrid_bolt_xybrid_streaming_session")]
+        internal static extern void NativeXybridStreamingSessionRelease(ulong handle);
 
         [DllImport(LibName, EntryPoint = "boltffi_release_class_xybrid_bolt_xybrid_telemetry_config")]
         internal static extern void NativeXybridTelemetryConfigRelease(ulong handle);
@@ -1164,6 +1265,21 @@ namespace XybridBolt
 
         [global::System.Runtime.InteropServices.DllImport(LibName, EntryPoint = "boltffi_stream_xybrid_bolt_xybrid_model_download_progress_free")]
         internal static extern void NativeXybridModelDownloadProgressFree(ulong subscription);
+
+        [global::System.Runtime.InteropServices.DllImport(LibName, EntryPoint = "boltffi_stream_xybrid_bolt_xybrid_streaming_session_partials_subscribe")]
+        internal static extern ulong NativeXybridStreamingSessionPartialsSubscribe(ulong receiver);
+
+        [global::System.Runtime.InteropServices.DllImport(LibName, EntryPoint = "boltffi_stream_xybrid_bolt_xybrid_streaming_session_partials_pop_batch")]
+        internal static extern FfiBuf NativeXybridStreamingSessionPartialsPopBatch(ulong subscription, nuint maxCount);
+
+        [global::System.Runtime.InteropServices.DllImport(LibName, EntryPoint = "boltffi_stream_xybrid_bolt_xybrid_streaming_session_partials_wait")]
+        internal static extern int NativeXybridStreamingSessionPartialsWait(ulong subscription, uint timeoutMilliseconds);
+
+        [global::System.Runtime.InteropServices.DllImport(LibName, EntryPoint = "boltffi_stream_xybrid_bolt_xybrid_streaming_session_partials_unsubscribe")]
+        internal static extern void NativeXybridStreamingSessionPartialsUnsubscribe(ulong subscription);
+
+        [global::System.Runtime.InteropServices.DllImport(LibName, EntryPoint = "boltffi_stream_xybrid_bolt_xybrid_streaming_session_partials_free")]
+        internal static extern void NativeXybridStreamingSessionPartialsFree(ulong subscription);
 
         [DllImport(LibName, EntryPoint = "boltffi_function_xybrid_bolt_has_api_key")]
         [return: MarshalAs(UnmanagedType.I1)]
