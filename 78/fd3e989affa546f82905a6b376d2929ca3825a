@@ -1,0 +1,63 @@
+CHANGELOG.md
+  s_054107b6096a7c::t_0f146760e751ea 12-17,61-63
+README.md
+  s_054107b6096a7c::t_7ca6131903d52a 260-261,266-267,272-273,389
+bindings/apple/Sources/Xybrid/Xybrid.swift
+  s_054107b6096a7c::t_f6b5f178b58962 384-388,395,708-729
+bindings/apple/Sources/Xybrid/xybrid_bolt.swift
+  s_054107b6096a7c::t_3764880f845788 1618-1713
+bindings/apple/include/xybrid-bolt.h
+  s_054107b6096a7c::t_f9108cd51cd869 192-199
+bindings/flutter/rust/src/api/pipeline.rs
+  s_054107b6096a7c::t_eca7b0af52150e 7-14,92-98,124-144
+bindings/kotlin/bazel/jni/jni_glue.c
+  s_054107b6096a7c::t_ea078ce170a96f 1127-1250
+bindings/kotlin/bazel/jni/xybrid_bolt.h
+  s_054107b6096a7c::t_f519c30738bd8e 192-199
+bindings/kotlin/src/main/kotlin/ai/xybrid/Xybrid.kt
+  s_054107b6096a7c::t_12d53640447b55 421-423,553-568
+bindings/kotlin/src/main/kotlin/ai/xybrid/XybridBolt.kt
+  s_054107b6096a7c::t_d8279ff444ecb1 962-969,3198-3300
+bindings/python/xybrid/_bolt/__init__.py
+  s_054107b6096a7c::t_c5cb767e3f391f 456-462,541-547,2656-2708,3085
+bindings/python/xybrid/_bolt/__init__.pyi
+  s_054107b6096a7c::t_9833944a05040a 806-833
+bindings/python/xybrid/_bolt/_native.c
+  s_054107b6096a7c::t_4f1263ecf3c7c2 129-144,359-366,1068-1147,2111-2114,2160-2163,7494-7715,9568-9575
+bindings/unity/Runtime/Api/Pipeline.cs
+  s_054107b6096a7c::t_1bb1fcdb55757d 1-154
+bindings/unity/Runtime/Api/Pipeline.cs.meta
+  s_054107b6096a7c::t_13c72fd6d92e5c 1-2
+bindings/unity/Runtime/Bolt/XybridBolt.cs
+  s_054107b6096a7c::t_5361e64a2cc8a7 979-987,1151-1162,1214-1216
+bindings/unity/Runtime/Bolt/XybridPipeline.cs
+  s_054107b6096a7c::t_a3fb37c6ce9837 1-210
+bindings/unity/Runtime/Bolt/XybridPipeline.cs.meta
+  s_054107b6096a7c::t_1a37223f387fd1 1-2
+crates/xybrid-bolt/src/lib.rs
+  s_054107b6096a7c::t_00b763a77499eb 55-57,1800-1855,2159-2178
+crates/xybrid-ffi-facade/src/lib.rs
+  s_054107b6096a7c::t_e847e58ee77a83 1354-1387,1430-1507,3139-3231
+crates/xybrid-sdk/src/pipeline/mod.rs
+  s_054107b6096a7c::t_2b8f20fa1e6ec0 612,2019-2044
+docs/sdk/API_REFERENCE.md
+  s_054107b6096a7c::t_bd5f9d29ad6999 738,764,766-772,775-788,790-792,794,796-797,799-808,849-855,859-863
+docs/sdk/api-surface.yaml
+  s_054107b6096a7c::t_09d869b6637e5e 422,427,431,435,439-440,458,461,464,467
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "78fd3e989affa546f82905a6b376d2929ca3825a",
+  "prompts": {},
+  "sessions": {
+    "s_054107b6096a7c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "fdf969ad-2cae-4a65-9b1b-07602e7a13b0",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
+    }
+  }
+}
