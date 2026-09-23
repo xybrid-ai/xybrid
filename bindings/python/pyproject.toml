@@ -17,7 +17,7 @@ Homepage = "https://github.com/xybrid-ai/xybrid"
 Documentation = "https://docs.xybrid.dev"
 
 [project.optional-dependencies]
-dev = ["pytest"]
+dev = ["pytest", "setuptools>=68", "wheel"]
 
 [tool.setuptools.packages.find]
 where = ["."]

@@ -34,6 +34,7 @@ from __future__ import annotations
 import os
 import sys
 import time
+from dataclasses import replace
 
 import xybrid
 
@@ -50,37 +51,11 @@ def load_model(spec: str) -> xybrid.XybridModel:
     return xybrid.XybridModel.from_registry(spec)
 
 
-def main() -> int:
-    spec = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_MODEL
-
-    # Anonymous init: local inference, telemetry disabled. Pass an api_key to
-    # light up the platform features (see xybrid.init docstring).
-    xybrid.init()
-
-    print(f"loading {spec} (registry/HF models download on first run) ...")
-    t0 = time.time()
-    try:
-        model = load_model(spec)
-    except xybrid.XybridError as exc:
-        print(f"could not load '{spec}': {exc}", file=sys.stderr)
-        print("pass a registry id, a Hugging Face repo, or a local model directory.", file=sys.stderr)
-        return 1
-    print(f"loaded: {model.model_id} v{model.version} | is_llm={model.is_llm} ({time.time() - t0:.1f}s)")
+def run_prompt(model: xybrid.XybridModel) -> None:
+    """Run a bounded prompt and print its output and timing."""
 
     # Bounded, deterministic decoding so the example finishes quickly.
-    # GenerationConfigs.greedy()/creative() are ready-made presets; here we
-    # spell out a config to also cap the token count.
-    config = xybrid.XybridGenerationConfig(
-        max_tokens=64,
-        temperature=0.0,
-        top_p=1.0,
-        min_p=None,
-        top_k=0,
-        repetition_penalty=None,
-        stop_sequences=[],
-        grammar=None,
-        tools=[],
-    )
+    config = replace(xybrid.GenerationConfigs.greedy(), max_tokens=64)
     options = xybrid.XybridRunOptions(
         generation_config=config,
         abort_on=[],
@@ -92,14 +67,9 @@ def main() -> int:
     prompt = "What is the capital of France? Answer in one short sentence."
     print(f"\nprompt: {prompt}")
 
-    t0 = time.time()
-    try:
-        result = model.run(xybrid.XybridEnvelope.text(prompt), options)
-    except xybrid.XybridError as exc:
-        print(f"inference failed: {exc}", file=sys.stderr)
-        model.close()
-        return 1
-    wall = time.time() - t0
+    t0 = time.perf_counter()
+    result = model.run(xybrid.XybridEnvelope.text(prompt), options)
+    wall = time.perf_counter() - t0
 
     # LLMs return text; a speech model would surface bytes in audio_bytes.
     if result.text is not None:
@@ -116,7 +86,27 @@ def main() -> int:
         f"latency={result.latency_seconds:.2f}s (wall {wall:.1f}s)"
     )
 
-    model.close()
+
+def main() -> int:
+    spec = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_MODEL
+    xybrid.init()
+    print(f"loading {spec} (registry/HF models download on first run) ...")
+    t0 = time.perf_counter()
+    try:
+        model = load_model(spec)
+    except xybrid.XybridError as exc:
+        print(f"could not load '{spec}': {exc}", file=sys.stderr)
+        print("pass a registry id, a Hugging Face repo, or a local model directory.", file=sys.stderr)
+        return 1
+
+    # Release the model on success, native errors and Python exceptions alike.
+    with model:
+        print(f"loaded: {model.model_id} v{model.version} | is_llm={model.is_llm} ({time.perf_counter() - t0:.1f}s)")
+        try:
+            run_prompt(model)
+        except xybrid.XybridError as exc:
+            print(f"inference failed: {exc}", file=sys.stderr)
+            return 1
     return 0
 
 

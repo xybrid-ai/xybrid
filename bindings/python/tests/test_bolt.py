@@ -11,10 +11,7 @@ from __future__ import annotations
 
 import pytest
 
-try:
-    import xybrid._bolt as bolt
-except ImportError as exc:  # pragma: no cover - native artifacts not built
-    pytest.skip(str(exc), allow_module_level=True)
+import xybrid._bolt as bolt
 
 
 def test_native_bridge_loads_and_reports_a_version() -> None:

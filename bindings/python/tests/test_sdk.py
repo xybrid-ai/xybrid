@@ -11,14 +11,12 @@ the failure lands here rather than in a user's code.
 from __future__ import annotations
 
 import inspect
+from unittest.mock import Mock
 
 import pytest
 
-try:
-    import xybrid
-    import xybrid._bolt as bolt
-except ImportError as exc:  # pragma: no cover - native artifacts not built
-    pytest.skip(str(exc), allow_module_level=True)
+import xybrid
+import xybrid._bolt as bolt
 
 
 def _metrics(total_ms: int) -> xybrid.XybridInferenceMetrics:
@@ -49,11 +47,36 @@ def _result(envelope: xybrid.XybridEnvelope, output_type: xybrid.XybridOutputTyp
     )
 
 
-def test_init_is_idempotent() -> None:
-    xybrid.init()
+def test_init_is_idempotent(monkeypatch) -> None:
+    configure = Mock()
+    binding = Mock()
+    monkeypatch.setattr(xybrid, "_INITIALIZED", False)
+    monkeypatch.setattr(bolt, "configure_runtime", configure)
+    monkeypatch.setattr(bolt, "set_binding", binding)
+
+    xybrid.init(api_key="first-key", gateway_url="https://gateway.example", ingest_url="https://ingest.example")
     xybrid.init(api_key="ignored-after-first-init")
 
     assert xybrid.is_initialized()
+    binding.assert_called_once_with("python")
+    configure.assert_called_once_with(
+        api_key="first-key", gateway_url="https://gateway.example", ingest_url="https://ingest.example"
+    )
+
+
+def test_failed_init_can_be_retried(monkeypatch) -> None:
+    configure = Mock(side_effect=[xybrid.ConfigError("invalid configuration"), None])
+    monkeypatch.setattr(xybrid, "_INITIALIZED", False)
+    monkeypatch.setattr(bolt, "configure_runtime", configure)
+    monkeypatch.setattr(bolt, "set_binding", Mock())
+
+    with pytest.raises(xybrid.ConfigError, match="invalid configuration"):
+        xybrid.init()
+    assert not xybrid.is_initialized()
+
+    xybrid.init()
+    assert xybrid.is_initialized()
+    assert configure.call_count == 2
 
 
 def test_envelope_factory_helpers_produce_expected_metadata() -> None:
@@ -123,7 +146,7 @@ def test_result_conveniences_on_synthetic_result() -> None:
     mislabeled_audio = _result(xybrid.XybridEnvelope.audio(b"pcm"), xybrid.XybridOutputType.UNKNOWN)
     assert mislabeled_audio.audio_bytes == b"pcm"
 
-    # The conveniences are class members, visible to type checkers.
+    # The conveniences are class members, available on native-returned objects.
     assert isinstance(xybrid.XybridResult.text, property)
     assert isinstance(xybrid.XybridVoiceInfo.is_female, property)
 
@@ -277,10 +300,19 @@ def test_run_methods_accept_an_explicit_cancellation_token() -> None:
     assert parameter.default is None
 
 
-def test_model_supports_explicit_release() -> None:
-    assert callable(xybrid.XybridModel.close)
-    assert hasattr(xybrid.XybridModel, "__enter__")
-    assert hasattr(xybrid.XybridModel, "__exit__")
+def test_model_context_releases_once_even_when_the_body_raises(monkeypatch) -> None:
+    release = Mock()
+    monkeypatch.setattr(bolt._native, "_boltffi_xybrid_model_release", release)
+    model = xybrid.XybridModel._from_handle(123)
+
+    with pytest.raises(ValueError, match="caller failed"):
+        with model as entered:
+            assert entered is model
+            raise ValueError("caller failed")
+    model.close()
+
+    release.assert_called_once_with(123)
+    assert model._handle is None
 
 
 @pytest.mark.parametrize(

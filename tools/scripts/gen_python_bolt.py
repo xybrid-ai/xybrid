@@ -131,11 +131,10 @@ def check_boltffi_version() -> None:
             f"  cargo install boltffi_cli --version {PINNED_BOLTFFI} --locked\n"
             f"({exc})"
         )
-    if PINNED_BOLTFFI not in out:
-        print(
-            f"warning: expected boltffi {PINNED_BOLTFFI}, got '{out}'. "
-            "Generated output may differ from the committed sources.",
-            file=sys.stderr,
+    if out != f"boltffi {PINNED_BOLTFFI}":
+        sys.exit(
+            f"error: expected boltffi {PINNED_BOLTFFI}, got '{out}'.\n"
+            f"Install with: cargo install boltffi_cli --version {PINNED_BOLTFFI} --locked"
         )
 
 

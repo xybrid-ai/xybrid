@@ -10,9 +10,9 @@ attaches them to the generated classes when ``xybrid`` is imported.
 Patching rather than subclassing is deliberate: the compiled bridge
 instantiates the generated classes directly (``_native._register_xybrid_result``
 and friends), so instances handed back from a native call would never be of a
-subclass. Every addition here is a new name; nothing generated is replaced
-except the four ``run*`` methods, which gain a default for their trailing
-``options`` argument.
+subclass. Model getters become properties, and the four ``run*`` methods gain
+defaults for options and a keyword-only cancellation token. Other additions
+use new names on the generated classes.
 
 Regeneration safety: ``tests/test_sdk.py`` asserts each patched member is
 present, so a generator change that renames or removes one fails the suite
@@ -21,7 +21,8 @@ instead of silently dropping the documented API.
 
 from __future__ import annotations
 
-from typing import Any
+from collections.abc import Iterator
+from types import TracebackType
 
 from . import _bolt
 from ._errors import ConfigError
@@ -99,7 +100,7 @@ def _install_envelope_factories() -> None:
         """Create a text envelope, optionally carrying TTS voice metadata."""
 
         selected_voice = voice if voice is not None else voice_id
-        metadata: list[Any] = []
+        metadata: list[_bolt.XybridMetadataEntry] = []
         if selected_voice is not None:
             metadata.append(entry(key="voice_id", value=selected_voice))
             metadata.append(entry(key="speed", value=str(float(1.0 if speed is None else speed))))
@@ -164,40 +165,40 @@ def _install_result_accessors() -> None:
 
     # Payload presence follows the envelope kind, not output_type — matching
     # the Swift and Kotlin accessors.
-    def text(self: Any) -> str | None:
+    def text(self: _bolt.XybridResult) -> str | None:
         """Text payload, or ``None`` when the result is not text."""
 
         kind = self.envelope.kind
         return kind.text if isinstance(kind, _bolt.XybridEnvelopeKindText) else None
 
-    def audio_bytes(self: Any) -> bytes | None:
+    def audio_bytes(self: _bolt.XybridResult) -> bytes | None:
         """Audio payload, or ``None`` when the result is not audio."""
 
         kind = self.envelope.kind
         return kind.bytes if isinstance(kind, _bolt.XybridEnvelopeKindAudio) else None
 
-    def embedding(self: Any) -> list[float] | None:
+    def embedding(self: _bolt.XybridResult) -> list[float] | None:
         """Embedding vector, or ``None`` when the result is not an embedding."""
 
         kind = self.envelope.kind
         return kind.values if isinstance(kind, _bolt.XybridEnvelopeKindEmbedding) else None
 
-    def success(self: Any) -> bool:
+    def success(self: _bolt.XybridResult) -> bool:
         """Always ``True``; failures raise instead. Shape-compat with Swift/Kotlin."""
 
         return True
 
-    def is_failure(self: Any) -> bool:
+    def is_failure(self: _bolt.XybridResult) -> bool:
         """``True`` when the result carries no output."""
 
         return self.output_type == _bolt.XybridOutputType.UNKNOWN
 
-    def latency_seconds(self: Any) -> float:
+    def latency_seconds(self: _bolt.XybridResult) -> float:
         """Latency in seconds."""
 
         return self.latency_ms / 1000.0
 
-    def has_tool_calls(self: Any) -> bool:
+    def has_tool_calls(self: _bolt.XybridResult) -> bool:
         """``True`` when the model asked to call at least one tool this turn."""
 
         return bool(self.tool_calls)
@@ -217,7 +218,7 @@ def _install_result_accessors() -> None:
 def _install_stream_token_accessors() -> None:
     stream_token = _bolt.XybridStreamToken
 
-    def has_tool_calls(self: Any) -> bool:
+    def has_tool_calls(self: _bolt.XybridStreamToken) -> bool:
         """``True`` when this token carries tool calls to execute.
 
         Only ever true on the terminal token. Tool-call blocks are suppressed
@@ -237,12 +238,12 @@ def _install_stream_token_accessors() -> None:
 def _install_voice_accessors() -> None:
     voice_info = _bolt.XybridVoiceInfo
 
-    def is_male(self: Any) -> bool:
+    def is_male(self: _bolt.XybridVoiceInfo) -> bool:
         """``True`` when the voice gender is male."""
 
         return self.gender == "male"
 
-    def is_female(self: Any) -> bool:
+    def is_female(self: _bolt.XybridVoiceInfo) -> bool:
         """``True`` when the voice gender is female."""
 
         return self.gender == "female"
@@ -271,7 +272,7 @@ def _install_model_accessors() -> None:
 
     for name in _MODEL_PROPERTIES:
         method = model.__dict__[name]
-        setattr(model, name, property(method, doc=f"See :meth:`xybrid.XybridModel.{name}`."))
+        setattr(model, name, property(method))
 
     run = model.__dict__["run"]
     run_stream = model.__dict__["run_stream"]
@@ -285,23 +286,40 @@ def _install_model_accessors() -> None:
     # have always had.
     token = _bolt.XybridCancellationToken
 
-    def _run(self: Any, envelope: Any, options: Any = None, *, cancel: Any = None) -> Any:
+    def _run(
+        self: _bolt.XybridModel,
+        envelope: _bolt.XybridEnvelope,
+        options: _bolt.XybridRunOptions | None = None,
+        *,
+        cancel: _bolt.XybridCancellationToken | None = None,
+    ) -> _bolt.XybridResult:
         """Run one inference and return its result."""
 
         return run(self, envelope, options, cancel if cancel is not None else token())
 
-    def _run_stream(self: Any, envelope: Any, options: Any = None, *, cancel: Any = None) -> int:
+    def _run_stream(
+        self: _bolt.XybridModel,
+        envelope: _bolt.XybridEnvelope,
+        options: _bolt.XybridRunOptions | None = None,
+        *,
+        cancel: _bolt.XybridCancellationToken | None = None,
+    ) -> int:
         """Start a streaming run and return its stream id.
 
-        Retain ``cancel`` to stop the stream: dropping the token here would
-        leave the caller no way to signal it.
+        Pass and retain ``cancel`` to stop the stream. If omitted, the SDK
+        creates a token that the caller cannot signal.
         """
 
         return run_stream(self, envelope, options, cancel if cancel is not None else token())
 
     def _run_with_context(
-        self: Any, envelope: Any, context: Any, options: Any = None, *, cancel: Any = None
-    ) -> Any:
+        self: _bolt.XybridModel,
+        envelope: _bolt.XybridEnvelope,
+        context: _bolt.XybridConversationContext,
+        options: _bolt.XybridRunOptions | None = None,
+        *,
+        cancel: _bolt.XybridCancellationToken | None = None,
+    ) -> _bolt.XybridResult:
         """Run one inference against a conversation context."""
 
         return run_with_context(
@@ -309,7 +327,12 @@ def _install_model_accessors() -> None:
         )
 
     def _run_stream_with_context(
-        self: Any, envelope: Any, context: Any, options: Any = None, *, cancel: Any = None
+        self: _bolt.XybridModel,
+        envelope: _bolt.XybridEnvelope,
+        context: _bolt.XybridConversationContext,
+        options: _bolt.XybridRunOptions | None = None,
+        *,
+        cancel: _bolt.XybridCancellationToken | None = None,
     ) -> int:
         """Start a streaming run against a conversation context."""
 
@@ -317,7 +340,7 @@ def _install_model_accessors() -> None:
             self, envelope, context, options, cancel if cancel is not None else token()
         )
 
-    def close(self: Any) -> None:
+    def close(self: _bolt.XybridModel) -> None:
         """Release the native handle now instead of at garbage collection.
 
         Idempotent, and what leaving a ``with`` block does. The handle is gone
@@ -328,10 +351,15 @@ def _install_model_accessors() -> None:
         # handle is cleared — so this stays correct if that path changes.
         model.__del__(self)
 
-    def __enter__(self: Any) -> Any:
+    def __enter__(self: _bolt.XybridModel) -> _bolt.XybridModel:
         return self
 
-    def __exit__(self: Any, exc_type: Any, exc: Any, traceback: Any) -> None:
+    def __exit__(
+        self: _bolt.XybridModel,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
         self.close()
 
     model.run = _run
@@ -356,7 +384,9 @@ def _install_download_iteration() -> None:
     unsubscribed = -1
     wait_slice_ms = 250
 
-    def __iter__(self: Any) -> Any:
+    def __iter__(
+        self: _bolt.XybridDownloadProgressSubscription | _bolt.XybridModelDownloadProgressSubscription,
+    ) -> Iterator[_bolt.XybridDownloadStatus]:
         while True:
             outcome = self.wait(wait_slice_ms)
             # Drain whatever landed before deciding to stop: the terminal

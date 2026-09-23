@@ -4,7 +4,7 @@
 
 This directory contains the Python package for Xybrid, providing local-first
 model inference through the Rust `xybrid-bolt` native library. Requires
-Python >= 3.10; `pytest` is used for tests.
+CPython >= 3.10; `pytest` is used for tests.
 
 ## Installation
 
@@ -13,22 +13,24 @@ Python >= 3.10; `pytest` is used for tests.
 Build the native artifacts and stage them into the package:
 
 ```bash
-# From the xybrid repo root
+# From the xybrid repo root, use the same interpreter for every step.
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -e './bindings/python[dev]'
+export PYTHON="$(command -v python)"
 ./tools/scripts/build-python-bolt.sh
-
-# LLM (GGUF) support is not in the platform-* presets — opt in:
-XYBRID_FEATURES=platform-macos,llm-llamacpp ./tools/scripts/build-python-bolt.sh
+python -m pytest bindings/python/tests -q
 ```
 
-Install the package in editable mode:
-
-```bash
-python -m pip install -e bindings/python
-```
+The host's platform preset includes GGUF/LLM, vision and Whisper support.
+Set `XYBRID_FEATURES` to override the preset, or `DEBUG=1` for a debug build.
+`PYTHON` defaults to `python3` and may be an absolute interpreter path.
 
 That stages two binaries into `xybrid/_bolt/` — the `_native` CPython extension
 and the `libxybrid_bolt` cdylib it loads. Both are build outputs and are
-git-ignored; without them, importing `xybrid` raises `ImportError`.
+git-ignored. Rebuild after changing the Rust binding surface, generated Python
+sources, or interpreter. Missing or stale binaries cause imports and tests to
+fail; the build script checks generated-source drift and verifies a real import.
 
 ## Quickstart
 
@@ -37,10 +39,9 @@ import xybrid
 
 xybrid.init()
 
-model = xybrid.XybridModel.from_registry("your-model-id")
-result = model.run(xybrid.XybridEnvelope.text("Hello from Python"))
-
-print(result.text)
+with xybrid.XybridModel.from_registry("your-model-id") as model:
+    result = model.run(xybrid.XybridEnvelope.text("Hello from Python"))
+    print(result.text)
 ```
 
 Pass an API key to enable optional platform features such as telemetry:
@@ -49,7 +50,10 @@ Pass an API key to enable optional platform features such as telemetry:
 xybrid.init(api_key="xyb_...")
 ```
 
-Anonymous initialization keeps inference local-only and telemetry disabled.
+Without a configured API key, inference stays local and telemetry remains
+disabled. Cloud routing can also read `XYBRID_API_KEY` from the environment.
+Pass initialization options on the first call; subsequent `init()` calls are
+no-ops.
 
 A runnable LLM example lives in [`examples/quickstart.py`](examples/quickstart.py):
 
@@ -60,6 +64,8 @@ python bindings/python/examples/quickstart.py
 ## Text to Speech and Voices
 
 ```python
+from pathlib import Path
+
 import xybrid
 
 xybrid.init()
@@ -153,6 +159,10 @@ python3 tools/scripts/gen_python_bolt.py --check   # fail on drift (CI)
 ./tools/scripts/build-python-bolt.sh               # compile + stage binaries
 ```
 
+Use the pinned CLI: `cargo install boltffi_cli --version 0.30.1 --locked`.
+Generation rejects other CLI versions. Build staging selects only the active
+interpreter's artifacts and removes obsolete native outputs from `xybrid/_bolt/`.
+
 Because that directory is byte-compared against fresh generator output, it
 carries no hand-written code. The Pythonic surface the docs above use —
 envelope factories, `result.text`, model properties, typed exceptions — is
@@ -166,6 +176,10 @@ Wheels bundle both binaries, so they are tagged per interpreter ABI
 (`cp312-cp312-macosx_11_0_arm64`) rather than `py3-none-any` — one wheel per
 Python version and platform.
 
+Packaging rejects missing native files and bridges from a different interpreter.
+After staging, `python -m pip wheel --no-deps ./bindings/python` builds a local
+wheel. Automated platform wheel builds and PyPI publishing are separate work.
+
 ## Directory Structure
 
 ```
@@ -175,6 +189,7 @@ python/
 ├── README.md
 ├── tests/
 │   ├── test_bolt.py    # generated bindings load and export the surface
+│   ├── test_packaging.py # wheel tags and staged-artifact validation
 │   └── test_sdk.py     # the hand-written SDK layer
 └── xybrid/
     ├── __init__.py     # init(), presets, public re-exports

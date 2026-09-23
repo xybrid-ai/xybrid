@@ -13,6 +13,8 @@ the binaries are missing. Editable installs from a checkout are unaffected.
 """
 
 import os
+import sys
+import sysconfig
 from pathlib import Path
 
 from setuptools import setup
@@ -23,8 +25,7 @@ except ImportError:  # setuptools < 70.1 keeps the command in the wheel package
     from wheel.bdist_wheel import bdist_wheel
 
 _BOLT_DIR = Path(__file__).resolve().parent / "xybrid" / "_bolt"
-_LIBRARY_SUFFIXES = {".dylib", ".so", ".dll"}
-_BRIDGE_SUFFIXES = {".so", ".pyd"}
+_NATIVE_SUFFIXES = {".dylib", ".so", ".dll", ".pyd"}
 
 
 class _NativeBdistWheel(bdist_wheel):
@@ -49,27 +50,32 @@ class _NativeBdistWheel(bdist_wheel):
         # multi-version / multi-distro portability still needs delocate (macOS)
         # and auditwheel (manylinux) in CI — see the packaging follow-up.
         if plat.startswith("macosx_"):
-            arch = plat.rsplit("_", 1)[-1]
+            arch = plat.split("_", 3)[-1]
             target = os.environ.get("MACOSX_DEPLOYMENT_TARGET", "11.0")
             major, _, minor = target.partition(".")
             plat = f"macosx_{major}_{minor or '0'}_{arch}"
         return impl, abi, plat
 
     def run(self) -> None:
-        staged = list(_BOLT_DIR.iterdir()) if _BOLT_DIR.is_dir() else []
-        # libxybrid_bolt.dylib / libxybrid_bolt.so / xybrid_bolt.dll, and
-        # _native.<abi>-<plat>.so / _native.<abi>.pyd.
-        has_library = any(p.suffix in _LIBRARY_SUFFIXES and "xybrid_bolt" in p.name for p in staged)
-        has_bridge = any(p.suffix in _BRIDGE_SUFFIXES and p.name.startswith("_native.") for p in staged)
-        missing = []
-        if not has_library:
-            missing.append("the xybrid-bolt cdylib")
-        if not has_bridge:
-            missing.append("the compiled _native bridge")
-        if missing:
+        libraries = {
+            "darwin": "libxybrid_bolt.dylib",
+            "linux": "libxybrid_bolt.so",
+            "win32": "xybrid_bolt.dll",
+        }
+        if sys.implementation.name != "cpython" or sys.platform not in libraries:
+            raise RuntimeError("xybrid wheels require CPython on macOS, Linux or Windows")
+        expected = {libraries[sys.platform], f"_native{sysconfig.get_config_var('EXT_SUFFIX')}"}
+        staged = {
+            path.name for path in _BOLT_DIR.glob("*")
+            if path.is_file() and path.suffix in _NATIVE_SUFFIXES
+        }
+        missing, stale = expected - staged, staged - expected
+        if missing or stale:
             raise RuntimeError(
-                f"xybrid: xybrid/_bolt/ is missing {' and '.join(missing)} — run "
-                "tools/scripts/build-python-bolt.sh before building a wheel"
+                f"xybrid: missing or mismatched native artifacts for interpreter {sys.executable} "
+                f"(missing: {sorted(missing)}, stale: {sorted(stale)}). "
+                "Run tools/scripts/build-python-bolt.sh with PYTHON set to this interpreter "
+                "before building a wheel."
             )
         super().run()
 
