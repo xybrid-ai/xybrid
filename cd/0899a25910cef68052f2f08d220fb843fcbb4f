@@ -1,0 +1,37 @@
+CHANGELOG.md
+  s_054107b6096a7c::t_5103102d30b1bd 19
+bindings/apple/Sources/Xybrid/Xybrid.swift
+  s_054107b6096a7c::t_4173e916136e69 225,233,238-284
+bindings/flutter/CHANGELOG.md
+  s_054107b6096a7c::t_2f6ee6ec60f4a7 8
+bindings/flutter/example/pubspec.lock
+  s_054107b6096a7c::t_c17320edb1ab12 422
+bindings/flutter/lib/src/rust/frb_generated.dart
+  s_054107b6096a7c::t_eb2c7e35ef1ca5 83,2369,2396,2421,2449,2475,2501,2524,2550,2573,2598,2624,2649,2675,2699,2723,2747,2772,2796,2821,2845,2868,2892
+bindings/flutter/rust/src/frb_generated.rs
+  s_054107b6096a7c::t_61cbec8979e3f3 47,5044,5050,5056,5062,5222,5227,5232,5237,5242,5247,5252,5257,5262,5267,5272,5277,5282,5287,5292,5297,5302,5305
+bindings/kotlin/src/main/kotlin/ai/xybrid/Xybrid.kt
+  s_054107b6096a7c::t_da6f52c59e3582 241,246-248,251-288
+docs/content/docs/concepts/caching.mdx
+  s_054107b6096a7c::t_db7d4695b5d628 173-181
+docs/sdk/API_REFERENCE.md
+  s_054107b6096a7c::t_1b5edd076557d8 129-133,153-155
+docs/sdk/api-surface.yaml
+  s_054107b6096a7c::t_f75181fb3a86de 119
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "cd0899a25910cef68052f2f08d220fb843fcbb4f",
+  "prompts": {},
+  "sessions": {
+    "s_054107b6096a7c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "fdf969ad-2cae-4a65-9b1b-07602e7a13b0",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
+    }
+  }
+}
