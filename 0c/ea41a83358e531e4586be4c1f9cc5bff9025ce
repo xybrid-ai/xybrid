@@ -1,0 +1,37 @@
+bindings/apple/Sources/Xybrid/xybrid_bolt.swift
+  s_6f2c86b8756be7::t_ec581a2ed12c41 740,755-756,780-782
+bindings/apple/include/xybrid-bolt.h
+  s_6f2c86b8756be7::t_5bc3dc908854f6 108
+bindings/kotlin/bazel/jni/xybrid_bolt.h
+  s_6f2c86b8756be7::t_7c30aff25e55dc 108
+bindings/kotlin/src/main/kotlin/ai/xybrid/XybridBolt.kt
+  s_6f2c86b8756be7::t_a8da47c2c21dae 2237-2248,2259
+crates/xybrid-cli/src/commands/registry_format.rs
+  s_6f2c86b8756be7::t_84f832a7120527 68-76
+crates/xybrid-core/src/runtime_adapter/mlx/arch/bert.rs
+  s_6f2c86b8756be7::t_c4c55f744463e8 460-461
+crates/xybrid-core/src/runtime_adapter/mlx/weights.rs
+  s_6f2c86b8756be7::t_b3159980d1fccc 288-289
+crates/xybrid-mlx/src/dtype.rs
+  s_6f2c86b8756be7::t_16d6e5911f91d2 55-58,69-73
+crates/xybrid-mlx/src/ops/basic.rs
+  s_6f2c86b8756be7::t_6c756e72f5d52f 781
+crates/xybrid-sdk/src/registry_client.rs
+  s_6f2c86b8756be7::t_5ffd2907bb57be 360-365,466-474
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "0cea41a83358e531e4586be4c1f9cc5bff9025ce",
+  "prompts": {},
+  "sessions": {
+    "s_6f2c86b8756be7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b42c19ca-d974-45fc-b0c2-867a7bfc953e",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
+    }
+  }
+}
