@@ -457,8 +457,8 @@ fn f32_le_bytes_to_vec(data: &[u8]) -> Result<Vec<f32>, String> {
     }
 
     let mut out = Vec::with_capacity(data.len() / 4);
-    for chunk in data.chunks_exact(4) {
-        out.push(f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]));
+    for &chunk in data.as_chunks::<4>().0 {
+        out.push(f32::from_le_bytes(chunk));
     }
     Ok(out)
 }

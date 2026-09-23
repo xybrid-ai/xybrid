@@ -357,6 +357,12 @@ fn registry_task_for_explicit_backend(
     model_id: &str,
     selected: BackendChoice,
 ) -> Result<Option<String>, SdkError> {
+    // Offline-first: the task recorded in an extracted copy's metadata is the
+    // registry's answer, so a cached model needs no registry round trip.
+    if let Some(task) = offline_cached_registry_task(client, model_id, selected) {
+        return Ok(Some(task));
+    }
+
     match client.get_model(model_id) {
         Ok(detail) => Ok(Some(detail.task)),
         Err(err) if registry_metadata_error_can_fall_back_to_default(&err) => {
@@ -457,6 +463,15 @@ pub(crate) fn registry_format_for_auto_local_backend(
     model_id: &str,
     cfg: &SelectorCfg,
 ) -> Result<Option<&'static str>, SdkError> {
+    // Offline-first, like `fetch_extracted`: a model already extracted on this
+    // machine must load without a registry round trip (or its retries).
+    if let Some(format) = offline_auto_registry_format(client, model_id, cfg) {
+        return Ok(Some(format));
+    }
+    if client.resolve_offline(model_id).is_some() {
+        return Ok(None);
+    }
+
     match client.get_model(model_id) {
         Ok(detail) => select_auto_registry_format_for_detail(model_id, &detail, cfg),
         Err(err) if registry_metadata_error_can_fall_back_to_default(&err) => {

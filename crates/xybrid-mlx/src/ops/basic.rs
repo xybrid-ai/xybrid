@@ -778,7 +778,7 @@ mod tests {
         assert_eq!(out.shape(), vec![2, 3]);
 
         let got = out.to_vec_f32().unwrap();
-        for (row_idx, chunk) in got.chunks_exact(3).enumerate() {
+        for (row_idx, chunk) in got.as_chunks::<3>().0.iter().enumerate() {
             let s: f32 = chunk.iter().sum();
             let diff = (s - 1.0).abs();
             assert!(

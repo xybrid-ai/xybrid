@@ -52,8 +52,10 @@ pub enum MlxDtype {
 pub fn f16_le_bytes_to_f32_vec(bytes: &[u8]) -> crate::MlxResult<Vec<f32>> {
     validate_16bit_byte_len(bytes, "f16")?;
     Ok(bytes
-        .chunks_exact(2)
-        .map(|c| f16_bits_to_f32(u16::from_le_bytes([c[0], c[1]])))
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|&c| f16_bits_to_f32(u16::from_le_bytes(c)))
         .collect())
 }
 
@@ -64,9 +66,11 @@ pub fn f16_le_bytes_to_f32_vec(bytes: &[u8]) -> crate::MlxResult<Vec<f32>> {
 pub fn bf16_le_bytes_to_f32_vec(bytes: &[u8]) -> crate::MlxResult<Vec<f32>> {
     validate_16bit_byte_len(bytes, "bf16")?;
     Ok(bytes
-        .chunks_exact(2)
-        .map(|c| {
-            let bits = (u32::from(u16::from_le_bytes([c[0], c[1]]))) << 16;
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|&c| {
+            let bits = (u32::from(u16::from_le_bytes(c))) << 16;
             f32::from_bits(bits)
         })
         .collect())

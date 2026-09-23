@@ -65,6 +65,15 @@ pub(crate) fn registry_format_for_auto_local_backend(
     model_id: &str,
     cfg: &SelectorCfg,
 ) -> Result<Option<&'static str>, SdkError> {
+    // Offline-first, like `fetch_extracted`: a model already extracted on this
+    // machine must run without a registry round trip (or its retries).
+    if let Some(format) = offline_auto_registry_format(client, model_id, cfg) {
+        return Ok(Some(format));
+    }
+    if client.resolve_offline(model_id).is_some() {
+        return Ok(None);
+    }
+
     let detail = match client.get_model(model_id) {
         Ok(detail) => detail,
         Err(err) if registry_metadata_error_can_fall_back_to_default(&err) => {
