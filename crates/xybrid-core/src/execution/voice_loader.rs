@@ -219,6 +219,13 @@ impl<S: VoiceEmbeddingSource> TtsVoiceLoader<S> {
         input: &Envelope,
         token_count: Option<usize>,
     ) -> ExecutorResult<Vec<f32>> {
+        if matches!(
+            metadata.voices.as_ref().map(|voices| &voices.format),
+            Some(VoiceFormat::PerModel { .. })
+        ) {
+            self.resolve_voice_model_path(metadata, input)?;
+            return Ok(Vec::new());
+        }
         // Step 1: Resolve voice file path
         let voice_path = match self.resolve_voice_path(metadata)? {
             Some(path) => path,
@@ -262,6 +269,31 @@ impl<S: VoiceEmbeddingSource> TtsVoiceLoader<S> {
         } else {
             self.load_legacy(&voice_path, voice_id)
         }
+    }
+
+    pub(crate) fn resolve_voice_model_path(
+        &self,
+        metadata: &ModelMetadata,
+        input: &Envelope,
+    ) -> ExecutorResult<Option<PathBuf>> {
+        let Some(voice_config) = &metadata.voices else {
+            return Ok(None);
+        };
+        let VoiceFormat::PerModel { voice_dir, pattern } = &voice_config.format else {
+            return Ok(None);
+        };
+        if !pattern.contains("{voice_id}") {
+            return Err(AdapterError::InvalidInput(
+                "Per-model voice pattern must contain {voice_id}".to_string(),
+            ));
+        }
+        let voice =
+            self.resolve_voice_info(voice_config, metadata, input.metadata.get("voice_id"))?;
+        Ok(Some(
+            self.base_path
+                .join(voice_dir)
+                .join(pattern.replace("{voice_id}", &voice.id)),
+        ))
     }
 
     /// Resolve the voice file path from metadata or legacy auto-detection.
@@ -767,6 +799,37 @@ mod tests {
         let path = loader.resolve_voice_path(&metadata).unwrap();
         assert!(path.is_some());
         assert!(path.unwrap().ends_with("voices.bin"));
+    }
+
+    #[test]
+    fn test_resolve_per_model_voice_path() {
+        let source = MockVoiceSource::new();
+        let loader = TtsVoiceLoader::with_source("/models/tts", source);
+        let mut metadata = create_test_metadata_with_voices();
+        metadata.voices.as_mut().expect("voices").format = VoiceFormat::PerModel {
+            voice_dir: "voices".to_string(),
+            pattern: "{voice_id}.onnx".to_string(),
+        };
+        let input = create_test_envelope_with_voice("voice_b");
+        assert_eq!(
+            loader
+                .resolve_voice_model_path(&metadata, &input)
+                .expect("path"),
+            Some(PathBuf::from("/models/tts/voices/voice_b.onnx"))
+        );
+    }
+
+    #[test]
+    fn test_per_model_voice_rejects_unknown_catalog_id() {
+        let source = MockVoiceSource::new();
+        let loader = TtsVoiceLoader::with_source("/models/tts", source);
+        let mut metadata = create_test_metadata_with_voices();
+        metadata.voices.as_mut().expect("voices").format = VoiceFormat::PerModel {
+            voice_dir: "voices".to_string(),
+            pattern: "{voice_id}.onnx".to_string(),
+        };
+        let input = create_test_envelope_with_voice("../outside");
+        assert!(loader.resolve_voice_model_path(&metadata, &input).is_err());
     }
 
     #[test]

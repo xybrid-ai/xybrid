@@ -248,7 +248,23 @@ pub enum PreprocessingStep {
         /// Uses token ID 30 (Kokoro silence token).
         #[serde(default)]
         silence_tokens: Option<u8>,
+
+        /// Token framing used after phonemization.
+        #[serde(default)]
+        id_style: PhonemeIdStyle,
     },
+}
+
+/// How phonemes are framed as model input IDs.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum PhonemeIdStyle {
+    /// Map each phoneme directly, with optional outer padding.
+    #[default]
+    Standard,
+    /// Piper framing: BOS, pad, each phoneme followed by pad, then EOS.
+    Piper,
 }
 
 impl PreprocessingStep {
