@@ -1,0 +1,89 @@
+docs/sdk/api-surface.yaml
+  s_054107b6096a7c::t_2f1dc3ba30dff9 438-441,674-728
+  s_054107b6096a7c::t_00e22f61d5164c 729
+bindings/flutter/lib/src/rust/api/pipeline.dart
+  s_054107b6096a7c::t_fda0264dc9f26a 16-17
+bindings/unity/Runtime/Api/PipelineResult.cs.meta
+  s_054107b6096a7c::t_6f40ac5debcef0 1-2
+bindings/python/tests/test_sdk.py
+  s_054107b6096a7c::t_b479187f61a5aa 131-165
+bindings/unity/Runtime/Api/Pipeline.cs
+  s_054107b6096a7c::t_6a63c03dbc875f 95,98-100,102,112
+CHANGELOG.md
+  s_054107b6096a7c::t_c6f3185f56fbc5 12-21,66-68
+  s_054107b6096a7c::t_f65a77aeed3934 72-73
+crates/xybrid-sdk/src/pipeline/mod.rs
+  s_054107b6096a7c::t_c0e4fd146a3b57 1748-1781
+  s_054107b6096a7c::t_ee5823fdf48ff9 297,300-301,306-310,317,321-322,1303,1316-1317,1353-1383,1641,1645,1696,1717,1737,1782-1803
+bindings/flutter/rust/src/api/pipeline.rs
+  s_054107b6096a7c::t_c6f3185f56fbc5 92-93,131,135,139-143
+README.md
+  s_054107b6096a7c::t_c6f3185f56fbc5 262,269,275-276
+crates/xybrid-ffi-facade/src/lib.rs
+  s_054107b6096a7c::t_6f64177495baed 1518,1549-1561,1563-1564,1583-1600
+  s_054107b6096a7c::t_e8d61ea02d6f3b 1104-1114,1408,1410-1413,1416,1426-1517,1601-1603,3255-3271,3273-3276,3280-3292,3294-3296,3299,3301-3352,3366-3370
+bindings/python/xybrid/_sugar.py
+  s_054107b6096a7c::t_b1bba2cedab57f 14-15,216-243,417
+bindings/apple/Sources/Xybrid/Xybrid.swift
+  s_054107b6096a7c::t_fee24b8d690a7d 724-732,734-792
+bindings/apple/Sources/Xybrid/xybrid_bolt.swift
+  s_054107b6096a7c::t_83cdb378ca30fc 434-529,1770-1776,1779-1795
+bindings/apple/include/xybrid-bolt.h
+  s_054107b6096a7c::t_7c6bcf74ea2582 196
+bindings/kotlin/bazel/jni/jni_glue.c
+  s_054107b6096a7c::t_5eb9824202c147 1202,1206,1212-1214,1216
+bindings/kotlin/bazel/jni/xybrid_bolt.h
+  s_054107b6096a7c::t_f0192141d0c99b 196
+bindings/kotlin/src/main/kotlin/ai/xybrid/Xybrid.kt
+  s_054107b6096a7c::t_c9832c99f7e20e 553-563,576-619
+bindings/kotlin/src/main/kotlin/ai/xybrid/XybridBolt.kt
+  s_054107b6096a7c::t_73cf41f8c404b5 966,1657-1788,3392-3397,3399,3403-3405,3407,3409,3412
+bindings/python/xybrid/_bolt/__init__.py
+  s_054107b6096a7c::t_ffb01fceb243ad 428,432,435,439,449,453-459,499,503,1908-2013,2804-2812,3151-3152
+bindings/python/xybrid/_bolt/__init__.pyi
+  s_054107b6096a7c::t_d69e9adc0a0a79 179-220,865-872
+bindings/python/xybrid/_bolt/_native.c
+  s_054107b6096a7c::t_16667f6e4f3499 137,2095-2096,2099-2100,2107-2110,2136-2137,4398-4519,7748-7750,7756-7757,7770-7773,7784,8677-8678,9637-9638
+bindings/unity/Runtime/Api/InferenceResult.cs
+  s_054107b6096a7c::t_21169a946651cf 162,195-222,237
+bindings/unity/Runtime/Bolt/XybridBolt.cs
+  s_054107b6096a7c::t_7df5075c64d332 1155
+bindings/unity/Runtime/Bolt/XybridPipeline.cs
+  s_054107b6096a7c::t_c7b7f299424d37 105-110,112,120-133,149
+bindings/unity/Runtime/Bolt/XybridPipelineResult.cs
+  s_054107b6096a7c::t_a1599ecc8344c4 1-58
+bindings/unity/Runtime/Bolt/XybridPipelineResult.cs.meta
+  s_054107b6096a7c::t_e8ec6fe89d8f8a 1-2
+bindings/unity/Runtime/Bolt/XybridStageResult.cs
+  s_054107b6096a7c::t_d74e61a4531d66 1-72
+bindings/unity/Runtime/Bolt/XybridStageResult.cs.meta
+  s_054107b6096a7c::t_e62085cfe50808 1-2
+crates/xybrid-bolt/src/lib.rs
+  s_054107b6096a7c::t_75951b199ae7cb 754-813,1892-1902,1904,2248-2325
+crates/xybrid-sdk/BUILD.bazel
+  s_054107b6096a7c::t_78305fd46f65f7 163-168
+crates/xybrid-sdk/tests/pipeline_stage_outputs.rs
+  s_054107b6096a7c::t_e865b50b01fe94 1-150
+docs/sdk/API_REFERENCE.md
+  s_054107b6096a7c::t_21609b4454fd3a 778-780,782-788,799-804,809,817-820,822,826-851,896-897,902-904
+tools/scripts/gen_unity_bolt_csharp.py
+  s_054107b6096a7c::t_331251d78a894c 96-97,100
+bindings/unity/Runtime/Api/PipelineResult.cs
+  s_054107b6096a7c::t_1572018335105d 1-147
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "9b06686870fec74a6e38e17de08aadb41f27efb9",
+  "prompts": {},
+  "sessions": {
+    "s_054107b6096a7c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "fdf969ad-2cae-4a65-9b1b-07602e7a13b0",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
+    }
+  }
+}
