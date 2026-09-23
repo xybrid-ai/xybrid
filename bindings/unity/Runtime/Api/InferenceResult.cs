@@ -159,21 +159,7 @@ namespace Xybrid
         /// <summary>Decode a successful bolt result into the public shape.</summary>
         internal static InferenceResult FromBolt(XybridBolt.XybridResult result)
         {
-            string text = null;
-            byte[] audio = null;
-            float[] embedding = null;
-            switch (result.Envelope.Kind)
-            {
-                case XybridBolt.XybridEnvelopeKind.Text t:
-                    text = t.Value;
-                    break;
-                case XybridBolt.XybridEnvelopeKind.Audio a:
-                    audio = a.Bytes;
-                    break;
-                case XybridBolt.XybridEnvelopeKind.Embedding e:
-                    embedding = e.Values;
-                    break;
-            }
+            DecodePayload(result.Envelope, out string text, out byte[] audio, out float[] embedding);
 
             return new InferenceResult(
                 success: true,
@@ -206,7 +192,34 @@ namespace Xybrid
                 metrics: new InferenceMetrics(0, null, null, null, null, null, Array.Empty<StageLatency>()),
                 reasoningContent: null);
 
-        private static OutputType MapOutputType(XybridBolt.XybridOutputType outputType)
+        /// <summary>
+        /// Split an envelope into the flat text / audio / embedding fields the
+        /// public result types expose. Every field but the matching one is null.
+        /// </summary>
+        internal static void DecodePayload(
+            XybridBolt.XybridEnvelope envelope,
+            out string text,
+            out byte[] audio,
+            out float[] embedding)
+        {
+            text = null;
+            audio = null;
+            embedding = null;
+            switch (envelope.Kind)
+            {
+                case XybridBolt.XybridEnvelopeKind.Text t:
+                    text = t.Value;
+                    break;
+                case XybridBolt.XybridEnvelopeKind.Audio a:
+                    audio = a.Bytes;
+                    break;
+                case XybridBolt.XybridEnvelopeKind.Embedding e:
+                    embedding = e.Values;
+                    break;
+            }
+        }
+
+        internal static OutputType MapOutputType(XybridBolt.XybridOutputType outputType)
         {
             switch (outputType)
             {
@@ -221,7 +234,7 @@ namespace Xybrid
             }
         }
 
-        private static InferenceMetrics MapMetrics(XybridBolt.XybridInferenceMetrics metrics)
+        internal static InferenceMetrics MapMetrics(XybridBolt.XybridInferenceMetrics metrics)
         {
             var stages = new List<StageLatency>(metrics.StageLatenciesMs.Length);
             foreach (XybridBolt.XybridStageLatency stage in metrics.StageLatenciesMs)

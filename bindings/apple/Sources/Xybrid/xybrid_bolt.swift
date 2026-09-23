@@ -431,6 +431,102 @@ public struct XybridDownloadStatus: Hashable, Equatable, Sendable {
     }
 }
 
+/// What one stage of a pipeline run produced.
+public struct XybridStageResult: Hashable, Equatable, Sendable {
+    /// Stage identifier from the pipeline YAML (`id:`), or the model ID when
+    /// the stage declares none. Matches [`XybridPipeline::stage_names`].
+    public var stageId: String
+    /// This stage's output, which is also the next stage's input — the
+    /// transcript of an ASR stage, the reply of an LLM stage.
+    public var envelope: XybridEnvelope
+    public var outputType: XybridOutputType
+    public var latencyMs: UInt32
+    /// Where this stage ran. Stages of one pipeline can run in different
+    /// places.
+    public var executionTarget: XybridExecutionTarget
+    /// Generation figures (TTFT, tokens per second) when this stage is a
+    /// language model; `total_ms` is the stage latency.
+    public var metrics: XybridInferenceMetrics
+
+    public init(
+        stageId: String,
+        envelope: XybridEnvelope,
+        outputType: XybridOutputType,
+        latencyMs: UInt32,
+        executionTarget: XybridExecutionTarget,
+        metrics: XybridInferenceMetrics
+    ) {
+        self.stageId = stageId
+        self.envelope = envelope
+        self.outputType = outputType
+        self.latencyMs = latencyMs
+        self.executionTarget = executionTarget
+        self.metrics = metrics
+    }
+
+    @inlinable static func decode(from reader: inout WireReader) -> XybridStageResult {
+        XybridStageResult(
+            stageId: reader.readString(),
+            envelope: XybridEnvelope.decode(from: &reader),
+            outputType: XybridOutputType(rawValue: reader.readI32())!,
+            latencyMs: reader.readU32(),
+            executionTarget: XybridExecutionTarget(rawValue: reader.readI32())!,
+            metrics: XybridInferenceMetrics.decode(from: &reader)
+        )
+    }
+
+    @inlinable func encode(to writer: inout WireWriter) {
+        writer.writeString(self.stageId)
+        self.envelope.encode(to: &writer)
+        writer.writeI32(self.outputType.rawValue)
+        writer.writeU32(self.latencyMs)
+        writer.writeI32(self.executionTarget.rawValue)
+        self.metrics.encode(to: &writer)
+    }
+}
+
+/// Result of [`XybridPipeline::run`]: the final output plus every stage's own
+/// output, so a voice pipeline can show the transcript and the reply as well
+/// as play the audio.
+public struct XybridPipelineResult: Hashable, Equatable, Sendable {
+    /// The final stage's output — the same envelope as the last entry of
+    /// `stages`.
+    public var envelope: XybridEnvelope
+    public var outputType: XybridOutputType
+    /// Wall-clock time of the whole run.
+    public var latencyMs: UInt32
+    /// Every executed stage, in order.
+    public var stages: [XybridStageResult]
+
+    public init(
+        envelope: XybridEnvelope,
+        outputType: XybridOutputType,
+        latencyMs: UInt32,
+        stages: [XybridStageResult]
+    ) {
+        self.envelope = envelope
+        self.outputType = outputType
+        self.latencyMs = latencyMs
+        self.stages = stages
+    }
+
+    @inlinable static func decode(from reader: inout WireReader) -> XybridPipelineResult {
+        XybridPipelineResult(
+            envelope: XybridEnvelope.decode(from: &reader),
+            outputType: XybridOutputType(rawValue: reader.readI32())!,
+            latencyMs: reader.readU32(),
+            stages: reader.readArray { reader in XybridStageResult.decode(from: &reader) }
+        )
+    }
+
+    @inlinable func encode(to writer: inout WireWriter) {
+        self.envelope.encode(to: &writer)
+        writer.writeI32(self.outputType.rawValue)
+        writer.writeU32(self.latencyMs)
+        writer.writeArray(self.stages) { writer, boltffiValue0 in boltffiValue0.encode(to: &writer) }
+    }
+}
+
 public struct XybridStreamToken: Hashable, Equatable, Sendable {
     public var token: String
     public var tokenId: Int64?
@@ -1612,6 +1708,112 @@ public final class XybridModel {
             defer { boltffi_free_buf(boltffiError) }
             throw boltffiDecodeOwnedBuf(boltffiError.ptr, Int(boltffiError.len)) { boltffiErrorReader in XybridError.decode(from: &boltffiErrorReader) }
         }
+    }
+}
+
+public final class XybridPipeline {
+    @usableFromInline let handle: UInt64
+
+    @usableFromInline init(handle: UInt64) {
+        self.handle = handle
+    }
+
+    deinit {
+        boltffi_release_class_xybrid_bolt_xybrid_pipeline(handle)
+    }
+
+    /// Parse and load a pipeline from YAML content.
+    public init(fromYaml yaml: String) throws {
+        let boltffiYamlBytes = boltffiEncode { boltffiYamlWriter in boltffiYamlWriter.writeString(yaml) }
+        let boltffiHandle = try boltffiYamlBytes.withUnsafeBufferPointer { boltffiYamlBuffer in
+            var boltffiResult: UInt64 = UInt64()
+            let boltffiError = boltffi_init_class_xybrid_bolt_xybrid_pipeline_from_yaml(boltffiYamlBuffer.baseAddress!, UInt(boltffiYamlBuffer.count), &boltffiResult)
+            if boltffiError.ptr != nil || Int(boltffiError.len) != 0 {
+                defer { boltffi_free_buf(boltffiError) }
+                throw boltffiDecodeOwnedBuf(boltffiError.ptr, Int(boltffiError.len)) { boltffiErrorReader in XybridError.decode(from: &boltffiErrorReader) }
+            }
+            return boltffiResult
+        }
+        self.handle = boltffiHandle
+    }
+
+    /// Read, parse, and load a pipeline from a YAML file.
+    public init(fromFile path: String) throws {
+        let boltffiPathBytes = boltffiEncode { boltffiPathWriter in boltffiPathWriter.writeString(path) }
+        let boltffiHandle = try boltffiPathBytes.withUnsafeBufferPointer { boltffiPathBuffer in
+            var boltffiResult: UInt64 = UInt64()
+            let boltffiError = boltffi_init_class_xybrid_bolt_xybrid_pipeline_from_file(boltffiPathBuffer.baseAddress!, UInt(boltffiPathBuffer.count), &boltffiResult)
+            if boltffiError.ptr != nil || Int(boltffiError.len) != 0 {
+                defer { boltffi_free_buf(boltffiError) }
+                throw boltffiDecodeOwnedBuf(boltffiError.ptr, Int(boltffiError.len)) { boltffiErrorReader in XybridError.decode(from: &boltffiErrorReader) }
+            }
+            return boltffiResult
+        }
+        self.handle = boltffiHandle
+    }
+
+    /// Load a pipeline bundle.
+    public init(fromBundle path: String) throws {
+        let boltffiPathBytes = boltffiEncode { boltffiPathWriter in boltffiPathWriter.writeString(path) }
+        let boltffiHandle = try boltffiPathBytes.withUnsafeBufferPointer { boltffiPathBuffer in
+            var boltffiResult: UInt64 = UInt64()
+            let boltffiError = boltffi_init_class_xybrid_bolt_xybrid_pipeline_from_bundle(boltffiPathBuffer.baseAddress!, UInt(boltffiPathBuffer.count), &boltffiResult)
+            if boltffiError.ptr != nil || Int(boltffiError.len) != 0 {
+                defer { boltffi_free_buf(boltffiError) }
+                throw boltffiDecodeOwnedBuf(boltffiError.ptr, Int(boltffiError.len)) { boltffiErrorReader in XybridError.decode(from: &boltffiErrorReader) }
+            }
+            return boltffiResult
+        }
+        self.handle = boltffiHandle
+    }
+
+    /// Execute every stage, downloading any missing models first, and return
+    /// each stage's output alongside the final one.
+    ///
+    /// Of `options`, only `correlation_id` applies to a pipeline run. Setting
+    /// `generation_config` or `abort_on` fails with `ConfigError` rather than
+    /// being ignored; per-stage generation settings belong in the YAML.
+    public func run(envelope: XybridEnvelope, options: XybridRunOptions?) throws -> XybridPipelineResult {
+        let boltffiEnvelopeBytes = boltffiEncode { boltffiEnvelopeWriter in envelope.encode(to: &boltffiEnvelopeWriter) }
+        return try boltffiEnvelopeBytes.withUnsafeBufferPointer { boltffiEnvelopeBuffer in
+            let boltffiOptionsBytes = boltffiEncode { boltffiOptionsWriter in boltffiOptionsWriter.writeOptional(options) { boltffiOptionsWriter, boltffiValue0 in boltffiValue0.encode(to: &boltffiOptionsWriter) } }
+            return try boltffiOptionsBytes.withUnsafeBufferPointer { boltffiOptionsBuffer in
+                var boltffiResult: FfiBuf_u8 = FfiBuf_u8()
+                let boltffiError = boltffi_method_class_xybrid_bolt_xybrid_pipeline_run(
+                    self.handle,
+                    boltffiEnvelopeBuffer.baseAddress!,
+                    UInt(boltffiEnvelopeBuffer.count),
+                    boltffiOptionsBuffer.baseAddress!,
+                    UInt(boltffiOptionsBuffer.count),
+                    &boltffiResult
+                )
+                if boltffiError.ptr != nil || Int(boltffiError.len) != 0 {
+                    defer { boltffi_free_buf(boltffiError) }
+                    throw boltffiDecodeOwnedBuf(boltffiError.ptr, Int(boltffiError.len)) { boltffiErrorReader in XybridError.decode(from: &boltffiErrorReader) }
+                }
+                defer { boltffi_free_buf(boltffiResult) }
+                return boltffiDecodeOwnedBuf(boltffiResult.ptr, Int(boltffiResult.len)) { boltffiReader in XybridPipelineResult.decode(from: &boltffiReader) }
+            }
+        }
+    }
+
+    /// Pipeline name from the YAML definition, if present.
+    public func name() -> String? {
+        let boltffiResult = boltffi_method_class_xybrid_bolt_xybrid_pipeline_name(self.handle)
+        defer { boltffi_free_buf(boltffiResult) }
+        return boltffiDecodeOwnedBuf(boltffiResult.ptr, Int(boltffiResult.len)) { boltffiReader in boltffiReader.readOptional { boltffiReader in boltffiReader.readString() } }
+    }
+
+    /// Stage identifiers in execution order.
+    public func stageNames() -> [String] {
+        let boltffiResult = boltffi_method_class_xybrid_bolt_xybrid_pipeline_stage_names(self.handle)
+        defer { boltffi_free_buf(boltffiResult) }
+        return boltffiDecodeOwnedBuf(boltffiResult.ptr, Int(boltffiResult.len)) { boltffiReader in boltffiReader.readArray { boltffiReader in boltffiReader.readString() } }
+    }
+
+    /// Number of stages in the pipeline.
+    public func stageCount() -> UInt32 {
+        return boltffi_method_class_xybrid_bolt_xybrid_pipeline_stage_count(self.handle)
     }
 }
 

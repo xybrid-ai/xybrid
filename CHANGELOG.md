@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Multi-stage pipelines on Swift, Kotlin and Unity.** Those SDKs had no
+  pipelines at all — only Flutter and Rust did. `XybridPipeline` (`Pipeline`
+  on Unity) loads from YAML, a file or a bundle, lists its stages and runs
+  them; Swift and Kotlin add async conveniences (#502).
+- **A pipeline run returns every stage's output, not only the last one.** An
+  `ASR -> LLM -> TTS` run now exposes the transcript and the reply alongside
+  the audio: `result.stage("asr")?.text`. Each stage carries its own latency,
+  where it ran, and generation metrics for a language-model stage. In Rust,
+  `StageTiming` gains an `output` envelope. Flutter still returns the final
+  stage only.
+
 - **Live ASR on Swift, Kotlin and Unity.** Those SDKs could transcribe a
   finished buffer but had no live-capture surface at all — only Flutter did.
   `model.stream(config)` now opens a session: feed microphone PCM in, read
@@ -52,9 +63,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   file-count based (the Hub gives no sizes up front, so `total_bytes` is null),
   but `downloaded_bytes` is now exact.
 - **`fetch_extracted` resolves once**, not twice, for bundle models.
+- Pipeline stages are now named by their YAML `id:` rather than the model ID,
+  so per-stage latencies and results match `stageNames()` (#502). Telemetry
+  stage names change the same way.
 
 ### Changed
 
+- **Breaking (Rust):** `pipeline::StageTiming` has a new public `output`
+  field, so code that builds one with a struct literal must set it.
 - **Breaking (Rust):** `ModelLoader::load_with_progress`,
   `RegistryClient::fetch` and `RegistryClient::fetch_extracted` take a
   `Fn(DownloadStatus)` callback instead of `Fn(f32)`. Read `status.progress`

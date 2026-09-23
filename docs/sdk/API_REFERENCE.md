@@ -735,7 +735,7 @@ both legs, so it is the only way to tell them apart.
 
 ---
 
-## 4. XybridPipelineRef / XybridPipeline
+## 4. XybridPipeline
 
 Multi-stage inference pipelines.
 
@@ -750,12 +750,8 @@ class XybridPipeline {
 
   // Properties
   String? get name;
-  bool get isReady;
   BigInt get stageCount;
   List<String> get stageNames;
-
-  // Load models
-  Future<void> load();
 
   // Execution
   Future<XybridResult> run({required Envelope envelope});
@@ -765,27 +761,93 @@ class XybridPipeline {
 ### Kotlin
 
 ```kotlin
-class XybridPipelineRef {
+class XybridPipeline {
   companion object {
-    fun fromYaml(yamlContent: String): XybridPipelineRef
-    fun fromFile(path: String): XybridPipelineRef
+    fun fromYaml(yaml: String): XybridPipeline
+    fun fromFile(path: String): XybridPipeline
+    fun fromBundle(path: String): XybridPipeline
+
+    suspend fun fromYamlAsync(yaml: String): XybridPipeline
+    suspend fun fromFileAsync(path: String): XybridPipeline
+    suspend fun fromBundleAsync(path: String): XybridPipeline
   }
 
-  val name: String?
-  val stageIds: List<String>
-
-  suspend fun load(): XybridPipeline
+  fun name(): String?
+  fun stageCount(): UInt
+  fun stageNames(): List<String>
+  fun run(envelope: XybridEnvelope, options: XybridRunOptions?): XybridPipelineResult
+  fun run(envelope: XybridEnvelope): XybridPipelineResult
+  suspend fun runAsync(envelope: XybridEnvelope, options: XybridRunOptions? = null): XybridPipelineResult
 }
 
-class XybridPipeline {
-  val name: String?
-  val isReady: Boolean
-  val stageCount: Long
-  val stageNames: List<String>
+// Sugar on the result
+fun XybridPipelineResult.stage(id: String): XybridStageResult?
+val XybridPipelineResult.text: String?
+val XybridPipelineResult.audioBytes: ByteArray?
+val XybridStageResult.text: String?
+val XybridStageResult.audioBytes: ByteArray?
+```
 
-  suspend fun run(envelope: Envelope): PipelineResult
+### Swift
+
+```swift
+let pipeline = try await XybridPipeline.fromYamlAsync(yaml)
+print(pipeline.name() ?? "unnamed")
+print(pipeline.stageNames())
+
+let result = try await pipeline.runAsync(envelope: input)
+transcript.text = result.stage("asr")?.text   // what it heard
+reply.text = result.stage("llm")?.text        // what it answered
+try player.play(result.audioBytes)            // the final output
+
+for stage in result.stages {
+    print("\(stage.stageId): \(stage.latencyMs) ms on \(stage.executionTarget)")
 }
 ```
+
+The generated handle also provides blocking `init(fromYaml:)`,
+`init(fromFile:)`, `init(fromBundle:)`, and `run(envelope:options:)` calls.
+
+### C# (Unity)
+
+```csharp
+using var pipeline = Pipeline.FromYaml(yaml);
+Debug.Log($"{pipeline.Name}: {pipeline.StageCount} stages");
+
+PipelineResult result = pipeline.Run(input);
+transcript.text = result.Stage("asr")?.Text;
+reply.text = result.Stage("llm")?.Text;
+foreach (StageResult stage in result.Stages)
+{
+    Debug.Log($"{stage.StageId}: {stage.LatencyMs} ms on {stage.ExecutionTarget}");
+}
+```
+
+### Pipeline result
+
+A run returns every stage's output, not only the final one, so an
+`ASR -> LLM -> TTS` pipeline exposes the transcript and the reply as well as
+the audio.
+
+| `XybridPipelineResult` | |
+|---|---|
+| `envelope` | The final stage's output (same as the last stage's `envelope`) |
+| `outputType` | Type of the final output |
+| `latencyMs` | Wall-clock time of the whole run |
+| `stages` | Every executed stage, in order |
+
+| `XybridStageResult` | |
+|---|---|
+| `stageId` | The YAML `id:`, or the model ID when the stage declares none; matches `stageNames()` |
+| `envelope` | This stage's output, which is also the next stage's input |
+| `outputType` | Type of this stage's output |
+| `latencyMs` | This stage's latency |
+| `executionTarget` | Where this stage ran (`local` / `cloud`); stages can differ |
+| `metrics` | TTFT and tokens per second when the stage is a language model |
+
+Of `XybridRunOptions`, only `correlationId` applies to a pipeline run. Setting
+`generationConfig` or `abortOn` fails with `ConfigError` instead of being
+ignored; per-stage generation settings belong in the pipeline YAML.
 
 ### Rust
 
@@ -824,20 +886,22 @@ impl Xybrid {
 
 | Method | Dart | Kotlin | Swift | C# |
 |--------|------|--------|-------|----|
-| `fromYaml()` | ✅ | — | — | — |
-| `fromFile()` | ✅ | — | — | — |
-| `fromBundle()` | ✅ | — | — | — |
-| `name` | ✅ | — | — | — |
-| `isReady` | ✅ | — | — | — |
-| `stageCount` | ✅ | — | — | — |
-| `stageNames` | ✅ | — | — | — |
-| `load()` | ✅ | — | — | — |
-| `run()` | ✅ | — | — | — |
-| `runWithOptions()` / `run_with_options()` | Rust ✅ | planned | planned | planned |
+| `fromYaml()` | ✅ | ✅ | ✅ | ✅ |
+| `fromFile()` | ✅ | ✅ | ✅ | ✅ |
+| `fromBundle()` | ✅ | ✅ | ✅ | ✅ |
+| `name` | ✅ | ✅ | ✅ | ✅ |
+| `stageCount` | ✅ | ✅ | ✅ | ✅ |
+| `stageNames` | ✅ | ✅ | ✅ | ✅ |
+| `run()` | ✅ | ✅ | ✅ | ✅ |
+| `run(envelope, options)` / `run_with_options()` | Rust ✅ | ✅ | ✅ | — |
+| per-stage outputs (`result.stages`) | Rust ✅ | ✅ | ✅ | ✅ |
 | `runPipelineStreamingWithOptions()` / `run_pipeline_streaming_with_options()` | Rust ✅ | planned | planned | planned |
 
-> **Note**: The Dart SDK currently uses a single `XybridPipeline` class (no separate `PipelineRef`).
-> The Kotlin spec shows the two-step `PipelineRef` → `Pipeline` pattern which is the target design.
+All foreign SDKs intentionally expose one pipeline handle. Their constructors
+collapse Rust's `PipelineRef` parse/resolve step, avoiding a second opaque FFI
+handle that exists only to return the first one. Dart still returns the final
+stage only, as an `XybridResult` whose `metrics.stageLatenciesMs` lists each
+stage's latency.
 
 ---
 

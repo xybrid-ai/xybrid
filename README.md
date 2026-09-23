@@ -257,17 +257,23 @@ final result = await pipeline.run(XybridEnvelope.audio(bytes: audioBytes, sample
 
 **Kotlin:**
 ```kotlin
-// Multi-model pipeline (MMP) support coming soon — use single model loading for now
+val pipeline = XybridPipeline.fromYamlAsync(yamlString)
+val result = pipeline.runAsync(inputEnvelope)
+val transcript = result.stage("asr")?.text  // every stage's output, not just the last
 ```
 
 **Swift:**
 ```swift
-// Multi-model pipeline (MMP) support coming soon — use single model loading for now
+let pipeline = try await XybridPipeline.fromYamlAsync(yamlString)
+let result = try await pipeline.runAsync(envelope: inputEnvelope)
+let transcript = result.stage("asr")?.text  // every stage's output, not just the last
 ```
 
 **Unity (C#):**
 ```csharp
-// Multi-model pipeline (MMP) support coming soon — use single model loading for now
+using var pipeline = Pipeline.FromYaml(yamlString);
+PipelineResult result = pipeline.Run(inputEnvelope);
+string transcript = result.Stage("asr")?.Text;  // every stage's output, not just the last
 ```
 
 **Rust:**
@@ -383,7 +389,7 @@ See the [model metadata docs](docs/sdk/API_REFERENCE.md) for the full schema, or
 | Model Download & Caching | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Hardware Acceleration | Metal, ANE | CPU | Metal, ANE | CPU, opt-in Vulkan | CPU |
 
-**SDK MMP support:** Flutter ✅ · Rust ✅ · Kotlin 🔜 · Swift 🔜 · Unity 🔜
+**SDK MMP support:** Flutter ✅ · Rust ✅ · Kotlin ✅ · Swift ✅ · Unity ✅
 
 **Tool calling:** local models call functions you define — your tools are plain
 data and the loop is your code. See the
