@@ -1153,6 +1153,196 @@ impl XybridDownload {
 }
 
 // ============================================================================
+// Live ASR session
+// ============================================================================
+//
+// Named `XybridStreamingSession`, and opened through its own constructor
+// rather than `XybridModel::stream`, because BoltFFI treats opaque types as
+// handle IDs that only the `impl` block they are defined on can return —
+// the same constraint that keeps `ModelLoader` out of this crate.
+
+/// How voice-activity detection (VAD) chunking is resolved for a session.
+#[data]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum XybridVadMode {
+    /// Fixed time-window chunking; no voice-activity detection.
+    Off,
+    /// VAD on, using the bundled default Silero model.
+    Default,
+    /// VAD on, using a Silero model from this directory.
+    Custom { model_dir: String },
+}
+
+impl From<XybridVadMode> for facade::VadMode {
+    fn from(mode: XybridVadMode) -> Self {
+        match mode {
+            XybridVadMode::Off => facade::VadMode::Off,
+            XybridVadMode::Default => facade::VadMode::Default,
+            XybridVadMode::Custom { model_dir } => facade::VadMode::Custom { model_dir },
+        }
+    }
+}
+
+/// Configuration for a live ASR session.
+///
+/// The model is not named here — it comes from the loaded `XybridModel` the
+/// session is opened on. This only configures *how* the audio is chunked.
+#[data]
+#[derive(Clone, Debug)]
+pub struct XybridStreamingConfig {
+    /// Sample rate of the audio you will feed. Must be 16000; the ASR
+    /// backends are fixed there, so anything else is rejected rather than
+    /// silently resampled.
+    pub sample_rate: u32,
+    /// Voice-activity-detection mode.
+    pub vad: XybridVadMode,
+    /// VAD sensitivity, 0.0–1.0. Ignored when `vad` is `Off`.
+    pub vad_threshold: f32,
+    /// Language hint (e.g. `"en"`); null uses the model default.
+    pub language: Option<String>,
+    /// Whisper encoder context in mel frames; null uses the model default.
+    pub audio_ctx: Option<u32>,
+}
+
+impl From<XybridStreamingConfig> for facade::StreamingConfig {
+    fn from(config: XybridStreamingConfig) -> Self {
+        Self {
+            sample_rate: config.sample_rate,
+            vad: config.vad.into(),
+            vad_threshold: config.vad_threshold,
+            language: config.language,
+            audio_ctx: config.audio_ctx,
+        }
+    }
+}
+
+/// A partial transcript emitted while audio is streaming.
+#[data]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct XybridPartialResult {
+    /// Best-effort transcript so far. Cumulative, not a delta — render it in
+    /// place of the previous partial rather than appending.
+    pub text: String,
+    /// `true` once this span is committed and will not change.
+    pub is_stable: bool,
+    /// Monotonic chunk sequence number this result corresponds to.
+    pub chunk_sequence: u64,
+    /// Audio covered so far, in milliseconds.
+    pub audio_duration_ms: u64,
+}
+
+impl From<facade::PartialResult> for XybridPartialResult {
+    fn from(p: facade::PartialResult) -> Self {
+        Self {
+            text: p.text,
+            is_stable: p.is_stable,
+            chunk_sequence: p.chunk_sequence,
+            audio_duration_ms: p.audio_duration_ms,
+        }
+    }
+}
+
+/// Ring-buffer depth for a partial-transcript stream.
+///
+/// Partials arrive at rolling-window rate (a few per second at most) and each
+/// one supersedes the last, so a host this far behind can afford to drop
+/// frames rather than back-pressure the transcriber.
+const PARTIAL_STREAM_CAPACITY: usize = 64;
+
+/// A live ASR session: feed microphone PCM in, read partial transcripts out.
+///
+/// This is the live-capture surface. `XybridModel::run` transcribes a
+/// finished buffer; this transcribes audio as it arrives, which is what
+/// dictation and captioning need.
+///
+/// Audio must be PCM **f32, mono, 16 kHz**. Converting from the platform's
+/// microphone format is the caller's job.
+pub struct XybridStreamingSession {
+    inner: std::sync::Arc<facade::AsrSession>,
+}
+
+#[export]
+impl XybridStreamingSession {
+    /// Open a session on an already-loaded ASR model.
+    ///
+    /// Starts a worker thread and warms the weights, so the first spoken
+    /// words do not pay the cold-start cost. Returns an error for a model
+    /// that does not support streaming, or a sample rate other than 16000.
+    pub fn for_model(
+        model: &XybridModel,
+        config: XybridStreamingConfig,
+    ) -> Result<Self, XybridError> {
+        let inner = model
+            .inner
+            .stream(config.into())
+            .map_err(XybridError::from)?;
+        Ok(Self { inner })
+    }
+
+    /// Feed PCM f32 mono 16 kHz samples.
+    ///
+    /// Hands the buffer to the worker and returns; transcription happens
+    /// there, never on the caller's thread. Blocks only when the queue is
+    /// full, which back-pressures a producer feeding faster than the model
+    /// can keep up.
+    pub fn feed(&self, samples: Vec<f32>) -> Result<(), XybridError> {
+        self.inner.feed(samples).map_err(XybridError::from)
+    }
+
+    /// Pushed partial transcripts, closing once the session ends.
+    ///
+    /// Generated as an `AsyncStream` in Swift, a `Flow` in Kotlin, an
+    /// `IAsyncEnumerable` in C# and an iterable subscription in Python.
+    ///
+    /// A partial produced before subscribing is delivered immediately, so
+    /// audio fed before the stream is attached is never silently lost, and
+    /// subscribing to a finished session closes at once instead of hanging.
+    #[ffi_stream(item = XybridPartialResult)]
+    pub fn partials(&self) -> std::sync::Arc<EventSubscription<XybridPartialResult>> {
+        let subscription = std::sync::Arc::new(EventSubscription::<XybridPartialResult>::new(
+            PARTIAL_STREAM_CAPACITY,
+        ));
+        let producer = std::sync::Arc::clone(&subscription);
+        self.inner.watch(move |event| match event {
+            facade::AsrEvent::Partial(partial) => {
+                producer.push_event(partial.into());
+            }
+            facade::AsrEvent::Finished => producer.unsubscribe(),
+        });
+        subscription
+    }
+
+    /// Finalize: drain buffered audio and return the complete transcript.
+    ///
+    /// The session is over afterwards — `feed` fails and the partial stream
+    /// closes. Blocks until the last chunk is transcribed, so call it off the
+    /// UI thread.
+    pub fn flush(&self) -> Result<String, XybridError> {
+        self.inner.flush().map_err(XybridError::from)
+    }
+
+    /// Reset to transcribe fresh audio without reloading the model.
+    pub fn reset(&self) -> Result<(), XybridError> {
+        self.inner.reset().map_err(XybridError::from)
+    }
+
+    /// Stop the session and release the model, discarding buffered audio.
+    ///
+    /// Idempotent. Use [`Self::flush`] when you want the transcript — this is
+    /// the "user walked away" path. Named `cancel` rather than `close`
+    /// because BoltFFI already gives every handle a generated `close()` for
+    /// the host's disposal idiom.
+    pub fn cancel(&self) {
+        self.inner.cancel();
+    }
+
+    /// Whether the session is still accepting audio.
+    pub fn is_running(&self) -> bool {
+        self.inner.is_running()
+    }
+}
+
+// ============================================================================
 // Cancellation
 // ============================================================================
 

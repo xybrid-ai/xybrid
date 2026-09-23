@@ -444,6 +444,117 @@ coroutine or a UI thread.
 
 ---
 
+## 2c. XybridStreamingSession
+
+Live-capture ASR: feed microphone PCM in, read partial transcripts out.
+
+This is a different surface from one-shot transcription. `XybridModel.run()`
+takes a finished audio buffer and returns one transcript; a session takes
+audio *as it arrives* and emits a running transcript, which is what dictation
+and live captioning need.
+
+Audio must be PCM **float32, mono, 16 kHz**. Converting from the platform's
+microphone format is the caller's job — deliberately kept out of the FFI
+layer, where it would have to be re-solved per binding.
+
+### Swift
+
+```swift
+let model = try await Xybrid.model("whisper-tiny").load()
+let session = try model.stream(config: .voiceActivity(language: "en"))
+
+Task {
+    for await partial in session.partials() {
+        label.text = partial.text           // cumulative; render in place
+    }
+}
+
+// From the AVAudioEngine tap, already converted to 16 kHz mono Float32:
+try session.feed(samples: pcm)
+
+// When the user stops talking:
+let transcript = try session.flush()
+```
+
+### Kotlin
+
+```kotlin
+val model = Xybrid.model("whisper-tiny").load()
+val session = model.stream(streamingConfigWithVad(language = "en"))
+
+scope.launch {
+    session.partials().collect { partial -> textView.text = partial.text }
+}
+
+// From the AudioRecord loop, converted to float mono 16 kHz:
+session.feed(pcm)
+
+val transcript = session.flush()
+```
+
+### C#
+
+```csharp
+using var session = model.Stream(StreamingConfigs.VoiceActivity(language: "en"));
+
+// Drive the UI from the partial stream.
+await foreach (var partial in session.Partials(cancellationToken))
+{
+    label.text = partial.Text;
+}
+
+// From the Microphone clip, converted to float mono 16 kHz:
+session.Feed(pcm);
+
+string transcript = session.Flush();
+```
+
+### Dart
+
+Flutter reaches the same capability through its own session type, which
+predates this one:
+
+```dart
+final session = await model.stream(config);
+session.subscribe().listen((partial) => setState(() => _text = partial.text));
+session.feed(pcm);
+final transcript = await session.flush();
+```
+
+### Implementation Status
+
+| Method | Dart | Kotlin | Swift | C# |
+|--------|------|--------|-------|----|
+| open a session | ✅ | ✅ | ✅ | ✅ |
+| `feed()` | ✅ | ✅ | ✅ | ✅ |
+| `partials()` | ✅ | ✅ | ✅ | ✅ |
+| `flush()` | ✅ | ✅ | ✅ | ✅ |
+| `reset()` | ✅ | ✅ | ✅ | ✅ |
+| `cancel()` | — | ✅ | ✅ | ✅ |
+
+### Notes
+
+`partials()` is generated from one BoltFFI stream declaration, so it arrives
+as an `AsyncStream` in Swift, a `Flow` in Kotlin, an `IAsyncEnumerable` in C#
+and an iterable subscription in Python. A partial produced before you
+subscribe is delivered immediately — `feed()` returns straight away, so the
+first transcripts routinely land before the stream is attached, and dropping
+them would lose the opening words of every utterance.
+
+`flush()` ends the session and returns the full transcript. `cancel()` ends it
+and discards the audio — the "user walked away" path. It is named `cancel`
+rather than `close` because BoltFFI already generates a `close()` on every
+handle for the host's disposal idiom.
+
+Partial text is **cumulative, not a delta**: render each one in place of the
+previous, don't append.
+
+VAD (voice-activity detection) chunking cuts on speech boundaries instead of a
+fixed clock, which avoids the stutter you get when a window lands mid-word. It
+costs a small extra model loaded alongside the ASR one.
+
+---
+
 ## 3. XybridModel
 
 Loaded model instance for running inference.

@@ -610,6 +610,42 @@ private final class XybridTokenStreamState: @unchecked Sendable {
 }
 
 public extension XybridModel {
+    /// Open a live ASR session: feed microphone PCM in, read partial
+    /// transcripts out.
+    ///
+    /// This is the live-capture surface. ``run(envelope:)`` transcribes a
+    /// finished buffer; this transcribes speech as it arrives, which is what
+    /// dictation and live captioning need.
+    ///
+    /// Audio must be PCM **Float32, mono, 16 kHz** — converting from the
+    /// microphone's format is the caller's job.
+    ///
+    /// ```swift
+    /// let session = try model.stream()
+    /// Task {
+    ///     for await partial in session.partials() {
+    ///         label.text = partial.text
+    ///     }
+    /// }
+    /// // from the audio callback:
+    /// try session.feed(samples: pcm)
+    /// // when the user stops talking:
+    /// let transcript = try session.flush()
+    /// ```
+    ///
+    /// - Parameter config: chunking options. The default is fixed-window
+    ///   chunking at 16 kHz with the model's own language; pass
+    ///   ``XybridStreamingConfig/voiceActivity(language:)`` to chunk on speech
+    ///   boundaries instead.
+    /// - Throws: ``XybridError/streamingNotSupported`` if this is not an ASR
+    ///   model, or ``XybridError/configError(message:)`` for a sample rate
+    ///   other than 16 kHz.
+    func stream(
+        config: XybridStreamingConfig = .default
+    ) throws -> XybridStreamingSession {
+        try XybridStreamingSession(forModel: self, config: config)
+    }
+
     /// Run inference with the model's default options.
     ///
     /// Convenience over `run(envelope:options:)` so simple call sites stay
@@ -799,6 +835,47 @@ public typealias StreamToken = XybridStreamToken
 // parameter means spelling out all nine. These factories default the rest.
 // They're static funcs rather than a defaulted `init` because an extension
 // init with the same argument labels would collide with the generated one.
+
+public extension XybridStreamingConfig {
+    /// Fixed time-window chunking at the required 16 kHz, using the model's
+    /// own language. The starting point for dictation.
+    static var `default`: XybridStreamingConfig {
+        XybridStreamingConfig(
+            sampleRate: 16_000,
+            vad: .off,
+            vadThreshold: 0.5,
+            language: nil,
+            audioCtx: nil
+        )
+    }
+
+    /// Chunk on speech boundaries using voice-activity detection, rather than
+    /// on a fixed clock.
+    ///
+    /// Better transcripts for natural speech — a window cut mid-word is what
+    /// makes fixed chunking stutter — at the cost of loading a small VAD
+    /// model alongside the ASR one.
+    ///
+    /// - Parameters:
+    ///   - language: language hint such as `"en"`; `nil` uses the model default.
+    ///   - threshold: VAD sensitivity, 0.0–1.0. Lower catches quieter speech
+    ///     and more background noise with it.
+    ///   - modelDir: directory holding a Silero VAD model; `nil` uses the
+    ///     bundled default.
+    static func voiceActivity(
+        language: String? = nil,
+        threshold: Float = 0.5,
+        modelDir: String? = nil
+    ) -> XybridStreamingConfig {
+        XybridStreamingConfig(
+            sampleRate: 16_000,
+            vad: modelDir.map { .custom(modelDir: $0) } ?? .default,
+            vadThreshold: threshold,
+            language: language,
+            audioCtx: nil
+        )
+    }
+}
 
 public extension XybridGenerationConfig {
     /// Build a config, defaulting every field you don't set to the model's own

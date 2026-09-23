@@ -167,6 +167,40 @@ string transcription = model.RunAudio(microphoneBytes, sampleRate: 16000);
 
 ---
 
+## Live Transcription
+
+`run()` transcribes a finished audio buffer. A session transcribes speech *as
+it arrives*, which is what dictation and live captioning need.
+
+Audio must be PCM **float32, mono, 16 kHz** — converting from the platform's
+microphone format is the caller's job.
+
+```csharp
+using var session = model.Stream(StreamingConfigs.VoiceActivity(language: "en"));
+
+// Drive the UI from the partial stream.
+await foreach (var partial in session.Partials(cancellationToken))
+{
+    label.text = partial.Text;
+}
+
+// From the Microphone clip, converted to float mono 16 kHz:
+session.Feed(pcm);
+
+string transcript = session.Flush();
+```
+
+Partial text is **cumulative, not a delta**: render each one in place of the
+previous rather than appending. A partial produced before you subscribe is
+delivered immediately, so the opening words of an utterance are never lost.
+
+`flush()` ends the session and returns the full transcript; `cancel()` ends it
+and discards the audio. Voice-activity detection cuts chunks on speech
+boundaries instead of a fixed clock, which avoids the stutter you get when a
+window lands mid-word.
+
+---
+
 ## Result Handling
 
 ```csharp

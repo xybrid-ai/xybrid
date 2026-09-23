@@ -419,6 +419,75 @@ typealias ModelLoader = XybridModelLoader
 typealias Model = XybridModel
 
 /**
+ * Open a live ASR session: feed microphone PCM in, read partial transcripts
+ * out.
+ *
+ * This is the live-capture surface. [XybridModel.run] transcribes a finished
+ * buffer; this transcribes speech as it arrives, which is what dictation and
+ * live captioning need.
+ *
+ * Audio must be PCM **float, mono, 16 kHz** — converting from the recorder's
+ * format is the caller's job.
+ *
+ * ```kotlin
+ * val session = model.stream()
+ * scope.launch {
+ *     session.partials().collect { partial -> textView.text = partial.text }
+ * }
+ * // from the audio callback:
+ * session.feed(pcm)
+ * // when the user stops talking:
+ * val transcript = session.flush()
+ * ```
+ *
+ * @param config chunking options; defaults to fixed-window chunking at
+ *   16 kHz. Use [streamingConfigWithVad] to chunk on speech boundaries.
+ * @throws XybridError.StreamingNotSupported if this is not an ASR model, or
+ *   [XybridError.ConfigError] for a sample rate other than 16 kHz.
+ */
+fun XybridModel.stream(
+    config: XybridStreamingConfig = defaultStreamingConfig(),
+): XybridStreamingSession = XybridStreamingSession(this, config)
+
+/**
+ * Fixed time-window chunking at the required 16 kHz, using the model's own
+ * language. The starting point for dictation.
+ */
+fun defaultStreamingConfig(): XybridStreamingConfig = XybridStreamingConfig(
+    sampleRate = 16_000u,
+    vad = XybridVadMode.Off,
+    vadThreshold = 0.5f,
+    language = null,
+    audioCtx = null,
+)
+
+/**
+ * Chunk on speech boundaries using voice-activity detection, rather than on a
+ * fixed clock.
+ *
+ * Better transcripts for natural speech — a window cut mid-word is what makes
+ * fixed chunking stutter — at the cost of loading a small VAD model alongside
+ * the ASR one.
+ *
+ * @param language language hint such as `"en"`; null uses the model default.
+ * @param threshold VAD sensitivity, 0.0–1.0. Lower catches quieter speech,
+ *   and more background noise with it.
+ * @param modelDir directory holding a Silero VAD model; null uses the bundled
+ *   default.
+ */
+fun streamingConfigWithVad(
+    language: String? = null,
+    threshold: Float = 0.5f,
+    modelDir: String? = null,
+): XybridStreamingConfig = XybridStreamingConfig(
+    sampleRate = 16_000u,
+    vad = if (modelDir != null) XybridVadMode.Custom(modelDir) else XybridVadMode.Default,
+    vadThreshold = threshold,
+    language = language,
+    audioCtx = null,
+)
+
+/**
  * Run inference with the model's default options.
  *
  * Convenience over the generated [XybridModel.run] (which takes an

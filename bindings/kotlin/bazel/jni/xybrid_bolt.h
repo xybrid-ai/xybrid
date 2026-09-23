@@ -135,6 +135,10 @@ typedef int32_t ___XybridThermalState;
 #define XYBRID_THERMAL_STATE_WARM ((___XybridThermalState)1)
 #define XYBRID_THERMAL_STATE_HOT ((___XybridThermalState)2)
 #define XYBRID_THERMAL_STATE_CRITICAL ((___XybridThermalState)3)
+typedef uint32_t ___XybridVadMode;
+#define XYBRID_VAD_MODE_OFF ((___XybridVadMode)0)
+#define XYBRID_VAD_MODE_DEFAULT ((___XybridVadMode)1)
+#define XYBRID_VAD_MODE_CUSTOM ((___XybridVadMode)2)
 void boltffi_release_class_xybrid_bolt_xybrid_download(uint64_t handle);
 uint64_t boltffi_init_class_xybrid_bolt_xybrid_download_from_registry(const uint8_t *id_ptr, uintptr_t id_len);
 uint64_t boltffi_init_class_xybrid_bolt_xybrid_download_from_registry_with_platform(const uint8_t *id_ptr, uintptr_t id_len, const uint8_t *platform_ptr, uintptr_t platform_len);
@@ -142,6 +146,13 @@ FfiBuf_u8 boltffi_method_class_xybrid_bolt_xybrid_download_status(uint64_t recei
 bool boltffi_method_class_xybrid_bolt_xybrid_download_is_finished(uint64_t receiver);
 FfiBuf_u8 boltffi_method_class_xybrid_bolt_xybrid_download_error(uint64_t receiver);
 FfiStatus boltffi_method_class_xybrid_bolt_xybrid_download_cancel(uint64_t receiver);
+void boltffi_release_class_xybrid_bolt_xybrid_streaming_session(uint64_t handle);
+FfiBuf_u8 boltffi_init_class_xybrid_bolt_xybrid_streaming_session_for_model(uint64_t model, const uint8_t *config_ptr, uintptr_t config_len, uint64_t *return_out);
+FfiBuf_u8 boltffi_method_class_xybrid_bolt_xybrid_streaming_session_feed(uint64_t receiver, const float *samples_ptr, uintptr_t samples_len);
+FfiBuf_u8 boltffi_method_class_xybrid_bolt_xybrid_streaming_session_flush(uint64_t receiver, FfiBuf_u8 *return_out);
+FfiBuf_u8 boltffi_method_class_xybrid_bolt_xybrid_streaming_session_reset(uint64_t receiver);
+FfiStatus boltffi_method_class_xybrid_bolt_xybrid_streaming_session_cancel(uint64_t receiver);
+bool boltffi_method_class_xybrid_bolt_xybrid_streaming_session_is_running(uint64_t receiver);
 void boltffi_release_class_xybrid_bolt_xybrid_cancellation_token(uint64_t handle);
 uint64_t boltffi_init_class_xybrid_bolt_xybrid_cancellation_token_new(void);
 FfiStatus boltffi_method_class_xybrid_bolt_xybrid_cancellation_token_cancel(uint64_t receiver);
@@ -240,6 +251,12 @@ WaitResult boltffi_stream_xybrid_bolt_xybrid_download_progress_wait(uint64_t sub
 void boltffi_stream_xybrid_bolt_xybrid_download_progress_poll(uint64_t subscription, uint64_t callback_data, void (*callback)(uint64_t, StreamPollResult));
 void boltffi_stream_xybrid_bolt_xybrid_download_progress_unsubscribe(uint64_t subscription);
 void boltffi_stream_xybrid_bolt_xybrid_download_progress_free(uint64_t subscription);
+uint64_t boltffi_stream_xybrid_bolt_xybrid_streaming_session_partials_subscribe(uint64_t receiver);
+FfiBuf_u8 boltffi_stream_xybrid_bolt_xybrid_streaming_session_partials_pop_batch(uint64_t subscription, uintptr_t max_count);
+WaitResult boltffi_stream_xybrid_bolt_xybrid_streaming_session_partials_wait(uint64_t subscription, uint32_t timeout_milliseconds);
+void boltffi_stream_xybrid_bolt_xybrid_streaming_session_partials_poll(uint64_t subscription, uint64_t callback_data, void (*callback)(uint64_t, StreamPollResult));
+void boltffi_stream_xybrid_bolt_xybrid_streaming_session_partials_unsubscribe(uint64_t subscription);
+void boltffi_stream_xybrid_bolt_xybrid_streaming_session_partials_free(uint64_t subscription);
 uint64_t boltffi_stream_xybrid_bolt_xybrid_model_download_progress_subscribe(uint64_t receiver);
 FfiBuf_u8 boltffi_stream_xybrid_bolt_xybrid_model_download_progress_pop_batch(uint64_t subscription, uintptr_t max_count);
 WaitResult boltffi_stream_xybrid_bolt_xybrid_model_download_progress_wait(uint64_t subscription, uint32_t timeout_milliseconds);

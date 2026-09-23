@@ -227,6 +227,51 @@ classes:
         status: { rust: implemented, dart: planned, kotlin: implemented, swift: implemented, csharp: implemented }
 
   # -------------------------------------------------------------------
+  # 2c. XybridStreamingSession
+  # -------------------------------------------------------------------
+  # Live-capture ASR: feed microphone PCM in, read partial transcripts out.
+  # Distinct from one-shot transcription of a finished buffer (XybridModel.run).
+  # Flutter reaches the same capability through its own FfiStreamSession.
+  XybridStreamingSession:
+    type: class
+    section: "2c. XybridStreamingSession"
+    methods:
+      stream:
+        # Opened from a loaded model: `model.stream(config)` on Swift/Kotlin,
+        # `model.Stream(config)` on Unity. Spelled `XybridStreamingSession
+        # .forModel(model, config)` on the generated surface, because BoltFFI
+        # only lets an impl block return its own opaque type.
+        params: [{ name: config, type: XybridStreamingConfig }]
+        return: XybridStreamingSession
+        status: { rust: implemented, dart: na, kotlin: implemented, swift: implemented, csharp: implemented }
+      feed:
+        params: [{ name: samples, type: "float[]" }]
+        # PCM f32 mono 16 kHz. Hands the buffer to the session worker and
+        # returns; transcription never runs on the caller's thread.
+        status: { rust: implemented, dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+      partials:
+        return: "Stream<XybridPartialResult>"
+        # AsyncStream (Swift) / Flow (Kotlin) / IAsyncEnumerable (C#) /
+        # iterable subscription (Python). A partial produced before
+        # subscribing is delivered immediately, and the stream closes when the
+        # session ends. Dart uses FfiStreamSession.subscribe instead.
+        status: { rust: implemented, dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+      flush:
+        return: String
+        # Drains buffered audio and returns the full transcript; ends the session.
+        status: { rust: implemented, dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+      reset:
+        # Start a fresh utterance without reloading the model.
+        status: { rust: implemented, dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+      cancel:
+        # Stop and discard buffered audio. Named `cancel`, not `close`:
+        # BoltFFI already generates a `close()` on every handle for disposal.
+        status: { rust: implemented, dart: na, kotlin: implemented, swift: implemented, csharp: implemented }
+      isRunning:
+        return: bool
+        status: { rust: implemented, dart: na, kotlin: implemented, swift: implemented, csharp: implemented }
+
+  # -------------------------------------------------------------------
   # 3. XybridModel
   # -------------------------------------------------------------------
   XybridModel:

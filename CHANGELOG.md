@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Live ASR on Swift, Kotlin and Unity.** Those SDKs could transcribe a
+  finished buffer but had no live-capture surface at all — only Flutter did.
+  `model.stream(config)` now opens a session: feed microphone PCM in, read
+  partial transcripts out of a pushed stream (`AsyncStream` on Swift, `Flow`
+  on Kotlin, `IAsyncEnumerable` on C#, an iterable on Python), then `flush()`
+  for the full transcript or `cancel()` to discard. Voice-activity chunking is
+  configurable, and audio is PCM float32 mono 16 kHz.
+
 - **Download progress with bytes, on every surface.** `DownloadStatus` now
   carries `downloaded_bytes` and `total_bytes` alongside the fraction, so apps
   can render megabytes, speed and time remaining instead of a bare percentage.

@@ -164,6 +164,36 @@ string transcription = model.RunAudio(microphoneBytes, sampleRate: 16000);
 
 ---
 
+## 实时转写
+
+`run()` 转写的是已经录完的音频缓冲区；而会话（session）在语音到达的同时进行转写，
+这正是听写和实时字幕所需要的能力。
+
+音频必须是 PCM **float32、单声道、16 kHz**——从平台麦克风格式转换由调用方负责。
+
+```csharp
+using var session = model.Stream(StreamingConfigs.VoiceActivity(language: "en"));
+
+// Drive the UI from the partial stream.
+await foreach (var partial in session.Partials(cancellationToken))
+{
+    label.text = partial.Text;
+}
+
+// From the Microphone clip, converted to float mono 16 kHz:
+session.Feed(pcm);
+
+string transcript = session.Flush();
+```
+
+部分转写文本是**累积的，而不是增量**：请用新的结果替换上一条显示，而不是追加。
+在订阅之前产生的部分结果会立即送达，因此一句话开头的词不会丢失。
+
+`flush()` 结束会话并返回完整转写文本；`cancel()` 结束会话并丢弃音频。
+语音活动检测按语音边界切分，而不是按固定时钟，可避免窗口落在词中间造成的断续。
+
+---
+
 ## 结果处理
 
 ```csharp

@@ -460,6 +460,138 @@ JNIEXPORT void JNICALL Java_ai_xybrid_Native_boltffi_1method_1class_1xybrid_1bol
     return;
 }
 
+JNIEXPORT void JNICALL Java_ai_xybrid_Native_boltffi_1release_1class_1xybrid_1bolt_1xybrid_1streaming_1session(JNIEnv *env, jclass cls, jlong handle) {
+    (void)cls;
+
+    (void)env;
+    boltffi_release_class_xybrid_bolt_xybrid_streaming_session(handle);
+
+    return;
+}
+
+JNIEXPORT jlong JNICALL Java_ai_xybrid_Native_boltffi_1init_1class_1xybrid_1bolt_1xybrid_1streaming_1session_1for_1model(JNIEnv *env, jclass cls, jlong model, jobject config, jint __boltffi_config_len) {
+    (void)cls;
+
+    void *__boltffi_config_ptr = NULL;
+    uint64_t __boltffi_return = (uint64_t){0};
+
+    if (!boltffi_jni_direct_buffer_address(env, config, (jlong)__boltffi_config_len, &__boltffi_config_ptr)) {
+        goto __boltffi_error;
+    }
+
+    FfiBuf_u8 error = boltffi_init_class_xybrid_bolt_xybrid_streaming_session_for_model(model, (const uint8_t *)__boltffi_config_ptr, (uintptr_t)__boltffi_config_len, &__boltffi_return);
+
+    if (error.ptr != NULL || error.len != 0) {
+        boltffi_jni_throw_error_buffer(env, error);
+        return 0;
+    }
+
+    return (jlong)__boltffi_return;
+__boltffi_error:
+    return 0;
+}
+
+JNIEXPORT void JNICALL Java_ai_xybrid_Native_boltffi_1method_1class_1xybrid_1bolt_1xybrid_1streaming_1session_1feed(JNIEnv *env, jclass cls, jlong receiver, jfloatArray samples) {
+    (void)cls;
+
+    jfloat *__boltffi_samples_ptr = NULL;
+    jsize __boltffi_samples_len = 0;
+    jfloat __boltffi_samples_stack[8];
+    bool __boltffi_samples_needs_release = false;
+
+    if (samples == NULL) {
+        boltffi_jni_throw_illegal_argument(env, "BoltFFI array argument was null");
+        goto __boltffi_error;
+    }
+    __boltffi_samples_len = (*env)->GetArrayLength(env, samples);
+    if (__boltffi_samples_len <= (jsize)8) {
+        (*env)->GetFloatArrayRegion(env, samples, 0, __boltffi_samples_len, __boltffi_samples_stack);
+        if ((*env)->ExceptionCheck(env)) {
+            goto __boltffi_error;
+        }
+        __boltffi_samples_ptr = __boltffi_samples_stack;
+    } else {
+        __boltffi_samples_ptr = (*env)->GetFloatArrayElements(env, samples, NULL);
+        if (__boltffi_samples_ptr == NULL) {
+            goto __boltffi_error;
+        }
+        __boltffi_samples_needs_release = true;
+    }
+
+    FfiBuf_u8 error = boltffi_method_class_xybrid_bolt_xybrid_streaming_session_feed(receiver, (const float *)__boltffi_samples_ptr, (uintptr_t)__boltffi_samples_len);
+
+    if (__boltffi_samples_ptr != NULL) {
+        if (__boltffi_samples_needs_release) {
+            (*env)->ReleaseFloatArrayElements(env, samples, __boltffi_samples_ptr, JNI_ABORT);
+        }
+        __boltffi_samples_ptr = NULL;
+    }
+    if (error.ptr != NULL || error.len != 0) {
+        boltffi_jni_throw_error_buffer(env, error);
+        return;
+    }
+
+    return;
+__boltffi_error:
+    if (__boltffi_samples_ptr != NULL) {
+        if (__boltffi_samples_needs_release) {
+            (*env)->ReleaseFloatArrayElements(env, samples, __boltffi_samples_ptr, JNI_ABORT);
+        }
+        __boltffi_samples_ptr = NULL;
+    }
+    return;
+}
+
+JNIEXPORT jbyteArray JNICALL Java_ai_xybrid_Native_boltffi_1method_1class_1xybrid_1bolt_1xybrid_1streaming_1session_1flush(JNIEnv *env, jclass cls, jlong receiver) {
+    (void)cls;
+
+    FfiBuf_u8 __boltffi_return = (FfiBuf_u8){0};
+
+    FfiBuf_u8 error = boltffi_method_class_xybrid_bolt_xybrid_streaming_session_flush(receiver, &__boltffi_return);
+
+    if (error.ptr != NULL || error.len != 0) {
+        boltffi_jni_throw_error_buffer(env, error);
+        return NULL;
+    }
+
+    return boltffi_jni_buffer_to_byte_array(env, __boltffi_return);
+}
+
+JNIEXPORT void JNICALL Java_ai_xybrid_Native_boltffi_1method_1class_1xybrid_1bolt_1xybrid_1streaming_1session_1reset(JNIEnv *env, jclass cls, jlong receiver) {
+    (void)cls;
+
+    FfiBuf_u8 error = boltffi_method_class_xybrid_bolt_xybrid_streaming_session_reset(receiver);
+
+    if (error.ptr != NULL || error.len != 0) {
+        boltffi_jni_throw_error_buffer(env, error);
+        return;
+    }
+
+    return;
+}
+
+JNIEXPORT void JNICALL Java_ai_xybrid_Native_boltffi_1method_1class_1xybrid_1bolt_1xybrid_1streaming_1session_1cancel(JNIEnv *env, jclass cls, jlong receiver) {
+    (void)cls;
+
+    FfiStatus __boltffi_status = boltffi_method_class_xybrid_bolt_xybrid_streaming_session_cancel(receiver);
+
+    if (__boltffi_status.code != 0) {
+        boltffi_jni_throw_status(env, __boltffi_status);
+        return;
+    }
+
+    return;
+}
+
+JNIEXPORT jboolean JNICALL Java_ai_xybrid_Native_boltffi_1method_1class_1xybrid_1bolt_1xybrid_1streaming_1session_1is_1running(JNIEnv *env, jclass cls, jlong receiver) {
+    (void)cls;
+
+    (void)env;
+    bool __boltffi_result = boltffi_method_class_xybrid_bolt_xybrid_streaming_session_is_running(receiver);
+
+    return (jboolean)__boltffi_result;
+}
+
 JNIEXPORT void JNICALL Java_ai_xybrid_Native_boltffi_1release_1class_1xybrid_1bolt_1xybrid_1cancellation_1token(JNIEnv *env, jclass cls, jlong handle) {
     (void)cls;
 
@@ -1828,6 +1960,60 @@ JNIEXPORT void JNICALL Java_ai_xybrid_Native_boltffi_1stream_1xybrid_1bolt_1xybr
 
     (void)env;
     boltffi_stream_xybrid_bolt_xybrid_download_progress_free(subscription);
+
+    return;
+}
+
+JNIEXPORT jlong JNICALL Java_ai_xybrid_Native_boltffi_1stream_1xybrid_1bolt_1xybrid_1streaming_1session_1partials_1subscribe(JNIEnv *env, jclass cls, jlong receiver) {
+    (void)cls;
+
+    (void)env;
+    uint64_t __boltffi_result = boltffi_stream_xybrid_bolt_xybrid_streaming_session_partials_subscribe(receiver);
+
+    return (jlong)__boltffi_result;
+}
+
+JNIEXPORT jbyteArray JNICALL Java_ai_xybrid_Native_boltffi_1stream_1xybrid_1bolt_1xybrid_1streaming_1session_1partials_1pop_1batch(JNIEnv *env, jclass cls, jlong subscription, jlong max_count) {
+    (void)cls;
+
+    (void)env;
+    FfiBuf_u8 __boltffi_result = boltffi_stream_xybrid_bolt_xybrid_streaming_session_partials_pop_batch(subscription, max_count);
+
+    return boltffi_jni_buffer_to_byte_array(env, __boltffi_result);
+}
+
+JNIEXPORT jint JNICALL Java_ai_xybrid_Native_boltffi_1stream_1xybrid_1bolt_1xybrid_1streaming_1session_1partials_1wait(JNIEnv *env, jclass cls, jlong subscription, jint timeout_milliseconds) {
+    (void)cls;
+
+    (void)env;
+    WaitResult __boltffi_result = boltffi_stream_xybrid_bolt_xybrid_streaming_session_partials_wait(subscription, timeout_milliseconds);
+
+    return (jint)__boltffi_result;
+}
+
+JNIEXPORT void JNICALL Java_ai_xybrid_Native_boltffi_1stream_1xybrid_1bolt_1xybrid_1streaming_1session_1partials_1poll(JNIEnv *env, jclass cls, jlong subscription, jlong callback_data) {
+    (void)cls;
+
+    (void)env;
+    boltffi_stream_xybrid_bolt_xybrid_streaming_session_partials_poll(subscription, callback_data, boltffi_jni_continuation_callback);
+
+    return;
+}
+
+JNIEXPORT void JNICALL Java_ai_xybrid_Native_boltffi_1stream_1xybrid_1bolt_1xybrid_1streaming_1session_1partials_1unsubscribe(JNIEnv *env, jclass cls, jlong subscription) {
+    (void)cls;
+
+    (void)env;
+    boltffi_stream_xybrid_bolt_xybrid_streaming_session_partials_unsubscribe(subscription);
+
+    return;
+}
+
+JNIEXPORT void JNICALL Java_ai_xybrid_Native_boltffi_1stream_1xybrid_1bolt_1xybrid_1streaming_1session_1partials_1free(JNIEnv *env, jclass cls, jlong subscription) {
+    (void)cls;
+
+    (void)env;
+    boltffi_stream_xybrid_bolt_xybrid_streaming_session_partials_free(subscription);
 
     return;
 }

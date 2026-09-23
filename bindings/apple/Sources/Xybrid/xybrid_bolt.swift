@@ -563,6 +563,98 @@ public struct XybridVoiceInfo: Hashable, Equatable, Sendable {
     }
 }
 
+/// Configuration for a live ASR session.
+///
+/// The model is not named here — it comes from the loaded `XybridModel` the
+/// session is opened on. This only configures *how* the audio is chunked.
+public struct XybridStreamingConfig: Hashable, Equatable, Sendable {
+    /// Sample rate of the audio you will feed. Must be 16000; the ASR
+    /// backends are fixed there, so anything else is rejected rather than
+    /// silently resampled.
+    public var sampleRate: UInt32
+    /// Voice-activity-detection mode.
+    public var vad: XybridVadMode
+    /// VAD sensitivity, 0.0–1.0. Ignored when `vad` is `Off`.
+    public var vadThreshold: Float
+    /// Language hint (e.g. `"en"`); null uses the model default.
+    public var language: String?
+    /// Whisper encoder context in mel frames; null uses the model default.
+    public var audioCtx: UInt32?
+
+    public init(
+        sampleRate: UInt32,
+        vad: XybridVadMode,
+        vadThreshold: Float,
+        language: String?,
+        audioCtx: UInt32?
+    ) {
+        self.sampleRate = sampleRate
+        self.vad = vad
+        self.vadThreshold = vadThreshold
+        self.language = language
+        self.audioCtx = audioCtx
+    }
+
+    @inlinable static func decode(from reader: inout WireReader) -> XybridStreamingConfig {
+        XybridStreamingConfig(
+            sampleRate: reader.readU32(),
+            vad: XybridVadMode.decode(from: &reader),
+            vadThreshold: reader.readF32(),
+            language: reader.readOptional { reader in reader.readString() },
+            audioCtx: reader.readOptional { reader in reader.readU32() }
+        )
+    }
+
+    @inlinable func encode(to writer: inout WireWriter) {
+        writer.writeU32(self.sampleRate)
+        self.vad.encode(to: &writer)
+        writer.writeF32(self.vadThreshold)
+        writer.writeOptional(self.language) { writer, boltffiValue0 in writer.writeString(boltffiValue0) }
+        writer.writeOptional(self.audioCtx) { writer, boltffiValue0 in writer.writeU32(boltffiValue0) }
+    }
+}
+
+/// A partial transcript emitted while audio is streaming.
+public struct XybridPartialResult: Hashable, Equatable, Sendable {
+    /// Best-effort transcript so far. Cumulative, not a delta — render it in
+    /// place of the previous partial rather than appending.
+    public var text: String
+    /// `true` once this span is committed and will not change.
+    public var isStable: Bool
+    /// Monotonic chunk sequence number this result corresponds to.
+    public var chunkSequence: UInt64
+    /// Audio covered so far, in milliseconds.
+    public var audioDurationMs: UInt64
+
+    public init(
+        text: String,
+        isStable: Bool,
+        chunkSequence: UInt64,
+        audioDurationMs: UInt64
+    ) {
+        self.text = text
+        self.isStable = isStable
+        self.chunkSequence = chunkSequence
+        self.audioDurationMs = audioDurationMs
+    }
+
+    @inlinable static func decode(from reader: inout WireReader) -> XybridPartialResult {
+        XybridPartialResult(
+            text: reader.readString(),
+            isStable: reader.readBool(),
+            chunkSequence: reader.readU64(),
+            audioDurationMs: reader.readU64()
+        )
+    }
+
+    @inlinable func encode(to writer: inout WireWriter) {
+        writer.writeString(self.text)
+        writer.writeBool(self.isStable)
+        writer.writeU64(self.chunkSequence)
+        writer.writeU64(self.audioDurationMs)
+    }
+}
+
 /// Errors surfaced across the FFI boundary. Variants mirror
 /// [`facade::Error`] — the facade owns the SDK→FFI translation; this enum
 /// only re-decorates it for the BoltFFI generator (proc macros must live
@@ -884,6 +976,42 @@ public enum XybridThermalState: Int32, Hashable, Sendable, CaseIterable {
     }
 }
 
+/// How voice-activity detection (VAD) chunking is resolved for a session.
+public enum XybridVadMode: Hashable, Equatable, Sendable {
+    /// Fixed time-window chunking; no voice-activity detection.
+    case off
+    /// VAD on, using the bundled default Silero model.
+    case `default`
+    /// VAD on, using a Silero model from this directory.
+    case custom(modelDir: String)
+
+    @inlinable static func decode(from reader: inout WireReader) -> XybridVadMode {
+        let tag = reader.readU32()
+        switch tag {
+        case 0:
+            return .off
+        case 1:
+            return .`default`
+        case 2:
+            return .custom(modelDir: reader.readString())
+        default:
+            fatalError("Invalid XybridVadMode tag: \(tag)")
+        }
+    }
+
+    @inlinable func encode(to writer: inout WireWriter) {
+        switch self {
+        case .off:
+            writer.writeU32(0)
+        case .`default`:
+            writer.writeU32(1)
+        case let .custom(modelDir):
+            writer.writeU32(2)
+            writer.writeString(modelDir)
+        }
+    }
+}
+
 public final class XybridDownload {
     @usableFromInline let handle: UInt64
 
@@ -948,6 +1076,98 @@ public final class XybridDownload {
     /// a no-op once the download is terminal.
     public func cancel() {
         boltffi_method_class_xybrid_bolt_xybrid_download_cancel(self.handle)
+    }
+}
+
+public final class XybridStreamingSession {
+    @usableFromInline let handle: UInt64
+
+    @usableFromInline init(handle: UInt64) {
+        self.handle = handle
+    }
+
+    deinit {
+        boltffi_release_class_xybrid_bolt_xybrid_streaming_session(handle)
+    }
+
+    /// Open a session on an already-loaded ASR model.
+    ///
+    /// Starts a worker thread and warms the weights, so the first spoken
+    /// words do not pay the cold-start cost. Returns an error for a model
+    /// that does not support streaming, or a sample rate other than 16000.
+    public init(forModel model: XybridModel, config: XybridStreamingConfig) throws {
+        let boltffiConfigBytes = boltffiEncode { boltffiConfigWriter in config.encode(to: &boltffiConfigWriter) }
+        let boltffiHandle = try boltffiConfigBytes.withUnsafeBufferPointer { boltffiConfigBuffer in
+            var boltffiResult: UInt64 = UInt64()
+            let boltffiError = boltffi_init_class_xybrid_bolt_xybrid_streaming_session_for_model(
+                model.handle,
+                boltffiConfigBuffer.baseAddress!,
+                UInt(boltffiConfigBuffer.count),
+                &boltffiResult
+            )
+            if boltffiError.ptr != nil || Int(boltffiError.len) != 0 {
+                defer { boltffi_free_buf(boltffiError) }
+                throw boltffiDecodeOwnedBuf(boltffiError.ptr, Int(boltffiError.len)) { boltffiErrorReader in XybridError.decode(from: &boltffiErrorReader) }
+            }
+            return boltffiResult
+        }
+        self.handle = boltffiHandle
+    }
+
+    /// Feed PCM f32 mono 16 kHz samples.
+    ///
+    /// Hands the buffer to the worker and returns; transcription happens
+    /// there, never on the caller's thread. Blocks only when the queue is
+    /// full, which back-pressures a producer feeding faster than the model
+    /// can keep up.
+    public func feed(samples: [Float]) throws {
+        _ = samples.withUnsafeBufferPointer { boltffiSamplesBuffer in
+            let boltffiError = boltffi_method_class_xybrid_bolt_xybrid_streaming_session_feed(self.handle, boltffiSamplesBuffer.baseAddress, UInt(boltffiSamplesBuffer.count))
+            if boltffiError.ptr != nil || Int(boltffiError.len) != 0 {
+                defer { boltffi_free_buf(boltffiError) }
+                throw boltffiDecodeOwnedBuf(boltffiError.ptr, Int(boltffiError.len)) { boltffiErrorReader in XybridError.decode(from: &boltffiErrorReader) }
+            }
+        }
+    }
+
+    /// Finalize: drain buffered audio and return the complete transcript.
+    ///
+    /// The session is over afterwards — `feed` fails and the partial stream
+    /// closes. Blocks until the last chunk is transcribed, so call it off the
+    /// UI thread.
+    public func flush() throws -> String {
+        var boltffiResult: FfiBuf_u8 = FfiBuf_u8()
+        let boltffiError = boltffi_method_class_xybrid_bolt_xybrid_streaming_session_flush(self.handle, &boltffiResult)
+        if boltffiError.ptr != nil || Int(boltffiError.len) != 0 {
+            defer { boltffi_free_buf(boltffiError) }
+            throw boltffiDecodeOwnedBuf(boltffiError.ptr, Int(boltffiError.len)) { boltffiErrorReader in XybridError.decode(from: &boltffiErrorReader) }
+        }
+        defer { boltffi_free_buf(boltffiResult) }
+        return boltffiDecodeOwnedBuf(boltffiResult.ptr, Int(boltffiResult.len)) { boltffiReader in boltffiReader.readString() }
+    }
+
+    /// Reset to transcribe fresh audio without reloading the model.
+    public func reset() throws {
+        let boltffiError = boltffi_method_class_xybrid_bolt_xybrid_streaming_session_reset(self.handle)
+        if boltffiError.ptr != nil || Int(boltffiError.len) != 0 {
+            defer { boltffi_free_buf(boltffiError) }
+            throw boltffiDecodeOwnedBuf(boltffiError.ptr, Int(boltffiError.len)) { boltffiErrorReader in XybridError.decode(from: &boltffiErrorReader) }
+        }
+    }
+
+    /// Stop the session and release the model, discarding buffered audio.
+    ///
+    /// Idempotent. Use [`Self::flush`] when you want the transcript — this is
+    /// the "user walked away" path. Named `cancel` rather than `close`
+    /// because BoltFFI already gives every handle a generated `close()` for
+    /// the host's disposal idiom.
+    public func cancel() {
+        boltffi_method_class_xybrid_bolt_xybrid_streaming_session_cancel(self.handle)
+    }
+
+    /// Whether the session is still accepting audio.
+    public func isRunning() -> Bool {
+        return boltffi_method_class_xybrid_bolt_xybrid_streaming_session_is_running(self.handle)
     }
 }
 
@@ -1942,6 +2162,55 @@ extension XybridDownload {
                 poll: boltffi_stream_xybrid_bolt_xybrid_download_progress_poll,
                 unsubscribe: boltffi_stream_xybrid_bolt_xybrid_download_progress_unsubscribe,
                 free: boltffi_stream_xybrid_bolt_xybrid_download_progress_free,
+                atomicCompareExchange: boltffi_atomic_u8_cas,
+                yieldItem: { item in _ = continuation.yield(item) },
+                finish: { continuation.finish() }
+            )
+            continuation.onTermination = { @Sendable _ in context.requestTermination() }
+            context.start()
+        }
+    }
+}
+
+
+extension XybridStreamingSession {
+    /// Pushed partial transcripts, closing once the session ends.
+    ///
+    /// Generated as an `AsyncStream` in Swift, a `Flow` in Kotlin, an
+    /// `IAsyncEnumerable` in C# and an iterable subscription in Python.
+    ///
+    /// A partial produced before subscribing is delivered immediately, so
+    /// audio fed before the stream is attached is never silently lost, and
+    /// subscribing to a finished session closes at once instead of hanging.
+    public func partials() -> _Concurrency.AsyncStream<XybridPartialResult> {
+        _Concurrency.AsyncStream<XybridPartialResult>(bufferingPolicy: .unbounded) { continuation in
+            let boltffiSubscription = boltffi_stream_xybrid_bolt_xybrid_streaming_session_partials_subscribe(self.handle)
+            guard boltffiSubscription != 0 else {
+                continuation.finish()
+                return
+            }
+            let context = BoltFFIStreamContext<XybridPartialResult>(
+                subscription: boltffiSubscription,
+                batchSize: 16,
+                readBatch: { subscription, batchSize in
+                    return boltffiReadWireStreamBatch(
+                        subscription: subscription,
+                        batchSize: batchSize,
+                        popBatch: boltffi_stream_xybrid_bolt_xybrid_streaming_session_partials_pop_batch,
+                        freeBuf: boltffi_free_buf
+                    ) { reader in
+                        let boltffiStreamCount = Int(reader.readU32())
+                        var boltffiStreamBatch = [XybridPartialResult]()
+                        boltffiStreamBatch.reserveCapacity(boltffiStreamCount)
+                        for _ in 0..<boltffiStreamCount {
+                            boltffiStreamBatch.append(XybridPartialResult.decode(from: &reader))
+                        }
+                        return boltffiStreamBatch
+                    }
+                },
+                poll: boltffi_stream_xybrid_bolt_xybrid_streaming_session_partials_poll,
+                unsubscribe: boltffi_stream_xybrid_bolt_xybrid_streaming_session_partials_unsubscribe,
+                free: boltffi_stream_xybrid_bolt_xybrid_streaming_session_partials_free,
                 atomicCompareExchange: boltffi_atomic_u8_cas,
                 yieldItem: { item in _ = continuation.yield(item) },
                 finish: { continuation.finish() }
