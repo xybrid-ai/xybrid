@@ -1121,7 +1121,7 @@ public final class XybridStreamingSession {
     /// full, which back-pressures a producer feeding faster than the model
     /// can keep up.
     public func feed(samples: [Float]) throws {
-        _ = samples.withUnsafeBufferPointer { boltffiSamplesBuffer in
+        try samples.withUnsafeBufferPointer { boltffiSamplesBuffer in
             let boltffiError = boltffi_method_class_xybrid_bolt_xybrid_streaming_session_feed(self.handle, boltffiSamplesBuffer.baseAddress, UInt(boltffiSamplesBuffer.count))
             if boltffiError.ptr != nil || Int(boltffiError.len) != 0 {
                 defer { boltffi_free_buf(boltffiError) }
