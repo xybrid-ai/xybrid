@@ -241,9 +241,15 @@ check_status_values() {
     # which buries the warnings it exists to surface.
     local valid_statuses="implemented partial stub planned na"
 
-    # Extract all status values
+    # Extract all status values.
+    #
+    # The recursive walk also lands on any map that merely *contains* a key
+    # named `status` -- a `methods:` block holding a method called `status()`,
+    # for example -- and would then read that method's whole definition as if
+    # it were a per-SDK status map. Keeping only maps whose values are all
+    # scalars selects the real status maps and skips definition blocks.
     local statuses
-    statuses=$(yq '.. | select(has("status")) | .status | to_entries | .[].value' "$API_SURFACE" 2>/dev/null | sort -u || true)
+    statuses=$(yq '.. | select(has("status")) | .status | select(tag == "!!map") | select([.[] | tag] | all_c(. == "!!str")) | to_entries | .[].value' "$API_SURFACE" 2>/dev/null | sort -u || true)
 
     for status in $statuses; do
         if echo "$valid_statuses" | grep -qw "$status"; then

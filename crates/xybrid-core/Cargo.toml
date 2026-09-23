@@ -25,11 +25,11 @@ path = "src/lib.rs"
 #   `xybrid-llama-sys`  : raw FFI + cmake build (Phase 1)
 #   `xybrid-llama`   : safe RAII + typed errors + streaming trampoline (Phase 2)
 #   `xybrid-core`    : thin adapter glue (Phase 3 reduction)
-xybrid-llama-sys = { path = "../llama-cpp-sys", version = "0.7.0", optional = true }
-xybrid-llama = { path = "../xybrid-llama", version = "0.7.0", optional = true }
+xybrid-llama-sys = { path = "../llama-cpp-sys", version = "0.9.0", optional = true }
+xybrid-llama = { path = "../xybrid-llama", version = "0.9.0", optional = true }
 # Safe whisper.cpp wrappers. Gated behind `asr-whispercpp`, which also pulls
 # `llm-llamacpp` — that is where the shared ggml comes from.
-xybrid-whisper = { path = "../xybrid-whisper", version = "0.7.0", optional = true }
+xybrid-whisper = { path = "../xybrid-whisper", version = "0.9.0", optional = true }
 # Real Jinja engine for the llama.cpp chat-template fallback: when llama.cpp's
 # hardcoded non-Jinja matcher rejects a GGUF's embedded template (returns -1),
 # we render that template here instead. Gated with the deps below into
@@ -115,7 +115,7 @@ rayon = { version = "1.8", optional = true }  # Bounded mobile compute pool (can
 # MLX adapter dep (US-010+). `llm-mlx` uses the non-linking portion of
 # `xybrid-mlx` on every platform, while `llm-mlx-runtime` forwards
 # `xybrid-mlx/bindings` for Apple Silicon runtime execution.
-xybrid-mlx = { path = "../xybrid-mlx", version = "0.7.0", optional = true }
+xybrid-mlx = { path = "../xybrid-mlx", version = "0.9.0", optional = true }
 
 # minijinja (declared above with the llama.cpp deps) is also pulled in by
 # `llm-mlx` for the MLX adapter's chat template renderer (US-014) — the
@@ -146,6 +146,21 @@ test-util = []
 ort-download = []  # no-op marker (was: ort/download-binaries + ort/tls-native)
 ort-dynamic = []   # no-op marker (was: ort/load-dynamic)
 ort-coreml = ["ort/coreml"]                                 # Apple Neural Engine acceleration
+# Native Core ML adapter. This coexists with `ort-coreml`, which is ONNX
+# Runtime's Core ML execution provider rather than the native model format.
+coreml = [
+    "objc2-core-ml/MLDictionaryFeatureProvider",
+    "objc2-core-ml/MLFeatureDescription",
+    "objc2-core-ml/MLFeatureProvider",
+    "objc2-core-ml/MLFeatureType",
+    "objc2-core-ml/MLFeatureValue",
+    "objc2-core-ml/MLModel",
+    "objc2-core-ml/MLModelConfiguration",
+    "objc2-core-ml/MLModelDescription",
+    "objc2-core-ml/MLModel_MLModelCompilation",
+    "objc2-core-ml/MLMultiArray",
+    "objc2-core-ml/MLMultiArrayConstraint",
+]
 
 # Candle (Pure Rust ML)
 candle = ["dep:candle-core", "dep:candle-nn", "dep:candle-transformers", "dep:safetensors", "dep:byteorder", "dep:num-traits", "dep:rayon"]
@@ -267,6 +282,11 @@ required-features = ["llm-llamacpp"]
 name = "lfm2_230m_tools_streaming"
 # Real inference — needs llama.cpp linked.
 required-features = ["llm-llamacpp"]
+
+[[example]]
+name = "coreml_linear"
+# Native Core ML inference on Apple platforms.
+required-features = ["coreml"]
 
 [[example]]
 name = "functiongemma_tools"

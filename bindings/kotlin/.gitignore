@@ -1,6 +1,6 @@
 # Native libraries under libs/ are build outputs, not source. They are
 # staged from the Bazel AAR (`bazel build -c opt //bindings/kotlin:xybrid_kotlin_aar`):
-#   - libxybrid-bolt.so  — Bazel build of crates/xybrid-bolt
+#   - libxybrid_bolt.so  — Bazel build of crates/xybrid-bolt
 #   - libonnxruntime.so  — copied from vendor/ort-android/ (the tracked source)
 #   - libc++_shared.so   — copied from the NDK sysroot
 # Releases ship them via the GitHub Release asset → Maven Central, not from

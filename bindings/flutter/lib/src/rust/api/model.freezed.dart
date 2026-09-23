@@ -18,21 +18,21 @@ final _privateConstructorUsedError = UnsupportedError(
 mixin _$FfiLoadEvent {
   @optionalTypeArgs
   TResult when<TResult extends Object?>({
-    required TResult Function(double field0) progress,
+    required TResult Function(FfiDownloadStatus field0) progress,
     required TResult Function() complete,
     required TResult Function(String field0) error,
   }) =>
       throw _privateConstructorUsedError;
   @optionalTypeArgs
   TResult? whenOrNull<TResult extends Object?>({
-    TResult? Function(double field0)? progress,
+    TResult? Function(FfiDownloadStatus field0)? progress,
     TResult? Function()? complete,
     TResult? Function(String field0)? error,
   }) =>
       throw _privateConstructorUsedError;
   @optionalTypeArgs
   TResult maybeWhen<TResult extends Object?>({
-    TResult Function(double field0)? progress,
+    TResult Function(FfiDownloadStatus field0)? progress,
     TResult Function()? complete,
     TResult Function(String field0)? error,
     required TResult orElse(),
@@ -90,7 +90,7 @@ abstract class _$$FfiLoadEvent_ProgressImplCopyWith<$Res> {
           $Res Function(_$FfiLoadEvent_ProgressImpl) then) =
       __$$FfiLoadEvent_ProgressImplCopyWithImpl<$Res>;
   @useResult
-  $Res call({double field0});
+  $Res call({FfiDownloadStatus field0});
 }
 
 /// @nodoc
@@ -112,7 +112,7 @@ class __$$FfiLoadEvent_ProgressImplCopyWithImpl<$Res>
       null == field0
           ? _value.field0
           : field0 // ignore: cast_nullable_to_non_nullable
-              as double,
+              as FfiDownloadStatus,
     ));
   }
 }
@@ -123,7 +123,7 @@ class _$FfiLoadEvent_ProgressImpl extends FfiLoadEvent_Progress {
   const _$FfiLoadEvent_ProgressImpl(this.field0) : super._();
 
   @override
-  final double field0;
+  final FfiDownloadStatus field0;
 
   @override
   String toString() {
@@ -153,7 +153,7 @@ class _$FfiLoadEvent_ProgressImpl extends FfiLoadEvent_Progress {
   @override
   @optionalTypeArgs
   TResult when<TResult extends Object?>({
-    required TResult Function(double field0) progress,
+    required TResult Function(FfiDownloadStatus field0) progress,
     required TResult Function() complete,
     required TResult Function(String field0) error,
   }) {
@@ -163,7 +163,7 @@ class _$FfiLoadEvent_ProgressImpl extends FfiLoadEvent_Progress {
   @override
   @optionalTypeArgs
   TResult? whenOrNull<TResult extends Object?>({
-    TResult? Function(double field0)? progress,
+    TResult? Function(FfiDownloadStatus field0)? progress,
     TResult? Function()? complete,
     TResult? Function(String field0)? error,
   }) {
@@ -173,7 +173,7 @@ class _$FfiLoadEvent_ProgressImpl extends FfiLoadEvent_Progress {
   @override
   @optionalTypeArgs
   TResult maybeWhen<TResult extends Object?>({
-    TResult Function(double field0)? progress,
+    TResult Function(FfiDownloadStatus field0)? progress,
     TResult Function()? complete,
     TResult Function(String field0)? error,
     required TResult orElse(),
@@ -220,11 +220,11 @@ class _$FfiLoadEvent_ProgressImpl extends FfiLoadEvent_Progress {
 }
 
 abstract class FfiLoadEvent_Progress extends FfiLoadEvent {
-  const factory FfiLoadEvent_Progress(final double field0) =
+  const factory FfiLoadEvent_Progress(final FfiDownloadStatus field0) =
       _$FfiLoadEvent_ProgressImpl;
   const FfiLoadEvent_Progress._() : super._();
 
-  double get field0;
+  FfiDownloadStatus get field0;
 
   /// Create a copy of FfiLoadEvent
   /// with the given fields replaced by the non-null parameter values.
@@ -276,7 +276,7 @@ class _$FfiLoadEvent_CompleteImpl extends FfiLoadEvent_Complete {
   @override
   @optionalTypeArgs
   TResult when<TResult extends Object?>({
-    required TResult Function(double field0) progress,
+    required TResult Function(FfiDownloadStatus field0) progress,
     required TResult Function() complete,
     required TResult Function(String field0) error,
   }) {
@@ -286,7 +286,7 @@ class _$FfiLoadEvent_CompleteImpl extends FfiLoadEvent_Complete {
   @override
   @optionalTypeArgs
   TResult? whenOrNull<TResult extends Object?>({
-    TResult? Function(double field0)? progress,
+    TResult? Function(FfiDownloadStatus field0)? progress,
     TResult? Function()? complete,
     TResult? Function(String field0)? error,
   }) {
@@ -296,7 +296,7 @@ class _$FfiLoadEvent_CompleteImpl extends FfiLoadEvent_Complete {
   @override
   @optionalTypeArgs
   TResult maybeWhen<TResult extends Object?>({
-    TResult Function(double field0)? progress,
+    TResult Function(FfiDownloadStatus field0)? progress,
     TResult Function()? complete,
     TResult Function(String field0)? error,
     required TResult orElse(),
@@ -416,7 +416,7 @@ class _$FfiLoadEvent_ErrorImpl extends FfiLoadEvent_Error {
   @override
   @optionalTypeArgs
   TResult when<TResult extends Object?>({
-    required TResult Function(double field0) progress,
+    required TResult Function(FfiDownloadStatus field0) progress,
     required TResult Function() complete,
     required TResult Function(String field0) error,
   }) {
@@ -426,7 +426,7 @@ class _$FfiLoadEvent_ErrorImpl extends FfiLoadEvent_Error {
   @override
   @optionalTypeArgs
   TResult? whenOrNull<TResult extends Object?>({
-    TResult? Function(double field0)? progress,
+    TResult? Function(FfiDownloadStatus field0)? progress,
     TResult? Function()? complete,
     TResult? Function(String field0)? error,
   }) {
@@ -436,7 +436,7 @@ class _$FfiLoadEvent_ErrorImpl extends FfiLoadEvent_Error {
   @override
   @optionalTypeArgs
   TResult maybeWhen<TResult extends Object?>({
-    TResult Function(double field0)? progress,
+    TResult Function(FfiDownloadStatus field0)? progress,
     TResult Function()? complete,
     TResult Function(String field0)? error,
     required TResult orElse(),

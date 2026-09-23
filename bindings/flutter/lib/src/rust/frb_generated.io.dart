@@ -237,6 +237,9 @@ abstract class XybridRustLibApiImplPlatform
       dynamic raw);
 
   @protected
+  FfiDownloadStatus dco_decode_box_autoadd_ffi_download_status(dynamic raw);
+
+  @protected
   FfiGenerationConfig dco_decode_box_autoadd_ffi_generation_config(dynamic raw);
 
   @protected
@@ -262,6 +265,9 @@ abstract class XybridRustLibApiImplPlatform
 
   @protected
   int dco_decode_box_autoadd_u_32(dynamic raw);
+
+  @protected
+  BigInt dco_decode_box_autoadd_u_64(dynamic raw);
 
   @protected
   int dco_decode_box_autoadd_u_8(dynamic raw);
@@ -438,6 +444,9 @@ abstract class XybridRustLibApiImplPlatform
 
   @protected
   int? dco_decode_opt_box_autoadd_u_32(dynamic raw);
+
+  @protected
+  BigInt? dco_decode_opt_box_autoadd_u_64(dynamic raw);
 
   @protected
   int? dco_decode_opt_box_autoadd_u_8(dynamic raw);
@@ -642,6 +651,10 @@ abstract class XybridRustLibApiImplPlatform
       SseDeserializer deserializer);
 
   @protected
+  FfiDownloadStatus sse_decode_box_autoadd_ffi_download_status(
+      SseDeserializer deserializer);
+
+  @protected
   FfiGenerationConfig sse_decode_box_autoadd_ffi_generation_config(
       SseDeserializer deserializer);
 
@@ -673,6 +686,9 @@ abstract class XybridRustLibApiImplPlatform
 
   @protected
   int sse_decode_box_autoadd_u_32(SseDeserializer deserializer);
+
+  @protected
+  BigInt sse_decode_box_autoadd_u_64(SseDeserializer deserializer);
 
   @protected
   int sse_decode_box_autoadd_u_8(SseDeserializer deserializer);
@@ -868,6 +884,9 @@ abstract class XybridRustLibApiImplPlatform
 
   @protected
   int? sse_decode_opt_box_autoadd_u_32(SseDeserializer deserializer);
+
+  @protected
+  BigInt? sse_decode_opt_box_autoadd_u_64(SseDeserializer deserializer);
 
   @protected
   int? sse_decode_opt_box_autoadd_u_8(SseDeserializer deserializer);
@@ -1075,6 +1094,10 @@ abstract class XybridRustLibApiImplPlatform
       FfiCloudFallbackAbort self, SseSerializer serializer);
 
   @protected
+  void sse_encode_box_autoadd_ffi_download_status(
+      FfiDownloadStatus self, SseSerializer serializer);
+
+  @protected
   void sse_encode_box_autoadd_ffi_generation_config(
       FfiGenerationConfig self, SseSerializer serializer);
 
@@ -1108,6 +1131,9 @@ abstract class XybridRustLibApiImplPlatform
 
   @protected
   void sse_encode_box_autoadd_u_32(int self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_box_autoadd_u_64(BigInt self, SseSerializer serializer);
 
   @protected
   void sse_encode_box_autoadd_u_8(int self, SseSerializer serializer);
@@ -1318,6 +1344,9 @@ abstract class XybridRustLibApiImplPlatform
 
   @protected
   void sse_encode_opt_box_autoadd_u_32(int? self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_opt_box_autoadd_u_64(BigInt? self, SseSerializer serializer);
 
   @protected
   void sse_encode_opt_box_autoadd_u_8(int? self, SseSerializer serializer);

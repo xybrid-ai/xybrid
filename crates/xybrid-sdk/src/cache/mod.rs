@@ -36,6 +36,8 @@
 
 mod cache_manager;
 mod cache_provider;
+#[cfg(feature = "huggingface")]
+pub(crate) mod hf_shared;
 pub(crate) mod layout;
 #[cfg(test)]
 mod layout_tests;

@@ -53,6 +53,12 @@ filegroup(
     visibility = ["//visibility:public"],
 )
 
+filegroup(
+    name = "coreml_model_fixture",
+    srcs = glob(["fixtures/coreml/xybrid_linear.mlpackage/**"]),
+    visibility = ["//visibility:public"],
+)
+
 # Integration tests. Each tests/*.rs is its own binary. They exercise real models
 # and self-skip when the weights are absent (fixtures::model_if_available), which
 # is what happens on CI — so these targets mainly prove the tests compile and
@@ -66,6 +72,7 @@ filegroup(
 # already builds with llm-llamacpp, so enabling it here lines up.
 _E2E_TESTS = {
     "asr_integration": [],
+    "coreml_native": ["coreml"],
     "context_budget_clamp": ["llm-llamacpp"],
     "integration_check": [],
     "llm_chat_template": ["llm-llamacpp"],
@@ -73,6 +80,10 @@ _E2E_TESTS = {
     "reasoning_capture": ["llm-llamacpp"],
     "tts_integration": [],
     "whispercpp_integration": ["asr-whispercpp"],
+}
+
+_E2E_TEST_DATA = {
+    "coreml_native": [":coreml_model_fixture"],
 }
 
 # local_llm is absent on purpose: it is gated on `llm-mistral`, and xybrid-core's
@@ -93,7 +104,7 @@ _E2E_TESTS = {
             ":input_fixtures",
             ":model_metadata_fixtures",
             ":pipeline_fixtures",
-        ],
+        ] + _E2E_TEST_DATA.get(name, []),
         edition = "2021",
         deps = [
             ":integration-tests",

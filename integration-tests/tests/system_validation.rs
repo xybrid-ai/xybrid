@@ -13,13 +13,19 @@ use std::process::Command;
 use tempfile::TempDir;
 use xybrid_sdk::run_pipeline;
 
-/// Test 2: xybrid_sdk::run_pipeline() executes successfully and returns 3 stage results
+/// Test 2: `xybrid_sdk::run_pipeline()` fails honestly for cloud-routed stages
+/// that name no provider.
+///
+/// Legacy configs list bare model ids with no resolved local bundle, so every
+/// stage routes to cloud. The bootstrapped orchestrator registers the real
+/// OpenAI-compatible cloud adapter, which rejects a stage without a provider
+/// before any HTTP request — it no longer returns synthetic text after a fake
+/// delay. This test pins that contract without touching the network.
 #[test]
 fn test_sdk_pipeline_execution() -> Result<(), Box<dyn std::error::Error>> {
-    println!("🚀 Test 2: SDK pipeline execution");
+    println!("🚀 Test 2: SDK pipeline execution (provider-less cloud stage fails closed)");
     println!("{}", "=".repeat(60));
 
-    // Create a test pipeline config
     let temp_dir = TempDir::new()?;
     let config_path = temp_dir.path().join("hiiipe_test.yml");
 
@@ -34,6 +40,7 @@ stages:
 input:
   kind: "Text"
 
+# Legacy fields: still required by the parser, ignored at runtime.
 metrics:
   network_rtt: 100
   battery: 80
@@ -48,41 +55,22 @@ availability:
     fs::write(&config_path, config_content)?;
     println!("   Created test config: {}", config_path.display());
 
-    // Execute the pipeline
-    println!("   Executing pipeline...");
-    let result = run_pipeline(config_path.to_str().unwrap())?;
-
-    println!("   Pipeline name: {:?}", result.name);
-    println!("   Total latency: {}ms", result.total_latency_ms);
-    println!("   Final output: {}", result.final_output);
-    println!("   Stage count: {}", result.stages.len());
-
-    // Assertions
-    assert_eq!(
-        result.stages.len(),
-        3,
-        "Pipeline should return exactly 3 stage results"
-    );
-
-    // Verify each stage has valid data
-    for (i, stage) in result.stages.iter().enumerate() {
-        println!(
-            "   Stage {}: {} → {} ({}ms)",
-            i + 1,
-            stage.name,
-            stage.target,
-            stage.latency_ms
-        );
-        assert!(!stage.name.is_empty(), "Stage name should not be empty");
-        assert!(!stage.target.is_empty(), "Stage target should not be empty");
-    }
+    let Err(err) = run_pipeline(config_path.to_str().unwrap()) else {
+        panic!("a cloud-routed stage without a provider must not succeed with fake output");
+    };
+    let message = err.to_string();
+    println!("   Pipeline error (expected): {message}");
 
     assert!(
-        !result.final_output.is_empty(),
-        "Final output should not be empty"
+        message.to_lowercase().contains("provider"),
+        "error should explain that the cloud stage has no provider, got: {message}"
+    );
+    assert!(
+        !message.contains("cloud-output"),
+        "the fake cloud adapter output must be gone: {message}"
     );
 
-    println!("   ✅ SDK pipeline execution successful");
+    println!("   ✅ SDK pipeline fails closed without a provider");
     println!();
     Ok(())
 }
@@ -102,7 +90,7 @@ fn test_cli_policy_loading() -> Result<(), Box<dyn std::error::Error>> {
 version: "0.1.0"
 rules:
   - id: "test_rule"
-    expression: "input.kind == \"SensitiveData\""
+    expression: "input.kind == \"audio\""
     action: "deny"
 signature: "test-signature"
 "#;

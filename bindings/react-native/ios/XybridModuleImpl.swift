@@ -580,14 +580,24 @@ public final class XybridModuleImpl: NSObject {
     case .downloading: state = "downloading"
     case .ready: state = "ready"
     case .failed: state = "failed"
+    case .cancelled: state = "cancelled"
     }
-    return ["state": state, "progress": s.progress]
+    var out: [String: Any] = [
+      "state": state,
+      "progress": s.progress,
+      "downloadedBytes": s.downloadedBytes,
+    ]
+    // Absent rather than 0 when the source declares no size, so JS can tell
+    // "unknown total" from "zero-byte model".
+    if let total = s.totalBytes { out["totalBytes"] = total }
+    return out
   }
 
   private func encodeResult(_ r: XybridResult) -> [String: Any] {
     var out: [String: Any] = [
       "success": r.success,
       "latencyMs": r.latencyMs,
+      "metrics": encodeInferenceMetrics(r.metrics),
       "executionTarget": r.executionTarget == .cloud ? "cloud" : "local",
     ]
     if let text = r.text { out["text"] = text }
@@ -643,6 +653,13 @@ public final class XybridModuleImpl: NSObject {
     case .circuitOpen: code = "xybrid_circuit_open"
     case .rateLimited: code = "xybrid_rate_limited"
     case .timeout: code = "xybrid_timeout"
+    // The four below predate this file's last update — the switch is
+    // exhaustive over a shared enum, so it could not compile without them.
+    case .missingArtifact: code = "xybrid_missing_artifact"
+    case .unsupportedModelCapability: code = "xybrid_unsupported_model_capability"
+    case .unsupportedBackendCapability: code = "xybrid_unsupported_backend_capability"
+    case .invalidImage: code = "xybrid_invalid_image"
+    case .cancelled: code = "xybrid_cancelled"
     }
     reject(code, error.errorDescription ?? "Xybrid error", error)
   }

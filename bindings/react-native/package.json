@@ -1,6 +1,6 @@
 {
   "name": "react-native-xybrid",
-  "version": "0.7.0",
+  "version": "0.9.0",
   "description": "On-device + cloud ML inference for React Native (iOS + Android), backed by the Xybrid Rust SDK",
   "main": "lib/commonjs/index.js",
   "module": "lib/module/index.js",
@@ -20,6 +20,8 @@
   ],
   "scripts": {
     "typecheck": "tsc --noEmit",
+    "test": "tsc --noEmit --strict --skipLibCheck --moduleResolution node --target ES2020 tests/metrics-types.test.ts && node --test tests/metrics-encoders.test.mjs",
+    "test:swift-metrics": "swiftc ios/XybridMetricsEncoder.swift tests/swift/main.swift -o /tmp/xybrid-rn-metrics-test && /tmp/xybrid-rn-metrics-test",
     "build": "tsc -p tsconfig.build.json",
     "clean": "rm -rf lib"
   },

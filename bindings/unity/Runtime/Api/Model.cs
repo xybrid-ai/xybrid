@@ -2,6 +2,7 @@
 // Wrapper for a loaded model ready for inference.
 
 using System;
+using System.Threading;
 
 namespace Xybrid
 {
@@ -40,7 +41,18 @@ namespace Xybrid
         /// <exception cref="ArgumentNullException">Thrown if envelope is null.</exception>
         /// <exception cref="ObjectDisposedException">Thrown if this model is disposed.</exception>
         /// <exception cref="XybridException">Thrown only on a catastrophic backend failure; ordinary inference failures (including a not-loaded model) set <see cref="InferenceResult.Success"/> to false instead.</exception>
-        public InferenceResult Run(Envelope envelope, GenerationConfig config = null)
+        /// <param name="cancellationToken">
+        /// Optional stop button. A batch run is only cancellable <em>before</em>
+        /// generation starts — once the backend is producing there is no
+        /// token-aware batch path to stop it, so the call finishes normally. Use
+        /// <c>RunStreaming</c> when a mid-flight stop button matters. A cancelled
+        /// run reports failure rather than throwing
+        /// <see cref="OperationCanceledException"/>.
+        /// </param>
+        public InferenceResult Run(
+            Envelope envelope,
+            GenerationConfig config = null,
+            CancellationToken cancellationToken = default)
         {
             ThrowIfDisposed();
             if (envelope == null)
@@ -48,7 +60,10 @@ namespace Xybrid
                 throw new ArgumentNullException(nameof(envelope));
             }
 
-            return Execute(() => _bolt.Run(envelope.Bolt, ToOptions(config)));
+            using (var cancel = BoltCancellation.From(cancellationToken))
+            {
+                return Execute(() => _bolt.Run(envelope.Bolt, ToOptions(config), cancel.Token));
+            }
         }
 
         /// <summary>
@@ -109,7 +124,19 @@ namespace Xybrid
         /// <exception cref="ArgumentNullException">Thrown if envelope or context is null.</exception>
         /// <exception cref="ObjectDisposedException">Thrown if this model is disposed.</exception>
         /// <exception cref="XybridException">Thrown only on a catastrophic backend failure; ordinary inference failures set <see cref="InferenceResult.Success"/> to false instead.</exception>
-        public InferenceResult Run(Envelope envelope, ConversationContext context, GenerationConfig config = null)
+        /// <param name="cancellationToken">
+        /// Optional stop button. A batch run is only cancellable <em>before</em>
+        /// generation starts — once the backend is producing there is no
+        /// token-aware batch path to stop it, so the call finishes normally. Use
+        /// <c>RunStreaming</c> when a mid-flight stop button matters. A cancelled
+        /// run reports failure rather than throwing
+        /// <see cref="OperationCanceledException"/>.
+        /// </param>
+        public InferenceResult Run(
+            Envelope envelope,
+            ConversationContext context,
+            GenerationConfig config = null,
+            CancellationToken cancellationToken = default)
         {
             ThrowIfDisposed();
             if (envelope == null)
@@ -121,7 +148,11 @@ namespace Xybrid
                 throw new ArgumentNullException(nameof(context));
             }
 
-            return Execute(() => _bolt.RunWithContext(envelope.Bolt, context.Bolt, ToOptions(config)));
+            using (var cancel = BoltCancellation.From(cancellationToken))
+            {
+                return Execute(() =>
+                    _bolt.RunWithContext(envelope.Bolt, context.Bolt, ToOptions(config), cancel.Token));
+            }
         }
 
         /// <summary>
@@ -270,7 +301,16 @@ namespace Xybrid
         /// <exception cref="ArgumentNullException">Thrown if envelope or onToken is null.</exception>
         /// <exception cref="ObjectDisposedException">Thrown if this model is disposed.</exception>
         /// <exception cref="XybridException">Thrown only on a catastrophic backend failure; ordinary inference failures set <see cref="InferenceResult.Success"/> to false instead.</exception>
-        public InferenceResult RunStreaming(Envelope envelope, Action<StreamToken> onToken, GenerationConfig config = null)
+        /// <param name="cancellationToken">
+        /// Optional stop button. Cancelling it ends the stream at the next token
+        /// boundary; the run then reports failure rather than throwing
+        /// <see cref="OperationCanceledException"/>.
+        /// </param>
+        public InferenceResult RunStreaming(
+            Envelope envelope,
+            Action<StreamToken> onToken,
+            GenerationConfig config = null,
+            CancellationToken cancellationToken = default)
         {
             ThrowIfDisposed();
             if (envelope == null)
@@ -282,7 +322,11 @@ namespace Xybrid
                 throw new ArgumentNullException(nameof(onToken));
             }
 
-            return Execute(() => _bolt.RunStreaming(envelope.Bolt, Forward(onToken), ToOptions(config)));
+            using (var cancel = BoltCancellation.From(cancellationToken))
+            {
+                return Execute(() =>
+                    _bolt.RunStreaming(envelope.Bolt, Forward(onToken), ToOptions(config), cancel.Token));
+            }
         }
 
         /// <summary>
@@ -296,7 +340,17 @@ namespace Xybrid
         /// <exception cref="ArgumentNullException">Thrown if any argument is null.</exception>
         /// <exception cref="ObjectDisposedException">Thrown if this model is disposed.</exception>
         /// <exception cref="XybridException">Thrown only on a catastrophic backend failure; ordinary inference failures set <see cref="InferenceResult.Success"/> to false instead.</exception>
-        public InferenceResult RunStreaming(Envelope envelope, ConversationContext context, Action<StreamToken> onToken, GenerationConfig config = null)
+        /// <param name="cancellationToken">
+        /// Optional stop button. Cancelling it ends the stream at the next token
+        /// boundary; the run then reports failure rather than throwing
+        /// <see cref="OperationCanceledException"/>.
+        /// </param>
+        public InferenceResult RunStreaming(
+            Envelope envelope,
+            ConversationContext context,
+            Action<StreamToken> onToken,
+            GenerationConfig config = null,
+            CancellationToken cancellationToken = default)
         {
             ThrowIfDisposed();
             if (envelope == null)
@@ -312,8 +366,11 @@ namespace Xybrid
                 throw new ArgumentNullException(nameof(onToken));
             }
 
-            return Execute(() => _bolt.RunStreamingWithContext(
-                envelope.Bolt, Forward(onToken), context.Bolt, ToOptions(config)));
+            using (var cancel = BoltCancellation.From(cancellationToken))
+            {
+                return Execute(() => _bolt.RunStreamingWithContext(
+                    envelope.Bolt, Forward(onToken), context.Bolt, ToOptions(config), cancel.Token));
+            }
         }
 
         /// <summary>

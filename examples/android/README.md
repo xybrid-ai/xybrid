@@ -36,7 +36,7 @@ unzip -o -q bazel-bin/bindings/kotlin/xybrid-kotlin.aar 'jni/*' -d /tmp/aar
 cp -r /tmp/aar/jni/* bindings/kotlin/libs/
 ```
 
-This stages `libxybrid-bolt.so`, `libonnxruntime.so`, and `libc++_shared.so` for each ABI (arm64-v8a, armeabi-v7a, x86_64) into `bindings/kotlin/libs/`.
+This stages `libxybrid_bolt.so`, `libonnxruntime.so`, and `libc++_shared.so` for each ABI (arm64-v8a, armeabi-v7a, x86_64) into `bindings/kotlin/libs/`.
 
 See [bindings/kotlin/README.md](../../bindings/kotlin/README.md) for detailed build instructions.
 

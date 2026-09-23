@@ -150,12 +150,28 @@ sealed class LoadEvent {
   const LoadEvent._();
 }
 
-/// Download progress update (0.0 to 1.0).
+/// Download progress update.
+///
+/// [progress] is aggregated across every artifact the model needs (weights
+/// plus companions such as a vision projector), never moves backwards, and
+/// reaches 1.0 only once the model is ready.
 class LoadProgress extends LoadEvent {
   /// Progress value from 0.0 to 1.0
   final double progress;
 
-  const LoadProgress(this.progress) : super._();
+  /// Bytes written so far, across every artifact.
+  final int downloadedBytes;
+
+  /// Declared total across every artifact, or `null` when the source does not
+  /// publish one (a Hugging Face repo, or a registry entry without a size).
+  /// [downloadedBytes] is exact either way.
+  final int? totalBytes;
+
+  const LoadProgress(
+    this.progress, {
+    this.downloadedBytes = 0,
+    this.totalBytes,
+  }) : super._();
 
   /// Progress as a percentage (0-100).
   int get percentage => (progress * 100).round();
@@ -251,7 +267,8 @@ class XybridModelLoader {
   /// Load the model with download progress updates.
   ///
   /// Returns a stream of [LoadEvent]:
-  /// - [LoadProgress] with download progress (0.0 to 1.0)
+  /// - [LoadProgress] with the fraction, bytes transferred and the declared
+  ///   total when the source has one
   /// - [LoadComplete] when the model is ready
   /// - [LoadError] if loading fails
   ///
@@ -262,8 +279,8 @@ class XybridModelLoader {
   /// final loader = Xybrid.model(modelId: 'kokoro-82m');
   /// await for (final event in loader.loadWithProgress()) {
   ///   switch (event) {
-  ///     case LoadProgress(:final progress):
-  ///       print('Downloading: ${(progress * 100).toInt()}%');
+  ///     case LoadProgress(:final progress, :final downloadedBytes):
+  ///       print('Downloading: ${(progress * 100).toInt()}% ($downloadedBytes B)');
   ///     case LoadComplete():
   ///       final model = await loader.load();
   ///       print('Model ready!');
@@ -277,7 +294,11 @@ class XybridModelLoader {
   }) {
     return _inner.loadWithProgress(backend: backend.toFfi()).map((ffiEvent) {
       return switch (ffiEvent) {
-        FfiLoadEvent_Progress(:final field0) => LoadProgress(field0),
+        FfiLoadEvent_Progress(:final field0) => LoadProgress(
+          field0.progress,
+          downloadedBytes: field0.downloadedBytes.toInt(),
+          totalBytes: field0.totalBytes?.toInt(),
+        ),
         FfiLoadEvent_Complete() => const LoadComplete(),
         FfiLoadEvent_Error(:final field0) => LoadError(field0),
       };
@@ -352,7 +373,11 @@ class XybridModel {
   Stream<LoadEvent> downloadProgress() {
     return inner.downloadProgress().map((ffiEvent) {
       return switch (ffiEvent) {
-        FfiLoadEvent_Progress(:final field0) => LoadProgress(field0),
+        FfiLoadEvent_Progress(:final field0) => LoadProgress(
+          field0.progress,
+          downloadedBytes: field0.downloadedBytes.toInt(),
+          totalBytes: field0.totalBytes?.toInt(),
+        ),
         FfiLoadEvent_Complete() => const LoadComplete(),
         FfiLoadEvent_Error(:final field0) => LoadError(field0),
       };

@@ -58,8 +58,8 @@ Usage:
     python3 tools/scripts/gen_unity_bolt_csharp.py            # regenerate + write
     python3 tools/scripts/gen_unity_bolt_csharp.py --check    # fail on drift
 
-Requires the pinned `boltffi` CLI (0.25.3) on PATH:
-    cargo install boltffi_cli --version 0.25.3 --locked
+Requires the pinned `boltffi` CLI (see PINNED_BOLTFFI below) on PATH:
+    cargo install boltffi_cli --version 0.30.1 --locked
 """
 
 from __future__ import annotations
@@ -78,7 +78,7 @@ RAW_DIR = BOLT_DIR / "dist" / "csharp"
 DEST_DIR = REPO_ROOT / "bindings" / "unity" / "Runtime" / "Bolt"
 # Path used to key deterministic GUIDs and to build the folder .meta location.
 DEST_REL = "bindings/unity/Runtime/Bolt"
-PINNED_BOLTFFI = "0.29.3"
+PINNED_BOLTFFI = "0.30.1"
 
 
 # --- Transform (a): readonly record struct (C# 10) -> plain readonly struct ---
@@ -388,7 +388,7 @@ def _drift(condition: bool, message: str) -> None:
 
 def generate() -> dict[str, str]:
     """Run the generator, down-level for Unity, and return {filename: contents}."""
-    subprocess.run(["boltffi", "generate", "csharp"], cwd=BOLT_DIR, check=True)
+    subprocess.run(["boltffi", "generate", "csharp", "--deny-skipped"], cwd=BOLT_DIR, check=True)
 
     sources = sorted(RAW_DIR.glob("*.cs"))
     if not sources:

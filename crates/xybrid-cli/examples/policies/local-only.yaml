@@ -1,0 +1,4 @@
+# Cloud is forbidden for every input: the stage always runs on the device.
+version: "1.0.0"
+deny_cloud_if:
+  - "true"

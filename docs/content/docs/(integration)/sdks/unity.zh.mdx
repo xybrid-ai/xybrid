@@ -89,6 +89,33 @@ var model = XybridClient.LoadModelFromBundle("path/to/model.xyb");
 
 ---
 
+## 下载进度
+
+`load()` 会一直阻塞到权重落盘，因此运行期间无法报告进度。请单独启动下载并进行监听：
+
+```csharp
+using var download = ModelLoader.FromRegistry("qwen3-0.6b").StartDownload();
+while (!download.IsFinished())
+{
+    // Status() 不会阻塞，因此每帧调用一次是安全的。
+    slider.value = download.Status().Progress;
+    yield return null;
+}
+
+using var loader = ModelLoader.FromRegistry("qwen3-0.6b");
+var model = loader.Load();   // 已缓存：立即返回
+```
+
+`progress` 覆盖模型所需的全部文件（权重以及视觉投影器等附属文件），并且只增不减，
+因此进度条既不会逐个文件重新开始，也不会在下载重试时回退。当来源未公布大小时
+（例如 Hugging Face 仓库），`totalBytes` 为 null；无论哪种情况 `downloadedBytes`
+都是准确值，可用于显示已下载体积、速度和剩余时间。
+
+取消消费方的任务只会退订更新。要真正停止传输，请调用 `cancel()`——它会在一次分块
+读取内生效，并删除已下载的部分文件。
+
+---
+
 ## 输入 Envelope
 
 ### 文本

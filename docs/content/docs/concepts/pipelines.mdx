@@ -64,10 +64,21 @@ stages:
 | `id` | Stage identifier (defaults to the model ID) |
 | `model` | Model ID from the registry, or a provider model name for cloud stages |
 | `version` | Model version (e.g. `"1.0"`) |
-| `target` | Where to run: `device`, `cloud`, or `auto` (default) — see [Hybrid Execution](/docs/concepts/hybrid-execution) |
-| `provider` | Cloud provider for cloud stages: `openai`, `anthropic`, `google`, `deepseek`, `elevenlabs`, `openrouter`, `custom` |
+| `target` | Where to run: `device`, `cloud`, or `auto` (default) — see [Hybrid Execution](/docs/concepts/hybrid-execution). `auto` **with** a `provider` is a hybrid stage: local model plus a cloud leg, chosen per request by policy and device state |
+| `provider` | Cloud provider for cloud or hybrid stages: `openai`, `anthropic`, `google`, `deepseek`, `elevenlabs`, `openrouter`, `custom` |
+| `cloud_model` | Model name sent to the provider on the cloud leg of a hybrid stage (defaults to `model`) |
+| `backend` | `gateway` (default) uses Xybrid Platform with `XYBRID_API_KEY`; `direct` with an OpenAI-compatible provider calls the provider's API with `$<PROVIDER>_API_KEY` |
+| `gateway_url`, `api_key` | Explicit endpoint and credential for the cloud leg (`api_key` accepts `$ENV_VAR`); credentials are never inherited across origins |
+| `thinking` | DeepSeek only: `enabled` or `disabled` (DeepSeek reasons by default; `disabled` keeps `max_tokens` for the answer) |
 | `execution_provider` | ONNX Runtime override: `cpu`, `coreml`, `coreml-ane`, `coreml-gpu` (auto-selected if unset) |
-| *(any other key)* | Passed to the stage as an option — common ones: `system_prompt`, `max_tokens`, `temperature` |
+| *(any other key)* | Passed to the stage as an option — `system_prompt`, `max_tokens`, `temperature`, `top_p` apply to both legs of a hybrid stage |
+
+<Callout type="info">
+Hybrid stages (`target: auto` with a `provider`) are currently supported by `xybrid run`. The Flutter and Rust SDK pipeline APIs treat this combination as cloud-only and do not load its local model.
+</Callout>
+
+Use `crates/xybrid-cli/examples/hybrid-platform.yaml` for the primary platform
+integration. `hybrid-deepseek.yaml` is the separate direct-provider testing example.
 
 ## Mixing device and cloud stages
 

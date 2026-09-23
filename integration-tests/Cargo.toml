@@ -16,6 +16,9 @@ candle = ["xybrid-core/candle"]
 # multilingual model is downloaded only by the dedicated model-test workflow.
 asr-whispercpp = ["xybrid-core/asr-whispercpp"]
 
+# Native Apple Core ML adapter and its real-model integration test.
+coreml = ["xybrid-core/coreml"]
+
 # Local LLM inference
 llm-mistral = ["xybrid-core/llm-mistral"]              # mistral.rs (CPU)
 llm-mistral-metal = ["xybrid-core/llm-mistral-metal"]  # mistral.rs + Metal (macOS)

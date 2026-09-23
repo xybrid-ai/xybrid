@@ -28,8 +28,10 @@ classes:
         # apiKey-bundled init shipped across all four bindings: Dart
         # Xybrid.init, Kotlin Xybrid.init(context, …), Swift
         # Xybrid.initialize(apiKey:), Unity XybridClient.Initialize(apiKey:).
-        # Param coverage varies by binding (e.g. Unity omits gatewayUrl;
-        # resourceTelemetry is Dart/Rust only) — the apiKey path is universal.
+        # Param coverage varies by binding (resourceTelemetry is Dart/Rust
+        # only) — the apiKey path is universal. Unity declares gatewayUrl last,
+        # after ingestUrl, so its pre-existing positional call sites keep
+        # compiling; the other bindings order it before ingestUrl.
         status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
       setApiKey:
         params: [{ name: apiKey, type: String }]
@@ -45,28 +47,56 @@ classes:
         status: { dart: implemented, kotlin: planned, swift: planned, csharp: planned }
       setSpeculativeCloud:
         params: [{ name: enabled, type: bool }]
-        # Global default for serving an undownloaded registry model from the
-        # cloud while its weights download.
-        status: { dart: implemented, kotlin: planned, swift: planned, csharp: planned }
+        # Process-wide DEFAULT for serving an undownloaded registry model from
+        # the cloud while its weights download. It applies only to loads that
+        # do not opt in per-load: fromRegistrySpeculative sets the per-load
+        # override itself and is unaffected by this toggle.
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+        since: "0.8.0"
       isSpeculativeCloudEnabled:
         return: bool
-        status: { dart: implemented, kotlin: planned, swift: planned, csharp: planned }
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+        since: "0.8.0"
       releaseMemory:
         return: int
         # Host-driven memory release: call from the platform's low-memory
         # signal. Returns how many loaded models were released; each reloads
-        # itself transparently on its next run. Same reach as the other
-        # process-global settings — Dart exposes it on the entry-point class,
-        # the rest go through the generated bolt global.
-        status: { dart: implemented, kotlin: planned, swift: planned, csharp: planned }
+        # itself transparently on its next run.
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+        since: "0.8.0"
       setAutoRelease:
         params: [{ name: enabled, type: bool }]
         # Opt into releasing least-recently-used idle models when a load hits
         # device memory pressure. Off by default.
-        status: { dart: implemented, kotlin: planned, swift: planned, csharp: planned }
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+        since: "0.8.0"
       isAutoReleaseEnabled:
         return: bool
-        status: { dart: implemented, kotlin: planned, swift: planned, csharp: planned }
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+        since: "0.8.0"
+      hasApiKey:
+        return: bool
+        # Whether a Xybrid gateway key resolves, from init or the environment.
+        # Gates cloud routing and telemetry; on-device inference needs none.
+        # Dart reaches the bolt global directly and has no facade member.
+        status: { dart: planned, kotlin: implemented, swift: implemented, csharp: implemented }
+        since: "0.8.0"
+      setProviderApiKey:
+        params:
+          - { name: provider, type: String }
+          - { name: apiKey, type: String }
+        # Per-provider key for gateway forwarding. Distinct from the Xybrid
+        # platform key that init/setApiKey configures.
+        status: { dart: planned, kotlin: implemented, swift: implemented, csharp: implemented }
+        since: "0.8.0"
+      jsonSchemaToGbnf:
+        params: [{ name: schemaJson, type: String }]
+        return: String
+        # JSON Schema -> GBNF for GenerationConfig.grammar. Dart, Kotlin and
+        # Swift expose it as a top-level function rather than a member; C# has
+        # no top-level functions, so Unity puts it on XybridClient.
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+        since: "0.8.0"
       model:
         params:
           - { name: source, type: ModelSource }
@@ -137,20 +167,69 @@ classes:
         status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
       loadWithProgress:
         return: "Stream<LoadEvent>"
+        # Dart-only. The bolt languages get the same capability through the
+        # separate XybridDownload handle, because their load call blocks.
         status: { dart: implemented, kotlin: planned, swift: planned, csharp: planned }
+      download:
+        # Starts the download in the background without loading, so a blocking
+        # host has something to watch. Returns null for a source with nothing
+        # to fetch (bundle, directory, Hugging Face repo). Named StartDownload
+        # in C#.
+        return: "XybridDownload?"
+        status: { rust: implemented, dart: planned, kotlin: implemented, swift: implemented, csharp: implemented }
       fromRegistrySpeculative:
         static: true
         params: [{ name: modelId, type: String }]
         return: XybridModelLoader
         # Serves from the cloud gateway while the weights download, instead of
-        # blocking on the download. C# consumes the generated bolt constructor
-        # (XybridModel.FromRegistrySpeculative) — no loader facade there.
-        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: planned }
+        # blocking on the download. Sets the per-load override itself, so it
+        # does not depend on Xybrid.setSpeculativeCloud.
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
       willSpeculate:
         return: bool
-        # Whether load() would actually speculate: enabled, an API key
-        # resolves, and the model is not already cached. Never hits the network.
-        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: planned }
+        # Whether load() would actually speculate: speculation is in effect for
+        # this loader, an API key resolves, and the model is not already
+        # cached. Reads the local cache; never hits the network.
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+
+  # -------------------------------------------------------------------
+  # 2b. XybridDownload
+  # -------------------------------------------------------------------
+  # A model download running in the background, decoupled from loading it.
+  # Exists because every bolt binding's load call blocks: there is no object to
+  # poll while the weights come down. The download fills the normal SDK cache,
+  # so the load afterwards returns at once. Dart drives the same capability
+  # through XybridModelLoader.loadWithProgress().
+  XybridDownload:
+    type: class
+    section: "2b. XybridDownload"
+    methods:
+      fromRegistry:
+        static: true
+        params: [{ name: modelId, type: String }]
+        return: XybridDownload
+        status: { rust: implemented, dart: planned, kotlin: implemented, swift: implemented, csharp: implemented }
+      status:
+        return: DownloadStatus
+        # Never blocks; safe from a UI thread or a per-frame render loop.
+        status: { rust: implemented, dart: planned, kotlin: implemented, swift: implemented, csharp: implemented }
+      progress:
+        return: "Stream<DownloadStatus>"
+        # AsyncStream (Swift) / Flow (Kotlin) / IAsyncEnumerable (C#) /
+        # iterable subscription (Python). Emits the current snapshot first,
+        # then closes on the terminal state.
+        status: { rust: implemented, dart: planned, kotlin: implemented, swift: implemented, csharp: implemented }
+      isFinished:
+        return: bool
+        status: { rust: implemented, dart: planned, kotlin: implemented, swift: implemented, csharp: implemented }
+      error:
+        return: "String?"
+        # The failure reason once the download ended in failed or cancelled.
+        status: { rust: implemented, dart: planned, kotlin: implemented, swift: implemented, csharp: implemented }
+      cancel:
+        # Stops the transfer within one chunk read and discards the partial
+        # file. Idempotent, and a no-op once terminal.
+        status: { rust: implemented, dart: planned, kotlin: implemented, swift: implemented, csharp: implemented }
 
   # -------------------------------------------------------------------
   # 3. XybridModel
@@ -278,7 +357,8 @@ classes:
         status: { rust: implemented, dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
       downloadStatus:
         return: DownloadStatus
-        # Download state + progress in one consistent read; poll to drive a bar.
+        # Download state, progress and byte counts in one consistent read; poll
+        # to drive a bar, or subscribe with downloadProgress().
         status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
       awaitDownload:
         params: [{ name: timeoutMs, type: int }]
@@ -287,10 +367,13 @@ classes:
         # the pushed downloadProgress() stream instead.
         status: { dart: planned, kotlin: implemented, swift: implemented, csharp: implemented }
       downloadProgress:
-        return: "Stream<LoadEvent>"
-        # Dart-only: flutter_rust_bridge stream sinks are safe, whereas the bolt
-        # bindings must not carry a closure across the FFI boundary.
-        status: { dart: implemented, kotlin: planned, swift: planned, csharp: planned }
+        return: "Stream<DownloadStatus>"
+        # Pushed progress for a speculative load. Dart rides a
+        # flutter_rust_bridge stream sink; the bolt bindings ride BoltFFI's
+        # stream primitive, which carries items Rust -> host only (no closure
+        # crosses the boundary): AsyncStream in Swift, Flow in Kotlin,
+        # IAsyncEnumerable in C#.
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
       executionProviderInfo:
         return: ExecutionProviderInfo
         status: { dart: planned, kotlin: planned, swift: planned, csharp: planned }
@@ -667,6 +750,13 @@ classes:
       stopSequences:
         type: "List<String>?"
         status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+      grammar:
+        type: "String?"
+        # GBNF grammar constraining decoding. Build one from a JSON Schema with
+        # jsonSchemaToGbnf, or pass raw GBNF. llama.cpp-only; other backends
+        # ignore it.
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+        since: "0.8.0"
       tools:
         type: "List<ToolDefinition>?"
         # Tools the model may call this turn. Empty/null = no tool calling.
@@ -1066,12 +1156,14 @@ classes:
   CancellationToken:
     type: class
     section: "8. Supporting Types"
-    notes: "Cooperative cancel handle for an in-flight run. In Rust it is paired with a RunOptions via with_cancellation_token; in Dart the caller constructs a CancellationToken and passes it to the streaming run methods (runStreaming / runStreamingWithContext / runStreamingWithFallback) via the optional cancellationToken parameter. Local streaming abort is cooperative: the token's cancelled state is checked before every emitted token, so cancellation takes effect at the next token boundary, not mid-token, and the model write lock is released promptly. The Dart binding surface (cancel handle exposing cancel() / isCancelled, plus sink-close-as-cancel when the Dart stream is unsubscribed mid-run) was wired by issue 10. Issue 11 reuses the same token for preemptive cancel-and-replace: when runStreaming/runStreamingWithContext are called with preempt=true, the token is registered in the model's in-flight slot and a later preempting run cancels it (latest-frame-wins) before acquiring the write lock — so a stale run halts and releases the lock instead of blocking the new one."
+    notes: "Cooperative cancel handle for an in-flight run. In Rust it is paired with a RunOptions via with_cancellation_token; in Dart the caller constructs a CancellationToken and passes it to the streaming run methods (runStreaming / runStreamingWithContext / runStreamingWithFallback) via the optional cancellationToken parameter. Local streaming abort is cooperative: the token's cancelled state is checked before every emitted token, so cancellation takes effect at the next token boundary, not mid-token, and the model write lock is released promptly. The Dart binding surface (cancel handle exposing cancel() / isCancelled, plus sink-close-as-cancel when the Dart stream is unsubscribed mid-run) was wired by issue 10. Issue 11 reuses the same token for preemptive cancel-and-replace: when runStreaming/runStreamingWithContext are called with preempt=true, the token is registered in the model's in-flight slot and a later preempting run cancels it (latest-frame-wins) before acquiring the write lock — so a stale run halts and releases the lock instead of blocking the new one. On the bolt bindings (Kotlin, Swift, C#) the token is a REQUIRED argument on every run entry point, because BoltFFI cannot express an optional handle parameter; the hand-written wrappers manufacture a throwaway token for callers who do not pass one, and wire host-native cancellation (Swift Task, Kotlin coroutine Job, .NET CancellationToken) to it."
     methods:
       cancel:
         notes: "Request cooperative cancellation of the associated run. Takes effect at the next token boundary."
-        status: { rust: implemented, dart: implemented, kotlin: planned, swift: planned, csharp: planned }
+        status: { rust: implemented, dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+        since: "0.10.0"
       is_cancelled:
-        notes: "Whether cancellation has been requested (Dart: isCancelled getter)."
+        notes: "Whether cancellation has been requested (Dart: isCancelled getter; Kotlin/Swift/C#: isCancelled())."
         return: bool
-        status: { rust: implemented, dart: implemented, kotlin: planned, swift: planned, csharp: planned }
+        status: { rust: implemented, dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+        since: "0.10.0"

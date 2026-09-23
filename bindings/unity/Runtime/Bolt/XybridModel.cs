@@ -461,8 +461,10 @@ namespace XybridBolt
         ///
         /// The hand-written wrappers add a one-arg `run(envelope)` convenience that
         /// forwards `None`, so simple call sites stay ergonomic.
+        /// Pass a [`XybridCancellationToken`] to keep a stop button on the run;
+        /// `None` means the run cannot be cancelled.
         /// </summary>
-        public global::XybridBolt.XybridResult Run(global::XybridBolt.XybridEnvelope envelope, global::XybridBolt.XybridRunOptions? options)
+        public global::XybridBolt.XybridResult Run(global::XybridBolt.XybridEnvelope envelope, global::XybridBolt.XybridRunOptions? options, XybridCancellationToken cancel)
         {
             ThrowIfDisposed();
             WireWriter envelopeWriter = new WireWriter();
@@ -483,7 +485,7 @@ namespace XybridBolt
                 }
             }
             byte[] optionsBytes = optionsWriter.ToArray();
-            FfiBuf boltffiErrorBuffer = NativeMethods.NativeXybridModelRun(this.Handle, envelopeBytes, (nuint)envelopeBytes.Length, optionsBytes, (nuint)optionsBytes.Length, out FfiBuf boltffiResultBuffer);
+            FfiBuf boltffiErrorBuffer = NativeMethods.NativeXybridModelRun(this.Handle, envelopeBytes, (nuint)envelopeBytes.Length, optionsBytes, (nuint)optionsBytes.Length, cancel.Handle, out FfiBuf boltffiResultBuffer);
             if (boltffiErrorBuffer.ptr != 0)
             {
                 try
@@ -513,8 +515,10 @@ namespace XybridBolt
         ///
         /// The identifier remains valid until the final result is taken, an error
         /// is returned, or [`Self::stream_close`] is called.
+        /// Pass a [`XybridCancellationToken`] to keep a stop button on the run;
+        /// `None` means the run cannot be cancelled.
         /// </summary>
-        public ulong RunStream(global::XybridBolt.XybridEnvelope envelope, global::XybridBolt.XybridRunOptions? options)
+        public ulong RunStream(global::XybridBolt.XybridEnvelope envelope, global::XybridBolt.XybridRunOptions? options, XybridCancellationToken cancel)
         {
             ThrowIfDisposed();
             WireWriter envelopeWriter = new WireWriter();
@@ -535,7 +539,7 @@ namespace XybridBolt
                 }
             }
             byte[] optionsBytes = optionsWriter.ToArray();
-            FfiBuf boltffiErrorBuffer = NativeMethods.NativeXybridModelRunStream(this.Handle, envelopeBytes, (nuint)envelopeBytes.Length, optionsBytes, (nuint)optionsBytes.Length, out ulong boltffiResult);
+            FfiBuf boltffiErrorBuffer = NativeMethods.NativeXybridModelRunStream(this.Handle, envelopeBytes, (nuint)envelopeBytes.Length, optionsBytes, (nuint)optionsBytes.Length, cancel.Handle, out ulong boltffiResult);
             if (boltffiErrorBuffer.ptr != 0)
             {
                 try
@@ -634,8 +638,13 @@ namespace XybridBolt
         /// Only the generation config from `options` is applied — abort signals and
         /// cloud fallback are not wired on the context path (matches the facade's
         /// `run_with_context`).
+        /// Pass a [`XybridCancellationToken`] to keep a stop button on the run;
+        /// `None` means the run cannot be cancelled.
+        ///
+        /// Routes through the facade's options path, so abort signals and cloud
+        /// fallback on `options` are honoured rather than dropped.
         /// </summary>
-        public global::XybridBolt.XybridResult RunWithContext(global::XybridBolt.XybridEnvelope envelope, XybridConversationContext context, global::XybridBolt.XybridRunOptions? options)
+        public global::XybridBolt.XybridResult RunWithContext(global::XybridBolt.XybridEnvelope envelope, XybridConversationContext context, global::XybridBolt.XybridRunOptions? options, XybridCancellationToken cancel)
         {
             ThrowIfDisposed();
             WireWriter envelopeWriter = new WireWriter();
@@ -656,7 +665,7 @@ namespace XybridBolt
                 }
             }
             byte[] optionsBytes = optionsWriter.ToArray();
-            FfiBuf boltffiErrorBuffer = NativeMethods.NativeXybridModelRunWithContext(this.Handle, envelopeBytes, (nuint)envelopeBytes.Length, context.Handle, optionsBytes, (nuint)optionsBytes.Length, out FfiBuf boltffiResultBuffer);
+            FfiBuf boltffiErrorBuffer = NativeMethods.NativeXybridModelRunWithContext(this.Handle, envelopeBytes, (nuint)envelopeBytes.Length, context.Handle, optionsBytes, (nuint)optionsBytes.Length, cancel.Handle, out FfiBuf boltffiResultBuffer);
             if (boltffiErrorBuffer.ptr != 0)
             {
                 try
@@ -685,8 +694,10 @@ namespace XybridBolt
         /// Start context-aware token streaming; returns a model-scoped session id.
         /// The pull protocol is identical to [`Self::run_stream`]
         /// (`stream_next` / `stream_result` / `stream_close`).
+        /// Pass a [`XybridCancellationToken`] to keep a stop button on the run;
+        /// `None` means the run cannot be cancelled.
         /// </summary>
-        public ulong RunStreamWithContext(global::XybridBolt.XybridEnvelope envelope, XybridConversationContext context, global::XybridBolt.XybridRunOptions? options)
+        public ulong RunStreamWithContext(global::XybridBolt.XybridEnvelope envelope, XybridConversationContext context, global::XybridBolt.XybridRunOptions? options, XybridCancellationToken cancel)
         {
             ThrowIfDisposed();
             WireWriter envelopeWriter = new WireWriter();
@@ -707,7 +718,7 @@ namespace XybridBolt
                 }
             }
             byte[] optionsBytes = optionsWriter.ToArray();
-            FfiBuf boltffiErrorBuffer = NativeMethods.NativeXybridModelRunStreamWithContext(this.Handle, envelopeBytes, (nuint)envelopeBytes.Length, context.Handle, optionsBytes, (nuint)optionsBytes.Length, out ulong boltffiResult);
+            FfiBuf boltffiErrorBuffer = NativeMethods.NativeXybridModelRunStreamWithContext(this.Handle, envelopeBytes, (nuint)envelopeBytes.Length, context.Handle, optionsBytes, (nuint)optionsBytes.Length, cancel.Handle, out ulong boltffiResult);
             if (boltffiErrorBuffer.ptr != 0)
             {
                 try

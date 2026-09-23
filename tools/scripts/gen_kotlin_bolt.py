@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Regenerate the committed BoltFFI Kotlin binding for the Android SDK.
+"""Regenerate the committed BoltFFI Kotlin and JNI bindings for Android.
 
 Sibling of `bindings/apple/scripts/gen-bolt-bindings.sh`, `gen_unity_bolt_csharp.py`
 and `gen_python_bolt.py`. Until now Kotlin was the one binding refreshed by
@@ -7,6 +7,11 @@ hand — `boltffi generate kotlin` followed by a copy — which meant the one
 post-process it needs was invisible and got lost on every regeneration.
 
 The post-processes:
+
+  boltffi's async/stream runtime resumes continuations with a bare
+  `Result.success(...)`. The hand-written wrapper declares
+  `typealias Result = XybridResult` in the same package, which shadows
+  `kotlin.Result` and breaks the compile; the call is qualified here.
 
   boltffi 0.29 emits each `XybridError` variant as a data class holding its
   payload, and `XybridError` extends `Exception`. For the fourteen variants
@@ -23,6 +28,10 @@ The post-processes:
   `XybridResult` gained an append-only `reasoning_content` wire field after
   tool calling landed. Its decoder probes for that tail before reading it and
   falls back to the existing reasoning metadata when the typed tail is absent.
+
+The generated JNI source and header are committed beside the Bazel AAR inputs.
+Keeping all three outputs in one drift check prevents the Kotlin declarations
+and native entry points from silently diverging.
 
 Usage:
     python3 tools/scripts/gen_kotlin_bolt.py            # regenerate + write
@@ -41,7 +50,10 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 BOLT_DIR = REPO_ROOT / "crates" / "xybrid-bolt"
 RAW_FILE = BOLT_DIR / "dist" / "android" / "kotlin" / "ai" / "xybrid" / "XybridBolt.kt"
 DEST_FILE = REPO_ROOT / "bindings" / "kotlin" / "src" / "main" / "kotlin" / "ai" / "xybrid" / "XybridBolt.kt"
-PINNED_BOLTFFI = "0.29.3"
+RAW_JNI_DIR = BOLT_DIR / "dist" / "android" / "kotlin" / "jni"
+DEST_JNI_DIR = REPO_ROOT / "bindings" / "kotlin" / "bazel" / "jni"
+NATIVE_FILES = ("jni_glue.c", "xybrid_bolt.h")
+PINNED_BOLTFFI = "0.30.1"
 
 # `data class Foo(<params>) : XybridError() {` — payload lists carry no nested
 # parentheses, so stopping at the first `)` is exact.
@@ -140,10 +152,37 @@ def _add_result_wire_compatibility(source: str) -> str:
     return source.replace(decoder_target, decoder_replacement, 1)
 
 
-def render() -> str:
-    subprocess.run(["boltffi", "generate", "kotlin"], cwd=BOLT_DIR, check=True)
+def _qualify_kotlin_result(source: str) -> str:
+    """Fully qualify `kotlin.Result` in the generated async/stream runtime.
+
+    The hand-written wrapper declares `typealias Result = XybridResult` in the
+    same `ai.xybrid` package, which shadows `kotlin.Result` for every file in
+    it. boltffi's async runtime resumes a continuation with a bare
+    `Result.success(...)`, so the binding stops compiling:
+
+        e: Expression 'success' cannot be invoked as a function.
+
+    Qualifying the call is the narrow fix; renaming the public typealias would
+    break every Kotlin consumer.
+    """
+
+    target = "continuation.resumeWith(Result.success("
+    if source.count(target) != 1:
+        sys.exit("error: expected one generated `Result.success(` continuation resume")
+    return source.replace(target, "continuation.resumeWith(kotlin.Result.success(", 1)
+
+
+def render() -> tuple[str, dict[str, bytes]]:
+    subprocess.run(["boltffi", "generate", "kotlin", "--deny-skipped"], cwd=BOLT_DIR, check=True)
     if not RAW_FILE.is_file():
         sys.exit(f"error: boltffi produced no Kotlin source at {RAW_FILE}")
+
+    native_files: dict[str, bytes] = {}
+    for name in NATIVE_FILES:
+        source = RAW_JNI_DIR / name
+        if not source.is_file():
+            sys.exit(f"error: boltffi produced no JNI input at {source}")
+        native_files[name] = source.read_bytes()
 
     source, overrides = _add_message_override(RAW_FILE.read_text())
     result_field = "    val reasoningContent: String?\n) {"
@@ -154,6 +193,7 @@ def render() -> str:
         "    val reasoningContent: String? = null\n) {",
     )
     source = _add_result_wire_compatibility(source)
+    source = _qualify_kotlin_result(source)
     if overrides == 0:
         # Either boltffi fixed this upstream or the error shape moved. Both
         # want a human to re-read the transform before it silently no-ops.
@@ -163,7 +203,8 @@ def render() -> str:
             "now emits it.",
             file=sys.stderr,
         )
-    return source if source.endswith("\n") else source + "\n"
+    kotlin = source if source.endswith("\n") else source + "\n"
+    return kotlin, native_files
 
 
 def main() -> int:
@@ -172,21 +213,32 @@ def main() -> int:
     args = parser.parse_args()
 
     check_boltffi_version()
-    rendered = render()
+    rendered, native_files = render()
 
     if args.check:
+        stale = []
         if not DEST_FILE.exists() or DEST_FILE.read_text() != rendered:
+            stale.append(DEST_FILE)
+        for name, content in native_files.items():
+            destination = DEST_JNI_DIR / name
+            if not destination.exists() or destination.read_bytes() != content:
+                stale.append(destination)
+        if stale:
+            paths = "\n".join(f"  - {path.relative_to(REPO_ROOT)}" for path in stale)
             print(
-                f"error: {DEST_FILE.relative_to(REPO_ROOT)} is out of date.\n"
+                f"error: generated Kotlin/JNI files are out of date:\n{paths}\n"
                 "Run: python3 tools/scripts/gen_kotlin_bolt.py",
                 file=sys.stderr,
             )
             return 1
-        print("Kotlin binding up to date")
+        print("Kotlin and JNI bindings up to date")
         return 0
 
     DEST_FILE.write_text(rendered)
-    print(f"Wrote {DEST_FILE.relative_to(REPO_ROOT)}")
+    DEST_JNI_DIR.mkdir(parents=True, exist_ok=True)
+    for name, content in native_files.items():
+        (DEST_JNI_DIR / name).write_bytes(content)
+    print(f"Wrote {DEST_FILE.relative_to(REPO_ROOT)} and {DEST_JNI_DIR.relative_to(REPO_ROOT)}")
     return 0
 
 

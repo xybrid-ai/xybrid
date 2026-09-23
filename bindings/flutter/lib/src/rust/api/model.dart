@@ -284,7 +284,8 @@ abstract class FfiModelLoader implements RustOpaqueInterface {
   /// Load the model with download progress updates.
   ///
   /// Streams FfiLoadEvent during download:
-  /// - `Progress(f64)` for download progress (0.0 to 1.0)
+  /// - `Progress(FfiDownloadStatus)` with the fraction, bytes transferred
+  ///   and the declared total when the source has one
   /// - `Complete` when the model is ready
   /// - `Error(String)` if loading fails
   ///
@@ -348,35 +349,58 @@ enum FfiCloudFallbackReason {
   ;
 }
 
-/// Lifecycle of the background download behind a speculative load.
+/// Lifecycle of a model download.
 enum FfiDownloadState {
-  /// Weights still downloading; runs are served from the cloud.
+  /// Bytes still in flight. For a speculative load, runs are served from
+  /// the cloud meanwhile.
   downloading,
 
-  /// Local handle installed; runs are on-device.
+  /// Every artifact landed and the model is usable.
   ready,
 
-  /// Download failed — the cloud keeps serving and the model never becomes
-  /// local. Surfacing this is the only way the UI can stop waiting.
+  /// Download failed — for a speculative load the cloud keeps serving and
+  /// the model never becomes local. Surfacing this is the only way the UI
+  /// can stop waiting.
   failed,
+
+  /// The download was cancelled by the caller.
+  cancelled,
   ;
 }
 
-/// Download progress + state in one consistent read, so a polling UI cannot
-/// observe a torn pair (for example `Ready` with a stale 0.34 progress).
+/// Download progress, bytes and state in one consistent read, so a polling UI
+/// cannot observe a torn pair (for example `Ready` with a stale 0.34
+/// progress).
+///
+/// `progress` is aggregated across every artifact the model needs (weights
+/// plus companions such as a vision projector), never moves backwards, and
+/// reaches 1.0 only alongside `Ready`. `totalBytes` is null when the source
+/// declares no size, in which case `downloadedBytes` is still exact.
 class FfiDownloadStatus {
   final FfiDownloadState state;
 
   /// 0.0 to 1.0.
   final double progress;
 
+  /// Bytes written so far, across every artifact.
+  final BigInt downloadedBytes;
+
+  /// Declared total across every artifact, or null when unknown.
+  final BigInt? totalBytes;
+
   const FfiDownloadStatus({
     required this.state,
     required this.progress,
+    required this.downloadedBytes,
+    this.totalBytes,
   });
 
   @override
-  int get hashCode => state.hashCode ^ progress.hashCode;
+  int get hashCode =>
+      state.hashCode ^
+      progress.hashCode ^
+      downloadedBytes.hashCode ^
+      totalBytes.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -384,7 +408,9 @@ class FfiDownloadStatus {
       other is FfiDownloadStatus &&
           runtimeType == other.runtimeType &&
           state == other.state &&
-          progress == other.progress;
+          progress == other.progress &&
+          downloadedBytes == other.downloadedBytes &&
+          totalBytes == other.totalBytes;
 }
 
 /// Generation parameters for LLM inference.
@@ -478,9 +504,10 @@ class FfiGenerationConfig {
 sealed class FfiLoadEvent with _$FfiLoadEvent {
   const FfiLoadEvent._();
 
-  /// Download progress update (0.0 to 1.0)
+  /// Download progress: fraction, bytes transferred, and the declared total
+  /// when the source has one.
   const factory FfiLoadEvent.progress(
-    double field0,
+    FfiDownloadStatus field0,
   ) = FfiLoadEvent_Progress;
 
   /// Model loaded successfully - contains the model handle ID

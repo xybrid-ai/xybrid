@@ -3919,6 +3919,7 @@ impl SseDecode for crate::api::model::FfiDownloadState {
             0 => crate::api::model::FfiDownloadState::Downloading,
             1 => crate::api::model::FfiDownloadState::Ready,
             2 => crate::api::model::FfiDownloadState::Failed,
+            3 => crate::api::model::FfiDownloadState::Cancelled,
             _ => unreachable!("Invalid variant for FfiDownloadState: {}", inner),
         };
     }
@@ -3929,9 +3930,13 @@ impl SseDecode for crate::api::model::FfiDownloadStatus {
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         let mut var_state = <crate::api::model::FfiDownloadState>::sse_decode(deserializer);
         let mut var_progress = <f64>::sse_decode(deserializer);
+        let mut var_downloadedBytes = <u64>::sse_decode(deserializer);
+        let mut var_totalBytes = <Option<u64>>::sse_decode(deserializer);
         return crate::api::model::FfiDownloadStatus {
             state: var_state,
             progress: var_progress,
+            downloaded_bytes: var_downloadedBytes,
+            total_bytes: var_totalBytes,
         };
     }
 }
@@ -4024,7 +4029,8 @@ impl SseDecode for crate::api::model::FfiLoadEvent {
         let mut tag_ = <i32>::sse_decode(deserializer);
         match tag_ {
             0 => {
-                let mut var_field0 = <f64>::sse_decode(deserializer);
+                let mut var_field0 =
+                    <crate::api::model::FfiDownloadStatus>::sse_decode(deserializer);
                 return crate::api::model::FfiLoadEvent::Progress(var_field0);
             }
             1 => {
@@ -4656,6 +4662,17 @@ impl SseDecode for Option<u32> {
     }
 }
 
+impl SseDecode for Option<u64> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        if (<bool>::sse_decode(deserializer)) {
+            return Some(<u64>::sse_decode(deserializer));
+        } else {
+            return None;
+        }
+    }
+}
+
 impl SseDecode for Option<u8> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -5280,6 +5297,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::model::FfiDownloadState {
             Self::Downloading => 0.into_dart(),
             Self::Ready => 1.into_dart(),
             Self::Failed => 2.into_dart(),
+            Self::Cancelled => 3.into_dart(),
             _ => unreachable!(),
         }
     }
@@ -5301,6 +5319,8 @@ impl flutter_rust_bridge::IntoDart for crate::api::model::FfiDownloadStatus {
         [
             self.state.into_into_dart().into_dart(),
             self.progress.into_into_dart().into_dart(),
+            self.downloaded_bytes.into_into_dart().into_dart(),
+            self.total_bytes.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -6237,6 +6257,7 @@ impl SseEncode for crate::api::model::FfiDownloadState {
                 crate::api::model::FfiDownloadState::Downloading => 0,
                 crate::api::model::FfiDownloadState::Ready => 1,
                 crate::api::model::FfiDownloadState::Failed => 2,
+                crate::api::model::FfiDownloadState::Cancelled => 3,
                 _ => {
                     unimplemented!("");
                 }
@@ -6251,6 +6272,8 @@ impl SseEncode for crate::api::model::FfiDownloadStatus {
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <crate::api::model::FfiDownloadState>::sse_encode(self.state, serializer);
         <f64>::sse_encode(self.progress, serializer);
+        <u64>::sse_encode(self.downloaded_bytes, serializer);
+        <Option<u64>>::sse_encode(self.total_bytes, serializer);
     }
 }
 
@@ -6316,7 +6339,7 @@ impl SseEncode for crate::api::model::FfiLoadEvent {
         match self {
             crate::api::model::FfiLoadEvent::Progress(field0) => {
                 <i32>::sse_encode(0, serializer);
-                <f64>::sse_encode(field0, serializer);
+                <crate::api::model::FfiDownloadStatus>::sse_encode(field0, serializer);
             }
             crate::api::model::FfiLoadEvent::Complete => {
                 <i32>::sse_encode(1, serializer);
@@ -6839,6 +6862,16 @@ impl SseEncode for Option<u32> {
         <bool>::sse_encode(self.is_some(), serializer);
         if let Some(value) = self {
             <u32>::sse_encode(value, serializer);
+        }
+    }
+}
+
+impl SseEncode for Option<u64> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <bool>::sse_encode(self.is_some(), serializer);
+        if let Some(value) = self {
+            <u64>::sse_encode(value, serializer);
         }
     }
 }

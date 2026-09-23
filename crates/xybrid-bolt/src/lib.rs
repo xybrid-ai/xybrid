@@ -14,6 +14,12 @@
 //! - Handle types use `#[export] impl Foo { ... }`; BoltFFI manages the
 //!   heap allocation and FFI handle internally — no `Arc<Self>` return is
 //!   required at the call site.
+//! - Pushed event streams use `#[ffi_stream(item = T)]` returning an
+//!   `Arc<EventSubscription<T>>`. Items travel Rust → host only (the host
+//!   allocates the output slots), so nothing crosses as a closure and no
+//!   foreign-allocated buffer is ever freed by Rust. The generator emits a
+//!   Swift `AsyncStream`, a Kotlin `Flow`, a C# `IAsyncEnumerable` and a
+//!   Python subscription object from the one declaration.
 //!
 //! ## Naming convention
 //!
@@ -41,8 +47,12 @@
 //! - **`XybridConversationContext`**: opaque handle (new / with_id / push /
 //!   set_system / clear / id) feeding `run_with_context` and
 //!   `run_stream_with_context`.
+//! - **`XybridCancellationToken`**: opaque handle (new / cancel /
+//!   is_cancelled) accepted by every `run*` entry point as the stop button.
+//! - **`XybridDownload`**: opaque handle over a background model download,
+//!   decoupled from loading so a blocking host has something to poll while the
+//!   weights come down (status / progress stream / cancel / error).
 //! - **Deferred to follow-up commits**:
-//!   - `XybridCancellationToken` as an `Arc<Self>` handle.
 //!   - Pipeline surface.
 //!
 //! This is now the sole native binding crate: `xybrid-uniffi` and the
@@ -74,28 +84,72 @@ use xybrid_ffi_facade as facade;
 #[error]
 #[derive(Debug, Clone)]
 pub enum XybridError {
-    ModelNotFound { id: String },
-    DirectoryNotFound { path: String },
-    MetadataNotFound { path: String },
-    MetadataInvalid { message: String },
-    LoadError { message: String },
-    InferenceError { message: String },
-    AbortedForCloudFallback { reason: String },
+    ModelNotFound {
+        id: String,
+    },
+    DirectoryNotFound {
+        path: String,
+    },
+    MetadataNotFound {
+        path: String,
+    },
+    MetadataInvalid {
+        message: String,
+    },
+    LoadError {
+        message: String,
+    },
+    InferenceError {
+        message: String,
+    },
+    AbortedForCloudFallback {
+        reason: String,
+    },
     StreamingNotSupported,
     NotLoaded,
-    ConfigError { message: String },
-    NetworkError { message: String },
-    Offline { message: String },
-    IoError { message: String },
-    CacheError { message: String },
-    PipelineError { message: String },
-    CircuitOpen { message: String },
-    RateLimited { retry_after_secs: u64 },
-    Timeout { timeout_ms: u64 },
-    MissingArtifact { message: String },
-    UnsupportedModelCapability { message: String },
-    UnsupportedBackendCapability { message: String },
-    InvalidImage { message: String },
+    ConfigError {
+        message: String,
+    },
+    NetworkError {
+        message: String,
+    },
+    Offline {
+        message: String,
+    },
+    IoError {
+        message: String,
+    },
+    CacheError {
+        message: String,
+    },
+    PipelineError {
+        message: String,
+    },
+    CircuitOpen {
+        message: String,
+    },
+    RateLimited {
+        retry_after_secs: u64,
+    },
+    Timeout {
+        timeout_ms: u64,
+    },
+    MissingArtifact {
+        message: String,
+    },
+    UnsupportedModelCapability {
+        message: String,
+    },
+    UnsupportedBackendCapability {
+        message: String,
+    },
+    InvalidImage {
+        message: String,
+    },
+    /// The host called `cancel` — today, on a model download.
+    Cancelled {
+        message: String,
+    },
 }
 
 impl XybridError {
@@ -142,6 +196,7 @@ impl From<XybridError> for facade::Error {
                 facade::Error::UnsupportedBackendCapability { message }
             }
             XybridError::InvalidImage { message } => facade::Error::InvalidImage { message },
+            XybridError::Cancelled { message } => facade::Error::Cancelled { message },
         }
     }
 }
@@ -179,6 +234,7 @@ impl From<facade::Error> for XybridError {
                 XybridError::UnsupportedBackendCapability { message }
             }
             facade::Error::InvalidImage { message } => XybridError::InvalidImage { message },
+            facade::Error::Cancelled { message } => XybridError::Cancelled { message },
         }
     }
 }
@@ -633,23 +689,39 @@ impl From<facade::ExecutionTarget> for XybridExecutionTarget {
     }
 }
 
-/// Lifecycle of the background download behind a speculative load.
+/// Lifecycle of a model download — a standalone [`XybridDownload`] or
+/// the background download behind a speculative load.
 #[data]
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum XybridDownloadState {
     Downloading,
     Ready,
-    /// Download failed; the cloud keeps serving and `isLoaded` never flips.
+    /// Download failed; for a speculative load the cloud keeps serving and
+    /// `isLoaded` never flips.
     Failed,
+    /// The host called `cancel`.
+    Cancelled,
 }
 
-/// Download progress + state in one consistent read.
+/// Download progress, bytes and state in one consistent read.
+///
+/// `progress` is aggregated across every artifact the model needs (weights
+/// plus companions such as a vision projector), never moves backwards, and
+/// reaches 1.0 only alongside `Ready`. `totalBytes` is null when the source
+/// declares no size — a Hugging Face repo, or a registry entry without one —
+/// in which case `downloadedBytes` is still exact and `progress` is coarser.
+///
+/// Derives `Copy` because it is carried as a stream item.
 #[data]
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct XybridDownloadStatus {
     pub state: XybridDownloadState,
     /// 0.0..=1.0.
     pub progress: f32,
+    /// Bytes written so far, across every artifact.
+    pub downloaded_bytes: u64,
+    /// Declared total across every artifact, or null when unknown.
+    pub total_bytes: Option<u64>,
 }
 
 impl From<facade::DownloadStatus> for XybridDownloadStatus {
@@ -658,10 +730,13 @@ impl From<facade::DownloadStatus> for XybridDownloadStatus {
             facade::DownloadState::Downloading => XybridDownloadState::Downloading,
             facade::DownloadState::Ready => XybridDownloadState::Ready,
             facade::DownloadState::Failed => XybridDownloadState::Failed,
+            facade::DownloadState::Cancelled => XybridDownloadState::Cancelled,
         };
         Self {
             state,
             progress: status.progress,
+            downloaded_bytes: status.downloaded_bytes,
+            total_bytes: status.total_bytes,
         }
     }
 }
@@ -988,11 +1063,149 @@ pub fn is_auto_release_enabled() -> bool {
 }
 
 // ============================================================================
+// XybridDownload handle
+// ============================================================================
+//
+// Named `XybridDownload`, not `XybridModelDownload`: BoltFFI derives native
+// symbols from class + method, and `XybridModelDownload::status` would collide
+// with `XybridModel::download_status`.
+
+/// Ring-buffer depth for a download progress stream.
+///
+/// Updates are throttled to ~10/s in the SDK and [`XybridDownload::status`]
+/// is always authoritative, so a host that falls this far behind can afford to
+/// drop frames rather than back-pressure the download.
+const DOWNLOAD_STREAM_CAPACITY: usize = 256;
+
+/// A model download running in the background, separate from loading it.
+///
+/// Every binding's load call blocks, so there is no object to poll while the
+/// weights come down — this is that object. Start it, drive a progress bar
+/// off [`Self::progress`] (or poll [`Self::status`]), then construct the
+/// model with `XybridModel(fromRegistry:)`, which hits the cache and returns
+/// at once.
+///
+/// Dropping the handle does not stop the transfer; call [`Self::cancel`].
+pub struct XybridDownload {
+    inner: std::sync::Arc<facade::ModelDownload>,
+}
+
+#[export]
+impl XybridDownload {
+    /// Start downloading a registry model. Returns immediately.
+    pub fn from_registry(id: String) -> Self {
+        Self {
+            inner: facade::ModelDownload::from_registry(id),
+        }
+    }
+
+    /// Start downloading a registry model resolved for a specific platform.
+    pub fn from_registry_with_platform(id: String, platform: String) -> Self {
+        Self {
+            inner: facade::ModelDownload::from_registry_with_platform(id, platform),
+        }
+    }
+
+    /// Current snapshot. Never blocks — safe from a UI thread or a per-frame
+    /// render loop.
+    pub fn status(&self) -> XybridDownloadStatus {
+        self.inner.status().into()
+    }
+
+    /// Whether the download reached a terminal state.
+    pub fn is_finished(&self) -> bool {
+        self.inner.is_finished()
+    }
+
+    /// The failure message once the download ended in `Failed` or
+    /// `Cancelled`; null otherwise. The stream carries the terminal *state*,
+    /// this carries the reason.
+    pub fn error(&self) -> Option<String> {
+        self.inner.error()
+    }
+
+    /// Pushed progress updates, closing once the download is terminal.
+    ///
+    /// Generated as an `AsyncStream` in Swift, a `Flow` in Kotlin, an
+    /// `IAsyncEnumerable` in C# and a subscription object in Python.
+    /// Cancelling the consuming task / scope / token unsubscribes; it does
+    /// **not** cancel the download itself — call [`Self::cancel`] for that.
+    ///
+    /// The current snapshot is delivered first, so subscribing late still
+    /// yields a frame, and a download that already finished closes at once
+    /// instead of hanging.
+    #[ffi_stream(item = XybridDownloadStatus)]
+    pub fn progress(&self) -> std::sync::Arc<EventSubscription<XybridDownloadStatus>> {
+        let subscription = std::sync::Arc::new(EventSubscription::<XybridDownloadStatus>::new(
+            DOWNLOAD_STREAM_CAPACITY,
+        ));
+        let producer = std::sync::Arc::clone(&subscription);
+        self.inner.watch(move |status| {
+            let status: XybridDownloadStatus = status.into();
+            producer.push_event(status);
+            if status.state != XybridDownloadState::Downloading {
+                // Terminal: close the stream so the host's `for await` /
+                // `collect` ends instead of waiting forever.
+                producer.unsubscribe();
+            }
+        });
+        subscription
+    }
+
+    /// Ask the download to stop. Takes effect within one chunk read, discards
+    /// the partial file, and moves the status to `Cancelled`. Idempotent, and
+    /// a no-op once the download is terminal.
+    pub fn cancel(&self) {
+        self.inner.cancel();
+    }
+}
+
+// ============================================================================
+// Cancellation
+// ============================================================================
+
+/// A stop button for an in-flight run.
+///
+/// Create one, hand it to `run` / `run_stream` (or the context variants), and
+/// call [`Self::cancel`] from anywhere — another thread, a UI action — to stop
+/// generation at the next token boundary. Cancelling after a run has finished
+/// is a no-op, and one token may be shared by several runs.
+///
+/// Cancellation is a separate handle rather than a field on
+/// [`XybridRunOptions`] because the options are a plain data record that
+/// crosses the wire by value; a stop button has to stay shared with the
+/// caller after the run starts.
+pub struct XybridCancellationToken {
+    inner: std::sync::Arc<facade::CancellationToken>,
+}
+
+#[export]
+impl XybridCancellationToken {
+    /// Create a fresh, un-cancelled token.
+    #[allow(clippy::new_without_default)]
+    pub fn new() -> Self {
+        Self {
+            inner: facade::CancellationToken::new(),
+        }
+    }
+
+    /// Request cancellation. Idempotent, and safe to call from any thread.
+    pub fn cancel(&self) {
+        self.inner.cancel();
+    }
+
+    /// Whether [`Self::cancel`] has been called on this token.
+    pub fn is_cancelled(&self) -> bool {
+        self.inner.is_cancelled()
+    }
+}
+
+// ============================================================================
 // XybridModel handle
 // ============================================================================
 //
-// Scope: load / run / pull-stream / warmup / unload / voice accessors.
-// Cancellation and conversation context remain follow-up work.
+// Scope: load / run / pull-stream / warmup / unload / voice accessors /
+// conversation context / cancellation.
 //
 // `ModelLoader` is intentionally **not** mirrored as a separate
 // `#[export]` type. BoltFFI's wire layer treats opaque types as handle
@@ -1126,6 +1339,28 @@ impl XybridModel {
         self.inner.await_download(timeout_ms).into()
     }
 
+    /// Pushed download updates for a speculatively-loaded model — the stream
+    /// counterpart of [`Self::await_download`], and what issue #504 asks for.
+    ///
+    /// Emits the current snapshot first, then every update, then closes on
+    /// the terminal state. An ordinary local model is already `Ready`, so its
+    /// stream yields one frame and ends.
+    #[ffi_stream(item = XybridDownloadStatus)]
+    pub fn download_progress(&self) -> std::sync::Arc<EventSubscription<XybridDownloadStatus>> {
+        let subscription = std::sync::Arc::new(EventSubscription::<XybridDownloadStatus>::new(
+            DOWNLOAD_STREAM_CAPACITY,
+        ));
+        let producer = std::sync::Arc::clone(&subscription);
+        self.inner.watch_download(move |status| {
+            let status: XybridDownloadStatus = status.into();
+            producer.push_event(status);
+            if status.state != XybridDownloadState::Downloading {
+                producer.unsubscribe();
+            }
+        });
+        subscription
+    }
+
     pub fn supports_streaming(&self) -> bool {
         self.inner.supports_streaming()
     }
@@ -1179,18 +1414,22 @@ impl XybridModel {
     ///
     /// The hand-written wrappers add a one-arg `run(envelope)` convenience that
     /// forwards `None`, so simple call sites stay ergonomic.
+    /// Pass a [`XybridCancellationToken`] to keep a stop button on the run;
+    /// `None` means the run cannot be cancelled.
     pub fn run(
         &self,
         envelope: XybridEnvelope,
         options: Option<XybridRunOptions>,
+        cancel: &XybridCancellationToken,
     ) -> Result<XybridResult, XybridError> {
-        let result = match options {
-            Some(opts) => self
-                .inner
-                .run_with_options(envelope.into(), opts.into(), None),
-            None => self.inner.run(envelope.into()),
-        }
-        .map_err(XybridError::from)?;
+        let result = self
+            .inner
+            .run_with_options(
+                envelope.into(),
+                options.map(Into::into).unwrap_or_default(),
+                Some(cancel.inner.clone()),
+            )
+            .map_err(XybridError::from)?;
         Ok(result.into())
     }
 
@@ -1198,17 +1437,20 @@ impl XybridModel {
     ///
     /// The identifier remains valid until the final result is taken, an error
     /// is returned, or [`Self::stream_close`] is called.
+    /// Pass a [`XybridCancellationToken`] to keep a stop button on the run;
+    /// `None` means the run cannot be cancelled.
     pub fn run_stream(
         &self,
         envelope: XybridEnvelope,
         options: Option<XybridRunOptions>,
+        cancel: &XybridCancellationToken,
     ) -> Result<u64, XybridError> {
         let session = self
             .inner
             .run_stream(
                 envelope.into(),
                 options.map(Into::into).unwrap_or_default(),
-                None,
+                Some(cancel.inner.clone()),
             )
             .map_err(XybridError::from)?;
         let stream_id = self
@@ -1299,18 +1541,26 @@ impl XybridModel {
     /// Only the generation config from `options` is applied — abort signals and
     /// cloud fallback are not wired on the context path (matches the facade's
     /// `run_with_context`).
+    /// Pass a [`XybridCancellationToken`] to keep a stop button on the run;
+    /// `None` means the run cannot be cancelled.
+    ///
+    /// Routes through the facade's options path, so abort signals and cloud
+    /// fallback on `options` are honoured rather than dropped.
     pub fn run_with_context(
         &self,
         envelope: XybridEnvelope,
         context: &XybridConversationContext,
         options: Option<XybridRunOptions>,
+        cancel: &XybridCancellationToken,
     ) -> Result<XybridResult, XybridError> {
-        let generation_config = options
-            .and_then(|opts| opts.generation_config)
-            .map(Into::into);
         let result = self
             .inner
-            .run_with_context(envelope.into(), context.inner.clone(), generation_config)
+            .run_with_context_options(
+                envelope.into(),
+                context.inner.clone(),
+                options.map(Into::into).unwrap_or_default(),
+                Some(cancel.inner.clone()),
+            )
             .map_err(XybridError::from)?;
         Ok(result.into())
     }
@@ -1318,11 +1568,14 @@ impl XybridModel {
     /// Start context-aware token streaming; returns a model-scoped session id.
     /// The pull protocol is identical to [`Self::run_stream`]
     /// (`stream_next` / `stream_result` / `stream_close`).
+    /// Pass a [`XybridCancellationToken`] to keep a stop button on the run;
+    /// `None` means the run cannot be cancelled.
     pub fn run_stream_with_context(
         &self,
         envelope: XybridEnvelope,
         context: &XybridConversationContext,
         options: Option<XybridRunOptions>,
+        cancel: &XybridCancellationToken,
     ) -> Result<u64, XybridError> {
         let session = self
             .inner
@@ -1330,7 +1583,7 @@ impl XybridModel {
                 envelope.into(),
                 context.inner.clone(),
                 options.map(Into::into).unwrap_or_default(),
-                None,
+                Some(cancel.inner.clone()),
             )
             .map_err(XybridError::from)?;
         let stream_id = self
@@ -1611,6 +1864,33 @@ impl XybridBundle {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cancellation_token_starts_uncancelled_and_latches() {
+        let token = XybridCancellationToken::new();
+        assert!(!token.is_cancelled());
+
+        token.cancel();
+        assert!(token.is_cancelled());
+
+        // Idempotent: a second cancel must not clear the flag.
+        token.cancel();
+        assert!(token.is_cancelled());
+    }
+
+    #[test]
+    fn cancellation_token_shares_one_flag_across_clones() {
+        // Two bolt tokens built from the same facade handle observe each
+        // other, which is what lets a UI thread stop a run on a worker.
+        let token = XybridCancellationToken::new();
+        let shared = XybridCancellationToken {
+            inner: token.inner.clone(),
+        };
+
+        assert!(!shared.is_cancelled());
+        token.cancel();
+        assert!(shared.is_cancelled());
+    }
 
     #[test]
     fn envelope_roundtrips_through_facade() {

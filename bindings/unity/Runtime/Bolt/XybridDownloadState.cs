@@ -6,15 +6,21 @@
 namespace XybridBolt
 {
     /// <summary>
-    /// Lifecycle of the background download behind a speculative load.
+    /// Lifecycle of a model download — a standalone [`XybridDownload`] or
+    /// the background download behind a speculative load.
     /// </summary>
     public enum XybridDownloadState : int
     {
         Downloading = 0,
         Ready = 1,
         /// <summary>
-        /// Download failed; the cloud keeps serving and `isLoaded` never flips.
+        /// Download failed; for a speculative load the cloud keeps serving and
+        /// `isLoaded` never flips.
         /// </summary>
-        Failed = 2
+        Failed = 2,
+        /// <summary>
+        /// The host called `cancel`.
+        /// </summary>
+        Cancelled = 3
     }
 }

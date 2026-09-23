@@ -1,4 +1,4 @@
-# libxybrid-bolt.so is a build output produced from crates/xybrid-bolt via
+# libxybrid_bolt.so is a build output produced from crates/xybrid-bolt via
 # the Bazel AAR (see README) and built fresh by CI for releases. It is
 # not committed. The vendored ONNX Runtime libraries (libonnxruntime.so,
 # libc++_shared.so) and .gitkeep are intentionally tracked and not ignored.

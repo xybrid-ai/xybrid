@@ -6,11 +6,22 @@
 //!
 //! ## How It Works
 //!
-//! `LocalAuthority` wraps the existing `PolicyEngine` and `RoutingEngine`:
+//! `LocalAuthority` owns the one policy engine and wraps the routing ladder:
 //!
-//! - **Policy evaluation**: Delegates to `DefaultPolicyEngine`
-//! - **Target resolution**: Delegates to `DefaultRoutingEngine`, respects explicit targets
-//! - **Model selection**: Uses `CacheProvider` to check availability, falls back to registry
+//! - **One prepared decision**: every stage decision takes exactly one live
+//!   resource snapshot and evaluates the policy exactly once, against the
+//!   actual input envelope. The same prepared values drive the policy event,
+//!   the routing decision, and the feedback signal bucket.
+//! - **Policy is an invariant, not a hint**: when the policy denies cloud (or
+//!   requires a transform that cannot be applied) the target is the device —
+//!   ahead of explicit `cloud`/`server` targets, model availability,
+//!   hysteresis, and reliability history. A stage with no usable local leg
+//!   then fails locally rather than leaking to cloud.
+//! - **Target resolution**: explicit target → local availability → policy
+//!   cloud preference → hysteresis → history bias → the routing ladder
+//!   (device stress, default local).
+//! - **Model selection**: Uses `CacheProvider` to check availability, falls
+//!   back to registry.
 //!
 //! ## Cache Provider
 //!
@@ -29,16 +40,19 @@
 use super::types::*;
 use super::OrchestrationAuthority;
 use crate::cache_provider::{CacheProvider, FilesystemCacheProvider};
-use crate::device::ResourceSnapshotProvider;
+use crate::context::DeviceMetrics;
+use crate::device::{ResourceMonitor, ResourceSnapshot, ResourceSnapshotProvider};
 use crate::ir::Envelope;
-use crate::orchestrator::policy_engine::{DefaultPolicyEngine, PolicyEngine};
+use crate::orchestrator::policy_engine::{
+    DefaultPolicyEngine, PolicyBundle, PolicyEngine, PolicyResult,
+};
 use crate::orchestrator::routing_engine::{
     DefaultRoutingEngine, LocalAvailability, LocalReliabilityHint, RouteTarget, RoutingDecision,
     RoutingEngine,
 };
 use crate::pipeline::ExecutionTarget;
 use std::collections::{HashMap, VecDeque};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use std::time::{Duration, Instant};
 
 const DEFAULT_HYSTERESIS_TTL: Duration = Duration::from_secs(30);
@@ -46,6 +60,8 @@ const RELIABILITY_WINDOW: usize = 32;
 const DEFAULT_HISTORY_BIAS_K: usize = 3;
 const MAX_HYSTERESIS_KEYS: usize = 256;
 const MAX_RELIABILITY_KEYS: usize = 256;
+/// Maximum age of a cached resource snapshot before it is refreshed.
+const RESOURCE_SNAPSHOT_MAX_AGE: Duration = Duration::from_millis(500);
 
 /// Local orchestration authority - fully functional offline.
 ///
@@ -66,7 +82,9 @@ const MAX_RELIABILITY_KEYS: usize = 256;
 /// # }
 /// ```
 pub struct LocalAuthority {
-    policy_engine: DefaultPolicyEngine,
+    /// The one policy engine. Reads on the per-stage hot path, writes only
+    /// on `load_policies`; a poisoned lock is recovered rather than panicked.
+    policy_engine: RwLock<DefaultPolicyEngine>,
     /// Wrapped in Mutex for interior mutability (RoutingEngine::decide requires &mut self).
     routing_engine: Mutex<DefaultRoutingEngine>,
     /// Cache provider for checking model availability.
@@ -80,9 +98,18 @@ pub struct LocalAuthority {
     history_bias_k: usize,
 }
 
+/// Everything one stage decision needs, computed exactly once: the live
+/// metrics, the signal bucket derived from them, and the policy result for
+/// the actual input. Shared between `LocalAuthority` and `RemoteAuthority` so
+/// the remote path never re-evaluates or re-samples.
+pub(super) struct PreparedStage {
+    pub(super) metrics: DeviceMetrics,
+    pub(super) signal: SignalContext,
+    pub(super) policy: PolicyResult,
+}
+
 impl LocalAuthority {
-    /// Create a new LocalAuthority with default policy, routing, and cache provider.
-    pub fn new() -> Self {
+    fn build(policy_engine: DefaultPolicyEngine, cache_provider: Arc<dyn CacheProvider>) -> Self {
         // Prewarm the static-capability cache. First call to
         // `detect_capabilities()` can take ~1s on macOS/iOS because
         // `MLAllComputeDevices` lazy-loads Core ML. Doing it here keeps
@@ -90,21 +117,7 @@ impl LocalAuthority {
         // hysteresis check measured in tens of ms).
         crate::device::capabilities::prewarm();
         Self {
-            policy_engine: DefaultPolicyEngine::with_default_policy(),
-            routing_engine: Mutex::new(DefaultRoutingEngine::new()),
-            cache_provider: Arc::new(FilesystemCacheProvider::new()),
-            resource_provider: None,
-            hysteresis: Mutex::new(HashMap::new()),
-            reliability: Mutex::new(HashMap::new()),
-            history_bias_k: DEFAULT_HISTORY_BIAS_K,
-        }
-    }
-
-    /// Create a LocalAuthority with a custom cache provider.
-    pub fn with_cache_provider(cache_provider: Arc<dyn CacheProvider>) -> Self {
-        crate::device::capabilities::prewarm();
-        Self {
-            policy_engine: DefaultPolicyEngine::with_default_policy(),
+            policy_engine: RwLock::new(policy_engine),
             routing_engine: Mutex::new(DefaultRoutingEngine::new()),
             cache_provider,
             resource_provider: None,
@@ -114,18 +127,22 @@ impl LocalAuthority {
         }
     }
 
+    /// Create a new LocalAuthority with default policy, routing, and cache provider.
+    pub fn new() -> Self {
+        Self::build(
+            DefaultPolicyEngine::with_default_policy(),
+            Arc::new(FilesystemCacheProvider::new()),
+        )
+    }
+
+    /// Create a LocalAuthority with a custom cache provider.
+    pub fn with_cache_provider(cache_provider: Arc<dyn CacheProvider>) -> Self {
+        Self::build(DefaultPolicyEngine::with_default_policy(), cache_provider)
+    }
+
     /// Create a LocalAuthority with a custom policy engine.
     pub fn with_policy_engine(policy_engine: DefaultPolicyEngine) -> Self {
-        crate::device::capabilities::prewarm();
-        Self {
-            policy_engine,
-            routing_engine: Mutex::new(DefaultRoutingEngine::new()),
-            cache_provider: Arc::new(FilesystemCacheProvider::new()),
-            resource_provider: None,
-            hysteresis: Mutex::new(HashMap::new()),
-            reliability: Mutex::new(HashMap::new()),
-            history_bias_k: DEFAULT_HISTORY_BIAS_K,
-        }
+        Self::build(policy_engine, Arc::new(FilesystemCacheProvider::new()))
     }
 
     /// Create a LocalAuthority with custom policy engine and cache provider.
@@ -133,16 +150,7 @@ impl LocalAuthority {
         policy_engine: DefaultPolicyEngine,
         cache_provider: Arc<dyn CacheProvider>,
     ) -> Self {
-        crate::device::capabilities::prewarm();
-        Self {
-            policy_engine,
-            routing_engine: Mutex::new(DefaultRoutingEngine::new()),
-            cache_provider,
-            resource_provider: None,
-            hysteresis: Mutex::new(HashMap::new()),
-            reliability: Mutex::new(HashMap::new()),
-            history_bias_k: DEFAULT_HISTORY_BIAS_K,
-        }
+        Self::build(policy_engine, cache_provider)
     }
 
     /// Use an injectable resource provider. Intended for tests and embedded
@@ -172,8 +180,26 @@ impl LocalAuthority {
         self.record_abort_for_hysteresis(model_id, reason, DEFAULT_HYSTERESIS_TTL);
     }
 
+    /// Inspect the active policy bundle (e.g. to report its version and rule
+    /// count). The closure runs under the read lock; keep it short.
+    pub fn with_policy_bundle<R>(&self, f: impl FnOnce(Option<&PolicyBundle>) -> R) -> R {
+        f(self.policy_read().bundle())
+    }
+
+    fn policy_read(&self) -> RwLockReadGuard<'_, DefaultPolicyEngine> {
+        self.policy_engine
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    fn policy_write(&self) -> RwLockWriteGuard<'_, DefaultPolicyEngine> {
+        self.policy_engine
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
     /// Check if a model exists locally using the cache provider.
-    fn check_model_exists(&self, model_id: &str) -> bool {
+    pub(super) fn check_model_exists(&self, model_id: &str) -> bool {
         self.cache_provider.is_model_cached(model_id)
     }
 
@@ -211,7 +237,11 @@ impl LocalAuthority {
             .unwrap_or_default()
     }
 
-    fn reliability_hint(&self, model_id: &str, signal: SignalContext) -> LocalReliabilityHint {
+    pub(super) fn reliability_hint(
+        &self,
+        model_id: &str,
+        signal: SignalContext,
+    ) -> LocalReliabilityHint {
         let history = self.history_snapshot(model_id, signal);
         if history.is_empty() {
             return LocalReliabilityHint::EMPTY;
@@ -275,6 +305,245 @@ impl LocalAuthority {
             reliability.remove(&victim);
         }
     }
+
+    fn live_snapshot(&self, monitor: &ResourceMonitor) -> ResourceSnapshot {
+        self.resource_provider
+            .as_ref()
+            .map(|provider| provider.current_snapshot(RESOURCE_SNAPSHOT_MAX_AGE))
+            .unwrap_or_else(|| monitor.current_snapshot(RESOURCE_SNAPSHOT_MAX_AGE))
+    }
+
+    /// Take one live snapshot and evaluate the policy once against the actual
+    /// input. Every decision path — standalone policy, target-only, and the
+    /// combined stage decision — goes through here.
+    pub(super) fn prepare_stage(
+        &self,
+        stage_id: &str,
+        envelope: &Envelope,
+        base_metrics: &DeviceMetrics,
+        monitor: &ResourceMonitor,
+    ) -> PreparedStage {
+        let metrics = base_metrics.with_live_snapshot(self.live_snapshot(monitor));
+        let signal = SignalContext::from_metrics(&metrics);
+        let policy = self.policy_read().evaluate(stage_id, envelope, &metrics);
+        PreparedStage {
+            metrics,
+            signal,
+            policy,
+        }
+    }
+
+    /// Convert an engine result into the authority's policy decision.
+    pub(super) fn policy_decision(policy: &PolicyResult) -> AuthorityDecision<PolicyOutcome> {
+        let outcome = if !policy.allowed {
+            PolicyOutcome::Deny {
+                reason: policy
+                    .reason
+                    .clone()
+                    .unwrap_or_else(|| "Policy denied".to_string()),
+            }
+        } else if !policy.transforms_applied.is_empty() {
+            PolicyOutcome::Transform {
+                transforms: policy.transforms_applied.clone(),
+            }
+        } else {
+            PolicyOutcome::Allow
+        };
+        AuthorityDecision {
+            result: outcome,
+            reason: policy
+                .reason
+                .clone()
+                .unwrap_or_else(|| "Local policy evaluation".to_string()),
+            source: DecisionSource::Local,
+            confidence: 1.0, // Local decisions are deterministic
+            timestamp_ms: now_ms(),
+        }
+    }
+
+    fn cloud_target() -> ResolvedTarget {
+        ResolvedTarget::Cloud {
+            provider: "xybrid".to_string(),
+        }
+    }
+
+    fn target_from_route(target: RouteTarget) -> ResolvedTarget {
+        match target {
+            RouteTarget::Local => ResolvedTarget::Device,
+            RouteTarget::Cloud => Self::cloud_target(),
+            // Carry the bare fallback id; the reverse-direction
+            // mapping in resolve_routing_decision (and
+            // Orchestrator::resolved_target_to_routing_decision) will
+            // re-wrap it as RouteTarget::Fallback. The "fallback:"
+            // prefix is added back by RouteTarget::to_json_string /
+            // Display, so synthesizing it here produced "fallback:fallback:<id>"
+            // when the resolution round-tripped through telemetry.
+            RouteTarget::Fallback(id) => ResolvedTarget::Server { endpoint: id },
+        }
+    }
+
+    /// Explicit pipeline target, if one was declared. Consulted only after
+    /// the policy has permitted leaving the device.
+    fn explicit_target(context: &StageContext) -> Option<(ResolvedTarget, String)> {
+        let explicit = context.explicit_target.as_ref()?;
+        let target = match explicit {
+            ExecutionTarget::Device => ResolvedTarget::Device,
+            ExecutionTarget::Server => ResolvedTarget::Server {
+                endpoint: "https://api.xybrid.dev".to_string(),
+            },
+            ExecutionTarget::Cloud => Self::cloud_target(),
+            ExecutionTarget::Auto => return None,
+        };
+        Some((
+            target,
+            format!("Explicit target from pipeline YAML: {:?}", explicit),
+        ))
+    }
+
+    /// Resolve the target from an already-prepared decision.
+    ///
+    /// Precedence: policy local-only → explicit target → local availability →
+    /// policy cloud preference → hysteresis → history bias → routing ladder
+    /// (device stress, default local). The policy is not re-evaluated and no
+    /// second snapshot is taken.
+    pub(super) fn resolve_prepared(
+        &self,
+        context: &StageContext,
+        prepared: PreparedStage,
+    ) -> TargetResolution {
+        let PreparedStage {
+            metrics,
+            signal,
+            policy,
+        } = prepared;
+        let model_id = context.model_id.clone();
+        let hint = self.reliability_hint(&model_id, signal);
+        let finish = |decision: AuthorityDecision<ResolvedTarget>| {
+            TargetResolution::new(decision, model_id.clone(), Some(signal))
+                .with_reliability_hint(hint)
+        };
+
+        // 1. Policy forbids leaving the device. This outranks explicit
+        //    targets, availability, hysteresis and history.
+        if policy.requires_local() {
+            let reason = if !policy.allowed {
+                format!(
+                    "policy_deny: {}",
+                    policy
+                        .reason
+                        .as_deref()
+                        .unwrap_or("policy denied cloud execution")
+                )
+            } else {
+                format!(
+                    "policy_transform_unsupported: {}",
+                    policy.transforms_applied.join(",")
+                )
+            };
+            return finish(AuthorityDecision::local(ResolvedTarget::Device, reason));
+        }
+
+        // 2. A permitted explicit target wins over every preference.
+        if let Some((target, reason)) = Self::explicit_target(context) {
+            return finish(AuthorityDecision::local(target, reason));
+        }
+
+        // 3. No local leg: cloud is the only usable target.
+        let availability = context
+            .local_availability
+            .clone()
+            .unwrap_or_else(|| LocalAvailability::new(self.check_model_exists(&model_id)));
+        if !availability.local_model_exists {
+            return finish(AuthorityDecision::new(
+                Self::cloud_target(),
+                "model_unavailable: local model not found",
+                DecisionSource::Local,
+                0.8,
+            ));
+        }
+
+        // 4. The policy asked for cloud and the local leg exists.
+        if policy.prefers_cloud() {
+            return finish(AuthorityDecision::new(
+                Self::cloud_target(),
+                format!(
+                    "policy_route_cloud: {}",
+                    policy
+                        .reason
+                        .as_deref()
+                        .unwrap_or("policy prefers cloud execution")
+                ),
+                DecisionSource::Local,
+                0.9,
+            ));
+        }
+
+        // 5. Sticky cloud after a recent local abort.
+        if let Some(reason) = self.active_hysteresis_for(&model_id) {
+            return finish(AuthorityDecision::new(
+                Self::cloud_target(),
+                format!(
+                    "hysteresis: recent local abort for model '{}' ({})",
+                    model_id, reason
+                ),
+                DecisionSource::Local,
+                0.9,
+            ));
+        }
+
+        // 6. Recent local failures under this signal bucket.
+        if self.history_bias_should_skip_local(&model_id, signal) {
+            return finish(AuthorityDecision::new(
+                Self::cloud_target(),
+                format!(
+                    "history_bias: recent local failure rate {:.0}% over {} samples",
+                    hint.recent_abort_rate * 100.0,
+                    hint.sample_size
+                ),
+                DecisionSource::Local,
+                0.85,
+            ));
+        }
+
+        // 7. Device stress heuristics, default local. Recover from a poisoned
+        //    lock rather than panicking: this is the per-stage routing hot
+        //    path, so a single panic elsewhere must not turn every subsequent
+        //    routing decision into a crash.
+        let decision = {
+            let mut routing_engine = self
+                .routing_engine
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            routing_engine.decide(&context.stage_id, &metrics, &policy, &availability)
+        };
+
+        finish(AuthorityDecision {
+            result: Self::target_from_route(decision.target),
+            reason: decision.reason,
+            source: DecisionSource::Local,
+            confidence: 0.8, // Heuristic-based, slightly lower confidence
+            timestamp_ms: decision.timestamp_ms,
+        })
+    }
+
+    /// Resolve into the routing-engine decision shape for tests and telemetry adapters.
+    pub fn resolve_routing_decision(&self, context: &StageContext) -> Option<RoutingDecision> {
+        let resolution = self.resolve_target_with_feedback(context);
+        let target = match resolution.decision.result {
+            ResolvedTarget::Device => RouteTarget::Local,
+            ResolvedTarget::Cloud { .. } => RouteTarget::Cloud,
+            ResolvedTarget::Server { endpoint } => RouteTarget::Fallback(endpoint),
+        };
+        Some(RoutingDecision {
+            stage: context.stage_id.clone(),
+            target,
+            reason: resolution.decision.reason,
+            timestamp_ms: resolution.decision.timestamp_ms,
+            local_reliability_hint: resolution
+                .local_reliability_hint
+                .unwrap_or(LocalReliabilityHint::EMPTY),
+        })
+    }
 }
 
 impl Default for LocalAuthority {
@@ -284,39 +553,27 @@ impl Default for LocalAuthority {
 }
 
 impl OrchestrationAuthority for LocalAuthority {
+    fn load_policies(&self, bundle: &[u8]) -> Result<(), String> {
+        // Parse and compile the candidate before taking the write lock, and
+        // swap only on success: an invalid reload leaves the active policy
+        // untouched, and in-flight decisions finish on the engine they read.
+        let mut candidate = DefaultPolicyEngine::new();
+        candidate.load_policies(bundle.to_vec())?;
+        *self.policy_write() = candidate;
+        Ok(())
+    }
+
     fn apply_policy(&self, request: &PolicyRequest) -> AuthorityDecision<PolicyOutcome> {
-        let result =
-            self.policy_engine
-                .evaluate(&request.stage_id, &request.envelope, &request.metrics);
-
-        let outcome = if result.allowed {
-            if result.transforms_applied.is_empty() {
-                PolicyOutcome::Allow
-            } else {
-                PolicyOutcome::Transform {
-                    transforms: result.transforms_applied.clone(),
-                }
-            }
-        } else {
-            PolicyOutcome::Deny {
-                reason: result
-                    .reason
-                    .clone()
-                    .unwrap_or_else(|| "Policy denied".to_string()),
-            }
-        };
-
-        let reason = result
-            .reason
-            .unwrap_or_else(|| "Local policy evaluation".to_string());
-
-        AuthorityDecision {
-            result: outcome,
-            reason,
-            source: DecisionSource::Local,
-            confidence: 1.0, // Local decisions are deterministic
-            timestamp_ms: now_ms(),
-        }
+        // No stage context here, so the process-wide monitor supplies the
+        // live snapshot (the injected provider still wins when present).
+        let monitor = ResourceMonitor::global();
+        let prepared = self.prepare_stage(
+            &request.stage_id,
+            &request.envelope,
+            &request.metrics,
+            &monitor,
+        );
+        Self::policy_decision(&prepared.policy)
     }
 
     fn resolve_target(&self, context: &StageContext) -> AuthorityDecision<ResolvedTarget> {
@@ -324,11 +581,28 @@ impl OrchestrationAuthority for LocalAuthority {
     }
 
     fn resolve_target_with_feedback(&self, context: &StageContext) -> TargetResolution {
-        if let Some(resolution) = self.explicit_target_resolution(context) {
-            return resolution;
-        }
+        // Target-only callers have no request envelope; the input kind
+        // carries the payload, so text rules still see the real text.
+        let envelope = Envelope::new(context.input_kind.clone());
+        let prepared = self.prepare_stage(
+            &context.stage_id,
+            &envelope,
+            &context.metrics,
+            &context.resource_monitor,
+        );
+        self.resolve_prepared(context, prepared)
+    }
 
-        self.resolve_with_routing_engine(context)
+    fn resolve_stage(&self, request: &PolicyRequest, context: &StageContext) -> StageResolution {
+        let prepared = self.prepare_stage(
+            &request.stage_id,
+            &request.envelope,
+            &context.metrics,
+            &context.resource_monitor,
+        );
+        let policy = Self::policy_decision(&prepared.policy);
+        let target = self.resolve_prepared(context, prepared);
+        StageResolution::new(policy, target)
     }
 
     fn select_model(&self, request: &ModelRequest) -> AuthorityDecision<ModelSelection> {
@@ -409,179 +683,6 @@ impl OrchestrationAuthority for LocalAuthority {
             }
             Self::prune_reliability(&mut reliability);
         }
-    }
-}
-
-impl LocalAuthority {
-    fn routing_metrics(&self, context: &StageContext) -> crate::context::DeviceMetrics {
-        let snapshot = self
-            .resource_provider
-            .as_ref()
-            .map(|provider| provider.current_snapshot(Duration::from_millis(500)))
-            .unwrap_or_else(|| {
-                context
-                    .resource_monitor
-                    .current_snapshot(Duration::from_millis(500))
-            });
-        context.metrics.with_live_snapshot(snapshot)
-    }
-
-    fn target_from_route(target: RouteTarget) -> ResolvedTarget {
-        match target {
-            RouteTarget::Local => ResolvedTarget::Device,
-            RouteTarget::Cloud => ResolvedTarget::Cloud {
-                provider: "xybrid".to_string(),
-            },
-            // Carry the bare fallback id; the reverse-direction
-            // mapping in resolve_routing_decision (and
-            // Orchestrator::resolved_target_to_routing_decision) will
-            // re-wrap it as RouteTarget::Fallback. The "fallback:"
-            // prefix is added back by RouteTarget::to_json_string /
-            // Display, so synthesizing it here produced "fallback:fallback:<id>"
-            // when the resolution round-tripped through telemetry.
-            RouteTarget::Fallback(id) => ResolvedTarget::Server { endpoint: id },
-        }
-    }
-
-    fn explicit_target_resolution(&self, context: &StageContext) -> Option<TargetResolution> {
-        let explicit = context.explicit_target.as_ref()?;
-        let target = match explicit {
-            ExecutionTarget::Device => ResolvedTarget::Device,
-            ExecutionTarget::Server => ResolvedTarget::Server {
-                endpoint: "https://api.xybrid.dev".to_string(),
-            },
-            ExecutionTarget::Cloud => ResolvedTarget::Cloud {
-                provider: "xybrid".to_string(),
-            },
-            ExecutionTarget::Auto => return None,
-        };
-
-        let metrics = self.routing_metrics(context);
-        Some(TargetResolution::new(
-            AuthorityDecision {
-                result: target,
-                reason: format!("Explicit target from pipeline YAML: {:?}", explicit),
-                source: DecisionSource::Local,
-                confidence: 1.0,
-                timestamp_ms: now_ms(),
-            },
-            context.model_id.clone(),
-            Some(SignalContext::from_metrics(&metrics)),
-        ))
-    }
-
-    /// Internal: resolve target using the routing engine.
-    fn resolve_with_routing_engine(&self, context: &StageContext) -> TargetResolution {
-        let availability = context
-            .local_availability
-            .clone()
-            .unwrap_or_else(|| LocalAvailability::new(self.check_model_exists(&context.model_id)));
-        self.resolve_with_routing_engine_and_availability(context, availability)
-    }
-
-    fn resolve_with_routing_engine_and_availability(
-        &self,
-        context: &StageContext,
-        availability: LocalAvailability,
-    ) -> TargetResolution {
-        // Create a minimal envelope for policy check
-        let envelope = Envelope::new(context.input_kind.clone());
-        let live_metrics = self.routing_metrics(context);
-        let signal = SignalContext::from_metrics(&live_metrics);
-        let hint = self.reliability_hint(&context.model_id, signal);
-
-        let policy_result =
-            self.policy_engine
-                .evaluate(&context.stage_id, &envelope, &live_metrics);
-
-        if policy_result.allowed {
-            if let Some(reason) = self.active_hysteresis_for(&context.model_id) {
-                let decision = AuthorityDecision {
-                    result: ResolvedTarget::Cloud {
-                        provider: "xybrid".to_string(),
-                    },
-                    reason: format!(
-                        "hysteresis: recent local abort for model '{}' ({})",
-                        context.model_id, reason
-                    ),
-                    source: DecisionSource::Local,
-                    confidence: 0.9,
-                    timestamp_ms: now_ms(),
-                };
-                return TargetResolution::new(decision, context.model_id.clone(), Some(signal))
-                    .with_reliability_hint(hint);
-            }
-
-            if self.history_bias_should_skip_local(&context.model_id, signal) {
-                let decision = AuthorityDecision {
-                    result: ResolvedTarget::Cloud {
-                        provider: "xybrid".to_string(),
-                    },
-                    reason: format!(
-                        "history_bias: recent local failure rate {:.0}% over {} samples",
-                        hint.recent_abort_rate * 100.0,
-                        hint.sample_size
-                    ),
-                    source: DecisionSource::Local,
-                    confidence: 0.85,
-                    timestamp_ms: now_ms(),
-                };
-                return TargetResolution::new(decision, context.model_id.clone(), Some(signal))
-                    .with_reliability_hint(hint);
-            }
-        }
-
-        // Use the stored routing engine (locked for interior mutability).
-        // Recover from a poisoned lock rather than panicking: this is the
-        // per-stage routing hot path, so a single panic elsewhere must not
-        // turn every subsequent routing decision into a crash. Matches the
-        // graceful handling used for `hysteresis`/`reliability` in this file
-        // and `target_cache_guard` in `remote.rs`.
-        let decision = {
-            let mut routing_engine = self
-                .routing_engine
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
-            routing_engine.decide(
-                &context.stage_id,
-                &live_metrics,
-                &policy_result,
-                &availability,
-            )
-        };
-
-        let target = Self::target_from_route(decision.target);
-        TargetResolution::new(
-            AuthorityDecision {
-                result: target,
-                reason: decision.reason,
-                source: DecisionSource::Local,
-                confidence: 0.8, // Heuristic-based, slightly lower confidence
-                timestamp_ms: decision.timestamp_ms,
-            },
-            context.model_id.clone(),
-            Some(signal),
-        )
-        .with_reliability_hint(hint)
-    }
-
-    /// Resolve into the routing-engine decision shape for tests and telemetry adapters.
-    pub fn resolve_routing_decision(&self, context: &StageContext) -> Option<RoutingDecision> {
-        let resolution = self.resolve_target_with_feedback(context);
-        let target = match resolution.decision.result {
-            ResolvedTarget::Device => RouteTarget::Local,
-            ResolvedTarget::Cloud { .. } => RouteTarget::Cloud,
-            ResolvedTarget::Server { endpoint } => RouteTarget::Fallback(endpoint),
-        };
-        Some(RoutingDecision {
-            stage: context.stage_id.clone(),
-            target,
-            reason: resolution.decision.reason,
-            timestamp_ms: resolution.decision.timestamp_ms,
-            local_reliability_hint: resolution
-                .local_reliability_hint
-                .unwrap_or(LocalReliabilityHint::EMPTY),
-        })
     }
 }
 
@@ -1248,5 +1349,264 @@ signature: "test-deny-all"
                 query, dir_name
             );
         }
+    }
+
+    // ── Phase 3: one evaluated decision, policy as an invariant ────────────
+
+    /// Counts how many snapshots a decision takes.
+    #[derive(Debug)]
+    struct CountingProvider {
+        snapshot: ResourceSnapshot,
+        calls: std::sync::atomic::AtomicUsize,
+    }
+
+    impl ResourceSnapshotProvider for CountingProvider {
+        fn current_snapshot(&self, _max_age: Duration) -> ResourceSnapshot {
+            self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            self.snapshot
+        }
+    }
+
+    fn text_request(text: &str) -> PolicyRequest {
+        PolicyRequest {
+            stage_id: "test-stage".to_string(),
+            envelope: text_envelope(text),
+            metrics: default_metrics(),
+        }
+    }
+
+    fn cached_authority() -> LocalAuthority {
+        LocalAuthority::with_cache_provider(Arc::new(CachedProvider))
+    }
+
+    #[test]
+    fn load_policies_via_trait_denies_cloud() {
+        let authority = cached_authority();
+        authority
+            .load_policies(deny_all_text_policy().as_bytes())
+            .expect("deny policy loads");
+
+        let decision = authority.resolve_target(&text_context());
+        assert_eq!(decision.result, ResolvedTarget::Device);
+        assert!(
+            decision.reason.starts_with("policy_deny"),
+            "{}",
+            decision.reason
+        );
+
+        let resolution = authority.resolve_stage(&text_request("hello"), &text_context());
+        assert!(matches!(
+            resolution.policy.result,
+            PolicyOutcome::Deny { .. }
+        ));
+        assert_eq!(resolution.target.decision.result, ResolvedTarget::Device);
+        assert!(resolution.policy_requires_local());
+    }
+
+    #[test]
+    fn load_policies_via_trait_prefers_cloud() {
+        let authority = cached_authority();
+        authority
+            .load_policies(b"route_cloud_if:\n  - \"true\"\n")
+            .expect("route_cloud policy loads");
+
+        let decision = authority.resolve_target(&text_context());
+        assert!(matches!(decision.result, ResolvedTarget::Cloud { .. }));
+        assert!(
+            decision.reason.starts_with("policy_route_cloud"),
+            "{}",
+            decision.reason
+        );
+        let resolution = authority.resolve_stage(&text_request("hello"), &text_context());
+        assert_eq!(resolution.policy.result, PolicyOutcome::Allow);
+        assert!(matches!(
+            resolution.target.decision.result,
+            ResolvedTarget::Cloud { .. }
+        ));
+    }
+
+    #[test]
+    fn load_policies_rejects_invalid_rule_and_keeps_previous() {
+        let authority = cached_authority();
+        authority
+            .load_policies(deny_all_text_policy().as_bytes())
+            .expect("deny policy loads");
+
+        let err = authority
+            .load_policies(b"deny_cloud_if:\n  - 'metrics.network_rtt > 300'\n")
+            .expect_err("unknown operand must be rejected");
+        assert!(err.contains("unknown operand"), "{err}");
+
+        let decision = authority.resolve_target(&text_context());
+        assert_eq!(decision.result, ResolvedTarget::Device);
+        assert!(
+            decision.reason.starts_with("policy_deny"),
+            "{}",
+            decision.reason
+        );
+        authority.with_policy_bundle(|bundle| {
+            assert_eq!(bundle.unwrap().signature, "test-deny-all");
+        });
+    }
+
+    #[test]
+    fn apply_policy_overlays_live_metrics() {
+        let mut snapshot = ResourceSnapshot::unknown();
+        snapshot.memory_pressure = MemoryPressure::Critical;
+        let authority =
+            cached_authority().with_resource_provider(Arc::new(FixedResourceProvider(snapshot)));
+        authority
+            .load_policies(b"deny_cloud_if:\n  - 'metrics.memory_pressure == \"critical\"'\n")
+            .expect("metrics policy loads");
+
+        // The request carries default (unknown) metrics; the live overlay is
+        // what the rule must see.
+        let decision = authority.apply_policy(&text_request("hello"));
+        assert!(
+            matches!(decision.result, PolicyOutcome::Deny { .. }),
+            "{decision:?}"
+        );
+    }
+
+    #[test]
+    fn policy_deny_overrides_explicit_cloud_and_server_targets() {
+        let authority = cached_authority();
+        authority
+            .load_policies(deny_all_text_policy().as_bytes())
+            .expect("deny policy loads");
+
+        for explicit in [ExecutionTarget::Cloud, ExecutionTarget::Server] {
+            let mut context = text_context();
+            context.explicit_target = Some(explicit.clone());
+            let resolution = authority.resolve_stage(&text_request("hello"), &context);
+            assert_eq!(
+                resolution.target.decision.result,
+                ResolvedTarget::Device,
+                "explicit {explicit:?} must not beat a policy denial"
+            );
+            assert!(
+                resolution.target.decision.reason.starts_with("policy_deny"),
+                "{}",
+                resolution.target.decision.reason
+            );
+        }
+    }
+
+    #[test]
+    fn policy_deny_beats_missing_local_model() {
+        let authority = cached_authority();
+        authority
+            .load_policies(deny_all_text_policy().as_bytes())
+            .expect("deny policy loads");
+        let mut context = text_context();
+        context.local_availability = Some(LocalAvailability::new(false));
+
+        let decision = authority.resolve_target(&context);
+
+        assert_eq!(decision.result, ResolvedTarget::Device);
+        assert!(
+            decision.reason.starts_with("policy_deny"),
+            "{}",
+            decision.reason
+        );
+        assert!(!decision.reason.contains("model_unavailable"));
+    }
+
+    #[test]
+    fn policy_transform_overrides_hysteresis_history_and_explicit_cloud() {
+        let authority = cached_authority().with_history_bias_k(1);
+        authority
+            .load_policies(
+                b"rules:\n  - id: scrub\n    expression: 'input.kind == \"text\"'\n    action: redact\n",
+            )
+            .expect("redact policy loads");
+        authority.record_abort_for_hysteresis_default_ttl("test-model", AbortReason::StressMemory);
+        authority.record_outcome(&ExecutionOutcome {
+            stage_id: "test-stage".to_string(),
+            target: ResolvedTarget::Device,
+            latency_ms: 10,
+            success: false,
+            error: Some("boom".to_string()),
+            category: Some(OutcomeCategory::HardFail {
+                reason: "boom".to_string(),
+            }),
+            model_id: Some("test-model".to_string()),
+            signal_context: Some(signal()),
+        });
+        let mut context = text_context();
+        context.explicit_target = Some(ExecutionTarget::Cloud);
+
+        let resolution = authority.resolve_stage(&text_request("hello"), &context);
+
+        assert!(matches!(
+            resolution.policy.result,
+            PolicyOutcome::Transform { .. }
+        ));
+        assert_eq!(resolution.target.decision.result, ResolvedTarget::Device);
+        assert!(
+            resolution
+                .target
+                .decision
+                .reason
+                .starts_with("policy_transform_unsupported"),
+            "{}",
+            resolution.target.decision.reason
+        );
+    }
+
+    #[test]
+    fn explicit_device_beats_policy_route_cloud() {
+        let authority = cached_authority();
+        authority
+            .load_policies(b"route_cloud_if:\n  - \"true\"\n")
+            .expect("route_cloud policy loads");
+        let mut context = text_context();
+        context.explicit_target = Some(ExecutionTarget::Device);
+
+        let decision = authority.resolve_target(&context);
+
+        assert_eq!(decision.result, ResolvedTarget::Device);
+        assert!(decision.reason.contains("Explicit"), "{}", decision.reason);
+    }
+
+    #[test]
+    fn resolve_stage_takes_one_snapshot_and_keeps_policy_and_target_consistent() {
+        let provider = Arc::new(CountingProvider {
+            snapshot: ResourceSnapshot::unknown(),
+            calls: std::sync::atomic::AtomicUsize::new(0),
+        });
+        let authority = cached_authority().with_resource_provider(provider.clone());
+        authority
+            .load_policies(deny_all_text_policy().as_bytes())
+            .expect("deny policy loads");
+
+        let resolution = authority.resolve_stage(&text_request("hello"), &text_context());
+
+        assert_eq!(
+            provider.calls.load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "a combined decision must sample the device exactly once"
+        );
+        assert!(matches!(
+            resolution.policy.result,
+            PolicyOutcome::Deny { .. }
+        ));
+        assert_eq!(resolution.target.decision.result, ResolvedTarget::Device);
+        assert!(resolution.target.signal_context.is_some());
+    }
+
+    #[test]
+    fn resolve_stage_evaluates_the_full_text_payload() {
+        let authority = cached_authority();
+        authority
+            .load_policies(b"deny_cloud_if:\n  - 'input.text contains \"secret\"'\n")
+            .expect("text policy loads");
+
+        let denied = authority.resolve_stage(&text_request("my secret plan"), &text_context());
+        assert!(matches!(denied.policy.result, PolicyOutcome::Deny { .. }));
+        assert_eq!(denied.target.decision.result, ResolvedTarget::Device);
+
+        let allowed = authority.resolve_stage(&text_request("public notes"), &text_context());
+        assert_eq!(allowed.policy.result, PolicyOutcome::Allow);
     }
 }

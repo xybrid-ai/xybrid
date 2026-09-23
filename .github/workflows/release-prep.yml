@@ -221,8 +221,12 @@ jobs:
         with:
           macos-sdk-mirror: ${{ vars.MACOS_SDK_MIRROR }}
 
+      # --config=rust-lto: fat LTO, so each slice carries only the Rust code
+      # reachable from the exported FFI symbols (see .bazelrc). build-apple.yml
+      # builds with the same config on every PR, so the Swift wrapper is
+      # compiled and unit-tested against exactly what ships here.
       - name: Build XCFramework (Bazel)
-        run: bazelisk build --config=ios //bindings/apple:XybridFFI
+        run: bazelisk build --config=ios --config=rust-lto //bindings/apple:XybridFFI
 
       - name: Prepare XCFramework artifact
         shell: bash
@@ -300,10 +304,10 @@ jobs:
               "prebuilt/$triple/libxybrid_flutter_ffi.a"
           }
           # macOS — mixed execution (Rust graph on RBE/cache, Metal local).
-          stage aarch64-apple-darwin --config=remote --config=macos-metal -c opt
+          stage aarch64-apple-darwin --config=remote --config=macos-metal -c opt --config=flutter-precompile
           # iOS device + simulator — Mac-local (Apple locks these to Xcode).
-          stage aarch64-apple-ios --config=ios
-          stage aarch64-apple-ios-sim --config=ios-sim
+          stage aarch64-apple-ios --config=ios --config=flutter-precompile
+          stage aarch64-apple-ios-sim --config=ios-sim --config=flutter-precompile
 
       # The payload gate (the cutover ritual): every staticlib must carry the
       # full shipped feature surface, and the iOS slices must be the right
@@ -569,6 +573,8 @@ jobs:
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+        with:
+          packages: platform-tools
 
       - name: Resolve NDK install path
         shell: bash
@@ -619,11 +625,11 @@ jobs:
           }
           # linux x86_64 — hermetic glibc floor (loadable on older distros,
           # unlike a runner-glibc cargo build)
-          stage x86_64-unknown-linux-gnu --config=remote -c opt
+          stage x86_64-unknown-linux-gnu --config=remote -c opt --config=flutter-precompile
           # android — the 3 Bazel ABIs (i686 stays on cargo below)
-          stage aarch64-linux-android --config=remote --config=android-arm64
-          stage armv7-linux-androideabi --config=remote --config=android-armv7
-          stage x86_64-linux-android --config=remote --config=android-x86_64
+          stage aarch64-linux-android --config=remote --config=android-arm64 --config=flutter-precompile
+          stage armv7-linux-androideabi --config=remote --config=android-armv7 --config=flutter-precompile
+          stage x86_64-linux-android --config=remote --config=android-x86_64 --config=flutter-precompile
 
       # The payload gate (the cutover ritual): right ELF machine per ABI,
       # vision aboard, android .so carry the c++_shared DT_NEEDED + 16KB
@@ -665,6 +671,8 @@ jobs:
         env:
           PRIVATE_KEY: ${{ secrets.CARGOKIT_PRIVATE_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Only i686 reaches Cargo; the other targets use the Bazel prebuilts.
+          CARGO_PROFILE_RELEASE_LTO: fat
         run: |
           dart run bin/build_tool.dart precompile-binaries \
             --repository ${{ github.repository }} \
@@ -731,11 +739,11 @@ jobs:
       - name: Build the Flutter windows native (Bazel on RBE)
         run: |
           set -euo pipefail
-          bazelisk build --config=remote --config=windows-msvc -c opt \
+          bazelisk build --config=remote --config=windows-msvc -c opt --config=flutter-precompile \
             //bindings/flutter/rust:xybrid_flutter_ffi_cdylib
           mkdir -p prebuilt/x86_64-pc-windows-msvc
           tools/scripts/bazel-output.sh --all //bindings/flutter/rust:xybrid_flutter_ffi_cdylib \
-            --config=remote --config=windows-msvc -c opt \
+            --config=remote --config=windows-msvc -c opt --config=flutter-precompile \
             | while read -r artifact; do
                 cp -L "$artifact" prebuilt/x86_64-pc-windows-msvc/
               done

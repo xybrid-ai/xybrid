@@ -390,11 +390,25 @@ def _boltffi_read_wire(data: bytes, decode):
 
 
 
-def _boltffi_read_fe83cddcf3822a1d(data: bytes):
+def _boltffi_read_347d2e2b11e825e8(data: bytes):
+    return _boltffi_read_wire(data, lambda reader: XybridDownloadStatus._boltffi_from_reader(reader))
+
+
+_native._register_wire_codec("read_347d2e2b11e825e8", _boltffi_read_347d2e2b11e825e8)
+
+
+def _boltffi_read_4319db60c88eabca(data: bytes):
+    return _boltffi_read_wire(data, lambda reader: reader.optional(lambda: reader.string()))
+
+
+_native._register_wire_codec("read_4319db60c88eabca", _boltffi_read_4319db60c88eabca)
+
+
+def _boltffi_read_09404a3c98b3f16c(data: bytes):
     return _boltffi_read_wire(data, lambda reader: XybridError._boltffi_from_reader(reader))
 
 
-_native._register_wire_codec("read_fe83cddcf3822a1d", _boltffi_read_fe83cddcf3822a1d)
+_native._register_wire_codec("read_09404a3c98b3f16c", _boltffi_read_09404a3c98b3f16c)
 
 
 def _boltffi_read_89cd31291d2aefa4(data: bytes):
@@ -404,67 +418,53 @@ def _boltffi_read_89cd31291d2aefa4(data: bytes):
 _native._register_wire_codec("read_89cd31291d2aefa4", _boltffi_read_89cd31291d2aefa4)
 
 
-def _boltffi_read_29c0b1cb6cb65e99(data: bytes):
-    return _boltffi_read_wire(data, lambda reader: XybridDownloadStatus._boltffi_from_reader(reader))
-
-
-_native._register_wire_codec("read_29c0b1cb6cb65e99", _boltffi_read_29c0b1cb6cb65e99)
-
-
-def _boltffi_read_49d0adb26a1528e6(data: bytes):
+def _boltffi_read_94828222bbb26957(data: bytes):
     return _boltffi_read_wire(data, lambda reader: XybridGenerationConfig._boltffi_from_reader(reader))
 
 
-_native._register_wire_codec("read_49d0adb26a1528e6", _boltffi_read_49d0adb26a1528e6)
+_native._register_wire_codec("read_94828222bbb26957", _boltffi_read_94828222bbb26957)
 
 
-def _boltffi_read_bd1359a0ca4e78d7(data: bytes):
+def _boltffi_read_8d5822576d97fd37(data: bytes):
     return _boltffi_read_wire(data, lambda reader: reader.sequence(lambda: XybridVoiceInfo._boltffi_from_reader(reader)))
 
 
-_native._register_wire_codec("read_bd1359a0ca4e78d7", _boltffi_read_bd1359a0ca4e78d7)
+_native._register_wire_codec("read_8d5822576d97fd37", _boltffi_read_8d5822576d97fd37)
 
 
-def _boltffi_read_74dbe00a1a77ad93(data: bytes):
+def _boltffi_read_5110818ecd16fc91(data: bytes):
     return _boltffi_read_wire(data, lambda reader: reader.optional(lambda: XybridVoiceInfo._boltffi_from_reader(reader)))
 
 
-_native._register_wire_codec("read_74dbe00a1a77ad93", _boltffi_read_74dbe00a1a77ad93)
+_native._register_wire_codec("read_5110818ecd16fc91", _boltffi_read_5110818ecd16fc91)
 
 
-def _boltffi_read_c9bb5dd3c2ec1b2a(data: bytes):
+def _boltffi_read_146d324414895b9b(data: bytes):
     return _boltffi_read_wire(data, lambda reader: XybridResult._boltffi_from_reader(reader))
 
 
-_native._register_wire_codec("read_c9bb5dd3c2ec1b2a", _boltffi_read_c9bb5dd3c2ec1b2a)
+_native._register_wire_codec("read_146d324414895b9b", _boltffi_read_146d324414895b9b)
 
 
-def _boltffi_read_e9a0b9fd71f8c9ff(data: bytes):
+def _boltffi_read_f45d365d172a914e(data: bytes):
     return _boltffi_read_wire(data, lambda reader: XybridStreamEvent._boltffi_from_reader(reader))
 
 
-_native._register_wire_codec("read_e9a0b9fd71f8c9ff", _boltffi_read_e9a0b9fd71f8c9ff)
+_native._register_wire_codec("read_f45d365d172a914e", _boltffi_read_f45d365d172a914e)
 
 
-def _boltffi_read_3cfe09c223256b1b(data: bytes):
+def _boltffi_read_0d42d278c66eef7b(data: bytes):
     return _boltffi_read_wire(data, lambda reader: reader.sequence(lambda: XybridEnvelope._boltffi_from_reader(reader)))
 
 
-_native._register_wire_codec("read_3cfe09c223256b1b", _boltffi_read_3cfe09c223256b1b)
+_native._register_wire_codec("read_0d42d278c66eef7b", _boltffi_read_0d42d278c66eef7b)
 
 
-def _boltffi_read_9415281aa52df749(data: bytes):
-    return _boltffi_read_wire(data, lambda reader: reader.optional(lambda: reader.string()))
-
-
-_native._register_wire_codec("read_9415281aa52df749", _boltffi_read_9415281aa52df749)
-
-
-def _boltffi_read_c9e5fd91113e36a2(data: bytes):
+def _boltffi_read_1497d20162db7713(data: bytes):
     return _boltffi_read_wire(data, lambda reader: XybridEnvelope._boltffi_from_reader(reader))
 
 
-_native._register_wire_codec("read_c9e5fd91113e36a2", _boltffi_read_c9e5fd91113e36a2)
+_native._register_wire_codec("read_1497d20162db7713", _boltffi_read_1497d20162db7713)
 
 
 
@@ -473,6 +473,13 @@ def _boltffi_write_c26bffea5b1b16cc(id) -> bytes:
 
 
 _native._register_wire_codec("write_c26bffea5b1b16cc", _boltffi_write_c26bffea5b1b16cc)
+
+
+def _boltffi_write_cfe97cd6dcce32b6(platform) -> bytes:
+    return _boltffi_wire_string(platform)
+
+
+_native._register_wire_codec("write_cfe97cd6dcce32b6", _boltffi_write_cfe97cd6dcce32b6)
 
 
 def _boltffi_write_766cdeb069dd2b0a(path) -> bytes:
@@ -503,18 +510,18 @@ def _boltffi_write_8d84d7157f6e715c(voice_id) -> bytes:
 _native._register_wire_codec("write_8d84d7157f6e715c", _boltffi_write_8d84d7157f6e715c)
 
 
-def _boltffi_write_62eeac930738df49(envelope) -> bytes:
+def _boltffi_write_183cd822b59b9ed8(envelope) -> bytes:
     return envelope._boltffi_wire()
 
 
-_native._register_wire_codec("write_62eeac930738df49", _boltffi_write_62eeac930738df49)
+_native._register_wire_codec("write_183cd822b59b9ed8", _boltffi_write_183cd822b59b9ed8)
 
 
-def _boltffi_write_922e13039dd3c493(options) -> bytes:
+def _boltffi_write_360ec15d925d8351(options) -> bytes:
     return _boltffi_wire_optional(options, lambda __boltffi_value_0: __boltffi_value_0._boltffi_wire())
 
 
-_native._register_wire_codec("write_922e13039dd3c493", _boltffi_write_922e13039dd3c493)
+_native._register_wire_codec("write_360ec15d925d8351", _boltffi_write_360ec15d925d8351)
 
 
 def _boltffi_write_45cfac4c89613282(api_key) -> bytes:
@@ -580,11 +587,11 @@ def _boltffi_write_544f2725dda888e0(prior_assistant_text) -> bytes:
 _native._register_wire_codec("write_544f2725dda888e0", _boltffi_write_544f2725dda888e0)
 
 
-def _boltffi_write_d82fa724b184c72a(results) -> bytes:
+def _boltffi_write_27d48eea4b9a1762(results) -> bytes:
     return _boltffi_wire_sequence(results, len(results), lambda __boltffi_value_0: __boltffi_value_0._boltffi_wire())
 
 
-_native._register_wire_codec("write_d82fa724b184c72a", _boltffi_write_d82fa724b184c72a)
+_native._register_wire_codec("write_27d48eea4b9a1762", _boltffi_write_27d48eea4b9a1762)
 
 
 def _boltffi_write_cd5b56c1c6bfc6e0(schema_json) -> bytes:
@@ -594,25 +601,25 @@ def _boltffi_write_cd5b56c1c6bfc6e0(schema_json) -> bytes:
 _native._register_wire_codec("write_cd5b56c1c6bfc6e0", _boltffi_write_cd5b56c1c6bfc6e0)
 
 
-def _boltffi_write_a4eb0446f96b83ef(api_key) -> bytes:
+def _boltffi_write_17f7606cd077d76c(api_key) -> bytes:
     return _boltffi_wire_optional(api_key, lambda __boltffi_value_0: _boltffi_wire_string(__boltffi_value_0))
 
 
-_native._register_wire_codec("write_a4eb0446f96b83ef", _boltffi_write_a4eb0446f96b83ef)
+_native._register_wire_codec("write_17f7606cd077d76c", _boltffi_write_17f7606cd077d76c)
 
 
-def _boltffi_write_5eb4d1ef4dc0ea3f(gateway_url) -> bytes:
+def _boltffi_write_d1c12e1524cd3dbc(gateway_url) -> bytes:
     return _boltffi_wire_optional(gateway_url, lambda __boltffi_value_0: _boltffi_wire_string(__boltffi_value_0))
 
 
-_native._register_wire_codec("write_5eb4d1ef4dc0ea3f", _boltffi_write_5eb4d1ef4dc0ea3f)
+_native._register_wire_codec("write_d1c12e1524cd3dbc", _boltffi_write_d1c12e1524cd3dbc)
 
 
-def _boltffi_write_a67118e385bc3069(ingest_url) -> bytes:
+def _boltffi_write_5575cc29a91ce4ea(ingest_url) -> bytes:
     return _boltffi_wire_optional(ingest_url, lambda __boltffi_value_0: _boltffi_wire_string(__boltffi_value_0))
 
 
-_native._register_wire_codec("write_a67118e385bc3069", _boltffi_write_a67118e385bc3069)
+_native._register_wire_codec("write_5575cc29a91ce4ea", _boltffi_write_5575cc29a91ce4ea)
 
 
 def _boltffi_write_73b9be8d33badc3c(cache_dir) -> bytes:
@@ -651,581 +658,23 @@ _native._register_wire_codec("write_83cc917c5525e5c3", _boltffi_write_83cc917c55
 
 
 
-@dataclass(frozen=True, slots=True)
-class XybridMetadataEntry:
-    key: str
-    value: str
-
-    def _boltffi_wire(self) -> bytes:
-        return b"".join((
-            _boltffi_wire_string(self.key),
-            _boltffi_wire_string(self.value),
-        ))
-
-    @classmethod
-    def _boltffi_from_wire(cls, data: bytes) -> "XybridMetadataEntry":
-        reader = _BoltFfiWireReader(data)
-        try:
-            value = cls._boltffi_from_reader(reader)
-        except struct.error as error:
-            raise ValueError("truncated BoltFFI wire bytes") from error
-        reader.finish()
-        return value
-
-    @classmethod
-    def _boltffi_from_reader(cls, reader: "_BoltFfiWireReader") -> "XybridMetadataEntry":
-        return cls(
-            key=reader.string(),
-            value=reader.string(),
-        )
-
-
-_native._register_xybrid_metadata_entry(XybridMetadataEntry)
-
-
-
-@dataclass(frozen=True, slots=True)
-class XybridEnvelope:
-    kind: XybridEnvelopeKind
-    metadata: list[XybridMetadataEntry]
-
-    def _boltffi_wire(self) -> bytes:
-        return b"".join((
-            self.kind._boltffi_wire(),
-            _boltffi_wire_sequence(self.metadata, len(self.metadata), lambda __boltffi_value_0: __boltffi_value_0._boltffi_wire()),
-        ))
-
-    @classmethod
-    def _boltffi_from_wire(cls, data: bytes) -> "XybridEnvelope":
-        reader = _BoltFfiWireReader(data)
-        try:
-            value = cls._boltffi_from_reader(reader)
-        except struct.error as error:
-            raise ValueError("truncated BoltFFI wire bytes") from error
-        reader.finish()
-        return value
-
-    @classmethod
-    def _boltffi_from_reader(cls, reader: "_BoltFfiWireReader") -> "XybridEnvelope":
-        return cls(
-            kind=XybridEnvelopeKind._boltffi_from_reader(reader),
-            metadata=reader.sequence(lambda: XybridMetadataEntry._boltffi_from_reader(reader)),
-        )
-
-
-_native._register_xybrid_envelope(XybridEnvelope)
-
-
-
-@dataclass(frozen=True, slots=True)
-class XybridToolDefinition:
-    name: str
-    description: str
-    parameters_json: str
-
-    def _boltffi_wire(self) -> bytes:
-        return b"".join((
-            _boltffi_wire_string(self.name),
-            _boltffi_wire_string(self.description),
-            _boltffi_wire_string(self.parameters_json),
-        ))
-
-    @classmethod
-    def _boltffi_from_wire(cls, data: bytes) -> "XybridToolDefinition":
-        reader = _BoltFfiWireReader(data)
-        try:
-            value = cls._boltffi_from_reader(reader)
-        except struct.error as error:
-            raise ValueError("truncated BoltFFI wire bytes") from error
-        reader.finish()
-        return value
-
-    @classmethod
-    def _boltffi_from_reader(cls, reader: "_BoltFfiWireReader") -> "XybridToolDefinition":
-        return cls(
-            name=reader.string(),
-            description=reader.string(),
-            parameters_json=reader.string(),
-        )
-
-
-_native._register_xybrid_tool_definition(XybridToolDefinition)
-
-
-
-@dataclass(frozen=True, slots=True)
-class XybridToolCall:
-    id: str
-    name: str
-    arguments_json: str
-
-    def _boltffi_wire(self) -> bytes:
-        return b"".join((
-            _boltffi_wire_string(self.id),
-            _boltffi_wire_string(self.name),
-            _boltffi_wire_string(self.arguments_json),
-        ))
-
-    @classmethod
-    def _boltffi_from_wire(cls, data: bytes) -> "XybridToolCall":
-        reader = _BoltFfiWireReader(data)
-        try:
-            value = cls._boltffi_from_reader(reader)
-        except struct.error as error:
-            raise ValueError("truncated BoltFFI wire bytes") from error
-        reader.finish()
-        return value
-
-    @classmethod
-    def _boltffi_from_reader(cls, reader: "_BoltFfiWireReader") -> "XybridToolCall":
-        return cls(
-            id=reader.string(),
-            name=reader.string(),
-            arguments_json=reader.string(),
-        )
-
-
-_native._register_xybrid_tool_call(XybridToolCall)
-
-
-
-@dataclass(frozen=True, slots=True)
-class XybridToolResult:
-    call_id: str
-    name: str
-    content_json: str
-
-    def _boltffi_wire(self) -> bytes:
-        return b"".join((
-            _boltffi_wire_string(self.call_id),
-            _boltffi_wire_string(self.name),
-            _boltffi_wire_string(self.content_json),
-        ))
-
-    @classmethod
-    def _boltffi_from_wire(cls, data: bytes) -> "XybridToolResult":
-        reader = _BoltFfiWireReader(data)
-        try:
-            value = cls._boltffi_from_reader(reader)
-        except struct.error as error:
-            raise ValueError("truncated BoltFFI wire bytes") from error
-        reader.finish()
-        return value
-
-    @classmethod
-    def _boltffi_from_reader(cls, reader: "_BoltFfiWireReader") -> "XybridToolResult":
-        return cls(
-            call_id=reader.string(),
-            name=reader.string(),
-            content_json=reader.string(),
-        )
-
-
-_native._register_xybrid_tool_result(XybridToolResult)
-
-
-
-@dataclass(frozen=True, slots=True)
-class XybridGenerationConfig:
-    max_tokens: int | None
-    temperature: float | None
-    top_p: float | None
-    min_p: float | None
-    top_k: int | None
-    repetition_penalty: float | None
-    stop_sequences: list[str]
-    grammar: str | None
-    tools: list[XybridToolDefinition]
-
-    def _boltffi_wire(self) -> bytes:
-        return b"".join((
-            _boltffi_wire_optional(self.max_tokens, lambda __boltffi_value_0: _boltffi_wire_u32(__boltffi_value_0)),
-            _boltffi_wire_optional(self.temperature, lambda __boltffi_value_0: _boltffi_wire_f32(__boltffi_value_0)),
-            _boltffi_wire_optional(self.top_p, lambda __boltffi_value_0: _boltffi_wire_f32(__boltffi_value_0)),
-            _boltffi_wire_optional(self.min_p, lambda __boltffi_value_0: _boltffi_wire_f32(__boltffi_value_0)),
-            _boltffi_wire_optional(self.top_k, lambda __boltffi_value_0: _boltffi_wire_u32(__boltffi_value_0)),
-            _boltffi_wire_optional(self.repetition_penalty, lambda __boltffi_value_0: _boltffi_wire_f32(__boltffi_value_0)),
-            _boltffi_wire_sequence(self.stop_sequences, len(self.stop_sequences), lambda __boltffi_value_0: _boltffi_wire_string(__boltffi_value_0)),
-            _boltffi_wire_optional(self.grammar, lambda __boltffi_value_0: _boltffi_wire_string(__boltffi_value_0)),
-            _boltffi_wire_sequence(self.tools, len(self.tools), lambda __boltffi_value_0: __boltffi_value_0._boltffi_wire()),
-        ))
-
-    @classmethod
-    def _boltffi_from_wire(cls, data: bytes) -> "XybridGenerationConfig":
-        reader = _BoltFfiWireReader(data)
-        try:
-            value = cls._boltffi_from_reader(reader)
-        except struct.error as error:
-            raise ValueError("truncated BoltFFI wire bytes") from error
-        reader.finish()
-        return value
-
-    @classmethod
-    def _boltffi_from_reader(cls, reader: "_BoltFfiWireReader") -> "XybridGenerationConfig":
-        return cls(
-            max_tokens=reader.optional(lambda: reader.u32()),
-            temperature=reader.optional(lambda: reader.f32()),
-            top_p=reader.optional(lambda: reader.f32()),
-            min_p=reader.optional(lambda: reader.f32()),
-            top_k=reader.optional(lambda: reader.u32()),
-            repetition_penalty=reader.optional(lambda: reader.f32()),
-            stop_sequences=reader.sequence(lambda: reader.string()),
-            grammar=reader.optional(lambda: reader.string()),
-            tools=reader.sequence(lambda: XybridToolDefinition._boltffi_from_reader(reader)),
-        )
-
-
-_native._register_xybrid_generation_config(XybridGenerationConfig)
-
-
-
-@dataclass(frozen=True, slots=True)
-class XybridRunOptions:
-    generation_config: XybridGenerationConfig | None
-    abort_on: list[XybridAbortSignal]
-    fallback_to_cloud: bool
-    max_grace_tokens: int
-    correlation_id: str | None
-
-    def _boltffi_wire(self) -> bytes:
-        return b"".join((
-            _boltffi_wire_optional(self.generation_config, lambda __boltffi_value_0: __boltffi_value_0._boltffi_wire()),
-            _boltffi_wire_sequence(self.abort_on, len(self.abort_on), lambda __boltffi_value_0: _boltffi_wire_i32(_boltffi_enum_value(__boltffi_value_0, XybridAbortSignal, "XybridAbortSignal"))),
-            _boltffi_wire_bool(self.fallback_to_cloud),
-            _boltffi_wire_u32(self.max_grace_tokens),
-            _boltffi_wire_optional(self.correlation_id, lambda __boltffi_value_0: _boltffi_wire_string(__boltffi_value_0)),
-        ))
-
-    @classmethod
-    def _boltffi_from_wire(cls, data: bytes) -> "XybridRunOptions":
-        reader = _BoltFfiWireReader(data)
-        try:
-            value = cls._boltffi_from_reader(reader)
-        except struct.error as error:
-            raise ValueError("truncated BoltFFI wire bytes") from error
-        reader.finish()
-        return value
-
-    @classmethod
-    def _boltffi_from_reader(cls, reader: "_BoltFfiWireReader") -> "XybridRunOptions":
-        return cls(
-            generation_config=reader.optional(lambda: XybridGenerationConfig._boltffi_from_reader(reader)),
-            abort_on=reader.enum_sequence(_BOLTFFI_STRUCT_I32, XybridAbortSignal),
-            fallback_to_cloud=reader.bool(),
-            max_grace_tokens=reader.u32(),
-            correlation_id=reader.optional(lambda: reader.string()),
-        )
-
-
-_native._register_xybrid_run_options(XybridRunOptions)
-
-
-
-@dataclass(frozen=True, slots=True)
-class XybridStageLatency:
-    stage_id: str
-    latency_ms: int
-
-    def _boltffi_wire(self) -> bytes:
-        return b"".join((
-            _boltffi_wire_string(self.stage_id),
-            _boltffi_wire_u32(self.latency_ms),
-        ))
-
-    @classmethod
-    def _boltffi_from_wire(cls, data: bytes) -> "XybridStageLatency":
-        reader = _BoltFfiWireReader(data)
-        try:
-            value = cls._boltffi_from_reader(reader)
-        except struct.error as error:
-            raise ValueError("truncated BoltFFI wire bytes") from error
-        reader.finish()
-        return value
-
-    @classmethod
-    def _boltffi_from_reader(cls, reader: "_BoltFfiWireReader") -> "XybridStageLatency":
-        return cls(
-            stage_id=reader.string(),
-            latency_ms=reader.u32(),
-        )
-
-
-_native._register_xybrid_stage_latency(XybridStageLatency)
-
-
-
-@dataclass(frozen=True, slots=True)
-class XybridInferenceMetrics:
-    total_ms: int
-    ttft_ms: int | None
-    tokens_per_second: float | None
-    prefill_tps: float | None
-    decode_tps: float | None
-    tokens_out: int | None
-    stage_latencies_ms: list[XybridStageLatency]
-
-    def _boltffi_wire(self) -> bytes:
-        return b"".join((
-            _boltffi_wire_u32(self.total_ms),
-            _boltffi_wire_optional(self.ttft_ms, lambda __boltffi_value_0: _boltffi_wire_u32(__boltffi_value_0)),
-            _boltffi_wire_optional(self.tokens_per_second, lambda __boltffi_value_0: _boltffi_wire_f32(__boltffi_value_0)),
-            _boltffi_wire_optional(self.prefill_tps, lambda __boltffi_value_0: _boltffi_wire_f32(__boltffi_value_0)),
-            _boltffi_wire_optional(self.decode_tps, lambda __boltffi_value_0: _boltffi_wire_f32(__boltffi_value_0)),
-            _boltffi_wire_optional(self.tokens_out, lambda __boltffi_value_0: _boltffi_wire_u32(__boltffi_value_0)),
-            _boltffi_wire_sequence(self.stage_latencies_ms, len(self.stage_latencies_ms), lambda __boltffi_value_0: __boltffi_value_0._boltffi_wire()),
-        ))
-
-    @classmethod
-    def _boltffi_from_wire(cls, data: bytes) -> "XybridInferenceMetrics":
-        reader = _BoltFfiWireReader(data)
-        try:
-            value = cls._boltffi_from_reader(reader)
-        except struct.error as error:
-            raise ValueError("truncated BoltFFI wire bytes") from error
-        reader.finish()
-        return value
-
-    @classmethod
-    def _boltffi_from_reader(cls, reader: "_BoltFfiWireReader") -> "XybridInferenceMetrics":
-        return cls(
-            total_ms=reader.u32(),
-            ttft_ms=reader.optional(lambda: reader.u32()),
-            tokens_per_second=reader.optional(lambda: reader.f32()),
-            prefill_tps=reader.optional(lambda: reader.f32()),
-            decode_tps=reader.optional(lambda: reader.f32()),
-            tokens_out=reader.optional(lambda: reader.u32()),
-            stage_latencies_ms=reader.sequence(lambda: XybridStageLatency._boltffi_from_reader(reader)),
-        )
-
-
-_native._register_xybrid_inference_metrics(XybridInferenceMetrics)
-
-
-
-@dataclass(frozen=True, slots=True)
-class XybridResult:
-    envelope: XybridEnvelope
-    output_type: XybridOutputType
-    model_id: str
-    latency_ms: int
-    execution_target: XybridExecutionTarget
-    metrics: XybridInferenceMetrics
-    tool_calls: list[XybridToolCall]
-    reasoning_content: str | None = None
-
-    def _boltffi_wire(self) -> bytes:
-        return b"".join((
-            self.envelope._boltffi_wire(),
-            _boltffi_wire_i32(_boltffi_enum_value(self.output_type, XybridOutputType, "XybridOutputType")),
-            _boltffi_wire_string(self.model_id),
-            _boltffi_wire_u32(self.latency_ms),
-            _boltffi_wire_i32(_boltffi_enum_value(self.execution_target, XybridExecutionTarget, "XybridExecutionTarget")),
-            self.metrics._boltffi_wire(),
-            _boltffi_wire_sequence(self.tool_calls, len(self.tool_calls), lambda __boltffi_value_0: __boltffi_value_0._boltffi_wire()),
-            _boltffi_wire_optional(self.reasoning_content, lambda __boltffi_value_0: _boltffi_wire_string(__boltffi_value_0)),
-        ))
-
-    @classmethod
-    def _boltffi_from_wire(cls, data: bytes) -> "XybridResult":
-        reader = _BoltFfiWireReader(data)
-        try:
-            value = cls._boltffi_from_reader(reader)
-        except struct.error as error:
-            raise ValueError("truncated BoltFFI wire bytes") from error
-        reader.finish()
-        return value
-
-    @classmethod
-    def _boltffi_from_reader(cls, reader: "_BoltFfiWireReader") -> "XybridResult":
-        envelope = XybridEnvelope._boltffi_from_reader(reader)
-        output_type = XybridOutputType(reader.i32())
-        model_id = reader.string()
-        latency_ms = reader.u32()
-        execution_target = XybridExecutionTarget(reader.i32())
-        metrics = XybridInferenceMetrics._boltffi_from_reader(reader)
-        tool_calls = reader.sequence(lambda: XybridToolCall._boltffi_from_reader(reader))
-        reasoning_content = (
-            reader.optional(lambda: reader.string())
-            if reader.has_remaining()
-            else next(
-                (entry.value for entry in envelope.metadata if entry.key == "reasoning_content"),
-                None,
-            )
-        )
-        return cls(
-            envelope=envelope,
-            output_type=output_type,
-            model_id=model_id,
-            latency_ms=latency_ms,
-            execution_target=execution_target,
-            metrics=metrics,
-            tool_calls=tool_calls,
-            reasoning_content=reasoning_content,
-        )
-
-
-_native._register_xybrid_result(XybridResult)
-
-
-
-@dataclass(frozen=True, slots=True)
-class XybridDownloadStatus:
-    state: XybridDownloadState
-    progress: float
-
-    def _boltffi_wire(self) -> bytes:
-        return b"".join((
-            _boltffi_wire_i32(_boltffi_enum_value(self.state, XybridDownloadState, "XybridDownloadState")),
-            _boltffi_wire_f32(self.progress),
-        ))
-
-    @classmethod
-    def _boltffi_from_wire(cls, data: bytes) -> "XybridDownloadStatus":
-        reader = _BoltFfiWireReader(data)
-        try:
-            value = cls._boltffi_from_reader(reader)
-        except struct.error as error:
-            raise ValueError("truncated BoltFFI wire bytes") from error
-        reader.finish()
-        return value
-
-    @classmethod
-    def _boltffi_from_reader(cls, reader: "_BoltFfiWireReader") -> "XybridDownloadStatus":
-        return cls(
-            state=XybridDownloadState(reader.i32()),
-            progress=reader.f32(),
-        )
-
-
-_native._register_xybrid_download_status(XybridDownloadStatus)
-
-
-
-@dataclass(frozen=True, slots=True)
-class XybridStreamToken:
-    token: str
-    token_id: int | None
-    index: int
-    cumulative_text: str
-    finish_reason: str | None
-    tool_calls: list[XybridToolCall]
-    raw_text: str | None
-
-    def _boltffi_wire(self) -> bytes:
-        return b"".join((
-            _boltffi_wire_string(self.token),
-            _boltffi_wire_optional(self.token_id, lambda __boltffi_value_0: _boltffi_wire_i64(__boltffi_value_0)),
-            _boltffi_wire_u64(self.index),
-            _boltffi_wire_string(self.cumulative_text),
-            _boltffi_wire_optional(self.finish_reason, lambda __boltffi_value_0: _boltffi_wire_string(__boltffi_value_0)),
-            _boltffi_wire_sequence(self.tool_calls, len(self.tool_calls), lambda __boltffi_value_0: __boltffi_value_0._boltffi_wire()),
-            _boltffi_wire_optional(self.raw_text, lambda __boltffi_value_0: _boltffi_wire_string(__boltffi_value_0)),
-        ))
-
-    @classmethod
-    def _boltffi_from_wire(cls, data: bytes) -> "XybridStreamToken":
-        reader = _BoltFfiWireReader(data)
-        try:
-            value = cls._boltffi_from_reader(reader)
-        except struct.error as error:
-            raise ValueError("truncated BoltFFI wire bytes") from error
-        reader.finish()
-        return value
-
-    @classmethod
-    def _boltffi_from_reader(cls, reader: "_BoltFfiWireReader") -> "XybridStreamToken":
-        return cls(
-            token=reader.string(),
-            token_id=reader.optional(lambda: reader.i64()),
-            index=reader.u64(),
-            cumulative_text=reader.string(),
-            finish_reason=reader.optional(lambda: reader.string()),
-            tool_calls=reader.sequence(lambda: XybridToolCall._boltffi_from_reader(reader)),
-            raw_text=reader.optional(lambda: reader.string()),
-        )
-
-
-_native._register_xybrid_stream_token(XybridStreamToken)
-
-
-
-@dataclass(frozen=True, slots=True)
-class XybridStreamEvent:
-    kind: XybridStreamEventKind
-    token: XybridStreamToken | None
-
-    def _boltffi_wire(self) -> bytes:
-        return b"".join((
-            _boltffi_wire_i32(_boltffi_enum_value(self.kind, XybridStreamEventKind, "XybridStreamEventKind")),
-            _boltffi_wire_optional(self.token, lambda __boltffi_value_0: __boltffi_value_0._boltffi_wire()),
-        ))
-
-    @classmethod
-    def _boltffi_from_wire(cls, data: bytes) -> "XybridStreamEvent":
-        reader = _BoltFfiWireReader(data)
-        try:
-            value = cls._boltffi_from_reader(reader)
-        except struct.error as error:
-            raise ValueError("truncated BoltFFI wire bytes") from error
-        reader.finish()
-        return value
-
-    @classmethod
-    def _boltffi_from_reader(cls, reader: "_BoltFfiWireReader") -> "XybridStreamEvent":
-        return cls(
-            kind=XybridStreamEventKind(reader.i32()),
-            token=reader.optional(lambda: XybridStreamToken._boltffi_from_reader(reader)),
-        )
-
-
-_native._register_xybrid_stream_event(XybridStreamEvent)
-
-
-
-@dataclass(frozen=True, slots=True)
-class XybridVoiceInfo:
-    id: str
-    name: str
-    gender: str | None
-    language: str | None
-    style: str | None
-
-    def _boltffi_wire(self) -> bytes:
-        return b"".join((
-            _boltffi_wire_string(self.id),
-            _boltffi_wire_string(self.name),
-            _boltffi_wire_optional(self.gender, lambda __boltffi_value_0: _boltffi_wire_string(__boltffi_value_0)),
-            _boltffi_wire_optional(self.language, lambda __boltffi_value_0: _boltffi_wire_string(__boltffi_value_0)),
-            _boltffi_wire_optional(self.style, lambda __boltffi_value_0: _boltffi_wire_string(__boltffi_value_0)),
-        ))
-
-    @classmethod
-    def _boltffi_from_wire(cls, data: bytes) -> "XybridVoiceInfo":
-        reader = _BoltFfiWireReader(data)
-        try:
-            value = cls._boltffi_from_reader(reader)
-        except struct.error as error:
-            raise ValueError("truncated BoltFFI wire bytes") from error
-        reader.finish()
-        return value
-
-    @classmethod
-    def _boltffi_from_reader(cls, reader: "_BoltFfiWireReader") -> "XybridVoiceInfo":
-        return cls(
-            id=reader.string(),
-            name=reader.string(),
-            gender=reader.optional(lambda: reader.string()),
-            language=reader.optional(lambda: reader.string()),
-            style=reader.optional(lambda: reader.string()),
-        )
-
-
-_native._register_xybrid_voice_info(XybridVoiceInfo)
-
-
-
-
 class XybridError:
+    """Errors surfaced across the FFI boundary. Variants mirror
+    [`facade::Error`] — the facade owns the SDK→FFI translation; this enum
+    only re-decorates it for the BoltFFI generator (proc macros must live
+    on the type definition).
+
+    Named `XybridError` (not `Error`) so the emitted Swift type doesn't
+    shadow / collide with Swift's stdlib `Error` protocol, and so the
+    Kotlin sealed-hierarchy name matches the existing uniffi consumer
+    expectations.
+
+    **Variant order is part of the wire contract.** BoltFFI encodes `#[error]`
+    (and `#[data]`) enums by ordinal tag, so reordering or inserting a variant
+    renumbers every variant after it and breaks already-built foreign clients.
+    Only ever append at the tail, and keep this order in lockstep with
+    [`facade::Error`] and its `code()` table.
+    """
     __slots__ = ()
 
     @classmethod
@@ -1285,6 +734,8 @@ class XybridError:
             return XybridErrorUnsupportedBackendCapability._boltffi_from_reader_payload(reader)
         if tag == 21:
             return XybridErrorInvalidImage._boltffi_from_reader_payload(reader)
+        if tag == 22:
+            return XybridErrorCancelled._boltffi_from_reader_payload(reader)
         raise ValueError("invalid XybridError tag")
 
 
@@ -1632,6 +1083,23 @@ class XybridErrorInvalidImage(XybridError):
         )
 
 
+@dataclass(frozen=True, slots=True)
+class XybridErrorCancelled(XybridError):
+    """The host called `cancel` — today, on a model download."""
+    message: str
+
+    def _boltffi_wire(self) -> bytes:
+        return _boltffi_wire_u32(22) + b"".join((
+            _boltffi_wire_string(self.message),
+        ))
+
+    @classmethod
+    def _boltffi_from_reader_payload(cls, reader: "_BoltFfiWireReader") -> "XybridErrorCancelled":
+        return cls(
+            message=reader.string(),
+        )
+
+
 
 _native._register_xybrid_error(XybridError)
 
@@ -1810,6 +1278,7 @@ _native._register_xybrid_output_type(XybridOutputType)
 
 
 class XybridExecutionTarget(IntEnum):
+    """Where a result was produced — observed fact, not a routing preference."""
     LOCAL = 0
     CLOUD = 1
 
@@ -1818,9 +1287,13 @@ _native._register_xybrid_execution_target(XybridExecutionTarget)
 
 
 class XybridDownloadState(IntEnum):
+    """Lifecycle of a model download — a standalone [`XybridDownload`] or
+    the background download behind a speculative load.
+    """
     DOWNLOADING = 0
     READY = 1
     FAILED = 2
+    CANCELLED = 3
 
 _native._register_xybrid_download_state(XybridDownloadState)
 
@@ -1842,6 +1315,807 @@ class XybridThermalState(IntEnum):
 
 _native._register_xybrid_thermal_state(XybridThermalState)
 
+
+
+
+@dataclass(frozen=True, slots=True)
+class XybridMetadataEntry:
+    """Single metadata key/value entry. BoltFFI doesn't auto-derive
+    `WireEncode` for `HashMap<String, String>`, so we expose metadata as
+    `Vec<XybridMetadataEntry>`. The conversion back to `HashMap` happens
+    at the facade boundary inside [`XybridEnvelope::into`].
+    """
+    key: str
+    value: str
+
+    def _boltffi_wire(self) -> bytes:
+        return b"".join((
+            _boltffi_wire_string(self.key),
+            _boltffi_wire_string(self.value),
+        ))
+
+    @classmethod
+    def _boltffi_from_wire(cls, data: bytes) -> "XybridMetadataEntry":
+        reader = _BoltFfiWireReader(data)
+        try:
+            value = cls._boltffi_from_reader(reader)
+        except struct.error as error:
+            raise ValueError("truncated BoltFFI wire bytes") from error
+        reader.finish()
+        return value
+
+    @classmethod
+    def _boltffi_from_reader(cls, reader: "_BoltFfiWireReader") -> "XybridMetadataEntry":
+        return cls(
+            key=reader.string(),
+            value=reader.string(),
+        )
+
+
+_native._register_xybrid_metadata_entry(XybridMetadataEntry)
+
+
+
+@dataclass(frozen=True, slots=True)
+class XybridEnvelope:
+    kind: XybridEnvelopeKind
+    metadata: list[XybridMetadataEntry]
+
+    def _boltffi_wire(self) -> bytes:
+        return b"".join((
+            self.kind._boltffi_wire(),
+            _boltffi_wire_sequence(self.metadata, len(self.metadata), lambda __boltffi_value_0: __boltffi_value_0._boltffi_wire()),
+        ))
+
+    @classmethod
+    def _boltffi_from_wire(cls, data: bytes) -> "XybridEnvelope":
+        reader = _BoltFfiWireReader(data)
+        try:
+            value = cls._boltffi_from_reader(reader)
+        except struct.error as error:
+            raise ValueError("truncated BoltFFI wire bytes") from error
+        reader.finish()
+        return value
+
+    @classmethod
+    def _boltffi_from_reader(cls, reader: "_BoltFfiWireReader") -> "XybridEnvelope":
+        return cls(
+            kind=XybridEnvelopeKind._boltffi_from_reader(reader),
+            metadata=reader.sequence(lambda: XybridMetadataEntry._boltffi_from_reader(reader)),
+        )
+
+
+_native._register_xybrid_envelope(XybridEnvelope)
+
+
+
+@dataclass(frozen=True, slots=True)
+class XybridToolDefinition:
+    """A tool (function) the model may ask to call.
+
+    `parameters_json` is the JSON Schema for the arguments, carried as a JSON
+    string because no binding generator can describe an arbitrary JSON tree.
+    """
+    name: str
+    description: str
+    parameters_json: str
+
+    def _boltffi_wire(self) -> bytes:
+        return b"".join((
+            _boltffi_wire_string(self.name),
+            _boltffi_wire_string(self.description),
+            _boltffi_wire_string(self.parameters_json),
+        ))
+
+    @classmethod
+    def _boltffi_from_wire(cls, data: bytes) -> "XybridToolDefinition":
+        reader = _BoltFfiWireReader(data)
+        try:
+            value = cls._boltffi_from_reader(reader)
+        except struct.error as error:
+            raise ValueError("truncated BoltFFI wire bytes") from error
+        reader.finish()
+        return value
+
+    @classmethod
+    def _boltffi_from_reader(cls, reader: "_BoltFfiWireReader") -> "XybridToolDefinition":
+        return cls(
+            name=reader.string(),
+            description=reader.string(),
+            parameters_json=reader.string(),
+        )
+
+
+_native._register_xybrid_tool_definition(XybridToolDefinition)
+
+
+
+@dataclass(frozen=True, slots=True)
+class XybridToolCall:
+    """One tool call the model emitted, from [`XybridResult::tool_calls`]."""
+    id: str
+    name: str
+    arguments_json: str
+
+    def _boltffi_wire(self) -> bytes:
+        return b"".join((
+            _boltffi_wire_string(self.id),
+            _boltffi_wire_string(self.name),
+            _boltffi_wire_string(self.arguments_json),
+        ))
+
+    @classmethod
+    def _boltffi_from_wire(cls, data: bytes) -> "XybridToolCall":
+        reader = _BoltFfiWireReader(data)
+        try:
+            value = cls._boltffi_from_reader(reader)
+        except struct.error as error:
+            raise ValueError("truncated BoltFFI wire bytes") from error
+        reader.finish()
+        return value
+
+    @classmethod
+    def _boltffi_from_reader(cls, reader: "_BoltFfiWireReader") -> "XybridToolCall":
+        return cls(
+            id=reader.string(),
+            name=reader.string(),
+            arguments_json=reader.string(),
+        )
+
+
+_native._register_xybrid_tool_call(XybridToolCall)
+
+
+
+@dataclass(frozen=True, slots=True)
+class XybridToolResult:
+    """The outcome of running one tool, fed back with [`tool_results_envelope`]."""
+    call_id: str
+    """The [`XybridToolCall::id`] this answers."""
+    name: str
+    content_json: str
+    """The tool's output as a JSON string."""
+
+    def _boltffi_wire(self) -> bytes:
+        return b"".join((
+            _boltffi_wire_string(self.call_id),
+            _boltffi_wire_string(self.name),
+            _boltffi_wire_string(self.content_json),
+        ))
+
+    @classmethod
+    def _boltffi_from_wire(cls, data: bytes) -> "XybridToolResult":
+        reader = _BoltFfiWireReader(data)
+        try:
+            value = cls._boltffi_from_reader(reader)
+        except struct.error as error:
+            raise ValueError("truncated BoltFFI wire bytes") from error
+        reader.finish()
+        return value
+
+    @classmethod
+    def _boltffi_from_reader(cls, reader: "_BoltFfiWireReader") -> "XybridToolResult":
+        return cls(
+            call_id=reader.string(),
+            name=reader.string(),
+            content_json=reader.string(),
+        )
+
+
+_native._register_xybrid_tool_result(XybridToolResult)
+
+
+
+@dataclass(frozen=True, slots=True)
+class XybridGenerationConfig:
+    max_tokens: int | None
+    temperature: float | None
+    top_p: float | None
+    min_p: float | None
+    top_k: int | None
+    repetition_penalty: float | None
+    stop_sequences: list[str]
+    grammar: str | None
+    """Optional GBNF grammar constraining generation to structured output
+    (local llama backend only). Produce one from a JSON Schema with
+    [`json_schema_to_gbnf`], or pass raw GBNF. Appended last: `#[data]`
+    PODs serialize by field order across the FFI boundary.
+    """
+    tools: list[XybridToolDefinition]
+    """Tools the model may call this turn. Empty means no tool calling —
+    existing behavior, unchanged. Appended after `grammar` for the same
+    field-order reason.
+
+    Tool calling is llama.cpp-only today; unsupported paths (no embedded
+    chat template, the mistralrs backend, the cloud fallback leg) reject
+    tool-bearing requests rather than quietly generating without them.
+    """
+
+    def _boltffi_wire(self) -> bytes:
+        return b"".join((
+            _boltffi_wire_optional(self.max_tokens, lambda __boltffi_value_0: _boltffi_wire_u32(__boltffi_value_0)),
+            _boltffi_wire_optional(self.temperature, lambda __boltffi_value_0: _boltffi_wire_f32(__boltffi_value_0)),
+            _boltffi_wire_optional(self.top_p, lambda __boltffi_value_0: _boltffi_wire_f32(__boltffi_value_0)),
+            _boltffi_wire_optional(self.min_p, lambda __boltffi_value_0: _boltffi_wire_f32(__boltffi_value_0)),
+            _boltffi_wire_optional(self.top_k, lambda __boltffi_value_0: _boltffi_wire_u32(__boltffi_value_0)),
+            _boltffi_wire_optional(self.repetition_penalty, lambda __boltffi_value_0: _boltffi_wire_f32(__boltffi_value_0)),
+            _boltffi_wire_sequence(self.stop_sequences, len(self.stop_sequences), lambda __boltffi_value_0: _boltffi_wire_string(__boltffi_value_0)),
+            _boltffi_wire_optional(self.grammar, lambda __boltffi_value_0: _boltffi_wire_string(__boltffi_value_0)),
+            _boltffi_wire_sequence(self.tools, len(self.tools), lambda __boltffi_value_0: __boltffi_value_0._boltffi_wire()),
+        ))
+
+    @classmethod
+    def _boltffi_from_wire(cls, data: bytes) -> "XybridGenerationConfig":
+        reader = _BoltFfiWireReader(data)
+        try:
+            value = cls._boltffi_from_reader(reader)
+        except struct.error as error:
+            raise ValueError("truncated BoltFFI wire bytes") from error
+        reader.finish()
+        return value
+
+    @classmethod
+    def _boltffi_from_reader(cls, reader: "_BoltFfiWireReader") -> "XybridGenerationConfig":
+        return cls(
+            max_tokens=reader.optional(lambda: reader.u32()),
+            temperature=reader.optional(lambda: reader.f32()),
+            top_p=reader.optional(lambda: reader.f32()),
+            min_p=reader.optional(lambda: reader.f32()),
+            top_k=reader.optional(lambda: reader.u32()),
+            repetition_penalty=reader.optional(lambda: reader.f32()),
+            stop_sequences=reader.sequence(lambda: reader.string()),
+            grammar=reader.optional(lambda: reader.string()),
+            tools=reader.sequence(lambda: XybridToolDefinition._boltffi_from_reader(reader)),
+        )
+
+
+_native._register_xybrid_generation_config(XybridGenerationConfig)
+
+
+
+@dataclass(frozen=True, slots=True)
+class XybridRunOptions:
+    generation_config: XybridGenerationConfig | None
+    abort_on: list[XybridAbortSignal]
+    fallback_to_cloud: bool
+    max_grace_tokens: int
+    correlation_id: str | None
+
+    def _boltffi_wire(self) -> bytes:
+        return b"".join((
+            _boltffi_wire_optional(self.generation_config, lambda __boltffi_value_0: __boltffi_value_0._boltffi_wire()),
+            _boltffi_wire_sequence(self.abort_on, len(self.abort_on), lambda __boltffi_value_0: _boltffi_wire_i32(_boltffi_enum_value(__boltffi_value_0, XybridAbortSignal, "XybridAbortSignal"))),
+            _boltffi_wire_bool(self.fallback_to_cloud),
+            _boltffi_wire_u32(self.max_grace_tokens),
+            _boltffi_wire_optional(self.correlation_id, lambda __boltffi_value_0: _boltffi_wire_string(__boltffi_value_0)),
+        ))
+
+    @classmethod
+    def _boltffi_from_wire(cls, data: bytes) -> "XybridRunOptions":
+        reader = _BoltFfiWireReader(data)
+        try:
+            value = cls._boltffi_from_reader(reader)
+        except struct.error as error:
+            raise ValueError("truncated BoltFFI wire bytes") from error
+        reader.finish()
+        return value
+
+    @classmethod
+    def _boltffi_from_reader(cls, reader: "_BoltFfiWireReader") -> "XybridRunOptions":
+        return cls(
+            generation_config=reader.optional(lambda: XybridGenerationConfig._boltffi_from_reader(reader)),
+            abort_on=reader.enum_sequence(_BOLTFFI_STRUCT_I32, XybridAbortSignal),
+            fallback_to_cloud=reader.bool(),
+            max_grace_tokens=reader.u32(),
+            correlation_id=reader.optional(lambda: reader.string()),
+        )
+
+
+_native._register_xybrid_run_options(XybridRunOptions)
+
+
+
+@dataclass(frozen=True, slots=True)
+class XybridStageLatency:
+    stage_id: str
+    latency_ms: int
+
+    def _boltffi_wire(self) -> bytes:
+        return b"".join((
+            _boltffi_wire_string(self.stage_id),
+            _boltffi_wire_u32(self.latency_ms),
+        ))
+
+    @classmethod
+    def _boltffi_from_wire(cls, data: bytes) -> "XybridStageLatency":
+        reader = _BoltFfiWireReader(data)
+        try:
+            value = cls._boltffi_from_reader(reader)
+        except struct.error as error:
+            raise ValueError("truncated BoltFFI wire bytes") from error
+        reader.finish()
+        return value
+
+    @classmethod
+    def _boltffi_from_reader(cls, reader: "_BoltFfiWireReader") -> "XybridStageLatency":
+        return cls(
+            stage_id=reader.string(),
+            latency_ms=reader.u32(),
+        )
+
+
+_native._register_xybrid_stage_latency(XybridStageLatency)
+
+
+
+@dataclass(frozen=True, slots=True)
+class XybridInferenceMetrics:
+    total_ms: int
+    ttft_ms: int | None
+    tokens_per_second: float | None
+    prefill_tps: float | None
+    decode_tps: float | None
+    tokens_out: int | None
+    stage_latencies_ms: list[XybridStageLatency]
+
+    def _boltffi_wire(self) -> bytes:
+        return b"".join((
+            _boltffi_wire_u32(self.total_ms),
+            _boltffi_wire_optional(self.ttft_ms, lambda __boltffi_value_0: _boltffi_wire_u32(__boltffi_value_0)),
+            _boltffi_wire_optional(self.tokens_per_second, lambda __boltffi_value_0: _boltffi_wire_f32(__boltffi_value_0)),
+            _boltffi_wire_optional(self.prefill_tps, lambda __boltffi_value_0: _boltffi_wire_f32(__boltffi_value_0)),
+            _boltffi_wire_optional(self.decode_tps, lambda __boltffi_value_0: _boltffi_wire_f32(__boltffi_value_0)),
+            _boltffi_wire_optional(self.tokens_out, lambda __boltffi_value_0: _boltffi_wire_u32(__boltffi_value_0)),
+            _boltffi_wire_sequence(self.stage_latencies_ms, len(self.stage_latencies_ms), lambda __boltffi_value_0: __boltffi_value_0._boltffi_wire()),
+        ))
+
+    @classmethod
+    def _boltffi_from_wire(cls, data: bytes) -> "XybridInferenceMetrics":
+        reader = _BoltFfiWireReader(data)
+        try:
+            value = cls._boltffi_from_reader(reader)
+        except struct.error as error:
+            raise ValueError("truncated BoltFFI wire bytes") from error
+        reader.finish()
+        return value
+
+    @classmethod
+    def _boltffi_from_reader(cls, reader: "_BoltFfiWireReader") -> "XybridInferenceMetrics":
+        return cls(
+            total_ms=reader.u32(),
+            ttft_ms=reader.optional(lambda: reader.u32()),
+            tokens_per_second=reader.optional(lambda: reader.f32()),
+            prefill_tps=reader.optional(lambda: reader.f32()),
+            decode_tps=reader.optional(lambda: reader.f32()),
+            tokens_out=reader.optional(lambda: reader.u32()),
+            stage_latencies_ms=reader.sequence(lambda: XybridStageLatency._boltffi_from_reader(reader)),
+        )
+
+
+_native._register_xybrid_inference_metrics(XybridInferenceMetrics)
+
+
+
+@dataclass(frozen=True, slots=True)
+class XybridResult:
+    """Inference output. Named `XybridResult` (not `XybridInferenceResult`)
+    to match the existing uniffi-generated Kotlin/Swift name — the iOS
+    example references `XybridResult` directly.
+    """
+    envelope: XybridEnvelope
+    output_type: XybridOutputType
+    model_id: str
+    latency_ms: int
+    execution_target: XybridExecutionTarget
+    """Where the answer actually came from. Cloud fallback keeps `model_id`
+    identical on both legs, so this is the only way to tell them apart.
+    """
+    metrics: XybridInferenceMetrics
+    tool_calls: list[XybridToolCall]
+    """Tool calls the model emitted this turn. Empty unless the request
+    offered tools via [`XybridGenerationConfig::tools`].
+    `#[data]` PODs serialize by field order across the FFI boundary.
+    """
+    reasoning_content: str | None = None
+    """Model reasoning emitted separately from the final answer text.
+    Appended last because `#[data]` fields serialize in declaration order.
+    """
+
+    def _boltffi_wire(self) -> bytes:
+        return b"".join((
+            self.envelope._boltffi_wire(),
+            _boltffi_wire_i32(_boltffi_enum_value(self.output_type, XybridOutputType, "XybridOutputType")),
+            _boltffi_wire_string(self.model_id),
+            _boltffi_wire_u32(self.latency_ms),
+            _boltffi_wire_i32(_boltffi_enum_value(self.execution_target, XybridExecutionTarget, "XybridExecutionTarget")),
+            self.metrics._boltffi_wire(),
+            _boltffi_wire_sequence(self.tool_calls, len(self.tool_calls), lambda __boltffi_value_0: __boltffi_value_0._boltffi_wire()),
+            _boltffi_wire_optional(self.reasoning_content, lambda __boltffi_value_0: _boltffi_wire_string(__boltffi_value_0)),
+        ))
+
+    @classmethod
+    def _boltffi_from_wire(cls, data: bytes) -> "XybridResult":
+        reader = _BoltFfiWireReader(data)
+        try:
+            value = cls._boltffi_from_reader(reader)
+        except struct.error as error:
+            raise ValueError("truncated BoltFFI wire bytes") from error
+        reader.finish()
+        return value
+
+    @classmethod
+    def _boltffi_from_reader(cls, reader: "_BoltFfiWireReader") -> "XybridResult":
+        envelope = XybridEnvelope._boltffi_from_reader(reader)
+        output_type = XybridOutputType(reader.i32())
+        model_id = reader.string()
+        latency_ms = reader.u32()
+        execution_target = XybridExecutionTarget(reader.i32())
+        metrics = XybridInferenceMetrics._boltffi_from_reader(reader)
+        tool_calls = reader.sequence(lambda: XybridToolCall._boltffi_from_reader(reader))
+        reasoning_content = (
+            reader.optional(lambda: reader.string())
+            if reader.has_remaining()
+            else next(
+                (entry.value for entry in envelope.metadata if entry.key == "reasoning_content"),
+                None,
+            )
+        )
+        return cls(
+            envelope=envelope,
+            output_type=output_type,
+            model_id=model_id,
+            latency_ms=latency_ms,
+            execution_target=execution_target,
+            metrics=metrics,
+            tool_calls=tool_calls,
+            reasoning_content=reasoning_content,
+        )
+
+
+_native._register_xybrid_result(XybridResult)
+
+
+
+@dataclass(frozen=True, slots=True)
+class XybridDownloadStatus:
+    """Download progress, bytes and state in one consistent read.
+
+    `progress` is aggregated across every artifact the model needs (weights
+    plus companions such as a vision projector), never moves backwards, and
+    reaches 1.0 only alongside `Ready`. `totalBytes` is null when the source
+    declares no size — a Hugging Face repo, or a registry entry without one —
+    in which case `downloadedBytes` is still exact and `progress` is coarser.
+
+    Derives `Copy` because it is carried as a stream item.
+    """
+    state: XybridDownloadState
+    progress: float
+    """0.0..=1.0."""
+    downloaded_bytes: int
+    """Bytes written so far, across every artifact."""
+    total_bytes: int | None
+    """Declared total across every artifact, or null when unknown."""
+
+    def _boltffi_wire(self) -> bytes:
+        return b"".join((
+            _boltffi_wire_i32(_boltffi_enum_value(self.state, XybridDownloadState, "XybridDownloadState")),
+            _boltffi_wire_f32(self.progress),
+            _boltffi_wire_u64(self.downloaded_bytes),
+            _boltffi_wire_optional(self.total_bytes, lambda __boltffi_value_0: _boltffi_wire_u64(__boltffi_value_0)),
+        ))
+
+    @classmethod
+    def _boltffi_from_wire(cls, data: bytes) -> "XybridDownloadStatus":
+        reader = _BoltFfiWireReader(data)
+        try:
+            value = cls._boltffi_from_reader(reader)
+        except struct.error as error:
+            raise ValueError("truncated BoltFFI wire bytes") from error
+        reader.finish()
+        return value
+
+    @classmethod
+    def _boltffi_from_reader(cls, reader: "_BoltFfiWireReader") -> "XybridDownloadStatus":
+        return cls(
+            state=XybridDownloadState(reader.i32()),
+            progress=reader.f32(),
+            downloaded_bytes=reader.u64(),
+            total_bytes=reader.optional(lambda: reader.u64()),
+        )
+
+
+_native._register_xybrid_download_status(XybridDownloadStatus)
+
+
+
+@dataclass(frozen=True, slots=True)
+class XybridStreamToken:
+    token: str
+    token_id: int | None
+    index: int
+    cumulative_text: str
+    finish_reason: str | None
+    """`"tool_calls"` when the turn ended on a parseable tool-call block."""
+    tool_calls: list[XybridToolCall]
+    """Tool calls parsed from the completed turn — populated on the
+    **terminal** token only (the one carrying `finish_reason`).
+
+    Tool-call blocks are suppressed from the emitted stream, so there is
+    nothing in the token text to parse: a streaming caller halts here,
+    runs the tools, then continues the turn by streaming a
+    [`tool_results_envelope`] through the same call. Empty on every
+    mid-stream token and on turns that emitted no call.
+    """
+    raw_text: str | None
+    """The completed turn's raw output text, tool-call block included — pass
+    it to [`tool_results_envelope`] as `prior_assistant_text`.
+
+    Present only alongside a non-empty [`Self::tool_calls`]. Not the same
+    as `cumulative_text`, which reports the *emitted* text with the
+    protocol blocks suppressed — which is why this field exists at all.
+    """
+
+    def _boltffi_wire(self) -> bytes:
+        return b"".join((
+            _boltffi_wire_string(self.token),
+            _boltffi_wire_optional(self.token_id, lambda __boltffi_value_0: _boltffi_wire_i64(__boltffi_value_0)),
+            _boltffi_wire_u64(self.index),
+            _boltffi_wire_string(self.cumulative_text),
+            _boltffi_wire_optional(self.finish_reason, lambda __boltffi_value_0: _boltffi_wire_string(__boltffi_value_0)),
+            _boltffi_wire_sequence(self.tool_calls, len(self.tool_calls), lambda __boltffi_value_0: __boltffi_value_0._boltffi_wire()),
+            _boltffi_wire_optional(self.raw_text, lambda __boltffi_value_0: _boltffi_wire_string(__boltffi_value_0)),
+        ))
+
+    @classmethod
+    def _boltffi_from_wire(cls, data: bytes) -> "XybridStreamToken":
+        reader = _BoltFfiWireReader(data)
+        try:
+            value = cls._boltffi_from_reader(reader)
+        except struct.error as error:
+            raise ValueError("truncated BoltFFI wire bytes") from error
+        reader.finish()
+        return value
+
+    @classmethod
+    def _boltffi_from_reader(cls, reader: "_BoltFfiWireReader") -> "XybridStreamToken":
+        return cls(
+            token=reader.string(),
+            token_id=reader.optional(lambda: reader.i64()),
+            index=reader.u64(),
+            cumulative_text=reader.string(),
+            finish_reason=reader.optional(lambda: reader.string()),
+            tool_calls=reader.sequence(lambda: XybridToolCall._boltffi_from_reader(reader)),
+            raw_text=reader.optional(lambda: reader.string()),
+        )
+
+
+_native._register_xybrid_stream_token(XybridStreamToken)
+
+
+
+@dataclass(frozen=True, slots=True)
+class XybridStreamEvent:
+    """One pull from a streaming inference session.
+
+    This is a flat record instead of a data-carrying enum because the pinned
+    C# generator cannot lower that enum shape reliably. `kind` selects the one
+    populated payload: `token` for `Token`, none for `Complete`. A `Complete`
+    event is followed by [`XybridModel::stream_result`] to retrieve the final
+    result. Inference failures are returned as typed [`XybridError`] values by
+    [`XybridModel::stream_next`].
+    """
+    kind: XybridStreamEventKind
+    token: XybridStreamToken | None
+
+    def _boltffi_wire(self) -> bytes:
+        return b"".join((
+            _boltffi_wire_i32(_boltffi_enum_value(self.kind, XybridStreamEventKind, "XybridStreamEventKind")),
+            _boltffi_wire_optional(self.token, lambda __boltffi_value_0: __boltffi_value_0._boltffi_wire()),
+        ))
+
+    @classmethod
+    def _boltffi_from_wire(cls, data: bytes) -> "XybridStreamEvent":
+        reader = _BoltFfiWireReader(data)
+        try:
+            value = cls._boltffi_from_reader(reader)
+        except struct.error as error:
+            raise ValueError("truncated BoltFFI wire bytes") from error
+        reader.finish()
+        return value
+
+    @classmethod
+    def _boltffi_from_reader(cls, reader: "_BoltFfiWireReader") -> "XybridStreamEvent":
+        return cls(
+            kind=XybridStreamEventKind(reader.i32()),
+            token=reader.optional(lambda: XybridStreamToken._boltffi_from_reader(reader)),
+        )
+
+
+_native._register_xybrid_stream_event(XybridStreamEvent)
+
+
+
+@dataclass(frozen=True, slots=True)
+class XybridVoiceInfo:
+    id: str
+    name: str
+    gender: str | None
+    language: str | None
+    style: str | None
+
+    def _boltffi_wire(self) -> bytes:
+        return b"".join((
+            _boltffi_wire_string(self.id),
+            _boltffi_wire_string(self.name),
+            _boltffi_wire_optional(self.gender, lambda __boltffi_value_0: _boltffi_wire_string(__boltffi_value_0)),
+            _boltffi_wire_optional(self.language, lambda __boltffi_value_0: _boltffi_wire_string(__boltffi_value_0)),
+            _boltffi_wire_optional(self.style, lambda __boltffi_value_0: _boltffi_wire_string(__boltffi_value_0)),
+        ))
+
+    @classmethod
+    def _boltffi_from_wire(cls, data: bytes) -> "XybridVoiceInfo":
+        reader = _BoltFfiWireReader(data)
+        try:
+            value = cls._boltffi_from_reader(reader)
+        except struct.error as error:
+            raise ValueError("truncated BoltFFI wire bytes") from error
+        reader.finish()
+        return value
+
+    @classmethod
+    def _boltffi_from_reader(cls, reader: "_BoltFfiWireReader") -> "XybridVoiceInfo":
+        return cls(
+            id=reader.string(),
+            name=reader.string(),
+            gender=reader.optional(lambda: reader.string()),
+            language=reader.optional(lambda: reader.string()),
+            style=reader.optional(lambda: reader.string()),
+        )
+
+
+_native._register_xybrid_voice_info(XybridVoiceInfo)
+
+
+
+
+class XybridDownload:
+    __slots__ = ("_handle",)
+
+
+    def __init__(self) -> None:
+        raise TypeError("XybridDownload cannot be constructed directly")
+
+
+    @classmethod
+    def _from_handle(cls, handle: int) -> "XybridDownload":
+        value = cls.__new__(cls)
+        value._handle = handle
+        return value
+
+    def __del__(self) -> None:
+        handle = getattr(self, "_handle", None)
+        if handle is not None:
+            self._handle = None
+            _native._boltffi_xybrid_download_release(handle)
+
+    @classmethod
+    def from_registry(cls, id: str) -> "XybridDownload":
+        """Start downloading a registry model. Returns immediately."""
+        return XybridDownload._from_handle(_native._boltffi_xybrid_download_from_registry(id))
+
+    @classmethod
+    def from_registry_with_platform(cls, id: str, platform: str) -> "XybridDownload":
+        """Start downloading a registry model resolved for a specific platform."""
+        return XybridDownload._from_handle(_native._boltffi_xybrid_download_from_registry_with_platform(id, platform))
+
+    def status(self) -> XybridDownloadStatus:
+        """Current snapshot. Never blocks — safe from a UI thread or a per-frame
+        render loop.
+        """
+        return _boltffi_read_wire(_native._boltffi_xybrid_download_status(self._handle), lambda reader: XybridDownloadStatus._boltffi_from_reader(reader))
+
+    def is_finished(self) -> bool:
+        """Whether the download reached a terminal state."""
+        return _native._boltffi_xybrid_download_is_finished(self._handle)
+
+    def error(self) -> str | None:
+        """The failure message once the download ended in `Failed` or
+        `Cancelled`; null otherwise. The stream carries the terminal *state*,
+        this carries the reason.
+        """
+        return _boltffi_read_wire(_native._boltffi_xybrid_download_error(self._handle), lambda reader: reader.optional(lambda: reader.string()))
+
+    def cancel(self) -> None:
+        """Ask the download to stop. Takes effect within one chunk read, discards
+        the partial file, and moves the status to `Cancelled`. Idempotent, and
+        a no-op once the download is terminal.
+        """
+        _native._boltffi_xybrid_download_cancel(self._handle)
+
+    def progress(self) -> "XybridDownloadProgressSubscription":
+        """Pushed progress updates, closing once the download is terminal.
+
+        Generated as an `AsyncStream` in Swift, a `Flow` in Kotlin, an
+        `IAsyncEnumerable` in C# and a subscription object in Python.
+        Cancelling the consuming task / scope / token unsubscribes; it does
+        **not** cancel the download itself — call [`Self::cancel`] for that.
+
+        The current snapshot is delivered first, so subscribing late still
+        yields a frame, and a download that already finished closes at once
+        instead of hanging.
+        """
+        return XybridDownloadProgressSubscription._from_handle(_native.progress(self._handle))
+
+
+class XybridDownloadProgressSubscription:
+    __slots__ = ("_handle",)
+
+    def __init__(self) -> None:
+        raise TypeError("XybridDownloadProgressSubscription cannot be constructed directly")
+
+    @classmethod
+    def _from_handle(cls, handle: int) -> "XybridDownloadProgressSubscription":
+        value = cls.__new__(cls)
+        value._handle = handle
+        return value
+
+    def __del__(self) -> None:
+        handle = getattr(self, "_handle", None)
+        if handle is not None:
+            self._handle = None
+            _native.progress_free(handle)
+
+    def pop_batch(self, max_count: int = 16) -> list[XybridDownloadStatus]:
+        data = _native.progress_pop_batch(self._require_handle(), max_count)
+        return _boltffi_read_wire(data, lambda reader: reader.sequence(lambda: XybridDownloadStatus._boltffi_from_reader(reader))) if data else []
+
+    def wait(self, timeout_milliseconds: int) -> int:
+        return _native.progress_wait(self._require_handle(), timeout_milliseconds)
+
+    def unsubscribe(self) -> None:
+        handle = self._require_handle()
+        self._handle = None
+        _native.progress_unsubscribe(handle)
+        _native.progress_free(handle)
+
+    def _require_handle(self) -> int:
+        handle = self._handle
+        if handle is None:
+            raise RuntimeError("stream subscription is closed")
+        return handle
+
+
+
+class XybridCancellationToken:
+    __slots__ = ("_handle",)
+
+
+
+    def __init__(self) -> None:
+        """Create a fresh, un-cancelled token."""
+        self._handle = _native._boltffi_xybrid_cancellation_token_new()
+
+
+
+    @classmethod
+    def _from_handle(cls, handle: int) -> "XybridCancellationToken":
+        value = cls.__new__(cls)
+        value._handle = handle
+        return value
+
+    def __del__(self) -> None:
+        handle = getattr(self, "_handle", None)
+        if handle is not None:
+            self._handle = None
+            _native._boltffi_xybrid_cancellation_token_release(handle)
+
+    def cancel(self) -> None:
+        """Request cancellation. Idempotent, and safe to call from any thread."""
+        _native._boltffi_xybrid_cancellation_token_cancel(self._handle)
+
+    def is_cancelled(self) -> bool:
+        """Whether [`Self::cancel`] has been called on this token."""
+        return _native._boltffi_xybrid_cancellation_token_is_cancelled(self._handle)
 
 
 
@@ -1867,31 +2141,47 @@ class XybridModel:
 
     @classmethod
     def from_registry(cls, id: str) -> "XybridModel":
-        return XybridModel._from_handle(_boltffi_call(_boltffi_read_fe83cddcf3822a1d, lambda: _native._boltffi_xybrid_model_from_registry(id)))
+        """Load from the xybrid registry. Recommended path."""
+        return XybridModel._from_handle(_boltffi_call(_boltffi_read_09404a3c98b3f16c, lambda: _native._boltffi_xybrid_model_from_registry(id)))
 
     @classmethod
     def from_registry_speculative(cls, id: str) -> "XybridModel":
-        return XybridModel._from_handle(_boltffi_call(_boltffi_read_fe83cddcf3822a1d, lambda: _native._boltffi_xybrid_model_from_registry_speculative(id)))
+        """Load from the registry, serving from the cloud gateway while the weights
+        download in the background.
+
+        Returns almost immediately instead of blocking on the download. Requires
+        a resolvable API key and an uncached model; otherwise it behaves exactly
+        like `from_registry`. Poll `download_status` for progress and
+        `is_cloud_serving` to know which leg is answering. LLM/chat models only.
+        """
+        return XybridModel._from_handle(_boltffi_call(_boltffi_read_09404a3c98b3f16c, lambda: _native._boltffi_xybrid_model_from_registry_speculative(id)))
 
     @classmethod
     def from_directory(cls, path: str) -> "XybridModel":
-        return XybridModel._from_handle(_boltffi_call(_boltffi_read_fe83cddcf3822a1d, lambda: _native._boltffi_xybrid_model_from_directory(path)))
+        """Load from a local model directory (must contain `model_metadata.json`)."""
+        return XybridModel._from_handle(_boltffi_call(_boltffi_read_09404a3c98b3f16c, lambda: _native._boltffi_xybrid_model_from_directory(path)))
 
     @classmethod
     def from_bundle(cls, path: str) -> "XybridModel":
-        return XybridModel._from_handle(_boltffi_call(_boltffi_read_fe83cddcf3822a1d, lambda: _native._boltffi_xybrid_model_from_bundle(path)))
+        """Load from a local `.xyb` bundle."""
+        return XybridModel._from_handle(_boltffi_call(_boltffi_read_09404a3c98b3f16c, lambda: _native._boltffi_xybrid_model_from_bundle(path)))
 
     @classmethod
     def from_huggingface(cls, repo: str) -> "XybridModel":
-        return XybridModel._from_handle(_boltffi_call(_boltffi_read_fe83cddcf3822a1d, lambda: _native._boltffi_xybrid_model_from_huggingface(repo)))
+        """Resolve and load from a HuggingFace repo (`org/repo` or `org/repo:variant`)."""
+        return XybridModel._from_handle(_boltffi_call(_boltffi_read_09404a3c98b3f16c, lambda: _native._boltffi_xybrid_model_from_huggingface(repo)))
 
     @classmethod
     def from_huggingface_with_revision(cls, repo: str, revision: str) -> "XybridModel":
-        return XybridModel._from_handle(_boltffi_call(_boltffi_read_fe83cddcf3822a1d, lambda: _native._boltffi_xybrid_model_from_huggingface_with_revision(repo, revision)))
+        """Resolve and load a HuggingFace repository pinned to a revision."""
+        return XybridModel._from_handle(_boltffi_call(_boltffi_read_09404a3c98b3f16c, lambda: _native._boltffi_xybrid_model_from_huggingface_with_revision(repo, revision)))
 
     @classmethod
     def from_model_file(cls, path: str) -> "XybridModel":
-        return XybridModel._from_handle(_boltffi_call(_boltffi_read_fe83cddcf3822a1d, lambda: _native._boltffi_xybrid_model_from_model_file(path)))
+        """Load from a raw GGUF file, auto-generating `model_metadata.json` from the
+        GGUF header (written next to the file if absent).
+        """
+        return XybridModel._from_handle(_boltffi_call(_boltffi_read_09404a3c98b3f16c, lambda: _native._boltffi_xybrid_model_from_model_file(path)))
 
     def model_id(self) -> str:
         return _native._boltffi_xybrid_model_model_id(self._handle)
@@ -1906,27 +2196,47 @@ class XybridModel:
         return _native._boltffi_xybrid_model_is_loaded(self._handle)
 
     def is_cloud_serving(self) -> bool:
+        """Whether runs are currently answered by the cloud because the local
+        weights are not ready yet. `false` for ordinary local models.
+        """
         return _native._boltffi_xybrid_model_is_cloud_serving(self._handle)
 
     def download_status(self) -> XybridDownloadStatus:
+        """Download progress + state in one read — poll this to drive a progress
+        bar. Reports `Ready` at 1.0 for an ordinary local model, so hosts need
+        no special case.
+        """
         return _boltffi_read_wire(_native._boltffi_xybrid_model_download_status(self._handle), lambda reader: XybridDownloadStatus._boltffi_from_reader(reader))
 
     def await_download(self, timeout_ms: int) -> XybridDownloadStatus:
+        """Block until the download finishes or `timeout_ms` elapses, then report
+        the status. Call it off the UI thread (the same place `from_registry` is
+        already called). `timeout_ms = 0` makes it a non-blocking read.
+        """
         return _boltffi_read_wire(_native._boltffi_xybrid_model_await_download(self._handle, timeout_ms), lambda reader: XybridDownloadStatus._boltffi_from_reader(reader))
 
     def supports_streaming(self) -> bool:
         return _native._boltffi_xybrid_model_supports_streaming(self._handle)
 
     def supports_token_streaming(self) -> bool:
+        """Whether this model emits true token-by-token output."""
         return _native._boltffi_xybrid_model_supports_token_streaming(self._handle)
 
     def default_generation_config(self) -> XybridGenerationConfig:
+        """Return the model's resolved generation defaults."""
         return _boltffi_read_wire(_native._boltffi_xybrid_model_default_generation_config(self._handle), lambda reader: XybridGenerationConfig._boltffi_from_reader(reader))
 
     def is_llm(self) -> bool:
         return _native._boltffi_xybrid_model_is_llm(self._handle)
 
     def supports_tool_calling(self) -> bool | None:
+        """Whether the model bundle declares local tool-calling support.
+
+        Advisory tri-state: `null` means the bundle says nothing, so the host
+        cannot tell. Gate tool UI on it; enforcement stays at run time — a
+        tools-bearing request against a model whose chat template has no tool
+        support fails as invalid input regardless of what this reports.
+        """
         return _native._boltffi_xybrid_model_supports_tool_calling(self._handle)
 
     def has_voices(self) -> bool:
@@ -1941,32 +2251,115 @@ class XybridModel:
     def voice(self, voice_id: str) -> XybridVoiceInfo | None:
         return _boltffi_read_wire(_native._boltffi_xybrid_model_voice(self._handle, voice_id), lambda reader: reader.optional(lambda: XybridVoiceInfo._boltffi_from_reader(reader)))
 
-    def run(self, envelope: XybridEnvelope, options: XybridRunOptions | None) -> XybridResult:
-        return _boltffi_read_wire(_boltffi_call(_boltffi_read_fe83cddcf3822a1d, lambda: _native._boltffi_xybrid_model_run(self._handle, envelope._boltffi_wire(), _boltffi_wire_optional(options, lambda __boltffi_value_0: __boltffi_value_0._boltffi_wire()))), lambda reader: XybridResult._boltffi_from_reader(reader))
+    def run(self, envelope: XybridEnvelope, options: XybridRunOptions | None, cancel: XybridCancellationToken) -> XybridResult:
+        """Run inference, optionally with [`XybridRunOptions`] (generation config,
+        abort signals, cloud-fallback). Pass `None` for the model's defaults.
 
-    def run_stream(self, envelope: XybridEnvelope, options: XybridRunOptions | None) -> int:
-        return _boltffi_call(_boltffi_read_fe83cddcf3822a1d, lambda: _native._boltffi_xybrid_model_run_stream(self._handle, envelope._boltffi_wire(), _boltffi_wire_optional(options, lambda __boltffi_value_0: __boltffi_value_0._boltffi_wire())))
+        The hand-written wrappers add a one-arg `run(envelope)` convenience that
+        forwards `None`, so simple call sites stay ergonomic.
+        Pass a [`XybridCancellationToken`] to keep a stop button on the run;
+        `None` means the run cannot be cancelled.
+        """
+        return _boltffi_read_wire(_boltffi_call(_boltffi_read_09404a3c98b3f16c, lambda: _native._boltffi_xybrid_model_run(self._handle, envelope._boltffi_wire(), _boltffi_wire_optional(options, lambda __boltffi_value_0: __boltffi_value_0._boltffi_wire()), cancel._handle)), lambda reader: XybridResult._boltffi_from_reader(reader))
+
+    def run_stream(self, envelope: XybridEnvelope, options: XybridRunOptions | None, cancel: XybridCancellationToken) -> int:
+        """Start token streaming and return a model-scoped session identifier.
+
+        The identifier remains valid until the final result is taken, an error
+        is returned, or [`Self::stream_close`] is called.
+        Pass a [`XybridCancellationToken`] to keep a stop button on the run;
+        `None` means the run cannot be cancelled.
+        """
+        return _boltffi_call(_boltffi_read_09404a3c98b3f16c, lambda: _native._boltffi_xybrid_model_run_stream(self._handle, envelope._boltffi_wire(), _boltffi_wire_optional(options, lambda __boltffi_value_0: __boltffi_value_0._boltffi_wire()), cancel._handle))
 
     def stream_next(self, stream_id: int) -> XybridStreamEvent:
-        return _boltffi_read_wire(_boltffi_call(_boltffi_read_fe83cddcf3822a1d, lambda: _native._boltffi_xybrid_model_stream_next(self._handle, stream_id)), lambda reader: XybridStreamEvent._boltffi_from_reader(reader))
+        """Block until the next item for `stream_id` is ready."""
+        return _boltffi_read_wire(_boltffi_call(_boltffi_read_09404a3c98b3f16c, lambda: _native._boltffi_xybrid_model_stream_next(self._handle, stream_id)), lambda reader: XybridStreamEvent._boltffi_from_reader(reader))
 
     def stream_result(self, stream_id: int) -> XybridResult:
-        return _boltffi_read_wire(_boltffi_call(_boltffi_read_fe83cddcf3822a1d, lambda: _native._boltffi_xybrid_model_stream_result(self._handle, stream_id)), lambda reader: XybridResult._boltffi_from_reader(reader))
+        """Take the final result after receiving a `Complete` event."""
+        return _boltffi_read_wire(_boltffi_call(_boltffi_read_09404a3c98b3f16c, lambda: _native._boltffi_xybrid_model_stream_result(self._handle, stream_id)), lambda reader: XybridResult._boltffi_from_reader(reader))
 
     def stream_close(self, stream_id: int) -> None:
+        """Forget a streaming session."""
         _native._boltffi_xybrid_model_stream_close(self._handle, stream_id)
 
-    def run_with_context(self, envelope: XybridEnvelope, context: XybridConversationContext, options: XybridRunOptions | None) -> XybridResult:
-        return _boltffi_read_wire(_boltffi_call(_boltffi_read_fe83cddcf3822a1d, lambda: _native._boltffi_xybrid_model_run_with_context(self._handle, envelope._boltffi_wire(), context._handle, _boltffi_wire_optional(options, lambda __boltffi_value_0: __boltffi_value_0._boltffi_wire()))), lambda reader: XybridResult._boltffi_from_reader(reader))
+    def run_with_context(self, envelope: XybridEnvelope, context: XybridConversationContext, options: XybridRunOptions | None, cancel: XybridCancellationToken) -> XybridResult:
+        """Run inference seeded with a conversation `context` (multi-turn chat).
 
-    def run_stream_with_context(self, envelope: XybridEnvelope, context: XybridConversationContext, options: XybridRunOptions | None) -> int:
-        return _boltffi_call(_boltffi_read_fe83cddcf3822a1d, lambda: _native._boltffi_xybrid_model_run_stream_with_context(self._handle, envelope._boltffi_wire(), context._handle, _boltffi_wire_optional(options, lambda __boltffi_value_0: __boltffi_value_0._boltffi_wire())))
+        Only the generation config from `options` is applied — abort signals and
+        cloud fallback are not wired on the context path (matches the facade's
+        `run_with_context`).
+        Pass a [`XybridCancellationToken`] to keep a stop button on the run;
+        `None` means the run cannot be cancelled.
+
+        Routes through the facade's options path, so abort signals and cloud
+        fallback on `options` are honoured rather than dropped.
+        """
+        return _boltffi_read_wire(_boltffi_call(_boltffi_read_09404a3c98b3f16c, lambda: _native._boltffi_xybrid_model_run_with_context(self._handle, envelope._boltffi_wire(), context._handle, _boltffi_wire_optional(options, lambda __boltffi_value_0: __boltffi_value_0._boltffi_wire()), cancel._handle)), lambda reader: XybridResult._boltffi_from_reader(reader))
+
+    def run_stream_with_context(self, envelope: XybridEnvelope, context: XybridConversationContext, options: XybridRunOptions | None, cancel: XybridCancellationToken) -> int:
+        """Start context-aware token streaming; returns a model-scoped session id.
+        The pull protocol is identical to [`Self::run_stream`]
+        (`stream_next` / `stream_result` / `stream_close`).
+        Pass a [`XybridCancellationToken`] to keep a stop button on the run;
+        `None` means the run cannot be cancelled.
+        """
+        return _boltffi_call(_boltffi_read_09404a3c98b3f16c, lambda: _native._boltffi_xybrid_model_run_stream_with_context(self._handle, envelope._boltffi_wire(), context._handle, _boltffi_wire_optional(options, lambda __boltffi_value_0: __boltffi_value_0._boltffi_wire()), cancel._handle))
 
     def warmup(self) -> None:
-        _boltffi_call(_boltffi_read_fe83cddcf3822a1d, lambda: _native._boltffi_xybrid_model_warmup(self._handle))
+        _boltffi_call(_boltffi_read_09404a3c98b3f16c, lambda: _native._boltffi_xybrid_model_warmup(self._handle))
 
     def unload(self) -> None:
-        _boltffi_call(_boltffi_read_fe83cddcf3822a1d, lambda: _native._boltffi_xybrid_model_unload(self._handle))
+        _boltffi_call(_boltffi_read_09404a3c98b3f16c, lambda: _native._boltffi_xybrid_model_unload(self._handle))
+
+    def download_progress(self) -> "XybridModelDownloadProgressSubscription":
+        """Pushed download updates for a speculatively-loaded model — the stream
+        counterpart of [`Self::await_download`], and what issue #504 asks for.
+
+        Emits the current snapshot first, then every update, then closes on
+        the terminal state. An ordinary local model is already `Ready`, so its
+        stream yields one frame and ends.
+        """
+        return XybridModelDownloadProgressSubscription._from_handle(_native.download_progress(self._handle))
+
+
+class XybridModelDownloadProgressSubscription:
+    __slots__ = ("_handle",)
+
+    def __init__(self) -> None:
+        raise TypeError("XybridModelDownloadProgressSubscription cannot be constructed directly")
+
+    @classmethod
+    def _from_handle(cls, handle: int) -> "XybridModelDownloadProgressSubscription":
+        value = cls.__new__(cls)
+        value._handle = handle
+        return value
+
+    def __del__(self) -> None:
+        handle = getattr(self, "_handle", None)
+        if handle is not None:
+            self._handle = None
+            _native.download_progress_free(handle)
+
+    def pop_batch(self, max_count: int = 16) -> list[XybridDownloadStatus]:
+        data = _native.download_progress_pop_batch(self._require_handle(), max_count)
+        return _boltffi_read_wire(data, lambda reader: reader.sequence(lambda: XybridDownloadStatus._boltffi_from_reader(reader))) if data else []
+
+    def wait(self, timeout_milliseconds: int) -> int:
+        return _native.download_progress_wait(self._require_handle(), timeout_milliseconds)
+
+    def unsubscribe(self) -> None:
+        handle = self._require_handle()
+        self._handle = None
+        _native.download_progress_unsubscribe(handle)
+        _native.download_progress_free(handle)
+
+    def _require_handle(self) -> int:
+        handle = self._handle
+        if handle is None:
+            raise RuntimeError("stream subscription is closed")
+        return handle
 
 
 
@@ -1976,6 +2369,7 @@ class XybridConversationContext:
 
 
     def __init__(self) -> None:
+        """Create an empty conversation context (fresh id)."""
         self._handle = _native._boltffi_xybrid_conversation_context_new()
 
 
@@ -1994,30 +2388,41 @@ class XybridConversationContext:
 
     @classmethod
     def with_id(cls, id: str) -> "XybridConversationContext":
+        """Create a context with a caller-supplied id (for telemetry correlation
+        across turns).
+        """
         return XybridConversationContext._from_handle(_native._boltffi_xybrid_conversation_context_with_id(id))
 
     def push(self, envelope: XybridEnvelope) -> None:
-        _boltffi_call(_boltffi_read_fe83cddcf3822a1d, lambda: _native._boltffi_xybrid_conversation_context_push(self._handle, envelope._boltffi_wire()))
+        """Append a turn — typically a user or assistant message envelope."""
+        _boltffi_call(_boltffi_read_09404a3c98b3f16c, lambda: _native._boltffi_xybrid_conversation_context_push(self._handle, envelope._boltffi_wire()))
 
     def set_system(self, envelope: XybridEnvelope) -> None:
-        _boltffi_call(_boltffi_read_fe83cddcf3822a1d, lambda: _native._boltffi_xybrid_conversation_context_set_system(self._handle, envelope._boltffi_wire()))
+        """Set the persistent system-prompt envelope (survives [`clear`](Self::clear))."""
+        _boltffi_call(_boltffi_read_09404a3c98b3f16c, lambda: _native._boltffi_xybrid_conversation_context_set_system(self._handle, envelope._boltffi_wire()))
 
     def clear(self) -> None:
+        """Drop the history; the system envelope (if any) is preserved."""
         _native._boltffi_xybrid_conversation_context_clear(self._handle)
 
     def id(self) -> str:
+        """The context id."""
         return _native._boltffi_xybrid_conversation_context_id(self._handle)
 
     def history_len(self) -> int:
+        """Number of history turns (excludes the system envelope)."""
         return _native._boltffi_xybrid_conversation_context_history_len(self._handle)
 
     def history(self) -> list[XybridEnvelope]:
+        """Return history turns, excluding the persistent system envelope."""
         return _boltffi_read_wire(_native._boltffi_xybrid_conversation_context_history(self._handle), lambda reader: reader.sequence(lambda: XybridEnvelope._boltffi_from_reader(reader)))
 
     def has_system(self) -> bool:
+        """Whether a persistent system-prompt envelope is set."""
         return _native._boltffi_xybrid_conversation_context_has_system(self._handle)
 
     def set_max_history_len(self, len: int) -> None:
+        """Set the max history length before FIFO pruning."""
         _native._boltffi_xybrid_conversation_context_set_max_history_len(self._handle, len)
 
 
@@ -2028,6 +2433,7 @@ class XybridTelemetryConfig:
 
 
     def __init__(self, api_key: str) -> None:
+        """A new config bound to the default ingest endpoint and the given API key."""
         self._handle = _native._boltffi_xybrid_telemetry_config_new(api_key)
 
 
@@ -2045,25 +2451,43 @@ class XybridTelemetryConfig:
             _native._boltffi_xybrid_telemetry_config_release(handle)
 
     def set_endpoint(self, endpoint: str) -> None:
+        """Override the ingest endpoint (self-hosted collector / non-prod)."""
         _native._boltffi_xybrid_telemetry_config_set_endpoint(self._handle, endpoint)
 
     def set_app_version(self, version: str) -> None:
+        """Set the app version reported with every event."""
         _native._boltffi_xybrid_telemetry_config_set_app_version(self._handle, version)
 
     def set_device_label(self, label: str) -> None:
+        """Set the human-friendly device label reported with every event."""
         _native._boltffi_xybrid_telemetry_config_set_device_label(self._handle, label)
 
     def set_device_attribute(self, key: str, value: str) -> None:
+        """Attach an app-provided device attribute (stored under `device.custom`)."""
         _native._boltffi_xybrid_telemetry_config_set_device_attribute(self._handle, key, value)
 
     def set_batch_size(self, batch_size: int) -> None:
+        """Set the number of events buffered before a flush."""
         _native._boltffi_xybrid_telemetry_config_set_batch_size(self._handle, batch_size)
 
     def set_flush_interval_secs(self, secs: int) -> None:
+        """Set the background flush interval, in seconds."""
         _native._boltffi_xybrid_telemetry_config_set_flush_interval_secs(self._handle, secs)
 
     def init(self) -> None:
-        _boltffi_call(_boltffi_read_fe83cddcf3822a1d, lambda: _native._boltffi_xybrid_telemetry_config_init(self._handle))
+        """Start the process-global telemetry exporter from this config.
+
+        Consumes the config: subsequent setters no-op and a second `init` on the
+        same handle errors. Modeled as a method (not a free `telemetry_init`)
+        because boltffi 0.25.3 drops free functions that take a handle
+        parameter, but lowers a handle self-method fine (same reason the
+        generated `run` lives on `XybridModel`).
+
+        # Errors
+        Errors if this config was already consumed, or if telemetry is already
+        initialized without an intervening [`telemetry_shutdown`].
+        """
+        _boltffi_call(_boltffi_read_09404a3c98b3f16c, lambda: _native._boltffi_xybrid_telemetry_config_init(self._handle))
 
 
 
@@ -2089,37 +2513,50 @@ class XybridBundle:
 
     @classmethod
     def open(cls, path: str) -> "XybridBundle":
-        return XybridBundle._from_handle(_boltffi_call(_boltffi_read_fe83cddcf3822a1d, lambda: _native._boltffi_xybrid_bundle_open(path)))
+        """Open and parse a `.xyb` bundle (decompress zstd, parse tar, validate the
+        manifest).
+        """
+        return XybridBundle._from_handle(_boltffi_call(_boltffi_read_09404a3c98b3f16c, lambda: _native._boltffi_xybrid_bundle_open(path)))
 
     def model_id(self) -> str:
+        """The model identifier from the manifest."""
         return _native._boltffi_xybrid_bundle_model_id(self._handle)
 
     def version(self) -> str:
+        """The version string from the manifest."""
         return _native._boltffi_xybrid_bundle_version(self._handle)
 
     def target(self) -> str:
+        """The target platform from the manifest."""
         return _native._boltffi_xybrid_bundle_target(self._handle)
 
     def hash(self) -> str:
+        """The SHA-256 hash from the manifest."""
         return _native._boltffi_xybrid_bundle_hash(self._handle)
 
     def has_metadata(self) -> bool:
+        """Whether the bundle carries a `model_metadata.json`."""
         return _native._boltffi_xybrid_bundle_has_metadata(self._handle)
 
     def file_count(self) -> int:
+        """Number of files in the bundle (excludes `manifest.json`)."""
         return _native._boltffi_xybrid_bundle_file_count(self._handle)
 
     def file_name(self, index: int) -> str | None:
+        """The file name at `index`, or `None` if out of bounds."""
         return _boltffi_read_wire(_native._boltffi_xybrid_bundle_file_name(self._handle, index), lambda reader: reader.optional(lambda: reader.string()))
 
     def manifest_json(self) -> str:
-        return _boltffi_call(_boltffi_read_fe83cddcf3822a1d, lambda: _native._boltffi_xybrid_bundle_manifest_json(self._handle))
+        """The full bundle manifest serialized as JSON."""
+        return _boltffi_call(_boltffi_read_09404a3c98b3f16c, lambda: _native._boltffi_xybrid_bundle_manifest_json(self._handle))
 
     def metadata_json(self) -> str | None:
-        return _boltffi_read_wire(_boltffi_call(_boltffi_read_fe83cddcf3822a1d, lambda: _native._boltffi_xybrid_bundle_metadata_json(self._handle)), lambda reader: reader.optional(lambda: reader.string()))
+        """The `model_metadata.json` contents, or `None` if the bundle has none."""
+        return _boltffi_read_wire(_boltffi_call(_boltffi_read_09404a3c98b3f16c, lambda: _native._boltffi_xybrid_bundle_metadata_json(self._handle)), lambda reader: reader.optional(lambda: reader.string()))
 
     def extract(self, output_dir: str) -> None:
-        _boltffi_call(_boltffi_read_fe83cddcf3822a1d, lambda: _native._boltffi_xybrid_bundle_extract(self._handle, output_dir))
+        """Extract every bundle file to `output_dir` (created if absent)."""
+        _boltffi_call(_boltffi_read_09404a3c98b3f16c, lambda: _native._boltffi_xybrid_bundle_extract(self._handle, output_dir))
 
 
 
@@ -2127,9 +2564,25 @@ class XybridBundle:
 
 
 def tool_results_envelope(user_text: str, prior_assistant_text: str, results: Sequence[XybridToolResult]) -> XybridEnvelope:
-    return _boltffi_read_wire(_boltffi_call(_boltffi_read_fe83cddcf3822a1d, lambda: _native.tool_results_envelope(user_text, prior_assistant_text, results)), lambda reader: XybridEnvelope._boltffi_from_reader(reader))
+    """Build the continuation envelope for the turn after the model asked for
+    tools.
+
+    One `run` is one model turn, so the loop lives in your code: run a
+    tools-bearing request, execute every [`XybridToolCall`] it returns, then
+    run this envelope to feed the outcomes back. Pass the same tools on the
+    continuation's [`XybridGenerationConfig`] as on the original turn.
+
+    A free function rather than a constructor because `XybridEnvelope` is a
+    `#[data]` record, not a handle type — records carry no methods across the
+    generated bindings.
+    """
+    return _boltffi_read_wire(_boltffi_call(_boltffi_read_09404a3c98b3f16c, lambda: _native.tool_results_envelope(user_text, prior_assistant_text, results)), lambda reader: XybridEnvelope._boltffi_from_reader(reader))
 def json_schema_to_gbnf(schema_json: str) -> str:
-    return _boltffi_call(_boltffi_read_fe83cddcf3822a1d, lambda: _native.json_schema_to_gbnf(schema_json))
+    """Convert a JSON Schema (as a JSON string) into a GBNF grammar for
+    [`XybridGenerationConfig::grammar`]. Fails on invalid JSON or schema
+    constructs outside the supported subset.
+    """
+    return _boltffi_call(_boltffi_read_09404a3c98b3f16c, lambda: _native.json_schema_to_gbnf(schema_json))
 def set_thermal_state(state: XybridThermalState) -> None:
     _native.set_thermal_state(state)
 def clear_thermal_state() -> None:
@@ -2139,6 +2592,12 @@ def set_battery_level(percent: int) -> None:
 def clear_battery_level() -> None:
     _native.clear_battery_level()
 def configure_runtime(api_key: str | None, gateway_url: str | None, ingest_url: str | None) -> None:
+    """One-stop SDK initialization: API key + gateway/ingest URL overrides in
+    one call. Delegates to [`facade::configure_runtime`]; blank strings are
+    treated as absent. This is the canonical init the Swift
+    `Xybrid.initialize(apiKey:gatewayUrl:ingestUrl:)` and Kotlin
+    `Xybrid.init(context, apiKey, gatewayUrl, ingestUrl)` wrappers call.
+    """
     _native.configure_runtime(_boltffi_wire_optional(api_key, lambda __boltffi_value_0: _boltffi_wire_string(__boltffi_value_0)), _boltffi_wire_optional(gateway_url, lambda __boltffi_value_0: _boltffi_wire_string(__boltffi_value_0)), _boltffi_wire_optional(ingest_url, lambda __boltffi_value_0: _boltffi_wire_string(__boltffi_value_0)))
 def init_sdk_cache_dir(cache_dir: str) -> None:
     _native.init_sdk_cache_dir(cache_dir)
@@ -2149,33 +2608,68 @@ def set_api_key(api_key: str) -> None:
 def set_provider_api_key(provider: str, api_key: str) -> None:
     _native.set_provider_api_key(provider, api_key)
 def set_platform_url(url: str) -> None:
+    """Point the cloud gateway at a platform base URL (staging, self-hosted).
+    Pass a bare base URL — the `/v1` suffix is applied internally.
+    """
     _native.set_platform_url(url)
 def set_speculative_cloud(enabled: bool) -> None:
+    """Enable speculative cloud fallback globally: a registry model that isn't
+    downloaded yet is served from the gateway while the weights download.
+
+    LLM/chat only — prefer `XybridModel.fromRegistrySpeculative` when the app
+    also loads ASR/TTS models, which cannot be served this way.
+    """
     _native.set_speculative_cloud(enabled)
 def has_api_key() -> bool:
+    """Whether a Xybrid gateway API key is resolvable (in-memory or env)."""
     return _native.has_api_key()
 def is_speculative_cloud_enabled() -> bool:
+    """Whether the global speculative-cloud default is on."""
     return _native.is_speculative_cloud_enabled()
 def will_speculate_for_model(model_id: str) -> bool:
+    """Whether `XybridModel::from_registry_speculative(model_id)` would actually
+    speculate: an API key resolves and the model is not already cached.
+
+    Lets the hand-written Swift/Kotlin loader facades answer "will this
+    speculate?" before loading. Never touches the network.
+    """
     return _native.will_speculate_for_model(model_id)
 def version() -> str:
+    """The SDK version string (tracks `CARGO_PKG_VERSION`)."""
     return _native.version()
 def release_memory() -> int:
+    """Release every idle loaded model's memory; returns how many were released.
+
+    Call this from the platform's low-memory hook (`didReceiveMemoryWarning`
+    on iOS, `onTrimMemory` on Android). Models with a run in flight are
+    skipped, and a released model reloads itself on next use — no reload call,
+    no new error to handle.
+    """
     return _native.release_memory()
 def set_auto_release(enabled: bool) -> None:
+    """Enable or disable automatic model release for subsequent loads.
+
+    When enabled, loading a model under device memory pressure first releases
+    least-recently-used idle models. Off by default; [`release_memory`] works
+    either way.
+    """
     _native.set_auto_release(enabled)
 def is_auto_release_enabled() -> bool:
+    """Whether automatic model release is enabled process-wide."""
     return _native.is_auto_release_enabled()
 def telemetry_default_endpoint() -> str:
+    """The SDK's default telemetry ingest endpoint (for display alongside a config)."""
     return _native.telemetry_default_endpoint()
 def telemetry_flush() -> None:
+    """Flush pending telemetry events. Safe before init / after shutdown."""
     _native.telemetry_flush()
 def telemetry_shutdown() -> None:
+    """Shut down the telemetry exporter. Idempotent."""
     _native.telemetry_shutdown()
 
 MODULE_NAME = "xybrid_bolt"
 PACKAGE_NAME = "xybrid_bolt"
-PACKAGE_VERSION = "0.7.0"
+PACKAGE_VERSION = "0.9.0"
 
 __all__ = [
     "MODULE_NAME",
@@ -2219,6 +2713,7 @@ __all__ = [
     "XybridErrorUnsupportedModelCapability",
     "XybridErrorUnsupportedBackendCapability",
     "XybridErrorInvalidImage",
+    "XybridErrorCancelled",
     "XybridEnvelopeKind",
     "XybridEnvelopeKindText",
     "XybridEnvelopeKindAudio",
@@ -2233,7 +2728,11 @@ __all__ = [
     "XybridDownloadState",
     "XybridStreamEventKind",
     "XybridThermalState",
+    "XybridDownload",
+    "XybridDownloadProgressSubscription",
+    "XybridCancellationToken",
     "XybridModel",
+    "XybridModelDownloadProgressSubscription",
     "XybridConversationContext",
     "XybridTelemetryConfig",
     "XybridBundle",

@@ -22,6 +22,7 @@ namespace Xybrid
             Directory,
             HuggingFace,
             ModelFile,
+            RegistrySpeculative,
         }
 
         private readonly Source _source;
@@ -112,6 +113,87 @@ namespace Xybrid
         }
 
         /// <summary>
+        /// Creates a loader that serves from the cloud gateway while the model's
+        /// weights download in the background, instead of blocking on the download.
+        /// </summary>
+        /// <remarks>
+        /// Opts this load into speculation explicitly, so it does not depend on
+        /// <see cref="XybridClient.SetSpeculativeCloud"/>. It still requires a
+        /// resolvable API key and a model that is not already cached; otherwise it
+        /// behaves exactly like <see cref="FromRegistry"/>.
+        /// <see cref="WillSpeculate"/> reports which of the two you will get.
+        /// LLM/chat models only.
+        /// </remarks>
+        /// <param name="modelId">The model ID.</param>
+        /// <exception cref="ArgumentNullException">Thrown if modelId is null.</exception>
+        public static ModelLoader FromRegistrySpeculative(string modelId)
+        {
+            if (modelId == null)
+            {
+                throw new ArgumentNullException(nameof(modelId));
+            }
+            return new ModelLoader(Source.RegistrySpeculative, modelId);
+        }
+
+        /// <summary>
+        /// Gets whether <see cref="Load"/> will actually speculate: speculation is
+        /// in effect for this loader, an API key resolves, and the model is not
+        /// already cached.
+        /// </summary>
+        /// <remarks>
+        /// Always false for every source but
+        /// <see cref="FromRegistrySpeculative"/>, which turns speculation on for
+        /// itself regardless of <see cref="XybridClient.SetSpeculativeCloud"/>.
+        /// Reads the local cache to answer; never hits the network.
+        /// </remarks>
+        public bool WillSpeculate =>
+            _source == Source.RegistrySpeculative &&
+            XybridBolt.XybridBolt.WillSpeculateForModel(_value);
+
+        /// <summary>
+        /// Starts downloading the model's weights in the background, without
+        /// loading them.
+        /// </summary>
+        /// <remarks>
+        /// This is how you drive a progress bar: <see cref="Load"/> blocks, so
+        /// there is no object to poll while it runs — this is that object. The
+        /// download fills the SDK cache, so the <see cref="Load"/> afterwards
+        /// returns immediately.
+        /// <code>
+        /// using var download = ModelLoader.FromRegistry("qwen3-0.6b").StartDownload();
+        /// while (!download.IsFinished())
+        /// {
+        ///     var status = download.Status();
+        ///     slider.value = status.Progress;
+        ///     yield return null;
+        /// }
+        /// </code>
+        /// <see cref="XybridBolt.XybridDownload.Status"/> never blocks, so it is
+        /// safe to read once per frame from a coroutine; await
+        /// <c>download.Progress(token)</c> for pushed updates instead. Cancelling
+        /// that token only unsubscribes — call
+        /// <see cref="XybridBolt.XybridDownload.Cancel"/> to stop the transfer.
+        /// </remarks>
+        /// <returns>
+        /// A download handle, or <c>null</c> for a source with nothing to fetch
+        /// (a local bundle, directory, model file, or Hugging Face repo).
+        /// </returns>
+        /// <exception cref="ObjectDisposedException">Thrown if this loader is disposed.</exception>
+        public XybridBolt.XybridDownload StartDownload()
+        {
+            ThrowIfDisposed();
+
+            switch (_source)
+            {
+                case Source.Registry:
+                case Source.RegistrySpeculative:
+                    return XybridBolt.XybridDownload.FromRegistry(_value);
+                default:
+                    return null;
+            }
+        }
+
+        /// <summary>
         /// Loads the model and prepares it for inference.
         /// </summary>
         /// <returns>A loaded <see cref="Model"/> ready for inference.</returns>
@@ -141,6 +223,9 @@ namespace Xybrid
                         break;
                     case Source.ModelFile:
                         bolt = XybridBolt.XybridModel.FromModelFile(_value);
+                        break;
+                    case Source.RegistrySpeculative:
+                        bolt = XybridBolt.XybridModel.FromRegistrySpeculative(_value);
                         break;
                     default:
                         throw new InvalidOperationException("Unknown model source.");

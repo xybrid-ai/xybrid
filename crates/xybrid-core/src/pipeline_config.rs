@@ -275,6 +275,32 @@ pub struct StageObjectConfig {
     pub options: HashMap<String, serde_json::Value>,
 }
 
+/// Cloud-leg transports the `backend` key can name (read by the cloud adapter).
+const CLOUD_TRANSPORT_BACKENDS: [&str; 2] = ["gateway", "direct"];
+
+impl StageObjectConfig {
+    /// Move a cloud transport `backend` into the stage options.
+    ///
+    /// The `backend` key is shared YAML vocabulary: `gateway` / `direct` pick
+    /// the cloud leg's transport, which the cloud adapter reads from the stage
+    /// options, while `auto` / `mlx` / `llamacpp` / `mistral` pick the local
+    /// backend. The two sets do not overlap, so a transport value is routed to
+    /// the options instead of failing local backend parsing.
+    fn route_cloud_transport_backend(&mut self) {
+        let is_cloud_transport = self.backend.as_deref().is_some_and(|backend| {
+            let backend = backend.trim().to_ascii_lowercase();
+            CLOUD_TRANSPORT_BACKENDS.contains(&backend.as_str())
+        });
+        if !is_cloud_transport {
+            return;
+        }
+        if let Some(backend) = self.backend.take() {
+            self.options
+                .insert("backend".to_string(), serde_json::Value::String(backend));
+        }
+    }
+}
+
 // ============================================================================
 // Custom Deserializers
 // ============================================================================
@@ -295,8 +321,9 @@ where
                 stages.push(StageConfig::Simple(s));
             }
             serde_json::Value::Object(_) => {
-                let config: StageObjectConfig = serde_json::from_value(item)
+                let mut config: StageObjectConfig = serde_json::from_value(item)
                     .map_err(|e| D::Error::custom(format!("Invalid stage {}: {}", i, e)))?;
+                config.route_cloud_transport_backend();
                 stages.push(StageConfig::Object(config));
             }
             _ => {
@@ -483,6 +510,44 @@ stages:
 "#;
         let config = PipelineConfig::from_yaml(yaml).unwrap();
         assert_eq!(config.stages[0].backend(), Some("mlx"));
+    }
+
+    #[test]
+    fn test_cloud_transport_backend_routes_to_options() {
+        let yaml = r#"
+stages:
+  - id: llm
+    model: functiongemma-270m-it
+    target: auto
+    provider: deepseek
+    backend: direct
+  - model: gpt-4o-mini
+    provider: openai
+    backend: Gateway
+"#;
+        let config = PipelineConfig::from_yaml(yaml).unwrap();
+        assert_eq!(config.stages[0].backend(), None);
+        assert_eq!(
+            config.stages[0].options().get("backend"),
+            Some(&serde_json::json!("direct"))
+        );
+        assert_eq!(config.stages[1].backend(), None);
+        assert_eq!(
+            config.stages[1].options().get("backend"),
+            Some(&serde_json::json!("Gateway"))
+        );
+    }
+
+    #[test]
+    fn test_local_backend_stays_out_of_options() {
+        let yaml = r#"
+stages:
+  - model: qwen3.5-3b
+    backend: llamacpp
+"#;
+        let config = PipelineConfig::from_yaml(yaml).unwrap();
+        assert_eq!(config.stages[0].backend(), Some("llamacpp"));
+        assert!(!config.stages[0].options().contains_key("backend"));
     }
 
     #[test]

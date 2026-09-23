@@ -111,11 +111,11 @@ cp -r /tmp/aar/jni/* bindings/kotlin/libs/
 ```
 
 The NDK is a pinned Bazel download — no machine setup. Each
-`libxybrid-bolt.so` is a clean one-link output (16 KB-aligned,
+`libxybrid_bolt.so` is a clean one-link output (16 KB-aligned,
 `libc++_shared` in DT_NEEDED, no patchelf) with the ORT runtime bundled.
 
 **Output:**
-- `bindings/kotlin/libs/<abi>/libxybrid-bolt.so` (native library; 16 KB-aligned,
+- `bindings/kotlin/libs/<abi>/libxybrid_bolt.so` (native library; 16 KB-aligned,
   `libc++_shared` linked in — a clean linker output that survives a consumer's
   AGP strip, no patchelf)
 - `bindings/kotlin/libs/<abi>/{libonnxruntime.so,libc++_shared.so}` (bundled runtime)

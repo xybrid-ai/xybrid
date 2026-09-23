@@ -27,6 +27,7 @@ from . import _bolt
 __all__ = [
     "AbortedForCloudFallback",
     "CacheError",
+    "Cancelled",
     "CircuitOpen",
     "ConfigError",
     "DirectoryNotFound",
@@ -269,6 +270,13 @@ class InvalidImage(XybridError):
 
     __slots__ = ()
     _payload = _bolt.XybridErrorInvalidImage
+
+
+class Cancelled(XybridError):
+    """The caller stopped the operation -- today, a model download."""
+
+    __slots__ = ()
+    _payload = _bolt.XybridErrorCancelled
 
 
 def payload_variants() -> list[type[Any]]:

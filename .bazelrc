@@ -115,6 +115,25 @@ build:ios-sim --compilation_mode=opt
 build:ios-sim --ios_minimum_os=16.0
 build:ios-sim --action_env=IPHONEOS_DEPLOYMENT_TARGET=16.0
 
+# Fat LTO across the Rust graph, for the binding archives we ship: the archive
+# then carries only code reachable from its exported FFI symbols. A staticlib
+# built without it is the union of every object of every crate. Opt-in by
+# config on purpose: the setting changes every Rust compile action, so it must
+# not leak into the CLI lane's cache keys. The rest of each archive is the
+# bundled ONNX Runtime, which Rust LTO cannot touch. Fallback if a macos-14
+# runner runs out of memory on the iOS slices: lto=thin.
+build:rust-lto --@rules_rust//rust/settings:lto=fat
+
+# Users of the config, with what it measured:
+# - Apple XCFramework (//bindings/apple:XybridFFI, release-prep.yml and
+#   build-apple.yml pass --config=rust-lto directly): zip 99.9 MB -> 63.6 MB;
+#   device slice 176 MB -> 117 MB, simulator slice 171 MB -> 111 MB.
+# - Flutter precompile lane (release-prep.yml's precompile-flutter-* jobs),
+#   through the alias below: darwin staticlib 175 MB -> 112 MB (macOS) and
+#   181 MB -> 119 MB (iOS); Rust objects 79 MB -> 25 MB; thin measured 131 MB
+#   on macOS.
+build:flutter-precompile --config=rust-lto
+
 # On Linux hosts, rules_rs' experimental toolchains need an explicit host platform
 # with libc constraints (//:host_linux_gnu, root BUILD.bazel). The enable flag
 # makes `common:linux` auto-apply on Linux hosts (no-op on macOS: no macos config).

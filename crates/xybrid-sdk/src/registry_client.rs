@@ -28,14 +28,15 @@
 //! println!("Download URL: {}", resolved.download_url);
 //!
 //! // Fetch and cache the bundle
-//! let bundle_path = client.fetch("kokoro-82m", None, |progress| {
-//!     println!("Downloaded: {:.1}%", progress * 100.0);
+//! let bundle_path = client.fetch("kokoro-82m", None, |status| {
+//!     println!("Downloaded: {:.1}%", status.progress * 100.0);
 //! })?;
 //! # Ok(())
 //! # }
 //! ```
 
 use crate::cache::CacheManager;
+use crate::download::{DownloadStatus, ProgressReporter};
 use crate::model::SdkError;
 use crate::platform::current_platform;
 use crate::source::detect_platform;
@@ -49,12 +50,16 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs::File;
 use std::io::{BufReader, Read, Write};
 use std::path::{Component, Path, PathBuf};
+use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use xybrid_core::http::{CircuitBreaker, CircuitConfig, RetryPolicy};
 use xybrid_core::runtime_adapter::{
     select_with_cfg, BackendChoice, RegistryView, SelectionParams, SelectorCfg,
 };
+
+/// How often a retry backoff wakes to check for cancellation.
+const CANCEL_POLL_INTERVAL: Duration = Duration::from_millis(100);
 
 pub const DEFAULT_REGISTRY_URL: &str = "https://registry.xybrid.dev";
 pub const FALLBACK_REGISTRY_URL: &str = "https://r2.xybrid.dev";
@@ -108,6 +113,35 @@ fn build_client_header_with_optout(binding: &str, opted_out: bool) -> Option<Str
         current_platform(),
         backends,
     ))
+}
+
+/// Sum of every byte the registry says a resolved variant needs — the main
+/// file plus each companion artifact (a VLM projector, a draft model, …).
+///
+/// This is what lets one progress bar span a multi-file model: the total is
+/// known before the first request, so finishing file 1 of 2 reads 50% instead
+/// of restarting the bar. Entries with no declared size contribute `0`, and a
+/// total of `0` is treated as "unknown" by [`ProgressReporter`].
+fn total_declared_bytes(resolved: &ResolvedVariant) -> u64 {
+    // One undeclared size poisons the whole aggregate: the missing artifact's
+    // bytes would push the running count past the "total", pin progress at the
+    // in-flight ceiling for the rest of the download, and let the terminal
+    // frame report fewer bytes than the bar already showed. Reporting the
+    // total as unknown instead downgrades progress to the coarse signal and
+    // keeps the byte count exact, which is the honest trade.
+    if resolved.size_bytes == 0
+        || resolved
+            .artifacts
+            .iter()
+            .any(|artifact| artifact.size_bytes == 0)
+    {
+        return 0;
+    }
+    resolved
+        .artifacts
+        .iter()
+        .map(|artifact| artifact.size_bytes)
+        .fold(resolved.size_bytes, u64::saturating_add)
 }
 
 /// Classify a download URL into the canonical telemetry `source` label
@@ -1064,7 +1098,9 @@ impl RegistryClient {
     ///
     /// * `mask` - Model mask (e.g., "kokoro-82m")
     /// * `platform` - Target platform (None for auto-detect)
-    /// * `progress_callback` - Optional callback for download progress (0.0 to 1.0)
+    /// * `progress_callback` - Receives a [`DownloadStatus`] (state, fraction,
+    ///   bytes) roughly ten times a second while the transfer runs, then once
+    ///   more with [`DownloadState::Ready`](crate::DownloadState::Ready).
     pub fn fetch<F>(
         &self,
         mask: &str,
@@ -1072,10 +1108,32 @@ impl RegistryClient {
         progress_callback: F,
     ) -> Result<PathBuf, SdkError>
     where
-        F: Fn(f32),
+        F: Fn(DownloadStatus),
+    {
+        self.fetch_cancellable(
+            mask,
+            platform,
+            Arc::new(AtomicBool::new(false)),
+            progress_callback,
+        )
+    }
+
+    /// [`Self::fetch`] with a caller-owned cancellation flag.
+    ///
+    /// Setting the flag stops the transfer within one chunk read and discards
+    /// the partial file; the call returns [`SdkError::Cancelled`].
+    pub fn fetch_cancellable<F>(
+        &self,
+        mask: &str,
+        platform: Option<&str>,
+        cancel: Arc<AtomicBool>,
+        progress_callback: F,
+    ) -> Result<PathBuf, SdkError>
+    where
+        F: Fn(DownloadStatus),
     {
         let resolved = self.resolve(mask, platform)?;
-        self.fetch_resolved(mask, &resolved, progress_callback)
+        self.fetch_resolved(mask, &resolved, cancel, &progress_callback)
     }
 
     /// Fetch a model bundle with an explicit registry format preference.
@@ -1087,21 +1145,53 @@ impl RegistryClient {
         progress_callback: F,
     ) -> Result<PathBuf, SdkError>
     where
-        F: Fn(f32),
+        F: Fn(DownloadStatus),
     {
         let resolved = self.resolve_with_format(mask, platform, format)?;
-        self.fetch_resolved(mask, &resolved, progress_callback)
+        self.fetch_resolved(
+            mask,
+            &resolved,
+            Arc::new(AtomicBool::new(false)),
+            &progress_callback,
+        )
     }
 
-    fn fetch_resolved<F>(
+    /// Download (or reuse the cached) `.xyb` bundle for an already-resolved
+    /// variant, driving one progress bar through to the terminal `Ready` frame.
+    fn fetch_resolved(
         &self,
         mask: &str,
         resolved: &ResolvedVariant,
-        progress_callback: F,
-    ) -> Result<PathBuf, SdkError>
-    where
-        F: Fn(f32),
-    {
+        cancel: Arc<AtomicBool>,
+        progress_callback: &dyn Fn(DownloadStatus),
+    ) -> Result<PathBuf, SdkError> {
+        let reporter = ProgressReporter::new(
+            Some(total_declared_bytes(resolved)),
+            1 + resolved.artifacts.len(),
+            cancel,
+            progress_callback,
+        );
+        let path = self.fetch_bundle(mask, resolved, &reporter)?;
+        // Hash verification and extraction run after the last byte, with no
+        // chunk loop to check the flag — so re-check here rather than
+        // announcing `Ready` for a download the caller already stopped. The
+        // bytes stay cached: they are complete and verified, so discarding
+        // them would only cost the next attempt.
+        if reporter.is_cancelled() {
+            return Err(ProgressReporter::cancelled_error());
+        }
+        reporter.finish();
+        Ok(path)
+    }
+
+    /// Download (or reuse the cached) `.xyb` bundle for an already-resolved
+    /// variant, reporting into `reporter`.
+    fn fetch_bundle(
+        &self,
+        mask: &str,
+        resolved: &ResolvedVariant,
+        reporter: &ProgressReporter<'_>,
+    ) -> Result<PathBuf, SdkError> {
         let cache_path = self.get_cache_path(resolved);
 
         debug!(
@@ -1170,12 +1260,7 @@ impl RegistryClient {
         // them would smear the network signal that operators actually
         // care about for the cost dashboard.
         let download_started = Instant::now();
-        self.download_with_progress(
-            &resolved.download_url,
-            &cache_path,
-            resolved.size_bytes,
-            progress_callback,
-        )?;
+        self.download_with_progress(&resolved.download_url, &cache_path, reporter)?;
         let download_duration = download_started.elapsed();
 
         // Emit a ModelDownload telemetry event for cost accounting. Use
@@ -1186,6 +1271,7 @@ impl RegistryClient {
         let bytes_downloaded = std::fs::metadata(&cache_path)
             .map(|m| m.len())
             .unwrap_or(resolved.size_bytes);
+        reporter.finish_file(bytes_downloaded);
         crate::telemetry::publish_model_download(
             mask,
             bytes_downloaded,
@@ -1236,7 +1322,11 @@ impl RegistryClient {
     ///
     /// * `mask` - Model mask (e.g., "kokoro-82m")
     /// * `platform` - Target platform (None for auto-detect)
-    /// * `progress_callback` - Optional callback for download progress (0.0 to 1.0)
+    /// * `progress_callback` - Receives a [`DownloadStatus`] (state, fraction,
+    ///   bytes) roughly ten times a second while the transfer runs, then once
+    ///   more with [`DownloadState::Ready`](crate::DownloadState::Ready). The
+    ///   fraction is aggregated across *every* artifact the model needs, so a
+    ///   multi-file model drives one bar rather than restarting per file.
     ///
     /// # Returns
     ///
@@ -1248,8 +1338,13 @@ impl RegistryClient {
     /// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
     /// # use xybrid_sdk::RegistryClient;
     /// let client = RegistryClient::default_client()?;
-    /// let model_dir = client.fetch_extracted("kokoro-82m", None, |p| {
-    ///     println!("Downloaded: {:.1}%", p * 100.0);
+    /// let model_dir = client.fetch_extracted("kokoro-82m", None, |status| {
+    ///     println!(
+    ///         "{} / {:?} bytes ({:.1}%)",
+    ///         status.downloaded_bytes,
+    ///         status.total_bytes,
+    ///         status.progress * 100.0
+    ///     );
     /// })?;
     ///
     /// // model_dir now contains model_metadata.json and all model files
@@ -1264,7 +1359,30 @@ impl RegistryClient {
         progress_callback: F,
     ) -> Result<PathBuf, SdkError>
     where
-        F: Fn(f32),
+        F: Fn(DownloadStatus),
+    {
+        self.fetch_extracted_cancellable(
+            mask,
+            platform,
+            Arc::new(AtomicBool::new(false)),
+            progress_callback,
+        )
+    }
+
+    /// [`Self::fetch_extracted`] with a caller-owned cancellation flag.
+    ///
+    /// Setting the flag stops the transfer within one chunk read and discards
+    /// the partial file; the call returns [`SdkError::Cancelled`]. This is what
+    /// backs [`ModelDownload::cancel`](crate::ModelDownload::cancel).
+    pub fn fetch_extracted_cancellable<F>(
+        &self,
+        mask: &str,
+        platform: Option<&str>,
+        cancel: Arc<AtomicBool>,
+        progress_callback: F,
+    ) -> Result<PathBuf, SdkError>
+    where
+        F: Fn(DownloadStatus),
     {
         // Offline-first: if we already have an extracted copy locally, return it
         // immediately. This avoids hitting the network (and tripping the circuit
@@ -1275,20 +1393,15 @@ impl RegistryClient {
                 mask,
                 extract_dir.display()
             );
+            // Nothing to transfer, but a host driving a bar still needs the
+            // terminal frame — otherwise a cached model looks stuck at 0%.
+            progress_callback(DownloadStatus::ready(0, None));
             return Ok(extract_dir);
         }
 
         // Resolve first to check if passthrough
         let resolved = self.resolve(mask, platform)?;
-
-        if resolved.passthrough {
-            // Passthrough: download raw model file directly, write metadata from registry
-            self.fetch_passthrough(mask, &resolved, progress_callback)
-        } else {
-            // Standard flow: download .xyb bundle, then extract
-            let xyb_path = self.fetch(mask, platform, progress_callback)?;
-            self.cache.ensure_extracted(&xyb_path)
-        }
+        self.fetch_extracted_resolved(mask, None, &resolved, cancel, &progress_callback)
     }
 
     /// Fetch and extract a model with an explicit registry format preference.
@@ -1304,7 +1417,7 @@ impl RegistryClient {
         progress_callback: F,
     ) -> Result<PathBuf, SdkError>
     where
-        F: Fn(f32),
+        F: Fn(DownloadStatus),
     {
         let cache_key = format_cache_key(mask, format);
 
@@ -1317,46 +1430,77 @@ impl RegistryClient {
                 mask,
                 extract_dir.display()
             );
+            progress_callback(DownloadStatus::ready(0, None));
             return Ok(extract_dir);
         }
 
         let resolved = self.resolve_with_format(mask, platform, format)?;
+        self.fetch_extracted_resolved(
+            mask,
+            Some(&cache_key),
+            &resolved,
+            Arc::new(AtomicBool::new(false)),
+            &progress_callback,
+        )
+    }
 
-        if resolved.passthrough {
-            self.fetch_passthrough_with_cache_key(mask, &cache_key, &resolved, progress_callback)
+    /// Download and extract an already-resolved variant into `cache_key`'s
+    /// extraction directory (the bare mask when `None`), driving one progress
+    /// bar through to the terminal `Ready` frame.
+    fn fetch_extracted_resolved(
+        &self,
+        mask: &str,
+        cache_key: Option<&str>,
+        resolved: &ResolvedVariant,
+        cancel: Arc<AtomicBool>,
+        progress_callback: &dyn Fn(DownloadStatus),
+    ) -> Result<PathBuf, SdkError> {
+        let (total_bytes, artifact_count) = if resolved.passthrough {
+            passthrough_progress_plan(resolved)
         } else {
-            let xyb_path = self.fetch_resolved(mask, &resolved, progress_callback)?;
-            self.cache.ensure_extracted_with_id(&xyb_path, &cache_key)
+            (total_declared_bytes(resolved), 1 + resolved.artifacts.len())
+        };
+        let reporter =
+            ProgressReporter::new(Some(total_bytes), artifact_count, cancel, progress_callback);
+
+        let extract_dir = if resolved.passthrough {
+            // Passthrough: download raw model files directly, write metadata from registry
+            self.fetch_passthrough_with_cache_key(
+                mask,
+                cache_key.unwrap_or(mask),
+                resolved,
+                &reporter,
+            )
+        } else {
+            // Standard flow: download .xyb bundle, then extract
+            let xyb_path = self.fetch_bundle(mask, resolved, &reporter)?;
+            match cache_key {
+                Some(cache_key) => self.cache.ensure_extracted_with_id(&xyb_path, cache_key),
+                None => self.cache.ensure_extracted(&xyb_path),
+            }
+        }?;
+        // Same reasoning as `fetch_resolved`: the tail past the last byte has
+        // no chunk loop, so a cancel landing there must not report `Ready`.
+        if reporter.is_cancelled() {
+            return Err(ProgressReporter::cancelled_error());
         }
+        reporter.finish();
+        Ok(extract_dir)
     }
 
     /// Fetch a passthrough model: download raw file directly and write metadata from registry.
     ///
     /// For passthrough variants, there is no .xyb bundle. The model file (e.g., a GGUF)
     /// is downloaded directly from the source HuggingFace repo, and `model_metadata.json`
-    /// is written from the inline metadata in the registry response.
-    fn fetch_passthrough<F>(
-        &self,
-        mask: &str,
-        resolved: &ResolvedVariant,
-        progress_callback: F,
-    ) -> Result<PathBuf, SdkError>
-    where
-        F: Fn(f32),
-    {
-        self.fetch_passthrough_with_cache_key(mask, mask, resolved, progress_callback)
-    }
-
-    fn fetch_passthrough_with_cache_key<F>(
+    /// is written from the inline metadata in the registry response. Files land
+    /// in `cache_key`'s extraction directory.
+    fn fetch_passthrough_with_cache_key(
         &self,
         mask: &str,
         cache_key: &str,
         resolved: &ResolvedVariant,
-        progress_callback: F,
-    ) -> Result<PathBuf, SdkError>
-    where
-        F: Fn(f32),
-    {
+        reporter: &ProgressReporter<'_>,
+    ) -> Result<PathBuf, SdkError> {
         let extract_dir = self.cache.extraction_dir(cache_key);
         let metadata_path = extract_dir.join("model_metadata.json");
         let mut required_files = passthrough_declared_files(resolved)?;
@@ -1386,14 +1530,14 @@ impl RegistryClient {
         std::fs::create_dir_all(&extract_dir)
             .map_err(|e| SdkError::cache_src("Failed to create extraction directory", e))?;
 
-        for file in required_files.clone() {
-            self.ensure_passthrough_file(mask, resolved, &extract_dir, &file, &progress_callback)?;
+        for file in passthrough_download_order(resolved, &required_files) {
+            self.ensure_passthrough_file(mask, resolved, &extract_dir, &file, reporter)?;
         }
 
         append_existing_index_shards(&extract_dir, &mut required_files)?;
         ensure_indexed_safetensors_hash_coverage(resolved, &extract_dir, &required_files)?;
-        for file in required_files.clone() {
-            self.ensure_passthrough_file(mask, resolved, &extract_dir, &file, &progress_callback)?;
+        for file in passthrough_download_order(resolved, &required_files) {
+            self.ensure_passthrough_file(mask, resolved, &extract_dir, &file, reporter)?;
         }
 
         if !passthrough_files_exist(&extract_dir, &required_files)? {
@@ -1423,17 +1567,14 @@ impl RegistryClient {
 
         Ok(extract_dir)
     }
-    fn ensure_passthrough_file<F>(
+    fn ensure_passthrough_file(
         &self,
         mask: &str,
         resolved: &ResolvedVariant,
         extract_dir: &Path,
         file: &str,
-        progress_callback: &F,
-    ) -> Result<(), SdkError>
-    where
-        F: Fn(f32),
-    {
+        reporter: &ProgressReporter<'_>,
+    ) -> Result<(), SdkError> {
         let path = passthrough_destination(extract_dir, file)?;
         let expected_sha256 = passthrough_expected_sha256(resolved, file)?;
 
@@ -1471,12 +1612,13 @@ impl RegistryClient {
         // bytes-on-the-wire signal.
         let download_started = Instant::now();
         let declared_size = passthrough_declared_size(resolved, file);
-        self.download_with_progress(&url, &path, declared_size, progress_callback)?;
+        self.download_with_progress(&url, &path, reporter)?;
         let download_duration = download_started.elapsed();
 
         let bytes_downloaded = std::fs::metadata(&path)
             .map(|m| m.len())
             .unwrap_or(declared_size);
+        reporter.finish_file(bytes_downloaded);
         crate::telemetry::publish_model_download(
             mask,
             bytes_downloaded,
@@ -1559,16 +1701,12 @@ impl RegistryClient {
     /// 1. HuggingFace is a different endpoint than the registry API
     /// 2. Large file downloads need longer timeouts
     /// 3. We don't want a failed HuggingFace download to trip the registry circuit breaker
-    fn download_with_progress<F>(
+    fn download_with_progress(
         &self,
         url: &str,
         dest: &PathBuf,
-        total_size: u64,
-        progress_callback: F,
-    ) -> Result<(), SdkError>
-    where
-        F: Fn(f32),
-    {
+        reporter: &ProgressReporter<'_>,
+    ) -> Result<(), SdkError> {
         // Use a more conservative retry policy for downloads (longer delays)
         let download_policy = RetryPolicy::conservative();
         let mut last_error: Option<SdkError> = None;
@@ -1582,17 +1720,25 @@ impl RegistryClient {
                 download_policy.delay_for_attempt(attempt)
             };
 
-            if !delay.is_zero() {
-                std::thread::sleep(delay);
+            // Sliced rather than one sleep: a server-supplied `Retry-After`
+            // can run to tens of seconds, and a cancel arriving during it
+            // would otherwise sit unobserved for that whole interval while the
+            // download still reported `Downloading`.
+            if !Self::sleep_unless_cancelled(delay, reporter) {
+                return Err(ProgressReporter::cancelled_error());
             }
 
-            match self.try_download(url, dest, total_size, &progress_callback) {
+            match self.try_download(url, dest, reporter) {
                 Ok(()) => return Ok(()),
                 Err(err) => {
+                    // `Cancelled` is non-retryable, so an aborted download
+                    // leaves this loop here rather than burning its attempts.
                     if !err.is_retryable() {
                         return Err(err);
                     }
-                    // Clean up partial file before retry
+                    // Clean up partial file before retry. The reported byte
+                    // count is a high-water mark, so the bar stalls through
+                    // the re-transfer instead of snapping back to zero.
                     std::fs::remove_file(dest).ok();
                     last_error = Some(err);
                 }
@@ -1603,17 +1749,32 @@ impl RegistryClient {
             .unwrap_or_else(|| SdkError::network("Download failed after all retry attempts")))
     }
 
+    /// Sleep for `delay`, waking every [`CANCEL_POLL_INTERVAL`] to check the
+    /// cancellation flag. Returns `false` if the wait was cut short by a
+    /// cancel.
+    fn sleep_unless_cancelled(delay: Duration, reporter: &ProgressReporter<'_>) -> bool {
+        let mut remaining = delay;
+        while !remaining.is_zero() {
+            if reporter.is_cancelled() {
+                return false;
+            }
+            let slice = remaining.min(CANCEL_POLL_INTERVAL);
+            std::thread::sleep(slice);
+            remaining -= slice;
+        }
+        !reporter.is_cancelled()
+    }
+
     /// Attempt a single download.
-    fn try_download<F>(
+    fn try_download(
         &self,
         url: &str,
         dest: &PathBuf,
-        total_size: u64,
-        progress_callback: &F,
-    ) -> Result<(), SdkError>
-    where
-        F: Fn(f32),
-    {
+        reporter: &ProgressReporter<'_>,
+    ) -> Result<(), SdkError> {
+        if reporter.is_cancelled() {
+            return Err(ProgressReporter::cancelled_error());
+        }
         // Use a longer timeout for downloads (5 minutes for large models)
         let download_agent = ureq::AgentBuilder::new()
             .timeout_connect(Duration::from_millis(CONNECT_TIMEOUT_MS))
@@ -1646,14 +1807,20 @@ impl RegistryClient {
             file.write_all(&buffer[..bytes_read])?;
             downloaded += bytes_read as u64;
 
-            // Report progress
-            if total_size > 0 {
-                let progress = downloaded as f32 / total_size as f32;
-                progress_callback(progress.min(1.0));
+            // Report progress. The reporter throttles and aggregates; this
+            // loop just says how many bytes of the current file landed.
+            reporter.file_bytes(downloaded);
+
+            // Checked per chunk so a cancel takes effect in milliseconds
+            // rather than at the end of a multi-gigabyte file. The partial
+            // file goes away so the next attempt starts clean.
+            if reporter.is_cancelled() {
+                drop(file);
+                std::fs::remove_file(dest).ok();
+                return Err(ProgressReporter::cancelled_error());
             }
         }
 
-        progress_callback(1.0);
         Ok(())
     }
 
@@ -2043,6 +2210,58 @@ fn passthrough_artifact_for_file<'a>(
         .find(|artifact| artifact.file == file)
 }
 
+/// Progress totals for a passthrough download: `(declared bytes, file count)`.
+///
+/// Passthrough variants can pull files beyond the main file and its
+/// artifacts (the metadata `files` list, tokenizer/config siblings), and those
+/// carry no declared size. Same rule as [`total_declared_bytes`]: one unsized
+/// file makes the byte total unknown, so progress falls back to completed
+/// files over this count. SafeTensors shards discovered from an index file
+/// after it lands are not counted up front; undeclared ones only add bytes.
+fn passthrough_progress_plan(resolved: &ResolvedVariant) -> (u64, usize) {
+    let Ok(files) = passthrough_declared_files(resolved) else {
+        // The fetch itself rejects the invalid path with a proper error.
+        return (0, 0);
+    };
+    let mut total: u64 = 0;
+    for file in &files {
+        let size = passthrough_declared_size(resolved, file);
+        if size == 0 {
+            return (0, files.len());
+        }
+        total = total.saturating_add(size);
+    }
+    (total, files.len())
+}
+
+/// Order passthrough downloads the way the registry declares them: the main
+/// file, then each artifact, then everything else (metadata `files`, index
+/// shards) alphabetically. Progress reads naturally that way — the weights
+/// land first — rather than in the set's lexical order.
+fn passthrough_download_order(
+    resolved: &ResolvedVariant,
+    required_files: &BTreeSet<String>,
+) -> Vec<String> {
+    let declared = std::iter::once(resolved.file.as_str()).chain(
+        resolved
+            .artifacts
+            .iter()
+            .map(|artifact| artifact.file.as_str()),
+    );
+    let mut ordered: Vec<String> = Vec::with_capacity(required_files.len());
+    for file in declared {
+        if required_files.contains(file) && !ordered.iter().any(|seen| seen == file) {
+            ordered.push(file.to_string());
+        }
+    }
+    for file in required_files {
+        if !ordered.contains(file) {
+            ordered.push(file.clone());
+        }
+    }
+    ordered
+}
+
 fn passthrough_declared_size(resolved: &ResolvedVariant, file: &str) -> u64 {
     if file == resolved.file {
         resolved.size_bytes
@@ -2418,6 +2637,69 @@ mod tests {
         assert_eq!(classify_download_source(""), "other");
     }
 
+    /// Build a resolved variant with the given main + companion sizes.
+    fn variant_with_sizes(main: u64, companions: &[u64]) -> ResolvedVariant {
+        let artifacts: Vec<serde_json::Value> = companions
+            .iter()
+            .enumerate()
+            .map(|(index, size)| {
+                serde_json::json!({
+                    "file": format!("companion-{index}.gguf"),
+                    "download_url": format!("https://example.com/companion-{index}.gguf"),
+                    "size_bytes": size,
+                    "sha256": ""
+                })
+            })
+            .collect();
+        serde_json::from_value(serde_json::json!({
+            "hf_repo": "xybrid-ai/sized",
+            "file": "model.gguf",
+            "download_url": "https://example.com/model.gguf",
+            "format": "gguf",
+            "quantization": "q4_k_m",
+            "size_bytes": main,
+            "sha256": "",
+            "passthrough": true,
+            "artifacts": artifacts,
+        }))
+        .expect("test variant should deserialize")
+    }
+
+    #[test]
+    fn declared_total_is_unknown_unless_every_artifact_publishes_a_size() {
+        assert_eq!(total_declared_bytes(&variant_with_sizes(10, &[5, 2])), 17);
+        assert_eq!(total_declared_bytes(&variant_with_sizes(10, &[])), 10);
+
+        // A companion with no declared size would otherwise let the running
+        // count overshoot the "total": the bar would saturate at the in-flight
+        // ceiling and the terminal frame could report fewer bytes than the
+        // caller already saw. `0` means unknown, which downgrades progress to
+        // the coarse signal but keeps the byte count exact.
+        assert_eq!(total_declared_bytes(&variant_with_sizes(10, &[0])), 0);
+        assert_eq!(total_declared_bytes(&variant_with_sizes(10, &[5, 0])), 0);
+        assert_eq!(total_declared_bytes(&variant_with_sizes(0, &[5])), 0);
+    }
+
+    #[test]
+    fn retry_backoff_gives_up_promptly_when_cancelled() {
+        // A server-supplied `Retry-After` can run to tens of seconds; a cancel
+        // arriving during it must not sit unobserved for the whole interval.
+        let cancel = Arc::new(AtomicBool::new(true));
+        let sink = |_: DownloadStatus| {};
+        let reporter = ProgressReporter::new(None, 1, cancel, &sink);
+
+        let started = Instant::now();
+        assert!(!RegistryClient::sleep_unless_cancelled(
+            Duration::from_secs(30),
+            &reporter
+        ));
+        assert!(
+            started.elapsed() < Duration::from_secs(1),
+            "cancelled backoff waited {:?}",
+            started.elapsed()
+        );
+    }
+
     #[test]
     fn resolved_variant_preserves_passthrough_sibling_artifacts() {
         let resolved: ResolvedVariant = serde_json::from_str(
@@ -2577,6 +2859,204 @@ mod tests {
         mmproj_mock.assert();
     }
 
+    /// The headline bug this surface exists to fix: a two-file model used to
+    /// run the bar 0→1 for the weights, then 0→1 again for the projector.
+    #[test]
+    fn multi_file_progress_is_one_monotonic_bar_over_summed_bytes() {
+        use httpmock::prelude::*;
+        use sha2::{Digest, Sha256};
+
+        fn sha256_hex(bytes: &[u8]) -> String {
+            let mut hasher = Sha256::new();
+            hasher.update(bytes);
+            format!("{:x}", hasher.finalize())
+        }
+
+        let server = MockServer::start();
+        let model_bytes = b"main model";
+        let mmproj_bytes = b"vision projector";
+        let total = (model_bytes.len() + mmproj_bytes.len()) as u64;
+        server.mock(|when, then| {
+            when.method(GET).path("/model.gguf");
+            then.status(200).body(model_bytes.as_slice());
+        });
+        server.mock(|when, then| {
+            when.method(GET).path("/mmproj-model.gguf");
+            then.status(200).body(mmproj_bytes.as_slice());
+        });
+        let resolve_body = serde_json::json!({
+            "mask": "vlm",
+            "platform": "universal",
+            "resolved": {
+                "hf_repo": "xybrid-ai/vlm",
+                "file": "model.gguf",
+                "download_url": server.url("/model.gguf"),
+                "format": "gguf",
+                "quantization": "q4_k_m",
+                "size_bytes": model_bytes.len(),
+                "sha256": sha256_hex(model_bytes),
+                "passthrough": true,
+                "artifacts": [
+                    {
+                        "file": "mmproj-model.gguf",
+                        "download_url": server.url("/mmproj-model.gguf"),
+                        "size_bytes": mmproj_bytes.len(),
+                        "sha256": sha256_hex(mmproj_bytes)
+                    }
+                ],
+                "model_metadata": {
+                    "model_id": "vlm",
+                    "version": "1.0",
+                    "execution_template": {
+                        "type": "VisionLanguage",
+                        "model_file": "model.gguf"
+                    },
+                    "vision_encoder": {
+                        "file": "mmproj-model.gguf",
+                        "preprocessing_preset": "gemma3_vision",
+                        "image_size": 896
+                    },
+                    "files": ["model.gguf", "mmproj-model.gguf"],
+                    "metadata": {}
+                }
+            }
+        });
+        server.mock(|when, then| {
+            when.method(GET)
+                .path("/v1/models/vlm/resolve")
+                .query_param_exists("platform");
+            then.status(200)
+                .header("content-type", "application/json")
+                .json_body(resolve_body);
+        });
+
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let mut client = RegistryClient::with_url(server.base_url()).unwrap();
+        client.cache = CacheManager::with_dir(temp_dir.path().join("cache")).unwrap();
+
+        let seen = std::sync::Mutex::new(Vec::new());
+        client
+            .fetch_extracted("vlm", Some("universal"), |status| {
+                seen.lock().unwrap().push(status);
+            })
+            .expect("passthrough VLM fetch should materialize all artifacts");
+
+        let seen = seen.into_inner().unwrap();
+        assert!(!seen.is_empty(), "no progress was reported at all");
+
+        // Every update names the summed total, so the bar is scaled once.
+        assert!(
+            seen.iter().all(|status| status.total_bytes == Some(total)),
+            "total must span both artifacts: {seen:?}"
+        );
+
+        // Monotonic, and no mid-download update claims completion.
+        let mut previous = 0;
+        for status in &seen {
+            assert!(
+                status.downloaded_bytes >= previous,
+                "bytes rewound: {seen:?}"
+            );
+            previous = status.downloaded_bytes;
+            if status.state == crate::DownloadState::Downloading {
+                assert!(
+                    status.progress < 1.0,
+                    "in-flight update hit 1.0: {status:?}"
+                );
+            }
+        }
+
+        // Finishing the first artifact reads its share of the whole, not 100%.
+        let after_first = seen
+            .iter()
+            .find(|status| status.downloaded_bytes == model_bytes.len() as u64)
+            .expect("the first artifact's completion should be reported");
+        let expected = model_bytes.len() as f32 / total as f32;
+        assert!(
+            (after_first.progress - expected).abs() < 1e-3,
+            "expected {expected}, got {}",
+            after_first.progress
+        );
+
+        // Exactly one terminal frame, and it is the last thing emitted.
+        let last = seen.last().unwrap();
+        assert_eq!(last.state, crate::DownloadState::Ready);
+        assert_eq!(last.progress, 1.0);
+        assert_eq!(last.downloaded_bytes, total);
+    }
+
+    /// Cancelling must stop the transfer and leave no partial file behind, so
+    /// a later attempt starts clean rather than resuming into a truncated one.
+    #[test]
+    fn cancelling_a_fetch_stops_it_and_discards_the_partial_file() {
+        use httpmock::prelude::*;
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        let server = MockServer::start();
+        server.mock(|when, then| {
+            when.method(GET).path("/model.gguf");
+            then.status(200).body(vec![0u8; 512 * 1024]);
+        });
+        let resolve_body = serde_json::json!({
+            "mask": "slow",
+            "platform": "universal",
+            "resolved": {
+                "hf_repo": "xybrid-ai/slow",
+                "file": "model.gguf",
+                "download_url": server.url("/model.gguf"),
+                "format": "gguf",
+                "quantization": "q4_k_m",
+                "size_bytes": 512 * 1024,
+                "sha256": "",
+                "passthrough": true,
+                "model_metadata": {
+                    "model_id": "slow",
+                    "version": "1.0",
+                    "execution_template": { "type": "Gguf", "model_file": "model.gguf" },
+                    "files": ["model.gguf"],
+                    "metadata": {}
+                }
+            }
+        });
+        server.mock(|when, then| {
+            when.method(GET)
+                .path("/v1/models/slow/resolve")
+                .query_param_exists("platform");
+            then.status(200)
+                .header("content-type", "application/json")
+                .json_body(resolve_body);
+        });
+
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let mut client = RegistryClient::with_url(server.base_url()).unwrap();
+        client.cache = CacheManager::with_dir(temp_dir.path().join("cache")).unwrap();
+
+        // Flip the flag from inside the progress callback, so cancellation
+        // lands mid-transfer rather than before the request goes out.
+        let cancel = Arc::new(AtomicBool::new(false));
+        let flag = Arc::clone(&cancel);
+        let err = client
+            .fetch_extracted_cancellable("slow", Some("universal"), cancel, move |_| {
+                flag.store(true, Ordering::Relaxed);
+            })
+            .expect_err("a cancelled fetch must not report success");
+
+        assert!(
+            matches!(err, SdkError::Cancelled { .. }),
+            "expected Cancelled, got {err:?}"
+        );
+        assert!(
+            !err.is_retryable(),
+            "retrying would resume what the caller just stopped"
+        );
+        let partial = client.cache.extraction_dir("slow").join("model.gguf");
+        assert!(
+            !partial.exists(),
+            "partial file survived cancellation at {}",
+            partial.display()
+        );
+    }
+
     #[test]
     fn fetch_extracted_bundle_repairs_partial_multifile_vlm_extraction() {
         use httpmock::prelude::*;
@@ -2646,7 +3126,11 @@ mod tests {
         );
         assert!(client.is_extracted("vlm-bundle"));
 
-        resolve_mock.assert_hits(2);
+        // One resolve, not two: `fetch_extracted` used to resolve, then hand
+        // the mask to `fetch`, which resolved again. Building the progress
+        // reporter needs every artifact's size up front, so the resolved
+        // variant is now threaded straight through to the bundle download.
+        resolve_mock.assert_hits(1);
         bundle_mock.assert();
     }
 

@@ -76,6 +76,33 @@ export interface RunOptions {
   correlationId?: string;
 }
 
+/** Latency reported for one stage of the inference pipeline. */
+export interface StageLatency {
+  stageId: string;
+  latencyMs: number;
+}
+
+/**
+ * Measurements captured by the native inference runtime. LLM-specific values
+ * are absent when a model or backend does not report them.
+ */
+export interface InferenceMetrics {
+  /** Total wall-clock inference time in milliseconds. */
+  totalMs: number;
+  /** Time to first generated token in milliseconds. */
+  ttftMs?: number;
+  /** Overall generated-token throughput. */
+  tokensPerSecond?: number;
+  /** Prompt-processing throughput. */
+  prefillTps?: number;
+  /** Generated-token decode throughput. */
+  decodeTps?: number;
+  /** Number of generated tokens. */
+  tokensOut?: number;
+  /** Per-stage measurements in native execution order. */
+  stageLatenciesMs: StageLatency[];
+}
+
 export interface InferenceResult {
   success: boolean;
   text?: string;
@@ -89,6 +116,8 @@ export interface InferenceResult {
   audioBytesBase64?: string;
   embedding?: number[];
   latencyMs: number;
+  /** Detailed native measurements for this inference. */
+  metrics: InferenceMetrics;
   /**
    * Where this answer actually came from. Cloud fallback keeps the model id
    * identical on both legs by design, so this is the only way to tell a
@@ -100,22 +129,39 @@ export interface InferenceResult {
 /** Where a result was produced — observed fact, not a routing preference. */
 export type ExecutionTarget = 'local' | 'cloud';
 
-/** Lifecycle of the background download behind a speculative load. */
+/** Lifecycle of a model download. */
 export type DownloadState =
   | 'downloading'
-  /** Local handle installed; runs are on-device. */
+  /** Every artifact landed; the model is usable on-device. */
   | 'ready'
   /**
-   * Download failed. The cloud keeps serving and the model never becomes
-   * local — surfacing this is the only way the UI can stop waiting.
+   * Download failed. For a speculative load the cloud keeps serving and the
+   * model never becomes local — surfacing this is the only way the UI can
+   * stop waiting.
    */
-  | 'failed';
+  | 'failed'
+  /** The download was cancelled by the caller. */
+  | 'cancelled';
 
-/** Download progress and state in one consistent read. */
+/**
+ * Download progress, bytes and state in one consistent read.
+ *
+ * `progress` is aggregated across every artifact the model needs (weights
+ * plus companions such as a vision projector), never moves backwards, and
+ * reaches 1.0 only alongside `ready`.
+ */
 export interface DownloadStatus {
   state: DownloadState;
   /** 0.0 to 1.0. */
   progress: number;
+  /** Bytes written so far, across every artifact. */
+  downloadedBytes: number;
+  /**
+   * Declared total across every artifact, or absent when the source publishes
+   * no size (a Hugging Face repo, or a registry entry without one).
+   * `downloadedBytes` is exact either way.
+   */
+  totalBytes?: number;
 }
 
 /** One token produced during streaming inference. */

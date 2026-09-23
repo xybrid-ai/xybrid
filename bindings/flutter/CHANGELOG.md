@@ -1,5 +1,61 @@
 # Changelog
 
+## Unreleased
+
+* Added: `LoadProgress` now carries `downloadedBytes` and `totalBytes` alongside
+  `progress`, so a UI can show megabytes, speed and time remaining instead of a
+  bare percentage. `totalBytes` is null when the source publishes no size.
+  Existing `case LoadProgress(:final progress)` call sites are unaffected.
+* Fixed: the bar no longer resets for each file of a multi-file model (a vision
+  model plus its projector), and no longer rewinds when a download retries.
+  `progress` is now scaled against the summed size of every artifact.
+* Fixed: progress events are throttled to roughly ten a second instead of one
+  per 8 KiB chunk, which previously pushed ~130,000 events per GB across the
+  FFI boundary.
+* Added: `FfiDownloadState.cancelled`, for downloads stopped by the caller.
+
+## 0.9.0
+
+No Dart API changes. This release is about the first build: the precompiled
+native library is smaller, downloaded compressed, cached per machine instead of
+per app, and its download is finally visible in the build log. iOS builds no
+longer fetch an ONNX Runtime copy they never link.
+
+* Changed: the precompiled native libraries are built with fat LTO, so each one
+  carries only the code reachable from the exported FFI functions — the iOS
+  static library drops from 181 MB to 119 MB (xybrid-ai/xybrid#570)
+* Changed: precompiled binaries are published and downloaded gzip-compressed,
+  each with its own ed25519 signature, verified before decompressing and with a
+  fallback to the uncompressed asset — the iOS download drops from 119 MB to
+  34 MB (xybrid-ai/xybrid#573)
+* Changed: verified downloads are cached in `~/.xybrid/cache/precompiled/`, so
+  `flutter clean` and new projects reuse the native library instead of
+  downloading it again; `XYBRID_PRECOMPILED_CACHE_DIR` relocates or disables the
+  cache (xybrid-ai/xybrid#572)
+* Changed: cargokit logs the native download at INFO — target, size, source URL,
+  progress, and whether each target was downloaded or reused from cache.
+  Previously silent for minutes, which read as a Rust compile
+  (xybrid-ai/xybrid#571)
+* Fixed: iOS builds from pub.dev no longer download an unused ~17 MB ONNX
+  Runtime xcframework, and simulator builds no longer fail with "xz is required"
+  on a Mac without Homebrew `xz` (xybrid-ai/xybrid#575)
+
+## 0.8.0
+
+No Dart API changes. Flutter desktop model loads can reuse compatible files
+from the standard Hugging Face cache, and the macOS native runtime gains Core
+ML execution support. Android native packaging also receives the release-wide
+JNI fix, while Apple token streams preserve producer backpressure.
+
+* Added: desktop Hugging Face loads reuse matching snapshots and
+  content-addressed blobs before downloading duplicate model files
+  (xybrid-ai/xybrid#536)
+* Added: native Core ML model execution on macOS (xybrid-ai/xybrid#548)
+* Fixed: Apple token streams preserve producer backpressure and clean up safely
+  when consumption is cancelled (xybrid-ai/xybrid#549)
+* Fixed: Android release artifacts carry the corrected callable JNI library;
+  this does not change the Dart API (xybrid-ai/xybrid#555)
+
 ## 0.7.0
 
 Streaming tool loops can now keep both live output and conversation history,

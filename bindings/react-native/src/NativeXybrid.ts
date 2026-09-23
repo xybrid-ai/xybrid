@@ -42,7 +42,8 @@ export interface Spec extends TurboModule {
   // `isCloudServing` predicts the next run; `InferenceResult.executionTarget`
   // reports what a run that already happened actually did (they differ when a
   // cloud leg fails and degrades to local mid-call). `downloadStatus` returns
-  // `{ state, progress }` — poll it for a progress bar. `awaitDownload` blocks
+  // `{ state, progress, downloadedBytes, totalBytes? }` — poll it for a
+  // progress bar. `awaitDownload` blocks
   // natively until the download settles or the timeout elapses, so JS can
   // await it once instead of running a timer.
   isCloudServing(handle: string): Promise<boolean>;

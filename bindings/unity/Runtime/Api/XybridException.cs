@@ -133,6 +133,7 @@ namespace Xybrid
                 case XybridBolt.XybridError.UnsupportedModelCapability e: return e.Message;
                 case XybridBolt.XybridError.UnsupportedBackendCapability e: return e.Message;
                 case XybridBolt.XybridError.InvalidImage e: return e.Message;
+                case XybridBolt.XybridError.Cancelled e: return e.Message;
                 default: return error.ToString();
             }
         }

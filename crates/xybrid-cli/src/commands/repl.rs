@@ -702,19 +702,14 @@ fn ensure_model_cached(
 
     let pb = ui::download_bar(resolved.size_bytes, model_id);
     let model_dir = if let Some(format) = format {
-        client.fetch_extracted_with_format(model_id, None, format, |p| {
-            pb.set_position((p * resolved.size_bytes as f32) as u64);
-        })?
-    } else if resolved.passthrough {
-        client.fetch_extracted(model_id, None, |p| {
-            pb.set_position((p * resolved.size_bytes as f32) as u64);
+        client.fetch_extracted_with_format(model_id, None, format, |status| {
+            ui::apply_download_status(&pb, &status);
         })?
     } else {
-        let xyb_path = client.fetch(model_id, None, |p| {
-            pb.set_position((p * resolved.size_bytes as f32) as u64);
-        })?;
-        let cache = xybrid_sdk::cache::CacheManager::new()?;
-        cache.ensure_extracted(&xyb_path)?
+        // Handles both passthrough files and `.xyb` bundles (download + extract).
+        client.fetch_extracted(model_id, None, |status| {
+            ui::apply_download_status(&pb, &status);
+        })?
     };
 
     pb.finish_and_clear();

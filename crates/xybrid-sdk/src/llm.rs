@@ -34,7 +34,6 @@
 //! ```
 
 use serde::{Deserialize, Serialize};
-use std::sync::{OnceLock, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 // ============================================================================
 // LLM Backend Configuration
@@ -138,40 +137,31 @@ impl Default for LlmClientConfig {
 // Helper Functions
 // ============================================================================
 
-static GATEWAY_URL_OVERRIDE: OnceLock<RwLock<Option<String>>> = OnceLock::new();
-
-fn gateway_url_override() -> &'static RwLock<Option<String>> {
-    GATEWAY_URL_OVERRIDE.get_or_init(|| RwLock::new(None))
-}
-
-fn read_gateway_url_override() -> RwLockReadGuard<'static, Option<String>> {
-    gateway_url_override()
-        .read()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-}
-
-fn write_gateway_url_override() -> RwLockWriteGuard<'static, Option<String>> {
-    gateway_url_override()
-        .write()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-}
-
-/// Set the process-local Xybrid gateway URL used by SDK-created LLM clients.
+/// Set the process-local Xybrid gateway URL used by SDK-created LLM clients
+/// and by pipeline stages the orchestrator routes to the cloud.
 ///
-/// This is intentionally not backed by `std::env::set_var`: platform bindings
-/// may call it from multi-threaded runtimes where mutating process environment
-/// is not synchronized.
+/// The value lives in the core in-memory cell
+/// ([`xybrid_core::cloud::set_xybrid_gateway_url`]) that the cloud adapter
+/// reads when the orchestrator registers it, so a pipeline stage is dispatched
+/// to the gateway configured here — never to the ambient `XYBRID_GATEWAY_URL`
+/// / `XYBRID_PLATFORM_URL` or the production default. It is intentionally not
+/// backed by `std::env::set_var`: platform bindings may call it from
+/// multi-threaded runtimes where mutating process environment is not
+/// synchronized.
+///
+/// Pass the full gateway URL including the `/v1` suffix. Blank values are
+/// ignored.
 pub fn set_gateway_url(gateway_url: impl Into<String>) {
     let gateway_url = gateway_url.into().trim().to_string();
     if gateway_url.is_empty() {
         return;
     }
-    *write_gateway_url_override() = Some(gateway_url);
+    xybrid_core::cloud::set_xybrid_gateway_url(Some(gateway_url));
 }
 
 #[cfg(test)]
 fn clear_gateway_url_override() {
-    *write_gateway_url_override() = None;
+    xybrid_core::cloud::set_xybrid_gateway_url(None);
 }
 
 /// Get default gateway URL from environment or fallback to production URL.
@@ -179,8 +169,9 @@ fn clear_gateway_url_override() {
 /// Priority:
 /// 1. Process-local override set with [`set_gateway_url`]
 /// 2. `XYBRID_GATEWAY_URL` env var (explicit override, should include `/v1`)
-/// 3. `XYBRID_PLATFORM_URL` env var + `/v1` suffix (shared with telemetry)
-/// 4. Default production URL (`https://api.xybrid.dev/v1`)
+/// 3. Process-local platform URL set with [`crate::set_platform_url`] + `/v1`
+/// 4. `XYBRID_PLATFORM_URL` env var + `/v1` suffix (shared with telemetry)
+/// 5. Default production URL (`https://api.xybrid.dev/v1`)
 ///
 /// # Note
 ///
@@ -197,25 +188,10 @@ fn clear_gateway_url_override() {
 /// assert!(url.ends_with("/v1"));
 /// ```
 pub fn default_gateway_url() -> String {
-    if let Some(url) = read_gateway_url_override().clone() {
-        return url;
-    }
-    if let Ok(url) = std::env::var("XYBRID_GATEWAY_URL") {
-        return url;
-    }
-    // Programmatic platform URL (set via `set_platform_url`, held in the core
-    // in-memory cell) takes precedence over the ambient XYBRID_PLATFORM_URL env
-    // var — same ordering as `xybrid_core::cloud::default_gateway_url`, so this
-    // resolver and the core `Cloud`/`CloudConfig` one stay in agreement.
-    if let Some(url) = xybrid_core::cloud::xybrid_platform_url() {
-        // Platform URL needs /v1 suffix for gateway endpoints
-        return format!("{}/v1", url.trim_end_matches('/'));
-    }
-    if let Ok(url) = std::env::var("XYBRID_PLATFORM_URL") {
-        // Platform URL needs /v1 suffix for gateway endpoints
-        return format!("{}/v1", url.trim_end_matches('/'));
-    }
-    "https://api.xybrid.dev/v1".to_string()
+    // One resolver for the whole process: the core `Cloud`/`CloudConfig`
+    // default and this SDK-facing accessor must never disagree on where a
+    // request goes, so this simply reads the core resolution.
+    xybrid_core::cloud::platform_gateway_url()
 }
 
 // ============================================================================
@@ -599,7 +575,7 @@ mod tests {
         }
         let _reset = ResetOnDrop;
 
-        // The llm-local override must be clear so the core cell is what wins.
+        // The gateway override must be clear so the platform cell is what wins.
         clear_gateway_url_override();
         xybrid_core::cloud::set_xybrid_platform_url(Some(
             "https://staging.example.com".to_string(),

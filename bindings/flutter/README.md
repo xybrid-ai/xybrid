@@ -88,8 +88,9 @@ final loader = XybridModelLoader.fromRegistry('kokoro-82m');
 
 await for (final event in loader.loadWithProgress()) {
   switch (event) {
-    case LoadProgress(:final progress):
-      print('Downloading: ${(progress * 100).toInt()}%');
+    case LoadProgress(:final progress, :final downloadedBytes, :final totalBytes):
+      print('Downloading: ${(progress * 100).toInt()}% '
+          '($downloadedBytes / ${totalBytes ?? '?'} bytes)');
     case LoadComplete():
       print('Model ready!');
     case LoadError(:final message):
@@ -97,6 +98,10 @@ await for (final event in loader.loadWithProgress()) {
   }
 }
 ```
+
+`progress` spans every file the model needs and never moves backwards.
+`totalBytes` is `null` when the source publishes no size; `downloadedBytes` is
+exact either way, so megabytes, speed and time remaining are all derivable.
 
 ### Input Envelopes
 
@@ -337,7 +342,7 @@ See [`docs/backends/mlx.md`](../../docs/backends/mlx.md) in the main repo for th
 Native ML runtimes are resolved automatically at build time:
 
 - **Android**: ONNX Runtime pulled from Maven Central (`com.microsoft.onnxruntime:onnxruntime-android`)
-- **iOS**: ONNX Runtime xcframework downloaded from HuggingFace and cached at `~/.xybrid/cache/ort-ios/`
+- **iOS**: ONNX Runtime is part of the precompiled library, so nothing extra is downloaded or installed. (Monorepo source builds fetch an ONNX Runtime xcframework from HuggingFace into `~/.xybrid/cache/ort-ios/`; simulator source builds also need `xz`.)
 - **macOS/Linux/Windows**: ONNX Runtime downloaded by the `ort` Rust crate at compile time
 
 The Rust library itself ships as a precompiled, signature-verified binary for
@@ -346,6 +351,34 @@ downloaded at build time. No Rust toolchain is required, and having one
 installed does not change anything — the published package is precompiled-only
 and cannot be built from source, because its Rust crate lives in the xybrid
 monorepo workspace.
+
+The first build of an app downloads that binary, gzip-compressed: roughly
+10 MB per Android ABI and 30–50 MB for iOS and macOS, where it is a static
+library of over 100 MB once unpacked. A slow first build is this download, not
+a Rust compile.
+
+The download is kept in a shared cache at `~/.xybrid/cache/precompiled/`, so
+`flutter clean` and other projects on the same machine reuse it instead of
+downloading again. Every reuse re-verifies the binary's signature against the
+key pinned in this package, and entries unused for 90 days are removed. Set
+`XYBRID_PRECOMPILED_CACHE_DIR` to move the cache — for example into a directory
+your CI persists between runs — or to an empty value to turn it off.
+
+Flutter hides native build-step output unless you pass `-v`; with it (or in
+the Xcode / Android Studio build log) cargokit reports what it is doing:
+
+```
+INFO: Downloading precompiled aarch64-apple-ios_libxybrid_flutter_ffi.a.gz (33.6 MB) from https://github.com/…
+INFO: aarch64-apple-ios_libxybrid_flutter_ffi.a.gz: 14.2 MB of 33.6 MB (42%)
+INFO: Downloaded aarch64-apple-ios_libxybrid_flutter_ffi.a.gz: 33.6 MB in 21s (1.6 MB/s)
+INFO: Unpacked aarch64-apple-ios_libxybrid_flutter_ffi.a.gz to 119.2 MB
+INFO: Using precompiled xybrid_flutter for aarch64-apple-ios (downloaded)
+```
+
+Later builds print `(cached)`; after `flutter clean`, or in another project,
+`(shared cache)`. A line starting
+`Building xybrid_flutter for` means a source build, which only happens inside
+the monorepo.
 
 Building from source is for monorepo development, where the workspace root and
 the `xybrid-*` crates are present. There it is the default whenever a Rust

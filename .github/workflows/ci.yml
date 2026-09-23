@@ -36,6 +36,8 @@ jobs:
       relevant: ${{ steps.filter.outputs.relevant }}
       unity_bolt: ${{ steps.filter.outputs.unity_bolt }}
       python_sdk: ${{ steps.filter.outputs.python_sdk }}
+      kotlin_jni: ${{ steps.filter.outputs.kotlin_jni }}
+      apple_bolt: ${{ steps.filter.outputs.apple_bolt }}
     steps:
       - name: Check changed paths
         id: filter
@@ -63,7 +65,10 @@ jobs:
           fi
           echo "relevant=$RELEVANT" >> "$GITHUB_OUTPUT"
           echo "Tooling-relevant changes: $RELEVANT"
-          if printf '%s\n' "$FILES" | grep -qE '^(bindings/unity/Runtime/Bolt/|bindings/unity/Runtime/BoltSupplement/|tools/unity-bolt-compile-check/|tools/scripts/gen_unity_bolt_csharp\.py$|crates/xybrid-bolt/boltffi\.toml$|\.github/workflows/ci\.yml$)'; then
+          # Runtime/Api is in the list because the compile gate compiles it
+          # (UnityBoltCompileCheck.csproj globs Bolt/, BoltSupplement/ AND Api/),
+          # so a hand-written wrapper edit must run the same netstandard2.1 check.
+          if printf '%s\n' "$FILES" | grep -qE '^(bindings/unity/Runtime/Bolt/|bindings/unity/Runtime/BoltSupplement/|bindings/unity/Runtime/Api/|tools/unity-bolt-compile-check/|tools/scripts/gen_unity_bolt_csharp\.py$|crates/xybrid-bolt/boltffi\.toml$|\.github/workflows/ci\.yml$)'; then
             UNITY_BOLT=true
           else
             UNITY_BOLT=false
@@ -77,6 +82,57 @@ jobs:
           fi
           echo "python_sdk=$PYTHON_SDK" >> "$GITHUB_OUTPUT"
           echo "Python SDK changes: $PYTHON_SDK"
+          if printf '%s\n' "$FILES" | grep -qE '^(bindings/kotlin/|tools/scripts/gen_kotlin_bolt\.py$|crates/xybrid-bolt/|crates/xybrid-ffi-facade/|\.github/workflows/ci\.yml$)'; then
+            KOTLIN_JNI=true
+          else
+            KOTLIN_JNI=false
+          fi
+          echo "kotlin_jni=$KOTLIN_JNI" >> "$GITHUB_OUTPUT"
+          echo "Kotlin and JNI changes: $KOTLIN_JNI"
+          if printf '%s\n' "$FILES" | grep -qE '^(bindings/apple/|crates/xybrid-bolt/|crates/xybrid-ffi-facade/|\.github/workflows/ci\.yml$)'; then
+            APPLE_BOLT=true
+          else
+            APPLE_BOLT=false
+          fi
+          echo "apple_bolt=$APPLE_BOLT" >> "$GITHUB_OUTPUT"
+          echo "Apple bolt binding changes: $APPLE_BOLT"
+
+  kotlin-jni-drift:
+    name: Kotlin and JNI generation drift
+    needs: tooling-changes
+    if: needs.tooling-changes.outputs.kotlin_jni == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Install the pinned boltffi CLI
+        run: cargo install boltffi_cli --version 0.30.1 --locked
+      - name: Compare committed Kotlin and JNI with fresh generation
+        run: python3 tools/scripts/gen_kotlin_bolt.py --check
+
+  # The committed Swift bindings and the C header the xcframework ships are
+  # generator output, like Kotlin/Python/Unity — but until now they had no
+  # drift gate, so a regeneration could silently disagree with the crate.
+  # Generation is host-agnostic (boltffi + a cargo metadata build), so this
+  # runs on Linux; the Swift *compile* stays on macOS in build-apple.yml.
+  apple-bolt-drift:
+    name: Swift and C header generation drift
+    needs: tooling-changes
+    if: needs.tooling-changes.outputs.apple_bolt == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Install the pinned boltffi CLI
+        run: cargo install boltffi_cli --version 0.30.1 --locked
+      - name: Compare committed Swift and C header with fresh generation
+        run: bindings/apple/scripts/gen-bolt-bindings.sh --check
 
   tooling-tests:
     name: Tooling tests (${{ matrix.platform }})
@@ -144,7 +200,7 @@ jobs:
           # Floor of the SDK: boltffi's generated package needs >= 3.10.
           python-version: '3.12'
       - name: Install the pinned boltffi CLI
-        run: cargo install boltffi_cli --version 0.29.3 --locked
+        run: cargo install boltffi_cli --version 0.30.1 --locked
       - name: Check the committed bindings match the crate
         run: python3 tools/scripts/gen_python_bolt.py --check
       - name: Build and stage the native artifacts
@@ -212,6 +268,10 @@ jobs:
           cache-bin: false
       - name: Check platform-macos
         run: cargo check -p xybrid-sdk --features platform-macos
+      - name: Test native Core ML bundle ownership
+        run: cargo test -p xybrid-core --features coreml,ort-download --lib runtime_adapter::coreml::native::tests
+      - name: Test native Core ML fixture
+        run: cargo test -p integration-tests --features coreml --test coreml_native
 
   check-platform-desktop:
     name: check (platform-desktop, ubuntu-latest)
@@ -477,13 +537,29 @@ jobs:
 
       # Skip examples — they statically link llama.cpp + ort and exhaust
       # runner disk during link. `clippy --all-targets` already verifies
-      # examples compile (it stops at .rmeta, so no link step).
+      # examples compile (it stops at .rmeta, so no link step) — but compiling
+      # is all it does: an example's `#[cfg(test)]` module never runs here.
+      # Examples that carry unit tests are opted in one at a time below.
       # `--doc` can't be combined with other target flags, so it runs separately.
       - name: Run tests (lib, bins, integration)
         run: cargo test --workspace --features ort-download --lib --bins --tests
 
+      # `sentence_ranker` unit-tests its cosine-similarity and ranking helpers.
+      # Selecting the single example keeps the no-examples policy above intact:
+      # it needs no llm-llamacpp, and ort is load-dynamic on Linux, so the link
+      # step is one small binary — not every example against llama.cpp. Add
+      # another `--example <name>` here when an example gains tests that run
+      # without llm-llamacpp; examples that need it belong in test-llm.
+      - name: Run tests (examples with unit tests)
+        run: cargo test -p xybrid-core --features ort-download --example sentence_ranker
+
       - name: Run doc tests
         run: cargo test --workspace --features ort-download --doc
+
+      # The optional `huggingface` feature isn't covered by ort-download
+      # above; run its unit tests (shared HF cache reuse) explicitly.
+      - name: Run tests (huggingface cache integration)
+        run: cargo test -p xybrid-sdk --features huggingface --lib
 
   # (Retired) The cargo linux-CLI build lived here. The required Bazel check
   # ("Bazel graph + RBE targets", bazel.yml) now builds + smokes the linux CLI
@@ -575,7 +651,7 @@ jobs:
     runs-on: ubuntu-latest
     # Inspect dependency results even when the tooling path gate skips its matrix.
     if: ${{ !cancelled() }}
-    needs: [tooling-changes, tooling-tests, unity-bolt-compile, python-sdk, fmt, clippy, check-no-default-features, check-platform-macos, check-platform-desktop, check-vision-platforms, check-llamacpp-vulkan, check-mlx-non-linking, check-mlx-runtime-macos, clippy-llm, test-llm, test, api-contract, web]
+    needs: [tooling-changes, tooling-tests, unity-bolt-compile, python-sdk, kotlin-jni-drift, apple-bolt-drift, fmt, clippy, check-no-default-features, check-platform-macos, check-platform-desktop, check-vision-platforms, check-llamacpp-vulkan, check-mlx-non-linking, check-mlx-runtime-macos, clippy-llm, test-llm, test, api-contract, web]
     steps:
       - name: Verify required job results
         env:
@@ -601,6 +677,16 @@ jobs:
                   .key == "python-sdk"
                   and .value.result == "skipped"
                   and $needs["tooling-changes"].outputs.python_sdk == "false"
+                )
+                or (
+                  .key == "kotlin-jni-drift"
+                  and .value.result == "skipped"
+                  and $needs["tooling-changes"].outputs.kotlin_jni == "false"
+                )
+                or (
+                  .key == "apple-bolt-drift"
+                  and .value.result == "skipped"
+                  and $needs["tooling-changes"].outputs.apple_bolt == "false"
                 )
               )
           ' <<<"$NEEDS_JSON"

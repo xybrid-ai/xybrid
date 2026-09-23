@@ -22,10 +22,12 @@ with intelligent routing based on device capabilities. Supports ASR, TTS, and LL
   s.source_files = 'Classes/**/*'
   s.dependency 'Flutter'
 
-  # ONNX Runtime 1.23.2 with CoreML EP — resolved at build time by build_pod.sh
-  # NOT vendored in the pod (too large for pub.dev). Instead:
+  # ONNX Runtime 1.23.2 with CoreML EP. NOT vendored in the pod (too large for
+  # pub.dev), and not needed separately by a pub.dev install: the precompiled
+  # Rust library already contains it. Only a source build resolves it, in
+  # build_pod.sh, for ort-sys to link:
   # - Monorepo dev: symlink at Frameworks/onnxruntime.xcframework -> vendor/ort-ios/
-  # - pub.dev install: downloaded from HuggingFace to ~/.xybrid/cache/ort-ios/
+  # - otherwise: downloaded from HuggingFace to ~/.xybrid/cache/ort-ios/
   # See cargokit/build_pod.sh for the full resolution logic.
 
   # iOS 13.0 minimum for modern APIs (Metal 2, Combine, CoreML 3, etc.)

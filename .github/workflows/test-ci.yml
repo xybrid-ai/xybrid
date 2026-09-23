@@ -127,6 +127,8 @@ jobs:
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+        with:
+          packages: platform-tools
 
       - name: Install Android NDK
         run: |
@@ -264,10 +266,15 @@ jobs:
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
-          key: test-publish-kotlin
+          # The boltffi CLI version is part of the key: rust-cache restores
+          # ~/.cargo/bin, and the install step below short-circuits on a cached
+          # binary, so a bump must invalidate the cache or the old CLI wins.
+          key: test-publish-kotlin-boltffi-0.30.1
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+        with:
+          packages: platform-tools
 
       - name: Install NDK
         run: |
@@ -275,12 +282,17 @@ jobs:
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/${{ env.NDK_VERSION }}" >> $GITHUB_ENV
 
       - name: Install boltffi CLI
-        # Pinned to 0.25.3 to MATCH the runtime `boltffi` crate (Cargo.lock):
-        # a CLI/runtime version skew mis-generates unit-ok `Result<(), E>`
-        # exports (model warmup/unload) as a `void` foreign function that drops
-        # the error and leaks the result buffer. `--locked` installs against
-        # the CLI's own bundled Cargo.lock for reproducibility.
-        run: which boltffi || cargo install boltffi_cli --version 0.25.3 --locked
+        # Pinned to MATCH the runtime `boltffi` crate (Cargo.lock): a
+        # CLI/runtime version skew mis-generates the foreign surface — 0.25.3
+        # lowered unit-ok `Result<(), E>` exports (model warmup/unload) to a
+        # `void` foreign function that dropped the error and leaked the result
+        # buffer, and the Python wire codecs are keyed by a version-sensitive
+        # symbol hash. `--locked` installs against the CLI's own bundled
+        # Cargo.lock for reproducibility.
+        #
+        # `which boltffi` short-circuits a cached hit, so bumping this version
+        # also needs the Rust cache key below to move or the stale CLI wins.
+        run: which boltffi || cargo install boltffi_cli --version 0.30.1 --locked
 
       # BuildBuddy RBE config from the secret (.bazelrc try-imports it). Falls
       # back to local execution when absent (the NDK is a Bazel download).
@@ -313,7 +325,7 @@ jobs:
         run: |
           SO_BASE_PATH="bindings/kotlin/libs"
           for abi in armeabi-v7a arm64-v8a x86_64; do
-            SO_PATH="$SO_BASE_PATH/$abi/libxybrid-bolt.so"
+            SO_PATH="$SO_BASE_PATH/$abi/libxybrid_bolt.so"
             if [ ! -f "$SO_PATH" ]; then
               echo "Error: .so file not found at $SO_PATH"
               exit 1

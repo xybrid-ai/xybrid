@@ -8,6 +8,7 @@
 
 use crate::cache::layout::CacheLayout;
 use crate::cache::CacheManager;
+use crate::download::{ModelDownload, MAX_IN_FLIGHT_PROGRESS_BP};
 use crate::model_registry::AutoReleasePolicy;
 use crate::registry_client::{
     registry_format_for_auto_local_backend,
@@ -23,7 +24,7 @@ use crate::source::{detect_platform, ModelSource};
 use crate::stream::XybridStream;
 use std::path::{Component, Path, PathBuf};
 use std::pin::Pin;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tempfile::TempDir;
@@ -47,6 +48,12 @@ use xybrid_core::runtime_adapter::{
     RegistryView, RuntimeAdapter, SelectionParams, SelectorCfg, STOP_SEQUENCES_METADATA_KEY,
 };
 use xybrid_core::streaming::{StreamConfig as CoreStreamConfig, VadStreamConfig as CoreVadConfig};
+
+/// Re-exported from [`crate::download`], where the download surface now
+/// lives, so long-standing `xybrid_sdk::model::DownloadStatus` paths keep
+/// resolving.
+#[doc(inline)]
+pub use crate::download::{DownloadState, DownloadStatus};
 
 /// A token generated during streaming inference.
 ///
@@ -198,6 +205,12 @@ pub enum SdkError {
     RateLimited { retry_after_secs: u64 },
     #[error("Request timeout after {timeout_ms}ms")]
     Timeout { timeout_ms: u64 },
+    /// The caller asked for the operation to stop — currently only
+    /// [`ModelDownload::cancel`](crate::download::ModelDownload::cancel).
+    /// Deliberately **not** retryable: retrying would undo the cancellation
+    /// the caller just asked for.
+    #[error("Cancelled: {message}")]
+    Cancelled { message: String },
 }
 
 /// Generates the `message`-only and `_src` (cause-chaining) constructors for
@@ -258,7 +271,8 @@ impl SdkError {
     /// Transient failures (`NetworkError`, `RateLimited`, `Timeout`,
     /// `Offline`) are retryable; everything else — including
     /// `CircuitOpen`, `ConfigError`, `ModelNotFound`, `LoadError`,
-    /// `InferenceError`, and `AbortedForCloudFallback` — is not. `Offline`
+    /// `InferenceError`, `Cancelled`, and `AbortedForCloudFallback` — is
+    /// not. `Offline`
     /// is retryable only across *different* registry URLs (a fallback
     /// registry may be reachable when the primary isn't); within a single
     /// URL the retry loop short-circuits (see `registry_client`).
@@ -298,6 +312,9 @@ impl SdkError {
             SdkError::CacheError { .. } => false,
             SdkError::PipelineError { .. } => false,
             SdkError::CircuitOpen(_) => false, // Don't retry when circuit is open
+            // Retrying a cancelled download would resume exactly what the
+            // caller just stopped.
+            SdkError::Cancelled { .. } => false,
         }
     }
 
@@ -1017,8 +1034,8 @@ impl ModelHandle {
 /// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
 /// # use xybrid_sdk::ModelLoader;
 /// let loader = ModelLoader::from_registry("kokoro-82m");
-/// let model = loader.load_with_progress(|progress| {
-///     println!("Download: {:.1}%", progress * 100.0);
+/// let model = loader.load_with_progress(|status| {
+///     println!("Download: {:.1}%", status.progress * 100.0);
 /// })?;
 /// # Ok(())
 /// # }
@@ -1032,7 +1049,7 @@ const GGUF_PREFERENCE_ORDER: &[&str] = &[
 const VISION_PROJECTOR_PREFERENCE_ORDER: &[&str] =
     &["Q8_0", "Q6_K", "Q5_K_M", "Q4_K_M", "F16", "BF16"];
 
-fn is_gguf_companion(filename: &str) -> bool {
+pub(crate) fn is_gguf_companion(filename: &str) -> bool {
     let filename = filename.to_ascii_lowercase();
     filename.contains("mmproj") || filename.contains("drafter") || filename.contains("dspark")
 }
@@ -1041,7 +1058,7 @@ fn is_gguf_vision_projector(filename: &str) -> bool {
     filename.to_ascii_lowercase().contains("mmproj")
 }
 
-fn select_vision_projector<'a>(gguf_files: &[&'a str]) -> Option<&'a str> {
+pub(crate) fn select_vision_projector<'a>(gguf_files: &[&'a str]) -> Option<&'a str> {
     for preference in VISION_PROJECTOR_PREFERENCE_ORDER {
         if let Some(projector) = gguf_files.iter().find(|filename| {
             is_gguf_vision_projector(filename) && filename.to_uppercase().contains(preference)
@@ -1060,7 +1077,7 @@ fn select_vision_projector<'a>(gguf_files: &[&'a str]) -> Option<&'a str> {
 ///
 /// If `variant` is specified, finds a file containing that quantization string (case-insensitive).
 /// Otherwise, selects the file matching the highest-priority quantization from `GGUF_PREFERENCE_ORDER`.
-fn select_gguf_variant(gguf_files: &[&str], variant: Option<&str>) -> SdkResult<String> {
+pub(crate) fn select_gguf_variant(gguf_files: &[&str], variant: Option<&str>) -> SdkResult<String> {
     if let Some(v) = variant {
         let v_upper = v.to_uppercase();
         if let Some(found) = gguf_files
@@ -1219,7 +1236,7 @@ fn metadata_supports_mlx_token_streaming_with_cfg(
         && cfg.mlx_runtime_ok
 }
 
-fn select_huggingface_files_to_download<'a>(
+pub(crate) fn select_huggingface_files_to_download<'a>(
     repo: &str,
     all_filenames: &[&'a str],
     selected_gguf: Option<&str>,
@@ -1311,6 +1328,146 @@ fn huggingface_materialized_cache_dir(
             .into_iter()
             .find(|dir| dir.join("model_metadata.json").exists())
             .unwrap_or_else(|| cache_layout.huggingface_repo_dir(repo)),
+    }
+}
+
+/// Fetch `filename -> blob hash` for every file of `repo` at `revision_sha`
+/// from the Hub's tree API — the LFS sha256 for large files, the git blob
+/// sha1 for the rest, matching how the shared hub cache names its blobs.
+///
+/// Best-effort: any failure returns `None` (with a debug log) and the caller
+/// downloads instead.
+#[cfg(feature = "huggingface")]
+fn fetch_huggingface_blob_ids(
+    repo: &str,
+    revision_sha: &str,
+) -> Option<std::collections::HashMap<String, String>> {
+    use std::io::Read;
+
+    let endpoint = std::env::var("HF_ENDPOINT")
+        .ok()
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "https://huggingface.co".to_string());
+    let url = format!(
+        "{}/api/models/{}/tree/{}?recursive=true",
+        endpoint.trim_end_matches('/'),
+        repo,
+        revision_sha
+    );
+    let mut request = ureq::get(&url);
+    if let Some(token) = huggingface_api_token() {
+        request = request.set("Authorization", &format!("Bearer {token}"));
+    }
+    let response = match request.call() {
+        Ok(response) => response,
+        Err(e) => {
+            log::debug!(
+                target: "xybrid_sdk",
+                "Failed to fetch file hashes for '{}'@{} ({}); skipping blob reuse",
+                repo, revision_sha, e
+            );
+            return None;
+        }
+    };
+    // Cap the read: a tree listing is small, and a huge response should not
+    // buffer unbounded.
+    let entries: Vec<serde_json::Value> =
+        match serde_json::from_reader(response.into_reader().take(8 * 1024 * 1024)) {
+            Ok(entries) => entries,
+            Err(e) => {
+                log::debug!(
+                    target: "xybrid_sdk",
+                    "Unparseable tree listing for '{}'@{} ({}); skipping blob reuse",
+                    repo, revision_sha, e
+                );
+                return None;
+            }
+        };
+    Some(blob_ids_from_tree_entries(&entries))
+}
+
+/// Extract `path -> blob hash` from Hub tree-API entries, preferring the LFS
+/// sha256 over the git blob sha1 (the shared cache names LFS blobs by
+/// sha256). Non-file entries are skipped.
+#[cfg(feature = "huggingface")]
+fn blob_ids_from_tree_entries(
+    entries: &[serde_json::Value],
+) -> std::collections::HashMap<String, String> {
+    entries
+        .iter()
+        .filter(|entry| entry.get("type").and_then(|t| t.as_str()) == Some("file"))
+        .filter_map(|entry| {
+            let path = entry.get("path").and_then(|p| p.as_str())?;
+            let oid = entry
+                .get("lfs")
+                .and_then(|lfs| lfs.get("oid"))
+                .and_then(|oid| oid.as_str())
+                .or_else(|| entry.get("oid").and_then(|oid| oid.as_str()))?;
+            Some((path.to_string(), oid.to_string()))
+        })
+        .collect()
+}
+
+/// Whether a Hub API failure warrants falling back to local caches: a
+/// transport-level failure (DNS, connection refused, timeout) or a
+/// server-side 5xx. Client errors (401/403/404 — bad repo, bad revision, bad
+/// auth) and malformed responses propagate instead, so a stale local copy
+/// never masks them.
+#[cfg(feature = "huggingface")]
+fn hub_error_is_connectivity(error: &hf_hub::api::sync::ApiError) -> bool {
+    match error {
+        // hf-hub's transport layer is ureq 3 (named here as `ureq3`; the
+        // SDK's own calls use ureq 2).
+        hf_hub::api::sync::ApiError::RequestError(request_error) => match request_error.as_ref() {
+            ureq3::Error::Io(_)
+            | ureq3::Error::Timeout(_)
+            | ureq3::Error::HostNotFound
+            | ureq3::Error::ConnectionFailed => true,
+            ureq3::Error::StatusCode(code) => *code >= 500,
+            _ => false,
+        },
+        _ => false,
+    }
+}
+
+/// The standard `HF_HUB_OFFLINE` switch: any value other than
+/// empty/`0`/`false` forces local-only loads, matching the rest of the
+/// Hugging Face ecosystem.
+#[cfg(feature = "huggingface")]
+fn huggingface_offline_mode() -> bool {
+    std::env::var("HF_HUB_OFFLINE").is_ok_and(|value| {
+        !value.is_empty() && value != "0" && !value.eq_ignore_ascii_case("false")
+    })
+}
+
+/// Resolve the Hub API token the way `hf auth login` stores it: `HF_TOKEN`,
+/// then the token file at `HF_TOKEN_PATH`, then
+/// `{HF_HOME:-~/.cache/huggingface}/token`.
+#[cfg(feature = "huggingface")]
+fn huggingface_api_token() -> Option<String> {
+    if let Ok(token) = std::env::var("HF_TOKEN") {
+        if !token.is_empty() {
+            return Some(token);
+        }
+    }
+    let token_path = std::env::var("HF_TOKEN_PATH")
+        .ok()
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| {
+            std::env::var("HF_HOME")
+                .ok()
+                .filter(|value| !value.is_empty())
+                .map(PathBuf::from)
+                .or_else(|| dirs::home_dir().map(|home| home.join(".cache").join("huggingface")))
+                .map(|hf_home| hf_home.join("token"))
+        })?;
+    let token = std::fs::read_to_string(token_path).ok()?;
+    let token = token.trim();
+    if token.is_empty() {
+        None
+    } else {
+        Some(token.to_string())
     }
 }
 
@@ -1454,13 +1611,6 @@ fn publish_speculative_cloud_event(model_id: &str, latency_ms: u32, streaming: b
     crate::telemetry::publish_telemetry_event(event);
 }
 
-/// Ceiling for in-flight download progress, in basis points (99.99%).
-///
-/// `fetch_extracted` restarts at 0 for every artifact, so hitting 1.0 on the
-/// first one would announce a finished download while later artifacts are
-/// still transferring. 1.0 is reserved for [`DownloadState::Ready`].
-const MAX_IN_FLIGHT_PROGRESS_BP: u32 = 9_999;
-
 /// Completion signal for the background download started by
 /// [`ModelLoader::load_speculative`].
 ///
@@ -1469,74 +1619,73 @@ const MAX_IN_FLIGHT_PROGRESS_BP: u32 = 9_999;
 /// error for a model the caller only ever asked to run. `outcome` is `None`
 /// while the download is in flight, `Some(true)` once the real local handle is
 /// installed, and `Some(false)` if the download failed (cloud keeps serving).
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub(crate) struct SpeculativeDownload {
     outcome: Mutex<Option<bool>>,
     finished: std::sync::Condvar,
-    /// Download completion in basis points (0..=10_000). `f32` has no atomic,
-    /// and a lock here would sit on the download's hot path.
-    progress_bp: std::sync::atomic::AtomicU32,
+    /// Last status the registry client reported. Already aggregated across
+    /// artifacts, monotonic and throttled by [`ProgressReporter`]; this only
+    /// has to store it.
+    progress: Mutex<DownloadStatus>,
+    /// Observers fed by [`XybridModel::watch_download`], so a host can be
+    /// pushed updates instead of polling. Rust-side only — the closure never
+    /// crosses an FFI boundary.
+    observers: Mutex<Vec<crate::download::DownloadObserver>>,
 }
 
-/// Lifecycle of the background download behind a speculative model.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DownloadState {
-    /// Weights still downloading; runs are served from the cloud.
-    Downloading,
-    /// Local handle installed; runs are on-device.
-    Ready,
-    /// Download failed — the cloud keeps serving, and `is_loaded()` will never
-    /// flip. Surfacing this is the only way a host can stop waiting.
-    Failed,
-}
-
-/// One consistent read of a speculative download's progress and state.
-///
-/// Taken as a snapshot so a polling host cannot observe a torn pair (for
-/// example `Ready` alongside a stale 0.34 progress).
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct DownloadStatus {
-    pub state: DownloadState,
-    /// 0.0..=1.0.
-    pub progress: f32,
+impl std::fmt::Debug for SpeculativeDownload {
+    /// Hand-written because the observer closures have no `Debug`; the status
+    /// is the only part worth printing anyway.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SpeculativeDownload")
+            .field("status", &self.status())
+            .finish_non_exhaustive()
+    }
 }
 
 impl SpeculativeDownload {
-    /// Record download progress (0.0..=1.0) from the fetch callback.
-    ///
-    /// `fetch_extracted` reports 0→1 *per artifact* — the main file, then each
-    /// extra (a VLM's projector, for example) — and never says how many are
-    /// coming. Two consequences are handled here:
-    ///
-    /// - monotonic (`fetch_max`), so a bar cannot snap backwards when the next
-    ///   artifact restarts at 0;
-    /// - capped just below 1.0, so finishing the *first* artifact cannot claim
-    ///   the whole download is done. Only the terminal `Ready` state reports
-    ///   1.0 (see [`Self::status`]).
-    ///
-    /// The result under-reports mid-download rather than lying about being
-    /// finished. True aggregation would need an artifact count the registry
-    /// client does not expose.
-    fn set_progress(&self, fraction: f32) {
-        let bp = (fraction.clamp(0.0, 1.0) * 10_000.0) as u32;
-        self.progress_bp
-            .fetch_max(bp.min(MAX_IN_FLIGHT_PROGRESS_BP), Ordering::Relaxed);
+    /// Record a status reported by the registry client's download.
+    fn set_progress(&self, status: DownloadStatus) {
+        // `ProgressReporter` emits the terminal `Ready` the moment the bytes
+        // are verified, but this download is only really done once the local
+        // handle is installed — which `finish` signals. Hold it just below.
+        let status = DownloadStatus {
+            state: DownloadState::Downloading,
+            progress: status
+                .progress
+                .min(MAX_IN_FLIGHT_PROGRESS_BP as f32 / 10_000.0),
+            ..status
+        };
+        *self.progress.lock().unwrap_or_else(|e| e.into_inner()) = status;
+        self.notify(status);
     }
 
     /// Snapshot progress + state together.
     fn status(&self) -> DownloadStatus {
         let outcome = *self.outcome.lock().unwrap_or_else(|e| e.into_inner());
-        let state = match outcome {
-            None => DownloadState::Downloading,
-            Some(true) => DownloadState::Ready,
-            Some(false) => DownloadState::Failed,
-        };
-        let progress = match state {
+        let progress = *self.progress.lock().unwrap_or_else(|e| e.into_inner());
+        match outcome {
+            None => progress,
             // A finished download is 1.0 even if the last callback never fired.
-            DownloadState::Ready => 1.0,
-            _ => self.progress_bp.load(Ordering::Relaxed) as f32 / 10_000.0,
-        };
-        DownloadStatus { state, progress }
+            Some(true) => DownloadStatus::ready(progress.downloaded_bytes, progress.total_bytes),
+            Some(false) => DownloadStatus::terminal(DownloadState::Failed, &progress),
+        }
+    }
+
+    fn notify(&self, status: DownloadStatus) {
+        let mut observers = self.observers.lock().unwrap_or_else(|e| e.into_inner());
+        for observer in observers.iter() {
+            observer(status);
+        }
+        if status.state != DownloadState::Downloading {
+            // Terminal: nothing further will be emitted, so release the host
+            // closures here rather than holding them for the model's lifetime.
+            // Done under the same lock `watch` registers through, so an
+            // observer arriving concurrently either lands before this and
+            // receives the frame, or lands after and reads the terminal
+            // status itself.
+            observers.clear();
+        }
     }
 
     /// Block until the download reaches a terminal state or `timeout` elapses.
@@ -1573,6 +1722,25 @@ impl SpeculativeDownload {
         *guard = Some(installed_local);
         drop(guard);
         self.finished.notify_all();
+        // Pushes the terminal frame and drops the observers, both under the
+        // observer lock (see `notify`).
+        self.notify(self.status());
+    }
+
+    /// Register an observer for pushed progress updates, delivering the
+    /// current snapshot first so a late subscriber still gets a frame.
+    fn watch(&self, observer: crate::download::DownloadObserver) {
+        // Lock before reading the status: `notify` delivers the terminal frame
+        // and clears the list under this same lock, so reading first would
+        // leave a window where a download finishing right now publishes to an
+        // empty list and then drops this observer unnotified — leaving the
+        // host's stream open forever.
+        let mut observers = self.observers.lock().unwrap_or_else(|e| e.into_inner());
+        let snapshot = self.status();
+        observer(snapshot);
+        if snapshot.state == DownloadState::Downloading {
+            observers.push(observer);
+        }
     }
 
     /// Block until the background download finishes; `true` if it installed a
@@ -2068,16 +2236,26 @@ impl ModelLoader {
 
     /// Load the model with a progress callback.
     ///
-    /// The callback receives progress as a float from 0.0 to 1.0.
-    /// Only applies to registry-based loading (downloads from HuggingFace).
+    /// The callback receives a [`DownloadStatus`]: state, a 0.0–1.0 fraction
+    /// aggregated across every artifact the model needs, bytes transferred,
+    /// and the declared total when the source has one. Updates arrive roughly
+    /// ten times a second, never move backwards, and reach 1.0 only alongside
+    /// [`DownloadState::Ready`].
+    ///
+    /// Only registry and Hugging Face sources download anything; local
+    /// bundles and directories report `Ready` and nothing else.
     ///
     /// # Example
     /// ```no_run
     /// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
     /// # use xybrid_sdk::ModelLoader;
     /// # let loader: ModelLoader = unimplemented!();
-    /// let model = loader.load_with_progress(|progress| {
-    ///     println!("Download: {:.1}%", progress * 100.0);
+    /// let model = loader.load_with_progress(|status| {
+    ///     println!(
+    ///         "Download: {:.1}% ({} bytes)",
+    ///         status.progress * 100.0,
+    ///         status.downloaded_bytes
+    ///     );
     /// })?;
     /// # Ok(())
     /// # }
@@ -2085,7 +2263,7 @@ impl ModelLoader {
     #[allow(deprecated)]
     pub fn load_with_progress<F>(&self, progress_callback: F) -> SdkResult<XybridModel>
     where
-        F: Fn(f32),
+        F: Fn(DownloadStatus),
     {
         // Before anything is downloaded or mapped: if this load opted into
         // auto-release and the device is under memory pressure, free the
@@ -2117,6 +2295,38 @@ impl ModelLoader {
         }
     }
 
+    /// Start downloading this model's weights in the background and return a
+    /// handle to watch.
+    ///
+    /// Separating the download from the load is what gives blocking hosts a
+    /// progress bar: `load()` has no object to poll while it runs, this does.
+    /// The download populates the normal SDK cache, so the later `load()` (or
+    /// `load_async()`) hits it and returns without touching the network.
+    ///
+    /// Returns immediately. Sources with nothing to fetch — a local directory
+    /// or bundle — come back already [`DownloadState::Ready`].
+    ///
+    /// # Example
+    /// ```no_run
+    /// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
+    /// # use std::time::Duration;
+    /// # use xybrid_sdk::{DownloadState, ModelLoader};
+    /// let loader = ModelLoader::from_registry("qwen3-0.6b");
+    /// let download = loader.start_download();
+    /// while download.next_status(Duration::from_millis(250))?.state
+    ///     == DownloadState::Downloading
+    /// {
+    ///     let status = download.status();
+    ///     println!("{} / {:?}", status.downloaded_bytes, status.total_bytes);
+    /// }
+    /// let model = loader.load()?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn start_download(&self) -> Arc<ModelDownload> {
+        ModelDownload::spawn(self.source.clone())
+    }
+
     /// Load the model asynchronously.
     pub async fn load_async(&self) -> SdkResult<XybridModel> {
         // For now, wrap the sync version. Real async would use tokio::fs and async HTTP.
@@ -2138,7 +2348,7 @@ impl ModelLoader {
         progress_callback: F,
     ) -> SdkResult<XybridModel>
     where
-        F: Fn(f32),
+        F: Fn(DownloadStatus),
     {
         // Speculative cloud: when enabled, a key is set, and the model isn't
         // cached yet, serve from cloud while the weights download in the
@@ -2251,8 +2461,9 @@ impl ModelLoader {
                         &id_owned,
                         platform_owned.as_deref(),
                         // Feed the poll-able progress cell; hosts read it via
-                        // `XybridModel::download_status`.
-                        |fraction| bg_download.set_progress(fraction),
+                        // `XybridModel::download_status` or subscribe with
+                        // `XybridModel::watch_download`.
+                        |status| bg_download.set_progress(status),
                     )?;
                     Self::create_model_handle(&dir, backend_override)
                 });
@@ -2370,6 +2581,107 @@ impl ModelLoader {
         Ok(Self::publish_loaded_model(handle))
     }
 
+    /// Try to load `repo` entirely from the shared Hugging Face cache with
+    /// zero network I/O.
+    ///
+    /// `None` means no usable snapshot (absent repo, unresolvable revision,
+    /// or an incomplete selection) — the caller proceeds with its own flow.
+    /// `Some(result)` means a complete snapshot was found and the load was
+    /// attempted from it.
+    ///
+    /// Because the revision resolves through the shared cache's *local* refs
+    /// and file selection runs over the snapshot's own (possibly partial)
+    /// listing, neither freshness nor completeness against the remote repo
+    /// can be verified here. Callers must only use this where that is
+    /// acceptable: explicit offline mode (`HF_HUB_OFFLINE`), or a
+    /// connectivity fallback (with a warning) when the Hub API is
+    /// unreachable. The online path instead resolves through the Hub API and
+    /// reuses shared files per-file against the authoritative manifest.
+    #[cfg(feature = "huggingface")]
+    fn try_load_from_shared_snapshot<F>(
+        &self,
+        cache_layout: &CacheLayout,
+        repo: &str,
+        revision: Option<&str>,
+        variant: Option<&str>,
+        progress_callback: &F,
+    ) -> Option<SdkResult<XybridModel>>
+    where
+        F: Fn(DownloadStatus),
+    {
+        let snapshot = crate::cache::hf_shared::find_shared_snapshot(repo, revision)?;
+        log::debug!(target: "xybrid_sdk", "Shared Hugging Face cache snapshot for '{}' at commit {}", repo, snapshot.commit);
+        let shared_files =
+            crate::cache::hf_shared::select_snapshot_files(&snapshot, repo, variant)?;
+        let result = (|| {
+            let cache_dir = huggingface_materialized_cache_dir(
+                cache_layout,
+                repo,
+                revision.map(|_| snapshot.commit.as_str()),
+                variant,
+            );
+            std::fs::create_dir_all(&cache_dir)?;
+            let shared_files: Vec<&str> = shared_files.iter().map(String::as_str).collect();
+            crate::cache::hf_shared::materialize_from_shared(&snapshot, &shared_files, &cache_dir)
+                .map_err(|e| {
+                    SdkError::cache_src(
+                        format!(
+                            "Failed to materialize '{}' from shared Hugging Face cache",
+                            repo
+                        ),
+                        e,
+                    )
+                })?;
+            // Nothing crossed the network — the files were hardlinked or
+            // copied out of the shared cache — so the byte count is honestly
+            // zero and the total unknown. The terminal `Ready` still fires so
+            // a host driving a bar sees it complete.
+            progress_callback(DownloadStatus::ready(0, None));
+
+            let metadata_path = cache_dir.join("model_metadata.json");
+            if !metadata_path.exists() {
+                log::info!(
+                    target: "xybrid_sdk",
+                    "No model_metadata.json in shared-cache snapshot of '{}', attempting auto-generation...",
+                    repo
+                );
+                match crate::metadata_gen::generate_metadata(&cache_dir, repo) {
+                    Ok((_metadata, _task_inference)) => {
+                        log::info!(
+                            target: "xybrid_sdk",
+                            "Auto-generated model_metadata.json for '{}'. \
+                             Review and adjust if inference results are unexpected.",
+                            repo
+                        );
+                    }
+                    Err(e) => {
+                        return Err(SdkError::MetadataNotFound(format!(
+                            "HuggingFace repo '{}' does not contain model_metadata.json and \
+                             auto-generation failed: {}. \
+                             Create one manually — see docs/sdk/MODEL_METADATA.md",
+                            repo, e
+                        )));
+                    }
+                }
+            }
+
+            let model = self.load_from_directory(&cache_dir)?;
+            if let Some(requested_revision) = revision {
+                cache_layout.record_huggingface_revision(
+                    repo,
+                    requested_revision,
+                    &snapshot.commit,
+                    variant,
+                )?;
+            } else {
+                cache_layout.record_huggingface_repo(repo)?;
+            }
+            log::info!(target: "xybrid_sdk", "Reusing model from local Hugging Face cache: {}", cache_dir.display());
+            Ok(model)
+        })();
+        Some(result)
+    }
+
     /// Load a model from HuggingFace Hub.
     ///
     /// Only downloads the selected GGUF variant (defaults to Q4_K_M) plus essential
@@ -2383,7 +2695,7 @@ impl ModelLoader {
         _progress_callback: F,
     ) -> SdkResult<XybridModel>
     where
-        F: Fn(f32),
+        F: Fn(DownloadStatus),
     {
         use hf_hub::{api::sync::ApiBuilder, Repo, RepoType};
 
@@ -2392,9 +2704,56 @@ impl ModelLoader {
         if revision.is_none() {
             let cache_dir = huggingface_materialized_cache_dir(&cache_layout, repo, None, variant);
             if cache_layout.is_huggingface_repo_materialized(repo, &cache_dir) {
-                log::info!(target: "xybrid_sdk", "Loading HuggingFace model from cache: {}", cache_dir.display());
-                return self.load_from_directory(&cache_dir);
+                let dangling = crate::cache::hf_shared::remove_dangling_files(&cache_dir);
+                if dangling == 0 {
+                    log::info!(target: "xybrid_sdk", "Loading HuggingFace model from cache: {}", cache_dir.display());
+                    return self.load_from_directory(&cache_dir);
+                }
+                log::warn!(
+                    target: "xybrid_sdk",
+                    "Cached copy of '{}' has {} dangling symlink(s) (source cache pruned?); removing it and re-materializing",
+                    repo, dangling
+                );
+                // Surviving entries may belong to an older commit than the
+                // one about to be materialized, and refilling around them
+                // would mix commits in one directory. This unpinned dir is
+                // not commit-keyed, so the only safe repair is rebuilding it
+                // from scratch at a single resolved commit.
+                if let Err(e) = std::fs::remove_dir_all(&cache_dir) {
+                    log::warn!(
+                        target: "xybrid_sdk",
+                        "Failed to remove corrupt cache dir {}: {}",
+                        cache_dir.display(),
+                        e
+                    );
+                }
             }
+        }
+
+        // Explicit offline mode (the standard HF_HUB_OFFLINE switch): load
+        // from the shared Hugging Face cache's local refs or fail — never
+        // touch the network. Outside the desktop allowlist
+        // (macOS/Linux/Windows) `find_shared_snapshot` always returns `None`,
+        // keeping mobile and other non-desktop behavior unchanged.
+        if huggingface_offline_mode() {
+            if let Some(result) = self.try_load_from_shared_snapshot(
+                &cache_layout,
+                repo,
+                revision,
+                variant,
+                &_progress_callback,
+            ) {
+                log::warn!(
+                    target: "xybrid_sdk",
+                    "HF_HUB_OFFLINE is set; loading '{}' from the shared Hugging Face cache — freshness and completeness cannot be verified offline",
+                    repo
+                );
+                return result;
+            }
+            return Err(SdkError::offline(format!(
+                "HF_HUB_OFFLINE is set and no usable local copy of '{}' exists in the shared Hugging Face cache",
+                repo
+            )));
         }
 
         log::info!(target: "xybrid_sdk", "Downloading model from HuggingFace: {}", repo);
@@ -2438,8 +2797,35 @@ impl ModelLoader {
                                     variant,
                                 )
                                 .unwrap_or(cache_dir);
-                            log::info!(target: "xybrid_sdk", "Loading offline HuggingFace revision from cache: {}", cache_dir.display());
-                            return self.load_from_directory(&cache_dir);
+                            if crate::cache::hf_shared::remove_dangling_files(&cache_dir) == 0 {
+                                log::info!(target: "xybrid_sdk", "Loading offline HuggingFace revision from cache: {}", cache_dir.display());
+                                return self.load_from_directory(&cache_dir);
+                            }
+                            log::warn!(
+                                target: "xybrid_sdk",
+                                "Offline cache for '{}'@{} has dangling symlinks (source cache pruned?); trying the shared Hugging Face cache",
+                                repo, requested_revision
+                            );
+                        }
+                    }
+                    // Connectivity fallback: resolve the revision through
+                    // the shared cache's local refs instead of the Hub API.
+                    // Client errors (bad repo, bad revision, bad auth)
+                    // propagate instead of being masked by a stale copy.
+                    if hub_error_is_connectivity(&error) {
+                        if let Some(result) = self.try_load_from_shared_snapshot(
+                            &cache_layout,
+                            repo,
+                            revision,
+                            variant,
+                            &_progress_callback,
+                        ) {
+                            log::warn!(
+                                target: "xybrid_sdk",
+                                "Hub API unreachable; falling back to the shared Hugging Face cache for '{}'@{} — a mutable revision may be stale",
+                                repo, requested_revision
+                            );
+                            return result;
                         }
                     }
                     return Err(SdkError::network_src(
@@ -2461,17 +2847,24 @@ impl ModelLoader {
                 variant,
             );
             if cache_layout.is_huggingface_revision_materialized(repo, &repo_info.sha, variant) {
-                cache_layout.record_huggingface_revision(
-                    repo,
-                    requested_revision,
-                    &repo_info.sha,
-                    variant,
-                )?;
-                let cache_dir = cache_layout
+                let materialized_dir = cache_layout
                     .materialized_huggingface_revision_dir(repo, &repo_info.sha, variant)
-                    .unwrap_or(cache_dir);
-                log::info!(target: "xybrid_sdk", "Loading HuggingFace model from cache: {}", cache_dir.display());
-                return self.load_from_directory(&cache_dir);
+                    .unwrap_or_else(|| cache_dir.clone());
+                if crate::cache::hf_shared::remove_dangling_files(&materialized_dir) == 0 {
+                    cache_layout.record_huggingface_revision(
+                        repo,
+                        requested_revision,
+                        &repo_info.sha,
+                        variant,
+                    )?;
+                    log::info!(target: "xybrid_sdk", "Loading HuggingFace model from cache: {}", materialized_dir.display());
+                    return self.load_from_directory(&materialized_dir);
+                }
+                log::info!(
+                    target: "xybrid_sdk",
+                    "Cached revision of '{}' had dangling symlink(s) (source cache pruned?); re-downloading",
+                    repo
+                );
             }
             let resolved_repo =
                 Repo::with_revision(repo.to_string(), RepoType::Model, repo_info.sha.clone());
@@ -2479,13 +2872,42 @@ impl ModelLoader {
         } else {
             let cache_dir = huggingface_materialized_cache_dir(&cache_layout, repo, None, variant);
             let repo_api = api.repo(Repo::new(repo.to_string(), RepoType::Model));
-            let repo_info = repo_api.info().map_err(|error| {
-                SdkError::network_src(
-                    format!("Failed to get HuggingFace repo info for '{}'", repo),
-                    error,
-                )
-            })?;
-            (cache_dir, repo_api, repo_info)
+            let repo_info = match repo_api.info() {
+                Ok(info) => info,
+                Err(error) => {
+                    // Connectivity fallback: resolve `main`/`master` through
+                    // the shared cache's local refs instead of the Hub API.
+                    // Client errors (bad repo, bad revision, bad auth)
+                    // propagate instead of being masked by a stale copy.
+                    if hub_error_is_connectivity(&error) {
+                        if let Some(result) = self.try_load_from_shared_snapshot(
+                            &cache_layout,
+                            repo,
+                            None,
+                            variant,
+                            &_progress_callback,
+                        ) {
+                            log::warn!(
+                                target: "xybrid_sdk",
+                                "Hub API unreachable; falling back to the shared Hugging Face cache for '{}' — the local ref may be stale",
+                                repo
+                            );
+                            return result;
+                        }
+                    }
+                    return Err(SdkError::network_src(
+                        format!("Failed to get HuggingFace repo info for '{}'", repo),
+                        error,
+                    ));
+                }
+            };
+            // Pin every subsequent file request to the commit `info()` just
+            // resolved — `Repo::new` stays on mutable `main`, which could
+            // move between `info()` and the downloads below and produce a
+            // directory mixing two commits.
+            let resolved_repo =
+                Repo::with_revision(repo.to_string(), RepoType::Model, repo_info.sha.clone());
+            (cache_dir, api.repo(resolved_repo), repo_info)
         };
 
         let metadata_path = cache_dir.join("model_metadata.json");
@@ -2543,25 +2965,34 @@ impl ModelLoader {
         // Create cache directory
         std::fs::create_dir_all(&cache_dir)?;
 
+        // Shared Hugging Face cache snapshot at the exact commit the Hub API
+        // just resolved, if the user already has one (via `huggingface-cli
+        // download`, transformers, ...). Files it holds are reused below
+        // instead of downloaded; because resolution went through the Hub API,
+        // a stale local ref can never divert this.
+        let shared_snapshot =
+            crate::cache::hf_shared::find_shared_snapshot(repo, Some(&repo_info.sha));
+
         let total_files = files_to_download.len();
+        // The Hub API gives no per-file sizes here, so `total_bytes` stays
+        // `None` and the fraction is coarse (completed files over total).
+        // `downloaded_bytes` is still real: each file is stat'd once it lands.
+        let hf_cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let hf_progress = crate::download::ProgressReporter::new(
+            None,
+            total_files,
+            hf_cancel,
+            &_progress_callback as &dyn Fn(DownloadStatus),
+        );
+        let mut reused_files = 0usize;
+        // Lazily fetched `filename -> blob hash` map for content-addressed
+        // reuse; outer None = not fetched yet, inner None = fetch failed.
+        let mut remote_blob_ids: Option<Option<std::collections::HashMap<String, String>>> = None;
         for (i, filename) in files_to_download.iter().enumerate() {
-            log::debug!(target: "xybrid_sdk", "Downloading [{}/{}]: {}", i + 1, total_files, filename);
-
             // Report approximate progress
-            _progress_callback((i as f32) / (total_files as f32));
+            hf_progress.set_fraction((i as f32) / (total_files as f32));
 
-            // Download file (hf-hub caches internally)
-            let cached_path = repo_api.get(filename).map_err(|e| {
-                SdkError::network_src(
-                    format!("Failed to download '{}' from '{}'", filename, repo),
-                    e,
-                )
-            })?;
-
-            // Create target path in our cache directory
             let target_path = cache_dir.join(filename);
-
-            // Create parent directories if the file is in a subdirectory
             if let Some(parent) = target_path.parent() {
                 std::fs::create_dir_all(parent)?;
             }
@@ -2571,28 +3002,96 @@ impl ModelLoader {
                 continue;
             }
 
-            // Create symlink to hf-hub's cached file (avoids duplication)
-            #[cfg(unix)]
-            {
-                std::os::unix::fs::symlink(&cached_path, &target_path).map_err(|e| {
-                    SdkError::IoError(std::io::Error::other(format!(
-                        "Failed to symlink {} -> {}: {}",
-                        cached_path.display(),
-                        target_path.display(),
-                        e
-                    )))
-                })?;
+            // Reuse the file from the shared cache when the snapshot holds
+            // it; any failure here falls back to the download below instead
+            // of failing the load.
+            if let Some(snapshot) = &shared_snapshot {
+                let source_path = snapshot.dir.join(filename);
+                if source_path.is_file() {
+                    match crate::cache::hf_shared::link_or_copy(&source_path, &target_path) {
+                        Ok(()) => {
+                            log::debug!(target: "xybrid_sdk", "Reusing [{}/{}] from shared Hugging Face cache: {}", i + 1, total_files, filename);
+                            reused_files += 1;
+                            continue;
+                        }
+                        Err(e) => {
+                            log::debug!(
+                                target: "xybrid_sdk",
+                                "Failed to reuse '{}' from shared Hugging Face cache ({}); downloading instead",
+                                filename, e
+                            );
+                        }
+                    }
+                }
             }
 
-            // On Windows, copy the file instead
-            #[cfg(not(unix))]
-            {
-                std::fs::copy(&cached_path, &target_path)?;
+            // Content-addressed fallback: even without a snapshot at this
+            // commit, the shared cache may hold these exact bytes under
+            // `blobs/<hash>` — e.g. the commit moved but this file didn't.
+            // Expected hashes come from the Hub's tree API, fetched at most
+            // once per load and only when the repo has a local blob store;
+            // any failure here just downloads.
+            if remote_blob_ids.is_none() && crate::cache::hf_shared::shared_repo_has_blobs(repo) {
+                remote_blob_ids = Some(fetch_huggingface_blob_ids(repo, &repo_info.sha));
             }
+            if let Some(Some(blob_ids)) = &remote_blob_ids {
+                if let Some(source_path) = blob_ids
+                    .get(*filename)
+                    .and_then(|oid| crate::cache::hf_shared::shared_repo_blob_path(repo, oid))
+                {
+                    match crate::cache::hf_shared::link_or_copy(&source_path, &target_path) {
+                        Ok(()) => {
+                            log::debug!(target: "xybrid_sdk", "Reusing [{}/{}] from shared Hugging Face blob store: {}", i + 1, total_files, filename);
+                            reused_files += 1;
+                            continue;
+                        }
+                        Err(e) => {
+                            log::debug!(
+                                target: "xybrid_sdk",
+                                "Failed to reuse '{}' from shared Hugging Face blob store ({}); downloading instead",
+                                filename, e
+                            );
+                        }
+                    }
+                }
+            }
+
+            log::debug!(target: "xybrid_sdk", "Downloading [{}/{}]: {}", i + 1, total_files, filename);
+
+            // Download file (hf-hub caches internally), then materialize it
+            // (symlink on unix, copy elsewhere — avoids duplication)
+            let cached_path = repo_api.get(filename).map_err(|e| {
+                SdkError::network_src(
+                    format!("Failed to download '{}' from '{}'", filename, repo),
+                    e,
+                )
+            })?;
+            crate::cache::hf_shared::link_or_copy(&cached_path, &target_path).map_err(|e| {
+                SdkError::IoError(std::io::Error::other(format!(
+                    "Failed to materialize {} -> {}: {}",
+                    cached_path.display(),
+                    target_path.display(),
+                    e
+                )))
+            })?;
+            // Real bytes, even though the fraction cannot be: `hf-hub` reports
+            // nothing mid-transfer, so the size is read off the landed file.
+            hf_progress.finish_file(
+                std::fs::metadata(&target_path)
+                    .map(|meta| meta.len())
+                    .unwrap_or(0),
+            );
+        }
+        if reused_files > 0 {
+            log::info!(
+                target: "xybrid_sdk",
+                "Reused {}/{} files for '{}' from the shared Hugging Face cache",
+                reused_files, total_files, repo
+            );
         }
 
         // Report completion
-        _progress_callback(1.0);
+        hf_progress.finish();
 
         // Auto-generate model_metadata.json if not provided by the repo
         if !metadata_path.exists() {
@@ -2647,7 +3146,7 @@ impl ModelLoader {
         _progress_callback: F,
     ) -> SdkResult<XybridModel>
     where
-        F: Fn(f32),
+        F: Fn(DownloadStatus),
     {
         Err(SdkError::ConfigError(
             "HuggingFace loading requires the 'huggingface' feature flag. \
@@ -3042,10 +3541,26 @@ impl XybridModel {
     pub fn download_status(&self) -> DownloadStatus {
         match self.speculative.as_ref() {
             Some(download) => download.status(),
-            None => DownloadStatus {
-                state: DownloadState::Ready,
-                progress: 1.0,
-            },
+            None => DownloadStatus::ready(0, None),
+        }
+    }
+
+    /// Subscribe to pushed download updates for a speculatively-loaded model.
+    ///
+    /// The current snapshot arrives synchronously, so a late subscriber is
+    /// never left without a first frame, and the observer is dropped once the
+    /// download reaches a terminal state. Rust-side only: the closure never
+    /// crosses an FFI boundary — bindings forward it into their own transport.
+    ///
+    /// A no-op beyond the first frame for an ordinary local model, which is
+    /// already `Ready`.
+    pub fn watch_download<F>(&self, observer: F)
+    where
+        F: Fn(DownloadStatus) + Send + Sync + 'static,
+    {
+        match self.speculative.as_ref() {
+            Some(download) => download.watch(Box::new(observer)),
+            None => observer(self.download_status()),
         }
     }
 
@@ -5061,6 +5576,38 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "huggingface")]
+    #[test]
+    fn blob_ids_prefer_lfs_sha256_and_skip_non_files() {
+        let entries: Vec<serde_json::Value> = serde_json::from_str(
+            r#"[
+                {"type":"file","path":"model.gguf","oid":"1111111111111111111111111111111111111111",
+                 "lfs":{"oid":"7e6f72643caafc9a68256686638c4d7916f2cec76d1df478d4c3ddcd95a6aed4"}},
+                {"type":"file","path":"config.json","oid":"2222222222222222222222222222222222222222"},
+                {"type":"directory","path":"onnx","oid":"3333333333333333333333333333333333333333"},
+                {"type":"file","path":"broken"}
+            ]"#,
+        )
+        .unwrap();
+
+        let ids = blob_ids_from_tree_entries(&entries);
+        assert_eq!(
+            ids.get("model.gguf").map(String::as_str),
+            Some("7e6f72643caafc9a68256686638c4d7916f2cec76d1df478d4c3ddcd95a6aed4"),
+            "LFS files map to their sha256, not the git oid"
+        );
+        assert_eq!(
+            ids.get("config.json").map(String::as_str),
+            Some("2222222222222222222222222222222222222222"),
+            "non-LFS files map to their git blob sha1"
+        );
+        assert!(!ids.contains_key("onnx"), "directories are skipped");
+        assert!(
+            !ids.contains_key("broken"),
+            "entries without a hash are skipped"
+        );
+    }
+
     #[test]
     fn distinct_huggingface_commits_do_not_share_materialized_cache() {
         let temp_dir = tempfile::tempdir().unwrap();
@@ -6054,23 +6601,36 @@ mod tests {
         assert!(!download.wait_for_local());
     }
 
-    /// Hosts poll `download_status` to drive a progress bar, so progress and
-    /// state must move together and never report a torn pair.
+    /// Build the status a registry download would report mid-transfer.
+    fn downloading(progress: f32, downloaded_bytes: u64, total_bytes: u64) -> DownloadStatus {
+        DownloadStatus {
+            state: DownloadState::Downloading,
+            progress,
+            downloaded_bytes,
+            total_bytes: Some(total_bytes),
+        }
+    }
+
+    /// Hosts poll `download_status` to drive a progress bar, so progress,
+    /// bytes and state must move together and never report a torn pair.
     #[test]
     fn download_status_tracks_progress_then_terminal_state() {
         let download = SpeculativeDownload::default();
         assert_eq!(download.status().state, DownloadState::Downloading);
         assert_eq!(download.status().progress, 0.0);
+        assert_eq!(download.status().downloaded_bytes, 0);
 
-        download.set_progress(0.42);
+        download.set_progress(downloading(0.42, 420, 1_000));
         let mid = download.status();
         assert_eq!(mid.state, DownloadState::Downloading);
         assert!((mid.progress - 0.42).abs() < 1e-3, "got {}", mid.progress);
+        assert_eq!(mid.downloaded_bytes, 420);
+        assert_eq!(mid.total_bytes, Some(1_000));
 
-        // Out-of-range input from a backend is clamped, not wrapped — and a
-        // still-running download never claims 1.0, because `fetch_extracted`
-        // reports 1.0 per artifact and more may follow.
-        download.set_progress(1.7);
+        // The registry client emits `Ready` at 1.0 the moment the bytes are
+        // verified, but this download is only done once the local handle is
+        // installed. Until `finish`, the reported bar stays below 1.0.
+        download.set_progress(DownloadStatus::ready(1_000, Some(1_000)));
         let capped = download.status();
         assert_eq!(capped.state, DownloadState::Downloading);
         assert!(
@@ -6079,22 +6639,79 @@ mod tests {
             capped.progress
         );
 
-        // Monotonic: a later artifact restarting at 0 cannot rewind the bar.
-        download.set_progress(0.0);
-        assert_eq!(download.status().progress, capped.progress);
-
         // A finished download reads 1.0 even if the last callback never fired.
         let ready = SpeculativeDownload::default();
-        ready.set_progress(0.9);
+        ready.set_progress(downloading(0.9, 900, 1_000));
         ready.finish(true);
         let done = ready.status();
         assert_eq!(done.state, DownloadState::Ready);
         assert_eq!(done.progress, 1.0);
+        assert_eq!(done.downloaded_bytes, 1_000);
 
         // Failure is visible: the host must be able to stop waiting.
         let failed = SpeculativeDownload::default();
         failed.finish(false);
         assert_eq!(failed.status().state, DownloadState::Failed);
+    }
+
+    /// A host that subscribes instead of polling must get a frame right away
+    /// (it may have subscribed late) and a terminal frame at the end.
+    #[test]
+    fn watch_download_pushes_first_and_terminal_frames() {
+        let download = SpeculativeDownload::default();
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let sink = Arc::clone(&seen);
+        download.watch(Box::new(move |status| {
+            sink.lock().unwrap_or_else(|e| e.into_inner()).push(status);
+        }));
+        assert_eq!(seen.lock().unwrap().len(), 1, "no frame on subscribe");
+
+        download.set_progress(downloading(0.5, 500, 1_000));
+        download.finish(true);
+
+        let frames = seen.lock().unwrap().clone();
+        assert_eq!(frames.len(), 3);
+        assert_eq!(frames.last().unwrap().state, DownloadState::Ready);
+        // Dropped after the terminal frame, so host closures are not retained.
+        assert!(download
+            .observers
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .is_empty());
+    }
+
+    /// Same lock-ordering contract as [`crate::download::ModelDownload::watch`]:
+    /// the observer lock must be held across the status read, because `notify`
+    /// delivers the terminal frame and clears the list under it. Reading first
+    /// would let a download finishing in that window publish to an empty list
+    /// and drop the observer that arrives a moment later, leaving the host's
+    /// stream open forever.
+    #[test]
+    fn speculative_watch_holds_the_observer_lock_across_its_status_read() {
+        let download = Arc::new(SpeculativeDownload::default());
+        let guard = download.observers.lock().unwrap_or_else(|e| e.into_inner());
+
+        let subscriber = Arc::clone(&download);
+        let delivered = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let flag = Arc::clone(&delivered);
+        let watching = std::thread::spawn(move || {
+            subscriber.watch(Box::new(move |_| {
+                flag.store(true, std::sync::atomic::Ordering::Relaxed)
+            }));
+        });
+
+        std::thread::sleep(Duration::from_millis(50));
+        assert!(
+            !delivered.load(std::sync::atomic::Ordering::Relaxed),
+            "watch delivered a frame without holding the observer lock"
+        );
+
+        drop(guard);
+        watching.join().expect("watching thread panicked");
+        assert!(
+            delivered.load(std::sync::atomic::Ordering::Relaxed),
+            "watch never delivered its first frame"
+        );
     }
 
     /// `await_download` must return on timeout rather than parking the caller

@@ -195,6 +195,8 @@ jobs:
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+        with:
+          packages: platform-tools
 
       # Use empty .so placeholders — we're validating the Gradle pipeline, not
       # shipping binaries. Real Maven Central publish still needs build-android.

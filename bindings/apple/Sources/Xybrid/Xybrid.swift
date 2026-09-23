@@ -17,6 +17,20 @@ import UIKit
 
 // MARK: - SDK Initialization
 
+// The generated free functions below share their names with the `Xybrid`
+// members that forward to them, and inside an enum body an unqualified call
+// resolves to the static member first — i.e. to itself. The module name can't
+// disambiguate either, because this module is also called `Xybrid`. Binding
+// them here, at file scope, where the enum's members are not in scope, is the
+// one place the global is reachable by name.
+private let boltReleaseMemory = releaseMemory
+private let boltSetAutoRelease = setAutoRelease
+private let boltIsAutoReleaseEnabled = isAutoReleaseEnabled
+private let boltSetSpeculativeCloud = setSpeculativeCloud
+private let boltIsSpeculativeCloudEnabled = isSpeculativeCloudEnabled
+private let boltHasApiKey = hasApiKey
+private let boltSetProviderApiKey = setProviderApiKey
+
 /// Main entry point for the Xybrid SDK on iOS/macOS.
 ///
 /// Call `Xybrid.initialize()` once before using any other Xybrid functionality.
@@ -104,6 +118,76 @@ public enum Xybrid {
         initLock.lock()
         defer { initLock.unlock() }
         return initialized
+    }
+
+    /// Releases every idle loaded model's memory; returns how many were released.
+    ///
+    /// Wire this to the platform's low-memory signal:
+    ///
+    /// ```swift
+    /// override func didReceiveMemoryWarning() {
+    ///     super.didReceiveMemoryWarning()
+    ///     Xybrid.releaseMemory()
+    /// }
+    /// ```
+    ///
+    /// Models with a run in flight are skipped, and a released model reloads
+    /// itself the next time it is used — there is no new error to handle and
+    /// nothing to reload by hand.
+    @discardableResult
+    public static func releaseMemory() -> UInt32 {
+        boltReleaseMemory()
+    }
+
+    /// Enables or disables automatic model release for subsequent loads.
+    ///
+    /// When enabled, loading a model while the device reports memory pressure
+    /// first releases least-recently-used idle models. Off by default;
+    /// `releaseMemory()` works either way.
+    public static func setAutoRelease(_ enabled: Bool) {
+        boltSetAutoRelease(enabled)
+    }
+
+    /// Whether automatic model release is enabled process-wide.
+    public static var isAutoReleaseEnabled: Bool {
+        boltIsAutoReleaseEnabled()
+    }
+
+    /// Sets the process-wide default for speculative cloud serving.
+    ///
+    /// Speculation answers from the cloud gateway while a registry model's
+    /// weights download in the background, instead of blocking on the download.
+    ///
+    /// This is the *default* for loads that do not opt in per-load;
+    /// ``ModelLoader/fromRegistrySpeculative(_:)`` opts in explicitly and is
+    /// unaffected by this toggle. Off by default. Either way, speculation also
+    /// needs a resolvable API key and a model that is not already cached —
+    /// ``ModelLoader/willSpeculate`` reports the combined answer for a
+    /// specific loader.
+    public static func setSpeculativeCloud(_ enabled: Bool) {
+        boltSetSpeculativeCloud(enabled)
+    }
+
+    /// Whether the global speculative-cloud default is on.
+    public static var isSpeculativeCloudEnabled: Bool {
+        boltIsSpeculativeCloudEnabled()
+    }
+
+    /// Whether a Xybrid gateway API key is resolvable, from either
+    /// `initialize(apiKey:)` or the environment.
+    ///
+    /// Inference runs on-device without one; this reports whether the optional
+    /// platform features (cloud routing, telemetry) can engage.
+    public static var hasApiKey: Bool {
+        boltHasApiKey()
+    }
+
+    /// Sets the API key for a specific cloud provider.
+    ///
+    /// Separate from `initialize(apiKey:)`, which sets the Xybrid platform key.
+    /// Use this when routing to a provider the gateway forwards to.
+    public static func setProviderApiKey(provider: String, apiKey: String) {
+        boltSetProviderApiKey(provider, apiKey)
     }
 
     private static func registerPlatformObservers() {
@@ -247,6 +331,36 @@ public struct ModelLoader: Sendable {
             return try XybridModel(fromRegistrySpeculative: id)
         }
     }
+
+    /// Start downloading this model's weights in the background, without
+    /// loading them.
+    ///
+    /// This is how you get a progress bar: ``load()`` blocks, so there is no
+    /// object to poll while it runs — this is that object. The download fills
+    /// the SDK cache, so the ``load()`` afterwards returns immediately.
+    ///
+    /// ```swift
+    /// let loader = Xybrid.model("qwen3-0.6b")
+    /// let download = loader.download()
+    /// for await status in download.progress() {
+    ///     bar.progress = Float(status.progress)
+    ///     label.text = "\(status.downloadedBytes) / \(status.totalBytes ?? 0)"
+    /// }
+    /// let model = try await loader.load()
+    /// ```
+    ///
+    /// Returns `nil` for a source with nothing to fetch — a local bundle,
+    /// directory, or Hugging Face repo — where ``load()`` is the whole story.
+    /// Cancelling the task consuming `progress()` unsubscribes from updates;
+    /// call ``XybridDownload/cancel()`` to stop the transfer itself.
+    public func download() -> XybridDownload? {
+        switch source {
+        case .registry(let id), .registrySpeculative(let id):
+            return XybridDownload(fromRegistry: id)
+        case .bundle, .directory, .huggingFace:
+            return nil
+        }
+    }
 }
 
 public extension Xybrid {
@@ -276,6 +390,225 @@ public typealias Model = XybridModel
 // `boltffi generate`, unlike `xybrid_bolt.swift`).
 extension XybridModel: @unchecked Sendable {}
 
+/// A pull-paced asynchronous stream of generated tokens.
+///
+/// The iterator asks the native streaming session for exactly one event from
+/// each call to ``AsyncIterator/next()``. A slow consumer therefore stops
+/// pulling from the facade and preserves its bounded-channel backpressure
+/// instead of accumulating tokens in an unbounded Swift buffer.
+///
+/// The sequence is one-shot. Its first iterator owns the inference run;
+/// subsequent iterators finish immediately without starting another run.
+public struct XybridTokenStream: AsyncSequence, Sendable {
+    public typealias Element = XybridStreamToken
+
+    /// An iterator over one native streaming session.
+    public struct AsyncIterator: AsyncIteratorProtocol {
+        fileprivate var state: XybridTokenStreamState?
+
+        public mutating func next() async throws -> XybridStreamToken? {
+            guard let state else { return nil }
+            do {
+                let token = try await state.next()
+                if token == nil {
+                    self.state = nil
+                }
+                return token
+            } catch {
+                self.state = nil
+                throw error
+            }
+        }
+    }
+
+    // Copies share one source, so claiming an iterator transfers the only
+    // retained session state out of every copy of the sequence.
+    private let source: XybridTokenStreamSource
+
+    fileprivate init(
+        model: XybridModel,
+        envelope: XybridEnvelope,
+        options: XybridRunOptions?
+    ) {
+        self.init(
+            start: {
+                try model.runStream(
+                    envelope: envelope,
+                    options: options,
+                    cancel: XybridCancellationToken()
+                )
+            },
+            next: { try model.streamNext(streamId: $0) },
+            close: { model.streamClose(streamId: $0) }
+        )
+    }
+
+    // Closure injection keeps the pull and cancellation contract testable
+    // without loading a native model. This initializer remains module-internal.
+    init(
+        start: @escaping @Sendable () throws -> UInt64,
+        next: @escaping @Sendable (UInt64) throws -> XybridStreamEvent,
+        close: @escaping @Sendable (UInt64) -> Void
+    ) {
+        source = XybridTokenStreamSource(
+            state: XybridTokenStreamState(start: start, next: next, close: close)
+        )
+    }
+
+    public func makeAsyncIterator() -> AsyncIterator {
+        AsyncIterator(state: source.claimState())
+    }
+}
+
+private final class XybridTokenStreamSource: @unchecked Sendable {
+    private let lock = NSLock()
+    private var state: XybridTokenStreamState?
+
+    init(state: XybridTokenStreamState) {
+        self.state = state
+    }
+
+    func claimState() -> XybridTokenStreamState? {
+        lock.lock()
+        defer { lock.unlock() }
+        let claimedState = state
+        state = nil
+        return claimedState
+    }
+}
+
+private final class XybridTokenStreamState: @unchecked Sendable {
+    private let lock = NSLock()
+    private let startSession: @Sendable () throws -> UInt64
+    private let pullNext: @Sendable (UInt64) throws -> XybridStreamEvent
+    private let closeSessionHandle: @Sendable (UInt64) -> Void
+    private var streamId: UInt64?
+    private var finished = false
+
+    init(
+        start: @escaping @Sendable () throws -> UInt64,
+        next: @escaping @Sendable (UInt64) throws -> XybridStreamEvent,
+        close: @escaping @Sendable (UInt64) -> Void
+    ) {
+        startSession = start
+        pullNext = next
+        closeSessionHandle = close
+    }
+
+    deinit {
+        close()
+    }
+
+    func next() async throws -> XybridStreamToken? {
+        if Task.isCancelled {
+            close()
+            return nil
+        }
+
+        do {
+            let token = try await withTaskCancellationHandler {
+                try await Task.detached { try self.pullOne() }.value
+            } onCancel: {
+                self.close()
+            }
+            if Task.isCancelled {
+                close()
+                return nil
+            }
+            return token
+        } catch {
+            if Task.isCancelled {
+                close()
+                return nil
+            }
+            throw error
+        }
+    }
+
+    private func pullOne() throws -> XybridStreamToken? {
+        let id = try sessionId()
+        let event: XybridStreamEvent
+        do {
+            event = try pullNext(id)
+        } catch {
+            close()
+            throw error
+        }
+
+        switch event.kind {
+        case .token:
+            guard let token = event.token else {
+                close()
+                throw XybridError.inferenceError(
+                    message: "Native stream returned a token event without a token"
+                )
+            }
+            return token
+        case .complete:
+            close()
+            return nil
+        }
+    }
+
+    private func sessionId() throws -> UInt64 {
+        lock.lock()
+        if finished {
+            lock.unlock()
+            throw CancellationError()
+        }
+        if let streamId {
+            lock.unlock()
+            return streamId
+        }
+        lock.unlock()
+
+        let openedId: UInt64
+        do {
+            openedId = try startSession()
+        } catch {
+            close()
+            throw error
+        }
+        lock.lock()
+        if finished {
+            lock.unlock()
+            closeSessionHandle(openedId)
+            throw CancellationError()
+        }
+        if let existingId = streamId {
+            lock.unlock()
+            // Defensive only: AsyncIteratorProtocol requires serialized next
+            // calls, but do not leak a session if a caller violates it.
+            closeSessionHandle(openedId)
+            return existingId
+        }
+        streamId = openedId
+        lock.unlock()
+        return openedId
+    }
+
+    private func close() {
+        lock.lock()
+        guard !finished else {
+            lock.unlock()
+            return
+        }
+        finished = true
+        let id = streamId
+        streamId = nil
+        lock.unlock()
+
+        if let id {
+            // Native close may wait for the worker to leave inference. A task's
+            // cancellation handler (and iterator deinit) runs synchronously on
+            // its caller, which can be the UI thread. Retain the close closure,
+            // not this state, until cleanup finishes on a background executor.
+            let closeHandle = closeSessionHandle
+            Task.detached { closeHandle(id) }
+        }
+    }
+}
+
 public extension XybridModel {
     /// Run inference with the model's default options.
     ///
@@ -284,6 +617,51 @@ public extension XybridModel {
     /// generation config, abort signals, or cloud-fallback behaviour.
     func run(envelope: XybridEnvelope) throws -> XybridResult {
         try run(envelope: envelope, options: nil)
+    }
+
+    /// Run inference that cannot be cancelled.
+    ///
+    /// The generated `run(envelope:options:cancel:)` takes the stop button as a
+    /// required argument — BoltFFI cannot express an optional handle parameter —
+    /// so this overload manufactures a token that is never signalled. Reach for
+    /// the three-argument form, or `runAsync`, when you want to stop a run.
+    func run(envelope: XybridEnvelope, options: XybridRunOptions?) throws -> XybridResult {
+        try run(envelope: envelope, options: options, cancel: XybridCancellationToken())
+    }
+
+    /// Context-aware run that cannot be cancelled. See `run(envelope:options:)`.
+    func runWithContext(
+        envelope: XybridEnvelope,
+        context: XybridConversationContext,
+        options: XybridRunOptions?
+    ) throws -> XybridResult {
+        try runWithContext(
+            envelope: envelope,
+            context: context,
+            options: options,
+            cancel: XybridCancellationToken()
+        )
+    }
+
+    /// Start a context-aware pull stream that cannot be cancelled.
+    /// See `run(envelope:options:)`.
+    func runStreamWithContext(
+        envelope: XybridEnvelope,
+        context: XybridConversationContext,
+        options: XybridRunOptions?
+    ) throws -> UInt64 {
+        try runStreamWithContext(
+            envelope: envelope,
+            context: context,
+            options: options,
+            cancel: XybridCancellationToken()
+        )
+    }
+
+    /// Start a pull-based stream that cannot be cancelled.
+    /// See `run(envelope:options:)`.
+    func runStream(envelope: XybridEnvelope, options: XybridRunOptions?) throws -> UInt64 {
+        try runStream(envelope: envelope, options: options, cancel: XybridCancellationToken())
     }
 }
 
@@ -324,11 +702,31 @@ public extension XybridModel {
     }
 
     /// Run inference without blocking the calling thread or actor.
+    ///
+    /// Honours Swift's structured concurrency: cancelling the surrounding
+    /// `Task` signals the native stop button. The run then returns or throws
+    /// whatever the backend reports for a cancelled run — it does not surface
+    /// `CancellationError`.
+    ///
+    /// Cancellation is checked at token boundaries **while streaming**. A batch
+    /// run is only cancellable before generation starts: once the backend is
+    /// producing, `run_with_options` has no token-aware path to stop it, so the
+    /// call finishes normally. Use the streaming surface when a mid-flight stop
+    /// button matters.
     func runAsync(
         envelope: XybridEnvelope,
         options: XybridRunOptions? = nil
     ) async throws -> XybridResult {
-        try await Task.detached { try self.run(envelope: envelope, options: options) }.value
+        let cancel = XybridCancellationToken()
+        return try await withTaskCancellationHandler {
+            try await Task.detached {
+                try self.run(envelope: envelope, options: options, cancel: cancel)
+            }.value
+        } onCancel: {
+            // Runs on the cancelling thread; `cancel()` is safe from any thread
+            // and is a no-op once the run has finished.
+            cancel.cancel()
+        }
     }
 
     /// Warm up the model without blocking the calling thread or actor.
@@ -353,12 +751,6 @@ public extension XybridModel {
     /// pull-based session API (``runStream(envelope:options:)`` /
     /// ``streamNext(streamId:)`` / ``streamClose(streamId:)``).
     ///
-    /// Note: the producing task pulls as fast as generation runs and buffers
-    /// unconsumed tokens in the async sequence (unbounded), so the facade's
-    /// bounded-channel backpressure applies to the raw session pull API, not
-    /// to a slow consumer of this sequence. Buffering is bounded by
-    /// `max_tokens` in practice; a bounded policy here would drop tokens.
-    ///
     /// ```swift
     /// for try await token in model.streamTokens(envelope: env) {
     ///     print(token.token, terminator: "")
@@ -367,38 +759,8 @@ public extension XybridModel {
     func streamTokens(
         envelope: XybridEnvelope,
         options: XybridRunOptions? = nil
-    ) -> AsyncThrowingStream<XybridStreamToken, Error> {
-        AsyncThrowingStream { continuation in
-            let task = Task.detached {
-                var streamId: UInt64?
-                do {
-                    let id = try self.runStream(envelope: envelope, options: options)
-                    streamId = id
-                    while !Task.isCancelled {
-                        let event = try self.streamNext(streamId: id)
-                        switch event.kind {
-                        case .token:
-                            if let token = event.token {
-                                continuation.yield(token)
-                            }
-                        case .complete:
-                            self.streamClose(streamId: id)
-                            continuation.finish()
-                            return
-                        }
-                    }
-                    // Cancelled: close the session to abort the in-flight run.
-                    self.streamClose(streamId: id)
-                    continuation.finish()
-                } catch {
-                    // A failed streamNext has already closed the session
-                    // bolt-side; closing again is an idempotent map-remove.
-                    if let id = streamId { self.streamClose(streamId: id) }
-                    continuation.finish(throwing: error)
-                }
-            }
-            continuation.onTermination = { _ in task.cancel() }
-        }
+    ) -> XybridTokenStream {
+        XybridTokenStream(model: self, envelope: envelope, options: options)
     }
 }
 
@@ -753,6 +1115,8 @@ extension XybridError: LocalizedError {
             return "Unsupported backend capability: \(message)"
         case .invalidImage(let message):
             return "Invalid image: \(message)"
+        case .cancelled(let message):
+            return "Cancelled: \(message)"
         }
     }
 }

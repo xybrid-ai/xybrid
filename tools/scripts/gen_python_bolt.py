@@ -41,7 +41,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 BOLT_DIR = REPO_ROOT / "crates" / "xybrid-bolt"
 RAW_DIR = BOLT_DIR / "dist" / "python" / "xybrid_bolt"
 DEST_DIR = REPO_ROOT / "bindings" / "python" / "xybrid" / "_bolt"
-PINNED_BOLTFFI = "0.29.3"
+PINNED_BOLTFFI = "0.30.1"
 
 # Generated sources to publish. `_native.c` is the CPython bridge that
 # build-python-bolt.sh compiles; the rest is the pure-Python wire layer.
@@ -140,18 +140,13 @@ def check_boltffi_version() -> None:
 
 
 def generate() -> list[Path]:
-    subprocess.run(["boltffi", "generate", "python"], cwd=BOLT_DIR, check=True)
-    defaults = {
-        "__init__.py": (
-            "    reasoning_content: str | None\n\n    def _boltffi_wire",
-            "    reasoning_content: str | None = None\n\n    def _boltffi_wire",
-        ),
-        "__init__.pyi": (
-            "    reasoning_content: str | None\n\n\n\n@dataclass",
-            "    reasoning_content: str | None = None\n\n\n\n@dataclass",
-        ),
-    }
-    for name, (target, replacement) in defaults.items():
+    subprocess.run(["boltffi", "generate", "python", "--deny-skipped"], cwd=BOLT_DIR, check=True)
+    # Anchored on the field declaration alone: boltffi 0.30 renders the Rust
+    # doc comment as a docstring *between* the field and whatever follows it,
+    # so anchoring on the next declaration breaks on every doc edit.
+    target = "    reasoning_content: str | None\n"
+    replacement = "    reasoning_content: str | None = None\n"
+    for name in ("__init__.py", "__init__.pyi"):
         path = RAW_DIR / name
         source = path.read_text()
         if source.count(target) != 1:
