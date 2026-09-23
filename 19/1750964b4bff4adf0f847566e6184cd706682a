@@ -1,0 +1,51 @@
+.github/workflows/ci.yml
+  s_8e142e41680520::t_e14bd95e3ab1e5 78,200,204
+bindings/python/README.md
+  s_8e142e41680520::t_e6e51302b55dfd 7,16-20,22,25-27,31-33,42-44,53-56,67-68,162-165,179-182,192
+bindings/python/examples/quickstart.py
+  s_8e142e41680520::t_a707beaaa7d4d9 37,54-55,58,70-72,89-109
+bindings/python/pyproject.toml
+  s_486ea76f12a67c::t_dbbc303ce91525 20
+bindings/python/setup.py
+  s_486ea76f12a67c::t_ff2c0044f03070 16-17,28,53,60-73,75-78
+bindings/python/tests/test_bolt.py
+  s_486ea76f12a67c::t_62e8bfdbb65bc4 14
+bindings/python/tests/test_packaging.py
+  s_486ea76f12a67c::t_da3d6608e92abd 1-47
+bindings/python/tests/test_sdk.py
+  s_8e142e41680520::t_966f951436fba9 14,18-19,50-57,61-79,149,303-315
+bindings/python/xybrid/_sugar.py
+  s_8e142e41680520::t_0ce85f53a82e26 13-15,24-25,103,168,174,180,186,191,196,201,221,241,246,275,289-295,300-306,309-310,316-322,330-335,343,354,357-362,387-389
+tools/scripts/build-python-bolt.sh
+  s_486ea76f12a67c::t_232064b28b30fb 2-3,6-7
+tools/scripts/build_python_bolt.py
+  s_8e142e41680520::t_c07cb1a29ef39c 1-109
+tools/scripts/gen_python_bolt.py
+  s_486ea76f12a67c::t_9f3e9595f92779 134-137
+tools/scripts/tests/test_build_python_bolt.py
+  s_8e142e41680520::t_2441f1f37ec504 1-84
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "191750964b4bff4adf0f847566e6184cd706682a",
+  "prompts": {},
+  "sessions": {
+    "s_486ea76f12a67c": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0cce5-db1d-7773-8b0a-145bf9846130",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
+    },
+    "s_8e142e41680520": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "01a0cce5-db1d-7773-8b0a-145bf9846130",
+        "model": "unknown"
+      },
+      "human_author": "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
+    }
+  }
+}
