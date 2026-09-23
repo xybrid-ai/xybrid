@@ -38,6 +38,7 @@
 //! [`FfiStageExecutionResult`]: xybrid_sdk::FfiStageExecutionResult
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, SyncSender};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -2061,14 +2062,19 @@ pub const REQUIRED_SAMPLE_RATE: u32 = 16_000;
 ///
 /// One decision in one type, rather than a `bool` + `Option<String>` pair
 /// where "disabled, yet a model directory is set" is representable.
+///
+/// There is deliberately no "on, with the default model" variant: nothing
+/// ships a bundled Silero model, and the core handles VAD-enabled-without-a-
+/// directory by printing a warning and silently falling back to fixed-window
+/// chunking. A variant whose only possible meaning is "quietly did nothing"
+/// is worse than no variant, so enabling VAD requires naming a directory.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum VadMode {
     /// Fixed time-window chunking; no voice-activity detection.
     Off,
-    /// VAD on, using the bundled default Silero model.
-    Default,
-    /// VAD on, using a Silero model from this directory.
-    Custom { model_dir: String },
+    /// VAD on, using the Silero model in this directory, which must contain a
+    /// `model.onnx`.
+    Enabled { model_dir: String },
 }
 
 /// Configuration for a live ASR session.
@@ -2116,8 +2122,7 @@ impl StreamingConfig {
         }
         let (enable_vad, vad_model_dir) = match &self.vad {
             VadMode::Off => (false, None),
-            VadMode::Default => (true, None),
-            VadMode::Custom { model_dir } => (true, Some(model_dir.clone())),
+            VadMode::Enabled { model_dir } => (true, Some(model_dir.clone())),
         };
         Ok(sdk::StreamConfig {
             enable_vad,
@@ -2239,6 +2244,16 @@ enum AsrCommand {
 pub struct AsrSession {
     commands: Mutex<Option<SyncSender<AsrCommand>>>,
     fanout: Arc<Mutex<AsrFanout>>,
+    /// Set by [`AsrSession::cancel`]. The worker checks it before each
+    /// command, so a cancel abandons the queued backlog instead of waiting
+    /// for it to transcribe.
+    cancelled: Arc<AtomicBool>,
+    /// First per-chunk failure, if any. The core removes a chunk from its
+    /// buffer *before* transcribing it, so a failed chunk's audio is gone —
+    /// never retried, never in the transcript. Remembering it here is what
+    /// stops [`AsrSession::flush`] returning a silently holed transcript as
+    /// success.
+    failure: Arc<Mutex<Option<String>>>,
 }
 
 impl AsrSession {
@@ -2246,16 +2261,24 @@ impl AsrSession {
     fn spawn(stream: sdk::XybridStream) -> Result<Arc<Self>> {
         let (sender, receiver) = mpsc::sync_channel::<AsrCommand>(ASR_COMMAND_CAPACITY);
         let fanout = Arc::new(Mutex::new(AsrFanout::default()));
-        let worker_fanout = Arc::clone(&fanout);
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let failure = Arc::new(Mutex::new(None));
+        let worker = AsrWorkerState {
+            fanout: Arc::clone(&fanout),
+            cancelled: Arc::clone(&cancelled),
+            failure: Arc::clone(&failure),
+        };
         std::thread::Builder::new()
             .name("xybrid-asr".into())
-            .spawn(move || asr_worker(stream, receiver, worker_fanout))
+            .spawn(move || asr_worker(stream, receiver, worker))
             .map_err(|e| Error::LoadError {
                 message: format!("failed to spawn ASR worker thread: {e}"),
             })?;
         Ok(Arc::new(Self {
             commands: Mutex::new(Some(sender)),
             fanout,
+            cancelled,
+            failure,
         }))
     }
 
@@ -2301,7 +2324,11 @@ impl AsrSession {
         self.send(AsrCommand::Flush(reply))?;
         // The worker always replies before exiting; a receive error means it
         // died mid-flush, which is a worker-gone condition either way.
-        answer.recv().unwrap_or_else(|_| Err(asr_worker_gone()))
+        let transcript = answer.recv().unwrap_or_else(|_| Err(asr_worker_gone()))?;
+        match self.take_failure() {
+            Some(message) => Err(Error::InferenceError { message }),
+            None => Ok(transcript),
+        }
     }
 
     /// Reset to transcribe fresh audio without reloading the model.
@@ -2318,7 +2345,12 @@ impl AsrSession {
     /// `close` so the bolt mirror does not collide with the `close()` BoltFFI
     /// generates on every handle for the host's disposal idiom.
     pub fn cancel(&self) {
-        // Dropping the sender ends the worker loop, which finishes the fanout.
+        // Flag first, *then* drop the sender. Dropping alone is not enough:
+        // `Receiver::recv` yields every already-queued command before it
+        // reports disconnection, so the worker would transcribe the whole
+        // backlog — holding the model and the CPU — after the caller believed
+        // it had stopped. The worker checks this flag before each command.
+        self.cancelled.store(true, Ordering::Relaxed);
         self.commands
             .lock()
             .unwrap_or_else(|e| e.into_inner())
@@ -2326,12 +2358,24 @@ impl AsrSession {
     }
 
     /// Whether the session is still accepting audio.
+    ///
+    /// Goes false the moment [`Self::cancel`] is called, not when the worker
+    /// notices — a stop button must read as stopped immediately.
     pub fn is_running(&self) -> bool {
-        !self
-            .fanout
+        !self.cancelled.load(Ordering::Relaxed)
+            && !self
+                .fanout
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .finished
+    }
+
+    /// Take the recorded per-chunk failure, if one happened.
+    fn take_failure(&self) -> Option<String> {
+        self.failure
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-            .finished
+            .take()
     }
 
     fn send(&self, command: AsrCommand) -> Result<()> {
@@ -2375,13 +2419,21 @@ fn asr_error_chain(e: &dyn std::error::Error) -> String {
     out
 }
 
-/// Owns the SDK stream and applies commands in order until the channel closes
-/// or a flush finalizes the session.
-fn asr_worker(
-    stream: sdk::XybridStream,
-    commands: Receiver<AsrCommand>,
+/// The shared state an ASR worker reports through.
+struct AsrWorkerState {
     fanout: Arc<Mutex<AsrFanout>>,
-) {
+    cancelled: Arc<AtomicBool>,
+    failure: Arc<Mutex<Option<String>>>,
+}
+
+/// Owns the SDK stream and applies commands in order until the channel closes,
+/// a flush finalizes the session, or the caller cancels.
+fn asr_worker(stream: sdk::XybridStream, commands: Receiver<AsrCommand>, state: AsrWorkerState) {
+    let AsrWorkerState {
+        fanout,
+        cancelled,
+        failure,
+    } = state;
     // Pay the model's cold-start cost while the host is still opening the
     // microphone, instead of on top of the first visible partial. Feeds that
     // arrive meanwhile queue on the command channel and drain against a warm
@@ -2399,6 +2451,12 @@ fn asr_worker(
     let mut last_sent_sequence: Option<u64> = None;
 
     while let Ok(command) = commands.recv() {
+        // Checked before every command, not just between feeds: a cancel has
+        // to abandon whatever is already queued, or it would sit transcribing
+        // the backlog long after the caller stopped listening.
+        if cancelled.load(Ordering::Relaxed) {
+            break;
+        }
         match command {
             AsrCommand::Feed(samples) => match stream.feed(&samples) {
                 Ok(Some(partial)) => {
@@ -2413,7 +2471,18 @@ fn asr_worker(
                         .emit(partial);
                 }
                 Ok(None) => {}
-                Err(e) => log::warn!("ASR feed error: {}", asr_error_chain(&e)),
+                Err(e) => {
+                    // Keep transcribing — a transient failure should not end a
+                    // live session — but remember it. The core extracts a
+                    // chunk from its buffer before transcribing, so this
+                    // chunk's audio is already gone and will never reach the
+                    // transcript. `flush` reports this instead of handing back
+                    // a holed transcript that looks complete.
+                    let message = format!("ASR chunk failed: {}", asr_error_chain(&e));
+                    log::warn!("{message}");
+                    let mut recorded = failure.lock().unwrap_or_else(|e| e.into_inner());
+                    recorded.get_or_insert(message);
+                }
             },
             AsrCommand::Flush(reply) => {
                 let outcome = stream
@@ -2429,8 +2498,10 @@ fn asr_worker(
                 let outcome = stream.reset().map_err(|e| Error::InferenceError {
                     message: format!("ASR reset failed: {}", asr_error_chain(&e)),
                 });
-                // A fresh utterance starts clean.
+                // A fresh utterance starts clean — including any failure
+                // recorded against the audio that is being discarded.
                 last_sent_sequence = None;
+                *failure.lock().unwrap_or_else(|e| e.into_inner()) = None;
                 let mut guard = fanout.lock().unwrap_or_else(|e| e.into_inner());
                 guard.pending = None;
                 drop(guard);
@@ -3733,27 +3804,81 @@ mod tests {
         assert!(StreamingConfig::default().to_sdk().is_ok());
     }
 
+    /// A cancel must abandon queued audio, not wait for it.
+    ///
+    /// Dropping the command sender alone does not do this: `Receiver::recv`
+    /// yields every buffered command before reporting disconnection, so the
+    /// worker would transcribe the whole backlog — holding the model and the
+    /// CPU — after the caller believed it had stopped.
     #[test]
-    fn vad_mode_maps_onto_the_sdk_enable_plus_path_pair() {
-        let with_dir = StreamingConfig {
-            vad: VadMode::Custom {
+    fn cancel_abandons_the_queued_backlog() {
+        let (sender, receiver) = mpsc::sync_channel::<AsrCommand>(ASR_COMMAND_CAPACITY);
+        let cancelled = Arc::new(AtomicBool::new(false));
+
+        // Queue work, then cancel before the worker gets to any of it.
+        for _ in 0..8 {
+            sender.send(AsrCommand::Feed(vec![0.0; 16])).unwrap();
+        }
+        cancelled.store(true, Ordering::Relaxed);
+        drop(sender);
+
+        // Stand in for the worker's command loop.
+        let mut processed = 0;
+        while let Ok(_command) = receiver.recv() {
+            if cancelled.load(Ordering::Relaxed) {
+                break;
+            }
+            processed += 1;
+        }
+
+        assert_eq!(processed, 0, "cancelled worker drained the backlog");
+    }
+
+    /// A failed chunk is gone: the core extracts it from its buffer before
+    /// transcribing, so the audio never reaches the transcript. Returning
+    /// that transcript as success hides the hole.
+    #[test]
+    fn a_recorded_chunk_failure_turns_flush_into_an_error() {
+        let failure: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+
+        // First failure wins; later ones must not overwrite the root cause.
+        {
+            let mut recorded = failure.lock().unwrap();
+            recorded.get_or_insert("ASR chunk failed: dtype mismatch".to_string());
+        }
+        {
+            let mut recorded = failure.lock().unwrap();
+            recorded.get_or_insert("ASR chunk failed: something later".to_string());
+        }
+
+        let taken = failure.lock().unwrap().take();
+        assert_eq!(
+            taken.as_deref(),
+            Some("ASR chunk failed: dtype mismatch"),
+            "the first failure is the one worth reporting"
+        );
+        // Taken, so a second flush of a reset session is not haunted by it.
+        assert!(failure.lock().unwrap().is_none());
+    }
+
+    /// Enabling VAD always carries a model directory.
+    ///
+    /// The core reads `enable_vad` without a `vad_model_dir` as "warn on
+    /// stderr and silently use fixed windows", and nothing ships a bundled
+    /// Silero model — so a config that could produce that pair would be a
+    /// feature that quietly does nothing.
+    #[test]
+    fn enabling_vad_always_carries_a_model_directory() {
+        let enabled = StreamingConfig {
+            vad: VadMode::Enabled {
                 model_dir: "/models/silero".into(),
             },
             ..StreamingConfig::default()
         }
         .to_sdk()
         .expect("valid config");
-        assert!(with_dir.enable_vad);
-        assert_eq!(with_dir.vad_model_dir.as_deref(), Some("/models/silero"));
-
-        let bundled = StreamingConfig {
-            vad: VadMode::Default,
-            ..StreamingConfig::default()
-        }
-        .to_sdk()
-        .expect("valid config");
-        assert!(bundled.enable_vad);
-        assert_eq!(bundled.vad_model_dir, None);
+        assert!(enabled.enable_vad);
+        assert_eq!(enabled.vad_model_dir.as_deref(), Some("/models/silero"));
 
         // The pairing the enum exists to make unrepresentable: no model
         // directory can survive VAD being off.

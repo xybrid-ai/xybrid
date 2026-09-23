@@ -977,13 +977,17 @@ public enum XybridThermalState: Int32, Hashable, Sendable, CaseIterable {
 }
 
 /// How voice-activity detection (VAD) chunking is resolved for a session.
+///
+/// There is deliberately no "on, with the default model" variant: nothing
+/// ships a bundled Silero model, and the core handles VAD-enabled-without-a-
+/// directory by warning and silently falling back to fixed-window chunking.
+/// Enabling VAD therefore requires naming a directory.
 public enum XybridVadMode: Hashable, Equatable, Sendable {
     /// Fixed time-window chunking; no voice-activity detection.
     case off
-    /// VAD on, using the bundled default Silero model.
-    case `default`
-    /// VAD on, using a Silero model from this directory.
-    case custom(modelDir: String)
+    /// VAD on, using the Silero model in this directory, which must contain a
+    /// `model.onnx`.
+    case enabled(modelDir: String)
 
     @inlinable static func decode(from reader: inout WireReader) -> XybridVadMode {
         let tag = reader.readU32()
@@ -991,9 +995,7 @@ public enum XybridVadMode: Hashable, Equatable, Sendable {
         case 0:
             return .off
         case 1:
-            return .`default`
-        case 2:
-            return .custom(modelDir: reader.readString())
+            return .enabled(modelDir: reader.readString())
         default:
             fatalError("Invalid XybridVadMode tag: \(tag)")
         }
@@ -1003,10 +1005,8 @@ public enum XybridVadMode: Hashable, Equatable, Sendable {
         switch self {
         case .off:
             writer.writeU32(0)
-        case .`default`:
+        case let .enabled(modelDir):
             writer.writeU32(1)
-        case let .custom(modelDir):
-            writer.writeU32(2)
             writer.writeString(modelDir)
         }
     }

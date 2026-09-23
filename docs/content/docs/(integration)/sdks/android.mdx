@@ -153,7 +153,7 @@ microphone format is the caller's job.
 
 ```kotlin
 val model = Xybrid.model("whisper-tiny").load()
-val session = model.stream(streamingConfigWithVad(language = "en"))
+val session = model.stream(streamingConfigWithVad(modelDir = vadModelDir, language = "en"))
 
 scope.launch {
     session.partials().collect { partial -> textView.text = partial.text }
@@ -169,10 +169,15 @@ Partial text is **cumulative, not a delta**: render each one in place of the
 previous rather than appending. A partial produced before you subscribe is
 delivered immediately, so the opening words of an utterance are never lost.
 
-`flush()` ends the session and returns the full transcript; `cancel()` ends it
-and discards the audio. Voice-activity detection cuts chunks on speech
-boundaries instead of a fixed clock, which avoids the stutter you get when a
-window lands mid-word.
+`flush()` ends the session and returns the full transcript — and reports an
+error if any chunk failed to transcribe, because that audio is gone and the
+transcript would otherwise look complete. `cancel()` ends the session and
+discards queued audio.
+
+Voice-activity detection cuts chunks on speech boundaries instead of a fixed
+clock, which avoids the stutter you get when a window lands mid-word. It needs
+a Silero VAD model directory containing a `model.onnx`; none ships with the
+SDK, and without one the engine falls back to fixed windows.
 
 ---
 

@@ -1162,23 +1162,26 @@ impl XybridDownload {
 // the same constraint that keeps `ModelLoader` out of this crate.
 
 /// How voice-activity detection (VAD) chunking is resolved for a session.
+///
+/// There is deliberately no "on, with the default model" variant: nothing
+/// ships a bundled Silero model, and the core handles VAD-enabled-without-a-
+/// directory by warning and silently falling back to fixed-window chunking.
+/// Enabling VAD therefore requires naming a directory.
 #[data]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum XybridVadMode {
     /// Fixed time-window chunking; no voice-activity detection.
     Off,
-    /// VAD on, using the bundled default Silero model.
-    Default,
-    /// VAD on, using a Silero model from this directory.
-    Custom { model_dir: String },
+    /// VAD on, using the Silero model in this directory, which must contain a
+    /// `model.onnx`.
+    Enabled { model_dir: String },
 }
 
 impl From<XybridVadMode> for facade::VadMode {
     fn from(mode: XybridVadMode) -> Self {
         match mode {
             XybridVadMode::Off => facade::VadMode::Off,
-            XybridVadMode::Default => facade::VadMode::Default,
-            XybridVadMode::Custom { model_dir } => facade::VadMode::Custom { model_dir },
+            XybridVadMode::Enabled { model_dir } => facade::VadMode::Enabled { model_dir },
         }
     }
 }

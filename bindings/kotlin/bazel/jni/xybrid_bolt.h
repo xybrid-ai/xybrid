@@ -137,8 +137,7 @@ typedef int32_t ___XybridThermalState;
 #define XYBRID_THERMAL_STATE_CRITICAL ((___XybridThermalState)3)
 typedef uint32_t ___XybridVadMode;
 #define XYBRID_VAD_MODE_OFF ((___XybridVadMode)0)
-#define XYBRID_VAD_MODE_DEFAULT ((___XybridVadMode)1)
-#define XYBRID_VAD_MODE_CUSTOM ((___XybridVadMode)2)
+#define XYBRID_VAD_MODE_ENABLED ((___XybridVadMode)1)
 void boltffi_release_class_xybrid_bolt_xybrid_download(uint64_t handle);
 uint64_t boltffi_init_class_xybrid_bolt_xybrid_download_from_registry(const uint8_t *id_ptr, uintptr_t id_len);
 uint64_t boltffi_init_class_xybrid_bolt_xybrid_download_from_registry_with_platform(const uint8_t *id_ptr, uintptr_t id_len, const uint8_t *platform_ptr, uintptr_t platform_len);

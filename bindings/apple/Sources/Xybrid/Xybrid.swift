@@ -635,8 +635,8 @@ public extension XybridModel {
     ///
     /// - Parameter config: chunking options. The default is fixed-window
     ///   chunking at 16 kHz with the model's own language; pass
-    ///   ``XybridStreamingConfig/voiceActivity(language:)`` to chunk on speech
-    ///   boundaries instead.
+    ///   ``XybridStreamingConfig/voiceActivity(modelDir:language:threshold:)``
+    ///   to chunk on speech boundaries instead.
     /// - Throws: ``XybridError/streamingNotSupported`` if this is not an ASR
     ///   model, or ``XybridError/configError(message:)`` for a sample rate
     ///   other than 16 kHz.
@@ -857,19 +857,20 @@ public extension XybridStreamingConfig {
     /// model alongside the ASR one.
     ///
     /// - Parameters:
+    ///   - modelDir: directory holding a Silero VAD model, containing a
+    ///     `model.onnx`. Required: no VAD model ships with the SDK, and the
+    ///     engine falls back to fixed windows without one.
     ///   - language: language hint such as `"en"`; `nil` uses the model default.
     ///   - threshold: VAD sensitivity, 0.0–1.0. Lower catches quieter speech
     ///     and more background noise with it.
-    ///   - modelDir: directory holding a Silero VAD model; `nil` uses the
-    ///     bundled default.
     static func voiceActivity(
+        modelDir: String,
         language: String? = nil,
-        threshold: Float = 0.5,
-        modelDir: String? = nil
+        threshold: Float = 0.5
     ) -> XybridStreamingConfig {
         XybridStreamingConfig(
             sampleRate: 16_000,
-            vad: modelDir.map { .custom(modelDir: $0) } ?? .default,
+            vad: .enabled(modelDir: modelDir),
             vadThreshold: threshold,
             language: language,
             audioCtx: nil

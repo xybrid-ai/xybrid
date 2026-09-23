@@ -469,19 +469,20 @@ fun defaultStreamingConfig(): XybridStreamingConfig = XybridStreamingConfig(
  * fixed chunking stutter — at the cost of loading a small VAD model alongside
  * the ASR one.
  *
+ * @param modelDir directory holding a Silero VAD model, containing a
+ *   `model.onnx`. Required: no VAD model ships with the SDK, and the engine
+ *   falls back to fixed windows without one.
  * @param language language hint such as `"en"`; null uses the model default.
  * @param threshold VAD sensitivity, 0.0–1.0. Lower catches quieter speech,
  *   and more background noise with it.
- * @param modelDir directory holding a Silero VAD model; null uses the bundled
- *   default.
  */
 fun streamingConfigWithVad(
+    modelDir: String,
     language: String? = null,
     threshold: Float = 0.5f,
-    modelDir: String? = null,
 ): XybridStreamingConfig = XybridStreamingConfig(
     sampleRate = 16_000u,
-    vad = if (modelDir != null) XybridVadMode.Custom(modelDir) else XybridVadMode.Default,
+    vad = XybridVadMode.Enabled(modelDir),
     vadThreshold = threshold,
     language = language,
     audioCtx = null,

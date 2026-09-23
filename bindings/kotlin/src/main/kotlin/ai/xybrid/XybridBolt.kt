@@ -2505,6 +2505,11 @@ enum class XybridThermalState(val value: Int) {
 
 /**
  * How voice-activity detection (VAD) chunking is resolved for a session.
+ *
+ * There is deliberately no "on, with the default model" variant: nothing
+ * ships a bundled Silero model, and the core handles VAD-enabled-without-a-
+ * directory by warning and silently falling back to fixed-window chunking.
+ * Enabling VAD therefore requires naming a directory.
  */
 sealed class XybridVadMode {
     internal abstract fun wireSize(): Int
@@ -2536,21 +2541,10 @@ sealed class XybridVadMode {
         }
     }
     /**
-     * VAD on, using the bundled default Silero model.
+     * VAD on, using the Silero model in this directory, which must contain a
+     * `model.onnx`.
      */
-    object Default : XybridVadMode() {
-        internal override fun wireSize(): Int {
-            return 4
-        }
-
-        internal override fun writeTo(writer: WireWriter) {
-            writer.writeU32(1.toUInt())
-        }
-    }
-    /**
-     * VAD on, using a Silero model from this directory.
-     */
-    data class Custom(
+    data class Enabled(
         val modelDir: String
     ) : XybridVadMode() {
         internal override fun wireSize(): Int {
@@ -2558,7 +2552,7 @@ sealed class XybridVadMode {
         }
 
         internal override fun writeTo(writer: WireWriter) {
-            writer.writeU32(2.toUInt())
+            writer.writeU32(1.toUInt())
             writer.writeString(this.modelDir)
         }
     }
@@ -2568,8 +2562,7 @@ sealed class XybridVadMode {
             val tag = reader.readU32()
             return when (tag) {
                 0.toUInt() -> Off
-                1.toUInt() -> Default
-                2.toUInt() -> Custom(reader.readString())
+                1.toUInt() -> Enabled(reader.readString())
                 else -> throw IllegalArgumentException("unknown XybridVadMode tag: $tag")
             }
         }

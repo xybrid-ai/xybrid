@@ -7,6 +7,11 @@ namespace XybridBolt
 {
     /// <summary>
     /// How voice-activity detection (VAD) chunking is resolved for a session.
+    ///
+    /// There is deliberately no "on, with the default model" variant: nothing
+    /// ships a bundled Silero model, and the core handles VAD-enabled-without-a-
+    /// directory by warning and silently falling back to fixed-window chunking.
+    /// Enabling VAD therefore requires naming a directory.
     /// </summary>
     public abstract record XybridVadMode
     {
@@ -14,8 +19,7 @@ namespace XybridBolt
             reader.ReadU32() switch
             {
                 0 => new Off(),
-                1 => new Default(),
-                2 => new Custom(reader.ReadString()),
+                1 => new Enabled(reader.ReadString()),
                 uint tag => throw new global::System.InvalidOperationException($"Invalid XybridVadMode tag: {tag}"),
             };
 
@@ -28,14 +32,9 @@ namespace XybridBolt
                     writer.WriteU32(0);
                     break;
                 }
-                case Default value:
+                case Enabled value:
                 {
                     writer.WriteU32(1);
-                    break;
-                }
-                case Custom value:
-                {
-                    writer.WriteU32(2);
                     {
                         writer.WriteString(value.ModelDir);
                     }
@@ -52,14 +51,10 @@ namespace XybridBolt
         public sealed record Off() : XybridVadMode;
 
         /// <summary>
-        /// VAD on, using the bundled default Silero model.
+        /// VAD on, using the Silero model in this directory, which must contain a
+        /// `model.onnx`.
         /// </summary>
-        public sealed record Default() : XybridVadMode;
-
-        /// <summary>
-        /// VAD on, using a Silero model from this directory.
-        /// </summary>
-        public sealed record Custom(string ModelDir) : XybridVadMode;
+        public sealed record Enabled(string ModelDir) : XybridVadMode;
 
     }
 }

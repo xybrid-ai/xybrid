@@ -38,20 +38,26 @@ namespace Xybrid
         /// what makes fixed chunking stutter — at the cost of loading a small
         /// VAD model alongside the ASR one.
         /// </remarks>
+        /// <param name="modelDir">
+        /// Directory holding a Silero VAD model, containing a <c>model.onnx</c>.
+        /// Required: no VAD model ships with the SDK, and the engine falls back
+        /// to fixed windows without one.
+        /// </param>
         /// <param name="language">Language hint such as "en"; null uses the model default.</param>
         /// <param name="threshold">VAD sensitivity, 0.0-1.0. Lower catches quieter speech, and more background noise with it.</param>
-        /// <param name="modelDir">Directory holding a Silero VAD model; null uses the bundled default.</param>
+        /// <exception cref="ArgumentNullException">Thrown if modelDir is null.</exception>
         public static XybridBolt.XybridStreamingConfig VoiceActivity(
+            string modelDir,
             string language = null,
-            float threshold = 0.5f,
-            string modelDir = null)
+            float threshold = 0.5f)
         {
-            XybridBolt.XybridVadMode vad = modelDir == null
-                ? (XybridBolt.XybridVadMode)new XybridBolt.XybridVadMode.Default()
-                : new XybridBolt.XybridVadMode.Custom(modelDir);
+            if (modelDir == null)
+            {
+                throw new System.ArgumentNullException(nameof(modelDir));
+            }
             return new XybridBolt.XybridStreamingConfig(
                 RequiredSampleRate,
-                vad,
+                new XybridBolt.XybridVadMode.Enabled(modelDir),
                 threshold,
                 language,
                 null);

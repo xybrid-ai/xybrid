@@ -461,7 +461,7 @@ layer, where it would have to be re-solved per binding.
 
 ```swift
 let model = try await Xybrid.model("whisper-tiny").load()
-let session = try model.stream(config: .voiceActivity(language: "en"))
+let session = try model.stream(config: .voiceActivity(modelDir: vadModelDir, language: "en"))
 
 Task {
     for await partial in session.partials() {
@@ -480,7 +480,7 @@ let transcript = try session.flush()
 
 ```kotlin
 val model = Xybrid.model("whisper-tiny").load()
-val session = model.stream(streamingConfigWithVad(language = "en"))
+val session = model.stream(streamingConfigWithVad(modelDir = vadModelDir, language = "en"))
 
 scope.launch {
     session.partials().collect { partial -> textView.text = partial.text }
@@ -495,7 +495,7 @@ val transcript = session.flush()
 ### C#
 
 ```csharp
-using var session = model.Stream(StreamingConfigs.VoiceActivity(language: "en"));
+using var session = model.Stream(StreamingConfigs.VoiceActivity(vadModelDir, language: "en"));
 
 // Drive the UI from the partial stream.
 await foreach (var partial in session.Partials(cancellationToken))
@@ -550,8 +550,9 @@ Partial text is **cumulative, not a delta**: render each one in place of the
 previous, don't append.
 
 VAD (voice-activity detection) chunking cuts on speech boundaries instead of a
-fixed clock, which avoids the stutter you get when a window lands mid-word. It
-costs a small extra model loaded alongside the ASR one.
+fixed clock, which avoids the stutter you get when a window lands mid-word.
+**It requires a Silero VAD model directory** containing a `model.onnx` — none
+ships with the SDK, and the engine falls back to fixed windows without one.
 
 ---
 

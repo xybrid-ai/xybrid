@@ -495,7 +495,13 @@ class XybridThermalState(IntEnum):
 
 
 class XybridVadMode:
-    """How voice-activity detection (VAD) chunking is resolved for a session."""
+    """How voice-activity detection (VAD) chunking is resolved for a session.
+
+    There is deliberately no "on, with the default model" variant: nothing
+    ships a bundled Silero model, and the core handles VAD-enabled-without-a-
+    directory by warning and silently falling back to fixed-window chunking.
+    Enabling VAD therefore requires naming a directory.
+    """
     pass
 
 
@@ -506,14 +512,10 @@ class XybridVadModeOff(XybridVadMode):
 
 
 @dataclass(frozen=True, slots=True)
-class XybridVadModeDefault(XybridVadMode):
-    """VAD on, using the bundled default Silero model."""
-    pass
-
-
-@dataclass(frozen=True, slots=True)
-class XybridVadModeCustom(XybridVadMode):
-    """VAD on, using a Silero model from this directory."""
+class XybridVadModeEnabled(XybridVadMode):
+    """VAD on, using the Silero model in this directory, which must contain a
+    `model.onnx`.
+    """
     model_dir: str
 
 

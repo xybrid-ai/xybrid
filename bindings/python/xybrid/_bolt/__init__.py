@@ -1307,7 +1307,13 @@ _native._register_xybrid_thermal_state(XybridThermalState)
 
 
 class XybridVadMode:
-    """How voice-activity detection (VAD) chunking is resolved for a session."""
+    """How voice-activity detection (VAD) chunking is resolved for a session.
+
+    There is deliberately no "on, with the default model" variant: nothing
+    ships a bundled Silero model, and the core handles VAD-enabled-without-a-
+    directory by warning and silently falling back to fixed-window chunking.
+    Enabling VAD therefore requires naming a directory.
+    """
     __slots__ = ()
 
     @classmethod
@@ -1326,9 +1332,7 @@ class XybridVadMode:
         if tag == 0:
             return XybridVadModeOff._boltffi_from_reader_payload(reader)
         if tag == 1:
-            return XybridVadModeDefault._boltffi_from_reader_payload(reader)
-        if tag == 2:
-            return XybridVadModeCustom._boltffi_from_reader_payload(reader)
+            return XybridVadModeEnabled._boltffi_from_reader_payload(reader)
         raise ValueError("invalid XybridVadMode tag")
 
 
@@ -1346,30 +1350,19 @@ class XybridVadModeOff(XybridVadMode):
 
 
 @dataclass(frozen=True, slots=True)
-class XybridVadModeDefault(XybridVadMode):
-    """VAD on, using the bundled default Silero model."""
-    pass
-
-    def _boltffi_wire(self) -> bytes:
-        return _boltffi_wire_u32(1)
-
-    @classmethod
-    def _boltffi_from_reader_payload(cls, reader: "_BoltFfiWireReader") -> "XybridVadModeDefault":
-        return cls()
-
-
-@dataclass(frozen=True, slots=True)
-class XybridVadModeCustom(XybridVadMode):
-    """VAD on, using a Silero model from this directory."""
+class XybridVadModeEnabled(XybridVadMode):
+    """VAD on, using the Silero model in this directory, which must contain a
+    `model.onnx`.
+    """
     model_dir: str
 
     def _boltffi_wire(self) -> bytes:
-        return _boltffi_wire_u32(2) + b"".join((
+        return _boltffi_wire_u32(1) + b"".join((
             _boltffi_wire_string(self.model_dir),
         ))
 
     @classmethod
-    def _boltffi_from_reader_payload(cls, reader: "_BoltFfiWireReader") -> "XybridVadModeCustom":
+    def _boltffi_from_reader_payload(cls, reader: "_BoltFfiWireReader") -> "XybridVadModeEnabled":
         return cls(
             model_dir=reader.string(),
         )
@@ -3014,8 +3007,7 @@ __all__ = [
     "XybridThermalState",
     "XybridVadMode",
     "XybridVadModeOff",
-    "XybridVadModeDefault",
-    "XybridVadModeCustom",
+    "XybridVadModeEnabled",
     "XybridDownload",
     "XybridDownloadProgressSubscription",
     "XybridStreamingSession",
