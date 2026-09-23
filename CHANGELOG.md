@@ -67,6 +67,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `tokenizers` 0.22.2 → 0.23.2. Token ids and decoded text are unchanged.
   Encoding a MiniLM input past its 128-token truncation is ~24% faster;
   loading a `tokenizer.json` and short encodes move by 3% or less.
+- Text models (the `Tokenize` step) and ONNX Whisper decoding (the
+  `WhisperDecode` step) parse `tokenizer.json` once per loaded model instead
+  of on every run. One all-MiniLM-L6-v2 embedding drops from ~43 ms to ~35 ms
+  on an M4 Max; the Whisper decode step from ~28 ms to a few microseconds.
+  A `tokenizer.json` replaced on disk is picked up on the next run.
 
 ### Planned
 
