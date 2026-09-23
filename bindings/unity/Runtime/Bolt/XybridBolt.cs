@@ -1152,7 +1152,7 @@ namespace XybridBolt
         internal static extern FfiBuf NativeXybridPipelineName(ulong receiver);
 
         [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_pipeline_run")]
-        internal static extern FfiBuf NativeXybridPipelineRun(ulong receiver, [In] byte[] envelopeBytes, nuint envelopeLength, out FfiBuf boltffiResultBuffer);
+        internal static extern FfiBuf NativeXybridPipelineRun(ulong receiver, [In] byte[] envelopeBytes, nuint envelopeLength, [In] byte[] optionsBytes, nuint optionsLength, out FfiBuf boltffiResultBuffer);
 
         [DllImport(LibName, EntryPoint = "boltffi_method_class_xybrid_bolt_xybrid_pipeline_stage_count")]
         internal static extern uint NativeXybridPipelineStageCount(ulong receiver);

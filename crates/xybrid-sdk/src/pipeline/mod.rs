@@ -294,22 +294,32 @@ impl PipelineInputType {
 // Pipeline Execution Result Types
 // ============================================================================
 
-/// Timing information for a single pipeline stage.
+/// Timing, routing and output of a single pipeline stage.
 #[derive(Debug, Clone, Serialize)]
 pub struct StageTiming {
+    /// Stage identifier from the pipeline YAML (`id:`), or the model ID when
+    /// the stage declares none.
     pub name: String,
     pub latency_ms: u32,
     pub target: String,
     pub reason: String,
+    /// What this stage produced, which is also what the next stage consumed.
+    ///
+    /// Retained so an `ASR -> LLM -> TTS` caller can read the transcript and
+    /// the reply text, not only the final audio.
+    pub output: Envelope,
 }
 
 /// Result of pipeline execution.
 #[derive(Debug, Clone, Serialize)]
 pub struct PipelineExecutionResult {
     pub name: Option<String>,
+    /// Every executed stage in order, each with its own output.
     pub stages: Vec<StageTiming>,
     pub total_latency_ms: u32,
     pub output_type: OutputType,
+    /// The final stage's output — the same envelope as the last entry of
+    /// [`stages`](Self::stages).
     pub output: Envelope,
 }
 
@@ -1290,25 +1300,7 @@ fn execute_blocking(
     bridge_res.map_err(|e| SdkError::pipeline_src("Orchestrator event bridge failed", e))?;
     let total_latency_ms = start_time.elapsed().as_millis() as u32;
 
-    let stages: Vec<StageTiming> = results
-        .iter()
-        .map(|result| StageTiming {
-            name: result.stage.clone(),
-            latency_ms: result.latency_ms,
-            target: result.routing_decision.target.to_string(),
-            reason: result.routing_decision.reason.clone(),
-        })
-        .collect();
-
-    let (output_type, output) = if let Some(last) = results.last() {
-        let output_type = output_type_for_envelope(&last.output);
-        (output_type, last.output.clone())
-    } else {
-        (
-            OutputType::Unknown,
-            Envelope::new(EnvelopeKind::Text(String::new())),
-        )
-    };
+    let (stages, output_type, output) = summarize_stage_results(results);
 
     // Emit telemetry event. LLM metrics ride on the separate
     // `PlatformEvent.stages[].spans[].metadata` path (populated via
@@ -1321,12 +1313,8 @@ fn execute_blocking(
     // `pipeline / <pipeline-name>` with `target: None`. Multi-stage pipelines
     // keep the pipeline-level naming so ASR → LLM → TTS legs still collapse
     // under one row via the shared `trace_id`.
-    let (event_stage_name, event_target) = if results.len() == 1 {
-        let only = &results[0];
-        (
-            Some(only.stage.clone()),
-            Some(only.routing_decision.target.to_string()),
-        )
+    let (event_stage_name, event_target) = if let [only] = stages.as_slice() {
+        (Some(only.name.clone()), Some(only.target.clone()))
     } else {
         (name.clone(), None)
     };
@@ -1360,6 +1348,37 @@ fn execute_blocking(
         output_type,
         output,
     })
+}
+
+/// Turn the orchestrator's per-stage results into [`StageTiming`]s plus the
+/// final output.
+///
+/// Every stage keeps its own output envelope; the final one is cloned once
+/// more so [`PipelineExecutionResult::output`] stays a direct field. An empty
+/// pipeline yields an empty text envelope of [`OutputType::Unknown`].
+fn summarize_stage_results(
+    results: Vec<StageExecutionResult>,
+) -> (Vec<StageTiming>, OutputType, Envelope) {
+    let stages: Vec<StageTiming> = results
+        .into_iter()
+        .map(|result| StageTiming {
+            name: result.stage,
+            latency_ms: result.latency_ms,
+            target: result.routing_decision.target.to_string(),
+            reason: result.routing_decision.reason,
+            output: result.output,
+        })
+        .collect();
+
+    let (output_type, output) = match stages.last() {
+        Some(last) => (output_type_for_envelope(&last.output), last.output.clone()),
+        None => (
+            OutputType::Unknown,
+            Envelope::new(EnvelopeKind::Text(String::new())),
+        ),
+    };
+
+    (stages, output_type, output)
 }
 
 // Make Pipeline cloneable (shares the handle via Arc)
@@ -1619,10 +1638,11 @@ impl Xybrid {
                         return Ok(PipelineExecutionResult {
                             name: pipeline.name.clone(),
                             stages: vec![StageTiming {
-                                name: pipeline_ref.config.stages[0].model_id(),
+                                name: pipeline_ref.config.stages[0].stage_id(),
                                 latency_ms: total_latency_ms,
                                 target: route.target,
                                 reason: route.reason,
+                                output: output.clone(),
                             }],
                             total_latency_ms,
                             output_type,
@@ -1673,6 +1693,7 @@ impl Xybrid {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use xybrid_core::orchestrator::routing_engine::{RouteTarget, RoutingDecision};
 
     #[test]
     fn test_pipeline_ref_from_yaml() {
@@ -1693,6 +1714,7 @@ stages:
             latency_ms: 12,
             target: "local".to_string(),
             reason: "local_available".to_string(),
+            output: Envelope::new(EnvelopeKind::Text(String::new())),
         }];
 
         let json = pipeline_complete_data(&stages, &OutputType::Text, Some("run-abc"));
@@ -1712,6 +1734,7 @@ stages:
             latency_ms: 7,
             target: "device".to_string(),
             reason: "local_available".to_string(),
+            output: Envelope::new(EnvelopeKind::Audio(Vec::new())),
         }];
 
         let json = pipeline_complete_data(&stages, &OutputType::Audio, None);
@@ -1720,6 +1743,62 @@ stages:
         assert!(value.get("correlation_id").is_none());
         assert_eq!(value["output_type"], "Audio");
         assert_eq!(value["stages"][0]["target"], "device");
+    }
+
+    fn stage_result(
+        stage: &str,
+        target: RouteTarget,
+        output: EnvelopeKind,
+    ) -> StageExecutionResult {
+        StageExecutionResult {
+            stage: stage.to_string(),
+            output: Envelope::new(output),
+            routing_decision: RoutingDecision {
+                stage: stage.to_string(),
+                target,
+                reason: "test".to_string(),
+                timestamp_ms: 0,
+                local_reliability_hint: Default::default(),
+            },
+            latency_ms: 5,
+            adapter: "test-adapter".to_string(),
+        }
+    }
+
+    #[test]
+    fn summarize_stage_results_keeps_every_stage_output() {
+        let results = vec![
+            stage_result("asr", RouteTarget::Local, EnvelopeKind::Text("hi".into())),
+            stage_result(
+                "llm",
+                RouteTarget::Cloud,
+                EnvelopeKind::Text("hello!".into()),
+            ),
+            stage_result(
+                "tts",
+                RouteTarget::Local,
+                EnvelopeKind::Audio(vec![1, 2, 3]),
+            ),
+        ];
+
+        let (stages, output_type, output) = summarize_stage_results(results);
+
+        let ids: Vec<&str> = stages.iter().map(|s| s.name.as_str()).collect();
+        assert_eq!(ids, ["asr", "llm", "tts"]);
+        assert_eq!(stages[0].output.kind, EnvelopeKind::Text("hi".into()));
+        assert_eq!(stages[1].output.kind, EnvelopeKind::Text("hello!".into()));
+        assert_eq!(stages[1].target, "cloud");
+        assert_eq!(output_type, OutputType::Audio);
+        assert_eq!(output, stages[2].output);
+    }
+
+    #[test]
+    fn summarize_stage_results_of_an_empty_pipeline_is_unknown() {
+        let (stages, output_type, output) = summarize_stage_results(Vec::new());
+
+        assert!(stages.is_empty());
+        assert_eq!(output_type, OutputType::Unknown);
+        assert_eq!(output.kind, EnvelopeKind::Text(String::new()));
     }
 
     #[test]

@@ -775,9 +775,17 @@ class XybridPipeline {
   fun name(): String?
   fun stageCount(): UInt
   fun stageNames(): List<String>
-  fun run(envelope: XybridEnvelope): XybridResult
-  suspend fun runAsync(envelope: XybridEnvelope): XybridResult
+  fun run(envelope: XybridEnvelope, options: XybridRunOptions?): XybridPipelineResult
+  fun run(envelope: XybridEnvelope): XybridPipelineResult
+  suspend fun runAsync(envelope: XybridEnvelope, options: XybridRunOptions? = null): XybridPipelineResult
 }
+
+// Sugar on the result
+fun XybridPipelineResult.stage(id: String): XybridStageResult?
+val XybridPipelineResult.text: String?
+val XybridPipelineResult.audioBytes: ByteArray?
+val XybridStageResult.text: String?
+val XybridStageResult.audioBytes: ByteArray?
 ```
 
 ### Swift
@@ -788,13 +796,17 @@ print(pipeline.name() ?? "unnamed")
 print(pipeline.stageNames())
 
 let result = try await pipeline.runAsync(envelope: input)
-for stage in result.metrics.stageLatenciesMs {
-    print("\(stage.stageId): \(stage.latencyMs) ms")
+transcript.text = result.stage("asr")?.text   // what it heard
+reply.text = result.stage("llm")?.text        // what it answered
+try player.play(result.audioBytes)            // the final output
+
+for stage in result.stages {
+    print("\(stage.stageId): \(stage.latencyMs) ms on \(stage.executionTarget)")
 }
 ```
 
 The generated handle also provides blocking `init(fromYaml:)`,
-`init(fromFile:)`, `init(fromBundle:)`, and `run(envelope:)` calls.
+`init(fromFile:)`, `init(fromBundle:)`, and `run(envelope:options:)` calls.
 
 ### C# (Unity)
 
@@ -802,12 +814,40 @@ The generated handle also provides blocking `init(fromYaml:)`,
 using var pipeline = Pipeline.FromYaml(yaml);
 Debug.Log($"{pipeline.Name}: {pipeline.StageCount} stages");
 
-InferenceResult result = pipeline.Run(input);
-foreach (StageLatency stage in result.Metrics.StageLatenciesMs)
+PipelineResult result = pipeline.Run(input);
+transcript.text = result.Stage("asr")?.Text;
+reply.text = result.Stage("llm")?.Text;
+foreach (StageResult stage in result.Stages)
 {
-    Debug.Log($"{stage.StageId}: {stage.LatencyMs} ms");
+    Debug.Log($"{stage.StageId}: {stage.LatencyMs} ms on {stage.ExecutionTarget}");
 }
 ```
+
+### Pipeline result
+
+A run returns every stage's output, not only the final one, so an
+`ASR -> LLM -> TTS` pipeline exposes the transcript and the reply as well as
+the audio.
+
+| `XybridPipelineResult` | |
+|---|---|
+| `envelope` | The final stage's output (same as the last stage's `envelope`) |
+| `outputType` | Type of the final output |
+| `latencyMs` | Wall-clock time of the whole run |
+| `stages` | Every executed stage, in order |
+
+| `XybridStageResult` | |
+|---|---|
+| `stageId` | The YAML `id:`, or the model ID when the stage declares none; matches `stageNames()` |
+| `envelope` | This stage's output, which is also the next stage's input |
+| `outputType` | Type of this stage's output |
+| `latencyMs` | This stage's latency |
+| `executionTarget` | Where this stage ran (`local` / `cloud`); stages can differ |
+| `metrics` | TTFT and tokens per second when the stage is a language model |
+
+Of `XybridRunOptions`, only `correlationId` applies to a pipeline run. Setting
+`generationConfig` or `abortOn` fails with `ConfigError` instead of being
+ignored; per-stage generation settings belong in the pipeline YAML.
 
 ### Rust
 
@@ -853,14 +893,15 @@ impl Xybrid {
 | `stageCount` | ✅ | ✅ | ✅ | ✅ |
 | `stageNames` | ✅ | ✅ | ✅ | ✅ |
 | `run()` | ✅ | ✅ | ✅ | ✅ |
-| `runWithOptions()` / `run_with_options()` | Rust ✅ | planned | planned | planned |
+| `run(envelope, options)` / `run_with_options()` | Rust ✅ | ✅ | ✅ | — |
+| per-stage outputs (`result.stages`) | Rust ✅ | ✅ | ✅ | ✅ |
 | `runPipelineStreamingWithOptions()` / `run_pipeline_streaming_with_options()` | Rust ✅ | planned | planned | planned |
 
 All foreign SDKs intentionally expose one pipeline handle. Their constructors
 collapse Rust's `PipelineRef` parse/resolve step, avoiding a second opaque FFI
-handle that exists only to return the first one. A run reports the final stage's
-execution target and carries every executed stage's latency in
-`result.metrics.stageLatenciesMs`.
+handle that exists only to return the first one. Dart still returns the final
+stage only, as an `XybridResult` whose `metrics.stageLatenciesMs` lists each
+stage's latency.
 
 ---
 

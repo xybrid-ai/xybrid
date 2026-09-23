@@ -102,9 +102,14 @@ namespace XybridBolt
 
 
         /// <summary>
-        /// Execute the pipeline and return the final stage's output.
+        /// Execute every stage, downloading any missing models first, and return
+        /// each stage's output alongside the final one.
+        ///
+        /// Of `options`, only `correlation_id` applies to a pipeline run. Setting
+        /// `generation_config` or `abort_on` fails with `ConfigError` rather than
+        /// being ignored; per-stage generation settings belong in the YAML.
         /// </summary>
-        public global::XybridBolt.XybridResult Run(global::XybridBolt.XybridEnvelope envelope)
+        public global::XybridBolt.XybridPipelineResult Run(global::XybridBolt.XybridEnvelope envelope, global::XybridBolt.XybridRunOptions? options)
         {
             ThrowIfDisposed();
             WireWriter envelopeWriter = new WireWriter();
@@ -112,7 +117,20 @@ namespace XybridBolt
                 envelope.Encode(envelopeWriter);
             }
             byte[] envelopeBytes = envelopeWriter.ToArray();
-            FfiBuf boltffiErrorBuffer = NativeMethods.NativeXybridPipelineRun(this.Handle, envelopeBytes, (nuint)envelopeBytes.Length, out FfiBuf boltffiResultBuffer);
+            WireWriter optionsWriter = new WireWriter();
+            {
+                if (options is { } boltffiValue0)
+                {
+                    optionsWriter.WriteU8(1);
+                    boltffiValue0.Encode(optionsWriter);
+                }
+                else
+                {
+                    optionsWriter.WriteU8(0);
+                }
+            }
+            byte[] optionsBytes = optionsWriter.ToArray();
+            FfiBuf boltffiErrorBuffer = NativeMethods.NativeXybridPipelineRun(this.Handle, envelopeBytes, (nuint)envelopeBytes.Length, optionsBytes, (nuint)optionsBytes.Length, out FfiBuf boltffiResultBuffer);
             if (boltffiErrorBuffer.ptr != 0)
             {
                 try
@@ -128,7 +146,7 @@ namespace XybridBolt
             try
             {
                 WireReader resultReader = new WireReader(boltffiResultBuffer);
-                return global::XybridBolt.XybridResult.Decode(resultReader);
+                return global::XybridBolt.XybridPipelineResult.Decode(resultReader);
             }
             finally
             {

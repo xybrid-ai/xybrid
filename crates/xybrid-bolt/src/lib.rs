@@ -751,6 +751,66 @@ impl From<facade::InferenceResult> for XybridResult {
     }
 }
 
+/// What one stage of a pipeline run produced.
+#[data]
+#[derive(Clone)]
+pub struct XybridStageResult {
+    /// Stage identifier from the pipeline YAML (`id:`), or the model ID when
+    /// the stage declares none. Matches [`XybridPipeline::stage_names`].
+    pub stage_id: String,
+    /// This stage's output, which is also the next stage's input — the
+    /// transcript of an ASR stage, the reply of an LLM stage.
+    pub envelope: XybridEnvelope,
+    pub output_type: XybridOutputType,
+    pub latency_ms: u32,
+    /// Where this stage ran. Stages of one pipeline can run in different
+    /// places.
+    pub execution_target: XybridExecutionTarget,
+    /// Generation figures (TTFT, tokens per second) when this stage is a
+    /// language model; `total_ms` is the stage latency.
+    pub metrics: XybridInferenceMetrics,
+}
+
+impl From<facade::StageResult> for XybridStageResult {
+    fn from(s: facade::StageResult) -> Self {
+        Self {
+            stage_id: s.stage_id,
+            envelope: s.envelope.into(),
+            output_type: s.output_type.into(),
+            latency_ms: s.latency_ms,
+            execution_target: s.execution_target.into(),
+            metrics: XybridInferenceMetrics::from(&s.metrics),
+        }
+    }
+}
+
+/// Result of [`XybridPipeline::run`]: the final output plus every stage's own
+/// output, so a voice pipeline can show the transcript and the reply as well
+/// as play the audio.
+#[data]
+#[derive(Clone)]
+pub struct XybridPipelineResult {
+    /// The final stage's output — the same envelope as the last entry of
+    /// `stages`.
+    pub envelope: XybridEnvelope,
+    pub output_type: XybridOutputType,
+    /// Wall-clock time of the whole run.
+    pub latency_ms: u32,
+    /// Every executed stage, in order.
+    pub stages: Vec<XybridStageResult>,
+}
+
+impl From<facade::PipelineResult> for XybridPipelineResult {
+    fn from(r: facade::PipelineResult) -> Self {
+        Self {
+            envelope: r.envelope.into(),
+            output_type: r.output_type.into(),
+            latency_ms: r.latency_ms,
+            stages: r.stages.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
 // ============================================================================
 // Pull-based token streaming
 // ============================================================================
@@ -1829,10 +1889,19 @@ impl XybridPipeline {
         Ok(Self { inner })
     }
 
-    /// Execute the pipeline and return the final stage's output.
-    pub fn run(&self, envelope: XybridEnvelope) -> Result<XybridResult, XybridError> {
+    /// Execute every stage, downloading any missing models first, and return
+    /// each stage's output alongside the final one.
+    ///
+    /// Of `options`, only `correlation_id` applies to a pipeline run. Setting
+    /// `generation_config` or `abort_on` fails with `ConfigError` rather than
+    /// being ignored; per-stage generation settings belong in the YAML.
+    pub fn run(
+        &self,
+        envelope: XybridEnvelope,
+        options: Option<XybridRunOptions>,
+    ) -> Result<XybridPipelineResult, XybridError> {
         self.inner
-            .run(envelope.into())
+            .run(envelope.into(), options.map(Into::into).unwrap_or_default())
             .map(Into::into)
             .map_err(XybridError::from)
     }
@@ -2174,6 +2243,84 @@ stages:
         assert_eq!(pipeline.name().as_deref(), Some("assistant"));
         assert_eq!(pipeline.stage_names(), vec!["answer"]);
         assert_eq!(pipeline.stage_count(), 1);
+    }
+
+    #[test]
+    fn pipeline_run_rejects_options_it_cannot_honour() {
+        let pipeline = XybridPipeline::from_yaml(
+            "stages:\n  - id: answer\n    model: gpt-4o-mini\n    provider: openai\n".into(),
+        )
+        .expect("cloud-only pipeline should resolve without model downloads");
+        let options = XybridRunOptions {
+            generation_config: Some(XybridGenerationConfig {
+                max_tokens: Some(8),
+                temperature: None,
+                top_p: None,
+                min_p: None,
+                top_k: None,
+                repetition_penalty: None,
+                stop_sequences: Vec::new(),
+                grammar: None,
+                tools: Vec::new(),
+            }),
+            abort_on: Vec::new(),
+            fallback_to_cloud: false,
+            max_grace_tokens: 0,
+            correlation_id: None,
+        };
+
+        let envelope = XybridEnvelope {
+            kind: XybridEnvelopeKind::Text { text: "hi".into() },
+            metadata: Vec::new(),
+        };
+
+        let result = pipeline.run(envelope, Some(options));
+
+        assert!(
+            matches!(result, Err(XybridError::ConfigError { .. })),
+            "a pipeline run must not silently drop generation_config"
+        );
+    }
+
+    #[test]
+    fn pipeline_result_crosses_bolt_with_every_stage() {
+        let stage = |id: &str, kind: facade::EnvelopeKind| facade::StageResult {
+            stage_id: id.into(),
+            envelope: facade::Envelope {
+                kind,
+                metadata: std::collections::HashMap::new(),
+            },
+            output_type: facade::OutputType::Text,
+            latency_ms: 10,
+            execution_target: facade::ExecutionTarget::Local,
+            metrics: facade::InferenceMetrics::default(),
+        };
+        let asr = stage(
+            "asr",
+            facade::EnvelopeKind::Text {
+                text: "hello".into(),
+            },
+        );
+        let llm = stage(
+            "llm",
+            facade::EnvelopeKind::Text {
+                text: "hi there".into(),
+            },
+        );
+        let result = XybridPipelineResult::from(facade::PipelineResult {
+            envelope: llm.envelope.clone(),
+            output_type: facade::OutputType::Text,
+            latency_ms: 20,
+            stages: vec![asr, llm],
+        });
+
+        let ids: Vec<&str> = result.stages.iter().map(|s| s.stage_id.as_str()).collect();
+        assert_eq!(ids, ["asr", "llm"]);
+        assert!(matches!(
+            &result.stages[0].envelope.kind,
+            XybridEnvelopeKind::Text { text } if text == "hello"
+        ));
+        assert_eq!(result.latency_ms, 20);
     }
 
     #[test]

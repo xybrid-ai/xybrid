@@ -193,7 +193,7 @@ void boltffi_release_class_xybrid_bolt_xybrid_pipeline(uint64_t handle);
 FfiBuf_u8 boltffi_init_class_xybrid_bolt_xybrid_pipeline_from_yaml(const uint8_t *yaml_ptr, uintptr_t yaml_len, uint64_t *return_out);
 FfiBuf_u8 boltffi_init_class_xybrid_bolt_xybrid_pipeline_from_file(const uint8_t *path_ptr, uintptr_t path_len, uint64_t *return_out);
 FfiBuf_u8 boltffi_init_class_xybrid_bolt_xybrid_pipeline_from_bundle(const uint8_t *path_ptr, uintptr_t path_len, uint64_t *return_out);
-FfiBuf_u8 boltffi_method_class_xybrid_bolt_xybrid_pipeline_run(uint64_t receiver, const uint8_t *envelope_ptr, uintptr_t envelope_len, FfiBuf_u8 *return_out);
+FfiBuf_u8 boltffi_method_class_xybrid_bolt_xybrid_pipeline_run(uint64_t receiver, const uint8_t *envelope_ptr, uintptr_t envelope_len, const uint8_t *options_ptr, uintptr_t options_len, FfiBuf_u8 *return_out);
 FfiBuf_u8 boltffi_method_class_xybrid_bolt_xybrid_pipeline_name(uint64_t receiver);
 FfiBuf_u8 boltffi_method_class_xybrid_bolt_xybrid_pipeline_stage_names(uint64_t receiver);
 uint32_t boltffi_method_class_xybrid_bolt_xybrid_pipeline_stage_count(uint64_t receiver);

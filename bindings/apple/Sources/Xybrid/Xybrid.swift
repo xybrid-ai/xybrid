@@ -721,9 +721,75 @@ public extension XybridPipeline {
         try await Task.detached { try XybridPipeline(fromBundle: url.path) }.value
     }
 
+    /// Run every stage with default options.
+    ///
+    /// Convenience over `run(envelope:options:)`. The first run downloads any
+    /// model the pipeline still needs, so prefer ``runAsync(envelope:options:)``
+    /// off the main actor.
+    func run(envelope: XybridEnvelope) throws -> XybridPipelineResult {
+        try run(envelope: envelope, options: nil)
+    }
+
     /// Run every stage without blocking the calling thread or actor.
-    func runAsync(envelope: XybridEnvelope) async throws -> XybridResult {
-        try await Task.detached { try self.run(envelope: envelope) }.value
+    ///
+    /// Of `options`, only `correlationId` applies to a pipeline run; setting
+    /// `generationConfig` or `abortOn` throws ``XybridError/configError(message:)``.
+    func runAsync(
+        envelope: XybridEnvelope,
+        options: XybridRunOptions? = nil
+    ) async throws -> XybridPipelineResult {
+        try await Task.detached { try self.run(envelope: envelope, options: options) }.value
+    }
+}
+
+// MARK: - Pipeline result ergonomics
+//
+// A pipeline run returns every stage's output, not only the last one, so a
+// voice assistant can show what it heard and what it answered while it plays
+// the audio:
+//
+//     let result = try await pipeline.runAsync(envelope: .audio(pcmData: pcm))
+//     transcript.text = result.stage("asr")?.text
+//     reply.text = result.stage("llm")?.text
+//     try player.play(result.audioBytes)
+
+public extension XybridPipelineResult {
+    /// Final text payload, if the last stage produced text. `nil` otherwise.
+    var text: String? { envelope.textPayload }
+
+    /// Final audio bytes, if the last stage produced audio. `nil` otherwise.
+    var audioBytes: Data? { envelope.audioPayload }
+
+    /// The whole run's latency as a `TimeInterval` in seconds.
+    var latency: TimeInterval { TimeInterval(latencyMs) / 1000.0 }
+
+    /// The stage with this identifier — the YAML `id:` — if it ran.
+    func stage(_ id: String) -> XybridStageResult? {
+        stages.first { $0.stageId == id }
+    }
+}
+
+public extension XybridStageResult {
+    /// This stage's text output — an ASR transcript, an LLM reply. `nil` for
+    /// any other payload.
+    var text: String? { envelope.textPayload }
+
+    /// This stage's audio output, if it produced audio. `nil` otherwise.
+    var audioBytes: Data? { envelope.audioPayload }
+
+    /// This stage's latency as a `TimeInterval` in seconds.
+    var latency: TimeInterval { TimeInterval(latencyMs) / 1000.0 }
+}
+
+private extension XybridEnvelope {
+    var textPayload: String? {
+        if case .text(let text) = kind { return text }
+        return nil
+    }
+
+    var audioPayload: Data? {
+        if case .audio(let bytes) = kind { return bytes }
+        return nil
     }
 }
 

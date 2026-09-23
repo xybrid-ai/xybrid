@@ -93,10 +93,11 @@ RECORD_STRUCT_RE = re.compile(
 # lowering dropped (XybridResult / XybridEnvelope / XybridStreamEvent / …),
 # plus 3 for the tool-calling records (XybridToolDefinition / XybridToolCall /
 # XybridToolResult), plus 2 for the live ASR session (XybridStreamingConfig /
-# XybridPartialResult).
+# XybridPartialResult), plus 2 for the pipeline result (XybridPipelineResult /
+# XybridStageResult).
 # Bump this deliberately: the count is a tripwire for unreviewed boltffi output
 # drift, not a value to auto-sync.
-EXPECTED_RECORD_STRUCTS = 16
+EXPECTED_RECORD_STRUCTS = 18
 
 
 # --- Transform (g): Unsafe.SizeOf<T>() -> Marshal.SizeOf<T>(). boltffi's wire

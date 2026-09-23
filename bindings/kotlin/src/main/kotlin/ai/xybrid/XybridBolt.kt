@@ -963,7 +963,7 @@ private object Native {
     @JvmStatic external fun boltffi_init_class_xybrid_bolt_xybrid_pipeline_from_yaml(yaml: java.nio.ByteBuffer, __boltffi_yaml_len: Int): Long
     @JvmStatic external fun boltffi_init_class_xybrid_bolt_xybrid_pipeline_from_file(path: java.nio.ByteBuffer, __boltffi_path_len: Int): Long
     @JvmStatic external fun boltffi_init_class_xybrid_bolt_xybrid_pipeline_from_bundle(path: java.nio.ByteBuffer, __boltffi_path_len: Int): Long
-    @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_pipeline_run(`receiver`: Long, envelope: java.nio.ByteBuffer, __boltffi_envelope_len: Int): ByteArray?
+    @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_pipeline_run(`receiver`: Long, envelope: java.nio.ByteBuffer, __boltffi_envelope_len: Int, options: java.nio.ByteBuffer, __boltffi_options_len: Int): ByteArray?
     @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_pipeline_name(`receiver`: Long): ByteArray?
     @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_pipeline_stage_names(`receiver`: Long): ByteArray?
     @JvmStatic external fun boltffi_method_class_xybrid_bolt_xybrid_pipeline_stage_count(`receiver`: Long): Int
@@ -1647,6 +1647,138 @@ data class XybridDownloadStatus(
         }
 
         internal fun fromByteArray(bytes: ByteArray): XybridDownloadStatus {
+            val reader = WireReader(bytes)
+            return fromReader(reader)
+        }
+    }
+}
+
+
+/**
+ * What one stage of a pipeline run produced.
+ */
+data class XybridStageResult(
+    /**
+     * Stage identifier from the pipeline YAML (`id:`), or the model ID when
+     * the stage declares none. Matches [`XybridPipeline::stage_names`].
+     */
+    val stageId: String,
+    /**
+     * This stage's output, which is also the next stage's input — the
+     * transcript of an ASR stage, the reply of an LLM stage.
+     */
+    val envelope: XybridEnvelope,
+    val outputType: XybridOutputType,
+    val latencyMs: UInt,
+    /**
+     * Where this stage ran. Stages of one pipeline can run in different
+     * places.
+     */
+    val executionTarget: XybridExecutionTarget,
+    /**
+     * Generation figures (TTFT, tokens per second) when this stage is a
+     * language model; `total_ms` is the stage latency.
+     */
+    val metrics: XybridInferenceMetrics
+) {
+    internal fun wireSize(): Int {
+        return 4 + Utf8Codec.maxBytes(this.stageId) + this.envelope.wireSize() + 4 + 4 + 4 + this.metrics.wireSize()
+    }
+
+    internal fun writeTo(writer: WireWriter) {
+        writer.writeString(this.stageId)
+        this.envelope.writeTo(writer)
+        writer.writeI32(this.outputType.value)
+        writer.writeU32(this.latencyMs)
+        writer.writeI32(this.executionTarget.value)
+        this.metrics.writeTo(writer)
+    }
+
+    internal fun toByteArray(): ByteArray {
+        val buffer = WireWriterPool.acquire(wireSize())
+        val writer = buffer.writer
+        try {
+            writeTo(writer)
+            return buffer.bytes()
+        } finally {
+            buffer.close()
+        }
+    }
+
+    companion object {
+        internal fun fromReader(reader: WireReader): XybridStageResult {
+            return XybridStageResult(
+                reader.readString(),
+                XybridEnvelope.fromReader(reader),
+                XybridOutputType.fromValue(reader.readI32()),
+                reader.readU32(),
+                XybridExecutionTarget.fromValue(reader.readI32()),
+                XybridInferenceMetrics.fromReader(reader)
+            )
+        }
+
+        internal fun fromByteArray(bytes: ByteArray): XybridStageResult {
+            val reader = WireReader(bytes)
+            return fromReader(reader)
+        }
+    }
+}
+
+
+/**
+ * Result of [`XybridPipeline::run`]: the final output plus every stage's own
+ * output, so a voice pipeline can show the transcript and the reply as well
+ * as play the audio.
+ */
+data class XybridPipelineResult(
+    /**
+     * The final stage's output — the same envelope as the last entry of
+     * `stages`.
+     */
+    val envelope: XybridEnvelope,
+    val outputType: XybridOutputType,
+    /**
+     * Wall-clock time of the whole run.
+     */
+    val latencyMs: UInt,
+    /**
+     * Every executed stage, in order.
+     */
+    val stages: List<XybridStageResult>
+) {
+    internal fun wireSize(): Int {
+        return this.envelope.wireSize() + 4 + 4 + 4 + this.stages.sumOf { __boltffi_value_0 -> (__boltffi_value_0.wireSize()).toInt() }
+    }
+
+    internal fun writeTo(writer: WireWriter) {
+        this.envelope.writeTo(writer)
+        writer.writeI32(this.outputType.value)
+        writer.writeU32(this.latencyMs)
+        writer.writeSequence(this.stages, this.stages.size, { writer, __boltffi_value_0 -> __boltffi_value_0.writeTo(writer) })
+    }
+
+    internal fun toByteArray(): ByteArray {
+        val buffer = WireWriterPool.acquire(wireSize())
+        val writer = buffer.writer
+        try {
+            writeTo(writer)
+            return buffer.bytes()
+        } finally {
+            buffer.close()
+        }
+    }
+
+    companion object {
+        internal fun fromReader(reader: WireReader): XybridPipelineResult {
+            return XybridPipelineResult(
+                XybridEnvelope.fromReader(reader),
+                XybridOutputType.fromValue(reader.readI32()),
+                reader.readU32(),
+                reader.readSequence({ reader -> XybridStageResult.fromReader(reader) })
+            )
+        }
+
+        internal fun fromByteArray(bytes: ByteArray): XybridPipelineResult {
             val reader = WireReader(bytes)
             return fromReader(reader)
         }
@@ -3257,18 +3389,27 @@ class XybridPipeline internal constructor(internal val handle: Long) : AutoClose
     }
 
     /**
-     * Execute the pipeline and return the final stage's output.
+     * Execute every stage, downloading any missing models first, and return
+     * each stage's output alongside the final one.
+     *
+     * Of `options`, only `correlation_id` applies to a pipeline run. Setting
+     * `generation_config` or `abort_on` fails with `ConfigError` rather than
+     * being ignored; per-stage generation settings belong in the YAML.
      */
-    fun run(envelope: XybridEnvelope): XybridResult {
+    fun run(envelope: XybridEnvelope, options: XybridRunOptions?): XybridPipelineResult {
         val __boltffi_envelope_wire = WireWriterPool.acquire(envelope.wireSize())
         val __boltffi_envelope_writer = __boltffi_envelope_wire.writer
         envelope.writeTo(__boltffi_envelope_writer)
+        val __boltffi_options_wire = WireWriterPool.acquire(1 + (options?.let { __boltffi_value_0 -> __boltffi_value_0.wireSize() } ?: 0))
+        val __boltffi_options_writer = __boltffi_options_wire.writer
+        __boltffi_options_writer.writeOptionalValue(options, { __boltffi_options_writer, __boltffi_value_0 -> __boltffi_value_0.writeTo(__boltffi_options_writer) })
         try {
-            val __boltffi_result = try { Native.boltffi_method_class_xybrid_bolt_xybrid_pipeline_run(this.boltffiHandle(), __boltffi_envelope_wire.directBuffer(), __boltffi_envelope_wire.size()) } catch (__boltffi_error: BoltFfiErrorBufferException) { run { val __boltffi_error_reader = WireReader(__boltffi_error.bytes); throw XybridError.fromReader(__boltffi_error_reader) } } ?: throw IllegalStateException("null buffer returned")
+            val __boltffi_result = try { Native.boltffi_method_class_xybrid_bolt_xybrid_pipeline_run(this.boltffiHandle(), __boltffi_envelope_wire.directBuffer(), __boltffi_envelope_wire.size(), __boltffi_options_wire.directBuffer(), __boltffi_options_wire.size()) } catch (__boltffi_error: BoltFfiErrorBufferException) { run { val __boltffi_error_reader = WireReader(__boltffi_error.bytes); throw XybridError.fromReader(__boltffi_error_reader) } } ?: throw IllegalStateException("null buffer returned")
             val __boltffi_reader = WireReader(__boltffi_result)
-            return XybridResult.fromReader(__boltffi_reader)
+            return XybridPipelineResult.fromReader(__boltffi_reader)
         } finally {
             __boltffi_envelope_wire.close()
+            __boltffi_options_wire.close()
         }
     }
 

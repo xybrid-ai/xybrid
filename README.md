@@ -259,18 +259,21 @@ final result = await pipeline.run(XybridEnvelope.audio(bytes: audioBytes, sample
 ```kotlin
 val pipeline = XybridPipeline.fromYamlAsync(yamlString)
 val result = pipeline.runAsync(inputEnvelope)
+val transcript = result.stage("asr")?.text  // every stage's output, not just the last
 ```
 
 **Swift:**
 ```swift
 let pipeline = try await XybridPipeline.fromYamlAsync(yamlString)
 let result = try await pipeline.runAsync(envelope: inputEnvelope)
+let transcript = result.stage("asr")?.text  // every stage's output, not just the last
 ```
 
 **Unity (C#):**
 ```csharp
 using var pipeline = Pipeline.FromYaml(yamlString);
-InferenceResult result = pipeline.Run(inputEnvelope);
+PipelineResult result = pipeline.Run(inputEnvelope);
+string transcript = result.Stage("asr")?.Text;  // every stage's output, not just the last
 ```
 
 **Rust:**

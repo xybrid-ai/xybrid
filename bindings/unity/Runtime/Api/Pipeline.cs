@@ -92,14 +92,14 @@ namespace Xybrid
         }
 
         /// <summary>
-        /// Runs every stage and returns the final stage's output.
+        /// Runs every stage and returns each stage's output alongside the final one.
         /// </summary>
         /// <remarks>
-        /// <see cref="InferenceResult.Metrics"/> includes one stage-latency
-        /// entry per executed stage. <see cref="InferenceResult.ExecutionTarget"/>
-        /// describes the final stage that produced the returned output.
+        /// Read <see cref="PipelineResult.Stage"/> for an intermediate output,
+        /// such as the transcript of an ASR stage. The first run downloads any
+        /// model the pipeline still needs, so call it off the main thread.
         /// </remarks>
-        public InferenceResult Run(Envelope envelope)
+        public PipelineResult Run(Envelope envelope)
         {
             ThrowIfDisposed();
             if (envelope == null)
@@ -109,7 +109,7 @@ namespace Xybrid
 
             try
             {
-                return InferenceResult.FromBolt(_bolt.Run(envelope.Bolt));
+                return PipelineResult.FromBolt(_bolt.Run(envelope.Bolt, null));
             }
             catch (Exception ex) when (
                 ex is XybridBolt.XybridErrorException || ex is XybridBolt.BoltException)

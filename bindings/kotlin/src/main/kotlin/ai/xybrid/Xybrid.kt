@@ -550,6 +550,17 @@ fun XybridModel.runStream(
     options: XybridRunOptions?,
 ): ULong = XybridCancellationToken().use { this.runStream(envelope, options, it) }
 
+// -- Pipelines --
+//
+// A pipeline run returns every stage's output, not only the last one, so a
+// voice assistant can show what it heard and what it answered while it plays
+// the audio:
+//
+//     val result = pipeline.runAsync(Envelope.audio(pcm))
+//     transcript.text = result.stage("asr")?.text
+//     reply.text = result.stage("llm")?.text
+//     player.play(result.audioBytes)
+
 /** Parse and load a pipeline off the caller's thread. */
 suspend fun XybridPipeline.Companion.fromYamlAsync(yaml: String): XybridPipeline =
     withContext(Dispatchers.IO) { fromYaml(yaml) }
@@ -562,9 +573,50 @@ suspend fun XybridPipeline.Companion.fromFileAsync(path: String): XybridPipeline
 suspend fun XybridPipeline.Companion.fromBundleAsync(path: String): XybridPipeline =
     withContext(Dispatchers.IO) { fromBundle(path) }
 
-/** Run every pipeline stage off the caller's thread. */
-suspend fun XybridPipeline.runAsync(envelope: XybridEnvelope): XybridResult =
-    withContext(Dispatchers.IO) { this@runAsync.run(envelope) }
+/**
+ * Run every stage with default options.
+ *
+ * Convenience over the generated `run(envelope, options)`. The first run
+ * downloads any model the pipeline still needs, so prefer [runAsync] on the
+ * main thread.
+ */
+fun XybridPipeline.run(envelope: XybridEnvelope): XybridPipelineResult = this.run(envelope, null)
+
+/**
+ * Run every pipeline stage off the caller's thread.
+ *
+ * Of [options], only `correlationId` applies to a pipeline run; setting
+ * `generationConfig` or `abortOn` throws [XybridError.ConfigError].
+ */
+suspend fun XybridPipeline.runAsync(
+    envelope: XybridEnvelope,
+    options: XybridRunOptions? = null,
+): XybridPipelineResult = withContext(Dispatchers.IO) { this@runAsync.run(envelope, options) }
+
+/** The stage with this identifier — the YAML `id:` — if it ran. */
+fun XybridPipelineResult.stage(id: String): XybridStageResult? = stages.firstOrNull { it.stageId == id }
+
+/** Final text payload, if the last stage produced text. `null` otherwise. */
+val XybridPipelineResult.text: String?
+    get() = (envelope.kind as? XybridEnvelopeKind.Text)?.text
+
+/** Final audio bytes, if the last stage produced audio. `null` otherwise. */
+val XybridPipelineResult.audioBytes: ByteArray?
+    get() = (envelope.kind as? XybridEnvelopeKind.Audio)?.bytes
+
+/** The whole run's latency in seconds as a Double. */
+val XybridPipelineResult.latencySeconds: Double get() = latencyMs.toDouble() / 1000.0
+
+/** This stage's text output — an ASR transcript, an LLM reply. `null` otherwise. */
+val XybridStageResult.text: String?
+    get() = (envelope.kind as? XybridEnvelopeKind.Text)?.text
+
+/** This stage's audio output, if it produced audio. `null` otherwise. */
+val XybridStageResult.audioBytes: ByteArray?
+    get() = (envelope.kind as? XybridEnvelopeKind.Audio)?.bytes
+
+/** This stage's latency in seconds as a Double. */
+val XybridStageResult.latencySeconds: Double get() = latencyMs.toDouble() / 1000.0
 
 // -- Async (suspend) conveniences --
 //

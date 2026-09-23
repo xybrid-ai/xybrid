@@ -128,6 +128,41 @@ def test_result_conveniences_on_synthetic_result() -> None:
     assert isinstance(xybrid.XybridVoiceInfo.is_female, property)
 
 
+def _stage(stage_id: str, envelope: xybrid.XybridEnvelope, output_type: xybrid.XybridOutputType):
+    return xybrid.XybridStageResult(
+        stage_id=stage_id,
+        envelope=envelope,
+        output_type=output_type,
+        latency_ms=250,
+        execution_target=xybrid.XybridExecutionTarget.LOCAL,
+        metrics=_metrics(250),
+    )
+
+
+def test_pipeline_result_conveniences_reach_every_stage() -> None:
+    asr = _stage("asr", xybrid.XybridEnvelope.text("what time is it"), xybrid.XybridOutputType.TEXT)
+    tts = _stage("tts", xybrid.XybridEnvelope.audio(b"pcm"), xybrid.XybridOutputType.AUDIO)
+    result = xybrid.XybridPipelineResult(
+        envelope=tts.envelope,
+        output_type=xybrid.XybridOutputType.AUDIO,
+        latency_ms=500,
+        stages=[asr, tts],
+    )
+
+    assert result.audio_bytes == b"pcm"
+    assert result.text is None
+    assert result.latency_seconds == pytest.approx(0.5)
+    assert result.stage("asr").text == "what time is it"
+    assert result.stage("tts").audio_bytes == b"pcm"
+    assert result.stage("missing") is None
+
+
+def test_pipeline_run_defaults_its_options() -> None:
+    parameter = inspect.signature(xybrid.XybridPipeline.run).parameters["options"]
+
+    assert parameter.default is None
+
+
 def test_tool_call_conveniences_on_result_and_stream_token() -> None:
     call = xybrid.XybridToolCall(id="call_0", name="get_weather", arguments_json='{"city":"Paris"}')
 

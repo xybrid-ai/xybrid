@@ -177,6 +177,48 @@ class XybridDownloadStatus:
 
 
 @dataclass(frozen=True, slots=True)
+class XybridStageResult:
+    """What one stage of a pipeline run produced."""
+    stage_id: str
+    """Stage identifier from the pipeline YAML (`id:`), or the model ID when
+    the stage declares none. Matches [`XybridPipeline::stage_names`].
+    """
+    envelope: XybridEnvelope
+    """This stage's output, which is also the next stage's input — the
+    transcript of an ASR stage, the reply of an LLM stage.
+    """
+    output_type: XybridOutputType
+    latency_ms: int
+    execution_target: XybridExecutionTarget
+    """Where this stage ran. Stages of one pipeline can run in different
+    places.
+    """
+    metrics: XybridInferenceMetrics
+    """Generation figures (TTFT, tokens per second) when this stage is a
+    language model; `total_ms` is the stage latency.
+    """
+
+
+
+@dataclass(frozen=True, slots=True)
+class XybridPipelineResult:
+    """Result of [`XybridPipeline::run`]: the final output plus every stage's own
+    output, so a voice pipeline can show the transcript and the reply as well
+    as play the audio.
+    """
+    envelope: XybridEnvelope
+    """The final stage's output — the same envelope as the last entry of
+    `stages`.
+    """
+    output_type: XybridOutputType
+    latency_ms: int
+    """Wall-clock time of the whole run."""
+    stages: list[XybridStageResult]
+    """Every executed stage, in order."""
+
+
+
+@dataclass(frozen=True, slots=True)
 class XybridStreamToken:
     token: str
     token_id: int | None
@@ -820,8 +862,14 @@ class XybridPipeline:
     @classmethod
     def from_bundle(cls, path: str) -> "XybridPipeline":
         """Load a pipeline bundle."""
-    def run(self, envelope: XybridEnvelope) -> XybridResult:
-        """Execute the pipeline and return the final stage's output."""
+    def run(self, envelope: XybridEnvelope, options: XybridRunOptions | None) -> XybridPipelineResult:
+        """Execute every stage, downloading any missing models first, and return
+        each stage's output alongside the final one.
+
+        Of `options`, only `correlation_id` applies to a pipeline run. Setting
+        `generation_config` or `abort_on` fails with `ConfigError` rather than
+        being ignored; per-stage generation settings belong in the YAML.
+        """
     def name(self) -> str | None:
         """Pipeline name from the YAML definition, if present."""
     def stage_names(self) -> list[str]:

@@ -425,18 +425,18 @@ def _boltffi_read_94828222bbb26957(data: bytes):
 _native._register_wire_codec("read_94828222bbb26957", _boltffi_read_94828222bbb26957)
 
 
-def _boltffi_read_8d5822576d97fd37(data: bytes):
+def _boltffi_read_4d62ca46c12c8415(data: bytes):
     return _boltffi_read_wire(data, lambda reader: reader.sequence(lambda: XybridVoiceInfo._boltffi_from_reader(reader)))
 
 
-_native._register_wire_codec("read_8d5822576d97fd37", _boltffi_read_8d5822576d97fd37)
+_native._register_wire_codec("read_4d62ca46c12c8415", _boltffi_read_4d62ca46c12c8415)
 
 
-def _boltffi_read_5110818ecd16fc91(data: bytes):
+def _boltffi_read_9105d99f798275b3(data: bytes):
     return _boltffi_read_wire(data, lambda reader: reader.optional(lambda: XybridVoiceInfo._boltffi_from_reader(reader)))
 
 
-_native._register_wire_codec("read_5110818ecd16fc91", _boltffi_read_5110818ecd16fc91)
+_native._register_wire_codec("read_9105d99f798275b3", _boltffi_read_9105d99f798275b3)
 
 
 def _boltffi_read_146d324414895b9b(data: bytes):
@@ -446,8 +446,15 @@ def _boltffi_read_146d324414895b9b(data: bytes):
 _native._register_wire_codec("read_146d324414895b9b", _boltffi_read_146d324414895b9b)
 
 
-def _boltffi_read_f45d365d172a914e(data: bytes):
+def _boltffi_read_b467de4c6abf182c(data: bytes):
     return _boltffi_read_wire(data, lambda reader: XybridStreamEvent._boltffi_from_reader(reader))
+
+
+_native._register_wire_codec("read_b467de4c6abf182c", _boltffi_read_b467de4c6abf182c)
+
+
+def _boltffi_read_f45d365d172a914e(data: bytes):
+    return _boltffi_read_wire(data, lambda reader: XybridPipelineResult._boltffi_from_reader(reader))
 
 
 _native._register_wire_codec("read_f45d365d172a914e", _boltffi_read_f45d365d172a914e)
@@ -489,11 +496,11 @@ def _boltffi_write_cfe97cd6dcce32b6(platform) -> bytes:
 _native._register_wire_codec("write_cfe97cd6dcce32b6", _boltffi_write_cfe97cd6dcce32b6)
 
 
-def _boltffi_write_f08afe91c607b511(config) -> bytes:
+def _boltffi_write_afeb278be053ce0f(config) -> bytes:
     return config._boltffi_wire()
 
 
-_native._register_wire_codec("write_f08afe91c607b511", _boltffi_write_f08afe91c607b511)
+_native._register_wire_codec("write_afeb278be053ce0f", _boltffi_write_afeb278be053ce0f)
 
 
 def _boltffi_write_766cdeb069dd2b0a(path) -> bytes:
@@ -1899,6 +1906,112 @@ _native._register_xybrid_download_status(XybridDownloadStatus)
 
 
 @dataclass(frozen=True, slots=True)
+class XybridStageResult:
+    """What one stage of a pipeline run produced."""
+    stage_id: str
+    """Stage identifier from the pipeline YAML (`id:`), or the model ID when
+    the stage declares none. Matches [`XybridPipeline::stage_names`].
+    """
+    envelope: XybridEnvelope
+    """This stage's output, which is also the next stage's input — the
+    transcript of an ASR stage, the reply of an LLM stage.
+    """
+    output_type: XybridOutputType
+    latency_ms: int
+    execution_target: XybridExecutionTarget
+    """Where this stage ran. Stages of one pipeline can run in different
+    places.
+    """
+    metrics: XybridInferenceMetrics
+    """Generation figures (TTFT, tokens per second) when this stage is a
+    language model; `total_ms` is the stage latency.
+    """
+
+    def _boltffi_wire(self) -> bytes:
+        return b"".join((
+            _boltffi_wire_string(self.stage_id),
+            self.envelope._boltffi_wire(),
+            _boltffi_wire_i32(_boltffi_enum_value(self.output_type, XybridOutputType, "XybridOutputType")),
+            _boltffi_wire_u32(self.latency_ms),
+            _boltffi_wire_i32(_boltffi_enum_value(self.execution_target, XybridExecutionTarget, "XybridExecutionTarget")),
+            self.metrics._boltffi_wire(),
+        ))
+
+    @classmethod
+    def _boltffi_from_wire(cls, data: bytes) -> "XybridStageResult":
+        reader = _BoltFfiWireReader(data)
+        try:
+            value = cls._boltffi_from_reader(reader)
+        except struct.error as error:
+            raise ValueError("truncated BoltFFI wire bytes") from error
+        reader.finish()
+        return value
+
+    @classmethod
+    def _boltffi_from_reader(cls, reader: "_BoltFfiWireReader") -> "XybridStageResult":
+        return cls(
+            stage_id=reader.string(),
+            envelope=XybridEnvelope._boltffi_from_reader(reader),
+            output_type=XybridOutputType(reader.i32()),
+            latency_ms=reader.u32(),
+            execution_target=XybridExecutionTarget(reader.i32()),
+            metrics=XybridInferenceMetrics._boltffi_from_reader(reader),
+        )
+
+
+_native._register_xybrid_stage_result(XybridStageResult)
+
+
+
+@dataclass(frozen=True, slots=True)
+class XybridPipelineResult:
+    """Result of [`XybridPipeline::run`]: the final output plus every stage's own
+    output, so a voice pipeline can show the transcript and the reply as well
+    as play the audio.
+    """
+    envelope: XybridEnvelope
+    """The final stage's output — the same envelope as the last entry of
+    `stages`.
+    """
+    output_type: XybridOutputType
+    latency_ms: int
+    """Wall-clock time of the whole run."""
+    stages: list[XybridStageResult]
+    """Every executed stage, in order."""
+
+    def _boltffi_wire(self) -> bytes:
+        return b"".join((
+            self.envelope._boltffi_wire(),
+            _boltffi_wire_i32(_boltffi_enum_value(self.output_type, XybridOutputType, "XybridOutputType")),
+            _boltffi_wire_u32(self.latency_ms),
+            _boltffi_wire_sequence(self.stages, len(self.stages), lambda __boltffi_value_0: __boltffi_value_0._boltffi_wire()),
+        ))
+
+    @classmethod
+    def _boltffi_from_wire(cls, data: bytes) -> "XybridPipelineResult":
+        reader = _BoltFfiWireReader(data)
+        try:
+            value = cls._boltffi_from_reader(reader)
+        except struct.error as error:
+            raise ValueError("truncated BoltFFI wire bytes") from error
+        reader.finish()
+        return value
+
+    @classmethod
+    def _boltffi_from_reader(cls, reader: "_BoltFfiWireReader") -> "XybridPipelineResult":
+        return cls(
+            envelope=XybridEnvelope._boltffi_from_reader(reader),
+            output_type=XybridOutputType(reader.i32()),
+            latency_ms=reader.u32(),
+            stages=reader.sequence(lambda: XybridStageResult._boltffi_from_reader(reader)),
+        )
+
+
+_native._register_xybrid_pipeline_result(XybridPipelineResult)
+
+
+
+@dataclass(frozen=True, slots=True)
 class XybridStreamToken:
     token: str
     token_id: int | None
@@ -2688,9 +2801,15 @@ class XybridPipeline:
         """Load a pipeline bundle."""
         return XybridPipeline._from_handle(_boltffi_call(_boltffi_read_09404a3c98b3f16c, lambda: _native._boltffi_xybrid_pipeline_from_bundle(path)))
 
-    def run(self, envelope: XybridEnvelope) -> XybridResult:
-        """Execute the pipeline and return the final stage's output."""
-        return _boltffi_read_wire(_boltffi_call(_boltffi_read_09404a3c98b3f16c, lambda: _native._boltffi_xybrid_pipeline_run(self._handle, envelope._boltffi_wire())), lambda reader: XybridResult._boltffi_from_reader(reader))
+    def run(self, envelope: XybridEnvelope, options: XybridRunOptions | None) -> XybridPipelineResult:
+        """Execute every stage, downloading any missing models first, and return
+        each stage's output alongside the final one.
+
+        Of `options`, only `correlation_id` applies to a pipeline run. Setting
+        `generation_config` or `abort_on` fails with `ConfigError` rather than
+        being ignored; per-stage generation settings belong in the YAML.
+        """
+        return _boltffi_read_wire(_boltffi_call(_boltffi_read_09404a3c98b3f16c, lambda: _native._boltffi_xybrid_pipeline_run(self._handle, envelope._boltffi_wire(), _boltffi_wire_optional(options, lambda __boltffi_value_0: __boltffi_value_0._boltffi_wire()))), lambda reader: XybridPipelineResult._boltffi_from_reader(reader))
 
     def name(self) -> str | None:
         """Pipeline name from the YAML definition, if present."""
@@ -3029,6 +3148,8 @@ __all__ = [
     "XybridInferenceMetrics",
     "XybridResult",
     "XybridDownloadStatus",
+    "XybridStageResult",
+    "XybridPipelineResult",
     "XybridStreamToken",
     "XybridStreamEvent",
     "XybridVoiceInfo",

@@ -89,9 +89,8 @@ impl FfiPipeline {
             // envelope carries no `execution_target` key on this path, since
             // pipeline stages do not go through `InferenceResult`.
             //
-            // The pipeline runner emits `device`, `cloud:<provider>`, or
-            // `server:<endpoint>`. Older fast paths used `local` and
-            // `fallback:<endpoint>`. Only the explicitly local spellings may
+            // The orchestrator records `local`, `cloud` or `fallback:<id>` (a
+            // xybrid-hosted server). Only the explicitly local spellings may
             // be reported as on-device; unknown targets fail closed to cloud.
             execution_target: final_execution_target(
                 result.stages.last().map(|stage| stage.target.as_str()),
@@ -129,15 +128,19 @@ mod tests {
     #[test]
     fn final_stage_provenance_recognizes_current_runner_targets() {
         assert_eq!(
-            final_execution_target(Some("device")),
+            final_execution_target(Some("local")),
             FfiExecutionTarget::Local
         );
         assert_eq!(
-            final_execution_target(Some("cloud:openai")),
+            final_execution_target(Some("cloud")),
             FfiExecutionTarget::Cloud
         );
         assert_eq!(
-            final_execution_target(Some("server:https://example.test")),
+            final_execution_target(Some("fallback:xybrid-edge")),
+            FfiExecutionTarget::Cloud
+        );
+        assert_eq!(
+            final_execution_target(Some("unexpected-remote-target")),
             FfiExecutionTarget::Cloud
         );
     }

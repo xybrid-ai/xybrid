@@ -1101,6 +1101,17 @@ impl OutputType {
             sdk::OutputType::Unknown => OutputType::Unknown,
         }
     }
+
+    /// The output type an envelope's payload reports as, mirroring the SDK's
+    /// classification of a model result.
+    fn of_envelope(kind: &EnvelopeKind) -> Self {
+        match kind {
+            EnvelopeKind::Text { .. } => OutputType::Text,
+            EnvelopeKind::Audio { .. } => OutputType::Audio,
+            EnvelopeKind::Embedding { .. } => OutputType::Embedding,
+            EnvelopeKind::Image { .. } | EnvelopeKind::MultiPart { .. } => OutputType::Unknown,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -1351,40 +1362,6 @@ impl InferenceResult {
         }
     }
 
-    /// Convert a pipeline result into the same result shape used by models.
-    ///
-    /// A pipeline can cross execution targets, so provenance describes the
-    /// final stage that produced the output. Metrics combine final-envelope
-    /// inference metadata with one latency entry per executed stage.
-    fn from_pipeline(result: sdk::PipelineExecutionResult, model_id: String) -> Self {
-        let mut metrics =
-            sdk::InferenceMetrics::from_metadata(&result.output.metadata, result.total_latency_ms);
-        metrics.stage_latencies_ms = result
-            .stages
-            .iter()
-            .map(|stage| sdk::StageLatency {
-                stage_id: stage.name.clone(),
-                latency_ms: stage.latency_ms,
-            })
-            .collect();
-
-        let execution_target = result
-            .stages
-            .last()
-            .map(|stage| ExecutionTarget::from_pipeline_target(&stage.target))
-            .unwrap_or(ExecutionTarget::Local);
-
-        Self {
-            envelope: Envelope::from_sdk(result.output),
-            output_type: OutputType::from_sdk(result.output_type),
-            model_id,
-            latency_ms: result.total_latency_ms,
-            execution_target,
-            metrics: InferenceMetrics::from_sdk(&metrics),
-            tool_calls: Vec::new(),
-        }
-    }
-
     /// Convenience: text payload, if the result is `OutputType::Text`.
     pub fn text(&self) -> Option<&str> {
         match &self.envelope.kind {
@@ -1428,15 +1405,15 @@ impl InferenceResult {
 }
 
 impl ExecutionTarget {
-    /// Map the pipeline runner's textual target to coarse result provenance.
+    /// Map a pipeline stage's routing target to coarse provenance.
     ///
-    /// The runner currently emits `device`, `cloud:<provider>`, or
-    /// `server:<endpoint>`. Older fast paths used `local` and `fallback:`, so
-    /// accept those spellings too. Unknown non-local targets are treated as
-    /// cloud to avoid falsely claiming that remote work happened on-device.
+    /// The orchestrator records `local`, `cloud` or `fallback:<id>` (a
+    /// xybrid-hosted server). `device` is accepted as a local spelling too.
+    /// Anything else is reported as cloud, so a spelling added later can never
+    /// claim that remote work ran on-device.
     fn from_pipeline_target(target: &str) -> Self {
         match target {
-            "device" | "local" => Self::Local,
+            "local" | "device" => Self::Local,
             _ => Self::Cloud,
         }
     }
@@ -1445,6 +1422,99 @@ impl ExecutionTarget {
 // ============================================================================
 // Pipeline handle
 // ============================================================================
+
+/// What one stage of a pipeline run produced.
+#[derive(Debug, Clone)]
+pub struct StageResult {
+    /// Stage identifier from the pipeline YAML (`id:`), or the model ID when
+    /// the stage declares none. Matches [`Pipeline::stage_names`].
+    pub stage_id: String,
+    /// This stage's output, which is also the next stage's input — the
+    /// transcript of an ASR stage, the reply of an LLM stage.
+    pub envelope: Envelope,
+    pub output_type: OutputType,
+    pub latency_ms: u32,
+    /// Where this stage ran. Stages of one pipeline can run in different
+    /// places.
+    pub execution_target: ExecutionTarget,
+    /// Generation figures (TTFT, tokens per second) when this stage is a
+    /// language model; `total_ms` is the stage latency and
+    /// `stage_latencies_ms` is empty.
+    pub metrics: InferenceMetrics,
+}
+
+impl StageResult {
+    fn from_sdk(stage: sdk::PipelineStageTiming) -> Self {
+        let metrics =
+            sdk::InferenceMetrics::from_metadata(&stage.output.metadata, stage.latency_ms);
+        let envelope = Envelope::from_sdk(stage.output);
+        Self {
+            execution_target: ExecutionTarget::from_pipeline_target(&stage.target),
+            output_type: OutputType::of_envelope(&envelope.kind),
+            envelope,
+            stage_id: stage.name,
+            latency_ms: stage.latency_ms,
+            metrics: InferenceMetrics::from_sdk(&metrics),
+        }
+    }
+
+    /// Convenience: text payload, if this stage produced text.
+    pub fn text(&self) -> Option<&str> {
+        match &self.envelope.kind {
+            EnvelopeKind::Text { text } => Some(text.as_str()),
+            _ => None,
+        }
+    }
+}
+
+/// Result of a pipeline run: the final output plus every stage's own output.
+#[derive(Debug, Clone)]
+pub struct PipelineResult {
+    /// The final stage's output — the same envelope as the last entry of
+    /// [`stages`](Self::stages).
+    pub envelope: Envelope,
+    pub output_type: OutputType,
+    /// Wall-clock time of the whole run.
+    pub latency_ms: u32,
+    /// Every executed stage, in order.
+    pub stages: Vec<StageResult>,
+}
+
+impl PipelineResult {
+    fn from_sdk(result: sdk::PipelineExecutionResult) -> Self {
+        Self {
+            envelope: Envelope::from_sdk(result.output),
+            output_type: OutputType::from_sdk(result.output_type),
+            latency_ms: result.total_latency_ms,
+            stages: result
+                .stages
+                .into_iter()
+                .map(StageResult::from_sdk)
+                .collect(),
+        }
+    }
+
+    /// The stage with this identifier, if it ran.
+    pub fn stage(&self, stage_id: &str) -> Option<&StageResult> {
+        self.stages.iter().find(|stage| stage.stage_id == stage_id)
+    }
+
+    /// Convenience: final text payload, if the last stage produced text.
+    pub fn text(&self) -> Option<&str> {
+        match &self.envelope.kind {
+            EnvelopeKind::Text { text } => Some(text.as_str()),
+            _ => None,
+        }
+    }
+
+    /// Convenience: final audio bytes, if the last stage produced audio.
+    pub fn audio_bytes(&self) -> Option<&[u8]> {
+        match &self.envelope.kind {
+            EnvelopeKind::Audio { bytes } => Some(bytes.as_slice()),
+            _ => None,
+        }
+    }
+}
 
 /// FFI-friendly handle around a loaded multi-stage pipeline.
 ///
@@ -1476,17 +1546,22 @@ impl Pipeline {
         Self::from_file(path)
     }
 
-    /// Execute every stage and return the final output.
-    pub fn run(&self, envelope: Envelope) -> Result<InferenceResult> {
+    /// Execute every stage, downloading any missing models first.
+    ///
+    /// Of [`RunOptions`], only `correlation_id` applies to a pipeline run: it
+    /// is copied onto the run's telemetry.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::ConfigError`] when `options` sets `generation_config` or
+    /// `abort_on` — a pipeline run cannot honour either, and ignoring them
+    /// would look like success. Per-stage generation settings belong in the
+    /// pipeline YAML. Otherwise any load or stage failure.
+    pub fn run(&self, envelope: Envelope, options: RunOptions) -> Result<PipelineResult> {
+        let sdk_options = pipeline_run_options(options)?;
         let envelope = envelope.into_sdk()?;
-        let model_id = self
-            .inner
-            .stages()
-            .last()
-            .and_then(|stage| stage.model_id.clone())
-            .unwrap_or_default();
-        let result = self.inner.run(&envelope)?;
-        Ok(InferenceResult::from_pipeline(result, model_id))
+        let result = self.inner.run_with_options(&envelope, &sdk_options)?;
+        Ok(PipelineResult::from_sdk(result))
     }
 
     /// Pipeline name from the YAML definition, if present.
@@ -1503,6 +1578,27 @@ impl Pipeline {
     pub fn stage_count(&self) -> u32 {
         u32::try_from(self.inner.stage_count()).unwrap_or(u32::MAX)
     }
+}
+
+/// Keep the [`RunOptions`] fields a pipeline run honours; reject the rest.
+fn pipeline_run_options(options: RunOptions) -> Result<sdk::RunOptions> {
+    if options.generation_config.is_some() {
+        return Err(Error::ConfigError {
+            message: "generation_config is not supported on pipeline runs; set per-stage \
+                      options in the pipeline YAML"
+                .into(),
+        });
+    }
+    if !options.abort_on.is_empty() {
+        return Err(Error::ConfigError {
+            message: "abort_on is not supported on pipeline runs".into(),
+        });
+    }
+    let mut sdk_options = sdk::RunOptions::new();
+    if let Some(correlation_id) = options.correlation_id {
+        sdk_options = sdk_options.with_correlation_id(correlation_id);
+    }
+    Ok(sdk_options)
 }
 
 // ============================================================================
@@ -3156,57 +3252,104 @@ stages:
         assert_eq!(pipeline.stage_count(), 1);
     }
 
+    fn sdk_stage(
+        name: &str,
+        target: &str,
+        kind: sdk::ir::EnvelopeKind,
+        metadata: HashMap<String, String>,
+    ) -> sdk::PipelineStageTiming {
+        sdk::PipelineStageTiming {
+            name: name.into(),
+            latency_ms: 40,
+            target: target.into(),
+            reason: "test".into(),
+            output: sdk::ir::Envelope::with_metadata(kind, metadata),
+        }
+    }
+
+    /// A voice-assistant run: the transcript and the reply must survive next
+    /// to the final audio, each stage with its own provenance and metrics.
     #[test]
-    fn pipeline_result_preserves_stage_metrics_and_final_provenance() {
-        let mut metadata = HashMap::new();
-        metadata.insert("ttft_ms".into(), "12".into());
-        metadata.insert("reasoning_content".into(), "working".into());
+    fn pipeline_result_keeps_every_stage_output() {
+        let mut llm_metadata = HashMap::new();
+        llm_metadata.insert("ttft_ms".into(), "12".into());
+        let tts_audio = sdk::ir::EnvelopeKind::Audio(vec![1, 2, 3]);
         let sdk_result = sdk::PipelineExecutionResult {
             name: Some("assistant".into()),
             stages: vec![
-                sdk::PipelineStageTiming {
-                    name: "asr".into(),
-                    latency_ms: 40,
-                    target: "device".into(),
-                    reason: "cached".into(),
-                },
-                sdk::PipelineStageTiming {
-                    name: "answer".into(),
-                    latency_ms: 60,
-                    target: "cloud:openai".into(),
-                    reason: "explicit".into(),
-                },
+                sdk_stage(
+                    "asr",
+                    "local",
+                    sdk::ir::EnvelopeKind::Text("what time is it".into()),
+                    HashMap::new(),
+                ),
+                sdk_stage(
+                    "llm",
+                    "cloud",
+                    sdk::ir::EnvelopeKind::Text("It is noon.".into()),
+                    llm_metadata,
+                ),
+                sdk_stage("tts", "local", tts_audio.clone(), HashMap::new()),
             ],
-            total_latency_ms: 105,
-            output_type: sdk::OutputType::Text,
-            output: sdk::ir::Envelope::with_metadata(
-                sdk::ir::EnvelopeKind::Text("hello".into()),
-                metadata,
-            ),
+            total_latency_ms: 125,
+            output_type: sdk::OutputType::Audio,
+            output: sdk::ir::Envelope::new(tts_audio),
         };
 
-        let result = InferenceResult::from_pipeline(sdk_result, "gpt-4o-mini".into());
+        let result = PipelineResult::from_sdk(sdk_result);
 
-        assert_eq!(result.text(), Some("hello"));
-        assert_eq!(result.reasoning_content(), Some("working"));
-        assert_eq!(result.model_id, "gpt-4o-mini");
-        assert_eq!(result.execution_target, ExecutionTarget::Cloud);
-        assert_eq!(result.metrics.total_ms, 105);
-        assert_eq!(result.metrics.ttft_ms, Some(12));
-        assert_eq!(
-            result.metrics.stage_latencies_ms,
-            vec![
-                StageLatency {
-                    stage_id: "asr".into(),
-                    latency_ms: 40,
-                },
-                StageLatency {
-                    stage_id: "answer".into(),
-                    latency_ms: 60,
-                },
-            ]
-        );
-        assert!(result.tool_calls.is_empty());
+        assert_eq!(result.output_type, OutputType::Audio);
+        assert_eq!(result.audio_bytes(), Some([1u8, 2, 3].as_slice()));
+        assert_eq!(result.latency_ms, 125);
+        let ids: Vec<&str> = result.stages.iter().map(|s| s.stage_id.as_str()).collect();
+        assert_eq!(ids, ["asr", "llm", "tts"]);
+
+        let asr = result.stage("asr").expect("asr stage");
+        assert_eq!(asr.text(), Some("what time is it"));
+        assert_eq!(asr.output_type, OutputType::Text);
+        assert_eq!(asr.execution_target, ExecutionTarget::Local);
+
+        let llm = result.stage("llm").expect("llm stage");
+        assert_eq!(llm.text(), Some("It is noon."));
+        assert_eq!(llm.execution_target, ExecutionTarget::Cloud);
+        assert_eq!(llm.metrics.ttft_ms, Some(12));
+        assert_eq!(llm.metrics.total_ms, 40);
+        assert!(llm.metrics.stage_latencies_ms.is_empty());
+
+        assert_eq!(result.stages[2].output_type, OutputType::Audio);
+        assert_eq!(result.stages[2].envelope.kind, result.envelope.kind);
+        assert!(result.stage("missing").is_none());
+    }
+
+    #[test]
+    fn pipeline_run_options_keep_correlation_id() {
+        let options = RunOptions {
+            correlation_id: Some("turn-7".into()),
+            fallback_to_cloud: true,
+            max_grace_tokens: 8,
+            ..RunOptions::default()
+        };
+
+        let sdk_options = pipeline_run_options(options).expect("inert fields are accepted");
+
+        assert_eq!(sdk_options.correlation_id.as_deref(), Some("turn-7"));
+    }
+
+    #[test]
+    fn pipeline_run_options_reject_what_a_pipeline_cannot_honour() {
+        let generation = RunOptions {
+            generation_config: Some(GenerationConfig::default()),
+            ..RunOptions::default()
+        };
+        let abort = RunOptions {
+            abort_on: vec![AbortSignal::ThermalHot],
+            ..RunOptions::default()
+        };
+
+        for options in [generation, abort] {
+            let err = pipeline_run_options(options).expect_err("must not be silently ignored");
+            assert!(matches!(err, Error::ConfigError { .. }), "got {err:?}");
+        }
     }
 
     #[test]
@@ -3220,7 +3363,11 @@ stages:
             ExecutionTarget::Local
         );
         assert_eq!(
-            ExecutionTarget::from_pipeline_target("server:https://example.test"),
+            ExecutionTarget::from_pipeline_target("cloud"),
+            ExecutionTarget::Cloud
+        );
+        assert_eq!(
+            ExecutionTarget::from_pipeline_target("fallback:xybrid-edge"),
             ExecutionTarget::Cloud
         );
         assert_eq!(
