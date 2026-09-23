@@ -1,0 +1,89 @@
+bindings/unity/Runtime/Bolt/XybridStreamingConfig.cs.meta
+  s_3e08cb1cab26f9::t_e9f812dcfe1850 1-2
+bindings/unity/Runtime/Bolt/XybridPartialResult.cs.meta
+  s_3e08cb1cab26f9::t_1507e4425fa4f0 1-2
+bindings/unity/Runtime/Api/Model.cs
+  s_3e08cb1cab26f9::t_c80018f7d955df 480-529
+CHANGELOG.md
+  s_3e08cb1cab26f9::t_d304d9bd5a0294 12-19
+docs/content/docs/(integration)/sdks/android.zh.mdx
+  s_3e08cb1cab26f9::t_294835584a95e4 132-160
+crates/xybrid-ffi-facade/src/lib.rs
+  s_3e08cb1cab26f9::t_4424941495c389 2033-2444,3646-3763
+bindings/unity/Runtime/Bolt/XybridStreamingConfig.cs
+  s_3e08cb1cab26f9::t_b6db71b3c9481d 1-79
+bindings/unity/Runtime/Bolt/XybridPartialResult.cs
+  s_3e08cb1cab26f9::t_d8f20c9f6382e8 1-53
+bindings/kotlin/bazel/jni/jni_glue.c
+  s_3e08cb1cab26f9::t_85f18b0ae4019d 463-594,1967-2020
+bindings/unity/Runtime/Api/StreamingConfigs.cs.meta
+  s_3e08cb1cab26f9::t_624c49a59acd7c 1-2
+bindings/python/xybrid/_bolt/__init__.py
+  s_3e08cb1cab26f9::t_5bad3f5aa8e1c2 485-491,1309-1382,2043-2143,2253-2371,2975-2976,3015-3018,3021-3022
+bindings/unity/Runtime/Api/StreamingConfigs.cs
+  s_3e08cb1cab26f9::t_2076b367546bad 1-60
+bindings/unity/Runtime/Bolt/XybridVadMode.cs
+  s_3e08cb1cab26f9::t_dccf89e0d20728 1-65
+tools/scripts/gen_unity_bolt_csharp.py
+  s_3e08cb1cab26f9::t_840db1f9839f69 95-96,99
+docs/content/docs/(integration)/sdks/android.mdx
+  s_3e08cb1cab26f9::t_a3615b697c061e 146-178
+docs/content/docs/(integration)/sdks/ios.zh.mdx
+  s_3e08cb1cab26f9::t_280e8d32b407f6 141-172
+bindings/kotlin/src/main/kotlin/ai/xybrid/Xybrid.kt
+  s_3e08cb1cab26f9::t_8093a73c34d125 421-489
+bindings/unity/Runtime/Bolt/XybridBolt.cs
+  s_3e08cb1cab26f9::t_060c442467a658 474-515,910-922,979-981,1142-1157,1194-1196,1244-1258
+bindings/python/xybrid/_bolt/__init__.pyi
+  s_3e08cb1cab26f9::t_1766862a923ad6 234-272,497-521,579-645
+bindings/kotlin/src/main/kotlin/ai/xybrid/XybridBolt.kt
+  s_3e08cb1cab26f9::t_b6f34db9b52b6e 918-924,1023-1028,1824-1957,2505-2583,2679-2773,3616-3653
+docs/sdk/API_REFERENCE.md
+  s_3e08cb1cab26f9::t_49ccb4d9171a8a 447-557
+bindings/apple/Sources/Xybrid/Xybrid.swift
+  s_3e08cb1cab26f9::t_8a3721cd087a58 613-648,839-879
+docs/content/docs/(integration)/sdks/ios.mdx
+  s_3e08cb1cab26f9::t_b1f86bba35059e 153-188
+bindings/unity/Runtime/Bolt/XybridStreamingSession.cs.meta
+  s_3e08cb1cab26f9::t_46ef95cbdba540 1-2
+docs/content/docs/(integration)/sdks/unity.mdx
+  s_3e08cb1cab26f9::t_b6e5b4d3d907bf 170-203
+crates/xybrid-ffi-facade/Cargo.toml
+  s_3e08cb1cab26f9::t_4085f7eb4ced0e 24-27
+bindings/apple/include/xybrid-bolt.h
+  s_3e08cb1cab26f9::t_b78cf424066343 138-141,149-155,254-259
+bindings/python/xybrid/_bolt/_native.c
+  s_3e08cb1cab26f9::t_e217c3fb285e9d 41-54,251-262,299-305,404-409,604-673,1654-1713,2024-2027,2697-2727,2808-2905,4465,4467-4471,4473-4474,4476-4483,4485,4487,4489-4492,4494-4497,4501-4502,4505-4506,4511-4845,5898-6097,6099-6108,6111-6112,6114-6116,6119-6128,6133,6137,6140,6147,6151-6158,6161-6162,6165,6169,6172-6183,6185-6186,6190-6196,6200,6203,6207,6210,6213-6222,6224-6225,6229,6231-6233,6237,6240,6247-6255,6257,6261,6263-6264,6268,6271,6278-6287,6289,6293,6298,6301,6308-6310,6315,6320,6323,6330,8213-8214,8224,8910-9030,9171-9172,9182,9190-9196,9271-9275
+crates/xybrid-bolt/src/lib.rs
+  s_3e08cb1cab26f9::t_e5dfef7e8b5a10 1155-1344
+Cargo.lock
+  s_3e08cb1cab26f9::t_7165c9d02db3ab 6390
+bindings/unity/Runtime/Bolt/XybridStreamingSession.cs
+  s_3e08cb1cab26f9::t_99c64b824f51fb 1-187
+bindings/kotlin/bazel/jni/xybrid_bolt.h
+  s_3e08cb1cab26f9::t_557dabf529bf53 138-141,149-155,254-259
+bindings/apple/Sources/Xybrid/xybrid_bolt.swift
+  s_3e08cb1cab26f9::t_166555034326c4 566-657,979-1014,1082-1173,2176-2224
+docs/content/docs/(integration)/sdks/unity.zh.mdx
+  s_3e08cb1cab26f9::t_1c97daf55029ac 167-196
+docs/sdk/api-surface.yaml
+  s_3e08cb1cab26f9::t_a82634378f43ea 228-272
+bindings/unity/Runtime/Bolt/XybridVadMode.cs.meta
+  s_3e08cb1cab26f9::t_f30ba92b4e9704 1-2
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "6f4dd1afcdf21f452b3d27a6bcd1c52480cbc9f4",
+  "prompts": {},
+  "sessions": {
+    "s_3e08cb1cab26f9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "27dd828b-8bde-449e-92e0-3fce2b3a673b",
+        "model": "claude-opus-5"
+      },
+      "human_author": "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
+    }
+  }
+}
