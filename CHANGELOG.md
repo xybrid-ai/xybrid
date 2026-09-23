@@ -80,6 +80,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `xybrid fetch`, `run`, `bundle` and the REPL drive their progress bars from
   the reported byte counts rather than back-computing them from the fraction,
   so a multi-file model's bar is correctly sized.
+- `tokenizers` 0.22.2 → 0.23.2. Token ids and decoded text are unchanged.
+  Encoding a MiniLM input past its 128-token truncation is ~24% faster;
+  loading a `tokenizer.json` and short encodes move by 3% or less.
 
 ### Planned
 
