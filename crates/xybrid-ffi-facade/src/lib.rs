@@ -2905,21 +2905,28 @@ pub fn is_sdk_cache_configured() -> bool {
     sdk::is_sdk_cache_configured()
 }
 
-/// Register the binding identifier (`"flutter"`, `"kotlin"`, `"swift"`,
-/// `"unity"`) reported in the `X-Xybrid-Client` registry header.
+/// Register the binding identifier (`"flutter"`, `"kotlin"`,
+/// `"react-native"`, `"swift"`, `"unity"`) reported in the `X-Xybrid-Client`
+/// registry header and on telemetry events.
 ///
-/// Each generator crate calls this once at SDK init with its hard-coded
-/// constant. Unknown strings fall back to [`sdk::DEFAULT_BINDING`] to
-/// bound cardinality on the registry side. First call wins.
+/// Each binding calls this once at SDK init with its hard-coded constant.
+/// React Native wraps the Swift and Kotlin SDKs and calls it before them.
+/// Unknown strings fall back to [`sdk::DEFAULT_BINDING`] to bound cardinality
+/// on the registry side. First call wins.
 pub fn set_binding(binding: String) {
-    let resolved: &'static str = match binding.as_str() {
+    sdk::set_binding(resolve_binding(&binding));
+}
+
+/// Map a binding name onto the accepted set, or [`sdk::DEFAULT_BINDING`].
+fn resolve_binding(binding: &str) -> &'static str {
+    match binding {
         "flutter" => "flutter",
         "kotlin" => "kotlin",
+        "react-native" => "react-native",
         "swift" => "swift",
         "unity" => "unity",
         _ => sdk::DEFAULT_BINDING,
-    };
-    sdk::set_binding(resolved);
+    }
 }
 
 pub fn get_binding() -> String {
@@ -4187,6 +4194,26 @@ stages:
     }
 
     #[test]
+    fn resolve_binding_keeps_every_platform_binding() {
+        for binding in ["flutter", "kotlin", "react-native", "swift", "unity"] {
+            assert_eq!(resolve_binding(binding), binding);
+        }
+    }
+
+    #[test]
+    fn resolve_binding_collapses_unknown_names_to_default() {
+        for binding in [
+            "",
+            "rust-sdk",
+            "React Native",
+            "react_native",
+            "reactnative",
+        ] {
+            assert_eq!(resolve_binding(binding), sdk::DEFAULT_BINDING);
+        }
+    }
+
+    #[test]
     fn set_binding_resolves_known_platforms_only() {
         // Process-global; this test is best-effort and may no-op if another
         // test set the binding first. The contract we care about is that
@@ -4195,23 +4222,21 @@ stages:
         let bound = get_binding();
         assert!(matches!(
             bound.as_str(),
-            "flutter" | "kotlin" | "swift" | "unity" | "rust"
+            "flutter" | "kotlin" | "react-native" | "swift" | "unity" | "rust"
         ));
     }
 
     #[test]
     fn binding_setter_rejects_unknown() {
-        // First-set-wins on the underlying OnceLock means we can only
-        // verify the resolution helper indirectly via `get_binding()`.
-        // The match arm in `set_binding` collapses unknowns to
-        // DEFAULT_BINDING, which is `"rust"`; any other test that ran
-        // first may already have pinned the value, so we just assert
-        // the result is in the accepted set.
+        // First-set-wins on the underlying OnceLock: another test may already
+        // have pinned the value, so assert the result is in the accepted set.
+        // `resolve_binding_collapses_unknown_names_to_default` covers the
+        // mapping itself.
         set_binding("not-a-real-binding".into());
         let bound = get_binding();
         assert!(matches!(
             bound.as_str(),
-            "flutter" | "kotlin" | "swift" | "unity" | "rust"
+            "flutter" | "kotlin" | "react-native" | "swift" | "unity" | "rust"
         ));
     }
 

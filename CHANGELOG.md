@@ -19,7 +19,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   introspection, pipelines, live ASR sessions, background downloads with
   progress, cache management and memory release. Android became a real
   TurboModule and no longer frees native objects that an in-flight call is
-  still using. Verified end to end on a Pixel 8 and the iOS Simulator.
+  still using. Registry requests and telemetry identify it as `react-native`
+  (the SDK now accepts that binding name) instead of the Swift or Kotlin SDK
+  underneath. Verified end to end on a Pixel 8 and the iOS Simulator.
 - **React Native can no longer silently fall behind.** A test reads every
   export of `xybrid-bolt` and fails until each new function, field or error is
   wired into React Native (or excluded with a reason); another checks the iOS

@@ -317,9 +317,10 @@ static BINDING: OnceLock<&'static str> = OnceLock::new();
 
 /// Default binding identifier reported in the registry telemetry header.
 ///
-/// Each platform binding (Flutter, Kotlin, Swift, Unity) overrides this via
-/// [`set_binding`] (process-global) or [`SdkConfig::with_binding`] (per-config)
-/// so registry calls can be attributed correctly.
+/// Each platform binding (Flutter, Kotlin, React Native, Swift, Unity)
+/// overrides this via [`set_binding`] (process-global) or
+/// [`SdkConfig::with_binding`] (per-config) so registry calls can be
+/// attributed correctly.
 pub const DEFAULT_BINDING: &str = "rust";
 
 /// SDK crate version, stamped onto every telemetry event as `sdk_version` and
@@ -333,9 +334,11 @@ pub const SDK_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Register the binding identifier for this process.
 ///
-/// Each platform binding (Flutter, Kotlin, Swift, Unity) calls this once at
-/// SDK init. The first call wins — subsequent calls are silent no-ops, which
-/// matches the lifecycle (a process is bound to exactly one platform binding).
+/// Each platform binding (Flutter, Kotlin, React Native, Swift, Unity) calls
+/// this once at SDK init. The first call wins — subsequent calls are silent
+/// no-ops, which matches the lifecycle (a process is bound to exactly one
+/// platform binding). A binding that wraps another SDK (React Native over
+/// Swift or Kotlin) registers before the SDK it wraps.
 ///
 /// `RegistryClient` default constructors (`new`, `default_client`,
 /// `with_url`, `from_env`) read this value via [`get_binding`], so any
@@ -728,8 +731,8 @@ impl XybridInit {
     }
 
     /// Register the binding identifier for this process (e.g. `"flutter"`,
-    /// `"kotlin"`, `"swift"`, `"unity"`). Bindings call this; host apps
-    /// rarely need to.
+    /// `"kotlin"`, `"react-native"`, `"swift"`, `"unity"`). Bindings call
+    /// this; host apps rarely need to.
     pub fn binding(mut self, binding: &'static str) -> Self {
         self.binding = Some(binding);
         self
