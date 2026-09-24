@@ -1,0 +1,21 @@
+bindings/react-native/ios/xybrid_natives.rb
+  s_ea98b02fdd6e9c::t_6d6379628103b8 101,129-142
+bindings/react-native/tests/natives.test.mjs
+  s_ea98b02fdd6e9c::t_e345d09cd94a02 1-62
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "1d4c13e4e04fdd1bc630bb97f2da83a80e42ed5d",
+  "prompts": {},
+  "sessions": {
+    "s_ea98b02fdd6e9c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a55ca134-c426-45f9-b479-cb4b1efcad25",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
+    }
+  }
+}
