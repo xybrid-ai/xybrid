@@ -98,7 +98,7 @@ module XybridNatives
 
     unless local.empty?
       fail!("XYBRID_XCFRAMEWORK_PATH does not exist: #{local}") unless File.exist?(local)
-      source = "local:#{local}:#{File.mtime(local).to_i}"
+      source = "local:#{local}:#{fingerprint(local)}"
       return if File.directory?(target) && installed == source
 
       replace!(frameworks, target) do
@@ -124,6 +124,20 @@ module XybridNatives
     FileUtils.rm_f(File.join(frameworks, STAMP))
     FileUtils.mkdir_p(frameworks)
     yield
+  end
+
+  # Identifies a local XCFramework (directory or .zip) by every file's path,
+  # size and mtime to the nanosecond. A directory's own mtime only moves when
+  # its direct entries change, so rebuilding a library inside the framework
+  # would otherwise keep serving the stale copy.
+  def fingerprint(path)
+    files = File.directory?(path) ? Dir.glob(File.join(path, '**', '*'), File::FNM_DOTMATCH) : [path]
+    digest = Digest::SHA256.new
+    files.select { |file| File.file?(file) }.sort.each do |file|
+      stat = File.stat(file)
+      digest << "#{file.delete_prefix(path)}\0#{stat.size}\0#{stat.mtime.to_i}.#{stat.mtime.nsec}\n"
+    end
+    digest.hexdigest
   end
 
   def cached_download!(version, sha256)
