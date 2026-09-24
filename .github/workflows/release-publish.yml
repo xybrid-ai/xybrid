@@ -24,7 +24,8 @@ name: Release Publish
 #   3. Verifies the published tag's Package.swift checksum matches the
 #      now-public xcframework zip (sanity belt).
 #   4. Publishes the language packages: crates.io and Maven Central run on
-#      either trigger. pub.dev (publish-flutter) only runs on
+#      either trigger, and npm (React Native) too once NPM_PUBLISH_ENABLED is
+#      set. pub.dev (publish-flutter) only runs on
 #      workflow_dispatch-from-tag — pub.dev's OIDC binding rejects
 #      pull_request / branch-ref tokens — so on the merge path
 #      dispatch-flutter-publish re-fires this workflow against the new tag
@@ -171,6 +172,7 @@ jobs:
           URL="https://github.com/${{ github.repository }}/releases/download/${TAG}/XybridFFI-${TAG}.xcframework.zip"
           curl -fsSL -o /tmp/x.zip "$URL"
           ./bindings/apple/scripts/sync-spm-checksum.sh --check /tmp/x.zip
+          ./bindings/react-native/scripts/pin-ios-checksum.sh --check /tmp/x.zip
 
   # =========================================================================
   # Publish Rust crates to crates.io.
@@ -464,6 +466,85 @@ jobs:
           ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.OSSRH_PASSWORD }}
           ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.GPG_PRIVATE_KEY }}
           ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.GPG_PASSPHRASE }}
+
+  # =========================================================================
+  # Publish the React Native package (react-native-xybrid) to npm.
+  #
+  # Inert until the repository variable NPM_PUBLISH_ENABLED is 'true' — the
+  # one-time setup (npm package, trusted publisher) is in
+  # bindings/react-native/RELEASING.md. Authenticates with npm trusted
+  # publishing (GitHub OIDC, no stored token) and attaches provenance; an
+  # NPM_TOKEN secret, when present, covers the bootstrap publish before the
+  # trusted publisher exists. Runs after verify-spm-checksum, which already
+  # proved the package's pinned XCFramework checksum matches the public asset
+  # its `pod install` will download. Prereleases go to the `next` dist-tag.
+  # =========================================================================
+  publish-npm:
+    name: Publish React Native (npm)
+    if: ${{ vars.NPM_PUBLISH_ENABLED == 'true' && (github.event_name != 'workflow_dispatch' || !inputs.flutter_only) }}
+    needs: [publish-release, verify-spm-checksum]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write   # npm trusted publishing + provenance
+    defaults:
+      run:
+        working-directory: bindings/react-native
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ needs.publish-release.outputs.tag }}
+
+      - name: Use Node.js
+        uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+
+      # Trusted publishing needs npm >= 11.5.1.
+      - name: Update npm
+        run: npm install -g npm@11
+
+      - name: Install and test
+        run: |
+          npm ci --no-audit --no-fund
+          npm test
+          node scripts/check-pack.mjs
+
+      # The package's Android half resolves ai.xybrid:xybrid-kotlin:<version>
+      # from Maven Central. publish-kotlin only uploads a Central Portal
+      # deployment; the version is public once that deployment is released and
+      # synced. Publishing before then ships a package whose Android build fails.
+      - name: Wait for the Kotlin SDK on Maven Central
+        env:
+          VERSION: ${{ needs.publish-release.outputs.version }}
+        run: |
+          set -euo pipefail
+          POM="https://repo1.maven.org/maven2/ai/xybrid/xybrid-kotlin/${VERSION}/xybrid-kotlin-${VERSION}.pom"
+          for _ in $(seq 60); do
+            if curl -sfI "$POM" >/dev/null; then
+              echo "Maven Central serves xybrid-kotlin ${VERSION}."
+              exit 0
+            fi
+            sleep 30
+          done
+          echo "::error::ai.xybrid:xybrid-kotlin:${VERSION} is not on Maven Central after 30 minutes. Release the deployment at central.sonatype.com if it is waiting, then re-run this job: gh run rerun ${{ github.run_id }} --failed"
+          exit 1
+
+      - name: Publish
+        env:
+          VERSION: ${{ needs.publish-release.outputs.version }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          test "$(node -p "require('./package.json').version")" = "$VERSION"
+          if npm view "react-native-xybrid@${VERSION}" version >/dev/null 2>&1; then
+            echo "::notice::react-native-xybrid@${VERSION} is already on npm — skipping."
+            exit 0
+          fi
+          DIST_TAG=latest
+          case "$VERSION" in *-*) DIST_TAG=next ;; esac
+          npm publish --provenance --access public --tag "$DIST_TAG"
 
   # =========================================================================
   # Update the legacy `swift` branch with the URL-based Package.swift.

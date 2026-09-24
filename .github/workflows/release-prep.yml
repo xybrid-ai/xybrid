@@ -18,8 +18,9 @@ name: Release Prep
 #   2. Builds every release artifact on the release branch (xcframework,
 #      android .so, Flutter precompiled binaries, CLI binaries).
 #   3. Pulls the xcframework zip, computes its SHA-256, patches
-#      Package.swift's xybridFFIChecksum on the release branch, commits and
-#      pushes that patch back. Pushes by GITHUB_TOKEN do not re-trigger
+#      Package.swift's xybridFFIChecksum and the React Native package's
+#      pinned checksum on the release branch, commits and pushes that patch
+#      back. Pushes by GITHUB_TOKEN do not re-trigger
 #      workflows, so this doesn't loop.
 #   4. Creates a DRAFT GitHub Release tagged v<version> with
 #      target_commitish pointing at the release branch, and uploads every
@@ -1050,7 +1051,7 @@ jobs:
           name: xcframework
           path: dist
 
-      - name: Patch and push Package.swift checksum
+      - name: Patch and push the XybridFFI checksums
         shell: bash
         env:
           TAG: ${{ needs.check-release-branch.outputs.tag }}
@@ -1058,16 +1059,19 @@ jobs:
         run: |
           set -euo pipefail
           ZIP="dist/XybridFFI-${TAG}.xcframework.zip"
+          # SPM's binaryTarget and the React Native pod verify the same asset.
           ./bindings/apple/scripts/sync-spm-checksum.sh "$ZIP"
+          ./bindings/react-native/scripts/pin-ios-checksum.sh "$ZIP"
 
-          if git diff --quiet Package.swift; then
-            echo "::notice::Package.swift checksum already matches built zip — nothing to commit."
+          PINNED=(Package.swift bindings/react-native/package.json)
+          if git diff --quiet -- "${PINNED[@]}"; then
+            echo "::notice::Checksums already match the built zip — nothing to commit."
             exit 0
           fi
 
           git config user.name  'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add Package.swift
+          git add -- "${PINNED[@]}"
           git commit -m "chore(release): pin XybridFFI checksum for ${TAG}"
           git push origin "HEAD:${BRANCH}"
 
