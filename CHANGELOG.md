@@ -117,6 +117,11 @@ model-release controls; Flutter, React Native and Python are unchanged.
 
 ### Added
 
+- **React Native model metadata.** `model.info()` now returns the canonical
+  model ID, version, output type, loaded state, and streaming/LLM capabilities
+  on both native platforms. The public API distinguishes that model ID from
+  the opaque `model.nativeHandle` used for resource ownership (#444).
+
 - **Policy DSL and cloud preference.** Bundles are compiled at load time and
   support `input.kind`, `input.text` (`contains` / `matches` / `==` / `!=`),
   `input.text_len`, `metrics.battery_level`, `metrics.cpu_pct`,
