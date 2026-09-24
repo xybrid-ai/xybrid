@@ -1,0 +1,28 @@
+bindings/react-native/RELEASING.md
+  s_43c2b112287c45::t_9177a51055364a 1-27,38-77
+  s_43c2b112287c45::t_5a9ef13ece6924 28-37
+bindings/react-native/scripts/pin-ios-checksum.sh
+  s_43c2b112287c45::t_4d54af0e713050 1-47
+.github/workflows/release-publish.yml
+  s_43c2b112287c45::t_aa847fa1058f48 514-533
+  s_43c2b112287c45::t_983f205e6733f0 27-28,175,470-513,534-547
+  s_43c2b112287c45::t_e31eeb1c6be904 548
+.github/workflows/release-prep.yml
+  s_43c2b112287c45::t_983f205e6733f0 21-23,1054,1062,1064,1066-1068,1074
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "119734b31b68034f4fb9f035243a2d7ad57f3d0f",
+  "prompts": {},
+  "sessions": {
+    "s_43c2b112287c45": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6b9a57e6-439d-4590-8d64-5b680ed5782e",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
+    }
+  }
+}
