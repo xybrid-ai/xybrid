@@ -2,7 +2,7 @@
 // result in one batch run, then transcribe it again through a live ASR session
 // fed in 100 ms chunks — the path a dictation UI takes.
 
-import type { Model } from 'react-native-xybrid';
+import type { Model } from '@xybrid/react-native';
 
 /**
  * Decode TTS output into Float32 samples. ONNX TTS models return raw 16-bit

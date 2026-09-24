@@ -19,7 +19,7 @@ const config = getDefaultConfig(projectRoot);
 
 config.watchFolders = [packageRoot];
 config.resolver.nodeModulesPaths = [path.resolve(projectRoot, 'node_modules')];
-config.resolver.extraNodeModules = { 'react-native-xybrid': packageRoot };
+config.resolver.extraNodeModules = { '@xybrid/react-native': packageRoot };
 
 const upstreamResolve = config.resolver.resolveRequest;
 config.resolver.resolveRequest = (context, moduleName, platform) => {

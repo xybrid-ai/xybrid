@@ -84,8 +84,8 @@ jobs:
       - name: Upload tarball
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: react-native-xybrid-tarball
-          path: bindings/react-native/react-native-xybrid-*.tgz
+          name: xybrid-react-native-tarball
+          path: bindings/react-native/xybrid-react-native-*.tgz
           if-no-files-found: error
 
   # The iOS half. First the cheap gate (issue #589): type-check every Swift

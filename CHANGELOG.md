@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **React Native catches up with the other SDKs, and runs on iOS.** The iOS
-  half of `react-native-xybrid` never compiled against the SDK it bundles, and
+  half of `@xybrid/react-native` never compiled against the SDK it bundles, and
   its method selectors did not match the ones React Native's code generator
   dispatches by — so every call would have crashed. Both are fixed, and the
   package now covers the whole SDK surface: API-key initialization (cloud

@@ -468,7 +468,7 @@ jobs:
           ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.GPG_PASSPHRASE }}
 
   # =========================================================================
-  # Publish the React Native package (react-native-xybrid) to npm.
+  # Publish the React Native package (@xybrid/react-native) to npm.
   #
   # Inert until the repository variable NPM_PUBLISH_ENABLED is 'true' — the
   # one-time setup (npm package, trusted publisher) is in
@@ -538,8 +538,8 @@ jobs:
         run: |
           set -euo pipefail
           test "$(node -p "require('./package.json').version")" = "$VERSION"
-          if npm view "react-native-xybrid@${VERSION}" version >/dev/null 2>&1; then
-            echo "::notice::react-native-xybrid@${VERSION} is already on npm — skipping."
+          if npm view "@xybrid/react-native@${VERSION}" version >/dev/null 2>&1; then
+            echo "::notice::@xybrid/react-native@${VERSION} is already on npm — skipping."
             exit 0
           fi
           DIST_TAG=latest

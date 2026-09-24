@@ -1,4 +1,4 @@
-# react-native-xybrid
+# @xybrid/react-native
 
 On-device AI for React Native — LLMs, speech recognition, text-to-speech,
 embeddings and vision — backed by the same Rust SDK as Xybrid's Swift, Kotlin,
@@ -6,7 +6,7 @@ Flutter and Unity bindings. Runs offline with no account; add an API key to
 light up cloud fallback and telemetry.
 
 ```ts
-import { Envelope, ModelLoader } from 'react-native-xybrid';
+import { Envelope, ModelLoader } from '@xybrid/react-native';
 
 const model = await ModelLoader.fromRegistry('qwen3.5-0.8b').load();
 const result = await model.run(Envelope.text('Write a haiku about the sea.'));
@@ -29,7 +29,7 @@ await model.release();
 ## Install
 
 ```sh
-npm install react-native-xybrid
+npm install @xybrid/react-native
 cd ios && pod install
 ```
 
@@ -41,7 +41,7 @@ cd ios && pod install
   targets iOS below 16.0, raise it in the Podfile (`platform :ios, '16.0'`).
 - **Android** — nothing to do: Gradle pulls `ai.xybrid:xybrid-kotlin` (the
   Kotlin SDK with the native libraries) from Maven Central.
-- **Expo** — `npx expo install react-native-xybrid`, then
+- **Expo** — `npx expo install @xybrid/react-native`, then
   `npx expo prebuild` / `npx expo run:ios|android`. No config plugin needed.
 
 ## Quick tour
@@ -53,7 +53,7 @@ options — an API key enables the platform features on top of the same local
 runtime: cloud fallback, speculative cloud serving and dashboard telemetry.
 
 ```ts
-import { Xybrid } from 'react-native-xybrid';
+import { Xybrid } from '@xybrid/react-native';
 
 await Xybrid.initialize({ apiKey: XYBRID_API_KEY });
 ```
@@ -64,7 +64,7 @@ rejects with `xybrid_config_error` (restart the app to change them).
 ### Load and run
 
 ```ts
-import { Envelope, GenerationConfigs, ModelLoader } from 'react-native-xybrid';
+import { Envelope, GenerationConfigs, ModelLoader } from '@xybrid/react-native';
 
 const model = await ModelLoader.fromRegistry('qwen3.5-0.8b').load();
 await model.warmup(); // optional: pay cold start now, not on the first run
@@ -106,7 +106,7 @@ generator's return value.
 ### Conversations
 
 ```ts
-import { ConversationContext, Envelope } from 'react-native-xybrid';
+import { ConversationContext, Envelope } from '@xybrid/react-native';
 
 const chat = await ConversationContext.create();
 await chat.setSystem('You are concise.');
@@ -120,7 +120,7 @@ await chat.push(reply.envelope); // push both turns yourself, after the run
 ### Structured output
 
 ```ts
-import { jsonSchemaToGbnf } from 'react-native-xybrid';
+import { jsonSchemaToGbnf } from '@xybrid/react-native';
 
 const grammar = await jsonSchemaToGbnf({
   type: 'object',
@@ -198,7 +198,7 @@ await session.release();
 ### Pipelines
 
 ```ts
-import { Pipeline } from 'react-native-xybrid';
+import { Pipeline } from '@xybrid/react-native';
 
 const pipeline = await Pipeline.fromFile(`${documentDirectory}voice-assistant.yaml`);
 const result = await pipeline.run(Envelope.audio(recordingBase64));
@@ -229,7 +229,7 @@ Xybrid.releaseMemoryOnWarning();       // free idle models on OS memory warnings
 Every rejection has a stable `code` (`XybridErrorCodes` lists them):
 
 ```ts
-import { isRetryable, isXybridError } from 'react-native-xybrid';
+import { isRetryable, isXybridError } from '@xybrid/react-native';
 
 try {
   await model.run(envelope);

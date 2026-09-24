@@ -21,11 +21,11 @@ import {
   isXybridError,
   jsonSchemaToGbnf,
   type Model,
-} from 'react-native-xybrid';
+} from '@xybrid/react-native';
 
 import { decodeAudio, resample, toWavBase64, transcribeLive } from './speech';
 
-// Smoke test for react-native-xybrid: runs once on launch (and again on the
+// Smoke test for @xybrid/react-native: runs once on launch (and again on the
 // button) through the SDK surface an app touches — version, load, model info,
 // warmup, run, streaming with a stop button, a two-turn conversation,
 // structured output, cache status — timing every step. Each step is also
@@ -249,7 +249,7 @@ export default function App() {
   return (
     <SafeAreaView style={styles.root}>
       <ScrollView contentContainerStyle={styles.body}>
-        <Text style={styles.title}>react-native-xybrid</Text>
+        <Text style={styles.title}>@xybrid/react-native</Text>
         <Text style={styles.subtitle}>Smoke test (runs on launch).</Text>
 
         <View style={styles.row}>
