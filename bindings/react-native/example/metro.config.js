@@ -1,39 +1,36 @@
-// Metro config for consuming the symlinked parent package (react-native-xybrid)
-// from source in this monorepo. Two problems this solves:
+// Metro config for running the example against the package source in ../src
+// (the `react-native` field), so JS edits need no build step.
 //
-//   1. The parent package's `react-native` field points Metro at its TS source
-//      (../src), which lives outside this project — so Metro must *watch* the
-//      parent dir or it can't read those files.
-//   2. That source does `import 'react-native'`, but react-native is only
-//      installed in THIS example's node_modules, not the parent's. Without a
-//      mapping, Metro resolves `react-native` relative to the parent and fails
-//      with "Unable to resolve module react-native". `extraNodeModules` pins
-//      react-native / react (and the package itself) to single copies so the
-//      symlinked source resolves them here.
+//   1. Metro must watch the package directory to read ../src at all.
+//   2. `react` and `react-native` must resolve to THIS app's copies, even when
+//      ../node_modules holds the package's own dev copies (after `npm install`
+//      in bindings/react-native). Hierarchical lookup from ../src would find
+//      those first and bundle a second React Native — whose
+//      TurboModuleRegistry does not match the native runtime, so
+//      `RNXybrid could not be found` (and duplicate-React hook errors).
 const { getDefaultConfig } = require('expo/metro-config');
 const path = require('path');
 
 const projectRoot = __dirname;
 const packageRoot = path.resolve(projectRoot, '..');
+const singletons = ['react', 'react-native'];
 
 const config = getDefaultConfig(projectRoot);
 
-// Watch the parent package so Metro picks up edits to ../src.
 config.watchFolders = [packageRoot];
+config.resolver.nodeModulesPaths = [path.resolve(projectRoot, 'node_modules')];
+config.resolver.extraNodeModules = { 'react-native-xybrid': packageRoot };
 
-// Resolve deps from the example first, then the package.
-config.resolver.nodeModulesPaths = [
-  path.resolve(projectRoot, 'node_modules'),
-  path.resolve(packageRoot, 'node_modules'),
-];
-
-// Single-copy pins: the symlinked package's source must use THIS example's
-// react-native / react, or Metro can't find them (and a duplicate React would
-// break hooks anyway).
-config.resolver.extraNodeModules = {
-  'react-native': path.resolve(projectRoot, 'node_modules/react-native'),
-  react: path.resolve(projectRoot, 'node_modules/react'),
-  'react-native-xybrid': packageRoot,
+const upstreamResolve = config.resolver.resolveRequest;
+config.resolver.resolveRequest = (context, moduleName, platform) => {
+  const isSingleton = singletons.some(
+    (name) => moduleName === name || moduleName.startsWith(`${name}/`),
+  );
+  // Resolve singletons as if imported from the app root.
+  const effective = isSingleton
+    ? { ...context, originModulePath: path.join(projectRoot, 'index.ts') }
+    : context;
+  return (upstreamResolve ?? context.resolveRequest)(effective, moduleName, platform);
 };
 
 module.exports = config;

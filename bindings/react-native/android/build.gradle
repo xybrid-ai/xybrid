@@ -1,56 +1,38 @@
-// React Native autolinking discovers this module via package.json.
-// Mirrors the layout of community modules (e.g. react-native-mmkv): the
-// module is consumable directly from a yarn install + gradle sync.
-//
-// The bolt-generated Kotlin binding and its native artifacts come from the
-// published `ai.xybrid:xybrid-kotlin` AAR on Maven Central — it bundles
-// `libxybrid_bolt.so` + the ORT runtime alongside the `ai.xybrid.*`
-// classes that `XybridModule.kt` calls into. No per-package native staging
-// is needed on Android; gradle resolves the AAR like any other dependency.
+// The Android half of react-native-xybrid: a TurboModule (XybridModule.kt)
+// over the Kotlin SDK. The SDK — Kotlin classes plus libxybrid_bolt.so and the
+// ONNX Runtime — comes from the `ai.xybrid:xybrid-kotlin` AAR on Maven
+// Central, so nothing native is built or staged here.
 
 buildscript {
-  ext.safeExtGet = { prop, fallback ->
-    rootProject.ext.has(prop) ? rootProject.ext.get(prop) : fallback
+  ext.xybridExt = { name, fallback ->
+    rootProject.ext.has(name) ? rootProject.ext.get(name) : fallback
   }
   repositories {
     google()
     mavenCentral()
   }
   dependencies {
-    classpath("com.android.tools.build:gradle:8.1.1")
-    classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:1.9.22")
+    // The host app's versions win when it already has these on its classpath.
+    classpath "com.android.tools.build:gradle:8.7.3"
+    classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:${xybridExt('kotlinVersion', '2.0.21')}"
   }
 }
 
 apply plugin: "com.android.library"
 apply plugin: "kotlin-android"
-// Apply the React Native gradle plugin so this library runs codegen for its
-// TurboModule spec (`codegenConfig` in package.json). Without it, RN
-// autolinking references the generated `react_codegen_RNXybridSpec` JNI
-// target but nothing produces it, and any New-Architecture host app fails
-// at CMake with "react_codegen_RNXybridSpec is not built by this project".
-// The plugin itself is made available to every subproject by the host app's
-// settings.gradle (`pluginManagement { includeBuild(reactNativeGradlePlugin) }`).
-// RN 0.80+ is New-Architecture-only, so this is applied unconditionally.
+// Runs Codegen for this library's spec (`codegenConfig` in package.json):
+// generates the `NativeXybridSpec` base class XybridModule extends, and the
+// `react_codegen_RNXybridSpec` JNI target autolinking wires into the app.
+// The host app's settings.gradle makes the plugin available.
 apply plugin: "com.facebook.react"
-
-def isNewArchitectureEnabled() {
-  return rootProject.hasProperty("newArchEnabled") &&
-         rootProject.getProperty("newArchEnabled") == "true"
-}
 
 android {
   namespace "ai.xybrid.reactnative"
-  compileSdkVersion safeExtGet("compileSdkVersion", 34)
+  compileSdkVersion xybridExt("compileSdkVersion", 35)
 
   defaultConfig {
-    minSdkVersion safeExtGet("minSdkVersion", 24)
-    targetSdkVersion safeExtGet("targetSdkVersion", 34)
-
-    // ABIs match what the Bazel AAR (//bindings/kotlin:xybrid_kotlin_aar) ships.
-    ndk {
-      abiFilters "armeabi-v7a", "arm64-v8a", "x86_64"
-    }
+    minSdkVersion xybridExt("minSdkVersion", 24)
+    targetSdkVersion xybridExt("targetSdkVersion", 35)
   }
 
   compileOptions {
@@ -61,35 +43,19 @@ android {
   kotlinOptions {
     jvmTarget = "17"
   }
-
-  buildFeatures {
-    buildConfig true
-  }
 }
 
 repositories {
-  mavenCentral()
   google()
+  mavenCentral()
 }
 
 dependencies {
-  // RN core. The Maven range `[0.74.0,)` ("0.74.0 or later") matches the
-  // npm peer dependency in package.json — without it a consumer on RN 0.74
-  // or 0.75 satisfies the npm peer check but trips a gradle resolution
-  // error. Note: Gradle's `+` suffix is a prefix wildcard (`0.74.0+` would
-  // ONLY match `0.74.0.*`, not 0.75/0.76/…), which is the opposite of what
-  // a community RN module wants. Real-world resolution: host apps pin RN
-  // to a specific version, which our open range trivially satisfies, and
-  // gradle's conflict resolver picks the host's pin.
-  implementation "com.facebook.react:react-native:[0.74.0,)"
-
+  // Versioned by the host app's React Native Gradle plugin.
+  implementation "com.facebook.react:react-android"
   implementation "org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.3"
 
-  // The bolt Kotlin SDK: provides the `ai.xybrid.*` classes XybridModule.kt
-  // calls (Xybrid, XybridModel, Envelope, XybridError, …) and bundles
-  // `libxybrid_bolt.so` + the ORT runtime in the AAR. Bolt talks to the
-  // native layer over JNI directly, so there is no JNA dependency (unlike
-  // the previous uniffi binding). Keep this version in lockstep with the
-  // workspace SDK version (bindings/kotlin/build.gradle.kts `version`).
+  // The Kotlin SDK. Kept in lockstep with the workspace version by
+  // tools/scripts/version-sync.sh (`just bump-version`).
   implementation "ai.xybrid:xybrid-kotlin:0.9.0"
 }

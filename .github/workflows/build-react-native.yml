@@ -11,14 +11,12 @@ on:
       - 'crates/xybrid-ffi-facade/**'
       - '.github/workflows/build-react-native.yml'
       # Docs-only changes under the paths above (READMEs, examples) never
-      # affect the native build — exclude markdown so they don't trigger it.
+      # affect the build — exclude markdown so they don't trigger it.
       - '!**.md'
   # Run on master merges too, so each merge saves a default-branch-scoped
-  # cache (sccache + rust-cache). GitHub Actions caches are branch-scoped:
-  # a PR run can only restore caches from its own branch or the default
-  # branch. Without this trigger master never builds, so master has no
-  # cache, so every new PR branch's first run is cold. Warming master here
-  # lets new branches start warm. Keep these paths in sync with the
+  # cache. GitHub Actions caches are branch-scoped: a PR run can only restore
+  # caches from its own branch or the default branch, so without this every
+  # new PR branch's first run is cold. Keep these paths in sync with the
   # pull_request trigger above.
   push:
     branches: [master]
@@ -38,168 +36,49 @@ concurrency:
 
 permissions: read-all
 
-env:
-  CARGO_TERM_COLOR: always
-  RUST_BACKTRACE: 1
-
 jobs:
-  # Only iOS needs per-package native staging: the pod vendors the bolt
-  # XCFramework + Swift wrapper sources. Android pulls its natives + Kotlin
-  # binding from the `ai.xybrid:xybrid-kotlin` Maven AAR (declared in
-  # android/build.gradle), so there is nothing to stage or cross-build here.
-
-  # RN's iOS piece IS the Apple xcframework — since the Apple G4 flip it is
-  # Bazel-built (the same //bindings/apple:XybridFFI the release and
-  # build-apple.yml use), so this job now stages that instead of running its
-  # own boltffi pack. The cargo-era helpers (iOS rust targets, boltffi CLI,
-  # the ghcr llama-natives pull) are dead on this path and gone.
-  stage-ios:
-    name: Stage iOS artifacts
-    runs-on: macos-14
-    env:
-      # Enables the remote-cache fast path below. Absent on fork PRs → the
-      # config script writes nothing → a plain local Bazel build (slow but
-      # correct).
-      BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
-    steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-        with:
-          submodules: true  # Bazel //:llama_src = vendor/llama-cpp
-
-      # build:ios uses the host's preinstalled cmake/make/pkg-config for
-      # rfcc's exec tools; xz decodes the fetched ort iOS-sim slice.
-      - name: Ensure rfcc host tools
-        run: |
-          which cmake >/dev/null || brew install cmake
-          which pkg-config >/dev/null || brew install pkg-config
-          which xz >/dev/null || brew install xz
-
-      # Remote CACHE only — never remote execution: iOS actions must run on
-      # this Mac (Apple policy), but their results can still up/download from
-      # BuildBuddy so identical macos-14 runners share work across jobs and
-      # runs. The build step below adds --config=remote-cache when the key
-      # is present.
-      - name: Configure BuildBuddy remote-cache config
-        env:
-          BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
-        run: tools/scripts/write-buildbuddy-rc.sh
-
-      # Serve hermetic-llvm's pinned macOS SDK from cache: Apple's URL 403s
-      # permanently and its only mirror throttles Actions runners. Analyzed on
-      # every target platform, not just Apple ones — see the action.
-      - name: Cache the pinned macOS SDK
-        uses: ./.github/actions/bazel-repo-cache
-        with:
-          macos-sdk-mirror: ${{ vars.MACOS_SDK_MIRROR }}
-
-      # Build the xcframework with Bazel (same //bindings/apple:XybridFFI the
-      # release and build-apple.yml use), then stage it + the committed bolt
-      # Swift wrappers into the RN package tree, where the podspec vendors
-      # them. Plain unzip/cp — npm pack needs the files physically in-tree.
-      - name: Stage iOS artifacts
-        run: |
-          set -euo pipefail
-          REMOTE=""; [ -n "$BUILDBUDDY_API_KEY" ] && REMOTE="--config=remote-cache"
-
-          # Retry the whole invocation: repo fetches out of this runner
-          # intermittently fail TLS verification mid-analysis —
-          #   TLS error: (certificate_unknown) PKIX path building failed
-          #   ... downloading rules_go-v0.59.0.zip
-          # which aborts the build before a single action runs (seen on the
-          # v0.5.0 release branch; the same job had passed 40 minutes earlier).
-          # Bazel's own --experimental_repository_downloader_retries (default
-          # 5) is already exhausted by then, so only a fresh invocation, later
-          # in wall-clock time, recovers. Same shape as the emulator-install
-          # retry in build-android.yml.
-          for i in 1 2 3; do
-            if bazelisk build $REMOTE --config=ios //bindings/apple:XybridFFI; then
-              break
-            fi
-            if [ "$i" = 3 ]; then
-              echo "::error::bazel build failed after 3 attempts"
-              exit 1
-            fi
-            echo "::warning::bazel build attempt $i failed; retrying in 30s"
-            sleep 30
-          done
-
-          RN_IOS="bindings/react-native/ios"
-          ZIP="bazel-bin/bindings/apple/XybridFFI.xcframework.zip"
-          [ -f "$ZIP" ] || { echo "Expected $ZIP after the Bazel build"; exit 1; }
-          rm -rf "$RN_IOS/Frameworks/XybridFFI.xcframework"
-          mkdir -p "$RN_IOS/Frameworks"
-          unzip -o -q "$ZIP" -d "$RN_IOS/Frameworks"
-          [ -d "$RN_IOS/Frameworks/XybridFFI.xcframework" ] \
-            || { echo "Zip did not contain XybridFFI.xcframework/ at its root"; exit 1; }
-
-          rm -rf "$RN_IOS/XybridSwift"
-          mkdir -p "$RN_IOS/XybridSwift"
-          for f in Xybrid.swift xybrid_bolt.swift; do
-            cp "bindings/apple/Sources/Xybrid/$f" "$RN_IOS/XybridSwift/$f"
-          done
-
-      - name: Verify iOS staging
-        run: |
-          set -euo pipefail
-          XCFW="bindings/react-native/ios/Frameworks/XybridFFI.xcframework"
-          [ -d "$XCFW" ] || { echo "Missing $XCFW"; exit 1; }
-          for f in Xybrid.swift xybrid_bolt.swift; do
-            [ -f "bindings/react-native/ios/XybridSwift/$f" ] \
-              || { echo "Missing bindings/react-native/ios/XybridSwift/$f"; exit 1; }
-          done
-          echo "iOS staging looks good:"
-          ls -la "$XCFW"
-          ls -la bindings/react-native/ios/XybridSwift/
-
-      - name: Upload iOS staged artifacts
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: rn-ios-staged
-          path: |
-            bindings/react-native/ios/Frameworks/
-            bindings/react-native/ios/XybridSwift/
-          if-no-files-found: error
-
-  package:
-    name: Typecheck + npm pack
-    needs: stage-ios
+  # Everything that needs no native toolchain beyond a JVM: types, the TS
+  # facade against a fake native module, the Codegen-selector and bolt-parity
+  # guards (tests/parity.test.mjs fails when crates/xybrid-bolt gains surface
+  # React Native does not map — which is why this workflow triggers on bolt
+  # changes), the Kotlin codec against the real bolt records, and what the
+  # npm tarball would contain.
+  js:
+    name: Tests + npm pack
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: bindings/react-native
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Use Node.js
         uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4
         with:
-          node-version: '20'
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: bindings/react-native/package-lock.json
 
-      - name: Download iOS staged artifacts
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+      - name: Set up JDK 17
+        uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9 # v4
         with:
-          name: rn-ios-staged
-          path: bindings/react-native/ios/
+          distribution: temurin
+          java-version: 17
 
-      - name: Install RN module deps
-        working-directory: bindings/react-native
-        run: npm install --no-audit --no-fund
+      - name: Install
+        run: npm ci --no-audit --no-fund
 
-      - name: Typecheck
-        working-directory: bindings/react-native
-        run: npm run typecheck
-
-      - name: Test result contracts
-        working-directory: bindings/react-native
+      - name: Types, unit tests, spec conformance, SDK parity
         run: npm test
 
-      - name: Build TS
-        working-directory: bindings/react-native
-        run: npm run build
+      # The runner image ships kotlinc; a missing compiler fails the step.
+      - name: Kotlin codec tests
+        run: npm run test:android
 
-      - name: npm pack (dry-run)
-        working-directory: bindings/react-native
-        run: npm pack --dry-run
+      - name: Check the tarball contents
+        run: node scripts/check-pack.mjs
 
-      - name: npm pack (real)
-        working-directory: bindings/react-native
+      - name: npm pack
         run: npm pack
 
       - name: Upload tarball
@@ -209,75 +88,120 @@ jobs:
           path: bindings/react-native/react-native-xybrid-*.tgz
           if-no-files-found: error
 
-  smoke-ios:
-    name: Smoke build (iOS podspec lint)
-    needs: stage-ios
-    runs-on: macos-14
+  # The iOS half. First the cheap gate (issue #589): type-check every Swift
+  # file of the module against the Swift SDK it ships with, and run the codec
+  # tests — no Rust build needed. Then the real thing: build the Expo example
+  # for the simulator against a Bazel-built XCFramework, which compiles the
+  # ObjC++ forwarder against the Codegen protocol (missing selectors are
+  # errors, see the podspec), links the Rust core, and runs Codegen's
+  # module-provider wiring.
+  ios:
+    name: iOS (Swift checks + example build)
+    # Same image as build-apple.yml: Xcode 26.x + an Apple Silicon host.
+    runs-on: macos-26
+    env:
+      # Enables the remote-cache fast path below. Absent on fork PRs → the
+      # config script writes nothing → a plain local Bazel build.
+      BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-
-      - name: Download iOS staged artifacts
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
-          name: rn-ios-staged
-          path: bindings/react-native/ios/
+          submodules: true  # Bazel //:llama_src = vendor/llama-cpp
 
-      # `--quick` validates the podspec's syntax, file paths, and dependency
-      # graph — which is what this gate is for. A full lint runs xcodebuild
-      # against the spec in isolation, which fails for a RN TurboModule
-      # because the spec depends on React Native's codegen output and headers
-      # (e.g. `<React/RCTBridgeModule.h>`) that `pod lib lint` can't resolve
-      # without a host app's `use_react_native!` setup. Replace with a real
-      # `pod install` against an example app when one is added.
-      - name: Lint podspec
+      - name: Swift type-check + codec tests
         working-directory: bindings/react-native
-        run: |
-          pod lib lint react-native-xybrid.podspec \
-            --allow-warnings \
-            --quick \
-            --verbose
+        run: scripts/test-ios.sh
 
-      - name: Test Swift metrics conversion
-        working-directory: bindings/react-native
+      - name: Ensure Bazel host tools
         run: |
-          swiftc ios/XybridMetricsEncoder.swift tests/swift/main.swift \
-            -o /tmp/xybrid-rn-metrics-test
-          /tmp/xybrid-rn-metrics-test
+          which cmake >/dev/null || brew install cmake
+          which pkg-config >/dev/null || brew install pkg-config
+          which xz >/dev/null || brew install xz
 
-  # The real end-to-end gate: build the Expo example app for Android from
-  # working-tree source. This compiles the bolt .so, publishes the kotlin
-  # binding to mavenLocal, runs RN codegen, and assembles the APK — the path
-  # that would have caught every defect that previously slipped through
-  # (non-exhaustive when, missing codegen wiring, version skew, .so strip).
-  # It does NOT run inference (no emulator); assembleDebug proves the whole
-  # build + link + autolink chain. Mirrors the documented local dev flow.
-  build-android-example:
-    name: Build Android example (from source)
+      # Remote CACHE only — iOS actions must run on this Mac.
+      - name: Configure BuildBuddy remote-cache config
+        env:
+          BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
+        run: tools/scripts/write-buildbuddy-rc.sh
+
+      - name: Cache the pinned macOS SDK
+        uses: ./.github/actions/bazel-repo-cache
+        with:
+          macos-sdk-mirror: ${{ vars.MACOS_SDK_MIRROR }}
+
+      - name: Build the XCFramework (Bazel)
+        run: |
+          set -euo pipefail
+          REMOTE=""; [ -n "$BUILDBUDDY_API_KEY" ] && REMOTE="--config=remote-cache"
+          # Repo fetches out of this runner occasionally fail TLS verification
+          # mid-analysis; only a fresh invocation later recovers.
+          for i in 1 2 3; do
+            bazelisk build $REMOTE --config=ios //bindings/apple:XybridFFI && break
+            [ "$i" = 3 ] && { echo "::error::bazel build failed after 3 attempts"; exit 1; }
+            echo "::warning::bazel build attempt $i failed; retrying in 30s"; sleep 30
+          done
+
+      - name: Use Node.js
+        uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4
+        with:
+          node-version: '22'
+
+      - name: Install example deps
+        working-directory: bindings/react-native/example
+        run: npm ci --no-audit --no-fund
+
+      - name: Expo prebuild (ios)
+        working-directory: bindings/react-native/example
+        run: CI=1 npx expo prebuild --platform ios --no-install
+
+      # ios/xybrid_natives.rb picks the monorepo's bazel-bin zip on its own;
+      # naming it keeps the job honest if that lookup ever changes.
+      - name: pod install
+        working-directory: bindings/react-native/example/ios
+        env:
+          XYBRID_XCFRAMEWORK_PATH: ${{ github.workspace }}/bazel-bin/bindings/apple/XybridFFI.xcframework.zip
+        run: pod install
+
+      - name: Build the example (iOS Simulator)
+        working-directory: bindings/react-native/example/ios
+        run: |
+          set -euo pipefail
+          # Expo's ExpoModulesJSI build phase runs a nested xcodebuild that can
+          # fail inside another xcodebuild; building its simulator slice first
+          # (hash-cached) makes that phase a no-op.
+          JSI=../node_modules/expo-modules-jsi/apple/scripts/build-xcframework.sh
+          if [ -x "$JSI" ]; then
+            PODS_ROOT="$PWD/Pods" RN_ROOT="$PWD/../node_modules/react-native" \
+              PLATFORM_NAME=iphonesimulator "$JSI"
+          fi
+          xcodebuild build \
+            -workspace example.xcworkspace \
+            -scheme example \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO
+
+  # The Android half: build the Expo example from working-tree source. This
+  # compiles the bolt .so, publishes the Kotlin SDK to mavenLocal, runs RN
+  # Codegen (XybridModule extends the generated NativeXybridSpec, so a spec
+  # mismatch is a compile error) and assembles the APK. It does not run
+  # inference (no emulator).
+  android:
+    name: Android (example build from source)
     runs-on: ubuntu-latest
     env:
-      # Enables the RBE fast path below. Absent on fork PRs → the config step
-      # skips → the bazelisk build falls back to local execution (slow but
-      # correct), same as before.
+      # Enables the RBE fast path below. Absent on fork PRs → local Bazel.
       BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           submodules: true  # //:llama_src = vendor/llama-cpp (the bolt .so builds via Bazel)
 
-      # Keep large-packages (LLVM etc.): originally needed because the bolt
-      # build ran bindgen over llama/ggml C++ via system libclang. That no
-      # longer applies — the Bazel lane uses COMMITTED bindings
-      # (crates/llama-cpp-sys/BUILD.bazel: committed-bindings, no bindgen, no
-      # libclang). The keep is preserved precautionarily for the Gradle/Expo
-      # Android toolchain; revisit (flip large-packages: true to reclaim the
-      # headroom) once a run confirms the bolt .so + APK assemble without it.
-      #
-      # tool-cache: true reclaims /opt/hostedtoolcache (~10 GB). This step runs
-      # first, before Set up JDK / Use Node.js, so those re-provision their
-      # toolchains afterward — the build never reads the preinstalled cache.
-      # The extra headroom is needed because the bolt .so compiles for every ABI
-      # and Gradle then assembles the APK, which previously exhausted the
-      # runner ("No space left on device") at assembleDebug.
+      # tool-cache: true reclaims /opt/hostedtoolcache (~10 GB) before the JDK
+      # and Node setup steps re-provision what they need: the bolt .so builds
+      # for every ABI and Gradle then assembles the APK, which previously ran
+      # the runner out of disk.
       - name: Free disk space
         uses: jlumbroso/free-disk-space@54081f138730dfa15788a46383842cd2f914a1be # v1.3.1
         with:
@@ -297,48 +221,36 @@ jobs:
       - name: Use Node.js
         uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4
         with:
-          node-version: '20'
+          node-version: '22'
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
         with:
-          # Don't install the default `tools` package — it drags in the Android
-          # Emulator (~1 GB), whose download flakes ("ZipFile unknown archive").
-          # This job only builds the APK (assembleDebug); the NDK is installed
-          # below and Gradle fetches build-tools/platform on demand. platform-tools
-          # is kept for adb, which some Gradle Android tasks probe for.
+          # Only platform-tools: the emulator download flakes and this job
+          # never boots one. Gradle fetches build-tools/platforms on demand.
           packages: platform-tools
 
-      # The NDK here is for the EXAMPLE APP's gradle build (RN codegen C++),
-      # not for our .so — Bazel downloads its own pinned NDK in-build.
+      # For the EXAMPLE APP's Gradle build (RN Codegen C++), not for our .so —
+      # Bazel downloads its own pinned NDK in-build.
       - name: Install NDK
         run: sdkmanager --install "ndk;27.1.12297006"
 
       - name: Set NDK environment
         run: echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.1.12297006" >> $GITHUB_ENV
 
-      # RBE fast path: with this config present, the Bazel build below adds
-      # --config=remote and the AAR graph resolves from BuildBuddy's cache
-      # (kept warm by bazel.yml on every PR) instead of compiling ~1,900
-      # crates + llama.cpp locally on a 2-core runner (~38 min → ~3).
-      # On forks (no secret) the script writes nothing → local Bazel fallback.
       - name: Configure BuildBuddy remote config
         env:
           BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
         run: tools/scripts/write-buildbuddy-rc.sh
 
-      # Serve hermetic-llvm's pinned macOS SDK from cache: Apple's URL 403s
-      # permanently and its only mirror throttles Actions runners. Analyzed on
-      # every target platform, not just Apple ones — see the action.
       - name: Cache the pinned macOS SDK
         uses: ./.github/actions/bazel-repo-cache
         with:
           macos-sdk-mirror: ${{ vars.MACOS_SDK_MIRROR }}
 
-      # 1. Build the bolt .so for all ABIs and stage the AAR's jniLibs into
-      #    bindings/kotlin/libs/ — the layout Gradle publishes from
-      #    (jniLibs.srcDirs("libs")). Same block release-prep.yml and
-      #    test-ci.yml (publish-kotlin) use. Bazel end-to-end since #341.
+      # Build the bolt .so for all ABIs and stage the AAR's jniLibs into
+      # bindings/kotlin/libs/, the layout Gradle publishes from. Same block
+      # release-prep.yml and test-ci.yml use.
       - name: Build Android native libs
         run: |
           set -euo pipefail
@@ -348,18 +260,17 @@ jobs:
           unzip -o -q bazel-bin/bindings/kotlin/xybrid-kotlin.aar 'jni/*' -d /tmp/aar
           cp -r /tmp/aar/jni/* bindings/kotlin/libs/
 
-      # 2. Publish the kotlin binding from source to mavenLocal (no signing —
-      #    guarded on signingInMemoryKey, absent here).
+      # No signing: guarded on signingInMemoryKey, absent here.
       - name: Publish xybrid-kotlin to mavenLocal
         working-directory: bindings/kotlin
         run: ./gradlew publishToMavenLocal --no-daemon
 
-      # 3. Build the example app: install JS deps, prebuild (codegen +
-      #    config plugin → mavenLocal + keepDebugSymbols), assemble the APK.
       - name: Install example deps
         working-directory: bindings/react-native/example
-        run: npm install --no-audit --no-fund
+        run: npm ci --no-audit --no-fund
 
+      # The example's config plugin puts mavenLocal() first, so the app links
+      # the Kotlin SDK just published instead of the last release.
       - name: Expo prebuild (android)
         working-directory: bindings/react-native/example
         run: CI=1 npx expo prebuild --platform android --no-install
