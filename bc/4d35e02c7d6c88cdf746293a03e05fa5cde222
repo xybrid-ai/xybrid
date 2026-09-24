@@ -1,0 +1,19 @@
+crates/xybrid-ffi-facade/BUILD.bazel
+  s_56fa2b8eb9d9fd::t_a4d6a9a699c195 20,24-26,31
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "bc4d35e02c7d6c88cdf746293a03e05fa5cde222",
+  "prompts": {},
+  "sessions": {
+    "s_56fa2b8eb9d9fd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5a255cb0-f56e-4278-a584-a951ac857571",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
+    }
+  }
+}
