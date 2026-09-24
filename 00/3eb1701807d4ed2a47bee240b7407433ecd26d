@@ -1,0 +1,182 @@
+bindings/react-native/example/speech.ts
+  s_43c2b112287c45::t_103a595e70bfb1 47-77
+  s_43c2b112287c45::t_04a7805d8e5aa9 1-6,15-18,24-39,41-46,78-117
+  s_43c2b112287c45::t_f16c03fbbd44d5 7-14,19-23,40
+.github/workflows/build-react-native.yml
+  s_43c2b112287c45::t_238d36b5a12cbb 14,17-19,40-101,104,111-115,121,132,136-137,139-141,147,149-151,153-155,157-163,165-166,168-191,194,201-204,224,229-230,233-234,251-253,263,270,272-273
+bindings/react-native/tests/wire.test.mjs
+  s_43c2b112287c45::t_e308c2c3170f42 1-192
+bindings/react-native/package.json
+  s_43c2b112287c45::t_8344f1e787df13 7,15-19,25-30,38-39,41,44-45,56-59,61,64,69-73
+  s_43c2b112287c45::t_4d54af0e713050 60
+  s_43c2b112287c45::t_8048a195438f64 81-85
+  s_43c2b112287c45::t_bd9e46bf3cfaf8 4
+bindings/react-native/android/src/main/java/ai/xybrid/reactnative/XybridPackage.kt
+  s_43c2b112287c45::t_02c2741d822e41 3,6-7,9-13,15-26
+bindings/react-native/tests/parity.test.mjs
+  s_43c2b112287c45::t_a265fafb91bbd9 1-110
+bindings/react-native/src/NativeXybrid.ts
+  s_43c2b112287c45::t_9c91a4f12e911b 1,7-11,13-20,26-46,48-55,57-63,65-68,71-81,84-93,95-97,99,101-106,108-112,114-118,120-128
+  s_43c2b112287c45::t_65d33e18cca2fd 2-5,69-70,100
+bindings/react-native/example/package.json
+  s_43c2b112287c45::t_1c710e1b2e529c 7
+bindings/react-native/tests/tsconfig.json
+  s_43c2b112287c45::t_87592f14e10e48 1-10
+bindings/react-native/tests/kotlin/android/util/Base64.kt
+  s_43c2b112287c45::t_a13214e6ad1d4d 1-14
+bindings/react-native/src/cancel.ts
+  s_43c2b112287c45::t_0a0360767b58cf 1-47
+bindings/react-native/ios/XybridModuleImpl.swift
+  s_43c2b112287c45::t_3fc3fae3b11128 4-8,10-100,102-108,110-113,119-126,129,131-154,159-164,166-169,172-198,202-205,208-233,236-237,239-310,313-328,331,334-339,341-344,347-351,354-358,360-377,379,381-416,418-421,423,427-446,448-461,463,465-569,571-573,578-595,597-605,607,611,613,615-618,621-623,628-642,646,648-654,658-667,671-679,683-690,693-700,703-708,712-721,724,726-734,738-739,742-743,747-748,751,754-761,764,766-782,785-795,799-810,813-826,829-839,842-849,852-858,861-867,871-872,874-877,881-885
+bindings/react-native/example/README.md
+  s_43c2b112287c45::t_d8ce53a2da4e07 1,3-9,11-13,15,17-18,20,22-27,29-30,32,34-39,42-47,49,51-58,61-70,74-80
+bindings/react-native/src/base64.ts
+  s_43c2b112287c45::t_f2c87b94a4752e 1-13,15,20-27,30,32,34-43
+  s_43c2b112287c45::t_2020fdf45a8f71 14,16-19,28-29,31,33
+bindings/react-native/android/src/main/java/ai/xybrid/reactnative/XybridModule.kt
+  s_43c2b112287c45::t_8f74d47205ce49 5-6,9-10,12,14-15,21-22,25,29-30,33-42,44,46,48-49,51-52,54,57,59,61-77,79-81,93-124,127,131,133-151,153-163,166-176,179-215,218-222,225-243,245-261,265-269,271-278,281-284,287-289,291-293,295-319,321-327,329-330,334-337,343,346-348,350-354,356,358-364,373-374,379-389,391-417,419,423-424,427-430,434-435,441,443-444,446-453,456-460,464-467,471-472,474-476,480-481,484-486,489,491-494,497-498,501-502,504-505,507,509-520,522,526-528,532-539,544-571,573,577-580,583-585,588-601,603,605-617,620-621,623-663
+  s_43c2b112287c45::t_3fc3fae3b11128 82-92,365-369,371-372,436
+  s_43c2b112287c45::t_c09feb1790ddf7 339-342,344-345
+bindings/react-native/android/build.gradle
+  s_43c2b112287c45::t_afb383d74f0639 1-4,7-8,15-17,23-26,31,34-35,50,54-55,58-59
+bindings/react-native/ios/xybrid_natives.rb
+  s_43c2b112287c45::t_37813d531ecfe5 1-9,12,20-39,42,46-60,62,73-75,77-78,80-81,84-85,90,110,116-117,120-121,123-124,127-164
+  s_43c2b112287c45::t_7771b2f4cd7f6c 71,82-83,86-89,91-93,96-108,114-115,118-119,122,125-126
+  s_43c2b112287c45::t_be647ea9570e3b 10-11,13-19,40-41,43-45,61,63-70,72,76,79,94-95,109,111-113
+bindings/react-native/scripts/test-ios.sh
+  s_43c2b112287c45::t_bdcf89da4e1641 1-47
+bindings/react-native/ios/XybridCodec.swift
+  s_43c2b112287c45::t_8a4943595afd18 36,43,48,55,63,72,81,85,91,98,106,109-129,138,169,182,208,219,235,252,262,269,287,296,307,311,327,331,345,359,377,385,395,411,422,431,440,460,491,507
+  s_43c2b112287c45::t_dbc627e906108c 7
+  s_43c2b112287c45::t_bf7187f14c5f05 1-6,8-35,37-42,44-47,49-54,56-62,64-71,73-80,82-84,86-90,92-97,99-105,107-108,130-137,139-168,170-181,183-207,209-218,220-234,236-251,253-261,263-268,270-286,288-295,297-306,308-310,312-326,328-330,332-344,346-358,360-376,378-384,386-394,396-410,412-421,423-430,432-439,441-459,461-490,492-506,508
+bindings/react-native/src/envelope.ts
+  s_43c2b112287c45::t_0426ca02fcc97e 1-115
+bindings/react-native/tests/facade.test.mjs
+  s_43c2b112287c45::t_a265fafb91bbd9 133
+  s_43c2b112287c45::t_5cb114a95860ce 1-132,134-383
+bindings/react-native/.gitignore
+  s_43c2b112287c45::t_c0da7b81ef7b3f 4,6,11-14,16-19
+bindings/react-native/scripts/test-android.sh
+  s_43c2b112287c45::t_a13214e6ad1d4d 1-24
+bindings/react-native/scripts/check-pack.mjs
+  s_43c2b112287c45::t_e45658fe816ab5 1-49
+bindings/react-native/tests/support/ts-surface.mjs
+  s_43c2b112287c45::t_a265fafb91bbd9 1-57
+bindings/react-native/src/types.ts
+  s_43c2b112287c45::t_dcb81621fc7d49 78-80
+  s_43c2b112287c45::t_3c94a62f0e8d56 1-8,10,13-26,29-30,33,35,39-51,56-77,81-99,101-113,123-124,127-128,131,138-144,151-152,171,173-178,180-183,185-186,189-190,193,197-213,215-217,219-223,226-228,237,243-261,263-264,266-269,272-273,275-293,295-346,348-361
+bindings/react-native/parity.json
+  s_43c2b112287c45::t_b8eabf22597417 1-187
+bindings/react-native/src/errors.ts
+  s_43c2b112287c45::t_4e3c85dd8c5dbb 1-50,54-67
+  s_34061f2182f2db::t_894eb84d5d735e 51-53
+bindings/react-native/android/src/main/java/ai/xybrid/reactnative/XybridHandles.kt
+  s_43c2b112287c45::t_fb2cf0f04735f4 127-138
+  s_43c2b112287c45::t_a24943adf55a3f 1-126,139
+bindings/react-native/src/index.ts
+  s_43c2b112287c45::t_dcb81621fc7d49 45
+  s_43c2b112287c45::t_04dd09e4930524 6
+  s_43c2b112287c45::t_80e63d8f4ff0b5 1-5,7-9,11-33,38-41,46,49-50,53-59,61,63,66-68,73-76,84,88-90
+bindings/react-native/tests/support/react-native-stub.js
+  s_43c2b112287c45::t_87592f14e10e48 1-41
+bindings/react-native/tests/types/tsconfig.json
+  s_43c2b112287c45::t_bd9e46bf3cfaf8 1-5
+bindings/react-native/example/metro.config.js
+  s_43c2b112287c45::t_b684046dcaf8c8 1-2,4-10,16,21-22,24-33
+bindings/react-native/tests/support/fake-native.mjs
+  s_43c2b112287c45::t_87592f14e10e48 1-46
+bindings/react-native/react-native-xybrid.podspec
+  s_43c2b112287c45::t_6351307b993294 22
+  s_43c2b112287c45::t_df85321647a3d7 19
+  s_43c2b112287c45::t_dfc66071d539ee 2,14-16,20-21,25-28,37-43,46-47
+bindings/react-native/ios/XybridModule.mm
+  s_43c2b112287c45::t_6351307b993294 1,4-21
+  s_43c2b112287c45::t_8048a195438f64 27-28
+  s_43c2b112287c45::t_9ff3438389b9b7 31-34,36-37,44-48,50-53,56-61,63-66,69-72,75-80,83-87,90-94,97-100,103-108,110-113,116-120,123-127,129-133,136-140,142-146,149-152,155-158,161-165,167-171,174-178,181-184,187-192,194-197,200-204,207-213,216-220,223-228,230-234,237-241,244-248,251-255,258-262,265-269,272-278,280-284,287-337,340-493
+bindings/react-native/example/App.tsx
+  s_43c2b112287c45::t_97bc130ff7563b 41,48-51,84
+  s_43c2b112287c45::t_034953740f8dba 38-40,77-81
+  s_43c2b112287c45::t_1c8a4f54857063 46
+  s_43c2b112287c45::t_b88a21a9cb36f7 1,20,43-45,267,270,272-275,291-314,316
+  s_43c2b112287c45::t_8a465697fa93f3 3,14-19,21-25,28-33,35-36,59,61-68,73,75-76,85-96,98-103,109,114-117,119-127,131,133-146,152-163,165,167-168,170-197,199-200,203-209,214,217-219,222-228,234,248,251-255,257,318-319,321-324,327,329,331
+  s_43c2b112287c45::t_d40c8d24cdebc1 106-108,110-113
+  s_43c2b112287c45::t_54c0306374f487 147-151
+  s_43c2b112287c45::t_895ef117444453 271
+  s_43c2b112287c45::t_f16c03fbbd44d5 280
+  s_43c2b112287c45::t_3c91d2d407cd90 42,201-202,268-269,276-279,281-290,315
+  s_43c2b112287c45::t_103a595e70bfb1 26
+  s_43c2b112287c45::t_410e12e1c7608b 47
+  s_43c2b112287c45::t_619d735c151734 317
+bindings/react-native/src/wire.ts
+  s_43c2b112287c45::t_dec2c74d8d1ebb 1-408
+bindings/react-native/src/presets.ts
+  s_43c2b112287c45::t_d20aea722961b2 1,3-4,6-12,18,22-25,31,35
+bindings/react-native/tests/run.mjs
+  s_43c2b112287c45::t_87592f14e10e48 1-44
+bindings/react-native/tests/spec-conformance.test.mjs
+  s_43c2b112287c45::t_0425dc45a6d6da 1-39,42-70
+  s_43c2b112287c45::t_bbd7f66b1897bb 40-41
+bindings/react-native/ios/XybridHandles.swift
+  s_43c2b112287c45::t_c928d33d73c3a5 17,19,28,30,32,37,39,42,44,49,53,59-60,63,67,70,72,76,79,93,101,104-190
+  s_43c2b112287c45::t_9be2009de4d8d9 1-16,18,20-27,29,31,33-36,38,40-41,43,45-48,50-52,54-58,61-62,64-66,68-69,71,73-75,77-78,80-92,94-100,102-103,191
+bindings/react-native/tests/types/api.ts
+  s_43c2b112287c45::t_bd9e46bf3cfaf8 1-61
+bindings/react-native/tsconfig.build.json
+  s_43c2b112287c45::t_bd9e46bf3cfaf8 4-6,8
+bindings/react-native/scripts/prepack.sh
+  s_43c2b112287c45::t_c0da7b81ef7b3f 1-17
+bindings/react-native/src/model.ts
+  s_43c2b112287c45::t_50b969952a4799 1-294,303-337,365-399,402-408
+  s_43c2b112287c45::t_dcb81621fc7d49 295-302,338-364,400-401
+bindings/react-native/android/src/main/java/ai/xybrid/reactnative/XybridCodec.kt
+  s_43c2b112287c45::t_157c065e07418a 1-111,125,127,129-137,139-481
+  s_43c2b112287c45::t_8a4943595afd18 112-124,126,128,138
+bindings/react-native/tests/swift/main.swift
+  s_43c2b112287c45::t_76af2b7385b2a1 67-68,183-184
+  s_43c2b112287c45::t_8a4943595afd18 79-82
+  s_43c2b112287c45::t_bdcf89da4e1641 1-4,7-13,16-26,29-66,70-78,83-118,121-136,138-143,145-149,151-182,185-186,188,190,192-201
+bindings/react-native/tests/support/bolt-surface.mjs
+  s_43c2b112287c45::t_dcb81621fc7d49 14,58,88-93
+  s_43c2b112287c45::t_a8ca3e7ee9c5ac 1-13,15-57,59-87,94
+bindings/react-native/example/app.json
+  s_43c2b112287c45::t_b2023c79c22b7d 10-11
+bindings/react-native/tests/kotlin/CodecTest.kt
+  s_43c2b112287c45::t_a13214e6ad1d4d 1-96,99-209
+  s_43c2b112287c45::t_8a4943595afd18 97-98
+bindings/react-native/example/package-lock.json
+  s_43c2b112287c45::t_ede1c0fb079ef7 12,25,30-31,35,2730-2739
+bindings/react-native/package-lock.json
+  s_43c2b112287c45::t_edacea2941e87d 1-6816
+bindings/react-native/src/context.ts
+  s_34061f2182f2db::t_a45fd5007b235d 1-70
+bindings/react-native/src/pipeline.ts
+  s_34061f2182f2db::t_83665bbae59d3a 1-66
+bindings/react-native/src/session.ts
+  s_34061f2182f2db::t_b69c8969dd6bb9 1-76
+bindings/react-native/src/xybrid.ts
+  s_34061f2182f2db::t_ade66ea1e866cf 1-176
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "003eb1701807d4ed2a47bee240b7407433ecd26d",
+  "prompts": {},
+  "sessions": {
+    "s_34061f2182f2db": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0d0e7-7d08-71d1-bd6e-65cfd8c2b944",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
+    },
+    "s_43c2b112287c45": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6b9a57e6-439d-4590-8d64-5b680ed5782e",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
+    }
+  }
+}
