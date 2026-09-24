@@ -17,13 +17,16 @@ rust_library(
 # FIRST test target in the workspace — the tests-under-Bazel pilot. Every
 # workspace `#[test]` runs only under cargo today, so Bazel builds everything it
 # ships but verifies none of it. This crate is the cheapest proof of the pattern:
-# 26 inline tests, pure Rust, no dev-dependencies, no model fixtures.
+# inline tests, pure Rust, no model fixtures.
 #
 # `crate = ` (not `srcs = `) recompiles the library above with `--test`, which is
 # the rules_rust idiom for inline `#[cfg(test)] mod tests` — it inherits srcs,
-# edition, features and deps, so the two targets cannot drift.
+# edition, features and deps, so the two targets cannot drift. It does NOT
+# inherit Cargo dev-dependencies: list each one here (xybrid-core_test does the
+# same). tempfile backs the cache-management tests' scratch directories.
 rust_test(
     name = "xybrid-ffi-facade_test",
     crate = ":xybrid-ffi-facade",
     crate_features = ["default"],
+    deps = ["@crates//:tempfile"],
 )
