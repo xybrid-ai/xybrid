@@ -1,0 +1,28 @@
+bindings/react-native/README.md
+  s_43c2b112287c45::t_04dd09e4930524 11,69,213,219,223
+  s_43c2b112287c45::t_6dea21b4f0948d 3-10,12,17-47,49,51-53,56-68,70,72-97,100-112,114-120,130-133,136,138,141-152,156-157,159-212,214-218,220-222,224-286,288-298
+AGENTS.md
+  s_43c2b112287c45::t_255cfb2698e4d5 203-213
+docs/content/docs/(integration)/sdks/react-native.mdx
+  s_43c2b112287c45::t_700072dac52c89 1-99
+CHANGELOG.md
+  s_43c2b112287c45::t_e46b5ce721cb20 12-33
+docs/content/docs/(integration)/sdks/meta.json
+  s_43c2b112287c45::t_3d1db0dc09cffe 3-11
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "2fe0535e80fae181040fcb5b5f1972ac44e62ec4",
+  "prompts": {},
+  "sessions": {
+    "s_43c2b112287c45": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6b9a57e6-439d-4590-8d64-5b680ed5782e",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
+    }
+  }
+}
