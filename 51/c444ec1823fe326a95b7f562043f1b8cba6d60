@@ -1,0 +1,33 @@
+CHANGELOG.md
+  s_ea98b02fdd6e9c::t_8beb40b5da72d8 22-24
+crates/xybrid-ffi-facade/src/lib.rs
+  s_43c2b112287c45::t_5de411783cf3ef 2908-2910,2912-2915,2917-2922,2925,2929,4196-4215,4225,4231-4234,4239
+crates/xybrid-sdk/src/registry_client.rs
+  s_43c2b112287c45::t_53ee678ff91bab 2439-2446
+crates/xybrid-sdk/src/lib.rs
+  s_43c2b112287c45::t_aafe0fb79ebf42 320-323,337-341,734-735
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "51c444ec1823fe326a95b7f562043f1b8cba6d60",
+  "prompts": {},
+  "sessions": {
+    "s_43c2b112287c45": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6b9a57e6-439d-4590-8d64-5b680ed5782e",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
+    },
+    "s_ea98b02fdd6e9c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a55ca134-c426-45f9-b479-cb4b1efcad25",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
+    }
+  }
+}
