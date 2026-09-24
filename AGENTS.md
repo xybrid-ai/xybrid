@@ -200,6 +200,17 @@ properties, typed exceptions) is attached to the generated classes at import by
 `xybrid/_sugar.py` and `xybrid/_errors.py`, guarded by `tests/test_sdk.py`. Add
 SDK ergonomics there, never in `xybrid/_bolt/`.
 
+The React Native package (`bindings/react-native`, npm `react-native-xybrid`,
+not a workspace member) is the one **hand-bridged** binding: a Codegen
+TurboModule over the Swift and Kotlin SDKs, so nothing reaches it for free.
+`tests/parity.test.mjs` fails when `crates/xybrid-bolt` gains an export, record
+field, enum variant or error variant that `bindings/react-native/parity.json`
+neither maps nor excludes. When you add bolt surface, wire it through React
+Native (spec, both shims, TS facade — see its README) or exclude it there with a
+reason; don't leave the test red. Its iOS core is not in the npm tarball:
+`pod install` downloads the release XCFramework and checks the SHA-256 that
+release-prep pins in its `package.json`.
+
 **Dependency direction (do not reverse):**
 
 ```

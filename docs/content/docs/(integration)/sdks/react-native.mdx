@@ -1,0 +1,99 @@
+---
+title: React Native
+description: On-device ML inference for React Native apps (iOS and Android)
+---
+
+The React Native package (`react-native-xybrid`) wraps the same Rust core as the Swift and Kotlin SDKs in a TurboModule, so the API, models and error codes match every other binding. It is in **preview**: the surface is complete and tested, but may still change before 1.0.
+
+## Requirements
+
+- React Native 0.76+ with the New Architecture (Expo SDK 52+ with a development build — not Expo Go)
+- iOS 16.0+ (simulator builds need an Apple Silicon Mac)
+- Android API 24+ (`arm64-v8a`, `armeabi-v7a`, `x86_64`)
+
+## Installation
+
+```bash
+npm install react-native-xybrid
+cd ios && pod install
+```
+
+On iOS, `pod install` downloads the Rust core from the matching GitHub Release and verifies its SHA-256. Offline or behind a proxy, set `XYBRID_NATIVES_BASE_URL` (a mirror) or `XYBRID_XCFRAMEWORK_PATH` (a local copy). On Android, Gradle resolves the Kotlin SDK from Maven Central. With Expo, run `npx expo prebuild` — no config plugin is needed.
+
+## Initialization
+
+Local inference needs no setup. Pass an API key to enable cloud fallback, speculative cloud serving and [dashboard](https://dashboard.xybrid.dev) telemetry on top of the same local runtime:
+
+```ts
+import { Xybrid } from 'react-native-xybrid';
+
+await Xybrid.initialize({ apiKey: XYBRID_API_KEY });
+```
+
+Options apply once per app process; a later call with different options rejects with `xybrid_config_error`.
+
+## Run a model
+
+```ts
+import { Envelope, GenerationConfigs, ModelLoader } from 'react-native-xybrid';
+
+const model = await ModelLoader.fromRegistry('qwen3.5-0.8b').load();
+const result = await model.run(Envelope.text('Name three rivers.'), {
+  generationConfig: GenerationConfigs.greedy({ maxTokens: 64 }),
+});
+console.log(result.text, result.metrics.tokensPerSecond);
+await model.release(); // weights live in native memory
+```
+
+## Streaming and cancellation
+
+`runStreaming` is an async generator. Pass an `AbortSignal` as the stop button; generation also stops when you `break` out of the loop:
+
+```ts
+const controller = new AbortController();
+for await (const token of model.runStreaming(Envelope.text('Tell me a story'), {
+  signal: controller.signal,
+})) {
+  append(token.token);
+}
+// controller.abort() → the run stops at the next token and rejects with xybrid_cancelled
+```
+
+## Conversations
+
+```ts
+import { ConversationContext, Envelope } from 'react-native-xybrid';
+
+const chat = await ConversationContext.create();
+await chat.setSystem('You are concise.');
+const question = Envelope.user('What is the capital of France?');
+const reply = await model.run(question, { context: chat });
+await chat.push(question);       // runs never modify the context:
+await chat.push(reply.envelope); // push both turns after the run
+```
+
+## More capabilities
+
+The package covers the full SDK surface — see the [package README](https://github.com/xybrid-ai/xybrid/tree/master/bindings/react-native#readme) for examples of each:
+
+- structured output (`jsonSchemaToGbnf` + `generationConfig.grammar`)
+- tool calling (`generationConfig.tools`, `result.toolCalls`, `Envelope.toolResults`)
+- vision (`Envelope.image`, `Envelope.userMessage`)
+- text-to-speech voices and speech recognition, batch and live (`model.stream()`)
+- multi-stage pipelines (`Pipeline.fromYaml` / `fromFile`)
+- background downloads with progress, speculative cloud serving, model cache management and memory release
+
+## Errors
+
+Every rejection carries a stable `code`, the same set on iOS and Android:
+
+```ts
+import { isRetryable, isXybridError } from 'react-native-xybrid';
+
+try {
+  await model.run(envelope);
+} catch (error) {
+  if (isXybridError(error) && error.code === 'xybrid_model_not_found') { /* … */ }
+  if (isRetryable(error)) { /* retry later: network, rate limit, timeout, offline */ }
+}
+```

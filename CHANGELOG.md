@@ -9,6 +9,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **React Native catches up with the other SDKs, and runs on iOS.** The iOS
+  half of `react-native-xybrid` never compiled against the SDK it bundles, and
+  its method selectors did not match the ones React Native's code generator
+  dispatches by — so every call would have crashed. Both are fixed, and the
+  package now covers the whole SDK surface: API-key initialization (cloud
+  fallback, speculative cloud, telemetry), a stop button through the standard
+  `AbortSignal`, conversation context, tool calling, image input, model
+  introspection, pipelines, live ASR sessions, background downloads with
+  progress, cache management and memory release. Android became a real
+  TurboModule and no longer frees native objects that an in-flight call is
+  still using. Verified end to end on a Pixel 8 and the iOS Simulator.
+- **React Native can no longer silently fall behind.** A test reads every
+  export of `xybrid-bolt` and fails until each new function, field or error is
+  wired into React Native (or excluded with a reason); another checks the iOS
+  selectors against the spec on any machine; CI now builds the example app for
+  the iOS Simulator (#589) as well as Android.
+- **React Native is ready to publish.** `pod install` fetches the iOS core from
+  the GitHub Release and checks the checksum the release pins, so the npm
+  package stays around 120 KiB; `release-publish.yml` gains an npm job
+  (trusted publishing, provenance), off until the maintainer enables it — see
+  `bindings/react-native/RELEASING.md`.
+
 - **Applications can manage model storage from every binding.** Swift, Kotlin,
   Python, Unity C#, and Dart now expose aggregate cache status, physical entry
   details, preferred paths, ready-model IDs, per-model deletion, and full cache

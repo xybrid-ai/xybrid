@@ -1,5 +1,13 @@
 {
   "title": "SDKs",
-  "pages": ["flutter", "ios", "android", "kotlin", "unity", "web"],
+  "pages": [
+    "flutter",
+    "ios",
+    "android",
+    "kotlin",
+    "react-native",
+    "unity",
+    "web"
+  ],
   "defaultOpen": true
 }
