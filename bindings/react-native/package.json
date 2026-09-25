@@ -1,10 +1,10 @@
 {
-  "name": "react-native-xybrid",
+  "name": "@xybrid/react-native",
   "version": "0.9.0",
-  "description": "On-device + cloud ML inference for React Native (iOS + Android), backed by the Xybrid Rust SDK",
+  "description": "On-device (and optionally cloud) ML inference for React Native: LLM, ASR, TTS, embeddings and vision, backed by the Xybrid Rust SDK",
   "main": "lib/commonjs/index.js",
   "module": "lib/module/index.js",
-  "types": "lib/typescript/src/index.d.ts",
+  "types": "lib/typescript/index.d.ts",
   "react-native": "src/index.ts",
   "source": "src/index.ts",
   "files": [
@@ -12,17 +12,22 @@
     "lib",
     "android/build.gradle",
     "android/src",
-    "android/libs",
-    "ios",
+    "ios/*.h",
+    "ios/*.mm",
+    "ios/*.swift",
+    "ios/xybrid_natives.rb",
+    "ios/XybridSwift",
     "react-native-xybrid.podspec",
     "README.md",
     "LICENSE"
   ],
   "scripts": {
-    "typecheck": "tsc --noEmit",
-    "test": "tsc --noEmit --strict --skipLibCheck --moduleResolution node --target ES2020 tests/metrics-types.test.ts && node --test tests/metrics-encoders.test.mjs",
-    "test:swift-metrics": "swiftc ios/XybridMetricsEncoder.swift tests/swift/main.swift -o /tmp/xybrid-rn-metrics-test && /tmp/xybrid-rn-metrics-test",
-    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tests/types",
+    "test": "npm run typecheck && node tests/run.mjs",
+    "test:ios": "scripts/test-ios.sh",
+    "test:android": "scripts/test-android.sh",
+    "build": "rm -rf lib && tsc -p tsconfig.build.json --module commonjs --outDir lib/commonjs && tsc -p tsconfig.build.json --module esnext --outDir lib/module && tsc -p tsconfig.build.json --emitDeclarationOnly --declaration --declarationMap --outDir lib/typescript",
+    "prepack": "scripts/prepack.sh",
     "clean": "rm -rf lib"
   },
   "keywords": [
@@ -30,10 +35,14 @@
     "ios",
     "android",
     "ml",
+    "ai",
+    "on-device",
     "inference",
+    "llm",
     "asr",
     "tts",
-    "llm",
+    "whisper",
+    "llama",
     "xybrid"
   ],
   "repository": {
@@ -44,15 +53,24 @@
   "author": "Xybrid AI <support@xybrid.dev>",
   "license": "Apache-2.0",
   "homepage": "https://github.com/xybrid-ai/xybrid/tree/master/bindings/react-native#readme",
+  "bugs": {
+    "url": "https://github.com/xybrid-ai/xybrid/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "peerDependencies": {
     "react": "*",
-    "react-native": ">=0.74.0"
+    "react-native": ">=0.76.0"
   },
   "devDependencies": {
     "@types/react": "^18.2.0",
     "react": "18.3.1",
-    "react-native": "0.76.0",
-    "typescript": "^5.4.0"
+    "react-native": "0.76.9",
+    "typescript": "^5.9.3"
+  },
+  "xybrid": {
+    "iosXcframeworkSha256": ""
   },
   "codegenConfig": {
     "name": "RNXybridSpec",
@@ -60,6 +78,11 @@
     "jsSrcsDir": "src",
     "android": {
       "javaPackageName": "ai.xybrid.reactnative"
+    },
+    "ios": {
+      "modulesProvider": {
+        "RNXybrid": "XybridModule"
+      }
     }
   }
 }

@@ -190,6 +190,98 @@ public enum Xybrid {
         boltSetProviderApiKey(provider, apiKey)
     }
 
+    /// Aggregate storage usage across all managed model-cache areas.
+    public static func modelCacheStatus() throws -> XybridCacheStatus {
+        try cacheStatus()
+    }
+
+    /// Physical entries across registry, extraction, and Hugging Face caches.
+    ///
+    /// A model can appear more than once when several managed copies exist.
+    public static func modelCacheEntries() throws -> [XybridCacheEntry] {
+        try cacheEntries()
+    }
+
+    /// Return whether `modelId` occupies any managed model-cache entry.
+    public static func hasCachedModelData(_ modelId: String) throws -> Bool {
+        try cacheIsModelCached(modelId: modelId)
+    }
+
+    /// Return a preferred local path for a model, or `nil` when absent.
+    ///
+    /// Presence does not necessarily mean the model is extracted and ready.
+    public static func cachedModelPath(_ modelId: String) throws -> String? {
+        try cacheModelPath(modelId: modelId)
+    }
+
+    /// List model IDs extracted, validated, and ready to run offline.
+    public static func extractedModelIds() throws -> [String] {
+        try cacheListExtractedModelIds()
+    }
+
+    /// Remove every managed cache entry for one model.
+    ///
+    /// Do not call concurrently with a load of the same model.
+    @discardableResult
+    public static func removeCachedModel(_ modelId: String) throws -> UInt32 {
+        try cacheRemoveModel(modelId: modelId)
+    }
+
+    /// Clear all managed model-cache storage.
+    ///
+    /// Do not call concurrently with any model load.
+    @discardableResult
+    public static func clearModelCache() throws -> UInt32 {
+        try cacheClear()
+    }
+
+    // MARK: Model storage, off the caller's thread
+    //
+    // Every storage call walks or deletes the cache directory on disk, which is
+    // too slow for the main actor once a device holds a few models. These run
+    // the same calls on a detached background task.
+
+    /// ``modelCacheStatus()`` without blocking the calling thread or actor.
+    public static func modelCacheStatusAsync() async throws -> XybridCacheStatus {
+        try await Task.detached { try cacheStatus() }.value
+    }
+
+    /// ``modelCacheEntries()`` without blocking the calling thread or actor.
+    public static func modelCacheEntriesAsync() async throws -> [XybridCacheEntry] {
+        try await Task.detached { try cacheEntries() }.value
+    }
+
+    /// ``hasCachedModelData(_:)`` without blocking the calling thread or actor.
+    public static func hasCachedModelDataAsync(_ modelId: String) async throws -> Bool {
+        try await Task.detached { try cacheIsModelCached(modelId: modelId) }.value
+    }
+
+    /// ``cachedModelPath(_:)`` without blocking the calling thread or actor.
+    public static func cachedModelPathAsync(_ modelId: String) async throws -> String? {
+        try await Task.detached { try cacheModelPath(modelId: modelId) }.value
+    }
+
+    /// ``extractedModelIds()`` without blocking the calling thread or actor.
+    public static func extractedModelIdsAsync() async throws -> [String] {
+        try await Task.detached { try cacheListExtractedModelIds() }.value
+    }
+
+    /// ``removeCachedModel(_:)`` without blocking the calling thread or actor.
+    ///
+    /// Do not call concurrently with a load of the same model.
+    @discardableResult
+    public static func removeCachedModelAsync(_ modelId: String) async throws -> UInt32 {
+        try await Task.detached { try cacheRemoveModel(modelId: modelId) }.value
+    }
+
+    /// ``clearModelCache()`` without blocking the calling thread or actor.
+    ///
+    /// Do not call concurrently with any model load.
+    @discardableResult
+    public static func clearModelCacheAsync() async throws -> UInt32 {
+        try await Task.detached { try cacheClear() }.value
+    }
+
     private static func registerPlatformObservers() {
         #if os(iOS)
         let device = UIDevice.current

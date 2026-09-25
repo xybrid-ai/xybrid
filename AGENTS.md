@@ -57,6 +57,14 @@ Use `bazelisk` (reads `.bazelversion`). `just bazel-build | bazel-analyze |
 bazel-test` are the shortcuts; each forwards extra Bazel flags. Full setup,
 including the Windows MSVC EULA note, is in `CONTRIBUTING.md`.
 
+Every first-party Rust target (`rust_library`, `rust_binary`, `rust_test`, …)
+passes `version = XYBRID_VERSION`, loaded from `@xybrid_version//:version.bzl`.
+That constant is read from `Cargo.toml`'s `[workspace.package] version` by
+`//bazel:cargo_version.bzl`; without it rules_rust sets `CARGO_PKG_VERSION` to
+`0.0.0`, which every shipped (Bazel-built) SDK would report. Add it to any new
+Rust target: `bazel.yml`'s "Every Rust target stamps the workspace version" step
+(a `bazel query` for Rust targets still on the `0.0.0` default) fails otherwise.
+
 `xtask` is **not** the native-binding entry point anymore. `build-android`,
 `build-xcframework`, `build-uniffi`, `stage-react-native`, `setup-targets`,
 `build-all`, and `package` were all removed once Bazel took over. What remains
@@ -80,6 +88,25 @@ After editing `bindings/flutter/rust`, regenerate the Dart glue with
 `flutter_rust_bridge_codegen generate` (CLI version must match the pinned
 `flutter_rust_bridge` in `bindings/flutter/rust/Cargo.toml`); `flutter run` then
 rebuilds the native lib via cargokit.
+
+**The arm64 AAR links llama.cpp dynamically; everything else statically.**
+Only the Kotlin AAR's arm64 slice (so Kotlin and React Native) uses
+`//:llama_android_dl`: ggml built with `GGML_BACKEND_DL` +
+`GGML_CPU_ALL_VARIANTS`, so `libxybrid_bolt.so` needs `libllama.so`,
+`libggml*.so` and `libmtmd.so`, and one CPU backend per ISA level ships as a
+module that `bindings/kotlin/bazel/jni/ggml_cpu_backend.cpp` loads at startup
+(best first; ggml skips variants the CPU cannot run). It is selected by the
+`//bazel/ggml:android_arm64_cpu_variants` platform, which only the AAR builds
+for — the Flutter arm64 cdylib keeps the static `//:llama`, because its
+precompiled package carries a single `.so`. Any new target that picks a llama
+build must select on `//bazel/ggml:cpu_variants_enabled` too, or the AAR would
+link two ggml copies. The shipped variant list lives in
+`bazel/ggml/android.bzl` and must match the loader's (the `build-android.yml`
+gate fails otherwise). Two rules_foreign_cc traps are handled there:
+Android is configured as `CMAKE_SYSTEM_NAME=Linux`, so a CMake hook
+(`bazel/ggml/android_system_name.cmake`) makes ggml build its Android variant
+set, and `CMAKE_PLATFORM_NO_VERSIONED_SONAME` keeps sonames unversioned (an APK
+only carries `lib*.so`).
 
 
 ### Prebuilt llama.cpp natives (the cargo fast path)
@@ -199,6 +226,17 @@ code. The Pythonic surface (envelope factories, `result.text`, model
 properties, typed exceptions) is attached to the generated classes at import by
 `xybrid/_sugar.py` and `xybrid/_errors.py`, guarded by `tests/test_sdk.py`. Add
 SDK ergonomics there, never in `xybrid/_bolt/`.
+
+The React Native package (`bindings/react-native`, npm `@xybrid/react-native`,
+not a workspace member) is the one **hand-bridged** binding: a Codegen
+TurboModule over the Swift and Kotlin SDKs, so nothing reaches it for free.
+`tests/parity.test.mjs` fails when `crates/xybrid-bolt` gains an export, record
+field, enum variant or error variant that `bindings/react-native/parity.json`
+neither maps nor excludes. When you add bolt surface, wire it through React
+Native (spec, both shims, TS facade — see its README) or exclude it there with a
+reason; don't leave the test red. Its iOS core is not in the npm tarball:
+`pod install` downloads the release XCFramework and checks the SHA-256 that
+release-prep pins in its `package.json`.
 
 **Dependency direction (do not reverse):**
 

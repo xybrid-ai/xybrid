@@ -3,7 +3,7 @@
   "compilerOptions": {
     "strict": true,
     "paths": {
-      "react-native-xybrid": ["../src"]
+      "@xybrid/react-native": ["../src"]
     }
   }
 }

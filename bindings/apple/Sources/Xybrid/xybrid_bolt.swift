@@ -659,6 +659,81 @@ public struct XybridVoiceInfo: Hashable, Equatable, Sendable {
     }
 }
 
+public struct XybridCacheEntry: Hashable, Equatable, Sendable {
+    public var modelId: String
+    public var location: XybridCacheEntryLocation
+    public var path: String
+    public var sizeBytes: UInt64
+
+    public init(
+        modelId: String,
+        location: XybridCacheEntryLocation,
+        path: String,
+        sizeBytes: UInt64
+    ) {
+        self.modelId = modelId
+        self.location = location
+        self.path = path
+        self.sizeBytes = sizeBytes
+    }
+
+    @inlinable static func decode(from reader: inout WireReader) -> XybridCacheEntry {
+        XybridCacheEntry(
+            modelId: reader.readString(),
+            location: XybridCacheEntryLocation(rawValue: reader.readI32())!,
+            path: reader.readString(),
+            sizeBytes: reader.readU64()
+        )
+    }
+
+    @inlinable func encode(to writer: inout WireWriter) {
+        writer.writeString(self.modelId)
+        writer.writeI32(self.location.rawValue)
+        writer.writeString(self.path)
+        writer.writeU64(self.sizeBytes)
+    }
+}
+
+public struct XybridCacheStatus: Hashable, Equatable, Sendable {
+    public var totalSizeBytes: UInt64
+    public var entryCount: UInt32
+    public var modelCount: UInt32
+    public var extractedModelCount: UInt32
+    public var cacheRoot: String
+
+    public init(
+        totalSizeBytes: UInt64,
+        entryCount: UInt32,
+        modelCount: UInt32,
+        extractedModelCount: UInt32,
+        cacheRoot: String
+    ) {
+        self.totalSizeBytes = totalSizeBytes
+        self.entryCount = entryCount
+        self.modelCount = modelCount
+        self.extractedModelCount = extractedModelCount
+        self.cacheRoot = cacheRoot
+    }
+
+    @inlinable static func decode(from reader: inout WireReader) -> XybridCacheStatus {
+        XybridCacheStatus(
+            totalSizeBytes: reader.readU64(),
+            entryCount: reader.readU32(),
+            modelCount: reader.readU32(),
+            extractedModelCount: reader.readU32(),
+            cacheRoot: reader.readString()
+        )
+    }
+
+    @inlinable func encode(to writer: inout WireWriter) {
+        writer.writeU64(self.totalSizeBytes)
+        writer.writeU32(self.entryCount)
+        writer.writeU32(self.modelCount)
+        writer.writeU32(self.extractedModelCount)
+        writer.writeString(self.cacheRoot)
+    }
+}
+
 /// Configuration for a live ASR session.
 ///
 /// The model is not named here — it comes from the loaded `XybridModel` the
@@ -1050,6 +1125,21 @@ public enum XybridStreamEventKind: Int32, Hashable, Sendable, CaseIterable {
 
     @usableFromInline init(fromC c: Int32) {
         self = XybridStreamEventKind(rawValue: c)!
+    }
+
+    @usableFromInline var cValue: Int32 {
+        rawValue
+    }
+}
+
+public enum XybridCacheEntryLocation: Int32, Hashable, Sendable, CaseIterable {
+    case registry = 0
+    case extracted = 1
+    case huggingFace = 2
+    case huggingFaceHub = 3
+
+    @usableFromInline init(fromC c: Int32) {
+        self = XybridCacheEntryLocation(rawValue: c)!
     }
 
     @usableFromInline var cValue: Int32 {
@@ -2204,6 +2294,100 @@ public func initSdkCacheDir(cacheDir: String) {
     boltffiCacheDirBytes.withUnsafeBufferPointer { boltffiCacheDirBuffer -> Void in
         boltffi_function_xybrid_bolt_init_sdk_cache_dir(boltffiCacheDirBuffer.baseAddress!, UInt(boltffiCacheDirBuffer.count))
     }
+}
+
+/// Returns aggregate storage usage across every managed model-cache location.
+public func cacheStatus() throws -> XybridCacheStatus {
+    var boltffiResult: FfiBuf_u8 = FfiBuf_u8()
+    let boltffiError = boltffi_function_xybrid_bolt_cache_status(&boltffiResult)
+    if boltffiError.ptr != nil || Int(boltffiError.len) != 0 {
+        defer { boltffi_free_buf(boltffiError) }
+        throw boltffiDecodeOwnedBuf(boltffiError.ptr, Int(boltffiError.len)) { boltffiErrorReader in XybridError.decode(from: &boltffiErrorReader) }
+    }
+    defer { boltffi_free_buf(boltffiResult) }
+    return boltffiDecodeOwnedBuf(boltffiResult.ptr, Int(boltffiResult.len)) { boltffiReader in XybridCacheStatus.decode(from: &boltffiReader) }
+}
+
+/// Lists every physical model entry occupying managed cache storage.
+public func cacheEntries() throws -> [XybridCacheEntry] {
+    var boltffiResult: FfiBuf_u8 = FfiBuf_u8()
+    let boltffiError = boltffi_function_xybrid_bolt_cache_entries(&boltffiResult)
+    if boltffiError.ptr != nil || Int(boltffiError.len) != 0 {
+        defer { boltffi_free_buf(boltffiError) }
+        throw boltffiDecodeOwnedBuf(boltffiError.ptr, Int(boltffiError.len)) { boltffiErrorReader in XybridError.decode(from: &boltffiErrorReader) }
+    }
+    defer { boltffi_free_buf(boltffiResult) }
+    return boltffiDecodeOwnedBuf(boltffiResult.ptr, Int(boltffiResult.len)) { boltffiReader in boltffiReader.readArray { boltffiReader in XybridCacheEntry.decode(from: &boltffiReader) } }
+}
+
+/// Returns whether a model occupies any managed cache entry.
+public func cacheIsModelCached(modelId: String) throws -> Bool {
+    let boltffiModelIdBytes = boltffiEncode { boltffiModelIdWriter in boltffiModelIdWriter.writeString(modelId) }
+    return try boltffiModelIdBytes.withUnsafeBufferPointer { boltffiModelIdBuffer in
+        var boltffiResult: Bool = Bool()
+        let boltffiError = boltffi_function_xybrid_bolt_cache_is_model_cached(boltffiModelIdBuffer.baseAddress!, UInt(boltffiModelIdBuffer.count), &boltffiResult)
+        if boltffiError.ptr != nil || Int(boltffiError.len) != 0 {
+            defer { boltffi_free_buf(boltffiError) }
+            throw boltffiDecodeOwnedBuf(boltffiError.ptr, Int(boltffiError.len)) { boltffiErrorReader in XybridError.decode(from: &boltffiErrorReader) }
+        }
+        return boltffiResult
+    }
+}
+
+/// Resolves the preferred local cache path for a model, if present.
+public func cacheModelPath(modelId: String) throws -> String? {
+    let boltffiModelIdBytes = boltffiEncode { boltffiModelIdWriter in boltffiModelIdWriter.writeString(modelId) }
+    return try boltffiModelIdBytes.withUnsafeBufferPointer { boltffiModelIdBuffer in
+        var boltffiResult: FfiBuf_u8 = FfiBuf_u8()
+        let boltffiError = boltffi_function_xybrid_bolt_cache_model_path(boltffiModelIdBuffer.baseAddress!, UInt(boltffiModelIdBuffer.count), &boltffiResult)
+        if boltffiError.ptr != nil || Int(boltffiError.len) != 0 {
+            defer { boltffi_free_buf(boltffiError) }
+            throw boltffiDecodeOwnedBuf(boltffiError.ptr, Int(boltffiError.len)) { boltffiErrorReader in XybridError.decode(from: &boltffiErrorReader) }
+        }
+        defer { boltffi_free_buf(boltffiResult) }
+        return boltffiDecodeOwnedBuf(boltffiResult.ptr, Int(boltffiResult.len)) { boltffiReader in boltffiReader.readOptional { boltffiReader in boltffiReader.readString() } }
+    }
+}
+
+/// Lists model IDs extracted, validated, and ready to run offline.
+public func cacheListExtractedModelIds() throws -> [String] {
+    var boltffiResult: FfiBuf_u8 = FfiBuf_u8()
+    let boltffiError = boltffi_function_xybrid_bolt_cache_list_extracted_model_ids(&boltffiResult)
+    if boltffiError.ptr != nil || Int(boltffiError.len) != 0 {
+        defer { boltffi_free_buf(boltffiError) }
+        throw boltffiDecodeOwnedBuf(boltffiError.ptr, Int(boltffiError.len)) { boltffiErrorReader in XybridError.decode(from: &boltffiErrorReader) }
+    }
+    defer { boltffi_free_buf(boltffiResult) }
+    return boltffiDecodeOwnedBuf(boltffiResult.ptr, Int(boltffiResult.len)) { boltffiReader in boltffiReader.readArray { boltffiReader in boltffiReader.readString() } }
+}
+
+/// Removes every managed cache entry for one model.
+///
+/// Do not call concurrently with a load of the same model.
+public func cacheRemoveModel(modelId: String) throws -> UInt32 {
+    let boltffiModelIdBytes = boltffiEncode { boltffiModelIdWriter in boltffiModelIdWriter.writeString(modelId) }
+    return try boltffiModelIdBytes.withUnsafeBufferPointer { boltffiModelIdBuffer in
+        var boltffiResult: UInt32 = UInt32()
+        let boltffiError = boltffi_function_xybrid_bolt_cache_remove_model(boltffiModelIdBuffer.baseAddress!, UInt(boltffiModelIdBuffer.count), &boltffiResult)
+        if boltffiError.ptr != nil || Int(boltffiError.len) != 0 {
+            defer { boltffi_free_buf(boltffiError) }
+            throw boltffiDecodeOwnedBuf(boltffiError.ptr, Int(boltffiError.len)) { boltffiErrorReader in XybridError.decode(from: &boltffiErrorReader) }
+        }
+        return boltffiResult
+    }
+}
+
+/// Clears all managed model-cache storage.
+///
+/// Do not call concurrently with any model load.
+public func cacheClear() throws -> UInt32 {
+    var boltffiResult: UInt32 = UInt32()
+    let boltffiError = boltffi_function_xybrid_bolt_cache_clear(&boltffiResult)
+    if boltffiError.ptr != nil || Int(boltffiError.len) != 0 {
+        defer { boltffi_free_buf(boltffiError) }
+        throw boltffiDecodeOwnedBuf(boltffiError.ptr, Int(boltffiError.len)) { boltffiErrorReader in XybridError.decode(from: &boltffiErrorReader) }
+    }
+    return boltffiResult
 }
 
 public func setBinding(binding: String) {

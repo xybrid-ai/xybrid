@@ -93,6 +93,15 @@ class Xybrid {
   });
 
   // Cache
+  static Future<CacheStatus> modelCacheStatus();
+  static Future<List<CacheEntry>> modelCacheEntries();
+  static Future<bool> hasCachedModelData(String modelId);
+  static Future<String?> cachedModelPath(String modelId);
+  static Future<List<String>> extractedModelIds();
+  static Future<int> removeCachedModel(String modelId);
+  static Future<int> clearModelCache();
+
+  // Compatibility check: extracted and ready to load, not merely downloaded
   static bool isModelCached(String modelId);
 }
 ```
@@ -110,6 +119,18 @@ object Xybrid {
   // Model description (no I/O)
   fun model(id: String): ModelLoader
   fun model(source: ModelSource): ModelLoader
+
+  // Model storage
+  fun modelCacheStatus(): XybridCacheStatus
+  fun modelCacheEntries(): List<XybridCacheEntry>
+  fun hasCachedModelData(modelId: String): Boolean
+  fun cachedModelPath(modelId: String): String?
+  fun extractedModelIds(): List<String>
+  fun removeCachedModel(modelId: String): Int
+  fun clearModelCache(): Int
+
+  // Each also has a suspend twin that runs on Dispatchers.IO:
+  // modelCacheStatusAsync(), removeCachedModelAsync(modelId), ...
 }
 ```
 
@@ -120,8 +141,40 @@ extension Xybrid {
   // Model description (no I/O)
   static func model(_ id: String) -> ModelLoader
   static func model(_ source: ModelSource) -> ModelLoader
+
+  // Model storage
+  static func modelCacheStatus() throws -> XybridCacheStatus
+  static func modelCacheEntries() throws -> [XybridCacheEntry]
+  static func hasCachedModelData(_ modelId: String) throws -> Bool
+  static func cachedModelPath(_ modelId: String) throws -> String?
+  static func extractedModelIds() throws -> [String]
+  static func removeCachedModel(_ modelId: String) throws -> UInt32
+  static func clearModelCache() throws -> UInt32
+
+  // Each also has an async twin that runs off the calling actor:
+  // modelCacheStatusAsync(), removeCachedModelAsync(_:), ...
 }
 ```
+
+### Unity C#
+
+```csharp
+XybridCacheStatus status = XybridClient.ModelCacheStatus();
+XybridCacheEntry[] entries = XybridClient.ModelCacheEntries();
+bool present = XybridClient.HasCachedModelData(modelId);
+string path = XybridClient.CachedModelPath(modelId); // null when absent
+string[] ready = XybridClient.ExtractedModelIds();
+uint removed = XybridClient.RemoveCachedModel(modelId);
+uint cleared = XybridClient.ClearModelCache();
+```
+
+`modelCacheEntries` reports physical storage entries, so one model may appear
+more than once (for example, as both a downloaded registry bundle and an
+extracted runtime directory). `hasCachedModelData` means that at least one such
+entry exists; use `extractedModelIds` when the application specifically needs
+models that are validated and ready to run offline. Deletion returns the number
+of physical roots removed. Do not delete a model while it is loading, or clear
+the cache while any model load is in flight.
 
 ### Implementation Status
 
@@ -141,6 +194,13 @@ extension Xybrid {
 | `hasApiKey` | — | ✅ | ✅ | ✅ |
 | `setProviderApiKey()` | — | ✅ | ✅ | ✅ |
 | `jsonSchemaToGbnf()` | ✅ | ✅ | ✅ | ✅ |
+| `modelCacheStatus()` | ✅ | ✅ | ✅ | ✅ |
+| `modelCacheEntries()` | ✅ | ✅ | ✅ | ✅ |
+| `hasCachedModelData()` | ✅ | ✅ | ✅ | ✅ |
+| `cachedModelPath()` | ✅ | ✅ | ✅ | ✅ |
+| `extractedModelIds()` | ✅ | ✅ | ✅ | ✅ |
+| `removeCachedModel()` | ✅ | ✅ | ✅ | ✅ |
+| `clearModelCache()` | ✅ | ✅ | ✅ | ✅ |
 
 `jsonSchemaToGbnf()` is a top-level function in Dart, Kotlin and Swift. C# has
 no top-level functions, so Unity exposes it as `XybridClient.JsonSchemaToGbnf`.

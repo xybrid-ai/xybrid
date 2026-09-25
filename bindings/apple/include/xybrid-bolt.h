@@ -130,6 +130,11 @@ typedef int32_t ___XybridDownloadState;
 typedef int32_t ___XybridStreamEventKind;
 #define XYBRID_STREAM_EVENT_KIND_TOKEN ((___XybridStreamEventKind)0)
 #define XYBRID_STREAM_EVENT_KIND_COMPLETE ((___XybridStreamEventKind)1)
+typedef int32_t ___XybridCacheEntryLocation;
+#define XYBRID_CACHE_ENTRY_LOCATION_REGISTRY ((___XybridCacheEntryLocation)0)
+#define XYBRID_CACHE_ENTRY_LOCATION_EXTRACTED ((___XybridCacheEntryLocation)1)
+#define XYBRID_CACHE_ENTRY_LOCATION_HUGGING_FACE ((___XybridCacheEntryLocation)2)
+#define XYBRID_CACHE_ENTRY_LOCATION_HUGGING_FACE_HUB ((___XybridCacheEntryLocation)3)
 typedef int32_t ___XybridThermalState;
 #define XYBRID_THERMAL_STATE_NORMAL ((___XybridThermalState)0)
 #define XYBRID_THERMAL_STATE_WARM ((___XybridThermalState)1)
@@ -237,6 +242,13 @@ FfiStatus boltffi_function_xybrid_bolt_set_battery_level(uint8_t percent);
 void boltffi_function_xybrid_bolt_clear_battery_level(void);
 FfiStatus boltffi_function_xybrid_bolt_configure_runtime(const uint8_t *api_key_ptr, uintptr_t api_key_len, const uint8_t *gateway_url_ptr, uintptr_t gateway_url_len, const uint8_t *ingest_url_ptr, uintptr_t ingest_url_len);
 FfiStatus boltffi_function_xybrid_bolt_init_sdk_cache_dir(const uint8_t *cache_dir_ptr, uintptr_t cache_dir_len);
+FfiBuf_u8 boltffi_function_xybrid_bolt_cache_status(FfiBuf_u8 *return_out);
+FfiBuf_u8 boltffi_function_xybrid_bolt_cache_entries(FfiBuf_u8 *return_out);
+FfiBuf_u8 boltffi_function_xybrid_bolt_cache_is_model_cached(const uint8_t *model_id_ptr, uintptr_t model_id_len, bool *return_out);
+FfiBuf_u8 boltffi_function_xybrid_bolt_cache_model_path(const uint8_t *model_id_ptr, uintptr_t model_id_len, FfiBuf_u8 *return_out);
+FfiBuf_u8 boltffi_function_xybrid_bolt_cache_list_extracted_model_ids(FfiBuf_u8 *return_out);
+FfiBuf_u8 boltffi_function_xybrid_bolt_cache_remove_model(const uint8_t *model_id_ptr, uintptr_t model_id_len, uint32_t *return_out);
+FfiBuf_u8 boltffi_function_xybrid_bolt_cache_clear(uint32_t *return_out);
 FfiStatus boltffi_function_xybrid_bolt_set_binding(const uint8_t *binding_ptr, uintptr_t binding_len);
 FfiStatus boltffi_function_xybrid_bolt_set_api_key(const uint8_t *api_key_ptr, uintptr_t api_key_len);
 FfiStatus boltffi_function_xybrid_bolt_set_provider_api_key(const uint8_t *provider_ptr, uintptr_t provider_len, const uint8_t *api_key_ptr, uintptr_t api_key_len);

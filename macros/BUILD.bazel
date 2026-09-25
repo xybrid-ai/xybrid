@@ -2,9 +2,11 @@
 # Proves rules_rs parses the real workspace lock and builds a proc-macro crate.
 # Requires the `crates` hub in //MODULE.bazel to be uncommented.
 load("@rules_rs//rs:rust_proc_macro.bzl", "rust_proc_macro")
+load("@xybrid_version//:version.bzl", "XYBRID_VERSION")
 
 rust_proc_macro(
     name = "xybrid_macros",
+    version = XYBRID_VERSION,
     srcs = glob(["src/**/*.rs"]),
     edition = "2021",
     deps = [

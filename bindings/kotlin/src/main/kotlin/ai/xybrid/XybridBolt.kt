@@ -1007,6 +1007,13 @@ private object Native {
     @JvmStatic external fun boltffi_function_xybrid_bolt_clear_battery_level(): Unit
     @JvmStatic external fun boltffi_function_xybrid_bolt_configure_runtime(api_key: java.nio.ByteBuffer, __boltffi_api_key_len: Int, gateway_url: java.nio.ByteBuffer, __boltffi_gateway_url_len: Int, ingest_url: java.nio.ByteBuffer, __boltffi_ingest_url_len: Int): Unit
     @JvmStatic external fun boltffi_function_xybrid_bolt_init_sdk_cache_dir(cache_dir: java.nio.ByteBuffer, __boltffi_cache_dir_len: Int): Unit
+    @JvmStatic external fun boltffi_function_xybrid_bolt_cache_status(): ByteArray?
+    @JvmStatic external fun boltffi_function_xybrid_bolt_cache_entries(): ByteArray?
+    @JvmStatic external fun boltffi_function_xybrid_bolt_cache_is_model_cached(model_id: java.nio.ByteBuffer, __boltffi_model_id_len: Int): Boolean
+    @JvmStatic external fun boltffi_function_xybrid_bolt_cache_model_path(model_id: java.nio.ByteBuffer, __boltffi_model_id_len: Int): ByteArray?
+    @JvmStatic external fun boltffi_function_xybrid_bolt_cache_list_extracted_model_ids(): ByteArray?
+    @JvmStatic external fun boltffi_function_xybrid_bolt_cache_remove_model(model_id: java.nio.ByteBuffer, __boltffi_model_id_len: Int): Int
+    @JvmStatic external fun boltffi_function_xybrid_bolt_cache_clear(): Int
     @JvmStatic external fun boltffi_function_xybrid_bolt_set_binding(binding: java.nio.ByteBuffer, __boltffi_binding_len: Int): Unit
     @JvmStatic external fun boltffi_function_xybrid_bolt_set_api_key(api_key: java.nio.ByteBuffer, __boltffi_api_key_len: Int): Unit
     @JvmStatic external fun boltffi_function_xybrid_bolt_set_provider_api_key(provider: java.nio.ByteBuffer, __boltffi_provider_len: Int, api_key: java.nio.ByteBuffer, __boltffi_api_key_len: Int): Unit
@@ -1961,6 +1968,101 @@ data class XybridVoiceInfo(
 }
 
 
+data class XybridCacheEntry(
+    val modelId: String,
+    val location: XybridCacheEntryLocation,
+    val path: String,
+    val sizeBytes: ULong
+) {
+    internal fun wireSize(): Int {
+        return 4 + Utf8Codec.maxBytes(this.modelId) + 4 + 4 + Utf8Codec.maxBytes(this.path) + 8
+    }
+
+    internal fun writeTo(writer: WireWriter) {
+        writer.writeString(this.modelId)
+        writer.writeI32(this.location.value)
+        writer.writeString(this.path)
+        writer.writeU64(this.sizeBytes)
+    }
+
+    internal fun toByteArray(): ByteArray {
+        val buffer = WireWriterPool.acquire(wireSize())
+        val writer = buffer.writer
+        try {
+            writeTo(writer)
+            return buffer.bytes()
+        } finally {
+            buffer.close()
+        }
+    }
+
+    companion object {
+        internal fun fromReader(reader: WireReader): XybridCacheEntry {
+            return XybridCacheEntry(
+                reader.readString(),
+                XybridCacheEntryLocation.fromValue(reader.readI32()),
+                reader.readString(),
+                reader.readU64()
+            )
+        }
+
+        internal fun fromByteArray(bytes: ByteArray): XybridCacheEntry {
+            val reader = WireReader(bytes)
+            return fromReader(reader)
+        }
+    }
+}
+
+
+data class XybridCacheStatus(
+    val totalSizeBytes: ULong,
+    val entryCount: UInt,
+    val modelCount: UInt,
+    val extractedModelCount: UInt,
+    val cacheRoot: String
+) {
+    internal fun wireSize(): Int {
+        return 8 + 4 + 4 + 4 + 4 + Utf8Codec.maxBytes(this.cacheRoot)
+    }
+
+    internal fun writeTo(writer: WireWriter) {
+        writer.writeU64(this.totalSizeBytes)
+        writer.writeU32(this.entryCount)
+        writer.writeU32(this.modelCount)
+        writer.writeU32(this.extractedModelCount)
+        writer.writeString(this.cacheRoot)
+    }
+
+    internal fun toByteArray(): ByteArray {
+        val buffer = WireWriterPool.acquire(wireSize())
+        val writer = buffer.writer
+        try {
+            writeTo(writer)
+            return buffer.bytes()
+        } finally {
+            buffer.close()
+        }
+    }
+
+    companion object {
+        internal fun fromReader(reader: WireReader): XybridCacheStatus {
+            return XybridCacheStatus(
+                reader.readU64(),
+                reader.readU32(),
+                reader.readU32(),
+                reader.readU32(),
+                reader.readString()
+            )
+        }
+
+        internal fun fromByteArray(bytes: ByteArray): XybridCacheStatus {
+            val reader = WireReader(bytes)
+            return fromReader(reader)
+        }
+    }
+}
+
+
 /**
  * Configuration for a live ASR session.
  *
@@ -2625,6 +2727,19 @@ enum class XybridStreamEventKind(val value: Int) {
 
     companion object {
         fun fromValue(value: Int): XybridStreamEventKind =
+            entries.first { it.value == value }
+    }
+}
+
+
+enum class XybridCacheEntryLocation(val value: Int) {
+    REGISTRY(0),
+    EXTRACTED(1),
+    HUGGING_FACE(2),
+    HUGGING_FACE_HUB(3);
+
+    companion object {
+        fun fromValue(value: Int): XybridCacheEntryLocation =
             entries.first { it.value == value }
     }
 }
@@ -4035,6 +4150,88 @@ fun initSdkCacheDir(cacheDir: String) {
     } finally {
         __boltffi_cacheDir_wire.close()
     }
+}
+
+/**
+ * Returns aggregate storage usage across every managed model-cache location.
+ */
+fun cacheStatus(): XybridCacheStatus {
+    val __boltffi_result = try { Native.boltffi_function_xybrid_bolt_cache_status() } catch (__boltffi_error: BoltFfiErrorBufferException) { run { val __boltffi_error_reader = WireReader(__boltffi_error.bytes); throw XybridError.fromReader(__boltffi_error_reader) } } ?: throw IllegalStateException("null buffer returned")
+    val __boltffi_reader = WireReader(__boltffi_result)
+    return XybridCacheStatus.fromReader(__boltffi_reader)
+}
+
+/**
+ * Lists every physical model entry occupying managed cache storage.
+ */
+fun cacheEntries(): List<XybridCacheEntry> {
+    val __boltffi_result = try { Native.boltffi_function_xybrid_bolt_cache_entries() } catch (__boltffi_error: BoltFfiErrorBufferException) { run { val __boltffi_error_reader = WireReader(__boltffi_error.bytes); throw XybridError.fromReader(__boltffi_error_reader) } } ?: throw IllegalStateException("null buffer returned")
+    val __boltffi_reader = WireReader(__boltffi_result)
+    return __boltffi_reader.readSequence({ __boltffi_reader -> XybridCacheEntry.fromReader(__boltffi_reader) })
+}
+
+/**
+ * Returns whether a model occupies any managed cache entry.
+ */
+fun cacheIsModelCached(modelId: String): Boolean {
+    val __boltffi_modelId_wire = WireWriterPool.acquire(4 + Utf8Codec.maxBytes(modelId))
+    val __boltffi_modelId_writer = __boltffi_modelId_wire.writer
+    __boltffi_modelId_writer.writeString(modelId)
+    try {
+        return try { Native.boltffi_function_xybrid_bolt_cache_is_model_cached(__boltffi_modelId_wire.directBuffer(), __boltffi_modelId_wire.size()) } catch (__boltffi_error: BoltFfiErrorBufferException) { run { val __boltffi_error_reader = WireReader(__boltffi_error.bytes); throw XybridError.fromReader(__boltffi_error_reader) } }
+    } finally {
+        __boltffi_modelId_wire.close()
+    }
+}
+
+/**
+ * Resolves the preferred local cache path for a model, if present.
+ */
+fun cacheModelPath(modelId: String): String? {
+    val __boltffi_modelId_wire = WireWriterPool.acquire(4 + Utf8Codec.maxBytes(modelId))
+    val __boltffi_modelId_writer = __boltffi_modelId_wire.writer
+    __boltffi_modelId_writer.writeString(modelId)
+    try {
+        val __boltffi_result = try { Native.boltffi_function_xybrid_bolt_cache_model_path(__boltffi_modelId_wire.directBuffer(), __boltffi_modelId_wire.size()) } catch (__boltffi_error: BoltFfiErrorBufferException) { run { val __boltffi_error_reader = WireReader(__boltffi_error.bytes); throw XybridError.fromReader(__boltffi_error_reader) } } ?: throw IllegalStateException("null buffer returned")
+        val __boltffi_reader = WireReader(__boltffi_result)
+        return __boltffi_reader.readOptionalValue({ __boltffi_reader -> __boltffi_reader.readString() })
+    } finally {
+        __boltffi_modelId_wire.close()
+    }
+}
+
+/**
+ * Lists model IDs extracted, validated, and ready to run offline.
+ */
+fun cacheListExtractedModelIds(): List<String> {
+    val __boltffi_result = try { Native.boltffi_function_xybrid_bolt_cache_list_extracted_model_ids() } catch (__boltffi_error: BoltFfiErrorBufferException) { run { val __boltffi_error_reader = WireReader(__boltffi_error.bytes); throw XybridError.fromReader(__boltffi_error_reader) } } ?: throw IllegalStateException("null buffer returned")
+    val __boltffi_reader = WireReader(__boltffi_result)
+    return __boltffi_reader.readSequence({ __boltffi_reader -> __boltffi_reader.readString() })
+}
+
+/**
+ * Removes every managed cache entry for one model.
+ *
+ * Do not call concurrently with a load of the same model.
+ */
+fun cacheRemoveModel(modelId: String): UInt {
+    val __boltffi_modelId_wire = WireWriterPool.acquire(4 + Utf8Codec.maxBytes(modelId))
+    val __boltffi_modelId_writer = __boltffi_modelId_wire.writer
+    __boltffi_modelId_writer.writeString(modelId)
+    try {
+        return try { Native.boltffi_function_xybrid_bolt_cache_remove_model(__boltffi_modelId_wire.directBuffer(), __boltffi_modelId_wire.size()) } catch (__boltffi_error: BoltFfiErrorBufferException) { run { val __boltffi_error_reader = WireReader(__boltffi_error.bytes); throw XybridError.fromReader(__boltffi_error_reader) } }.toUInt()
+    } finally {
+        __boltffi_modelId_wire.close()
+    }
+}
+
+/**
+ * Clears all managed model-cache storage.
+ *
+ * Do not call concurrently with any model load.
+ */
+fun cacheClear(): UInt {
+    return try { Native.boltffi_function_xybrid_bolt_cache_clear() } catch (__boltffi_error: BoltFfiErrorBufferException) { run { val __boltffi_error_reader = WireReader(__boltffi_error.bytes); throw XybridError.fromReader(__boltffi_error_reader) } }.toUInt()
 }
 
 fun setBinding(binding: String) {

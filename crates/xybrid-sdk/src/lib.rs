@@ -214,7 +214,7 @@ pub use xybrid_core::execution::template as execution_template;
 
 // SDK types (new API)
 pub use benchmark::{compare_benchmarks, BenchmarkResult, ExecutionProviderInfo};
-pub use cache::{CacheManager, CacheStatus, SdkCacheProvider};
+pub use cache::{CacheEntryInfo, CacheEntryLocation, CacheManager, CacheStatus, SdkCacheProvider};
 pub use device::{device_id, Device};
 pub use download::{DownloadState, DownloadStatus, ModelDownload};
 pub use llm::{
@@ -317,9 +317,10 @@ static BINDING: OnceLock<&'static str> = OnceLock::new();
 
 /// Default binding identifier reported in the registry telemetry header.
 ///
-/// Each platform binding (Flutter, Kotlin, Swift, Unity) overrides this via
-/// [`set_binding`] (process-global) or [`SdkConfig::with_binding`] (per-config)
-/// so registry calls can be attributed correctly.
+/// Each platform binding (Flutter, Kotlin, React Native, Swift, Unity)
+/// overrides this via [`set_binding`] (process-global) or
+/// [`SdkConfig::with_binding`] (per-config) so registry calls can be
+/// attributed correctly.
 pub const DEFAULT_BINDING: &str = "rust";
 
 /// SDK crate version, stamped onto every telemetry event as `sdk_version` and
@@ -333,9 +334,11 @@ pub const SDK_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Register the binding identifier for this process.
 ///
-/// Each platform binding (Flutter, Kotlin, Swift, Unity) calls this once at
-/// SDK init. The first call wins — subsequent calls are silent no-ops, which
-/// matches the lifecycle (a process is bound to exactly one platform binding).
+/// Each platform binding (Flutter, Kotlin, React Native, Swift, Unity) calls
+/// this once at SDK init. The first call wins — subsequent calls are silent
+/// no-ops, which matches the lifecycle (a process is bound to exactly one
+/// platform binding). A binding that wraps another SDK (React Native over
+/// Swift or Kotlin) registers before the SDK it wraps.
 ///
 /// `RegistryClient` default constructors (`new`, `default_client`,
 /// `with_url`, `from_env`) read this value via [`get_binding`], so any
@@ -728,8 +731,8 @@ impl XybridInit {
     }
 
     /// Register the binding identifier for this process (e.g. `"flutter"`,
-    /// `"kotlin"`, `"swift"`, `"unity"`). Bindings call this; host apps
-    /// rarely need to.
+    /// `"kotlin"`, `"react-native"`, `"swift"`, `"unity"`). Bindings call
+    /// this; host apps rarely need to.
     pub fn binding(mut self, binding: &'static str) -> Self {
         self.binding = Some(binding);
         self
@@ -1155,6 +1158,15 @@ mod sdk_config_tests {
     #[test]
     fn default_binding_is_rust() {
         assert_eq!(DEFAULT_BINDING, "rust");
+    }
+
+    #[test]
+    fn sdk_version_is_stamped_by_the_build() {
+        // rules_rust fills CARGO_PKG_VERSION with "0.0.0" unless the target
+        // passes `version` (//bazel:cargo_version.bzl). Running under both
+        // cargo and `bazel test`, this proves the version reaches the crate;
+        // that EVERY target passes it is a `bazel query` check in bazel.yml.
+        assert_ne!(crate::SDK_VERSION, "0.0.0");
     }
 
     #[test]

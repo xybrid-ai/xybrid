@@ -6395,6 +6395,7 @@ version = "0.9.0"
 dependencies = [
  "log",
  "serde_json",
+ "tempfile",
  "tokio",
  "xybrid-core",
  "xybrid-sdk",

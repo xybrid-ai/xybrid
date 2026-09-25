@@ -9,6 +9,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **React Native catches up with the other SDKs, and runs on iOS.** The iOS
+  half of `@xybrid/react-native` never compiled against the SDK it bundles, and
+  its method selectors did not match the ones React Native's code generator
+  dispatches by — so every call would have crashed. Both are fixed, and the
+  package now covers the whole SDK surface: API-key initialization (cloud
+  fallback, speculative cloud, telemetry), a stop button through the standard
+  `AbortSignal`, conversation context, tool calling, image input, model
+  introspection, pipelines, live ASR sessions, background downloads with
+  progress, cache management and memory release. Android became a real
+  TurboModule and no longer frees native objects that an in-flight call is
+  still using. Registry requests and telemetry identify it as `react-native`
+  (the SDK now accepts that binding name) instead of the Swift or Kotlin SDK
+  underneath. Verified end to end on a Pixel 8 and the iOS Simulator.
+- **React Native can no longer silently fall behind.** A test reads every
+  export of `xybrid-bolt` and fails until each new function, field or error is
+  wired into React Native (or excluded with a reason); another checks the iOS
+  selectors against the spec on any machine; CI now builds the example app for
+  the iOS Simulator (#589) as well as Android.
+- **React Native is ready to publish.** `pod install` fetches the iOS core from
+  the GitHub Release and checks the checksum the release pins, so the npm
+  package stays around 120 KiB; `release-publish.yml` gains an npm job
+  (trusted publishing, provenance), off until the maintainer enables it — see
+  `bindings/react-native/RELEASING.md`.
+
+- **Applications can manage model storage from every binding.** Swift, Kotlin,
+  Python, Unity C#, and Dart now expose aggregate cache status, physical entry
+  details, preferred paths, ready-model IDs, per-model deletion, and full cache
+  clearing. Lookups and per-model deletion validate identifiers
+  before constructing paths and removes registry, extraction, direct Hugging
+  Face, and owned Hub-cache data without touching sibling models (#505).
+  Ready counts exclude incomplete extractions. Dart cache operations run off
+  the UI isolate, and Swift and Kotlin pair each call with an `…Async` twin.
 - **Multi-stage pipelines on Swift, Kotlin and Unity.** Those SDKs had no
   pipelines at all — only Flutter and Rust did. `XybridPipeline` (`Pipeline`
   on Unity) loads from YAML, a file or a bundle, lists its stages and runs
@@ -50,18 +82,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Shipped SDKs report their real version.** The iOS XCFramework, the Android
+  AAR, the CLI and Flutter's precompiled Android library are built with Bazel,
+  which filled the SDK's compiled-in version with `0.0.0` — so `version()`,
+  every registry request and every telemetry event said `0.0.0`. Bazel now
+  reads the version from `Cargo.toml`, like Cargo does.
 - **Multi-file models no longer reset the progress bar.** A vision model plus
   its projector ran 0→1 once per file; progress is now scaled against the
   summed size of every artifact, so finishing the first file reads its real
   share. The speculative path no longer parks at 99.99% from the second file on.
-- **A retry no longer rewinds the bar.** The partial file is still discarded,
-  but the reported byte count is a high-water mark, so the bar stalls through
+- **A retry no longer rewinds the bar.** The reported byte count is a
+  high-water mark, so when a retry has to restart a file the bar stalls through
   the re-transfer instead of snapping back to 0.
 - **Progress updates are throttled** to roughly ten a second instead of one per
   8 KiB chunk (~130,000 events per GB previously pushed across the FFI boundary).
 - **Hugging Face downloads report real bytes.** Progress there remains
   file-count based (the Hub gives no sizes up front, so `total_bytes` is null),
   but `downloaded_bytes` is now exact.
+- **Large models download on slow links.** A 5-minute limit covered the whole
+  transfer, so a model bigger than five minutes of the link's bandwidth could
+  never finish (229 MB needs about 6 Mbit/s), and each of the three attempts
+  restarted at byte 0. The limit is now a 30-second stall timeout: a slow link
+  takes as long as it needs, a silent connection is dropped quickly, and a
+  retry resumes from the partial file. A resumed range must carry the original
+  file's `ETag` (Hugging Face's CDN ignores `If-Range`), or the download starts
+  over rather than splicing two versions. Only attempts that add no bytes count
+  against the retry budget.
+- **Progress for models with no declared size.** A single-file model whose
+  registry entry has `size_bytes = 0` (such as `lfm2.5-350m`) sat at 0% until
+  the end. The server's announced size now fills in the total, and also
+  replaces a stale registry size.
+- **A progress frame at 0 bytes as the transfer starts**, so an app can tell a
+  download that is connecting from one that is stuck.
+- **Flutter: native logs on iOS without an API key.** Logging started only from
+  `initSdkCacheDir` (Android-only in `Xybrid.init`), `setApiKey` or telemetry
+  setup; it now starts inside `Xybrid.init` on every platform.
+- **Flutter: a panic no longer looks like success.** A panic on a load or
+  streaming worker thread closed the Dart stream with no event; it now arrives
+  as the stream's `Error` event.
 - **`fetch_extracted` resolves once**, not twice, for bundle models.
 - Pipeline stages are now named by their YAML `id:` rather than the model ID,
   so per-stage latencies and results match `stageNames()` (#502). Telemetry
@@ -69,6 +127,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Android (Kotlin, React Native) uses the fastest CPU instructions each phone
+  has.** The arm64 AAR used to run llama.cpp and whisper.cpp on plain Armv8.0
+  code on every device. It now ships llama.cpp's CPU variants and picks the best
+  one the device supports when the SDK loads — dot-product and fp16 on
+  Cortex-A55/A75 and later, int8 matrix multiply on Armv9-era cores, the old
+  baseline everywhere else. In the app on a Pixel 8 with LFM2.5-230M, prompt
+  processing goes from about 210 to about 600 tokens/s, generation from about
+  41 to 65 tokens/s, and speech recognition gets about 15% faster. The arm64
+  native libraries grow by about 4 MB.
 - **Breaking (Rust):** `pipeline::StageTiming` has a new public `output`
   field, so code that builds one with a struct literal must set it.
 - **Breaking (Rust):** `ModelLoader::load_with_progress`,

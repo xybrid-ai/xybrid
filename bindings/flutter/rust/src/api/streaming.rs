@@ -28,8 +28,6 @@
 //! [`feed`]: FfiStreamSession::feed
 //! [`subscribe`]: FfiStreamSession::subscribe
 
-use std::sync::Once;
-
 use flutter_rust_bridge::frb;
 use tokio::sync::{mpsc, oneshot};
 use xybrid_sdk::{PartialResult as SdkPartialResult, StreamConfig, XybridStream};
@@ -38,30 +36,6 @@ use crate::frb_generated::StreamSink;
 
 /// 16 kHz mono — the only sample rate the ASR backends accept.
 pub const REQUIRED_SAMPLE_RATE: u32 = 16_000;
-
-static LOG_INIT: Once = Once::new();
-
-/// Install a `log` backend and a panic hook on first use. Idempotent.
-///
-/// Without this the binding registers no logger, so on Android every `log::*`
-/// line across the whole Rust stack is dropped and a panic on a worker thread
-/// dies silently. This makes both visible in `logcat` (tag `xybrid`).
-fn ensure_logging() {
-    LOG_INIT.call_once(|| {
-        #[cfg(target_os = "android")]
-        android_logger::init_once(
-            android_logger::Config::default()
-                .with_max_level(log::LevelFilter::Debug)
-                .with_tag("xybrid"),
-        );
-        // Surface panics that would otherwise vanish on a detached worker thread.
-        let prev = std::panic::take_hook();
-        std::panic::set_hook(Box::new(move |info| {
-            log::error!("xybrid RUST PANIC: {info}");
-            prev(info);
-        }));
-    });
-}
 
 /// How voice-activity detection (VAD) chunking is resolved for a session.
 ///
@@ -179,7 +153,6 @@ impl FfiStreamSession {
     /// `pub(crate)`: not an FFI entry point. Callers reach this through
     /// `FfiModel::stream`, which resolves the model directory for us.
     pub(crate) fn spawn(stream: XybridStream) -> Self {
-        ensure_logging();
         let (cmd_tx, cmd_rx) = mpsc::unbounded_channel::<Command>();
         // The model is already loaded inside `stream`, so the worker only owns
         // and drives it — no model load happens here.
@@ -276,7 +249,6 @@ fn error_chain(e: &dyn std::error::Error) -> String {
 /// Owns the `XybridStream` and applies commands in order until the channel
 /// closes (all senders dropped) or a `Flush` finalizes the session.
 fn worker_loop(stream: XybridStream, mut cmd_rx: mpsc::UnboundedReceiver<Command>) {
-    ensure_logging();
     log::debug!("ASR worker started");
 
     // Pay the model's cold-start cost (~5 s for whisper-tiny on a Pixel 8)

@@ -6,6 +6,7 @@
 #   crate         -> rust_library linking those
 load("@rules_cc//cc:defs.bzl", "cc_library")
 load("@rules_rs//rs:rust_library.bzl", "rust_library")
+load("@xybrid_version//:version.bzl", "XYBRID_VERSION")
 
 # Platforms with the vision (mtmd) backend: the wrapper compiles its mtmd
 # functions + the crate enables `vision`, and //:llama builds/installs libmtmd
@@ -79,6 +80,7 @@ cc_library(
         # Everything above these selects is identical between the lanes by design.
         "//:metal_enabled": ["//:llama_metal"],
         "//:vulkan_enabled": ["//:llama_vulkan"],
+        "//bazel/ggml:cpu_variants_enabled": ["//:llama_android_dl"],
         "//conditions:default": ["//:llama"],
     }),
 )
@@ -89,6 +91,7 @@ cc_library(
 # llama.cpp bumps keep working there.
 rust_library(
     name = "llama_cpp_sys",
+    version = XYBRID_VERSION,
     srcs = glob(["src/**/*.rs"]),
     crate_features = [
         "bindings",
@@ -101,6 +104,7 @@ rust_library(
     deps = [":wrapper_cc"] + select({
         "//:metal_enabled": ["//:llama_metal"],
         "//:vulkan_enabled": ["//:llama_vulkan"],
+        "//bazel/ggml:cpu_variants_enabled": ["//:llama_android_dl"],
         "//conditions:default": ["//:llama"],
     }),
     visibility = ["//visibility:public"],
