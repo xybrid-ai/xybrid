@@ -81,6 +81,25 @@ After editing `bindings/flutter/rust`, regenerate the Dart glue with
 `flutter_rust_bridge` in `bindings/flutter/rust/Cargo.toml`); `flutter run` then
 rebuilds the native lib via cargokit.
 
+**The arm64 AAR links llama.cpp dynamically; everything else statically.**
+Only the Kotlin AAR's arm64 slice (so Kotlin and React Native) uses
+`//:llama_android_dl`: ggml built with `GGML_BACKEND_DL` +
+`GGML_CPU_ALL_VARIANTS`, so `libxybrid_bolt.so` needs `libllama.so`,
+`libggml*.so` and `libmtmd.so`, and one CPU backend per ISA level ships as a
+module that `bindings/kotlin/bazel/jni/ggml_cpu_backend.cpp` loads at startup
+(best first; ggml skips variants the CPU cannot run). It is selected by the
+`//bazel/ggml:android_arm64_cpu_variants` platform, which only the AAR builds
+for — the Flutter arm64 cdylib keeps the static `//:llama`, because its
+precompiled package carries a single `.so`. Any new target that picks a llama
+build must select on `//bazel/ggml:cpu_variants_enabled` too, or the AAR would
+link two ggml copies. The shipped variant list lives in
+`bazel/ggml/android.bzl` and must match the loader's (the `build-android.yml`
+gate fails otherwise). Two rules_foreign_cc traps are handled there:
+Android is configured as `CMAKE_SYSTEM_NAME=Linux`, so a CMake hook
+(`bazel/ggml/android_system_name.cmake`) makes ggml build its Android variant
+set, and `CMAKE_PLATFORM_NO_VERSIONED_SONAME` keeps sonames unversioned (an APK
+only carries `lib*.so`).
+
 
 ### Prebuilt llama.cpp natives (the cargo fast path)
 

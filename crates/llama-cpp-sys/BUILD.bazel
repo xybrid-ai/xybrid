@@ -79,6 +79,7 @@ cc_library(
         # Everything above these selects is identical between the lanes by design.
         "//:metal_enabled": ["//:llama_metal"],
         "//:vulkan_enabled": ["//:llama_vulkan"],
+        "//bazel/ggml:cpu_variants_enabled": ["//:llama_android_dl"],
         "//conditions:default": ["//:llama"],
     }),
 )
@@ -101,6 +102,7 @@ rust_library(
     deps = [":wrapper_cc"] + select({
         "//:metal_enabled": ["//:llama_metal"],
         "//:vulkan_enabled": ["//:llama_vulkan"],
+        "//bazel/ggml:cpu_variants_enabled": ["//:llama_android_dl"],
         "//conditions:default": ["//:llama"],
     }),
     visibility = ["//visibility:public"],

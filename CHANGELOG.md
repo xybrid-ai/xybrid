@@ -101,6 +101,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Android (Kotlin, React Native) uses the fastest CPU instructions each phone
+  has.** The arm64 AAR used to run llama.cpp and whisper.cpp on plain Armv8.0
+  code on every device. It now ships llama.cpp's CPU variants and picks the best
+  one the device supports when the SDK loads — dot-product and fp16 on
+  Cortex-A55/A75 and later, int8 matrix multiply on Armv9-era cores, the old
+  baseline everywhere else. In the app on a Pixel 8 with LFM2.5-230M, prompt
+  processing goes from about 210 to about 600 tokens/s, generation from about
+  41 to 65 tokens/s, and speech recognition gets about 15% faster. The arm64
+  native libraries grow by about 4 MB.
 - **Breaking (Rust):** `pipeline::StageTiming` has a new public `output`
   field, so code that builds one with a struct literal must set it.
 - **Breaking (Rust):** `ModelLoader::load_with_progress`,
