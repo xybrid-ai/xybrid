@@ -22,6 +22,9 @@
   5-minute limit (a 229 MB model needed about 6 Mbit/s) and every retry started
   over; a silent connection is now dropped after 30 seconds and the retry
   resumes where it stopped.
+* Fixed: a download that loses the network part-way (Wi-Fi to cellular, a
+  lift, a tunnel) waits up to two minutes for it to return and resumes, instead
+  of failing about seven seconds into the outage.
 * Fixed: a model whose registry entry publishes no size (such as
   `lfm2.5-350m`) stayed at 0% until it finished. `totalBytes` now comes from
   the server for single-file models, and a first `LoadProgress` at 0 bytes

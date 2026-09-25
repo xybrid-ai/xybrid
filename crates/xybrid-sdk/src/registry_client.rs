@@ -277,6 +277,20 @@ const REQUEST_TIMEOUT_MS: u64 = 15000;
 /// handoff, a dropped NAT mapping) is abandoned within this window.
 const DOWNLOAD_STALL_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// How long a download that has already received bytes waits for the network
+/// to come back before giving up.
+///
+/// While a device is offline every retry fails at once (the DNS lookup), so
+/// counting those against the retry budget ended a download about seven
+/// seconds into an outage: shorter than a Wi-Fi to cellular handoff, a lift or
+/// a tunnel. A download that has not received a byte yet still fails fast, so
+/// an app that starts offline hears about it right away.
+const DOWNLOAD_OFFLINE_PATIENCE: Duration = Duration::from_secs(120);
+
+/// Longest wait between two retries while offline, so a network that comes
+/// back is picked up within seconds.
+const DOWNLOAD_OFFLINE_RETRY_CAP: Duration = Duration::from_secs(10);
+
 /// Default retry delay when a 429 response omits or mangles Retry-After.
 const DEFAULT_RATE_LIMIT_RETRY_AFTER_SECS: u64 = 60;
 
@@ -329,6 +343,8 @@ pub struct RegistryClient {
     download_retry_policy: RetryPolicy,
     /// See [`DOWNLOAD_STALL_TIMEOUT`].
     download_stall_timeout: Duration,
+    /// See [`DOWNLOAD_OFFLINE_PATIENCE`].
+    download_offline_patience: Duration,
     /// Binding identifier reported via the `X-Xybrid-Client` header.
     binding: &'static str,
 }
@@ -375,6 +391,7 @@ impl RegistryClient {
             // Longer delays than API calls: downloads hit a CDN, not the registry.
             download_retry_policy: RetryPolicy::conservative(),
             download_stall_timeout: DOWNLOAD_STALL_TIMEOUT,
+            download_offline_patience: DOWNLOAD_OFFLINE_PATIENCE,
             binding: get_binding(),
         })
     }
@@ -1299,9 +1316,12 @@ impl RegistryClient {
     /// An interrupted attempt keeps its partial file, and the next one asks
     /// the server for only the missing bytes. Only attempts that add nothing
     /// to the file count against the retry policy, so a download that keeps
-    /// moving on a flaky link is not killed after three drops. The loop still
-    /// ends: every retry that is not counted has grown the file past its
-    /// previous best, and the file is finite.
+    /// moving on a flaky link is not killed after three drops. Once bytes have
+    /// arrived, losing the network entirely does not count either: the
+    /// download waits up to [`DOWNLOAD_OFFLINE_PATIENCE`] for it to return.
+    /// The loop still ends: every retry that is not counted has either grown
+    /// the file past its previous best (the file is finite) or falls inside
+    /// that bounded wait.
     ///
     /// On failure or cancellation the partial file is removed.
     fn download_with_progress(
@@ -1334,13 +1354,14 @@ impl RegistryClient {
         let mut partial = PartialFile::default();
         let mut furthest: u64 = 0;
         let mut failed_attempts: u32 = 0;
-        let mut last_error: Option<SdkError> = None;
+        // When the current run of "network unreachable" errors began, and how
+        // many retries it has taken so far.
+        let mut offline_since: Option<Instant> = None;
+        let mut offline_retries: u32 = 0;
+        let mut next_delay: Option<Duration> = None;
 
         loop {
-            if let Some(ref err) = last_error {
-                let delay = err
-                    .retry_after()
-                    .unwrap_or_else(|| policy.delay_for_attempt(failed_attempts.max(1)));
+            if let Some(delay) = next_delay {
                 // Sliced rather than one sleep: a server-supplied `Retry-After`
                 // can run to tens of seconds, and a cancel arriving during it
                 // would otherwise sit unobserved for that whole interval while
@@ -1360,19 +1381,35 @@ impl RegistryClient {
                 return Err(err);
             }
             let on_disk = partial_len(dest);
-            if on_disk > furthest {
+            let delay = if on_disk > furthest {
                 furthest = on_disk;
+                offline_since = None;
+                offline_retries = 0;
+                policy.delay_for_attempt(1)
+            } else if furthest > 0 && matches!(err, SdkError::Offline { .. }) {
+                // The network went away mid-download. Every lookup fails at
+                // once until it returns, so wait for it (bounded) instead of
+                // spending the retry budget on attempts that cannot succeed.
+                let since = *offline_since.get_or_insert_with(Instant::now);
+                if since.elapsed() >= self.download_offline_patience {
+                    return Err(err);
+                }
+                offline_retries += 1;
+                policy
+                    .delay_for_attempt(offline_retries)
+                    .min(DOWNLOAD_OFFLINE_RETRY_CAP)
             } else {
                 failed_attempts += 1;
                 if failed_attempts >= policy.max_attempts {
                     return Err(err);
                 }
-            }
+                policy.delay_for_attempt(failed_attempts)
+            };
             warn!(
                 "Download of {} interrupted at {} bytes, retrying: {}",
                 url, on_disk, err
             );
-            last_error = Some(err);
+            next_delay = Some(err.retry_after().unwrap_or(delay));
         }
     }
 
@@ -2395,9 +2432,18 @@ mod tests {
     /// Serve `replies` in order, one per connection. Returns the download URL
     /// and the request heads received, in arrival order.
     fn scripted_server(replies: Vec<ScriptedReply>) -> (String, Arc<Mutex<Vec<String>>>) {
+        scripted_server_at("127.0.0.1:0", replies)
+    }
+
+    /// [`scripted_server`] on a given address. The listener closes once the
+    /// replies run out, so the address refuses connections from then on.
+    fn scripted_server_at(
+        addr: &str,
+        replies: Vec<ScriptedReply>,
+    ) -> (String, Arc<Mutex<Vec<String>>>) {
         use std::io::BufRead;
 
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let listener = std::net::TcpListener::bind(addr).unwrap();
         let url = format!("http://{}/model.gguf", listener.local_addr().unwrap());
         let requests = Arc::new(Mutex::new(Vec::new()));
         let recorded = Arc::clone(&requests);
@@ -2621,6 +2667,84 @@ mod tests {
         assert!(err.is_retryable(), "expected a network error, got {err:?}");
         assert_eq!(requests.lock().unwrap().len(), 3);
         assert!(!dest.exists(), "partial file left at {}", dest.display());
+    }
+
+    #[test]
+    fn a_download_waits_out_a_network_drop_once_bytes_have_arrived() {
+        // The first connection delivers half the file, then the address
+        // refuses connections, the way a phone that lost Wi-Fi fails every
+        // attempt at once. A budget of one would end the download on the
+        // first refusal; having received bytes, it must wait instead and
+        // resume when the server is back.
+        let body = model_body(20_000, 0);
+        let half = body.len() / 2;
+        let (url, requests) = scripted_server(vec![cut_off_reply(&body, half, "\"v1\"")]);
+        let addr = url
+            .trim_start_matches("http://")
+            .trim_end_matches("/model.gguf")
+            .to_string();
+        let temp = tempfile::TempDir::new().unwrap();
+        let mut client = fast_retry_client(temp.path());
+        client.download_retry_policy.max_attempts = 1;
+        client.download_retry_policy.initial_delay_ms = 50;
+        client.download_offline_patience = Duration::from_secs(10);
+        let dest = temp.path().join("model.gguf");
+
+        let restored = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(600));
+            scripted_server_at(&addr, vec![partial_reply(&body, half, "\"v1\"")])
+        });
+        let sink = |_: DownloadStatus| {};
+        let reporter = ProgressReporter::new(None, 1, Arc::new(AtomicBool::new(false)), &sink);
+
+        client
+            .download_with_progress(&url, &dest, &reporter)
+            .expect("the download should wait for the network and resume");
+
+        let (_, resumed_requests) = restored.join().unwrap();
+        assert_eq!(std::fs::read(&dest).unwrap(), model_body(20_000, 0));
+        assert_eq!(requests.lock().unwrap().len(), 1);
+        let resumed = resumed_requests.lock().unwrap();
+        assert_eq!(resumed.len(), 1, "{resumed:?}");
+        assert!(
+            resumed[0].contains(&format!("range: bytes={half}-")),
+            "{}",
+            resumed[0]
+        );
+    }
+
+    #[test]
+    fn a_download_that_starts_offline_fails_fast() {
+        // Nothing listens here. With no byte received yet, refusals count
+        // against the budget as before, so an app that starts offline hears
+        // about it at once rather than after the offline patience.
+        let port = std::net::TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port();
+        let url = format!("http://127.0.0.1:{port}/model.gguf");
+        let temp = tempfile::TempDir::new().unwrap();
+        let mut client = fast_retry_client(temp.path());
+        client.download_offline_patience = Duration::from_secs(60);
+        let dest = temp.path().join("model.gguf");
+        let sink = |_: DownloadStatus| {};
+        let reporter = ProgressReporter::new(None, 1, Arc::new(AtomicBool::new(false)), &sink);
+
+        let started = Instant::now();
+        let err = client
+            .download_with_progress(&url, &dest, &reporter)
+            .expect_err("nothing is listening");
+
+        assert!(
+            matches!(err, SdkError::Offline { .. }),
+            "expected Offline, got {err:?}"
+        );
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "waited {:?} before reporting a download that never started",
+            started.elapsed()
+        );
     }
 
     #[test]
