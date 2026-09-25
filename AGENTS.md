@@ -57,6 +57,14 @@ Use `bazelisk` (reads `.bazelversion`). `just bazel-build | bazel-analyze |
 bazel-test` are the shortcuts; each forwards extra Bazel flags. Full setup,
 including the Windows MSVC EULA note, is in `CONTRIBUTING.md`.
 
+Every first-party Rust target (`rust_library`, `rust_binary`, `rust_test`, …)
+passes `version = XYBRID_VERSION`, loaded from `@xybrid_version//:version.bzl`.
+That constant is read from `Cargo.toml`'s `[workspace.package] version` by
+`//bazel:cargo_version.bzl`; without it rules_rust sets `CARGO_PKG_VERSION` to
+`0.0.0`, which every shipped (Bazel-built) SDK would report. Add it to any new
+Rust target: `bazel.yml`'s "Every Rust target stamps the workspace version" step
+(a `bazel query` for Rust targets still on the `0.0.0` default) fails otherwise.
+
 `xtask` is **not** the native-binding entry point anymore. `build-android`,
 `build-xcframework`, `build-uniffi`, `stage-react-native`, `setup-targets`,
 `build-all`, and `package` were all removed once Bazel took over. What remains

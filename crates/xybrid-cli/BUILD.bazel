@@ -4,6 +4,7 @@
 load("@rules_rs//rs:rust_binary.bzl", "rust_binary")
 load("@rules_rs//rs:rust_test.bzl", "rust_test")
 load("@crates//:defs.bzl", "all_crate_deps")
+load("@xybrid_version//:version.bzl", "XYBRID_VERSION")
 
 # crate_features mirrors the LLM half of cargo's `platform-desktop`
 # (= ort-download + llm-llamacpp-vision + huggingface), which is what the shipped
@@ -21,6 +22,7 @@ load("@crates//:defs.bzl", "all_crate_deps")
 # from these cfgs.
 rust_binary(
     name = "xybrid",
+    version = XYBRID_VERSION,
     srcs = glob(["src/**/*.rs"]),
     edition = "2021",
     # Listed flat, not as the preset: Bazel does not expand transitive features
@@ -73,6 +75,7 @@ _CLI_TEST_FEATURES = {
 [
     rust_test(
         name = name,
+        version = XYBRID_VERSION,
         srcs = ["tests/{}.rs".format(name)],
         crate_features = _CLI_TEST_FEATURES.get(name, []),
         data = [":xybrid"],

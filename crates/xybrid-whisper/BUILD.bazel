@@ -1,9 +1,11 @@
 # Safe Rust wrapper over xybrid-whisper-sys. Builds once that crate links.
 load("@rules_rs//rs:rust_library.bzl", "rust_library")
 load("@rules_rs//rs:rust_test.bzl", "rust_test")
+load("@xybrid_version//:version.bzl", "XYBRID_VERSION")
 
 rust_library(
     name = "xybrid_whisper",
+    version = XYBRID_VERSION,
     srcs = glob(["src/**/*.rs"]),
     # Plain list, no select: unlike llama's `vision`, this crate has no
     # per-platform Rust feature delta. The wrapper requests the Metal backend
@@ -24,6 +26,7 @@ rust_library(
 # inherit (the loss on `crate = ` affects selects, see xybrid-llama's note).
 rust_test(
     name = "xybrid_whisper_test",
+    version = XYBRID_VERSION,
     crate = ":xybrid_whisper",
 )
 
@@ -33,6 +36,7 @@ rust_test(
 # CI — so compiling it is most of the value of having it here.
 rust_test(
     name = "transcribe_smoke",
+    version = XYBRID_VERSION,
     srcs = ["tests/transcribe_smoke.rs"],
     crate_features = ["bindings"],
     edition = "2021",

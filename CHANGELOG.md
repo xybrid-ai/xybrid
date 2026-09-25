@@ -82,6 +82,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Shipped SDKs report their real version.** The iOS XCFramework, the Android
+  AAR, the CLI and Flutter's precompiled Android library are built with Bazel,
+  which filled the SDK's compiled-in version with `0.0.0` — so `version()`,
+  every registry request and every telemetry event said `0.0.0`. Bazel now
+  reads the version from `Cargo.toml`, like Cargo does.
 - **Multi-file models no longer reset the progress bar.** A vision model plus
   its projector ran 0→1 once per file; progress is now scaled against the
   summed size of every artifact, so finishing the first file reads its real

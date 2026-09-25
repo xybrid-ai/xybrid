@@ -10,12 +10,14 @@
 # ld resolves static archives left to right. Bazel derives link order from the
 # dep graph, so //:whisper depending on //:llama is enough.
 load("@rules_rs//rs:rust_library.bzl", "rust_library")
+load("@xybrid_version//:version.bzl", "XYBRID_VERSION")
 
 # `committed-bindings` makes lib.rs `include!` the committed src/bindings.rs
 # instead of $OUT_DIR. Cargo builds do NOT enable it — they stay on fresh
 # bindgen output so whisper.cpp bumps keep working there.
 rust_library(
     name = "xybrid_whisper_sys",
+    version = XYBRID_VERSION,
     srcs = glob(["src/**/*.rs"]),
     crate_features = [
         "bindings",
