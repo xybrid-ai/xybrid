@@ -3263,7 +3263,7 @@ def telemetry_shutdown() -> None:
 
 MODULE_NAME = "xybrid_bolt"
 PACKAGE_NAME = "xybrid_bolt"
-PACKAGE_VERSION = "0.9.0"
+PACKAGE_VERSION = "0.10.0-rc1"
 
 __all__ = [
     "MODULE_NAME",
