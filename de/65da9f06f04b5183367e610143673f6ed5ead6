@@ -1,0 +1,20 @@
+crates/xybrid-sdk/src/registry_client.rs
+  s_cbf4fe83e9069b::t_1a95f550dbf0d4 1411-1414,1536-1542,1548-1549,2579-2624
+  s_cbf4fe83e9069b::t_20682ed02e12d8 2625
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "de65da9f06f04b5183367e610143673f6ed5ead6",
+  "prompts": {},
+  "sessions": {
+    "s_cbf4fe83e9069b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7858ebf6-17d3-467f-8db4-8f1f27e33435",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
+    }
+  }
+}
