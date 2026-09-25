@@ -62,8 +62,8 @@ passes `version = XYBRID_VERSION`, loaded from `@xybrid_version//:version.bzl`.
 That constant is read from `Cargo.toml`'s `[workspace.package] version` by
 `//bazel:cargo_version.bzl`; without it rules_rust sets `CARGO_PKG_VERSION` to
 `0.0.0`, which every shipped (Bazel-built) SDK would report. Add it to any new
-Rust target; `xybrid-sdk`'s `sdk_version_is_stamped_by_the_build` test fails
-otherwise.
+Rust target: `bazel.yml`'s "Every Rust target stamps the workspace version" step
+(a `bazel query` for Rust targets still on the `0.0.0` default) fails otherwise.
 
 `xtask` is **not** the native-binding entry point anymore. `build-android`,
 `build-xcframework`, `build-uniffi`, `stage-react-native`, `setup-targets`,

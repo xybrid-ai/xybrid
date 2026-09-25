@@ -1163,8 +1163,9 @@ mod sdk_config_tests {
     #[test]
     fn sdk_version_is_stamped_by_the_build() {
         // rules_rust fills CARGO_PKG_VERSION with "0.0.0" unless the target
-        // passes `version` (//bazel:cargo_version.bzl). Every shipped artifact
-        // is Bazel-built and this test also runs under `bazel test`.
+        // passes `version` (//bazel:cargo_version.bzl). Running under both
+        // cargo and `bazel test`, this proves the version reaches the crate;
+        // that EVERY target passes it is a `bazel query` check in bazel.yml.
         assert_ne!(crate::SDK_VERSION, "0.0.0");
     }
 
