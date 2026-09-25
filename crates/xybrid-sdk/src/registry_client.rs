@@ -1408,10 +1408,10 @@ impl RegistryClient {
         reporter: &ProgressReporter<'_>,
     ) -> Result<(), SdkError> {
         // One request per pass. A later pass either asks for the rest after a
-        // range came back short, or starts over once the server has shown the
-        // partial file cannot be continued. Neither can repeat forever: a
-        // short range must have added bytes, and after a reset there is no
-        // partial left to reject.
+        // resumed range came back short, or starts over once the server has
+        // shown the partial file cannot be continued. Neither can repeat
+        // forever: a short range must have added bytes to the file, and the
+        // pass after a reset is a full request, which always returns.
         loop {
             if reporter.is_cancelled() {
                 return Err(ProgressReporter::cancelled_error());
@@ -1533,16 +1533,20 @@ impl RegistryClient {
                     url, downloaded, size
                 )));
             }
-            if downloaded == offset {
-                // Nothing arrived. Leave it to the retry policy, which gives
-                // up on attempts that add no bytes.
+            if !resuming || downloaded == offset {
+                // A full response that ended early (possible when chunked
+                // framing overrides `Content-Length`), or a range that added
+                // nothing. Hand it to the retry policy, which backs off and
+                // gives up on attempts that make no headway. Continuing here
+                // could spin: a server that ignores `Range` restarts the file
+                // from zero on every pass.
                 return Err(SdkError::network(format!(
                     "Download of {} stopped at {} of {} bytes",
                     url, downloaded, size
                 )));
             }
-            // The range ended before the file did, which HTTP allows. Ask for
-            // the rest.
+            // The resumed range ended before the file did, which HTTP allows.
+            // Ask for the rest.
             debug!(
                 "Range for {} ended at {} of {} bytes, requesting the rest",
                 url, downloaded, size
@@ -2570,6 +2574,53 @@ mod tests {
             "{}",
             requests[2]
         );
+    }
+
+    /// A 200 whose chunked body ends before its `Content-Length`: ureq lets
+    /// chunked framing win, so the short body arrives without an error.
+    fn short_chunked_reply(body: &[u8], sent: usize) -> ScriptedReply {
+        let mut chunked = format!("{sent:x}\r\n").into_bytes();
+        chunked.extend_from_slice(&body[..sent]);
+        chunked.extend_from_slice(b"\r\n0\r\n\r\n");
+        ScriptedReply::new(
+            "200 OK",
+            &[
+                ("ETag", "\"v1\"".to_string()),
+                ("Content-Length", body.len().to_string()),
+                ("Transfer-Encoding", "chunked".to_string()),
+            ],
+            &chunked,
+        )
+    }
+
+    #[test]
+    fn a_full_response_that_ends_early_goes_through_the_retry_budget() {
+        // The server ignores `Range`, so every request restarts the file, and
+        // each ends at a different point. Asking for "the rest" right away
+        // would loop with no backoff and no limit. Each short response must
+        // instead count as an attempt: 5 000 and 15 000 bytes are new highs,
+        // 8 000 is not, and with a budget of one the third request is the last.
+        let body = model_body(20_000, 0);
+        let (url, requests) = scripted_server(vec![
+            short_chunked_reply(&body, 5_000),
+            short_chunked_reply(&body, 15_000),
+            short_chunked_reply(&body, 8_000),
+            short_chunked_reply(&body, 12_000),
+        ]);
+        let temp = tempfile::TempDir::new().unwrap();
+        let mut client = fast_retry_client(temp.path());
+        client.download_retry_policy.max_attempts = 1;
+        let dest = temp.path().join("model.gguf");
+        let sink = |_: DownloadStatus| {};
+        let reporter = ProgressReporter::new(None, 1, Arc::new(AtomicBool::new(false)), &sink);
+
+        let err = client
+            .download_with_progress(&url, &dest, &reporter)
+            .expect_err("a file that never arrives whole must fail");
+
+        assert!(err.is_retryable(), "expected a network error, got {err:?}");
+        assert_eq!(requests.lock().unwrap().len(), 3);
+        assert!(!dest.exists(), "partial file left at {}", dest.display());
     }
 
     #[test]
