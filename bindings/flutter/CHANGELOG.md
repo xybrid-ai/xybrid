@@ -18,6 +18,19 @@
 * Fixed: progress events are throttled to roughly ten a second instead of one
   per 8 KiB chunk, which previously pushed ~130,000 events per GB across the
   FFI boundary.
+* Fixed: large models download on slow connections. The whole transfer had a
+  5-minute limit (a 229 MB model needed about 6 Mbit/s) and every retry started
+  over; a silent connection is now dropped after 30 seconds and the retry
+  resumes where it stopped.
+* Fixed: a model whose registry entry publishes no size (such as
+  `lfm2.5-350m`) stayed at 0% until it finished. `totalBytes` now comes from
+  the server for single-file models, and a first `LoadProgress` at 0 bytes
+  arrives as the download starts.
+* Fixed: native logs (`dev.xybrid.sdk` on iOS, tag `xybrid` on Android) now
+  start in `Xybrid.init` on every platform. iOS apps without an API key got
+  none.
+* Fixed: a Rust panic during a load or a streaming run now ends the stream
+  with an error event instead of closing it silently.
 * Added: `FfiDownloadState.cancelled`, for downloads stopped by the caller.
 
 ## 0.9.0

@@ -16,6 +16,7 @@ use crate::frb_generated::StreamSink;
 use super::context::FfiConversationContext;
 use super::device;
 use super::result::FfiResult;
+use super::spawn_reporting_panics;
 
 /// Generation parameters for LLM inference.
 ///
@@ -759,7 +760,8 @@ impl FfiModelLoader {
         let loader = self.0.clone();
 
         // Run loading in a background thread to not block
-        std::thread::spawn(move || {
+        let panic_sink = sink.clone();
+        let work = move || {
             let result = loader.load_with_progress(|status| {
                 let _ = sink.add(FfiLoadEvent::Progress(FfiDownloadStatus::from_sdk(status)));
             });
@@ -773,6 +775,9 @@ impl FfiModelLoader {
                     let _ = sink.add(FfiLoadEvent::Error(e.to_string()));
                 }
             }
+        };
+        spawn_reporting_panics(work, move |message| {
+            let _ = panic_sink.add(FfiLoadEvent::Error(message));
         });
     }
 }
@@ -820,7 +825,8 @@ impl FfiModel {
     /// is already local.
     pub fn download_progress(&self, sink: StreamSink<FfiLoadEvent>) {
         let model = Arc::clone(&self.0);
-        std::thread::spawn(move || {
+        let panic_sink = sink.clone();
+        let work = move || {
             loop {
                 // Bounded wait: wakes as soon as the download finishes, but
                 // still ticks often enough to animate a progress bar.
@@ -859,6 +865,9 @@ impl FfiModel {
                     }
                 }
             }
+        };
+        spawn_reporting_panics(work, move |message| {
+            let _ = panic_sink.add(FfiLoadEvent::Error(message));
         });
     }
 
@@ -934,7 +943,8 @@ impl FfiModel {
         // rate-limits its telemetry per session.
         let cancel_handle = cancellation_token;
 
-        std::thread::spawn(move || {
+        let panic_sink = sink.clone();
+        let work = move || {
             let sdk_config = match facade_config
                 .map(|config| config.apply_over(model.default_generation_config()))
                 .transpose()
@@ -994,6 +1004,9 @@ impl FfiModel {
                     let _ = sink.add(FfiStreamEvent::Error(e.to_string()));
                 }
             }
+        };
+        spawn_reporting_panics(work, move |message| {
+            let _ = panic_sink.add(FfiStreamEvent::Error(message));
         });
     }
 
@@ -1018,7 +1031,8 @@ impl FfiModel {
         let facade_config = config.map(|c| c.to_facade());
         let cancel_handle = cancellation_token;
 
-        std::thread::spawn(move || {
+        let panic_sink = sink.clone();
+        let work = move || {
             let sdk_config = match facade_config
                 .map(|config| config.apply_over(model.default_generation_config()))
                 .transpose()
@@ -1079,6 +1093,9 @@ impl FfiModel {
                     let _ = sink.add(FfiTtsStreamEvent::Error(e.to_string()));
                 }
             }
+        };
+        spawn_reporting_panics(work, move |message| {
+            let _ = panic_sink.add(FfiTtsStreamEvent::Error(message));
         });
     }
 
@@ -1173,7 +1190,8 @@ impl FfiModel {
         let cancel_handle = cancellation_token;
 
         // Spawn a background thread
-        std::thread::spawn(move || {
+        let panic_sink = sink.clone();
+        let work = move || {
             let sdk_config = match facade_config
                 .map(|config| config.apply_over(model.default_generation_config()))
                 .transpose()
@@ -1249,6 +1267,9 @@ impl FfiModel {
                     let _ = sink.add(FfiStreamEvent::Error(e.to_string()));
                 }
             }
+        };
+        spawn_reporting_panics(work, move |message| {
+            let _ = panic_sink.add(FfiStreamEvent::Error(message));
         });
     }
 
@@ -1282,7 +1303,8 @@ impl FfiModel {
             None => CloudRuntimeAdapter::new(),
         };
 
-        std::thread::spawn(move || {
+        let panic_sink = sink.clone();
+        let work = move || {
             let run_options = match options.to_sdk_with_cancellation_over(
                 facade_config,
                 model.default_generation_config(),
@@ -1342,6 +1364,9 @@ impl FfiModel {
                     let _ = sink.add(FfiStreamEvent::Error(e.to_string()));
                 }
             }
+        };
+        spawn_reporting_panics(work, move |message| {
+            let _ = panic_sink.add(FfiStreamEvent::Error(message));
         });
     }
 
