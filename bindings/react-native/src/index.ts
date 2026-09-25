@@ -1,4 +1,4 @@
-// react-native-xybrid — on-device (and optionally cloud) inference for React
+// @xybrid/react-native — on-device (and optionally cloud) inference for React
 // Native, backed by the same Rust SDK as the Swift, Kotlin, Flutter and Unity
 // bindings.
 //

@@ -1,4 +1,4 @@
-// Expo config plugin for building react-native-xybrid from LOCAL repo source
+// Expo config plugin for building @xybrid/react-native from LOCAL repo source
 // in this monorepo. Applied via app.json `plugins`. Because `expo prebuild`
 // regenerates android/, this edit can't live in the generated files — it has
 // to be reapplied on every prebuild, which is what a config plugin is for.
