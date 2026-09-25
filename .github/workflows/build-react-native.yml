@@ -50,17 +50,17 @@ jobs:
       run:
         working-directory: bindings/react-native
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
 
       - name: Use Node.js
-        uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v4
         with:
           node-version: '22'
           cache: npm
           cache-dependency-path: bindings/react-native/package-lock.json
 
       - name: Set up JDK 17
-        uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9 # v4
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v4
         with:
           distribution: temurin
           java-version: 17
@@ -82,7 +82,7 @@ jobs:
         run: npm pack
 
       - name: Upload tarball
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: xybrid-react-native-tarball
           path: bindings/react-native/xybrid-react-native-*.tgz
@@ -104,7 +104,7 @@ jobs:
       # config script writes nothing → a plain local Bazel build.
       BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
         with:
           submodules: true  # Bazel //:llama_src = vendor/llama-cpp
 
@@ -142,7 +142,7 @@ jobs:
           done
 
       - name: Use Node.js
-        uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v4
         with:
           node-version: '22'
 
@@ -194,7 +194,7 @@ jobs:
       # Enables the RBE fast path below. Absent on fork PRs → local Bazel.
       BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
         with:
           submodules: true  # //:llama_src = vendor/llama-cpp (the bolt .so builds via Bazel)
 
@@ -203,7 +203,7 @@ jobs:
       # for every ABI and Gradle then assembles the APK, which previously ran
       # the runner out of disk.
       - name: Free disk space
-        uses: jlumbroso/free-disk-space@54081f138730dfa15788a46383842cd2f914a1be # v1.3.1
+        uses: jlumbroso/free-disk-space@ceedf095f4ec1a097402bc6bd80831f2e1a6fde6 # v2.0.0
         with:
           tool-cache: true
           android: false
@@ -213,18 +213,18 @@ jobs:
           swap-storage: true
 
       - name: Set up JDK 17
-        uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9 # v4
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v4
         with:
           distribution: temurin
           java-version: 17
 
       - name: Use Node.js
-        uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v4
         with:
           node-version: '22'
 
       - name: Setup Android SDK
-        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+        uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4
         with:
           # Only platform-tools: the emulator download flakes and this job
           # never boots one. Gradle fetches build-tools/platforms on demand.
@@ -280,7 +280,7 @@ jobs:
         run: ./gradlew :app:assembleDebug --no-daemon --stacktrace
 
       - name: Upload example APK
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: xybrid-example-android-debug
           path: bindings/react-native/example/android/app/build/outputs/apk/debug/*.apk
