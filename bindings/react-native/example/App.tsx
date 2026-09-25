@@ -116,6 +116,25 @@ export default function App() {
         detail: result.text,
       });
 
+      // Prompt processing: a few hundred tokens in, one out. This is the
+      // speed the CPU instruction set changes most (dot-product, int8 matmul).
+      const passage = 'The quick brown fox jumps over the lazy dog. '.repeat(40);
+      const long = await timed(
+        'long prompt',
+        () =>
+          model!.run(Envelope.text(`${passage}\nHow many foxes are there?`), {
+            generationConfig: GenerationConfigs.greedy({ maxTokens: 1 }),
+          }),
+        push,
+      );
+      push({
+        label:
+          `→ prefill ${long.metrics.prefillTps === undefined ? '?' : long.metrics.prefillTps.toFixed(0)} tok/s, ` +
+          `ttft ${long.metrics.ttftMs ?? '?'} ms`,
+        durationMs: 0,
+        ok: true,
+      });
+
       // Stop button: abort the stream after five tokens.
       const controller = new AbortController();
       let streamed = '';

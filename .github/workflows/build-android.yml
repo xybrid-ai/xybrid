@@ -13,6 +13,11 @@ on:
       - 'tools/scripts/android-dlopen-probe.c'
       - 'tools/scripts/verify_android_jni.py'
       - 'xtask/**'
+      # llama.cpp's Android build config and sources (see //:llama_android_dl).
+      - 'BUILD.bazel'
+      - 'bazel/ggml/**'
+      - 'crates/llama-cpp-sys/**'
+      - 'vendor/llama-cpp'
       - 'Cargo.lock'
       - 'Cargo.toml'
       - '.github/workflows/build-android.yml'
@@ -38,6 +43,11 @@ on:
       - 'tools/scripts/android-dlopen-probe.c'
       - 'tools/scripts/verify_android_jni.py'
       - 'xtask/**'
+      # llama.cpp's Android build config and sources (see //:llama_android_dl).
+      - 'BUILD.bazel'
+      - 'bazel/ggml/**'
+      - 'crates/llama-cpp-sys/**'
+      - 'vendor/llama-cpp'
       - 'Cargo.lock'
       - 'Cargo.toml'
       - '.github/workflows/build-android.yml'
@@ -182,6 +192,42 @@ jobs:
                 echo "  16 KB LOAD alignment: present"
                 ;;
             esac
+          done
+
+      - name: Verify llama.cpp CPU variants (arm64-v8a)
+        run: |
+          # arm64 ships llama.cpp as shared libraries plus one CPU backend
+          # module per ISA level, and ggml_cpu_backend.cpp loads the best one
+          # at runtime (see //:llama_android_dl). Its variant list and the AAR must agree:
+          # a name it tries that is not shipped is a dead fallback, a shipped
+          # variant it never tries is dead weight.
+          SO_BASE="bindings/kotlin/libs/arm64-v8a"
+          READELF="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf"
+          LOADER="bindings/kotlin/bazel/jni/ggml_cpu_backend.cpp"
+          tried=$(grep -o '"libggml-cpu-[^"]*\.so"' "$LOADER" | tr -d '"' | sort)
+          shipped=$(cd "$SO_BASE" && printf '%s\n' libggml-cpu-*.so | sort)
+          if [ -z "$tried" ] || [ "$tried" != "$shipped" ]; then
+            echo "Error: the loader's CPU variants and the AAR's differ"
+            echo "loader tries: $tried"
+            echo "AAR ships:    $shipped"
+            exit 1
+          fi
+          for lib in libllama.so libggml.so libggml-base.so libmtmd.so; do
+            if ! "$READELF" -d "$SO_BASE/libxybrid_bolt.so" | grep -q "\[$lib\]"; then
+              echo "Error: libxybrid_bolt.so does not link $lib"
+              exit 1
+            fi
+          done
+          for lib in libllama.so libggml.so libggml-base.so libmtmd.so $shipped; do
+            SO="$SO_BASE/$lib"
+            [ -f "$SO" ] || { echo "Error: $SO not found"; exit 1; }
+            while read -r al; do
+              if [ "$((al))" -lt 16384 ]; then
+                echo "Error: $SO has a LOAD segment aligned below 16 KB ($al)"
+                exit 1
+              fi
+            done < <("$READELF" -l "$SO" | awk '$1=="LOAD"{if(NF>4){print $NF}else{getline;print $NF}}')
+            echo "OK: $lib ($(du -h "$SO" | cut -f1), 16 KB aligned)"
           done
 
       - name: Verify ORT runtime bundled (arm64-v8a, x86_64)
