@@ -6,6 +6,16 @@ use xybrid_sdk::ResourceTelemetryMode;
 
 use super::{ensure_native_logging, FLUTTER_BINDING};
 
+/// Install native logging (logcat / os_log) and the panic logger.
+///
+/// Runs automatically from `XybridRustLib.init()`, on every platform and
+/// before any other call, so logs flow without an API key or cache
+/// directory being set first.
+#[frb(init)]
+pub fn init_native_logging() {
+    ensure_native_logging();
+}
+
 /// Logical storage area containing a cached model entry.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FfiCacheEntryLocation {
@@ -135,7 +145,6 @@ fn parse_resource_telemetry_mode(value: Option<&str>) -> Option<ResourceTelemetr
 impl XybridSdkClient {
     #[frb(sync)]
     pub fn init_sdk_cache_dir(cache_dir: String) {
-        ensure_native_logging();
         facade::set_binding(FLUTTER_BINDING.to_string());
         facade::init_sdk_cache_dir(cache_dir);
     }
@@ -187,7 +196,6 @@ impl XybridSdkClient {
 
     #[frb(sync)]
     pub fn set_api_key(api_key: &str) {
-        ensure_native_logging();
         facade::set_binding(FLUTTER_BINDING.to_string());
         facade::set_api_key(api_key.to_string());
     }
@@ -277,7 +285,6 @@ impl XybridSdkClient {
     /// spins up its own background thread for batched sends.
     #[frb(sync)]
     pub fn init_telemetry(endpoint: String, api_key: String) {
-        ensure_native_logging();
         facade::set_binding(FLUTTER_BINDING.to_string());
         let config = xybrid_sdk::TelemetryConfig::new(endpoint, api_key);
         initialize_telemetry_once(config);
@@ -301,7 +308,6 @@ impl XybridSdkClient {
         // master's DEFAULT_INGEST_URL defaulting lives in
         // resolve_ingest_endpoint below. Clone the key because it's moved
         // into TelemetryConfig::new on the next line.
-        ensure_native_logging();
         facade::set_binding(FLUTTER_BINDING.to_string());
         facade::set_api_key(api_key.clone());
 

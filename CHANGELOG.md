@@ -91,14 +91,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   its projector ran 0→1 once per file; progress is now scaled against the
   summed size of every artifact, so finishing the first file reads its real
   share. The speculative path no longer parks at 99.99% from the second file on.
-- **A retry no longer rewinds the bar.** The partial file is still discarded,
-  but the reported byte count is a high-water mark, so the bar stalls through
+- **A retry no longer rewinds the bar.** The reported byte count is a
+  high-water mark, so when a retry has to restart a file the bar stalls through
   the re-transfer instead of snapping back to 0.
 - **Progress updates are throttled** to roughly ten a second instead of one per
   8 KiB chunk (~130,000 events per GB previously pushed across the FFI boundary).
 - **Hugging Face downloads report real bytes.** Progress there remains
   file-count based (the Hub gives no sizes up front, so `total_bytes` is null),
   but `downloaded_bytes` is now exact.
+- **Large models download on slow links.** A 5-minute limit covered the whole
+  transfer, so a model bigger than five minutes of the link's bandwidth could
+  never finish (229 MB needs about 6 Mbit/s), and each of the three attempts
+  restarted at byte 0. The limit is now a 30-second stall timeout: a slow link
+  takes as long as it needs, a silent connection is dropped quickly, and a
+  retry resumes from the partial file. A resumed range must carry the original
+  file's `ETag` (Hugging Face's CDN ignores `If-Range`), or the download starts
+  over rather than splicing two versions. Only attempts that add no bytes count
+  against the retry budget.
+- **Progress for models with no declared size.** A single-file model whose
+  registry entry has `size_bytes = 0` (such as `lfm2.5-350m`) sat at 0% until
+  the end. The server's announced size now fills in the total, and also
+  replaces a stale registry size.
+- **A progress frame at 0 bytes as the transfer starts**, so an app can tell a
+  download that is connecting from one that is stuck.
+- **Flutter: native logs on iOS without an API key.** Logging started only from
+  `initSdkCacheDir` (Android-only in `Xybrid.init`), `setApiKey` or telemetry
+  setup; it now starts inside `Xybrid.init` on every platform.
+- **Flutter: a panic no longer looks like success.** A panic on a load or
+  streaming worker thread closed the Dart stream with no event; it now arrives
+  as the stream's `Error` event.
 - **`fetch_extracted` resolves once**, not twice, for bundle models.
 - Pipeline stages are now named by their YAML `id:` rather than the model ID,
   so per-stage latencies and results match `stageNames()` (#502). Telemetry

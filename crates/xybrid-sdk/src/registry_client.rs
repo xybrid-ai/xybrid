@@ -49,7 +49,7 @@ use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufReader, Read, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -110,6 +110,85 @@ fn build_client_header_with_optout(binding: &str, opted_out: bool) -> Option<Str
         current_platform(),
         backends,
     ))
+}
+
+/// Header identifying which version of a file a partial download holds, so a
+/// resumed request can prove it continues the same bytes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ResumeValidator {
+    ETag(String),
+    LastModified(String),
+}
+
+impl ResumeValidator {
+    /// The strongest validator `response` carries. Weak ETags (`W/"…"`) are
+    /// skipped: they promise equivalent content, not identical bytes, and
+    /// splicing needs identical bytes.
+    fn from_response(response: &ureq::Response) -> Option<Self> {
+        if let Some(etag) = response.header("ETag").filter(|tag| !tag.starts_with("W/")) {
+            return Some(Self::ETag(etag.to_string()));
+        }
+        response
+            .header("Last-Modified")
+            .map(|date| Self::LastModified(date.to_string()))
+    }
+
+    /// The header value, as sent back in `If-Range`.
+    fn value(&self) -> &str {
+        match self {
+            Self::ETag(value) | Self::LastModified(value) => value,
+        }
+    }
+}
+
+/// What earlier requests left at a download's destination, and how to
+/// continue it.
+#[derive(Debug, Default)]
+struct PartialFile {
+    /// Proves the server still serves the same file. `None` means the bytes on
+    /// disk cannot be continued, so the next request starts over.
+    validator: Option<ResumeValidator>,
+    /// The whole file's size, when the server announced it. Checked after
+    /// every response: a `206` may legally cover less than was asked for.
+    size: Option<u64>,
+}
+
+/// Whether a `206 Partial Content` response continues `partial`: it starts
+/// exactly at `offset` and serves the same file, at the same size.
+fn continues_partial(response: &ureq::Response, offset: u64, partial: &PartialFile) -> bool {
+    let Some((start, total)) = response
+        .header("Content-Range")
+        .and_then(parse_content_range)
+    else {
+        return false;
+    };
+    let same_size = match (total, partial.size) {
+        (Some(total), Some(size)) => total == size,
+        _ => true,
+    };
+    start == offset
+        && same_size
+        && partial.validator.is_some()
+        && ResumeValidator::from_response(response) == partial.validator
+}
+
+/// Parse `Content-Range: bytes <start>-<end>/<total>` into `(start, total)`.
+/// `total` is `None` when the server writes `*` (size unknown).
+fn parse_content_range(value: &str) -> Option<(u64, Option<u64>)> {
+    let range = value.trim().strip_prefix("bytes ")?;
+    let (span, total) = range.split_once('/')?;
+    let (start, _end) = span.split_once('-')?;
+    let start = start.trim().parse().ok()?;
+    let total = match total.trim() {
+        "*" => None,
+        total => Some(total.parse().ok()?),
+    };
+    Some((start, total))
+}
+
+/// Bytes already on disk at `path`; `0` when there is no file.
+fn partial_len(path: &Path) -> u64 {
+    std::fs::metadata(path).map(|meta| meta.len()).unwrap_or(0)
 }
 
 /// Sum of every byte the registry says a resolved variant needs — the main
@@ -188,6 +267,16 @@ const CONNECT_TIMEOUT_MS: u64 = 5000;
 /// Request timeout in milliseconds.
 const REQUEST_TIMEOUT_MS: u64 = 15000;
 
+/// Longest a model download may go without receiving a byte before the
+/// attempt is dropped and retried from where it stopped.
+///
+/// A stall bound, not a transfer deadline. The old 5-minute limit covered the
+/// whole body, so a model bigger than five minutes of the link's bandwidth
+/// could never finish (229 MB needs about 6 Mbit/s). A slow link now takes as
+/// long as it takes, while a connection that went silent (a Wi-Fi to cellular
+/// handoff, a dropped NAT mapping) is abandoned within this window.
+const DOWNLOAD_STALL_TIMEOUT: Duration = Duration::from_secs(30);
+
 /// Default retry delay when a 429 response omits or mangles Retry-After.
 const DEFAULT_RATE_LIMIT_RETRY_AFTER_SECS: u64 = 60;
 
@@ -235,6 +324,11 @@ pub struct RegistryClient {
     circuits: Vec<Arc<CircuitBreaker>>,
     /// Retry policy for API calls
     retry_policy: RetryPolicy,
+    /// Retry policy for model downloads. Only attempts that add no bytes
+    /// count against it (see [`Self::download_with_progress`]).
+    download_retry_policy: RetryPolicy,
+    /// See [`DOWNLOAD_STALL_TIMEOUT`].
+    download_stall_timeout: Duration,
     /// Binding identifier reported via the `X-Xybrid-Client` header.
     binding: &'static str,
 }
@@ -278,6 +372,9 @@ impl RegistryClient {
             agent,
             circuits,
             retry_policy: RetryPolicy::default(),
+            // Longer delays than API calls: downloads hit a CDN, not the registry.
+            download_retry_policy: RetryPolicy::conservative(),
+            download_stall_timeout: DOWNLOAD_STALL_TIMEOUT,
             binding: get_binding(),
         })
     }
@@ -1192,58 +1289,91 @@ impl RegistryClient {
         self.cache.list_extracted_model_ids()
     }
 
-    /// Download a file with progress tracking and retry on connection failures.
+    /// Download a file with progress tracking, resuming across retries.
     ///
     /// Note: Downloads use a separate retry mechanism because:
     /// 1. HuggingFace is a different endpoint than the registry API
-    /// 2. Large file downloads need longer timeouts
+    /// 2. Large file downloads need a stall timeout, not a request deadline
     /// 3. We don't want a failed HuggingFace download to trip the registry circuit breaker
+    ///
+    /// An interrupted attempt keeps its partial file, and the next one asks
+    /// the server for only the missing bytes. Only attempts that add nothing
+    /// to the file count against the retry policy, so a download that keeps
+    /// moving on a flaky link is not killed after three drops. The loop still
+    /// ends: every retry that is not counted has grown the file past its
+    /// previous best, and the file is finite.
+    ///
+    /// On failure or cancellation the partial file is removed.
     fn download_with_progress(
         &self,
         url: &str,
         dest: &PathBuf,
         reporter: &ProgressReporter<'_>,
     ) -> Result<(), SdkError> {
-        // Use a more conservative retry policy for downloads (longer delays)
-        let download_policy = RetryPolicy::conservative();
+        let result = self.download_with_retries(url, dest, reporter);
+        if result.is_err() {
+            std::fs::remove_file(dest).ok();
+        }
+        result
+    }
+
+    fn download_with_retries(
+        &self,
+        url: &str,
+        dest: &PathBuf,
+        reporter: &ProgressReporter<'_>,
+    ) -> Result<(), SdkError> {
+        let agent = ureq::AgentBuilder::new()
+            .timeout_connect(Duration::from_millis(CONNECT_TIMEOUT_MS))
+            .timeout_read(self.download_stall_timeout)
+            .timeout_write(self.download_stall_timeout)
+            .build();
+        let policy = &self.download_retry_policy;
+        reporter.begin_transfer();
+
+        let mut partial = PartialFile::default();
+        let mut furthest: u64 = 0;
+        let mut failed_attempts: u32 = 0;
         let mut last_error: Option<SdkError> = None;
 
-        for attempt in 0..download_policy.max_attempts {
-            // Calculate delay
-            let delay = if let Some(ref err) = last_error {
-                err.retry_after()
-                    .unwrap_or_else(|| download_policy.delay_for_attempt(attempt))
-            } else {
-                download_policy.delay_for_attempt(attempt)
-            };
-
-            // Sliced rather than one sleep: a server-supplied `Retry-After`
-            // can run to tens of seconds, and a cancel arriving during it
-            // would otherwise sit unobserved for that whole interval while the
-            // download still reported `Downloading`.
-            if !Self::sleep_unless_cancelled(delay, reporter) {
-                return Err(ProgressReporter::cancelled_error());
-            }
-
-            match self.try_download(url, dest, reporter) {
-                Ok(()) => return Ok(()),
-                Err(err) => {
-                    // `Cancelled` is non-retryable, so an aborted download
-                    // leaves this loop here rather than burning its attempts.
-                    if !err.is_retryable() {
-                        return Err(err);
-                    }
-                    // Clean up partial file before retry. The reported byte
-                    // count is a high-water mark, so the bar stalls through
-                    // the re-transfer instead of snapping back to zero.
-                    std::fs::remove_file(dest).ok();
-                    last_error = Some(err);
+        loop {
+            if let Some(ref err) = last_error {
+                let delay = err
+                    .retry_after()
+                    .unwrap_or_else(|| policy.delay_for_attempt(failed_attempts.max(1)));
+                // Sliced rather than one sleep: a server-supplied `Retry-After`
+                // can run to tens of seconds, and a cancel arriving during it
+                // would otherwise sit unobserved for that whole interval while
+                // the download still reported `Downloading`.
+                if !Self::sleep_unless_cancelled(delay, reporter) {
+                    return Err(ProgressReporter::cancelled_error());
                 }
             }
-        }
 
-        Err(last_error
-            .unwrap_or_else(|| SdkError::network("Download failed after all retry attempts")))
+            let err = match self.try_download(&agent, url, dest, &mut partial, reporter) {
+                Ok(()) => return Ok(()),
+                Err(err) => err,
+            };
+            // `Cancelled` is non-retryable, so an aborted download leaves the
+            // loop here rather than burning its attempts.
+            if !err.is_retryable() {
+                return Err(err);
+            }
+            let on_disk = partial_len(dest);
+            if on_disk > furthest {
+                furthest = on_disk;
+            } else {
+                failed_attempts += 1;
+                if failed_attempts >= policy.max_attempts {
+                    return Err(err);
+                }
+            }
+            warn!(
+                "Download of {} interrupted at {} bytes, retrying: {}",
+                url, on_disk, err
+            );
+            last_error = Some(err);
+        }
     }
 
     /// Sleep for `delay`, waking every [`CANCEL_POLL_INTERVAL`] to check the
@@ -1262,63 +1392,166 @@ impl RegistryClient {
         !reporter.is_cancelled()
     }
 
-    /// Attempt a single download.
+    /// Download `url` into `dest`, continuing the partial file there when the
+    /// server proves it still serves the same one.
+    ///
+    /// `partial` describes the bytes on disk. It is set from the response that
+    /// starts the file and reset whenever those bytes cannot be continued.
+    /// Returns once the file is whole; a transfer that breaks off returns its
+    /// error with `partial` ready for the next attempt to continue from.
     fn try_download(
         &self,
+        agent: &ureq::Agent,
         url: &str,
         dest: &PathBuf,
+        partial: &mut PartialFile,
         reporter: &ProgressReporter<'_>,
     ) -> Result<(), SdkError> {
-        if reporter.is_cancelled() {
-            return Err(ProgressReporter::cancelled_error());
-        }
-        // Use a longer timeout for downloads (5 minutes for large models)
-        let download_agent = ureq::AgentBuilder::new()
-            .timeout_connect(Duration::from_millis(CONNECT_TIMEOUT_MS))
-            .timeout(Duration::from_secs(300)) // 5 minute timeout for downloads
-            .build();
-
-        let response = download_agent
-            .get(url)
-            .call()
-            .map_err(|e| self.ureq_error_to_sdk_error(e, "download bundle"))?;
-
-        if response.status() != 200 {
-            return Err(self.response_status_to_error(&response, "download bundle"));
-        }
-
-        let mut file = File::create(dest)?;
-        let mut reader = response.into_reader();
-        let mut buffer = [0u8; 8192];
-        let mut downloaded: u64 = 0;
-
+        // One request per pass. A later pass either asks for the rest after a
+        // resumed range came back short, or starts over once the server has
+        // shown the partial file cannot be continued. Neither can repeat
+        // forever: a short range must have added bytes to the file, and the
+        // pass after a reset is a full request, which always returns.
         loop {
-            let bytes_read = reader
-                .read(&mut buffer)
-                .map_err(|e| SdkError::network_src("Read error", e))?;
-
-            if bytes_read == 0 {
-                break;
-            }
-
-            file.write_all(&buffer[..bytes_read])?;
-            downloaded += bytes_read as u64;
-
-            // Report progress. The reporter throttles and aggregates; this
-            // loop just says how many bytes of the current file landed.
-            reporter.file_bytes(downloaded);
-
-            // Checked per chunk so a cancel takes effect in milliseconds
-            // rather than at the end of a multi-gigabyte file. The partial
-            // file goes away so the next attempt starts clean.
             if reporter.is_cancelled() {
-                drop(file);
-                std::fs::remove_file(dest).ok();
                 return Err(ProgressReporter::cancelled_error());
             }
-        }
 
-        Ok(())
+            // Resume only with a validator from the response that wrote the
+            // partial file. Without one there is no way to tell whether the
+            // file changed on the server in between, and splicing two versions
+            // corrupts the model silently when the registry has no SHA-256.
+            let offset = match partial.validator {
+                Some(_) => partial_len(dest),
+                None => 0,
+            };
+
+            let mut request = agent.get(url);
+            if offset > 0 {
+                request = request.set("Range", &format!("bytes={offset}-"));
+                if let Some(validator) = partial.validator.as_ref() {
+                    request = request.set("If-Range", validator.value());
+                }
+            }
+
+            let response = match request.call() {
+                Ok(response) => response,
+                // The partial is no longer a prefix of the server's file (it
+                // shrank or was replaced). Start over.
+                Err(ureq::Error::Status(416, _)) if offset > 0 => {
+                    *partial = PartialFile::default();
+                    continue;
+                }
+                Err(e) => return Err(self.ureq_error_to_sdk_error(e, "download bundle")),
+            };
+
+            let resuming = offset > 0 && response.status() == 206;
+            if resuming && !continues_partial(&response, offset, partial) {
+                // A range of some other file. Hugging Face's CDN ignores
+                // `If-Range`, so this is how a file replaced mid-download
+                // shows up. Start over.
+                *partial = PartialFile::default();
+                continue;
+            }
+            if response.status() != 200 && !resuming {
+                return Err(self.response_status_to_error(&response, "download bundle"));
+            }
+
+            // The server's word on the whole file's size. The registry may
+            // declare none, or a stale one.
+            let file_size = if resuming {
+                response
+                    .header("Content-Range")
+                    .and_then(parse_content_range)
+                    .and_then(|(_, total)| total)
+            } else {
+                response
+                    .header("Content-Length")
+                    .and_then(|value| value.trim().parse().ok())
+            };
+            if resuming {
+                partial.size = partial.size.or(file_size);
+            } else {
+                // A full body: whatever was on disk is replaced.
+                *partial = PartialFile {
+                    validator: ResumeValidator::from_response(&response),
+                    size: file_size,
+                };
+            }
+            if let Some(size) = partial.size {
+                reporter.file_size_announced(size);
+            }
+
+            let (mut file, mut downloaded) = if resuming {
+                info!("Resuming download of {} at byte {}", url, offset);
+                let file = std::fs::OpenOptions::new().append(true).open(dest)?;
+                (file, offset)
+            } else {
+                (File::create(dest)?, 0)
+            };
+            let mut reader = response.into_reader();
+            let mut buffer = [0u8; 8192];
+
+            loop {
+                let bytes_read = reader
+                    .read(&mut buffer)
+                    .map_err(|e| SdkError::network_src("Read error", e))?;
+
+                if bytes_read == 0 {
+                    break;
+                }
+
+                file.write_all(&buffer[..bytes_read])?;
+                downloaded += bytes_read as u64;
+
+                // Report progress. The reporter throttles and aggregates; this
+                // loop just says how many bytes of the current file landed.
+                reporter.file_bytes(downloaded);
+
+                // Checked per chunk so a cancel takes effect in milliseconds
+                // rather than at the end of a multi-gigabyte file.
+                if reporter.is_cancelled() {
+                    return Err(ProgressReporter::cancelled_error());
+                }
+            }
+
+            // With no announced size, the end of the body is all there is to
+            // go on. With one, the file must match it exactly: ending early
+            // would cache a truncated model as ready.
+            let Some(size) = partial.size else {
+                return Ok(());
+            };
+            if downloaded == size {
+                return Ok(());
+            }
+            if downloaded > size {
+                // More bytes than the file has: the partial is not the file
+                // the server serves. The next attempt starts over.
+                *partial = PartialFile::default();
+                return Err(SdkError::network(format!(
+                    "Download of {} overran its size: {} of {} bytes",
+                    url, downloaded, size
+                )));
+            }
+            if !resuming || downloaded == offset {
+                // A full response that ended early (possible when chunked
+                // framing overrides `Content-Length`), or a range that added
+                // nothing. Hand it to the retry policy, which backs off and
+                // gives up on attempts that make no headway. Continuing here
+                // could spin: a server that ignores `Range` restarts the file
+                // from zero on every pass.
+                return Err(SdkError::network(format!(
+                    "Download of {} stopped at {} of {} bytes",
+                    url, downloaded, size
+                )));
+            }
+            // The resumed range ended before the file did, which HTTP allows.
+            // Ask for the rest.
+            debug!(
+                "Range for {} ended at {} of {} bytes, requesting the rest",
+                url, downloaded, size
+            );
+        }
     }
 
     /// Clear the local cache for a specific model.
@@ -1612,6 +1845,7 @@ mod tests {
     use super::*;
     use crate::cache::layout::CacheLayout;
     use chrono::TimeZone;
+    use std::sync::Mutex;
 
     fn create_vlm_bundle(temp_dir: &tempfile::TempDir, model_id: &str) -> PathBuf {
         let model_dir = temp_dir.path().join("bundle_model_files");
@@ -2100,13 +2334,16 @@ mod tests {
         let mut client = RegistryClient::with_url(server.base_url()).unwrap();
         client.cache = CacheManager::with_dir(temp_dir.path().join("cache")).unwrap();
 
-        // Flip the flag from inside the progress callback, so cancellation
-        // lands mid-transfer rather than before the request goes out.
+        // Flip the flag from inside the progress callback once bytes are
+        // flowing, so cancellation lands mid-transfer rather than on the
+        // start frame, before the request goes out.
         let cancel = Arc::new(AtomicBool::new(false));
         let flag = Arc::clone(&cancel);
         let err = client
-            .fetch_extracted_cancellable("slow", Some("universal"), cancel, move |_| {
-                flag.store(true, Ordering::Relaxed);
+            .fetch_extracted_cancellable("slow", Some("universal"), cancel, move |status| {
+                if status.downloaded_bytes > 0 {
+                    flag.store(true, Ordering::Relaxed);
+                }
             })
             .expect_err("a cancelled fetch must not report success");
 
@@ -2124,6 +2361,374 @@ mod tests {
             "partial file survived cancellation at {}",
             partial.display()
         );
+    }
+
+    /// One canned reply per connection, for failures `httpmock` cannot stage:
+    /// a body cut off mid-transfer, a connection that goes silent.
+    struct ScriptedReply {
+        /// Status line and headers, without the blank line that ends them.
+        head: String,
+        body: Vec<u8>,
+        /// Keep the connection open this long after the body, sending nothing.
+        stall: Option<Duration>,
+    }
+
+    impl ScriptedReply {
+        fn new(status: &str, headers: &[(&str, String)], body: &[u8]) -> Self {
+            let mut head = format!("HTTP/1.1 {status}\r\nConnection: close");
+            for (name, value) in headers {
+                head.push_str(&format!("\r\n{name}: {value}"));
+            }
+            Self {
+                head,
+                body: body.to_vec(),
+                stall: None,
+            }
+        }
+
+        fn then_stall(mut self, stall: Duration) -> Self {
+            self.stall = Some(stall);
+            self
+        }
+    }
+
+    /// Serve `replies` in order, one per connection. Returns the download URL
+    /// and the request heads received, in arrival order.
+    fn scripted_server(replies: Vec<ScriptedReply>) -> (String, Arc<Mutex<Vec<String>>>) {
+        use std::io::BufRead;
+
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/model.gguf", listener.local_addr().unwrap());
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let recorded = Arc::clone(&requests);
+        std::thread::spawn(move || {
+            for (reply, stream) in replies.into_iter().zip(listener.incoming()) {
+                let Ok(mut stream) = stream else { return };
+                let recorded = Arc::clone(&recorded);
+                // One thread per connection, so a stalled reply cannot hold up
+                // the retry that follows it.
+                std::thread::spawn(move || {
+                    let mut reader = BufReader::new(stream.try_clone().unwrap());
+                    let mut head = String::new();
+                    loop {
+                        let mut line = String::new();
+                        if reader.read_line(&mut line).unwrap_or(0) == 0 || line == "\r\n" {
+                            break;
+                        }
+                        head.push_str(&line);
+                    }
+                    recorded.lock().unwrap().push(head.to_ascii_lowercase());
+                    let _ = stream.write_all(format!("{}\r\n\r\n", reply.head).as_bytes());
+                    let _ = stream.write_all(&reply.body);
+                    let _ = stream.flush();
+                    if let Some(stall) = reply.stall {
+                        std::thread::sleep(stall);
+                    }
+                });
+            }
+        });
+        (url, requests)
+    }
+
+    /// A client whose downloads retry at once and give up on a silent
+    /// connection quickly.
+    fn fast_retry_client(temp: &Path) -> RegistryClient {
+        let mut client = RegistryClient::with_url("http://127.0.0.1:9").unwrap();
+        client.cache = CacheManager::with_dir(temp.join("cache")).unwrap();
+        client.download_retry_policy = RetryPolicy {
+            max_attempts: 3,
+            initial_delay_ms: 0,
+            max_delay_ms: 0,
+            jitter_factor: 0.0,
+        };
+        client.download_stall_timeout = Duration::from_millis(300);
+        client
+    }
+
+    /// Distinct bytes, so a spliced or duplicated range cannot compare equal.
+    fn model_body(len: u32, seed: u32) -> Vec<u8> {
+        (0..len).map(|i| ((i + seed) % 251) as u8).collect()
+    }
+
+    fn partial_reply(body: &[u8], from: usize, etag: &str) -> ScriptedReply {
+        ScriptedReply::new(
+            "206 Partial Content",
+            &[
+                ("ETag", etag.to_string()),
+                (
+                    "Content-Range",
+                    format!("bytes {from}-{}/{}", body.len() - 1, body.len()),
+                ),
+                ("Content-Length", (body.len() - from).to_string()),
+            ],
+            &body[from..],
+        )
+    }
+
+    /// A 200 that announces all of `body` but sends only its first `sent` bytes.
+    fn cut_off_reply(body: &[u8], sent: usize, etag: &str) -> ScriptedReply {
+        ScriptedReply::new(
+            "200 OK",
+            &[
+                ("ETag", etag.to_string()),
+                ("Content-Length", body.len().to_string()),
+            ],
+            &body[..sent],
+        )
+    }
+
+    fn full_reply(body: &[u8], etag: &str) -> ScriptedReply {
+        cut_off_reply(body, body.len(), etag)
+    }
+
+    #[test]
+    fn an_interrupted_download_resumes_where_it_stopped() {
+        let body = model_body(20_000, 0);
+        let half = body.len() / 2;
+        let (url, requests) = scripted_server(vec![
+            cut_off_reply(&body, half, "\"v1\""),
+            partial_reply(&body, half, "\"v1\""),
+        ]);
+        let temp = tempfile::TempDir::new().unwrap();
+        let mut client = fast_retry_client(temp.path());
+        // A drop that still moved the file along must not use up the budget,
+        // or a large model on a flaky link would fail after a few drops.
+        client.download_retry_policy.max_attempts = 1;
+        let dest = temp.path().join("model.gguf");
+
+        let seen = Mutex::new(Vec::new());
+        let sink = |status: DownloadStatus| seen.lock().unwrap().push(status);
+        // No declared size, like the registry's `lfm2.5-350m` entry.
+        let reporter = ProgressReporter::new(None, 1, Arc::new(AtomicBool::new(false)), &sink);
+
+        client
+            .download_with_progress(&url, &dest, &reporter)
+            .expect("the interrupted download should resume and complete");
+
+        assert_eq!(std::fs::read(&dest).unwrap(), body);
+        let requests = requests.lock().unwrap();
+        assert_eq!(requests.len(), 2, "{requests:?}");
+        assert!(!requests[0].contains("range:"), "{}", requests[0]);
+        assert!(
+            requests[1].contains(&format!("range: bytes={half}-")),
+            "the retry must ask for only the missing bytes: {}",
+            requests[1]
+        );
+        assert!(requests[1].contains("if-range: \"v1\""), "{}", requests[1]);
+
+        let seen = seen.lock().unwrap();
+        assert_eq!(
+            seen[0].downloaded_bytes, 0,
+            "a start frame must precede the first byte"
+        );
+        assert!(
+            seen.iter()
+                .skip(1)
+                .all(|status| status.total_bytes == Some(body.len() as u64)),
+            "the announced size must stand in for the missing declared one: {seen:?}"
+        );
+        assert!(
+            seen.windows(2)
+                .all(|pair| pair[1].downloaded_bytes >= pair[0].downloaded_bytes),
+            "bytes rewound: {seen:?}"
+        );
+    }
+
+    #[test]
+    fn a_short_range_is_continued_until_the_file_is_whole() {
+        // HTTP lets a server answer `Range: bytes=N-` with less than the rest
+        // of the file. Stopping at the end of that range would cache a
+        // truncated model as ready. The middle reply also withholds the total
+        // (`/*`), so only the size from the first response can catch it.
+        let body = model_body(20_000, 0);
+        let half = body.len() / 2;
+        let chunk_end = half + 1_000;
+        let (url, requests) = scripted_server(vec![
+            cut_off_reply(&body, half, "\"v1\""),
+            ScriptedReply::new(
+                "206 Partial Content",
+                &[
+                    ("ETag", "\"v1\"".to_string()),
+                    ("Content-Range", format!("bytes {half}-{}/*", chunk_end - 1)),
+                    ("Content-Length", (chunk_end - half).to_string()),
+                ],
+                &body[half..chunk_end],
+            ),
+            partial_reply(&body, chunk_end, "\"v1\""),
+        ]);
+        let temp = tempfile::TempDir::new().unwrap();
+        let client = fast_retry_client(temp.path());
+        let dest = temp.path().join("model.gguf");
+        let sink = |_: DownloadStatus| {};
+        let reporter = ProgressReporter::new(None, 1, Arc::new(AtomicBool::new(false)), &sink);
+
+        client
+            .download_with_progress(&url, &dest, &reporter)
+            .expect("the download should continue past the short range");
+
+        assert_eq!(std::fs::read(&dest).unwrap(), body);
+        let requests = requests.lock().unwrap();
+        assert_eq!(requests.len(), 3, "{requests:?}");
+        assert!(
+            requests[2].contains(&format!("range: bytes={chunk_end}-")),
+            "{}",
+            requests[2]
+        );
+    }
+
+    /// A 200 whose chunked body ends before its `Content-Length`: ureq lets
+    /// chunked framing win, so the short body arrives without an error.
+    fn short_chunked_reply(body: &[u8], sent: usize) -> ScriptedReply {
+        let mut chunked = format!("{sent:x}\r\n").into_bytes();
+        chunked.extend_from_slice(&body[..sent]);
+        chunked.extend_from_slice(b"\r\n0\r\n\r\n");
+        ScriptedReply::new(
+            "200 OK",
+            &[
+                ("ETag", "\"v1\"".to_string()),
+                ("Content-Length", body.len().to_string()),
+                ("Transfer-Encoding", "chunked".to_string()),
+            ],
+            &chunked,
+        )
+    }
+
+    #[test]
+    fn a_full_response_that_ends_early_goes_through_the_retry_budget() {
+        // The server ignores `Range`, so every request restarts the file, and
+        // each ends at a different point. Asking for "the rest" right away
+        // would loop with no backoff and no limit. Each short response must
+        // instead count as an attempt: 5 000 and 15 000 bytes are new highs,
+        // 8 000 is not, and with a budget of one the third request is the last.
+        let body = model_body(20_000, 0);
+        let (url, requests) = scripted_server(vec![
+            short_chunked_reply(&body, 5_000),
+            short_chunked_reply(&body, 15_000),
+            short_chunked_reply(&body, 8_000),
+            short_chunked_reply(&body, 12_000),
+        ]);
+        let temp = tempfile::TempDir::new().unwrap();
+        let mut client = fast_retry_client(temp.path());
+        client.download_retry_policy.max_attempts = 1;
+        let dest = temp.path().join("model.gguf");
+        let sink = |_: DownloadStatus| {};
+        let reporter = ProgressReporter::new(None, 1, Arc::new(AtomicBool::new(false)), &sink);
+
+        let err = client
+            .download_with_progress(&url, &dest, &reporter)
+            .expect_err("a file that never arrives whole must fail");
+
+        assert!(err.is_retryable(), "expected a network error, got {err:?}");
+        assert_eq!(requests.lock().unwrap().len(), 3);
+        assert!(!dest.exists(), "partial file left at {}", dest.display());
+    }
+
+    #[test]
+    fn a_silent_connection_is_dropped_and_resumed() {
+        let body = model_body(20_000, 0);
+        let half = body.len() / 2;
+        let (url, _requests) = scripted_server(vec![
+            cut_off_reply(&body, half, "\"v1\"").then_stall(Duration::from_secs(5)),
+            partial_reply(&body, half, "\"v1\""),
+        ]);
+        let temp = tempfile::TempDir::new().unwrap();
+        let client = fast_retry_client(temp.path());
+        let dest = temp.path().join("model.gguf");
+        let sink = |_: DownloadStatus| {};
+        let reporter = ProgressReporter::new(None, 1, Arc::new(AtomicBool::new(false)), &sink);
+
+        let started = Instant::now();
+        client
+            .download_with_progress(&url, &dest, &reporter)
+            .expect("the stalled download should resume and complete");
+
+        assert_eq!(std::fs::read(&dest).unwrap(), body);
+        assert!(
+            started.elapsed() < Duration::from_secs(4),
+            "waited {:?} on a silent connection",
+            started.elapsed()
+        );
+    }
+
+    #[test]
+    fn a_resume_that_lands_on_a_replaced_file_starts_over() {
+        // Hugging Face's CDN answers a range request for a replaced file with
+        // a 206 of the new one, ignoring `If-Range`. Appending it would splice
+        // two versions into one corrupt model.
+        let old = model_body(20_000, 0);
+        let new = model_body(20_000, 7);
+        let half = old.len() / 2;
+        let (url, requests) = scripted_server(vec![
+            cut_off_reply(&old, half, "\"v1\""),
+            partial_reply(&new, half, "\"v2\""),
+            full_reply(&new, "\"v2\""),
+        ]);
+        let temp = tempfile::TempDir::new().unwrap();
+        let client = fast_retry_client(temp.path());
+        let dest = temp.path().join("model.gguf");
+        let sink = |_: DownloadStatus| {};
+        let reporter = ProgressReporter::new(None, 1, Arc::new(AtomicBool::new(false)), &sink);
+
+        client
+            .download_with_progress(&url, &dest, &reporter)
+            .expect("the download should restart on the new file");
+
+        assert_eq!(std::fs::read(&dest).unwrap(), new);
+        let requests = requests.lock().unwrap();
+        assert_eq!(requests.len(), 3, "{requests:?}");
+        assert!(!requests[2].contains("range:"), "{}", requests[2]);
+    }
+
+    #[test]
+    fn a_server_that_ignores_ranges_gets_a_clean_restart() {
+        let body = model_body(20_000, 0);
+        let (url, _requests) = scripted_server(vec![
+            cut_off_reply(&body, body.len() / 2, "\"v1\""),
+            full_reply(&body, "\"v1\""),
+        ]);
+        let temp = tempfile::TempDir::new().unwrap();
+        let client = fast_retry_client(temp.path());
+        let dest = temp.path().join("model.gguf");
+        let sink = |_: DownloadStatus| {};
+        let reporter = ProgressReporter::new(None, 1, Arc::new(AtomicBool::new(false)), &sink);
+
+        client
+            .download_with_progress(&url, &dest, &reporter)
+            .expect("a full 200 should replace the partial file");
+
+        // Replaced, not appended to the first half.
+        assert_eq!(std::fs::read(&dest).unwrap(), body);
+    }
+
+    #[test]
+    fn a_download_that_never_progresses_gives_up_and_leaves_no_partial() {
+        let body = model_body(20_000, 0);
+        let (url, requests) =
+            scripted_server((0..3).map(|_| cut_off_reply(&body, 0, "\"v1\"")).collect());
+        let temp = tempfile::TempDir::new().unwrap();
+        let client = fast_retry_client(temp.path());
+        let dest = temp.path().join("model.gguf");
+        let sink = |_: DownloadStatus| {};
+        let reporter = ProgressReporter::new(None, 1, Arc::new(AtomicBool::new(false)), &sink);
+
+        let err = client
+            .download_with_progress(&url, &dest, &reporter)
+            .expect_err("a server that never sends a byte must not loop forever");
+
+        assert!(err.is_retryable(), "expected a network error, got {err:?}");
+        assert_eq!(requests.lock().unwrap().len(), 3);
+        assert!(!dest.exists(), "partial file left at {}", dest.display());
+    }
+
+    #[test]
+    fn content_range_parses_start_and_total() {
+        assert_eq!(
+            parse_content_range("bytes 1000-1999/229312224"),
+            Some((1000, Some(229_312_224)))
+        );
+        assert_eq!(parse_content_range("bytes 5-9/*"), Some((5, None)));
+        assert_eq!(parse_content_range("bytes */100"), None);
+        assert_eq!(parse_content_range("items 0-1/2"), None);
     }
 
     #[test]
