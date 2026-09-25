@@ -1,0 +1,25 @@
+.github/workflows/bazel.yml
+  s_43c2b112287c45::t_7eac317442c1b7 151-164
+AGENTS.md
+  s_43c2b112287c45::t_eefc0fd59907f4 65-66
+crates/xybrid-sdk/src/lib.rs
+  s_43c2b112287c45::t_1fe7312a31c56f 1166-1168
+spike/BUILD.bazel
+  s_43c2b112287c45::t_05218152e288d3 4,8
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "e75ac798a90b2de0c1471087bedc2effef841bd3",
+  "prompts": {},
+  "sessions": {
+    "s_43c2b112287c45": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6b9a57e6-439d-4590-8d64-5b680ed5782e",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
+    }
+  }
+}
