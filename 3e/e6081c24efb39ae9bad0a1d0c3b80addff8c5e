@@ -1,0 +1,28 @@
+examples/flutter/integration_test/download_progress_test.dart
+  s_cbf4fe83e9069b::t_46974684d5f34b 19-21,27,36-40,43-57,59-82,84-96,98,100-114,116-122
+  s_cbf4fe83e9069b::t_62101681cdab3c 17-18,28-34
+  s_cbf4fe83e9069b::t_c3b215e56d6c62 1-16,22-26,35,41-42,58,83,97,99,115,123
+crates/xybrid-sdk/src/registry_client.rs
+  s_cbf4fe83e9069b::t_ca7bf6c00dba75 280-293,346-347,394,1319-1324,1357-1361,1364,1384,1386-1400,1406-1407,1412,2435-2443,2446,2672-2748
+  s_cbf4fe83e9069b::t_f83b1a0406608d 2749
+bindings/flutter/CHANGELOG.md
+  s_cbf4fe83e9069b::t_da9c38a7e27863 25-27
+CHANGELOG.md
+  s_cbf4fe83e9069b::t_da9c38a7e27863 111-117
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "3ee6081c24efb39ae9bad0a1d0c3b80addff8c5e",
+  "prompts": {},
+  "sessions": {
+    "s_cbf4fe83e9069b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7858ebf6-17d3-467f-8db4-8f1f27e33435",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
+    }
+  }
+}
