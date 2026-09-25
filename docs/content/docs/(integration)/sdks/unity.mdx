@@ -89,6 +89,36 @@ var model = XybridClient.LoadModelFromBundle("path/to/model.xyb");
 
 ---
 
+## Download Progress
+
+`load()` blocks until the weights are on disk, so it has no progress to report
+while it runs. Start the download separately and watch it:
+
+```csharp
+using var download = ModelLoader.FromRegistry("qwen3-0.6b").StartDownload();
+while (!download.IsFinished())
+{
+    // Status() never blocks, so it is safe once per frame.
+    slider.value = download.Status().Progress;
+    yield return null;
+}
+
+using var loader = ModelLoader.FromRegistry("qwen3-0.6b");
+var model = loader.Load();   // cached: returns at once
+```
+
+`progress` spans every file the model needs — weights plus companions such as a
+vision projector — and never moves backwards, so the bar neither restarts per
+file nor rewinds when a download retries. `totalBytes` is null when the source
+publishes no size (a Hugging Face repo); `downloadedBytes` is exact either way,
+which is what you need for megabytes, speed and time remaining.
+
+Cancelling the consuming task only unsubscribes from updates. Call `cancel()`
+to stop the transfer itself — it takes effect within one chunk read and
+discards the partial file.
+
+---
+
 ## Input Envelopes
 
 ### Text
@@ -134,6 +164,45 @@ string output = model.RunText("Tell me about the ancient ruins.");
 // Audio-in, text-out shorthand (player voice command)
 string transcription = model.RunAudio(microphoneBytes, sampleRate: 16000);
 ```
+
+---
+
+## Live Transcription
+
+`run()` transcribes a finished audio buffer. A session transcribes speech *as
+it arrives*, which is what dictation and live captioning need.
+
+Audio must be PCM **float32, mono, 16 kHz** — converting from the platform's
+microphone format is the caller's job.
+
+```csharp
+using var session = model.Stream(StreamingConfigs.VoiceActivity(vadModelDir, language: "en"));
+
+// Drive the UI from the partial stream.
+await foreach (var partial in session.Partials(cancellationToken))
+{
+    label.text = partial.Text;
+}
+
+// From the Microphone clip, converted to float mono 16 kHz:
+session.Feed(pcm);
+
+string transcript = session.Flush();
+```
+
+Partial text is **cumulative, not a delta**: render each one in place of the
+previous rather than appending. A partial produced before you subscribe is
+delivered immediately, so the opening words of an utterance are never lost.
+
+`flush()` ends the session and returns the full transcript — and reports an
+error if any chunk failed to transcribe, because that audio is gone and the
+transcript would otherwise look complete. `cancel()` ends the session and
+discards queued audio.
+
+Voice-activity detection cuts chunks on speech boundaries instead of a fixed
+clock, which avoids the stutter you get when a window lands mid-word. It needs
+a Silero VAD model directory containing a `model.onnx`; none ships with the
+SDK, and without one the engine falls back to fixed windows.
 
 ---
 

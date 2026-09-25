@@ -78,3 +78,10 @@ claudedocs/
 bindings/kotlin/consumer-smoke/.gradle/
 bindings/kotlin/consumer-smoke/app/build/
 bindings/kotlin/consumer-smoke/app/libs/
+
+# Star history scratch (tools/scripts/star-history.py). The canonical series
+# and rendered charts live on the unprotected `star-history` branch, which the
+# README links to; these are just local run output.
+/.metrics/
+/docs/assets/star-history.svg
+/docs/assets/star-history-dark.svg

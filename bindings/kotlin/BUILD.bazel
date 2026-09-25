@@ -9,17 +9,19 @@
 # transitions too.
 #
 # jni payload per ABI:
-#   libxybrid-bolt.so   — the one-link cdylib (renamed: rustc emits underscore,
-#                         Kotlin's System.loadLibrary("xybrid-bolt") wants hyphen)
+#   libxybrid_bolt.so   — the BoltFFI JNI glue linked with the Rust staticlib;
+#                         matches System.loadLibrary("xybrid_bolt") exactly
 #   libc++_shared.so    — from @androidndk's sysroot (version-matched to the
 #                         NDK that linked the .so; no vendored drift)
 #   libonnxruntime.so   — vendored, arm64-v8a + x86_64 only (armv7 ships no ORT,
 #                         matching today's AAR)
 load("@aspect_bazel_lib//lib:transitions.bzl", "platform_transition_filegroup")
+load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_import")
 load("@rules_kotlin//kotlin:core.bzl", "define_kt_toolchain")
 load("@rules_kotlin//kotlin:jvm.bzl", "kt_jvm_library")
 load("@rules_pkg//pkg:mappings.bzl", "pkg_files")
 load("@rules_pkg//pkg:zip.bzl", "pkg_zip")
+load("//bazel/ggml:android.bzl", "ANDROID_ARM64_CPU_VARIANTS", "ANDROID_ARM64_GGML_LIBS")
 
 # Consumer-compatibility toolchain (registered in MODULE.bazel): rules_kotlin
 # 2.4's bundled kotlinc emits Kotlin 2.1 METADATA by default, which the shipped
@@ -35,19 +37,71 @@ define_kt_toolchain(
 
 # (abi dir, rules_rs platform, NDK target_system_name, vendored-ORT label or None)
 ANDROID_ABIS = [
-    ("arm64-v8a", "@rules_rs//rs/platforms:aarch64-linux-android", "aarch64-linux-android", "//:ort_android_arm64"),
+    # arm64 builds for a child of rules_rs' arm64 Android platform that turns on
+    # llama.cpp's runtime CPU-variant selection (//bazel/ggml, //:llama_android_dl).
+    ("arm64-v8a", "//bazel/ggml:android_arm64_cpu_variants", "aarch64-linux-android", "//:ort_android_arm64"),
     ("armeabi-v7a", "@rules_rs//rs/platforms:armv7-linux-androideabi", "arm-linux-androideabi", None),
     ("x86_64", "@rules_rs//rs/platforms:x86_64-linux-android", "x86_64-linux-android", "//:ort_android_x86_64"),
 ]
 
-# The NDK repo's clang dir is pinned to linux-x86_64 binaries by
-# XYBRID_NDK_HOST_TAG in the committed .bazelrc (RBE workers run them).
-NDK_SYSROOT = "@androidndk//toolchains/llvm/prebuilt/linux-x86_64/sysroot"
+cc_import(
+    name = "android_cxx_shared",
+    # Resolve the select on host platforms so wildcard analysis can skip this
+    # Android-only target. Each shipped Android ABI still requires its NDK lib.
+    shared_library = select({
+        "@rules_rs//rs/platforms/config:aarch64-linux-android": "@androidndk//:libcxx_shared_aarch64-linux-android",
+        "@rules_rs//rs/platforms/config:armv7-linux-androideabi": "@androidndk//:libcxx_shared_arm-linux-androideabi",
+        "@rules_rs//rs/platforms/config:x86_64-linux-android": "@androidndk//:libcxx_shared_x86_64-linux-android",
+        "//conditions:default": None,
+    }),
+    target_compatible_with = ["@platforms//os:android"],
+)
+
+# BoltFFI's generated Kotlin declares JVM `external fun`s. The Rust staticlib
+# exports the underlying C ABI, while this generated C layer exports the
+# matching Java_* JNI entry points and translates JVM values to that ABI. This
+# mirrors `boltffi pack android`; packaging the Rust cdylib alone is not enough
+# for a JVM consumer.
+cc_binary(
+    name = "libxybrid_bolt.so",
+    srcs = [
+        "bazel/jni/jni_glue.c",
+        "bazel/jni/xybrid_bolt.h",
+    ] + select({
+        # arm64 ships llama.cpp's CPU variants as modules; this registers the
+        # best one when the library loads (see the file's header).
+        "//bazel/ggml:cpu_variants_enabled": ["bazel/jni/ggml_cpu_backend.cpp"],
+        "//conditions:default": [],
+    }),
+    additional_linker_inputs = ["bazel/jni/exports.map"],
+    deps = [
+        ":android_cxx_shared",
+        "//crates/xybrid-bolt:xybrid_bolt_staticlib",
+    ] + select({
+        # ggml-backend.h and libggml.so for the loader above.
+        "//bazel/ggml:cpu_variants_enabled": ["//:llama_android_dl"],
+        "//conditions:default": [],
+    }),
+    linkopts = [
+        "-Wl,--version-script,$(location bazel/jni/exports.map)",
+        "-Wl,--gc-sections",
+        "-Wl,-z,nodelete",
+        "-Wl,-z,max-page-size=16384",
+        "-Wl,-soname,libxybrid_bolt.so",
+        "-Wl,-s",
+        "-llog",
+        "-ldl",
+        "-lm",
+    ],
+    linkshared = True,
+    linkstatic = True,
+    target_compatible_with = ["@platforms//os:android"],
+)
 
 [
     platform_transition_filegroup(
         name = "bolt_so_" + abi,
-        srcs = ["//crates/xybrid-bolt:xybrid_bolt_cdylib"],
+        srcs = [":libxybrid_bolt.so"],
         target_platform = platform,
     )
     for abi, platform, _, _ in ANDROID_ABIS
@@ -58,7 +112,7 @@ NDK_SYSROOT = "@androidndk//toolchains/llvm/prebuilt/linux-x86_64/sysroot"
         name = "jni_bolt_" + abi,
         srcs = [":bolt_so_" + abi],
         prefix = "jni/" + abi,
-        renames = {":bolt_so_" + abi: "libxybrid-bolt.so"},
+        renames = {":bolt_so_" + abi: "libxybrid_bolt.so"},
     )
     for abi, _, _, _ in ANDROID_ABIS
 ]
@@ -66,7 +120,7 @@ NDK_SYSROOT = "@androidndk//toolchains/llvm/prebuilt/linux-x86_64/sysroot"
 [
     pkg_files(
         name = "jni_cxx_" + abi,
-        srcs = ["%s:libcxx_shared_%s" % (NDK_SYSROOT, tsn)],
+        srcs = ["@androidndk//:libcxx_shared_" + tsn],
         prefix = "jni/" + abi,
     )
     for abi, _, tsn, _ in ANDROID_ABIS
@@ -81,6 +135,33 @@ NDK_SYSROOT = "@androidndk//toolchains/llvm/prebuilt/linux-x86_64/sysroot"
     for abi, _, _, ort_target in ANDROID_ABIS
     if ort_target
 ]
+
+# arm64 only: llama.cpp's shared libraries (libxybrid_bolt.so's DT_NEEDED) and
+# the CPU-variant modules ggml_cpu_backend.cpp loads at runtime — see
+# //:llama_android_dl.
+# Each is one output group of the cmake target.
+_ARM64_GGML_FILES = ANDROID_ARM64_GGML_LIBS + ANDROID_ARM64_CPU_VARIANTS
+
+[
+    filegroup(
+        name = "ggml_" + lib,
+        srcs = ["//:llama_android_dl"],
+        output_group = lib,
+    )
+    for lib in _ARM64_GGML_FILES
+]
+
+platform_transition_filegroup(
+    name = "ggml_so_arm64-v8a",
+    srcs = [":ggml_" + lib for lib in _ARM64_GGML_FILES],
+    target_platform = "//bazel/ggml:android_arm64_cpu_variants",
+)
+
+pkg_files(
+    name = "jni_ggml_arm64-v8a",
+    srcs = [":ggml_so_arm64-v8a"],
+    prefix = "jni/arm64-v8a",
+)
 
 # classes.jar: the committed Kotlin sources (hand Xybrid.kt + bolt-generated
 # XybridBolt.kt) compiled by hermetic kotlinc against the bazelified android.jar
@@ -122,7 +203,8 @@ pkg_zip(
         ":aar_rtxt",
     ] + [":jni_bolt_" + abi for abi, _, _, _ in ANDROID_ABIS] +
         [":jni_cxx_" + abi for abi, _, _, _ in ANDROID_ABIS] +
-        [":jni_ort_" + abi for abi, _, _, ort_target in ANDROID_ABIS if ort_target],
+        [":jni_ort_" + abi for abi, _, _, ort_target in ANDROID_ABIS if ort_target] +
+        [":jni_ggml_arm64-v8a"],
     out = "xybrid-kotlin.aar",
     visibility = ["//visibility:public"],
 )

@@ -6,7 +6,7 @@ global_args = []
 [cargo.command_args]
 
 [package]
-name = "xybrid-bolt"
+name = "xybrid_bolt"
 
 [targets.apple]
 enabled = true
@@ -107,19 +107,15 @@ min_sdk = 24
 output = "dist/dart"
 enabled = false
 
-# Python stays disabled: boltffi 0.25.3's python target is experimental and
-# silently drops everything the SDK actually needs (fallible functions,
-# `#[export]` handle types like XybridModel, data-carrying enums like
-# XybridError/XybridEnvelopeKind) — see boltffi_bindgen 0.25.3
-# render/python/lower (ReturnDef::Result => None). Full python support lands
-# in boltffi >= 0.26. Until the workspace migrates, the Python SDK in
-# bindings/python hand-ports the wire layer (ctypes over the xybrid-bolt
-# cdylib), using the generated Swift in bindings/apple as the wire spec.
-# When the boltffi pin moves to >= 0.26: enable this target and replace the
-# hand-ported `xybrid/_bolt.py` with generator output.
+# Enabled on boltffi 0.29, whose Python generator finally expresses handle
+# types and fallible functions — the two gaps that forced bindings/python to
+# hand-port the ctypes wire layer against 0.25.3. `bindings/python/xybrid/
+# _bolt/` is now generator output, copied by tools/scripts/gen_python_bolt.py.
+# Note the target emits a compiled CPython extension, not ctypes: the SDK
+# therefore requires Python >= 3.10 and ships one wheel per interpreter ABI.
 [targets.python]
 output = "dist/python"
-enabled = false
+enabled = true
 module_name = "xybrid_bolt"
 
 [targets.python.wheel]
@@ -138,3 +134,7 @@ module_name = "xybrid_bolt"
 [targets.csharp]
 output = "dist/csharp"
 enabled = true
+# Explicit since boltffi 0.29: the namespace defaults to the PascalCase of the
+# crate name, and `xybrid_bolt` pascal-cases to `Xybrid_bolt` (the casing does
+# not split on underscores). `XybridBolt` is what the Unity package imports.
+namespace = "XybridBolt"

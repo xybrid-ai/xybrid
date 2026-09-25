@@ -3,8 +3,7 @@
 // </auto-generated>
 #nullable enable
 
-using System;
-using System.Text;
+using System.Runtime.InteropServices;
 
 namespace XybridBolt
 {
@@ -21,25 +20,53 @@ namespace XybridBolt
             new XybridVoiceInfo(
                 reader.ReadString(),
                 reader.ReadString(),
-                reader.ReadU8() == 0 ? (string?)null : reader.ReadString(),
-                reader.ReadU8() == 0 ? (string?)null : reader.ReadString(),
-                reader.ReadU8() == 0 ? (string?)null : reader.ReadString()
+                reader.ReadU8() == 0 ? default(string?) : reader.ReadString(),
+                reader.ReadU8() == 0 ? default(string?) : reader.ReadString(),
+                reader.ReadU8() == 0 ? default(string?) : reader.ReadString()
             );
 
-        internal int WireEncodedSize() =>
-            (4 + Encoding.UTF8.GetByteCount(this.Id)) +
-            (4 + Encoding.UTF8.GetByteCount(this.Name)) +
-            (1 + (this.Gender is { } sizeOpt0 ? (4 + Encoding.UTF8.GetByteCount(sizeOpt0)) : 0)) +
-            (1 + (this.Language is { } sizeOpt1 ? (4 + Encoding.UTF8.GetByteCount(sizeOpt1)) : 0)) +
-            (1 + (this.Style is { } sizeOpt2 ? (4 + Encoding.UTF8.GetByteCount(sizeOpt2)) : 0));
-
-        internal void WireEncodeTo(WireWriter wire)
+        internal void Encode(WireWriter writer)
         {
-            wire.WriteString(this.Id);
-            wire.WriteString(this.Name);
-            if (this.Gender is { } opt0) { wire.WriteU8((byte)1); wire.WriteString(opt0); } else { wire.WriteU8((byte)0); };
-            if (this.Language is { } opt1) { wire.WriteU8((byte)1); wire.WriteString(opt1); } else { wire.WriteU8((byte)0); };
-            if (this.Style is { } opt2) { wire.WriteU8((byte)1); wire.WriteString(opt2); } else { wire.WriteU8((byte)0); };
+            {
+                writer.WriteString(this.Id);
+            }
+            {
+                writer.WriteString(this.Name);
+            }
+            {
+                if (this.Gender is { } boltffiValue0)
+                {
+                    writer.WriteU8(1);
+                    writer.WriteString(boltffiValue0);
+                }
+                else
+                {
+                    writer.WriteU8(0);
+                }
+            }
+            {
+                if (this.Language is { } boltffiValue0)
+                {
+                    writer.WriteU8(1);
+                    writer.WriteString(boltffiValue0);
+                }
+                else
+                {
+                    writer.WriteU8(0);
+                }
+            }
+            {
+                if (this.Style is { } boltffiValue0)
+                {
+                    writer.WriteU8(1);
+                    writer.WriteString(boltffiValue0);
+                }
+                else
+                {
+                    writer.WriteU8(0);
+                }
+            }
         }
+
     }
 }

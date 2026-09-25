@@ -83,6 +83,17 @@ impl ModelRuntime for CandleRuntime {
         vec!["safetensors"]
     }
 
+    fn is_loaded(&self, model_path: &Path) -> bool {
+        // Same dir normalization as `load`, so the two always agree.
+        let model_dir = if model_path.is_file() {
+            model_path.parent().unwrap_or(model_path)
+        } else {
+            model_path
+        };
+        self.models
+            .contains_key(model_dir.to_string_lossy().as_ref())
+    }
+
     fn load(&mut self, model_path: &Path) -> AdapterResult<()> {
         let _path_str = model_path.to_string_lossy().to_string();
 

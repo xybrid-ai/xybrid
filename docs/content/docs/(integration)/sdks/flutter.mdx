@@ -11,7 +11,7 @@ Add to your `pubspec.yaml`:
 
 ```yaml
 dependencies:
-  xybrid_flutter: ^0.4.1
+  xybrid_flutter: ^0.6.0
 ```
 
 ## Initialization
@@ -70,7 +70,7 @@ final wavBytes = result.audioAsWav(sampleRate: 24000);
 ## Speech-to-Text
 
 ```dart
-final model = await Xybrid.model('whisper-tiny').load();
+final model = await Xybrid.model('whisper-tiny-ggml').load();
 final envelope = XybridEnvelope.audio(bytes: audioBytes, sampleRate: 16000);
 final result = await model.run(envelope);
 print(result.text); // "Hello, how are you?"
@@ -99,8 +99,8 @@ final loader = XybridModelLoader.fromRegistry('kokoro-82m');
 
 await for (final event in loader.loadWithProgress()) {
   switch (event) {
-    case LoadProgress(:final percentage):
-      print('Loading: $percentage%');
+    case LoadProgress(:final percentage, :final downloadedBytes, :final totalBytes):
+      print('Loading: $percentage% ($downloadedBytes / ${totalBytes ?? '?'} bytes)');
     case LoadComplete():
       print('Model ready!');
     case LoadError(:final message):
@@ -108,6 +108,12 @@ await for (final event in loader.loadWithProgress()) {
   }
 }
 ```
+
+`progress` spans every file the model needs — weights plus companions such as a
+vision projector — and never moves backwards, so the bar neither restarts per
+file nor rewinds when a download retries. `totalBytes` is `null` when the source
+publishes no size (a Hugging Face repo); `downloadedBytes` is exact either way,
+which is what you need for megabytes, speed, and time remaining.
 
 ---
 
@@ -153,7 +159,7 @@ class XybridModelLoader {
 
 | Event | Properties | Description |
 |-------|-----------|-------------|
-| `LoadProgress` | `progress` (0.0–1.0), `percentage` (0–100) | Download/load progress |
+| `LoadProgress` | `progress` (0.0–1.0), `percentage` (0–100), `downloadedBytes`, `totalBytes` (nullable) | Download/load progress |
 | `LoadComplete` | — | Model is ready |
 | `LoadError` | `message` | Loading failed |
 

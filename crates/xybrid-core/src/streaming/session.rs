@@ -10,7 +10,7 @@ use crate::audio::vad::{VadConfig, VadSession};
 use crate::execution::{ExecutionTemplate, ModelMetadata, TemplateExecutor};
 use crate::ir::{Envelope, EnvelopeKind};
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 /// Error type for streaming operations.
@@ -97,8 +97,14 @@ pub struct StreamConfig {
     pub min_chunk_secs: f32,
     /// Enable partial results during streaming
     pub enable_partial_results: bool,
-    /// Language hint (passed to model if supported)
+    /// Language hint passed to the model when supported.
+    ///
+    /// When absent, a reporting ASR runtime may auto-detect from the first
+    /// full audio window; [`StreamSession`] reuses that language for later
+    /// windows until the session is reset.
     pub language: Option<String>,
+    /// Whisper encoder context override in mel frames; `None` uses the model default
+    pub audio_ctx: Option<u32>,
     /// VAD configuration for smart chunking
     pub vad: VadStreamConfig,
 }
@@ -110,6 +116,7 @@ impl Default for StreamConfig {
             min_chunk_secs: 1.0, // At least 1 second before processing
             enable_partial_results: true,
             language: Some("en".to_string()),
+            audio_ctx: None,
             vad: VadStreamConfig::default(),
         }
     }
@@ -130,6 +137,24 @@ impl StreamConfig {
             vad: VadStreamConfig::with_model(model_dir),
             ..Default::default()
         }
+    }
+
+    /// Create an audio envelope carrying the effective ASR overrides.
+    fn inference_envelope(&self, wav_bytes: Vec<u8>, detected_language: Option<&str>) -> Envelope {
+        let mut envelope = Envelope::new(EnvelopeKind::Audio(wav_bytes));
+        // A caller override always wins. Otherwise, reuse the language the ASR
+        // runtime auto-detected on this session's first successful window.
+        if let Some(language) = self.language.as_deref().or(detected_language) {
+            envelope
+                .metadata
+                .insert("language".to_string(), language.to_string());
+        }
+        if let Some(audio_ctx) = self.audio_ctx {
+            envelope
+                .metadata
+                .insert("audio_ctx".to_string(), audio_ctx.to_string());
+        }
+        envelope
     }
 }
 
@@ -338,10 +363,16 @@ pub struct StreamSession {
     // model_dir: PathBuf,
     /// Loaded model metadata
     metadata: ModelMetadata,
-    /// Template executor for inference
-    executor: TemplateExecutor,
+    /// Template executor for inference.
+    ///
+    /// Shared so a caller that already loaded the model (e.g. the SDK's
+    /// `XybridModel`) can hand its executor to the session and the stream
+    /// reuses the loaded weights instead of paying a fresh cold start.
+    executor: Arc<Mutex<TemplateExecutor>>,
     /// Configuration
     config: StreamConfig,
+    /// Language auto-detected for this stream, reused by later windows.
+    detected_language: Option<String>,
     /// Audio buffer
     buffer: AudioBuffer,
     /// Transcript accumulator
@@ -389,6 +420,26 @@ impl StreamSession {
     /// # }
     /// ```
     pub fn new<P: AsRef<Path>>(model_dir: P, config: StreamConfig) -> StreamResult<Self> {
+        // Fresh executor owned by this session alone; the model loads on the
+        // first inference (or `warmup`).
+        let executor = Arc::new(Mutex::new(TemplateExecutor::with_base_path(
+            model_dir.as_ref().to_str().unwrap_or("."),
+        )));
+        Self::with_executor(model_dir, config, executor)
+    }
+
+    /// Create a streaming session that reuses an existing executor.
+    ///
+    /// The executor keeps its loaded-model cache, so a caller that already
+    /// ran (or warmed up) this model skips the cold start entirely — the
+    /// session's first chunk executes against warm weights. Inference from
+    /// other holders of the same executor serializes with this session on
+    /// the mutex.
+    pub fn with_executor<P: AsRef<Path>>(
+        model_dir: P,
+        config: StreamConfig,
+        executor: Arc<Mutex<TemplateExecutor>>,
+    ) -> StreamResult<Self> {
         let model_dir = model_dir.as_ref().to_path_buf();
 
         // Validate model directory exists
@@ -414,9 +465,6 @@ impl StreamSession {
         let metadata: ModelMetadata = serde_json::from_str(&metadata_str)
             .map_err(|e| StreamError::ConfigError(format!("Failed to parse metadata: {}", e)))?;
 
-        // Create executor with model directory as base path
-        let executor = TemplateExecutor::with_base_path(model_dir.to_str().unwrap_or("."));
-
         // Infer optimal buffer config from model type
         let buffer_config = Self::infer_buffer_config(&metadata, &config);
         let buffer = AudioBuffer::with_config(buffer_config);
@@ -432,6 +480,7 @@ impl StreamSession {
                         metadata,
                         executor,
                         config,
+                        detected_language: None,
                         buffer,
                         transcript: TranscriptAccumulator::new(),
                         state: StreamState::Idle,
@@ -467,6 +516,7 @@ impl StreamSession {
             metadata,
             executor,
             config,
+            detected_language: None,
             buffer,
             transcript: TranscriptAccumulator::new(),
             state: StreamState::Idle,
@@ -480,11 +530,15 @@ impl StreamSession {
 
     /// Infer optimal buffer configuration from model metadata.
     fn infer_buffer_config(metadata: &ModelMetadata, config: &StreamConfig) -> AudioBufferConfig {
-        // Check if this is a Whisper model (SafeTensors/Candle)
+        // Whisper on either backend: SafeTensors/Candle or GGML/whisper.cpp.
+        // The window shape is a property of the *model architecture* (30 s
+        // encoder, mel hop), not of the runtime executing it, so both get the
+        // same buffer configuration.
         let is_whisper = match &metadata.execution_template {
             ExecutionTemplate::SafeTensors { architecture, .. } => {
                 architecture.as_deref() == Some("whisper")
             }
+            ExecutionTemplate::GgmlWhisper { .. } => true,
             _ => false,
         };
 
@@ -524,6 +578,51 @@ impl StreamSession {
         F: Fn(PartialResult) + Send + Sync + 'static,
     {
         self.on_partial = Some(Arc::new(callback));
+    }
+
+    /// Pay the model's cold-start cost now, before real audio arrives.
+    ///
+    /// Runs a short silent inference through the executor. The first
+    /// execution of a session lazily loads weights and pays first-run
+    /// allocation costs (measured ~5 s for whisper-tiny on a Pixel 8, vs
+    /// ~2.5 s warm) — doing it here overlaps that cost with the user
+    /// starting to speak instead of adding it to the first visible partial.
+    ///
+    /// Only meaningful in [`StreamState::Idle`]; once audio has been fed the
+    /// first chunk already paid the cost, so this becomes a no-op. The
+    /// transcript and audio buffer are untouched either way.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StreamError::InferenceError`] if the warm-up inference
+    /// fails; the session stays usable (state is not poisoned).
+    pub fn warmup(&mut self) -> StreamResult<()> {
+        if self.state != StreamState::Idle {
+            return Ok(());
+        }
+
+        let mut executor = self.executor.lock().unwrap_or_else(|e| e.into_inner());
+
+        // A shared executor may already hold the loaded model (a previous
+        // session or a direct run paid the cold start). The warm-up pass
+        // itself costs a full encoder pass (~2.5 s for whisper-tiny on a
+        // Pixel 8), so skip it when there is nothing left to warm.
+        if executor.is_model_loaded(&self.metadata) {
+            return Ok(());
+        }
+
+        // Half a second of silence. Whisper pads every input to its fixed
+        // mel window, so the duration barely matters — one encoder pass is
+        // the cost either way.
+        let sample_rate = self.buffer.config().sample_rate;
+        let silence = vec![0.0f32; (sample_rate as usize) / 2];
+        let wav_bytes = samples_to_wav(&silence, sample_rate);
+        let envelope = self.config.inference_envelope(wav_bytes, None);
+
+        executor
+            .execute(&self.metadata, &envelope, None)
+            .map(|_| ())
+            .map_err(|e| StreamError::InferenceError(format!("Warm-up failed: {}", e)))
     }
 
     /// Feed audio samples into the stream.
@@ -624,6 +723,7 @@ impl StreamSession {
         self.transcript.reset();
         self.state = StreamState::Idle;
         self.last_error = None;
+        self.detected_language = None;
         // Reset VAD state
         if let Some(ref mut vad) = self.vad {
             vad.reset();
@@ -640,6 +740,15 @@ impl StreamSession {
     /// Get current session state.
     pub fn state(&self) -> StreamState {
         self.state
+    }
+
+    /// Return the language auto-detected for the current stream.
+    ///
+    /// This remains `None` when the caller configured an explicit language or
+    /// the active ASR runtime does not report language detection.
+    #[must_use]
+    pub fn detected_language(&self) -> Option<&str> {
+        self.detected_language.as_deref()
     }
 
     /// Get buffer statistics.
@@ -695,12 +804,16 @@ impl StreamSession {
         // Convert samples to WAV bytes
         let wav_bytes = samples_to_wav(&chunk.samples, self.buffer.config().sample_rate);
 
-        // Create envelope with audio data
-        let envelope = Envelope::new(EnvelopeKind::Audio(wav_bytes));
+        // Create envelope with audio data and per-session ASR overrides.
+        let envelope = self
+            .config
+            .inference_envelope(wav_bytes, self.detected_language.as_deref());
 
         // Execute through TemplateExecutor (handles ONNX, Candle, etc.)
         let output = self
             .executor
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
             .execute(&self.metadata, &envelope, None)
             .map_err(|e| StreamError::InferenceError(format!("Execution failed: {}", e)))?;
 
@@ -713,6 +826,25 @@ impl StreamSession {
                 ));
             }
         };
+
+        // Short warm-up windows are deliberately excluded. The committed
+        // French fixture is misidentified from its first 1.5 s but correctly
+        // identified from the full 5 s window; caching the early guess would
+        // make every later transcript consistently wrong. Explicit session
+        // configuration takes precedence forever, and the first full-window
+        // detection remains stable until `reset` starts a new stream.
+        if self.config.language.is_none()
+            && self.detected_language.is_none()
+            && !self.buffer.config().is_warmup_chunk(chunk.sequence)
+        {
+            self.detected_language = output
+                .metadata
+                .get(Envelope::DETECTED_LANGUAGE_METADATA_KEY)
+                .map(String::as_str)
+                .map(str::trim)
+                .filter(|language| !language.is_empty())
+                .map(str::to_owned);
+        }
 
         // Reconcile into the transcript (replaces re-covered spans, dedupes
         // the overlap seam).
@@ -761,6 +893,71 @@ mod tests {
         let config = StreamConfig::default();
         assert_eq!(config.buffer_config.sample_rate, 16000);
         assert!(config.enable_partial_results);
+        assert_eq!(config.audio_ctx, None);
+    }
+
+    #[test]
+    fn configured_asr_overrides_are_added_to_the_inference_envelope() {
+        let config = StreamConfig {
+            language: Some("fr".to_string()),
+            audio_ctx: Some(500),
+            ..Default::default()
+        };
+
+        let envelope = config.inference_envelope(vec![1, 2, 3], Some("de"));
+
+        assert_eq!(
+            envelope.metadata.get("language").map(String::as_str),
+            Some("fr")
+        );
+        assert_eq!(
+            envelope.metadata.get("audio_ctx").map(String::as_str),
+            Some("500")
+        );
+    }
+
+    #[test]
+    fn absent_asr_overrides_leave_bundle_defaults_in_control() {
+        let config = StreamConfig {
+            language: None,
+            audio_ctx: None,
+            ..Default::default()
+        };
+
+        let envelope = config.inference_envelope(vec![1, 2, 3], None);
+
+        assert!(!envelope.metadata.contains_key("language"));
+        assert!(!envelope.metadata.contains_key("audio_ctx"));
+    }
+
+    #[test]
+    fn detected_language_is_reused_when_no_override_is_configured() {
+        let config = StreamConfig {
+            language: None,
+            ..Default::default()
+        };
+
+        let envelope = config.inference_envelope(vec![1, 2, 3], Some("fr"));
+
+        assert_eq!(
+            envelope.metadata.get("language").map(String::as_str),
+            Some("fr")
+        );
+    }
+
+    #[test]
+    fn configured_language_takes_precedence_over_detected_language() {
+        let config = StreamConfig {
+            language: Some("en".to_string()),
+            ..Default::default()
+        };
+
+        let envelope = config.inference_envelope(vec![1, 2, 3], Some("fr"));
+
+        assert_eq!(
+            envelope.metadata.get("language").map(String::as_str),
+            Some("en")
+        );
     }
 
     fn secs(s: f64) -> Duration {

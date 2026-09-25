@@ -3,8 +3,7 @@
 // </auto-generated>
 #nullable enable
 
-using System;
-using System.Text;
+using System.Runtime.InteropServices;
 
 namespace XybridBolt
 {
@@ -26,14 +25,15 @@ namespace XybridBolt
                 reader.ReadString()
             );
 
-        internal int WireEncodedSize() =>
-            (4 + Encoding.UTF8.GetByteCount(this.Key)) +
-            (4 + Encoding.UTF8.GetByteCount(this.Value));
-
-        internal void WireEncodeTo(WireWriter wire)
+        internal void Encode(WireWriter writer)
         {
-            wire.WriteString(this.Key);
-            wire.WriteString(this.Value);
+            {
+                writer.WriteString(this.Key);
+            }
+            {
+                writer.WriteString(this.Value);
+            }
         }
+
     }
 }

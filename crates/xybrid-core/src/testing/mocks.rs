@@ -242,6 +242,12 @@ impl MockOnnxOutputs {
 /// # }
 /// ```
 pub struct MockRuntimeAdapter {
+    /// Adapter name reported to the executor (defaults to `"mock"`).
+    ///
+    /// The executor keys its default local/cloud adapters on the names
+    /// `"onnx"` and `"cloud"`, so tests that register more than one adapter
+    /// should name them explicitly with [`MockRuntimeAdapter::with_name`].
+    name: String,
     /// The output to return from execute()
     output: MockOutput,
     /// Track the number of executions (thread-safe for RuntimeAdapter: Send + Sync)
@@ -250,37 +256,47 @@ pub struct MockRuntimeAdapter {
     is_loaded: Mutex<bool>,
     /// Simulate an error if set
     error: Option<String>,
+    /// Every envelope passed to `execute()`, in order.
+    captured_inputs: Mutex<Vec<Envelope>>,
 }
 
 impl MockRuntimeAdapter {
-    /// Create a mock adapter that returns text output (for ASR-like behavior).
-    pub fn with_text_output(text: impl Into<String>) -> Self {
+    fn from_output(output: MockOutput) -> Self {
         Self {
-            output: MockOutput::Text(text.into()),
+            name: "mock".to_string(),
+            output,
             call_count: Mutex::new(0),
             is_loaded: Mutex::new(false),
             error: None,
+            captured_inputs: Mutex::new(Vec::new()),
         }
+    }
+
+    /// Create a mock adapter that returns text output (for ASR-like behavior).
+    pub fn with_text_output(text: impl Into<String>) -> Self {
+        Self::from_output(MockOutput::Text(text.into()))
     }
 
     /// Create a mock adapter that returns audio output (for TTS-like behavior).
     pub fn with_audio_output(bytes: Vec<u8>) -> Self {
-        Self {
-            output: MockOutput::Audio(bytes),
-            call_count: Mutex::new(0),
-            is_loaded: Mutex::new(false),
-            error: None,
-        }
+        Self::from_output(MockOutput::Audio(bytes))
     }
 
     /// Create a mock adapter that returns embedding output.
     pub fn with_embedding_output(values: Vec<f32>) -> Self {
-        Self {
-            output: MockOutput::Embedding(values),
-            call_count: Mutex::new(0),
-            is_loaded: Mutex::new(false),
-            error: None,
-        }
+        Self::from_output(MockOutput::Embedding(values))
+    }
+
+    /// Register under a specific adapter name (e.g. `"onnx"` or `"cloud"`)
+    /// so the executor's default-adapter selection is deterministic.
+    pub fn with_name(mut self, name: impl Into<String>) -> Self {
+        self.name = name.into();
+        self
+    }
+
+    /// Every input envelope `execute()` received so far, oldest first.
+    pub fn captured_inputs(&self) -> Vec<Envelope> {
+        self.captured_inputs.lock().unwrap().clone()
     }
 
     /// Configure the mock to simulate an error on execute.
@@ -302,7 +318,7 @@ impl MockRuntimeAdapter {
 
 impl RuntimeAdapter for MockRuntimeAdapter {
     fn name(&self) -> &str {
-        "mock"
+        &self.name
     }
 
     fn supported_formats(&self) -> Vec<&'static str> {
@@ -314,7 +330,9 @@ impl RuntimeAdapter for MockRuntimeAdapter {
         Ok(())
     }
 
-    fn execute(&self, _input: &Envelope) -> AdapterResult<Envelope> {
+    fn execute(&self, input: &Envelope) -> AdapterResult<Envelope> {
+        self.captured_inputs.lock().unwrap().push(input.clone());
+
         if let Some(ref err) = self.error {
             return Err(AdapterError::RuntimeError(err.clone()));
         }

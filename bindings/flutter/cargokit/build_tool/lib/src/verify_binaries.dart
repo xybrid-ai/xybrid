@@ -2,16 +2,64 @@
 /// Details: https://fzyzcjy.github.io/flutter_rust_bridge/manual/integrate/builtin
 
 import 'dart:io';
+import 'dart:typed_data';
 
+import 'package:collection/collection.dart';
 import 'package:ed25519_edwards/ed25519_edwards.dart';
 import 'package:http/http.dart';
 
+import 'artifact_compression.dart';
 import 'artifacts_provider.dart';
 import 'cargo.dart';
 import 'crate_hash.dart';
 import 'options.dart';
 import 'precompile_binaries.dart';
+import 'shared_artifact_cache.dart';
 import 'target.dart';
+
+/// Result of checking the optional compressed form of a published artifact.
+enum CompressedArtifactVerification {
+  notPublished,
+  valid,
+  missingBinary,
+  missingSignature,
+  invalidSignature,
+  invalidGzip,
+  mismatch,
+}
+
+/// Verifies that a compressed release asset is complete and matches its twin.
+CompressedArtifactVerification verifyCompressedArtifact({
+  required PublicKey publicKey,
+  required int compressedStatusCode,
+  required Uint8List compressedBytes,
+  required int signatureStatusCode,
+  required Uint8List signatureBytes,
+  required Uint8List uncompressedBytes,
+}) {
+  if (compressedStatusCode == 404 && signatureStatusCode == 404) {
+    return CompressedArtifactVerification.notPublished;
+  }
+  if (compressedStatusCode != 200) {
+    return CompressedArtifactVerification.missingBinary;
+  }
+  if (signatureStatusCode != 200) {
+    return CompressedArtifactVerification.missingSignature;
+  }
+  if (!signatureVerifies(publicKey, compressedBytes, signatureBytes)) {
+    return CompressedArtifactVerification.invalidSignature;
+  }
+
+  final Uint8List unpacked;
+  try {
+    unpacked = decompressArtifact(compressedBytes);
+  } on FormatException {
+    return CompressedArtifactVerification.invalidGzip;
+  }
+  return const ListEquality<int>().equals(unpacked, uncompressedBytes)
+      ? CompressedArtifactVerification.valid
+      : CompressedArtifactVerification.mismatch;
+}
 
 class VerifyBinaries {
   VerifyBinaries({
@@ -72,6 +120,47 @@ class VerifyBinaries {
               signature.bodyBytes)) {
             stdout.writeln('INVALID SIGNATURE');
             ok = false;
+          }
+
+          // xybrid addition: the gzip form consumers prefer. Absent on
+          // releases from before compressed assets, which is not an error.
+          final compressedName =
+              PrecompileBinaries.compressedFileName(target, artifact);
+          final compressedSignatureName =
+              PrecompileBinaries.compressedSignatureFileName(target, artifact);
+          final responses = await Future.wait([
+            get(Uri.parse('$prefix$crateHash/$compressedName')),
+            get(Uri.parse('$prefix$crateHash/$compressedSignatureName')),
+          ]);
+          final compressed = responses[0];
+          final compressedSignature = responses[1];
+          final compressedVerification = verifyCompressedArtifact(
+            publicKey: precompiledBinaries.publicKey,
+            compressedStatusCode: compressed.statusCode,
+            compressedBytes: compressed.bodyBytes,
+            signatureStatusCode: compressedSignature.statusCode,
+            signatureBytes: compressedSignature.bodyBytes,
+            uncompressedBytes: asset.bodyBytes,
+          );
+          switch (compressedVerification) {
+            case CompressedArtifactVerification.notPublished:
+            case CompressedArtifactVerification.valid:
+              break;
+            case CompressedArtifactVerification.missingBinary:
+              stdout.writeln('MISSING $compressedName');
+              ok = false;
+            case CompressedArtifactVerification.missingSignature:
+              stdout.writeln('MISSING $compressedSignatureName');
+              ok = false;
+            case CompressedArtifactVerification.invalidSignature:
+              stdout.writeln('INVALID SIGNATURE $compressedName');
+              ok = false;
+            case CompressedArtifactVerification.invalidGzip:
+              stdout.writeln('INVALID GZIP $compressedName');
+              ok = false;
+            case CompressedArtifactVerification.mismatch:
+              stdout.writeln('MISMATCH $compressedName');
+              ok = false;
           }
         }
 

@@ -7,9 +7,794 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **React Native catches up with the other SDKs, and runs on iOS.** The iOS
+  half of `@xybrid/react-native` never compiled against the SDK it bundles, and
+  its method selectors did not match the ones React Native's code generator
+  dispatches by — so every call would have crashed. Both are fixed, and the
+  package now covers the whole SDK surface: API-key initialization (cloud
+  fallback, speculative cloud, telemetry), a stop button through the standard
+  `AbortSignal`, conversation context, tool calling, image input, model
+  introspection, pipelines, live ASR sessions, background downloads with
+  progress, cache management and memory release. Android became a real
+  TurboModule and no longer frees native objects that an in-flight call is
+  still using. Registry requests and telemetry identify it as `react-native`
+  (the SDK now accepts that binding name) instead of the Swift or Kotlin SDK
+  underneath. Verified end to end on a Pixel 8 and the iOS Simulator.
+- **React Native can no longer silently fall behind.** A test reads every
+  export of `xybrid-bolt` and fails until each new function, field or error is
+  wired into React Native (or excluded with a reason); another checks the iOS
+  selectors against the spec on any machine; CI now builds the example app for
+  the iOS Simulator (#589) as well as Android.
+- **React Native is ready to publish.** `pod install` fetches the iOS core from
+  the GitHub Release and checks the checksum the release pins, so the npm
+  package stays around 120 KiB; `release-publish.yml` gains an npm job
+  (trusted publishing, provenance), off until the maintainer enables it — see
+  `bindings/react-native/RELEASING.md`.
+
+- **Applications can manage model storage from every binding.** Swift, Kotlin,
+  Python, Unity C#, and Dart now expose aggregate cache status, physical entry
+  details, preferred paths, ready-model IDs, per-model deletion, and full cache
+  clearing. Lookups and per-model deletion validate identifiers
+  before constructing paths and removes registry, extraction, direct Hugging
+  Face, and owned Hub-cache data without touching sibling models (#505).
+  Ready counts exclude incomplete extractions. Dart cache operations run off
+  the UI isolate, and Swift and Kotlin pair each call with an `…Async` twin.
+- **Multi-stage pipelines on Swift, Kotlin and Unity.** Those SDKs had no
+  pipelines at all — only Flutter and Rust did. `XybridPipeline` (`Pipeline`
+  on Unity) loads from YAML, a file or a bundle, lists its stages and runs
+  them; Swift and Kotlin add async conveniences (#502).
+- **A pipeline run returns every stage's output, not only the last one.** An
+  `ASR -> LLM -> TTS` run now exposes the transcript and the reply alongside
+  the audio: `result.stage("asr")?.text`. Each stage carries its own latency,
+  where it ran, and generation metrics for a language-model stage. In Rust,
+  `StageTiming` gains an `output` envelope. Flutter still returns the final
+  stage only.
+
+- **Live ASR on Swift, Kotlin and Unity.** Those SDKs could transcribe a
+  finished buffer but had no live-capture surface at all — only Flutter did.
+  `model.stream(config)` now opens a session: feed microphone PCM in, read
+  partial transcripts out of a pushed stream (`AsyncStream` on Swift, `Flow`
+  on Kotlin, `IAsyncEnumerable` on C#, an iterable on Python), then `flush()`
+  for the full transcript or `cancel()` to discard. Voice-activity chunking is
+  configurable, and audio is PCM float32 mono 16 kHz.
+
+- **Download progress with bytes, on every surface.** `DownloadStatus` now
+  carries `downloaded_bytes` and `total_bytes` alongside the fraction, so apps
+  can render megabytes, speed and time remaining instead of a bare percentage.
+  The fraction is aggregated across *all* of a model's artifacts, never moves
+  backwards, and reaches 1.0 only once the model is actually ready.
+- **A download handle, separate from loading.** `ModelLoader::start_download()`
+  (Rust), `XybridDownload` (Swift / Kotlin / C# / Python) and
+  `ModelLoader.download()` / `StartDownload()` start the transfer in the
+  background and hand back something to watch — which the blocking `load` call
+  never gave the native bindings. The later `load` hits the cache and returns
+  at once.
+- **Pushed progress streams on the native bindings.** Built on BoltFFI 0.30's
+  stream primitive, so `download.progress()` is an `AsyncStream` in Swift, a
+  `Flow` in Kotlin, an `IAsyncEnumerable` in C# and an iterable in Python.
+  `XybridModel.download_progress()` is the same stream for a speculative load
+  (issue #504). Flutter keeps `loadWithProgress()` / `downloadProgress()`,
+  whose events gain the new byte fields.
+- **Cancellable downloads.** `cancel()` stops a transfer within one chunk read
+  and discards the partial file; the status moves to a new `Cancelled` state.
+
+### Fixed
+
+- **Shipped SDKs report their real version.** The iOS XCFramework, the Android
+  AAR, the CLI and Flutter's precompiled Android library are built with Bazel,
+  which filled the SDK's compiled-in version with `0.0.0` — so `version()`,
+  every registry request and every telemetry event said `0.0.0`. Bazel now
+  reads the version from `Cargo.toml`, like Cargo does.
+- **Multi-file models no longer reset the progress bar.** A vision model plus
+  its projector ran 0→1 once per file; progress is now scaled against the
+  summed size of every artifact, so finishing the first file reads its real
+  share. The speculative path no longer parks at 99.99% from the second file on.
+- **A retry no longer rewinds the bar.** The reported byte count is a
+  high-water mark, so when a retry has to restart a file the bar stalls through
+  the re-transfer instead of snapping back to 0.
+- **Progress updates are throttled** to roughly ten a second instead of one per
+  8 KiB chunk (~130,000 events per GB previously pushed across the FFI boundary).
+- **Hugging Face downloads report real bytes.** Progress there remains
+  file-count based (the Hub gives no sizes up front, so `total_bytes` is null),
+  but `downloaded_bytes` is now exact.
+- **Large models download on slow links.** A 5-minute limit covered the whole
+  transfer, so a model bigger than five minutes of the link's bandwidth could
+  never finish (229 MB needs about 6 Mbit/s), and each of the three attempts
+  restarted at byte 0. The limit is now a 30-second stall timeout: a slow link
+  takes as long as it needs, a silent connection is dropped quickly, and a
+  retry resumes from the partial file. A resumed range must carry the original
+  file's `ETag` (Hugging Face's CDN ignores `If-Range`), or the download starts
+  over rather than splicing two versions. Only attempts that add no bytes count
+  against the retry budget.
+- **Progress for models with no declared size.** A single-file model whose
+  registry entry has `size_bytes = 0` (such as `lfm2.5-350m`) sat at 0% until
+  the end. The server's announced size now fills in the total, and also
+  replaces a stale registry size.
+- **A progress frame at 0 bytes as the transfer starts**, so an app can tell a
+  download that is connecting from one that is stuck.
+- **Flutter: native logs on iOS without an API key.** Logging started only from
+  `initSdkCacheDir` (Android-only in `Xybrid.init`), `setApiKey` or telemetry
+  setup; it now starts inside `Xybrid.init` on every platform.
+- **Flutter: a panic no longer looks like success.** A panic on a load or
+  streaming worker thread closed the Dart stream with no event; it now arrives
+  as the stream's `Error` event.
+- **`fetch_extracted` resolves once**, not twice, for bundle models.
+- Pipeline stages are now named by their YAML `id:` rather than the model ID,
+  so per-stage latencies and results match `stageNames()` (#502). Telemetry
+  stage names change the same way.
+
+### Changed
+
+- **Android (Kotlin, React Native) uses the fastest CPU instructions each phone
+  has.** The arm64 AAR used to run llama.cpp and whisper.cpp on plain Armv8.0
+  code on every device. It now ships llama.cpp's CPU variants and picks the best
+  one the device supports when the SDK loads — dot-product and fp16 on
+  Cortex-A55/A75 and later, int8 matrix multiply on Armv9-era cores, the old
+  baseline everywhere else. In the app on a Pixel 8 with LFM2.5-230M, prompt
+  processing goes from about 210 to about 600 tokens/s, generation from about
+  41 to 65 tokens/s, and speech recognition gets about 15% faster. The arm64
+  native libraries grow by about 4 MB.
+- **Breaking (Rust):** `pipeline::StageTiming` has a new public `output`
+  field, so code that builds one with a struct literal must set it.
+- **Breaking (Rust):** `ModelLoader::load_with_progress`,
+  `RegistryClient::fetch` and `RegistryClient::fetch_extracted` take a
+  `Fn(DownloadStatus)` callback instead of `Fn(f32)`. Read `status.progress`
+  for the old value.
+- **Breaking (bindings):** `DownloadState` gained a `Cancelled` variant, which
+  affects exhaustive `switch` / `when` statements over it.
+- `xybrid fetch`, `run`, `bundle` and the REPL drive their progress bars from
+  the reported byte counts rather than back-computing them from the fraction,
+  so a multi-file model's bar is correctly sized.
+- `tokenizers` 0.22.2 → 0.23.2. Token ids and decoded text are unchanged.
+  Encoding a MiniLM input past its 128-token truncation is ~24% faster;
+  loading a `tokenizer.json` and short encodes move by 3% or less.
+- Text models (the `Tokenize` step) and ONNX Whisper decoding (the
+  `WhisperDecode` step) parse `tokenizer.json` once per loaded model instead
+  of on every run. One all-MiniLM-L6-v2 embedding drops from ~43 ms to ~35 ms
+  on an M4 Max; the Whisper decode step from ~28 ms to a few microseconds.
+  A `tokenizer.json` replaced on disk is picked up on the next run.
+
 ### Planned
 
 - **Multimodal KV-prefix reuse**: the per-frame prefill cost lever for live vision — **deferred** from 0.2.0, not yet implemented.
+
+---
+
+## [0.9.0] - 2026-09-20
+
+Policy-routed hybrid inference lands: a pipeline stage can carry a local GGUF
+model and an OpenAI-compatible cloud leg at the same time, and a compiled policy
+bundle decides which leg serves each request. Binding downloads also get
+substantially smaller and, for the first time, visible in the build log.
+
+This release changes a few Rust orchestration signatures (`Orchestrator::with_engines`
+is removed, `Orchestrator::with_all` no longer takes policy/routing engines, and
+`PolicyRule.action` is now a `PolicyAction`). The Swift, Kotlin and Unity SDKs gain
+model-release controls; Flutter, React Native and Python are unchanged.
+
+### Added
+
+- **Policy DSL and cloud preference.** Bundles are compiled at load time and
+  support `input.kind`, `input.text` (`contains` / `matches` / `==` / `!=`),
+  `input.text_len`, `metrics.battery_level`, `metrics.cpu_pct`,
+  `metrics.memory_pressure`, `metrics.thermal_state` and bare `true` / `false`;
+  actions are `allow`, `deny`, `route_cloud` (alias `prefer_cloud`) and
+  `redact`, plus `deny_cloud_if` / `route_cloud_if` shorthand lists. Invalid
+  rules are rejected at load and a failed reload keeps the previous bundle.
+- **Hybrid stages in `xybrid run`.** `target: auto` with a `provider` resolves
+  the local bundle *and* keeps the cloud leg; `cloud_model` names the model
+  sent to the provider; shared `system_prompt` / `temperature` / `max_tokens`
+  / `top_p` apply to both legs with the same precedence (input metadata, then
+  YAML, then template defaults). Unknown targets or providers are errors.
+- **OpenAI-compatible direct providers and DeepSeek thinking mode.**
+  `backend: direct` for OpenAI, DeepSeek, OpenRouter and Custom uses the
+  gateway transport at the provider's documented base URL with
+  `$<PROVIDER>_API_KEY`; `thinking: enabled|disabled` is a typed request
+  option serialized as DeepSeek's `"thinking": {"type": ...}`. Batch and SSE
+  share one request-body builder.
+- **`Backend` in CLI results** (`template-executor` vs
+  `cloud:<provider>:gateway`) and `StageExecutionResult.adapter`, so a routing
+  label can be checked against what actually ran.
+- `OrchestrationAuthority::resolve_stage` and `load_policies`,
+  `StageResolution`, `PolicyAction`, `PolicyRoute`, `ThinkingMode`,
+  `CompletionRequest::with_thinking`, `MockRuntimeAdapter::with_name` /
+  `captured_inputs`.
+- Primary example `crates/xybrid-cli/examples/hybrid-platform.yaml` uses a
+  Xybrid API key and platform-held provider credentials. The separate
+  `hybrid-deepseek.yaml` example supports direct-provider testing. Both use
+  policies under `crates/xybrid-cli/examples/policies/`, alongside the
+  `test-policy-routing` workflow that drives the real binary through a policy
+  with a real local model and a local fake DeepSeek endpoint.
+- **Model-release controls on Swift, Kotlin and Unity.** `releaseMemory()`,
+  `setAutoRelease(_:)` and `isAutoReleaseEnabled` (Kotlin: `@JvmStatic` members on
+  `object Xybrid`, `releaseMemory` returning `Int` so the Java name is not mangled;
+  Unity: `ReleaseMemory()`, `SetAutoRelease(bool)`, `IsAutoReleaseEnabled` on
+  `XybridClient`). These were exported by `xybrid-bolt` and reachable from Flutter,
+  but missing from every other hand-written wrapper.
+
+### Changed
+
+- **Apple: smaller `XybridFFI.xcframework`.** The Swift package's binary target is now
+  built with fat LTO (`--config=rust-lto`, shared with the Flutter precompile lane), so
+  each slice carries only the Rust code reachable from the exported FFI functions.
+  Measured: release zip 99.9 MB -> 63.6 MB; device slice 176 MB -> 117 MB, simulator
+  slice 171 MB -> 111 MB. All 91 functions declared in `xybrid-bolt.h` remain exported.
+  PR CI builds the XCFramework with the same config, so the Swift wrapper is compiled
+  and unit-tested against exactly what ships.
+- **Flutter: precompiled binaries are downloaded gzip-compressed.** The release lane
+  publishes every native library as-is and as `<asset>.gz`, each with its own ed25519
+  signature; cargokit prefers the compressed form, verifies it *before* decompressing,
+  and falls back to the uncompressed asset if the compressed one is missing (older
+  releases) or fails verification. Measured: iOS static library 119.2 MB -> 33.6 MB,
+  Android arm64 26.9 MB -> 9.5 MB; verify + unpack costs 0.6 s. The shared cache stores
+  the compressed form, so it shrinks by the same factor. `verify-binaries` also checks
+  that each compressed asset decodes to its uncompressed twin. A publisher re-run over a
+  partial release derives the missing assets from the already-published, signature-
+  verified binary instead of this run's rebuild, deletes unusable orphans (a binary
+  without its signature), and never signs bytes it cannot verify.
+- **Flutter: precompiled binaries are cached per machine, not per app.** cargokit
+  keeps verified downloads in `~/.xybrid/cache/precompiled/<crate-hash>/`, so
+  `flutter clean` and new projects copy the native library locally instead of
+  downloading it again. Each reuse re-verifies the ed25519 signature against the
+  package's pinned key; a corrupted or swapped entry is deleted and re-downloaded.
+  Entries unused for 90 days are pruned. `XYBRID_PRECOMPILED_CACHE_DIR` relocates
+  the cache (e.g. a CI-persisted path) or, set empty, disables it. Downloads into
+  the app's build directory are now written atomically.
+- **Flutter: precompiled-binary downloads are visible in the build log.**
+  cargokit now logs at INFO which native library it downloads, its size, and
+  the source URL, then progress every 10 s and a size/time/throughput summary;
+  each target also reports whether its binary was downloaded or reused from
+  cache. Previously all of this was FINE-level, so a first build that fetched a
+  ~180 MB static library was silent for minutes and read as a Rust compile.
+- **Smaller Flutter precompiled natives.** The `release/v*` precompile lane now
+  builds the Flutter staticlib/cdylib with fat LTO (`--config=flutter-precompile`).
+  Measured on the darwin staticlib: macOS 175 MB -> 112 MB, iOS 181 MB -> 119 MB;
+  the Rust objects shrink 79 MB -> 25 MB, the remainder is the bundled ONNX Runtime.
+  Cuts the first-build download and `-force_load` link for pub.dev consumers.
+- **Policy is a dispatch invariant.** Every stage decision evaluates the
+  policy once against the actual input and one device snapshot; a denial (or
+  a required transform) restricts the target to the device ahead of explicit
+  `cloud` / `server` targets, model availability, hysteresis, reliability
+  history, device stress and remote advice, and is re-applied immediately
+  before dispatch. A denied stage with no usable local leg fails locally
+  instead of running on cloud. `RemoteAuthority` consults advice only for
+  decisions the policy, an explicit target, availability or a policy
+  preference did not already settle, and never for a denied input.
+- **Credentials are scoped to the destination.** An explicit `api_key`
+  (literal or `$ENV`) always wins and never falls through; the Xybrid platform
+  key is sent only to the configured platform gateway origin (exact
+  scheme/host/port); a provider key only to that provider's origin; any other
+  endpoint — including a self-hosted gateway reached via `gateway_url` — is
+  anonymous unless `api_key` is set. Point the platform at such a gateway with
+  `init().gateway_url(..)` / `set_gateway_url`, `XYBRID_GATEWAY_URL` or
+  `set_platform_url` to keep the platform key flowing.
+- **The executor dispatches on the routing target**, not on the presence of a
+  provider. A hybrid stage routed local whose bundle is missing or invalid
+  errors instead of falling back to another adapter or to cloud; local
+  fallback never selects the cloud adapter and vice versa.
+- `--dry-run` decides the first stage through the same authority (and honours
+  `--policy`) at the current device snapshot; later stages print UNKNOWN
+  instead of fabricated outputs.
+- `Orchestrator::with_engines` removed; `Orchestrator::with_all` no longer
+  takes policy/routing engines; `PolicyRule.action` is a `PolicyAction`;
+  `PolicyResult` gains `route`; `CompletionRequest` gains `thinking`.
+- The SDK streaming fast path makes one `resolve_stage` decision (one policy
+  evaluation, one resource snapshot) instead of separate policy and target
+  calls.
+- **BoltFFI 0.29.3 -> 0.30.1**, with `--deny-skipped` wired into all four binding
+  generators so a dropped declaration fails the build instead of shipping a quietly
+  smaller surface. The Kotlin bindings gain KDoc (0.30 pipes Rust doc comments into
+  generated output) and the Python wire layer is reshaped, so its pure-Python half and
+  compiled bridge move together.
+- **Apple binding generation now has a drift gate.** `gen-bolt-bindings.sh --check`
+  regenerates into a staging directory and fails on any disagreement with the crate;
+  an `apple-bolt-drift` CI job runs it. Kotlin, Python and Unity already had one, so a
+  regenerated Swift binding or C header could previously disagree with the crate and
+  nothing would fail.
+
+### Fixed
+
+- **Flutter iOS: builds from pub.dev no longer download an unused ONNX Runtime, and no
+  longer need `xz`.** The precompiled library already contains ONNX Runtime and nothing in
+  the podspec links a separate copy, yet every iOS build fetched a ~17 MB xcframework
+  (plus a ~9 MB simulator slice, 154 MB on disk) into `~/.xybrid/cache/ort-ios/`. The
+  simulator path also aborted with "xz is required" on any Mac without Homebrew `xz`,
+  which macOS does not ship. `build_pod.sh` now resolves ONNX Runtime only where a source
+  build is possible (the monorepo), decided by `source_build_possible.sh`, the shell twin
+  of cargokit's existing rule.
+- `Orchestrator::load_policies` (and therefore `xybrid run --policy`) wrote
+  into an engine nothing consulted, so policies never affected routing.
+- The CLI mapped any provider other than openai/anthropic/google to OpenAI, so
+  `provider: deepseek` silently called the wrong API.
+- `Orchestrator::new()` / the SDK `Pipeline` served cloud stages from a fake
+  adapter that slept 50 ms and returned `cloud-output-<text>`; the real
+  OpenAI-compatible adapter is registered now, and a provider-less cloud stage
+  fails honestly.
+- `xybrid_sdk::init().gateway_url(..)` / `set_gateway_url` (and Flutter's
+  `Xybrid.setGatewayUrl`) wrote an SDK-local cell that no pipeline read, so an
+  SDK pipeline cloud stage without a stage-level `gateway_url` was sent to the
+  ambient/production gateway — with the Xybrid bearer key — instead of the
+  configured one. The setting now lives in the core cell
+  (`xybrid_core::cloud::set_xybrid_gateway_url`), consulted ahead of
+  `XYBRID_GATEWAY_URL`, and a loopback regression test asserts the receiving
+  endpoint.
+- `input.kind == "<v>"` matched a text payload equal to the literal.
+- Shared YAML generation options only reached the cloud leg; the local
+  template executor now receives them too.
+- `backend: direct` with `anthropic` ignored the stage's `api_key` and
+  `gateway_url`; both now reach the native client. Google and ElevenLabs,
+  which have no native direct client, are rejected when the bundle loads
+  instead of failing at request time.
+- An HTTP 200 with no answer text (empty `content`, no choices) is a
+  non-retryable parse error instead of a silent empty success.
+- BoltFFI 0.29.3 silently dropped `release_memory`, `set_auto_release` and
+  `is_auto_release_enabled` from the Swift and C# surfaces and from the C header,
+  while emitting them correctly for Kotlin. 0.30.1 emits all three.
+- The pinned `boltffi_cli` in `test-ci.yml` had drifted to 0.25.3 against a 0.29.3
+  runtime — exactly the skew its own comment warns about. The rust-cache key now
+  carries the CLI version, because `which boltffi ||` short-circuits on a cached
+  binary and would otherwise keep serving the old CLI after a bump.
+
+---
+
+## [0.8.0] - 2026-09-08
+
+Desktop model loading can reuse weights already present in the shared Hugging
+Face cache, macOS gains a native Core ML runtime adapter, and the Kotlin AAR is
+callable on Android. Apple token streams also preserve producer
+backpressure and enforce one-shot consumption.
+
+There are no intentional breaking API changes in this release.
+
+### Added
+
+- **Reuse the shared Hugging Face cache on desktop.** Before downloading model
+  files, the SDK probes the standard Hub cache roots, resolves mutable
+  revisions authoritatively, and reuses matching snapshot files or
+  content-addressed blobs. Missing or unusable files fall back to the normal
+  download path, while dangling materialized symlinks heal automatically
+  (#536).
+- **Native Core ML execution on macOS.** The Core ML runtime adapter now loads
+  compiled models, maps tensor inputs and outputs, and releases per-load
+  compiled bundles with their model lifetime (#548).
+- **Sentence-transformer ranking example.** The `sentence_ranker` example
+  demonstrates embedding text with `all-MiniLM-L6-v2`, cosine scoring, and
+  ranked output, with its unit tests included in CI (#550, #559).
+
+### Fixed
+
+- **The published Kotlin AAR now contains a callable JNI library.** Its native
+  filename matches `System.loadLibrary("xybrid_bolt")`, and the Bazel link
+  includes every generated `Java_ai_xybrid_Native_*` trampoline over the Bolt
+  C ABI. Android CI compares the final ELF exports with the generated JNI
+  source and executes a real JNI round trip on an emulator, so a filename-only
+  or C-ABI-only artifact cannot ship again (#530, #555).
+- **Apple token streams preserve backpressure.** `streamTokens` no longer lets
+  the native producer outrun a slow consumer, stream cleanup stays off the
+  cancelling thread, and each stream can be consumed only once (#549).
+
+---
+
+## [0.7.0] - 2026-08-28
+
+Streaming tool loops now keep both live token delivery and conversation history.
+The terminal token carries parsed calls plus the raw assistant turn needed for
+the continuation, and every text execution path accepts that continuation.
+Separately, apps can opt into releasing idle models under memory pressure; an
+evicted model reloads itself transparently on its next use.
+
+**Upgrade notes.** `PartialToken`, the SDK `StreamToken`, and the FFI facade
+`StreamToken` gain `tool_calls` and `raw_text`. Code using their constructors is
+unchanged, but external Rust code that builds these public types with struct
+literals must populate the new fields. Image-bearing tool continuations remain
+unsupported because their embeddings cannot be reconstructed from replayed
+text.
+
+### Added
+
+- **Tool calling works in a streaming chat.** A tools-bearing streaming run now
+  halts at the call boundary and hands back typed calls: the terminal stream
+  token carries `finish_reason: "tool_calls"`, the parsed `tool_calls`, and
+  `raw_text` (the turn's output *with* its protocol block, which is what the
+  continuation replays). Nothing needs parsing on the caller's side — call
+  blocks were already suppressed from the token feed. Exposed on every stream
+  token: Rust, Swift, Kotlin, Python, Unity C#, and Dart. Every foreign binding
+  also exposes the idiomatic `hasToolCalls` / `has_tool_calls` convenience on
+  results and stream tokens (#542, #546).
+- **`tool_results` continuations run on every text path.** `execute_with_context`,
+  `execute_streaming`, and `execute_streaming_with_context` compose the
+  continuation instead of rejecting it, so a chat screen keeps both its history
+  and its token-by-token output across a tool turn. Backed by a new
+  `LlmBackend::generate_raw_streaming`. Reference loop:
+  `crates/xybrid-core/examples/functiongemma_tools_streaming_context.rs` (#542).
+- **Idle models can release their memory without invalidating their handles.**
+  `release_memory()` evicts least-recently-used idle models and skips busy runs;
+  the next use reloads an evicted model from disk transparently. Automatic
+  release is opt-in through `ModelLoader::with_auto_release` or the
+  process-global `set_auto_release`, and only runs before a load when the device
+  reports memory pressure. The explicit release call works regardless of that
+  setting. The Rust, BoltFFI, Python, and Dart surfaces expose the controls
+  (#539).
+
+### Fixed
+
+- **Cloud fallback no longer discards the caller's `GenerationConfig`.**
+  `run_streaming_with_fallback` handed the cloud adapter the untouched
+  envelope, and that adapter reads its request settings from envelope metadata
+  alone — so `max_tokens`, `temperature`, `top_p`, and `stop_sequences` were
+  dropped and the gateway answered with its own defaults. The run still
+  succeeded with plausible output, so nothing signalled the loss. All four now
+  reach the cloud leg. Metadata already on the envelope still wins: it targets
+  the cloud leg specifically, while `GenerationConfig` describes the run in
+  general.
+- **Stop sequences survive the metadata bridge.** `stop_sequences` crosses the
+  envelope as a JSON array now, not a comma-delimited string. The old encoding
+  corrupted the most common values there are: `"\n\n"` trimmed away to empty
+  and was dropped, so a run that should have stopped at a blank line continued
+  to `max_tokens`; `"\nUser:"` arrived as `"User:"`; anything containing a
+  comma was split in two. The local leg kept the caller's exact values, so the
+  two legs stopped on different text. Local and cloud now share one encoder and
+  one parser; hand-written comma-separated metadata is still read.
+- **`top_p` and `stop_sequences` reach cloud at all.** `CloudRuntimeAdapter`
+  never read either from metadata, so both were dropped on *every* cloud path
+  — speculative serving included — even though the gateway request body has
+  always serialised them.
+
+### Changed
+
+- The only tool-continuation shape that still fails closed is an
+  **image-bearing conversation** — a continuation replays prior turns as a
+  composed text prompt, and image embeddings cannot be re-evaluated from text.
+  The error message and the tool-calling guide now say that it is a property of
+  the replay mechanism rather than an unfinished path (#542).
+
+---
+
+## [0.6.0] - 2026-08-25
+
+Tool calling reaches every binding, and an external `cargo build --features
+llm-llamacpp` stops compiling llama.cpp. FunctionGemma joins the local
+tool-calling backends, tool calls cross the FFI boundary into Swift, Kotlin,
+Python, Unity C# and Dart, and `supportsToolCalling` lets an app gate its tool
+UI on what a bundle actually declares. Separately, `xybrid-llama-sys` resolves a
+prebuilt, SHA-256-verified llama.cpp slice over plain HTTPS — no oras, no
+environment variable, no CMake — turning the dominant cold-build cost from
+roughly twenty minutes into a download.
+
+**Upgrade notes.** The HuggingFace cache moves to a repository-hash layout, so
+caches written by 0.5.0 and earlier are not reused: the next
+`from_huggingface(...)` load re-downloads the model, and the old copy stays on
+disk until it is evicted. It remains listed under its raw on-disk label
+(`owner--repo` under `hf/`, `models--owner--repo` under `hf-hub/`) and is
+removed by a targeted eviction on that label. Kotlin callers should drop
+`import ai.xybrid.reasoningContent` — `reasoningContent` is now a member of
+`XybridResult` rather than an extension property, which is source-compatible at
+the call site but needs a recompile against the new AAR.
+
+### Added
+
+- **Prebuilt llama.cpp for a plain `cargo build`.** `xybrid-llama-sys` resolves
+  its native archives in three steps — an explicitly staged
+  `XYBRID_NATIVES_PREBUILT_DIR/<target>`, then a slice named in the generated
+  `natives-manifest.txt`, then the CMake source build. The middle step is new:
+  it fetches the layer over plain HTTPS from `ghcr.io/xybrid-ai/llama-natives`
+  and verifies its SHA-256, needing no oras, no environment variable and no
+  CMake, which takes the dominant cold-build cost for an external
+  `--features llm-llamacpp` consumer from roughly twenty minutes to a download.
+  Slices are cached by digest under `$CARGO_HOME/xybrid-natives/` and shared
+  across projects. Every miss falls through to the source build, so the fast
+  path can only fail to accelerate a build, never break one; the manifest pins
+  the sha256 of `build.rs`, `wrapper.cpp`, `wrapper.h` and the llama.cpp commit,
+  so a local edit to any of them disarms every row until CI republishes. Set
+  `XYBRID_NATIVES_FORCE_SOURCE=1` to opt out (#526).
+- **FunctionGemma tool calling.** The local llama.cpp backend recognizes
+  FunctionGemma's call protocol, including its space-separated form, alongside
+  the existing tool-calling models (#512).
+- **Tool calls cross the FFI boundary.** Tool definitions travel out on
+  `RunOptions` and parsed calls come back on the result, so Swift, Kotlin,
+  Python and Unity C# callers drive a tool loop turn by turn — the caller
+  executes the tool and issues another `run`, with no cross-boundary callback
+  (#513).
+- **`supportsToolCalling` on every binding.** `XybridModel` surfaces the
+  bundle's `tool_calling` metadata flag as an advisory tri-state — `null` means
+  the bundle says nothing — so an app can gate its tool UI on model capability.
+  Available on Swift, Kotlin, Python, Unity C# and Flutter. Enforcement stays at
+  run time: a tools-bearing request against a model whose chat template has no
+  tool support fails either way (#515).
+- **Grammar, `jsonSchemaToGbnf` and `reasoningContent` in Dart.** All three had
+  reached the generated layer and stopped at the hand-written Flutter wrapper.
+  `GenerationConfig.grammar` now passes through, the greedy and creative presets
+  take an optional grammar so the usual extraction shape is one call,
+  `jsonSchemaToGbnf` is re-exported, and `XybridResult.reasoningContent` is
+  readable. The Dart unit tests under `bindings/flutter/test` also run in CI for
+  the first time (#511).
+- **`TemperatureSample` postprocessing step.** Pipeline templates can sample a
+  token from logits with temperature, optional top-k and optional top-p, rather
+  than taking the argmax — sampling from the final sequence position, with
+  temperature zero preserved as exact argmax (#521).
+- **A runnable Flutter example app.** `xybrid_flutter` ships a real
+  single-screen app in `example/` instead of a snippet file, so a consumer of
+  the published package has something to run (#525, #152).
+- **Reasoning text as a typed field on the Bolt bindings.** `XybridResult`
+  gains `reasoningContent`, carrying what a thinking model emits separately
+  from its answer, on Swift, Kotlin, Python, and Unity C#. It is appended last
+  on the wire — `#[data]` PODs serialize in declaration order — and the
+  envelope keeps its `reasoning_content` metadata, so a consumer reading that
+  metadata is unaffected. Each generator's decoder probes for the tail before
+  reading it and falls back to the metadata when it is absent (#508).
+- **Conversation history readback.** `ConversationContext.history()` returns
+  the turns a context holds, excluding the persistent system envelope, on
+  Swift, Kotlin, Python, and Unity C# (#508).
+- **Revision-pinned HuggingFace loading.** `from_huggingface_with_revision`
+  resolves a branch, tag, or commit SHA to an immutable commit and pins the
+  load to it. Pinned and mutable refs occupy separate cache namespaces, so
+  `main` and a commit of `main` no longer alias, and a resolved revision that
+  is already materialized still loads when the Hub is unreachable (#508).
+- **The resolved default generation config.** `defaultGenerationConfig` returns
+  what a `run*` call uses when given no explicit config — template
+  `generation_params` layered over global defaults, including the
+  reasoning-budget floor — so a caller building an explicit config can start
+  from the model's own defaults rather than `GenerationConfig::default()`. It
+  no longer requires an LLM backend feature to be compiled in, and reads
+  without waiting on an in-flight run (#508).
+
+### Changed
+
+- **The HuggingFace cache is keyed by repository hash.** Both `hf/` and
+  `hf-hub/` directories move from a slash-to-`--` encoding (`owner--repo`,
+  `models--owner--repo`) to `repo--<sha256(repo)>`, with the repository id
+  recorded in a `.repo-id` marker inside each directory. The old encoding was
+  not injective — `a/b--c` and `a--b/c` both wrote to `a--b--c` — so two
+  unrelated repositories could share one cache. Directories under the old
+  layout are not adopted, because their label cannot be decoded back to a
+  repository id; they stay visible to cache listing and evictable under that
+  raw label. See the upgrade note above (#508).
+- **Envelope metadata crosses the FFI boundary in a deterministic order.**
+  `XybridEnvelope.metadata` is sorted by key rather than emitted in `HashMap`
+  iteration order, so two conversions of the same envelope produce identical
+  wire bytes (#508).
+
+### Fixed
+
+- **Streaming stop-boundary panics.** Three fixes in `StreamingTextFilter`'s
+  `last_emitted_len` invariant: a stop sequence completing across chunks could
+  land the emission boundary below already-emitted text, after which the
+  cumulative slice went out of bounds and panicked mid-stream. The boundary is
+  now clamped after a complete-stop truncation, and the potential-stop scan
+  holds the longest matching tail prefix per pattern and the earliest hold
+  across patterns, rather than the shortest prefix of the first pattern that
+  matched — the under-hold that let a later chunk complete a stop behind the
+  boundary (#518).
+- **A second ggml bundled into staticlib targets.** `flutter build macos` failed
+  on the example app with 1287 duplicate `ggml_*` symbols: one Rust staticlib
+  carried two copies, from `whisper-cpp-sys`'s deliberate ggml re-emission on
+  top of the one llama.cpp already links (#528).
+- **Published native slices are portable.** llama.cpp's `GGML_NATIVE` defaults
+  on for non-cross builds, so each published slice inherited the CPU of the
+  runner that built it — the x86_64 Linux slice carried AVX-512 and AMX, and the
+  aarch64 Linux slice carried SVE, either of which is an illegal-instruction
+  trap on a consumer without them, while the cross-built darwin x86_64 slices
+  had the inverse problem and shipped scalar ggml. Slices now pin an explicit
+  x86-64-v3 baseline (SSE4.2/AVX/AVX2/BMI2/FMA/F16C) on non-Android x86_64 and
+  plain armv8-a on aarch64, so no consumer traps and the cross-built slices
+  regain SIMD (#534).
+- **Windows slice publishing and darwin cross-arch linking.** GNU tar on the
+  Windows runner read the `D:` drive-letter prefix as a remote host, so neither
+  `x86_64-pc-windows-msvc` slice ever published; and llama.cpp's vendored
+  cpp-httplib defaults `LLAMA_OPENSSL` on, so the arm64 macOS runner
+  cross-building x86_64 picked up an arm64 libcrypto and failed to link. The
+  slices ship only static archives, so tool-binary TLS is now off (#529).
+- **`clippy::chunks_exact_to_as_chunks` under Rust 1.98.** Constant-size slice
+  chunking moves to `as_chunks`, restoring a green `-D warnings` build on the
+  stable toolchain (#522).
+- **crates.io publish ordering.** The whisper crates publish before
+  `xybrid-core`, which is what broke v0.5.0's publish run, and the generated
+  Python binding's `PACKAGE_VERSION` is synced by the version bump rather than
+  being left behind for `gen_python_bolt.py --check` to reject (#488, #490).
+
+### Performance
+
+- **Metal for whisper.cpp on Apple silicon.** Measured inference latency drops
+  2.7-7.8x on an M1 Pro with no word-level regressions. Other targets stay on
+  CPU until measured independently (#491).
+- **Cached stream language detection.** A streaming session detects its language
+  once and reuses the result across windows instead of re-detecting per chunk
+  (#493).
+
+---
+
+## [0.5.0] - 2026-08-11
+
+Speech recognition moves off Candle and onto whisper.cpp, running on the same
+ggml that llama.cpp already links — 3.6x faster to a first partial on a Pixel 8
+for 0.2 MiB of binary, and the first time Linux and Windows have local Whisper
+at all. Candle is retired from all four platform presets as a result; the
+features remain opt-in, so this removes a default, not a capability. Live
+streaming ASR lands on Flutter with warm-up windowing and a span-reconciled
+transcript, every binding gains the speculative-cloud surface that 0.4.1 shipped
+Rust-only, all bindings move to BoltFFI 0.29.3 (the Python SDK is now generated
+rather than hand-ported), and desktop Linux gets an opt-in Vulkan build of
+llama.cpp.
+
+**Upgrade notes.** Registry model id `whisper-tiny` resolves to a
+SafeTensors/Candle bundle and no longer runs on a default build — use
+`whisper-tiny-ggml`, a multilingual Q5_1 GGML bundle served as its own id, or
+build with `--features candle`. The Python SDK now requires **Python >= 3.10**
+and ships one wheel per interpreter ABI.
+
+### Added
+
+- **whisper.cpp speech recognition on the shared ggml.** A three-layer stack
+  mirroring the llama.cpp one — `crates/whisper-cpp-sys` (raw FFI, compiled
+  with `cc` against llama's ggml headers, never whisper's bundled copy),
+  `crates/xybrid-whisper` (safe RAII handle, no `unsafe` on the public surface),
+  and a `WhisperCppRuntime` in core behind `ExecutionTemplate::GgmlWhisper`.
+  Measured on a Pixel 8 (5 s window, tiny.en Q5_1, 4 threads): 744 ms against
+  ~3.5 s for the Candle path. Note the container: whisper.cpp verifies
+  `GGML_FILE_MAGIC` and never moved to GGUF, so these are `ggml-*.bin` files
+  (#462).
+- **whisper.cpp is built by Bazel and enabled in every platform preset.**
+  `//:whisper` is a plain `cc_library` on `//:llama` rather than a second
+  `cmake()` target, so "exactly one ggml" is a property of the build graph and
+  CI fails if that stops being true. Cost on the stripped cdylib: +0.2 MiB
+  (#465).
+- **Live streaming ASR on Flutter**, with the rolling-window streaming API
+  bound through `flutter_rust_bridge` and a demo screen in the example app
+  (#453).
+- **Warm-up windows and a span-reconciled transcript for live streaming.** The
+  first chunks use growing windows (1.5 s, 3 s) instead of waiting for a full
+  5 s one, landing the first partial ~3.5 s sooner, and the accumulator tracks
+  the audio span each segment covers so overlapping windows replace rather than
+  repeat earlier text (#458).
+- **An `audio_ctx` streaming override**, threaded through core `StreamConfig`,
+  the SDK builder, and the Flutter binding, so a caller can trim the Whisper
+  encoder window without repackaging the model bundle. `None` keeps the bundle
+  default (#481).
+- **Speculative cloud, download progress, and result provenance on every
+  binding.** `ExecutionProvenance` on `InferenceResult` tells a device answer
+  from a gateway answer, `DownloadState`/`DownloadStatus` plus
+  `download_status`/`await_download`/`is_cloud_serving` expose the background
+  download, and `set_speculative_cloud` / `from_registry_speculative` /
+  `set_platform_url` reach Swift, Kotlin, Unity C#, Python, React Native, and
+  Dart. Progress is polled everywhere except Flutter, which gets a push
+  `StreamSink`: FRB sinks are safe, while boltffi's inline-closure return ABI
+  is not, so no closure crosses that boundary (#459).
+- **llama.cpp Vulkan builds for desktop Linux**: consumers can now set
+  `XYBRID_LLAMA_CPP_VULKAN=1` when building `platform-desktop` to compile the
+  bundled backend with `GGML_VULKAN=ON`; local LLM telemetry reports `vulkan`
+  for those builds. Windows is not supported yet — ggml builds its GLSL
+  compiler as a nested CMake project whose paths exceed Windows' 260-character
+  limit under cargo's `OUT_DIR`, so the build fails wherever the repo is
+  checked out. Every other target rejects the variable with a clear error.
+- **A Vulkan lane on the Bazel graph** (`--config=linux-vulkan`). The Linux CLI
+  builds from Bazel, which writes llama.cpp's cmake defines itself and never
+  reads `XYBRID_LLAMA_CPP_VULKAN` — so the environment variable above reaches
+  cargo builds only. The new `--//:vulkan` flag selects `//:llama_vulkan`,
+  mirroring how `--//:metal` selects `//:llama_metal`, and a CI job builds and
+  smokes the resulting CLI (Vulkan backend symbols present, `libvulkan.so.1` a
+  real link dependency). That target runs on the local machine rather than a
+  remote worker, because ggml's Vulkan build needs `glslc`, the Vulkan headers
+  and a host compiler where cmake runs, and the remote image has none of them.
+  Published Linux binaries are unchanged and stay CPU-only: a Vulkan build
+  requires a Vulkan loader on the machine that runs it, so it belongs in a
+  separate artifact rather than in place of the default one.
+- **A warning when a GPU offload request cannot be honored.** `gpu_layers`
+  defaults to 99 and llama.cpp keeps every layer on the CPU when no GPU backend
+  was compiled in, so until now the only symptom of a CPU-only build on a
+  machine with an idle GPU was that inference ran slowly. Model load now logs
+  this once, pointing at the platform's GPU build options (#485).
+- **A Device Logs guide** — where SDK logs land per platform (logcat tag
+  `xybrid`, unified-log subsystem `dev.xybrid.sdk`, host-registered logger on
+  desktop), the commands to read them, and what the telemetry-export and
+  registry-failover warnings look like (#457).
+
+### Changed
+
+- **Candle is retired from all four platform presets.** whisper.cpp supersedes
+  it for ASR at a fraction of the cost — measured on the stripped cdylib,
+  Candle is 1.3–1.9 MiB against whisper.cpp's 0.2 MiB, 6.5–9.5x its
+  replacement — and Whisper was its only live model here. The `candle*`
+  features stay declared and buildable as an opt-in. Consequence for callers:
+  the registry id `whisper-tiny` (a SafeTensors bundle) no longer loads on a
+  default build, and fails with a message naming both the feature and the GGML
+  alternative rather than a bare `Runtime 'candle' not configured`. The demos
+  and examples point at `whisper-tiny-ggml` (#476).
+- **whisper.cpp transcription is hardened**, with three user-visible changes:
+  bracketed non-speech annotations such as `[BLANK_AUDIO]` are suppressed
+  rather than emitted as transcript text (a caller-facing opt-out is tracked in
+  #483); timestamp tokens are decoded for audio longer than 30 seconds, so a
+  padded final window no longer repeats text past the end of the real audio;
+  and unsupported `prompt` metadata returns `InvalidInput` instead of being
+  silently ignored, without echoing the prompt back. Twelve real-model
+  regression cases move off Candle onto a checksum-pinned multilingual GGML
+  model, covering WER, window boundaries, 66-second input, per-request language
+  and translation, and the two behaviours above (#484).
+- **Streaming sessions share the model's loaded executor.** Each session used
+  to build its own, reloading whisper weights from disk on every open (~2.5 s),
+  and then ran a full silent warm-up inference even when the weights were
+  already resident. `ModelHandle.executor` is now shared, `ModelRuntime` gained
+  `is_loaded`, and the warm-up returns early when the executor is already warm,
+  so second and later sessions open with no hidden compute. Unloading mid-stream
+  swaps in a fresh executor rather than pulling weights out from under a running
+  transcription (#461, #464).
+- **BoltFFI 0.25.3 → 0.29.3.** Every exported C symbol is renamed
+  (`boltffi_set_api_key` → `boltffi_function_xybrid_bolt_set_api_key`), so all
+  generated bindings — Swift, Kotlin, Unity C#, Python — were regenerated
+  together; the wire format itself is unchanged. The Cargo package is renamed
+  `xybrid-bolt` → `xybrid_bolt` because 0.29's C# generator rejects the
+  hyphenated name; the cdylib and Bazel `crate_name` were already
+  `xybrid_bolt`, so no artifact moved. Unity's 576-line hand-ported inference
+  supplement collapsed to ~85 lines, since 0.29 emits the inference path 0.25.3
+  dropped.
+- **Python SDK on generated bindings.** The 1,900-line hand-ported ctypes wire
+  layer is gone; `xybrid/_bolt/` is boltffi output, regenerated by
+  `tools/scripts/gen_python_bolt.py` and byte-compared in CI. The SDK's
+  Pythonic surface (envelope factories, `result.text`, model properties, typed
+  `xybrid.ModelNotFound`-style exceptions) is unchanged for callers but now
+  lives in `xybrid/_sugar.py` and `xybrid/_errors.py`. **Breaking for the
+  distribution**: 0.29's Python target compiles a CPython extension rather than
+  emitting ctypes, so the SDK requires **Python >= 3.10** and ships one wheel
+  per interpreter ABI instead of a single `py3-none` wheel.
+- **Docs corrected for the Candle retirement.** Preset tables, platform
+  rationales, and every runnable example that named the now-unloadable
+  `whisper-tiny`; the `candle` feature-reference rows stay and now say
+  explicitly that they are opt-in. Also fills gaps that predate the change:
+  `asr-whispercpp` and `ExecutionTemplate::GgmlWhisper` were absent from these
+  docs despite shipping in every preset, telemetry's `backend` enum lacked
+  `whispercpp`, and the feature matrix claimed every preset is text-only when
+  they have carried the llama.cpp vision path for far longer (#479).
+
+### Fixed
+
+- **The READMEs claimed CUDA acceleration on Linux and Windows, which no build
+  provides.** `GGML_CUDA` is `OFF` on every target in both the cargo and Bazel
+  paths, `llm-mistral-cuda` is a marker feature whose backing crate is commented
+  out of the workspace, and Candle — the one component with a real CUDA path —
+  was retired from the platform presets. The hardware-acceleration table now
+  reads CPU for Linux (with Vulkan as a build-time opt-in) and CPU for Windows,
+  in all three translations (#485).
+- **A gateway request with no model no longer silently runs OpenAI.** Both
+  request builders fell back to `gpt-4o-mini`, so a caller who forgot to set a
+  model paid for a third-party provider and saw the resulting failure as an
+  opaque gateway 502 rather than a client bug. It is now an `InvalidInput`
+  error. The per-provider defaults stay, since there the caller has already
+  chosen the provider (#463).
+- **Swift and Kotlin SDKs register a native log sink.** `xybrid-bolt` never
+  registered a log backend, so every `log::warn!` in the SDK — telemetry send
+  failures, registry failovers — was discarded on those two SDKs, the same hole
+  #448 closed for Flutter (#452).
+- **The cargo-built CLI had no whisper.cpp on any platform.** Its manifest
+  re-listed its own backend sets instead of forwarding to the SDK presets, so
+  `asr-whispercpp` never reached it and only the Bazel-built CLI had ASR. It
+  now forwards, removing the drift class rather than this instance of it
+  (#476).
+- **`asr-whispercpp` is advertised in the registry client's backend list.** It
+  was missing from `ALL_FEATURES`, so the `backends=` header under-reported the
+  backend set for as long as the backend had existed (#476).
+- **Cross-compiling whisper.cpp gave bindgen the wrong sysroot.** A cargo
+  Android build — which is what cargokit does for Flutter — died on
+  `ggml.h:214:10: fatal error: 'stdio.h' file not found`, because libclang
+  resolves headers against the host sysroot. `xybrid-llama-sys` now emits
+  `cargo:ndk=<path>` and the whisper crate consumes it, keeping one
+  NDK-resolution implementation in the workspace; the Apple `-isysroot` and
+  simulator-triple handling come along in the same helper. CI missed it because
+  every Android lane goes through Bazel, which compiles committed bindings and
+  never runs bindgen (#468).
+- **`gen_python_bolt.py` no longer deletes the staged native artifacts.** It
+  pruned every file it had not generated, so regenerating removed the compiled
+  bridge and the cdylib beside it and broke `import xybrid`.
+- **`XYBRID_FEATURES` reaches the Python native build again.** The staged
+  cdylib comes from the wheel `boltffi pack python` builds, so features are now
+  forwarded to that build (`--cargo-arg`) instead of only to a separate
+  `cargo build` whose output was discarded.
+- **Three workflows no longer fail in every fork.** Unity Editor CI, the
+  Bazel Windows Flutter DLL smoke, and the weekly Build Natives cron each
+  assumed a non-`pull_request` event implies secrets are present, which is
+  false for a contributor syncing their fork's master and for inherited crons.
+  None of them gated anything here, but they buried real failures in forks
+  under noise a contributor cannot fix (#480).
 
 ---
 

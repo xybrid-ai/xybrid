@@ -1,612 +1,665 @@
 package ai.xybrid.reactnative
 
-// TurboModule implementation. Forwards every JS call into the Kotlin
-// wrapper that ships at `bindings/kotlin/src/main/kotlin/ai/xybrid/Xybrid.kt`,
-// which is itself a thin layer over the BoltFFI-generated bindings.
-//
-// Model handles are opaque string IDs (UUIDs). The native side keeps a
-// concurrent map of `id -> XybridModel`; `releaseModel` drops the entry and
-// closes the handle so the underlying Rust `Arc<XybridModel>` decrements and
-// frees.
-
-import ai.xybrid.Envelope
 import ai.xybrid.Xybrid
-import ai.xybrid.XybridAbortSignal
-import ai.xybrid.XybridEnvelope
+import ai.xybrid.XybridCancellationToken
+import ai.xybrid.XybridConversationContext
+import ai.xybrid.XybridDownload
 import ai.xybrid.XybridError
-import ai.xybrid.XybridGenerationConfig
 import ai.xybrid.XybridModel
-import ai.xybrid.XybridResult
-import ai.xybrid.XybridRunOptions
+import ai.xybrid.XybridPartialResult
+import ai.xybrid.XybridPipeline
 import ai.xybrid.XybridStreamEventKind
-import ai.xybrid.XybridStreamToken
+import ai.xybrid.XybridStreamingSession
 import ai.xybrid.XybridThermalState
-import ai.xybrid.XybridVoiceInfo
-import ai.xybrid.audioBytes
-import ai.xybrid.clearBatteryLevel
-import ai.xybrid.clearThermalState
-import ai.xybrid.embedding
-import ai.xybrid.initSdkCacheDir
-import ai.xybrid.jsonSchemaToGbnf
-import ai.xybrid.reasoningContent
-import ai.xybrid.setBatteryLevel
-import ai.xybrid.setBinding
-import ai.xybrid.setThermalState
-import ai.xybrid.success
-import ai.xybrid.text
-import android.util.Base64
+import ai.xybrid.partials
+import android.content.Context
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
-import com.facebook.react.bridge.ReactContextBaseJavaModule
-import com.facebook.react.bridge.ReactMethod
 import com.facebook.react.bridge.ReadableArray
 import com.facebook.react.bridge.ReadableMap
-import com.facebook.react.bridge.WritableMap
+import java.io.File
+import kotlin.math.roundToInt
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
-import java.io.File
-import java.util.UUID
-import java.util.concurrent.ConcurrentHashMap
 
-class XybridModule(reactContext: ReactApplicationContext) :
-  ReactContextBaseJavaModule(reactContext) {
+// The React Native TurboModule. Extending the Codegen-generated
+// `NativeXybridSpec` makes the compiler hold this class to
+// src/NativeXybrid.ts; each override decodes its arguments (XybridCodec),
+// calls the bolt Kotlin SDK from the `ai.xybrid:xybrid-kotlin` AAR, and
+// settles the promise with a typed `xybrid_*` code on failure.
+//
+// Blocking SDK calls (load, run, stream pulls, downloads, disk walks) run on
+// Dispatchers.IO; cheap getters settle inline. Every call that touches a
+// native object holds a lease on it (see XybridHandles), so disposing a
+// handle mid-call can never free memory the call is using.
 
+class XybridModule(reactContext: ReactApplicationContext) : NativeXybridSpec(reactContext) {
   private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-  private val models = ConcurrentHashMap<String, XybridModel>()
-  private val streams = ConcurrentHashMap<String, StreamEntry>()
+  private val handles = XybridHandles()
 
-  override fun getName(): String = NAME
-
-  // Released when the RN module is torn down (fast refresh, bundle reload,
-  // host teardown). Native model weights are hundreds of MB, so failing to
-  // close them promptly OOMs the device — cancel in-flight work and free
-  // every handle here. Streams are closed too: a live generation keeps a
-  // worker thread (and the model) alive until it is aborted.
+  // Module teardown (reload, host shutdown): stop in-flight work, then free
+  // every object as soon as the calls using it return.
   override fun invalidate() {
-    super.invalidate()
+    handles.forEachLive(XybridCancellationToken::class.java) { it.cancel() }
+    handles.disposeAll()
     scope.cancel()
-    // Close streaming sessions before their models: streamClose needs the
-    // still-alive model handle, and closing it unwinds the generation thread.
-    streams.values.forEach { it.model.streamClose(it.streamId) }
-    streams.clear()
-    models.values.forEach { it.close() }
-    models.clear()
+    super.invalidate()
   }
 
-  // -- Lifecycle --
+  // -- Settling promises ------------------------------------------------------
 
-  @ReactMethod
-  fun initialize(cacheDir: String?, promise: Promise) {
+  private inline fun now(promise: Promise, block: () -> Any?) {
     try {
-      // Register react-native as the binding identity *before* invoking
-      // Xybrid.init, which would otherwise lock in "kotlin" via its own
-      // setBinding call. set_binding is OnceLock-guarded so the first call
-      // wins; this ordering pins the registry header to react-native.
-      setBinding("react-native")
-      Xybrid.init(reactApplicationContext)
+      SdkSetup.ensureBase(reactApplicationContext)
+      promise.resolve(toJs(block()))
+    } catch (t: Throwable) {
+      reject(promise, t)
+    }
+  }
 
-      // Override the cache dir if the JS side supplied one. Otherwise
-      // Xybrid.init has already pointed it at <filesDir>/xybrid/models.
-      if (!cacheDir.isNullOrEmpty()) {
-        File(cacheDir).mkdirs()
-        initSdkCacheDir(cacheDir)
+  private fun background(promise: Promise, block: suspend () -> Any?) {
+    scope.launch {
+      try {
+        SdkSetup.ensureBase(reactApplicationContext)
+        promise.resolve(toJs(block()))
+      } catch (e: CancellationException) {
+        promise.reject("xybrid_cancelled", "The Xybrid module was torn down", e)
+        throw e
+      } catch (t: Throwable) {
+        reject(promise, t)
       }
+    }
+  }
+
+  /**
+   * The SDK reports a run stopped by its token as an inference error
+   * ("user_cancelled"); JS gets the dedicated `xybrid_cancelled` code.
+   */
+  private fun cancellationAware(error: Throwable, token: XybridCancellationToken): Throwable =
+    if (error !is BridgeException && error !is CancellationException && token.isCancelled()) {
+      XybridError.Cancelled("The run was cancelled")
+    } else {
+      error
+    }
+
+  private fun reject(promise: Promise, error: Throwable) {
+    val (code, message) = XybridCodec.rejection(error)
+    promise.reject(code, message, error)
+  }
+
+  /** Codec output (maps, lists, Doubles) → what `Promise.resolve` accepts. */
+  @Suppress("UNCHECKED_CAST")
+  private fun toJs(value: Any?): Any? = when (value) {
+    null, is Unit -> null
+    is Map<*, *> -> Arguments.makeNativeMap(value as Map<String, Any?>)
+    is List<*> -> Arguments.makeNativeArray(value)
+    is Int -> value.toDouble()
+    is Long -> value.toDouble()
+    is Float -> value.toDouble()
+    else -> value
+  }
+
+  // -- SDK configuration ------------------------------------------------------
+
+  override fun initialize(options: ReadableMap?, promise: Promise) {
+    try {
+      val what = "initialize options"
+      val o = options?.toHashMap() ?: emptyMap()
+      val cacheDir = XybridCodec.optionalString(o, "cacheDir", what).nonBlank()
+      SdkSetup.ensureBase(reactApplicationContext, cacheDir?.let(XybridCodec::filePath))
+      SdkSetup.configure(
+        SdkSetup.Runtime(
+          apiKey = XybridCodec.optionalString(o, "apiKey", what).nonBlank(),
+          gatewayUrl = XybridCodec.optionalString(o, "gatewayUrl", what).nonBlank(),
+          ingestUrl = XybridCodec.optionalString(o, "ingestUrl", what).nonBlank(),
+        ),
+      )
       promise.resolve(null)
     } catch (t: Throwable) {
-      promise.reject("xybrid_init", t.message, t)
+      reject(promise, t)
     }
   }
 
-  // -- Loaders --
-  //
-  // Bolt collapsed `XybridModelLoader.fromX(...).load()` into the
-  // `XybridModel` factories: the primary constructor loads from the registry,
-  // and `fromBundle` / `fromDirectory` / `fromHuggingface` are companion
-  // factories. Each loads eagerly (there is no separate `.load()` step).
+  override fun sdkVersion(promise: Promise) = now(promise) { ai.xybrid.version() }
 
-  @ReactMethod
-  fun loadFromRegistry(modelId: String, promise: Promise) {
-    runLoad(promise) { XybridModel(modelId) }
+  override fun hasApiKey(promise: Promise) = now(promise) { ai.xybrid.hasApiKey() }
+
+  override fun setProviderApiKey(provider: String, apiKey: String, promise: Promise) =
+    now(promise) { ai.xybrid.setProviderApiKey(provider, apiKey) }
+
+  override fun setPlatformUrl(url: String, promise: Promise) =
+    now(promise) { ai.xybrid.setPlatformUrl(url) }
+
+  override fun setSpeculativeCloud(enabled: Boolean, promise: Promise) =
+    now(promise) { ai.xybrid.setSpeculativeCloud(enabled) }
+
+  override fun isSpeculativeCloudEnabled(promise: Promise) =
+    now(promise) { ai.xybrid.isSpeculativeCloudEnabled() }
+
+  override fun willSpeculate(modelId: String, promise: Promise) =
+    background(promise) { ai.xybrid.willSpeculateForModel(modelId) }
+
+  override fun releaseMemory(promise: Promise) =
+    background(promise) { ai.xybrid.releaseMemory().toDouble() }
+
+  override fun setAutoRelease(enabled: Boolean, promise: Promise) =
+    now(promise) { ai.xybrid.setAutoRelease(enabled) }
+
+  override fun isAutoReleaseEnabled(promise: Promise) =
+    now(promise) { ai.xybrid.isAutoReleaseEnabled() }
+
+  // -- Device state push ------------------------------------------------------
+
+  override fun setBatteryLevel(percent: Double, promise: Promise) = now(promise) {
+    if (!percent.isFinite()) throw BridgeException.InvalidArgument("battery level must be a finite number")
+    ai.xybrid.setBatteryLevel(percent.roundToInt().coerceIn(0, 100).toUByte())
   }
 
-  @ReactMethod
-  fun loadFromBundle(path: String, promise: Promise) {
-    runLoad(promise) { XybridModel.fromBundle(path) }
-  }
+  override fun clearBatteryLevel(promise: Promise) = now(promise) { ai.xybrid.clearBatteryLevel() }
 
-  @ReactMethod
-  fun loadFromDirectory(path: String, promise: Promise) {
-    runLoad(promise) { XybridModel.fromDirectory(path) }
-  }
-
-  @ReactMethod
-  fun loadFromHuggingface(repo: String, promise: Promise) {
-    runLoad(promise) { XybridModel.fromHuggingface(repo) }
-  }
-
-  @ReactMethod
-  fun releaseModel(handle: String, promise: Promise) {
-    // Abort + drop any live streams started from this model first (streamClose
-    // needs the still-alive model handle), so releasing the model unwinds
-    // their generation instead of orphaning a worker thread.
-    val iter = streams.entries.iterator()
-    while (iter.hasNext()) {
-      val entry = iter.next()
-      if (entry.value.modelHandle == handle) {
-        entry.value.model.streamClose(entry.value.streamId)
-        iter.remove()
-      }
-    }
-    models.remove(handle)?.close()
-    promise.resolve(null)
-  }
-
-  // -- Model lifecycle --
-
-  @ReactMethod
-  fun warmup(handle: String, promise: Promise) {
-    runVoid(handle, promise) { it.warmup() }
-  }
-
-  @ReactMethod
-  fun unload(handle: String, promise: Promise) {
-    runVoid(handle, promise) { it.unload() }
-  }
-
-  // -- Inference --
-
-  @ReactMethod
-  fun run(handle: String, envelope: ReadableMap, config: ReadableMap?, promise: Promise) {
-    val model = models[handle]
-    if (model == null) {
-      promise.reject("xybrid_handle", "Unknown model handle: $handle")
-      return
-    }
-    val env = try {
-      decodeEnvelope(envelope)
-    } catch (e: IllegalArgumentException) {
-      promise.reject("xybrid_envelope", e.message, e)
-      return
-    }
-    val opts = config?.let(::decodeRunOptions)
-
-    scope.launch {
-      try {
-        val result = model.run(env, opts)
-        promise.resolve(encodeResult(result))
-      } catch (e: XybridError) {
-        rejectXybrid(promise, e)
-      } catch (t: Throwable) {
-        // Don't swallow coroutine cancellation (e.g. scope.cancel() on
-        // module invalidation) — let it propagate so the machinery unwinds.
-        if (t is CancellationException) throw t
-        promise.reject("xybrid", t.message, t)
-      }
-    }
-  }
-
-  // -- Streaming --
-
-  @ReactMethod
-  fun streamStart(handle: String, envelope: ReadableMap, options: ReadableMap?, promise: Promise) {
-    val model = models[handle]
-    if (model == null) {
-      promise.reject("xybrid_handle", "Unknown model handle: $handle")
-      return
-    }
-    val env = try {
-      decodeEnvelope(envelope)
-    } catch (e: IllegalArgumentException) {
-      promise.reject("xybrid_envelope", e.message, e)
-      return
-    }
-    val opts = options?.let(::decodeRunOptions)
-
-    scope.launch {
-      try {
-        val streamId = model.runStream(env, opts)
-        val id = UUID.randomUUID().toString()
-        streams[id] = StreamEntry(model, streamId, handle)
-        promise.resolve(id)
-      } catch (e: XybridError) {
-        rejectXybrid(promise, e)
-      } catch (t: Throwable) {
-        if (t is CancellationException) throw t
-        promise.reject("xybrid", t.message, t)
-      }
-    }
-  }
-
-  @ReactMethod
-  fun streamNext(streamHandle: String, promise: Promise) {
-    val entry = streams[streamHandle]
-    if (entry == null) {
-      // Released/unknown stream → treat as exhausted, not an error.
-      promise.resolve(null)
-      return
-    }
-    scope.launch {
-      try {
-        // Blocks until the next event is ready; runs on Dispatchers.IO like run.
-        val event = entry.model.streamNext(entry.streamId)
-        when (event.kind) {
-          XybridStreamEventKind.TOKEN -> {
-            val token = event.token
-            if (token == null) promise.resolve(null) else promise.resolve(encodeTokenEvent(token))
-          }
-          XybridStreamEventKind.COMPLETE -> {
-            // `streamResult` also closes the bolt-side session; drop our
-            // bookkeeping entry so later calls resolve null (exhausted).
-            val result = entry.model.streamResult(entry.streamId)
-            streams.remove(streamHandle)
-            val out = Arguments.createMap()
-            out.putString("kind", "complete")
-            out.putMap("result", encodeResult(result))
-            promise.resolve(out)
-          }
-        }
-      } catch (e: XybridError) {
-        // A failed streamNext already closed the session bolt-side; mirror
-        // that here, then reject with the same typed codes as `run`.
-        streams.remove(streamHandle)
-        rejectXybrid(promise, e)
-      } catch (t: Throwable) {
-        if (t is CancellationException) throw t
-        streams.remove(streamHandle)
-        promise.reject("xybrid", t.message, t)
-      }
-    }
-  }
-
-  @ReactMethod
-  fun streamRelease(streamHandle: String, promise: Promise) {
-    // Closing the bolt session aborts the underlying generation run (its
-    // receiver drops, unwinding the backend). Idempotent if the session
-    // already finished or errored.
-    streams.remove(streamHandle)?.let { it.model.streamClose(it.streamId) }
-    promise.resolve(null)
-  }
-
-  // -- TTS introspection --
-
-  @ReactMethod
-  fun voices(handle: String, promise: Promise) {
-    val model = models[handle]
-    if (model == null) {
-      promise.reject("xybrid_handle", "Unknown model handle: $handle")
-      return
-    }
-    if (!model.hasVoices()) {
-      promise.resolve(null)
-      return
-    }
-    val out = Arguments.createArray()
-    model.voices().forEach { out.pushMap(encodeVoice(it)) }
-    promise.resolve(out)
-  }
-
-  @ReactMethod
-  fun defaultVoiceId(handle: String, promise: Promise) {
-    val model = models[handle]
-    if (model == null) {
-      promise.reject("xybrid_handle", "Unknown model handle: $handle")
-      return
-    }
-    promise.resolve(model.defaultVoice()?.id)
-  }
-
-  @ReactMethod
-  fun hasVoices(handle: String, promise: Promise) {
-    val model = models[handle]
-    if (model == null) {
-      promise.reject("xybrid_handle", "Unknown model handle: $handle")
-      return
-    }
-    promise.resolve(model.hasVoices())
-  }
-
-  // -- Platform-state push --
-
-  @ReactMethod
-  fun setBatteryLevel(percent: Double, promise: Promise) {
-    val bounded = percent.coerceIn(0.0, 100.0).toInt()
-    setBatteryLevel(bounded.toUByte())
-    promise.resolve(null)
-  }
-
-  @ReactMethod
-  fun clearBatteryLevel(promise: Promise) {
-    clearBatteryLevel()
-    promise.resolve(null)
-  }
-
-  @ReactMethod
-  fun setThermalState(state: String, promise: Promise) {
-    val mapped = when (state.lowercase(java.util.Locale.ROOT)) {
+  override fun setThermalState(state: String, promise: Promise) = now(promise) {
+    val mapped = when (state) {
       "normal" -> XybridThermalState.NORMAL
       "warm" -> XybridThermalState.WARM
       "hot" -> XybridThermalState.HOT
       "critical" -> XybridThermalState.CRITICAL
-      else -> {
-        promise.reject("xybrid_thermal", "Unknown thermal state: $state")
-        return
-      }
+      else -> throw BridgeException.InvalidArgument("unknown thermal state '$state'")
     }
-    setThermalState(mapped)
+    ai.xybrid.setThermalState(mapped)
+  }
+
+  override fun clearThermalState(promise: Promise) = now(promise) { ai.xybrid.clearThermalState() }
+
+  // -- Model cache (disk walks: off the calling thread) ----------------------
+
+  override fun cacheStatus(promise: Promise) =
+    background(promise) { XybridCodec.encodeCacheStatus(ai.xybrid.cacheStatus()) }
+
+  override fun cacheEntries(promise: Promise) =
+    background(promise) { ai.xybrid.cacheEntries().map(XybridCodec::encodeCacheEntry) }
+
+  override fun cacheIsModelCached(modelId: String, promise: Promise) =
+    background(promise) { ai.xybrid.cacheIsModelCached(modelId) }
+
+  override fun cacheModelPath(modelId: String, promise: Promise) =
+    background(promise) { ai.xybrid.cacheModelPath(modelId) }
+
+  override fun cacheExtractedModelIds(promise: Promise) =
+    background(promise) { ai.xybrid.cacheListExtractedModelIds() }
+
+  override fun cacheRemoveModel(modelId: String, promise: Promise) =
+    background(promise) { ai.xybrid.cacheRemoveModel(modelId).toDouble() }
+
+  override fun cacheClear(promise: Promise) = background(promise) { ai.xybrid.cacheClear().toDouble() }
+
+  // -- Stateless helpers ------------------------------------------------------
+
+  override fun jsonSchemaToGbnf(schemaJson: String, promise: Promise) =
+    now(promise) { ai.xybrid.jsonSchemaToGbnf(schemaJson) }
+
+  override fun toolResultsEnvelope(
+    userText: String,
+    priorAssistantText: String,
+    results: ReadableArray,
+    promise: Promise,
+  ) = now(promise) {
+    val decoded = results.toArrayList().map(XybridCodec::decodeToolResult)
+    XybridCodec.encodeEnvelope(ai.xybrid.toolResultsEnvelope(userText, priorAssistantText, decoded))
+  }
+
+  // -- Handles ----------------------------------------------------------------
+
+  override fun dispose(handle: String, promise: Promise) {
+    handles.dispose(handle)
     promise.resolve(null)
   }
 
-  @ReactMethod
-  fun clearThermalState(promise: Promise) {
-    clearThermalState()
-    promise.resolve(null)
-  }
+  // -- Models -----------------------------------------------------------------
 
-  // -- Utilities --
-
-  @ReactMethod
-  fun jsonSchemaToGbnf(schemaJson: String, promise: Promise) {
-    try {
-      // Shared JSON-Schema→GBNF converter from the bolt bindings. Fast (pure
-      // string transform), so no coroutine hop is needed.
-      promise.resolve(jsonSchemaToGbnf(schemaJson))
-    } catch (e: XybridError) {
-      rejectXybrid(promise, e)
-    } catch (t: Throwable) {
-      promise.reject("xybrid", t.message, t)
+  override fun loadModel(source: ReadableMap, promise: Promise) {
+    val raw = source.toHashMap()
+    background(promise) {
+      val what = "model source"
+      val o = XybridCodec.obj(raw, what)
+      val kind = XybridCodec.string(o, "kind", what)
+      val value = XybridCodec.string(o, "value", what)
+      val model = when (kind) {
+        "registry" -> XybridModel.fromRegistry(value)
+        "registrySpeculative" -> XybridModel.fromRegistrySpeculative(value)
+        "bundle" -> XybridModel.fromBundle(XybridCodec.filePath(value))
+        "directory" -> XybridModel.fromDirectory(XybridCodec.filePath(value))
+        "huggingFace" -> XybridCodec.optionalString(o, "revision", what)
+          ?.let { XybridModel.fromHuggingfaceWithRevision(value, it) }
+          ?: XybridModel.fromHuggingface(value)
+        "modelFile" -> XybridModel.fromModelFile(XybridCodec.filePath(value))
+        else -> throw BridgeException.InvalidArgument("unknown model source kind '$kind'")
+      }
+      handles.insert(model, "model")
     }
   }
 
-  // MARK: - Helpers
+  override fun modelInfo(model: String, promise: Promise) = now(promise) {
+    handles.use(model, XybridModel::class.java) { m ->
+      mapOf(
+        "modelId" to m.modelId(),
+        "version" to m.version(),
+        "outputType" to XybridCodec.encodeOutputType(m.outputType()),
+        "isLlm" to m.isLlm(),
+        "supportsStreaming" to m.supportsStreaming(),
+        "supportsTokenStreaming" to m.supportsTokenStreaming(),
+        "supportsToolCalling" to m.supportsToolCalling(),
+        "hasVoices" to m.hasVoices(),
+        "defaultGenerationConfig" to XybridCodec.encodeGenerationConfig(m.defaultGenerationConfig()),
+      )
+    }
+  }
 
-  private fun runLoad(promise: Promise, factory: suspend () -> XybridModel) {
-    scope.launch {
+  override fun isLoaded(model: String, promise: Promise) =
+    now(promise) { handles.use(model, XybridModel::class.java) { it.isLoaded() } }
+
+  override fun warmup(model: String, promise: Promise) =
+    background(promise) { handles.use(model, XybridModel::class.java) { it.warmup() } }
+
+  override fun unload(model: String, promise: Promise) =
+    background(promise) { handles.use(model, XybridModel::class.java) { it.unload() } }
+
+  override fun isCloudServing(model: String, promise: Promise) =
+    now(promise) { handles.use(model, XybridModel::class.java) { it.isCloudServing() } }
+
+  override fun downloadStatus(model: String, promise: Promise) = now(promise) {
+    handles.use(model, XybridModel::class.java) { XybridCodec.encodeDownloadStatus(it.downloadStatus()) }
+  }
+
+  override fun awaitDownload(model: String, timeoutMs: Double, promise: Promise) = background(promise) {
+    // NaN and negatives clamp to 0 (a non-blocking read); huge values saturate.
+    val timeout = if (timeoutMs.isFinite()) timeoutMs.coerceAtLeast(0.0).toULong() else 0uL
+    handles.use(model, XybridModel::class.java) { XybridCodec.encodeDownloadStatus(it.awaitDownload(timeout)) }
+  }
+
+  override fun voices(model: String, promise: Promise) = now(promise) {
+    handles.use(model, XybridModel::class.java) { m -> m.voices().map(XybridCodec::encodeVoice) }
+  }
+
+  override fun defaultVoice(model: String, promise: Promise) = now(promise) {
+    handles.use(model, XybridModel::class.java) { m -> m.defaultVoice()?.let(XybridCodec::encodeVoice) }
+  }
+
+  override fun voice(model: String, voiceId: String, promise: Promise) = now(promise) {
+    handles.use(model, XybridModel::class.java) { m -> m.voice(voiceId)?.let(XybridCodec::encodeVoice) }
+  }
+
+  // -- Inference --------------------------------------------------------------
+
+  /**
+   * Everything one run needs, leased for its duration: the model, the
+   * optional conversation context, and a stop button — the caller's token,
+   * or one of our own registered under the model so disposing the model (or
+   * tearing the module down) stops the run.
+   */
+  private inner class RunScope(
+    private val modelHandle: String,
+    rawOptions: Any?,
+  ) : AutoCloseable {
+    val request = XybridCodec.decodeRunRequest(rawOptions)
+    private val held = mutableListOf<AutoCloseable>()
+    private var ownToken: String? = null
+
+    val model: XybridModel
+    val context: XybridConversationContext?
+    val cancel: XybridCancellationToken
+
+    init {
       try {
-        val model = factory()
-        val id = UUID.randomUUID().toString()
-        models[id] = model
-        promise.resolve(id)
-      } catch (e: XybridError) {
-        rejectXybrid(promise, e)
-      } catch (t: Throwable) {
-        // Don't swallow coroutine cancellation (e.g. scope.cancel() on
-        // module invalidation) — let it propagate so the machinery unwinds.
-        if (t is CancellationException) throw t
-        promise.reject("xybrid", t.message, t)
-      }
-    }
-  }
-
-  // Run a void-returning model op (warmup / unload) off the RN thread,
-  // resolving on success and mapping XybridError on failure.
-  private fun runVoid(handle: String, promise: Promise, op: suspend (XybridModel) -> Unit) {
-    val model = models[handle]
-    if (model == null) {
-      promise.reject("xybrid_handle", "Unknown model handle: $handle")
-      return
-    }
-    scope.launch {
-      try {
-        op(model)
-        promise.resolve(null)
-      } catch (e: XybridError) {
-        rejectXybrid(promise, e)
-      } catch (t: Throwable) {
-        if (t is CancellationException) throw t
-        promise.reject("xybrid", t.message, t)
-      }
-    }
-  }
-
-  // Build a bolt [XybridEnvelope] via the `Envelope` factories, which fold the
-  // well-known TTS / ASR options (sample_rate, channels, voice_id, speed) into
-  // envelope metadata entries — the bolt `XybridEnvelopeKind` variants
-  // themselves only carry the raw payload.
-  private fun decodeEnvelope(map: ReadableMap): XybridEnvelope {
-    val kind = map.getString("kind") ?: throw IllegalArgumentException("envelope missing 'kind'")
-    return when (kind) {
-      "audio" -> {
-        val b64 = map.getString("bytesBase64")
-          ?: throw IllegalArgumentException("audio envelope: 'bytesBase64' missing")
-        val bytes = Base64.decode(b64, Base64.DEFAULT)
-        val sampleRate = if (map.hasKey("sampleRate") && !map.isNull("sampleRate")) map.getInt("sampleRate") else 16000
-        val channels = if (map.hasKey("channels") && !map.isNull("channels")) map.getInt("channels") else 1
-        Envelope.audio(bytes, sampleRate.toUInt(), channels.toUInt())
-      }
-      "text" -> {
-        val text = map.getString("text")
-          ?: throw IllegalArgumentException("text envelope: 'text' missing")
-        val voiceId = if (map.hasKey("voiceId") && !map.isNull("voiceId")) map.getString("voiceId") else null
-        val speed = if (map.hasKey("speed") && !map.isNull("speed")) map.getDouble("speed") else null
-        if (voiceId != null) {
-          Envelope.text(text, voiceId, speed ?: 1.0)
-        } else {
-          Envelope.text(text)
+        model = hold(handles.lease(modelHandle, XybridModel::class.java))
+        context = request.context?.let { hold(handles.lease(it, XybridConversationContext::class.java)) }
+        val tokenHandle = request.cancel ?: XybridCancellationToken().let { token ->
+          handles.insert(token, "cancel", owner = modelHandle, onDispose = token::cancel)
+            .also { ownToken = it }
         }
+        cancel = hold(handles.lease(tokenHandle, XybridCancellationToken::class.java))
+      } catch (t: Throwable) {
+        close()
+        throw t
       }
-      "embedding" -> {
-        val arr = map.getArray("data")
-          ?: throw IllegalArgumentException("embedding envelope: 'data' missing")
-        Envelope.embedding(arr.toFloatArray())
+    }
+
+    private fun <T : Any> hold(lease: XybridHandles.Lease<T>): T {
+      held.add(lease)
+      return lease.value
+    }
+
+    /**
+     * Hand every lease — and our own token, if we made one — over to a
+     * stream entry, which releases them (last first) when it is closed.
+     */
+    fun transferToStream(): List<AutoCloseable> {
+      val transferred = held.toMutableList()
+      ownToken?.let { handle -> transferred.add(AutoCloseable { handles.dispose(handle) }) }
+      held.clear()
+      ownToken = null
+      return transferred
+    }
+
+    override fun close() {
+      held.asReversed().forEach(AutoCloseable::close)
+      held.clear()
+      ownToken?.let(handles::dispose)
+    }
+  }
+
+  override fun run(model: String, envelope: ReadableMap, options: ReadableMap?, promise: Promise) {
+    val rawEnvelope = envelope.toHashMap()
+    val rawOptions = options?.toHashMap()
+    background(promise) {
+      val input = XybridCodec.decodeEnvelope(rawEnvelope)
+      RunScope(model, rawOptions).use { run ->
+        val context = run.context
+        val result = try {
+          if (context != null) {
+            run.model.runWithContext(input, context, run.request.options, run.cancel)
+          } else {
+            run.model.run(input, run.request.options, run.cancel)
+          }
+        } catch (t: Throwable) {
+          throw cancellationAware(t, run.cancel)
+        }
+        XybridCodec.encodeResult(result)
       }
-      else -> throw IllegalArgumentException("Unknown envelope kind: $kind")
     }
   }
 
-  private fun ReadableArray.toFloatArray(): FloatArray {
-    val out = FloatArray(size())
-    for (i in 0 until size()) out[i] = getDouble(i).toFloat()
-    return out
-  }
-
-  // Map the JS `RunOptions` payload onto bolt's XybridRunOptions. The JS facade
-  // normalizes its argument to `{ generationConfig, abortOn, fallbackToCloud,
-  // maxGraceTokens, correlationId }`, so every field the Apple/Kotlin SDKs
-  // expose is reachable from React Native.
-  private fun decodeRunOptions(map: ReadableMap): XybridRunOptions {
-    val gc = if (map.hasKey("generationConfig") && !map.isNull("generationConfig")) {
-      map.getMap("generationConfig")?.let(::decodeGenerationConfig)
-    } else {
-      null
-    }
-    val abortOn = if (map.hasKey("abortOn") && !map.isNull("abortOn")) {
-      val arr = map.getArray("abortOn")!!
-      val out = ArrayList<XybridAbortSignal>(arr.size())
-      for (i in 0 until arr.size()) {
-        decodeAbortSignal(arr.getString(i))?.let(out::add)
-      }
-      out
-    } else {
-      emptyList()
-    }
-    val maxGrace = if (map.hasKey("maxGraceTokens") && !map.isNull("maxGraceTokens")) {
-      map.getInt("maxGraceTokens").coerceAtLeast(0).toUInt()
-    } else {
-      0u
-    }
-    return XybridRunOptions(
-      generationConfig = gc,
-      abortOn = abortOn,
-      fallbackToCloud = map.hasKey("fallbackToCloud") && !map.isNull("fallbackToCloud") &&
-        map.getBoolean("fallbackToCloud"),
-      maxGraceTokens = maxGrace,
-      correlationId = if (map.hasKey("correlationId") && !map.isNull("correlationId")) {
-        map.getString("correlationId")
-      } else {
-        null
-      },
-    )
-  }
-
-  private fun decodeGenerationConfig(map: ReadableMap): XybridGenerationConfig {
-    fun uintOrNull(key: String): UInt? {
-      if (!map.hasKey(key) || map.isNull(key)) return null
-      // Guard against negative JS values wrapping around to a huge UInt.
-      val value = map.getInt(key)
-      return if (value >= 0) value.toUInt() else null
-    }
-    fun floatOrNull(key: String) =
-      if (map.hasKey(key) && !map.isNull(key)) map.getDouble(key).toFloat() else null
-    val stops = if (map.hasKey("stopSequences") && !map.isNull("stopSequences")) {
-      val arr = map.getArray("stopSequences")!!
-      val out = ArrayList<String>(arr.size())
-      for (i in 0 until arr.size()) out.add(arr.getString(i) ?: "")
-      out
-    } else {
-      emptyList()
-    }
-    return XybridGenerationConfig(
-      maxTokens = uintOrNull("maxTokens"),
-      temperature = floatOrNull("temperature"),
-      topP = floatOrNull("topP"),
-      minP = floatOrNull("minP"),
-      topK = uintOrNull("topK"),
-      repetitionPenalty = floatOrNull("repetitionPenalty"),
-      stopSequences = stops,
-      grammar = if (map.hasKey("grammar") && !map.isNull("grammar")) map.getString("grammar") else null,
-    )
-  }
-
-  private fun decodeAbortSignal(raw: String?): XybridAbortSignal? = when (raw) {
-    "memoryPressureWarn" -> XybridAbortSignal.MEMORY_PRESSURE_WARN
-    "memoryPressureCritical" -> XybridAbortSignal.MEMORY_PRESSURE_CRITICAL
-    "thermalHot" -> XybridAbortSignal.THERMAL_HOT
-    "thermalCritical" -> XybridAbortSignal.THERMAL_CRITICAL
-    else -> null
-  }
-
-  private fun encodeResult(r: XybridResult): WritableMap {
-    val out = Arguments.createMap()
-    out.putBoolean("success", r.success)
-    out.putInt("latencyMs", r.latencyMs.toInt())
-    r.text?.let { out.putString("text", it) }
-    r.reasoningContent?.let { out.putString("reasoningContent", it) }
-    r.audioBytes?.let { out.putString("audioBytesBase64", Base64.encodeToString(it, Base64.NO_WRAP)) }
-    r.embedding?.let {
-      val arr = Arguments.createArray()
-      it.forEach { f -> arr.pushDouble(f.toDouble()) }
-      out.putArray("embedding", arr)
-    }
-    return out
-  }
-
-  // Encode a bolt `XybridStreamToken` as the discriminated `token` event the
-  // JS facade narrows by `kind`. The terminal `complete` event is built at the
-  // call site (it pairs `streamResult` with `encodeResult` so the generator's
-  // return value matches `run`).
-  private fun encodeTokenEvent(t: XybridStreamToken): WritableMap {
-    val out = Arguments.createMap()
-    out.putString("kind", "token")
-    val token = Arguments.createMap()
-    token.putString("token", t.token)
-    // Double, not Int: index is u64 (ULong) and RN numbers are doubles (exact
-    // to 2^53) — toInt() would truncate a large index.
-    token.putDouble("index", t.index.toDouble())
-    token.putString("cumulativeText", t.cumulativeText)
-    t.tokenId?.let { token.putDouble("tokenId", it.toDouble()) }
-    t.finishReason?.let { token.putString("finishReason", it) }
-    out.putMap("token", token)
-    return out
-  }
-
-  private fun encodeVoice(v: XybridVoiceInfo): WritableMap {
-    val out = Arguments.createMap()
-    out.putString("id", v.id)
-    out.putString("name", v.name)
-    v.gender?.let { out.putString("gender", it) }
-    v.language?.let { out.putString("language", it) }
-    v.style?.let { out.putString("style", it) }
-    return out
-  }
-
-  private fun rejectXybrid(promise: Promise, e: XybridError) {
-    val code = when (e) {
-      is XybridError.ModelNotFound -> "xybrid_model_not_found"
-      is XybridError.DirectoryNotFound -> "xybrid_directory_not_found"
-      is XybridError.MetadataNotFound -> "xybrid_metadata_not_found"
-      is XybridError.MetadataInvalid -> "xybrid_metadata_invalid"
-      is XybridError.LoadError -> "xybrid_load_error"
-      is XybridError.InferenceError -> "xybrid_inference_error"
-      is XybridError.AbortedForCloudFallback -> "xybrid_aborted_cloud_fallback"
-      is XybridError.StreamingNotSupported -> "xybrid_streaming_unsupported"
-      is XybridError.NotLoaded -> "xybrid_not_loaded"
-      is XybridError.ConfigError -> "xybrid_config_error"
-      is XybridError.NetworkError -> "xybrid_network_error"
-      is XybridError.Offline -> "xybrid_offline"
-      is XybridError.IoError -> "xybrid_io_error"
-      is XybridError.CacheError -> "xybrid_cache_error"
-      is XybridError.PipelineError -> "xybrid_pipeline_error"
-      is XybridError.CircuitOpen -> "xybrid_circuit_open"
-      is XybridError.RateLimited -> "xybrid_rate_limited"
-      is XybridError.Timeout -> "xybrid_timeout"
-      is XybridError.InvalidImage -> "xybrid_invalid_image"
-      is XybridError.MissingArtifact -> "xybrid_missing_artifact"
-      is XybridError.UnsupportedModelCapability -> "xybrid_unsupported_model_capability"
-      is XybridError.UnsupportedBackendCapability -> "xybrid_unsupported_backend_capability"
-    }
-    promise.reject(code, e.message ?: "Xybrid error", e)
-  }
-
-  // A live streaming session: the model it runs on (bolt sessions are
-  // model-scoped ids, so streamNext/streamClose are model methods), the
-  // session id, and the model's handle string (so releasing a model can drain
-  // its streams). No native handle of its own to free: `streamClose` is an
-  // idempotent map-remove inside the bolt model, and the session `Arc` is
-  // released when the last in-flight `streamNext` returns — so the
-  // use-after-free/deferred-close machinery the old stream *handle* needed
-  // does not apply here. Abort still takes effect at the next token boundary.
-  private data class StreamEntry(
+  /** A pull-based token stream plus the leases that keep its model and token alive. */
+  private class TokenStream(
     val model: XybridModel,
     val streamId: ULong,
-    val modelHandle: String,
-  )
+    val cancel: XybridCancellationToken,
+    private val resources: List<AutoCloseable>,
+  ) {
+    /** Abort generation now; safe while a pull is in flight (see XybridHandles). */
+    fun abort() {
+      cancel.cancel()
+      model.streamClose(streamId)
+    }
+
+    fun release() = resources.asReversed().forEach(AutoCloseable::close)
+  }
+
+  override fun streamStart(model: String, envelope: ReadableMap, options: ReadableMap?, promise: Promise) {
+    val rawEnvelope = envelope.toHashMap()
+    val rawOptions = options?.toHashMap()
+    background(promise) {
+      val input = XybridCodec.decodeEnvelope(rawEnvelope)
+      RunScope(model, rawOptions).use { run ->
+        val context = run.context
+        val streamId = if (context != null) {
+          run.model.runStreamWithContext(input, context, run.request.options, run.cancel)
+        } else {
+          run.model.runStream(input, run.request.options, run.cancel)
+        }
+        val stream = TokenStream(run.model, streamId, run.cancel, run.transferToStream())
+        handles.insert(stream, "stream", owner = model, onDispose = stream::abort, onClose = stream::release)
+      }
+    }
+  }
+
+  override fun streamNext(stream: String, promise: Promise) = background(promise) {
+    // A disposed stream reads as exhausted, not as an error.
+    val lease = handles.leaseOrNull(stream, TokenStream::class.java) ?: return@background null
+    lease.use {
+      val s = it.value
+      try {
+        val event = s.model.streamNext(s.streamId)
+        when (event.kind) {
+          XybridStreamEventKind.TOKEN -> {
+            val token = event.token
+              ?: throw XybridError.InferenceError("stream returned a token event without a token")
+            mapOf("kind" to "token", "token" to XybridCodec.encodeStreamToken(token))
+          }
+          XybridStreamEventKind.COMPLETE -> {
+            // `streamResult` closes the bolt session; drop our entry with it.
+            val result = s.model.streamResult(s.streamId)
+            handles.dispose(stream)
+            mapOf("kind" to "complete", "result" to XybridCodec.encodeResult(result))
+          }
+        }
+      } catch (t: Throwable) {
+        // A failed pull already closed the bolt session.
+        handles.dispose(stream)
+        throw cancellationAware(t, s.cancel)
+      }
+    }
+  }
+
+  // -- Cancellation tokens ----------------------------------------------------
+
+  override fun createCancelToken(promise: Promise) =
+    now(promise) { handles.insert(XybridCancellationToken(), "cancel") }
+
+  override fun cancel(token: String, promise: Promise) =
+    now(promise) { handles.use(token, XybridCancellationToken::class.java) { it.cancel() } }
+
+  // -- Conversation contexts ----------------------------------------------------
+
+  override fun createContext(contextId: String?, promise: Promise) = now(promise) {
+    val context = contextId?.let { XybridConversationContext.withId(it) } ?: XybridConversationContext()
+    handles.insert(context, "context")
+  }
+
+  override fun contextPush(context: String, envelope: ReadableMap, promise: Promise) {
+    val raw = envelope.toHashMap()
+    // Image turns are decode-validated natively, so this can take a moment.
+    background(promise) {
+      handles.use(context, XybridConversationContext::class.java) { it.push(XybridCodec.decodeEnvelope(raw)) }
+    }
+  }
+
+  override fun contextSetSystem(context: String, envelope: ReadableMap, promise: Promise) {
+    val raw = envelope.toHashMap()
+    background(promise) {
+      handles.use(context, XybridConversationContext::class.java) { it.setSystem(XybridCodec.decodeEnvelope(raw)) }
+    }
+  }
+
+  override fun contextClear(context: String, promise: Promise) =
+    now(promise) { handles.use(context, XybridConversationContext::class.java) { it.clear() } }
+
+  override fun contextInfo(context: String, promise: Promise) = now(promise) {
+    handles.use(context, XybridConversationContext::class.java) { c ->
+      mapOf("id" to c.id(), "historyLength" to c.historyLen().toDouble(), "hasSystem" to c.hasSystem())
+    }
+  }
+
+  override fun contextHistory(context: String, promise: Promise) = now(promise) {
+    handles.use(context, XybridConversationContext::class.java) { c -> c.history().map(XybridCodec::encodeEnvelope) }
+  }
+
+  override fun contextSetMaxHistoryLength(context: String, length: Double, promise: Promise) = now(promise) {
+    val max = XybridCodec.uint(length, "max history length")
+    handles.use(context, XybridConversationContext::class.java) { it.setMaxHistoryLen(max) }
+  }
+
+  // -- Standalone downloads ---------------------------------------------------
+
+  override fun startDownload(modelId: String, platform: String?, promise: Promise) = background(promise) {
+    val download = platform?.let { XybridDownload.fromRegistryWithPlatform(modelId, it) }
+      ?: XybridDownload.fromRegistry(modelId)
+    handles.insert(download, "download")
+  }
+
+  override fun downloadHandleStatus(download: String, promise: Promise) = now(promise) {
+    handles.use(download, XybridDownload::class.java) { XybridCodec.encodeDownloadStatus(it.status()) }
+  }
+
+  override fun downloadHandleError(download: String, promise: Promise) =
+    now(promise) { handles.use(download, XybridDownload::class.java) { it.error() } }
+
+  override fun cancelDownload(download: String, promise: Promise) =
+    now(promise) { handles.use(download, XybridDownload::class.java) { it.cancel() } }
+
+  // -- Pipelines ----------------------------------------------------------------
+
+  override fun loadPipeline(source: ReadableMap, promise: Promise) {
+    val raw = source.toHashMap()
+    background(promise) {
+      val what = "pipeline source"
+      val o = XybridCodec.obj(raw, what)
+      val kind = XybridCodec.string(o, "kind", what)
+      val value = XybridCodec.string(o, "value", what)
+      val pipeline = when (kind) {
+        "yaml" -> XybridPipeline.fromYaml(value)
+        "file" -> XybridPipeline.fromFile(XybridCodec.filePath(value))
+        "bundle" -> XybridPipeline.fromBundle(XybridCodec.filePath(value))
+        else -> throw BridgeException.InvalidArgument("unknown pipeline source kind '$kind'")
+      }
+      handles.insert(pipeline, "pipeline")
+    }
+  }
+
+  override fun pipelineInfo(pipeline: String, promise: Promise) = now(promise) {
+    handles.use(pipeline, XybridPipeline::class.java) { p ->
+      mapOf("name" to p.name(), "stageNames" to p.stageNames(), "stageCount" to p.stageCount().toDouble())
+    }
+  }
+
+  override fun runPipeline(pipeline: String, envelope: ReadableMap, options: ReadableMap?, promise: Promise) {
+    val rawEnvelope = envelope.toHashMap()
+    val rawOptions = options?.toHashMap()
+    background(promise) {
+      val input = XybridCodec.decodeEnvelope(rawEnvelope)
+      val request = XybridCodec.decodeRunRequest(rawOptions)
+      handles.use(pipeline, XybridPipeline::class.java) { p ->
+        XybridCodec.encodePipelineResult(p.run(input, request.options))
+      }
+    }
+  }
+
+  // -- Live ASR sessions ------------------------------------------------------
+
+  /** A live-ASR session plus a buffer of its partial transcripts for pull reads. */
+  private class SessionEntry(val session: XybridStreamingSession) {
+    // Partials are cumulative — each supersedes the last — so a reader that
+    // falls behind only loses stale text.
+    val partials = Channel<XybridPartialResult>(capacity = 64, onBufferOverflow = BufferOverflow.DROP_OLDEST)
+  }
+
+  override fun openStreamingSession(model: String, config: ReadableMap?, promise: Promise) {
+    val rawConfig = config?.toHashMap()
+    // Opening warms the weights, so it runs off the calling thread.
+    background(promise) {
+      val streamingConfig = XybridCodec.decodeStreamingConfig(rawConfig)
+      val session = handles.use(model, XybridModel::class.java) { XybridStreamingSession.forModel(it, streamingConfig) }
+      val entry = SessionEntry(session)
+      val handle = handles.insert(entry, "session", onDispose = session::cancel, onClose = session::close)
+      // The collector holds a lease for its whole life, so the session is
+      // only closed after it has unsubscribed; cancelling the session (on
+      // dispose) is what ends the partial stream.
+      val lease = handles.lease(handle, SessionEntry::class.java)
+      scope.launch(start = CoroutineStart.UNDISPATCHED) {
+        try {
+          session.partials().collect { entry.partials.send(it) }
+        } finally {
+          entry.partials.close()
+          lease.close()
+        }
+      }
+      handle
+    }
+  }
+
+  override fun sessionFeed(session: String, samplesBase64: String, promise: Promise) = background(promise) {
+    val samples = XybridCodec.float32Samples(samplesBase64)
+    // Blocks only when the worker's queue is full (back-pressure).
+    handles.use(session, SessionEntry::class.java) { it.session.feed(samples) }
+  }
+
+  override fun sessionNextPartial(session: String, promise: Promise) = background(promise) {
+    val lease = handles.leaseOrNull(session, SessionEntry::class.java) ?: return@background null
+    lease.use { it.value.partials.receiveCatching().getOrNull()?.let(XybridCodec::encodePartial) }
+  }
+
+  override fun sessionFlush(session: String, promise: Promise) =
+    background(promise) { handles.use(session, SessionEntry::class.java) { it.session.flush() } }
+
+  override fun sessionReset(session: String, promise: Promise) =
+    background(promise) { handles.use(session, SessionEntry::class.java) { it.session.reset() } }
+
+  override fun sessionCancel(session: String, promise: Promise) =
+    now(promise) { handles.use(session, SessionEntry::class.java) { it.session.cancel() } }
+
+  override fun sessionIsRunning(session: String, promise: Promise) =
+    now(promise) { handles.use(session, SessionEntry::class.java) { it.session.isRunning() } }
 
   companion object {
-    const val NAME = "RNXybrid"
+    const val NAME = NativeXybridSpec.NAME
+  }
+}
+
+/** Blank means absent for configuration strings. */
+private fun String?.nonBlank(): String? = this?.trim()?.takeIf { it.isNotEmpty() }
+
+/**
+ * Process-wide SDK setup. The Rust SDK's configuration is process-global
+ * (first-set-wins) and outlives this module: a JS reload builds a new module
+ * instance but not a new process. So what has been applied is tracked
+ * process-wide too, which is what keeps a reload from starting a second
+ * telemetry exporter.
+ */
+private object SdkSetup {
+  data class Runtime(val apiKey: String?, val gatewayUrl: String?, val ingestUrl: String?) {
+    val isEmpty get() = apiKey == null && gatewayUrl == null && ingestUrl == null
+  }
+
+  private var appliedCacheDir: String? = null
+  private var appliedRuntime: Runtime? = null
+
+  /**
+   * Register the binding, device observers and the cache directory, once.
+   * Every bridged call runs this first, so local inference needs no
+   * `initialize()` at all.
+   */
+  @Synchronized
+  fun ensureBase(context: Context, requested: String? = null) {
+    val applied = appliedCacheDir
+    if (applied != null) {
+      if (requested != null && requested != applied) {
+        throw BridgeException.Config(
+          "the model cache is already at $applied; cacheDir only applies to the first Xybrid call",
+        )
+      }
+      return
+    }
+    // First-set-wins in the SDK: claim the binding and the cache directory
+    // before Xybrid.init() would register "kotlin" and <filesDir>/xybrid/models.
+    // Its own configureRuntime(null, null, null) is a no-op; what it adds is
+    // the battery and thermal observers.
+    ai.xybrid.setBinding("react-native")
+    val directory = requested ?: File(context.filesDir, "xybrid/models").absolutePath
+    File(directory).mkdirs()
+    ai.xybrid.initSdkCacheDir(directory)
+    Xybrid.init(context)
+    appliedCacheDir = directory
+  }
+
+  /** Apply the API key and URL overrides — once per process. */
+  @Synchronized
+  fun configure(runtime: Runtime) {
+    if (runtime.isEmpty) return
+    val applied = appliedRuntime
+    if (applied != null) {
+      if (applied == runtime) return
+      throw BridgeException.Config(
+        "Xybrid is already initialized with different options; they apply once per app process",
+      )
+    }
+    ai.xybrid.configureRuntime(runtime.apiKey, runtime.gatewayUrl, runtime.ingestUrl)
+    appliedRuntime = runtime
   }
 }

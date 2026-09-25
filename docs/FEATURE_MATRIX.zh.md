@@ -25,7 +25,8 @@
 | **ort-download** | 下载预编译的 ONNX Runtime 二进制文件 | `ort/download-binaries`、`ort/tls-native` |
 | **ort-dynamic** | 在运行时加载 ONNX Runtime 的 .so | `ort/load-dynamic` |
 | **ort-coreml** | Apple Neural Engine 加速 | `ort/coreml` |
-| **candle** | 纯 Rust ML 框架（Whisper）— 兼容 Android | `candle-core`、`candle-nn`、`candle-transformers`、`safetensors`、`byteorder`、`num-traits` |
+| **candle** | 纯 Rust ML 框架 — SafeTensors Whisper 路径。**仅可显式启用**，自 whisper.cpp 取代其 ASR 角色后已从所有平台预设中移除 | `candle-core`、`candle-nn`、`candle-transformers`、`safetensors`、`byteorder`、`num-traits` |
+| **asr-whispercpp** | whisper.cpp 语音识别，运行在 llama.cpp 已链接的 ggml 上。需要 `llm-llamacpp` —— ggml 正是由它提供 | `xybrid-whisper`、`xybrid-whisper-sys` |
 | **candle-hub** | Candle + HuggingFace Hub 下载支持 | `candle`、`hf-hub`（需要 OpenSSL — **不适用于 Android**） |
 | **candle-metal** | 带 Metal 显卡加速的 Candle | `candle`、`candle-core/metal`、`candle-nn/metal` |
 | **candle-cuda** | 带 CUDA 显卡加速的 Candle | `candle`、`candle-core/cuda` |
@@ -57,10 +58,10 @@
 | Feature | 说明 | 转发到 xybrid-core |
 |---------|-------------|-------------------------|
 | **default** | 无默认特性 | *（无）* |
-| **platform-android** | Android 预设 | `ort-dynamic`、`candle`、`llm-llamacpp` |
-| **platform-ios** | iOS 预设 | `ort-download`、`ort-coreml`、`candle-metal`、`candle-hub`、`llm-llamacpp` |
-| **platform-macos** | macOS 预设 | `ort-download`、`ort-coreml`、`candle-metal`、`candle-hub`、`llm-llamacpp` |
-| **platform-desktop** | 桌面（Linux/Windows）预设 | `ort-download`、`llm-llamacpp` |
+| **platform-android** | Android 预设 | `ort-dynamic`、`llm-llamacpp-vision`、`asr-whispercpp` |
+| **platform-ios** | iOS 预设 | `ort-download`、`ort-coreml`、`llm-llamacpp-vision`、`asr-whispercpp` |
+| **platform-macos** | macOS 预设 | `ort-download`、`ort-coreml`、`llm-llamacpp-vision`、`asr-whispercpp` |
+| **platform-desktop** | 桌面（Linux/Windows）预设 | `ort-download`、`llm-llamacpp-vision`、`asr-whispercpp` |
 | **ort-download** | 转发到 core | `xybrid-core/ort-download` |
 | **ort-dynamic** | 转发到 core | `xybrid-core/ort-dynamic` |
 | **ort-coreml** | 转发到 core | `xybrid-core/ort-coreml` |
@@ -86,10 +87,10 @@
 | **onnx-inspect** | 为 `xybrid init` 提供 ONNX 元数据检查 | `xybrid-sdk/onnx-inspect` |
 | **vision** | 为 VLM 对话提供 `xybrid run --input-image` 和 REPL `/image` 的 Envelope 构建 | `xybrid-core/vision`、`xybrid-sdk/vision` |
 | **llm-llamacpp-vision** | llama.cpp VLM 运行时以及 CLI 图像输入支持 | `llm-llamacpp`、`vision`、`xybrid-sdk/llm-llamacpp-vision` |
-| **platform-android** | Android 发布预设 | `ort-dynamic`、`llm-llamacpp`、`candle`、`huggingface` |
-| **platform-ios** | iOS 发布预设 | `ort-download`、`ort-coreml`、`candle-metal`、`candle-hub`、`llm-llamacpp`、`huggingface` |
-| **platform-macos** | macOS 发布预设 | `ort-download`、`ort-coreml`、`candle-metal`、`candle-hub`、`llm-llamacpp`、`huggingface` |
-| **platform-desktop** | Linux/Windows 发布预设 | `ort-download`、`llm-llamacpp`、`huggingface` |
+| **platform-android** | Android 发布预设 — 转发到 `xybrid-sdk/platform-android` | `ort-dynamic`、`llm-llamacpp-vision`、`asr-whispercpp`、`llm-llamacpp`、`huggingface` |
+| **platform-ios** | iOS 发布预设 — 转发到 `xybrid-sdk/platform-ios` | `ort-download`、`ort-coreml`、`llm-llamacpp-vision`、`asr-whispercpp`、`llm-llamacpp`、`huggingface` |
+| **platform-macos** | macOS 发布预设 — 转发到 `xybrid-sdk/platform-macos` | `ort-download`、`ort-coreml`、`llm-llamacpp-vision`、`asr-whispercpp`、`llm-llamacpp`、`huggingface` |
+| **platform-desktop** | Linux/Windows 发布预设 — 转发到 `xybrid-sdk/platform-desktop` | `ort-download`、`llm-llamacpp-vision`、`asr-whispercpp`、`llm-llamacpp`、`huggingface` |
 
 ---
 
@@ -97,14 +98,16 @@
 
 平台预设是平台专属特性组合的**单一事实来源**。它们定义在 `xybrid-sdk/Cargo.toml` 中，并通过 crate 层级向下转发。
 
-当前所有平台预设默认仅提供**纯文本**的 llama.cpp 支持。视觉语言构建必须将平台预设与 `llm-llamacpp-vision` 组合；仅当某个 crate 需要图像 Envelope/预处理类型而不需要 llama.cpp VLM 运行时时，才单独使用 `vision`。
+四个平台预设均已包含视觉语言 llama.cpp 路径（`llm-llamacpp-vision`）与 whisper.cpp 语音识别（`asr-whispercpp`，在 Android `.so` 代理上约 0.2 MiB，已 strip）。VLM 与 ASR 开箱即用，无需额外组合。
 
-| 预设 | 目标平台 | 启用的 Core 特性 | VLM 默认 | 理由 |
-|--------|-----------------|----------------------|-------------|-----------|
-| **platform-android** | Android（所有 ABI） | `ort-dynamic`、`candle`、`llm-llamacpp` | 关闭；添加 `llm-llamacpp-vision` | 用于 AAR 分发的动态 ORT 加载；用于 Whisper ASR 的 Candle（CPU）；llama.cpp 具备运行时 SIMD 检测；mistral.rs 在不具备 ARMv8.2-A FP16 的设备上会导致 SIGILL |
-| **platform-ios** | iOS（arm64、模拟器） | `ort-download`、`ort-coreml`、`candle-metal`、`candle-hub`、`llm-llamacpp` | 关闭；添加 `llm-llamacpp-vision` | 静态 ORT 链接；用于 ANE 加速的 CoreML；用于 GPU 的 Metal |
-| **platform-macos** | macOS（arm64、x86_64） | `ort-download`、`ort-coreml`、`candle-metal`、`candle-hub`、`llm-llamacpp` | 关闭；添加 `llm-llamacpp-vision` | 与 iOS 相同 — 统一的 Apple 平台特性 |
-| **platform-desktop** | Linux、Windows | `ort-download`、`llm-llamacpp` | 关闭；添加 `llm-llamacpp-vision` | 静态 ORT 链接；用于 LLM 推理的 llama.cpp（所有平台统一） |
+Candle **不在**任何预设中。在同一 Android 代理上它约占 1.3 MiB（Apple 形态因额外链接 `candle-metal` 约占 1.9 MiB），即其替代方案的 6.5–9.5 倍；在 Pixel 8 上首个部分结果需 9871 ms，而 whisper.cpp 为 2724 ms。`candle*` 特性仍然保留且可编译，需要 SafeTensors 路径的用户可显式启用 —— 只是不再默认开启。
+
+| 预设 | 目标平台 | 启用的 Core 特性 | VLM 默认 | ASR 默认 | 理由 |
+|--------|-----------------|----------------------|-------------|-------------|-----------|
+| **platform-android** | Android（所有 ABI） | `ort-dynamic`、`llm-llamacpp-vision`、`asr-whispercpp` | 开启 | whisper.cpp | 用于 AAR 分发的动态 ORT 加载；Whisper ASR 由 whisper.cpp 承担，复用 llama.cpp 已链接的 ggml（strip 后约 0.2 MiB）；llama.cpp 具备运行时 SIMD 检测；mistral.rs 在不具备 ARMv8.2-A FP16 的设备上会导致 SIGILL |
+| **platform-ios** | iOS（arm64、模拟器） | `ort-download`、`ort-coreml`、`llm-llamacpp-vision`、`asr-whispercpp` | 开启 | whisper.cpp | 静态 ORT 链接；用于 ANE 加速的 CoreML；经由 ggml 使用 Metal |
+| **platform-macos** | macOS（arm64、x86_64） | `ort-download`、`ort-coreml`、`llm-llamacpp-vision`、`asr-whispercpp` | 开启 | whisper.cpp | 与 iOS 相同 — 统一的 Apple 平台特性 |
+| **platform-desktop** | Linux、Windows | `ort-download`、`llm-llamacpp-vision`、`asr-whispercpp` | 开启 | whisper.cpp | 静态 ORT 链接；LLM 推理用 llama.cpp，ASR 用 whisper.cpp（所有平台统一） |
 
 > **注意**：CLI（`xybrid-cli`）会为其所有平台预设添加 `huggingface`，使 `xybrid run --huggingface` 在发布构建中可用。SDK/FFI 预设默认不包含 `huggingface` — 如有需要请单独添加。
 

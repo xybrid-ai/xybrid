@@ -506,7 +506,8 @@ mod tests {
         );
         let responses = serde_json::json!([{ "content": injected }]).to_string();
 
-        let result = compose_tool_continuation("base", &prior, &responses).unwrap();
+        let result =
+            compose_tool_continuation("<|im_start|>assistant\n", &prior, &responses).unwrap();
 
         assert_eq!(parse_tool_calls(&result).len(), 1);
         assert_eq!(result.matches(TOOL_CALL_START).count(), 1);

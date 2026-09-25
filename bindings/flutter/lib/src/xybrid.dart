@@ -18,6 +18,15 @@ import 'model_loader.dart';
 import 'pipeline.dart';
 import 'runtime_config.dart';
 
+/// A physical model entry occupying managed cache storage.
+typedef CacheEntry = FfiCacheEntry;
+
+/// The managed storage area containing a [CacheEntry].
+typedef CacheEntryLocation = FfiCacheEntryLocation;
+
+/// Aggregate storage usage across all managed model-cache areas.
+typedef CacheStatus = FfiCacheStatus;
+
 /// Main entry point for the Xybrid SDK.
 ///
 /// Call [Xybrid.init] once before using any other Xybrid functionality.
@@ -164,6 +173,55 @@ class Xybrid {
     XybridSdkClient.setGatewayUrl(gatewayUrl: gatewayUrl);
   }
 
+  /// Point the cloud gateway at a platform base URL (staging, self-hosted).
+  ///
+  /// Pass a bare base URL — the `/v1` suffix is applied internally.
+  static void setPlatformUrl(String url) {
+    XybridSdkClient.setPlatformUrl(url: url);
+  }
+
+  /// Enable speculative cloud fallback globally: a registry model that isn't
+  /// downloaded yet is served from the gateway while the weights download.
+  ///
+  /// Only takes effect when an API key resolves. Speculation is LLM/chat only —
+  /// prefer [XybridModelLoader.fromRegistrySpeculative] when the app also loads
+  /// ASR/TTS models, which cannot be served this way.
+  static void setSpeculativeCloud(bool enabled) {
+    XybridSdkClient.setSpeculativeCloud(enabled: enabled);
+  }
+
+  /// Whether the global speculative-cloud default is on.
+  static bool get isSpeculativeCloudEnabled =>
+      XybridSdkClient.isSpeculativeCloudEnabled();
+
+  /// Release every idle loaded model's memory; returns how many were released.
+  ///
+  /// Wire this to the app's low-memory signal, e.g. from a
+  /// [WidgetsBindingObserver]:
+  ///
+  /// ```dart
+  /// @override
+  /// void didHaveMemoryPressure() => Xybrid.releaseMemory();
+  /// ```
+  ///
+  /// Models with a run in flight are skipped, and a released model reloads
+  /// itself the next time it is used — there is no new error to handle and
+  /// nothing to reload by hand.
+  static int releaseMemory() => XybridSdkClient.releaseMemory();
+
+  /// Enable or disable automatic model release for subsequent loads.
+  ///
+  /// When enabled, loading a model while the device reports memory pressure
+  /// first releases least-recently-used idle models. Off by default;
+  /// [releaseMemory] works either way.
+  static void setAutoRelease(bool enabled) {
+    XybridSdkClient.setAutoRelease(enabled: enabled);
+  }
+
+  /// Whether automatic model release is enabled process-wide.
+  static bool get isAutoReleaseEnabled =>
+      XybridSdkClient.isAutoReleaseEnabled();
+
   static void applyDebugMemoryPressure() {
     XybridDevice.applyDebugMemoryPressure();
   }
@@ -185,6 +243,48 @@ class Xybrid {
   static bool isModelCached(String modelId) {
     return XybridSdkClient.isModelCached(modelId: modelId);
   }
+
+  /// Returns aggregate storage usage across every managed model-cache area.
+  static Future<CacheStatus> modelCacheStatus() =>
+      XybridSdkClient.cacheStatus();
+
+  /// Lists physical entries across registry, extraction, and Hugging Face caches.
+  ///
+  /// A model can appear more than once when its downloaded archive and extracted
+  /// runtime directory are both present.
+  static Future<List<CacheEntry>> modelCacheEntries() =>
+      XybridSdkClient.cacheEntries();
+
+  /// Returns whether [modelId] occupies any managed model-cache entry.
+  ///
+  /// This includes archives and shared downloads that may still need extraction.
+  /// Use [isModelCached] to ask whether a registry model is ready to load.
+  static Future<bool> hasCachedModelData(String modelId) =>
+      XybridSdkClient.hasCachedModelData(modelId: modelId);
+
+  /// Returns a preferred local path for [modelId], or `null` when absent.
+  ///
+  /// Presence does not necessarily mean the model is extracted and ready. Use
+  /// [isModelCached] when a ready-to-load check is required.
+  static Future<String?> cachedModelPath(String modelId) =>
+      XybridSdkClient.cachedModelPath(modelId: modelId);
+
+  /// Lists model IDs that are extracted, validated, and ready to run offline.
+  static Future<List<String>> extractedModelIds() =>
+      XybridSdkClient.listExtractedModelIds();
+
+  /// Removes all managed cache entries for [modelId].
+  ///
+  /// Returns how many physical entries were deleted. Do not call this while the
+  /// same model is loading.
+  static Future<int> removeCachedModel(String modelId) =>
+      XybridSdkClient.removeCachedModel(modelId: modelId);
+
+  /// Clears all managed model-cache storage.
+  ///
+  /// Returns how many physical entries were deleted. Do not call this while any
+  /// model is loading.
+  static Future<int> clearModelCache() => XybridSdkClient.clearModelCache();
 
   /// Legacy telemetry entry point. Prefer passing `apiKey` (and, for a
   /// self-hosted dashboard, `ingestUrl`) to [init] — that starts the

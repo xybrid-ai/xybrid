@@ -73,7 +73,7 @@ class _SpeechToTextScreenState extends State<SpeechToTextScreen> {
   XybridModel? _model;
 
   /// The model ID used for ASR.
-  static const _asrModelId = 'whisper-tiny';
+  static const _asrModelId = 'whisper-tiny-ggml';
 
   /// Latency of the last inference in milliseconds.
   int? _latencyMs;

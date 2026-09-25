@@ -35,3 +35,10 @@ ios/Frameworks/
 # Test artifacts
 coverage/
 test_driver/
+
+# Example app: publish the Dart source and the Android runner only. The
+# generated macOS runner is ~160KB of app icons alone and doubles the
+# archive without teaching a consumer anything. `example/test/` is listed
+# so a future test directory cannot silently grow the archive either.
+example/macos/
+example/test/

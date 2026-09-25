@@ -40,12 +40,14 @@ class XybridStreamSession {
     XybridModel model, {
     FfiVadMode vad = const FfiVadMode.off(),
     String? language,
+    int? audioCtx,
   }) async {
     final inner = await model.inner.stream(
       config: FfiStreamingConfig(
         sampleRate: 16000,
         vad: vad,
         language: language,
+        audioCtx: audioCtx,
       ),
     );
     return XybridStreamSession._(inner);

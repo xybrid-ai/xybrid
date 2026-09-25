@@ -16,6 +16,7 @@ on:
     paths:
       - '**.md'
       - 'docs/**'
+      - 'examples/**'
       - '.github/ISSUE_TEMPLATE/**'
       - 'LICENSE'
   pull_request:
@@ -23,6 +24,7 @@ on:
     paths:
       - '**.md'
       - 'docs/**'
+      - 'examples/**'
       - '.github/ISSUE_TEMPLATE/**'
       - 'LICENSE'
 

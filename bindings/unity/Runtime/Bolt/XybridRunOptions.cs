@@ -3,8 +3,7 @@
 // </auto-generated>
 #nullable enable
 
-using System;
-using System.Text;
+using System.Runtime.InteropServices;
 
 namespace XybridBolt
 {
@@ -19,28 +18,51 @@ namespace XybridBolt
 
         internal static XybridRunOptions Decode(WireReader reader) =>
             new XybridRunOptions(
-                reader.ReadU8() == 0 ? (XybridGenerationConfig?)null : XybridGenerationConfig.Decode(reader),
-                reader.ReadEncodedArray<XybridAbortSignal>(r0 => XybridAbortSignalWire.Decode(r0)),
+                reader.ReadU8() == 0 ? default(XybridGenerationConfig?) : XybridGenerationConfig.Decode(reader),
+                reader.ReadArray(reader => (XybridAbortSignal)reader.ReadI32()),
                 reader.ReadBool(),
                 reader.ReadU32(),
-                reader.ReadU8() == 0 ? (string?)null : reader.ReadString()
+                reader.ReadU8() == 0 ? default(string?) : reader.ReadString()
             );
 
-        internal int WireEncodedSize() =>
-            (1 + (this.GenerationConfig is { } sizeOpt0 ? sizeOpt0.WireEncodedSize() : 0)) +
-            WireWriter.EncodedArraySize(this.AbortOn, sizeItem0 => 4) +
-            1 +
-            4 +
-            (1 + (this.CorrelationId is { } sizeOpt1 ? (4 + Encoding.UTF8.GetByteCount(sizeOpt1)) : 0));
-
-        internal void WireEncodeTo(WireWriter wire)
+        internal void Encode(WireWriter writer)
         {
-            if (this.GenerationConfig is { } opt0) { wire.WriteU8((byte)1); opt0.WireEncodeTo(wire); } else { wire.WriteU8((byte)0); };
-            wire.WriteI32(this.AbortOn.Length);
-            foreach (XybridAbortSignal item0 in this.AbortOn) { item0.WireEncodeTo(wire); };
-            wire.WriteBool(this.FallbackToCloud);
-            wire.WriteU32(this.MaxGraceTokens);
-            if (this.CorrelationId is { } opt1) { wire.WriteU8((byte)1); wire.WriteString(opt1); } else { wire.WriteU8((byte)0); };
+            {
+                if (this.GenerationConfig is { } boltffiValue0)
+                {
+                    writer.WriteU8(1);
+                    boltffiValue0.Encode(writer);
+                }
+                else
+                {
+                    writer.WriteU8(0);
+                }
+            }
+            {
+                writer.WriteU32(checked((uint)this.AbortOn.Length));
+                foreach (var boltffiValue0 in this.AbortOn)
+                {
+                    writer.WriteI32((int)boltffiValue0);
+                }
+            }
+            {
+                writer.WriteBool(this.FallbackToCloud);
+            }
+            {
+                writer.WriteU32(this.MaxGraceTokens);
+            }
+            {
+                if (this.CorrelationId is { } boltffiValue0)
+                {
+                    writer.WriteU8(1);
+                    writer.WriteString(boltffiValue0);
+                }
+                else
+                {
+                    writer.WriteU8(0);
+                }
+            }
         }
+
     }
 }

@@ -3,7 +3,7 @@
 // </auto-generated>
 #nullable enable
 
-using System;
+using System.Runtime.InteropServices;
 
 namespace XybridBolt
 {
@@ -25,18 +25,27 @@ namespace XybridBolt
 
         internal static XybridStreamEvent Decode(WireReader reader) =>
             new XybridStreamEvent(
-                XybridStreamEventKindWire.Decode(reader),
-                reader.ReadU8() == 0 ? (XybridStreamToken?)null : XybridStreamToken.Decode(reader)
+                (XybridStreamEventKind)reader.ReadI32(),
+                reader.ReadU8() == 0 ? default(XybridStreamToken?) : XybridStreamToken.Decode(reader)
             );
 
-        internal int WireEncodedSize() =>
-            4 +
-            (1 + (this.Token is { } sizeOpt0 ? sizeOpt0.WireEncodedSize() : 0));
-
-        internal void WireEncodeTo(WireWriter wire)
+        internal void Encode(WireWriter writer)
         {
-            this.Kind.WireEncodeTo(wire);
-            if (this.Token is { } opt0) { wire.WriteU8((byte)1); opt0.WireEncodeTo(wire); } else { wire.WriteU8((byte)0); };
+            {
+                writer.WriteI32((int)this.Kind);
+            }
+            {
+                if (this.Token is { } boltffiValue0)
+                {
+                    writer.WriteU8(1);
+                    boltffiValue0.Encode(writer);
+                }
+                else
+                {
+                    writer.WriteU8(0);
+                }
+            }
         }
+
     }
 }

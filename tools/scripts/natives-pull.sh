@@ -11,7 +11,10 @@
 # XYBRID_NATIVES_PREBUILT_DIR/<target>; see resolve_prebuilt in build.rs).
 #
 # Usage: natives-pull.sh <target-triple> <feature-set> <dest-base-dir>
-# Requires: oras on PATH (public package pulls anonymously).
+# Requires: oras on PATH, and read access to $XYBRID_NATIVES_PKG. Anonymous
+# pulls only work once that package is public — until then callers must
+# `oras login` first (our CI jobs do). tools/scripts/natives-verify-anon.sh
+# checks the anonymous path, which is the one external cargo consumers use.
 set -euo pipefail
 
 TARGET="${1:?usage: natives-pull.sh <target-triple> <feature-set> <dest-base-dir>}"
@@ -40,7 +43,9 @@ if [ ! -f "$SLICE/native.tar.gz" ]; then
   echo "natives-pull: pulled artifact missing native.tar.gz" >&2
   exit 1
 fi
-tar -C "$SLICE" -xzf "$SLICE/native.tar.gz" && rm -f "$SLICE/native.tar.gz" || exit 1
+# Relative -f from inside the dir: GNU tar parses a `D:` drive-letter prefix
+# in -f as a remote host on the windows runner (same fix as natives-push.sh).
+(cd "$SLICE" && tar -xzf native.tar.gz && rm -f native.tar.gz) || exit 1
 
 # build.rs re-validates completeness (required archives + include/) before
 # trusting the slice, so a partial unpack here just degrades to source.

@@ -6,7 +6,13 @@ Build automation and scripts for the xybrid project.
 
 ```
 tools/
-├── scripts/        # Shell scripts for platform builds
+├── scripts/        # Build, release, and codegen helpers (see below)
+│   ├── natives-*.sh          # Prebuilt llama.cpp slices: fingerprint, push,
+│   │                         #   pull, manifest, anonymous-pull verification
+│   ├── gen_*_bolt*.py        # Generate the Kotlin / Python / Unity C# bolt
+│   │                         #   bindings (CI byte-compares with --check)
+│   ├── version-sync.sh       # Read or set the version across every manifest
+│   ├── api-contract-check.sh # Soft-warning public SDK signature check
 │   ├── build-xcframework.sh  # Build XCFramework for Apple platforms
 │   └── build-android.sh      # Build AAR for Android
 └── README.md       # This file
@@ -105,11 +111,11 @@ cp -r /tmp/aar/jni/* bindings/kotlin/libs/
 ```
 
 The NDK is a pinned Bazel download — no machine setup. Each
-`libxybrid-bolt.so` is a clean one-link output (16 KB-aligned,
+`libxybrid_bolt.so` is a clean one-link output (16 KB-aligned,
 `libc++_shared` in DT_NEEDED, no patchelf) with the ORT runtime bundled.
 
 **Output:**
-- `bindings/kotlin/libs/<abi>/libxybrid-bolt.so` (native library; 16 KB-aligned,
+- `bindings/kotlin/libs/<abi>/libxybrid_bolt.so` (native library; 16 KB-aligned,
   `libc++_shared` linked in — a clean linker output that survives a consumer's
   AGP strip, no patchelf)
 - `bindings/kotlin/libs/<abi>/{libonnxruntime.so,libc++_shared.so}` (bundled runtime)

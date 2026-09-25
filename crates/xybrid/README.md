@@ -13,12 +13,12 @@ xybrid = "0.2"
 
 Feature flags forward 1:1 to `xybrid-sdk`. Pick the preset that matches your target platform:
 
-- `platform-macos` — CoreML + Metal + llama.cpp
-- `platform-ios` — CoreML + Metal + llama.cpp
-- `platform-android` — Dynamic ORT + Candle + llama.cpp
-- `platform-desktop` — CPU ORT + llama.cpp (Linux/Windows)
+- `platform-macos` — CoreML + Metal + llama.cpp (vision) + whisper.cpp ASR
+- `platform-ios` — CoreML + Metal + llama.cpp (vision) + whisper.cpp ASR
+- `platform-android` — Dynamic ORT + llama.cpp (vision) + whisper.cpp ASR
+- `platform-desktop` — CPU ORT + llama.cpp (vision) + whisper.cpp ASR (Linux/Windows)
 
-For finer-grained control, enable individual features such as `ort-download`, `candle`, `llm-llamacpp`, `huggingface`, etc.
+For finer-grained control, enable individual features such as `ort-download`, `candle`, `llm-llamacpp`, `huggingface`, etc. On Linux, set `XYBRID_LLAMA_CPP_VULKAN=1` when building `platform-desktop` to opt into Vulkan acceleration.
 
 ## License
 

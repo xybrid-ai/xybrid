@@ -57,6 +57,14 @@ Use `bazelisk` (reads `.bazelversion`). `just bazel-build | bazel-analyze |
 bazel-test` are the shortcuts; each forwards extra Bazel flags. Full setup,
 including the Windows MSVC EULA note, is in `CONTRIBUTING.md`.
 
+Every first-party Rust target (`rust_library`, `rust_binary`, `rust_test`, …)
+passes `version = XYBRID_VERSION`, loaded from `@xybrid_version//:version.bzl`.
+That constant is read from `Cargo.toml`'s `[workspace.package] version` by
+`//bazel:cargo_version.bzl`; without it rules_rust sets `CARGO_PKG_VERSION` to
+`0.0.0`, which every shipped (Bazel-built) SDK would report. Add it to any new
+Rust target: `bazel.yml`'s "Every Rust target stamps the workspace version" step
+(a `bazel query` for Rust targets still on the `0.0.0` default) fails otherwise.
+
 `xtask` is **not** the native-binding entry point anymore. `build-android`,
 `build-xcframework`, `build-uniffi`, `stage-react-native`, `setup-targets`,
 `build-all`, and `package` were all removed once Bazel took over. What remains
@@ -81,7 +89,59 @@ After editing `bindings/flutter/rust`, regenerate the Dart glue with
 `flutter_rust_bridge` in `bindings/flutter/rust/Cargo.toml`); `flutter run` then
 rebuilds the native lib via cargokit.
 
-Note: `tools/README.md` still documents the pre-Bazel xtask matrix and is stale.
+**The arm64 AAR links llama.cpp dynamically; everything else statically.**
+Only the Kotlin AAR's arm64 slice (so Kotlin and React Native) uses
+`//:llama_android_dl`: ggml built with `GGML_BACKEND_DL` +
+`GGML_CPU_ALL_VARIANTS`, so `libxybrid_bolt.so` needs `libllama.so`,
+`libggml*.so` and `libmtmd.so`, and one CPU backend per ISA level ships as a
+module that `bindings/kotlin/bazel/jni/ggml_cpu_backend.cpp` loads at startup
+(best first; ggml skips variants the CPU cannot run). It is selected by the
+`//bazel/ggml:android_arm64_cpu_variants` platform, which only the AAR builds
+for — the Flutter arm64 cdylib keeps the static `//:llama`, because its
+precompiled package carries a single `.so`. Any new target that picks a llama
+build must select on `//bazel/ggml:cpu_variants_enabled` too, or the AAR would
+link two ggml copies. The shipped variant list lives in
+`bazel/ggml/android.bzl` and must match the loader's (the `build-android.yml`
+gate fails otherwise). Two rules_foreign_cc traps are handled there:
+Android is configured as `CMAKE_SYSTEM_NAME=Linux`, so a CMake hook
+(`bazel/ggml/android_system_name.cmake`) makes ggml build its Android variant
+set, and `CMAKE_PLATFORM_NO_VERSIONED_SONAME` keeps sonames unversioned (an APK
+only carries `lib*.so`).
+
+
+### Prebuilt llama.cpp natives (the cargo fast path)
+
+`crates/llama-cpp-sys/build.rs` does not always run cmake. It resolves the
+llama.cpp static archives in this order, falling through on any miss:
+
+1. `XYBRID_NATIVES_PREBUILT_DIR/<target>` — a slice staged by the caller. Our
+   CI jobs pull with `tools/scripts/natives-pull.sh` and point at it.
+2. A slice named in `crates/llama-cpp-sys/natives-manifest.txt`, downloaded
+   over plain HTTPS from `ghcr.io/xybrid-ai/llama-natives` and SHA-256
+   verified. Needs no oras, no env var, no cmake — this is what makes an
+   **external** `cargo build --features llm-llamacpp` cheap.
+3. The cmake source build.
+
+The manifest is GENERATED — `.github/workflows/build-natives.yml` publishes the
+slices, then its `publish-manifest` job regenerates the file via
+`tools/scripts/natives-manifest.sh` and opens a PR. Never hand-edit it.
+
+Two traps:
+
+- **The manifest goes stale on purpose.** It pins plain hashes of
+  `wrapper.cpp`, `wrapper.h`, `build.rs`, and the llama.cpp commit. Touch any
+  of them and every row is ignored until CI republishes — that is the guard
+  that stops a local edit from linking archives that predate it. A dropped
+  fast path after editing `build.rs` is expected, not a bug.
+- **Anonymous reachability is not covered by our own CI.** Every job here
+  `oras login`s first, so a private package looks healthy internally and 401s
+  for everyone outside. `tools/scripts/natives-verify-anon.sh` is the check
+  that catches it; it runs credential-free at the end of `build-natives`.
+
+The publisher fingerprint (`natives-fingerprint.sh`) folds in the LOCAL
+cmake/cc/NDK versions. That is right for publisher/consumer cache parity and
+wrong for distribution, which is why the download path selects by target +
+feature set + ABI attributes from the manifest instead of recomputing it.
 
 ### Releases
 
@@ -153,13 +213,30 @@ Cargo workspace, `resolver = "2"`, edition 2021, MSRV not pinned. Members:
 the FFI binding crates now route their SDK→foreign-language translation
 through `xybrid-ffi-facade` rather than each re-translating SDK types.
 
-The Python SDK (`bindings/python`, pure Python — not a workspace member)
-consumes `xybrid-bolt`'s cdylib via a hand-ported ctypes wire layer
-(`bindings/python/xybrid/_bolt.py`) pinned to the boltffi 0.25.3 ABI: the
-pinned boltffi's experimental Python generator cannot express handles or
-fallible functions. Refresh the native lib with
-`tools/scripts/build-python-bolt.sh`; see the `[targets.python]` note in
-`crates/xybrid-bolt/boltffi.toml` for the boltffi >= 0.26 migration plan.
+The Python SDK (`bindings/python`, not a workspace member) runs on boltffi's
+**generated** bindings as of 0.29: `xybrid/_bolt/` is generator output
+(`tools/scripts/gen_python_bolt.py`, byte-compared in CI via `--check`), and it
+imports a compiled CPython bridge that dlopens the `xybrid-bolt` cdylib. Both
+binaries are staged by `tools/scripts/build-python-bolt.sh` and are **build
+outputs, never committed** — so wheels are per-interpreter (`cp3XX`) and the
+SDK requires Python >= 3.10.
+
+Because the generated package is byte-compared, it carries no hand-written
+code. The Pythonic surface (envelope factories, `result.text`, model
+properties, typed exceptions) is attached to the generated classes at import by
+`xybrid/_sugar.py` and `xybrid/_errors.py`, guarded by `tests/test_sdk.py`. Add
+SDK ergonomics there, never in `xybrid/_bolt/`.
+
+The React Native package (`bindings/react-native`, npm `@xybrid/react-native`,
+not a workspace member) is the one **hand-bridged** binding: a Codegen
+TurboModule over the Swift and Kotlin SDKs, so nothing reaches it for free.
+`tests/parity.test.mjs` fails when `crates/xybrid-bolt` gains an export, record
+field, enum variant or error variant that `bindings/react-native/parity.json`
+neither maps nor excludes. When you add bolt surface, wire it through React
+Native (spec, both shims, TS facade — see its README) or exclude it there with a
+reason; don't leave the test red. Its iOS core is not in the npm tarball:
+`pod install` downloads the release XCFramework and checks the SHA-256 that
+release-prep pins in its `package.json`.
 
 **Dependency direction (do not reverse):**
 

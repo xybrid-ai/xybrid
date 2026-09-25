@@ -72,7 +72,7 @@ pub mod onnx;
 // Cloud LLM backend (OpenAI, Anthropic, etc.) - always available
 pub mod cloud;
 
-#[cfg(any(target_os = "macos", target_os = "ios", test))]
+#[cfg(any(target_os = "macos", target_os = "ios", feature = "coreml", test))]
 pub mod coreml;
 
 // Candle backend (feature-gated, pure Rust ML framework)
@@ -105,6 +105,12 @@ pub mod mistral;
 #[cfg(feature = "llm-llamacpp")]
 pub mod llama_cpp;
 
+// whisper.cpp ASR (feature-gated). Shares llama.cpp's ggml rather than
+// linking a second one — see the module docs for why that constraint shapes
+// the whole backend.
+#[cfg(feature = "asr-whispercpp")]
+pub mod whisper_cpp;
+
 // Re-exports from runtime backends
 pub use cloud::{CloudRuntimeAdapter, CloudStreaming};
 pub use metadata_driven::MetadataDrivenAdapter;
@@ -115,7 +121,7 @@ pub use onnx::{ExecutionProviderKind, ONNXSession, SessionOptions};
 #[cfg(any(target_os = "android", test))]
 pub use onnx::ONNXMobileRuntimeAdapter;
 
-#[cfg(any(target_os = "macos", target_os = "ios", test))]
+#[cfg(any(target_os = "macos", target_os = "ios", feature = "coreml", test))]
 pub use coreml::CoreMLRuntimeAdapter;
 
 #[cfg(feature = "candle")]
@@ -138,13 +144,18 @@ pub use llama_cpp::LlamaCppBackend;
 #[cfg(feature = "llm-llamacpp")]
 pub use llama_cpp::{llama_log_get_verbosity, llama_log_set_verbosity};
 
+// whisper.cpp ASR export.
+#[cfg(feature = "asr-whispercpp")]
+pub use whisper_cpp::WhisperCppRuntime;
+
 // Re-export inference backend types
 pub use inference_backend::{BackendError, BackendResult, InferenceBackend, RuntimeType};
 pub use traits::ModelRuntime;
 
 // Always-available streaming and chat types (NOT feature-gated)
 pub use types::{
-    ChatMessage, GenerationConfig, LlmConfig, PartialToken, StreamingCallback, StreamingError,
+    encode_stop_sequences, parse_stop_sequences, ChatMessage, GenerationConfig, LlmConfig,
+    PartialToken, StreamingCallback, StreamingError, STOP_SEQUENCES_METADATA_KEY,
 };
 pub use types::{MultimodalChatMessage, MultimodalImagePart, MultimodalMessagePart};
 pub use vision::{VisionEmbeddings, VisionEncoder, VisionTokenId};

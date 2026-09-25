@@ -15,7 +15,7 @@ Add the Xybrid package via Swift Package Manager:
 
 ```swift title="Package.swift"
 dependencies: [
-    .package(url: "https://github.com/xybrid-ai/xybrid", from: "0.4.1")
+    .package(url: "https://github.com/xybrid-ai/xybrid", from: "0.6.0")
 ]
 ```
 
@@ -68,7 +68,7 @@ Without a key, telemetry is disabled and the first inference logs a one-shot hin
 ### From Registry
 
 ```swift
-let model = try await Xybrid.model("whisper-tiny").load()
+let model = try await Xybrid.model("whisper-tiny-ggml").load()
 ```
 
 ### From Local Bundle
@@ -82,6 +82,34 @@ directory sources use `URL` through `.bundle(url)` and `.directory(url)`;
 Hugging Face uses `.huggingFace("org/repo")`. Async `load()` is the explicit
 boundary for resolving, downloading, disk access, and runtime initialization.
 Use `loadSync()` only from an existing worker thread.
+
+---
+
+## Download Progress
+
+`load()` blocks until the weights are on disk, so it has no progress to report
+while it runs. Start the download separately and watch it:
+
+```swift
+let loader = Xybrid.model("qwen3-0.6b")
+if let download = loader.download() {
+    for await status in download.progress() {
+        bar.progress = Float(status.progress)
+        label.text = "\(status.downloadedBytes) / \(status.totalBytes ?? 0)"
+    }
+}
+let model = try await loader.load()   // cached: returns at once
+```
+
+`progress` spans every file the model needs — weights plus companions such as a
+vision projector — and never moves backwards, so the bar neither restarts per
+file nor rewinds when a download retries. `totalBytes` is null when the source
+publishes no size (a Hugging Face repo); `downloadedBytes` is exact either way,
+which is what you need for megabytes, speed and time remaining.
+
+Cancelling the consuming task only unsubscribes from updates. Call `cancel()`
+to stop the transfer itself — it takes effect within one chunk read and
+discards the partial file.
 
 ---
 
@@ -119,6 +147,47 @@ if let vector = result.embedding {
     // Process embedding vector
 }
 ```
+
+---
+
+## Live Transcription
+
+`run()` transcribes a finished audio buffer. A session transcribes speech *as
+it arrives*, which is what dictation and live captioning need.
+
+Audio must be PCM **float32, mono, 16 kHz** — converting from the platform's
+microphone format is the caller's job.
+
+```swift
+let model = try await Xybrid.model("whisper-tiny").load()
+let session = try model.stream(config: .voiceActivity(modelDir: vadModelDir, language: "en"))
+
+Task {
+    for await partial in session.partials() {
+        label.text = partial.text
+    }
+}
+
+// From the AVAudioEngine tap, converted to 16 kHz mono Float32:
+try session.feed(samples: pcm)
+
+// When the user stops talking:
+let transcript = try session.flush()
+```
+
+Partial text is **cumulative, not a delta**: render each one in place of the
+previous rather than appending. A partial produced before you subscribe is
+delivered immediately, so the opening words of an utterance are never lost.
+
+`flush()` ends the session and returns the full transcript — and reports an
+error if any chunk failed to transcribe, because that audio is gone and the
+transcript would otherwise look complete. `cancel()` ends the session and
+discards queued audio.
+
+Voice-activity detection cuts chunks on speech boundaries instead of a fixed
+clock, which avoids the stutter you get when a window lands mid-word. It needs
+a Silero VAD model directory containing a `model.onnx`; none ships with the
+SDK, and without one the engine falls back to fixed windows.
 
 ---
 

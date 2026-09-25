@@ -1,0 +1,4 @@
+# Offload when the battery is low (live reading at decision time).
+version: "1.0.0"
+route_cloud_if:
+  - "metrics.battery_level < 25"

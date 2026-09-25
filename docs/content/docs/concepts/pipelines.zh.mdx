@@ -64,10 +64,21 @@ stages:
 | `id` | 阶段标识符（默认为模型 ID） |
 | `model` | 注册表中的模型 ID，云端阶段则为提供商的模型名 |
 | `version` | 模型版本（如 `"1.0"`） |
-| `target` | 运行位置：`device`、`cloud` 或 `auto`（默认）— 参见[混合执行](/docs/concepts/hybrid-execution) |
-| `provider` | 云端阶段的提供商：`openai`、`anthropic`、`google`、`deepseek`、`elevenlabs`、`openrouter`、`custom` |
+| `target` | 运行位置：`device`、`cloud` 或 `auto`（默认）— 参见[混合执行](/docs/concepts/hybrid-execution)。`auto` **同时**声明 `provider` 即为混合阶段：本地模型加一条云端分支，由策略与设备状态按请求选择 |
+| `provider` | 云端或混合阶段的提供商：`openai`、`anthropic`、`google`、`deepseek`、`elevenlabs`、`openrouter`、`custom` |
+| `cloud_model` | 混合阶段云端分支发送给提供商的模型名（默认与 `model` 相同） |
+| `backend` | `gateway`（默认）通过 `XYBRID_API_KEY` 访问 Xybrid Platform；对 OpenAI 兼容提供商使用 `direct` 会以 `$<PROVIDER>_API_KEY` 直接调用其 API |
+| `gateway_url`、`api_key` | 云端分支的显式端点与凭据（`api_key` 接受 `$ENV_VAR`）；凭据绝不会跨源继承 |
+| `thinking` | 仅 DeepSeek：`enabled` 或 `disabled`（DeepSeek 默认开启推理；`disabled` 把 `max_tokens` 留给回答） |
 | `execution_provider` | ONNX Runtime 覆盖：`cpu`、`coreml`、`coreml-ane`、`coreml-gpu`（不设置则自动选择） |
 | *（其他任意键）* | 作为阶段选项传递 — 常用：`system_prompt`、`max_tokens`、`temperature` |
+
+<Callout type="info">
+混合阶段（`target: auto` 搭配 `provider`）目前由 `xybrid run` 支持。Flutter 与 Rust SDK 的流水线 API 会把该组合视为纯云端阶段，不会加载其本地模型。
+</Callout>
+
+主平台集成示例为 `crates/xybrid-cli/examples/hybrid-platform.yaml`；
+`hybrid-deepseek.yaml` 是独立的直连提供商测试示例。
 
 ## 混合设备端与云端阶段
 

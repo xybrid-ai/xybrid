@@ -362,6 +362,21 @@ pub fn download_bar(total: u64, label: &str) -> ProgressBar {
     pb
 }
 
+/// Drive a [`download_bar`] from an SDK [`DownloadStatus`].
+///
+/// Takes the byte counts straight from the download rather than
+/// back-computing them from the fraction, and re-sizes the bar when the SDK
+/// reports a total — a multi-file model's real total is the sum across every
+/// artifact, which the caller's `resolved.size_bytes` does not cover.
+pub fn apply_download_status(pb: &ProgressBar, status: &xybrid_sdk::DownloadStatus) {
+    if let Some(total) = status.total_bytes {
+        if pb.length() != Some(total) {
+            pb.set_length(total);
+        }
+    }
+    pb.set_position(status.downloaded_bytes);
+}
+
 /// Create a branded indeterminate spinner.
 pub fn spinner(msg: &str) -> ProgressBar {
     let pb = ProgressBar::new_spinner();

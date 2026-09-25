@@ -64,7 +64,7 @@ xybrid models list
 xybrid run --model kokoro-82m --input-text "Hello from Xybrid!" -o hello.wav
 
 # 语音识别
-xybrid run --model whisper-tiny --input-audio recording.wav
+xybrid run --model whisper-tiny-ggml --input-audio recording.wav
 
 # 与本地 LLM 对话（流式输出）
 xybrid repl --model qwen2.5-0.5b-instruct --stream

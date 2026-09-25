@@ -9,8 +9,11 @@
 
 import '../frb_generated.dart';
 import 'envelope.dart';
+import 'model.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import 'result.dart';
+
+// These functions are ignored because they are not marked as `pub`: `final_execution_target`
 
 // Rust type: RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FfiPipeline>>
 abstract class FfiPipeline implements RustOpaqueInterface {

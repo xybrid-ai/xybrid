@@ -41,7 +41,8 @@ SLICE="$EXPORT/$TARGET"
 # archives build.rs's resolve_prebuilt requires are present and non-empty in
 # lib/ OR lib64/ before publishing. Mirror required_archives() in build.rs:
 # MSVC names static libs `<name>.lib` (no prefix); every other target is
-# Unix-style `lib<name>.a`. Base set, plus ggml-metal on Apple and mtmd on vision.
+# Unix-style `lib<name>.a`. Base set, plus ggml-metal on Apple, mtmd on vision,
+# and ggml-vulkan on Vulkan feature sets.
 case "$TARGET" in
   *windows-msvc*) pfx=''; sfx='.lib' ;;
   *) pfx='lib'; sfx='.a' ;;
@@ -50,7 +51,12 @@ archives=("${pfx}llama${sfx}" "${pfx}ggml${sfx}" "${pfx}ggml-base${sfx}" "${pfx}
 case "$TARGET" in
   *apple*) archives+=("${pfx}ggml-metal${sfx}") ;;
 esac
-[ "$FEATURES" = "vision" ] && archives+=("${pfx}mtmd${sfx}")
+case "$FEATURES" in
+  vision|vision-vulkan) archives+=("${pfx}mtmd${sfx}") ;;
+esac
+case "$FEATURES" in
+  vulkan|vision-vulkan) archives+=("${pfx}ggml-vulkan${sfx}") ;;
+esac
 for a in "${archives[@]}"; do
   [ -s "$SLICE/lib/$a" ] || [ -s "$SLICE/lib64/$a" ] || {
     echo "natives-push: required archive $a missing — refusing to publish incomplete slice" >&2
@@ -60,14 +66,16 @@ done
 
 slice_dirs=(lib include)
 [ -d "$SLICE/lib64" ] && slice_dirs+=(lib64)
-tar -C "$SLICE" -czf "$SLICE/native.tar.gz" "${slice_dirs[@]}"
 
-# Push from INSIDE the slice dir so the layer reference is a RELATIVE path:
-# oras rejects absolute file paths (path-validation), and a bare
-# `native.tar.gz` title is exactly what natives-pull.sh expects from
+# Everything below runs from INSIDE the slice dir so both tar and oras see
+# RELATIVE paths. tar: on the windows runner $SLICE starts with `D:`, which
+# GNU tar's -f parses as a remote host ("Cannot connect to D:") — a relative
+# archive name sidesteps it. oras: rejects absolute file paths outright, and
+# a bare `native.tar.gz` title is exactly what natives-pull.sh expects from
 # `oras pull -o <dir>` (it writes <dir>/native.tar.gz).
 (
   cd "$SLICE"
+  tar -czf native.tar.gz "${slice_dirs[@]}"
   oras push "$PKG:$FP" \
     --artifact-type application/vnd.xybrid.natives.layer.v1+gzip \
     --annotation "org.opencontainers.image.source=https://github.com/xybrid-ai/xybrid" \

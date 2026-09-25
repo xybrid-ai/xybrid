@@ -91,6 +91,9 @@ pub(crate) use session_factory::{InferenceSession, OnnxSessionFactory, SessionFa
 // Base-path file resolution (internal)
 pub(crate) mod path;
 
+// Loaded tokenizer.json cache, one per executor (internal)
+pub(crate) mod tokenizer_cache;
+
 // TTS text chunking (internal)
 pub(crate) mod text_chunking;
 
@@ -105,7 +108,6 @@ pub(crate) mod tool_continuation;
 
 // Main executor
 mod executor;
-#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
 pub use executor::model_default_gen_config;
 pub use executor::TemplateExecutor;
 

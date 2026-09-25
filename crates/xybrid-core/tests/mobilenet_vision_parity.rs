@@ -55,7 +55,9 @@ fn legacy_flattened_metadata(mut metadata: ModelMetadata) -> ModelMetadata {
 fn topk_pairs(envelope: Envelope) -> Vec<(usize, f32)> {
     match envelope.kind {
         EnvelopeKind::Embedding(values) => values
-            .chunks_exact(2)
+            .as_chunks::<2>()
+            .0
+            .iter()
             .map(|pair| (pair[0] as usize, pair[1]))
             .collect(),
         other => panic!("expected embedding TopK output, got {other:?}"),

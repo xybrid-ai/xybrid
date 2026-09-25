@@ -15,7 +15,7 @@ Or add to your `pubspec.yaml`:
 
 ```yaml
 dependencies:
-  xybrid_flutter: ^0.4.1
+  xybrid_flutter: ^0.6.0
 ```
 
 <details>
@@ -88,8 +88,9 @@ final loader = XybridModelLoader.fromRegistry('kokoro-82m');
 
 await for (final event in loader.loadWithProgress()) {
   switch (event) {
-    case LoadProgress(:final progress):
-      print('Downloading: ${(progress * 100).toInt()}%');
+    case LoadProgress(:final progress, :final downloadedBytes, :final totalBytes):
+      print('Downloading: ${(progress * 100).toInt()}% '
+          '($downloadedBytes / ${totalBytes ?? '?'} bytes)');
     case LoadComplete():
       print('Model ready!');
     case LoadError(:final message):
@@ -97,6 +98,10 @@ await for (final event in loader.loadWithProgress()) {
   }
 }
 ```
+
+`progress` spans every file the model needs and never moves backwards.
+`totalBytes` is `null` when the source publishes no size; `downloadedBytes` is
+exact either way, so megabytes, speed and time remaining are all derivable.
 
 ### Input Envelopes
 
@@ -161,6 +166,78 @@ final result = await model.run(XybridEnvelope.text(
 if (result.text != null) print('Answer: ${result.text}');
 if (result.reasoningContent != null) print('Reasoning: ${result.reasoningContent}');
 ```
+
+### Structured Output (JSON Schema)
+
+Constrain a local llama model so its output is always schema-valid — no
+retry loop, no parse failures. `jsonSchemaToGbnf` turns a JSON Schema into the
+GBNF grammar `GenerationConfig.grammar` expects:
+
+```dart
+final grammar = jsonSchemaToGbnf(
+  schemaJson: '{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]}',
+);
+
+final result = await model.run(
+  XybridEnvelope.text('Extract the city: "I flew into Paris last night."'),
+  config: GenerationConfig.greedy(grammar: grammar),
+);
+// result.text is guaranteed to parse against the schema
+```
+
+`GenerationConfig.greedy` is the usual pairing — deterministic decoding plus a
+grammar is the standard extraction shape. Raw GBNF works too: pass it to
+`grammar` directly.
+
+### Tool Calling
+
+One `run` is one model turn, so the loop lives in your code: run a request
+carrying tools, execute the calls the model asks for, then run a continuation
+envelope that feeds the outcomes back.
+
+```dart
+final tools = [
+  ToolDefinition(
+    name: 'get_weather',
+    description: 'Current weather for a city',
+    parametersJson: '{"type":"object","properties":{"city":{"type":"string"}}}',
+  ),
+];
+final config = GenerationConfig.greedy(tools: tools);
+
+const question = 'Weather in Paris?';
+final first = await model.run(XybridEnvelope.text(question), config: config);
+
+if (first.hasToolCalls) {
+  final results = [
+    for (final call in first.toolCalls)
+      ToolResult(callId: call.id, name: call.name, contentJson: runTool(call)),
+  ];
+
+  final answer = await model.run(
+    XybridEnvelope.toolResults(
+      userText: question,
+      priorAssistantText: first.text!,  // raw output, tool-call block included
+      results: results,
+    ),
+    config: config,  // same tools as the first turn
+  );
+}
+```
+
+Two rules the loop depends on: run the continuation with the **same tools** as
+the original turn so the executor rebuilds an identical chat prefix, and pass
+`priorAssistantText` **verbatim** — tool-call block included.
+
+Gate your tool UI on the bundle's advisory flag:
+
+```dart
+if (model.supportsToolCalling == true) showToolsToggle();
+```
+
+`null` means the bundle says nothing and never implies support. Tool calling is
+llama.cpp-only; unsupported paths reject tool-bearing requests rather than
+silently generating without them.
 
 ### LLM Streaming
 
@@ -248,7 +325,7 @@ await for (final token in model.runStreamingWithContext(envelope, context)) {
 Native ML runtimes are resolved automatically at build time:
 
 - **Android**: ONNX Runtime pulled from Maven Central (`com.microsoft.onnxruntime:onnxruntime-android`)
-- **iOS**: ONNX Runtime xcframework downloaded from HuggingFace and cached at `~/.xybrid/cache/ort-ios/`
+- **iOS**: ONNX Runtime is part of the precompiled library, so nothing extra is downloaded or installed. (Monorepo source builds fetch an ONNX Runtime xcframework from HuggingFace into `~/.xybrid/cache/ort-ios/`; simulator source builds also need `xz`.)
 - **macOS/Linux/Windows**: ONNX Runtime downloaded by the `ort` Rust crate at compile time
 
 The Rust library itself ships as a precompiled, signature-verified binary for
@@ -257,6 +334,34 @@ downloaded at build time. No Rust toolchain is required, and having one
 installed does not change anything — the published package is precompiled-only
 and cannot be built from source, because its Rust crate lives in the xybrid
 monorepo workspace.
+
+The first build of an app downloads that binary, gzip-compressed: roughly
+10 MB per Android ABI and 30–50 MB for iOS and macOS, where it is a static
+library of over 100 MB once unpacked. A slow first build is this download, not
+a Rust compile.
+
+The download is kept in a shared cache at `~/.xybrid/cache/precompiled/`, so
+`flutter clean` and other projects on the same machine reuse it instead of
+downloading again. Every reuse re-verifies the binary's signature against the
+key pinned in this package, and entries unused for 90 days are removed. Set
+`XYBRID_PRECOMPILED_CACHE_DIR` to move the cache — for example into a directory
+your CI persists between runs — or to an empty value to turn it off.
+
+Flutter hides native build-step output unless you pass `-v`; with it (or in
+the Xcode / Android Studio build log) cargokit reports what it is doing:
+
+```
+INFO: Downloading precompiled aarch64-apple-ios_libxybrid_flutter_ffi.a.gz (33.6 MB) from https://github.com/…
+INFO: aarch64-apple-ios_libxybrid_flutter_ffi.a.gz: 14.2 MB of 33.6 MB (42%)
+INFO: Downloaded aarch64-apple-ios_libxybrid_flutter_ffi.a.gz: 33.6 MB in 21s (1.6 MB/s)
+INFO: Unpacked aarch64-apple-ios_libxybrid_flutter_ffi.a.gz to 119.2 MB
+INFO: Using precompiled xybrid_flutter for aarch64-apple-ios (downloaded)
+```
+
+Later builds print `(cached)`; after `flutter clean`, or in another project,
+`(shared cache)`. A line starting
+`Building xybrid_flutter for` means a source build, which only happens inside
+the monorepo.
 
 Building from source is for monorepo development, where the workspace root and
 the `xybrid-*` crates are present. There it is the default whenever a Rust

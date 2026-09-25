@@ -10,6 +10,19 @@ use xybrid_sdk::registry_client::RegistryClient;
 
 use super::utils::format_size;
 
+/// Drive the bundle command's progress bar from an SDK download status.
+///
+/// Re-sizes the bar when the SDK reports a total: a multi-file model's real
+/// total spans every artifact, which `resolved.size_bytes` does not cover.
+fn apply_download_status(pb: &ProgressBar, status: &xybrid_sdk::DownloadStatus) {
+    if let Some(total) = status.total_bytes {
+        if pb.length() != Some(total) {
+            pb.set_length(total);
+        }
+    }
+    pb.set_position(status.downloaded_bytes);
+}
+
 /// Handle `xybrid bundle` command: fetch a registry model and produce a .xyb bundle.
 pub(crate) fn handle_bundle_command(
     model_id: &str,
@@ -77,9 +90,8 @@ fn bundle_from_cache(
         let pb = create_progress_bar(resolved.size_bytes, model_id);
 
         client
-            .fetch(model_id, platform, |progress| {
-                let bytes_done = (progress * resolved.size_bytes as f32) as u64;
-                pb.set_position(bytes_done);
+            .fetch(model_id, platform, |status| {
+                apply_download_status(&pb, &status);
             })
             .context(format!("Failed to fetch model '{}'", model_id))?;
 
@@ -123,9 +135,8 @@ fn bundle_from_passthrough(
     let pb = create_progress_bar(resolved.size_bytes, model_id);
 
     let extract_dir = client
-        .fetch_extracted(model_id, platform, |progress| {
-            let bytes_done = (progress * resolved.size_bytes as f32) as u64;
-            pb.set_position(bytes_done);
+        .fetch_extracted(model_id, platform, |status| {
+            apply_download_status(&pb, &status);
         })
         .context(format!("Failed to fetch model '{}'", model_id))?;
 

@@ -1,537 +1,887 @@
 import Foundation
 import React
 
-// `XybridModuleImpl` does the actual work of every TurboModule call. It
-// holds the `id -> XybridModel` map (model handles are opaque strings on
-// the JS side) and translates between RN's NSDictionary payloads and the
-// Swift-native BoltFFI types in the bundled `Xybrid.swift` wrapper.
+// The Swift half of the TurboModule. XybridModule.mm conforms to the
+// Codegen protocol and forwards every selector here unchanged; each method
+// decodes its arguments (XybridCodec), calls the bolt Swift SDK compiled into
+// this pod (Xybrid.swift + xybrid_bolt.swift), and settles the promise with a
+// typed `xybrid_*` code on failure.
 //
-// All long-running operations (load, run) hop onto a detached Task so the
-// React Native module thread isn't blocked. Errors map to NSError with the
-// underlying XybridError's `errorDescription` as the message.
+// Blocking SDK calls (load, run, stream pulls, downloads, disk walks) run on
+// a detached task so the module's method queue stays free; cheap getters
+// settle inline.
+
+// File-scope aliases for the generated bolt free functions. Inside the class,
+// a member named like a global (`setBatteryLevel`, `cacheStatus`, …) shadows
+// it — "use of 'X' refers to instance method rather than global function" —
+// and the module name can't qualify it portably. At file scope no member is
+// in scope, so these bind to the globals.
+private let ffiSetBinding = setBinding
+private let ffiInitSdkCacheDir = initSdkCacheDir
+private let ffiConfigureRuntime = configureRuntime
+private let ffiVersion = version
+private let ffiHasApiKey = hasApiKey
+private let ffiSetProviderApiKey = setProviderApiKey
+private let ffiSetPlatformUrl = setPlatformUrl
+private let ffiSetSpeculativeCloud = setSpeculativeCloud
+private let ffiIsSpeculativeCloudEnabled = isSpeculativeCloudEnabled
+private let ffiWillSpeculateForModel = willSpeculateForModel
+private let ffiReleaseMemory = releaseMemory
+private let ffiSetAutoRelease = setAutoRelease
+private let ffiIsAutoReleaseEnabled = isAutoReleaseEnabled
+private let ffiSetBatteryLevel = setBatteryLevel
+private let ffiClearBatteryLevel = clearBatteryLevel
+private let ffiSetThermalState = setThermalState
+private let ffiClearThermalState = clearThermalState
+private let ffiCacheStatus = cacheStatus
+private let ffiCacheEntries = cacheEntries
+private let ffiCacheIsModelCached = cacheIsModelCached
+private let ffiCacheModelPath = cacheModelPath
+private let ffiCacheListExtractedModelIds = cacheListExtractedModelIds
+private let ffiCacheRemoveModel = cacheRemoveModel
+private let ffiCacheClear = cacheClear
+private let ffiJsonSchemaToGbnf = jsonSchemaToGbnf
+private let ffiToolResultsEnvelope = toolResultsEnvelope
+
+/// Process-wide SDK setup. The Rust SDK's configuration is process-global
+/// (first-set-wins), and it outlives this module: a JS reload builds a new
+/// module instance but not a new process. So what has been applied is
+/// tracked process-wide too, which is what keeps a reload from starting a
+/// second telemetry exporter.
+private enum SdkSetup {
+  struct Runtime: Equatable {
+    var apiKey: String?
+    var gatewayUrl: String?
+    var ingestUrl: String?
+
+    var isEmpty: Bool { apiKey == nil && gatewayUrl == nil && ingestUrl == nil }
+  }
+
+  private static let lock = NSLock()
+  nonisolated(unsafe) private static var appliedCacheDir: String?
+  nonisolated(unsafe) private static var appliedRuntime: Runtime?
+
+  /// Register the binding, battery observers and the cache directory, once.
+  /// Every bridged call runs this first, so local inference needs no
+  /// `initialize()` at all.
+  static func ensureBase(cacheDir requested: String? = nil) throws {
+    lock.lock()
+    defer { lock.unlock() }
+    if let applied = appliedCacheDir {
+      if let requested, requested != applied {
+        throw BridgeError.config(
+          "the model cache is already at \(applied); cacheDir only applies to the first Xybrid call")
+      }
+      return
+    }
+    // First-set-wins in the SDK: claim the binding before Xybrid.initialize()
+    // registers "swift". Its own configureRuntime(nil, nil, nil) is a no-op;
+    // what it adds is the UIDevice battery observer.
+    ffiSetBinding("react-native")
+    Xybrid.initialize()
+    let directory = try requested ?? defaultCacheDirectory()
+    try FileManager.default.createDirectory(atPath: directory, withIntermediateDirectories: true)
+    ffiInitSdkCacheDir(directory)
+    appliedCacheDir = directory
+  }
+
+  /// Apply the API key and URL overrides — once per process.
+  static func configure(_ runtime: Runtime) throws {
+    guard !runtime.isEmpty else { return }
+    lock.lock()
+    defer { lock.unlock() }
+    if let applied = appliedRuntime {
+      if applied == runtime { return }
+      throw BridgeError.config(
+        "Xybrid is already initialized with different options; they apply once per app process")
+    }
+    ffiConfigureRuntime(runtime.apiKey, runtime.gatewayUrl, runtime.ingestUrl)
+    appliedRuntime = runtime
+  }
+
+  private static func defaultCacheDirectory() throws -> String {
+    guard let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first else {
+      throw BridgeError.config("could not resolve the caches directory")
+    }
+    return caches.appendingPathComponent("xybrid/models", isDirectory: true).path
+  }
+}
+
+/// Clamp a JS millisecond timeout into `UInt64` without trapping on NaN,
+/// infinity, negatives, or values at or above 2^63 (`UInt64.max` itself is
+/// not exactly representable as a `Double`).
+private func clampTimeoutMs(_ raw: Double) -> UInt64 {
+  guard raw.isFinite, raw > 0 else { return 0 }
+  let ceiling = Double(UInt64(1) << 63)
+  return raw >= ceiling ? UInt64(1) << 63 : UInt64(raw)
+}
+
+/// Blank means absent for configuration strings.
+private func nonBlank(_ value: String?) -> String? {
+  guard let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty else {
+    return nil
+  }
+  return trimmed
+}
 
 @objc(XybridModuleImpl)
 public final class XybridModuleImpl: NSObject {
-  private let modelsLock = NSLock()
-  private var models: [String: XybridModel] = [:]
+  private let handles = XybridHandles()
 
-  // Live streaming sessions, keyed by an opaque stream id string. Bolt
-  // sessions are model-scoped (`runStream` returns a UInt64 id valid on that
-  // model), so each entry keeps the model object (to call streamNext/
-  // streamClose on) plus the model's handle string (so releasing a model can
-  // abort its streams). Guarded by its own lock.
-  private let streamsLock = NSLock()
-  private var streams: [String: (model: XybridModel, id: UInt64, owner: String)] = [:]
+  // MARK: - Settling promises
 
-  // -- Lifecycle --
-
-  @objc public func initializeWithCacheDir(_ cacheDir: String?,
-                                           resolve: @escaping RCTPromiseResolveBlock,
-                                           reject: @escaping RCTPromiseRejectBlock) {
-    // The Swift Xybrid.initialize() registers the binding identifier and
-    // wires up UIDevice battery observers. We override the binding right
-    // before to "react-native" — Xybrid.initialize() registers "swift" by
-    // default, but the registry's first-set-wins OnceLock means we have to
-    // call set_binding *first* if we want a different value.
-    setBinding(binding: "react-native")
-    Xybrid.initialize()
-
-    if let dir = cacheDir, !dir.isEmpty {
-      initSdkCacheDir(cacheDir: dir)
-    } else {
-      // Default cache root: <Library>/Caches/xybrid/models
-      guard let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first else {
-        reject("xybrid_init", "Failed to resolve caches directory", nil)
-        return
-      }
-      let xybridCache = caches.appendingPathComponent("xybrid/models", isDirectory: true)
-      try? FileManager.default.createDirectory(at: xybridCache, withIntermediateDirectories: true)
-      initSdkCacheDir(cacheDir: xybridCache.path)
-    }
-    resolve(nil)
-  }
-
-  // -- Loaders --
-  //
-  // Bolt collapsed `XybridModelLoader.fromX(...).load()` into throwing
-  // `XybridModel` convenience initializers; the primary registry path is
-  // `init(fromRegistry:)`. Each initializer loads eagerly (synchronously),
-  // so we run it on a detached Task to keep the RN thread free.
-
-  @objc public func loadFromRegistry(_ modelId: String,
-                                     resolve: @escaping RCTPromiseResolveBlock,
-                                     reject: @escaping RCTPromiseRejectBlock) {
-    runAsyncLoad(resolve: resolve, reject: reject) { try XybridModel(fromRegistry: modelId) }
-  }
-
-  @objc public func loadFromBundle(_ path: String,
-                                   resolve: @escaping RCTPromiseResolveBlock,
-                                   reject: @escaping RCTPromiseRejectBlock) {
-    runAsyncLoad(resolve: resolve, reject: reject) { try XybridModel(fromBundle: path) }
-  }
-
-  @objc public func loadFromDirectory(_ path: String,
-                                      resolve: @escaping RCTPromiseResolveBlock,
-                                      reject: @escaping RCTPromiseRejectBlock) {
-    runAsyncLoad(resolve: resolve, reject: reject) { try XybridModel(fromDirectory: path) }
-  }
-
-  @objc public func loadFromHuggingface(_ repo: String,
-                                        resolve: @escaping RCTPromiseResolveBlock,
-                                        reject: @escaping RCTPromiseRejectBlock) {
-    runAsyncLoad(resolve: resolve, reject: reject) { try XybridModel(fromHuggingface: repo) }
-  }
-
-  @objc public func releaseModel(_ handle: String,
-                                 resolve: @escaping RCTPromiseResolveBlock,
-                                 reject: @escaping RCTPromiseRejectBlock) {
-    // Close any live streaming sessions started from this model first (the
-    // session needs the still-alive model to abort), so releasing the model
-    // unwinds their in-flight generation instead of orphaning it. The model
-    // object itself is freed by ARC once the last in-flight call returns.
-    streamsLock.lock()
-    for (key, entry) in streams where entry.owner == handle {
-      entry.model.streamClose(streamId: entry.id)
-      streams.removeValue(forKey: key)
-    }
-    streamsLock.unlock()
-    modelsLock.lock()
-    models.removeValue(forKey: handle)
-    modelsLock.unlock()
-    resolve(nil)
-  }
-
-  // -- Model lifecycle --
-
-  @objc public func warmup(_ handle: String,
-                           resolve: @escaping RCTPromiseResolveBlock,
-                           reject: @escaping RCTPromiseRejectBlock) {
-    runAsyncVoid(handle: handle, resolve: resolve, reject: reject) { try $0.warmup() }
-  }
-
-  @objc public func unload(_ handle: String,
-                           resolve: @escaping RCTPromiseResolveBlock,
-                           reject: @escaping RCTPromiseRejectBlock) {
-    runAsyncVoid(handle: handle, resolve: resolve, reject: reject) { try $0.unload() }
-  }
-
-  // -- Inference --
-
-  @objc public func run(_ handle: String,
-                        envelope: NSDictionary,
-                        config: NSDictionary?,
-                        resolve: @escaping RCTPromiseResolveBlock,
-                        reject: @escaping RCTPromiseRejectBlock) {
-    guard let model = lookup(handle) else {
-      reject("xybrid_handle", "Unknown model handle: \(handle)", nil)
-      return
-    }
-    let envelopeOrError = decodeEnvelope(envelope)
-    let options = config.map(decodeRunOptions)
-
-    Task.detached {
-      switch envelopeOrError {
-      case .failure(let err):
-        reject("xybrid_envelope", err, nil)
-      case .success(let env):
-        do {
-          let result = try model.run(envelope: env, options: options)
-          resolve(self.encodeResult(result))
-        } catch let error as XybridError {
-          self.rejectXybrid(error, reject)
-        } catch {
-          reject("xybrid", error.localizedDescription, error)
-        }
-      }
+  /// Settle inline — for calls that return immediately.
+  private func now(_ resolve: RCTPromiseResolveBlock,
+                   _ reject: RCTPromiseRejectBlock,
+                   _ work: () throws -> Any?) {
+    do {
+      try SdkSetup.ensureBase()
+      resolve(try work())
+    } catch {
+      Self.reject(reject, error)
     }
   }
 
-  // -- Streaming --
-
-  @objc public func streamStart(_ handle: String,
-                                envelope: NSDictionary,
-                                options: NSDictionary?,
-                                resolve: @escaping RCTPromiseResolveBlock,
-                                reject: @escaping RCTPromiseRejectBlock) {
-    guard let model = lookup(handle) else {
-      reject("xybrid_handle", "Unknown model handle: \(handle)", nil)
-      return
-    }
-    let envelopeOrError = decodeEnvelope(envelope)
-    let runOptions = options.map(decodeRunOptions)
-
-    Task.detached {
-      switch envelopeOrError {
-      case .failure(let err):
-        reject("xybrid_envelope", err, nil)
-      case .success(let env):
-        do {
-          let id = try model.runStream(envelope: env, options: runOptions)
-          resolve(self.storeStream(model: model, id: id, owner: handle))
-        } catch let error as XybridError {
-          self.rejectXybrid(error, reject)
-        } catch {
-          reject("xybrid", error.localizedDescription, error)
-        }
-      }
-    }
-  }
-
-  @objc public func streamNext(_ streamHandle: String,
-                               resolve: @escaping RCTPromiseResolveBlock,
-                               reject: @escaping RCTPromiseRejectBlock) {
-    guard let entry = lookupStream(streamHandle) else {
-      // A released/unknown stream is treated as exhausted rather than an
-      // error, so a `streamNext` racing a `streamRelease` resolves to null.
-      resolve(nil)
-      return
-    }
+  /// Settle from a detached task — for calls that block or suspend.
+  private func background(_ resolve: @escaping RCTPromiseResolveBlock,
+                          _ reject: @escaping RCTPromiseRejectBlock,
+                          _ work: @escaping () async throws -> Any?) {
     Task.detached {
       do {
-        // `streamNext` blocks until the next event; run off the RN thread
-        // like `run`.
-        let event = try entry.model.streamNext(streamId: entry.id)
+        try SdkSetup.ensureBase()
+        resolve(try await work())
+      } catch {
+        Self.reject(reject, error)
+      }
+    }
+  }
+
+  /// The SDK reports a run stopped by its token as an inference error
+  /// ("user_cancelled"); JS gets the dedicated `xybrid_cancelled` code.
+  private static func cancellationAware(_ error: Error, _ token: XybridCancellationToken) -> Error {
+    guard token.isCancelled(), !(error is BridgeError) else { return error }
+    return XybridError.cancelled(message: "The run was cancelled")
+  }
+
+  private static func reject(_ reject: RCTPromiseRejectBlock, _ error: Error) {
+    let (code, message) = XybridCodec.rejection(for: error)
+    reject(code, message, NSError(domain: "Xybrid", code: 0,
+                                  userInfo: [NSLocalizedDescriptionKey: message]))
+  }
+
+  // MARK: - Lifecycle
+
+  /// Module teardown (reload, host shutdown): stop in-flight work, free all.
+  @objc public func invalidate() {
+    handles.all(XybridCancellationToken.self).forEach { $0.cancel() }
+    handles.disposeAll()
+  }
+
+  // MARK: - SDK configuration
+
+  @objc(initialize:resolve:reject:)
+  public func initialize(_ options: NSDictionary?,
+                         resolve: @escaping RCTPromiseResolveBlock,
+                         reject: @escaping RCTPromiseRejectBlock) {
+    do {
+      let object = (options as? JSObject) ?? [:]
+      let what = "initialize options"
+      let cacheDir = try nonBlank(XybridCodec.optionalString(object, "cacheDir", what))
+      try SdkSetup.ensureBase(cacheDir: cacheDir.map(XybridCodec.filePath))
+      try SdkSetup.configure(SdkSetup.Runtime(
+        apiKey: nonBlank(try XybridCodec.optionalString(object, "apiKey", what)),
+        gatewayUrl: nonBlank(try XybridCodec.optionalString(object, "gatewayUrl", what)),
+        ingestUrl: nonBlank(try XybridCodec.optionalString(object, "ingestUrl", what))
+      ))
+      resolve(nil)
+    } catch {
+      Self.reject(reject, error)
+    }
+  }
+
+  @objc(sdkVersion:reject:)
+  public func sdkVersion(_ resolve: @escaping RCTPromiseResolveBlock,
+                         reject: @escaping RCTPromiseRejectBlock) {
+    now(resolve, reject) { ffiVersion() }
+  }
+
+  @objc(hasApiKey:reject:)
+  public func hasApiKey(_ resolve: @escaping RCTPromiseResolveBlock,
+                        reject: @escaping RCTPromiseRejectBlock) {
+    now(resolve, reject) { ffiHasApiKey() }
+  }
+
+  @objc(setProviderApiKey:apiKey:resolve:reject:)
+  public func setProviderApiKey(_ provider: String,
+                                apiKey: String,
+                                resolve: @escaping RCTPromiseResolveBlock,
+                                reject: @escaping RCTPromiseRejectBlock) {
+    now(resolve, reject) { ffiSetProviderApiKey(provider, apiKey); return nil }
+  }
+
+  @objc(setPlatformUrl:resolve:reject:)
+  public func setPlatformUrl(_ url: String,
+                             resolve: @escaping RCTPromiseResolveBlock,
+                             reject: @escaping RCTPromiseRejectBlock) {
+    now(resolve, reject) { ffiSetPlatformUrl(url); return nil }
+  }
+
+  @objc(setSpeculativeCloud:resolve:reject:)
+  public func setSpeculativeCloud(_ enabled: Bool,
+                                  resolve: @escaping RCTPromiseResolveBlock,
+                                  reject: @escaping RCTPromiseRejectBlock) {
+    now(resolve, reject) { ffiSetSpeculativeCloud(enabled); return nil }
+  }
+
+  @objc(isSpeculativeCloudEnabled:reject:)
+  public func isSpeculativeCloudEnabled(_ resolve: @escaping RCTPromiseResolveBlock,
+                                        reject: @escaping RCTPromiseRejectBlock) {
+    now(resolve, reject) { ffiIsSpeculativeCloudEnabled() }
+  }
+
+  @objc(willSpeculate:resolve:reject:)
+  public func willSpeculate(_ modelId: String,
+                            resolve: @escaping RCTPromiseResolveBlock,
+                            reject: @escaping RCTPromiseRejectBlock) {
+    background(resolve, reject) { ffiWillSpeculateForModel(modelId) }
+  }
+
+  @objc(releaseMemory:reject:)
+  public func releaseMemory(_ resolve: @escaping RCTPromiseResolveBlock,
+                            reject: @escaping RCTPromiseRejectBlock) {
+    background(resolve, reject) { ffiReleaseMemory() }
+  }
+
+  @objc(setAutoRelease:resolve:reject:)
+  public func setAutoRelease(_ enabled: Bool,
+                             resolve: @escaping RCTPromiseResolveBlock,
+                             reject: @escaping RCTPromiseRejectBlock) {
+    now(resolve, reject) { ffiSetAutoRelease(enabled); return nil }
+  }
+
+  @objc(isAutoReleaseEnabled:reject:)
+  public func isAutoReleaseEnabled(_ resolve: @escaping RCTPromiseResolveBlock,
+                                   reject: @escaping RCTPromiseRejectBlock) {
+    now(resolve, reject) { ffiIsAutoReleaseEnabled() }
+  }
+
+  // MARK: - Device state push
+
+  @objc(setBatteryLevel:resolve:reject:)
+  public func setBatteryLevel(_ percent: Double,
+                              resolve: @escaping RCTPromiseResolveBlock,
+                              reject: @escaping RCTPromiseRejectBlock) {
+    now(resolve, reject) {
+      guard percent.isFinite else {
+        throw BridgeError.invalidArgument("battery level must be a finite number")
+      }
+      ffiSetBatteryLevel(UInt8(max(0, min(100, percent.rounded()))))
+      return nil
+    }
+  }
+
+  @objc(clearBatteryLevel:reject:)
+  public func clearBatteryLevel(_ resolve: @escaping RCTPromiseResolveBlock,
+                                reject: @escaping RCTPromiseRejectBlock) {
+    now(resolve, reject) { ffiClearBatteryLevel(); return nil }
+  }
+
+  @objc(setThermalState:resolve:reject:)
+  public func setThermalState(_ state: String,
+                              resolve: @escaping RCTPromiseResolveBlock,
+                              reject: @escaping RCTPromiseRejectBlock) {
+    now(resolve, reject) {
+      let mapped: XybridThermalState
+      switch state {
+      case "normal": mapped = .normal
+      case "warm": mapped = .warm
+      case "hot": mapped = .hot
+      case "critical": mapped = .critical
+      default: throw BridgeError.invalidArgument("unknown thermal state '\(state)'")
+      }
+      ffiSetThermalState(mapped)
+      return nil
+    }
+  }
+
+  @objc(clearThermalState:reject:)
+  public func clearThermalState(_ resolve: @escaping RCTPromiseResolveBlock,
+                                reject: @escaping RCTPromiseRejectBlock) {
+    now(resolve, reject) { ffiClearThermalState(); return nil }
+  }
+
+  // MARK: - Model cache (disk walks: off the method queue)
+
+  @objc(cacheStatus:reject:)
+  public func cacheStatus(_ resolve: @escaping RCTPromiseResolveBlock,
+                          reject: @escaping RCTPromiseRejectBlock) {
+    background(resolve, reject) { XybridCodec.encodeCacheStatus(try ffiCacheStatus()) }
+  }
+
+  @objc(cacheEntries:reject:)
+  public func cacheEntries(_ resolve: @escaping RCTPromiseResolveBlock,
+                           reject: @escaping RCTPromiseRejectBlock) {
+    background(resolve, reject) { try ffiCacheEntries().map(XybridCodec.encodeCacheEntry) }
+  }
+
+  @objc(cacheIsModelCached:resolve:reject:)
+  public func cacheIsModelCached(_ modelId: String,
+                                 resolve: @escaping RCTPromiseResolveBlock,
+                                 reject: @escaping RCTPromiseRejectBlock) {
+    background(resolve, reject) { try ffiCacheIsModelCached(modelId) }
+  }
+
+  @objc(cacheModelPath:resolve:reject:)
+  public func cacheModelPath(_ modelId: String,
+                             resolve: @escaping RCTPromiseResolveBlock,
+                             reject: @escaping RCTPromiseRejectBlock) {
+    background(resolve, reject) { try ffiCacheModelPath(modelId) }
+  }
+
+  @objc(cacheExtractedModelIds:reject:)
+  public func cacheExtractedModelIds(_ resolve: @escaping RCTPromiseResolveBlock,
+                                     reject: @escaping RCTPromiseRejectBlock) {
+    background(resolve, reject) { try ffiCacheListExtractedModelIds() }
+  }
+
+  @objc(cacheRemoveModel:resolve:reject:)
+  public func cacheRemoveModel(_ modelId: String,
+                               resolve: @escaping RCTPromiseResolveBlock,
+                               reject: @escaping RCTPromiseRejectBlock) {
+    background(resolve, reject) { try ffiCacheRemoveModel(modelId) }
+  }
+
+  @objc(cacheClear:reject:)
+  public func cacheClear(_ resolve: @escaping RCTPromiseResolveBlock,
+                         reject: @escaping RCTPromiseRejectBlock) {
+    background(resolve, reject) { try ffiCacheClear() }
+  }
+
+  // MARK: - Stateless helpers
+
+  @objc(jsonSchemaToGbnf:resolve:reject:)
+  public func jsonSchemaToGbnf(_ schemaJson: String,
+                               resolve: @escaping RCTPromiseResolveBlock,
+                               reject: @escaping RCTPromiseRejectBlock) {
+    now(resolve, reject) { try ffiJsonSchemaToGbnf(schemaJson) }
+  }
+
+  @objc(toolResultsEnvelope:priorAssistantText:results:resolve:reject:)
+  public func toolResultsEnvelope(_ userText: String,
+                                  priorAssistantText: String,
+                                  results: NSArray,
+                                  resolve: @escaping RCTPromiseResolveBlock,
+                                  reject: @escaping RCTPromiseRejectBlock) {
+    now(resolve, reject) {
+      let decoded = try (results as? [Any] ?? []).map(XybridCodec.decodeToolResult)
+      return XybridCodec.encodeEnvelope(try ffiToolResultsEnvelope(userText, priorAssistantText, decoded))
+    }
+  }
+
+  // MARK: - Handles
+
+  @objc(dispose:resolve:reject:)
+  public func dispose(_ handle: String,
+                      resolve: @escaping RCTPromiseResolveBlock,
+                      reject: @escaping RCTPromiseRejectBlock) {
+    handles.dispose(handle)
+    resolve(nil)
+  }
+
+  // MARK: - Models
+
+  @objc(loadModel:resolve:reject:)
+  public func loadModel(_ source: NSDictionary,
+                        resolve: @escaping RCTPromiseResolveBlock,
+                        reject: @escaping RCTPromiseRejectBlock) {
+    background(resolve, reject) { [handles] in
+      let object = try XybridCodec.object(source, "model source")
+      let what = "model source"
+      let kind = try XybridCodec.string(object, "kind", what)
+      let value = try XybridCodec.string(object, "value", what)
+      let model: XybridModel
+      switch kind {
+      case "registry":
+        model = try XybridModel(fromRegistry: value)
+      case "registrySpeculative":
+        model = try XybridModel(fromRegistrySpeculative: value)
+      case "bundle":
+        model = try XybridModel(fromBundle: XybridCodec.filePath(value))
+      case "directory":
+        model = try XybridModel(fromDirectory: XybridCodec.filePath(value))
+      case "huggingFace":
+        if let revision = try XybridCodec.optionalString(object, "revision", what) {
+          model = try XybridModel(fromHuggingfaceWithRevision: value, revision: revision)
+        } else {
+          model = try XybridModel(fromHuggingface: value)
+        }
+      case "modelFile":
+        model = try XybridModel(fromModelFile: XybridCodec.filePath(value))
+      default:
+        throw BridgeError.invalidArgument("unknown model source kind '\(kind)'")
+      }
+      return handles.insert(model, kind: "model")
+    }
+  }
+
+  @objc(modelInfo:resolve:reject:)
+  public func modelInfo(_ model: String,
+                        resolve: @escaping RCTPromiseResolveBlock,
+                        reject: @escaping RCTPromiseRejectBlock) {
+    now(resolve, reject) {
+      let m = try handles.get(model, as: XybridModel.self)
+      let info: JSObject = [
+        "modelId": m.modelId(),
+        "version": m.version(),
+        "outputType": XybridCodec.encodeOutputType(m.outputType()),
+        "isLlm": m.isLlm(),
+        "supportsStreaming": m.supportsStreaming(),
+        "supportsTokenStreaming": m.supportsTokenStreaming(),
+        "supportsToolCalling": m.supportsToolCalling().map { $0 as Any } ?? NSNull(),
+        "hasVoices": m.hasVoices(),
+        "defaultGenerationConfig": XybridCodec.encodeGenerationConfig(m.defaultGenerationConfig()),
+      ]
+      return info
+    }
+  }
+
+  @objc(isLoaded:resolve:reject:)
+  public func isLoaded(_ model: String,
+                       resolve: @escaping RCTPromiseResolveBlock,
+                       reject: @escaping RCTPromiseRejectBlock) {
+    now(resolve, reject) { try handles.get(model, as: XybridModel.self).isLoaded() }
+  }
+
+  @objc(warmup:resolve:reject:)
+  public func warmup(_ model: String,
+                     resolve: @escaping RCTPromiseResolveBlock,
+                     reject: @escaping RCTPromiseRejectBlock) {
+    background(resolve, reject) { [handles] in
+      try handles.get(model, as: XybridModel.self).warmup()
+      return nil
+    }
+  }
+
+  @objc(unload:resolve:reject:)
+  public func unload(_ model: String,
+                     resolve: @escaping RCTPromiseResolveBlock,
+                     reject: @escaping RCTPromiseRejectBlock) {
+    background(resolve, reject) { [handles] in
+      try handles.get(model, as: XybridModel.self).unload()
+      return nil
+    }
+  }
+
+  @objc(isCloudServing:resolve:reject:)
+  public func isCloudServing(_ model: String,
+                             resolve: @escaping RCTPromiseResolveBlock,
+                             reject: @escaping RCTPromiseRejectBlock) {
+    now(resolve, reject) { try handles.get(model, as: XybridModel.self).isCloudServing() }
+  }
+
+  @objc(downloadStatus:resolve:reject:)
+  public func downloadStatus(_ model: String,
+                             resolve: @escaping RCTPromiseResolveBlock,
+                             reject: @escaping RCTPromiseRejectBlock) {
+    now(resolve, reject) {
+      XybridCodec.encodeDownloadStatus(try handles.get(model, as: XybridModel.self).downloadStatus())
+    }
+  }
+
+  @objc(awaitDownload:timeoutMs:resolve:reject:)
+  public func awaitDownload(_ model: String,
+                            timeoutMs: Double,
+                            resolve: @escaping RCTPromiseResolveBlock,
+                            reject: @escaping RCTPromiseRejectBlock) {
+    background(resolve, reject) { [handles] in
+      let m = try handles.get(model, as: XybridModel.self)
+      return XybridCodec.encodeDownloadStatus(m.awaitDownload(timeoutMs: clampTimeoutMs(timeoutMs)))
+    }
+  }
+
+  @objc(voices:resolve:reject:)
+  public func voices(_ model: String,
+                     resolve: @escaping RCTPromiseResolveBlock,
+                     reject: @escaping RCTPromiseRejectBlock) {
+    now(resolve, reject) {
+      try handles.get(model, as: XybridModel.self).voices().map(XybridCodec.encodeVoice)
+    }
+  }
+
+  @objc(defaultVoice:resolve:reject:)
+  public func defaultVoice(_ model: String,
+                           resolve: @escaping RCTPromiseResolveBlock,
+                           reject: @escaping RCTPromiseRejectBlock) {
+    now(resolve, reject) {
+      try handles.get(model, as: XybridModel.self).defaultVoice().map(XybridCodec.encodeVoice)
+    }
+  }
+
+  @objc(voice:voiceId:resolve:reject:)
+  public func voice(_ model: String,
+                    voiceId: String,
+                    resolve: @escaping RCTPromiseResolveBlock,
+                    reject: @escaping RCTPromiseRejectBlock) {
+    now(resolve, reject) {
+      try handles.get(model, as: XybridModel.self).voice(voiceId: voiceId).map(XybridCodec.encodeVoice)
+    }
+  }
+
+  // MARK: - Inference
+
+  /// Resolve the handles a run request carries. Without a caller token a
+  /// batch run still gets one, registered under the model so disposing the
+  /// model (or tearing the module down) stops it; a stream's own entry plays
+  /// that role instead, so streams skip the registration.
+  private func prepareRun(_ modelHandle: String, _ options: NSDictionary?, registerToken: Bool) throws
+    -> (model: XybridModel, request: XybridCodec.RunRequest,
+        context: XybridConversationContext?, cancel: XybridCancellationToken, ownToken: String?)
+  {
+    let model = try handles.get(modelHandle, as: XybridModel.self)
+    let request = try XybridCodec.decodeRunRequest(options)
+    let context = try request.context.map { try handles.get($0, as: XybridConversationContext.self) }
+    if let token = request.cancel {
+      return (model, request, context, try handles.get(token, as: XybridCancellationToken.self), nil)
+    }
+    let token = XybridCancellationToken()
+    let handle = registerToken
+      ? handles.insert(token, kind: "cancel", owner: modelHandle, onDispose: { token.cancel() })
+      : nil
+    return (model, request, context, token, handle)
+  }
+
+  @objc(run:envelope:options:resolve:reject:)
+  public func run(_ model: String,
+                  envelope: NSDictionary,
+                  options: NSDictionary?,
+                  resolve: @escaping RCTPromiseResolveBlock,
+                  reject: @escaping RCTPromiseRejectBlock) {
+    background(resolve, reject) { [handles] in
+      let input = try XybridCodec.decodeEnvelope(envelope)
+      let run = try self.prepareRun(model, options, registerToken: true)
+      defer { if let own = run.ownToken { handles.dispose(own) } }
+      do {
+        let result: XybridResult
+        if let context = run.context {
+          result = try run.model.runWithContext(envelope: input, context: context,
+                                                options: run.request.options, cancel: run.cancel)
+        } else {
+          result = try run.model.run(envelope: input, options: run.request.options, cancel: run.cancel)
+        }
+        return XybridCodec.encodeResult(result)
+      } catch {
+        throw Self.cancellationAware(error, run.cancel)
+      }
+    }
+  }
+
+  @objc(streamStart:envelope:options:resolve:reject:)
+  public func streamStart(_ model: String,
+                          envelope: NSDictionary,
+                          options: NSDictionary?,
+                          resolve: @escaping RCTPromiseResolveBlock,
+                          reject: @escaping RCTPromiseRejectBlock) {
+    background(resolve, reject) { [handles] in
+      let input = try XybridCodec.decodeEnvelope(envelope)
+      let run = try self.prepareRun(model, options, registerToken: false)
+      let streamId: UInt64
+      if let context = run.context {
+        streamId = try run.model.runStreamWithContext(envelope: input, context: context,
+                                                      options: run.request.options, cancel: run.cancel)
+      } else {
+        streamId = try run.model.runStream(envelope: input, options: run.request.options, cancel: run.cancel)
+      }
+      let entry = XybridTokenStreamEntry(model: run.model, streamId: streamId, cancel: run.cancel)
+      return handles.insert(entry, kind: "stream", owner: model, onDispose: { entry.abort() })
+    }
+  }
+
+  @objc(streamNext:resolve:reject:)
+  public func streamNext(_ stream: String,
+                         resolve: @escaping RCTPromiseResolveBlock,
+                         reject: @escaping RCTPromiseRejectBlock) {
+    background(resolve, reject) { [handles] in
+      // A disposed stream reads as exhausted, not as an error.
+      guard let entry = handles.find(stream, as: XybridTokenStreamEntry.self) else { return nil }
+      do {
+        let event = try entry.model.streamNext(streamId: entry.streamId)
         switch event.kind {
         case .token:
           guard let token = event.token else {
-            resolve(nil)
-            return
+            throw XybridError.inferenceError(message: "stream returned a token event without a token")
           }
-          resolve(["kind": "token", "token": self.encodeStreamToken(token)])
+          return ["kind": "token", "token": XybridCodec.encodeStreamToken(token)] as JSObject
         case .complete:
-          // `streamResult` also closes the bolt-side session; drop our
-          // bookkeeping entry so later calls resolve null (exhausted).
-          let result = try entry.model.streamResult(streamId: entry.id)
-          self.removeStream(streamHandle)
-          resolve(["kind": "complete", "result": self.encodeResult(result)])
+          // `streamResult` closes the bolt session; drop our entry with it.
+          let result = try entry.model.streamResult(streamId: entry.streamId)
+          handles.dispose(stream)
+          return ["kind": "complete", "result": XybridCodec.encodeResult(result)] as JSObject
         }
-      } catch let error as XybridError {
-        // A failed streamNext already closed the session bolt-side; mirror
-        // that in our map, then reject with the same typed codes as `run`.
-        self.removeStream(streamHandle)
-        self.rejectXybrid(error, reject)
       } catch {
-        self.removeStream(streamHandle)
-        reject("xybrid", error.localizedDescription, error)
+        // A failed pull already closed the bolt session.
+        handles.dispose(stream)
+        throw Self.cancellationAware(error, entry.cancel)
       }
     }
   }
 
-  @objc public func streamRelease(_ streamHandle: String,
-                                  resolve: @escaping RCTPromiseResolveBlock,
-                                  reject: @escaping RCTPromiseRejectBlock) {
-    streamsLock.lock()
-    let entry = streams.removeValue(forKey: streamHandle)
-    streamsLock.unlock()
-    // Closing the bolt session aborts the underlying generation run (the
-    // session's receiver drops, unwinding the backend). Idempotent if the
-    // session already finished or errored.
-    if let entry = entry {
-      entry.model.streamClose(streamId: entry.id)
-    }
-    resolve(nil)
+  // MARK: - Cancellation tokens
+
+  @objc(createCancelToken:reject:)
+  public func createCancelToken(_ resolve: @escaping RCTPromiseResolveBlock,
+                                reject: @escaping RCTPromiseRejectBlock) {
+    now(resolve, reject) { handles.insert(XybridCancellationToken(), kind: "cancel") }
   }
 
-  // -- TTS introspection --
+  @objc(cancel:resolve:reject:)
+  public func cancel(_ token: String,
+                     resolve: @escaping RCTPromiseResolveBlock,
+                     reject: @escaping RCTPromiseRejectBlock) {
+    now(resolve, reject) {
+      try handles.get(token, as: XybridCancellationToken.self).cancel()
+      return nil
+    }
+  }
 
-  @objc public func voices(_ handle: String,
+  // MARK: - Conversation contexts
+
+  @objc(createContext:resolve:reject:)
+  public func createContext(_ contextId: String?,
+                            resolve: @escaping RCTPromiseResolveBlock,
+                            reject: @escaping RCTPromiseRejectBlock) {
+    now(resolve, reject) {
+      let context = contextId.map { XybridConversationContext(withId: $0) } ?? XybridConversationContext()
+      return handles.insert(context, kind: "context")
+    }
+  }
+
+  @objc(contextPush:envelope:resolve:reject:)
+  public func contextPush(_ context: String,
+                          envelope: NSDictionary,
+                          resolve: @escaping RCTPromiseResolveBlock,
+                          reject: @escaping RCTPromiseRejectBlock) {
+    // Image turns are decode-validated natively, so this can take a moment.
+    background(resolve, reject) { [handles] in
+      try handles.get(context, as: XybridConversationContext.self)
+        .push(envelope: try XybridCodec.decodeEnvelope(envelope))
+      return nil
+    }
+  }
+
+  @objc(contextSetSystem:envelope:resolve:reject:)
+  public func contextSetSystem(_ context: String,
+                               envelope: NSDictionary,
+                               resolve: @escaping RCTPromiseResolveBlock,
+                               reject: @escaping RCTPromiseRejectBlock) {
+    background(resolve, reject) { [handles] in
+      try handles.get(context, as: XybridConversationContext.self)
+        .setSystem(envelope: try XybridCodec.decodeEnvelope(envelope))
+      return nil
+    }
+  }
+
+  @objc(contextClear:resolve:reject:)
+  public func contextClear(_ context: String,
                            resolve: @escaping RCTPromiseResolveBlock,
                            reject: @escaping RCTPromiseRejectBlock) {
-    guard let model = lookup(handle) else {
-      reject("xybrid_handle", "Unknown model handle: \(handle)", nil)
-      return
+    now(resolve, reject) {
+      try handles.get(context, as: XybridConversationContext.self).clear()
+      return nil
     }
-    let voices = model.hasVoices() ? model.voices().map { encodeVoice($0) } : nil
-    resolve(voices as Any)
   }
 
-  @objc public func defaultVoiceId(_ handle: String,
+  @objc(contextInfo:resolve:reject:)
+  public func contextInfo(_ context: String,
+                          resolve: @escaping RCTPromiseResolveBlock,
+                          reject: @escaping RCTPromiseRejectBlock) {
+    now(resolve, reject) {
+      let c = try handles.get(context, as: XybridConversationContext.self)
+      return ["id": c.id(), "historyLength": c.historyLen(), "hasSystem": c.hasSystem()] as JSObject
+    }
+  }
+
+  @objc(contextHistory:resolve:reject:)
+  public func contextHistory(_ context: String,
+                             resolve: @escaping RCTPromiseResolveBlock,
+                             reject: @escaping RCTPromiseRejectBlock) {
+    now(resolve, reject) {
+      try handles.get(context, as: XybridConversationContext.self).history().map(XybridCodec.encodeEnvelope)
+    }
+  }
+
+  @objc(contextSetMaxHistoryLength:length:resolve:reject:)
+  public func contextSetMaxHistoryLength(_ context: String,
+                                         length: Double,
+                                         resolve: @escaping RCTPromiseResolveBlock,
+                                         reject: @escaping RCTPromiseRejectBlock) {
+    now(resolve, reject) {
+      let c = try handles.get(context, as: XybridConversationContext.self)
+      c.setMaxHistoryLen(len: try XybridCodec.uint32(length, "max history length"))
+      return nil
+    }
+  }
+
+  // MARK: - Standalone downloads
+
+  @objc(startDownload:platform:resolve:reject:)
+  public func startDownload(_ modelId: String,
+                            platform: String?,
+                            resolve: @escaping RCTPromiseResolveBlock,
+                            reject: @escaping RCTPromiseRejectBlock) {
+    background(resolve, reject) { [handles] in
+      let download = platform.map { XybridDownload(fromRegistryWithPlatform: modelId, platform: $0) }
+        ?? XybridDownload(fromRegistry: modelId)
+      return handles.insert(download, kind: "download")
+    }
+  }
+
+  @objc(downloadHandleStatus:resolve:reject:)
+  public func downloadHandleStatus(_ download: String,
                                    resolve: @escaping RCTPromiseResolveBlock,
                                    reject: @escaping RCTPromiseRejectBlock) {
-    guard let model = lookup(handle) else {
-      reject("xybrid_handle", "Unknown model handle: \(handle)", nil)
-      return
-    }
-    resolve(model.defaultVoice()?.id as Any)
-  }
-
-  @objc public func hasVoices(_ handle: String,
-                              resolve: @escaping RCTPromiseResolveBlock,
-                              reject: @escaping RCTPromiseRejectBlock) {
-    guard let model = lookup(handle) else {
-      reject("xybrid_handle", "Unknown model handle: \(handle)", nil)
-      return
-    }
-    resolve(model.hasVoices())
-  }
-
-  // -- Platform-state push --
-
-  @objc public func setBatteryLevel(_ percent: Double,
-                                    resolve: @escaping RCTPromiseResolveBlock,
-                                    reject: @escaping RCTPromiseRejectBlock) {
-    let bounded = max(0, min(100, Int(percent.rounded())))
-    // Free function from xybrid_bolt.swift; overload resolution distinguishes
-    // it from the @objc member above by the `percent:` UInt8 label.
-    setBatteryLevel(percent: UInt8(bounded))
-    resolve(nil)
-  }
-
-  @objc public func clearBatteryLevel(_ resolve: @escaping RCTPromiseResolveBlock,
-                                      reject: @escaping RCTPromiseRejectBlock) {
-    clearBatteryLevel()
-    resolve(nil)
-  }
-
-  @objc public func setThermalState(_ state: String,
-                                    resolve: @escaping RCTPromiseResolveBlock,
-                                    reject: @escaping RCTPromiseRejectBlock) {
-    let mapped: XybridThermalState
-    switch state.lowercased() {
-    case "normal": mapped = .normal
-    case "warm": mapped = .warm
-    case "hot": mapped = .hot
-    case "critical": mapped = .critical
-    default:
-      reject("xybrid_thermal", "Unknown thermal state: \(state)", nil)
-      return
-    }
-    setThermalState(state: mapped)
-    resolve(nil)
-  }
-
-  @objc public func clearThermalState(_ resolve: @escaping RCTPromiseResolveBlock,
-                                      reject: @escaping RCTPromiseRejectBlock) {
-    clearThermalState()
-    resolve(nil)
-  }
-
-  // -- Utilities --
-
-  @objc public func jsonSchemaToGbnf(_ schemaJson: String,
-                                     resolve: @escaping RCTPromiseResolveBlock,
-                                     reject: @escaping RCTPromiseRejectBlock) {
-    do {
-      // Free function from xybrid_bolt.swift; the shared JSON-Schema→GBNF
-      // converter every binding uses. Fast (pure string transform), so no
-      // Task.detached hop is needed.
-      resolve(try jsonSchemaToGbnf(schemaJson: schemaJson))
-    } catch let error as XybridError {
-      rejectXybrid(error, reject)
-    } catch {
-      reject("xybrid", error.localizedDescription, error)
+    now(resolve, reject) {
+      XybridCodec.encodeDownloadStatus(try handles.get(download, as: XybridDownload.self).status())
     }
   }
 
-  // MARK: - Helpers
-
-  private func lookup(_ handle: String) -> XybridModel? {
-    modelsLock.lock()
-    defer { modelsLock.unlock() }
-    return models[handle]
+  @objc(downloadHandleError:resolve:reject:)
+  public func downloadHandleError(_ download: String,
+                                  resolve: @escaping RCTPromiseResolveBlock,
+                                  reject: @escaping RCTPromiseRejectBlock) {
+    now(resolve, reject) { try handles.get(download, as: XybridDownload.self).error() }
   }
 
-  private func store(_ model: XybridModel) -> String {
-    let id = UUID().uuidString
-    modelsLock.lock()
-    models[id] = model
-    modelsLock.unlock()
-    return id
+  @objc(cancelDownload:resolve:reject:)
+  public func cancelDownload(_ download: String,
+                             resolve: @escaping RCTPromiseResolveBlock,
+                             reject: @escaping RCTPromiseRejectBlock) {
+    now(resolve, reject) {
+      try handles.get(download, as: XybridDownload.self).cancel()
+      return nil
+    }
   }
 
-  private func lookupStream(_ id: String) -> (model: XybridModel, id: UInt64, owner: String)? {
-    streamsLock.lock()
-    defer { streamsLock.unlock() }
-    return streams[id]
-  }
+  // MARK: - Pipelines
 
-  private func removeStream(_ id: String) {
-    streamsLock.lock()
-    streams.removeValue(forKey: id)
-    streamsLock.unlock()
-  }
-
-  private func storeStream(model: XybridModel, id: UInt64, owner: String) -> String {
-    let key = UUID().uuidString
-    streamsLock.lock()
-    streams[key] = (model, id, owner)
-    streamsLock.unlock()
-    return key
-  }
-
-  private func runAsyncLoad(resolve: @escaping RCTPromiseResolveBlock,
-                            reject: @escaping RCTPromiseRejectBlock,
-                            _ factory: @escaping () throws -> XybridModel) {
-    Task.detached {
-      do {
-        let model = try factory()
-        let id = self.store(model)
-        resolve(id)
-      } catch let error as XybridError {
-        self.rejectXybrid(error, reject)
-      } catch {
-        reject("xybrid", error.localizedDescription, error)
+  @objc(loadPipeline:resolve:reject:)
+  public func loadPipeline(_ source: NSDictionary,
+                           resolve: @escaping RCTPromiseResolveBlock,
+                           reject: @escaping RCTPromiseRejectBlock) {
+    background(resolve, reject) { [handles] in
+      let object = try XybridCodec.object(source, "pipeline source")
+      let kind = try XybridCodec.string(object, "kind", "pipeline source")
+      let value = try XybridCodec.string(object, "value", "pipeline source")
+      let pipeline: XybridPipeline
+      switch kind {
+      case "yaml": pipeline = try XybridPipeline(fromYaml: value)
+      case "file": pipeline = try XybridPipeline(fromFile: XybridCodec.filePath(value))
+      case "bundle": pipeline = try XybridPipeline(fromBundle: XybridCodec.filePath(value))
+      default: throw BridgeError.invalidArgument("unknown pipeline source kind '\(kind)'")
       }
+      return handles.insert(pipeline, kind: "pipeline")
     }
   }
 
-  // Run a throwing, void-returning model op (warmup / unload) off the RN
-  // thread, resolving on success and mapping XybridError on failure.
-  private func runAsyncVoid(handle: String,
+  @objc(pipelineInfo:resolve:reject:)
+  public func pipelineInfo(_ pipeline: String,
+                           resolve: @escaping RCTPromiseResolveBlock,
+                           reject: @escaping RCTPromiseRejectBlock) {
+    now(resolve, reject) {
+      let p = try handles.get(pipeline, as: XybridPipeline.self)
+      return [
+        "name": p.name().map { $0 as Any } ?? NSNull(),
+        "stageNames": p.stageNames(),
+        "stageCount": p.stageCount(),
+      ] as JSObject
+    }
+  }
+
+  @objc(runPipeline:envelope:options:resolve:reject:)
+  public func runPipeline(_ pipeline: String,
+                          envelope: NSDictionary,
+                          options: NSDictionary?,
+                          resolve: @escaping RCTPromiseResolveBlock,
+                          reject: @escaping RCTPromiseRejectBlock) {
+    background(resolve, reject) { [handles] in
+      let p = try handles.get(pipeline, as: XybridPipeline.self)
+      let result = try p.run(envelope: try XybridCodec.decodeEnvelope(envelope),
+                             options: try XybridCodec.decodeRunRequest(options).options)
+      return XybridCodec.encodePipelineResult(result)
+    }
+  }
+
+  // MARK: - Live ASR sessions
+
+  @objc(openStreamingSession:config:resolve:reject:)
+  public func openStreamingSession(_ model: String,
+                                   config: NSDictionary?,
+                                   resolve: @escaping RCTPromiseResolveBlock,
+                                   reject: @escaping RCTPromiseRejectBlock) {
+    // Opening warms the weights, so it runs off the method queue.
+    background(resolve, reject) { [handles] in
+      let m = try handles.get(model, as: XybridModel.self)
+      let session = try XybridStreamingSession(forModel: m, config: try XybridCodec.decodeStreamingConfig(config))
+      let entry = XybridSessionEntry(session: session)
+      return handles.insert(entry, kind: "session", onDispose: { session.cancel() })
+    }
+  }
+
+  @objc(sessionFeed:samplesBase64:resolve:reject:)
+  public func sessionFeed(_ session: String,
+                          samplesBase64: String,
+                          resolve: @escaping RCTPromiseResolveBlock,
+                          reject: @escaping RCTPromiseRejectBlock) {
+    // `feed` blocks only when the worker's queue is full (back-pressure).
+    background(resolve, reject) { [handles] in
+      let entry = try handles.get(session, as: XybridSessionEntry.self)
+      try entry.session.feed(samples: try XybridCodec.float32Samples(samplesBase64))
+      return nil
+    }
+  }
+
+  @objc(sessionNextPartial:resolve:reject:)
+  public func sessionNextPartial(_ session: String,
+                                 resolve: @escaping RCTPromiseResolveBlock,
+                                 reject: @escaping RCTPromiseRejectBlock) {
+    background(resolve, reject) { [handles] in
+      guard let entry = handles.find(session, as: XybridSessionEntry.self) else { return nil }
+      return await entry.nextPartial().map(XybridCodec.encodePartial)
+    }
+  }
+
+  @objc(sessionFlush:resolve:reject:)
+  public func sessionFlush(_ session: String,
+                           resolve: @escaping RCTPromiseResolveBlock,
+                           reject: @escaping RCTPromiseRejectBlock) {
+    background(resolve, reject) { [handles] in
+      try handles.get(session, as: XybridSessionEntry.self).session.flush()
+    }
+  }
+
+  @objc(sessionReset:resolve:reject:)
+  public func sessionReset(_ session: String,
+                           resolve: @escaping RCTPromiseResolveBlock,
+                           reject: @escaping RCTPromiseRejectBlock) {
+    background(resolve, reject) { [handles] in
+      try handles.get(session, as: XybridSessionEntry.self).session.reset()
+      return nil
+    }
+  }
+
+  @objc(sessionCancel:resolve:reject:)
+  public func sessionCancel(_ session: String,
                             resolve: @escaping RCTPromiseResolveBlock,
-                            reject: @escaping RCTPromiseRejectBlock,
-                            _ op: @escaping (XybridModel) throws -> Void) {
-    guard let model = lookup(handle) else {
-      reject("xybrid_handle", "Unknown model handle: \(handle)", nil)
-      return
-    }
-    Task.detached {
-      do {
-        try op(model)
-        resolve(nil)
-      } catch let error as XybridError {
-        self.rejectXybrid(error, reject)
-      } catch {
-        reject("xybrid", error.localizedDescription, error)
-      }
+                            reject: @escaping RCTPromiseRejectBlock) {
+    now(resolve, reject) {
+      try handles.get(session, as: XybridSessionEntry.self).session.cancel()
+      return nil
     }
   }
 
-  // Build a bolt [XybridEnvelope] via the `XybridEnvelope` factories in
-  // Xybrid.swift, which fold the well-known TTS / ASR options (sample_rate,
-  // channels, voice_id, speed) into envelope metadata entries — the bolt
-  // `XybridEnvelopeKind` variants themselves only carry the raw payload.
-  private func decodeEnvelope(_ dict: NSDictionary) -> Result<XybridEnvelope, String> {
-    guard let kind = dict["kind"] as? String else {
-      return .failure("Envelope missing 'kind' field")
-    }
-    switch kind {
-    case "audio":
-      guard let b64 = dict["bytesBase64"] as? String,
-            let bytes = Data(base64Encoded: b64) else {
-        return .failure("audio envelope: 'bytesBase64' missing or invalid")
-      }
-      let sampleRate = (dict["sampleRate"] as? NSNumber)?.uint32Value ?? 16000
-      let channels = (dict["channels"] as? NSNumber)?.uint32Value ?? 1
-      return .success(.audio(pcmData: bytes, sampleRate: sampleRate, channels: channels))
-    case "text":
-      guard let text = dict["text"] as? String else {
-        return .failure("text envelope: 'text' missing")
-      }
-      return .success(.text(text: text,
-                            voiceId: dict["voiceId"] as? String,
-                            speed: (dict["speed"] as? NSNumber)?.doubleValue))
-    case "embedding":
-      guard let raw = dict["data"] as? [NSNumber] else {
-        return .failure("embedding envelope: 'data' must be a number array")
-      }
-      return .success(.embedding(data: raw.map { $0.floatValue }))
-    default:
-      return .failure("Unknown envelope kind: \(kind)")
-    }
-  }
-
-  // Map the JS `RunOptions` payload onto bolt's XybridRunOptions. The JS facade
-  // normalizes its argument to `{ generationConfig, abortOn, fallbackToCloud,
-  // maxGraceTokens, correlationId }`, so every field the Apple/Kotlin SDKs
-  // expose is reachable from React Native.
-  private func decodeRunOptions(_ dict: NSDictionary) -> XybridRunOptions {
-    return XybridRunOptions(
-      generationConfig: (dict["generationConfig"] as? NSDictionary).map(decodeGenerationConfig),
-      abortOn: (dict["abortOn"] as? [String])?.compactMap(decodeAbortSignal) ?? [],
-      fallbackToCloud: (dict["fallbackToCloud"] as? NSNumber)?.boolValue ?? false,
-      maxGraceTokens: (dict["maxGraceTokens"] as? NSNumber).flatMap { $0.intValue >= 0 ? $0.uint32Value : nil } ?? 0,
-      correlationId: dict["correlationId"] as? String
-    )
-  }
-
-  private func decodeGenerationConfig(_ dict: NSDictionary) -> XybridGenerationConfig {
-    // Guard against negative JS values wrapping around to a huge UInt32.
-    func uint32OrNil(_ key: String) -> UInt32? {
-      guard let n = dict[key] as? NSNumber, n.intValue >= 0 else { return nil }
-      return n.uint32Value
-    }
-    return XybridGenerationConfig(
-      maxTokens: uint32OrNil("maxTokens"),
-      temperature: (dict["temperature"] as? NSNumber)?.floatValue,
-      topP: (dict["topP"] as? NSNumber)?.floatValue,
-      minP: (dict["minP"] as? NSNumber)?.floatValue,
-      topK: uint32OrNil("topK"),
-      repetitionPenalty: (dict["repetitionPenalty"] as? NSNumber)?.floatValue,
-      stopSequences: dict["stopSequences"] as? [String] ?? [],
-      grammar: dict["grammar"] as? String
-    )
-  }
-
-  private func decodeAbortSignal(_ raw: String) -> XybridAbortSignal? {
-    switch raw {
-    case "memoryPressureWarn": return .memoryPressureWarn
-    case "memoryPressureCritical": return .memoryPressureCritical
-    case "thermalHot": return .thermalHot
-    case "thermalCritical": return .thermalCritical
-    default: return nil
-    }
-  }
-
-  private func encodeResult(_ r: XybridResult) -> [String: Any] {
-    var out: [String: Any] = [
-      "success": r.success,
-      "latencyMs": r.latencyMs,
-    ]
-    if let text = r.text { out["text"] = text }
-    if let reasoning = r.reasoningContent { out["reasoningContent"] = reasoning }
-    if let bytes = r.audioBytes {
-      out["audioBytesBase64"] = bytes.base64EncodedString()
-    }
-    if let emb = r.embedding { out["embedding"] = emb }
-    return out
-  }
-
-  // Encode a bolt `XybridStreamToken` as the `token` payload of the
-  // discriminated `StreamEvent` object the JS facade narrows by `kind`.
-  private func encodeStreamToken(_ t: XybridStreamToken) -> [String: Any] {
-    // index as Double, not Int: it is u64 and RN numbers are doubles (exact
-    // to 2^53) — Int() could trap/truncate a large index.
-    var token: [String: Any] = [
-      "token": t.token,
-      "index": Double(t.index),
-      "cumulativeText": t.cumulativeText,
-    ]
-    if let id = t.tokenId { token["tokenId"] = id }
-    if let reason = t.finishReason { token["finishReason"] = reason }
-    return token
-  }
-
-  private func encodeVoice(_ v: XybridVoiceInfo) -> [String: Any] {
-    var out: [String: Any] = ["id": v.id, "name": v.name]
-    if let g = v.gender { out["gender"] = g }
-    if let l = v.language { out["language"] = l }
-    if let s = v.style { out["style"] = s }
-    return out
-  }
-
-  private func rejectXybrid(_ error: XybridError, _ reject: RCTPromiseRejectBlock) {
-    let code: String
-    switch error {
-    case .modelNotFound: code = "xybrid_model_not_found"
-    case .directoryNotFound: code = "xybrid_directory_not_found"
-    case .metadataNotFound: code = "xybrid_metadata_not_found"
-    case .metadataInvalid: code = "xybrid_metadata_invalid"
-    case .loadError: code = "xybrid_load_error"
-    case .inferenceError: code = "xybrid_inference_error"
-    case .abortedForCloudFallback: code = "xybrid_aborted_cloud_fallback"
-    case .streamingNotSupported: code = "xybrid_streaming_unsupported"
-    case .notLoaded: code = "xybrid_not_loaded"
-    case .configError: code = "xybrid_config_error"
-    case .networkError: code = "xybrid_network_error"
-    case .offline: code = "xybrid_offline"
-    case .ioError: code = "xybrid_io_error"
-    case .cacheError: code = "xybrid_cache_error"
-    case .pipelineError: code = "xybrid_pipeline_error"
-    case .circuitOpen: code = "xybrid_circuit_open"
-    case .rateLimited: code = "xybrid_rate_limited"
-    case .timeout: code = "xybrid_timeout"
-    }
-    reject(code, error.errorDescription ?? "Xybrid error", error)
+  @objc(sessionIsRunning:resolve:reject:)
+  public func sessionIsRunning(_ session: String,
+                               resolve: @escaping RCTPromiseResolveBlock,
+                               reject: @escaping RCTPromiseRejectBlock) {
+    now(resolve, reject) { try handles.get(session, as: XybridSessionEntry.self).session.isRunning() }
   }
 }

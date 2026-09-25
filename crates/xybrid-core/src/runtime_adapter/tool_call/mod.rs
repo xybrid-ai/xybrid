@@ -1,22 +1,26 @@
-//! LFM2-family and gemma-4-family tool-call text protocol support.
+//! LFM2-family, gemma-4-family, and FunctionGemma tool-call protocols.
 //!
 //! LFM2-family GGUF models emit pythonic function-call text between special
 //! markers. Gemma-4-family GGUF models emit `call:name{args}` blocks inside
-//! their model turn. This module is always compiled because both protocols are
-//! plain text: parsing and continuation composition do not depend on a specific
-//! runtime, feature flag, or I/O surface.
+//! their model turn. FunctionGemma uses the same structured call grammar with
+//! different markers and a different string delimiter. This module is always
+//! compiled because every protocol is plain text: parsing and continuation
+//! composition do not depend on a specific runtime, feature flag, or I/O surface.
 //!
 //! Model output is untrusted. Malformed candidates are skipped instead of
 //! surfaced as fatal errors so callers can still use surrounding prose or
 //! sibling tool calls. LFM2 nested dictionaries, nested calls, and nested lists
 //! are deliberately unsupported in v1 to keep the accepted grammar predictable;
-//! gemma-4 supports nested maps and lists with an explicit depth cap.
+//! both structured Gemma dialects support nested maps and lists with an
+//! explicit depth cap.
 //!
 //! The cross-protocol scanner and continuation dispatcher live here.
 //! Grammar-specific parsing and response formatting live in `lfm2` and
 //! `gemma`, with shared cursor primitives isolated in `cursor`.
 
 mod cursor;
+#[cfg(test)]
+mod functiongemma_tests;
 mod gemma;
 mod lfm2;
 
@@ -32,6 +36,13 @@ const GEMMA_TOOL_CALL_START: &str = "<|tool_call>";
 const GEMMA_TOOL_CALL_END: &str = "<tool_call|>";
 const GEMMA_TOOL_RESPONSE_START: &str = "<|tool_response>";
 const GEMMA_TOOL_RESPONSE_END: &str = "<tool_response|>";
+const FUNCTION_GEMMA_DECLARATION_START: &str = "<start_function_declaration>";
+const FUNCTION_GEMMA_DECLARATION_END: &str = "<end_function_declaration>";
+const FUNCTION_GEMMA_TOOL_CALL_START: &str = "<start_function_call>";
+const FUNCTION_GEMMA_TOOL_CALL_END: &str = "<end_function_call>";
+const FUNCTION_GEMMA_TOOL_RESPONSE_START: &str = "<start_function_response>";
+const FUNCTION_GEMMA_TOOL_RESPONSE_END: &str = "<end_function_response>";
+const FUNCTION_GEMMA_STRING_DELIMITER: &str = "<escape>";
 const FAMILY_MARKERS: &[&str] = &[
     TOOL_CALL_START,
     TOOL_CALL_END,
@@ -41,6 +52,12 @@ const FAMILY_MARKERS: &[&str] = &[
     GEMMA_TOOL_CALL_END,
     GEMMA_TOOL_RESPONSE_START,
     GEMMA_TOOL_RESPONSE_END,
+    FUNCTION_GEMMA_DECLARATION_START,
+    FUNCTION_GEMMA_DECLARATION_END,
+    FUNCTION_GEMMA_TOOL_CALL_START,
+    FUNCTION_GEMMA_TOOL_CALL_END,
+    FUNCTION_GEMMA_TOOL_RESPONSE_START,
+    FUNCTION_GEMMA_TOOL_RESPONSE_END,
 ];
 const RESERVED_PROTOCOL_MARKERS: &[&str] = &[
     TOOL_CALL_START,
@@ -51,26 +68,58 @@ const RESERVED_PROTOCOL_MARKERS: &[&str] = &[
     GEMMA_TOOL_CALL_END,
     GEMMA_TOOL_RESPONSE_START,
     GEMMA_TOOL_RESPONSE_END,
+    FUNCTION_GEMMA_DECLARATION_START,
+    FUNCTION_GEMMA_DECLARATION_END,
+    FUNCTION_GEMMA_TOOL_CALL_START,
+    FUNCTION_GEMMA_TOOL_CALL_END,
+    FUNCTION_GEMMA_TOOL_RESPONSE_START,
+    FUNCTION_GEMMA_TOOL_RESPONSE_END,
+    FUNCTION_GEMMA_STRING_DELIMITER,
+    "<|\"|>",
     "<|im_end|>",
     "<|im_start|>",
     "<turn|>",
     "<|turn>",
+    "<start_of_turn>",
+    "<end_of_turn>",
 ];
 
 /// Shared turn markers used by continuation stop configuration and
 /// [`truncate_at_turn_marker`].
-pub(crate) const TURN_MARKERS: &[&str] = &["<|im_end|>", "<|im_start|>", "<turn|>", "<|turn>"];
+pub(crate) const TURN_MARKERS: &[&str] = &[
+    "<|im_end|>",
+    "<|im_start|>",
+    "<turn|>",
+    "<|turn>",
+    "<start_of_turn>",
+    "<end_of_turn>",
+    FUNCTION_GEMMA_TOOL_RESPONSE_START,
+];
 
 /// Complete tool-protocol block delimiters as `(start, end, is_call_block)`,
 /// for streaming suppression and any consumer that must recognize whole
-/// blocks. Includes both families' call blocks and gemma-4's tool-response
-/// block (gemma models emit a response opener as trained scaffolding after
-/// their calls); a response block is suppressible protocol traffic but not a
-/// tool call, hence the flag.
+/// blocks. Includes each family's calls plus structured Gemma declaration and
+/// response blocks. Declarations and responses are suppressible protocol
+/// traffic but not tool calls, hence the flag.
 pub(crate) const TOOL_BLOCK_MARKERS: &[(&str, &str, bool)] = &[
     (TOOL_CALL_START, TOOL_CALL_END, true),
     (GEMMA_TOOL_CALL_START, GEMMA_TOOL_CALL_END, true),
     (GEMMA_TOOL_RESPONSE_START, GEMMA_TOOL_RESPONSE_END, false),
+    (
+        FUNCTION_GEMMA_TOOL_CALL_START,
+        FUNCTION_GEMMA_TOOL_CALL_END,
+        true,
+    ),
+    (
+        FUNCTION_GEMMA_TOOL_RESPONSE_START,
+        FUNCTION_GEMMA_TOOL_RESPONSE_END,
+        false,
+    ),
+    (
+        FUNCTION_GEMMA_DECLARATION_START,
+        FUNCTION_GEMMA_DECLARATION_END,
+        false,
+    ),
 ];
 
 /// Which tool-call text protocol a model speaks. Owned here so every
@@ -85,28 +134,36 @@ pub(crate) enum ToolCallProtocol {
     /// Gemma-4-family: `<|turn>` framing, `call:name{...}` notation,
     /// wrapper-shaped tool declarations.
     Gemma,
+    /// FunctionGemma: Gemma turns, `call:name{...}` notation with
+    /// `<escape>`-delimited strings, wrapper-shaped tool declarations.
+    FunctionGemma,
 }
 
 impl ToolCallProtocol {
     /// Detect from an embedded chat template's source text.
-    /// Gemma-4 templates render `<|tool>` declaration blocks; nothing in the
-    /// LFM2/ChatML marker family contains that substring.
+    /// Structured Gemma templates carry distinct declaration markers; the
+    /// LFM2/ChatML marker family contains neither marker.
     pub(crate) fn detect_from_template(template: &str) -> Self {
-        if template.contains("<|tool>") {
+        if template.contains(FUNCTION_GEMMA_DECLARATION_START) {
+            Self::FunctionGemma
+        } else if template.contains("<|tool>") {
             Self::Gemma
         } else {
             Self::Lfm2
         }
     }
 
-    /// Detect from a rendered prompt. Gemma-4 prompts frame turns with
-    /// `<|turn>`. Invariant: a template that detects as Gemma renders a
-    /// prompt that detects as Gemma (the framing comes from the template).
-    pub(crate) fn detect_from_prompt(prompt: &str) -> Self {
-        if prompt.contains("<|turn>") {
-            Self::Gemma
+    pub(crate) fn detect_from_prompt(prompt: &str) -> Option<Self> {
+        if prompt.contains(FUNCTION_GEMMA_DECLARATION_START)
+            || prompt.contains(FUNCTION_GEMMA_DECLARATION_END)
+        {
+            Some(Self::FunctionGemma)
+        } else if prompt.contains("<|turn>") {
+            Some(Self::Gemma)
+        } else if prompt.contains("<|im_start|>") {
+            Some(Self::Lfm2)
         } else {
-            Self::Lfm2
+            None
         }
     }
 
@@ -114,6 +171,7 @@ impl ToolCallProtocol {
         match self {
             Self::Lfm2 => TOOL_CALL_START,
             Self::Gemma => GEMMA_TOOL_CALL_START,
+            Self::FunctionGemma => FUNCTION_GEMMA_TOOL_CALL_START,
         }
     }
 
@@ -121,11 +179,12 @@ impl ToolCallProtocol {
         match self {
             Self::Lfm2 => TOOL_CALL_END,
             Self::Gemma => GEMMA_TOOL_CALL_END,
+            Self::FunctionGemma => FUNCTION_GEMMA_TOOL_CALL_END,
         }
     }
 }
 
-/// Parses LFM2-family and gemma-4-family tool-call blocks from model output.
+/// Parses supported tool-call blocks from model output.
 ///
 /// Complete marker blocks are scanned in left-to-right order across both
 /// protocols. Malformed call candidates are skipped silently; successfully
@@ -167,6 +226,11 @@ pub fn parse_tool_calls(text: &str) -> Vec<ToolCall> {
             ToolCallProtocol::Gemma => gemma::parse_gemma_block(after_start[..end].trim())
                 .into_iter()
                 .collect(),
+            ToolCallProtocol::FunctionGemma => {
+                gemma::parse_function_gemma_block(after_start[..end].trim())
+                    .into_iter()
+                    .collect()
+            }
         };
 
         for call in calls {
@@ -186,7 +250,7 @@ pub fn parse_tool_calls(text: &str) -> Vec<ToolCall> {
     parsed
 }
 
-/// Strips LFM2/gemma-4 tool-call AND tool-response protocol blocks.
+/// Strips supported tool-call and tool-response protocol blocks.
 ///
 /// Complete blocks are removed with both markers. A trailing start marker
 /// with no end marker is display garbage, so everything from that marker to
@@ -213,12 +277,20 @@ pub fn parse_tool_calls(text: &str) -> Vec<ToolCall> {
 /// assert_eq!(visible, "answer");
 /// ```
 pub fn strip_tool_calls(text: &str) -> String {
-    // Call blocks of both families plus both families' response blocks.
     const BLOCK_MARKERS: &[(&str, &str)] = &[
         (TOOL_CALL_START, TOOL_CALL_END),
         (TOOL_RESPONSE_START, TOOL_RESPONSE_END),
         (GEMMA_TOOL_CALL_START, GEMMA_TOOL_CALL_END),
         (GEMMA_TOOL_RESPONSE_START, GEMMA_TOOL_RESPONSE_END),
+        (
+            FUNCTION_GEMMA_DECLARATION_START,
+            FUNCTION_GEMMA_DECLARATION_END,
+        ),
+        (FUNCTION_GEMMA_TOOL_CALL_START, FUNCTION_GEMMA_TOOL_CALL_END),
+        (
+            FUNCTION_GEMMA_TOOL_RESPONSE_START,
+            FUNCTION_GEMMA_TOOL_RESPONSE_END,
+        ),
     ];
 
     let mut output = String::new();
@@ -266,11 +338,10 @@ pub fn has_tool_markers(text: &str) -> bool {
 
 /// Composes a raw tool-call continuation prompt with tool responses.
 ///
-/// ChatML/LFM2 prompts keep the legacy scaffold. Gemma-4 prompts are detected
-/// by `<|turn>` in `base_prompt`; their tool responses are appended directly
-/// after `prior_assistant_text` because gemma-4 keeps tool response blocks
-/// inside the still-open model turn and its template emits no new turn header
-/// after tool responses.
+/// ChatML/LFM2 prompts keep the legacy scaffold. Structured Gemma prompts are
+/// detected from their declaration or turn markers; their tool responses are
+/// appended directly after `prior_assistant_text` because their templates emit
+/// no new model-turn header after a tool response.
 ///
 /// Crate-internal on purpose: callers drive continuations through
 /// [`Envelope::tool_results`](crate::ir::Envelope::tool_results), not by
@@ -278,8 +349,8 @@ pub fn has_tool_markers(text: &str) -> bool {
 ///
 /// # Errors
 ///
-/// Returns [`AdapterError::InvalidInput`] when `tool_responses_json` does not
-/// exactly answer the calls from `prior_assistant_text`.
+/// Returns [`AdapterError::InvalidInput`] when responses do not exactly answer
+/// the prior calls or `base_prompt` has no supported protocol markers.
 pub(crate) fn compose_tool_continuation(
     base_prompt: &str,
     prior_assistant_text: &str,
@@ -291,13 +362,26 @@ pub(crate) fn compose_tool_continuation(
     let calls = parse_tool_calls(prior_assistant_text);
     let responses = validate_tool_responses(&value, &calls)?;
 
-    match ToolCallProtocol::detect_from_prompt(base_prompt) {
+    let protocol = ToolCallProtocol::detect_from_prompt(base_prompt).ok_or_else(|| {
+        AdapterError::InvalidInput(
+            "could not detect a supported tool-call protocol in the rendered prompt; refusing \
+             to substitute a ChatML continuation"
+                .to_string(),
+        )
+    })?;
+
+    match protocol {
         ToolCallProtocol::Lfm2 => {
             lfm2::compose_chatml_continuation(base_prompt, prior_assistant_text, &responses)
         }
         ToolCallProtocol::Gemma => {
             gemma::compose_gemma_continuation(base_prompt, prior_assistant_text, &responses)
         }
+        ToolCallProtocol::FunctionGemma => gemma::compose_function_gemma_continuation(
+            base_prompt,
+            prior_assistant_text,
+            &responses,
+        ),
     }
 }
 
@@ -452,11 +536,26 @@ fn neutralized_marker(marker: &str) -> &'static str {
         "tool_call"
     } else if marker == GEMMA_TOOL_RESPONSE_START || marker == GEMMA_TOOL_RESPONSE_END {
         "tool_response"
+    } else if marker == FUNCTION_GEMMA_DECLARATION_START || marker == FUNCTION_GEMMA_DECLARATION_END
+    {
+        "function_declaration"
+    } else if marker == FUNCTION_GEMMA_TOOL_CALL_START || marker == FUNCTION_GEMMA_TOOL_CALL_END {
+        "function_call"
+    } else if marker == FUNCTION_GEMMA_TOOL_RESPONSE_START
+        || marker == FUNCTION_GEMMA_TOOL_RESPONSE_END
+    {
+        "function_response"
+    } else if marker == FUNCTION_GEMMA_STRING_DELIMITER || marker == "<|\"|>" {
+        "string_delimiter"
     } else if marker == "<|im_end|>" {
         "im_end"
     } else if marker == "<|im_start|>" {
         "im_start"
-    } else if marker == "<turn|>" || marker == "<|turn>" {
+    } else if marker == "<turn|>"
+        || marker == "<|turn>"
+        || marker == "<start_of_turn>"
+        || marker == "<end_of_turn>"
+    {
         "turn"
     } else {
         "protocol_marker"
@@ -468,9 +567,9 @@ fn neutralized_marker(marker: &str) -> &'static str {
 /// The raw continuation path stops generation on protocol turn markers but,
 /// unlike the chat path's stop-pattern cleanup, the backend's raw output keeps
 /// the marker text. Cutting it here keeps response text clean and keeps the
-/// next continuation protocol-faithful. Neither ChatML/LFM2 nor gemma-4
-/// legitimately emits the other's turn markers as assistant content, so the
-/// combined marker set is safe.
+/// next continuation protocol-faithful. Supported families do not legitimately
+/// emit each other's turn markers as assistant content, so the combined marker
+/// set is safe.
 pub(crate) fn truncate_at_turn_marker(text: &mut String) {
     let cut = TURN_MARKERS
         .iter()
@@ -483,18 +582,17 @@ pub(crate) fn truncate_at_turn_marker(text: &mut String) {
 }
 
 fn find_next_call_marker(text: &str) -> Option<(ToolCallProtocol, usize)> {
-    let lfm2 = text
-        .find(TOOL_CALL_START)
-        .map(|index| (ToolCallProtocol::Lfm2, index));
-    let gemma = text
-        .find(GEMMA_TOOL_CALL_START)
-        .map(|index| (ToolCallProtocol::Gemma, index));
-
-    match (lfm2, gemma) {
-        (Some(left), Some(right)) => Some(if left.1 <= right.1 { left } else { right }),
-        (Some(found), None) | (None, Some(found)) => Some(found),
-        (None, None) => None,
-    }
+    [
+        (ToolCallProtocol::Lfm2, TOOL_CALL_START),
+        (ToolCallProtocol::Gemma, GEMMA_TOOL_CALL_START),
+        (
+            ToolCallProtocol::FunctionGemma,
+            FUNCTION_GEMMA_TOOL_CALL_START,
+        ),
+    ]
+    .into_iter()
+    .filter_map(|(protocol, marker)| text.find(marker).map(|index| (protocol, index)))
+    .min_by_key(|(_, index)| *index)
 }
 
 #[cfg(test)]
@@ -542,7 +640,7 @@ hi<|im_end|>
 
         assert_eq!(
             ToolCallProtocol::detect_from_prompt(prompt),
-            ToolCallProtocol::Lfm2
+            Some(ToolCallProtocol::Lfm2)
         );
     }
 
@@ -555,8 +653,18 @@ hi<turn|>
 
         assert_eq!(
             ToolCallProtocol::detect_from_prompt(prompt),
-            ToolCallProtocol::Gemma
+            Some(ToolCallProtocol::Gemma)
         );
+    }
+
+    #[test]
+    fn continuation_rejects_an_unrecognized_prompt_protocol() {
+        let prior = wrapped("[weather(city='Paris')]");
+        let responses = r#"[{"call_id":"call_0","name":"weather","content":{"temperature_c":21}}]"#;
+
+        let result = compose_tool_continuation("plain prompt", &prior, responses);
+
+        assert_invalid_input(result);
     }
 
     #[test]
@@ -646,9 +754,12 @@ hi<turn|>
     #[test]
     fn compose_preserves_response_order_when_two_responses() {
         let prior = format!("{}{}", wrapped("[first()]"), wrapped("[second()]"));
-        let result =
-            compose_tool_continuation("base", &prior, r#"[{"content":"one"},{"content":2}]"#)
-                .unwrap();
+        let result = compose_tool_continuation(
+            "<|im_start|>assistant\n",
+            &prior,
+            r#"[{"content":"one"},{"content":2}]"#,
+        )
+        .unwrap();
 
         assert!(result.contains(
             "<|tool_response_start|>\"one\"<|tool_response_end|><|tool_response_start|>2<|tool_response_end|>"
@@ -738,7 +849,7 @@ hi<turn|>
     fn compose_orders_explicit_call_ids_by_prior_call_order() {
         let prior = format!("{}{}", wrapped("[first()]"), wrapped("[second()]"));
         let result = compose_tool_continuation(
-            "base",
+            "<|im_start|>assistant\n",
             &prior,
             r#"[
                 {"call_id":"call_1","name":"second","content":"two"},

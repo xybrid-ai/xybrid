@@ -79,6 +79,7 @@ def main() -> int:
         repetition_penalty=None,
         stop_sequences=[],
         grammar=None,
+        tools=[],
     )
     options = xybrid.XybridRunOptions(
         generation_config=config,

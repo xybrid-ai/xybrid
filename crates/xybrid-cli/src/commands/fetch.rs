@@ -36,9 +36,8 @@ pub(crate) fn handle_fetch_command(model_id: &str, platform: Option<&str>) -> Re
 
     let pb = ui::download_bar(resolved.size_bytes, model_id);
 
-    let model_path = fetch_resolved_model(&client, model_id, platform, &resolved, |progress| {
-        let bytes_done = (progress * resolved.size_bytes as f32) as u64;
-        pb.set_position(bytes_done);
+    let model_path = fetch_resolved_model(&client, model_id, platform, &resolved, |status| {
+        ui::apply_download_status(&pb, &status);
     })
     .context(format!("Failed to fetch model '{}'", model_id))?;
 
@@ -55,11 +54,6 @@ pub(crate) fn handle_fetch_command(model_id: &str, platform: Option<&str>) -> Re
 pub(crate) fn handle_fetch_huggingface_command(repo: &str) -> Result<()> {
     ui::header(&format!("Fetch · HuggingFace · {}", repo));
 
-    let cache_repo = xybrid_sdk::ModelSource::parse_huggingface(repo);
-    let sanitized = cache_repo.model_id().unwrap_or(repo).replace('/', "--");
-    let cache_dir =
-        dirs::home_dir().map(|h| h.join(".xybrid").join("cache").join("hf").join(&sanitized));
-
     let loader = xybrid_sdk::ModelLoader::from_huggingface_parsed(repo);
     let model = loader.load().context(format!(
         "Failed to load model from HuggingFace repo '{}'",
@@ -69,6 +63,12 @@ pub(crate) fn handle_fetch_huggingface_command(repo: &str) -> Result<()> {
     ui::ok("Model downloaded successfully");
     ui::kv("Model ID", model.model_id());
     ui::kv("Version", model.version());
+
+    let cache_repo = xybrid_sdk::ModelSource::parse_huggingface(repo);
+    let repo_id = cache_repo.model_id().unwrap_or(repo);
+    let cache_dir = xybrid_sdk::CacheManager::new()
+        .ok()
+        .and_then(|manager| manager.huggingface_cache_dir(repo_id));
 
     if let Some(ref dir) = cache_dir {
         ui::kv("Directory", &dir.display().to_string());
@@ -202,7 +202,7 @@ fn fetch_resolved_model<F>(
     progress_callback: F,
 ) -> Result<std::path::PathBuf>
 where
-    F: Fn(f32),
+    F: Fn(xybrid_sdk::DownloadStatus),
 {
     if uses_extracted_model_path(resolved) {
         client
@@ -243,9 +243,8 @@ fn fetch_models(
 
                 let pb = ui::download_bar(resolved.size_bytes, model_id);
 
-                match fetch_resolved_model(client, model_id, platform, &resolved, |progress| {
-                    let bytes_done = (progress * resolved.size_bytes as f32) as u64;
-                    pb.set_position(bytes_done);
+                match fetch_resolved_model(client, model_id, platform, &resolved, |status| {
+                    ui::apply_download_status(&pb, &status);
                 }) {
                     Ok(_) => {
                         pb.finish_and_clear();

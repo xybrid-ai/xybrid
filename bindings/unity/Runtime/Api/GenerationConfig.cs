@@ -35,7 +35,10 @@ namespace Xybrid
         private float? _minP;
         private uint? _topK;
         private float? _repetitionPenalty;
+        private string _grammar;
         private readonly List<string> _stopSequences = new List<string>();
+        private readonly List<XybridBolt.XybridToolDefinition> _tools =
+            new List<XybridBolt.XybridToolDefinition>();
 
         /// <summary>
         /// Gets whether this config has been disposed. Retained for source
@@ -138,6 +141,21 @@ namespace Xybrid
         }
 
         /// <summary>
+        /// Constrain decoding to a GBNF grammar.
+        /// </summary>
+        /// <remarks>
+        /// Build one from a JSON Schema with
+        /// <see cref="XybridClient.JsonSchemaToGbnf"/>, or pass raw GBNF.
+        /// llama.cpp-only &#x2014; other backends ignore it.
+        /// </remarks>
+        /// <param name="grammar">The GBNF grammar, or null to clear it.</param>
+        public void SetGrammar(string grammar)
+        {
+            ThrowIfDisposed();
+            _grammar = grammar;
+        }
+
+        /// <summary>
         /// Add a stop sequence. Can be called multiple times.
         /// </summary>
         /// <param name="stop">The stop sequence string.</param>
@@ -150,9 +168,39 @@ namespace Xybrid
         }
 
         /// <summary>
+        /// Offer a tool the model may call. Can be called multiple times.
+        /// </summary>
+        /// <remarks>
+        /// Run a request with tools, read <see cref="InferenceResult.ToolCalls"/>,
+        /// execute each call yourself, then feed the outcomes back with
+        /// <see cref="Envelope.ToolResults"/> — one Run is one model turn, so
+        /// the loop lives in your code.
+        ///
+        /// Tool calling is llama.cpp-only today. Unsupported paths reject a
+        /// tool-bearing request rather than quietly generating without the
+        /// tools.
+        /// </remarks>
+        /// <param name="name">Function name the model will emit, e.g. "get_weather".</param>
+        /// <param name="description">What the tool does — the model reads this to decide when to call it.</param>
+        /// <param name="parametersJson">
+        /// JSON Schema for the arguments, as a JSON string. Pass
+        /// <c>{"type":"object","properties":{}}</c> for a tool that takes none.
+        /// </param>
+        public void AddTool(string name, string description, string parametersJson)
+        {
+            ThrowIfDisposed();
+            if (name == null)
+                throw new ArgumentNullException(nameof(name));
+            if (description == null)
+                throw new ArgumentNullException(nameof(description));
+            if (parametersJson == null)
+                throw new ArgumentNullException(nameof(parametersJson));
+            _tools.Add(new XybridBolt.XybridToolDefinition(name, description, parametersJson));
+        }
+
+        /// <summary>
         /// Snapshot the current values as the bolt wire type consumed by
-        /// <see cref="Model"/>. Grammar-constrained decoding is not exposed by
-        /// the Unity API, so it is always null.
+        /// <see cref="Model"/>.
         /// </summary>
         internal XybridBolt.XybridGenerationConfig ToBolt()
         {
@@ -165,7 +213,8 @@ namespace Xybrid
                 _topK,
                 _repetitionPenalty,
                 _stopSequences.ToArray(),
-                null);
+                _grammar,
+                _tools.ToArray());
         }
 
         private void ThrowIfDisposed()

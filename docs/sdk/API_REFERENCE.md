@@ -46,7 +46,7 @@ SDKs may prefix or adjust casing:
 All SDKs follow the same three-step pattern:
 
 ```
-1. Describe a Model →  Xybrid.model("whisper-tiny")
+1. Describe a Model →  Xybrid.model("whisper-tiny-ggml")
 2. Load the Model   →  await loader.load()
 3. Run Inference    →  await model.run(envelope: input)
 ```
@@ -93,6 +93,15 @@ class Xybrid {
   });
 
   // Cache
+  static Future<CacheStatus> modelCacheStatus();
+  static Future<List<CacheEntry>> modelCacheEntries();
+  static Future<bool> hasCachedModelData(String modelId);
+  static Future<String?> cachedModelPath(String modelId);
+  static Future<List<String>> extractedModelIds();
+  static Future<int> removeCachedModel(String modelId);
+  static Future<int> clearModelCache();
+
+  // Compatibility check: extracted and ready to load, not merely downloaded
   static bool isModelCached(String modelId);
 }
 ```
@@ -110,6 +119,18 @@ object Xybrid {
   // Model description (no I/O)
   fun model(id: String): ModelLoader
   fun model(source: ModelSource): ModelLoader
+
+  // Model storage
+  fun modelCacheStatus(): XybridCacheStatus
+  fun modelCacheEntries(): List<XybridCacheEntry>
+  fun hasCachedModelData(modelId: String): Boolean
+  fun cachedModelPath(modelId: String): String?
+  fun extractedModelIds(): List<String>
+  fun removeCachedModel(modelId: String): Int
+  fun clearModelCache(): Int
+
+  // Each also has a suspend twin that runs on Dispatchers.IO:
+  // modelCacheStatusAsync(), removeCachedModelAsync(modelId), ...
 }
 ```
 
@@ -120,8 +141,40 @@ extension Xybrid {
   // Model description (no I/O)
   static func model(_ id: String) -> ModelLoader
   static func model(_ source: ModelSource) -> ModelLoader
+
+  // Model storage
+  static func modelCacheStatus() throws -> XybridCacheStatus
+  static func modelCacheEntries() throws -> [XybridCacheEntry]
+  static func hasCachedModelData(_ modelId: String) throws -> Bool
+  static func cachedModelPath(_ modelId: String) throws -> String?
+  static func extractedModelIds() throws -> [String]
+  static func removeCachedModel(_ modelId: String) throws -> UInt32
+  static func clearModelCache() throws -> UInt32
+
+  // Each also has an async twin that runs off the calling actor:
+  // modelCacheStatusAsync(), removeCachedModelAsync(_:), ...
 }
 ```
+
+### Unity C#
+
+```csharp
+XybridCacheStatus status = XybridClient.ModelCacheStatus();
+XybridCacheEntry[] entries = XybridClient.ModelCacheEntries();
+bool present = XybridClient.HasCachedModelData(modelId);
+string path = XybridClient.CachedModelPath(modelId); // null when absent
+string[] ready = XybridClient.ExtractedModelIds();
+uint removed = XybridClient.RemoveCachedModel(modelId);
+uint cleared = XybridClient.ClearModelCache();
+```
+
+`modelCacheEntries` reports physical storage entries, so one model may appear
+more than once (for example, as both a downloaded registry bundle and an
+extracted runtime directory). `hasCachedModelData` means that at least one such
+entry exists; use `extractedModelIds` when the application specifically needs
+models that are validated and ready to run offline. Deletion returns the number
+of physical roots removed. Do not delete a model while it is loading, or clear
+the cache while any model load is in flight.
 
 ### Implementation Status
 
@@ -133,6 +186,28 @@ extension Xybrid {
 | `model()` | ✅ | ✅ | ✅ | ✅ |
 | `pipeline()` | ✅ | — | — | — |
 | `isModelCached()` | ✅ | — | — | — |
+| `releaseMemory()` | ✅ | ✅ | ✅ | ✅ |
+| `setAutoRelease()` | ✅ | ✅ | ✅ | ✅ |
+| `isAutoReleaseEnabled` | ✅ | ✅ | ✅ | ✅ |
+| `setSpeculativeCloud()` | ✅ | ✅ | ✅ | ✅ |
+| `isSpeculativeCloudEnabled` | ✅ | ✅ | ✅ | ✅ |
+| `hasApiKey` | — | ✅ | ✅ | ✅ |
+| `setProviderApiKey()` | — | ✅ | ✅ | ✅ |
+| `jsonSchemaToGbnf()` | ✅ | ✅ | ✅ | ✅ |
+| `modelCacheStatus()` | ✅ | ✅ | ✅ | ✅ |
+| `modelCacheEntries()` | ✅ | ✅ | ✅ | ✅ |
+| `hasCachedModelData()` | ✅ | ✅ | ✅ | ✅ |
+| `cachedModelPath()` | ✅ | ✅ | ✅ | ✅ |
+| `extractedModelIds()` | ✅ | ✅ | ✅ | ✅ |
+| `removeCachedModel()` | ✅ | ✅ | ✅ | ✅ |
+| `clearModelCache()` | ✅ | ✅ | ✅ | ✅ |
+
+`jsonSchemaToGbnf()` is a top-level function in Dart, Kotlin and Swift. C# has
+no top-level functions, so Unity exposes it as `XybridClient.JsonSchemaToGbnf`.
+
+Unity's `Initialize()` declares `gatewayUrl` **last**, after `ingestUrl`, so its
+pre-existing positional call sites keep compiling; the other bindings order it
+before `ingestUrl`.
 
 ---
 
@@ -149,12 +224,35 @@ class XybridModelLoader {
   factory XybridModelLoader.fromBundle(String path);
   factory XybridModelLoader.fromDirectory(String path);
 
+  // Serve from the cloud gateway while the weights download in the background
+  factory XybridModelLoader.fromRegistrySpeculative(String modelId);
+
+  // Would load() actually speculate? (enabled + API key + not cached)
+  bool get willSpeculate;
+
   // Load the model
   Future<XybridModel> load();
 
   // Load with progress events
   Stream<LoadEvent> loadWithProgress();
 }
+```
+
+Pinned revisions are available on the generated Bolt model surface. The Hub
+resolves a branch, tag, or commit input to an immutable commit SHA before
+selecting the materialized cache. These constructors load synchronously and
+must run off the UI thread:
+
+```kotlin
+val model = XybridModel.fromHuggingfaceWithRevision("org/repo:Q8_0", "v1.0")
+```
+
+```swift
+let model = try XybridModel(fromHuggingfaceWithRevision: "org/repo:Q8_0", revision: "v1.0")
+```
+
+```csharp
+var model = XybridModel.FromHuggingfaceWithRevision("org/repo:Q8_0", "v1.0");
 ```
 
 ### Kotlin
@@ -165,7 +263,10 @@ class XybridModelLoader {
     fun fromRegistry(modelId: String): XybridModelLoader
     fun fromBundle(path: String): XybridModelLoader
     fun fromDirectory(path: String): XybridModelLoader
+    fun fromRegistrySpeculative(id: String): XybridModelLoader
   }
+
+  val willSpeculate: Boolean
 
   suspend fun load(): XybridModel
   fun loadBlocking(): XybridModel
@@ -180,10 +281,14 @@ public enum ModelSource {
   case bundle(URL)
   case directory(URL)
   case huggingFace(String)
+  case registrySpeculative(String)
 }
 
 public struct ModelLoader {
   let source: ModelSource
+
+  static func fromRegistrySpeculative(_ id: String) -> Self
+  var willSpeculate: Bool { get }
 
   func load() async throws -> XybridModel
   func loadSync() throws -> XybridModel
@@ -303,8 +408,211 @@ var result = model.Run(Envelope.Text("Hello!"));
 | `fromBundle()` | ✅ | ✅ | ✅ | ✅ |
 | `fromDirectory()` | ✅ | ✅ | ✅ | ✅ |
 | `fromHuggingFace()` | ✅ | ✅ | ✅ | ✅ |
+| `fromHuggingfaceWithRevision()` | — | ✅ | ✅ | ✅ |
 | `load()` | ✅ | ✅ | ✅ | ✅ |
 | `loadWithProgress()` | ✅ | — | — | — |
+| `download()` / `StartDownload()` | — | ✅ | ✅ | ✅ |
+| `fromRegistrySpeculative()` | ✅ | ✅ | ✅ | ✅ |
+| `willSpeculate` | ✅ | ✅ | ✅ | ✅ |
+
+`fromRegistrySpeculative()` answers from the cloud gateway while the registry
+weights download in the background, then switches to on-device by itself. It
+needs an API key and an uncached model — otherwise it behaves exactly like
+`fromRegistry()`, which `willSpeculate` reports up front. LLM/chat models only.
+
+It sets the per-load override itself, so it does **not** depend on
+`setSpeculativeCloud()` — that toggle is the default for loads which do not opt
+in per-load.
+
+---
+
+## 2b. XybridDownload
+
+A model download running in the background, decoupled from loading it.
+
+`load()` blocks on the Bolt bindings, so while it runs there is no object to
+poll — which is why those SDKs had no progress bar at all on an ordinary
+registry load. A download handle is that object. It fills the normal SDK cache,
+so the `load()` afterwards returns immediately.
+
+Dart reaches the same capability through
+[`loadWithProgress()`](#2-xybridmodelloader), whose events carry the same
+fields.
+
+### Swift
+
+```swift
+let loader = Xybrid.model("qwen3-0.6b")
+guard let download = loader.download() else { return }
+for await status in download.progress() {
+    bar.progress = Float(status.progress)
+    label.text = "\(status.downloadedBytes) / \(status.totalBytes ?? 0)"
+}
+let model = try await loader.load()   // cached: returns at once
+```
+
+### Kotlin
+
+```kotlin
+val loader = Xybrid.model("qwen3-0.6b")
+loader.download()?.progress()?.collect { status ->
+    bar.progress = (status.progress * 100).toInt()
+}
+val model = loader.load()
+```
+
+### C#
+
+```csharp
+using var download = ModelLoader.FromRegistry("qwen3-0.6b").StartDownload();
+while (!download.IsFinished())
+{
+    slider.value = download.Status().Progress;   // never blocks
+    yield return null;
+}
+```
+
+### Python
+
+```python
+download = xybrid.XybridDownload.from_registry("qwen3-0.6b")
+for status in download.progress():
+    print(status.downloaded_bytes, status.total_bytes, status.progress)
+```
+
+### Implementation Status
+
+| Method | Dart | Kotlin | Swift | C# |
+|--------|------|--------|-------|----|
+| `fromRegistry()` | — | ✅ | ✅ | ✅ |
+| `status()` | — | ✅ | ✅ | ✅ |
+| `progress()` | — | ✅ | ✅ | ✅ |
+| `isFinished()` | — | ✅ | ✅ | ✅ |
+| `error()` | — | ✅ | ✅ | ✅ |
+| `cancel()` | — | ✅ | ✅ | ✅ |
+
+`progress()` is generated from one BoltFFI stream declaration, so it arrives as
+an `AsyncStream` in Swift, a `Flow` in Kotlin, an `IAsyncEnumerable` in C# and
+an iterable subscription in Python. It emits the current snapshot first (a late
+subscriber still gets a frame), then closes on the terminal state. Cancelling
+the consuming task / scope / token only unsubscribes — call `cancel()` to stop
+the transfer itself, which takes effect within one chunk read and discards the
+partial file.
+
+`status()` never blocks, so it is safe to read once per frame from a Unity
+coroutine or a UI thread.
+
+---
+
+## 2c. XybridStreamingSession
+
+Live-capture ASR: feed microphone PCM in, read partial transcripts out.
+
+This is a different surface from one-shot transcription. `XybridModel.run()`
+takes a finished audio buffer and returns one transcript; a session takes
+audio *as it arrives* and emits a running transcript, which is what dictation
+and live captioning need.
+
+Audio must be PCM **float32, mono, 16 kHz**. Converting from the platform's
+microphone format is the caller's job — deliberately kept out of the FFI
+layer, where it would have to be re-solved per binding.
+
+### Swift
+
+```swift
+let model = try await Xybrid.model("whisper-tiny").load()
+let session = try model.stream(config: .voiceActivity(modelDir: vadModelDir, language: "en"))
+
+Task {
+    for await partial in session.partials() {
+        label.text = partial.text           // cumulative; render in place
+    }
+}
+
+// From the AVAudioEngine tap, already converted to 16 kHz mono Float32:
+try session.feed(samples: pcm)
+
+// When the user stops talking:
+let transcript = try session.flush()
+```
+
+### Kotlin
+
+```kotlin
+val model = Xybrid.model("whisper-tiny").load()
+val session = model.stream(streamingConfigWithVad(modelDir = vadModelDir, language = "en"))
+
+scope.launch {
+    session.partials().collect { partial -> textView.text = partial.text }
+}
+
+// From the AudioRecord loop, converted to float mono 16 kHz:
+session.feed(pcm)
+
+val transcript = session.flush()
+```
+
+### C#
+
+```csharp
+using var session = model.Stream(StreamingConfigs.VoiceActivity(vadModelDir, language: "en"));
+
+// Drive the UI from the partial stream.
+await foreach (var partial in session.Partials(cancellationToken))
+{
+    label.text = partial.Text;
+}
+
+// From the Microphone clip, converted to float mono 16 kHz:
+session.Feed(pcm);
+
+string transcript = session.Flush();
+```
+
+### Dart
+
+Flutter reaches the same capability through its own session type, which
+predates this one:
+
+```dart
+final session = await model.stream(config);
+session.subscribe().listen((partial) => setState(() => _text = partial.text));
+session.feed(pcm);
+final transcript = await session.flush();
+```
+
+### Implementation Status
+
+| Method | Dart | Kotlin | Swift | C# |
+|--------|------|--------|-------|----|
+| open a session | ✅ | ✅ | ✅ | ✅ |
+| `feed()` | ✅ | ✅ | ✅ | ✅ |
+| `partials()` | ✅ | ✅ | ✅ | ✅ |
+| `flush()` | ✅ | ✅ | ✅ | ✅ |
+| `reset()` | ✅ | ✅ | ✅ | ✅ |
+| `cancel()` | — | ✅ | ✅ | ✅ |
+
+### Notes
+
+`partials()` is generated from one BoltFFI stream declaration, so it arrives
+as an `AsyncStream` in Swift, a `Flow` in Kotlin, an `IAsyncEnumerable` in C#
+and an iterable subscription in Python. A partial produced before you
+subscribe is delivered immediately — `feed()` returns straight away, so the
+first transcripts routinely land before the stream is attached, and dropping
+them would lose the opening words of every utterance.
+
+`flush()` ends the session and returns the full transcript. `cancel()` ends it
+and discards the audio — the "user walked away" path. It is named `cancel`
+rather than `close` because BoltFFI already generates a `close()` on every
+handle for the host's disposal idiom.
+
+Partial text is **cumulative, not a delta**: render each one in place of the
+previous, don't append.
+
+VAD (voice-activity detection) chunking cuts on speech boundaries instead of a
+fixed clock, which avoids the stutter you get when a window lands mid-word.
+**It requires a Silero VAD model directory** containing a `model.onnx` — none
+ships with the SDK, and the engine falls back to fixed windows without one.
 
 ---
 
@@ -386,6 +694,7 @@ class XybridModel {
 ```kotlin
 class XybridModel {
   val modelId: String
+  fun defaultGenerationConfig(): XybridGenerationConfig
 
   // Voice discovery (TTS models only)
   val voices: List<VoiceInfo>?
@@ -432,6 +741,11 @@ impl XybridModel {
 }
 ```
 
+The generated Swift and C# model types expose the same generation-default call
+as `defaultGenerationConfig()` / `DefaultGenerationConfig()`. These reads use
+load-time metadata snapshots, so they do not wait behind an in-flight
+inference's model write lock.
+
 ### Implementation Status
 
 | Method | Dart | Kotlin | Swift | C# |
@@ -440,6 +754,7 @@ impl XybridModel {
 | `voices` | — | ✅ | ✅ | ✅ |
 | `defaultVoice` | — | 🚧 | 🚧 | ✅ |
 | `hasVoices` | — | ✅ | ✅ | ✅ |
+| `defaultGenerationConfig()` | — | ✅ | ✅ | ✅ |
 | `voice()` | — | ✅ | ✅ | ✅ |
 | `run()` | ✅ | ✅ | ✅ | ✅ |
 | `runWithOptions()` / `run_with_options()` | Rust ✅ | planned | planned | planned |
@@ -454,11 +769,33 @@ impl XybridModel {
 | `benchmark()` | — | — | — | — |
 | `warmup()` | ✅ | ✅ | ✅ | — |
 | `unload()` | ✅ | ✅ | ✅ | — |
+| `isCloudServing()` | ✅ | ✅ | ✅ | ✅ |
+| `downloadStatus()` | ✅ | ✅ | ✅ | ✅ |
+| `awaitDownload()` | — | ✅ | ✅ | ✅ |
+| `downloadProgress()` | ✅ | ✅ | ✅ | ✅ |
 | `executionProviderInfo()` | — | — | — | — |
+
+While a speculative load is still downloading, `isCloudServing()` is true and
+`downloadStatus()` returns a consistent read of the state (`downloading` /
+`ready` / `failed` / `cancelled`), a `0.0..=1.0` fraction, `downloadedBytes`
+and `totalBytes`. The fraction is aggregated across every artifact the model
+needs and never moves backwards; `1.0` is reserved for `ready`, because
+checksum verification and extraction still run after the last byte lands.
+`totalBytes` is null when the source publishes no size (a Hugging Face repo, or
+a registry entry without one) — `downloadedBytes` is exact either way.
+
+`awaitDownload(timeoutMs)` blocks until the download settles — call it off the
+UI thread. `downloadProgress()` is the pushed form on every SDK: a
+flutter_rust_bridge stream sink on Dart, and a BoltFFI stream elsewhere, which
+carries items Rust → host only so no closure crosses the FFI boundary.
+
+`XybridResult.executionTarget` reports whether an answer that already ran came
+from the device or the cloud; cloud fallback keeps the model id identical on
+both legs, so it is the only way to tell them apart.
 
 ---
 
-## 4. XybridPipelineRef / XybridPipeline
+## 4. XybridPipeline
 
 Multi-stage inference pipelines.
 
@@ -473,12 +810,8 @@ class XybridPipeline {
 
   // Properties
   String? get name;
-  bool get isReady;
   BigInt get stageCount;
   List<String> get stageNames;
-
-  // Load models
-  Future<void> load();
 
   // Execution
   Future<XybridResult> run({required Envelope envelope});
@@ -488,27 +821,93 @@ class XybridPipeline {
 ### Kotlin
 
 ```kotlin
-class XybridPipelineRef {
+class XybridPipeline {
   companion object {
-    fun fromYaml(yamlContent: String): XybridPipelineRef
-    fun fromFile(path: String): XybridPipelineRef
+    fun fromYaml(yaml: String): XybridPipeline
+    fun fromFile(path: String): XybridPipeline
+    fun fromBundle(path: String): XybridPipeline
+
+    suspend fun fromYamlAsync(yaml: String): XybridPipeline
+    suspend fun fromFileAsync(path: String): XybridPipeline
+    suspend fun fromBundleAsync(path: String): XybridPipeline
   }
 
-  val name: String?
-  val stageIds: List<String>
-
-  suspend fun load(): XybridPipeline
+  fun name(): String?
+  fun stageCount(): UInt
+  fun stageNames(): List<String>
+  fun run(envelope: XybridEnvelope, options: XybridRunOptions?): XybridPipelineResult
+  fun run(envelope: XybridEnvelope): XybridPipelineResult
+  suspend fun runAsync(envelope: XybridEnvelope, options: XybridRunOptions? = null): XybridPipelineResult
 }
 
-class XybridPipeline {
-  val name: String?
-  val isReady: Boolean
-  val stageCount: Long
-  val stageNames: List<String>
+// Sugar on the result
+fun XybridPipelineResult.stage(id: String): XybridStageResult?
+val XybridPipelineResult.text: String?
+val XybridPipelineResult.audioBytes: ByteArray?
+val XybridStageResult.text: String?
+val XybridStageResult.audioBytes: ByteArray?
+```
 
-  suspend fun run(envelope: Envelope): PipelineResult
+### Swift
+
+```swift
+let pipeline = try await XybridPipeline.fromYamlAsync(yaml)
+print(pipeline.name() ?? "unnamed")
+print(pipeline.stageNames())
+
+let result = try await pipeline.runAsync(envelope: input)
+transcript.text = result.stage("asr")?.text   // what it heard
+reply.text = result.stage("llm")?.text        // what it answered
+try player.play(result.audioBytes)            // the final output
+
+for stage in result.stages {
+    print("\(stage.stageId): \(stage.latencyMs) ms on \(stage.executionTarget)")
 }
 ```
+
+The generated handle also provides blocking `init(fromYaml:)`,
+`init(fromFile:)`, `init(fromBundle:)`, and `run(envelope:options:)` calls.
+
+### C# (Unity)
+
+```csharp
+using var pipeline = Pipeline.FromYaml(yaml);
+Debug.Log($"{pipeline.Name}: {pipeline.StageCount} stages");
+
+PipelineResult result = pipeline.Run(input);
+transcript.text = result.Stage("asr")?.Text;
+reply.text = result.Stage("llm")?.Text;
+foreach (StageResult stage in result.Stages)
+{
+    Debug.Log($"{stage.StageId}: {stage.LatencyMs} ms on {stage.ExecutionTarget}");
+}
+```
+
+### Pipeline result
+
+A run returns every stage's output, not only the final one, so an
+`ASR -> LLM -> TTS` pipeline exposes the transcript and the reply as well as
+the audio.
+
+| `XybridPipelineResult` | |
+|---|---|
+| `envelope` | The final stage's output (same as the last stage's `envelope`) |
+| `outputType` | Type of the final output |
+| `latencyMs` | Wall-clock time of the whole run |
+| `stages` | Every executed stage, in order |
+
+| `XybridStageResult` | |
+|---|---|
+| `stageId` | The YAML `id:`, or the model ID when the stage declares none; matches `stageNames()` |
+| `envelope` | This stage's output, which is also the next stage's input |
+| `outputType` | Type of this stage's output |
+| `latencyMs` | This stage's latency |
+| `executionTarget` | Where this stage ran (`local` / `cloud`); stages can differ |
+| `metrics` | TTFT and tokens per second when the stage is a language model |
+
+Of `XybridRunOptions`, only `correlationId` applies to a pipeline run. Setting
+`generationConfig` or `abortOn` fails with `ConfigError` instead of being
+ignored; per-stage generation settings belong in the pipeline YAML.
 
 ### Rust
 
@@ -547,20 +946,22 @@ impl Xybrid {
 
 | Method | Dart | Kotlin | Swift | C# |
 |--------|------|--------|-------|----|
-| `fromYaml()` | ✅ | — | — | — |
-| `fromFile()` | ✅ | — | — | — |
-| `fromBundle()` | ✅ | — | — | — |
-| `name` | ✅ | — | — | — |
-| `isReady` | ✅ | — | — | — |
-| `stageCount` | ✅ | — | — | — |
-| `stageNames` | ✅ | — | — | — |
-| `load()` | ✅ | — | — | — |
-| `run()` | ✅ | — | — | — |
-| `runWithOptions()` / `run_with_options()` | Rust ✅ | planned | planned | planned |
+| `fromYaml()` | ✅ | ✅ | ✅ | ✅ |
+| `fromFile()` | ✅ | ✅ | ✅ | ✅ |
+| `fromBundle()` | ✅ | ✅ | ✅ | ✅ |
+| `name` | ✅ | ✅ | ✅ | ✅ |
+| `stageCount` | ✅ | ✅ | ✅ | ✅ |
+| `stageNames` | ✅ | ✅ | ✅ | ✅ |
+| `run()` | ✅ | ✅ | ✅ | ✅ |
+| `run(envelope, options)` / `run_with_options()` | Rust ✅ | ✅ | ✅ | — |
+| per-stage outputs (`result.stages`) | Rust ✅ | ✅ | ✅ | ✅ |
 | `runPipelineStreamingWithOptions()` / `run_pipeline_streaming_with_options()` | Rust ✅ | planned | planned | planned |
 
-> **Note**: The Dart SDK currently uses a single `XybridPipeline` class (no separate `PipelineRef`).
-> The Kotlin spec shows the two-step `PipelineRef` → `Pipeline` pattern which is the target design.
+All foreign SDKs intentionally expose one pipeline handle. Their constructors
+collapse Rust's `PipelineRef` parse/resolve step, avoiding a second opaque FFI
+handle that exists only to return the first one. Dart still returns the final
+stage only, as an `XybridResult` whose `metrics.stageLatenciesMs` lists each
+stage's latency.
 
 ---
 
@@ -809,7 +1210,7 @@ The optional `voiceId` and `speed` parameters work seamlessly in pipelines:
 final pipeline = XybridPipeline.fromYaml('''
 name: voice-assistant
 stages:
-  - model: whisper-tiny
+  - model: whisper-tiny-ggml
   - model: llama-3-8b
   - model: kokoro-82m
 ''');
@@ -825,7 +1226,7 @@ For pipeline-level voice configuration, use stage config in YAML:
 ```yaml
 name: voice-assistant
 stages:
-  - model: whisper-tiny
+  - model: whisper-tiny-ggml
   - model: llama-3-8b
   - model: kokoro-82m
     config:
@@ -851,6 +1252,7 @@ class XybridResult {
   final Uint8List? audioBytes;   // Raw PCM bytes (16-bit signed LE)
   final Float32List? embedding;
   final int latencyMs;
+  final String? reasoningContent;
 
   // Convenience
   bool get isFailure;
@@ -869,7 +1271,8 @@ data class XybridResult(
   val embedding: FloatArray?,
   val outputType: OutputType,
   val latencyMs: Int,
-  val modelId: String
+  val modelId: String,
+  val reasoningContent: String?
 ) {
   val isFailure: Boolean
   val latencySeconds: Double
@@ -890,6 +1293,7 @@ public sealed class InferenceResult : IDisposable
   public float[] Embedding { get; }
   public OutputType OutputType { get; }
   public uint LatencyMs { get; }
+  public string ReasoningContent { get; }
   public bool HasAudio { get; }
   public bool HasEmbedding { get; }
 }
@@ -992,6 +1396,7 @@ public sealed class StageLatency
 | `outputType` | — | — | — | ✅ |
 | `latencyMs` | ✅ | ✅ | ✅ | ✅ |
 | `modelId` | — | — | — | ✅ |
+| `reasoningContent` | ✅ | ✅ | ✅ | ✅ |
 | `isFailure` | ✅ | ✅ | ✅ | ✅ |
 | `audioAsWav()` | ✅ | — | — | — |
 | `metrics` | ✅ | ✅ | ✅ | ✅ |
@@ -1019,8 +1424,13 @@ class ConversationContext {
 class ConversationContext {
   fun withSystem(systemMessage: Envelope): ConversationContext
   fun push(message: Envelope)
+  fun history(): List<Envelope>
 }
 ```
+
+The generated Swift and C# context types expose the same `history()` /
+`History()` snapshot. History deliberately excludes the persistent system
+envelope.
 
 **Multi-turn vision** (planned): when a user message contains images
 (built via `Envelope.userMessage(text, images: [...])`), the image-bearing envelope
@@ -1148,6 +1558,19 @@ GenerationConfigs.greedy()    // temperature=0, topP=1, topK=0
 GenerationConfigs.creative()  // temperature=0.9, topP=0.95, topK=50
 ```
 
+#### Structured output (`grammar`)
+
+`grammar` constrains decoding to a GBNF grammar. Build one from a JSON Schema
+with `jsonSchemaToGbnf()`, or pass raw GBNF. llama.cpp-only — other backends
+ignore it.
+
+| Binding | Surface |
+|---------|---------|
+| Dart | `GenerationConfig.grammar` |
+| Kotlin | `XybridGenerationConfig.grammar` |
+| Swift | `XybridGenerationConfig.make(grammar:)` |
+| C# (Unity) | `GenerationConfig.SetGrammar()` |
+
 #### Usage
 
 ```dart
@@ -1197,7 +1620,7 @@ let result = model.run_streaming_with_options(&envelope, &options, |token| {
 layers and platform routing can restart on cloud where supported; local Rust
 streaming abort is cooperative and checked before every emitted token.
 
-**User cancellation (Dart binding surface — implemented, issue 10).** A caller
+**User cancellation (all bindings).** A caller
 can abort an in-flight local streaming run via a `CancellationToken` cancel
 handle. In Rust the token is paired with `RunOptions`
 (`with_cancellation_token`); in Dart the caller constructs a
@@ -1222,6 +1645,47 @@ final sub = stream.listen((token) { /* ... */ });
 // Later, to stop Rust generation (not just unsubscribe):
 cancel.cancel();
 await sub.cancel();
+```
+
+**The bolt bindings (Kotlin, Swift, C#).** The token reaches them as a
+`XybridCancellationToken` handle with `cancel()` and `isCancelled()`, and it is
+a **required** argument on every generated run entry point — BoltFFI cannot
+express an optional handle parameter, so there is no way to say "no token" at
+that layer. The hand-written wrappers hide this: they manufacture a throwaway
+token for callers who do not supply one, and they bridge the host's own
+cancellation primitive to it.
+
+| Binding | Cancel a run by |
+|---------|-----------------|
+| Dart | passing a `CancellationToken`, or unsubscribing the stream |
+| Swift | cancelling the `Task` around `runAsync`, or passing a token to `run(envelope:options:cancel:)` |
+| Kotlin | cancelling the coroutine around `runAsync` / `streamTokens`, or passing a token to the generated `run` |
+| C# (Unity) | passing a `System.Threading.CancellationToken` to `Run` / `RunStreaming` |
+
+> **Streaming stops mid-flight; batch does not.** Token checks happen at token
+> boundaries, which only the streaming path has. A batch run honours a token
+> that is already cancelled when it starts (`check_before_run`), but once the
+> backend is generating, `run_with_options` has no token-aware path to stop it
+> and the call finishes normally. Reach for the streaming surface when a
+> mid-flight stop button matters.
+
+```swift
+// Swift — structured concurrency drives the native stop button
+let task = Task { try await model.runAsync(envelope: .text("Tell me a long story")) }
+task.cancel()   // generation stops at the next token
+```
+
+```kotlin
+// Kotlin — cancelling the collector stops native generation, not just collection
+val job = scope.launch { model.streamTokens(envelope).collect { render(it) } }
+job.cancel()
+```
+
+```csharp
+// C# / Unity
+using var cts = new CancellationTokenSource();
+var result = model.Run(Envelope.Text("Tell me a long story"), cancellationToken: cts.Token);
+cts.Cancel();
 ```
 
 **Preemptive cancel-and-replace (implemented, issue 11).** A continuous
@@ -1324,7 +1788,7 @@ stream stays low-cardinality.
 
 | Type | Dart | Kotlin | Swift | C# |
 |------|------|--------|-------|----|
-| `ConversationContext` | ✅ | — | — | ✅ |
+| `ConversationContext` | ✅ | ✅ | ✅ | ✅ |
 | `MessageRole` | ✅ | — | — | ✅ |
 | `GenerationConfig` | ✅ | ✅ | ✅ | ✅ |
 | `PixelFormat` | ✅ | 📋 | 📋 | 📋 |

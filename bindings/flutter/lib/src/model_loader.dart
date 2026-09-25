@@ -14,6 +14,7 @@ import 'llm.dart';
 import 'result.dart';
 import 'rust/api/model.dart';
 import 'run_options.dart';
+import 'tools.dart';
 
 /// Exception thrown when Xybrid operations fail.
 class XybridException implements Exception {
@@ -101,12 +102,31 @@ sealed class LoadEvent {
   const LoadEvent._();
 }
 
-/// Download progress update (0.0 to 1.0).
+/// Download progress update.
+///
+/// [progress] is aggregated across every artifact the model needs (weights
+/// plus companions such as a vision projector), never moves backwards, and
+/// reaches 1.0 only once the model is ready. A first event at 0 bytes arrives
+/// as the transfer starts, so a UI can tell "connecting" apart from "stuck".
 class LoadProgress extends LoadEvent {
   /// Progress value from 0.0 to 1.0
   final double progress;
 
-  const LoadProgress(this.progress) : super._();
+  /// Bytes written so far, across every artifact.
+  final int downloadedBytes;
+
+  /// Total across every artifact, or `null` while unknown. A single-file
+  /// model takes the size the server announces, so this fills in once the
+  /// download connects even when the registry publishes no size. It stays
+  /// `null` for a Hugging Face repo, or a multi-file model missing a size.
+  /// [downloadedBytes] is exact either way.
+  final int? totalBytes;
+
+  const LoadProgress(
+    this.progress, {
+    this.downloadedBytes = 0,
+    this.totalBytes,
+  }) : super._();
 
   /// Progress as a percentage (0-100).
   int get percentage => (progress * 100).round();
@@ -138,6 +158,27 @@ class XybridModelLoader {
   factory XybridModelLoader.fromRegistry(String modelId) {
     return XybridModelLoader._(FfiModelLoader.fromRegistry(modelId: modelId));
   }
+
+  /// Create a loader that serves from the cloud gateway while the registry
+  /// weights download in the background, instead of blocking on the download.
+  ///
+  /// [load] then returns almost immediately with a cloud-backed model that
+  /// switches to on-device by itself once the download lands. Requires an API
+  /// key (see [Xybrid.setApiKey]) and an uncached model — otherwise this
+  /// behaves exactly like [XybridModelLoader.fromRegistry], which
+  /// [willSpeculate] reports. LLM/chat models only.
+  ///
+  /// Watch the handover with [XybridModel.isCloudServing],
+  /// [XybridModel.downloadStatus] and [XybridModel.downloadProgress].
+  factory XybridModelLoader.fromRegistrySpeculative(String modelId) {
+    return XybridModelLoader._(
+      FfiModelLoader.fromRegistrySpeculative(modelId: modelId),
+    );
+  }
+
+  /// Whether [load] would actually speculate: speculation enabled, an API key
+  /// resolves, and the model is not already cached. Never touches the network.
+  bool get willSpeculate => _inner.willSpeculate();
 
   /// Create a loader for a model from a local bundle path.
   ///
@@ -179,7 +220,8 @@ class XybridModelLoader {
   /// Load the model with download progress updates.
   ///
   /// Returns a stream of [LoadEvent]:
-  /// - [LoadProgress] with download progress (0.0 to 1.0)
+  /// - [LoadProgress] with the fraction, bytes transferred and the declared
+  ///   total when the source has one
   /// - [LoadComplete] when the model is ready
   /// - [LoadError] if loading fails
   ///
@@ -190,8 +232,8 @@ class XybridModelLoader {
   /// final loader = Xybrid.model(modelId: 'kokoro-82m');
   /// await for (final event in loader.loadWithProgress()) {
   ///   switch (event) {
-  ///     case LoadProgress(:final progress):
-  ///       print('Downloading: ${(progress * 100).toInt()}%');
+  ///     case LoadProgress(:final progress, :final downloadedBytes):
+  ///       print('Downloading: ${(progress * 100).toInt()}% ($downloadedBytes B)');
   ///     case LoadComplete():
   ///       final model = await loader.load();
   ///       print('Model ready!');
@@ -203,7 +245,11 @@ class XybridModelLoader {
   Stream<LoadEvent> loadWithProgress() {
     return _inner.loadWithProgress().map((ffiEvent) {
       return switch (ffiEvent) {
-        FfiLoadEvent_Progress(:final field0) => LoadProgress(field0),
+        FfiLoadEvent_Progress(:final field0) => LoadProgress(
+          field0.progress,
+          downloadedBytes: field0.downloadedBytes.toInt(),
+          totalBytes: field0.totalBytes?.toInt(),
+        ),
         FfiLoadEvent_Complete() => const LoadComplete(),
         FfiLoadEvent_Error(:final field0) => LoadError(field0),
       };
@@ -227,6 +273,60 @@ class XybridModel {
   final FfiModel inner;
 
   XybridModel._(this.inner);
+
+  /// Whether runs are currently answered by the cloud because the local
+  /// weights are not ready yet. `false` for ordinary local models.
+  ///
+  /// This predicts the *next* run; [XybridResult.executionTarget] reports what
+  /// a run that already happened actually did. They differ when a cloud leg
+  /// fails and degrades to local mid-call.
+  bool get isCloudServing => inner.isCloudServing();
+
+  /// Whether the model bundle declares local tool-calling support.
+  ///
+  /// Advisory tri-state: `null` means the bundle says nothing, so the app
+  /// cannot tell. Gate tool UI on it — enforcement stays at run time, where a
+  /// request carrying [GenerationConfig.tools] against a model whose chat
+  /// template has no tool support fails regardless of what this reports.
+  bool? get supportsToolCalling => inner.supportsToolCalling();
+
+  /// Download progress + state in one consistent read.
+  ///
+  /// Reports [FfiDownloadState.ready] at 1.0 for an ordinary local model, so
+  /// the UI needs no special case. Prefer [downloadProgress] to be pushed
+  /// updates instead of polling.
+  FfiDownloadStatus get downloadStatus => inner.downloadStatus();
+
+  /// Stream download progress for a speculatively-loaded model until it
+  /// reaches a terminal state.
+  ///
+  /// Emits [LoadProgress] while downloading, then exactly one [LoadComplete]
+  /// (now running on-device) or [LoadError] (download failed; the cloud keeps
+  /// serving). Cancelling the subscription stops the native poller.
+  ///
+  /// ```dart
+  /// final model = await XybridModelLoader
+  ///     .fromRegistrySpeculative('lfm2.5-350m')
+  ///     .load();
+  ///
+  /// model.downloadProgress().listen((event) {
+  ///   if (event is LoadProgress) setState(() => _pct = event.progress);
+  ///   if (event is LoadComplete) setState(() => _banner = null);
+  /// });
+  /// ```
+  Stream<LoadEvent> downloadProgress() {
+    return inner.downloadProgress().map((ffiEvent) {
+      return switch (ffiEvent) {
+        FfiLoadEvent_Progress(:final field0) => LoadProgress(
+          field0.progress,
+          downloadedBytes: field0.downloadedBytes.toInt(),
+          totalBytes: field0.totalBytes?.toInt(),
+        ),
+        FfiLoadEvent_Complete() => const LoadComplete(),
+        FfiLoadEvent_Error(:final field0) => LoadError(field0),
+      };
+    });
+  }
 
   /// Run inference with the given envelope.
   ///
@@ -364,17 +464,26 @@ class XybridModel {
               cumulativeText: field0.cumulativeText,
               isFinal: isFinal,
               finishReason: field0.finishReason,
+              toolCalls: field0.toolCalls
+                  .map(ToolCall.fromFfi)
+                  .toList(growable: false),
+              rawText: field0.rawText,
             );
           case FfiStreamEvent_Complete(:final field0):
             // Only emit if we haven't already emitted a final token
             if (!emittedFinal) {
+              final calls = field0.toolCalls
+                  .map(ToolCall.fromFfi)
+                  .toList(growable: false);
               yield StreamToken(
                 token: '',
                 index: 0,
                 cumulativeText: field0.text ?? '',
                 isFinal: true,
-                finishReason: 'stop',
+                finishReason: calls.isEmpty ? 'stop' : 'tool_calls',
                 metrics: XybridInferenceMetrics.fromFfi(field0.metrics),
+                toolCalls: calls,
+                rawText: calls.isEmpty ? null : field0.text,
               );
             }
           case FfiStreamEvent_Error(:final field0):
@@ -461,16 +570,25 @@ class XybridModel {
               cumulativeText: field0.cumulativeText,
               isFinal: isFinal,
               finishReason: field0.finishReason,
+              toolCalls: field0.toolCalls
+                  .map(ToolCall.fromFfi)
+                  .toList(growable: false),
+              rawText: field0.rawText,
             );
           case FfiStreamEvent_Complete(:final field0):
             if (!emittedFinal) {
+              final calls = field0.toolCalls
+                  .map(ToolCall.fromFfi)
+                  .toList(growable: false);
               yield StreamToken(
                 token: '',
                 index: 0,
                 cumulativeText: field0.text ?? '',
                 isFinal: true,
-                finishReason: 'stop',
+                finishReason: calls.isEmpty ? 'stop' : 'tool_calls',
                 metrics: XybridInferenceMetrics.fromFfi(field0.metrics),
+                toolCalls: calls,
+                rawText: calls.isEmpty ? null : field0.text,
               );
             }
           case FfiStreamEvent_Error(:final field0):
@@ -553,24 +671,42 @@ class XybridModel {
         frameSessionId: frameSessionId,
       );
 
+      // This method emits the native terminal token AND a completion token
+      // (the latter is where metrics arrive). Tool calls must be delivered
+      // across that pair exactly once, or a caller looping on [hasToolCalls]
+      // would execute every tool twice.
+      var emittedToolCalls = false;
+
       await for (final event in stream) {
         switch (event) {
           case FfiStreamEvent_Token(:final field0):
+            final calls =
+                field0.toolCalls.map(ToolCall.fromFfi).toList(growable: false);
+            if (calls.isNotEmpty) emittedToolCalls = true;
             yield StreamToken(
               token: field0.token,
               index: field0.index,
               cumulativeText: field0.cumulativeText,
               isFinal: field0.finishReason != null,
               finishReason: field0.finishReason,
+              toolCalls: calls,
+              rawText: field0.rawText,
             );
           case FfiStreamEvent_Complete(:final field0):
+            final calls = emittedToolCalls
+                ? const <ToolCall>[]
+                : field0.toolCalls
+                    .map(ToolCall.fromFfi)
+                    .toList(growable: false);
             yield StreamToken(
               token: '',
               index: 0,
               cumulativeText: field0.text ?? '',
               isFinal: true,
-              finishReason: 'stop',
+              finishReason: calls.isEmpty ? 'stop' : 'tool_calls',
               metrics: XybridInferenceMetrics.fromFfi(field0.metrics),
+              toolCalls: calls,
+              rawText: calls.isEmpty ? null : field0.text,
             );
           case FfiStreamEvent_Error(:final field0):
             yield StreamToken(

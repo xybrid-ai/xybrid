@@ -44,9 +44,10 @@ pub type LlmResult<T> = Result<T, AdapterError>;
 /// Build flags determine the answer because backend selection happens at
 /// compile time: `llm-mistral-metal` and `llm-mistral-cuda` switch
 /// mistralrs to the corresponding accelerator; `llm-llamacpp` on macOS
-/// builds with `GGML_METAL=ON` by default (see `build.rs`). For unknown
-/// or mock backends we report `cpu` rather than guessing — wrong is
-/// worse than missing on a diagnostic field.
+/// builds with `GGML_METAL=ON` by default. On Linux/Windows,
+/// `XYBRID_LLAMA_CPP_VULKAN=1` builds llama.cpp with `GGML_VULKAN=ON`.
+/// For unknown or mock backends we report `cpu` rather than guessing —
+/// wrong is worse than missing on a diagnostic field.
 pub(crate) fn local_execution_provider(backend_name: &str) -> &'static str {
     match backend_name {
         "llama-cpp" => llamacpp_execution_provider(),
@@ -66,9 +67,11 @@ fn llamacpp_execution_provider() -> &'static str {
     not(any(target_os = "macos", target_os = "ios"))
 ))]
 fn llamacpp_execution_provider() -> &'static str {
-    // Linux / Windows / Android currently build llama.cpp without
-    // GGML_CUDA. When we add a CUDA build flag, switch on it here.
-    "cpu"
+    if option_env!("XYBRID_LLAMA_CPP_VULKAN") == Some("1") {
+        "vulkan"
+    } else {
+        "cpu"
+    }
 }
 
 #[cfg(not(feature = "llm-llamacpp"))]
@@ -99,6 +102,18 @@ fn unsupported_vision_input_error(backend_name: &str) -> AdapterError {
         "LLM backend '{}' does not support vision input",
         backend_name
     ))
+}
+
+/// Tool calls to stamp on a terminal streaming token.
+///
+/// Parsing runs only for requests that actually offered tools, mirroring
+/// `build_llm_response_envelope`'s gate — so the terminal token and the
+/// response envelope can never disagree about whether a turn called a tool.
+fn parsed_tool_calls(text: &str, config: &GenerationConfig) -> Vec<crate::gateway::ToolCall> {
+    if config.tools.is_empty() {
+        return Vec::new();
+    }
+    crate::runtime_adapter::tool_call::parse_tool_calls(text)
 }
 
 // =============================================================================
@@ -236,14 +251,56 @@ pub trait LlmBackend: Send + Sync {
         // Default implementation: fall back to non-streaming and emit all at once
         let output = self.generate(messages, config)?;
 
-        // Emit the entire output as a single "token"
+        // Emit the entire output as a single "token". This lone token is
+        // also the terminal one, so it carries the turn's parsed tool calls
+        // — the streaming contract is identical whether a backend streams
+        // natively or falls back to here.
         let partial = PartialToken {
             token: output.text.clone(),
             token_id: None,
             index: 0,
             cumulative_text: output.text.clone(),
             finish_reason: Some(output.finish_reason.clone()),
-        };
+            tool_calls: Vec::new(),
+            raw_text: None,
+        }
+        .with_tool_calls(parsed_tool_calls(&output.text, config), &output.text);
+
+        let mut callback = on_token;
+        callback(partial).map_err(AdapterError::from_streaming_callback_error)?;
+
+        Ok(output)
+    }
+
+    /// Generate text from a raw prompt (no chat template) with streaming.
+    ///
+    /// The raw-prompt sibling of [`Self::generate_streaming`], and the seam
+    /// tool-result continuations stream through: a continuation is a
+    /// protocol-faithful raw prompt (see the executor's `tool_continuation`
+    /// module), so it cannot ride the chat path.
+    ///
+    /// # Default Implementation
+    ///
+    /// Falls back to non-streaming [`Self::generate_raw`] and emits the whole
+    /// output as one terminal token. Override for true streaming.
+    fn generate_raw_streaming(
+        &self,
+        prompt: &str,
+        config: &GenerationConfig,
+        on_token: StreamingCallback<'_>,
+    ) -> LlmResult<GenerationOutput> {
+        let output = self.generate_raw(prompt, config)?;
+
+        let partial = PartialToken {
+            token: output.text.clone(),
+            token_id: None,
+            index: 0,
+            cumulative_text: output.text.clone(),
+            finish_reason: Some(output.finish_reason.clone()),
+            tool_calls: Vec::new(),
+            raw_text: None,
+        }
+        .with_tool_calls(parsed_tool_calls(&output.text, config), &output.text);
 
         let mut callback = on_token;
         callback(partial).map_err(AdapterError::from_streaming_callback_error)?;
@@ -784,6 +841,20 @@ mod tests {
         assert!(!mistral.is_empty(), "mistral must map to a label");
     }
 
+    #[cfg(all(
+        feature = "llm-llamacpp",
+        any(target_os = "linux", target_os = "windows")
+    ))]
+    #[test]
+    fn llamacpp_execution_provider_matches_vulkan_build_setting() {
+        let expected = if option_env!("XYBRID_LLAMA_CPP_VULKAN") == Some("1") {
+            "vulkan"
+        } else {
+            "cpu"
+        };
+        assert_eq!(local_execution_provider("llama-cpp"), expected);
+    }
+
     #[test]
     fn local_execution_provider_unknown_backend_falls_back_to_cpu() {
         // Mock backends in tests, or any name we don't recognise, get
@@ -898,6 +969,110 @@ mod tests {
         assert_eq!(received_tokens[0].cumulative_text, "Test response");
         assert_eq!(received_tokens[0].finish_reason, Some("stop".to_string()));
         assert!(received_tokens[0].is_final());
+    }
+
+    /// A tools-bearing streaming turn must hand the caller typed calls plus
+    /// the raw turn text on the terminal token — otherwise the loop cannot
+    /// close without re-parsing text the caller never received.
+    #[test]
+    fn default_streaming_stamps_tool_calls_and_raw_text_on_the_terminal_token() {
+        struct ToolEmittingBackend;
+
+        const TURN: &str =
+            "checking<|tool_call_start|>[get_temperature(room=\"kitchen\")]<|tool_call_end|>";
+
+        impl LlmBackend for ToolEmittingBackend {
+            fn name(&self) -> &str {
+                "mock"
+            }
+            fn supported_formats(&self) -> Vec<&'static str> {
+                vec!["test"]
+            }
+            fn load(&mut self, _config: &LlmConfig) -> LlmResult<()> {
+                Ok(())
+            }
+            fn is_loaded(&self) -> bool {
+                true
+            }
+            fn unload(&mut self) -> LlmResult<()> {
+                Ok(())
+            }
+            fn generate(
+                &self,
+                _messages: &[ChatMessage],
+                _config: &GenerationConfig,
+            ) -> LlmResult<GenerationOutput> {
+                Ok(GenerationOutput {
+                    text: TURN.to_string(),
+                    tokens_generated: 8,
+                    generation_time_ms: 50,
+                    tokens_per_second: 40.0,
+                    finish_reason: "stop".to_string(),
+                    ttft_ms: None,
+                    mean_itl_ms: None,
+                    p95_itl_ms: None,
+                    emitted_chunks: None,
+                    inter_chunk_ms: Vec::new(),
+                    decode_tps: None,
+                    prefill_tps: None,
+                    image_preprocess_ms: None,
+                    reasoning_content: None,
+                })
+            }
+            fn generate_raw(
+                &self,
+                prompt: &str,
+                config: &GenerationConfig,
+            ) -> LlmResult<GenerationOutput> {
+                self.generate(&[ChatMessage::user(prompt)], config)
+            }
+        }
+
+        let tools_config = GenerationConfig {
+            tools: vec![crate::gateway::Tool::function(
+                "get_temperature",
+                "Room temperature.",
+                serde_json::json!({"type": "object", "properties": {}}),
+            )],
+            ..Default::default()
+        };
+
+        let mut tokens: Vec<PartialToken> = Vec::new();
+        ToolEmittingBackend
+            .generate_streaming(
+                &[ChatMessage::user("how warm is the kitchen?")],
+                &tools_config,
+                Box::new(|token| {
+                    tokens.push(token);
+                    Ok(())
+                }),
+            )
+            .expect("streaming should succeed");
+
+        let terminal = tokens.last().expect("a terminal token must be emitted");
+        assert_eq!(terminal.tool_calls.len(), 1);
+        assert_eq!(terminal.tool_calls[0].function.name, "get_temperature");
+        assert_eq!(
+            terminal.raw_text.as_deref(),
+            Some(TURN),
+            "the raw turn text is what `Envelope::tool_results` replays"
+        );
+
+        // A tools-off request parses nothing, even when the text happens to
+        // contain markers — same gate as `build_llm_response_envelope`.
+        let mut plain: Vec<PartialToken> = Vec::new();
+        ToolEmittingBackend
+            .generate_streaming(
+                &[ChatMessage::user("hi")],
+                &GenerationConfig::default(),
+                Box::new(|token| {
+                    plain.push(token);
+                    Ok(())
+                }),
+            )
+            .expect("streaming should succeed");
+        assert!(plain.last().unwrap().tool_calls.is_empty());
+        assert!(plain.last().unwrap().raw_text.is_none());
     }
 
     /// Test that callback errors propagate correctly in default streaming

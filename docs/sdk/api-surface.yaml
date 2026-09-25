@@ -2,7 +2,8 @@
 # Machine-readable companion to API_REFERENCE.md
 #
 # This file is parsed by tools/scripts/api-contract-check.sh and the /sync-api command.
-# Status values: implemented, partial, stub, planned
+# Status values: implemented, partial, stub, planned, na (not applicable
+# to that language, as opposed to `planned` = intended but not built yet)
 #
 # IMPORTANT: When modifying SDK public APIs, update BOTH this file and API_REFERENCE.md.
 
@@ -27,8 +28,10 @@ classes:
         # apiKey-bundled init shipped across all four bindings: Dart
         # Xybrid.init, Kotlin Xybrid.init(context, …), Swift
         # Xybrid.initialize(apiKey:), Unity XybridClient.Initialize(apiKey:).
-        # Param coverage varies by binding (e.g. Unity omits gatewayUrl;
-        # resourceTelemetry is Dart/Rust only) — the apiKey path is universal.
+        # Param coverage varies by binding (resourceTelemetry is Dart/Rust
+        # only) — the apiKey path is universal. Unity declares gatewayUrl last,
+        # after ingestUrl, so its pre-existing positional call sites keep
+        # compiling; the other bindings order it before ingestUrl.
         status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
       setApiKey:
         params: [{ name: apiKey, type: String }]
@@ -36,6 +39,64 @@ classes:
       setGatewayUrl:
         params: [{ name: gatewayUrl, type: String }]
         status: { dart: implemented, kotlin: planned, swift: planned, csharp: planned }
+      setPlatformUrl:
+        params: [{ name: url, type: String }]
+        # Points the cloud gateway at staging / self-hosted. Kotlin, Swift and
+        # C# reach it through the generated bolt global rather than a facade
+        # method, so only Dart exposes it on the entry-point class today.
+        status: { dart: implemented, kotlin: planned, swift: planned, csharp: planned }
+      setSpeculativeCloud:
+        params: [{ name: enabled, type: bool }]
+        # Process-wide DEFAULT for serving an undownloaded registry model from
+        # the cloud while its weights download. It applies only to loads that
+        # do not opt in per-load: fromRegistrySpeculative sets the per-load
+        # override itself and is unaffected by this toggle.
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+        since: "0.8.0"
+      isSpeculativeCloudEnabled:
+        return: bool
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+        since: "0.8.0"
+      releaseMemory:
+        return: int
+        # Host-driven memory release: call from the platform's low-memory
+        # signal. Returns how many loaded models were released; each reloads
+        # itself transparently on its next run.
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+        since: "0.8.0"
+      setAutoRelease:
+        params: [{ name: enabled, type: bool }]
+        # Opt into releasing least-recently-used idle models when a load hits
+        # device memory pressure. Off by default.
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+        since: "0.8.0"
+      isAutoReleaseEnabled:
+        return: bool
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+        since: "0.8.0"
+      hasApiKey:
+        return: bool
+        # Whether a Xybrid gateway key resolves, from init or the environment.
+        # Gates cloud routing and telemetry; on-device inference needs none.
+        # Dart reaches the bolt global directly and has no facade member.
+        status: { dart: planned, kotlin: implemented, swift: implemented, csharp: implemented }
+        since: "0.8.0"
+      setProviderApiKey:
+        params:
+          - { name: provider, type: String }
+          - { name: apiKey, type: String }
+        # Per-provider key for gateway forwarding. Distinct from the Xybrid
+        # platform key that init/setApiKey configures.
+        status: { dart: planned, kotlin: implemented, swift: implemented, csharp: implemented }
+        since: "0.8.0"
+      jsonSchemaToGbnf:
+        params: [{ name: schemaJson, type: String }]
+        return: String
+        # JSON Schema -> GBNF for GenerationConfig.grammar. Dart, Kotlin and
+        # Swift expose it as a top-level function rather than a member; C# has
+        # no top-level functions, so Unity puts it on XybridClient.
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+        since: "0.8.0"
       model:
         params:
           - { name: source, type: ModelSource }
@@ -51,7 +112,36 @@ classes:
       isModelCached:
         params: [{ name: modelId, type: String }]
         return: bool
+        notes: "Dart compatibility API: true only when a registry model is extracted and ready to load. Use hasCachedModelData for any managed cache presence."
         status: { dart: implemented, kotlin: planned, swift: planned, csharp: planned }
+      modelCacheStatus:
+        return: CacheStatus
+        notes: "All new cache operations return Futures on Dart; filesystem work runs on the FRB worker pool. Swift and Kotlin are synchronous with an *Async twin for each call (async / suspend on Dispatchers.IO); C# is synchronous."
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+      modelCacheEntries:
+        return: "List<CacheEntry>"
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+      hasCachedModelData:
+        params: [{ name: modelId, type: String }]
+        return: bool
+        notes: "True when any registry, extracted, direct Hugging Face, or owned Hub-cache entry exists; this does not imply runtime readiness."
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+      cachedModelPath:
+        params: [{ name: modelId, type: String }]
+        return: "String?"
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+      extractedModelIds:
+        return: "List<String>"
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+      removeCachedModel:
+        params: [{ name: modelId, type: String }]
+        return: int
+        notes: "Returns the number of physical cache roots removed. Must not run concurrently with a load of the same model."
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+      clearModelCache:
+        return: int
+        notes: "Returns the number of physical cache roots removed. Must not run concurrently with model loading."
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
 
   # -------------------------------------------------------------------
   # 2. XybridModelLoader
@@ -87,13 +177,128 @@ classes:
         return: XybridModelLoader
         notes: "Requires huggingface feature flag. Downloads and caches model files from HuggingFace Hub."
         status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+      fromHuggingfaceWithRevision:
+        static: true
+        params:
+          - { name: repo, type: String }
+          - { name: revision, type: String }
+        return: XybridModel
+        notes: "Pins the load to the commit resolved from a branch, tag, or SHA. The Bolt languages expose this as a synchronous XybridModel constructor; call it off the UI thread."
+        status: { dart: planned, kotlin: implemented, swift: implemented, csharp: implemented }
       load:
         async: true
         return: XybridModel
         status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
       loadWithProgress:
         return: "Stream<LoadEvent>"
+        # Dart-only. The bolt languages get the same capability through the
+        # separate XybridDownload handle, because their load call blocks.
         status: { dart: implemented, kotlin: planned, swift: planned, csharp: planned }
+      download:
+        # Starts the download in the background without loading, so a blocking
+        # host has something to watch. Returns null for a source with nothing
+        # to fetch (bundle, directory, Hugging Face repo). Named StartDownload
+        # in C#.
+        return: "XybridDownload?"
+        status: { rust: implemented, dart: planned, kotlin: implemented, swift: implemented, csharp: implemented }
+      fromRegistrySpeculative:
+        static: true
+        params: [{ name: modelId, type: String }]
+        return: XybridModelLoader
+        # Serves from the cloud gateway while the weights download, instead of
+        # blocking on the download. Sets the per-load override itself, so it
+        # does not depend on Xybrid.setSpeculativeCloud.
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+      willSpeculate:
+        return: bool
+        # Whether load() would actually speculate: speculation is in effect for
+        # this loader, an API key resolves, and the model is not already
+        # cached. Reads the local cache; never hits the network.
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+
+  # -------------------------------------------------------------------
+  # 2b. XybridDownload
+  # -------------------------------------------------------------------
+  # A model download running in the background, decoupled from loading it.
+  # Exists because every bolt binding's load call blocks: there is no object to
+  # poll while the weights come down. The download fills the normal SDK cache,
+  # so the load afterwards returns at once. Dart drives the same capability
+  # through XybridModelLoader.loadWithProgress().
+  XybridDownload:
+    type: class
+    section: "2b. XybridDownload"
+    methods:
+      fromRegistry:
+        static: true
+        params: [{ name: modelId, type: String }]
+        return: XybridDownload
+        status: { rust: implemented, dart: planned, kotlin: implemented, swift: implemented, csharp: implemented }
+      status:
+        return: DownloadStatus
+        # Never blocks; safe from a UI thread or a per-frame render loop.
+        status: { rust: implemented, dart: planned, kotlin: implemented, swift: implemented, csharp: implemented }
+      progress:
+        return: "Stream<DownloadStatus>"
+        # AsyncStream (Swift) / Flow (Kotlin) / IAsyncEnumerable (C#) /
+        # iterable subscription (Python). Emits the current snapshot first,
+        # then closes on the terminal state.
+        status: { rust: implemented, dart: planned, kotlin: implemented, swift: implemented, csharp: implemented }
+      isFinished:
+        return: bool
+        status: { rust: implemented, dart: planned, kotlin: implemented, swift: implemented, csharp: implemented }
+      error:
+        return: "String?"
+        # The failure reason once the download ended in failed or cancelled.
+        status: { rust: implemented, dart: planned, kotlin: implemented, swift: implemented, csharp: implemented }
+      cancel:
+        # Stops the transfer within one chunk read and discards the partial
+        # file. Idempotent, and a no-op once terminal.
+        status: { rust: implemented, dart: planned, kotlin: implemented, swift: implemented, csharp: implemented }
+
+  # -------------------------------------------------------------------
+  # 2c. XybridStreamingSession
+  # -------------------------------------------------------------------
+  # Live-capture ASR: feed microphone PCM in, read partial transcripts out.
+  # Distinct from one-shot transcription of a finished buffer (XybridModel.run).
+  # Flutter reaches the same capability through its own FfiStreamSession.
+  XybridStreamingSession:
+    type: class
+    section: "2c. XybridStreamingSession"
+    methods:
+      stream:
+        # Opened from a loaded model: `model.stream(config)` on Swift/Kotlin,
+        # `model.Stream(config)` on Unity. Spelled `XybridStreamingSession
+        # .forModel(model, config)` on the generated surface, because BoltFFI
+        # only lets an impl block return its own opaque type.
+        params: [{ name: config, type: XybridStreamingConfig }]
+        return: XybridStreamingSession
+        status: { rust: implemented, dart: na, kotlin: implemented, swift: implemented, csharp: implemented }
+      feed:
+        params: [{ name: samples, type: "float[]" }]
+        # PCM f32 mono 16 kHz. Hands the buffer to the session worker and
+        # returns; transcription never runs on the caller's thread.
+        status: { rust: implemented, dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+      partials:
+        return: "Stream<XybridPartialResult>"
+        # AsyncStream (Swift) / Flow (Kotlin) / IAsyncEnumerable (C#) /
+        # iterable subscription (Python). A partial produced before
+        # subscribing is delivered immediately, and the stream closes when the
+        # session ends. Dart uses FfiStreamSession.subscribe instead.
+        status: { rust: implemented, dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+      flush:
+        return: String
+        # Drains buffered audio and returns the full transcript; ends the session.
+        status: { rust: implemented, dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+      reset:
+        # Start a fresh utterance without reloading the model.
+        status: { rust: implemented, dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+      cancel:
+        # Stop and discard buffered audio. Named `cancel`, not `close`:
+        # BoltFFI already generates a `close()` on every handle for disposal.
+        status: { rust: implemented, dart: na, kotlin: implemented, swift: implemented, csharp: implemented }
+      isRunning:
+        return: bool
+        status: { rust: implemented, dart: na, kotlin: implemented, swift: implemented, csharp: implemented }
 
   # -------------------------------------------------------------------
   # 3. XybridModel
@@ -113,6 +318,10 @@ classes:
         status: { dart: planned, kotlin: partial, swift: partial, csharp: implemented }
       hasVoices:
         type: bool
+        status: { dart: planned, kotlin: implemented, swift: implemented, csharp: implemented }
+      defaultGenerationConfig:
+        type: GenerationConfig
+        notes: "Resolved model defaults, including template generation parameters and the reasoning-token floor."
         status: { dart: planned, kotlin: implemented, swift: implemented, csharp: implemented }
     methods:
       voice:
@@ -200,6 +409,36 @@ classes:
       unload:
         notes: "Genuinely frees model memory: resets the SDK executor and drops the backend session (ONNX session removed from cache; llama.cpp model/context dropped). Dart binds it as Future<void> (NOT a sync void). Not yet on the Unity C-ABI (pending migration off the pre-bolt C ABI)."
         status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: planned }
+      isCloudServing:
+        return: bool
+        # True while the cloud answers because the local weights are not ready.
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+      supportsToolCalling:
+        return: "bool?"
+        # Advisory tri-state read off the bundle's tool_calling metadata flag:
+        # null means the bundle says nothing. Gate tool UI on it; enforcement
+        # is independent, at run time — a tools-bearing request against a model
+        # whose chat template has no tool support fails either way.
+        status: { rust: implemented, dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+      downloadStatus:
+        return: DownloadStatus
+        # Download state, progress and byte counts in one consistent read; poll
+        # to drive a bar, or subscribe with downloadProgress().
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+      awaitDownload:
+        params: [{ name: timeoutMs, type: int }]
+        return: DownloadStatus
+        # Blocks until the download settles or the timeout elapses. Dart uses
+        # the pushed downloadProgress() stream instead.
+        status: { dart: planned, kotlin: implemented, swift: implemented, csharp: implemented }
+      downloadProgress:
+        return: "Stream<DownloadStatus>"
+        # Pushed progress for a speculative load. Dart rides a
+        # flutter_rust_bridge stream sink; the bolt bindings ride BoltFFI's
+        # stream primitive, which carries items Rust -> host only (no closure
+        # crosses the boundary): AsyncStream in Swift, Flow in Kotlin,
+        # IAsyncEnumerable in C#.
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
       executionProviderInfo:
         return: ExecutionProviderInfo
         status: { dart: planned, kotlin: planned, swift: planned, csharp: planned }
@@ -209,27 +448,27 @@ classes:
   # -------------------------------------------------------------------
   XybridPipeline:
     type: class
-    section: "4. XybridPipelineRef / XybridPipeline"
+    section: "4. XybridPipeline"
     methods:
       fromYaml:
         static: true
         params: [{ name: yamlContent, type: String }]
-        status: { dart: implemented, kotlin: planned, swift: planned, csharp: planned }
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
       fromFile:
         static: true
         params: [{ name: path, type: String }]
-        status: { dart: implemented, kotlin: planned, swift: planned, csharp: planned }
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
       fromBundle:
         static: true
         params: [{ name: path, type: String }]
-        status: { dart: implemented, kotlin: planned, swift: planned, csharp: planned }
-      load:
-        async: true
-        status: { dart: implemented, kotlin: planned, swift: planned, csharp: planned }
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
       run:
         async: true
-        params: [{ name: envelope, type: Envelope }]
-        status: { dart: implemented, kotlin: planned, swift: planned, csharp: planned }
+        params:
+          - { name: envelope, type: Envelope }
+          - { name: options, type: "RunOptions?", default: "null" }
+        notes: "Constructors collapse PipelineRef loading into one operation. Kotlin and Swift provide off-UI-thread async conveniences; Dart is async; C# exposes the blocking native call and takes no options. Kotlin, Swift and C# return a PipelineResult carrying every stage's output; Dart returns the final stage as an XybridResult. Of RunOptions only correlationId applies; generationConfig or abortOn fail with ConfigError."
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
       runWithOptions:
         async: true
         params:
@@ -247,16 +486,16 @@ classes:
     properties:
       name:
         type: "String?"
-        status: { dart: implemented, kotlin: planned, swift: planned, csharp: planned }
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
       isReady:
         type: bool
-        status: { dart: implemented, kotlin: planned, swift: planned, csharp: planned }
+        status: { dart: planned, kotlin: planned, swift: planned, csharp: planned }
       stageCount:
         type: int
-        status: { dart: implemented, kotlin: planned, swift: planned, csharp: planned }
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
       stageNames:
         type: "List<String>"
-        status: { dart: implemented, kotlin: planned, swift: planned, csharp: planned }
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
 
   # -------------------------------------------------------------------
   # 5. Envelope
@@ -281,6 +520,17 @@ classes:
           - { name: sampleRate, type: int, default: "16000" }
           - { name: channels, type: int, default: "1" }
         status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+      toolResults:
+        # The continuation turn after the model asked for tools. Only the
+        # immediately prior assistant turn is replayed. A continuation runs on
+        # every text path — batch, streaming, and both conversation-context
+        # variants; image-bearing conversations are rejected.
+        params:
+          - { name: userText, type: String }
+          - { name: priorAssistantText, type: String }
+          - { name: results, type: "List<ToolResult>" }
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+        since: "0.5.0"
       embedding:
         params: [{ name: embedding, type: "List<double>" }]
         status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
@@ -373,9 +623,31 @@ classes:
       modelId:
         type: String
         status: { dart: planned, kotlin: planned, swift: planned, csharp: implemented }
+      reasoningContent:
+        type: "String?"
+        notes: "Model reasoning emitted separately from the final answer text."
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+      executionTarget:
+        type: ExecutionTarget
+        # Whether the answer came from the device or the cloud gateway. Cloud
+        # fallback keeps modelId identical on both legs, so this is the only
+        # way to tell them apart.
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
       isFailure:
         type: bool
         status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+      toolCalls:
+        type: "List<ToolCall>"
+        # Tool calls the model emitted. Empty unless the request offered
+        # tools. The raw tool-call block stays in `text`.
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+        since: "0.5.0"
+      hasToolCalls:
+        type: bool
+        # Convenience over `toolCalls.isEmpty`, so the branch a tool loop
+        # actually writes reads the same in every language.
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+        since: "0.7.0"
       audioAsWav:
         type: "Uint8List?"
         status: { dart: implemented, kotlin: planned, swift: planned, csharp: planned }
@@ -428,13 +700,74 @@ classes:
         type: int
         status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
 
+  PipelineResult:
+    type: data
+    section: "4. XybridPipeline"
+    # Every stage's output, not only the final one: an ASR -> LLM -> TTS run
+    # exposes the transcript and the reply alongside the audio.
+    dart_name: XybridPipelineResult
+    kotlin_name: XybridPipelineResult
+    swift_name: XybridPipelineResult
+    csharp_name: PipelineResult
+    properties:
+      outputType:
+        type: OutputType
+        status: { dart: planned, kotlin: implemented, swift: implemented, csharp: implemented }
+      latencyMs:
+        type: int
+        status: { dart: planned, kotlin: implemented, swift: implemented, csharp: implemented }
+      stages:
+        type: "List<StageResult>"
+        status: { dart: planned, kotlin: implemented, swift: implemented, csharp: implemented }
+      text:
+        type: "String?"
+        status: { dart: planned, kotlin: implemented, swift: implemented, csharp: implemented }
+      audioBytes:
+        type: "Uint8List?"
+        status: { dart: planned, kotlin: implemented, swift: implemented, csharp: implemented }
+
+  StageResult:
+    type: data
+    section: "4. XybridPipeline"
+    dart_name: XybridStageResult
+    kotlin_name: XybridStageResult
+    swift_name: XybridStageResult
+    csharp_name: StageResult
+    properties:
+      stageId:
+        type: String
+        status: { dart: planned, kotlin: implemented, swift: implemented, csharp: implemented }
+      outputType:
+        type: OutputType
+        status: { dart: planned, kotlin: implemented, swift: implemented, csharp: implemented }
+      latencyMs:
+        type: int
+        status: { dart: planned, kotlin: implemented, swift: implemented, csharp: implemented }
+      executionTarget:
+        type: ExecutionTarget
+        status: { dart: planned, kotlin: implemented, swift: implemented, csharp: implemented }
+      metrics:
+        type: InferenceMetrics
+        status: { dart: planned, kotlin: implemented, swift: implemented, csharp: implemented }
+      text:
+        type: "String?"
+        status: { dart: planned, kotlin: implemented, swift: implemented, csharp: implemented }
+      audioBytes:
+        type: "Uint8List?"
+        status: { dart: planned, kotlin: implemented, swift: implemented, csharp: implemented }
+
   # -------------------------------------------------------------------
   # 8. Supporting Types
   # -------------------------------------------------------------------
   ConversationContext:
     type: class
     section: "8. Supporting Types"
-    status: { dart: implemented, kotlin: planned, swift: planned, csharp: implemented }
+    methods:
+      history:
+        return: "List<Envelope>"
+        notes: "Snapshot of history turns; excludes the persistent system envelope."
+        status: { dart: planned, kotlin: implemented, swift: implemented, csharp: implemented }
+    status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
 
   MessageRole:
     type: enum
@@ -531,16 +864,79 @@ classes:
       stopSequences:
         type: "List<String>?"
         status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+      grammar:
+        type: "String?"
+        # GBNF grammar constraining decoding. Build one from a JSON Schema with
+        # jsonSchemaToGbnf, or pass raw GBNF. llama.cpp-only; other backends
+        # ignore it.
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+        since: "0.8.0"
+      tools:
+        type: "List<ToolDefinition>?"
+        # Tools the model may call this turn. Empty/null = no tool calling.
+        # llama.cpp-only; unsupported paths reject a tool-bearing request
+        # rather than generating without the tools.
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+        since: "0.5.0"
     factories:
       greedy:
         status: { dart: implemented, kotlin: implemented, swift: planned, csharp: implemented }
       creative:
         status: { dart: implemented, kotlin: implemented, swift: planned, csharp: implemented }
 
+  ToolDefinition:
+    type: data
+    section: "8. Supporting Types"
+    csharp_name: XybridToolDefinition
+    since: "0.5.0"
+    notes: "A tool the model may call. `parametersJson` is the argument JSON Schema carried as a JSON string — no FFI generator can describe an arbitrary JSON tree. Invalid JSON fails the run rather than dropping the tool. On C# the tool is added via GenerationConfig.AddTool(name, description, parametersJson)."
+    status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+
+  ToolCall:
+    type: data
+    section: "8. Supporting Types"
+    csharp_name: XybridToolCall
+    since: "0.5.0"
+    notes: "One tool call the model emitted, read from XybridResult.toolCalls. Echo `id` back as ToolResult.callId."
+    status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+
+  ToolResult:
+    type: data
+    section: "8. Supporting Types"
+    csharp_name: XybridToolResult
+    since: "0.5.0"
+    notes: "The outcome of running one tool, fed back via Envelope.toolResults. One run is one model turn, so the tool loop lives in app code."
+    status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+
   StreamToken:
     type: data
     section: "8. Supporting Types"
-    status: { dart: implemented, kotlin: planned, swift: planned, csharp: implemented }
+    # Kotlin and Swift reach this through a `StreamToken` typealias over the
+    # generated bolt type, the same way ToolCall/GenerationConfig work there.
+    status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+    properties:
+      toolCalls:
+        type: "List<ToolCall>"
+        # Tool calls the model emitted, on the terminal token only. Tool-call
+        # blocks are suppressed from the streamed text, so a streaming caller
+        # dispatches these rather than parsing token text.
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+        since: "0.7.0"
+      rawText:
+        type: "String?"
+        # The completed turn's raw output text, tool-call block included —
+        # what the tool-results envelope needs as priorAssistantText. Set only
+        # alongside a non-empty toolCalls; NOT the same as cumulativeText,
+        # which is the emitted (block-suppressed) text.
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+        since: "0.7.0"
+      hasToolCalls:
+        type: bool
+        # Only ever true on the terminal token. Call blocks are suppressed
+        # from the streamed text, so this is what a streaming loop branches
+        # on rather than the token text.
+        status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+        since: "0.7.0"
 
   # -------------------------------------------------------------------
   # 9. Configuration Types
@@ -874,12 +1270,14 @@ classes:
   CancellationToken:
     type: class
     section: "8. Supporting Types"
-    notes: "Cooperative cancel handle for an in-flight run. In Rust it is paired with a RunOptions via with_cancellation_token; in Dart the caller constructs a CancellationToken and passes it to the streaming run methods (runStreaming / runStreamingWithContext / runStreamingWithFallback) via the optional cancellationToken parameter. Local streaming abort is cooperative: the token's cancelled state is checked before every emitted token, so cancellation takes effect at the next token boundary, not mid-token, and the model write lock is released promptly. The Dart binding surface (cancel handle exposing cancel() / isCancelled, plus sink-close-as-cancel when the Dart stream is unsubscribed mid-run) was wired by issue 10. Issue 11 reuses the same token for preemptive cancel-and-replace: when runStreaming/runStreamingWithContext are called with preempt=true, the token is registered in the model's in-flight slot and a later preempting run cancels it (latest-frame-wins) before acquiring the write lock — so a stale run halts and releases the lock instead of blocking the new one."
+    notes: "Cooperative cancel handle for an in-flight run. In Rust it is paired with a RunOptions via with_cancellation_token; in Dart the caller constructs a CancellationToken and passes it to the streaming run methods (runStreaming / runStreamingWithContext / runStreamingWithFallback) via the optional cancellationToken parameter. Local streaming abort is cooperative: the token's cancelled state is checked before every emitted token, so cancellation takes effect at the next token boundary, not mid-token, and the model write lock is released promptly. The Dart binding surface (cancel handle exposing cancel() / isCancelled, plus sink-close-as-cancel when the Dart stream is unsubscribed mid-run) was wired by issue 10. Issue 11 reuses the same token for preemptive cancel-and-replace: when runStreaming/runStreamingWithContext are called with preempt=true, the token is registered in the model's in-flight slot and a later preempting run cancels it (latest-frame-wins) before acquiring the write lock — so a stale run halts and releases the lock instead of blocking the new one. On the bolt bindings (Kotlin, Swift, C#) the token is a REQUIRED argument on every run entry point, because BoltFFI cannot express an optional handle parameter; the hand-written wrappers manufacture a throwaway token for callers who do not pass one, and wire host-native cancellation (Swift Task, Kotlin coroutine Job, .NET CancellationToken) to it."
     methods:
       cancel:
         notes: "Request cooperative cancellation of the associated run. Takes effect at the next token boundary."
-        status: { rust: implemented, dart: implemented, kotlin: planned, swift: planned, csharp: planned }
+        status: { rust: implemented, dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+        since: "0.10.0"
       is_cancelled:
-        notes: "Whether cancellation has been requested (Dart: isCancelled getter)."
+        notes: "Whether cancellation has been requested (Dart: isCancelled getter; Kotlin/Swift/C#: isCancelled())."
         return: bool
-        status: { rust: implemented, dart: implemented, kotlin: planned, swift: planned, csharp: planned }
+        status: { rust: implemented, dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
+        since: "0.10.0"

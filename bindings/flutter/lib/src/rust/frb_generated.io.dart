@@ -221,10 +221,16 @@ abstract class XybridRustLibApiImplPlatform
           dynamic raw);
 
   @protected
+  bool dco_decode_box_autoadd_bool(dynamic raw);
+
+  @protected
   double dco_decode_box_autoadd_f_32(dynamic raw);
 
   @protected
   double dco_decode_box_autoadd_f_64(dynamic raw);
+
+  @protected
+  FfiDownloadStatus dco_decode_box_autoadd_ffi_download_status(dynamic raw);
 
   @protected
   FfiGenerationConfig dco_decode_box_autoadd_ffi_generation_config(dynamic raw);
@@ -254,6 +260,9 @@ abstract class XybridRustLibApiImplPlatform
   int dco_decode_box_autoadd_u_32(dynamic raw);
 
   @protected
+  BigInt dco_decode_box_autoadd_u_64(dynamic raw);
+
+  @protected
   int dco_decode_box_autoadd_u_8(dynamic raw);
 
   @protected
@@ -261,6 +270,24 @@ abstract class XybridRustLibApiImplPlatform
 
   @protected
   double dco_decode_f_64(dynamic raw);
+
+  @protected
+  FfiCacheEntry dco_decode_ffi_cache_entry(dynamic raw);
+
+  @protected
+  FfiCacheEntryLocation dco_decode_ffi_cache_entry_location(dynamic raw);
+
+  @protected
+  FfiCacheStatus dco_decode_ffi_cache_status(dynamic raw);
+
+  @protected
+  FfiDownloadState dco_decode_ffi_download_state(dynamic raw);
+
+  @protected
+  FfiDownloadStatus dco_decode_ffi_download_status(dynamic raw);
+
+  @protected
+  FfiExecutionTarget dco_decode_ffi_execution_target(dynamic raw);
 
   @protected
   FfiGenerationConfig dco_decode_ffi_generation_config(dynamic raw);
@@ -311,6 +338,15 @@ abstract class XybridRustLibApiImplPlatform
   FfiThermalState dco_decode_ffi_thermal_state(dynamic raw);
 
   @protected
+  FfiToolCall dco_decode_ffi_tool_call(dynamic raw);
+
+  @protected
+  FfiToolDefinition dco_decode_ffi_tool_definition(dynamic raw);
+
+  @protected
+  FfiToolResult dco_decode_ffi_tool_result(dynamic raw);
+
+  @protected
   FfiTtsStreamEvent dco_decode_ffi_tts_stream_event(dynamic raw);
 
   @protected
@@ -340,10 +376,22 @@ abstract class XybridRustLibApiImplPlatform
   List<String> dco_decode_list_String(dynamic raw);
 
   @protected
+  List<FfiCacheEntry> dco_decode_list_ffi_cache_entry(dynamic raw);
+
+  @protected
   List<FfiImagePlane> dco_decode_list_ffi_image_plane(dynamic raw);
 
   @protected
   List<FfiStageLatency> dco_decode_list_ffi_stage_latency(dynamic raw);
+
+  @protected
+  List<FfiToolCall> dco_decode_list_ffi_tool_call(dynamic raw);
+
+  @protected
+  List<FfiToolDefinition> dco_decode_list_ffi_tool_definition(dynamic raw);
+
+  @protected
+  List<FfiToolResult> dco_decode_list_ffi_tool_result(dynamic raw);
 
   @protected
   List<double> dco_decode_list_prim_f_32_loose(dynamic raw);
@@ -364,6 +412,9 @@ abstract class XybridRustLibApiImplPlatform
   FfiCancellationToken?
       dco_decode_opt_box_autoadd_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiCancellationToken(
           dynamic raw);
+
+  @protected
+  bool? dco_decode_opt_box_autoadd_bool(dynamic raw);
 
   @protected
   double? dco_decode_opt_box_autoadd_f_32(dynamic raw);
@@ -388,10 +439,16 @@ abstract class XybridRustLibApiImplPlatform
   int? dco_decode_opt_box_autoadd_u_32(dynamic raw);
 
   @protected
+  BigInt? dco_decode_opt_box_autoadd_u_64(dynamic raw);
+
+  @protected
   int? dco_decode_opt_box_autoadd_u_8(dynamic raw);
 
   @protected
   List<String>? dco_decode_opt_list_String(dynamic raw);
+
+  @protected
+  List<FfiToolDefinition>? dco_decode_opt_list_ffi_tool_definition(dynamic raw);
 
   @protected
   Float32List? dco_decode_opt_list_prim_f_32_strict(dynamic raw);
@@ -571,10 +628,17 @@ abstract class XybridRustLibApiImplPlatform
           SseDeserializer deserializer);
 
   @protected
+  bool sse_decode_box_autoadd_bool(SseDeserializer deserializer);
+
+  @protected
   double sse_decode_box_autoadd_f_32(SseDeserializer deserializer);
 
   @protected
   double sse_decode_box_autoadd_f_64(SseDeserializer deserializer);
+
+  @protected
+  FfiDownloadStatus sse_decode_box_autoadd_ffi_download_status(
+      SseDeserializer deserializer);
 
   @protected
   FfiGenerationConfig sse_decode_box_autoadd_ffi_generation_config(
@@ -610,6 +674,9 @@ abstract class XybridRustLibApiImplPlatform
   int sse_decode_box_autoadd_u_32(SseDeserializer deserializer);
 
   @protected
+  BigInt sse_decode_box_autoadd_u_64(SseDeserializer deserializer);
+
+  @protected
   int sse_decode_box_autoadd_u_8(SseDeserializer deserializer);
 
   @protected
@@ -617,6 +684,27 @@ abstract class XybridRustLibApiImplPlatform
 
   @protected
   double sse_decode_f_64(SseDeserializer deserializer);
+
+  @protected
+  FfiCacheEntry sse_decode_ffi_cache_entry(SseDeserializer deserializer);
+
+  @protected
+  FfiCacheEntryLocation sse_decode_ffi_cache_entry_location(
+      SseDeserializer deserializer);
+
+  @protected
+  FfiCacheStatus sse_decode_ffi_cache_status(SseDeserializer deserializer);
+
+  @protected
+  FfiDownloadState sse_decode_ffi_download_state(SseDeserializer deserializer);
+
+  @protected
+  FfiDownloadStatus sse_decode_ffi_download_status(
+      SseDeserializer deserializer);
+
+  @protected
+  FfiExecutionTarget sse_decode_ffi_execution_target(
+      SseDeserializer deserializer);
 
   @protected
   FfiGenerationConfig sse_decode_ffi_generation_config(
@@ -672,6 +760,16 @@ abstract class XybridRustLibApiImplPlatform
   FfiThermalState sse_decode_ffi_thermal_state(SseDeserializer deserializer);
 
   @protected
+  FfiToolCall sse_decode_ffi_tool_call(SseDeserializer deserializer);
+
+  @protected
+  FfiToolDefinition sse_decode_ffi_tool_definition(
+      SseDeserializer deserializer);
+
+  @protected
+  FfiToolResult sse_decode_ffi_tool_result(SseDeserializer deserializer);
+
+  @protected
   FfiTtsStreamEvent sse_decode_ffi_tts_stream_event(
       SseDeserializer deserializer);
 
@@ -703,11 +801,26 @@ abstract class XybridRustLibApiImplPlatform
   List<String> sse_decode_list_String(SseDeserializer deserializer);
 
   @protected
+  List<FfiCacheEntry> sse_decode_list_ffi_cache_entry(
+      SseDeserializer deserializer);
+
+  @protected
   List<FfiImagePlane> sse_decode_list_ffi_image_plane(
       SseDeserializer deserializer);
 
   @protected
   List<FfiStageLatency> sse_decode_list_ffi_stage_latency(
+      SseDeserializer deserializer);
+
+  @protected
+  List<FfiToolCall> sse_decode_list_ffi_tool_call(SseDeserializer deserializer);
+
+  @protected
+  List<FfiToolDefinition> sse_decode_list_ffi_tool_definition(
+      SseDeserializer deserializer);
+
+  @protected
+  List<FfiToolResult> sse_decode_list_ffi_tool_result(
       SseDeserializer deserializer);
 
   @protected
@@ -729,6 +842,9 @@ abstract class XybridRustLibApiImplPlatform
   FfiCancellationToken?
       sse_decode_opt_box_autoadd_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiCancellationToken(
           SseDeserializer deserializer);
+
+  @protected
+  bool? sse_decode_opt_box_autoadd_bool(SseDeserializer deserializer);
 
   @protected
   double? sse_decode_opt_box_autoadd_f_32(SseDeserializer deserializer);
@@ -755,10 +871,17 @@ abstract class XybridRustLibApiImplPlatform
   int? sse_decode_opt_box_autoadd_u_32(SseDeserializer deserializer);
 
   @protected
+  BigInt? sse_decode_opt_box_autoadd_u_64(SseDeserializer deserializer);
+
+  @protected
   int? sse_decode_opt_box_autoadd_u_8(SseDeserializer deserializer);
 
   @protected
   List<String>? sse_decode_opt_list_String(SseDeserializer deserializer);
+
+  @protected
+  List<FfiToolDefinition>? sse_decode_opt_list_ffi_tool_definition(
+      SseDeserializer deserializer);
 
   @protected
   Float32List? sse_decode_opt_list_prim_f_32_strict(
@@ -939,10 +1062,17 @@ abstract class XybridRustLibApiImplPlatform
           FfiCancellationToken self, SseSerializer serializer);
 
   @protected
+  void sse_encode_box_autoadd_bool(bool self, SseSerializer serializer);
+
+  @protected
   void sse_encode_box_autoadd_f_32(double self, SseSerializer serializer);
 
   @protected
   void sse_encode_box_autoadd_f_64(double self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_box_autoadd_ffi_download_status(
+      FfiDownloadStatus self, SseSerializer serializer);
 
   @protected
   void sse_encode_box_autoadd_ffi_generation_config(
@@ -980,6 +1110,9 @@ abstract class XybridRustLibApiImplPlatform
   void sse_encode_box_autoadd_u_32(int self, SseSerializer serializer);
 
   @protected
+  void sse_encode_box_autoadd_u_64(BigInt self, SseSerializer serializer);
+
+  @protected
   void sse_encode_box_autoadd_u_8(int self, SseSerializer serializer);
 
   @protected
@@ -987,6 +1120,29 @@ abstract class XybridRustLibApiImplPlatform
 
   @protected
   void sse_encode_f_64(double self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_ffi_cache_entry(FfiCacheEntry self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_ffi_cache_entry_location(
+      FfiCacheEntryLocation self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_ffi_cache_status(
+      FfiCacheStatus self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_ffi_download_state(
+      FfiDownloadState self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_ffi_download_status(
+      FfiDownloadStatus self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_ffi_execution_target(
+      FfiExecutionTarget self, SseSerializer serializer);
 
   @protected
   void sse_encode_ffi_generation_config(
@@ -1049,6 +1205,16 @@ abstract class XybridRustLibApiImplPlatform
       FfiThermalState self, SseSerializer serializer);
 
   @protected
+  void sse_encode_ffi_tool_call(FfiToolCall self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_ffi_tool_definition(
+      FfiToolDefinition self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_ffi_tool_result(FfiToolResult self, SseSerializer serializer);
+
+  @protected
   void sse_encode_ffi_tts_stream_event(
       FfiTtsStreamEvent self, SseSerializer serializer);
 
@@ -1082,12 +1248,28 @@ abstract class XybridRustLibApiImplPlatform
   void sse_encode_list_String(List<String> self, SseSerializer serializer);
 
   @protected
+  void sse_encode_list_ffi_cache_entry(
+      List<FfiCacheEntry> self, SseSerializer serializer);
+
+  @protected
   void sse_encode_list_ffi_image_plane(
       List<FfiImagePlane> self, SseSerializer serializer);
 
   @protected
   void sse_encode_list_ffi_stage_latency(
       List<FfiStageLatency> self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_list_ffi_tool_call(
+      List<FfiToolCall> self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_list_ffi_tool_definition(
+      List<FfiToolDefinition> self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_list_ffi_tool_result(
+      List<FfiToolResult> self, SseSerializer serializer);
 
   @protected
   void sse_encode_list_prim_f_32_loose(
@@ -1111,6 +1293,9 @@ abstract class XybridRustLibApiImplPlatform
   void
       sse_encode_opt_box_autoadd_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFfiCancellationToken(
           FfiCancellationToken? self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_opt_box_autoadd_bool(bool? self, SseSerializer serializer);
 
   @protected
   void sse_encode_opt_box_autoadd_f_32(double? self, SseSerializer serializer);
@@ -1138,10 +1323,17 @@ abstract class XybridRustLibApiImplPlatform
   void sse_encode_opt_box_autoadd_u_32(int? self, SseSerializer serializer);
 
   @protected
+  void sse_encode_opt_box_autoadd_u_64(BigInt? self, SseSerializer serializer);
+
+  @protected
   void sse_encode_opt_box_autoadd_u_8(int? self, SseSerializer serializer);
 
   @protected
   void sse_encode_opt_list_String(List<String>? self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_opt_list_ffi_tool_definition(
+      List<FfiToolDefinition>? self, SseSerializer serializer);
 
   @protected
   void sse_encode_opt_list_prim_f_32_strict(

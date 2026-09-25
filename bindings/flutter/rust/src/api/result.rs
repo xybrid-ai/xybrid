@@ -1,6 +1,8 @@
 //! Inference result FFI wrappers for Flutter.
 use xybrid_sdk::{InferenceMetrics, InferenceResult, StageLatency};
 
+use super::model::FfiToolCall;
+
 /// Per-stage latency entry for pipeline runs.
 ///
 /// Mirrors `xybrid_sdk::StageLatency`. One entry per executed stage; the
@@ -69,7 +71,17 @@ pub struct FfiResult {
     pub audio_bytes: Option<Vec<u8>>,
     pub embedding: Option<Vec<f32>>,
     pub latency_ms: u32,
+    /// Whether this answer came from the device or the cloud gateway.
+    pub execution_target: FfiExecutionTarget,
     pub metrics: FfiInferenceMetrics,
+    /// Tool calls the model asked for this turn.
+    ///
+    /// Empty unless the request offered tools via
+    /// `FfiGenerationConfig.tools`. Run each call yourself, then feed the
+    /// outcomes back with `FfiEnvelope::tool_results` — one run is one model
+    /// turn. The raw tool-call block stays in `text` untouched, and malformed
+    /// model output yields an empty list rather than an error.
+    pub tool_calls: Vec<FfiToolCall>,
 }
 
 impl FfiResult {
@@ -81,7 +93,36 @@ impl FfiResult {
             audio_bytes: r.audio_bytes().map(|b| b.to_vec()),
             embedding: r.embedding().map(|e| e.to_vec()),
             latency_ms: r.latency_ms(),
+            execution_target: FfiExecutionTarget::from_sdk(r.provenance()),
             metrics: FfiInferenceMetrics::from_core(r.metrics()),
+            tool_calls: r
+                .tool_calls()
+                .into_iter()
+                .map(|call| FfiToolCall {
+                    id: call.id,
+                    name: call.function.name,
+                    arguments_json: call.function.arguments,
+                })
+                .collect(),
+        }
+    }
+}
+
+/// Where a result was produced — the observed fact, not a routing preference.
+///
+/// Cloud fallback (speculative or reactive) keeps the model id identical on
+/// both legs by design, so this is the only way to tell them apart.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FfiExecutionTarget {
+    Local,
+    Cloud,
+}
+
+impl FfiExecutionTarget {
+    fn from_sdk(provenance: xybrid_sdk::ExecutionProvenance) -> Self {
+        match provenance {
+            xybrid_sdk::ExecutionProvenance::Local => Self::Local,
+            xybrid_sdk::ExecutionProvenance::Cloud => Self::Cloud,
         }
     }
 }

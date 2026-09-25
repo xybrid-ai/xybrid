@@ -125,16 +125,19 @@ check_method_in_sdk() {
         kotlin)
             src_dir="$KOTLIN_SRC"
             [ ! -d "$src_dir" ] && return 2
-            # Match both plain (val foo) and backticked (var `foo`) — UniFFI
-            # generates the backticked form for record fields.
-            pattern="(fun ${method_name}|val ${method_name}|var ${method_name}|val \`${method_name}\`|var \`${method_name}\`|${method_name}\()"
+            # Match plain (val foo), backticked (var `foo`, the form UniFFI
+            # generated for record fields), and extension properties
+            # (val XybridResult.foo) — the Kotlin SDK layers most of its
+            # ergonomics on the generated bolt types as extensions, so without
+            # that last form every one of them reports a false "not found".
+            pattern="(fun ${method_name}|val ${method_name}|var ${method_name}|val [A-Za-z0-9_]+\.${method_name}|var [A-Za-z0-9_]+\.${method_name}|val \`${method_name}\`|var \`${method_name}\`|${method_name}\()"
             ;;
         swift)
             src_dir="$SWIFT_SRC"
             [ ! -d "$src_dir" ] && return 2
             # Match plain declarations and record-field forms produced by
             # UniFFI's Swift generator (`public var foo`, `public let foo`).
-            pattern="(func ${method_name}|var ${method_name}|let ${method_name}|public var ${method_name}|public let ${method_name}|${method_name}\()"
+            pattern="(func ${method_name}|var ${method_name}|let ${method_name}|public var ${method_name}|public let ${method_name}|init\(${method_name}[[:space:]]|${method_name}\()"
             ;;
         csharp)
             src_dir="$UNITY_SRC"
@@ -232,11 +235,21 @@ validate_implementations() {
 # ─── Check for valid status values ────────────────────────────────────────
 check_status_values() {
     info "Checking status values are valid..."
-    local valid_statuses="implemented partial stub planned"
+    # `na` = deliberately not applicable to that language, as opposed to
+    # `planned` (intended, not built yet). runTtsStreaming has used it since
+    # the vision PR; without it here the whole check exits non-zero forever,
+    # which buries the warnings it exists to surface.
+    local valid_statuses="implemented partial stub planned na"
 
-    # Extract all status values
+    # Extract all status values.
+    #
+    # The recursive walk also lands on any map that merely *contains* a key
+    # named `status` -- a `methods:` block holding a method called `status()`,
+    # for example -- and would then read that method's whole definition as if
+    # it were a per-SDK status map. Keeping only maps whose values are all
+    # scalars selects the real status maps and skips definition blocks.
     local statuses
-    statuses=$(yq '.. | select(has("status")) | .status | to_entries | .[].value' "$API_SURFACE" 2>/dev/null | sort -u || true)
+    statuses=$(yq '.. | select(has("status")) | .status | select(tag == "!!map") | select([.[] | tag] | all_c(. == "!!str")) | to_entries | .[].value' "$API_SURFACE" 2>/dev/null | sort -u || true)
 
     for status in $statuses; do
         if echo "$valid_statuses" | grep -qw "$status"; then

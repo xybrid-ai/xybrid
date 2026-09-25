@@ -4,7 +4,14 @@ use std::sync::Arc;
 use xybrid_sdk::{Pipeline, PipelineRef};
 
 use super::envelope::FfiEnvelope;
-use super::result::FfiResult;
+use super::result::{FfiExecutionTarget, FfiResult};
+
+fn final_execution_target(target: Option<&str>) -> FfiExecutionTarget {
+    match target {
+        Some("device" | "local") | None => FfiExecutionTarget::Local,
+        Some(_) => FfiExecutionTarget::Cloud,
+    }
+}
 
 /// FFI wrapper for a loaded Pipeline ready for execution.
 #[frb(opaque)]
@@ -76,7 +83,22 @@ impl FfiPipeline {
             audio_bytes: result.audio_bytes().map(|b| b.to_vec()),
             embedding: result.embedding().map(|e| e.to_vec()),
             latency_ms: result.total_latency_ms,
+            // A pipeline can mix local and remote stages, so there is no single
+            // provenance for the run: report the final stage's target, which is
+            // what produced `output`. The stage records it directly; the
+            // envelope carries no `execution_target` key on this path, since
+            // pipeline stages do not go through `InferenceResult`.
+            //
+            // The orchestrator records `local`, `cloud` or `fallback:<id>` (a
+            // xybrid-hosted server). Only the explicitly local spellings may
+            // be reported as on-device; unknown targets fail closed to cloud.
+            execution_target: final_execution_target(
+                result.stages.last().map(|stage| stage.target.as_str()),
+            ),
             metrics: crate::api::result::FfiInferenceMetrics::from_core(&metrics),
+            // Pipelines don't offer tools, so a pipeline run never produces
+            // tool calls.
+            tool_calls: Vec::new(),
         })
     }
 
@@ -96,5 +118,30 @@ impl FfiPipeline {
     #[frb(sync)]
     pub fn stage_count(&self) -> usize {
         self.0.stage_count()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn final_stage_provenance_recognizes_current_runner_targets() {
+        assert_eq!(
+            final_execution_target(Some("local")),
+            FfiExecutionTarget::Local
+        );
+        assert_eq!(
+            final_execution_target(Some("cloud")),
+            FfiExecutionTarget::Cloud
+        );
+        assert_eq!(
+            final_execution_target(Some("fallback:xybrid-edge")),
+            FfiExecutionTarget::Cloud
+        );
+        assert_eq!(
+            final_execution_target(Some("unexpected-remote-target")),
+            FfiExecutionTarget::Cloud
+        );
     }
 }

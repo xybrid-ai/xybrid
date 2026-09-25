@@ -17,6 +17,20 @@ import UIKit
 
 // MARK: - SDK Initialization
 
+// The generated free functions below share their names with the `Xybrid`
+// members that forward to them, and inside an enum body an unqualified call
+// resolves to the static member first — i.e. to itself. The module name can't
+// disambiguate either, because this module is also called `Xybrid`. Binding
+// them here, at file scope, where the enum's members are not in scope, is the
+// one place the global is reachable by name.
+private let boltReleaseMemory = releaseMemory
+private let boltSetAutoRelease = setAutoRelease
+private let boltIsAutoReleaseEnabled = isAutoReleaseEnabled
+private let boltSetSpeculativeCloud = setSpeculativeCloud
+private let boltIsSpeculativeCloudEnabled = isSpeculativeCloudEnabled
+private let boltHasApiKey = hasApiKey
+private let boltSetProviderApiKey = setProviderApiKey
+
 /// Main entry point for the Xybrid SDK on iOS/macOS.
 ///
 /// Call `Xybrid.initialize()` once before using any other Xybrid functionality.
@@ -106,6 +120,168 @@ public enum Xybrid {
         return initialized
     }
 
+    /// Releases every idle loaded model's memory; returns how many were released.
+    ///
+    /// Wire this to the platform's low-memory signal:
+    ///
+    /// ```swift
+    /// override func didReceiveMemoryWarning() {
+    ///     super.didReceiveMemoryWarning()
+    ///     Xybrid.releaseMemory()
+    /// }
+    /// ```
+    ///
+    /// Models with a run in flight are skipped, and a released model reloads
+    /// itself the next time it is used — there is no new error to handle and
+    /// nothing to reload by hand.
+    @discardableResult
+    public static func releaseMemory() -> UInt32 {
+        boltReleaseMemory()
+    }
+
+    /// Enables or disables automatic model release for subsequent loads.
+    ///
+    /// When enabled, loading a model while the device reports memory pressure
+    /// first releases least-recently-used idle models. Off by default;
+    /// `releaseMemory()` works either way.
+    public static func setAutoRelease(_ enabled: Bool) {
+        boltSetAutoRelease(enabled)
+    }
+
+    /// Whether automatic model release is enabled process-wide.
+    public static var isAutoReleaseEnabled: Bool {
+        boltIsAutoReleaseEnabled()
+    }
+
+    /// Sets the process-wide default for speculative cloud serving.
+    ///
+    /// Speculation answers from the cloud gateway while a registry model's
+    /// weights download in the background, instead of blocking on the download.
+    ///
+    /// This is the *default* for loads that do not opt in per-load;
+    /// ``ModelLoader/fromRegistrySpeculative(_:)`` opts in explicitly and is
+    /// unaffected by this toggle. Off by default. Either way, speculation also
+    /// needs a resolvable API key and a model that is not already cached —
+    /// ``ModelLoader/willSpeculate`` reports the combined answer for a
+    /// specific loader.
+    public static func setSpeculativeCloud(_ enabled: Bool) {
+        boltSetSpeculativeCloud(enabled)
+    }
+
+    /// Whether the global speculative-cloud default is on.
+    public static var isSpeculativeCloudEnabled: Bool {
+        boltIsSpeculativeCloudEnabled()
+    }
+
+    /// Whether a Xybrid gateway API key is resolvable, from either
+    /// `initialize(apiKey:)` or the environment.
+    ///
+    /// Inference runs on-device without one; this reports whether the optional
+    /// platform features (cloud routing, telemetry) can engage.
+    public static var hasApiKey: Bool {
+        boltHasApiKey()
+    }
+
+    /// Sets the API key for a specific cloud provider.
+    ///
+    /// Separate from `initialize(apiKey:)`, which sets the Xybrid platform key.
+    /// Use this when routing to a provider the gateway forwards to.
+    public static func setProviderApiKey(provider: String, apiKey: String) {
+        boltSetProviderApiKey(provider, apiKey)
+    }
+
+    /// Aggregate storage usage across all managed model-cache areas.
+    public static func modelCacheStatus() throws -> XybridCacheStatus {
+        try cacheStatus()
+    }
+
+    /// Physical entries across registry, extraction, and Hugging Face caches.
+    ///
+    /// A model can appear more than once when several managed copies exist.
+    public static func modelCacheEntries() throws -> [XybridCacheEntry] {
+        try cacheEntries()
+    }
+
+    /// Return whether `modelId` occupies any managed model-cache entry.
+    public static func hasCachedModelData(_ modelId: String) throws -> Bool {
+        try cacheIsModelCached(modelId: modelId)
+    }
+
+    /// Return a preferred local path for a model, or `nil` when absent.
+    ///
+    /// Presence does not necessarily mean the model is extracted and ready.
+    public static func cachedModelPath(_ modelId: String) throws -> String? {
+        try cacheModelPath(modelId: modelId)
+    }
+
+    /// List model IDs extracted, validated, and ready to run offline.
+    public static func extractedModelIds() throws -> [String] {
+        try cacheListExtractedModelIds()
+    }
+
+    /// Remove every managed cache entry for one model.
+    ///
+    /// Do not call concurrently with a load of the same model.
+    @discardableResult
+    public static func removeCachedModel(_ modelId: String) throws -> UInt32 {
+        try cacheRemoveModel(modelId: modelId)
+    }
+
+    /// Clear all managed model-cache storage.
+    ///
+    /// Do not call concurrently with any model load.
+    @discardableResult
+    public static func clearModelCache() throws -> UInt32 {
+        try cacheClear()
+    }
+
+    // MARK: Model storage, off the caller's thread
+    //
+    // Every storage call walks or deletes the cache directory on disk, which is
+    // too slow for the main actor once a device holds a few models. These run
+    // the same calls on a detached background task.
+
+    /// ``modelCacheStatus()`` without blocking the calling thread or actor.
+    public static func modelCacheStatusAsync() async throws -> XybridCacheStatus {
+        try await Task.detached { try cacheStatus() }.value
+    }
+
+    /// ``modelCacheEntries()`` without blocking the calling thread or actor.
+    public static func modelCacheEntriesAsync() async throws -> [XybridCacheEntry] {
+        try await Task.detached { try cacheEntries() }.value
+    }
+
+    /// ``hasCachedModelData(_:)`` without blocking the calling thread or actor.
+    public static func hasCachedModelDataAsync(_ modelId: String) async throws -> Bool {
+        try await Task.detached { try cacheIsModelCached(modelId: modelId) }.value
+    }
+
+    /// ``cachedModelPath(_:)`` without blocking the calling thread or actor.
+    public static func cachedModelPathAsync(_ modelId: String) async throws -> String? {
+        try await Task.detached { try cacheModelPath(modelId: modelId) }.value
+    }
+
+    /// ``extractedModelIds()`` without blocking the calling thread or actor.
+    public static func extractedModelIdsAsync() async throws -> [String] {
+        try await Task.detached { try cacheListExtractedModelIds() }.value
+    }
+
+    /// ``removeCachedModel(_:)`` without blocking the calling thread or actor.
+    ///
+    /// Do not call concurrently with a load of the same model.
+    @discardableResult
+    public static func removeCachedModelAsync(_ modelId: String) async throws -> UInt32 {
+        try await Task.detached { try cacheRemoveModel(modelId: modelId) }.value
+    }
+
+    /// ``clearModelCache()`` without blocking the calling thread or actor.
+    ///
+    /// Do not call concurrently with any model load.
+    @discardableResult
+    public static func clearModelCacheAsync() async throws -> UInt32 {
+        try await Task.detached { try cacheClear() }.value
+    }
+
     private static func registerPlatformObservers() {
         #if os(iOS)
         let device = UIDevice.current
@@ -161,6 +337,11 @@ public enum ModelSource: Sendable, Equatable {
 
     /// A Hugging Face repository (`org/repo` or `org/repo:variant`).
     case huggingFace(String)
+
+    /// A registry model served from the cloud gateway while its weights
+    /// download in the background. See
+    /// ``ModelLoader/fromRegistrySpeculative(_:)``.
+    case registrySpeculative(String)
 }
 
 /// A cheap model reference that defers all expensive work until ``load()``.
@@ -178,6 +359,30 @@ public struct ModelLoader: Sendable {
     /// Create a loader for a registry model.
     public static func fromRegistry(_ id: String) -> Self {
         Self(source: .registry(id))
+    }
+
+    /// Create a loader that answers from the cloud gateway while the registry
+    /// weights download in the background, instead of blocking on the download.
+    ///
+    /// ``load()`` returns almost immediately with a cloud-backed model that
+    /// switches to on-device by itself once the download lands. Requires an API
+    /// key and an uncached model — otherwise it behaves exactly like
+    /// ``fromRegistry(_:)``, which ``willSpeculate`` reports up front. LLM/chat
+    /// models only.
+    ///
+    /// Track the handover with ``XybridModel/isCloudServing()``,
+    /// ``XybridModel/downloadStatus()`` and ``XybridModel/awaitDownload(timeoutMs:)``.
+    public static func fromRegistrySpeculative(_ id: String) -> Self {
+        Self(source: .registrySpeculative(id))
+    }
+
+    /// Whether ``load()`` would actually speculate: speculation is possible for
+    /// this source, an API key resolves, and the model is not already cached.
+    ///
+    /// Always `false` for non-speculative sources. Never touches the network.
+    public var willSpeculate: Bool {
+        guard case .registrySpeculative(let id) = source else { return false }
+        return willSpeculateForModel(modelId: id)
     }
 
     /// Create a loader for a local `.xyb` bundle.
@@ -214,6 +419,38 @@ public struct ModelLoader: Sendable {
             return try XybridModel(fromDirectory: url.path)
         case .huggingFace(let repo):
             return try XybridModel(fromHuggingface: repo)
+        case .registrySpeculative(let id):
+            return try XybridModel(fromRegistrySpeculative: id)
+        }
+    }
+
+    /// Start downloading this model's weights in the background, without
+    /// loading them.
+    ///
+    /// This is how you get a progress bar: ``load()`` blocks, so there is no
+    /// object to poll while it runs — this is that object. The download fills
+    /// the SDK cache, so the ``load()`` afterwards returns immediately.
+    ///
+    /// ```swift
+    /// let loader = Xybrid.model("qwen3-0.6b")
+    /// let download = loader.download()
+    /// for await status in download.progress() {
+    ///     bar.progress = Float(status.progress)
+    ///     label.text = "\(status.downloadedBytes) / \(status.totalBytes ?? 0)"
+    /// }
+    /// let model = try await loader.load()
+    /// ```
+    ///
+    /// Returns `nil` for a source with nothing to fetch — a local bundle,
+    /// directory, or Hugging Face repo — where ``load()`` is the whole story.
+    /// Cancelling the task consuming `progress()` unsubscribes from updates;
+    /// call ``XybridDownload/cancel()`` to stop the transfer itself.
+    public func download() -> XybridDownload? {
+        switch source {
+        case .registry(let id), .registrySpeculative(let id):
+            return XybridDownload(fromRegistry: id)
+        case .bundle, .directory, .huggingFace:
+            return nil
         }
     }
 }
@@ -236,16 +473,275 @@ public extension Xybrid {
 /// Call `run(envelope:)` to execute inference on input data.
 public typealias Model = XybridModel
 
-// The bolt handle wraps a thread-safe, `Arc`-backed Rust model (the facade's
-// types are `Send + Sync`), so the handle is safe to move across threads and
+/// A loaded multi-stage inference pipeline.
+public typealias Pipeline = XybridPipeline
+
+// The bolt handles wrap thread-safe, `Arc`-backed Rust values (the facade's
+// types are `Send + Sync`), so they are safe to move across threads and
 // actors — e.g. loading or running on a `Task.detached` background executor,
 // which is the recommended pattern since bolt's `load`/`run` are blocking.
 // boltffi does not emit `Sendable` on generated handle types yet, so declare it
 // here in the hand-written wrapper (regen-safe — never overwritten by
 // `boltffi generate`, unlike `xybrid_bolt.swift`).
 extension XybridModel: @unchecked Sendable {}
+extension XybridPipeline: @unchecked Sendable {}
+
+/// A pull-paced asynchronous stream of generated tokens.
+///
+/// The iterator asks the native streaming session for exactly one event from
+/// each call to ``AsyncIterator/next()``. A slow consumer therefore stops
+/// pulling from the facade and preserves its bounded-channel backpressure
+/// instead of accumulating tokens in an unbounded Swift buffer.
+///
+/// The sequence is one-shot. Its first iterator owns the inference run;
+/// subsequent iterators finish immediately without starting another run.
+public struct XybridTokenStream: AsyncSequence, Sendable {
+    public typealias Element = XybridStreamToken
+
+    /// An iterator over one native streaming session.
+    public struct AsyncIterator: AsyncIteratorProtocol {
+        fileprivate var state: XybridTokenStreamState?
+
+        public mutating func next() async throws -> XybridStreamToken? {
+            guard let state else { return nil }
+            do {
+                let token = try await state.next()
+                if token == nil {
+                    self.state = nil
+                }
+                return token
+            } catch {
+                self.state = nil
+                throw error
+            }
+        }
+    }
+
+    // Copies share one source, so claiming an iterator transfers the only
+    // retained session state out of every copy of the sequence.
+    private let source: XybridTokenStreamSource
+
+    fileprivate init(
+        model: XybridModel,
+        envelope: XybridEnvelope,
+        options: XybridRunOptions?
+    ) {
+        self.init(
+            start: {
+                try model.runStream(
+                    envelope: envelope,
+                    options: options,
+                    cancel: XybridCancellationToken()
+                )
+            },
+            next: { try model.streamNext(streamId: $0) },
+            close: { model.streamClose(streamId: $0) }
+        )
+    }
+
+    // Closure injection keeps the pull and cancellation contract testable
+    // without loading a native model. This initializer remains module-internal.
+    init(
+        start: @escaping @Sendable () throws -> UInt64,
+        next: @escaping @Sendable (UInt64) throws -> XybridStreamEvent,
+        close: @escaping @Sendable (UInt64) -> Void
+    ) {
+        source = XybridTokenStreamSource(
+            state: XybridTokenStreamState(start: start, next: next, close: close)
+        )
+    }
+
+    public func makeAsyncIterator() -> AsyncIterator {
+        AsyncIterator(state: source.claimState())
+    }
+}
+
+private final class XybridTokenStreamSource: @unchecked Sendable {
+    private let lock = NSLock()
+    private var state: XybridTokenStreamState?
+
+    init(state: XybridTokenStreamState) {
+        self.state = state
+    }
+
+    func claimState() -> XybridTokenStreamState? {
+        lock.lock()
+        defer { lock.unlock() }
+        let claimedState = state
+        state = nil
+        return claimedState
+    }
+}
+
+private final class XybridTokenStreamState: @unchecked Sendable {
+    private let lock = NSLock()
+    private let startSession: @Sendable () throws -> UInt64
+    private let pullNext: @Sendable (UInt64) throws -> XybridStreamEvent
+    private let closeSessionHandle: @Sendable (UInt64) -> Void
+    private var streamId: UInt64?
+    private var finished = false
+
+    init(
+        start: @escaping @Sendable () throws -> UInt64,
+        next: @escaping @Sendable (UInt64) throws -> XybridStreamEvent,
+        close: @escaping @Sendable (UInt64) -> Void
+    ) {
+        startSession = start
+        pullNext = next
+        closeSessionHandle = close
+    }
+
+    deinit {
+        close()
+    }
+
+    func next() async throws -> XybridStreamToken? {
+        if Task.isCancelled {
+            close()
+            return nil
+        }
+
+        do {
+            let token = try await withTaskCancellationHandler {
+                try await Task.detached { try self.pullOne() }.value
+            } onCancel: {
+                self.close()
+            }
+            if Task.isCancelled {
+                close()
+                return nil
+            }
+            return token
+        } catch {
+            if Task.isCancelled {
+                close()
+                return nil
+            }
+            throw error
+        }
+    }
+
+    private func pullOne() throws -> XybridStreamToken? {
+        let id = try sessionId()
+        let event: XybridStreamEvent
+        do {
+            event = try pullNext(id)
+        } catch {
+            close()
+            throw error
+        }
+
+        switch event.kind {
+        case .token:
+            guard let token = event.token else {
+                close()
+                throw XybridError.inferenceError(
+                    message: "Native stream returned a token event without a token"
+                )
+            }
+            return token
+        case .complete:
+            close()
+            return nil
+        }
+    }
+
+    private func sessionId() throws -> UInt64 {
+        lock.lock()
+        if finished {
+            lock.unlock()
+            throw CancellationError()
+        }
+        if let streamId {
+            lock.unlock()
+            return streamId
+        }
+        lock.unlock()
+
+        let openedId: UInt64
+        do {
+            openedId = try startSession()
+        } catch {
+            close()
+            throw error
+        }
+        lock.lock()
+        if finished {
+            lock.unlock()
+            closeSessionHandle(openedId)
+            throw CancellationError()
+        }
+        if let existingId = streamId {
+            lock.unlock()
+            // Defensive only: AsyncIteratorProtocol requires serialized next
+            // calls, but do not leak a session if a caller violates it.
+            closeSessionHandle(openedId)
+            return existingId
+        }
+        streamId = openedId
+        lock.unlock()
+        return openedId
+    }
+
+    private func close() {
+        lock.lock()
+        guard !finished else {
+            lock.unlock()
+            return
+        }
+        finished = true
+        let id = streamId
+        streamId = nil
+        lock.unlock()
+
+        if let id {
+            // Native close may wait for the worker to leave inference. A task's
+            // cancellation handler (and iterator deinit) runs synchronously on
+            // its caller, which can be the UI thread. Retain the close closure,
+            // not this state, until cleanup finishes on a background executor.
+            let closeHandle = closeSessionHandle
+            Task.detached { closeHandle(id) }
+        }
+    }
+}
 
 public extension XybridModel {
+    /// Open a live ASR session: feed microphone PCM in, read partial
+    /// transcripts out.
+    ///
+    /// This is the live-capture surface. ``run(envelope:)`` transcribes a
+    /// finished buffer; this transcribes speech as it arrives, which is what
+    /// dictation and live captioning need.
+    ///
+    /// Audio must be PCM **Float32, mono, 16 kHz** — converting from the
+    /// microphone's format is the caller's job.
+    ///
+    /// ```swift
+    /// let session = try model.stream()
+    /// Task {
+    ///     for await partial in session.partials() {
+    ///         label.text = partial.text
+    ///     }
+    /// }
+    /// // from the audio callback:
+    /// try session.feed(samples: pcm)
+    /// // when the user stops talking:
+    /// let transcript = try session.flush()
+    /// ```
+    ///
+    /// - Parameter config: chunking options. The default is fixed-window
+    ///   chunking at 16 kHz with the model's own language; pass
+    ///   ``XybridStreamingConfig/voiceActivity(modelDir:language:threshold:)``
+    ///   to chunk on speech boundaries instead.
+    /// - Throws: ``XybridError/streamingNotSupported`` if this is not an ASR
+    ///   model, or ``XybridError/configError(message:)`` for a sample rate
+    ///   other than 16 kHz.
+    func stream(
+        config: XybridStreamingConfig = .default
+    ) throws -> XybridStreamingSession {
+        try XybridStreamingSession(forModel: self, config: config)
+    }
+
     /// Run inference with the model's default options.
     ///
     /// Convenience over `run(envelope:options:)` so simple call sites stay
@@ -253,6 +749,139 @@ public extension XybridModel {
     /// generation config, abort signals, or cloud-fallback behaviour.
     func run(envelope: XybridEnvelope) throws -> XybridResult {
         try run(envelope: envelope, options: nil)
+    }
+
+    /// Run inference that cannot be cancelled.
+    ///
+    /// The generated `run(envelope:options:cancel:)` takes the stop button as a
+    /// required argument — BoltFFI cannot express an optional handle parameter —
+    /// so this overload manufactures a token that is never signalled. Reach for
+    /// the three-argument form, or `runAsync`, when you want to stop a run.
+    func run(envelope: XybridEnvelope, options: XybridRunOptions?) throws -> XybridResult {
+        try run(envelope: envelope, options: options, cancel: XybridCancellationToken())
+    }
+
+    /// Context-aware run that cannot be cancelled. See `run(envelope:options:)`.
+    func runWithContext(
+        envelope: XybridEnvelope,
+        context: XybridConversationContext,
+        options: XybridRunOptions?
+    ) throws -> XybridResult {
+        try runWithContext(
+            envelope: envelope,
+            context: context,
+            options: options,
+            cancel: XybridCancellationToken()
+        )
+    }
+
+    /// Start a context-aware pull stream that cannot be cancelled.
+    /// See `run(envelope:options:)`.
+    func runStreamWithContext(
+        envelope: XybridEnvelope,
+        context: XybridConversationContext,
+        options: XybridRunOptions?
+    ) throws -> UInt64 {
+        try runStreamWithContext(
+            envelope: envelope,
+            context: context,
+            options: options,
+            cancel: XybridCancellationToken()
+        )
+    }
+
+    /// Start a pull-based stream that cannot be cancelled.
+    /// See `run(envelope:options:)`.
+    func runStream(envelope: XybridEnvelope, options: XybridRunOptions?) throws -> UInt64 {
+        try runStream(envelope: envelope, options: options, cancel: XybridCancellationToken())
+    }
+}
+
+public extension XybridPipeline {
+    /// Parse and load a pipeline without blocking the caller.
+    static func fromYamlAsync(_ yaml: String) async throws -> XybridPipeline {
+        try await Task.detached { try XybridPipeline(fromYaml: yaml) }.value
+    }
+
+    /// Read, parse, and load a pipeline file without blocking the caller.
+    static func fromFileAsync(_ url: URL) async throws -> XybridPipeline {
+        try await Task.detached { try XybridPipeline(fromFile: url.path) }.value
+    }
+
+    /// Load a pipeline bundle without blocking the caller.
+    static func fromBundleAsync(_ url: URL) async throws -> XybridPipeline {
+        try await Task.detached { try XybridPipeline(fromBundle: url.path) }.value
+    }
+
+    /// Run every stage with default options.
+    ///
+    /// Convenience over `run(envelope:options:)`. The first run downloads any
+    /// model the pipeline still needs, so prefer ``runAsync(envelope:options:)``
+    /// off the main actor.
+    func run(envelope: XybridEnvelope) throws -> XybridPipelineResult {
+        try run(envelope: envelope, options: nil)
+    }
+
+    /// Run every stage without blocking the calling thread or actor.
+    ///
+    /// Of `options`, only `correlationId` applies to a pipeline run; setting
+    /// `generationConfig` or `abortOn` throws ``XybridError/configError(message:)``.
+    func runAsync(
+        envelope: XybridEnvelope,
+        options: XybridRunOptions? = nil
+    ) async throws -> XybridPipelineResult {
+        try await Task.detached { try self.run(envelope: envelope, options: options) }.value
+    }
+}
+
+// MARK: - Pipeline result ergonomics
+//
+// A pipeline run returns every stage's output, not only the last one, so a
+// voice assistant can show what it heard and what it answered while it plays
+// the audio:
+//
+//     let result = try await pipeline.runAsync(envelope: .audio(pcmData: pcm))
+//     transcript.text = result.stage("asr")?.text
+//     reply.text = result.stage("llm")?.text
+//     try player.play(result.audioBytes)
+
+public extension XybridPipelineResult {
+    /// Final text payload, if the last stage produced text. `nil` otherwise.
+    var text: String? { envelope.textPayload }
+
+    /// Final audio bytes, if the last stage produced audio. `nil` otherwise.
+    var audioBytes: Data? { envelope.audioPayload }
+
+    /// The whole run's latency as a `TimeInterval` in seconds.
+    var latency: TimeInterval { TimeInterval(latencyMs) / 1000.0 }
+
+    /// The stage with this identifier — the YAML `id:` — if it ran.
+    func stage(_ id: String) -> XybridStageResult? {
+        stages.first { $0.stageId == id }
+    }
+}
+
+public extension XybridStageResult {
+    /// This stage's text output — an ASR transcript, an LLM reply. `nil` for
+    /// any other payload.
+    var text: String? { envelope.textPayload }
+
+    /// This stage's audio output, if it produced audio. `nil` otherwise.
+    var audioBytes: Data? { envelope.audioPayload }
+
+    /// This stage's latency as a `TimeInterval` in seconds.
+    var latency: TimeInterval { TimeInterval(latencyMs) / 1000.0 }
+}
+
+private extension XybridEnvelope {
+    var textPayload: String? {
+        if case .text(let text) = kind { return text }
+        return nil
+    }
+
+    var audioPayload: Data? {
+        if case .audio(let bytes) = kind { return bytes }
+        return nil
     }
 }
 
@@ -293,11 +922,31 @@ public extension XybridModel {
     }
 
     /// Run inference without blocking the calling thread or actor.
+    ///
+    /// Honours Swift's structured concurrency: cancelling the surrounding
+    /// `Task` signals the native stop button. The run then returns or throws
+    /// whatever the backend reports for a cancelled run — it does not surface
+    /// `CancellationError`.
+    ///
+    /// Cancellation is checked at token boundaries **while streaming**. A batch
+    /// run is only cancellable before generation starts: once the backend is
+    /// producing, `run_with_options` has no token-aware path to stop it, so the
+    /// call finishes normally. Use the streaming surface when a mid-flight stop
+    /// button matters.
     func runAsync(
         envelope: XybridEnvelope,
         options: XybridRunOptions? = nil
     ) async throws -> XybridResult {
-        try await Task.detached { try self.run(envelope: envelope, options: options) }.value
+        let cancel = XybridCancellationToken()
+        return try await withTaskCancellationHandler {
+            try await Task.detached {
+                try self.run(envelope: envelope, options: options, cancel: cancel)
+            }.value
+        } onCancel: {
+            // Runs on the cancelling thread; `cancel()` is safe from any thread
+            // and is a no-op once the run has finished.
+            cancel.cancel()
+        }
     }
 
     /// Warm up the model without blocking the calling thread or actor.
@@ -322,12 +971,6 @@ public extension XybridModel {
     /// pull-based session API (``runStream(envelope:options:)`` /
     /// ``streamNext(streamId:)`` / ``streamClose(streamId:)``).
     ///
-    /// Note: the producing task pulls as fast as generation runs and buffers
-    /// unconsumed tokens in the async sequence (unbounded), so the facade's
-    /// bounded-channel backpressure applies to the raw session pull API, not
-    /// to a slow consumer of this sequence. Buffering is bounded by
-    /// `max_tokens` in practice; a bounded policy here would drop tokens.
-    ///
     /// ```swift
     /// for try await token in model.streamTokens(envelope: env) {
     ///     print(token.token, terminator: "")
@@ -336,38 +979,8 @@ public extension XybridModel {
     func streamTokens(
         envelope: XybridEnvelope,
         options: XybridRunOptions? = nil
-    ) -> AsyncThrowingStream<XybridStreamToken, Error> {
-        AsyncThrowingStream { continuation in
-            let task = Task.detached {
-                var streamId: UInt64?
-                do {
-                    let id = try self.runStream(envelope: envelope, options: options)
-                    streamId = id
-                    while !Task.isCancelled {
-                        let event = try self.streamNext(streamId: id)
-                        switch event.kind {
-                        case .token:
-                            if let token = event.token {
-                                continuation.yield(token)
-                            }
-                        case .complete:
-                            self.streamClose(streamId: id)
-                            continuation.finish()
-                            return
-                        }
-                    }
-                    // Cancelled: close the session to abort the in-flight run.
-                    self.streamClose(streamId: id)
-                    continuation.finish()
-                } catch {
-                    // A failed streamNext has already closed the session
-                    // bolt-side; closing again is an idempotent map-remove.
-                    if let id = streamId { self.streamClose(streamId: id) }
-                    continuation.finish(throwing: error)
-                }
-            }
-            continuation.onTermination = { _ in task.cancel() }
-        }
+    ) -> XybridTokenStream {
+        XybridTokenStream(model: self, envelope: envelope, options: options)
     }
 }
 
@@ -386,6 +999,165 @@ public typealias VoiceInfo = XybridVoiceInfo
 
 /// Generation parameters for LLM inference (temperature, top_p, max_tokens, etc.).
 public typealias GenerationConfig = XybridGenerationConfig
+
+/// A tool the model may ask to call.
+public typealias ToolDefinition = XybridToolDefinition
+
+/// One tool call the model emitted, from `XybridResult.toolCalls`.
+public typealias ToolCall = XybridToolCall
+
+/// The outcome of running one tool, fed back with `Envelope.toolResults`.
+public typealias ToolResult = XybridToolResult
+
+/// One token emitted by a streaming run. The terminal token carries the
+/// turn's `toolCalls` and `rawText`.
+public typealias StreamToken = XybridStreamToken
+
+// MARK: - GenerationConfig ergonomics
+//
+// The generated memberwise init takes every field positionally, so setting one
+// parameter means spelling out all nine. These factories default the rest.
+// They're static funcs rather than a defaulted `init` because an extension
+// init with the same argument labels would collide with the generated one.
+
+public extension XybridStreamingConfig {
+    /// Fixed time-window chunking at the required 16 kHz, using the model's
+    /// own language. The starting point for dictation.
+    static var `default`: XybridStreamingConfig {
+        XybridStreamingConfig(
+            sampleRate: 16_000,
+            vad: .off,
+            vadThreshold: 0.5,
+            language: nil,
+            audioCtx: nil
+        )
+    }
+
+    /// Chunk on speech boundaries using voice-activity detection, rather than
+    /// on a fixed clock.
+    ///
+    /// Better transcripts for natural speech — a window cut mid-word is what
+    /// makes fixed chunking stutter — at the cost of loading a small VAD
+    /// model alongside the ASR one.
+    ///
+    /// - Parameters:
+    ///   - modelDir: directory holding a Silero VAD model, containing a
+    ///     `model.onnx`. Required: no VAD model ships with the SDK, and the
+    ///     engine falls back to fixed windows without one.
+    ///   - language: language hint such as `"en"`; `nil` uses the model default.
+    ///   - threshold: VAD sensitivity, 0.0–1.0. Lower catches quieter speech
+    ///     and more background noise with it.
+    static func voiceActivity(
+        modelDir: String,
+        language: String? = nil,
+        threshold: Float = 0.5
+    ) -> XybridStreamingConfig {
+        XybridStreamingConfig(
+            sampleRate: 16_000,
+            vad: .enabled(modelDir: modelDir),
+            vadThreshold: threshold,
+            language: language,
+            audioCtx: nil
+        )
+    }
+}
+
+public extension XybridGenerationConfig {
+    /// Build a config, defaulting every field you don't set to the model's own
+    /// default.
+    static func make(
+        maxTokens: UInt32? = nil,
+        temperature: Float? = nil,
+        topP: Float? = nil,
+        minP: Float? = nil,
+        topK: UInt32? = nil,
+        repetitionPenalty: Float? = nil,
+        stopSequences: [String] = [],
+        grammar: String? = nil,
+        tools: [XybridToolDefinition] = []
+    ) -> XybridGenerationConfig {
+        XybridGenerationConfig(
+            maxTokens: maxTokens,
+            temperature: temperature,
+            topP: topP,
+            minP: minP,
+            topK: topK,
+            repetitionPenalty: repetitionPenalty,
+            stopSequences: stopSequences,
+            grammar: grammar,
+            tools: tools
+        )
+    }
+
+    /// Greedy decoding (deterministic, temperature 0). The usual choice for
+    /// extraction and for tool calling, where you want the most likely tokens
+    /// rather than creative sampling.
+    static func greedy(
+        maxTokens: UInt32? = nil,
+        grammar: String? = nil,
+        tools: [XybridToolDefinition] = []
+    ) -> XybridGenerationConfig {
+        .make(
+            maxTokens: maxTokens,
+            temperature: 0.0,
+            topP: 1.0,
+            topK: 0,
+            grammar: grammar,
+            tools: tools
+        )
+    }
+
+    /// Higher temperature, for more varied output.
+    static func creative(
+        maxTokens: UInt32? = nil,
+        tools: [XybridToolDefinition] = []
+    ) -> XybridGenerationConfig {
+        .make(
+            maxTokens: maxTokens,
+            temperature: 0.9,
+            topP: 0.95,
+            topK: 50,
+            tools: tools
+        )
+    }
+
+    /// The same config, offering `tools` to the model.
+    func withTools(_ tools: [XybridToolDefinition]) -> XybridGenerationConfig {
+        var copy = self
+        copy.tools = tools
+        return copy
+    }
+}
+
+// MARK: - Tool-calling ergonomics
+
+public extension XybridEnvelope {
+    /// The continuation envelope for the turn after the model asked for tools.
+    ///
+    /// One `run` is one model turn, so the tool loop lives in your code: run a
+    /// request carrying tools, execute every `XybridResult.toolCalls` entry,
+    /// then run this envelope to feed the outcomes back. Run the continuation
+    /// with the same tools as the original turn so the executor rebuilds an
+    /// identical chat prefix.
+    ///
+    /// - Parameters:
+    ///   - userText: The original user message of the turn being continued.
+    ///   - priorAssistantText: That turn's raw output text, tool-call block
+    ///     included — i.e. `XybridResult.text` verbatim.
+    ///   - results: Tool outcomes, in call order.
+    /// - Throws: `XybridError` if a result's content isn't valid JSON.
+    static func toolResults(
+        _ userText: String,
+        priorAssistantText: String,
+        results: [XybridToolResult]
+    ) throws -> XybridEnvelope {
+        try toolResultsEnvelope(
+            userText: userText,
+            priorAssistantText: priorAssistantText,
+            results: results
+        )
+    }
+}
 
 // MARK: - XybridResult compatibility shim
 //
@@ -412,16 +1184,6 @@ public extension XybridResult {
         return nil
     }
 
-    /// The model's chain-of-thought / reasoning text (LLM `<think>` blocks),
-    /// surfaced separately from `text`, which always excludes it. `nil` when
-    /// the model emitted no reasoning or the backend doesn't surface one.
-    ///
-    /// Carried on the envelope's `reasoning_content` metadata rather than the
-    /// payload `kind`, so it reads from `metadata` rather than the enum.
-    var reasoningContent: String? {
-        envelope.metadata.first { $0.key == "reasoning_content" }?.value
-    }
-
     /// Audio bytes, if the result is `.audio`. `nil` otherwise.
     ///
     /// Returns `Data` (not `[UInt8]`) because that's what BoltFFI emits
@@ -440,6 +1202,20 @@ public extension XybridResult {
 
     /// The latency as a `TimeInterval` in seconds.
     var latency: TimeInterval { TimeInterval(latencyMs) / 1000.0 }
+
+    /// `true` if the model asked to call at least one tool this turn.
+    var hasToolCalls: Bool { !toolCalls.isEmpty }
+}
+
+// MARK: - XybridStreamToken ergonomics
+
+public extension XybridStreamToken {
+    /// `true` if this token carries tool calls to execute.
+    ///
+    /// Only ever true on the terminal token. Tool-call blocks are suppressed
+    /// from the streamed text, so this — not the token text — is what a
+    /// streaming loop branches on.
+    var hasToolCalls: Bool { !toolCalls.isEmpty }
 }
 
 // MARK: - XybridEnvelope compatibility factories
@@ -601,6 +1377,8 @@ extension XybridError: LocalizedError {
             return "Unsupported backend capability: \(message)"
         case .invalidImage(let message):
             return "Invalid image: \(message)"
+        case .cancelled(let message):
+            return "Cancelled: \(message)"
         }
     }
 }

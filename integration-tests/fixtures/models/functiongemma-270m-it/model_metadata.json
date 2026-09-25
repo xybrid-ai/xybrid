@@ -1,0 +1,38 @@
+{
+  "model_id": "functiongemma-270m-it",
+  "version": "1.0",
+  "description": "Google FunctionGemma 270M instruction-tuned function-calling model, Q8_0 GGUF",
+  "execution_template": {
+    "type": "Gguf",
+    "model_file": "functiongemma-270m-it-q8_0.gguf",
+    "context_length": 4096,
+    "generation_params": {
+      "max_tokens": 128,
+      "temperature": 0.0,
+      "top_p": 1.0,
+      "repetition_penalty": 1.0
+    }
+  },
+  "preprocessing": [],
+  "postprocessing": [],
+  "files": [
+    "functiongemma-270m-it-q8_0.gguf"
+  ],
+  "metadata": {
+    "task": "text-generation",
+    "architecture": "gemma3",
+    "backend": "llamacpp",
+    "family": "functiongemma",
+    "instruction_tuned": true,
+    "license": "Gemma",
+    "parameters": 270000000,
+    "quantization": "q8_0",
+    "context_length": 32768,
+    "tool_calling": true,
+    "source_repo": "ggml-org/functiongemma-270m-it-GGUF",
+    "source_revision": "2566ce14aedfc14fdd0de955ba67346425e67126",
+    "sha256": "83940d4dd9676710856f43523bed096164a595a96f6b34771610a03937de5270",
+    "ram_minimum_mb": 512,
+    "ram_recommended_mb": 1024
+  }
+}

@@ -78,6 +78,9 @@ namespace Xybrid
         /// <summary>Gets the text output (for ASR or LLM models), or null if not applicable.</summary>
         public string Text { get; }
 
+        /// <summary>Gets model reasoning separately from the final answer text.</summary>
+        public string ReasoningContent { get; }
+
         /// <summary>Gets the inference latency in milliseconds.</summary>
         public uint LatencyMs { get; }
 
@@ -102,6 +105,30 @@ namespace Xybrid
         /// <summary>Gets the typed inference metrics (TTFT, tok/s, per-stage latencies).</summary>
         public InferenceMetrics Metrics { get; }
 
+        /// <summary>
+        /// Gets whether this answer came from the device or the cloud gateway.
+        /// Cloud fallback keeps the model id identical on both legs, so this is
+        /// the only way to tell them apart. Defaults to
+        /// <see cref="XybridBolt.XybridExecutionTarget.Local"/> for synthesized
+        /// failures, which never reached the cloud.
+        /// </summary>
+        public XybridBolt.XybridExecutionTarget ExecutionTarget { get; }
+
+        /// <summary>
+        /// Tool calls the model asked for this turn.
+        /// </summary>
+        /// <remarks>
+        /// Empty unless the request offered tools via
+        /// <see cref="GenerationConfig.AddTool"/>. Run each call yourself, then
+        /// feed the outcomes back with <see cref="Envelope.ToolResults"/>. The
+        /// raw tool-call block stays in <see cref="Text"/> untouched, and
+        /// malformed model output yields an empty list rather than an error.
+        /// </remarks>
+        public IReadOnlyList<XybridBolt.XybridToolCall> ToolCalls { get; }
+
+        /// <summary>Gets whether the model asked to call at least one tool.</summary>
+        public bool HasToolCalls => ToolCalls != null && ToolCalls.Count > 0;
+
         private InferenceResult(
             bool success,
             string error,
@@ -110,7 +137,11 @@ namespace Xybrid
             OutputType outputType,
             byte[] audioBytes,
             float[] embedding,
-            InferenceMetrics metrics)
+            InferenceMetrics metrics,
+            string reasoningContent,
+            XybridBolt.XybridExecutionTarget executionTarget =
+                XybridBolt.XybridExecutionTarget.Local,
+            IReadOnlyList<XybridBolt.XybridToolCall> toolCalls = null)
         {
             Success = success;
             Error = error;
@@ -120,26 +151,15 @@ namespace Xybrid
             AudioBytes = audioBytes;
             Embedding = embedding;
             Metrics = metrics;
+            ReasoningContent = reasoningContent;
+            ExecutionTarget = executionTarget;
+            ToolCalls = toolCalls ?? System.Array.Empty<XybridBolt.XybridToolCall>();
         }
 
         /// <summary>Decode a successful bolt result into the public shape.</summary>
         internal static InferenceResult FromBolt(XybridBolt.XybridResult result)
         {
-            string text = null;
-            byte[] audio = null;
-            float[] embedding = null;
-            switch (result.Envelope.Kind)
-            {
-                case XybridBolt.XybridEnvelopeKind.Text t:
-                    text = t.Value;
-                    break;
-                case XybridBolt.XybridEnvelopeKind.Audio a:
-                    audio = a.Bytes;
-                    break;
-                case XybridBolt.XybridEnvelopeKind.Embedding e:
-                    embedding = e.Values;
-                    break;
-            }
+            DecodePayload(result.Envelope, out string text, out byte[] audio, out float[] embedding);
 
             return new InferenceResult(
                 success: true,
@@ -149,7 +169,10 @@ namespace Xybrid
                 outputType: MapOutputType(result.OutputType),
                 audioBytes: audio,
                 embedding: embedding,
-                metrics: MapMetrics(result.Metrics));
+                metrics: MapMetrics(result.Metrics),
+                reasoningContent: result.ReasoningContent,
+                executionTarget: result.ExecutionTarget,
+                toolCalls: result.ToolCalls ?? System.Array.Empty<XybridBolt.XybridToolCall>());
         }
 
         /// <summary>
@@ -166,9 +189,37 @@ namespace Xybrid
                 outputType: OutputType.Unknown,
                 audioBytes: null,
                 embedding: null,
-                metrics: new InferenceMetrics(0, null, null, null, null, null, Array.Empty<StageLatency>()));
+                metrics: new InferenceMetrics(0, null, null, null, null, null, Array.Empty<StageLatency>()),
+                reasoningContent: null);
 
-        private static OutputType MapOutputType(XybridBolt.XybridOutputType outputType)
+        /// <summary>
+        /// Split an envelope into the flat text / audio / embedding fields the
+        /// public result types expose. Every field but the matching one is null.
+        /// </summary>
+        internal static void DecodePayload(
+            XybridBolt.XybridEnvelope envelope,
+            out string text,
+            out byte[] audio,
+            out float[] embedding)
+        {
+            text = null;
+            audio = null;
+            embedding = null;
+            switch (envelope.Kind)
+            {
+                case XybridBolt.XybridEnvelopeKind.Text t:
+                    text = t.Value;
+                    break;
+                case XybridBolt.XybridEnvelopeKind.Audio a:
+                    audio = a.Bytes;
+                    break;
+                case XybridBolt.XybridEnvelopeKind.Embedding e:
+                    embedding = e.Values;
+                    break;
+            }
+        }
+
+        internal static OutputType MapOutputType(XybridBolt.XybridOutputType outputType)
         {
             switch (outputType)
             {
@@ -183,7 +234,7 @@ namespace Xybrid
             }
         }
 
-        private static InferenceMetrics MapMetrics(XybridBolt.XybridInferenceMetrics metrics)
+        internal static InferenceMetrics MapMetrics(XybridBolt.XybridInferenceMetrics metrics)
         {
             var stages = new List<StageLatency>(metrics.StageLatenciesMs.Length);
             foreach (XybridBolt.XybridStageLatency stage in metrics.StageLatenciesMs)

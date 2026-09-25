@@ -16,6 +16,7 @@ use crate::frb_generated::StreamSink;
 use super::context::FfiConversationContext;
 use super::device;
 use super::result::FfiResult;
+use super::spawn_reporting_panics;
 
 /// Generation parameters for LLM inference.
 ///
@@ -40,6 +41,70 @@ pub struct FfiGenerationConfig {
     /// (local llama backend only; other backends ignore it). Produce one from
     /// a JSON Schema with `jsonSchemaToGbnf`, or pass raw GBNF.
     pub grammar: Option<String>,
+    /// Tools the model may call this turn. `None` or empty means no tool
+    /// calling — existing behavior, unchanged.
+    ///
+    /// Tool calling is llama.cpp-only today; unsupported paths (no embedded
+    /// chat template, the mistralrs backend, the cloud fallback leg) reject
+    /// tool-bearing requests rather than quietly generating without them.
+    pub tools: Option<Vec<FfiToolDefinition>>,
+}
+
+/// A tool (function) the model may ask to call.
+///
+/// `parameters_json` is the JSON Schema for the arguments, carried as a JSON
+/// string because FRB can't describe an arbitrary JSON tree.
+#[derive(Debug, Clone)]
+pub struct FfiToolDefinition {
+    /// Function name the model will emit, e.g. `get_weather`.
+    pub name: String,
+    /// What the tool does. The model reads this to decide when to call it.
+    pub description: String,
+    /// JSON Schema for the arguments, as a JSON string. Pass
+    /// `{"type":"object","properties":{}}` for a tool that takes none.
+    pub parameters_json: String,
+}
+
+impl FfiToolDefinition {
+    fn into_facade(self) -> facade::ToolDefinition {
+        facade::ToolDefinition {
+            name: self.name,
+            description: self.description,
+            parameters_json: self.parameters_json,
+        }
+    }
+}
+
+/// One tool call the model emitted, from `FfiResult.toolCalls`.
+#[derive(Debug, Clone)]
+pub struct FfiToolCall {
+    /// Correlation id, e.g. `call_0`. Echo it back as `FfiToolResult.callId`.
+    pub id: String,
+    /// Which tool the model wants to run.
+    pub name: String,
+    /// Arguments as a JSON object string.
+    pub arguments_json: String,
+}
+
+/// The outcome of running one tool, fed back with `FfiEnvelope::tool_results`.
+#[derive(Debug, Clone)]
+pub struct FfiToolResult {
+    /// The `FfiToolCall.id` this answers.
+    pub call_id: String,
+    /// The tool that was invoked.
+    pub name: String,
+    /// The tool's output as a JSON string.
+    pub content_json: String,
+}
+
+impl FfiToolResult {
+    pub(crate) fn into_facade(self) -> facade::ToolResult {
+        facade::ToolResult {
+            call_id: self.call_id,
+            name: self.name,
+            content_json: self.content_json,
+        }
+    }
 }
 
 impl FfiGenerationConfig {
@@ -55,6 +120,7 @@ impl FfiGenerationConfig {
             repetition_penalty: None,
             stop_sequences: None,
             grammar: None,
+            tools: None,
         }
     }
 
@@ -70,6 +136,7 @@ impl FfiGenerationConfig {
             repetition_penalty: None,
             stop_sequences: None,
             grammar: None,
+            tools: None,
         }
     }
 
@@ -85,11 +152,21 @@ impl FfiGenerationConfig {
             repetition_penalty: self.repetition_penalty,
             stop_sequences: self.stop_sequences.clone().unwrap_or_default(),
             grammar: self.grammar.clone(),
+            tools: self
+                .tools
+                .clone()
+                .unwrap_or_default()
+                .into_iter()
+                .map(FfiToolDefinition::into_facade)
+                .collect(),
         }
     }
 
-    pub(crate) fn to_sdk_over(&self, base: GenerationConfig) -> GenerationConfig {
-        self.to_facade().apply_over(base)
+    /// # Errors
+    /// Returns the facade's message when a tool carries a `parametersJson`
+    /// that isn't valid JSON.
+    pub(crate) fn to_sdk_over(&self, base: GenerationConfig) -> Result<GenerationConfig, String> {
+        self.to_facade().apply_over(base).map_err(|e| e.to_string())
     }
 }
 
@@ -212,10 +289,11 @@ impl FfiRunOptions {
         generation_config: Option<facade::GenerationConfig>,
         generation_base: GenerationConfig,
         cancellation_token: Option<&FfiCancellationToken>,
-    ) -> RunOptions {
+    ) -> Result<RunOptions, String> {
         let mut options = self
             .to_facade(generation_config)
-            .to_sdk_over(None, generation_base);
+            .to_sdk_over(None, generation_base)
+            .map_err(|err| err.to_string())?;
 
         // Flutter-specific resource provider; the facade omits this field so it
         // stays FFI-safe (the trait object isn't portable across generators).
@@ -238,7 +316,7 @@ impl FfiRunOptions {
             options = options.with_frame_session(frame_session_id.to_string());
         }
 
-        options
+        Ok(options)
     }
 }
 
@@ -434,8 +512,9 @@ fn is_ipv6_unique_local(ip: std::net::Ipv6Addr) -> bool {
 /// Event emitted during model loading with progress.
 #[derive(Clone)]
 pub enum FfiLoadEvent {
-    /// Download progress update (0.0 to 1.0)
-    Progress(f64),
+    /// Download progress: fraction, bytes transferred, and the declared total
+    /// when the source has one.
+    Progress(FfiDownloadStatus),
     /// Model loaded successfully - contains the model handle ID
     Complete,
     /// An error occurred during loading
@@ -479,8 +558,99 @@ pub struct FfiStreamToken {
     pub index: u32,
     /// Cumulative text generated so far
     pub cumulative_text: String,
-    /// Reason for stopping (if this is the final token)
+    /// Reason for stopping (if this is the final token). `"tool_calls"` when
+    /// the turn ended on a parseable tool-call block.
     pub finish_reason: Option<String>,
+    /// Tool calls the model emitted this turn — final token only.
+    ///
+    /// Tool-call blocks are suppressed from the streamed text, so there is
+    /// nothing in `token` to parse: halt here, run the tools, then continue
+    /// the turn by streaming a `FfiEnvelope::tool_results` envelope through
+    /// the same call. Empty on every other token.
+    pub tool_calls: Vec<FfiToolCall>,
+    /// The completed turn's raw output text, tool-call block included — pass
+    /// it to `FfiEnvelope::tool_results` as `prior_assistant_text`.
+    ///
+    /// Set only alongside a non-empty `tool_calls`. Deliberately not the same
+    /// as `cumulative_text`, which reports the *emitted* text with the
+    /// protocol blocks suppressed.
+    pub raw_text: Option<String>,
+}
+
+impl FfiStreamToken {
+    /// Translate one SDK stream token, index rebased onto the FFI stream's
+    /// own counter (the callers own that numbering).
+    fn from_sdk(token: &xybrid_core::runtime_adapter::types::PartialToken, index: u32) -> Self {
+        Self {
+            token: token.token.clone(),
+            token_id: token.token_id,
+            index,
+            cumulative_text: token.cumulative_text.clone(),
+            finish_reason: token.finish_reason.clone(),
+            tool_calls: token
+                .tool_calls
+                .iter()
+                .map(|call| FfiToolCall {
+                    id: call.id.clone(),
+                    name: call.function.name.clone(),
+                    arguments_json: call.function.arguments.clone(),
+                })
+                .collect(),
+            raw_text: token.raw_text.clone(),
+        }
+    }
+}
+
+/// Lifecycle of a model download.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FfiDownloadState {
+    /// Bytes still in flight. For a speculative load, runs are served from
+    /// the cloud meanwhile.
+    Downloading,
+    /// Every artifact landed and the model is usable.
+    Ready,
+    /// Download failed — for a speculative load the cloud keeps serving and
+    /// the model never becomes local. Surfacing this is the only way the UI
+    /// can stop waiting.
+    Failed,
+    /// The download was cancelled by the caller.
+    Cancelled,
+}
+
+/// Download progress, bytes and state in one consistent read, so a polling UI
+/// cannot observe a torn pair (for example `Ready` with a stale 0.34
+/// progress).
+///
+/// `progress` is aggregated across every artifact the model needs (weights
+/// plus companions such as a vision projector), never moves backwards, and
+/// reaches 1.0 only alongside `Ready`. `totalBytes` is null when the source
+/// declares no size, in which case `downloadedBytes` is still exact.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FfiDownloadStatus {
+    pub state: FfiDownloadState,
+    /// 0.0 to 1.0.
+    pub progress: f64,
+    /// Bytes written so far, across every artifact.
+    pub downloaded_bytes: u64,
+    /// Declared total across every artifact, or null when unknown.
+    pub total_bytes: Option<u64>,
+}
+
+impl FfiDownloadStatus {
+    fn from_sdk(status: xybrid_sdk::DownloadStatus) -> Self {
+        let state = match status.state {
+            xybrid_sdk::DownloadState::Downloading => FfiDownloadState::Downloading,
+            xybrid_sdk::DownloadState::Ready => FfiDownloadState::Ready,
+            xybrid_sdk::DownloadState::Failed => FfiDownloadState::Failed,
+            xybrid_sdk::DownloadState::Cancelled => FfiDownloadState::Cancelled,
+        };
+        Self {
+            state,
+            progress: status.progress as f64,
+            downloaded_bytes: status.downloaded_bytes,
+            total_bytes: status.total_bytes,
+        }
+    }
 }
 
 /// FFI wrapper for ModelLoader (preparatory step before loading).
@@ -500,6 +670,16 @@ impl From<xybrid_sdk::StreamEvent> for FfiStreamEvent {
                 index: token.index as u32,
                 cumulative_text: token.cumulative_text,
                 finish_reason: token.finish_reason,
+                tool_calls: token
+                    .tool_calls
+                    .into_iter()
+                    .map(|call| FfiToolCall {
+                        id: call.id,
+                        name: call.function.name,
+                        arguments_json: call.function.arguments,
+                    })
+                    .collect(),
+                raw_text: token.raw_text,
             }),
             xybrid_sdk::StreamEvent::Complete(result) => {
                 FfiStreamEvent::Complete(FfiResult::from_inference_result(&result))
@@ -513,6 +693,26 @@ impl FfiModelLoader {
     #[frb(sync)]
     pub fn from_registry(model_id: String) -> FfiModelLoader {
         FfiModelLoader(ModelLoader::from_registry(&model_id))
+    }
+
+    /// Loader that serves from the cloud gateway while the registry weights
+    /// download in the background, instead of blocking on the download.
+    ///
+    /// `load()` then returns almost immediately with a cloud-backed model that
+    /// switches to on-device by itself once the download lands. Requires a
+    /// resolvable API key and an uncached model — otherwise this behaves
+    /// exactly like [`Self::from_registry`], which [`Self::will_speculate`]
+    /// reports. LLM/chat models only.
+    #[frb(sync)]
+    pub fn from_registry_speculative(model_id: String) -> FfiModelLoader {
+        FfiModelLoader(ModelLoader::from_registry(&model_id).with_speculative_cloud(true))
+    }
+
+    /// Whether `load()` would actually speculate: enabled, an API key
+    /// resolves, and the model is not already cached. Never hits the network.
+    #[frb(sync)]
+    pub fn will_speculate(&self) -> bool {
+        self.0.will_speculate()
     }
 
     #[frb(sync)]
@@ -550,7 +750,8 @@ impl FfiModelLoader {
     /// Load the model with download progress updates.
     ///
     /// Streams FfiLoadEvent during download:
-    /// - `Progress(f64)` for download progress (0.0 to 1.0)
+    /// - `Progress(FfiDownloadStatus)` with the fraction, bytes transferred
+    ///   and the declared total when the source has one
     /// - `Complete` when the model is ready
     /// - `Error(String)` if loading fails
     ///
@@ -559,10 +760,10 @@ impl FfiModelLoader {
         let loader = self.0.clone();
 
         // Run loading in a background thread to not block
-        std::thread::spawn(move || {
-            let result = loader.load_with_progress(|progress| {
-                // Send progress as f64 (0.0 to 1.0)
-                let _ = sink.add(FfiLoadEvent::Progress(progress as f64));
+        let panic_sink = sink.clone();
+        let work = move || {
+            let result = loader.load_with_progress(|status| {
+                let _ = sink.add(FfiLoadEvent::Progress(FfiDownloadStatus::from_sdk(status)));
             });
 
             match result {
@@ -574,11 +775,102 @@ impl FfiModelLoader {
                     let _ = sink.add(FfiLoadEvent::Error(e.to_string()));
                 }
             }
+        };
+        spawn_reporting_panics(work, move |message| {
+            let _ = panic_sink.add(FfiLoadEvent::Error(message));
         });
     }
 }
 
 impl FfiModel {
+    /// Whether runs are currently answered by the cloud because the local
+    /// weights are not ready yet. `false` for ordinary local models.
+    ///
+    /// This predicts the *next* run; `FfiResult.executionTarget` reports what a
+    /// run that already happened actually did. They differ when a cloud leg
+    /// fails and degrades to local mid-call.
+    #[frb(sync)]
+    pub fn is_cloud_serving(&self) -> bool {
+        self.0.is_cloud_serving()
+    }
+
+    /// Whether the model bundle declares local tool-calling support.
+    ///
+    /// Advisory tri-state: `null` means the bundle says nothing, so the app
+    /// cannot tell. Gate tool UI on it; enforcement stays at run time — a
+    /// tools-bearing request against a model whose chat template has no tool
+    /// support fails as invalid input regardless of what this reports.
+    #[frb(sync)]
+    pub fn supports_tool_calling(&self) -> Option<bool> {
+        self.0.supports_tool_calling()
+    }
+
+    /// Download progress + state in one consistent read.
+    ///
+    /// Reports `Ready` at 1.0 for an ordinary local model, so the UI needs no
+    /// special case. Prefer [`Self::download_progress`] to be pushed updates
+    /// rather than polling.
+    #[frb(sync)]
+    pub fn download_status(&self) -> FfiDownloadStatus {
+        FfiDownloadStatus::from_sdk(self.0.download_status())
+    }
+
+    /// Stream download progress for a speculatively-loaded model until it
+    /// reaches a terminal state.
+    ///
+    /// Flutter keeps a push API here (other bindings poll) because
+    /// flutter_rust_bridge stream sinks are safe — unlike the bolt closure ABI
+    /// the native bindings must avoid. Emits `Progress` while downloading, then
+    /// exactly one `Complete` or `Error`. Returns immediately for a model that
+    /// is already local.
+    pub fn download_progress(&self, sink: StreamSink<FfiLoadEvent>) {
+        let model = Arc::clone(&self.0);
+        let panic_sink = sink.clone();
+        let work = move || {
+            loop {
+                // Bounded wait: wakes as soon as the download finishes, but
+                // still ticks often enough to animate a progress bar.
+                let status = model.await_download(250);
+                let ffi_status = FfiDownloadStatus::from_sdk(status);
+                match status.state {
+                    xybrid_sdk::DownloadState::Downloading => {
+                        // A closed sink means Dart cancelled the subscription.
+                        // Stop here instead of waking every 250ms — and holding
+                        // the model alive — until a download that may never
+                        // finish does.
+                        if sink.add(FfiLoadEvent::Progress(ffi_status)).is_err() {
+                            break;
+                        }
+                    }
+                    xybrid_sdk::DownloadState::Ready => {
+                        let _ = sink.add(FfiLoadEvent::Progress(ffi_status));
+                        let _ = sink.add(FfiLoadEvent::Complete);
+                        break;
+                    }
+                    xybrid_sdk::DownloadState::Failed => {
+                        let _ = sink.add(FfiLoadEvent::Error(
+                            "speculative model download failed; still serving from cloud"
+                                .to_string(),
+                        ));
+                        break;
+                    }
+                    xybrid_sdk::DownloadState::Cancelled => {
+                        // Not reachable today — nothing cancels a speculative
+                        // download — but the state exists, so report it rather
+                        // than leaving the stream hanging if that changes.
+                        let _ = sink.add(FfiLoadEvent::Error(
+                            "model download cancelled; still serving from cloud".to_string(),
+                        ));
+                        break;
+                    }
+                }
+            }
+        };
+        spawn_reporting_panics(work, move |message| {
+            let _ = panic_sink.add(FfiLoadEvent::Error(message));
+        });
+    }
+
     /// Run batch inference (non-streaming).
     ///
     /// Pass an optional `config` to control generation parameters.
@@ -590,7 +882,8 @@ impl FfiModel {
     ) -> Result<FfiResult, String> {
         let sdk_config = config
             .as_ref()
-            .map(|c| c.to_sdk_over(self.0.default_generation_config()));
+            .map(|c| c.to_sdk_over(self.0.default_generation_config()))
+            .transpose()?;
         let result = self
             .0
             .run(&envelope.into_envelope(), sdk_config.as_ref())
@@ -650,9 +943,21 @@ impl FfiModel {
         // rate-limits its telemetry per session.
         let cancel_handle = cancellation_token;
 
-        std::thread::spawn(move || {
-            let sdk_config =
-                facade_config.map(|config| config.apply_over(model.default_generation_config()));
+        let panic_sink = sink.clone();
+        let work = move || {
+            let sdk_config = match facade_config
+                .map(|config| config.apply_over(model.default_generation_config()))
+                .transpose()
+            {
+                Ok(config) => config,
+                // A tool schema that isn't valid JSON. Reported through the
+                // sink like any other run failure: this worker has no caller
+                // left to return an error to.
+                Err(e) => {
+                    let _ = sink.add(FfiStreamEvent::Error(e.to_string()));
+                    return;
+                }
+            };
             let run_options = streaming_run_options(
                 sdk_config,
                 cancel_handle.as_ref(),
@@ -668,13 +973,7 @@ impl FfiModel {
                 let token_sink = sink.clone();
                 let on_token = move |token: xybrid_core::runtime_adapter::types::PartialToken| {
                     let is_final = token.finish_reason.is_some();
-                    let ffi_token = FfiStreamToken {
-                        token: token.token.clone(),
-                        token_id: token.token_id,
-                        index: token_index,
-                        cumulative_text: token.cumulative_text.clone(),
-                        finish_reason: token.finish_reason.clone(),
-                    };
+                    let ffi_token = FfiStreamToken::from_sdk(&token, token_index);
                     token_index = token_index.saturating_add(1);
                     // Mark terminal *before* the final emit so a sink-close that
                     // races the last token does not look like a mid-stream cancel.
@@ -705,6 +1004,9 @@ impl FfiModel {
                     let _ = sink.add(FfiStreamEvent::Error(e.to_string()));
                 }
             }
+        };
+        spawn_reporting_panics(work, move |message| {
+            let _ = panic_sink.add(FfiStreamEvent::Error(message));
         });
     }
 
@@ -729,9 +1031,21 @@ impl FfiModel {
         let facade_config = config.map(|c| c.to_facade());
         let cancel_handle = cancellation_token;
 
-        std::thread::spawn(move || {
-            let sdk_config =
-                facade_config.map(|config| config.apply_over(model.default_generation_config()));
+        let panic_sink = sink.clone();
+        let work = move || {
+            let sdk_config = match facade_config
+                .map(|config| config.apply_over(model.default_generation_config()))
+                .transpose()
+            {
+                Ok(config) => config,
+                // A tool schema that isn't valid JSON. Reported through the
+                // sink like any other run failure: this worker has no caller
+                // left to return an error to.
+                Err(e) => {
+                    let _ = sink.add(FfiTtsStreamEvent::Error(e.to_string()));
+                    return;
+                }
+            };
             let run_options = streaming_run_options(sdk_config, cancel_handle.as_ref(), None);
             let reached_terminal = Arc::new(std::sync::atomic::AtomicBool::new(false));
             let result = {
@@ -779,6 +1093,9 @@ impl FfiModel {
                     let _ = sink.add(FfiTtsStreamEvent::Error(e.to_string()));
                 }
             }
+        };
+        spawn_reporting_panics(work, move |message| {
+            let _ = panic_sink.add(FfiTtsStreamEvent::Error(message));
         });
     }
 
@@ -809,7 +1126,8 @@ impl FfiModel {
     ) -> Result<FfiResult, String> {
         let sdk_config = config
             .as_ref()
-            .map(|c| c.to_sdk_over(self.0.default_generation_config()));
+            .map(|c| c.to_sdk_over(self.0.default_generation_config()))
+            .transpose()?;
         let ctx_guard = context
             .0
             .read()
@@ -872,9 +1190,21 @@ impl FfiModel {
         let cancel_handle = cancellation_token;
 
         // Spawn a background thread
-        std::thread::spawn(move || {
-            let sdk_config =
-                facade_config.map(|config| config.apply_over(model.default_generation_config()));
+        let panic_sink = sink.clone();
+        let work = move || {
+            let sdk_config = match facade_config
+                .map(|config| config.apply_over(model.default_generation_config()))
+                .transpose()
+            {
+                Ok(config) => config,
+                // A tool schema that isn't valid JSON. Reported through the
+                // sink like any other run failure: this worker has no caller
+                // left to return an error to.
+                Err(e) => {
+                    let _ = sink.add(FfiStreamEvent::Error(e.to_string()));
+                    return;
+                }
+            };
             let run_options = streaming_run_options(
                 sdk_config,
                 cancel_handle.as_ref(),
@@ -908,13 +1238,7 @@ impl FfiModel {
                     preempt,
                     move |token| {
                         let is_final = token.finish_reason.is_some();
-                        let ffi_token = FfiStreamToken {
-                            token: token.token.clone(),
-                            token_id: token.token_id,
-                            index: token_index,
-                            cumulative_text: token.cumulative_text.clone(),
-                            finish_reason: token.finish_reason.clone(),
-                        };
+                        let ffi_token = FfiStreamToken::from_sdk(&token, token_index);
                         token_index = token_index.saturating_add(1);
                         if is_final {
                             reached_terminal.store(true, std::sync::atomic::Ordering::SeqCst);
@@ -943,6 +1267,9 @@ impl FfiModel {
                     let _ = sink.add(FfiStreamEvent::Error(e.to_string()));
                 }
             }
+        };
+        spawn_reporting_panics(work, move |message| {
+            let _ = panic_sink.add(FfiStreamEvent::Error(message));
         });
     }
 
@@ -976,12 +1303,22 @@ impl FfiModel {
             None => CloudRuntimeAdapter::new(),
         };
 
-        std::thread::spawn(move || {
-            let run_options = options.to_sdk_with_cancellation_over(
+        let panic_sink = sink.clone();
+        let work = move || {
+            let run_options = match options.to_sdk_with_cancellation_over(
                 facade_config,
                 model.default_generation_config(),
                 cancel_handle.as_ref(),
-            );
+            ) {
+                Ok(options) => options,
+                // A tool schema that isn't valid JSON. Reported through the
+                // sink like any other run failure: this worker has no caller
+                // left to return an error to.
+                Err(e) => {
+                    let _ = sink.add(FfiStreamEvent::Error(e));
+                    return;
+                }
+            };
             let reached_terminal = Arc::new(std::sync::atomic::AtomicBool::new(false));
             let mut token_index = 0u32;
             let result = {
@@ -990,13 +1327,7 @@ impl FfiModel {
                 let token_sink = sink.clone();
                 let mut on_token = |token: xybrid_core::runtime_adapter::types::PartialToken| {
                     let is_final = token.finish_reason.is_some();
-                    let ffi_token = FfiStreamToken {
-                        token: token.token.clone(),
-                        token_id: token.token_id,
-                        index: token_index,
-                        cumulative_text: token.cumulative_text.clone(),
-                        finish_reason: token.finish_reason.clone(),
-                    };
+                    let ffi_token = FfiStreamToken::from_sdk(&token, token_index);
                     token_index = token_index.saturating_add(1);
                     if is_final {
                         reached_terminal.store(true, std::sync::atomic::Ordering::SeqCst);
@@ -1033,6 +1364,9 @@ impl FfiModel {
                     let _ = sink.add(FfiStreamEvent::Error(e.to_string()));
                 }
             }
+        };
+        spawn_reporting_panics(work, move |message| {
+            let _ = panic_sink.add(FfiStreamEvent::Error(message));
         });
     }
 
@@ -1099,8 +1433,9 @@ mod tests {
 
     #[test]
     fn to_sdk_without_cancellation_token_does_not_observe_user_cancelled() {
-        let sdk =
-            sample_options().to_sdk_with_cancellation_over(None, GenerationConfig::default(), None);
+        let sdk = sample_options()
+            .to_sdk_with_cancellation_over(None, GenerationConfig::default(), None)
+            .expect("no tools, so lowering cannot fail");
 
         assert!(!sdk.abort_policy.observes(AbortSignal::UserCancelled));
         assert!(sdk.cancellation_token.is_none());
@@ -1109,11 +1444,9 @@ mod tests {
     #[test]
     fn to_sdk_with_cancellation_token_observes_user_cancelled_and_sets_token() {
         let token = FfiCancellationToken::new();
-        let sdk = sample_options().to_sdk_with_cancellation_over(
-            None,
-            GenerationConfig::default(),
-            Some(&token),
-        );
+        let sdk = sample_options()
+            .to_sdk_with_cancellation_over(None, GenerationConfig::default(), Some(&token))
+            .expect("no tools, so lowering cannot fail");
 
         assert!(sdk.abort_policy.observes(AbortSignal::UserCancelled));
         assert!(sdk.cancellation_token.is_some());
@@ -1133,8 +1466,9 @@ mod tests {
         ffi.abort_on_thermal_critical = true;
         let token = FfiCancellationToken::new();
 
-        let sdk =
-            ffi.to_sdk_with_cancellation_over(None, GenerationConfig::default(), Some(&token));
+        let sdk = ffi
+            .to_sdk_with_cancellation_over(None, GenerationConfig::default(), Some(&token))
+            .expect("no tools, so lowering cannot fail");
 
         assert!(sdk
             .abort_policy
@@ -1177,7 +1511,9 @@ mod tests {
     fn to_sdk_with_frame_session_id_enables_live_mode() {
         let mut ffi = sample_options();
         ffi.frame_session_id = Some("frame-sess-9".to_string());
-        let sdk = ffi.to_sdk_with_cancellation_over(None, GenerationConfig::default(), None);
+        let sdk = ffi
+            .to_sdk_with_cancellation_over(None, GenerationConfig::default(), None)
+            .expect("no tools, so lowering cannot fail");
         assert!(sdk.live_mode);
         assert_eq!(sdk.frame_session_id.as_deref(), Some("frame-sess-9"));
     }
@@ -1215,7 +1551,9 @@ mod tests {
             frame_session_id: None,
         };
 
-        let sdk = ffi.to_sdk_with_cancellation_over(None, GenerationConfig::default(), None);
+        let sdk = ffi
+            .to_sdk_with_cancellation_over(None, GenerationConfig::default(), None)
+            .expect("no tools, so lowering cannot fail");
 
         assert!(sdk
             .abort_policy

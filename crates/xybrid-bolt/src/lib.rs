@@ -14,6 +14,12 @@
 //! - Handle types use `#[export] impl Foo { ... }`; BoltFFI manages the
 //!   heap allocation and FFI handle internally — no `Arc<Self>` return is
 //!   required at the call site.
+//! - Pushed event streams use `#[ffi_stream(item = T)]` returning an
+//!   `Arc<EventSubscription<T>>`. Items travel Rust → host only (the host
+//!   allocates the output slots), so nothing crosses as a closure and no
+//!   foreign-allocated buffer is ever freed by Rust. The generator emits a
+//!   Swift `AsyncStream`, a Kotlin `Flow`, a C# `IAsyncEnumerable` and a
+//!   Python subscription object from the one declaration.
 //!
 //! ## Naming convention
 //!
@@ -34,12 +40,21 @@
 //!   binding needs at startup.
 //! - **`XybridModel`**: load / run / pull-stream / conversation-context runs /
 //!   warmup / voice surface.
+//! - **Tool calling**: `XybridToolDefinition` on the generation config,
+//!   `XybridToolCall` on the result, and `tool_results_envelope` for the
+//!   continuation turn. One `run` is one model turn — the loop lives in the
+//!   caller's code, not behind a cross-boundary callback.
 //! - **`XybridConversationContext`**: opaque handle (new / with_id / push /
 //!   set_system / clear / id) feeding `run_with_context` and
 //!   `run_stream_with_context`.
-//! - **Deferred to follow-up commits**:
-//!   - `XybridCancellationToken` as an `Arc<Self>` handle.
-//!   - Pipeline surface.
+//! - **`XybridCancellationToken`**: opaque handle (new / cancel /
+//!   is_cancelled) accepted by every `run*` entry point as the stop button.
+//! - **`XybridDownload`**: opaque handle over a background model download,
+//!   decoupled from loading so a blocking host has something to poll while the
+//!   weights come down (status / progress stream / cancel / error).
+//! - **`XybridPipeline`**: opaque handle over a multi-stage pipeline
+//!   (from_yaml / from_file / from_bundle / run / stage introspection). `run`
+//!   returns every stage's output, not only the final one.
 //!
 //! This is now the sole native binding crate: `xybrid-uniffi` and the
 //! pre-bolt `xybrid-ffi` C ABI have both been removed, and every foreign SDK
@@ -70,28 +85,72 @@ use xybrid_ffi_facade as facade;
 #[error]
 #[derive(Debug, Clone)]
 pub enum XybridError {
-    ModelNotFound { id: String },
-    DirectoryNotFound { path: String },
-    MetadataNotFound { path: String },
-    MetadataInvalid { message: String },
-    LoadError { message: String },
-    InferenceError { message: String },
-    AbortedForCloudFallback { reason: String },
+    ModelNotFound {
+        id: String,
+    },
+    DirectoryNotFound {
+        path: String,
+    },
+    MetadataNotFound {
+        path: String,
+    },
+    MetadataInvalid {
+        message: String,
+    },
+    LoadError {
+        message: String,
+    },
+    InferenceError {
+        message: String,
+    },
+    AbortedForCloudFallback {
+        reason: String,
+    },
     StreamingNotSupported,
     NotLoaded,
-    ConfigError { message: String },
-    NetworkError { message: String },
-    Offline { message: String },
-    IoError { message: String },
-    CacheError { message: String },
-    PipelineError { message: String },
-    CircuitOpen { message: String },
-    RateLimited { retry_after_secs: u64 },
-    Timeout { timeout_ms: u64 },
-    MissingArtifact { message: String },
-    UnsupportedModelCapability { message: String },
-    UnsupportedBackendCapability { message: String },
-    InvalidImage { message: String },
+    ConfigError {
+        message: String,
+    },
+    NetworkError {
+        message: String,
+    },
+    Offline {
+        message: String,
+    },
+    IoError {
+        message: String,
+    },
+    CacheError {
+        message: String,
+    },
+    PipelineError {
+        message: String,
+    },
+    CircuitOpen {
+        message: String,
+    },
+    RateLimited {
+        retry_after_secs: u64,
+    },
+    Timeout {
+        timeout_ms: u64,
+    },
+    MissingArtifact {
+        message: String,
+    },
+    UnsupportedModelCapability {
+        message: String,
+    },
+    UnsupportedBackendCapability {
+        message: String,
+    },
+    InvalidImage {
+        message: String,
+    },
+    /// The host called `cancel` — today, on a model download.
+    Cancelled {
+        message: String,
+    },
 }
 
 impl XybridError {
@@ -138,6 +197,7 @@ impl From<XybridError> for facade::Error {
                 facade::Error::UnsupportedBackendCapability { message }
             }
             XybridError::InvalidImage { message } => facade::Error::InvalidImage { message },
+            XybridError::Cancelled { message } => facade::Error::Cancelled { message },
         }
     }
 }
@@ -175,6 +235,7 @@ impl From<facade::Error> for XybridError {
                 XybridError::UnsupportedBackendCapability { message }
             }
             facade::Error::InvalidImage { message } => XybridError::InvalidImage { message },
+            facade::Error::Cancelled { message } => XybridError::Cancelled { message },
         }
     }
 }
@@ -258,13 +319,15 @@ impl From<XybridEnvelope> for facade::Envelope {
 
 impl From<facade::Envelope> for XybridEnvelope {
     fn from(e: facade::Envelope) -> Self {
+        let mut metadata: Vec<_> = e
+            .metadata
+            .into_iter()
+            .map(|(key, value)| XybridMetadataEntry { key, value })
+            .collect();
+        metadata.sort_unstable_by(|left, right| left.key.cmp(&right.key));
         Self {
             kind: e.kind.into(),
-            metadata: e
-                .metadata
-                .into_iter()
-                .map(|(key, value)| XybridMetadataEntry { key, value })
-                .collect(),
+            metadata,
         }
     }
 }
@@ -288,6 +351,108 @@ impl From<XybridMessageRole> for facade::MessageRole {
 }
 
 // ============================================================================
+// Tool calling
+// ============================================================================
+
+/// A tool (function) the model may ask to call.
+///
+/// `parameters_json` is the JSON Schema for the arguments, carried as a JSON
+/// string because no binding generator can describe an arbitrary JSON tree.
+#[data]
+#[derive(Clone)]
+pub struct XybridToolDefinition {
+    pub name: String,
+    pub description: String,
+    pub parameters_json: String,
+}
+
+impl From<XybridToolDefinition> for facade::ToolDefinition {
+    fn from(t: XybridToolDefinition) -> Self {
+        Self {
+            name: t.name,
+            description: t.description,
+            parameters_json: t.parameters_json,
+        }
+    }
+}
+
+impl From<facade::ToolDefinition> for XybridToolDefinition {
+    fn from(t: facade::ToolDefinition) -> Self {
+        Self {
+            name: t.name,
+            description: t.description,
+            parameters_json: t.parameters_json,
+        }
+    }
+}
+
+/// One tool call the model emitted, from [`XybridResult::tool_calls`].
+#[data]
+#[derive(Clone)]
+pub struct XybridToolCall {
+    pub id: String,
+    pub name: String,
+    pub arguments_json: String,
+}
+
+impl From<facade::ToolCall> for XybridToolCall {
+    fn from(c: facade::ToolCall) -> Self {
+        Self {
+            id: c.id,
+            name: c.name,
+            arguments_json: c.arguments_json,
+        }
+    }
+}
+
+/// The outcome of running one tool, fed back with [`tool_results_envelope`].
+#[data]
+#[derive(Clone)]
+pub struct XybridToolResult {
+    /// The [`XybridToolCall::id`] this answers.
+    pub call_id: String,
+    pub name: String,
+    /// The tool's output as a JSON string.
+    pub content_json: String,
+}
+
+impl From<XybridToolResult> for facade::ToolResult {
+    fn from(r: XybridToolResult) -> Self {
+        Self {
+            call_id: r.call_id,
+            name: r.name,
+            content_json: r.content_json,
+        }
+    }
+}
+
+/// Build the continuation envelope for the turn after the model asked for
+/// tools.
+///
+/// One `run` is one model turn, so the loop lives in your code: run a
+/// tools-bearing request, execute every [`XybridToolCall`] it returns, then
+/// run this envelope to feed the outcomes back. Pass the same tools on the
+/// continuation's [`XybridGenerationConfig`] as on the original turn.
+///
+/// A free function rather than a constructor because `XybridEnvelope` is a
+/// `#[data]` record, not a handle type — records carry no methods across the
+/// generated bindings.
+#[export]
+pub fn tool_results_envelope(
+    user_text: String,
+    prior_assistant_text: String,
+    results: Vec<XybridToolResult>,
+) -> Result<XybridEnvelope, XybridError> {
+    facade::Envelope::tool_results(
+        user_text,
+        prior_assistant_text,
+        results.into_iter().map(Into::into).collect(),
+    )
+    .map(Into::into)
+    .map_err(XybridError::from)
+}
+
+// ============================================================================
 // Generation + Run options
 // ============================================================================
 
@@ -306,6 +471,14 @@ pub struct XybridGenerationConfig {
     /// [`json_schema_to_gbnf`], or pass raw GBNF. Appended last: `#[data]`
     /// PODs serialize by field order across the FFI boundary.
     pub grammar: Option<String>,
+    /// Tools the model may call this turn. Empty means no tool calling —
+    /// existing behavior, unchanged. Appended after `grammar` for the same
+    /// field-order reason.
+    ///
+    /// Tool calling is llama.cpp-only today; unsupported paths (no embedded
+    /// chat template, the mistralrs backend, the cloud fallback leg) reject
+    /// tool-bearing requests rather than quietly generating without them.
+    pub tools: Vec<XybridToolDefinition>,
 }
 
 impl From<XybridGenerationConfig> for facade::GenerationConfig {
@@ -319,6 +492,34 @@ impl From<XybridGenerationConfig> for facade::GenerationConfig {
             repetition_penalty: c.repetition_penalty,
             stop_sequences: c.stop_sequences,
             grammar: c.grammar,
+            tools: c.tools.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+impl From<facade::GenerationConfig> for XybridGenerationConfig {
+    fn from(config: facade::GenerationConfig) -> Self {
+        let facade::GenerationConfig {
+            max_tokens,
+            temperature,
+            top_p,
+            min_p,
+            top_k,
+            repetition_penalty,
+            stop_sequences,
+            grammar,
+            tools,
+        } = config;
+        Self {
+            max_tokens,
+            temperature,
+            top_p,
+            min_p,
+            top_k,
+            repetition_penalty,
+            stop_sequences,
+            grammar,
+            tools: tools.into_iter().map(Into::into).collect(),
         }
     }
 }
@@ -451,18 +652,161 @@ pub struct XybridResult {
     pub output_type: XybridOutputType,
     pub model_id: String,
     pub latency_ms: u32,
+    /// Where the answer actually came from. Cloud fallback keeps `model_id`
+    /// identical on both legs, so this is the only way to tell them apart.
+    pub execution_target: XybridExecutionTarget,
     pub metrics: XybridInferenceMetrics,
+    /// Tool calls the model emitted this turn. Empty unless the request
+    /// offered tools via [`XybridGenerationConfig::tools`].
+    /// `#[data]` PODs serialize by field order across the FFI boundary.
+    pub tool_calls: Vec<XybridToolCall>,
+    /// Model reasoning emitted separately from the final answer text.
+    /// Appended last because `#[data]` fields serialize in declaration order.
+    pub reasoning_content: Option<String>,
+}
+
+/// Where a result was produced — observed fact, not a routing preference.
+#[data]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum XybridExecutionTarget {
+    Local,
+    Cloud,
+}
+
+impl From<facade::ExecutionTarget> for XybridExecutionTarget {
+    fn from(target: facade::ExecutionTarget) -> Self {
+        match target {
+            facade::ExecutionTarget::Local => Self::Local,
+            facade::ExecutionTarget::Cloud => Self::Cloud,
+        }
+    }
+}
+
+/// Lifecycle of a model download — a standalone [`XybridDownload`] or
+/// the background download behind a speculative load.
+#[data]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum XybridDownloadState {
+    Downloading,
+    Ready,
+    /// Download failed; for a speculative load the cloud keeps serving and
+    /// `isLoaded` never flips.
+    Failed,
+    /// The host called `cancel`.
+    Cancelled,
+}
+
+/// Download progress, bytes and state in one consistent read.
+///
+/// `progress` is aggregated across every artifact the model needs (weights
+/// plus companions such as a vision projector), never moves backwards, and
+/// reaches 1.0 only alongside `Ready`. `totalBytes` is null when the source
+/// declares no size — a Hugging Face repo, or a registry entry without one —
+/// in which case `downloadedBytes` is still exact and `progress` is coarser.
+///
+/// Derives `Copy` because it is carried as a stream item.
+#[data]
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct XybridDownloadStatus {
+    pub state: XybridDownloadState,
+    /// 0.0..=1.0.
+    pub progress: f32,
+    /// Bytes written so far, across every artifact.
+    pub downloaded_bytes: u64,
+    /// Declared total across every artifact, or null when unknown.
+    pub total_bytes: Option<u64>,
+}
+
+impl From<facade::DownloadStatus> for XybridDownloadStatus {
+    fn from(status: facade::DownloadStatus) -> Self {
+        let state = match status.state {
+            facade::DownloadState::Downloading => XybridDownloadState::Downloading,
+            facade::DownloadState::Ready => XybridDownloadState::Ready,
+            facade::DownloadState::Failed => XybridDownloadState::Failed,
+            facade::DownloadState::Cancelled => XybridDownloadState::Cancelled,
+        };
+        Self {
+            state,
+            progress: status.progress,
+            downloaded_bytes: status.downloaded_bytes,
+            total_bytes: status.total_bytes,
+        }
+    }
 }
 
 impl From<facade::InferenceResult> for XybridResult {
     fn from(r: facade::InferenceResult) -> Self {
         let metrics = XybridInferenceMetrics::from(&r.metrics);
+        let reasoning_content = r.envelope.metadata.get("reasoning_content").cloned();
         Self {
             envelope: r.envelope.into(),
             output_type: r.output_type.into(),
             model_id: r.model_id,
             latency_ms: r.latency_ms,
+            execution_target: r.execution_target.into(),
             metrics,
+            tool_calls: r.tool_calls.into_iter().map(Into::into).collect(),
+            reasoning_content,
+        }
+    }
+}
+
+/// What one stage of a pipeline run produced.
+#[data]
+#[derive(Clone)]
+pub struct XybridStageResult {
+    /// Stage identifier from the pipeline YAML (`id:`), or the model ID when
+    /// the stage declares none. Matches [`XybridPipeline::stage_names`].
+    pub stage_id: String,
+    /// This stage's output, which is also the next stage's input — the
+    /// transcript of an ASR stage, the reply of an LLM stage.
+    pub envelope: XybridEnvelope,
+    pub output_type: XybridOutputType,
+    pub latency_ms: u32,
+    /// Where this stage ran. Stages of one pipeline can run in different
+    /// places.
+    pub execution_target: XybridExecutionTarget,
+    /// Generation figures (TTFT, tokens per second) when this stage is a
+    /// language model; `total_ms` is the stage latency.
+    pub metrics: XybridInferenceMetrics,
+}
+
+impl From<facade::StageResult> for XybridStageResult {
+    fn from(s: facade::StageResult) -> Self {
+        Self {
+            stage_id: s.stage_id,
+            envelope: s.envelope.into(),
+            output_type: s.output_type.into(),
+            latency_ms: s.latency_ms,
+            execution_target: s.execution_target.into(),
+            metrics: XybridInferenceMetrics::from(&s.metrics),
+        }
+    }
+}
+
+/// Result of [`XybridPipeline::run`]: the final output plus every stage's own
+/// output, so a voice pipeline can show the transcript and the reply as well
+/// as play the audio.
+#[data]
+#[derive(Clone)]
+pub struct XybridPipelineResult {
+    /// The final stage's output — the same envelope as the last entry of
+    /// `stages`.
+    pub envelope: XybridEnvelope,
+    pub output_type: XybridOutputType,
+    /// Wall-clock time of the whole run.
+    pub latency_ms: u32,
+    /// Every executed stage, in order.
+    pub stages: Vec<XybridStageResult>,
+}
+
+impl From<facade::PipelineResult> for XybridPipelineResult {
+    fn from(r: facade::PipelineResult) -> Self {
+        Self {
+            envelope: r.envelope.into(),
+            output_type: r.output_type.into(),
+            latency_ms: r.latency_ms,
+            stages: r.stages.into_iter().map(Into::into).collect(),
         }
     }
 }
@@ -485,7 +829,24 @@ pub struct XybridStreamToken {
     pub token_id: Option<i64>,
     pub index: u64,
     pub cumulative_text: String,
+    /// `"tool_calls"` when the turn ended on a parseable tool-call block.
     pub finish_reason: Option<String>,
+    /// Tool calls parsed from the completed turn — populated on the
+    /// **terminal** token only (the one carrying `finish_reason`).
+    ///
+    /// Tool-call blocks are suppressed from the emitted stream, so there is
+    /// nothing in the token text to parse: a streaming caller halts here,
+    /// runs the tools, then continues the turn by streaming a
+    /// [`tool_results_envelope`] through the same call. Empty on every
+    /// mid-stream token and on turns that emitted no call.
+    pub tool_calls: Vec<XybridToolCall>,
+    /// The completed turn's raw output text, tool-call block included — pass
+    /// it to [`tool_results_envelope`] as `prior_assistant_text`.
+    ///
+    /// Present only alongside a non-empty [`Self::tool_calls`]. Not the same
+    /// as `cumulative_text`, which reports the *emitted* text with the
+    /// protocol blocks suppressed — which is why this field exists at all.
+    pub raw_text: Option<String>,
 }
 
 impl From<facade::StreamToken> for XybridStreamToken {
@@ -496,6 +857,8 @@ impl From<facade::StreamToken> for XybridStreamToken {
             index: token.index,
             cumulative_text: token.cumulative_text,
             finish_reason: token.finish_reason,
+            tool_calls: token.tool_calls.into_iter().map(Into::into).collect(),
+            raw_text: token.raw_text,
         }
     }
 }
@@ -555,6 +918,72 @@ impl From<facade::VoiceInfo> for XybridVoiceInfo {
             gender: v.gender,
             language: v.language,
             style: v.style,
+        }
+    }
+}
+
+// ============================================================================
+// Model cache management
+// ============================================================================
+
+#[data]
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum XybridCacheEntryLocation {
+    Registry,
+    Extracted,
+    HuggingFace,
+    HuggingFaceHub,
+}
+
+impl From<facade::CacheEntryLocation> for XybridCacheEntryLocation {
+    fn from(location: facade::CacheEntryLocation) -> Self {
+        match location {
+            facade::CacheEntryLocation::Registry => Self::Registry,
+            facade::CacheEntryLocation::Extracted => Self::Extracted,
+            facade::CacheEntryLocation::HuggingFace => Self::HuggingFace,
+            facade::CacheEntryLocation::HuggingFaceHub => Self::HuggingFaceHub,
+        }
+    }
+}
+
+#[data]
+#[derive(Clone)]
+pub struct XybridCacheEntry {
+    pub model_id: String,
+    pub location: XybridCacheEntryLocation,
+    pub path: String,
+    pub size_bytes: u64,
+}
+
+impl From<facade::CacheEntry> for XybridCacheEntry {
+    fn from(entry: facade::CacheEntry) -> Self {
+        Self {
+            model_id: entry.model_id,
+            location: entry.location.into(),
+            path: entry.path,
+            size_bytes: entry.size_bytes,
+        }
+    }
+}
+
+#[data]
+#[derive(Clone)]
+pub struct XybridCacheStatus {
+    pub total_size_bytes: u64,
+    pub entry_count: u32,
+    pub model_count: u32,
+    pub extracted_model_count: u32,
+    pub cache_root: String,
+}
+
+impl From<facade::CacheStatus> for XybridCacheStatus {
+    fn from(status: facade::CacheStatus) -> Self {
+        Self {
+            total_size_bytes: status.total_size_bytes,
+            entry_count: status.entry_count,
+            model_count: status.model_count,
+            extracted_model_count: status.extracted_model_count,
+            cache_root: status.cache_root,
         }
     }
 }
@@ -660,6 +1089,56 @@ pub fn init_sdk_cache_dir(cache_dir: String) {
     facade::init_sdk_cache_dir(cache_dir);
 }
 
+/// Returns aggregate storage usage across every managed model-cache location.
+#[export]
+pub fn cache_status() -> Result<XybridCacheStatus, XybridError> {
+    facade::cache_status()
+        .map(Into::into)
+        .map_err(XybridError::from)
+}
+
+/// Lists every physical model entry occupying managed cache storage.
+#[export]
+pub fn cache_entries() -> Result<Vec<XybridCacheEntry>, XybridError> {
+    facade::cache_entries()
+        .map(|entries| entries.into_iter().map(Into::into).collect())
+        .map_err(XybridError::from)
+}
+
+/// Returns whether a model occupies any managed cache entry.
+#[export]
+pub fn cache_is_model_cached(model_id: String) -> Result<bool, XybridError> {
+    facade::cache_is_model_cached(model_id).map_err(XybridError::from)
+}
+
+/// Resolves the preferred local cache path for a model, if present.
+#[export]
+pub fn cache_model_path(model_id: String) -> Result<Option<String>, XybridError> {
+    facade::cache_model_path(model_id).map_err(XybridError::from)
+}
+
+/// Lists model IDs extracted, validated, and ready to run offline.
+#[export]
+pub fn cache_list_extracted_model_ids() -> Result<Vec<String>, XybridError> {
+    facade::cache_list_extracted_model_ids().map_err(XybridError::from)
+}
+
+/// Removes every managed cache entry for one model.
+///
+/// Do not call concurrently with a load of the same model.
+#[export]
+pub fn cache_remove_model(model_id: String) -> Result<u32, XybridError> {
+    facade::cache_remove_model(model_id).map_err(XybridError::from)
+}
+
+/// Clears all managed model-cache storage.
+///
+/// Do not call concurrently with any model load.
+#[export]
+pub fn cache_clear() -> Result<u32, XybridError> {
+    facade::cache_clear().map_err(XybridError::from)
+}
+
 #[export]
 pub fn set_binding(binding: String) {
     ensure_native_logging();
@@ -678,18 +1157,417 @@ pub fn set_provider_api_key(provider: String, api_key: String) {
     facade::set_provider_api_key(provider, api_key);
 }
 
+/// Point the cloud gateway at a platform base URL (staging, self-hosted).
+/// Pass a bare base URL — the `/v1` suffix is applied internally.
+#[export]
+pub fn set_platform_url(url: String) {
+    ensure_native_logging();
+    facade::set_platform_url(url);
+}
+
+/// Enable speculative cloud fallback globally: a registry model that isn't
+/// downloaded yet is served from the gateway while the weights download.
+///
+/// LLM/chat only — prefer `XybridModel.fromRegistrySpeculative` when the app
+/// also loads ASR/TTS models, which cannot be served this way.
+#[export]
+pub fn set_speculative_cloud(enabled: bool) {
+    ensure_native_logging();
+    facade::set_speculative_cloud(enabled);
+}
+
+/// Whether a Xybrid gateway API key is resolvable (in-memory or env).
+#[export]
+pub fn has_api_key() -> bool {
+    facade::has_api_key()
+}
+
+/// Whether the global speculative-cloud default is on.
+#[export]
+pub fn is_speculative_cloud_enabled() -> bool {
+    facade::is_speculative_cloud_enabled()
+}
+
+/// Whether `XybridModel::from_registry_speculative(model_id)` would actually
+/// speculate: an API key resolves and the model is not already cached.
+///
+/// Lets the hand-written Swift/Kotlin loader facades answer "will this
+/// speculate?" before loading. Never touches the network.
+#[export]
+pub fn will_speculate_for_model(model_id: String) -> bool {
+    facade::will_speculate_for_model(model_id)
+}
+
 /// The SDK version string (tracks `CARGO_PKG_VERSION`).
 #[export]
 pub fn version() -> String {
     facade::version()
 }
 
+/// Release every idle loaded model's memory; returns how many were released.
+///
+/// Call this from the platform's low-memory hook (`didReceiveMemoryWarning`
+/// on iOS, `onTrimMemory` on Android). Models with a run in flight are
+/// skipped, and a released model reloads itself on next use — no reload call,
+/// no new error to handle.
+#[export]
+pub fn release_memory() -> u32 {
+    facade::release_memory()
+}
+
+/// Enable or disable automatic model release for subsequent loads.
+///
+/// When enabled, loading a model under device memory pressure first releases
+/// least-recently-used idle models. Off by default; [`release_memory`] works
+/// either way.
+#[export]
+pub fn set_auto_release(enabled: bool) {
+    facade::set_auto_release(enabled);
+}
+
+/// Whether automatic model release is enabled process-wide.
+#[export]
+pub fn is_auto_release_enabled() -> bool {
+    facade::is_auto_release_enabled()
+}
+
+// ============================================================================
+// XybridDownload handle
+// ============================================================================
+//
+// Named `XybridDownload`, not `XybridModelDownload`: BoltFFI derives native
+// symbols from class + method, and `XybridModelDownload::status` would collide
+// with `XybridModel::download_status`.
+
+/// Ring-buffer depth for a download progress stream.
+///
+/// Updates are throttled to ~10/s in the SDK and [`XybridDownload::status`]
+/// is always authoritative, so a host that falls this far behind can afford to
+/// drop frames rather than back-pressure the download.
+const DOWNLOAD_STREAM_CAPACITY: usize = 256;
+
+/// A model download running in the background, separate from loading it.
+///
+/// Every binding's load call blocks, so there is no object to poll while the
+/// weights come down — this is that object. Start it, drive a progress bar
+/// off [`Self::progress`] (or poll [`Self::status`]), then construct the
+/// model with `XybridModel(fromRegistry:)`, which hits the cache and returns
+/// at once.
+///
+/// Dropping the handle does not stop the transfer; call [`Self::cancel`].
+pub struct XybridDownload {
+    inner: std::sync::Arc<facade::ModelDownload>,
+}
+
+#[export]
+impl XybridDownload {
+    /// Start downloading a registry model. Returns immediately.
+    pub fn from_registry(id: String) -> Self {
+        Self {
+            inner: facade::ModelDownload::from_registry(id),
+        }
+    }
+
+    /// Start downloading a registry model resolved for a specific platform.
+    pub fn from_registry_with_platform(id: String, platform: String) -> Self {
+        Self {
+            inner: facade::ModelDownload::from_registry_with_platform(id, platform),
+        }
+    }
+
+    /// Current snapshot. Never blocks — safe from a UI thread or a per-frame
+    /// render loop.
+    pub fn status(&self) -> XybridDownloadStatus {
+        self.inner.status().into()
+    }
+
+    /// Whether the download reached a terminal state.
+    pub fn is_finished(&self) -> bool {
+        self.inner.is_finished()
+    }
+
+    /// The failure message once the download ended in `Failed` or
+    /// `Cancelled`; null otherwise. The stream carries the terminal *state*,
+    /// this carries the reason.
+    pub fn error(&self) -> Option<String> {
+        self.inner.error()
+    }
+
+    /// Pushed progress updates, closing once the download is terminal.
+    ///
+    /// Generated as an `AsyncStream` in Swift, a `Flow` in Kotlin, an
+    /// `IAsyncEnumerable` in C# and a subscription object in Python.
+    /// Cancelling the consuming task / scope / token unsubscribes; it does
+    /// **not** cancel the download itself — call [`Self::cancel`] for that.
+    ///
+    /// The current snapshot is delivered first, so subscribing late still
+    /// yields a frame, and a download that already finished closes at once
+    /// instead of hanging.
+    #[ffi_stream(item = XybridDownloadStatus)]
+    pub fn progress(&self) -> std::sync::Arc<EventSubscription<XybridDownloadStatus>> {
+        let subscription = std::sync::Arc::new(EventSubscription::<XybridDownloadStatus>::new(
+            DOWNLOAD_STREAM_CAPACITY,
+        ));
+        let producer = std::sync::Arc::clone(&subscription);
+        self.inner.watch(move |status| {
+            let status: XybridDownloadStatus = status.into();
+            producer.push_event(status);
+            if status.state != XybridDownloadState::Downloading {
+                // Terminal: close the stream so the host's `for await` /
+                // `collect` ends instead of waiting forever.
+                producer.unsubscribe();
+            }
+        });
+        subscription
+    }
+
+    /// Ask the download to stop. Takes effect within one chunk read, discards
+    /// the partial file, and moves the status to `Cancelled`. Idempotent, and
+    /// a no-op once the download is terminal.
+    pub fn cancel(&self) {
+        self.inner.cancel();
+    }
+}
+
+// ============================================================================
+// Live ASR session
+// ============================================================================
+//
+// Named `XybridStreamingSession`, and opened through its own constructor
+// rather than `XybridModel::stream`, because BoltFFI treats opaque types as
+// handle IDs that only the `impl` block they are defined on can return —
+// the same constraint that keeps `ModelLoader` out of this crate.
+
+/// How voice-activity detection (VAD) chunking is resolved for a session.
+///
+/// There is deliberately no "on, with the default model" variant: nothing
+/// ships a bundled Silero model, and the core handles VAD-enabled-without-a-
+/// directory by warning and silently falling back to fixed-window chunking.
+/// Enabling VAD therefore requires naming a directory.
+#[data]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum XybridVadMode {
+    /// Fixed time-window chunking; no voice-activity detection.
+    Off,
+    /// VAD on, using the Silero model in this directory, which must contain a
+    /// `model.onnx`.
+    Enabled { model_dir: String },
+}
+
+impl From<XybridVadMode> for facade::VadMode {
+    fn from(mode: XybridVadMode) -> Self {
+        match mode {
+            XybridVadMode::Off => facade::VadMode::Off,
+            XybridVadMode::Enabled { model_dir } => facade::VadMode::Enabled { model_dir },
+        }
+    }
+}
+
+/// Configuration for a live ASR session.
+///
+/// The model is not named here — it comes from the loaded `XybridModel` the
+/// session is opened on. This only configures *how* the audio is chunked.
+#[data]
+#[derive(Clone, Debug)]
+pub struct XybridStreamingConfig {
+    /// Sample rate of the audio you will feed. Must be 16000; the ASR
+    /// backends are fixed there, so anything else is rejected rather than
+    /// silently resampled.
+    pub sample_rate: u32,
+    /// Voice-activity-detection mode.
+    pub vad: XybridVadMode,
+    /// VAD sensitivity, 0.0–1.0. Ignored when `vad` is `Off`.
+    pub vad_threshold: f32,
+    /// Language hint (e.g. `"en"`); null uses the model default.
+    pub language: Option<String>,
+    /// Whisper encoder context in mel frames; null uses the model default.
+    pub audio_ctx: Option<u32>,
+}
+
+impl From<XybridStreamingConfig> for facade::StreamingConfig {
+    fn from(config: XybridStreamingConfig) -> Self {
+        Self {
+            sample_rate: config.sample_rate,
+            vad: config.vad.into(),
+            vad_threshold: config.vad_threshold,
+            language: config.language,
+            audio_ctx: config.audio_ctx,
+        }
+    }
+}
+
+/// A partial transcript emitted while audio is streaming.
+#[data]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct XybridPartialResult {
+    /// Best-effort transcript so far. Cumulative, not a delta — render it in
+    /// place of the previous partial rather than appending.
+    pub text: String,
+    /// `true` once this span is committed and will not change.
+    pub is_stable: bool,
+    /// Monotonic chunk sequence number this result corresponds to.
+    pub chunk_sequence: u64,
+    /// Audio covered so far, in milliseconds.
+    pub audio_duration_ms: u64,
+}
+
+impl From<facade::PartialResult> for XybridPartialResult {
+    fn from(p: facade::PartialResult) -> Self {
+        Self {
+            text: p.text,
+            is_stable: p.is_stable,
+            chunk_sequence: p.chunk_sequence,
+            audio_duration_ms: p.audio_duration_ms,
+        }
+    }
+}
+
+/// Ring-buffer depth for a partial-transcript stream.
+///
+/// Partials arrive at rolling-window rate (a few per second at most) and each
+/// one supersedes the last, so a host this far behind can afford to drop
+/// frames rather than back-pressure the transcriber.
+const PARTIAL_STREAM_CAPACITY: usize = 64;
+
+/// A live ASR session: feed microphone PCM in, read partial transcripts out.
+///
+/// This is the live-capture surface. `XybridModel::run` transcribes a
+/// finished buffer; this transcribes audio as it arrives, which is what
+/// dictation and captioning need.
+///
+/// Audio must be PCM **f32, mono, 16 kHz**. Converting from the platform's
+/// microphone format is the caller's job.
+pub struct XybridStreamingSession {
+    inner: std::sync::Arc<facade::AsrSession>,
+}
+
+#[export]
+impl XybridStreamingSession {
+    /// Open a session on an already-loaded ASR model.
+    ///
+    /// Starts a worker thread and warms the weights, so the first spoken
+    /// words do not pay the cold-start cost. Returns an error for a model
+    /// that does not support streaming, or a sample rate other than 16000.
+    pub fn for_model(
+        model: &XybridModel,
+        config: XybridStreamingConfig,
+    ) -> Result<Self, XybridError> {
+        let inner = model
+            .inner
+            .stream(config.into())
+            .map_err(XybridError::from)?;
+        Ok(Self { inner })
+    }
+
+    /// Feed PCM f32 mono 16 kHz samples.
+    ///
+    /// Hands the buffer to the worker and returns; transcription happens
+    /// there, never on the caller's thread. Blocks only when the queue is
+    /// full, which back-pressures a producer feeding faster than the model
+    /// can keep up.
+    pub fn feed(&self, samples: Vec<f32>) -> Result<(), XybridError> {
+        self.inner.feed(samples).map_err(XybridError::from)
+    }
+
+    /// Pushed partial transcripts, closing once the session ends.
+    ///
+    /// Generated as an `AsyncStream` in Swift, a `Flow` in Kotlin, an
+    /// `IAsyncEnumerable` in C# and an iterable subscription in Python.
+    ///
+    /// A partial produced before subscribing is delivered immediately, so
+    /// audio fed before the stream is attached is never silently lost, and
+    /// subscribing to a finished session closes at once instead of hanging.
+    #[ffi_stream(item = XybridPartialResult)]
+    pub fn partials(&self) -> std::sync::Arc<EventSubscription<XybridPartialResult>> {
+        let subscription = std::sync::Arc::new(EventSubscription::<XybridPartialResult>::new(
+            PARTIAL_STREAM_CAPACITY,
+        ));
+        let producer = std::sync::Arc::clone(&subscription);
+        self.inner.watch(move |event| match event {
+            facade::AsrEvent::Partial(partial) => {
+                producer.push_event(partial.into());
+            }
+            facade::AsrEvent::Finished => producer.unsubscribe(),
+        });
+        subscription
+    }
+
+    /// Finalize: drain buffered audio and return the complete transcript.
+    ///
+    /// The session is over afterwards — `feed` fails and the partial stream
+    /// closes. Blocks until the last chunk is transcribed, so call it off the
+    /// UI thread.
+    pub fn flush(&self) -> Result<String, XybridError> {
+        self.inner.flush().map_err(XybridError::from)
+    }
+
+    /// Reset to transcribe fresh audio without reloading the model.
+    pub fn reset(&self) -> Result<(), XybridError> {
+        self.inner.reset().map_err(XybridError::from)
+    }
+
+    /// Stop the session and release the model, discarding buffered audio.
+    ///
+    /// Idempotent. Use [`Self::flush`] when you want the transcript — this is
+    /// the "user walked away" path. Named `cancel` rather than `close`
+    /// because BoltFFI already gives every handle a generated `close()` for
+    /// the host's disposal idiom.
+    pub fn cancel(&self) {
+        self.inner.cancel();
+    }
+
+    /// Whether the session is still accepting audio.
+    pub fn is_running(&self) -> bool {
+        self.inner.is_running()
+    }
+}
+
+// ============================================================================
+// Cancellation
+// ============================================================================
+
+/// A stop button for an in-flight run.
+///
+/// Create one, hand it to `run` / `run_stream` (or the context variants), and
+/// call [`Self::cancel`] from anywhere — another thread, a UI action — to stop
+/// generation at the next token boundary. Cancelling after a run has finished
+/// is a no-op, and one token may be shared by several runs.
+///
+/// Cancellation is a separate handle rather than a field on
+/// [`XybridRunOptions`] because the options are a plain data record that
+/// crosses the wire by value; a stop button has to stay shared with the
+/// caller after the run starts.
+pub struct XybridCancellationToken {
+    inner: std::sync::Arc<facade::CancellationToken>,
+}
+
+#[export]
+impl XybridCancellationToken {
+    /// Create a fresh, un-cancelled token.
+    #[allow(clippy::new_without_default)]
+    pub fn new() -> Self {
+        Self {
+            inner: facade::CancellationToken::new(),
+        }
+    }
+
+    /// Request cancellation. Idempotent, and safe to call from any thread.
+    pub fn cancel(&self) {
+        self.inner.cancel();
+    }
+
+    /// Whether [`Self::cancel`] has been called on this token.
+    pub fn is_cancelled(&self) -> bool {
+        self.inner.is_cancelled()
+    }
+}
+
 // ============================================================================
 // XybridModel handle
 // ============================================================================
 //
-// Scope: load / run / pull-stream / warmup / unload / voice accessors.
-// Cancellation and conversation context remain follow-up work.
+// Scope: load / run / pull-stream / warmup / unload / voice accessors /
+// conversation context / cancellation.
 //
 // `ModelLoader` is intentionally **not** mirrored as a separate
 // `#[export]` type. BoltFFI's wire layer treats opaque types as handle
@@ -732,6 +1610,20 @@ impl XybridModel {
         Ok(Self::new(model))
     }
 
+    /// Load from the registry, serving from the cloud gateway while the weights
+    /// download in the background.
+    ///
+    /// Returns almost immediately instead of blocking on the download. Requires
+    /// a resolvable API key and an uncached model; otherwise it behaves exactly
+    /// like `from_registry`. Poll `download_status` for progress and
+    /// `is_cloud_serving` to know which leg is answering. LLM/chat models only.
+    pub fn from_registry_speculative(id: String) -> Result<Self, XybridError> {
+        let model = facade::ModelLoader::from_registry_speculative(id)
+            .load()
+            .map_err(XybridError::from)?;
+        Ok(Self::new(model))
+    }
+
     /// Load from a local model directory (must contain `model_metadata.json`).
     pub fn from_directory(path: String) -> Result<Self, XybridError> {
         let loader = facade::ModelLoader::from_directory(path).map_err(XybridError::from)?;
@@ -749,6 +1641,17 @@ impl XybridModel {
     /// Resolve and load from a HuggingFace repo (`org/repo` or `org/repo:variant`).
     pub fn from_huggingface(repo: String) -> Result<Self, XybridError> {
         let model = facade::ModelLoader::from_huggingface(repo)
+            .load()
+            .map_err(XybridError::from)?;
+        Ok(Self::new(model))
+    }
+
+    /// Resolve and load a HuggingFace repository pinned to a revision.
+    pub fn from_huggingface_with_revision(
+        repo: String,
+        revision: String,
+    ) -> Result<Self, XybridError> {
+        let model = facade::ModelLoader::from_huggingface_with_revision(repo, revision)
             .load()
             .map_err(XybridError::from)?;
         Ok(Self::new(model))
@@ -778,6 +1681,48 @@ impl XybridModel {
         self.inner.is_loaded()
     }
 
+    /// Whether runs are currently answered by the cloud because the local
+    /// weights are not ready yet. `false` for ordinary local models.
+    pub fn is_cloud_serving(&self) -> bool {
+        self.inner.is_cloud_serving()
+    }
+
+    /// Download progress + state in one read — poll this to drive a progress
+    /// bar. Reports `Ready` at 1.0 for an ordinary local model, so hosts need
+    /// no special case.
+    pub fn download_status(&self) -> XybridDownloadStatus {
+        self.inner.download_status().into()
+    }
+
+    /// Block until the download finishes or `timeout_ms` elapses, then report
+    /// the status. Call it off the UI thread (the same place `from_registry` is
+    /// already called). `timeout_ms = 0` makes it a non-blocking read.
+    pub fn await_download(&self, timeout_ms: u64) -> XybridDownloadStatus {
+        self.inner.await_download(timeout_ms).into()
+    }
+
+    /// Pushed download updates for a speculatively-loaded model — the stream
+    /// counterpart of [`Self::await_download`], and what issue #504 asks for.
+    ///
+    /// Emits the current snapshot first, then every update, then closes on
+    /// the terminal state. An ordinary local model is already `Ready`, so its
+    /// stream yields one frame and ends.
+    #[ffi_stream(item = XybridDownloadStatus)]
+    pub fn download_progress(&self) -> std::sync::Arc<EventSubscription<XybridDownloadStatus>> {
+        let subscription = std::sync::Arc::new(EventSubscription::<XybridDownloadStatus>::new(
+            DOWNLOAD_STREAM_CAPACITY,
+        ));
+        let producer = std::sync::Arc::clone(&subscription);
+        self.inner.watch_download(move |status| {
+            let status: XybridDownloadStatus = status.into();
+            producer.push_event(status);
+            if status.state != XybridDownloadState::Downloading {
+                producer.unsubscribe();
+            }
+        });
+        subscription
+    }
+
     pub fn supports_streaming(&self) -> bool {
         self.inner.supports_streaming()
     }
@@ -787,8 +1732,23 @@ impl XybridModel {
         self.inner.supports_token_streaming()
     }
 
+    /// Return the model's resolved generation defaults.
+    pub fn default_generation_config(&self) -> XybridGenerationConfig {
+        self.inner.default_generation_config().into()
+    }
+
     pub fn is_llm(&self) -> bool {
         self.inner.is_llm()
+    }
+
+    /// Whether the model bundle declares local tool-calling support.
+    ///
+    /// Advisory tri-state: `null` means the bundle says nothing, so the host
+    /// cannot tell. Gate tool UI on it; enforcement stays at run time — a
+    /// tools-bearing request against a model whose chat template has no tool
+    /// support fails as invalid input regardless of what this reports.
+    pub fn supports_tool_calling(&self) -> Option<bool> {
+        self.inner.supports_tool_calling()
     }
 
     pub fn has_voices(&self) -> bool {
@@ -816,18 +1776,22 @@ impl XybridModel {
     ///
     /// The hand-written wrappers add a one-arg `run(envelope)` convenience that
     /// forwards `None`, so simple call sites stay ergonomic.
+    /// Pass a [`XybridCancellationToken`] to keep a stop button on the run;
+    /// `None` means the run cannot be cancelled.
     pub fn run(
         &self,
         envelope: XybridEnvelope,
         options: Option<XybridRunOptions>,
+        cancel: &XybridCancellationToken,
     ) -> Result<XybridResult, XybridError> {
-        let result = match options {
-            Some(opts) => self
-                .inner
-                .run_with_options(envelope.into(), opts.into(), None),
-            None => self.inner.run(envelope.into()),
-        }
-        .map_err(XybridError::from)?;
+        let result = self
+            .inner
+            .run_with_options(
+                envelope.into(),
+                options.map(Into::into).unwrap_or_default(),
+                Some(cancel.inner.clone()),
+            )
+            .map_err(XybridError::from)?;
         Ok(result.into())
     }
 
@@ -835,17 +1799,20 @@ impl XybridModel {
     ///
     /// The identifier remains valid until the final result is taken, an error
     /// is returned, or [`Self::stream_close`] is called.
+    /// Pass a [`XybridCancellationToken`] to keep a stop button on the run;
+    /// `None` means the run cannot be cancelled.
     pub fn run_stream(
         &self,
         envelope: XybridEnvelope,
         options: Option<XybridRunOptions>,
+        cancel: &XybridCancellationToken,
     ) -> Result<u64, XybridError> {
         let session = self
             .inner
             .run_stream(
                 envelope.into(),
                 options.map(Into::into).unwrap_or_default(),
-                None,
+                Some(cancel.inner.clone()),
             )
             .map_err(XybridError::from)?;
         let stream_id = self
@@ -936,18 +1903,26 @@ impl XybridModel {
     /// Only the generation config from `options` is applied — abort signals and
     /// cloud fallback are not wired on the context path (matches the facade's
     /// `run_with_context`).
+    /// Pass a [`XybridCancellationToken`] to keep a stop button on the run;
+    /// `None` means the run cannot be cancelled.
+    ///
+    /// Routes through the facade's options path, so abort signals and cloud
+    /// fallback on `options` are honoured rather than dropped.
     pub fn run_with_context(
         &self,
         envelope: XybridEnvelope,
         context: &XybridConversationContext,
         options: Option<XybridRunOptions>,
+        cancel: &XybridCancellationToken,
     ) -> Result<XybridResult, XybridError> {
-        let generation_config = options
-            .and_then(|opts| opts.generation_config)
-            .map(Into::into);
         let result = self
             .inner
-            .run_with_context(envelope.into(), context.inner.clone(), generation_config)
+            .run_with_context_options(
+                envelope.into(),
+                context.inner.clone(),
+                options.map(Into::into).unwrap_or_default(),
+                Some(cancel.inner.clone()),
+            )
             .map_err(XybridError::from)?;
         Ok(result.into())
     }
@@ -955,11 +1930,14 @@ impl XybridModel {
     /// Start context-aware token streaming; returns a model-scoped session id.
     /// The pull protocol is identical to [`Self::run_stream`]
     /// (`stream_next` / `stream_result` / `stream_close`).
+    /// Pass a [`XybridCancellationToken`] to keep a stop button on the run;
+    /// `None` means the run cannot be cancelled.
     pub fn run_stream_with_context(
         &self,
         envelope: XybridEnvelope,
         context: &XybridConversationContext,
         options: Option<XybridRunOptions>,
+        cancel: &XybridCancellationToken,
     ) -> Result<u64, XybridError> {
         let session = self
             .inner
@@ -967,7 +1945,7 @@ impl XybridModel {
                 envelope.into(),
                 context.inner.clone(),
                 options.map(Into::into).unwrap_or_default(),
-                None,
+                Some(cancel.inner.clone()),
             )
             .map_err(XybridError::from)?;
         let stream_id = self
@@ -992,6 +1970,71 @@ impl XybridModel {
 
     pub fn unload(&self) -> Result<(), XybridError> {
         self.inner.unload().map_err(XybridError::from)
+    }
+}
+
+// ============================================================================
+// XybridPipeline handle
+// ============================================================================
+
+/// A loaded multi-stage inference pipeline.
+///
+/// Constructors parse and resolve the pipeline in one step; there is no
+/// separate `PipelineRef` handle on the foreign surface.
+pub struct XybridPipeline {
+    inner: std::sync::Arc<facade::Pipeline>,
+}
+
+#[export]
+impl XybridPipeline {
+    /// Parse and load a pipeline from YAML content.
+    pub fn from_yaml(yaml: String) -> Result<Self, XybridError> {
+        let inner = facade::Pipeline::from_yaml(yaml).map_err(XybridError::from)?;
+        Ok(Self { inner })
+    }
+
+    /// Read, parse, and load a pipeline from a YAML file.
+    pub fn from_file(path: String) -> Result<Self, XybridError> {
+        let inner = facade::Pipeline::from_file(path).map_err(XybridError::from)?;
+        Ok(Self { inner })
+    }
+
+    /// Load a pipeline bundle.
+    pub fn from_bundle(path: String) -> Result<Self, XybridError> {
+        let inner = facade::Pipeline::from_bundle(path).map_err(XybridError::from)?;
+        Ok(Self { inner })
+    }
+
+    /// Execute every stage, downloading any missing models first, and return
+    /// each stage's output alongside the final one.
+    ///
+    /// Of `options`, only `correlation_id` applies to a pipeline run. Setting
+    /// `generation_config` or `abort_on` fails with `ConfigError` rather than
+    /// being ignored; per-stage generation settings belong in the YAML.
+    pub fn run(
+        &self,
+        envelope: XybridEnvelope,
+        options: Option<XybridRunOptions>,
+    ) -> Result<XybridPipelineResult, XybridError> {
+        self.inner
+            .run(envelope.into(), options.map(Into::into).unwrap_or_default())
+            .map(Into::into)
+            .map_err(XybridError::from)
+    }
+
+    /// Pipeline name from the YAML definition, if present.
+    pub fn name(&self) -> Option<String> {
+        self.inner.name()
+    }
+
+    /// Stage identifiers in execution order.
+    pub fn stage_names(&self) -> Vec<String> {
+        self.inner.stage_names()
+    }
+
+    /// Number of stages in the pipeline.
+    pub fn stage_count(&self) -> u32 {
+        self.inner.stage_count()
     }
 }
 
@@ -1048,6 +2091,11 @@ impl XybridConversationContext {
     /// Number of history turns (excludes the system envelope).
     pub fn history_len(&self) -> u32 {
         self.inner.history_len()
+    }
+
+    /// Return history turns, excluding the persistent system envelope.
+    pub fn history(&self) -> Vec<XybridEnvelope> {
+        self.inner.history().into_iter().map(Into::into).collect()
     }
 
     /// Whether a persistent system-prompt envelope is set.
@@ -1245,6 +2293,60 @@ mod tests {
     use super::*;
 
     #[test]
+    fn cache_records_cross_from_facade_without_losing_storage_semantics() {
+        let entry = XybridCacheEntry::from(facade::CacheEntry {
+            model_id: "owner/repo".into(),
+            location: facade::CacheEntryLocation::HuggingFace,
+            path: "/cache/hf/repo".into(),
+            size_bytes: 2048,
+        });
+        let status = XybridCacheStatus::from(facade::CacheStatus {
+            total_size_bytes: 2048,
+            entry_count: 1,
+            model_count: 1,
+            extracted_model_count: 0,
+            cache_root: "/cache".into(),
+        });
+
+        assert_eq!(entry.model_id, "owner/repo");
+        assert!(entry.location == XybridCacheEntryLocation::HuggingFace);
+        assert_eq!(entry.path, "/cache/hf/repo");
+        assert_eq!(entry.size_bytes, 2048);
+        assert_eq!(status.total_size_bytes, 2048);
+        assert_eq!(status.entry_count, 1);
+        assert_eq!(status.model_count, 1);
+        assert_eq!(status.extracted_model_count, 0);
+        assert_eq!(status.cache_root, "/cache");
+    }
+
+    #[test]
+    fn cancellation_token_starts_uncancelled_and_latches() {
+        let token = XybridCancellationToken::new();
+        assert!(!token.is_cancelled());
+
+        token.cancel();
+        assert!(token.is_cancelled());
+
+        // Idempotent: a second cancel must not clear the flag.
+        token.cancel();
+        assert!(token.is_cancelled());
+    }
+
+    #[test]
+    fn cancellation_token_shares_one_flag_across_clones() {
+        // Two bolt tokens built from the same facade handle observe each
+        // other, which is what lets a UI thread stop a run on a worker.
+        let token = XybridCancellationToken::new();
+        let shared = XybridCancellationToken {
+            inner: token.inner.clone(),
+        };
+
+        assert!(!shared.is_cancelled());
+        token.cancel();
+        assert!(shared.is_cancelled());
+    }
+
+    #[test]
     fn envelope_roundtrips_through_facade() {
         let env = XybridEnvelope {
             kind: XybridEnvelopeKind::Text { text: "hi".into() },
@@ -1264,6 +2366,104 @@ mod tests {
             _ => panic!("expected text"),
         }
         assert_eq!(back.metadata.len(), 1);
+    }
+
+    #[test]
+    fn pipeline_handle_crosses_bolt_with_introspection() {
+        let pipeline = XybridPipeline::from_yaml(
+            r#"
+name: assistant
+stages:
+  - id: answer
+    model: gpt-4o-mini
+    target: cloud
+    provider: openai
+"#
+            .into(),
+        )
+        .expect("cloud-only pipeline should resolve without model downloads");
+
+        assert_eq!(pipeline.name().as_deref(), Some("assistant"));
+        assert_eq!(pipeline.stage_names(), vec!["answer"]);
+        assert_eq!(pipeline.stage_count(), 1);
+    }
+
+    #[test]
+    fn pipeline_run_rejects_options_it_cannot_honour() {
+        let pipeline = XybridPipeline::from_yaml(
+            "stages:\n  - id: answer\n    model: gpt-4o-mini\n    provider: openai\n".into(),
+        )
+        .expect("cloud-only pipeline should resolve without model downloads");
+        let options = XybridRunOptions {
+            generation_config: Some(XybridGenerationConfig {
+                max_tokens: Some(8),
+                temperature: None,
+                top_p: None,
+                min_p: None,
+                top_k: None,
+                repetition_penalty: None,
+                stop_sequences: Vec::new(),
+                grammar: None,
+                tools: Vec::new(),
+            }),
+            abort_on: Vec::new(),
+            fallback_to_cloud: false,
+            max_grace_tokens: 0,
+            correlation_id: None,
+        };
+
+        let envelope = XybridEnvelope {
+            kind: XybridEnvelopeKind::Text { text: "hi".into() },
+            metadata: Vec::new(),
+        };
+
+        let result = pipeline.run(envelope, Some(options));
+
+        assert!(
+            matches!(result, Err(XybridError::ConfigError { .. })),
+            "a pipeline run must not silently drop generation_config"
+        );
+    }
+
+    #[test]
+    fn pipeline_result_crosses_bolt_with_every_stage() {
+        let stage = |id: &str, kind: facade::EnvelopeKind| facade::StageResult {
+            stage_id: id.into(),
+            envelope: facade::Envelope {
+                kind,
+                metadata: std::collections::HashMap::new(),
+            },
+            output_type: facade::OutputType::Text,
+            latency_ms: 10,
+            execution_target: facade::ExecutionTarget::Local,
+            metrics: facade::InferenceMetrics::default(),
+        };
+        let asr = stage(
+            "asr",
+            facade::EnvelopeKind::Text {
+                text: "hello".into(),
+            },
+        );
+        let llm = stage(
+            "llm",
+            facade::EnvelopeKind::Text {
+                text: "hi there".into(),
+            },
+        );
+        let result = XybridPipelineResult::from(facade::PipelineResult {
+            envelope: llm.envelope.clone(),
+            output_type: facade::OutputType::Text,
+            latency_ms: 20,
+            stages: vec![asr, llm],
+        });
+
+        let ids: Vec<&str> = result.stages.iter().map(|s| s.stage_id.as_str()).collect();
+        assert_eq!(ids, ["asr", "llm"]);
+        assert!(matches!(
+            &result.stages[0].envelope.kind,
+            XybridEnvelopeKind::Text { text } if text == "hello"
+        ));
+        assert_eq!(result.latency_ms, 20);
     }
 
     #[test]
@@ -1301,11 +2501,179 @@ mod tests {
             index: 3,
             cumulative_text: "say hi".into(),
             finish_reason: None,
+            tool_calls: Vec::new(),
+            raw_text: None,
         }));
 
         assert_eq!(event.kind, XybridStreamEventKind::Token);
         let token = event.token.expect("token event should carry a token");
         assert_eq!(token.token, "hi");
         assert_eq!(token.index, 3);
+        assert!(token.tool_calls.is_empty());
+    }
+
+    #[test]
+    fn terminal_stream_token_carries_tool_calls_across_the_boundary() {
+        // Foreign callers dispatch on this instead of parsing token text —
+        // the call blocks never reach the stream.
+        let event = XybridStreamEvent::from(facade::StreamEvent::Token(facade::StreamToken {
+            token: String::new(),
+            token_id: None,
+            index: 9,
+            cumulative_text: "checking".into(),
+            finish_reason: Some("tool_calls".into()),
+            raw_text: Some("checking<|tool_call_start|>[x()]<|tool_call_end|>".into()),
+            tool_calls: vec![facade::ToolCall {
+                id: "call_0".into(),
+                name: "get_temperature".into(),
+                arguments_json: r#"{"room":"kitchen"}"#.into(),
+            }],
+        }));
+
+        let token = event.token.expect("token event should carry a token");
+        assert_eq!(token.finish_reason.as_deref(), Some("tool_calls"));
+        assert_eq!(token.tool_calls.len(), 1);
+        assert_eq!(token.tool_calls[0].name, "get_temperature");
+        assert!(
+            token.raw_text.is_some(),
+            "the replayable raw text must cross too"
+        );
+    }
+
+    #[test]
+    fn generation_config_crosses_from_facade_with_resolved_values() {
+        let config = facade::GenerationConfig {
+            max_tokens: Some(128),
+            temperature: Some(0.25),
+            top_p: Some(0.75),
+            min_p: Some(0.05),
+            top_k: Some(32),
+            repetition_penalty: Some(1.1),
+            stop_sequences: vec!["</s>".into(), "END".into()],
+            grammar: Some("root ::= \"ok\"".into()),
+            tools: vec![facade::ToolDefinition {
+                name: "weather".into(),
+                description: "Weather lookup".into(),
+                parameters_json: r#"{"type":"object"}"#.into(),
+            }],
+        };
+
+        let wire = XybridGenerationConfig::from(config);
+
+        assert_eq!(wire.max_tokens, Some(128));
+        assert_eq!(wire.temperature, Some(0.25));
+        assert_eq!(wire.top_p, Some(0.75));
+        assert_eq!(wire.min_p, Some(0.05));
+        assert_eq!(wire.top_k, Some(32));
+        assert_eq!(wire.repetition_penalty, Some(1.1));
+        assert_eq!(wire.stop_sequences, vec!["</s>", "END"]);
+        assert_eq!(wire.grammar.as_deref(), Some("root ::= \"ok\""));
+        assert_eq!(wire.tools.len(), 1);
+        assert_eq!(wire.tools[0].name, "weather");
+        assert_eq!(wire.tools[0].description, "Weather lookup");
+        assert_eq!(wire.tools[0].parameters_json, r#"{"type":"object"}"#);
+    }
+
+    #[test]
+    fn result_conversion_exposes_reasoning_content() {
+        // Given
+        let mut envelope = facade::Envelope::text("answer".into());
+        envelope
+            .metadata
+            .insert("reasoning_content".into(), "reasoning".into());
+        let result = facade::InferenceResult {
+            envelope,
+            output_type: facade::OutputType::Text,
+            model_id: "model".into(),
+            latency_ms: 1,
+            execution_target: facade::ExecutionTarget::Local,
+            metrics: facade::InferenceMetrics {
+                total_ms: 1,
+                ttft_ms: None,
+                tokens_per_second: None,
+                prefill_tps: None,
+                decode_tps: None,
+                tokens_out: None,
+                stage_latencies_ms: Vec::new(),
+            },
+            tool_calls: Vec::new(),
+        };
+
+        // When
+        let wire = XybridResult::from(result);
+
+        // Then
+        assert_eq!(wire.reasoning_content.as_deref(), Some("reasoning"));
+        assert!(wire
+            .envelope
+            .metadata
+            .iter()
+            .any(|entry| { entry.key == "reasoning_content" && entry.value == "reasoning" }));
+    }
+
+    #[test]
+    fn envelope_metadata_order_is_stable_across_wire_conversions() {
+        // Given
+        let envelope = facade::Envelope {
+            kind: facade::EnvelopeKind::Text {
+                text: "hello".into(),
+            },
+            metadata: [
+                ("zeta".to_string(), "last".to_string()),
+                ("alpha".to_string(), "first".to_string()),
+            ]
+            .into_iter()
+            .collect(),
+        };
+
+        // When
+        let first = XybridEnvelope::from(envelope.clone());
+        let second = XybridEnvelope::from(envelope);
+
+        // Then
+        assert_eq!(
+            first
+                .metadata
+                .iter()
+                .map(|entry| entry.key.as_str())
+                .collect::<Vec<_>>(),
+            vec!["alpha", "zeta"]
+        );
+        assert_eq!(
+            first
+                .metadata
+                .iter()
+                .map(|entry| (entry.key.as_str(), entry.value.as_str()))
+                .collect::<Vec<_>>(),
+            second
+                .metadata
+                .iter()
+                .map(|entry| (entry.key.as_str(), entry.value.as_str()))
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn conversation_context_history_crosses_the_wire() {
+        // Given
+        let context = XybridConversationContext::new();
+        context
+            .push(XybridEnvelope {
+                kind: XybridEnvelopeKind::Text {
+                    text: "hello".into(),
+                },
+                metadata: Vec::new(),
+            })
+            .expect("test envelope should be accepted");
+
+        // When
+        let history = context.history();
+
+        // Then
+        assert_eq!(history.len(), 1);
+        assert!(matches!(
+            &history[0].kind,
+            XybridEnvelopeKind::Text { text } if text == "hello"
+        ));
     }
 }

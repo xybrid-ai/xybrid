@@ -261,11 +261,10 @@ impl VoiceEmbeddingLoader {
         let voice_bytes = &bytes[start..end];
 
         let embedding: Vec<f32> = voice_bytes
-            .chunks_exact(4)
-            .map(|chunk| {
-                let bytes: [u8; 4] = chunk.try_into().unwrap();
-                f32::from_le_bytes(bytes)
-            })
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|chunk| f32::from_le_bytes(*chunk))
             .collect();
 
         Ok(embedding)

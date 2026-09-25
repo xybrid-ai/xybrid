@@ -153,9 +153,11 @@ use xybrid_core::orchestrator::{Orchestrator, StageExecutionResult};
 pub mod benchmark;
 pub mod cache;
 pub mod device;
+pub mod download;
 pub mod llm;
 pub mod metadata_gen;
 pub mod model;
+pub mod model_registry;
 pub mod pipeline;
 pub mod platform;
 pub mod registry_client;
@@ -212,16 +214,19 @@ pub use xybrid_core::execution::template as execution_template;
 
 // SDK types (new API)
 pub use benchmark::{compare_benchmarks, BenchmarkResult, ExecutionProviderInfo};
-pub use cache::{CacheManager, CacheStatus, SdkCacheProvider};
+pub use cache::{CacheEntryInfo, CacheEntryLocation, CacheManager, CacheStatus, SdkCacheProvider};
 pub use device::{device_id, Device};
+pub use download::{DownloadState, DownloadStatus, ModelDownload};
 pub use llm::{
     default_gateway_url, set_gateway_url, ChatMessage, CompletionRequest, CompletionResponse,
     LlmBackend, LlmClientConfig, MessageRole, TokenUsage,
 };
 pub use model::SdkError;
 pub use model::{
-    ModelLoader, SdkResult, SeamInfo, StreamConfig, StreamEvent, StreamToken, XybridModel,
+    LoadState, ModelLoader, SdkResult, SeamInfo, StreamConfig, StreamEvent, StreamToken,
+    XybridModel,
 };
+pub use model_registry::{release_memory, AutoReleasePolicy};
 pub use platform::current_platform;
 pub use registry_client::{CacheStats, ModelSummary, RegistryClient, ResolvedVariant};
 pub use run_options::{AbortPolicy, AbortReason, AbortSignal, CancellationToken, RunOptions};
@@ -254,7 +259,9 @@ pub use pipeline::{
     TextInputConfig,
     Xybrid,
 };
-pub use result::{InferenceMetrics, InferenceResult, OutputType, StageLatency};
+pub use result::{
+    ExecutionProvenance, InferenceMetrics, InferenceResult, OutputType, StageLatency,
+};
 pub use source::ModelSource;
 pub use stream::{PartialResult, StreamState, StreamStats, TranscriptionResult, XybridStream};
 // FFI streaming types for platform bindings (Flutter, Kotlin, Swift)
@@ -310,9 +317,10 @@ static BINDING: OnceLock<&'static str> = OnceLock::new();
 
 /// Default binding identifier reported in the registry telemetry header.
 ///
-/// Each platform binding (Flutter, Kotlin, Swift, Unity) overrides this via
-/// [`set_binding`] (process-global) or [`SdkConfig::with_binding`] (per-config)
-/// so registry calls can be attributed correctly.
+/// Each platform binding (Flutter, Kotlin, React Native, Swift, Unity)
+/// overrides this via [`set_binding`] (process-global) or
+/// [`SdkConfig::with_binding`] (per-config) so registry calls can be
+/// attributed correctly.
 pub const DEFAULT_BINDING: &str = "rust";
 
 /// SDK crate version, stamped onto every telemetry event as `sdk_version` and
@@ -326,9 +334,11 @@ pub const SDK_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Register the binding identifier for this process.
 ///
-/// Each platform binding (Flutter, Kotlin, Swift, Unity) calls this once at
-/// SDK init. The first call wins — subsequent calls are silent no-ops, which
-/// matches the lifecycle (a process is bound to exactly one platform binding).
+/// Each platform binding (Flutter, Kotlin, React Native, Swift, Unity) calls
+/// this once at SDK init. The first call wins — subsequent calls are silent
+/// no-ops, which matches the lifecycle (a process is bound to exactly one
+/// platform binding). A binding that wraps another SDK (React Native over
+/// Swift or Kotlin) registers before the SDK it wraps.
 ///
 /// `RegistryClient` default constructors (`new`, `default_client`,
 /// `with_url`, `from_env`) read this value via [`get_binding`], so any
@@ -491,9 +501,10 @@ pub fn set_api_key(api_key: &str) {
 /// Mirrors [`set_api_key`]: the value is stored in a process-memory cell rather
 /// than the environment, so it is safe to call after telemetry threads have
 /// started (a concurrent `setenv`/`getenv` is UB). Consulted by the gateway
-/// ahead of the `XYBRID_PLATFORM_URL` env var; `XYBRID_GATEWAY_URL` (explicit,
-/// `/v1`-suffixed) still takes precedence. Pass a bare base URL — the `/v1`
-/// suffix is applied internally.
+/// ahead of the `XYBRID_PLATFORM_URL` env var; a full gateway URL set via
+/// [`set_gateway_url`] or `XYBRID_GATEWAY_URL` (explicit, `/v1`-suffixed)
+/// still takes precedence. Pass a bare base URL — the `/v1` suffix is applied
+/// internally.
 pub fn set_platform_url(url: &str) {
     xybrid_core::cloud::set_xybrid_platform_url(Some(url.to_string()));
 }
@@ -565,6 +576,39 @@ pub fn is_speculative_cloud_enabled() -> bool {
 
 /// Process-global speculative-cloud default. See [`set_speculative_cloud`].
 static SPECULATIVE_CLOUD: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Enable or disable automatic model release globally.
+///
+/// When enabled, loading a model while the device reports memory pressure
+/// first releases least-recently-used idle models. A released model reloads
+/// itself the next time it is used — no reload call is needed and no run
+/// starts failing. Individual loads override this with
+/// [`ModelLoader::with_auto_release`]. The flag persists in memory for the app
+/// lifetime.
+///
+/// [`release_memory`] ignores this flag: calling it *is* the consent.
+///
+/// # Examples
+/// ```
+/// xybrid_sdk::set_auto_release(true);
+/// assert!(xybrid_sdk::auto_release_policy().on_pressure);
+/// # xybrid_sdk::set_auto_release(false);
+/// ```
+pub fn set_auto_release(enabled: bool) {
+    AUTO_RELEASE.store(enabled, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// The process-global auto-release policy.
+///
+/// Reflects the most recent [`set_auto_release`] call; defaults to disabled.
+/// A per-load override via [`ModelLoader::with_auto_release`] takes precedence
+/// for that load.
+pub fn auto_release_policy() -> AutoReleasePolicy {
+    AutoReleasePolicy::from(AUTO_RELEASE.load(std::sync::atomic::Ordering::Relaxed))
+}
+
+/// Process-global auto-release default. See [`set_auto_release`].
+static AUTO_RELEASE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// Get the currently configured Xybrid API key (if set).
 ///
@@ -663,8 +707,10 @@ impl XybridInit {
         self
     }
 
-    /// Override the LLM gateway URL. Defaults to the production gateway
-    /// or to `XYBRID_GATEWAY_URL` / `XYBRID_PLATFORM_URL` if set.
+    /// Override the LLM gateway URL for SDK LLM clients and for pipeline
+    /// stages routed to the cloud. Pass the full URL including `/v1`.
+    /// Defaults to the production gateway or to `XYBRID_GATEWAY_URL` /
+    /// `XYBRID_PLATFORM_URL` if set.
     pub fn gateway_url(mut self, url: impl Into<String>) -> Self {
         self.gateway_url = Some(url.into());
         self
@@ -685,8 +731,8 @@ impl XybridInit {
     }
 
     /// Register the binding identifier for this process (e.g. `"flutter"`,
-    /// `"kotlin"`, `"swift"`, `"unity"`). Bindings call this; host apps
-    /// rarely need to.
+    /// `"kotlin"`, `"react-native"`, `"swift"`, `"unity"`). Bindings call
+    /// this; host apps rarely need to.
     pub fn binding(mut self, binding: &'static str) -> Self {
         self.binding = Some(binding);
         self
@@ -1112,6 +1158,15 @@ mod sdk_config_tests {
     #[test]
     fn default_binding_is_rust() {
         assert_eq!(DEFAULT_BINDING, "rust");
+    }
+
+    #[test]
+    fn sdk_version_is_stamped_by_the_build() {
+        // rules_rust fills CARGO_PKG_VERSION with "0.0.0" unless the target
+        // passes `version` (//bazel:cargo_version.bzl). Running under both
+        // cargo and `bazel test`, this proves the version reaches the crate;
+        // that EVERY target passes it is a `bazel query` check in bazel.yml.
+        assert_ne!(crate::SDK_VERSION, "0.0.0");
     }
 
     #[test]

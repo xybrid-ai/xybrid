@@ -11,9 +11,29 @@ import '../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
 // These functions are ignored because they are not marked as `pub`: `initialize_telemetry_once`, `parse_resource_telemetry_mode`, `resolve_ingest_endpoint`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `from`, `from`, `from`
 
 // Rust type: RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<XybridSdkClient>>
 abstract class XybridSdkClient implements RustOpaqueInterface {
+  /// Lists every physical model entry occupying managed cache storage.
+  static Future<List<FfiCacheEntry>> cacheEntries() =>
+      XybridRustLib.instance.api.crateApiSdkClientXybridSdkClientCacheEntries();
+
+  /// Returns aggregate storage usage across every managed model-cache area.
+  static Future<FfiCacheStatus> cacheStatus() =>
+      XybridRustLib.instance.api.crateApiSdkClientXybridSdkClientCacheStatus();
+
+  /// Resolves the preferred local cache path for a model, if present.
+  static Future<String?> cachedModelPath({required String modelId}) =>
+      XybridRustLib.instance.api
+          .crateApiSdkClientXybridSdkClientCachedModelPath(modelId: modelId);
+
+  /// Clears all managed model-cache storage.
+  ///
+  /// Do not call concurrently with any model load.
+  static Future<int> clearModelCache() => XybridRustLib.instance.api
+      .crateApiSdkClientXybridSdkClientClearModelCache();
+
   /// Start the platform telemetry exporter from the bundled
   /// `Xybrid.init(apiKey: ...)` path.
   ///
@@ -34,6 +54,11 @@ abstract class XybridSdkClient implements RustOpaqueInterface {
 
   static void flushPlatformTelemetry() => XybridRustLib.instance.api
       .crateApiSdkClientXybridSdkClientFlushPlatformTelemetry();
+
+  /// Returns whether a model occupies any managed model-cache entry.
+  static Future<bool> hasCachedModelData({required String modelId}) =>
+      XybridRustLib.instance.api
+          .crateApiSdkClientXybridSdkClientHasCachedModelData(modelId: modelId);
 
   static void initSdkCacheDir({required String cacheDir}) =>
       XybridRustLib.instance.api
@@ -62,6 +87,10 @@ abstract class XybridSdkClient implements RustOpaqueInterface {
       XybridRustLib.instance.api.crateApiSdkClientXybridSdkClientInitTelemetry(
           endpoint: endpoint, apiKey: apiKey);
 
+  /// Whether automatic model release is enabled process-wide.
+  static bool isAutoReleaseEnabled() => XybridRustLib.instance.api
+      .crateApiSdkClientXybridSdkClientIsAutoReleaseEnabled();
+
   /// Check if a model is cached locally (extracted and ready to use).
   ///
   /// This is a pure filesystem check — no network access required.
@@ -71,11 +100,36 @@ abstract class XybridSdkClient implements RustOpaqueInterface {
       XybridRustLib.instance.api
           .crateApiSdkClientXybridSdkClientIsModelCached(modelId: modelId);
 
+  /// Whether the global speculative-cloud default is on.
+  static bool isSpeculativeCloudEnabled() => XybridRustLib.instance.api
+      .crateApiSdkClientXybridSdkClientIsSpeculativeCloudEnabled();
+
   /// Whether [`Self::init_telemetry`] has run at least once in this
   /// process. Reflects the authoritative process-wide state, not any
   /// Dart-side flag — survives hot-restart, multiple isolates, etc.
   static bool isTelemetryInitialized() => XybridRustLib.instance.api
       .crateApiSdkClientXybridSdkClientIsTelemetryInitialized();
+
+  /// Lists model IDs extracted, validated, and ready to run offline.
+  static Future<List<String>> listExtractedModelIds() =>
+      XybridRustLib.instance.api
+          .crateApiSdkClientXybridSdkClientListExtractedModelIds();
+
+  /// Release every idle loaded model's memory; returns how many were released.
+  ///
+  /// Wire this to the app's low-memory signal
+  /// (`WidgetsBindingObserver.didHaveMemoryPressure`). Models with a run in
+  /// flight are skipped, and a released model reloads itself the next time
+  /// it is used — Dart callers get no new error to handle.
+  static int releaseMemory() => XybridRustLib.instance.api
+      .crateApiSdkClientXybridSdkClientReleaseMemory();
+
+  /// Removes every managed cache entry for one model.
+  ///
+  /// Do not call concurrently with a load of the same model.
+  static Future<int> removeCachedModel({required String modelId}) =>
+      XybridRustLib.instance.api
+          .crateApiSdkClientXybridSdkClientRemoveCachedModel(modelId: modelId);
 
   /// Return the xybrid runtime features compiled into this native library.
   ///
@@ -88,7 +142,109 @@ abstract class XybridSdkClient implements RustOpaqueInterface {
   static void setApiKey({required String apiKey}) => XybridRustLib.instance.api
       .crateApiSdkClientXybridSdkClientSetApiKey(apiKey: apiKey);
 
+  /// Enable or disable automatic model release for subsequent loads.
+  ///
+  /// When enabled, loading a model under device memory pressure first
+  /// releases least-recently-used idle models. Off by default;
+  /// [`Self::release_memory`] works either way.
+  static void setAutoRelease({required bool enabled}) =>
+      XybridRustLib.instance.api
+          .crateApiSdkClientXybridSdkClientSetAutoRelease(enabled: enabled);
+
   static void setGatewayUrl({required String gatewayUrl}) => XybridRustLib
       .instance.api
       .crateApiSdkClientXybridSdkClientSetGatewayUrl(gatewayUrl: gatewayUrl);
+
+  /// Point the cloud gateway at a platform base URL (staging, self-hosted).
+  ///
+  /// Held in process memory rather than the environment, so it is safe to
+  /// call after telemetry threads have started. Pass a bare base URL — the
+  /// `/v1` suffix is applied internally.
+  static void setPlatformUrl({required String url}) =>
+      XybridRustLib.instance.api
+          .crateApiSdkClientXybridSdkClientSetPlatformUrl(url: url);
+
+  /// Enable speculative cloud fallback globally: a registry model that isn't
+  /// downloaded yet is served from the gateway while the weights download.
+  ///
+  /// Only takes effect when an API key resolves. Speculation is LLM/chat
+  /// only — prefer `FfiModelLoader.fromRegistrySpeculative` when the app also
+  /// loads ASR/TTS models, which cannot be served this way.
+  static void setSpeculativeCloud({required bool enabled}) => XybridRustLib
+      .instance.api
+      .crateApiSdkClientXybridSdkClientSetSpeculativeCloud(enabled: enabled);
+}
+
+/// One physical model entry occupying managed cache storage.
+class FfiCacheEntry {
+  final String modelId;
+  final FfiCacheEntryLocation location;
+  final String path;
+  final BigInt sizeBytes;
+
+  const FfiCacheEntry({
+    required this.modelId,
+    required this.location,
+    required this.path,
+    required this.sizeBytes,
+  });
+
+  @override
+  int get hashCode =>
+      modelId.hashCode ^ location.hashCode ^ path.hashCode ^ sizeBytes.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FfiCacheEntry &&
+          runtimeType == other.runtimeType &&
+          modelId == other.modelId &&
+          location == other.location &&
+          path == other.path &&
+          sizeBytes == other.sizeBytes;
+}
+
+/// Logical storage area containing a cached model entry.
+enum FfiCacheEntryLocation {
+  registry,
+  extracted,
+  huggingFace,
+  huggingFaceHub,
+  ;
+}
+
+/// Aggregate model-cache storage status.
+class FfiCacheStatus {
+  final BigInt totalSizeBytes;
+  final int entryCount;
+  final int modelCount;
+  final int extractedModelCount;
+  final String cacheRoot;
+
+  const FfiCacheStatus({
+    required this.totalSizeBytes,
+    required this.entryCount,
+    required this.modelCount,
+    required this.extractedModelCount,
+    required this.cacheRoot,
+  });
+
+  @override
+  int get hashCode =>
+      totalSizeBytes.hashCode ^
+      entryCount.hashCode ^
+      modelCount.hashCode ^
+      extractedModelCount.hashCode ^
+      cacheRoot.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FfiCacheStatus &&
+          runtimeType == other.runtimeType &&
+          totalSizeBytes == other.totalSizeBytes &&
+          entryCount == other.entryCount &&
+          modelCount == other.modelCount &&
+          extractedModelCount == other.extractedModelCount &&
+          cacheRoot == other.cacheRoot;
 }

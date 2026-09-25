@@ -727,4 +727,29 @@ mod tests {
             _ => panic!("Expected CodecDecode variant"),
         }
     }
+
+    #[test]
+    fn temperature_sample_serde_preserves_all_parameters() {
+        let json = r#"{
+            "type": "TemperatureSample",
+            "temperature": 0.7,
+            "top_k": 40,
+            "top_p": 0.9
+        }"#;
+
+        let step: PostprocessingStep = serde_json::from_str(json).unwrap();
+
+        match step {
+            PostprocessingStep::TemperatureSample {
+                temperature,
+                top_k,
+                top_p,
+            } => {
+                assert!((temperature - 0.7).abs() < f32::EPSILON);
+                assert_eq!(top_k, Some(40));
+                assert_eq!(top_p, Some(0.9));
+            }
+            _ => panic!("Expected TemperatureSample variant"),
+        }
+    }
 }

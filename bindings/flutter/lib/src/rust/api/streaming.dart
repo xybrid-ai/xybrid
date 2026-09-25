@@ -12,7 +12,7 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import 'package:freezed_annotation/freezed_annotation.dart' hide protected;
 part 'streaming.freezed.dart';
 
-// These functions are ignored because they are not marked as `pub`: `ensure_logging`, `error_chain`, `spawn`, `to_sdk`, `worker_gone`, `worker_loop`
+// These functions are ignored because they are not marked as `pub`: `error_chain`, `spawn`, `to_sdk`, `worker_gone`, `worker_loop`
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `Command`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `fmt`, `fmt`, `fmt`, `from`
 
@@ -115,14 +115,22 @@ class FfiStreamingConfig {
   /// Optional language hint (e.g. `"en"`); `None` uses the model default.
   final String? language;
 
+  /// Optional Whisper encoder context in mel frames; `None` uses the model default.
+  final int? audioCtx;
+
   const FfiStreamingConfig({
     required this.sampleRate,
     required this.vad,
     this.language,
+    this.audioCtx,
   });
 
   @override
-  int get hashCode => sampleRate.hashCode ^ vad.hashCode ^ language.hashCode;
+  int get hashCode =>
+      sampleRate.hashCode ^
+      vad.hashCode ^
+      language.hashCode ^
+      audioCtx.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -131,7 +139,8 @@ class FfiStreamingConfig {
           runtimeType == other.runtimeType &&
           sampleRate == other.sampleRate &&
           vad == other.vad &&
-          language == other.language;
+          language == other.language &&
+          audioCtx == other.audioCtx;
 }
 
 @freezed

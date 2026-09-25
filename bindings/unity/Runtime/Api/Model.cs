@@ -2,6 +2,7 @@
 // Wrapper for a loaded model ready for inference.
 
 using System;
+using System.Threading;
 
 namespace Xybrid
 {
@@ -40,7 +41,18 @@ namespace Xybrid
         /// <exception cref="ArgumentNullException">Thrown if envelope is null.</exception>
         /// <exception cref="ObjectDisposedException">Thrown if this model is disposed.</exception>
         /// <exception cref="XybridException">Thrown only on a catastrophic backend failure; ordinary inference failures (including a not-loaded model) set <see cref="InferenceResult.Success"/> to false instead.</exception>
-        public InferenceResult Run(Envelope envelope, GenerationConfig config = null)
+        /// <param name="cancellationToken">
+        /// Optional stop button. A batch run is only cancellable <em>before</em>
+        /// generation starts — once the backend is producing there is no
+        /// token-aware batch path to stop it, so the call finishes normally. Use
+        /// <c>RunStreaming</c> when a mid-flight stop button matters. A cancelled
+        /// run reports failure rather than throwing
+        /// <see cref="OperationCanceledException"/>.
+        /// </param>
+        public InferenceResult Run(
+            Envelope envelope,
+            GenerationConfig config = null,
+            CancellationToken cancellationToken = default)
         {
             ThrowIfDisposed();
             if (envelope == null)
@@ -48,7 +60,10 @@ namespace Xybrid
                 throw new ArgumentNullException(nameof(envelope));
             }
 
-            return Execute(() => _bolt.Run(envelope.Bolt, ToOptions(config)));
+            using (var cancel = BoltCancellation.From(cancellationToken))
+            {
+                return Execute(() => _bolt.Run(envelope.Bolt, ToOptions(config), cancel.Token));
+            }
         }
 
         /// <summary>
@@ -109,7 +124,19 @@ namespace Xybrid
         /// <exception cref="ArgumentNullException">Thrown if envelope or context is null.</exception>
         /// <exception cref="ObjectDisposedException">Thrown if this model is disposed.</exception>
         /// <exception cref="XybridException">Thrown only on a catastrophic backend failure; ordinary inference failures set <see cref="InferenceResult.Success"/> to false instead.</exception>
-        public InferenceResult Run(Envelope envelope, ConversationContext context, GenerationConfig config = null)
+        /// <param name="cancellationToken">
+        /// Optional stop button. A batch run is only cancellable <em>before</em>
+        /// generation starts — once the backend is producing there is no
+        /// token-aware batch path to stop it, so the call finishes normally. Use
+        /// <c>RunStreaming</c> when a mid-flight stop button matters. A cancelled
+        /// run reports failure rather than throwing
+        /// <see cref="OperationCanceledException"/>.
+        /// </param>
+        public InferenceResult Run(
+            Envelope envelope,
+            ConversationContext context,
+            GenerationConfig config = null,
+            CancellationToken cancellationToken = default)
         {
             ThrowIfDisposed();
             if (envelope == null)
@@ -121,7 +148,11 @@ namespace Xybrid
                 throw new ArgumentNullException(nameof(context));
             }
 
-            return Execute(() => _bolt.RunWithContext(envelope.Bolt, context.Bolt, ToOptions(config)));
+            using (var cancel = BoltCancellation.From(cancellationToken))
+            {
+                return Execute(() =>
+                    _bolt.RunWithContext(envelope.Bolt, context.Bolt, ToOptions(config), cancel.Token));
+            }
         }
 
         /// <summary>
@@ -241,6 +272,25 @@ namespace Xybrid
         }
 
         /// <summary>
+        /// Gets whether the model bundle declares local tool-calling support.
+        /// </summary>
+        /// <remarks>
+        /// Advisory tri-state: null means the bundle says nothing, so the app
+        /// cannot tell. Gate tool UI on it; enforcement stays at run time — a
+        /// request carrying <see cref="GenerationConfig.AddTool"/> tools against a
+        /// model whose chat template has no tool support fails regardless of what
+        /// this reports.
+        /// </remarks>
+        public bool? SupportsToolCalling
+        {
+            get
+            {
+                ThrowIfDisposed();
+                return _bolt.SupportsToolCalling();
+            }
+        }
+
+        /// <summary>
         /// Runs streaming inference, invoking the callback for each generated token.
         /// Blocks until inference is complete.
         /// </summary>
@@ -251,7 +301,16 @@ namespace Xybrid
         /// <exception cref="ArgumentNullException">Thrown if envelope or onToken is null.</exception>
         /// <exception cref="ObjectDisposedException">Thrown if this model is disposed.</exception>
         /// <exception cref="XybridException">Thrown only on a catastrophic backend failure; ordinary inference failures set <see cref="InferenceResult.Success"/> to false instead.</exception>
-        public InferenceResult RunStreaming(Envelope envelope, Action<StreamToken> onToken, GenerationConfig config = null)
+        /// <param name="cancellationToken">
+        /// Optional stop button. Cancelling it ends the stream at the next token
+        /// boundary; the run then reports failure rather than throwing
+        /// <see cref="OperationCanceledException"/>.
+        /// </param>
+        public InferenceResult RunStreaming(
+            Envelope envelope,
+            Action<StreamToken> onToken,
+            GenerationConfig config = null,
+            CancellationToken cancellationToken = default)
         {
             ThrowIfDisposed();
             if (envelope == null)
@@ -263,7 +322,11 @@ namespace Xybrid
                 throw new ArgumentNullException(nameof(onToken));
             }
 
-            return Execute(() => _bolt.RunStreaming(envelope.Bolt, Forward(onToken), ToOptions(config)));
+            using (var cancel = BoltCancellation.From(cancellationToken))
+            {
+                return Execute(() =>
+                    _bolt.RunStreaming(envelope.Bolt, Forward(onToken), ToOptions(config), cancel.Token));
+            }
         }
 
         /// <summary>
@@ -277,7 +340,17 @@ namespace Xybrid
         /// <exception cref="ArgumentNullException">Thrown if any argument is null.</exception>
         /// <exception cref="ObjectDisposedException">Thrown if this model is disposed.</exception>
         /// <exception cref="XybridException">Thrown only on a catastrophic backend failure; ordinary inference failures set <see cref="InferenceResult.Success"/> to false instead.</exception>
-        public InferenceResult RunStreaming(Envelope envelope, ConversationContext context, Action<StreamToken> onToken, GenerationConfig config = null)
+        /// <param name="cancellationToken">
+        /// Optional stop button. Cancelling it ends the stream at the next token
+        /// boundary; the run then reports failure rather than throwing
+        /// <see cref="OperationCanceledException"/>.
+        /// </param>
+        public InferenceResult RunStreaming(
+            Envelope envelope,
+            ConversationContext context,
+            Action<StreamToken> onToken,
+            GenerationConfig config = null,
+            CancellationToken cancellationToken = default)
         {
             ThrowIfDisposed();
             if (envelope == null)
@@ -293,8 +366,11 @@ namespace Xybrid
                 throw new ArgumentNullException(nameof(onToken));
             }
 
-            return Execute(() => _bolt.RunStreamingWithContext(
-                envelope.Bolt, Forward(onToken), context.Bolt, ToOptions(config)));
+            using (var cancel = BoltCancellation.From(cancellationToken))
+            {
+                return Execute(() => _bolt.RunStreamingWithContext(
+                    envelope.Bolt, Forward(onToken), context.Bolt, ToOptions(config), cancel.Token));
+            }
         }
 
         /// <summary>
@@ -368,7 +444,9 @@ namespace Xybrid
                 token.TokenId,
                 (uint)token.Index,
                 token.CumulativeText,
-                token.FinishReason);
+                token.FinishReason,
+                token.ToolCalls ?? System.Array.Empty<XybridBolt.XybridToolCall>(),
+                token.RawText);
 
         private static VoiceInfo MapVoice(XybridBolt.XybridVoiceInfo voice) =>
             new VoiceInfo(voice.Id, voice.Name, voice.Gender, voice.Language, voice.Style);
@@ -397,6 +475,56 @@ namespace Xybrid
                     $"Output type was: {result.OutputType}");
             }
             return result.AudioBytes;
+        }
+
+        /// <summary>
+        /// Opens a live ASR session: feed microphone PCM in, read partial
+        /// transcripts out.
+        /// </summary>
+        /// <remarks>
+        /// This is the live-capture surface. <see cref="Run"/> transcribes a
+        /// finished buffer; this transcribes speech as it arrives, which is what
+        /// dictation and live captioning need.
+        /// <para>
+        /// Audio must be PCM <b>float, mono, 16 kHz</b> — converting from Unity's
+        /// <c>AudioClip</c> or microphone format is the caller's job.
+        /// </para>
+        /// <code>
+        /// using var session = model.Stream();
+        /// // drive the UI from the partial stream
+        /// await foreach (var partial in session.Partials(token))
+        /// {
+        ///     label.text = partial.Text;
+        /// }
+        /// </code>
+        /// </remarks>
+        /// <param name="config">
+        /// Chunking options. Pass null for fixed-window chunking at 16 kHz with
+        /// the model's own language; use
+        /// <see cref="StreamingConfigs.VoiceActivity"/> to chunk on speech
+        /// boundaries instead.
+        /// </param>
+        /// <returns>A session; dispose it to stop transcribing.</returns>
+        /// <exception cref="ObjectDisposedException">Thrown if this model is disposed.</exception>
+        /// <exception cref="XybridException">
+        /// Thrown if this is not an ASR model, or the sample rate is not 16 kHz.
+        /// </exception>
+        public XybridBolt.XybridStreamingSession Stream(
+            XybridBolt.XybridStreamingConfig? config = null)
+        {
+            ThrowIfDisposed();
+
+            try
+            {
+                return XybridBolt.XybridStreamingSession.ForModel(
+                    _bolt,
+                    config ?? StreamingConfigs.Default);
+            }
+            catch (Exception ex) when (
+                ex is XybridBolt.XybridErrorException || ex is XybridBolt.BoltException)
+            {
+                throw BoltErrors.Translate(ex);
+            }
         }
 
         private void ThrowIfDisposed()

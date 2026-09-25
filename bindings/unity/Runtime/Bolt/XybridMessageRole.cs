@@ -3,8 +3,6 @@
 // </auto-generated>
 #nullable enable
 
-using System;
-
 namespace XybridBolt
 {
     public enum XybridMessageRole : int
@@ -12,28 +10,5 @@ namespace XybridBolt
         System = 0,
         User = 1,
         Assistant = 2
-    }
-
-    internal static class XybridMessageRoleWire
-    {
-        internal const int WireEncodedSize = 4;
-
-        internal static XybridMessageRole Decode(WireReader reader) =>
-            reader.ReadI32() switch
-            {
-                0 => XybridMessageRole.System,
-                1 => XybridMessageRole.User,
-                2 => XybridMessageRole.Assistant,
-                int tag => throw new InvalidOperationException($"Unknown XybridMessageRole wire tag: {tag}"),
-            };
-
-        internal static void WireEncodeTo(this XybridMessageRole value, WireWriter wire) =>
-            wire.WriteI32(value switch
-            {
-                XybridMessageRole.System => 0,
-                XybridMessageRole.User => 1,
-                XybridMessageRole.Assistant => 2,
-                _ => throw new InvalidOperationException($"Unknown XybridMessageRole variant: {value}"),
-            });
     }
 }

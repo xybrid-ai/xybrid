@@ -9,6 +9,8 @@
 //! with the definitions in the Jinja context. In every case the policy is
 //! the same: never silently substitute a different prompt family.
 
+mod functiongemma;
+
 use super::jinja_template::{JinjaChatTemplate, JinjaTemplateError, RenderOptions};
 use crate::gateway::Tool;
 use crate::runtime_adapter::llm::LlmResult;
@@ -138,16 +140,17 @@ fn render_with_tools(
     // The tool shape is template-dependent, keyed on the template's own
     // protocol markers:
     //
-    // - gemma-4-family templates (they emit `<|tool>` declaration blocks)
-    //   index `tool['function']['name']` — they need the FULL OpenAI wrapper
+    // - Structured Gemma templates index `tool['function']['name']` — they
+    //   need the FULL OpenAI wrapper
     //   ({"type": "function", "function": {...}}).
     // - LFM2-family (and HF-generic `tojson`-the-entry) templates get the
     //   BARE function objects ({name, description, parameters}): they inline
     //   each entry verbatim into their system-prompt tool list, and the
     //   wrapper shape is not what those models were trained on (verified
     //   against the LFM2.5-230M/350M GGUF templates).
-    let entries = match ToolCallProtocol::detect_from_template(&template) {
-        ToolCallProtocol::Gemma => tools
+    let protocol = ToolCallProtocol::detect_from_template(&template);
+    let entries = match protocol {
+        ToolCallProtocol::Gemma | ToolCallProtocol::FunctionGemma => tools
             .iter()
             .map(serde_json::to_value)
             .collect::<Result<Vec<_>, _>>(),
@@ -159,11 +162,12 @@ fn render_with_tools(
     let entries = entries.map_err(|e| {
         AdapterError::InvalidInput(format!("tool definition failed to serialize: {e}"))
     })?;
+    let messages = functiongemma::messages_for_tool_protocol(protocol, messages);
 
     let prompt = render_embedded(
         model,
         &template,
-        messages,
+        messages.as_ref(),
         Some(serde_json::Value::Array(entries)),
     )
     .map_err(|render_err| {

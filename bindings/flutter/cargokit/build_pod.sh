@@ -60,13 +60,31 @@ fi
 # 1. Vendored path (monorepo dev — symlink to vendor/ort-ios/)
 # 2. Cached download (~/.xybrid/cache/ort-ios/onnxruntime.xcframework)
 # 3. Download from HuggingFace and cache
+#
+# Only a SOURCE build needs any of this: ORT_LIB_LOCATION is read by ort-sys
+# when cargo compiles the crate. The precompiled library already contains
+# ONNX Runtime, and nothing in the podspec links a separate copy. So where a
+# source build is impossible — the package as published to pub.dev — this
+# block is skipped. It used to run there anyway: a ~17 MB download (plus a
+# ~9 MB simulator slice) that was never linked, and a hard failure on any Mac
+# without `xz`, which macOS does not ship.
 # ============================================================================
 
 ORT_VERSION="1.23.2"
 ORT_HF_URL="https://huggingface.co/xybrid-ai/ios-onnxruntime/resolve/main/${ORT_VERSION}/onnxruntime.xcframework.tar.bz2"
 ORT_CACHE_DIR="$HOME/.xybrid/cache/ort-ios/${ORT_VERSION}"
 
+RESOLVE_ORT=0
 if [[ "$PLATFORM_NAME" == "iphoneos" || "$PLATFORM_NAME" == "iphonesimulator" ]]; then
+  if SOURCE_BUILD_BLOCKER=$(sh "$BASEDIR/source_build_possible.sh" "$CARGOKIT_MANIFEST_DIR"); then
+    RESOLVE_ORT=1
+  else
+    echo "=== ORT: not resolved — no source build here ($SOURCE_BUILD_BLOCKER) ==="
+    echo "=== ORT: the precompiled library already contains ONNX Runtime ==="
+  fi
+fi
+
+if [[ "$RESOLVE_ORT" == "1" ]]; then
   ORT_XCFRAMEWORK_BASE=""
 
   # --- Path 1: Vendored xcframework (monorepo dev with symlink) ---

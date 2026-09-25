@@ -11,7 +11,7 @@ Android SDK 通过 BoltFFI 为 Xybrid 运行时提供原生 Kotlin 绑定，支�
 
 ```kotlin title="build.gradle.kts"
 dependencies {
-    implementation("ai.xybrid:xybrid-kotlin:0.4.1")
+    implementation("ai.xybrid:xybrid-kotlin:0.6.0")
 }
 ```
 
@@ -34,6 +34,8 @@ if (result.success) {
 }
 ```
 
+`Xybrid.init(context)` 还会注册 `BatteryManager` 以及（在 API 29+ 上）`PowerManager.OnThermalStatusChangedListener` 观察者，将读数转发给路由引擎。
+
 ## 初始化
 
 无论是否鉴权，推理都完全在本地运行。传入 `apiKey` 即可点亮[控制台](https://dashboard.xybrid.dev)——这一次调用会启动遥测导出器，你的 `model.run(...)` 调用便会自动上报执行轨迹：
@@ -51,7 +53,7 @@ Xybrid.init(this, apiKey = BuildConfig.XYBRID_API_KEY)
 ### 从注册表
 
 ```kotlin
-val model = Xybrid.model("whisper-tiny").load()
+val model = Xybrid.model("whisper-tiny-ggml").load()
 ```
 
 ### 从本地 Bundle
@@ -62,6 +64,29 @@ val model = Xybrid.model(ModelSource.bundle("/path/to/model.xyb")).load()
 
 `Xybrid.model(...)` 只创建廉价的、未加载的引用。`load()` 是显式的加载边界，
 可能解析元数据、下载文件、访问磁盘并初始化运行时。
+
+---
+
+## 下载进度
+
+`load()` 会一直阻塞到权重落盘，因此运行期间无法报告进度。请单独启动下载并进行监听：
+
+```kotlin
+val loader = Xybrid.model("qwen3-0.6b")
+loader.download()?.progress()?.collect { status ->
+    bar.progress = (status.progress * 100).toInt()
+    label.text = "${status.downloadedBytes} / ${status.totalBytes ?: 0}"
+}
+val model = loader.load()   // 已缓存：立即返回
+```
+
+`progress` 覆盖模型所需的全部文件（权重以及视觉投影器等附属文件），并且只增不减，
+因此进度条既不会逐个文件重新开始，也不会在下载重试时回退。当来源未公布大小时
+（例如 Hugging Face 仓库），`totalBytes` 为 null；无论哪种情况 `downloadedBytes`
+都是准确值，可用于显示已下载体积、速度和剩余时间。
+
+取消消费方的任务只会退订更新。要真正停止传输，请调用 `cancel()`——它会在一次分块
+读取内生效，并删除已下载的部分文件。
 
 ---
 
@@ -101,6 +126,39 @@ val envelope = Envelope.embedding(listOf(0.1f, 0.2f, 0.3f))
 val result = model.run(envelope)
 val vector = result.embedding
 ```
+
+---
+
+## 实时转写
+
+`run()` 转写的是已经录完的音频缓冲区；而会话（session）在语音到达的同时进行转写，
+这正是听写和实时字幕所需要的能力。
+
+音频必须是 PCM **float32、单声道、16 kHz**——从平台麦克风格式转换由调用方负责。
+
+```kotlin
+val model = Xybrid.model("whisper-tiny").load()
+val session = model.stream(streamingConfigWithVad(modelDir = vadModelDir, language = "en"))
+
+scope.launch {
+    session.partials().collect { partial -> textView.text = partial.text }
+}
+
+// From the AudioRecord loop, converted to float mono 16 kHz:
+session.feed(pcm)
+
+val transcript = session.flush()
+```
+
+部分转写文本是**累积的，而不是增量**：请用新的结果替换上一条显示，而不是追加。
+在订阅之前产生的部分结果会立即送达，因此一句话开头的词不会丢失。
+
+`flush()` 结束会话并返回完整转写文本；若其间有任何音频块转写失败，它会返回错误——
+那段音频已经丢失，否则返回的转写结果看起来完整却缺了一段。`cancel()` 结束会话并丢弃排队中的音频。
+
+语音活动检测按语音边界切分，而不是按固定时钟，可避免窗口落在词中间造成的断续。
+它需要一个包含 `model.onnx` 的 Silero VAD 模型目录；SDK 不附带该模型，
+缺少时引擎会退回固定窗口切分。
 
 ---
 

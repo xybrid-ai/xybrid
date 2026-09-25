@@ -2,7 +2,7 @@
   "model_id": "all-minilm",
   "version": "L6-v2",
   "execution_template": {
-    "type": "SimpleMode",
+    "type": "Onnx",
     "model_file": "model.onnx"
   },
   "preprocessing": [

@@ -1,0 +1,80 @@
+name: Star history
+
+# Records the public star count once a day and redraws the README chart.
+#
+# GitHub restricted the stargazers *list* endpoint to admins and collaborators
+# on 2026-06-30, which is what broke star-history.com. The star *count* on the
+# repo object is still public, so we collect our own series instead of relying
+# on a third-party service.
+#
+# Data and charts live on the unprotected `star-history` branch, never on
+# master: master requires a reviewed PR, and a daily commit there would churn
+# the git log and re-trigger CI for nothing.
+
+on:
+  schedule:
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: star-history
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Check out master for the script
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Attach the data branch as a worktree
+        run: |
+          if git fetch origin star-history:refs/remotes/origin/star-history 2>/dev/null; then
+            git worktree add data origin/star-history
+            git -C data switch -c star-history --track origin/star-history
+          else
+            # First run: start the branch with no history of its own, so the
+            # daily snapshots never interleave with the source tree.
+            echo "star-history branch not found; bootstrapping an orphan branch"
+            git worktree add --detach data
+            git -C data checkout --orphan star-history
+            git -C data rm -rf --quiet . || true
+          fi
+
+      - name: Snapshot and render
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python3 tools/scripts/star-history.py \
+            --repo "${{ github.repository }}" \
+            --data data/stars.jsonl \
+            --light data/star-history.svg \
+            --dark data/star-history-dark.svg \
+            snapshot
+          python3 tools/scripts/star-history.py \
+            --repo "${{ github.repository }}" \
+            --data data/stars.jsonl \
+            --light data/star-history.svg \
+            --dark data/star-history-dark.svg \
+            render
+
+      - name: Commit if the count moved
+        working-directory: data
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add stars.jsonl star-history.svg star-history-dark.svg
+          if git diff --cached --quiet; then
+            echo "No change today."
+            exit 0
+          fi
+          stars=$(tail -n 1 stars.jsonl | sed 's/.*"stars": *\([0-9]*\).*/\1/')
+          git commit -m "chore(stars): ${stars} stars"
+          git push origin star-history

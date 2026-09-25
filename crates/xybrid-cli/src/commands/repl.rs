@@ -159,13 +159,13 @@ pub(crate) fn handle_repl_command(args: ReplArgs) -> Result<()> {
         ))?;
 
         let cache_repo = xybrid_sdk::ModelSource::parse_huggingface(repo);
-        let sanitized = cache_repo.model_id().unwrap_or(repo).replace('/', "--");
-        let cache_dir = dirs::home_dir()
-            .ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))?
-            .join(".xybrid")
-            .join("cache")
-            .join("hf")
-            .join(&sanitized);
+        let repo_id = cache_repo.model_id().unwrap_or(repo);
+        let cache_dir = xybrid_sdk::CacheManager::new()
+            .context("Failed to open the model cache")?
+            .huggingface_cache_dir(repo_id)
+            .ok_or_else(|| {
+                anyhow::anyhow!("HuggingFace model '{repo_id}' has no materialized cache directory")
+            })?;
 
         sp.finish_and_clear();
         ui::ok("Model loaded from HuggingFace");
@@ -618,8 +618,8 @@ fn ensure_model_cached(
 
     if !client.is_cached(model_id, None).unwrap_or(false) {
         let pb = ui::download_bar(resolved.size_bytes, model_id);
-        let model_dir = client.fetch_extracted(model_id, None, |p| {
-            pb.set_position((p * resolved.size_bytes as f32) as u64);
+        let model_dir = client.fetch_extracted(model_id, None, |status| {
+            ui::apply_download_status(&pb, &status);
         })?;
         pb.finish_and_clear();
         ui::ok(&format!("{} downloaded", model_id));

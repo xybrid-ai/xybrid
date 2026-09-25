@@ -67,8 +67,11 @@ class VerifyLibraryTests(unittest.TestCase):
             def __call__(self, *_args):
                 return self.result
 
-        fake_lib = MagicMock()
-        fake_lib.boltffi_version = FakeFunction(
+        # `spec` pins the export names: a plain MagicMock answers to any
+        # attribute, so this test kept passing across the boltffi 0.29 symbol
+        # rename while the script could no longer load a real DLL.
+        fake_lib = MagicMock(spec=["boltffi_function_xybrid_bolt_version", "boltffi_free_buf"])
+        fake_lib.boltffi_function_xybrid_bolt_version = FakeFunction(
             FfiBuf(ctypes.addressof(raw), len(raw.raw) - 1, len(raw.raw) - 1, 1)
         )
         fake_lib.boltffi_free_buf = FakeFunction()

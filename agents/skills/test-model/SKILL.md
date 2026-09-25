@@ -41,7 +41,8 @@ Based on the `execution_template.type` and `metadata.task`:
 |------|-------|-----------------|---------------|
 | `text-to-speech` | `Envelope::Text("Hello world")` | Audio bytes (length > 0) | default |
 | `speech-recognition` (Onnx) | `Envelope::Audio(wav_bytes)` | Text transcription | default |
-| `speech-recognition` (SafeTensors) | `Envelope::Audio(wav_bytes)` | Text transcription | `candle,candle-metal` |
+| `speech-recognition` (GgmlWhisper) | `Envelope::Audio(wav_bytes)` | Text transcription | `asr-whispercpp` (in every `platform-*` preset) |
+| `speech-recognition` (SafeTensors) | `Envelope::Audio(wav_bytes)` | Text transcription | `candle,candle-metal` — opt-in only; no preset enables Candle |
 | `text-generation` (Gguf) | `Envelope::Text("Hello")` | Text response | `llm-llamacpp` |
 | `text-embedding` | `Envelope::Text("test sentence")` | Embedding vector (f32) | default |
 | `image_classification` | Raw image bytes | Class probabilities | default |
@@ -74,7 +75,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         metadata: HashMap::new(),
     };
 
-    let output = executor.execute(&metadata, &input)?;
+    // Third arg is an optional `&GenerationConfig` override.
+    let output = executor.execute(&metadata, &input, None)?;
     println!("Output: {:?}", output.kind);
     println!("Test passed!");
     Ok(())
@@ -129,5 +131,6 @@ Status: PASS / FAIL
 - **"file not found"**: A file listed in `files` array doesn't exist — download it or fix the path
 - **"preprocessing failed"**: Wrong preprocessing step for the model type
 - **"ONNX error"**: Model file may be corrupted or wrong format
-- **"feature not enabled"**: Add the required feature flag (e.g., `--features candle` for SafeTensors models)
+- **"SafeTensors execution requires the 'candle' feature"**: the bundle is a Candle/SafeTensors model and no `platform-*` preset enables Candle any more. Either add `--features candle` explicitly, or switch to the GGML bundle (`ExecutionTemplate::GgmlWhisper`) that runs on `asr-whispercpp` — e.g. `whisper-tiny-ggml` instead of `whisper-tiny`.
+- **"feature not enabled"**: Add the required feature flag (e.g. `--features asr-whispercpp` for GGML Whisper, `--features candle` for SafeTensors)
 - **"llm backend not available"**: Add `--features llm-llamacpp` for GGUF models

@@ -8,10 +8,21 @@
 // ignore_for_file: invalid_use_of_internal_member, unused_import, unnecessary_import
 
 import '../frb_generated.dart';
+import 'model.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `from_core`, `from_core`, `from_inference_result`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`
+// These functions are ignored because they are not marked as `pub`: `from_core`, `from_core`, `from_inference_result`, `from_sdk`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `eq`, `fmt`
+
+/// Where a result was produced — the observed fact, not a routing preference.
+///
+/// Cloud fallback (speculative or reactive) keeps the model id identical on
+/// both legs by design, so this is the only way to tell them apart.
+enum FfiExecutionTarget {
+  local,
+  cloud,
+  ;
+}
 
 /// Typed inference metrics.
 ///
@@ -78,7 +89,19 @@ class FfiResult {
   final Uint8List? audioBytes;
   final Float32List? embedding;
   final int latencyMs;
+
+  /// Whether this answer came from the device or the cloud gateway.
+  final FfiExecutionTarget executionTarget;
   final FfiInferenceMetrics metrics;
+
+  /// Tool calls the model asked for this turn.
+  ///
+  /// Empty unless the request offered tools via
+  /// `FfiGenerationConfig.tools`. Run each call yourself, then feed the
+  /// outcomes back with `FfiEnvelope::tool_results` — one run is one model
+  /// turn. The raw tool-call block stays in `text` untouched, and malformed
+  /// model output yields an empty list rather than an error.
+  final List<FfiToolCall> toolCalls;
 
   const FfiResult({
     required this.success,
@@ -87,7 +110,9 @@ class FfiResult {
     this.audioBytes,
     this.embedding,
     required this.latencyMs,
+    required this.executionTarget,
     required this.metrics,
+    required this.toolCalls,
   });
 
   @override
@@ -98,7 +123,9 @@ class FfiResult {
       audioBytes.hashCode ^
       embedding.hashCode ^
       latencyMs.hashCode ^
-      metrics.hashCode;
+      executionTarget.hashCode ^
+      metrics.hashCode ^
+      toolCalls.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -111,7 +138,9 @@ class FfiResult {
           audioBytes == other.audioBytes &&
           embedding == other.embedding &&
           latencyMs == other.latencyMs &&
-          metrics == other.metrics;
+          executionTarget == other.executionTarget &&
+          metrics == other.metrics &&
+          toolCalls == other.toolCalls;
 }
 
 /// Per-stage latency entry for pipeline runs.

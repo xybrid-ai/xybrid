@@ -4,6 +4,7 @@
 //! - `tokenize_step`: Tokenize text for NLP models
 //! - `phonemize_step`: Convert text to phonemes for TTS models
 
+use super::super::tokenizer_cache::TokenizerCache;
 use super::super::types::{ExecutorResult, PreprocessedData};
 use crate::execution::template::{PhonemizerBackend, TokenizerType};
 use crate::runtime_adapter::AdapterError;
@@ -15,14 +16,14 @@ use crate::runtime_adapter::AdapterError;
 /// - `tokenizer_path`: Path to tokenizer.json file
 /// - `tokenizer_type`: Type of tokenizer (WordPiece, BPE, SentencePiece)
 /// - `max_length`: Optional maximum sequence length
+/// - `tokenizers`: The executor's cache; the file is parsed only on a miss
 pub fn tokenize_step(
     data: PreprocessedData,
     tokenizer_path: &str,
     tokenizer_type: &TokenizerType,
     max_length: Option<usize>,
+    tokenizers: &mut TokenizerCache,
 ) -> ExecutorResult<PreprocessedData> {
-    use tokenizers::Tokenizer;
-
     let text = match data {
         PreprocessedData::Text(text) => text,
         _ => {
@@ -33,7 +34,8 @@ pub fn tokenize_step(
     };
 
     let tokenizer = match tokenizer_type {
-        TokenizerType::WordPiece | TokenizerType::BPE => Tokenizer::from_file(tokenizer_path)
+        TokenizerType::WordPiece | TokenizerType::BPE => tokenizers
+            .get_or_load(std::path::Path::new(tokenizer_path))
             .map_err(|e| {
                 AdapterError::InvalidInput(format!(
                     "Failed to load tokenizer from {}: {}",

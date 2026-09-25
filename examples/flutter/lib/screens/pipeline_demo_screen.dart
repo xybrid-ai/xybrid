@@ -18,7 +18,7 @@ class _PipelineScreenState extends State<PipelineScreen> {
   static const _examplePipelineYaml = '''name: speech-to-text
 description: Simple ASR pipeline
 stages:
-  - model: whisper-tiny
+  - model: whisper-tiny-ggml
     input: audio
 ''';
 

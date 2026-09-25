@@ -17,7 +17,7 @@
 //! # }
 //! ```
 
-use super::layout::{CacheEntryInfo, CacheLayout};
+use super::layout::{CacheEntryInfo, CacheEntryLocation, CacheLayout, HF_REVISIONS_DIR};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::path::{Component, Path, PathBuf};
@@ -192,8 +192,18 @@ impl CacheManager {
         self.layout().registry_bundle_path(hf_repo, file)
     }
 
-    pub(crate) fn cache_entries(&self) -> Result<Vec<CacheEntryInfo>, SdkError> {
+    /// Lists entries across every managed model-cache location.
+    ///
+    /// Includes registry bundles, extracted models, direct Hugging Face
+    /// materializations, and the shared Hugging Face blob cache. The result is
+    /// read fresh from disk and sorted deterministically.
+    pub fn cache_entries(&self) -> Result<Vec<CacheEntryInfo>, SdkError> {
         self.layout().cache_entries()
+    }
+
+    /// Returns the root that owns every managed model-cache location.
+    pub fn cache_root(&self) -> PathBuf {
+        self.layout().cache_root().to_path_buf()
     }
 
     /// Scans the cache directory for existing bundles.
@@ -318,6 +328,28 @@ impl CacheManager {
             .any(|key| key.starts_with(&format!("{}@", model_id)))
     }
 
+    /// Resolve the local directory a HuggingFace repo materialized into.
+    ///
+    /// Covers the current hashed layout plus marked legacy locations, and
+    /// returns the first directory holding a `model_metadata.json`. The
+    /// on-disk directory name is a repository hash, so callers must resolve
+    /// paths through this rather than deriving them from the repo id.
+    ///
+    /// # Arguments
+    ///
+    /// * `repo` - Repository id (format: "owner/repo", no variant suffix)
+    ///
+    /// # Returns
+    ///
+    /// Path to the materialized repo directory, or `None` when the repo has
+    /// not been downloaded into this cache.
+    pub fn huggingface_cache_dir(&self, repo: &str) -> Option<PathBuf> {
+        self.layout()
+            .huggingface_repo_dirs(repo)
+            .into_iter()
+            .find(|dir| dir.join("model_metadata.json").is_file())
+    }
+
     /// Gets the path to a cached bundle.
     ///
     /// # Arguments
@@ -340,6 +372,50 @@ impl CacheManager {
             .filter(|(key, _)| key.starts_with(&prefix))
             .max_by_key(|(key, _)| *key)
             .map(|(_, entry)| entry.path.clone())
+    }
+
+    /// Resolves a local cache path for a model across every managed location.
+    ///
+    /// Runtime-ready extracted and direct Hugging Face materializations are
+    /// preferred, followed by registry bundles and shared Hugging Face cache
+    /// entries. Returns `None` when the model occupies no managed cache entry.
+    /// This operation never touches the network.
+    ///
+    /// # Errors
+    /// Returns an error for absolute paths or traversal instead of model IDs.
+    pub fn cached_model_path(&self, model_id: &str) -> Result<Option<PathBuf>, SdkError> {
+        validate_cache_model_id(model_id)?;
+        if let Some(path) = self.existing_extraction_dir(model_id) {
+            return Ok(Some(path));
+        }
+        if let Some(path) = self.huggingface_cache_dir(model_id) {
+            return Ok(Some(path));
+        }
+        if let Some(path) = self.get_cached_path(model_id) {
+            return Ok(Some(path));
+        }
+
+        let entries = self.cache_entries()?;
+        let locations = [
+            CacheEntryLocation::Extracted,
+            CacheEntryLocation::HuggingFace,
+            CacheEntryLocation::Registry,
+            CacheEntryLocation::HuggingFaceHub,
+        ];
+        Ok(locations.into_iter().find_map(|location| {
+            entries
+                .iter()
+                .find(|entry| entry.model_id == model_id && entry.location == location)
+                .map(|entry| entry.path.clone())
+        }))
+    }
+
+    /// Returns whether a model occupies any managed cache entry.
+    ///
+    /// Unlike [`Self::is_extracted`], this also counts downloaded bundles and
+    /// Hugging Face cache entries that have not been copied into `extracted/`.
+    pub fn is_model_cached(&self, model_id: &str) -> Result<bool, SdkError> {
+        Ok(self.cached_model_path(model_id)?.is_some())
     }
 
     /// Decompresses and validates a `.xyb` bundle.
@@ -627,6 +703,10 @@ impl CacheManager {
     ///
     /// Removes cloud models that have exceeded their TTL.
     ///
+    /// Retention metadata is not persisted yet: a newly opened manager treats
+    /// every scanned bundle as local, so this currently removes no disk entries.
+    /// Use explicit per-model eviction until persistent retention is supported.
+    ///
     /// # Returns
     ///
     /// Number of entries removed
@@ -672,18 +752,31 @@ impl CacheManager {
     /// Not safe to run concurrently with a load of the same model: it removes
     /// whole cache directories that an in-flight extraction may be writing to.
     pub(crate) fn clear_model_roots(&mut self, model_id: &str) -> Result<u32, SdkError> {
-        if model_id.is_empty()
-            || !Path::new(model_id)
-                .components()
-                .all(|component| matches!(component, Component::Normal(_)))
-        {
-            return Err(SdkError::cache(format!(
-                "Invalid cache model identifier: {}",
-                model_id
-            )));
-        }
+        validate_cache_model_id(model_id)?;
 
-        let mut roots = self.layout().model_roots(model_id);
+        let matching_cache_entries: Vec<_> = self
+            .layout()
+            .cache_entries()?
+            .into_iter()
+            .filter(|entry| entry.model_id == model_id)
+            .collect();
+        let clears_huggingface_revision = matching_cache_entries.iter().any(|entry| {
+            entry.location == CacheEntryLocation::HuggingFace
+                && entry
+                    .path
+                    .parent()
+                    .is_some_and(|parent| parent.ends_with(HF_REVISIONS_DIR))
+        });
+
+        // Revision entries share one repository-scoped hf-hub blob store. A
+        // targeted revision eviction must remove only its materialization;
+        // deleting `model_roots` would also delete blobs used by siblings.
+        let mut roots = if clears_huggingface_revision {
+            Vec::new()
+        } else {
+            self.layout().model_roots(model_id)
+        };
+        roots.extend(matching_cache_entries.into_iter().map(|entry| entry.path));
         let mut entry_keys = Vec::new();
         for (key, entry) in &self.entries {
             if entry.id == model_id {
@@ -708,6 +801,20 @@ impl CacheManager {
         }
 
         Ok(removed_count)
+    }
+
+    /// Removes every managed cache entry for a single model.
+    ///
+    /// Returns the number of cache roots removed, or `0` when the model was not
+    /// cached. Model identifiers are validated before any path is constructed;
+    /// traversal and absolute-path inputs are rejected.
+    ///
+    /// # Concurrency
+    ///
+    /// Do not call this concurrently with a load of the same model. It removes
+    /// directories that an in-flight download or extraction may be writing to.
+    pub fn clear_model(&mut self, model_id: &str) -> Result<u32, SdkError> {
+        self.clear_model_roots(model_id)
     }
 
     /// Clears all cached models across every managed cache root.
@@ -749,6 +856,24 @@ impl CacheManager {
             Ok(false)
         }
     }
+}
+
+/// Keep lookup and eviction within the same model-ID namespace on every host.
+fn validate_cache_model_id(model_id: &str) -> Result<(), SdkError> {
+    if model_id.is_empty()
+        || model_id.contains(['\\', ':', '\0'])
+        || model_id
+            .split('/')
+            .any(|part| part.is_empty() || part == "." || part == "..")
+        || !Path::new(model_id)
+            .components()
+            .all(|component| matches!(component, Component::Normal(_)))
+    {
+        return Err(SdkError::cache(format!(
+            "Invalid cache model identifier: {model_id}"
+        )));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -808,6 +933,75 @@ mod tests {
     }
 
     #[test]
+    fn cache_root_owns_models_and_runtime_siblings() {
+        let temp_dir = TempDir::new().unwrap();
+        let cache_root = temp_dir.path().join("cache");
+        let manager = CacheManager::with_dir(cache_root.join("models")).unwrap();
+
+        assert_eq!(manager.cache_root(), cache_root);
+    }
+
+    #[test]
+    fn cached_model_path_prefers_ready_extraction_over_registry_bundle() {
+        let temp_dir = TempDir::new().unwrap();
+        let cache_root = temp_dir.path().join("cache");
+        let models_dir = cache_root.join("models");
+        let registry_dir = models_dir.join("test-model");
+        let extracted_dir = cache_root.join("extracted").join("test-model");
+        fs::create_dir_all(&registry_dir).unwrap();
+        fs::write(registry_dir.join("universal.xyb"), b"bundle").unwrap();
+        write_ready_extracted_model(&extracted_dir, "test-model");
+        let manager = CacheManager::with_dir(models_dir).unwrap();
+
+        assert!(manager.is_model_cached("test-model").unwrap());
+        assert_eq!(
+            manager.cached_model_path("test-model").unwrap(),
+            Some(extracted_dir)
+        );
+        assert!(!manager.is_model_cached("missing").unwrap());
+    }
+
+    #[test]
+    fn cache_lookup_and_eviction_reject_paths_outside_managed_storage() {
+        let temp = TempDir::new().unwrap();
+        let outside = temp.path().join("outside");
+        write_ready_extracted_model(&outside, "outside");
+        let mut manager = CacheManager::with_dir(temp.path().join("cache/models")).unwrap();
+
+        for id in [
+            outside.to_str().unwrap(),
+            "",
+            ".",
+            "..",
+            "../outside",
+            "owner/../../outside",
+            "owner/./repo",
+            "owner//repo",
+            "owner/",
+            r"C:\outside",
+            r"..\outside",
+            r"\\server\share",
+            "bad\0id",
+        ] {
+            assert!(
+                manager.cached_model_path(id).is_err(),
+                "lookup accepted {id:?}"
+            );
+            assert!(
+                manager.is_model_cached(id).is_err(),
+                "presence accepted {id:?}"
+            );
+            assert!(manager.clear_model(id).is_err(), "eviction accepted {id:?}");
+        }
+        for id in ["model", "model@1.0", "owner/repo", "owner/repo@revision"] {
+            assert_eq!(manager.cached_model_path(id).unwrap(), None);
+            assert!(!manager.is_model_cached(id).unwrap());
+        }
+        assert!(manager.cache_entries().unwrap().is_empty());
+        assert!(outside.join("model.onnx").is_file());
+    }
+
+    #[test]
     fn clear_removes_managed_model_cache_roots_when_registry_entries_are_unscanned() {
         // Given: the real cache layout produced by registry, extraction, and
         // direct HuggingFace model-loading paths.
@@ -817,7 +1011,10 @@ mod tests {
         let registry_model_dir = models_dir.join("Kokoro-82M-v1.0-ONNX");
         let extracted_model_dir = cache_root.join("extracted").join("kokoro-82m");
         let hf_model_dir = cache_root.join("hf").join("owner--repo");
-        let hf_hub_model_dir = cache_root.join("hf-hub").join("models--owner--repo");
+        let layout = CacheLayout::from_registry_root(models_dir.clone());
+        let hf_hub_model_dir = layout
+            .prepare_huggingface_hub_repo_root("owner/repo")
+            .unwrap();
         fs::create_dir_all(&registry_model_dir).unwrap();
         fs::create_dir_all(&extracted_model_dir).unwrap();
         fs::create_dir_all(&hf_model_dir).unwrap();
@@ -857,8 +1054,9 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let cache_root = temp_dir.path().join("cache");
         let models_dir = cache_root.join("models");
-        let model_dir = models_dir.join("kokoro-82m");
-        let extracted_model_dir = cache_root.join("extracted").join("kokoro-82m");
+        let model_id = "kokoro@82m";
+        let model_dir = models_dir.join(model_id);
+        let extracted_model_dir = cache_root.join("extracted").join(model_id);
         let other_model_dir = models_dir.join("other-model");
         fs::create_dir_all(&model_dir).unwrap();
         fs::create_dir_all(&extracted_model_dir).unwrap();
@@ -869,7 +1067,7 @@ mod tests {
 
         let mut manager = CacheManager::with_dir(models_dir).unwrap();
 
-        let removed = manager.clear_model_roots("kokoro-82m").unwrap();
+        let removed = manager.clear_model_roots(model_id).unwrap();
 
         assert_eq!(removed, 2);
         assert!(
@@ -884,16 +1082,44 @@ mod tests {
     }
 
     #[test]
+    fn huggingface_cache_dir_resolves_materialized_hashed_repo() {
+        let temp_dir = TempDir::new().unwrap();
+        let models_dir = temp_dir.path().join("cache").join("models");
+        let layout = CacheLayout::from_registry_root(models_dir.clone());
+        let repo_dir = layout.huggingface_repo_dir("owner/repo");
+        fs::create_dir_all(&repo_dir).unwrap();
+        fs::write(repo_dir.join("model_metadata.json"), b"{}").unwrap();
+        layout.record_huggingface_repo("owner/repo").unwrap();
+
+        let manager = CacheManager::with_dir(models_dir).unwrap();
+
+        assert_eq!(
+            manager.huggingface_cache_dir("owner/repo"),
+            Some(repo_dir),
+            "materialized repo must resolve through its hashed directory"
+        );
+        assert_eq!(
+            manager.huggingface_cache_dir("owner/other"),
+            None,
+            "a repo that never downloaded has no cache directory"
+        );
+    }
+
+    #[test]
     fn clear_model_roots_removes_direct_hf_cache_for_repo_id() {
         let temp_dir = TempDir::new().unwrap();
         let cache_root = temp_dir.path().join("cache");
         let models_dir = cache_root.join("models");
-        let hf_model_dir = cache_root.join("hf").join("owner--repo");
-        let hf_hub_model_dir = cache_root.join("hf-hub").join("models--owner--repo");
+        let layout = CacheLayout::from_registry_root(models_dir.clone());
+        let hf_model_dir = layout.huggingface_repo_dir("owner/repo");
+        let hf_hub_model_dir = layout
+            .prepare_huggingface_hub_repo_root("owner/repo")
+            .unwrap();
         fs::create_dir_all(&hf_model_dir).unwrap();
         fs::create_dir_all(&hf_hub_model_dir).unwrap();
         fs::write(hf_model_dir.join("model.gguf"), b"weights").unwrap();
         fs::write(hf_hub_model_dir.join("blob"), b"weights").unwrap();
+        layout.record_huggingface_repo("owner/repo").unwrap();
 
         let mut manager = CacheManager::with_dir(models_dir).unwrap();
 
@@ -908,6 +1134,115 @@ mod tests {
             !hf_hub_model_dir.exists(),
             "owned HuggingFace blob cache should be removed"
         );
+    }
+
+    #[test]
+    fn clear_model_roots_removes_one_resolved_hf_revision() {
+        let temp_dir = TempDir::new().unwrap();
+        let models_dir = temp_dir.path().join("cache/models");
+        let layout = CacheLayout::from_registry_root(models_dir.clone());
+        let first_commit = "commit-a";
+        let second_commit = "commit-b";
+        let hub_root = layout
+            .prepare_huggingface_hub_repo_root("owner/repo")
+            .unwrap();
+        let shared_blob = hub_root.join("model.gguf");
+        fs::write(&shared_blob, b"weights").unwrap();
+        for commit in [first_commit, second_commit] {
+            layout
+                .record_huggingface_revision("owner/repo", commit, commit, None)
+                .unwrap();
+            let revision_dir = layout.huggingface_repo_revision_dir("owner/repo", commit, None);
+            fs::write(revision_dir.join("model_metadata.json"), b"{}").unwrap();
+            #[cfg(unix)]
+            std::os::unix::fs::symlink(&shared_blob, revision_dir.join("model.gguf")).unwrap();
+            #[cfg(not(unix))]
+            fs::copy(&shared_blob, revision_dir.join("model.gguf")).unwrap();
+        }
+        let first_dir = layout.huggingface_repo_revision_dir("owner/repo", first_commit, None);
+        let second_dir = layout.huggingface_repo_revision_dir("owner/repo", second_commit, None);
+        let mut manager = CacheManager::with_dir(models_dir).unwrap();
+
+        let removed = manager
+            .clear_model_roots(&format!("owner/repo@{first_commit}"))
+            .unwrap();
+
+        assert_eq!(removed, 1);
+        assert!(!first_dir.exists());
+        assert!(second_dir.exists());
+        assert_eq!(fs::read(second_dir.join("model.gguf")).unwrap(), b"weights");
+        assert!(
+            hub_root.exists(),
+            "sibling revisions still depend on the hub"
+        );
+    }
+
+    #[test]
+    fn clear_model_roots_does_not_remove_a_colliding_repo_revision() {
+        let temp_dir = TempDir::new().unwrap();
+        let models_dir = temp_dir.path().join("cache/models");
+        let layout = CacheLayout::from_registry_root(models_dir.clone());
+        let first_repo = "a/b--c";
+        let second_repo = "a--b/c";
+        let commit = "commit-a";
+
+        for repo in [first_repo, second_repo] {
+            layout
+                .record_huggingface_revision(repo, "main", commit, None)
+                .unwrap();
+            let hub_root = layout.prepare_huggingface_hub_repo_root(repo).unwrap();
+            fs::write(hub_root.join("blob"), repo.as_bytes()).unwrap();
+            let revision_dir = layout.huggingface_repo_revision_dir(repo, commit, None);
+            fs::write(revision_dir.join("model_metadata.json"), b"{}").unwrap();
+        }
+        let first_dir = layout.huggingface_repo_revision_dir(first_repo, commit, None);
+        let second_dir = layout.huggingface_repo_revision_dir(second_repo, commit, None);
+        let first_hub_root = layout.huggingface_hub_repo_root(first_repo);
+        let second_hub_root = layout.huggingface_hub_repo_root(second_repo);
+        let mut manager = CacheManager::with_dir(models_dir).unwrap();
+
+        let removed = manager
+            .clear_model_roots(&format!("{first_repo}@{commit}"))
+            .unwrap();
+
+        assert_eq!(removed, 1);
+        assert!(!first_dir.exists());
+        assert!(first_hub_root.exists());
+        assert!(second_dir.exists());
+        assert!(second_hub_root.exists());
+    }
+
+    #[test]
+    fn unmarked_legacy_hf_caches_remain_listed_and_evictable() {
+        let temp_dir = TempDir::new().unwrap();
+        let cache_root = temp_dir.path().join("cache");
+        let models_dir = cache_root.join("models");
+        let legacy_direct = cache_root.join("hf").join("owner--repo");
+        let legacy_hub = cache_root.join("hf-hub").join("models--owner--repo");
+        fs::create_dir_all(&legacy_direct).unwrap();
+        fs::create_dir_all(&legacy_hub).unwrap();
+        fs::write(legacy_direct.join("model.gguf"), b"direct").unwrap();
+        fs::write(legacy_hub.join("blob"), b"hub").unwrap();
+
+        let layout = CacheLayout::from_registry_root(models_dir.clone());
+        let entries = layout.cache_entries().unwrap();
+        assert!(entries.iter().any(|entry| {
+            entry.model_id == "owner--repo"
+                && entry.path == legacy_direct
+                && entry.location == CacheEntryLocation::HuggingFace
+        }));
+        assert!(entries.iter().any(|entry| {
+            entry.model_id == "models--owner--repo"
+                && entry.path == legacy_hub
+                && entry.location == CacheEntryLocation::HuggingFaceHub
+        }));
+
+        let mut manager = CacheManager::with_dir(models_dir).unwrap();
+        assert_eq!(manager.clear_model_roots("owner--repo").unwrap(), 1);
+        assert!(!legacy_direct.exists());
+        assert!(legacy_hub.exists());
+        assert_eq!(manager.clear_model_roots("models--owner--repo").unwrap(), 1);
+        assert!(!legacy_hub.exists());
     }
 
     #[test]
@@ -957,7 +1292,7 @@ mod tests {
 
         let mut manager = CacheManager::with_dir(models_dir).unwrap();
 
-        let result = manager.clear_model_roots("../outside");
+        let result = manager.clear_model("../outside");
 
         assert!(result.is_err());
         assert!(

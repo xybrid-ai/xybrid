@@ -243,19 +243,21 @@ impl ModelSource {
     /// Supports the format `"org/repo:variant"` (e.g., `"LiquidAI/LFM2.5-350M-GGUF:Q8_0"`).
     /// If no colon is present, returns the repo as-is with no variant.
     pub fn parse_huggingface(input: &str) -> Self {
-        if let Some((repo, variant)) = input.rsplit_once(':') {
-            // Avoid treating "https://..." as variant syntax
-            if repo.contains('/') && !repo.contains("://") {
-                ModelSource::HuggingFace {
-                    repo: repo.to_string(),
-                    revision: None,
-                    variant: Some(variant.to_string()),
-                }
-            } else {
-                ModelSource::huggingface(input)
-            }
-        } else {
-            ModelSource::huggingface(input)
+        let (repo, variant) = parse_huggingface_repo(input);
+        ModelSource::HuggingFace {
+            repo,
+            revision: None,
+            variant,
+        }
+    }
+
+    /// Parse a HuggingFace repo string with a variant suffix and pin a revision.
+    pub fn parse_huggingface_with_revision(input: &str, revision: impl Into<String>) -> Self {
+        let (repo, variant) = parse_huggingface_repo(input);
+        ModelSource::HuggingFace {
+            repo,
+            revision: Some(revision.into()),
+            variant,
         }
     }
 
@@ -301,6 +303,16 @@ impl ModelSource {
             _ => None,
         }
     }
+}
+
+fn parse_huggingface_repo(input: &str) -> (String, Option<String>) {
+    if let Some((repo, variant)) = input.rsplit_once(':') {
+        // Avoid treating an explicit URL scheme as variant syntax.
+        if repo.contains('/') && !repo.contains("://") {
+            return (repo.to_string(), Some(variant.to_string()));
+        }
+    }
+    (input.to_string(), None)
 }
 
 /// Detect the current platform for registry downloads.
@@ -374,6 +386,17 @@ mod tests {
         assert_eq!(source.source_type(), "huggingface");
         assert_eq!(source.model_id(), Some("xybrid-ai/kokoro-82m"));
         assert_eq!(source.version(), Some("v1.0"));
+    }
+
+    #[test]
+    fn test_parse_huggingface_with_variant_and_revision() {
+        let source = ModelSource::parse_huggingface_with_revision(
+            "LiquidAI/LFM2.5-350M-GGUF:Q8_0",
+            "commit-123",
+        );
+        assert_eq!(source.model_id(), Some("LiquidAI/LFM2.5-350M-GGUF"));
+        assert_eq!(source.version(), Some("commit-123"));
+        assert_eq!(source.variant(), Some("Q8_0"));
     }
 
     #[test]
