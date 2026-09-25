@@ -1,0 +1,57 @@
+bindings/react-native/example/App.tsx
+  s_43c2b112287c45::t_75d5b4ec244b20 119-137
+bazel/ggml/android.bzl
+  s_43c2b112287c45::t_e17ebdadb6b477 3-4
+  s_43c2b112287c45::t_e2ebe4674f37e4 1-2,5-25
+BUILD.bazel
+  s_43c2b112287c45::t_d7781f2f02f058 602-605
+  s_56fa2b8eb9d9fd::t_af562e233fb15d 10,117-145,588-601,606-615,678
+.github/workflows/build-android.yml
+  s_43c2b112287c45::t_e84d1e4c8e749c 16-20,46-50,197-232
+CHANGELOG.md
+  s_43c2b112287c45::t_01aa1e53dca68c 104-112
+bazel/ggml/android_system_name.cmake
+  s_28b1349e061c3e::t_fed978d305f1d3 1-12
+bindings/kotlin/BUILD.bazel
+  s_43c2b112287c45::t_7d9d1187bed958 24,40-42,70-75,80-84,139-165,206-207
+bindings/kotlin/bazel/jni/ggml_cpu_backend.cpp
+  s_43c2b112287c45::t_88cff207afdae3 1-37
+crates/llama-cpp-sys/BUILD.bazel
+  s_43c2b112287c45::t_5d9c73941d90f7 82,105
+AGENTS.md
+  s_43c2b112287c45::t_f6f1f2c8c5f6b4 84-102
+bazel/ggml/BUILD.bazel
+  s_43c2b112287c45::t_a40e5dba127b71 1-35
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "b92e4dbd6d1ae6558baa91a7e269783898dae925",
+  "prompts": {},
+  "sessions": {
+    "s_28b1349e061c3e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0d1e7-def6-72b0-80e2-e885ecfb92aa",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
+    },
+    "s_43c2b112287c45": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6b9a57e6-439d-4590-8d64-5b680ed5782e",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
+    },
+    "s_56fa2b8eb9d9fd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5a255cb0-f56e-4278-a584-a951ac857571",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
+    }
+  }
+}
