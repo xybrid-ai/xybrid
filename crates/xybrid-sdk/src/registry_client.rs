@@ -141,20 +141,35 @@ impl ResumeValidator {
     }
 }
 
-/// Whether a `206 Partial Content` response continues the partial file:
-/// it starts exactly at `offset` and serves the file `validator` names.
-fn continues_partial(
-    response: &ureq::Response,
-    offset: u64,
-    validator: Option<&ResumeValidator>,
-) -> bool {
-    let starts_at_offset = response
+/// What earlier requests left at a download's destination, and how to
+/// continue it.
+#[derive(Debug, Default)]
+struct PartialFile {
+    /// Proves the server still serves the same file. `None` means the bytes on
+    /// disk cannot be continued, so the next request starts over.
+    validator: Option<ResumeValidator>,
+    /// The whole file's size, when the server announced it. Checked after
+    /// every response: a `206` may legally cover less than was asked for.
+    size: Option<u64>,
+}
+
+/// Whether a `206 Partial Content` response continues `partial`: it starts
+/// exactly at `offset` and serves the same file, at the same size.
+fn continues_partial(response: &ureq::Response, offset: u64, partial: &PartialFile) -> bool {
+    let Some((start, total)) = response
         .header("Content-Range")
         .and_then(parse_content_range)
-        .is_some_and(|(start, _)| start == offset);
-    starts_at_offset
-        && validator.is_some()
-        && ResumeValidator::from_response(response).as_ref() == validator
+    else {
+        return false;
+    };
+    let same_size = match (total, partial.size) {
+        (Some(total), Some(size)) => total == size,
+        _ => true,
+    };
+    start == offset
+        && same_size
+        && partial.validator.is_some()
+        && ResumeValidator::from_response(response) == partial.validator
 }
 
 /// Parse `Content-Range: bytes <start>-<end>/<total>` into `(start, total)`.
@@ -1316,7 +1331,7 @@ impl RegistryClient {
         let policy = &self.download_retry_policy;
         reporter.begin_transfer();
 
-        let mut validator: Option<ResumeValidator> = None;
+        let mut partial = PartialFile::default();
         let mut furthest: u64 = 0;
         let mut failed_attempts: u32 = 0;
         let mut last_error: Option<SdkError> = None;
@@ -1335,7 +1350,7 @@ impl RegistryClient {
                 }
             }
 
-            let err = match self.try_download(&agent, url, dest, &mut validator, reporter) {
+            let err = match self.try_download(&agent, url, dest, &mut partial, reporter) {
                 Ok(()) => return Ok(()),
                 Err(err) => err,
             };
@@ -1377,116 +1392,162 @@ impl RegistryClient {
         !reporter.is_cancelled()
     }
 
-    /// Attempt a single download, continuing the partial file at `dest` when
-    /// the server proves it still serves the same file.
+    /// Download `url` into `dest`, continuing the partial file there when the
+    /// server proves it still serves the same one.
     ///
-    /// `validator` identifies the file whose bytes are on disk. It is set from
-    /// the response that started the file and cleared whenever the partial
-    /// cannot be continued.
+    /// `partial` describes the bytes on disk. It is set from the response that
+    /// starts the file and reset whenever those bytes cannot be continued.
+    /// Returns once the file is whole; a transfer that breaks off returns its
+    /// error with `partial` ready for the next attempt to continue from.
     fn try_download(
         &self,
         agent: &ureq::Agent,
         url: &str,
         dest: &PathBuf,
-        validator: &mut Option<ResumeValidator>,
+        partial: &mut PartialFile,
         reporter: &ProgressReporter<'_>,
     ) -> Result<(), SdkError> {
-        if reporter.is_cancelled() {
-            return Err(ProgressReporter::cancelled_error());
-        }
-
-        // Resume only with a validator from the response that wrote the
-        // partial file. Without one there is no way to tell whether the file
-        // changed on the server in between, and splicing two versions
-        // corrupts the model silently when the registry has no SHA-256.
-        let offset = match validator {
-            Some(_) => partial_len(dest),
-            None => 0,
-        };
-
-        let mut request = agent.get(url);
-        if offset > 0 {
-            request = request.set("Range", &format!("bytes={offset}-"));
-            if let Some(validator) = validator.as_ref() {
-                request = request.set("If-Range", validator.value());
-            }
-        }
-
-        let response = match request.call() {
-            Ok(response) => response,
-            // The partial is no longer a prefix of the server's file (it
-            // shrank or was replaced). Start over.
-            Err(ureq::Error::Status(416, _)) if offset > 0 => {
-                *validator = None;
-                return self.try_download(agent, url, dest, validator, reporter);
-            }
-            Err(e) => return Err(self.ureq_error_to_sdk_error(e, "download bundle")),
-        };
-
-        let resuming = offset > 0 && response.status() == 206;
-        if resuming && !continues_partial(&response, offset, validator.as_ref()) {
-            // A range of some other file. Hugging Face's CDN ignores
-            // `If-Range`, so this is how a file replaced mid-download shows up.
-            // Start over (with no validator the retry cannot recurse again).
-            *validator = None;
-            return self.try_download(agent, url, dest, validator, reporter);
-        }
-        if response.status() != 200 && !resuming {
-            return Err(self.response_status_to_error(&response, "download bundle"));
-        }
-
-        // The server's word on the whole file's size. The registry may declare
-        // none, or a stale one.
-        let file_size = if resuming {
-            response
-                .header("Content-Range")
-                .and_then(parse_content_range)
-                .and_then(|(_, total)| total)
-        } else {
-            response
-                .header("Content-Length")
-                .and_then(|value| value.trim().parse().ok())
-        };
-        if let Some(file_size) = file_size {
-            reporter.file_size_announced(file_size);
-        }
-
-        let (mut file, mut downloaded) = if resuming {
-            info!("Resuming download of {} at byte {}", url, offset);
-            let file = std::fs::OpenOptions::new().append(true).open(dest)?;
-            (file, offset)
-        } else {
-            // A full body: whatever was on disk is replaced.
-            *validator = ResumeValidator::from_response(&response);
-            (File::create(dest)?, 0)
-        };
-        let mut reader = response.into_reader();
-        let mut buffer = [0u8; 8192];
-
+        // One request per pass. A later pass either asks for the rest after a
+        // range came back short, or starts over once the server has shown the
+        // partial file cannot be continued. Neither can repeat forever: a
+        // short range must have added bytes, and after a reset there is no
+        // partial left to reject.
         loop {
-            let bytes_read = reader
-                .read(&mut buffer)
-                .map_err(|e| SdkError::network_src("Read error", e))?;
-
-            if bytes_read == 0 {
-                break;
-            }
-
-            file.write_all(&buffer[..bytes_read])?;
-            downloaded += bytes_read as u64;
-
-            // Report progress. The reporter throttles and aggregates; this
-            // loop just says how many bytes of the current file landed.
-            reporter.file_bytes(downloaded);
-
-            // Checked per chunk so a cancel takes effect in milliseconds
-            // rather than at the end of a multi-gigabyte file.
             if reporter.is_cancelled() {
                 return Err(ProgressReporter::cancelled_error());
             }
-        }
 
-        Ok(())
+            // Resume only with a validator from the response that wrote the
+            // partial file. Without one there is no way to tell whether the
+            // file changed on the server in between, and splicing two versions
+            // corrupts the model silently when the registry has no SHA-256.
+            let offset = match partial.validator {
+                Some(_) => partial_len(dest),
+                None => 0,
+            };
+
+            let mut request = agent.get(url);
+            if offset > 0 {
+                request = request.set("Range", &format!("bytes={offset}-"));
+                if let Some(validator) = partial.validator.as_ref() {
+                    request = request.set("If-Range", validator.value());
+                }
+            }
+
+            let response = match request.call() {
+                Ok(response) => response,
+                // The partial is no longer a prefix of the server's file (it
+                // shrank or was replaced). Start over.
+                Err(ureq::Error::Status(416, _)) if offset > 0 => {
+                    *partial = PartialFile::default();
+                    continue;
+                }
+                Err(e) => return Err(self.ureq_error_to_sdk_error(e, "download bundle")),
+            };
+
+            let resuming = offset > 0 && response.status() == 206;
+            if resuming && !continues_partial(&response, offset, partial) {
+                // A range of some other file. Hugging Face's CDN ignores
+                // `If-Range`, so this is how a file replaced mid-download
+                // shows up. Start over.
+                *partial = PartialFile::default();
+                continue;
+            }
+            if response.status() != 200 && !resuming {
+                return Err(self.response_status_to_error(&response, "download bundle"));
+            }
+
+            // The server's word on the whole file's size. The registry may
+            // declare none, or a stale one.
+            let file_size = if resuming {
+                response
+                    .header("Content-Range")
+                    .and_then(parse_content_range)
+                    .and_then(|(_, total)| total)
+            } else {
+                response
+                    .header("Content-Length")
+                    .and_then(|value| value.trim().parse().ok())
+            };
+            if resuming {
+                partial.size = partial.size.or(file_size);
+            } else {
+                // A full body: whatever was on disk is replaced.
+                *partial = PartialFile {
+                    validator: ResumeValidator::from_response(&response),
+                    size: file_size,
+                };
+            }
+            if let Some(size) = partial.size {
+                reporter.file_size_announced(size);
+            }
+
+            let (mut file, mut downloaded) = if resuming {
+                info!("Resuming download of {} at byte {}", url, offset);
+                let file = std::fs::OpenOptions::new().append(true).open(dest)?;
+                (file, offset)
+            } else {
+                (File::create(dest)?, 0)
+            };
+            let mut reader = response.into_reader();
+            let mut buffer = [0u8; 8192];
+
+            loop {
+                let bytes_read = reader
+                    .read(&mut buffer)
+                    .map_err(|e| SdkError::network_src("Read error", e))?;
+
+                if bytes_read == 0 {
+                    break;
+                }
+
+                file.write_all(&buffer[..bytes_read])?;
+                downloaded += bytes_read as u64;
+
+                // Report progress. The reporter throttles and aggregates; this
+                // loop just says how many bytes of the current file landed.
+                reporter.file_bytes(downloaded);
+
+                // Checked per chunk so a cancel takes effect in milliseconds
+                // rather than at the end of a multi-gigabyte file.
+                if reporter.is_cancelled() {
+                    return Err(ProgressReporter::cancelled_error());
+                }
+            }
+
+            // With no announced size, the end of the body is all there is to
+            // go on. With one, the file must match it exactly: ending early
+            // would cache a truncated model as ready.
+            let Some(size) = partial.size else {
+                return Ok(());
+            };
+            if downloaded == size {
+                return Ok(());
+            }
+            if downloaded > size {
+                // More bytes than the file has: the partial is not the file
+                // the server serves. The next attempt starts over.
+                *partial = PartialFile::default();
+                return Err(SdkError::network(format!(
+                    "Download of {} overran its size: {} of {} bytes",
+                    url, downloaded, size
+                )));
+            }
+            if downloaded == offset {
+                // Nothing arrived. Leave it to the retry policy, which gives
+                // up on attempts that add no bytes.
+                return Err(SdkError::network(format!(
+                    "Download of {} stopped at {} of {} bytes",
+                    url, downloaded, size
+                )));
+            }
+            // The range ended before the file did, which HTTP allows. Ask for
+            // the rest.
+            debug!(
+                "Range for {} ended at {} of {} bytes, requesting the rest",
+                url, downloaded, size
+            );
+        }
     }
 
     /// Clear the local cache for a specific model.
@@ -2466,6 +2527,48 @@ mod tests {
             seen.windows(2)
                 .all(|pair| pair[1].downloaded_bytes >= pair[0].downloaded_bytes),
             "bytes rewound: {seen:?}"
+        );
+    }
+
+    #[test]
+    fn a_short_range_is_continued_until_the_file_is_whole() {
+        // HTTP lets a server answer `Range: bytes=N-` with less than the rest
+        // of the file. Stopping at the end of that range would cache a
+        // truncated model as ready. The middle reply also withholds the total
+        // (`/*`), so only the size from the first response can catch it.
+        let body = model_body(20_000, 0);
+        let half = body.len() / 2;
+        let chunk_end = half + 1_000;
+        let (url, requests) = scripted_server(vec![
+            cut_off_reply(&body, half, "\"v1\""),
+            ScriptedReply::new(
+                "206 Partial Content",
+                &[
+                    ("ETag", "\"v1\"".to_string()),
+                    ("Content-Range", format!("bytes {half}-{}/*", chunk_end - 1)),
+                    ("Content-Length", (chunk_end - half).to_string()),
+                ],
+                &body[half..chunk_end],
+            ),
+            partial_reply(&body, chunk_end, "\"v1\""),
+        ]);
+        let temp = tempfile::TempDir::new().unwrap();
+        let client = fast_retry_client(temp.path());
+        let dest = temp.path().join("model.gguf");
+        let sink = |_: DownloadStatus| {};
+        let reporter = ProgressReporter::new(None, 1, Arc::new(AtomicBool::new(false)), &sink);
+
+        client
+            .download_with_progress(&url, &dest, &reporter)
+            .expect("the download should continue past the short range");
+
+        assert_eq!(std::fs::read(&dest).unwrap(), body);
+        let requests = requests.lock().unwrap();
+        assert_eq!(requests.len(), 3, "{requests:?}");
+        assert!(
+            requests[2].contains(&format!("range: bytes={chunk_end}-")),
+            "{}",
+            requests[2]
         );
     }
 
