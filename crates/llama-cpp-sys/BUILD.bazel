@@ -6,6 +6,7 @@
 #   crate         -> rust_library linking those
 load("@rules_cc//cc:defs.bzl", "cc_library")
 load("@rules_rs//rs:rust_library.bzl", "rust_library")
+load("@xybrid_version//:version.bzl", "XYBRID_VERSION")
 
 # Platforms with the vision (mtmd) backend: the wrapper compiles its mtmd
 # functions + the crate enables `vision`, and //:llama builds/installs libmtmd
@@ -90,6 +91,7 @@ cc_library(
 # llama.cpp bumps keep working there.
 rust_library(
     name = "llama_cpp_sys",
+    version = XYBRID_VERSION,
     srcs = glob(["src/**/*.rs"]),
     crate_features = [
         "bindings",

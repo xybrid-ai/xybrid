@@ -2,9 +2,11 @@
 # one internal dep, zero externals, default features.
 load("@rules_rs//rs:rust_library.bzl", "rust_library")
 load("@crates//:defs.bzl", "all_crate_deps")
+load("@xybrid_version//:version.bzl", "XYBRID_VERSION")
 
 rust_library(
     name = "xybrid",
+    version = XYBRID_VERSION,
     srcs = glob(["src/**/*.rs"]),
     edition = "2021",
     crate_features = ["default"],

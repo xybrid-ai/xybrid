@@ -1161,6 +1161,14 @@ mod sdk_config_tests {
     }
 
     #[test]
+    fn sdk_version_is_stamped_by_the_build() {
+        // rules_rust fills CARGO_PKG_VERSION with "0.0.0" unless the target
+        // passes `version` (//bazel:cargo_version.bzl). Every shipped artifact
+        // is Bazel-built and this test also runs under `bazel test`.
+        assert_ne!(crate::SDK_VERSION, "0.0.0");
+    }
+
+    #[test]
     fn default_config_resolves_to_default_binding() {
         let cfg = SdkConfig::default();
         assert!(cfg.binding.is_none());

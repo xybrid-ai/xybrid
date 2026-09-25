@@ -4,9 +4,11 @@
 load("@rules_rs//rs:rust_library.bzl", "rust_library")
 load("@rules_rs//rs:rust_test.bzl", "rust_test")
 load("@crates//:defs.bzl", "all_crate_deps")
+load("@xybrid_version//:version.bzl", "XYBRID_VERSION")
 
 rust_library(
     name = "xybrid-ffi-facade",
+    version = XYBRID_VERSION,
     srcs = glob(["src/**/*.rs"]),
     edition = "2021",
     crate_features = ["default"],
@@ -26,6 +28,7 @@ rust_library(
 # same). tempfile backs the cache-management tests' scratch directories.
 rust_test(
     name = "xybrid-ffi-facade_test",
+    version = XYBRID_VERSION,
     crate = ":xybrid-ffi-facade",
     crate_features = ["default"],
     deps = ["@crates//:tempfile"],

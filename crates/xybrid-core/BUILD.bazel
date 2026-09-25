@@ -20,6 +20,7 @@ load("@rules_rs//rs:rust_library.bzl", "rust_library")
 load("@rules_rs//rs:rust_test.bzl", "rust_test")
 load("@crates//:data.bzl", "DEP_DATA")
 load("@crates//:defs.bzl", "all_crate_deps")
+load("@xybrid_version//:version.bzl", "XYBRID_VERSION")
 
 # Android ships the `platform-android` backend set: llm-llamacpp-vision (mtmd
 # multimodal) plus the unconditional asr-whispercpp below. Bazel has no
@@ -36,6 +37,7 @@ _ANDROID_BACKENDS = [
 
 rust_library(
     name = "xybrid-core",
+    version = XYBRID_VERSION,
     srcs = glob(["src/**/*.rs"]),
     edition = "2021",
     # Resolved from the real Cargo.lock by the @crates hub (DEP_DATA). Backend
@@ -195,6 +197,7 @@ _CORE_TEST_DATA = {
 [
     rust_test(
         name = name,
+        version = XYBRID_VERSION,
         srcs = ["tests/{}.rs".format(name)],
         crate_features = _CORE_TEST_FEATURES.get(name, []),
         data = _CORE_TEST_DATA.get(name, []),
@@ -219,6 +222,7 @@ _CORE_TEST_UREQ = [
 
 rust_test(
     name = "xybrid-core_test",
+    version = XYBRID_VERSION,
     crate = ":xybrid-core",
     # Fixture files three inline tests read off disk (model metadata + the web
     # SDK's serialization fixture). Cargo reads them straight from the worktree;

@@ -8,6 +8,7 @@ load("@rules_rs//rs:rust_library.bzl", "rust_library")
 load("@rules_rs//rs:rust_test.bzl", "rust_test")
 load("@crates//:data.bzl", "DEP_DATA")
 load("@rules_rs//rs/private:all_crate_deps.bzl", _all_crate_deps = "all_crate_deps")
+load("@xybrid_version//:version.bzl", "XYBRID_VERSION")
 
 PLATFORMS = [
     "@rules_rs//rs/platforms/config:aarch64-apple-darwin",
@@ -66,6 +67,7 @@ filtered_sdk_deps["deps_by_platform"] = _ORIG_DBP | {
 
 rust_library(
     name = "xybrid-sdk",
+    version = XYBRID_VERSION,
     srcs = glob(["src/**/*.rs"]),
     edition = "2021",
     crate_features = [
@@ -132,6 +134,7 @@ rust_library(
 # integration binaries and are NOT covered by this target.
 rust_test(
     name = "xybrid-sdk_test",
+    version = XYBRID_VERSION,
     crate = ":xybrid-sdk",
     deps = ["@crates//:httpmock"],
 )
@@ -190,6 +193,7 @@ _SDK_TEST_DATA = {
 [
     rust_test(
         name = name,
+        version = XYBRID_VERSION,
         srcs = ["tests/{}.rs".format(name)],
         data = _SDK_TEST_DATA.get(name, []),
         edition = "2021",
