@@ -1,0 +1,63 @@
+CHANGELOG.md
+  s_6cad2c92f6e2bc::t_90601861a8a7f2 85-89
+bindings/flutter/rust/BUILD.bazel
+  s_43c2b112287c45::t_4b4bccca5d4912 24,29,78
+crates/llama-cpp-sys/BUILD.bazel
+  s_43c2b112287c45::t_498562ec085e7d 9,94
+crates/whisper-cpp-sys/BUILD.bazel
+  s_43c2b112287c45::t_0895a456c0b65c 13,20
+crates/xybrid-bolt/BUILD.bazel
+  s_43c2b112287c45::t_f82439f4b79ff4 15,45,118
+crates/xybrid-cli/BUILD.bazel
+  s_43c2b112287c45::t_a5c62d860298ac 7,25,78
+crates/xybrid-core/BUILD.bazel
+  s_43c2b112287c45::t_9b8aa41680fef4 23,40,200,225
+crates/xybrid-ffi-facade/BUILD.bazel
+  s_43c2b112287c45::t_0503a1a4c5894f 7,11,31
+crates/xybrid-llama/BUILD.bazel
+  s_43c2b112287c45::t_3d58d60f71688e 4,22,47,73
+crates/xybrid-sdk/BUILD.bazel
+  s_43c2b112287c45::t_e97485fbf28f35 11,70,137,196
+crates/xybrid-sdk/src/lib.rs
+  s_43c2b112287c45::t_9be2e632c9866c 1163-1170
+crates/xybrid-whisper/BUILD.bazel
+  s_43c2b112287c45::t_71e556a615b54c 4,8,29,39
+crates/xybrid/BUILD.bazel
+  s_43c2b112287c45::t_cfa63fbbd1d7c5 5,9
+integration-tests/BUILD.bazel
+  s_43c2b112287c45::t_f0850df81bd988 9,13,103,125
+macros/BUILD.bazel
+  s_43c2b112287c45::t_3a10d041518ec4 5,9
+xtask/BUILD.bazel
+  s_43c2b112287c45::t_313085b8736c79 9,13,24
+AGENTS.md
+  s_43c2b112287c45::t_02cd135341fdeb 60-67
+MODULE.bazel
+  s_43c2b112287c45::t_cad4176a2c5bec 175-184
+bazel/cargo_version.bzl
+  s_43c2b112287c45::t_3893fc3538e867 1-45
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "a5e6bfa888700b9bd341e7eea270f6d433f2f2c7",
+  "prompts": {},
+  "sessions": {
+    "s_43c2b112287c45": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6b9a57e6-439d-4590-8d64-5b680ed5782e",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
+    },
+    "s_6cad2c92f6e2bc": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "dcb0f33d-1b71-4b1e-84ce-9ad7d86064e6",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
+    }
+  }
+}
