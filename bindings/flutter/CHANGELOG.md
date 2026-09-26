@@ -1,6 +1,9 @@
 # Changelog
 
-## Unreleased
+## 0.10.0-rc1
+
+Model-cache management and download progress in bytes reach Dart, and large
+models now download on slow connections.
 
 * Added: complete model-cache management through `Xybrid`, including aggregate
   status, physical entries, preferred paths, ready-model IDs,

@@ -1,6 +1,6 @@
 {
   "name": "@xybrid/react-native",
-  "version": "0.9.0",
+  "version": "0.10.0-rc1",
   "description": "On-device (and optionally cloud) ML inference for React Native: LLM, ASR, TTS, embeddings and vision, backed by the Xybrid Rust SDK",
   "main": "lib/commonjs/index.js",
   "module": "lib/module/index.js",
@@ -70,7 +70,7 @@
     "typescript": "^5.9.3"
   },
   "xybrid": {
-    "iosXcframeworkSha256": ""
+    "iosXcframeworkSha256": "801b4dac0bdf7b199276d8366615141ddd60e3108f6a602f94270b2730ae3a78"
   },
   "codegenConfig": {
     "name": "RNXybridSpec",

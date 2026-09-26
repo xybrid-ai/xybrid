@@ -2749,7 +2749,7 @@ dependencies = [
 
 [[package]]
 name = "integration-tests"
-version = "0.9.0"
+version = "0.10.0-rc1"
 dependencies = [
  "anyhow",
  "dirs",
@@ -6271,7 +6271,7 @@ dependencies = [
 
 [[package]]
 name = "xtask"
-version = "0.9.0"
+version = "0.10.0-rc1"
 dependencies = [
  "anyhow",
  "clap",
@@ -6285,14 +6285,14 @@ dependencies = [
 
 [[package]]
 name = "xybrid"
-version = "0.9.0"
+version = "0.10.0-rc1"
 dependencies = [
  "xybrid-sdk",
 ]
 
 [[package]]
 name = "xybrid-cli"
-version = "0.9.0"
+version = "0.10.0-rc1"
 dependencies = [
  "anyhow",
  "chrono",
@@ -6321,7 +6321,7 @@ dependencies = [
 
 [[package]]
 name = "xybrid-core"
-version = "0.9.0"
+version = "0.10.0-rc1"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -6391,7 +6391,7 @@ dependencies = [
 
 [[package]]
 name = "xybrid-ffi-facade"
-version = "0.9.0"
+version = "0.10.0-rc1"
 dependencies = [
  "log",
  "serde_json",
@@ -6403,7 +6403,7 @@ dependencies = [
 
 [[package]]
 name = "xybrid-llama"
-version = "0.9.0"
+version = "0.10.0-rc1"
 dependencies = [
  "thiserror 1.0.69",
  "tracing",
@@ -6412,7 +6412,7 @@ dependencies = [
 
 [[package]]
 name = "xybrid-llama-sys"
-version = "0.9.0"
+version = "0.10.0-rc1"
 dependencies = [
  "bindgen",
  "cc",
@@ -6425,7 +6425,7 @@ dependencies = [
 
 [[package]]
 name = "xybrid-macros"
-version = "0.9.0"
+version = "0.10.0-rc1"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -6434,7 +6434,7 @@ dependencies = [
 
 [[package]]
 name = "xybrid-sdk"
-version = "0.9.0"
+version = "0.10.0-rc1"
 dependencies = [
  "anyhow",
  "chrono",
@@ -6461,7 +6461,7 @@ dependencies = [
 
 [[package]]
 name = "xybrid-whisper"
-version = "0.9.0"
+version = "0.10.0-rc1"
 dependencies = [
  "thiserror 1.0.69",
  "tracing",
@@ -6470,7 +6470,7 @@ dependencies = [
 
 [[package]]
 name = "xybrid-whisper-sys"
-version = "0.9.0"
+version = "0.10.0-rc1"
 dependencies = [
  "bindgen",
  "cc",
@@ -6479,7 +6479,7 @@ dependencies = [
 
 [[package]]
 name = "xybrid_bolt"
-version = "0.9.0"
+version = "0.10.0-rc1"
 dependencies = [
  "android_logger",
  "boltffi",
@@ -6491,7 +6491,7 @@ dependencies = [
 
 [[package]]
 name = "xybrid_flutter"
-version = "0.9.0"
+version = "0.10.0-rc1"
 dependencies = [
  "android_logger",
  "flutter_rust_bridge",

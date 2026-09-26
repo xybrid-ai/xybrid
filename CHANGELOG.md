@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Planned
+
+- **Multimodal KV-prefix reuse**: the per-frame prefill cost lever for live vision — **deferred** from 0.2.0, not yet implemented.
+
+---
+
+## [0.10.0-rc1] - 2026-09-25
+
+React Native becomes a first-class SDK: it runs on iOS, covers the whole SDK
+surface and publishes to npm as `@xybrid/react-native`. Every binding gains
+model-cache management, pipelines that return each stage's output, live speech
+recognition and download progress in bytes; downloads survive slow links;
+Android runs llama.cpp with the fastest CPU instructions each phone has; and
+the shipped SDKs report their real version.
+
+This release changes a few Rust signatures (`pipeline::StageTiming` gains a
+public `output` field; `ModelLoader::load_with_progress` and
+`RegistryClient::fetch` / `fetch_extracted` take a `DownloadStatus` callback)
+and adds a `Cancelled` download state that exhaustive `switch` / `when` /
+`match` statements in the bindings must handle.
+
 ### Added
 
 - **React Native catches up with the other SDKs, and runs on iOS.** The iOS
@@ -155,10 +176,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   of on every run. One all-MiniLM-L6-v2 embedding drops from ~43 ms to ~35 ms
   on an M4 Max; the Whisper decode step from ~28 ms to a few microseconds.
   A `tokenizer.json` replaced on disk is picked up on the next run.
-
-### Planned
-
-- **Multimodal KV-prefix reuse**: the per-frame prefill cost lever for live vision — **deferred** from 0.2.0, not yet implemented.
 
 ---
 
