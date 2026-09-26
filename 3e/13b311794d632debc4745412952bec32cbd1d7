@@ -1,0 +1,21 @@
+CHANGELOG.md
+  s_cbf4fe83e9069b::t_5b4a84ae4288bc 10-19
+bindings/flutter/CHANGELOG.md
+  s_cbf4fe83e9069b::t_5b4a84ae4288bc 3-8
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "3e13b311794d632debc4745412952bec32cbd1d7",
+  "prompts": {},
+  "sessions": {
+    "s_cbf4fe83e9069b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7858ebf6-17d3-467f-8db4-8f1f27e33435",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
+    }
+  }
+}
