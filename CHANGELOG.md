@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A download survives losing the network for a while.** Once bytes have
+  arrived, "network unreachable" errors no longer count against the retry
+  budget: the download waits up to two minutes for the connection to return,
+  then resumes. Before, every retry failed on the DNS lookup at once and the
+  budget ran out about seven seconds into an outage (caught cutting a Pixel 8's
+  Wi-Fi for 10 seconds mid-download). A download that starts offline still
+  fails fast.
+
 ### Planned
 
 - **Multimodal KV-prefix reuse**: the per-frame prefill cost lever for live vision — **deferred** from 0.2.0, not yet implemented.
@@ -129,13 +139,6 @@ and adds a `Cancelled` download state that exhaustive `switch` / `when` /
   file's `ETag` (Hugging Face's CDN ignores `If-Range`), or the download starts
   over rather than splicing two versions. Only attempts that add no bytes count
   against the retry budget.
-- **A download survives losing the network for a while.** Once bytes have
-  arrived, "network unreachable" errors no longer count against the retry
-  budget: the download waits up to two minutes for the connection to return,
-  then resumes. Before, every retry failed on the DNS lookup at once and the
-  budget ran out about seven seconds into an outage (caught cutting a Pixel 8's
-  Wi-Fi for 10 seconds mid-download). A download that starts offline still
-  fails fast.
 - **Progress for models with no declared size.** A single-file model whose
   registry entry has `size_bytes = 0` (such as `lfm2.5-350m`) sat at 0% until
   the end. The server's announced size now fills in the total, and also
