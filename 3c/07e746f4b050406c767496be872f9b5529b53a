@@ -1,0 +1,21 @@
+examples/flutter/ios/Runner.xcodeproj/project.pbxproj
+  s_cbf4fe83e9069b::t_cd050b78bc064a 492,499,516,534,550,675,682,698,705
+examples/flutter/pubspec.lock
+  s_cbf4fe83e9069b::t_0d930eb9abfbbe 1045
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "3c07e746f4b050406c767496be872f9b5529b53a",
+  "prompts": {},
+  "sessions": {
+    "s_cbf4fe83e9069b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7858ebf6-17d3-467f-8db4-8f1f27e33435",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
+    }
+  }
+}
