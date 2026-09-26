@@ -105,6 +105,9 @@ class XybridRunOptions:
     fallback_to_cloud: bool
     max_grace_tokens: int
     correlation_id: str | None
+    cloud_provider: str | None = None
+    cloud_model: str | None = None
+    cloud_gateway_url: str | None = None
 
 
 

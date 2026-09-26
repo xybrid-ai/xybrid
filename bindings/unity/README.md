@@ -135,6 +135,30 @@ public class XybridExample : MonoBehaviour
 }
 ```
 
+### Cloud Fallback Destination
+
+Pass optional cloud settings and explicit fallback permission to a model run:
+
+```csharp
+var cloud = new CloudFallbackOptions
+{
+    FallbackToCloud = true,
+    CloudProvider = "openai",
+    CloudModel = "gpt-4o-mini",
+    CloudGatewayUrl = "https://api.xybrid.dev/v1"
+};
+using var stop = new System.Threading.CancellationTokenSource();
+using var result = model.Run(Envelope.Text("Write a haiku"),
+    cancellationToken: stop.Token, cloudOptions: cloud);
+result.ThrowIfFailed();
+```
+
+Omitting `cloudOptions` keeps existing calls unchanged. A destination alone
+does not enable fallback; `FallbackToCloud` defaults to `false`. The shared
+facade validates an explicit gateway URL before a run. `Model.Run` carries the
+settings into the existing execution path; it does not itself start an
+automatic cloud retry.
+
 ### Text-to-Speech
 
 ```csharp

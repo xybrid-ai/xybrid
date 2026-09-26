@@ -313,7 +313,21 @@ def _downlevel_record_structs(content: str) -> tuple[str, int]:
             for p in match.group("params").split(",")
             if p.strip()
         ]
-        ctor_params = ", ".join(f"{ty} {pn}" for ty, pn in fields)
+        # The cloud fields are an append-only input tail. Keep existing C#
+        # five-argument construction source-compatible; nullable fields in a
+        # struct do not otherwise make constructor parameters optional.
+        if name == "XybridRunOptions":
+            _drift(
+                [pn for _, pn in fields[-3:]]
+                == ["CloudProvider", "CloudModel", "CloudGatewayUrl"],
+                "expected XybridRunOptions cloud fields at the wire tail",
+            )
+            ctor_params = ", ".join(
+                f"{ty} {pn}" + (" = null" if index >= len(fields) - 3 else "")
+                for index, (ty, pn) in enumerate(fields)
+            )
+        else:
+            ctor_params = ", ".join(f"{ty} {pn}" for ty, pn in fields)
         assigns = " ".join(f"this.{pn} = {pn};" for _, pn in fields)
         props = "\n".join(f"        public {ty} {pn} {{ get; }}" for ty, pn in fields)
         return (

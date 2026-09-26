@@ -577,7 +577,8 @@ fun streamingConfigWithVad(
  * Convenience over the generated [XybridModel.run] (which takes an
  * `XybridRunOptions?`) so simple call sites stay one-argument. Forwards
  * `null` options. Use the two-arg `run(envelope, options)` to override
- * generation config, abort signals, or cloud-fallback behaviour.
+ * generation config, abort signals, or cloud target selection. Cloud settings
+ * do not enable fallback or make this method retry in cloud.
  */
 fun XybridModel.run(envelope: XybridEnvelope): XybridResult = this.run(envelope, null)
 
@@ -666,7 +667,7 @@ fun XybridPipeline.run(envelope: XybridEnvelope): XybridPipelineResult = this.ru
  * Run every pipeline stage off the caller's thread.
  *
  * Of [options], only `correlationId` applies to a pipeline run; setting
- * `generationConfig` or `abortOn` throws [XybridError.ConfigError].
+ * `generationConfig`, `abortOn`, or a cloud target throws [XybridError.ConfigError].
  */
 suspend fun XybridPipeline.runAsync(
     envelope: XybridEnvelope,

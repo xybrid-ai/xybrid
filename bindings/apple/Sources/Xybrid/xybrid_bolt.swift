@@ -206,19 +206,28 @@ public struct XybridRunOptions: Hashable, Equatable, Sendable {
     public var fallbackToCloud: Bool
     public var maxGraceTokens: UInt32
     public var correlationId: String?
+    public var cloudProvider: String?
+    public var cloudModel: String?
+    public var cloudGatewayUrl: String?
 
     public init(
         generationConfig: XybridGenerationConfig?,
         abortOn: [XybridAbortSignal],
         fallbackToCloud: Bool,
         maxGraceTokens: UInt32,
-        correlationId: String?
+        correlationId: String?,
+        cloudProvider: String? = nil,
+        cloudModel: String? = nil,
+        cloudGatewayUrl: String? = nil
     ) {
         self.generationConfig = generationConfig
         self.abortOn = abortOn
         self.fallbackToCloud = fallbackToCloud
         self.maxGraceTokens = maxGraceTokens
         self.correlationId = correlationId
+        self.cloudProvider = cloudProvider
+        self.cloudModel = cloudModel
+        self.cloudGatewayUrl = cloudGatewayUrl
     }
 
     @inlinable static func decode(from reader: inout WireReader) -> XybridRunOptions {
@@ -227,7 +236,10 @@ public struct XybridRunOptions: Hashable, Equatable, Sendable {
             abortOn: reader.readArray { reader in XybridAbortSignal(rawValue: reader.readI32())! },
             fallbackToCloud: reader.readBool(),
             maxGraceTokens: reader.readU32(),
-            correlationId: reader.readOptional { reader in reader.readString() }
+            correlationId: reader.readOptional { reader in reader.readString() },
+            cloudProvider: reader.readOptional { reader in reader.readString() },
+            cloudModel: reader.readOptional { reader in reader.readString() },
+            cloudGatewayUrl: reader.readOptional { reader in reader.readString() }
         )
     }
 
@@ -237,6 +249,9 @@ public struct XybridRunOptions: Hashable, Equatable, Sendable {
         writer.writeBool(self.fallbackToCloud)
         writer.writeU32(self.maxGraceTokens)
         writer.writeOptional(self.correlationId) { writer, boltffiValue0 in writer.writeString(boltffiValue0) }
+        writer.writeOptional(self.cloudProvider) { writer, boltffiValue0 in writer.writeString(boltffiValue0) }
+        writer.writeOptional(self.cloudModel) { writer, boltffiValue0 in writer.writeString(boltffiValue0) }
+        writer.writeOptional(self.cloudGatewayUrl) { writer, boltffiValue0 in writer.writeString(boltffiValue0) }
     }
 }
 

@@ -39,6 +39,8 @@ use std::time::Duration;
 
 use xybrid_sdk as sdk;
 
+mod cloud;
+
 // ============================================================================
 // Error
 // ============================================================================
@@ -999,9 +1001,71 @@ pub struct RunOptions {
     pub max_grace_tokens: u32,
 
     pub correlation_id: Option<String>,
+
+    /// Caller-selected provider. `None` preserves the envelope's existing value.
+    pub cloud_provider: Option<String>,
+    /// Caller-selected model. `None` preserves the envelope's existing value.
+    pub cloud_model: Option<String>,
+    /// Caller-selected gateway base URL, validated before SDK dispatch.
+    pub cloud_gateway_url: Option<String>,
 }
 
 impl RunOptions {
+    /// Validate supplied cloud settings and lower them onto the SDK envelope.
+    ///
+    /// The caller owns defaults. When every cloud field is absent or blank,
+    /// this leaves metadata untouched. A supplied target does not change
+    /// `fallback_to_cloud`; that permission remains in the SDK abort policy.
+    /// Returns the normalized explicit gateway for bindings that also create
+    /// a cloud adapter.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::ConfigError`] for an invalid explicit gateway URL.
+    pub fn apply_cloud_fallback_metadata(
+        &self,
+        envelope: &mut sdk::ir::Envelope,
+    ) -> Result<Option<String>> {
+        let provider = cloud::non_empty(self.cloud_provider.as_deref());
+        let model = cloud::non_empty(self.cloud_model.as_deref());
+        let gateway = cloud::non_empty(self.cloud_gateway_url.as_deref())
+            .map(cloud::validate_gateway_url)
+            .transpose()
+            .map_err(|message| Error::ConfigError { message })?;
+
+        if provider.is_none() && model.is_none() && gateway.is_none() {
+            return Ok(None);
+        }
+
+        if let Some(provider) = provider {
+            envelope.metadata.insert("provider".into(), provider.into());
+        }
+        if let Some(model) = model {
+            envelope.metadata.insert("model".into(), model.into());
+        }
+        if let Some(gateway) = gateway.as_ref() {
+            envelope
+                .metadata
+                .insert("gateway_url".into(), gateway.clone());
+        }
+        envelope.metadata.insert("backend".into(), "gateway".into());
+
+        if let Some(config) = self.generation_config.as_ref() {
+            if let Some(max_tokens) = config.max_tokens {
+                envelope
+                    .metadata
+                    .insert("max_tokens".into(), max_tokens.to_string());
+            }
+            if let Some(temperature) = config.temperature {
+                envelope
+                    .metadata
+                    .insert("temperature".into(), temperature.to_string());
+            }
+        }
+
+        Ok(gateway)
+    }
+
     /// Materialize the SDK type over global defaults.
     ///
     /// Run paths with a model in scope should prefer [`Self::to_sdk_over`].
@@ -1549,12 +1613,13 @@ impl Pipeline {
     /// Execute every stage, downloading any missing models first.
     ///
     /// Of [`RunOptions`], only `correlation_id` applies to a pipeline run: it
-    /// is copied onto the run's telemetry.
+    /// is copied onto the run's telemetry. Effective cloud target fields are
+    /// rejected because pipeline routing is configured per stage.
     ///
     /// # Errors
     ///
-    /// [`Error::ConfigError`] when `options` sets `generation_config` or
-    /// `abort_on` — a pipeline run cannot honour either, and ignoring them
+    /// [`Error::ConfigError`] when `options` sets `generation_config`,
+    /// `abort_on`, or a cloud target — a pipeline run cannot honour them, and ignoring them
     /// would look like success. Per-stage generation settings belong in the
     /// pipeline YAML. Otherwise any load or stage failure.
     pub fn run(&self, envelope: Envelope, options: RunOptions) -> Result<PipelineResult> {
@@ -1592,6 +1657,14 @@ fn pipeline_run_options(options: RunOptions) -> Result<sdk::RunOptions> {
     if !options.abort_on.is_empty() {
         return Err(Error::ConfigError {
             message: "abort_on is not supported on pipeline runs".into(),
+        });
+    }
+    if cloud::non_empty(options.cloud_provider.as_deref()).is_some()
+        || cloud::non_empty(options.cloud_model.as_deref()).is_some()
+        || cloud::non_empty(options.cloud_gateway_url.as_deref()).is_some()
+    {
+        return Err(Error::ConfigError {
+            message: "cloud target options are not supported on pipeline runs; configure pipeline stages instead".into(),
         });
     }
     let mut sdk_options = sdk::RunOptions::new();
@@ -2058,9 +2131,10 @@ impl XybridModel {
         options: RunOptions,
         cancel: Option<Arc<CancellationToken>>,
     ) -> Result<InferenceResult> {
-        let env = envelope.into_sdk()?;
+        let mut env = envelope.into_sdk()?;
         let opts =
             options.to_sdk_over(cancel.as_deref(), self.inner.default_generation_config())?;
+        options.apply_cloud_fallback_metadata(&mut env)?;
         let result = self
             .inner
             .run_with_options(&env, &opts)
@@ -2107,10 +2181,11 @@ impl XybridModel {
         options: RunOptions,
         cancel: Option<Arc<CancellationToken>>,
     ) -> Result<InferenceResult> {
-        let env = envelope.into_sdk()?;
+        let mut env = envelope.into_sdk()?;
         let ctx = context.snapshot();
         let opts =
             options.to_sdk_over(cancel.as_deref(), self.inner.default_generation_config())?;
+        options.apply_cloud_fallback_metadata(&mut env)?;
         let result = self
             .inner
             .run_with_context_options(&env, &ctx, &opts)
@@ -2145,13 +2220,14 @@ impl XybridModel {
         options: RunOptions,
         cancel: Option<Arc<CancellationToken>>,
     ) -> Result<Arc<StreamingSession>> {
-        let envelope = envelope.into_sdk()?;
-        let options =
+        let mut envelope = envelope.into_sdk()?;
+        let sdk_options =
             options.to_sdk_over(cancel.as_deref(), self.inner.default_generation_config())?;
+        options.apply_cloud_fallback_metadata(&mut envelope)?;
         let model = self.inner.clone();
 
         StreamingSession::spawn(move |sender| {
-            let result = model.run_streaming_with_options(&envelope, &options, |token| {
+            let result = model.run_streaming_with_options(&envelope, &sdk_options, |token| {
                 sender
                     .send(StreamEvent::Token(StreamToken::from_sdk(token)))
                     .map_err(|_| {
@@ -2189,15 +2265,16 @@ impl XybridModel {
         options: RunOptions,
         cancel: Option<Arc<CancellationToken>>,
     ) -> Result<Arc<StreamingSession>> {
-        let envelope = envelope.into_sdk()?;
+        let mut envelope = envelope.into_sdk()?;
         let ctx = context.snapshot();
-        let options =
+        let sdk_options =
             options.to_sdk_over(cancel.as_deref(), self.inner.default_generation_config())?;
+        options.apply_cloud_fallback_metadata(&mut envelope)?;
         let model = self.inner.clone();
 
         StreamingSession::spawn(move |sender| {
             let result =
-                model.run_streaming_with_context_options(&envelope, &ctx, &options, |token| {
+                model.run_streaming_with_context_options(&envelope, &ctx, &sdk_options, |token| {
                     sender
                         .send(StreamEvent::Token(StreamToken::from_sdk(token)))
                         .map_err(|_| {
@@ -3312,6 +3389,9 @@ mod tests {
             fallback_to_cloud: false,
             max_grace_tokens: 0,
             correlation_id: None,
+            cloud_provider: None,
+            cloud_model: None,
+            cloud_gateway_url: None,
         }
     }
 
@@ -3547,6 +3627,14 @@ stages:
         let sdk_options = pipeline_run_options(options).expect("inert fields are accepted");
 
         assert_eq!(sdk_options.correlation_id.as_deref(), Some("turn-7"));
+
+        let blank_cloud = RunOptions {
+            cloud_provider: Some("  ".into()),
+            cloud_model: Some(String::new()),
+            cloud_gateway_url: Some("\t".into()),
+            ..RunOptions::default()
+        };
+        pipeline_run_options(blank_cloud).expect("blank target fields are absent");
     }
 
     #[test]
@@ -3559,11 +3647,185 @@ stages:
             abort_on: vec![AbortSignal::ThermalHot],
             ..RunOptions::default()
         };
+        let cloud = RunOptions {
+            cloud_model: Some("model-a".into()),
+            ..RunOptions::default()
+        };
 
-        for options in [generation, abort] {
+        for options in [generation, abort, cloud] {
             let err = pipeline_run_options(options).expect_err("must not be silently ignored");
             assert!(matches!(err, Error::ConfigError { .. }), "got {err:?}");
         }
+    }
+
+    #[test]
+    fn cloud_options_default_to_absent_and_do_not_enable_fallback() {
+        let options = RunOptions::default();
+        assert!(options.cloud_provider.is_none());
+        assert!(options.cloud_model.is_none());
+        assert!(options.cloud_gateway_url.is_none());
+        assert!(!options.fallback_to_cloud);
+
+        let options = RunOptions {
+            cloud_provider: Some("openai".into()),
+            cloud_model: Some("model-a".into()),
+            ..RunOptions::default()
+        };
+        let sdk_options = options.to_sdk(None).unwrap();
+        assert!(!sdk_options.abort_policy.fallback_to_cloud);
+    }
+
+    #[test]
+    fn omitted_and_blank_cloud_options_preserve_the_entire_metadata_map() {
+        let mut envelope = Envelope::text("hello".into()).into_sdk().unwrap();
+        envelope.metadata.insert("provider".into(), "prior".into());
+        envelope.metadata.insert("backend".into(), "direct".into());
+        envelope.metadata.insert("custom".into(), "keep".into());
+        let original = envelope.metadata.clone();
+
+        let options = RunOptions {
+            generation_config: Some(GenerationConfig {
+                max_tokens: Some(9),
+                ..GenerationConfig::default()
+            }),
+            ..RunOptions::default()
+        };
+        assert_eq!(
+            options
+                .apply_cloud_fallback_metadata(&mut envelope)
+                .unwrap(),
+            None
+        );
+        assert_eq!(envelope.metadata, original);
+
+        let blank = RunOptions {
+            cloud_provider: Some("  ".into()),
+            cloud_model: Some(String::new()),
+            cloud_gateway_url: Some(" \t ".into()),
+            ..RunOptions::default()
+        };
+        assert_eq!(
+            blank.apply_cloud_fallback_metadata(&mut envelope).unwrap(),
+            None
+        );
+        assert_eq!(envelope.metadata, original);
+    }
+
+    #[test]
+    fn supplied_cloud_fields_override_independently_without_invented_defaults() {
+        for (field, value, key) in [
+            ("provider", "provider-a", "provider"),
+            ("model", "model-a", "model"),
+            ("gateway", "https://api.xybrid.dev/v1/", "gateway_url"),
+        ] {
+            let mut envelope = Envelope::text("hello".into()).into_sdk().unwrap();
+            envelope.metadata.insert("custom".into(), "keep".into());
+            let mut options = RunOptions::default();
+            match field {
+                "provider" => options.cloud_provider = Some(format!(" {value} ")),
+                "model" => options.cloud_model = Some(format!(" {value} ")),
+                _ => options.cloud_gateway_url = Some(value.into()),
+            }
+            let gateway = options
+                .apply_cloud_fallback_metadata(&mut envelope)
+                .unwrap();
+            let effective = if field == "gateway" {
+                "https://api.xybrid.dev/v1"
+            } else {
+                value
+            };
+            assert_eq!(
+                envelope.metadata.get(key).map(String::as_str),
+                Some(effective)
+            );
+            assert_eq!(
+                envelope.metadata.get("backend").map(String::as_str),
+                Some("gateway")
+            );
+            assert_eq!(
+                envelope.metadata.get("custom").map(String::as_str),
+                Some("keep")
+            );
+            for absent in ["provider", "model", "gateway_url"] {
+                if absent != key {
+                    assert!(!envelope.metadata.contains_key(absent));
+                }
+            }
+            assert_eq!(gateway.is_some(), field == "gateway");
+        }
+    }
+
+    #[test]
+    fn cloud_lowering_preserves_existing_unsupplied_fields_and_explicit_sampling() {
+        let mut envelope = Envelope::text("hello".into()).into_sdk().unwrap();
+        envelope
+            .metadata
+            .insert("provider".into(), "prior-provider".into());
+        envelope.metadata.insert("backend".into(), "direct".into());
+        envelope
+            .metadata
+            .insert("max_tokens".into(), "prior-tokens".into());
+        let options = RunOptions {
+            cloud_model: Some("new-model".into()),
+            generation_config: Some(GenerationConfig {
+                max_tokens: Some(0),
+                temperature: Some(0.0),
+                ..GenerationConfig::default()
+            }),
+            ..RunOptions::default()
+        };
+
+        options
+            .apply_cloud_fallback_metadata(&mut envelope)
+            .unwrap();
+        assert_eq!(envelope.metadata.get("provider").unwrap(), "prior-provider");
+        assert_eq!(envelope.metadata.get("model").unwrap(), "new-model");
+        assert_eq!(envelope.metadata.get("backend").unwrap(), "gateway");
+        assert_eq!(envelope.metadata.get("max_tokens").unwrap(), "0");
+        assert_eq!(envelope.metadata.get("temperature").unwrap(), "0");
+    }
+
+    #[test]
+    fn all_explicit_cloud_fields_reach_metadata() {
+        let mut envelope = Envelope::text("hello".into()).into_sdk().unwrap();
+        let options = RunOptions {
+            cloud_provider: Some("provider-a".into()),
+            cloud_model: Some("model-a".into()),
+            cloud_gateway_url: Some("https://api.xybrid.dev/v1/".into()),
+            ..RunOptions::default()
+        };
+
+        let gateway = options
+            .apply_cloud_fallback_metadata(&mut envelope)
+            .unwrap();
+        assert_eq!(gateway.as_deref(), Some("https://api.xybrid.dev/v1"));
+        assert_eq!(envelope.metadata.get("provider").unwrap(), "provider-a");
+        assert_eq!(envelope.metadata.get("model").unwrap(), "model-a");
+        assert_eq!(
+            envelope.metadata.get("gateway_url").unwrap(),
+            "https://api.xybrid.dev/v1"
+        );
+        assert_eq!(envelope.metadata.get("backend").unwrap(), "gateway");
+    }
+
+    #[test]
+    fn invalid_gateway_is_rejected_before_any_metadata_mutation() {
+        let mut envelope = Envelope::text("hello".into()).into_sdk().unwrap();
+        envelope.metadata.insert("backend".into(), "direct".into());
+        let original = envelope.metadata.clone();
+        let options = RunOptions {
+            cloud_provider: Some("provider-a".into()),
+            cloud_gateway_url: Some("https://secret@api.xybrid.dev/v1".into()),
+            ..RunOptions::default()
+        };
+
+        let error = options
+            .apply_cloud_fallback_metadata(&mut envelope)
+            .unwrap_err();
+        assert!(matches!(error, Error::ConfigError { .. }));
+        assert!(!error.to_string().contains("secret"));
+        assert_eq!(envelope.metadata, original);
+        assert!(!options.to_sdk(None).unwrap().abort_policy.fallback_to_cloud);
     }
 
     #[test]
@@ -3863,6 +4125,9 @@ stages:
             fallback_to_cloud: true,
             max_grace_tokens: 16,
             correlation_id: Some("trace-1".into()),
+            cloud_provider: None,
+            cloud_model: None,
+            cloud_gateway_url: None,
         };
         let sdk_opts = opts
             .to_sdk(Some(&cancel))

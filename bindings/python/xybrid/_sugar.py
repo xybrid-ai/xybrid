@@ -228,7 +228,8 @@ def _install_pipeline_accessors() -> None:
         """Run every stage and return each stage's output alongside the final one.
 
         Of ``options``, only ``correlation_id`` applies to a pipeline run;
-        setting ``generation_config`` or ``abort_on`` raises ``ConfigError``.
+        setting ``generation_config``, ``abort_on``, or a cloud destination
+        raises ``ConfigError``.
         """
 
         return run(self, envelope, options)

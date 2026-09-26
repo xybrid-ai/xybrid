@@ -1182,14 +1182,16 @@ classes:
         status: { dart: implemented, rust: planned, kotlin: planned, swift: planned, csharp: planned }
       cloudProvider:
         type: "String?"
-        status: { dart: implemented, rust: planned, kotlin: planned, swift: planned, csharp: planned }
+        notes: "Caller-resolved optional cloud destination; the FFI facade lowers only supplied values and does not enable fallback."
+        status: { dart: implemented, rust: planned, kotlin: implemented, swift: implemented, csharp: implemented }
       cloudModel:
         type: "String?"
-        status: { dart: implemented, rust: planned, kotlin: planned, swift: planned, csharp: planned }
+        notes: "Caller-resolved optional model; omission preserves existing envelope metadata."
+        status: { dart: implemented, rust: planned, kotlin: implemented, swift: implemented, csharp: implemented }
       cloudGatewayUrl:
         type: "String?"
-        notes: "Optional Xybrid cloud gateway base URL. Customer builds accept HTTPS Xybrid hosts with a /v1 base path; debug builds also accept local/private gateways for local platform stacks."
-        status: { dart: implemented, rust: planned, kotlin: planned, swift: planned, csharp: planned }
+        notes: "Optional Xybrid cloud gateway base URL. Customer builds accept HTTPS Xybrid hosts with a /v1 base path; debug builds also accept localhost and local/private IPv4 gateways. The existing validator rejects bracketed IPv6 URLs."
+        status: { dart: implemented, rust: planned, kotlin: implemented, swift: implemented, csharp: implemented }
       correlationId:
         type: "String?"
         status: { dart: implemented, rust: planned, kotlin: planned, swift: planned, csharp: planned }

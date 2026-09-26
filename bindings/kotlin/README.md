@@ -131,6 +131,28 @@ result.text?.let { println("Answer: $it") }
 result.reasoningContent?.let { println("Reasoning: $it") }
 ```
 
+### Cloud fallback destination
+
+Pass an options record to configure a destination for an execution path that
+supports cloud fallback. The provider, model, and versioned gateway URL select
+that destination; `fallbackToCloud` separately permits fallback. An ordinary
+`runAsync` call does not itself initiate a cloud retry. Existing calls that omit
+these fields keep their previous behavior.
+
+```kotlin
+val options = XybridRunOptions(
+    generationConfig = null,
+    abortOn = emptyList(),
+    fallbackToCloud = true,
+    maxGraceTokens = 0u,
+    correlationId = null,
+    cloudProvider = "openai",
+    cloudModel = "gpt-4o-mini",
+    cloudGatewayUrl = "https://api.xybrid.dev/v1",
+)
+val response = model.runAsync(Envelope.text("Hello"), options)
+```
+
 ### Error Handling
 
 ```kotlin

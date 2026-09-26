@@ -6397,6 +6397,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "tokio",
+ "url",
  "xybrid-core",
  "xybrid-sdk",
 ]
@@ -6500,7 +6501,6 @@ dependencies = [
  "oslog",
  "tokio",
  "tokio-stream",
- "url",
  "xybrid-core",
  "xybrid-ffi-facade",
  "xybrid-sdk",

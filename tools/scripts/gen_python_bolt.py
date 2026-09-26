@@ -152,6 +152,14 @@ def generate() -> list[Path]:
         if source.count(target) != 1:
             sys.exit(f"error: expected one XybridResult reasoning field in {path}")
         source = source.replace(target, replacement)
+        # Bolt emits every dataclass field as a required constructor argument,
+        # even when its type is optional. Keep the existing five-argument
+        # XybridRunOptions constructor usable after the cloud tail is added.
+        for field in ("cloud_provider", "cloud_model", "cloud_gateway_url"):
+            field_target = f"    {field}: str | None\n"
+            if source.count(field_target) != 1:
+                sys.exit(f"error: expected one {field} field in {path}")
+            source = source.replace(field_target, f"    {field}: str | None = None\n", 1)
         if name == "__init__.py":
             source = _add_result_wire_compatibility(source)
         path.write_text(source)

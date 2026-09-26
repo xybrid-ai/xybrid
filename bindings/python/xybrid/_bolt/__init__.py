@@ -1681,6 +1681,9 @@ class XybridRunOptions:
     fallback_to_cloud: bool
     max_grace_tokens: int
     correlation_id: str | None
+    cloud_provider: str | None = None
+    cloud_model: str | None = None
+    cloud_gateway_url: str | None = None
 
     def _boltffi_wire(self) -> bytes:
         return b"".join((
@@ -1689,6 +1692,9 @@ class XybridRunOptions:
             _boltffi_wire_bool(self.fallback_to_cloud),
             _boltffi_wire_u32(self.max_grace_tokens),
             _boltffi_wire_optional(self.correlation_id, lambda __boltffi_value_0: _boltffi_wire_string(__boltffi_value_0)),
+            _boltffi_wire_optional(self.cloud_provider, lambda __boltffi_value_0: _boltffi_wire_string(__boltffi_value_0)),
+            _boltffi_wire_optional(self.cloud_model, lambda __boltffi_value_0: _boltffi_wire_string(__boltffi_value_0)),
+            _boltffi_wire_optional(self.cloud_gateway_url, lambda __boltffi_value_0: _boltffi_wire_string(__boltffi_value_0)),
         ))
 
     @classmethod
@@ -1709,6 +1715,9 @@ class XybridRunOptions:
             fallback_to_cloud=reader.bool(),
             max_grace_tokens=reader.u32(),
             correlation_id=reader.optional(lambda: reader.string()),
+            cloud_provider=reader.optional(lambda: reader.string()),
+            cloud_model=reader.optional(lambda: reader.string()),
+            cloud_gateway_url=reader.optional(lambda: reader.string()),
         )
 
 

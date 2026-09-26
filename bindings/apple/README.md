@@ -74,6 +74,31 @@ if let answer = result.text { print("Answer:", answer) }
 if let reasoning = result.reasoningContent { print("Reasoning:", reasoning) }
 ```
 
+### Cloud fallback destination
+
+Pass an options record to configure a destination for an execution path that
+supports cloud fallback. The provider, model, and versioned gateway URL select
+that destination; `fallbackToCloud` separately permits fallback. An ordinary
+`runAsync` call does not itself initiate a cloud retry. Existing calls that omit
+these fields keep their previous behavior.
+
+```swift
+let options = XybridRunOptions(
+    generationConfig: nil,
+    abortOn: [],
+    fallbackToCloud: true,
+    maxGraceTokens: 0,
+    correlationId: nil,
+    cloudProvider: "openai",
+    cloudModel: "gpt-4o-mini",
+    cloudGatewayUrl: "https://api.xybrid.dev/v1"
+)
+let response = try await model.runAsync(
+    envelope: XybridEnvelope.text("Hello"),
+    options: options
+)
+```
+
 ### Available Types
 
 | Type | Description |

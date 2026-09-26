@@ -562,6 +562,9 @@ pub struct XybridRunOptions {
     pub fallback_to_cloud: bool,
     pub max_grace_tokens: u32,
     pub correlation_id: Option<String>,
+    pub cloud_provider: Option<String>,
+    pub cloud_model: Option<String>,
+    pub cloud_gateway_url: Option<String>,
 }
 
 impl From<XybridRunOptions> for facade::RunOptions {
@@ -572,6 +575,9 @@ impl From<XybridRunOptions> for facade::RunOptions {
             fallback_to_cloud: o.fallback_to_cloud,
             max_grace_tokens: o.max_grace_tokens,
             correlation_id: o.correlation_id,
+            cloud_provider: o.cloud_provider,
+            cloud_model: o.cloud_model,
+            cloud_gateway_url: o.cloud_gateway_url,
         }
     }
 }
@@ -2410,6 +2416,9 @@ stages:
             fallback_to_cloud: false,
             max_grace_tokens: 0,
             correlation_id: None,
+            cloud_provider: None,
+            cloud_model: None,
+            cloud_gateway_url: None,
         };
 
         let envelope = XybridEnvelope {
@@ -2483,14 +2492,43 @@ stages:
             fallback_to_cloud: true,
             max_grace_tokens: 4,
             correlation_id: Some("trace".into()),
+            cloud_provider: Some("openai".into()),
+            cloud_model: Some("gpt-4o-mini".into()),
+            cloud_gateway_url: Some("https://api.xybrid.dev/v1".into()),
         };
         let facade_opts: facade::RunOptions = opts.into();
         assert!(facade_opts.fallback_to_cloud);
         assert_eq!(facade_opts.max_grace_tokens, 4);
+        assert_eq!(facade_opts.cloud_provider.as_deref(), Some("openai"));
+        assert_eq!(facade_opts.cloud_model.as_deref(), Some("gpt-4o-mini"));
+        assert_eq!(
+            facade_opts.cloud_gateway_url.as_deref(),
+            Some("https://api.xybrid.dev/v1")
+        );
         assert_eq!(
             facade_opts.abort_on,
             vec![facade::AbortSignal::ThermalCritical]
         );
+    }
+
+    #[test]
+    fn run_options_preserve_independent_cloud_fields_and_disabled_fallback() {
+        let opts = XybridRunOptions {
+            generation_config: None,
+            abort_on: Vec::new(),
+            fallback_to_cloud: false,
+            max_grace_tokens: 0,
+            correlation_id: None,
+            cloud_provider: None,
+            cloud_model: Some("custom-model".into()),
+            cloud_gateway_url: None,
+        };
+
+        let facade_opts: facade::RunOptions = opts.into();
+        assert!(!facade_opts.fallback_to_cloud);
+        assert_eq!(facade_opts.cloud_provider, None);
+        assert_eq!(facade_opts.cloud_model.as_deref(), Some("custom-model"));
+        assert_eq!(facade_opts.cloud_gateway_url, None);
     }
 
     #[test]
