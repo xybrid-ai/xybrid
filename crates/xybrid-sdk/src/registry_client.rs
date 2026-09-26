@@ -153,6 +153,37 @@ struct PartialFile {
     size: Option<u64>,
 }
 
+/// The current run of "network unreachable" errors during a download.
+///
+/// Kept apart from the retry loop so the patience rule can be tested without
+/// waiting out real outages.
+#[derive(Debug, Default)]
+struct OfflineWindow {
+    /// When the run began; `None` while the network is reachable.
+    since: Option<Instant>,
+    /// Retries taken during the run, which paces the backoff.
+    retries: u32,
+}
+
+impl OfflineWindow {
+    /// The network answered (with bytes, or even with an HTTP error), so the
+    /// outage is over. The next one gets a full patience window of its own.
+    fn end(&mut self) {
+        *self = Self::default();
+    }
+
+    /// Record an unreachable-network error at `now`. Returns the retry number
+    /// within this outage, or `None` once it has lasted `patience`.
+    fn record(&mut self, now: Instant, patience: Duration) -> Option<u32> {
+        let since = *self.since.get_or_insert(now);
+        if now.saturating_duration_since(since) >= patience {
+            return None;
+        }
+        self.retries += 1;
+        Some(self.retries)
+    }
+}
+
 /// Whether a `206 Partial Content` response continues `partial`: it starts
 /// exactly at `offset` and serves the same file, at the same size.
 fn continues_partial(response: &ureq::Response, offset: u64, partial: &PartialFile) -> bool {
@@ -1321,7 +1352,8 @@ impl RegistryClient {
     /// download waits up to [`DOWNLOAD_OFFLINE_PATIENCE`] for it to return.
     /// The loop still ends: every retry that is not counted has either grown
     /// the file past its previous best (the file is finite) or falls inside
-    /// that bounded wait.
+    /// that bounded wait, and a wait can only restart after the network
+    /// answers, which either adds bytes or spends an attempt.
     ///
     /// On failure or cancellation the partial file is removed.
     fn download_with_progress(
@@ -1354,10 +1386,7 @@ impl RegistryClient {
         let mut partial = PartialFile::default();
         let mut furthest: u64 = 0;
         let mut failed_attempts: u32 = 0;
-        // When the current run of "network unreachable" errors began, and how
-        // many retries it has taken so far.
-        let mut offline_since: Option<Instant> = None;
-        let mut offline_retries: u32 = 0;
+        let mut offline = OfflineWindow::default();
         let mut next_delay: Option<Duration> = None;
 
         loop {
@@ -1381,22 +1410,25 @@ impl RegistryClient {
                 return Err(err);
             }
             let on_disk = partial_len(dest);
+            let unreachable = matches!(err, SdkError::Offline { .. });
+            if on_disk > furthest || !unreachable {
+                // Bytes arrived, or the server answered with an error: either
+                // way the network is back, so the outage is over.
+                offline.end();
+            }
             let delay = if on_disk > furthest {
                 furthest = on_disk;
-                offline_since = None;
-                offline_retries = 0;
                 policy.delay_for_attempt(1)
-            } else if furthest > 0 && matches!(err, SdkError::Offline { .. }) {
+            } else if furthest > 0 && unreachable {
                 // The network went away mid-download. Every lookup fails at
                 // once until it returns, so wait for it (bounded) instead of
                 // spending the retry budget on attempts that cannot succeed.
-                let since = *offline_since.get_or_insert_with(Instant::now);
-                if since.elapsed() >= self.download_offline_patience {
+                let Some(retry) = offline.record(Instant::now(), self.download_offline_patience)
+                else {
                     return Err(err);
-                }
-                offline_retries += 1;
+                };
                 policy
-                    .delay_for_attempt(offline_retries)
+                    .delay_for_attempt(retry)
                     .min(DOWNLOAD_OFFLINE_RETRY_CAP)
             } else {
                 failed_attempts += 1;
@@ -2710,6 +2742,35 @@ mod tests {
             resumed[0].contains(&format!("range: bytes={half}-")),
             "{}",
             resumed[0]
+        );
+    }
+
+    #[test]
+    fn a_new_outage_gets_its_own_patience_window() {
+        // An outage of nearly the whole window, a brief return (the server
+        // answers 502), then a second outage. Carrying the first outage's
+        // clock over would end the download the moment the second began.
+        let patience = Duration::from_secs(120);
+        let start = Instant::now();
+        let mut window = OfflineWindow::default();
+
+        assert_eq!(window.record(start, patience), Some(1));
+        assert_eq!(
+            window.record(start + Duration::from_secs(110), patience),
+            Some(2)
+        );
+
+        window.end();
+        let second = start + Duration::from_secs(115);
+        assert_eq!(window.record(second, patience), Some(1));
+        assert_eq!(
+            window.record(second + Duration::from_secs(60), patience),
+            Some(2)
+        );
+        assert_eq!(
+            window.record(second + Duration::from_secs(120), patience),
+            None,
+            "a single outage is still bounded"
         );
     }
 
