@@ -432,6 +432,74 @@
         }
       }
     },
+    "cifar10-resnet": {
+      "description": "CIFAR-10 Image classification using ResNet-8 model",
+      "source": "url",
+      "size_mb": 0.31,
+      "task": "image-classification",
+      "files": [
+        {
+          "url": "https://huggingface.co/ketiswp/mlcommons-ResNet8-CIFAR10-fp32-onnx/resolve/main/model.onnx",
+          "output": "model.onnx"
+        }
+      ],
+      "model_metadata": {
+        "model_id": "cifar10-resnet",
+        "version": "1.0",
+        "description": "CIFAR-10 Image classification using ResNet-8 model",
+        "execution_template": {
+          "type": "Onnx",
+          "model_file": "model.onnx"
+        },
+        "preprocessing": [
+          {
+            "type": "ImageDecode",
+            "channels": 3,
+            "layout": "Nhwc"
+          },
+          {
+            "type": "ImageResize",
+            "width": 32,
+            "height": 32,
+            "mode": "Stretch",
+            "interpolation": "Bilinear",
+            "layout": "Nhwc"
+          },
+          {
+            "type": "ImageNormalize",
+            "preset": {
+              "Custom": {
+                "mean": [0.0, 0.0, 0.0],
+                "std": [0.003921569, 0.003921569, 0.003921569]
+              }
+            },
+            "layout": "Nhwc"
+          }
+        ],
+        "postprocessing": [
+          {
+            "type": "TopK",
+            "k": 3
+          }
+        ],
+        "files": [
+          "model.onnx"
+        ],
+        "metadata": {
+          "input_shape": [1, 32, 32, 3],
+          "output_shape": [1, 10],
+          "opset_version": 16,
+          "task": "image_classification",
+          "num_classes": 10,
+          "dataset": "CIFAR-10",
+          "accuracy": {
+            "top1": 0.85
+          },
+          "model_size_mb": 0.31,
+          "notes": "Lightweight ResNet-8 classification model trained on CIFAR-10 dataset."
+        }
+      }
+    },
     "all-minilm": {
       "description": "Sentence embeddings (384-dim, text to vector)",
       "source": "url",
