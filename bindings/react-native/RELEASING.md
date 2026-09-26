@@ -1,4 +1,4 @@
-# Releasing react-native-xybrid
+# Releasing @xybrid/react-native
 
 The npm package ships with every Xybrid release; there is no separate
 React Native release. This page covers what the pipeline does for it and the
@@ -41,10 +41,11 @@ is `true`.
 
 ## One-time setup
 
-1. **Pick the package name.** The code uses `react-native-xybrid`. If you
-   prefer the scope the web package uses (`@xybrid/react-native`), rename it in
-   `package.json`, `tools/scripts/version-sync.sh` (nothing else keys on the
-   name) and the docs, and create the `xybrid` npm organization.
+1. **Own the `@xybrid` scope.** The package is `@xybrid/react-native`, so the
+   `xybrid` organization must exist on npmjs.com (Add Organization, free for
+   public packages) and the publishing account must be able to publish in it.
+   The CocoaPods pod stays `react-native-xybrid` (pod names cannot contain
+   `@` or `/`).
 2. **Bootstrap publish.** npm only lets you configure a trusted publisher on a
    package that exists, so the first version needs a token: create a granular
    access token (publish scope, short expiry), save it as the repository secret
@@ -66,9 +67,9 @@ same pattern as pub.dev: publish from a `workflow_dispatch` of
 ```sh
 cd bindings/react-native
 npm ci && npm test && node scripts/check-pack.mjs
-npm pack                                   # react-native-xybrid-<version>.tgz
+npm pack                                   # xybrid-react-native-<version>.tgz
 # In a fresh app (Expo: npx create-expo-app, then a dev build):
-npm install /path/to/react-native-xybrid-<version>.tgz
+npm install /path/to/xybrid-react-native-<version>.tgz
 XYBRID_XCFRAMEWORK_PATH=/path/to/XybridFFI.xcframework.zip npx pod-install
 ```
 

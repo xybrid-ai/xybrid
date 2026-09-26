@@ -4,6 +4,8 @@ require_relative "ios/xybrid_natives"
 package = JSON.parse(File.read(File.join(__dir__, "package.json")))
 
 Pod::Spec.new do |s|
+  # The npm package is @xybrid/react-native; pod names cannot contain `@` or
+  # `/`, so the pod keeps this name (it only shows up in Podfile.lock).
   s.name         = "react-native-xybrid"
   s.version      = package["version"]
   s.summary      = package["description"]

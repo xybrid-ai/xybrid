@@ -48,14 +48,14 @@ module XybridNatives
 
   def log(message)
     if defined?(Pod::UI)
-      Pod::UI.puts("[react-native-xybrid] #{message}")
+      Pod::UI.puts("[@xybrid/react-native] #{message}")
     else
-      puts("[react-native-xybrid] #{message}")
+      puts("[@xybrid/react-native] #{message}")
     end
   end
 
   def fail!(message)
-    raise(defined?(Pod::Informative) ? Pod::Informative : RuntimeError, "[react-native-xybrid] #{message}")
+    raise(defined?(Pod::Informative) ? Pod::Informative : RuntimeError, "[@xybrid/react-native] #{message}")
   end
 
   def ensure_swift_sources!(root, monorepo)
@@ -73,7 +73,7 @@ module XybridNatives
     end
     return if SWIFT_SOURCES.all? { |name| File.file?(File.join(staged, name)) }
 
-    fail!('ios/XybridSwift is missing the Swift SDK sources; reinstall react-native-xybrid from npm.')
+    fail!('ios/XybridSwift is missing the Swift SDK sources; reinstall @xybrid/react-native from npm.')
   end
 
   def ensure_xcframework!(root, package, monorepo)

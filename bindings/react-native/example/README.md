@@ -1,6 +1,6 @@
-# react-native-xybrid example
+# @xybrid/react-native example
 
-An Expo app that smoke-tests `react-native-xybrid` from this repo's source.
+An Expo app that smoke-tests `@xybrid/react-native` from this repo's source.
 On launch it runs through the SDK surface an app touches — version, load,
 model info, warmup, run, streaming with a stop button, a two-turn
 conversation, structured output, cache status — and, optionally, a speech

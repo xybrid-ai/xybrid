@@ -1,4 +1,4 @@
-// The Android half of react-native-xybrid: a TurboModule (XybridModule.kt)
+// The Android half of @xybrid/react-native: a TurboModule (XybridModule.kt)
 // over the Kotlin SDK. The SDK — Kotlin classes plus libxybrid_bolt.so and the
 // ONNX Runtime — comes from the `ai.xybrid:xybrid-kotlin` AAR on Maven
 // Central, so nothing native is built or staged here.
@@ -57,5 +57,5 @@ dependencies {
 
   // The Kotlin SDK. Kept in lockstep with the workspace version by
   // tools/scripts/version-sync.sh (`just bump-version`).
-  implementation "ai.xybrid:xybrid-kotlin:0.9.0"
+  implementation "ai.xybrid:xybrid-kotlin:0.10.0-rc1"
 }

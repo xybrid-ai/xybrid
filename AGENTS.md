@@ -227,7 +227,7 @@ properties, typed exceptions) is attached to the generated classes at import by
 `xybrid/_sugar.py` and `xybrid/_errors.py`, guarded by `tests/test_sdk.py`. Add
 SDK ergonomics there, never in `xybrid/_bolt/`.
 
-The React Native package (`bindings/react-native`, npm `react-native-xybrid`,
+The React Native package (`bindings/react-native`, npm `@xybrid/react-native`,
 not a workspace member) is the one **hand-bridged** binding: a Codegen
 TurboModule over the Swift and Kotlin SDKs, so nothing reaches it for free.
 `tests/parity.test.mjs` fails when `crates/xybrid-bolt` gains an export, record
