@@ -52,14 +52,31 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Create an encoded test image. The metadata pipeline decodes, resizes,
     // normalizes it before ONNX Runtime sees the tensor.
     println!("🎨 Creating encoded test image (320x256 PNG)...");
-    let image_bytes = create_test_image_png()?;
-    println!("✅ Test image created");
-    println!("   Pattern: Diagonal stripes");
-    println!("   Note: Using synthetic pattern for testing");
-    println!("   For real predictions, use actual CIFAR-10 images");
-    println!();
+    // let image_bytes = create_test_image_png()?;
 
-    let input_envelope = Envelope::image(image_bytes, "png")?;
+    // accept an image path
+    let image_arg = std::env::args().nth(1);
+    let (image_bytes, image_format) = match &image_arg {
+        Some(path) => {
+            println!("🖼️ Loading image: {}", path);
+            let format = std::path::Path::new(path)
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .ok_or("image file has no extension")?;
+            (std::fs::read(path)?, format)
+        }
+        None => {
+            println!("🎨 No image given - using synthetic test image (320x256 PNG)");
+            println!("   Pass a path to classify a real image:");
+            println!("   cargo run --example cifar10_classification -- <image-path>");
+            println!("   Pattern: Diagonal stripes");
+            println!("   Note: Using synthetic pattern for testing");
+            println!("   For real predictions, use actual CIFAR-10 images");
+            (create_test_image_png()?, "png")
+        }
+    };
+
+    let input_envelope = Envelope::image(image_bytes, image_format)?;
 
     // Execute inference via TemplateExecutor
     println!("🔄 Running inference via TemplateExecutor...");
