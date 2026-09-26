@@ -1,0 +1,26 @@
+# Canonical Rust toolchain for this repo.
+#
+# WHY THIS FILE EXISTS: CI used to resolve `stable` at job time, so a new Rust
+# release could turn master red without a single line of our code changing.
+# That is exactly what happened on 2026-08-18 — Rust 1.98.0 shipped
+# `clippy::chunks_exact_to_as_chunks`, and every open PR started failing
+# `-D warnings` on pre-existing code (fixed in #522).
+#
+# Pinning here makes a toolchain bump a deliberate, reviewable commit instead
+# of an ambient event. rustup reads this file for every cargo invocation in the
+# repo, so contributors and CI compile with the same rustc.
+#
+# TO BUMP: change `channel` below, then run
+#   tools/scripts/toolchain-sync.sh --write
+# to update the `RUST_VERSION` pin in every workflow, and fix any new lints in
+# the same PR.
+#
+# NOT an MSRV. This is the toolchain we build and lint with; no `rust-version`
+# is declared in Cargo.toml (see AGENTS.md § Open questions).
+#
+# Bazel is unaffected — it carries its own hermetic Rust (see MODULE.bazel).
+
+[toolchain]
+channel = "1.98.0"
+components = ["clippy", "rustfmt"]
+profile = "minimal"
