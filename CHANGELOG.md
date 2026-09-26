@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A download survives losing the network for a while.** Once bytes have
+  arrived, "network unreachable" errors no longer count against the retry
+  budget: the download waits up to two minutes for the connection to return,
+  then resumes. Before, every retry failed on the DNS lookup at once and the
+  budget ran out about seven seconds into an outage (caught cutting a Pixel 8's
+  Wi-Fi for 10 seconds mid-download). A download that starts offline still
+  fails fast.
+
 ### Planned
 
 - **Multimodal KV-prefix reuse**: the per-frame prefill cost lever for live vision — **deferred** from 0.2.0, not yet implemented.

@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+* Fixed: a download that loses the network part-way (Wi-Fi to cellular, a
+  lift, a tunnel) waits up to two minutes for it to return and resumes, instead
+  of failing about seven seconds into the outage.
+
 ## 0.10.0-rc1
 
 Model-cache management and download progress in bytes reach Dart, and large
