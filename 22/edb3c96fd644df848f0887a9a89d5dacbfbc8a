@@ -1,0 +1,59 @@
+crates/xybrid-core/Cargo.toml
+  s_3fa520519b0cb5::t_17828e11e8fbd0 28-29,32
+crates/xybrid-sdk/Cargo.toml
+  s_3fa520519b0cb5::t_377cd3e73ebe05 17,41,46
+bindings/flutter/rust/Cargo.toml
+  s_3fa520519b0cb5::t_82e915aeb0e5d9 3
+crates/xybrid-llama/Cargo.toml
+  s_3fa520519b0cb5::t_5c624be6263f05 24
+crates/xybrid-whisper/Cargo.toml
+  s_3fa520519b0cb5::t_d900b626990c90 23
+Cargo.lock
+  s_3fa520519b0cb5::t_feb62afb5bed5a 2752,6274,6288,6295,6324,6394,6406,6415,6428,6437,6464,6473,6482,6494
+bindings/flutter/CHANGELOG.md
+  s_3fa520519b0cb5::t_f03876f30d6f1a 5-10
+bindings/react-native/package.json
+  s_3fa520519b0cb5::t_b408e0f45f0d43 3
+bindings/python/xybrid/_bolt/__init__.py
+  s_3fa520519b0cb5::t_2f675da087c30a 3266
+bindings/python/pyproject.toml
+  s_3fa520519b0cb5::t_ac2e94e400466e 7
+crates/xybrid/Cargo.toml
+  s_3fa520519b0cb5::t_f92749affea13c 17
+Cargo.toml
+  s_3fa520519b0cb5::t_dfd0deb2e6fb0e 21
+bindings/react-native/android/build.gradle
+  s_3fa520519b0cb5::t_c0005ace3ccafe 60
+CHANGELOG.md
+  s_3fa520519b0cb5::t_e1ca38b0ed4b94 32,34-37
+  s_3fa520519b0cb5::t_af722643c98b4b 10-13
+  s_3fa520519b0cb5::t_f03876f30d6f1a 14-21
+bindings/web/package.json
+  s_3fa520519b0cb5::t_a70c6027eccf45 3
+bindings/unity/package.json
+  s_3fa520519b0cb5::t_7f46a4b3e8d5fc 3
+bindings/flutter/pubspec.yaml
+  s_3fa520519b0cb5::t_6202ee1292ce2d 3
+Package.swift
+  s_3fa520519b0cb5::t_39fc5c0e11e56d 40
+bindings/kotlin/build.gradle.kts
+  s_3fa520519b0cb5::t_9041e2eff5a9b7 8
+crates/whisper-cpp-sys/Cargo.toml
+  s_3fa520519b0cb5::t_e200d6753237fe 42
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "22edb3c96fd644df848f0887a9a89d5dacbfbc8a",
+  "prompts": {},
+  "sessions": {
+    "s_3fa520519b0cb5": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0dc32-340b-7570-b4c7-855b4fa43e25",
+        "model": "gpt-6-sol"
+      },
+      "human_author": null
+    }
+  }
+}
