@@ -12,7 +12,8 @@ use crate::execution::postprocessing::codec::{
 };
 use crate::execution::strategies::llm::{LlmGenerationParams, LlmInference, LlmModelConfig};
 use crate::execution::template::{
-    ExecutionTemplate, GenerationParams, ModelMetadata, PostprocessingStep,
+    gguf_runtime_backend_hint, ExecutionTemplate, GenerationParams, ModelMetadata,
+    PostprocessingStep,
 };
 use crate::execution::types::ExecutorResult;
 use crate::execution::voice_loader::TtsVoiceLoader;
@@ -121,7 +122,7 @@ impl<I: LlmInference> CodecTtsStrategy<I> {
                     let template_path = Path::new(base_path).join(template);
                     config = config.with_chat_template(template_path.to_string_lossy().to_string());
                 }
-                if let Some(hint) = metadata.metadata.get("backend").and_then(|v| v.as_str()) {
+                if let Some(hint) = gguf_runtime_backend_hint(metadata) {
                     config = config.with_backend_hint(hint);
                 }
                 Ok(config)

@@ -24,7 +24,7 @@ use crate::source::{detect_platform, ModelSource};
 use crate::stream::XybridStream;
 use std::path::{Component, Path, PathBuf};
 use std::pin::Pin;
-use std::sync::atomic::AtomicU64;
+use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tempfile::TempDir;
@@ -1133,6 +1133,49 @@ fn explicit_registry_format_for_backend(
     }
 }
 
+/// Registry format a load of `id` should fetch.
+///
+/// An explicit backend pins its artifact format; otherwise the auto selector
+/// decides (MLX SafeTensors on a capable Apple Silicon host, else the registry
+/// default).
+pub(crate) fn registry_format_for_load(
+    client: &RegistryClient,
+    id: &str,
+    backend_override: Option<BackendChoice>,
+    cfg: &SelectorCfg,
+) -> SdkResult<Option<&'static str>> {
+    if let Some(backend) = backend_override {
+        return match registry_format_preference_for_backend_choice_with_registry_context(
+            client, id, backend, cfg,
+        )? {
+            RegistryFormatPreference::Auto => Ok(None),
+            RegistryFormatPreference::ExplicitBackend { format } => Ok(format),
+        };
+    }
+
+    registry_format_for_auto_local_backend(client, id, cfg)
+}
+
+/// Resolve the load format for `id`, then fetch and extract that variant.
+///
+/// `load()`, the speculative background download and `start_download()` all
+/// go through here so they download the same artifact into the same cache
+/// entry; a later `load()` then hits the cache instead of downloading again.
+pub(crate) fn fetch_registry_model_for_load<F>(
+    client: &RegistryClient,
+    id: &str,
+    platform: Option<&str>,
+    backend_override: Option<BackendChoice>,
+    cancel: Arc<AtomicBool>,
+    progress_callback: F,
+) -> SdkResult<PathBuf>
+where
+    F: Fn(DownloadStatus),
+{
+    let format = registry_format_for_load(client, id, backend_override, &SelectorCfg::current())?;
+    client.fetch_extracted_preferring_format(id, platform, format, cancel, progress_callback)
+}
+
 fn validate_local_backend_override(
     metadata: &ModelMetadata,
     backend: BackendChoice,
@@ -1207,14 +1250,15 @@ fn metadata_is_mlx_compatible_safetensors(metadata: &ModelMetadata) -> bool {
 }
 
 fn metadata_is_llm(metadata: &ModelMetadata) -> bool {
-    matches!(metadata.execution_template, ExecutionTemplate::Gguf { .. })
-        || is_mlx_llm_safetensors_metadata(metadata)
+    ModelLoader::is_llm_template(metadata) || is_mlx_llm_safetensors_metadata(metadata)
 }
 
 fn metadata_supports_token_streaming(metadata: &ModelMetadata) -> bool {
-    let gguf_streaming = matches!(metadata.execution_template, ExecutionTemplate::Gguf { .. })
+    // GGUF and VisionLanguage both stream through the llama.cpp / mistral.rs
+    // adapters, so they share the same feature gate.
+    let native_streaming = ModelLoader::is_llm_template(metadata)
         && cfg!(any(feature = "llm-mistral", feature = "llm-llamacpp"));
-    if gguf_streaming {
+    if native_streaming {
         return true;
     }
 
@@ -2324,7 +2368,7 @@ impl ModelLoader {
     /// # }
     /// ```
     pub fn start_download(&self) -> Arc<ModelDownload> {
-        ModelDownload::spawn(self.source.clone())
+        ModelDownload::spawn(self.source.clone(), self.backend_override)
     }
 
     /// Load the model asynchronously.
@@ -2360,44 +2404,18 @@ impl ModelLoader {
         // Create registry client (uses default API or environment variable)
         let client = RegistryClient::from_env()?;
 
-        let format = self.registry_format_preference_for_load(&client, id)?;
-
         // Fetch and extract model (handles both .xyb bundles and passthrough GGUF files)
-        let model_dir = if let Some(format) = format {
-            client.fetch_extracted_with_format(id, platform, format, progress_callback)?
-        } else {
-            client.fetch_extracted(id, platform, progress_callback)?
-        };
+        let model_dir = fetch_registry_model_for_load(
+            &client,
+            id,
+            platform,
+            self.backend_override,
+            Arc::new(AtomicBool::new(false)),
+            progress_callback,
+        )?;
 
         // Load from extracted directory
         self.load_from_directory(&model_dir)
-    }
-
-    fn registry_format_preference_for_load(
-        &self,
-        client: &RegistryClient,
-        id: &str,
-    ) -> SdkResult<Option<&'static str>> {
-        let cfg = SelectorCfg::current();
-        self.registry_format_preference_for_load_with_cfg(client, id, &cfg)
-    }
-
-    fn registry_format_preference_for_load_with_cfg(
-        &self,
-        client: &RegistryClient,
-        id: &str,
-        cfg: &SelectorCfg,
-    ) -> SdkResult<Option<&'static str>> {
-        if let Some(backend) = self.backend_override {
-            return match registry_format_preference_for_backend_choice_with_registry_context(
-                client, id, backend, cfg,
-            )? {
-                RegistryFormatPreference::Auto => Ok(None),
-                RegistryFormatPreference::ExplicitBackend { format } => Ok(format),
-            };
-        }
-
-        registry_format_for_auto_local_backend(client, id, cfg)
     }
 
     /// Build a cloud-backed [`XybridModel`] that serves from the gateway while
@@ -2457,9 +2475,16 @@ impl ModelLoader {
             .name(thread_name)
             .spawn(move || {
                 let built = RegistryClient::from_env().and_then(|client| {
-                    let dir = client.fetch_extracted(
+                    // Same format resolution as a blocking `load()`, so an MLX
+                    // (or explicitly pinned) model downloads the artifact the
+                    // handle can actually run, into the cache entry `load()`
+                    // reuses.
+                    let dir = fetch_registry_model_for_load(
+                        &client,
                         &id_owned,
                         platform_owned.as_deref(),
+                        backend_override,
+                        Arc::new(AtomicBool::new(false)),
                         // Feed the poll-able progress cell; hosts read it via
                         // `XybridModel::download_status` or subscribe with
                         // `XybridModel::watch_download`.
@@ -6290,6 +6315,16 @@ mod tests {
         assert!(ModelLoader::is_llm_template(&metadata));
         assert!(ModelLoader::check_streaming_support(&metadata));
         assert_eq!(ModelLoader::infer_output_type(&metadata), OutputType::Text);
+
+        // The public surface must agree with the template check: a VLM is an
+        // LLM (chat/REPL mode, no ASR warmup) and streams tokens whenever a
+        // native LLM runtime is compiled in.
+        let model = test_loaded_model_with_metadata(metadata);
+        assert!(model.is_llm());
+        assert_eq!(
+            model.supports_token_streaming(),
+            cfg!(any(feature = "llm-mistral", feature = "llm-llamacpp"))
+        );
     }
 
     #[test]
@@ -7377,13 +7412,13 @@ mod tests {
         let loader =
             ModelLoader::from_registry(&model_id).with_backend(crate::BackendChoice::LlamaCpp);
 
-        let err = loader
-            .registry_format_preference_for_load_with_cfg(
-                &client,
-                &model_id,
-                &apple_mlx_selector_cfg(),
-            )
-            .unwrap_err();
+        let err = registry_format_for_load(
+            &client,
+            &model_id,
+            loader.backend_override,
+            &apple_mlx_selector_cfg(),
+        )
+        .unwrap_err();
 
         assert!(
             detail_mock.hits() > 0,
@@ -7751,7 +7786,6 @@ mod tests {
         tensors.push((name.to_string(), shape, bytes));
     }
 
-    #[cfg(feature = "llm-mlx")]
     fn test_loaded_model_with_metadata(metadata: ModelMetadata) -> XybridModel {
         XybridModel {
             handle: Arc::new(RwLock::new(ModelHandle {

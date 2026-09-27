@@ -431,8 +431,17 @@ pub(crate) fn select_auto_registry_format_for_detail(
         return Ok(None);
     };
 
-    let selected = select_with_cfg(&SelectionParams::new(model_id), detail, cfg)
-        .map_err(selector_error_to_sdk)?;
+    let selected = match select_with_cfg(&SelectionParams::new(model_id), detail, cfg) {
+        Ok(selected) => selected,
+        // Auto selection only picks a *preferred* variant. A build with no
+        // local LLM runtime (an ONNX-only embedding build, say) keeps the
+        // registry default: the model may not need an LLM backend at all, and
+        // if it does, execution reports the missing feature.
+        Err(xybrid_core::runtime_adapter::SelectorError::NoBackendAvailable { .. }) => {
+            return Ok(None)
+        }
+        Err(err) => return Err(selector_error_to_sdk(err)),
+    };
 
     let Some(format) = registry_format_for_backend(selected) else {
         return Ok(None);
@@ -458,7 +467,12 @@ pub(crate) fn select_auto_registry_format_for_detail(
 /// the selector's normal GGUF priority; embedding tasks keep the registry
 /// default instead of requesting GGUF because the local llama.cpp adapter does
 /// not currently produce embedding envelopes.
-pub(crate) fn registry_format_for_auto_local_backend(
+///
+/// # Errors
+///
+/// Returns the registry error when model metadata cannot be fetched and the
+/// failure is not one a cached model can fall back from.
+pub fn registry_format_for_auto_local_backend(
     client: &RegistryClient,
     model_id: &str,
     cfg: &SelectorCfg,
@@ -1434,6 +1448,58 @@ impl RegistryClient {
     where
         F: Fn(DownloadStatus),
     {
+        self.fetch_extracted_with_format_cancellable(
+            mask,
+            platform,
+            format,
+            Arc::new(AtomicBool::new(false)),
+            progress_callback,
+        )
+    }
+
+    /// Fetch and extract `mask`, honouring a resolved registry format
+    /// preference when there is one.
+    ///
+    /// `None` is the registry default variant under the bare mask; `Some`
+    /// uses the format-variant cache entry. Every SDK download path (`load`,
+    /// speculative background download, `start_download`) goes through here
+    /// so they all land in, and reuse, the same cache entry.
+    pub(crate) fn fetch_extracted_preferring_format<F>(
+        &self,
+        mask: &str,
+        platform: Option<&str>,
+        format: Option<&str>,
+        cancel: Arc<AtomicBool>,
+        progress_callback: F,
+    ) -> Result<PathBuf, SdkError>
+    where
+        F: Fn(DownloadStatus),
+    {
+        match format {
+            Some(format) => self.fetch_extracted_with_format_cancellable(
+                mask,
+                platform,
+                format,
+                cancel,
+                progress_callback,
+            ),
+            None => self.fetch_extracted_cancellable(mask, platform, cancel, progress_callback),
+        }
+    }
+
+    /// [`Self::fetch_extracted_with_format`] with a caller-owned cancellation
+    /// flag.
+    fn fetch_extracted_with_format_cancellable<F>(
+        &self,
+        mask: &str,
+        platform: Option<&str>,
+        format: &str,
+        cancel: Arc<AtomicBool>,
+        progress_callback: F,
+    ) -> Result<PathBuf, SdkError>
+    where
+        F: Fn(DownloadStatus),
+    {
         let cache_key = format_cache_key(mask, format);
 
         // Offline-first, mirroring `fetch_extracted`: a fully-extracted
@@ -1454,7 +1520,7 @@ impl RegistryClient {
             mask,
             Some(&cache_key),
             &resolved,
-            Arc::new(AtomicBool::new(false)),
+            cancel,
             &progress_callback,
         )
     }
@@ -3687,6 +3753,49 @@ mod tests {
     }
 
     #[test]
+    fn fetch_extracted_preferring_format_reuses_cached_variant_without_network() {
+        // `load()`, the speculative download and `start_download()` all resolve
+        // a format first. A variant already extracted under its format key must
+        // come straight back from the cache (an unreachable registry proves no
+        // request is made), so one path never re-downloads what another fetched.
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let client =
+            RegistryClient::with_url_and_cache_dir("http://127.0.0.1:9", temp_dir.path().into())
+                .unwrap();
+        let model_id = "variant-cache-model";
+        let metadata = xybrid_core::execution::ModelMetadata::safetensors(
+            model_id,
+            "1.0",
+            "model.safetensors",
+            "qwen3",
+        );
+        let variant_dir = client.extraction_dir_with_format(model_id, "safetensors");
+        std::fs::create_dir_all(&variant_dir).unwrap();
+        std::fs::write(variant_dir.join("model.safetensors"), b"weights").unwrap();
+        std::fs::write(
+            variant_dir.join("model_metadata.json"),
+            serde_json::to_string(&metadata).unwrap(),
+        )
+        .unwrap();
+
+        let dir = client
+            .fetch_extracted_preferring_format(
+                model_id,
+                None,
+                Some("safetensors"),
+                Arc::new(AtomicBool::new(false)),
+                |_| {},
+            )
+            .expect("a cached format variant loads without the registry");
+
+        assert_eq!(dir, variant_dir);
+        assert!(
+            client.resolve_offline(model_id).is_none(),
+            "the format variant must not be confused with the default entry"
+        );
+    }
+
+    #[test]
     fn test_resolve_offline_none_for_nonexistent() {
         // resolve_offline must return None for a model that has never been
         // fetched, and it must do so without touching the network. Using an
@@ -3791,6 +3900,48 @@ mod tests {
             .unwrap()
             .with_binding("flutter");
         assert_eq!(client.binding(), "flutter");
+    }
+
+    #[test]
+    fn auto_registry_format_keeps_default_variant_when_no_llm_backend_is_compiled() {
+        // An ONNX-only build (no llama.cpp / mistral.rs / MLX) must still load
+        // an embedding or LLM-task registry model from its default variant.
+        // Auto format selection is a preference, not a gate.
+        let no_llm_backend = SelectorCfg {
+            target: "linux-x86_64".to_string(),
+            host_is_apple_arm64: false,
+            mlx_compiled: false,
+            llamacpp_compiled: false,
+            mistral_compiled: false,
+            mlx_runtime_ok: false,
+        };
+
+        for task in ["sentence-embedding", "text-generation"] {
+            let detail = ModelDetail {
+                id: "all-minilm".to_string(),
+                family: "minilm".to_string(),
+                task: task.to_string(),
+                parameters: 22_000_000,
+                description: "test".to_string(),
+                default_variant: None,
+                variants: std::collections::HashMap::from([(
+                    "onnx-fp32".to_string(),
+                    VariantInfo {
+                        platform: "universal".to_string(),
+                        format: "onnx".to_string(),
+                        quantization: "fp32".to_string(),
+                        size_bytes: 1,
+                        hf_repo: "xybrid-ai/test".to_string(),
+                        file: "model.onnx".to_string(),
+                    },
+                )]),
+            };
+
+            let format =
+                select_auto_registry_format_for_detail("all-minilm", &detail, &no_llm_backend)
+                    .unwrap_or_else(|err| panic!("task `{task}` must not fail: {err}"));
+            assert_eq!(format, None, "task `{task}`");
+        }
     }
 
     #[test]

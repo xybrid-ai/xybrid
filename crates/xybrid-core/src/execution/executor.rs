@@ -32,9 +32,10 @@ use super::template::is_mlx_embedding_safetensors_metadata;
 #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
 use super::template::PostprocessingStep;
 use super::template::{
-    backend_label_from_template, explicit_llm_backend_hint, is_mlx_llm_safetensors_metadata,
-    quantization_label_from_metadata, raw_llm_backend_hint, span_kind_from_template,
-    stage_kind_from_task, ExecutionMode, ExecutionTemplate, ModelMetadata, PipelineStage,
+    backend_label_from_template, explicit_llm_backend_hint, gguf_runtime_backend_hint,
+    is_mlx_llm_safetensors_metadata, quantization_label_from_metadata, raw_llm_backend_hint,
+    span_kind_from_template, stage_kind_from_task, ExecutionMode, ExecutionTemplate, ModelMetadata,
+    PipelineStage,
 };
 use crate::conversation::ConversationContext;
 use crate::ir::EnvelopeKind;
@@ -73,6 +74,13 @@ fn mark_execution_terminal(guard: &ExecutionGuard, error: &AdapterError) {
 }
 
 fn llm_backend_hint(metadata: &ModelMetadata) -> Option<&str> {
+    if matches!(
+        metadata.execution_template,
+        ExecutionTemplate::Gguf { .. } | ExecutionTemplate::VisionLanguage { .. }
+    ) {
+        return gguf_runtime_backend_hint(metadata);
+    }
+
     explicit_llm_backend_hint(metadata).or_else(|| {
         (cfg!(feature = "llm-mlx") && is_mlx_llm_safetensors_metadata(metadata)).then_some("mlx")
     })
@@ -2731,7 +2739,6 @@ impl TemplateExecutor {
         // entry points.
         stamp_llm_span_cost_attribution(metadata);
 
-        #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
         reject_text_only_model_image_input(metadata, input)?;
 
         let cache_key = llm_adapter_cache_key(
@@ -2807,7 +2814,6 @@ impl TemplateExecutor {
                 // bundle metadata).
                 stamp_llm_runtime_backend(adapter);
                 let backend = adapter.backend();
-                #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
                 let out = if let Some(responses_json) =
                     input.metadata.get(Envelope::TOOL_RESPONSES_METADATA_KEY)
                 {
@@ -2815,8 +2821,6 @@ impl TemplateExecutor {
                 } else {
                     backend.generate(&messages, &gen_config)?
                 };
-                #[cfg(not(any(feature = "llm-mistral", feature = "llm-llamacpp")))]
-                let out = backend.generate(&messages, &gen_config)?;
                 let name = backend.name().to_string();
                 let cached = backend.last_cached_prefix_len();
                 (out, name, cached)
@@ -3647,7 +3651,7 @@ mod tests {
     // Characterization tests pinning the response-envelope contract shared by
     // every execute_llm* path after the in-place dedup into
     // `build_llm_response_envelope`.
-    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp", feature = "llm-mlx"))]
     fn sample_generation_output(tokens: usize) -> crate::runtime_adapter::llm::GenerationOutput {
         crate::runtime_adapter::llm::GenerationOutput {
             text: "hello".to_string(),
@@ -5702,7 +5706,73 @@ mod tests {
         assert_eq!(model_file, "model.gguf");
         assert_eq!(chat_template, Some("chat-template.json"));
         assert_eq!(context_length, 2048);
-        assert_eq!(backend_hint, Some("llamacpp"));
+        assert_eq!(
+            backend_hint,
+            cfg!(feature = "llm-llamacpp").then_some("llamacpp")
+        );
+    }
+
+    fn gguf_metadata_with_backend(
+        template: ExecutionTemplate,
+        backend: Option<&str>,
+    ) -> ModelMetadata {
+        ModelMetadata {
+            model_id: "llama-gguf".to_string(),
+            version: "1.0".to_string(),
+            execution_template: template,
+            preprocessing: vec![],
+            postprocessing: vec![],
+            files: vec!["model.gguf".to_string()],
+            vision_encoder: None,
+            description: None,
+            backend: backend.map(str::to_string),
+            metadata: HashMap::new(),
+            voices: None,
+            max_chunk_chars: None,
+            trim_trailing_samples: None,
+        }
+    }
+
+    #[test]
+    fn gguf_backend_hint_ignores_backends_that_cannot_run_gguf() {
+        let templates = [
+            ExecutionTemplate::Gguf {
+                model_file: "model.gguf".to_string(),
+                chat_template: None,
+                context_length: 4096,
+                generation_params: None,
+            },
+            ExecutionTemplate::VisionLanguage {
+                model_file: "model.gguf".to_string(),
+                chat_template: None,
+                context_length: 4096,
+                generation_params: None,
+            },
+        ];
+
+        for template in templates {
+            // `mlx` cannot load a .gguf and `candle` is a legacy hint: both fall
+            // back to the default runtime, as they did before MLX landed.
+            for hint in ["mlx", "candle"] {
+                let metadata = gguf_metadata_with_backend(template.clone(), Some(hint));
+                assert_eq!(llm_backend_hint(&metadata), None, "hint `{hint}`");
+            }
+
+            let llamacpp = gguf_metadata_with_backend(template.clone(), Some("llama.cpp"));
+            assert_eq!(
+                llm_backend_hint(&llamacpp),
+                cfg!(feature = "llm-llamacpp").then_some("llama.cpp")
+            );
+
+            let mistral = gguf_metadata_with_backend(template.clone(), Some("mistral"));
+            assert_eq!(
+                llm_backend_hint(&mistral),
+                cfg!(feature = "llm-mistral").then_some("mistral")
+            );
+
+            let unset = gguf_metadata_with_backend(template, None);
+            assert_eq!(llm_backend_hint(&unset), None);
+        }
     }
 
     #[cfg(feature = "llm-mlx")]
@@ -5784,6 +5854,90 @@ mod tests {
         assert_eq!(
             resolve_llm_model_path("/bundle/qwen", model_file),
             "/bundle/qwen"
+        );
+    }
+
+    /// Batch `execute_llm` used to compile its tool-continuation branch only for
+    /// llama.cpp / mistral.rs builds, so an MLX-only build ran a plain
+    /// `generate` on a tool-results turn and the model answered as if no tool
+    /// had run. The stub panics on `generate` and relies on the default
+    /// `render_chat_prompt` error to prove the continuation path was taken.
+    #[cfg(feature = "llm-mlx")]
+    #[test]
+    fn mlx_batch_execute_routes_tool_results_through_continuation() {
+        struct PlainGenerateForbidden;
+
+        impl crate::runtime_adapter::LlmBackend for PlainGenerateForbidden {
+            fn name(&self) -> &str {
+                "mlx"
+            }
+
+            fn supported_formats(&self) -> Vec<&'static str> {
+                vec!["mlx"]
+            }
+
+            fn load(&mut self, _config: &LlmConfig) -> ExecutorResult<()> {
+                Ok(())
+            }
+
+            fn is_loaded(&self) -> bool {
+                true
+            }
+
+            fn unload(&mut self) -> ExecutorResult<()> {
+                Ok(())
+            }
+
+            fn generate(
+                &self,
+                _messages: &[ChatMessage],
+                _config: &GenerationConfig,
+            ) -> ExecutorResult<crate::runtime_adapter::GenerationOutput> {
+                panic!("tool results were dropped: plain generate ran instead of the continuation");
+            }
+
+            fn generate_raw(
+                &self,
+                _prompt: &str,
+                _config: &GenerationConfig,
+            ) -> ExecutorResult<crate::runtime_adapter::GenerationOutput> {
+                Ok(sample_generation_output(1))
+            }
+        }
+
+        let metadata = ModelMetadata::safetensors("qwen3-mlx", "1.0", "model.safetensors", "qwen3");
+        assert!(is_mlx_llm_safetensors_metadata(&metadata));
+
+        let mut executor = TemplateExecutor::with_base_path("/models");
+        executor.llm_adapter_cache = Some((
+            llm_adapter_cache_key(
+                "/models",
+                "",
+                None,
+                mlx_context_length(&metadata),
+                Some("mlx"),
+            ),
+            crate::runtime_adapter::LlmRuntimeAdapter::with_backend(Box::new(
+                PlainGenerateForbidden,
+            )),
+        ));
+
+        let input = Envelope::tool_results(
+            "What is the weather?",
+            r#"<tool_call>{"name":"lookup_weather","arguments":{}}</tool_call>"#,
+            &[crate::ir::ToolCallResult {
+                call_id: "call_0".to_string(),
+                name: "lookup_weather".to_string(),
+                content: serde_json::json!({ "forecast": "sunny" }),
+            }],
+        );
+
+        let err = executor
+            .execute(&metadata, &input, None)
+            .expect_err("the stub cannot render a chat prompt for the continuation");
+        assert!(
+            err.to_string().contains("chat-prompt rendering"),
+            "expected the continuation path, got {err}"
         );
     }
 

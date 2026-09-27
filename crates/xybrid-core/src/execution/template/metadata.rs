@@ -675,6 +675,37 @@ pub fn explicit_llm_backend_hint(metadata: &ModelMetadata) -> Option<&str> {
     raw_llm_backend_hint(metadata).filter(|hint| !hint.eq_ignore_ascii_case("auto"))
 }
 
+/// Backend hint to forward for a GGUF / VisionLanguage bundle.
+///
+/// Only llama.cpp and mistral.rs run these artifacts, so the hint is forwarded
+/// only when it names one of them *and* that runtime is compiled in. Anything
+/// else (`mlx`, a legacy value such as `candle`, or a runtime this build lacks)
+/// falls back to the platform default instead of failing adapter construction.
+/// Explicit SDK overrides are validated up front by the SDK loader, so this
+/// only softens bundle-carried and pipeline-stage hints.
+pub(crate) fn gguf_runtime_backend_hint(metadata: &ModelMetadata) -> Option<&str> {
+    use crate::runtime_adapter::BackendChoice;
+
+    let hint = explicit_llm_backend_hint(metadata)?;
+    let runnable = match BackendChoice::parse(hint) {
+        Ok(Some(BackendChoice::LlamaCpp)) => cfg!(feature = "llm-llamacpp"),
+        Ok(Some(BackendChoice::Mistral)) => cfg!(feature = "llm-mistral"),
+        Ok(Some(BackendChoice::Mlx)) | Ok(None) | Err(_) => false,
+    };
+    if runnable {
+        return Some(hint);
+    }
+
+    log::warn!(
+        target: "xybrid_core",
+        "Ignoring backend hint `{}` for GGUF model `{}`: only a compiled llama.cpp or \
+         mistral.rs runtime can run it; using the default LLM runtime",
+        hint,
+        metadata.model_id
+    );
+    None
+}
+
 /// True when SafeTensors metadata names an MLX LLM architecture that can route
 /// through `MlxLlmAdapter` when the backend is unset or `auto`.
 ///

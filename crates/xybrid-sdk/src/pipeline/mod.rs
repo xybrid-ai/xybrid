@@ -82,11 +82,11 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp", feature = "llm-mlx"))]
 use xybrid_core::cache_provider::CacheProvider;
 use xybrid_core::context::{DeviceMetrics, StageDescriptor, DEVICE_CLASS_SCHEMA_VERSION};
 use xybrid_core::device::ResourceMonitor;
-#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp", feature = "llm-mlx"))]
 use xybrid_core::event_bus::{EventContext, OrchestratorEvent};
 use xybrid_core::execution::{ExecutionTemplate, ModelMetadata, PreprocessingStep};
 use xybrid_core::ir::{Envelope, EnvelopeKind};
@@ -95,7 +95,7 @@ use xybrid_core::orchestrator::{
     LocalAuthority, OrchestrationAuthority, Orchestrator, ResolvedTarget, StageContext,
     StageExecutionResult,
 };
-#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp", feature = "llm-mlx"))]
 use xybrid_core::orchestrator::{PolicyOutcome, PolicyRequest};
 use xybrid_core::pipeline::{ExecutionTarget, IntegrationProvider, StageOptions};
 use xybrid_core::pipeline_config::PipelineConfig;
@@ -486,13 +486,13 @@ fn current_timestamp_millis() -> u64 {
         .unwrap_or(0)
 }
 
-#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp", feature = "llm-mlx"))]
 struct StreamingFastPathCacheProvider {
     model_id: String,
     model_path: PathBuf,
 }
 
-#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp", feature = "llm-mlx"))]
 impl StreamingFastPathCacheProvider {
     fn new(model_id: impl Into<String>, model_path: PathBuf) -> Self {
         Self {
@@ -502,7 +502,7 @@ impl StreamingFastPathCacheProvider {
     }
 }
 
-#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp", feature = "llm-mlx"))]
 impl CacheProvider for StreamingFastPathCacheProvider {
     fn is_model_cached(&self, model_id: &str) -> bool {
         model_id == self.model_id && self.model_path.exists()
@@ -552,7 +552,7 @@ fn prepare_streaming_fast_path_input(
         .map_err(|e| SdkError::pipeline(format!("stage '{}': {}", stage.name, e)))
 }
 
-#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp", feature = "llm-mlx"))]
 #[derive(Debug, Clone)]
 struct StreamingFastPathRoute {
     policy_allowed: bool,
@@ -564,7 +564,7 @@ struct StreamingFastPathRoute {
     can_stream_locally: bool,
 }
 
-#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp", feature = "llm-mlx"))]
 fn resolve_streaming_fast_path_route(
     authority: &dyn OrchestrationAuthority,
     stage: &StageDescriptor,
@@ -622,7 +622,7 @@ fn resolve_streaming_fast_path_route(
     }
 }
 
-#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp", feature = "llm-mlx"))]
 fn streaming_fast_path_events(
     stage_name: &str,
     model_id: &str,
@@ -647,7 +647,7 @@ fn streaming_fast_path_events(
     ]
 }
 
-#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+#[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp", feature = "llm-mlx"))]
 fn publish_streaming_fast_path_events(
     stage_name: &str,
     model_id: &str,
@@ -1809,54 +1809,33 @@ impl Xybrid {
                         // validation) the batch path does.
                         let prepared =
                             prepare_streaming_fast_path_input(&stage_descriptor, envelope)?;
-                        #[cfg_attr(
-                            not(any(feature = "llm-mistral", feature = "llm-llamacpp")),
-                            expect(
-                                unused_mut,
-                                reason = "only the GGUF routing fast path below reassigns these"
-                            )
-                        )]
-                        let mut stage_target = "local".to_string();
-                        #[cfg_attr(
-                            not(any(feature = "llm-mistral", feature = "llm-llamacpp")),
-                            expect(
-                                unused_mut,
-                                reason = "only the GGUF routing fast path below reassigns these"
-                            )
-                        )]
-                        let mut stage_reason = "local_streaming_llm".to_string();
+                        // Streaming bypasses the orchestrator, so resolve the
+                        // same policy + target decision here for every local
+                        // LLM runtime (GGUF and MLX alike). Anything but a
+                        // permitted on-device route falls back to the
+                        // orchestrated batch path.
+                        let metrics = pipeline_metrics(options);
+                        let authority = LocalAuthority::with_cache_provider(Arc::new(
+                            StreamingFastPathCacheProvider::new(
+                                model_id.clone(),
+                                bundle_path.clone(),
+                            ),
+                        ));
+                        let route = resolve_streaming_fast_path_route(
+                            &authority,
+                            &stage_descriptor,
+                            &model_id,
+                            &prepared,
+                            &metrics,
+                        );
 
-                        #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
-                        let mut route_to_publish: Option<
-                            StreamingFastPathRoute,
-                        > = None;
-
-                        #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
-                        if matches!(&metadata.execution_template, ExecutionTemplate::Gguf { .. }) {
-                            let metrics = pipeline_metrics(options);
-                            let authority = LocalAuthority::with_cache_provider(Arc::new(
-                                StreamingFastPathCacheProvider::new(
-                                    model_id.clone(),
-                                    bundle_path.clone(),
-                                ),
-                            ));
-                            let route = resolve_streaming_fast_path_route(
-                                &authority,
-                                &stage_descriptor,
-                                &model_id,
-                                &prepared,
-                                &metrics,
-                            );
-
-                            if !route.can_stream_locally {
-                                drop(handle);
-                                return pipeline.run_with_options(envelope, options);
-                            }
-
-                            stage_target = route.target.clone();
-                            stage_reason = route.reason.clone();
-                            route_to_publish = Some(route);
+                        if !route.can_stream_locally {
+                            drop(handle);
+                            return pipeline.run_with_options(envelope, options);
                         }
+
+                        let stage_target = route.target.clone();
+                        let stage_reason = route.reason.clone();
 
                         drop(handle); // Release lock before executor call
 
@@ -1870,16 +1849,13 @@ impl Xybrid {
                                 pipeline_id,
                                 Some(trace_id),
                             );
-                        #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
-                        if let Some(route) = &route_to_publish {
-                            publish_streaming_fast_path_events(
-                                &stage_name,
-                                &model_id,
-                                route,
-                                pipeline_id,
-                                Some(trace_id),
-                            );
-                        }
+                        publish_streaming_fast_path_events(
+                            &stage_name,
+                            &model_id,
+                            &route,
+                            pipeline_id,
+                            Some(trace_id),
+                        );
 
                         let mut executor =
                             TemplateExecutor::with_base_path(bundle_path.to_str().unwrap_or(""));
@@ -2454,7 +2430,7 @@ stages:
         ) -> PipelineResult<PipelineExecutionResult> = Xybrid::run_pipeline_streaming_with_options;
     }
 
-    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp", feature = "llm-mlx"))]
     #[test]
     fn streaming_fast_path_route_uses_policy_and_local_routing() {
         let tempdir = tempfile::tempdir().unwrap();
@@ -2479,7 +2455,7 @@ stages:
         assert!(route.reason.contains("Explicit target"));
     }
 
-    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp", feature = "llm-mlx"))]
     #[test]
     fn streaming_fast_path_descriptor_uses_loaded_bundle_path() {
         let tempdir = tempfile::tempdir().unwrap();
@@ -2494,7 +2470,7 @@ stages:
         assert!(stage.is_locally_runnable());
     }
 
-    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp", feature = "llm-mlx"))]
     #[test]
     fn streaming_fast_path_network_target_disables_local_streaming() {
         let tempdir = tempfile::tempdir().unwrap();
@@ -2516,7 +2492,7 @@ stages:
         assert_eq!(route.target, "cloud");
     }
 
-    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp", feature = "llm-mlx"))]
     #[test]
     fn streaming_fast_path_policy_deny_disables_local_streaming() {
         use xybrid_core::orchestrator::policy_engine::{DefaultPolicyEngine, PolicyEngine};
@@ -2558,7 +2534,7 @@ signature: "test-deny-text"
         );
     }
 
-    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
+    #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp", feature = "llm-mlx"))]
     #[test]
     fn streaming_fast_path_events_emit_policy_before_routing_with_hint() {
         let route = StreamingFastPathRoute {

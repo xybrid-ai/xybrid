@@ -13,6 +13,7 @@ mod steps;
 mod voice;
 
 // Re-export metadata types + swim-lane grouping helpers
+pub(crate) use metadata::gguf_runtime_backend_hint;
 pub use metadata::{
     backend_label_from_template, explicit_llm_backend_hint, is_mlx_embedding_safetensors_metadata,
     is_mlx_llm_safetensors_metadata, normalize_llm_backend_hint, quantization_label_from_metadata,

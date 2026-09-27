@@ -806,6 +806,12 @@ impl LlmBackend for MlxLlmAdapter {
                 ))
             })?
         };
+        // The executor resolves the window from model metadata; honour it so
+        // the prompt-length check and `context_length()` match the bundle
+        // rather than the 4096 default.
+        if config.context_length > 0 {
+            self.config.max_seq_len = config.context_length;
+        }
         self.load_in_place(model_dir).map_err(AdapterError::from)?;
         Ok(())
     }
@@ -1285,6 +1291,19 @@ mod tests {
             adapter.architecture(),
             Some(ModelArchitecture::Lfm35)
         ));
+    }
+
+    #[test]
+    fn llm_backend_load_honours_config_context_length() {
+        let tmp = TempDir::new().unwrap();
+        write_dummy_bundle(tmp.path(), "gemma4");
+        let mut adapter = MlxLlmAdapter::new(MlxLlmConfig::default());
+        let config = LlmConfig::new(tmp.path().to_string_lossy()).with_context_length(16384);
+
+        LlmBackend::load(&mut adapter, &config).expect("load ok");
+
+        assert_eq!(LlmBackend::context_length(&adapter), Some(16384));
+        assert_eq!(adapter.config().max_seq_len, 16384);
     }
 
     #[test]
