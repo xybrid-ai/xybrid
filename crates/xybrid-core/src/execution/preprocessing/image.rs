@@ -1182,6 +1182,7 @@ mod tests {
             template::{
                 ImageNormalizePreset, ImageResizeMode, ImageTensorLayout, PreprocessingStep,
             },
+            tokenizer_cache::TokenizerCache,
         },
         ir::{Envelope, ImagePlane, PixelFormat, YuvColorInfo, YuvColorMatrix, YuvColorRange},
     };
@@ -1415,6 +1416,7 @@ mod tests {
                 data,
                 &envelope,
                 model_dir.to_str().expect("fixture path is UTF-8"),
+                &mut TokenizerCache::default(),
             )
             .unwrap();
         }
@@ -1520,7 +1522,9 @@ mod tests {
             layout: ImageTensorLayout::Nchw,
         };
 
-        let result = apply_preprocessing_step(&step, data, &envelope, "").unwrap();
+        let result =
+            apply_preprocessing_step(&step, data, &envelope, "", &mut TokenizerCache::default())
+                .unwrap();
 
         match result {
             PreprocessedData::Tensor(tensor) => assert_eq!(tensor.shape(), &[1, 3, 1, 2]),
@@ -1620,7 +1624,9 @@ mod tests {
             layout: ImageTensorLayout::Nchw,
         };
 
-        let result = apply_preprocessing_step(&step, data, &envelope, "").unwrap();
+        let result =
+            apply_preprocessing_step(&step, data, &envelope, "", &mut TokenizerCache::default())
+                .unwrap();
 
         match result {
             PreprocessedData::Tensor(tensor) => assert_eq!(tensor.shape(), &[1, 3, 1, 2]),
@@ -1658,12 +1664,21 @@ mod tests {
 
         let mut raw_data = PreprocessedData::from_envelope(&raw).unwrap();
         for step in &steps {
-            raw_data = apply_preprocessing_step(step, raw_data, &raw, "").unwrap();
+            raw_data =
+                apply_preprocessing_step(step, raw_data, &raw, "", &mut TokenizerCache::default())
+                    .unwrap();
         }
 
         let mut encoded_data = PreprocessedData::from_envelope(&encoded).unwrap();
         for step in &steps {
-            encoded_data = apply_preprocessing_step(step, encoded_data, &encoded, "").unwrap();
+            encoded_data = apply_preprocessing_step(
+                step,
+                encoded_data,
+                &encoded,
+                "",
+                &mut TokenizerCache::default(),
+            )
+            .unwrap();
         }
 
         match (raw_data, encoded_data) {
@@ -1777,12 +1792,21 @@ mod tests {
 
         let mut raw_data = PreprocessedData::from_envelope(&raw).unwrap();
         for step in &steps {
-            raw_data = apply_preprocessing_step(step, raw_data, &raw, "").unwrap();
+            raw_data =
+                apply_preprocessing_step(step, raw_data, &raw, "", &mut TokenizerCache::default())
+                    .unwrap();
         }
 
         let mut encoded_data = PreprocessedData::from_envelope(&encoded).unwrap();
         for step in &steps {
-            encoded_data = apply_preprocessing_step(step, encoded_data, &encoded, "").unwrap();
+            encoded_data = apply_preprocessing_step(
+                step,
+                encoded_data,
+                &encoded,
+                "",
+                &mut TokenizerCache::default(),
+            )
+            .unwrap();
         }
 
         match (raw_data, encoded_data) {
@@ -1899,6 +1923,7 @@ mod tests {
             input,
             &Envelope::new(crate::ir::EnvelopeKind::Text(String::new())),
             "",
+            &mut TokenizerCache::default(),
         )
         .unwrap();
 
@@ -1970,6 +1995,7 @@ mod tests {
             PreprocessedData::Tensor(data),
             &Envelope::new(crate::ir::EnvelopeKind::Text(String::new())),
             "",
+            &mut TokenizerCache::default(),
         )
         .unwrap();
 

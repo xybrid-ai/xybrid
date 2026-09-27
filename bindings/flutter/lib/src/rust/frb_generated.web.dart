@@ -274,6 +274,15 @@ abstract class XybridRustLibApiImplPlatform
   double dco_decode_f_64(dynamic raw);
 
   @protected
+  FfiCacheEntry dco_decode_ffi_cache_entry(dynamic raw);
+
+  @protected
+  FfiCacheEntryLocation dco_decode_ffi_cache_entry_location(dynamic raw);
+
+  @protected
+  FfiCacheStatus dco_decode_ffi_cache_status(dynamic raw);
+
+  @protected
   FfiDownloadState dco_decode_ffi_download_state(dynamic raw);
 
   @protected
@@ -367,6 +376,9 @@ abstract class XybridRustLibApiImplPlatform
 
   @protected
   List<String> dco_decode_list_String(dynamic raw);
+
+  @protected
+  List<FfiCacheEntry> dco_decode_list_ffi_cache_entry(dynamic raw);
 
   @protected
   List<FfiImagePlane> dco_decode_list_ffi_image_plane(dynamic raw);
@@ -676,6 +688,16 @@ abstract class XybridRustLibApiImplPlatform
   double sse_decode_f_64(SseDeserializer deserializer);
 
   @protected
+  FfiCacheEntry sse_decode_ffi_cache_entry(SseDeserializer deserializer);
+
+  @protected
+  FfiCacheEntryLocation sse_decode_ffi_cache_entry_location(
+      SseDeserializer deserializer);
+
+  @protected
+  FfiCacheStatus sse_decode_ffi_cache_status(SseDeserializer deserializer);
+
+  @protected
   FfiDownloadState sse_decode_ffi_download_state(SseDeserializer deserializer);
 
   @protected
@@ -779,6 +801,10 @@ abstract class XybridRustLibApiImplPlatform
 
   @protected
   List<String> sse_decode_list_String(SseDeserializer deserializer);
+
+  @protected
+  List<FfiCacheEntry> sse_decode_list_ffi_cache_entry(
+      SseDeserializer deserializer);
 
   @protected
   List<FfiImagePlane> sse_decode_list_ffi_image_plane(
@@ -1098,6 +1124,17 @@ abstract class XybridRustLibApiImplPlatform
   void sse_encode_f_64(double self, SseSerializer serializer);
 
   @protected
+  void sse_encode_ffi_cache_entry(FfiCacheEntry self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_ffi_cache_entry_location(
+      FfiCacheEntryLocation self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_ffi_cache_status(
+      FfiCacheStatus self, SseSerializer serializer);
+
+  @protected
   void sse_encode_ffi_download_state(
       FfiDownloadState self, SseSerializer serializer);
 
@@ -1211,6 +1248,10 @@ abstract class XybridRustLibApiImplPlatform
 
   @protected
   void sse_encode_list_String(List<String> self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_list_ffi_cache_entry(
+      List<FfiCacheEntry> self, SseSerializer serializer);
 
   @protected
   void sse_encode_list_ffi_image_plane(

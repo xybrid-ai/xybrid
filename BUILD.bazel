@@ -7,6 +7,7 @@ exports_files([
 
 load("@bazel_skylib//rules:common_settings.bzl", "bool_flag")
 load("@rules_cc//cc:defs.bzl", "cc_library")
+load("//bazel/ggml:android.bzl", "ANDROID_ARM64_CPU_VARIANTS", "ANDROID_ARM64_GGML_LIBS")
 
 # The macOS GPU lane toggle (Flip 2). Both darwin lanes share the SAME Rust
 # feature set (candle-metal/CoreML/vision are bindings — pure Rust, cross-
@@ -111,6 +112,35 @@ _ANDROID_LLAMA = {
     "LLAMA_BUILD_COMMON": "ON",
     "GGML_LLAMAFILE": "OFF",
     "CMAKE_EXE_LINKER_FLAGS": "-lc++_shared",
+}
+
+# The arm64 AAR (//:llama_android_dl) picks its CPU kernels at RUNTIME, the way
+# llama.cpp's own Android builds do. A static build must choose one ISA for
+# every phone:
+# plain armv8.0 runs everywhere but leaves the dot-product and int8-matmul
+# instructions unused (in the app on a Pixel 8 with LFM2.5-230M: ~210 vs ~600
+# tok/s prompt processing, ~41 vs ~65 generation), while a static dotprod build
+# would SIGILL on older cores. So ggml is built shared, GGML_CPU_ALL_VARIANTS
+# compiles one CPU backend per ISA level as a dlopen-able module, and
+# bindings/kotlin/bazel/jni/ggml_cpu_backend.cpp loads the best one this
+# device supports when libxybrid_bolt.so is loaded.
+#
+# BUILD_SHARED_LIBS is required by GGML_BACKEND_DL. rules_foreign_cc names the
+# platform Linux, which would (a) pick ggml's desktop-Linux variant list and
+# (b) give every library a versioned soname (libggml.so.0) that an APK cannot
+# carry — the hook fixes (a) inside ggml's scope, NO_VERSIONED_SONAME fixes
+# (b) everywhere, as CMake's own Android platform does. The shared libraries
+# and modules need the C++ runtime like the tool executables, the 16 KB page
+# alignment Android 15+ devices require, and no symbol table (-s keeps the
+# dynamic symbols ggml's loader looks up).
+_ANDROID_ARM64_LLAMA = _LLAMA_CACHE_ENTRIES | _ANDROID_LLAMA | {
+    "BUILD_SHARED_LIBS": "ON",
+    "GGML_BACKEND_DL": "ON",
+    "GGML_CPU_ALL_VARIANTS": "ON",
+    "CMAKE_PROJECT_ggml_INCLUDE": "$$EXT_BUILD_ROOT/$(execpath //bazel/ggml:android_system_name.cmake)",
+    "CMAKE_PLATFORM_NO_VERSIONED_SONAME": "ON",
+    "CMAKE_SHARED_LINKER_FLAGS": "-lc++_shared -Wl,-z,max-page-size=16384 -Wl,-s",
+    "CMAKE_MODULE_LINKER_FLAGS": "-lc++_shared -Wl,-z,max-page-size=16384 -Wl,-s",
 }
 
 # out_static_libs differs by platform: android adds libmtmd.a (vision).
@@ -555,6 +585,34 @@ cmake(
     visibility = ["//visibility:public"],
 )
 
+# The Android arm64 AAR's llama.cpp: shared libraries plus one CPU backend
+# module per ISA level, loaded at runtime (see _ANDROID_ARM64_LLAMA). A SEPARATE
+# target, like //:llama_metal and //:llama_vulkan, so every other arm64 Android
+# consumer — the Flutter cdylib, whose precompiled package carries exactly one
+# .so — keeps //:llama's static build. It is selected by the
+# //bazel/ggml:android_arm64_cpu_variants platform, which only the AAR's
+# packaging (//bindings/kotlin) builds for.
+cmake(
+    name = "llama_android_dl",
+    # The CMAKE_PROJECT_ggml_INCLUDE hook _ANDROID_ARM64_LLAMA references.
+    build_data = ["//bazel/ggml:android_system_name.cmake"],
+    cache_entries = _ANDROID_ARM64_LLAMA,
+    lib_source = ":llama_src",
+    # The shared libraries dependents link (DT_NEEDED) ...
+    out_shared_libs = ANDROID_ARM64_GGML_LIBS,
+    # ... and the CPU-variant modules, which must NOT be linked: ggml installs
+    # GGML_BACKEND_DL modules into bin/, and declaring them as binaries makes
+    # them outputs (one output group each, for the AAR) without putting them in
+    # CcInfo, where every dependent would link all of them.
+    out_binaries = ANDROID_ARM64_CPU_VARIANTS,
+    # "manual" (like //:llama_metal) keeps `bazel build //...` from building it
+    # for the host. Not target_compatible_with: rules_rs also gives each
+    # rust_library's C deps an exec-configuration edge, which a constraint
+    # would turn into an incompatible //crates/llama-cpp-sys.
+    tags = ["manual"],
+    visibility = ["//visibility:public"],
+)
+
 # whisper.cpp, built on the ggml //:llama already produced.
 #
 # A plain cc_library, NOT a second rules_foreign_cc cmake() target. Two reasons,
@@ -617,6 +675,7 @@ cc_library(
     deps = select({
         "//:metal_enabled": ["//:llama_metal"],
         "//:vulkan_enabled": ["//:llama_vulkan"],
+        "//bazel/ggml:cpu_variants_enabled": ["//:llama_android_dl"],
         "//conditions:default": ["//:llama"],
     }),
     visibility = ["//visibility:public"],

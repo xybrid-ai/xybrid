@@ -17,6 +17,7 @@ pub mod tensor;
 pub mod text;
 
 use super::path::resolve_file_path;
+use super::tokenizer_cache::TokenizerCache;
 use super::types::{ExecutorResult, PreprocessedData};
 use crate::execution::template::PreprocessingStep;
 use crate::ir::Envelope;
@@ -29,6 +30,7 @@ pub fn apply_preprocessing_step(
     data: PreprocessedData,
     input_envelope: &Envelope,
     base_path: &str,
+    tokenizers: &mut TokenizerCache,
 ) -> ExecutorResult<PreprocessedData> {
     match step {
         PreprocessingStep::MelSpectrogram {
@@ -69,7 +71,7 @@ pub fn apply_preprocessing_step(
             max_length,
         } => {
             let vocab_path = resolve_file_path(base_path, vocab_file);
-            text::tokenize_step(data, &vocab_path, tokenizer_type, *max_length)
+            text::tokenize_step(data, &vocab_path, tokenizer_type, *max_length, tokenizers)
         }
 
         PreprocessingStep::PhonemeRaw { .. } => {

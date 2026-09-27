@@ -172,6 +172,16 @@ ort_ios_sim = use_repo_rule("//bazel:ort_ios_sim.bzl", "ort_ios_sim_repository")
 
 ort_ios_sim(name = "ort_ios_arm64_sim")
 
+# The workspace version from Cargo.toml, which every first-party Rust target
+# passes as `version` (rules_rust's CARGO_PKG_VERSION would otherwise be
+# "0.0.0") — see //bazel:cargo_version.bzl.
+cargo_version = use_repo_rule("//bazel:cargo_version.bzl", "cargo_version_repository")
+
+cargo_version(
+    name = "xybrid_version",
+    cargo_toml = "//:Cargo.toml",
+)
+
 http_archive(
     name = "android_sdk_34",
     build_file_content = """

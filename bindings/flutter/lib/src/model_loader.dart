@@ -106,7 +106,8 @@ sealed class LoadEvent {
 ///
 /// [progress] is aggregated across every artifact the model needs (weights
 /// plus companions such as a vision projector), never moves backwards, and
-/// reaches 1.0 only once the model is ready.
+/// reaches 1.0 only once the model is ready. A first event at 0 bytes arrives
+/// as the transfer starts, so a UI can tell "connecting" apart from "stuck".
 class LoadProgress extends LoadEvent {
   /// Progress value from 0.0 to 1.0
   final double progress;
@@ -114,8 +115,10 @@ class LoadProgress extends LoadEvent {
   /// Bytes written so far, across every artifact.
   final int downloadedBytes;
 
-  /// Declared total across every artifact, or `null` when the source does not
-  /// publish one (a Hugging Face repo, or a registry entry without a size).
+  /// Total across every artifact, or `null` while unknown. A single-file
+  /// model takes the size the server announces, so this fills in once the
+  /// download connects even when the registry publishes no size. It stays
+  /// `null` for a Hugging Face repo, or a multi-file model missing a size.
   /// [downloadedBytes] is exact either way.
   final int? totalBytes;
 

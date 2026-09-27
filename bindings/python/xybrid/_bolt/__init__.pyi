@@ -274,6 +274,25 @@ class XybridVoiceInfo:
 
 
 @dataclass(frozen=True, slots=True)
+class XybridCacheEntry:
+    model_id: str
+    location: XybridCacheEntryLocation
+    path: str
+    size_bytes: int
+
+
+
+@dataclass(frozen=True, slots=True)
+class XybridCacheStatus:
+    total_size_bytes: int
+    entry_count: int
+    model_count: int
+    extracted_model_count: int
+    cache_root: str
+
+
+
+@dataclass(frozen=True, slots=True)
 class XybridStreamingConfig:
     """Configuration for a live ASR session.
 
@@ -527,6 +546,13 @@ class XybridDownloadState(IntEnum):
 class XybridStreamEventKind(IntEnum):
     TOKEN = 0
     COMPLETE = 1
+
+
+class XybridCacheEntryLocation(IntEnum):
+    REGISTRY = 0
+    EXTRACTED = 1
+    HUGGING_FACE = 2
+    HUGGING_FACE_HUB = 3
 
 
 class XybridThermalState(IntEnum):
@@ -1021,6 +1047,26 @@ def configure_runtime(api_key: str | None, gateway_url: str | None, ingest_url: 
     `Xybrid.init(context, apiKey, gatewayUrl, ingestUrl)` wrappers call.
     """
 def init_sdk_cache_dir(cache_dir: str) -> None: ...
+def cache_status() -> XybridCacheStatus:
+    """Returns aggregate storage usage across every managed model-cache location."""
+def cache_entries() -> list[XybridCacheEntry]:
+    """Lists every physical model entry occupying managed cache storage."""
+def cache_is_model_cached(model_id: str) -> bool:
+    """Returns whether a model occupies any managed cache entry."""
+def cache_model_path(model_id: str) -> str | None:
+    """Resolves the preferred local cache path for a model, if present."""
+def cache_list_extracted_model_ids() -> list[str]:
+    """Lists model IDs extracted, validated, and ready to run offline."""
+def cache_remove_model(model_id: str) -> int:
+    """Removes every managed cache entry for one model.
+
+    Do not call concurrently with a load of the same model.
+    """
+def cache_clear() -> int:
+    """Clears all managed model-cache storage.
+
+    Do not call concurrently with any model load.
+    """
 def set_binding(binding: str) -> None: ...
 def set_api_key(api_key: str) -> None: ...
 def set_provider_api_key(provider: str, api_key: str) -> None: ...

@@ -179,8 +179,10 @@ use super::modes::{
     execute_autoregressive_stage, execute_bert_inference, execute_single_shot_stage,
     execute_tts_inference, execute_whisper_decoder_stage,
 };
+use super::path::{file_identity, FileIdentity};
 use super::postprocessing;
 use super::preprocessing;
+use super::tokenizer_cache::TokenizerCache;
 use super::types::{ExecutorResult, PreprocessedData, RawOutputs};
 use super::voice_loader::TtsVoiceLoader;
 
@@ -228,7 +230,7 @@ struct TtsSessionCache {
     /// `(len, modified)` of the model file at build time. `None` when the file
     /// metadata couldn't be read — treated as "unverifiable", forcing a rebuild
     /// rather than trusting a possibly-stale session.
-    file_identity: Option<(u64, std::time::SystemTime)>,
+    file_identity: Option<FileIdentity>,
     session: Arc<ONNXSession>,
 }
 
@@ -252,6 +254,10 @@ pub struct TemplateExecutor {
     /// the executor's lifetime — i.e. the TTS model's load — and drops on unload,
     /// exactly like `llm_adapter_cache`; no separate eviction needed.
     tts_session_cache: Option<TtsSessionCache>,
+    /// Parsed `tokenizer.json` files for the `Tokenize` and `WhisperDecode`
+    /// steps (see [`TokenizerCache`]). Lives for the executor's lifetime, like
+    /// the caches above, so each tokenizer is parsed once per loaded model.
+    tokenizer_cache: TokenizerCache,
     /// Optional embedding-style vision encoders keyed by metadata `vision_encoder.file`.
     ///
     /// llama.cpp VLMs do not use this registry: they consume raw ordered
@@ -312,6 +318,7 @@ impl TemplateExecutor {
             base_path: base_path.into(),
             llm_adapter_cache: None,
             tts_session_cache: None,
+            tokenizer_cache: TokenizerCache::default(),
             vision_encoders: HashMap::new(),
         }
     }
@@ -401,7 +408,12 @@ impl TemplateExecutor {
 
         let steps = config.preprocessing_steps();
         let image_preprocess_started = std::time::Instant::now();
-        let image_tensors = Self::preprocess_multimodal_images(&self.base_path, &steps, messages)?;
+        let image_tensors = Self::preprocess_multimodal_images(
+            &self.base_path,
+            &mut self.tokenizer_cache,
+            &steps,
+            messages,
+        )?;
         if image_tensors.is_empty() {
             return Ok(None);
         }
@@ -436,6 +448,7 @@ impl TemplateExecutor {
 
     fn preprocess_multimodal_images(
         base_path: &str,
+        tokenizers: &mut TokenizerCache,
         steps: &[super::template::PreprocessingStep],
         messages: &[MultimodalChatMessage],
     ) -> ExecutorResult<Vec<ArrayD<f32>>> {
@@ -459,6 +472,7 @@ impl TemplateExecutor {
                         data,
                         &image_input,
                         base_path,
+                        tokenizers,
                     )?;
                 }
 
@@ -2637,7 +2651,13 @@ impl TemplateExecutor {
                 },
             );
 
-            data = preprocessing::apply_preprocessing_step(step, data, input, &self.base_path)?;
+            data = preprocessing::apply_preprocessing_step(
+                step,
+                data,
+                input,
+                &self.base_path,
+                &mut self.tokenizer_cache,
+            )?;
         }
 
         debug!(target: "xybrid_core", "Preprocessing complete");
@@ -2792,7 +2812,12 @@ impl TemplateExecutor {
                 },
             );
 
-            data = postprocessing::apply_postprocessing_step(step, data, &self.base_path)?;
+            data = postprocessing::apply_postprocessing_step(
+                step,
+                data,
+                &self.base_path,
+                &mut self.tokenizer_cache,
+            )?;
         }
 
         debug!(target: "xybrid_core", "Postprocessing complete");
@@ -2840,7 +2865,7 @@ impl TemplateExecutor {
     /// the model file's `(len, mtime)` changes. TTS always runs on CPU with
     /// default options, so path + file identity is a sufficient key.
     fn tts_session(&mut self, model_path: &Path) -> ExecutorResult<Arc<ONNXSession>> {
-        let identity = tts_file_identity(model_path);
+        let identity = file_identity(model_path);
         if let Some(cache) = &self.tts_session_cache {
             // Reuse only when the path matches AND the file identity is both
             // readable and unchanged — an unreadable identity (`None`) forces a
@@ -3185,11 +3210,6 @@ fn fade_pcm16_edges(pcm: &mut [u8], fade_samples: usize) {
 /// `(len, modified)` of the file at `path`, or `None` if the metadata can't be
 /// read. Used as the TTS session-cache identity so a model file replaced in
 /// place invalidates the cached session.
-fn tts_file_identity(path: &Path) -> Option<(u64, std::time::SystemTime)> {
-    let meta = std::fs::metadata(path).ok()?;
-    Some((meta.len(), meta.modified().ok()?))
-}
-
 /// Extract TTS speed from envelope metadata, clamped to [0.5, 2.0].
 ///
 /// Reads the "speed" key from `envelope.metadata`. Returns 1.0 if absent or

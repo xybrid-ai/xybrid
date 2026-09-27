@@ -192,8 +192,18 @@ impl CacheManager {
         self.layout().registry_bundle_path(hf_repo, file)
     }
 
-    pub(crate) fn cache_entries(&self) -> Result<Vec<CacheEntryInfo>, SdkError> {
+    /// Lists entries across every managed model-cache location.
+    ///
+    /// Includes registry bundles, extracted models, direct Hugging Face
+    /// materializations, and the shared Hugging Face blob cache. The result is
+    /// read fresh from disk and sorted deterministically.
+    pub fn cache_entries(&self) -> Result<Vec<CacheEntryInfo>, SdkError> {
         self.layout().cache_entries()
+    }
+
+    /// Returns the root that owns every managed model-cache location.
+    pub fn cache_root(&self) -> PathBuf {
+        self.layout().cache_root().to_path_buf()
     }
 
     /// Scans the cache directory for existing bundles.
@@ -362,6 +372,50 @@ impl CacheManager {
             .filter(|(key, _)| key.starts_with(&prefix))
             .max_by_key(|(key, _)| *key)
             .map(|(_, entry)| entry.path.clone())
+    }
+
+    /// Resolves a local cache path for a model across every managed location.
+    ///
+    /// Runtime-ready extracted and direct Hugging Face materializations are
+    /// preferred, followed by registry bundles and shared Hugging Face cache
+    /// entries. Returns `None` when the model occupies no managed cache entry.
+    /// This operation never touches the network.
+    ///
+    /// # Errors
+    /// Returns an error for absolute paths or traversal instead of model IDs.
+    pub fn cached_model_path(&self, model_id: &str) -> Result<Option<PathBuf>, SdkError> {
+        validate_cache_model_id(model_id)?;
+        if let Some(path) = self.existing_extraction_dir(model_id) {
+            return Ok(Some(path));
+        }
+        if let Some(path) = self.huggingface_cache_dir(model_id) {
+            return Ok(Some(path));
+        }
+        if let Some(path) = self.get_cached_path(model_id) {
+            return Ok(Some(path));
+        }
+
+        let entries = self.cache_entries()?;
+        let locations = [
+            CacheEntryLocation::Extracted,
+            CacheEntryLocation::HuggingFace,
+            CacheEntryLocation::Registry,
+            CacheEntryLocation::HuggingFaceHub,
+        ];
+        Ok(locations.into_iter().find_map(|location| {
+            entries
+                .iter()
+                .find(|entry| entry.model_id == model_id && entry.location == location)
+                .map(|entry| entry.path.clone())
+        }))
+    }
+
+    /// Returns whether a model occupies any managed cache entry.
+    ///
+    /// Unlike [`Self::is_extracted`], this also counts downloaded bundles and
+    /// Hugging Face cache entries that have not been copied into `extracted/`.
+    pub fn is_model_cached(&self, model_id: &str) -> Result<bool, SdkError> {
+        Ok(self.cached_model_path(model_id)?.is_some())
     }
 
     /// Decompresses and validates a `.xyb` bundle.
@@ -649,6 +703,10 @@ impl CacheManager {
     ///
     /// Removes cloud models that have exceeded their TTL.
     ///
+    /// Retention metadata is not persisted yet: a newly opened manager treats
+    /// every scanned bundle as local, so this currently removes no disk entries.
+    /// Use explicit per-model eviction until persistent retention is supported.
+    ///
     /// # Returns
     ///
     /// Number of entries removed
@@ -694,16 +752,7 @@ impl CacheManager {
     /// Not safe to run concurrently with a load of the same model: it removes
     /// whole cache directories that an in-flight extraction may be writing to.
     pub(crate) fn clear_model_roots(&mut self, model_id: &str) -> Result<u32, SdkError> {
-        if model_id.is_empty()
-            || !Path::new(model_id)
-                .components()
-                .all(|component| matches!(component, Component::Normal(_)))
-        {
-            return Err(SdkError::cache(format!(
-                "Invalid cache model identifier: {}",
-                model_id
-            )));
-        }
+        validate_cache_model_id(model_id)?;
 
         let matching_cache_entries: Vec<_> = self
             .layout()
@@ -754,6 +803,20 @@ impl CacheManager {
         Ok(removed_count)
     }
 
+    /// Removes every managed cache entry for a single model.
+    ///
+    /// Returns the number of cache roots removed, or `0` when the model was not
+    /// cached. Model identifiers are validated before any path is constructed;
+    /// traversal and absolute-path inputs are rejected.
+    ///
+    /// # Concurrency
+    ///
+    /// Do not call this concurrently with a load of the same model. It removes
+    /// directories that an in-flight download or extraction may be writing to.
+    pub fn clear_model(&mut self, model_id: &str) -> Result<u32, SdkError> {
+        self.clear_model_roots(model_id)
+    }
+
     /// Clears all cached models across every managed cache root.
     ///
     /// # Returns
@@ -793,6 +856,24 @@ impl CacheManager {
             Ok(false)
         }
     }
+}
+
+/// Keep lookup and eviction within the same model-ID namespace on every host.
+fn validate_cache_model_id(model_id: &str) -> Result<(), SdkError> {
+    if model_id.is_empty()
+        || model_id.contains(['\\', ':', '\0'])
+        || model_id
+            .split('/')
+            .any(|part| part.is_empty() || part == "." || part == "..")
+        || !Path::new(model_id)
+            .components()
+            .all(|component| matches!(component, Component::Normal(_)))
+    {
+        return Err(SdkError::cache(format!(
+            "Invalid cache model identifier: {model_id}"
+        )));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -849,6 +930,75 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let manager = CacheManager::with_dir(temp_dir.path().to_path_buf()).unwrap();
         assert!(manager.get_cached_path("test-model").is_none());
+    }
+
+    #[test]
+    fn cache_root_owns_models_and_runtime_siblings() {
+        let temp_dir = TempDir::new().unwrap();
+        let cache_root = temp_dir.path().join("cache");
+        let manager = CacheManager::with_dir(cache_root.join("models")).unwrap();
+
+        assert_eq!(manager.cache_root(), cache_root);
+    }
+
+    #[test]
+    fn cached_model_path_prefers_ready_extraction_over_registry_bundle() {
+        let temp_dir = TempDir::new().unwrap();
+        let cache_root = temp_dir.path().join("cache");
+        let models_dir = cache_root.join("models");
+        let registry_dir = models_dir.join("test-model");
+        let extracted_dir = cache_root.join("extracted").join("test-model");
+        fs::create_dir_all(&registry_dir).unwrap();
+        fs::write(registry_dir.join("universal.xyb"), b"bundle").unwrap();
+        write_ready_extracted_model(&extracted_dir, "test-model");
+        let manager = CacheManager::with_dir(models_dir).unwrap();
+
+        assert!(manager.is_model_cached("test-model").unwrap());
+        assert_eq!(
+            manager.cached_model_path("test-model").unwrap(),
+            Some(extracted_dir)
+        );
+        assert!(!manager.is_model_cached("missing").unwrap());
+    }
+
+    #[test]
+    fn cache_lookup_and_eviction_reject_paths_outside_managed_storage() {
+        let temp = TempDir::new().unwrap();
+        let outside = temp.path().join("outside");
+        write_ready_extracted_model(&outside, "outside");
+        let mut manager = CacheManager::with_dir(temp.path().join("cache/models")).unwrap();
+
+        for id in [
+            outside.to_str().unwrap(),
+            "",
+            ".",
+            "..",
+            "../outside",
+            "owner/../../outside",
+            "owner/./repo",
+            "owner//repo",
+            "owner/",
+            r"C:\outside",
+            r"..\outside",
+            r"\\server\share",
+            "bad\0id",
+        ] {
+            assert!(
+                manager.cached_model_path(id).is_err(),
+                "lookup accepted {id:?}"
+            );
+            assert!(
+                manager.is_model_cached(id).is_err(),
+                "presence accepted {id:?}"
+            );
+            assert!(manager.clear_model(id).is_err(), "eviction accepted {id:?}");
+        }
+        for id in ["model", "model@1.0", "owner/repo", "owner/repo@revision"] {
+            assert_eq!(manager.cached_model_path(id).unwrap(), None);
+            assert!(!manager.is_model_cached(id).unwrap());
+        }
+        assert!(manager.cache_entries().unwrap().is_empty());
+        assert!(outside.join("model.onnx").is_file());
     }
 
     #[test]
@@ -1142,7 +1292,7 @@ mod tests {
 
         let mut manager = CacheManager::with_dir(models_dir).unwrap();
 
-        let result = manager.clear_model_roots("../outside");
+        let result = manager.clear_model("../outside");
 
         assert!(result.is_err());
         assert!(

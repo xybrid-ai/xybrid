@@ -64,18 +64,12 @@ This Agreement shall be governed by and construed in accordance with the laws of
 
 By submitting a pull request or other Contribution to any Xybrid project, you indicate that you have read, understood, and agree to this Contributor License Agreement.
 
-If this is your first contribution, please add your name and email to the table below in your pull request:
-
-| Name | Email | Date | GitHub Username |
-|------|-------|------|-----------------|
-| | | | |
-
 ### For Corporate Contributors
 
-If you are making Contributions on behalf of a company or other legal entity, please contact licensing@xybrid.io to sign a Corporate Contributor License Agreement (CCLA).
+If you are making Contributions on behalf of a company or other legal entity, please contact licensing@xybrid.dev to sign a Corporate Contributor License Agreement (CCLA).
 
 ---
 
 ## Questions
 
-If you have questions about this Agreement, please contact us at licensing@xybrid.io.
+If you have questions about this Agreement, please contact us at licensing@xybrid.dev.

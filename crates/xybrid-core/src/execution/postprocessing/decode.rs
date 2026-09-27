@@ -5,6 +5,7 @@
 //! - `bpe_decode_step`: BPE token decoding
 //! - `whisper_decode_step`: Whisper token decoding using HuggingFace tokenizer
 
+use super::super::tokenizer_cache::TokenizerCache;
 use super::super::types::{ExecutorResult, RawOutputs};
 use crate::runtime_adapter::AdapterError;
 use ndarray::IxDyn;
@@ -108,7 +109,12 @@ pub fn bpe_decode_step(data: RawOutputs, vocab_path: &str) -> ExecutorResult<Raw
 /// # Arguments
 /// - `data`: Input data (TokenIds)
 /// - `tokenizer_path`: Path to tokenizer.json file
-pub fn whisper_decode_step(data: RawOutputs, tokenizer_path: &str) -> ExecutorResult<RawOutputs> {
+/// - `tokenizers`: The executor's cache; the file is parsed only on a miss
+pub fn whisper_decode_step(
+    data: RawOutputs,
+    tokenizer_path: &str,
+    tokenizers: &mut TokenizerCache,
+) -> ExecutorResult<RawOutputs> {
     let token_ids = match data {
         RawOutputs::TokenIds(ids) => ids,
         _ => {
@@ -118,7 +124,10 @@ pub fn whisper_decode_step(data: RawOutputs, tokenizer_path: &str) -> ExecutorRe
         }
     };
 
-    let text = decode_whisper_tokens(&token_ids, tokenizer_path)?;
+    let tokenizer = tokenizers
+        .get_or_load(std::path::Path::new(tokenizer_path))
+        .map_err(|e| AdapterError::InvalidInput(format!("Failed to load tokenizer: {}", e)))?;
+    let text = decode_whisper_tokens(&token_ids, &tokenizer)?;
 
     Ok(RawOutputs::Text(text))
 }
@@ -222,14 +231,11 @@ fn decode_bpe_tokens(token_ids: &[usize], vocab_path: &str) -> ExecutorResult<St
     Ok(String::from_utf8_lossy(&decoded_bytes).to_string())
 }
 
-/// Decode Whisper tokens using HuggingFace tokenizer.json.
-fn decode_whisper_tokens(token_ids: &[usize], tokenizer_path: &str) -> ExecutorResult<String> {
-    use tokenizers::Tokenizer;
-
-    // Load the HuggingFace tokenizer
-    let tokenizer = Tokenizer::from_file(tokenizer_path)
-        .map_err(|e| AdapterError::InvalidInput(format!("Failed to load tokenizer: {}", e)))?;
-
+/// Decode Whisper tokens with a loaded HuggingFace tokenizer.
+fn decode_whisper_tokens(
+    token_ids: &[usize],
+    tokenizer: &tokenizers::Tokenizer,
+) -> ExecutorResult<String> {
     // Convert token IDs to u32 (tokenizers crate uses u32)
     let ids: Vec<u32> = token_ids.iter().map(|&id| id as u32).collect();
 

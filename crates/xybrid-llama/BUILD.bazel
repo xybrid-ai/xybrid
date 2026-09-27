@@ -1,6 +1,7 @@
 # GATE 3: safe Rust wrapper over llama-cpp-sys. Builds once llama_cpp_sys links.
 load("@rules_rs//rs:rust_library.bzl", "rust_library")
 load("@rules_rs//rs:rust_test.bzl", "rust_test")
+load("@xybrid_version//:version.bzl", "XYBRID_VERSION")
 
 # Vision (mtmd safe wrappers): Android + desktop-linux (Flip 1) — must match
 # llama-cpp-sys/BUILD.bazel's _VISION_PLATFORMS and //:llama's libmtmd arms.
@@ -18,6 +19,7 @@ _VISION_PLATFORMS = [
 
 rust_library(
     name = "xybrid_llama",
+    version = XYBRID_VERSION,
     srcs = glob(["src/**/*.rs"]),
     edition = "2021",
     crate_features = ["bindings"] + select({
@@ -42,6 +44,7 @@ rust_library(
 # crates inherit fine; only the select is lost.
 rust_test(
     name = "xybrid_llama_test",
+    version = XYBRID_VERSION,
     crate = ":xybrid_llama",
     crate_features = ["bindings"] + select({
         cfg: ["vision"]
@@ -67,6 +70,7 @@ _LLAMA_INTEGRATION_TESTS = {
 [
     rust_test(
         name = name,
+        version = XYBRID_VERSION,
         srcs = ["tests/{}.rs".format(name)],
         crate_features = features,
         edition = "2021",

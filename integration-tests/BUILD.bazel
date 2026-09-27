@@ -6,9 +6,11 @@
 load("@rules_rs//rs:rust_library.bzl", "rust_library")
 load("@rules_rs//rs:rust_test.bzl", "rust_test")
 load("@crates//:defs.bzl", "all_crate_deps")
+load("@xybrid_version//:version.bzl", "XYBRID_VERSION")
 
 rust_library(
     name = "integration-tests",
+    version = XYBRID_VERSION,
     srcs = glob(["src/**/*.rs"]),
     edition = "2021",
     crate_features = ["default"],
@@ -98,6 +100,7 @@ _E2E_TEST_DATA = {
 [
     rust_test(
         name = name,
+        version = XYBRID_VERSION,
         srcs = ["tests/{}.rs".format(name)],
         crate_features = features,
         data = [
@@ -119,6 +122,7 @@ _E2E_TEST_DATA = {
 # CLI-spawning cases are #[ignore]d, so no binary has to be staged.
 rust_test(
     name = "system_validation",
+    version = XYBRID_VERSION,
     srcs = ["tests/system_validation.rs"],
     edition = "2021",
     deps = [

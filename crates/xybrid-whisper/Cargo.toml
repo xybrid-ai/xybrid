@@ -20,6 +20,6 @@ default = []
 bindings = ["xybrid-whisper-sys/bindings"]
 
 [dependencies]
-xybrid-whisper-sys = { path = "../whisper-cpp-sys", version = "0.9.0" }
+xybrid-whisper-sys = { path = "../whisper-cpp-sys", version = "0.10.0-rc1" }
 thiserror = { workspace = true }
 tracing = "0.1"

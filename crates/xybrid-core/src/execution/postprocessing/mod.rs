@@ -15,6 +15,7 @@ pub mod decode;
 pub mod tensor_ops;
 
 use super::path::resolve_file_path;
+use super::tokenizer_cache::TokenizerCache;
 use super::types::{ExecutorResult, RawOutputs};
 use crate::execution::template::PostprocessingStep;
 
@@ -25,6 +26,7 @@ pub fn apply_postprocessing_step(
     step: &PostprocessingStep,
     data: RawOutputs,
     base_path: &str,
+    tokenizers: &mut TokenizerCache,
 ) -> ExecutorResult<RawOutputs> {
     match step {
         PostprocessingStep::CTCDecode {
@@ -42,7 +44,7 @@ pub fn apply_postprocessing_step(
 
         PostprocessingStep::WhisperDecode { tokenizer_file } => {
             let tokenizer_path = resolve_file_path(base_path, tokenizer_file);
-            decode::whisper_decode_step(data, &tokenizer_path)
+            decode::whisper_decode_step(data, &tokenizer_path, tokenizers)
         }
 
         PostprocessingStep::Argmax { dim } => tensor_ops::argmax_step(data, *dim),
@@ -103,7 +105,8 @@ mod tests {
             top_p: None,
         };
 
-        let result = apply_postprocessing_step(&step, data, "").expect("sampling should succeed");
+        let result = apply_postprocessing_step(&step, data, "", &mut TokenizerCache::default())
+            .expect("sampling should succeed");
 
         assert!(matches!(result, RawOutputs::ClassId(1)));
     }

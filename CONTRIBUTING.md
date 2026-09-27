@@ -222,4 +222,4 @@ builds are reproducible.
 
 ## License
 
-By contributing, you agree that your contributions will be licensed under the [Apache License 2.0](LICENSE).
+By contributing, you agree that your contributions are made under the [Contributor License Agreement](CLA.md) and licensed under the [Apache License 2.0](LICENSE).

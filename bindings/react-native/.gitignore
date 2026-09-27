@@ -1,30 +1,19 @@
 # Build outputs
 lib/
 node_modules/
+*.tgz
 
-# Gradle build output for the android library module (produced when the
-# module is compiled, e.g. by the example app's `gradlew assembleDebug`).
+# Gradle output for the Android library module (from the example build).
 android/build/
 android/.gradle/
 .kotlin/
 
-# iOS native artifacts staged from the Bazel xcframework build (see the
-# README's Local development section / build-react-native.yml). These are
-# produced from the Rust core and should not be checked in — the published
-# npm tarball includes them (CI stages them before `npm pack`), but
-# they're regenerated from source on every build, so committing would just
-# create merge friction.
-#
-# Android stages nothing: the module depends on the `ai.xybrid:xybrid-kotlin`
-# Maven AAR (it bundles the bolt .so + ORT + the Kotlin binding), so gradle
-# resolves the natives at consumer build time.
-#
-# HEADS-UP: installing this package from a git ref (e.g.
-# `react-native-xybrid: github:xybrid-ai/xybrid#some-sha`) will NOT pull
-# the iOS native artifacts — there is no `prepare` script that regenerates
-# them at install time, because doing so would force every consumer to
-# have a Rust toolchain. Install from the npm registry (or from the CI
-# tarball artifact) to get a working iOS package.
+# Native inputs resolved at `pod install` time by ios/xybrid_natives.rb — the
+# release XCFramework (or a local build) and, in this monorepo, the Swift SDK
+# sources synced from bindings/apple. The npm tarball carries the Swift
+# sources (staged by scripts/prepack.sh), never the XCFramework.
 ios/Frameworks/
-ios/XybridSwift/Xybrid.swift
-ios/XybridSwift/xybrid_bolt.swift
+ios/XybridSwift/
+
+# Staged from the repo root by scripts/prepack.sh.
+LICENSE

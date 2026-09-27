@@ -88,10 +88,14 @@ pub enum DownloadState {
 ///   A retry re-transfers bytes that were already counted, so the bar stalls
 ///   rather than rewinding.
 /// - `progress` stays below 1.0 until `state` is [`DownloadState::Ready`].
-/// - `total_bytes` is `None` when the source declares no size (a Hugging Face
-///   repo, or a registry entry with `size_bytes = 0`). `progress` then comes
-///   from a coarser signal — completed files over total files — and
+/// - `total_bytes` is `None` while the size is unknown (a Hugging Face repo,
+///   or a registry entry with `size_bytes = 0`). `progress` then comes from a
+///   coarser signal — completed files over total files — and
 ///   `downloaded_bytes` still counts real bytes.
+/// - For a single-file download, the size the server announces fills in (or
+///   corrects) `total_bytes` as soon as the response arrives, so it can turn
+///   from `None` to `Some` before the first byte. It never changes once bytes
+///   are counted.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct DownloadStatus {
     pub state: DownloadState,
@@ -99,7 +103,8 @@ pub struct DownloadStatus {
     pub progress: f32,
     /// Running total of bytes written across every artifact.
     pub downloaded_bytes: u64,
-    /// Sum of every artifact's declared size, or `None` when unknown.
+    /// Sum of every artifact's declared size (for a single file, the size the
+    /// server announced), or `None` when unknown.
     pub total_bytes: Option<u64>,
 }
 
@@ -146,10 +151,14 @@ impl DownloadStatus {
 /// resolves every artifact's `size_bytes` before the first request), which is
 /// what makes a single bar across multiple files possible.
 ///
-/// Emission is throttled to [`MIN_EMIT_INTERVAL`] except for artifact
-/// completion and the terminal update, which always go out.
+/// Emission is throttled to [`MIN_EMIT_INTERVAL`] except for the start of a
+/// transfer, a newly announced size, artifact completion and the terminal
+/// update, which always go out.
 pub struct ProgressReporter<'a> {
-    total_bytes: Option<u64>,
+    /// Byte total the bar is scaled against; `0` while unknown. Atomic because
+    /// a single-file download learns its real size from the response headers
+    /// (see [`Self::file_size_announced`]).
+    total_bytes: AtomicU64,
     /// Bytes belonging to artifacts that already finished.
     completed_bytes: AtomicU64,
     /// Highest byte count ever reported. A retry restarts the current file at
@@ -173,7 +182,7 @@ pub struct ProgressReporter<'a> {
 impl std::fmt::Debug for ProgressReporter<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ProgressReporter")
-            .field("total_bytes", &self.total_bytes)
+            .field("total_bytes", &self.total())
             .field("reported_bytes", &self.reported_bytes)
             .finish_non_exhaustive()
     }
@@ -189,7 +198,7 @@ impl<'a> ProgressReporter<'a> {
         sink: &'a dyn Fn(DownloadStatus),
     ) -> Self {
         Self {
-            total_bytes: total_bytes.filter(|bytes| *bytes > 0),
+            total_bytes: AtomicU64::new(total_bytes.unwrap_or(0)),
             completed_bytes: AtomicU64::new(0),
             reported_bytes: AtomicU64::new(0),
             fraction_bp: AtomicU32::new(0),
@@ -213,6 +222,42 @@ impl<'a> ProgressReporter<'a> {
     pub(crate) fn cancelled_error() -> SdkError {
         SdkError::Cancelled {
             message: "download cancelled by caller".to_string(),
+        }
+    }
+
+    /// The byte total, or `None` while it is unknown.
+    fn total(&self) -> Option<u64> {
+        Some(self.total_bytes.load(Ordering::Relaxed)).filter(|bytes| *bytes > 0)
+    }
+
+    /// Announce that a transfer is starting, before any response arrives.
+    ///
+    /// Connecting, following the redirect and waiting for headers can take
+    /// seconds on a slow link. Without this, nothing is emitted until the first
+    /// body bytes land, and a host cannot tell a download that is starting
+    /// from one that is stuck.
+    pub(crate) fn begin_transfer(&self) {
+        self.emit(true);
+    }
+
+    /// Adopt the size a server announced for the file about to transfer.
+    ///
+    /// Only for a single-file download, and only before any byte is counted.
+    /// There the server's size is the real one, which beats a registry entry
+    /// that declares none (`size_bytes = 0`) or a stale one. A multi-file
+    /// download keeps its declared sum, since one file's size says nothing
+    /// about the rest. And a total never moves once bytes are counted, so the
+    /// bar cannot rewind.
+    pub(crate) fn file_size_announced(&self, file_bytes: u64) {
+        if self.artifact_count != 1
+            || file_bytes == 0
+            || self.reported_bytes.load(Ordering::Relaxed) > 0
+        {
+            return;
+        }
+        if self.total_bytes.swap(file_bytes, Ordering::Relaxed) != file_bytes {
+            // Forced, so the host can show the size right away.
+            self.emit(true);
         }
     }
 
@@ -252,7 +297,7 @@ impl<'a> ProgressReporter<'a> {
     /// Face: completed files over total files). Ignored once `total_bytes` is
     /// known, where the byte count is strictly better.
     pub(crate) fn set_fraction(&self, fraction: f32) {
-        if self.total_bytes.is_some() {
+        if self.total().is_some() {
             return;
         }
         let bp = (fraction.clamp(0.0, 1.0) * 10_000.0) as u32;
@@ -264,7 +309,8 @@ impl<'a> ProgressReporter<'a> {
     /// Snapshot without emitting.
     pub(crate) fn snapshot(&self) -> DownloadStatus {
         let downloaded = self.reported_bytes.load(Ordering::Relaxed);
-        let progress = match self.total_bytes {
+        let total_bytes = self.total();
+        let progress = match total_bytes {
             Some(total) => {
                 let bp = ((downloaded as f64 / total as f64) * 10_000.0) as u32;
                 bp.min(MAX_IN_FLIGHT_PROGRESS_BP) as f32 / 10_000.0
@@ -275,7 +321,7 @@ impl<'a> ProgressReporter<'a> {
             state: DownloadState::Downloading,
             progress,
             downloaded_bytes: downloaded,
-            total_bytes: self.total_bytes,
+            total_bytes,
         }
     }
 
@@ -283,7 +329,7 @@ impl<'a> ProgressReporter<'a> {
     /// verified and extracted, and on a cache hit (nothing to transfer).
     pub(crate) fn finish(&self) {
         let downloaded = self.reported_bytes.load(Ordering::Relaxed);
-        (self.sink)(DownloadStatus::ready(downloaded, self.total_bytes));
+        (self.sink)(DownloadStatus::ready(downloaded, self.total()));
     }
 
     fn emit(&self, force: bool) {
@@ -732,6 +778,66 @@ mod tests {
         reporter.set_fraction(0.9);
         let last = *seen.lock().unwrap().last().unwrap();
         assert!((last.progress - 0.1).abs() < 1e-3, "got {}", last.progress);
+    }
+
+    #[test]
+    fn a_single_file_download_adopts_the_announced_size() {
+        // A registry entry with `size_bytes = 0` used to leave the bar at zero
+        // until the terminal frame. The server's announced size fills it in.
+        let (sink, seen) = recording_reporter();
+        let reporter = reporter_over_files(None, 1, &sink);
+        reporter.file_size_announced(1_000);
+        let announced = *seen
+            .lock()
+            .unwrap()
+            .last()
+            .expect("adopting a size must emit it");
+        assert_eq!(announced.total_bytes, Some(1_000));
+        assert_eq!(announced.downloaded_bytes, 0);
+
+        reporter.file_bytes(250);
+        let status = reporter.snapshot();
+        assert!(
+            (status.progress - 0.25).abs() < 1e-3,
+            "got {}",
+            status.progress
+        );
+    }
+
+    #[test]
+    fn an_announced_size_replaces_a_stale_declared_one() {
+        let (sink, _seen) = recording_reporter();
+        let reporter = reporter_over_files(Some(900), 1, &sink);
+        reporter.file_size_announced(1_000);
+        assert_eq!(reporter.snapshot().total_bytes, Some(1_000));
+    }
+
+    #[test]
+    fn an_announced_size_is_ignored_across_files_and_once_bytes_are_counted() {
+        // One file's size says nothing about a multi-file total.
+        let (sink, _seen) = recording_reporter();
+        let multi = reporter_over_files(None, 2, &sink);
+        multi.file_size_announced(1_000);
+        assert_eq!(multi.snapshot().total_bytes, None);
+
+        // A resumed retry announces again mid-download. Moving the total then
+        // would make the bar jump or rewind.
+        let single = reporter_over_files(Some(1_000), 1, &sink);
+        single.file_bytes(600);
+        single.file_size_announced(2_000);
+        assert_eq!(single.snapshot().total_bytes, Some(1_000));
+    }
+
+    #[test]
+    fn beginning_a_transfer_emits_a_zero_frame() {
+        let (sink, seen) = recording_reporter();
+        let reporter = reporter_over_files(None, 1, &sink);
+        reporter.begin_transfer();
+        let frames = seen.lock().unwrap().clone();
+        assert_eq!(frames.len(), 1);
+        assert_eq!(frames[0].state, DownloadState::Downloading);
+        assert_eq!(frames[0].downloaded_bytes, 0);
+        assert_eq!(frames[0].progress, 0.0);
     }
 
     #[test]

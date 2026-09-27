@@ -1835,6 +1835,132 @@ __boltffi_error:
     return;
 }
 
+JNIEXPORT jbyteArray JNICALL Java_ai_xybrid_Native_boltffi_1function_1xybrid_1bolt_1cache_1status(JNIEnv *env, jclass cls) {
+    (void)cls;
+
+    FfiBuf_u8 __boltffi_return = (FfiBuf_u8){0};
+
+    FfiBuf_u8 error = boltffi_function_xybrid_bolt_cache_status(&__boltffi_return);
+
+    if (error.ptr != NULL || error.len != 0) {
+        boltffi_jni_throw_error_buffer(env, error);
+        return NULL;
+    }
+
+    return boltffi_jni_buffer_to_byte_array(env, __boltffi_return);
+}
+
+JNIEXPORT jbyteArray JNICALL Java_ai_xybrid_Native_boltffi_1function_1xybrid_1bolt_1cache_1entries(JNIEnv *env, jclass cls) {
+    (void)cls;
+
+    FfiBuf_u8 __boltffi_return = (FfiBuf_u8){0};
+
+    FfiBuf_u8 error = boltffi_function_xybrid_bolt_cache_entries(&__boltffi_return);
+
+    if (error.ptr != NULL || error.len != 0) {
+        boltffi_jni_throw_error_buffer(env, error);
+        return NULL;
+    }
+
+    return boltffi_jni_buffer_to_byte_array(env, __boltffi_return);
+}
+
+JNIEXPORT jboolean JNICALL Java_ai_xybrid_Native_boltffi_1function_1xybrid_1bolt_1cache_1is_1model_1cached(JNIEnv *env, jclass cls, jobject model_id, jint __boltffi_model_id_len) {
+    (void)cls;
+
+    void *__boltffi_model_id_ptr = NULL;
+    bool __boltffi_return = (bool){0};
+
+    if (!boltffi_jni_direct_buffer_address(env, model_id, (jlong)__boltffi_model_id_len, &__boltffi_model_id_ptr)) {
+        goto __boltffi_error;
+    }
+
+    FfiBuf_u8 error = boltffi_function_xybrid_bolt_cache_is_model_cached((const uint8_t *)__boltffi_model_id_ptr, (uintptr_t)__boltffi_model_id_len, &__boltffi_return);
+
+    if (error.ptr != NULL || error.len != 0) {
+        boltffi_jni_throw_error_buffer(env, error);
+        return JNI_FALSE;
+    }
+
+    return (jboolean)__boltffi_return;
+__boltffi_error:
+    return JNI_FALSE;
+}
+
+JNIEXPORT jbyteArray JNICALL Java_ai_xybrid_Native_boltffi_1function_1xybrid_1bolt_1cache_1model_1path(JNIEnv *env, jclass cls, jobject model_id, jint __boltffi_model_id_len) {
+    (void)cls;
+
+    void *__boltffi_model_id_ptr = NULL;
+    FfiBuf_u8 __boltffi_return = (FfiBuf_u8){0};
+
+    if (!boltffi_jni_direct_buffer_address(env, model_id, (jlong)__boltffi_model_id_len, &__boltffi_model_id_ptr)) {
+        goto __boltffi_error;
+    }
+
+    FfiBuf_u8 error = boltffi_function_xybrid_bolt_cache_model_path((const uint8_t *)__boltffi_model_id_ptr, (uintptr_t)__boltffi_model_id_len, &__boltffi_return);
+
+    if (error.ptr != NULL || error.len != 0) {
+        boltffi_jni_throw_error_buffer(env, error);
+        return NULL;
+    }
+
+    return boltffi_jni_buffer_to_byte_array(env, __boltffi_return);
+__boltffi_error:
+    return NULL;
+}
+
+JNIEXPORT jbyteArray JNICALL Java_ai_xybrid_Native_boltffi_1function_1xybrid_1bolt_1cache_1list_1extracted_1model_1ids(JNIEnv *env, jclass cls) {
+    (void)cls;
+
+    FfiBuf_u8 __boltffi_return = (FfiBuf_u8){0};
+
+    FfiBuf_u8 error = boltffi_function_xybrid_bolt_cache_list_extracted_model_ids(&__boltffi_return);
+
+    if (error.ptr != NULL || error.len != 0) {
+        boltffi_jni_throw_error_buffer(env, error);
+        return NULL;
+    }
+
+    return boltffi_jni_buffer_to_byte_array(env, __boltffi_return);
+}
+
+JNIEXPORT jint JNICALL Java_ai_xybrid_Native_boltffi_1function_1xybrid_1bolt_1cache_1remove_1model(JNIEnv *env, jclass cls, jobject model_id, jint __boltffi_model_id_len) {
+    (void)cls;
+
+    void *__boltffi_model_id_ptr = NULL;
+    uint32_t __boltffi_return = (uint32_t){0};
+
+    if (!boltffi_jni_direct_buffer_address(env, model_id, (jlong)__boltffi_model_id_len, &__boltffi_model_id_ptr)) {
+        goto __boltffi_error;
+    }
+
+    FfiBuf_u8 error = boltffi_function_xybrid_bolt_cache_remove_model((const uint8_t *)__boltffi_model_id_ptr, (uintptr_t)__boltffi_model_id_len, &__boltffi_return);
+
+    if (error.ptr != NULL || error.len != 0) {
+        boltffi_jni_throw_error_buffer(env, error);
+        return 0;
+    }
+
+    return (jint)__boltffi_return;
+__boltffi_error:
+    return 0;
+}
+
+JNIEXPORT jint JNICALL Java_ai_xybrid_Native_boltffi_1function_1xybrid_1bolt_1cache_1clear(JNIEnv *env, jclass cls) {
+    (void)cls;
+
+    uint32_t __boltffi_return = (uint32_t){0};
+
+    FfiBuf_u8 error = boltffi_function_xybrid_bolt_cache_clear(&__boltffi_return);
+
+    if (error.ptr != NULL || error.len != 0) {
+        boltffi_jni_throw_error_buffer(env, error);
+        return 0;
+    }
+
+    return (jint)__boltffi_return;
+}
+
 JNIEXPORT void JNICALL Java_ai_xybrid_Native_boltffi_1function_1xybrid_1bolt_1set_1binding(JNIEnv *env, jclass cls, jobject binding, jint __boltffi_binding_len) {
     (void)cls;
 
