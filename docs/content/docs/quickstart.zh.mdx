@@ -5,14 +5,14 @@ description: 几分钟内开始使用 Xybrid
 
 只需几行代码即可在您的应用中运行 Xybrid。选择下方的 SDK 开始。
 
-<Tabs items={['Flutter', 'Swift', 'Kotlin', 'Unity', 'Web', 'Rust', 'CLI']}>
+<Tabs items={['Flutter', 'Swift', 'Kotlin', 'React Native', 'Unity', 'Web', 'Rust', 'CLI']}>
   <Tab value="Flutter">
 **安装**
 
 ```yaml
 # pubspec.yaml
 dependencies:
-  xybrid_flutter: ^0.6.0
+  xybrid_flutter: ^0.10.1
 ```
 
 ```bash
@@ -54,7 +54,7 @@ https://github.com/xybrid-ai/xybrid
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/xybrid-ai/xybrid", from: "0.6.0")
+    .package(url: "https://github.com/xybrid-ai/xybrid", from: "0.10.1")
 ]
 ```
 
@@ -85,7 +85,7 @@ let result = try await model.runAsync(envelope: envelope)
 ```kotlin
 // build.gradle.kts
 dependencies {
-    implementation("ai.xybrid:xybrid-kotlin:0.6.0")
+    implementation("ai.xybrid:xybrid-kotlin:0.10.1")
 }
 ```
 
@@ -110,6 +110,32 @@ val result = model.runAsync(envelope)
 
 **预期输出：** `result.success == true`，音频字节在 `result.audioBytes` 中。
   </Tab>
+  <Tab value="React Native">
+**安装**：React Native 0.76+ 应用需启用新架构；Expo SDK 52+ 需使用开发构建。
+
+```bash
+npm install @xybrid/react-native@0.10.1
+```
+
+原生 React Native 应用运行 `cd ios && pod install`；Expo 应用运行 `npx expo prebuild`。Expo Go 无法加载该原生模块。
+
+**运行推理**
+
+```ts
+import { Envelope, GenerationConfigs, ModelLoader } from '@xybrid/react-native';
+
+const model = await ModelLoader.fromRegistry('lfm2.5-230m').load();
+const result = await model.run(Envelope.text('Name three rivers.'), {
+  generationConfig: GenerationConfigs.greedy({ maxTokens: 64 }),
+});
+console.log(result.text);
+await model.release();
+```
+
+**预期输出：** 设备上生成的可读文本。iOS 模拟器上的 llama.cpp 使用 CPU；实体 iOS 设备使用 Metal。
+
+流式输出、取消等功能请参阅 [React Native 指南](/en/docs/sdks/react-native)。
+  </Tab>
   <Tab value="Unity">
 **安装**
 
@@ -119,7 +145,7 @@ val result = model.runAsync(envelope)
 https://github.com/xybrid-ai/xybrid.git?path=/bindings/unity
 ```
 
-或通过 [OpenUPM](https://openupm.com/packages/ai.xybrid.sdk/) 安装：`openupm add ai.xybrid.sdk`。原生库在首次导入时自动下载（经 SHA-256 校验）；如需固定版本，在 git URL 后追加 `#v0.6.0`。
+或通过 [OpenUPM](https://openupm.com/packages/ai.xybrid.sdk/) 安装：`openupm add ai.xybrid.sdk`。原生库在首次导入时自动下载（经 SHA-256 校验）；如需固定版本，在 git URL 后追加 `#v0.10.1`。
 
 **运行推理**
 
@@ -190,7 +216,7 @@ const llm = await XybridLlm.fromHuggingFace("litert-community/SmolLM2-135M-Instr
 ```toml
 # Cargo.toml
 [dependencies]
-xybrid = "0.6.0"
+xybrid = "0.10.1"
 ```
 
 **运行推理**

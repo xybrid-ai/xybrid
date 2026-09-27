@@ -5,14 +5,14 @@ description: Get up and running with Xybrid in minutes
 
 Get Xybrid running in your app with a few lines of code. Choose your SDK below.
 
-<Tabs items={['Flutter', 'Swift', 'Kotlin', 'Unity', 'Web', 'Rust', 'CLI']}>
+<Tabs items={['Flutter', 'Swift', 'Kotlin', 'React Native', 'Unity', 'Web', 'Rust', 'CLI']}>
   <Tab value="Flutter">
 **Install**
 
 ```yaml
 # pubspec.yaml
 dependencies:
-  xybrid_flutter: ^0.6.0
+  xybrid_flutter: ^0.10.1
 ```
 
 ```bash
@@ -54,7 +54,7 @@ Or add to `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/xybrid-ai/xybrid", from: "0.6.0")
+    .package(url: "https://github.com/xybrid-ai/xybrid", from: "0.10.1")
 ]
 ```
 
@@ -85,7 +85,7 @@ let result = try await model.runAsync(envelope: envelope)
 ```kotlin
 // build.gradle.kts
 dependencies {
-    implementation("ai.xybrid:xybrid-kotlin:0.6.0")
+    implementation("ai.xybrid:xybrid-kotlin:0.10.1")
 }
 ```
 
@@ -110,6 +110,32 @@ val result = model.runAsync(envelope)
 
 **Expected output:** `result.success == true` with audio bytes in `result.audioBytes`.
   </Tab>
+  <Tab value="React Native">
+**Install** in a React Native 0.76+ app with the New Architecture, or an Expo SDK 52+ development build:
+
+```bash
+npm install @xybrid/react-native@0.10.1
+```
+
+For bare React Native, run `cd ios && pod install`. For Expo, run `npx expo prebuild`; Expo Go cannot load the native module.
+
+**Run inference**
+
+```ts
+import { Envelope, GenerationConfigs, ModelLoader } from '@xybrid/react-native';
+
+const model = await ModelLoader.fromRegistry('lfm2.5-230m').load();
+const result = await model.run(Envelope.text('Name three rivers.'), {
+  generationConfig: GenerationConfigs.greedy({ maxTokens: 64 }),
+});
+console.log(result.text);
+await model.release();
+```
+
+**Expected output:** Readable text generated on the device. The iOS Simulator uses the CPU for llama.cpp inference; physical iOS devices use Metal.
+
+See the [React Native guide](/docs/sdks/react-native) for streaming, cancellation, and more.
+  </Tab>
   <Tab value="Unity">
 **Install**
 
@@ -119,7 +145,7 @@ In Unity, go to **Window > Package Manager > + > Add package from git URL** and 
 https://github.com/xybrid-ai/xybrid.git?path=/bindings/unity
 ```
 
-Or via [OpenUPM](https://openupm.com/packages/ai.xybrid.sdk/): `openupm add ai.xybrid.sdk`. Native libraries download automatically on first import (SHA-256 verified); pin a version by appending `#v0.6.0` to the git URL.
+Or via [OpenUPM](https://openupm.com/packages/ai.xybrid.sdk/): `openupm add ai.xybrid.sdk`. Native libraries download automatically on first import (SHA-256 verified); pin a version by appending `#v0.10.1` to the git URL.
 
 **Run inference**
 
@@ -191,7 +217,7 @@ See the [Web SDK guide](/docs/sdks/web) for the tensor surface, registry loading
 ```toml
 # Cargo.toml
 [dependencies]
-xybrid = "0.6.0"
+xybrid = "0.10.1"
 ```
 
 **Run inference**

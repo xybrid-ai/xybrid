@@ -13,6 +13,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.10.1] - 2026-09-27
+
+### Fixed
+
+- **Readable llama.cpp output on the iOS Simulator.** Simulator builds now run
+  llama.cpp inference on the CPU. This fixes the invalid special-token output
+  observed in fresh Expo and bare React Native apps with 0.10.0. Physical iOS
+  devices continue to use Metal. The fix was verified with local XCFramework
+  builds in both Expo and bare React Native apps on an iPhone 17 Pro simulator.
+
+---
+
 ## [0.10.0] - 2026-09-26
 
 This is the stable release of the React Native, model-cache, pipeline, live

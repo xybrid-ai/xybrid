@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.10.1
+
+* Fixed: llama.cpp inference on the iOS Simulator uses the CPU to avoid
+  invalid special-token output. Physical iOS devices continue to use Metal.
+
 ## 0.10.0
 
 Stable release of the Dart changes in 0.10.0-rc1, including model-cache
