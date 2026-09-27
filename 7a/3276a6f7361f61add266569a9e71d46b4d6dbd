@@ -1,0 +1,23 @@
+.github/workflows/release-publish.yml
+  s_3fa520519b0cb5::t_e430543879bf62 478-479
+  s_3fa520519b0cb5::t_b6518b42c95579 476-477,504,534,547
+bindings/react-native/RELEASING.md
+  s_3fa520519b0cb5::t_e430543879bf62 67
+  s_3fa520519b0cb5::t_b6518b42c95579 31-32,34,50-64
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "7a3276a6f7361f61add266569a9e71d46b4d6dbd",
+  "prompts": {},
+  "sessions": {
+    "s_3fa520519b0cb5": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0dc32-340b-7570-b4c7-855b4fa43e25",
+        "model": "gpt-6-sol"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
