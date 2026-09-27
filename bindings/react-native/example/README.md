@@ -73,8 +73,8 @@ EXPO_PUBLIC_XYBRID_SMOKE_MODEL=/data/user/0/com.anonymous.example/files/smoke/lf
 
 - Watch the logs with `adb logcat -s ReactNativeJS` (Android) or the Metro
   terminal.
-- LLM output on the **iOS Simulator** is garbage today: llama.cpp offloads to
-  Metal, which the simulator does not support. Use a device, or Android.
+- LLM inference on the **iOS Simulator** uses the CPU. Physical iOS devices
+  still use Metal acceleration.
 - `metro.config.js` pins `react` and `react-native` to this app's copies, so a
   `node_modules` in `bindings/react-native` can never put a second React
   Native in the bundle.
