@@ -134,6 +134,15 @@ enum Commands {
         /// Target platform (auto-detected if not specified)
         #[arg(short, long, value_name = "PLATFORM")]
         platform: Option<String>,
+
+        /// Local generation or embedding backend override for registry artifact selection
+        #[arg(
+            long,
+            value_name = "BACKEND",
+            conflicts_with = "huggingface",
+            long_help = "Local generation or embedding backend override for registry artifact selection.\n\nValues: auto|mlx|llamacpp|mistral.\n\nMLX requires Apple Silicon macOS with the llm-mlx-runtime build enabled.\n\nExample: xybrid run --model qwen3-4b --backend mlx"
+        )]
+        backend: Option<String>,
     },
     /// Manage the local model cache
     Cache {
@@ -205,6 +214,14 @@ enum Commands {
         #[arg(long, value_name = "TARGET")]
         target: Option<String>,
 
+        /// Local generation or embedding backend override
+        #[arg(
+            long,
+            value_name = "BACKEND",
+            long_help = "Local generation or embedding backend override.\n\nValues: auto|mlx|llamacpp|mistral.\n\nMLX requires Apple Silicon macOS with the llm-mlx-runtime build enabled.\n\nExample: xybrid run --model qwen3-4b --backend mlx"
+        )]
+        backend: Option<String>,
+
         /// Enable detailed execution tracing with flame graph output
         #[arg(long, default_value = "false")]
         trace: bool,
@@ -256,6 +273,14 @@ enum Commands {
         /// Execution target for REPL inference (auto, local/device, cloud, server)
         #[arg(long, value_name = "TARGET")]
         target: Option<String>,
+
+        /// Local generation or embedding backend override
+        #[arg(
+            long,
+            value_name = "BACKEND",
+            long_help = "Local generation or embedding backend override.\n\nValues: auto|mlx|llamacpp|mistral.\n\nMLX requires Apple Silicon macOS with the llm-mlx-runtime build enabled.\n\nExample: xybrid run --model qwen3-4b --backend mlx"
+        )]
+        backend: Option<String>,
 
         /// Stream tokens as they are generated (LLM models only)
         #[arg(long)]
@@ -532,11 +557,20 @@ fn run_command(cli: Cli) -> Result<()> {
             model,
             huggingface,
             platform,
+            backend,
         } => {
             if let Some(config_path) = config {
-                commands::fetch::handle_fetch_pipeline_command(&config_path, platform.as_deref())
+                commands::fetch::handle_fetch_pipeline_command(
+                    &config_path,
+                    platform.as_deref(),
+                    backend.as_deref(),
+                )
             } else if let Some(model_id) = model {
-                commands::fetch::handle_fetch_command(&model_id, platform.as_deref())
+                commands::fetch::handle_fetch_command(
+                    &model_id,
+                    platform.as_deref(),
+                    backend.as_deref(),
+                )
             } else if let Some(repo) = huggingface {
                 commands::fetch::handle_fetch_huggingface_command(&repo)
             } else {
@@ -562,6 +596,7 @@ fn run_command(cli: Cli) -> Result<()> {
             voice,
             output,
             target,
+            backend,
             trace,
             show_reasoning,
             max_tokens,
@@ -581,6 +616,7 @@ fn run_command(cli: Cli) -> Result<()> {
                     voice.as_deref(),
                     output.as_ref(),
                     dry_run,
+                    backend.as_deref(),
                     trace,
                     show_reasoning,
                     max_tokens,
@@ -617,6 +653,7 @@ fn run_command(cli: Cli) -> Result<()> {
                     voice.as_deref(),
                     output.as_ref(),
                     target.as_deref(),
+                    backend.as_deref(),
                     dry_run,
                     trace,
                     show_reasoning,
@@ -633,6 +670,7 @@ fn run_command(cli: Cli) -> Result<()> {
                     &input_images,
                     voice.as_deref(),
                     output.as_ref(),
+                    backend.as_deref(),
                     dry_run,
                     trace,
                     show_reasoning,
@@ -649,6 +687,7 @@ fn run_command(cli: Cli) -> Result<()> {
                     &input_images,
                     voice.as_deref(),
                     output.as_ref(),
+                    backend.as_deref(),
                     dry_run,
                     trace,
                     show_reasoning,
@@ -665,6 +704,7 @@ fn run_command(cli: Cli) -> Result<()> {
                     &input_images,
                     voice.as_deref(),
                     output.as_ref(),
+                    backend.as_deref(),
                     dry_run,
                     trace,
                     show_reasoning,
@@ -684,6 +724,7 @@ fn run_command(cli: Cli) -> Result<()> {
                 voice.as_deref(),
                 output.as_ref(),
                 target.as_deref(),
+                backend.as_deref(),
                 trace,
                 show_reasoning,
                 max_tokens,
@@ -697,6 +738,7 @@ fn run_command(cli: Cli) -> Result<()> {
             huggingface,
             voice,
             target,
+            backend,
             stream,
             show_reasoning,
             max_tokens,
@@ -711,6 +753,7 @@ fn run_command(cli: Cli) -> Result<()> {
             huggingface,
             voice,
             target,
+            backend,
             stream,
             show_reasoning,
             max_tokens,
@@ -803,6 +846,79 @@ fn resolve_config_path(config: Option<PathBuf>, pipeline: Option<String>) -> Res
 #[cfg(test)]
 mod tests {
     use super::*;
+    use clap::{CommandFactory, Parser};
+
+    #[test]
+    fn run_accepts_backend_override_flag() {
+        let cli = Cli::try_parse_from([
+            "xybrid",
+            "run",
+            "--directory",
+            "/tmp/model",
+            "--backend",
+            "mlx",
+        ])
+        .unwrap();
+
+        match cli.command {
+            Commands::Run { backend, .. } => assert_eq!(backend.as_deref(), Some("mlx")),
+            _ => panic!("expected run command"),
+        }
+    }
+
+    #[test]
+    fn fetch_accepts_backend_override_flag() {
+        let cli =
+            Cli::try_parse_from(["xybrid", "fetch", "--model", "test-llm", "--backend", "mlx"])
+                .unwrap();
+
+        match cli.command {
+            Commands::Fetch { backend, .. } => assert_eq!(backend.as_deref(), Some("mlx")),
+            _ => panic!("expected fetch command"),
+        }
+    }
+
+    #[test]
+    fn repl_accepts_backend_override_flag() {
+        let cli =
+            Cli::try_parse_from(["xybrid", "repl", "--model", "test-llm", "--backend", "mlx"])
+                .unwrap();
+
+        match cli.command {
+            Commands::Repl { backend, .. } => assert_eq!(backend.as_deref(), Some("mlx")),
+            _ => panic!("expected repl command"),
+        }
+    }
+
+    #[test]
+    fn models_list_accepts_backend_filter() {
+        let cli = Cli::try_parse_from(["xybrid", "models", "list", "--backend", "mlx"]).unwrap();
+
+        match cli.command {
+            Commands::Models {
+                command: ModelsCommand::List { backend },
+            } => assert_eq!(backend.as_deref(), Some("mlx")),
+            _ => panic!("expected models list command"),
+        }
+    }
+
+    #[test]
+    fn backend_long_help_documents_mlx_requirements() {
+        let mut cmd = Cli::command();
+        let help = cmd
+            .find_subcommand_mut("run")
+            .expect("run subcommand exists")
+            .render_long_help()
+            .to_string();
+
+        assert!(help.contains("auto|mlx|llamacpp|mistral"), "{help}");
+        assert!(help.contains("Apple Silicon macOS"), "{help}");
+        assert!(help.contains("llm-mlx-runtime"), "{help}");
+        assert!(
+            help.contains("xybrid run --model qwen3-4b --backend mlx"),
+            "{help}"
+        );
+    }
 
     #[test]
     fn every_subcommand_parses_without_arg_collisions() {
@@ -810,7 +926,6 @@ mod tests {
         // global `-v/--verbose`) when the subcommand's arg set is built —
         // exercise each one so a collision fails here instead of panicking
         // at run time.
-        use clap::CommandFactory;
         Cli::command().debug_assert();
     }
 

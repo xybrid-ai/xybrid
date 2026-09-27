@@ -992,9 +992,15 @@ fn build_metadata(
             all_files,
             cache_dir,
         ),
-        ModelFormat::SafeTensors => {
-            build_safetensors_metadata(model_id, model_id, primary, &task, card, model_files)
-        }
+        ModelFormat::SafeTensors => build_safetensors_metadata(
+            model_id,
+            model_id,
+            primary,
+            &task,
+            card,
+            supporting_files,
+            model_files,
+        ),
         ModelFormat::TfLite => build_uninspected_metadata(
             model_id,
             primary,
@@ -1048,6 +1054,7 @@ fn build_uninspected_metadata(
         files: vec![primary.filename.clone()],
         vision_encoder: None,
         description: Some(description),
+        backend: None,
         metadata: metadata_map,
         voices: None,
         max_chunk_chars: None,
@@ -1131,6 +1138,7 @@ fn build_gguf_metadata(
         files: vec![primary.filename.clone()],
         vision_encoder: None,
         description: Some(description),
+        backend: None,
         metadata: metadata_map,
         voices: None,
         max_chunk_chars: None,
@@ -1226,6 +1234,7 @@ fn build_qwen3vl_metadata(
             patch_size: Some(patch_size),
         }),
         description: Some(format!("{} (auto-generated Qwen3VL GGUF)", model_id)),
+        backend: None,
         metadata,
         voices: None,
         max_chunk_chars: None,
@@ -1245,7 +1254,7 @@ fn build_onnx_metadata(
     all_files: &[String],
     cache_dir: &Path,
 ) -> ModelMetadata {
-    use xybrid_core::execution::template::TokenizerType;
+    use xybrid_core::execution::template::{TokenizerBackend, TokenizerType};
     use xybrid_core::execution::{PostprocessingStep, PreprocessingStep};
 
     // Use task inference results when available (they incorporate supporting file info)
@@ -1295,6 +1304,7 @@ fn build_onnx_metadata(
                     vocab_file: tokenizer_file.to_string(),
                     tokenizer_type: TokenizerType::WordPiece,
                     max_length: supporting_files.max_position_embeddings.map(|v| v as usize),
+                    backend: TokenizerBackend::HuggingFace,
                 });
                 postprocessing.push(PostprocessingStep::Argmax { dim: None });
             }
@@ -1303,6 +1313,7 @@ fn build_onnx_metadata(
                     vocab_file: tokenizer_file.to_string(),
                     tokenizer_type: TokenizerType::WordPiece,
                     max_length: supporting_files.max_position_embeddings.map(|v| v as usize),
+                    backend: TokenizerBackend::HuggingFace,
                 });
                 postprocessing.push(PostprocessingStep::Argmax { dim: None });
             }
@@ -1325,6 +1336,7 @@ fn build_onnx_metadata(
                     vocab_file: tokenizer_file.to_string(),
                     tokenizer_type: TokenizerType::WordPiece,
                     max_length: supporting_files.max_position_embeddings.map(|v| v as usize),
+                    backend: TokenizerBackend::HuggingFace,
                 });
             }
             _ => {
@@ -1407,6 +1419,7 @@ fn build_onnx_metadata(
         files,
         vision_encoder: None,
         description: Some(description),
+        backend: None,
         metadata: metadata_map,
         voices: None,
         max_chunk_chars: None,
@@ -1420,6 +1433,7 @@ fn build_safetensors_metadata(
     primary: &ModelFileInfo,
     task: &str,
     card: Option<&HfModelCard>,
+    supporting_files: &SupportingFileInfo,
     all_files: &[ModelFileInfo],
 ) -> ModelMetadata {
     let mut files: Vec<String> = vec![primary.filename.clone()];
@@ -1430,24 +1444,7 @@ fn build_safetensors_metadata(
         }
     }
 
-    let architecture = card
-        .and_then(|c| {
-            c.tags.iter().find(|t| {
-                matches!(
-                    t.as_str(),
-                    "whisper"
-                        | "llama"
-                        | "gpt2"
-                        | "bert"
-                        | "t5"
-                        | "mistral"
-                        | "phi"
-                        | "gemma"
-                        | "qwen"
-                )
-            })
-        })
-        .cloned();
+    let architecture = safetensors_architecture(card, supporting_files);
 
     let mut metadata_map = HashMap::new();
     metadata_map.insert(
@@ -1478,10 +1475,50 @@ fn build_safetensors_metadata(
         files,
         vision_encoder: None,
         description: Some(description),
+        backend: None,
         metadata: metadata_map,
         voices: None,
         max_chunk_chars: None,
         trim_trailing_samples: None,
+    }
+}
+
+fn safetensors_architecture(
+    card: Option<&HfModelCard>,
+    supporting_files: &SupportingFileInfo,
+) -> Option<String> {
+    supporting_files
+        .model_type
+        .as_deref()
+        .and_then(normalize_safetensors_architecture)
+        .map(str::to_string)
+        .or_else(|| {
+            card.and_then(|c| {
+                c.tags
+                    .iter()
+                    .find_map(|tag| normalize_safetensors_architecture(tag).map(str::to_string))
+            })
+        })
+}
+
+fn normalize_safetensors_architecture(raw: &str) -> Option<&'static str> {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "whisper" => Some("whisper"),
+        "llama" => Some("llama"),
+        "gpt2" => Some("gpt2"),
+        "bert" => Some("bert"),
+        "nomic_bert" | "nomic-bert" => Some("nomic_bert"),
+        "t5" => Some("t5"),
+        "mistral" => Some("mistral"),
+        "phi" => Some("phi"),
+        "gemma" => Some("gemma"),
+        "gemma4" => Some("gemma4"),
+        "qwen" => Some("qwen"),
+        "qwen3" => Some("qwen3"),
+        "lfm2" => Some("lfm2"),
+        "lfm" => Some("lfm"),
+        "lfm3" => Some("lfm3"),
+        _ => None,
     }
 }
 
@@ -1686,6 +1723,7 @@ fn infer_from_pipeline_tag(
     image_std: &[f32],
     files: &SupportingFileInfo,
 ) -> Option<TaskInference> {
+    use xybrid_core::execution::template::TokenizerBackend;
     use xybrid_core::execution::{PostprocessingStep, PreprocessingStep};
 
     let inf = match tag {
@@ -1731,6 +1769,7 @@ fn infer_from_pipeline_tag(
                 vocab_file: tokenizer_file.to_string(),
                 tokenizer_type,
                 max_length,
+                backend: TokenizerBackend::HuggingFace,
             }],
             postprocessing: vec![PostprocessingStep::Softmax { dim: None }],
             confidence: Confidence::High,
@@ -1742,6 +1781,7 @@ fn infer_from_pipeline_tag(
                 vocab_file: tokenizer_file.to_string(),
                 tokenizer_type,
                 max_length,
+                backend: TokenizerBackend::HuggingFace,
             }],
             postprocessing: vec![PostprocessingStep::Argmax { dim: None }],
             confidence: Confidence::High,
@@ -1763,6 +1803,7 @@ fn infer_from_pipeline_tag(
                 vocab_file: tokenizer_file.to_string(),
                 tokenizer_type,
                 max_length,
+                backend: TokenizerBackend::HuggingFace,
             }],
             postprocessing: vec![PostprocessingStep::MeanPool { dim: 1 }],
             confidence: Confidence::High,
@@ -1782,12 +1823,14 @@ fn infer_nlp_task_from_outputs(
     max_length: Option<usize>,
     files: &SupportingFileInfo,
 ) -> TaskInference {
+    use xybrid_core::execution::template::TokenizerBackend;
     use xybrid_core::execution::{PostprocessingStep, PreprocessingStep};
 
     let tokenize_step = PreprocessingStep::Tokenize {
         vocab_file: tokenizer_file.to_string(),
         tokenizer_type: tokenizer_type.clone(),
         max_length,
+        backend: TokenizerBackend::HuggingFace,
     };
 
     // Analyze output shapes
@@ -1876,6 +1919,7 @@ fn infer_from_output_shapes(
     image_std: &[f32],
     _files: &SupportingFileInfo,
 ) -> TaskInference {
+    use xybrid_core::execution::template::TokenizerBackend;
     use xybrid_core::execution::{PostprocessingStep, PreprocessingStep};
 
     if let Some(output) = onnx.outputs.first() {
@@ -1910,6 +1954,7 @@ fn infer_from_output_shapes(
                         vocab_file: tokenizer_file.to_string(),
                         tokenizer_type,
                         max_length,
+                        backend: TokenizerBackend::HuggingFace,
                     }],
                     postprocessing: vec![PostprocessingStep::Softmax { dim: None }],
                     confidence: Confidence::Low,
@@ -1963,7 +2008,7 @@ fn infer_steps_from_onnx(
     files: &mut Vec<String>,
     tokenizer_file: &str,
 ) {
-    use xybrid_core::execution::template::TokenizerType;
+    use xybrid_core::execution::template::{TokenizerBackend, TokenizerType};
     use xybrid_core::execution::{PostprocessingStep, PreprocessingStep};
 
     let input_names: Vec<&str> = info.inputs.iter().map(|i| i.name.as_str()).collect();
@@ -1978,6 +2023,7 @@ fn infer_steps_from_onnx(
             vocab_file: tokenizer_file.to_string(),
             tokenizer_type: TokenizerType::WordPiece,
             max_length: Some(512),
+            backend: TokenizerBackend::HuggingFace,
         });
         files.push(tokenizer_file.to_string());
     }
@@ -2868,6 +2914,7 @@ mod tests {
             vocab_file,
             tokenizer_type,
             max_length,
+            ..
         } = &result.preprocessing[0]
         {
             assert_eq!(vocab_file, "tokenizer.json");
@@ -2970,6 +3017,50 @@ mod tests {
         assert!(!metadata.files.contains(&".gitkeep".to_string()));
         // model_metadata.json itself should also be excluded
         assert!(!metadata.files.contains(&"model_metadata.json".to_string()));
+    }
+
+    #[test]
+    fn test_generate_safetensors_metadata_uses_config_model_type() {
+        let dir = TempDir::new().unwrap();
+
+        std::fs::write(dir.path().join("model.safetensors"), b"dummy safetensors").unwrap();
+        std::fs::write(
+            dir.path().join("config.json"),
+            serde_json::json!({ "model_type": "gemma4" }).to_string(),
+        )
+        .unwrap();
+
+        let (metadata, _) =
+            generate_metadata(dir.path(), "mlx-community/gemma-4-e2b-4bit").unwrap();
+
+        match metadata.execution_template {
+            xybrid_core::execution::ExecutionTemplate::SafeTensors { architecture, .. } => {
+                assert_eq!(architecture.as_deref(), Some("gemma4"));
+            }
+            other => panic!("expected SafeTensors metadata, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_generate_safetensors_metadata_recognizes_mlx_tags() {
+        let dir = TempDir::new().unwrap();
+
+        std::fs::write(dir.path().join("model.safetensors"), b"dummy safetensors").unwrap();
+        std::fs::write(
+            dir.path().join("README.md"),
+            "---\npipeline_tag: any-to-any\ntags:\n  - mlx\n  - safetensors\n  - gemma4\n---\n# Gemma 4\n",
+        )
+        .unwrap();
+
+        let (metadata, _) =
+            generate_metadata(dir.path(), "mlx-community/gemma-4-e2b-4bit").unwrap();
+
+        match metadata.execution_template {
+            xybrid_core::execution::ExecutionTemplate::SafeTensors { architecture, .. } => {
+                assert_eq!(architecture.as_deref(), Some("gemma4"));
+            }
+            other => panic!("expected SafeTensors metadata, got {other:?}"),
+        }
     }
 
     #[test]

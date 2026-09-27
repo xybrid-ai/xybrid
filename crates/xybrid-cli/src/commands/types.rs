@@ -6,7 +6,11 @@ use clap::Subcommand;
 #[derive(Subcommand)]
 pub(crate) enum ModelsCommand {
     /// List all available models in the registry
-    List,
+    List {
+        /// Filter variants by local backend compatibility (auto|mlx|llamacpp|mistral)
+        #[arg(long, value_name = "BACKEND")]
+        backend: Option<String>,
+    },
     /// Search for models by name or task
     Search {
         /// Search query (matches model ID, family, task, or description)

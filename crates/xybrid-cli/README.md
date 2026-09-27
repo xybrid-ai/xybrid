@@ -25,6 +25,14 @@ cargo install --git https://github.com/xybrid-ai/xybrid xybrid-cli --features pl
 cargo install --git https://github.com/xybrid-ai/xybrid xybrid-cli --features platform-macos,llm-llamacpp-vision
 ```
 
+`platform-macos` includes MLX registry/metadata support but not the linked MLX
+runtime. To run MLX SafeTensors models on Apple Silicon, build with
+`--features platform-macos,llm-mlx-runtime` from a local clone after running
+`./tools/scripts/fetch-mlx-xcframework.sh` when the pinned download is
+available or `./tools/scripts/build-local-mlx-xcframework.sh` for source-build
+validation. In external build environments, set `MLX_XCFRAMEWORK_PATH` to a
+prebuilt `mlx.xcframework`.
+
 ## Quick Start
 
 ```bash
@@ -42,6 +50,9 @@ xybrid repl --model smollm2-360m --stream
 
 # Vision-language prompt (requires a vision-capable build and model)
 xybrid run --model lfm2-vl-450m --input-text "Describe this image" --input-image photo.jpg
+
+# Chat through a specific local backend when available
+xybrid repl --model qwen3-4b --backend mlx --stream
 
 # Run any GGUF from HuggingFace
 xybrid run --huggingface "unsloth/SmolLM2-360M-Instruct-GGUF:Q4_K_M" --input-text "Hello!"

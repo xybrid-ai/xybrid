@@ -113,6 +113,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         EnvelopeKind::Image { .. } | EnvelopeKind::MultiPart(_) => {
             println!("🖼️  Vision output (unexpected for sentence embedding model)");
         }
+        EnvelopeKind::TokenIds(ids) => {
+            println!(
+                "🔢 Token ID output (unexpected for sentence embedding model): {} ids",
+                ids.len()
+            );
+        }
     }
 
     println!();

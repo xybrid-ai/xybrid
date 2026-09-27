@@ -3225,6 +3225,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "mlx-c-sys"
+version = "0.10.0-rc1"
+dependencies = [
+ "bindgen",
+]
+
+[[package]]
 name = "monostate"
 version = "0.1.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6302,14 +6309,17 @@ dependencies = [
  "dialoguer",
  "dirs",
  "hostname",
+ "httpmock",
  "image 0.25.10",
  "indicatif 0.17.11",
  "lazy_static",
+ "safetensors",
  "serde",
  "serde_json",
  "serde_yaml",
  "sha2",
  "tempfile",
+ "tokenizers",
  "tracing",
  "tracing-flame",
  "tracing-subscriber",
@@ -6384,6 +6394,7 @@ dependencies = [
  "windows-sys 0.59.0",
  "xybrid-llama",
  "xybrid-llama-sys",
+ "xybrid-mlx",
  "xybrid-whisper",
  "yuvutils-rs",
  "zstd",
@@ -6433,6 +6444,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "xybrid-mlx"
+version = "0.10.0-rc1"
+dependencies = [
+ "metal 0.29.0",
+ "mlx-c-sys",
+ "thiserror 1.0.69",
+ "tracing",
+]
+
+[[package]]
 name = "xybrid-sdk"
 version = "0.10.0"
 dependencies = [
@@ -6444,12 +6465,14 @@ dependencies = [
  "log",
  "ort",
  "rustls",
+ "safetensors",
  "serde",
  "serde_json",
  "serde_yaml",
  "sha2",
  "tempfile",
  "thiserror 1.0.69",
+ "tokenizers",
  "tokio",
  "tokio-stream",
  "ureq 2.12.1",

@@ -324,6 +324,9 @@ pub enum EnvelopeKind {
     Embedding {
         values: Vec<f32>,
     },
+    TokenIds {
+        ids: Vec<i64>,
+    },
     /// Encoded image input (PNG/JPEG/WebP) for vision-capable models. The
     /// bytes are decode-validated and the dimensions derived when this is
     /// lowered to the SDK in [`Envelope::into_sdk`] — so construction is
@@ -367,6 +370,13 @@ impl Envelope {
     pub fn embedding(values: Vec<f32>) -> Self {
         Self {
             kind: EnvelopeKind::Embedding { values },
+            metadata: HashMap::new(),
+        }
+    }
+
+    pub fn token_ids(ids: Vec<i64>) -> Self {
+        Self {
+            kind: EnvelopeKind::TokenIds { ids },
             metadata: HashMap::new(),
         }
     }
@@ -490,6 +500,7 @@ impl Envelope {
             EnvelopeKind::Text { text } => sdk::ir::EnvelopeKind::Text(text),
             EnvelopeKind::Audio { bytes } => sdk::ir::EnvelopeKind::Audio(bytes),
             EnvelopeKind::Embedding { values } => sdk::ir::EnvelopeKind::Embedding(values),
+            EnvelopeKind::TokenIds { ids } => sdk::ir::EnvelopeKind::TokenIds(ids),
             EnvelopeKind::Image { bytes, format } => {
                 // Decode-validates the bytes and derives dimensions, then carry
                 // this envelope's metadata onto the validated kind via
@@ -514,6 +525,7 @@ impl Envelope {
             sdk::ir::EnvelopeKind::Text(text) => EnvelopeKind::Text { text },
             sdk::ir::EnvelopeKind::Audio(bytes) => EnvelopeKind::Audio { bytes },
             sdk::ir::EnvelopeKind::Embedding(values) => EnvelopeKind::Embedding { values },
+            sdk::ir::EnvelopeKind::TokenIds(ids) => EnvelopeKind::TokenIds { ids },
             sdk::ir::EnvelopeKind::Image { source } => match source.as_encoded() {
                 Some((bytes, format)) => EnvelopeKind::Image {
                     bytes: bytes.to_vec(),
@@ -834,6 +846,9 @@ impl GenerationConfig {
             stop_sequences,
             grammar,
             tools,
+            // The facade POD has no seed knob: seeding is a Rust-SDK surface
+            // today, and the readback path (model defaults) never carries one.
+            seed: _,
         } = config;
         let tools = tools
             .into_iter()
@@ -1109,7 +1124,9 @@ impl OutputType {
             EnvelopeKind::Text { .. } => OutputType::Text,
             EnvelopeKind::Audio { .. } => OutputType::Audio,
             EnvelopeKind::Embedding { .. } => OutputType::Embedding,
-            EnvelopeKind::Image { .. } | EnvelopeKind::MultiPart { .. } => OutputType::Unknown,
+            EnvelopeKind::Image { .. }
+            | EnvelopeKind::MultiPart { .. }
+            | EnvelopeKind::TokenIds { .. } => OutputType::Unknown,
         }
     }
 }
@@ -3786,6 +3803,7 @@ stages:
             min_p: 0.1,
             top_k: 17,
             repetition_penalty: 1.2,
+            seed: None,
             stop_sequences: vec!["stop".into()],
             grammar: Some("root ::= \"ok\"".into()),
             tools: vec![sdk::Tool::function(

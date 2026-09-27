@@ -111,6 +111,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         EnvelopeKind::Image { .. } | EnvelopeKind::MultiPart(_) => {
             println!("⚠️  Unexpected: Got vision output instead of text");
         }
+        EnvelopeKind::TokenIds(_) => {
+            println!("⚠️  Unexpected: Got raw token IDs output instead of text");
+        }
     }
 
     println!();
