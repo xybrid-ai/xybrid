@@ -1,9 +1,0 @@
-# Source/dev files we don't ship
-node_modules/
-example/
-.github/
-.editorconfig
-tsconfig.json
-tsconfig.build.json
-*.log
-.DS_Store

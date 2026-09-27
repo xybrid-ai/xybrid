@@ -164,6 +164,40 @@ string transcription = model.RunAudio(microphoneBytes, sampleRate: 16000);
 
 ---
 
+## 实时转写
+
+`run()` 转写的是已经录完的音频缓冲区；而会话（session）在语音到达的同时进行转写，
+这正是听写和实时字幕所需要的能力。
+
+音频必须是 PCM **float32、单声道、16 kHz**——从平台麦克风格式转换由调用方负责。
+
+```csharp
+using var session = model.Stream(StreamingConfigs.VoiceActivity(vadModelDir, language: "en"));
+
+// Drive the UI from the partial stream.
+await foreach (var partial in session.Partials(cancellationToken))
+{
+    label.text = partial.Text;
+}
+
+// From the Microphone clip, converted to float mono 16 kHz:
+session.Feed(pcm);
+
+string transcript = session.Flush();
+```
+
+部分转写文本是**累积的，而不是增量**：请用新的结果替换上一条显示，而不是追加。
+在订阅之前产生的部分结果会立即送达，因此一句话开头的词不会丢失。
+
+`flush()` 结束会话并返回完整转写文本；若其间有任何音频块转写失败，它会返回错误——
+那段音频已经丢失，否则返回的转写结果看起来完整却缺了一段。`cancel()` 结束会话并丢弃排队中的音频。
+
+语音活动检测按语音边界切分，而不是按固定时钟，可避免窗口落在词中间造成的断续。
+它需要一个包含 `model.onnx` 的 Silero VAD 模型目录；SDK 不附带该模型，
+缺少时引擎会退回固定窗口切分。
+
+---
+
 ## 结果处理
 
 ```csharp

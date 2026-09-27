@@ -1,0 +1,35 @@
+# The Android arm64 AAR's llama.cpp build: shared libraries plus CPU-variant
+# modules picked at runtime (see //:llama_android_dl).
+#
+# Selected by PLATFORM, not by a flag: the AAR's packaging builds its arm64
+# slice for android_arm64_cpu_variants (a child of rules_rs' arm64 Android
+# platform, so every existing arm64 Android select still matches), and every
+# target that picks a llama build — //crates/llama-cpp-sys and //:whisper —
+# switches to //:llama_android_dl on cpu_variants_enabled. Other arm64
+# Android builds (the Flutter cdylib) never see the constraint and keep the
+# static //:llama.
+exports_files(
+    ["android_system_name.cmake"],
+    visibility = ["//visibility:public"],
+)
+
+constraint_setting(name = "llama_cpu_backend")
+
+constraint_value(
+    name = "cpu_variants",
+    constraint_setting = ":llama_cpu_backend",
+    visibility = ["//visibility:public"],
+)
+
+platform(
+    name = "android_arm64_cpu_variants",
+    constraint_values = [":cpu_variants"],
+    parents = ["@rules_rs//rs/platforms:aarch64-linux-android"],
+    visibility = ["//visibility:public"],
+)
+
+config_setting(
+    name = "cpu_variants_enabled",
+    constraint_values = [":cpu_variants"],
+    visibility = ["//visibility:public"],
+)

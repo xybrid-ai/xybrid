@@ -1258,6 +1258,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "daachorse"
+version = "3.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5614204febbc33cc07a2806aa6440b904ac012b68eecc37f4493ea4a76455a3d"
+
+[[package]]
 name = "darling"
 version = "0.20.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2743,7 +2749,7 @@ dependencies = [
 
 [[package]]
 name = "integration-tests"
-version = "0.9.0"
+version = "0.10.0-rc1"
 dependencies = [
  "anyhow",
  "dirs",
@@ -3220,7 +3226,7 @@ dependencies = [
 
 [[package]]
 name = "mlx-c-sys"
-version = "0.9.0"
+version = "0.10.0-rc1"
 dependencies = [
  "bindgen",
 ]
@@ -5232,13 +5238,13 @@ checksum = "fd3ca314f692efd6c868f8408f53fe444634a845f96c028b97d35f6a1f79f0ee"
 
 [[package]]
 name = "tokenizers"
-version = "0.22.2"
+version = "0.23.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b238e22d44a15349529690fb07bd645cf58149a1b1e44d6cb5bd1641ff1a6223"
+checksum = "7afbf6e88718afcc138bad01d6ccc3051dbbc3b2ce9793d8b8a3aeb610969cfc"
 dependencies = [
  "ahash",
- "aho-corasick",
  "compact_str",
+ "daachorse",
  "dary_heap",
  "derive_builder",
  "esaxx-rs",
@@ -6272,7 +6278,7 @@ dependencies = [
 
 [[package]]
 name = "xtask"
-version = "0.9.0"
+version = "0.10.0-rc1"
 dependencies = [
  "anyhow",
  "clap",
@@ -6286,14 +6292,14 @@ dependencies = [
 
 [[package]]
 name = "xybrid"
-version = "0.9.0"
+version = "0.10.0-rc1"
 dependencies = [
  "xybrid-sdk",
 ]
 
 [[package]]
 name = "xybrid-cli"
-version = "0.9.0"
+version = "0.10.0-rc1"
 dependencies = [
  "anyhow",
  "chrono",
@@ -6325,7 +6331,7 @@ dependencies = [
 
 [[package]]
 name = "xybrid-core"
-version = "0.9.0"
+version = "0.10.0-rc1"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -6396,9 +6402,11 @@ dependencies = [
 
 [[package]]
 name = "xybrid-ffi-facade"
-version = "0.9.0"
+version = "0.10.0-rc1"
 dependencies = [
+ "log",
  "serde_json",
+ "tempfile",
  "tokio",
  "xybrid-core",
  "xybrid-sdk",
@@ -6406,7 +6414,7 @@ dependencies = [
 
 [[package]]
 name = "xybrid-llama"
-version = "0.9.0"
+version = "0.10.0-rc1"
 dependencies = [
  "thiserror 1.0.69",
  "tracing",
@@ -6415,7 +6423,7 @@ dependencies = [
 
 [[package]]
 name = "xybrid-llama-sys"
-version = "0.9.0"
+version = "0.10.0-rc1"
 dependencies = [
  "bindgen",
  "cc",
@@ -6428,7 +6436,7 @@ dependencies = [
 
 [[package]]
 name = "xybrid-macros"
-version = "0.9.0"
+version = "0.10.0-rc1"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -6437,7 +6445,7 @@ dependencies = [
 
 [[package]]
 name = "xybrid-mlx"
-version = "0.9.0"
+version = "0.10.0-rc1"
 dependencies = [
  "metal 0.29.0",
  "mlx-c-sys",
@@ -6447,7 +6455,7 @@ dependencies = [
 
 [[package]]
 name = "xybrid-sdk"
-version = "0.9.0"
+version = "0.10.0-rc1"
 dependencies = [
  "anyhow",
  "chrono",
@@ -6476,7 +6484,7 @@ dependencies = [
 
 [[package]]
 name = "xybrid-whisper"
-version = "0.9.0"
+version = "0.10.0-rc1"
 dependencies = [
  "thiserror 1.0.69",
  "tracing",
@@ -6485,7 +6493,7 @@ dependencies = [
 
 [[package]]
 name = "xybrid-whisper-sys"
-version = "0.9.0"
+version = "0.10.0-rc1"
 dependencies = [
  "bindgen",
  "cc",
@@ -6494,7 +6502,7 @@ dependencies = [
 
 [[package]]
 name = "xybrid_bolt"
-version = "0.9.0"
+version = "0.10.0-rc1"
 dependencies = [
  "android_logger",
  "boltffi",
@@ -6506,7 +6514,7 @@ dependencies = [
 
 [[package]]
 name = "xybrid_flutter"
-version = "0.9.0"
+version = "0.10.0-rc1"
 dependencies = [
  "android_logger",
  "flutter_rust_bridge",

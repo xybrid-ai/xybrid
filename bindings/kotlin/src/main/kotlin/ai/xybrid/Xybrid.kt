@@ -207,6 +207,86 @@ object Xybrid {
     fun setProviderApiKey(provider: String, apiKey: String) =
         ai.xybrid.setProviderApiKey(provider, apiKey)
 
+    /** Aggregate storage usage across all managed model-cache areas. */
+    @JvmStatic
+    fun modelCacheStatus(): XybridCacheStatus = ai.xybrid.cacheStatus()
+
+    /**
+     * List physical entries across registry, extraction, and Hugging Face caches.
+     * A model can appear more than once when several managed copies exist.
+     */
+    @JvmStatic
+    fun modelCacheEntries(): List<XybridCacheEntry> = ai.xybrid.cacheEntries()
+
+    /** Return whether [modelId] occupies any managed model-cache entry. */
+    @JvmStatic
+    fun hasCachedModelData(modelId: String): Boolean = ai.xybrid.cacheIsModelCached(modelId)
+
+    /**
+     * Return a preferred local path for [modelId], or `null` when absent.
+     * Presence does not necessarily mean the model is extracted and ready.
+     */
+    @JvmStatic
+    fun cachedModelPath(modelId: String): String? = ai.xybrid.cacheModelPath(modelId)
+
+    /** List model IDs extracted, validated, and ready to run offline. */
+    @JvmStatic
+    fun extractedModelIds(): List<String> = ai.xybrid.cacheListExtractedModelIds()
+
+    /**
+     * Remove every managed cache entry for [modelId].
+     * Do not call concurrently with a load of the same model.
+     */
+    @JvmStatic
+    fun removeCachedModel(modelId: String): Int = ai.xybrid.cacheRemoveModel(modelId).toInt()
+
+    /**
+     * Clear all managed model-cache storage.
+     * Do not call concurrently with any model load.
+     *
+     * Like [removeCachedModel], this returns `Int` rather than the generated
+     * `UInt` so the `@JvmStatic` name is not mangled for Java callers.
+     */
+    @JvmStatic
+    fun clearModelCache(): Int = ai.xybrid.cacheClear().toInt()
+
+    // Model storage, off the caller's thread. Every storage call walks or
+    // deletes the cache directory on disk, which is too slow for the main
+    // thread once a device holds a few models.
+
+    /** [modelCacheStatus] on [Dispatchers.IO]. */
+    suspend fun modelCacheStatusAsync(): XybridCacheStatus =
+        withContext(Dispatchers.IO) { modelCacheStatus() }
+
+    /** [modelCacheEntries] on [Dispatchers.IO]. */
+    suspend fun modelCacheEntriesAsync(): List<XybridCacheEntry> =
+        withContext(Dispatchers.IO) { modelCacheEntries() }
+
+    /** [hasCachedModelData] on [Dispatchers.IO]. */
+    suspend fun hasCachedModelDataAsync(modelId: String): Boolean =
+        withContext(Dispatchers.IO) { hasCachedModelData(modelId) }
+
+    /** [cachedModelPath] on [Dispatchers.IO]. */
+    suspend fun cachedModelPathAsync(modelId: String): String? =
+        withContext(Dispatchers.IO) { cachedModelPath(modelId) }
+
+    /** [extractedModelIds] on [Dispatchers.IO]. */
+    suspend fun extractedModelIdsAsync(): List<String> =
+        withContext(Dispatchers.IO) { extractedModelIds() }
+
+    /**
+     * [removeCachedModel] on [Dispatchers.IO].
+     * Do not call concurrently with a load of the same model.
+     */
+    suspend fun removeCachedModelAsync(modelId: String): Int =
+        withContext(Dispatchers.IO) { removeCachedModel(modelId) }
+
+    /**
+     * [clearModelCache] on [Dispatchers.IO].
+     * Do not call concurrently with any model load.
+     */
+    suspend fun clearModelCacheAsync(): Int = withContext(Dispatchers.IO) { clearModelCache() }
+
     private fun registerPlatformObservers(appContext: Context) {
         val batteryReceiver = object : BroadcastReceiver() {
             override fun onReceive(received: Context, intent: Intent) {
@@ -418,6 +498,79 @@ typealias ModelLoader = XybridModelLoader
 /** A loaded model ready for inference. */
 typealias Model = XybridModel
 
+/** A loaded multi-stage inference pipeline. */
+typealias Pipeline = XybridPipeline
+
+/**
+ * Open a live ASR session: feed microphone PCM in, read partial transcripts
+ * out.
+ *
+ * This is the live-capture surface. [XybridModel.run] transcribes a finished
+ * buffer; this transcribes speech as it arrives, which is what dictation and
+ * live captioning need.
+ *
+ * Audio must be PCM **float, mono, 16 kHz** — converting from the recorder's
+ * format is the caller's job.
+ *
+ * ```kotlin
+ * val session = model.stream()
+ * scope.launch {
+ *     session.partials().collect { partial -> textView.text = partial.text }
+ * }
+ * // from the audio callback:
+ * session.feed(pcm)
+ * // when the user stops talking:
+ * val transcript = session.flush()
+ * ```
+ *
+ * @param config chunking options; defaults to fixed-window chunking at
+ *   16 kHz. Use [streamingConfigWithVad] to chunk on speech boundaries.
+ * @throws XybridError.StreamingNotSupported if this is not an ASR model, or
+ *   [XybridError.ConfigError] for a sample rate other than 16 kHz.
+ */
+fun XybridModel.stream(
+    config: XybridStreamingConfig = defaultStreamingConfig(),
+): XybridStreamingSession = XybridStreamingSession(this, config)
+
+/**
+ * Fixed time-window chunking at the required 16 kHz, using the model's own
+ * language. The starting point for dictation.
+ */
+fun defaultStreamingConfig(): XybridStreamingConfig = XybridStreamingConfig(
+    sampleRate = 16_000u,
+    vad = XybridVadMode.Off,
+    vadThreshold = 0.5f,
+    language = null,
+    audioCtx = null,
+)
+
+/**
+ * Chunk on speech boundaries using voice-activity detection, rather than on a
+ * fixed clock.
+ *
+ * Better transcripts for natural speech — a window cut mid-word is what makes
+ * fixed chunking stutter — at the cost of loading a small VAD model alongside
+ * the ASR one.
+ *
+ * @param modelDir directory holding a Silero VAD model, containing a
+ *   `model.onnx`. Required: no VAD model ships with the SDK, and the engine
+ *   falls back to fixed windows without one.
+ * @param language language hint such as `"en"`; null uses the model default.
+ * @param threshold VAD sensitivity, 0.0–1.0. Lower catches quieter speech,
+ *   and more background noise with it.
+ */
+fun streamingConfigWithVad(
+    modelDir: String,
+    language: String? = null,
+    threshold: Float = 0.5f,
+): XybridStreamingConfig = XybridStreamingConfig(
+    sampleRate = 16_000u,
+    vad = XybridVadMode.Enabled(modelDir),
+    vadThreshold = threshold,
+    language = language,
+    audioCtx = null,
+)
+
 /**
  * Run inference with the model's default options.
  *
@@ -476,6 +629,74 @@ fun XybridModel.runStream(
     envelope: XybridEnvelope,
     options: XybridRunOptions?,
 ): ULong = XybridCancellationToken().use { this.runStream(envelope, options, it) }
+
+// -- Pipelines --
+//
+// A pipeline run returns every stage's output, not only the last one, so a
+// voice assistant can show what it heard and what it answered while it plays
+// the audio:
+//
+//     val result = pipeline.runAsync(Envelope.audio(pcm))
+//     transcript.text = result.stage("asr")?.text
+//     reply.text = result.stage("llm")?.text
+//     player.play(result.audioBytes)
+
+/** Parse and load a pipeline off the caller's thread. */
+suspend fun XybridPipeline.Companion.fromYamlAsync(yaml: String): XybridPipeline =
+    withContext(Dispatchers.IO) { fromYaml(yaml) }
+
+/** Read, parse, and load a pipeline file off the caller's thread. */
+suspend fun XybridPipeline.Companion.fromFileAsync(path: String): XybridPipeline =
+    withContext(Dispatchers.IO) { fromFile(path) }
+
+/** Load a pipeline bundle off the caller's thread. */
+suspend fun XybridPipeline.Companion.fromBundleAsync(path: String): XybridPipeline =
+    withContext(Dispatchers.IO) { fromBundle(path) }
+
+/**
+ * Run every stage with default options.
+ *
+ * Convenience over the generated `run(envelope, options)`. The first run
+ * downloads any model the pipeline still needs, so prefer [runAsync] on the
+ * main thread.
+ */
+fun XybridPipeline.run(envelope: XybridEnvelope): XybridPipelineResult = this.run(envelope, null)
+
+/**
+ * Run every pipeline stage off the caller's thread.
+ *
+ * Of [options], only `correlationId` applies to a pipeline run; setting
+ * `generationConfig` or `abortOn` throws [XybridError.ConfigError].
+ */
+suspend fun XybridPipeline.runAsync(
+    envelope: XybridEnvelope,
+    options: XybridRunOptions? = null,
+): XybridPipelineResult = withContext(Dispatchers.IO) { this@runAsync.run(envelope, options) }
+
+/** The stage with this identifier — the YAML `id:` — if it ran. */
+fun XybridPipelineResult.stage(id: String): XybridStageResult? = stages.firstOrNull { it.stageId == id }
+
+/** Final text payload, if the last stage produced text. `null` otherwise. */
+val XybridPipelineResult.text: String?
+    get() = (envelope.kind as? XybridEnvelopeKind.Text)?.text
+
+/** Final audio bytes, if the last stage produced audio. `null` otherwise. */
+val XybridPipelineResult.audioBytes: ByteArray?
+    get() = (envelope.kind as? XybridEnvelopeKind.Audio)?.bytes
+
+/** The whole run's latency in seconds as a Double. */
+val XybridPipelineResult.latencySeconds: Double get() = latencyMs.toDouble() / 1000.0
+
+/** This stage's text output — an ASR transcript, an LLM reply. `null` otherwise. */
+val XybridStageResult.text: String?
+    get() = (envelope.kind as? XybridEnvelopeKind.Text)?.text
+
+/** This stage's audio output, if it produced audio. `null` otherwise. */
+val XybridStageResult.audioBytes: ByteArray?
+    get() = (envelope.kind as? XybridEnvelopeKind.Audio)?.bytes
+
+/** This stage's latency in seconds as a Double. */
+val XybridStageResult.latencySeconds: Double get() = latencyMs.toDouble() / 1000.0
 
 // -- Async (suspend) conveniences --
 //

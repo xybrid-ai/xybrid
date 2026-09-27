@@ -25,11 +25,11 @@ path = "src/lib.rs"
 #   `xybrid-llama-sys`  : raw FFI + cmake build (Phase 1)
 #   `xybrid-llama`   : safe RAII + typed errors + streaming trampoline (Phase 2)
 #   `xybrid-core`    : thin adapter glue (Phase 3 reduction)
-xybrid-llama-sys = { path = "../llama-cpp-sys", version = "0.9.0", optional = true }
-xybrid-llama = { path = "../xybrid-llama", version = "0.9.0", optional = true }
+xybrid-llama-sys = { path = "../llama-cpp-sys", version = "0.10.0-rc1", optional = true }
+xybrid-llama = { path = "../xybrid-llama", version = "0.10.0-rc1", optional = true }
 # Safe whisper.cpp wrappers. Gated behind `asr-whispercpp`, which also pulls
 # `llm-llamacpp` — that is where the shared ggml comes from.
-xybrid-whisper = { path = "../xybrid-whisper", version = "0.9.0", optional = true }
+xybrid-whisper = { path = "../xybrid-whisper", version = "0.10.0-rc1", optional = true }
 # Real Jinja engine for the llama.cpp chat-template fallback: when llama.cpp's
 # hardcoded non-Jinja matcher rejects a GGUF's embedded template (returns -1),
 # we render that template here instead. Gated with the deps below into
@@ -82,7 +82,7 @@ yuvutils-rs = { version = "0.8.3", default-features = false }  # For raw YUV cam
 # Disable default features to exclude esaxx_fast (esaxx-rs/cpp) which hardcodes
 # static_crt(true) on MSVC, producing /MT objects that conflict with ORT's /MD.
 # We only run tokenizer models, we don't train them — esaxx-rs is only for BPE training.
-tokenizers = { version = "0.22", default-features = false, features = ["onig"] }
+tokenizers = { version = "0.23", default-features = false, features = ["onig"] }
 schemars = { version = "1.0", optional = true }  # JSON Schema generation for model_metadata.json
 hound = "3.5"  # For WAV file reading (audio preprocessing)
 cmudict-fast = "0.8"  # For CMU pronouncing dictionary (TTS phonemization)
@@ -115,7 +115,7 @@ rayon = { version = "1.8", optional = true }  # Bounded mobile compute pool (can
 # MLX adapter dep (US-010+). `llm-mlx` uses the non-linking portion of
 # `xybrid-mlx` on every platform, while `llm-mlx-runtime` forwards
 # `xybrid-mlx/bindings` for Apple Silicon runtime execution.
-xybrid-mlx = { path = "../xybrid-mlx", version = "0.9.0", optional = true }
+xybrid-mlx = { path = "../xybrid-mlx", version = "0.10.0-rc1", optional = true }
 
 # minijinja (declared above with the llama.cpp deps) is also pulled in by
 # `llm-mlx` for the MLX adapter's chat template renderer (US-014) — the

@@ -190,6 +190,98 @@ public enum Xybrid {
         boltSetProviderApiKey(provider, apiKey)
     }
 
+    /// Aggregate storage usage across all managed model-cache areas.
+    public static func modelCacheStatus() throws -> XybridCacheStatus {
+        try cacheStatus()
+    }
+
+    /// Physical entries across registry, extraction, and Hugging Face caches.
+    ///
+    /// A model can appear more than once when several managed copies exist.
+    public static func modelCacheEntries() throws -> [XybridCacheEntry] {
+        try cacheEntries()
+    }
+
+    /// Return whether `modelId` occupies any managed model-cache entry.
+    public static func hasCachedModelData(_ modelId: String) throws -> Bool {
+        try cacheIsModelCached(modelId: modelId)
+    }
+
+    /// Return a preferred local path for a model, or `nil` when absent.
+    ///
+    /// Presence does not necessarily mean the model is extracted and ready.
+    public static func cachedModelPath(_ modelId: String) throws -> String? {
+        try cacheModelPath(modelId: modelId)
+    }
+
+    /// List model IDs extracted, validated, and ready to run offline.
+    public static func extractedModelIds() throws -> [String] {
+        try cacheListExtractedModelIds()
+    }
+
+    /// Remove every managed cache entry for one model.
+    ///
+    /// Do not call concurrently with a load of the same model.
+    @discardableResult
+    public static func removeCachedModel(_ modelId: String) throws -> UInt32 {
+        try cacheRemoveModel(modelId: modelId)
+    }
+
+    /// Clear all managed model-cache storage.
+    ///
+    /// Do not call concurrently with any model load.
+    @discardableResult
+    public static func clearModelCache() throws -> UInt32 {
+        try cacheClear()
+    }
+
+    // MARK: Model storage, off the caller's thread
+    //
+    // Every storage call walks or deletes the cache directory on disk, which is
+    // too slow for the main actor once a device holds a few models. These run
+    // the same calls on a detached background task.
+
+    /// ``modelCacheStatus()`` without blocking the calling thread or actor.
+    public static func modelCacheStatusAsync() async throws -> XybridCacheStatus {
+        try await Task.detached { try cacheStatus() }.value
+    }
+
+    /// ``modelCacheEntries()`` without blocking the calling thread or actor.
+    public static func modelCacheEntriesAsync() async throws -> [XybridCacheEntry] {
+        try await Task.detached { try cacheEntries() }.value
+    }
+
+    /// ``hasCachedModelData(_:)`` without blocking the calling thread or actor.
+    public static func hasCachedModelDataAsync(_ modelId: String) async throws -> Bool {
+        try await Task.detached { try cacheIsModelCached(modelId: modelId) }.value
+    }
+
+    /// ``cachedModelPath(_:)`` without blocking the calling thread or actor.
+    public static func cachedModelPathAsync(_ modelId: String) async throws -> String? {
+        try await Task.detached { try cacheModelPath(modelId: modelId) }.value
+    }
+
+    /// ``extractedModelIds()`` without blocking the calling thread or actor.
+    public static func extractedModelIdsAsync() async throws -> [String] {
+        try await Task.detached { try cacheListExtractedModelIds() }.value
+    }
+
+    /// ``removeCachedModel(_:)`` without blocking the calling thread or actor.
+    ///
+    /// Do not call concurrently with a load of the same model.
+    @discardableResult
+    public static func removeCachedModelAsync(_ modelId: String) async throws -> UInt32 {
+        try await Task.detached { try cacheRemoveModel(modelId: modelId) }.value
+    }
+
+    /// ``clearModelCache()`` without blocking the calling thread or actor.
+    ///
+    /// Do not call concurrently with any model load.
+    @discardableResult
+    public static func clearModelCacheAsync() async throws -> UInt32 {
+        try await Task.detached { try cacheClear() }.value
+    }
+
     private static func registerPlatformObservers() {
         #if os(iOS)
         let device = UIDevice.current
@@ -381,14 +473,18 @@ public extension Xybrid {
 /// Call `run(envelope:)` to execute inference on input data.
 public typealias Model = XybridModel
 
-// The bolt handle wraps a thread-safe, `Arc`-backed Rust model (the facade's
-// types are `Send + Sync`), so the handle is safe to move across threads and
+/// A loaded multi-stage inference pipeline.
+public typealias Pipeline = XybridPipeline
+
+// The bolt handles wrap thread-safe, `Arc`-backed Rust values (the facade's
+// types are `Send + Sync`), so they are safe to move across threads and
 // actors — e.g. loading or running on a `Task.detached` background executor,
 // which is the recommended pattern since bolt's `load`/`run` are blocking.
 // boltffi does not emit `Sendable` on generated handle types yet, so declare it
 // here in the hand-written wrapper (regen-safe — never overwritten by
 // `boltffi generate`, unlike `xybrid_bolt.swift`).
 extension XybridModel: @unchecked Sendable {}
+extension XybridPipeline: @unchecked Sendable {}
 
 /// A pull-paced asynchronous stream of generated tokens.
 ///
@@ -610,6 +706,42 @@ private final class XybridTokenStreamState: @unchecked Sendable {
 }
 
 public extension XybridModel {
+    /// Open a live ASR session: feed microphone PCM in, read partial
+    /// transcripts out.
+    ///
+    /// This is the live-capture surface. ``run(envelope:)`` transcribes a
+    /// finished buffer; this transcribes speech as it arrives, which is what
+    /// dictation and live captioning need.
+    ///
+    /// Audio must be PCM **Float32, mono, 16 kHz** — converting from the
+    /// microphone's format is the caller's job.
+    ///
+    /// ```swift
+    /// let session = try model.stream()
+    /// Task {
+    ///     for await partial in session.partials() {
+    ///         label.text = partial.text
+    ///     }
+    /// }
+    /// // from the audio callback:
+    /// try session.feed(samples: pcm)
+    /// // when the user stops talking:
+    /// let transcript = try session.flush()
+    /// ```
+    ///
+    /// - Parameter config: chunking options. The default is fixed-window
+    ///   chunking at 16 kHz with the model's own language; pass
+    ///   ``XybridStreamingConfig/voiceActivity(modelDir:language:threshold:)``
+    ///   to chunk on speech boundaries instead.
+    /// - Throws: ``XybridError/streamingNotSupported`` if this is not an ASR
+    ///   model, or ``XybridError/configError(message:)`` for a sample rate
+    ///   other than 16 kHz.
+    func stream(
+        config: XybridStreamingConfig = .default
+    ) throws -> XybridStreamingSession {
+        try XybridStreamingSession(forModel: self, config: config)
+    }
+
     /// Run inference with the model's default options.
     ///
     /// Convenience over `run(envelope:options:)` so simple call sites stay
@@ -662,6 +794,94 @@ public extension XybridModel {
     /// See `run(envelope:options:)`.
     func runStream(envelope: XybridEnvelope, options: XybridRunOptions?) throws -> UInt64 {
         try runStream(envelope: envelope, options: options, cancel: XybridCancellationToken())
+    }
+}
+
+public extension XybridPipeline {
+    /// Parse and load a pipeline without blocking the caller.
+    static func fromYamlAsync(_ yaml: String) async throws -> XybridPipeline {
+        try await Task.detached { try XybridPipeline(fromYaml: yaml) }.value
+    }
+
+    /// Read, parse, and load a pipeline file without blocking the caller.
+    static func fromFileAsync(_ url: URL) async throws -> XybridPipeline {
+        try await Task.detached { try XybridPipeline(fromFile: url.path) }.value
+    }
+
+    /// Load a pipeline bundle without blocking the caller.
+    static func fromBundleAsync(_ url: URL) async throws -> XybridPipeline {
+        try await Task.detached { try XybridPipeline(fromBundle: url.path) }.value
+    }
+
+    /// Run every stage with default options.
+    ///
+    /// Convenience over `run(envelope:options:)`. The first run downloads any
+    /// model the pipeline still needs, so prefer ``runAsync(envelope:options:)``
+    /// off the main actor.
+    func run(envelope: XybridEnvelope) throws -> XybridPipelineResult {
+        try run(envelope: envelope, options: nil)
+    }
+
+    /// Run every stage without blocking the calling thread or actor.
+    ///
+    /// Of `options`, only `correlationId` applies to a pipeline run; setting
+    /// `generationConfig` or `abortOn` throws ``XybridError/configError(message:)``.
+    func runAsync(
+        envelope: XybridEnvelope,
+        options: XybridRunOptions? = nil
+    ) async throws -> XybridPipelineResult {
+        try await Task.detached { try self.run(envelope: envelope, options: options) }.value
+    }
+}
+
+// MARK: - Pipeline result ergonomics
+//
+// A pipeline run returns every stage's output, not only the last one, so a
+// voice assistant can show what it heard and what it answered while it plays
+// the audio:
+//
+//     let result = try await pipeline.runAsync(envelope: .audio(pcmData: pcm))
+//     transcript.text = result.stage("asr")?.text
+//     reply.text = result.stage("llm")?.text
+//     try player.play(result.audioBytes)
+
+public extension XybridPipelineResult {
+    /// Final text payload, if the last stage produced text. `nil` otherwise.
+    var text: String? { envelope.textPayload }
+
+    /// Final audio bytes, if the last stage produced audio. `nil` otherwise.
+    var audioBytes: Data? { envelope.audioPayload }
+
+    /// The whole run's latency as a `TimeInterval` in seconds.
+    var latency: TimeInterval { TimeInterval(latencyMs) / 1000.0 }
+
+    /// The stage with this identifier — the YAML `id:` — if it ran.
+    func stage(_ id: String) -> XybridStageResult? {
+        stages.first { $0.stageId == id }
+    }
+}
+
+public extension XybridStageResult {
+    /// This stage's text output — an ASR transcript, an LLM reply. `nil` for
+    /// any other payload.
+    var text: String? { envelope.textPayload }
+
+    /// This stage's audio output, if it produced audio. `nil` otherwise.
+    var audioBytes: Data? { envelope.audioPayload }
+
+    /// This stage's latency as a `TimeInterval` in seconds.
+    var latency: TimeInterval { TimeInterval(latencyMs) / 1000.0 }
+}
+
+private extension XybridEnvelope {
+    var textPayload: String? {
+        if case .text(let text) = kind { return text }
+        return nil
+    }
+
+    var audioPayload: Data? {
+        if case .audio(let bytes) = kind { return bytes }
+        return nil
     }
 }
 
@@ -799,6 +1019,48 @@ public typealias StreamToken = XybridStreamToken
 // parameter means spelling out all nine. These factories default the rest.
 // They're static funcs rather than a defaulted `init` because an extension
 // init with the same argument labels would collide with the generated one.
+
+public extension XybridStreamingConfig {
+    /// Fixed time-window chunking at the required 16 kHz, using the model's
+    /// own language. The starting point for dictation.
+    static var `default`: XybridStreamingConfig {
+        XybridStreamingConfig(
+            sampleRate: 16_000,
+            vad: .off,
+            vadThreshold: 0.5,
+            language: nil,
+            audioCtx: nil
+        )
+    }
+
+    /// Chunk on speech boundaries using voice-activity detection, rather than
+    /// on a fixed clock.
+    ///
+    /// Better transcripts for natural speech — a window cut mid-word is what
+    /// makes fixed chunking stutter — at the cost of loading a small VAD
+    /// model alongside the ASR one.
+    ///
+    /// - Parameters:
+    ///   - modelDir: directory holding a Silero VAD model, containing a
+    ///     `model.onnx`. Required: no VAD model ships with the SDK, and the
+    ///     engine falls back to fixed windows without one.
+    ///   - language: language hint such as `"en"`; `nil` uses the model default.
+    ///   - threshold: VAD sensitivity, 0.0–1.0. Lower catches quieter speech
+    ///     and more background noise with it.
+    static func voiceActivity(
+        modelDir: String,
+        language: String? = nil,
+        threshold: Float = 0.5
+    ) -> XybridStreamingConfig {
+        XybridStreamingConfig(
+            sampleRate: 16_000,
+            vad: .enabled(modelDir: modelDir),
+            vadThreshold: threshold,
+            language: language,
+            audioCtx: nil
+        )
+    }
+}
 
 public extension XybridGenerationConfig {
     /// Build a config, defaulting every field you don't set to the model's own

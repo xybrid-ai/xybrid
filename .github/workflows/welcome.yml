@@ -40,6 +40,6 @@ jobs:
             - [ ] `cargo fmt --all` clean
             - [ ] `cargo clippy --workspace -- -D warnings` clean
             - [ ] `cargo test -p <affected-crate>` passes
-            - [ ] Commits are DCO-signed (`git commit -s`)
+            - [ ] Agreed to the [CLA](https://github.com/xybrid-ai/xybrid/blob/master/CLA.md)
 
             See [`CONTRIBUTING.md`](https://github.com/xybrid-ai/xybrid/blob/master/CONTRIBUTING.md#where-to-start) for the full guide. A maintainer will be along for review.

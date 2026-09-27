@@ -96,5 +96,5 @@ tracing-flame = "0.2"
 [dev-dependencies]
 httpmock = "0.7"
 safetensors = "0.4"
-tokenizers = { version = "0.22", default-features = false, features = ["onig"] }
+tokenizers = { version = "0.23", default-features = false, features = ["onig"] }
 image = "0.25"

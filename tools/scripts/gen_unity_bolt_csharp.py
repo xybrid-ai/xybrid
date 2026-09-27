@@ -92,10 +92,13 @@ RECORD_STRUCT_RE = re.compile(
 # 11 on boltffi 0.29, which emits the whole inference path the 0.25.3 C#
 # lowering dropped (XybridResult / XybridEnvelope / XybridStreamEvent / …),
 # plus 3 for the tool-calling records (XybridToolDefinition / XybridToolCall /
-# XybridToolResult).
+# XybridToolResult), plus 2 for the live ASR session (XybridStreamingConfig /
+# XybridPartialResult), plus 2 for the pipeline result (XybridPipelineResult /
+# XybridStageResult), plus 2 for model cache management (XybridCacheEntry /
+# XybridCacheStatus).
 # Bump this deliberately: the count is a tripwire for unreviewed boltffi output
 # drift, not a value to auto-sync.
-EXPECTED_RECORD_STRUCTS = 14
+EXPECTED_RECORD_STRUCTS = 20
 
 
 # --- Transform (g): Unsafe.SizeOf<T>() -> Marshal.SizeOf<T>(). boltffi's wire
@@ -388,6 +391,11 @@ def _drift(condition: bool, message: str) -> None:
 
 def generate() -> dict[str, str]:
     """Run the generator, down-level for Unity, and return {filename: contents}."""
+    # boltffi writes into the language directory but does not remove files for
+    # types that disappeared since a previous run. Start clean so an ignored
+    # dist artifact cannot leak into the committed Unity package.
+    if RAW_DIR.exists():
+        shutil.rmtree(RAW_DIR)
     subprocess.run(["boltffi", "generate", "csharp", "--deny-skipped"], cwd=BOLT_DIR, check=True)
 
     sources = sorted(RAW_DIR.glob("*.cs"))

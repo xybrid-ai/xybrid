@@ -21,10 +21,12 @@
 load("@rules_rs//rs:rust_shared_library.bzl", "rust_shared_library")
 load("@rules_rs//rs:rust_static_library.bzl", "rust_static_library")
 load("@crates//:defs.bzl", "all_crate_deps")
+load("@xybrid_version//:version.bzl", "XYBRID_VERSION")
 
 # cdylib — libxybrid_flutter_ffi.{so,dylib}
 rust_shared_library(
     name = "xybrid_flutter_ffi_cdylib",
+    version = XYBRID_VERSION,
     srcs = glob(["src/**/*.rs"]),
     crate_name = "xybrid_flutter_ffi",
     edition = "2021",
@@ -73,6 +75,7 @@ rust_shared_library(
 # staticlib — libxybrid_flutter_ffi.a
 rust_static_library(
     name = "xybrid_flutter_ffi_staticlib",
+    version = XYBRID_VERSION,
     srcs = glob(["src/**/*.rs"]),
     crate_name = "xybrid_flutter_ffi",
     edition = "2021",

@@ -282,6 +282,15 @@ abstract class XybridRustLibApiImplPlatform
   FfiBackend dco_decode_ffi_backend(dynamic raw);
 
   @protected
+  FfiCacheEntry dco_decode_ffi_cache_entry(dynamic raw);
+
+  @protected
+  FfiCacheEntryLocation dco_decode_ffi_cache_entry_location(dynamic raw);
+
+  @protected
+  FfiCacheStatus dco_decode_ffi_cache_status(dynamic raw);
+
+  @protected
   FfiCloudFallbackAbort dco_decode_ffi_cloud_fallback_abort(dynamic raw);
 
   @protected
@@ -381,6 +390,9 @@ abstract class XybridRustLibApiImplPlatform
 
   @protected
   List<String> dco_decode_list_String(dynamic raw);
+
+  @protected
+  List<FfiCacheEntry> dco_decode_list_ffi_cache_entry(dynamic raw);
 
   @protected
   List<FfiImagePlane> dco_decode_list_ffi_image_plane(dynamic raw);
@@ -703,6 +715,16 @@ abstract class XybridRustLibApiImplPlatform
   FfiBackend sse_decode_ffi_backend(SseDeserializer deserializer);
 
   @protected
+  FfiCacheEntry sse_decode_ffi_cache_entry(SseDeserializer deserializer);
+
+  @protected
+  FfiCacheEntryLocation sse_decode_ffi_cache_entry_location(
+      SseDeserializer deserializer);
+
+  @protected
+  FfiCacheStatus sse_decode_ffi_cache_status(SseDeserializer deserializer);
+
+  @protected
   FfiCloudFallbackAbort sse_decode_ffi_cloud_fallback_abort(
       SseDeserializer deserializer);
 
@@ -814,6 +836,10 @@ abstract class XybridRustLibApiImplPlatform
 
   @protected
   List<String> sse_decode_list_String(SseDeserializer deserializer);
+
+  @protected
+  List<FfiCacheEntry> sse_decode_list_ffi_cache_entry(
+      SseDeserializer deserializer);
 
   @protected
   List<FfiImagePlane> sse_decode_list_ffi_image_plane(
@@ -1148,6 +1174,17 @@ abstract class XybridRustLibApiImplPlatform
   void sse_encode_ffi_backend(FfiBackend self, SseSerializer serializer);
 
   @protected
+  void sse_encode_ffi_cache_entry(FfiCacheEntry self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_ffi_cache_entry_location(
+      FfiCacheEntryLocation self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_ffi_cache_status(
+      FfiCacheStatus self, SseSerializer serializer);
+
+  @protected
   void sse_encode_ffi_cloud_fallback_abort(
       FfiCloudFallbackAbort self, SseSerializer serializer);
 
@@ -1269,6 +1306,10 @@ abstract class XybridRustLibApiImplPlatform
 
   @protected
   void sse_encode_list_String(List<String> self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_list_ffi_cache_entry(
+      List<FfiCacheEntry> self, SseSerializer serializer);
 
   @protected
   void sse_encode_list_ffi_image_plane(

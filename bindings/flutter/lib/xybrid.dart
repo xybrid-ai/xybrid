@@ -110,4 +110,5 @@ export 'src/streaming.dart'
     show XybridStreamSession, FfiPartialResult, FfiVadMode;
 export 'src/tools.dart' show ToolCall, ToolDefinition, ToolResult;
 export 'src/utils/utils.dart';
-export 'src/xybrid.dart' show Xybrid;
+export 'src/xybrid.dart'
+    show Xybrid, CacheEntry, CacheEntryLocation, CacheStatus;

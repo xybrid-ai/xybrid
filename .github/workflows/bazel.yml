@@ -148,6 +148,20 @@ jobs:
           bazelisk build --nobuild \
             //crates/... //bindings/... //macros/... //xtask/... //integration-tests/... //:llama
 
+      # Every first-party Rust target must stamp the workspace version: without
+      # `version = XYBRID_VERSION`, rules_rust sets CARGO_PKG_VERSION to its
+      # "0.0.0" default and that artifact reports it (//bazel:cargo_version.bzl).
+      - name: Every Rust target stamps the workspace version
+        run: |
+          set -euo pipefail
+          unstamped=$(bazelisk query --output=label \
+            'attr(version, "^0\.0\.0$", kind("rust_(library|binary|test|shared_library|static_library|proc_macro) rule", //...))')
+          if [ -n "$unstamped" ]; then
+            echo "::error::These Rust targets do not pass version = XYBRID_VERSION, so they would report 0.0.0:"
+            echo "$unstamped"
+            exit 1
+          fi
+
       # The RBE-proven hermetic linux chain (PR #326 gates 3B/4), plus the
       # whisper.cpp chain that sits on the same ggml. //:whisper is a plain
       # cc_library depending on //:llama, so building both here is what proves

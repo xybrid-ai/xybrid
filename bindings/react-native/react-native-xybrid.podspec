@@ -1,8 +1,11 @@
 require "json"
+require_relative "ios/xybrid_natives"
 
 package = JSON.parse(File.read(File.join(__dir__, "package.json")))
 
 Pod::Spec.new do |s|
+  # The npm package is @xybrid/react-native; pod names cannot contain `@` or
+  # `/`, so the pod keeps this name (it only shows up in Podfile.lock).
   s.name         = "react-native-xybrid"
   s.version      = package["version"]
   s.summary      = package["description"]
@@ -10,27 +13,21 @@ Pod::Spec.new do |s|
   s.license      = package["license"]
   s.authors      = package["author"]
 
-  s.platforms    = { :ios => "13.0" }
+  # Matches the XCFramework's minimum (bindings/apple/BUILD.bazel) and
+  # Package.swift; React Native 0.76+ already needs iOS 15.1.
+  s.platforms    = { :ios => "16.0" }
   s.source       = { :git => "https://github.com/xybrid-ai/xybrid.git", :tag => "v#{s.version}" }
 
-  # Swift wrapper sources (`Xybrid.swift`, `xybrid_bolt.swift`) ride along
-  # with this pod rather than being pulled from SPM. This keeps consumer
-  # setup to a single `npm install` + `pod install` and avoids resolving two
-  # parallel package managers for the same Rust core. The files are copied
-  # in by the stage-ios step of build-react-native.yml (or the staging
-  # commands in this package's README for local dev); they live under
-  # `ios/XybridSwift/` so the `.swift` files are discovered alongside the
-  # TurboModule glue.
-  s.source_files = "ios/**/*.{h,m,mm,swift}"
-  s.requires_arc = true
+  # The TurboModule (XybridModule.mm + the Swift implementation) and the
+  # Swift SDK it calls (ios/XybridSwift: Xybrid.swift + xybrid_bolt.swift, the
+  # same sources the standalone Apple SDK ships) compile into this one pod.
+  s.source_files = "ios/*.{mm,swift}", "ios/XybridSwift/*.swift"
   s.swift_version = "5.0"
 
-  # Pre-built bolt static framework bundled as an XCFramework — the same
-  # Bazel-built `//bindings/apple:XybridFFI` the Apple release ships, staged
-  # here by build-react-native.yml / the README's staging commands. (Android
-  # pulls its natives
-  # from the Maven AAR instead — see android/build.gradle.)
-  s.vendored_frameworks = "ios/Frameworks/XybridFFI.xcframework"
+  # The Rust core, resolved at `pod install` time — downloaded from the
+  # GitHub Release and checked against package.json's pinned SHA-256, or a
+  # local build. See ios/xybrid_natives.rb for the order and overrides.
+  s.vendored_frameworks = XybridNatives.prepare!(__dir__)
 
   # System frameworks the Rust core links against (mirrors Package.swift).
   s.frameworks = "Metal", "MetalPerformanceShaders", "MetalPerformanceShadersGraph",
@@ -39,21 +36,15 @@ Pod::Spec.new do |s|
 
   s.pod_target_xcconfig = {
     "DEFINES_MODULE" => "YES",
-    "SWIFT_OBJC_INTEROP_MODE" => "objcxx",
-    # Codegen-emitted headers live under Pods/Headers/Public/RNXybridSpec
-    # once the New Architecture is enabled in the host app.
-    "HEADER_SEARCH_PATHS" => '"$(PODS_TARGET_SRCROOT)/ios" "$(PODS_ROOT)/Headers/Public/RNXybridSpec"',
-    # Apple Silicon required. The staged XCFramework does not contain
-    # `ios-x86_64-simulator` or `macos-x86_64` slices — xtask intentionally
-    # drops those targets because ort-sys (v2.0.0-rc.11) ships no prebuilt
-    # ONNX Runtime for Intel Mac / Intel iOS Simulator. Excluding x86_64
-    # here turns "missing library at link time" into "Xcode picks arm64
-    # automatically" on Apple Silicon hosts. Intel Mac and Rosetta-mode
-    # builds are unsupported by design — see README.md.
-    "EXCLUDED_ARCHS[sdk=iphonesimulator*]" => "i386 x86_64"
+    # A method missing from the Codegen protocol only warns — and then
+    # crashes at the first JS call, because the TurboModule looks methods up
+    # by the protocol's selectors. Make it a build error instead.
+    "WARNING_CFLAGS" => "$(inherited) -Werror=protocol",
+    # The XCFramework has no x86_64 simulator slice (no prebuilt ONNX Runtime
+    # for Intel simulators), so build simulator targets for arm64 only.
+    "EXCLUDED_ARCHS[sdk=iphonesimulator*]" => "i386 x86_64",
   }
 
-  # Wire up React Native's New Architecture (TurboModules + codegen).
-  # Mirrors the boilerplate in react-native-mmkv / react-native-screens.
-  install_modules_dependencies(s) if respond_to?(:install_modules_dependencies)
+  # React Native's New Architecture wiring (TurboModule headers + Codegen).
+  install_modules_dependencies(s)
 end
