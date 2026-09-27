@@ -1,0 +1,23 @@
+bindings/react-native/example/README.md
+  s_3fa520519b0cb5::t_76b5f103824c7e 76-77
+crates/xybrid-core/src/runtime_adapter/llama_cpp/mod.rs
+  s_3fa520519b0cb5::t_303de7fe6a1243 481-484,696-706,839-843,846,1908-1914
+crates/xybrid-core/src/runtime_adapter/llm.rs
+  s_3fa520519b0cb5::t_7583e8e1952c7b 44-47,58-61,63,67-73
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "0d42399885033c13bd04af8cf73156341ae2fdc1",
+  "prompts": {},
+  "sessions": {
+    "s_3fa520519b0cb5": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0dc32-340b-7570-b4c7-855b4fa43e25",
+        "model": "gpt-6-sol"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
