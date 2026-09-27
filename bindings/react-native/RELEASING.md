@@ -28,9 +28,10 @@ version and the Kotlin SDK pin (`tools/scripts/version-sync.sh`).
    - `publish-npm` runs the test suite and the tarball check at the tag,
      waits (up to 30 minutes) until Maven Central serves
      `ai.xybrid:xybrid-kotlin:<version>` — without it the package's Android
-     build fails — then runs `npm publish --provenance`. Versions with a
+     build fails — then runs `npm stage publish --provenance`. A maintainer
+     approves the staged version on npmjs.com with 2FA. Versions with a
      prerelease suffix (`0.10.0-rc1`) go to the `next` dist-tag, others to
-     `latest`. Re-runs skip a version already on npm.
+     `latest` after approval. Re-runs skip a version already live on npm.
 
 If the wait times out, the Kotlin deployment is usually sitting unreleased in
 the Central Portal (central.sonatype.com → Deployments). Release it, wait for
@@ -46,20 +47,24 @@ is `true`.
    public packages) and the publishing account must be able to publish in it.
    The CocoaPods pod stays `react-native-xybrid` (pod names cannot contain
    `@` or `/`).
-2. **Bootstrap publish.** npm only lets you configure a trusted publisher on a
-   package that exists, so the first version needs a token: create a granular
-   access token (publish scope, short expiry), save it as the repository secret
-   `NPM_TOKEN`, set `NPM_PUBLISH_ENABLED=true`, and let the next release publish.
-   (Or publish that version by hand from a clean checkout of the tag:
-   `cd bindings/react-native && npm ci && npm publish --access public`.)
-3. **Trusted publishing.** On npmjs.com → package → Settings → Trusted
-   publishing, add GitHub Actions: repository `xybrid-ai/xybrid`, workflow
-   `release-publish.yml`. Then delete the `NPM_TOKEN` secret and, under
-   Publishing access, require 2FA and disallow tokens. Every later publish
-   authenticates with a short-lived OIDC token and carries provenance.
+2. **Stage-only token.** Until trusted publishing is configured, save a
+   stage-only granular token with write access to `@xybrid/react-native` as the
+   repository secret `NPM_TOKEN`. Set `NPM_PUBLISH_ENABLED=true`. The first
+   package version was published separately because npm cannot stage a package
+   that does not exist yet.
+3. **Trusted publishing (optional).** On npmjs.com → package → Settings →
+   Trusted publishing, add GitHub Actions: repository `xybrid-ai/xybrid`,
+   workflow `release-publish.yml`, with **stage-only** permission. Then delete
+   the `NPM_TOKEN` secret. Every later staging request authenticates with a
+   short-lived OIDC token and carries provenance.
+
+For each release, review the staged version in npmjs.com's **Staged Packages**
+tab and approve it with 2FA. The version and its `next` or `latest` tag become
+public only after approval. Staging requires npm CLI >= 11.15.0 and Node.js >=
+22.14.0; the release workflow installs npm 11 on Node 22.
 
 If npm ever rejects the OIDC token of the merge (`pull_request`) run, use the
-same pattern as pub.dev: publish from a `workflow_dispatch` of
+same pattern as pub.dev: stage from a `workflow_dispatch` of
 `release-publish.yml` on the tag.
 
 ## Checking a release candidate by hand
