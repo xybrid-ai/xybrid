@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Planned
+
+- **Multimodal KV-prefix reuse**: the per-frame prefill cost lever for live vision — **deferred** from 0.2.0, not yet implemented.
+
+---
+
+## [0.10.0] - 2026-09-26
+
+This is the stable release of the React Native, model-cache, pipeline, live
+speech and download-progress work in 0.10.0-rc1. See the release-candidate
+entry below for the full SDK changes.
+
 ### Fixed
 
 - **A download survives losing the network for a while.** Once bytes have
@@ -17,9 +29,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Wi-Fi for 10 seconds mid-download). A download that starts offline still
   fails fast.
 
-### Planned
+### Known issues
 
-- **Multimodal KV-prefix reuse**: the per-frame prefill cost lever for live vision — **deferred** from 0.2.0, not yet implemented.
+- In fresh Expo and bare React Native apps, the published rc1 built and loaded
+  a local model on the iOS Simulator, but inference returned invalid special
+  tokens. This was reproduced on an iPhone 17 Pro simulator running iOS 26.5;
+  inference on a physical iPhone was not tested.
 
 ---
 

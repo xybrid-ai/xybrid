@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.10.0
+
+Stable release of the Dart changes in 0.10.0-rc1, including model-cache
+management and byte-level download progress. See the rc1 entry below for the
+full list.
+
 * Fixed: a download that loses the network part-way (Wi-Fi to cellular, a
   lift, a tunnel) waits up to two minutes for it to return and resumes, instead
   of failing about seven seconds into the outage.
