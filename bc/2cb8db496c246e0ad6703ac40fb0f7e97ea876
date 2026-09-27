@@ -1,0 +1,19 @@
+.github/workflows/release-prep.yml
+  s_3fa520519b0cb5::t_80b3259220e2fa 1123
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "bc2cb8db496c246e0ad6703ac40fb0f7e97ea876",
+  "prompts": {},
+  "sessions": {
+    "s_3fa520519b0cb5": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0dc32-340b-7570-b4c7-855b4fa43e25",
+        "model": "gpt-6-sol"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
