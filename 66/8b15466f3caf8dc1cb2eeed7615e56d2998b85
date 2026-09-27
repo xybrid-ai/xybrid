@@ -1,0 +1,460 @@
+bindings/react-native/src/errors.ts
+  s_4ce877e6330995::t_d00e83601cfef4 1-67
+bindings/unity/Runtime/Api/StreamingConfigs.cs.meta
+  s_4ce877e6330995::t_d00e83601cfef4 1-2
+bindings/flutter/rust/src/api/model.rs
+  s_4ce877e6330995::t_d00e83601cfef4 19,846-847,861-863,911-912,951-953,1029-1030,1090-1092,1117-1118,1179-1181,1277-1278,1354-1356,1390-1391,1453-1455
+bindings/unity/Runtime/Api/InferenceResult.cs
+  s_4ce877e6330995::t_d00e83601cfef4 162,195-222,237
+bindings/react-native/.gitignore
+  s_4ce877e6330995::t_d00e83601cfef4 4,6,11-14,16-19
+crates/xybrid-sdk/tests/pipeline_stage_outputs.rs
+  s_4ce877e6330995::t_d00e83601cfef4 1-150
+crates/xybrid-core/src/execution/path.rs
+  s_4ce877e6330995::t_d00e83601cfef4 1-2,8-20
+bindings/unity/Runtime/Api/PipelineResult.cs
+  s_4ce877e6330995::t_d00e83601cfef4 1-147
+docs/content/docs/(integration)/sdks/unity.mdx
+  s_4ce877e6330995::t_d00e83601cfef4 170-208
+macros/BUILD.bazel
+  s_4ce877e6330995::t_d00e83601cfef4 5,9
+MODULE.bazel
+  s_4ce877e6330995::t_d00e83601cfef4 175-184
+crates/xybrid-mlx/Cargo.toml
+  s_4ce877e6330995::t_37cab9a37ee943 24
+bindings/react-native/tests/types/api.ts
+  s_4ce877e6330995::t_d00e83601cfef4 1-61
+bindings/unity/Runtime/Bolt/XybridCacheEntry.cs
+  s_4ce877e6330995::t_d00e83601cfef4 1-43
+bindings/react-native/example/plugins/withXybridDevAndroid.js
+  s_4ce877e6330995::t_d00e83601cfef4 1
+bindings/unity/Runtime/Bolt/XybridCacheEntry.cs.meta
+  s_4ce877e6330995::t_d00e83601cfef4 1-2
+bindings/unity/Runtime/Bolt/XybridCacheEntryLocation.cs.meta
+  s_4ce877e6330995::t_d00e83601cfef4 1-2
+bindings/react-native/tests/natives.test.mjs
+  s_4ce877e6330995::t_d00e83601cfef4 1-62
+AGENTS.md
+  s_4ce877e6330995::t_d00e83601cfef4 60-67,92-110,230-239
+  s_4ce877e6330995::t_e466243b3511a5 240
+bindings/unity/Runtime/Bolt/XybridStageResult.cs
+  s_4ce877e6330995::t_d00e83601cfef4 1-72
+bindings/python/tests/test_sdk.py
+  s_4ce877e6330995::t_d00e83601cfef4 131-165
+bindings/react-native/ios/XybridCodec.swift
+  s_4ce877e6330995::t_d00e83601cfef4 1-508
+bindings/react-native/tests/support/bolt-surface.mjs
+  s_4ce877e6330995::t_d00e83601cfef4 1-94
+bindings/unity/Runtime/Bolt/XybridStreamingSession.cs.meta
+  s_4ce877e6330995::t_d00e83601cfef4 1-2
+bazel/ggml/android_system_name.cmake
+  s_4ce877e6330995::t_d00e83601cfef4 1-12
+bindings/apple/Sources/Xybrid/Xybrid.swift
+  s_4ce877e6330995::t_d00e83601cfef4 193-284,476-480,487,709-744,800-887,1023-1063
+  s_4ce877e6330995::t_581f2bd406aee9 1064
+CLA.md
+  s_4ce877e6330995::t_d00e83601cfef4 69,75
+crates/xybrid/BUILD.bazel
+  s_4ce877e6330995::t_d00e83601cfef4 5,9
+docs/content/docs/(integration)/sdks/meta.json
+  s_4ce877e6330995::t_d00e83601cfef4 3-11
+bindings/react-native/tests/parity.test.mjs
+  s_4ce877e6330995::t_d00e83601cfef4 1-110
+crates/xybrid-ffi-facade/Cargo.toml
+  s_4ce877e6330995::t_d00e83601cfef4 24-30
+README.md
+  s_4ce877e6330995::t_d00e83601cfef4 260-262,267-269,274-276,392
+integration-tests/BUILD.bazel
+  s_4ce877e6330995::t_d00e83601cfef4 9,13,103,125
+bindings/react-native/tests/tsconfig.json
+  s_4ce877e6330995::t_d00e83601cfef4 1-10
+bindings/react-native/ios/XybridHandles.swift
+  s_4ce877e6330995::t_d00e83601cfef4 1-191
+bindings/react-native/src/xybrid.ts
+  s_4ce877e6330995::t_d00e83601cfef4 1-176
+docs/content/docs/(integration)/sdks/android.mdx
+  s_4ce877e6330995::t_d00e83601cfef4 146-183
+bindings/react-native/scripts/pin-ios-checksum.sh
+  s_4ce877e6330995::t_d00e83601cfef4 1-47
+bindings/react-native/tests/kotlin/CodecTest.kt
+  s_4ce877e6330995::t_d00e83601cfef4 1-209
+bindings/flutter/lib/src/rust/frb_generated.dart
+  s_4ce877e6330995::t_d00e83601cfef4 73-75,305-313,319-321,336-337,340-342,361-362,2322-2327,2329-2351,2353-2377,2379-2401,2403-2418,2474-2481,2483-2499,2651-2656,2658-2673,2675,2700-2707,2709-2725,2919-2924,2926-2941,3419-3450,3859-3864,4472-4509,4958-4966,5744-5768,6111-6117
+  s_4ce877e6330995::t_6365c151086f5d 85,2328,2352,2378,2402,2429,2454,2482,2508,2534,2557,2583,2606,2631,2657,2682,2708,2732,2756,2780,2805,2829,2854,2878,2901,2925,2949,3451-3453,4969,5743,5769-5770,6119
+  s_4ce877e6330995::t_d87132dae62f71 2419,2500,2674,2676,2726,2942,4967-4968,4970,6118,6120
+bindings/flutter/rust/src/frb_generated.rs
+  s_4ce877e6330995::t_d00e83601cfef4 3005-3134,3204-3238,3432-3464,3495-3528,3780-3813,4156-4200,4763-4771,5169-5173,5175-5179,5181-5185,5193-5197,5199-5203,5205-5209,5211-5215,5629-5694,6672-6707,7175-7180
+  s_4ce877e6330995::t_6365c151086f5d 47,4201-4204,4774-4775,5168,5174,5180,5186-5192,5198,5204,5210,5375,5380,5385,5390,5395,5400,5405,5410,5415,5420,5425,5430,5435,5440,5445,5450,5455,5458,5695-5698,6708-6710,7182-7183
+  s_4ce877e6330995::t_9ba6023fd5fb87 4772-4773,4776,7181,7184
+bindings/react-native/example/README.md
+  s_4ce877e6330995::t_d00e83601cfef4 1,3-9,11-13,15,17-18,20,22-27,29-30,32,34-39,42-47,49,51-58,61-70,74-80
+bindings/react-native/scripts/test-android.sh
+  s_4ce877e6330995::t_d00e83601cfef4 1-24
+bindings/react-native/android/src/main/java/ai/xybrid/reactnative/XybridCodec.kt
+  s_4ce877e6330995::t_d00e83601cfef4 1-481
+bindings/react-native/android/src/main/java/ai/xybrid/reactnative/XybridPackage.kt
+  s_4ce877e6330995::t_d00e83601cfef4 3,6-7,9-13,15-26
+bindings/flutter/lib/src/rust/api/pipeline.dart
+  s_4ce877e6330995::t_d00e83601cfef4 16-17
+bindings/kotlin/src/main/kotlin/ai/xybrid/XybridBolt.kt
+  s_4ce877e6330995::t_d00e83601cfef4 918-924,962-969,1010-1016,1038-1043,1664-1795,1971-2199,2748-2760,2773-2844,2940-3034,3458-3569,3989-4026,4168-4248
+  s_4ce877e6330995::t_1408358e09294a 4249
+bindings/python/pyproject.toml
+  s_4ce877e6330995::t_d00e83601cfef4 7
+bindings/react-native/tests/run.mjs
+  s_4ce877e6330995::t_d00e83601cfef4 1-44
+bindings/react-native/src/presets.ts
+  s_4ce877e6330995::t_d00e83601cfef4 1,3-4,6-12,18,22-25,31,35
+crates/xybrid-ffi-facade/src/lib.rs
+  s_4ce877e6330995::t_d00e83601cfef4 34-35,1119-1126,1130-1131,1424-1620,2253-2864,2925-2927,2929-2932,2934-2939,2942,2946,3358-3434,3466-3609,4214-4233,4243,4249-4252,4257,4313-4484
+  s_4ce877e6330995::t_a23f94e0e92cbe 1127-1129
+crates/xybrid-sdk/src/registry_client.rs
+  s_4ce877e6330995::t_d00e83601cfef4 118-227,690-713,761-767,814-817,1924,1928,1930-1942,1949-1954,1956-1968,1970-1984,1987,1989-2001,2003-2028,2048-2054,2057,2060,2063-2071,2073-2080,2082-2088,2090-2099,2101-2111,2113-2135,2138-2151,2153-2155,2157-2168,2171-2207,2223,2876,3418-3420,3424-3427,3447-3930,4368-4375
+bindings/react-native/android/src/main/java/ai/xybrid/reactnative/XybridModule.kt
+  s_4ce877e6330995::t_d00e83601cfef4 5-6,9-10,12,14-15,21-22,25,29-30,33-42,44,46,48-49,51-52,54,57,59,61-77,79-124,127,131,133-151,153-163,166-176,179-215,218-222,225-243,245-261,265-269,271-278,281-284,287-289,291-293,295-319,321-327,329-330,334-337,339-348,350-354,356,358-369,371-374,379-389,391-417,419,423-424,427-430,434-436,441,443-444,446-453,456-460,464-467,471-472,474-476,480-481,484-486,489,491-494,497-498,501-502,504-505,507,509-520,522,526-528,532-539,544-571,573,577-580,583-585,588-601,603,605-617,620-621,623-663
+bindings/react-native/scripts/check-pack.mjs
+  s_4ce877e6330995::t_d00e83601cfef4 1-49
+Cargo.toml
+  s_4ce877e6330995::t_d00e83601cfef4 23
+bindings/apple/include/xybrid-bolt.h
+  s_4ce877e6330995::t_d00e83601cfef4 134-138,144-146,154-160,198-205,246-252,274-279
+crates/xybrid-sdk/Cargo.toml
+  s_4ce877e6330995::t_463cb12c49f489 140
+  s_4ce877e6330995::t_d00e83601cfef4 17,41,46
+crates/xybrid-core/src/execution/preprocessing/text.rs
+  s_4ce877e6330995::t_d00e83601cfef4 7,19,25,37-38
+bindings/react-native/tests/spec-conformance.test.mjs
+  s_4ce877e6330995::t_d00e83601cfef4 1-70
+crates/xybrid-whisper/BUILD.bazel
+  s_4ce877e6330995::t_d00e83601cfef4 4,8,29,39
+bindings/unity/Runtime/Bolt/XybridVadMode.cs
+  s_4ce877e6330995::t_d00e83601cfef4 1-60
+bindings/react-native/tests/wire.test.mjs
+  s_4ce877e6330995::t_d00e83601cfef4 1-192
+crates/llama-cpp-sys/BUILD.bazel
+  s_4ce877e6330995::t_d00e83601cfef4 9,83,94,107
+crates/xybrid/Cargo.toml
+  s_4ce877e6330995::t_d00e83601cfef4 17
+crates/xybrid-core/src/execution/tokenizer_cache.rs
+  s_4ce877e6330995::t_d00e83601cfef4 1-160
+bindings/flutter/lib/src/rust/frb_generated.web.dart
+  s_4ce877e6330995::t_6365c151086f5d 286,294
+  s_4ce877e6330995::t_d00e83601cfef4 287-293,396-398,719-728,842-845,1178-1188,1312-1314
+  s_4ce877e6330995::t_515480d6015ebc 1315
+crates/xybrid-core/src/execution/preprocessing/image.rs
+  s_4ce877e6330995::t_d00e83601cfef4 1185,1419,1525-1527,1627-1629,1667-1669,1674-1681,1795-1797,1802-1809,1926,1998
+bindings/python/xybrid/_bolt/__init__.py
+  s_4ce877e6330995::t_d00e83601cfef4 428,432,435,439,449,453-459,463-469,484-497,513-519,562-568,674-680,1352-1361,1372-1438,1950-2055,2205-2386,2496-2614,2892-2950,3189-3215,3284,3301-3302,3306-3309,3348,3350-3352,3355-3356,3360,3372-3378
+bindings/unity/Runtime/Bolt/XybridStreamingSession.cs
+  s_4ce877e6330995::t_d00e83601cfef4 1-187
+bindings/web/package.json
+  s_4ce877e6330995::t_d00e83601cfef4 3
+bindings/unity/Runtime/Api/Pipeline.cs
+  s_4ce877e6330995::t_d00e83601cfef4 1-154
+bindings/kotlin/bazel/jni/jni_glue.c
+  s_4ce877e6330995::t_d00e83601cfef4 463-594,1127-1254,1838-1963,2221-2270,2272-2273
+  s_4ce877e6330995::t_7345a390ba2c33 2271,2274
+bindings/react-native/src/types.ts
+  s_4ce877e6330995::t_d00e83601cfef4 1-8,10,13-26,29-30,33,35,39-51,56-99,101-113,123-124,127-128,131,138-144,151-152,171,173-178,180-183,185-186,189-190,193,197-213,215-217,219-223,226-228,237,243-261,263-264,266-269,272-273,275-293,295-346,348-361
+bindings/react-native/ios/xybrid_natives.rb
+  s_4ce877e6330995::t_d00e83601cfef4 1-178
+bazel/ggml/android.bzl
+  s_4ce877e6330995::t_d00e83601cfef4 1-25
+bindings/kotlin/BUILD.bazel
+  s_4ce877e6330995::t_d00e83601cfef4 24,40-42,70-75,80-84,139-165,206-207
+bindings/react-native/example/app.json
+  s_4ce877e6330995::t_d00e83601cfef4 10-11
+bindings/apple/scripts/gen-bolt-bindings.sh
+  s_4ce877e6330995::t_d00e83601cfef4 7-13,22-32,73,126-169
+BUILD.bazel
+  s_4ce877e6330995::t_d00e83601cfef4 10,117-145,588-615,678
+bindings/unity/Runtime/Bolt/XybridPipeline.cs.meta
+  s_4ce877e6330995::t_d00e83601cfef4 1-2
+bindings/react-native/tests/support/ts-surface.mjs
+  s_4ce877e6330995::t_d00e83601cfef4 1-57
+.github/workflows/release-prep.yml
+  s_4ce877e6330995::t_d00e83601cfef4 21-23,1054,1062,1064,1066-1068,1074
+bindings/unity/Runtime/Api/XybridClient.cs
+  s_4ce877e6330995::t_d00e83601cfef4 220-287
+bindings/python/xybrid/_bolt/__init__.pyi
+  s_4ce877e6330995::t_d00e83601cfef4 179-220,276-333,556-562,570-596,654-720,879-912,1055-1074
+bindings/react-native/android/build.gradle
+  s_4ce877e6330995::t_d00e83601cfef4 1-4,7-8,15-17,23-26,31,34-35,50,54-55,58-60
+bindings/react-native/ios/XybridModuleImpl.swift
+  s_4ce877e6330995::t_d00e83601cfef4 4-8,10-100,102-108,110-113,119-126,129,131-154,159-164,166-169,172-198,202-205,208-233,236-237,239-310,313-328,331,334-339,341-344,347-351,354-358,360-377,379,381-416,418-421,423,427-446,448-461,463,465-569,571-573,578-595,597-605,607,611,613,615-618,621-623,628-642,646,648-654,658-667,671-679,683-690,693-700,703-708,712-721,724,726-734,738-739,742-743,747-748,751,754-761,764,766-782,785-795,799-810,813-826,829-839,842-849,852-858,861-867,871-872,874-877,881-885
+crates/xybrid-core/src/execution/executor.rs
+  s_4ce877e6330995::t_d00e83601cfef4 294,297,345,372-375,438,531-536,571,595,2899-2905,3060-3065,3113
+crates/xybrid-sdk/BUILD.bazel
+  s_4ce877e6330995::t_d00e83601cfef4 11,70,137,166-171,196
+bindings/react-native/tests/types/tsconfig.json
+  s_4ce877e6330995::t_d00e83601cfef4 1-5
+bindings/react-native/src/envelope.ts
+  s_4ce877e6330995::t_d00e83601cfef4 1-115
+bindings/unity/Runtime/Bolt/XybridCacheEntryLocation.cs
+  s_4ce877e6330995::t_d00e83601cfef4 1-15
+docs/sdk/api-surface.yaml
+  s_4ce877e6330995::t_d00e83601cfef4 115,117-144,263-307,460,465,469,473,476-480,498,501,504,507,712-766
+  s_4ce877e6330995::t_7a74d2e2609a3d 767
+crates/xybrid-sdk/src/download.rs
+  s_4ce877e6330995::t_d00e83601cfef4 92-94,96-99,107-108,155-157,159-162,186,202,229-264,301,313-314,325,333,788-846
+  s_4ce877e6330995::t_5a86296d17c80a 847
+crates/xybrid-core/BUILD.bazel
+  s_4ce877e6330995::t_d00e83601cfef4 23,40,200,225
+.github/workflows/build-android.yml
+  s_4ce877e6330995::t_d00e83601cfef4 16-20,46-50,197-231
+  s_4ce877e6330995::t_befc2d8adc9baf 232
+bindings/react-native/src/pipeline.ts
+  s_4ce877e6330995::t_d00e83601cfef4 1-66
+bindings/react-native/example/tsconfig.json
+  s_4ce877e6330995::t_d00e83601cfef4 6
+bindings/unity/Runtime/Api/Pipeline.cs.meta
+  s_4ce877e6330995::t_d00e83601cfef4 1-2
+docs/content/docs/(integration)/sdks/ios.zh.mdx
+  s_4ce877e6330995::t_d00e83601cfef4 141-176
+bindings/kotlin/bazel/jni/ggml_cpu_backend.cpp
+  s_4ce877e6330995::t_d00e83601cfef4 1-37
+bindings/react-native/example/App.tsx
+  s_4ce877e6330995::t_d00e83601cfef4 1,3,14-26,28-33,35-46,48-51,59,61-68,73,75-81,84-94,96-103,106-117,119-146,150,152-182,184,186-187,189-216,218-228,233,236-238,241-247,252-253,267,270-274,276,286-338,340-343,346,348,350
+bindings/flutter/lib/src/rust/api/streaming.dart
+  s_4ce877e6330995::t_d00e83601cfef4 15
+bindings/react-native/src/context.ts
+  s_4ce877e6330995::t_d00e83601cfef4 1-70
+crates/xybrid-sdk/src/pipeline/mod.rs
+  s_4ce877e6330995::t_d00e83601cfef4 428,431-432,437-441,448,452-453,772,1564,1577-1578,1614-1644,1925,1929,1980,2050,2070,2081-2136,2790-2814
+  s_4ce877e6330995::t_4e300199f8f271 2815
+bazel/cargo_version.bzl
+  s_4ce877e6330995::t_d00e83601cfef4 1-45
+.github/workflows/bazel.yml
+  s_4ce877e6330995::t_d00e83601cfef4 151-164
+bindings/kotlin/src/main/kotlin/ai/xybrid/Xybrid.kt
+  s_4ce877e6330995::t_d00e83601cfef4 210-289,501-573,633-699
+  s_4ce877e6330995::t_1f6fcb5317c585 700
+bindings/react-native/example/metro.config.js
+  s_4ce877e6330995::t_d00e83601cfef4 1-2,4-10,16,21-22,24-33
+bindings/react-native/example/package.json
+  s_4ce877e6330995::t_d00e83601cfef4 7,11
+bindings/react-native/src/index.ts
+  s_4ce877e6330995::t_d00e83601cfef4 1-9,11-33,38-41,45-46,49-50,53-59,61,63,66-68,73-76,84,88-90
+CHANGELOG.md
+  s_4ce877e6330995::t_d00e83601cfef4 10-40,43-93,116-120,125-126,133-153,155-157,161-171,181-188
+spike/BUILD.bazel
+  s_4ce877e6330995::t_d00e83601cfef4 4,8
+bindings/flutter/lib/src/model_loader.dart
+  s_4ce877e6330995::t_d00e83601cfef4 157-158,166-169
+crates/xybrid-bolt/src/lib.rs
+  s_4ce877e6330995::t_d00e83601cfef4 55-57,762-821,933-998,1100-1149,1340-1532,1984-2048,2303-2329,2379-2475
+  s_4ce877e6330995::t_8596b093b3629f 2476
+Package.swift
+  s_4ce877e6330995::t_d00e83601cfef4 40,45
+docs/sdk/API_REFERENCE.md
+  s_4ce877e6330995::t_2dbfae8dfebbcb 178
+  s_4ce877e6330995::t_d00e83601cfef4 96-104,122-133,144-155,159-177,208-214,551-662,850,876,878-884,887-901,903-916,918,920-927,929-934,938-963,1001-1009,1012-1016
+crates/xybrid-bolt/BUILD.bazel
+  s_4ce877e6330995::t_d00e83601cfef4 15,45,118
+crates/xybrid-core/src/execution/postprocessing/decode.rs
+  s_4ce877e6330995::t_d00e83601cfef4 8,112-117,127-130,234-238
+bindings/flutter/pubspec.yaml
+  s_4ce877e6330995::t_d00e83601cfef4 3
+crates/xybrid-core/src/execution/preprocessing/mod.rs
+  s_4ce877e6330995::t_d00e83601cfef4 20,33,75
+crates/xybrid-core/src/execution/mod.rs
+  s_4ce877e6330995::t_d00e83601cfef4 94-96
+examples/flutter/integration_test/download_progress_test.dart
+  s_4ce877e6330995::t_d00e83601cfef4 1-123
+.github/workflows/release-publish.yml
+  s_4ce877e6330995::t_d00e83601cfef4 27-28,175,472-549
+  s_4ce877e6330995::t_2080e90e1e1782 550
+bindings/flutter/lib/src/rust/api/sdk_client.dart
+  s_4ce877e6330995::t_d00e83601cfef4 14,18-36,58-62,113-117,127-133,177-250
+bindings/flutter/rust/BUILD.bazel
+  s_4ce877e6330995::t_d00e83601cfef4 24,29,78
+bindings/unity/Runtime/Bolt/XybridStreamingConfig.cs
+  s_4ce877e6330995::t_d00e83601cfef4 1-79
+bindings/apple/XybridFFI-Info.plist
+  s_4ce877e6330995::t_d00e83601cfef4 10,12
+bindings/react-native/scripts/test-ios.sh
+  s_4ce877e6330995::t_d00e83601cfef4 1-47
+bindings/react-native/RELEASING.md
+  s_4ce877e6330995::t_d00e83601cfef4 1-83
+bindings/react-native/src/base64.ts
+  s_4ce877e6330995::t_d00e83601cfef4 1-43
+bindings/flutter/rust/src/api/mod.rs
+  s_4ce877e6330995::t_d00e83601cfef4 12-13,15-24,41-64,68-78,99-138
+bindings/unity/Runtime/Bolt/XybridVadMode.cs.meta
+  s_4ce877e6330995::t_d00e83601cfef4 1-2
+crates/xybrid-core/src/execution/postprocessing/mod.rs
+  s_4ce877e6330995::t_d00e83601cfef4 18,29,47,108-109
+crates/xybrid-cli/Cargo.toml
+  s_4ce877e6330995::t_463cb12c49f489 99
+bindings/unity/Runtime/Bolt/XybridBolt.cs
+  s_4ce877e6330995::t_d00e83601cfef4 474-515,706-903,1108-1120,1177-1188,1349-1376,1413-1418,1422-1442,1487-1501
+xtask/BUILD.bazel
+  s_4ce877e6330995::t_d00e83601cfef4 9,13,24
+bindings/react-native/android/src/main/java/ai/xybrid/reactnative/XybridHandles.kt
+  s_4ce877e6330995::t_d00e83601cfef4 1-139
+bindings/react-native/tests/swift/main.swift
+  s_4ce877e6330995::t_d00e83601cfef4 1-4,7-13,16-26,29-68,70-118,121-136,138-143,145-149,151-186,188,190,192-201
+tools/scripts/gen_unity_bolt_csharp.py
+  s_4ce877e6330995::t_d00e83601cfef4 95-98,101,394-398
+bindings/kotlin/build.gradle.kts
+  s_4ce877e6330995::t_d00e83601cfef4 8
+bindings/python/xybrid/_sugar.py
+  s_4ce877e6330995::t_d00e83601cfef4 14-15,216-243,417
+bindings/unity/Runtime/Bolt/XybridCacheStatus.cs.meta
+  s_4ce877e6330995::t_d00e83601cfef4 1-2
+crates/xybrid-ffi-facade/BUILD.bazel
+  s_4ce877e6330995::t_d00e83601cfef4 7,11,22,26-28,31,34
+bindings/react-native/src/NativeXybrid.ts
+  s_4ce877e6330995::t_d00e83601cfef4 1-5,7-11,13-20,26-46,48-55,57-63,65-81,84-93,95-97,99-106,108-112,114-118,120-128
+bindings/unity/Runtime/Bolt/XybridCacheStatus.cs
+  s_4ce877e6330995::t_d00e83601cfef4 1-48
+bindings/unity/Runtime/Api/PipelineResult.cs.meta
+  s_4ce877e6330995::t_d00e83601cfef4 1-2
+bindings/flutter/rust/src/api/sdk_client.rs
+  s_4ce877e6330995::t_d00e83601cfef4 9-80,152-196,367-390
+  s_4ce877e6330995::t_f36caba0850f25 391
+.github/PULL_REQUEST_TEMPLATE.md
+  s_4ce877e6330995::t_d00e83601cfef4 16,19
+bindings/flutter/lib/src/rust/frb_generated.io.dart
+  s_4ce877e6330995::t_6365c151086f5d 284,292
+  s_4ce877e6330995::t_d00e83601cfef4 285-291,394-396,717-726,840-843,1176-1186,1310-1312
+  s_4ce877e6330995::t_dfa11a90359875 1313
+bindings/flutter/lib/xybrid.dart
+  s_4ce877e6330995::t_d00e83601cfef4 113-114
+bindings/unity/Runtime/Api/StreamingConfigs.cs
+  s_4ce877e6330995::t_d00e83601cfef4 1-66
+bindings/apple/Sources/Xybrid/xybrid_bolt.swift
+  s_4ce877e6330995::t_d00e83601cfef4 434-529,662-828,1141-1155,1171-1206,1274-1365,1810-1915,2305-2398,2568-2605,2609,2612-2614
+  s_4ce877e6330995::t_ae48376188cb31 2606-2608,2610-2611,2615-2616
+bindings/unity/Runtime/Bolt/XybridPartialResult.cs
+  s_4ce877e6330995::t_d00e83601cfef4 1-53
+docs/content/docs/(integration)/sdks/ios.mdx
+  s_4ce877e6330995::t_d00e83601cfef4 153-193
+bindings/react-native/src/model.ts
+  s_4ce877e6330995::t_d00e83601cfef4 1-408
+bindings/react-native/parity.json
+  s_4ce877e6330995::t_d00e83601cfef4 1-187
+bindings/react-native/src/cancel.ts
+  s_4ce877e6330995::t_d00e83601cfef4 1-47
+crates/whisper-cpp-sys/Cargo.toml
+  s_4ce877e6330995::t_d00e83601cfef4 42
+docs/content/docs/(integration)/sdks/react-native.mdx
+  s_4ce877e6330995::t_d00e83601cfef4 1-99
+bindings/unity/Runtime/Bolt/XybridStageResult.cs.meta
+  s_4ce877e6330995::t_d00e83601cfef4 1-2
+bindings/kotlin/bazel/jni/xybrid_bolt.h
+  s_4ce877e6330995::t_d00e83601cfef4 134-138,144-146,154-160,198-205,246-252,274-279
+.github/workflows/welcome.yml
+  s_4ce877e6330995::t_d00e83601cfef4 43
+bindings/react-native/package.json
+  s_4ce877e6330995::t_d00e83601cfef4 2-4,7,15-19,25-30,38-39,41,44-45,56-61,64,69-73,81-85
+CONTRIBUTING.md
+  s_4ce877e6330995::t_d00e83601cfef4 225
+bindings/flutter/CHANGELOG.md
+  s_4ce877e6330995::t_d00e83601cfef4 5-19,30-42
+bindings/react-native/ios/XybridModule.mm
+  s_4ce877e6330995::t_d00e83601cfef4 1,4-21,27-28,31-34,36-37,44-48,50-53,56-61,63-66,69-72,75-80,83-87,90-94,97-100,103-108,110-113,116-120,123-127,129-133,136-140,142-146,149-152,155-158,161-165,167-171,174-178,181-184,187-192,194-197,200-204,207-213,216-220,223-228,230-234,237-241,244-248,251-255,258-262,265-269,272-278,280-284,287-337,340-493
+bindings/react-native/react-native-xybrid.podspec
+  s_4ce877e6330995::t_d00e83601cfef4 2,7-8,16-18,21-24,27-30,39-45,48-49
+bindings/flutter/rust/src/api/pipeline.rs
+  s_4ce877e6330995::t_d00e83601cfef4 7-14,92-97,123-147
+bindings/flutter/lib/src/xybrid.dart
+  s_4ce877e6330995::t_d00e83601cfef4 21-29,247-287
+  s_4ce877e6330995::t_8f9877ac93b2d7 288
+bindings/flutter/rust/Cargo.toml
+  s_4ce877e6330995::t_d00e83601cfef4 3
+bindings/react-native/tests/facade.test.mjs
+  s_4ce877e6330995::t_d00e83601cfef4 1-383
+bindings/react-native/tests/support/fake-native.mjs
+  s_4ce877e6330995::t_d00e83601cfef4 1-46
+bindings/unity/Runtime/Bolt/XybridPipeline.cs
+  s_4ce877e6330995::t_d00e83601cfef4 1-228
+bindings/unity/Runtime/Bolt/XybridPipelineResult.cs.meta
+  s_4ce877e6330995::t_d00e83601cfef4 1-2
+bindings/unity/Runtime/Bolt/XybridStreamingConfig.cs.meta
+  s_4ce877e6330995::t_d00e83601cfef4 1-2
+crates/whisper-cpp-sys/BUILD.bazel
+  s_4ce877e6330995::t_d00e83601cfef4 13,20
+crates/xybrid-sdk/src/lib.rs
+  s_4ce877e6330995::t_d00e83601cfef4 218,321-324,338-342,735-736,1164-1170
+  s_4ce877e6330995::t_8261158caf8531 1171-1172
+docs/content/docs/(integration)/sdks/android.zh.mdx
+  s_4ce877e6330995::t_d00e83601cfef4 132-164
+.github/workflows/build-react-native.yml
+  s_4ce877e6330995::t_d00e83601cfef4 14,17-19,40-101,104,111-115,121,132,136-137,139-141,147,149-151,153-155,157-163,165-166,168-191,194,201-204,224,229-230,233-234,251-253,263,270,272-273
+bindings/react-native/tests/kotlin/android/util/Base64.kt
+  s_4ce877e6330995::t_d00e83601cfef4 1-14
+examples/flutter/ios/Runner.xcodeproj/project.pbxproj
+  s_4ce877e6330995::t_d00e83601cfef4 492,499,516,534,550,675,682,698,705
+bindings/unity/Runtime/Bolt/XybridPipelineResult.cs
+  s_4ce877e6330995::t_d00e83601cfef4 1-58
+docs/content/docs/concepts/caching.mdx
+  s_4ce877e6330995::t_d00e83601cfef4 144-184,188,195,197-202,204-205
+bindings/react-native/src/session.ts
+  s_4ce877e6330995::t_d00e83601cfef4 1-76
+bindings/react-native/src/wire.ts
+  s_4ce877e6330995::t_d00e83601cfef4 1-408
+bindings/react-native/tsconfig.build.json
+  s_4ce877e6330995::t_d00e83601cfef4 4-6,8
+crates/xybrid-core/Cargo.toml
+  s_4ce877e6330995::t_37cab9a37ee943 118
+  s_4ce877e6330995::t_d00e83601cfef4 28-29,32,85
+crates/xybrid-sdk/src/cache/cache_manager.rs
+  s_4ce877e6330995::t_d00e83601cfef4 195-200,204-208,377-420,713-716,762,813-826,946-963,1020-1088,1380
+bazel/ggml/BUILD.bazel
+  s_4ce877e6330995::t_d00e83601cfef4 1-35
+bindings/react-native/tests/support/react-native-stub.js
+  s_4ce877e6330995::t_d00e83601cfef4 1-41
+crates/xybrid-llama/BUILD.bazel
+  s_4ce877e6330995::t_d00e83601cfef4 4,22,47,73
+bindings/react-native/example/speech.ts
+  s_4ce877e6330995::t_d00e83601cfef4 1-117
+bindings/react-native/README.md
+  s_4ce877e6330995::t_d00e83601cfef4 1,3-6,8-9,11-15,17-18,20-33,36-45,47,49,51-53,55-58,61-62,64,66-67,69-70,72-79,81-87,90,92-97,100-118,120,123,130-133,136,138,141-152,156-157,159-286,288-298
+bindings/unity/Runtime/Api/Model.cs
+  s_4ce877e6330995::t_d00e83601cfef4 480-529
+crates/xybrid-llama/Cargo.toml
+  s_4ce877e6330995::t_d00e83601cfef4 24
+bindings/flutter/test/model_cache_test.dart
+  s_4ce877e6330995::t_d00e83601cfef4 1-52
+bindings/unity/Runtime/Bolt/XybridPartialResult.cs.meta
+  s_4ce877e6330995::t_d00e83601cfef4 1-2
+crates/xybrid-whisper/Cargo.toml
+  s_4ce877e6330995::t_d00e83601cfef4 23
+bindings/react-native/scripts/prepack.sh
+  s_4ce877e6330995::t_d00e83601cfef4 1-17
+bindings/unity/package.json
+  s_4ce877e6330995::t_d00e83601cfef4 3
+docs/content/docs/(integration)/sdks/unity.zh.mdx
+  s_4ce877e6330995::t_d00e83601cfef4 167-200
+bindings/python/xybrid/_bolt/_native.c
+  s_4ce877e6330995::t_d00e83601cfef4 41-54,129-144,225-238,281-292,329-335,373-380,421-427,449-454,649-718,1089-1168,1569-1638,1849-1908,2186-2187,2190-2191,2198-2201,2206-2209,2218-2225,2235-2238,2263-2266,2327-2330,2912-2942,3023-3032,3034-3038,3040-3056,3059-3062,3064-3067,3069-3153,4497,4499,4502,4505,4512,4514,4523,4528,4537,4547,4550,4558,4560,4563,4566,4573,4575,4584,4589,4598,4608,4611,4619,4621,4624,4627,4634,4636,4645,4650,4659,4669,4672,4680,4682-4686,4688-4689,4691-4698,4700,4702,4704-4707,4709-4712,4716-4717,4720-4721,4726-4727,4730,4733,4735,4741,4743,4746,4749,4755-4756,4758,4767,4772,4781-5579,6330-6450,6452-6454,6456,6458-6459,6462,6465,6468-6469,6476,6479,6483,6485-6486,6493-6494,6500,6508-6513,6515,6520-6521,6523,6530,6534,6536,6540,6542-6554,6562,6564,6567,6570,6572,6576-6577,6723-6781,6850-7029,7033,7035-7037,7041,7044,7051-7059,7061,7065,7067-7068,7072,7075,7082-7091,7093,7097,7102,7105,7112-7114,7119,7124,7127,7134,8114-8347,8355,8360,8363,8370,8375,8380,8383,8390-8400,8403-8410,9243-9244,9248-9251,9260,9262,9319-9534,9540-9541,9544,9548,9556,9563-9569,9573,9576,9580,9583-9588,9591,9593-9594,9599-9605,9609,9612,9616,9619-9627,9629-9630,9635-9638,9642,9645,9649-9657,9659,9664-9670,9673-9674,9677,9681,9684-9689,9692,9694-9695,9700-9703,9706-9707,9710,9714-9719,9722,9724,10172-10292,10430-10431,10435-10438,10447,10449,10457-10463,10501-10508,10546-10550,10564-10570
+crates/xybrid-cli/BUILD.bazel
+  s_4ce877e6330995::t_d00e83601cfef4 7,25,78
+Cargo.lock
+  s_4ce877e6330995::t_b2957fc83c2e6e 1260-1265,2752,3229,5241,5243,5247,6281,6295,6302,6334,6405,6407,6409,6417,6426,6439,6448,6458,6487,6496,6505,6517
+bindings/flutter/example/pubspec.lock
+  s_4ce877e6330995::t_443f95d278f4f9 422
+bindings/react-native/example/package-lock.json
+  s_4ce877e6330995::t_78901574c281b0 11,13,16,24-25,30-31,35,1854-1857,2734-2743
+bindings/react-native/package-lock.json
+  s_4ce877e6330995::t_2c8ee43bb08627 1-6816
+examples/flutter/pubspec.lock
+  s_4ce877e6330995::t_9896faec7198fa 1045
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "668b15466f3caf8dc1cb2eeed7615e56d2998b85",
+  "prompts": {},
+  "sessions": {
+    "s_4ce877e6330995": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "af12d004-e1a4-4597-a288-ab8c3b2b1801",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
