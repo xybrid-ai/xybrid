@@ -1,0 +1,34 @@
+bindings/apple/README.md
+  s_9b857a9086aa89::t_af246c00e0cc1c 40-43
+bindings/apple/Sources/Xybrid/Xybrid.swift
+  s_9b857a9086aa89::t_efb5dcfab77dbf 425
+  s_9b857a9086aa89::t_d24c2d57b45ab5 123-132
+  s_9b857a9086aa89::t_549d2a8dc3b54f 462
+  s_9b857a9086aa89::t_d618d32e433439 100
+  s_9b857a9086aa89::t_efec51c762377a 817-818,823-824,829-830
+  s_3fa520519b0cb5::t_15a6c762a8e5c9 133-134
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "6b6abf18047cd4b531976e43cdc7ae010661a4ba",
+  "prompts": {},
+  "sessions": {
+    "s_3fa520519b0cb5": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0dc32-340b-7570-b4c7-855b4fa43e25",
+        "model": "gpt-6-sol"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    },
+    "s_9b857a9086aa89": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b332f3e2-74c3-42fb-a790-f2f69038286c",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
