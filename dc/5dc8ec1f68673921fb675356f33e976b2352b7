@@ -1,0 +1,30 @@
+bindings/web/README.md
+  s_9b857a9086aa89::t_f060a1fb67ee07 38
+docs/telemetry/registry.md
+  s_9b857a9086aa89::t_f060a1fb67ee07 45,63,81
+bindings/web/test/registry.test.ts
+  s_9b857a9086aa89::t_a5ff134c70103d 11
+  s_9b857a9086aa89::t_7efa4cf1a3b902 230-233
+bindings/web/src/internal/registry.ts
+  s_9b857a9086aa89::t_7efa4cf1a3b902 11,17-21,213
+bindings/web/src/version.ts
+  s_9b857a9086aa89::t_cc29549794f41b 1-2
+CHANGELOG.md
+  s_9b857a9086aa89::t_f060a1fb67ee07 25-26
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "dc5dc8ec1f68673921fb675356f33e976b2352b7",
+  "prompts": {},
+  "sessions": {
+    "s_9b857a9086aa89": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b332f3e2-74c3-42fb-a790-f2f69038286c",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
