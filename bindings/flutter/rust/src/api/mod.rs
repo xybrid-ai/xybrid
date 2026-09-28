@@ -1,19 +1,17 @@
 // Flutter FFI API module
 // Thin wrappers with #[frb] attributes that delegate to xybrid-sdk
 
-/// Binding identifier reported in the `X-Xybrid-Client` registry header
-/// for Flutter apps. Routed through `xybrid_sdk::set_binding` at every
-/// FFI entry so registry calls are attributed correctly even on
-/// platforms that skip `init_sdk_cache_dir` (iOS/macOS), and on entry
-/// points the host hits before `init_sdk_cache_dir` is called (the
-/// push-state setters in [`device`]).
+/// Binding identifier reported in the `X-Xybrid-Client` registry header and
+/// on telemetry events for Flutter apps. Registered once, by the
+/// `#[frb(init)]` hook [`sdk_client::init_app`], which `XybridRustLib.init()`
+/// runs on every platform before any other call.
 pub(crate) const FLUTTER_BINDING: &str = "flutter";
 
 /// Install the platform-native `log` backend and a panic logger, once per
 /// process.
 ///
 /// Runs from `XybridRustLib.init()` through the `#[frb(init)]` hook
-/// [`sdk_client::init_native_logging`], so every app gets native logs from the
+/// [`sdk_client::init_app`], so every app gets native logs from the
 /// first call. It used to run only from `initSdkCacheDir`, `setApiKey` and the
 /// telemetry setters, and `Xybrid.init` calls `initSdkCacheDir` on Android
 /// only: an iOS app without an API key got no `dev.xybrid.sdk` logs at all.

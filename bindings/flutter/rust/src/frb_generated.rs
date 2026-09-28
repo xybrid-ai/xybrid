@@ -44,7 +44,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.11.1";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 601181265;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -231353907;
 
 // Section: executor
 
@@ -3723,7 +3723,7 @@ fn wire__crate__api__model__ffi_generation_config_greedy_impl(
         },
     )
 }
-fn wire__crate__api__sdk_client__init_native_logging_impl(
+fn wire__crate__api__sdk_client__init_app_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
     rust_vec_len_: i32,
@@ -3731,7 +3731,7 @@ fn wire__crate__api__sdk_client__init_native_logging_impl(
 ) {
     FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
         flutter_rust_bridge::for_generated::TaskInfo {
-            debug_name: "init_native_logging",
+            debug_name: "init_app",
             port: Some(port_),
             mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
         },
@@ -3749,7 +3749,7 @@ fn wire__crate__api__sdk_client__init_native_logging_impl(
             move |context| {
                 transform_result_sse::<_, ()>((move || {
                     let output_ok = Result::<_, ()>::Ok({
-                        crate::api::sdk_client::init_native_logging();
+                        crate::api::sdk_client::init_app();
                     })?;
                     Ok(output_ok)
                 })())
@@ -5099,12 +5099,7 @@ fn pde_ffi_dispatcher_primary_impl(
             rust_vec_len,
             data_len,
         ),
-        90 => wire__crate__api__sdk_client__init_native_logging_impl(
-            port,
-            ptr,
-            rust_vec_len,
-            data_len,
-        ),
+        90 => wire__crate__api__sdk_client__init_app_impl(port, ptr, rust_vec_len, data_len),
         _ => unreachable!(),
     }
 }

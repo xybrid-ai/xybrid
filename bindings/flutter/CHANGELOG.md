@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+* Fixed: registry requests and telemetry say `flutter` on every platform.
+  On iOS, macOS, Linux and Windows without an API key they said `rust`.
+
 ## 0.10.1
 
 * Fixed: llama.cpp inference on the iOS Simulator uses the CPU to avoid
