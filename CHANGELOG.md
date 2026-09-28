@@ -22,6 +22,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     Android until an SDK registers its own name, and Unity registers from the
     static constructors of the generated types.
   - The `xybrid` CLI now reports `cli` instead of `rust`.
+  - The browser SDK (`@xybrid/web`) sent no header at all; it now sends
+    `binding=web` with its version.
 
   A test now fails if a binding registers a name the SDK would reject.
 - **Unity on Android can load models.** Android has no default model cache
