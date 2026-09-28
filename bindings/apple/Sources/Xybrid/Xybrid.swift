@@ -97,7 +97,7 @@ public enum Xybrid {
         initLock.lock()
         defer { initLock.unlock() }
         if initialized { return }
-        setBinding(binding: "swift")
+        registerBinding()
         configureRuntime(apiKey: apiKey, gatewayUrl: gatewayUrl, ingestUrl: ingestUrl)
         // `registerPlatformObservers()` touches UIKit (`UIDevice.current`,
         // `isBatteryMonitoringEnabled`) on iOS, which is main-thread-only.
@@ -118,6 +118,18 @@ public enum Xybrid {
         initLock.lock()
         defer { initLock.unlock() }
         return initialized
+    }
+
+    /// Register `swift` as this process's binding, for registry and telemetry
+    /// attribution.
+    ///
+    /// `initialize()` calls this, but loading and running models works without
+    /// it on iOS and macOS, so the loader, download and pipeline entry points
+    /// call it too. The SDK keeps the first name registered: React Native,
+    /// which wraps this SDK, registers `react-native` before its first Swift
+    /// call and keeps it.
+    static func registerBinding() {
+        setBinding(binding: "swift")
     }
 
     /// Releases every idle loaded model's memory; returns how many were released.
@@ -410,6 +422,7 @@ public struct ModelLoader: Sendable {
     /// This may resolve registry metadata, download files, access disk, and
     /// initialize the inference runtime. Do not call it from the main actor.
     public func loadSync() throws -> XybridModel {
+        Xybrid.registerBinding()
         switch source {
         case .registry(let id):
             return try XybridModel(fromRegistry: id)
@@ -446,6 +459,7 @@ public struct ModelLoader: Sendable {
     /// Cancelling the task consuming `progress()` unsubscribes from updates;
     /// call ``XybridDownload/cancel()`` to stop the transfer itself.
     public func download() -> XybridDownload? {
+        Xybrid.registerBinding()
         switch source {
         case .registry(let id), .registrySpeculative(let id):
             return XybridDownload(fromRegistry: id)
@@ -800,17 +814,20 @@ public extension XybridModel {
 public extension XybridPipeline {
     /// Parse and load a pipeline without blocking the caller.
     static func fromYamlAsync(_ yaml: String) async throws -> XybridPipeline {
-        try await Task.detached { try XybridPipeline(fromYaml: yaml) }.value
+        Xybrid.registerBinding()
+        return try await Task.detached { try XybridPipeline(fromYaml: yaml) }.value
     }
 
     /// Read, parse, and load a pipeline file without blocking the caller.
     static func fromFileAsync(_ url: URL) async throws -> XybridPipeline {
-        try await Task.detached { try XybridPipeline(fromFile: url.path) }.value
+        Xybrid.registerBinding()
+        return try await Task.detached { try XybridPipeline(fromFile: url.path) }.value
     }
 
     /// Load a pipeline bundle without blocking the caller.
     static func fromBundleAsync(_ url: URL) async throws -> XybridPipeline {
-        try await Task.detached { try XybridPipeline(fromBundle: url.path) }.value
+        Xybrid.registerBinding()
+        return try await Task.detached { try XybridPipeline(fromBundle: url.path) }.value
     }
 
     /// Run every stage with default options.
