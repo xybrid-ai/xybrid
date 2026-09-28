@@ -1,0 +1,26 @@
+crates/xybrid-sdk/src/lib.rs
+  s_9b857a9086aa89::t_ff4ad319d4a61f 318-320
+  s_9b857a9086aa89::t_25efe60fa9cf21 354-365,368-369,371-375
+crates/xybrid-ffi-facade/src/lib.rs
+  s_9b857a9086aa89::t_44f711510a4b7c 4277-4282
+  s_9b857a9086aa89::t_9c3dfcc6f19b6c 4255-4257
+  s_9b857a9086aa89::t_39154228e78ee8 2920-2927
+crates/xybrid-bolt/src/lib.rs
+  s_9b857a9086aa89::t_f62c6f614e7421 1067-1068,1071-1075,1077,1079,1094,1282,1290,1625,1640,1649,1657,1665,1677,1687,2017,2024,2031,2229,2325-2328,2330,2337-2341
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "2425d7e752f0e67f802553b218c5f0fa668717cd",
+  "prompts": {},
+  "sessions": {
+    "s_9b857a9086aa89": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b332f3e2-74c3-42fb-a790-f2f69038286c",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
