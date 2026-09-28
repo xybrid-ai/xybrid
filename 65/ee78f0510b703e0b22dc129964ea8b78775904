@@ -1,0 +1,19 @@
+bindings/unity/Runtime/BoltSupplement/AndroidCacheFolder.cs
+  s_9b857a9086aa89::t_8765d36ca48f3e 6-10,30-34
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "65ee78f0510b703e0b22dc129964ea8b78775904",
+  "prompts": {},
+  "sessions": {
+    "s_9b857a9086aa89": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b332f3e2-74c3-42fb-a790-f2f69038286c",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
