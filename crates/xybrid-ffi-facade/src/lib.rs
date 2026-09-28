@@ -2905,7 +2905,7 @@ pub fn is_sdk_cache_configured() -> bool {
     sdk::is_sdk_cache_configured()
 }
 
-/// Register the binding identifier (`"flutter"`, `"kotlin"`,
+/// Register the binding identifier (`"flutter"`, `"kotlin"`, `"python"`,
 /// `"react-native"`, `"swift"`, `"unity"`) reported in the `X-Xybrid-Client`
 /// registry header and on telemetry events.
 ///
@@ -2922,6 +2922,7 @@ fn resolve_binding(binding: &str) -> &'static str {
     match binding {
         "flutter" => "flutter",
         "kotlin" => "kotlin",
+        "python" => "python",
         "react-native" => "react-native",
         "swift" => "swift",
         "unity" => "unity",
@@ -4193,10 +4194,84 @@ stages:
         assert!(ctx.history().is_empty());
     }
 
+    /// Every name a shipped SDK registers.
+    const PLATFORM_BINDINGS: [&str; 6] = [
+        "flutter",
+        "kotlin",
+        "python",
+        "react-native",
+        "swift",
+        "unity",
+    ];
+
     #[test]
     fn resolve_binding_keeps_every_platform_binding() {
-        for binding in ["flutter", "kotlin", "react-native", "swift", "unity"] {
+        for binding in PLATFORM_BINDINGS {
             assert_eq!(resolve_binding(binding), binding);
+        }
+    }
+
+    /// A name `resolve_binding` collapses makes that whole SDK report `rust`,
+    /// which is how React Native and Python went unattributed. This reads the
+    /// bindings' sources, so it only runs from a checkout (`cargo test`), not
+    /// from a Bazel sandbox that has no `bindings/`.
+    #[test]
+    fn every_name_a_binding_registers_is_accepted() {
+        let bindings = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../bindings");
+        if !bindings.is_dir() {
+            eprintln!("skipped: no bindings/ at {}", bindings.display());
+            return;
+        }
+        let mut found = Vec::new();
+        collect_registered_bindings(&bindings, &mut found);
+        for sdk in PLATFORM_BINDINGS {
+            assert!(
+                found.iter().any(|(_, name)| name == sdk),
+                "no `{sdk}` registration found; did its call change shape? {found:?}"
+            );
+        }
+        for (file, name) in &found {
+            assert_eq!(
+                resolve_binding(name),
+                name,
+                "{file} registers `{name}`, which resolve_binding collapses"
+            );
+        }
+    }
+
+    /// Collect `(file, name)` for each literal registration under `dir`:
+    /// `setBinding("…")`, `SetBinding("…")`, `set_binding("…")`, and the
+    /// Flutter crate's `FLUTTER_BINDING` constant.
+    fn collect_registered_bindings(dir: &std::path::Path, found: &mut Vec<(String, String)>) {
+        const SOURCES: [&str; 7] = ["cs", "java", "kt", "py", "rs", "swift", "ts"];
+        const SKIPPED_DIRS: [&str; 4] = ["build", "node_modules", "Pods", "target"];
+        let entries = std::fs::read_dir(dir).expect("bindings/ should be readable");
+        for path in entries.flatten().map(|entry| entry.path()) {
+            let name = path.file_name().unwrap_or_default().to_string_lossy();
+            if path.is_dir() {
+                if !name.starts_with('.') && !SKIPPED_DIRS.contains(&name.as_ref()) {
+                    collect_registered_bindings(&path, found);
+                }
+                continue;
+            }
+            let extension = path.extension().unwrap_or_default().to_string_lossy();
+            if !SOURCES.contains(&extension.as_ref()) {
+                continue;
+            }
+            let Ok(source) = std::fs::read_to_string(&path) else {
+                continue;
+            };
+            for marker in ["etBinding(", "et_binding(", "_BINDING: &str = "] {
+                for (at, _) in source.match_indices(marker) {
+                    let call = source[at + marker.len()..].trim_start_matches("binding: ");
+                    let literal = call
+                        .strip_prefix('"')
+                        .and_then(|rest| rest.split('"').next());
+                    if let Some(literal) = literal {
+                        found.push((path.display().to_string(), literal.to_string()));
+                    }
+                }
+            }
         }
     }
 
@@ -4220,10 +4295,7 @@ stages:
         // `get_binding()` returns one of the accepted values.
         set_binding("flutter".into());
         let bound = get_binding();
-        assert!(matches!(
-            bound.as_str(),
-            "flutter" | "kotlin" | "react-native" | "swift" | "unity" | "rust"
-        ));
+        assert!(PLATFORM_BINDINGS.contains(&bound.as_str()) || bound == sdk::DEFAULT_BINDING);
     }
 
     #[test]
@@ -4234,10 +4306,7 @@ stages:
         // mapping itself.
         set_binding("not-a-real-binding".into());
         let bound = get_binding();
-        assert!(matches!(
-            bound.as_str(),
-            "flutter" | "kotlin" | "react-native" | "swift" | "unity" | "rust"
-        ));
+        assert!(PLATFORM_BINDINGS.contains(&bound.as_str()) || bound == sdk::DEFAULT_BINDING);
     }
 
     #[test]

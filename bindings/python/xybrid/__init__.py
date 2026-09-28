@@ -24,6 +24,11 @@ _sugar.install()
 from ._errors import *  # noqa: E402,F403 -- ordering is deliberate, see above
 from ._errors import XybridError  # noqa: E402
 
+# Attribute registry requests and telemetry to this SDK from the first call.
+# `init()` is optional (local inference needs none of it), so registering
+# there left every app that skips it reported as `rust`.
+_bolt.set_binding("python")
+
 _INIT_LOCK: Final = threading.Lock()
 _INITIALIZED = False
 
@@ -31,9 +36,8 @@ _INITIALIZED = False
 def init(api_key: str | None = None, gateway_url: str | None = None, ingest_url: str | None = None) -> None:
     """Initialize the Xybrid runtime.
 
-    This function is idempotent and thread-safe. The first call registers the
-    Python binding identifier and applies runtime configuration; later calls are
-    no-ops even if they pass different arguments.
+    This function is idempotent and thread-safe. The first call applies runtime
+    configuration; later calls are no-ops even if they pass different arguments.
 
     Without ``api_key``, xybrid runs fully on-device and telemetry remains
     disabled. Passing ``api_key`` starts the platform telemetry exporter;
@@ -46,7 +50,6 @@ def init(api_key: str | None = None, gateway_url: str | None = None, ingest_url:
     with _INIT_LOCK:
         if _INITIALIZED:
             return
-        _bolt.set_binding("python")
         _bolt.configure_runtime(api_key=api_key, gateway_url=gateway_url, ingest_url=ingest_url)
         _INITIALIZED = True
 
