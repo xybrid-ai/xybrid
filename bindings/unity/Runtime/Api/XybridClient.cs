@@ -172,7 +172,7 @@ namespace Xybrid
                 // telemetry attribution). The pre-bolt xybrid_init() was a no-op.
                 // Telemetry now runs entirely through bolt (A2.2), so there is no
                 // longer a second C-ABI binding state to keep in sync.
-                RegisterBinding();
+                XybridBolt.XybridBolt.SetBinding("unity");
 
                 // One call configures the whole runtime, exactly as the Swift
                 // `Xybrid.initialize(apiKey:gatewayUrl:ingestUrl:)` and Kotlin
@@ -215,20 +215,6 @@ namespace Xybrid
                 throw new InvalidOperationException(
                     "Xybrid SDK is not initialized. Call XybridClient.Initialize() first.");
             }
-        }
-
-        /// <summary>
-        /// Registers <c>unity</c> as this process's binding, for registry and
-        /// telemetry attribution.
-        /// </summary>
-        /// <remarks>
-        /// <see cref="Initialize"/> calls this, but loading a model works without
-        /// it, so the model, download and pipeline entry points call it too. The
-        /// SDK keeps the first name registered, so repeat calls are no-ops.
-        /// </remarks>
-        internal static void RegisterBinding()
-        {
-            XybridBolt.XybridBolt.SetBinding("unity");
         }
 
         /// <summary>Gets aggregate storage usage across all managed model-cache areas.</summary>

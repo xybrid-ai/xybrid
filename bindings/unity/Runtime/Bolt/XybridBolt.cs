@@ -1131,7 +1131,7 @@ namespace XybridBolt
 
     }
 
-    internal static class NativeMethods
+    internal static partial class NativeMethods
     {
         internal const string LibName = "xybrid_bolt";
 

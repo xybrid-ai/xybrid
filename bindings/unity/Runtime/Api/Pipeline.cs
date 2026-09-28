@@ -122,7 +122,6 @@ namespace Xybrid
         {
             try
             {
-                XybridClient.RegisterBinding();
                 return new Pipeline(create());
             }
             catch (Exception ex) when (

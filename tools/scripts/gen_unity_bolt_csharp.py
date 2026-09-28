@@ -50,6 +50,10 @@ What it does:
         a Rust-side allocator (e.g. boltffi_alloc_buf).
      g. Probes before decoding the append-only `XybridResult` reasoning tail,
         preserving compatibility with the merged tool-calling wire shape.
+     h. `class NativeMethods` -> `partial class NativeMethods`. Every generated
+        call reaches native code through it, so a static constructor in
+        bindings/unity/Runtime/BoltSupplement registers the `unity` binding
+        before the first one, whichever public entry point the app uses.
   3. Writes deterministic Unity .meta files (GUID = sha256(asset path)[:32],
      the same scheme as stage_unity_desktop_ort.py).
   4. Syncs the result into bindings/unity/Runtime/Bolt, pruning stale files.
@@ -284,6 +288,11 @@ BOLT_CLASS_DEST = "XybridBolt.cs"
 BOLT_CLASS_TARGET = "public static class Xybrid_bolt"
 BOLT_CLASS_REPLACEMENT = "public static class XybridBolt"
 
+# --- Transform (h): make NativeMethods partial for the supplement's static
+# constructor, which registers the binding before the first native call.
+NATIVE_METHODS_TARGET = "internal static class NativeMethods"
+NATIVE_METHODS_REPLACEMENT = "internal static partial class NativeMethods"
+
 # --- Transform (c): IsExternalInit polyfill (a Unity-only supplement) ---
 POLYFILL_FILE = "IsExternalInit.cs"
 POLYFILL_CONTENT = (
@@ -439,6 +448,13 @@ def generate() -> dict[str, str]:
             )
             content = content.replace(BOLT_CLASS_TARGET, BOLT_CLASS_REPLACEMENT, 1)
             bolt_class_renamed = True
+            _drift(
+                content.count(NATIVE_METHODS_TARGET) == 1,
+                f"expected the NativeMethods declaration in {src.name}",
+            )
+            content = content.replace(
+                NATIVE_METHODS_TARGET, NATIVE_METHODS_REPLACEMENT, 1
+            )
             _drift(
                 content.count(READER_REMAINING_TARGET) == 1,
                 f"expected WireReader constructor in {src.name}",
