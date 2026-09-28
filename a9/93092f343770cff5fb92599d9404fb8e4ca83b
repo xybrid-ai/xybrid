@@ -1,0 +1,34 @@
+bindings/unity/Runtime/Api/XybridClient.cs
+  s_9b857a9086aa89::t_31f36c1ef5d3f9 220-231
+  s_9b857a9086aa89::t_31dcf59753582c 175
+  s_3fa520519b0cb5::t_d57400917ebeac 232-233
+bindings/unity/Runtime/Api/ModelLoader.cs
+  s_9b857a9086aa89::t_3f656d8caecd22 185
+  s_9b857a9086aa89::t_4a42ed6cbf8faf 210
+bindings/unity/Runtime/Api/Pipeline.cs
+  s_9b857a9086aa89::t_2f76bb2cff1c6c 125
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "a993092f343770cff5fb92599d9404fb8e4ca83b",
+  "prompts": {},
+  "sessions": {
+    "s_3fa520519b0cb5": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0dc32-340b-7570-b4c7-855b4fa43e25",
+        "model": "gpt-6-sol"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    },
+    "s_9b857a9086aa89": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b332f3e2-74c3-42fb-a790-f2f69038286c",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
