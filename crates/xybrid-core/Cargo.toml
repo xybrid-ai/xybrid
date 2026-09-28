@@ -57,7 +57,7 @@ log = "0.4"  # Standard logging facade
 tracing = "0.1"  # Structured logging for streaming backend telemetry
 
 # System information for device detection (v0.0.7)
-sysinfo = "0.32"
+sysinfo = "0.39"
 
 # ONNX Runtime for model inference — the linking MODE is per-target (cfg-driven,
 # see the [target.'cfg(...)'] sections below), not feature-driven:
