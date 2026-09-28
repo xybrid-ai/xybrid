@@ -3,10 +3,11 @@
 // Android has no default one: the native library refuses to load or list models
 // until a folder is set. Kotlin and Flutter pass their app's files folder at
 // init; here it is <Application.persistentDataPath>/xybrid/models. Unity lets
-// only the main thread read persistentDataPath, so it is read in the earliest
-// startup phase, and again on first use if that comes first on the main thread
-// (another startup hook loading a model). A first use off the main thread before
-// either gets the folder as soon as the startup hook runs. An app that calls
+// only the main thread read persistentDataPath, and may not have it yet in the
+// earliest startup phase, so it is read there, again before the first scene
+// loads, and on first use when that comes first on the main thread (another
+// startup hook loading a model). A first use off the main thread before any of
+// these gets the folder as soon as a startup read succeeds. An app that calls
 // XybridBolt.InitSdkCacheDir before loading or listing a model keeps its own
 // folder: the first one set wins.
 
@@ -26,6 +27,11 @@ namespace XybridBolt
         private static bool _needed;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        private static void CaptureEarly() => Capture();
+
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
+        private static void CaptureBeforeScene() => Capture();
+
         private static void Capture()
         {
             lock (Gate)
