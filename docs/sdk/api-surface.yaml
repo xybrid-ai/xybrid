@@ -1143,8 +1143,8 @@ classes:
       Rust-side init configuration consumed by `init_sdk_cache_dir`. Non-Rust
       bindings register the binding identifier themselves, at the entry points
       listed in `docs/telemetry/registry.md`; they do not expose `SdkConfig`
-      directly. The `binding` field flows into the `X-Xybrid-Client` registry
-      header — see `docs/telemetry/registry.md` for the wire format.
+      directly. The `binding` field and its methods are deprecated: nothing
+      reads them. Rust apps use `set_binding` or `init().binding()`.
     properties:
       cache_dir:
         type: "Option<PathBuf>"
@@ -1153,10 +1153,8 @@ classes:
       binding:
         type: "Option<&'static str>"
         description: >-
-          Binding identifier reported in the `X-Xybrid-Client` registry
-          telemetry header. Defaults to `xybrid_sdk::DEFAULT_BINDING`
-          ("rust") when unset. Each platform binding (Flutter, Kotlin,
-          Swift, Unity) sets its own value at SDK init.
+          Deprecated and never read. Register the binding with
+          `xybrid_sdk::set_binding` or `xybrid_sdk::init().binding()`.
         since: "0.1.0-beta12"
     methods:
       with_binding:
@@ -1164,12 +1162,12 @@ classes:
         parameters:
           - { name: binding, type: "&'static str" }
         returns: Self
-        description: "Override the binding identifier reported in the registry telemetry header. Fluent builder."
+        description: "Deprecated, no effect: stores a binding nothing reads."
         since: "0.1.0-beta12"
       binding:
         name: binding
         returns: "&'static str"
-        description: "Resolve the configured binding identifier, falling back to `DEFAULT_BINDING` when unset."
+        description: "Deprecated, no effect: returns the stored binding, not the one requests report."
         since: "0.1.0-beta12"
   RunOptions:
     type: data

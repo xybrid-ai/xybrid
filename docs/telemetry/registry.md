@@ -145,14 +145,13 @@ Most users never need to think about `binding` — the platform binding sets it 
 xybrid_sdk::set_binding("my-tool");
 ```
 
-The first `set_binding` call wins — once a value is registered, subsequent calls are silent no-ops, matching the lifecycle of "one process, one binding." A second route is the per-config field on [`SdkConfig::with_binding`](../sdk/API_REFERENCE.md#9-configuration-types):
+The first `set_binding` call wins — once a value is registered, subsequent calls are silent no-ops, matching the lifecycle of "one process, one binding." The init builder does the same:
 
 ```rust
-use xybrid_sdk::{SdkConfig, DEFAULT_BINDING};
-
-let config = SdkConfig::default().with_binding("my-tool");
-assert_eq!(config.binding(), "my-tool");
+xybrid_sdk::init().binding("my-tool").run();
 ```
+
+`SdkConfig::with_binding` is deprecated: nothing reads a config's binding, so it never reaches a request.
 
 If your value contains anything outside `[a-z0-9_-]`, the SDK substitutes `rust` before placing the value into the header. There is no way to inject a custom field name; the format is fixed.
 
@@ -164,5 +163,5 @@ Run the CLI command above, or instrument an HTTP proxy in front of the registry 
 
 - [Platform telemetry exporter](../sdk/telemetry.md) — the opt-in exporter for inference events
 - [Resource telemetry](../sdk/resource-telemetry.md) — per-inference resource summaries
-- [API reference](../sdk/API_REFERENCE.md) — full SDK API surface, including `SdkConfig.binding`
+- [API reference](../sdk/API_REFERENCE.md) — full SDK API surface
 - [Feature matrix](../FEATURE_MATRIX.md) — which backend features compile together

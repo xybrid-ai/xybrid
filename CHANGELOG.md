@@ -32,6 +32,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the folder alone but still pointed `HF_HOME` and related variables at its
   own path.
 
+### Deprecated
+
+- **`SdkConfig::with_binding()` and `SdkConfig::binding()`.** No API reads a
+  config's binding, so they never changed what requests report. Use
+  `xybrid_sdk::set_binding` or `xybrid_sdk::init().binding()`.
+
 ### Planned
 
 - **Multimodal KV-prefix reuse**: the per-frame prefill cost lever for live vision — **deferred** from 0.2.0, not yet implemented.
