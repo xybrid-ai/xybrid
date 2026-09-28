@@ -359,6 +359,10 @@ fn parse_max_tokens(s: &str) -> Result<usize, String> {
 }
 
 fn main() -> Result<()> {
+    // Registry requests and telemetry from the CLI say `cli`, not the `rust`
+    // that Rust SDK apps report.
+    xybrid_sdk::set_binding("cli");
+
     let cli = Cli::parse();
 
     configure_log_level(&cli);
