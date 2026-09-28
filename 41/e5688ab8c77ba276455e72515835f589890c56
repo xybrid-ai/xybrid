@@ -1,0 +1,21 @@
+tools/scripts/version-sync.sh
+  s_9b857a9086aa89::t_43ab77f17ae6e1 46-51,118-132,257-271,283,323,350
+bindings/flutter/example/pubspec.lock
+  s_9b857a9086aa89::t_0f30ed3e260f4e 422
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "41e5688ab8c77ba276455e72515835f589890c56",
+  "prompts": {},
+  "sessions": {
+    "s_9b857a9086aa89": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b332f3e2-74c3-42fb-a790-f2f69038286c",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
