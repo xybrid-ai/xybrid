@@ -238,6 +238,15 @@ reason; don't leave the test red. Its iOS core is not in the npm tarball:
 `pod install` downloads the release XCFramework and checks the SHA-256 that
 release-prep pins in its `package.json`.
 
+Every SDK names itself in registry requests and telemetry (`binding=` in
+`X-Xybrid-Client`), and the first registration in a process wins. Flutter
+registers in its `#[frb(init)]` hook, Python on import, Unity in a static
+constructor and React Native before every bridged call: each before its first
+call into the native library. `xybrid-bolt` falls back to `swift` on Apple
+platforms and `kotlin` on Android, so a new binding there must register first
+too, or it reports theirs. Add a new name to the facade's `resolve_binding`;
+a test fails until you do. The table is in `docs/telemetry/registry.md`.
+
 **Dependency direction (do not reverse):**
 
 ```

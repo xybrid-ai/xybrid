@@ -17,8 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     because `Xybrid.init` reached no registering call there.
     `XybridRustLib.init()` now registers `flutter` on every platform.
   - Swift and Unity did whenever an app skipped `Xybrid.initialize()` or
-    `XybridClient.Initialize()`. Loading a model or pipeline, or starting a
-    download, now registers the name too.
+    `XybridClient.Initialize()`, including through the generated constructors.
+    The native library now reports `swift` on Apple platforms and `kotlin` on
+    Android when nothing registered, and Unity registers before its first
+    native call.
   - The `xybrid` CLI now reports `cli` instead of `rust`.
 
   A test now fails if a binding registers a name the SDK would reject.

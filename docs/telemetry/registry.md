@@ -55,13 +55,13 @@ X-Xybrid-Client: binding=flutter; sdk_version=0.10.1; core_version=0.10.1; platf
 | `rust` | Default — used when nothing registers a binding, e.g. a Rust app built on `xybrid-sdk`. | `xybrid_sdk::DEFAULT_BINDING` |
 | `cli` | The `xybrid` command-line tool. | `main()` (`crates/xybrid-cli/src/main.rs`) |
 | `flutter` | Flutter plugin via `flutter_rust_bridge`. | `XybridRustLib.init()`, through the `#[frb(init)]` hook `init_app` (`bindings/flutter/rust/src/api/sdk_client.rs`) |
-| `kotlin` | Android library via BoltFFI. | `Xybrid.init(context)` (`bindings/kotlin/src/main/kotlin/ai/xybrid/Xybrid.kt`) |
+| `kotlin` | Android library via BoltFFI. | `Xybrid.init(context)` (`bindings/kotlin/src/main/kotlin/ai/xybrid/Xybrid.kt`); failing that, the native library on Android (`crates/xybrid-bolt/src/lib.rs`) |
 | `python` | Python package via BoltFFI. | `import xybrid` (`bindings/python/xybrid/__init__.py`) |
 | `react-native` | React Native package, wrapping the Swift and Kotlin SDKs. | Every bridged call, before the SDK it wraps (`bindings/react-native/ios/XybridModuleImpl.swift`, `bindings/react-native/android/src/main/java/ai/xybrid/reactnative/XybridModule.kt`) |
-| `swift` | iOS / macOS Swift package via BoltFFI. | `Xybrid.initialize()` and the model, download and pipeline loaders (`bindings/apple/Sources/Xybrid/Xybrid.swift`) |
-| `unity` | Unity / C# binding via BoltFFI. | `XybridClient.Initialize()` and the model, download and pipeline loaders (`bindings/unity/Runtime/Api/XybridClient.cs`) |
+| `swift` | iOS / macOS Swift package via BoltFFI. | `Xybrid.initialize()` (`bindings/apple/Sources/Xybrid/Xybrid.swift`); failing that, the native library on Apple platforms, from any model, download or pipeline constructor (`crates/xybrid-bolt/src/lib.rs`) |
+| `unity` | Unity / C# binding via BoltFFI. | A static constructor that runs before the first native call (`bindings/unity/Runtime/BoltSupplement/BindingRegistration.cs`) |
 
-The first registration in a process wins. That is how React Native keeps its name while the Swift or Kotlin SDK underneath also registers, and why the loaders can register again without harm.
+The first registration in a process wins. React Native, Unity and Python register before their first call into the native library, so they keep their names on Apple platforms and Android, where the library falls back to `swift` or `kotlin` for apps that registered nothing.
 
 Any value containing characters outside `[a-z0-9_-]` is replaced with `rust` before being placed in the header. This is a defensive sanitization step — it prevents user-controlled strings from injecting additional fields or terminators into the header.
 
