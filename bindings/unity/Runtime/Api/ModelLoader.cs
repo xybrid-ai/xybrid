@@ -146,9 +146,20 @@ namespace Xybrid
         /// itself regardless of <see cref="XybridClient.SetSpeculativeCloud"/>.
         /// Reads the local cache to answer; never hits the network.
         /// </remarks>
-        public bool WillSpeculate =>
-            _source == Source.RegistrySpeculative &&
-            XybridBolt.XybridBolt.WillSpeculateForModel(_value);
+        public bool WillSpeculate
+        {
+            get
+            {
+                if (_source != Source.RegistrySpeculative)
+                {
+                    return false;
+                }
+                // The answer depends on the cache, which Android only has once
+                // the default folder is set.
+                XybridBolt.AndroidCacheFolder.ApplyDefault();
+                return XybridBolt.XybridBolt.WillSpeculateForModel(_value);
+            }
+        }
 
         /// <summary>
         /// Starts downloading the model's weights in the background, without
