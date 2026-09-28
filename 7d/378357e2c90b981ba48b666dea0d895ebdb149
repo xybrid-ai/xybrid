@@ -1,0 +1,21 @@
+bindings/unity/Runtime/Api/ModelLoader.cs
+  s_9b857a9086aa89::t_240969a44fd419 149-162
+bindings/unity/Runtime/BoltSupplement/AndroidCacheFolder.cs
+  s_9b857a9086aa89::t_c1c8e3e32e837d 5-11,24-26,28,31,33-37,41-55,70-84
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "7d378357e2c90b981ba48b666dea0d895ebdb149",
+  "prompts": {},
+  "sessions": {
+    "s_9b857a9086aa89": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b332f3e2-74c3-42fb-a790-f2f69038286c",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
