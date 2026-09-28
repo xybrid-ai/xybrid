@@ -1,0 +1,28 @@
+docs/sdk/api-surface.yaml
+  s_9b857a9086aa89::t_e65f199b383f00 1146-1147,1156-1157,1165,1170
+docs/sdk/API_REFERENCE.md
+  s_9b857a9086aa89::t_e65f199b383f00 1919-1923,1926-1928,1931-1933,1959-1960,1969-1971
+CHANGELOG.md
+  s_9b857a9086aa89::t_50c1fb429be1f1 35-39
+  s_9b857a9086aa89::t_426b76e9f1bb0d 40
+crates/xybrid-sdk/src/lib.rs
+  s_9b857a9086aa89::t_8a131046db01be 324-325,382-383,388-391,397-398,1183
+docs/telemetry/registry.md
+  s_9b857a9086aa89::t_fc3db3e2c7f094 148,151,154-155,166
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "452e07202eaa960a72fd27690f445090fc84eb44",
+  "prompts": {},
+  "sessions": {
+    "s_9b857a9086aa89": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b332f3e2-74c3-42fb-a790-f2f69038286c",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
