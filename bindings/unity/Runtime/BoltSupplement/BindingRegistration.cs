@@ -1,20 +1,22 @@
-// Registers the Unity binding before the first native call.
+// Registers the Unity binding before the generated entry types reach native
+// code.
 //
 // Apps reach native code through the hand-written Xybrid API or straight
 // through the generated types (the documented pinned-revision constructor,
 // XybridModel.FromHuggingfaceWithRevision, exists only there), with or without
-// XybridClient.Initialize(). Every one of those calls goes through
-// NativeMethods, so its static constructor runs first. Without it the native
-// library reports its platform default (`swift` on Apple platforms, `kotlin`
-// on Android) or `rust`. The first registration wins, so this one sticks.
+// XybridClient.Initialize(). Every generated type whose calls can reach the
+// registry or telemetry gets a static constructor, which runs before that
+// type's first static call or new instance. The native library's platform
+// fallback (`swift` on Apple platforms, `kotlin` on Android) never outranks a
+// registration, so a registration that comes late still wins.
 
 using System;
 
 namespace XybridBolt
 {
-    internal static partial class NativeMethods
+    internal static class BindingRegistration
     {
-        static NativeMethods()
+        internal static void Register()
         {
             try
             {
@@ -22,11 +24,36 @@ namespace XybridBolt
             }
             catch (Exception)
             {
-                // Attribution is best-effort. A missing or mismatched native
-                // library still fails the call that triggered this constructor;
-                // throwing here would instead fail every native call with
-                // TypeInitializationException.
+                // Throwing from a static constructor would make its type
+                // unusable (TypeInitializationException), and a missing native
+                // library fails the call that triggered this anyway. The other
+                // entry types and XybridClient.Initialize() register again.
             }
         }
+    }
+
+    public static partial class XybridBolt
+    {
+        static XybridBolt() => BindingRegistration.Register();
+    }
+
+    public sealed partial class XybridModel
+    {
+        static XybridModel() => BindingRegistration.Register();
+    }
+
+    public sealed partial class XybridPipeline
+    {
+        static XybridPipeline() => BindingRegistration.Register();
+    }
+
+    public sealed partial class XybridDownload
+    {
+        static XybridDownload() => BindingRegistration.Register();
+    }
+
+    public sealed partial class XybridTelemetryConfig
+    {
+        static XybridTelemetryConfig() => BindingRegistration.Register();
     }
 }

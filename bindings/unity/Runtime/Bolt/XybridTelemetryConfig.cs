@@ -5,7 +5,7 @@
 
 namespace XybridBolt
 {
-    public sealed class XybridTelemetryConfig : global::System.IDisposable
+    public sealed partial class XybridTelemetryConfig : global::System.IDisposable
     {
         private long handle;
 

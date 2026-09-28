@@ -514,7 +514,7 @@ namespace XybridBolt
         }
     }
 
-    public static class XybridBolt
+    public static partial class XybridBolt
     {
         /// <summary>
         /// Build the continuation envelope for the turn after the model asked for
@@ -1131,7 +1131,7 @@ namespace XybridBolt
 
     }
 
-    internal static partial class NativeMethods
+    internal static class NativeMethods
     {
         internal const string LibName = "xybrid_bolt";
 
