@@ -1141,10 +1141,8 @@ classes:
     since: "0.1.0-beta12"
     notes: >-
       Rust-side init configuration consumed by `init_sdk_cache_dir`. Non-Rust
-      bindings register the binding identifier via the platform-specific entry
-      points listed in `docs/telemetry/registry.md` (Flutter:
-      `XybridSdkClient`, Kotlin: `Xybrid.init`, Swift: `Xybrid.initialize`,
-      Unity: `XybridClient.Initialize`); they do not expose `SdkConfig`
+      bindings register the binding identifier themselves, at the entry points
+      listed in `docs/telemetry/registry.md`; they do not expose `SdkConfig`
       directly. The `binding` field flows into the `X-Xybrid-Client` registry
       header — see `docs/telemetry/registry.md` for the wire format.
     properties:

@@ -39,6 +39,10 @@ dependencies {
 import ai.xybrid.Envelope
 import ai.xybrid.Xybrid
 
+// Once, in Application.onCreate(): sets the model cache folder, which
+// Android needs before any load.
+Xybrid.init(context)
+
 // Describing the source is cheap; load() is the explicit suspend boundary.
 val model = Xybrid.model("kokoro-82m").load()
 

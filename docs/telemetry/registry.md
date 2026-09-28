@@ -42,7 +42,7 @@ X-Xybrid-Client: binding=flutter; sdk_version=0.10.1; core_version=0.10.1; platf
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `binding` | enum string | The platform binding that made the call. One of `rust`, `flutter`, `kotlin`, `swift`, `unity`. Defaults to `rust` when no binding is registered. |
+| `binding` | enum string | The platform binding that made the call. One of `rust`, `cli`, `flutter`, `kotlin`, `python`, `react-native`, `swift`, `unity`. Defaults to `rust` when no binding is registered. |
 | `sdk_version` | semver-ish string | `xybrid-sdk` package version, baked in at compile time via `CARGO_PKG_VERSION`. |
 | `core_version` | semver-ish string | `xybrid-core` package version, baked in via the same mechanism. Usually equal to `sdk_version` but reported independently so version skews surface. |
 | `platform` | enum string | Compile-time target triple summary. See the table below. |
@@ -52,11 +52,16 @@ X-Xybrid-Client: binding=flutter; sdk_version=0.10.1; core_version=0.10.1; platf
 
 | Value | Source | Set by |
 |-------|--------|--------|
-| `rust` | Default — used when no platform binding registers itself. | `xybrid_sdk::DEFAULT_BINDING` |
-| `flutter` | Flutter plugin via `flutter_rust_bridge`. | `XybridSdkClient` (`bindings/flutter/rust/src/api/sdk_client.rs`) |
-| `kotlin` | Android library via UniFFI. | `Xybrid.init(context)` (`bindings/kotlin/src/main/kotlin/ai/xybrid/Xybrid.kt`) |
-| `swift` | iOS / macOS Swift package via UniFFI. | `Xybrid.initialize()` (`bindings/apple/Sources/Xybrid/Xybrid.swift`) |
-| `unity` | Unity / C# binding via the C FFI. | `XybridClient.Initialize()` (`bindings/unity/Runtime/Api/XybridClient.cs`) |
+| `rust` | Default — used when nothing registers a binding, e.g. a Rust app built on `xybrid-sdk`. | `xybrid_sdk::DEFAULT_BINDING` |
+| `cli` | The `xybrid` command-line tool. | `main()` (`crates/xybrid-cli/src/main.rs`) |
+| `flutter` | Flutter plugin via `flutter_rust_bridge`. | `XybridRustLib.init()`, through the `#[frb(init)]` hook `init_app` (`bindings/flutter/rust/src/api/sdk_client.rs`) |
+| `kotlin` | Android library via BoltFFI. | `Xybrid.init(context)` (`bindings/kotlin/src/main/kotlin/ai/xybrid/Xybrid.kt`) |
+| `python` | Python package via BoltFFI. | `import xybrid` (`bindings/python/xybrid/__init__.py`) |
+| `react-native` | React Native package, wrapping the Swift and Kotlin SDKs. | Every bridged call, before the SDK it wraps (`bindings/react-native/ios/XybridModuleImpl.swift`, `bindings/react-native/android/src/main/java/ai/xybrid/reactnative/XybridModule.kt`) |
+| `swift` | iOS / macOS Swift package via BoltFFI. | `Xybrid.initialize()` and the model, download and pipeline loaders (`bindings/apple/Sources/Xybrid/Xybrid.swift`) |
+| `unity` | Unity / C# binding via BoltFFI. | `XybridClient.Initialize()` and the model, download and pipeline loaders (`bindings/unity/Runtime/Api/XybridClient.cs`) |
+
+The first registration in a process wins. That is how React Native keeps its name while the Swift or Kotlin SDK underneath also registers, and why the loaders can register again without harm.
 
 Any value containing characters outside `[a-z0-9_-]` is replaced with `rust` before being placed in the header. This is a defensive sanitization step — it prevents user-controlled strings from injecting additional fields or terminators into the header.
 

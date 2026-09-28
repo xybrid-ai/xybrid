@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Registry requests and telemetry name the SDK that sent them.** Several
+  paths reported the fallback `rust` instead:
+  - Python always did: the SDK rejected the name `python`. It is accepted now
+    and registered on `import xybrid`, so `xybrid.init()` stays optional.
+  - Flutter did on iOS, macOS, Linux and Windows unless an API key was set,
+    because `Xybrid.init` reached no registering call there.
+    `XybridRustLib.init()` now registers `flutter` on every platform.
+  - Swift and Unity did whenever an app skipped `Xybrid.initialize()` or
+    `XybridClient.Initialize()`. Loading a model or pipeline, or starting a
+    download, now registers the name too.
+  - The `xybrid` CLI now reports `cli` instead of `rust`.
+
+  A test now fails if a binding registers a name the SDK would reject.
+
 ### Planned
 
 - **Multimodal KV-prefix reuse**: the per-frame prefill cost lever for live vision — **deferred** from 0.2.0, not yet implemented.
