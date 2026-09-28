@@ -1,0 +1,29 @@
+tools/scripts/gen_unity_bolt_csharp.py
+  s_9b857a9086aa89::t_d141c583625c6c 53-55,57,290-301,428,467-476,545-549
+bindings/unity/Runtime/Bolt/XybridPipeline.cs
+  s_9b857a9086aa89::t_637f7a556deb0f 8
+bindings/unity/Runtime/Bolt/XybridTelemetryConfig.cs
+  s_9b857a9086aa89::t_637f7a556deb0f 8
+bindings/unity/Runtime/Bolt/XybridDownload.cs
+  s_9b857a9086aa89::t_637f7a556deb0f 8
+bindings/unity/Runtime/Bolt/XybridBolt.cs
+  s_9b857a9086aa89::t_637f7a556deb0f 517,1134
+bindings/unity/Runtime/BoltSupplement/BindingRegistration.cs
+  s_9b857a9086aa89::t_b9ed017efae717 1-2,7-11,17,19,27-30,34-58
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "db5066b025d887b16403dac532f25fea09a016c8",
+  "prompts": {},
+  "sessions": {
+    "s_9b857a9086aa89": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b332f3e2-74c3-42fb-a790-f2f69038286c",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
