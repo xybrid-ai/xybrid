@@ -8,7 +8,9 @@
 // registry or telemetry gets a static constructor, which runs before that
 // type's first static call or new instance. The native library's platform
 // fallback (`swift` on Apple platforms, `kotlin` on Android) never outranks a
-// registration, so a registration that comes late still wins.
+// registration, so a registration that comes late still wins. The types that
+// touch the model cache also set the Android default (AndroidCacheFolder.cs);
+// XybridBolt does not, so an app's own InitSdkCacheDir call there comes first.
 
 using System;
 
@@ -39,17 +41,29 @@ namespace XybridBolt
 
     public sealed partial class XybridModel
     {
-        static XybridModel() => BindingRegistration.Register();
+        static XybridModel()
+        {
+            BindingRegistration.Register();
+            AndroidCacheFolder.ApplyDefault();
+        }
     }
 
     public sealed partial class XybridPipeline
     {
-        static XybridPipeline() => BindingRegistration.Register();
+        static XybridPipeline()
+        {
+            BindingRegistration.Register();
+            AndroidCacheFolder.ApplyDefault();
+        }
     }
 
     public sealed partial class XybridDownload
     {
-        static XybridDownload() => BindingRegistration.Register();
+        static XybridDownload()
+        {
+            BindingRegistration.Register();
+            AndroidCacheFolder.ApplyDefault();
+        }
     }
 
     public sealed partial class XybridTelemetryConfig

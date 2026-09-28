@@ -415,6 +415,9 @@ impl SdkConfig {
 /// that third-party libraries (like mistralrs/hf-hub) can find cache directories
 /// on platforms like Android where standard Unix paths don't exist.
 ///
+/// The first call wins: later calls change neither the folder nor those
+/// variables, so an SDK's default never overrides an app's earlier choice.
+///
 /// # Example (Flutter/Dart)
 ///
 /// ```dart
@@ -432,7 +435,19 @@ impl SdkConfig {
 /// * `cache_dir` - Path to the directory where model bundles will be cached
 pub fn init_sdk_cache_dir(cache_dir: impl Into<std::path::PathBuf>) {
     let cache_path = cache_dir.into();
+    // `get_or_init` runs this once: a later call changes neither the folder nor
+    // the environment that points third-party libraries at it.
+    SDK_CONFIG.get_or_init(|| {
+        export_cache_env(&cache_path);
+        SdkConfig {
+            cache_dir: Some(cache_path),
+            ..SdkConfig::default()
+        }
+    });
+}
 
+/// Point third-party libraries (hf-hub, mistralrs, ...) at the cache folder.
+fn export_cache_env(cache_path: &std::path::Path) {
     // Set environment variables for third-party libraries (hf-hub, mistralrs, etc.)
     // On Android, dirs::home_dir() and dirs::cache_dir() return None, causing panics.
     // Setting these env vars provides fallback paths for those libraries.
@@ -466,12 +481,6 @@ pub fn init_sdk_cache_dir(cache_dir: impl Into<std::path::PathBuf>) {
             std::env::set_var("XDG_CACHE_HOME", cache_str);
         }
     }
-
-    let config = SdkConfig {
-        cache_dir: Some(cache_path),
-        ..SdkConfig::default()
-    };
-    let _ = SDK_CONFIG.set(config);
 }
 
 /// Get the configured cache directory (if set).

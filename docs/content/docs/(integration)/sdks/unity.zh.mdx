@@ -32,6 +32,8 @@ void Awake()
 
 `Initialize()` 是线程安全且幂等的——多次调用无副作用。
 
+在 Android 上，模型缓存在 `Application.persistentDataPath/xybrid/models`。如需使用其他目录，请在加载或列出任何模型之前调用 `XybridBolt.XybridBolt.InitSdkCacheDir(path)`；以最先设置的目录为准。
+
 无论是否鉴权，推理都完全在本地运行。传入 `apiKey` 即可点亮[控制台](https://dashboard.xybrid.dev)——这一次调用会启动遥测导出器，你的 `model.Run(...)` 调用便会自动上报执行轨迹：
 
 ```csharp

@@ -274,6 +274,7 @@ namespace Xybrid
         private static T CacheCall<T>(Func<T> call)
         {
             EnsureInitialized();
+            XybridBolt.AndroidCacheFolder.ApplyDefault();
             try
             {
                 return call();

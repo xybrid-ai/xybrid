@@ -258,6 +258,10 @@ Models are automatically downloaded from the Xybrid registry on first use.
 | iOS | arm64 | Supported (auto-fetched) |
 | Android | arm64-v8a, armeabi-v7a, x86_64 | Supported |
 
+On Android, models are cached in `Application.persistentDataPath/xybrid/models`.
+To use another folder, call `XybridBolt.XybridBolt.InitSdkCacheDir(path)` before
+loading or listing any model; the first folder set wins.
+
 ## Building Native Libraries
 
 If you need to build the native libraries yourself:

@@ -24,6 +24,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - The `xybrid` CLI now reports `cli` instead of `rust`.
 
   A test now fails if a binding registers a name the SDK would reject.
+- **Unity on Android can load models.** Android has no default model cache
+  folder, and the Unity SDK never set one, so every registry and bundle load
+  failed. It now uses `Application.persistentDataPath/xybrid/models`, unless
+  the app sets its own folder first.
+- **`init_sdk_cache_dir` keeps its first folder entirely.** A later call left
+  the folder alone but still pointed `HF_HOME` and related variables at its
+  own path.
 
 ### Planned
 
