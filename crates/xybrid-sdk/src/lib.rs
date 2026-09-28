@@ -315,6 +315,9 @@ static SDK_CONFIG: OnceLock<SdkConfig> = OnceLock::new();
 /// [`get_binding`], which returns [`DEFAULT_BINDING`] when unset.
 static BINDING: OnceLock<&'static str> = OnceLock::new();
 
+/// Binding reported until [`set_binding`] runs; see [`set_fallback_binding`].
+static FALLBACK_BINDING: OnceLock<&'static str> = OnceLock::new();
+
 /// Default binding identifier reported in the registry telemetry header.
 ///
 /// Each platform binding (Flutter, Kotlin, React Native, Swift, Unity)
@@ -348,12 +351,28 @@ pub fn set_binding(binding: &'static str) {
     let _ = BINDING.set(binding);
 }
 
+/// Set the binding reported until one is registered with [`set_binding`].
+///
+/// A native library that several SDKs load uses this for the SDK that usually
+/// ships it, so an app that never registers is still attributed: `xybrid-bolt`
+/// names `swift` on Apple platforms and `kotlin` on Android. Unlike
+/// [`set_binding`] it never blocks a registration, so an SDK that registers
+/// later (Unity, React Native, Python) reports its own name from then on. The
+/// first call wins.
+pub fn set_fallback_binding(binding: &'static str) {
+    let _ = FALLBACK_BINDING.set(binding);
+}
+
 /// Read the process-global binding identifier.
 ///
-/// Returns the value passed to the most recent successful [`set_binding`]
-/// call, falling back to [`DEFAULT_BINDING`] when unset.
+/// Returns the value passed to the first [`set_binding`] call, else the one
+/// passed to [`set_fallback_binding`], else [`DEFAULT_BINDING`].
 pub fn get_binding() -> &'static str {
-    BINDING.get().copied().unwrap_or(DEFAULT_BINDING)
+    BINDING
+        .get()
+        .or_else(|| FALLBACK_BINDING.get())
+        .copied()
+        .unwrap_or(DEFAULT_BINDING)
 }
 
 /// SDK configuration options.

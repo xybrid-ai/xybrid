@@ -2917,6 +2917,14 @@ pub fn set_binding(binding: String) {
     sdk::set_binding(resolve_binding(&binding));
 }
 
+/// Set the binding reported until one is registered with [`set_binding`],
+/// which it never blocks. Native libraries name the SDK that usually ships
+/// them this way. Names outside the accepted set fall back to
+/// [`sdk::DEFAULT_BINDING`]. First call wins.
+pub fn set_fallback_binding(binding: String) {
+    sdk::set_fallback_binding(resolve_binding(&binding));
+}
+
 /// Map a binding name onto the accepted set, or [`sdk::DEFAULT_BINDING`].
 fn resolve_binding(binding: &str) -> &'static str {
     match binding {
@@ -4244,8 +4252,9 @@ stages:
     }
 
     /// Collect `(file, name)` for each literal registration under `dir`:
-    /// `setBinding("…")`, `SetBinding("…")`, `set_binding("…")`, and the
-    /// Flutter crate's `FLUTTER_BINDING` constant.
+    /// `setBinding("…")`, `SetBinding("…")`, `set_binding("…")`,
+    /// `set_fallback_binding("…")`, and the Flutter crate's `FLUTTER_BINDING`
+    /// constant.
     fn collect_registered_bindings(dir: &std::path::Path, found: &mut Vec<(String, String)>) {
         const SOURCES: [&str; 7] = ["cs", "java", "kt", "py", "rs", "swift", "ts"];
         const SKIPPED_DIRS: [&str; 4] = ["build", "node_modules", "Pods", "target"];
@@ -4265,7 +4274,12 @@ stages:
             let Ok(source) = std::fs::read_to_string(&path) else {
                 continue;
             };
-            for marker in ["etBinding(", "et_binding(", "_BINDING: &str = "] {
+            for marker in [
+                "etBinding(",
+                "et_binding(",
+                "_fallback_binding(",
+                "_BINDING: &str = ",
+            ] {
                 for (at, _) in source.match_indices(marker) {
                     let call = source[at + marker.len()..].trim_start_matches("binding: ");
                     let literal = call
