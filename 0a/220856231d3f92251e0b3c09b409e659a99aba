@@ -1,0 +1,40 @@
+crates/xybrid-sdk/src/lib.rs
+  s_9b857a9086aa89::t_c9ad7490c942d0 438-439
+  s_9b857a9086aa89::t_cd2d8bb8a65016 418-420,440-447,449-450
+bindings/unity/Runtime/Api/XybridClient.cs
+  s_9b857a9086aa89::t_76a4df8813a777 277
+bindings/unity/Runtime/BoltSupplement/AndroidCacheFolder.cs.meta
+  s_9b857a9086aa89::t_76a4df8813a777 1-2
+docs/content/docs/(integration)/sdks/unity.mdx
+  s_9b857a9086aa89::t_76ed19c5c7a13f 35-36
+bindings/unity/README.md
+  s_9b857a9086aa89::t_f15dfa5b16bdb8 261-264
+CHANGELOG.md
+  s_9b857a9086aa89::t_f15dfa5b16bdb8 27-33
+docs/content/docs/(integration)/sdks/unity.zh.mdx
+  s_9b857a9086aa89::t_25b358883b5bfe 35-36
+bindings/unity/Runtime/BoltSupplement/BindingRegistration.cs
+  s_9b857a9086aa89::t_76a4df8813a777 11-13,44-48,53-57,62-66
+bindings/unity/Runtime/BoltSupplement/AndroidCacheFolder.cs
+  s_9b857a9086aa89::t_10d1d8d05c31a2 1-58
+crates/xybrid-sdk/src/cache/cache_manager.rs
+  s_9b857a9086aa89::t_b216932dd527c2 160-161,163-165
+crates/xybrid-sdk/tests/cache_dir_first_call_wins.rs
+  s_9b857a9086aa89::t_d1cabdf20e3b6b 1-20
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "0a220856231d3f92251e0b3c09b409e659a99aba",
+  "prompts": {},
+  "sessions": {
+    "s_9b857a9086aa89": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b332f3e2-74c3-42fb-a790-f2f69038286c",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
