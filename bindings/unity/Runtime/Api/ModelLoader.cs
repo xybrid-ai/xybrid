@@ -182,6 +182,7 @@ namespace Xybrid
         public XybridBolt.XybridDownload StartDownload()
         {
             ThrowIfDisposed();
+            XybridClient.RegisterBinding();
 
             switch (_source)
             {
@@ -206,6 +207,7 @@ namespace Xybrid
 
             try
             {
+                XybridClient.RegisterBinding();
                 XybridBolt.XybridModel bolt;
                 switch (_source)
                 {
