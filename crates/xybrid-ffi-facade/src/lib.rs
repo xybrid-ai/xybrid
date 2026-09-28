@@ -4213,17 +4213,21 @@ stages:
 
     /// A name `resolve_binding` collapses makes that whole SDK report `rust`,
     /// which is how React Native and Python went unattributed. This reads the
-    /// bindings' sources, so it only runs from a checkout (`cargo test`), not
-    /// from a Bazel sandbox that has no `bindings/`.
+    /// bindings' sources and xybrid-bolt's per-platform defaults, so it only
+    /// runs from a checkout (`cargo test`), not from a Bazel sandbox that has
+    /// neither.
     #[test]
     fn every_name_a_binding_registers_is_accepted() {
-        let bindings = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../bindings");
-        if !bindings.is_dir() {
-            eprintln!("skipped: no bindings/ at {}", bindings.display());
+        let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let roots = [repo.join("bindings"), repo.join("crates/xybrid-bolt/src")];
+        if !roots.iter().all(|root| root.is_dir()) {
+            eprintln!("skipped: no bindings/ checkout at {}", repo.display());
             return;
         }
         let mut found = Vec::new();
-        collect_registered_bindings(&bindings, &mut found);
+        for root in &roots {
+            collect_registered_bindings(root, &mut found);
+        }
         for sdk in PLATFORM_BINDINGS {
             assert!(
                 found.iter().any(|(_, name)| name == sdk),
@@ -4245,7 +4249,7 @@ stages:
     fn collect_registered_bindings(dir: &std::path::Path, found: &mut Vec<(String, String)>) {
         const SOURCES: [&str; 7] = ["cs", "java", "kt", "py", "rs", "swift", "ts"];
         const SKIPPED_DIRS: [&str; 4] = ["build", "node_modules", "Pods", "target"];
-        let entries = std::fs::read_dir(dir).expect("bindings/ should be readable");
+        let entries = std::fs::read_dir(dir).expect("scanned sources should be readable");
         for path in entries.flatten().map(|entry| entry.path()) {
             let name = path.file_name().unwrap_or_default().to_string_lossy();
             if path.is_dir() {
