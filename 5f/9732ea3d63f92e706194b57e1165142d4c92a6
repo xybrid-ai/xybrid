@@ -1,0 +1,28 @@
+bindings/python/xybrid/__init__.py
+  s_9b857a9086aa89::t_b042b60d43bf4d 27-31
+  s_9b857a9086aa89::t_5e4269c6e6cb7c 39-40
+crates/xybrid-ffi-facade/src/lib.rs
+  s_9b857a9086aa89::t_d48e308d50ff69 2908
+  s_9b857a9086aa89::t_6f720fee7a43ec 2925
+  s_9b857a9086aa89::t_dd7c0861cdc42e 4197-4206,4209,4227
+  s_9b857a9086aa89::t_1346fb01058b99 4246
+  s_9b857a9086aa89::t_58507d21cdd356 4267-4270,4298,4309
+  s_9b857a9086aa89::t_af2d56cb706734 4214-4226,4228-4245,4247-4266,4271-4276
+  s_9b857a9086aa89::t_7fede2cdacd99c 4277
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "5f9732ea3d63f92e706194b57e1165142d4c92a6",
+  "prompts": {},
+  "sessions": {
+    "s_9b857a9086aa89": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b332f3e2-74c3-42fb-a790-f2f69038286c",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
