@@ -240,12 +240,13 @@ release-prep pins in its `package.json`.
 
 Every SDK names itself in registry requests and telemetry (`binding=` in
 `X-Xybrid-Client`), and the first registration in a process wins. Flutter
-registers in its `#[frb(init)]` hook, Python on import, Unity in a static
-constructor and React Native before every bridged call: each before its first
-call into the native library. `xybrid-bolt` falls back to `swift` on Apple
-platforms and `kotlin` on Android, so a new binding there must register first
-too, or it reports theirs. Add a new name to the facade's `resolve_binding`;
-a test fails until you do. The table is in `docs/telemetry/registry.md`.
+registers in its `#[frb(init)]` hook, Python on import, Unity from static
+constructors and React Native before every bridged call. Until an SDK
+registers, `xybrid-bolt` reports a fallback: `swift` on Apple platforms,
+`kotlin` on Android. A registration always replaces it, whenever it happens,
+so a new binding there reports theirs only until it registers. Add a new name
+to the facade's `resolve_binding`; a test fails until you do. The table is in
+`docs/telemetry/registry.md`.
 
 **Dependency direction (do not reverse):**
 
