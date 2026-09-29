@@ -244,8 +244,8 @@ def verify(
     options = ort.SessionOptions()
     options.intra_op_num_threads = 1
     options.inter_op_num_threads = 1
-    # xybrid opens ONNX sessions at Level3, which is ORT_ENABLE_ALL.
-    options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+    # xybrid opens ONNX sessions at ort's Level3, which is ORT_ENABLE_LAYOUT.
+    options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_LAYOUT
     session = ort.InferenceSession(onnx_bytes, options, providers=["CPUExecutionProvider"])
     gates = ("export_parity", "padding", "export_vs_reference")
     worst = {gate: {"logit": 0.0, "score": 0.0} for gate in gates}
