@@ -1,0 +1,241 @@
+{
+  "description": "Label-token scoring conformance cases for Qwen3.5-0.8B. Each case becomes chat messages: an optional system message, then one user message built from prompt.user_template, with one prompt.choice_template line per choice. The next token after the rendered generation prompt is read at each label's token id.",
+  "provenance": {
+    "sources": {
+      "qwen3.5-0.8b": "2fc06364715b967f1860aea9cf38778875588b17"
+    }
+  },
+  "prompt": {
+    "user_template": "{context}\n\nOptions:\n{choices}\n\nAnswer with a single letter.",
+    "choice_template": "{label}. {text}",
+    "choice_separator": "\n"
+  },
+  "cases": [
+    {
+      "id": "forms-phone",
+      "description": "The FORMS phone-fill request as a letter-choice prompt, fixed actions listed as ordinary options.",
+      "system": null,
+      "context": "TASK fill the form from the document, then submit\nFORM Northwind Clinic - New Patient Registration\nELEMENT Edit \"Phone number\" value=\"\"",
+      "choices": [
+        {
+          "id": "name",
+          "text": "fill Name: Jane Doe"
+        },
+        {
+          "id": "tel",
+          "text": "fill Tel: (503) 555-0142"
+        },
+        {
+          "id": "dob",
+          "text": "fill DOB: 03/14/1987"
+        },
+        {
+          "id": "email",
+          "text": "fill Email: jane.doe@example.invalid"
+        },
+        {
+          "id": "check",
+          "text": "check"
+        },
+        {
+          "id": "click",
+          "text": "click"
+        },
+        {
+          "id": "skip",
+          "text": "skip"
+        }
+      ],
+      "labels": ["A", "B", "C", "D", "E", "F", "G"]
+    },
+    {
+      "id": "binary",
+      "description": "The smallest candidate set: two choices.",
+      "system": null,
+      "context": "The button below submits the form. Should the agent click it now that every required field is filled?",
+      "choices": [
+        {
+          "id": "yes",
+          "text": "Yes, click it"
+        },
+        {
+          "id": "no",
+          "text": "No, wait"
+        }
+      ],
+      "labels": ["A", "B"]
+    },
+    {
+      "id": "system-prompt",
+      "description": "A system message ahead of the user turn.",
+      "system": "You are a careful form-filling assistant. Answer with the letter of the single best action.",
+      "context": "FORM Northwind Clinic - New Patient Registration\nELEMENT CheckBox \"I agree to the privacy policy\" unchecked",
+      "choices": [
+        {
+          "id": "check",
+          "text": "check the box"
+        },
+        {
+          "id": "skip",
+          "text": "leave it unchecked"
+        },
+        {
+          "id": "click",
+          "text": "click submit"
+        }
+      ],
+      "labels": ["A", "B", "C"]
+    },
+    {
+      "id": "multilingual",
+      "description": "Non-ASCII context and choices (French, Japanese, emoji) to pin tokenization.",
+      "system": null,
+      "context": "Formulaire : « Numéro de téléphone » — 電話番号を入力してください 📞",
+      "choices": [
+        {
+          "id": "tel",
+          "text": "remplir Tél. : 06 12 34 56 78"
+        },
+        {
+          "id": "email",
+          "text": "remplir Courriel : élodie@example.invalid"
+        },
+        {
+          "id": "skip",
+          "text": "ignorer ce champ ✓"
+        }
+      ],
+      "labels": ["A", "B", "C"]
+    },
+    {
+      "id": "max-26",
+      "description": "Every single-letter label A-Z: the largest label set the letter template allows.",
+      "system": null,
+      "context": "Which city is the capital of Australia?",
+      "choices": [
+        {
+          "id": "sydney",
+          "text": "Sydney"
+        },
+        {
+          "id": "melbourne",
+          "text": "Melbourne"
+        },
+        {
+          "id": "canberra",
+          "text": "Canberra"
+        },
+        {
+          "id": "perth",
+          "text": "Perth"
+        },
+        {
+          "id": "adelaide",
+          "text": "Adelaide"
+        },
+        {
+          "id": "brisbane",
+          "text": "Brisbane"
+        },
+        {
+          "id": "hobart",
+          "text": "Hobart"
+        },
+        {
+          "id": "darwin",
+          "text": "Darwin"
+        },
+        {
+          "id": "auckland",
+          "text": "Auckland"
+        },
+        {
+          "id": "wellington",
+          "text": "Wellington"
+        },
+        {
+          "id": "toronto",
+          "text": "Toronto"
+        },
+        {
+          "id": "ottawa",
+          "text": "Ottawa"
+        },
+        {
+          "id": "vancouver",
+          "text": "Vancouver"
+        },
+        {
+          "id": "montreal",
+          "text": "Montreal"
+        },
+        {
+          "id": "chicago",
+          "text": "Chicago"
+        },
+        {
+          "id": "boston",
+          "text": "Boston"
+        },
+        {
+          "id": "denver",
+          "text": "Denver"
+        },
+        {
+          "id": "seattle",
+          "text": "Seattle"
+        },
+        {
+          "id": "lisbon",
+          "text": "Lisbon"
+        },
+        {
+          "id": "madrid",
+          "text": "Madrid"
+        },
+        {
+          "id": "dublin",
+          "text": "Dublin"
+        },
+        {
+          "id": "oslo",
+          "text": "Oslo"
+        },
+        {
+          "id": "vienna",
+          "text": "Vienna"
+        },
+        {
+          "id": "prague",
+          "text": "Prague"
+        },
+        {
+          "id": "warsaw",
+          "text": "Warsaw"
+        },
+        {
+          "id": "athens",
+          "text": "Athens"
+        }
+      ],
+      "labels": ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z"]
+    },
+    {
+      "id": "near-tie-season",
+      "description": "A preference question the base model splits almost evenly (reference margin below 0.05).",
+      "system": null,
+      "context": "Which season do you prefer?",
+      "choices": [
+        {
+          "id": "autumn",
+          "text": "autumn"
+        },
+        {
+          "id": "spring",
+          "text": "spring"
+        }
+      ],
+      "labels": ["A", "B"]
+    }
+  ]
+}

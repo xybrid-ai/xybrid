@@ -6,11 +6,14 @@ Build automation and scripts for the xybrid project.
 
 ```
 tools/
+├── conformance/    # Choice-scoring conformance inputs: exports, goldens,
+│                   #   pinned environments (see conformance/README.md)
 ├── scripts/        # Build, release, and codegen helpers (see below)
 │   ├── natives-*.sh          # Prebuilt llama.cpp slices: fingerprint, push,
 │   │                         #   pull, manifest, anonymous-pull verification
 │   ├── gen_*_bolt*.py        # Generate the Kotlin / Python / Unity C# bolt
 │   │                         #   bindings (CI byte-compares with --check)
+│   ├── check_choice_provenance.py  # Verify the conformance fixture pins
 │   ├── version-sync.sh       # Read or set the version across every manifest
 │   ├── api-contract-check.sh # Soft-warning public SDK signature check
 │   ├── build-xcframework.sh  # Build XCFramework for Apple platforms

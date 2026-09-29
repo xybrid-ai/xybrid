@@ -1,0 +1,26 @@
+{
+  "type": "OnnxByteOptionScorer",
+  "model_file": "cua-s1-forms.onnx",
+  "context": {
+    "offset": 1,
+    "max_len": 224,
+    "overflow": "Truncate",
+    "ids_input": "context_ids",
+    "mask_input": "context_mask"
+  },
+  "choice": {
+    "offset": 1,
+    "max_len": 96,
+    "overflow": "Truncate",
+    "ids_input": "option_ids",
+    "mask_input": "option_token_mask"
+  },
+  "choice_mask_input": "option_mask",
+  "logits_output": "logits",
+  "max_choices": 64,
+  "fixed_choices": [
+    { "id": "check", "text": "check" },
+    { "id": "click", "text": "click" },
+    { "id": "skip", "text": "skip" }
+  ]
+}

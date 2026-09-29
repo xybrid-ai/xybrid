@@ -5,9 +5,12 @@ set -euo pipefail
 # Supports two download sources:
 #   - registry: Downloads from xybrid registry (registry.xybrid.dev)
 #   - url: Downloads directly from URLs (GitHub, HuggingFace, etc.)
+# "derived" entries are not published anywhere: they are regenerated from
+# pinned inputs by tools/conformance/prepare.sh, which this script delegates to.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MODELS_DIR="$SCRIPT_DIR/fixtures/models"
+PREPARE="$SCRIPT_DIR/../tools/conformance/prepare.sh"
 MANIFEST="$MODELS_DIR/models.json"
 REGISTRY_API="https://registry.xybrid.dev"
 
@@ -41,6 +44,9 @@ list_models() {
     echo -e "${BLUE}Direct URL models:${NC}"
     jq -r '.models | to_entries[] | select(.value.source == "url") | "  \(.key) (\(.value.size_mb)MB) - \(.value.description)"' "$MANIFEST"
     echo ""
+    echo -e "${BLUE}Derived models (regenerated from pinned inputs by tools/conformance/prepare.sh):${NC}"
+    jq -r '.models | to_entries[] | select(.value.source == "derived") | "  \(.key) (\(.value.size_mb)MB) - \(.value.description)"' "$MANIFEST"
+    echo ""
     echo "Usage: $0 [model-name|--all|--list|--check]"
 }
 
@@ -59,8 +65,19 @@ check_models() {
         local source
         source=$(jq -r ".models[\"$model\"].source" "$MANIFEST")
 
-        # Check for model.onnx or model_metadata.json
-        if [ -d "$model_dir" ] && { [ -f "$model_dir/model_metadata.json" ] || [ -f "$model_dir/model.onnx" ]; }; then
+        # Derived models are present when every declared output is; others
+        # when model.onnx or model_metadata.json is.
+        local staged=false
+        local output
+        if [ "$source" = "derived" ]; then
+            staged=true
+            while IFS= read -r output; do
+                [ -f "$model_dir/$output" ] || staged=false
+            done < <(jq -r ".models[\"$model\"].files[].output" "$MANIFEST")
+        elif [ -d "$model_dir" ] && { [ -f "$model_dir/model_metadata.json" ] || [ -f "$model_dir/model.onnx" ]; }; then
+            staged=true
+        fi
+        if $staged; then
             echo -e "  ${GREEN}✓${NC} $model [$source]"
             present=$((present + 1))
         else
@@ -73,7 +90,7 @@ check_models() {
     if [ $missing -eq 0 ]; then
         echo -e "${GREEN}All $present models present!${NC}"
     else
-        echo -e "${YELLOW}$missing model(s) missing, $present present. Run '$0 --all' to download.${NC}"
+        echo -e "${YELLOW}$missing model(s) missing, $present present. Run '$0 --all' to download; derived models need '$0 <model>'.${NC}"
     fi
 }
 
@@ -513,6 +530,9 @@ download_model() {
         url)
             download_from_url "$model_name"
             ;;
+        derived)
+            "$PREPARE" "$model_name"
+            ;;
         *)
             echo -e "${RED}Unknown source type: $source${NC}"
             return 1
@@ -531,6 +551,14 @@ download_all() {
     local succeeded=0
 
     for model in $models; do
+        # Regenerating a derived model needs the conformance toolchain (uv,
+        # cmake, the llama.cpp submodule), so --all leaves it to an explicit
+        # request by name.
+        if [ "$(jq -r ".models[\"$model\"].source" "$MANIFEST")" = "derived" ]; then
+            echo -e "${YELLOW}Skipping derived model $model; run '$0 $model' to regenerate it${NC}"
+            echo ""
+            continue
+        fi
         if download_model "$model"; then
             succeeded=$((succeeded + 1))
         else
@@ -569,12 +597,13 @@ case "${1:-}" in
         echo "Options:"
         echo "  --list, -l     List available models"
         echo "  --check, -c    Check which models are present"
-        echo "  --all, -a      Download all models"
+        echo "  --all, -a      Download all models (derived models are skipped)"
         echo "  --help, -h     Show this help"
         echo ""
         echo "Download sources:"
         echo "  registry  - Downloads from xybrid registry (registry.xybrid.dev)"
         echo "  url       - Downloads directly from URLs"
+        echo "  derived   - Regenerated from pinned inputs (tools/conformance/prepare.sh)"
         echo ""
         echo "Examples:"
         echo "  $0 --list           # List available models"

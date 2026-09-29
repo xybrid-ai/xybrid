@@ -1,0 +1,188 @@
+name: Test choice conformance
+
+# Choice-scoring conformance inputs (integration-tests/fixtures/choice). The
+# model artifacts are not published anywhere: tools/conformance/prepare.sh
+# regenerates them from pinned upstream inputs and stages them only if they
+# match the sha256 that models.json and provenance.json pin.
+#
+# Each job caches its staged artifacts under a key that covers the whole
+# recipe: the model's models.json entry, the provenance sections it depends
+# on, the locked environment, the tooling and this workflow. Any recipe change
+# therefore re-proves regeneration, every run re-verifies the bytes, and the
+# nightly run skips the cache so a cold rebuild (upstream availability,
+# resolvable packages) is exercised daily. The runtime conformance tests, and
+# the runtime paths, Cargo files and native pins in the path filters, join the
+# forms (ONNX) and label-token (llama.cpp) jobs as the scorer lands.
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'integration-tests/fixtures/choice/**'
+      - 'integration-tests/fixtures/models/models.json'
+      - 'integration-tests/download.sh'
+      - 'tools/conformance/**'
+      - 'tools/scripts/check_choice_provenance.py'
+      - 'tools/scripts/tests/test_check_choice_provenance.py'
+      - 'vendor/llama-cpp'
+      - '.github/workflows/test-choice-conformance.yml'
+      - "!**.md"
+  pull_request:
+    branches: [master]
+    paths:
+      - 'integration-tests/fixtures/choice/**'
+      - 'integration-tests/fixtures/models/models.json'
+      - 'integration-tests/download.sh'
+      - 'tools/conformance/**'
+      - 'tools/scripts/check_choice_provenance.py'
+      - 'tools/scripts/tests/test_check_choice_provenance.py'
+      - 'vendor/llama-cpp'
+      - '.github/workflows/test-choice-conformance.yml'
+      - "!**.md"
+  schedule:
+    - cron: '23 5 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions: read-all
+
+jobs:
+  provenance:
+    name: Provenance and fixture digests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Checker unit tests
+        run: python3 -m unittest discover -s tools/scripts/tests -p 'test_check_choice_provenance.py' -v
+      # Reads the vendor/llama-cpp gitlink from the index, so the submodule
+      # itself need not be checked out.
+      - name: Verify every digest and citation
+        run: python3 tools/scripts/check_choice_provenance.py --check
+
+  forms:
+    name: CUA-S1-FORMS ONNX (regenerate or verify)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Digest the recipe
+        id: recipe
+        run: |
+          {
+            jq -cS '.models["cua-s1-forms"]' integration-tests/fixtures/models/models.json
+            jq -cS '{artifact: .artifacts["cua-s1-forms"], sources, environment: .environments.forms}' \
+              integration-tests/fixtures/choice/provenance.json
+          } > "$RUNNER_TEMP/recipe"
+          echo "digest=$(sha256sum "$RUNNER_TEMP/recipe" | cut -c1-16)" >> "$GITHUB_OUTPUT"
+
+      # Skipped nightly, so the scheduled run always rebuilds from cold.
+      - name: Cache cua-s1-forms
+        if: github.event_name != 'schedule'
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: integration-tests/fixtures/models/cua-s1-forms
+          key: choice-cua-s1-forms-${{ steps.recipe.outputs.digest }}-${{ hashFiles('tools/conformance/prepare.sh', 'tools/conformance/export_forms_onnx.py', 'tools/conformance/requirements-forms.txt', 'integration-tests/fixtures/choice/cases/forms.json', '.github/workflows/test-choice-conformance.yml') }}
+
+      # A miss, or a restored artifact that fails its digest, needs a rebuild.
+      - name: Verify the restored artifact
+        id: staged
+        run: |
+          if python3 tools/scripts/check_choice_provenance.py --staged cua-s1-forms; then
+            echo "verified=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "verified=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        if: steps.staged.outputs.verified != 'true'
+        with:
+          version: '0.11.23'
+          enable-cache: false
+
+      # Exports the ONNX from the pinned checkpoint and stages it only if the
+      # parity and padding gates hold and its sha256 matches the pin; a no-op
+      # when the restored artifact already verified.
+      - name: Prepare cua-s1-forms
+        env:
+          # CPU-only torch: the default Linux wheels pull in the CUDA stack.
+          # The locked `torch==2.14.0` resolves to 2.14.0+cpu, whose export is
+          # byte-identical to the macOS one.
+          UV_INDEX: https://download.pytorch.org/whl/cpu
+          UV_INDEX_STRATEGY: unsafe-best-match
+        run: tools/conformance/prepare.sh cua-s1-forms
+
+      - name: Verify the staged artifact against provenance
+        run: python3 tools/scripts/check_choice_provenance.py --staged cua-s1-forms
+
+      - name: Upload the export report
+        if: steps.staged.outputs.verified != 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: cua-s1-forms-export-report
+          path: target/choice-conformance/reports/cua-s1-forms-export.json
+          if-no-files-found: error
+
+  label-token:
+    name: Qwen3.5-0.8B GGUF (regenerate or verify)
+    runs-on: macos-14
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Ensure jq and cmake
+        run: |
+          for tool in jq cmake; do
+            command -v "$tool" >/dev/null || brew install "$tool"
+          done
+
+      - name: Digest the recipe
+        id: recipe
+        run: |
+          {
+            jq -cS '[.models["qwen3.5-0.8b-f16-cf"], .models["qwen3.5-0.8b-q4km-cf"]]' \
+              integration-tests/fixtures/models/models.json
+            jq -cS '{f16: .artifacts["qwen3.5-0.8b-f16-cf"], q4: .artifacts["qwen3.5-0.8b-q4km-cf"], sources, environment: .environments.convert, templates}' \
+              integration-tests/fixtures/choice/provenance.json
+          } > "$RUNNER_TEMP/recipe"
+          echo "digest=$(shasum -a 256 "$RUNNER_TEMP/recipe" | cut -c1-16)" >> "$GITHUB_OUTPUT"
+
+      # Skipped nightly, so the scheduled run always rebuilds from cold.
+      - name: Cache the Qwen3.5-0.8B GGUFs
+        if: github.event_name != 'schedule'
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            integration-tests/fixtures/models/qwen3.5-0.8b-f16-cf
+            integration-tests/fixtures/models/qwen3.5-0.8b-q4km-cf
+          key: choice-qwen3.5-0.8b-${{ steps.recipe.outputs.digest }}-${{ hashFiles('tools/conformance/prepare.sh', 'tools/conformance/convert_gguf.sh', 'tools/conformance/requirements-convert.txt', 'integration-tests/fixtures/choice/templates/qwen3.5.jinja', '.github/workflows/test-choice-conformance.yml') }}
+
+      # A miss, or a restored artifact that fails its digest, needs a rebuild.
+      - name: Verify the restored artifacts
+        id: staged
+        run: |
+          if python3 tools/scripts/check_choice_provenance.py --staged qwen3.5-0.8b-f16-cf qwen3.5-0.8b-q4km-cf; then
+            echo "verified=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "verified=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Only a rebuild needs the converter and llama-quantize sources.
+      - name: Check out vendor/llama-cpp
+        if: steps.staged.outputs.verified != 'true'
+        run: git submodule update --init --depth 1 vendor/llama-cpp
+
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        if: steps.staged.outputs.verified != 'true'
+        with:
+          version: '0.11.23'
+          enable-cache: false
+
+      - name: Prepare the F16 and Q4_K_M GGUFs
+        run: tools/conformance/prepare.sh qwen3.5-0.8b-f16-cf qwen3.5-0.8b-q4km-cf
+
+      - name: Verify the staged artifacts against provenance
+        run: python3 tools/scripts/check_choice_provenance.py --staged qwen3.5-0.8b-f16-cf qwen3.5-0.8b-q4km-cf

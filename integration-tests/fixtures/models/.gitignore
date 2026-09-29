@@ -14,6 +14,11 @@ model_metadata.json
 !/gemma-4-e2b/model_metadata.json
 !/functiongemma-270m-it/model_metadata.json
 !/whisper-ggml-tiny-en/model_metadata.json
+# Choice-scoring conformance fixtures (tools/conformance). Their artifacts
+# are regenerated, never committed; metadata lands with the scorer template.
+!/cua-s1-forms/model_metadata.json
+!/qwen3.5-0.8b-f16-cf/model_metadata.json
+!/qwen3.5-0.8b-q4km-cf/model_metadata.json
 
 # Keep scripts and tooling
 !download_models.sh
