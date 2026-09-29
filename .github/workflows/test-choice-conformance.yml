@@ -88,7 +88,7 @@ jobs:
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: integration-tests/fixtures/models/cua-s1-forms
-          key: choice-cua-s1-forms-${{ steps.recipe.outputs.digest }}-${{ hashFiles('tools/conformance/prepare.sh', 'tools/conformance/export_forms_onnx.py', 'tools/conformance/requirements-forms.txt', 'integration-tests/fixtures/choice/cases/forms.json', '.github/workflows/test-choice-conformance.yml') }}
+          key: choice-cua-s1-forms-${{ steps.recipe.outputs.digest }}-${{ hashFiles('tools/conformance/prepare.sh', 'tools/conformance/export_forms_onnx.py', 'tools/conformance/common.py', 'tools/conformance/requirements-forms.txt', 'integration-tests/fixtures/choice/cases/forms.json', '.github/workflows/test-choice-conformance.yml') }}
 
       # A miss, or a restored artifact that fails its digest, needs a rebuild.
       - name: Verify the restored artifact
