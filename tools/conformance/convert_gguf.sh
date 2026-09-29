@@ -129,7 +129,11 @@ build_quantize() {
     build="$CACHE/build/llama-quantize-$revision-$flags"
     if [ ! -x "$build/bin/llama-quantize" ]; then
         cmake -S "$LLAMA" -B "$build" "${QUANTIZE_FLAGS[@]}" >&2
-        cmake --build "$build" --target llama-quantize --parallel >&2
+        # One job per core. A bare --parallel is an unbounded `make -j`: on a
+        # 3-core, 7 GB CI runner it starts ~180 compiles at once and thrashes
+        # for most of an hour.
+        cmake --build "$build" --target llama-quantize \
+            --parallel "$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2)" >&2
     fi
     echo "$build/bin/llama-quantize"
 }
