@@ -53,10 +53,9 @@ class CleanTestCase(unittest.TestCase):
         self.git(self.temp, "init", "-q", "--bare", "-b", "main", str(self.origin))
         self.repo = self.temp / "repo"
         self.git(self.temp, "clone", "-q", str(self.origin), str(self.repo))
-        write(
-            self.repo / ".gitignore",
-            ".context/\n/target/\nnode_modules/\nbuild/\n*.so\n",
-        )
+        # No `.context/` here: Conductor ignores it through .git/info/exclude
+        # only, so a fresh clone does not, and the scripts must not rely on it.
+        write(self.repo / ".gitignore", "/target/\nnode_modules/\nbuild/\n*.so\n")
         write(self.repo / "src.txt")
         shutil.copy(ROOT_SCRIPT, self.repo / "clean.sh")
         (self.repo / "tools" / "scripts").mkdir(parents=True)
@@ -86,6 +85,8 @@ class CleanTestCase(unittest.TestCase):
             f'{body}\nclean_run "$@"\n',
         )
         path.chmod(0o755)
+        # The root only runs clean scripts git tracks.
+        self.git(self.repo, "add", str(path))
         return path
 
     def run_script(self, script, *args, **env):
@@ -239,11 +240,22 @@ class RootScriptTests(CleanTestCase):
         for path in ("a-app/build", "b-app/build", "target"):
             self.assertFalse((self.repo / path).exists(), path)
 
-    def test_skips_clean_scripts_in_ignored_dirs(self):
-        # A package's own clean.sh inside node_modules/ is not ours to run.
+    def test_runs_only_clean_scripts_git_tracks(self):
+        # A package's own clean.sh inside node_modules/, or a stray untracked
+        # one, is not ours to run.
         marker = self.temp / "ran"
-        for folder in ("web/node_modules/pkg", ".context/scratch"):
+        for folder in ("web/node_modules/pkg", "stray"):
             write(self.repo / folder / "clean.sh", f"touch {marker}\n")
+
+        result = self.run_root("--apply")
+
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertFalse(marker.exists())
+
+    def test_never_runs_clean_scripts_under_context_even_when_tracked(self):
+        marker = self.temp / "ran"
+        write(self.repo / ".context" / "scratch" / "clean.sh", f"touch {marker}\n")
+        self.git(self.repo, "add", ".context/scratch/clean.sh")
 
         result = self.run_root("--apply")
 
@@ -252,6 +264,7 @@ class RootScriptTests(CleanTestCase):
 
     def test_failing_folder_script_fails_the_run_but_not_the_others(self):
         write(self.repo / "broken" / "clean.sh", "echo boom; exit 3\n")
+        self.git(self.repo, "add", "broken/clean.sh")
         self.folder_script("app", "clean_paths build")
         write(self.repo / "app" / "build" / "out.bin")
 
@@ -262,15 +275,41 @@ class RootScriptTests(CleanTestCase):
         self.assertIn("boom", result.stdout)
         self.assertFalse((self.repo / "app" / "build").exists())
 
-    def test_sweeps_ignored_outputs_in_context_but_keeps_notes(self):
+    def test_sweeps_outputs_in_plain_context_scratch_but_keeps_notes(self):
+        # .context/ is not ignored here, as on a machine without Conductor.
         write(self.repo / ".context" / "smoke" / "node_modules" / "pkg" / "i.js")
+        write(self.repo / ".context" / "smoke" / "ios" / "Pods" / "Pod.h")
         write(self.repo / ".context" / "notes.md")
 
         result = self.run_root("--apply")
 
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertFalse((self.repo / ".context" / "smoke" / "node_modules").exists())
+        self.assertFalse((self.repo / ".context" / "smoke" / "ios" / "Pods").exists())
         self.assertTrue((self.repo / ".context" / "notes.md").is_file())
+
+    def test_sweeps_only_what_a_nested_checkout_under_context_ignores(self):
+        app = self.repo / ".context" / "app"
+        app.mkdir(parents=True)
+        self.git(app, "init", "-q")
+        write(app / ".gitignore", "node_modules/\n")
+        write(app / "node_modules" / "pkg" / "i.js")
+        write(app / "build" / "handwritten.txt")
+
+        result = self.run_root("--apply")
+
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertFalse((app / "node_modules").exists())
+        self.assertTrue((app / "build" / "handwritten.txt").is_file())
+
+    def test_keeps_context_dirs_this_checkout_tracks(self):
+        write(self.repo / ".context" / "kept" / "build" / "keep.txt")
+        self.git(self.repo, "add", "-f", ".context/kept/build/keep.txt")
+
+        result = self.run_root("--apply")
+
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertTrue((self.repo / ".context" / "kept" / "build" / "keep.txt").is_file())
 
     def test_worktrees_removes_only_published_clean_ones(self):
         pushed = self.add_worktree("pushed", "feat/pushed")
@@ -339,7 +378,7 @@ class RootScriptTests(CleanTestCase):
 
 def folder_scripts():
     listed = subprocess.run(
-        ["git", "ls-files", "--cached", "--others", "--exclude-standard", "--", ":(glob)**/clean.sh"],
+        ["git", "ls-files", "--cached", "--", ":(glob)**/clean.sh", ":!.context"],
         cwd=REPO,
         check=True,
         capture_output=True,

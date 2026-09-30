@@ -6,12 +6,13 @@
 # candidate with its size. Pass --apply to delete. `just clean` runs it.
 #
 # Every folder that produces build output owns a clean.sh naming its outputs
-# (see tools/scripts/clean-lib.sh). This script finds them all with git, runs
-# them in parallel, and prints their reports in path order. It also owns:
+# (see tools/scripts/clean-lib.sh). This script runs every clean.sh git tracks
+# in parallel, and prints their reports in path order. It also owns:
 #   .               the cargo target/ and SwiftPM .build/.
 #   .context/       agent scratch: any target/, node_modules/, Pods/, build/...
-#                   inside it that git ignores (it holds throwaway apps and
-#                   release checkouts, which have no clean.sh of their own).
+#                   inside it (it holds throwaway apps and release checkouts,
+#                   which have no clean.sh of their own). Inside a checkout
+#                   with its own .git, only what that checkout ignores.
 #   --worktrees     nested git worktrees under .context/ that are clean and
 #                   whose HEAD is on a remote branch or in a merged PR (asked
 #                   of `gh`, when installed). Removed by `git worktree remove`.
@@ -33,7 +34,7 @@
 clean_paths target .build
 
 # Names that only ever hold build or install output, swept inside .context/.
-# `build` and `dist` are generic, which is why every hit must be git-ignored.
+# `build` and `dist` are generic, which is why is_scratch_output vets each hit.
 SCRATCH_OUTPUT_NAMES="target node_modules Pods build .gradle .cxx .next
   .dart_tool .build DerivedData dist .expo bazel-disk-cache"
 
@@ -58,11 +59,13 @@ clean_args ${args[@]+"${args[@]}"}
 
 # --- folder clean.sh scripts --------------------------------------------------
 
-# folder_scripts: every clean.sh below the root that git tracks or would track.
-# Asking git keeps out copies inside node_modules/, .context/ and the like.
+# folder_scripts: every clean.sh below the root that git tracks, so only
+# committed (or staged) scripts run, never a copy inside node_modules/.
+# .context/ is excluded by name: it holds other checkouts and throwaway trees,
+# and only a local exclude file, not .gitignore, keeps it out of git.
 folder_scripts() {
-  git -C "$CLEAN_ROOT" ls-files --cached --others --exclude-standard \
-    -- ':(glob)**/clean.sh' | grep -vx 'clean.sh' | sort -u
+  git -C "$CLEAN_ROOT" ls-files --cached -- ':(glob)**/clean.sh' ':!.context' |
+    grep -vx 'clean.sh' | sort -u
 }
 
 # run_folder_scripts: start every folder clean.sh at once, then print each
@@ -111,7 +114,7 @@ clean_scratch() {
   for name in $SCRATCH_OUTPUT_NAMES; do name_args+=(-o -name "$name"); done
   while IFS= read -r dir; do
     inside_removed_worktree "$dir" && continue
-    is_disposable "$dir" || continue
+    is_scratch_output "$dir" || continue
     if [ "$first" = 1 ]; then heading ".context (scratch)"; first=0; fi
     account "$dir"
     if [ "$CLEAN_APPLY" = 1 ]; then delete_path "$dir"; fi
@@ -119,6 +122,22 @@ clean_scratch() {
     find "$CLEAN_ROOT/.context" -name .git -prune \
       -o -type d \( "${name_args[@]:1}" \) -print -prune 2>/dev/null
   )
+}
+
+# is_scratch_output <dir>: safe to delete from .context/. Inside a checkout of
+# its own (a release worktree, a smoke app with its own .git) that checkout must
+# ignore it. Otherwise it sits in plain scratch, where it only has to be
+# untracked here: do not ask whether .context/ is ignored, because only
+# Conductor's .git/info/exclude says so.
+is_scratch_output() {
+  local owner
+  owner="$(git -C "$(dirname "$1")" rev-parse --show-toplevel 2>/dev/null)" ||
+    return 1
+  if [ "$owner" != "$CLEAN_ROOT" ]; then
+    is_disposable "$1"
+  else
+    [ -z "$(git -C "$CLEAN_ROOT" ls-files -- "$1" 2>/dev/null | head -n 1)" ]
+  fi
 }
 
 # is_published <worktree>: HEAD is safe elsewhere, on a remote branch or as a

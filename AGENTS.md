@@ -48,10 +48,10 @@ recreates; add `--all` for merged `.context` worktrees and Bazel output bases,
 Cleaning is per folder. Every folder that produces build output owns a
 `clean.sh` that sources `tools/scripts/clean-lib.sh` and names its outputs
 (`clean_paths`, plus `clean_command` for a tool like `flutter clean`); the root
-`clean.sh` finds them all with git and runs them in parallel. **A new folder
-that builds something gets a `clean.sh` too.** Only list paths git ignores:
-the lib refuses anything else, and `tools/scripts/tests/test_clean.py` fails on
-it.
+`clean.sh` runs every one git tracks, in parallel. **A new folder that builds
+something gets a `clean.sh` too** (commit it, or it never runs). Only list
+paths git ignores: the lib refuses anything else, and
+`tools/scripts/tests/test_clean.py` fails on it.
 
 ### Building native bindings / cross-compiled artifacts
 

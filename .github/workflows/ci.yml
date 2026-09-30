@@ -58,9 +58,7 @@ jobs:
               "repos/$REPOSITORY/compare/$BEFORE_SHA...$CURRENT_SHA" \
               --jq '.files[].filename')
           fi
-          # clean.sh and .gitignore anywhere: test_clean.py checks every
-          # folder clean.sh lists only paths the .gitignore files ignore.
-          if printf '%s\n' "$FILES" | grep -qE '^(tools/scripts/|\.github/workflows/ci\.yml$)|(^|/)(clean\.sh|\.gitignore)$'; then
+          if printf '%s\n' "$FILES" | grep -qE '^(tools/scripts/|\.github/workflows/ci\.yml$)'; then
             RELEVANT=true
           else
             RELEVANT=false

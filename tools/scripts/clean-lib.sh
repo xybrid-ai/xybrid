@@ -18,7 +18,7 @@
 # whatever paths remain. A path is only touched when git ignores it and tracks
 # nothing inside it: a wrong entry is reported, never deleted.
 #
-# The root clean.sh finds every clean.sh in the repo and runs them in parallel.
+# The root clean.sh runs every clean.sh git tracks, in parallel.
 # It sets CLEAN_KB_FILE, where clean_run writes its total instead of a summary.
 set -euo pipefail
 
