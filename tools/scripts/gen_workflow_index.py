@@ -39,8 +39,9 @@ END = "<!-- END GENERATED: workflow inventory -->"
 
 # Display order of the inventory; the keys are the allowed `Group` prefixes.
 GROUPS = {
-    "CI": "Pull-request gates, and the test suites and caches behind them.",
+    "CI": "Workspace validation, pull-request gates and backend test suites.",
     "SDK": "Per-platform SDK builds, wrapper tests and example apps.",
+    "Artifacts": "Publish reusable native artifacts and their download manifests.",
     "Release": "Cut, validate, publish and announce a release.",
     "Security": "Static analysis and supply-chain checks.",
     "Maintenance": "Manual utilities, run on demand.",

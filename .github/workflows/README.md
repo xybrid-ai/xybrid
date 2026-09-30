@@ -29,13 +29,24 @@ decisions to keep.
   `Bazel graph + RBE targets` (`bazel.yml`), matched by job name. A workflow's
   `name:` can change freely; those job names cannot.
 
+## Preserving execution
+
+Display-name and purpose edits must preserve workflow filenames, triggers and
+path filters, job IDs and check names, matrices, steps and test commands,
+dependencies, permissions, secret references and cancellation settings. The
+literal concurrency keys stay stable when a display name changes.
+
+The `Workflow index` job supplements the existing checks. Every original test
+command continues to run in its existing job; the index job checks this page and
+the naming conventions.
+
 ## Inventory
 
 <!-- BEGIN GENERATED: workflow inventory (tools/scripts/gen_workflow_index.py) -->
 
 ### CI
 
-Pull-request gates, and the test suites and caches behind them.
+Workspace validation, pull-request gates and backend test suites.
 
 | File | Name | Triggers | Writes | Purpose |
 | --- | --- | --- | --- | --- |
@@ -44,7 +55,6 @@ Pull-request gates, and the test suites and caches behind them.
 | [`test-choice-conformance.yml`](test-choice-conformance.yml) | CI: Choice conformance | push to `master`, pull_request to `master`, schedule (`23 5 * * 1`), workflow_dispatch | none | Regenerate and verify choice-scoring conformance artifacts against pinned sha256s; weekly cold rebuild. |
 | [`ci-docs.yml`](ci-docs.yml) | CI: Docs-only gate | push to `master`, pull_request to `master` | none | Report the CI Success gate for docs-only changes, which ci.yml skips. |
 | [`test-policy-routing.yml`](test-policy-routing.yml) | CI: Policy routing | push to `master`, pull_request to `master`, workflow_dispatch | none | Drive the xybrid binary through a policy-routed hybrid stage: local GGUF leg, fake DeepSeek cloud leg. |
-| [`build-natives.yml`](build-natives.yml) | CI: Publish llama.cpp natives | push to `master`, schedule (`17 6 * * 1`), workflow_dispatch | contents, packages, pull-requests | Publish prebuilt llama.cpp slices to ghcr.io and open the natives-manifest PR that lets plain cargo builds download them. |
 | [`test-whispercpp.yml`](test-whispercpp.yml) | CI: whisper.cpp backend | push to `master`, pull_request to `master`, workflow_dispatch | none | Exercise whisper.cpp with real multilingual weights: translation, per-request language, long windows, non-speech suppression. |
 | [`ci.yml`](ci.yml) | CI: Workspace | push to `master`, pull_request to `master` | none | Rust format, lint, tests and feature matrix, plus binding drift, API contract, Python and Web SDK checks. Gates merges. |
 
@@ -59,6 +69,14 @@ Per-platform SDK builds, wrapper tests and example apps.
 | [`build-flutter.yml`](build-flutter.yml) | SDK: Flutter | push to `master`, pull_request to `master`, workflow_dispatch | none | Analyze and test the Dart wrapper, build the native libraries, and build a consumer app against the packaged layout. |
 | [`build-react-native.yml`](build-react-native.yml) | SDK: React Native | push to `master`, pull_request to `master`, workflow_dispatch | none | Test and npm-pack the JS package; build the iOS and Android example apps. |
 | [`unity-editor.yml`](unity-editor.yml) | SDK: Unity Editor | push to `master`, pull_request to `master`, workflow_dispatch | checks | Run a real Unity Editor: EditMode tests against a Bazel-built native, then an IL2CPP player smoke. |
+
+### Artifacts
+
+Publish reusable native artifacts and their download manifests.
+
+| File | Name | Triggers | Writes | Purpose |
+| --- | --- | --- | --- | --- |
+| [`build-natives.yml`](build-natives.yml) | Artifacts: Publish llama.cpp prebuilts | push to `master`, schedule (`17 6 * * 1`), workflow_dispatch | contents, packages, pull-requests | Publish prebuilt llama.cpp slices to ghcr.io and open the natives-manifest PR that lets plain cargo builds download them. |
 
 ### Release
 
