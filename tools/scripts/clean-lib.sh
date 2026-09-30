@@ -75,7 +75,7 @@ clean_usage() {
 # glob matching several paths reports as one line.
 clean_folder() {
   local pattern path matched kb i
-  local found=() skipped=() sizes=() labels=()
+  local found=() skipped=() reasons=() sizes=() labels=()
   [ "${#CLEAN_PATHS[@]}" -gt 0 ] || return 0
   for pattern in "${CLEAN_PATHS[@]}"; do
     matched=0
@@ -84,8 +84,14 @@ clean_folder() {
     # literal and fails the -e test.
     for path in "$CLEAN_DIR"/$pattern; do
       [ -e "$path" ] || continue
+      if is_checkout "$path"; then
+        skipped+=("$path")
+        reasons+=("a git checkout, not build output")
+        continue
+      fi
       if ! is_disposable "$path"; then
         skipped+=("$path")
+        reasons+=("git does not ignore it, so clean.sh should not list it")
         continue
       fi
       found+=("$path")
@@ -108,8 +114,10 @@ clean_folder() {
     report "${sizes[$i]}" "${labels[$i]}"
     i=$((i + 1))
   done
-  for path in ${skipped[@]+"${skipped[@]}"}; do
-    skip "$path" "git does not ignore it, so clean.sh should not list it"
+  i=0
+  while [ "$i" -lt "${#skipped[@]}" ]; do
+    skip "${skipped[$i]}" "${reasons[$i]}"
+    i=$((i + 1))
   done
   [ "${#found[@]}" -gt 0 ] || return 0
   if [ "${#CLEAN_COMMAND[@]}" -gt 0 ]; then
@@ -182,6 +190,11 @@ delete_path() {
   chmod -R u+w "$1" 2>/dev/null || true
   rm -rf "$1"
 }
+
+# is_checkout <path>: <path> is the top of a git checkout or worktree, which
+# holds work of its own whatever its name. Only the top: an output tree can
+# hold a .git deeper down (cargo's target/ keeps a llama.cpp clone).
+is_checkout() { [ -e "$1/.git" ]; }
 
 # is_disposable <path>: git ignores <path> and tracks nothing inside it, so
 # deleting it cannot lose committed or pending work. check-ignore reads the

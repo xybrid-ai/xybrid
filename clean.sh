@@ -119,8 +119,11 @@ clean_scratch() {
     account "$dir"
     if [ "$CLEAN_APPLY" = 1 ]; then delete_path "$dir"; fi
   done < <(
+    # A checkout named like an output (.context/build) is no match: find
+    # descends into it as into any other checkout here.
     find "$CLEAN_ROOT/.context" -name .git -prune \
-      -o -type d \( "${name_args[@]:1}" \) -print -prune 2>/dev/null
+      -o -type d \( "${name_args[@]:1}" \) \
+      ! -exec sh -c 'test -e "$1/.git"' sh {} \; -print -prune 2>/dev/null
   )
 }
 

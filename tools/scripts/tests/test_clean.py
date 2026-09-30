@@ -153,6 +153,20 @@ class FolderScriptTests(CleanTestCase):
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertTrue((self.repo / "app" / "build" / "vendored.js").is_file())
 
+    def test_keeps_a_listed_path_that_is_a_checkout(self):
+        # Ignored by this repo, but a clone of its own: not build output.
+        script = self.folder_script("app", "clean_paths build")
+        checkout = self.repo / "app" / "build"
+        checkout.mkdir(parents=True)
+        self.git(checkout, "init", "-q")
+        write(checkout / "work.txt")
+
+        result = self.run_script(script, "--apply")
+
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertTrue((checkout / "work.txt").is_file())
+        self.assertIn("app/build (a git checkout, not build output)", result.stdout)
+
     def test_glob_reports_one_line_and_deletes_every_match(self):
         script = self.folder_script("app", "clean_paths 'libs/*/*.so'")
         for abi in ("arm64-v8a", "x86_64", "armeabi-v7a"):
@@ -301,6 +315,26 @@ class RootScriptTests(CleanTestCase):
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertFalse((app / "node_modules").exists())
         self.assertTrue((app / "build" / "handwritten.txt").is_file())
+
+    def test_keeps_checkouts_named_like_outputs_but_cleans_inside_them(self):
+        # A worktree at .context/build and a clone at .context/target must
+        # survive as checkouts, not be deleted as scratch output.
+        worktree = self.add_worktree("build", "feat/build")
+        write(worktree / "target" / "debug" / "bin")
+        clone = self.repo / ".context" / "target"
+        clone.mkdir(parents=True)
+        self.git(clone, "init", "-q")
+        write(clone / ".gitignore", "node_modules/\n")
+        write(clone / "work.txt")
+        write(clone / "node_modules" / "pkg" / "i.js")
+
+        result = self.run_root("--apply")
+
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertTrue((worktree / "build.txt").is_file())
+        self.assertFalse((worktree / "target").exists())
+        self.assertTrue((clone / "work.txt").is_file())
+        self.assertFalse((clone / "node_modules").exists())
 
     def test_keeps_context_dirs_this_checkout_tracks(self):
         write(self.repo / ".context" / "kept" / "build" / "keep.txt")
