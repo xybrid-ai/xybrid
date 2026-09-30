@@ -115,7 +115,10 @@ class Tree:
                     "template": "templates/t.jinja",
                 }
             },
-            "gates": {"status": "provisional", "g1": {"max_abs_logit": 0.15, "note": "text"}},
+            "gates": {
+                "note": "text",
+                "track": {"status": "provisional", "g1": {"max_abs_logit": 0.15, "note": "text"}},
+            },
             "fixtures": {},
         }
         self.models = {
@@ -297,15 +300,38 @@ class CheckerTests(unittest.TestCase):
         self.assertRejects(r"templates\.templates/t\.jinja: differs from the pinned")
 
     def test_gate_bounds_must_be_positive(self) -> None:
-        self.tree.manifest["gates"]["g1"]["max_abs_logit"] = 0
+        self.tree.manifest["gates"]["track"]["g1"]["max_abs_logit"] = 0
         self.tree.save()
-        self.assertRejects(r"gates\.g1\.max_abs_logit: expected a finite positive bound")
+        self.assertRejects(r"gates\.track\.g1\.max_abs_logit: expected a finite positive bound")
 
     def test_gate_bounds_must_be_finite_numbers(self) -> None:
         for bad in ("0.15", float("inf"), True):
-            self.tree.manifest["gates"]["g1"]["max_abs_logit"] = bad
+            self.tree.manifest["gates"]["track"]["g1"]["max_abs_logit"] = bad
             self.tree.save()
-            self.assertRejects(r"gates\.g1\.max_abs_logit: expected a finite positive bound")
+            self.assertRejects(r"gates\.track\.g1\.max_abs_logit: expected a finite positive bound")
+
+    def test_each_gate_track_has_its_own_status(self) -> None:
+        for bad in (None, "measured"):
+            self.tree.manifest["gates"]["track"]["status"] = bad
+            self.tree.save()
+            self.assertRejects(r"gates\.track\.status: expected one of \['frozen', 'provisional'\]")
+        self.tree.manifest["gates"]["track"]["status"] = "frozen"
+        self.tree.save()
+        self.assertEqual(self.run_main("--check")[0], 0)
+
+    def test_gate_status_is_not_global(self) -> None:
+        self.tree.manifest["gates"]["status"] = "provisional"
+        self.tree.save()
+        self.assertRejects(r"gates\.status: status is per track")
+
+    def test_gate_tracks_need_bounds(self) -> None:
+        for track in ({"status": "frozen"}, {"status": "frozen", "note": "measured"}):
+            self.tree.manifest["gates"]["track"] = track
+            self.tree.save()
+            self.assertRejects(r"gates\.track: expected at least one gate")
+        self.tree.manifest["gates"] = {"note": "text"}
+        self.tree.save()
+        self.assertRejects(r"gates: expected at least one track")
 
     def run_main(self, *args: str) -> tuple[int, str]:
         stderr = io.StringIO()

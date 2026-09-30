@@ -53,6 +53,9 @@ use tempfile::TempDir;
 /// Metadata extracted from ONNX model inputs: (names, shapes, element types).
 type InputMetadata = (Vec<String>, Vec<Vec<i64>>, Vec<Option<TensorElementType>>);
 
+/// Metadata extracted from ONNX model outputs: (names, shapes, element types).
+type OutputMetadata = (Vec<String>, Vec<Vec<i64>>, Vec<Option<TensorElementType>>);
+
 /// Construction-time options for [`ONNXSession::build`].
 ///
 /// Every field defaults to the cheap behaviour — opting in costs
@@ -128,6 +131,8 @@ pub struct ONNXSession {
     output_shapes: Vec<Vec<i64>>,
     /// Input element types (e.g., Float32, Int64) from ONNX model metadata
     input_dtypes: Vec<Option<TensorElementType>>,
+    /// Output element types from ONNX model metadata
+    output_dtypes: Vec<Option<TensorElementType>>,
     /// The execution provider used for this session
     execution_provider: ExecutionProviderKind,
     /// Resolved-EP capture state. `Disabled` for sessions built with the
@@ -245,7 +250,7 @@ impl ONNXSession {
             .map_err(|e| AdapterError::RuntimeError(format!("Failed to load ONNX model: {}", e)))?;
 
         let (input_names, input_shapes, input_dtypes) = Self::extract_input_metadata(&session)?;
-        let (output_names, output_shapes) = Self::extract_output_metadata(&session)?;
+        let (output_names, output_shapes, output_dtypes) = Self::extract_output_metadata(&session)?;
 
         log::info!(
             "Created ONNX session with {} execution provider for model: {} (capture_resolved_ep={})",
@@ -261,6 +266,7 @@ impl ONNXSession {
             input_shapes,
             output_shapes,
             input_dtypes,
+            output_dtypes,
             execution_provider,
             resolved_state: Mutex::new(resolved_state),
         })
@@ -345,9 +351,10 @@ impl ONNXSession {
     }
 
     /// Extracts output metadata from the session.
-    fn extract_output_metadata(session: &Session) -> AdapterResult<(Vec<String>, Vec<Vec<i64>>)> {
+    fn extract_output_metadata(session: &Session) -> AdapterResult<OutputMetadata> {
         let mut output_names = Vec::new();
         let mut output_shapes = Vec::new();
+        let mut output_dtypes = Vec::new();
 
         // Access session.outputs directly - ort exposes outputs as Vec<Output>
         // Each Output has a name field
@@ -358,15 +365,17 @@ impl ONNXSession {
             // For now, use placeholder shapes
             // TODO: Extract real shapes from model metadata if available
             output_shapes.push(vec![-1]); // Placeholder: -1 indicates dynamic dimension
+            output_dtypes.push(output.dtype().tensor_type());
         }
 
         // If no outputs found, use placeholder
         if output_names.is_empty() {
             output_names.push("output".to_string());
             output_shapes.push(vec![1, 512]); // Placeholder shape
+            output_dtypes.push(None);
         }
 
-        Ok((output_names, output_shapes))
+        Ok((output_names, output_shapes, output_dtypes))
     }
 
     /// Runs inference on the session.
@@ -429,6 +438,51 @@ impl ONNXSession {
         &self,
         inputs: HashMap<String, Value>,
     ) -> AdapterResult<HashMap<String, ArrayD<f32>>> {
+        self.run_then(inputs, |outputs| self.collect_outputs(outputs))
+    }
+
+    /// Runs inference and returns one named float32 output.
+    ///
+    /// Unlike [`ONNXSession::run_with_values`], the output is looked up by
+    /// name rather than collected with the rest, and it is never converted:
+    /// an output of any other element type is an error. Locking and the
+    /// resolved-EP harvest are shared with `run_with_values`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `name` is empty (without running the model),
+    /// inference fails, the model has no output called `name`, or that output
+    /// is not a float32 tensor.
+    pub fn run_single_output_f32(
+        &self,
+        inputs: HashMap<String, Value>,
+        name: &str,
+    ) -> AdapterResult<ArrayD<f32>> {
+        // ort asserts on an empty output name; refuse it as an error instead.
+        if name.is_empty() {
+            return Err(AdapterError::InvalidInput(
+                "Output name must not be empty".to_string(),
+            ));
+        }
+        self.run_then(inputs, |outputs| {
+            let value = outputs.get(name).ok_or_else(|| {
+                AdapterError::RuntimeError(format!("Model has no output named '{name}'"))
+            })?;
+            let array = value.try_extract_array::<f32>().map_err(|e| {
+                AdapterError::RuntimeError(format!("Output '{name}' is not float32: {e}"))
+            })?;
+            Ok(array.to_owned())
+        })
+    }
+
+    /// Locks the session, runs it, hands the outputs to `extract`, then
+    /// finishes the resolved-EP harvest. An `extract` error returns before the
+    /// harvest, leaving capture pending for the next inference.
+    fn run_then<T>(
+        &self,
+        inputs: HashMap<String, Value>,
+        extract: impl FnOnce(&ort::session::SessionOutputs<'_>) -> AdapterResult<T>,
+    ) -> AdapterResult<T> {
         use ort::session::SessionInputs;
 
         // Get mutable access to session (wrapped in Mutex)
@@ -454,6 +508,24 @@ impl ONNXSession {
                 AdapterError::InferenceFailed(format!("ONNX Runtime inference failed: {}", e))
             })?;
 
+        let result = extract(&outputs)?;
+
+        // After the first inference, end profiling and parse the JSON
+        // to surface the resolved EP. `extract` returned owned data, so
+        // nothing borrows from `session_guard` once `outputs` is gone and
+        // we can take a `&mut` reborrow for `end_profiling`. Drop
+        // `outputs` explicitly to make that borrow lifetime obvious.
+        drop(outputs);
+        self.maybe_harvest_resolved_ep(&mut session_guard);
+
+        Ok(result)
+    }
+
+    /// Converts every model output to `ArrayD<f32>`, widening int64 outputs.
+    fn collect_outputs(
+        &self,
+        outputs: &ort::session::SessionOutputs<'_>,
+    ) -> AdapterResult<HashMap<String, ArrayD<f32>>> {
         // Convert outputs back to HashMap<String, ArrayD<f32>>
         let mut result = HashMap::new();
 
@@ -499,15 +571,6 @@ impl ONNXSession {
             result.insert(output_name.clone(), array_d);
         }
 
-        // After the first inference, end profiling and parse the JSON
-        // to surface the resolved EP. `outputs` has been fully converted
-        // into owned `result` entries above, so we no longer borrow
-        // from `session_guard` and can take a `&mut` reborrow for
-        // `end_profiling`. Drop `outputs` explicitly to make that
-        // borrow lifetime obvious to the reader.
-        drop(outputs);
-        self.maybe_harvest_resolved_ep(&mut session_guard);
-
         Ok(result)
     }
 
@@ -534,6 +597,11 @@ impl ONNXSession {
     /// Returns output shapes.
     pub fn output_shapes(&self) -> &[Vec<i64>] {
         &self.output_shapes
+    }
+
+    /// Returns output element types, parallel to [`ONNXSession::output_names`].
+    pub fn output_dtypes(&self) -> &[Option<TensorElementType>] {
+        &self.output_dtypes
     }
 
     /// Returns the execution provider used for this session.

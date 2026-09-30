@@ -17,6 +17,7 @@
 //! | [`preprocessing`] | Preprocessing step implementations |
 //! | [`postprocessing`] | Postprocessing step implementations |
 //! | [`modes`] | Execution mode implementations (SingleShot, Autoregressive, Whisper, TTS, BERT) |
+//! | [`choice`] | Choice-scoring primitives (candidates, byte encoding, score math, ONNX scorer) |
 //!
 //! ## Execution Flow
 //!
@@ -60,6 +61,9 @@
 
 // Template types (model_metadata.json schema)
 pub mod template;
+
+// Choice-scoring primitives (decision models)
+pub mod choice;
 
 // Chat template formatting for LLM prompts
 pub mod chat_template;

@@ -454,9 +454,15 @@ class Checker:
                 raise ProvenanceError(f"{where}: read {entry.get('file')!r} at another digest")
 
     def check_gates(self) -> None:
+        """Each track (``forms``, ``labels``) carries its own status and bounds."""
         gates = _mapping(self.manifest.get("gates"), "gates")
-        if gates.get("status") not in _GATE_STATUS:
-            raise ProvenanceError(f"gates.status: expected one of {sorted(_GATE_STATUS)}")
+        if "status" in gates:
+            raise ProvenanceError("gates.status: status is per track, as gates.<track>.status")
+        if "note" in gates:
+            _text(gates["note"], "gates.note")
+        tracks = {key: value for key, value in gates.items() if key != "note"}
+        if not tracks:
+            raise ProvenanceError("gates: expected at least one track")
 
         def walk(value: Any, where: str, key: str) -> None:
             if isinstance(value, dict):
@@ -472,9 +478,17 @@ class Checker:
             ):
                 raise ProvenanceError(f"{where}: expected a finite positive bound")
 
-        for key, value in gates.items():
-            if key != "status":
-                walk(value, f"gates.{key}", key)
+        for track, raw in tracks.items():
+            where = f"gates.{track}"
+            entry = _mapping(raw, where)
+            if entry.get("status") not in _GATE_STATUS:
+                raise ProvenanceError(f"{where}.status: expected one of {sorted(_GATE_STATUS)}")
+            # A note documents the track; it does not count as a gate.
+            if not any(key not in ("status", "note") for key in entry):
+                raise ProvenanceError(f"{where}: expected at least one gate")
+            for key, value in entry.items():
+                if key != "status":
+                    walk(value, f"{where}.{key}", key)
 
     # -- staged artifacts ----------------------------------------------------
 

@@ -153,7 +153,25 @@ on these cases, so a 1e-5 logit bound fails on rounding. Measured maxima over
 | ONNX Runtime vs PyTorch, logits / scores | 2.3e-5 / 1.3e-6 | 1.6e-5 / 2.2e-6 |
 | Padding (fixed vs collator), logits / scores | 1.9e-6 / 5e-11 | 1.1e-5 / 1.2e-6 |
 
-Padding is not exempt: on x86_64 it alone exceeds 1e-5 on logits. The G1/G2
-bounds in `provenance.json`'s `gates` are the plan's starting values
-(`"status": "provisional"`); the runtime conformance tests measure and freeze
-them.
+Padding is not exempt: on x86_64 it alone exceeds 1e-5 on logits.
+
+## Runtime gates
+
+Each track in `provenance.json`'s `gates` (`forms`, `labels`) has its own
+`status`. `provisional` bounds are the plan's starting values; `frozen` bounds
+were measured through xybrid's own runtime path, and loosening one needs a
+written justification. The runtime test of a frozen track fails if its status
+reverts to `provisional`.
+
+`forms` is frozen. Against the PyTorch reference, xybrid's ONNX path reaches
+|Δlogit| 1.9e-5 and |Δscore| 4.4e-7 on macOS arm64, and 1.2e-5 and 2.0e-6 on
+Linux x86_64, the same at 1, 4 and 8 threads and bit-identical across repeats.
+G1 allows 8e-5 and 1e-5: the larger of the export bound and four times the
+worst measurement. `labels` stays provisional until the label scorer's runtime
+tests freeze it.
+
+One input is outside what these gates prove: an empty context. With every
+context position masked, the model averages over all padding positions, and its
+position embeddings make that average depend on the padded length (224 in the
+export, 1 in the reference collator), so the logits differ by about 1.5. xybrid
+refuses an empty context instead.

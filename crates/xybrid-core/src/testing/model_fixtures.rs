@@ -235,6 +235,83 @@ pub fn model_or_skip(model_name: &str) -> Option<PathBuf> {
     None
 }
 
+/// Environment variable that turns a missing test model into a failure.
+///
+/// Presence alone counts (any value), as with `integration-tests`'
+/// `model_for_test`: CI sets it where a quietly skipped model test would
+/// prove nothing.
+pub const ENV_REQUIRE_MODELS: &str = "XYBRID_REQUIRE_MODELS";
+
+/// Whether [`ENV_REQUIRE_MODELS`] is set.
+pub fn models_required() -> bool {
+    std::env::var_os(ENV_REQUIRE_MODELS).is_some()
+}
+
+/// Path of `file`, staged for `model_id` by `integration-tests/download.sh`.
+///
+/// `models.json` in the models directory must list `file` under the entry's
+/// `files`. This locates artifacts that carry no `model_metadata.json`, such
+/// as the regenerated choice-scoring conformance models, which
+/// [`model_or_skip`] would not recognise.
+///
+/// Returns `None`, after printing a skip notice, when the file is not staged.
+///
+/// # Panics
+///
+/// Panics when `models.json` does not list `file` for `model_id` (a typo in
+/// the test), and when [`ENV_REQUIRE_MODELS`] is set and the file is missing.
+///
+/// # Example
+///
+/// ```no_run
+/// # fn _example() {
+/// use xybrid_core::testing::model_fixtures;
+/// let Some(onnx) = model_fixtures::staged_artifact("cua-s1-forms", "cua-s1-forms.onnx") else {
+///     return; // skipped
+/// };
+/// # let _ = onnx;
+/// # }
+/// ```
+pub fn staged_artifact(model_id: &str, file: &str) -> Option<PathBuf> {
+    let Some(dir) = models_dir() else {
+        return skip_or_require(format!("no models directory for '{model_id}/{file}'"));
+    };
+    let manifest = dir.join("models.json");
+    let listed = std::fs::read_to_string(&manifest)
+        .ok()
+        .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+        .map(|json| {
+            json["models"][model_id]["files"]
+                .as_array()
+                .is_some_and(|files| files.iter().any(|entry| entry["output"] == file))
+        });
+    match listed {
+        Some(true) => {}
+        Some(false) => panic!(
+            "{} does not list '{file}' under models.{model_id}.files",
+            manifest.display()
+        ),
+        None => return skip_or_require(format!("cannot read {}", manifest.display())),
+    }
+
+    let path = dir.join(model_id).join(file);
+    if path.is_file() {
+        Some(path)
+    } else {
+        skip_or_require(format!(
+            "'{model_id}/{file}' is not staged. Run: ./integration-tests/download.sh {model_id}"
+        ))
+    }
+}
+
+fn skip_or_require<T>(reason: String) -> Option<T> {
+    if models_required() {
+        panic!("{ENV_REQUIRE_MODELS} is set but {reason}");
+    }
+    eprintln!("Skipping test: {reason}");
+    None
+}
+
 /// Get the integration-tests fixtures directory (parent of models directory).
 ///
 /// Returns the fixtures directory which contains `models/` and `input/` subdirectories.

@@ -351,16 +351,18 @@
     }
   },
   "gates": {
-    "status": "provisional",
-    "note": "Starting bounds from the plan. PR 02 freezes the FORMS bounds and PR 05 the label bounds from measured spreads; loosening a frozen bound needs a written justification.",
+    "note": "Each track freezes its own bounds from measured spreads: PR 02 the FORMS track, PR 05 the label track. Loosening a frozen bound needs a written justification.",
     "forms": {
+      "status": "frozen",
+      "note": "Frozen by PR 02 at max(export-time bound, 4x the worst measured |delta|), capped at the starting bound 1e-4. Measured through xybrid's ONNX path against goldens/forms.json (13 cases, ONNX Runtime 1.23.2, ORT_ENABLE_LAYOUT, intra-op threads 1/4/8 x 5 repeats, bit-identical across repeats): macOS arm64 |dlogit| 1.895e-5, |dscore| 4.45e-7; Linux x86_64 |dlogit| 1.24e-5, |dscore| 1.97e-6.",
       "g1": {
-        "max_abs_logit": 0.0001,
-        "max_abs_score": 0.0001,
+        "max_abs_logit": 8e-05,
+        "max_abs_score": 1e-05,
         "near_tie_margin": 0.05
       }
     },
     "labels": {
+      "status": "provisional",
       "g1": {
         "max_abs_logit": 0.15,
         "max_abs_score": 0.02,

@@ -5,8 +5,10 @@
 //! payloads (audio, text, embeddings) and can be serialized for storage or
 //! transmission between local processes or over HTTP to cloud endpoints.
 
+pub mod choice;
 pub mod envelope;
 
+pub use choice::{Choice, ChoiceScore, ChoiceScores};
 pub use envelope::{AudioSamples, Envelope, EnvelopeKind, ToolCallResult};
 pub use envelope::{
     ImageDimensions, ImageFormat, ImagePlane, ImageSource, ImageSummary, ImageSummarySource,
