@@ -1,3 +1,4 @@
+# Purpose: Announce a published release on Discord.
 name: "Release: Announce on Discord"
 
 on:

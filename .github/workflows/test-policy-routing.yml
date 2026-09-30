@@ -1,3 +1,4 @@
+# Purpose: Drive the xybrid binary through a policy-routed hybrid stage: local GGUF leg, fake DeepSeek cloud leg.
 name: "CI: Policy routing"
 
 # Drives the real `xybrid` binary through a policy-routed hybrid stage: the

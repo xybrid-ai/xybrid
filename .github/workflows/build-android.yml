@@ -1,3 +1,4 @@
+# Purpose: Build the Android .so files for every ABI, test the Kotlin wrapper, and gate dlopen on an x86_64 emulator.
 name: "SDK: Android"
 
 on:

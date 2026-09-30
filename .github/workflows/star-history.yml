@@ -1,3 +1,4 @@
+# Purpose: Record the daily star count and redraw the README chart on the star-history branch.
 name: "Community: Star history"
 
 # Records the public star count once a day and redraws the README chart.

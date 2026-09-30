@@ -1,3 +1,4 @@
+# Purpose: Weekly OpenSSF Scorecard run; publishes results and uploads SARIF to code scanning.
 name: "Security: OpenSSF Scorecard"
 
 on:

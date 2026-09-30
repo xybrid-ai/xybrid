@@ -1,3 +1,4 @@
+# Purpose: On a v* tag, build the Unity native libraries for every platform and upload the bundles to the release.
 name: "Release: Unity bundles"
 
 on:

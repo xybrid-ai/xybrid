@@ -1,3 +1,4 @@
+# Purpose: Analyze and test the Dart wrapper, build the native libraries, and build a consumer app against the packaged layout.
 name: "SDK: Flutter"
 
 on:

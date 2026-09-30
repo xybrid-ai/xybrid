@@ -1,3 +1,4 @@
+# Purpose: CodeQL analysis of the workflow files themselves (language: actions).
 name: "Security: CodeQL"
 
 on:

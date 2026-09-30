@@ -1,3 +1,4 @@
+# Purpose: Build and verify the Apple XCFramework, then compile and unit-test the Swift wrapper on an iOS Simulator.
 name: "SDK: Apple"
 
 on:

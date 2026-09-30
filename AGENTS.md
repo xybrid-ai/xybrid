@@ -485,6 +485,29 @@ Setup, dry runs, and conformance-fixture migration are documented in
 
 ---
 
+## GitHub Actions workflows — names, files, keys
+
+The map of every workflow is
+[`.github/workflows/README.md`](.github/workflows/README.md). Its inventory table
+is generated from the workflow files, and these rules keep it true:
+
+- **Display name** is `"Group: Subject"` (quoted), and the line directly above
+  `name:` is `# Purpose: <one sentence>`. **Concurrency groups** are literal
+  (`<file-stem>-${{ github.ref }}`), never `${{ github.workflow }}`, so a display
+  name can change without changing the group. After touching any workflow, run
+  `python3 tools/scripts/gen_workflow_index.py` to refresh the table. CI runs it
+  with `--check` (job `Workflow index`) and fails on drift, or on a new workflow
+  that breaks these rules.
+- **Rename workflow files rarely.** GitHub ties run history and code-scanning
+  configurations (CodeQL `codeql.yml:analyze`, Scorecard `scorecard.yml:analysis`)
+  to the path, and `release-publish.yml` and the docs call
+  `gh workflow run <file>`. Change `name:` instead.
+- **Job names are the required checks.** `CI Success` (`ci.yml` and `ci-docs.yml`)
+  and `Bazel graph + RBE targets` (`bazel.yml`) gate `master`, matched by job
+  name. Edit a workflow's `name:` freely; never those job names.
+
+---
+
 ## Things to leave alone unless explicitly asked
 
 - `rustfmt.toml` is intentionally empty (defaults). Don't add style overrides.

@@ -1,3 +1,4 @@
+# Purpose: Exercise whisper.cpp with real multilingual weights: translation, per-request language, long windows, non-speech suppression.
 name: "CI: whisper.cpp backend"
 
 # Real multilingual weights exercise behavior that compile-only lanes cannot:

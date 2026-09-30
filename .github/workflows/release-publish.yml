@@ -1,3 +1,4 @@
+# Purpose: Release step 2: when the release PR merges, publish the release and the language packages.
 name: "Release: Publish"
 
 # Release-branch flow, step 2 of 2. Companion: release-prep.yml.

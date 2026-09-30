@@ -1,3 +1,4 @@
+# Purpose: Test and npm-pack the JS package; build the iOS and Android example apps.
 name: "SDK: React Native"
 
 on:

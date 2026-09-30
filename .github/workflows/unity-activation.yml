@@ -16,6 +16,7 @@
 # The `.alf` contains machine bindings and an account identifier, not a
 # credential — but the `.ulf` you get back IS the license, so it goes in secrets,
 # never in the repo.
+# Purpose: Manual: emit the Unity license activation request (.alf); re-run when Editor activation starts failing.
 name: "Maintenance: Unity activation (manual)"
 
 on:

@@ -14,6 +14,7 @@
 # into a Linux IL2CPP player and runs the player headlessly against that native.
 #
 # The Windows plugin loader remains outside hosted CI.
+# Purpose: Run a real Unity Editor: EditMode tests against a Bazel-built native, then an IL2CPP player smoke.
 name: "SDK: Unity Editor"
 
 on:

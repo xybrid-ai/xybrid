@@ -1,3 +1,4 @@
+# Purpose: Release step 1: build every artifact on a release/v* branch, create the draft release, open the release PR.
 name: "Release: Prepare"
 
 # Release-branch flow, step 1 of 2. Companion: release-publish.yml.

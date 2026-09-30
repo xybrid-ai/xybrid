@@ -1,3 +1,4 @@
+# Purpose: Test the Candle backend (Metal runs only on macOS), scoped to the paths that can affect it.
 name: "CI: Candle backend"
 
 # Candle is the pure-Rust ML framework gated behind a feature flag in

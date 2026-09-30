@@ -1,3 +1,4 @@
+# Purpose: Validate release packages before tagging: version sync, changelog, pub.dev and Kotlin/Maven dry-runs.
 name: "Release: Dry-run"
 
 # Runs publish-side validation on release/* branches so publish failures surface

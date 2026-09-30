@@ -8,6 +8,7 @@
 #
 # Fork-safe: PRs from forks have no secrets, so the RBE steps skip and only the
 # analyze phase runs (no remote, no network beyond repo fetches).
+# Purpose: Bazel graph analysis and remote-execution targets; a required check that skips when no Bazel input changed.
 name: "CI: Bazel"
 
 on:

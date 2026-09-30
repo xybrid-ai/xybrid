@@ -1,3 +1,4 @@
+# Purpose: Rust format, lint, tests and feature matrix, plus binding drift, API contract, Python and Web SDK checks. Gates merges.
 name: "CI: Workspace"
 
 on:
@@ -224,6 +225,17 @@ jobs:
           toolchain: stable
           components: rustfmt
       - run: cargo fmt --all --check
+
+  # .github/workflows/README.md's inventory is generated from the workflow files;
+  # this also enforces the "Group: Subject" names and literal concurrency keys it
+  # describes. It takes about a second, so it runs on every PR rather than behind
+  # a path gate that a new workflow could slip past.
+  workflow-index:
+    name: Workflow index
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - run: python3 tools/scripts/gen_workflow_index.py --check
 
   clippy:
     name: Clippy
@@ -582,7 +594,7 @@ jobs:
     runs-on: ubuntu-latest
     # Inspect dependency results even when the tooling path gate skips its matrix.
     if: ${{ !cancelled() }}
-    needs: [tooling-changes, tooling-tests, unity-bolt-compile, python-sdk, kotlin-jni-drift, apple-bolt-drift, fmt, clippy, check-no-default-features, check-platform-macos, check-platform-desktop, check-vision-platforms, check-llamacpp-vulkan, clippy-llm, test-llm, test, api-contract, web]
+    needs: [tooling-changes, tooling-tests, unity-bolt-compile, python-sdk, kotlin-jni-drift, apple-bolt-drift, fmt, workflow-index, clippy, check-no-default-features, check-platform-macos, check-platform-desktop, check-vision-platforms, check-llamacpp-vulkan, clippy-llm, test-llm, test, api-contract, web]
     steps:
       - name: Verify required job results
         env:

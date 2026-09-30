@@ -1,3 +1,4 @@
+# Purpose: Publish prebuilt llama.cpp slices to ghcr.io and open the natives-manifest PR that lets plain cargo builds download them.
 name: "CI: Publish llama.cpp natives"
 
 # Publisher for the prebuilt-natives cache: compiles the llama.cpp static
