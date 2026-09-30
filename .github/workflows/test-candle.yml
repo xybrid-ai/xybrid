@@ -1,4 +1,4 @@
-name: Test Candle
+name: "CI: Candle backend"
 
 # Candle is the pure-Rust ML framework gated behind a feature flag in
 # xybrid-core. macOS is the only place its Metal backend can run, so this
@@ -51,7 +51,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: test-candle-${{ github.ref }}
   cancel-in-progress: true
 
 permissions: read-all

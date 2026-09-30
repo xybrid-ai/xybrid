@@ -1,4 +1,4 @@
-name: Test whisper.cpp
+name: "CI: whisper.cpp backend"
 
 # Real multilingual weights exercise behavior that compile-only lanes cannot:
 # translation, per-request language selection, long-window handling, and the
@@ -43,7 +43,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: test-whispercpp-${{ github.ref }}
   cancel-in-progress: true
 
 permissions: read-all

@@ -1,4 +1,4 @@
-name: CI
+name: "CI: Workspace"
 
 on:
   push:
@@ -19,7 +19,7 @@ on:
       - 'LICENSE'
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ci-${{ github.ref }}
   cancel-in-progress: true
 
 permissions: read-all

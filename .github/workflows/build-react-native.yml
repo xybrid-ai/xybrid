@@ -1,4 +1,4 @@
-name: Build React Native
+name: "SDK: React Native"
 
 on:
   pull_request:
@@ -31,7 +31,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: build-react-native-${{ github.ref }}
   cancel-in-progress: true
 
 permissions: read-all

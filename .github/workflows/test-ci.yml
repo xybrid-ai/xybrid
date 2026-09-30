@@ -1,4 +1,4 @@
-name: Test CI
+name: "Maintenance: Packaging tools (manual)"
 
 on:
   workflow_dispatch:

@@ -14,7 +14,7 @@
 # into a Linux IL2CPP player and runs the player headlessly against that native.
 #
 # The Windows plugin loader remains outside hosted CI.
-name: Unity Editor CI
+name: "SDK: Unity Editor"
 
 on:
   pull_request:
@@ -54,7 +54,7 @@ permissions:
   checks: write
 
 concurrency:
-  group: unity-editor-${{ github.workflow }}-${{ github.ref }}
+  group: unity-editor-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:

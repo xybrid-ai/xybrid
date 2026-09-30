@@ -1,4 +1,4 @@
-name: Build Natives (prebuilt llama.cpp)
+name: "CI: Publish llama.cpp natives"
 
 # Publisher for the prebuilt-natives cache: compiles the llama.cpp static
 # slice ONCE per (target, feature-set) and pushes it to ghcr, tagged by the
@@ -44,7 +44,7 @@ on:
 # Do NOT cancel in-progress publishes: a half-finished push leaves the cache
 # cold (correct, just slow), and write-once means a re-run is idempotent.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: build-natives-${{ github.ref }}
   cancel-in-progress: false
 
 permissions:

@@ -8,7 +8,7 @@
 #
 # Keep the `paths` list here in sync with the `paths-ignore` list in ci.yml,
 # and keep the job name identical to ci.yml's gate ("CI Success").
-name: CI
+name: "CI: Docs-only gate"
 
 on:
   push:

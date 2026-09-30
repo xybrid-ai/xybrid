@@ -1,4 +1,4 @@
-name: Build Unity
+name: "Release: Unity bundles"
 
 on:
   push:

@@ -16,7 +16,7 @@
 # The `.alf` contains machine bindings and an account identifier, not a
 # credential — but the `.ulf` you get back IS the license, so it goes in secrets,
 # never in the repo.
-name: Unity activation (manual)
+name: "Maintenance: Unity activation (manual)"
 
 on:
   workflow_dispatch:

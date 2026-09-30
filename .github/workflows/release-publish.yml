@@ -1,4 +1,4 @@
-name: Release Publish
+name: "Release: Publish"
 
 # Release-branch flow, step 2 of 2. Companion: release-prep.yml.
 #

@@ -1,4 +1,4 @@
-name: Build Android
+name: "SDK: Android"
 
 on:
   pull_request:
@@ -55,7 +55,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: build-android-${{ github.ref }}
   cancel-in-progress: true
 
 permissions: read-all

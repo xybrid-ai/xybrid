@@ -8,7 +8,7 @@
 #
 # Fork-safe: PRs from forks have no secrets, so the RBE steps skip and only the
 # analyze phase runs (no remote, no network beyond repo fetches).
-name: Bazel
+name: "CI: Bazel"
 
 on:
   # No path filter here (unlike push): a required check must report on EVERY PR
@@ -56,7 +56,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: bazel-${{ github.workflow }}-${{ github.ref }}
+  group: bazel-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:

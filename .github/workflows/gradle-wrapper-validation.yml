@@ -2,7 +2,7 @@
 # checksums, so a tampered wrapper can't slip in via the binary blobs we ship
 # in the Android/Kotlin bindings and examples. Also satisfies the OpenSSF
 # Scorecard Binary-Artifacts allowance for gradle-wrapper.jar files.
-name: Gradle Wrapper Validation
+name: "Security: Gradle wrapper"
 
 on:
   push:

@@ -1,11 +1,11 @@
-name: Release notify to Discord
+name: "Release: Announce on Discord"
 
 on:
   release:
     types: [published]
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.release.tag_name }}
+  group: release-notify-${{ github.event.release.tag_name }}
   cancel-in-progress: false
 
 permissions:

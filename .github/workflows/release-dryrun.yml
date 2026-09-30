@@ -1,4 +1,4 @@
-name: Release Dry-Run
+name: "Release: Dry-run"
 
 # Runs publish-side validation on release/* branches so publish failures surface
 # before tagging. Validates what release-prep.yml / release-publish.yml don't
