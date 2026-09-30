@@ -1,0 +1,26 @@
+.github/workflows/ci.yml
+  s_7277137da82bbc::t_2cf329d9c097d5 330-332,348
+.github/workflows/build-natives.yml
+  s_7277137da82bbc::t_2cf329d9c097d5 201
+.github/actions/setup-vulkan-sdk/action.yml
+  s_7277137da82bbc::t_2cf329d9c097d5 4-5,10-12,17-28,30-32,34,36
+  s_7277137da82bbc::t_6a329e94573c78 6
+.github/workflows/bazel.yml
+  s_7277137da82bbc::t_2cf329d9c097d5 523
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "ce55e22b623cc6d3a947c026c7276a385efb022a",
+  "prompts": {},
+  "sessions": {
+    "s_7277137da82bbc": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8323a04a-682e-4b89-8a20-e533a866c765",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
