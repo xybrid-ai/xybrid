@@ -1,0 +1,23 @@
+clean.sh
+  s_7277137da82bbc::t_62b05a88e86a5e 122-123,125-126
+tools/scripts/clean-lib.sh
+  s_7277137da82bbc::t_db5cdb2eae90e6 78,87-91,94,117-120,194-198
+tools/scripts/tests/test_clean.py
+  s_7277137da82bbc::t_f6399d6b719fe4 156-169,319-338
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "cdbe486f512f3e65e74256f1612e3728143399d3",
+  "prompts": {},
+  "sessions": {
+    "s_7277137da82bbc": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8323a04a-682e-4b89-8a20-e533a866c765",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
