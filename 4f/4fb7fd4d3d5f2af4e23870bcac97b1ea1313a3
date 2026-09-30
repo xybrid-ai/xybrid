@@ -1,0 +1,77 @@
+bindings/react-native/example/clean.sh
+  s_7277137da82bbc::t_8b9501e4832f46 5
+  s_7277137da82bbc::t_a3da9c8f0b4e2b 1-4,6-9
+bindings/react-native/clean.sh
+  s_7277137da82bbc::t_8b9501e4832f46 5
+  s_7277137da82bbc::t_cb46a4357852a5 1-4,6-7
+justfile
+  s_7277137da82bbc::t_187af19458abd2 141-153
+  s_7277137da82bbc::t_0c176344b5544c 136-140
+bindings/python/clean.sh
+  s_7277137da82bbc::t_8b9501e4832f46 5
+  s_7277137da82bbc::t_76651f0fbc4e68 1-4,6-8
+tools/scripts/clean-lib.sh
+  s_7277137da82bbc::t_0a4b6cbd26a781 44,57-58,60-177,184,191
+  s_7277137da82bbc::t_e331e689748603 1-43,45-56,59,178-183,185-190
+examples/flutter/clean.sh
+  s_7277137da82bbc::t_8b9501e4832f46 2,6
+  s_7277137da82bbc::t_b03d9ffb87db7b 1,3-5,7-8
+bindings/flutter/clean.sh
+  s_7277137da82bbc::t_8b9501e4832f46 5
+  s_7277137da82bbc::t_c4441dcf59c49d 1-4,6-7
+AGENTS.md
+  s_7277137da82bbc::t_187af19458abd2 42-55
+bindings/flutter/example/clean.sh
+  s_7277137da82bbc::t_8b9501e4832f46 2
+  s_7277137da82bbc::t_8fc3ff5793e1a5 1,3-7
+.github/workflows/ci.yml
+  s_7277137da82bbc::t_12483c4b91e939 61-63
+bindings/apple/clean.sh
+  s_7277137da82bbc::t_54e1a87019a11b 1-5
+bindings/flutter/.pubignore
+  s_7277137da82bbc::t_36e82a5caf028e 45-48
+bindings/kotlin/clean.sh
+  s_7277137da82bbc::t_40aa5e0d9ccc8d 1-5
+bindings/kotlin/consumer-smoke/clean.sh
+  s_7277137da82bbc::t_d4da5f8aead488 1-5
+bindings/web/clean.sh
+  s_7277137da82bbc::t_a32e093f0d496d 1-6
+clean.sh
+  s_7277137da82bbc::t_8f8c48c6269d20 1-267
+crates/xybrid-bolt/clean.sh
+  s_7277137da82bbc::t_60c5f239de590d 1-5
+docs/clean.sh
+  s_7277137da82bbc::t_825dc16fd056ab 1-5
+examples/android/clean.sh
+  s_7277137da82bbc::t_ce6abae39f33e3 1-5
+examples/unity/Telemetry/clean.sh
+  s_7277137da82bbc::t_e7e09fd4d0a949 1-6
+examples/unity/starter/clean.sh
+  s_7277137da82bbc::t_99b85dd986a526 1-6
+tools/scripts/tests/test_clean.py
+  s_7277137da82bbc::t_cec4fcc02e8324 1-395
+tools/unity-bolt-compile-check/clean.sh
+  s_7277137da82bbc::t_057e204634a7bf 1-5
+tools/unity-runtime-smoke/clean.sh
+  s_7277137da82bbc::t_a15a396cb31642 1-5
+tools/windows-smoke/.gitignore
+  s_7277137da82bbc::t_b43fcc2fe30b82 1-5
+tools/windows-smoke/clean.sh
+  s_7277137da82bbc::t_ec04fa4da53bf2 1-5
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "4f4fb7fd4d3d5f2af4e23870bcac97b1ea1313a3",
+  "prompts": {},
+  "sessions": {
+    "s_7277137da82bbc": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8323a04a-682e-4b89-8a20-e533a866c765",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Glenn Sonna <kenpachi.os@gmail.com>"
+    }
+  }
+}
