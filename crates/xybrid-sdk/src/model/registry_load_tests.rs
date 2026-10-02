@@ -116,7 +116,7 @@ fn a_cached_model_loads_without_the_registry_even_when_it_is_down() {
         "a cached load must not call the registry"
     );
     assert!(
-        model.speculative.is_none() && !model.is_cloud_serving(),
+        !model.is_speculative() && !model.is_cloud_serving(),
         "a cached model must run on the device, so no run can reach the gateway"
     );
     assert!(model.is_loaded());
@@ -145,7 +145,7 @@ fn an_uncached_chat_model_speculates_after_one_resolve_and_downloads_that_varian
     // Set when the placeholder is built, so this holds however far the
     // background download has got.
     assert!(
-        model.speculative.is_some(),
+        model.is_speculative(),
         "a chat model must be served from the cloud while it downloads"
     );
     let status = model.await_download(DOWNLOAD_TIMEOUT_MS);
@@ -158,6 +158,10 @@ fn an_uncached_chat_model_speculates_after_one_resolve_and_downloads_that_varian
     assert!(
         model.is_loaded() && !model.is_cloud_serving(),
         "the downloaded weights must take over from the cloud"
+    );
+    assert!(
+        model.is_speculative(),
+        "the model still reports that its load speculated"
     );
     resolve.assert_hits(1);
     download.assert_hits(1);
@@ -218,7 +222,7 @@ fn a_passthrough_variant_without_chat_metadata_loads_normally() {
             Ok(model) => {
                 assert!(loads, "{id}: expected the load to fail");
                 assert!(
-                    model.speculative.is_none() && model.is_loaded(),
+                    !model.is_speculative() && model.is_loaded(),
                     "{id}: must load on the device, not behind a cloud placeholder"
                 );
                 let last = *progress
@@ -274,7 +278,7 @@ fn a_bundle_is_not_speculated_even_when_it_holds_a_chat_model() {
     let model = load_with_speculation(client(&registry.base_url(), &temp), "bundled-chat", |_| {})
         .expect("a bundled model must load normally");
 
-    assert!(model.speculative.is_none() && model.is_loaded());
+    assert!(!model.is_speculative() && model.is_loaded());
     resolve.assert_hits(1);
     download.assert_hits(1);
 }

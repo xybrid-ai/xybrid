@@ -2001,7 +2001,7 @@ impl ModelLoader {
     /// download whose inline metadata declares a `Gguf` or `VisionLanguage`
     /// template. Any other model, including one packaged as a `.xyb` bundle,
     /// downloads and loads as if speculation were off.
-    /// [`XybridModel::is_cloud_serving`] on the loaded model reports the
+    /// [`XybridModel::is_speculative`] on the loaded model reports the
     /// outcome.
     ///
     /// Performs a local cache lookup only — it never touches the network.
@@ -2017,7 +2017,7 @@ impl ModelLoader {
     ///     // whether this is a chat model it can serve from the cloud.
     /// }
     /// let model = loader.load()?;
-    /// if model.is_cloud_serving() {
+    /// if model.is_speculative() {
     ///     // Runs go to the cloud until the background download lands.
     /// }
     /// # Ok(())
@@ -3356,6 +3356,18 @@ impl XybridModel {
     /// leg fails and degrades to local mid-call.
     pub fn is_cloud_serving(&self) -> bool {
         self.cloud_serve()
+    }
+
+    /// Whether this model came from a speculative load: it answered from the
+    /// cloud while its weights downloaded.
+    ///
+    /// Stays `true` after the download lands, so it reports what the load did
+    /// even when the download finished at once; [`Self::is_cloud_serving`]
+    /// reports whether the cloud still answers. `false` for a model that
+    /// loaded from disk, including one that speculation could have served but
+    /// the registry did not describe as a chat model.
+    pub fn is_speculative(&self) -> bool {
+        self.speculative.is_some()
     }
 
     /// Snapshot of the background download behind a speculative load.

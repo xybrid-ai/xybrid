@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`XybridModel::is_speculative`** reports whether a load served the model
+  from the cloud while it downloaded. It stays `true` once the download lands;
+  `is_cloud_serving` reports whether the cloud still answers.
+
 ### Changed
 
 - **A speculative load asks the registry before serving from the cloud.**
@@ -25,10 +31,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Cached models still load offline without a registry request.
   `will_speculate` (`willSpeculate` in the bindings) still reads only the local
   cache, so it can return `true` for a model the load then declines to
-  speculate; check `is_cloud_serving` on the loaded model.
+  speculate. The loaded model's `is_speculative` (Rust) or `isCloudServing`
+  (bindings) tells.
 
 ### Fixed
 
+- **`xybrid run` and `xybrid repl` with `--speculative-cloud` handle a model
+  that loads locally.** `run` saved only streamed text, so a TTS model's
+  `--output` came out empty; it now prints and saves the audio as WAV, as
+  plain `run` does. The REPL failed every turn on a model that is not a chat
+  model and now runs it like any registry model. Both show a download bar while
+  such a model downloads, and report whether the load speculated even when the
+  download finishes at once.
 - **Registry requests and telemetry name the SDK that sent them.** Several
   paths reported the fallback `rust` instead:
   - Python always did: the SDK rejected the name `python`. It is accepted now
