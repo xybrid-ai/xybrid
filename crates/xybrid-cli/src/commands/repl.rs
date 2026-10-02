@@ -116,11 +116,12 @@ pub(crate) fn handle_repl_command(args: ReplArgs) -> Result<()> {
         // (the CPU cluster that runs the edge model) while it downloads locally.
         let loader = ModelLoader::from_registry(&model_id).with_speculative_cloud(true);
 
-        if loader.will_speculate() {
-            ui::ok(&format!(
-                "Speculative cloud: serving '{}' via xycloud while it downloads in the background",
-                model_id
-            ));
+        // `will_speculate` only checks local preconditions; the registry
+        // decides during the load whether this model can be served from the
+        // cloud.
+        let may_speculate = loader.will_speculate();
+        if may_speculate {
+            ui::hint("Asking the registry whether this model can be served via xycloud");
         } else if xybrid_sdk::cache::CacheManager::new()
             .map(|c| c.is_extracted(&model_id))
             .unwrap_or(false)
@@ -135,6 +136,14 @@ pub(crate) fn handle_repl_command(args: ReplArgs) -> Result<()> {
         let model_obj = loader
             .load()
             .context("Failed to load speculative cloud model")?;
+        if model_obj.is_cloud_serving() {
+            ui::ok(&format!(
+                "Speculative cloud: serving '{}' via xycloud while it downloads in the background",
+                model_id
+            ));
+        } else if may_speculate {
+            ui::hint("Not a chat model xycloud can serve — downloaded, running locally");
+        }
         #[cfg(any(feature = "llm-mistral", feature = "llm-llamacpp"))]
         {
             speculative_model = Some(model_obj);

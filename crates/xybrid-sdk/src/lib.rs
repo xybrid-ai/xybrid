@@ -577,7 +577,8 @@ pub fn set_provider_api_key(provider: &str, api_key: &str) {
 ///
 /// When enabled, a [`ModelLoader`] whose model isn't downloaded yet is served
 /// from the Xybrid gateway while the weights download in the background —
-/// provided a cloud API key is resolvable. This sets the process-global
+/// provided a cloud API key is resolvable and the registry reports a chat
+/// model (see [`ModelLoader::will_speculate`]). This sets the process-global
 /// default; individual loads override it with
 /// [`ModelLoader::with_speculative_cloud`]. The flag persists in memory for the
 /// app lifetime.

@@ -1006,11 +1006,11 @@ pub(crate) fn run_model_speculative(
     // (the CPU cluster that runs the edge model) while it downloads locally.
     let loader = xybrid_sdk::ModelLoader::from_registry(model_id).with_speculative_cloud(true);
 
-    if loader.will_speculate() {
-        ui::ok(&format!(
-            "Serving '{}' via xycloud while it downloads in the background",
-            model_id
-        ));
+    // `will_speculate` only checks local preconditions; the registry decides
+    // during the load whether this model can be served from the cloud.
+    let may_speculate = loader.will_speculate();
+    if may_speculate {
+        ui::hint("Asking the registry whether this model can be served via xycloud");
     } else if xybrid_sdk::cache::CacheManager::new()
         .map(|c| c.is_extracted(model_id))
         .unwrap_or(false)
@@ -1023,6 +1023,15 @@ pub(crate) fn run_model_speculative(
     let model = loader
         .load()
         .context("Failed to load speculative cloud model")?;
+
+    if model.is_cloud_serving() {
+        ui::ok(&format!(
+            "Serving '{}' via xycloud while it downloads in the background",
+            model_id
+        ));
+    } else if may_speculate {
+        ui::hint("Not a chat model xycloud can serve — downloaded, running locally");
+    }
 
     let envelope = build_input_envelope(input_audio, input_text, input_images, voice, max_tokens)?;
 

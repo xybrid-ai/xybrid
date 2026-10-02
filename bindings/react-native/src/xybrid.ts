@@ -75,9 +75,9 @@ export const Xybrid = {
 
   /**
    * Default speculative cloud serving on or off for loads that don't opt in
-   * per load (`ModelLoader.fromRegistrySpeculative` always speculates). Needs
-   * an API key. LLM/chat only — prefer the per-load form when the app also
-   * loads ASR/TTS models.
+   * per load (`ModelLoader.fromRegistrySpeculative` opts in itself). Needs an
+   * API key. An uncached load asks the registry first, so only chat models
+   * are served this way; ASR, TTS and `.xyb` bundles load as usual.
    */
   setSpeculativeCloud(enabled: boolean): Promise<void> {
     return NativeXybrid.setSpeculativeCloud(enabled);

@@ -264,9 +264,11 @@ abstract class FfiModelLoader implements RustOpaqueInterface {
   ///
   /// `load()` then returns almost immediately with a cloud-backed model that
   /// switches to on-device by itself once the download lands. Requires a
-  /// resolvable API key and an uncached model — otherwise this behaves
-  /// exactly like [`Self::from_registry`], which [`Self::will_speculate`]
-  /// reports. LLM/chat models only.
+  /// resolvable API key, an uncached model, and a chat model the registry
+  /// serves as a direct download (GGUF or vision-language, not a `.xyb`
+  /// bundle) — otherwise this behaves exactly like [`Self::from_registry`].
+  /// [`Self::will_speculate`] checks the first two before loading;
+  /// `FfiModel::is_cloud_serving` reports the outcome.
   static FfiModelLoader fromRegistrySpeculative({required String modelId}) =>
       XybridRustLib.instance.api
           .crateApiModelFfiModelLoaderFromRegistrySpeculative(modelId: modelId);
@@ -285,8 +287,10 @@ abstract class FfiModelLoader implements RustOpaqueInterface {
   /// After receiving `Complete`, call `load()` to get the cached model instantly.
   Stream<FfiLoadEvent> loadWithProgress();
 
-  /// Whether `load()` would actually speculate: enabled, an API key
-  /// resolves, and the model is not already cached. Never hits the network.
+  /// Whether `load()` may speculate: enabled, an API key resolves, and the
+  /// model is not already cached. Never hits the network, so it cannot know
+  /// the model type: the load asks the registry and speculates only for a
+  /// chat model.
   bool willSpeculate();
 }
 

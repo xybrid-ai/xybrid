@@ -164,9 +164,11 @@ class XybridModelLoader {
   ///
   /// [load] then returns almost immediately with a cloud-backed model that
   /// switches to on-device by itself once the download lands. Requires an API
-  /// key (see [Xybrid.setApiKey]) and an uncached model — otherwise this
-  /// behaves exactly like [XybridModelLoader.fromRegistry], which
-  /// [willSpeculate] reports. LLM/chat models only.
+  /// key (see [Xybrid.setApiKey]), an uncached model, and a chat model the
+  /// registry serves as a direct download (GGUF or vision-language, not a
+  /// `.xyb` bundle) — otherwise this behaves exactly like
+  /// [XybridModelLoader.fromRegistry]. [willSpeculate] checks the first two
+  /// before loading.
   ///
   /// Watch the handover with [XybridModel.isCloudServing],
   /// [XybridModel.downloadStatus] and [XybridModel.downloadProgress].
@@ -176,8 +178,10 @@ class XybridModelLoader {
     );
   }
 
-  /// Whether [load] would actually speculate: speculation enabled, an API key
-  /// resolves, and the model is not already cached. Never touches the network.
+  /// Whether [load] may speculate: speculation enabled, an API key resolves,
+  /// and the model is not already cached. Never touches the network, so it
+  /// cannot know the model type: [load] asks the registry and speculates only
+  /// for a chat model. [XybridModel.isCloudServing] reports the outcome.
   bool get willSpeculate => _inner.willSpeculate();
 
   /// Create a loader for a model from a local bundle path.

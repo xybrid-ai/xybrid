@@ -72,7 +72,8 @@ namespace Xybrid
         /// opts in explicitly and is unaffected by this toggle. Off by default.
         /// Either way, speculation also needs a resolvable API key and a model that
         /// is not already cached &#x2014; <see cref="ModelLoader.WillSpeculate"/>
-        /// reports the combined answer for a specific loader.
+        /// checks both for a specific loader &#x2014; and the load asks the
+        /// registry first, so only chat models are served this way.
         /// </remarks>
         public static void SetSpeculativeCloud(bool enabled) =>
             XybridBolt.XybridBolt.SetSpeculativeCloud(enabled);

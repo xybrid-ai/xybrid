@@ -211,9 +211,10 @@ classes:
         status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
       willSpeculate:
         return: bool
-        # Whether load() would actually speculate: speculation is in effect for
-        # this loader, an API key resolves, and the model is not already
-        # cached. Reads the local cache; never hits the network.
+        # Whether load() may speculate: speculation is in effect for this
+        # loader, an API key resolves, and the model is not already cached.
+        # Reads the local cache; never hits the network. The load then asks
+        # the registry and speculates only for a chat model.
         status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
 
   # -------------------------------------------------------------------

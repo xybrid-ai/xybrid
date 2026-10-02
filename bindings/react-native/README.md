@@ -215,8 +215,9 @@ const download = await loader.download();
 for await (const status of download!.progress()) setProgress(status.progress);
 const model = await loader.load();
 
-// Answer from the cloud while the weights download (needs an API key).
-const fast = await ModelLoader.fromRegistrySpeculative('qwen3.5-0.8b').load();
+// Answer from the cloud while the weights download (needs an API key and a
+// chat model the registry serves as a direct GGUF download).
+const fast = await ModelLoader.fromRegistrySpeculative('lfm2.5-350m').load();
 await fast.isCloudServing(); // true until the local weights land
 
 await Xybrid.modelCacheStatus();       // bytes and models on disk

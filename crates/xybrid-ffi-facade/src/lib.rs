@@ -1708,9 +1708,12 @@ impl ModelLoader {
     /// Registry load that serves from the cloud gateway while the weights
     /// download in the background, instead of blocking on the download.
     ///
-    /// Requires a resolvable API key and an uncached model; otherwise this
-    /// behaves exactly like [`Self::from_registry`]. Check
-    /// [`Self::will_speculate`] to know which you got. LLM/chat models only.
+    /// Requires a resolvable API key, an uncached model, and a chat model the
+    /// registry serves as a direct download (a GGUF or vision-language
+    /// variant, not a `.xyb` bundle); otherwise this behaves exactly like
+    /// [`Self::from_registry`]. [`Self::will_speculate`] checks the first two
+    /// before loading; `is_cloud_serving` on the loaded model reports the
+    /// outcome.
     pub fn from_registry_speculative(id: String) -> Arc<Self> {
         Arc::new(Self {
             inner: sdk::ModelLoader::from_registry(&id).with_speculative_cloud(true),
@@ -1725,9 +1728,10 @@ impl ModelLoader {
         })
     }
 
-    /// Whether [`Self::load`] would actually speculate: speculation enabled, an
-    /// API key resolves, and the model is not already cached. Never touches the
-    /// network.
+    /// Whether [`Self::load`] may speculate: speculation enabled, an API key
+    /// resolves, and the model is not already cached. Never touches the
+    /// network, so it cannot know the model type: the load asks the registry
+    /// and speculates only for a chat model.
     pub fn will_speculate(&self) -> bool {
         self.inner.will_speculate()
     }
@@ -2962,12 +2966,13 @@ pub fn set_platform_url(url: String) {
     sdk::set_platform_url(&url);
 }
 
-/// Enable speculative cloud fallback globally: a registry model that isn't
-/// downloaded yet is served from the gateway while the weights download.
+/// Enable speculative cloud fallback globally: a registry chat model that
+/// isn't downloaded yet is served from the gateway while the weights download.
 ///
-/// Only takes effect when an API key resolves. Speculation is LLM/chat-only —
-/// prefer the per-load [`ModelLoader::from_registry_speculative`] when the app
-/// also loads ASR/TTS models, which cannot be served this way.
+/// Only takes effect when an API key resolves. An uncached load asks the
+/// registry first, so other models (ASR, TTS, `.xyb` bundles) download and
+/// load as usual. [`ModelLoader::from_registry_speculative`] opts a single
+/// load in instead.
 pub fn set_speculative_cloud(enabled: bool) {
     sdk::set_speculative_cloud(enabled);
 }
@@ -2977,12 +2982,13 @@ pub fn is_speculative_cloud_enabled() -> bool {
     sdk::is_speculative_cloud_enabled()
 }
 
-/// Whether a speculative load of `model_id` would actually speculate right now:
-/// an API key resolves and the model is not already cached.
+/// Whether a speculative load of `model_id` may speculate right now: an API
+/// key resolves and the model is not already cached.
 ///
 /// A free function rather than a method because the foreign bindings collapse
 /// the loader into `XybridModel::from_*` constructors, leaving nowhere to hang
-/// a pre-load query. Never touches the network.
+/// a pre-load query. Never touches the network, so it cannot know the model
+/// type: the load asks the registry and speculates only for a chat model.
 pub fn will_speculate_for_model(model_id: String) -> bool {
     sdk::ModelLoader::from_registry(&model_id)
         .with_speculative_cloud(true)

@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+* Changed: `XybridModelLoader.fromRegistrySpeculative` asks the registry
+  before serving from the cloud, and speculates only for a chat model served
+  as a direct GGUF download. Other models, including `.xyb` bundles such as
+  `qwen3.5-0.8b`, download and load normally. An uncached speculative load now
+  fails when the registry is unreachable. `willSpeculate` still reads only the
+  local cache; `XybridModel.isCloudServing` reports the outcome.
 * Fixed: registry requests and telemetry say `flutter` on every platform.
   On iOS, macOS, Linux and Windows without an API key they said `rust`.
 

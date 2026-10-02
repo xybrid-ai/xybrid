@@ -6692,8 +6692,10 @@ class FfiModelLoaderImpl extends RustOpaque implements FfiModelLoader {
         that: this,
       );
 
-  /// Whether `load()` would actually speculate: enabled, an API key
-  /// resolves, and the model is not already cached. Never hits the network.
+  /// Whether `load()` may speculate: enabled, an API key resolves, and the
+  /// model is not already cached. Never hits the network, so it cannot know
+  /// the model type: the load asks the registry and speculates only for a
+  /// chat model.
   bool willSpeculate() =>
       XybridRustLib.instance.api.crateApiModelFfiModelLoaderWillSpeculate(
         that: this,

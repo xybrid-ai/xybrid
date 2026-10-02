@@ -226,7 +226,8 @@ enum Commands {
 
         /// Serve from the cloud while the registry model downloads, instead of
         /// blocking on the download. Requires --api-key (or XYBRID_API_KEY) and
-        /// a registry --model. LLM/chat only.
+        /// a registry --model. Chat models only: the registry is asked first,
+        /// and any other model downloads, then runs locally.
         #[arg(long)]
         speculative_cloud: bool,
     },
@@ -277,7 +278,9 @@ enum Commands {
 
         /// Serve from the cloud while the registry model downloads in the
         /// background, then switch to local once ready. Requires --api-key
-        /// (or XYBRID_API_KEY) and a registry --model. LLM/chat only.
+        /// (or XYBRID_API_KEY) and a registry --model. Chat models only: the
+        /// registry is asked first, and any other model downloads, then runs
+        /// locally.
         #[arg(long)]
         speculative_cloud: bool,
 

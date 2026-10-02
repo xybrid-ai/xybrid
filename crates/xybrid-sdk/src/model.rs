@@ -10,7 +10,7 @@ use crate::cache::layout::CacheLayout;
 use crate::cache::CacheManager;
 use crate::download::{ModelDownload, MAX_IN_FLIGHT_PROGRESS_BP};
 use crate::model_registry::AutoReleasePolicy;
-use crate::registry_client::RegistryClient;
+use crate::registry_client::{RegistryClient, ResolvedVariant};
 use crate::result::{InferenceResult, OutputType};
 use crate::run_options::{
     check_abort_for_streaming, AbortState, CancellationToken, LiveModeTag, RunOptions,
@@ -19,7 +19,7 @@ use crate::source::{detect_platform, ModelSource};
 use crate::stream::XybridStream;
 use std::path::{Component, Path, PathBuf};
 use std::pin::Pin;
-use std::sync::atomic::AtomicU64;
+use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
 use std::time::{Duration, Instant};
 use tempfile::TempDir;
@@ -1904,11 +1904,11 @@ impl ModelLoader {
     /// Prefer the cloud while this model downloads, for this load only.
     ///
     /// Overrides the process-global default set via
-    /// [`crate::set_speculative_cloud`]. When the gate in
-    /// [`Self::will_speculate`] is satisfied, the first run is served from the
-    /// Xybrid gateway while the local weights download in the background,
-    /// instead of blocking on the download. Has no effect for already-local
-    /// sources (bundle/directory).
+    /// [`crate::set_speculative_cloud`]. When [`Self::will_speculate`] holds
+    /// and the registry reports a chat model, runs are served from the Xybrid
+    /// gateway while the local weights download in the background, instead of
+    /// blocking on the download. Has no effect for already-local sources
+    /// (bundle/directory).
     ///
     /// # Examples
     /// ```
@@ -1987,25 +1987,41 @@ impl ModelLoader {
         }
     }
 
-    /// Whether this load would serve from the cloud while the model downloads.
+    /// Whether this load may serve from the cloud while the model downloads.
     ///
-    /// True only when all three hold: speculation is enabled (per-load override
-    /// or global default), a cloud API key is resolvable, and the model is not
-    /// already extracted in the local cache. Only registry sources can be
-    /// "not yet downloaded"; bundle, directory, and HuggingFace loads are
-    /// treated as already-local and never speculate.
+    /// A local precondition, not the decision. True only when all three hold:
+    /// speculation is enabled (per-load override or global default), a cloud
+    /// API key is resolvable, and the model is not already extracted in the
+    /// local cache. Only registry sources can be "not yet downloaded"; bundle,
+    /// directory, and HuggingFace loads are treated as already-local and never
+    /// speculate.
+    ///
+    /// The load then resolves the model once and speculates only when the
+    /// registry's answer describes a chat model: a variant served as a direct
+    /// download whose inline metadata declares a `Gguf` or `VisionLanguage`
+    /// template. Any other model, including one packaged as a `.xyb` bundle,
+    /// downloads and loads as if speculation were off.
+    /// [`XybridModel::is_cloud_serving`] on the loaded model reports the
+    /// outcome.
     ///
     /// Performs a local cache lookup only — it never touches the network.
     ///
     /// # Examples
     /// ```no_run
+    /// # fn _example() -> Result<(), Box<dyn std::error::Error>> {
     /// use xybrid_sdk::ModelLoader;
     /// let loader = ModelLoader::from_registry("qwen2.5-0.5b-instruct")
     ///     .with_speculative_cloud(true);
     /// if loader.will_speculate() {
-    ///     // Not cached locally and a key is set: this load is served from the
-    ///     // cloud while the download runs in the background.
+    ///     // Not cached locally and a key is set: the load asks the registry
+    ///     // whether this is a chat model it can serve from the cloud.
     /// }
+    /// let model = loader.load()?;
+    /// if model.is_cloud_serving() {
+    ///     // Runs go to the cloud until the background download lands.
+    /// }
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn will_speculate(&self) -> bool {
         // Short-circuit: skip the API-key lookup and the local-cache disk check
@@ -2166,15 +2182,48 @@ impl ModelLoader {
     where
         F: Fn(DownloadStatus),
     {
-        // Speculative cloud: when enabled, a key is set, and the model isn't
-        // cached yet, serve from cloud while the weights download in the
-        // background instead of blocking the caller on the download.
-        if self.will_speculate() {
-            return Ok(self.load_speculative(id, platform));
-        }
-
         // Create registry client (uses default API or environment variable)
-        let client = RegistryClient::from_env()?;
+        let client = Arc::new(RegistryClient::from_env()?);
+        let speculate = self.speculative_enabled() && cloud_api_key_present();
+        self.load_from_registry_client(client, id, platform, speculate, progress_callback)
+    }
+
+    /// [`Self::load_from_registry_api`] through `client`, with the speculation
+    /// preference already settled.
+    ///
+    /// The extracted cache comes first: a cached model loads locally without
+    /// a registry call, even when speculation is requested and the registry is
+    /// down. An uncached model under speculation is resolved once, and the
+    /// resolved variant decides: a chat model (see [`resolved_is_chat`]) serves
+    /// from the cloud while that variant downloads in the background, anything
+    /// else downloads that same variant and loads normally. A failed resolve
+    /// fails the load; it never leaves a cloud-backed placeholder.
+    ///
+    /// [`resolved_is_chat`]: crate::registry_client::resolved_is_chat
+    fn load_from_registry_client<F>(
+        &self,
+        client: Arc<RegistryClient>,
+        id: &str,
+        platform: Option<&str>,
+        speculate: bool,
+        progress_callback: F,
+    ) -> SdkResult<XybridModel>
+    where
+        F: Fn(DownloadStatus),
+    {
+        if speculate && client.resolve_offline(id).is_none() {
+            let resolved = client.resolve(id, platform)?;
+            if crate::registry_client::resolved_is_chat(&resolved) {
+                return Ok(Self::load_speculative(client, id, resolved));
+            }
+            let model_dir = client.fetch_extracted_resolved(
+                id,
+                &resolved,
+                Arc::new(AtomicBool::new(false)),
+                progress_callback,
+            )?;
+            return self.load_from_directory(&model_dir);
+        }
 
         // Fetch and extract model (handles both .xyb bundles and passthrough GGUF files)
         let model_dir = client.fetch_extracted(id, platform, progress_callback)?;
@@ -2189,18 +2238,23 @@ impl ModelLoader {
     ///
     /// The returned model holds a placeholder handle (`loaded == false`); every
     /// run routes to cloud via [`XybridModel::speculative`] until the download
-    /// thread installs the extracted local handle. Never blocks the caller.
-    fn load_speculative(&self, id: &str, platform: Option<&str>) -> XybridModel {
+    /// thread installs the extracted local handle. The thread downloads
+    /// `resolved`, the variant the caller judged a chat model, without
+    /// resolving again. Never blocks the caller.
+    fn load_speculative(
+        client: Arc<RegistryClient>,
+        id: &str,
+        resolved: ResolvedVariant,
+    ) -> XybridModel {
         // The future extraction directory for the placeholder executor. The
         // executor is lazy (no weights touched until `execute`), so pointing it
         // at a not-yet-populated path is fine — it is never executed while the
         // handle stays `loaded == false`.
-        let model_dir = crate::cache::CacheManager::new()
-            .map(|cache| cache.extraction_dir(id))
-            .unwrap_or_else(|_| PathBuf::from(id));
+        let model_dir = client.extraction_dir(id);
 
-        // Speculation is LLM/chat-only and the gateway streams tokens, so mark
-        // the placeholder as GGUF. Otherwise `is_llm()` / `supports_token_streaming()`
+        // Only chat models get here (the caller checked the resolved variant)
+        // and the gateway streams tokens, so mark the placeholder as GGUF.
+        // Otherwise `is_llm()` / `supports_token_streaming()`
         // read this metadata and report `false`, dropping the REPL to batch mode
         // until the real handle swaps in. The background download replaces the
         // whole handle (with real metadata) once it completes.
@@ -2233,22 +2287,22 @@ impl ModelLoader {
         let download = Arc::new(SpeculativeDownload::default());
         let bg_download = Arc::clone(&download);
         let id_owned = id.to_string();
-        let platform_owned = platform.map(String::from);
         let thread_name = format!("speculative-download-{id_owned}");
         if let Err(err) = std::thread::Builder::new()
             .name(thread_name)
             .spawn(move || {
-                let built = RegistryClient::from_env().and_then(|client| {
-                    let dir = client.fetch_extracted(
+                let built = client
+                    .fetch_extracted_resolved(
                         &id_owned,
-                        platform_owned.as_deref(),
+                        &resolved,
+                        // Nothing cancels a speculative download.
+                        Arc::new(AtomicBool::new(false)),
                         // Feed the poll-able progress cell; hosts read it via
                         // `XybridModel::download_status` or subscribe with
                         // `XybridModel::watch_download`.
                         |status| bg_download.set_progress(status),
-                    )?;
-                    Self::create_model_handle(&dir)
-                });
+                    )
+                    .and_then(|dir| Self::create_model_handle(&dir));
                 match built {
                     Ok(real) => {
                         *bg_handle.write().unwrap_or_else(|e| e.into_inner()) = real;
@@ -5265,6 +5319,9 @@ impl Clone for XybridModel {
         }
     }
 }
+
+#[cfg(test)]
+mod registry_load_tests;
 
 #[cfg(test)]
 mod tests {

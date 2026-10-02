@@ -101,8 +101,10 @@ export class ModelLoader {
    * Serve from the cloud gateway while the registry weights download in the
    * background, instead of blocking on the download. `load()` then resolves
    * almost immediately with a model that switches to on-device by itself.
-   * Needs an API key and an uncached model — {@link willSpeculate} tells you
-   * up front — otherwise it behaves like {@link fromRegistry}. LLM/chat only.
+   * Needs an API key, an uncached model ({@link willSpeculate} checks both up
+   * front) and a chat model the registry serves as a direct download (GGUF or
+   * vision-language, not a `.xyb` bundle) — otherwise it behaves like
+   * {@link fromRegistry}.
    */
   static fromRegistrySpeculative(id: string): ModelLoader {
     return new ModelLoader({ kind: 'registrySpeculative', id });
@@ -134,8 +136,10 @@ export class ModelLoader {
   }
 
   /**
-   * Whether {@link load} would actually speculate: a speculative source, an
-   * API key, and a model not yet cached. Never touches the network.
+   * Whether {@link load} may speculate: a speculative source, an API key, and
+   * a model not yet cached. Never touches the network, so it cannot know the
+   * model type: `load()` asks the registry and speculates only for a chat
+   * model. `isCloudServing()` on the loaded model reports the outcome.
    */
   async willSpeculate(): Promise<boolean> {
     if (this.source.kind !== 'registrySpeculative') return false;

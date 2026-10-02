@@ -162,8 +162,9 @@ public enum Xybrid {
     /// ``ModelLoader/fromRegistrySpeculative(_:)`` opts in explicitly and is
     /// unaffected by this toggle. Off by default. Either way, speculation also
     /// needs a resolvable API key and a model that is not already cached —
-    /// ``ModelLoader/willSpeculate`` reports the combined answer for a
-    /// specific loader.
+    /// ``ModelLoader/willSpeculate`` checks both for a specific loader — and
+    /// the load asks the registry first, so only chat models are served this
+    /// way.
     public static func setSpeculativeCloud(_ enabled: Bool) {
         boltSetSpeculativeCloud(enabled)
     }
@@ -366,9 +367,10 @@ public struct ModelLoader: Sendable {
     ///
     /// ``load()`` returns almost immediately with a cloud-backed model that
     /// switches to on-device by itself once the download lands. Requires an API
-    /// key and an uncached model — otherwise it behaves exactly like
-    /// ``fromRegistry(_:)``, which ``willSpeculate`` reports up front. LLM/chat
-    /// models only.
+    /// key, an uncached model, and a chat model the registry serves as a direct
+    /// download (GGUF or vision-language, not a `.xyb` bundle) — otherwise it
+    /// behaves exactly like ``fromRegistry(_:)``. ``willSpeculate`` checks the
+    /// first two up front.
     ///
     /// Track the handover with ``XybridModel/isCloudServing()``,
     /// ``XybridModel/downloadStatus()`` and ``XybridModel/awaitDownload(timeoutMs:)``.
@@ -376,10 +378,13 @@ public struct ModelLoader: Sendable {
         Self(source: .registrySpeculative(id))
     }
 
-    /// Whether ``load()`` would actually speculate: speculation is possible for
-    /// this source, an API key resolves, and the model is not already cached.
+    /// Whether ``load()`` may speculate: speculation is possible for this
+    /// source, an API key resolves, and the model is not already cached.
     ///
-    /// Always `false` for non-speculative sources. Never touches the network.
+    /// Always `false` for non-speculative sources. Never touches the network,
+    /// so it cannot know the model type: ``load()`` asks the registry and
+    /// speculates only for a chat model. ``XybridModel/isCloudServing()``
+    /// reports the outcome.
     public var willSpeculate: Bool {
         guard case .registrySpeculative(let id) = source else { return false }
         return willSpeculateForModel(modelId: id)

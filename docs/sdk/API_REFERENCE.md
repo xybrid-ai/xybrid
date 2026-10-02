@@ -227,7 +227,8 @@ class XybridModelLoader {
   // Serve from the cloud gateway while the weights download in the background
   factory XybridModelLoader.fromRegistrySpeculative(String modelId);
 
-  // Would load() actually speculate? (enabled + API key + not cached)
+  // May load() speculate? (enabled + API key + not cached; the registry
+  // then decides whether it is a chat model)
   bool get willSpeculate;
 
   // Load the model
@@ -417,8 +418,12 @@ var result = model.Run(Envelope.Text("Hello!"));
 
 `fromRegistrySpeculative()` answers from the cloud gateway while the registry
 weights download in the background, then switches to on-device by itself. It
-needs an API key and an uncached model — otherwise it behaves exactly like
-`fromRegistry()`, which `willSpeculate` reports up front. LLM/chat models only.
+needs an API key, an uncached model, and a chat model the registry serves as a
+direct download (a GGUF or vision-language variant, not a `.xyb` bundle) —
+otherwise it behaves exactly like `fromRegistry()`. `willSpeculate` checks the
+first two before loading and never touches the network; the load asks the
+registry for the third, and `isCloudServing()` on the loaded model reports the
+outcome.
 
 It sets the per-load override itself, so it does **not** depend on
 `setSpeculativeCloud()` — that toggle is the default for loads which do not opt

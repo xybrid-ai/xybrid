@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **A speculative load asks the registry before serving from the cloud.**
+  When speculation is on and the model is not cached, the load now resolves
+  the model first and serves it from the gateway only if the registry
+  describes a chat model: a GGUF or vision-language variant served as a direct
+  download. Every other model downloads and loads as if speculation were off.
+  Before, every uncached registry model was speculated, so speech and TTS
+  models had their requests sent to the gateway as chat. Models packaged as
+  `.xyb` bundles are no longer speculated either; on today's registry that is
+  `qwen3.5-0.8b` and `qwen3.5-2b`.
+
+  The check costs one registry request before the load returns; the download
+  reuses its answer. An uncached speculative load now fails when the registry
+  is unreachable, instead of returning a model whose download then fails.
+  Cached models still load offline without a registry request.
+  `will_speculate` (`willSpeculate` in the bindings) still reads only the local
+  cache, so it can return `true` for a model the load then declines to
+  speculate; check `is_cloud_serving` on the loaded model.
+
 ### Fixed
 
 - **Registry requests and telemetry name the SDK that sent them.** Several
