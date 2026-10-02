@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:xybrid_flutter/src/runtime_config.dart';
 import 'package:xybrid_flutter/xybrid_flutter.dart';
 
 void main() {
@@ -58,5 +59,34 @@ void main() {
     expect(options.abortPolicy.maxGraceTokens, isNull);
     expect(options.toFfi().maxGraceTokens, 3);
     expect(options.toFfi().fallbackToCloud, isTrue);
+  });
+
+  test('runtime gateway applies only when per-call gateway is null', () {
+    final previousGateway = XybridRuntimeConfig.gatewayUrl;
+    addTearDown(() => XybridRuntimeConfig.gatewayUrl = previousGateway);
+    XybridRuntimeConfig.gatewayUrl = 'https://api.xybrid.dev/v1';
+    const omitted = RunOptions.cloudFallback();
+    const explicit = RunOptions.cloudFallback(
+      cloudGatewayUrl: 'https://other.xybrid.dev/v1',
+    );
+    const blank = RunOptions.cloudFallback(cloudGatewayUrl: '   ');
+
+    expect(omitted.toFfi().cloudGatewayUrl, 'https://api.xybrid.dev/v1');
+    expect(explicit.toFfi().cloudGatewayUrl, 'https://other.xybrid.dev/v1');
+    expect(blank.toFfi().cloudGatewayUrl, '   ');
+  });
+
+  test('cloud destination never opts into fallback by itself', () {
+    const options = RunOptions(
+      cloudProvider: 'provider',
+      cloudModel: 'model',
+      cloudGatewayUrl: 'https://api.xybrid.dev/v1',
+    );
+
+    final ffi = options.toFfi();
+    expect(ffi.cloudProvider, 'provider');
+    expect(ffi.cloudModel, 'model');
+    expect(ffi.cloudGatewayUrl, 'https://api.xybrid.dev/v1');
+    expect(ffi.fallbackToCloud, isFalse);
   });
 }

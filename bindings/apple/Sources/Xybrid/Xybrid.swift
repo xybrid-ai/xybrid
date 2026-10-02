@@ -746,7 +746,8 @@ public extension XybridModel {
     ///
     /// Convenience over `run(envelope:options:)` so simple call sites stay
     /// one-argument; forwards `nil` options. Use the two-arg form to override
-    /// generation config, abort signals, or cloud-fallback behaviour.
+    /// generation config, abort signals, or cloud target selection. Cloud
+    /// settings do not enable fallback or make this method retry in cloud.
     func run(envelope: XybridEnvelope) throws -> XybridResult {
         try run(envelope: envelope, options: nil)
     }
@@ -825,7 +826,8 @@ public extension XybridPipeline {
     /// Run every stage without blocking the calling thread or actor.
     ///
     /// Of `options`, only `correlationId` applies to a pipeline run; setting
-    /// `generationConfig` or `abortOn` throws ``XybridError/configError(message:)``.
+    /// `generationConfig`, `abortOn`, or a cloud target throws
+    /// ``XybridError/configError(message:)``.
     func runAsync(
         envelope: XybridEnvelope,
         options: XybridRunOptions? = nil

@@ -29,6 +29,9 @@ The post-processes:
   tool calling landed. Its decoder probes for that tail before reading it and
   falls back to the existing reasoning metadata when the typed tail is absent.
 
+  The appended cloud fallback fields on `XybridRunOptions` default to null in
+  its public constructor so existing five-argument calls still compile.
+
 The generated JNI source and header are committed beside the Bazel AAR inputs.
 Keeping all three outputs in one drift check prevents the Kotlin declarations
 and native entry points from silently diverging.
@@ -172,6 +175,20 @@ def _qualify_kotlin_result(source: str) -> str:
     return source.replace(target, "continuation.resumeWith(kotlin.Result.success(", 1)
 
 
+def _add_run_options_constructor_defaults(source: str) -> str:
+    """Keep the original five-argument run-options constructor usable."""
+
+    start = source.index("data class XybridRunOptions(")
+    end = source.index(") {", start) + len(") {")
+    constructor = source[start:end]
+    for name in ("cloudProvider", "cloudModel", "cloudGatewayUrl"):
+        original = f"    val {name}: String?"
+        if constructor.count(original) != 1:
+            sys.exit(f"error: expected one XybridRunOptions {name} constructor field")
+        constructor = constructor.replace(original, f"    val {name}: String? = null", 1)
+    return source[:start] + constructor + source[end:]
+
+
 def render() -> tuple[str, dict[str, bytes]]:
     subprocess.run(["boltffi", "generate", "kotlin", "--deny-skipped"], cwd=BOLT_DIR, check=True)
     if not RAW_FILE.is_file():
@@ -194,6 +211,7 @@ def render() -> tuple[str, dict[str, bytes]]:
     )
     source = _add_result_wire_compatibility(source)
     source = _qualify_kotlin_result(source)
+    source = _add_run_options_constructor_defaults(source)
     if overrides == 0:
         # Either boltffi fixed this upstream or the error shape moved. Both
         # want a human to re-read the transform before it silently no-ops.

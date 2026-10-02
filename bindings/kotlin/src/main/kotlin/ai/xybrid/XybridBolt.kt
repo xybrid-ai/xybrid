@@ -1368,10 +1368,13 @@ data class XybridRunOptions(
     val abortOn: List<XybridAbortSignal>,
     val fallbackToCloud: Boolean,
     val maxGraceTokens: UInt,
-    val correlationId: String?
+    val correlationId: String?,
+    val cloudProvider: String? = null,
+    val cloudModel: String? = null,
+    val cloudGatewayUrl: String? = null
 ) {
     internal fun wireSize(): Int {
-        return 1 + (this.generationConfig?.let { __boltffi_value_0 -> __boltffi_value_0.wireSize() } ?: 0) + 4 + this.abortOn.sumOf { __boltffi_value_0 -> (4).toInt() } + 1 + 4 + 1 + (this.correlationId?.let { __boltffi_value_0 -> 4 + Utf8Codec.maxBytes(__boltffi_value_0) } ?: 0)
+        return 1 + (this.generationConfig?.let { __boltffi_value_0 -> __boltffi_value_0.wireSize() } ?: 0) + 4 + this.abortOn.sumOf { __boltffi_value_0 -> (4).toInt() } + 1 + 4 + 1 + (this.correlationId?.let { __boltffi_value_0 -> 4 + Utf8Codec.maxBytes(__boltffi_value_0) } ?: 0) + 1 + (this.cloudProvider?.let { __boltffi_value_0 -> 4 + Utf8Codec.maxBytes(__boltffi_value_0) } ?: 0) + 1 + (this.cloudModel?.let { __boltffi_value_0 -> 4 + Utf8Codec.maxBytes(__boltffi_value_0) } ?: 0) + 1 + (this.cloudGatewayUrl?.let { __boltffi_value_0 -> 4 + Utf8Codec.maxBytes(__boltffi_value_0) } ?: 0)
     }
 
     internal fun writeTo(writer: WireWriter) {
@@ -1380,6 +1383,9 @@ data class XybridRunOptions(
         writer.writeBool(this.fallbackToCloud)
         writer.writeU32(this.maxGraceTokens)
         writer.writeOptionalValue(this.correlationId, { writer, __boltffi_value_0 -> writer.writeString(__boltffi_value_0) })
+        writer.writeOptionalValue(this.cloudProvider, { writer, __boltffi_value_0 -> writer.writeString(__boltffi_value_0) })
+        writer.writeOptionalValue(this.cloudModel, { writer, __boltffi_value_0 -> writer.writeString(__boltffi_value_0) })
+        writer.writeOptionalValue(this.cloudGatewayUrl, { writer, __boltffi_value_0 -> writer.writeString(__boltffi_value_0) })
     }
 
     internal fun toByteArray(): ByteArray {
@@ -1400,6 +1406,9 @@ data class XybridRunOptions(
                 reader.readSequence({ reader -> XybridAbortSignal.fromValue(reader.readI32()) }),
                 reader.readBool(),
                 reader.readU32(),
+                reader.readOptionalValue({ reader -> reader.readString() }),
+                reader.readOptionalValue({ reader -> reader.readString() }),
+                reader.readOptionalValue({ reader -> reader.readString() }),
                 reader.readOptionalValue({ reader -> reader.readString() })
             )
         }

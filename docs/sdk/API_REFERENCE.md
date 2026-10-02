@@ -906,7 +906,8 @@ the audio.
 | `metrics` | TTFT and tokens per second when the stage is a language model |
 
 Of `XybridRunOptions`, only `correlationId` applies to a pipeline run. Setting
-`generationConfig` or `abortOn` fails with `ConfigError` instead of being
+`generationConfig`, `abortOn`, or an effective cloud destination fails with
+`ConfigError` instead of being
 ignored; per-stage generation settings belong in the pipeline YAML.
 
 ### Rust
@@ -1767,12 +1768,35 @@ Rust SDK abort policy, including the selected memory/thermal stop signals,
 `fallbackToCloud`, and grace-token budget, and uses
 `runStreamingWithFallback(...)` for the continuous token stream.
 
+The shared FFI model-run options accept three independent, optional cloud
+destination values:
+
+| Field | Effect when supplied | When omitted |
+|---|---|---|
+| `cloud_provider` (`cloudProvider`) | Overrides envelope metadata `provider` | Preserves existing metadata and caller behavior |
+| `cloud_model` (`cloudModel`) | Overrides metadata `model` | Preserves existing metadata and caller behavior |
+| `cloud_gateway_url` (`cloudGatewayUrl`) | Validates and overrides metadata `gateway_url` | Preserves existing metadata and caller behavior |
+
+The binding or application resolves its own defaults before passing these
+fields. The facade never chooses a provider, model, or gateway for an omitted
+field. Flutter retains its existing `openai` and `gpt-4o-mini` fallback defaults
+and resolves a null per-call gateway from `XybridRuntimeConfig.gatewayUrl`.
+Explicit destination values select the gateway backend but do not change
+`fallback_to_cloud`: callers must still opt into the existing fallback policy.
+The options do not add automatic cloud retry behavior to ordinary model run
+methods; they supply configuration to execution paths that already support
+fallback. Flutter's dedicated `runStreamingWithFallback` is the current
+reactive retry entry point.
+Matching generated bindings and native artifacts must be used together; the
+appended Bolt record fields do not establish mixed-version binary decoding.
+
 `cloudGatewayUrl` is an optional override for the Xybrid cloud gateway base URL.
 Customer builds accept HTTPS Xybrid gateway hosts with a `/v1` base path. Debug
-builds also accept localhost, private IP, and link-local gateways so apps can
+builds also accept localhost, private IPv4, and link-local IPv4 gateways so apps can
 exercise fallback against the local platform stack. URLs with embedded
 credentials, query strings, fragments, unsupported schemes, or missing `/v1`
-are rejected before the cloud retry starts.
+are rejected before model dispatch. The existing validator rejects bracketed
+IPv6 URLs in debug builds.
 
 Routing feedback is recorded inside the core orchestrator using low-cardinality
 resource buckets. The SDK keeps `correlation_id` as an opaque string for
@@ -1794,7 +1818,7 @@ stream stays low-cardinality.
 | `PixelFormat` | ✅ | 📋 | 📋 | 📋 |
 | `ImagePlane` | ✅ | 📋 | 📋 | 📋 |
 | `YuvColorInfo` | ✅ | 📋 | 📋 | 📋 |
-| `RunOptions` | ✅ | planned | planned | planned |
+| `RunOptions` cloud destination fields | ✅ | ✅ | ✅ | ✅ |
 | `RunOptions.frameSessionId` / `liveMode` | ✅ | 📋 | 📋 | 📋 |
 | `AbortPolicy` | ✅ | planned | planned | planned |
 | `AbortSignal` | ✅ | planned | planned | planned |

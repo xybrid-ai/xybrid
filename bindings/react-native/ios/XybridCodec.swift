@@ -277,7 +277,10 @@ enum XybridCodec {
       abortOn: try stringArray(object, "abortOn", what).map(decodeAbortSignal),
       fallbackToCloud: try optionalBool(object, "fallbackToCloud", what) ?? false,
       maxGraceTokens: try optionalUInt32(object, "maxGraceTokens", what) ?? 0,
-      correlationId: try optionalString(object, "correlationId", what)
+      correlationId: try optionalString(object, "correlationId", what),
+      cloudProvider: try optionalString(object, "cloudProvider", what),
+      cloudModel: try optionalString(object, "cloudModel", what),
+      cloudGatewayUrl: try optionalString(object, "cloudGatewayUrl", what)
     )
     return RunRequest(
       options: options,
