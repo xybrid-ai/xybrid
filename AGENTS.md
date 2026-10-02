@@ -39,6 +39,20 @@ Crate-wide lint opt-outs go in `lib.rs` at the crate root (see e.g.
 `crates/xybrid-core/src/lib.rs`). Don't sprinkle `#[allow(...)]` at call sites —
 push it to crate level or fix the lint. Never bypass hooks (`--no-verify`).
 
+A workspace grows to tens of GB: `target/`, React Native `Pods/` and Gradle
+builds, release checkouts in `.context/`, and a Bazel output base that lives
+outside the workspace. `just clean` (`./clean.sh`) lists what a rebuild
+recreates; add `--all` for merged `.context` worktrees and Bazel output bases,
+`--apply` to delete. Use it rather than a hand-rolled `rm -rf`.
+
+Cleaning is per folder. Every folder that produces build output owns a
+`clean.sh` that sources `tools/scripts/clean-lib.sh` and names its outputs
+(`clean_paths`, plus `clean_command` for a tool like `flutter clean`); the root
+`clean.sh` runs every one git tracks, in parallel. **A new folder that builds
+something gets a `clean.sh` too** (commit it, or it never runs). Only list
+paths git ignores: the lib refuses anything else, and
+`tools/scripts/tests/test_clean.py` fails on it.
+
 ### Building native bindings / cross-compiled artifacts
 
 **Native artifacts are built by Bazel**, not `xtask`. Bazel brings its own

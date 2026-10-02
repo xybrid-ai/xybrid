@@ -198,6 +198,7 @@ jobs:
       - name: Setup Vulkan SDK
         if: contains(matrix.feature, 'vulkan')
         uses: ./.github/actions/setup-vulkan-sdk
+        timeout-minutes: 15
 
       # Log in via `oras login`, not docker/login-action: the macOS runners have
       # no docker binary (the action errors there). oras (set up above) needs no

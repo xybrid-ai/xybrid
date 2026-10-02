@@ -1,17 +1,36 @@
 name: Setup Vulkan SDK
 description: Install Vulkan headers, loader, glslc, and expose VULKAN_SDK for llama.cpp Vulkan builds.
 
+# Normally about 40s. A composite action cannot bound its own run time, so
+# every caller sets `timeout-minutes: 15` on the step that uses it: room for
+# the apt retries below (at most ~11 min) plus the SDK download.
 runs:
   using: composite
   steps:
+    # The runner's Azure apt mirror can stall mid-fetch without failing: one
+    # `apt-get update` hung for 52 minutes. Bound each attempt (a healthy one
+    # takes under 10s) and retry.
     - name: Install Linux Vulkan prerequisites
       if: runner.os == 'Linux'
       shell: bash
       run: |
-        sudo apt-get update
-        sudo apt-get install -y glslc libvulkan-dev
+        apt_retry() {
+          local attempt
+          for attempt in 1 2 3; do
+            sudo timeout --kill-after=10 90 apt-get \
+              -o Acquire::Retries=3 -o Acquire::http::Timeout=30 "$@" && return 0
+            echo "apt-get $* failed or timed out (attempt $attempt of 3)" >&2
+            sleep 10
+          done
+          return 1
+        }
+        apt_retry update
+        apt_retry install -y glslc libvulkan-dev
 
+    # Pinned, not `latest`: a new SDK would otherwise change the headers every
+    # Vulkan build compiles against (bazel.yml stages them for //:llama_vulkan)
+    # with no commit to point at. Bump it deliberately.
     - name: Install Vulkan SDK
-      uses: jakoch/install-vulkan-sdk-action@v1
+      uses: jakoch/install-vulkan-sdk-action@37effcfa045411f8bfbbda26df2fd1b3bf3436fa # v1.6.0
       with:
-        vulkan_version: latest
+        vulkan_version: 1.4.363.0
