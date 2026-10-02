@@ -914,6 +914,10 @@ Of `XybridRunOptions`, only `correlationId` applies to a pipeline run. Setting
 `generationConfig` or `abortOn` fails with `ConfigError` instead of being
 ignored; per-stage generation settings belong in the pipeline YAML.
 
+A run fails if any stage's output cannot be represented, as described under
+[Result Types](#7-result-types); Dart, which returns only the final output,
+checks that one.
+
 ### Rust
 
 ```rust
@@ -1246,6 +1250,12 @@ stages:
 > **Audio format**: TTS models produce raw PCM audio bytes (16-bit signed, little-endian).
 > Typical sample rate is 24kHz mono (e.g., Kokoro TTS). The audio is returned as raw bytes,
 > not base64-encoded. Convert to WAV or feed directly to platform audio APIs.
+
+A result always carries its output. If a run produces an output the binding has
+no field for, the run fails instead of returning success with empty payload
+fields: `UnsupportedModelCapability` (code 20) on Kotlin, Swift, C# and Python,
+an `Unsupported model capability:` error on Dart. Streams end with that error
+instead of a completion. No shipped model produces such an output today.
 
 ### Dart
 

@@ -33,6 +33,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   cache, so it can return `true` for a model the load then declines to
   speculate. The loaded model's `is_speculative` (Rust) or `isCloudServing`
   (bindings) tells.
+- **The bindings never report success with the output missing.** A run,
+  pipeline run or stream whose output a binding has no field for now fails with
+  `UnsupportedModelCapability` (code 20) on Kotlin, Swift, C# and Python, and
+  with an `Unsupported model capability:` error on Dart. Before, Dart returned
+  `success: true` with every payload field empty, and the other bindings
+  replaced a raw pixel image with the text `[raw image]`. No shipped model
+  produces such an output, so existing results are unchanged.
+- **Breaking (Rust):** in `xybrid-ffi-facade`, `Envelope::from_sdk` and
+  `InferenceResult::from_sdk` are now `Envelope::try_from_sdk` and
+  `InferenceResult::try_from_sdk`, returning `Result`. The foreign APIs are
+  unchanged.
 
 ### Fixed
 

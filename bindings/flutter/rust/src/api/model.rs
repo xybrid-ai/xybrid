@@ -7,8 +7,8 @@ use xybrid_core::device::{ResourceSnapshot, ResourceSnapshotProvider};
 use xybrid_core::runtime_adapter::CloudRuntimeAdapter;
 use xybrid_ffi_facade as facade;
 use xybrid_sdk::{
-    AbortPolicy, AbortSignal, CancellationToken, GenerationConfig, ModelLoader, RunOptions,
-    XybridModel,
+    AbortPolicy, AbortSignal, CancellationToken, GenerationConfig, InferenceResult, ModelLoader,
+    RunOptions, XybridModel,
 };
 
 use crate::frb_generated::StreamSink;
@@ -661,6 +661,17 @@ pub struct FfiModelLoader(ModelLoader);
 #[frb(opaque)]
 pub struct FfiModel(Arc<XybridModel>);
 
+impl FfiStreamEvent {
+    /// The event that ends a successful run: `Complete` only when the result
+    /// converts, so a stream never completes with its output dropped.
+    fn completion(result: &InferenceResult) -> Self {
+        match FfiResult::try_from_inference_result(result) {
+            Ok(result) => FfiStreamEvent::Complete(result),
+            Err(error) => FfiStreamEvent::Error(error),
+        }
+    }
+}
+
 impl From<xybrid_sdk::StreamEvent> for FfiStreamEvent {
     fn from(event: xybrid_sdk::StreamEvent) -> Self {
         match event {
@@ -681,9 +692,7 @@ impl From<xybrid_sdk::StreamEvent> for FfiStreamEvent {
                     .collect(),
                 raw_text: token.raw_text,
             }),
-            xybrid_sdk::StreamEvent::Complete(result) => {
-                FfiStreamEvent::Complete(FfiResult::from_inference_result(&result))
-            }
+            xybrid_sdk::StreamEvent::Complete(result) => FfiStreamEvent::completion(&result),
             xybrid_sdk::StreamEvent::Error(e) => FfiStreamEvent::Error(e),
         }
     }
@@ -892,7 +901,7 @@ impl FfiModel {
             .0
             .run(&envelope.into_envelope(), sdk_config.as_ref())
             .map_err(|e| e.to_string())?;
-        Ok(FfiResult::from_inference_result(&result))
+        FfiResult::try_from_inference_result(&result)
     }
 
     /// Run inference with streaming output.
@@ -1001,8 +1010,7 @@ impl FfiModel {
             match result {
                 Ok(inference_result) => {
                     reached_terminal.store(true, std::sync::atomic::Ordering::SeqCst);
-                    let ffi_result = FfiResult::from_inference_result(&inference_result);
-                    let _ = sink.add(FfiStreamEvent::Complete(ffi_result));
+                    let _ = sink.add(FfiStreamEvent::completion(&inference_result));
                 }
                 Err(e) => {
                     let _ = sink.add(FfiStreamEvent::Error(e.to_string()));
@@ -1142,7 +1150,7 @@ impl FfiModel {
             .run_with_context(&envelope.into_envelope(), &ctx_guard, sdk_config.as_ref())
             .map_err(|e| e.to_string())?;
 
-        Ok(FfiResult::from_inference_result(&result))
+        FfiResult::try_from_inference_result(&result)
     }
 
     /// Run inference with streaming output and conversation context.
@@ -1264,8 +1272,7 @@ impl FfiModel {
             match result {
                 Ok(inference_result) => {
                     reached_terminal.store(true, std::sync::atomic::Ordering::SeqCst);
-                    let ffi_result = FfiResult::from_inference_result(&inference_result);
-                    let _ = sink.add(FfiStreamEvent::Complete(ffi_result));
+                    let _ = sink.add(FfiStreamEvent::completion(&inference_result));
                 }
                 Err(e) => {
                     let _ = sink.add(FfiStreamEvent::Error(e.to_string()));
@@ -1361,8 +1368,7 @@ impl FfiModel {
             match result {
                 Ok(inference_result) => {
                     reached_terminal.store(true, std::sync::atomic::Ordering::SeqCst);
-                    let ffi_result = FfiResult::from_inference_result(&inference_result);
-                    let _ = sink.add(FfiStreamEvent::Complete(ffi_result));
+                    let _ = sink.add(FfiStreamEvent::completion(&inference_result));
                 }
                 Err(e) => {
                     let _ = sink.add(FfiStreamEvent::Error(e.to_string()));
@@ -1603,5 +1609,30 @@ mod tests {
     fn cloud_gateway_url_accepts_debug_localhost_gateway() {
         let url = validate_cloud_gateway_url("http://127.0.0.1:3001/v1").unwrap();
         assert_eq!(url, "http://127.0.0.1:3001/v1");
+    }
+
+    /// Every stream completion goes through `completion`, so a run whose output
+    /// `FfiResult` cannot carry ends the stream with an error, not with an
+    /// empty `Complete`.
+    #[test]
+    fn a_stream_completes_only_when_its_result_converts() {
+        use xybrid_sdk::ir::{Envelope, EnvelopeKind};
+
+        let text = InferenceResult::new(Envelope::new(EnvelopeKind::Text("done".into())), "m", 0);
+        assert!(matches!(
+            FfiStreamEvent::completion(&text),
+            FfiStreamEvent::Complete(ref result) if result.text.as_deref() == Some("done")
+        ));
+
+        let multipart =
+            InferenceResult::new(Envelope::new(EnvelopeKind::MultiPart(vec![])), "m", 0);
+        assert!(matches!(
+            FfiStreamEvent::completion(&multipart),
+            FfiStreamEvent::Error(ref error) if error.contains("a multi-part message")
+        ));
+        assert!(matches!(
+            FfiStreamEvent::from(xybrid_sdk::StreamEvent::Complete(multipart)),
+            FfiStreamEvent::Error(_)
+        ));
     }
 }

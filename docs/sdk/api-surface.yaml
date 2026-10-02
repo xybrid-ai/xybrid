@@ -595,6 +595,11 @@ classes:
   XybridResult:
     type: data
     section: "7. Result Types"
+    # A result always carries its output. A run whose output has no field here
+    # fails instead of returning success with every payload empty:
+    # UnsupportedModelCapability (code 20) on the bolt bindings, an
+    # "Unsupported model capability:" error on Dart. The same holds for stream
+    # completions.
     dart_name: XybridResult
     kotlin_name: XybridResult
     swift_name: XybridResult
@@ -705,7 +710,8 @@ classes:
     type: data
     section: "4. XybridPipeline"
     # Every stage's output, not only the final one: an ASR -> LLM -> TTS run
-    # exposes the transcript and the reply alongside the audio.
+    # exposes the transcript and the reply alongside the audio. The run fails
+    # when any of those outputs cannot be represented (see XybridResult).
     dart_name: XybridPipelineResult
     kotlin_name: XybridPipelineResult
     swift_name: XybridPipelineResult
@@ -766,7 +772,7 @@ classes:
     methods:
       history:
         return: "List<Envelope>"
-        notes: "Snapshot of history turns; excludes the persistent system envelope."
+        notes: "Snapshot of history turns; excludes the persistent system envelope. Cannot fail: the context holds only envelopes pushed through this binding."
         status: { dart: planned, kotlin: implemented, swift: implemented, csharp: implemented }
     status: { dart: implemented, kotlin: implemented, swift: implemented, csharp: implemented }
 
